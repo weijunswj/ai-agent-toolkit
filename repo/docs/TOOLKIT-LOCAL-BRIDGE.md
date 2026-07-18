@@ -464,7 +464,7 @@ Codex plugin cache auto-refresh is included in the setup checklist. Codex may re
 
 ## Windows Codex Plugin Hook Repair
 
-Windows hook repair is a separate post-install maintenance utility. Use [repair-codex-plugin-windows-hooks.cjs](../scripts/repair-codex-plugin-windows-hooks.cjs) after a requested Codex plugin install or update when an installed plugin root contains `hooks/hooks.json`. The Local Bridge updater calls the same implementation from a trusted Codex startup hook only for the exactly recognised installed `n8n-skills@n8n-io` cache when Codex plugin cache auto-refresh is enabled.
+Windows hook repair is a separate post-install maintenance utility. Use [repair-codex-plugin-windows-hooks.cjs](../scripts/repair-codex-plugin-windows-hooks.cjs) after a requested Codex plugin install or update when an installed plugin root contains `hooks/hooks.json`. The Local Bridge updater inventories plugin cache identity independently of that legacy hook path, then uses `codex plugin list --available --json` to select the single installed and enabled `n8n-skills@n8n-io` version/root. Retained historical versions are skipped. Missing, moved, unknown, or ambiguous current layouts fail closed without mutation. Only the selected exact supported cache may reach the existing repair implementation when Codex plugin cache auto-refresh is enabled.
 
 The repair utility:
 
@@ -477,7 +477,7 @@ The repair utility:
 
 The automatic repair path is deliberately limited to the supported n8n Skills compatibility contract:
 
-- It selects only the installed `n8n-skills@n8n-io` cache root, never unrelated plugins or temporary marketplace checkouts.
+- It selects only the single installed and enabled `n8n-skills@n8n-io` version reported by Codex, never retained historical caches, unrelated plugins, or temporary marketplace checkouts.
 - It skips the Toolkit native plugin cache so Toolkit updates remain source-owned by the managed checkout.
 - It verifies the supported version and exact pristine or repaired fingerprints before any write.
 - It writes only the already approved launcher rewrites, Toolkit-managed `hooks/run-hook.ps1`, and n8n JSON fallbacks for the supported pristine layout.

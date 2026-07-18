@@ -9,7 +9,7 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '2.7.15';
+const EXPECTED_TOOLKIT_VERSION = '2.7.16';
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-start.cjs';
 const SESSION_START_POWERSHELL_REL_PATH = 'repo/scripts/toolkit-codex-session-start.ps1';
@@ -538,13 +538,21 @@ function verifyInstalledCache(codexHome, expectedVersion = EXPECTED_TOOLKIT_VERS
   return { cacheRoot, errors };
 }
 
-function findInstalledEntry(pluginList) {
+function findInstalledPluginEntries(pluginList, identity) {
   const installed = Array.isArray(pluginList?.installed) ? pluginList.installed : [];
-  return installed.find((entry) =>
+  return installed.filter((entry) =>
     entry &&
-    (entry.pluginId === pluginId() ||
-      (entry.name === TOOLKIT_PLUGIN_NAME && entry.marketplaceName === TOOLKIT_MARKETPLACE_NAME))
-  ) || null;
+    (entry.pluginId === identity.pluginId ||
+      (entry.name === identity.name && entry.marketplaceName === identity.marketplaceName))
+  );
+}
+
+function findInstalledEntry(pluginList) {
+  return findInstalledPluginEntries(pluginList, {
+    pluginId: pluginId(),
+    name: TOOLKIT_PLUGIN_NAME,
+    marketplaceName: TOOLKIT_MARKETPLACE_NAME
+  })[0] || null;
 }
 
 function evaluateConfigCacheFallback(options = {}) {
@@ -765,6 +773,30 @@ function runCodexJson(command, args) {
     return output ? JSON.parse(output) : {};
   } catch (error) {
     throw new Error(`codex ${args.join(' ')} returned invalid JSON: ${error.message}`);
+  }
+}
+
+function inspectCodexPluginList(options = {}) {
+  const resolved = (options.resolveCodexCommand || resolveCodexCommand)(options.codexCommand || '');
+  if (!resolved.command) {
+    return {
+      ok: false,
+      pluginList: null,
+      errors: ['Codex CLI plugin inspection is unavailable; current installed plugin state cannot be proven']
+    };
+  }
+  try {
+    return {
+      ok: true,
+      pluginList: (options.runCodexJson || runCodexJson)(resolved.command, ['plugin', 'list', '--json', '--available']),
+      errors: []
+    };
+  } catch {
+    return {
+      ok: false,
+      pluginList: null,
+      errors: ['Codex CLI plugin inspection failed; current installed plugin state cannot be proven']
+    };
   }
 }
 
@@ -1078,6 +1110,8 @@ module.exports = {
   codexToolkitInstallCommands,
   defaultWindowsPowerShellPath,
   evaluateCodexToolkitPluginState,
+  findInstalledPluginEntries,
+  inspectCodexPluginList,
   prepareInstalledSessionStart,
   prepareInstalledSessionStartIfPresent,
   sourceSessionStartCommand,

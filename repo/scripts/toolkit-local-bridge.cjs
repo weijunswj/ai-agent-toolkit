@@ -6,7 +6,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
-const { verifyInstalledCacheFreshness } = require('./setup-codex-toolkit-plugin.cjs');
+const {
+  findInstalledPluginEntries,
+  inspectCodexPluginList,
+  verifyInstalledCacheFreshness
+} = require('./setup-codex-toolkit-plugin.cjs');
 const {
   reconcileN8nSkillsPlugin
 } = require('./repair-codex-plugin-windows-hooks.cjs');
@@ -19,7 +23,7 @@ const {
 } = require('./toolkit-staging-generations.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.7.15';
+const BRIDGE_VERSION = '2.7.16';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -3532,10 +3536,9 @@ function discoverCodexPluginHookRoots({ codexHome = defaultCodexHome(), currentP
       for (const version of fs.readdirSync(pluginPath, { withFileTypes: true })) {
         if (!version.isDirectory()) continue;
         const cacheRoot = path.join(pluginPath, version.name);
-        const hooksJsonPath = path.join(cacheRoot, 'hooks', 'hooks.json');
-        if (!fs.existsSync(hooksJsonPath)) continue;
         const entry = {
           plugin_id: `${plugin.name}@${marketplace.name}`,
+          version: version.name,
           plugin_root: cacheRoot
         };
         if (isToolkitCodexCacheRoot(cacheRoot, currentPluginRoot)) {
@@ -3549,6 +3552,54 @@ function discoverCodexPluginHookRoots({ codexHome = defaultCodexHome(), currentP
   roots.sort((left, right) => left.plugin_root.localeCompare(right.plugin_root));
   skipped.sort((left, right) => left.plugin_root.localeCompare(right.plugin_root));
   return { roots, skipped };
+}
+
+function selectCurrentN8nSkillsCache({ codexHome, pluginList, discovered }) {
+  const matches = findInstalledPluginEntries(pluginList, {
+    pluginId: 'n8n-skills@n8n-io',
+    name: 'n8n-skills',
+    marketplaceName: 'n8n-io'
+  });
+  if (matches.length === 0) {
+    return { status: 'not-installed', entry: null, reason: 'Codex reports no installed n8n-skills@n8n-io plugin' };
+  }
+  if (matches.length !== 1) {
+    return {
+      status: 'ambiguous',
+      entry: null,
+      reason: 'Codex reports multiple installed n8n-skills@n8n-io entries; current cache is ambiguous'
+    };
+  }
+
+  const installed = matches[0];
+  if (installed.installed !== true || installed.enabled !== true) {
+    return {
+      status: 'not-installed',
+      entry: null,
+      reason: 'Codex does not report n8n-skills@n8n-io as installed and enabled'
+    };
+  }
+  const version = typeof installed.version === 'string' ? installed.version.trim() : '';
+  if (!version || version === '.' || version === '..' || /[\\/\0]/.test(version)) {
+    return {
+      status: 'ambiguous',
+      entry: null,
+      reason: 'Codex reported an invalid n8n-skills@n8n-io version; current cache cannot be proven'
+    };
+  }
+
+  const expectedRoot = path.resolve(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', version);
+  const entry = discovered.roots.find((candidate) =>
+    candidate.plugin_id === 'n8n-skills@n8n-io' && path.resolve(candidate.plugin_root) === expectedRoot
+  ) || null;
+  if (!entry) {
+    return {
+      status: 'missing',
+      entry: null,
+      reason: `Codex reports current n8n-skills@n8n-io version ${version}, but its installed cache root is missing`
+    };
+  }
+  return { status: 'selected', entry, reason: '' };
 }
 
 function repairThirdPartyCodexPluginHooks(options = {}) {
@@ -3570,12 +3621,52 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
 
   if (!windows) return result;
 
-  const targets = [];
+  const n8nCandidates = [];
   for (const entry of discovered.roots) {
-    if (entry.plugin_id === 'n8n-skills@n8n-io') targets.push(entry);
+    if (entry.plugin_id === 'n8n-skills@n8n-io') n8nCandidates.push(entry);
     else result.skipped.push({ ...entry, reason: 'unrelated plugin; n8n Skills reconciliation is target-specific' });
   }
-  result.scanned = targets.length;
+  if (n8nCandidates.length === 0) {
+    result.skipped.sort((left, right) => left.plugin_root.localeCompare(right.plugin_root));
+    return result;
+  }
+
+  const pluginInspection = Object.prototype.hasOwnProperty.call(options, 'pluginList')
+    ? { ok: true, pluginList: options.pluginList, errors: [] }
+    : inspectCodexPluginList({ codexCommand: options.codexCommand || '' });
+  if (!pluginInspection.ok) {
+    for (const entry of n8nCandidates) {
+      result.skipped.push({ ...entry, reason: 'current installed n8n Skills cache could not be proven' });
+    }
+    result.status = 'repair-failed';
+    result.errors = (pluginInspection.errors || ['Codex installed plugin state is unavailable'])
+      .slice(0, THIRD_PARTY_HOOK_REPAIR_ERROR_LIMIT);
+    result.skipped.sort((left, right) => left.plugin_root.localeCompare(right.plugin_root));
+    return result;
+  }
+
+  const selection = selectCurrentN8nSkillsCache({
+    codexHome,
+    pluginList: pluginInspection.pluginList,
+    discovered
+  });
+  if (selection.status !== 'selected') {
+    for (const entry of n8nCandidates) {
+      result.skipped.push({ ...entry, reason: 'historical or unverified n8n Skills cache; not current according to Codex installed state' });
+    }
+    result.skipped.sort((left, right) => left.plugin_root.localeCompare(right.plugin_root));
+    if (selection.status === 'not-installed') return result;
+    result.status = 'repair-failed';
+    result.errors = [selection.reason].slice(0, THIRD_PARTY_HOOK_REPAIR_ERROR_LIMIT);
+    return result;
+  }
+
+  const targets = [selection.entry];
+  for (const entry of n8nCandidates) {
+    if (path.resolve(entry.plugin_root) === path.resolve(selection.entry.plugin_root)) continue;
+    result.skipped.push({ ...entry, reason: 'historical n8n Skills cache; not current according to Codex installed state' });
+  }
+  result.scanned = 1;
   result.skipped.sort((left, right) => left.plugin_root.localeCompare(right.plugin_root));
 
   for (const entry of targets) {

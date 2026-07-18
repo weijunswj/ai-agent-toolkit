@@ -17,6 +17,7 @@ const {
   replaceDirectoryAtomically,
   runAgentRulesPreflight,
   formatAgentRulesPreflight,
+  discoverCodexPluginHookRoots,
   repairThirdPartyCodexPluginHooks,
   adapterPayloads,
   payloadChecksum,
@@ -40,7 +41,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.7.15';
+const expectedBridgeVersion = '2.7.16';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 
 function tmpBaseDir() {
@@ -682,6 +683,46 @@ function writeGenericPluginHookFixture(pluginRoot, command = 'hooks/session-star
 function copySupportedN8nPluginFixture(pluginRoot) {
   fs.mkdirSync(pluginRoot, { recursive: true });
   fs.cpSync(supportedN8nFixtureRoot, pluginRoot, { recursive: true, force: true });
+}
+
+function n8nInstalledEntry(version = '1.0.1', overrides = {}) {
+  return {
+    pluginId: 'n8n-skills@n8n-io',
+    name: 'n8n-skills',
+    marketplaceName: 'n8n-io',
+    version,
+    installed: true,
+    enabled: true,
+    ...overrides
+  };
+}
+
+function codexPluginList(entries = []) {
+  return { installed: entries, available: [] };
+}
+
+function writeFakeCodexPluginList(root, pluginList) {
+  const statePath = path.join(root, 'fake-codex-plugin-list.json');
+  const commandPath = path.join(root, 'fake-codex-plugin-list.cjs');
+  writeJson(statePath, pluginList);
+  writeFile(commandPath, [
+    "'use strict';",
+    "const fs = require('node:fs');",
+    `const statePath = ${JSON.stringify(statePath)};`,
+    'const args = process.argv.slice(2);',
+    "if (args.join(' ') === 'plugin --help') {",
+    "  process.stdout.write('Manage Codex plugins\\n');",
+    '  process.exit(0);',
+    '}',
+    "if (args.join(' ') === 'plugin list --json --available') {",
+    "  process.stdout.write(fs.readFileSync(statePath, 'utf8'));",
+    '  process.exit(0);',
+    '}',
+    "process.stderr.write(`unexpected fake Codex arguments: ${args.join(' ')}\\n`);",
+    'process.exit(2);',
+    ''
+  ].join('\n'));
+  return { commandPath, statePath };
 }
 
 function pushRepoToolkitUpdate(fixture, label) {
@@ -5410,21 +5451,32 @@ test('Codex plugin hook reconciliation repairs only the exact supported n8n cach
   const toolkitRoot = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', expectedBridgeVersion);
   const thirdPartyRoot = path.join(codexHome, 'plugins', 'cache', 'example-marketplace', 'generic-third-party', '1.0.0');
   const n8nRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
+  const historicalN8nRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.0');
   writeGenericPluginHookFixture(toolkitRoot);
   writeGenericPluginHookFixture(thirdPartyRoot);
   copySupportedN8nPluginFixture(n8nRoot);
+  copySupportedN8nPluginFixture(historicalN8nRoot);
+  const historicalManifestPath = path.join(historicalN8nRoot, '.codex-plugin', 'plugin.json');
+  const historicalManifest = readJson(historicalManifestPath);
+  historicalManifest.version = '1.0.0';
+  writeJson(historicalManifestPath, historicalManifest);
   const unrelatedBefore = fs.readFileSync(path.join(thirdPartyRoot, 'hooks', 'hooks.json'));
+  const historicalBefore = snapshotTree(historicalN8nRoot);
 
   const result = repairThirdPartyCodexPluginHooks({
     codexHome,
     currentPluginRoot: toolkitRoot,
     windows: true,
-    write: true
+    write: true,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.1')])
   });
 
   assert.equal(result.status, 'repaired');
   assert.deepEqual(result.repaired.map((entry) => entry.plugin_root), [n8nRoot]);
-  assert.deepEqual(result.skipped.map((entry) => entry.plugin_root).sort(), [thirdPartyRoot, toolkitRoot].sort());
+  assert.deepEqual(
+    result.skipped.map((entry) => entry.plugin_root).sort(),
+    [historicalN8nRoot, thirdPartyRoot, toolkitRoot].sort()
+  );
 
   const repairedHooks = readJson(path.join(n8nRoot, 'hooks', 'hooks.json'));
   const repairedCommand = collectHookCommands(repairedHooks)[0].command;
@@ -5433,9 +5485,79 @@ test('Codex plugin hook reconciliation repairs only the exact supported n8n cach
   assert.equal(fs.existsSync(path.join(n8nRoot, 'hooks', 'run-hook.ps1')), true);
   assert.deepEqual(fs.readFileSync(path.join(thirdPartyRoot, 'hooks', 'hooks.json')), unrelatedBefore);
   assert.equal(fs.existsSync(path.join(thirdPartyRoot, 'hooks', 'run-hook.ps1')), false);
+  assert.deepEqual(snapshotTree(historicalN8nRoot), historicalBefore, 'retained historical n8n cache must not be repaired');
 
   const toolkitHooks = readJson(path.join(toolkitRoot, 'hooks', 'hooks.json'));
   assert.equal(collectHookCommands(toolkitHooks)[0].command, 'hooks/session-start.sh');
+
+  const repairedBefore = snapshotTree(n8nRoot);
+  const second = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    currentPluginRoot: toolkitRoot,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.1')])
+  });
+  assert.equal(second.status, 'not-needed');
+  assert.deepEqual(snapshotTree(n8nRoot), repairedBefore, 'current healthy cache must be a byte-idempotent no-op');
+});
+
+test('Codex plugin identity discovery exposes moved n8n hook layouts and fails closed', () => {
+  const root = tmpRoot();
+  const codexHome = path.join(root, 'Codex Home With Spaces');
+  const n8nRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
+  copySupportedN8nPluginFixture(n8nRoot);
+  fs.renameSync(path.join(n8nRoot, 'hooks', 'hooks.json'), path.join(n8nRoot, 'hooks', 'hooks-v2.json'));
+  const before = snapshotTree(n8nRoot);
+
+  const discovered = discoverCodexPluginHookRoots({ codexHome });
+  assert.deepEqual(discovered.roots.map((entry) => entry.plugin_root), [n8nRoot]);
+
+  const result = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.1')])
+  });
+  assert.equal(result.status, 'repair-failed');
+  assert.match(result.errors.join('\n'), /malformed|fingerprint|layout/i);
+  assert.deepEqual(snapshotTree(n8nRoot), before, 'moved hook layout must fail closed without writes');
+});
+
+test('Codex plugin reconciliation refuses ambiguous current state and cleanly skips no target', () => {
+  const root = tmpRoot();
+  const codexHome = path.join(root, 'codex-home');
+  const supportedRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
+  const unknownRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copySupportedN8nPluginFixture(supportedRoot);
+  copySupportedN8nPluginFixture(unknownRoot);
+  const unknownManifestPath = path.join(unknownRoot, '.codex-plugin', 'plugin.json');
+  const unknownManifest = readJson(unknownManifestPath);
+  unknownManifest.version = '1.0.2';
+  writeJson(unknownManifestPath, unknownManifest);
+  const supportedBefore = snapshotTree(supportedRoot);
+  const unknownBefore = snapshotTree(unknownRoot);
+
+  const ambiguous = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.1'), n8nInstalledEntry('1.0.2')])
+  });
+  assert.equal(ambiguous.status, 'repair-failed');
+  assert.match(ambiguous.errors.join('\n'), /ambiguous|multiple/i);
+  assert.deepEqual(snapshotTree(supportedRoot), supportedBefore, 'ambiguous current state must not repair supported cache');
+  assert.deepEqual(snapshotTree(unknownRoot), unknownBefore, 'ambiguous current state must not modify unknown cache');
+
+  const noTarget = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([])
+  });
+  assert.equal(noTarget.status, 'not-needed');
+  assert.deepEqual(snapshotTree(supportedRoot), supportedBefore, 'historical cache without an installed target must remain untouched');
+  assert.deepEqual(snapshotTree(unknownRoot), unknownBefore, 'unknown historical cache must remain untouched');
 });
 
 test('Codex maintenance auto-reapplies supported n8n hook repair after refresh', {
@@ -5448,10 +5570,18 @@ test('Codex maintenance auto-reapplies supported n8n hook repair after refresh',
   const toolkitRoot = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', expectedBridgeVersion);
   const thirdPartyRoot = path.join(codexHome, 'plugins', 'cache', 'example-marketplace', 'generic-third-party', '1.0.0');
   const n8nRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
+  const historicalN8nRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.0');
   writeGenericPluginHookFixture(toolkitRoot);
   writeGenericPluginHookFixture(thirdPartyRoot);
   copySupportedN8nPluginFixture(n8nRoot);
+  copySupportedN8nPluginFixture(historicalN8nRoot);
+  const historicalManifestPath = path.join(historicalN8nRoot, '.codex-plugin', 'plugin.json');
+  const historicalManifest = readJson(historicalManifestPath);
+  historicalManifest.version = '1.0.0';
+  writeJson(historicalManifestPath, historicalManifest);
+  const fakeCodex = writeFakeCodexPluginList(root, codexPluginList([n8nInstalledEntry('1.0.1')]));
   const unrelatedBefore = fs.readFileSync(path.join(thirdPartyRoot, 'hooks', 'hooks.json'));
+  const historicalBefore = snapshotTree(historicalN8nRoot);
 
   let result = run([
     '--hub', hub,
@@ -5465,6 +5595,7 @@ test('Codex maintenance auto-reapplies supported n8n hook repair after refresh',
     env: isolatedHomeEnv(root, {
       PATH: process.env.PATH,
       CODEX_HOME: codexHome,
+      CODEX_TOOLKIT_CODEX_CLI: fakeCodex.commandPath,
       PLUGIN_ROOT: toolkitRoot
     })
   });
@@ -5474,6 +5605,7 @@ test('Codex maintenance auto-reapplies supported n8n hook repair after refresh',
     env: isolatedHomeEnv(root, {
       PATH: process.env.PATH,
       CODEX_HOME: codexHome,
+      CODEX_TOOLKIT_CODEX_CLI: fakeCodex.commandPath,
       PLUGIN_ROOT: toolkitRoot
     })
   });
@@ -5493,23 +5625,27 @@ test('Codex maintenance auto-reapplies supported n8n hook repair after refresh',
 
   fs.cpSync(supportedN8nFixtureRoot, n8nRoot, { recursive: true, force: true });
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: isolatedHomeEnv(root, { PATH: process.env.PATH, CODEX_HOME: codexHome, PLUGIN_ROOT: toolkitRoot })
+    env: isolatedHomeEnv(root, { PATH: process.env.PATH, CODEX_HOME: codexHome, CODEX_TOOLKIT_CODEX_CLI: fakeCodex.commandPath, PLUGIN_ROOT: toolkitRoot })
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(collectHookCommands(readJson(path.join(n8nRoot, 'hooks', 'hooks.json')))[0].command, /^powershell(?:\.exe)?\s/i);
+  assert.deepEqual(snapshotTree(historicalN8nRoot), historicalBefore, 'startup maintenance must skip retained historical caches');
 
   const afterRefreshRepair = fs.readFileSync(path.join(n8nRoot, 'hooks', 'hooks.json'));
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
-    env: isolatedHomeEnv(root, { PATH: process.env.PATH, CODEX_HOME: codexHome, PLUGIN_ROOT: toolkitRoot })
+    env: isolatedHomeEnv(root, { PATH: process.env.PATH, CODEX_HOME: codexHome, CODEX_TOOLKIT_CODEX_CLI: fakeCodex.commandPath, PLUGIN_ROOT: toolkitRoot })
   });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(fs.readFileSync(path.join(n8nRoot, 'hooks', 'hooks.json')), afterRefreshRepair);
+  assert.deepEqual(snapshotTree(historicalN8nRoot), historicalBefore, 'idempotent startup maintenance must leave historical caches unchanged');
 });
 
 test('Codex plugin hook reconciliation fails closed on unknown n8n layout without touching cache extras', () => {
   const root = tmpRoot();
   const codexHome = path.join(root, 'Codex Home With Spaces');
+  const historicalRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
   const n8nRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copySupportedN8nPluginFixture(historicalRoot);
   copySupportedN8nPluginFixture(n8nRoot);
   const manifestPath = path.join(n8nRoot, '.codex-plugin', 'plugin.json');
   const manifest = readJson(manifestPath);
@@ -5519,12 +5655,19 @@ test('Codex plugin hook reconciliation fails closed on unknown n8n layout withou
   writeFile(envPath, 'fixture sentinel must remain untouched\n');
   const beforeHooks = fs.readFileSync(path.join(n8nRoot, 'hooks', 'hooks.json'));
   const beforeEnv = fs.readFileSync(envPath);
+  const historicalBefore = snapshotTree(historicalRoot);
 
-  const result = repairThirdPartyCodexPluginHooks({ codexHome, windows: true, write: true });
+  const result = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
+  });
 
   assert.equal(result.status, 'repair-failed');
   assert.match(result.errors.join('\n'), /unsupported n8n Skills version 1\.0\.2|compatibility contract changed/i);
   assert.deepEqual(fs.readFileSync(path.join(n8nRoot, 'hooks', 'hooks.json')), beforeHooks);
   assert.deepEqual(fs.readFileSync(envPath), beforeEnv);
   assert.equal(fs.existsSync(path.join(n8nRoot, 'hooks', 'run-hook.ps1')), false);
+  assert.deepEqual(snapshotTree(historicalRoot), historicalBefore, 'retained supported cache must not be repaired when current is unknown');
 });
