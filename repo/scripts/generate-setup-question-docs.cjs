@@ -11,18 +11,32 @@ function generatedBytes() {
   return core.renderSetupQuestionDocumentation();
 }
 
+function normalizeTextForComparison(text) {
+  return text.replace(/\r\n/g, '\n');
+}
+
+function writeGeneratedDocument(targetPath = outputPath) {
+  fs.writeFileSync(targetPath, generatedBytes(), 'utf8');
+}
+
+function checkGeneratedDocument(targetPath = outputPath) {
+  const expected = generatedBytes();
+  const actual = fs.existsSync(targetPath) ? fs.readFileSync(targetPath, 'utf8') : '';
+  if (normalizeTextForComparison(actual) !== normalizeTextForComparison(expected)) {
+    throw new Error('Stale generated setup question documentation. Run node repo/scripts/generate-setup-question-docs.cjs --write');
+  }
+}
+
 function main(argv = process.argv.slice(2)) {
   const write = argv.includes('--write');
   const check = argv.includes('--check');
   if (write === check) throw new Error('Use exactly one of --write or --check.');
-  const expected = generatedBytes();
   if (write) {
-    fs.writeFileSync(outputPath, expected, 'utf8');
+    writeGeneratedDocument();
     console.log('Updated repo/docs/SETUP-QUESTIONS.generated.md');
     return;
   }
-  const actual = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, 'utf8') : '';
-  if (actual !== expected) throw new Error('Stale generated setup question documentation. Run node repo/scripts/generate-setup-question-docs.cjs --write');
+  checkGeneratedDocument();
   console.log('Setup question documentation is current.');
 }
 
@@ -34,4 +48,11 @@ if (require.main === module) {
   }
 }
 
-module.exports = { generatedBytes, main, outputPath };
+module.exports = {
+  checkGeneratedDocument,
+  generatedBytes,
+  main,
+  normalizeTextForComparison,
+  outputPath,
+  writeGeneratedDocument,
+};
