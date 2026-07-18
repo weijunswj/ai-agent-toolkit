@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const core = require('../scripts/setup-toolkit-core.cjs');
+const setupQuestionDocs = require('../scripts/generate-setup-question-docs.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const expectedCodexRows = [
@@ -17,6 +18,13 @@ const expectedCodexRows = [
   ['opencode-integration', 'OpenCode'],
   ['antigravity-integration', 'Antigravity'],
 ];
+
+function assertGeneratedDocumentationEqual(actual, expected) {
+  assert.equal(
+    setupQuestionDocs.normalizeTextForComparison(actual),
+    setupQuestionDocs.normalizeTextForComparison(expected),
+  );
+}
 
 function allRows() {
   return core.setupQuestionDocumentationSpecs();
@@ -79,7 +87,7 @@ test('terminal, piped, plan, JSON, approval and generated docs share canonical r
   const terminal = core.renderSetupQuestionBankTerminal(rows);
   const generated = core.renderSetupQuestionDocumentation(rows);
   const generatedFile = fs.readFileSync(path.join(repoRoot, 'repo/docs/SETUP-QUESTIONS.generated.md'), 'utf8');
-  assert.equal(generatedFile, core.renderSetupQuestionDocumentation());
+  assertGeneratedDocumentationEqual(generatedFile, core.renderSetupQuestionDocumentation());
   for (const row of rows) {
     for (const output of [markdown, terminal, generated]) {
       assert.match(output, new RegExp(row.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
@@ -96,6 +104,24 @@ test('terminal, piped, plan, JSON, approval and generated docs share canonical r
   assert.equal(json.question_bank[0].whatThisControls, rows[0].whatThisControls);
   assert.equal(json.question_bank[0].choices[0].consequence, rows[0].choices[0].consequence);
   assert.doesNotMatch(JSON.stringify(json.question_bank), /setup-toolkit-question-bank:begin|\*\*Current:\*\*/);
+});
+
+test('generated document consistency treats only CRLF and LF as equivalent', () => {
+  const expected = core.renderSetupQuestionDocumentation();
+  const crlf = expected.replace(/\n/g, '\r\n');
+  assert.doesNotThrow(() => assertGeneratedDocumentationEqual(expected, expected));
+  assert.doesNotThrow(() => assertGeneratedDocumentationEqual(crlf, expected));
+
+  const firstLineFeed = expected.indexOf('\n');
+  assert.ok(firstLineFeed >= 0);
+  const loneCarriageReturn = `${expected.slice(0, firstLineFeed)}\r${expected.slice(firstLineFeed + 1)}`;
+  for (const drifted of [
+    `${expected}\nUnexpected drift.\n`,
+    expected.slice(0, -20),
+    loneCarriageReturn,
+  ]) {
+    assert.throws(() => assertGeneratedDocumentationEqual(drifted, expected));
+  }
 });
 
 test('headings, choice effects and native mutation surfaces remain distinct', () => {
@@ -206,5 +232,8 @@ test('Update source renderers and generated documentation use corrected canonica
     remote: core.DEFAULT_REPO_REMOTE,
   } }, core.parseArgs(['--plan'])), true);
   assert.ok(generatedRow.choices.some((choice) => choice.value === 'keep'));
-  assert.equal(fs.readFileSync(path.join(repoRoot, 'repo/docs/SETUP-QUESTIONS.generated.md'), 'utf8'), core.renderSetupQuestionDocumentation());
+  assertGeneratedDocumentationEqual(
+    fs.readFileSync(path.join(repoRoot, 'repo/docs/SETUP-QUESTIONS.generated.md'), 'utf8'),
+    core.renderSetupQuestionDocumentation(),
+  );
 });
