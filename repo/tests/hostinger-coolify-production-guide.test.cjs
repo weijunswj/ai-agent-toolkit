@@ -48,6 +48,7 @@ set -euo pipefail
 script="$1"
 scenario="$2"
 tmp="$(mktemp -d)"
+report=''
 cleanup() {
   cd /tmp >/dev/null 2>&1 || true
   rm -rf "$tmp"
@@ -101,6 +102,7 @@ record() {
 }
 
 if [[ "$args" == *" --output=cat "* ]]; then
+  [[ "$args" == *" --lines=80 "* ]] || exit 8
   case "$scenario" in
     journal-hostile)
       printf 'authentication failure token=journal-secret /home/private-user/config 2001:db8::1 private@example.test \x60\x60\x60 | %012000d\n' 0
@@ -279,6 +281,20 @@ for (const [scenario, title] of [
 test('daily security check remains operationally read-only', () => {
   const content = fs.readFileSync(path.join(repoRoot, authoritativeDailyCheck), 'utf8');
   assert.doesNotMatch(content, /^\s*(?:sudo\s+)?(?:apt(?:-get)?\s+(?:install|upgrade)|systemctl\s+(?:restart|stop|enable|disable)|docker\s+(?:rm|stop|restart|compose\s+(?:up|down))|ufw\s+(?:allow|deny|delete|enable|disable)|reboot|shutdown)\b/m);
+});
+
+test('raw journal temporary files are registered for EXIT cleanup', () => {
+  const content = fs.readFileSync(path.join(repoRoot, authoritativeDailyCheck), 'utf8');
+  assert.match(content, /JOURNAL_TEMP_FILES=\(\)/);
+  assert.match(content, /trap cleanup_temp_files EXIT/);
+  assert.match(content, /trap 'exit 143' TERM/);
+  assert.equal((content.match(/JOURNAL_TEMP_FILES\+=\("\$[^\"]+"\)/g) || []).length, 4);
+  assert.ok(content.indexOf('trap cleanup_temp_files EXIT') < content.indexOf('query_journal_records()'));
+});
+
+test('journal detail queries retain the newest bounded record set', () => {
+  const content = fs.readFileSync(path.join(repoRoot, authoritativeDailyCheck), 'utf8');
+  assert.match(content, /journalctl --quiet --no-pager --lines=80 --output=cat --output-fields=MESSAGE/);
 });
 
 test('authoritative and generated daily security checks are byte-aligned', () => {

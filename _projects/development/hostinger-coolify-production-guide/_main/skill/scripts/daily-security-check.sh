@@ -16,7 +16,15 @@ FAIL_COUNT=0
 mkdir -p "$REPORT_DIR"
 chmod 700 "$MAINTENANCE_ROOT" "$REPORT_DIR" 2>/dev/null || true
 TMP_REPORT="$(mktemp "${REPORT_DIR}/.security-check.XXXXXX")"
-trap 'rm -f "$TMP_REPORT"' EXIT
+JOURNAL_TEMP_FILES=()
+cleanup_temp_files() {
+  rm -f "$TMP_REPORT"
+  if [ "${#JOURNAL_TEMP_FILES[@]}" -gt 0 ]; then rm -f "${JOURNAL_TEMP_FILES[@]}"; fi
+}
+trap cleanup_temp_files EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 have() { command -v "$1" >/dev/null 2>&1; }
 redact_text() {
@@ -110,6 +118,7 @@ query_journal_records() {
     JOURNAL_QUERY_DIAGNOSTIC='temporary evidence file unavailable'
     return 0
   }
+  JOURNAL_TEMP_FILES+=("$stdout_file")
   stderr_file="$(mktemp "${REPORT_DIR}/.journal-diagnostic.XXXXXX")" || {
     rm -f "$stdout_file"
     JOURNAL_QUERY_STATE='unavailable'
@@ -117,6 +126,7 @@ query_journal_records() {
     JOURNAL_QUERY_DIAGNOSTIC='temporary diagnostic file unavailable'
     return 0
   }
+  JOURNAL_TEMP_FILES+=("$stderr_file")
 
   if journalctl --quiet --no-pager --output=export --output-fields=__CURSOR "$@" >"$stdout_file" 2>"$stderr_file"; then
     exit_status=0
@@ -149,11 +159,13 @@ append_journal_block() {
   local title="$1" stdout_file stderr_file exit_status diagnostic
   shift
   stdout_file="$(mktemp "${REPORT_DIR}/.journal-detail.XXXXXX")" || return 0
+  JOURNAL_TEMP_FILES+=("$stdout_file")
   stderr_file="$(mktemp "${REPORT_DIR}/.journal-detail-diagnostic.XXXXXX")" || {
     rm -f "$stdout_file"
     return 0
   }
-  if journalctl --quiet --no-pager --output=cat --output-fields=MESSAGE "$@" >"$stdout_file" 2>"$stderr_file"; then
+  JOURNAL_TEMP_FILES+=("$stderr_file")
+  if journalctl --quiet --no-pager --lines=80 --output=cat --output-fields=MESSAGE "$@" >"$stdout_file" 2>"$stderr_file"; then
     exit_status=0
   else
     exit_status=$?
