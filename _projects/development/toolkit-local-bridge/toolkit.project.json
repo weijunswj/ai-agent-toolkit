@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.7.14",
+  "version": "2.7.15",
   "version_policy": "semver",
-  "version_notes": "Makes hosted critical and authentication journal reporting record-oriented, privacy-bounded, and explicit about query failure or unavailable evidence.",
+  "version_notes": "Makes supported n8n Skills Windows hook repair durable through exact, fail-closed Codex plugin-maintenance reconciliation and narrow intent routing.",
   "outputs": [
     {
       "kind": "curated",

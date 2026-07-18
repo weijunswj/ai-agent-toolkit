@@ -40,7 +40,8 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.7.14';
+const expectedBridgeVersion = '2.7.15';
+const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 
 function tmpBaseDir() {
   if (process.platform === 'win32' && process.env.USERPROFILE) {
@@ -674,6 +675,11 @@ function writeGenericPluginHookFixture(pluginRoot, command = 'hooks/session-star
     'echo "generic hook"',
     ''
   ].join('\n'));
+}
+
+function copySupportedN8nPluginFixture(pluginRoot) {
+  fs.mkdirSync(pluginRoot, { recursive: true });
+  fs.cpSync(supportedN8nFixtureRoot, pluginRoot, { recursive: true, force: true });
 }
 
 function pushRepoToolkitUpdate(fixture, label) {
@@ -5366,7 +5372,7 @@ test('Windows n8n plugin hook repair removes bare shell hooks and verifies hook 
 }, () => {
   const root = tmpRoot();
   const pluginRoot = path.join(root, 'n8n-skills-plugin');
-  writeN8nPluginHookFixture(pluginRoot);
+  copySupportedN8nPluginFixture(pluginRoot);
 
   assert.ok(
     auditPluginRoot(pluginRoot, { windows: true }).some((error) => /directly invokes|bare bash/i.test(error)),
@@ -5392,13 +5398,16 @@ test('Windows n8n plugin hook repair removes bare shell hooks and verifies hook 
   assert.deepEqual(errors, []);
 });
 
-test('third-party Codex plugin hook repair discovers generic installed plugin caches', () => {
+test('Codex plugin hook reconciliation repairs only the exact supported n8n cache', () => {
   const root = tmpRoot();
-  const codexHome = path.join(root, 'codex-home');
+  const codexHome = path.join(root, 'Codex Home With Spaces');
   const toolkitRoot = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', expectedBridgeVersion);
   const thirdPartyRoot = path.join(codexHome, 'plugins', 'cache', 'example-marketplace', 'generic-third-party', '1.0.0');
+  const n8nRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
   writeGenericPluginHookFixture(toolkitRoot);
   writeGenericPluginHookFixture(thirdPartyRoot);
+  copySupportedN8nPluginFixture(n8nRoot);
+  const unrelatedBefore = fs.readFileSync(path.join(thirdPartyRoot, 'hooks', 'hooks.json'));
 
   const result = repairThirdPartyCodexPluginHooks({
     codexHome,
@@ -5408,20 +5417,22 @@ test('third-party Codex plugin hook repair discovers generic installed plugin ca
   });
 
   assert.equal(result.status, 'repaired');
-  assert.deepEqual(result.repaired.map((entry) => entry.plugin_root), [thirdPartyRoot]);
-  assert.deepEqual(result.skipped.map((entry) => entry.plugin_root), [toolkitRoot]);
+  assert.deepEqual(result.repaired.map((entry) => entry.plugin_root), [n8nRoot]);
+  assert.deepEqual(result.skipped.map((entry) => entry.plugin_root).sort(), [thirdPartyRoot, toolkitRoot].sort());
 
-  const repairedHooks = readJson(path.join(thirdPartyRoot, 'hooks', 'hooks.json'));
+  const repairedHooks = readJson(path.join(n8nRoot, 'hooks', 'hooks.json'));
   const repairedCommand = collectHookCommands(repairedHooks)[0].command;
   assert.match(repairedCommand, /^powershell(?:\.exe)?\s/i);
   assert.match(repairedCommand, /hooks\/run-hook\.ps1/);
-  assert.equal(fs.existsSync(path.join(thirdPartyRoot, 'hooks', 'run-hook.ps1')), true);
+  assert.equal(fs.existsSync(path.join(n8nRoot, 'hooks', 'run-hook.ps1')), true);
+  assert.deepEqual(fs.readFileSync(path.join(thirdPartyRoot, 'hooks', 'hooks.json')), unrelatedBefore);
+  assert.equal(fs.existsSync(path.join(thirdPartyRoot, 'hooks', 'run-hook.ps1')), false);
 
   const toolkitHooks = readJson(path.join(toolkitRoot, 'hooks', 'hooks.json'));
   assert.equal(collectHookCommands(toolkitHooks)[0].command, 'hooks/session-start.sh');
 });
 
-test('Codex hook auto-repairs third-party plugin hooks after setup opt-in', {
+test('Codex maintenance auto-reapplies supported n8n hook repair after refresh', {
   skip: process.platform !== 'win32' ? 'Windows hook repair is Windows-only' : false
 }, () => {
   const root = tmpRoot();
@@ -5430,8 +5441,11 @@ test('Codex hook auto-repairs third-party plugin hooks after setup opt-in', {
   const codexHome = path.join(root, 'codex-home');
   const toolkitRoot = path.join(codexHome, 'plugins', 'cache', 'ai-agent-toolkit-local', 'ai-agent-toolkit', expectedBridgeVersion);
   const thirdPartyRoot = path.join(codexHome, 'plugins', 'cache', 'example-marketplace', 'generic-third-party', '1.0.0');
+  const n8nRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
   writeGenericPluginHookFixture(toolkitRoot);
   writeGenericPluginHookFixture(thirdPartyRoot);
+  copySupportedN8nPluginFixture(n8nRoot);
+  const unrelatedBefore = fs.readFileSync(path.join(thirdPartyRoot, 'hooks', 'hooks.json'));
 
   let result = run([
     '--hub', hub,
@@ -5461,12 +5475,50 @@ test('Codex hook auto-repairs third-party plugin hooks after setup opt-in', {
   assert.match(result.stdout, /Toolkit local bridge sync complete\./);
 
   const report = readLatestReport(hub);
-  assert.match(report.text, /Repaired `1` third-party Codex plugin hook cache/);
-  assert.match(report.text, /generic-third-party@example-marketplace/);
-  assert.match(report.text, /third-party Codex plugin hook repair: `repaired`/);
+  assert.match(report.text, /Repaired `1` supported n8n Skills Codex plugin hook cache/);
+  assert.match(report.text, /n8n-skills@n8n-io/);
+  assert.match(report.text, /n8n Skills plugin hook reconciliation: `repaired`/);
 
-  const repairedHooks = readJson(path.join(thirdPartyRoot, 'hooks', 'hooks.json'));
+  const repairedHooks = readJson(path.join(n8nRoot, 'hooks', 'hooks.json'));
   assert.match(collectHookCommands(repairedHooks)[0].command, /^powershell(?:\.exe)?\s/i);
+  assert.deepEqual(fs.readFileSync(path.join(thirdPartyRoot, 'hooks', 'hooks.json')), unrelatedBefore);
   const toolkitHooks = readJson(path.join(toolkitRoot, 'hooks', 'hooks.json'));
   assert.equal(collectHookCommands(toolkitHooks)[0].command, 'hooks/session-start.sh');
+
+  fs.cpSync(supportedN8nFixtureRoot, n8nRoot, { recursive: true, force: true });
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
+    env: isolatedHomeEnv(root, { PATH: process.env.PATH, CODEX_HOME: codexHome, PLUGIN_ROOT: toolkitRoot })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(collectHookCommands(readJson(path.join(n8nRoot, 'hooks', 'hooks.json')))[0].command, /^powershell(?:\.exe)?\s/i);
+
+  const afterRefreshRepair = fs.readFileSync(path.join(n8nRoot, 'hooks', 'hooks.json'));
+  result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
+    env: isolatedHomeEnv(root, { PATH: process.env.PATH, CODEX_HOME: codexHome, PLUGIN_ROOT: toolkitRoot })
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(fs.readFileSync(path.join(n8nRoot, 'hooks', 'hooks.json')), afterRefreshRepair);
+});
+
+test('Codex plugin hook reconciliation fails closed on unknown n8n layout without touching cache extras', () => {
+  const root = tmpRoot();
+  const codexHome = path.join(root, 'Codex Home With Spaces');
+  const n8nRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copySupportedN8nPluginFixture(n8nRoot);
+  const manifestPath = path.join(n8nRoot, '.codex-plugin', 'plugin.json');
+  const manifest = readJson(manifestPath);
+  manifest.version = '1.0.2';
+  writeJson(manifestPath, manifest);
+  const envPath = path.join(n8nRoot, '.env');
+  writeFile(envPath, 'fixture sentinel must remain untouched\n');
+  const beforeHooks = fs.readFileSync(path.join(n8nRoot, 'hooks', 'hooks.json'));
+  const beforeEnv = fs.readFileSync(envPath);
+
+  const result = repairThirdPartyCodexPluginHooks({ codexHome, windows: true, write: true });
+
+  assert.equal(result.status, 'repair-failed');
+  assert.match(result.errors.join('\n'), /unsupported n8n Skills version 1\.0\.2|compatibility contract changed/i);
+  assert.deepEqual(fs.readFileSync(path.join(n8nRoot, 'hooks', 'hooks.json')), beforeHooks);
+  assert.deepEqual(fs.readFileSync(envPath), beforeEnv);
+  assert.equal(fs.existsSync(path.join(n8nRoot, 'hooks', 'run-hook.ps1')), false);
 });

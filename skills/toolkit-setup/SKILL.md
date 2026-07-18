@@ -1,6 +1,6 @@
 ---
 name: toolkit-setup
-description: Use when the user says "setup toolkit" or "refresh toolkit", or when the task is clearly about AI Agent Toolkit plugin setup/update state, Toolkit Local Bridge setup or troubleshooting, repo-backed auto-update, bridge audit/sync/disable, OpenCode or Antigravity 2 opt-in bridge support, native Codex or Claude Code plugin behavior, Windows hook repair, or bridge setup safety. Route to the Toolkit setup subsystem and repo/scripts/toolkit-local-bridge.cjs; do not use for ordinary project coding or unrelated n8n setup.
+description: Use when the user says "setup toolkit" or "refresh toolkit", asks to repair the installed n8n Skills plugin or fix n8n .sh hooks opening in an editor on Windows, or when the task is clearly about AI Agent Toolkit plugin setup/update state, Toolkit Local Bridge setup or troubleshooting, repo-backed auto-update, bridge audit/sync/disable, OpenCode or Antigravity 2 opt-in bridge support, native Codex or Claude Code plugin behavior, Windows hook repair, or bridge setup safety. Route only installed-plugin repair intents to the bounded Toolkit setup subsystem and repo/scripts/toolkit-local-bridge.cjs; do not use for ordinary project coding, repo-local n8n helper scripts, live n8n operations, or generic n8n/MCP work.
 ---
 
 <!--
@@ -124,7 +124,7 @@ On Windows, do **not** rely on bare `codex`; it can resolve to a non-runnable Wi
 - Sync only enabled targets.
 - Disabled or never-enabled targets must not be touched.
 - Repo auto-update must validate the configured Toolkit repo and expected remote, refuse dirty worktrees without stashing or switching, auto-switch only the managed clean checkout back to the configured branch, fast-forward update, and run hook-light validation before enabled-target sync.
-- Codex plugin cache auto-refresh is Codex-only. When enabled, startup hooks may refresh stale Codex Toolkit plugin cache content only from the configured managed `main` repo after repo validation and delegated target sync succeed. On Windows, the same opt-in may scan installed non-Toolkit Codex plugin caches under `CODEX_HOME/plugins/cache` and repair unsafe `.sh` hook launchers with the Toolkit wrapper.
+- Codex plugin cache auto-refresh is Codex-only. When enabled, startup hooks may refresh stale Codex Toolkit plugin cache content only from the configured managed `main` repo after repo validation and delegated target sync succeed. On Windows, the same opt-in may inspect the exact installed `n8n-skills@n8n-io` cache under `CODEX_HOME/plugins/cache` and reconcile only a known supported version/layout with the existing Toolkit wrapper. Unrelated plugins are skipped. Unknown or malformed n8n Skills layouts fail closed and require upstream compatibility review.
 - Startup hooks may also run a passive repo-local instruction preflight for the current working directory. Codex checks `AGENTS.md`; Claude Code checks `AGENTS.md` and `CLAUDE.md`. The preflight may compare expected `AI-AGENT-TOOLKIT` managed block content against bundled repo-local templates, but it must only warn and must not write, repair, back up, create, or refresh instruction files. When findings exist, pause and ask whether to run `ai-coding-agent-rules` check/repair/refresh now or proceed with the current task despite the warning.
 - Claude Code plugin cache refresh is Claude-Code-only. If it cannot be automated, report the verified metadata/cache status and the exact manual Claude Code native plugin action required.
 - Meaningful update activity should write an update report when reports are enabled; no-op updates should print concise status instead of spamming reports. A central classification opens only reports requiring action, including validation, fetch/update, dirty-checkout, remote-mismatch, target-sync, native-cache refresh, hook-repair, rollback, or restoration failures. Successful updates, refreshes, repairs, and syncs remain closed. Legacy persisted all-report auto-open state is migrated to this failure-only behavior, and compatibility flags never restore success-report auto-opening.
@@ -140,7 +140,17 @@ On Windows, do **not** rely on bare `codex`; it can resolve to a non-runnable Wi
 
 ## n8n Plugin Path Note
 
-Official `n8n-io/skills` plugin setup is owned by n8n setup guidance. Marketplace registration alone is not installation. Verify `n8n-skills@n8n-io` is installed and enabled, not merely available. On Windows, repair and audit the installed plugin cache path under `.codex/plugins/cache/n8n-io/n8n-skills/<version>` before trusting hooks. Trusted Toolkit Codex startup hooks may repair it again after future plugin updates when Codex plugin cache auto-refresh is enabled. Do not repair or audit temporary marketplace checkout paths such as `.codex/.tmp/marketplaces/n8n-io/plugins/n8n-skills`.
+Official `n8n-io/skills` plugin setup is owned by n8n setup guidance. Marketplace registration alone is not installation. Verify `n8n-skills@n8n-io` is installed and enabled, not merely available. On Windows, repair and audit the installed plugin cache path under `.codex/plugins/cache/n8n-io/n8n-skills/<version>` before trusting hooks. Trusted Toolkit Codex startup hooks may repair an exactly recognised supported upstream layout again after future plugin updates when Codex plugin cache auto-refresh is enabled. Already repaired layouts are a no-op; partially repaired, malformed, or unknown versions fail closed. Do not repair or audit temporary marketplace checkout paths such as `.codex/.tmp/marketplaces/n8n-io/plugins/n8n-skills`.
+
+Route `repair n8n plugin`, `fix n8n skill hooks`, `repair the n8n Skills plugin`, and questions about n8n `.sh` hooks opening in VS Code to this bounded installed-plugin inspection/repair path. Before acting, distinguish the target:
+
+1. Installed Codex `n8n-skills@n8n-io` cache: inspect the exact identity/version/layout and use the existing Windows hook reconciliation. The enabled Codex plugin-maintenance preference is standing permission only for the exact known-compatible transform.
+2. Claude Code plugin: inspect and report through Claude Code's native plugin flow; Codex must not mutate Claude Code cache.
+3. Toolkit source or generated skill: follow repository source ownership and regeneration rules, not installed-cache repair.
+4. Consumer-repo `n8n-workflows/scripts/` helpers: route to the workspace helper ownership path; do not touch plugin caches.
+5. Live n8n workflows, community nodes, Docker, or server operations: load the n8n safety/setup route and require its live-action approvals; do not trigger plugin-cache repair.
+
+When the target is genuinely ambiguous, ask for the smallest numbered choice from the applicable targets above. Do not load every n8n or MCP skill merely because the word `n8n` appears.
 
 Plain skill installs for OpenCode, AG2/Antigravity, or other folder-based targets do not include official n8n plugin hooks, so target repo instructions must cue `using-n8n-skills`.
 
