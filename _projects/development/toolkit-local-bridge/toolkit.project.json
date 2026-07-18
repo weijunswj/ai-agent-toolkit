@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.7.13",
+  "version": "2.7.14",
   "version_policy": "semver",
-  "version_notes": "Makes generated setup-question documentation freshness checks portable across LF and CRLF text materialization without weakening content-drift detection.",
+  "version_notes": "Makes hosted critical and authentication journal reporting record-oriented, privacy-bounded, and explicit about query failure or unavailable evidence.",
   "outputs": [
     {
       "kind": "curated",

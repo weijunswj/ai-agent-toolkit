@@ -5,9 +5,9 @@
   "title": "Codex SSH Hostinger Coolify Setup Maintainer",
   "module_path": "_projects/development/hostinger-coolify-production-guide",
   "main_path": "_projects/development/hostinger-coolify-production-guide/_main",
-  "version": "2.1.4",
+  "version": "2.1.5",
   "version_policy": "semver",
-  "version_notes": "Adds owner-approved upgrade advisory guidance for Hostinger/Coolify usage pressure.",
+  "version_notes": "Makes critical and authentication journal evidence record-oriented with explicit zero, failure, unavailable, and malformed states.",
   "outputs": [
     {
       "kind": "curated",

@@ -16,7 +16,15 @@ FAIL_COUNT=0
 mkdir -p "$REPORT_DIR"
 chmod 700 "$MAINTENANCE_ROOT" "$REPORT_DIR" 2>/dev/null || true
 TMP_REPORT="$(mktemp "${REPORT_DIR}/.security-check.XXXXXX")"
-trap 'rm -f "$TMP_REPORT"' EXIT
+JOURNAL_TEMP_FILES=()
+cleanup_temp_files() {
+  rm -f "$TMP_REPORT"
+  if [ "${#JOURNAL_TEMP_FILES[@]}" -gt 0 ]; then rm -f "${JOURNAL_TEMP_FILES[@]}"; fi
+}
+trap cleanup_temp_files EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 have() { command -v "$1" >/dev/null 2>&1; }
 redact_text() {
@@ -27,6 +35,16 @@ redact_text() {
     -e 's#([?&][^=[:space:]&]*(token|secret|password|passwd|api[_-]?key|key|auth|signature|sig|access[_-]?token|refresh[_-]?token)[^=[:space:]&]*=)[^&#[:space:]]+#\1<redacted>#Ig' \
     -e 's#(token|secret|password|passwd|api[_-]?key)=([^[:space:]]+)#\1=<redacted>#Ig' \
     -e 's#(Authorization:[[:space:]]*(Bearer|Basic)[[:space:]]+)[A-Za-z0-9._~+/-]+=*#\1<redacted>#Ig'
+}
+sanitize_journal_text() {
+  redact_text | sed -E \
+    -e 's#/(root|home)/[^[:space:]|]+#<private-path>#g' \
+    -e 's#[A-Za-z]:\\(Users|home)\\[^[:space:]|]+#<private-path>#Ig' \
+    -e 's#(^|[^0-9])([0-9]{1,3}\.){3}[0-9]{1,3}([^0-9]|$)#\1<redacted-ip>\3#g' \
+    -e 's#(^|[^[:xdigit:]:])([[:xdigit:]]{0,4}:){2,}[[:xdigit:]:]{0,4}([^[:xdigit:]:]|$)#\1<redacted-ip>\3#g' \
+    -e 's#[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}#<redacted-email>#g' \
+    | LC_ALL=C tr '\000-\010\013\014\016-\037\177' '?' \
+    | tr '\140\174' '\047\057'
 }
 secret_like_url() {
   printf '%s' "$1" | grep -Eiq '://[^/@]+@|[?&][^=]*(token|secret|password|passwd|api[_-]?key|key|auth|signature|sig|access[_-]?token|refresh[_-]?token)='
@@ -62,6 +80,112 @@ append_block() {
     bash -c "$cmd" 2>&1 | redact_text | head -n 120
     printf '```\n'
   } >> "$TMP_REPORT"
+}
+bounded_journal_diagnostic() {
+  sanitize_journal_text | tr '\n' ' ' | head -c 500 | sed -E 's/[[:space:]]+$//'
+}
+parse_journal_export_count() {
+  awk '
+    function finish_record() {
+      if (!in_record) return
+      if (cursor != 1 || realtime != 1 || monotonic != 1 || boot_id != 1) invalid = 1
+      count++
+      in_record = cursor = realtime = monotonic = boot_id = 0
+    }
+    BEGIN { count = 0; invalid = 0 }
+    /^$/ { finish_record(); next }
+    {
+      in_record = 1
+      if ($0 !~ /^[[:print:]]+$/) invalid = 1
+      if ($0 ~ /^__CURSOR=.+$/) cursor++
+      else if ($0 ~ /^__REALTIME_TIMESTAMP=[0-9]+$/) realtime++
+      else if ($0 ~ /^__MONOTONIC_TIMESTAMP=[0-9]+$/) monotonic++
+      else if ($0 ~ /^_BOOT_ID=[0-9A-Fa-f]{32}$/) boot_id++
+      else invalid = 1
+    }
+    END {
+      finish_record()
+      if (invalid) exit 2
+      print count
+    }
+  ' "$1"
+}
+query_journal_records() {
+  local stdout_file stderr_file exit_status parsed_count diagnostic
+  stdout_file="$(mktemp "${REPORT_DIR}/.journal-records.XXXXXX")" || {
+    JOURNAL_QUERY_STATE='unavailable'
+    JOURNAL_QUERY_COUNT=0
+    JOURNAL_QUERY_DIAGNOSTIC='temporary evidence file unavailable'
+    return 0
+  }
+  JOURNAL_TEMP_FILES+=("$stdout_file")
+  stderr_file="$(mktemp "${REPORT_DIR}/.journal-diagnostic.XXXXXX")" || {
+    rm -f "$stdout_file"
+    JOURNAL_QUERY_STATE='unavailable'
+    JOURNAL_QUERY_COUNT=0
+    JOURNAL_QUERY_DIAGNOSTIC='temporary diagnostic file unavailable'
+    return 0
+  }
+  JOURNAL_TEMP_FILES+=("$stderr_file")
+
+  if journalctl --quiet --no-pager --output=export --output-fields=__CURSOR "$@" >"$stdout_file" 2>"$stderr_file"; then
+    exit_status=0
+  else
+    exit_status=$?
+  fi
+  diagnostic="$(bounded_journal_diagnostic < "$stderr_file")"
+
+  if [ "$exit_status" -ne 0 ]; then
+    JOURNAL_QUERY_STATE='failed'
+    JOURNAL_QUERY_COUNT=0
+    JOURNAL_QUERY_DIAGNOSTIC="exit $exit_status: ${diagnostic:-no diagnostic text}"
+  elif [ -n "$diagnostic" ]; then
+    JOURNAL_QUERY_STATE='unavailable'
+    JOURNAL_QUERY_COUNT=0
+    JOURNAL_QUERY_DIAGNOSTIC="$diagnostic"
+  elif parsed_count="$(parse_journal_export_count "$stdout_file")"; then
+    JOURNAL_QUERY_STATE='ok'
+    JOURNAL_QUERY_COUNT="$parsed_count"
+    JOURNAL_QUERY_DIAGNOSTIC=''
+  else
+    JOURNAL_QUERY_STATE='malformed'
+    JOURNAL_QUERY_COUNT=0
+    JOURNAL_QUERY_DIAGNOSTIC=''
+  fi
+
+  rm -f "$stdout_file" "$stderr_file"
+}
+append_journal_block() {
+  local title="$1" stdout_file stderr_file exit_status diagnostic
+  shift
+  stdout_file="$(mktemp "${REPORT_DIR}/.journal-detail.XXXXXX")" || return 0
+  JOURNAL_TEMP_FILES+=("$stdout_file")
+  stderr_file="$(mktemp "${REPORT_DIR}/.journal-detail-diagnostic.XXXXXX")" || {
+    rm -f "$stdout_file"
+    return 0
+  }
+  JOURNAL_TEMP_FILES+=("$stderr_file")
+  if journalctl --quiet --no-pager --lines=80 --output=cat --output-fields=MESSAGE "$@" >"$stdout_file" 2>"$stderr_file"; then
+    exit_status=0
+  else
+    exit_status=$?
+  fi
+  diagnostic="$(bounded_journal_diagnostic < "$stderr_file")"
+  {
+    printf '\n### %s\n\n```text\n' "$title"
+    if [ "$exit_status" -ne 0 ]; then
+      printf 'Journal detail query failed (exit %s): %s\n' "$exit_status" "${diagnostic:-no diagnostic text}"
+    elif [ -n "$diagnostic" ]; then
+      printf 'Journal detail unavailable: %s\n' "$diagnostic"
+    elif [ -s "$stdout_file" ]; then
+      sanitize_journal_text < "$stdout_file" | head -n 80 | head -c 4000
+      printf '\n'
+    else
+      printf '(no matching records)\n'
+    fi
+    printf '```\n'
+  } >> "$TMP_REPORT"
+  rm -f "$stdout_file" "$stderr_file"
 }
 notification_targets() {
   local targets=''
@@ -215,12 +339,36 @@ if have docker; then
   else status_line PASS 'Docker containers' "No unhealthy/restarting containers detected; Coolify-like containers: ${coolify:-0}" 'None.'; fi
 else status_line WARN 'Docker containers' 'docker unavailable' 'Expected only before Docker/Coolify install.'; fi
 
+AUTH_JOURNAL_ARGS=(--since '24 hours ago' --case-sensitive=false --grep='Failed password|authentication failure|Invalid user')
+
 if have journalctl; then
-  auth_failures="$(journalctl --since '24 hours ago' 2>/dev/null | grep -Eic 'Failed password|authentication failure|Invalid user' || true)"
-  critical="$(journalctl -p crit..alert --since '24 hours ago' 2>/dev/null | wc -l | tr -d ' ')"
-  [ "${auth_failures:-0}" -gt 20 ] && status_line WARN 'SSH/auth failures' "$auth_failures recent auth failures" 'Review source patterns and access controls.' || status_line PASS 'SSH/auth failures' "${auth_failures:-0} recent auth failures" 'None.'
-  [ "${critical:-0}" -gt 0 ] && status_line WARN 'Critical system errors' "$critical recent critical log lines" 'Review journal details.' || status_line PASS 'Critical system errors' 'No recent critical journal lines' 'None.'
-else status_line WARN 'System logs' 'journalctl unavailable' 'Check /var/log/auth.log or provider logs manually.'; fi
+  query_journal_records "${AUTH_JOURNAL_ARGS[@]}"
+  case "$JOURNAL_QUERY_STATE" in
+    ok)
+      auth_failures="$JOURNAL_QUERY_COUNT"
+      auth_label='records'; [ "$auth_failures" -eq 1 ] && auth_label='record'
+      [ "$auth_failures" -gt 20 ] && status_line WARN 'SSH/auth failures' "$auth_failures recent auth failure $auth_label" 'Review source patterns and access controls.' || status_line PASS 'SSH/auth failures' "$auth_failures recent auth failure $auth_label" 'None.'
+      ;;
+    failed) status_line WARN 'SSH/auth failures' "Journal query failed (${JOURNAL_QUERY_DIAGNOSTIC%%:*}): ${JOURNAL_QUERY_DIAGNOSTIC#*: }" 'Review journal access and diagnostics.' ;;
+    unavailable) status_line WARN 'SSH/auth failures' "Journal evidence unavailable: $JOURNAL_QUERY_DIAGNOSTIC" 'Review journal access and diagnostics.' ;;
+    malformed) status_line WARN 'SSH/auth failures' 'Malformed journal record output; evidence unavailable' 'Review journal access and output format.' ;;
+  esac
+
+  query_journal_records -p crit..alert --since '24 hours ago'
+  case "$JOURNAL_QUERY_STATE" in
+    ok)
+      critical="$JOURNAL_QUERY_COUNT"
+      critical_label='records'; [ "$critical" -eq 1 ] && critical_label='record'
+      [ "$critical" -gt 0 ] && status_line WARN 'Critical system errors' "$critical recent critical journal $critical_label" 'Review journal details.' || status_line PASS 'Critical system errors' '0 recent critical journal records' 'None.'
+      ;;
+    failed) status_line WARN 'Critical system errors' "Journal query failed (${JOURNAL_QUERY_DIAGNOSTIC%%:*}): ${JOURNAL_QUERY_DIAGNOSTIC#*: }" 'Review journal access and diagnostics.' ;;
+    unavailable) status_line WARN 'Critical system errors' "Journal evidence unavailable: $JOURNAL_QUERY_DIAGNOSTIC" 'Review journal access and diagnostics.' ;;
+    malformed) status_line WARN 'Critical system errors' 'Malformed journal record output; evidence unavailable' 'Review journal access and output format.' ;;
+  esac
+else
+  status_line WARN 'SSH/auth failures' 'Journal evidence unavailable: journalctl command unavailable' 'Check /var/log/auth.log or provider logs manually.'
+  status_line WARN 'Critical system errors' 'Journal evidence unavailable: journalctl command unavailable' 'Check provider logs manually.'
+fi
 
 # Intrusion signals are read-only indicators, not proof that no intrusion occurred.
 if have getent; then
@@ -285,8 +433,8 @@ have ufw && append_block 'UFW Numbered Rules' 'ufw status numbered'
 have ss && append_block 'Listening Ports' 'ss -tulpn'
 have docker && append_block 'Docker Containers' "docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'"
 have docker && append_block 'Coolify-like Containers' "docker ps --format '{{.Names}} {{.Image}} {{.Status}}' | grep -Ei 'coolify|coolify-' || true"
-have journalctl && append_block 'Recent Auth Failures Summary' "journalctl --since '24 hours ago' | grep -Ei 'Failed password|authentication failure|Invalid user' | tail -n 50 || true"
-have journalctl && append_block 'Recent Critical System Errors' "journalctl -p crit..alert --since '24 hours ago' | tail -n 80 || true"
+have journalctl && append_journal_block 'Recent Auth Failures Summary' "${AUTH_JOURNAL_ARGS[@]}"
+have journalctl && append_journal_block 'Recent Critical System Errors' -p crit..alert --since '24 hours ago'
 have last && append_block 'Recent Successful Logins' "last -n 20 -F || true"
 if [ -x "$SSHD_BIN" ]; then append_block 'SSH Effective Security Settings' "\"$SSHD_BIN\" -T 2>/dev/null | grep -Ei '^(passwordauthentication|pubkeyauthentication|permitrootlogin|authenticationmethods|maxauthtries) ' || true"; fi
 append_block 'Account Privilege Inventory' "getent passwd | awk -F: '\$3 == 0 {print \"uid0:\" \$1}' ; getent group sudo wheel 2>/dev/null | awk -F: '\$4 != \"\" {print \$1 \":\" \$4}'"

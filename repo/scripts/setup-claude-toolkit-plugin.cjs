@@ -278,7 +278,7 @@ function claudeSpawnParts(command, args, options = {}) {
 function spawnClaude(command, args, options = {}) {
   const parts = claudeSpawnParts(command, args, options);
   // The executable is validated and argv remains separate; shell interpretation is never enabled.
-  // lgtm[js/shell-command-injection-from-environment]
+  // codeql[js/shell-command-injection-from-environment]
   return spawnSync(parts.command, parts.args, {
     ...options,
     windowsVerbatimArguments: parts.windowsVerbatimArguments,
@@ -415,6 +415,8 @@ function spawnClaudeProcess(command, args) {
   // supported plugin-state verification below, never captured output, and an
   // inherited or piped handle must not be able to keep this parent waiting
   // on a child that has already finished its real work.
+  // The executable is validated and argv remains separate; shell interpretation is never enabled.
+  // codeql[js/shell-command-injection-from-environment]
   return spawn(parts.command, parts.args, {
     windowsVerbatimArguments: parts.windowsVerbatimArguments,
     stdio: 'ignore',
