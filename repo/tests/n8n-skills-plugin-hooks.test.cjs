@@ -79,6 +79,12 @@ function runRepair(pluginRoot, ...extraArgs) {
   });
 }
 
+function runRepairedAudit(pluginRoot) {
+  return process.platform === 'win32'
+    ? runAudit(pluginRoot, '--verify-output')
+    : runAudit(pluginRoot);
+}
+
 function findBashForTests() {
   const candidates = process.platform === 'win32'
     ? [
@@ -1090,7 +1096,7 @@ test('supported refresh is repaired, verified, and byte-idempotent', () => {
   const first = reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true });
   assert.equal(first.status, 'repaired');
   assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'healthy');
-  assert.equal(runAudit(pluginRoot, '--verify-output').status, 0);
+  assert.equal(runRepairedAudit(pluginRoot).status, 0);
   assert.deepEqual(fs.readFileSync(envPath), envBefore);
   const hooksText = fs.readFileSync(path.join(pluginRoot, 'hooks', 'hooks.json'), 'utf8');
   assert.match(hooksText, /run-hook\.ps1/);
@@ -1107,7 +1113,7 @@ test('supported refresh is repaired, verified, and byte-idempotent', () => {
   const refreshed = reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true });
   assert.equal(refreshed.status, 'repaired');
   assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'healthy');
-  assert.equal(runAudit(pluginRoot, '--verify-output').status, 0);
+  assert.equal(runRepairedAudit(pluginRoot).status, 0);
   assert.deepEqual(fs.readFileSync(envPath), envBefore);
   assertSnapshotEqual(pluginRoot, repaired, 'refresh reconciliation must restore the deterministic repaired bytes');
 });
