@@ -11,6 +11,8 @@ const scripts = [
   '_projects/development/hostinger-coolify-production-guide/_main/skill/scripts/daily-security-check.sh',
   'skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/daily-security-check.sh'
 ];
+const authoritativeDailyCheck = scripts[0];
+const generatedDailyCheck = scripts[1];
 const hostingerDocsPath = 'docs/hostinger-coolify/';
 
 function findBash() {
@@ -67,6 +69,115 @@ trap dump_debug ERR
 cd "$tmp"
 mkdir -- -delete
 printf keep > sentinel.txt
+mkdir -p "$tmp/bin"
+cat > "$tmp/bin/systemctl" <<'STUB'
+#!/usr/bin/env bash
+exit 1
+STUB
+chmod +x "$tmp/bin/systemctl"
+PATH="$tmp/bin:/usr/bin:/bin"
+export PATH
+unset HEALTHCHECK_URLS HEALTHCHECK_HOSTS BACKUP_PATHS NOTIFY_TELEGRAM_BOT_TOKEN NOTIFY_TELEGRAM_CHAT_ID NOTIFY_TELEGRAM_THREAD_ID NOTIFY_EMAIL_TO NOTIFY_EMAIL_SUBJECT_PREFIX
+
+if [[ "$scenario" == journal-* ]]; then
+  cat > "$tmp/bin/find" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x "$tmp/bin/find"
+  cat > "$tmp/bin/journalctl" <<'STUB'
+#!/usr/bin/env bash
+set -u
+
+scenario="$JOURNAL_SCENARIO"
+args=" $* "
+
+record() {
+  id="$1"
+  printf '__CURSOR=s=test;i=%s;b=0123456789abcdef0123456789abcdef;m=%s;t=%s;x=test\n' "$id" "$id" "$id"
+  printf '__REALTIME_TIMESTAMP=%s\n' "$id"
+  printf '__MONOTONIC_TIMESTAMP=%s\n' "$id"
+  printf '_BOOT_ID=0123456789abcdef0123456789abcdef\n\n'
+}
+
+if [[ "$args" == *" --output=cat "* ]]; then
+  case "$scenario" in
+    journal-hostile)
+      printf 'authentication failure token=journal-secret /home/private-user/config 2001:db8::1 private@example.test \x60\x60\x60 | %012000d\n' 0
+      ;;
+    journal-one) printf 'one bounded journal detail\n' ;;
+    journal-multiple) printf 'journal detail one\njournal detail two\njournal detail three\n' ;;
+    journal-stderr) printf 'journal diagnostic only\n' >&2 ;;
+    journal-failure) printf 'journal service unavailable\n' >&2; exit 5 ;;
+    journal-permission) printf 'permission denied: /home/private-user/config token=journal-secret\n' >&2; exit 1 ;;
+    journal-malformed) printf 'malformed detail\n' ;;
+  esac
+  exit 0
+fi
+
+case "$scenario" in
+  journal-placeholder)
+    if [[ "$args" != *" --output=export "* ]]; then printf '%s\n' '-- No entries --'; fi
+    ;;
+  journal-empty) ;;
+  journal-one) record 1 ;;
+  journal-multiple) record 1; record 2; record 3 ;;
+  journal-stderr) printf 'journal diagnostic only\n' >&2 ;;
+  journal-failure) printf 'journal service unavailable\n' >&2; exit 5 ;;
+  journal-permission) printf 'permission denied: /home/private-user/config token=journal-secret\n' >&2; exit 1 ;;
+  journal-malformed) printf '{"truncated":true\n' ;;
+  journal-hostile) record 1 ;;
+  *) printf 'unknown journal scenario\n' >&2; exit 9 ;;
+esac
+STUB
+  chmod +x "$tmp/bin/journalctl"
+  PATH="$tmp/bin:$PATH" JOURNAL_SCENARIO="$scenario" MAINTENANCE_ROOT="$tmp/maintenance" bash "$script" >"$tmp/stdout.txt" 2>"$tmp/stderr.txt"
+  test -f sentinel.txt
+  report="$tmp/maintenance/reports/latest-security-check.md"
+
+  case "$scenario" in
+    journal-placeholder|journal-empty)
+      grep -Fq '| SSH/auth failures | PASS | 0 recent auth failure records | None. |' "$report"
+      grep -Fq '| Critical system errors | PASS | 0 recent critical journal records | None. |' "$report"
+      ;;
+    journal-one)
+      grep -Fq '| SSH/auth failures | PASS | 1 recent auth failure record | None. |' "$report"
+      grep -Fq '| Critical system errors | WARN | 1 recent critical journal record | Review journal details. |' "$report"
+      ;;
+    journal-multiple)
+      grep -Fq '| SSH/auth failures | PASS | 3 recent auth failure records | None. |' "$report"
+      grep -Fq '| Critical system errors | WARN | 3 recent critical journal records | Review journal details. |' "$report"
+      ;;
+    journal-stderr)
+      grep -Fq '| SSH/auth failures | WARN | Journal evidence unavailable: journal diagnostic only | Review journal access and diagnostics. |' "$report"
+      grep -Fq '| Critical system errors | WARN | Journal evidence unavailable: journal diagnostic only | Review journal access and diagnostics. |' "$report"
+      ;;
+    journal-failure)
+      grep -Fq '| SSH/auth failures | WARN | Journal query failed (exit 5): journal service unavailable | Review journal access and diagnostics. |' "$report"
+      grep -Fq '| Critical system errors | WARN | Journal query failed (exit 5): journal service unavailable | Review journal access and diagnostics. |' "$report"
+      ;;
+    journal-permission)
+      grep -Fq '| SSH/auth failures | WARN | Journal query failed (exit 1): permission denied: <private-path> token=<redacted> | Review journal access and diagnostics. |' "$report"
+      grep -Fq '| Critical system errors | WARN | Journal query failed (exit 1): permission denied: <private-path> token=<redacted> | Review journal access and diagnostics. |' "$report"
+      ! grep -Fq '/home/private-user' "$report"
+      ! grep -Fq 'journal-secret' "$report"
+      ;;
+    journal-malformed)
+      grep -Fq '| SSH/auth failures | WARN | Malformed journal record output; evidence unavailable | Review journal access and output format. |' "$report"
+      grep -Fq '| Critical system errors | WARN | Malformed journal record output; evidence unavailable | Review journal access and output format. |' "$report"
+      ;;
+    journal-hostile)
+      grep -Fq '| Critical system errors | WARN | 1 recent critical journal record | Review journal details. |' "$report"
+      ! grep -Fq '/home/private-user' "$report"
+      ! grep -Fq 'journal-secret' "$report"
+      ! grep -Fq '2001:db8::1' "$report"
+      ! grep -Fq 'private@example.test' "$report"
+      ! grep -Fq $'\x60\x60\x60 |' "$report"
+      test "$(wc -c < "$report")" -lt 15000
+      ;;
+  esac
+  exit 0
+fi
 
 case "$scenario" in
   unsafe)
@@ -92,7 +203,6 @@ case "$scenario" in
     ! grep -q 'Rejected non-absolute backup path' "$report"
     ;;
   telegram)
-    mkdir -p "$tmp/bin"
     export CURL_ARGS_FILE="$tmp/curl-args.txt"
     cat > "$tmp/bin/curl" <<'STUB'
 #!/usr/bin/env bash
@@ -148,6 +258,34 @@ test('daily security check can send Telegram notification without leaking token'
   for (const scriptRelPath of scripts) {
     runDailyCheckScenario(scriptRelPath, 'telegram');
   }
+});
+
+for (const [scenario, title] of [
+  ['journal-placeholder', 'literal journal placeholder is not counted as a record'],
+  ['journal-empty', 'successful empty journal output counts zero records'],
+  ['journal-one', 'one structured journal record counts exactly once'],
+  ['journal-multiple', 'multiple structured journal records count exactly'],
+  ['journal-stderr', 'stderr-only journal diagnostics are visible but never counted'],
+  ['journal-failure', 'non-zero journal query exit is visible and never treated as zero'],
+  ['journal-permission', 'permission-denied journal query is redacted and never treated as zero'],
+  ['journal-malformed', 'malformed structured journal output is unavailable rather than counted'],
+  ['journal-hostile', 'hostile journal detail is sanitised and deterministically bounded']
+]) {
+  test(title, () => {
+    runDailyCheckScenario(authoritativeDailyCheck, scenario);
+  });
+}
+
+test('daily security check remains operationally read-only', () => {
+  const content = fs.readFileSync(path.join(repoRoot, authoritativeDailyCheck), 'utf8');
+  assert.doesNotMatch(content, /^\s*(?:sudo\s+)?(?:apt(?:-get)?\s+(?:install|upgrade)|systemctl\s+(?:restart|stop|enable|disable)|docker\s+(?:rm|stop|restart|compose\s+(?:up|down))|ufw\s+(?:allow|deny|delete|enable|disable)|reboot|shutdown)\b/m);
+});
+
+test('authoritative and generated daily security checks are byte-aligned', () => {
+  assert.deepEqual(
+    fs.readFileSync(path.join(repoRoot, generatedDailyCheck)),
+    fs.readFileSync(path.join(repoRoot, authoritativeDailyCheck))
+  );
 });
 
 test('Hostinger/Coolify repo-side evidence artifacts have a docs home', () => {
