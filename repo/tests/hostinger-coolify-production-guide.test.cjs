@@ -101,6 +101,22 @@ record() {
   printf '_BOOT_ID=0123456789abcdef0123456789abcdef\n\n'
 }
 
+if [[ "$scenario" == journal-auth-case-insensitive ]]; then
+  [[ "$args" == *" --grep=Failed password|authentication failure|Invalid user "* ]] || exit 9
+  if [[ "$args" == *" --case-sensitive=false "* ]]; then
+    if [[ "$args" == *" --output=cat "* ]]; then
+      printf '%s\n' 'Failed password canonical' 'failed password lowercase' 'FAILED PASSWORD uppercase' 'Invalid user canonical' 'invalid user lowercase'
+    else
+      record 1; record 2; record 3; record 4; record 5
+    fi
+  elif [[ "$args" == *" --output=cat "* ]]; then
+    printf '%s\n' 'Failed password canonical' 'Invalid user canonical'
+  else
+    record 1; record 2
+  fi
+  exit 0
+fi
+
 if [[ "$args" == *" --output=cat "* ]]; then
   [[ "$args" == *" --lines=80 "* ]] || exit 8
   case "$scenario" in
@@ -177,6 +193,15 @@ STUB
       ! grep -Fq $'\x60\x60\x60 |' "$report"
       test "$(wc -c < "$report")" -lt 15000
       ;;
+    journal-auth-case-insensitive)
+      grep -Fq '| SSH/auth failures | PASS | 5 recent auth failure records | None. |' "$report"
+      grep -Fq 'Failed password canonical' "$report"
+      grep -Fq 'failed password lowercase' "$report"
+      grep -Fq 'FAILED PASSWORD uppercase' "$report"
+      grep -Fq 'Invalid user canonical' "$report"
+      grep -Fq 'invalid user lowercase' "$report"
+      ! grep -Fq 'Accepted publickey unrelated' "$report"
+      ;;
   esac
   exit 0
 fi
@@ -235,9 +260,10 @@ cat "$tmp/stdout.txt"
 cat "$tmp/stderr.txt" >&2
 `;
 
-  const result = spawnSync(bash, ['-lc', command, 'daily-security-check-test', toBashPath(path.join(repoRoot, scriptRelPath)), scenario], {
+  const result = spawnSync(bash, ['-l', '-s', '--', toBashPath(path.join(repoRoot, scriptRelPath)), scenario], {
     cwd: repoRoot,
-    encoding: 'utf8'
+    encoding: 'utf8',
+    input: command
   });
 
   assert.equal(result.status, 0, `${scriptRelPath} ${scenario}\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`);
@@ -271,7 +297,8 @@ for (const [scenario, title] of [
   ['journal-failure', 'non-zero journal query exit is visible and never treated as zero'],
   ['journal-permission', 'permission-denied journal query is redacted and never treated as zero'],
   ['journal-malformed', 'malformed structured journal output is unavailable rather than counted'],
-  ['journal-hostile', 'hostile journal detail is sanitised and deterministically bounded']
+  ['journal-hostile', 'hostile journal detail is sanitised and deterministically bounded'],
+  ['journal-auth-case-insensitive', 'auth summary and detail preserve case-insensitive matching']
 ]) {
   test(title, () => {
     runDailyCheckScenario(authoritativeDailyCheck, scenario);

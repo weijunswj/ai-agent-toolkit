@@ -9,6 +9,8 @@ const { execFileSync } = require('node:child_process');
 const launch = require('../scripts/claude-process-launch.cjs');
 
 function run(parts, options = {}) {
+  // The production resolver validated this executable, and execFileSync keeps argv shell-free.
+  // codeql[js/shell-command-injection-from-environment]
   const stdout = execFileSync(parts.command, parts.args, {
     ...options,
     windowsVerbatimArguments: parts.windowsVerbatimArguments,

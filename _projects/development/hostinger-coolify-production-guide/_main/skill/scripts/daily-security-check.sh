@@ -339,8 +339,10 @@ if have docker; then
   else status_line PASS 'Docker containers' "No unhealthy/restarting containers detected; Coolify-like containers: ${coolify:-0}" 'None.'; fi
 else status_line WARN 'Docker containers' 'docker unavailable' 'Expected only before Docker/Coolify install.'; fi
 
+AUTH_JOURNAL_ARGS=(--since '24 hours ago' --case-sensitive=false --grep='Failed password|authentication failure|Invalid user')
+
 if have journalctl; then
-  query_journal_records --since '24 hours ago' --grep='Failed password|authentication failure|Invalid user'
+  query_journal_records "${AUTH_JOURNAL_ARGS[@]}"
   case "$JOURNAL_QUERY_STATE" in
     ok)
       auth_failures="$JOURNAL_QUERY_COUNT"
@@ -431,7 +433,7 @@ have ufw && append_block 'UFW Numbered Rules' 'ufw status numbered'
 have ss && append_block 'Listening Ports' 'ss -tulpn'
 have docker && append_block 'Docker Containers' "docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'"
 have docker && append_block 'Coolify-like Containers' "docker ps --format '{{.Names}} {{.Image}} {{.Status}}' | grep -Ei 'coolify|coolify-' || true"
-have journalctl && append_journal_block 'Recent Auth Failures Summary' --since '24 hours ago' --grep='Failed password|authentication failure|Invalid user'
+have journalctl && append_journal_block 'Recent Auth Failures Summary' "${AUTH_JOURNAL_ARGS[@]}"
 have journalctl && append_journal_block 'Recent Critical System Errors' -p crit..alert --since '24 hours ago'
 have last && append_block 'Recent Successful Logins' "last -n 20 -F || true"
 if [ -x "$SSHD_BIN" ]; then append_block 'SSH Effective Security Settings' "\"$SSHD_BIN\" -T 2>/dev/null | grep -Ei '^(passwordauthentication|pubkeyauthentication|permitrootlogin|authenticationmethods|maxauthtries) ' || true"; fi
