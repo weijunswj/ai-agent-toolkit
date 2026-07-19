@@ -808,6 +808,17 @@ function claudeInvocation(spec, options = {}) {
   return { executable: parts.command, args: parts.args, windowsVerbatimArguments: parts.windowsVerbatimArguments, raw_executable: executable, raw_args: args, env, stdin: promptBytes, effort: checked.effort, non_fast: true, max_depth: 1 };
 }
 
+function spawnValidatedClaude(invocation, captureChecker) {
+  // The production resolver validated this executable, and spawn keeps argv shell-free while streaming private stdin.
+  // codeql[js/shell-command-injection-from-environment]
+  return spawn(invocation.executable, invocation.args, {
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+    env: invocation.env,
+    windowsHide: true,
+    stdio: ['pipe', captureChecker ? 'pipe' : 'inherit', 'inherit'],
+  });
+}
+
 function launch(specInput, options = {}) {
   const childRefusal = childLaunchRefusal(options);
   if (childRefusal) return childRefusal;
@@ -877,9 +888,7 @@ async function supervise(args) {
       const output = [];
       const captureChecker = spec.role === ROLES.CHECKER;
       const finish = (value) => { if (!settled) { settled = true; resolve({ code: value, output: Buffer.concat(output), outputExceeded }); } };
-      // The executable passed validation and argv is separate; spawn is required for streaming private stdin.
-      // codeql[js/shell-command-injection-from-environment]
-      const child = spawn(invocation.executable, invocation.args, { windowsVerbatimArguments: invocation.windowsVerbatimArguments, env: invocation.env, windowsHide: true, stdio: ['pipe', captureChecker ? 'pipe' : 'inherit', 'inherit'] });
+      const child = spawnValidatedClaude(invocation, captureChecker);
       if (captureChecker) {
         child.stdout.on('data', (chunk) => {
           outputBytes += chunk.length;
