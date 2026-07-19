@@ -182,5 +182,6 @@ test('checker execution clears failures and completes only validated structured 
   assert.equal(passed.state.checker_reviews[0].status, 'completed');
   assert.equal(passed.state.checker_reviews[0].result, control.CHECKER_RESULTS.PASS);
   assert.equal(passed.state.checker_reviews[0].findings_count, 0);
+  assert.equal(passed.error, '');
   assert.equal(control.checkerResultFromClaudeOutput(passed.output).status, control.CHECKER_RESULTS.PASS);
 });
