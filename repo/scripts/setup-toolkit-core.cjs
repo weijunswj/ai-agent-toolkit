@@ -936,6 +936,27 @@ function selectedHelperCount(args, current) {
   return null;
 }
 
+function needsPipedCodexProposalApproval(args, current) {
+  if (args.host !== 'codex' || args.approveCodexConfigProposal) return false;
+  const choice = args.setupChoices.codexHelperCapacity;
+  if (!['one-helper', 'root-only', 'custom', 'migrate', 'remove'].includes(choice)) return false;
+  const helperCount = selectedHelperCount(args, current);
+  if (choice === 'custom' && !Number.isSafeInteger(helperCount)) return false;
+  const previewOptions = {
+    runtime: current.runtime.runtime,
+    setupScriptPath: path.resolve(__dirname, 'setup-toolkit.cjs'),
+  };
+  const preview = choice === 'remove'
+    ? delegation.previewCodexDelegationRemoval(current.delegation.config_path || delegation.codexConfigPath(), previewOptions)
+    : delegation.previewCodexDelegation(current.delegation.config_path || delegation.codexConfigPath(), {
+        ...previewOptions,
+        helperCount,
+        allowUserOwnedReplacement: true,
+      });
+  return preview.selected_outcome_matches !== true
+    && ['preview', 'removal-preview'].includes(preview.status)
+    && preview.requires_user_confirmation === true;
+}
 async function confirmSelectedDelegationProposal(args, current, questionBank) {
   const assertQuestionBankConsumed = () => {
     if (questionBank.remaining_input.length) throw new Error('Setup question bank received unexpected extra non-empty input.');
@@ -1953,7 +1974,8 @@ async function answerSetupQuestionBank(args, current) {
     && (args.codexHelperCount === null || (args.codexHelperCount > 1 && !args.approveHighHelperCapacity));
   const needsClaudeManualDetails = args.setupChoices.claudeAgentCapacity === 'manual' && args.claudeManualMaximum === null;
   const needsPromptedAnswers = missing.length > 0 || needsCustomPath || needsHelperDetails || needsClaudeManualDetails;
-  const lines = needsPromptedAnswers && !process.stdin.isTTY ? fs.readFileSync(0, 'utf8').split(/\r?\n/) : null;
+  const needsCodexProposalInput = !process.stdin.isTTY && needsPipedCodexProposalApproval(args, current);
+  const lines = (needsPromptedAnswers || needsCodexProposalInput) && !process.stdin.isTTY ? fs.readFileSync(0, 'utf8').split(/\r?\n/) : null;
 
   // Complete full piped banks before displaying them so every row reports its
   // actual selection. Partial/empty input still prints the bank before pausing.

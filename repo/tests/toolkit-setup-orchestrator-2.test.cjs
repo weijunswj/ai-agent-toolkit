@@ -22,6 +22,23 @@ test('ordinary setup automatically selects the root-only safety outcome without 
   assert.match(fs.readFileSync(codexConfig(root), 'utf8'), /max_concurrent_threads_per_session = 1/);
 });
 
+test('auto-selected Codex capacity consumes a piped technical approval when unrelated user config must be preserved', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const configPath = codexConfig(root);
+  const original = 'model = "gpt-5.6"\n';
+  writeFile(configPath, original);
+  const result = run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--yes-recommended', '--skip-codex-plugin-auto-refresh'], {
+    env: isolatedHomeEnv(root),
+    input: 'apply\n',
+    timeout: 300000,
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const configured = fs.readFileSync(configPath, 'utf8');
+  assert.ok(configured.startsWith(original));
+  assert.match(configured, /max_concurrent_threads_per_session = 1/);
+  assert.match(result.stdout, /Configuration changed this run: yes/);
+});
 test('ordinary setup preserves conflicting user-owned Codex state instead of defaulting it to root-only', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);

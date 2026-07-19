@@ -24,6 +24,9 @@ function context(overrides = {}) {
 function options(host, work, overrides = {}) {
   return { host, root: work, enforcementVerified: true, adapter: `toolkit-controlled-${host}`,
     resourceState: resources(), ...overrides };
+}function decision(spec, launchOptions) {
+  const profile = launchOptions.profile || { capacity_mode: control.CAPACITY_MODES.AUTO, manual_maximum: 0, worker_estimate_bytes: control.DEFAULT_WORKER_COST };
+  return control.resourceAdmissionDecision(spec, profile, launchOptions.resourceState, launchOptions);
 }
 
 test('deterministic checker trigger requires meaningful code and skips only proven trivial docs', () => {
@@ -33,6 +36,9 @@ test('deterministic checker trigger requires meaningful code and skips only prov
   assert.equal(trivial.result, control.CHECKER_RESULTS.SKIPPED_TRIVIAL);
   assert.equal(control.checkerRequirement(ready({ changed_files: ['skills/example/SKILL.md'], change_kind: 'typo-only-docs' })).required, true);
   assert.equal(control.checkerRequirement(ready({ changed_files: ['repo/scripts/setup.cjs'], change_kind: 'mechanical-comment-only' })).required, true);
+  assert.equal(control.checkerRequirement(ready({ changed_files: ['src/runtime.js'], change_kind: 'generated-only-authoritative-validated', authoritative_source_independently_validated: true })).required, true);
+  const generated = control.checkerRequirement(ready({ changed_files: ['skills/example/SKILL.md'], change_kind: 'generated-only-authoritative-validated', authoritative_source_independently_validated: true }));
+  assert.equal(generated.result, control.CHECKER_RESULTS.SKIPPED_TRIVIAL);
 });
 
 test('checker context is bounded and contains only the review contract', () => {
@@ -81,56 +87,70 @@ test('checker contract is direct, read-only, non-fast, non-recursive, and host-m
   }
 });
 
-test('Codex and OpenCode adapters use canonical admission and deny unverified bypasses', () => {
+test('Codex and OpenCode production paths remain root-only without a native launch interceptor', () => {
   for (const host of [control.HOSTS.CODEX, control.HOSTS.OPENCODE]) {
     const spec = control.checkerLaunchSpec(host, context(), { review_id: `verified-${host}` });
-    assert.equal(control.admissionDecision(spec, options(host, root())).result, control.RESULTS.START);
-    assert.equal(control.admissionDecision(spec, { ...options(host, root()), enforcementVerified: false }).result, control.RESULTS.REFUSE);
+    const claimed = control.admissionDecision(spec, options(host, root()));
+    assert.equal(claimed.result, control.RESULTS.REFUSE);
+    assert.match(claimed.reason, /no production.*interceptor|root-only/i);
     assert.equal(control.admissionDecision(spec, { ...options(host, root()), adapter: 'bypass' }).result, control.RESULTS.REFUSE);
     assert.equal(control.admissionDecision(spec, { ...options(host === control.HOSTS.CODEX ? control.HOSTS.OPENCODE : control.HOSTS.CODEX, root()) }).result, control.RESULTS.REFUSE);
-    assert.equal(control.admissionDecision(spec, options(host, root(), { profile: { capacity_mode: control.CAPACITY_MODES.ROOT_ONLY, manual_maximum: 0 } })).result, control.RESULTS.REFUSE);
+    assert.equal(decision(spec, options(host, root(), { profile: { capacity_mode: control.CAPACITY_MODES.ROOT_ONLY, manual_maximum: 0 } })).result, control.RESULTS.REFUSE);
   }
 });
 
 test('exactly one checker reserves memory and completion releases it', () => {
   const work = root();
-  const first = control.admissionDecision(control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'one' }), options(control.HOSTS.CODEX, work));
+  const first = decision(control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'one' }), options(control.HOSTS.CODEX, work));
   assert.equal(first.result, control.RESULTS.START);
-  const second = control.admissionDecision(control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'two' }), options(control.HOSTS.CODEX, work));
+  const second = decision(control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'two' }), options(control.HOSTS.CODEX, work));
   assert.equal(second.result, control.RESULTS.REFUSE);
   assert.match(second.reason, /exactly one/i);
   assert.equal(control.releaseReservation(first.reservation_id, { root: work }), true);
   assert.equal(JSON.parse(fs.readFileSync(control.statePath({ root: work }), 'utf8')).reservations.length, 0);
-  const repeated = control.admissionDecision(control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'one' }), options(control.HOSTS.CODEX, work));
+  const repeated = decision(control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'one' }), options(control.HOSTS.CODEX, work));
   assert.equal(repeated.result, control.RESULTS.REFUSE);
   assert.match(repeated.reason, /already admitted/i);
-  const nextReview = control.admissionDecision(control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'three' }), options(control.HOSTS.CODEX, work));
+  const nextReview = decision(control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'three' }), options(control.HOSTS.CODEX, work));
   assert.equal(nextReview.result, control.RESULTS.START);
 });
 
 test('memory remains the hard gate and CPU cannot override it', () => {
   const spec = control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'memory' });
   const deniedRoot = root();
-  const denied = control.admissionDecision(spec, options(control.HOSTS.CODEX, deniedRoot, {
+  const denied = decision(spec, options(control.HOSTS.CODEX, deniedRoot, {
     resourceState: resources({ physical_available: control.GIB, commit_available: control.GIB, cpu_idle_percent: 100 }),
   }));
   assert.equal(denied.result, control.RESULTS.REFUSE);
   assert.match(denied.reason, /memory/i);
   assert.equal(fs.existsSync(control.statePath({ root: deniedRoot })), false);
-  const unknown = control.admissionDecision(spec, options(control.HOSTS.CODEX, root(), { resourceState: null }));
+  const unknown = decision(spec, options(control.HOSTS.CODEX, root(), { resourceState: null }));
   assert.equal(unknown.result, control.RESULTS.REFUSE);
-  const unresponsive = control.admissionDecision(spec, options(control.HOSTS.CODEX, root(), { resourceState: resources({ host_responsive: false }) }));
+  const unresponsive = decision(spec, options(control.HOSTS.CODEX, root(), { resourceState: resources({ host_responsive: false }) }));
   assert.equal(unresponsive.result, control.RESULTS.REFUSE);
 });
 
 test('existing reservations reduce headroom and concurrent admissions cannot overbook', async () => {
   const work = root();
   const expensive = control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'expensive', estimated_memory_bytes: 7 * control.GIB });
-  assert.equal(control.admissionDecision(expensive, options(control.HOSTS.CODEX, work)).result, control.RESULTS.START);
+  assert.equal(decision(expensive, options(control.HOSTS.CODEX, work)).result, control.RESULTS.START);
   const worker = { ...expensive, role: control.ROLES.WORKER, review_id: undefined };
-  assert.equal(control.admissionDecision(worker, options(control.HOSTS.CODEX, work)).result, control.RESULTS.QUEUE);
+  assert.equal(decision(worker, options(control.HOSTS.CODEX, work)).result, control.RESULTS.QUEUE);
 });
 
+test('queue tickets are bound to the original host and child role', () => {
+  const work = root();
+  const checker = control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'queue-worker' });
+  const worker = { ...checker, role: control.ROLES.WORKER, model: control.MODEL_CONTRACT[control.HOSTS.CODEX].worker, review_id: undefined };
+  const pressured = options(control.HOSTS.CODEX, work, { resourceState: resources({ physical_available: 9 * control.GIB }) });
+  const queued = decision(worker, pressured);
+  assert.equal(queued.result, control.RESULTS.QUEUE);
+  const wrongHost = { ...worker, host: control.HOSTS.OPENCODE, model: control.MODEL_CONTRACT[control.HOSTS.OPENCODE].worker, queue_id: queued.queue_id };
+  assert.equal(decision(wrongHost, options(control.HOSTS.OPENCODE, work)).result, control.RESULTS.REFUSE);
+  const wrongRole = control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'queue-checker', queue_id: queued.queue_id });
+  assert.equal(decision(wrongRole, options(control.HOSTS.CODEX, work)).result, control.RESULTS.REFUSE);
+  assert.equal(decision({ ...worker, queue_id: queued.queue_id }, options(control.HOSTS.CODEX, work)).result, control.RESULTS.START);
+});
 test('checker results distinguish pass, findings, and admission-denied self-review fallback', () => {
   assert.equal(control.checkerResult(control.CHECKER_RESULTS.PASS).status, 'PASS');
   const findings = control.checkerResult(control.CHECKER_RESULTS.FINDINGS, { findings: [{ file: 'x.cjs', evidence: 'branch fails closed incorrectly' }] });
@@ -148,8 +168,8 @@ test('manual limits can further restrict but never weaken hard memory admission'
   const spec = control.checkerLaunchSpec(host, context(), { review_id: 'manual' });
   const restrictive = { capacity_mode: control.CAPACITY_MODES.MANUAL, manual_maximum: 1, worker_estimate_bytes: control.DEFAULT_WORKER_COST };
   const work = root();
-  assert.equal(control.admissionDecision(spec, options(host, work, { profile: restrictive })).result, control.RESULTS.START);
+  assert.equal(decision(spec, options(host, work, { profile: restrictive })).result, control.RESULTS.START);
   const another = { ...spec, role: control.ROLES.WORKER, review_id: undefined };
-  assert.equal(control.admissionDecision(another, options(host, work, { profile: restrictive })).result, control.RESULTS.QUEUE);
-  assert.equal(control.admissionDecision(spec, options(host, root(), { profile: restrictive, resourceState: resources({ physical_available: control.GIB, commit_available: control.GIB }) })).result, control.RESULTS.REFUSE);
+  assert.equal(decision(another, options(host, work, { profile: restrictive })).result, control.RESULTS.QUEUE);
+  assert.equal(decision(spec, options(host, root(), { profile: restrictive, resourceState: resources({ physical_available: control.GIB, commit_available: control.GIB }) })).result, control.RESULTS.REFUSE);
 });

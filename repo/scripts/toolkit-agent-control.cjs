@@ -223,7 +223,7 @@ function validReservation(entry) {
 
 function validQueueEntry(entry) {
   return Boolean(entry && typeof entry === 'object' && typeof entry.id === 'string' && entry.id.length > 0
-    && Object.values(HOSTS).includes(entry.host) && entry.status === RESULTS.QUEUE
+    && Object.values(HOSTS).includes(entry.host) && (entry.role === undefined || Object.values(ROLES).includes(entry.role)) && entry.status === RESULTS.QUEUE
     && Number.isSafeInteger(entry.created_at_ms) && Number.isSafeInteger(entry.expires_at_ms)
     && entry.created_at_ms > 0 && entry.expires_at_ms >= entry.created_at_ms);
 }
@@ -442,6 +442,7 @@ function inspectResourceCapability(options = {}) {
 
 
 const TRIVIAL_CHANGE_KINDS = new Set(['typo-only-docs', 'mechanical-comment-only', 'generated-only-authoritative-validated']);
+const GENERATED_ONLY_PREFIXES = ['skills/', '.codex-plugin/', '.claude-plugin/'];
 const PACKAGED_OR_RUNTIME_PREFIXES = [
   'repo/scripts/', 'repo/tests/', '_projects/', 'skills/', '.codex-plugin/', '.claude-plugin/',
   '.agents/', 'AGENTS.md', 'CLAUDE.md', 'GEMINI.md', 'package.json', 'package-lock.json',
@@ -456,10 +457,13 @@ function checkerRequirement(input = {}) {
   const highRisk = files.some((file) => PACKAGED_OR_RUNTIME_PREFIXES.some((prefix) => file === prefix || file.startsWith(prefix)));
   const trivialKind = String(input.change_kind || '');
   const docsOnly = files.every((file) => /\.(?:md|txt)$/i.test(file));
-  const generatedOnly = trivialKind === 'generated-only-authoritative-validated' && input.authoritative_source_independently_validated === true;
-  const permittedTrivial = TRIVIAL_CHANGE_KINDS.has(trivialKind) && (docsOnly || generatedOnly) && !highRisk;
+  const generatedOnly = trivialKind === 'generated-only-authoritative-validated'
+    && input.authoritative_source_independently_validated === true
+    && files.every((file) => GENERATED_ONLY_PREFIXES.some((prefix) => file.startsWith(prefix)));
+  const docsTrivial = ['typo-only-docs', 'mechanical-comment-only'].includes(trivialKind) && docsOnly && !highRisk;
+  const permittedTrivial = TRIVIAL_CHANGE_KINDS.has(trivialKind) && (docsTrivial || generatedOnly);
   return permittedTrivial
-    ? { required: false, ready: true, result: CHECKER_RESULTS.SKIPPED_TRIVIAL, reason: 'The deterministic trivial-change classifier matched and no packaged or runtime surface changed.' }
+    ? { required: false, ready: true, result: CHECKER_RESULTS.SKIPPED_TRIVIAL, reason: 'The deterministic trivial-change classifier matched a verified docs-only or declared generated-only contract.' }
     : { required: true, ready: true, reason: highRisk ? 'Packaged or runtime behavior requires independent pre-PR checking.' : 'Meaningful code-changing work requires independent pre-PR checking.' };
 }
 
@@ -579,12 +583,25 @@ function admissionDecision(specInput, options = {}) {
       || profile.controller_version !== CONTROL_VERSION || profile.topology !== TOPOLOGIES.CLAUDE_DIRECT
       || ![CAPACITY_MODES.AUTO, CAPACITY_MODES.MANUAL].includes(profile.capacity_mode)) return refusal('The selected Claude profile is root-only, stale, unsupported, or outside the verified Toolkit launch boundary.');
     if (!verifyCurrentClaudeEnforcement(profile, options)) return refusal('Current Claude plugin trust, hook activation, and installed enforcement identity could not be verified.');
-  } else if (options.enforcementVerified !== true || options.adapter !== `toolkit-controlled-${host}`) {
-    return refusal('The native host path did not prove the canonical Toolkit launch boundary.');
+  } else {
+    return refusal('No production Toolkit launch interceptor is installed for this host; native child launches remain root-only.');
   }
   const resources = inspectResources(options);
   if (!validResourceState(resources)) return refusal('Resource state could not be verified safely.');
+  return resourceAdmissionDecisionValidated(spec, profile, resources, options);
+}
 
+function resourceAdmissionDecision(specInput, profile, resources, options = {}) {
+  let spec;
+  try { spec = validateLaunchSpec(specInput); }
+  catch (error) { return refusal(error.message); }
+  if (!profile || profile.capacity_mode === CAPACITY_MODES.ROOT_ONLY) return refusal('The selected host profile is root-only and cannot admit a child.');
+  if (!validResourceState(resources)) return refusal('Resource state could not be verified safely.');
+  return resourceAdmissionDecisionValidated(spec, profile, resources, options);
+}
+
+function resourceAdmissionDecisionValidated(spec, profile, resources, options) {
+  const host = spec.host;
   return withLock(options, () => {
     const now = options.now || Date.now();
     const stateFile = statePath(options);
@@ -612,13 +629,14 @@ function admissionDecision(specInput, options = {}) {
     if (critical) return refusal('Current memory pressure is unsafe for another worker.');
     const queuedReservation = spec.queue_id ? state.queue.find((entry) => entry.id === spec.queue_id) : null;
     if (spec.queue_id && !queuedReservation) return refusal('The queue entry is missing or expired.');
+    if (queuedReservation && (queuedReservation.host !== host || queuedReservation.role !== spec.role)) return refusal('The queue entry belongs to a different host or child role.');
     if (state.queue.length && state.queue[0].id !== spec.queue_id) {
       if (spec.role === ROLES.CHECKER) return refusal('The required checker could not be admitted immediately.');
       if (queuedReservation) {
         return { result: RESULTS.QUEUE, queue_id: queuedReservation.id, expires_at_ms: queuedReservation.expires_at_ms, reason: 'An earlier bounded queue entry is still waiting.', safe_action: 'Continue productive root work and retry before the queue entry expires.' };
       }
       if (state.queue.length >= MAX_QUEUE) return refusal('The bounded worker queue is full.');
-      const queued = { id: crypto.randomUUID(), host, created_at_ms: now, expires_at_ms: now + QUEUE_TTL_MS, status: RESULTS.QUEUE };
+      const queued = { id: crypto.randomUUID(), host, role: spec.role, created_at_ms: now, expires_at_ms: now + QUEUE_TTL_MS, status: RESULTS.QUEUE };
       state.queue.push(queued);
       atomicWriteJson(statePath(options), state);
       return { result: RESULTS.QUEUE, queue_id: queued.id, expires_at_ms: queued.expires_at_ms, reason: 'Earlier Toolkit-controlled work is queued.', safe_action: 'Continue productive root work and retry before the queue entry expires.' };
@@ -630,7 +648,7 @@ function admissionDecision(specInput, options = {}) {
         return { result: RESULTS.QUEUE, queue_id: queuedReservation.id, expires_at_ms: queuedReservation.expires_at_ms, reason: 'Verified capacity is temporarily unavailable.', safe_action: 'Continue productive root work and retry before the queue entry expires.' };
       }
       if (state.queue.length >= MAX_QUEUE) return refusal('The bounded worker queue is full.');
-      const queued = { id: crypto.randomUUID(), host, created_at_ms: now, expires_at_ms: now + QUEUE_TTL_MS, status: RESULTS.QUEUE };
+      const queued = { id: crypto.randomUUID(), host, role: spec.role, created_at_ms: now, expires_at_ms: now + QUEUE_TTL_MS, status: RESULTS.QUEUE };
       state.queue.push(queued);
       atomicWriteJson(statePath(options), state);
       return { result: RESULTS.QUEUE, queue_id: queued.id, expires_at_ms: queued.expires_at_ms, reason: 'Verified capacity is temporarily unavailable.', safe_action: 'Continue productive root work and retry before the queue entry expires.' };
@@ -810,5 +828,5 @@ if (require.main === module) main().then((code) => { process.exitCode = code; })
 module.exports = {
   SCHEMA, CONTROL_VERSION, RESULTS, CHECKER_RESULTS, HOSTS, ROLES, MODEL_CONTRACT, CHECKER_CONTEXT_LIMITS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES, LOCK_TTL_MS,
   controlRoot, profilePath, statePath, lockPath, lockRecoveryPath, readProfile, configureProfile, invalidateProfile, validateLaunchSpec, inspectResources, inspectResourceCapability, validResourceState, validActivationProof, verifyCurrentClaudeEnforcement, effectiveEnvironment, effectiveClaudeCommand, acquireLock, recoverStaleRecoveryMarker,
-  checkerRequirement, checkerContext, checkerLaunchSpec, checkerResult, checkerAdmissionOutcome, admissionDecision, updateReservation, releaseReservation, claudeInvocationArgs, claudeInvocation, launch, recoverState, pidAlive,
+  checkerRequirement, checkerContext, checkerLaunchSpec, checkerResult, checkerAdmissionOutcome, admissionDecision, resourceAdmissionDecision, updateReservation, releaseReservation, claudeInvocationArgs, claudeInvocation, launch, recoverState, pidAlive,
 };
