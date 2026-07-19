@@ -5259,7 +5259,8 @@ test('bridge docs document cache-first setup and release branch auto-update boun
   assert.match(text, /does not run a GitHub webhook listener or background push daemon/i);
   assert.match(text, /New bridges never use `hub_version` for downgrade enforcement/i);
   assert.match(text, /old Claude Code cache still uses the legacy global `hub_version` guard/i);
-  assert.match(text, /selects only the single installed and enabled `n8n-skills@n8n-io` version reported by Codex/i);
+  assert.match(text, /selects only the single installed and enabled `n8n-skills@n8n-io` version positively reported by Codex, or the one exact cache candidate backed by explicit config enablement/i);
+  assert.match(text, /never guesses by directory or version ordering/i);
   assert.match(text, /unknown or malformed layouts fail closed/i);
   assert.doesNotMatch(text, /automatic repair path is generic for third-party/i);
   assert.doesNotMatch(text, /opt-in also permits repair of unsafe hook launchers in installed third-party/i);
