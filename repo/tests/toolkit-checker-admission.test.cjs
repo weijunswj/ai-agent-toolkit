@@ -111,9 +111,11 @@ test('exactly one checker reserves memory and completion releases it', () => {
   const second = decision(control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'two' }), options(control.HOSTS.CODEX, work));
   assert.equal(second.result, control.RESULTS.REFUSE);
   assert.match(second.reason, /exactly one/i);
-  assert.equal(control.updateCheckerReview('one', 'completed', { root: work }), true);
+  assert.equal(control.updateCheckerReview('one', 'completed', { root: work, checker_result: control.checkerResult(control.CHECKER_RESULTS.PASS) }), true);
   assert.equal(control.releaseReservation(first.reservation_id, { root: work }), true);
-  assert.equal(JSON.parse(fs.readFileSync(control.statePath({ root: work }), 'utf8')).reservations.length, 0);
+  const completedState = JSON.parse(fs.readFileSync(control.statePath({ root: work }), 'utf8'));
+  assert.equal(completedState.reservations.length, 0);
+  assert.equal(completedState.checker_reviews[0].result, control.CHECKER_RESULTS.PASS);
   const repeated = decision(control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'one' }), options(control.HOSTS.CODEX, work));
   assert.equal(repeated.result, control.RESULTS.REFUSE);
   assert.match(repeated.reason, /already admitted/i);
@@ -130,6 +132,24 @@ test('failed checker launch clears only pending review identity so the required 
   assert.equal(control.releaseReservation(admitted.reservation_id, { root: work }), true);
   assert.equal(decision(spec, options(control.HOSTS.CODEX, work)).result, control.RESULTS.START);
 });
+test('stale reservation recovery reclaims only its orphaned pending checker identity', () => {
+  const work = root();
+  const spec = control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'orphaned-pending' });
+  const admitted = decision(spec, options(control.HOSTS.CODEX, work));
+  assert.equal(admitted.result, control.RESULTS.START);
+  const raw = JSON.parse(fs.readFileSync(control.statePath({ root: work }), 'utf8'));
+  raw.reservations[0].expires_at_ms = 1;
+  raw.checker_reviews[0].expires_at_ms = Date.now() + 60_000;
+  const expiredReserved = control.recoverState(structuredClone(raw), Date.now());
+  assert.equal(expiredReserved.reservations.length, 0);
+  assert.equal(expiredReserved.checker_reviews.length, 0);
+  raw.reservations[0].status = 'running';
+  raw.reservations[0].owner_pid = 99999999;
+  const deadRunning = control.recoverState(raw, Date.now());
+  assert.equal(deadRunning.reservations.length, 0);
+  assert.equal(deadRunning.checker_reviews.length, 0);
+});
+
 test('memory remains the hard gate and CPU cannot override it', () => {
   const spec = control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'memory' });
   const deniedRoot = root();
@@ -170,6 +190,12 @@ test('checker results distinguish pass, findings, and admission-denied self-revi
   assert.equal(control.checkerResult(control.CHECKER_RESULTS.PASS).status, 'PASS');
   const findings = control.checkerResult(control.CHECKER_RESULTS.FINDINGS, { findings: [{ file: 'x.cjs', evidence: 'branch fails closed incorrectly' }] });
   assert.equal(findings.findings.length, 1);
+  const passEnvelope = JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify({ status: 'PASS', findings: [] }) });
+  assert.equal(control.checkerResultFromClaudeOutput(passEnvelope).status, control.CHECKER_RESULTS.PASS);
+  const findingsEnvelope = JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: JSON.stringify({ status: 'FINDINGS', findings: [{ file: 'x.cjs', evidence: 'bounded actionable evidence' }] }) });
+  assert.equal(control.checkerResultFromClaudeOutput(findingsEnvelope).findings.length, 1);
+  assert.throws(() => control.checkerResultFromClaudeOutput('{}'), /envelope/i);
+  assert.throws(() => control.checkerResultFromClaudeOutput(JSON.stringify({ type: 'result', result: '{}' })), /PASS or FINDINGS/i);
   assert.throws(() => control.checkerResult(control.CHECKER_RESULTS.PASS, { findings: [{}] }), /PASS/);
   assert.throws(() => control.checkerAdmissionOutcome({ result: control.RESULTS.REFUSE }), /self-review/i);
   const denied = control.checkerAdmissionOutcome({ result: control.RESULTS.REFUSE }, { root_self_review_performed: true });

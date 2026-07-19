@@ -34,6 +34,7 @@ const MIN_WORKER_COST = GIB;
 const MAX_WORKER_COST = 16 * GIB;
 const MAX_MANUAL_WORKERS = 64;
 const MAX_PROMPT_BYTES = 1024 * 1024;
+const MAX_CHECKER_OUTPUT_BYTES = 256 * 1024;
 
 function controlRoot(options = {}) {
   return path.resolve(options.root || process.env.AI_AGENT_TOOLKIT_CONTROL_ROOT || path.join(os.homedir(), '.ai-agent-toolkit', 'agent-control'));
@@ -233,7 +234,11 @@ function validCheckerReview(entry) {
     && typeof entry.review_id === 'string' && entry.review_id.trim().length > 0
     && Number.isSafeInteger(entry.admitted_at_ms) && entry.admitted_at_ms > 0
     && Number.isSafeInteger(entry.expires_at_ms) && entry.expires_at_ms >= entry.admitted_at_ms
-    && (entry.status === undefined || ['pending', 'completed'].includes(entry.status)));
+    && (entry.status === undefined || ['pending', 'completed'].includes(entry.status))
+    && (entry.reservation_id === undefined || (typeof entry.reservation_id === 'string' && entry.reservation_id.length > 0))
+    && (entry.result === undefined || [CHECKER_RESULTS.PASS, CHECKER_RESULTS.FINDINGS].includes(entry.result))
+    && (entry.findings_count === undefined || (Number.isSafeInteger(entry.findings_count) && entry.findings_count >= 0))
+    && (entry.status !== 'pending' || (entry.result === undefined && entry.findings_count === undefined)));
 }
 
 function validControlState(raw) {
@@ -268,10 +273,14 @@ function readMutableControlState(options = {}) {
 function recoverState(state, now = Date.now()) {
   state.reservations = state.reservations.filter((entry) => {
     const expired = Number.isFinite(entry.expires_at_ms) && entry.expires_at_ms <= now;
-    return !(expired && !pidAlive(entry.owner_pid));
+    return !(expired && (entry.status === 'reserved' || !pidAlive(entry.owner_pid)));
   });
   state.queue = state.queue.filter((entry) => Number.isFinite(entry.expires_at_ms) && entry.expires_at_ms > now);
-  state.checker_reviews = (state.checker_reviews || []).filter((entry) => Number.isFinite(entry.expires_at_ms) && entry.expires_at_ms > now);
+  const activeReservationIds = new Set(state.reservations.map((entry) => entry.id));
+  state.checker_reviews = (state.checker_reviews || []).filter((entry) => {
+    if (!Number.isFinite(entry.expires_at_ms) || entry.expires_at_ms <= now) return false;
+    return entry.status !== 'pending' || (typeof entry.reservation_id === 'string' && activeReservationIds.has(entry.reservation_id));
+  });
   return state;
 }
 
@@ -504,6 +513,7 @@ function checkerLaunchSpec(host, context, overrides = {}) {
       statuses: [CHECKER_RESULTS.PASS, CHECKER_RESULTS.FINDINGS],
       pass: 'Return PASS only when no actionable finding remains.',
       findings: 'Return FINDINGS with bounded file and evidence details for every actionable defect.',
+      format: 'Return only one JSON object: {"status":"PASS","findings":[]} or {"status":"FINDINGS","findings":[{"file":"...","evidence":"..."}]}.',
     },
     context: boundedContext,
   });
@@ -529,6 +539,24 @@ function checkerResult(status, details = {}) {
   if (status === CHECKER_RESULTS.PASS && findings.length) throw new Error('PASS cannot contain findings.');
   if (status === CHECKER_RESULTS.ADMISSION_DENIED && details.root_self_review_performed !== true) throw new Error('ADMISSION_DENIED requires a recorded bounded root self-review.');
   return { status, findings, reason: String(details.reason || ''), root_self_review_performed: details.root_self_review_performed === true };
+}
+
+function checkerResultFromClaudeOutput(raw) {
+  const bytes = Buffer.isBuffer(raw) ? raw : Buffer.from(String(raw || ''), 'utf8');
+  if (!bytes.length || bytes.length > MAX_CHECKER_OUTPUT_BYTES) throw new Error('Checker output is empty or exceeds the bounded result limit.');
+  let envelope;
+  try { envelope = JSON.parse(bytes.toString('utf8')); }
+  catch { throw new Error('Checker output is not valid Claude JSON.'); }
+  if (!envelope || envelope.type !== 'result' || envelope.is_error === true || typeof envelope.result !== 'string') {
+    throw new Error('Checker output is not a successful Claude result envelope.');
+  }
+  let payload;
+  try { payload = JSON.parse(envelope.result); }
+  catch { throw new Error('Checker result payload is not valid JSON.'); }
+  if (!payload || typeof payload !== 'object' || ![CHECKER_RESULTS.PASS, CHECKER_RESULTS.FINDINGS].includes(payload.status)) {
+    throw new Error('Checker result payload must be PASS or FINDINGS.');
+  }
+  return checkerResult(payload.status, { findings: payload.findings, reason: payload.reason });
 }
 
 function checkerAdmissionOutcome(admission, details = {}) {
@@ -682,7 +710,7 @@ function resourceAdmissionDecisionValidated(spec, profile, resources, options) {
     };
     state.reservations.push(reservation);
     if (spec.role === ROLES.CHECKER) {
-      state.checker_reviews.push({ review_id: spec.review_id, admitted_at_ms: now, expires_at_ms: now + CHECKER_REVIEW_TTL_MS, status: 'pending' });
+      state.checker_reviews.push({ review_id: spec.review_id, reservation_id: reservation.id, admitted_at_ms: now, expires_at_ms: now + CHECKER_REVIEW_TTL_MS, status: 'pending' });
     }
     atomicWriteJson(statePath(options), state);
     return { result: RESULTS.START, reservation_id: reservation.id, expires_at_ms: reservation.expires_at_ms, profile: 'toolkit-controlled-direct', host, role: spec.role, model: MODEL_CONTRACT[host][spec.role], effort: spec.effort, non_fast: host === HOSTS.CLAUDE ? 'CLAUDE_CODE_DISABLE_FAST_MODE=1' : true, productive_parent: true };
@@ -713,6 +741,7 @@ function releaseReservation(id, options = {}) {
     const before = state.reservations.length;
     state.reservations = state.reservations.filter((entry) => entry.id !== id);
     if (state.reservations.length === before) return false;
+    state.checker_reviews = state.checker_reviews.filter((entry) => entry.status !== 'pending' || entry.reservation_id !== id);
     atomicWriteJson(statePath(options), state);
     return true;
   });
@@ -720,6 +749,14 @@ function releaseReservation(id, options = {}) {
 
 function updateCheckerReview(reviewId, status, options = {}) {
   if (!['pending', 'completed'].includes(status)) return false;
+  let outcome = null;
+  if (status === 'completed') {
+    try {
+      const candidate = options.checker_result || {};
+      if (![CHECKER_RESULTS.PASS, CHECKER_RESULTS.FINDINGS].includes(candidate.status)) return false;
+      outcome = checkerResult(candidate.status, { findings: candidate.findings, reason: candidate.reason });
+    } catch { return false; }
+  }
   return withLock(options, () => {
     const current = readMutableControlState(options);
     if (!current.exists || !current.state) return false;
@@ -727,6 +764,10 @@ function updateCheckerReview(reviewId, status, options = {}) {
     const entry = state.checker_reviews.find((item) => item.review_id === reviewId);
     if (!entry) return false;
     entry.status = status;
+    if (outcome) {
+      entry.result = outcome.status;
+      entry.findings_count = outcome.findings.length;
+    }
     if (!validControlState(state)) return false;
     atomicWriteJson(statePath(options), state);
     return true;
@@ -818,6 +859,7 @@ async function supervise(args) {
   const spec = readJson(args.spec);
   const options = { root: args.root };
   let code = 1;
+  let checkerOutcome = null;
   try {
     const encoded = String(spec?.child_prompt_base64 || '');
     const promptBytes = Buffer.from(encoded, 'base64');
@@ -826,20 +868,43 @@ async function supervise(args) {
     if (!updateReservation(args.reservation, { owner_pid: process.pid, status: 'running' }, options)) {
       throw new Error('Toolkit reservation state could not be verified before worker execution.');
     }
-    code = await new Promise((resolve) => {
+    const childResult = await new Promise((resolve) => {
       let settled = false;
-      const finish = (value) => { if (!settled) { settled = true; resolve(value); } };
+      let outputBytes = 0;
+      let outputExceeded = false;
+      const output = [];
+      const captureChecker = spec.role === ROLES.CHECKER;
+      const finish = (value) => { if (!settled) { settled = true; resolve({ code: value, output: Buffer.concat(output), outputExceeded }); } };
       // The executable passed validation and argv is separate; spawn is required for streaming private stdin.
       // lgtm[js/shell-command-injection-from-environment]
-      const child = spawn(invocation.executable, invocation.args, { windowsVerbatimArguments: invocation.windowsVerbatimArguments, env: invocation.env, windowsHide: true, stdio: ['pipe', 'inherit', 'inherit'] });
+      const child = spawn(invocation.executable, invocation.args, { windowsVerbatimArguments: invocation.windowsVerbatimArguments, env: invocation.env, windowsHide: true, stdio: ['pipe', captureChecker ? 'pipe' : 'inherit', 'inherit'] });
+      if (captureChecker) {
+        child.stdout.on('data', (chunk) => {
+          outputBytes += chunk.length;
+          if (outputBytes > MAX_CHECKER_OUTPUT_BYTES) {
+            outputExceeded = true;
+            child.kill();
+            return;
+          }
+          output.push(chunk);
+          process.stdout.write(chunk);
+        });
+      }
       child.on('error', () => finish(1));
-      child.on('exit', (value) => finish(Number.isInteger(value) ? value : 1));
-      child.stdin.on('error', () => { child.kill(); finish(1); });
+      child.on('close', (value) => finish(outputExceeded ? 1 : (Number.isInteger(value) ? value : 1)));
+      child.stdin.on('error', () => { child.kill(); });
       child.stdin.end(invocation.stdin);
     });
+    code = childResult.code;
+    if (spec.role === ROLES.CHECKER && code === 0) {
+      try { checkerOutcome = checkerResultFromClaudeOutput(childResult.output); }
+      catch (error) { console.error(error.message); code = 1; }
+    } else if (spec.role === ROLES.CHECKER && childResult.outputExceeded) {
+      console.error('Checker output exceeds the bounded result limit.');
+    }
   } finally {
     if (spec?.role === ROLES.CHECKER) {
-      if (code === 0 && !updateCheckerReview(spec.review_id, 'completed', options)) code = 1;
+      if (code === 0 && !updateCheckerReview(spec.review_id, 'completed', { ...options, checker_result: checkerOutcome })) code = 1;
       if (code !== 0) clearPendingCheckerReview(spec.review_id, options);
     }
     releaseReservation(args.reservation, options);
@@ -878,7 +943,7 @@ async function main(argv = process.argv.slice(2)) {
 if (require.main === module) main().then((code) => { process.exitCode = code; }).catch((error) => { console.error(`FAIL: ${error.message}`); process.exitCode = 1; });
 
 module.exports = {
-  SCHEMA, CONTROL_VERSION, RESULTS, CHECKER_RESULTS, HOSTS, ROLES, MODEL_CONTRACT, CHECKER_CONTEXT_LIMITS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES, LOCK_TTL_MS,
+  SCHEMA, CONTROL_VERSION, RESULTS, CHECKER_RESULTS, HOSTS, ROLES, MODEL_CONTRACT, CHECKER_CONTEXT_LIMITS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES, MAX_CHECKER_OUTPUT_BYTES, LOCK_TTL_MS,
   controlRoot, profilePath, statePath, lockPath, lockRecoveryPath, readProfile, configureProfile, invalidateProfile, validateLaunchSpec, inspectResources, inspectResourceCapability, validResourceState, validActivationProof, verifyCurrentClaudeEnforcement, effectiveEnvironment, effectiveClaudeCommand, acquireLock, recoverStaleRecoveryMarker,
-  checkerRequirement, checkerContext, checkerLaunchSpec, checkerResult, checkerAdmissionOutcome, admissionDecision, resourceAdmissionDecision, updateReservation, releaseReservation, updateCheckerReview, clearPendingCheckerReview, claudeInvocationArgs, claudeInvocation, launch, recoverState, pidAlive,
+  checkerRequirement, checkerContext, checkerLaunchSpec, checkerResult, checkerResultFromClaudeOutput, checkerAdmissionOutcome, admissionDecision, resourceAdmissionDecision, updateReservation, releaseReservation, updateCheckerReview, clearPendingCheckerReview, claudeInvocationArgs, claudeInvocation, launch, recoverState, pidAlive,
 };

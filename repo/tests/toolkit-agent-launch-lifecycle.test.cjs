@@ -97,7 +97,7 @@ test('detached Claude supervisor forces medium non-fast invocation and releases 
   if (process.platform !== 'win32') assert.equal(fs.statSync(result.error_path).mode & 0o777, 0o600);
 });
 
-test('failed checker execution releases its reservation and pending review identity', async () => {
+test('checker execution clears failures and completes only validated structured results', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-agent-lifecycle-missing-env-'));
   const cache = path.join(root, 'cache');
   const sourceRoot = path.resolve(__dirname, '..', '..');
@@ -114,11 +114,11 @@ test('failed checker execution releases its reservation and pending review ident
     "if (process.argv[2] === '--version') { process.stdout.write('claude fake\\n'); process.exit(0); }",
     "if (process.argv[2] === 'plugin' && process.argv[3] === 'list') { process.stdout.write(JSON.stringify({ installed: [pluginEntry] }) + '\\n'); process.exit(0); }",
     "if (process.env.REQUIRED_CHILD_CONFIG !== 'present') { console.error('missing required child config'); process.exit(7); }",
-    "process.stdout.write('{}');",
+    "if (process.env.CHECKER_RESULT) { process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: process.env.CHECKER_RESULT })); } else { process.stdout.write('{}'); }",
     '',
   ].join('\n'));
   const activationProof = pluginSetup.installedActivationProof(pluginEntry, control.CONTROL_VERSION);
-  const result = control.launch({
+  const checkerSpec = {
     role: control.ROLES.CHECKER,
     host: control.HOSTS.CLAUDE,
     model: control.MODEL_CONTRACT[control.HOSTS.CLAUDE].checker,
@@ -131,36 +131,56 @@ test('failed checker execution releases its reservation and pending review ident
     may_open_pr: false,
     may_merge_pr: false,
     may_spawn_children: false,
-    review_id: 'failed-checker-lifecycle',
-    child_responsibility: 'Implement the isolated parser shard and focused unit coverage.',
-    parent_responsibility: 'Review the integration interface and reconcile adjacent contracts.',
+    child_responsibility: 'Adversarially review the isolated parser shard and focused unit coverage.',
+    parent_responsibility: 'Review the checker evidence and reconcile adjacent contracts.',
     integration_plan: 'The root owns interface reconciliation and final integration judgement.',
     validation_plan: 'The root runs cross-shard validation and reviews the final combined diff.',
-    material_benefit: 'The isolated parser work is independent and improves implementation quality.',
+    material_benefit: 'The bounded independent review can catch semantic implementation defects.',
     child_prompt: 'private prompt remains on stdin',
-  }, {
+  };
+  const launchOptions = {
     root,
     claudeCli: fake,
-    env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== 'REQUIRED_CHILD_CONFIG')),
     profile: { schema: control.SCHEMA, host: 'claude-code', topology: control.TOPOLOGIES.CLAUDE_DIRECT,
       capacity_mode: control.CAPACITY_MODES.AUTO, manual_maximum: 0, worker_estimate_bytes: control.DEFAULT_WORKER_COST,
       queue_limit: control.MAX_QUEUE, reservation_limit: control.EMERGENCY_WORKER_CEILING,
       controller_version: control.CONTROL_VERSION, enforcement_verified: true, activation_proof: activationProof, status: 'configured', supported: true },
     resourceState: { physical_total: 32 * control.GIB, physical_available: 20 * control.GIB, commit_total: 48 * control.GIB, commit_available: 32 * control.GIB, host_responsive: true },
-  });
-  assert.equal(result.status, 'launched');
-  let reservations = [{}];
-  let checkerReviews = [{}];
-  let error = '';
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const state = JSON.parse(fs.readFileSync(control.statePath({ root }), 'utf8'));
-    reservations = state.reservations;
-    checkerReviews = state.checker_reviews;
-    if (fs.existsSync(result.error_path)) error = fs.readFileSync(result.error_path, 'utf8');
-    if (reservations.length === 0 && error) break;
-    await wait(25);
-  }
-  assert.equal(reservations.length, 0);
-  assert.equal(checkerReviews.length, 0);
-  assert.match(error, /missing required child config/);
+  };
+  const launchChecker = (reviewId, env) => control.launch({ ...checkerSpec, review_id: reviewId }, { ...launchOptions, env });
+  const settle = async (launched) => {
+    assert.equal(launched.status, 'launched');
+    let state;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      state = JSON.parse(fs.readFileSync(control.statePath({ root }), 'utf8'));
+      if (state.reservations.length === 0) {
+        await wait(25);
+        return {
+          state: JSON.parse(fs.readFileSync(control.statePath({ root }), 'utf8')),
+          error: fs.readFileSync(launched.error_path, 'utf8'),
+          output: fs.readFileSync(launched.output_path, 'utf8'),
+        };
+      }
+      await wait(25);
+    }
+    return { state, error: '', output: '' };
+  };
+
+  const failed = await settle(launchChecker('failed-checker-lifecycle', Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== 'REQUIRED_CHILD_CONFIG'))));
+  assert.equal(failed.state.reservations.length, 0);
+  assert.equal(failed.state.checker_reviews.length, 0);
+  assert.match(failed.error, /missing required child config/);
+
+  const malformed = await settle(launchChecker('malformed-checker-lifecycle', { ...process.env, REQUIRED_CHILD_CONFIG: 'present' }));
+  assert.equal(malformed.state.checker_reviews.length, 0);
+  assert.equal(malformed.output, '{}');
+  assert.match(malformed.error, /successful Claude result envelope/);
+
+  const passPayload = JSON.stringify({ status: control.CHECKER_RESULTS.PASS, findings: [] });
+  const passed = await settle(launchChecker('passed-checker-lifecycle', { ...process.env, REQUIRED_CHILD_CONFIG: 'present', CHECKER_RESULT: passPayload }));
+  assert.equal(passed.state.checker_reviews.length, 1);
+  assert.equal(passed.state.checker_reviews[0].status, 'completed');
+  assert.equal(passed.state.checker_reviews[0].result, control.CHECKER_RESULTS.PASS);
+  assert.equal(passed.state.checker_reviews[0].findings_count, 0);
+  assert.equal(control.checkerResultFromClaudeOutput(passed.output).status, control.CHECKER_RESULTS.PASS);
 });
