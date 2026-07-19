@@ -808,15 +808,23 @@ function claudeInvocation(spec, options = {}) {
   return { executable: parts.command, args: parts.args, windowsVerbatimArguments: parts.windowsVerbatimArguments, raw_executable: executable, raw_args: args, env, stdin: promptBytes, effort: checked.effort, non_fast: true, max_depth: 1 };
 }
 
-function spawnValidatedClaude(invocation, captureChecker) {
-  // The production resolver validated this executable, and spawn keeps argv shell-free while streaming private stdin.
+function runValidatedClaude(invocation, captureChecker) {
+  // The production resolver validated this executable, and spawnSync keeps argv shell-free inside the detached supervisor.
   // codeql[js/shell-command-injection-from-environment]
-  return spawn(invocation.executable, invocation.args, {
+  const result = spawnSync(invocation.executable, invocation.args, {
     windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     env: invocation.env,
     windowsHide: true,
+    input: invocation.stdin,
+    maxBuffer: captureChecker ? MAX_CHECKER_OUTPUT_BYTES : undefined,
     stdio: ['pipe', captureChecker ? 'pipe' : 'inherit', 'inherit'],
   });
+  return {
+    code: Number.isInteger(result.status) ? result.status : 1,
+    output: captureChecker && Buffer.isBuffer(result.stdout) ? result.stdout : Buffer.alloc(0),
+    outputExceeded: result.error?.code === 'ENOBUFS',
+    error: result.error || null,
+  };
 }
 
 function launch(specInput, options = {}) {
@@ -881,31 +889,9 @@ async function supervise(args) {
     if (!updateReservation(args.reservation, { owner_pid: process.pid, status: 'running' }, options)) {
       throw new Error('Toolkit reservation state could not be verified before worker execution.');
     }
-    const childResult = await new Promise((resolve) => {
-      let settled = false;
-      let outputBytes = 0;
-      let outputExceeded = false;
-      const output = [];
-      const captureChecker = spec.role === ROLES.CHECKER;
-      const finish = (value) => { if (!settled) { settled = true; resolve({ code: value, output: Buffer.concat(output), outputExceeded }); } };
-      const child = spawnValidatedClaude(invocation, captureChecker);
-      if (captureChecker) {
-        child.stdout.on('data', (chunk) => {
-          outputBytes += chunk.length;
-          if (outputBytes > MAX_CHECKER_OUTPUT_BYTES) {
-            outputExceeded = true;
-            child.kill();
-            return;
-          }
-          output.push(chunk);
-          process.stdout.write(chunk);
-        });
-      }
-      child.on('error', () => finish(1));
-      child.on('close', (value) => finish(outputExceeded ? 1 : (Number.isInteger(value) ? value : 1)));
-      child.stdin.on('error', () => { child.kill(); });
-      child.stdin.end(invocation.stdin);
-    });
+    const childResult = runValidatedClaude(invocation, spec.role === ROLES.CHECKER);
+    if (childResult.output.length) process.stdout.write(childResult.output);
+    if (childResult.error && !childResult.outputExceeded) console.error(childResult.error.message);
     code = childResult.code;
     if (spec.role === ROLES.CHECKER && code === 0) {
       try { checkerOutcome = checkerResultFromClaudeOutput(childResult.output); }
