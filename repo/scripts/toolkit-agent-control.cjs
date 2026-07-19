@@ -890,7 +890,7 @@ async function supervise(args) {
       throw new Error('Toolkit reservation state could not be verified before worker execution.');
     }
     const childResult = runValidatedClaude(invocation, spec.role === ROLES.CHECKER);
-    if (childResult.output.length) process.stdout.write(childResult.output);
+    if (!childResult.outputExceeded && childResult.output.length) process.stdout.write(childResult.output);
     if (childResult.error && !childResult.outputExceeded) console.error(childResult.error.message);
     code = childResult.code;
     if (spec.role === ROLES.CHECKER && code === 0) {

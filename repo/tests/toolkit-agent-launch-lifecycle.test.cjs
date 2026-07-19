@@ -114,7 +114,7 @@ test('checker execution clears failures and completes only validated structured 
     "if (process.argv[2] === '--version') { process.stdout.write('claude fake\\n'); process.exit(0); }",
     "if (process.argv[2] === 'plugin' && process.argv[3] === 'list') { process.stdout.write(JSON.stringify({ installed: [pluginEntry] }) + '\\n'); process.exit(0); }",
     "if (process.env.REQUIRED_CHILD_CONFIG !== 'present') { console.error('missing required child config'); process.exit(7); }",
-    "if (process.env.CHECKER_RESULT) { process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: process.env.CHECKER_RESULT })); } else { process.stdout.write('{}'); }",
+    "if (process.env.CHECKER_OVERSIZED) { process.stdout.write('x'.repeat(300000)); } else if (process.env.CHECKER_RESULT) { process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: process.env.CHECKER_RESULT })); } else { process.stdout.write('{}'); }",
     '',
   ].join('\n'));
   const activationProof = pluginSetup.installedActivationProof(pluginEntry, control.CONTROL_VERSION);
@@ -175,6 +175,11 @@ test('checker execution clears failures and completes only validated structured 
   assert.equal(malformed.state.checker_reviews.length, 0);
   assert.equal(malformed.output, '{}');
   assert.match(malformed.error, /successful Claude result envelope/);
+
+  const oversized = await settle(launchChecker('oversized-checker-lifecycle', { ...process.env, REQUIRED_CHILD_CONFIG: 'present', CHECKER_OVERSIZED: '1' }));
+  assert.equal(oversized.state.checker_reviews.length, 0);
+  assert.equal(oversized.output, '');
+  assert.match(oversized.error, /exceeds the bounded result limit/);
 
   const passPayload = JSON.stringify({ status: control.CHECKER_RESULTS.PASS, findings: [] });
   const passed = await settle(launchChecker('passed-checker-lifecycle', { ...process.env, REQUIRED_CHILD_CONFIG: 'present', CHECKER_RESULT: passPayload }));
