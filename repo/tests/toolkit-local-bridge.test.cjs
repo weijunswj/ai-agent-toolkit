@@ -32,7 +32,10 @@ const {
   windowsSessionStartCommand,
   verifyInstalledCacheFreshness
 } = require('../scripts/setup-codex-toolkit-plugin.cjs');
-const { repairPluginRoot } = require('../scripts/repair-codex-plugin-windows-hooks.cjs');
+const {
+  N8N_SKILLS_COMPATIBILITY,
+  repairPluginRoot
+} = require('../scripts/repair-codex-plugin-windows-hooks.cjs');
 const { auditPluginRoot, collectHookCommands } = require('../scripts/audit-n8n-skills-plugin-hooks.cjs');
 const {
   RECORD_PREFIX,
@@ -41,7 +44,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.7.17';
+const expectedBridgeVersion = '2.7.18';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 
 function tmpBaseDir() {
@@ -681,8 +684,27 @@ function writeGenericPluginHookFixture(pluginRoot, command = 'hooks/session-star
 }
 
 function copySupportedN8nPluginFixture(pluginRoot) {
+  fs.rmSync(pluginRoot, { recursive: true, force: true });
   fs.mkdirSync(pluginRoot, { recursive: true });
   fs.cpSync(supportedN8nFixtureRoot, pluginRoot, { recursive: true, force: true });
+}
+
+function copySupportedN8nCrlfPluginFixture(pluginRoot) {
+  copySupportedN8nPluginFixture(pluginRoot);
+  let converted = 0;
+  for (const relPath of N8N_SKILLS_COMPATIBILITY.text_eol_paths) {
+    const filePath = path.join(pluginRoot, ...relPath.split('/'));
+    if (!fs.existsSync(filePath)) continue;
+    const bytes = fs.readFileSync(filePath);
+    const output = [];
+    for (let index = 0; index < bytes.length; index += 1) {
+      if (bytes[index] === 0x0a && (index === 0 || bytes[index - 1] !== 0x0d)) output.push(0x0d);
+      output.push(bytes[index]);
+    }
+    fs.writeFileSync(filePath, Buffer.from(output));
+    converted += 1;
+  }
+  assert.equal(converted, 12);
 }
 
 function n8nInstalledEntry(version = '1.0.1', overrides = {}) {
@@ -5455,7 +5477,7 @@ test('Codex plugin hook reconciliation repairs only the exact supported n8n cach
   const historicalN8nRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.0');
   writeGenericPluginHookFixture(toolkitRoot);
   writeGenericPluginHookFixture(thirdPartyRoot);
-  copySupportedN8nPluginFixture(n8nRoot);
+  copySupportedN8nCrlfPluginFixture(n8nRoot);
   copySupportedN8nPluginFixture(historicalN8nRoot);
   const historicalManifestPath = path.join(historicalN8nRoot, '.codex-plugin', 'plugin.json');
   const historicalManifest = readJson(historicalManifestPath);
@@ -5530,7 +5552,7 @@ test('Codex plugin reconciliation refuses ambiguous current state and cleanly sk
   const codexHome = path.join(root, 'codex-home');
   const supportedRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
   const unknownRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
-  copySupportedN8nPluginFixture(supportedRoot);
+  copySupportedN8nCrlfPluginFixture(supportedRoot);
   copySupportedN8nPluginFixture(unknownRoot);
   const unknownManifestPath = path.join(unknownRoot, '.codex-plugin', 'plugin.json');
   const unknownManifest = readJson(unknownManifestPath);
@@ -5566,7 +5588,7 @@ test('Codex n8n config fallback distinguishes enabled, disabled, and unprovable 
   const root = tmpRoot();
   const enabledHome = path.join(root, 'enabled-home');
   const enabledRoot = path.join(enabledHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
-  copySupportedN8nPluginFixture(enabledRoot);
+  copySupportedN8nCrlfPluginFixture(enabledRoot);
   writeFile(path.join(enabledHome, 'config.toml'), [
     '[plugins."n8n-skills@n8n-io"]',
     'enabled = true',
@@ -5594,7 +5616,7 @@ test('Codex n8n config fallback distinguishes enabled, disabled, and unprovable 
 
   const disabledHome = path.join(root, 'disabled-home');
   const disabledRoot = path.join(disabledHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
-  copySupportedN8nPluginFixture(disabledRoot);
+  copySupportedN8nCrlfPluginFixture(disabledRoot);
   writeFile(path.join(disabledHome, 'config.toml'), [
     '[plugins."n8n-skills@n8n-io"]',
     'enabled = false',
@@ -5630,7 +5652,7 @@ test('Codex n8n config fallback never selects arbitrarily across retained versio
   const codexHome = path.join(root, 'codex-home');
   const supportedRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
   const unknownRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
-  copySupportedN8nPluginFixture(supportedRoot);
+  copySupportedN8nCrlfPluginFixture(supportedRoot);
   copySupportedN8nPluginFixture(unknownRoot);
   const unknownManifestPath = path.join(unknownRoot, '.codex-plugin', 'plugin.json');
   const unknownManifest = readJson(unknownManifestPath);
@@ -5685,7 +5707,7 @@ test('Codex maintenance auto-reapplies supported n8n hook repair after refresh',
   const historicalN8nRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.0');
   writeGenericPluginHookFixture(toolkitRoot);
   writeGenericPluginHookFixture(thirdPartyRoot);
-  copySupportedN8nPluginFixture(n8nRoot);
+  copySupportedN8nCrlfPluginFixture(n8nRoot);
   copySupportedN8nPluginFixture(historicalN8nRoot);
   const historicalManifestPath = path.join(historicalN8nRoot, '.codex-plugin', 'plugin.json');
   const historicalManifest = readJson(historicalManifestPath);
@@ -5735,7 +5757,7 @@ test('Codex maintenance auto-reapplies supported n8n hook repair after refresh',
   const toolkitHooks = readJson(path.join(toolkitRoot, 'hooks', 'hooks.json'));
   assert.equal(collectHookCommands(toolkitHooks)[0].command, 'hooks/session-start.sh');
 
-  fs.cpSync(supportedN8nFixtureRoot, n8nRoot, { recursive: true, force: true });
+  copySupportedN8nCrlfPluginFixture(n8nRoot);
   result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin'], {
     env: isolatedHomeEnv(root, { PATH: process.env.PATH, CODEX_HOME: codexHome, CODEX_TOOLKIT_CODEX_CLI: fakeCodex.commandPath, PLUGIN_ROOT: toolkitRoot })
   });

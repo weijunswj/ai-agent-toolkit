@@ -12,7 +12,9 @@ const auditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-n8n-skills-plu
 const repairScript = path.join(repoRoot, 'repo', 'scripts', 'repair-codex-plugin-windows-hooks.cjs');
 const supportedFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 const {
+  N8N_SKILLS_COMPATIBILITY,
   classifyN8nSkillsCompatibility,
+  n8nSkillsCompatibilityFingerprints,
   reconcileN8nSkillsPlugin
 } = require('../scripts/repair-codex-plugin-windows-hooks.cjs');
 
@@ -42,6 +44,42 @@ function makePluginRoot() {
 function copySupportedFixture(pluginRoot = makePluginRoot()) {
   fs.cpSync(supportedFixtureRoot, pluginRoot, { recursive: true, force: true });
   return pluginRoot;
+}
+
+function toCrlfBytes(bytes) {
+  const output = [];
+  for (let index = 0; index < bytes.length; index += 1) {
+    if (bytes[index] === 0x0a && (index === 0 || bytes[index - 1] !== 0x0d)) output.push(0x0d);
+    output.push(bytes[index]);
+  }
+  return Buffer.from(output);
+}
+
+function convertExistingContractTextFilesToCrlf(pluginRoot) {
+  let converted = 0;
+  for (const relPath of N8N_SKILLS_COMPATIBILITY.text_eol_paths) {
+    const filePath = path.join(pluginRoot, ...relPath.split('/'));
+    if (!fs.existsSync(filePath)) continue;
+    fs.writeFileSync(filePath, toCrlfBytes(fs.readFileSync(filePath)));
+    converted += 1;
+  }
+  return converted;
+}
+
+function copySupportedCrlfFixture(pluginRoot = makePluginRoot()) {
+  copySupportedFixture(pluginRoot);
+  assert.equal(convertExistingContractTextFilesToCrlf(pluginRoot), 12);
+  return pluginRoot;
+}
+
+function assertAllExistingContractTextFilesUseCrlf(pluginRoot) {
+  for (const relPath of N8N_SKILLS_COMPATIBILITY.text_eol_paths) {
+    const filePath = path.join(pluginRoot, ...relPath.split('/'));
+    if (!fs.existsSync(filePath)) continue;
+    const bytes = fs.readFileSync(filePath);
+    assert.equal(bytes.includes(Buffer.from('\r\n')), true, relPath);
+    assert.equal(/(^|[^\r])\n/.test(bytes.toString('latin1')), false, relPath);
+  }
 }
 
 function snapshotFiles(root) {
@@ -1068,6 +1106,94 @@ test('n8n-skills Windows hook repair wraps hooks, adds Node fallbacks, and verif
   assert.equal(JSON.parse(secondPreToolUse.stdout).hookSpecificOutput.hookEventName, 'PreToolUse');
 
   assert.equal(runAudit(pluginRoot).status, 0);
+});
+
+test('supported LF and native CRLF fixtures share exact canonical compatibility fingerprints', () => {
+  const lfRoot = copySupportedFixture();
+  const crlfRoot = copySupportedCrlfFixture();
+  assertAllExistingContractTextFilesUseCrlf(crlfRoot);
+
+  assert.equal(classifyN8nSkillsCompatibility(lfRoot).status, 'repair-required');
+  assert.equal(classifyN8nSkillsCompatibility(crlfRoot).status, 'repair-required');
+  assert.deepEqual(
+    n8nSkillsCompatibilityFingerprints(crlfRoot, N8N_SKILLS_COMPATIBILITY.pristine_sha256),
+    n8nSkillsCompatibilityFingerprints(lfRoot, N8N_SKILLS_COMPATIBILITY.pristine_sha256)
+  );
+});
+
+test('supported native CRLF refresh repairs to healthy and remains byte-idempotent', () => {
+  const pluginRoot = copySupportedCrlfFixture();
+  const first = reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true });
+  assert.equal(first.status, 'repaired');
+  assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'healthy');
+  assert.equal(runRepairedAudit(pluginRoot).status, 0);
+
+  const mixedRepaired = snapshotFiles(pluginRoot);
+  const second = reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true });
+  assert.equal(second.status, 'healthy');
+  assert.equal(second.repaired, false);
+  assertSnapshotEqual(pluginRoot, mixedRepaired, 'mixed-EOL repaired state must be a byte-idempotent no-op');
+
+  assert.equal(convertExistingContractTextFilesToCrlf(pluginRoot), 13);
+  assertAllExistingContractTextFilesUseCrlf(pluginRoot);
+  assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'healthy');
+  const crlfRepaired = snapshotFiles(pluginRoot);
+  const third = reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true });
+  assert.equal(third.status, 'healthy');
+  assert.equal(third.repaired, false);
+  assertSnapshotEqual(pluginRoot, crlfRepaired, 'all-CRLF repaired state must be a byte-idempotent no-op');
+});
+
+test('canonical compatibility accepts only CRLF-to-LF equivalence', () => {
+  const cases = [
+    {
+      name: 'non-EOL content drift',
+      mutate(pluginRoot) {
+        const filePath = path.join(pluginRoot, 'hooks', 'session-start.sh');
+        const bytes = fs.readFileSync(filePath);
+        const marker = Buffer.from('#!/usr/bin/env bash');
+        const index = bytes.indexOf(marker);
+        assert.notEqual(index, -1);
+        bytes[index + marker.length - 1] = 0x78;
+        fs.writeFileSync(filePath, bytes);
+      }
+    },
+    {
+      name: 'non-EOL whitespace drift',
+      mutate(pluginRoot) {
+        const filePath = path.join(pluginRoot, 'hooks', 'pre-tool-use', 'create-workflow.sh');
+        const bytes = fs.readFileSync(filePath);
+        fs.writeFileSync(filePath, Buffer.concat([bytes.subarray(0, bytes.length - 1), Buffer.from(' \n')]));
+      }
+    },
+    {
+      name: 'lone CR drift',
+      mutate(pluginRoot) {
+        const filePath = path.join(pluginRoot, 'hooks', 'pre-tool-use', 'execute-workflow.sh');
+        fs.appendFileSync(filePath, Buffer.from('\r'));
+      }
+    },
+    {
+      name: 'BOM drift',
+      mutate(pluginRoot) {
+        const filePath = path.join(pluginRoot, 'hooks', 'session-start.sh');
+        fs.writeFileSync(filePath, Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), fs.readFileSync(filePath)]));
+      }
+    }
+  ];
+
+  for (const entry of cases) {
+    const pluginRoot = copySupportedCrlfFixture();
+    entry.mutate(pluginRoot);
+    const before = snapshotFiles(pluginRoot);
+    assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'malformed', entry.name);
+    assert.throws(
+      () => reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true }),
+      /malformed|partially repaired|fingerprint/i,
+      entry.name
+    );
+    assertSnapshotEqual(pluginRoot, before, entry.name + ' must fail closed without writes');
+  }
 });
 
 test('supported n8n Skills 1.0.1 compatibility inspection is exact and write-free', () => {
