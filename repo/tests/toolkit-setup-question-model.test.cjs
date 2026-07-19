@@ -13,7 +13,6 @@ const expectedCodexRows = [
   ['automatic-updates', 'Automatic updates'],
   ['update-reports', 'Update reports'],
   ['report-retention', 'Report retention'],
-  ['codex-helper-agents', 'Codex helper agents'],
   ['codex-toolkit-maintenance', 'Codex Toolkit maintenance'],
   ['opencode-integration', 'OpenCode'],
   ['antigravity-integration', 'Antigravity'],
@@ -61,7 +60,7 @@ function updateSourceRow(managed, argv = ['--plan', '--host', 'codex']) {
   return core.setupQuestionSpecs(args, stateWithManaged(managed)).find((row) => row.id === 'update-source');
 }
 
-test('all eight Codex questions expose complete canonical semantics', () => {
+test('all ordinary Codex questions expose complete canonical semantics', () => {
   const rows = allRows();
   assert.deepEqual(rows.map((row) => [row.id, row.title]), expectedCodexRows);
   for (const row of rows) {
@@ -133,7 +132,7 @@ test('headings, choice effects and native mutation surfaces remain distinct', ()
   assert.match(byId['automatic-updates'].choices.find((choice) => choice.value === 'disable').consequence, /manual `setup toolkit`/i);
   assert.match(byId['update-reports'].whatThisControls, /private absolute paths/i);
   assert.match(byId['report-retention'].whatThisControls, /does not modify project files, application logs, or unrelated operational logs/i);
-  assert.match(byId['codex-helper-agents'].choices.find((choice) => choice.value === 'remove').consequence, /Toolkit-owned|native or user-owned/i);
+  assert.equal(byId['codex-helper-agents'], undefined);
   assert.match(byId['codex-toolkit-maintenance'].choices.find((choice) => choice.value === 'disable').consequence, /not uninstalled/i);
   assert.match(byId['opencode-integration'].afterApplying, /skill folders/i);
   assert.match(byId['antigravity-integration'].afterApplying, /plugin metadata and skill folders/i);
@@ -151,10 +150,8 @@ test('unknown and unsupported state is honest and never recommends unavailable c
   };
   const rows = core.setupQuestionSpecs(args, current);
   for (const row of rows) assert.ok(row.choices.some((choice) => choice.value === row.recommended));
-  const helper = rows.find((row) => row.id === 'codex-helper-agents');
-  assert.deepEqual(helper.choices.map((choice) => choice.value), ['keep']);
-  assert.match(helper.current, /could not be verified safely/i);
-  assert.match(helper.recommendation.reason, /unavailable or unverifiable/i);
+  assert.equal(rows.some((row) => row.id === 'codex-helper-agents'), false);
+  assert.equal(args.setupChoices.codexHelperCapacity, 'keep');
   const output = `${core.renderSetupQuestionBank(rows)}\n${JSON.stringify(rows)}`;
   assert.doesNotMatch(output, /Synthetic Private|C:\\|USERPROFILE|CODEX_HOME|GH_TOKEN|GITHUB_TOKEN/);
 });

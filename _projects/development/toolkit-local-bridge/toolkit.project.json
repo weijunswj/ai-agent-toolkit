@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.7.19",
+  "version": "2.7.20",
   "version_policy": "semver",
-  "version_notes": "Uses a direct Windows PowerShell script-file boundary for Codex Toolkit SessionStart so the wrapper and Node launcher remain reachable without nested command-text quoting.",
+  "version_notes": "Adds deterministic bounded pre-PR checking, canonical cross-host memory admission, and automatic ordinary helper-capacity management.",
   "outputs": [
     {
       "kind": "curated",

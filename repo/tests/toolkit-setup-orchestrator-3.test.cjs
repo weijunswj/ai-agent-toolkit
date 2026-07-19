@@ -45,7 +45,7 @@ test('Claude setup rejects extra non-empty piped input before every setup write'
     '--execute', '--host', 'claude-code', '--repo-root', validRepo.setupRepo, '--repo-remote', validRepo.origin,
   ], {
     env: isolatedHomeEnv(validRoot),
-    input: ['keep', 'keep', 'keep', 'root-only', 'root-only', 'instructions', '   ', ''].join('\n'),
+    input: Array(16).fill('').join('\n'),
   });
   assert.equal(valid.status, 0, valid.stderr || valid.stdout);
 
@@ -56,7 +56,7 @@ test('Claude setup rejects extra non-empty piped input before every setup write'
     '--execute', '--host', 'claude-code', '--repo-root', rejectedRepo.setupRepo, '--repo-remote', rejectedRepo.origin,
   ], {
     env: isolatedHomeEnv(rejectedRoot),
-    input: ['keep', 'keep', 'keep', 'root-only', 'root-only', 'instructions', 'unexpected'].join('\n'),
+    input: `${Array(16).fill('').join('\n')}\nunexpected`,
   });
   assert.equal(rejected.status, 1, rejected.stderr || rejected.stdout);
   assert.match(rejected.stderr, /Setup question bank received unexpected extra non-empty input\./);
@@ -87,7 +87,7 @@ test('target keep, skip, enable-sync, and disable remain distinct', () => {
   assert.match(second.stdout, /AG2 action this run: kept/);
 });
 
-test('setup docs require explicit V2 opt-in and honest enforcement disclosure', () => {
+test('setup docs explain automatic resource admission and honest enforcement disclosure', () => {
   const docs = [
     '_projects/development/toolkit-local-bridge/curated_output_for_ai/skills/toolkit-setup/SKILL.md',
     'skills/toolkit-setup/SKILL.md',
@@ -99,16 +99,15 @@ test('setup docs require explicit V2 opt-in and honest enforcement disclosure', 
     assert.match(text, /setup toolkit/i, relPath);
     assert.match(text, /root agent alone|root-agent work|handled by the root agent alone|routine setup on the root agent/i, relPath);
     assert.match(text, /must not spawn subagents|do not spawn subagents/i, relPath);
-    assert.match(text, /MultiAgentV2|multi_agent_v2/i, relPath);
-    assert.match(text, /one[- ]helper|helper capacity/i, relPath);
-    assert.match(text, /root counts|include(?:s|ing)? the root|root-inclusive/i, relPath);
+    assert.match(text, /automatically limit|automatic memory|available memory|memory admission/i, relPath);
+    assert.match(text, /root-only|root agent alone|root-agent work|handled by the root agent alone/i, relPath);
+    assert.match(text, /does not ask|no ordinary .*capacity|no longer asks/i, relPath);
     assert.match(text, /policy-only|no native hard block|no invented host-level enforcement|cannot .*strict enforcement|unsupported .*enforcement/i, relPath);
-    assert.match(text, /Codex Security[\s\S]{0,400}(never raise|never raises|not raised automatically|no documented)/i, relPath);
     assert.doesNotMatch(text, /compatible with Codex Security|Codex Security compatible/i, relPath);
   }
   const bridge = fs.readFileSync(path.join(repoRoot, 'repo/docs/TOOLKIT-LOCAL-BRIDGE.md'), 'utf8');
   assert.doesNotMatch(bridge, /compatible with Codex Security|Codex Security compatible/i);
-  assert.match(bridge, /executing SessionStart bridge in that installed cache/i);
+  assert.match(bridge, /executing `?SessionStart`? bridge in that installed cache/i);
   assert.match(bridge, /managed checkout is only its refresh source/i);
 });
 
@@ -120,7 +119,7 @@ test('generated Codex and Claude instruction surfaces preserve productive root-f
     /active host profile is a topology ceiling/,
     /Missing any fact prohibits launch/,
     /Never delegate every substantive shard/,
-    /meaningful root-owned work starting immediately/,
+    /concurrent root work/,
     /default to medium reasoning effort/,
     /never use or inherit fast mode/,
     /Final integration, conflict resolution, cross-shard validation, and judgment remain root-owned/,

@@ -56,7 +56,7 @@ test('detached Claude supervisor forces medium non-fast invocation and releases 
       capacity_mode: control.CAPACITY_MODES.AUTO, manual_maximum: 0, worker_estimate_bytes: control.DEFAULT_WORKER_COST,
       queue_limit: control.MAX_QUEUE, reservation_limit: control.EMERGENCY_WORKER_CEILING,
       controller_version: control.CONTROL_VERSION, enforcement_verified: true, activation_proof: activationProof, status: 'configured', supported: true },
-    resourceState: { physical_total: 32 * control.GIB, physical_available: 20 * control.GIB, commit_total: 48 * control.GIB, commit_available: 32 * control.GIB },
+    resourceState: { physical_total: 32 * control.GIB, physical_available: 20 * control.GIB, commit_total: 48 * control.GIB, commit_available: 32 * control.GIB, host_responsive: true },
   });
   if (previousParentMarker === undefined) delete process.env.PARENT_ONLY_ENV;
   else process.env.PARENT_ONLY_ENV = previousParentMarker;
@@ -83,7 +83,7 @@ test('detached Claude supervisor forces medium non-fast invocation and releases 
   const child = JSON.parse(output);
   assert.equal(child.fast_disabled, '1');
   assert.equal(child.background_disabled, '1');
-  assert.deepEqual(child.args, ['--print', '--output-format', 'json', '--effort', 'medium', '--disallowedTools', 'Agent', 'Task', '--permission-mode', 'default', '--no-session-persistence']);
+  assert.deepEqual(child.args, ['--print', '--output-format', 'json', '--model', 'fable-5', '--effort', 'medium', '--disallowedTools', 'Agent', 'Task', '--permission-mode', 'default', '--no-session-persistence']);
   assert.equal(child.args.filter((arg) => arg === '--no-session-persistence').length, 1);
   assert.equal(child.args.includes('Agent'), true);
   assert.equal(child.args.includes('Task'), true);
@@ -133,7 +133,7 @@ test('missing explicit child environment fails truthfully and releases its reser
       capacity_mode: control.CAPACITY_MODES.AUTO, manual_maximum: 0, worker_estimate_bytes: control.DEFAULT_WORKER_COST,
       queue_limit: control.MAX_QUEUE, reservation_limit: control.EMERGENCY_WORKER_CEILING,
       controller_version: control.CONTROL_VERSION, enforcement_verified: true, activation_proof: activationProof, status: 'configured', supported: true },
-    resourceState: { physical_total: 32 * control.GIB, physical_available: 20 * control.GIB, commit_total: 48 * control.GIB, commit_available: 32 * control.GIB },
+    resourceState: { physical_total: 32 * control.GIB, physical_available: 20 * control.GIB, commit_total: 48 * control.GIB, commit_available: 32 * control.GIB, host_responsive: true },
   });
   assert.equal(result.status, 'launched');
   let reservations = [{}];

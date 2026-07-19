@@ -13,7 +13,7 @@ const pluginSetup = require('../scripts/setup-claude-toolkit-plugin.cjs');
 
 function root() { return fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-agent-control-')); }
 function resources(overrides = {}) {
-  return { physical_total: 32 * control.GIB, physical_available: 20 * control.GIB, commit_total: 48 * control.GIB, commit_available: 32 * control.GIB, source: 'fixture', ...overrides };
+  return { physical_total: 32 * control.GIB, physical_available: 20 * control.GIB, commit_total: 48 * control.GIB, commit_available: 32 * control.GIB, host_responsive: true, source: 'fixture', ...overrides };
 }
 function spec(overrides = {}) {
   return {
@@ -162,7 +162,7 @@ test('stale dead reservations recover but live ownership is preserved', () => {
 
 test('direct child defaults medium, disables fast, and blocks nested Agent and Task tools', () => {
   const invocation = control.claudeInvocation(spec(), { claudeCli: process.execPath });
-  assert.deepEqual(invocation.raw_args.slice(0, 8), ['--print', '--output-format', 'json', '--effort', 'medium', '--disallowedTools', 'Agent', 'Task']);
+  assert.deepEqual(invocation.raw_args.slice(0, 10), ['--print', '--output-format', 'json', '--model', 'fable-5', '--effort', 'medium', '--disallowedTools', 'Agent', 'Task']);
   assert.equal(invocation.raw_args.filter((arg) => arg === '--no-session-persistence').length, 1);
   assert.equal(invocation.raw_args.at(-1), '--no-session-persistence');
   assert.equal(invocation.env.CLAUDE_CODE_DISABLE_FAST_MODE, '1');

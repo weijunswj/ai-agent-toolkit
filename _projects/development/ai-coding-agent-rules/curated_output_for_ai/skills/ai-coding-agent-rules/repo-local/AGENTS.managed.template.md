@@ -35,9 +35,13 @@ Ordinary work begins root-first. The root handles setup/updates, docs/repo orien
 
 The active host profile is a topology ceiling, not a delegation instruction. Capacity is a resource backstop, never launch permission. No explicit profile or unverifiable topology, admission, effort, or non-fast guarantee means root-only. Never project one host's controls onto another or describe policy-only behavior as hard enforcement.
 
-Generic wording like `use helpers`, `use agents`, `parallelize this`, `delegate this`, `use subagents`, or `finish faster with helpers` is a preference, not a bounded delegation instruction. Do not invent scope. UAT context, later stages, available capacity, or future helper tests cannot qualify the present task.
+Generic requests to use helpers, agents, parallelism, delegation, subagents, or speed are preferences, not bounded scope; do not invent it. UAT, later stages, capacity, or future tests cannot qualify this task.
 
-Before launch, state the task, independent bounded scopes, non-overlapping ownership, material quality, safety, or critical-path benefit, active topology and resource admission, verified medium reasoning and non-fast child mode, meaningful root-owned work starting immediately, and root-owned integration/validation. Missing any fact prohibits launch. Independent work may run concurrently when it materially shortens the critical path even if root could do it sequentially. Generic parallelism, second opinions, routine-work offloading, independent verification, task count, capacity, or speed are insufficient.
+The only independent-verification exception is a pre-PR adversarial checker: after meaningful root code changes and focused validation pass with a PR-ready diff, exactly one fresh direct read-only checker may review bounded task, diff, file, test, and invariant context. It cannot mutate, publish, spawn, or use Fast; generic verification, research, or second opinions remain insufficient. Root owns fixes.
+
+Every child uses canonical atomic Toolkit admission: RAM after live reservations is the hard fail-closed gate; CPU is secondary. Reserve before launch; release after failure/completion; reclaim stale state identity-safely. A denied required checker is `ADMISSION_DENIED`; root self-review is not independent.
+
+Before launch, record bounded independent scope and ownership, material benefit, active topology and resource admission, verified medium non-fast mode, concurrent root work, and root integration/validation. Missing any fact prohibits launch.
 
 Never delegate every substantive shard. Root immediately performs useful non-overlapping work, not wait, poll, narrate status, or repeat child scope. Wait only when root work is exhausted or depends on a child. Final integration, conflict resolution, cross-shard validation, and judgment remain root-owned.
 

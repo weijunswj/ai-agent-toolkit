@@ -1519,56 +1519,14 @@ function setupQuestionSpecs(args, current) {
   ];
 
   if (args.host === 'codex') {
-    const migrationPending = current.delegation?.status === 'migration-required';
-    const runtimeSupported = [RUNTIMES.V1, RUNTIMES.V2].includes(current.runtime?.runtime);
-    const removalAvailable = String(current.delegation?.ownership || '').startsWith('toolkit-managed');
-    const helperChoices = migrationPending
-      ? [
-          wizardChoice('keep', 'Keep current', `Preserve this effective behavior: ${currentHelperOutcome(current)}`),
-          wizardChoice('migrate', 'Update the existing Toolkit helper setting', 'Replace only the exact Toolkit-owned legacy limit with the supported current native shape after a separately bound technical preview and `apply` approval.'),
-        ]
-      : [
-          ...(runtimeSupported ? [
-            wizardChoice('root-only', 'Root agent only', 'Set the native session capacity backstop to the root agent only; this does not claim control over unsupported helper launch paths.'),
-            wizardChoice('one-helper', 'One helper at most', 'Allow capacity for one helper while the root continues productive work; Toolkit policy still requires independent scope, medium non-fast execution, and root-owned integration.'),
-          ] : []),
-          wizardChoice('keep', Number.isSafeInteger(current.delegation?.helper_count) && current.delegation.helper_count > 1
-            ? 'Keep current - memory risk'
-            : 'Keep current', `Preserve this effective behavior: ${currentHelperOutcome(current)}`),
-          ...(runtimeSupported ? [wizardChoice('custom', 'Use a custom number', 'Set an approved native capacity backstop; values above one require separate memory-risk approval and add coordination and memory overhead.')] : []),
-          ...(removalAvailable ? [wizardChoice('remove', 'Remove the Toolkit helper limit', 'Remove only Toolkit-owned helper-capacity controls after an exact removal preview; native or user-owned Codex behavior outside those controls remains available and is not Toolkit-enforced.')] : []),
-        ];
-    const helperRecommendation = recommendedChoice('codexHelperCapacity', current, args);
-    specs.push(resolvedQuestion({
-      id: 'codex-helper-agents',
-      key: 'codexHelperCapacity',
-      section: 'Computer performance',
-      title: 'Codex helper agents',
-      prompt: 'Codex helper choice',
-      whatThisControls: 'A helper agent is an additional Codex worker assigned an independent task while the root agent continues productive work and retains integration and final validation. This setting is a native capacity backstop, not launch permission; helpers and nested helpers must never use fast mode.',
-      choices: helperChoices,
-      recommendation: {
-        value: helperRecommendation,
-        outcome: migrationPending
-          ? 'Keep the existing Toolkit legacy setting unchanged unless you explicitly approve migration.'
-          : !runtimeSupported
-          ? 'Keep the current effective setting until supported native helper controls can be verified.'
-          : 'Use the root agent only.',
-        reason: helperRecommendationReason(current, runtimeSupported, migrationPending),
-      },
-      selected: args.setupChoices.codexHelperCapacity,
-      current: currentHelperOutcome(current),
-      currentVerification: Number.isSafeInteger(current.delegation?.helper_count) ? 'verified' : 'unverified-or-unconfigured',
-      afterApplying: runtimeSupported || migrationPending || removalAvailable
-        ? 'A changed choice may update only the approved native Codex helper-capacity configuration after an exact technical preview. Existing active sessions may retain their prior capacity, so use a fresh Codex session before relying on the new limit.'
-        : 'Keep current performs no Codex configuration write. Toolkit cannot apply a new helper limit while the native capability is unavailable or unverifiable.',
-      availability: {
-        status: runtimeSupported ? 'available' : (migrationPending || removalAvailable ? 'limited' : 'unverifiable'),
-        condition: runtimeSupported
-          ? 'Root-only, one-helper, and custom limits are mapped from the detected effective native runtime; removal appears only for exact Toolkit-owned controls.'
-          : 'Only choices that do not require unsupported native writes are shown.',
-      },
-    }));
+    // Ordinary setup never asks users to choose helper quantities. Existing explicit
+    // or saved state is preserved; otherwise fail closed to root-only until a
+    // Toolkit-controlled launch path proves live memory admission.
+    if (!args.setupChoices.codexHelperCapacity) {
+      args.setupChoices.codexHelperCapacity = Number.isSafeInteger(current.delegation?.helper_count)
+        ? 'keep'
+        : ([RUNTIMES.V1, RUNTIMES.V2].includes(current.runtime?.runtime) ? 'root-only' : 'keep');
+    }
     specs.push(resolvedQuestion({
       id: 'codex-toolkit-maintenance',
       key: 'codexPluginAutoRefresh',
@@ -1620,29 +1578,14 @@ function setupQuestionSpecs(args, current) {
       afterApplying: 'A changed choice updates only the Claude Toolkit profile. A fresh Claude Code session may be required before relying on changed native hook behavior.',
       availability: { status: capabilitySupported ? 'available' : 'limited', condition: capabilitySupported ? 'Strict direct mode is shown only when every required capability verifies.' : 'Strict direct mode is omitted because its capability proof is incomplete.' },
     }));
-    specs.push(resolvedQuestion({
-      id: 'claude-agent-capacity',
-      key: 'claudeAgentCapacity',
-      section: 'Computer performance',
-      title: 'How should Toolkit manage agent capacity?',
-      prompt: 'Claude Code agent capacity choice',
-      whatThisControls: 'How Toolkit limits directly controlled Claude workers. Automatic admission checks current memory, commit headroom, pressure, active workers, reservations, topology, and nesting before every controlled launch.',
-      choices: [
-        ...(directCapacityAvailable ? [wizardChoice('automatic', 'Manage automatically based on available resources', 'Admit direct workers only when validated live resource headroom and all topology gates allow them.')] : []),
-        wizardChoice('root-only', 'Root agent only', 'Disable Toolkit-managed Claude workers.'),
-        ...(directCapacityAvailable || activeProfile.capacity_mode === agentControl.CAPACITY_MODES.ROOT_ONLY ? [wizardChoice('keep', 'Keep current', `Preserve the effective ${activeProfile.capacity_mode || 'root-only'} capacity outcome.`)] : []),
-        ...(directCapacityAvailable ? [wizardChoice('manual', 'Use a manual maximum', 'Set a fixed upper backstop while retaining live resource-safety checks for every launch.')] : []),
-      ],
-      recommendation: {
-        value: directCapacityAvailable ? recommendedChoice('claudeAgentCapacity', current, args) : 'root-only',
-        outcome: directCapacityAvailable ? 'Manage direct-worker capacity automatically from validated available resources.' : 'Remain root-only because direct admission cannot be enforced.',
-        reason: directCapacityAvailable ? 'Live admission responds to changing physical and committed memory more safely than a fixed maximum alone.' : 'Automatic or manual direct capacity is not meaningful without a verified strict direct-worker boundary.',
-      },
-      selected: args.setupChoices.claudeAgentCapacity,
-      current: `Current capacity outcome: ${activeProfile.capacity_mode || 'root-only'}${activeProfile.manual_maximum ? ` (manual maximum ${activeProfile.manual_maximum})` : ''}.`,
-      afterApplying: 'A changed choice updates only the Claude Toolkit profile; it does not edit Codex configuration.',
-      availability: { status: directCapacityAvailable ? 'available' : 'limited', condition: directCapacityAvailable ? 'Automatic and manual choices use the same verified direct-capability state.' : 'Choices requiring direct admission are omitted.' },
-    }));
+    // Capacity is an automatic consequence of the selected topology, not an
+    // ordinary quantity question. Explicit legacy/manual flags remain supported
+    // as restrictive compatibility inputs and never bypass live admission.
+    if (!args.setupChoices.claudeAgentCapacity) {
+      args.setupChoices.claudeAgentCapacity = directCapacityAvailable
+        ? (currentDirect && [agentControl.CAPACITY_MODES.AUTO, agentControl.CAPACITY_MODES.MANUAL].includes(activeProfile.capacity_mode) ? 'keep' : 'automatic')
+        : 'root-only';
+    }
     specs.push(resolvedQuestion({
       id: 'claude-toolkit-plugin',
       key: 'claudePluginBehavior',
@@ -1857,7 +1800,7 @@ function renderSetupQuestionDocumentation(specs = setupQuestionDocumentationSpec
     '<!-- Generated by repo/scripts/generate-setup-question-docs.cjs from setup-toolkit-core.cjs. Do not edit directly. -->',
     '# Toolkit setup question reference',
     '',
-    'This reference uses a privacy-safe representative Codex state in which all eight current questions are available. Runtime output resolves Current, Recommended, Why, available choices, and After applying from the same canonical metadata and the actual inspected state.',
+    'This reference uses a privacy-safe representative Codex state in which all current ordinary questions are available. Runtime output resolves Current, Recommended, Why, available choices, and After applying from the same canonical metadata and the actual inspected state.',
     '',
     renderQuestionRows(specs),
     '',
@@ -1999,7 +1942,6 @@ async function answerSetupQuestionBank(args, current) {
   let specs = setupQuestionSpecs(args, current);
   let missing = specs.filter((spec) => !choiceForKey(args, spec.key));
   const needsCustomPath = args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit;
-  const helperChoiceInitiallyMissing = initialSpecs.some((spec) => spec.key === 'codexHelperCapacity' && !spec.selected);
   const needsHelperDetails = args.setupChoices.codexHelperCapacity === 'custom'
     && (args.codexHelperCount === null || (args.codexHelperCount > 1 && !args.approveHighHelperCapacity));
   const needsClaudeManualDetails = args.setupChoices.claudeAgentCapacity === 'manual' && args.claudeManualMaximum === null;
@@ -2030,7 +1972,7 @@ async function answerSetupQuestionBank(args, current) {
     console.log('Answer the remaining setup choices now. Setup will not write preferences or targets before these answers are complete.');
   }
 
-  const remainingPromptedAnswers = missing.length > 0 || needsCustomPath || needsHelperDetails || needsClaudeManualDetails || helperChoiceInitiallyMissing;
+  const remainingPromptedAnswers = missing.length > 0 || needsCustomPath || needsHelperDetails || needsClaudeManualDetails;
   const rl = remainingPromptedAnswers && !lines ? readline.createInterface({ input: process.stdin, output: process.stdout }) : null;
   try {
     for (const spec of missing) {
@@ -2745,6 +2687,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   console.log(`Question bank stopped for answers: ${yesNo(questionBank?.stopped_for_answers)}`);
   console.log(`Question answer source: ${unknown(questionBank?.answer_source || 'none')}`);
   console.log(`Question bank render attempts: ${unknown(questionBank?.render_attempts)}`);
+  console.log('Helper-agent capacity questions shown: no; Toolkit automatically limits controlled children from verified available memory.');
   console.log('Preference/target writes before answers: no');
   console.log('');
   if (args.host === 'codex') {
@@ -2761,7 +2704,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   console.log('Worker topology policy: Direct children of the root with no needless scope overlap; helpers must not spawn helpers; root retains coordination and final judgment');
   console.log('Helpers creating helpers: Prohibited by Toolkit policy');
   console.log(`Recursive delegation enforcement: ${unknown(delegation.recursive_helper_control || (delegation.runtime === RUNTIMES.V2 ? 'policy-only; no native hard block verified' : 'unverified'))}`);
-  console.log(`Concurrent helper enforcement: ${Number.isSafeInteger(delegation.helper_count) ? 'queued or rejected when the configured capacity is full; native UAT pending' : 'unverified'}`);
+  console.log('Runtime resource admission: Toolkit-controlled child paths reserve memory atomically before launch and fail closed when live state is unprovable.');
   const technicalSetting = delegation.runtime === RUNTIMES.V2 && Number.isSafeInteger(delegation.total_threads)
     ? `features.multi_agent_v2.max_concurrent_threads_per_session = ${delegation.total_threads}`
     : (delegation.runtime === RUNTIMES.V1 && Number.isSafeInteger(delegation.helper_count)
@@ -2791,7 +2734,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
     console.log('## Claude Code agent topology');
     console.log(`Selected topology: ${unknown(delegation.topology)}`);
     console.log(`Capacity mode: ${unknown(delegation.capacity_mode)}`);
-    console.log(`Manual maximum backstop: ${delegation.manual_maximum || 'not selected'}`);
+    console.log(`Manual maximum backstop: ${delegation.manual_maximum || 'not selected'}; restrictive only and never above the live memory ceiling`);
     console.log('Toolkit-controlled child effort: medium by default; higher effort requires one named difficult role and narrow justification');
     console.log('Toolkit-controlled child fast mode: disabled with CLAUDE_CODE_DISABLE_FAST_MODE=1');
     console.log('Nested Toolkit-controlled children: blocked by direct-only --disallowedTools Agent');

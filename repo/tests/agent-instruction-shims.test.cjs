@@ -286,20 +286,22 @@ test('portable rules require host-profile-aware topology and a complete delegati
     /unverifiable topology, admission, effort, or non-fast guarantee means root-only/,
     /Never project one host's controls onto another/,
     /policy-only behavior as hard enforcement/,
-    /Generic wording like `use helpers`, `use agents`, `parallelize this`, `delegate this`, `use subagents`, or `finish faster with helpers` is a preference, not a bounded delegation instruction/,
-    /Do not invent scope/,
-    /UAT context, later stages, available capacity, or future helper tests cannot qualify the present task/,
-    /Before launch, state/,
-    /independent bounded scopes/,
-    /non-overlapping ownership/,
-    /material quality, safety, or critical-path benefit/,
-    /active topology and resource admission/,
-    /verified medium reasoning and non-fast child mode/,
-    /meaningful root-owned work starting immediately/,
-    /root-owned integration\/validation/,
+    /Generic requests to use helpers, agents, parallelism, delegation, subagents, or speed are preferences, not bounded scope/,
+    /do not invent it/,
+    /UAT, later stages, capacity, or future tests cannot qualify this task/,
+    /only independent-verification exception is a pre-PR adversarial checker/,
+    /after meaningful root code changes and focused validation pass with a PR-ready diff/,
+    /exactly one fresh direct read-only checker/,
+    /cannot mutate, publish, spawn, or use Fast/,
+    /generic verification, research, or second opinions remain insufficient/,
+    /canonical atomic Toolkit admission/,
+    /RAM after live reservations is the hard fail-closed gate; CPU is secondary/,
+    /ADMISSION_DENIED/,
+    /Before launch, record bounded independent scope and ownership/,
+    /material benefit, active topology and resource admission/,
+    /verified medium non-fast mode, concurrent root work/,
+    /root integration\/validation/,
     /Missing any fact prohibits launch/,
-    /may run concurrently when it materially shortens the critical path even if root could do it sequentially/,
-    /routine-work offloading/,
     /Never delegate every substantive shard/,
     /wait, poll, narrate status/,
     /Final integration, conflict resolution, cross-shard validation, and judgment remain root-owned/,
@@ -346,9 +348,9 @@ test('speed-only C2 wording remains root-only without blocking qualified special
   ];
   for (const relPath of surfaces) {
     const text = readText(relPath);
-    assert.match(text, /finish faster with helpers` is a preference, not a bounded delegation instruction/, relPath);
-    assert.match(text, /available capacity[^.]*cannot qualify the present task/, relPath);
-    assert.match(text, /Do not invent scope/, relPath);
+    assert.match(text, /helpers, agents, parallelism, delegation, subagents, or speed are preferences, not bounded scope/, relPath);
+    assert.match(text, /capacity, or future tests cannot qualify this task/, relPath);
+    assert.match(text, /do not invent it/, relPath);
     assert.match(text, /Missing any fact prohibits launch/, relPath);
     assert.match(text, /Never delegate every substantive shard/, relPath);
     assert.match(text, /Children never use or inherit fast mode/, relPath);
