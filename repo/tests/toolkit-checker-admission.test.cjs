@@ -40,18 +40,24 @@ test('checker context is bounded and contains only the review contract', () => {
   assert.deepEqual(Object.keys(value), ['task_contract', 'changed_files', 'diff', 'focused_validation', 'surrounding_invariants', 'review_checks']);
   assert.ok(Object.isFrozen(value));
   assert.throws(() => context({ diff: 'x'.repeat(control.CHECKER_CONTEXT_LIMITS.diff + 1) }), /bounded checker context/i);
+  assert.throws(() => context({ diff: '' }), /Diff is required/i);
+  assert.throws(() => context({ focused_validation: '   ' }), /Focused validation is required/i);
+  assert.throws(() => control.checkerLaunchSpec(control.HOSTS.CODEX, { ...context(), diff: '' }), /Diff is required/i);
 });
 
 test('worker and checker mappings are sticky first-class launch contracts', () => {
-  const workerBase = control.checkerLaunchSpec(control.HOSTS.CLAUDE, context(), { review_id: 'worker-contract' });
-  const worker = control.validateLaunchSpec({ ...workerBase, role: control.ROLES.WORKER, model: undefined });
+  const checkerBase = control.checkerLaunchSpec(control.HOSTS.CLAUDE, context(), { review_id: 'worker-contract' });
+  const worker = control.validateLaunchSpec({ ...checkerBase, role: control.ROLES.WORKER, model: control.MODEL_CONTRACT[control.HOSTS.CLAUDE].worker, review_id: undefined });
   assert.equal(worker.model, control.MODEL_CONTRACT[control.HOSTS.CLAUDE].worker);
-  assert.throws(() => control.validateLaunchSpec({ ...workerBase, role: control.ROLES.WORKER, model: 'silent-upgrade' }), /sticky host model/i);
+  assert.throws(() => control.validateLaunchSpec({ ...worker, model: 'silent-upgrade' }), /sticky host model/i);
   const invocation = control.claudeInvocation(worker, { claudeCli: process.execPath, env: {} });
   assert.deepEqual(invocation.raw_args.slice(0, 6), ['--print', '--output-format', 'json', '--model', 'fable-5', '--effort']);
   const checker = control.checkerLaunchSpec(control.HOSTS.CLAUDE, context(), { review_id: 'checker-contract' });
   const checkerInvocation = control.claudeInvocation(checker, { claudeCli: process.execPath, env: {} });
   assert.deepEqual(checkerInvocation.raw_args.slice(0, 6), ['--print', '--output-format', 'json', '--model', 'opus-4.8', '--effort']);
+  assert.deepEqual(checkerInvocation.raw_args.slice(checkerInvocation.raw_args.indexOf('--tools') + 1, checkerInvocation.raw_args.indexOf('--disallowedTools')), ['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch']);
+  assert.deepEqual(checkerInvocation.raw_args.slice(checkerInvocation.raw_args.indexOf('--disallowedTools') + 1, checkerInvocation.raw_args.indexOf('--permission-mode')), ['Agent', 'Task', 'Bash', 'Edit', 'Write', 'NotebookEdit']);
+  assert.equal(checkerInvocation.raw_args[checkerInvocation.raw_args.indexOf('--permission-mode') + 1], 'plan');
 });
 
 test('checker contract is direct, read-only, non-fast, non-recursive, and host-model specific', () => {
@@ -63,6 +69,11 @@ test('checker contract is direct, read-only, non-fast, non-recursive, and host-m
     assert.equal(spec.read_only, true);
     for (const key of ['may_edit', 'may_commit', 'may_push', 'may_open_pr', 'may_merge_pr', 'may_spawn_children']) assert.equal(spec[key], false);
     assert.equal(control.validateLaunchSpec(spec).depth, 1);
+    const hardened = control.checkerLaunchSpec(host, context(), { review_id: 'hardened-' + host, role: control.ROLES.WORKER, may_edit: true, may_spawn_children: true, model: 'override' });
+    assert.equal(hardened.role, control.ROLES.CHECKER);
+    assert.equal(hardened.may_edit, false);
+    assert.equal(hardened.may_spawn_children, false);
+    assert.equal(hardened.model, control.MODEL_CONTRACT[host].checker);
     assert.throws(() => control.validateLaunchSpec({ ...spec, effort: 'low' }), /medium/i);
     assert.throws(() => control.validateLaunchSpec({ ...spec, model: 'silent-upgrade' }), /sticky host model/i);
     assert.throws(() => control.validateLaunchSpec({ ...spec, depth: 2 }), /nested/i);
@@ -76,6 +87,8 @@ test('Codex and OpenCode adapters use canonical admission and deny unverified by
     assert.equal(control.admissionDecision(spec, options(host, root())).result, control.RESULTS.START);
     assert.equal(control.admissionDecision(spec, { ...options(host, root()), enforcementVerified: false }).result, control.RESULTS.REFUSE);
     assert.equal(control.admissionDecision(spec, { ...options(host, root()), adapter: 'bypass' }).result, control.RESULTS.REFUSE);
+    assert.equal(control.admissionDecision(spec, { ...options(host === control.HOSTS.CODEX ? control.HOSTS.OPENCODE : control.HOSTS.CODEX, root()) }).result, control.RESULTS.REFUSE);
+    assert.equal(control.admissionDecision(spec, options(host, root(), { profile: { capacity_mode: control.CAPACITY_MODES.ROOT_ONLY, manual_maximum: 0 } })).result, control.RESULTS.REFUSE);
   }
 });
 
@@ -88,6 +101,11 @@ test('exactly one checker reserves memory and completion releases it', () => {
   assert.match(second.reason, /exactly one/i);
   assert.equal(control.releaseReservation(first.reservation_id, { root: work }), true);
   assert.equal(JSON.parse(fs.readFileSync(control.statePath({ root: work }), 'utf8')).reservations.length, 0);
+  const repeated = control.admissionDecision(control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'one' }), options(control.HOSTS.CODEX, work));
+  assert.equal(repeated.result, control.RESULTS.REFUSE);
+  assert.match(repeated.reason, /already admitted/i);
+  const nextReview = control.admissionDecision(control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'three' }), options(control.HOSTS.CODEX, work));
+  assert.equal(nextReview.result, control.RESULTS.START);
 });
 
 test('memory remains the hard gate and CPU cannot override it', () => {

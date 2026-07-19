@@ -24,6 +24,7 @@ const CAPACITY_MODES = Object.freeze({ AUTO: 'automatic', ROOT_ONLY: 'root-only'
 const GIB = 1024 ** 3;
 const DEFAULT_WORKER_COST = 2 * GIB;
 const RESERVATION_TTL_MS = 6 * 60 * 60 * 1000;
+const CHECKER_REVIEW_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const QUEUE_TTL_MS = 10 * 60 * 1000;
 const LOCK_TTL_MS = 30 * 1000;
 const MAX_QUEUE = 4;
@@ -205,7 +206,7 @@ function withLock(options, action) {
   finally { release(); }
 }
 
-function emptyState() { return { schema: SCHEMA, reservations: [], queue: [] }; }
+function emptyState() { return { schema: SCHEMA, reservations: [], queue: [], checker_reviews: [] }; }
 
 function validReservation(entry) {
   return Boolean(entry && typeof entry === 'object'
@@ -227,16 +228,31 @@ function validQueueEntry(entry) {
     && entry.created_at_ms > 0 && entry.expires_at_ms >= entry.created_at_ms);
 }
 
+function validCheckerReview(entry) {
+  return Boolean(entry && typeof entry === 'object'
+    && typeof entry.review_id === 'string' && entry.review_id.trim().length > 0
+    && Number.isSafeInteger(entry.admitted_at_ms) && entry.admitted_at_ms > 0
+    && Number.isSafeInteger(entry.expires_at_ms) && entry.expires_at_ms >= entry.admitted_at_ms);
+}
+
 function validControlState(raw) {
   if (!raw || raw.schema !== SCHEMA || !Array.isArray(raw.reservations) || !Array.isArray(raw.queue)
-    || !raw.reservations.every(validReservation) || !raw.queue.every(validQueueEntry)) return false;
+    || (raw.checker_reviews !== undefined && !Array.isArray(raw.checker_reviews))
+    || !raw.reservations.every(validReservation) || !raw.queue.every(validQueueEntry)
+    || !(raw.checker_reviews || []).every(validCheckerReview)) return false;
   const ids = [...raw.reservations, ...raw.queue].map((entry) => entry.id);
-  return new Set(ids).size === ids.length;
+  const reviewIds = (raw.checker_reviews || []).map((entry) => entry.review_id);
+  return new Set(ids).size === ids.length && new Set(reviewIds).size === reviewIds.length;
 }
 
 function sanitizeState(raw) {
   if (!validControlState(raw)) return emptyState();
-  return { schema: SCHEMA, reservations: raw.reservations.map((entry) => ({ ...entry })), queue: raw.queue.map((entry) => ({ ...entry })) };
+  return {
+    schema: SCHEMA,
+    reservations: raw.reservations.map((entry) => ({ ...entry })),
+    queue: raw.queue.map((entry) => ({ ...entry })),
+    checker_reviews: (raw.checker_reviews || []).map((entry) => ({ ...entry })),
+  };
 }
 
 function readMutableControlState(options = {}) {
@@ -254,6 +270,7 @@ function recoverState(state, now = Date.now()) {
     return !(expired && !pidAlive(entry.owner_pid));
   });
   state.queue = state.queue.filter((entry) => Number.isFinite(entry.expires_at_ms) && entry.expires_at_ms > now);
+  state.checker_reviews = (state.checker_reviews || []).filter((entry) => Number.isFinite(entry.expires_at_ms) && entry.expires_at_ms > now);
   return state;
 }
 
@@ -452,14 +469,20 @@ function boundedText(value, limit, label) {
   return text;
 }
 
+function requiredBoundedText(value, limit, label) {
+  const text = boundedText(value, limit, label);
+  if (!text.trim()) throw new Error(`${label} is required for checker review.`);
+  return text;
+}
+
 function checkerContext(input = {}) {
   const changedFiles = Array.isArray(input.changed_files) ? input.changed_files.map(String) : [];
   if (!changedFiles.length || changedFiles.length > 200) throw new Error('Checker context requires 1-200 changed files.');
   return Object.freeze({
-    task_contract: boundedText(input.task_contract, CHECKER_CONTEXT_LIMITS.task, 'Task contract'),
+    task_contract: requiredBoundedText(input.task_contract, CHECKER_CONTEXT_LIMITS.task, 'Task contract'),
     changed_files: Object.freeze(changedFiles),
-    diff: boundedText(input.diff, CHECKER_CONTEXT_LIMITS.diff, 'Diff'),
-    focused_validation: boundedText(input.focused_validation, CHECKER_CONTEXT_LIMITS.validation, 'Focused validation'),
+    diff: requiredBoundedText(input.diff, CHECKER_CONTEXT_LIMITS.diff, 'Diff'),
+    focused_validation: requiredBoundedText(input.focused_validation, CHECKER_CONTEXT_LIMITS.validation, 'Focused validation'),
     surrounding_invariants: boundedText(input.surrounding_invariants, CHECKER_CONTEXT_LIMITS.surrounding, 'Surrounding invariants'),
     review_checks: Object.freeze(['semantic parity', 'edge and fail-closed cases', 'behavioral test strength', 'Windows/POSIX portability', 'security and privacy', 'generated-source coupling', 'version alignment', 'stale-state migration', 'user-owned-state preservation', 'scope control']),
   });
@@ -468,7 +491,9 @@ function checkerContext(input = {}) {
 function checkerLaunchSpec(host, context, overrides = {}) {
   if (!Object.values(HOSTS).includes(host)) throw new Error('Unsupported checker host.');
   const mapping = MODEL_CONTRACT[host];
+  const boundedContext = checkerContext(context);
   return {
+    ...overrides,
     role: ROLES.CHECKER, host, depth: 1, effort: mapping.effort, model: mapping.checker,
     read_only: true, may_edit: false, may_commit: false, may_push: false, may_open_pr: false, may_merge_pr: false, may_spawn_children: false,
     review_id: String(overrides.review_id || crypto.randomUUID()),
@@ -477,8 +502,7 @@ function checkerLaunchSpec(host, context, overrides = {}) {
     integration_plan: 'The root alone applies any fixes and integrates the final implementation.',
     validation_plan: 'The root reruns focused validation after every accepted checker finding.',
     material_benefit: 'A fresh bounded context can catch semantic defects before pull-request review.',
-    child_prompt: JSON.stringify(context),
-    ...overrides,
+    child_prompt: JSON.stringify(boundedContext),
   };
 }
 
@@ -547,7 +571,9 @@ function admissionDecision(specInput, options = {}) {
   catch (error) { return refusal(error.message); }
   const host = String(options.host || spec.host || HOSTS.CLAUDE);
   if (!Object.values(HOSTS).includes(host)) return refusal('The requested host adapter is unsupported.');
+  if (host !== spec.host) return refusal('The native host adapter does not match the validated child host contract.');
   const profile = options.profile || (host === HOSTS.CLAUDE ? readProfile(HOSTS.CLAUDE, options) : { capacity_mode: CAPACITY_MODES.AUTO, manual_maximum: 0, worker_estimate_bytes: DEFAULT_WORKER_COST });
+  if (profile.capacity_mode === CAPACITY_MODES.ROOT_ONLY) return refusal('The selected host profile is root-only and cannot admit a child.');
   if (host === HOSTS.CLAUDE) {
     if (profile.supported !== true || profile.status !== 'configured' || profile.enforcement_verified !== true
       || profile.controller_version !== CONTROL_VERSION || profile.topology !== TOPOLOGIES.CLAUDE_DIRECT
@@ -572,6 +598,7 @@ function admissionDecision(specInput, options = {}) {
     }
     const active = state.reservations.length;
     if (spec.role === ROLES.CHECKER && state.reservations.some((entry) => entry.role === ROLES.CHECKER)) return refusal('Exactly one independent checker may be active.');
+    if (spec.role === ROLES.CHECKER && state.checker_reviews.some((entry) => entry.review_id === spec.review_id)) return refusal('This pre-PR review already admitted its one independent checker.');
     const maximum = profile.capacity_mode === CAPACITY_MODES.MANUAL ? profile.manual_maximum : EMERGENCY_WORKER_CEILING;
     const physicalReserve = Math.max(4 * GIB, resources.physical_total * 0.25);
     const commitReserve = Math.max(6 * GIB, resources.commit_total * 0.20);
@@ -616,6 +643,9 @@ function admissionDecision(specInput, options = {}) {
       estimated_memory_bytes: requested, effort: spec.effort, status: 'reserved',
     };
     state.reservations.push(reservation);
+    if (spec.role === ROLES.CHECKER) {
+      state.checker_reviews.push({ review_id: spec.review_id, admitted_at_ms: now, expires_at_ms: now + CHECKER_REVIEW_TTL_MS });
+    }
     atomicWriteJson(statePath(options), state);
     return { result: RESULTS.START, reservation_id: reservation.id, expires_at_ms: reservation.expires_at_ms, profile: 'toolkit-controlled-direct', host, role: spec.role, model: MODEL_CONTRACT[host][spec.role], effort: spec.effort, non_fast: host === HOSTS.CLAUDE ? 'CLAUDE_CODE_DISABLE_FAST_MODE=1' : true, productive_parent: true };
   });
@@ -650,13 +680,21 @@ function releaseReservation(id, options = {}) {
   });
 }
 
+function claudeInvocationArgs(checked) {
+  const common = ['--print', '--output-format', 'json', '--model', checked.model, '--effort', checked.effort];
+  if (checked.role === ROLES.CHECKER) {
+    return [...common, '--tools', 'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', '--disallowedTools', 'Agent', 'Task', 'Bash', 'Edit', 'Write', 'NotebookEdit', '--permission-mode', 'plan', '--no-session-persistence'];
+  }
+  return [...common, '--disallowedTools', 'Agent', 'Task', '--permission-mode', 'default', '--no-session-persistence'];
+}
+
 function claudeInvocation(spec, options = {}) {
   const checked = validateLaunchSpec(spec);
   const envInput = effectiveEnvironment(options);
   const executable = processLaunch.resolveClaudeCommandInput({ explicit: options.claudeCli, persisted: options.persistedClaudeCli, env: envInput });
   const promptBytes = options.promptBytes || Buffer.from(String(checked.child_prompt || checked.child_responsibility), 'utf8');
   if (!Buffer.isBuffer(promptBytes) || promptBytes.length > MAX_PROMPT_BYTES) throw new Error('Child prompt exceeds the bounded private transport limit.');
-  const args = ['--print', '--output-format', 'json', '--model', checked.model, '--effort', checked.effort, '--disallowedTools', 'Agent', 'Task', '--permission-mode', 'default', '--no-session-persistence'];
+  const args = claudeInvocationArgs(checked);
   const env = { ...envInput, CLAUDE_CODE_DISABLE_FAST_MODE: '1', CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1', AI_AGENT_TOOLKIT_CHILD: '1' };
   const parts = processLaunch.claudeSpawnParts(executable, args, { env });
   return { executable: parts.command, args: parts.args, windowsVerbatimArguments: parts.windowsVerbatimArguments, raw_executable: executable, raw_args: args, env, stdin: promptBytes, effort: checked.effort, non_fast: true, max_depth: 1 };
@@ -772,5 +810,5 @@ if (require.main === module) main().then((code) => { process.exitCode = code; })
 module.exports = {
   SCHEMA, CONTROL_VERSION, RESULTS, CHECKER_RESULTS, HOSTS, ROLES, MODEL_CONTRACT, CHECKER_CONTEXT_LIMITS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES, LOCK_TTL_MS,
   controlRoot, profilePath, statePath, lockPath, lockRecoveryPath, readProfile, configureProfile, invalidateProfile, validateLaunchSpec, inspectResources, inspectResourceCapability, validResourceState, validActivationProof, verifyCurrentClaudeEnforcement, effectiveEnvironment, effectiveClaudeCommand, acquireLock, recoverStaleRecoveryMarker,
-  checkerRequirement, checkerContext, checkerLaunchSpec, checkerResult, checkerAdmissionOutcome, admissionDecision, updateReservation, releaseReservation, claudeInvocation, launch, recoverState, pidAlive,
+  checkerRequirement, checkerContext, checkerLaunchSpec, checkerResult, checkerAdmissionOutcome, admissionDecision, updateReservation, releaseReservation, claudeInvocationArgs, claudeInvocation, launch, recoverState, pidAlive,
 };

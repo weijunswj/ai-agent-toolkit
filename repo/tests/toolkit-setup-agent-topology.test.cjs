@@ -191,7 +191,7 @@ test('bounded exact-argv probe succeeds even when help omits supported flags', (
   assert.equal(capability.launch_supported, true);
   assert.equal(capability.launch_probe_status, 'supported');
   const probe = JSON.parse(fs.readFileSync(path.join(root, 'supported.json'), 'utf8'));
-  assert.deepEqual(probe.args, ['--print', '--output-format', 'json', '--effort', 'medium', '--disallowedTools', 'Agent', 'Task', '--permission-mode', 'default', '--no-session-persistence']);
+  assert.deepEqual(probe.args, ['--print', '--output-format', 'json', '--model', 'opus-4.8', '--effort', 'medium', '--tools', 'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', '--disallowedTools', 'Agent', 'Task', 'Bash', 'Edit', 'Write', 'NotebookEdit', '--permission-mode', 'plan', '--no-session-persistence']);
   assert.equal(probe.stdin, '');
 });
 
@@ -223,6 +223,24 @@ test('setup capability command precedence is explicit, AI env, helper env, legac
   assert.equal(core.inspectClaudeAgentCapability({ persistedClaudeCli: commands.persisted, env }).claude_command, commands.persisted);
 });
 
+test('capability probe fails closed when either sticky worker or checker model is unavailable', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-capability-model-'));
+  const target = path.join(root, 'claude-model.cjs');
+  fs.writeFileSync(target, [
+    "'use strict';",
+    "const args=process.argv.slice(2);",
+    "if(args.includes('--version')){console.log('2.1.999 fixture');process.exit(0);}",
+    "if(args.includes('--print')&&args.includes('opus-4.8')){console.error('unknown model opus-4.8');process.exit(2);}",
+    "if(args.includes('--print')){console.log('{}');process.exit(0);}",
+    'process.exit(4);',
+    '',
+  ].join('\n'));
+  const capability = core.inspectClaudeAgentCapability({ claudeCli: target });
+  assert.equal(capability.launch_supported, false);
+  assert.equal(capability.launch_probe_status, 'unsupported-syntax');
+  assert.equal(capability.launch_probe_exit_status, 0);
+  assert.equal(capability.checker_probe_exit_status, 2);
+});
 test('capability probe distinguishes unsupported syntax from unrelated runtime failure', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-capability-failures-'));
   const unsupported = core.inspectClaudeAgentCapability({ claudeCli: capabilityCli(root, 'unsupported') });

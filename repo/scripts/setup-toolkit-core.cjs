@@ -1105,15 +1105,18 @@ function inspectClaudeAgentCapability(args) {
   }
   const versionResult = helper.runClaudeCommand(command, ['--version'], { timeout: 10000, env });
   const version = `${versionResult.stdout || ''}\n${versionResult.stderr || ''}`.trim();
-  const probeArgs = ['--print', '--output-format', 'json', '--effort', 'medium', '--disallowedTools', 'Agent', 'Task', '--permission-mode', 'default', '--no-session-persistence'];
-  const probe = helper.runClaudeCommand(command, probeArgs, {
+  const probeSpecs = [
+    { role: agentControl.ROLES.WORKER, model: agentControl.MODEL_CONTRACT[agentControl.HOSTS.CLAUDE].worker, effort: 'medium' },
+    { role: agentControl.ROLES.CHECKER, model: agentControl.MODEL_CONTRACT[agentControl.HOSTS.CLAUDE].checker, effort: 'medium' },
+  ];
+  const probes = probeSpecs.map((spec) => helper.runClaudeCommand(command, agentControl.claudeInvocationArgs(spec), {
     timeout: 10000,
     input: '',
     env: { ...env, CLAUDE_CODE_DISABLE_FAST_MODE: '1', CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1' },
-  });
-  const probeOutput = `${probe.stdout || ''}\n${probe.stderr || ''}${probe.error ? `\n${probe.error.message}` : ''}`.trim();
-  const unsupportedSyntax = /unknown (?:option|argument)|unrecognized (?:option|argument)|unexpected argument|invalid (?:option|argument).*--/i.test(probeOutput);
-  const launchSupported = versionResult.status === 0 && version.length > 0 && probe.status === 0;
+  }));
+  const probeOutput = probes.map((probe) => `${probe.stdout || ''}\n${probe.stderr || ''}${probe.error ? `\n${probe.error.message}` : ''}`).join('\n').trim();
+  const unsupportedSyntax = /unknown (?:option|argument)|unrecognized (?:option|argument)|unexpected argument|invalid (?:option|argument).*--|unknown model|model .*not (?:found|available|supported)/i.test(probeOutput);
+  const launchSupported = versionResult.status === 0 && version.length > 0 && probes.every((probe) => probe.status === 0);
   const resourceCapability = agentControl.inspectResourceCapability();
   const probeStatus = launchSupported ? 'supported' : (unsupportedSyntax ? 'unsupported-syntax' : 'indeterminate-runtime-failure');
   return {
@@ -1125,7 +1128,8 @@ function inspectClaudeAgentCapability(args) {
       ? 'claude --version plus bounded empty-input exact-argv capability probe'
       : `Claude launch capability ${probeStatus}`,
     launch_probe_status: probeStatus,
-    launch_probe_exit_status: Number.isInteger(probe.status) ? probe.status : null,
+    launch_probe_exit_status: Number.isInteger(probes[0]?.status) ? probes[0].status : null,
+    checker_probe_exit_status: Number.isInteger(probes[1]?.status) ? probes[1].status : null,
     claude_command: command,
     version,
     direct_only: launchSupported,
@@ -1523,9 +1527,12 @@ function setupQuestionSpecs(args, current) {
     // or saved state is preserved; otherwise fail closed to root-only until a
     // Toolkit-controlled launch path proves live memory admission.
     if (!args.setupChoices.codexHelperCapacity) {
-      args.setupChoices.codexHelperCapacity = Number.isSafeInteger(current.delegation?.helper_count)
-        ? 'keep'
-        : ([RUNTIMES.V1, RUNTIMES.V2].includes(current.runtime?.runtime) ? 'root-only' : 'keep');
+      const unsafeV2Shape = current.delegation?.layout?.multiAgentV2Tables?.length > 1
+        || current.delegation?.layout?.multiAgentV2Children?.length > 0;
+      args.setupChoices.codexHelperCapacity = unsafeV2Shape
+        || (current.delegation?.status === 'unconfigured' && [RUNTIMES.V1, RUNTIMES.V2].includes(current.runtime?.runtime))
+        ? 'root-only'
+        : 'keep';
     }
     specs.push(resolvedQuestion({
       id: 'codex-toolkit-maintenance',
