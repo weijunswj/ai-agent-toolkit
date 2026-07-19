@@ -133,6 +133,20 @@ test('manual maximum is a backstop and never bypasses resource admission', () =>
   assert.equal(control.admissionDecision(spec(), verifiedOptions({ root: work, profile: manual, resourceState: resources() })).result, control.RESULTS.QUEUE);
 });
 
+test('shared resource admission rejects malformed capacity profiles before reserving', () => {
+  for (const malformed of [
+    { capacity_mode: control.CAPACITY_MODES.MANUAL, worker_estimate_bytes: control.DEFAULT_WORKER_COST },
+    { capacity_mode: control.CAPACITY_MODES.MANUAL, manual_maximum: 0, worker_estimate_bytes: control.DEFAULT_WORKER_COST },
+    { capacity_mode: 'unverified', manual_maximum: 64, worker_estimate_bytes: control.DEFAULT_WORKER_COST },
+  ]) {
+    const work = root();
+    const result = control.resourceAdmissionDecision(spec(), malformed, resources(), { root: work });
+    assert.equal(result.result, control.RESULTS.REFUSE);
+    assert.match(result.reason, /profile.*verified safely/i);
+    assert.equal(fs.existsSync(control.statePath({ root: work })), false);
+  }
+});
+
 test('atomic admission prevents two concurrent parents from consuming one manual slot', async () => {
   const work = root();
   control.configureProfile('claude-code', configured(control.TOPOLOGIES.CLAUDE_DIRECT, control.CAPACITY_MODES.MANUAL, { manual_maximum: 1 }), { root: work });

@@ -579,6 +579,12 @@ function refusal(reason) {
   return { result: RESULTS.REFUSE, reason, safe_action: 'Continue with the root agent only; no worker was launched.' };
 }
 
+function validAdmissionProfile(profile) {
+  if (!profile || ![CAPACITY_MODES.AUTO, CAPACITY_MODES.MANUAL].includes(profile.capacity_mode)) return false;
+  return profile.capacity_mode !== CAPACITY_MODES.MANUAL
+    || (Number.isSafeInteger(profile.manual_maximum) && profile.manual_maximum >= 1 && profile.manual_maximum <= MAX_MANUAL_WORKERS);
+}
+
 function admissionDecision(specInput, options = {}) {
   const childRefusal = childLaunchRefusal(options);
   if (childRefusal) return childRefusal;
@@ -590,6 +596,7 @@ function admissionDecision(specInput, options = {}) {
   if (host !== spec.host) return refusal('The native host adapter does not match the validated child host contract.');
   const profile = options.profile || (host === HOSTS.CLAUDE ? readProfile(HOSTS.CLAUDE, options) : { capacity_mode: CAPACITY_MODES.AUTO, manual_maximum: 0, worker_estimate_bytes: DEFAULT_WORKER_COST });
   if (profile.capacity_mode === CAPACITY_MODES.ROOT_ONLY) return refusal('The selected host profile is root-only and cannot admit a child.');
+  if (!validAdmissionProfile(profile)) return refusal('The selected host admission profile could not be verified safely.');
   if (host === HOSTS.CLAUDE) {
     if (profile.supported !== true || profile.status !== 'configured' || profile.enforcement_verified !== true
       || profile.controller_version !== CONTROL_VERSION || profile.topology !== TOPOLOGIES.CLAUDE_DIRECT
@@ -608,6 +615,7 @@ function resourceAdmissionDecision(specInput, profile, resources, options = {}) 
   try { spec = validateLaunchSpec(specInput); }
   catch (error) { return refusal(error.message); }
   if (!profile || profile.capacity_mode === CAPACITY_MODES.ROOT_ONLY) return refusal('The selected host profile is root-only and cannot admit a child.');
+  if (!validAdmissionProfile(profile)) return refusal('The selected host admission profile could not be verified safely.');
   if (!validResourceState(resources)) return refusal('Resource state could not be verified safely.');
   return resourceAdmissionDecisionValidated(spec, profile, resources, options);
 }
