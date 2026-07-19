@@ -9,7 +9,7 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '2.7.18';
+const EXPECTED_TOOLKIT_VERSION = '2.7.19';
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-start.cjs';
 const SESSION_START_POWERSHELL_REL_PATH = 'repo/scripts/toolkit-codex-session-start.ps1';
@@ -87,9 +87,12 @@ function defaultWindowsPowerShellPath() {
   return path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 }
 
+function powershellSingleQuoted(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
 function windowsSessionStartCommand(powershellPath = defaultWindowsPowerShellPath()) {
-  const script = `& { & (Join-Path $env:PLUGIN_ROOT '${SESSION_START_POWERSHELL_REL_PATH}') ${SESSION_START_ARGS.map((arg) => `'${arg}'`).join(' ')} }`;
-  return `"${powershellPath}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "${script}"`;
+  return `& ${powershellSingleQuoted(powershellPath)} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$env:PLUGIN_ROOT/${SESSION_START_POWERSHELL_REL_PATH}"`;
 }
 
 function writeFileAtomically(filePath, bytes) {
@@ -234,8 +237,10 @@ function verifySessionStartHook(hooksPath, options = {}) {
     errors.push('SessionStart command must call the Toolkit hook-safe launcher');
   }
   if (/toolkit-local-bridge\.cjs/.test(command)) errors.push('SessionStart command must not call toolkit-local-bridge.cjs directly');
-  for (const arg of SESSION_START_ARGS) {
-    if (!command.includes(arg)) errors.push(`SessionStart command must include ${arg}`);
+  if (!options.windows) {
+    for (const arg of SESSION_START_ARGS) {
+      if (!command.includes(arg)) errors.push(`SessionStart command must include ${arg}`);
+    }
   }
   return errors;
 }

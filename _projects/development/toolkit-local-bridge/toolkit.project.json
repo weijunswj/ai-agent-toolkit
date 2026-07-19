@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.7.18",
+  "version": "2.7.19",
   "version_policy": "semver",
-  "version_notes": "Makes the exact supported n8n Skills pristine and repaired compatibility fingerprints CRLF-safe for explicitly declared text paths without weakening fail-closed reconciliation.",
+  "version_notes": "Uses a direct Windows PowerShell script-file boundary for Codex Toolkit SessionStart so the wrapper and Node launcher remain reachable without nested command-text quoting.",
   "outputs": [
     {
       "kind": "curated",

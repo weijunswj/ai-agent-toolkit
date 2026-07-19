@@ -27,7 +27,7 @@ function copyFile(relPath, pluginRoot) {
 }
 
 function createPluginFixture(root, bridgeText) {
-  const pluginRoot = path.join(root, 'plugin root with spaces & brackets [safe]', 'ai-agent-toolkit');
+  const pluginRoot = path.join(root, "plugin root with spaces & brackets [safe] (quoted 'path') $dollar `tick", 'ai-agent-toolkit');
   copyFile(setup.SESSION_START_LAUNCHER_REL_PATH, pluginRoot);
   copyFile(setup.SESSION_START_POWERSHELL_REL_PATH, pluginRoot);
   writeFile(path.join(pluginRoot, '.codex-plugin', 'hooks', 'hooks.json'), `${JSON.stringify({
@@ -66,13 +66,17 @@ function createRealBridgePluginFixture(root) {
   return pluginRoot;
 }
 
-function runWindowsHook(pluginRoot, input = '') {
-  return spawnSync(setup.windowsSessionStartCommand(), [], {
+function runWindowsHook(pluginRoot, input = '', extraEnv = {}) {
+  const powershellPath = path.join(
+    process.env.SystemRoot || process.env.SYSTEMROOT || 'C:\\Windows',
+    'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'
+  );
+  const command = setup.windowsSessionStartCommand(powershellPath);
+  return spawnSync(powershellPath, ['-NoProfile', '-NonInteractive', '-Command', command], {
     cwd: repoRoot,
-    env: { ...process.env, PATH: '', PLUGIN_ROOT: pluginRoot },
+    env: { ...process.env, PATH: '', PLUGIN_ROOT: pluginRoot, ...extraEnv },
     input,
     encoding: 'utf8',
-    shell: true,
     timeout: 30000,
     windowsHide: true,
   });
@@ -196,6 +200,45 @@ test('Windows launcher uses exact Node metadata, preserves stdin and output, and
   assert.equal(result.stderr, '');
 });
 
+test('Windows installed command uses a direct script-file boundary without nested command text', () => {
+  const command = setup.windowsSessionStartCommand("C:\\Program Files\\Power's $hell `tick\\powershell.exe");
+  assert.equal(command, "& 'C:\\Program Files\\Power''s $hell `tick\\powershell.exe' -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"$env:PLUGIN_ROOT/repo/scripts/toolkit-codex-session-start.ps1\"");
+  assert.doesNotMatch(command, /\$\{PLUGIN_ROOT\}|(?:^|\s)-Command(?:\s|$)|&\s*\{/i);
+  assert.doesNotMatch(command, /\.sh(?:["\s]|$)|(?:^|[\\/])code(?:\.exe)?(?:["\s]|$)/i);
+});
+
+test('Codex Desktop Windows host shape reaches the wrapper and Node launcher without file association', { skip: process.platform !== 'win32' }, () => {
+  const root = tmpRoot();
+  const sentinelDir = path.join(root, 'sentinel commands');
+  const codeSentinel = path.join(root, 'code-launched.txt');
+  writeFile(path.join(sentinelDir, 'code.cmd'), '@echo launched>"%CODE_SENTINEL%"\r\n');
+  const pluginRoot = createPluginFixture(root, [
+    "'use strict';",
+    "const fs = require('node:fs');",
+    "exports.run = (args) => { console.log('node launcher entered; payload=' + JSON.stringify({ argv: process.argv.slice(1), args, stdin: fs.readFileSync(0, 'utf8') })); return { status: 0 }; };",
+    '',
+  ].join('\n'));
+  const result = runWindowsHook(pluginRoot, '{"source":"codex-desktop"}', {
+    PATH: sentinelDir,
+    CODE_SENTINEL: codeSentinel,
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const payload = JSON.parse(result.stdout.match(/node launcher entered; payload=(\{.*\})/)[1]);
+  assert.equal(payload.argv[0], path.join(pluginRoot, setup.SESSION_START_LAUNCHER_REL_PATH));
+  assert.deepEqual(payload.argv.slice(1), ['--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin']);
+  assert.deepEqual(payload.args, ['--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin']);
+  assert.equal(payload.stdin, '{"source":"codex-desktop"}');
+  assert.equal(fs.existsSync(codeSentinel), false, 'Toolkit SessionStart must not launch VS Code');
+});
+
+test('Codex Desktop Windows host shape preserves optional-maintenance non-fatal exit behavior', { skip: process.platform !== 'win32' }, () => {
+  const root = tmpRoot();
+  const pluginRoot = createPluginFixture(root, "'use strict';\nexports.run = () => ({ status: 9 });\n");
+  const result = runWindowsHook(pluginRoot, '{"source":"startup"}');
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(result.stdout.trim(), launcher.WARNING);
+  assert.equal(result.stderr, '');
+});
 test('Windows launcher reports an unavailable Node runtime without a red exit or private path', { skip: process.platform !== 'win32' }, () => {
   const root = tmpRoot();
   const pluginRoot = createPluginFixture(root, "'use strict';\nexports.run = () => ({ status: 0 });\n");
