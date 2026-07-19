@@ -639,6 +639,8 @@ function admissionDecision(specInput, options = {}) {
 }
 
 function resourceAdmissionDecision(specInput, profile, resources, options = {}) {
+  const childRefusal = childLaunchRefusal(options);
+  if (childRefusal) return childRefusal;
   let spec;
   try { spec = validateLaunchSpec(specInput); }
   catch (error) { return refusal(error.message); }
@@ -876,7 +878,7 @@ async function supervise(args) {
       const captureChecker = spec.role === ROLES.CHECKER;
       const finish = (value) => { if (!settled) { settled = true; resolve({ code: value, output: Buffer.concat(output), outputExceeded }); } };
       // The executable passed validation and argv is separate; spawn is required for streaming private stdin.
-      // lgtm[js/shell-command-injection-from-environment]
+      // codeql[js/shell-command-injection-from-environment]
       const child = spawn(invocation.executable, invocation.args, { windowsVerbatimArguments: invocation.windowsVerbatimArguments, env: invocation.env, windowsHide: true, stdio: ['pipe', captureChecker ? 'pipe' : 'inherit', 'inherit'] });
       if (captureChecker) {
         child.stdout.on('data', (chunk) => {

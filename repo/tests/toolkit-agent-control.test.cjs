@@ -147,6 +147,17 @@ test('shared resource admission rejects malformed capacity profiles before reser
   }
 });
 
+test('shared resource admission refuses Toolkit child recursion before creating state', () => {
+  const work = root();
+  const result = control.resourceAdmissionDecision(spec(), profile(), resources(), {
+    root: work,
+    env: { ...process.env, AI_AGENT_TOOLKIT_CHILD: '1' },
+  });
+  assert.equal(result.result, control.RESULTS.REFUSE);
+  assert.match(result.reason, /children cannot launch/i);
+  assert.equal(fs.existsSync(control.statePath({ root: work })), false);
+});
+
 test('atomic admission prevents two concurrent parents from consuming one manual slot', async () => {
   const work = root();
   control.configureProfile('claude-code', configured(control.TOPOLOGIES.CLAUDE_DIRECT, control.CAPACITY_MODES.MANUAL, { manual_maximum: 1 }), { root: work });
