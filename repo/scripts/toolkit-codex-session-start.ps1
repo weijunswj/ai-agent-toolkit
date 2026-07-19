@@ -1,8 +1,6 @@
 # AI-AGENT-TOOLKIT:CODEX-SESSION-START-LAUNCHER v1
-param(
-  [Parameter(ValueFromRemainingArguments = $true)]
-  [string[]]$HookArgs
-)
+
+$hookArgs = @('--hook', '--sync-enabled', '--write', '--sync-source', 'codex-plugin')
 
 $ErrorActionPreference = "Stop"
 $warning = 'Toolkit SessionStart skipped optional maintenance safely. Run `setup toolkit` in Codex to repair the installed hook.'
@@ -22,7 +20,7 @@ try {
   $nodePath = [System.IO.Path]::GetFullPath($nodeValue)
   if (-not (Test-Path -LiteralPath $nodePath -PathType Leaf)) { throw "Node executable unavailable" }
 
-  & $nodePath $launcherPath @HookArgs
+  & $nodePath $launcherPath @hookArgs
   if ($LASTEXITCODE -ne 0) { throw "Node launcher returned non-zero" }
 } catch {
   Write-Output $warning
