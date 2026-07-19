@@ -25,8 +25,8 @@ test('Claude recommended execution writes only the enforceable direct automatic 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /\*\*Recommended:\*\* Use direct Toolkit-managed subagents with native Agent launches blocked\./);
   assert.match(result.stdout, /\*\*Selected:\*\* Direct Toolkit-managed subagents only/);
-  assert.match(result.stdout, /\*\*Recommended:\*\* Manage direct-worker capacity automatically from validated available resources\./);
-  assert.match(result.stdout, /\*\*Selected:\*\* Manage automatically based on available resources/);
+  assert.doesNotMatch(result.stdout, /How should Toolkit manage agent capacity|Claude Code agent capacity choice/);
+  assert.match(result.stdout, /Helper-agent capacity questions shown: no; Toolkit automatically limits controlled children/);
   assert.match(result.stdout, /Selected topology: claude-toolkit-direct/);
   assert.match(result.stdout, /Capacity mode: automatic/);
   const profile = JSON.parse(fs.readFileSync(control.profilePath('claude-code', { root: path.join(root, '.ai-agent-toolkit', 'agent-control') }), 'utf8'));
@@ -104,10 +104,11 @@ test('kept broader-native survives root-only capacity across flag and piped exec
   const piped = run([
     '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
     '--claude-cli', fakeClaude,
+    '--claude-topology', 'keep', '--claude-plugin-behavior', 'instructions',
   ], {
     env,
     timeout: 300000,
-    input: ['keep', 'keep', 'keep', 'keep', 'root-only', 'instructions'].join('\n'),
+    input: Array(16).fill('').join('\n'),
   });
   assert.equal(piped.status, 0, piped.stderr || piped.stdout);
   assert.match(piped.stdout, /Selected topology: broader-native/);

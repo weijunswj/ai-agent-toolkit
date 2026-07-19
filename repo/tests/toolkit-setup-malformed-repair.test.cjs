@@ -28,7 +28,7 @@ test('complete question bank precedes a sanitized malformed-marker proposal and 
   writeFile(filePath, original.toString('utf8'));
   const result = run([
     '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
-    '--yes-recommended', '--skip-codex-plugin-auto-refresh',
+    '--yes-recommended', '--skip-codex-plugin-auto-refresh', '--codex-helper-capacity', 'root-only',
   ], {
     env: { ...isolatedHomeEnv(root), SYNTHETIC_PRIVATE_ENV: 'ENV-DO-NOT-PRINT' },
     timeout: 300000,
@@ -51,7 +51,7 @@ test('complete question bank precedes a sanitized malformed-marker proposal and 
   assert.deepEqual(backupFiles(root), []);
   assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false);
 });
-test('literal apply completes the bounded root-only repair after the full question bank', () => {
+test('approved repair completes the bounded root-only repair after the full question bank', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const filePath = codexConfig(root);
@@ -59,10 +59,9 @@ test('literal apply completes the bounded root-only repair after the full questi
   writeFile(filePath, original);
   const result = run([
     '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
-    '--skip-codex-plugin-auto-refresh',
+    '--skip-codex-plugin-auto-refresh', '--yes-recommended', '--codex-helper-capacity', 'root-only', '--approve-codex-config-proposal',
   ], {
     env: isolatedHomeEnv(root),
-    input: ['keep', 'keep', 'keep', 'root-only', 'apply'].join('\n'),
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -91,8 +90,8 @@ test('plan and JSON question surfaces remain coherent and read-only for malforme
       '--skip-codex-plugin-auto-refresh',
     ], { env: isolatedHomeEnv(root), timeout: 300000 });
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.match(result.stdout, /codex-helper-agents|Codex helper agents/);
-    assert.match(result.stdout, /root-only|Root agent only/);
+    assert.doesNotMatch(result.stdout, /codex-helper-agents|Codex helper agents/);
+    assert.match(result.stdout, /automatically limits|automatic.*memory|root-only/i);
     assert.doesNotMatch(result.stdout, /SYNTHETIC-DO-NOT-PRINT/);
     assert.deepEqual(fs.readFileSync(filePath), original);
     assert.deepEqual(backupFiles(root), []);

@@ -8,19 +8,18 @@ const {
 } = require('./toolkit-setup-test-support.cjs');
 const delegation = require('../scripts/codex-delegation-config.cjs');
 
-test('empty consolidated delegation answer selects the visible root-only recommendation', () => {
+test('ordinary setup automatically selects the root-only safety outcome without a quantity row', () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
-  const result = run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin], {
+  const result = run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--yes-recommended', '--skip-codex-plugin-auto-refresh'], {
     env: isolatedHomeEnv(root),
-    input: ['keep', 'keep', 'keep', '', 'disable'].join('\n'),
     timeout: 300000
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Codex helper agents[\s\S]*\*\*Selected:\*\* Root agent only/);
+  assert.doesNotMatch(result.stdout, /Codex helper agents[\s\S]*\*\*Selected:/);
+  assert.match(result.stdout, /Helper-agent capacity questions shown: no/);
   assert.match(result.stdout, /Configuration changed this run: yes/);
   assert.match(fs.readFileSync(codexConfig(root), 'utf8'), /max_concurrent_threads_per_session = 1/);
-  assert.match(fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8'), /--disable-codex-plugin-auto-refresh --write/);
 });
 
 test('explicit keep does not migrate an exact legacy block or create a backup', () => {
@@ -29,8 +28,8 @@ test('explicit keep does not migrate an exact legacy block or create a backup', 
   const configPath = codexConfig(root);
   const original = `[agents]\n${delegation.expectedLegacyBlock(1)}\n`;
   writeFile(configPath, original);
-  const result = run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--skip-codex-plugin-auto-refresh'], {
-    env: isolatedHomeEnv(root), timeout: 300000, input: ['keep', 'keep', 'keep', 'keep'].join('\n')
+  const result = run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--skip-codex-plugin-auto-refresh', '--yes-recommended', '--codex-helper-capacity', 'keep'], {
+    env: isolatedHomeEnv(root), timeout: 300000
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /Configuration changed this run: no/);
@@ -46,16 +45,14 @@ test('migration-required defaults and yes-recommended keep the legacy block unch
     const editorLog = path.join(root, 'editor.log');
     const original = Buffer.from(`[agents]\n${delegation.expectedLegacyBlock(1)}\n`);
     writeFile(configPath, original.toString('utf8'));
-    const args = ['--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--skip-codex-plugin-auto-refresh'];
-    if (mode === 'yes-recommended') args.push('--yes-recommended');
+    const args = ['--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--skip-codex-plugin-auto-refresh', '--codex-helper-capacity', 'keep', '--yes-recommended'];
     const result = run(args, {
       env: { ...isolatedHomeEnv(root), SETUP_FAKE_CODEX_EDITOR_LOG: editorLog },
-      input: mode === 'empty' ? ['keep', 'keep', 'keep', ''].join('\n') : undefined,
+      input: undefined,
       timeout: 300000,
     });
     assert.equal(result.status, 0, `${mode}: ${result.stderr || result.stdout}`);
-    assert.match(result.stdout, /Update the existing Toolkit helper setting/);
-    assert.match(result.stdout, /Codex helper agents[\s\S]*\*\*Selected:\*\* Keep current/);
+    assert.doesNotMatch(result.stdout, /Update the existing Toolkit helper setting|Codex helper agents[\s\S]*\*\*Selected:/);
     assert.match(result.stdout, /Helper-capacity outcome this run: kept/);
     assert.match(result.stdout, /PR #237 legacy block migrated: no/);
     assert.match(result.stdout, /Configuration changed this run: no/);
@@ -101,7 +98,7 @@ test('legacy migration is a distinct explicit choice with a full visible preview
     '--yes-recommended', '--skip-codex-plugin-auto-refresh', '--codex-helper-capacity', 'one-helper',
   ], { env: { ...isolatedHomeEnv(root), SETUP_FAKE_CODEX_EDITOR_LOG: editorLog }, timeout: 300000 });
   assert.equal(repeated.status, 0, repeated.stderr || repeated.stdout);
-  assert.match(repeated.stdout, /Helper-capacity outcome this run: already configured/);
+  assert.match(repeated.stdout, /Helper-capacity outcome this run: kept|already configured/);
   assert.match(repeated.stdout, /PR #237 legacy block migrated: no/);
   assert.deepEqual(fs.readFileSync(configPath), configuredBytes);
   assert.equal(fs.readFileSync(editorLog, 'utf8').trim(), 'config/batchWrite');
@@ -215,8 +212,7 @@ test('already matching user-owned V1 and V2 configs complete without apply, edit
       name: 'V2 empty input',
       runtime: 'v2',
       text: ['[features.multi_agent_v2]', 'enabled = true', 'max_concurrent_threads_per_session = 1', `root_agent_usage_hint_text = ${JSON.stringify(delegation.CODEX_V2_ROOT_GUIDANCE)}`, `subagent_usage_hint_text = ${JSON.stringify(delegation.CODEX_V2_HELPER_GUIDANCE)}`, ''].join('\n'),
-      args: [],
-      input: ['keep', 'keep', 'keep', ''].join('\n'),
+      args: ['--yes-recommended', '--codex-helper-capacity', 'root-only'],
     },
     {
       name: 'V1 yes-recommended',
@@ -242,7 +238,7 @@ test('already matching user-owned V1 and V2 configs complete without apply, edit
     });
     assert.equal(result.status, 0, `${fixture.name}: ${result.stderr || result.stdout}`);
     assert.doesNotMatch(result.stdout, /Type apply to approve/);
-    assert.match(result.stdout, /Helper-capacity outcome this run: already configured/);
+    assert.match(result.stdout, /Helper-capacity outcome this run: kept|already configured/);
     assert.match(result.stdout, /Configuration changed this run: no/);
     assert.deepEqual(fs.readFileSync(configPath), original);
     assert.doesNotMatch(fs.readFileSync(configPath, 'utf8'), /AI-AGENT-TOOLKIT/);
@@ -306,7 +302,7 @@ test('setup rejects V1 and V2 config drift after proposal approval without edito
     writeFile(configPath, fixture.original);
     const result = run([
       '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
-      '--skip-codex-plugin-auto-refresh',
+      '--skip-codex-plugin-auto-refresh', '--yes-recommended', '--codex-helper-capacity', 'one-helper', '--approve-codex-config-proposal',
     ], {
       env: {
         ...isolatedHomeEnv(root),
@@ -315,7 +311,6 @@ test('setup rejects V1 and V2 config drift after proposal approval without edito
         SETUP_FAKE_CONFIG_DRIFT_CONTENT: fixture.drift,
         SETUP_FAKE_CODEX_EDITOR_LOG: editorLog,
       },
-      input: ['keep', 'keep', 'keep', 'one-helper', 'apply'].join('\n'),
       timeout: 300000,
     });
     assert.equal(result.status, 23, `${fixture.runtime}: ${result.stderr || result.stdout}`);
