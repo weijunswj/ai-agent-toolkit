@@ -97,7 +97,7 @@ test('detached Claude supervisor forces medium non-fast invocation and releases 
   if (process.platform !== 'win32') assert.equal(fs.statSync(result.error_path).mode & 0o777, 0o600);
 });
 
-test('missing explicit child environment fails truthfully and releases its reservation', async () => {
+test('failed checker execution releases its reservation and pending review identity', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-agent-lifecycle-missing-env-'));
   const cache = path.join(root, 'cache');
   const sourceRoot = path.resolve(__dirname, '..', '..');
@@ -119,6 +119,19 @@ test('missing explicit child environment fails truthfully and releases its reser
   ].join('\n'));
   const activationProof = pluginSetup.installedActivationProof(pluginEntry, control.CONTROL_VERSION);
   const result = control.launch({
+    role: control.ROLES.CHECKER,
+    host: control.HOSTS.CLAUDE,
+    model: control.MODEL_CONTRACT[control.HOSTS.CLAUDE].checker,
+    effort: 'medium',
+    depth: 1,
+    read_only: true,
+    may_edit: false,
+    may_commit: false,
+    may_push: false,
+    may_open_pr: false,
+    may_merge_pr: false,
+    may_spawn_children: false,
+    review_id: 'failed-checker-lifecycle',
     child_responsibility: 'Implement the isolated parser shard and focused unit coverage.',
     parent_responsibility: 'Review the integration interface and reconcile adjacent contracts.',
     integration_plan: 'The root owns interface reconciliation and final integration judgement.',
@@ -137,14 +150,17 @@ test('missing explicit child environment fails truthfully and releases its reser
   });
   assert.equal(result.status, 'launched');
   let reservations = [{}];
+  let checkerReviews = [{}];
   let error = '';
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const state = JSON.parse(fs.readFileSync(control.statePath({ root }), 'utf8'));
     reservations = state.reservations;
+    checkerReviews = state.checker_reviews;
     if (fs.existsSync(result.error_path)) error = fs.readFileSync(result.error_path, 'utf8');
     if (reservations.length === 0 && error) break;
     await wait(25);
   }
   assert.equal(reservations.length, 0);
+  assert.equal(checkerReviews.length, 0);
   assert.match(error, /missing required child config/);
 });

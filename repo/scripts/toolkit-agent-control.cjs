@@ -232,7 +232,8 @@ function validCheckerReview(entry) {
   return Boolean(entry && typeof entry === 'object'
     && typeof entry.review_id === 'string' && entry.review_id.trim().length > 0
     && Number.isSafeInteger(entry.admitted_at_ms) && entry.admitted_at_ms > 0
-    && Number.isSafeInteger(entry.expires_at_ms) && entry.expires_at_ms >= entry.admitted_at_ms);
+    && Number.isSafeInteger(entry.expires_at_ms) && entry.expires_at_ms >= entry.admitted_at_ms
+    && (entry.status === undefined || ['pending', 'completed'].includes(entry.status)));
 }
 
 function validControlState(raw) {
@@ -447,7 +448,7 @@ const PACKAGED_OR_RUNTIME_PREFIXES = [
   'repo/scripts/', 'repo/tests/', '_projects/', 'skills/', '.codex-plugin/', '.claude-plugin/',
   '.agents/', 'AGENTS.md', 'CLAUDE.md', 'GEMINI.md', 'package.json', 'package-lock.json',
 ];
-const CHECKER_CONTEXT_LIMITS = Object.freeze({ task: 64 * 1024, diff: 512 * 1024, validation: 64 * 1024, surrounding: 128 * 1024 });
+const CHECKER_CONTEXT_LIMITS = Object.freeze({ task: 64 * 1024, files: 64 * 1024, diff: 512 * 1024, validation: 64 * 1024, surrounding: 128 * 1024 });
 
 function checkerRequirement(input = {}) {
   const files = Array.isArray(input.changed_files) ? input.changed_files.map((value) => String(value).replace(/\\/g, '/')) : [];
@@ -482,6 +483,7 @@ function requiredBoundedText(value, limit, label) {
 function checkerContext(input = {}) {
   const changedFiles = Array.isArray(input.changed_files) ? input.changed_files.map(String) : [];
   if (!changedFiles.length || changedFiles.length > 200) throw new Error('Checker context requires 1-200 changed files.');
+  if (Buffer.byteLength(JSON.stringify(changedFiles), 'utf8') > CHECKER_CONTEXT_LIMITS.files) throw new Error('Changed-file list exceeds the bounded checker context limit.');
   return Object.freeze({
     task_contract: requiredBoundedText(input.task_contract, CHECKER_CONTEXT_LIMITS.task, 'Task contract'),
     changed_files: Object.freeze(changedFiles),
@@ -496,6 +498,16 @@ function checkerLaunchSpec(host, context, overrides = {}) {
   if (!Object.values(HOSTS).includes(host)) throw new Error('Unsupported checker host.');
   const mapping = MODEL_CONTRACT[host];
   const boundedContext = checkerContext(context);
+  const childPrompt = JSON.stringify({
+    instructions: 'Perform a read-only adversarial review of the bounded ready diff. Do not mutate files, run mutating commands, or launch children.',
+    result_contract: {
+      statuses: [CHECKER_RESULTS.PASS, CHECKER_RESULTS.FINDINGS],
+      pass: 'Return PASS only when no actionable finding remains.',
+      findings: 'Return FINDINGS with bounded file and evidence details for every actionable defect.',
+    },
+    context: boundedContext,
+  });
+  if (Buffer.byteLength(childPrompt, 'utf8') > MAX_PROMPT_BYTES) throw new Error('Checker prompt exceeds the bounded private transport limit.');
   return {
     ...overrides,
     role: ROLES.CHECKER, host, depth: 1, effort: mapping.effort, model: mapping.checker,
@@ -506,7 +518,7 @@ function checkerLaunchSpec(host, context, overrides = {}) {
     integration_plan: 'The root alone applies any fixes and integrates the final implementation.',
     validation_plan: 'The root reruns focused validation after every accepted checker finding.',
     material_benefit: 'A fresh bounded context can catch semantic defects before pull-request review.',
-    child_prompt: JSON.stringify(boundedContext),
+    child_prompt: childPrompt,
   };
 }
 
@@ -662,7 +674,7 @@ function resourceAdmissionDecisionValidated(spec, profile, resources, options) {
     };
     state.reservations.push(reservation);
     if (spec.role === ROLES.CHECKER) {
-      state.checker_reviews.push({ review_id: spec.review_id, admitted_at_ms: now, expires_at_ms: now + CHECKER_REVIEW_TTL_MS });
+      state.checker_reviews.push({ review_id: spec.review_id, admitted_at_ms: now, expires_at_ms: now + CHECKER_REVIEW_TTL_MS, status: 'pending' });
     }
     atomicWriteJson(statePath(options), state);
     return { result: RESULTS.START, reservation_id: reservation.id, expires_at_ms: reservation.expires_at_ms, profile: 'toolkit-controlled-direct', host, role: spec.role, model: MODEL_CONTRACT[host][spec.role], effort: spec.effort, non_fast: host === HOSTS.CLAUDE ? 'CLAUDE_CODE_DISABLE_FAST_MODE=1' : true, productive_parent: true };
@@ -698,6 +710,33 @@ function releaseReservation(id, options = {}) {
   });
 }
 
+function updateCheckerReview(reviewId, status, options = {}) {
+  if (!['pending', 'completed'].includes(status)) return false;
+  return withLock(options, () => {
+    const current = readMutableControlState(options);
+    if (!current.exists || !current.state) return false;
+    const state = recoverState(current.state);
+    const entry = state.checker_reviews.find((item) => item.review_id === reviewId);
+    if (!entry) return false;
+    entry.status = status;
+    if (!validControlState(state)) return false;
+    atomicWriteJson(statePath(options), state);
+    return true;
+  });
+}
+
+function clearPendingCheckerReview(reviewId, options = {}) {
+  return withLock(options, () => {
+    const current = readMutableControlState(options);
+    if (!current.exists || !current.state) return false;
+    const state = recoverState(current.state);
+    const before = state.checker_reviews.length;
+    state.checker_reviews = state.checker_reviews.filter((entry) => entry.review_id !== reviewId || entry.status === 'completed');
+    if (state.checker_reviews.length === before) return false;
+    atomicWriteJson(statePath(options), state);
+    return true;
+  });
+}
 function claudeInvocationArgs(checked) {
   const common = ['--print', '--output-format', 'json', '--model', checked.model, '--effort', checked.effort];
   if (checked.role === ROLES.CHECKER) {
@@ -756,6 +795,7 @@ function launch(specInput, options = {}) {
     return { ...admitted, supervisor_pid: supervisor.pid, spec_path: specPath, output_path: outputPath, error_path: errorPath, status: 'launched' };
   } catch {
     releaseReservation(admitted.reservation_id, options);
+    if (spec.role === ROLES.CHECKER) clearPendingCheckerReview(spec.review_id, options);
     for (const privatePath of [specPath, outputPath, errorPath]) {
       try { if (fs.existsSync(privatePath) && verifyPrivateRegularFile(privatePath)) fs.unlinkSync(privatePath); } catch {}
     }
@@ -790,6 +830,10 @@ async function supervise(args) {
       child.stdin.end(invocation.stdin);
     });
   } finally {
+    if (spec?.role === ROLES.CHECKER) {
+      if (code === 0 && !updateCheckerReview(spec.review_id, 'completed', options)) code = 1;
+      if (code !== 0) clearPendingCheckerReview(spec.review_id, options);
+    }
     releaseReservation(args.reservation, options);
     try { if (verifyPrivateRegularFile(args.spec)) fs.unlinkSync(args.spec); } catch {}
   }
@@ -828,5 +872,5 @@ if (require.main === module) main().then((code) => { process.exitCode = code; })
 module.exports = {
   SCHEMA, CONTROL_VERSION, RESULTS, CHECKER_RESULTS, HOSTS, ROLES, MODEL_CONTRACT, CHECKER_CONTEXT_LIMITS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES, LOCK_TTL_MS,
   controlRoot, profilePath, statePath, lockPath, lockRecoveryPath, readProfile, configureProfile, invalidateProfile, validateLaunchSpec, inspectResources, inspectResourceCapability, validResourceState, validActivationProof, verifyCurrentClaudeEnforcement, effectiveEnvironment, effectiveClaudeCommand, acquireLock, recoverStaleRecoveryMarker,
-  checkerRequirement, checkerContext, checkerLaunchSpec, checkerResult, checkerAdmissionOutcome, admissionDecision, resourceAdmissionDecision, updateReservation, releaseReservation, claudeInvocationArgs, claudeInvocation, launch, recoverState, pidAlive,
+  checkerRequirement, checkerContext, checkerLaunchSpec, checkerResult, checkerAdmissionOutcome, admissionDecision, resourceAdmissionDecision, updateReservation, releaseReservation, updateCheckerReview, clearPendingCheckerReview, claudeInvocationArgs, claudeInvocation, launch, recoverState, pidAlive,
 };

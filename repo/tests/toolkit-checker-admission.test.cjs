@@ -49,6 +49,7 @@ test('checker context is bounded and contains only the review contract', () => {
   assert.throws(() => context({ diff: '' }), /Diff is required/i);
   assert.throws(() => context({ focused_validation: '   ' }), /Focused validation is required/i);
   assert.throws(() => control.checkerLaunchSpec(control.HOSTS.CODEX, { ...context(), diff: '' }), /Diff is required/i);
+  assert.throws(() => context({ changed_files: Array.from({ length: 200 }, (_, index) => String(index) + '-' + 'x'.repeat(400)) }), /Changed-file list exceeds/i);
 });
 
 test('worker and checker mappings are sticky first-class launch contracts', () => {
@@ -60,6 +61,10 @@ test('worker and checker mappings are sticky first-class launch contracts', () =
   assert.deepEqual(invocation.raw_args.slice(0, 6), ['--print', '--output-format', 'json', '--model', 'fable-5', '--effort']);
   const checker = control.checkerLaunchSpec(control.HOSTS.CLAUDE, context(), { review_id: 'checker-contract' });
   const checkerInvocation = control.claudeInvocation(checker, { claudeCli: process.execPath, env: {} });
+  const checkerPrompt = JSON.parse(checker.child_prompt);
+  assert.match(checkerPrompt.instructions, /read-only adversarial review/i);
+  assert.deepEqual(checkerPrompt.result_contract.statuses, [control.CHECKER_RESULTS.PASS, control.CHECKER_RESULTS.FINDINGS]);
+  assert.equal(checkerPrompt.context.diff, context().diff);
   assert.deepEqual(checkerInvocation.raw_args.slice(0, 6), ['--print', '--output-format', 'json', '--model', 'opus-4.8', '--effort']);
   assert.deepEqual(checkerInvocation.raw_args.slice(checkerInvocation.raw_args.indexOf('--tools') + 1, checkerInvocation.raw_args.indexOf('--disallowedTools')), ['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch']);
   assert.deepEqual(checkerInvocation.raw_args.slice(checkerInvocation.raw_args.indexOf('--disallowedTools') + 1, checkerInvocation.raw_args.indexOf('--permission-mode')), ['Agent', 'Task', 'Bash', 'Edit', 'Write', 'NotebookEdit']);
@@ -106,6 +111,7 @@ test('exactly one checker reserves memory and completion releases it', () => {
   const second = decision(control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'two' }), options(control.HOSTS.CODEX, work));
   assert.equal(second.result, control.RESULTS.REFUSE);
   assert.match(second.reason, /exactly one/i);
+  assert.equal(control.updateCheckerReview('one', 'completed', { root: work }), true);
   assert.equal(control.releaseReservation(first.reservation_id, { root: work }), true);
   assert.equal(JSON.parse(fs.readFileSync(control.statePath({ root: work }), 'utf8')).reservations.length, 0);
   const repeated = decision(control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'one' }), options(control.HOSTS.CODEX, work));
@@ -115,6 +121,15 @@ test('exactly one checker reserves memory and completion releases it', () => {
   assert.equal(nextReview.result, control.RESULTS.START);
 });
 
+test('failed checker launch clears only pending review identity so the required review can retry', () => {
+  const work = root();
+  const spec = control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'failed-before-check' });
+  const admitted = decision(spec, options(control.HOSTS.CODEX, work));
+  assert.equal(admitted.result, control.RESULTS.START);
+  assert.equal(control.clearPendingCheckerReview('failed-before-check', { root: work }), true);
+  assert.equal(control.releaseReservation(admitted.reservation_id, { root: work }), true);
+  assert.equal(decision(spec, options(control.HOSTS.CODEX, work)).result, control.RESULTS.START);
+});
 test('memory remains the hard gate and CPU cannot override it', () => {
   const spec = control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'memory' });
   const deniedRoot = root();
