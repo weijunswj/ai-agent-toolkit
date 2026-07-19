@@ -27,7 +27,7 @@ function copyFile(relPath, pluginRoot) {
 }
 
 function createPluginFixture(root, bridgeText) {
-  const pluginRoot = path.join(root, "plugin root with spaces & brackets [safe] (quoted 'path')", 'ai-agent-toolkit');
+  const pluginRoot = path.join(root, "plugin root with spaces & brackets [safe] (quoted 'path') $dollar `tick", 'ai-agent-toolkit');
   copyFile(setup.SESSION_START_LAUNCHER_REL_PATH, pluginRoot);
   copyFile(setup.SESSION_START_POWERSHELL_REL_PATH, pluginRoot);
   writeFile(path.join(pluginRoot, '.codex-plugin', 'hooks', 'hooks.json'), `${JSON.stringify({
@@ -71,7 +71,7 @@ function runWindowsHook(pluginRoot, input = '', extraEnv = {}) {
     process.env.SystemRoot || process.env.SYSTEMROOT || 'C:\\Windows',
     'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'
   );
-  const command = setup.windowsSessionStartCommand(powershellPath).replace('${PLUGIN_ROOT}', pluginRoot.replace(/\\/g, '/'));
+  const command = setup.windowsSessionStartCommand(powershellPath);
   return spawnSync(powershellPath, ['-NoProfile', '-NonInteractive', '-Command', command], {
     cwd: repoRoot,
     env: { ...process.env, PATH: '', PLUGIN_ROOT: pluginRoot, ...extraEnv },
@@ -201,10 +201,9 @@ test('Windows launcher uses exact Node metadata, preserves stdin and output, and
 });
 
 test('Windows installed command uses a direct script-file boundary without nested command text', () => {
-  const command = setup.windowsSessionStartCommand('C:\\Program Files\\PowerShell Test\\powershell.exe');
-  assert.match(command, /^& "C:\\Program Files\\PowerShell Test\\powershell\.exe" /);
-  assert.match(command, / -File "\$\{PLUGIN_ROOT\}\/repo\/scripts\/toolkit-codex-session-start\.ps1"$/);
-  assert.doesNotMatch(command, /(?:^|\s)-Command(?:\s|$)|&\s*\{/i);
+  const command = setup.windowsSessionStartCommand("C:\\Program Files\\Power's $hell `tick\\powershell.exe");
+  assert.equal(command, "& 'C:\\Program Files\\Power''s $hell `tick\\powershell.exe' -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"$env:PLUGIN_ROOT/repo/scripts/toolkit-codex-session-start.ps1\"");
+  assert.doesNotMatch(command, /\$\{PLUGIN_ROOT\}|(?:^|\s)-Command(?:\s|$)|&\s*\{/i);
   assert.doesNotMatch(command, /\.sh(?:["\s]|$)|(?:^|[\\/])code(?:\.exe)?(?:["\s]|$)/i);
 });
 

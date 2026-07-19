@@ -87,8 +87,12 @@ function defaultWindowsPowerShellPath() {
   return path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 }
 
+function powershellSingleQuoted(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
 function windowsSessionStartCommand(powershellPath = defaultWindowsPowerShellPath()) {
-  return `& "${powershellPath}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "\${PLUGIN_ROOT}/${SESSION_START_POWERSHELL_REL_PATH}"`;
+  return `& ${powershellSingleQuoted(powershellPath)} -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$env:PLUGIN_ROOT/${SESSION_START_POWERSHELL_REL_PATH}"`;
 }
 
 function writeFileAtomically(filePath, bytes) {
