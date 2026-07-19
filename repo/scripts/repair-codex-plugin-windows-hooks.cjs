@@ -9,11 +9,27 @@ const { auditPluginRoot, isTemporaryMarketplacePluginRoot } = require('./audit-n
 
 const WRAPPER_MARKER = 'AI-AGENT-TOOLKIT-WINDOWS-HOOK-WRAPPER v1';
 const N8N_NODE_FALLBACK_MARKER = 'AI-AGENT-TOOLKIT:N8N-NODE-FALLBACK v1';
+const N8N_SKILLS_TEXT_EOL_PATHS = Object.freeze([
+  '.codex-plugin/plugin.json',
+  'hooks/hooks.json',
+  'hooks/session-start.sh',
+  'hooks/pre-tool-use/_emit.sh',
+  'hooks/pre-tool-use/create-workflow.sh',
+  'hooks/pre-tool-use/execute-workflow.sh',
+  'hooks/pre-tool-use/get-node.sh',
+  'hooks/pre-tool-use/test-workflow.sh',
+  'hooks/pre-tool-use/update-workflow.sh',
+  'hooks/pre-tool-use/validate-workflow.sh',
+  'hooks/post-tool-use/validate-workflow.sh',
+  'hooks/run-hook.ps1',
+  'skills/using-n8n-skills-official/SKILL.md'
+]);
 const N8N_SKILLS_COMPATIBILITY = Object.freeze({
   plugin_id: 'n8n-skills@n8n-io',
   version: '1.0.1',
   upstream_repo: 'n8n-io/skills',
   upstream_commit: 'c350f8b4bd8417108bce266d88e21b8a1bb966db',
+  text_eol_paths: N8N_SKILLS_TEXT_EOL_PATHS,
   pristine_sha256: Object.freeze({
     '.codex-plugin/plugin.json': '3e7da0f4b2cff1a351254614f2bdef71f41b4d2f9e8c45cb27926a0a876ae5aa',
     'hooks/hooks.json': '192f4c3bf06de12ee7e6c7b9ec0f35aae915e33d6874154377a3e93e688862b1',
@@ -40,7 +56,7 @@ const N8N_SKILLS_COMPATIBILITY = Object.freeze({
     'hooks/pre-tool-use/update-workflow.sh': 'a7a7d1c5be93bb47f7e75e684198957b43b9f1a3515f1f2a462a560ed1b6efe4',
     'hooks/pre-tool-use/validate-workflow.sh': '0b32c21a6a549f051594e18b065b9c62187c1b472ef726bdc7b36a6b202933ca',
     'hooks/post-tool-use/validate-workflow.sh': 'e6e3f060d5770aa640dc57f9d23792316e9cf965199395771a585b3a504e983d',
-    'hooks/run-hook.ps1': '7f827162387fa3ef1e8849bf7a33d6134736b64c0d1b0c6f412ffd259d4e93d1',
+    'hooks/run-hook.ps1': 'ca721972f6a7f972f828b0481ae0f19a08e057fe986a1f17dc081b759e9b666f',
     'skills/using-n8n-skills-official/SKILL.md': 'b19218c759d5a3538e0e11182adb3a38b50712e4f4c1822fa80834aa25fe9c09'
   })
 });
@@ -419,17 +435,46 @@ function isN8nSkillsPlugin(pluginRoot, options) {
   return normalizeRelPath(pluginRoot).toLowerCase().includes('/n8n-io/n8n-skills/');
 }
 
-function sha256File(filePath) {
-  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+function canonicalizeCrLfBytes(bytes) {
+  const chunks = [];
+  let start = 0;
+  let index = bytes.indexOf('\r\n');
+  if (index === -1) return bytes;
+
+  while (index !== -1) {
+    chunks.push(bytes.subarray(start, index), Buffer.from('\n'));
+    start = index + 2;
+    index = bytes.indexOf('\r\n', start);
+  }
+  chunks.push(bytes.subarray(start));
+  return Buffer.concat(chunks);
+}
+
+function sha256File(filePath, options = {}) {
+  const bytes = fs.readFileSync(filePath);
+  const canonicalBytes = options.canonicalTextEol ? canonicalizeCrLfBytes(bytes) : bytes;
+  return crypto.createHash('sha256').update(canonicalBytes).digest('hex');
+}
+
+function n8nSkillsCompatibilityFingerprints(pluginRoot, expected) {
+  const textEolPaths = new Set(N8N_SKILLS_COMPATIBILITY.text_eol_paths);
+  const fingerprints = {};
+  for (const relPath of Object.keys(expected)) {
+    const filePath = path.join(pluginRoot, ...relPath.split('/'));
+    if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+      fingerprints[relPath] = null;
+      continue;
+    }
+    fingerprints[relPath] = sha256File(filePath, {
+      canonicalTextEol: textEolPaths.has(relPath)
+    });
+  }
+  return fingerprints;
 }
 
 function fingerprintsMatch(pluginRoot, expected) {
-  for (const [relPath, expectedSha256] of Object.entries(expected)) {
-    const filePath = path.join(pluginRoot, ...relPath.split('/'));
-    if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) return false;
-    if (sha256File(filePath) !== expectedSha256) return false;
-  }
-  return true;
+  const actual = n8nSkillsCompatibilityFingerprints(pluginRoot, expected);
+  return Object.entries(expected).every(([relPath, expectedSha256]) => actual[relPath] === expectedSha256);
 }
 
 function classifyN8nSkillsCompatibility(pluginRoot) {
@@ -885,11 +930,14 @@ if (require.main === module) {
 
 module.exports = {
   N8N_SKILLS_COMPATIBILITY,
+  N8N_SKILLS_TEXT_EOL_PATHS,
   N8N_NODE_FALLBACK_MARKER,
   WRAPPER_MARKER,
+  canonicalizeCrLfBytes,
   classifyHookCommand,
   collectHookCommandEntries,
   classifyN8nSkillsCompatibility,
+  n8nSkillsCompatibilityFingerprints,
   reconcileN8nSkillsPlugin,
   repairPluginRoot,
   tokenizeCommand

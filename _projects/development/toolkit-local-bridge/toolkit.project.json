@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.7.17",
+  "version": "2.7.18",
   "version_policy": "semver",
-  "version_notes": "Makes supported n8n Skills Windows hook repair durable through exact, fail-closed Codex plugin-maintenance reconciliation and narrow intent routing.",
+  "version_notes": "Makes the exact supported n8n Skills pristine and repaired compatibility fingerprints CRLF-safe for explicitly declared text paths without weakening fail-closed reconciliation.",
   "outputs": [
     {
       "kind": "curated",

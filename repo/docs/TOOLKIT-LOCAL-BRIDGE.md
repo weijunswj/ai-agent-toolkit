@@ -479,12 +479,14 @@ The automatic repair path is deliberately limited to the supported n8n Skills co
 
 - It selects only the single installed and enabled `n8n-skills@n8n-io` version positively reported by Codex, or the one exact cache candidate backed by explicit config enablement when the CLI omits it; it never guesses by directory or version ordering.
 - It skips the Toolkit native plugin cache so Toolkit updates remain source-owned by the managed checkout.
-- It verifies the supported version and exact pristine or repaired fingerprints before any write.
+- It verifies the supported version and exact pristine or repaired fingerprints before any write. For the compatibility contract's explicitly declared text paths only, hashing replaces each exact CRLF byte pair with LF. It preserves all other bytes, including lone CR bytes, spaces, tabs, final-newline presence, Unicode representation, and BOMs; non-text paths retain raw-byte hashing.
 - It writes only the already approved launcher rewrites, Toolkit-managed `hooks/run-hook.ps1`, and n8n JSON fallbacks for the supported pristine layout.
 - It fails closed on partial, malformed, or unknown layouts and leaves every unrelated cache file unchanged.
 - It writes details to the Toolkit update report and keeps hook stdout compact.
 
 The Toolkit reconciliation runs inside the Toolkit plugin's `SessionStart` hook. Repository fixtures prove that it repairs the on-disk n8n cache for later hook discovery, but the supported Codex host contract does not establish that one plugin hook can replace another plugin command already discovered for the same `SessionStart` event. Do not claim the first session after an upstream refresh is error-free from repository tests alone. The earliest bounded maintenance point with deterministic before-session effect is the existing approved Toolkit n8n hook repair immediately after the plugin refresh and before starting or restarting Codex; native post-merge UAT must record whether same-event startup ordering also protects the first session. No background mutation or broader passive repair is implied.
+
+After merge, native Windows UAT must use the real currently installed supported cache through the approved Toolkit maintenance lifecycle: confirm the CRLF pristine cache classifies `repair-required`; run maintenance; verify the wrapper is installed, active `SessionStart` no longer launches raw `.sh`, runtime hook JSON passes, and repeated maintenance is a byte-identical no-op; then start a fresh Codex session and confirm no `.sh` file-association or editor launch. Repeat the observation after a disposable simulated upstream pristine refresh followed by approved maintenance. Record the first-session result after repair, the first-session result after simulated refresh, whether same-`SessionStart` ordering causes one transient failure, and the next-session result when applicable.
 
 Example:
 
