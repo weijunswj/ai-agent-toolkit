@@ -8,6 +8,7 @@ const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const {
   findInstalledPluginEntries,
+  inspectCodexConfiguredPluginState,
   inspectCodexPluginList,
   verifyInstalledCacheFreshness
 } = require('./setup-codex-toolkit-plugin.cjs');
@@ -23,7 +24,7 @@ const {
 } = require('./toolkit-staging-generations.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.7.16';
+const BRIDGE_VERSION = '2.7.17';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -3602,6 +3603,41 @@ function selectCurrentN8nSkillsCache({ codexHome, pluginList, discovered }) {
   return { status: 'selected', entry, reason: '' };
 }
 
+function selectCurrentN8nSkillsCacheFromConfig({ codexHome, discovered }) {
+  const configured = inspectCodexConfiguredPluginState({
+    codexHome,
+    identity: 'n8n-skills@n8n-io'
+  });
+  if (configured.status === 'disabled') {
+    return {
+      status: 'not-installed',
+      entry: null,
+      reason: 'Codex config explicitly reports n8n-skills@n8n-io disabled'
+    };
+  }
+  if (configured.status !== 'enabled') {
+    return {
+      status: 'ambiguous',
+      entry: null,
+      reason: `Codex CLI omitted n8n-skills@n8n-io and current installed/enabled state cannot be proven: ${configured.reason}`
+    };
+  }
+
+  const candidates = discovered.roots.filter((entry) => entry.plugin_id === 'n8n-skills@n8n-io');
+  if (candidates.length !== 1) {
+    return {
+      status: 'ambiguous',
+      entry: null,
+      reason: `Codex config explicitly enables n8n-skills@n8n-io, but ${candidates.length} cache candidates exist; the current cache cannot be proven without arbitrary selection`
+    };
+  }
+  return {
+    status: 'selected',
+    entry: candidates[0],
+    reason: 'Selected by explicit Codex config enablement plus one exact n8n Skills cache candidate'
+  };
+}
+
 function repairThirdPartyCodexPluginHooks(options = {}) {
   const codexHome = path.resolve(options.codexHome || defaultCodexHome());
   const windows = options.windows ?? process.platform === 'win32';
@@ -3634,22 +3670,20 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
   const pluginInspection = Object.prototype.hasOwnProperty.call(options, 'pluginList')
     ? { ok: true, pluginList: options.pluginList, errors: [] }
     : inspectCodexPluginList({ codexCommand: options.codexCommand || '' });
-  if (!pluginInspection.ok) {
-    for (const entry of n8nCandidates) {
-      result.skipped.push({ ...entry, reason: 'current installed n8n Skills cache could not be proven' });
-    }
-    result.status = 'repair-failed';
-    result.errors = (pluginInspection.errors || ['Codex installed plugin state is unavailable'])
-      .slice(0, THIRD_PARTY_HOOK_REPAIR_ERROR_LIMIT);
-    result.skipped.sort((left, right) => left.plugin_root.localeCompare(right.plugin_root));
-    return result;
-  }
-
-  const selection = selectCurrentN8nSkillsCache({
-    codexHome,
-    pluginList: pluginInspection.pluginList,
-    discovered
-  });
+  const cliMatches = pluginInspection.ok
+    ? findInstalledPluginEntries(pluginInspection.pluginList, {
+      pluginId: 'n8n-skills@n8n-io',
+      name: 'n8n-skills',
+      marketplaceName: 'n8n-io'
+    })
+    : [];
+  const selection = pluginInspection.ok && cliMatches.length > 0
+    ? selectCurrentN8nSkillsCache({
+      codexHome,
+      pluginList: pluginInspection.pluginList,
+      discovered
+    })
+    : selectCurrentN8nSkillsCacheFromConfig({ codexHome, discovered });
   if (selection.status !== 'selected') {
     for (const entry of n8nCandidates) {
       result.skipped.push({ ...entry, reason: 'historical or unverified n8n Skills cache; not current according to Codex installed state' });
@@ -3657,7 +3691,10 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
     result.skipped.sort((left, right) => left.plugin_root.localeCompare(right.plugin_root));
     if (selection.status === 'not-installed') return result;
     result.status = 'repair-failed';
-    result.errors = [selection.reason].slice(0, THIRD_PARTY_HOOK_REPAIR_ERROR_LIMIT);
+    result.errors = [
+      selection.reason,
+      ...(!pluginInspection.ok ? (pluginInspection.errors || []) : [])
+    ].slice(0, THIRD_PARTY_HOOK_REPAIR_ERROR_LIMIT);
     return result;
   }
 

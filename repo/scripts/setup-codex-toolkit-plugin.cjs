@@ -9,7 +9,7 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '2.7.16';
+const EXPECTED_TOOLKIT_VERSION = '2.7.17';
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-start.cjs';
 const SESSION_START_POWERSHELL_REL_PATH = 'repo/scripts/toolkit-codex-session-start.ps1';
@@ -453,12 +453,63 @@ function parseTomlSectionValues(sectionText) {
 }
 
 function configHasEnabledPlugin(configText) {
-  const id = escapeRegex(pluginId());
-  const section = findTomlSection(
-    configText,
-    new RegExp(`^plugins\\.(?:"${id}"|'${id}')$`)
-  );
-  return Boolean(section && /^\s*enabled\s*=\s*true\s*(?:#.*)?$/im.test(section));
+  return inspectConfiguredPluginState(configText, pluginId()).status === 'enabled';
+}
+
+function inspectConfiguredPluginState(configText, identity) {
+  const id = escapeRegex(identity);
+  const sectionPattern = new RegExp(`^plugins\\.(?:"${id}"|'${id}')$`);
+  const lines = String(configText || '').split(/\r?\n/);
+  const sections = [];
+  let body = null;
+  for (const line of lines) {
+    const section = line.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/);
+    if (section) {
+      if (body) sections.push(body);
+      body = sectionPattern.test(section[1].trim()) ? [] : null;
+      continue;
+    }
+    if (body) body.push(line);
+  }
+  if (body) sections.push(body);
+
+  if (sections.length !== 1) {
+    return {
+      status: 'unprovable',
+      reason: sections.length === 0
+        ? `Codex config has no explicit [plugins."${identity}"] state`
+        : `Codex config has multiple [plugins."${identity}"] sections`
+    };
+  }
+  const enabledValues = sections[0]
+    .map((line) => line.match(/^\s*enabled\s*=\s*(true|false)\s*(?:#.*)?$/))
+    .filter(Boolean)
+    .map((match) => match[1].toLowerCase());
+  if (enabledValues.length !== 1) {
+    return {
+      status: 'unprovable',
+      reason: `Codex config does not contain one explicit boolean enabled value for [plugins."${identity}"]`
+    };
+  }
+  return {
+    status: enabledValues[0] === 'true' ? 'enabled' : 'disabled',
+    reason: `Codex config explicitly reports [plugins."${identity}"] as ${enabledValues[0]}`
+  };
+}
+
+function inspectCodexConfiguredPluginState(options = {}) {
+  const codexHome = path.resolve(options.codexHome || defaultCodexHome());
+  const identity = String(options.identity || '').trim();
+  if (!identity) return { status: 'unprovable', reason: 'Plugin identity is required for Codex config inspection' };
+  const configPath = codexConfigPath(codexHome);
+  if (!fs.existsSync(configPath)) {
+    return { status: 'unprovable', reason: `Codex config is unavailable for ${identity}` };
+  }
+  try {
+    return inspectConfiguredPluginState(fs.readFileSync(configPath, 'utf8'), identity);
+  } catch {
+    return { status: 'unprovable', reason: `Codex config state for ${identity} could not be read` };
+  }
 }
 
 function localMarketplaceSection(configText) {
@@ -1111,7 +1162,9 @@ module.exports = {
   defaultWindowsPowerShellPath,
   evaluateCodexToolkitPluginState,
   findInstalledPluginEntries,
+  inspectCodexConfiguredPluginState,
   inspectCodexPluginList,
+  inspectConfiguredPluginState,
   prepareInstalledSessionStart,
   prepareInstalledSessionStartIfPresent,
   sourceSessionStartCommand,

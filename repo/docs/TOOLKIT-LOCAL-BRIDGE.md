@@ -464,7 +464,7 @@ Codex plugin cache auto-refresh is included in the setup checklist. Codex may re
 
 ## Windows Codex Plugin Hook Repair
 
-Windows hook repair is a separate post-install maintenance utility. Use [repair-codex-plugin-windows-hooks.cjs](../scripts/repair-codex-plugin-windows-hooks.cjs) after a requested Codex plugin install or update when an installed plugin root contains `hooks/hooks.json`. The Local Bridge updater inventories plugin cache identity independently of that legacy hook path, then uses `codex plugin list --available --json` to select the single installed and enabled `n8n-skills@n8n-io` version/root. Retained historical versions are skipped. Missing, moved, unknown, or ambiguous current layouts fail closed without mutation. Only the selected exact supported cache may reach the existing repair implementation when Codex plugin cache auto-refresh is enabled.
+Windows hook repair is a separate post-install maintenance utility. Use [repair-codex-plugin-windows-hooks.cjs](../scripts/repair-codex-plugin-windows-hooks.cjs) after a requested Codex plugin install or update when an installed plugin root contains `hooks/hooks.json`. The Local Bridge updater inventories plugin cache identity independently of that legacy hook path, then prefers `codex plugin list --available --json` to select the single installed and enabled `n8n-skills@n8n-io` version/root. Because the CLI has omitted installed plugins in supported field observations, an omitted n8n entry is not proof of uninstall. With discovered n8n cache candidates, fallback selection requires one explicit `[plugins."n8n-skills@n8n-io"] enabled = true` config state and exactly one cache candidate; multiple candidates or absent/malformed config state fail closed without mutation. An explicit `enabled = false` is sufficient disabled-state proof and leaves retained caches untouched. Retained historical versions are skipped when the CLI positively identifies another current version. Missing, moved, unknown, or ambiguous current layouts fail closed without mutation. Only the selected exact supported cache may reach the existing repair implementation when Codex plugin cache auto-refresh is enabled.
 
 The repair utility:
 
@@ -477,12 +477,14 @@ The repair utility:
 
 The automatic repair path is deliberately limited to the supported n8n Skills compatibility contract:
 
-- It selects only the single installed and enabled `n8n-skills@n8n-io` version reported by Codex, never retained historical caches, unrelated plugins, or temporary marketplace checkouts.
+- It selects only the single installed and enabled `n8n-skills@n8n-io` version positively reported by Codex, or the one exact cache candidate backed by explicit config enablement when the CLI omits it; it never guesses by directory or version ordering.
 - It skips the Toolkit native plugin cache so Toolkit updates remain source-owned by the managed checkout.
 - It verifies the supported version and exact pristine or repaired fingerprints before any write.
 - It writes only the already approved launcher rewrites, Toolkit-managed `hooks/run-hook.ps1`, and n8n JSON fallbacks for the supported pristine layout.
 - It fails closed on partial, malformed, or unknown layouts and leaves every unrelated cache file unchanged.
 - It writes details to the Toolkit update report and keeps hook stdout compact.
+
+The Toolkit reconciliation runs inside the Toolkit plugin's `SessionStart` hook. Repository fixtures prove that it repairs the on-disk n8n cache for later hook discovery, but the supported Codex host contract does not establish that one plugin hook can replace another plugin command already discovered for the same `SessionStart` event. Do not claim the first session after an upstream refresh is error-free from repository tests alone. The earliest bounded maintenance point with deterministic before-session effect is the existing approved Toolkit n8n hook repair immediately after the plugin refresh and before starting or restarting Codex; native post-merge UAT must record whether same-event startup ordering also protects the first session. No background mutation or broader passive repair is implied.
 
 Example:
 
