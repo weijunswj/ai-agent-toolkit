@@ -60,7 +60,7 @@ The hub contains:
 - Sync timestamp.
 - Repo auto-update state: `repo_auto_update_enabled`, `repo_path`, `repo_branch`, `repo_remote`, `last_repo_update`, `last_repo_update_status`, `last_repo_update_from_commit`, `last_repo_update_to_commit`, and `last_repo_update_error`.
 - Update-report state: `last_update_report_path`, `update_report_enabled`, failure-only opening behavior, `update_report_retention_days`, max retained report count, and last cleanup status. Legacy `update_report_open_enabled=true` is retained only as migration evidence and is normalized to failure-only behavior.
-- Codex plugin cache auto-refresh preference: `codex_plugin_auto_refresh_enabled`. On Codex/Windows, this same opt-in also allows trusted Toolkit startup hooks to repair Windows-unsafe installed third-party Codex plugin hook caches after plugin updates.
+- Codex plugin cache auto-refresh preference: `codex_plugin_auto_refresh_enabled`. On Codex/Windows, this same opt-in also allows trusted Toolkit startup hooks to reconcile the exactly recognised installed `n8n-skills@n8n-io` hook cache after supported plugin updates.
 - Target paths.
 - Target detected, enabled, disabled, stale, and synced state.
 
@@ -401,7 +401,7 @@ node repo/scripts/validate-toolkit.cjs
 node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs
 ```
 
-9. Checks the running host's native plugin cache state against the configured repo source. When Codex is the running host and `codex_plugin_auto_refresh_enabled` is true, the trusted `main` hook refreshes only the Codex Toolkit plugin cache through `repo/scripts/setup-codex-toolkit-plugin.cjs --write --json --repo-root <repo_path>` after repo validation and before delegated target sync completes, so a stale Codex cache can still be refreshed when a later target sync step fails safely. On Codex/Windows, the same opt-in then audits installed non-Toolkit Codex plugin caches with `hooks/hooks.json`; if a cache directly invokes `.sh` hooks or uses bare/WSL bash, it rewrites those commands through the Toolkit PowerShell/Git Bash wrapper and records the result in the update report. Claude Code hooks report check-only/manual native refresh status and do not mutate Codex or Claude plugin caches from the opposite host.
+9. Checks the running host's native plugin cache state against the configured repo source. When Codex is the running host and `codex_plugin_auto_refresh_enabled` is true, the trusted `main` hook refreshes only the Codex Toolkit plugin cache through `repo/scripts/setup-codex-toolkit-plugin.cjs --write --json --repo-root <repo_path>` after repo validation and before delegated target sync completes, so a stale Codex cache can still be refreshed when a later target sync step fails safely. On Codex/Windows, the same opt-in then inspects only the installed `n8n-skills@n8n-io` cache. An exact supported pristine layout is rewritten through the Toolkit PowerShell/Git Bash wrapper; an exact repaired layout is a no-op; unknown or malformed layouts fail closed and are recorded for compatibility review. Claude Code hooks report check-only/manual native refresh status and do not mutate Codex or Claude plugin caches from the opposite host.
 10. Delegates enabled-target sync to the freshly updated repo script with `--skip-repo-auto-update`.
 
 Before the repo-update and target-sync work, the same startup hook also runs a passive repo-local instruction preflight against the current working directory. For Codex it checks `AGENTS.md`; for Claude Code it checks `AGENTS.md` and `CLAUDE.md`. The preflight reads only the expected files and bundled repo-local templates, verifies `AI-AGENT-TOOLKIT` managed marker structure, compares expected managed block content, prints a concise warning for missing, broken, or stale content, and never writes files, creates backups, or performs repair. When findings exist, the agent should pause and ask whether to run `ai-coding-agent-rules` check/repair/refresh now or proceed with the current task despite the warning.
@@ -421,7 +421,7 @@ npm run validate:all
 node --test repo/tests/toolkit-local-bridge.test.cjs
 ```
 
-Repo auto-update never runs `git pull`, merge commits, rebase, package installs, marketplace installs, credential writes, `n8n_live` actions, or arbitrary project-repo mutations. Codex native Toolkit cache refresh and installed third-party hook repair run only after the user enables Codex plugin cache auto-refresh. If validation, fetch, fast-forward, delegation, native cache refresh, or third-party hook repair fails in hook mode, the hook prints or reports a concise warning, records the last status when possible, and exits successfully so agent startup is not blocked.
+Repo auto-update never runs `git pull`, merge commits, rebase, package installs, marketplace installs, credential writes, `n8n_live` actions, or arbitrary project-repo mutations. Codex native Toolkit cache refresh and exact supported n8n Skills hook reconciliation run only after the user enables Codex plugin cache auto-refresh. If validation, fetch, fast-forward, delegation, native cache refresh, or n8n hook reconciliation fails in hook mode, the hook prints or reports a concise warning, records the last status when possible, and exits successfully so agent startup is not blocked.
 
 ## Update Reports
 
@@ -460,11 +460,11 @@ During `setup toolkit`, report creation and retention remain in the upfront wiza
 
 Toolkit-managed update reports/logs older than the configured retention window are cleaned up best-effort on setup and hook/update runs. Default retention is 7 days and can be configured with `--update-report-retention-days <positive-integer>`. Cleanup also caps retained files to the newest 200 Toolkit reports inside the retention window. Cleanup only considers Toolkit report filenames under the Toolkit-managed update report/log directory, never arbitrary user files, and never treats cleanup failure as a setup or startup blocker. Setup and audit summaries include retention days, max retained reports, deleted count, skipped/error count, and the report/log directory path.
 
-Codex plugin cache auto-refresh is included in the setup checklist. Codex may refresh only the Codex Toolkit native plugin cache from the managed `main` checkout. On Windows, that opt-in also permits repair of unsafe hook launchers in installed third-party Codex plugin caches. Claude Code reports check-only/manual native refresh state and does not let Codex mutate Claude Code cache.
+Codex plugin cache auto-refresh is included in the setup checklist. Codex may refresh only the Codex Toolkit native plugin cache from the managed `main` checkout. On Windows, that opt-in also permits exact supported `n8n-skills@n8n-io` hook reconciliation. Claude Code reports check-only/manual native refresh state and does not let Codex mutate Claude Code cache.
 
 ## Windows Codex Plugin Hook Repair
 
-Windows hook repair is a separate post-install maintenance utility. Use [repair-codex-plugin-windows-hooks.cjs](../scripts/repair-codex-plugin-windows-hooks.cjs) after a requested Codex plugin install or update when an installed plugin root contains `hooks/hooks.json`. The Local Bridge updater may also call this utility from a trusted Codex startup hook when Codex plugin cache auto-refresh is enabled, limited to installed non-Toolkit Codex plugin caches under `CODEX_HOME/plugins/cache`.
+Windows hook repair is a separate post-install maintenance utility. Use [repair-codex-plugin-windows-hooks.cjs](../scripts/repair-codex-plugin-windows-hooks.cjs) after a requested Codex plugin install or update when an installed plugin root contains `hooks/hooks.json`. The Local Bridge updater inventories plugin cache identity independently of that legacy hook path, then prefers `codex plugin list --available --json` to select the single installed and enabled `n8n-skills@n8n-io` version/root. Because the CLI has omitted installed plugins in supported field observations, an omitted n8n entry is not proof of uninstall. With discovered n8n cache candidates, fallback selection requires one explicit `[plugins."n8n-skills@n8n-io"] enabled = true` config state and exactly one cache candidate; multiple candidates or absent/malformed config state fail closed without mutation. An explicit `enabled = false` is sufficient disabled-state proof and leaves retained caches untouched. Retained historical versions are skipped when the CLI positively identifies another current version. Missing, moved, unknown, or ambiguous current layouts fail closed without mutation. Only the selected exact supported cache may reach the existing repair implementation when Codex plugin cache auto-refresh is enabled.
 
 The repair utility:
 
@@ -475,13 +475,16 @@ The repair utility:
 - Applies the n8n-specific Node JSON fallback patch for `n8n-skills@n8n-io`.
 - Fails with an actionable error when a hook cannot be repaired safely.
 
-The automatic repair path is generic for third-party Codex plugin hook launchers but deliberately narrow:
+The automatic repair path is deliberately limited to the supported n8n Skills compatibility contract:
 
-- It scans installed cache roots only, never temporary marketplace checkouts.
+- It selects only the single installed and enabled `n8n-skills@n8n-io` version positively reported by Codex, or the one exact cache candidate backed by explicit config enablement when the CLI omits it; it never guesses by directory or version ordering.
 - It skips the Toolkit native plugin cache so Toolkit updates remain source-owned by the managed checkout.
-- It writes only `hooks/hooks.json` launcher rewrites and the Toolkit-managed `hooks/run-hook.ps1` wrapper for generic plugins.
-- It applies n8n hook internals patches only when the installed plugin is identified as `n8n-skills`.
+- It verifies the supported version and exact pristine or repaired fingerprints before any write.
+- It writes only the already approved launcher rewrites, Toolkit-managed `hooks/run-hook.ps1`, and n8n JSON fallbacks for the supported pristine layout.
+- It fails closed on partial, malformed, or unknown layouts and leaves every unrelated cache file unchanged.
 - It writes details to the Toolkit update report and keeps hook stdout compact.
+
+The Toolkit reconciliation runs inside the Toolkit plugin's `SessionStart` hook. Repository fixtures prove that it repairs the on-disk n8n cache for later hook discovery, but the supported Codex host contract does not establish that one plugin hook can replace another plugin command already discovered for the same `SessionStart` event. Do not claim the first session after an upstream refresh is error-free from repository tests alone. The earliest bounded maintenance point with deterministic before-session effect is the existing approved Toolkit n8n hook repair immediately after the plugin refresh and before starting or restarting Codex; native post-merge UAT must record whether same-event startup ordering also protects the first session. No background mutation or broader passive repair is implied.
 
 Example:
 

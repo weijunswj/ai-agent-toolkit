@@ -236,6 +236,34 @@ test('toolkit skill routing stays routing-only', () => {
   assert.doesNotMatch(routing, /`\$skill-name`/);
 });
 
+test('narrow n8n plugin repair intents route without capturing workspace or live n8n work', () => {
+  const routing = readText(routingPartial);
+  const source = readText(path.join(
+    repoRoot,
+    '_projects',
+    'development',
+    'toolkit-local-bridge',
+    'curated_output_for_ai',
+    'skills',
+    'toolkit-setup',
+    'SKILL.md'
+  ));
+
+  for (const text of [routing, source]) {
+    assert.match(text, /n8n-skills@n8n-io/);
+    assert.match(text, /\.sh hooks? opening|\.sh` hooks opening/i);
+    assert.match(text, /repo-local n8n helper|n8n-workflows\/scripts/i);
+    assert.match(text, /live n8n|Docker|server/i);
+  }
+  assert.match(source, /repair n8n plugin/);
+  assert.match(source, /fix n8n skill hooks/);
+  assert.match(source, /repair the n8n Skills plugin/);
+  assert.match(source, /Claude Code plugin/);
+  assert.match(source, /Toolkit source or generated skill/);
+  assert.match(source, /smallest numbered choice/);
+  assert.match(source, /Do not load every n8n or MCP skill/);
+});
+
 test('markdown docs use markdown numbered steps instead of HTML or compressed step lists', () => {
   const files = markdownFilesIn(['README.md', 'repo', '_projects', 'skills']);
 

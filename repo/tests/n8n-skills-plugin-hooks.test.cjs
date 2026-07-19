@@ -10,6 +10,11 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..', '..');
 const auditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-n8n-skills-plugin-hooks.cjs');
 const repairScript = path.join(repoRoot, 'repo', 'scripts', 'repair-codex-plugin-windows-hooks.cjs');
+const supportedFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
+const {
+  classifyN8nSkillsCompatibility,
+  reconcileN8nSkillsPlugin
+} = require('../scripts/repair-codex-plugin-windows-hooks.cjs');
 
 function writeJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -34,6 +39,32 @@ function makePluginRoot() {
   return root;
 }
 
+function copySupportedFixture(pluginRoot = makePluginRoot()) {
+  fs.cpSync(supportedFixtureRoot, pluginRoot, { recursive: true, force: true });
+  return pluginRoot;
+}
+
+function snapshotFiles(root) {
+  const result = new Map();
+  function walk(current) {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory()) walk(fullPath);
+      else if (entry.isFile()) result.set(path.relative(root, fullPath), fs.readFileSync(fullPath));
+    }
+  }
+  walk(root);
+  return result;
+}
+
+function assertSnapshotEqual(actualRoot, expected, message) {
+  const actual = snapshotFiles(actualRoot);
+  assert.deepEqual([...actual.keys()].sort(), [...expected.keys()].sort(), message);
+  for (const [relPath, bytes] of expected) {
+    assert.deepEqual(actual.get(relPath), bytes, `${message}: ${relPath}`);
+  }
+}
+
 function runAudit(pluginRoot, ...extraArgs) {
   return spawnSync(process.execPath, [auditScript, '--plugin-root', pluginRoot, '--windows', ...extraArgs], {
     cwd: repoRoot,
@@ -46,6 +77,12 @@ function runRepair(pluginRoot, ...extraArgs) {
     cwd: repoRoot,
     encoding: 'utf8'
   });
+}
+
+function runRepairedAudit(pluginRoot) {
+  return process.platform === 'win32'
+    ? runAudit(pluginRoot, '--verify-output')
+    : runAudit(pluginRoot);
 }
 
 function findBashForTests() {
@@ -953,8 +990,7 @@ test('n8n-skills Windows hook repair wraps hooks, adds Node fallbacks, and verif
     assert.fail('bash is required for n8n hook execution verification');
   }
 
-  const pluginRoot = makePluginRoot();
-  writeN8nOfficialLikePlugin(pluginRoot);
+  const pluginRoot = copySupportedFixture();
 
   const result = runRepair(pluginRoot);
   assert.equal(result.status, 0, result.stderr);
@@ -1032,4 +1068,94 @@ test('n8n-skills Windows hook repair wraps hooks, adds Node fallbacks, and verif
   assert.equal(JSON.parse(secondPreToolUse.stdout).hookSpecificOutput.hookEventName, 'PreToolUse');
 
   assert.equal(runAudit(pluginRoot).status, 0);
+});
+
+test('supported n8n Skills 1.0.1 compatibility inspection is exact and write-free', () => {
+  const pluginRoot = copySupportedFixture();
+  const before = snapshotFiles(pluginRoot);
+
+  const classification = classifyN8nSkillsCompatibility(pluginRoot);
+  assert.equal(classification.status, 'repair-required');
+  assert.equal(classification.plugin_id, 'n8n-skills@n8n-io');
+  assert.equal(classification.version, '1.0.1');
+  assert.equal(classification.upstream_commit, 'c350f8b4bd8417108bce266d88e21b8a1bb966db');
+
+  const inspection = reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: false });
+  assert.equal(inspection.status, 'repair-required');
+  assert.ok(inspection.actions.length > 0);
+  assertSnapshotEqual(pluginRoot, before, 'inspection-only reconciliation must not write');
+});
+
+test('supported refresh is repaired, verified, and byte-idempotent', () => {
+  const pluginRoot = copySupportedFixture();
+  const envPath = path.join(pluginRoot, '.env');
+  fs.writeFileSync(envPath, 'fixture sentinel must never be inspected or changed\n', 'utf8');
+  const envBefore = fs.readFileSync(envPath);
+  assert.notEqual(runAudit(pluginRoot).status, 0, 'pristine upstream fixture must reproduce the Windows failure');
+
+  const first = reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true });
+  assert.equal(first.status, 'repaired');
+  assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'healthy');
+  assert.equal(runRepairedAudit(pluginRoot).status, 0);
+  assert.deepEqual(fs.readFileSync(envPath), envBefore);
+  const hooksText = fs.readFileSync(path.join(pluginRoot, 'hooks', 'hooks.json'), 'utf8');
+  assert.match(hooksText, /run-hook\.ps1/);
+  assert.doesNotMatch(hooksText, /"command":\s*"\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/[^\"]+\.sh"/);
+
+  const repaired = snapshotFiles(pluginRoot);
+  const second = reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true });
+  assert.equal(second.status, 'healthy');
+  assert.equal(second.repaired, false);
+  assertSnapshotEqual(pluginRoot, repaired, 'healthy reconciliation must be byte-idempotent');
+
+  fs.cpSync(supportedFixtureRoot, pluginRoot, { recursive: true, force: true });
+  assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'repair-required');
+  const refreshed = reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true });
+  assert.equal(refreshed.status, 'repaired');
+  assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'healthy');
+  assert.equal(runRepairedAudit(pluginRoot).status, 0);
+  assert.deepEqual(fs.readFileSync(envPath), envBefore);
+  assertSnapshotEqual(pluginRoot, repaired, 'refresh reconciliation must restore the deterministic repaired bytes');
+});
+
+test('unknown and partially repaired n8n Skills shapes fail closed', () => {
+  const unknownRoot = copySupportedFixture();
+  const unknownManifest = readJson(path.join(unknownRoot, '.codex-plugin', 'plugin.json'));
+  unknownManifest.version = '1.0.2';
+  writeJson(path.join(unknownRoot, '.codex-plugin', 'plugin.json'), unknownManifest);
+  const unknownBefore = snapshotFiles(unknownRoot);
+  assert.equal(classifyN8nSkillsCompatibility(unknownRoot).status, 'compatibility-drift');
+  assert.throws(
+    () => reconcileN8nSkillsPlugin(unknownRoot, { windows: true, write: true }),
+    /compatibility contract changed|unsupported/i
+  );
+  assertSnapshotEqual(unknownRoot, unknownBefore, 'unknown versions must not be modified');
+
+  const partialRoot = copySupportedFixture();
+  fs.appendFileSync(path.join(partialRoot, 'hooks', 'session-start.sh'), '# local drift\n', 'utf8');
+  const partialBefore = snapshotFiles(partialRoot);
+  assert.equal(classifyN8nSkillsCompatibility(partialRoot).status, 'malformed');
+  assert.throws(
+    () => reconcileN8nSkillsPlugin(partialRoot, { windows: true, write: true }),
+    /malformed|partially repaired|fingerprint/i
+  );
+  assertSnapshotEqual(partialRoot, partialBefore, 'ambiguous supported-version state must not be modified');
+
+  const missingRoot = copySupportedFixture();
+  fs.unlinkSync(path.join(missingRoot, 'hooks', 'pre-tool-use', 'execute-workflow.sh'));
+  const missingBefore = snapshotFiles(missingRoot);
+  assert.equal(classifyN8nSkillsCompatibility(missingRoot).status, 'malformed');
+  assert.throws(() => reconcileN8nSkillsPlugin(missingRoot, { windows: true, write: true }), /malformed|fingerprint/i);
+  assertSnapshotEqual(missingRoot, missingBefore, 'missing required hook state must not be modified');
+});
+
+test('source-watch records the authoritative n8n Skills compatibility baseline without mutation authority', () => {
+  const advisory = readJson(path.join(repoRoot, 'repo', 'source-watch', 'advisory-targets.json'));
+  const target = advisory.targets.find((entry) => entry.id === 'n8n-skills-hook-compatibility');
+  assert.ok(target);
+  assert.equal(target.repo, 'n8n-io/skills');
+  assert.equal(target.ref, 'main');
+  assert.equal(target.baseline_sha, 'c350f8b4bd8417108bce266d88e21b8a1bb966db');
+  assert.match(target.recommendation, /must not mutate installed caches/i);
+  assert.match(target.remaining_work, /#248/);
 });

@@ -32,6 +32,7 @@ skills/**/*.yaml text eol=lf
 skills/**/*.yml text eol=lf
 skills/**/*.sh text eol=lf
 skills/**/*.env.example text eol=lf
+repo/tests/fixtures/n8n-skills-1.0.1/** text eol=lf
 
 # Design skill Markdown is validated as LF-only.
 skills/ui-ux-secure-frontend-design/**/*.md text eol=lf

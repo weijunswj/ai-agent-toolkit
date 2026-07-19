@@ -6,8 +6,15 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
-const { verifyInstalledCacheFreshness } = require('./setup-codex-toolkit-plugin.cjs');
-const { repairPluginRoot } = require('./repair-codex-plugin-windows-hooks.cjs');
+const {
+  findInstalledPluginEntries,
+  inspectCodexConfiguredPluginState,
+  inspectCodexPluginList,
+  verifyInstalledCacheFreshness
+} = require('./setup-codex-toolkit-plugin.cjs');
+const {
+  reconcileN8nSkillsPlugin
+} = require('./repair-codex-plugin-windows-hooks.cjs');
 const {
   auditOwnedStaging,
   cleanupOwnedGeneration,
@@ -17,7 +24,7 @@ const {
 } = require('./toolkit-staging-generations.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.7.14';
+const BRIDGE_VERSION = '2.7.17';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -2008,7 +2015,7 @@ function actionTldr({ repo, nativePluginCache, thirdPartyHookRepair, warning, st
     return 'enable Codex plugin auto-refresh in setup, or run `setup toolkit`';
   }
   if (nativePluginCache.status === 'refresh-failed') return 'run `setup toolkit` to refresh the Codex plugin cache manually';
-  if (['repair-failed', 'partial-failed'].includes(thirdPartyHookRepair.status)) return 'check third-party Codex plugin hook repair';
+  if (['repair-failed', 'partial-failed'].includes(thirdPartyHookRepair.status)) return 'check n8n Skills plugin compatibility drift';
   if (repo.status === 'validation-failed') return 'check hook-light validation';
   if (repo.status === 'sync-delegation-failed') return 'check target sync';
   const suggestion = warningSuggestion(warning);
@@ -2129,14 +2136,14 @@ function buildUpdateReport({ args, state, checksum, context }) {
     lines.push(`- Claude Code native plugin cache: ${nativePluginCache.manual_action}`);
   }
   if (thirdPartyHookRepair.status === 'repaired' || thirdPartyHookRepair.status === 'partial-failed') {
-    lines.push(`- Repaired ${inlineCode((thirdPartyHookRepair.repaired || []).length)} third-party Codex plugin hook cache(s).`);
+    lines.push(`- Repaired ${inlineCode((thirdPartyHookRepair.repaired || []).length)} supported n8n Skills Codex plugin hook cache(s).`);
     for (const entry of thirdPartyHookRepair.repaired || []) {
       lines.push(`  - ${inlineCode(entry.plugin_id || entry.plugin_root)}`);
     }
   } else if (thirdPartyHookRepair.status === 'repair-failed') {
-    lines.push('- Third-party Codex plugin hook repair failed.');
+    lines.push('- n8n Skills plugin hook reconciliation failed closed.');
   } else if (thirdPartyHookRepair.status === 'not-needed') {
-    lines.push('- Third-party Codex plugin hooks were already Windows-safe.');
+    lines.push('- Supported n8n Skills plugin hooks were already Windows-safe, or no supported target was installed.');
   }
   lines.push('- Skipped live n8n systems; not touched.');
 
@@ -2159,7 +2166,7 @@ function buildUpdateReport({ args, state, checksum, context }) {
     for (const error of nativePluginCache.errors || []) lines.push(`  - ${inlineCode(error)}`);
   }
   if (thirdPartyHookRepair.status) {
-    lines.push(`- third-party Codex plugin hook repair: ${inlineCode(thirdPartyHookRepair.status)}`);
+    lines.push(`- n8n Skills plugin hook reconciliation: ${inlineCode(thirdPartyHookRepair.status)}`);
     for (const error of thirdPartyHookRepair.errors || []) lines.push(`  - ${inlineCode(error)}`);
   }
   lines.push(`- checksum: ${inlineCode(checksum)}`);
@@ -3530,10 +3537,9 @@ function discoverCodexPluginHookRoots({ codexHome = defaultCodexHome(), currentP
       for (const version of fs.readdirSync(pluginPath, { withFileTypes: true })) {
         if (!version.isDirectory()) continue;
         const cacheRoot = path.join(pluginPath, version.name);
-        const hooksJsonPath = path.join(cacheRoot, 'hooks', 'hooks.json');
-        if (!fs.existsSync(hooksJsonPath)) continue;
         const entry = {
           plugin_id: `${plugin.name}@${marketplace.name}`,
+          version: version.name,
           plugin_root: cacheRoot
         };
         if (isToolkitCodexCacheRoot(cacheRoot, currentPluginRoot)) {
@@ -3549,6 +3555,89 @@ function discoverCodexPluginHookRoots({ codexHome = defaultCodexHome(), currentP
   return { roots, skipped };
 }
 
+function selectCurrentN8nSkillsCache({ codexHome, pluginList, discovered }) {
+  const matches = findInstalledPluginEntries(pluginList, {
+    pluginId: 'n8n-skills@n8n-io',
+    name: 'n8n-skills',
+    marketplaceName: 'n8n-io'
+  });
+  if (matches.length === 0) {
+    return { status: 'not-installed', entry: null, reason: 'Codex reports no installed n8n-skills@n8n-io plugin' };
+  }
+  if (matches.length !== 1) {
+    return {
+      status: 'ambiguous',
+      entry: null,
+      reason: 'Codex reports multiple installed n8n-skills@n8n-io entries; current cache is ambiguous'
+    };
+  }
+
+  const installed = matches[0];
+  if (installed.installed !== true || installed.enabled !== true) {
+    return {
+      status: 'not-installed',
+      entry: null,
+      reason: 'Codex does not report n8n-skills@n8n-io as installed and enabled'
+    };
+  }
+  const version = typeof installed.version === 'string' ? installed.version.trim() : '';
+  if (!version || version === '.' || version === '..' || /[\\/\0]/.test(version)) {
+    return {
+      status: 'ambiguous',
+      entry: null,
+      reason: 'Codex reported an invalid n8n-skills@n8n-io version; current cache cannot be proven'
+    };
+  }
+
+  const expectedRoot = path.resolve(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', version);
+  const entry = discovered.roots.find((candidate) =>
+    candidate.plugin_id === 'n8n-skills@n8n-io' && path.resolve(candidate.plugin_root) === expectedRoot
+  ) || null;
+  if (!entry) {
+    return {
+      status: 'missing',
+      entry: null,
+      reason: `Codex reports current n8n-skills@n8n-io version ${version}, but its installed cache root is missing`
+    };
+  }
+  return { status: 'selected', entry, reason: '' };
+}
+
+function selectCurrentN8nSkillsCacheFromConfig({ codexHome, discovered }) {
+  const configured = inspectCodexConfiguredPluginState({
+    codexHome,
+    identity: 'n8n-skills@n8n-io'
+  });
+  if (configured.status === 'disabled') {
+    return {
+      status: 'not-installed',
+      entry: null,
+      reason: 'Codex config explicitly reports n8n-skills@n8n-io disabled'
+    };
+  }
+  if (configured.status !== 'enabled') {
+    return {
+      status: 'ambiguous',
+      entry: null,
+      reason: `Codex CLI omitted n8n-skills@n8n-io and current installed/enabled state cannot be proven: ${configured.reason}`
+    };
+  }
+
+  const candidates = discovered.roots.filter((entry) => entry.plugin_id === 'n8n-skills@n8n-io');
+  if (candidates.length !== 1) {
+    return {
+      status: 'ambiguous',
+      entry: null,
+      reason: `Codex config explicitly enables n8n-skills@n8n-io, but ${candidates.length} cache candidates exist; the current cache cannot be proven without arbitrary selection`
+    };
+  }
+  return {
+    status: 'selected',
+    entry: candidates[0],
+    reason: 'Selected by explicit Codex config enablement plus one exact n8n Skills cache candidate'
+  };
+}
+
 function repairThirdPartyCodexPluginHooks(options = {}) {
   const codexHome = path.resolve(options.codexHome || defaultCodexHome());
   const windows = options.windows ?? process.platform === 'win32';
@@ -3559,7 +3648,7 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
     status: windows ? 'not-needed' : 'not-supported',
     codex_home: codexHome,
     write,
-    scanned: discovered.roots.length,
+    scanned: 0,
     skipped: discovered.skipped,
     repaired: [],
     unchanged: [],
@@ -3568,9 +3657,58 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
 
   if (!windows) return result;
 
+  const n8nCandidates = [];
   for (const entry of discovered.roots) {
+    if (entry.plugin_id === 'n8n-skills@n8n-io') n8nCandidates.push(entry);
+    else result.skipped.push({ ...entry, reason: 'unrelated plugin; n8n Skills reconciliation is target-specific' });
+  }
+  if (n8nCandidates.length === 0) {
+    result.skipped.sort((left, right) => left.plugin_root.localeCompare(right.plugin_root));
+    return result;
+  }
+
+  const pluginInspection = Object.prototype.hasOwnProperty.call(options, 'pluginList')
+    ? { ok: true, pluginList: options.pluginList, errors: [] }
+    : inspectCodexPluginList({ codexCommand: options.codexCommand || '' });
+  const cliMatches = pluginInspection.ok
+    ? findInstalledPluginEntries(pluginInspection.pluginList, {
+      pluginId: 'n8n-skills@n8n-io',
+      name: 'n8n-skills',
+      marketplaceName: 'n8n-io'
+    })
+    : [];
+  const selection = pluginInspection.ok && cliMatches.length > 0
+    ? selectCurrentN8nSkillsCache({
+      codexHome,
+      pluginList: pluginInspection.pluginList,
+      discovered
+    })
+    : selectCurrentN8nSkillsCacheFromConfig({ codexHome, discovered });
+  if (selection.status !== 'selected') {
+    for (const entry of n8nCandidates) {
+      result.skipped.push({ ...entry, reason: 'historical or unverified n8n Skills cache; not current according to Codex installed state' });
+    }
+    result.skipped.sort((left, right) => left.plugin_root.localeCompare(right.plugin_root));
+    if (selection.status === 'not-installed') return result;
+    result.status = 'repair-failed';
+    result.errors = [
+      selection.reason,
+      ...(!pluginInspection.ok ? (pluginInspection.errors || []) : [])
+    ].slice(0, THIRD_PARTY_HOOK_REPAIR_ERROR_LIMIT);
+    return result;
+  }
+
+  const targets = [selection.entry];
+  for (const entry of n8nCandidates) {
+    if (path.resolve(entry.plugin_root) === path.resolve(selection.entry.plugin_root)) continue;
+    result.skipped.push({ ...entry, reason: 'historical n8n Skills cache; not current according to Codex installed state' });
+  }
+  result.scanned = 1;
+  result.skipped.sort((left, right) => left.plugin_root.localeCompare(right.plugin_root));
+
+  for (const entry of targets) {
     try {
-      const repair = repairPluginRoot(entry.plugin_root, {
+      const repair = reconcileN8nSkillsPlugin(entry.plugin_root, {
         windows: true,
         write
       });
@@ -3580,7 +3718,7 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
           actions: repair.actions || []
         });
       } else {
-        result.unchanged.push(entry);
+        result.unchanged.push({ ...entry, classification: repair.status });
       }
     } catch (error) {
       result.errors.push(`${entry.plugin_id}: ${error.message}`);
