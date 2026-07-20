@@ -9,7 +9,7 @@ const crypto = require('node:crypto');
 const processLaunch = require('./claude-process-launch.cjs');
 
 const SCHEMA = 1;
-const CONTROL_VERSION = '2.7.21';
+const CONTROL_VERSION = '2.7.22';
 const RESULTS = Object.freeze({ START: 'start', QUEUE: 'queue', REFUSE: 'refuse-root-only' });
 const CHECKER_RESULTS = Object.freeze({ PASS: 'PASS', FINDINGS: 'FINDINGS', ADMISSION_DENIED: 'ADMISSION_DENIED', SKIPPED_TRIVIAL: 'SKIPPED_TRIVIAL' });
 const HOSTS = Object.freeze({ CODEX: 'codex', CLAUDE: 'claude-code', OPENCODE: 'opencode' });
@@ -479,7 +479,8 @@ function canonicalChangedFiles(values) {
 
 function checkerRequirement(input = {}) {
   const rawFiles = Array.isArray(input.changed_files) ? input.changed_files : [];
-  if (!input.implementation_complete || !input.focused_validation_passed || !input.diff_ready || rawFiles.length === 0) {
+  if (input.implementation_complete !== true || input.focused_validation_passed !== true
+    || input.diff_ready !== true || rawFiles.length === 0) {
     return { required: false, ready: false, reason: 'Checker decision requires completed implementation, passed focused validation, a ready diff, and changed files.' };
   }
   let files;
@@ -931,11 +932,17 @@ function checkerWorkflow(input, options = {}) {
   const spec = checkerLaunchSpec(checkedInput.host, context, overrides);
   const launched = launch(spec, options);
   if (launched.result !== RESULTS.START) return checkerAdmissionOutcome(launched);
+  const resultArgs = [path.resolve(__filename), 'checker-result', '--review-id', spec.review_id];
+  if (options.root) resultArgs.push('--root', path.resolve(options.root));
+  const quoteArgument = process.platform === 'win32'
+    ? require('./codex-delegation-config.cjs').quotePowerShellArgument
+    : require('./codex-delegation-config.cjs').quotePosixArgument;
   return {
     status: 'PENDING',
     review_id: spec.review_id,
     reservation_id: launched.reservation_id,
-    result_command: `node repo/scripts/toolkit-agent-control.cjs checker-result --review-id ${spec.review_id}`,
+    result_invocation: { executable: process.execPath, args: resultArgs },
+    result_command: ['node', ...resultArgs.map(quoteArgument)].join(' '),
     root_action: 'Continue productive root work; retrieve the validated result when it is needed for integration.',
   };
 }

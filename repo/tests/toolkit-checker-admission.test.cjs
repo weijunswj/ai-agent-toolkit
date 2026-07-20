@@ -61,6 +61,10 @@ test('deterministic checker trigger requires meaningful code and skips only prov
   assert.equal(control.checkerRequirement(ready({ changed_files: ['src/runtime.js'], change_kind: 'generated-only-authoritative-validated', authoritative_source_independently_validated: true })).required, true);
   const generated = control.checkerRequirement(ready({ changed_files: ['skills/example/SKILL.md'], change_kind: 'generated-only-authoritative-validated', authoritative_source_independently_validated: true }));
   assert.equal(generated.result, control.CHECKER_RESULTS.SKIPPED_TRIVIAL);
+  for (const field of ['implementation_complete', 'focused_validation_passed', 'diff_ready']) {
+    const unready = control.checkerRequirement(ready({ [field]: 'false', changed_files: ['docs/wording.md'], change_kind: 'typo-only-docs' }));
+    assert.equal(unready.ready, false, `${field} must be literal true`);
+  }
 });
 
 test('supported checker workflow handles trivial, malformed, admission-denied, and unforgeable inputs', () => {

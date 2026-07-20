@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.7.21",
+  "version": "2.7.22",
   "version_policy": "semver",
-  "version_notes": "Adds the supported bounded checker workflow, no-maintenance checker sessions, single-pass Windows wrapper launches, and productive-parallel worker admission.",
+  "version_notes": "Hardens checker readiness booleans and custom-root result retrieval after the bounded checker workflow, no-maintenance sessions, and single-pass Windows wrapper launch changes.",
   "outputs": [
     {
       "kind": "curated",

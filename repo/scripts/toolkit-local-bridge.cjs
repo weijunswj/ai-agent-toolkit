@@ -24,7 +24,7 @@ const {
 } = require('./toolkit-staging-generations.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.7.21';
+const BRIDGE_VERSION = '2.7.22';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];

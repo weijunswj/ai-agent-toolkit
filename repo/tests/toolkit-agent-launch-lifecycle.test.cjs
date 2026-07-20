@@ -194,8 +194,10 @@ test('checker execution clears failures and completes only validated structured 
   assert.equal(passed.error, '');
   assert.equal(control.checkerResultFromClaudeOutput(passed.output).status, control.CHECKER_RESULTS.PASS);
   assert.equal(control.checkerResultStatus(passed.launched.review_id, { root }).status, control.CHECKER_RESULTS.PASS);
-  const resultCli = spawnSync(process.execPath, [path.join(__dirname, '..', 'scripts', 'toolkit-agent-control.cjs'),
-    'checker-result', '--review-id', passed.launched.review_id, '--root', root], { encoding: 'utf8', windowsHide: true });
+  assert.deepEqual(passed.launched.result_invocation.args.slice(-2), ['--root', path.resolve(root)]);
+  assert.match(passed.launched.result_command, /--root/);
+  const resultCli = spawnSync(passed.launched.result_invocation.executable,
+    passed.launched.result_invocation.args, { encoding: 'utf8', windowsHide: true, shell: false });
   assert.equal(resultCli.status, 0, resultCli.stderr);
   assert.equal(JSON.parse(resultCli.stdout).status, control.CHECKER_RESULTS.PASS);
 

@@ -113,13 +113,15 @@ Use plain ASCII punctuation for agent-facing prompts, templates, scripts, config
 
 ## GitHub-Backed Project Issue Tracking
 
-Activate issue tracking only after proving the active project is a Git repo with a relevant GitHub remote and same-repo issue/PR. Skip folders, non/local-only repos, other forges, and unrelated GitHub repos; Toolkit's remote never substitutes. Non-applicability is not an error.
+Activate only for the active Git repo's relevant GitHub remote and same-repo activity. Skip loose, non/local-only, other-forge, and unrelated repos; Toolkit's remote never substitutes. Skipping is not an error.
 
-Find the smallest existing owner before creating an issue; update/reopen instead of duplicating. Use `Refs` for multi-stage, UAT-pending, blocked, or follow-up PRs; use `Closes`/`Fixes` only when merge satisfies every criterion.
+Same-repo issue/PR metadata sync for requested work is a scoped external-write exception. It never authorizes merge, deployment, secrets, workflows, or unrelated repos.
 
-Synchronize start, PR/head, review Merge/Amend/Reject, findings/exact-head fixes, threads, CI/CodeQL, merge, UAT pending/pass/fail, remediation, and completion. Resolve threads only after exact-head verification. Keep any programme tracker's main SHA, version, lane/gate, PR, review/UAT, queue, and completed/deferred/superseded work current; advance on evidence.
+Find the smallest owner; update/reopen, never duplicate. Use `Refs` for multi-stage, UAT-pending, blocked, or follow-up PRs; `Closes`/`Fixes` only if merge completes every criterion.
 
-Keep canonical bodies current with bounded edits; use comments for chronology/history. Report failed/blocked writes honestly. After merge, update trackers, close only complete issues, keep pending gates open, and advance.
+Sync start, PR/head, review Merge/Amend/Reject, findings/exact-head fixes, threads, CI/CodeQL, merge, UAT pending/pass/fail, remediation, and completion. Verify exact head before resolving. Keep programme tracker SHA, version, lane/gate, PR, review/UAT, queue, and completed/deferred/superseded work current.
+
+Boundedly update canonical bodies; comments hold history. Report failed/blocked writes. After merge, close only complete issues, keep pending gates open, and advance.
 
 ## Git Completion
 
