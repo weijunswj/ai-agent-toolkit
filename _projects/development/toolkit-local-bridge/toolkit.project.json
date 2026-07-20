@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.7.25",
+  "version": "2.7.26",
   "version_policy": "semver",
-  "version_notes": "Defers all Claude worker/checker capability sessions until after approval and verified-current active plugin enforcement, with fail-closed restart handling and isolated capability probes.",
+  "version_notes": "Makes the visible Claude topology choice authoritative over derived capacity and synchronizes deferred post-approval capability guidance while preserving verified-current fail-closed probes.",
   "outputs": [
     {
       "kind": "curated",

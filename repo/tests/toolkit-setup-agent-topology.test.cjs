@@ -9,7 +9,7 @@ const core = require('../scripts/setup-toolkit-core.cjs');
 const control = require('../scripts/toolkit-agent-control.cjs');
 
 function current(supported, profile = {}) {
-  const proof = { schema: 3, source: 'claude-plugin-list', plugin_version: '2.7.25', cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64) };
+  const proof = { schema: 3, source: 'claude-plugin-list', plugin_version: '2.7.26', cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64) };
   return {
     managed: { currentPath: '', selectedPath: '', defaultPath: '', exists: false, git: false, dirty: false, branch: '', remote: '' },
     audit: { repo_auto_update: {}, targets: {} },
@@ -27,7 +27,7 @@ test('one canonical question specification drives supported Claude choices witho
   const topology = specs.find((row) => row.key === 'claudeTopology');
   assert.deepEqual(topology.choices.map((choice) => choice.value), ['toolkit-direct', 'root-only', 'broader-native', 'keep']);
   assert.equal(specs.some((row) => row.key === 'claudeAgentCapacity'), false);
-  assert.equal(args.setupChoices.claudeAgentCapacity, 'automatic');
+  assert.equal(args.setupChoices.claudeAgentCapacity, '');
   const text = core.renderSetupQuestionBank(specs);
   assert.doesNotMatch(text, /\bAdvanced(?: options)?\b|More options/);
   assert.doesNotMatch(text, /manage agent capacity|manual maximum/i);
@@ -39,7 +39,7 @@ test('unverified Claude capability keeps direct as a post-approval request but d
   assert.deepEqual(specs.find((row) => row.key === 'claudeTopology').choices.map((choice) => choice.value), ['toolkit-direct', 'root-only', 'broader-native', 'keep']);
   assert.equal(specs.find((row) => row.key === 'claudeTopology').availability.status, 'post-approval-verification-required');
   assert.equal(specs.some((row) => row.key === 'claudeAgentCapacity'), false);
-  assert.equal(args.setupChoices.claudeAgentCapacity, 'root-only');
+  assert.equal(args.setupChoices.claudeAgentCapacity, '');
 });
 
 test('Codex setup exposes no Claude topology state and Claude setup exposes no Codex capacity row', () => {
@@ -65,7 +65,7 @@ test('topology and capacity resolve to one canonical compatible outcome', () => 
 
   const rootUnanswered = core.parseArgs(['--plan', '--host', 'claude-code', '--claude-topology', 'root-only']);
   core.setupQuestionSpecs(rootUnanswered, directProfile);
-  assert.equal(rootUnanswered.setupChoices.claudeAgentCapacity, 'root-only');
+  assert.equal(rootUnanswered.setupChoices.claudeAgentCapacity, '');
   assert.deepEqual(core.resolveClaudeTopologyCapacity(rootUnanswered, directProfile), {
     topology: 'root-only', capacity_mode: 'root-only', manual_maximum: 0,
   });
@@ -89,11 +89,28 @@ test('recommended plan and rendered question surfaces show the same reconciled r
   const args = core.parseArgs(['--plan', '--host', 'claude-code', '--yes-recommended', '--claude-topology', 'root-only']);
   const planned = core.plannedQuestionBank(args, current(true));
   const resolved = core.resolveClaudeTopologyCapacity(planned.args, current(true));
+
   assert.equal(resolved.topology, 'root-only');
   assert.equal(resolved.capacity_mode, 'root-only');
   assert.equal(planned.specs.some((row) => row.key === 'claudeAgentCapacity'), false);
   assert.doesNotMatch(core.renderSetupQuestionBank(planned.specs), /manage agent capacity|manual maximum/i);
   assert.doesNotMatch(core.renderSetupQuestionBankTerminal(planned.specs), /manage agent capacity|manual maximum/i);
+});
+
+test('initial question rendering cannot seed hidden root-only capacity over a later visible direct choice', () => {
+  const args = core.parseArgs(['--execute', '--host', 'claude-code']);
+  const state = current(false);
+  const initial = core.setupQuestionSpecs(args, state);
+  assert.equal(initial.find((row) => row.key === 'claudeTopology').selected, '');
+  assert.equal(args.setupChoices.claudeAgentCapacity, '');
+  args.setupChoices.claudeTopology = 'toolkit-direct';
+  const resolved = core.resolveClaudeTopologyCapacity(args, state);
+  assert.deepEqual(resolved, { topology: control.TOPOLOGIES.CLAUDE_DIRECT, capacity_mode: control.CAPACITY_MODES.AUTO, manual_maximum: 0 });
+  assert.equal(args.setupChoices.claudeTopology, 'toolkit-direct');
+  assert.equal(args.setupChoices.claudeAgentCapacity, 'automatic');
+
+  const restricted = core.parseArgs(['--execute', '--host', 'claude-code', '--claude-topology', 'toolkit-direct', '--claude-agent-capacity', 'root-only']);
+  assert.equal(core.resolveClaudeTopologyCapacity(restricted, state).topology, control.TOPOLOGIES.ROOT_ONLY);
 });
 
 test('broader-native remains distinct from root-only Toolkit capacity across flags and keep-current', () => {
@@ -112,7 +129,7 @@ test('broader-native remains distinct from root-only Toolkit capacity across fla
   interactive.setupChoices.claudeTopology = 'keep';
   interactive.setupChoices.claudeAgentCapacity = 'root-only';
   const specs = core.setupQuestionSpecs(interactive, state);
-  assert.equal(specs.find((row) => row.key === 'claudeTopology').selected, 'broader-native');
+  assert.equal(specs.find((row) => row.key === 'claudeTopology').selected, 'keep');
   assert.equal(core.resolveClaudeTopologyCapacity(interactive, state).topology, 'broader-native');
 
   const planned = core.plannedQuestionBank(core.parseArgs([

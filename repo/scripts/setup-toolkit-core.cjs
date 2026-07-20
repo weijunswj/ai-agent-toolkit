@@ -155,6 +155,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     yesRecommended: false,
     codexHelperCount: null,
     claudeManualMaximum: null,
+    claudeTopologyRequested: '',
+    claudeAgentCapacityExplicit: false,
     approveHighHelperCapacity: false,
     approveCodexConfigProposal: false,
     codexRuntime: RUNTIMES.UNKNOWN,
@@ -274,25 +276,31 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === '--claude-topology') {
       const choice = next().toLowerCase();
       if (!['root-only', 'toolkit-direct', 'broader-native', 'keep'].includes(choice)) throw new Error(`Unsupported --claude-topology choice: ${choice}`);
+      args.claudeTopologyRequested = choice;
       args.setupChoices.claudeTopology = choice;
     } else if (arg.startsWith('--claude-topology=')) {
       const choice = arg.slice('--claude-topology='.length).toLowerCase();
       if (!['root-only', 'toolkit-direct', 'broader-native', 'keep'].includes(choice)) throw new Error(`Unsupported --claude-topology choice: ${choice}`);
+      args.claudeTopologyRequested = choice;
       args.setupChoices.claudeTopology = choice;
     } else if (arg === '--claude-agent-capacity') {
       const choice = next().toLowerCase();
       if (!['automatic', 'root-only', 'keep', 'manual'].includes(choice)) throw new Error(`Unsupported --claude-agent-capacity choice: ${choice}`);
       args.setupChoices.claudeAgentCapacity = choice;
+      args.claudeAgentCapacityExplicit = true;
     } else if (arg.startsWith('--claude-agent-capacity=')) {
       const choice = arg.slice('--claude-agent-capacity='.length).toLowerCase();
       if (!['automatic', 'root-only', 'keep', 'manual'].includes(choice)) throw new Error(`Unsupported --claude-agent-capacity choice: ${choice}`);
       args.setupChoices.claudeAgentCapacity = choice;
+      args.claudeAgentCapacityExplicit = true;
     } else if (arg === '--claude-agent-maximum') {
       args.claudeManualMaximum = parsePositiveInteger(next(), arg);
       args.setupChoices.claudeAgentCapacity = 'manual';
+      args.claudeAgentCapacityExplicit = true;
     } else if (arg.startsWith('--claude-agent-maximum=')) {
       args.claudeManualMaximum = parsePositiveInteger(arg.slice('--claude-agent-maximum='.length), '--claude-agent-maximum');
       args.setupChoices.claudeAgentCapacity = 'manual';
+      args.claudeAgentCapacityExplicit = true;
     }
     else if (arg === '--claude-plugin-behavior') {
       const choice = next().toLowerCase();
@@ -1650,20 +1658,28 @@ function reconcileClaudeQuestionChoices(args, current) {
   if (args.host !== 'claude-code') return;
   const choices = args.setupChoices;
   const currentProfile = current.agentProfile || agentControl.readProfile('claude-code');
-  if (choices.claudeTopology === 'keep' && currentProfile.supported === true) {
+  const requestedTopology = args.claudeTopologyRequested || choices.claudeTopology || 'keep';
+  const explicitCapacity = args.claudeAgentCapacityExplicit === true;
+  if (requestedTopology === 'keep' && currentProfile.supported === true) {
     choices.claudeTopology = currentProfile.topology === agentControl.TOPOLOGIES.CLAUDE_DIRECT ? 'toolkit-direct'
       : (currentProfile.topology === agentControl.TOPOLOGIES.BROADER_NATIVE ? 'broader-native' : 'root-only');
   }
-  if (choices.claudeAgentCapacity === 'root-only' && choices.claudeTopology !== 'broader-native') choices.claudeTopology = 'root-only';
-  if (['root-only', 'broader-native'].includes(choices.claudeTopology)) choices.claudeAgentCapacity = 'root-only';
-  if (choices.claudeTopology === 'keep' && currentProfile.supported !== true) {
+  if (requestedTopology === 'keep' && currentProfile.supported !== true) {
     choices.claudeTopology = 'root-only';
-    choices.claudeAgentCapacity = 'root-only';
   }
-  if (choices.claudeTopology === 'toolkit-direct' && choices.claudeAgentCapacity === 'keep') {
+  if (explicitCapacity && choices.claudeAgentCapacity === 'root-only' && choices.claudeTopology !== 'broader-native') {
+    choices.claudeTopology = 'root-only';
+  }
+  if (['root-only', 'broader-native'].includes(choices.claudeTopology)) {
+    choices.claudeAgentCapacity = 'root-only';
+  } else if (choices.claudeTopology === 'toolkit-direct' && requestedTopology === 'keep' && !explicitCapacity) {
     const compatibleKeep = currentProfile.supported === true && currentProfile.topology === agentControl.TOPOLOGIES.CLAUDE_DIRECT
       && [agentControl.CAPACITY_MODES.AUTO, agentControl.CAPACITY_MODES.MANUAL].includes(currentProfile.capacity_mode);
-    if (!compatibleKeep) choices.claudeAgentCapacity = 'automatic';
+    choices.claudeAgentCapacity = compatibleKeep ? 'keep' : 'automatic';
+  } else if (choices.claudeTopology === 'toolkit-direct' && (!explicitCapacity || choices.claudeAgentCapacity === 'keep')) {
+    const compatibleKeep = currentProfile.supported === true && currentProfile.topology === agentControl.TOPOLOGIES.CLAUDE_DIRECT
+      && [agentControl.CAPACITY_MODES.AUTO, agentControl.CAPACITY_MODES.MANUAL].includes(currentProfile.capacity_mode);
+    choices.claudeAgentCapacity = explicitCapacity && choices.claudeAgentCapacity === 'keep' && compatibleKeep ? 'keep' : 'automatic';
   }
 }
 
@@ -1686,6 +1702,7 @@ function resolveClaudeTopologyCapacity(args, current) {
   if (capacityMode === agentControl.CAPACITY_MODES.MANUAL && (!Number.isSafeInteger(manualMaximum) || manualMaximum < 1 || manualMaximum > agentControl.MAX_MANUAL_WORKERS)) {
     throw new Error('Manual Claude agent maximum is outside the supported bounds.');
   }
+  if (capacityMode === agentControl.CAPACITY_MODES.MANUAL) args.claudeManualMaximum = manualMaximum;
   args.setupChoices.claudeTopology = topology === agentControl.TOPOLOGIES.CLAUDE_DIRECT ? 'toolkit-direct' : (topology === agentControl.TOPOLOGIES.BROADER_NATIVE ? 'broader-native' : 'root-only');
   args.setupChoices.claudeAgentCapacity = capacityMode === agentControl.CAPACITY_MODES.AUTO ? 'automatic' : (capacityMode === agentControl.CAPACITY_MODES.MANUAL ? 'manual' : 'root-only');
   return { topology, capacity_mode: capacityMode, manual_maximum: manualMaximum };
@@ -1748,7 +1765,6 @@ function helperRecommendationReason(current, runtimeSupported, migrationPending)
 }
 
 function setupQuestionSpecs(args, current) {
-  reconcileClaudeQuestionChoices(args, current);
   const managedRecommendation = recommendedChoice('managedCheckout', current, args);
   const managedCurrent = currentManagedSourceOutcome(current, args);
   const retentionRaw = current?.audit?.update_report_retention_days;
@@ -1895,10 +1911,6 @@ function setupQuestionSpecs(args, current) {
   } else {
     const capabilitySupported = strictClaudeSetupCapability(current);
     const activeProfile = current.agentProfile || agentControl.readProfile('claude-code');
-    const selectedTopology = args.setupChoices.claudeTopology;
-    const currentDirect = activeProfile.supported === true && activeProfile.topology === agentControl.TOPOLOGIES.CLAUDE_DIRECT;
-    const directCapacityAvailable = selectedTopology === 'toolkit-direct'
-      || (capabilitySupported && (!selectedTopology || (selectedTopology === 'keep' && currentDirect)));
     specs.push(resolvedQuestion({
       id: 'claude-agent-topology',
       key: 'claudeTopology',
@@ -1924,14 +1936,8 @@ function setupQuestionSpecs(args, current) {
       afterApplying: 'A changed choice updates only the Claude Toolkit profile. A fresh Claude Code session may be required before relying on changed native hook behavior.',
       availability: { status: capabilitySupported ? 'available' : 'post-approval-verification-required', condition: capabilitySupported ? 'Existing strict proof is present, but exact launch capability is reverified after approval.' : 'Direct mode is selectable as a request but remains inactive unless every post-approval gate verifies.' },
     }));
-    // Capacity is an automatic consequence of the selected topology, not an
-    // ordinary quantity question. Explicit legacy/manual flags remain supported
-    // as restrictive compatibility inputs and never bypass live admission.
-    if (!args.setupChoices.claudeAgentCapacity) {
-      args.setupChoices.claudeAgentCapacity = directCapacityAvailable
-        ? (currentDirect && [agentControl.CAPACITY_MODES.AUTO, agentControl.CAPACITY_MODES.MANUAL].includes(activeProfile.capacity_mode) ? 'keep' : 'automatic')
-        : 'root-only';
-    }
+    // Capacity is derived only after the visible topology answer is known. Rendering
+    // this bank cannot create hidden state that later overrides the user's choice.
     specs.push(resolvedQuestion({
       id: 'claude-toolkit-plugin',
       key: 'claudePluginBehavior',
@@ -2028,6 +2034,7 @@ function plannedQuestionBank(args, current) {
   for (const spec of initialSpecs) {
     if (!choiceForKey(planned, spec.key)) assignChoice(planned, spec.key, spec.recommended);
   }
+  if (planned.host === 'claude-code') resolveClaudeTopologyCapacity(planned, current);
   const resolvedSpecs = setupQuestionSpecs(planned, current);
   assertManagedCheckoutChoiceAvailable(planned, resolvedSpecs);
   return {
@@ -2195,7 +2202,10 @@ function assignChoice(args, key, choice) {
   else if (key === 'updateReportRetention') args.setupChoices.updateReportRetention = choice;
   else if (key === 'codexPluginAutoRefresh') args.setupChoices.codexPluginAutoRefresh = choice;
   else if (key === 'codexHelperCapacity') args.setupChoices.codexHelperCapacity = choice;
-  else if (key === 'claudeTopology') args.setupChoices.claudeTopology = choice;
+  else if (key === 'claudeTopology') {
+    args.setupChoices.claudeTopology = choice;
+    args.claudeTopologyRequested = choice;
+  }
   else if (key === 'claudeAgentCapacity') args.setupChoices.claudeAgentCapacity = choice;
   else if (key === 'claudePluginBehavior') args.setupChoices.claudePluginBehavior = choice;
   else if (key === 'opencodeTarget') args.setupChoices.targets.opencode = choice;
