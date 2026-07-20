@@ -134,16 +134,15 @@ test('ordinary bank removes quantity choice while advanced compatibility flags r
   assert.equal(args.codexHelperCount, 2);
 });
 
-test('missing wizard output retries the complete bank and never emits a shortcut alone', () => {
+test('missing wizard output fails after one render and never emits a shortcut alone', () => {
   const specs = [{
     key: 'example', section: 'Automatic updates', title: 'Example?', description: 'Example control.',
     current: 'Off.', recommended_outcome: 'On.', recommended: 'on', selected: 'on', empty_input: 'on',
     choices: [{ value: 'on', label: 'On - recommended' }, { value: 'off', label: 'Off' }],
   }];
   let writes = 0;
-  const retried = core.emitCompleteQuestionBank(specs, { write() { writes += 1; return writes > 1; } });
-  assert.equal(retried.attempts, 2);
-  assert.equal(writes, 2);
+  assert.throws(() => core.emitCompleteQuestionBank(specs, { write() { writes += 1; return false; } }), /no approval prompt or write is allowed/i);
+  assert.equal(writes, 1);
   assert.throws(() => core.emitCompleteQuestionBank(specs, { write() { return false; } }), /no approval prompt or write is allowed/i);
 });
 

@@ -393,20 +393,20 @@ test('managed question-bank pause and safety blocker are never bypassed by activ
     assert.equal(result.status, scenario.expected, result.stderr || result.stdout);
     assert.match(result.stdout, /# setup toolkit managed route/);
     if (scenario.expected === 23) assert.match(result.stdout, /setup-toolkit-question-bank:complete/);
-    else assert.match(result.stderr, /managed safety blocker/);
+    else assert.match(result.stderr, /Managed setup failed before completing the question-bank protocol/);
     assert.doesNotMatch(result.stdout, /# setup toolkit checklist/);
   }
 });
 
-test('suppressed managed bank retries once and exposes no approval shortcut or writes', () => {
+test('suppressed managed bank fails once with a precise no-output diagnosis and no writes', () => {
   const root = tmpRoot();
   createFakeManagedSetupScript(root, { exitCode: 23, emitQuestionBank: false });
   const result = run(['--execute', '--profile', 'auto-main'], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 1, result.stderr || result.stdout);
   assert.doesNotMatch(result.stdout, /managed setup script version/);
   assert.doesNotMatch(result.stdout, /Accept all displayed recommended settings/);
-  assert.match(result.stderr, /retrying the same safe pre-write request once/);
-  assert.match(result.stderr, /suppressed the complete question bank twice/);
+  assert.match(result.stderr, /Managed setup returned no question-bank output/);
+  assert.doesNotMatch(result.stderr, /retry/i);
   assert.equal(fs.existsSync(codexConfig(root)), false);
 });
 
