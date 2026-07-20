@@ -4,7 +4,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { spawnSync, spawn } = require('node:child_process');
 const readline = require('node:readline/promises');
 const delegation = require('./codex-delegation-config.cjs');
 const agentControl = require('./toolkit-agent-control.cjs');
@@ -23,6 +23,11 @@ const SETUP_PAUSED_FOR_CODEX_PLUGIN_AUTO_REFRESH_APPROVAL = 22;
 const SETUP_PAUSED_FOR_QUESTION_BANK = 23;
 const QUESTION_BANK_BEGIN = '<!-- setup-toolkit-question-bank:begin -->';
 const QUESTION_BANK_COMPLETE = '<!-- setup-toolkit-question-bank:complete -->';
+const MANAGED_QUESTION_BANK_PROTOCOL = 'setup-toolkit-managed-question-bank-v1';
+const MANAGED_PROTOCOL_PROBE_FLAG = '--managed-question-bank-protocol-probe';
+const MANAGED_PROTOCOL_ENV = 'AI_AGENT_TOOLKIT_MANAGED_QUESTION_BANK_PROTOCOL';
+const MANAGED_DELEGATION_DEPTH_ENV = 'AI_AGENT_TOOLKIT_MANAGED_DELEGATION_DEPTH';
+const MANAGED_CHILD_TIMEOUT_MS = 300000;
 
 function repoRootFromScript() {
   return path.resolve(__dirname, '..', '..');
@@ -725,56 +730,230 @@ function statusForSummary(repoPath) {
   return status ? 'dirty' : 'clean';
 }
 
-function delegateToManagedSetupIfAvailable(args) {
+function managedProtocolProbe() {
+  return {
+    protocol: MANAGED_QUESTION_BANK_PROTOCOL,
+    question_bank_stream: 'stdout',
+    control_fd: 3,
+    acknowledgement_fd: 4,
+    pause_status: SETUP_PAUSED_FOR_QUESTION_BANK,
+  };
+}
+
+function countOccurrences(text, token) {
+  return String(text || '').split(token).length - 1;
+}
+
+function inspectManagedBankOutput(stdout, stderr, receiptText) {
+  const out = String(stdout || '');
+  const err = String(stderr || '');
+  const beginCount = countOccurrences(out, QUESTION_BANK_BEGIN);
+  const completeCount = countOccurrences(out, QUESTION_BANK_COMPLETE);
+  const stderrBeginCount = countOccurrences(err, QUESTION_BANK_BEGIN);
+  const stderrCompleteCount = countOccurrences(err, QUESTION_BANK_COMPLETE);
+  let receipt = null;
+  try { receipt = JSON.parse(String(receiptText || '').trim()); } catch { /* classified below */ }
+  if (stderrBeginCount || stderrCompleteCount) return { ok: false, classification: 'bank-on-unexpected-stream' };
+  if (beginCount === 0 && completeCount === 0) return { ok: false, classification: 'no-bank-output' };
+  if (beginCount === 0 && completeCount > 0) return { ok: false, classification: 'complete-without-begin' };
+  if (beginCount > 1) return { ok: false, classification: 'duplicate-begin-marker' };
+  if (completeCount > 1) return { ok: false, classification: 'duplicate-complete-marker' };
+  if (beginCount === 1 && completeCount === 0) return { ok: false, classification: 'partial-bank' };
+  const beginIndex = out.indexOf(QUESTION_BANK_BEGIN);
+  const completeIndex = out.indexOf(QUESTION_BANK_COMPLETE);
+  if (completeIndex < beginIndex) return { ok: false, classification: 'complete-before-begin' };
+  if (!receipt || receipt.protocol !== MANAGED_QUESTION_BANK_PROTOCOL || receipt.event !== 'question-bank-complete'
+      || receipt.stream !== 'stdout' || receipt.begin_markers !== 1 || receipt.complete_markers !== 1) {
+    return { ok: false, classification: 'invalid-control-receipt' };
+  }
+  if (!Number.isSafeInteger(receipt.question_count) || receipt.question_count < 1) {
+    return { ok: false, classification: 'invalid-control-receipt' };
+  }
+  let end = completeIndex + QUESTION_BANK_COMPLETE.length;
+  while (end < out.length && (out[end] === '\r' || out[end] === '\n')) end += 1;
+  return { ok: true, begin: beginIndex, end };
+}
+
+function managedFailureMessage(classification) {
+  const messages = {
+    'no-bank-output': 'Managed setup returned no question-bank output.',
+    'partial-bank': 'Managed setup returned a partial question bank without its complete marker.',
+    'complete-without-begin': 'Managed setup returned a complete marker without a begin marker.',
+    'complete-before-begin': 'Managed setup returned question-bank markers out of order.',
+    'duplicate-begin-marker': 'Managed setup returned duplicate question-bank begin markers.',
+    'duplicate-complete-marker': 'Managed setup returned duplicate question-bank complete markers.',
+    'bank-on-unexpected-stream': 'Managed setup returned question-bank markers on stderr instead of documented stdout.',
+    'invalid-control-receipt': 'Managed setup did not provide the matching question-bank control receipt.',
+    timeout: 'Managed setup timed out before the question-bank protocol completed.',
+    signal: 'Managed setup was terminated by a signal before the question-bank protocol completed.',
+    'invalid-managed-script-identity': 'Managed setup script identity does not support the required question-bank protocol.',
+    'recursive-delegation': 'Managed setup refused recursive active-to-managed delegation.',
+    'stdin-transport-failure': 'Managed setup could not receive the delegated question-bank input.',
+    'child-failure': 'Managed setup failed before completing the question-bank protocol.',
+  };
+  return `${messages[classification] || messages['child-failure']} No approval shortcut or setup write is allowed.`;
+}
+
+function verifyManagedProtocolIdentity(managedScript, managedRoot) {
+  const result = spawnSync(process.execPath, [managedScript, MANAGED_PROTOCOL_PROBE_FLAG], {
+    cwd: managedRoot,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 10000,
+    windowsHide: true,
+  });
+  if (result.error || result.status !== 0 || result.stderr) return false;
+  try {
+    const probe = JSON.parse(String(result.stdout || '').trim());
+    return probe.protocol === MANAGED_QUESTION_BANK_PROTOCOL
+      && probe.question_bank_stream === 'stdout'
+      && probe.control_fd === 3
+      && probe.acknowledgement_fd === 4
+      && probe.pause_status === SETUP_PAUSED_FOR_QUESTION_BANK;
+  } catch {
+    return false;
+  }
+}
+
+async function runManagedQuestionBankChild(managedScript, managedRoot, argv, options = {}) {
+  const timeoutMs = options.timeoutMs || MANAGED_CHILD_TIMEOUT_MS;
+  return new Promise((resolve, reject) => {
+    const pipeStdin = Object.prototype.hasOwnProperty.call(options, 'stdinInput');
+    const child = spawn(process.execPath, [managedScript, ...argv], {
+      cwd: managedRoot,
+      env: {
+        ...process.env,
+        [MANAGED_PROTOCOL_ENV]: MANAGED_QUESTION_BANK_PROTOCOL,
+        [MANAGED_DELEGATION_DEPTH_ENV]: '1',
+      },
+      stdio: [pipeStdin ? 'pipe' : 'inherit', 'pipe', 'pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    if (pipeStdin) child.stdin.end(String(options.stdinInput || ''));
+    let stdout = '';
+    let stderr = '';
+    let control = '';
+    let forwarded = false;
+    let forwardOffset = 0;
+    let timedOut = false;
+    let earlyClassification = '';
+    let settled = false;
+    if (pipeStdin) {
+      child.stdin.on('error', () => {
+        earlyClassification = earlyClassification || 'stdin-transport-failure';
+        try { child.kill(); } catch { /* child may already be gone */ }
+      });
+    }
+    child.stdio[4].on('error', () => {
+      earlyClassification = earlyClassification || 'child-failure';
+      try { child.kill(); } catch { /* child may already be gone */ }
+    });
+
+    const acknowledgeIfComplete = () => {
+      if (forwarded) return;
+      const inspected = inspectManagedBankOutput(stdout, stderr, control);
+      if (!inspected.ok) return;
+      fs.writeSync(1, stdout.slice(inspected.begin, inspected.end));
+      forwarded = true;
+      forwardOffset = inspected.end;
+      child.stdio[4].end('question-bank-visible\n');
+    };
+    child.stdout.on('data', (chunk) => {
+      const text = String(chunk);
+      stdout += text;
+      if (forwarded) {
+        process.stdout.write(stdout.slice(forwardOffset));
+        forwardOffset = stdout.length;
+      } else acknowledgeIfComplete();
+    });
+    child.stderr.on('data', (chunk) => { stderr += String(chunk); acknowledgeIfComplete(); });
+    child.stdio[3].on('data', (chunk) => {
+      control += String(chunk);
+      acknowledgeIfComplete();
+      setTimeout(() => {
+        if (forwarded || earlyClassification) return;
+        const inspected = inspectManagedBankOutput(stdout, stderr, control);
+        if (!inspected.ok && inspected.classification !== 'no-bank-output') {
+          earlyClassification = inspected.classification;
+          try { child.kill(); } catch { /* child may already be gone */ }
+        }
+      }, 50);
+    });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try { child.kill(); } catch { /* child may already be gone */ }
+    }, timeoutMs);
+    const signalTimer = options.terminateAfterMs ? setTimeout(() => {
+      try { child.kill(); } catch { /* child may already be gone */ }
+    }, options.terminateAfterMs) : null;
+    child.on('error', () => {
+      clearTimeout(timer);
+      if (signalTimer) clearTimeout(signalTimer);
+      if (!settled) { settled = true; reject(new Error(managedFailureMessage('child-failure'))); }
+    });
+    child.on('close', (status, signal) => {
+      clearTimeout(timer);
+      if (signalTimer) clearTimeout(signalTimer);
+      if (settled) return;
+      settled = true;
+      const inspected = inspectManagedBankOutput(stdout, stderr, control);
+      if (!forwarded && inspected.ok) {
+        fs.writeSync(1, stdout.slice(inspected.begin, inspected.end));
+        forwarded = true;
+      }
+      if (timedOut) return reject(new Error(managedFailureMessage('timeout')));
+      if (earlyClassification) return reject(new Error(managedFailureMessage(earlyClassification)));
+      if (signal) return reject(new Error(managedFailureMessage('signal')));
+      if (!inspected.ok) {
+        const classification = status !== SETUP_PAUSED_FOR_QUESTION_BANK && inspected.classification === 'no-bank-output'
+          ? 'child-failure'
+          : inspected.classification;
+        return reject(new Error(managedFailureMessage(classification)));
+      }
+      if (status === SETUP_PAUSED_FOR_QUESTION_BANK) {
+        process.stderr.write('SETUP PAUSED: Managed setup displayed the complete question bank and requires additional approved answers.\n');
+      } else if (status !== 0) {
+        return reject(new Error(managedFailureMessage('child-failure')));
+      }
+      resolve(status);
+    });
+  });
+}
+
+async function delegateToManagedSetupIfAvailable(args) {
   if (!args.execute || args.repoRootExplicit) return null;
   const managedScript = defaultManagedSetupScriptPath();
   const currentScript = path.resolve(__dirname, 'setup-toolkit.cjs');
   if (!fs.existsSync(managedScript) || samePath(managedScript, currentScript)) return null;
+  if (Number(process.env[MANAGED_DELEGATION_DEPTH_ENV] || 0) > 0) {
+    throw new Error(managedFailureMessage('recursive-delegation'));
+  }
 
   const activeRoot = repoRootFromScript();
   const managedRoot = defaultManagedSourcePath();
+  if (!verifyManagedProtocolIdentity(managedScript, managedRoot)) {
+    throw new Error(managedFailureMessage('invalid-managed-script-identity'));
+  }
   console.log('# setup toolkit managed route');
-  console.log(`Active worktree path: ${activeRoot}`);
   console.log(`Active worktree branch: ${branchForSummary(activeRoot)}`);
   console.log(`Active worktree commit: ${commitForSummary(activeRoot)}`);
   console.log(`Active worktree status: ${statusForSummary(activeRoot)}`);
   console.log('Active worktree role: delegated to managed checkout');
-  console.log(`Managed checkout path: ${managedRoot}`);
-  console.log(`Managed checkout default path: ${defaultManagedSourcePath()} (Windows default: %USERPROFILE%\\.ai-agent-toolkit\\source\\ai-agent-toolkit; POSIX default: $HOME/.ai-agent-toolkit/source/ai-agent-toolkit)`);
   console.log(`Managed checkout commit: ${commitForSummary(managedRoot)}`);
-  console.log(`Setup script path executed: ${managedScript}`);
+  console.log('Managed setup script identity: verified question-bank protocol');
   console.log('Active worktree setup is bootstrap/fallback only; delegating to the managed checkout setup script.');
   console.log('');
 
-  const interactive = process.stdin.isTTY;
-  // Inherit stdin directly instead of eagerly buffering it with
-  // fs.readFileSync(0) and forwarding it as `input`: that eager read blocks
-  // until EOF even when the delegated child never ends up needing an answer
-  // (e.g. every setup question was already resolved by flags), hanging any
-  // non-interactive caller whose stdin pipe is never explicitly closed.
-  const invoke = () => spawnSync(process.execPath, [managedScript, ...args.argv], {
-    cwd: managedRoot,
-    encoding: interactive ? undefined : 'utf8',
-    stdio: interactive ? 'inherit' : ['inherit', 'pipe', 'pipe'],
-    windowsHide: true
-  });
-  let result = invoke();
-  if (result.error) throw result.error;
-  if (!interactive) {
-    if (result.status === SETUP_PAUSED_FOR_QUESTION_BANK
-      && !(String(result.stdout).includes(QUESTION_BANK_BEGIN) && String(result.stdout).includes(QUESTION_BANK_COMPLETE))) {
-      console.error('Managed setup did not emit a complete visible question bank; retrying the same safe pre-write request once.');
-      result = invoke();
-      if (result.error) throw result.error;
-      if (result.status === SETUP_PAUSED_FOR_QUESTION_BANK
-        && !(String(result.stdout).includes(QUESTION_BANK_BEGIN) && String(result.stdout).includes(QUESTION_BANK_COMPLETE))) {
-        throw new Error('Managed setup suppressed the complete question bank twice. No approval shortcut or write is allowed.');
-      }
-    }
-    if (result.stdout) process.stdout.write(result.stdout);
-    if (result.stderr) process.stderr.write(result.stderr);
+  let stdinInput;
+  if (!process.stdin.isTTY) {
+    // Windows does not reliably carry a grandparent's piped bytes through an
+    // inherited stdin handle. Read once in the active parent and write the
+    // exact bytes to the managed child. Explicit --yes-recommended needs no
+    // input read, preserving the unclosed-stdin fast path.
+    stdinInput = args.yesRecommended ? '' : fs.readFileSync(0, 'utf8');
   }
-  return typeof result.status === 'number' ? result.status : 1;
+  return runManagedQuestionBankChild(managedScript, managedRoot, args.argv,
+    process.stdin.isTTY ? {} : { stdinInput });
 }
 
 function scriptRootForReadOnlyProbe(args) {
@@ -1836,14 +2015,32 @@ function renderSetupQuestionDocumentation(specs = setupQuestionDocumentationSpec
 }
 
 function emitCompleteQuestionBank(specs, options = {}) {
-  const write = options.write || ((text) => { process.stdout.write(text); return true; });
+  const write = options.write || ((text) => {
+    if (process.env[MANAGED_PROTOCOL_ENV] === MANAGED_QUESTION_BANK_PROTOCOL) fs.writeSync(1, text);
+    else process.stdout.write(text);
+    return true;
+  });
   const render = options.render || renderSetupQuestionBank;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const text = render(specs);
-    const complete = text.includes(QUESTION_BANK_BEGIN)
-      && text.includes(QUESTION_BANK_COMPLETE)
-      && specs.every((spec) => text.includes(spec.title));
-    if (complete && write(text) !== false) return { appeared: true, attempts: attempt + 1, text };
+  const text = render(specs);
+  const complete = text.includes(QUESTION_BANK_BEGIN)
+    && text.includes(QUESTION_BANK_COMPLETE)
+    && specs.every((spec) => text.includes(spec.title));
+  if (complete && write(text) !== false) {
+    if (process.env[MANAGED_PROTOCOL_ENV] === MANAGED_QUESTION_BANK_PROTOCOL) {
+      fs.writeSync(3, `${JSON.stringify({
+        protocol: MANAGED_QUESTION_BANK_PROTOCOL,
+        event: 'question-bank-complete',
+        stream: 'stdout',
+        begin_markers: 1,
+        complete_markers: 1,
+        question_count: specs.length,
+      })}\n`);
+      const acknowledgement = fs.readFileSync(4, 'utf8').trim();
+      if (acknowledgement !== 'question-bank-visible') {
+        throw new Error('Managed question-bank visibility acknowledgement was not received.');
+      }
+    }
+    return { appeared: true, attempts: 1, text };
   }
   throw new Error('Complete setup question bank could not be rendered visibly; no approval prompt or write is allowed.');
 }
@@ -1979,19 +2176,24 @@ async function answerSetupQuestionBank(args, current) {
 
   // Complete full piped banks before displaying them so every row reports its
   // actual selection. Partial/empty input still prints the bank before pausing.
+  let deferredInputError = null;
   if (lines && !needsCustomPath && lines.length >= missing.length) {
     for (const spec of missing) {
       const answer = await promptForChoice(spec, lines, null);
-      if (!choiceValues(spec).includes(answer)) throw new Error(`${spec.title} must be one of: ${choiceValues(spec).join(', ')}`);
+      if (!choiceValues(spec).includes(answer)) {
+        deferredInputError = new Error(`${spec.title} must be one of: ${choiceValues(spec).join(', ')}`);
+        break;
+      }
       assignChoice(args, spec.key, answer);
     }
     specs = setupQuestionSpecs(args, current);
-    missing = [];
+    missing = specs.filter((spec) => !choiceForKey(args, spec.key));
   }
 
   const rendered = emitCompleteQuestionBank(specs, {
     render: process.stdin.isTTY ? renderSetupQuestionBankTerminal : renderSetupQuestionBank,
   });
+  if (deferredInputError) throw deferredInputError;
   if (args.yesRecommended) {
     console.log('--yes-recommended selected; setup will apply these choices before writing.');
     console.log('');
@@ -2851,6 +3053,10 @@ async function execute(args) {
 }
 
 async function main(argv = process.argv.slice(2)) {
+  if (argv.length === 1 && argv[0] === MANAGED_PROTOCOL_PROBE_FLAG) {
+    process.stdout.write(`${JSON.stringify(managedProtocolProbe())}\n`);
+    return 0;
+  }
   const restoreIndex = argv.indexOf(RESTORE_FLAG);
   const restoreInline = argv.find((arg) => arg.startsWith(`${RESTORE_FLAG}=`));
   if (restoreIndex >= 0 || restoreInline) {
@@ -2870,7 +3076,7 @@ async function main(argv = process.argv.slice(2)) {
     runClaudeNativePluginVerify(args);
     return 0;
   }
-  const delegatedCode = delegateToManagedSetupIfAvailable(args);
+  const delegatedCode = await delegateToManagedSetupIfAvailable(args);
   if (delegatedCode !== null) return delegatedCode;
   if (args.plan) {
     const current = await collectCurrentState(args);
@@ -2909,6 +3115,10 @@ module.exports = {
   SETUP_PAUSED_FOR_UPDATE_REPORT_OPEN_APPROVAL,
   SETUP_PAUSED_FOR_CODEX_PLUGIN_AUTO_REFRESH_APPROVAL,
   SETUP_PAUSED_FOR_QUESTION_BANK,
+  QUESTION_BANK_BEGIN,
+  QUESTION_BANK_COMPLETE,
+  MANAGED_QUESTION_BANK_PROTOCOL,
+  MANAGED_PROTOCOL_PROBE_FLAG,
   CLAUDE_SETUP_VERIFY_TIMEOUT_FALLBACK_MS,
   CLAUDE_SETUP_WRITE_TIMEOUT_FALLBACK_MS,
   claudeSetupBudgets,
@@ -2927,6 +3137,10 @@ module.exports = {
   renderSetupQuestionDocumentation,
   setupQuestionDocumentationSpecs,
   emitCompleteQuestionBank,
+  inspectManagedBankOutput,
+  managedFailureMessage,
+  verifyManagedProtocolIdentity,
+  runManagedQuestionBankChild,
   plannedQuestionBank,
   setupPlan,
   normalizeRemote,

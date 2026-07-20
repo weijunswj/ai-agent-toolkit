@@ -1,0 +1,195 @@
+'use strict';
+
+const test = require('node:test');
+const core = require('../scripts/setup-toolkit-core.cjs');
+const {
+  assert, fs, path, tmpRoot, isolatedHomeEnv, writeFile, run, runTestGit,
+  createFakeManagedSetupScript, createGitBackedRealSetupRepo, codexConfig,
+} = require('./toolkit-setup-test-support.cjs');
+
+function markerCount(text, marker) {
+  return String(text || '').split(marker).length - 1;
+}
+
+function runFake(options = {}, argv = ['--execute', '--profile', 'auto-main', '--host', 'claude-code']) {
+  const root = tmpRoot();
+  const fake = createFakeManagedSetupScript(root, options);
+  const result = run(argv, { env: isolatedHomeEnv(root), timeout: 30000 });
+  return { root, fake, result };
+}
+
+test('managed child bank is forwarded exactly once before intentional status 23 pause', () => {
+  const { result } = runFake();
+  assert.equal(result.status, 23, result.stderr || result.stdout);
+  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
+  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
+  assert.match(result.stderr, /displayed the complete question bank and requires additional approved answers/);
+});
+
+test('status 23 without output is rejected precisely without retry', () => {
+  const { result } = runFake({ emitQuestionBank: false });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /returned no question-bank output/);
+  assert.doesNotMatch(result.stderr, /retry/i);
+});
+
+for (const scenario of [
+  ['begin without complete', { omitComplete: true }, /partial question bank/],
+  ['complete without begin', { omitBegin: true }, /complete marker without a begin marker/],
+  ['duplicate begin', { duplicateBegin: true }, /duplicate question-bank begin markers/],
+  ['duplicate complete', { duplicateComplete: true }, /duplicate question-bank complete markers/],
+  ['bank on stderr', { bankStream: 'stderr' }, /on stderr instead of documented stdout/],
+  ['missing control receipt', { controlReceipt: false }, /matching question-bank control receipt/],
+]) {
+  test(`managed protocol rejects ${scenario[0]}`, () => {
+    const { result } = runFake(scenario[1]);
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    assert.match(result.stderr, scenario[2]);
+    assert.doesNotMatch(result.stdout, /Accept all displayed recommended settings/);
+  });
+}
+
+test('genuine child failure is not classified as question-bank pause and raw logs stay hidden', () => {
+  const { root, result } = runFake({ emitQuestionBank: false, exitCode: 9, extraLines: ["console.error('PRIVATE RAW LOG ' + __filename);"] });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /failed before completing the question-bank protocol/);
+  assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /PRIVATE RAW LOG/);
+  assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+});
+
+test('managed script identity mismatch fails before execution and reveals no private path', () => {
+  const { root, result } = runFake({ identityMismatch: true });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /identity does not support the required question-bank protocol/);
+  assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+});
+
+test('host and user arguments survive delegation exactly once and recursion depth is explicit', () => {
+  const root = tmpRoot();
+  const argsLogPath = path.join(root, 'managed-args.json');
+  createFakeManagedSetupScript(root, { argsLogPath });
+  const result = run([
+    '--execute', '--profile', 'auto-main', '--host', 'claude-code',
+    '--claude-plugin-behavior', 'instructions', '--skip-target', 'opencode',
+  ], { env: isolatedHomeEnv(root), timeout: 30000 });
+  assert.equal(result.status, 23, result.stderr || result.stdout);
+  const logged = JSON.parse(fs.readFileSync(argsLogPath, 'utf8'));
+  assert.equal(logged.argv.filter((arg) => arg === '--host').length, 1);
+  assert.equal(logged.argv.filter((arg) => arg === 'claude-code').length, 1);
+  assert.equal(logged.argv.filter((arg) => arg === '--claude-plugin-behavior').length, 1);
+  assert.equal(logged.argv.filter((arg) => arg === 'instructions').length, 1);
+  assert.equal(logged.argv.filter((arg) => arg === '--skip-target').length, 1);
+  assert.equal(logged.depth, '1');
+});
+
+test('timeout and signal termination have distinct privacy-safe diagnoses', async () => {
+  const timeoutRoot = tmpRoot();
+  const timeoutFake = createFakeManagedSetupScript(timeoutRoot, { hang: true, emitQuestionBank: false });
+  await assert.rejects(
+    core.runManagedQuestionBankChild(timeoutFake.scriptPath, timeoutFake.managedPath, ['--execute'], { timeoutMs: 100 }),
+    /timed out before the question-bank protocol completed/,
+  );
+
+  const signalRoot = tmpRoot();
+  const signalFake = createFakeManagedSetupScript(signalRoot, { hang: true, emitQuestionBank: false });
+  await assert.rejects(
+    core.runManagedQuestionBankChild(signalFake.scriptPath, signalFake.managedPath, ['--execute'], { timeoutMs: 5000, terminateAfterMs: 100 }),
+    /terminated by a signal before the question-bank protocol completed/,
+  );
+});
+
+test('Windows CRLF bank markers are accepted by the documented stdout protocol', () => {
+  const { result } = runFake();
+  assert.equal(result.status, 23, result.stderr || result.stdout);
+  assert.match(result.stdout, /question-bank:begin -->\r?\n/);
+  assert.match(result.stdout, /question-bank:complete -->/);
+});
+
+function realManagedFixture() {
+  const root = tmpRoot();
+  const { origin } = createGitBackedRealSetupRepo(root);
+  const managedPath = path.join(root, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
+  runTestGit(root, ['clone', '--branch', 'main', origin, managedPath]);
+  return { root, origin, managedPath };
+}
+
+function runRealManaged(fixture, extraArgs = [], input) {
+  return run([
+    '--execute', '--profile', 'auto-main', '--host', 'claude-code',
+    '--repo-remote', fixture.origin, ...extraArgs,
+  ], { env: isolatedHomeEnv(fixture.root), input, timeout: 300000 });
+}
+
+test('real active-to-managed Claude route shows one complete bank then pauses on empty input with zero writes', () => {
+  const fixture = realManagedFixture();
+  const result = runRealManaged(fixture, [], '');
+  assert.equal(result.status, 23, result.stderr || result.stdout);
+  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
+  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
+  assert.equal(fs.existsSync(path.join(fixture.managedPath, 'BRIDGE_ARGS.log')), false);
+  assert.equal(fs.existsSync(path.join(fixture.managedPath, 'CLAUDE_PLUGIN_SETUP.log')), false);
+  assert.equal(fs.existsSync(codexConfig(fixture.root)), false);
+});
+
+test('real partial piped answers still show one complete effective bank before pausing', () => {
+  const fixture = realManagedFixture();
+  const result = runRealManaged(fixture, [], 'default\n');
+  assert.equal(result.status, 23, result.stderr || result.stdout);
+  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
+  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
+  assert.match(result.stdout, /Update source[\s\S]*Selected:/);
+  assert.equal(fs.existsSync(path.join(fixture.managedPath, 'BRIDGE_ARGS.log')), false);
+});
+
+test('real complete piped answers show one bank before synthetic-home setup mutation', () => {
+  const fixture = realManagedFixture();
+  const input = ['default', 'enable', 'enable', 'default', 'instructions', ''].join('\n');
+  const result = runRealManaged(fixture, [], input);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
+  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
+  assert.equal(fs.existsSync(path.join(fixture.managedPath, 'CLAUDE_PLUGIN_SETUP.log')), false);
+  assert.equal(fs.existsSync(codexConfig(fixture.root)), false);
+});
+
+test('real explicit yes-recommended still shows one bank before synthetic-home setup mutation', () => {
+  const fixture = realManagedFixture();
+  const result = runRealManaged(fixture, [
+    '--yes-recommended', '--claude-plugin-behavior', 'instructions',
+    '--claude-topology', 'root-only', '--claude-agent-capacity', 'root-only',
+  ]);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
+  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
+  assert.match(result.stdout, /--yes-recommended selected/);
+  assert.equal(fs.existsSync(path.join(fixture.managedPath, 'CLAUDE_PLUGIN_SETUP.log')), false);
+  assert.equal(fs.existsSync(codexConfig(fixture.root)), false);
+});
+
+test('Claude probe timeout cannot silently suppress the real managed bank', () => {
+  const fixture = realManagedFixture();
+  const fakeClaude = path.join(fixture.root, 'Claude CLI With Spaces', 'fake-claude.cjs');
+  writeFile(fakeClaude, [
+    "'use strict';",
+    "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);",
+    '',
+  ].join('\n'));
+  const result = run([
+    '--execute', '--profile', 'auto-main', '--host', 'claude-code',
+    '--repo-remote', fixture.origin, '--claude-cli', fakeClaude,
+  ], {
+    env: {
+      ...isolatedHomeEnv(fixture.root),
+      CLAUDE_TOOLKIT_CLAUDE_CLI_TIMEOUT_MS: '50',
+      CLAUDE_TOOLKIT_CLAUDE_CLI_PROBE_TIMEOUT_MS: '50',
+    },
+    input: '',
+    timeout: 300000,
+  });
+  assert.equal(result.status, 23, result.stderr || result.stdout);
+  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
+  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
+  assert.match(result.stdout, /could not be verified|may need attention|unavailable/i);
+  assert.equal(fs.existsSync(path.join(fixture.managedPath, 'BRIDGE_ARGS.log')), false);
+  assert.equal(fs.existsSync(codexConfig(fixture.root)), false);
+});

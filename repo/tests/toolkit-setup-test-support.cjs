@@ -97,10 +97,10 @@ function runTestGit(cwd, args) {
 function createMinimalSetupRepo(root, options = {}) {
   writeFile(path.join(root, 'AGENTS.md'), '# fake toolkit repo\n');
   writeFile(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({
-    name: 'ai-agent-toolkit', version: '2.7.22', skills: './skills', hooks: './.claude-plugin/hooks/hooks.json'
+    name: 'ai-agent-toolkit', version: '2.7.23', skills: './skills', hooks: './.claude-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.codex-plugin', 'plugin.json'), JSON.stringify({
-    name: 'ai-agent-toolkit', version: '2.7.22', hooks: './.codex-plugin/hooks/hooks.json'
+    name: 'ai-agent-toolkit', version: '2.7.23', hooks: './.codex-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.claude-plugin', 'hooks', 'hooks.json'), JSON.stringify({
     hooks: {
@@ -114,7 +114,7 @@ function createMinimalSetupRepo(root, options = {}) {
     "const path = require('node:path');",
     "if (process.env.SETUP_FAKE_PLUGIN_FAILURE === '1') { console.error('synthetic plugin failure'); process.exit(1); }",
     "if (process.argv.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
-    "process.stdout.write(JSON.stringify({ ok: true, version: '2.7.22', installed: true, enabled: true, current: true, cache_root: path.join(process.cwd(), 'fake-codex-cache'), hook_trust_status: 'verification-unavailable', hook_execution_status: 'verification unavailable; open /hooks in Codex', hook_trust_message: 'Hook trust verification unavailable; open /hooks in Codex and review the current Toolkit SessionStart hook' }));",
+    "process.stdout.write(JSON.stringify({ ok: true, version: '2.7.23', installed: true, enabled: true, current: true, cache_root: path.join(process.cwd(), 'fake-codex-cache'), hook_trust_status: 'verification-unavailable', hook_execution_status: 'verification unavailable; open /hooks in Codex', hook_trust_message: 'Hook trust verification unavailable; open /hooks in Codex and review the current Toolkit SessionStart hook' }));",
     'process.exit(0);', ''
   ].join('\n'));
   writeFile(path.join(root, 'repo', 'scripts', 'setup-claude-toolkit-plugin.cjs'), [
@@ -125,8 +125,8 @@ function createMinimalSetupRepo(root, options = {}) {
     "if (process.argv.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'CLAUDE_PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
     "const active = process.env.SETUP_FAKE_CLAUDE_ENFORCEMENT !== '0' && process.env.SETUP_FAKE_CLAUDE_TRUST !== '0';",
     "const cachePath = path.join(process.cwd(), 'fake-claude-cache');",
-    "const proof = active ? { schema: 3, source: 'claude-plugin-list', plugin_version: '2.7.22', cache_identity: crypto.createHash('sha256').update(path.resolve(cachePath)).digest('hex'), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64) } : null;",
-    "process.stdout.write(JSON.stringify({ ok: true, version: '2.7.22', scope: 'user', current: true, installed_current: true, enabled: true, strict_enforcement_verified: active, enforcement_verified: active, source_path: process.cwd(), cache_path: cachePath, trusted: process.env.SETUP_FAKE_CLAUDE_TRUST !== '0', hook_active: active, activation_proof: proof }));",
+    "const proof = active ? { schema: 3, source: 'claude-plugin-list', plugin_version: '2.7.23', cache_identity: crypto.createHash('sha256').update(path.resolve(cachePath)).digest('hex'), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64) } : null;",
+    "process.stdout.write(JSON.stringify({ ok: true, version: '2.7.23', scope: 'user', current: true, installed_current: true, enabled: true, strict_enforcement_verified: active, enforcement_verified: active, source_path: process.cwd(), cache_path: cachePath, trusted: process.env.SETUP_FAKE_CLAUDE_TRUST !== '0', hook_active: active, activation_proof: proof }));",
     'process.exit(0);', ''
   ].join('\n'));
   writeFile(path.join(root, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), [
@@ -196,16 +196,35 @@ function createFakeManagedSetupScript(root, options = {}) {
   const managedPath = path.join(root, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
   const scriptPath = path.join(managedPath, 'repo', 'scripts', 'setup-toolkit.cjs');
   const exitCode = Number.isInteger(options.exitCode) ? options.exitCode : 23;
+  const beginLines = options.duplicateBegin ? 2 : (options.omitBegin ? 0 : 1);
+  const completeLines = options.duplicateComplete ? 2 : (options.omitComplete ? 0 : 1);
+  const bankStream = options.bankStream === 'stderr' ? 2 : 1;
   writeFile(scriptPath, [
-    '#!/usr/bin/env node', "'use strict';",
-    "console.log('managed setup script version 2.7.22');",
+    '#!/usr/bin/env node', "'use strict';", "const fs = require('node:fs');",
+    "const protocol = 'setup-toolkit-managed-question-bank-v1';",
+    "if (process.argv.length === 3 && process.argv[2] === '--managed-question-bank-protocol-probe') {",
+    ...(options.identityMismatch
+      ? ["  process.stdout.write(JSON.stringify({ protocol: 'mismatch' }) + '\\n');"]
+      : ["  process.stdout.write(JSON.stringify({ protocol, question_bank_stream: 'stdout', control_fd: 3, acknowledgement_fd: 4, pause_status: 23 }) + '\\n');"]),
+    "  process.exit(0);",
+    "}",
+    ...(options.argsLogPath ? [`fs.writeFileSync(${JSON.stringify(options.argsLogPath)}, JSON.stringify({ argv: process.argv.slice(2), depth: process.env.AI_AGENT_TOOLKIT_MANAGED_DELEGATION_DEPTH || '' }));`] : []),
+    ...(options.stdinLogPath ? [`fs.writeFileSync(${JSON.stringify(options.stdinLogPath)}, fs.readFileSync(0, 'utf8'));`] : []),
+    ...(options.hang ? ["Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);"] : []),
+    ...(options.signal ? ["process.kill(process.pid, 'SIGTERM');"] : []),
     ...(options.emitQuestionBank === false ? [] : [
-      "console.log('<!-- setup-toolkit-question-bank:begin -->');",
-      "console.log('# Toolkit setup choices');",
-      "console.log('<!-- setup-toolkit-question-bank:complete -->');"
+      `for (let index = 0; index < ${beginLines}; index += 1) fs.writeSync(${bankStream}, '<!-- setup-toolkit-question-bank:begin -->\\r\\n');`,
+      `fs.writeSync(${bankStream}, '# Toolkit setup choices\\r\\n');`,
+      `for (let index = 0; index < ${completeLines}; index += 1) fs.writeSync(${bankStream}, '<!-- setup-toolkit-question-bank:complete -->\\r\\n');`,
+    ]),
+    ...(options.emitQuestionBank === false || options.controlReceipt === false ? [] : [
+      "fs.writeSync(3, JSON.stringify({ protocol, event: 'question-bank-complete', stream: 'stdout', begin_markers: 1, complete_markers: 1, question_count: 1 }) + '\\n');",
+    ]),
+    ...(options.emitQuestionBank === false || options.controlReceipt === false ? [] : [
+      "const acknowledgement = fs.readFileSync(4, 'utf8').trim();",
+      "if (acknowledgement !== 'question-bank-visible') process.exit(91);",
     ]),
     ...(options.extraLines || []),
-    "console.log('Setup script path executed: ' + __filename);",
     `process.exit(${exitCode});`, ''
   ].join('\n'));
   writeFile(path.join(managedPath, 'AGENTS.md'), '# fake managed toolkit repo\n');
