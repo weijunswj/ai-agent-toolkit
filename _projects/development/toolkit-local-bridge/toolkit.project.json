@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.7.24",
+  "version": "2.7.26",
   "version_policy": "semver",
-  "version_notes": "Guarantees one complete visible managed Claude question bank through a deterministic parent-child handshake before prompts or setup writes.",
+  "version_notes": "Makes the visible Claude topology choice authoritative over derived capacity and synchronizes deferred post-approval capability guidance while preserving verified-current fail-closed probes.",
   "outputs": [
     {
       "kind": "curated",

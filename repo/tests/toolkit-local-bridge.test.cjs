@@ -44,7 +44,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.7.24';
+const expectedBridgeVersion = '2.7.26';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 
 function tmpBaseDir() {
@@ -1563,6 +1563,23 @@ test('Claude checker SessionStart exits successfully before all optional mainten
   }
 });
 
+test('Claude capability-probe SessionStart exits before parsing, maintenance, or mutation', () => {
+  const root = tmpRoot();
+  const sentinel = path.join(root, 'owned-state.txt');
+  fs.writeFileSync(sentinel, 'unchanged\n');
+  const before = snapshotTree(root);
+  const previous = process.env.AI_AGENT_TOOLKIT_CAPABILITY_PROBE;
+  process.env.AI_AGENT_TOOLKIT_CAPABILITY_PROBE = '1';
+  try {
+    assert.deepEqual(runBridge(['--hook', '--unsupported-capability-probe-fixture']), {
+      status: 0, audit: null, capability_probe_noop: true,
+    });
+  } finally {
+    if (previous === undefined) delete process.env.AI_AGENT_TOOLKIT_CAPABILITY_PROBE;
+    else process.env.AI_AGENT_TOOLKIT_CAPABILITY_PROBE = previous;
+  }
+  assert.deepEqual(snapshotTree(root), before);
+});
 test('repo same-source downgrade names managed source remediation', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
@@ -5312,6 +5329,16 @@ test('toolkit setup skill documents the end-to-end English setup journey', () =>
     assert.match(text, /Toolkit-managed update reports\/logs older than 7 days/i, relPath);
     assert.match(text, /official `n8n-io\/skills` plugin setup/i, relPath);
     assert.match(text, /Do not repair or audit temporary marketplace checkout paths/i, relPath);
+    assert.match(text, /pre-approval Claude(?: Code)? setup and plan discovery (?:start|launch) no Claude session/i, relPath);
+    assert.match(text, /does not prove worker\/checker launch capability/i, relPath);
+    assert.match(text, /root-only is the conservative recommendation while strict capability is unverified/i, relPath);
+    assert.match(text, /direct.*(?:visible|displayed).*request/i, relPath);
+    assert.match(text, /selecting it does not mean it is (?:already )?(?:active|enabled)/i, relPath);
+    assert.match(text, /Fable 5 worker.*Opus 4\.8 checker/i, relPath);
+    assert.match(text, /verified-current no-maintenance SessionStart identity/i, relPath);
+    assert.match(text, /stale installed Toolkit code is never trusted/i, relPath);
+    assert.match(text, /Restart-pending, stale, or failed verification leaves root-only active/i, relPath);
+    assert.doesNotMatch(text, /offers .* only when the detected CLI supports their real effects/i, relPath);
   }
 });
 

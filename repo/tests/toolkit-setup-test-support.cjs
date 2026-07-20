@@ -97,10 +97,10 @@ function runTestGit(cwd, args) {
 function createMinimalSetupRepo(root, options = {}) {
   writeFile(path.join(root, 'AGENTS.md'), '# fake toolkit repo\n');
   writeFile(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({
-    name: 'ai-agent-toolkit', version: '2.7.24', skills: './skills', hooks: './.claude-plugin/hooks/hooks.json'
+    name: 'ai-agent-toolkit', version: '2.7.26', skills: './skills', hooks: './.claude-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.codex-plugin', 'plugin.json'), JSON.stringify({
-    name: 'ai-agent-toolkit', version: '2.7.24', hooks: './.codex-plugin/hooks/hooks.json'
+    name: 'ai-agent-toolkit', version: '2.7.26', hooks: './.codex-plugin/hooks/hooks.json'
   }, null, 2));
   writeFile(path.join(root, '.claude-plugin', 'hooks', 'hooks.json'), JSON.stringify({
     hooks: {
@@ -114,7 +114,7 @@ function createMinimalSetupRepo(root, options = {}) {
     "const path = require('node:path');",
     "if (process.env.SETUP_FAKE_PLUGIN_FAILURE === '1') { console.error('synthetic plugin failure'); process.exit(1); }",
     "if (process.argv.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
-    "process.stdout.write(JSON.stringify({ ok: true, version: '2.7.24', installed: true, enabled: true, current: true, cache_root: path.join(process.cwd(), 'fake-codex-cache'), hook_trust_status: 'verification-unavailable', hook_execution_status: 'verification unavailable; open /hooks in Codex', hook_trust_message: 'Hook trust verification unavailable; open /hooks in Codex and review the current Toolkit SessionStart hook' }));",
+    "process.stdout.write(JSON.stringify({ ok: true, version: '2.7.26', installed: true, enabled: true, current: true, cache_root: path.join(process.cwd(), 'fake-codex-cache'), hook_trust_status: 'verification-unavailable', hook_execution_status: 'verification unavailable; open /hooks in Codex', hook_trust_message: 'Hook trust verification unavailable; open /hooks in Codex and review the current Toolkit SessionStart hook' }));",
     'process.exit(0);', ''
   ].join('\n'));
   writeFile(path.join(root, 'repo', 'scripts', 'setup-claude-toolkit-plugin.cjs'), [
@@ -122,11 +122,13 @@ function createMinimalSetupRepo(root, options = {}) {
     "const crypto = require('node:crypto');",
     "const fs = require('node:fs');",
     "const path = require('node:path');",
-    "if (process.argv.includes('--write')) fs.appendFileSync(path.join(process.cwd(), 'CLAUDE_PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`);",
+    "const refreshMarker = path.join(process.cwd(), 'CLAUDE_PLUGIN_REFRESHED');",
+    "if (process.argv.includes('--write')) { fs.appendFileSync(path.join(process.cwd(), 'CLAUDE_PLUGIN_SETUP.log'), `${process.argv.slice(2).join(' ')}\\n`); fs.writeFileSync(refreshMarker, '1'); }",
+    "if (process.env.SETUP_FAKE_CLAUDE_REFRESH_REQUIRED === '1' && !process.argv.includes('--write') && !fs.existsSync(refreshMarker)) { console.error('stale plugin fixture'); process.exit(1); }",
     "const active = process.env.SETUP_FAKE_CLAUDE_ENFORCEMENT !== '0' && process.env.SETUP_FAKE_CLAUDE_TRUST !== '0';",
     "const cachePath = path.join(process.cwd(), 'fake-claude-cache');",
-    "const proof = active ? { schema: 3, source: 'claude-plugin-list', plugin_version: '2.7.24', cache_identity: crypto.createHash('sha256').update(path.resolve(cachePath)).digest('hex'), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64) } : null;",
-    "process.stdout.write(JSON.stringify({ ok: true, version: '2.7.24', scope: 'user', current: true, installed_current: true, enabled: true, strict_enforcement_verified: active, enforcement_verified: active, source_path: process.cwd(), cache_path: cachePath, trusted: process.env.SETUP_FAKE_CLAUDE_TRUST !== '0', hook_active: active, activation_proof: proof }));",
+    "const proof = active ? { schema: 3, source: 'claude-plugin-list', plugin_version: '2.7.26', cache_identity: crypto.createHash('sha256').update(path.resolve(cachePath)).digest('hex'), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64) } : null;",
+    "process.stdout.write(JSON.stringify({ ok: true, version: '2.7.26', scope: 'user', current: true, installed_current: true, enabled: true, strict_enforcement_verified: active, enforcement_verified: active, source_path: process.cwd(), cache_path: cachePath, trusted: process.env.SETUP_FAKE_CLAUDE_TRUST !== '0', hook_active: active, activation_proof: proof }));",
     'process.exit(0);', ''
   ].join('\n'));
   writeFile(path.join(root, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), [
