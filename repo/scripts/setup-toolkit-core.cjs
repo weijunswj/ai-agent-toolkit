@@ -2601,7 +2601,7 @@ function runCodexNativePluginSetup(args) {
   );
   const expectedVersion = expectedToolkitVersion(args.repoRoot, 'codex');
   if (verify.status === 0) {
-    process.stdout.write(verify.stdout || '');
+    // Captured helper JSON remains internal to avoid routine path disclosure.
     const summary = parseJsonFromOutput(verify.stdout);
     return {
       status: 'already fresh',
@@ -2632,7 +2632,7 @@ function runCodexNativePluginSetup(args) {
     setupCodexArgs(args, '--verify'),
     { cwd: args.repoRoot, capture: true, timeout: 120000 }
   );
-  process.stdout.write(finalVerify.stdout || '');
+  // Captured helper JSON remains internal to avoid routine path disclosure.
   const summary = parseJsonFromOutput(finalVerify.stdout);
   return {
     status: 'refreshed',
@@ -2947,7 +2947,7 @@ function runBridgeAudit(args) {
     timeout: 120000
   });
   const stdout = result.stdout || '';
-  process.stdout.write(stdout);
+  // Captured audit JSON remains internal to avoid routine path disclosure.
   const jsonStart = stdout.indexOf('{');
   if (jsonStart < 0) throw new Error('Final bridge audit did not return valid JSON.');
   const audit = JSON.parse(stdout.slice(jsonStart));
