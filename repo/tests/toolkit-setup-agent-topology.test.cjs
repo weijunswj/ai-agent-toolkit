@@ -9,7 +9,7 @@ const core = require('../scripts/setup-toolkit-core.cjs');
 const control = require('../scripts/toolkit-agent-control.cjs');
 
 function current(supported, profile = {}) {
-  const proof = { schema: 3, source: 'claude-plugin-list', plugin_version: '2.7.24', cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64) };
+  const proof = { schema: 3, source: 'claude-plugin-list', plugin_version: '2.7.25', cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64) };
   return {
     managed: { currentPath: '', selectedPath: '', defaultPath: '', exists: false, git: false, dirty: false, branch: '', remote: '' },
     audit: { repo_auto_update: {}, targets: {} },
@@ -33,10 +33,11 @@ test('one canonical question specification drives supported Claude choices witho
   assert.doesNotMatch(text, /manage agent capacity|manual maximum/i);
 });
 
-test('unsupported Claude capability omits decorative automatic, manual and Toolkit-direct choices', () => {
+test('unverified Claude capability keeps direct as a post-approval request but defaults root-only', () => {
   const args = core.parseArgs(['--plan', '--host', 'claude-code']);
   const specs = core.setupQuestionSpecs(args, current(false));
-  assert.deepEqual(specs.find((row) => row.key === 'claudeTopology').choices.map((choice) => choice.value), ['root-only', 'broader-native', 'keep']);
+  assert.deepEqual(specs.find((row) => row.key === 'claudeTopology').choices.map((choice) => choice.value), ['toolkit-direct', 'root-only', 'broader-native', 'keep']);
+  assert.equal(specs.find((row) => row.key === 'claudeTopology').availability.status, 'post-approval-verification-required');
   assert.equal(specs.some((row) => row.key === 'claudeAgentCapacity'), false);
   assert.equal(args.setupChoices.claudeAgentCapacity, 'root-only');
 });
@@ -81,7 +82,7 @@ test('topology and capacity resolve to one canonical compatible outcome', () => 
   });
 
   const unsupported = core.parseArgs(['--plan', '--host', 'claude-code', '--claude-topology', 'toolkit-direct']);
-  assert.throws(() => core.resolveClaudeTopologyCapacity(unsupported, current(false)), /unavailable/);
+  assert.equal(core.resolveClaudeTopologyCapacity(unsupported, current(false)).topology, control.TOPOLOGIES.CLAUDE_DIRECT);
 });
 
 test('recommended plan and rendered question surfaces show the same reconciled root-only result', () => {
@@ -155,6 +156,18 @@ test('resource-counter loss invalidates an existing automatic strict profile', a
   }
 });
 
+test('pre-approval Claude capability inspection launches no Claude command', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-observational-'));
+  const sentinel = path.join(root, 'session-start-sentinel');
+  const fakeClaude = path.join(root, 'stale-claude.cjs');
+  fs.writeFileSync(fakeClaude, `require('node:fs').writeFileSync(${JSON.stringify(sentinel)}, 'session started');\n`);
+  const capability = core.inspectClaudeAgentCapability({ claudeCli: fakeClaude });
+  assert.equal(capability.executable_available, true);
+  assert.equal(capability.launch_supported, false);
+  assert.equal(capability.launch_probe_status, 'deferred');
+  assert.equal(capability.version_verification, 'deferred');
+  assert.equal(fs.existsSync(sentinel), false);
+});
 test('explicit Windows cmd path with spaces works through bounded launch and version capability probes', { skip: process.platform !== 'win32' }, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'Claude probe path '));
   const fake = path.join(root, 'fake.cjs');
@@ -166,7 +179,7 @@ test('explicit Windows cmd path with spaces works through bounded launch and ver
     '',
   ].join('\n'));
   fs.writeFileSync(wrapper, `@echo off\r\n"${process.execPath}" "${fake}" %*\r\n`);
-  const capability = core.inspectClaudeAgentCapability({ claudeCli: wrapper });
+  const capability = core.probeClaudeAgentCapability({ claudeCli: wrapper });
   assert.equal(capability.launch_supported, true);
   assert.match(capability.version, /2\.1\.198/);
 });
@@ -178,7 +191,7 @@ function capabilityCli(root, behavior) {
     "const fs=require('node:fs');const args=process.argv.slice(2);",
     "if(args.includes('--version')){console.log('2.1.999 fixture');process.exit(0);}",
     "if(args.includes('--help')){console.log('--print only');process.exit(0);}",
-    `if(args.includes('--print')){fs.writeFileSync(${JSON.stringify(path.join(root, `${behavior}.json`))},JSON.stringify({args,stdin:fs.readFileSync(0,'utf8')}));${behavior === 'supported' ? "console.log('{}');process.exit(0);" : behavior === 'unsupported' ? "console.error('unknown option --effort');process.exit(2);" : "console.error('authentication required: sign in');process.exit(3);"}}`,
+    `if(args.includes('--print')){fs.writeFileSync(${JSON.stringify(path.join(root, `${behavior}.json`))},JSON.stringify({args,stdin:fs.readFileSync(0,'utf8'),capabilityProbe:process.env.AI_AGENT_TOOLKIT_CAPABILITY_PROBE}));${behavior === 'supported' ? "console.log('{}');process.exit(0);" : behavior === 'unsupported' ? "console.error('unknown option --effort');process.exit(2);" : "console.error('authentication required: sign in');process.exit(3);"}}`,
     'process.exit(4);',
     '',
   ].join('\n'));
@@ -187,12 +200,13 @@ function capabilityCli(root, behavior) {
 
 test('bounded exact-argv probe succeeds even when help omits supported flags', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-capability-supported-'));
-  const capability = core.inspectClaudeAgentCapability({ claudeCli: capabilityCli(root, 'supported') });
+  const capability = core.probeClaudeAgentCapability({ claudeCli: capabilityCli(root, 'supported') });
   assert.equal(capability.launch_supported, true);
   assert.equal(capability.launch_probe_status, 'supported');
   const probe = JSON.parse(fs.readFileSync(path.join(root, 'supported.json'), 'utf8'));
   assert.deepEqual(probe.args, ['--print', '--output-format', 'json', '--model', 'opus-4.8', '--effort', 'medium', '--tools', 'Read', 'Glob', 'Grep', '--disallowedTools', 'Agent', 'Task', 'Bash', 'Edit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch', '--permission-mode', 'plan', '--no-session-persistence']);
   assert.equal(probe.stdin, '');
+  assert.equal(probe.capabilityProbe, '1');
 });
 
 for (const variable of ['CLAUDE_TOOLKIT_CLAUDE_CLI', 'CLAUDE_CLI_PATH']) {
@@ -200,7 +214,7 @@ for (const variable of ['CLAUDE_TOOLKIT_CLAUDE_CLI', 'CLAUDE_CLI_PATH']) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-capability-env-'));
     const command = capabilityCli(root, 'supported');
     const env = { PATH: '', [variable]: command };
-    const capability = core.inspectClaudeAgentCapability({ env });
+    const capability = core.probeClaudeAgentCapability({ env });
     assert.equal(capability.launch_supported, true);
     assert.equal(capability.claude_command, command);
   });
@@ -214,13 +228,13 @@ test('setup capability command precedence is explicit, AI env, helper env, legac
     CLAUDE_TOOLKIT_CLAUDE_CLI: commands.helper,
     CLAUDE_CLI_PATH: commands.legacy,
   };
-  assert.equal(core.inspectClaudeAgentCapability({ claudeCli: commands.explicit, persistedClaudeCli: commands.persisted, env }).claude_command, commands.explicit);
+  assert.equal(core.probeClaudeAgentCapability({ claudeCli: commands.explicit, persistedClaudeCli: commands.persisted, env }).claude_command, commands.explicit);
   delete env.AI_AGENT_TOOLKIT_CLAUDE_CLI;
-  assert.equal(core.inspectClaudeAgentCapability({ persistedClaudeCli: commands.persisted, env }).claude_command, commands.helper);
+  assert.equal(core.probeClaudeAgentCapability({ persistedClaudeCli: commands.persisted, env }).claude_command, commands.helper);
   delete env.CLAUDE_TOOLKIT_CLAUDE_CLI;
-  assert.equal(core.inspectClaudeAgentCapability({ persistedClaudeCli: commands.persisted, env }).claude_command, commands.legacy);
+  assert.equal(core.probeClaudeAgentCapability({ persistedClaudeCli: commands.persisted, env }).claude_command, commands.legacy);
   delete env.CLAUDE_CLI_PATH;
-  assert.equal(core.inspectClaudeAgentCapability({ persistedClaudeCli: commands.persisted, env }).claude_command, commands.persisted);
+  assert.equal(core.probeClaudeAgentCapability({ persistedClaudeCli: commands.persisted, env }).claude_command, commands.persisted);
 });
 
 test('capability probe fails closed when either sticky worker or checker model is unavailable', () => {
@@ -235,7 +249,7 @@ test('capability probe fails closed when either sticky worker or checker model i
     'process.exit(4);',
     '',
   ].join('\n'));
-  const capability = core.inspectClaudeAgentCapability({ claudeCli: target });
+  const capability = core.probeClaudeAgentCapability({ claudeCli: target });
   assert.equal(capability.launch_supported, false);
   assert.equal(capability.launch_probe_status, 'unsupported-syntax');
   assert.equal(capability.launch_probe_exit_status, 0);
@@ -243,10 +257,10 @@ test('capability probe fails closed when either sticky worker or checker model i
 });
 test('capability probe distinguishes unsupported syntax from unrelated runtime failure', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-capability-failures-'));
-  const unsupported = core.inspectClaudeAgentCapability({ claudeCli: capabilityCli(root, 'unsupported') });
+  const unsupported = core.probeClaudeAgentCapability({ claudeCli: capabilityCli(root, 'unsupported') });
   assert.equal(unsupported.launch_supported, false);
   assert.equal(unsupported.launch_probe_status, 'unsupported-syntax');
-  const auth = core.inspectClaudeAgentCapability({ claudeCli: capabilityCli(root, 'auth') });
+  const auth = core.probeClaudeAgentCapability({ claudeCli: capabilityCli(root, 'auth') });
   assert.equal(auth.launch_supported, false);
   assert.equal(auth.launch_probe_status, 'indeterminate-runtime-failure');
   assert.doesNotMatch(auth.detector, /unsupported-syntax/);

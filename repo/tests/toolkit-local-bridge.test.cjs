@@ -44,7 +44,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.7.24';
+const expectedBridgeVersion = '2.7.25';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 
 function tmpBaseDir() {
@@ -1563,6 +1563,23 @@ test('Claude checker SessionStart exits successfully before all optional mainten
   }
 });
 
+test('Claude capability-probe SessionStart exits before parsing, maintenance, or mutation', () => {
+  const root = tmpRoot();
+  const sentinel = path.join(root, 'owned-state.txt');
+  fs.writeFileSync(sentinel, 'unchanged\n');
+  const before = snapshotTree(root);
+  const previous = process.env.AI_AGENT_TOOLKIT_CAPABILITY_PROBE;
+  process.env.AI_AGENT_TOOLKIT_CAPABILITY_PROBE = '1';
+  try {
+    assert.deepEqual(runBridge(['--hook', '--unsupported-capability-probe-fixture']), {
+      status: 0, audit: null, capability_probe_noop: true,
+    });
+  } finally {
+    if (previous === undefined) delete process.env.AI_AGENT_TOOLKIT_CAPABILITY_PROBE;
+    else process.env.AI_AGENT_TOOLKIT_CAPABILITY_PROBE = previous;
+  }
+  assert.deepEqual(snapshotTree(root), before);
+});
 test('repo same-source downgrade names managed source remediation', () => {
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');

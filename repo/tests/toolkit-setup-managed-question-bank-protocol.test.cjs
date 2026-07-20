@@ -11,6 +11,30 @@ function markerCount(text, marker) {
   return String(text || '').split(marker).length - 1;
 }
 
+function snapshotOwned(root) {
+  if (!fs.existsSync(root)) return [];
+  return fs.readdirSync(root, { recursive: true })
+    .map((entry) => path.join(root, entry))
+    .filter((entry) => fs.lstatSync(entry).isFile())
+    .sort()
+    .map((entry) => [path.relative(root, entry).replaceAll('\\', '/'), fs.readFileSync(entry).toString('hex')]);
+}
+
+function seedOwnedMutationSentinels(root) {
+  const paths = [
+    '.ai-agent-toolkit/current/manifest.json',
+    '.ai-agent-toolkit/current/state.json',
+    '.ai-agent-toolkit/current/.toolkit-staging-owner.json',
+    '.ai-agent-toolkit/staging/managed/sentinel.json',
+    '.ai-agent-toolkit/update-reports/sentinel.txt',
+    '.codex/config.toml',
+    '.codex/plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/stale/manifest.json',
+    '.config/opencode/skills/ai-agent-toolkit/sentinel.txt',
+    '.ag2/plugins/ai-agent-toolkit/sentinel.txt',
+    '.claude/plugins/cache/ai-agent-toolkit-local/ai-agent-toolkit/stale/plugin.json',
+  ];
+  for (const rel of paths) writeFile(path.join(root, ...rel.split('/')), `sentinel:${rel}\n`);
+}
 function createSequencedProtocolFake(root, options = {}) {
   const fake = createFakeManagedSetupScript(root);
   const bank = Buffer.from(options.bank || [
@@ -218,11 +242,11 @@ function realManagedFixture() {
   return { root, origin, managedPath };
 }
 
-function runRealManaged(fixture, extraArgs = [], input) {
+function runRealManaged(fixture, extraArgs = [], input, options = {}) {
   return run([
     '--execute', '--profile', 'auto-main', '--host', 'claude-code',
     '--repo-remote', fixture.origin, ...extraArgs,
-  ], { env: isolatedHomeEnv(fixture.root), input, timeout: 300000 });
+  ], { env: { ...(options.baseEnv || isolatedHomeEnv(fixture.root)), ...(options.env || {}) }, input, timeout: 300000 });
 }
 
 test('real active-to-managed Claude route shows one complete bank then pauses on empty input with zero writes', () => {
@@ -236,6 +260,53 @@ test('real active-to-managed Claude route shows one complete bank then pauses on
   assert.equal(fs.existsSync(codexConfig(fixture.root)), false);
 });
 
+test('stale SessionStart and owned-state sentinels remain untouched through the entire pre-approval lifecycle', () => {
+  for (const input of ['', 'default\n']) {
+    const fixture = realManagedFixture();
+    seedOwnedMutationSentinels(fixture.root);
+    const staleSessionStart = path.join(fixture.root, 'stale-session-start-sentinel.txt');
+    const workerProbe = path.join(fixture.root, 'worker-probe-sentinel.txt');
+    const checkerProbe = path.join(fixture.root, 'checker-probe-sentinel.txt');
+    const fakeClaude = path.join(fixture.root, 'Claude CLI With Spaces', 'stale-claude.cjs');
+    writeFile(fakeClaude, [
+      "'use strict';", "const fs = require('node:fs');", "const args = process.argv.slice(2);",
+      `fs.writeFileSync(${JSON.stringify(staleSessionStart)}, 'stale SessionStart ran');`,
+      `if (args.includes('--print') && args.includes('opus-4.8')) fs.writeFileSync(${JSON.stringify(checkerProbe)}, 'checker');`,
+      `if (args.includes('--print') && !args.includes('opus-4.8')) fs.writeFileSync(${JSON.stringify(workerProbe)}, 'worker');`,
+      "if (args.includes('--version')) console.log('2.3.25 stale'); else console.log('{}');",
+    ].join('\n'));
+    const baseEnv = isolatedHomeEnv(fixture.root);
+    const before = snapshotOwned(fixture.root);
+    const result = runRealManaged(fixture, ['--claude-cli', fakeClaude], input, { baseEnv });
+    assert.equal(result.status, 23, result.stderr || result.stdout);
+    assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
+    assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
+    assert.deepEqual(snapshotOwned(fixture.root), before);
+    assert.equal(fs.existsSync(staleSessionStart), false);
+    assert.equal(fs.existsSync(workerProbe), false);
+    assert.equal(fs.existsSync(checkerProbe), false);
+  }
+});
+
+test('Claude plan and JSON plan are observational and report launch verification deferred', () => {
+  for (const json of [false, true]) {
+    const fixture = realManagedFixture();
+    seedOwnedMutationSentinels(fixture.root);
+    const staleSessionStart = path.join(fixture.root, `plan-session-${json}.txt`);
+    const fakeClaude = path.join(fixture.root, 'Claude Plan CLI', 'stale-claude.cjs');
+    writeFile(fakeClaude, `require('node:fs').writeFileSync(${JSON.stringify(staleSessionStart)}, 'session');\n`);
+    const env = isolatedHomeEnv(fixture.root);
+    const before = snapshotOwned(fixture.root);
+    const result = run([
+      '--plan', ...(json ? ['--json'] : []), '--host', 'claude-code', '--repo-root', fixture.managedPath,
+      '--repo-remote', fixture.origin, '--claude-cli', fakeClaude,
+    ], { env, timeout: 300000 });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /root-only|root agent/i);
+    assert.deepEqual(snapshotOwned(fixture.root), before);
+    assert.equal(fs.existsSync(staleSessionStart), false);
+  }
+});
 test('managed explicit flags without yes-recommended complete with non-TTY stdin still open', async () => {
   const fixture = realManagedFixture();
   const result = await runWithUnclosedStdin(script, [
