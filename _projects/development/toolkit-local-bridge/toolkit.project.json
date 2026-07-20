@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.7.20",
+  "version": "2.7.21",
   "version_policy": "semver",
-  "version_notes": "Adds deterministic bounded pre-PR checking, canonical cross-host memory admission, and automatic ordinary helper-capacity management.",
+  "version_notes": "Adds the supported bounded checker workflow, no-maintenance checker sessions, single-pass Windows wrapper launches, and productive-parallel worker admission.",
   "outputs": [
     {
       "kind": "curated",

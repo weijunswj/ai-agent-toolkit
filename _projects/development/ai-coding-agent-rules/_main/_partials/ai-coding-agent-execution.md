@@ -24,23 +24,19 @@ If instructions conflict, follow the higher-priority source and report material 
 
 ## Agent Topology And Delegation
 
-Ordinary work begins root-first. The root handles setup/updates, docs/repo orientation, narrow changes, routine tests/checks/formatting, version alignment, reviews/plans/summaries, and root-capable verification unless the launch gate passes. Scope broad work in root first. `setup toolkit` uses no subagents.
+Ordinary work begins root-first. Root owns setup, orientation, narrow changes, checks, versioning, reviews, summaries, and root-capable verification; `setup toolkit` uses no subagents.
 
-The active host profile is a topology ceiling, not a delegation instruction. Capacity is a resource backstop, never launch permission. No explicit profile or unverifiable topology, admission, effort, or non-fast guarantee means root-only. Never project one host's controls onto another or describe policy-only behavior as hard enforcement.
+A host profile/capacity is a ceiling, never launch permission. Unverifiable topology, admission, effort, or non-fast enforcement means root-only. Never project controls across hosts or call policy hard enforcement. Generic helper/speed requests, child availability, UAT, or future tests cannot qualify launch.
 
-Generic requests to use helpers, agents, parallelism, delegation, subagents, or speed are preferences, not bounded scope; do not invent it. UAT, later stages, capacity, or future tests cannot qualify this task.
+Workers require separable concurrent work and concrete critical-path/wall-clock speedup. Declare ownership, speedup, root's critical task, shorter/easier child tasks, productive root work, integration/validation, and medium non-fast admission. Missing/contradictory declarations refuse; Toolkit validates allocation, not duration.
 
-The only independent-verification exception is a pre-PR adversarial checker: after meaningful root code changes and focused validation pass with a PR-ready diff, exactly one fresh direct read-only checker may review bounded task, diff, file, test, and invariant context. It cannot mutate, publish, spawn, or use Fast; generic verification, research, or second opinions remain insufficient. Root owns fixes.
+Never delegate all work, give a child the longer task while root keeps the easy task, or launch because a child is available. Root continues critical work, not waiting/polling, and owns integration, conflicts, validation, and final judgment.
 
-Every child uses canonical atomic Toolkit admission: RAM after live reservations is the hard fail-closed gate; CPU is secondary. Reserve before launch; release after failure/completion; reclaim stale state identity-safely. A denied required checker is `ADMISSION_DENIED`; root self-review is not independent.
+The sole verification exception is one fresh direct read-only pre-PR checker after meaningful root changes, focused validation, and a ready diff. Bounded context/identity/admission applies; worker-speedup fields do not. It cannot mutate, publish, spawn, or use Fast; root owns fixes. Denial is `ADMISSION_DENIED`; root self-review is not independent.
 
-Before launch, record bounded independent scope and ownership, material benefit, active topology and resource admission, verified medium non-fast mode, concurrent root work, and root integration/validation. Missing any fact prohibits launch.
+Every child uses atomic Toolkit admission: RAM after reservations is the hard gate; CPU is secondary. Reserve/release around launch and reclaim stale state identity-safely. Children default medium, never use Fast or nest; higher effort needs narrow escalation. Built-in, Security, plugin, multi-worker, third-party, and nested paths get no exception.
 
-Never delegate every substantive shard. Root immediately performs useful non-overlapping work, not wait, poll, narrate status, or repeat child scope. Wait only when root work is exhausted or depends on a child. Final integration, conflict resolution, cross-shard validation, and judgment remain root-owned.
-
-Every child applies the same launch gate and active profile. Toolkit-managed direct and nested children default to medium reasoning effort; higher effort needs narrow explicit escalation and does not raise siblings. Children never use or inherit fast mode; verify this before launch or reject/queue it. Built-in, Security, plugin, named multi-worker, third-party, and nested paths get no exception.
-
-When supported, default `fork_turns="none"` and brief only required files/evidence/constraints/criteria. `fork_turns="all"` needs exceptional justification; bounded inheritance needs specific dialogue. Do not claim support on unsupported hosts.
+Use `fork_turns="none"` with required context. Full inheritance needs justification; do not claim unsupported controls.
 
 ## Local Documentation
 
@@ -114,6 +110,16 @@ When a file says it is generated, do not edit it directly unless the user explic
 Find and edit the source, template, schema, generator, or source data first. Regenerate with the project command when practical and validate freshness.
 
 Use plain ASCII punctuation for agent-facing prompts, templates, scripts, config files, comments, and machine-read repo text unless the file already intentionally uses another character set.
+
+## GitHub-Backed Project Issue Tracking
+
+Activate issue tracking only after proving the active project is a Git repo with a relevant GitHub remote and same-repo issue/PR. Skip folders, non/local-only repos, other forges, and unrelated GitHub repos; Toolkit's remote never substitutes. Non-applicability is not an error.
+
+Find the smallest existing owner before creating an issue; update/reopen instead of duplicating. Use `Refs` for multi-stage, UAT-pending, blocked, or follow-up PRs; use `Closes`/`Fixes` only when merge satisfies every criterion.
+
+Synchronize start, PR/head, review Merge/Amend/Reject, findings/exact-head fixes, threads, CI/CodeQL, merge, UAT pending/pass/fail, remediation, and completion. Resolve threads only after exact-head verification. Keep any programme tracker's main SHA, version, lane/gate, PR, review/UAT, queue, and completed/deferred/superseded work current; advance on evidence.
+
+Keep canonical bodies current with bounded edits; use comments for chronology/history. Report failed/blocked writes honestly. After merge, update trackers, close only complete issues, keep pending gates open, and advance.
 
 ## Git Completion
 

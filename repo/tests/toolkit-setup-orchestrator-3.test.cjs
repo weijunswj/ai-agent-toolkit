@@ -116,13 +116,13 @@ test('generated Codex and Claude instruction surfaces preserve productive root-f
   const claude = fs.readFileSync(path.join(repoRoot, 'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md'), 'utf8');
   for (const pattern of [
     /Ordinary work begins root-first/,
-    /active host profile is a topology ceiling/,
-    /Missing any fact prohibits launch/,
-    /Never delegate every substantive shard/,
-    /concurrent root work/,
-    /default to medium reasoning effort/,
-    /never use or inherit fast mode/,
-    /Final integration, conflict resolution, cross-shard validation, and judgment remain root-owned/,
+    /profile\/capacity is a ceiling, never launch permission/,
+    /Missing\/contradictory declarations refuse/,
+    /Never delegate all work/,
+    /productive root work/,
+    /Children default medium/,
+    /never use Fast or nest/,
+    /owns integration, conflicts, validation, and final judgment/,
   ]) assert.match(agents, pattern);
   assert.match(claude, /@AGENTS\.md/);
   assert.match(claude, /Root `AGENTS\.md` is canonical/);

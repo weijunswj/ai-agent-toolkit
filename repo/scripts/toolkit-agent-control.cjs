@@ -9,7 +9,7 @@ const crypto = require('node:crypto');
 const processLaunch = require('./claude-process-launch.cjs');
 
 const SCHEMA = 1;
-const CONTROL_VERSION = '2.7.20';
+const CONTROL_VERSION = '2.7.21';
 const RESULTS = Object.freeze({ START: 'start', QUEUE: 'queue', REFUSE: 'refuse-root-only' });
 const CHECKER_RESULTS = Object.freeze({ PASS: 'PASS', FINDINGS: 'FINDINGS', ADMISSION_DENIED: 'ADMISSION_DENIED', SKIPPED_TRIVIAL: 'SKIPPED_TRIVIAL' });
 const HOSTS = Object.freeze({ CODEX: 'codex', CLAUDE: 'claude-code', OPENCODE: 'opencode' });
@@ -35,6 +35,7 @@ const MAX_WORKER_COST = 16 * GIB;
 const MAX_MANUAL_WORKERS = 64;
 const MAX_PROMPT_BYTES = 1024 * 1024;
 const MAX_CHECKER_OUTPUT_BYTES = 256 * 1024;
+const MAX_CHECKER_INPUT_BYTES = 1024 * 1024;
 const CHECKER_TIMEOUT_MS = 30 * 60 * 1000;
 
 function controlRoot(options = {}) {
@@ -239,7 +240,11 @@ function validCheckerReview(entry) {
     && (entry.reservation_id === undefined || (typeof entry.reservation_id === 'string' && entry.reservation_id.length > 0))
     && (entry.result === undefined || [CHECKER_RESULTS.PASS, CHECKER_RESULTS.FINDINGS].includes(entry.result))
     && (entry.findings_count === undefined || (Number.isSafeInteger(entry.findings_count) && entry.findings_count >= 0))
-    && (entry.status !== 'pending' || (entry.result === undefined && entry.findings_count === undefined)));
+    && (entry.findings === undefined || (Array.isArray(entry.findings) && entry.findings.every((finding) => finding && typeof finding.file === 'string'
+      && finding.file.length > 0 && typeof finding.evidence === 'string' && finding.evidence.length >= 12)))
+    && (entry.reason === undefined || typeof entry.reason === 'string')
+    && (entry.status !== 'pending' || (entry.result === undefined && entry.findings_count === undefined
+      && entry.findings === undefined && entry.reason === undefined)));
 }
 
 function validControlState(raw) {
@@ -582,7 +587,8 @@ function checkerResultFromClaudeOutput(raw) {
   let envelope;
   try { envelope = JSON.parse(bytes.toString('utf8')); }
   catch { throw new Error('Checker output is not valid Claude JSON.'); }
-  if (!envelope || envelope.type !== 'result' || envelope.is_error === true || typeof envelope.result !== 'string') {
+  if (!envelope || envelope.type !== 'result' || envelope.subtype !== 'success'
+    || envelope.is_error !== false || typeof envelope.result !== 'string') {
     throw new Error('Checker output is not a successful Claude result envelope.');
   }
   let payload;
@@ -596,6 +602,16 @@ function checkerResultFromClaudeOutput(raw) {
 
 function checkerAdmissionOutcome(admission, details = {}) {
   if (admission?.result === RESULTS.START) return { status: 'ADMITTED', reservation_id: admission.reservation_id };
+  if (details.root_self_review_performed !== true) {
+    return {
+      status: CHECKER_RESULTS.ADMISSION_DENIED,
+      findings: [],
+      reason: 'The canonical Toolkit resource gate could not safely admit the checker.',
+      root_self_review_required: true,
+      root_self_review_performed: false,
+      root_self_review_contract: 'Perform and report a bounded root self-review; do not represent it as independent verification.',
+    };
+  }
   return checkerResult(CHECKER_RESULTS.ADMISSION_DENIED, {
     reason: 'The canonical Toolkit resource gate could not safely admit the checker.',
     root_self_review_performed: details.root_self_review_performed === true,
@@ -628,6 +644,21 @@ function validateLaunchSpec(spec) {
     }
     if (model !== MODEL_CONTRACT[host].checker || String(spec.effort || 'medium').toLowerCase() !== 'medium') {
       throw new Error('The checker must use the declared host checker model at medium effort.');
+    }
+  } else {
+    if (spec.tasks_separable !== true) throw new Error('Worker tasks must be genuinely separable.');
+    if (spec.concurrent_execution_possible !== true) throw new Error('Worker tasks must be concurrently executable.');
+    if (String(spec.expected_wall_clock_speedup || '').trim().length < 12) {
+      throw new Error('Worker launch requires a concrete expected wall-clock speedup rationale.');
+    }
+    if (spec.root_retains_longest_or_critical_path !== true) {
+      throw new Error('The root must retain the longest or critical-path task.');
+    }
+    if (spec.child_task_is_shorter_or_easier !== true) {
+      throw new Error('The child task must be shorter or easier than the root retained task.');
+    }
+    if (spec.root_productive_work_declared !== true) {
+      throw new Error('The root must begin and continue productive work while the child runs.');
     }
   }
   const depth = Number(spec.depth ?? 1);
@@ -808,6 +839,8 @@ function updateCheckerReview(reviewId, status, options = {}) {
     if (outcome) {
       entry.result = outcome.status;
       entry.findings_count = outcome.findings.length;
+      entry.findings = outcome.findings;
+      entry.reason = outcome.reason;
     }
     if (!validControlState(state)) return false;
     atomicWriteJson(statePath(options), state);
@@ -843,8 +876,10 @@ function claudeInvocation(spec, options = {}) {
   if (!Buffer.isBuffer(promptBytes) || promptBytes.length > MAX_PROMPT_BYTES) throw new Error('Child prompt exceeds the bounded private transport limit.');
   const args = claudeInvocationArgs(checked);
   const env = { ...envInput, CLAUDE_CODE_DISABLE_FAST_MODE: '1', CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1', AI_AGENT_TOOLKIT_CHILD: '1' };
-  const parts = processLaunch.claudeSpawnParts(executable, args, { env });
-  return { executable: parts.command, args: parts.args, windowsVerbatimArguments: parts.windowsVerbatimArguments, raw_executable: executable, raw_args: args, env, stdin: promptBytes, effort: checked.effort, non_fast: true, max_depth: 1 };
+  if (checked.role === ROLES.CHECKER) env.AI_AGENT_TOOLKIT_CHECKER = '1';
+  else delete env.AI_AGENT_TOOLKIT_CHECKER;
+  const validatedExecutable = processLaunch.assertExecutableAvailable(executable, { env });
+  return { executable: validatedExecutable, args, raw_executable: validatedExecutable, raw_args: args, env, stdin: promptBytes, effort: checked.effort, non_fast: true, max_depth: 1 };
 }
 
 function runValidatedClaude(invocation, captureChecker, options = {}) {
@@ -853,8 +888,7 @@ function runValidatedClaude(invocation, captureChecker, options = {}) {
     ? Math.min(requestedTimeout, CHECKER_TIMEOUT_MS)
     : CHECKER_TIMEOUT_MS;
   // Reuse the validated shell-free Claude launcher that setup probes and native enforcement share.
-  const result = require('./setup-claude-toolkit-plugin.cjs').spawnClaude(invocation.executable, invocation.args, {
-    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+  const result = require('./setup-claude-toolkit-plugin.cjs').spawnClaude(invocation.raw_executable, invocation.raw_args, {
     env: invocation.env,
     windowsHide: true,
     input: invocation.stdin,
@@ -869,6 +903,88 @@ function runValidatedClaude(invocation, captureChecker, options = {}) {
     outputExceeded: result.error?.code === 'ENOBUFS',
     error: result.error || null,
   };
+}
+
+const CHECKER_INPUT_KEYS = new Set([
+  'implementation_complete', 'focused_validation_passed', 'diff_ready', 'changed_files', 'change_kind',
+  'authoritative_source_independently_validated', 'task_contract', 'diff', 'focused_validation',
+  'surrounding_invariants', 'host', 'estimated_memory_bytes',
+]);
+
+function validateCheckerWorkflowInput(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Checker workflow input must be a JSON object.');
+  const unexpected = Object.keys(input).filter((key) => !CHECKER_INPUT_KEYS.has(key));
+  if (unexpected.length) throw new Error(`Checker workflow input contains unsupported fields: ${unexpected.join(', ')}.`);
+  const host = String(input.host || HOSTS.CLAUDE);
+  if (host !== HOSTS.CLAUDE) throw new Error('The supported checker launch workflow currently requires the verified Claude direct host.');
+  return { ...input, host };
+}
+
+function checkerWorkflow(input, options = {}) {
+  const checkedInput = validateCheckerWorkflowInput(input);
+  const requirement = checkerRequirement(checkedInput);
+  if (!requirement.ready) throw new Error(requirement.reason);
+  if (!requirement.required) return checkerResult(CHECKER_RESULTS.SKIPPED_TRIVIAL, { reason: requirement.reason });
+  const context = checkerContext(checkedInput);
+  const overrides = {};
+  if (checkedInput.estimated_memory_bytes !== undefined) overrides.estimated_memory_bytes = checkedInput.estimated_memory_bytes;
+  const spec = checkerLaunchSpec(checkedInput.host, context, overrides);
+  const launched = launch(spec, options);
+  if (launched.result !== RESULTS.START) return checkerAdmissionOutcome(launched);
+  return {
+    status: 'PENDING',
+    review_id: spec.review_id,
+    reservation_id: launched.reservation_id,
+    result_command: `node repo/scripts/toolkit-agent-control.cjs checker-result --review-id ${spec.review_id}`,
+    root_action: 'Continue productive root work; retrieve the validated result when it is needed for integration.',
+  };
+}
+
+function checkerResultStatus(reviewId, options = {}) {
+  const expected = String(reviewId || '');
+  if (!/^checker-[a-f0-9]{64}$/.test(expected)) throw new Error('A deterministic checker review ID is required.');
+  return withLock(options, () => {
+    const current = readMutableControlState(options);
+    if (current.exists && !current.state) throw new Error('Toolkit admission state could not be verified safely.');
+    const state = recoverState(current.state || emptyState());
+    const entry = state.checker_reviews.find((item) => item.review_id === expected);
+    if (!entry) return { status: 'RETRY_REQUIRED', review_id: expected, reason: 'No pending or completed checker result exists; a failed attempt may be retried with the same bounded input.' };
+    if (entry.status !== 'completed') return { status: 'PENDING', review_id: expected, root_action: 'Continue productive root work; do not idle-poll the checker.' };
+    return checkerResult(entry.result, { findings: entry.findings || [], reason: entry.reason || '' });
+  });
+}
+
+function readBoundedFd(fd, limit = MAX_CHECKER_INPUT_BYTES) {
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const chunk = Buffer.alloc(Math.min(64 * 1024, limit + 1 - total));
+    const count = fs.readSync(fd, chunk, 0, chunk.length, null);
+    if (count === 0) break;
+    total += count;
+    if (total > limit) throw new Error('Checker workflow input exceeds the bounded private input limit.');
+    chunks.push(chunk.subarray(0, count));
+  }
+  return Buffer.concat(chunks, total);
+}
+
+function readCheckerWorkflowInput(inputPath, options = {}) {
+  let bytes;
+  if (inputPath === '-') bytes = readBoundedFd(0);
+  else {
+    const target = path.resolve(String(inputPath || ''));
+    const ownedInputRoot = path.join(controlRoot(options), 'inputs');
+    if (path.dirname(target) !== ownedInputRoot) throw new Error('Checker input files must be direct private children of the Toolkit control inputs directory.');
+    const stat = verifyPrivateRegularFile(target);
+    try {
+      if (stat.size > MAX_CHECKER_INPUT_BYTES) throw new Error('Checker workflow input exceeds the bounded private input limit.');
+      bytes = fs.readFileSync(target);
+    }
+    finally { fs.unlinkSync(target); }
+  }
+  if (!bytes.length) throw new Error('Checker workflow input is empty.');
+  try { return JSON.parse(bytes.toString('utf8')); }
+  catch { throw new Error('Checker workflow input is not valid JSON.'); }
 }
 
 function launch(specInput, options = {}) {
@@ -955,11 +1071,13 @@ async function supervise(args) {
 }
 
 function parseCli(argv) {
-  const parsed = { command: argv[0] || '', root: '', spec: '', reservation: '', claudeCli: '' };
+  const parsed = { command: argv[0] || '', root: '', spec: '', input: '', reviewId: '', reservation: '', claudeCli: '' };
   for (let i = 1; i < argv.length; i += 1) {
     const value = argv[i + 1];
     if (argv[i] === '--root') { parsed.root = value; i += 1; }
     else if (argv[i] === '--spec') { parsed.spec = value; i += 1; }
+    else if (argv[i] === '--input') { parsed.input = value; i += 1; }
+    else if (argv[i] === '--review-id') { parsed.reviewId = value; i += 1; }
     else if (argv[i] === '--reservation') { parsed.reservation = value; i += 1; }
     else if (argv[i] === '--claude-cli') { parsed.claudeCli = value; i += 1; }
   }
@@ -974,17 +1092,27 @@ async function main(argv = process.argv.slice(2)) {
     return result.result === RESULTS.REFUSE ? 2 : 0;
   }
   if (args.command === 'supervise') return supervise(args);
+  if (args.command === 'checker') {
+    const result = checkerWorkflow(readCheckerWorkflowInput(args.input, { root: args.root }), { root: args.root, claudeCli: args.claudeCli });
+    console.log(JSON.stringify(result, null, 2));
+    return result.status === CHECKER_RESULTS.ADMISSION_DENIED ? 2 : 0;
+  }
+  if (args.command === 'checker-result') {
+    const result = checkerResultStatus(args.reviewId, { root: args.root });
+    console.log(JSON.stringify(result, null, 2));
+    return result.status === 'RETRY_REQUIRED' ? 2 : 0;
+  }
   if (args.command === 'status') {
     const result = withLock({ root: args.root }, () => recoverState(sanitizeState(readJson(statePath({ root: args.root }), emptyState()))));
     console.log(JSON.stringify(result, null, 2)); return 0;
   }
-  throw new Error('Usage: toolkit-agent-control.cjs launch --spec <json> [--root <path>]');
+  throw new Error('Usage: toolkit-agent-control.cjs checker --input - [--root <path>] | checker-result --review-id <id> [--root <path>] | launch --spec <json> [--root <path>]');
 }
 
 if (require.main === module) main().then((code) => { process.exitCode = code; }).catch((error) => { console.error(`FAIL: ${error.message}`); process.exitCode = 1; });
 
 module.exports = {
-  SCHEMA, CONTROL_VERSION, RESULTS, CHECKER_RESULTS, HOSTS, ROLES, MODEL_CONTRACT, CHECKER_CONTEXT_LIMITS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES, MAX_CHECKER_OUTPUT_BYTES, CHECKER_TIMEOUT_MS, LOCK_TTL_MS,
+  SCHEMA, CONTROL_VERSION, RESULTS, CHECKER_RESULTS, HOSTS, ROLES, MODEL_CONTRACT, CHECKER_CONTEXT_LIMITS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES, MAX_CHECKER_INPUT_BYTES, MAX_CHECKER_OUTPUT_BYTES, CHECKER_TIMEOUT_MS, LOCK_TTL_MS,
   controlRoot, profilePath, statePath, lockPath, lockRecoveryPath, readProfile, configureProfile, invalidateProfile, validateLaunchSpec, inspectResources, inspectResourceCapability, validResourceState, validActivationProof, verifyCurrentClaudeEnforcement, effectiveEnvironment, effectiveClaudeCommand, acquireLock, recoverStaleRecoveryMarker,
-  checkerRequirement, checkerContext, buildCheckerPrompt, validateCheckerPrompt, checkerLaunchSpec, checkerResult, checkerResultFromClaudeOutput, checkerAdmissionOutcome, admissionDecision, resourceAdmissionDecision, updateReservation, releaseReservation, updateCheckerReview, clearPendingCheckerReview, claudeInvocationArgs, claudeInvocation, runValidatedClaude, launch, recoverState, pidAlive,
+  checkerRequirement, checkerContext, buildCheckerPrompt, validateCheckerPrompt, checkerLaunchSpec, checkerResult, checkerResultFromClaudeOutput, checkerAdmissionOutcome, validateCheckerWorkflowInput, checkerWorkflow, checkerResultStatus, readCheckerWorkflowInput, admissionDecision, resourceAdmissionDecision, updateReservation, releaseReservation, updateCheckerReview, clearPendingCheckerReview, claudeInvocationArgs, claudeInvocation, runValidatedClaude, launch, recoverState, pidAlive,
 };

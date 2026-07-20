@@ -139,6 +139,23 @@ test('headings, choice effects and native mutation surfaces remain distinct', ()
   assert.notEqual(byId['opencode-integration'].whatThisControls, byId['antigravity-integration'].whatThisControls);
 });
 
+test('legacy migration stays advanced while ordinary setup and authoritative guidance omit helper capacity', () => {
+  const args = core.parseArgs(['--plan', '--host', 'codex']);
+  const current = stateWithManaged(managedState());
+  current.runtime = { runtime: 'multi-agent-v2' };
+  current.delegation = { status: 'migration-required', helper_count: 1 };
+  const rows = core.setupQuestionSpecs(args, current);
+  assert.equal(rows.some((row) => row.id === 'codex-helper-agents'), false);
+  assert.equal(args.setupChoices.codexHelperCapacity, 'keep');
+  const rendered = `${core.renderSetupQuestionBank(rows)}\n${core.renderSetupQuestionBankTerminal(rows)}`;
+  assert.doesNotMatch(rendered, /\bmigrate\b|PR #237|helper-agent quantit/i);
+
+  const skill = fs.readFileSync(path.join(repoRoot, '_projects/development/toolkit-local-bridge/curated_output_for_ai/skills/toolkit-setup/SKILL.md'), 'utf8');
+  assert.doesNotMatch(skill, /exception is a visible `migrate` choice/i);
+  assert.match(skill, /advanced compatibility\/repair operation/i);
+  assert.match(skill, /ordinary setup preserves that state without adding a helper-capacity row/i);
+});
+
 test('unknown and unsupported state is honest and never recommends unavailable choices', () => {
   const args = core.parseArgs(['--plan', '--host', 'codex']);
   const current = {

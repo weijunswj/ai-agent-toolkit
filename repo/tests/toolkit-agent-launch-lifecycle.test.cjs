@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const control = require('../scripts/toolkit-agent-control.cjs');
 const pluginSetup = require('../scripts/setup-claude-toolkit-plugin.cjs');
 
@@ -46,7 +47,13 @@ test('detached Claude supervisor forces medium non-fast invocation and releases 
     parent_responsibility: 'Review the integration interface and reconcile adjacent contracts.',
     integration_plan: 'The root owns interface reconciliation and final integration judgement.',
     validation_plan: 'The root runs cross-shard validation and reviews the final combined diff.',
-    material_benefit: 'The isolated parser work is independent and improves implementation quality.',
+    material_benefit: 'The shorter parser shard runs concurrently and reduces the implementation critical path.',
+    tasks_separable: true,
+    concurrent_execution_possible: true,
+    expected_wall_clock_speedup: 'The parser shard completes while the root handles the longer integration task.',
+    root_retains_longest_or_critical_path: true,
+    child_task_is_shorter_or_easier: true,
+    root_productive_work_declared: true,
     child_prompt: secretPrompt,
   }, {
     root,
@@ -114,7 +121,7 @@ test('checker execution clears failures and completes only validated structured 
     "if (process.argv[2] === '--version') { process.stdout.write('claude fake\\n'); process.exit(0); }",
     "if (process.argv[2] === 'plugin' && process.argv[3] === 'list') { process.stdout.write(JSON.stringify({ installed: [pluginEntry] }) + '\\n'); process.exit(0); }",
     "if (process.env.REQUIRED_CHILD_CONFIG !== 'present') { console.error('missing required child config'); process.exit(7); }",
-    "if (process.env.CHECKER_OVERSIZED) { process.stdout.write('x'.repeat(300000)); } else if (process.env.CHECKER_RESULT) { process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: process.env.CHECKER_RESULT })); } else { process.stdout.write('{}'); }",
+    "if (process.env.CHECKER_OVERSIZED) { process.stdout.write('x'.repeat(300000)); } else if (process.env.CHECKER_ENVELOPE) { process.stdout.write(process.env.CHECKER_ENVELOPE); } else if (process.env.CHECKER_RESULT) { process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: process.env.CHECKER_RESULT })); } else { process.stdout.write('{}'); }",
     '',
   ].join('\n'));
   const activationProof = pluginSetup.installedActivationProof(pluginEntry, control.CONTROL_VERSION);
@@ -134,23 +141,33 @@ test('checker execution clears failures and completes only validated structured 
       controller_version: control.CONTROL_VERSION, enforcement_verified: true, activation_proof: activationProof, status: 'configured', supported: true },
     resourceState: { physical_total: 32 * control.GIB, physical_available: 20 * control.GIB, commit_total: 48 * control.GIB, commit_available: 32 * control.GIB, host_responsive: true },
   };
-  const launchChecker = (reviewId, env) => control.launch(control.checkerLaunchSpec(control.HOSTS.CLAUDE, { ...checkerContext, diff: checkerContext.diff + ' ' + reviewId }), { ...launchOptions, env });
-  const settle = async (launched) => {
-    assert.equal(launched.status, 'launched');
+  const launchChecker = (reviewId, env, controlRoot = root) => control.checkerWorkflow({
+    implementation_complete: true,
+    focused_validation_passed: true,
+    diff_ready: true,
+    change_kind: 'behavior',
+    ...checkerContext,
+    diff: checkerContext.diff + ' ' + reviewId,
+  }, { ...launchOptions, root: controlRoot, env });
+  const settle = async (launched, controlRoot = root) => {
+    assert.equal(launched.status, 'PENDING');
+    const outputPath = path.join(controlRoot, 'jobs', `${launched.reservation_id}.stdout.json`);
+    const errorPath = path.join(controlRoot, 'jobs', `${launched.reservation_id}.stderr.log`);
     let state;
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      state = JSON.parse(fs.readFileSync(control.statePath({ root }), 'utf8'));
+    for (let attempt = 0; attempt < 400; attempt += 1) {
+      state = JSON.parse(fs.readFileSync(control.statePath({ root: controlRoot }), 'utf8'));
       if (state.reservations.length === 0) {
-        await wait(25);
+        await wait(150);
         return {
-          state: JSON.parse(fs.readFileSync(control.statePath({ root }), 'utf8')),
-          error: fs.readFileSync(launched.error_path, 'utf8'),
-          output: fs.readFileSync(launched.output_path, 'utf8'),
+          state: JSON.parse(fs.readFileSync(control.statePath({ root: controlRoot }), 'utf8')),
+          launched,
+          error: fs.readFileSync(errorPath, 'utf8'),
+          output: fs.readFileSync(outputPath, 'utf8'),
         };
       }
       await wait(25);
     }
-    return { state, error: '', output: '' };
+    return { state, error: '', output: '', launched };
   };
 
   const failed = await settle(launchChecker('failed-checker-lifecycle', Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== 'REQUIRED_CHILD_CONFIG'))));
@@ -176,4 +193,41 @@ test('checker execution clears failures and completes only validated structured 
   assert.equal(passed.state.checker_reviews[0].findings_count, 0);
   assert.equal(passed.error, '');
   assert.equal(control.checkerResultFromClaudeOutput(passed.output).status, control.CHECKER_RESULTS.PASS);
+  assert.equal(control.checkerResultStatus(passed.launched.review_id, { root }).status, control.CHECKER_RESULTS.PASS);
+  const resultCli = spawnSync(process.execPath, [path.join(__dirname, '..', 'scripts', 'toolkit-agent-control.cjs'),
+    'checker-result', '--review-id', passed.launched.review_id, '--root', root], { encoding: 'utf8', windowsHide: true });
+  assert.equal(resultCli.status, 0, resultCli.stderr);
+  assert.equal(JSON.parse(resultCli.stdout).status, control.CHECKER_RESULTS.PASS);
+
+  const findingsPayload = JSON.stringify({ status: control.CHECKER_RESULTS.FINDINGS, findings: [{ file: 'repo/scripts/toolkit-agent-control.cjs', evidence: 'The bounded fixture exposes an actionable lifecycle defect.' }] });
+  const findings = await settle(launchChecker('findings-checker-lifecycle', { ...process.env, REQUIRED_CHILD_CONFIG: 'present', CHECKER_RESULT: findingsPayload }));
+  const retrievedFindings = control.checkerResultStatus(findings.launched.review_id, { root });
+  assert.equal(retrievedFindings.status, control.CHECKER_RESULTS.FINDINGS);
+  assert.equal(retrievedFindings.findings.length, 1);
+
+  const invalidEnvelopes = [
+    ['missing-subtype', { type: 'result', is_error: false, result: passPayload }, /successful Claude result envelope/],
+    ['max-turns', { type: 'result', subtype: 'error_max_turns', is_error: false, result: passPayload }, /successful Claude result envelope/],
+    ['other-subtype', { type: 'result', subtype: 'incompatible', is_error: false, result: passPayload }, /successful Claude result envelope/],
+    ['missing-error', { type: 'result', subtype: 'success', result: passPayload }, /successful Claude result envelope/],
+    ['explicit-error', { type: 'result', subtype: 'success', is_error: true, result: passPayload }, /successful Claude result envelope/],
+    ['partial-result', { type: 'result', subtype: 'success', is_error: false }, /successful Claude result envelope/],
+    ['malformed-inner-json', { type: 'result', subtype: 'success', is_error: false, result: '{' }, /payload is not valid JSON/],
+  ];
+  for (const [name, envelope, errorPattern] of invalidEnvelopes) {
+    const caseRoot = path.join(root, 'envelope-cases', name);
+    const failedEnvelope = await settle(launchChecker(`invalid-envelope-${name}`, {
+      ...process.env,
+      REQUIRED_CHILD_CONFIG: 'present',
+      CHECKER_ENVELOPE: JSON.stringify(envelope),
+    }, caseRoot), caseRoot);
+    assert.match(failedEnvelope.error, errorPattern);
+    assert.equal(failedEnvelope.state.checker_reviews.some((entry) => entry.review_id === failedEnvelope.launched.review_id), false);
+    const retry = await settle(launchChecker(`invalid-envelope-${name}`, {
+      ...process.env,
+      REQUIRED_CHILD_CONFIG: 'present',
+      CHECKER_RESULT: passPayload,
+    }, caseRoot), caseRoot);
+    assert.equal(control.checkerResultStatus(retry.launched.review_id, { root: caseRoot }).status, control.CHECKER_RESULTS.PASS);
+  }
 });
