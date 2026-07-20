@@ -930,8 +930,11 @@ async function runManagedQuestionBankChild(managedScript, managedRoot, argv, opt
       });
     }
     child.stdio[4].on('error', () => {
-      earlyClassification = earlyClassification || 'child-failure';
-      try { child.kill(); } catch { /* child may already be gone */ }
+      // Once the exact bank has been synchronously forwarded, the managed
+      // child may consume the acknowledgement and close fd 4 before Node
+      // reports the local pipe close. That post-forward close is not evidence
+      // that acknowledgement delivery failed. Pre-forward pipe failure is.
+      if (!forwarded) failEarly('child-failure');
     });
 
     const acknowledgeIfComplete = () => {
