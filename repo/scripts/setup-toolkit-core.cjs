@@ -2170,6 +2170,20 @@ function nextNonEmptyLine(lines) {
   return '';
 }
 
+async function readNonInteractiveStdin() {
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of process.stdin) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += bytes.length;
+    if (process.env[MANAGED_PROTOCOL_ENV] === MANAGED_QUESTION_BANK_PROTOCOL && total > MANAGED_STDIN_MAX_BYTES) {
+      throw new Error(managedFailureMessage('stdin-input-too-large'));
+    }
+    chunks.push(bytes);
+  }
+  return Buffer.concat(chunks, total).toString('utf8');
+}
+
 async function promptForChoice(spec, lines, rl) {
   if (lines) {
     if (!lines.length) throw new Error(`Setup question bank requires an answer for ${spec.title}`);
@@ -2270,7 +2284,7 @@ async function answerSetupQuestionBank(args, current) {
   });
 
   const lines = (needsPromptedAnswers || needsCodexProposalInput) && !process.stdin.isTTY
-    ? fs.readFileSync(0).toString('utf8').split(/\r?\n/)
+    ? (await readNonInteractiveStdin()).split(/\r?\n/)
     : null;
 
   // Apply a complete piped answer set only after its canonical bank is visible.
