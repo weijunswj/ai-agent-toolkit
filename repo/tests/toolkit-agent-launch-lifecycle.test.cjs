@@ -118,25 +118,12 @@ test('checker execution clears failures and completes only validated structured 
     '',
   ].join('\n'));
   const activationProof = pluginSetup.installedActivationProof(pluginEntry, control.CONTROL_VERSION);
-  const checkerSpec = {
-    role: control.ROLES.CHECKER,
-    host: control.HOSTS.CLAUDE,
-    model: control.MODEL_CONTRACT[control.HOSTS.CLAUDE].checker,
-    effort: 'medium',
-    depth: 1,
-    read_only: true,
-    may_edit: false,
-    may_commit: false,
-    may_push: false,
-    may_open_pr: false,
-    may_merge_pr: false,
-    may_spawn_children: false,
-    child_responsibility: 'Adversarially review the isolated parser shard and focused unit coverage.',
-    parent_responsibility: 'Review the checker evidence and reconcile adjacent contracts.',
-    integration_plan: 'The root owns interface reconciliation and final integration judgement.',
-    validation_plan: 'The root runs cross-shard validation and reviews the final combined diff.',
-    material_benefit: 'The bounded independent review can catch semantic implementation defects.',
-    child_prompt: 'private prompt remains on stdin',
+  const checkerContext = {
+    task_contract: 'Review the bounded checker lifecycle fixture against its acceptance contract.',
+    changed_files: ['repo/scripts/toolkit-agent-control.cjs'],
+    diff: 'bounded checker lifecycle fixture diff',
+    focused_validation: 'focused lifecycle fixture validation passed',
+    surrounding_invariants: 'The checker remains read-only, local-only, non-recursive, and fail-closed.',
   };
   const launchOptions = {
     root,
@@ -147,7 +134,7 @@ test('checker execution clears failures and completes only validated structured 
       controller_version: control.CONTROL_VERSION, enforcement_verified: true, activation_proof: activationProof, status: 'configured', supported: true },
     resourceState: { physical_total: 32 * control.GIB, physical_available: 20 * control.GIB, commit_total: 48 * control.GIB, commit_available: 32 * control.GIB, host_responsive: true },
   };
-  const launchChecker = (reviewId, env) => control.launch({ ...checkerSpec, review_id: reviewId }, { ...launchOptions, env });
+  const launchChecker = (reviewId, env) => control.launch(control.checkerLaunchSpec(control.HOSTS.CLAUDE, { ...checkerContext, diff: checkerContext.diff + ' ' + reviewId }), { ...launchOptions, env });
   const settle = async (launched) => {
     assert.equal(launched.status, 'launched');
     let state;

@@ -50,6 +50,14 @@ test('checker context is bounded and contains only the review contract', () => {
   assert.throws(() => context({ focused_validation: '   ' }), /Focused validation is required/i);
   assert.throws(() => control.checkerLaunchSpec(control.HOSTS.CODEX, { ...context(), diff: '' }), /Diff is required/i);
   assert.throws(() => context({ changed_files: Array.from({ length: 200 }, (_, index) => String(index) + '-' + 'x'.repeat(400)) }), /Changed-file list exceeds/i);
+  assert.deepEqual(context({ changed_files: ['./docs/guide.md'] }).changed_files, ['docs/guide.md']);
+  assert.throws(() => context({ changed_files: ['C:/private/guide.md'] }), /repository-relative/i);
+  const instructionPath = control.checkerRequirement({ implementation_complete: true, focused_validation_passed: true, diff_ready: true, changed_files: ['./AGENTS.md'], change_kind: 'typo-only-docs' });
+  assert.equal(instructionPath.required, true);
+  const absolutePath = control.checkerRequirement({ implementation_complete: true, focused_validation_passed: true, diff_ready: true, changed_files: ['C:/repo/docs/guide.md'], change_kind: 'typo-only-docs' });
+  assert.equal(absolutePath.required, true);
+  const notReady = control.checkerRequirement({ implementation_complete: false, focused_validation_passed: false, diff_ready: false, changed_files: ['C:/repo/docs/guide.md'], change_kind: 'typo-only-docs' });
+  assert.equal(notReady.ready, false);
 });
 
 test('worker and checker mappings are sticky first-class launch contracts', () => {
@@ -66,8 +74,8 @@ test('worker and checker mappings are sticky first-class launch contracts', () =
   assert.deepEqual(checkerPrompt.result_contract.statuses, [control.CHECKER_RESULTS.PASS, control.CHECKER_RESULTS.FINDINGS]);
   assert.equal(checkerPrompt.context.diff, context().diff);
   assert.deepEqual(checkerInvocation.raw_args.slice(0, 6), ['--print', '--output-format', 'json', '--model', 'opus-4.8', '--effort']);
-  assert.deepEqual(checkerInvocation.raw_args.slice(checkerInvocation.raw_args.indexOf('--tools') + 1, checkerInvocation.raw_args.indexOf('--disallowedTools')), ['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch']);
-  assert.deepEqual(checkerInvocation.raw_args.slice(checkerInvocation.raw_args.indexOf('--disallowedTools') + 1, checkerInvocation.raw_args.indexOf('--permission-mode')), ['Agent', 'Task', 'Bash', 'Edit', 'Write', 'NotebookEdit']);
+  assert.deepEqual(checkerInvocation.raw_args.slice(checkerInvocation.raw_args.indexOf('--tools') + 1, checkerInvocation.raw_args.indexOf('--disallowedTools')), ['Read', 'Glob', 'Grep']);
+  assert.deepEqual(checkerInvocation.raw_args.slice(checkerInvocation.raw_args.indexOf('--disallowedTools') + 1, checkerInvocation.raw_args.indexOf('--permission-mode')), ['Agent', 'Task', 'Bash', 'Edit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch']);
   assert.equal(checkerInvocation.raw_args[checkerInvocation.raw_args.indexOf('--permission-mode') + 1], 'plan');
 });
 
@@ -85,6 +93,11 @@ test('checker contract is direct, read-only, non-fast, non-recursive, and host-m
     assert.equal(hardened.may_edit, false);
     assert.equal(hardened.may_spawn_children, false);
     assert.equal(hardened.model, control.MODEL_CONTRACT[host].checker);
+    assert.equal(hardened.review_id, spec.review_id);
+    assert.throws(() => control.validateLaunchSpec({ ...spec, child_prompt: JSON.stringify({ status: 'PASS' }) }), /factory-validated/i);
+    assert.throws(() => control.validateLaunchSpec({ ...spec, review_id: 'caller-selected' }), /derived/i);
+    const distinct = control.checkerLaunchSpec(host, context({ diff: 'different ready diff for the same host' }));
+    assert.notEqual(distinct.review_id, spec.review_id);
     assert.throws(() => control.validateLaunchSpec({ ...spec, effort: 'low' }), /medium/i);
     assert.throws(() => control.validateLaunchSpec({ ...spec, model: 'silent-upgrade' }), /sticky host model/i);
     assert.throws(() => control.validateLaunchSpec({ ...spec, depth: 2 }), /nested/i);
@@ -106,29 +119,30 @@ test('Codex and OpenCode production paths remain root-only without a native laun
 
 test('exactly one checker reserves memory and completion releases it', () => {
   const work = root();
-  const first = decision(control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'one' }), options(control.HOSTS.CODEX, work));
+  const firstSpec = control.checkerLaunchSpec(control.HOSTS.CODEX, context());
+  const first = decision(firstSpec, options(control.HOSTS.CODEX, work));
   assert.equal(first.result, control.RESULTS.START);
-  const second = decision(control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'two' }), options(control.HOSTS.CODEX, work));
+  const secondSpec = control.checkerLaunchSpec(control.HOSTS.CODEX, context({ diff: 'second distinct ready diff' }));
+  const second = decision(secondSpec, options(control.HOSTS.CODEX, work));
   assert.equal(second.result, control.RESULTS.REFUSE);
   assert.match(second.reason, /exactly one/i);
-  assert.equal(control.updateCheckerReview('one', 'completed', { root: work, checker_result: control.checkerResult(control.CHECKER_RESULTS.PASS) }), true);
+  assert.equal(control.updateCheckerReview(firstSpec.review_id, 'completed', { root: work, checker_result: control.checkerResult(control.CHECKER_RESULTS.PASS) }), true);
   assert.equal(control.releaseReservation(first.reservation_id, { root: work }), true);
   const completedState = JSON.parse(fs.readFileSync(control.statePath({ root: work }), 'utf8'));
   assert.equal(completedState.reservations.length, 0);
   assert.equal(completedState.checker_reviews[0].result, control.CHECKER_RESULTS.PASS);
-  const repeated = decision(control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'one' }), options(control.HOSTS.CODEX, work));
+  const repeated = decision(control.checkerLaunchSpec(control.HOSTS.CODEX, context()), options(control.HOSTS.CODEX, work));
   assert.equal(repeated.result, control.RESULTS.REFUSE);
   assert.match(repeated.reason, /already admitted/i);
-  const nextReview = decision(control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'three' }), options(control.HOSTS.CODEX, work));
+  const nextReview = decision(control.checkerLaunchSpec(control.HOSTS.CODEX, context({ diff: 'third distinct ready diff' })), options(control.HOSTS.CODEX, work));
   assert.equal(nextReview.result, control.RESULTS.START);
 });
-
 test('failed checker launch clears only pending review identity so the required review can retry', () => {
   const work = root();
   const spec = control.checkerLaunchSpec(control.HOSTS.CODEX, context(), { review_id: 'failed-before-check' });
   const admitted = decision(spec, options(control.HOSTS.CODEX, work));
   assert.equal(admitted.result, control.RESULTS.START);
-  assert.equal(control.clearPendingCheckerReview('failed-before-check', { root: work }), true);
+  assert.equal(control.clearPendingCheckerReview(spec.review_id, { root: work }), true);
   assert.equal(control.releaseReservation(admitted.reservation_id, { root: work }), true);
   assert.equal(decision(spec, options(control.HOSTS.CODEX, work)).result, control.RESULTS.START);
 });
@@ -186,6 +200,32 @@ test('queue tickets are bound to the original host and child role', () => {
   assert.equal(decision(wrongRole, options(control.HOSTS.CODEX, work)).result, control.RESULTS.REFUSE);
   assert.equal(decision({ ...worker, queue_id: queued.queue_id }, options(control.HOSTS.CODEX, work)).result, control.RESULTS.START);
 });
+test('legacy role-less queue tickets migrate to worker and remain retryable', () => {
+  const work = root();
+  const checker = control.checkerLaunchSpec(control.HOSTS.CODEX, context({ diff: 'legacy queue migration diff' }));
+  const worker = { ...checker, role: control.ROLES.WORKER, model: control.MODEL_CONTRACT[control.HOSTS.CODEX].worker, review_id: undefined, checker_context_digest: undefined };
+  const queued = decision(worker, options(control.HOSTS.CODEX, work, { resourceState: resources({ physical_available: 9 * control.GIB }) }));
+  assert.equal(queued.result, control.RESULTS.QUEUE);
+  const state = JSON.parse(fs.readFileSync(control.statePath({ root: work }), 'utf8'));
+  delete state.queue[0].role;
+  fs.writeFileSync(control.statePath({ root: work }), JSON.stringify(state));
+  const retried = decision({ ...worker, queue_id: queued.queue_id }, options(control.HOSTS.CODEX, work));
+  assert.equal(retried.result, control.RESULTS.START);
+});
+
+test('bounded checker execution timeout terminates the child process', () => {
+  const invocation = {
+    executable: process.execPath,
+    args: ['-e', 'setInterval(() => {}, 1000)'],
+    windowsVerbatimArguments: false,
+    env: process.env,
+    stdin: Buffer.from('bounded checker timeout fixture'),
+  };
+  const result = control.runValidatedClaude(invocation, true, { checkerTimeoutMs: 50 });
+  assert.equal(result.code, 1);
+  assert.equal(result.error?.code, 'ETIMEDOUT');
+});
+
 test('checker results distinguish pass, findings, and admission-denied self-review fallback', () => {
   assert.equal(control.checkerResult(control.CHECKER_RESULTS.PASS).status, 'PASS');
   const findings = control.checkerResult(control.CHECKER_RESULTS.FINDINGS, { findings: [{ file: 'x.cjs', evidence: 'branch fails closed incorrectly' }] });

@@ -35,6 +35,7 @@ const MAX_WORKER_COST = 16 * GIB;
 const MAX_MANUAL_WORKERS = 64;
 const MAX_PROMPT_BYTES = 1024 * 1024;
 const MAX_CHECKER_OUTPUT_BYTES = 256 * 1024;
+const CHECKER_TIMEOUT_MS = 30 * 60 * 1000;
 
 function controlRoot(options = {}) {
   return path.resolve(options.root || process.env.AI_AGENT_TOOLKIT_CONTROL_ROOT || path.join(os.homedir(), '.ai-agent-toolkit', 'agent-control'));
@@ -275,7 +276,8 @@ function recoverState(state, now = Date.now()) {
     const expired = Number.isFinite(entry.expires_at_ms) && entry.expires_at_ms <= now;
     return !(expired && (entry.status === 'reserved' || !pidAlive(entry.owner_pid)));
   });
-  state.queue = state.queue.filter((entry) => Number.isFinite(entry.expires_at_ms) && entry.expires_at_ms > now);
+  state.queue = state.queue.filter((entry) => Number.isFinite(entry.expires_at_ms) && entry.expires_at_ms > now)
+    .map((entry) => entry.role === undefined ? { ...entry, role: ROLES.WORKER } : entry);
   const activeReservationIds = new Set(state.reservations.map((entry) => entry.id));
   state.checker_reviews = (state.checker_reviews || []).filter((entry) => {
     if (!Number.isFinite(entry.expires_at_ms) || entry.expires_at_ms <= now) return false;
@@ -459,10 +461,26 @@ const PACKAGED_OR_RUNTIME_PREFIXES = [
 ];
 const CHECKER_CONTEXT_LIMITS = Object.freeze({ task: 64 * 1024, files: 64 * 1024, diff: 512 * 1024, validation: 64 * 1024, surrounding: 128 * 1024 });
 
+function canonicalChangedFiles(values) {
+  if (!Array.isArray(values)) return [];
+  return values.map((value) => {
+    const slash = String(value).replace(/\\/g, '/');
+    if (!slash || slash.startsWith('/') || /^[A-Za-z]:[/]/.test(slash)) throw new Error('Changed files must use repository-relative paths.');
+    const normalized = path.posix.normalize(slash);
+    if (normalized === '.' || normalized === '..' || normalized.startsWith('../')) throw new Error('Changed files must stay inside the repository.');
+    return normalized;
+  });
+}
+
 function checkerRequirement(input = {}) {
-  const files = Array.isArray(input.changed_files) ? input.changed_files.map((value) => String(value).replace(/\\/g, '/')) : [];
-  if (!input.implementation_complete || !input.focused_validation_passed || !input.diff_ready || files.length === 0) {
+  const rawFiles = Array.isArray(input.changed_files) ? input.changed_files : [];
+  if (!input.implementation_complete || !input.focused_validation_passed || !input.diff_ready || rawFiles.length === 0) {
     return { required: false, ready: false, reason: 'Checker decision requires completed implementation, passed focused validation, a ready diff, and changed files.' };
+  }
+  let files;
+  try { files = canonicalChangedFiles(rawFiles); }
+  catch {
+    return { required: true, ready: true, reason: 'Noncanonical changed-file paths cannot qualify for trivial checker skipping.' };
   }
   const highRisk = files.some((file) => PACKAGED_OR_RUNTIME_PREFIXES.some((prefix) => file === prefix || file.startsWith(prefix)));
   const trivialKind = String(input.change_kind || '');
@@ -490,7 +508,7 @@ function requiredBoundedText(value, limit, label) {
 }
 
 function checkerContext(input = {}) {
-  const changedFiles = Array.isArray(input.changed_files) ? input.changed_files.map(String) : [];
+  const changedFiles = canonicalChangedFiles(input.changed_files);
   if (!changedFiles.length || changedFiles.length > 200) throw new Error('Checker context requires 1-200 changed files.');
   if (Buffer.byteLength(JSON.stringify(changedFiles), 'utf8') > CHECKER_CONTEXT_LIMITS.files) throw new Error('Changed-file list exceeds the bounded checker context limit.');
   return Object.freeze({
@@ -503,12 +521,10 @@ function checkerContext(input = {}) {
   });
 }
 
-function checkerLaunchSpec(host, context, overrides = {}) {
-  if (!Object.values(HOSTS).includes(host)) throw new Error('Unsupported checker host.');
-  const mapping = MODEL_CONTRACT[host];
+function buildCheckerPrompt(context) {
   const boundedContext = checkerContext(context);
   const childPrompt = JSON.stringify({
-    instructions: 'Perform a read-only adversarial review of the bounded ready diff. Do not mutate files, run mutating commands, or launch children.',
+    instructions: 'Perform a local-only read-only adversarial review of the bounded ready diff. Do not mutate files, run mutating commands, access network tools, or launch children.',
     result_contract: {
       statuses: [CHECKER_RESULTS.PASS, CHECKER_RESULTS.FINDINGS],
       pass: 'Return PASS only when no actionable finding remains.',
@@ -518,11 +534,30 @@ function checkerLaunchSpec(host, context, overrides = {}) {
     context: boundedContext,
   });
   if (Buffer.byteLength(childPrompt, 'utf8') > MAX_PROMPT_BYTES) throw new Error('Checker prompt exceeds the bounded private transport limit.');
+  const digest = crypto.createHash('sha256').update(childPrompt, 'utf8').digest('hex');
+  return { boundedContext, childPrompt, digest };
+}
+
+function validateCheckerPrompt(childPrompt) {
+  let rebuilt;
+  try {
+    const parsed = JSON.parse(String(childPrompt || ''));
+    rebuilt = buildCheckerPrompt(parsed?.context);
+  } catch { throw new Error('Checker launch requires a factory-validated bounded context prompt.'); }
+  if (rebuilt.childPrompt !== childPrompt) throw new Error('Checker launch requires a factory-validated bounded context prompt.');
+  return rebuilt;
+}
+
+function checkerLaunchSpec(host, context, overrides = {}) {
+  if (!Object.values(HOSTS).includes(host)) throw new Error('Unsupported checker host.');
+  const mapping = MODEL_CONTRACT[host];
+  const { childPrompt, digest } = buildCheckerPrompt(context);
   return {
     ...overrides,
     role: ROLES.CHECKER, host, depth: 1, effort: mapping.effort, model: mapping.checker,
     read_only: true, may_edit: false, may_commit: false, may_push: false, may_open_pr: false, may_merge_pr: false, may_spawn_children: false,
-    review_id: String(overrides.review_id || crypto.randomUUID()),
+    review_id: 'checker-' + digest,
+    checker_context_digest: digest,
     child_responsibility: 'Adversarially review the bounded ready diff and report evidence without mutating it.',
     parent_responsibility: 'Inspect checker evidence, own every fix, and retain final integration judgement.',
     integration_plan: 'The root alone applies any fixes and integrates the final implementation.',
@@ -587,6 +622,10 @@ function validateLaunchSpec(spec) {
     const immutable = spec.read_only === true && spec.may_edit === false && spec.may_commit === false && spec.may_push === false
       && spec.may_open_pr === false && spec.may_merge_pr === false && spec.may_spawn_children === false;
     if (!immutable || !String(spec.review_id || '').trim()) throw new Error('The checker must be a bounded read-only direct reviewer.');
+    const prompt = validateCheckerPrompt(spec.child_prompt);
+    if (spec.checker_context_digest !== prompt.digest || spec.review_id !== 'checker-' + prompt.digest) {
+      throw new Error('Checker identity must be derived from its factory-validated bounded context.');
+    }
     if (model !== MODEL_CONTRACT[host].checker || String(spec.effort || 'medium').toLowerCase() !== 'medium') {
       throw new Error('The checker must use the declared host checker model at medium effort.');
     }
@@ -791,7 +830,7 @@ function clearPendingCheckerReview(reviewId, options = {}) {
 function claudeInvocationArgs(checked) {
   const common = ['--print', '--output-format', 'json', '--model', checked.model, '--effort', checked.effort];
   if (checked.role === ROLES.CHECKER) {
-    return [...common, '--tools', 'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', '--disallowedTools', 'Agent', 'Task', 'Bash', 'Edit', 'Write', 'NotebookEdit', '--permission-mode', 'plan', '--no-session-persistence'];
+    return [...common, '--tools', 'Read', 'Glob', 'Grep', '--disallowedTools', 'Agent', 'Task', 'Bash', 'Edit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch', '--permission-mode', 'plan', '--no-session-persistence'];
   }
   return [...common, '--disallowedTools', 'Agent', 'Task', '--permission-mode', 'default', '--no-session-persistence'];
 }
@@ -808,7 +847,11 @@ function claudeInvocation(spec, options = {}) {
   return { executable: parts.command, args: parts.args, windowsVerbatimArguments: parts.windowsVerbatimArguments, raw_executable: executable, raw_args: args, env, stdin: promptBytes, effort: checked.effort, non_fast: true, max_depth: 1 };
 }
 
-function runValidatedClaude(invocation, captureChecker) {
+function runValidatedClaude(invocation, captureChecker, options = {}) {
+  const requestedTimeout = Number(options.checkerTimeoutMs);
+  const checkerTimeoutMs = Number.isSafeInteger(requestedTimeout) && requestedTimeout > 0
+    ? Math.min(requestedTimeout, CHECKER_TIMEOUT_MS)
+    : CHECKER_TIMEOUT_MS;
   // The production resolver validated this executable, and spawnSync keeps argv shell-free inside the detached supervisor.
   // codeql[js/shell-command-injection-from-environment]
   const result = spawnSync(invocation.executable, invocation.args, {
@@ -816,6 +859,8 @@ function runValidatedClaude(invocation, captureChecker) {
     env: invocation.env,
     windowsHide: true,
     input: invocation.stdin,
+    timeout: captureChecker ? checkerTimeoutMs : undefined,
+    killSignal: 'SIGTERM',
     maxBuffer: captureChecker ? MAX_CHECKER_OUTPUT_BYTES : undefined,
     stdio: ['pipe', captureChecker ? 'pipe' : 'inherit', 'inherit'],
   });
@@ -885,7 +930,7 @@ async function supervise(args) {
     const encoded = String(spec?.child_prompt_base64 || '');
     const promptBytes = Buffer.from(encoded, 'base64');
     if (!encoded || promptBytes.toString('base64') !== encoded || promptBytes.length > MAX_PROMPT_BYTES) throw new Error('Stored child prompt transport is malformed.');
-    const invocation = claudeInvocation(spec, { claudeCli: args.claudeCli, promptBytes });
+    const invocation = claudeInvocation({ ...spec, child_prompt: promptBytes.toString('utf8') }, { claudeCli: args.claudeCli, promptBytes });
     if (!updateReservation(args.reservation, { owner_pid: process.pid, status: 'running' }, options)) {
       throw new Error('Toolkit reservation state could not be verified before worker execution.');
     }
@@ -940,7 +985,7 @@ async function main(argv = process.argv.slice(2)) {
 if (require.main === module) main().then((code) => { process.exitCode = code; }).catch((error) => { console.error(`FAIL: ${error.message}`); process.exitCode = 1; });
 
 module.exports = {
-  SCHEMA, CONTROL_VERSION, RESULTS, CHECKER_RESULTS, HOSTS, ROLES, MODEL_CONTRACT, CHECKER_CONTEXT_LIMITS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES, MAX_CHECKER_OUTPUT_BYTES, LOCK_TTL_MS,
+  SCHEMA, CONTROL_VERSION, RESULTS, CHECKER_RESULTS, HOSTS, ROLES, MODEL_CONTRACT, CHECKER_CONTEXT_LIMITS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES, MAX_CHECKER_OUTPUT_BYTES, CHECKER_TIMEOUT_MS, LOCK_TTL_MS,
   controlRoot, profilePath, statePath, lockPath, lockRecoveryPath, readProfile, configureProfile, invalidateProfile, validateLaunchSpec, inspectResources, inspectResourceCapability, validResourceState, validActivationProof, verifyCurrentClaudeEnforcement, effectiveEnvironment, effectiveClaudeCommand, acquireLock, recoverStaleRecoveryMarker,
-  checkerRequirement, checkerContext, checkerLaunchSpec, checkerResult, checkerResultFromClaudeOutput, checkerAdmissionOutcome, admissionDecision, resourceAdmissionDecision, updateReservation, releaseReservation, updateCheckerReview, clearPendingCheckerReview, claudeInvocationArgs, claudeInvocation, launch, recoverState, pidAlive,
+  checkerRequirement, checkerContext, buildCheckerPrompt, validateCheckerPrompt, checkerLaunchSpec, checkerResult, checkerResultFromClaudeOutput, checkerAdmissionOutcome, admissionDecision, resourceAdmissionDecision, updateReservation, releaseReservation, updateCheckerReview, clearPendingCheckerReview, claudeInvocationArgs, claudeInvocation, runValidatedClaude, launch, recoverState, pidAlive,
 };

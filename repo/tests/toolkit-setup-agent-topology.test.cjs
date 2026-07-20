@@ -191,7 +191,7 @@ test('bounded exact-argv probe succeeds even when help omits supported flags', (
   assert.equal(capability.launch_supported, true);
   assert.equal(capability.launch_probe_status, 'supported');
   const probe = JSON.parse(fs.readFileSync(path.join(root, 'supported.json'), 'utf8'));
-  assert.deepEqual(probe.args, ['--print', '--output-format', 'json', '--model', 'opus-4.8', '--effort', 'medium', '--tools', 'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', '--disallowedTools', 'Agent', 'Task', 'Bash', 'Edit', 'Write', 'NotebookEdit', '--permission-mode', 'plan', '--no-session-persistence']);
+  assert.deepEqual(probe.args, ['--print', '--output-format', 'json', '--model', 'opus-4.8', '--effort', 'medium', '--tools', 'Read', 'Glob', 'Grep', '--disallowedTools', 'Agent', 'Task', 'Bash', 'Edit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch', '--permission-mode', 'plan', '--no-session-persistence']);
   assert.equal(probe.stdin, '');
 });
 
