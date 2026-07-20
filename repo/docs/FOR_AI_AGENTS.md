@@ -119,6 +119,8 @@ Scoped writes are allowed only when the relevant template or helper is being run
 - n8n sanitizer templates may write ignored `.to-sanitise/**` and `.sanitised/**` staging folders.
 - n8n sync helper templates may write `n8n-workflows/*.json`, ignored `.tmp/**`, and ignored `.n8n-local/**` in a consumer repo after review.
 
+Managed delegation launches the child before waiting for non-TTY stdin EOF and streams input as exact bytes under a fixed limit. The child emits the bank before reading unresolved input and binds its bounded stdout payload to exact byte length, SHA-256, marker counts, and question count. The parent assembles and validates that exact payload regardless of stdout/control pipe ordering, forwards it once, and acknowledges only afterward. Length/digest mismatch or oversized input, output, or metadata fails closed with a fixed privacy-safe diagnosis.
+
 ## n8n Template Safety
 
 Treat n8n workflow JSON as high risk. Prefer policy docs, sanitizer scripts, and helper templates. If a workflow JSON file is ever added, it must be generic, inactive, credential-free, and validated.
