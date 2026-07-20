@@ -852,9 +852,8 @@ function runValidatedClaude(invocation, captureChecker, options = {}) {
   const checkerTimeoutMs = Number.isSafeInteger(requestedTimeout) && requestedTimeout > 0
     ? Math.min(requestedTimeout, CHECKER_TIMEOUT_MS)
     : CHECKER_TIMEOUT_MS;
-  // The production resolver validated this executable, and spawnSync keeps argv shell-free inside the detached supervisor.
-  // codeql[js/shell-command-injection-from-environment]
-  const result = spawnSync(invocation.executable, invocation.args, {
+  // Reuse the validated shell-free Claude launcher that setup probes and native enforcement share.
+  const result = require('./setup-claude-toolkit-plugin.cjs').spawnClaude(invocation.executable, invocation.args, {
     windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     env: invocation.env,
     windowsHide: true,

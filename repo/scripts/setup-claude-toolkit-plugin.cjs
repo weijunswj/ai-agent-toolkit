@@ -860,6 +860,7 @@ module.exports = {
   readExpectedToolkitVersion,
   resolutionBudgetMs,
   runClaudeCommand,
+  spawnClaude,
   runClaudeMutationAndVerify,
   quoteWindowsArg: processLaunch.quoteWindowsArgument,
   validateMarketplaceWrapper,
