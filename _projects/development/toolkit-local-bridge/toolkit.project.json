@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.7.27",
+  "version": "2.7.28",
   "version_policy": "semver",
-  "version_notes": "Supports current Claude plugin-list schemas that omit projectPath by binding registry, commit, and exact cache-byte evidence; redacts private setup paths from routine managed output.",
+  "version_notes": "Treats Claude and Codex native-plugin verify/write JSON as captured structured IPC with bounded privacy-safe parent diagnostics.",
   "outputs": [
     {
       "kind": "curated",

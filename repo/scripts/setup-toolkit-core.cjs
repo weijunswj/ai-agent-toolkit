@@ -2576,6 +2576,43 @@ function parseJsonFromOutput(text) {
   return parseFirstJsonObject(text) || {};
 }
 
+function nativePluginPhaseFailure(platform, phase, result = {}, error = null) {
+  const timedOut = error?.code === 'ETIMEDOUT' || result?.error?.code === 'ETIMEDOUT';
+  if (phase === 'mutation' && timedOut) {
+    return new Error(`${platform} native plugin mutation timed out before completion. Captured helper diagnostics were withheld from routine output.`);
+  }
+  const status = Number.isInteger(result?.status) ? ` (exit code ${result.status})` : '';
+  const action = phase === 'mutation' ? 'mutation' : 'verification';
+  return new Error(`${platform} native plugin ${action} failed${status}. Captured helper diagnostics were withheld from routine output.`);
+}
+
+function runNativePluginJsonPhase({ platform, phase, label, args, cwd, timeout, allowRefreshRequired = false }) {
+  let result;
+  try {
+    result = runCommand(label, process.execPath, args, {
+      cwd,
+      capture: true,
+      timeout,
+      allowFailure: true
+    });
+  } catch (error) {
+    throw nativePluginPhaseFailure(platform, phase, {}, error);
+  }
+  if (result.status !== 0) {
+    if (allowRefreshRequired) {
+      console.log(`${platform} native plugin verification: current source identity was not established; approved refresh is required.`);
+      return null;
+    }
+    throw nativePluginPhaseFailure(platform, phase, result);
+  }
+  const summary = parseFirstJsonObject(result.stdout);
+  if (!summary || summary.ok !== true) {
+    const action = phase === 'mutation' ? 'mutation' : 'verification';
+    throw new Error(`${platform} native plugin ${action} returned invalid structured status. Captured helper diagnostics were withheld from routine output.`);
+  }
+  return summary;
+}
+
 function expectedToolkitVersion(repoRoot, platform = 'codex') {
   const rel = platform === 'claude-code'
     ? ['.claude-plugin', 'plugin.json']
@@ -2593,16 +2630,18 @@ function defaultCodexPluginCachePath(version) {
 }
 
 function runCodexNativePluginSetup(args) {
-  const verify = runCommand(
-    'node repo/scripts/setup-codex-toolkit-plugin.cjs --verify --json',
-    process.execPath,
-    setupCodexArgs(args, '--verify'),
-    { cwd: args.repoRoot, capture: true, timeout: 120000, allowFailure: true }
-  );
+  const verifySummary = runNativePluginJsonPhase({
+    platform: 'Codex',
+    phase: 'verification',
+    label: 'node repo/scripts/setup-codex-toolkit-plugin.cjs --verify --json',
+    args: setupCodexArgs(args, '--verify'),
+    cwd: args.repoRoot,
+    timeout: 120000,
+    allowRefreshRequired: true
+  });
   const expectedVersion = expectedToolkitVersion(args.repoRoot, 'codex');
-  if (verify.status === 0) {
-    // Captured helper JSON remains internal to avoid routine path disclosure.
-    const summary = parseJsonFromOutput(verify.stdout);
+  if (verifySummary) {
+    const summary = verifySummary;
     return {
       status: 'already fresh',
       installed: summary.installed === true,
@@ -2618,22 +2657,22 @@ function runCodexNativePluginSetup(args) {
       hook_trust_action: summary.hook_trust_message || 'Open `/hooks` in Codex and review the current Toolkit SessionStart hook'
     };
   }
-  process.stderr.write(verify.stderr || '');
-
-  runCommand(
-    'node repo/scripts/setup-codex-toolkit-plugin.cjs --write --json',
-    process.execPath,
-    setupCodexArgs(args, '--write'),
-    { cwd: args.repoRoot, timeout: 180000 }
-  );
-  const finalVerify = runCommand(
-    'node repo/scripts/setup-codex-toolkit-plugin.cjs --verify --json',
-    process.execPath,
-    setupCodexArgs(args, '--verify'),
-    { cwd: args.repoRoot, capture: true, timeout: 120000 }
-  );
-  // Captured helper JSON remains internal to avoid routine path disclosure.
-  const summary = parseJsonFromOutput(finalVerify.stdout);
+  runNativePluginJsonPhase({
+    platform: 'Codex',
+    phase: 'mutation',
+    label: 'node repo/scripts/setup-codex-toolkit-plugin.cjs --write --json',
+    args: setupCodexArgs(args, '--write'),
+    cwd: args.repoRoot,
+    timeout: 180000
+  });
+  const summary = runNativePluginJsonPhase({
+    platform: 'Codex post-mutation',
+    phase: 'verification',
+    label: 'node repo/scripts/setup-codex-toolkit-plugin.cjs --verify --json',
+    args: setupCodexArgs(args, '--verify'),
+    cwd: args.repoRoot,
+    timeout: 120000
+  });
   return {
     status: 'refreshed',
     installed: summary.installed === true,
@@ -2761,16 +2800,19 @@ function claudeSetupBudgets(claudeCli = '') {
 
 function runClaudeNativePluginSetup(args) {
   const budgets = claudeSetupBudgets(args.claudeCli);
-  const verify = runCommand(
-    'node repo/scripts/setup-claude-toolkit-plugin.cjs --verify --json',
-    process.execPath,
-    setupClaudeArgs(args, '--verify'),
-    { cwd: args.repoRoot, capture: true, timeout: budgets.verify, allowFailure: true }
-  );
+  const verifySummary = runNativePluginJsonPhase({
+    platform: 'Claude',
+    phase: 'verification',
+    label: 'node repo/scripts/setup-claude-toolkit-plugin.cjs --verify --json',
+    args: setupClaudeArgs(args, '--verify'),
+    cwd: args.repoRoot,
+    timeout: budgets.verify,
+    allowRefreshRequired: true
+  });
   const expectedVersion = expectedToolkitVersion(args.repoRoot, 'claude-code');
   const manifestPath = path.join(args.repoRoot, '.claude-plugin', 'plugin.json');
-  if (verify.status === 0) {
-    const summary = parseJsonFromOutput(verify.stdout);
+  if (verifySummary) {
+    const summary = verifySummary;
     return {
       status: 'already fresh',
       manifest_path: manifestPath,
@@ -2793,21 +2835,22 @@ function runClaudeNativePluginSetup(args) {
       hook_trust_action: 'follow Claude Code native plugin trust prompts if shown'
     };
   }
-  process.stderr.write(verify.stderr || '');
-
-  runCommand(
-    'node repo/scripts/setup-claude-toolkit-plugin.cjs --write --json --scope user',
-    process.execPath,
-    setupClaudeArgs(args, '--write'),
-    { cwd: args.repoRoot, timeout: budgets.write }
-  );
-  const finalVerify = runCommand(
-    'node repo/scripts/setup-claude-toolkit-plugin.cjs --verify --json',
-    process.execPath,
-    setupClaudeArgs(args, '--verify'),
-    { cwd: args.repoRoot, capture: true, timeout: budgets.verify }
-  );
-  const summary = parseJsonFromOutput(finalVerify.stdout);
+  runNativePluginJsonPhase({
+    platform: 'Claude',
+    phase: 'mutation',
+    label: 'node repo/scripts/setup-claude-toolkit-plugin.cjs --write --json --scope user',
+    args: setupClaudeArgs(args, '--write'),
+    cwd: args.repoRoot,
+    timeout: budgets.write
+  });
+  const summary = runNativePluginJsonPhase({
+    platform: 'Claude post-mutation',
+    phase: 'verification',
+    label: 'node repo/scripts/setup-claude-toolkit-plugin.cjs --verify --json',
+    args: setupClaudeArgs(args, '--verify'),
+    cwd: args.repoRoot,
+    timeout: budgets.verify
+  });
   return {
     status: 'refreshed',
     manifest_path: manifestPath,
