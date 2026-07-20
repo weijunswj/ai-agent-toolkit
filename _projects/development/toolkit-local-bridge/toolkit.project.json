@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.7.26",
+  "version": "2.7.27",
   "version_policy": "semver",
-  "version_notes": "Makes the visible Claude topology choice authoritative over derived capacity and synchronizes deferred post-approval capability guidance while preserving verified-current fail-closed probes.",
+  "version_notes": "Supports current Claude plugin-list schemas that omit projectPath by binding registry, commit, and exact cache-byte evidence; redacts private setup paths from routine managed output.",
   "outputs": [
     {
       "kind": "curated",

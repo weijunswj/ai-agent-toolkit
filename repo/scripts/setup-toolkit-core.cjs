@@ -664,7 +664,7 @@ function assertRepoRoot(repoRoot) {
 function runCommand(label, command, args, options = {}) {
   if (!options.quiet) {
     console.log(`\n==> ${label}`);
-    console.log([command, ...args].join(' '));
+    console.log('Command arguments: withheld from routine output; see the named checklist step.');
   }
   const result = spawnSync(command, args, {
     cwd: options.cwd,
@@ -2770,7 +2770,6 @@ function runClaudeNativePluginSetup(args) {
   const expectedVersion = expectedToolkitVersion(args.repoRoot, 'claude-code');
   const manifestPath = path.join(args.repoRoot, '.claude-plugin', 'plugin.json');
   if (verify.status === 0) {
-    process.stdout.write(verify.stdout || '');
     const summary = parseJsonFromOutput(verify.stdout);
     return {
       status: 'already fresh',
@@ -2808,7 +2807,6 @@ function runClaudeNativePluginSetup(args) {
     setupClaudeArgs(args, '--verify'),
     { cwd: args.repoRoot, capture: true, timeout: budgets.verify }
   );
-  process.stdout.write(finalVerify.stdout || '');
   const summary = parseJsonFromOutput(finalVerify.stdout);
   return {
     status: 'refreshed',
@@ -2840,7 +2838,6 @@ function runClaudeNativePluginVerify(args) {
     setupClaudeArgs(args, '--verify'),
     { cwd: args.repoRoot, capture: true, timeout: claudeSetupBudgets(args.claudeCli).verify }
   );
-  process.stdout.write(result.stdout || '');
   return parseJsonFromOutput(result.stdout);
 }
 
@@ -2966,7 +2963,7 @@ function printSetupChecklist(plan) {
   console.log(plan.checklist_explanation);
   console.log('');
   console.log(`Host: ${plan.host}`);
-  console.log(`Managed checkout path: ${plan.managed_source.path}`);
+  console.log('Managed checkout path: <managed-toolkit-checkout>');
   console.log(`Managed checkout branch: ${plan.managed_source.branch}`);
   console.log(`Managed checkout remote: ${plan.managed_source.remote}`);
   console.log('');
@@ -3040,7 +3037,7 @@ function printTargetSummary(label, target, choice) {
   console.log(`${label} enabled: ${yesNo(target?.enabled === true)}`);
   console.log(`${label} synced: ${yesNo(target?.synced === true)}`);
   console.log(`${label} version: ${unknown(target?.synced_version)}`);
-  console.log(`${label} path: ${unknown(target?.path || target?.target_path || target?.sync_path)}`);
+  console.log(`${label} path status: ${target?.path || target?.target_path || target?.sync_path ? 'configured' : 'not configured'}`);
   console.log(`${label} status: ${unknown(target?.status)}`);
   console.log(`${label} action this run: ${targetActionSummary(choice)}`);
 }
@@ -3063,27 +3060,25 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   const targets = audit?.targets || {};
   const targetChoices = args.setupChoices?.targets || {};
   const active = activeWorktreeSummary(args);
-  const defaultPath = defaultManagedSourcePath();
-  const setupScriptPath = path.join(args.repoRoot, 'repo', 'scripts', 'setup-toolkit.cjs');
   console.log('');
   console.log('# setup toolkit final summary');
   console.log('');
   console.log('## Active worktree');
-  console.log(`Active worktree path: ${active.path}`);
+  console.log('Active worktree path: <active-worktree>');
   console.log(`Active worktree branch: ${active.branch}`);
   console.log(`Active worktree commit: ${active.commit}`);
   console.log(`Active worktree status: ${active.status}`);
   console.log(`Active worktree role: ${active.role}`);
   console.log('');
   console.log('## Managed main checkout');
-  console.log(`Managed checkout path: ${args.repoRoot}`);
-  console.log(`Managed checkout default path: ${defaultPath} (Windows default: %USERPROFILE%\\.ai-agent-toolkit\\source\\ai-agent-toolkit; POSIX default: $HOME/.ai-agent-toolkit/source/ai-agent-toolkit)`);
+  console.log('Managed checkout path: <managed-toolkit-checkout>');
+  console.log('Managed checkout default path: %USERPROFILE%\\.ai-agent-toolkit\\source\\ai-agent-toolkit (Windows) or $HOME/.ai-agent-toolkit/source/ai-agent-toolkit (POSIX)');
   console.log(`Managed checkout branch: ${args.repoBranch}`);
   console.log(`Managed checkout remote: ${unknown(managed.remote || args.repoRemote)}`);
   console.log(`Managed checkout commit before: ${unknown(managed.commit_before || current?.managed?.commit)}`);
   console.log(`Managed checkout commit after: ${unknown(managed.commit_after || managed.commit)}`);
   console.log(`Managed checkout update action: ${unknown(managed.update_action)}`);
-  console.log(`Setup script path executed: ${setupScriptPath}`);
+  console.log('Setup script path executed: <managed-toolkit-checkout>/repo/scripts/setup-toolkit.cjs');
   console.log('');
   console.log('## Question bank');
   console.log(`Question bank appeared: ${yesNo(questionBank?.appeared)}`);
@@ -3122,7 +3117,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   console.log(`PR #237 legacy block migrated: ${yesNo(delegation.migrated_legacy_block === true)}`);
   console.log(`Malformed historical Toolkit marker material repaired: ${yesNo(delegation.repaired_malformed_toolkit_material === true)}`);
   console.log(`Official V2 boolean enablement migrated to configured table: ${yesNo(delegation.migrated_v2_boolean_enablement === true)}`);
-  console.log(`Codex config path: ${unknown(delegation.config_path)}`);
+  console.log('Codex config path: <Codex user configuration>');
   console.log(`Configuration scope: ${unknown(delegation.client_scope || CODEX_CONFIG_CLIENT_SCOPE)}`);
   console.log(`Helper-capacity detail: ${unknown(delegation.detail)}`);
   console.log(`Temporary editor cleanup: ${unknown(delegation.temporary_cleanup || 'no temporary editor directory created')}`);
@@ -3150,7 +3145,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   }
   console.log('## Codex native plugin');
   if (args.host === 'codex') {
-    console.log(`Codex plugin cache path: ${unknown(nativeCache.cache_path)}`);
+    console.log('Codex plugin cache path: <Codex Toolkit cache>');
     console.log(`Codex expected Toolkit version: ${unknown(nativeCache.expected_version)}`);
     console.log(`Codex installed Toolkit version: ${unknown(nativeCache.installed_version)}`);
     console.log(`Codex plugin installed: ${yesNo(nativeCache.installed === true)}`);
@@ -3169,7 +3164,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   console.log('');
   console.log('## Claude Code native plugin');
   if (args.host === 'claude-code') {
-    console.log(`Claude plugin manifest path: ${unknown(nativeCache.manifest_path)}`);
+    console.log('Claude plugin manifest path: <managed-toolkit-checkout>/.claude-plugin/plugin.json');
     console.log(`Claude expected Toolkit version: ${unknown(nativeCache.expected_version)}`);
     console.log(`Claude manifest Toolkit version: ${unknown(nativeCache.manifest_version)}`);
     console.log(`Claude plugin status: ${unknown(nativeCache.status)}`);
@@ -3184,12 +3179,12 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   console.log('');
   console.log('## Bridge state');
   console.log(`Repo auto-update enabled: ${yesNo(repo.enabled === true || args.repoAutoUpdate === true)}`);
-  console.log(`Repo auto-update path: ${unknown(repo.repo_path || args.repoRoot)}`);
+  console.log('Repo auto-update path: <managed-toolkit-checkout>');
   console.log(`Repo auto-update status: ${args.repoAutoUpdate ? unknown(repo.last_status || 'configured') : 'disabled'}`);
   console.log(`Update report writes enabled: ${args.updateReports}`);
   console.log('Update report opening behavior: action-required reports open automatically; successful reports stay closed');
   console.log(`Update report/log retention days: ${args.updateReportRetentionDays}`);
-  console.log(`Update report/log directory: ${unknown(cleanup.report_log_directory)}`);
+  console.log('Update report/log directory: <Toolkit update-report directory>');
   console.log(`Update report cleanup deleted count: ${cleanup.deleted_count ?? 0}`);
   console.log(`Update report cleanup error count: ${cleanup.error_count ?? 0}`);
   console.log('');

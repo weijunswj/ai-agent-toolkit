@@ -2,6 +2,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const crypto = require('node:crypto');
@@ -20,6 +21,11 @@ function slash(value) {
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, ''));
+}
+
+function readJsonIfExists(filePath) {
+  if (!fs.existsSync(filePath)) return null;
+  return readJson(filePath);
 }
 
 function repoRootFromScript() {
@@ -56,6 +62,69 @@ function compareSemver(left, right) {
 
 function pluginId() {
   return `${TOOLKIT_PLUGIN_NAME}@${TOOLKIT_MARKETPLACE_NAME}`;
+}
+
+function claudeConfigDir(options = {}) {
+  return path.resolve(options.claudeConfigDir || process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'));
+}
+
+function repoCommit(repoRoot) {
+  const result = spawnSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], {
+    encoding: 'utf8',
+    timeout: 10000,
+    windowsHide: true
+  });
+  return result.status === 0 ? String(result.stdout || '').trim().toLowerCase() : '';
+}
+
+function readClaudePluginRegistryState(options = {}) {
+  const configRoot = claudeConfigDir(options);
+  return {
+    knownMarketplaces: readJsonIfExists(path.join(configRoot, 'plugins', 'known_marketplaces.json')),
+    installedPlugins: readJsonIfExists(path.join(configRoot, 'plugins', 'installed_plugins.json')),
+    repoCommit: options.repoCommit || repoCommit(path.resolve(options.repoRoot || repoRootFromScript()))
+  };
+}
+
+function registrySourceEvidence(installed, repoRoot, expectedVersion, options = {}) {
+  let registry;
+  try {
+    registry = Object.prototype.hasOwnProperty.call(options, 'registryState')
+      ? options.registryState
+      : readClaudePluginRegistryState({ ...options, repoRoot });
+  } catch {
+    return { ok: false, reason: 'Claude plugin registry state could not be read safely' };
+  }
+  const marketplaces = registry?.knownMarketplaces || {};
+  const marketplace = marketplaces[TOOLKIT_MARKETPLACE_NAME]
+    || marketplaces.marketplaces?.[TOOLKIT_MARKETPLACE_NAME]
+    || null;
+  const sourcePath = marketplace?.source?.path || marketplace?.path || '';
+  if (!sourcePath || path.resolve(sourcePath) !== repoRoot) {
+    return { ok: false, reason: 'Claude local marketplace source identity does not match the managed Toolkit checkout' };
+  }
+
+  const pluginRecords = registry?.installedPlugins?.plugins?.[pluginId()]
+    ?? registry?.installedPlugins?.[pluginId()]
+    ?? [];
+  const records = Array.isArray(pluginRecords) ? pluginRecords : [pluginRecords];
+  const installPath = installed?.installPath ? path.resolve(installed.installPath) : '';
+  const matching = records.filter((entry) => entry && entry.installPath
+    && path.resolve(entry.installPath) === installPath
+    && (!installed.scope || !entry.scope || entry.scope === installed.scope));
+  if (matching.length !== 1) {
+    return { ok: false, reason: 'Claude installed-plugin registry identity is missing or ambiguous' };
+  }
+  const record = matching[0];
+  if (record.version !== expectedVersion || installed.version !== expectedVersion) {
+    return { ok: false, reason: 'Claude installed-plugin registry version is not current' };
+  }
+  const expectedCommit = String(registry?.repoCommit || '').toLowerCase();
+  const installedCommit = String(record.gitCommitSha || '').toLowerCase();
+  if (!/^[a-f0-9]{40}$/.test(expectedCommit) || installedCommit !== expectedCommit) {
+    return { ok: false, reason: 'Claude installed-plugin source commit does not match the managed Toolkit checkout' };
+  }
+  return { ok: true, sourcePath: repoRoot, sourceIdentity: 'claude-plugin-registry' };
 }
 
 function verifySessionStartHook(hooksPath) {
@@ -175,11 +244,11 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     const source = path.join(repoRoot, ...relPath.split('/'));
     const installedFile = path.join(installPath, ...relPath.split('/'));
     if (!fs.existsSync(installedFile)) {
-      errors.push(`installed plugin cache is missing ${relPath}: ${installedFile}`);
+      errors.push(`installed plugin cache is missing ${relPath}`);
       continue;
     }
     if (!fs.lstatSync(installedFile).isFile()) {
-      errors.push(`installed plugin cache path is not a regular file: ${installedFile}`);
+      errors.push(`installed plugin cache entry is not a regular file: ${relPath}`);
       continue;
     }
     const sourceBytes = fs.readFileSync(source);
@@ -458,6 +527,7 @@ function mutationLingerWarning(args) {
 async function runClaudeMutationAndVerify(command, mutationArgs, options = {}) {
   const deadlineMs = options.deadlineMs || mutationDeadlineMs();
   const pollMs = options.pollMs || mutationPollMs();
+  const expectedSourceCommit = options.repoCommit || repoCommit(path.resolve(options.repoRoot || repoRootFromScript()));
   const startedAt = Date.now();
   let child;
   let childExit = null;
@@ -490,7 +560,8 @@ async function runClaudeMutationAndVerify(command, mutationArgs, options = {}) {
       lastListError = null;
       lastState = evaluateClaudeToolkitPluginState(pluginList, {
         repoRoot: options.repoRoot,
-        expectedVersion: options.expectedVersion
+        expectedVersion: options.expectedVersion,
+        repoCommit: expectedSourceCommit
       });
       if (lastState.ok) {
         // The synchronous state poll starves the event loop, so a child that
@@ -558,11 +629,11 @@ async function runClaudeMutationAndVerify(command, mutationArgs, options = {}) {
   };
 }
 
-// `claude plugin list --json` returns a flat array of entries shaped like
-// { id: "ai-agent-toolkit@ai-agent-toolkit-local", version, scope, enabled,
-//   installPath, projectPath }, confirmed against a real Claude Code 2.1.197
-// install. Match on `id` first; fall back to name/marketplace-style fields
-// too, since this isn't a documented/versioned schema and could vary.
+// Claude plugin-list output is not a documented/versioned schema. Older
+// releases exposed projectPath; current releases can omit it while retaining
+// installPath. Match on stable identity fields, then bind a path-less entry to
+// the managed source only through Claude's marketplace/install registries,
+// exact source commit, and exact installed-cache bytes.
 function findPluginEntries(node, matches = []) {
   if (!node || typeof node !== 'object') return matches;
   if (Array.isArray(node)) {
@@ -609,10 +680,19 @@ function evaluateClaudeToolkitPluginState(pluginList, options = {}) {
       errors.push(`${pluginId()} expected version ${expectedVersion}: ${installed.version}`);
     }
   }
-  const sourcePath = installed.projectPath || installed.source?.path || installed.path || '';
-  const sourceMatches = Boolean(sourcePath) && path.resolve(sourcePath) === repoRoot;
+  const listedSourcePath = installed.projectPath || installed.source?.path || installed.path || '';
+  let sourcePath = listedSourcePath;
+  let sourceIdentity = 'plugin-list';
+  let sourceMatches = Boolean(listedSourcePath) && path.resolve(listedSourcePath) === repoRoot;
+  if (!listedSourcePath) {
+    const registryEvidence = registrySourceEvidence(installed, repoRoot, expectedVersion, options);
+    sourceMatches = registryEvidence.ok;
+    sourcePath = registryEvidence.sourcePath || '';
+    sourceIdentity = registryEvidence.sourceIdentity || 'unverified';
+    if (!registryEvidence.ok) errors.push(registryEvidence.reason);
+  }
   if (!sourceMatches) {
-    errors.push(`${pluginId()} source path does not match this local repo: ${sourcePath}`);
+    if (listedSourcePath) errors.push(`${pluginId()} source identity does not match the managed Toolkit checkout`);
   }
   if (enabled && sourceMatches) {
     errors.push(...validateInstalledEnforcement(installed, repoRoot, expectedVersion));
@@ -626,7 +706,7 @@ function evaluateClaudeToolkitPluginState(pluginList, options = {}) {
   // marketplace add + install path.
   const canUpdateInPlace = staleVersion && enabled && sourceMatches;
 
-  return { ok: errors.length === 0, installed, errors, refusesDowngrade, staleVersion, canUpdateInPlace };
+  return { ok: errors.length === 0, installed, errors, refusesDowngrade, staleVersion, canUpdateInPlace, sourcePath, sourceIdentity };
 }
 
 function claudeToolkitInstallCommands(repoRoot, scope = DEFAULT_SCOPE) {
@@ -784,7 +864,7 @@ async function main(argv = process.argv.slice(2)) {
       } else {
         for (const warning of warnings) console.error(`WARN: ${warning}`);
         console.error(`FAIL: ${installOutcome.failure}`);
-        console.error(`Expected commands: ${claudeToolkitInstallCommands(options.repoRoot, options.scope).map((args) => `claude ${args.join(' ')}`).join(' ; ')}`);
+        console.error(`Expected commands: claude plugin marketplace add <managed-toolkit-checkout> ; claude plugin install ${pluginId()} --scope ${options.scope}`);
         return 1;
       }
     }
@@ -794,7 +874,7 @@ async function main(argv = process.argv.slice(2)) {
     for (const error of state.errors) console.error(`FAIL: ${error}`);
     for (const warning of warnings) console.error(`WARN: ${warning}`);
     console.error('Run with --write to install or update through the supported Claude Code local marketplace path.');
-    console.error(`Expected commands: ${claudeToolkitInstallCommands(options.repoRoot, options.scope).map((args) => `claude ${args.join(' ')}`).join(' ; ')}`);
+    console.error(`Expected commands: claude plugin marketplace add <managed-toolkit-checkout> ; claude plugin install ${pluginId()} --scope ${options.scope}`);
     return 1;
   }
 
@@ -815,7 +895,8 @@ async function main(argv = process.argv.slice(2)) {
     strict_enforcement_verified: Boolean(activationProof),
     enforcement_verified: Boolean(activationProof),
     activation_proof: activationProof,
-    source_path: state.installed.projectPath || state.installed.source?.path || state.installed.path || '',
+    source_path: state.sourcePath || '',
+    source_identity: state.sourceIdentity || 'unverified',
     cache_path: cachePath,
     installed_entry: state.installed,
     install_path: claudeToolkitInstallCommands(options.repoRoot, options.scope),
@@ -853,6 +934,8 @@ module.exports = {
   commandCandidates,
   evaluateClaudeToolkitPluginState,
   findPluginEntries,
+  readClaudePluginRegistryState,
+  registrySourceEvidence,
   mutationDeadlineMs,
   mutationPollMs,
   installedActivationProof,

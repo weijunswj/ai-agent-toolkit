@@ -157,7 +157,9 @@ test('valid custom Update source keep preserves its configured checkout through 
   ], { env, timeout: 300000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /Update source: Keep the current update source - Preserve this effective behavior: Toolkit uses a separate clean custom checkout/i);
-  assert.match(result.stdout, new RegExp(`Managed checkout path: ${setupRepo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  assert.match(result.stdout, /Managed checkout path: <managed-toolkit-checkout>/);
+  const leakedLines = result.stdout.split(/\r?\n/).filter((line) => line.includes(setupRepo)).map((line) => line.replaceAll(setupRepo, '<managed-toolkit-checkout>'));
+  assert.deepEqual(leakedLines, []);
   const bridgeArgs = fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8');
   assert.match(bridgeArgs, new RegExp(`--repo-path ${setupRepo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
 });
@@ -177,5 +179,7 @@ test('valid standard Update source keep remains available and preserves the stan
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /Update source[\s\S]*\*\*Recommended:\*\* Keep using the verified dedicated clean managed copy/i);
   assert.match(result.stdout, /Update source: Keep the current update source - Preserve this effective behavior: Toolkit uses the dedicated clean managed copy/i);
-  assert.match(result.stdout, new RegExp(`Managed checkout path: ${setupRepo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  assert.match(result.stdout, /Managed checkout path: <managed-toolkit-checkout>/);
+  const leakedLines = result.stdout.split(/\r?\n/).filter((line) => line.includes(setupRepo)).map((line) => line.replaceAll(setupRepo, '<managed-toolkit-checkout>'));
+  assert.deepEqual(leakedLines, []);
 });
