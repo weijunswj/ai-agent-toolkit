@@ -276,43 +276,27 @@ test('portable rules require host-profile-aware topology and a complete delegati
   const requiredRules = [
     /## Agent Topology And Delegation/,
     /Ordinary work begins root-first/,
-    /setup\/updates, docs\/repo orientation, narrow changes/,
-    /routine tests\/checks\/formatting, version alignment, reviews\/plans\/summaries/,
     /root-capable verification/,
-    /Scope broad work in root first/,
     /`setup toolkit` uses no subagents/,
-    /active host profile is a topology ceiling, not a delegation instruction/,
-    /Capacity is a resource backstop, never launch permission/,
-    /unverifiable topology, admission, effort, or non-fast guarantee means root-only/,
-    /Never project one host's controls onto another/,
-    /policy-only behavior as hard enforcement/,
-    /Generic wording like `use helpers`, `use agents`, `parallelize this`, `delegate this`, `use subagents`, or `finish faster with helpers` is a preference, not a bounded delegation instruction/,
-    /Do not invent scope/,
-    /UAT context, later stages, available capacity, or future helper tests cannot qualify the present task/,
-    /Before launch, state/,
-    /independent bounded scopes/,
-    /non-overlapping ownership/,
-    /material quality, safety, or critical-path benefit/,
-    /active topology and resource admission/,
-    /verified medium reasoning and non-fast child mode/,
-    /meaningful root-owned work starting immediately/,
-    /root-owned integration\/validation/,
-    /Missing any fact prohibits launch/,
-    /may run concurrently when it materially shortens the critical path even if root could do it sequentially/,
-    /routine-work offloading/,
-    /Never delegate every substantive shard/,
-    /wait, poll, narrate status/,
-    /Final integration, conflict resolution, cross-shard validation, and judgment remain root-owned/,
-    /Every child applies the same launch gate and active profile/,
-    /default to medium reasoning effort/,
-    /Children never use or inherit fast mode/,
-    /before launch or reject\/queue it/,
-    /Built-in, Security, plugin, named multi-worker, third-party, and nested paths get no exception/,
-    /default `fork_turns="none"`/,
-    /brief only required files\/evidence\/constraints\/criteria/,
-    /bounded inheritance needs specific dialogue/,
-    /`fork_turns="all"` needs exceptional justification/,
-    /Do not claim support on unsupported hosts/
+    /profile\/capacity is a ceiling, never launch permission/,
+    /Unverifiable topology, admission, effort, or non-fast enforcement means root-only/,
+    /Never project controls across hosts or call policy hard enforcement/,
+    /Generic helper\/speed requests, child availability, UAT, or future tests cannot qualify launch/,
+    /Workers require separable concurrent work and concrete critical-path\/wall-clock speedup/,
+    /root's critical task, shorter\/easier child tasks, productive root work/,
+    /Missing\/contradictory declarations refuse/,
+    /Never delegate all work, give a child the longer task while root keeps the easy task/,
+    /Root continues critical work, not waiting\/polling/,
+    /owns integration, conflicts, validation, and final judgment/,
+    /sole verification exception is one fresh direct read-only pre-PR checker/,
+    /worker-speedup fields do not/,
+    /cannot mutate, publish, spawn, or use Fast/,
+    /ADMISSION_DENIED/,
+    /RAM after reservations is the hard gate; CPU is secondary/,
+    /Children default medium, never use Fast or nest/,
+    /Built-in, Security, plugin, multi-worker, third-party, and nested paths get no exception/,
+    /Use `fork_turns="none"` with required context/,
+    /do not claim unsupported controls/
   ];
 
   for (const relPath of [
@@ -346,12 +330,44 @@ test('speed-only C2 wording remains root-only without blocking qualified special
   ];
   for (const relPath of surfaces) {
     const text = readText(relPath);
-    assert.match(text, /finish faster with helpers` is a preference, not a bounded delegation instruction/, relPath);
-    assert.match(text, /available capacity[^.]*cannot qualify the present task/, relPath);
-    assert.match(text, /Do not invent scope/, relPath);
-    assert.match(text, /Missing any fact prohibits launch/, relPath);
-    assert.match(text, /Never delegate every substantive shard/, relPath);
-    assert.match(text, /Children never use or inherit fast mode/, relPath);
+    assert.match(text, /Generic helper\/speed requests/, relPath);
+    assert.match(text, /child availability, UAT, or future tests cannot qualify launch/, relPath);
+    assert.match(text, /Missing\/contradictory declarations refuse/, relPath);
+    assert.match(text, /Never delegate all work/, relPath);
+    assert.match(text, /never use Fast or nest/, relPath);
+  }
+});
+
+test('portable rules activate GitHub issue tracking only for the applicable working repository', () => {
+  const requiredRules = [
+    /## GitHub-Backed Project Issue Tracking/,
+    /active Git repo's relevant GitHub remote and same-repo activity/,
+    /Skip loose, non\/local-only, other-forge, and unrelated repos/,
+    /Toolkit's remote never substitutes/,
+    /Skipping is not an error/,
+    /Same-repo issue\/PR metadata sync for requested work is a scoped external-write exception/,
+    /never authorizes merge, deployment, secrets, workflows, or unrelated repos/,
+    /smallest owner; update\/reopen, never duplicate/,
+    /Use `Refs` for multi-stage, UAT-pending, blocked, or follow-up PRs/,
+    /`Closes`\/`Fixes` only if merge completes every criterion/,
+    /review Merge\/Amend\/Reject, findings\/exact-head fixes, threads, CI\/CodeQL, merge, UAT pending\/pass\/fail/,
+    /Verify exact head before resolving/,
+    /programme tracker SHA, version, lane\/gate, PR, review\/UAT, queue/,
+    /Boundedly update canonical bodies; comments hold history/,
+    /Report failed\/blocked writes/,
+    /close only complete issues, keep pending gates open/,
+  ];
+  for (const relPath of [
+    executionPromptPath,
+    '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
+    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+    'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+    'AGENTS.md',
+  ]) {
+    const text = readText(relPath);
+    for (const rule of requiredRules) assert.match(text, rule, `${relPath}: ${rule}`);
   }
 });
 

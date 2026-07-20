@@ -29,37 +29,19 @@ test('Claude Code plan omits unsupported automatic admission and never emits Cod
   const plan = JSON.parse(result.stdout);
   assert.equal(plan.host, 'claude-code');
   assert.equal(plan.preferences.helper_capacity_backstop, 'root-only');
-  assert.equal(plan.question_bank.find((row) => row.key === 'claudeAgentCapacity').choices.some((choice) => choice.value === 'automatic'), false);
+  assert.equal(plan.question_bank.some((row) => row.key === 'claudeAgentCapacity'), false);
   assert.doesNotMatch(plan.steps.flatMap((step) => step.commands || []).join('\n'), /agents\.max_threads|agents\.max_depth/);
 });
 
-test('plain and JSON plans share the root-only recommendation and canonical Codex question row', () => {
+test('plain and JSON plans omit ordinary helper quantity choices', () => {
   const root = tmpRoot();
   const plain = run(['--plan'], { env: isolatedHomeEnv(root) });
   const json = run(['--plan', '--json'], { env: isolatedHomeEnv(root) });
   assert.equal(plain.status, 0, plain.stderr);
   assert.equal(json.status, 0, json.stderr);
-  assert.match(plain.stdout, /## Computer performance[\s\S]*Codex helper agents[\s\S]*\*\*Recommended:\*\* Use the root agent only/);
+  assert.doesNotMatch(plain.stdout, /Codex helper agents|how many helper|custom number/i);
   const plan = JSON.parse(json.stdout);
-  const delegationRow = plan.question_bank.find((row) => row.key === 'codexHelperCapacity');
-  assert.deepEqual(
-    {
-      recommended: delegationRow.recommended,
-      recommended_value: delegationRow.recommended_value,
-      empty_input: delegationRow.empty_input,
-      empty_input_behavior: delegationRow.empty_input_behavior,
-      selected: delegationRow.selected,
-      selected_value: delegationRow.selected_value,
-    },
-    {
-      recommended: 'root-only',
-      recommended_value: 'root-only',
-      empty_input: 'root-only',
-      empty_input_behavior: 'root-only',
-      selected: 'root-only',
-      selected_value: 'root-only',
-    }
-  );
+  assert.equal(plan.question_bank.some((row) => row.key === 'codexHelperCapacity'), false);
   assert.equal(plan.preferences.helper_capacity_backstop, 'root-only');
 });
 
@@ -72,11 +54,10 @@ test('canonical question specification orders delegation before plugin auto-refr
     nativePlugin: { status: 'not checked' },
   };
   const keys = core.setupQuestionSpecs(args, current).map((spec) => spec.key);
-  assert.ok(keys.indexOf('codexHelperCapacity') < keys.indexOf('codexPluginAutoRefresh'));
   assert.deepEqual(keys, [
-    'managedCheckout', 'repoAutoUpdate', 'updateReports', 'updateReportRetention',
-    'codexHelperCapacity', 'codexPluginAutoRefresh',
+    'managedCheckout', 'repoAutoUpdate', 'updateReports', 'updateReportRetention', 'codexPluginAutoRefresh',
   ]);
+  assert.equal(args.setupChoices.codexHelperCapacity, 'keep');
 });
 
 test('agent-facing setup docs match the report question rows', () => {
@@ -132,57 +113,25 @@ test('canonical wizard renderer is compact, aligned, and free of implementation 
   assert.match(text, /## Automatic updates[\s\S]*## Computer performance/);
   assert.doesNotMatch(text, /## Other coding apps/);
   assert.doesNotMatch(text, /Update report auto-open|MultiAgentV[12]|max_threads|max_concurrent|AI-AGENT-TOOLKIT|PR #|issue #|C:\\|restore command|migration/i);
-  assert.match(text, /Codex helper agents[\s\S]*\*\*What this controls:\*\*[\s\S]*\*\*Current:\*\*[\s\S]*\*\*Recommended:\*\*[\s\S]*\*\*Why:\*\*[\s\S]*\*\*Choices:\*\*[\s\S]*\*\*After applying:\*\*[\s\S]*\*\*Selected:\*\*/);
-  assert.match(text, /\*\*Choices:\*\*\n\n- \*\*Root agent only\*\* - [^\n]+\n- \*\*One helper at most\*\* - [^\n]+\n- \*\*Keep current\*\* - [^\n]+\n- \*\*Use a custom number\*\* - /);
+  assert.doesNotMatch(text, /Codex helper agents|One helper at most|Use a custom number/i);
   assert.doesNotMatch(text, /\bAdvanced(?: options)?\b|Show advanced choices|More options/);
   assert.doesNotMatch(text, /\*\*Choices:\*\*[^\n]*(?:\/|\|)/);
-  assert.match(terminal, /Choices:\n  - Root agent only - [^\n]+\n  - One helper at most - [^\n]+\n  - Keep current - [^\n]+\n  - Use a custom number - /);
+  assert.doesNotMatch(terminal, /Codex helper agents|One helper at most|Use a custom number/i);
   assert.doesNotMatch(terminal, /Choices:[^\n]*(?:\/|,)/);
   assert.match(text, /Accept all displayed recommended settings:[\s\S]*setup-toolkit-question-bank:complete/);
   for (const spec of planned.specs) assert.ok(spec.description.split(/(?<=[.!?])\s+/).filter(Boolean).length <= 2, spec.key);
 
   current.delegation.helper_count = 4;
-  const unsafe = core.setupQuestionSpecs(args, current).find((spec) => spec.key === 'codexHelperCapacity');
-  assert.match(unsafe.current, /Risk:/);
-  assert.match(unsafe.choices.find((choice) => choice.value === 'keep').label, /memory risk/);
+  assert.equal(core.setupQuestionSpecs(args, current).some((spec) => spec.key === 'codexHelperCapacity'), false);
 });
 
-test('helper choices are direct and conditional on current runtime and ownership', () => {
-  const args = core.parseArgs(['--plan']);
-  const base = {
-    managed: { currentPath: '', selectedPath: '', defaultPath: '', exists: false, git: false, dirty: false, branch: '', remote: '' },
-    audit: { repo_auto_update: {}, targets: {} },
-    nativePlugin: { status: 'not checked' },
-  };
-  const helperSpec = (runtime, delegationState) => core.setupQuestionSpecs(args, {
-    ...base,
-    runtime: { runtime },
-    delegation: delegationState,
-  }).find((spec) => spec.key === 'codexHelperCapacity');
-
-  const supported = helperSpec('MultiAgentV2', { status: 'unconfigured', detail: 'not configured' });
-  assert.deepEqual(supported.choices.map((choice) => choice.value), ['root-only', 'one-helper', 'keep', 'custom']);
-  assert.equal(supported.choices.find((choice) => choice.value === 'custom').label, 'Use a custom number');
-  assert.equal(supported.choices.some((choice) => /advanced/i.test(choice.label)), false);
-
-  const unsupported = helperSpec('unknown', { status: 'unsupported', detail: 'unknown runtime' });
-  assert.deepEqual(unsupported.choices.map((choice) => choice.value), ['keep']);
-  assert.equal(unsupported.recommended, 'keep');
-  assert.match(unsupported.recommended_outcome, /Keep the current effective setting.*supported native helper controls/i);
-
-  const disabled = helperSpec('disabled', { status: 'disabled', detail: 'disabled runtime' });
-  assert.deepEqual(disabled.choices.map((choice) => choice.value), ['keep']);
-  assert.equal(disabled.recommended, 'keep');
-  assert.match(disabled.recommended_outcome, /Keep the current effective setting.*supported native helper controls/i);
-  assert.doesNotMatch(disabled.recommended_outcome, /One helper at most/i);
-
-  const migration = helperSpec('MultiAgentV2', { status: 'migration-required', ownership: 'toolkit-managed-v1-legacy', helper_count: 1, detail: 'pending' });
-  assert.deepEqual(migration.choices.map((choice) => choice.value), ['keep', 'migrate']);
-  assert.deepEqual(migration.choices.map((choice) => choice.label), ['Keep current', 'Update the existing Toolkit helper setting']);
-
-  const removable = helperSpec('MultiAgentV2', { status: 'configured', ownership: 'toolkit-managed-v2', helper_count: 1, detail: 'configured' });
-  assert.equal(removable.choices.find((choice) => choice.value === 'remove').label, 'Remove the Toolkit helper limit');
-  assert.equal(removable.choices.some((choice) => choice.value === 'migrate'), false);
+test('ordinary bank removes quantity choice while advanced compatibility flags remain restrictive', () => {
+  const args = core.parseArgs(['--plan', '--codex-helper-count', '2', '--approve-high-helper-capacity']);
+  const current = { managed: { currentPath: '', selectedPath: '', defaultPath: '', exists: false, git: false, dirty: false, branch: '', remote: '' }, audit: { repo_auto_update: {}, targets: {} }, runtime: { runtime: 'MultiAgentV2' }, delegation: { status: 'configured', helper_count: 4 }, nativePlugin: { status: 'not checked' } };
+  const specs = core.setupQuestionSpecs(args, current);
+  assert.equal(specs.some((spec) => spec.key === 'codexHelperCapacity'), false);
+  assert.equal(args.setupChoices.codexHelperCapacity, 'custom');
+  assert.equal(args.codexHelperCount, 2);
 });
 
 test('missing wizard output retries the complete bank and never emits a shortcut alone', () => {
@@ -203,7 +152,9 @@ test('--yes-recommended applies the visibly recommended root-only Codex outcome'
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const result = run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin, '--yes-recommended', '--skip-codex-plugin-auto-refresh'], { env: isolatedHomeEnv(root) });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Codex helper agents[\s\S]*\*\*Selected:\*\* Root agent only/);
+  const ordinaryBank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
+  assert.doesNotMatch(ordinaryBank, /Codex helper agents|helper quantity/i);
+  assert.match(result.stdout, /Helper-agent capacity questions shown: no/);
   assert.match(result.stdout, /Codex helper-agent runtime: MultiAgentV2/);
   assert.match(result.stdout, /Helper-capacity outcome this run: configured/);
   assert.match(result.stdout, /Configuration changed this run: yes/);
@@ -257,11 +208,12 @@ test('distinct piped answers follow the canonical question order without shifts'
     '--codex-cli', createFakeCodexAppServer(root),
   ], {
     env: isolatedHomeEnv(root),
-    input: ['disable', 'enable', 'default', 'one-helper', 'keep'].join('\n'),
+    input: ['disable', 'enable', 'default', 'keep'].join('\n'),
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*Codex helper agents: One helper at most[\s\S]*Codex Toolkit maintenance: Keep current/);
+  assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*Codex Toolkit maintenance: Keep current/);
+  assert.doesNotMatch(result.stdout, /Codex helper agents:/);
   assert.match(result.stdout, /Question answers initially required: yes/);
   assert.match(result.stdout, /Question answers supplied by complete stdin: yes/);
   assert.match(result.stdout, /Question answers prompted interactively: no/);
@@ -279,7 +231,7 @@ test('extra non-empty piped answers fail before any setup write', () => {
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const result = run(['--execute', '--repo-root', setupRepo, '--repo-remote', origin], {
     env: isolatedHomeEnv(root),
-    input: ['keep', 'keep', 'keep', 'keep', 'keep', 'unexpected'].join('\n'),
+    input: ['keep', 'keep', 'keep', 'keep', 'unexpected'].join('\n'),
   });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /unexpected extra non-empty input/);

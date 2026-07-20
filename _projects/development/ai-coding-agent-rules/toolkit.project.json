@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "2.6.7",
+  "version": "2.6.10",
   "version_policy": "semver",
-  "version_notes": "Adds productive root concurrency, host-profile ceilings, medium-effort defaults, and strict non-fast launch gates without unsupported enforcement claims.",
+  "version_notes": "Clarifies automatic same-repository GitHub issue synchronization as a bounded metadata exception while preserving productive critical-path delegation and checker rules.",
   "outputs": [
     {
       "kind": "curated",

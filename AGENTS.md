@@ -27,19 +27,19 @@ If instructions conflict, follow the higher-priority source and report material 
 
 ## Agent Topology And Delegation
 
-Ordinary work begins root-first. The root handles setup/updates, docs/repo orientation, narrow changes, routine tests/checks/formatting, version alignment, reviews/plans/summaries, and root-capable verification unless the launch gate passes. Scope broad work in root first. `setup toolkit` uses no subagents.
+Ordinary work begins root-first. Root owns setup, orientation, narrow changes, checks, versioning, reviews, summaries, and root-capable verification; `setup toolkit` uses no subagents.
 
-The active host profile is a topology ceiling, not a delegation instruction. Capacity is a resource backstop, never launch permission. No explicit profile or unverifiable topology, admission, effort, or non-fast guarantee means root-only. Never project one host's controls onto another or describe policy-only behavior as hard enforcement.
+A host profile/capacity is a ceiling, never launch permission. Unverifiable topology, admission, effort, or non-fast enforcement means root-only. Never project controls across hosts or call policy hard enforcement. Generic helper/speed requests, child availability, UAT, or future tests cannot qualify launch.
 
-Generic wording like `use helpers`, `use agents`, `parallelize this`, `delegate this`, `use subagents`, or `finish faster with helpers` is a preference, not a bounded delegation instruction. Do not invent scope. UAT context, later stages, available capacity, or future helper tests cannot qualify the present task.
+Workers require separable concurrent work and concrete critical-path/wall-clock speedup. Declare ownership, speedup, root's critical task, shorter/easier child tasks, productive root work, integration/validation, and medium non-fast admission. Missing/contradictory declarations refuse; Toolkit validates allocation, not duration.
 
-Before launch, state the task, independent bounded scopes, non-overlapping ownership, material quality, safety, or critical-path benefit, active topology and resource admission, verified medium reasoning and non-fast child mode, meaningful root-owned work starting immediately, and root-owned integration/validation. Missing any fact prohibits launch. Independent work may run concurrently when it materially shortens the critical path even if root could do it sequentially. Generic parallelism, second opinions, routine-work offloading, independent verification, task count, capacity, or speed are insufficient.
+Never delegate all work, give a child the longer task while root keeps the easy task, or launch because a child is available. Root continues critical work, not waiting/polling, and owns integration, conflicts, validation, and final judgment.
 
-Never delegate every substantive shard. Root immediately performs useful non-overlapping work, not wait, poll, narrate status, or repeat child scope. Wait only when root work is exhausted or depends on a child. Final integration, conflict resolution, cross-shard validation, and judgment remain root-owned.
+The sole verification exception is one fresh direct read-only pre-PR checker after meaningful root changes, focused validation, and a ready diff. Bounded context/identity/admission applies; worker-speedup fields do not. It cannot mutate, publish, spawn, or use Fast; root owns fixes. Denial is `ADMISSION_DENIED`; root self-review is not independent.
 
-Every child applies the same launch gate and active profile. Toolkit-managed direct and nested children default to medium reasoning effort; higher effort needs narrow explicit escalation and does not raise siblings. Children never use or inherit fast mode; verify this before launch or reject/queue it. Built-in, Security, plugin, named multi-worker, third-party, and nested paths get no exception.
+Every child uses atomic Toolkit admission: RAM after reservations is the hard gate; CPU is secondary. Reserve/release around launch and reclaim stale state identity-safely. Children default medium, never use Fast or nest; higher effort needs narrow escalation. Built-in, Security, plugin, multi-worker, third-party, and nested paths get no exception.
 
-When supported, default `fork_turns="none"` and brief only required files/evidence/constraints/criteria. `fork_turns="all"` needs exceptional justification; bounded inheritance needs specific dialogue. Do not claim support on unsupported hosts.
+Use `fork_turns="none"` with required context. Full inheritance needs justification; do not claim unsupported controls.
 
 ## Local Documentation
 
@@ -113,6 +113,18 @@ When a file says it is generated, do not edit it directly unless the user explic
 Find and edit the source, template, schema, generator, or source data first. Regenerate with the project command when practical and validate freshness.
 
 Use plain ASCII punctuation for agent-facing prompts, templates, scripts, config files, comments, and machine-read repo text unless the file already intentionally uses another character set.
+
+## GitHub-Backed Project Issue Tracking
+
+Activate only for the active Git repo's relevant GitHub remote and same-repo activity. Skip loose, non/local-only, other-forge, and unrelated repos; Toolkit's remote never substitutes. Skipping is not an error.
+
+Same-repo issue/PR metadata sync for requested work is a scoped external-write exception. It never authorizes merge, deployment, secrets, workflows, or unrelated repos.
+
+Find the smallest owner; update/reopen, never duplicate. Use `Refs` for multi-stage, UAT-pending, blocked, or follow-up PRs; `Closes`/`Fixes` only if merge completes every criterion.
+
+Sync start, PR/head, review Merge/Amend/Reject, findings/exact-head fixes, threads, CI/CodeQL, merge, UAT pending/pass/fail, remediation, and completion. Verify exact head before resolving. Keep programme tracker SHA, version, lane/gate, PR, review/UAT, queue, and completed/deferred/superseded work current.
+
+Boundedly update canonical bodies; comments hold history. Report failed/blocked writes. After merge, close only complete issues, keep pending gates open, and advance.
 
 ## Git Completion
 

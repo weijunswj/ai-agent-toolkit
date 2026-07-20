@@ -44,7 +44,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.7.19';
+const expectedBridgeVersion = '2.7.22';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 
 function tmpBaseDir() {
@@ -1513,6 +1513,54 @@ test('hook mode downgrade skip exits 0 and prints host remediation on stdout', (
   assert.match(result.stdout, /claude plugin update ai-agent-toolkit@ai-agent-toolkit-local --scope user/);
   assert.match(result.stdout, /reinstall through the supported Claude Code marketplace path/);
   assert.doesNotMatch(result.stdout, /--force-downgrade/);
+});
+
+test('Claude checker SessionStart exits successfully before all optional maintenance and mutation', () => {
+  const root = tmpRoot();
+  const hub = path.join(root, 'hub', 'current');
+  const repoPath = path.join(root, 'managed-source');
+  const openCodeTarget = path.join(root, 'opencode-target');
+  const pluginRoot = path.join(root, 'installed-plugin');
+  fs.mkdirSync(repoPath, { recursive: true });
+  fs.mkdirSync(openCodeTarget, { recursive: true });
+  fs.mkdirSync(pluginRoot, { recursive: true });
+  fs.writeFileSync(path.join(repoPath, 'sentinel.txt'), 'repo update must not run\n');
+  fs.writeFileSync(path.join(openCodeTarget, 'sentinel.txt'), 'target sync must not run\n');
+  fs.writeFileSync(path.join(pluginRoot, 'sentinel.txt'), 'hook repair and cache refresh must not run\n');
+  writeJson(path.join(hub, 'state.json'), {
+    schema_version: 1,
+    architecture_version: 2,
+    hub_version: expectedBridgeVersion,
+    bridge_versions_by_source: { 'claude-plugin': expectedBridgeVersion },
+    auto_sync_enabled: true,
+    repo_auto_update_enabled: true,
+    repo_path: repoPath,
+    repo_branch: 'main',
+    repo_remote: 'https://example.invalid/no-network.git',
+    update_report_enabled: true,
+    codex_plugin_auto_refresh_enabled: true,
+    targets: { opencode: { enabled: true, path: openCodeTarget } }
+  });
+  const env = isolatedHomeEnv(root, {
+    AI_AGENT_TOOLKIT_CHECKER: '1',
+    PLUGIN_ROOT: pluginRoot,
+    TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER: path.join(root, 'network-or-maintenance-marker.txt')
+  });
+  const before = snapshotTree(root);
+  const result = run(['--hub', hub, '--hook', '--sync-enabled', '--write', '--sync-source', 'claude-plugin'], { env });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, '');
+  assert.deepEqual(snapshotTree(root), before);
+  assert.equal(fs.existsSync(env.TOOLKIT_BRIDGE_TEST_DELEGATE_MARKER), false);
+
+  const previous = process.env.AI_AGENT_TOOLKIT_CHECKER;
+  process.env.AI_AGENT_TOOLKIT_CHECKER = '1';
+  try {
+    assert.deepEqual(runBridge(['--hook', '--unsupported-checker-fixture']), { status: 0, audit: null, checker_session_noop: true });
+  } finally {
+    if (previous === undefined) delete process.env.AI_AGENT_TOOLKIT_CHECKER;
+    else process.env.AI_AGENT_TOOLKIT_CHECKER = previous;
+  }
 });
 
 test('repo same-source downgrade names managed source remediation', () => {

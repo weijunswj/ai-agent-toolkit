@@ -24,7 +24,7 @@ const {
 } = require('./toolkit-staging-generations.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.7.19';
+const BRIDGE_VERSION = '2.7.22';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -4099,6 +4099,9 @@ function persistActiveNoTargetWrite({
 }
 
 function run(argv = process.argv.slice(2), testHooks = {}) {
+  if (process.env.AI_AGENT_TOOLKIT_CHECKER === '1' && argv.includes('--hook')) {
+    return { status: 0, audit: null, checker_session_noop: true };
+  }
   const args = parseArgs(argv);
   assertReconciliationCommandArgs(args);
   const hubPath = assertSafeWritePath(args.hub || defaultHubPath(), 'hub path');

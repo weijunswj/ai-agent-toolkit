@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.7.19",
+  "version": "2.7.22",
   "version_policy": "semver",
-  "version_notes": "Uses a direct Windows PowerShell script-file boundary for Codex Toolkit SessionStart so the wrapper and Node launcher remain reachable without nested command-text quoting.",
+  "version_notes": "Hardens checker readiness booleans and custom-root result retrieval after the bounded checker workflow, no-maintenance sessions, and single-pass Windows wrapper launch changes.",
   "outputs": [
     {
       "kind": "curated",

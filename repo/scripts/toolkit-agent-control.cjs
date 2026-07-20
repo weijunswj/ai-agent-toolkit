@@ -9,13 +9,22 @@ const crypto = require('node:crypto');
 const processLaunch = require('./claude-process-launch.cjs');
 
 const SCHEMA = 1;
-const CONTROL_VERSION = '2.7.19';
+const CONTROL_VERSION = '2.7.22';
 const RESULTS = Object.freeze({ START: 'start', QUEUE: 'queue', REFUSE: 'refuse-root-only' });
+const CHECKER_RESULTS = Object.freeze({ PASS: 'PASS', FINDINGS: 'FINDINGS', ADMISSION_DENIED: 'ADMISSION_DENIED', SKIPPED_TRIVIAL: 'SKIPPED_TRIVIAL' });
+const HOSTS = Object.freeze({ CODEX: 'codex', CLAUDE: 'claude-code', OPENCODE: 'opencode' });
+const ROLES = Object.freeze({ WORKER: 'worker', CHECKER: 'checker' });
+const MODEL_CONTRACT = Object.freeze({
+  codex: Object.freeze({ worker: 'gpt-5.6-sol', checker: 'gpt-5.6-sol', effort: 'medium' }),
+  'claude-code': Object.freeze({ worker: 'fable-5', checker: 'opus-4.8', effort: 'medium' }),
+  opencode: Object.freeze({ worker: 'gpt-5.6-sol', checker: 'gpt-5.6-sol', effort: 'medium' }),
+});
 const TOPOLOGIES = Object.freeze({ ROOT_ONLY: 'root-only', CLAUDE_DIRECT: 'claude-toolkit-direct', BROADER_NATIVE: 'broader-native' });
 const CAPACITY_MODES = Object.freeze({ AUTO: 'automatic', ROOT_ONLY: 'root-only', MANUAL: 'manual' });
 const GIB = 1024 ** 3;
 const DEFAULT_WORKER_COST = 2 * GIB;
 const RESERVATION_TTL_MS = 6 * 60 * 60 * 1000;
+const CHECKER_REVIEW_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const QUEUE_TTL_MS = 10 * 60 * 1000;
 const LOCK_TTL_MS = 30 * 1000;
 const MAX_QUEUE = 4;
@@ -25,6 +34,9 @@ const MIN_WORKER_COST = GIB;
 const MAX_WORKER_COST = 16 * GIB;
 const MAX_MANUAL_WORKERS = 64;
 const MAX_PROMPT_BYTES = 1024 * 1024;
+const MAX_CHECKER_OUTPUT_BYTES = 256 * 1024;
+const MAX_CHECKER_INPUT_BYTES = 1024 * 1024;
+const CHECKER_TIMEOUT_MS = 30 * 60 * 1000;
 
 function controlRoot(options = {}) {
   return path.resolve(options.root || process.env.AI_AGENT_TOOLKIT_CONTROL_ROOT || path.join(os.homedir(), '.ai-agent-toolkit', 'agent-control'));
@@ -197,12 +209,13 @@ function withLock(options, action) {
   finally { release(); }
 }
 
-function emptyState() { return { schema: SCHEMA, reservations: [], queue: [] }; }
+function emptyState() { return { schema: SCHEMA, reservations: [], queue: [], checker_reviews: [] }; }
 
 function validReservation(entry) {
   return Boolean(entry && typeof entry === 'object'
     && typeof entry.id === 'string' && entry.id.length > 0
-    && entry.host === 'claude-code' && entry.topology === TOPOLOGIES.CLAUDE_DIRECT && entry.depth === 1
+    && Object.values(HOSTS).includes(entry.host) && (entry.topology === 'toolkit-controlled-direct' || (entry.host === HOSTS.CLAUDE && entry.topology === TOPOLOGIES.CLAUDE_DIRECT)) && entry.depth === 1
+    && (entry.role === undefined || Object.values(ROLES).includes(entry.role))
     && Number.isSafeInteger(entry.owner_pid) && entry.owner_pid > 0
     && Number.isSafeInteger(entry.created_at_ms) && Number.isSafeInteger(entry.expires_at_ms)
     && entry.created_at_ms > 0 && entry.expires_at_ms >= entry.created_at_ms
@@ -213,21 +226,45 @@ function validReservation(entry) {
 
 function validQueueEntry(entry) {
   return Boolean(entry && typeof entry === 'object' && typeof entry.id === 'string' && entry.id.length > 0
-    && entry.host === 'claude-code' && entry.status === RESULTS.QUEUE
+    && Object.values(HOSTS).includes(entry.host) && (entry.role === undefined || Object.values(ROLES).includes(entry.role)) && entry.status === RESULTS.QUEUE
     && Number.isSafeInteger(entry.created_at_ms) && Number.isSafeInteger(entry.expires_at_ms)
     && entry.created_at_ms > 0 && entry.expires_at_ms >= entry.created_at_ms);
 }
 
+function validCheckerReview(entry) {
+  return Boolean(entry && typeof entry === 'object'
+    && typeof entry.review_id === 'string' && entry.review_id.trim().length > 0
+    && Number.isSafeInteger(entry.admitted_at_ms) && entry.admitted_at_ms > 0
+    && Number.isSafeInteger(entry.expires_at_ms) && entry.expires_at_ms >= entry.admitted_at_ms
+    && (entry.status === undefined || ['pending', 'completed'].includes(entry.status))
+    && (entry.reservation_id === undefined || (typeof entry.reservation_id === 'string' && entry.reservation_id.length > 0))
+    && (entry.result === undefined || [CHECKER_RESULTS.PASS, CHECKER_RESULTS.FINDINGS].includes(entry.result))
+    && (entry.findings_count === undefined || (Number.isSafeInteger(entry.findings_count) && entry.findings_count >= 0))
+    && (entry.findings === undefined || (Array.isArray(entry.findings) && entry.findings.every((finding) => finding && typeof finding.file === 'string'
+      && finding.file.length > 0 && typeof finding.evidence === 'string' && finding.evidence.length >= 12)))
+    && (entry.reason === undefined || typeof entry.reason === 'string')
+    && (entry.status !== 'pending' || (entry.result === undefined && entry.findings_count === undefined
+      && entry.findings === undefined && entry.reason === undefined)));
+}
+
 function validControlState(raw) {
   if (!raw || raw.schema !== SCHEMA || !Array.isArray(raw.reservations) || !Array.isArray(raw.queue)
-    || !raw.reservations.every(validReservation) || !raw.queue.every(validQueueEntry)) return false;
+    || (raw.checker_reviews !== undefined && !Array.isArray(raw.checker_reviews))
+    || !raw.reservations.every(validReservation) || !raw.queue.every(validQueueEntry)
+    || !(raw.checker_reviews || []).every(validCheckerReview)) return false;
   const ids = [...raw.reservations, ...raw.queue].map((entry) => entry.id);
-  return new Set(ids).size === ids.length;
+  const reviewIds = (raw.checker_reviews || []).map((entry) => entry.review_id);
+  return new Set(ids).size === ids.length && new Set(reviewIds).size === reviewIds.length;
 }
 
 function sanitizeState(raw) {
   if (!validControlState(raw)) return emptyState();
-  return { schema: SCHEMA, reservations: raw.reservations.map((entry) => ({ ...entry })), queue: raw.queue.map((entry) => ({ ...entry })) };
+  return {
+    schema: SCHEMA,
+    reservations: raw.reservations.map((entry) => ({ ...entry })),
+    queue: raw.queue.map((entry) => ({ ...entry })),
+    checker_reviews: (raw.checker_reviews || []).map((entry) => ({ ...entry })),
+  };
 }
 
 function readMutableControlState(options = {}) {
@@ -242,9 +279,15 @@ function readMutableControlState(options = {}) {
 function recoverState(state, now = Date.now()) {
   state.reservations = state.reservations.filter((entry) => {
     const expired = Number.isFinite(entry.expires_at_ms) && entry.expires_at_ms <= now;
-    return !(expired && !pidAlive(entry.owner_pid));
+    return !(expired && (entry.status === 'reserved' || !pidAlive(entry.owner_pid)));
   });
-  state.queue = state.queue.filter((entry) => Number.isFinite(entry.expires_at_ms) && entry.expires_at_ms > now);
+  state.queue = state.queue.filter((entry) => Number.isFinite(entry.expires_at_ms) && entry.expires_at_ms > now)
+    .map((entry) => entry.role === undefined ? { ...entry, role: ROLES.WORKER } : entry);
+  const activeReservationIds = new Set(state.reservations.map((entry) => entry.id));
+  state.checker_reviews = (state.checker_reviews || []).filter((entry) => {
+    if (!Number.isFinite(entry.expires_at_ms) || entry.expires_at_ms <= now) return false;
+    return entry.status !== 'pending' || (typeof entry.reservation_id === 'string' && activeReservationIds.has(entry.reservation_id));
+  });
   return state;
 }
 
@@ -380,6 +423,7 @@ function linuxResources() {
     commit_total: values.CommitLimit,
     commit_available: values.CommitLimit - values.Committed_AS,
     source: 'proc-meminfo',
+    host_responsive: true,
   };
 }
 
@@ -387,7 +431,7 @@ function windowsResources() {
   const command = '$o=Get-CimInstance Win32_OperatingSystem; [pscustomobject]@{physical_total=[double]$o.TotalVisibleMemorySize*1024;physical_available=[double]$o.FreePhysicalMemory*1024;commit_total=[double]$o.TotalVirtualMemorySize*1024;commit_available=[double]$o.FreeVirtualMemory*1024}|ConvertTo-Json -Compress';
   const result = spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command], { encoding: 'utf8', windowsHide: true, timeout: 10000 });
   if (result.status !== 0) throw new Error('Windows memory counters are unavailable.');
-  return { ...JSON.parse(result.stdout), source: 'win32-operating-system' };
+  return { ...JSON.parse(result.stdout), source: 'win32-operating-system', host_responsive: true };
 }
 
 function inspectResources(options = {}) {
@@ -403,13 +447,176 @@ function validResourceState(resources) {
   return resources && ['physical_total', 'physical_available', 'commit_total', 'commit_available']
     .every((key) => Number.isSafeInteger(resources[key]) && resources[key] > 0)
     && resources.physical_available <= resources.physical_total
-    && resources.commit_available <= resources.commit_total;
+    && resources.commit_available <= resources.commit_total
+    && resources.host_responsive === true;
 }
 
 function inspectResourceCapability(options = {}) {
   const resources = inspectResources(options);
   const supported = Boolean(validResourceState(resources) && ['proc-meminfo', 'win32-operating-system', 'fixture'].includes(resources.source));
   return { supported, source: supported ? resources.source : 'unsupported-or-malformed', resources: supported ? resources : null };
+}
+
+
+const TRIVIAL_CHANGE_KINDS = new Set(['typo-only-docs', 'mechanical-comment-only', 'generated-only-authoritative-validated']);
+const GENERATED_ONLY_PREFIXES = ['skills/', '.codex-plugin/', '.claude-plugin/'];
+const PACKAGED_OR_RUNTIME_PREFIXES = [
+  'repo/scripts/', 'repo/tests/', '_projects/', 'skills/', '.codex-plugin/', '.claude-plugin/',
+  '.agents/', 'AGENTS.md', 'CLAUDE.md', 'GEMINI.md', 'package.json', 'package-lock.json',
+];
+const CHECKER_CONTEXT_LIMITS = Object.freeze({ task: 64 * 1024, files: 64 * 1024, diff: 512 * 1024, validation: 64 * 1024, surrounding: 128 * 1024 });
+
+function canonicalChangedFiles(values) {
+  if (!Array.isArray(values)) return [];
+  return values.map((value) => {
+    const slash = String(value).replace(/\\/g, '/');
+    if (!slash || slash.startsWith('/') || /^[A-Za-z]:[/]/.test(slash)) throw new Error('Changed files must use repository-relative paths.');
+    const normalized = path.posix.normalize(slash);
+    if (normalized === '.' || normalized === '..' || normalized.startsWith('../')) throw new Error('Changed files must stay inside the repository.');
+    return normalized;
+  });
+}
+
+function checkerRequirement(input = {}) {
+  const rawFiles = Array.isArray(input.changed_files) ? input.changed_files : [];
+  if (input.implementation_complete !== true || input.focused_validation_passed !== true
+    || input.diff_ready !== true || rawFiles.length === 0) {
+    return { required: false, ready: false, reason: 'Checker decision requires completed implementation, passed focused validation, a ready diff, and changed files.' };
+  }
+  let files;
+  try { files = canonicalChangedFiles(rawFiles); }
+  catch {
+    return { required: true, ready: true, reason: 'Noncanonical changed-file paths cannot qualify for trivial checker skipping.' };
+  }
+  const highRisk = files.some((file) => PACKAGED_OR_RUNTIME_PREFIXES.some((prefix) => file === prefix || file.startsWith(prefix)));
+  const trivialKind = String(input.change_kind || '');
+  const docsOnly = files.every((file) => /\.(?:md|txt)$/i.test(file));
+  const generatedOnly = trivialKind === 'generated-only-authoritative-validated'
+    && input.authoritative_source_independently_validated === true
+    && files.every((file) => GENERATED_ONLY_PREFIXES.some((prefix) => file.startsWith(prefix)));
+  const docsTrivial = ['typo-only-docs', 'mechanical-comment-only'].includes(trivialKind) && docsOnly && !highRisk;
+  const permittedTrivial = TRIVIAL_CHANGE_KINDS.has(trivialKind) && (docsTrivial || generatedOnly);
+  return permittedTrivial
+    ? { required: false, ready: true, result: CHECKER_RESULTS.SKIPPED_TRIVIAL, reason: 'The deterministic trivial-change classifier matched a verified docs-only or declared generated-only contract.' }
+    : { required: true, ready: true, reason: highRisk ? 'Packaged or runtime behavior requires independent pre-PR checking.' : 'Meaningful code-changing work requires independent pre-PR checking.' };
+}
+
+function boundedText(value, limit, label) {
+  const text = String(value || '');
+  if (Buffer.byteLength(text, 'utf8') > limit) throw new Error(`${label} exceeds the bounded checker context limit.`);
+  return text;
+}
+
+function requiredBoundedText(value, limit, label) {
+  const text = boundedText(value, limit, label);
+  if (!text.trim()) throw new Error(`${label} is required for checker review.`);
+  return text;
+}
+
+function checkerContext(input = {}) {
+  const changedFiles = canonicalChangedFiles(input.changed_files);
+  if (!changedFiles.length || changedFiles.length > 200) throw new Error('Checker context requires 1-200 changed files.');
+  if (Buffer.byteLength(JSON.stringify(changedFiles), 'utf8') > CHECKER_CONTEXT_LIMITS.files) throw new Error('Changed-file list exceeds the bounded checker context limit.');
+  return Object.freeze({
+    task_contract: requiredBoundedText(input.task_contract, CHECKER_CONTEXT_LIMITS.task, 'Task contract'),
+    changed_files: Object.freeze(changedFiles),
+    diff: requiredBoundedText(input.diff, CHECKER_CONTEXT_LIMITS.diff, 'Diff'),
+    focused_validation: requiredBoundedText(input.focused_validation, CHECKER_CONTEXT_LIMITS.validation, 'Focused validation'),
+    surrounding_invariants: boundedText(input.surrounding_invariants, CHECKER_CONTEXT_LIMITS.surrounding, 'Surrounding invariants'),
+    review_checks: Object.freeze(['semantic parity', 'edge and fail-closed cases', 'behavioral test strength', 'Windows/POSIX portability', 'security and privacy', 'generated-source coupling', 'version alignment', 'stale-state migration', 'user-owned-state preservation', 'scope control']),
+  });
+}
+
+function buildCheckerPrompt(context) {
+  const boundedContext = checkerContext(context);
+  const childPrompt = JSON.stringify({
+    instructions: 'Perform a local-only read-only adversarial review of the bounded ready diff. Do not mutate files, run mutating commands, access network tools, or launch children.',
+    result_contract: {
+      statuses: [CHECKER_RESULTS.PASS, CHECKER_RESULTS.FINDINGS],
+      pass: 'Return PASS only when no actionable finding remains.',
+      findings: 'Return FINDINGS with bounded file and evidence details for every actionable defect.',
+      format: 'Return only one JSON object: {"status":"PASS","findings":[]} or {"status":"FINDINGS","findings":[{"file":"...","evidence":"..."}]}.',
+    },
+    context: boundedContext,
+  });
+  if (Buffer.byteLength(childPrompt, 'utf8') > MAX_PROMPT_BYTES) throw new Error('Checker prompt exceeds the bounded private transport limit.');
+  const digest = crypto.createHash('sha256').update(childPrompt, 'utf8').digest('hex');
+  return { boundedContext, childPrompt, digest };
+}
+
+function validateCheckerPrompt(childPrompt) {
+  let rebuilt;
+  try {
+    const parsed = JSON.parse(String(childPrompt || ''));
+    rebuilt = buildCheckerPrompt(parsed?.context);
+  } catch { throw new Error('Checker launch requires a factory-validated bounded context prompt.'); }
+  if (rebuilt.childPrompt !== childPrompt) throw new Error('Checker launch requires a factory-validated bounded context prompt.');
+  return rebuilt;
+}
+
+function checkerLaunchSpec(host, context, overrides = {}) {
+  if (!Object.values(HOSTS).includes(host)) throw new Error('Unsupported checker host.');
+  const mapping = MODEL_CONTRACT[host];
+  const { childPrompt, digest } = buildCheckerPrompt(context);
+  return {
+    ...overrides,
+    role: ROLES.CHECKER, host, depth: 1, effort: mapping.effort, model: mapping.checker,
+    read_only: true, may_edit: false, may_commit: false, may_push: false, may_open_pr: false, may_merge_pr: false, may_spawn_children: false,
+    review_id: 'checker-' + digest,
+    checker_context_digest: digest,
+    child_responsibility: 'Adversarially review the bounded ready diff and report evidence without mutating it.',
+    parent_responsibility: 'Inspect checker evidence, own every fix, and retain final integration judgement.',
+    integration_plan: 'The root alone applies any fixes and integrates the final implementation.',
+    validation_plan: 'The root reruns focused validation after every accepted checker finding.',
+    material_benefit: 'A fresh bounded context can catch semantic defects before pull-request review.',
+    child_prompt: childPrompt,
+  };
+}
+
+function checkerResult(status, details = {}) {
+  if (!Object.values(CHECKER_RESULTS).includes(status)) throw new Error('Unknown checker result.');
+  const findings = Array.isArray(details.findings) ? details.findings : [];
+  if (status === CHECKER_RESULTS.FINDINGS && (!findings.length || findings.some((finding) => !finding || typeof finding.file !== 'string' || !finding.file || typeof finding.evidence !== 'string' || finding.evidence.length < 12))) throw new Error('FINDINGS requires bounded file and evidence details.');
+  if (status === CHECKER_RESULTS.PASS && findings.length) throw new Error('PASS cannot contain findings.');
+  if (status === CHECKER_RESULTS.ADMISSION_DENIED && details.root_self_review_performed !== true) throw new Error('ADMISSION_DENIED requires a recorded bounded root self-review.');
+  return { status, findings, reason: String(details.reason || ''), root_self_review_performed: details.root_self_review_performed === true };
+}
+
+function checkerResultFromClaudeOutput(raw) {
+  const bytes = Buffer.isBuffer(raw) ? raw : Buffer.from(String(raw || ''), 'utf8');
+  if (!bytes.length || bytes.length > MAX_CHECKER_OUTPUT_BYTES) throw new Error('Checker output is empty or exceeds the bounded result limit.');
+  let envelope;
+  try { envelope = JSON.parse(bytes.toString('utf8')); }
+  catch { throw new Error('Checker output is not valid Claude JSON.'); }
+  if (!envelope || envelope.type !== 'result' || envelope.subtype !== 'success'
+    || envelope.is_error !== false || typeof envelope.result !== 'string') {
+    throw new Error('Checker output is not a successful Claude result envelope.');
+  }
+  let payload;
+  try { payload = JSON.parse(envelope.result); }
+  catch { throw new Error('Checker result payload is not valid JSON.'); }
+  if (!payload || typeof payload !== 'object' || ![CHECKER_RESULTS.PASS, CHECKER_RESULTS.FINDINGS].includes(payload.status)) {
+    throw new Error('Checker result payload must be PASS or FINDINGS.');
+  }
+  return checkerResult(payload.status, { findings: payload.findings, reason: payload.reason });
+}
+
+function checkerAdmissionOutcome(admission, details = {}) {
+  if (admission?.result === RESULTS.START) return { status: 'ADMITTED', reservation_id: admission.reservation_id };
+  if (details.root_self_review_performed !== true) {
+    return {
+      status: CHECKER_RESULTS.ADMISSION_DENIED,
+      findings: [],
+      reason: 'The canonical Toolkit resource gate could not safely admit the checker.',
+      root_self_review_required: true,
+      root_self_review_performed: false,
+      root_self_review_contract: 'Perform and report a bounded root self-review; do not represent it as independent verification.',
+    };
+  }
+  return checkerResult(CHECKER_RESULTS.ADMISSION_DENIED, {
+    reason: 'The canonical Toolkit resource gate could not safely admit the checker.',
+    root_self_review_performed: details.root_self_review_performed === true,
+  });
 }
 
 function validateLaunchSpec(spec) {
@@ -421,6 +628,40 @@ function validateLaunchSpec(spec) {
   if (child === parent || child.includes(parent) || parent.includes(child)) throw new Error('Parent and child responsibilities must be non-overlapping.');
   if (/^(wait|poll|monitor|narrate|idle)\b|wait for (?:the )?(?:child|result)/i.test(parent)) throw new Error('The parent must retain productive work, not waiting or polling.');
   if (spec.delegates_all_substantive_work === true) throw new Error('Every substantive shard cannot be delegated.');
+  const role = String(spec.role || ROLES.WORKER);
+  const host = String(spec.host || HOSTS.CLAUDE);
+  if (!Object.values(ROLES).includes(role)) throw new Error('Unsupported child role.');
+  if (!Object.values(HOSTS).includes(host)) throw new Error('Unsupported child host.');
+  const expectedModel = MODEL_CONTRACT[host][role];
+  const model = String(spec.model || expectedModel);
+  if (model !== expectedModel) throw new Error('The child must use the declared sticky host model contract.');
+  if (role === ROLES.CHECKER) {
+    const immutable = spec.read_only === true && spec.may_edit === false && spec.may_commit === false && spec.may_push === false
+      && spec.may_open_pr === false && spec.may_merge_pr === false && spec.may_spawn_children === false;
+    if (!immutable || !String(spec.review_id || '').trim()) throw new Error('The checker must be a bounded read-only direct reviewer.');
+    const prompt = validateCheckerPrompt(spec.child_prompt);
+    if (spec.checker_context_digest !== prompt.digest || spec.review_id !== 'checker-' + prompt.digest) {
+      throw new Error('Checker identity must be derived from its factory-validated bounded context.');
+    }
+    if (model !== MODEL_CONTRACT[host].checker || String(spec.effort || 'medium').toLowerCase() !== 'medium') {
+      throw new Error('The checker must use the declared host checker model at medium effort.');
+    }
+  } else {
+    if (spec.tasks_separable !== true) throw new Error('Worker tasks must be genuinely separable.');
+    if (spec.concurrent_execution_possible !== true) throw new Error('Worker tasks must be concurrently executable.');
+    if (String(spec.expected_wall_clock_speedup || '').trim().length < 12) {
+      throw new Error('Worker launch requires a concrete expected wall-clock speedup rationale.');
+    }
+    if (spec.root_retains_longest_or_critical_path !== true) {
+      throw new Error('The root must retain the longest or critical-path task.');
+    }
+    if (spec.child_task_is_shorter_or_easier !== true) {
+      throw new Error('The child task must be shorter or easier than the root retained task.');
+    }
+    if (spec.root_productive_work_declared !== true) {
+      throw new Error('The root must begin and continue productive work while the child runs.');
+    }
+  }
   const depth = Number(spec.depth ?? 1);
   if (depth !== 1) throw new Error('The direct-only Toolkit profile blocks nested launches.');
   const effort = String(spec.effort || 'medium').toLowerCase();
@@ -430,11 +671,17 @@ function validateLaunchSpec(spec) {
       throw new Error('Higher effort requires one named difficult role and a narrow current-task justification.');
     }
   }
-  return { ...spec, depth, effort };
+  return { ...spec, host, role, model, depth, effort };
 }
 
 function refusal(reason) {
   return { result: RESULTS.REFUSE, reason, safe_action: 'Continue with the root agent only; no worker was launched.' };
+}
+
+function validAdmissionProfile(profile) {
+  if (!profile || ![CAPACITY_MODES.AUTO, CAPACITY_MODES.MANUAL].includes(profile.capacity_mode)) return false;
+  return profile.capacity_mode !== CAPACITY_MODES.MANUAL
+    || (Number.isSafeInteger(profile.manual_maximum) && profile.manual_maximum >= 1 && profile.manual_maximum <= MAX_MANUAL_WORKERS);
 }
 
 function admissionDecision(specInput, options = {}) {
@@ -443,14 +690,39 @@ function admissionDecision(specInput, options = {}) {
   let spec;
   try { spec = validateLaunchSpec(specInput); }
   catch (error) { return refusal(error.message); }
-  const profile = options.profile || readProfile('claude-code', options);
-  if (profile.supported !== true || profile.status !== 'configured' || profile.enforcement_verified !== true
-    || profile.controller_version !== CONTROL_VERSION || profile.topology !== TOPOLOGIES.CLAUDE_DIRECT
-    || ![CAPACITY_MODES.AUTO, CAPACITY_MODES.MANUAL].includes(profile.capacity_mode)) return refusal('The selected Claude profile is root-only, stale, unsupported, or outside the verified Toolkit launch boundary.');
-  if (!verifyCurrentClaudeEnforcement(profile, options)) return refusal('Current Claude plugin trust, hook activation, and installed enforcement identity could not be verified.');
+  const host = String(options.host || spec.host || HOSTS.CLAUDE);
+  if (!Object.values(HOSTS).includes(host)) return refusal('The requested host adapter is unsupported.');
+  if (host !== spec.host) return refusal('The native host adapter does not match the validated child host contract.');
+  const profile = options.profile || (host === HOSTS.CLAUDE ? readProfile(HOSTS.CLAUDE, options) : { capacity_mode: CAPACITY_MODES.AUTO, manual_maximum: 0, worker_estimate_bytes: DEFAULT_WORKER_COST });
+  if (profile.capacity_mode === CAPACITY_MODES.ROOT_ONLY) return refusal('The selected host profile is root-only and cannot admit a child.');
+  if (!validAdmissionProfile(profile)) return refusal('The selected host admission profile could not be verified safely.');
+  if (host === HOSTS.CLAUDE) {
+    if (profile.supported !== true || profile.status !== 'configured' || profile.enforcement_verified !== true
+      || profile.controller_version !== CONTROL_VERSION || profile.topology !== TOPOLOGIES.CLAUDE_DIRECT
+      || ![CAPACITY_MODES.AUTO, CAPACITY_MODES.MANUAL].includes(profile.capacity_mode)) return refusal('The selected Claude profile is root-only, stale, unsupported, or outside the verified Toolkit launch boundary.');
+    if (!verifyCurrentClaudeEnforcement(profile, options)) return refusal('Current Claude plugin trust, hook activation, and installed enforcement identity could not be verified.');
+  } else {
+    return refusal('No production Toolkit launch interceptor is installed for this host; native child launches remain root-only.');
+  }
   const resources = inspectResources(options);
   if (!validResourceState(resources)) return refusal('Resource state could not be verified safely.');
+  return resourceAdmissionDecisionValidated(spec, profile, resources, options);
+}
 
+function resourceAdmissionDecision(specInput, profile, resources, options = {}) {
+  const childRefusal = childLaunchRefusal(options);
+  if (childRefusal) return childRefusal;
+  let spec;
+  try { spec = validateLaunchSpec(specInput); }
+  catch (error) { return refusal(error.message); }
+  if (!profile || profile.capacity_mode === CAPACITY_MODES.ROOT_ONLY) return refusal('The selected host profile is root-only and cannot admit a child.');
+  if (!validAdmissionProfile(profile)) return refusal('The selected host admission profile could not be verified safely.');
+  if (!validResourceState(resources)) return refusal('Resource state could not be verified safely.');
+  return resourceAdmissionDecisionValidated(spec, profile, resources, options);
+}
+
+function resourceAdmissionDecisionValidated(spec, profile, resources, options) {
+  const host = spec.host;
   return withLock(options, () => {
     const now = options.now || Date.now();
     const stateFile = statePath(options);
@@ -463,6 +735,8 @@ function admissionDecision(specInput, options = {}) {
       reservedBytes += entry.estimated_memory_bytes;
     }
     const active = state.reservations.length;
+    if (spec.role === ROLES.CHECKER && state.reservations.some((entry) => entry.role === ROLES.CHECKER)) return refusal('Exactly one independent checker may be active.');
+    if (spec.role === ROLES.CHECKER && state.checker_reviews.some((entry) => entry.review_id === spec.review_id)) return refusal('This pre-PR review already admitted its one independent checker.');
     const maximum = profile.capacity_mode === CAPACITY_MODES.MANUAL ? profile.manual_maximum : EMERGENCY_WORKER_CEILING;
     const physicalReserve = Math.max(4 * GIB, resources.physical_total * 0.25);
     const commitReserve = Math.max(6 * GIB, resources.commit_total * 0.20);
@@ -476,23 +750,26 @@ function admissionDecision(specInput, options = {}) {
     if (critical) return refusal('Current memory pressure is unsafe for another worker.');
     const queuedReservation = spec.queue_id ? state.queue.find((entry) => entry.id === spec.queue_id) : null;
     if (spec.queue_id && !queuedReservation) return refusal('The queue entry is missing or expired.');
+    if (queuedReservation && (queuedReservation.host !== host || queuedReservation.role !== spec.role)) return refusal('The queue entry belongs to a different host or child role.');
     if (state.queue.length && state.queue[0].id !== spec.queue_id) {
+      if (spec.role === ROLES.CHECKER) return refusal('The required checker could not be admitted immediately.');
       if (queuedReservation) {
         return { result: RESULTS.QUEUE, queue_id: queuedReservation.id, expires_at_ms: queuedReservation.expires_at_ms, reason: 'An earlier bounded queue entry is still waiting.', safe_action: 'Continue productive root work and retry before the queue entry expires.' };
       }
       if (state.queue.length >= MAX_QUEUE) return refusal('The bounded worker queue is full.');
-      const queued = { id: crypto.randomUUID(), host: 'claude-code', created_at_ms: now, expires_at_ms: now + QUEUE_TTL_MS, status: RESULTS.QUEUE };
+      const queued = { id: crypto.randomUUID(), host, role: spec.role, created_at_ms: now, expires_at_ms: now + QUEUE_TTL_MS, status: RESULTS.QUEUE };
       state.queue.push(queued);
       atomicWriteJson(statePath(options), state);
       return { result: RESULTS.QUEUE, queue_id: queued.id, expires_at_ms: queued.expires_at_ms, reason: 'Earlier Toolkit-controlled work is queued.', safe_action: 'Continue productive root work and retry before the queue entry expires.' };
     }
     const temporarilyFull = active >= maximum || active >= EMERGENCY_WORKER_CEILING || physicalAfter < physicalReserve || commitAfter < commitReserve;
     if (temporarilyFull) {
+      if (spec.role === ROLES.CHECKER) return refusal('Verified memory capacity is unavailable for the required checker.');
       if (queuedReservation) {
         return { result: RESULTS.QUEUE, queue_id: queuedReservation.id, expires_at_ms: queuedReservation.expires_at_ms, reason: 'Verified capacity is temporarily unavailable.', safe_action: 'Continue productive root work and retry before the queue entry expires.' };
       }
       if (state.queue.length >= MAX_QUEUE) return refusal('The bounded worker queue is full.');
-      const queued = { id: crypto.randomUUID(), host: 'claude-code', created_at_ms: now, expires_at_ms: now + QUEUE_TTL_MS, status: RESULTS.QUEUE };
+      const queued = { id: crypto.randomUUID(), host, role: spec.role, created_at_ms: now, expires_at_ms: now + QUEUE_TTL_MS, status: RESULTS.QUEUE };
       state.queue.push(queued);
       atomicWriteJson(statePath(options), state);
       return { result: RESULTS.QUEUE, queue_id: queued.id, expires_at_ms: queued.expires_at_ms, reason: 'Verified capacity is temporarily unavailable.', safe_action: 'Continue productive root work and retry before the queue entry expires.' };
@@ -500,13 +777,16 @@ function admissionDecision(specInput, options = {}) {
     if (queuedReservation) state.queue.shift();
     if (spec.effort !== 'medium' && state.reservations.some((entry) => entry.effort !== 'medium')) return refusal('A higher-effort child is already active; sibling effort escalation is not allowed.');
     const reservation = {
-      id: crypto.randomUUID(), host: 'claude-code', topology: TOPOLOGIES.CLAUDE_DIRECT, depth: 1,
+      id: crypto.randomUUID(), host, topology: 'toolkit-controlled-direct', depth: 1, role: spec.role,
       owner_pid: options.ownerPid || process.pid, created_at_ms: now, expires_at_ms: now + RESERVATION_TTL_MS,
       estimated_memory_bytes: requested, effort: spec.effort, status: 'reserved',
     };
     state.reservations.push(reservation);
+    if (spec.role === ROLES.CHECKER) {
+      state.checker_reviews.push({ review_id: spec.review_id, reservation_id: reservation.id, admitted_at_ms: now, expires_at_ms: now + CHECKER_REVIEW_TTL_MS, status: 'pending' });
+    }
     atomicWriteJson(statePath(options), state);
-    return { result: RESULTS.START, reservation_id: reservation.id, expires_at_ms: reservation.expires_at_ms, profile: TOPOLOGIES.CLAUDE_DIRECT, effort: spec.effort, non_fast: 'CLAUDE_CODE_DISABLE_FAST_MODE=1', productive_parent: true };
+    return { result: RESULTS.START, reservation_id: reservation.id, expires_at_ms: reservation.expires_at_ms, profile: 'toolkit-controlled-direct', host, role: spec.role, model: MODEL_CONTRACT[host][spec.role], effort: spec.effort, non_fast: host === HOSTS.CLAUDE ? 'CLAUDE_CODE_DISABLE_FAST_MODE=1' : true, productive_parent: true };
   });
 }
 
@@ -534,9 +814,59 @@ function releaseReservation(id, options = {}) {
     const before = state.reservations.length;
     state.reservations = state.reservations.filter((entry) => entry.id !== id);
     if (state.reservations.length === before) return false;
+    state.checker_reviews = state.checker_reviews.filter((entry) => entry.status !== 'pending' || entry.reservation_id !== id);
     atomicWriteJson(statePath(options), state);
     return true;
   });
+}
+
+function updateCheckerReview(reviewId, status, options = {}) {
+  if (!['pending', 'completed'].includes(status)) return false;
+  let outcome = null;
+  if (status === 'completed') {
+    try {
+      const candidate = options.checker_result || {};
+      if (![CHECKER_RESULTS.PASS, CHECKER_RESULTS.FINDINGS].includes(candidate.status)) return false;
+      outcome = checkerResult(candidate.status, { findings: candidate.findings, reason: candidate.reason });
+    } catch { return false; }
+  }
+  return withLock(options, () => {
+    const current = readMutableControlState(options);
+    if (!current.exists || !current.state) return false;
+    const state = recoverState(current.state);
+    const entry = state.checker_reviews.find((item) => item.review_id === reviewId);
+    if (!entry) return false;
+    entry.status = status;
+    if (outcome) {
+      entry.result = outcome.status;
+      entry.findings_count = outcome.findings.length;
+      entry.findings = outcome.findings;
+      entry.reason = outcome.reason;
+    }
+    if (!validControlState(state)) return false;
+    atomicWriteJson(statePath(options), state);
+    return true;
+  });
+}
+
+function clearPendingCheckerReview(reviewId, options = {}) {
+  return withLock(options, () => {
+    const current = readMutableControlState(options);
+    if (!current.exists || !current.state) return false;
+    const state = recoverState(current.state);
+    const before = state.checker_reviews.length;
+    state.checker_reviews = state.checker_reviews.filter((entry) => entry.review_id !== reviewId || entry.status === 'completed');
+    if (state.checker_reviews.length === before) return false;
+    atomicWriteJson(statePath(options), state);
+    return true;
+  });
+}
+function claudeInvocationArgs(checked) {
+  const common = ['--print', '--output-format', 'json', '--model', checked.model, '--effort', checked.effort];
+  if (checked.role === ROLES.CHECKER) {
+    return [...common, '--tools', 'Read', 'Glob', 'Grep', '--disallowedTools', 'Agent', 'Task', 'Bash', 'Edit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch', '--permission-mode', 'plan', '--no-session-persistence'];
+  }
+  return [...common, '--disallowedTools', 'Agent', 'Task', '--permission-mode', 'default', '--no-session-persistence'];
 }
 
 function claudeInvocation(spec, options = {}) {
@@ -545,10 +875,123 @@ function claudeInvocation(spec, options = {}) {
   const executable = processLaunch.resolveClaudeCommandInput({ explicit: options.claudeCli, persisted: options.persistedClaudeCli, env: envInput });
   const promptBytes = options.promptBytes || Buffer.from(String(checked.child_prompt || checked.child_responsibility), 'utf8');
   if (!Buffer.isBuffer(promptBytes) || promptBytes.length > MAX_PROMPT_BYTES) throw new Error('Child prompt exceeds the bounded private transport limit.');
-  const args = ['--print', '--output-format', 'json', '--effort', checked.effort, '--disallowedTools', 'Agent', 'Task', '--permission-mode', 'default', '--no-session-persistence'];
+  const args = claudeInvocationArgs(checked);
   const env = { ...envInput, CLAUDE_CODE_DISABLE_FAST_MODE: '1', CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1', AI_AGENT_TOOLKIT_CHILD: '1' };
-  const parts = processLaunch.claudeSpawnParts(executable, args, { env });
-  return { executable: parts.command, args: parts.args, windowsVerbatimArguments: parts.windowsVerbatimArguments, raw_executable: executable, raw_args: args, env, stdin: promptBytes, effort: checked.effort, non_fast: true, max_depth: 1 };
+  if (checked.role === ROLES.CHECKER) env.AI_AGENT_TOOLKIT_CHECKER = '1';
+  else delete env.AI_AGENT_TOOLKIT_CHECKER;
+  const validatedExecutable = processLaunch.assertExecutableAvailable(executable, { env });
+  return { executable: validatedExecutable, args, raw_executable: validatedExecutable, raw_args: args, env, stdin: promptBytes, effort: checked.effort, non_fast: true, max_depth: 1 };
+}
+
+function runValidatedClaude(invocation, captureChecker, options = {}) {
+  const requestedTimeout = Number(options.checkerTimeoutMs);
+  const checkerTimeoutMs = Number.isSafeInteger(requestedTimeout) && requestedTimeout > 0
+    ? Math.min(requestedTimeout, CHECKER_TIMEOUT_MS)
+    : CHECKER_TIMEOUT_MS;
+  // Reuse the validated shell-free Claude launcher that setup probes and native enforcement share.
+  const result = require('./setup-claude-toolkit-plugin.cjs').spawnClaude(invocation.raw_executable, invocation.raw_args, {
+    env: invocation.env,
+    windowsHide: true,
+    input: invocation.stdin,
+    timeout: captureChecker ? checkerTimeoutMs : undefined,
+    killSignal: 'SIGTERM',
+    maxBuffer: captureChecker ? MAX_CHECKER_OUTPUT_BYTES : undefined,
+    stdio: ['pipe', captureChecker ? 'pipe' : 'inherit', 'inherit'],
+  });
+  return {
+    code: Number.isInteger(result.status) ? result.status : 1,
+    output: captureChecker && Buffer.isBuffer(result.stdout) ? result.stdout : Buffer.alloc(0),
+    outputExceeded: result.error?.code === 'ENOBUFS',
+    error: result.error || null,
+  };
+}
+
+const CHECKER_INPUT_KEYS = new Set([
+  'implementation_complete', 'focused_validation_passed', 'diff_ready', 'changed_files', 'change_kind',
+  'authoritative_source_independently_validated', 'task_contract', 'diff', 'focused_validation',
+  'surrounding_invariants', 'host', 'estimated_memory_bytes',
+]);
+
+function validateCheckerWorkflowInput(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Checker workflow input must be a JSON object.');
+  const unexpected = Object.keys(input).filter((key) => !CHECKER_INPUT_KEYS.has(key));
+  if (unexpected.length) throw new Error(`Checker workflow input contains unsupported fields: ${unexpected.join(', ')}.`);
+  const host = String(input.host || HOSTS.CLAUDE);
+  if (host !== HOSTS.CLAUDE) throw new Error('The supported checker launch workflow currently requires the verified Claude direct host.');
+  return { ...input, host };
+}
+
+function checkerWorkflow(input, options = {}) {
+  const checkedInput = validateCheckerWorkflowInput(input);
+  const requirement = checkerRequirement(checkedInput);
+  if (!requirement.ready) throw new Error(requirement.reason);
+  if (!requirement.required) return checkerResult(CHECKER_RESULTS.SKIPPED_TRIVIAL, { reason: requirement.reason });
+  const context = checkerContext(checkedInput);
+  const overrides = {};
+  if (checkedInput.estimated_memory_bytes !== undefined) overrides.estimated_memory_bytes = checkedInput.estimated_memory_bytes;
+  const spec = checkerLaunchSpec(checkedInput.host, context, overrides);
+  const launched = launch(spec, options);
+  if (launched.result !== RESULTS.START) return checkerAdmissionOutcome(launched);
+  const resultArgs = [path.resolve(__filename), 'checker-result', '--review-id', spec.review_id];
+  if (options.root) resultArgs.push('--root', path.resolve(options.root));
+  const quoteArgument = process.platform === 'win32'
+    ? require('./codex-delegation-config.cjs').quotePowerShellArgument
+    : require('./codex-delegation-config.cjs').quotePosixArgument;
+  return {
+    status: 'PENDING',
+    review_id: spec.review_id,
+    reservation_id: launched.reservation_id,
+    result_invocation: { executable: process.execPath, args: resultArgs },
+    result_command: ['node', ...resultArgs.map(quoteArgument)].join(' '),
+    root_action: 'Continue productive root work; retrieve the validated result when it is needed for integration.',
+  };
+}
+
+function checkerResultStatus(reviewId, options = {}) {
+  const expected = String(reviewId || '');
+  if (!/^checker-[a-f0-9]{64}$/.test(expected)) throw new Error('A deterministic checker review ID is required.');
+  return withLock(options, () => {
+    const current = readMutableControlState(options);
+    if (current.exists && !current.state) throw new Error('Toolkit admission state could not be verified safely.');
+    const state = recoverState(current.state || emptyState());
+    const entry = state.checker_reviews.find((item) => item.review_id === expected);
+    if (!entry) return { status: 'RETRY_REQUIRED', review_id: expected, reason: 'No pending or completed checker result exists; a failed attempt may be retried with the same bounded input.' };
+    if (entry.status !== 'completed') return { status: 'PENDING', review_id: expected, root_action: 'Continue productive root work; do not idle-poll the checker.' };
+    return checkerResult(entry.result, { findings: entry.findings || [], reason: entry.reason || '' });
+  });
+}
+
+function readBoundedFd(fd, limit = MAX_CHECKER_INPUT_BYTES) {
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const chunk = Buffer.alloc(Math.min(64 * 1024, limit + 1 - total));
+    const count = fs.readSync(fd, chunk, 0, chunk.length, null);
+    if (count === 0) break;
+    total += count;
+    if (total > limit) throw new Error('Checker workflow input exceeds the bounded private input limit.');
+    chunks.push(chunk.subarray(0, count));
+  }
+  return Buffer.concat(chunks, total);
+}
+
+function readCheckerWorkflowInput(inputPath, options = {}) {
+  let bytes;
+  if (inputPath === '-') bytes = readBoundedFd(0);
+  else {
+    const target = path.resolve(String(inputPath || ''));
+    const ownedInputRoot = path.join(controlRoot(options), 'inputs');
+    if (path.dirname(target) !== ownedInputRoot) throw new Error('Checker input files must be direct private children of the Toolkit control inputs directory.');
+    const stat = verifyPrivateRegularFile(target);
+    try {
+      if (stat.size > MAX_CHECKER_INPUT_BYTES) throw new Error('Checker workflow input exceeds the bounded private input limit.');
+      bytes = fs.readFileSync(target);
+    }
+    finally { fs.unlinkSync(target); }
+  }
+  if (!bytes.length) throw new Error('Checker workflow input is empty.');
+  try { return JSON.parse(bytes.toString('utf8')); }
+  catch { throw new Error('Checker workflow input is not valid JSON.'); }
 }
 
 function launch(specInput, options = {}) {
@@ -589,6 +1032,7 @@ function launch(specInput, options = {}) {
     return { ...admitted, supervisor_pid: supervisor.pid, spec_path: specPath, output_path: outputPath, error_path: errorPath, status: 'launched' };
   } catch {
     releaseReservation(admitted.reservation_id, options);
+    if (spec.role === ROLES.CHECKER) clearPendingCheckerReview(spec.review_id, options);
     for (const privatePath of [specPath, outputPath, errorPath]) {
       try { if (fs.existsSync(privatePath) && verifyPrivateRegularFile(privatePath)) fs.unlinkSync(privatePath); } catch {}
     }
@@ -603,26 +1047,30 @@ async function supervise(args) {
   const spec = readJson(args.spec);
   const options = { root: args.root };
   let code = 1;
+  let checkerOutcome = null;
   try {
     const encoded = String(spec?.child_prompt_base64 || '');
     const promptBytes = Buffer.from(encoded, 'base64');
     if (!encoded || promptBytes.toString('base64') !== encoded || promptBytes.length > MAX_PROMPT_BYTES) throw new Error('Stored child prompt transport is malformed.');
-    const invocation = claudeInvocation(spec, { claudeCli: args.claudeCli, promptBytes });
+    const invocation = claudeInvocation({ ...spec, child_prompt: promptBytes.toString('utf8') }, { claudeCli: args.claudeCli, promptBytes });
     if (!updateReservation(args.reservation, { owner_pid: process.pid, status: 'running' }, options)) {
       throw new Error('Toolkit reservation state could not be verified before worker execution.');
     }
-    code = await new Promise((resolve) => {
-      let settled = false;
-      const finish = (value) => { if (!settled) { settled = true; resolve(value); } };
-      // The executable passed validation and argv is separate; spawn is required for streaming private stdin.
-      // lgtm[js/shell-command-injection-from-environment]
-      const child = spawn(invocation.executable, invocation.args, { windowsVerbatimArguments: invocation.windowsVerbatimArguments, env: invocation.env, windowsHide: true, stdio: ['pipe', 'inherit', 'inherit'] });
-      child.on('error', () => finish(1));
-      child.on('exit', (value) => finish(Number.isInteger(value) ? value : 1));
-      child.stdin.on('error', () => { child.kill(); finish(1); });
-      child.stdin.end(invocation.stdin);
-    });
+    const childResult = runValidatedClaude(invocation, spec.role === ROLES.CHECKER);
+    if (!childResult.outputExceeded && childResult.output.length) process.stdout.write(childResult.output);
+    if (childResult.error && !childResult.outputExceeded) console.error(childResult.error.message);
+    code = childResult.code;
+    if (spec.role === ROLES.CHECKER && code === 0) {
+      try { checkerOutcome = checkerResultFromClaudeOutput(childResult.output); }
+      catch (error) { console.error(error.message); code = 1; }
+    } else if (spec.role === ROLES.CHECKER && childResult.outputExceeded) {
+      console.error('Checker output exceeds the bounded result limit.');
+    }
   } finally {
+    if (spec?.role === ROLES.CHECKER) {
+      if (code === 0 && !updateCheckerReview(spec.review_id, 'completed', { ...options, checker_result: checkerOutcome })) code = 1;
+      if (code !== 0) clearPendingCheckerReview(spec.review_id, options);
+    }
     releaseReservation(args.reservation, options);
     try { if (verifyPrivateRegularFile(args.spec)) fs.unlinkSync(args.spec); } catch {}
   }
@@ -630,11 +1078,13 @@ async function supervise(args) {
 }
 
 function parseCli(argv) {
-  const parsed = { command: argv[0] || '', root: '', spec: '', reservation: '', claudeCli: '' };
+  const parsed = { command: argv[0] || '', root: '', spec: '', input: '', reviewId: '', reservation: '', claudeCli: '' };
   for (let i = 1; i < argv.length; i += 1) {
     const value = argv[i + 1];
     if (argv[i] === '--root') { parsed.root = value; i += 1; }
     else if (argv[i] === '--spec') { parsed.spec = value; i += 1; }
+    else if (argv[i] === '--input') { parsed.input = value; i += 1; }
+    else if (argv[i] === '--review-id') { parsed.reviewId = value; i += 1; }
     else if (argv[i] === '--reservation') { parsed.reservation = value; i += 1; }
     else if (argv[i] === '--claude-cli') { parsed.claudeCli = value; i += 1; }
   }
@@ -649,17 +1099,27 @@ async function main(argv = process.argv.slice(2)) {
     return result.result === RESULTS.REFUSE ? 2 : 0;
   }
   if (args.command === 'supervise') return supervise(args);
+  if (args.command === 'checker') {
+    const result = checkerWorkflow(readCheckerWorkflowInput(args.input, { root: args.root }), { root: args.root, claudeCli: args.claudeCli });
+    console.log(JSON.stringify(result, null, 2));
+    return result.status === CHECKER_RESULTS.ADMISSION_DENIED ? 2 : 0;
+  }
+  if (args.command === 'checker-result') {
+    const result = checkerResultStatus(args.reviewId, { root: args.root });
+    console.log(JSON.stringify(result, null, 2));
+    return result.status === 'RETRY_REQUIRED' ? 2 : 0;
+  }
   if (args.command === 'status') {
     const result = withLock({ root: args.root }, () => recoverState(sanitizeState(readJson(statePath({ root: args.root }), emptyState()))));
     console.log(JSON.stringify(result, null, 2)); return 0;
   }
-  throw new Error('Usage: toolkit-agent-control.cjs launch --spec <json> [--root <path>]');
+  throw new Error('Usage: toolkit-agent-control.cjs checker --input - [--root <path>] | checker-result --review-id <id> [--root <path>] | launch --spec <json> [--root <path>]');
 }
 
 if (require.main === module) main().then((code) => { process.exitCode = code; }).catch((error) => { console.error(`FAIL: ${error.message}`); process.exitCode = 1; });
 
 module.exports = {
-  SCHEMA, CONTROL_VERSION, RESULTS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES, LOCK_TTL_MS,
+  SCHEMA, CONTROL_VERSION, RESULTS, CHECKER_RESULTS, HOSTS, ROLES, MODEL_CONTRACT, CHECKER_CONTEXT_LIMITS, TOPOLOGIES, CAPACITY_MODES, GIB, DEFAULT_WORKER_COST, EMERGENCY_WORKER_CEILING, MAX_QUEUE, MAX_MANUAL_WORKERS, MAX_PROMPT_BYTES, MAX_CHECKER_INPUT_BYTES, MAX_CHECKER_OUTPUT_BYTES, CHECKER_TIMEOUT_MS, LOCK_TTL_MS,
   controlRoot, profilePath, statePath, lockPath, lockRecoveryPath, readProfile, configureProfile, invalidateProfile, validateLaunchSpec, inspectResources, inspectResourceCapability, validResourceState, validActivationProof, verifyCurrentClaudeEnforcement, effectiveEnvironment, effectiveClaudeCommand, acquireLock, recoverStaleRecoveryMarker,
-  admissionDecision, updateReservation, releaseReservation, claudeInvocation, launch, recoverState, pidAlive,
+  checkerRequirement, checkerContext, buildCheckerPrompt, validateCheckerPrompt, checkerLaunchSpec, checkerResult, checkerResultFromClaudeOutput, checkerAdmissionOutcome, validateCheckerWorkflowInput, checkerWorkflow, checkerResultStatus, readCheckerWorkflowInput, admissionDecision, resourceAdmissionDecision, updateReservation, releaseReservation, updateCheckerReview, clearPendingCheckerReview, claudeInvocationArgs, claudeInvocation, runValidatedClaude, launch, recoverState, pidAlive,
 };

@@ -13,7 +13,7 @@ const pluginSetup = require('../scripts/setup-claude-toolkit-plugin.cjs');
 
 function root() { return fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-agent-control-')); }
 function resources(overrides = {}) {
-  return { physical_total: 32 * control.GIB, physical_available: 20 * control.GIB, commit_total: 48 * control.GIB, commit_available: 32 * control.GIB, source: 'fixture', ...overrides };
+  return { physical_total: 32 * control.GIB, physical_available: 20 * control.GIB, commit_total: 48 * control.GIB, commit_available: 32 * control.GIB, host_responsive: true, source: 'fixture', ...overrides };
 }
 function spec(overrides = {}) {
   return {
@@ -21,7 +21,13 @@ function spec(overrides = {}) {
     parent_responsibility: 'Reconcile interfaces and review the independent integration boundary.',
     integration_plan: 'The root owns interface reconciliation and final integration judgement.',
     validation_plan: 'The root runs cross-shard validation and reviews the final combined diff.',
-    material_benefit: 'The parser shard is independent and materially improves review quality.',
+    material_benefit: 'The shorter parser shard runs concurrently and reduces the implementation critical path.',
+    tasks_separable: true,
+    concurrent_execution_possible: true,
+    expected_wall_clock_speedup: 'The shorter parser fixture completes while the root handles the longer integration task.',
+    root_retains_longest_or_critical_path: true,
+    child_task_is_shorter_or_easier: true,
+    root_productive_work_declared: true,
     child_prompt: 'Implement only the isolated parser shard and report changed files and tests.',
     ...overrides,
   };
@@ -79,7 +85,7 @@ function assertNoAdmissionResidue(fixture, result, name) {
 }
 defaultVerifier = verifierFixture();
 
-test('C2 speed-only and non-productive parent requests remain root-only', () => {
+test('non-productive parent requests remain root-only', () => {
   const result = control.admissionDecision(spec({ parent_responsibility: 'Wait for the child result.' }), verifiedOptions({ root: root(), resourceState: resources() }));
   assert.equal(result.result, control.RESULTS.REFUSE);
   assert.match(result.reason, /productive work|waiting/i);
@@ -93,6 +99,16 @@ test('genuine independent work starts with a reservation and productive-root evi
   assert.equal(result.non_fast, 'CLAUDE_CODE_DISABLE_FAST_MODE=1');
   assert.equal(result.productive_parent, true);
   assert.equal(JSON.parse(fs.readFileSync(control.statePath({ root: work }), 'utf8')).reservations.length, 1);
+});
+
+test('worker scheduling contract refuses missing or contradictory speedup declarations', () => {
+  const launchOptions = verifiedOptions({ root: root(), resourceState: resources() });
+  assert.match(control.admissionDecision(spec({ expected_wall_clock_speedup: '' }), launchOptions).reason, /wall-clock speedup/i);
+  assert.match(control.admissionDecision(spec({ tasks_separable: false }), launchOptions).reason, /separable/i);
+  assert.match(control.admissionDecision(spec({ concurrent_execution_possible: false }), launchOptions).reason, /concurrently executable/i);
+  assert.match(control.admissionDecision(spec({ root_retains_longest_or_critical_path: false }), launchOptions).reason, /longest|critical-path/i);
+  assert.match(control.admissionDecision(spec({ child_task_is_shorter_or_easier: false }), launchOptions).reason, /shorter or easier/i);
+  assert.match(control.admissionDecision(spec({ root_productive_work_declared: false }), launchOptions).reason, /productive work/i);
 });
 
 test('delegating every substantive shard and duplicate parent work are rejected', () => {
@@ -133,6 +149,31 @@ test('manual maximum is a backstop and never bypasses resource admission', () =>
   assert.equal(control.admissionDecision(spec(), verifiedOptions({ root: work, profile: manual, resourceState: resources() })).result, control.RESULTS.QUEUE);
 });
 
+test('shared resource admission rejects malformed capacity profiles before reserving', () => {
+  for (const malformed of [
+    { capacity_mode: control.CAPACITY_MODES.MANUAL, worker_estimate_bytes: control.DEFAULT_WORKER_COST },
+    { capacity_mode: control.CAPACITY_MODES.MANUAL, manual_maximum: 0, worker_estimate_bytes: control.DEFAULT_WORKER_COST },
+    { capacity_mode: 'unverified', manual_maximum: 64, worker_estimate_bytes: control.DEFAULT_WORKER_COST },
+  ]) {
+    const work = root();
+    const result = control.resourceAdmissionDecision(spec(), malformed, resources(), { root: work });
+    assert.equal(result.result, control.RESULTS.REFUSE);
+    assert.match(result.reason, /profile.*verified safely/i);
+    assert.equal(fs.existsSync(control.statePath({ root: work })), false);
+  }
+});
+
+test('shared resource admission refuses Toolkit child recursion before creating state', () => {
+  const work = root();
+  const result = control.resourceAdmissionDecision(spec(), profile(), resources(), {
+    root: work,
+    env: { ...process.env, AI_AGENT_TOOLKIT_CHILD: '1' },
+  });
+  assert.equal(result.result, control.RESULTS.REFUSE);
+  assert.match(result.reason, /children cannot launch/i);
+  assert.equal(fs.existsSync(control.statePath({ root: work })), false);
+});
+
 test('atomic admission prevents two concurrent parents from consuming one manual slot', async () => {
   const work = root();
   control.configureProfile('claude-code', configured(control.TOPOLOGIES.CLAUDE_DIRECT, control.CAPACITY_MODES.MANUAL, { manual_maximum: 1 }), { root: work });
@@ -162,7 +203,7 @@ test('stale dead reservations recover but live ownership is preserved', () => {
 
 test('direct child defaults medium, disables fast, and blocks nested Agent and Task tools', () => {
   const invocation = control.claudeInvocation(spec(), { claudeCli: process.execPath });
-  assert.deepEqual(invocation.raw_args.slice(0, 8), ['--print', '--output-format', 'json', '--effort', 'medium', '--disallowedTools', 'Agent', 'Task']);
+  assert.deepEqual(invocation.raw_args.slice(0, 10), ['--print', '--output-format', 'json', '--model', 'fable-5', '--effort', 'medium', '--disallowedTools', 'Agent', 'Task']);
   assert.equal(invocation.raw_args.filter((arg) => arg === '--no-session-persistence').length, 1);
   assert.equal(invocation.raw_args.at(-1), '--no-session-persistence');
   assert.equal(invocation.env.CLAUDE_CODE_DISABLE_FAST_MODE, '1');
