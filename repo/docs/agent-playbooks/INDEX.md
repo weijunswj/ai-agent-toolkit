@@ -34,6 +34,12 @@ Triggers: docs map, repo map, documentation index, changelog, decision log, ADR,
 
 Read: `repo/docs/agent-playbooks/docs-governance.md`.
 
+## Match: Repo-Local Backup Or Ignore Hygiene
+
+Triggers: Toolkit-created repo-local backups, backup restore, `/_agent-toolkit-backups/`, legacy `/.agent-toolkit-backups/`, `.gitignore` backup coverage, `.git/info/exclude`, or managed-file repair rollback.
+
+Read: `repo/docs/agent-playbooks/repo-local-backup-and-ignore-hygiene.md`.
+
 ## Match: Repo-Local Agent Instruction Work
 
 Triggers: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.agents/rules`, managed markers, agent bootstrap, repo-local templates, instruction shims, or the `ai-coding-agent-rules` project.

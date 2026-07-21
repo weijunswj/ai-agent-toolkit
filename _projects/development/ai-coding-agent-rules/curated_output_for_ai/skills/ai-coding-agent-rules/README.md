@@ -28,7 +28,7 @@ The skill is intended to run a cheap local check before coding work in GitHub, G
 
 Model expectation: Fresh-folder bootstrap and structurally-current cheap checks are designed to work broadly, but complex broken-marker or edited-managed-block auto-repair is best-effort below Codex GPT-5.5 High. For perfect runtime behaviour, use Codex GPT-5.5 High or an equivalent high-reasoning model.
 
-Copy or merge a template into the matching active instruction filename only after reviewing the target repo. Preserve unmarked user-authored content. If a toolkit-managed block is broken or edited during an explicit install/check/repair/refresh/bootstrap request, back up the existing file under `.agent-toolkit-backups/` before replacing the toolkit-owned managed block from the current template.
+Copy or merge a template into the matching active instruction filename only after reviewing the target repo. Preserve unmarked user-authored content. If a toolkit-managed block is broken or edited during an explicit install/check/repair/refresh/bootstrap request, use the shared exact repo-local backup/restore contract under `_agent-toolkit-backups/` before replacing the toolkit-owned managed block. Continue recognizing legacy `.agent-toolkit-backups/` content without moving, merging, rewriting, or deleting it. Preview tracked `.gitignore` versus local-only `.git/info/exclude` choices and require exact approval before changing either ignore file.
 
 After installing or refreshing portable playbook docs, inspect target `docs/agent-playbooks/INDEX.md` and verify every linked `*.md` file exists beside it before reporting completion.
 

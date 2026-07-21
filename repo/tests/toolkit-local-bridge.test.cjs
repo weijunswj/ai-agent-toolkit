@@ -44,7 +44,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.7.32';
+const expectedBridgeVersion = '2.8.0';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 
 function tmpBaseDir() {
@@ -412,6 +412,8 @@ function writeRepoToolkitFixture(repoPath, label) {
     'codex-delegation-layout.cjs',
     'codex-delegation-state.cjs',
     'setup-toolkit-core.cjs',
+    'repo-ignore-hygiene.cjs',
+    'repo-local-backup.cjs',
     'toolkit-agent-control.cjs',
     'claude-process-launch.cjs',
     'toolkit-staging-generations.cjs'
@@ -3565,6 +3567,7 @@ test('agent-rules preflight stops loudly when a git repo is missing root AGENTS 
   assert.deepEqual(fs.readdirSync(root).sort(), before);
   assert.equal(fs.existsSync(path.join(root, 'AGENTS.md')), false);
   assert.equal(fs.existsSync(path.join(root, 'docs', 'agent-playbooks')), false);
+  assert.equal(fs.existsSync(path.join(root, '_agent-toolkit-backups')), false);
   assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
 });
 
@@ -3591,6 +3594,7 @@ test('Codex SessionStart hook puts the exact missing-AGENTS decision instruction
   assert.doesNotMatch(result.stderr, /STOP: Root AGENTS\.md is missing/);
   assert.deepEqual(snapshotTree(root), before);
   assert.equal(fs.existsSync(path.join(root, 'AGENTS.md')), false);
+  assert.equal(fs.existsSync(path.join(root, '_agent-toolkit-backups')), false);
   assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
 });
 
@@ -3642,6 +3646,7 @@ test('agent-rules preflight reports stale managed block content without writing 
   assert.match(message, /repair\/refresh Toolkit repo-local rules now/);
   assert.match(message, /proceed without current Toolkit repo-local rules/);
   assert.doesNotMatch(message, /before implementation/);
+  assert.equal(fs.existsSync(path.join(root, '_agent-toolkit-backups')), false);
   assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
 });
 
@@ -3688,6 +3693,7 @@ test('Codex SessionStart hook puts stale and malformed repair decisions on stdou
       assert.match(result.stdout, fixture.finding);
       assert.match(result.stdout, /No files were changed by this hook\./);
       assert.deepEqual(snapshotTree(root), before);
+      assert.equal(fs.existsSync(path.join(root, '_agent-toolkit-backups')), false);
       assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
     });
   }
@@ -3711,6 +3717,7 @@ test('agent-rules preflight keeps broken managed-block warnings as stop-and-ask 
   assert.match(message, /No files were changed by this hook/);
   assert.match(message, /Stop before repository work/);
   assert.match(message, /proceed without current Toolkit repo-local rules/);
+  assert.equal(fs.existsSync(path.join(root, '_agent-toolkit-backups')), false);
   assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
 });
 
@@ -3767,6 +3774,7 @@ test('hook mode runs passive agent-rules preflight before bridge no-op return', 
   assert.match(result.stdout, /proceed without current Toolkit repo-local rules/);
   assert.doesNotMatch(result.stderr, /Toolkit agent-rules preflight/);
   assert.doesNotMatch(result.stdout, /Toolkit local bridge sync complete\./);
+  assert.equal(fs.existsSync(path.join(root, '_agent-toolkit-backups')), false);
   assert.equal(fs.existsSync(path.join(root, '.agent-toolkit-backups')), false);
 });
 

@@ -624,7 +624,7 @@ test('skill README documents required file sets and shim dependency', () => {
     assert.match(text, /`AGENTS\.managed\.template\.md` is canonical for the managed toolkit block/i, relPath);
     assert.match(text, /Preserve unmarked user-authored content\./i, relPath);
     assert.match(text, /toolkit-managed block is broken or edited during an explicit install\/check\/repair\/refresh\/bootstrap request/i, relPath);
-    assert.match(text, /back up the existing file under `\.agent-toolkit-backups\/` before replacing the toolkit-owned managed block from the current template/i, relPath);
+    assert.match(text, /shared exact repo-local backup\/restore contract under `_agent-toolkit-backups\/` before replacing the toolkit-owned managed block/i, relPath);
     assert.match(text, /Model expectation: Fresh-folder bootstrap and structurally-current cheap checks are designed to work broadly, but complex broken-marker or edited-managed-block auto-repair is best-effort below Codex GPT-5\.5 High\./, relPath);
     assert.match(text, /For perfect runtime behaviour, use Codex GPT-5\.5 High or an equivalent high-reasoning model\./, relPath);
     assert.match(text, /\| Claude Code \| 1\. Create or merge `AGENTS\.md` from \[repo-local\/AGENTS\.managed\.template\.md\][^|]*<br>2\. Add `CLAUDE\.md` from \[repo-local\/CLAUDE\.shim\.template\.md\][^|]* \|/i, relPath);
@@ -677,10 +677,12 @@ test('skill instructions add only target platform shims by default', () => {
     assert.match(text, /replace edited or stale managed blocks from the current template/i, relPath);
     assert.match(text, /preserve unmarked user-authored content outside the markers/i, relPath);
     assert.match(text, /automatically repair the affected repo-local instruction file/i, relPath);
-    assert.match(text, /\.agent-toolkit-backups\//, relPath);
-    assert.match(text, /Backup files are local repair artifacts/i, relPath);
-    assert.match(text, /do not commit, stage, delete, or move backup files unless the user explicitly asks/i, relPath);
-    assert.match(text, /If I repaired or backed up an instruction file, the previous version was saved under `\.agent-toolkit-backups\/` in this project folder\./, relPath);
+    assert.match(text, /_agent-toolkit-backups\//, relPath);
+    assert.match(text, /\.agent-toolkit-backups\/.*legacy compatibility/i, relPath);
+    assert.match(text, /require approval bound to that exact preview/i, relPath);
+    assert.match(text, /Backup generations are local repair artifacts/i, relPath);
+    assert.match(text, /do not commit, stage, delete, migrate, or move backup files unless the user explicitly asks/i, relPath);
+    assert.match(text, /If I repaired or backed up an instruction file, the exact previous state and restore metadata were saved under `_agent-toolkit-backups\/` in this project folder\./, relPath);
     assert.match(text, /Start a new agent session in this folder/i, relPath);
     assert.match(text, /If a managed block appears manually edited, treat it as toolkit-owned content that needs repair during explicit install, check, repair, refresh, or bootstrap requests/i, relPath);
     assert.doesNotMatch(text, /repair\/overwrite questions/i, relPath);

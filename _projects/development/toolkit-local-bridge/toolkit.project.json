@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.7.32",
+  "version": "2.8.0",
   "version_policy": "semver",
-  "version_notes": "Uses one canonical non-interactive answer plan for conditional detail rendering, validation, and consumption order.",
+  "version_notes": "Adds the shared repo-local backup, restore, and approval-bound ignore-hygiene runtime contract without changing passive setup behavior.",
   "outputs": [
     {
       "kind": "curated",
