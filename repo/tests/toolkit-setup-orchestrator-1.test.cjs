@@ -8,6 +8,71 @@ const {
 } = require('./toolkit-setup-test-support.cjs');
 const core = require('../scripts/setup-toolkit-core.cjs');
 
+function displayedBankReference(output) {
+  const match = String(output || '').match(/Bank reference: ([0-9A-HJKMNP-TV-Z-]+)/);
+  assert.ok(match, output);
+  return match[1];
+}
+
+function auditFixture({ targets = false, retentionDays = 7 } = {}) {
+  const target = (name) => ({
+    detected: targets,
+    enabled: targets,
+    synced: targets,
+    status: targets ? 'current' : 'not detected',
+    synced_version: '',
+    path: '',
+    name,
+  });
+  return {
+    update_report_enabled: true,
+    update_report_open_enabled: false,
+    update_report_retention_days: retentionDays,
+    codex_plugin_auto_refresh_enabled: false,
+    repo_auto_update: { enabled: false, last_status: 'configured', repo_path: '' },
+    update_report_cleanup: { retention_days: retentionDays, deleted_count: 0, error_count: 0, report_log_directory: 'private-value-never-rendered' },
+    targets: { opencode: target('opencode'), ag2: target('ag2') },
+  };
+}
+
+function specsForAudit(audit) {
+  return core.setupQuestionSpecs(core.parseArgs(['--execute', '--host', 'codex']), {
+    managed: { currentPath: '', selectedPath: '', defaultPath: '', exists: false, git: false, dirty: false, branch: '', remote: '' },
+    audit,
+    runtime: { runtime: 'unknown' },
+    delegation: { status: 'unsupported', helper_count: null },
+    nativePlugin: { status: 'unknown' },
+  });
+}
+
+function parseConciseInFreshProcess(specs, input) {
+  const child = spawnSync(process.execPath, ['-e', [
+    `const core = require(${JSON.stringify(path.join(repoRoot, 'repo', 'scripts', 'setup-toolkit-core.cjs'))});`,
+    "const payload = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));",
+    'try { core.parseConciseQuestionBankAnswer(payload.input, payload.specs); process.stdout.write("accepted"); }',
+    'catch (error) { process.stderr.write(String(error.message)); process.exitCode = 1; }',
+  ].join('\n')], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    input: JSON.stringify({ specs, input }),
+  });
+  return child;
+}
+
+test('drive, spaced, UNC and file URL values remain non-concise in a fresh parser process', () => {
+  const specs = specsForAudit(auditFixture());
+  for (const value of [
+    'C:\\Toolkit Source',
+    'C:\\Toolkit Source With Spaces',
+    '\\\\server\\share\\Toolkit Source',
+    'file:///C:/Toolkit%20Source',
+  ]) {
+    const parsed = parseConciseInFreshProcess(specs, value);
+    assert.equal(parsed.status, 0, parsed.stderr);
+    assert.equal(parsed.stdout, 'accepted');
+  }
+});
+
 test('plan mode remains read-only and exposes the existing setup journey', () => {
   const root = tmpRoot();
   const result = run(['--plan', '--json'], { env: isolatedHomeEnv(root) });
@@ -110,15 +175,15 @@ test('canonical wizard renderer is compact, aligned, and free of implementation 
   const planned = core.plannedQuestionBank(args, current);
   const text = core.renderSetupQuestionBank(planned.specs);
   const terminal = core.renderSetupQuestionBankTerminal(planned.specs);
-  assert.match(text, /## Automatic updates[\s\S]*## Computer performance/);
-  assert.doesNotMatch(text, /## Other coding apps/);
+  assert.match(text, /## 1\. Updates and reports[\s\S]*## 2\. Computer performance/);
+  assert.doesNotMatch(text, /## \d+\. Other coding apps/);
   assert.doesNotMatch(text, /Update report auto-open|MultiAgentV[12]|max_threads|max_concurrent|AI-AGENT-TOOLKIT|PR #|issue #|C:\\|restore command|migration/i);
   assert.doesNotMatch(text, /Codex helper agents|One helper at most|Use a custom number/i);
   assert.doesNotMatch(text, /\bAdvanced(?: options)?\b|Show advanced choices|More options/);
   assert.doesNotMatch(text, /\*\*Choices:\*\*[^\n]*(?:\/|\|)/);
   assert.doesNotMatch(terminal, /Codex helper agents|One helper at most|Use a custom number/i);
   assert.doesNotMatch(terminal, /Choices:[^\n]*(?:\/|,)/);
-  assert.match(text, /Accept all displayed recommended settings:[\s\S]*setup-toolkit-question-bank:complete/);
+  assert.match(text, /Reply with the displayed bank reference[\s\S]*: all recommended`[\s\S]*setup-toolkit-question-bank:complete/);
   for (const spec of planned.specs) assert.ok(spec.description.split(/(?<=[.!?])\s+/).filter(Boolean).length <= 2, spec.key);
 
   current.delegation.helper_count = 4;
@@ -211,7 +276,11 @@ test('distinct piped answers follow the canonical question order without shifts'
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*Codex Toolkit maintenance: Keep current/);
+  const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
+  assert.match(bank, /Some visible questions are already resolved by explicit setup flags/);
+  assert.match(bank, /Reply with one line for each unresolved question in this exact order:[\s\S]*\*\*1\.2\*\* Automatic updates[\s\S]*\*\*1\.3\*\* Update reports[\s\S]*\*\*1\.4\*\* Report retention[\s\S]*\*\*2\.1\*\* Codex Toolkit maintenance/);
+  assert.doesNotMatch(bank, /Reply with the displayed bank reference and either|: all recommended/);
+  assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*2\.1 Codex Toolkit maintenance: C - Keep current \(canonical: keep; effective: disable\)/);
   assert.doesNotMatch(result.stdout, /Codex helper agents:/);
   assert.match(result.stdout, /Question answers initially required: yes/);
   assert.match(result.stdout, /Question answers supplied by complete stdin: yes/);
@@ -223,6 +292,282 @@ test('distinct piped answers follow the canonical question order without shifts'
   assert.match(bridgeArgs, /--disable-update-report-open --enable-update-reports --update-report-retention-days 7 --write/);
   assert.doesNotMatch(bridgeArgs, /codex-plugin-auto-refresh/);
   assert.doesNotMatch(bridgeArgs, /--enable-target opencode/);
+});
+
+test('partial explicit flags reject concise input before writes and accept only the displayed ordered contract', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const args = ['--execute', '--repo-root', setupRepo, '--repo-remote', origin];
+  const env = isolatedHomeEnv(root);
+  const preview = run(args, { env, input: '' });
+  const reference = displayedBankReference(preview.stdout);
+  assert.match(preview.stdout, /Some visible questions are already resolved by explicit setup flags/);
+  assert.doesNotMatch(preview.stdout, /Reply with the displayed bank reference and either/);
+
+  const rejected = run(args, { env, input: `${reference}: all recommended\n` });
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /Concise bank-reference answers are not accepted when explicit setup flags already resolved part of the bank/);
+  assert.equal(fs.existsSync(path.join(setupRepo, 'BRIDGE_ARGS.log')), false);
+  assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false);
+
+  const accepted = run(args, {
+    env,
+    input: ['disable', 'enable', 'default', 'keep'].join('\n'),
+    timeout: 300000,
+  });
+  assert.equal(accepted.status, 0, accepted.stderr || accepted.stdout);
+  assert.match(accepted.stdout, /1\.2 Automatic updates: B - Turn off/);
+});
+
+test('multiple explicit flags render and accept one remaining ordered non-TTY answer', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const result = run([
+    '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
+    '--enable-repo-auto-update', '--enable-update-reports', '--default-update-report-retention-days',
+  ], { env: isolatedHomeEnv(root), input: 'B\n', timeout: 300000 });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
+  const guide = bank.slice(bank.indexOf('Some visible questions'));
+  assert.match(guide, /\*\*2\.1\*\* Codex Toolkit maintenance \[A-C\]/);
+  assert.doesNotMatch(guide, /\*\*1\.2\*\* Automatic updates \[A-C\]|: all recommended/);
+  assert.match(result.stdout, /2\.1 Codex Toolkit maintenance: B - Turn off/);
+});
+
+test('choice-activated custom checkout detail is rendered and consumed in the canonical post-answer block', () => {
+  const root = tmpRoot();
+  const { origin } = createGitBackedSetupRepo(root);
+  const customPath = path.join(root, 'Chosen Managed Source');
+  const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
+    env: isolatedHomeEnv(root),
+    input: ['custom', 'A', 'C', 'B', customPath].join('\n'),
+    timeout: 300000,
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
+  assert.match(bank, /After those question-answer lines, append detail lines in this exact canonical order[\s\S]*1\. 1\.1 Update source: custom managed-checkout path \(when 1\.1 is [A-Z]+\/custom/);
+  assert.match(result.stdout, /Detail 1 1\.1 Update source: custom managed-checkout path - custom path supplied \(value remains private\)/);
+  assert.equal(fs.existsSync(path.join(customPath, 'BRIDGE_ARGS.log')), true);
+});
+
+test('choice-activated custom retention detail follows the displayed canonical order', () => {
+  const root = tmpRoot();
+  const { origin } = createGitBackedSetupRepo(root);
+  const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
+    env: isolatedHomeEnv(root),
+    input: ['A', 'A', 'B', 'B', '14'].join('\n'),
+    timeout: 300000,
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /2\. 1\.4 Report retention: positive report-retention duration in days \(when 1\.4 is B\/custom/);
+  assert.match(result.stdout, /Detail 2 1\.4 Report retention: positive report-retention duration in days - 14 days/);
+});
+
+test('simultaneous custom checkout and retention consume details in displayed order', () => {
+  const root = tmpRoot();
+  const { origin } = createGitBackedSetupRepo(root);
+  const customPath = path.join(root, 'Two Detail Managed Source');
+  const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
+    env: isolatedHomeEnv(root),
+    input: ['custom', 'A', 'B', 'B', customPath, '21'].join('\n'),
+    timeout: 300000,
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
+  assert.ok(bank.indexOf('1. 1.1 Update source: custom managed-checkout path') < bank.indexOf('2. 1.4 Report retention: positive report-retention duration'));
+  assert.ok(result.stdout.indexOf('Detail 1 1.1 Update source') < result.stdout.indexOf('Detail 2 1.4 Report retention'));
+  assert.match(result.stdout, /Detail 2 1\.4 Report retention:[^\n]*21 days/);
+  assert.equal(fs.existsSync(path.join(customPath, 'BRIDGE_ARGS.log')), true);
+});
+
+test('preselected path and helper details share rendering consumption and summary order with custom retention', () => {
+  const root = tmpRoot();
+  const { origin } = createGitBackedSetupRepo(root);
+  const customPath = path.join(root, 'Preselected Detail Source');
+  const result = run([
+    '--execute', '--repo-remote', origin, '--managed-checkout', 'custom', '--enable-repo-auto-update',
+    '--codex-helper-capacity', 'custom', '--codex-cli', createFakeCodexAppServer(root),
+    '--approve-codex-config-proposal',
+  ], {
+    env: isolatedHomeEnv(root),
+    input: ['A', 'B', 'B', customPath, '30', '1'].join('\n'),
+    timeout: 300000,
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
+  const rendered = [
+    bank.indexOf('1. 1.1 Update source: custom managed-checkout path'),
+    bank.indexOf('2. 1.4 Report retention: positive report-retention duration'),
+    bank.indexOf('3. Advanced compatibility selection: bounded Codex helper count'),
+  ];
+  assert.ok(rendered.every((index) => index >= 0) && rendered[0] < rendered[1] && rendered[1] < rendered[2]);
+  const summary = [
+    result.stdout.indexOf('Detail 1 1.1 Update source'),
+    result.stdout.indexOf('Detail 2 1.4 Report retention'),
+    result.stdout.indexOf('Detail 3 Advanced compatibility selection'),
+  ];
+  assert.ok(summary.every((index) => index >= 0) && summary[0] < summary[1] && summary[1] < summary[2]);
+});
+
+test('missing and misordered conditional details fail before every setup write', () => {
+  for (const mode of ['missing', 'misordered']) {
+    const root = tmpRoot();
+    const { origin, setupRepo } = createGitBackedSetupRepo(root);
+    const customPath = path.join(root, 'Must Not Be Written');
+    const input = mode === 'missing'
+      ? ['custom', 'A', 'C', 'B'].join('\n')
+      : ['custom', 'A', 'B', 'B', '14', customPath].join('\n');
+    const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
+      env: isolatedHomeEnv(root), input, timeout: 300000,
+    });
+    assert.notEqual(result.status, 0);
+    if (mode === 'missing') assert.match(result.stderr, /requires the 1\.1 Update source custom path detail/);
+    else assert.match(result.stderr, /Report retention day count (?:must be|requires) a positive integer/);
+    assert.equal(fs.existsSync(customPath), false);
+    assert.equal(fs.existsSync(path.join(setupRepo, 'BRIDGE_ARGS.log')), false);
+    assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false);
+  }
+});
+
+test('fully explicit setup does not wait for or advertise setup-question stdin', async () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const result = await runWithUnclosedStdin(script, [
+    '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
+    '--enable-repo-auto-update', '--enable-update-reports', '--default-update-report-retention-days',
+    '--skip-codex-plugin-auto-refresh',
+  ], { env: isolatedHomeEnv(root), deadlineMs: 300000 });
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
+  assert.match(bank, /All visible setup questions are already resolved by explicit inputs/);
+  assert.match(bank, /No setup-question stdin is required or read/);
+  assert.doesNotMatch(bank, /Reply with the displayed bank reference|Reply with one line for each unresolved question/);
+});
+
+test('Windows drive-letter path with spaces remains line-by-line detail input', { skip: process.platform !== 'win32' }, () => {
+  const fixtureRoot = path.join(tmpRoot(), 'Managed Source With Spaces');
+  const { origin, setupRepo } = createGitBackedSetupRepo(fixtureRoot);
+  const result = run([
+    '--execute', '--managed-checkout', 'custom', '--repo-remote', origin,
+    '--enable-repo-auto-update', '--enable-update-reports', '--default-update-report-retention-days',
+    '--skip-codex-plugin-auto-refresh',
+  ], { env: isolatedHomeEnv(fixtureRoot), input: `${setupRepo}\n`, timeout: 300000 });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /append detail lines in this exact canonical order[\s\S]*custom managed-checkout path/);
+  assert.doesNotMatch(result.stderr, /bank reference|concise/i);
+  assert.match(fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8'), new RegExp(escapeRegExp(setupRepo)));
+});
+
+test('explicit textual all recommended approves the exact visible bank', () => {
+  const root = tmpRoot();
+  const { origin } = createGitBackedSetupRepo(root);
+  const env = isolatedHomeEnv(root);
+  const preview = run(['--execute', '--repo-remote', origin], { env, input: '' });
+  const reference = displayedBankReference(preview.stdout);
+  const result = run(['--execute', '--repo-remote', origin], {
+    env,
+    input: `${reference}: all recommended\n`,
+    timeout: 300000,
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Question answer source: user-approved all recommended/);
+  assert.equal((result.stdout.match(/setup-toolkit-question-bank:begin/g) || []).length, 1);
+  assert.equal((result.stdout.match(/setup-toolkit-question-bank:complete/g) || []).length, 1);
+  assert.ok(result.stdout.indexOf('setup-toolkit-question-bank:complete') < result.stdout.indexOf('Setup choices confirmed before writes:'));
+});
+
+test('changed-only piped answer applies recommendations except exact indexed changes', () => {
+  const root = tmpRoot();
+  const { origin } = createGitBackedSetupRepo(root);
+  const env = isolatedHomeEnv(root);
+  const preview = run(['--execute', '--repo-remote', origin], { env, input: '' });
+  const reference = displayedBankReference(preview.stdout);
+  const result = run(['--execute', '--repo-remote', origin], {
+    env,
+    input: `${reference}: 1.2=b, 2.1=B\n`,
+    timeout: 300000,
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Question answer source: user-approved recommended except listed changes/);
+  assert.match(result.stdout, /1\.2 Automatic updates: B - Turn off \(canonical: disable; effective: disable\)/);
+  assert.match(result.stdout, /2\.1 Codex Toolkit maintenance: B - Turn off \(canonical: disable; effective: disable\)/);
+  assert.match(result.stdout, /1\.3 Update reports: A - Keep reports \(canonical: enable; effective: enable\)/);
+});
+
+test('cross-process concise replay fails before mapping across host and conditional target changes', () => {
+  const root = tmpRoot();
+  const { origin } = createGitBackedSetupRepo(root);
+  const baseArgs = ['--execute', '--repo-remote', origin];
+  const baseEnv = isolatedHomeEnv(root);
+
+  const codexPreview = run(baseArgs, { env: baseEnv, input: '' });
+  const codexReference = displayedBankReference(codexPreview.stdout);
+  const claudeReplay = run([...baseArgs, '--host', 'claude-code'], {
+    env: baseEnv,
+    input: `${codexReference}: 2.1=B\n`,
+  });
+  assert.notEqual(claudeReplay.status, 0);
+  assert.match(claudeReplay.stderr, /reference is stale or belongs to a different rendered bank/);
+  assert.doesNotMatch(claudeReplay.stderr, /unavailable question|unavailable choice/);
+
+  const withTargets = specsForAudit(auditFixture({ targets: true }));
+  const withoutTargets = specsForAudit(auditFixture({ targets: false }));
+  const withTargetsReference = withTargets[0].presentation.bank_reference;
+  const removedReplay = parseConciseInFreshProcess(withoutTargets, `${withTargetsReference}: 3.1=D`);
+  assert.notEqual(removedReplay.status, 0);
+  assert.match(removedReplay.stderr, /reference is stale or belongs/);
+
+  const withoutTargetsReference = withoutTargets[0].presentation.bank_reference;
+  const addedReplay = parseConciseInFreshProcess(withTargets, `${withoutTargetsReference}: all recommended`);
+  assert.notEqual(addedReplay.status, 0);
+  assert.match(addedReplay.stderr, /reference is stale or belongs/);
+});
+
+test('cross-process concise replay fails when a displayed recommendation changes', () => {
+  const initial = specsForAudit(auditFixture({ retentionDays: 7 }));
+  const changed = specsForAudit(auditFixture({ retentionDays: 30 }));
+  const reference = initial[0].presentation.bank_reference;
+  const replay = parseConciseInFreshProcess(changed, `${reference}: all recommended`);
+  assert.notEqual(replay.status, 0);
+  assert.match(replay.stderr, /reference is stale or belongs/);
+});
+
+test('non-interactive concise input rejects missing malformed and secondary-detail values before writes', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const args = ['--execute', '--repo-remote', origin];
+  const env = isolatedHomeEnv(root);
+  const preview = run(args, { env, input: '' });
+  const reference = displayedBankReference(preview.stdout);
+  for (const [input, expected] of [
+    ['all recommended\n', /require the displayed bank reference/],
+    ['BAD: all recommended\n', /malformed or truncated/],
+    [`${reference.slice(0, -1)}: all recommended\n`, /malformed or truncated/],
+  ]) {
+    const rejected = run(args, { env, input });
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.stderr, expected);
+  }
+  const plan = run(['--plan', '--json', '--repo-remote', origin], { env });
+  const bank = JSON.parse(plan.stdout).question_bank;
+  const retention = bank.find((row) => row.id === 'report-retention');
+  const custom = retention.choices.find((choice) => choice.value === 'custom');
+  const secondary = run(args, {
+    env,
+    input: `${reference}: ${retention.presentation.question_ref}=${custom.presentation_ref}\n`,
+  });
+  assert.notEqual(secondary.status, 0);
+  assert.match(secondary.stderr, /requires additional values.*update-report-retention-days/i);
+  const updateSource = bank.find((row) => row.id === 'update-source');
+  const customSource = updateSource.choices.find((choice) => choice.value === 'custom');
+  const sourceSecondary = run(args, {
+    env,
+    input: `${reference}: ${updateSource.presentation.question_ref}=${customSource.presentation_ref}\n`,
+  });
+  assert.notEqual(sourceSecondary.status, 0);
+  assert.match(sourceSecondary.stderr, /requires additional values.*--repo-root/i);
+  assert.equal(fs.existsSync(path.join(setupRepo, 'BRIDGE_ARGS.log')), false);
+  assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false);
 });
 
 test('extra non-empty piped answers fail before any setup write', () => {

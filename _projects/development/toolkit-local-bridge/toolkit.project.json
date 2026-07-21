@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.7.28",
+  "version": "2.7.32",
   "version_policy": "semver",
-  "version_notes": "Treats Claude and Codex native-plugin verify/write JSON as captured structured IPC with bounded privacy-safe parent diagnostics.",
+  "version_notes": "Uses one canonical non-interactive answer plan for conditional detail rendering, validation, and consumption order.",
   "outputs": [
     {
       "kind": "curated",

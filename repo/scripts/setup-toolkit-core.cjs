@@ -34,6 +34,8 @@ const MANAGED_BANK_MAX_BYTES = 1024 * 1024;
 const MANAGED_STDOUT_MAX_BYTES = MANAGED_BANK_MAX_BYTES + (256 * 1024);
 const MANAGED_STDERR_MAX_BYTES = 256 * 1024;
 const MANAGED_CONTROL_MAX_BYTES = 4096;
+const BANK_REFERENCE_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+const BANK_REFERENCE_PATTERN = /^[0-9A-HJKMNP-TV-Z]{4}(?:-[0-9A-HJKMNP-TV-Z]{4}){3}$/;
 
 function repoRootFromScript() {
   return path.resolve(__dirname, '..', '..');
@@ -146,6 +148,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     repoAutoUpdate: true,
     updateReports: true,
     updateReportRetentionDays: DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
+    updateReportRetentionDaysExplicit: false,
     updateReportOpen: false,
     codexPluginAutoRefresh: true,
     enableTargets: [],
@@ -252,10 +255,12 @@ function parseArgs(argv = process.argv.slice(2)) {
     } else if (arg === '--keep-update-reports') args.setupChoices.updateReports = 'keep';
     else if (arg === '--update-report-retention-days') {
       args.updateReportRetentionDays = parsePositiveInteger(next(), arg);
+      args.updateReportRetentionDaysExplicit = true;
       args.setupChoices.updateReportRetention = 'custom';
     }
     else if (arg.startsWith('--update-report-retention-days=')) {
       args.updateReportRetentionDays = parsePositiveInteger(arg.slice('--update-report-retention-days='.length), '--update-report-retention-days');
+      args.updateReportRetentionDaysExplicit = true;
       args.setupChoices.updateReportRetention = 'custom';
     } else if (arg === '--default-update-report-retention-days') {
       args.updateReportRetentionDays = DEFAULT_UPDATE_REPORT_RETENTION_DAYS;
@@ -1646,6 +1651,179 @@ function selectedChoice(spec, value) {
   return spec.choices.find((choice) => choice.value === value) || null;
 }
 
+function spreadsheetChoiceReference(index) {
+  if (!Number.isSafeInteger(index) || index < 1 || index > 702) {
+    throw new Error('Setup question choices exceed the supported A-ZZ presentation range.');
+  }
+  let value = index;
+  let reference = '';
+  while (value > 0) {
+    value -= 1;
+    reference = String.fromCharCode(65 + (value % 26)) + reference;
+    value = Math.floor(value / 26);
+  }
+  return reference;
+}
+
+function questionBankApprovalPayload(specs) {
+  const sectionMap = new Map();
+  for (const spec of specs) {
+    const sectionKey = `${spec.presentation.section_index}:${spec.presentation.section_id}`;
+    if (!sectionMap.has(sectionKey)) {
+      sectionMap.set(sectionKey, {
+        section_id: spec.presentation.section_id,
+        section_index: spec.presentation.section_index,
+        title: spec.section,
+        question_count: spec.presentation.question_count
+          || specs.filter((candidate) => candidate.section === spec.section).length,
+      });
+    }
+  }
+  return {
+    schema: 'ai-agent-toolkit.setup-question-bank-approval.v2',
+    host: specs[0]?.presentation?.host || 'unknown',
+    total_visible_section_count: specs[0]?.presentation?.total_visible_section_count || sectionMap.size,
+    total_visible_question_count: specs[0]?.presentation?.total_visible_question_count || specs.length,
+    sections: [...sectionMap.values()],
+    questions: specs.map((spec) => {
+      const recommendedChoice = selectedChoice(spec, spec.recommended);
+      const displayedSelection = spec.selected || spec.empty_input || '';
+      const displayedChoice = selectedChoice(spec, displayedSelection);
+      return {
+        id: spec.id,
+        key: spec.key,
+        section_id: spec.presentation.section_id,
+        section_index: spec.presentation.section_index,
+        question_index: spec.presentation.question_index,
+        question_ref: spec.presentation.question_ref,
+        section_title: spec.section,
+        title: spec.title,
+        what_this_controls: spec.whatThisControls,
+        current: {
+          effective_behavior: spec.currentState?.effectiveBehavior || spec.current,
+          displayed_text: spec.current,
+          verification: spec.currentState?.verification || 'unverified',
+        },
+        availability: {
+          status: spec.availability?.status || 'available',
+          condition: spec.availability?.condition || '',
+        },
+        recommendation: {
+          canonical_value: spec.recommended,
+          choice_ref: spec.presentation.recommended_choice_ref,
+          label: recommendedChoice?.label || '',
+          outcome: spec.recommended_outcome,
+          reason: spec.recommendation_reason,
+        },
+        choices: spec.choices.map((choice) => ({
+          presentation_ref: choice.presentation_ref,
+          canonical_value: choice.value,
+          label: choice.label,
+          consequence: choice.consequence,
+        })),
+        after_applying: spec.afterApplying,
+        displayed_selection: {
+          canonical_value: displayedSelection,
+          choice_ref: displayedChoice?.presentation_ref || '',
+          label: displayedChoice?.label || '',
+        },
+      };
+    }),
+  };
+}
+
+function questionBankSemanticIdentity(specs) {
+  return crypto.createHash('sha256').update(JSON.stringify(questionBankApprovalPayload(specs))).digest('hex');
+}
+
+function bankReferenceFromIdentity(identity) {
+  const bytes = Buffer.from(String(identity || ''), 'hex');
+  if (bytes.length !== 32) throw new Error('Setup question bank identity must be a SHA-256 digest.');
+  let bits = 0;
+  let bitCount = 0;
+  let compact = '';
+  for (const byte of bytes.subarray(0, 10)) {
+    bits = (bits << 8) | byte;
+    bitCount += 8;
+    while (bitCount >= 5) {
+      bitCount -= 5;
+      compact += BANK_REFERENCE_ALPHABET[(bits >>> bitCount) & 31];
+      bits &= (1 << bitCount) - 1;
+    }
+  }
+  return compact.match(/.{4}/g).join('-');
+}
+
+function normalizeBankReference(value) {
+  const normalized = String(value || '').trim().toUpperCase();
+  return BANK_REFERENCE_PATTERN.test(normalized) ? normalized : '';
+}
+
+function withPresentationMetadata(specs, host = specs[0]?.presentation?.host || 'unknown') {
+  const sections = [];
+  const sectionByName = new Map();
+  for (const spec of specs) {
+    if (!sectionByName.has(spec.section)) {
+      const section = {
+        id: spec.section.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+        index: sections.length + 1,
+        title: spec.section,
+        question_count: 0,
+      };
+      sections.push(section);
+      sectionByName.set(spec.section, section);
+    }
+    sectionByName.get(spec.section).question_count += 1;
+  }
+  const seenBySection = new Map();
+  const presented = specs.map((spec) => {
+    const section = sectionByName.get(spec.section);
+    const questionIndex = (seenBySection.get(spec.section) || 0) + 1;
+    seenBySection.set(spec.section, questionIndex);
+    const choices = spec.choices.map((choice, index) => ({
+      ...choice,
+      presentation_ref: spreadsheetChoiceReference(index + 1),
+    }));
+    const recommendedChoice = choices.find((choice) => choice.value === spec.recommended);
+    return {
+      ...spec,
+      choices,
+      presentation: {
+        host,
+        section_id: section.id,
+        section_index: section.index,
+        question_index: questionIndex,
+        question_ref: `${section.index}.${questionIndex}`,
+        recommended_choice_ref: recommendedChoice.presentation_ref,
+        total_visible_section_count: sections.length,
+        total_visible_question_count: specs.length,
+      },
+    };
+  });
+  const bankIdentity = questionBankSemanticIdentity(presented);
+  const bankReference = bankReferenceFromIdentity(bankIdentity);
+  return presented.map((spec) => ({
+    ...spec,
+    presentation: { ...spec.presentation, bank_identity: bankIdentity, bank_reference: bankReference },
+  }));
+}
+
+function ensurePresentationMetadata(specs) {
+  // Presentation references are derived from the exact visible array. Always
+  // rebuild them so a caller that filters an already-presented bank cannot
+  // retain gaps or a stale bank identity.
+  return withPresentationMetadata(specs);
+}
+
+function choiceByPresentationReference(spec, reference) {
+  const normalized = String(reference || '').trim().toUpperCase();
+  return spec.choices.find((choice) => choice.presentation_ref === normalized) || null;
+}
+
+function choiceReference(spec, value) {
+  return selectedChoice(spec, value)?.presentation_ref || '';
+}
+
 function assertManagedCheckoutChoiceAvailable(args, specs) {
   const spec = specs.find((candidate) => candidate.key === 'managedCheckout');
   const selected = spec ? choiceForKey(args, spec.key) : '';
@@ -1775,7 +1953,7 @@ function setupQuestionSpecs(args, current) {
     resolvedQuestion({
       id: 'update-source',
       key: 'managedCheckout',
-      section: 'Automatic updates',
+      section: 'Updates and reports',
       title: 'Update source',
       prompt: 'Toolkit update source choice',
       whatThisControls: 'Where Toolkit fetches and prepares future updates. A dedicated clean managed copy stays separate from active project repositories, so setup never pulls into or modifies the dirty project checkout you are working in.',
@@ -1807,7 +1985,7 @@ function setupQuestionSpecs(args, current) {
     resolvedQuestion({
       id: 'automatic-updates',
       key: 'repoAutoUpdate',
-      section: 'Automatic updates',
+      section: 'Updates and reports',
       title: 'Automatic updates',
       prompt: 'Automatic Toolkit updates choice',
       whatThisControls: 'Whether Toolkit checks the managed update source when a supported coding app starts. Any update still has to be fetched, fast-forwarded, validated, and safely activated before enabled integrations use it.',
@@ -1829,7 +2007,7 @@ function setupQuestionSpecs(args, current) {
     resolvedQuestion({
       id: 'update-reports',
       key: 'updateReports',
-      section: 'Automatic updates',
+      section: 'Updates and reports',
       title: 'Update reports',
       prompt: 'Update report choice',
       whatThisControls: 'Whether Toolkit keeps a privacy-safe maintenance report when an update, cache refresh, hook repair, target sync, or safety stop produced meaningful information. Routine successful maintenance stays quiet; failures needing action may open automatically, and routine output does not print private absolute paths.',
@@ -1851,7 +2029,7 @@ function setupQuestionSpecs(args, current) {
     resolvedQuestion({
       id: 'report-retention',
       key: 'updateReportRetention',
-      section: 'Automatic updates',
+      section: 'Updates and reports',
       title: 'Report retention',
       prompt: 'Update report retention choice',
       whatThisControls: 'How long Toolkit keeps only its own maintenance reports before best-effort cleanup. It does not modify project files, application logs, or unrelated operational logs.',
@@ -2009,12 +2187,12 @@ function setupQuestionSpecs(args, current) {
       availability: { status: target.detected === true ? 'available' : 'persisted-state-only', condition: 'This row appears only when Antigravity is detected or Toolkit already has enabled state for it.' },
     }));
   }
-  return specs.map((spec) => ({
+  return withPresentationMetadata(specs.map((spec) => ({
     ...spec,
     recommended_value: spec.recommended,
     selected_value: spec.selected,
     empty_input_behavior: spec.recommended,
-  }));
+  })), args.host);
 }
 
 function clonedSetupArgs(args) {
@@ -2044,74 +2222,307 @@ function plannedQuestionBank(args, current) {
 }
 
 function renderQuestionRows(specs) {
+  specs = ensurePresentationMetadata(specs);
   const lines = [];
   let section = '';
   for (const spec of specs) {
     if (spec.section !== section) {
       if (lines.length) lines.push('');
       section = spec.section;
-      lines.push(`## ${section}`, '');
+      lines.push(`## ${spec.presentation.section_index}. ${section}`, '');
     }
-    lines.push(`### ${spec.title}`);
+    lines.push(`### ${spec.presentation.question_ref} ${spec.title}`);
     lines.push('');
     lines.push(`**What this controls:** ${spec.whatThisControls}`);
     lines.push('');
     lines.push(`**Current:** ${spec.current}`);
     lines.push('');
-    lines.push(`**Recommended:** ${spec.recommended_outcome}`);
+    lines.push(`**Verification:** ${spec.currentState?.verification || 'unverified'}`);
+    lines.push('');
+    lines.push(`**Recommended:** ${spec.presentation.recommended_choice_ref} - ${choiceLabel(spec, spec.recommended)}`);
+    lines.push('');
+    lines.push(`**Recommended outcome:** ${spec.recommended_outcome}`);
     lines.push('');
     lines.push(`**Why:** ${spec.recommendation_reason}`);
     lines.push('');
     lines.push('**Choices:**', '');
-    for (const choice of spec.choices) lines.push(`- **${choice.label}** - ${choice.consequence}`);
+    for (const choice of spec.choices) lines.push(`- **${choice.presentation_ref}. ${choice.label}** - ${choice.consequence}`);
     if (spec.afterApplying) lines.push('', `**After applying:** ${spec.afterApplying}`);
+    const selectedValue = spec.selected || spec.empty_input || '';
     lines.push('');
-    lines.push(`**Selected:** ${choiceLabel(spec, spec.selected || spec.empty_input || '')}`);
+    lines.push(`**Selected:** ${selectedValue
+      ? `${choiceReference(spec, selectedValue)} - ${choiceLabel(spec, selectedValue)}`
+      : '(answer required)'}`);
     lines.push('', '---', '');
   }
   return lines.join('\n').trimEnd();
 }
 
-function renderSetupQuestionBankTerminal(specs) {
+function renderQuestionBankHeader(specs, markdown = true) {
+  const questionCount = specs[0]?.presentation.total_visible_question_count || 0;
+  const sectionCount = specs[0]?.presentation.total_visible_section_count || 0;
+  const heading = `Toolkit setup choices - ${questionCount} questions across ${sectionCount} sections`;
+  const bankReference = specs[0]?.presentation.bank_reference || '';
+  const lines = [markdown ? `# ${heading}` : heading, '', `Bank reference: ${bankReference}`, '', 'Quick index', ''];
+  for (const spec of specs) {
+    lines.push(`${spec.presentation.question_ref} ${spec.title} - Recommended: ${spec.presentation.recommended_choice_ref} - ${choiceLabel(spec, spec.recommended)}`);
+  }
+  lines.push('');
+  return lines;
+}
+
+function changedOnlyExample(specs) {
+  const preferred = ['automatic-updates', 'opencode-integration'];
+  const picked = preferred.map((id) => specs.find((spec) => spec.id === id)).filter(Boolean);
+  for (const spec of specs) {
+    if (picked.length >= 2) break;
+    if (!picked.includes(spec)) picked.push(spec);
+  }
+  picked.sort((left, right) => specs.indexOf(left) - specs.indexOf(right));
+  return picked.map((spec) => {
+    const replacement = spec.choices.find((choice) => choice.value !== spec.recommended) || spec.choices[0];
+    return `${spec.presentation.question_ref}=${replacement.presentation_ref}`;
+  }).join(', ');
+}
+
+function buildNonTtyAnswerPlan(specs, args) {
+  const unresolved = specs.filter((spec) => !choiceForKey(args, spec.key));
+  const unresolvedIds = new Set(unresolved.map((spec) => spec.id));
+  const byId = new Map(specs.map((spec) => [spec.id, spec]));
+  const questions = unresolved.map((spec, index) => ({
+    kind: 'question',
+    order: index + 1,
+    question_id: spec.id,
+    question_ref: spec.presentation.question_ref,
+    title: spec.title,
+    choice_range: `${spec.choices[0].presentation_ref}-${spec.choices.at(-1).presentation_ref}`,
+    canonical_values: spec.choices.map((choice) => choice.value),
+  }));
+  const detailDefinitions = [
+    {
+      owner_question_id: 'update-source', detail_type: 'managed-checkout-path',
+      activation_key: 'managedCheckout', activation_value: 'custom',
+      supplied: () => args.repoRootExplicit,
+      validation_contract: 'non-empty path',
+      description: 'custom managed-checkout path',
+      missing_message: 'Setup question bank requires the 1.1 Update source custom path detail after the question-answer lines.',
+    },
+    {
+      owner_question_id: 'report-retention', detail_type: 'report-retention-days',
+      activation_key: 'updateReportRetention', activation_value: 'custom',
+      supplied: () => args.updateReportRetentionDaysExplicit,
+      validation_contract: 'positive integer day count',
+      description: 'positive report-retention duration in days',
+      missing_message: 'Setup question bank requires the 1.4 Report retention custom duration detail as a positive day-count line.',
+    },
+    {
+      owner_question_id: 'codex-helper-capacity', detail_type: 'codex-helper-count',
+      activation_key: 'codexHelperCapacity', activation_value: 'custom',
+      supplied: () => args.codexHelperCount !== null,
+      validation_contract: 'non-negative integer helper count',
+      description: 'bounded Codex helper count',
+      missing_message: 'Setup question bank requires the custom Codex helper-count detail line.',
+    },
+    {
+      owner_question_id: 'codex-helper-capacity', detail_type: 'codex-helper-risk-approval',
+      activation_key: 'codexHelperCapacity', activation_value: 'custom',
+      supplied: () => args.approveHighHelperCapacity || (args.codexHelperCount !== null && args.codexHelperCount <= 1),
+      validation_contract: 'exact approve when the helper count is greater than one',
+      description: 'exact `approve` RAM-risk acknowledgement; More than one helper may exhaust RAM, slow or freeze this PC, and stop useful work',
+      missing_message: 'Setup question bank requires an `approve` detail line for custom Codex helper counts above one.',
+      secondary_condition: 'helper-count-above-one',
+    },
+    {
+      owner_question_id: 'claude-agent-capacity', detail_type: 'claude-manual-maximum',
+      activation_key: 'claudeAgentCapacity', activation_value: 'manual',
+      supplied: () => args.claudeManualMaximum !== null,
+      validation_contract: 'positive integer worker maximum',
+      description: 'positive manual Claude worker maximum',
+      missing_message: 'Setup question bank requires the manual Claude capacity detail as a positive maximum line.',
+    },
+  ];
+  const details = [];
+  for (const definition of detailDefinitions) {
+    const owner = byId.get(definition.owner_question_id);
+    const ownerUnresolved = unresolvedIds.has(definition.owner_question_id);
+    const selected = args.setupChoices[definition.activation_key];
+    const choice = owner?.choices.find((candidate) => candidate.value === definition.activation_value);
+    const conditionallySelectable = Boolean(ownerUnresolved && choice);
+    const alreadyRequired = selected === definition.activation_value && !definition.supplied();
+    if (!conditionallySelectable && !alreadyRequired) continue;
+    details.push({
+      kind: 'detail',
+      order: details.length + 1,
+      owner_question_id: definition.owner_question_id,
+      question_ref: owner?.presentation.question_ref || null,
+      question_title: owner?.title || null,
+      detail_type: definition.detail_type,
+      activation_key: definition.activation_key,
+      activation_value: definition.activation_value,
+      activation_choice_ref: choice?.presentation_ref || null,
+      validation_contract: definition.validation_contract,
+      description: definition.description,
+      missing_message: definition.missing_message,
+      secondary_condition: definition.secondary_condition || null,
+      requirement: alreadyRequired ? 'required' : 'conditional',
+    });
+  }
+  return {
+    schema: 'ai-agent-toolkit.setup-question-answer-plan.v1',
+    mode: 'non-tty-line-by-line',
+    questions,
+    details,
+    entries: [...questions, ...details],
+  };
+}
+
+function detailPlanEntryApplies(entry, args) {
+  if (args.setupChoices[entry.activation_key] !== entry.activation_value) return false;
+  if (entry.detail_type === 'managed-checkout-path') return !args.repoRootExplicit;
+  if (entry.detail_type === 'report-retention-days') return !args.updateReportRetentionDaysExplicit;
+  if (entry.detail_type === 'codex-helper-count') return args.codexHelperCount === null;
+  if (entry.detail_type === 'codex-helper-risk-approval') return args.codexHelperCount > 1 && !args.approveHighHelperCapacity;
+  if (entry.detail_type === 'claude-manual-maximum') return args.claudeManualMaximum === null;
+  throw new Error(`Unsupported setup answer-plan detail type: ${entry.detail_type}`);
+}
+
+function detailPlanEntrySelected(entry, args) {
+  if (args.setupChoices[entry.activation_key] !== entry.activation_value) return false;
+  if (entry.detail_type === 'codex-helper-risk-approval') return args.codexHelperCount > 1;
+  return true;
+}
+
+function approvedDetailSummary(entry, args) {
+  if (entry.detail_type === 'managed-checkout-path') return 'custom path supplied (value remains private)';
+  if (entry.detail_type === 'report-retention-days') return `${args.updateReportRetentionDays} days`;
+  if (entry.detail_type === 'codex-helper-count') return `${args.codexHelperCount} helper(s)`;
+  if (entry.detail_type === 'codex-helper-risk-approval') return 'approved';
+  if (entry.detail_type === 'claude-manual-maximum') return `${args.claudeManualMaximum} worker(s)`;
+  throw new Error(`Unsupported setup answer-plan detail type: ${entry.detail_type}`);
+}
+
+function renderAnswerGuide(specs, markdown = true, mode = 'non-tty', options = {}) {
+  const example = changedOnlyExample(specs);
+  const bankReference = specs[0]?.presentation.bank_reference || '';
+  if (mode === 'tty') {
+    return [
+      'After this complete bank, enter either:',
+      '',
+      markdown ? '- `all recommended`' : '  - all recommended',
+      markdown ? `- only your changes, for example: \`${example}\`` : `  - only your changes, for example: ${example}`,
+      markdown ? '- press Enter to answer questions one at a time' : '  - press Enter to answer questions one at a time',
+      '',
+      'Unspecified changed-only entries use the displayed recommendation for this in-memory bank.',
+      'Malformed concise input is rejected and can be corrected before any setup write.',
+      'Choice letters and existing canonical textual values remain supported in one-at-a-time mode.',
+    ];
+  }
+  if (mode === 'tty-one-at-a-time') {
+    return [
+      'After this complete bank, answer unresolved questions one at a time.',
+      'Displayed choice letters and existing canonical textual values are accepted; invalid input is re-prompted before any setup write.',
+    ];
+  }
+  if (mode === 'non-tty-line-by-line') {
+    const answerPlan = options.answerPlan || { questions: [], details: [] };
+    const lines = [
+      'Some visible questions are already resolved by explicit setup flags, so concise bank-reference answers are not accepted for this bank.',
+    ];
+    if (answerPlan.questions.length) {
+      lines.push('', 'Reply with one line for each unresolved question in this exact order:', '');
+      for (const entry of answerPlan.questions) {
+        const values = entry.canonical_values.join(', ');
+        lines.push(markdown
+          ? `- **${entry.question_ref}** ${entry.title} [${entry.choice_range}] - enter a displayed letter or canonical value: ${values}`
+          : `  - ${entry.question_ref} ${entry.title} [${entry.choice_range}] - enter a displayed letter or canonical value: ${values}`);
+      }
+    }
+    if (answerPlan.details.length) {
+      lines.push('', 'After those question-answer lines, append detail lines in this exact canonical order only when the stated condition applies:', '');
+      for (const entry of answerPlan.details) {
+        const owner = entry.question_ref ? `${entry.question_ref} ${entry.question_title}` : 'Advanced compatibility selection';
+        const condition = entry.requirement === 'required'
+          ? `required by the explicit ${entry.activation_value} selection`
+          : `when ${entry.question_ref} is ${entry.activation_choice_ref}/${entry.activation_value}`;
+        const secondary = entry.secondary_condition === 'helper-count-above-one' ? ' and the entered helper count is greater than one' : '';
+        const rendered = `${entry.order}. ${owner}: ${entry.description} (${condition}${secondary}; ${entry.validation_contract}).`;
+        lines.push(markdown ? `- ${rendered}` : `  - ${rendered}`);
+      }
+    }
+    lines.push('', 'Do not repeat questions already selected by explicit flags. A bank-reference all-recommended or indexed changed-only reply is rejected in this mixed mode.',
+      'The complete ordered answer set must be accepted before any setup write.');
+    return lines;
+  }
+  if (mode === 'non-tty-resolved') {
+    return [
+      'All visible setup questions are already resolved by explicit inputs.',
+      'No setup-question stdin is required or read before setup continues to the approval summary.',
+    ];
+  }
+  const lines = [
+    'Reply with the displayed bank reference and either:',
+    '',
+    markdown ? `- \`${bankReference}: all recommended\`` : `  - ${bankReference}: all recommended`,
+    markdown ? `- only your changes, for example: \`${bankReference}: ${example}\`` : `  - only your changes, for example: ${bankReference}: ${example}`,
+    '',
+    'Unspecified entries in the changed-only form mean: apply the displayed recommendation for that exact rendered question.',
+    'The bank reference binds indexed input to this exact displayed host, order, state, recommendations, and choices.',
+    'Missing, stale, partial, malformed, timed-out, or EOF input never means all recommended and fails before setup writes.',
+    'Existing canonical textual values, complete line-by-line answers, explicit setup flags, and explicit --yes-recommended remain supported.',
+  ];
+  return lines;
+}
+
+function renderSetupQuestionBankTerminal(specs, options = {}) {
+  specs = ensurePresentationMetadata(specs);
   const lines = [
     QUESTION_BANK_BEGIN,
-    'Toolkit setup choices',
-    '',
+    ...renderQuestionBankHeader(specs, false),
     'Review every visible choice before setup writes anything.',
   ];
   let section = '';
   for (const spec of specs) {
     if (spec.section !== section) {
       section = spec.section;
-      lines.push('', section, '='.repeat(section.length));
+      const heading = `${spec.presentation.section_index}. ${section}`;
+      lines.push('', heading, '='.repeat(heading.length));
     }
-    lines.push('', spec.title, '', `What this controls: ${spec.whatThisControls}`, '');
+    lines.push('', `${spec.presentation.question_ref} ${spec.title}`, '', `What this controls: ${spec.whatThisControls}`, '');
     lines.push(`Current: ${spec.current}`);
     lines.push('');
-    lines.push(`Recommended: ${spec.recommended_outcome}`);
+    lines.push(`Verification: ${spec.currentState?.verification || 'unverified'}`);
+    lines.push('');
+    lines.push(`Recommended: ${spec.presentation.recommended_choice_ref} - ${choiceLabel(spec, spec.recommended)}`);
+    lines.push('');
+    lines.push(`Recommended outcome: ${spec.recommended_outcome}`);
     lines.push('');
     lines.push(`Why: ${spec.recommendation_reason}`);
     lines.push('');
     lines.push('Choices:');
-    for (const choice of spec.choices) lines.push(`  - ${choice.label} - ${choice.consequence}`);
+    for (const choice of spec.choices) lines.push(`  ${choice.presentation_ref}. ${choice.label} - ${choice.consequence}`);
     if (spec.afterApplying) lines.push('', `After applying: ${spec.afterApplying}`);
+    const selectedValue = spec.selected || spec.empty_input || '';
     lines.push('');
-    lines.push(`Selected: ${choiceLabel(spec, spec.selected || spec.empty_input || '')}`);
+    lines.push(`Selected: ${selectedValue
+      ? `${choiceReference(spec, selectedValue)} - ${choiceLabel(spec, selectedValue)}`
+      : '(answer required)'}`);
   }
-  lines.push('', 'Accept all displayed recommended settings only after reviewing this complete bank.', QUESTION_BANK_COMPLETE, '');
+  const guideMode = options.answerMode
+    || (options.conciseCommands === false ? 'tty-one-at-a-time' : 'tty');
+  lines.push('', ...renderAnswerGuide(specs, false, guideMode), '', QUESTION_BANK_COMPLETE, '');
   return lines.join('\n');
 }
 
-function renderSetupQuestionBank(specs) {
+function renderSetupQuestionBank(specs, options = {}) {
+  specs = ensurePresentationMetadata(specs);
   return [
     QUESTION_BANK_BEGIN,
-    '# Toolkit setup choices',
-    '',
+    ...renderQuestionBankHeader(specs, true),
     'Review every visible choice before setup writes anything.',
     '',
     renderQuestionRows(specs),
     '',
-    '**Accept all displayed recommended settings:** use `--yes-recommended` only after reviewing this complete bank.',
+    ...renderAnswerGuide(specs, true, options.answerMode || 'non-tty', options),
     QUESTION_BANK_COMPLETE,
     '',
   ].join('\n');
@@ -2149,18 +2560,24 @@ function setupQuestionDocumentationSpecs() {
 }
 
 function renderSetupQuestionDocumentation(specs = setupQuestionDocumentationSpecs()) {
+  specs = ensurePresentationMetadata(specs);
   return [
     '<!-- Generated by repo/scripts/generate-setup-question-docs.cjs from setup-toolkit-core.cjs. Do not edit directly. -->',
     '# Toolkit setup question reference',
     '',
     'This reference uses a privacy-safe representative Codex state in which all current ordinary questions are available. Runtime output resolves Current, Recommended, Why, available choices, and After applying from the same canonical metadata and the actual inspected state.',
     '',
+    ...renderQuestionBankHeader(specs, false),
+    '',
     renderQuestionRows(specs),
+    '',
+    ...renderAnswerGuide(specs, true),
     '',
   ].join('\n');
 }
 
 function emitCompleteQuestionBank(specs, options = {}) {
+  specs = ensurePresentationMetadata(specs);
   const write = options.write || ((text) => {
     if (process.env[MANAGED_PROTOCOL_ENV] === MANAGED_QUESTION_BANK_PROTOCOL) fs.writeSync(1, text);
     else process.stdout.write(text);
@@ -2190,7 +2607,12 @@ function emitCompleteQuestionBank(specs, options = {}) {
         throw new Error('Managed question-bank visibility acknowledgement was not received.');
       }
     }
-    return { appeared: true, attempts: 1, text };
+    return {
+      appeared: true,
+      attempts: 1,
+      text,
+      bank_identity: specs[0]?.presentation.bank_identity || questionBankSemanticIdentity(specs),
+    };
   }
   throw new Error('Complete setup question bank could not be rendered visibly; no approval prompt or write is allowed.');
 }
@@ -2249,16 +2671,167 @@ async function readNonInteractiveStdin() {
   return Buffer.concat(chunks, total).toString('utf8');
 }
 
+function looksLikeConciseQuestionBankAnswer(value) {
+  const text = String(value || '').trim();
+  return /all\s+recommended/i.test(text) || /^\d+\.\d+\s*=/.test(text);
+}
+
+function looksLikeConciseSubmission(value) {
+  const text = String(value || '').trim();
+  if (/^all\s+recommended(?:\s*$|\s*,)/i.test(text) || /^\d+\.\d+\s*=/.test(text)) return true;
+  const envelope = text.match(/^[^:\s]+\s*:\s*([\s\S]+)$/);
+  return Boolean(envelope && (/^all\s+recommended(?:\s*$|\s*,)/i.test(envelope[1].trim())
+    || /^\d+\.\d+\s*=/.test(envelope[1].trim())));
+}
+
+function parseConciseQuestionBankAnswer(input, specs, options = {}) {
+  const text = String(input || '').trim();
+  if (!text) return null;
+  const expectedReference = specs[0]?.presentation.bank_reference || '';
+  const requireBankReference = options.requireBankReference !== false;
+  let suppliedReference = expectedReference;
+  let answerText = text;
+  if (requireBankReference) {
+    const envelope = text.match(/^([^:\s]+)\s*:\s*([\s\S]+)$/);
+    if (!envelope) {
+      if (looksLikeConciseQuestionBankAnswer(text)) {
+        throw new Error(`Concise setup answers require the displayed bank reference. Reply with ${expectedReference}: followed by all recommended or indexed changes.`);
+      }
+      return null;
+    }
+    // A drive-letter path or another canonical line-by-line value may contain
+    // a colon. Treat it as an approval envelope only when the payload is
+    // recognizably one of the bounded concise answer modes.
+    if (!looksLikeConciseQuestionBankAnswer(envelope[2])) return null;
+    suppliedReference = normalizeBankReference(envelope[1]);
+    if (!suppliedReference) throw new Error('Setup question bank reference is malformed or truncated; copy the complete displayed reference and retry before any setup write.');
+    if (suppliedReference !== expectedReference) throw new Error('Setup question bank reference is stale or belongs to a different rendered bank; review the current bank and answer with its displayed reference.');
+    answerText = envelope[2].trim();
+  } else {
+    const optionalEnvelope = text.match(/^([^:\s]+)\s*:\s*([\s\S]+)$/);
+    if (optionalEnvelope) {
+      const normalized = normalizeBankReference(optionalEnvelope[1]);
+      if (!normalized || normalized !== expectedReference) {
+        throw new Error('Setup question bank reference does not match this live rendered bank.');
+      }
+      suppliedReference = normalized;
+      answerText = optionalEnvelope[2].trim();
+    }
+  }
+  if (/^all\s+recommended$/i.test(answerText)) {
+    return {
+      mode: 'all-recommended',
+      binding_mode: requireBankReference ? 'displayed-reference' : 'same-process',
+      bank_reference: suppliedReference,
+      bank_identity: specs[0]?.presentation.bank_identity || questionBankSemanticIdentity(specs),
+      selections: specs.map((spec) => ({
+        question_id: spec.id,
+        question_ref: spec.presentation.question_ref,
+        choice_ref: spec.presentation.recommended_choice_ref,
+        canonical_value: spec.recommended,
+      })),
+    };
+  }
+  if (/all\s+recommended/i.test(answerText)) {
+    throw new Error('Setup question bank answer mixes or malforms the all recommended mode.');
+  }
+  if (!/^\d+\.\d+\s*=\s*[A-Za-z]{1,2}(?:\s*,\s*\d+\.\d+\s*=\s*[A-Za-z]{1,2})*$/.test(answerText)) {
+    if (/\d+\.\d+\s*=/.test(answerText)) {
+      throw new Error('Setup question bank changed-only answer has malformed separators or mixed answer modes.');
+    }
+    return null;
+  }
+  const byReference = new Map(specs.map((spec) => [spec.presentation.question_ref, spec]));
+  const seen = new Set();
+  const overrides = [];
+  for (const token of answerText.split(',')) {
+    const match = token.trim().match(/^(\d+\.\d+)\s*=\s*([A-Za-z]{1,2})$/);
+    if (!match) throw new Error('Setup question bank changed-only answer has malformed separators.');
+    const [, questionRef, rawChoiceRef] = match;
+    if (seen.has(questionRef)) throw new Error(`Setup question bank answer repeats question reference ${questionRef}.`);
+    seen.add(questionRef);
+    const spec = byReference.get(questionRef);
+    if (!spec) throw new Error(`Setup question bank answer references unavailable question ${questionRef}.`);
+    const choice = choiceByPresentationReference(spec, rawChoiceRef);
+    if (!choice) throw new Error(`Setup question bank answer references unavailable choice ${rawChoiceRef.toUpperCase()} for ${questionRef}.`);
+    overrides.push({
+      question_id: spec.id,
+      question_ref: questionRef,
+      choice_ref: choice.presentation_ref,
+      canonical_value: choice.value,
+    });
+  }
+  const byQuestionId = new Map(overrides.map((selection) => [selection.question_id, selection]));
+  return {
+    mode: 'recommended-except',
+    binding_mode: requireBankReference ? 'displayed-reference' : 'same-process',
+    bank_reference: suppliedReference,
+    bank_identity: specs[0]?.presentation.bank_identity || questionBankSemanticIdentity(specs),
+    selections: specs.map((spec) => byQuestionId.get(spec.id) || ({
+      question_id: spec.id,
+      question_ref: spec.presentation.question_ref,
+      choice_ref: spec.presentation.recommended_choice_ref,
+      canonical_value: spec.recommended,
+    })),
+  };
+}
+
+function assertQuestionBankAnswerBinding(parsed, specs) {
+  const currentIdentity = specs[0]?.presentation.bank_identity || questionBankSemanticIdentity(specs);
+  const currentReference = specs[0]?.presentation.bank_reference || bankReferenceFromIdentity(currentIdentity);
+  if (!parsed || parsed.bank_identity !== currentIdentity || parsed.bank_reference !== currentReference) {
+    throw new Error('Setup question bank answer does not match the exact rendered bank.');
+  }
+  if (parsed.selections.length !== specs.length) {
+    throw new Error('Setup question bank answer does not cover the exact rendered bank.');
+  }
+  for (let index = 0; index < specs.length; index += 1) {
+    const spec = specs[index];
+    const selection = parsed.selections[index];
+    const choice = selectedChoice(spec, selection.canonical_value);
+    if (selection.question_id !== spec.id
+        || selection.question_ref !== spec.presentation.question_ref
+        || !choice
+        || choice.presentation_ref !== selection.choice_ref) {
+      throw new Error('Setup question bank answer contains stale or inconsistent presentation references.');
+    }
+  }
+}
+
+function resolveDisplayedChoiceAnswer(spec, answer) {
+  const normalized = String(answer || '').trim();
+  if (!normalized) return spec.recommended;
+  const presented = choiceByPresentationReference(spec, normalized);
+  if (presented) return presented.value;
+  const canonical = spec.choices.find((choice) => choice.value.toLowerCase() === normalized.toLowerCase());
+  return canonical?.value || normalized.toLowerCase();
+}
+
 async function promptForChoice(spec, lines, rl) {
   if (lines) {
     if (!lines.length) throw new Error(`Setup question bank requires an answer for ${spec.title}`);
-    return String(lines.shift() || '').trim().toLowerCase() || spec.recommended;
+    return resolveDisplayedChoiceAnswer(spec, lines.shift());
   }
   for (;;) {
-    console.log(`${spec.prompt} choices:`);
-    for (const choice of spec.choices) console.log(`  - ${choice.value}: ${choice.label}`);
-    const answer = (await rl.question(`Enter one choice, or press Enter for ${spec.recommended}: `)).trim().toLowerCase();
-    return answer || spec.recommended;
+    const range = `${spec.choices[0].presentation_ref}-${spec.choices.at(-1).presentation_ref}`;
+    const answer = await rl.question(`${spec.presentation.question_ref} ${spec.title} [${range}] (letter or canonical value; Enter=${spec.presentation.recommended_choice_ref}): `);
+    const resolved = resolveDisplayedChoiceAnswer(spec, answer);
+    if (choiceValues(spec).includes(resolved)) return resolved;
+    console.log(`${spec.title} must be one of: ${choiceValues(spec).join(', ')}. Enter a displayed letter or canonical value.`);
+  }
+}
+
+async function promptForTTYCommand(specs, rl) {
+  for (;;) {
+    const answer = await rl.question('Enter "all recommended", enter indexed changes, or press Enter to answer questions one at a time: ');
+    if (!String(answer).trim()) return null;
+    try {
+      const parsed = parseConciseQuestionBankAnswer(answer, specs, { requireBankReference: false });
+      if (parsed) return parsed;
+      console.log('Enter exactly "all recommended", indexed changes such as 1.2=B, or press Enter for one-at-a-time questions.');
+    } catch (error) {
+      console.log(`${error.message} Correct the concise answer or press Enter for one-at-a-time questions.`);
+    }
   }
 }
 
@@ -2317,11 +2890,76 @@ async function requireHighHelperCapacityApproval(args, lines, rl) {
   args.approveHighHelperCapacity = true;
 }
 
-async function answerSetupQuestionBank(args, current) {
+async function promptForReportRetentionDays(lines, rl) {
+  if (lines) {
+    const value = nextNonEmptyLine(lines);
+    if (!value) throw new Error('Choose another report-retention duration requires a positive day-count answer');
+    return parsePositiveInteger(value, 'Report retention day count');
+  }
+  for (;;) {
+    const answer = (await rl.question('Report retention duration in days: ')).trim();
+    try { return parsePositiveInteger(answer, 'Report retention day count'); }
+    catch (error) { console.log(error.message); }
+  }
+}
+
+async function consumeNonTtyAnswerPlan(answerPlan, specs, args, lines) {
+  const specsById = new Map(specs.map((spec) => [spec.id, spec]));
+  for (const entry of answerPlan.questions) {
+    const spec = specsById.get(entry.question_id);
+    if (!spec) throw new Error(`Setup answer plan references unavailable question ${entry.question_id}.`);
+    if (!lines.length || (lines.length === 1 && !String(lines[0]).trim())) {
+      throw new Error(`Setup question bank requires an answer line for ${entry.question_ref} ${entry.title} in the displayed order.`);
+    }
+    const answer = await promptForChoice(spec, lines, null);
+    if (!choiceValues(spec).includes(answer)) {
+      throw new Error(`${entry.question_ref} ${entry.title} must be one of: ${choiceValues(spec).join(', ')}`);
+    }
+    assignChoice(args, spec.key, answer);
+  }
+  for (const entry of answerPlan.details) {
+    if (!detailPlanEntryApplies(entry, args)) continue;
+    if (!lines.some((line) => String(line).trim())) throw new Error(entry.missing_message);
+    if (entry.detail_type === 'managed-checkout-path') {
+      args.repoRoot = await promptForCustomPath(lines, null);
+      args.repoRootExplicit = true;
+    } else if (entry.detail_type === 'report-retention-days') {
+      args.updateReportRetentionDays = await promptForReportRetentionDays(lines, null);
+      args.updateReportRetentionDaysExplicit = true;
+    } else if (entry.detail_type === 'codex-helper-count') {
+      args.codexHelperCount = await promptForHelperCount(lines, null);
+    } else if (entry.detail_type === 'codex-helper-risk-approval') {
+      await requireHighHelperCapacityApproval(args, lines, null);
+    } else if (entry.detail_type === 'claude-manual-maximum') {
+      args.claudeManualMaximum = await promptForClaudeManualMaximum(lines, null);
+    } else {
+      throw new Error(`Unsupported setup answer-plan detail type: ${entry.detail_type}`);
+    }
+  }
+}
+
+function effectiveChoiceSummary(args, current, spec, value) {
+  if (spec.key === 'repoAutoUpdate') return args.repoAutoUpdate ? 'enable' : 'disable';
+  if (spec.key === 'updateReports') return args.updateReports ? 'enable' : 'disable';
+  if (spec.key === 'updateReportRetention') return `${args.updateReportRetentionDays} days`;
+  if (spec.key === 'codexPluginAutoRefresh') return args.codexPluginAutoRefresh ? 'enable' : 'disable';
+  if (spec.key === 'claudeTopology' && value === 'toolkit-direct') {
+    return strictClaudeSetupCapability(current)
+      ? 'requested direct; exact launch and active-plugin verification still rerun after approval'
+      : 'request only; root-only remains active unless post-approval verification passes';
+  }
+  if (spec.key === 'claudeAgentCapacity' && value === 'automatic') {
+    return 'automatic requested; the final limit is derived post-approval from verified live capacity';
+  }
+  return value;
+}
+
+async function answerSetupQuestionBank(args, current, options = {}) {
+  const isTTY = options.isTTY === undefined ? process.stdin.isTTY === true : options.isTTY === true;
   const initialSpecs = setupQuestionSpecs(args, current);
   assertManagedCheckoutChoiceAvailable(args, initialSpecs);
   const initialMissingCount = initialSpecs.filter((spec) => !choiceForKey(args, spec.key)).length;
-  let answerSource = initialMissingCount ? (process.stdin.isTTY ? 'interactive' : 'stdin') : 'explicit flags';
+  let answerSource = initialMissingCount ? (isTTY ? 'interactive' : 'stdin') : 'explicit flags';
   let completeStdinConsumed = false;
 
   if (args.yesRecommended) {
@@ -2333,42 +2971,120 @@ async function answerSetupQuestionBank(args, current) {
 
   let specs = setupQuestionSpecs(args, current);
   let missing = specs.filter((spec) => !choiceForKey(args, spec.key));
-  const needsCustomPath = args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit;
-  const needsHelperDetails = args.setupChoices.codexHelperCapacity === 'custom'
+  let needsCustomPath = args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit;
+  let needsRetentionDetails = args.setupChoices.updateReportRetention === 'custom' && !args.updateReportRetentionDaysExplicit;
+  let needsHelperDetails = args.setupChoices.codexHelperCapacity === 'custom'
     && (args.codexHelperCount === null || (args.codexHelperCount > 1 && !args.approveHighHelperCapacity));
-  const needsClaudeManualDetails = args.setupChoices.claudeAgentCapacity === 'manual' && args.claudeManualMaximum === null;
-  const needsPromptedAnswers = missing.length > 0 || needsCustomPath || needsHelperDetails || needsClaudeManualDetails;
-  const needsCodexProposalInput = !process.stdin.isTTY && needsPipedCodexProposalApproval(args, current);
+  let needsClaudeManualDetails = args.setupChoices.claudeAgentCapacity === 'manual' && args.claudeManualMaximum === null;
+  const needsPromptedAnswers = missing.length > 0 || needsCustomPath || needsRetentionDetails || needsHelperDetails || needsClaudeManualDetails;
+  const needsCodexProposalInput = !isTTY && needsPipedCodexProposalApproval(args, current);
+  const conciseAllowed = !args.yesRecommended
+    && initialMissingCount > 0
+    && initialMissingCount === initialSpecs.length;
+  const nonTtyAnswerMode = !needsPromptedAnswers
+    ? 'non-tty-resolved'
+    : (conciseAllowed ? 'non-tty' : 'non-tty-line-by-line');
+  const nonTtyAnswerPlan = !isTTY && needsPromptedAnswers ? buildNonTtyAnswerPlan(specs, args) : null;
+  const displayedSpecs = specs;
 
   // The complete canonical bank is the first input-dependent protocol event.
   // In particular, an open non-TTY pipe can never suppress bank visibility:
   // unresolved answers are consumed only after the parent validates, forwards,
   // and acknowledges this exact bank payload.
   const rendered = emitCompleteQuestionBank(specs, {
-    render: process.stdin.isTTY ? renderSetupQuestionBankTerminal : renderSetupQuestionBank,
+    render: isTTY
+      ? (rows) => renderSetupQuestionBankTerminal(rows, {
+        conciseCommands: conciseAllowed,
+        answerMode: !needsPromptedAnswers ? 'non-tty-resolved' : undefined,
+      })
+      : (rows) => renderSetupQuestionBank(rows, {
+        answerMode: nonTtyAnswerMode,
+        answerPlan: nonTtyAnswerPlan,
+      }),
+    ...(options.write ? { write: options.write } : {}),
   });
 
-  const lines = (needsPromptedAnswers || needsCodexProposalInput) && !process.stdin.isTTY
-    ? (await readNonInteractiveStdin()).split(/\r?\n/)
+  const rawStdin = (needsPromptedAnswers || needsCodexProposalInput) && !isTTY
+    ? await readNonInteractiveStdin()
     : null;
+  let lines = rawStdin === null ? null : rawStdin.split(/\r?\n/);
+  let approvedBankAnswer = null;
+  let rl = null;
 
-  // Apply a complete piped answer set only after its canonical bank is visible.
-  // Invalid or partial input remains a pre-write pause/failure.
-  let deferredInputError = null;
-  if (lines && !needsCustomPath && lines.length >= missing.length) {
-    for (const spec of missing) {
-      const answer = await promptForChoice(spec, lines, null);
-      if (!choiceValues(spec).includes(answer)) {
-        deferredInputError = new Error(`${spec.title} must be one of: ${choiceValues(spec).join(', ')}`);
-        break;
+  if (isTTY && missing.length && initialMissingCount === initialSpecs.length) {
+    rl = options.createReadlineInterface
+      ? options.createReadlineInterface()
+      : readline.createInterface({ input: process.stdin, output: process.stdout });
+    const conciseAnswer = await promptForTTYCommand(specs, rl);
+    if (conciseAnswer) {
+      assertQuestionBankAnswerBinding(conciseAnswer, specs);
+      for (const selection of conciseAnswer.selections) {
+        const spec = specs.find((candidate) => candidate.id === selection.question_id);
+        assignChoice(args, spec.key, selection.canonical_value);
       }
-      assignChoice(args, spec.key, answer);
+      approvedBankAnswer = conciseAnswer;
+      answerSource = conciseAnswer.mode === 'all-recommended'
+        ? 'interactive all recommended'
+        : 'interactive recommended except listed changes';
+      specs = setupQuestionSpecs(args, current);
+      missing = specs.filter((spec) => !choiceForKey(args, spec.key));
+      needsCustomPath = args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit;
+      needsRetentionDetails = args.setupChoices.updateReportRetention === 'custom' && !args.updateReportRetentionDaysExplicit;
+      needsHelperDetails = args.setupChoices.codexHelperCapacity === 'custom'
+        && (args.codexHelperCount === null || (args.codexHelperCount > 1 && !args.approveHighHelperCapacity));
+      needsClaudeManualDetails = args.setupChoices.claudeAgentCapacity === 'manual' && args.claudeManualMaximum === null;
     }
-    specs = setupQuestionSpecs(args, current);
-    missing = specs.filter((spec) => !choiceForKey(args, spec.key));
   }
 
-  if (deferredInputError) throw deferredInputError;
+  if (rawStdin !== null) {
+    if (!conciseAllowed && looksLikeConciseSubmission(rawStdin)) {
+      throw new Error('Concise bank-reference answers are not accepted when explicit setup flags already resolved part of the bank. Provide one line per unresolved question in the displayed order.');
+    }
+    const conciseAnswer = conciseAllowed ? parseConciseQuestionBankAnswer(rawStdin, specs) : null;
+    if (conciseAnswer) {
+      assertQuestionBankAnswerBinding(conciseAnswer, specs);
+      for (const selection of conciseAnswer.selections) {
+        const spec = specs.find((candidate) => candidate.id === selection.question_id);
+        assignChoice(args, spec.key, selection.canonical_value);
+      }
+      approvedBankAnswer = conciseAnswer;
+      answerSource = conciseAnswer.mode === 'all-recommended'
+        ? 'user-approved all recommended'
+        : 'user-approved recommended except listed changes';
+      completeStdinConsumed = true;
+      lines = [];
+      specs = setupQuestionSpecs(args, current);
+      missing = specs.filter((spec) => !choiceForKey(args, spec.key));
+      needsCustomPath = args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit;
+      needsRetentionDetails = args.setupChoices.updateReportRetention === 'custom' && !args.updateReportRetentionDaysExplicit;
+      needsHelperDetails = args.setupChoices.codexHelperCapacity === 'custom'
+        && (args.codexHelperCount === null || (args.codexHelperCount > 1 && !args.approveHighHelperCapacity));
+      needsClaudeManualDetails = args.setupChoices.claudeAgentCapacity === 'manual' && args.claudeManualMaximum === null;
+      const detailInstructions = [];
+      if (needsCustomPath) detailInstructions.push('Choose another update location requires `--repo-root <path>` or complete line-by-line input.');
+      if (needsRetentionDetails) detailInstructions.push('Choose another report-retention duration requires `--update-report-retention-days <positive-days>` or complete line-by-line input.');
+      if (needsHelperDetails) detailInstructions.push('The selected helper compatibility choice requires its explicit bounded helper details.');
+      if (needsClaudeManualDetails) detailInstructions.push('Manual Claude capacity requires `--claude-agent-maximum <positive-number>`.');
+      if (detailInstructions.length) {
+        throw new Error(`Concise non-interactive setup answer requires additional values: ${detailInstructions.join(' ')}`);
+      }
+    }
+  }
+
+  // The same canonical plan that rendered the non-TTY grammar consumes it.
+  // Question answers always precede the conditionally applicable detail block.
+  if (!approvedBankAnswer && lines && nonTtyAnswerPlan) {
+    await consumeNonTtyAnswerPlan(nonTtyAnswerPlan, displayedSpecs, args, lines);
+    completeStdinConsumed = true;
+    specs = setupQuestionSpecs(args, current);
+    missing = specs.filter((spec) => !choiceForKey(args, spec.key));
+    needsCustomPath = args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit;
+    needsRetentionDetails = args.setupChoices.updateReportRetention === 'custom' && !args.updateReportRetentionDaysExplicit;
+    needsHelperDetails = args.setupChoices.codexHelperCapacity === 'custom'
+      && (args.codexHelperCount === null || (args.codexHelperCount > 1 && !args.approveHighHelperCapacity));
+    needsClaudeManualDetails = args.setupChoices.claudeAgentCapacity === 'manual' && args.claudeManualMaximum === null;
+  }
+
   if (args.yesRecommended) {
     console.log('--yes-recommended selected; setup will apply these choices before writing.');
     console.log('');
@@ -2378,8 +3094,12 @@ async function answerSetupQuestionBank(args, current) {
     console.log('Answer the remaining setup choices now. Setup will not write preferences or targets before these answers are complete.');
   }
 
-  const remainingPromptedAnswers = missing.length > 0 || needsCustomPath || needsHelperDetails || needsClaudeManualDetails;
-  const rl = remainingPromptedAnswers && !lines ? readline.createInterface({ input: process.stdin, output: process.stdout }) : null;
+  const remainingPromptedAnswers = missing.length > 0 || needsCustomPath || needsRetentionDetails || needsHelperDetails || needsClaudeManualDetails;
+  if (remainingPromptedAnswers && !lines && !rl) {
+    rl = options.createReadlineInterface
+      ? options.createReadlineInterface()
+      : readline.createInterface({ input: process.stdin, output: process.stdout });
+  }
   try {
     for (const spec of missing) {
       const answer = await promptForChoice(spec, lines, rl);
@@ -2387,6 +3107,10 @@ async function answerSetupQuestionBank(args, current) {
         throw new Error(`${spec.title} must be one of: ${choiceValues(spec).join(', ')}`);
       }
       assignChoice(args, spec.key, answer);
+    }
+    if (args.setupChoices.updateReportRetention === 'custom' && !args.updateReportRetentionDaysExplicit) {
+      args.updateReportRetentionDays = await promptForReportRetentionDays(lines, rl);
+      args.updateReportRetentionDaysExplicit = true;
     }
     if (args.setupChoices.codexHelperCapacity === 'custom') {
       if (args.codexHelperCount === null) args.codexHelperCount = await promptForHelperCount(lines, rl);
@@ -2406,25 +3130,42 @@ async function answerSetupQuestionBank(args, current) {
   if (lines) completeStdinConsumed = true;
 
   if (args.host === 'claude-code') resolveClaudeTopologyCapacity(args, current);
-  assertManagedCheckoutChoiceAvailable(args, setupQuestionSpecs(args, current));
+  const confirmedSpecs = setupQuestionSpecs(args, current);
+  assertManagedCheckoutChoiceAvailable(args, confirmedSpecs);
+  const displayedById = new Map(displayedSpecs.map((spec) => [spec.id, spec]));
+  const confirmedAsDisplayed = withPresentationMetadata(confirmedSpecs.map((spec) => {
+    const displayed = displayedById.get(spec.id);
+    return { ...spec, selected: displayed?.selected, empty_input: displayed?.empty_input, presentation: undefined };
+  }), displayedSpecs[0]?.presentation?.host || args.host);
+  if (approvedBankAnswer) assertQuestionBankAnswerBinding(approvedBankAnswer, displayedSpecs);
+  if (rendered.bank_identity !== confirmedAsDisplayed[0]?.presentation.bank_identity) {
+    throw new Error('Setup question bank changed between rendering and approval.');
+  }
   applySetupChoices(args, current);
   console.log('');
   console.log('Setup choices confirmed before writes:');
-  for (const spec of setupQuestionSpecs(args, current)) {
+  for (const spec of confirmedSpecs) {
     const value = choiceForKey(args, spec.key);
     const choice = selectedChoice(spec, value);
-    console.log(`- ${spec.title}: ${choice?.label || value} - ${choice?.consequence || spec.privacySafeFallback}`);
+    if (!choice || choice.value !== value) throw new Error(`Setup question bank canonical value is inconsistent for ${spec.id}.`);
+    const effective = effectiveChoiceSummary(args, current, spec, value);
+    console.log(`- ${spec.presentation.question_ref} ${spec.title}: ${choice.presentation_ref} - ${choice.label} (canonical: ${choice.value}; effective: ${effective}) - ${choice.consequence}`);
     if (spec.afterApplying) console.log(`  After applying: ${spec.afterApplying}`);
   }
-  if (args.setupChoices.claudeAgentCapacity === 'manual') console.log(`- Manual Claude worker maximum: ${args.claudeManualMaximum}`);
-  if (args.setupChoices.codexHelperCapacity === 'custom') {
+  const approvedPlanDetails = nonTtyAnswerPlan?.details.filter((entry) => detailPlanEntrySelected(entry, args)) || [];
+  for (const entry of approvedPlanDetails) {
+    const owner = entry.question_ref ? `${entry.question_ref} ${entry.question_title}` : 'Advanced compatibility selection';
+    console.log(`- Detail ${entry.order} ${owner}: ${entry.description} - ${approvedDetailSummary(entry, args)}`);
+  }
+  if (!nonTtyAnswerPlan && args.setupChoices.claudeAgentCapacity === 'manual') console.log(`- Manual Claude worker maximum: ${args.claudeManualMaximum}`);
+  if (!nonTtyAnswerPlan && args.setupChoices.codexHelperCapacity === 'custom') {
     console.log(`- Custom Codex helper count: ${args.codexHelperCount}`);
     console.log(`- Total MultiAgentV2 session threads including the main agent: ${args.codexHelperCount + 1}`);
     console.log(`- RAM-risk approval for more than one helper: ${args.codexHelperCount > 1 ? (args.approveHighHelperCapacity ? 'approved' : 'missing') : 'not required'}`);
   }
   return {
     appeared: true,
-    answers_initially_required: initialMissingCount > 0 || needsCustomPath || needsHelperDetails || needsClaudeManualDetails,
+    answers_initially_required: initialMissingCount > 0 || needsCustomPath || needsRetentionDetails || needsHelperDetails || needsClaudeManualDetails,
     answers_supplied_by_complete_stdin: completeStdinConsumed,
     answers_prompted_interactively: Boolean(rl),
     stopped_for_answers: false,
@@ -3359,6 +4100,15 @@ module.exports = {
   applyHostDelegationControl,
   parseArgs,
   setupQuestionSpecs,
+  withPresentationMetadata,
+  buildNonTtyAnswerPlan,
+  questionBankApprovalPayload,
+  questionBankSemanticIdentity,
+  spreadsheetChoiceReference,
+  parseConciseQuestionBankAnswer,
+  assertQuestionBankAnswerBinding,
+  answerSetupQuestionBank,
+  resolveDisplayedChoiceAnswer,
   renderSetupQuestionBank,
   reconcileClaudeQuestionChoices,
   resolveClaudeTopologyCapacity,

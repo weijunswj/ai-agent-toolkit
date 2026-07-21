@@ -60,6 +60,33 @@ function updateSourceRow(managed, argv = ['--plan', '--host', 'codex']) {
   return core.setupQuestionSpecs(args, stateWithManaged(managed)).find((row) => row.id === 'update-source');
 }
 
+async function runInjectedTTY(responses, configure = () => {}) {
+  const args = core.parseArgs(['--execute', '--host', 'codex']);
+  const current = stateWithManaged(managedState());
+  current.audit.update_report_enabled = true;
+  current.audit.update_report_retention_days = 7;
+  current.audit.codex_plugin_auto_refresh_enabled = false;
+  configure({ args, current });
+  const prompts = [];
+  let bank = '';
+  const answers = [...responses];
+  const result = await core.answerSetupQuestionBank(args, current, {
+    isTTY: true,
+    write(text) { bank += text; return true; },
+    createReadlineInterface() {
+      return {
+        async question(prompt) {
+          prompts.push(prompt);
+          if (!answers.length) throw new Error(`TTY fixture exhausted at prompt: ${prompt}`);
+          return answers.shift();
+        },
+        close() {},
+      };
+    },
+  });
+  return { args, current, prompts, bank, result, remaining: answers };
+}
+
 test('all ordinary Codex questions expose complete canonical semantics', () => {
   const rows = allRows();
   assert.deepEqual(rows.map((row) => [row.id, row.title]), expectedCodexRows);
@@ -96,7 +123,7 @@ test('terminal, piped, plan, JSON, approval and generated docs share canonical r
     }
   }
   assert.match(markdown, /\*\*What this controls:\*\*[\s\S]*\*\*Current:\*\*[\s\S]*\*\*Recommended:\*\*[\s\S]*\*\*Why:\*\*[\s\S]*\*\*Choices:\*\*[\s\S]*\*\*After applying:\*\*/);
-  assert.match(terminal, /What this controls:[\s\S]*\n\nCurrent:[\s\S]*\n\nRecommended:[\s\S]*\n\nWhy:[\s\S]*\n\nChoices:\n  - /);
+  assert.match(terminal, /What this controls:[\s\S]*\n\nCurrent:[\s\S]*\n\nVerification:[\s\S]*\n\nRecommended:[\s\S]*\n\nWhy:[\s\S]*\n\nChoices:\n  A\. /);
   const plan = core.setupPlan({ host: 'codex', setupChoices: core.parseArgs(['--plan']).setupChoices, questionBank: rows });
   assert.deepEqual(plan.question_bank, rows);
   const json = JSON.parse(JSON.stringify(plan));
@@ -250,4 +277,244 @@ test('Update source renderers and generated documentation use corrected canonica
     fs.readFileSync(path.join(repoRoot, 'repo/docs/SETUP-QUESTIONS.generated.md'), 'utf8'),
     core.renderSetupQuestionDocumentation(),
   );
+});
+
+test('resolved Codex and Claude banks expose contiguous deterministic presentation metadata', () => {
+  const codexArgs = core.parseArgs(['--plan', '--host', 'codex']);
+  const codexCurrent = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
+  codexCurrent.audit.codex_plugin_auto_refresh_enabled = false;
+  const codex = core.setupQuestionSpecs(codexArgs, codexCurrent);
+  assert.equal(codex[0].presentation.total_visible_question_count, 5);
+  assert.equal(codex[0].presentation.total_visible_section_count, 2);
+  assert.deepEqual(codex.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1']);
+
+  const claudeArgs = core.parseArgs(['--plan', '--host', 'claude-code']);
+  const claudeCurrent = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
+  claudeCurrent.agentCapability = { launch_supported: false, resource_counter_supported: false };
+  claudeCurrent.agentProfile = { supported: false, topology: 'root-only' };
+  claudeCurrent.nativePlugin = { status: 'unknown', trusted: false, hook_active: false };
+  const claude = core.setupQuestionSpecs(claudeArgs, claudeCurrent);
+  assert.equal(claude[0].presentation.total_visible_question_count, 6);
+  assert.equal(claude[0].presentation.total_visible_section_count, 3);
+  assert.deepEqual(claude.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1', '3.1']);
+});
+
+test('quick index, detailed bank, recommendations, and choices share one indexed ordering', () => {
+  const rows = allRows();
+  const rendered = core.renderSetupQuestionBank(rows);
+  const quickIndex = rendered.slice(rendered.indexOf('Quick index'), rendered.indexOf('Review every visible choice'));
+  const references = rows.map((row) => row.presentation.question_ref);
+  assert.equal(new Set(references).size, rows.length);
+  let previousIndex = -1;
+  for (const row of rows) {
+    const quickLine = `${row.presentation.question_ref} ${row.title} - Recommended: ${row.presentation.recommended_choice_ref}`;
+    const quickPosition = quickIndex.indexOf(quickLine);
+    assert.ok(quickPosition > previousIndex, row.id);
+    previousIndex = quickPosition;
+    assert.match(rendered, new RegExp(`### ${row.presentation.question_ref.replace('.', '\\.')} ${row.title}`));
+    assert.equal(new Set(row.choices.map((choice) => choice.presentation_ref)).size, row.choices.length);
+    assert.equal(
+      row.choices.find((choice) => choice.value === row.recommended).presentation_ref,
+      row.presentation.recommended_choice_ref,
+    );
+  }
+  assert.doesNotMatch(rendered, /## \d+\. Automatic updates\s+### \d+\.\d+ Automatic updates/);
+});
+
+test('conditional questions renumber without gaps and change the bound bank identity', () => {
+  const withTargets = allRows();
+  const withoutTargets = withTargets.filter((row) => !['opencode-integration', 'antigravity-integration'].includes(row.id));
+  const renumbered = core.withPresentationMetadata(withoutTargets.map((row) => ({ ...row, presentation: undefined })));
+  assert.deepEqual(renumbered.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1']);
+  assert.notEqual(renumbered[0].presentation.bank_identity, withTargets[0].presentation.bank_identity);
+});
+
+test('spreadsheet-style choice references are bounded and never wrap', () => {
+  assert.equal(core.spreadsheetChoiceReference(1), 'A');
+  assert.equal(core.spreadsheetChoiceReference(26), 'Z');
+  assert.equal(core.spreadsheetChoiceReference(27), 'AA');
+  assert.equal(core.spreadsheetChoiceReference(52), 'AZ');
+  assert.equal(core.spreadsheetChoiceReference(702), 'ZZ');
+  assert.throws(() => core.spreadsheetChoiceReference(703), /A-ZZ/);
+});
+
+test('all recommended and changed-only answers resolve to canonical values', () => {
+  const rows = allRows();
+  const reference = rows[0].presentation.bank_reference;
+  const all = core.parseConciseQuestionBankAnswer(`  ${reference.toLowerCase()}: ALL recommended  `, rows);
+  assert.equal(all.mode, 'all-recommended');
+  assert.deepEqual(all.selections.map((selection) => selection.canonical_value), rows.map((row) => row.recommended));
+  core.assertQuestionBankAnswerBinding(all, rows);
+
+  const changed = core.parseConciseQuestionBankAnswer(`${reference}: 1.2=b, 3.1 = d`, rows);
+  assert.equal(changed.mode, 'recommended-except');
+  assert.equal(changed.selections.find((selection) => selection.question_ref === '1.2').canonical_value, 'disable');
+  assert.equal(changed.selections.find((selection) => selection.question_ref === '3.1').canonical_value, 'skip');
+  assert.equal(changed.selections.find((selection) => selection.question_ref === '1.1').canonical_value, rows[0].recommended);
+  core.assertQuestionBankAnswerBinding(changed, rows);
+});
+
+test('indexed answer parser rejects duplicates, unknowns, malformed modes, and stale banks', () => {
+  const rows = allRows();
+  const reference = rows[0].presentation.bank_reference;
+  assert.equal(core.parseConciseQuestionBankAnswer('', rows), null);
+  assert.equal(core.parseConciseQuestionBankAnswer('enable\ndisable', rows), null);
+  assert.equal(core.parseConciseQuestionBankAnswer('C:\\Toolkit path with spaces', rows), null);
+  assert.equal(core.parseConciseQuestionBankAnswer('\\\\server\\Toolkit path with spaces', rows), null);
+  assert.equal(core.parseConciseQuestionBankAnswer('file:///C:/Toolkit%20path', rows), null);
+  assert.throws(() => core.parseConciseQuestionBankAnswer('1.2=B', rows), /require the displayed bank reference/);
+  assert.throws(() => core.parseConciseQuestionBankAnswer(`BAD: all recommended`, rows), /malformed or truncated/);
+  assert.throws(() => core.parseConciseQuestionBankAnswer(`0000-0000-0000-0000: all recommended`, rows), /stale or belongs/);
+  assert.throws(() => core.parseConciseQuestionBankAnswer(`${reference}: 1.2=B, 1.2=C`, rows), /repeats question reference/);
+  assert.throws(() => core.parseConciseQuestionBankAnswer(`${reference}: 9.9=A`, rows), /unavailable question/);
+  assert.throws(() => core.parseConciseQuestionBankAnswer(`${reference}: 1.2=Z`, rows), /unavailable choice/);
+  assert.throws(() => core.parseConciseQuestionBankAnswer(`${reference}: 1.2=B; 3.1=D`, rows), /malformed separators/);
+  assert.throws(() => core.parseConciseQuestionBankAnswer(`${reference}: all recommended, 1.2=B`, rows), /mixes or malforms/);
+
+  const parsed = core.parseConciseQuestionBankAnswer(`${reference}: 1.2=B`, rows);
+  const changedBank = core.withPresentationMetadata(rows.slice(0, -1).map((row) => ({ ...row, presentation: undefined })));
+  assert.throws(() => core.assertQuestionBankAnswerBinding(parsed, changedBank), /exact rendered bank/);
+});
+
+test('canonical non-TTY answer plan owns question and conditional detail ordering', () => {
+  const current = stateWithManaged(managedState({ exists: false, git: false, currentPath: '', selectedPath: '' }));
+  current.audit.update_report_enabled = true;
+  current.audit.update_report_retention_days = 7;
+  current.audit.codex_plugin_auto_refresh_enabled = false;
+  const args = core.parseArgs(['--execute', '--host', 'codex', '--enable-repo-auto-update']);
+  const rows = core.setupQuestionSpecs(args, current);
+  const plan = core.buildNonTtyAnswerPlan(rows, args);
+  assert.equal(plan.schema, 'ai-agent-toolkit.setup-question-answer-plan.v1');
+  assert.deepEqual(plan.questions.map((entry) => entry.question_id), [
+    'update-source', 'update-reports', 'report-retention', 'codex-toolkit-maintenance',
+  ]);
+  assert.deepEqual(plan.details.map((entry) => entry.detail_type), [
+    'managed-checkout-path', 'report-retention-days',
+  ]);
+  assert.deepEqual(plan.details.map((entry) => entry.order), [1, 2]);
+  assert.equal(plan.details[0].question_ref, '1.1');
+  assert.equal(plan.details[0].activation_choice_ref, rows.find((row) => row.id === 'update-source').choices.find((choice) => choice.value === 'custom').presentation_ref);
+  assert.equal(plan.details[1].question_ref, '1.4');
+  assert.equal(plan.details[1].activation_choice_ref, 'B');
+
+  const advanced = core.parseArgs([
+    '--execute', '--host', 'codex', '--managed-checkout', 'custom',
+    '--codex-helper-capacity', 'custom', '--enable-repo-auto-update',
+  ]);
+  const advancedRows = core.setupQuestionSpecs(advanced, current);
+  const advancedPlan = core.buildNonTtyAnswerPlan(advancedRows, advanced);
+  assert.deepEqual(advancedPlan.details.map((entry) => [entry.detail_type, entry.requirement]), [
+    ['managed-checkout-path', 'required'],
+    ['report-retention-days', 'conditional'],
+    ['codex-helper-count', 'required'],
+    ['codex-helper-risk-approval', 'required'],
+  ]);
+});
+
+test('bank reference covers host, order, recommendations and approval-visible semantics', () => {
+  const rows = allRows();
+  const reference = rows[0].presentation.bank_reference;
+  assert.match(reference, /^[0-9A-HJKMNP-TV-Z]{4}(?:-[0-9A-HJKMNP-TV-Z]{4}){3}$/);
+  assert.doesNotMatch(reference, /[\\/:]|secret|user|home/i);
+
+  const payload = core.questionBankApprovalPayload(rows);
+  assert.equal(payload.schema, 'ai-agent-toolkit.setup-question-bank-approval.v2');
+  assert.equal(payload.host, 'codex');
+  assert.deepEqual(payload.sections.map((section) => section.title), ['Updates and reports', 'Computer performance', 'Other coding apps']);
+  assert.ok(payload.questions.every((question) => question.what_this_controls));
+  assert.ok(payload.questions.every((question) => question.recommendation.choice_ref && question.recommendation.label));
+
+  const changedHost = core.withPresentationMetadata(rows, 'claude-code');
+  const changedRecommendation = core.withPresentationMetadata(rows.map((row, index) => index === 0
+    ? { ...row, recommended: row.choices.find((choice) => choice.value !== row.recommended).value }
+    : row), 'codex');
+  const reordered = core.withPresentationMetadata([rows[1], rows[0], ...rows.slice(2)], 'codex');
+  const mutateFirst = (change) => core.withPresentationMetadata(rows.map((row, index) => index === 0
+    ? change({ ...row, presentation: undefined, currentState: { ...row.currentState }, choices: row.choices.map((choice) => ({ ...choice })) })
+    : { ...row, presentation: undefined }), 'codex');
+  const approvalVisibleMutations = [
+    mutateFirst((row) => ({ ...row, whatThisControls: `${row.whatThisControls} Changed displayed scope.` })),
+    mutateFirst((row) => ({ ...row, title: `${row.title} changed` })),
+    mutateFirst((row) => ({ ...row, current: `${row.current} Changed displayed state.` })),
+    mutateFirst((row) => ({ ...row, currentState: { ...row.currentState, verification: 'changed-verification' } })),
+    mutateFirst((row) => ({ ...row, recommendation_reason: `${row.recommendation_reason} Changed reason.` })),
+    mutateFirst((row) => ({ ...row, recommended_outcome: `${row.recommended_outcome} Changed outcome.` })),
+    mutateFirst((row) => ({ ...row, choices: row.choices.map((choice, index) => index === 0 ? { ...choice, label: `${choice.label} changed` } : choice) })),
+    mutateFirst((row) => ({ ...row, choices: row.choices.map((choice, index) => index === 0 ? { ...choice, consequence: `${choice.consequence} Changed consequence.` } : choice) })),
+    mutateFirst((row) => ({ ...row, afterApplying: `${row.afterApplying} Changed effect.` })),
+    mutateFirst((row) => ({ ...row, availability: { ...row.availability, condition: `${row.availability.condition} Changed condition.` } })),
+    mutateFirst((row) => ({ ...row, selected: row.choices.find((choice) => choice.value !== (row.selected || '')).value })),
+  ];
+  for (const changed of [changedHost, changedRecommendation, reordered, ...approvalVisibleMutations]) {
+    assert.notEqual(changed[0].presentation.bank_reference, reference);
+    assert.throws(
+      () => core.parseConciseQuestionBankAnswer(`${reference}: all recommended`, changed),
+      /stale or belongs/,
+    );
+  }
+
+  const identical = core.withPresentationMetadata(rows.map((row) => ({ ...row, presentation: undefined })), 'codex');
+  assert.equal(identical[0].presentation.bank_identity, rows[0].presentation.bank_identity);
+  assert.equal(identical[0].presentation.bank_reference, reference);
+});
+
+test('display letters and canonical textual values resolve without becoming stored identities', () => {
+  const automatic = allRows().find((row) => row.id === 'automatic-updates');
+  assert.equal(core.resolveDisplayedChoiceAnswer(automatic, 'b'), 'disable');
+  assert.equal(core.resolveDisplayedChoiceAnswer(automatic, 'DISABLE'), 'disable');
+  assert.equal(core.resolveDisplayedChoiceAnswer(automatic, ''), automatic.recommended);
+});
+
+test('TTY all recommended and changed-only commands execute after exactly one complete bank', async () => {
+  const all = await runInjectedTTY(['all recommended']);
+  assert.equal(all.result.answer_source, 'interactive all recommended');
+  assert.equal((all.bank.match(/setup-toolkit-question-bank:begin/g) || []).length, 1);
+  assert.equal((all.bank.match(/setup-toolkit-question-bank:complete/g) || []).length, 1);
+  assert.match(all.bank, /enter either:[\s\S]*all recommended[\s\S]*press Enter to answer questions one at a time/i);
+
+  const specs = core.setupQuestionSpecs(core.parseArgs(['--execute', '--host', 'codex']), stateWithManaged(managedState()));
+  const automatic = specs.find((row) => row.id === 'automatic-updates');
+  const off = automatic.choices.find((choice) => choice.value === 'disable');
+  const changed = await runInjectedTTY([`${automatic.presentation.question_ref}=${off.presentation_ref}`]);
+  assert.equal(changed.result.answer_source, 'interactive recommended except listed changes');
+  assert.equal(changed.args.setupChoices.repoAutoUpdate, 'disable');
+});
+
+test('TTY blank enters one-at-a-time mode and invalid answers are re-prompted', async () => {
+  const journey = await runInjectedTTY(['', 'Z', 'A', 'disable', 'enable', 'default', 'enable']);
+  assert.equal(journey.result.answer_source, 'interactive');
+  assert.match(journey.prompts[0], /all recommended/);
+  assert.match(journey.prompts[1], /1\.1 Update source/);
+  assert.match(journey.prompts[2], /1\.1 Update source/);
+  assert.match(journey.prompts[3], /1\.2 Automatic updates/);
+  assert.equal(journey.args.setupChoices.managedCheckout, 'default');
+  assert.equal(journey.args.setupChoices.repoAutoUpdate, 'disable');
+  assert.equal(journey.remaining.length, 0);
+});
+
+test('TTY malformed concise input can be corrected and secondary details are collected', async () => {
+  const corrected = await runInjectedTTY(['1.2=B, 1.2=C', '9.9=A', '1.2=B; 2.1=A', '1.2=B']);
+  assert.equal(corrected.args.setupChoices.repoAutoUpdate, 'disable');
+  assert.equal(corrected.prompts.filter((prompt) => /all recommended/.test(prompt)).length, 4);
+
+  const rows = core.setupQuestionSpecs(core.parseArgs(['--execute', '--host', 'codex']), stateWithManaged(managedState()));
+  const updateSource = rows.find((row) => row.id === 'update-source');
+  const customSource = updateSource.choices.find((choice) => choice.value === 'custom');
+  const customPath = path.resolve(repoRoot, '..', 'tty-approved-custom-source');
+  const sourceJourney = await runInjectedTTY([
+    `${updateSource.presentation.question_ref}=${customSource.presentation_ref}`,
+    customPath,
+  ]);
+  assert.equal(sourceJourney.args.repoRoot, customPath);
+
+  const retention = rows.find((row) => row.id === 'report-retention');
+  const customRetention = retention.choices.find((choice) => choice.value === 'custom');
+  const retentionJourney = await runInjectedTTY([
+    `${retention.presentation.question_ref}=${customRetention.presentation_ref}`,
+    'not-a-day-count',
+    '14',
+  ]);
+  assert.equal(retentionJourney.args.updateReportRetentionDays, 14);
+  assert.equal(retentionJourney.args.updateReportRetentionDaysExplicit, true);
+  assert.equal(retentionJourney.prompts.filter((prompt) => /Report retention duration in days/.test(prompt)).length, 2);
 });

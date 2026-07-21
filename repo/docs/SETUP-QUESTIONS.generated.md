@@ -3,166 +3,219 @@
 
 This reference uses a privacy-safe representative Codex state in which all current ordinary questions are available. Runtime output resolves Current, Recommended, Why, available choices, and After applying from the same canonical metadata and the actual inspected state.
 
-## Automatic updates
+Toolkit setup choices - 7 questions across 3 sections
 
-### Update source
+Bank reference: 84PJ-ZBV2-N6C2-NQDK
+
+Quick index
+
+1.1 Update source - Recommended: B - Keep the current update source
+1.2 Automatic updates - Recommended: A - Turn on
+1.3 Update reports - Recommended: A - Keep reports
+1.4 Report retention - Recommended: C - Keep current
+2.1 Codex Toolkit maintenance - Recommended: A - Turn on
+3.1 OpenCode - Recommended: C - Keep current
+3.2 Antigravity - Recommended: C - Keep current
+
+
+## 1. Updates and reports
+
+### 1.1 Update source
 
 **What this controls:** Where Toolkit fetches and prepares future updates. A dedicated clean managed copy stays separate from active project repositories, so setup never pulls into or modifies the dirty project checkout you are working in.
 
 **Current:** Toolkit uses the dedicated clean managed copy for updates.
 
-**Recommended:** Keep using the verified dedicated clean managed copy.
+**Verification:** state-derived
+
+**Recommended:** B - Keep the current update source
+
+**Recommended outcome:** Keep using the verified dedicated clean managed copy.
 
 **Why:** Separating update operations from active branches and uncommitted project work makes fetch, verification, and safe activation predictable.
 
 **Choices:**
 
-- **Use the dedicated clean update copy** - Create or reuse the standard managed checkout, verify its clean main branch, and make it the update source without moving or deleting another checkout.
-- **Keep the current update source** - Preserve this effective behavior: Toolkit uses the dedicated clean managed copy for updates.
-- **Choose another location** - Create or reuse a clean Toolkit checkout at the approved location and make that location the managed update source; existing managed copies are not migrated or deleted.
+- **A. Use the dedicated clean update copy** - Create or reuse the standard managed checkout, verify its clean main branch, and make it the update source without moving or deleting another checkout.
+- **B. Keep the current update source** - Preserve this effective behavior: Toolkit uses the dedicated clean managed copy for updates.
+- **C. Choose another location** - Create or reuse a clean Toolkit checkout at the approved location and make that location the managed update source; existing managed copies are not migrated or deleted.
 
 **After applying:** After final approval, setup will create or verify only the selected managed checkout and store it as Toolkit update state. The active project checkout is unchanged; no existing managed copy is moved or removed.
 
-**Selected:** Keep the current update source
+**Selected:** B - Keep the current update source
 
 ---
 
-### Automatic updates
+### 1.2 Automatic updates
 
 **What this controls:** Whether Toolkit checks the managed update source when a supported coding app starts. Any update still has to be fetched, fast-forwarded, validated, and safely activated before enabled integrations use it.
 
 **Current:** Automatic startup update checks are on.
 
-**Recommended:** Turn on clean, verified automatic updates.
+**Verification:** verified
+
+**Recommended:** A - Turn on
+
+**Recommended outcome:** Turn on clean, verified automatic updates.
 
 **Why:** Startup checks keep Toolkit current while the clean-checkout, expected-remote, fast-forward, and validation gates protect active work.
 
 **Choices:**
 
-- **Turn on** - Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates.
-- **Turn off** - Disable startup update checks and automatic enabled-target synchronization; manual `setup toolkit` or explicit maintenance remains available.
-- **Keep current** - Preserve this effective behavior: Automatic startup update checks are on.
+- **A. Turn on** - Store automatic maintenance as enabled so trusted startup maintenance checks for, verifies, and safely activates clean updates.
+- **B. Turn off** - Disable startup update checks and automatic enabled-target synchronization; manual `setup toolkit` or explicit maintenance remains available.
+- **C. Keep current** - Preserve this effective behavior: Automatic startup update checks are on.
 
 **After applying:** This changes Toolkit maintenance state and future trusted SessionStart behavior; it does not directly edit native host configuration and does not require a restart by itself.
 
-**Selected:** Turn on
+**Selected:** A - Turn on
 
 ---
 
-### Update reports
+### 1.3 Update reports
 
 **What this controls:** Whether Toolkit keeps a privacy-safe maintenance report when an update, cache refresh, hook repair, target sync, or safety stop produced meaningful information. Routine successful maintenance stays quiet; failures needing action may open automatically, and routine output does not print private absolute paths.
 
 **Current:** Meaningful maintenance reports are kept; only action-required reports open automatically.
 
-**Recommended:** Keep meaningful reports; open only reports that require action.
+**Verification:** verified
+
+**Recommended:** A - Keep reports
+
+**Recommended outcome:** Keep meaningful reports; open only reports that require action.
 
 **Why:** A short-lived, privacy-safe record makes failed or safety-blocked maintenance diagnosable without making routine success noisy.
 
 **Choices:**
 
-- **Keep reports** - Create deduplicated reports for meaningful maintenance, keep successful reports closed, and automatically open only reports classified as requiring action.
-- **Do not keep reports** - Stop creating normal Toolkit maintenance reports; concise failure or safety status still appears when action is required.
-- **Keep current** - Preserve this effective behavior: Meaningful maintenance reports are kept; only action-required reports open automatically.
+- **A. Keep reports** - Create deduplicated reports for meaningful maintenance, keep successful reports closed, and automatically open only reports classified as requiring action.
+- **B. Do not keep reports** - Stop creating normal Toolkit maintenance reports; concise failure or safety status still appears when action is required.
+- **C. Keep current** - Preserve this effective behavior: Meaningful maintenance reports are kept; only action-required reports open automatically.
 
 **After applying:** This changes Toolkit report state only. It does not change native host configuration, and no restart is required.
 
-**Selected:** Keep reports
+**Selected:** A - Keep reports
 
 ---
 
-### Report retention
+### 1.4 Report retention
 
 **What this controls:** How long Toolkit keeps only its own maintenance reports before best-effort cleanup. It does not modify project files, application logs, or unrelated operational logs.
 
 **Current:** Toolkit maintenance reports are currently kept for 7 day(s).
 
-**Recommended:** Keep the effective seven-day retention window.
+**Verification:** verified
+
+**Recommended:** C - Keep current
+
+**Recommended outcome:** Keep the effective seven-day retention window.
 
 **Why:** Seven days normally preserves enough troubleshooting context while limiting accumulation of maintenance-only reports.
 
 **Choices:**
 
-- **7 days** - Use the seven-day retention window and remove only eligible Toolkit maintenance reports older than that window.
-- **Choose another duration** - Use the approved positive day count for future Toolkit report cleanup; no unrelated logs or project files are considered.
-- **Keep current** - Preserve this effective behavior: Toolkit maintenance reports are currently kept for 7 day(s).
+- **A. 7 days** - Use the seven-day retention window and remove only eligible Toolkit maintenance reports older than that window.
+- **B. Choose another duration** - Use the approved positive day count for future Toolkit report cleanup; no unrelated logs or project files are considered.
+- **C. Keep current** - Preserve this effective behavior: Toolkit maintenance reports are currently kept for 7 day(s).
 
 **After applying:** The approved duration is stored in Toolkit state. Eligible Toolkit maintenance-report cleanup runs during the approved setup and future maintenance; unrelated files are never included.
 
-**Selected:** Keep current
+**Selected:** C - Keep current
 
 ---
 
 
-## Computer performance
+## 2. Computer performance
 
-### Codex Toolkit maintenance
+### 2.1 Codex Toolkit maintenance
 
 **What this controls:** Whether trusted Codex startup maintenance may refresh the installed Toolkit plugin cache from the verified managed source and, on Windows, safely repair incompatible installed plugin SessionStart hook launchers. It does not give Codex permission to update Claude Code.
 
 **Current:** Automatic Codex Toolkit maintenance is on.
 
-**Recommended:** Turn on native Toolkit cache refresh and safe Windows hook maintenance.
+**Verification:** verified
+
+**Recommended:** A - Turn on
+
+**Recommended outcome:** Turn on native Toolkit cache refresh and safe Windows hook maintenance.
 
 **Why:** Keeping the installed cache aligned with the verified managed source avoids stale setup behavior after Toolkit updates.
 
 **Choices:**
 
-- **Turn on** - Enable future native Toolkit cache refresh and safe Windows installed-hook repair when maintenance detects stale or incompatible files.
-- **Turn off** - Disable future automatic cache refresh and Windows hook repair; the installed Toolkit plugin is not uninstalled, and manual `setup toolkit` repair or refresh remains available.
-- **Keep current** - Preserve this effective behavior: Automatic Codex Toolkit maintenance is on.
+- **A. Turn on** - Enable future native Toolkit cache refresh and safe Windows installed-hook repair when maintenance detects stale or incompatible files.
+- **B. Turn off** - Disable future automatic cache refresh and Windows hook repair; the installed Toolkit plugin is not uninstalled, and manual `setup toolkit` repair or refresh remains available.
+- **C. Keep current** - Preserve this effective behavior: Automatic Codex Toolkit maintenance is on.
 
 **After applying:** The approved setup always verifies the current native Toolkit plugin. If files change, setup may update the Codex plugin cache and Windows hook launchers; restart Codex, then review and trust the current SessionStart hook in `/hooks`. Turning maintenance off only changes future Toolkit state and does not uninstall the plugin.
 
-**Selected:** Turn on
+**Selected:** A - Turn on
 
 ---
 
 
-## Other coding apps
+## 3. Other coding apps
 
-### OpenCode
+### 3.1 OpenCode
 
 **What this controls:** Whether Toolkit synchronizes its managed skill folders and OpenCode adapter into OpenCode's user-level skills area. This configures Toolkit integration files only; it does not install or update OpenCode itself.
 
 **Current:** Toolkit synchronization is enabled and the managed OpenCode files are current.
 
-**Recommended:** Keep the current OpenCode integration setting.
+**Verification:** state-derived
+
+**Recommended:** C - Keep current
+
+**Recommended outcome:** Keep the current OpenCode integration setting.
 
 **Why:** The existing opt-in remains the least surprising choice while preserving current managed behavior.
 
 **Choices:**
 
-- **Keep synchronized** - Enable the integration and immediately synchronize current Toolkit skill folders plus the OpenCode adapter after final approval.
-- **Turn off** - Disable future Toolkit synchronization without uninstalling OpenCode or deleting already synchronized files.
-- **Keep current** - Preserve this effective behavior: Toolkit synchronization is enabled and the managed OpenCode files are current.
-- **Skip this time** - Make no OpenCode target-state or file change during this setup; any previously enabled future synchronization setting remains as it was.
+- **A. Keep synchronized** - Enable the integration and immediately synchronize current Toolkit skill folders plus the OpenCode adapter after final approval.
+- **B. Turn off** - Disable future Toolkit synchronization without uninstalling OpenCode or deleting already synchronized files.
+- **C. Keep current** - Preserve this effective behavior: Toolkit synchronization is enabled and the managed OpenCode files are current.
+- **D. Skip this time** - Make no OpenCode target-state or file change during this setup; any previously enabled future synchronization setting remains as it was.
 
 **After applying:** Enable writes the managed OpenCode skill folders immediately after final approval; disable changes Toolkit target state but leaves existing files in place. Reopen or refresh OpenCode if it does not reload changed skills automatically.
 
-**Selected:** Keep current
+**Selected:** C - Keep current
 
 ---
 
-### Antigravity
+### 3.2 Antigravity
 
 **What this controls:** Whether Toolkit synchronizes an Antigravity plugin-scoped integration containing plugin metadata, installed-version metadata, the Toolkit adapter, and managed skill folders. This does not install Antigravity or the optional Python AG2 package.
 
 **Current:** Toolkit synchronization is enabled and the managed Antigravity files are current.
 
-**Recommended:** Keep the current Antigravity integration setting.
+**Verification:** state-derived
+
+**Recommended:** C - Keep current
+
+**Recommended outcome:** Keep the current Antigravity integration setting.
 
 **Why:** The existing opt-in remains the least surprising choice while preserving current managed behavior.
 
 **Choices:**
 
-- **Keep synchronized** - Enable the integration and immediately refresh Toolkit-owned Antigravity plugin metadata, adapter files, and managed skill folders after final approval.
-- **Turn off** - Disable future Toolkit synchronization without uninstalling Antigravity or deleting already synchronized plugin files.
-- **Keep current** - Preserve this effective behavior: Toolkit synchronization is enabled and the managed Antigravity files are current.
-- **Skip this time** - Make no Antigravity target-state or plugin-file change during this setup; any previously enabled future synchronization setting remains as it was.
+- **A. Keep synchronized** - Enable the integration and immediately refresh Toolkit-owned Antigravity plugin metadata, adapter files, and managed skill folders after final approval.
+- **B. Turn off** - Disable future Toolkit synchronization without uninstalling Antigravity or deleting already synchronized plugin files.
+- **C. Keep current** - Preserve this effective behavior: Toolkit synchronization is enabled and the managed Antigravity files are current.
+- **D. Skip this time** - Make no Antigravity target-state or plugin-file change during this setup; any previously enabled future synchronization setting remains as it was.
 
 **After applying:** Enable writes the Toolkit-owned Antigravity plugin metadata and skill folders immediately after final approval; disable changes Toolkit target state but leaves existing files in place. Restart or reopen Antigravity if it does not reload plugin files automatically.
 
-**Selected:** Keep current
+**Selected:** C - Keep current
 
 ---
+
+Reply with the displayed bank reference and either:
+
+- `84PJ-ZBV2-N6C2-NQDK: all recommended`
+- only your changes, for example: `84PJ-ZBV2-N6C2-NQDK: 1.2=B, 3.1=A`
+
+Unspecified entries in the changed-only form mean: apply the displayed recommendation for that exact rendered question.
+The bank reference binds indexed input to this exact displayed host, order, state, recommendations, and choices.
+Missing, stale, partial, malformed, timed-out, or EOF input never means all recommended and fails before setup writes.
+Existing canonical textual values, complete line-by-line answers, explicit setup flags, and explicit --yes-recommended remain supported.

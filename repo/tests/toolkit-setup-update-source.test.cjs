@@ -156,7 +156,7 @@ test('valid custom Update source keep preserves its configured checkout through 
     '--repo-remote', origin, '--yes-recommended', '--codex-helper-capacity', 'keep',
   ], { env, timeout: 300000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Update source: Keep the current update source - Preserve this effective behavior: Toolkit uses a separate clean custom checkout/i);
+  assert.match(result.stdout, /1\.1 Update source: B - Keep the current update source[\s\S]*Preserve this effective behavior: Toolkit uses a separate clean custom checkout/i);
   assert.match(result.stdout, /Managed checkout path: <managed-toolkit-checkout>/);
   const leakedLines = result.stdout.split(/\r?\n/).filter((line) => line.includes(setupRepo)).map((line) => line.replaceAll(setupRepo, '<managed-toolkit-checkout>'));
   assert.deepEqual(leakedLines, []);
@@ -177,8 +177,8 @@ test('valid standard Update source keep remains available and preserves the stan
     '--yes-recommended', '--codex-helper-capacity', 'keep',
   ], { env, timeout: 300000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Update source[\s\S]*\*\*Recommended:\*\* Keep using the verified dedicated clean managed copy/i);
-  assert.match(result.stdout, /Update source: Keep the current update source - Preserve this effective behavior: Toolkit uses the dedicated clean managed copy/i);
+  assert.match(result.stdout, /1\.1 Update source[\s\S]*\*\*Recommended:\*\* B - Keep the current update source[\s\S]*\*\*Recommended outcome:\*\* Keep using the verified dedicated clean managed copy/i);
+  assert.match(result.stdout, /1\.1 Update source: B - Keep the current update source[\s\S]*Preserve this effective behavior: Toolkit uses the dedicated clean managed copy/i);
   assert.match(result.stdout, /Managed checkout path: <managed-toolkit-checkout>/);
   const leakedLines = result.stdout.split(/\r?\n/).filter((line) => line.includes(setupRepo)).map((line) => line.replaceAll(setupRepo, '<managed-toolkit-checkout>'));
   assert.deepEqual(leakedLines, []);

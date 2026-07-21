@@ -50,7 +50,7 @@ test('ordinary interactive topology selection keeps visible direct and derives a
   ], { env: isolatedHomeEnv(root), input: 'toolkit-direct\n' });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /Direct Toolkit-managed subagents only/);
-  assert.match(result.stdout, /How should Claude Code use agents\?: Direct Toolkit-managed subagents only/);
+  assert.match(result.stdout, /2\.1 How should Claude Code use agents\?: A - Direct Toolkit-managed subagents only/);
   assert.doesNotMatch(result.stdout, /Claude Code agent capacity choice|Manual maximum for Toolkit-managed Claude workers/);
   assert.match(result.stdout, /Selected topology: claude-toolkit-direct/);
   assert.match(result.stdout, /Capacity mode: automatic/);
@@ -76,7 +76,7 @@ test('ordinary complete piped answers keep visible direct and derive automatic c
     input: ['enable', 'enable', 'default', 'toolkit-direct', 'instructions', ''].join('\n'),
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /How should Claude Code use agents\?: Direct Toolkit-managed subagents only/);
+  assert.match(result.stdout, /2\.1 How should Claude Code use agents\?: A - Direct Toolkit-managed subagents only/);
   assert.doesNotMatch(result.stdout, /Claude Code agent capacity choice|Manual maximum for Toolkit-managed Claude workers/);
   assert.match(result.stdout, /Selected topology: claude-toolkit-direct/);
   assert.match(result.stdout, /Capacity mode: automatic/);
@@ -105,8 +105,9 @@ test('Claude recommended execution writes only the enforceable direct automatic 
     '--yes-recommended', '--claude-cli', fakeClaude, '--claude-topology', 'toolkit-direct', '--claude-plugin-behavior', 'instructions',
   ], { env: isolatedHomeEnv(root), timeout: 300000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /\*\*Recommended:\*\* Use the root agent only until every strict launch control is verifiable\./);
-  assert.match(result.stdout, /\*\*Selected:\*\* Direct Toolkit-managed subagents only/);
+  assert.match(result.stdout, /\*\*Recommended:\*\* B - Root agent only/);
+  assert.match(result.stdout, /\*\*Recommended outcome:\*\* Use the root agent only until every strict launch control is verifiable\./);
+  assert.match(result.stdout, /\*\*Selected:\*\* A - Direct Toolkit-managed subagents only/);
   assert.doesNotMatch(result.stdout, /How should Toolkit manage agent capacity|Claude Code agent capacity choice/);
   assert.match(result.stdout, /Helper-agent capacity questions shown: no; Toolkit automatically limits controlled children/);
   assert.match(result.stdout, /Selected topology: claude-toolkit-direct/);
@@ -146,7 +147,7 @@ test('keep current preserves compatible direct automatic and manual capacity wit
       '--claude-plugin-behavior', 'instructions',
     ], { env, timeout: 300000 });
     assert.equal(kept.status, 0, kept.stderr || kept.stdout);
-    assert.match(kept.stdout, /\*\*Selected:\*\* Keep current/);
+    assert.match(kept.stdout, /\*\*Selected:\*\* D - Keep current/);
     assert.doesNotMatch(kept.stdout, /Claude Code agent capacity choice|Manual maximum for Toolkit-managed Claude workers/);
     assert.match(kept.stdout, /Selected topology: claude-toolkit-direct/);
     assert.match(kept.stdout, new RegExp(`Capacity mode: ${expectedMode}`));
@@ -222,7 +223,7 @@ test('yes-recommended keeps conservative root-only without unnecessary direct pr
     '--yes-recommended', '--claude-cli', fake.command, '--claude-plugin-behavior', 'instructions',
   ], { env: isolatedHomeEnv(root), timeout: 300000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /\*\*Selected:\*\* Root agent only/);
+  assert.match(result.stdout, /\*\*Selected:\*\* B - Root agent only/);
   assert.match(result.stdout, /Selected topology: root-only/);
   assert.equal(fs.existsSync(fake.log), false);
   const profileRoot = path.join(root, '.ai-agent-toolkit', 'agent-control');
