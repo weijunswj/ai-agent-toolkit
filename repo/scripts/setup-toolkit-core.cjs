@@ -664,7 +664,7 @@ function assertRepoRoot(repoRoot) {
 function runCommand(label, command, args, options = {}) {
   if (!options.quiet) {
     console.log(`\n==> ${label}`);
-    console.log([command, ...args].join(' '));
+    console.log('Command arguments: withheld from routine output; see the named checklist step.');
   }
   const result = spawnSync(command, args, {
     cwd: options.cwd,
@@ -2576,6 +2576,43 @@ function parseJsonFromOutput(text) {
   return parseFirstJsonObject(text) || {};
 }
 
+function nativePluginPhaseFailure(platform, phase, result = {}, error = null) {
+  const timedOut = error?.code === 'ETIMEDOUT' || result?.error?.code === 'ETIMEDOUT';
+  if (phase === 'mutation' && timedOut) {
+    return new Error(`${platform} native plugin mutation timed out before completion. Captured helper diagnostics were withheld from routine output.`);
+  }
+  const status = Number.isInteger(result?.status) ? ` (exit code ${result.status})` : '';
+  const action = phase === 'mutation' ? 'mutation' : 'verification';
+  return new Error(`${platform} native plugin ${action} failed${status}. Captured helper diagnostics were withheld from routine output.`);
+}
+
+function runNativePluginJsonPhase({ platform, phase, label, args, cwd, timeout, allowRefreshRequired = false }) {
+  let result;
+  try {
+    result = runCommand(label, process.execPath, args, {
+      cwd,
+      capture: true,
+      timeout,
+      allowFailure: true
+    });
+  } catch (error) {
+    throw nativePluginPhaseFailure(platform, phase, {}, error);
+  }
+  if (result.status !== 0) {
+    if (allowRefreshRequired) {
+      console.log(`${platform} native plugin verification: current source identity was not established; approved refresh is required.`);
+      return null;
+    }
+    throw nativePluginPhaseFailure(platform, phase, result);
+  }
+  const summary = parseFirstJsonObject(result.stdout);
+  if (!summary || summary.ok !== true) {
+    const action = phase === 'mutation' ? 'mutation' : 'verification';
+    throw new Error(`${platform} native plugin ${action} returned invalid structured status. Captured helper diagnostics were withheld from routine output.`);
+  }
+  return summary;
+}
+
 function expectedToolkitVersion(repoRoot, platform = 'codex') {
   const rel = platform === 'claude-code'
     ? ['.claude-plugin', 'plugin.json']
@@ -2593,16 +2630,18 @@ function defaultCodexPluginCachePath(version) {
 }
 
 function runCodexNativePluginSetup(args) {
-  const verify = runCommand(
-    'node repo/scripts/setup-codex-toolkit-plugin.cjs --verify --json',
-    process.execPath,
-    setupCodexArgs(args, '--verify'),
-    { cwd: args.repoRoot, capture: true, timeout: 120000, allowFailure: true }
-  );
+  const verifySummary = runNativePluginJsonPhase({
+    platform: 'Codex',
+    phase: 'verification',
+    label: 'node repo/scripts/setup-codex-toolkit-plugin.cjs --verify --json',
+    args: setupCodexArgs(args, '--verify'),
+    cwd: args.repoRoot,
+    timeout: 120000,
+    allowRefreshRequired: true
+  });
   const expectedVersion = expectedToolkitVersion(args.repoRoot, 'codex');
-  if (verify.status === 0) {
-    process.stdout.write(verify.stdout || '');
-    const summary = parseJsonFromOutput(verify.stdout);
+  if (verifySummary) {
+    const summary = verifySummary;
     return {
       status: 'already fresh',
       installed: summary.installed === true,
@@ -2618,22 +2657,22 @@ function runCodexNativePluginSetup(args) {
       hook_trust_action: summary.hook_trust_message || 'Open `/hooks` in Codex and review the current Toolkit SessionStart hook'
     };
   }
-  process.stderr.write(verify.stderr || '');
-
-  runCommand(
-    'node repo/scripts/setup-codex-toolkit-plugin.cjs --write --json',
-    process.execPath,
-    setupCodexArgs(args, '--write'),
-    { cwd: args.repoRoot, timeout: 180000 }
-  );
-  const finalVerify = runCommand(
-    'node repo/scripts/setup-codex-toolkit-plugin.cjs --verify --json',
-    process.execPath,
-    setupCodexArgs(args, '--verify'),
-    { cwd: args.repoRoot, capture: true, timeout: 120000 }
-  );
-  process.stdout.write(finalVerify.stdout || '');
-  const summary = parseJsonFromOutput(finalVerify.stdout);
+  runNativePluginJsonPhase({
+    platform: 'Codex',
+    phase: 'mutation',
+    label: 'node repo/scripts/setup-codex-toolkit-plugin.cjs --write --json',
+    args: setupCodexArgs(args, '--write'),
+    cwd: args.repoRoot,
+    timeout: 180000
+  });
+  const summary = runNativePluginJsonPhase({
+    platform: 'Codex post-mutation',
+    phase: 'verification',
+    label: 'node repo/scripts/setup-codex-toolkit-plugin.cjs --verify --json',
+    args: setupCodexArgs(args, '--verify'),
+    cwd: args.repoRoot,
+    timeout: 120000
+  });
   return {
     status: 'refreshed',
     installed: summary.installed === true,
@@ -2761,17 +2800,19 @@ function claudeSetupBudgets(claudeCli = '') {
 
 function runClaudeNativePluginSetup(args) {
   const budgets = claudeSetupBudgets(args.claudeCli);
-  const verify = runCommand(
-    'node repo/scripts/setup-claude-toolkit-plugin.cjs --verify --json',
-    process.execPath,
-    setupClaudeArgs(args, '--verify'),
-    { cwd: args.repoRoot, capture: true, timeout: budgets.verify, allowFailure: true }
-  );
+  const verifySummary = runNativePluginJsonPhase({
+    platform: 'Claude',
+    phase: 'verification',
+    label: 'node repo/scripts/setup-claude-toolkit-plugin.cjs --verify --json',
+    args: setupClaudeArgs(args, '--verify'),
+    cwd: args.repoRoot,
+    timeout: budgets.verify,
+    allowRefreshRequired: true
+  });
   const expectedVersion = expectedToolkitVersion(args.repoRoot, 'claude-code');
   const manifestPath = path.join(args.repoRoot, '.claude-plugin', 'plugin.json');
-  if (verify.status === 0) {
-    process.stdout.write(verify.stdout || '');
-    const summary = parseJsonFromOutput(verify.stdout);
+  if (verifySummary) {
+    const summary = verifySummary;
     return {
       status: 'already fresh',
       manifest_path: manifestPath,
@@ -2794,22 +2835,22 @@ function runClaudeNativePluginSetup(args) {
       hook_trust_action: 'follow Claude Code native plugin trust prompts if shown'
     };
   }
-  process.stderr.write(verify.stderr || '');
-
-  runCommand(
-    'node repo/scripts/setup-claude-toolkit-plugin.cjs --write --json --scope user',
-    process.execPath,
-    setupClaudeArgs(args, '--write'),
-    { cwd: args.repoRoot, timeout: budgets.write }
-  );
-  const finalVerify = runCommand(
-    'node repo/scripts/setup-claude-toolkit-plugin.cjs --verify --json',
-    process.execPath,
-    setupClaudeArgs(args, '--verify'),
-    { cwd: args.repoRoot, capture: true, timeout: budgets.verify }
-  );
-  process.stdout.write(finalVerify.stdout || '');
-  const summary = parseJsonFromOutput(finalVerify.stdout);
+  runNativePluginJsonPhase({
+    platform: 'Claude',
+    phase: 'mutation',
+    label: 'node repo/scripts/setup-claude-toolkit-plugin.cjs --write --json --scope user',
+    args: setupClaudeArgs(args, '--write'),
+    cwd: args.repoRoot,
+    timeout: budgets.write
+  });
+  const summary = runNativePluginJsonPhase({
+    platform: 'Claude post-mutation',
+    phase: 'verification',
+    label: 'node repo/scripts/setup-claude-toolkit-plugin.cjs --verify --json',
+    args: setupClaudeArgs(args, '--verify'),
+    cwd: args.repoRoot,
+    timeout: budgets.verify
+  });
   return {
     status: 'refreshed',
     manifest_path: manifestPath,
@@ -2840,7 +2881,6 @@ function runClaudeNativePluginVerify(args) {
     setupClaudeArgs(args, '--verify'),
     { cwd: args.repoRoot, capture: true, timeout: claudeSetupBudgets(args.claudeCli).verify }
   );
-  process.stdout.write(result.stdout || '');
   return parseJsonFromOutput(result.stdout);
 }
 
@@ -2950,7 +2990,7 @@ function runBridgeAudit(args) {
     timeout: 120000
   });
   const stdout = result.stdout || '';
-  process.stdout.write(stdout);
+  // Captured audit JSON remains internal to avoid routine path disclosure.
   const jsonStart = stdout.indexOf('{');
   if (jsonStart < 0) throw new Error('Final bridge audit did not return valid JSON.');
   const audit = JSON.parse(stdout.slice(jsonStart));
@@ -2966,7 +3006,7 @@ function printSetupChecklist(plan) {
   console.log(plan.checklist_explanation);
   console.log('');
   console.log(`Host: ${plan.host}`);
-  console.log(`Managed checkout path: ${plan.managed_source.path}`);
+  console.log('Managed checkout path: <managed-toolkit-checkout>');
   console.log(`Managed checkout branch: ${plan.managed_source.branch}`);
   console.log(`Managed checkout remote: ${plan.managed_source.remote}`);
   console.log('');
@@ -3040,7 +3080,7 @@ function printTargetSummary(label, target, choice) {
   console.log(`${label} enabled: ${yesNo(target?.enabled === true)}`);
   console.log(`${label} synced: ${yesNo(target?.synced === true)}`);
   console.log(`${label} version: ${unknown(target?.synced_version)}`);
-  console.log(`${label} path: ${unknown(target?.path || target?.target_path || target?.sync_path)}`);
+  console.log(`${label} path status: ${target?.path || target?.target_path || target?.sync_path ? 'configured' : 'not configured'}`);
   console.log(`${label} status: ${unknown(target?.status)}`);
   console.log(`${label} action this run: ${targetActionSummary(choice)}`);
 }
@@ -3063,27 +3103,25 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   const targets = audit?.targets || {};
   const targetChoices = args.setupChoices?.targets || {};
   const active = activeWorktreeSummary(args);
-  const defaultPath = defaultManagedSourcePath();
-  const setupScriptPath = path.join(args.repoRoot, 'repo', 'scripts', 'setup-toolkit.cjs');
   console.log('');
   console.log('# setup toolkit final summary');
   console.log('');
   console.log('## Active worktree');
-  console.log(`Active worktree path: ${active.path}`);
+  console.log('Active worktree path: <active-worktree>');
   console.log(`Active worktree branch: ${active.branch}`);
   console.log(`Active worktree commit: ${active.commit}`);
   console.log(`Active worktree status: ${active.status}`);
   console.log(`Active worktree role: ${active.role}`);
   console.log('');
   console.log('## Managed main checkout');
-  console.log(`Managed checkout path: ${args.repoRoot}`);
-  console.log(`Managed checkout default path: ${defaultPath} (Windows default: %USERPROFILE%\\.ai-agent-toolkit\\source\\ai-agent-toolkit; POSIX default: $HOME/.ai-agent-toolkit/source/ai-agent-toolkit)`);
+  console.log('Managed checkout path: <managed-toolkit-checkout>');
+  console.log('Managed checkout default path: %USERPROFILE%\\.ai-agent-toolkit\\source\\ai-agent-toolkit (Windows) or $HOME/.ai-agent-toolkit/source/ai-agent-toolkit (POSIX)');
   console.log(`Managed checkout branch: ${args.repoBranch}`);
   console.log(`Managed checkout remote: ${unknown(managed.remote || args.repoRemote)}`);
   console.log(`Managed checkout commit before: ${unknown(managed.commit_before || current?.managed?.commit)}`);
   console.log(`Managed checkout commit after: ${unknown(managed.commit_after || managed.commit)}`);
   console.log(`Managed checkout update action: ${unknown(managed.update_action)}`);
-  console.log(`Setup script path executed: ${setupScriptPath}`);
+  console.log('Setup script path executed: <managed-toolkit-checkout>/repo/scripts/setup-toolkit.cjs');
   console.log('');
   console.log('## Question bank');
   console.log(`Question bank appeared: ${yesNo(questionBank?.appeared)}`);
@@ -3122,7 +3160,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   console.log(`PR #237 legacy block migrated: ${yesNo(delegation.migrated_legacy_block === true)}`);
   console.log(`Malformed historical Toolkit marker material repaired: ${yesNo(delegation.repaired_malformed_toolkit_material === true)}`);
   console.log(`Official V2 boolean enablement migrated to configured table: ${yesNo(delegation.migrated_v2_boolean_enablement === true)}`);
-  console.log(`Codex config path: ${unknown(delegation.config_path)}`);
+  console.log('Codex config path: <Codex user configuration>');
   console.log(`Configuration scope: ${unknown(delegation.client_scope || CODEX_CONFIG_CLIENT_SCOPE)}`);
   console.log(`Helper-capacity detail: ${unknown(delegation.detail)}`);
   console.log(`Temporary editor cleanup: ${unknown(delegation.temporary_cleanup || 'no temporary editor directory created')}`);
@@ -3150,7 +3188,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   }
   console.log('## Codex native plugin');
   if (args.host === 'codex') {
-    console.log(`Codex plugin cache path: ${unknown(nativeCache.cache_path)}`);
+    console.log('Codex plugin cache path: <Codex Toolkit cache>');
     console.log(`Codex expected Toolkit version: ${unknown(nativeCache.expected_version)}`);
     console.log(`Codex installed Toolkit version: ${unknown(nativeCache.installed_version)}`);
     console.log(`Codex plugin installed: ${yesNo(nativeCache.installed === true)}`);
@@ -3169,7 +3207,7 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   console.log('');
   console.log('## Claude Code native plugin');
   if (args.host === 'claude-code') {
-    console.log(`Claude plugin manifest path: ${unknown(nativeCache.manifest_path)}`);
+    console.log('Claude plugin manifest path: <managed-toolkit-checkout>/.claude-plugin/plugin.json');
     console.log(`Claude expected Toolkit version: ${unknown(nativeCache.expected_version)}`);
     console.log(`Claude manifest Toolkit version: ${unknown(nativeCache.manifest_version)}`);
     console.log(`Claude plugin status: ${unknown(nativeCache.status)}`);
@@ -3184,12 +3222,12 @@ function printFinalSummary({ args, current, managed, nativeCache, delegation, au
   console.log('');
   console.log('## Bridge state');
   console.log(`Repo auto-update enabled: ${yesNo(repo.enabled === true || args.repoAutoUpdate === true)}`);
-  console.log(`Repo auto-update path: ${unknown(repo.repo_path || args.repoRoot)}`);
+  console.log('Repo auto-update path: <managed-toolkit-checkout>');
   console.log(`Repo auto-update status: ${args.repoAutoUpdate ? unknown(repo.last_status || 'configured') : 'disabled'}`);
   console.log(`Update report writes enabled: ${args.updateReports}`);
   console.log('Update report opening behavior: action-required reports open automatically; successful reports stay closed');
   console.log(`Update report/log retention days: ${args.updateReportRetentionDays}`);
-  console.log(`Update report/log directory: ${unknown(cleanup.report_log_directory)}`);
+  console.log('Update report/log directory: <Toolkit update-report directory>');
   console.log(`Update report cleanup deleted count: ${cleanup.deleted_count ?? 0}`);
   console.log(`Update report cleanup error count: ${cleanup.error_count ?? 0}`);
   console.log('');

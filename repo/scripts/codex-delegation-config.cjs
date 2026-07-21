@@ -48,7 +48,7 @@ const {
   writeRegularFileAtomically,
 } = require('./codex-delegation-backup.cjs');
 
-const TOOLKIT_CLIENT_VERSION = '2.7.26';
+const TOOLKIT_CLIENT_VERSION = '2.7.28';
 const TRANSIENT_CLEANUP_CODES = new Set(['EBUSY', 'ENOTEMPTY', 'EPERM']);
 const APPROVAL_BINDING_SCHEMA = 'ai-agent-toolkit.codex-config-proposal-approval.v2';
 
@@ -525,7 +525,7 @@ async function inspectCodexMultiAgentRuntime(options = {}) {
       const runtime = v2?.enabled === true ? RUNTIMES.V2 : (v1?.enabled === true ? RUNTIMES.V1 : RUNTIMES.DISABLED);
       return {
         runtime,
-        detector: `${command} app-server experimentalFeature/list`,
+        detector: 'Codex app-server experimentalFeature/list',
         multi_agent_v2_enabled: v2 ? v2.enabled : null,
         multi_agent_v1_enabled: v1 ? v1.enabled : null,
         detail: `${runtime} detected from effective app-server feature state.`,

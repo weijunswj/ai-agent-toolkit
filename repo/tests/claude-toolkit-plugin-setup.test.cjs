@@ -313,7 +313,7 @@ test('Claude Toolkit plugin state evaluator rejects missing, disabled, stale, or
 
   state = setup.evaluateClaudeToolkitPluginState(installedList({ sourcePath: tmpRoot() }), { repoRoot });
   assert.equal(state.ok, false);
-  assert.match(state.errors.join('\n'), /source path does not match/i);
+  assert.match(state.errors.join('\n'), /source identity does not match/i);
 });
 
 test('Claude Toolkit plugin state evaluator refuses implicit downgrade from newer install', () => {
@@ -375,6 +375,88 @@ test('Claude Toolkit plugin state evaluator accepts the real claude plugin list 
   const state = setup.evaluateClaudeToolkitPluginState(realShapeList, { repoRoot });
   assert.equal(state.ok, true);
   assert.deepEqual(state.errors, []);
+});
+
+test('Claude Toolkit plugin state evaluator accepts current plugin-list output without projectPath using bound registry evidence', () => {
+  const commit = 'a'.repeat(40);
+  const currentShapeList = [{
+    id: `${setup.TOOLKIT_PLUGIN_NAME}@${setup.TOOLKIT_MARKETPLACE_NAME}`,
+    version: expectedVersion(),
+    scope: 'user',
+    enabled: true,
+    installPath: repoRoot
+  }];
+  const registryState = {
+    knownMarketplaces: {
+      [setup.TOOLKIT_MARKETPLACE_NAME]: { source: { source: 'directory', path: repoRoot } }
+    },
+    installedPlugins: {
+      plugins: {
+        [`${setup.TOOLKIT_PLUGIN_NAME}@${setup.TOOLKIT_MARKETPLACE_NAME}`]: [{
+          scope: 'user',
+          version: expectedVersion(),
+          installPath: repoRoot,
+          gitCommitSha: commit
+        }]
+      }
+    },
+    repoCommit: commit
+  };
+
+  const state = setup.evaluateClaudeToolkitPluginState(currentShapeList, { repoRoot, registryState });
+  assert.equal(state.ok, true);
+  assert.equal(state.sourceIdentity, 'claude-plugin-registry');
+  assert.equal(state.sourcePath, repoRoot);
+  assert.deepEqual(state.errors, []);
+});
+
+test('path-less current Claude state fails closed when registry source, install, or commit identity is not exact', () => {
+  const commit = 'a'.repeat(40);
+  const install = {
+    id: `${setup.TOOLKIT_PLUGIN_NAME}@${setup.TOOLKIT_MARKETPLACE_NAME}`,
+    version: expectedVersion(),
+    scope: 'user',
+    enabled: true,
+    installPath: repoRoot
+  };
+  const validRegistry = {
+    knownMarketplaces: {
+      [setup.TOOLKIT_MARKETPLACE_NAME]: { source: { source: 'directory', path: repoRoot } }
+    },
+    installedPlugins: {
+      plugins: {
+        [`${setup.TOOLKIT_PLUGIN_NAME}@${setup.TOOLKIT_MARKETPLACE_NAME}`]: [{
+          scope: 'user', version: expectedVersion(), installPath: repoRoot, gitCommitSha: commit
+        }]
+      }
+    },
+    repoCommit: commit
+  };
+
+  for (const registryState of [
+    { ...validRegistry, knownMarketplaces: {} },
+    { ...validRegistry, installedPlugins: { plugins: {} } },
+    { ...validRegistry, repoCommit: 'b'.repeat(40) }
+  ]) {
+    const state = setup.evaluateClaudeToolkitPluginState([install], { repoRoot, registryState });
+    assert.equal(state.ok, false);
+    assert.equal(state.canUpdateInPlace, false);
+  }
+});
+
+test('an explicit wrong plugin-list source cannot be overridden by matching registry evidence or leaked in errors', () => {
+  const wrongSource = tmpRoot();
+  const state = setup.evaluateClaudeToolkitPluginState(installedList({ sourcePath: wrongSource }), {
+    repoRoot,
+    registryState: {
+      knownMarketplaces: { [setup.TOOLKIT_MARKETPLACE_NAME]: { source: { path: repoRoot } } },
+      installedPlugins: { plugins: {} },
+      repoCommit: 'a'.repeat(40)
+    }
+  });
+  assert.equal(state.ok, false);
+  assert.match(state.errors.join('\n'), /source identity does not match/i);
+  assert.equal(state.errors.join('\n').includes(wrongSource), false);
 });
 
 test('claudeSpawnParts routes PATH-resolved bare Windows commands through an explicit non-shell cmd contract', { skip: process.platform !== 'win32' }, () => {
