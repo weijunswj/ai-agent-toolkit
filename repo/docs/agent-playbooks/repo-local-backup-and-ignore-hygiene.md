@@ -62,6 +62,7 @@ The API:
 - records repository-relative affected paths, original existence, mode where portable, byte size, SHA-256, LF/CRLF/mixed state, final-newline state, and the expected post-operation existence/size/checksum;
 - records only a SHA-256 repository identity, operation ID, UTC timestamp, schema, and retention flag;
 - never stores file contents, absolute repository paths, secrets, credentials, environment values, tokens, or connection strings in metadata;
+- rejects affected paths whose first normalized segment is `_agent-toolkit-backups` or `.agent-toolkit-backups`, so the recovery API cannot back up its own canonical or legacy evidence;
 - never deletes a completed generation automatically.
 
 Schema `ai-agent-toolkit.repo-local-backup.v1` is the only supported schema. Unknown or future schemas fail closed.
@@ -82,9 +83,19 @@ The supported restore route is:
 node repo/scripts/repo-local-backup.cjs restore --repo "C:\path with spaces\repository" --metadata "_agent-toolkit-backups/<generation>/restore.json"
 ```
 
-Restore validates the known schema, repository identity, direct completed-generation topology, repository-relative paths, no traversal or outside-repository resolution, no symlink traversal, payload checksums, and the exact expected current replacement state before writing. It restores exact original bytes, so LF/CRLF and final-newline behavior are preserved. A file that was originally missing returns to missing.
+Restore validates the known schema, repository identity, direct completed-generation topology, repository-relative paths, protected backup-root segments, no traversal or outside-repository resolution, and the exact expected current replacement state before writing. It resolves the completed generation and every payload ancestor, rejects symbolic links and Windows junction/reparse-point traversal where the platform exposes it, requires the payload leaf to be a regular non-link file beneath that exact resolved generation, and performs these checks before reading payload bytes. Payload checksums and the exact expected current replacement state still fail closed. Restore writes exact original bytes, so LF/CRLF and final-newline behavior are preserved. A file that was originally missing returns to missing.
+
+Preparation is part of the protected transaction boundary. Restore builds an incremental prepared list and removes every earlier private restore temporary if a later payload read, parent preparation, or temporary write fails. No target is mutated until every payload is prepared. Cleanup failure is fail-closed and routine output does not disclose private absolute temporary paths.
 
 Each target uses same-directory rename transactions. For a multi-file restore, the current replacement is held in a private rollback sibling until all targets succeed. An injected partial failure reverses already-applied targets to their exact pre-restore bytes and fails visibly. Checksum mismatch or uncertain topology fails closed. Restore never touches unrelated files and never removes the completed backup.
+
+Rollback-temporary cleanup retries the bounded transient Windows conditions `EPERM`, `EBUSY`, and `ENOTEMPTY`. Exhaustion returns `status: cleanup-incomplete`, exits the CLI non-zero, and reports that exact target restoration completed while private residue remains; it does not roll back an already verified restore or reveal the residue path. After the filesystem lock is released, retry only the deterministic metadata-bound cleanup route:
+
+```powershell
+node repo/scripts/repo-local-backup.cjs cleanup --repo "C:\path with spaces\repository" --metadata "_agent-toolkit-backups/<generation>/restore.json"
+```
+
+Cleanup first revalidates the metadata, payloads, repository identity, and restored target bytes. It considers only the generation-bound private rollback name beside each affected target, never deletes unrelated files, and leaves the completed backup intact.
 
 ## Native UAT And Later Consumers
 
