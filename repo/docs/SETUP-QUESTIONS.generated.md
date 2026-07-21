@@ -5,7 +5,7 @@ This reference uses a privacy-safe representative Codex state in which all curre
 
 Toolkit setup choices - 7 questions across 3 sections
 
-Bank reference: 51T3-Q9SD-38K3-YP9Q
+Bank reference: 84PJ-ZBV2-N6C2-NQDK
 
 Quick index
 
@@ -212,8 +212,8 @@ Quick index
 
 Reply with the displayed bank reference and either:
 
-- `51T3-Q9SD-38K3-YP9Q: all recommended`
-- only your changes, for example: `51T3-Q9SD-38K3-YP9Q: 1.2=B, 3.1=A`
+- `84PJ-ZBV2-N6C2-NQDK: all recommended`
+- only your changes, for example: `84PJ-ZBV2-N6C2-NQDK: 1.2=B, 3.1=A`
 
 Unspecified entries in the changed-only form mean: apply the displayed recommendation for that exact rendered question.
 The bank reference binds indexed input to this exact displayed host, order, state, recommendations, and choices.

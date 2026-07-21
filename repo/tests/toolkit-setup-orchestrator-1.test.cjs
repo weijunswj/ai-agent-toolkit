@@ -238,6 +238,10 @@ test('distinct piped answers follow the canonical question order without shifts'
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
+  const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
+  assert.match(bank, /Some visible questions are already resolved by explicit setup flags/);
+  assert.match(bank, /Reply with one line for each unresolved question in this exact order:[\s\S]*1\.2 Automatic updates[\s\S]*1\.3 Update reports[\s\S]*1\.4 Report retention[\s\S]*2\.1 Codex Toolkit maintenance/);
+  assert.doesNotMatch(bank, /Reply with the displayed bank reference and either|: all recommended/);
   assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*2\.1 Codex Toolkit maintenance: C - Keep current \(canonical: keep; effective: disable\)/);
   assert.doesNotMatch(result.stdout, /Codex helper agents:/);
   assert.match(result.stdout, /Question answers initially required: yes/);
@@ -250,6 +254,75 @@ test('distinct piped answers follow the canonical question order without shifts'
   assert.match(bridgeArgs, /--disable-update-report-open --enable-update-reports --update-report-retention-days 7 --write/);
   assert.doesNotMatch(bridgeArgs, /codex-plugin-auto-refresh/);
   assert.doesNotMatch(bridgeArgs, /--enable-target opencode/);
+});
+
+test('partial explicit flags reject concise input before writes and accept only the displayed ordered contract', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const args = ['--execute', '--repo-root', setupRepo, '--repo-remote', origin];
+  const env = isolatedHomeEnv(root);
+  const preview = run(args, { env, input: '' });
+  const reference = displayedBankReference(preview.stdout);
+  assert.match(preview.stdout, /Some visible questions are already resolved by explicit setup flags/);
+  assert.doesNotMatch(preview.stdout, /Reply with the displayed bank reference and either/);
+
+  const rejected = run(args, { env, input: `${reference}: all recommended\n` });
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /Concise bank-reference answers are not accepted when explicit setup flags already resolved part of the bank/);
+  assert.equal(fs.existsSync(path.join(setupRepo, 'BRIDGE_ARGS.log')), false);
+  assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false);
+
+  const accepted = run(args, {
+    env,
+    input: ['disable', 'enable', 'default', 'keep'].join('\n'),
+    timeout: 300000,
+  });
+  assert.equal(accepted.status, 0, accepted.stderr || accepted.stdout);
+  assert.match(accepted.stdout, /1\.2 Automatic updates: B - Turn off/);
+});
+
+test('multiple explicit flags render and accept one remaining ordered non-TTY answer', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const result = run([
+    '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
+    '--enable-repo-auto-update', '--enable-update-reports', '--default-update-report-retention-days',
+  ], { env: isolatedHomeEnv(root), input: 'B\n', timeout: 300000 });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
+  const guide = bank.slice(bank.indexOf('Some visible questions'));
+  assert.match(guide, /\*\*2\.1\*\* Codex Toolkit maintenance \[A-C\]/);
+  assert.doesNotMatch(guide, /\*\*1\.2\*\* Automatic updates \[A-C\]|: all recommended/);
+  assert.match(result.stdout, /2\.1 Codex Toolkit maintenance: B - Turn off/);
+});
+
+test('fully explicit setup does not wait for or advertise setup-question stdin', async () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const result = await runWithUnclosedStdin(script, [
+    '--execute', '--repo-root', setupRepo, '--repo-remote', origin,
+    '--enable-repo-auto-update', '--enable-update-reports', '--default-update-report-retention-days',
+    '--skip-codex-plugin-auto-refresh',
+  ], { env: isolatedHomeEnv(root), deadlineMs: 300000 });
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
+  assert.match(bank, /All visible setup questions are already resolved by explicit inputs/);
+  assert.match(bank, /No setup-question stdin is required or read/);
+  assert.doesNotMatch(bank, /Reply with the displayed bank reference|Reply with one line for each unresolved question/);
+});
+
+test('Windows drive-letter path with spaces remains line-by-line detail input', { skip: process.platform !== 'win32' }, () => {
+  const fixtureRoot = path.join(tmpRoot(), 'Managed Source With Spaces');
+  const { origin, setupRepo } = createGitBackedSetupRepo(fixtureRoot);
+  const result = run([
+    '--execute', '--managed-checkout', 'custom', '--repo-remote', origin,
+    '--enable-repo-auto-update', '--enable-update-reports', '--default-update-report-retention-days',
+    '--skip-codex-plugin-auto-refresh',
+  ], { env: isolatedHomeEnv(fixtureRoot), input: `${setupRepo}\n`, timeout: 300000 });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Then provide these required detail values in this exact order:[\s\S]*Custom managed checkout path/);
+  assert.doesNotMatch(result.stderr, /bank reference|concise/i);
+  assert.match(fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8'), new RegExp(escapeRegExp(setupRepo)));
 });
 
 test('explicit textual all recommended approves the exact visible bank', () => {

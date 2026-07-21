@@ -319,6 +319,29 @@ test('managed explicit flags without yes-recommended complete with non-TTY stdin
   assert.equal(result.code, 0, result.stderr || result.stdout);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
+  assert.equal((result.stdout.match(/^Bank reference: [0-9A-Z]{4}(?:-[0-9A-Z]{4}){3}$/gm) || []).length, 1);
+  assert.match(result.stdout, /All visible setup questions are already resolved by explicit inputs/);
+  assert.doesNotMatch(result.stdout, /Reply with the displayed bank reference|Reply with one line for each unresolved question/);
+});
+
+test('managed partial explicit flags preserve one bank and truthful child guidance', async () => {
+  const fixture = realManagedFixture();
+  const result = await runWithUnclosedStdin(script, [
+    '--execute', '--profile', 'auto-main', '--host', 'claude-code', '--repo-remote', fixture.origin,
+    '--enable-repo-auto-update',
+  ], {
+    env: isolatedHomeEnv(fixture.root),
+    closeStdinAfterOutput: core.QUESTION_BANK_COMPLETE,
+    deadlineMs: 300000,
+  });
+  assert.equal(result.code, 23, result.stderr || result.stdout);
+  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
+  assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
+  assert.equal((result.stdout.match(/^Bank reference: [0-9A-Z]{4}(?:-[0-9A-Z]{4}){3}$/gm) || []).length, 1);
+  assert.match(result.stdout, /Some visible questions are already resolved by explicit setup flags/);
+  assert.match(result.stdout, /Reply with one line for each unresolved question in this exact order/);
+  assert.doesNotMatch(result.stdout, /Reply with the displayed bank reference and either/);
+  assert.equal(fs.existsSync(path.join(fixture.managedPath, 'BRIDGE_ARGS.log')), false);
 });
 
 test('managed unresolved unclosed input displays the bank before EOF and then pauses when input closes', async () => {

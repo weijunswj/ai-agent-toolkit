@@ -380,18 +380,45 @@ test('bank reference covers host, order, recommendations and approval-visible se
   assert.match(reference, /^[0-9A-HJKMNP-TV-Z]{4}(?:-[0-9A-HJKMNP-TV-Z]{4}){3}$/);
   assert.doesNotMatch(reference, /[\\/:]|secret|user|home/i);
 
+  const payload = core.questionBankApprovalPayload(rows);
+  assert.equal(payload.schema, 'ai-agent-toolkit.setup-question-bank-approval.v2');
+  assert.equal(payload.host, 'codex');
+  assert.deepEqual(payload.sections.map((section) => section.title), ['Updates and reports', 'Computer performance', 'Other coding apps']);
+  assert.ok(payload.questions.every((question) => question.what_this_controls));
+  assert.ok(payload.questions.every((question) => question.recommendation.choice_ref && question.recommendation.label));
+
   const changedHost = core.withPresentationMetadata(rows, 'claude-code');
   const changedRecommendation = core.withPresentationMetadata(rows.map((row, index) => index === 0
     ? { ...row, recommended: row.choices.find((choice) => choice.value !== row.recommended).value }
     : row), 'codex');
   const reordered = core.withPresentationMetadata([rows[1], rows[0], ...rows.slice(2)], 'codex');
-  for (const changed of [changedHost, changedRecommendation, reordered]) {
+  const mutateFirst = (change) => core.withPresentationMetadata(rows.map((row, index) => index === 0
+    ? change({ ...row, presentation: undefined, currentState: { ...row.currentState }, choices: row.choices.map((choice) => ({ ...choice })) })
+    : { ...row, presentation: undefined }), 'codex');
+  const approvalVisibleMutations = [
+    mutateFirst((row) => ({ ...row, whatThisControls: `${row.whatThisControls} Changed displayed scope.` })),
+    mutateFirst((row) => ({ ...row, title: `${row.title} changed` })),
+    mutateFirst((row) => ({ ...row, current: `${row.current} Changed displayed state.` })),
+    mutateFirst((row) => ({ ...row, currentState: { ...row.currentState, verification: 'changed-verification' } })),
+    mutateFirst((row) => ({ ...row, recommendation_reason: `${row.recommendation_reason} Changed reason.` })),
+    mutateFirst((row) => ({ ...row, recommended_outcome: `${row.recommended_outcome} Changed outcome.` })),
+    mutateFirst((row) => ({ ...row, choices: row.choices.map((choice, index) => index === 0 ? { ...choice, label: `${choice.label} changed` } : choice) })),
+    mutateFirst((row) => ({ ...row, choices: row.choices.map((choice, index) => index === 0 ? { ...choice, consequence: `${choice.consequence} Changed consequence.` } : choice) })),
+    mutateFirst((row) => ({ ...row, afterApplying: `${row.afterApplying} Changed effect.` })),
+    mutateFirst((row) => ({ ...row, availability: { ...row.availability, condition: `${row.availability.condition} Changed condition.` } })),
+    mutateFirst((row) => ({ ...row, selected: row.choices.find((choice) => choice.value !== (row.selected || '')).value })),
+  ];
+  for (const changed of [changedHost, changedRecommendation, reordered, ...approvalVisibleMutations]) {
     assert.notEqual(changed[0].presentation.bank_reference, reference);
     assert.throws(
       () => core.parseConciseQuestionBankAnswer(`${reference}: all recommended`, changed),
       /stale or belongs/,
     );
   }
+
+  const identical = core.withPresentationMetadata(rows.map((row) => ({ ...row, presentation: undefined })), 'codex');
+  assert.equal(identical[0].presentation.bank_identity, rows[0].presentation.bank_identity);
+  assert.equal(identical[0].presentation.bank_reference, reference);
 });
 
 test('display letters and canonical textual values resolve without becoming stored identities', () => {
