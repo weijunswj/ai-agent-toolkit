@@ -35,6 +35,30 @@ function auditFixture({ targets = false, retentionDays = 7 } = {}) {
   };
 }
 
+function specsForAudit(audit) {
+  return core.setupQuestionSpecs(core.parseArgs(['--execute', '--host', 'codex']), {
+    managed: { currentPath: '', selectedPath: '', defaultPath: '', exists: false, git: false, dirty: false, branch: '', remote: '' },
+    audit,
+    runtime: { runtime: 'unknown' },
+    delegation: { status: 'unsupported', helper_count: null },
+    nativePlugin: { status: 'unknown' },
+  });
+}
+
+function parseConciseInFreshProcess(specs, input) {
+  const child = spawnSync(process.execPath, ['-e', [
+    `const core = require(${JSON.stringify(path.join(repoRoot, 'repo', 'scripts', 'setup-toolkit-core.cjs'))});`,
+    "const payload = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));",
+    'try { core.parseConciseQuestionBankAnswer(payload.input, payload.specs); process.stdout.write("accepted"); }',
+    'catch (error) { process.stderr.write(String(error.message)); process.exitCode = 1; }',
+  ].join('\n')], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    input: JSON.stringify({ specs, input }),
+  });
+  return child;
+}
+
 test('plan mode remains read-only and exposes the existing setup journey', () => {
   const root = tmpRoot();
   const result = run(['--plan', '--json'], { env: isolatedHomeEnv(root) });
@@ -240,7 +264,7 @@ test('distinct piped answers follow the canonical question order without shifts'
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
   assert.match(bank, /Some visible questions are already resolved by explicit setup flags/);
-  assert.match(bank, /Reply with one line for each unresolved question in this exact order:[\s\S]*1\.2 Automatic updates[\s\S]*1\.3 Update reports[\s\S]*1\.4 Report retention[\s\S]*2\.1 Codex Toolkit maintenance/);
+  assert.match(bank, /Reply with one line for each unresolved question in this exact order:[\s\S]*\*\*1\.2\*\* Automatic updates[\s\S]*\*\*1\.3\*\* Update reports[\s\S]*\*\*1\.4\*\* Report retention[\s\S]*\*\*2\.1\*\* Codex Toolkit maintenance/);
   assert.doesNotMatch(bank, /Reply with the displayed bank reference and either|: all recommended/);
   assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*2\.1 Codex Toolkit maintenance: C - Keep current \(canonical: keep; effective: disable\)/);
   assert.doesNotMatch(result.stdout, /Codex helper agents:/);
@@ -363,8 +387,8 @@ test('changed-only piped answer applies recommendations except exact indexed cha
 
 test('cross-process concise replay fails before mapping across host and conditional target changes', () => {
   const root = tmpRoot();
-  const { origin, setupRepo } = createGitBackedSetupRepo(root);
-  const baseArgs = ['--execute', '--repo-root', setupRepo, '--repo-remote', origin];
+  const { origin } = createGitBackedSetupRepo(root);
+  const baseArgs = ['--execute', '--repo-remote', origin];
   const baseEnv = isolatedHomeEnv(root);
 
   const codexPreview = run(baseArgs, { env: baseEnv, input: '' });
@@ -377,35 +401,24 @@ test('cross-process concise replay fails before mapping across host and conditio
   assert.match(claudeReplay.stderr, /reference is stale or belongs to a different rendered bank/);
   assert.doesNotMatch(claudeReplay.stderr, /unavailable question|unavailable choice/);
 
-  const withTargetsEnv = { ...baseEnv, SETUP_FAKE_AUDIT_JSON: JSON.stringify(auditFixture({ targets: true })) };
-  const withoutTargetsEnv = { ...baseEnv, SETUP_FAKE_AUDIT_JSON: JSON.stringify(auditFixture({ targets: false })) };
-  const withTargetsPreview = run(baseArgs, { env: withTargetsEnv, input: '' });
-  const withTargetsReference = displayedBankReference(withTargetsPreview.stdout);
-  const removedReplay = run(baseArgs, { env: withoutTargetsEnv, input: `${withTargetsReference}: 3.1=D\n` });
+  const withTargets = specsForAudit(auditFixture({ targets: true }));
+  const withoutTargets = specsForAudit(auditFixture({ targets: false }));
+  const withTargetsReference = withTargets[0].presentation.bank_reference;
+  const removedReplay = parseConciseInFreshProcess(withoutTargets, `${withTargetsReference}: 3.1=D`);
   assert.notEqual(removedReplay.status, 0);
   assert.match(removedReplay.stderr, /reference is stale or belongs/);
 
-  const withoutTargetsPreview = run(baseArgs, { env: withoutTargetsEnv, input: '' });
-  const withoutTargetsReference = displayedBankReference(withoutTargetsPreview.stdout);
-  const addedReplay = run(baseArgs, { env: withTargetsEnv, input: `${withoutTargetsReference}: all recommended\n` });
+  const withoutTargetsReference = withoutTargets[0].presentation.bank_reference;
+  const addedReplay = parseConciseInFreshProcess(withTargets, `${withoutTargetsReference}: all recommended`);
   assert.notEqual(addedReplay.status, 0);
   assert.match(addedReplay.stderr, /reference is stale or belongs/);
 });
 
 test('cross-process concise replay fails when a displayed recommendation changes', () => {
-  const root = tmpRoot();
-  const { origin, setupRepo } = createGitBackedSetupRepo(root);
-  const args = ['--execute', '--repo-root', setupRepo, '--repo-remote', origin];
-  const env = isolatedHomeEnv(root);
-  const initial = run(args, {
-    env: { ...env, SETUP_FAKE_AUDIT_JSON: JSON.stringify(auditFixture({ retentionDays: 7 })) },
-    input: '',
-  });
-  const reference = displayedBankReference(initial.stdout);
-  const replay = run(args, {
-    env: { ...env, SETUP_FAKE_AUDIT_JSON: JSON.stringify(auditFixture({ retentionDays: 30 })) },
-    input: `${reference}: all recommended\n`,
-  });
+  const initial = specsForAudit(auditFixture({ retentionDays: 7 }));
+  const changed = specsForAudit(auditFixture({ retentionDays: 30 }));
+  const reference = initial[0].presentation.bank_reference;
+  const replay = parseConciseInFreshProcess(changed, `${reference}: all recommended`);
   assert.notEqual(replay.status, 0);
   assert.match(replay.stderr, /reference is stale or belongs/);
 });
