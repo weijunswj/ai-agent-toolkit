@@ -5,6 +5,8 @@ This reference uses a privacy-safe representative Codex state in which all curre
 
 Toolkit setup choices - 7 questions across 3 sections
 
+Bank reference: 51T3-Q9SD-38K3-YP9Q
+
 Quick index
 
 1.1 Update source - Recommended: B - Keep the current update source
@@ -208,11 +210,12 @@ Quick index
 
 ---
 
-Reply with either:
+Reply with the displayed bank reference and either:
 
-- `all recommended`
-- or only your changes, for example: `1.2=B, 3.1=A`
+- `51T3-Q9SD-38K3-YP9Q: all recommended`
+- only your changes, for example: `51T3-Q9SD-38K3-YP9Q: 1.2=B, 3.1=A`
 
 Unspecified entries in the changed-only form mean: apply the displayed recommendation for that exact rendered question.
-This explicit consequence applies before input is accepted; empty, partial, malformed, missing, timed-out, or EOF input never means all recommended.
+The bank reference binds indexed input to this exact displayed host, order, state, recommendations, and choices.
+Missing, stale, partial, malformed, timed-out, or EOF input never means all recommended and fails before setup writes.
 Existing canonical textual values, complete line-by-line answers, explicit setup flags, and explicit --yes-recommended remain supported.

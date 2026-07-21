@@ -89,6 +89,7 @@ test('managed child bank is forwarded exactly once before intentional status 23 
   assert.equal(result.status, 23, result.stderr || result.stdout);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_BEGIN), 1);
   assert.equal(markerCount(result.stdout, core.QUESTION_BANK_COMPLETE), 1);
+  assert.equal((result.stdout.match(/Bank reference: 0123-4567-89AB-CDEF/g) || []).length, 1);
   assert.match(result.stderr, /displayed the complete question bank and requires additional approved answers/);
 });
 

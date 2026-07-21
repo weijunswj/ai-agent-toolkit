@@ -275,6 +275,10 @@ node repo/scripts/toolkit-agent-control.cjs launch --spec path/to/launch-spec.js
 
 The result is exactly `start`, `queue`, or `refuse-root-only`. `queue` entries expire after ten minutes and are visible through `node repo/scripts/toolkit-agent-control.cjs status`. Retry the same reviewed specification with the returned `queue_id`; only the oldest live entry can start, so later parents cannot leapfrog it. Refusal reports only the safe root-only action and no private process details.
 
+### Setup Bank Approval References
+
+Non-interactive and managed-continuation concise answers must carry the displayed privacy-safe 80-bit bank reference. It is derived from the complete approval-relevant SHA-256 identity, including host, visible order, stable IDs and keys, indexed references, current/effective and verification state, availability, recommendations and reasons, canonical choices and visible labels/consequences, and after-applying effects. The reference is validated before any indexed question or choice is mapped; missing, malformed, truncated, cross-host, reordered, conditional, recommendation-changed, or otherwise stale input fails before writes. A live TTY instead uses the exact in-memory bank for one concise-command stage after rendering, with Enter selecting one-at-a-time prompts and invalid input re-prompted. Choices requiring another path, retention duration, or advanced value collect it before approval in TTY mode and are rejected with exact non-interactive instructions otherwise.
+
 ### Supported Pre-PR Checker Workflow
 
 Do not hand-author a checker prompt, context digest, or review ID. Provide the bounded JSON input through stdin so private task and diff content does not enter argv:

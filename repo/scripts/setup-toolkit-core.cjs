@@ -34,6 +34,8 @@ const MANAGED_BANK_MAX_BYTES = 1024 * 1024;
 const MANAGED_STDOUT_MAX_BYTES = MANAGED_BANK_MAX_BYTES + (256 * 1024);
 const MANAGED_STDERR_MAX_BYTES = 256 * 1024;
 const MANAGED_CONTROL_MAX_BYTES = 4096;
+const BANK_REFERENCE_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+const BANK_REFERENCE_PATTERN = /^[0-9A-HJKMNP-TV-Z]{4}(?:-[0-9A-HJKMNP-TV-Z]{4}){3}$/;
 
 function repoRootFromScript() {
   return path.resolve(__dirname, '..', '..');
@@ -146,6 +148,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     repoAutoUpdate: true,
     updateReports: true,
     updateReportRetentionDays: DEFAULT_UPDATE_REPORT_RETENTION_DAYS,
+    updateReportRetentionDaysExplicit: false,
     updateReportOpen: false,
     codexPluginAutoRefresh: true,
     enableTargets: [],
@@ -252,10 +255,12 @@ function parseArgs(argv = process.argv.slice(2)) {
     } else if (arg === '--keep-update-reports') args.setupChoices.updateReports = 'keep';
     else if (arg === '--update-report-retention-days') {
       args.updateReportRetentionDays = parsePositiveInteger(next(), arg);
+      args.updateReportRetentionDaysExplicit = true;
       args.setupChoices.updateReportRetention = 'custom';
     }
     else if (arg.startsWith('--update-report-retention-days=')) {
       args.updateReportRetentionDays = parsePositiveInteger(arg.slice('--update-report-retention-days='.length), '--update-report-retention-days');
+      args.updateReportRetentionDaysExplicit = true;
       args.setupChoices.updateReportRetention = 'custom';
     } else if (arg === '--default-update-report-retention-days') {
       args.updateReportRetentionDays = DEFAULT_UPDATE_REPORT_RETENTION_DAYS;
@@ -1661,7 +1666,10 @@ function spreadsheetChoiceReference(index) {
 }
 
 function questionBankSemanticIdentity(specs) {
-  const semanticBank = specs.map((spec) => ({
+  const semanticBank = {
+    schema: 'ai-agent-toolkit.setup-question-bank-approval.v1',
+    host: specs[0]?.presentation?.host || 'unknown',
+    questions: specs.map((spec) => ({
     id: spec.id,
     key: spec.key,
     section: spec.section,
@@ -1680,11 +1688,35 @@ function questionBankSemanticIdentity(specs) {
       consequence: choice.consequence,
       presentation_ref: choice.presentation_ref,
     })),
-  }));
+    })),
+  };
   return crypto.createHash('sha256').update(JSON.stringify(semanticBank)).digest('hex');
 }
 
-function withPresentationMetadata(specs) {
+function bankReferenceFromIdentity(identity) {
+  const bytes = Buffer.from(String(identity || ''), 'hex');
+  if (bytes.length !== 32) throw new Error('Setup question bank identity must be a SHA-256 digest.');
+  let bits = 0;
+  let bitCount = 0;
+  let compact = '';
+  for (const byte of bytes.subarray(0, 10)) {
+    bits = (bits << 8) | byte;
+    bitCount += 8;
+    while (bitCount >= 5) {
+      bitCount -= 5;
+      compact += BANK_REFERENCE_ALPHABET[(bits >>> bitCount) & 31];
+      bits &= (1 << bitCount) - 1;
+    }
+  }
+  return compact.match(/.{4}/g).join('-');
+}
+
+function normalizeBankReference(value) {
+  const normalized = String(value || '').trim().toUpperCase();
+  return BANK_REFERENCE_PATTERN.test(normalized) ? normalized : '';
+}
+
+function withPresentationMetadata(specs, host = specs[0]?.presentation?.host || 'unknown') {
   const sections = [];
   const sectionByName = new Map();
   for (const spec of specs) {
@@ -1714,6 +1746,7 @@ function withPresentationMetadata(specs) {
       ...spec,
       choices,
       presentation: {
+        host,
         section_id: section.id,
         section_index: section.index,
         question_index: questionIndex,
@@ -1725,9 +1758,10 @@ function withPresentationMetadata(specs) {
     };
   });
   const bankIdentity = questionBankSemanticIdentity(presented);
+  const bankReference = bankReferenceFromIdentity(bankIdentity);
   return presented.map((spec) => ({
     ...spec,
-    presentation: { ...spec.presentation, bank_identity: bankIdentity },
+    presentation: { ...spec.presentation, bank_identity: bankIdentity, bank_reference: bankReference },
   }));
 }
 
@@ -2115,7 +2149,7 @@ function setupQuestionSpecs(args, current) {
     recommended_value: spec.recommended,
     selected_value: spec.selected,
     empty_input_behavior: spec.recommended,
-  })));
+  })), args.host);
 }
 
 function clonedSetupArgs(args) {
@@ -2185,7 +2219,8 @@ function renderQuestionBankHeader(specs, markdown = true) {
   const questionCount = specs[0]?.presentation.total_visible_question_count || 0;
   const sectionCount = specs[0]?.presentation.total_visible_section_count || 0;
   const heading = `Toolkit setup choices - ${questionCount} questions across ${sectionCount} sections`;
-  const lines = [markdown ? `# ${heading}` : heading, '', 'Quick index', ''];
+  const bankReference = specs[0]?.presentation.bank_reference || '';
+  const lines = [markdown ? `# ${heading}` : heading, '', `Bank reference: ${bankReference}`, '', 'Quick index', ''];
   for (const spec of specs) {
     lines.push(`${spec.presentation.question_ref} ${spec.title} - Recommended: ${spec.presentation.recommended_choice_ref} - ${choiceLabel(spec, spec.recommended)}`);
   }
@@ -2207,22 +2242,43 @@ function changedOnlyExample(specs) {
   }).join(', ');
 }
 
-function renderAnswerGuide(specs, markdown = true) {
+function renderAnswerGuide(specs, markdown = true, mode = 'non-tty') {
   const example = changedOnlyExample(specs);
+  const bankReference = specs[0]?.presentation.bank_reference || '';
+  if (mode === 'tty') {
+    return [
+      'After this complete bank, enter either:',
+      '',
+      markdown ? '- `all recommended`' : '  - all recommended',
+      markdown ? `- only your changes, for example: \`${example}\`` : `  - only your changes, for example: ${example}`,
+      markdown ? '- press Enter to answer questions one at a time' : '  - press Enter to answer questions one at a time',
+      '',
+      'Unspecified changed-only entries use the displayed recommendation for this in-memory bank.',
+      'Malformed concise input is rejected and can be corrected before any setup write.',
+      'Choice letters and existing canonical textual values remain supported in one-at-a-time mode.',
+    ];
+  }
+  if (mode === 'tty-one-at-a-time') {
+    return [
+      'After this complete bank, answer unresolved questions one at a time.',
+      'Displayed choice letters and existing canonical textual values are accepted; invalid input is re-prompted before any setup write.',
+    ];
+  }
   const lines = [
-    'Reply with either:',
+    'Reply with the displayed bank reference and either:',
     '',
-    markdown ? '- `all recommended`' : '  - all recommended',
-    markdown ? `- or only your changes, for example: \`${example}\`` : `  - or only your changes, for example: ${example}`,
+    markdown ? `- \`${bankReference}: all recommended\`` : `  - ${bankReference}: all recommended`,
+    markdown ? `- only your changes, for example: \`${bankReference}: ${example}\`` : `  - only your changes, for example: ${bankReference}: ${example}`,
     '',
     'Unspecified entries in the changed-only form mean: apply the displayed recommendation for that exact rendered question.',
-    'This explicit consequence applies before input is accepted; empty, partial, malformed, missing, timed-out, or EOF input never means all recommended.',
+    'The bank reference binds indexed input to this exact displayed host, order, state, recommendations, and choices.',
+    'Missing, stale, partial, malformed, timed-out, or EOF input never means all recommended and fails before setup writes.',
     'Existing canonical textual values, complete line-by-line answers, explicit setup flags, and explicit --yes-recommended remain supported.',
   ];
   return lines;
 }
 
-function renderSetupQuestionBankTerminal(specs) {
+function renderSetupQuestionBankTerminal(specs, options = {}) {
   specs = ensurePresentationMetadata(specs);
   const lines = [
     QUESTION_BANK_BEGIN,
@@ -2256,7 +2312,8 @@ function renderSetupQuestionBankTerminal(specs) {
       ? `${choiceReference(spec, selectedValue)} - ${choiceLabel(spec, selectedValue)}`
       : '(answer required)'}`);
   }
-  lines.push('', ...renderAnswerGuide(specs, false), '', QUESTION_BANK_COMPLETE, '');
+  const guideMode = options.conciseCommands === false ? 'tty-one-at-a-time' : 'tty';
+  lines.push('', ...renderAnswerGuide(specs, false, guideMode), '', QUESTION_BANK_COMPLETE, '');
   return lines.join('\n');
 }
 
@@ -2418,12 +2475,50 @@ async function readNonInteractiveStdin() {
   return Buffer.concat(chunks, total).toString('utf8');
 }
 
-function parseConciseQuestionBankAnswer(input, specs) {
+function looksLikeConciseQuestionBankAnswer(value) {
+  const text = String(value || '').trim();
+  return /all\s+recommended/i.test(text) || /^\d+\.\d+\s*=/.test(text);
+}
+
+function parseConciseQuestionBankAnswer(input, specs, options = {}) {
   const text = String(input || '').trim();
   if (!text) return null;
-  if (/^all\s+recommended$/i.test(text)) {
+  const expectedReference = specs[0]?.presentation.bank_reference || '';
+  const requireBankReference = options.requireBankReference !== false;
+  let suppliedReference = expectedReference;
+  let answerText = text;
+  if (requireBankReference) {
+    const envelope = text.match(/^([^:\s]+)\s*:\s*([\s\S]+)$/);
+    if (!envelope) {
+      if (looksLikeConciseQuestionBankAnswer(text)) {
+        throw new Error(`Concise setup answers require the displayed bank reference. Reply with ${expectedReference}: followed by all recommended or indexed changes.`);
+      }
+      return null;
+    }
+    // A drive-letter path or another canonical line-by-line value may contain
+    // a colon. Treat it as an approval envelope only when the payload is
+    // recognizably one of the bounded concise answer modes.
+    if (!looksLikeConciseQuestionBankAnswer(envelope[2])) return null;
+    suppliedReference = normalizeBankReference(envelope[1]);
+    if (!suppliedReference) throw new Error('Setup question bank reference is malformed or truncated; copy the complete displayed reference and retry before any setup write.');
+    if (suppliedReference !== expectedReference) throw new Error('Setup question bank reference is stale or belongs to a different rendered bank; review the current bank and answer with its displayed reference.');
+    answerText = envelope[2].trim();
+  } else {
+    const optionalEnvelope = text.match(/^([^:\s]+)\s*:\s*([\s\S]+)$/);
+    if (optionalEnvelope) {
+      const normalized = normalizeBankReference(optionalEnvelope[1]);
+      if (!normalized || normalized !== expectedReference) {
+        throw new Error('Setup question bank reference does not match this live rendered bank.');
+      }
+      suppliedReference = normalized;
+      answerText = optionalEnvelope[2].trim();
+    }
+  }
+  if (/^all\s+recommended$/i.test(answerText)) {
     return {
       mode: 'all-recommended',
+      binding_mode: requireBankReference ? 'displayed-reference' : 'same-process',
+      bank_reference: suppliedReference,
       bank_identity: specs[0]?.presentation.bank_identity || questionBankSemanticIdentity(specs),
       selections: specs.map((spec) => ({
         question_id: spec.id,
@@ -2433,11 +2528,11 @@ function parseConciseQuestionBankAnswer(input, specs) {
       })),
     };
   }
-  if (/all\s+recommended/i.test(text)) {
+  if (/all\s+recommended/i.test(answerText)) {
     throw new Error('Setup question bank answer mixes or malforms the all recommended mode.');
   }
-  if (!/^\d+\.\d+\s*=\s*[A-Za-z]{1,2}(?:\s*,\s*\d+\.\d+\s*=\s*[A-Za-z]{1,2})*$/.test(text)) {
-    if (/\d+\.\d+\s*=/.test(text)) {
+  if (!/^\d+\.\d+\s*=\s*[A-Za-z]{1,2}(?:\s*,\s*\d+\.\d+\s*=\s*[A-Za-z]{1,2})*$/.test(answerText)) {
+    if (/\d+\.\d+\s*=/.test(answerText)) {
       throw new Error('Setup question bank changed-only answer has malformed separators or mixed answer modes.');
     }
     return null;
@@ -2445,7 +2540,7 @@ function parseConciseQuestionBankAnswer(input, specs) {
   const byReference = new Map(specs.map((spec) => [spec.presentation.question_ref, spec]));
   const seen = new Set();
   const overrides = [];
-  for (const token of text.split(',')) {
+  for (const token of answerText.split(',')) {
     const match = token.trim().match(/^(\d+\.\d+)\s*=\s*([A-Za-z]{1,2})$/);
     if (!match) throw new Error('Setup question bank changed-only answer has malformed separators.');
     const [, questionRef, rawChoiceRef] = match;
@@ -2465,6 +2560,8 @@ function parseConciseQuestionBankAnswer(input, specs) {
   const byQuestionId = new Map(overrides.map((selection) => [selection.question_id, selection]));
   return {
     mode: 'recommended-except',
+    binding_mode: requireBankReference ? 'displayed-reference' : 'same-process',
+    bank_reference: suppliedReference,
     bank_identity: specs[0]?.presentation.bank_identity || questionBankSemanticIdentity(specs),
     selections: specs.map((spec) => byQuestionId.get(spec.id) || ({
       question_id: spec.id,
@@ -2477,7 +2574,8 @@ function parseConciseQuestionBankAnswer(input, specs) {
 
 function assertQuestionBankAnswerBinding(parsed, specs) {
   const currentIdentity = specs[0]?.presentation.bank_identity || questionBankSemanticIdentity(specs);
-  if (!parsed || parsed.bank_identity !== currentIdentity) {
+  const currentReference = specs[0]?.presentation.bank_reference || bankReferenceFromIdentity(currentIdentity);
+  if (!parsed || parsed.bank_identity !== currentIdentity || parsed.bank_reference !== currentReference) {
     throw new Error('Setup question bank answer does not match the exact rendered bank.');
   }
   if (parsed.selections.length !== specs.length) {
@@ -2513,7 +2611,23 @@ async function promptForChoice(spec, lines, rl) {
   for (;;) {
     const range = `${spec.choices[0].presentation_ref}-${spec.choices.at(-1).presentation_ref}`;
     const answer = await rl.question(`${spec.presentation.question_ref} ${spec.title} [${range}] (letter or canonical value; Enter=${spec.presentation.recommended_choice_ref}): `);
-    return resolveDisplayedChoiceAnswer(spec, answer);
+    const resolved = resolveDisplayedChoiceAnswer(spec, answer);
+    if (choiceValues(spec).includes(resolved)) return resolved;
+    console.log(`${spec.title} must be one of: ${choiceValues(spec).join(', ')}. Enter a displayed letter or canonical value.`);
+  }
+}
+
+async function promptForTTYCommand(specs, rl) {
+  for (;;) {
+    const answer = await rl.question('Enter "all recommended", enter indexed changes, or press Enter to answer questions one at a time: ');
+    if (!String(answer).trim()) return null;
+    try {
+      const parsed = parseConciseQuestionBankAnswer(answer, specs, { requireBankReference: false });
+      if (parsed) return parsed;
+      console.log('Enter exactly "all recommended", indexed changes such as 1.2=B, or press Enter for one-at-a-time questions.');
+    } catch (error) {
+      console.log(`${error.message} Correct the concise answer or press Enter for one-at-a-time questions.`);
+    }
   }
 }
 
@@ -2572,6 +2686,19 @@ async function requireHighHelperCapacityApproval(args, lines, rl) {
   args.approveHighHelperCapacity = true;
 }
 
+async function promptForReportRetentionDays(lines, rl) {
+  if (lines) {
+    const value = nextNonEmptyLine(lines);
+    if (!value) throw new Error('Choose another report-retention duration requires a positive day-count answer');
+    return parsePositiveInteger(value, 'Report retention day count');
+  }
+  for (;;) {
+    const answer = (await rl.question('Report retention duration in days: ')).trim();
+    try { return parsePositiveInteger(answer, 'Report retention day count'); }
+    catch (error) { console.log(error.message); }
+  }
+}
+
 function effectiveChoiceSummary(args, current, spec, value) {
   if (spec.key === 'repoAutoUpdate') return args.repoAutoUpdate ? 'enable' : 'disable';
   if (spec.key === 'updateReports') return args.updateReports ? 'enable' : 'disable';
@@ -2588,11 +2715,12 @@ function effectiveChoiceSummary(args, current, spec, value) {
   return value;
 }
 
-async function answerSetupQuestionBank(args, current) {
+async function answerSetupQuestionBank(args, current, options = {}) {
+  const isTTY = options.isTTY === undefined ? process.stdin.isTTY === true : options.isTTY === true;
   const initialSpecs = setupQuestionSpecs(args, current);
   assertManagedCheckoutChoiceAvailable(args, initialSpecs);
   const initialMissingCount = initialSpecs.filter((spec) => !choiceForKey(args, spec.key)).length;
-  let answerSource = initialMissingCount ? (process.stdin.isTTY ? 'interactive' : 'stdin') : 'explicit flags';
+  let answerSource = initialMissingCount ? (isTTY ? 'interactive' : 'stdin') : 'explicit flags';
   let completeStdinConsumed = false;
 
   if (args.yesRecommended) {
@@ -2605,25 +2733,56 @@ async function answerSetupQuestionBank(args, current) {
   let specs = setupQuestionSpecs(args, current);
   let missing = specs.filter((spec) => !choiceForKey(args, spec.key));
   let needsCustomPath = args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit;
+  let needsRetentionDetails = args.setupChoices.updateReportRetention === 'custom' && !args.updateReportRetentionDaysExplicit;
   let needsHelperDetails = args.setupChoices.codexHelperCapacity === 'custom'
     && (args.codexHelperCount === null || (args.codexHelperCount > 1 && !args.approveHighHelperCapacity));
   let needsClaudeManualDetails = args.setupChoices.claudeAgentCapacity === 'manual' && args.claudeManualMaximum === null;
-  const needsPromptedAnswers = missing.length > 0 || needsCustomPath || needsHelperDetails || needsClaudeManualDetails;
-  const needsCodexProposalInput = !process.stdin.isTTY && needsPipedCodexProposalApproval(args, current);
+  const needsPromptedAnswers = missing.length > 0 || needsCustomPath || needsRetentionDetails || needsHelperDetails || needsClaudeManualDetails;
+  const needsCodexProposalInput = !isTTY && needsPipedCodexProposalApproval(args, current);
 
   // The complete canonical bank is the first input-dependent protocol event.
   // In particular, an open non-TTY pipe can never suppress bank visibility:
   // unresolved answers are consumed only after the parent validates, forwards,
   // and acknowledges this exact bank payload.
   const rendered = emitCompleteQuestionBank(specs, {
-    render: process.stdin.isTTY ? renderSetupQuestionBankTerminal : renderSetupQuestionBank,
+    render: isTTY
+      ? (rows) => renderSetupQuestionBankTerminal(rows, { conciseCommands: initialMissingCount === initialSpecs.length })
+      : renderSetupQuestionBank,
+    ...(options.write ? { write: options.write } : {}),
   });
 
-  const rawStdin = (needsPromptedAnswers || needsCodexProposalInput) && !process.stdin.isTTY
+  const rawStdin = (needsPromptedAnswers || needsCodexProposalInput) && !isTTY
     ? await readNonInteractiveStdin()
     : null;
   let lines = rawStdin === null ? null : rawStdin.split(/\r?\n/);
   let approvedBankAnswer = null;
+  let rl = null;
+
+  if (isTTY && missing.length && initialMissingCount === initialSpecs.length) {
+    rl = options.createReadlineInterface
+      ? options.createReadlineInterface()
+      : readline.createInterface({ input: process.stdin, output: process.stdout });
+    const conciseAnswer = await promptForTTYCommand(specs, rl);
+    if (conciseAnswer) {
+      assertQuestionBankAnswerBinding(conciseAnswer, specs);
+      for (const selection of conciseAnswer.selections) {
+        const spec = specs.find((candidate) => candidate.id === selection.question_id);
+        assignChoice(args, spec.key, selection.canonical_value);
+      }
+      approvedBankAnswer = conciseAnswer;
+      answerSource = conciseAnswer.mode === 'all-recommended'
+        ? 'interactive all recommended'
+        : 'interactive recommended except listed changes';
+      specs = setupQuestionSpecs(args, current);
+      missing = specs.filter((spec) => !choiceForKey(args, spec.key));
+      needsCustomPath = args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit;
+      needsRetentionDetails = args.setupChoices.updateReportRetention === 'custom' && !args.updateReportRetentionDaysExplicit;
+      needsHelperDetails = args.setupChoices.codexHelperCapacity === 'custom'
+        && (args.codexHelperCount === null || (args.codexHelperCount > 1 && !args.approveHighHelperCapacity));
+      needsClaudeManualDetails = args.setupChoices.claudeAgentCapacity === 'manual' && args.claudeManualMaximum === null;
+    }
+  }
+
   if (rawStdin !== null) {
     const conciseAnswer = parseConciseQuestionBankAnswer(rawStdin, specs);
     if (conciseAnswer) {
@@ -2644,9 +2803,18 @@ async function answerSetupQuestionBank(args, current) {
       specs = setupQuestionSpecs(args, current);
       missing = specs.filter((spec) => !choiceForKey(args, spec.key));
       needsCustomPath = args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit;
+      needsRetentionDetails = args.setupChoices.updateReportRetention === 'custom' && !args.updateReportRetentionDaysExplicit;
       needsHelperDetails = args.setupChoices.codexHelperCapacity === 'custom'
         && (args.codexHelperCount === null || (args.codexHelperCount > 1 && !args.approveHighHelperCapacity));
       needsClaudeManualDetails = args.setupChoices.claudeAgentCapacity === 'manual' && args.claudeManualMaximum === null;
+      const detailInstructions = [];
+      if (needsCustomPath) detailInstructions.push('Choose another update location requires `--repo-root <path>` or complete line-by-line input.');
+      if (needsRetentionDetails) detailInstructions.push('Choose another report-retention duration requires `--update-report-retention-days <positive-days>` or complete line-by-line input.');
+      if (needsHelperDetails) detailInstructions.push('The selected helper compatibility choice requires its explicit bounded helper details.');
+      if (needsClaudeManualDetails) detailInstructions.push('Manual Claude capacity requires `--claude-agent-maximum <positive-number>`.');
+      if (detailInstructions.length) {
+        throw new Error(`Concise non-interactive setup answer requires additional values: ${detailInstructions.join(' ')}`);
+      }
     }
   }
 
@@ -2676,8 +2844,12 @@ async function answerSetupQuestionBank(args, current) {
     console.log('Answer the remaining setup choices now. Setup will not write preferences or targets before these answers are complete.');
   }
 
-  const remainingPromptedAnswers = missing.length > 0 || needsCustomPath || needsHelperDetails || needsClaudeManualDetails;
-  const rl = remainingPromptedAnswers && !lines ? readline.createInterface({ input: process.stdin, output: process.stdout }) : null;
+  const remainingPromptedAnswers = missing.length > 0 || needsCustomPath || needsRetentionDetails || needsHelperDetails || needsClaudeManualDetails;
+  if (remainingPromptedAnswers && !lines && !rl) {
+    rl = options.createReadlineInterface
+      ? options.createReadlineInterface()
+      : readline.createInterface({ input: process.stdin, output: process.stdout });
+  }
   try {
     for (const spec of missing) {
       const answer = await promptForChoice(spec, lines, rl);
@@ -2685,6 +2857,10 @@ async function answerSetupQuestionBank(args, current) {
         throw new Error(`${spec.title} must be one of: ${choiceValues(spec).join(', ')}`);
       }
       assignChoice(args, spec.key, answer);
+    }
+    if (args.setupChoices.updateReportRetention === 'custom' && !args.updateReportRetentionDaysExplicit) {
+      args.updateReportRetentionDays = await promptForReportRetentionDays(lines, rl);
+      args.updateReportRetentionDaysExplicit = true;
     }
     if (args.setupChoices.codexHelperCapacity === 'custom') {
       if (args.codexHelperCount === null) args.codexHelperCount = await promptForHelperCount(lines, rl);
@@ -2729,7 +2905,7 @@ async function answerSetupQuestionBank(args, current) {
   }
   return {
     appeared: true,
-    answers_initially_required: initialMissingCount > 0 || needsCustomPath || needsHelperDetails || needsClaudeManualDetails,
+    answers_initially_required: initialMissingCount > 0 || needsCustomPath || needsRetentionDetails || needsHelperDetails || needsClaudeManualDetails,
     answers_supplied_by_complete_stdin: completeStdinConsumed,
     answers_prompted_interactively: Boolean(rl),
     stopped_for_answers: false,
@@ -3669,6 +3845,7 @@ module.exports = {
   spreadsheetChoiceReference,
   parseConciseQuestionBankAnswer,
   assertQuestionBankAnswerBinding,
+  answerSetupQuestionBank,
   resolveDisplayedChoiceAnswer,
   renderSetupQuestionBank,
   reconcileClaudeQuestionChoices,

@@ -8,6 +8,33 @@ const {
 } = require('./toolkit-setup-test-support.cjs');
 const core = require('../scripts/setup-toolkit-core.cjs');
 
+function displayedBankReference(output) {
+  const match = String(output || '').match(/Bank reference: ([0-9A-HJKMNP-TV-Z-]+)/);
+  assert.ok(match, output);
+  return match[1];
+}
+
+function auditFixture({ targets = false, retentionDays = 7 } = {}) {
+  const target = (name) => ({
+    detected: targets,
+    enabled: targets,
+    synced: targets,
+    status: targets ? 'current' : 'not detected',
+    synced_version: '',
+    path: '',
+    name,
+  });
+  return {
+    update_report_enabled: true,
+    update_report_open_enabled: false,
+    update_report_retention_days: retentionDays,
+    codex_plugin_auto_refresh_enabled: false,
+    repo_auto_update: { enabled: false, last_status: 'configured', repo_path: '' },
+    update_report_cleanup: { retention_days: retentionDays, deleted_count: 0, error_count: 0, report_log_directory: 'private-value-never-rendered' },
+    targets: { opencode: target('opencode'), ag2: target('ag2') },
+  };
+}
+
 test('plan mode remains read-only and exposes the existing setup journey', () => {
   const root = tmpRoot();
   const result = run(['--plan', '--json'], { env: isolatedHomeEnv(root) });
@@ -118,7 +145,7 @@ test('canonical wizard renderer is compact, aligned, and free of implementation 
   assert.doesNotMatch(text, /\*\*Choices:\*\*[^\n]*(?:\/|\|)/);
   assert.doesNotMatch(terminal, /Codex helper agents|One helper at most|Use a custom number/i);
   assert.doesNotMatch(terminal, /Choices:[^\n]*(?:\/|,)/);
-  assert.match(text, /Reply with either:[\s\S]*`all recommended`[\s\S]*setup-toolkit-question-bank:complete/);
+  assert.match(text, /Reply with the displayed bank reference[\s\S]*: all recommended`[\s\S]*setup-toolkit-question-bank:complete/);
   for (const spec of planned.specs) assert.ok(spec.description.split(/(?<=[.!?])\s+/).filter(Boolean).length <= 2, spec.key);
 
   current.delegation.helper_count = 4;
@@ -228,9 +255,12 @@ test('distinct piped answers follow the canonical question order without shifts'
 test('explicit textual all recommended approves the exact visible bank', () => {
   const root = tmpRoot();
   const { origin } = createGitBackedSetupRepo(root);
+  const env = isolatedHomeEnv(root);
+  const preview = run(['--execute', '--repo-remote', origin], { env, input: '' });
+  const reference = displayedBankReference(preview.stdout);
   const result = run(['--execute', '--repo-remote', origin], {
-    env: isolatedHomeEnv(root),
-    input: 'all recommended\n',
+    env,
+    input: `${reference}: all recommended\n`,
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -243,9 +273,12 @@ test('explicit textual all recommended approves the exact visible bank', () => {
 test('changed-only piped answer applies recommendations except exact indexed changes', () => {
   const root = tmpRoot();
   const { origin } = createGitBackedSetupRepo(root);
+  const env = isolatedHomeEnv(root);
+  const preview = run(['--execute', '--repo-remote', origin], { env, input: '' });
+  const reference = displayedBankReference(preview.stdout);
   const result = run(['--execute', '--repo-remote', origin], {
-    env: isolatedHomeEnv(root),
-    input: '1.2=b, 2.1=B\n',
+    env,
+    input: `${reference}: 1.2=b, 2.1=B\n`,
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -253,6 +286,93 @@ test('changed-only piped answer applies recommendations except exact indexed cha
   assert.match(result.stdout, /1\.2 Automatic updates: B - Turn off \(canonical: disable; effective: disable\)/);
   assert.match(result.stdout, /2\.1 Codex Toolkit maintenance: B - Turn off \(canonical: disable; effective: disable\)/);
   assert.match(result.stdout, /1\.3 Update reports: A - Keep reports \(canonical: enable; effective: enable\)/);
+});
+
+test('cross-process concise replay fails before mapping across host and conditional target changes', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const baseArgs = ['--execute', '--repo-root', setupRepo, '--repo-remote', origin];
+  const baseEnv = isolatedHomeEnv(root);
+
+  const codexPreview = run(baseArgs, { env: baseEnv, input: '' });
+  const codexReference = displayedBankReference(codexPreview.stdout);
+  const claudeReplay = run([...baseArgs, '--host', 'claude-code'], {
+    env: baseEnv,
+    input: `${codexReference}: 2.1=B\n`,
+  });
+  assert.notEqual(claudeReplay.status, 0);
+  assert.match(claudeReplay.stderr, /reference is stale or belongs to a different rendered bank/);
+  assert.doesNotMatch(claudeReplay.stderr, /unavailable question|unavailable choice/);
+
+  const withTargetsEnv = { ...baseEnv, SETUP_FAKE_AUDIT_JSON: JSON.stringify(auditFixture({ targets: true })) };
+  const withoutTargetsEnv = { ...baseEnv, SETUP_FAKE_AUDIT_JSON: JSON.stringify(auditFixture({ targets: false })) };
+  const withTargetsPreview = run(baseArgs, { env: withTargetsEnv, input: '' });
+  const withTargetsReference = displayedBankReference(withTargetsPreview.stdout);
+  const removedReplay = run(baseArgs, { env: withoutTargetsEnv, input: `${withTargetsReference}: 3.1=D\n` });
+  assert.notEqual(removedReplay.status, 0);
+  assert.match(removedReplay.stderr, /reference is stale or belongs/);
+
+  const withoutTargetsPreview = run(baseArgs, { env: withoutTargetsEnv, input: '' });
+  const withoutTargetsReference = displayedBankReference(withoutTargetsPreview.stdout);
+  const addedReplay = run(baseArgs, { env: withTargetsEnv, input: `${withoutTargetsReference}: all recommended\n` });
+  assert.notEqual(addedReplay.status, 0);
+  assert.match(addedReplay.stderr, /reference is stale or belongs/);
+});
+
+test('cross-process concise replay fails when a displayed recommendation changes', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const args = ['--execute', '--repo-root', setupRepo, '--repo-remote', origin];
+  const env = isolatedHomeEnv(root);
+  const initial = run(args, {
+    env: { ...env, SETUP_FAKE_AUDIT_JSON: JSON.stringify(auditFixture({ retentionDays: 7 })) },
+    input: '',
+  });
+  const reference = displayedBankReference(initial.stdout);
+  const replay = run(args, {
+    env: { ...env, SETUP_FAKE_AUDIT_JSON: JSON.stringify(auditFixture({ retentionDays: 30 })) },
+    input: `${reference}: all recommended\n`,
+  });
+  assert.notEqual(replay.status, 0);
+  assert.match(replay.stderr, /reference is stale or belongs/);
+});
+
+test('non-interactive concise input rejects missing malformed and secondary-detail values before writes', () => {
+  const root = tmpRoot();
+  const { origin, setupRepo } = createGitBackedSetupRepo(root);
+  const args = ['--execute', '--repo-remote', origin];
+  const env = isolatedHomeEnv(root);
+  const preview = run(args, { env, input: '' });
+  const reference = displayedBankReference(preview.stdout);
+  for (const [input, expected] of [
+    ['all recommended\n', /require the displayed bank reference/],
+    ['BAD: all recommended\n', /malformed or truncated/],
+    [`${reference.slice(0, -1)}: all recommended\n`, /malformed or truncated/],
+  ]) {
+    const rejected = run(args, { env, input });
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.stderr, expected);
+  }
+  const plan = run(['--plan', '--json', '--repo-remote', origin], { env });
+  const bank = JSON.parse(plan.stdout).question_bank;
+  const retention = bank.find((row) => row.id === 'report-retention');
+  const custom = retention.choices.find((choice) => choice.value === 'custom');
+  const secondary = run(args, {
+    env,
+    input: `${reference}: ${retention.presentation.question_ref}=${custom.presentation_ref}\n`,
+  });
+  assert.notEqual(secondary.status, 0);
+  assert.match(secondary.stderr, /requires additional values.*update-report-retention-days/i);
+  const updateSource = bank.find((row) => row.id === 'update-source');
+  const customSource = updateSource.choices.find((choice) => choice.value === 'custom');
+  const sourceSecondary = run(args, {
+    env,
+    input: `${reference}: ${updateSource.presentation.question_ref}=${customSource.presentation_ref}\n`,
+  });
+  assert.notEqual(sourceSecondary.status, 0);
+  assert.match(sourceSecondary.stderr, /requires additional values.*--repo-root/i);
+  assert.equal(fs.existsSync(path.join(setupRepo, 'BRIDGE_ARGS.log')), false);
+  assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false);
 });
 
 test('extra non-empty piped answers fail before any setup write', () => {

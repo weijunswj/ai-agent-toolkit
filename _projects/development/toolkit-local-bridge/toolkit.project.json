@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.7.29",
+  "version": "2.7.30",
   "version_policy": "semver",
-  "version_notes": "Adds deterministic indexed setup-bank presentation and approval-bound concise answers while preserving semantic question identities and canonical values.",
+  "version_notes": "Binds non-interactive concise setup answers to a privacy-safe displayed bank reference and adds a truthful live TTY concise-command stage.",
   "outputs": [
     {
       "kind": "curated",

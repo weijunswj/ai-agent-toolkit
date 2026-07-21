@@ -44,6 +44,10 @@ Bridge version state is recorded independently for `repo`, `codex-plugin`, and `
 
 [repo/scripts/generate-setup-question-docs.cjs](../../../repo/scripts/generate-setup-question-docs.cjs) renders [repo/docs/SETUP-QUESTIONS.generated.md](../../../repo/docs/SETUP-QUESTIONS.generated.md) from the same resolved question metadata using a privacy-safe representative Codex state. The generated reference is not a second explanation source; Toolkit validation checks it for freshness.
 
+### Setup Bank Approval Reference Amendment
+
+The concise-answer in-memory binding described above applies directly only to a live TTY response entered after that process rendered the bank. Non-interactive and managed-continuation concise answers carry a displayed privacy-safe 80-bit bank reference derived from the full approval-relevant SHA-256 identity. The parser validates that reference before mapping any indexed question or choice, so host, order, current state, verification, availability, recommendation, choice, or after-applying drift fails closed. Live TTY setup presents one corrective concise-command stage before the one-at-a-time fallback; secondary path, retention, and advanced values are collected before approval or rejected with precise non-interactive instructions.
+
 ## AI-Facing Surfaces
 
 - `skills/toolkit-setup/` is generated from curated output as the only Toolkit setup or bridge discoverability skill.

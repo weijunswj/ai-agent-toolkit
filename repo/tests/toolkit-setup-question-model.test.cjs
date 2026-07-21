@@ -60,6 +60,33 @@ function updateSourceRow(managed, argv = ['--plan', '--host', 'codex']) {
   return core.setupQuestionSpecs(args, stateWithManaged(managed)).find((row) => row.id === 'update-source');
 }
 
+async function runInjectedTTY(responses, configure = () => {}) {
+  const args = core.parseArgs(['--execute', '--host', 'codex']);
+  const current = stateWithManaged(managedState());
+  current.audit.update_report_enabled = true;
+  current.audit.update_report_retention_days = 7;
+  current.audit.codex_plugin_auto_refresh_enabled = false;
+  configure({ args, current });
+  const prompts = [];
+  let bank = '';
+  const answers = [...responses];
+  const result = await core.answerSetupQuestionBank(args, current, {
+    isTTY: true,
+    write(text) { bank += text; return true; },
+    createReadlineInterface() {
+      return {
+        async question(prompt) {
+          prompts.push(prompt);
+          if (!answers.length) throw new Error(`TTY fixture exhausted at prompt: ${prompt}`);
+          return answers.shift();
+        },
+        close() {},
+      };
+    },
+  });
+  return { args, current, prompts, bank, result, remaining: answers };
+}
+
 test('all ordinary Codex questions expose complete canonical semantics', () => {
   const rows = allRows();
   assert.deepEqual(rows.map((row) => [row.id, row.title]), expectedCodexRows);
@@ -313,12 +340,13 @@ test('spreadsheet-style choice references are bounded and never wrap', () => {
 
 test('all recommended and changed-only answers resolve to canonical values', () => {
   const rows = allRows();
-  const all = core.parseConciseQuestionBankAnswer('  ALL recommended  ', rows);
+  const reference = rows[0].presentation.bank_reference;
+  const all = core.parseConciseQuestionBankAnswer(`  ${reference.toLowerCase()}: ALL recommended  `, rows);
   assert.equal(all.mode, 'all-recommended');
   assert.deepEqual(all.selections.map((selection) => selection.canonical_value), rows.map((row) => row.recommended));
   core.assertQuestionBankAnswerBinding(all, rows);
 
-  const changed = core.parseConciseQuestionBankAnswer('1.2=b, 3.1 = d', rows);
+  const changed = core.parseConciseQuestionBankAnswer(`${reference}: 1.2=b, 3.1 = d`, rows);
   assert.equal(changed.mode, 'recommended-except');
   assert.equal(changed.selections.find((selection) => selection.question_ref === '1.2').canonical_value, 'disable');
   assert.equal(changed.selections.find((selection) => selection.question_ref === '3.1').canonical_value, 'skip');
@@ -328,17 +356,42 @@ test('all recommended and changed-only answers resolve to canonical values', () 
 
 test('indexed answer parser rejects duplicates, unknowns, malformed modes, and stale banks', () => {
   const rows = allRows();
+  const reference = rows[0].presentation.bank_reference;
   assert.equal(core.parseConciseQuestionBankAnswer('', rows), null);
   assert.equal(core.parseConciseQuestionBankAnswer('enable\ndisable', rows), null);
-  assert.throws(() => core.parseConciseQuestionBankAnswer('1.2=B, 1.2=C', rows), /repeats question reference/);
-  assert.throws(() => core.parseConciseQuestionBankAnswer('9.9=A', rows), /unavailable question/);
-  assert.throws(() => core.parseConciseQuestionBankAnswer('1.2=Z', rows), /unavailable choice/);
-  assert.throws(() => core.parseConciseQuestionBankAnswer('1.2=B; 3.1=D', rows), /malformed separators/);
-  assert.throws(() => core.parseConciseQuestionBankAnswer('all recommended, 1.2=B', rows), /mixes or malforms/);
+  assert.equal(core.parseConciseQuestionBankAnswer('C:\\Toolkit path with spaces', rows), null);
+  assert.throws(() => core.parseConciseQuestionBankAnswer('1.2=B', rows), /require the displayed bank reference/);
+  assert.throws(() => core.parseConciseQuestionBankAnswer(`BAD: all recommended`, rows), /malformed or truncated/);
+  assert.throws(() => core.parseConciseQuestionBankAnswer(`0000-0000-0000-0000: all recommended`, rows), /stale or belongs/);
+  assert.throws(() => core.parseConciseQuestionBankAnswer(`${reference}: 1.2=B, 1.2=C`, rows), /repeats question reference/);
+  assert.throws(() => core.parseConciseQuestionBankAnswer(`${reference}: 9.9=A`, rows), /unavailable question/);
+  assert.throws(() => core.parseConciseQuestionBankAnswer(`${reference}: 1.2=Z`, rows), /unavailable choice/);
+  assert.throws(() => core.parseConciseQuestionBankAnswer(`${reference}: 1.2=B; 3.1=D`, rows), /malformed separators/);
+  assert.throws(() => core.parseConciseQuestionBankAnswer(`${reference}: all recommended, 1.2=B`, rows), /mixes or malforms/);
 
-  const parsed = core.parseConciseQuestionBankAnswer('1.2=B', rows);
+  const parsed = core.parseConciseQuestionBankAnswer(`${reference}: 1.2=B`, rows);
   const changedBank = core.withPresentationMetadata(rows.slice(0, -1).map((row) => ({ ...row, presentation: undefined })));
   assert.throws(() => core.assertQuestionBankAnswerBinding(parsed, changedBank), /exact rendered bank/);
+});
+
+test('bank reference covers host, order, recommendations and approval-visible semantics', () => {
+  const rows = allRows();
+  const reference = rows[0].presentation.bank_reference;
+  assert.match(reference, /^[0-9A-HJKMNP-TV-Z]{4}(?:-[0-9A-HJKMNP-TV-Z]{4}){3}$/);
+  assert.doesNotMatch(reference, /[\\/:]|secret|user|home/i);
+
+  const changedHost = core.withPresentationMetadata(rows, 'claude-code');
+  const changedRecommendation = core.withPresentationMetadata(rows.map((row, index) => index === 0
+    ? { ...row, recommended: row.choices.find((choice) => choice.value !== row.recommended).value }
+    : row), 'codex');
+  const reordered = core.withPresentationMetadata([rows[1], rows[0], ...rows.slice(2)], 'codex');
+  for (const changed of [changedHost, changedRecommendation, reordered]) {
+    assert.notEqual(changed[0].presentation.bank_reference, reference);
+    assert.throws(
+      () => core.parseConciseQuestionBankAnswer(`${reference}: all recommended`, changed),
+      /stale or belongs/,
+    );
+  }
 });
 
 test('display letters and canonical textual values resolve without becoming stored identities', () => {
@@ -346,4 +399,56 @@ test('display letters and canonical textual values resolve without becoming stor
   assert.equal(core.resolveDisplayedChoiceAnswer(automatic, 'b'), 'disable');
   assert.equal(core.resolveDisplayedChoiceAnswer(automatic, 'DISABLE'), 'disable');
   assert.equal(core.resolveDisplayedChoiceAnswer(automatic, ''), automatic.recommended);
+});
+
+test('TTY all recommended and changed-only commands execute after exactly one complete bank', async () => {
+  const all = await runInjectedTTY(['all recommended']);
+  assert.equal(all.result.answer_source, 'interactive all recommended');
+  assert.equal((all.bank.match(/setup-toolkit-question-bank:begin/g) || []).length, 1);
+  assert.equal((all.bank.match(/setup-toolkit-question-bank:complete/g) || []).length, 1);
+  assert.match(all.bank, /enter either:[\s\S]*all recommended[\s\S]*press Enter to answer questions one at a time/i);
+
+  const specs = core.setupQuestionSpecs(core.parseArgs(['--execute', '--host', 'codex']), stateWithManaged(managedState()));
+  const automatic = specs.find((row) => row.id === 'automatic-updates');
+  const off = automatic.choices.find((choice) => choice.value === 'disable');
+  const changed = await runInjectedTTY([`${automatic.presentation.question_ref}=${off.presentation_ref}`]);
+  assert.equal(changed.result.answer_source, 'interactive recommended except listed changes');
+  assert.equal(changed.args.setupChoices.repoAutoUpdate, 'disable');
+});
+
+test('TTY blank enters one-at-a-time mode and invalid answers are re-prompted', async () => {
+  const journey = await runInjectedTTY(['', 'Z', 'A', 'disable', 'enable', 'default', 'enable']);
+  assert.equal(journey.result.answer_source, 'interactive');
+  assert.match(journey.prompts[0], /all recommended/);
+  assert.match(journey.prompts[1], /1\.1 Update source/);
+  assert.match(journey.prompts[2], /1\.1 Update source/);
+  assert.match(journey.prompts[3], /1\.2 Automatic updates/);
+  assert.equal(journey.args.setupChoices.managedCheckout, 'default');
+  assert.equal(journey.args.setupChoices.repoAutoUpdate, 'disable');
+  assert.equal(journey.remaining.length, 0);
+});
+
+test('TTY malformed concise input can be corrected and secondary details are collected', async () => {
+  const corrected = await runInjectedTTY(['1.2=B, 1.2=C', '9.9=A', '1.2=B; 2.1=A', '1.2=B']);
+  assert.equal(corrected.args.setupChoices.repoAutoUpdate, 'disable');
+  assert.equal(corrected.prompts.filter((prompt) => /all recommended/.test(prompt)).length, 4);
+
+  const rows = core.setupQuestionSpecs(core.parseArgs(['--execute', '--host', 'codex']), stateWithManaged(managedState()));
+  const updateSource = rows.find((row) => row.id === 'update-source');
+  const customSource = updateSource.choices.find((choice) => choice.value === 'custom');
+  const customPath = path.resolve(repoRoot, '..', 'tty-approved-custom-source');
+  const sourceJourney = await runInjectedTTY([
+    `${updateSource.presentation.question_ref}=${customSource.presentation_ref}`,
+    customPath,
+  ]);
+  assert.equal(sourceJourney.args.repoRoot, customPath);
+
+  const retention = rows.find((row) => row.id === 'report-retention');
+  const customRetention = retention.choices.find((choice) => choice.value === 'custom');
+  const retentionJourney = await runInjectedTTY([
+    `${retention.presentation.question_ref}=${customRetention.presentation_ref}`,
+    '14',
+  ]);
+  assert.equal(retentionJourney.args.updateReportRetentionDays, 14);
+  assert.equal(retentionJourney.args.updateReportRetentionDaysExplicit, true);
 });
