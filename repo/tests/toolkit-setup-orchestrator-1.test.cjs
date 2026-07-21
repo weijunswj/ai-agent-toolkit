@@ -59,6 +59,20 @@ function parseConciseInFreshProcess(specs, input) {
   return child;
 }
 
+test('drive, spaced, UNC and file URL values remain non-concise in a fresh parser process', () => {
+  const specs = specsForAudit(auditFixture());
+  for (const value of [
+    'C:\\Toolkit Source',
+    'C:\\Toolkit Source With Spaces',
+    '\\\\server\\share\\Toolkit Source',
+    'file:///C:/Toolkit%20Source',
+  ]) {
+    const parsed = parseConciseInFreshProcess(specs, value);
+    assert.equal(parsed.status, 0, parsed.stderr);
+    assert.equal(parsed.stdout, 'accepted');
+  }
+});
+
 test('plan mode remains read-only and exposes the existing setup journey', () => {
   const root = tmpRoot();
   const result = run(['--plan', '--json'], { env: isolatedHomeEnv(root) });
@@ -320,6 +334,101 @@ test('multiple explicit flags render and accept one remaining ordered non-TTY an
   assert.match(result.stdout, /2\.1 Codex Toolkit maintenance: B - Turn off/);
 });
 
+test('choice-activated custom checkout detail is rendered and consumed in the canonical post-answer block', () => {
+  const root = tmpRoot();
+  const { origin } = createGitBackedSetupRepo(root);
+  const customPath = path.join(root, 'Chosen Managed Source');
+  const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
+    env: isolatedHomeEnv(root),
+    input: ['custom', 'A', 'C', 'B', customPath].join('\n'),
+    timeout: 300000,
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
+  assert.match(bank, /After those question-answer lines, append detail lines in this exact canonical order[\s\S]*1\. 1\.1 Update source: custom managed-checkout path \(when 1\.1 is [A-Z]+\/custom/);
+  assert.match(result.stdout, /Detail 1 1\.1 Update source: custom managed-checkout path - custom path supplied \(value remains private\)/);
+  assert.equal(fs.existsSync(path.join(customPath, 'BRIDGE_ARGS.log')), true);
+});
+
+test('choice-activated custom retention detail follows the displayed canonical order', () => {
+  const root = tmpRoot();
+  const { origin } = createGitBackedSetupRepo(root);
+  const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
+    env: isolatedHomeEnv(root),
+    input: ['A', 'A', 'B', 'B', '14'].join('\n'),
+    timeout: 300000,
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /2\. 1\.4 Report retention: positive report-retention duration in days \(when 1\.4 is B\/custom/);
+  assert.match(result.stdout, /Detail 2 1\.4 Report retention: positive report-retention duration in days - 14 days/);
+});
+
+test('simultaneous custom checkout and retention consume details in displayed order', () => {
+  const root = tmpRoot();
+  const { origin } = createGitBackedSetupRepo(root);
+  const customPath = path.join(root, 'Two Detail Managed Source');
+  const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
+    env: isolatedHomeEnv(root),
+    input: ['custom', 'A', 'B', 'B', customPath, '21'].join('\n'),
+    timeout: 300000,
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
+  assert.ok(bank.indexOf('1. 1.1 Update source: custom managed-checkout path') < bank.indexOf('2. 1.4 Report retention: positive report-retention duration'));
+  assert.ok(result.stdout.indexOf('Detail 1 1.1 Update source') < result.stdout.indexOf('Detail 2 1.4 Report retention'));
+  assert.match(result.stdout, /Detail 2 1\.4 Report retention:[^\n]*21 days/);
+  assert.equal(fs.existsSync(path.join(customPath, 'BRIDGE_ARGS.log')), true);
+});
+
+test('preselected path and helper details share rendering consumption and summary order with custom retention', () => {
+  const root = tmpRoot();
+  const { origin } = createGitBackedSetupRepo(root);
+  const customPath = path.join(root, 'Preselected Detail Source');
+  const result = run([
+    '--execute', '--repo-remote', origin, '--managed-checkout', 'custom', '--enable-repo-auto-update',
+    '--codex-helper-capacity', 'custom', '--codex-cli', createFakeCodexAppServer(root),
+    '--approve-codex-config-proposal',
+  ], {
+    env: isolatedHomeEnv(root),
+    input: ['A', 'B', 'B', customPath, '30', '1'].join('\n'),
+    timeout: 300000,
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const bank = result.stdout.split('<!-- setup-toolkit-question-bank:complete -->')[0];
+  const rendered = [
+    bank.indexOf('1. 1.1 Update source: custom managed-checkout path'),
+    bank.indexOf('2. 1.4 Report retention: positive report-retention duration'),
+    bank.indexOf('3. Advanced compatibility selection: bounded Codex helper count'),
+  ];
+  assert.ok(rendered.every((index) => index >= 0) && rendered[0] < rendered[1] && rendered[1] < rendered[2]);
+  const summary = [
+    result.stdout.indexOf('Detail 1 1.1 Update source'),
+    result.stdout.indexOf('Detail 2 1.4 Report retention'),
+    result.stdout.indexOf('Detail 3 Advanced compatibility selection'),
+  ];
+  assert.ok(summary.every((index) => index >= 0) && summary[0] < summary[1] && summary[1] < summary[2]);
+});
+
+test('missing and misordered conditional details fail before every setup write', () => {
+  for (const mode of ['missing', 'misordered']) {
+    const root = tmpRoot();
+    const { origin, setupRepo } = createGitBackedSetupRepo(root);
+    const customPath = path.join(root, 'Must Not Be Written');
+    const input = mode === 'missing'
+      ? ['custom', 'A', 'C', 'B'].join('\n')
+      : ['custom', 'A', 'B', 'B', '14', customPath].join('\n');
+    const result = run(['--execute', '--repo-remote', origin, '--enable-repo-auto-update'], {
+      env: isolatedHomeEnv(root), input, timeout: 300000,
+    });
+    assert.notEqual(result.status, 0);
+    if (mode === 'missing') assert.match(result.stderr, /requires the 1\.1 Update source custom path detail/);
+    else assert.match(result.stderr, /Report retention day count (?:must be|requires) a positive integer/);
+    assert.equal(fs.existsSync(customPath), false);
+    assert.equal(fs.existsSync(path.join(setupRepo, 'BRIDGE_ARGS.log')), false);
+    assert.equal(fs.existsSync(path.join(setupRepo, 'PLUGIN_SETUP.log')), false);
+  }
+});
+
 test('fully explicit setup does not wait for or advertise setup-question stdin', async () => {
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
@@ -344,7 +453,7 @@ test('Windows drive-letter path with spaces remains line-by-line detail input', 
     '--skip-codex-plugin-auto-refresh',
   ], { env: isolatedHomeEnv(fixtureRoot), input: `${setupRepo}\n`, timeout: 300000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Then provide these required detail values in this exact order:[\s\S]*Custom managed checkout path/);
+  assert.match(result.stdout, /append detail lines in this exact canonical order[\s\S]*custom managed-checkout path/);
   assert.doesNotMatch(result.stderr, /bank reference|concise/i);
   assert.match(fs.readFileSync(path.join(setupRepo, 'BRIDGE_ARGS.log'), 'utf8'), new RegExp(escapeRegExp(setupRepo)));
 });

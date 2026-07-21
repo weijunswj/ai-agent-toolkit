@@ -2285,6 +2285,122 @@ function changedOnlyExample(specs) {
   }).join(', ');
 }
 
+function buildNonTtyAnswerPlan(specs, args) {
+  const unresolved = specs.filter((spec) => !choiceForKey(args, spec.key));
+  const unresolvedIds = new Set(unresolved.map((spec) => spec.id));
+  const byId = new Map(specs.map((spec) => [spec.id, spec]));
+  const questions = unresolved.map((spec, index) => ({
+    kind: 'question',
+    order: index + 1,
+    question_id: spec.id,
+    question_ref: spec.presentation.question_ref,
+    title: spec.title,
+    choice_range: `${spec.choices[0].presentation_ref}-${spec.choices.at(-1).presentation_ref}`,
+    canonical_values: spec.choices.map((choice) => choice.value),
+  }));
+  const detailDefinitions = [
+    {
+      owner_question_id: 'update-source', detail_type: 'managed-checkout-path',
+      activation_key: 'managedCheckout', activation_value: 'custom',
+      supplied: () => args.repoRootExplicit,
+      validation_contract: 'non-empty path',
+      description: 'custom managed-checkout path',
+      missing_message: 'Setup question bank requires the 1.1 Update source custom path detail after the question-answer lines.',
+    },
+    {
+      owner_question_id: 'report-retention', detail_type: 'report-retention-days',
+      activation_key: 'updateReportRetention', activation_value: 'custom',
+      supplied: () => args.updateReportRetentionDaysExplicit,
+      validation_contract: 'positive integer day count',
+      description: 'positive report-retention duration in days',
+      missing_message: 'Setup question bank requires the 1.4 Report retention custom duration detail as a positive day-count line.',
+    },
+    {
+      owner_question_id: 'codex-helper-capacity', detail_type: 'codex-helper-count',
+      activation_key: 'codexHelperCapacity', activation_value: 'custom',
+      supplied: () => args.codexHelperCount !== null,
+      validation_contract: 'non-negative integer helper count',
+      description: 'bounded Codex helper count',
+      missing_message: 'Setup question bank requires the custom Codex helper-count detail line.',
+    },
+    {
+      owner_question_id: 'codex-helper-capacity', detail_type: 'codex-helper-risk-approval',
+      activation_key: 'codexHelperCapacity', activation_value: 'custom',
+      supplied: () => args.approveHighHelperCapacity || (args.codexHelperCount !== null && args.codexHelperCount <= 1),
+      validation_contract: 'exact approve when the helper count is greater than one',
+      description: 'exact `approve` RAM-risk acknowledgement; More than one helper may exhaust RAM, slow or freeze this PC, and stop useful work',
+      missing_message: 'Setup question bank requires an `approve` detail line for custom Codex helper counts above one.',
+      secondary_condition: 'helper-count-above-one',
+    },
+    {
+      owner_question_id: 'claude-agent-capacity', detail_type: 'claude-manual-maximum',
+      activation_key: 'claudeAgentCapacity', activation_value: 'manual',
+      supplied: () => args.claudeManualMaximum !== null,
+      validation_contract: 'positive integer worker maximum',
+      description: 'positive manual Claude worker maximum',
+      missing_message: 'Setup question bank requires the manual Claude capacity detail as a positive maximum line.',
+    },
+  ];
+  const details = [];
+  for (const definition of detailDefinitions) {
+    const owner = byId.get(definition.owner_question_id);
+    const ownerUnresolved = unresolvedIds.has(definition.owner_question_id);
+    const selected = args.setupChoices[definition.activation_key];
+    const choice = owner?.choices.find((candidate) => candidate.value === definition.activation_value);
+    const conditionallySelectable = Boolean(ownerUnresolved && choice);
+    const alreadyRequired = selected === definition.activation_value && !definition.supplied();
+    if (!conditionallySelectable && !alreadyRequired) continue;
+    details.push({
+      kind: 'detail',
+      order: details.length + 1,
+      owner_question_id: definition.owner_question_id,
+      question_ref: owner?.presentation.question_ref || null,
+      question_title: owner?.title || null,
+      detail_type: definition.detail_type,
+      activation_key: definition.activation_key,
+      activation_value: definition.activation_value,
+      activation_choice_ref: choice?.presentation_ref || null,
+      validation_contract: definition.validation_contract,
+      description: definition.description,
+      missing_message: definition.missing_message,
+      secondary_condition: definition.secondary_condition || null,
+      requirement: alreadyRequired ? 'required' : 'conditional',
+    });
+  }
+  return {
+    schema: 'ai-agent-toolkit.setup-question-answer-plan.v1',
+    mode: 'non-tty-line-by-line',
+    questions,
+    details,
+    entries: [...questions, ...details],
+  };
+}
+
+function detailPlanEntryApplies(entry, args) {
+  if (args.setupChoices[entry.activation_key] !== entry.activation_value) return false;
+  if (entry.detail_type === 'managed-checkout-path') return !args.repoRootExplicit;
+  if (entry.detail_type === 'report-retention-days') return !args.updateReportRetentionDaysExplicit;
+  if (entry.detail_type === 'codex-helper-count') return args.codexHelperCount === null;
+  if (entry.detail_type === 'codex-helper-risk-approval') return args.codexHelperCount > 1 && !args.approveHighHelperCapacity;
+  if (entry.detail_type === 'claude-manual-maximum') return args.claudeManualMaximum === null;
+  throw new Error(`Unsupported setup answer-plan detail type: ${entry.detail_type}`);
+}
+
+function detailPlanEntrySelected(entry, args) {
+  if (args.setupChoices[entry.activation_key] !== entry.activation_value) return false;
+  if (entry.detail_type === 'codex-helper-risk-approval') return args.codexHelperCount > 1;
+  return true;
+}
+
+function approvedDetailSummary(entry, args) {
+  if (entry.detail_type === 'managed-checkout-path') return 'custom path supplied (value remains private)';
+  if (entry.detail_type === 'report-retention-days') return `${args.updateReportRetentionDays} days`;
+  if (entry.detail_type === 'codex-helper-count') return `${args.codexHelperCount} helper(s)`;
+  if (entry.detail_type === 'codex-helper-risk-approval') return 'approved';
+  if (entry.detail_type === 'claude-manual-maximum') return `${args.claudeManualMaximum} worker(s)`;
+  throw new Error(`Unsupported setup answer-plan detail type: ${entry.detail_type}`);
+}
+
 function renderAnswerGuide(specs, markdown = true, mode = 'non-tty', options = {}) {
   const example = changedOnlyExample(specs);
   const bankReference = specs[0]?.presentation.bank_reference || '';
@@ -2308,24 +2424,30 @@ function renderAnswerGuide(specs, markdown = true, mode = 'non-tty', options = {
     ];
   }
   if (mode === 'non-tty-line-by-line') {
-    const unresolvedIds = new Set(options.unresolvedQuestionIds || []);
-    const unresolved = specs.filter((spec) => unresolvedIds.has(spec.id));
+    const answerPlan = options.answerPlan || { questions: [], details: [] };
     const lines = [
       'Some visible questions are already resolved by explicit setup flags, so concise bank-reference answers are not accepted for this bank.',
     ];
-    if (unresolved.length) {
+    if (answerPlan.questions.length) {
       lines.push('', 'Reply with one line for each unresolved question in this exact order:', '');
-      for (const spec of unresolved) {
-        const range = `${spec.choices[0].presentation_ref}-${spec.choices.at(-1).presentation_ref}`;
-        const values = spec.choices.map((choice) => choice.value).join(', ');
+      for (const entry of answerPlan.questions) {
+        const values = entry.canonical_values.join(', ');
         lines.push(markdown
-          ? `- **${spec.presentation.question_ref}** ${spec.title} [${range}] - enter a displayed letter or canonical value: ${values}`
-          : `  - ${spec.presentation.question_ref} ${spec.title} [${range}] - enter a displayed letter or canonical value: ${values}`);
+          ? `- **${entry.question_ref}** ${entry.title} [${entry.choice_range}] - enter a displayed letter or canonical value: ${values}`
+          : `  - ${entry.question_ref} ${entry.title} [${entry.choice_range}] - enter a displayed letter or canonical value: ${values}`);
       }
     }
-    if (options.detailInputGuidance?.length) {
-      lines.push('', 'Then provide these required detail values in this exact order:', '');
-      for (const detail of options.detailInputGuidance) lines.push(markdown ? `- ${detail}` : `  - ${detail}`);
+    if (answerPlan.details.length) {
+      lines.push('', 'After those question-answer lines, append detail lines in this exact canonical order only when the stated condition applies:', '');
+      for (const entry of answerPlan.details) {
+        const owner = entry.question_ref ? `${entry.question_ref} ${entry.question_title}` : 'Advanced compatibility selection';
+        const condition = entry.requirement === 'required'
+          ? `required by the explicit ${entry.activation_value} selection`
+          : `when ${entry.question_ref} is ${entry.activation_choice_ref}/${entry.activation_value}`;
+        const secondary = entry.secondary_condition === 'helper-count-above-one' ? ' and the entered helper count is greater than one' : '';
+        const rendered = `${entry.order}. ${owner}: ${entry.description} (${condition}${secondary}; ${entry.validation_contract}).`;
+        lines.push(markdown ? `- ${rendered}` : `  - ${rendered}`);
+      }
     }
     lines.push('', 'Do not repeat questions already selected by explicit flags. A bank-reference all-recommended or indexed changed-only reply is rejected in this mixed mode.',
       'The complete ordered answer set must be accepted before any setup write.');
@@ -2781,6 +2903,41 @@ async function promptForReportRetentionDays(lines, rl) {
   }
 }
 
+async function consumeNonTtyAnswerPlan(answerPlan, specs, args, lines) {
+  const specsById = new Map(specs.map((spec) => [spec.id, spec]));
+  for (const entry of answerPlan.questions) {
+    const spec = specsById.get(entry.question_id);
+    if (!spec) throw new Error(`Setup answer plan references unavailable question ${entry.question_id}.`);
+    if (!lines.length || (lines.length === 1 && !String(lines[0]).trim())) {
+      throw new Error(`Setup question bank requires an answer line for ${entry.question_ref} ${entry.title} in the displayed order.`);
+    }
+    const answer = await promptForChoice(spec, lines, null);
+    if (!choiceValues(spec).includes(answer)) {
+      throw new Error(`${entry.question_ref} ${entry.title} must be one of: ${choiceValues(spec).join(', ')}`);
+    }
+    assignChoice(args, spec.key, answer);
+  }
+  for (const entry of answerPlan.details) {
+    if (!detailPlanEntryApplies(entry, args)) continue;
+    if (!lines.some((line) => String(line).trim())) throw new Error(entry.missing_message);
+    if (entry.detail_type === 'managed-checkout-path') {
+      args.repoRoot = await promptForCustomPath(lines, null);
+      args.repoRootExplicit = true;
+    } else if (entry.detail_type === 'report-retention-days') {
+      args.updateReportRetentionDays = await promptForReportRetentionDays(lines, null);
+      args.updateReportRetentionDaysExplicit = true;
+    } else if (entry.detail_type === 'codex-helper-count') {
+      args.codexHelperCount = await promptForHelperCount(lines, null);
+    } else if (entry.detail_type === 'codex-helper-risk-approval') {
+      await requireHighHelperCapacityApproval(args, lines, null);
+    } else if (entry.detail_type === 'claude-manual-maximum') {
+      args.claudeManualMaximum = await promptForClaudeManualMaximum(lines, null);
+    } else {
+      throw new Error(`Unsupported setup answer-plan detail type: ${entry.detail_type}`);
+    }
+  }
+}
+
 function effectiveChoiceSummary(args, current, spec, value) {
   if (spec.key === 'repoAutoUpdate') return args.repoAutoUpdate ? 'enable' : 'disable';
   if (spec.key === 'updateReports') return args.updateReports ? 'enable' : 'disable';
@@ -2824,14 +2981,10 @@ async function answerSetupQuestionBank(args, current, options = {}) {
   const conciseAllowed = !args.yesRecommended
     && initialMissingCount > 0
     && initialMissingCount === initialSpecs.length;
-  const detailInputGuidance = [];
-  if (needsCustomPath) detailInputGuidance.push('Custom managed checkout path.');
-  if (needsRetentionDetails) detailInputGuidance.push('Positive report-retention duration in days.');
-  if (needsHelperDetails) detailInputGuidance.push('Required bounded helper compatibility values and approval, when applicable.');
-  if (needsClaudeManualDetails) detailInputGuidance.push('Positive manual Claude worker maximum.');
   const nonTtyAnswerMode = !needsPromptedAnswers
     ? 'non-tty-resolved'
     : (conciseAllowed ? 'non-tty' : 'non-tty-line-by-line');
+  const nonTtyAnswerPlan = !isTTY && needsPromptedAnswers ? buildNonTtyAnswerPlan(specs, args) : null;
   const displayedSpecs = specs;
 
   // The complete canonical bank is the first input-dependent protocol event.
@@ -2846,8 +2999,7 @@ async function answerSetupQuestionBank(args, current, options = {}) {
       })
       : (rows) => renderSetupQuestionBank(rows, {
         answerMode: nonTtyAnswerMode,
-        unresolvedQuestionIds: missing.map((spec) => spec.id),
-        detailInputGuidance,
+        answerPlan: nonTtyAnswerPlan,
       }),
     ...(options.write ? { write: options.write } : {}),
   });
@@ -2919,23 +3071,20 @@ async function answerSetupQuestionBank(args, current, options = {}) {
     }
   }
 
-  // Apply a complete piped answer set only after its canonical bank is visible.
-  // Invalid or partial input remains a pre-write pause/failure.
-  let deferredInputError = null;
-  if (!approvedBankAnswer && lines && !needsCustomPath && lines.length >= missing.length) {
-    for (const spec of missing) {
-      const answer = await promptForChoice(spec, lines, null);
-      if (!choiceValues(spec).includes(answer)) {
-        deferredInputError = new Error(`${spec.title} must be one of: ${choiceValues(spec).join(', ')}`);
-        break;
-      }
-      assignChoice(args, spec.key, answer);
-    }
+  // The same canonical plan that rendered the non-TTY grammar consumes it.
+  // Question answers always precede the conditionally applicable detail block.
+  if (!approvedBankAnswer && lines && nonTtyAnswerPlan) {
+    await consumeNonTtyAnswerPlan(nonTtyAnswerPlan, displayedSpecs, args, lines);
+    completeStdinConsumed = true;
     specs = setupQuestionSpecs(args, current);
     missing = specs.filter((spec) => !choiceForKey(args, spec.key));
+    needsCustomPath = args.setupChoices.managedCheckout === 'custom' && !args.repoRootExplicit;
+    needsRetentionDetails = args.setupChoices.updateReportRetention === 'custom' && !args.updateReportRetentionDaysExplicit;
+    needsHelperDetails = args.setupChoices.codexHelperCapacity === 'custom'
+      && (args.codexHelperCount === null || (args.codexHelperCount > 1 && !args.approveHighHelperCapacity));
+    needsClaudeManualDetails = args.setupChoices.claudeAgentCapacity === 'manual' && args.claudeManualMaximum === null;
   }
 
-  if (deferredInputError) throw deferredInputError;
   if (args.yesRecommended) {
     console.log('--yes-recommended selected; setup will apply these choices before writing.');
     console.log('');
@@ -3003,8 +3152,13 @@ async function answerSetupQuestionBank(args, current, options = {}) {
     console.log(`- ${spec.presentation.question_ref} ${spec.title}: ${choice.presentation_ref} - ${choice.label} (canonical: ${choice.value}; effective: ${effective}) - ${choice.consequence}`);
     if (spec.afterApplying) console.log(`  After applying: ${spec.afterApplying}`);
   }
-  if (args.setupChoices.claudeAgentCapacity === 'manual') console.log(`- Manual Claude worker maximum: ${args.claudeManualMaximum}`);
-  if (args.setupChoices.codexHelperCapacity === 'custom') {
+  const approvedPlanDetails = nonTtyAnswerPlan?.details.filter((entry) => detailPlanEntrySelected(entry, args)) || [];
+  for (const entry of approvedPlanDetails) {
+    const owner = entry.question_ref ? `${entry.question_ref} ${entry.question_title}` : 'Advanced compatibility selection';
+    console.log(`- Detail ${entry.order} ${owner}: ${entry.description} - ${approvedDetailSummary(entry, args)}`);
+  }
+  if (!nonTtyAnswerPlan && args.setupChoices.claudeAgentCapacity === 'manual') console.log(`- Manual Claude worker maximum: ${args.claudeManualMaximum}`);
+  if (!nonTtyAnswerPlan && args.setupChoices.codexHelperCapacity === 'custom') {
     console.log(`- Custom Codex helper count: ${args.codexHelperCount}`);
     console.log(`- Total MultiAgentV2 session threads including the main agent: ${args.codexHelperCount + 1}`);
     console.log(`- RAM-risk approval for more than one helper: ${args.codexHelperCount > 1 ? (args.approveHighHelperCapacity ? 'approved' : 'missing') : 'not required'}`);
@@ -3947,6 +4101,7 @@ module.exports = {
   parseArgs,
   setupQuestionSpecs,
   withPresentationMetadata,
+  buildNonTtyAnswerPlan,
   questionBankApprovalPayload,
   questionBankSemanticIdentity,
   spreadsheetChoiceReference,

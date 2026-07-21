@@ -360,6 +360,8 @@ test('indexed answer parser rejects duplicates, unknowns, malformed modes, and s
   assert.equal(core.parseConciseQuestionBankAnswer('', rows), null);
   assert.equal(core.parseConciseQuestionBankAnswer('enable\ndisable', rows), null);
   assert.equal(core.parseConciseQuestionBankAnswer('C:\\Toolkit path with spaces', rows), null);
+  assert.equal(core.parseConciseQuestionBankAnswer('\\\\server\\Toolkit path with spaces', rows), null);
+  assert.equal(core.parseConciseQuestionBankAnswer('file:///C:/Toolkit%20path', rows), null);
   assert.throws(() => core.parseConciseQuestionBankAnswer('1.2=B', rows), /require the displayed bank reference/);
   assert.throws(() => core.parseConciseQuestionBankAnswer(`BAD: all recommended`, rows), /malformed or truncated/);
   assert.throws(() => core.parseConciseQuestionBankAnswer(`0000-0000-0000-0000: all recommended`, rows), /stale or belongs/);
@@ -372,6 +374,41 @@ test('indexed answer parser rejects duplicates, unknowns, malformed modes, and s
   const parsed = core.parseConciseQuestionBankAnswer(`${reference}: 1.2=B`, rows);
   const changedBank = core.withPresentationMetadata(rows.slice(0, -1).map((row) => ({ ...row, presentation: undefined })));
   assert.throws(() => core.assertQuestionBankAnswerBinding(parsed, changedBank), /exact rendered bank/);
+});
+
+test('canonical non-TTY answer plan owns question and conditional detail ordering', () => {
+  const current = stateWithManaged(managedState({ exists: false, git: false, currentPath: '', selectedPath: '' }));
+  current.audit.update_report_enabled = true;
+  current.audit.update_report_retention_days = 7;
+  current.audit.codex_plugin_auto_refresh_enabled = false;
+  const args = core.parseArgs(['--execute', '--host', 'codex', '--enable-repo-auto-update']);
+  const rows = core.setupQuestionSpecs(args, current);
+  const plan = core.buildNonTtyAnswerPlan(rows, args);
+  assert.equal(plan.schema, 'ai-agent-toolkit.setup-question-answer-plan.v1');
+  assert.deepEqual(plan.questions.map((entry) => entry.question_id), [
+    'update-source', 'update-reports', 'report-retention', 'codex-toolkit-maintenance',
+  ]);
+  assert.deepEqual(plan.details.map((entry) => entry.detail_type), [
+    'managed-checkout-path', 'report-retention-days',
+  ]);
+  assert.deepEqual(plan.details.map((entry) => entry.order), [1, 2]);
+  assert.equal(plan.details[0].question_ref, '1.1');
+  assert.equal(plan.details[0].activation_choice_ref, rows.find((row) => row.id === 'update-source').choices.find((choice) => choice.value === 'custom').presentation_ref);
+  assert.equal(plan.details[1].question_ref, '1.4');
+  assert.equal(plan.details[1].activation_choice_ref, 'B');
+
+  const advanced = core.parseArgs([
+    '--execute', '--host', 'codex', '--managed-checkout', 'custom',
+    '--codex-helper-capacity', 'custom', '--enable-repo-auto-update',
+  ]);
+  const advancedRows = core.setupQuestionSpecs(advanced, current);
+  const advancedPlan = core.buildNonTtyAnswerPlan(advancedRows, advanced);
+  assert.deepEqual(advancedPlan.details.map((entry) => [entry.detail_type, entry.requirement]), [
+    ['managed-checkout-path', 'required'],
+    ['report-retention-days', 'conditional'],
+    ['codex-helper-count', 'required'],
+    ['codex-helper-risk-approval', 'required'],
+  ]);
 });
 
 test('bank reference covers host, order, recommendations and approval-visible semantics', () => {
@@ -474,8 +511,10 @@ test('TTY malformed concise input can be corrected and secondary details are col
   const customRetention = retention.choices.find((choice) => choice.value === 'custom');
   const retentionJourney = await runInjectedTTY([
     `${retention.presentation.question_ref}=${customRetention.presentation_ref}`,
+    'not-a-day-count',
     '14',
   ]);
   assert.equal(retentionJourney.args.updateReportRetentionDays, 14);
   assert.equal(retentionJourney.args.updateReportRetentionDaysExplicit, true);
+  assert.equal(retentionJourney.prompts.filter((prompt) => /Report retention duration in days/.test(prompt)).length, 2);
 });
