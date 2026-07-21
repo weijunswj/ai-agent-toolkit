@@ -110,15 +110,15 @@ test('canonical wizard renderer is compact, aligned, and free of implementation 
   const planned = core.plannedQuestionBank(args, current);
   const text = core.renderSetupQuestionBank(planned.specs);
   const terminal = core.renderSetupQuestionBankTerminal(planned.specs);
-  assert.match(text, /## Automatic updates[\s\S]*## Computer performance/);
-  assert.doesNotMatch(text, /## Other coding apps/);
+  assert.match(text, /## 1\. Updates and reports[\s\S]*## 2\. Computer performance/);
+  assert.doesNotMatch(text, /## \d+\. Other coding apps/);
   assert.doesNotMatch(text, /Update report auto-open|MultiAgentV[12]|max_threads|max_concurrent|AI-AGENT-TOOLKIT|PR #|issue #|C:\\|restore command|migration/i);
   assert.doesNotMatch(text, /Codex helper agents|One helper at most|Use a custom number/i);
   assert.doesNotMatch(text, /\bAdvanced(?: options)?\b|Show advanced choices|More options/);
   assert.doesNotMatch(text, /\*\*Choices:\*\*[^\n]*(?:\/|\|)/);
   assert.doesNotMatch(terminal, /Codex helper agents|One helper at most|Use a custom number/i);
   assert.doesNotMatch(terminal, /Choices:[^\n]*(?:\/|,)/);
-  assert.match(text, /Accept all displayed recommended settings:[\s\S]*setup-toolkit-question-bank:complete/);
+  assert.match(text, /Reply with either:[\s\S]*`all recommended`[\s\S]*setup-toolkit-question-bank:complete/);
   for (const spec of planned.specs) assert.ok(spec.description.split(/(?<=[.!?])\s+/).filter(Boolean).length <= 2, spec.key);
 
   current.delegation.helper_count = 4;
@@ -211,7 +211,7 @@ test('distinct piped answers follow the canonical question order without shifts'
     timeout: 300000,
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*Codex Toolkit maintenance: Keep current/);
+  assert.match(result.stdout, /Setup choices confirmed before writes:[\s\S]*2\.1 Codex Toolkit maintenance: C - Keep current \(canonical: keep; effective: disable\)/);
   assert.doesNotMatch(result.stdout, /Codex helper agents:/);
   assert.match(result.stdout, /Question answers initially required: yes/);
   assert.match(result.stdout, /Question answers supplied by complete stdin: yes/);
@@ -223,6 +223,36 @@ test('distinct piped answers follow the canonical question order without shifts'
   assert.match(bridgeArgs, /--disable-update-report-open --enable-update-reports --update-report-retention-days 7 --write/);
   assert.doesNotMatch(bridgeArgs, /codex-plugin-auto-refresh/);
   assert.doesNotMatch(bridgeArgs, /--enable-target opencode/);
+});
+
+test('explicit textual all recommended approves the exact visible bank', () => {
+  const root = tmpRoot();
+  const { origin } = createGitBackedSetupRepo(root);
+  const result = run(['--execute', '--repo-remote', origin], {
+    env: isolatedHomeEnv(root),
+    input: 'all recommended\n',
+    timeout: 300000,
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Question answer source: user-approved all recommended/);
+  assert.equal((result.stdout.match(/setup-toolkit-question-bank:begin/g) || []).length, 1);
+  assert.equal((result.stdout.match(/setup-toolkit-question-bank:complete/g) || []).length, 1);
+  assert.ok(result.stdout.indexOf('setup-toolkit-question-bank:complete') < result.stdout.indexOf('Setup choices confirmed before writes:'));
+});
+
+test('changed-only piped answer applies recommendations except exact indexed changes', () => {
+  const root = tmpRoot();
+  const { origin } = createGitBackedSetupRepo(root);
+  const result = run(['--execute', '--repo-remote', origin], {
+    env: isolatedHomeEnv(root),
+    input: '1.2=b, 2.1=B\n',
+    timeout: 300000,
+  });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Question answer source: user-approved recommended except listed changes/);
+  assert.match(result.stdout, /1\.2 Automatic updates: B - Turn off \(canonical: disable; effective: disable\)/);
+  assert.match(result.stdout, /2\.1 Codex Toolkit maintenance: B - Turn off \(canonical: disable; effective: disable\)/);
+  assert.match(result.stdout, /1\.3 Update reports: A - Keep reports \(canonical: enable; effective: enable\)/);
 });
 
 test('extra non-empty piped answers fail before any setup write', () => {

@@ -428,7 +428,7 @@ test('managed setup script can run from its own standard managed checkout', () =
     cwd: managedPath, encoding: 'utf8', env: { ...process.env, ...isolatedHomeEnv(root) }, timeout: 300000, windowsHide: true
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  assert.match(result.stdout, /Update source[\s\S]*\*\*Selected:\*\* Use the dedicated clean update copy/);
+  assert.match(result.stdout, /1\.1 Update source[\s\S]*\*\*Selected:\*\* A - Use the dedicated clean update copy/);
   assert.match(result.stdout, /Configuration changed this run: yes/);
   assert.equal(fs.existsSync(codexConfig(root)), true);
 });

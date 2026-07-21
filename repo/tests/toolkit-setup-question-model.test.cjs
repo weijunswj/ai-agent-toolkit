@@ -96,7 +96,7 @@ test('terminal, piped, plan, JSON, approval and generated docs share canonical r
     }
   }
   assert.match(markdown, /\*\*What this controls:\*\*[\s\S]*\*\*Current:\*\*[\s\S]*\*\*Recommended:\*\*[\s\S]*\*\*Why:\*\*[\s\S]*\*\*Choices:\*\*[\s\S]*\*\*After applying:\*\*/);
-  assert.match(terminal, /What this controls:[\s\S]*\n\nCurrent:[\s\S]*\n\nRecommended:[\s\S]*\n\nWhy:[\s\S]*\n\nChoices:\n  - /);
+  assert.match(terminal, /What this controls:[\s\S]*\n\nCurrent:[\s\S]*\n\nVerification:[\s\S]*\n\nRecommended:[\s\S]*\n\nWhy:[\s\S]*\n\nChoices:\n  A\. /);
   const plan = core.setupPlan({ host: 'codex', setupChoices: core.parseArgs(['--plan']).setupChoices, questionBank: rows });
   assert.deepEqual(plan.question_bank, rows);
   const json = JSON.parse(JSON.stringify(plan));
@@ -250,4 +250,100 @@ test('Update source renderers and generated documentation use corrected canonica
     fs.readFileSync(path.join(repoRoot, 'repo/docs/SETUP-QUESTIONS.generated.md'), 'utf8'),
     core.renderSetupQuestionDocumentation(),
   );
+});
+
+test('resolved Codex and Claude banks expose contiguous deterministic presentation metadata', () => {
+  const codexArgs = core.parseArgs(['--plan', '--host', 'codex']);
+  const codexCurrent = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
+  codexCurrent.audit.codex_plugin_auto_refresh_enabled = false;
+  const codex = core.setupQuestionSpecs(codexArgs, codexCurrent);
+  assert.equal(codex[0].presentation.total_visible_question_count, 5);
+  assert.equal(codex[0].presentation.total_visible_section_count, 2);
+  assert.deepEqual(codex.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1']);
+
+  const claudeArgs = core.parseArgs(['--plan', '--host', 'claude-code']);
+  const claudeCurrent = stateWithManaged(managedState({ currentPath: '', exists: false, git: false }));
+  claudeCurrent.agentCapability = { launch_supported: false, resource_counter_supported: false };
+  claudeCurrent.agentProfile = { supported: false, topology: 'root-only' };
+  claudeCurrent.nativePlugin = { status: 'unknown', trusted: false, hook_active: false };
+  const claude = core.setupQuestionSpecs(claudeArgs, claudeCurrent);
+  assert.equal(claude[0].presentation.total_visible_question_count, 6);
+  assert.equal(claude[0].presentation.total_visible_section_count, 3);
+  assert.deepEqual(claude.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1', '3.1']);
+});
+
+test('quick index, detailed bank, recommendations, and choices share one indexed ordering', () => {
+  const rows = allRows();
+  const rendered = core.renderSetupQuestionBank(rows);
+  const quickIndex = rendered.slice(rendered.indexOf('Quick index'), rendered.indexOf('Review every visible choice'));
+  const references = rows.map((row) => row.presentation.question_ref);
+  assert.equal(new Set(references).size, rows.length);
+  let previousIndex = -1;
+  for (const row of rows) {
+    const quickLine = `${row.presentation.question_ref} ${row.title} - Recommended: ${row.presentation.recommended_choice_ref}`;
+    const quickPosition = quickIndex.indexOf(quickLine);
+    assert.ok(quickPosition > previousIndex, row.id);
+    previousIndex = quickPosition;
+    assert.match(rendered, new RegExp(`### ${row.presentation.question_ref.replace('.', '\\.')} ${row.title}`));
+    assert.equal(new Set(row.choices.map((choice) => choice.presentation_ref)).size, row.choices.length);
+    assert.equal(
+      row.choices.find((choice) => choice.value === row.recommended).presentation_ref,
+      row.presentation.recommended_choice_ref,
+    );
+  }
+  assert.doesNotMatch(rendered, /## \d+\. Automatic updates\s+### \d+\.\d+ Automatic updates/);
+});
+
+test('conditional questions renumber without gaps and change the bound bank identity', () => {
+  const withTargets = allRows();
+  const withoutTargets = withTargets.filter((row) => !['opencode-integration', 'antigravity-integration'].includes(row.id));
+  const renumbered = core.withPresentationMetadata(withoutTargets.map((row) => ({ ...row, presentation: undefined })));
+  assert.deepEqual(renumbered.map((row) => row.presentation.question_ref), ['1.1', '1.2', '1.3', '1.4', '2.1']);
+  assert.notEqual(renumbered[0].presentation.bank_identity, withTargets[0].presentation.bank_identity);
+});
+
+test('spreadsheet-style choice references are bounded and never wrap', () => {
+  assert.equal(core.spreadsheetChoiceReference(1), 'A');
+  assert.equal(core.spreadsheetChoiceReference(26), 'Z');
+  assert.equal(core.spreadsheetChoiceReference(27), 'AA');
+  assert.equal(core.spreadsheetChoiceReference(52), 'AZ');
+  assert.equal(core.spreadsheetChoiceReference(702), 'ZZ');
+  assert.throws(() => core.spreadsheetChoiceReference(703), /A-ZZ/);
+});
+
+test('all recommended and changed-only answers resolve to canonical values', () => {
+  const rows = allRows();
+  const all = core.parseConciseQuestionBankAnswer('  ALL recommended  ', rows);
+  assert.equal(all.mode, 'all-recommended');
+  assert.deepEqual(all.selections.map((selection) => selection.canonical_value), rows.map((row) => row.recommended));
+  core.assertQuestionBankAnswerBinding(all, rows);
+
+  const changed = core.parseConciseQuestionBankAnswer('1.2=b, 3.1 = d', rows);
+  assert.equal(changed.mode, 'recommended-except');
+  assert.equal(changed.selections.find((selection) => selection.question_ref === '1.2').canonical_value, 'disable');
+  assert.equal(changed.selections.find((selection) => selection.question_ref === '3.1').canonical_value, 'skip');
+  assert.equal(changed.selections.find((selection) => selection.question_ref === '1.1').canonical_value, rows[0].recommended);
+  core.assertQuestionBankAnswerBinding(changed, rows);
+});
+
+test('indexed answer parser rejects duplicates, unknowns, malformed modes, and stale banks', () => {
+  const rows = allRows();
+  assert.equal(core.parseConciseQuestionBankAnswer('', rows), null);
+  assert.equal(core.parseConciseQuestionBankAnswer('enable\ndisable', rows), null);
+  assert.throws(() => core.parseConciseQuestionBankAnswer('1.2=B, 1.2=C', rows), /repeats question reference/);
+  assert.throws(() => core.parseConciseQuestionBankAnswer('9.9=A', rows), /unavailable question/);
+  assert.throws(() => core.parseConciseQuestionBankAnswer('1.2=Z', rows), /unavailable choice/);
+  assert.throws(() => core.parseConciseQuestionBankAnswer('1.2=B; 3.1=D', rows), /malformed separators/);
+  assert.throws(() => core.parseConciseQuestionBankAnswer('all recommended, 1.2=B', rows), /mixes or malforms/);
+
+  const parsed = core.parseConciseQuestionBankAnswer('1.2=B', rows);
+  const changedBank = core.withPresentationMetadata(rows.slice(0, -1).map((row) => ({ ...row, presentation: undefined })));
+  assert.throws(() => core.assertQuestionBankAnswerBinding(parsed, changedBank), /exact rendered bank/);
+});
+
+test('display letters and canonical textual values resolve without becoming stored identities', () => {
+  const automatic = allRows().find((row) => row.id === 'automatic-updates');
+  assert.equal(core.resolveDisplayedChoiceAnswer(automatic, 'b'), 'disable');
+  assert.equal(core.resolveDisplayedChoiceAnswer(automatic, 'DISABLE'), 'disable');
+  assert.equal(core.resolveDisplayedChoiceAnswer(automatic, ''), automatic.recommended);
 });
