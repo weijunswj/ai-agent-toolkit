@@ -9,6 +9,7 @@ const CANONICAL_BACKUP_DIR = '_agent-toolkit-backups';
 const LEGACY_BACKUP_DIR = '.agent-toolkit-backups';
 const TRANSIENT_CLEANUP_CODES = new Set(['EPERM', 'EBUSY', 'ENOTEMPTY']);
 const CLEANUP_RETRY_DELAYS_MS = Object.freeze([0, 10, 25, 50]);
+const CLEANUP_ID_PATTERN = /^[a-f0-9]{24}$/;
 
 function sha256(bytes) {
   return crypto.createHash('sha256').update(bytes).digest('hex');
@@ -31,7 +32,7 @@ function normalizeRelativePath(value) {
   if (path.posix.isAbsolute(slash) || /^[A-Za-z]:/.test(slash)) throw new Error('Backup file path must be repository-relative.');
   const parts = slash.split('/');
   if (parts.some((part) => !part || part === '.' || part === '..')) throw new Error('Backup file path contains an unsafe path segment.');
-  const firstSegment = process.platform === 'win32' ? parts[0].toLowerCase() : parts[0];
+  const firstSegment = parts[0].toLowerCase();
   if ([CANONICAL_BACKUP_DIR, LEGACY_BACKUP_DIR].includes(firstSegment)) {
     throw new Error('Affected file path must not target Toolkit backup evidence.');
   }
@@ -297,6 +298,27 @@ function uniqueSibling(target, label) {
   return path.join(path.dirname(target), `.${path.basename(target)}.${label}-${process.pid}-${crypto.randomBytes(6).toString('hex')}`);
 }
 
+function cleanupId(value) {
+  if (typeof value !== 'string' || !CLEANUP_ID_PATTERN.test(value)) {
+    throw new Error('Cleanup ID must be exactly 24 lowercase hexadecimal characters.');
+  }
+  return value;
+}
+
+function rollbackPath(target, generationPath, id) {
+  return path.join(path.dirname(target), `.${path.basename(target)}.${rollbackLabel(generationPath)}-${cleanupId(id)}`);
+}
+
+function pathEntryExists(filePath) {
+  try {
+    fs.lstatSync(filePath);
+    return true;
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 function waitForCleanupRetry(delayMs, options) {
   if (typeof options.waitForCleanupRetry === 'function') {
     options.waitForCleanupRetry(delayMs);
@@ -348,6 +370,7 @@ function restoreResult(inspected, prepared, cleanup) {
   return {
     status: 'cleanup-incomplete',
     ...common,
+    cleanup_id: cleanup.cleanupId,
     remediation: 'Target restoration completed, but private temporary residue remains. Run the cleanup command for this metadata after the filesystem lock is released.',
   };
 }
@@ -358,22 +381,34 @@ function restoreRepoLocalBackup(repoRoot, metadataPath, options = {}) {
     if (!currentMatches(file.target, file.entry.expected_replacement)) throw new Error(`Current file does not match the recorded Toolkit replacement: ${file.entry.path}`);
   }
 
+  const transactionCleanupId = cleanupId(options.testCleanupId == null
+    ? crypto.randomBytes(12).toString('hex')
+    : options.testCleanupId);
   const prepared = [];
   try {
     for (let index = 0; index < inspected.files.length; index += 1) {
       const file = inspected.files[index];
+      requireRealDirectory(path.dirname(file.target), 'Restore target parent');
       const preparedFile = {
         ...file,
         restoreTemp: file.entry.original.existed ? uniqueSibling(file.target, 'toolkit-restore') : null,
-        rollbackTemp: uniqueSibling(file.target, rollbackLabel(inspected.generation_path)),
+        rollbackTemp: rollbackPath(file.target, inspected.generation_path, transactionCleanupId),
         mutated: false,
       };
       prepared.push(preparedFile);
+      if (pathEntryExists(preparedFile.rollbackTemp)) throw new Error('Restore rollback destination already exists.');
       if (preparedFile.restoreTemp) {
-        fs.mkdirSync(path.dirname(file.target), { recursive: true });
         const readBackupFile = options.readBackupFile || fs.readFileSync;
         const writeRestoreTemp = options.writeRestoreTemp || fs.writeFileSync;
-        const originalBytes = readBackupFile(file.backupFile);
+        const beforeRead = requireResolvedPayload(inspected.generation_path, file.entry.backup_path);
+        const originalBytes = readBackupFile(beforeRead);
+        const afterRead = requireResolvedPayload(inspected.generation_path, file.entry.backup_path);
+        if (!samePath(beforeRead, afterRead)) throw new Error('Backup payload changed during restore preparation.');
+        if (!Buffer.isBuffer(originalBytes)
+          || originalBytes.length !== file.entry.original.size_bytes
+          || sha256(originalBytes) !== file.entry.original.sha256) {
+          throw new Error('Prepared backup payload bytes do not match restore metadata.');
+        }
         writeRestoreTemp(preparedFile.restoreTemp, originalBytes, { flag: 'wx', mode: file.entry.original.mode == null ? 0o600 : file.entry.original.mode });
       }
     }
@@ -405,7 +440,7 @@ function restoreRepoLocalBackup(repoRoot, metadataPath, options = {}) {
     for (const file of prepared) {
       if (!removePrivateTemp(file.rollbackTemp, options)) residueCount += 1;
     }
-    return restoreResult(inspected, prepared, { complete: residueCount === 0, residueCount });
+    return restoreResult(inspected, prepared, { complete: residueCount === 0, residueCount, cleanupId: transactionCleanupId });
   } catch (error) {
     const rollbackErrors = [];
     for (const file of [...prepared].reverse()) {
@@ -426,23 +461,24 @@ function restoreRepoLocalBackup(repoRoot, metadataPath, options = {}) {
   }
 }
 
-function cleanupRepoLocalRestoreResidue(repoRoot, metadataPath, options = {}) {
+function cleanupRepoLocalRestoreResidue(repoRoot, metadataPath, requestedCleanupId, options = {}) {
+  const exactCleanupId = cleanupId(requestedCleanupId);
   const inspected = readRepoLocalBackup(repoRoot, metadataPath);
   for (const file of inspected.files) {
     if (!currentMatches(file.target, file.entry.original)) throw new Error(`Cleanup requires the verified restored target state: ${file.entry.path}`);
   }
-  const label = rollbackLabel(inspected.generation_path);
+  let foundCount = 0;
   let residueCount = 0;
   for (const file of inspected.files) {
-    const prefix = `.${path.basename(file.target)}.${label}-`;
-    const directory = path.dirname(file.target);
-    if (!fs.existsSync(directory)) continue;
-    for (const name of fs.readdirSync(directory)) {
-      if (!name.startsWith(prefix)) continue;
-      const candidate = path.join(directory, name);
-      const stat = fs.lstatSync(candidate);
-      if (stat.isSymbolicLink() || !stat.isFile() || !currentMatches(candidate, file.entry.expected_replacement) || !removePrivateTemp(candidate, options)) residueCount += 1;
-    }
+    if (!file.entry.expected_replacement.existed) continue;
+    const candidate = rollbackPath(file.target, inspected.generation_path, exactCleanupId);
+    if (!pathEntryExists(candidate)) continue;
+    foundCount += 1;
+    const stat = fs.lstatSync(candidate);
+    if (stat.isSymbolicLink() || !stat.isFile() || !currentMatches(candidate, file.entry.expected_replacement) || !removePrivateTemp(candidate, options)) residueCount += 1;
+  }
+  if (foundCount === 0) {
+    return { status: 'cleanup-not-found', restored: true, backup_retained: true, temporary_cleanup_complete: false, temporary_residue_detected: false, temporary_residue_count: 0 };
   }
   if (residueCount === 0) {
     return { status: 'cleanup-complete', restored: true, backup_retained: true, temporary_cleanup_complete: true, temporary_residue_detected: false, temporary_residue_count: 0 };
@@ -454,6 +490,7 @@ function cleanupRepoLocalRestoreResidue(repoRoot, metadataPath, options = {}) {
     temporary_cleanup_complete: false,
     temporary_residue_detected: true,
     temporary_residue_count: residueCount,
+    cleanup_id: exactCleanupId,
     remediation: 'Private temporary residue remains. Retry cleanup after the filesystem lock is released.',
   };
 }
@@ -476,6 +513,7 @@ function parseArgs(argv) {
     const value = argv[index];
     if (value === '--repo') args.repo = argv[++index];
     else if (value === '--metadata') args.metadata = argv[++index];
+    else if (value === '--cleanup-id') args.cleanupId = argv[++index];
     else throw new Error(`Unknown argument: ${value}`);
   }
   return args;
@@ -488,10 +526,10 @@ function main(argv = process.argv, options = {}) {
   let result;
   if (args.command === 'inspect') result = inspectRepoLocalBackup(args.repo, metadataPath);
   else if (args.command === 'restore') result = restoreRepoLocalBackup(args.repo, metadataPath, options);
-  else if (args.command === 'cleanup') result = cleanupRepoLocalRestoreResidue(args.repo, metadataPath, options);
+  else if (args.command === 'cleanup') result = cleanupRepoLocalRestoreResidue(args.repo, metadataPath, args.cleanupId, options);
   else throw new Error('Usage: repo-local-backup.cjs inspect|restore|cleanup --repo <path> --metadata <restore.json>');
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-  if (result.status === 'cleanup-incomplete') process.exitCode = 2;
+  if (result.status === 'cleanup-incomplete' || result.status === 'cleanup-not-found') process.exitCode = 2;
   return result;
 }
 

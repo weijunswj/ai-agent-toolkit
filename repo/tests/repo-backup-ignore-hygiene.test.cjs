@@ -442,6 +442,11 @@ function privateRestoreResidue(root) {
   return fs.readdirSync(root).filter((name) => name.includes('.toolkit-restore-') || name.includes('.toolkit-rollback-'));
 }
 
+function rollbackResiduePath(target, generationPath, cleanupId) {
+  const generationIdentity = crypto.createHash('sha256').update(path.basename(generationPath), 'utf8').digest('hex').slice(0, 12);
+  return path.join(path.dirname(target), `.${path.basename(target)}.toolkit-rollback-${generationIdentity}-${cleanupId}`);
+}
+
 function transientError(code) {
   return Object.assign(new Error('injected transient cleanup failure'), { code });
 }
@@ -558,6 +563,59 @@ test('restore preparation cleans all partial temps when the second temp write fa
   assert.equal(hashTree(backup.generation_path), backupBefore);
 });
 
+test('restore preparation rejects a missing target parent without creating it or mutating targets', () => {
+  const root = initRepo('prepare-missing-parent');
+  const firstTarget = path.join(root, 'a.txt');
+  const missingParent = path.join(root, 'removed-parent');
+  const secondTarget = path.join(missingParent, 'b.txt');
+  write(firstTarget, 'old-a\n');
+  write(secondTarget, 'old-b\r\n');
+  const backup = createRepoLocalBackup(root, {
+    operation: 'prepare-missing-parent',
+    changes: [
+      { path: 'a.txt', replacementBytes: 'new-a\n' },
+      { path: 'removed-parent/b.txt', replacementExisted: false },
+    ],
+  });
+  write(firstTarget, 'new-a\n');
+  fs.unlinkSync(secondTarget);
+  fs.rmdirSync(missingParent);
+  const firstBefore = read(firstTarget);
+  const backupBefore = hashTree(backup.generation_path);
+
+  assert.throws(() => restoreRepoLocalBackup(root, backup.metadata_path), /before any target mutation/);
+  assert.deepEqual(read(firstTarget), firstBefore);
+  assert.equal(fs.existsSync(missingParent), false);
+  assert.deepEqual(privateRestoreResidue(root), []);
+  assert.equal(hashTree(backup.generation_path), backupBefore);
+});
+
+test('restore preparation rejects substituted payload bytes before target mutation', () => {
+  const root = initRepo('prepare-payload-substitution');
+  write(path.join(root, 'a.txt'), 'old-a\n');
+  write(path.join(root, 'b.txt'), 'old-b\r\n');
+  const backup = createRepoLocalBackup(root, {
+    operation: 'prepare-payload-substitution',
+    changes: [
+      { path: 'a.txt', replacementBytes: 'new-a\n' },
+      { path: 'b.txt', replacementBytes: 'new-b\n' },
+    ],
+  });
+  write(path.join(root, 'a.txt'), 'new-a\n');
+  write(path.join(root, 'b.txt'), 'new-b\n');
+  const beforeA = read(path.join(root, 'a.txt'));
+  const beforeB = read(path.join(root, 'b.txt'));
+  const backupBefore = hashTree(backup.generation_path);
+
+  assert.throws(() => restoreRepoLocalBackup(root, backup.metadata_path, {
+    readBackupFile: (filePath) => filePath.endsWith('0001.original') ? Buffer.from('substituted\n') : fs.readFileSync(filePath),
+  }), /before any target mutation/);
+  assert.deepEqual(read(path.join(root, 'a.txt')), beforeA);
+  assert.deepEqual(read(path.join(root, 'b.txt')), beforeB);
+  assert.deepEqual(privateRestoreResidue(root), []);
+  assert.equal(hashTree(backup.generation_path), backupBefore);
+});
+
 test('creation and metadata validation reject canonical and legacy backup evidence paths without mutation', async (t) => {
   for (const backupDirectory of [CANONICAL_BACKUP_DIR, LEGACY_BACKUP_DIR]) {
     for (const originallyExists of [true, false]) {
@@ -598,6 +656,38 @@ test('creation and metadata validation reject canonical and legacy backup eviden
   }
 });
 
+test('creation and restore metadata reject case-varied canonical and legacy backup roots on every platform', async (t) => {
+  const variants = ['_Agent-Toolkit-Backups', '.Agent-Toolkit-Backups'];
+  for (const backupDirectory of variants) {
+    await t.test(`creation rejects ${backupDirectory}`, () => {
+      const root = initRepo('protected-case-create');
+      const canonicalBefore = hashTree(path.join(root, CANONICAL_BACKUP_DIR));
+      const legacyBefore = hashTree(path.join(root, LEGACY_BACKUP_DIR));
+      assert.throws(() => createRepoLocalBackup(root, {
+        operation: 'protected-case-create',
+        changes: [{ path: `${backupDirectory}/nested/evidence.txt`, replacementBytes: 'replacement\n' }],
+      }), /must not target Toolkit backup evidence/);
+      assert.equal(hashTree(path.join(root, CANONICAL_BACKUP_DIR)), canonicalBefore);
+      assert.equal(hashTree(path.join(root, LEGACY_BACKUP_DIR)), legacyBefore);
+    });
+
+    await t.test(`metadata rejects ${backupDirectory}`, () => {
+      const root = initRepo('protected-case-metadata');
+      const target = path.join(root, 'a.txt');
+      write(target, 'old\n');
+      const backup = createRepoLocalBackup(root, { operation: 'protected-case-metadata', changes: [{ path: 'a.txt', replacementBytes: 'new\n' }] });
+      write(target, 'new\n');
+      const metadata = JSON.parse(read(backup.metadata_path));
+      metadata.files[0].path = `${backupDirectory}/nested/evidence.txt`;
+      write(backup.metadata_path, `${JSON.stringify(metadata, null, 2)}\n`);
+      const backupBefore = hashTree(backup.generation_path);
+      assert.throws(() => restoreRepoLocalBackup(root, backup.metadata_path), /must not target Toolkit backup evidence/);
+      assert.deepEqual(read(target), Buffer.from('new\n'));
+      assert.equal(hashTree(backup.generation_path), backupBefore);
+    });
+  }
+});
+
 test('transient rollback-temp cleanup retries remain bounded and can succeed', () => {
   const root = initRepo('cleanup-retry');
   const target = path.join(root, 'a.txt');
@@ -618,6 +708,7 @@ test('transient rollback-temp cleanup retries remain bounded and can succeed', (
   });
   assert.equal(result.status, 'restored');
   assert.equal(result.temporary_cleanup_complete, true);
+  assert.equal(Object.hasOwn(result, 'cleanup_id'), false);
   assert.equal(attempts, 3);
   assert.deepEqual(read(target), Buffer.from('old\n'));
   assert.deepEqual(privateRestoreResidue(root), []);
@@ -644,6 +735,7 @@ test('cleanup retry exhaustion reports non-success without rolling back restored
   });
   assert.equal(attempts, 4);
   assert.equal(result.status, 'cleanup-incomplete');
+  assert.match(result.cleanup_id, /^[a-f0-9]{24}$/);
   assert.equal(result.restored, true);
   assert.equal(result.temporary_residue_detected, true);
   assert.equal(result.temporary_residue_count, 1);
@@ -658,11 +750,12 @@ test('cleanup retry exhaustion reports non-success without rolling back restored
   process.exitCode = 0;
   process.stdout.write = (chunk) => { output += chunk; return true; };
   try {
-    const cliResult = backupMain(['node', backupScript, 'cleanup', '--repo', root, '--metadata', backup.metadata_path], {
+    const cliResult = backupMain(['node', backupScript, 'cleanup', '--repo', root, '--metadata', backup.metadata_path, '--cleanup-id', result.cleanup_id], {
       unlinkFile: failRollbackUnlink,
       waitForCleanupRetry: () => {},
     });
     assert.equal(cliResult.status, 'cleanup-incomplete');
+    assert.equal(cliResult.cleanup_id, result.cleanup_id);
     assert.equal(process.exitCode, 2);
     assert.doesNotMatch(output, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   } finally {
@@ -670,9 +763,85 @@ test('cleanup retry exhaustion reports non-success without rolling back restored
     process.exitCode = previousExitCode;
   }
 
-  const cleanup = cleanupRepoLocalRestoreResidue(root, backup.metadata_path);
+  const cleanup = cleanupRepoLocalRestoreResidue(root, backup.metadata_path, result.cleanup_id);
   assert.equal(cleanup.status, 'cleanup-complete');
+  assert.equal(Object.hasOwn(cleanup, 'cleanup_id'), false);
   assert.deepEqual(privateRestoreResidue(root), []);
   assert.deepEqual(read(target), Buffer.from('old\r\n'));
+  assert.equal(hashTree(backup.generation_path), backupBefore);
+});
+
+test('cleanup requires the exact opaque ID and never scans same-prefix decoys', () => {
+  const root = initRepo('cleanup-exact-id');
+  const target = path.join(root, 'a.txt');
+  write(target, 'old\r\n');
+  const backup = createRepoLocalBackup(root, { operation: 'cleanup-exact-id', changes: [{ path: 'a.txt', replacementBytes: 'new\n' }] });
+  write(target, 'new\n');
+  const backupBefore = hashTree(backup.generation_path);
+  const result = restoreRepoLocalBackup(root, backup.metadata_path, {
+    unlinkFile: (filePath) => {
+      if (filePath.includes('.toolkit-rollback-')) throw transientError('EBUSY');
+      fs.unlinkSync(filePath);
+    },
+    waitForCleanupRetry: () => {},
+  });
+  const genuineResidue = rollbackResiduePath(target, backup.generation_path, result.cleanup_id);
+  const decoy = `${genuineResidue}-decoy`;
+  write(decoy, 'new\n');
+  const targetBefore = read(target);
+
+  assert.throws(() => cleanupRepoLocalRestoreResidue(root, backup.metadata_path), /Cleanup ID/);
+  assert.throws(() => cleanupRepoLocalRestoreResidue(root, backup.metadata_path, 'ABC'), /Cleanup ID/);
+  assert.throws(() => backupMain(['node', backupScript, 'cleanup', '--repo', root, '--metadata', backup.metadata_path]), /Cleanup ID/);
+  assert.throws(() => backupMain(['node', backupScript, 'cleanup', '--repo', root, '--metadata', backup.metadata_path, '--cleanup-id', 'ABC']), /Cleanup ID/);
+  assert.deepEqual(read(target), targetBefore);
+  assert.equal(fs.existsSync(genuineResidue), true);
+  assert.equal(fs.existsSync(decoy), true);
+
+  const wrongId = result.cleanup_id === '0'.repeat(24) ? '1'.repeat(24) : '0'.repeat(24);
+  const wrong = cleanupRepoLocalRestoreResidue(root, backup.metadata_path, wrongId);
+  assert.equal(wrong.status, 'cleanup-not-found');
+  assert.equal(Object.hasOwn(wrong, 'cleanup_id'), false);
+  assert.equal(fs.existsSync(genuineResidue), true);
+  assert.equal(fs.existsSync(decoy), true);
+
+  const previousExitCode = process.exitCode;
+  const originalWrite = process.stdout.write;
+  process.exitCode = 0;
+  process.stdout.write = () => true;
+  try {
+    const cliWrong = backupMain(['node', backupScript, 'cleanup', '--repo', root, '--metadata', backup.metadata_path, '--cleanup-id', wrongId]);
+    assert.equal(cliWrong.status, 'cleanup-not-found');
+    assert.equal(process.exitCode, 2);
+  } finally {
+    process.stdout.write = originalWrite;
+    process.exitCode = previousExitCode;
+  }
+
+  const cleanup = cleanupRepoLocalRestoreResidue(root, backup.metadata_path, result.cleanup_id);
+  assert.equal(cleanup.status, 'cleanup-complete');
+  assert.equal(fs.existsSync(genuineResidue), false);
+  assert.equal(fs.existsSync(decoy), true);
+  assert.deepEqual(read(decoy), Buffer.from('new\n'));
+  assert.deepEqual(read(target), Buffer.from('old\r\n'));
+  assert.equal(hashTree(backup.generation_path), backupBefore);
+});
+
+test('restore rejects a pre-existing exact rollback destination before target mutation', () => {
+  const root = initRepo('cleanup-preexisting-destination');
+  const target = path.join(root, 'a.txt');
+  const fixedCleanupId = 'a'.repeat(24);
+  write(target, 'old\n');
+  const backup = createRepoLocalBackup(root, { operation: 'cleanup-preexisting-destination', changes: [{ path: 'a.txt', replacementBytes: 'new\n' }] });
+  write(target, 'new\n');
+  const rollbackDestination = rollbackResiduePath(target, backup.generation_path, fixedCleanupId);
+  write(rollbackDestination, 'decoy\n');
+  const targetBefore = read(target);
+  const backupBefore = hashTree(backup.generation_path);
+
+  assert.throws(() => restoreRepoLocalBackup(root, backup.metadata_path, { testCleanupId: fixedCleanupId }), /before any target mutation/);
+  assert.deepEqual(read(target), targetBefore);
+  assert.deepEqual(read(rollbackDestination), Buffer.from('decoy\n'));
+  assert.deepEqual(privateRestoreResidue(root), [path.basename(rollbackDestination)]);
   assert.equal(hashTree(backup.generation_path), backupBefore);
 });
