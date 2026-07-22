@@ -686,7 +686,7 @@ Run this acceptance test only in a disposable Git repo outside the Toolkit check
 3. In Codex, open `/hooks`. Locate the exact Toolkit `SessionStart` command, review its current definition, and trust it. If trust verification remains unavailable, stop and record that UAT is pending.
 4. Open a fresh Codex task in the temporary repo and submit `list the branches`.
 5. Verify Codex asks whether to install/repair Toolkit repo-local rules or proceed without Toolkit repo-local rules before it lists branches or performs other repository work.
-6. Choose `proceed without Toolkit repo-local rules`. Verify Codex continues with the harmless request and does not create `AGENTS.md`, `docs/agent-playbooks/`, `.agent-toolkit-backups/`, or any other repo file.
+6. Choose `proceed without Toolkit repo-local rules`. Verify Codex continues with the harmless request and does not create `AGENTS.md`, `docs/agent-playbooks/`, `_agent-toolkit-backups/`, legacy `.agent-toolkit-backups/`, or any other repo file.
 7. Install the correct repo-local instructions through the normal user-approved `ai-coding-agent-rules` flow. Open another fresh task and verify the missing-rule warning no longer appears.
 8. In another disposable copy, alter a managed block in `AGENTS.md`. Open a fresh task and verify Codex asks whether to repair/refresh or proceed without current Toolkit repo-local rules, and does not repair or create a backup before the user decides.
 

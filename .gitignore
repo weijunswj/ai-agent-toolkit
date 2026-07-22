@@ -10,6 +10,7 @@
 **/n8n-production-*/
 .claude/
 .tmp/
+/_agent-toolkit-backups/
 .agent-toolkit-backups/
 /n8n-workflows/
 .to-sanitise/

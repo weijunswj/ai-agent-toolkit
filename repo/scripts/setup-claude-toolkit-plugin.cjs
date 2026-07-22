@@ -215,6 +215,9 @@ function validateRepoPluginSource(repoRoot, expectedVersion = '') {
     errors.push(...hookErrors.map((error) => `${slash(path.relative(repoRoot, hooksPath))}: ${error}`));
   }
 
+  for (const relPath of ['repo/scripts/repo-ignore-hygiene.cjs', 'repo/scripts/repo-local-backup.cjs']) {
+    if (!fs.existsSync(path.join(repoRoot, ...relPath.split('/')))) errors.push(`Missing repo-local safety package file: ${relPath}`);
+  }
   for (const relPath of ['repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/toolkit-claude-agent-hook.cjs', 'repo/scripts/toolkit-local-bridge.cjs']) {
     if (!fs.existsSync(path.join(repoRoot, ...relPath.split('/')))) errors.push(`Missing Claude agent-control package file: ${relPath}`);
   }
@@ -239,6 +242,8 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ['repo/scripts/claude-process-launch.cjs', false],
     ['repo/scripts/toolkit-claude-agent-hook.cjs', false],
     ['repo/scripts/toolkit-local-bridge.cjs', false],
+    ['repo/scripts/repo-ignore-hygiene.cjs', false],
+    ['repo/scripts/repo-local-backup.cjs', false],
   ];
   for (const [relPath, json] of pairs) {
     const source = path.join(repoRoot, ...relPath.split('/'));

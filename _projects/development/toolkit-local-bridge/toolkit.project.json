@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.7.32",
+  "version": "2.8.2",
   "version_policy": "semver",
-  "version_notes": "Uses one canonical non-interactive answer plan for conditional detail rendering, validation, and consumption order.",
+  "version_notes": "Redacts private ignore-hygiene paths and closes restore and cleanup target-state races.",
   "outputs": [
     {
       "kind": "curated",

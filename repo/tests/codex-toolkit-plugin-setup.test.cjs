@@ -796,6 +796,8 @@ test('Codex cache fingerprints include every new installed setup dependency and 
   const dependencies = [
     'repo/scripts/toolkit-agent-control.cjs',
     'repo/scripts/claude-process-launch.cjs',
+    'repo/scripts/repo-ignore-hygiene.cjs',
+    'repo/scripts/repo-local-backup.cjs',
     'repo/scripts/audit-n8n-skills-plugin-hooks.cjs',
     'repo/scripts/repair-codex-plugin-windows-hooks.cjs'
   ];

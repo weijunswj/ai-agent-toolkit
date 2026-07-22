@@ -55,7 +55,7 @@ Do not treat bare `AI-AGENT-TOOLKIT` text, a missing managed block, or balanced 
 
 For ordinary follow-up coding tasks, stop after the cheap structural managed-marker check when all required files are structurally current.
 
-For explicit install, check, repair, refresh, or bootstrap requests, do not stop at the cheap structural check. Read the current repo-local templates and compare toolkit-owned managed block content against the current template content. If managed block content differs from the current template, treat it as edited or stale toolkit-owned content, back up the affected file under `.agent-toolkit-backups/`, replace the managed block from the current template, preserve unmarked user-authored content outside managed markers, then stop with the session reset prompt.
+For explicit install, check, repair, refresh, or bootstrap requests, do not stop at the cheap structural check. Read the current repo-local templates and compare toolkit-owned managed block content against the current template content. If managed block content differs from the current template, treat it as edited or stale toolkit-owned content, back up the affected file under `_agent-toolkit-backups/`, replace the managed block from the current template, preserve unmarked user-authored content outside managed markers, then stop with the session reset prompt.
 
 ## Install Or Repair
 
@@ -97,14 +97,15 @@ Content inside `AI-AGENT-TOOLKIT` managed marker pairs is toolkit-owned. During 
 
 When a target file has broken, duplicate, unmatched, nested, or out-of-order managed markers, automatically repair the affected repo-local instruction file instead of continuing unrelated repository edits.
 
-Before repairing, create a backup copy of the existing file under `.agent-toolkit-backups/` in the same target repo or project folder. Use this naming pattern:
+Before repairing, use the Toolkit repo-local backup contract to create one operation generation under `_agent-toolkit-backups/` in the target repository. Capture every affected instruction file, including originally missing files, with the operation identity, exact original bytes, line-ending/final-newline state, checksums, expected replacement checksums, and `full-file` or `managed-region` scope in `restore.json`. Use the shared `repo/scripts/repo-local-backup.cjs` API or the equivalent installed Toolkit-bundle path; do not invent a flat backup name or another restore format.
 
-- `.agent-toolkit-backups/AGENTS.dirty_backup_<YYYYMMDD-HHMMSS>.md` for `AGENTS.md`.
-- `.agent-toolkit-backups/CLAUDE.dirty_backup_<YYYYMMDD-HHMMSS>.md` for `CLAUDE.md`.
-- `.agent-toolkit-backups/GEMINI.dirty_backup_<YYYYMMDD-HHMMSS>.md` for `GEMINI.md`.
-- `.agent-toolkit-backups/00-agent-toolkit-bootstrap.dirty_backup_<YYYYMMDD-HHMMSS>.md` for `.agents/rules/00-agent-toolkit-bootstrap.md`.
+Before proposing any ignore-file mutation, inspect both `.gitignore` and Git's resolved `.git/info/exclude`, plus canonical and legacy folder presence. Show the exact target and missing narrow rules, explain tracked versus local-only consequences, and require approval bound to that exact preview. Supported decisions are tracked `.gitignore`, local-only `.git/info/exclude`, decline, or proceed with an explicit hygiene warning when repair remains safe. An explicit repair request is not approval to change an ignore file. Passive hooks, checks, previews, and status paths never write ignore files or create backups.
 
-Backup files are local repair artifacts. Report their paths clearly, but do not commit, stage, delete, or move backup files unless the user explicitly asks.
+New backups always use `_agent-toolkit-backups/`. Continue recognizing `.agent-toolkit-backups/` as legacy compatibility material, report its presence, and never select it for a new backup merely because it exists. Never move, merge, rename, rewrite, or delete canonical or legacy backup content. Never add a broad backup ignore pattern.
+
+After backup creation, apply the repair transactionally and verify the intended result. On partial failure, use the supported exact restore route and return every affected path to its prior state. Restore must validate schema, repository identity, repository-relative paths, expected replacement state, and payload checksums; it must reject traversal, outside-repository paths, unknown schemas, and checksum drift. Keep the completed backup after restore.
+
+Backup generations are local repair artifacts. Report repository-relative inspection and restore commands clearly, but do not commit, stage, delete, migrate, or move backup files unless the user explicitly asks for a separately scoped action.
 
 After backing up, repair the required instruction file using the current repo-local template content. If unmarked user-authored content can be safely separated from the broken managed block, preserve it below the repaired managed block. If it cannot be safely separated, keep the repaired instruction file clean and tell the user the previous file was backed up.
 
@@ -120,7 +121,7 @@ If this skill creates, modifies, repairs, or backs up `AGENTS.md`, `CLAUDE.md`, 
 
 **I created/updated repo-local agent instructions. Start a new agent session in this folder so the agent loads `AGENTS.md` as startup instructions before continuing implementation.**
 
-**If I repaired or backed up an instruction file, the previous version was saved under `.agent-toolkit-backups/` in this project folder.**
+**If I repaired or backed up an instruction file, the exact previous state and restore metadata were saved under `_agent-toolkit-backups/` in this project folder. Legacy `.agent-toolkit-backups/` content, if present, was not changed.**
 
 **Should I continue in this same session best-effort after reading the updated instructions, or will you start a new agent session?**
 
