@@ -17,6 +17,21 @@ const CHOICES = Object.freeze({
   PROCEED_WARNING: 'proceed-warning',
 });
 
+class PublicIgnoreHygieneError extends Error {}
+
+function publicError(message) {
+  return new PublicIgnoreHygieneError(message);
+}
+
+function withPathlessErrors(action) {
+  try {
+    return action();
+  } catch (error) {
+    if (error instanceof PublicIgnoreHygieneError) throw error;
+    throw publicError('Ignore hygiene operation failed safely.');
+  }
+}
+
 function samePath(left, right) {
   const a = path.resolve(left);
   const b = path.resolve(right);
@@ -30,34 +45,54 @@ function runGit(repoRoot, args, options = {}) {
     windowsHide: true,
     shell: false,
   });
-  if (result.error) throw new Error(`Git inspection failed: ${result.error.message}`);
+  if (result.error) throw publicError('Git inspection could not be started safely.');
   return result;
 }
 
-function discoverRepository(repoRoot) {
+function repositoryIdentity(repoRoot) {
+  const normalized = process.platform === 'win32' ? repoRoot.toLowerCase() : repoRoot;
+  return sha256(Buffer.from(normalized, 'utf8'));
+}
+
+function discoverRepositoryBinding(repoRoot) {
   const requested = path.resolve(repoRoot);
   const top = runGit(requested, ['rev-parse', '--show-toplevel']);
-  if (top.status !== 0) throw new Error('Ignore hygiene requires a real Git repository.');
+  if (top.status !== 0) throw publicError('Ignore hygiene requires a real Git repository.');
   const resolved = path.resolve(String(top.stdout).trim());
-  if (!samePath(requested, resolved)) throw new Error('Ignore hygiene must target the repository root explicitly.');
+  if (!samePath(requested, resolved)) throw publicError('Ignore hygiene must target the repository root explicitly.');
   const exclude = runGit(resolved, ['rev-parse', '--git-path', 'info/exclude']);
-  if (exclude.status !== 0 || !String(exclude.stdout).trim()) throw new Error('Git local exclude path could not be resolved.');
+  if (exclude.status !== 0 || !String(exclude.stdout).trim()) throw publicError('Git local exclude path could not be resolved.');
   const excludePath = path.isAbsolute(String(exclude.stdout).trim())
     ? path.resolve(String(exclude.stdout).trim())
     : path.resolve(resolved, String(exclude.stdout).trim());
-  return { repo_root: resolved, gitignore_path: path.join(resolved, '.gitignore'), exclude_path: excludePath };
+  return {
+    repo_root: resolved,
+    repository_identity_sha256: repositoryIdentity(resolved),
+    gitignore_path: path.join(resolved, '.gitignore'),
+    exclude_path: excludePath,
+  };
+}
+
+function discoverRepository(repoRoot) {
+  return withPathlessErrors(() => {
+    const binding = discoverRepositoryBinding(repoRoot);
+    return {
+      repository_identity_sha256: binding.repository_identity_sha256,
+      files: { gitignore: '.gitignore', info_exclude: '.git/info/exclude' },
+    };
+  });
 }
 
 function readSnapshot(filePath) {
   try {
     const stat = fs.lstatSync(filePath);
-    if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`Ignore target must be a regular file or missing: ${filePath}`);
+    if (stat.isSymbolicLink() || !stat.isFile()) throw publicError('Ignore target must be a regular file or missing.');
     const bytes = fs.readFileSync(filePath);
     const text = bytes.toString('utf8');
-    if (!Buffer.from(text, 'utf8').equals(bytes)) throw new Error(`Ignore target is not valid UTF-8: ${filePath}`);
-    return { path: filePath, existed: true, bytes, sha256: sha256(bytes), mode: process.platform === 'win32' ? null : stat.mode & 0o7777 };
+    if (!Buffer.from(text, 'utf8').equals(bytes)) throw publicError('Ignore target is not valid UTF-8.');
+    return { existed: true, bytes, sha256: sha256(bytes), mode: process.platform === 'win32' ? null : stat.mode & 0o7777 };
   } catch (error) {
-    if (error && error.code === 'ENOENT') return { path: filePath, existed: false, bytes: Buffer.alloc(0), sha256: null, mode: null };
+    if (error && error.code === 'ENOENT') return { existed: false, bytes: Buffer.alloc(0), sha256: null, mode: null };
     throw error;
   }
 }
@@ -101,9 +136,9 @@ function gitCoverage(repo, folder) {
     input: Buffer.from(`${probe}\n`, 'utf8'),
   });
   if (result.status === 1) return null;
-  if (result.status !== 0) throw new Error('Git could not evaluate ignore coverage safely.');
+  if (result.status !== 0) throw publicError('Git could not evaluate ignore coverage safely.');
   const fields = Buffer.from(result.stdout).toString('utf8').split('\0').filter((field) => field !== '');
-  if (fields.length < 4) throw new Error('Git returned malformed ignore coverage evidence.');
+  if (fields.length < 4) throw publicError('Git returned malformed ignore coverage evidence.');
   const match = { source: fields[0], line: Number(fields[1]), pattern: fields[2], path: fields[3] };
   if (match.pattern.startsWith('!')) return null;
   const sourcePath = normalizeReportedSource(repo, match.source);
@@ -157,7 +192,12 @@ function coverageEntry(repo, key, matches, canonicalPresent, legacyPresent) {
     coverage,
     covered_by_gitignore: gitignore,
     covered_by_info_exclude: exclude,
-    matches: matches.map((match) => ({ ...match, kind: exactRuleKind(match.pattern, folder) })),
+    matches: matches.map((match) => ({
+      source: match.source,
+      line: match.line,
+      pattern: match.pattern,
+      kind: exactRuleKind(match.pattern, folder),
+    })),
     existing_folder_present: key === 'canonical' ? canonicalPresent : legacyPresent,
     legacy_folder_present: legacyPresent,
     proposed_action: matches.length ? 'none; existing coverage is effective' : `add ${RULES[key]} to the explicitly selected ignore file`,
@@ -166,31 +206,38 @@ function coverageEntry(repo, key, matches, canonicalPresent, legacyPresent) {
   };
 }
 
-function inspectIgnoreHygiene(repoRoot) {
-  const repo = discoverRepository(repoRoot);
+function inspectIgnoreHygieneBinding(repoRoot) {
+  const repo = discoverRepositoryBinding(repoRoot);
   const canonicalPresent = fs.existsSync(path.join(repo.repo_root, CANONICAL_BACKUP_DIR));
   const legacyPresent = fs.existsSync(path.join(repo.repo_root, LEGACY_BACKUP_DIR));
   const canonicalMatches = coverageMatches(repo, CANONICAL_BACKUP_DIR);
   const legacyMatches = coverageMatches(repo, LEGACY_BACKUP_DIR);
-  return {
-    repository: repo.repo_root,
+  const result = {
+    repository: { identity_sha256: repo.repository_identity_sha256 },
     files: {
-      gitignore: { path: repo.gitignore_path, exists: fs.existsSync(repo.gitignore_path) },
-      info_exclude: { path: repo.exclude_path, exists: fs.existsSync(repo.exclude_path) },
+      gitignore: { label: '.gitignore', exists: fs.existsSync(repo.gitignore_path) },
+      info_exclude: { label: '.git/info/exclude', exists: fs.existsSync(repo.exclude_path) },
     },
     canonical: coverageEntry(repo, 'canonical', canonicalMatches, canonicalPresent, legacyPresent),
     legacy: coverageEntry(repo, 'legacy', legacyMatches, canonicalPresent, legacyPresent),
   };
+  return { repo, result };
+}
+
+function inspectIgnoreHygiene(repoRoot) {
+  return withPathlessErrors(() => inspectIgnoreHygieneBinding(repoRoot).result);
 }
 
 function previewDigest(value) {
   return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
-function previewIgnoreHygiene(repoRoot, choice = CHOICES.GITIGNORE) {
-  if (![CHOICES.GITIGNORE, CHOICES.EXCLUDE, CHOICES.DECLINE, CHOICES.PROCEED_WARNING].includes(choice)) throw new Error('Unsupported ignore-hygiene choice.');
-  const coverage = inspectIgnoreHygiene(repoRoot);
-  const targetPath = choice === CHOICES.EXCLUDE ? coverage.files.info_exclude.path : choice === CHOICES.GITIGNORE ? coverage.files.gitignore.path : null;
+function buildPreviewIgnoreHygiene(repoRoot, choice = CHOICES.GITIGNORE) {
+  if (![CHOICES.GITIGNORE, CHOICES.EXCLUDE, CHOICES.DECLINE, CHOICES.PROCEED_WARNING].includes(choice)) throw publicError('Unsupported ignore-hygiene choice.');
+  const inspected = inspectIgnoreHygieneBinding(repoRoot);
+  const { repo, result: coverage } = inspected;
+  const targetPath = choice === CHOICES.EXCLUDE ? repo.exclude_path : choice === CHOICES.GITIGNORE ? repo.gitignore_path : null;
+  const targetLabel = choice === CHOICES.EXCLUDE ? '.git/info/exclude' : choice === CHOICES.GITIGNORE ? '.gitignore' : null;
   const targetSnapshot = targetPath ? readSnapshot(targetPath) : null;
   const additions = [];
   if (choice === CHOICES.GITIGNORE || choice === CHOICES.EXCLUDE) {
@@ -201,7 +248,8 @@ function previewIgnoreHygiene(repoRoot, choice = CHOICES.GITIGNORE) {
   const mutationRequired = Boolean(targetPath && additions.length);
   const binding = {
     schema: 'ai-agent-toolkit.ignore-hygiene-preview.v1',
-    repository: coverage.repository,
+    repository: repo.repo_root,
+    repository_identity_sha256: repo.repository_identity_sha256,
     choice,
     target_file: targetPath,
     target_existed: targetSnapshot ? targetSnapshot.existed : null,
@@ -209,7 +257,12 @@ function previewIgnoreHygiene(repoRoot, choice = CHOICES.GITIGNORE) {
     additions,
   };
   const preview = {
-    ...binding,
+    schema: binding.schema,
+    repository_identity_sha256: repo.repository_identity_sha256,
+    choice,
+    target_file: targetLabel,
+    target_existed: binding.target_existed,
+    target_sha256: binding.target_sha256,
     coverage,
     exact_lines_proposed: additions,
     canonical_reason: 'Canonical rule protects all new Toolkit-created repo-local backups.',
@@ -227,7 +280,11 @@ function previewIgnoreHygiene(repoRoot, choice = CHOICES.GITIGNORE) {
       : null,
   };
   preview.approval_digest = previewDigest(binding);
-  return preview;
+  return { preview, binding, repo };
+}
+
+function previewIgnoreHygiene(repoRoot, choice = CHOICES.GITIGNORE) {
+  return withPathlessErrors(() => buildPreviewIgnoreHygiene(repoRoot, choice).preview);
 }
 
 function atomicWrite(filePath, bytes, mode, options = {}) {
@@ -248,45 +305,47 @@ function atomicWrite(filePath, bytes, mode, options = {}) {
 }
 
 function applyIgnoreHygiene(repoRoot, request, options = {}) {
-  if (!request || typeof request !== 'object') throw new Error('An explicit ignore-hygiene request is required.');
-  const choice = request.choice;
-  const preview = previewIgnoreHygiene(repoRoot, choice);
-  if (request.approval_digest !== preview.approval_digest) throw new Error('Approval is missing, stale, or not bound to this exact ignore-hygiene preview.');
-  if (choice === CHOICES.DECLINE) return { status: 'declined', changed: false, preview };
-  if (choice === CHOICES.PROCEED_WARNING) {
-    if (request.parent_operation_safe !== true) throw new Error('Proceed-with-warning requires an explicit assertion that the parent operation remains safe.');
-    return { status: 'proceed-with-warning', changed: false, warning: preview.unresolved_warning, preview };
-  }
-  if (!preview.mutation_required) return { status: 'already-covered', changed: false, preview };
-  const target = preview.target_file;
-  const before = readSnapshot(target);
-  const expected = { existed: preview.target_existed, sha256: preview.target_sha256, bytes: before.bytes };
-  if (!snapshotsMatch(before, expected)) throw new Error('Ignore file changed after preview; a fresh preview and approval are required.');
-  const replacement = appendRules(before, preview.exact_lines_proposed);
-  const createParent = choice === CHOICES.EXCLUDE;
-  if (createParent) {
-    const repo = discoverRepository(repoRoot);
-    if (!samePath(target, repo.exclude_path)) throw new Error('Local exclude target changed after preview.');
-  }
-  atomicWrite(target, replacement, before.mode, {
-    createParent,
-    beforeReplace: () => {
-      const current = readSnapshot(target);
-      if (!snapshotsMatch(before, current)) throw new Error('Ignore file changed immediately before replacement; refusing the stale approval.');
-      if (typeof options.beforeReplace === 'function') options.beforeReplace({ target, replacement });
-    },
+  return withPathlessErrors(() => {
+    if (!request || typeof request !== 'object') throw publicError('An explicit ignore-hygiene request is required.');
+    const choice = request.choice;
+    const built = buildPreviewIgnoreHygiene(repoRoot, choice);
+    const { preview, binding, repo } = built;
+    if (request.approval_digest !== preview.approval_digest) throw publicError('Approval is missing, stale, or not bound to this exact ignore-hygiene preview.');
+    if (choice === CHOICES.DECLINE) return { status: 'declined', changed: false, preview };
+    if (choice === CHOICES.PROCEED_WARNING) {
+      if (request.parent_operation_safe !== true) throw publicError('Proceed-with-warning requires an explicit assertion that the parent operation remains safe.');
+      return { status: 'proceed-with-warning', changed: false, warning: preview.unresolved_warning, preview };
+    }
+    if (!preview.mutation_required) return { status: 'already-covered', changed: false, preview };
+    const target = binding.target_file;
+    const before = readSnapshot(target);
+    const expected = { existed: binding.target_existed, sha256: binding.target_sha256, bytes: before.bytes };
+    if (!snapshotsMatch(before, expected)) throw publicError('Ignore file changed after preview; a fresh preview and approval are required.');
+    const replacement = appendRules(before, preview.exact_lines_proposed);
+    const createParent = choice === CHOICES.EXCLUDE;
+    if (createParent && !samePath(target, repo.exclude_path)) throw publicError('Local exclude target changed after preview.');
+    atomicWrite(target, replacement, before.mode, {
+      createParent,
+      beforeReplace: () => {
+        const current = readSnapshot(target);
+        if (!snapshotsMatch(before, current)) throw publicError('Ignore file changed immediately before replacement; refusing the stale approval.');
+        if (typeof options.beforeReplace === 'function') options.beforeReplace({ target, replacement });
+      },
+    });
+    return { status: 'updated', changed: true, target_file: preview.target_file, added: preview.exact_lines_proposed, preview };
   });
-  return { status: 'updated', changed: true, target_file: target, added: preview.exact_lines_proposed, preview };
 }
 
 function passiveIgnoreHygiene(repoRoot) {
-  const coverage = inspectIgnoreHygiene(repoRoot);
-  return {
-    status: coverage.canonical.mutation_required || coverage.legacy.mutation_required ? 'warning' : 'ok',
-    changed: false,
-    coverage,
-    message: 'Passive Toolkit inspection is read-only; use an active preview and exact approval before changing ignore files.',
-  };
+  return withPathlessErrors(() => {
+    const coverage = inspectIgnoreHygieneBinding(repoRoot).result;
+    return {
+      status: coverage.canonical.mutation_required || coverage.legacy.mutation_required ? 'warning' : 'ok',
+      changed: false,
+      coverage,
+      message: 'Passive Toolkit inspection is read-only; use an active preview and exact approval before changing ignore files.',
+    };
+  });
 }
 
 function parseArgs(argv) {
@@ -297,7 +356,7 @@ function parseArgs(argv) {
     else if (value === '--choice') args.choice = argv[++index];
     else if (value === '--approval-digest') args.approval_digest = argv[++index];
     else if (value === '--parent-operation-safe') args.parent_operation_safe = true;
-    else throw new Error(`Unknown argument: ${value}`);
+    else throw publicError('Unknown ignore-hygiene argument.');
   }
   return args;
 }
@@ -309,7 +368,7 @@ function main(argv = process.argv) {
   if (args.command === 'status') result = passiveIgnoreHygiene(root);
   else if (args.command === 'preview') result = previewIgnoreHygiene(root, args.choice || CHOICES.GITIGNORE);
   else if (args.command === 'apply') result = applyIgnoreHygiene(root, { choice: args.choice, approval_digest: args.approval_digest, parent_operation_safe: args.parent_operation_safe });
-  else throw new Error('Usage: repo-ignore-hygiene.cjs status|preview|apply --repo <path> [--choice gitignore|exclude|decline|proceed-warning] [--approval-digest <sha256>] [--parent-operation-safe]');
+  else throw publicError('Usage: repo-ignore-hygiene.cjs status|preview|apply --repo <path> [--choice gitignore|exclude|decline|proceed-warning] [--approval-digest <sha256>] [--parent-operation-safe]');
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 

@@ -289,9 +289,26 @@ function readRepoLocalBackup(repoRoot, metadataPath) {
 function currentMatches(target, descriptor) {
   let stat;
   try { stat = fs.lstatSync(target); } catch (error) { return Boolean(error && error.code === 'ENOENT' && !descriptor.existed); }
-  if (!descriptor.existed || stat.isSymbolicLink() || !stat.isFile()) return false;
-  const bytes = fs.readFileSync(target);
-  return bytes.length === descriptor.size_bytes && sha256(bytes) === descriptor.sha256;
+  if (!descriptor.existed || stat.isSymbolicLink() || !stat.isFile() || stat.size !== descriptor.size_bytes) return false;
+  try {
+    const real = fs.realpathSync.native ? fs.realpathSync.native(target) : fs.realpathSync(target);
+    if (!samePath(real, target)) return false;
+    const bytes = fs.readFileSync(target);
+    return bytes.length === descriptor.size_bytes && sha256(bytes) === descriptor.sha256;
+  } catch {
+    return false;
+  }
+}
+
+function targetStateMatches(inspected, file, descriptor) {
+  try {
+    const resolved = resolveRepoPath(inspected.repo_root, file.entry.path, { targetMayExist: true });
+    if (!samePath(resolved.target, file.target)) return false;
+    requireRealDirectory(path.dirname(file.target), 'Restore target parent');
+    return currentMatches(file.target, descriptor);
+  } catch {
+    return false;
+  }
 }
 
 function uniqueSibling(target, label) {
@@ -327,10 +344,11 @@ function waitForCleanupRetry(delayMs, options) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
 }
 
-function removePrivateTemp(filePath, options = {}) {
+function removePrivateTemp(filePath, options = {}, validateBeforeUnlink = null) {
   const unlinkFile = options.unlinkFile || fs.unlinkSync;
   for (let attempt = 0; attempt < CLEANUP_RETRY_DELAYS_MS.length; attempt += 1) {
     try {
+      if (validateBeforeUnlink && !validateBeforeUnlink()) return false;
       unlinkFile(filePath);
       return true;
     } catch (error) {
@@ -421,6 +439,10 @@ function restoreRepoLocalBackup(repoRoot, metadataPath, options = {}) {
   try {
     for (let index = 0; index < prepared.length; index += 1) {
       const file = prepared[index];
+      if (typeof options.beforeTargetDisplacement === 'function') options.beforeTargetDisplacement({ index, path: file.entry.path });
+      if (!targetStateMatches(inspected, file, file.entry.expected_replacement)) {
+        throw new Error(`Restore target changed immediately before mutation: ${file.entry.path}`);
+      }
       if (file.entry.expected_replacement.existed) {
         fs.renameSync(file.target, file.rollbackTemp);
         file.mutated = true;
@@ -465,17 +487,30 @@ function cleanupRepoLocalRestoreResidue(repoRoot, metadataPath, requestedCleanup
   const exactCleanupId = cleanupId(requestedCleanupId);
   const inspected = readRepoLocalBackup(repoRoot, metadataPath);
   for (const file of inspected.files) {
-    if (!currentMatches(file.target, file.entry.original)) throw new Error(`Cleanup requires the verified restored target state: ${file.entry.path}`);
+    if (!targetStateMatches(inspected, file, file.entry.original)) throw new Error(`Cleanup requires the verified restored target state: ${file.entry.path}`);
   }
   let foundCount = 0;
   let residueCount = 0;
+  let targetDriftCount = 0;
+  let candidateDriftCount = 0;
   for (const file of inspected.files) {
     if (!file.entry.expected_replacement.existed) continue;
     const candidate = rollbackPath(file.target, inspected.generation_path, exactCleanupId);
     if (!pathEntryExists(candidate)) continue;
     foundCount += 1;
-    const stat = fs.lstatSync(candidate);
-    if (stat.isSymbolicLink() || !stat.isFile() || !currentMatches(candidate, file.entry.expected_replacement) || !removePrivateTemp(candidate, options)) residueCount += 1;
+    if (typeof options.beforeCleanupCandidateDelete === 'function') options.beforeCleanupCandidateDelete({ path: file.entry.path });
+    let targetDrifted = false;
+    let candidateDrifted = false;
+    const validateDeletion = () => {
+      const targetValid = targetStateMatches(inspected, file, file.entry.original);
+      const candidateValid = currentMatches(candidate, file.entry.expected_replacement);
+      targetDrifted ||= !targetValid;
+      candidateDrifted ||= !candidateValid;
+      return targetValid && candidateValid;
+    };
+    if (!removePrivateTemp(candidate, options, validateDeletion)) residueCount += 1;
+    if (targetDrifted) targetDriftCount += 1;
+    if (candidateDrifted) candidateDriftCount += 1;
   }
   if (foundCount === 0) {
     return { status: 'cleanup-not-found', restored: true, backup_retained: true, temporary_cleanup_complete: false, temporary_residue_detected: false, temporary_residue_count: 0 };
@@ -485,13 +520,17 @@ function cleanupRepoLocalRestoreResidue(repoRoot, metadataPath, requestedCleanup
   }
   return {
     status: 'cleanup-incomplete',
-    restored: true,
+    restored: targetDriftCount === 0,
     backup_retained: true,
     temporary_cleanup_complete: false,
     temporary_residue_detected: true,
     temporary_residue_count: residueCount,
+    target_drift_detected: targetDriftCount > 0,
+    candidate_drift_detected: candidateDriftCount > 0,
     cleanup_id: exactCleanupId,
-    remediation: 'Private temporary residue remains. Retry cleanup after the filesystem lock is released.',
+    remediation: targetDriftCount || candidateDriftCount
+      ? 'Target or recovery residue state changed before cleanup. Preserve both entries and inspect the repository before retrying.'
+      : 'Private temporary residue remains. Retry cleanup after the filesystem lock is released.',
   };
 }
 

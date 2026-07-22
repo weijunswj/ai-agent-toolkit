@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.8.1",
+  "version": "2.8.2",
   "version_policy": "semver",
-  "version_notes": "Hardens exact cleanup identity, restore preparation topology, payload revalidation, and protected backup-root aliases.",
+  "version_notes": "Redacts private ignore-hygiene paths and closes restore and cleanup target-state races.",
   "outputs": [
     {
       "kind": "curated",

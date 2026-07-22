@@ -81,6 +81,30 @@ function approve(root, choice) {
   return applyIgnoreHygiene(root, { choice, approval_digest: preview.approval_digest });
 }
 
+function privatePaths(root) {
+  const gitDirectory = path.resolve(root, git(root, 'rev-parse', '--absolute-git-dir'));
+  const exclude = path.resolve(root, git(root, 'rev-parse', '--git-path', 'info/exclude'));
+  return [root, gitDirectory, exclude];
+}
+
+function assertPathless(value, paths) {
+  const serialized = typeof value === 'string' ? value : JSON.stringify(value);
+  const normalized = serialized.replace(/\\\\/g, '\\').replace(/\\/g, '/').toLowerCase();
+  for (const privatePath of paths) {
+    const needle = path.resolve(privatePath).replace(/\\/g, '/').toLowerCase();
+    assert.equal(normalized.includes(needle), false, `private path leaked: ${needle}`);
+  }
+}
+
+function captureError(action) {
+  try {
+    action();
+  } catch (error) {
+    return error;
+  }
+  assert.fail('Expected operation to fail.');
+}
+
 test('Toolkit repository tracks canonical and legacy narrow ignore coverage', () => {
   const result = inspectIgnoreHygiene(repoRoot);
   assert.equal(result.canonical.coverage, '.gitignore');
@@ -203,6 +227,115 @@ test('passive inspection reports only and never writes', () => {
   assert.equal(result.changed, false);
   assert.match(result.message, /read-only/);
   assert.equal(hashTree(root), before);
+});
+
+test('ignore-hygiene API outcomes and routine errors never expose private resolved paths', () => {
+  const root = initRepo('pathless-api');
+  const paths = privatePaths(root);
+  const status = passiveIgnoreHygiene(root);
+  const preview = previewIgnoreHygiene(root, CHOICES.GITIGNORE);
+  const declinePreview = previewIgnoreHygiene(root, CHOICES.DECLINE);
+  const declined = applyIgnoreHygiene(root, { choice: CHOICES.DECLINE, approval_digest: declinePreview.approval_digest });
+  const warningPreview = previewIgnoreHygiene(root, CHOICES.PROCEED_WARNING);
+  const warning = applyIgnoreHygiene(root, {
+    choice: CHOICES.PROCEED_WARNING,
+    approval_digest: warningPreview.approval_digest,
+    parent_operation_safe: true,
+  });
+  const updated = applyIgnoreHygiene(root, { choice: CHOICES.GITIGNORE, approval_digest: preview.approval_digest });
+  const coveredPreview = previewIgnoreHygiene(root, CHOICES.GITIGNORE);
+  const covered = applyIgnoreHygiene(root, { choice: CHOICES.GITIGNORE, approval_digest: coveredPreview.approval_digest });
+  for (const result of [status, preview, declined, warning, updated, covered]) assertPathless(result, paths);
+  assert.match(preview.repository_identity_sha256, /^[a-f0-9]{64}$/);
+  assert.equal(preview.target_file, '.gitignore');
+  assert.equal(preview.coverage.files.gitignore.label, '.gitignore');
+  assert.equal(preview.coverage.files.info_exclude.label, '.git/info/exclude');
+  assert.equal(updated.target_file, '.gitignore');
+
+  const localRoot = initRepo('pathless-api-local');
+  const localPaths = privatePaths(localRoot);
+  const localPreview = previewIgnoreHygiene(localRoot, CHOICES.EXCLUDE);
+  const localUpdated = applyIgnoreHygiene(localRoot, { choice: CHOICES.EXCLUDE, approval_digest: localPreview.approval_digest });
+  assert.equal(localUpdated.target_file, '.git/info/exclude');
+  assertPathless(localUpdated, localPaths);
+
+  const staleRoot = initRepo('pathless-api-stale');
+  const stalePaths = privatePaths(staleRoot);
+  const stalePreview = previewIgnoreHygiene(staleRoot, CHOICES.GITIGNORE);
+  write(path.join(staleRoot, '.gitignore'), 'concurrent-change/\n');
+  assertPathless(captureError(() => applyIgnoreHygiene(staleRoot, {
+    choice: CHOICES.GITIGNORE,
+    approval_digest: stalePreview.approval_digest,
+  })).message, stalePaths);
+
+  const unsafeRoot = initRepo('pathless-api-unsafe');
+  const unsafePaths = privatePaths(unsafeRoot);
+  fs.mkdirSync(path.join(unsafeRoot, '.gitignore'));
+  assertPathless(captureError(() => previewIgnoreHygiene(unsafeRoot, CHOICES.GITIGNORE)).message, unsafePaths);
+  const invalidTarget = path.join(unsafeRoot, 'nested');
+  fs.mkdirSync(invalidTarget);
+  assertPathless(captureError(() => previewIgnoreHygiene(invalidTarget, CHOICES.GITIGNORE)).message, unsafePaths);
+
+  const unsafeExcludeRoot = initRepo('pathless-api-unsafe-exclude');
+  const unsafeExcludePaths = privatePaths(unsafeExcludeRoot);
+  const unsafeExclude = path.resolve(unsafeExcludeRoot, git(unsafeExcludeRoot, 'rev-parse', '--git-path', 'info/exclude'));
+  fs.unlinkSync(unsafeExclude);
+  fs.mkdirSync(unsafeExclude);
+  assertPathless(captureError(() => previewIgnoreHygiene(unsafeExcludeRoot, CHOICES.EXCLUDE)).message, unsafeExcludePaths);
+});
+
+test('ignore-hygiene spawned CLI output and routine errors never expose private resolved paths', () => {
+  const root = initRepo('pathless-cli');
+  const paths = privatePaths(root);
+  const invoke = (...args) => run(process.execPath, [ignoreScript, ...args, '--repo', root], { cwd: repoRoot });
+  const status = invoke('status');
+  const previewRun = invoke('preview', '--choice', CHOICES.GITIGNORE);
+  assert.equal(status.status, 0, status.stderr);
+  assert.equal(previewRun.status, 0, previewRun.stderr);
+  const preview = JSON.parse(previewRun.stdout);
+  const declinePreview = JSON.parse(invoke('preview', '--choice', CHOICES.DECLINE).stdout);
+  const declined = invoke('apply', '--choice', CHOICES.DECLINE, '--approval-digest', declinePreview.approval_digest);
+  const warningPreview = JSON.parse(invoke('preview', '--choice', CHOICES.PROCEED_WARNING).stdout);
+  const warning = invoke('apply', '--choice', CHOICES.PROCEED_WARNING, '--approval-digest', warningPreview.approval_digest, '--parent-operation-safe');
+  const updated = invoke('apply', '--choice', CHOICES.GITIGNORE, '--approval-digest', preview.approval_digest);
+  const coveredPreview = JSON.parse(invoke('preview', '--choice', CHOICES.GITIGNORE).stdout);
+  const covered = invoke('apply', '--choice', CHOICES.GITIGNORE, '--approval-digest', coveredPreview.approval_digest);
+  for (const result of [status, previewRun, declined, warning, updated, covered]) {
+    assert.equal(result.status, 0, result.stderr);
+    assertPathless(`${result.stdout}\n${result.stderr}`, paths);
+  }
+
+  const localRoot = initRepo('pathless-cli-local');
+  const localPaths = privatePaths(localRoot);
+  const localPreviewRun = run(process.execPath, [ignoreScript, 'preview', '--repo', localRoot, '--choice', CHOICES.EXCLUDE], { cwd: repoRoot });
+  const localPreview = JSON.parse(localPreviewRun.stdout);
+  const localUpdated = run(process.execPath, [ignoreScript, 'apply', '--repo', localRoot, '--choice', CHOICES.EXCLUDE, '--approval-digest', localPreview.approval_digest], { cwd: repoRoot });
+  assert.equal(localUpdated.status, 0, localUpdated.stderr);
+  assertPathless(`${localUpdated.stdout}\n${localUpdated.stderr}`, localPaths);
+
+  const staleRoot = initRepo('pathless-cli-stale');
+  const stalePaths = privatePaths(staleRoot);
+  const stalePreview = JSON.parse(run(process.execPath, [ignoreScript, 'preview', '--repo', staleRoot, '--choice', CHOICES.GITIGNORE], { cwd: repoRoot }).stdout);
+  write(path.join(staleRoot, '.gitignore'), 'concurrent-change/\n');
+  const stale = run(process.execPath, [ignoreScript, 'apply', '--repo', staleRoot, '--choice', CHOICES.GITIGNORE, '--approval-digest', stalePreview.approval_digest], { cwd: repoRoot });
+  assert.notEqual(stale.status, 0);
+  assertPathless(`${stale.stdout}\n${stale.stderr}`, stalePaths);
+
+  const unsafeRoot = initRepo('pathless-cli-unsafe');
+  const unsafePaths = privatePaths(unsafeRoot);
+  fs.mkdirSync(path.join(unsafeRoot, '.gitignore'));
+  const unsafe = run(process.execPath, [ignoreScript, 'preview', '--repo', unsafeRoot, '--choice', CHOICES.GITIGNORE], { cwd: repoRoot });
+  assert.notEqual(unsafe.status, 0);
+  assertPathless(`${unsafe.stdout}\n${unsafe.stderr}`, unsafePaths);
+
+  const unsafeExcludeRoot = initRepo('pathless-cli-unsafe-exclude');
+  const unsafeExcludePaths = privatePaths(unsafeExcludeRoot);
+  const unsafeExcludePath = path.resolve(unsafeExcludeRoot, git(unsafeExcludeRoot, 'rev-parse', '--git-path', 'info/exclude'));
+  fs.unlinkSync(unsafeExcludePath);
+  fs.mkdirSync(unsafeExcludePath);
+  const unsafeExclude = run(process.execPath, [ignoreScript, 'preview', '--repo', unsafeExcludeRoot, '--choice', CHOICES.EXCLUDE], { cwd: repoRoot });
+  assert.notEqual(unsafeExclude.status, 0);
+  assertPathless(`${unsafeExclude.stdout}\n${unsafeExclude.stderr}`, unsafeExcludePaths);
 });
 
 test('repeat run is idempotent and preserves comments and LF formatting', () => {
@@ -436,6 +569,41 @@ test('current replacement checksum mismatch refuses restore without mutation', (
   const before = read(path.join(root, 'a.txt'));
   assert.throws(() => restoreRepoLocalBackup(root, backup.metadata_path), /does not match/);
   assert.deepEqual(read(path.join(root, 'a.txt')), before);
+});
+
+test('restore revalidates each target immediately before displacement and rolls back earlier mutations', () => {
+  const root = initRepo('restore-target-race');
+  const firstTarget = path.join(root, 'a.txt');
+  const secondTarget = path.join(root, 'b.txt');
+  write(firstTarget, 'old-a\n');
+  write(secondTarget, 'old-b\r\n');
+  const backup = createRepoLocalBackup(root, {
+    operation: 'restore-target-race',
+    changes: [
+      { path: 'a.txt', replacementBytes: 'new-a\n' },
+      { path: 'b.txt', replacementBytes: 'new-b\n' },
+    ],
+  });
+  write(firstTarget, 'new-a\n');
+  write(secondTarget, 'new-b\n');
+  const firstBefore = read(firstTarget);
+  const concurrentBytes = Buffer.from('concurrent-b\r\n');
+  const backupBefore = hashTree(backup.generation_path);
+  let stdout = '';
+  const originalWrite = process.stdout.write;
+  process.stdout.write = (chunk) => { stdout += chunk; return true; };
+  try {
+    assert.throws(() => backupMain(['node', backupScript, 'restore', '--repo', root, '--metadata', backup.metadata_path], {
+      beforeTargetDisplacement: ({ index }) => { if (index === 1) write(secondTarget, concurrentBytes); },
+    }), /exact prior target state was restored/);
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+  assert.deepEqual(read(firstTarget), firstBefore);
+  assert.deepEqual(read(secondTarget), concurrentBytes);
+  assert.deepEqual(privateRestoreResidue(root), []);
+  assert.equal(hashTree(backup.generation_path), backupBefore);
+  assert.doesNotMatch(stdout, /"exact"\s*:\s*true/);
 });
 
 function privateRestoreResidue(root) {
@@ -825,6 +993,46 @@ test('cleanup requires the exact opaque ID and never scans same-prefix decoys', 
   assert.deepEqual(read(decoy), Buffer.from('new\n'));
   assert.deepEqual(read(target), Buffer.from('old\r\n'));
   assert.equal(hashTree(backup.generation_path), backupBefore);
+});
+
+test('cleanup revalidates target and exact candidate immediately before deletion', async (t) => {
+  for (const drift of ['target', 'candidate']) await t.test(`${drift} drift`, () => {
+    const root = initRepo(`cleanup-${drift}-race`);
+    const target = path.join(root, 'a.txt');
+    write(target, 'old\r\n');
+    const backup = createRepoLocalBackup(root, {
+      operation: `cleanup-${drift}-race`,
+      changes: [{ path: 'a.txt', replacementBytes: 'new\n' }],
+    });
+    write(target, 'new\n');
+    const backupBefore = hashTree(backup.generation_path);
+    const restored = restoreRepoLocalBackup(root, backup.metadata_path, {
+      unlinkFile: (filePath) => {
+        if (filePath.includes('.toolkit-rollback-')) throw transientError('EBUSY');
+        fs.unlinkSync(filePath);
+      },
+      waitForCleanupRetry: () => {},
+    });
+    const residue = rollbackResiduePath(target, backup.generation_path, restored.cleanup_id);
+    const targetDrift = Buffer.from('concurrent-target\n');
+    const candidateDrift = Buffer.from('concurrent-candidate\n');
+    const result = cleanupRepoLocalRestoreResidue(root, backup.metadata_path, restored.cleanup_id, {
+      beforeCleanupCandidateDelete: () => {
+        if (drift === 'target') write(target, targetDrift);
+        else write(residue, candidateDrift);
+      },
+    });
+    assert.equal(result.status, 'cleanup-incomplete');
+    assert.equal(result.temporary_residue_count, 1);
+    assert.equal(result.target_drift_detected, drift === 'target');
+    assert.equal(result.candidate_drift_detected, drift === 'candidate');
+    assert.equal(result.restored, drift !== 'target');
+    assert.equal(fs.existsSync(residue), true);
+    assert.deepEqual(read(target), drift === 'target' ? targetDrift : Buffer.from('old\r\n'));
+    assert.deepEqual(read(residue), drift === 'candidate' ? candidateDrift : Buffer.from('new\n'));
+    assert.equal(hashTree(backup.generation_path), backupBefore);
+    assertPathless(result, privatePaths(root));
+  });
 });
 
 test('restore rejects a pre-existing exact rollback destination before target mutation', () => {
