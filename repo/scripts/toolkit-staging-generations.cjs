@@ -214,7 +214,7 @@ function validateRecordShape(record, recordPath, expectedParent) {
   const expectedStageName = record.operation === 'hub-snapshot-replacement'
     ? `.staging-${record.generation_id}`
     : `.${path.basename(record.expected_final_target)}.staging-${record.generation_id}`;
-  if (!['hub-snapshot-replacement', 'target-directory-copy', 'target-skill-replacement'].includes(record.operation)) return 'operation-mismatch';
+  if (!['hub-snapshot-replacement', 'target-directory-copy', 'target-skill-replacement', 'n8n-skills-plugin-repair'].includes(record.operation)) return 'operation-mismatch';
   if (path.basename(record.expected_staging_path) !== expectedStageName) return 'staging-name-mismatch';
   if (!/^\d+\.\d+\.\d+$/.test(String(record.bridge_version || ''))) return 'bridge-version-mismatch';
   if (record.state !== 'registered' || !Number.isFinite(Date.parse(record.created_at || '')) || !Number.isFinite(Date.parse(record.creating_process?.started_at || ''))) return 'generation-state-or-time-mismatch';

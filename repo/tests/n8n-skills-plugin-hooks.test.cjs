@@ -11,8 +11,20 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 const auditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-n8n-skills-plugin-hooks.cjs');
 const repairScript = path.join(repoRoot, 'repo', 'scripts', 'repair-codex-plugin-windows-hooks.cjs');
 const supportedFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
+const currentManifestPath = path.join(
+  repoRoot,
+  '_projects',
+  'n8n',
+  'skills-plugin-compatibility',
+  '_main',
+  'plugins',
+  'n8n-skills',
+  '.codex-plugin',
+  'plugin.json'
+);
 const {
   N8N_SKILLS_COMPATIBILITY,
+  N8N_SKILLS_COMPATIBILITY_ADAPTERS,
   classifyN8nSkillsCompatibility,
   n8nSkillsCompatibilityFingerprints,
   reconcileN8nSkillsPlugin
@@ -43,6 +55,12 @@ function makePluginRoot() {
 
 function copySupportedFixture(pluginRoot = makePluginRoot()) {
   fs.cpSync(supportedFixtureRoot, pluginRoot, { recursive: true, force: true });
+  return pluginRoot;
+}
+
+function copyCurrentSupportedFixture(pluginRoot = makePluginRoot()) {
+  copySupportedFixture(pluginRoot);
+  fs.copyFileSync(currentManifestPath, path.join(pluginRoot, '.codex-plugin', 'plugin.json'));
   return pluginRoot;
 }
 
@@ -1186,10 +1204,10 @@ test('canonical compatibility accepts only CRLF-to-LF equivalence', () => {
     const pluginRoot = copySupportedCrlfFixture();
     entry.mutate(pluginRoot);
     const before = snapshotFiles(pluginRoot);
-    assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'malformed', entry.name);
+    assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'identity-unverified', entry.name);
     assert.throws(
       () => reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true }),
-      /malformed|partially repaired|fingerprint/i,
+      /source identity|partially repaired|fingerprint/i,
       entry.name
     );
     assertSnapshotEqual(pluginRoot, before, entry.name + ' must fail closed without writes');
@@ -1210,6 +1228,34 @@ test('supported n8n Skills 1.0.1 compatibility inspection is exact and write-fre
   assert.equal(inspection.status, 'repair-required');
   assert.ok(inspection.actions.length > 0);
   assertSnapshotEqual(pluginRoot, before, 'inspection-only reconciliation must not write');
+});
+
+test('current n8n Skills 1.0.2 adapter is exact, repairable, verified, and idempotent', () => {
+  const pluginRoot = copyCurrentSupportedFixture();
+  const pristine = snapshotFiles(pluginRoot);
+  const classification = classifyN8nSkillsCompatibility(pluginRoot);
+  assert.equal(classification.status, 'repair-required');
+  assert.equal(classification.version, '1.0.2');
+  assert.equal(classification.adapter_id, 'n8n-skills-1.0.2-windows-hooks-v1');
+  assert.equal(classification.upstream_commit, 'eb18fc3ab3e2820c748c2d84386fb5496efc1516');
+
+  const inspection = reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: false });
+  assert.ok(inspection.actions.length > 0);
+  assertSnapshotEqual(pluginRoot, pristine, 'current-version inspection must not write');
+
+  const repaired = reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true });
+  assert.equal(repaired.status, 'repaired');
+  const healthy = classifyN8nSkillsCompatibility(pluginRoot);
+  assert.equal(healthy.status, 'healthy');
+  assert.equal(healthy.compatibility_scope, 'declared-windows-hook-contract');
+  assert.match(healthy.reason, /unrelated plugin content.*not attested/i);
+  assert.equal(healthy.version, '1.0.2');
+  assert.equal(readJson(path.join(pluginRoot, '.codex-plugin', 'plugin.json')).version, '1.0.2');
+  const repairedSnapshot = snapshotFiles(pluginRoot);
+  const second = reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true });
+  assert.equal(second.status, 'healthy');
+  assert.equal(second.repaired, false);
+  assertSnapshotEqual(pluginRoot, repairedSnapshot, 'current-version healthy rerun must be byte-identical');
 });
 
 test('supported refresh is repaired, verified, and byte-idempotent', () => {
@@ -1247,41 +1293,172 @@ test('supported refresh is repaired, verified, and byte-idempotent', () => {
 test('unknown and partially repaired n8n Skills shapes fail closed', () => {
   const unknownRoot = copySupportedFixture();
   const unknownManifest = readJson(path.join(unknownRoot, '.codex-plugin', 'plugin.json'));
-  unknownManifest.version = '1.0.2';
+  unknownManifest.version = '1.0.3';
   writeJson(path.join(unknownRoot, '.codex-plugin', 'plugin.json'), unknownManifest);
   const unknownBefore = snapshotFiles(unknownRoot);
-  assert.equal(classifyN8nSkillsCompatibility(unknownRoot).status, 'compatibility-drift');
+  assert.equal(classifyN8nSkillsCompatibility(unknownRoot).status, 'unsupported-version');
   assert.throws(
     () => reconcileN8nSkillsPlugin(unknownRoot, { windows: true, write: true }),
-    /compatibility contract changed|unsupported/i
+    /exact adapter|unsupported/i
   );
   assertSnapshotEqual(unknownRoot, unknownBefore, 'unknown versions must not be modified');
 
   const partialRoot = copySupportedFixture();
-  fs.appendFileSync(path.join(partialRoot, 'hooks', 'session-start.sh'), '# local drift\n', 'utf8');
+  reconcileN8nSkillsPlugin(partialRoot, { windows: true, write: true });
+  fs.copyFileSync(
+    path.join(supportedFixtureRoot, 'hooks', 'session-start.sh'),
+    path.join(partialRoot, 'hooks', 'session-start.sh')
+  );
   const partialBefore = snapshotFiles(partialRoot);
-  assert.equal(classifyN8nSkillsCompatibility(partialRoot).status, 'malformed');
+  assert.equal(classifyN8nSkillsCompatibility(partialRoot).status, 'partial-repair');
   assert.throws(
     () => reconcileN8nSkillsPlugin(partialRoot, { windows: true, write: true }),
-    /malformed|partially repaired|fingerprint/i
+    /mixture|partially repaired|source identity/i
   );
   assertSnapshotEqual(partialRoot, partialBefore, 'ambiguous supported-version state must not be modified');
 
   const missingRoot = copySupportedFixture();
   fs.unlinkSync(path.join(missingRoot, 'hooks', 'pre-tool-use', 'execute-workflow.sh'));
   const missingBefore = snapshotFiles(missingRoot);
-  assert.equal(classifyN8nSkillsCompatibility(missingRoot).status, 'malformed');
-  assert.throws(() => reconcileN8nSkillsPlugin(missingRoot, { windows: true, write: true }), /malformed|fingerprint/i);
+  assert.equal(classifyN8nSkillsCompatibility(missingRoot).status, 'unsupported-layout');
+  assert.throws(() => reconcileN8nSkillsPlugin(missingRoot, { windows: true, write: true }), /layout|missing/i);
   assertSnapshotEqual(missingRoot, missingBefore, 'missing required hook state must not be modified');
 });
 
+test('current adapter rejects wrong identity, unknown versions, malformed manifests, and layout drift', () => {
+  const cases = [
+    {
+      name: 'wrong source identity',
+      expected: 'identity-unverified',
+      mutate(root) {
+        const manifestPath = path.join(root, '.codex-plugin', 'plugin.json');
+        const manifest = readJson(manifestPath);
+        manifest.repository = 'https://github.com/example/not-official';
+        writeJson(manifestPath, manifest);
+      }
+    },
+    {
+      name: 'unknown older version',
+      expected: 'unsupported-version',
+      mutate(root) {
+        const manifestPath = path.join(root, '.codex-plugin', 'plugin.json');
+        const manifest = readJson(manifestPath);
+        manifest.version = '0.9.9';
+        writeJson(manifestPath, manifest);
+      }
+    },
+    {
+      name: 'unsupported hook path',
+      expected: 'unsupported-layout',
+      mutate(root) {
+        const manifestPath = path.join(root, '.codex-plugin', 'plugin.json');
+        const manifest = readJson(manifestPath);
+        manifest.hooks = './hooks/hooks-v2.json';
+        writeJson(manifestPath, manifest);
+      }
+    },
+    {
+      name: 'unexpected critical hook file',
+      expected: 'unsupported-layout',
+      mutate(root) {
+        fs.writeFileSync(path.join(root, 'hooks', 'unexpected-critical.sh'), '#!/usr/bin/env bash\n', 'utf8');
+      }
+    },
+    {
+      name: 'malformed hook manifest',
+      expected: 'malformed',
+      mutate(root) {
+        fs.writeFileSync(path.join(root, 'hooks', 'hooks.json'), '{not-json\n', 'utf8');
+      }
+    }
+  ];
+
+  for (const entry of cases) {
+    const root = copyCurrentSupportedFixture();
+    entry.mutate(root);
+    const before = snapshotFiles(root);
+    const classification = classifyN8nSkillsCompatibility(root);
+    assert.equal(classification.status, entry.expected, entry.name);
+    assert.equal(classification.mutation_allowed, false, entry.name);
+    assert.ok(classification.code, entry.name);
+    assert.ok(classification.next_action, entry.name);
+    assert.throws(() => reconcileN8nSkillsPlugin(root, { windows: true, write: true }), /./, entry.name);
+    assertSnapshotEqual(root, before, `${entry.name} must fail closed`);
+  }
+});
+
+test('current adapter rejects a redirected hooks root before any repair', (t) => {
+  const root = copyCurrentSupportedFixture();
+  const realHooks = path.join(root, 'real-hooks');
+  const hooksRoot = path.join(root, 'hooks');
+  fs.renameSync(hooksRoot, realHooks);
+  try {
+    fs.symlinkSync(realHooks, hooksRoot, process.platform === 'win32' ? 'junction' : 'dir');
+  } catch (error) {
+    if (error.code === 'EPERM' || error.code === 'EACCES') {
+      t.skip(`directory link creation is unavailable: ${error.code}`);
+      return;
+    }
+    throw error;
+  }
+
+  const classification = classifyN8nSkillsCompatibility(root);
+  assert.equal(classification.status, 'unsupported-layout');
+  assert.match(classification.reason, /redirected|symbolic link|junction/i);
+  assert.throws(() => reconcileN8nSkillsPlugin(root, { windows: true, write: true }), /redirected|symbolic link|junction/i);
+  assert.equal(fs.existsSync(path.join(realHooks, 'run-hook.ps1')), false);
+});
+
+test('current partial repair is distinct and never rewritten', () => {
+  const root = copyCurrentSupportedFixture();
+  reconcileN8nSkillsPlugin(root, { windows: true, write: true });
+  fs.copyFileSync(
+    path.join(supportedFixtureRoot, 'hooks', 'pre-tool-use', '_emit.sh'),
+    path.join(root, 'hooks', 'pre-tool-use', '_emit.sh')
+  );
+  const before = snapshotFiles(root);
+  assert.equal(classifyN8nSkillsCompatibility(root).status, 'partial-repair');
+  assert.throws(() => reconcileN8nSkillsPlugin(root, { windows: true, write: true }), /mixture/i);
+  assertSnapshotEqual(root, before, 'current partial repair must remain unchanged');
+});
+
 test('source-watch records the authoritative n8n Skills compatibility baseline without mutation authority', () => {
+  const sourceLockPath = path.join(repoRoot, '_projects', 'n8n', 'skills-plugin-compatibility', 'SOURCE-LOCK.json');
+  const before = fs.readFileSync(sourceLockPath);
+  const sourceLock = JSON.parse(before.toString('utf8'));
+  assert.equal(sourceLock.source_repo, 'n8n-io/skills');
+  assert.equal(sourceLock.source_ref, 'main');
+  assert.equal(sourceLock.source_commit, 'eb18fc3ab3e2820c748c2d84386fb5496efc1516');
+  assert.equal(sourceLock.source_update_policy, 'manual_review_required');
+  assert.deepEqual(sourceLock.upstream_root_surface_paths, ['skills/using-n8n-skills-official/SKILL.md']);
+  assert.deepEqual(sourceLock.files.map((entry) => entry.source_path), [
+    '.codex-plugin/plugin.json',
+    '.agents/plugins/marketplace.json',
+    '.claude-plugin/marketplace.json',
+    '.claude-plugin/plugin.json',
+    'hooks/hooks.json',
+    'hooks/session-start.sh',
+    'hooks/pre-tool-use/_emit.sh',
+    'hooks/pre-tool-use/create-workflow.sh',
+    'hooks/pre-tool-use/execute-workflow.sh',
+    'hooks/pre-tool-use/get-node.sh',
+    'hooks/pre-tool-use/test-workflow.sh',
+    'hooks/pre-tool-use/update-workflow.sh',
+    'hooks/pre-tool-use/validate-workflow.sh',
+    'hooks/post-tool-use/validate-workflow.sh',
+    'skills/using-n8n-skills-official/SKILL.md',
+    'README.md',
+    'LICENSE'
+  ]);
+  assert.match(sourceLock.notes, /report-only/i);
+  assert.ok(sourceLock.files.every((entry) => /^[0-9a-f]{40}$/.test(entry.source_blob_sha)));
+  assert.deepEqual(fs.readFileSync(sourceLockPath), before, 'source-watch metadata inspection must not mutate its lock');
+
   const advisory = readJson(path.join(repoRoot, 'repo', 'source-watch', 'advisory-targets.json'));
-  const target = advisory.targets.find((entry) => entry.id === 'n8n-skills-hook-compatibility');
-  assert.ok(target);
-  assert.equal(target.repo, 'n8n-io/skills');
-  assert.equal(target.ref, 'main');
-  assert.equal(target.baseline_sha, 'c350f8b4bd8417108bce266d88e21b8a1bb966db');
-  assert.match(target.recommendation, /must not mutate installed caches/i);
-  assert.match(target.remaining_work, /#248/);
+  assert.equal(
+    advisory.targets.some((entry) => entry.id === 'n8n-skills-hook-compatibility'),
+    false,
+    'active SOURCE-LOCK tracking replaces the temporary advisory target'
+  );
+  assert.deepEqual(Object.keys(N8N_SKILLS_COMPATIBILITY_ADAPTERS).sort(), ['1.0.1', '1.0.2']);
 });

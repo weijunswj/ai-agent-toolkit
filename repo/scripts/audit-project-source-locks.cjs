@@ -27,9 +27,9 @@ const knownRetiredInternalSourceRepos = new Set([
 ]);
 // These prefixes are reserved toolkit-local source/maintenance namespaces.
 // SOURCE-LOCK source_path values must usually describe upstream repo paths,
-// not toolkit-local layout paths. A narrow exception exists for retired
-// same-repo migrations from former root published surfaces, where skills/
-// is the real pinned upstream path.
+// not toolkit-local layout paths. Narrow exceptions exist for retired
+// same-repo migrations and for exact paths explicitly declared by an active,
+// immutable third-party source whose real upstream package lives at skills/.
 const toolkitLocalSourcePathPrefixes = ['_projects/', 'repo/'];
 const sameRepoRootSurfaceSourcePathPrefixes = ['skills/'];
 const rootSurfacePathPrefixes = ['skills/'];
@@ -170,11 +170,20 @@ function isSameRepoRetiredRootSurfaceSource(lock, normalizedSourcePath) {
     sameRepoRootSurfaceSourcePathPrefixes.some((prefix) => normalizedSourcePath.startsWith(prefix));
 }
 
+function isDeclaredThirdPartyRootSurfaceSource(lock, normalizedSourcePath) {
+  return lock.source_role === 'third_party_attribution_source' &&
+    lock.source_lifecycle === 'active' &&
+    fullCommitShaPattern.test(String(lock.source_commit || '')) &&
+    Array.isArray(lock.upstream_root_surface_paths) &&
+    lock.upstream_root_surface_paths.includes(normalizedSourcePath);
+}
+
 function validateSourcePathProvenance(lock, file, relPath, label, errors) {
   if (!file.source_path) return;
   const normalized = String(file.source_path).replace(/\\/g, '/');
   if (sameRepoRootSurfaceSourcePathPrefixes.some((prefix) => normalized === prefix.slice(0, -1) || normalized.startsWith(prefix))) {
     if (isSameRepoRetiredRootSurfaceSource(lock, normalized)) return;
+    if (isDeclaredThirdPartyRootSurfaceSource(lock, normalized)) return;
     errors.push(`${relPath} root-surface source_path is allowed only for retired same-repo migrations: ${label} uses ${file.source_path}`);
     return;
   }

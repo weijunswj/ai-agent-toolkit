@@ -256,7 +256,7 @@ test('narrow n8n plugin repair intents route without capturing workspace or live
     assert.match(text, /live n8n|Docker|server/i);
   }
   assert.match(source, /repair n8n plugin/);
-  assert.match(source, /fix n8n skill hooks/);
+  assert.match(source, /fix n8n Skills hooks/i);
   assert.match(source, /repair the n8n Skills plugin/);
   assert.match(source, /Claude Code plugin/);
   assert.match(source, /Toolkit source or generated skill/);

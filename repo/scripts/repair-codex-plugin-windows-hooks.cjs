@@ -24,13 +24,7 @@ const N8N_SKILLS_TEXT_EOL_PATHS = Object.freeze([
   'hooks/run-hook.ps1',
   'skills/using-n8n-skills-official/SKILL.md'
 ]);
-const N8N_SKILLS_COMPATIBILITY = Object.freeze({
-  plugin_id: 'n8n-skills@n8n-io',
-  version: '1.0.1',
-  upstream_repo: 'n8n-io/skills',
-  upstream_commit: 'c350f8b4bd8417108bce266d88e21b8a1bb966db',
-  text_eol_paths: N8N_SKILLS_TEXT_EOL_PATHS,
-  pristine_sha256: Object.freeze({
+const N8N_SKILLS_PRISTINE_SHA256_1_0_1 = Object.freeze({
     '.codex-plugin/plugin.json': '3e7da0f4b2cff1a351254614f2bdef71f41b4d2f9e8c45cb27926a0a876ae5aa',
     'hooks/hooks.json': '192f4c3bf06de12ee7e6c7b9ec0f35aae915e33d6874154377a3e93e688862b1',
     'hooks/session-start.sh': 'f9d49f81bbb6b1da756f3f207017cc3a1660ad3e565e99e65c18396459a0308d',
@@ -43,8 +37,8 @@ const N8N_SKILLS_COMPATIBILITY = Object.freeze({
     'hooks/pre-tool-use/validate-workflow.sh': '0b32c21a6a549f051594e18b065b9c62187c1b472ef726bdc7b36a6b202933ca',
     'hooks/post-tool-use/validate-workflow.sh': '6e9bd8e914e936116a019f5a9ea1c40eba62d96a90823b87e32e4a84b86c1ddf',
     'skills/using-n8n-skills-official/SKILL.md': 'b19218c759d5a3538e0e11182adb3a38b50712e4f4c1822fa80834aa25fe9c09'
-  }),
-  repaired_sha256: Object.freeze({
+});
+const N8N_SKILLS_REPAIRED_SHA256_1_0_1 = Object.freeze({
     '.codex-plugin/plugin.json': '3e7da0f4b2cff1a351254614f2bdef71f41b4d2f9e8c45cb27926a0a876ae5aa',
     'hooks/hooks.json': '216c491b96fe6656396e1df4fc12291647f42689e54b291153fc765d41d94fd9',
     'hooks/session-start.sh': '92ff280ea75c5c3ca0bd2e97b295f45a3433cc8f33e522b1563c3ff32b0e8610',
@@ -58,8 +52,50 @@ const N8N_SKILLS_COMPATIBILITY = Object.freeze({
     'hooks/post-tool-use/validate-workflow.sh': 'e6e3f060d5770aa640dc57f9d23792316e9cf965199395771a585b3a504e983d',
     'hooks/run-hook.ps1': 'ca721972f6a7f972f828b0481ae0f19a08e057fe986a1f17dc081b759e9b666f',
     'skills/using-n8n-skills-official/SKILL.md': 'b19218c759d5a3538e0e11182adb3a38b50712e4f4c1822fa80834aa25fe9c09'
+});
+
+function hashesForManifest(base, manifestSha256) {
+  return Object.freeze({ ...base, '.codex-plugin/plugin.json': manifestSha256 });
+}
+
+function compatibilityAdapter({ version, upstreamCommit, pristineSha256, repairedSha256 }) {
+  return Object.freeze({
+    adapter_id: `n8n-skills-${version}-windows-hooks-v1`,
+    plugin_id: 'n8n-skills@n8n-io',
+    package_name: 'n8n-skills',
+    marketplace_name: 'n8n-io',
+    version,
+    upstream_repo: 'n8n-io/skills',
+    upstream_ref: 'main',
+    upstream_commit: upstreamCommit,
+    repair_profile: 'windows-shell-wrapper-node-json-fallback-v1',
+    text_eol_paths: N8N_SKILLS_TEXT_EOL_PATHS,
+    pristine_sha256: pristineSha256,
+    repaired_sha256: repairedSha256
+  });
+}
+
+const N8N_SKILLS_COMPATIBILITY_ADAPTERS = Object.freeze({
+  '1.0.1': compatibilityAdapter({
+    version: '1.0.1',
+    upstreamCommit: 'c350f8b4bd8417108bce266d88e21b8a1bb966db',
+    pristineSha256: N8N_SKILLS_PRISTINE_SHA256_1_0_1,
+    repairedSha256: N8N_SKILLS_REPAIRED_SHA256_1_0_1
+  }),
+  '1.0.2': compatibilityAdapter({
+    version: '1.0.2',
+    upstreamCommit: 'eb18fc3ab3e2820c748c2d84386fb5496efc1516',
+    pristineSha256: hashesForManifest(
+      N8N_SKILLS_PRISTINE_SHA256_1_0_1,
+      '1a3902743108d3126666aed29641a4da16bb9cbeef2ad80a46afa7e779d8c2dc'
+    ),
+    repairedSha256: hashesForManifest(
+      N8N_SKILLS_REPAIRED_SHA256_1_0_1,
+      '1a3902743108d3126666aed29641a4da16bb9cbeef2ad80a46afa7e779d8c2dc'
+    )
   })
 });
+const N8N_SKILLS_COMPATIBILITY = N8N_SKILLS_COMPATIBILITY_ADAPTERS['1.0.2'];
 
 function normalizeRelPath(value) {
   return String(value || '').replace(/\\/g, '/');
@@ -456,8 +492,8 @@ function sha256File(filePath, options = {}) {
   return crypto.createHash('sha256').update(canonicalBytes).digest('hex');
 }
 
-function n8nSkillsCompatibilityFingerprints(pluginRoot, expected) {
-  const textEolPaths = new Set(N8N_SKILLS_COMPATIBILITY.text_eol_paths);
+function n8nSkillsCompatibilityFingerprints(pluginRoot, expected, adapter = N8N_SKILLS_COMPATIBILITY) {
+  const textEolPaths = new Set(adapter.text_eol_paths);
   const fingerprints = {};
   for (const relPath of Object.keys(expected)) {
     const filePath = path.join(pluginRoot, ...relPath.split('/'));
@@ -472,56 +508,217 @@ function n8nSkillsCompatibilityFingerprints(pluginRoot, expected) {
   return fingerprints;
 }
 
-function fingerprintsMatch(pluginRoot, expected) {
-  const actual = n8nSkillsCompatibilityFingerprints(pluginRoot, expected);
+function fingerprintsMatch(pluginRoot, expected, adapter) {
+  const actual = n8nSkillsCompatibilityFingerprints(pluginRoot, expected, adapter);
   return Object.entries(expected).every(([relPath, expectedSha256]) => actual[relPath] === expectedSha256);
 }
 
-function classifyN8nSkillsCompatibility(pluginRoot) {
-  const base = {
-    plugin_id: N8N_SKILLS_COMPATIBILITY.plugin_id,
-    upstream_repo: N8N_SKILLS_COMPATIBILITY.upstream_repo,
-    upstream_commit: N8N_SKILLS_COMPATIBILITY.upstream_commit
+function fingerprintDigest(fingerprints) {
+  const canonical = Object.entries(fingerprints)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([relPath, sha256]) => `${relPath}\0${sha256 || 'missing'}\n`)
+    .join('');
+  return crypto.createHash('sha256').update(canonical, 'utf8').digest('hex');
+}
+
+function n8nSkillsTreeIdentity(pluginRoot, adapter) {
+  const changedPaths = new Set([
+    ...Object.keys(adapter.pristine_sha256),
+    ...Object.keys(adapter.repaired_sha256)
+  ].filter((relPath) => adapter.pristine_sha256[relPath] !== adapter.repaired_sha256[relPath]));
+  const allRows = [];
+  const preservedRows = [];
+
+  function visit(currentPath, relDir = '') {
+    const currentStat = fs.lstatSync(currentPath);
+    if (currentStat.isSymbolicLink() || !currentStat.isDirectory()) {
+      throw new Error(`${relDir || 'plugin root'} is not a direct regular directory`);
+    }
+    if (relDir) {
+      const row = `directory\0${relDir}\n`;
+      allRows.push(row);
+      preservedRows.push(row);
+    }
+    for (const entry of fs.readdirSync(currentPath, { withFileTypes: true })) {
+      const fullPath = path.join(currentPath, entry.name);
+      const relPath = normalizeRelPath(path.join(relDir, entry.name));
+      const stat = fs.lstatSync(fullPath);
+      if (stat.isSymbolicLink()) throw new Error(`${relPath} is a symbolic link or junction`);
+      if (stat.isDirectory()) {
+        visit(fullPath, relPath);
+      } else if (stat.isFile()) {
+        const row = `file\0${relPath}\0${sha256File(fullPath)}\n`;
+        allRows.push(row);
+        if (!changedPaths.has(relPath)) preservedRows.push(row);
+      } else {
+        throw new Error(`${relPath} is not a regular file or directory`);
+      }
+    }
+  }
+
+  visit(pluginRoot);
+  const digest = (rows) => crypto.createHash('sha256').update(rows.join(''), 'utf8').digest('hex');
+  return {
+    tree_digest: digest(allRows),
+    preserved_tree_digest: digest(preservedRows)
   };
+}
+
+function compatibilityResult(adapter, status, version, reason = '') {
+  const actions = {
+    'repair-required': ['Preview or apply the exact adapter repair through the approved Toolkit maintenance path.'],
+    healthy: ['No action; rerun remains a byte-identical no-op.'],
+    'unsupported-version': ['Review and add a separate exact adapter before any mutation.'],
+    'unsupported-layout': ['Restore the exact supported package layout or review upstream drift before any mutation.'],
+    'partial-repair': ['Restore the exact pristine or repaired package bytes, then inspect again.'],
+    malformed: ['Restore a valid official package manifest and inspect again.'],
+    'identity-unverified': ['Verify the official package source identity and exact fingerprints before any mutation.'],
+    'not-target': ['Select the official n8n-skills@n8n-io package instead.']
+  };
+  const defaultReasons = {
+    'repair-required': 'The exact declared Windows hook compatibility contract is pristine and requires the supported repair.',
+    healthy: 'The exact declared Windows hook compatibility contract is repaired and healthy; unrelated plugin content is preserved but is not attested by this compatibility result.'
+  };
+  return {
+    plugin_id: adapter?.plugin_id || 'n8n-skills@n8n-io',
+    adapter_id: adapter?.adapter_id || '',
+    upstream_repo: adapter?.upstream_repo || 'n8n-io/skills',
+    upstream_ref: adapter?.upstream_ref || 'main',
+    upstream_commit: adapter?.upstream_commit || '',
+    status,
+    code: status,
+    compatibility_scope: 'declared-windows-hook-contract',
+    version,
+    mutation_allowed: status === 'repair-required',
+    reason: reason || defaultReasons[status] || '',
+    next_action: actions[status]?.[0] || 'Inspect the reported compatibility state.'
+  };
+}
+
+function walkRegularFiles(root, base = root, files = []) {
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    const fullPath = path.join(root, entry.name);
+    const relPath = normalizeRelPath(path.relative(base, fullPath));
+    const stat = fs.lstatSync(fullPath);
+    if (stat.isSymbolicLink()) return { files, error: `critical hook path is a symbolic link: hooks/${relPath}` };
+    if (entry.isDirectory()) {
+      const nested = walkRegularFiles(fullPath, base, files);
+      if (nested.error) return nested;
+    } else if (entry.isFile()) {
+      files.push(`hooks/${relPath}`);
+    } else {
+      return { files, error: `critical hook path is not a regular file: hooks/${relPath}` };
+    }
+  }
+  return { files, error: '' };
+}
+
+function validateCriticalLayout(pluginRoot, adapter) {
+  const hooksRoot = path.join(pluginRoot, 'hooks');
+  if (!fs.existsSync(hooksRoot)) {
+    return 'required hooks directory is missing or is not a directory';
+  }
+  const hooksStat = fs.lstatSync(hooksRoot);
+  if (hooksStat.isSymbolicLink() || !hooksStat.isDirectory()) {
+    return 'required hooks directory is redirected or is not a direct directory';
+  }
+  const walked = walkRegularFiles(hooksRoot);
+  if (walked.error) return walked.error;
+  const actual = walked.files.sort();
+  const pristine = Object.keys(adapter.pristine_sha256).filter((relPath) => relPath.startsWith('hooks/')).sort();
+  const repaired = Object.keys(adapter.repaired_sha256).filter((relPath) => relPath.startsWith('hooks/')).sort();
+  const same = (left, right) => left.length === right.length && left.every((value, index) => value === right[index]);
+  if (!same(actual, pristine) && !same(actual, repaired)) {
+    const allowed = new Set([...pristine, ...repaired]);
+    const unexpected = actual.filter((relPath) => !allowed.has(relPath));
+    const missing = pristine.filter((relPath) => !actual.includes(relPath));
+    if (unexpected.length) return `unexpected critical hook file(s): ${unexpected.join(', ')}`;
+    if (missing.length) return `missing required critical hook file(s): ${missing.join(', ')}`;
+    return 'critical hook file set is partial or unsupported';
+  }
+  return '';
+}
+
+function classifyRecognizedAdapter(pluginRoot, manifest, adapter) {
+  if (manifest.hooks !== './hooks/hooks.json' || manifest.skills !== './skills') {
+    return compatibilityResult(adapter, 'unsupported-layout', adapter.version, 'official plugin manifest declares a moved hooks or skills path');
+  }
+  const layoutError = validateCriticalLayout(pluginRoot, adapter);
+  if (layoutError) return compatibilityResult(adapter, 'unsupported-layout', adapter.version, layoutError);
+  let treeIdentity;
+  try {
+    treeIdentity = n8nSkillsTreeIdentity(pluginRoot, adapter);
+  } catch (error) {
+    return compatibilityResult(adapter, 'unsupported-layout', adapter.version, error.message);
+  }
+  try {
+    const hooks = readJsonFile(path.join(pluginRoot, 'hooks', 'hooks.json'), 'hooks/hooks.json');
+    if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks) || !hooks.hooks || typeof hooks.hooks !== 'object') {
+      return compatibilityResult(adapter, 'malformed', adapter.version, 'hooks/hooks.json does not contain a hooks object');
+    }
+  } catch (error) {
+    return compatibilityResult(adapter, 'malformed', adapter.version, error.message);
+  }
+
+  if (fingerprintsMatch(pluginRoot, adapter.pristine_sha256, adapter)) {
+    const fingerprints = n8nSkillsCompatibilityFingerprints(pluginRoot, adapter.pristine_sha256, adapter);
+    return { ...compatibilityResult(adapter, 'repair-required', adapter.version), contract_digest: fingerprintDigest(fingerprints), ...treeIdentity };
+  }
+  if (fingerprintsMatch(pluginRoot, adapter.repaired_sha256, adapter)) {
+    const fingerprints = n8nSkillsCompatibilityFingerprints(pluginRoot, adapter.repaired_sha256, adapter);
+    return { ...compatibilityResult(adapter, 'healthy', adapter.version), contract_digest: fingerprintDigest(fingerprints), ...treeIdentity };
+  }
+
+  const unionPaths = [...new Set([...Object.keys(adapter.pristine_sha256), ...Object.keys(adapter.repaired_sha256)])];
+  const actual = n8nSkillsCompatibilityFingerprints(
+    pluginRoot,
+    Object.fromEntries(unionPaths.map((relPath) => [relPath, ''])),
+    adapter
+  );
+  const changedPaths = unionPaths.filter((relPath) => adapter.pristine_sha256[relPath] !== adapter.repaired_sha256[relPath]);
+  const hasPristine = changedPaths.some((relPath) => actual[relPath] === adapter.pristine_sha256[relPath]);
+  const hasRepaired = changedPaths.some((relPath) => actual[relPath] === adapter.repaired_sha256[relPath]);
+  const status = hasPristine && hasRepaired ? 'partial-repair' : 'identity-unverified';
+  const reason = status === 'partial-repair'
+    ? 'supported n8n Skills version contains a mixture of exact pristine and repaired compatibility bytes'
+    : 'supported n8n Skills version does not match the exact pristine or repaired source identity';
+  return {
+    ...compatibilityResult(adapter, status, adapter.version, reason),
+    contract_digest: fingerprintDigest(actual),
+    ...treeIdentity
+  };
+}
+
+function classifyN8nSkillsCompatibility(pluginRoot) {
   const manifestPath = path.join(pluginRoot, '.codex-plugin', 'plugin.json');
   if (!fs.existsSync(manifestPath)) {
-    return { ...base, status: 'malformed', version: '', reason: 'official Codex plugin manifest is missing' };
+    return compatibilityResult(null, 'unsupported-layout', '', 'official Codex plugin manifest is missing');
   }
 
   let manifest;
   try {
     manifest = readJsonFile(manifestPath, '.codex-plugin/plugin.json');
   } catch (error) {
-    return { ...base, status: 'malformed', version: '', reason: error.message };
+    return compatibilityResult(null, 'malformed', '', error.message);
   }
   const version = typeof manifest.version === 'string' ? manifest.version : '';
+  if (manifest.name !== 'n8n-skills') {
+    return compatibilityResult(null, 'not-target', version, 'plugin name does not match official n8n Skills');
+  }
   if (
-    manifest.name !== 'n8n-skills' ||
     manifest.repository !== 'https://github.com/n8n-io/skills' ||
-    manifest.homepage !== 'https://github.com/n8n-io/skills'
+    manifest.homepage !== 'https://github.com/n8n-io/skills' ||
+    manifest.license !== 'Apache-2.0' ||
+    manifest.author?.name !== 'n8n' ||
+    manifest.author?.url !== 'https://n8n.io'
   ) {
-    return { ...base, status: 'not-target', version, reason: 'plugin identity does not match official n8n Skills' };
+    return compatibilityResult(null, 'identity-unverified', version, 'plugin metadata does not match the official n8n Skills source identity');
   }
-  if (version !== N8N_SKILLS_COMPATIBILITY.version) {
-    return {
-      ...base,
-      status: 'compatibility-drift',
-      version,
-      reason: `unsupported n8n Skills version ${version || '(missing)'}; compatibility contract changed`
-    };
+  const adapter = N8N_SKILLS_COMPATIBILITY_ADAPTERS[version];
+  if (!adapter) {
+    return compatibilityResult(null, 'unsupported-version', version, `unsupported n8n Skills version ${version || '(missing)'}; an exact adapter is required`);
   }
-  if (fingerprintsMatch(pluginRoot, N8N_SKILLS_COMPATIBILITY.pristine_sha256)) {
-    return { ...base, status: 'repair-required', version };
-  }
-  if (fingerprintsMatch(pluginRoot, N8N_SKILLS_COMPATIBILITY.repaired_sha256)) {
-    return { ...base, status: 'healthy', version };
-  }
-  return {
-    ...base,
-    status: 'malformed',
-    version,
-    reason: 'supported n8n Skills version is partially repaired, malformed, or has an unrecognised file fingerprint'
-  };
+  return classifyRecognizedAdapter(pluginRoot, manifest, adapter);
 }
 
 function replaceOrThrow(text, pattern, replacement, label) {
@@ -930,6 +1127,7 @@ if (require.main === module) {
 
 module.exports = {
   N8N_SKILLS_COMPATIBILITY,
+  N8N_SKILLS_COMPATIBILITY_ADAPTERS,
   N8N_SKILLS_TEXT_EOL_PATHS,
   N8N_NODE_FALLBACK_MARKER,
   WRAPPER_MARKER,
@@ -937,6 +1135,8 @@ module.exports = {
   classifyHookCommand,
   collectHookCommandEntries,
   classifyN8nSkillsCompatibility,
+  fingerprintDigest,
+  n8nSkillsTreeIdentity,
   n8nSkillsCompatibilityFingerprints,
   reconcileN8nSkillsPlugin,
   repairPluginRoot,

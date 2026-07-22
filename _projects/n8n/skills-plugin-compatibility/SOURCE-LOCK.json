@@ -1,0 +1,117 @@
+{
+  "source_repo": "n8n-io/skills",
+  "source_ref": "main",
+  "source_commit": "eb18fc3ab3e2820c748c2d84386fb5496efc1516",
+  "source_lifecycle": "active",
+  "source_role": "third_party_attribution_source",
+  "source_update_policy": "manual_review_required",
+  "public_attribution_required": true,
+  "upstream_root_surface_paths": [
+    "skills/using-n8n-skills-official/SKILL.md"
+  ],
+  "notes": "Official n8n Skills package compatibility evidence re-verified on 2026-07-23 after upstream moved the Codex plugin from a mirrored bundle to the repository root. Source watch is report-only; unknown ref, version, layout, or blob drift requires a separate reviewed adapter PR and never authorizes installed-cache mutation.",
+  "files": [
+    {
+      "mode": "exact",
+      "source_path": ".codex-plugin/plugin.json",
+      "project_path": "_projects/n8n/skills-plugin-compatibility/_main/plugins/n8n-skills/.codex-plugin/plugin.json",
+      "source_blob_sha": "57dfb8d5354c8cf92fbe4035519521c523793a72"
+    },
+    {
+      "mode": "excluded",
+      "source_path": ".agents/plugins/marketplace.json",
+      "source_blob_sha": "0dfb658e38eaa94b2eb3b03d60a481fd837dfd8f",
+      "notes": "Inspected to verify the current repository-root Codex local installation identity; not copied or published by this source-only project."
+    },
+    {
+      "mode": "excluded",
+      "source_path": ".claude-plugin/marketplace.json",
+      "source_blob_sha": "cf252db29e9412deb571167449f485e460a00131",
+      "notes": "Inspected to verify Claude Code marketplace identity and version; not copied or published."
+    },
+    {
+      "mode": "excluded",
+      "source_path": ".claude-plugin/plugin.json",
+      "source_blob_sha": "f8075e42c536cce8c8495e2a1a6310273e186119",
+      "notes": "Inspected to verify the Claude Code package version; Toolkit does not mutate Claude Code cache from Codex."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "hooks/hooks.json",
+      "source_blob_sha": "e3d1b9e99ca835afd5c1181cc7ffc262458ef4e0",
+      "notes": "Exact compatibility fingerprint is maintained by the first-party adapter; executable upstream hooks are not published from this project."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "hooks/session-start.sh",
+      "source_blob_sha": "36faa0ab66dff87dd5ba899cfd87ea746765bf61",
+      "notes": "Exact compatibility fingerprint is maintained by the first-party adapter; executable upstream hooks are not published from this project."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "hooks/pre-tool-use/_emit.sh",
+      "source_blob_sha": "4dfe5150fa7b0bbb734a3e0c1b31a6a51d19ad9e",
+      "notes": "Exact compatibility fingerprint is maintained by the first-party adapter; executable upstream hooks are not published from this project."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "hooks/pre-tool-use/create-workflow.sh",
+      "source_blob_sha": "af3f5b99fe7135b830698e96e69a1d7daad9799e",
+      "notes": "Exact compatibility fingerprint is maintained by the first-party adapter; executable upstream hooks are not published from this project."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "hooks/pre-tool-use/execute-workflow.sh",
+      "source_blob_sha": "4a364eeade635aeb73392bbdea3158e866fab3be",
+      "notes": "Exact compatibility fingerprint is maintained by the first-party adapter; executable upstream hooks are not published from this project."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "hooks/pre-tool-use/get-node.sh",
+      "source_blob_sha": "73fd83334ad464673475fff2567e7fc864d90989",
+      "notes": "Exact compatibility fingerprint is maintained by the first-party adapter; executable upstream hooks are not published from this project."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "hooks/pre-tool-use/test-workflow.sh",
+      "source_blob_sha": "d685e310f52307954cab7dca94218076aeaca894",
+      "notes": "Exact compatibility fingerprint is maintained by the first-party adapter; executable upstream hooks are not published from this project."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "hooks/pre-tool-use/update-workflow.sh",
+      "source_blob_sha": "7fc0e9729cb067853c5e1b3c9b367ce1575b7b83",
+      "notes": "Exact compatibility fingerprint is maintained by the first-party adapter; executable upstream hooks are not published from this project."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "hooks/pre-tool-use/validate-workflow.sh",
+      "source_blob_sha": "112206cf8c536065ef774b23250d26303e6037bd",
+      "notes": "Exact compatibility fingerprint is maintained by the first-party adapter; executable upstream hooks are not published from this project."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "hooks/post-tool-use/validate-workflow.sh",
+      "source_blob_sha": "e2087aa33ac3f244dc9efa1bb2aa650df38ac2a7",
+      "notes": "Exact compatibility fingerprint is maintained by the first-party adapter; executable upstream hooks are not published from this project."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "skills/using-n8n-skills-official/SKILL.md",
+      "source_blob_sha": "ffd83822b88e032f7bb9863f3fdc92ab8ab83e35",
+      "notes": "Inspected as the SessionStart runtime dependency and fingerprinted by the adapter; the full official skill pack is not copied or republished."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "README.md",
+      "source_blob_sha": "a75d091c9a86d7e965ae432241220019b1e3e670",
+      "notes": "Inspected for official host installation mechanisms; documentation is linked rather than copied."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "LICENSE",
+      "source_blob_sha": "c87e50b21d7195576cfda86509960d9f80a1d3bd",
+      "notes": "Apache-2.0 licence verified; the existing 1.0.1 test fixture retains the licence copy used by synthetic tests."
+    }
+  ]
+}

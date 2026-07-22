@@ -37,21 +37,6 @@
       "removal_condition": "Remove after accepted Ponytail-inspired toolkit work is implemented and any ongoing upstream dependency is represented by SOURCE-LOCK daily source-watch, or after deciding no action is needed."
     },
     {
-      "id": "n8n-skills-hook-compatibility",
-      "name": "Official n8n Skills Windows hook compatibility",
-      "kind": "github_repo",
-      "enabled": true,
-      "state": "watching",
-      "repo": "n8n-io/skills",
-      "ref": "main",
-      "baseline_sha": "c350f8b4bd8417108bce266d88e21b8a1bb966db",
-      "baseline_policy": "human_advanced_only",
-      "recommendation": "Review upstream plugin identity, version, hooks/hooks.json, hook entrypoints, and Windows execution semantics only. Source-watch must not mutate installed caches or extend the compatibility contract.",
-      "action_taken": "Toolkit recognises the exact n8n-skills@n8n-io 1.0.1 hook layout at the baseline commit and may reapply its bounded Windows launcher transform through approved Codex plugin maintenance.",
-      "remaining_work": "When upstream differs, review the new version and hook layout under #248. If compatible support is justified, update fingerprints and fixtures in a separate human-reviewed implementation PR; otherwise retain fail-closed behavior.",
-      "removal_condition": "Remove only if official n8n Skills no longer needs Toolkit Windows hook compatibility or ongoing tracking moves to an active SOURCE-LOCK contract."
-    },
-    {
       "id": "host-harness-capability-drift-review",
       "name": "Host Harness Capability Drift Review",
       "kind": "manual",

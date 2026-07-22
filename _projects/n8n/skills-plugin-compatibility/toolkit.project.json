@@ -1,0 +1,44 @@
+{
+  "id": "n8n.skills-plugin-compatibility",
+  "category": "n8n",
+  "name": "skills-plugin-compatibility",
+  "title": "Official n8n Skills Plugin Compatibility",
+  "module_path": "_projects/n8n/skills-plugin-compatibility",
+  "main_path": "_projects/n8n/skills-plugin-compatibility/_main",
+  "version": "1.0.0",
+  "version_policy": "semver",
+  "version_notes": "Pins the exact current official n8n Skills 1.0.2 package contract and its bounded Windows compatibility adapter evidence.",
+  "outputs": [],
+  "writes": {
+    "allowed": [],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false,
+  "project": {
+    "name": "Official n8n Skills Plugin Compatibility",
+    "category": "n8n",
+    "summary": "Source-only exact package identity, provenance, layout, and fingerprint evidence for bounded official n8n Skills hook compatibility adapters."
+  },
+  "surface": {
+    "publish_as": "source_only",
+    "skill": {
+      "status": "not_applicable"
+    },
+    "mcp": {
+      "status": "not_applicable"
+    }
+  }
+}

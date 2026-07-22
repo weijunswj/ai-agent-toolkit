@@ -13,6 +13,7 @@ const {
   verifyInstalledCacheFreshness
 } = require('./setup-codex-toolkit-plugin.cjs');
 const {
+  classifyN8nSkillsCompatibility,
   reconcileN8nSkillsPlugin
 } = require('./repair-codex-plugin-windows-hooks.cjs');
 const {
@@ -24,7 +25,7 @@ const {
 } = require('./toolkit-staging-generations.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.8.2';
+const BRIDGE_VERSION = '2.9.0';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -3095,30 +3096,45 @@ function replaceDirectoryAtomically(sourceDir, targetDir, options = {}) {
   fs.mkdirSync(parent, { recursive: true });
   const backup = path.join(parent, `.${path.basename(targetDir)}.backup-${process.pid}-${Date.now()}`);
   if (fs.existsSync(backup)) fs.rmSync(backup, { recursive: true, force: true });
-  if (fs.existsSync(targetDir)) renameSyncWithRetry(targetDir, backup, options);
+  let backupCreated = false;
+  let targetInstalled = false;
+  if (fs.existsSync(targetDir)) {
+    renameSyncWithRetry(targetDir, backup, options);
+    backupCreated = true;
+  }
   try {
-    renameSyncWithRetry(sourceDir, targetDir, options);
-  } catch (error) {
-    if (isTransientRenameError(error) && fs.existsSync(sourceDir) && !fs.existsSync(targetDir)) {
+    try {
+      renameSyncWithRetry(sourceDir, targetDir, options);
+      targetInstalled = true;
+    } catch (error) {
+      if (!isTransientRenameError(error) || !fs.existsSync(sourceDir) || fs.existsSync(targetDir)) throw error;
       try {
         fs.cpSync(sourceDir, targetDir, { recursive: true, force: false, errorOnExist: true });
+        targetInstalled = true;
         fs.rmSync(sourceDir, { recursive: true, force: true });
-        if (fs.existsSync(backup)) fs.rmSync(backup, { recursive: true, force: true });
-        return;
       } catch (copyError) {
         if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true, force: true });
+        targetInstalled = false;
         const fallbackError = new Error(
           `Failed to replace ${targetDir}: rename failed with ${error.code || error.message}; copy fallback failed with ${copyError.code || copyError.message}`
         );
         fallbackError.code = copyError.code || error.code;
         fallbackError.cause = copyError;
-        error = fallbackError;
+        throw fallbackError;
       }
     }
-    if (fs.existsSync(backup) && !fs.existsSync(targetDir)) renameSyncWithRetry(backup, targetDir, options);
+    if (options.verifyTarget) options.verifyTarget(targetDir);
+    if (backupCreated && fs.existsSync(backup)) fs.rmSync(backup, { recursive: true, force: true });
+  } catch (error) {
+    try {
+      if (targetInstalled && fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true, force: true });
+      if (backupCreated && fs.existsSync(backup)) renameSyncWithRetry(backup, targetDir, options);
+    } catch (rollbackError) {
+      error.message = `${error.message}; rollback failed: ${rollbackError.message}`;
+      error.rollbackError = rollbackError;
+    }
     throw error;
   }
-  if (fs.existsSync(backup)) fs.rmSync(backup, { recursive: true, force: true });
 }
 
 function copyDirectoryAtomically(sourceDir, targetDir, requiredRelPath = 'SKILL.md', options = {}) {
@@ -3575,7 +3591,7 @@ function selectCurrentN8nSkillsCache({ codexHome, pluginList, discovered }) {
   const installed = matches[0];
   if (installed.installed !== true || installed.enabled !== true) {
     return {
-      status: 'not-installed',
+      status: installed.enabled === false ? 'disabled' : 'not-installed',
       entry: null,
       reason: 'Codex does not report n8n-skills@n8n-io as installed and enabled'
     };
@@ -3610,7 +3626,7 @@ function selectCurrentN8nSkillsCacheFromConfig({ codexHome, discovered }) {
   });
   if (configured.status === 'disabled') {
     return {
-      status: 'not-installed',
+      status: 'disabled',
       entry: null,
       reason: 'Codex config explicitly reports n8n-skills@n8n-io disabled'
     };
@@ -3638,6 +3654,88 @@ function selectCurrentN8nSkillsCacheFromConfig({ codexHome, discovered }) {
   };
 }
 
+function sameN8nCompatibilityEvidence(left, right) {
+  return Boolean(left && right)
+    && left.adapter_id === right.adapter_id
+    && left.version === right.version
+    && left.status === right.status
+    && left.contract_digest === right.contract_digest
+    && left.tree_digest === right.tree_digest;
+}
+
+function reconcileSelectedN8nSkillsCache(entry, options = {}) {
+  const pluginRoot = path.resolve(entry.plugin_root);
+  const write = Boolean(options.write);
+  const testHooks = options.testHooks || {};
+  const proposal = classifyN8nSkillsCompatibility(pluginRoot);
+  const preview = reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: false });
+  if (!write || proposal.status === 'healthy') return preview;
+  if (proposal.status !== 'repair-required') {
+    throw new Error(proposal.reason || `n8n Skills compatibility state is ${proposal.status}`);
+  }
+
+  if (testHooks.beforeN8nRepairRevalidation) {
+    testHooks.beforeN8nRepairRevalidation({ pluginRoot, proposal: { ...proposal } });
+  }
+  const revalidated = classifyN8nSkillsCompatibility(pluginRoot);
+  if (!sameN8nCompatibilityEvidence(proposal, revalidated)) {
+    throw new Error('n8n Skills repair approval is stale because the selected cache changed after inspection');
+  }
+
+  return withOwnedStaging({
+    target: pluginRoot,
+    stagePrefix: `.${path.basename(pluginRoot)}.staging-`,
+    operation: 'n8n-skills-plugin-repair',
+    sourceType: 'codex-plugin'
+  }, (stagePath) => {
+    const stagedPluginRoot = path.join(stagePath, 'plugin');
+    fs.cpSync(pluginRoot, stagedPluginRoot, { recursive: true });
+    const stagedRepair = reconcileN8nSkillsPlugin(stagedPluginRoot, { windows: true, write: true });
+    const stagedState = classifyN8nSkillsCompatibility(stagedPluginRoot);
+    if (
+      stagedState.status !== 'healthy'
+      || stagedState.adapter_id !== proposal.adapter_id
+      || stagedState.version !== proposal.version
+      || stagedState.preserved_tree_digest !== proposal.preserved_tree_digest
+    ) {
+      throw new Error('n8n Skills staged repair verification failed');
+    }
+
+    if (testHooks.beforeN8nRepairReplacement) {
+      testHooks.beforeN8nRepairReplacement({ pluginRoot, stagedPluginRoot, proposal: { ...proposal } });
+    }
+    const immediatelyBeforeWrite = classifyN8nSkillsCompatibility(pluginRoot);
+    if (!sameN8nCompatibilityEvidence(proposal, immediatelyBeforeWrite)) {
+      throw new Error('n8n Skills repair approval is stale because the selected cache changed before replacement');
+    }
+
+    replaceDirectoryAtomically(stagedPluginRoot, pluginRoot, {
+      ...(testHooks.replaceDirectoryOptions || {}),
+      verifyTarget: (installedRoot) => {
+        if (testHooks.beforeN8nRepairVerification) {
+          testHooks.beforeN8nRepairVerification({ pluginRoot: installedRoot, proposal: { ...proposal } });
+        }
+        const verified = classifyN8nSkillsCompatibility(installedRoot);
+        if (
+          verified.status !== 'healthy'
+          || verified.adapter_id !== proposal.adapter_id
+          || verified.version !== proposal.version
+          || verified.preserved_tree_digest !== proposal.preserved_tree_digest
+        ) {
+          throw new Error(`n8n Skills repair verification failed: ${verified.reason || verified.status}`);
+        }
+      }
+    });
+    const finalState = classifyN8nSkillsCompatibility(pluginRoot);
+    return {
+      ...finalState,
+      status: 'repaired',
+      repaired: true,
+      actions: stagedRepair.actions || []
+    };
+  });
+}
+
 function repairThirdPartyCodexPluginHooks(options = {}) {
   const codexHome = path.resolve(options.codexHome || defaultCodexHome());
   const windows = options.windows ?? process.platform === 'win32';
@@ -3646,6 +3744,7 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
   const discovered = discoverCodexPluginHookRoots({ codexHome, currentPluginRoot });
   const result = {
     status: windows ? 'not-needed' : 'not-supported',
+    code: windows ? 'not-needed' : 'not-supported',
     codex_home: codexHome,
     write,
     scanned: 0,
@@ -3684,13 +3783,20 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
       discovered
     })
     : selectCurrentN8nSkillsCacheFromConfig({ codexHome, discovered });
+  result.selection_status = selection.status === 'ambiguous'
+    ? 'ambiguous-target'
+    : selection.status === 'missing'
+      ? 'identity-unverified'
+      : selection.status;
+  result.code = result.selection_status;
   if (selection.status !== 'selected') {
     for (const entry of n8nCandidates) {
       result.skipped.push({ ...entry, reason: 'historical or unverified n8n Skills cache; not current according to Codex installed state' });
     }
     result.skipped.sort((left, right) => left.plugin_root.localeCompare(right.plugin_root));
-    if (selection.status === 'not-installed') return result;
+    if (selection.status === 'not-installed' || selection.status === 'disabled') return result;
     result.status = 'repair-failed';
+    result.code = result.selection_status;
     result.errors = [
       selection.reason,
       ...(!pluginInspection.ok ? (pluginInspection.errors || []) : [])
@@ -3708,9 +3814,9 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
 
   for (const entry of targets) {
     try {
-      const repair = reconcileN8nSkillsPlugin(entry.plugin_root, {
-        windows: true,
-        write
+      const repair = reconcileSelectedN8nSkillsCache(entry, {
+        write,
+        testHooks: options.testHooks || {}
       });
       if (repair.repaired) {
         result.repaired.push({
@@ -3729,6 +3835,9 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
   else if (result.errors.length) result.status = 'repair-failed';
   else if (result.repaired.length) result.status = 'repaired';
   else result.status = 'not-needed';
+  result.code = result.errors.some((message) => /verification failed/i.test(message))
+    ? 'verification-failed'
+    : result.status;
   result.errors = result.errors.slice(0, THIRD_PARTY_HOOK_REPAIR_ERROR_LIMIT);
   return result;
 }
