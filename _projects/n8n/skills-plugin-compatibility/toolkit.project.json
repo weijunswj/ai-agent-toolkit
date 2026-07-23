@@ -5,9 +5,9 @@
   "title": "Official n8n Skills Plugin Compatibility",
   "module_path": "_projects/n8n/skills-plugin-compatibility",
   "main_path": "_projects/n8n/skills-plugin-compatibility/_main",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "version_policy": "semver",
-  "version_notes": "Pins the exact current official n8n Skills 1.0.2 package contract and its bounded Windows compatibility adapter evidence.",
+  "version_notes": "Enforces deterministic contract/runtime parity for the exact supported n8n Skills 1.0.1 and 1.0.2 adapter evidence.",
   "outputs": [],
   "writes": {
     "allowed": [],

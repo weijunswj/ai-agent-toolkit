@@ -9,21 +9,72 @@ const { auditPluginRoot, isTemporaryMarketplacePluginRoot } = require('./audit-n
 
 const WRAPPER_MARKER = 'AI-AGENT-TOOLKIT-WINDOWS-HOOK-WRAPPER v1';
 const N8N_NODE_FALLBACK_MARKER = 'AI-AGENT-TOOLKIT:N8N-NODE-FALLBACK v1';
-const N8N_SKILLS_TEXT_EOL_PATHS = Object.freeze([
-  '.codex-plugin/plugin.json',
-  'hooks/hooks.json',
-  'hooks/session-start.sh',
-  'hooks/pre-tool-use/_emit.sh',
-  'hooks/pre-tool-use/create-workflow.sh',
-  'hooks/pre-tool-use/execute-workflow.sh',
-  'hooks/pre-tool-use/get-node.sh',
-  'hooks/pre-tool-use/test-workflow.sh',
-  'hooks/pre-tool-use/update-workflow.sh',
-  'hooks/pre-tool-use/validate-workflow.sh',
-  'hooks/post-tool-use/validate-workflow.sh',
-  'hooks/run-hook.ps1',
-  'skills/using-n8n-skills-official/SKILL.md'
-]);
+const N8N_SKILLS_RUNTIME_CONTRACT_METADATA = Object.freeze(
+/* AI-AGENT-TOOLKIT:N8N-SKILLS-RUNTIME-CONTRACT:BEGIN */
+{
+  "package_id": "n8n-skills@n8n-io",
+  "package_name": "n8n-skills",
+  "marketplace_name": "n8n-io",
+  "upstream_repo": "n8n-io/skills",
+  "upstream_ref": "main",
+  "current_version": "1.0.2",
+  "current_upstream_windows_status": "repair-required",
+  "source_watch_policy": "report-only-manual-review-required",
+  "contract_paths": [
+    ".codex-plugin/plugin.json",
+    "hooks/hooks.json",
+    "hooks/session-start.sh",
+    "hooks/pre-tool-use/_emit.sh",
+    "hooks/pre-tool-use/create-workflow.sh",
+    "hooks/pre-tool-use/execute-workflow.sh",
+    "hooks/pre-tool-use/get-node.sh",
+    "hooks/pre-tool-use/test-workflow.sh",
+    "hooks/pre-tool-use/update-workflow.sh",
+    "hooks/pre-tool-use/validate-workflow.sh",
+    "hooks/post-tool-use/validate-workflow.sh",
+    "skills/using-n8n-skills-official/SKILL.md"
+  ],
+  "text_eol_paths": [
+    ".codex-plugin/plugin.json",
+    "hooks/hooks.json",
+    "hooks/session-start.sh",
+    "hooks/pre-tool-use/_emit.sh",
+    "hooks/pre-tool-use/create-workflow.sh",
+    "hooks/pre-tool-use/execute-workflow.sh",
+    "hooks/pre-tool-use/get-node.sh",
+    "hooks/pre-tool-use/test-workflow.sh",
+    "hooks/pre-tool-use/update-workflow.sh",
+    "hooks/pre-tool-use/validate-workflow.sh",
+    "hooks/post-tool-use/validate-workflow.sh",
+    "hooks/run-hook.ps1",
+    "skills/using-n8n-skills-official/SKILL.md"
+  ],
+  "supported_adapters": [
+    {
+      "version": "1.0.1",
+      "upstream_commit": "c350f8b4bd8417108bce266d88e21b8a1bb966db",
+      "repair_profile": "windows-shell-wrapper-node-json-fallback-v1"
+    },
+    {
+      "version": "1.0.2",
+      "upstream_commit": "eb18fc3ab3e2820c748c2d84386fb5496efc1516",
+      "repair_profile": "windows-shell-wrapper-node-json-fallback-v1"
+    }
+  ]
+}
+/* AI-AGENT-TOOLKIT:N8N-SKILLS-RUNTIME-CONTRACT:END */
+);
+const N8N_SKILLS_SOURCE_WATCH_POLICY = N8N_SKILLS_RUNTIME_CONTRACT_METADATA.source_watch_policy;
+const N8N_SKILLS_CURRENT_UPSTREAM_WINDOWS_STATUS = N8N_SKILLS_RUNTIME_CONTRACT_METADATA.current_upstream_windows_status;
+const N8N_SKILLS_TEXT_EOL_PATHS = Object.freeze([...N8N_SKILLS_RUNTIME_CONTRACT_METADATA.text_eol_paths]);
+const N8N_SKILLS_CONTRACT_FILE_MAX_BYTES = 2 * 1024 * 1024;
+const N8N_SKILLS_TREE_LIMITS = Object.freeze({
+  max_files: 4096,
+  max_directories: 1024,
+  max_total_bytes: 256 * 1024 * 1024,
+  max_file_bytes: 64 * 1024 * 1024,
+  max_depth: 32
+});
 const N8N_SKILLS_PRISTINE_SHA256_1_0_1 = Object.freeze({
     '.codex-plugin/plugin.json': '3e7da0f4b2cff1a351254614f2bdef71f41b4d2f9e8c45cb27926a0a876ae5aa',
     'hooks/hooks.json': '192f4c3bf06de12ee7e6c7b9ec0f35aae915e33d6874154377a3e93e688862b1',
@@ -41,50 +92,61 @@ const N8N_SKILLS_PRISTINE_SHA256_1_0_1 = Object.freeze({
 const N8N_SKILLS_REPAIRED_SHA256_1_0_1 = Object.freeze({
     '.codex-plugin/plugin.json': '3e7da0f4b2cff1a351254614f2bdef71f41b4d2f9e8c45cb27926a0a876ae5aa',
     'hooks/hooks.json': '216c491b96fe6656396e1df4fc12291647f42689e54b291153fc765d41d94fd9',
-    'hooks/session-start.sh': '92ff280ea75c5c3ca0bd2e97b295f45a3433cc8f33e522b1563c3ff32b0e8610',
-    'hooks/pre-tool-use/_emit.sh': '32171e8339ed8800d1ae336f1a34c6069302a737f436c88f3c76a8e0ccec29ec',
+    'hooks/session-start.sh': '842ce852ea1b88b00835edc16cef633fdbb28cd601cf7534022fbdb26a8de5d5',
+    'hooks/pre-tool-use/_emit.sh': '192dbd4bc4f86482987db139b7b0e60aafdc5132142411db7c7861483a0e8b5d',
     'hooks/pre-tool-use/create-workflow.sh': '884e9c6b823d9d40e7bfdb77d625f0ba486c81fe5155b8882c2f959aad2bab62',
     'hooks/pre-tool-use/execute-workflow.sh': '3212e10f40420ee364caf23cfe7e9a2a4b3c0a6501e0dc932ba53be2de2fb0d9',
-    'hooks/pre-tool-use/get-node.sh': '4f68352123ded0d58dbc7545f88e98886ea0d873689354a0ab438c2d537ce700',
+    'hooks/pre-tool-use/get-node.sh': '59020f7af1c4ff4fbbba2022608a074a5fe006258b1d1145c603626a1eec6dd8',
     'hooks/pre-tool-use/test-workflow.sh': '7b92b089b6af30300c6e0131bcfa72af1acb6b8e7ca773ac0d3d11d904860fdb',
     'hooks/pre-tool-use/update-workflow.sh': 'a7a7d1c5be93bb47f7e75e684198957b43b9f1a3515f1f2a462a560ed1b6efe4',
     'hooks/pre-tool-use/validate-workflow.sh': '0b32c21a6a549f051594e18b065b9c62187c1b472ef726bdc7b36a6b202933ca',
-    'hooks/post-tool-use/validate-workflow.sh': 'e6e3f060d5770aa640dc57f9d23792316e9cf965199395771a585b3a504e983d',
-    'hooks/run-hook.ps1': 'ca721972f6a7f972f828b0481ae0f19a08e057fe986a1f17dc081b759e9b666f',
+    'hooks/post-tool-use/validate-workflow.sh': '72e82d6d0d90ebcf4a78ee6aad35229e1981307661fa17b23e75f7fb993a1284',
+    'hooks/run-hook.ps1': '4955dd41931394daf45a0f440e7237494fdc91452bb37171ef80a9a6f3de8ec5',
     'skills/using-n8n-skills-official/SKILL.md': 'b19218c759d5a3538e0e11182adb3a38b50712e4f4c1822fa80834aa25fe9c09'
+});
+const N8N_SKILLS_REPAIRED_SHA256_1_0_1_LEGACY = Object.freeze({
+  ...N8N_SKILLS_REPAIRED_SHA256_1_0_1,
+  'hooks/session-start.sh': '92ff280ea75c5c3ca0bd2e97b295f45a3433cc8f33e522b1563c3ff32b0e8610',
+  'hooks/pre-tool-use/_emit.sh': '32171e8339ed8800d1ae336f1a34c6069302a737f436c88f3c76a8e0ccec29ec',
+  'hooks/pre-tool-use/get-node.sh': '4f68352123ded0d58dbc7545f88e98886ea0d873689354a0ab438c2d537ce700',
+  'hooks/post-tool-use/validate-workflow.sh': 'e6e3f060d5770aa640dc57f9d23792316e9cf965199395771a585b3a504e983d',
+  'hooks/run-hook.ps1': 'ca721972f6a7f972f828b0481ae0f19a08e057fe986a1f17dc081b759e9b666f'
 });
 
 function hashesForManifest(base, manifestSha256) {
   return Object.freeze({ ...base, '.codex-plugin/plugin.json': manifestSha256 });
 }
 
-function compatibilityAdapter({ version, upstreamCommit, pristineSha256, repairedSha256 }) {
+function compatibilityAdapter({ metadata, pristineSha256, repairedSha256, legacyRepairedSha256 }) {
   return Object.freeze({
-    adapter_id: `n8n-skills-${version}-windows-hooks-v1`,
-    plugin_id: 'n8n-skills@n8n-io',
-    package_name: 'n8n-skills',
-    marketplace_name: 'n8n-io',
-    version,
-    upstream_repo: 'n8n-io/skills',
-    upstream_ref: 'main',
-    upstream_commit: upstreamCommit,
-    repair_profile: 'windows-shell-wrapper-node-json-fallback-v1',
+    adapter_id: `n8n-skills-${metadata.version}-windows-hooks-v1`,
+    plugin_id: N8N_SKILLS_RUNTIME_CONTRACT_METADATA.package_id,
+    package_name: N8N_SKILLS_RUNTIME_CONTRACT_METADATA.package_name,
+    marketplace_name: N8N_SKILLS_RUNTIME_CONTRACT_METADATA.marketplace_name,
+    version: metadata.version,
+    upstream_repo: N8N_SKILLS_RUNTIME_CONTRACT_METADATA.upstream_repo,
+    upstream_ref: N8N_SKILLS_RUNTIME_CONTRACT_METADATA.upstream_ref,
+    upstream_commit: metadata.upstream_commit,
+    repair_profile: metadata.repair_profile,
     text_eol_paths: N8N_SKILLS_TEXT_EOL_PATHS,
     pristine_sha256: pristineSha256,
-    repaired_sha256: repairedSha256
+    repaired_sha256: repairedSha256,
+    repaired_sha256_variants: Object.freeze([
+      ...(legacyRepairedSha256 ? [legacyRepairedSha256] : []),
+      repairedSha256
+    ])
   });
 }
 
 const N8N_SKILLS_COMPATIBILITY_ADAPTERS = Object.freeze({
   '1.0.1': compatibilityAdapter({
-    version: '1.0.1',
-    upstreamCommit: 'c350f8b4bd8417108bce266d88e21b8a1bb966db',
+    metadata: N8N_SKILLS_RUNTIME_CONTRACT_METADATA.supported_adapters[0],
     pristineSha256: N8N_SKILLS_PRISTINE_SHA256_1_0_1,
-    repairedSha256: N8N_SKILLS_REPAIRED_SHA256_1_0_1
+    repairedSha256: N8N_SKILLS_REPAIRED_SHA256_1_0_1,
+    legacyRepairedSha256: N8N_SKILLS_REPAIRED_SHA256_1_0_1_LEGACY
   }),
   '1.0.2': compatibilityAdapter({
-    version: '1.0.2',
-    upstreamCommit: 'eb18fc3ab3e2820c748c2d84386fb5496efc1516',
+    metadata: N8N_SKILLS_RUNTIME_CONTRACT_METADATA.supported_adapters[1],
     pristineSha256: hashesForManifest(
       N8N_SKILLS_PRISTINE_SHA256_1_0_1,
       '1a3902743108d3126666aed29641a4da16bb9cbeef2ad80a46afa7e779d8c2dc'
@@ -92,10 +154,111 @@ const N8N_SKILLS_COMPATIBILITY_ADAPTERS = Object.freeze({
     repairedSha256: hashesForManifest(
       N8N_SKILLS_REPAIRED_SHA256_1_0_1,
       '1a3902743108d3126666aed29641a4da16bb9cbeef2ad80a46afa7e779d8c2dc'
+    ),
+    legacyRepairedSha256: hashesForManifest(
+      N8N_SKILLS_REPAIRED_SHA256_1_0_1_LEGACY,
+      '1a3902743108d3126666aed29641a4da16bb9cbeef2ad80a46afa7e779d8c2dc'
     )
   })
 });
-const N8N_SKILLS_COMPATIBILITY = N8N_SKILLS_COMPATIBILITY_ADAPTERS['1.0.2'];
+const N8N_SKILLS_COMPATIBILITY = N8N_SKILLS_COMPATIBILITY_ADAPTERS[N8N_SKILLS_RUNTIME_CONTRACT_METADATA.current_version];
+
+function compatibilityContractPath(workspaceRoot = path.resolve(__dirname, '..', '..')) {
+  return path.join(
+    workspaceRoot,
+    '_projects',
+    'n8n',
+    'skills-plugin-compatibility',
+    '_main',
+    'compatibility-contract.json'
+  );
+}
+
+function compatibilitySourceLockPath(workspaceRoot = path.resolve(__dirname, '..', '..')) {
+  return path.join(workspaceRoot, '_projects', 'n8n', 'skills-plugin-compatibility', 'SOURCE-LOCK.json');
+}
+
+function sortedStrings(values) {
+  return [...values].map(String).sort((left, right) => left.localeCompare(right));
+}
+
+function validateN8nSkillsCompatibilityContractParity(options = {}) {
+  const runtimeMetadata = options.runtimeMetadata || N8N_SKILLS_RUNTIME_CONTRACT_METADATA;
+  const adapters = options.adapters === null ? null : (options.adapters || N8N_SKILLS_COMPATIBILITY_ADAPTERS);
+  const currentAdapter = options.currentAdapter || (adapters && adapters[runtimeMetadata.current_version]);
+  const contractPath = options.contractPath || compatibilityContractPath(options.workspaceRoot);
+  const sourceLockPath = options.sourceLockPath || compatibilitySourceLockPath(options.workspaceRoot);
+  const errors = [];
+  let contract;
+  let sourceLock;
+  try {
+    contract = readJsonFile(contractPath, 'n8n Skills compatibility contract');
+    sourceLock = readJsonFile(sourceLockPath, 'n8n Skills compatibility source lock');
+  } catch (error) {
+    const parityError = new Error(error.message);
+    parityError.code = 'compatibility-contract-drift';
+    throw parityError;
+  }
+
+  const runtimeAdapters = Array.isArray(runtimeMetadata.supported_adapters) ? runtimeMetadata.supported_adapters : [];
+  const adapterVersions = sortedStrings(runtimeAdapters.map((adapter) => adapter?.version || ''));
+  const contractAdapters = Array.isArray(contract.supported_adapters) ? contract.supported_adapters : [];
+  const contractVersions = sortedStrings(contractAdapters.map((adapter) => adapter?.version || ''));
+  const contractPaths = sortedStrings(Array.isArray(contract.contract_paths) ? contract.contract_paths : []);
+  const currentMetadataAdapter = runtimeAdapters.find((adapter) => adapter?.version === runtimeMetadata.current_version);
+  if (contract.package_id !== runtimeMetadata.package_id) errors.push('package_id');
+  if (contract.package_name !== runtimeMetadata.package_name) errors.push('package_name');
+  if (contract.current_version !== runtimeMetadata.current_version || !currentMetadataAdapter) errors.push('current_version/current adapter');
+  if (contract.upstream_repo !== runtimeMetadata.upstream_repo) errors.push('upstream_repo');
+  if (contract.upstream_ref !== runtimeMetadata.upstream_ref) errors.push('upstream_ref');
+  if (contract.upstream_commit !== currentMetadataAdapter?.upstream_commit) errors.push('current upstream_commit');
+  if (contract.current_upstream_windows_status !== runtimeMetadata.current_upstream_windows_status) {
+    errors.push('current_upstream_windows_status');
+  }
+  if (contract.source_watch_policy !== runtimeMetadata.source_watch_policy) errors.push('source_watch_policy');
+  if (sourceLock.source_repo !== contract.upstream_repo) errors.push('source-watch source_repo');
+  if (sourceLock.source_ref !== contract.upstream_ref) errors.push('source-watch source_ref');
+  if (sourceLock.source_commit !== contract.upstream_commit) errors.push('source-watch source_commit');
+  if (sourceLock.source_update_policy !== 'manual_review_required') errors.push('source-watch source_update_policy');
+  if (JSON.stringify(contractVersions) !== JSON.stringify(adapterVersions)) errors.push('supported adapter versions');
+
+  for (const version of adapterVersions) {
+    const runtimeAdapterMetadata = runtimeAdapters.find((adapter) => adapter?.version === version);
+    const runtimeAdapter = adapters?.[version];
+    const declaredAdapter = contractAdapters.find((adapter) => adapter?.version === version);
+    if (!declaredAdapter) continue;
+    if (declaredAdapter.upstream_commit !== runtimeAdapterMetadata?.upstream_commit) {
+      errors.push(`${version} upstream_commit`);
+    }
+    if (declaredAdapter.repair_profile !== runtimeAdapterMetadata?.repair_profile) {
+      errors.push(`${version} repair_profile`);
+    }
+    if (runtimeAdapter) {
+      if (runtimeAdapter.plugin_id !== runtimeMetadata.package_id) errors.push(`${version} runtime package_id`);
+      if (runtimeAdapter.package_name !== runtimeMetadata.package_name) errors.push(`${version} runtime package_name`);
+      if (runtimeAdapter.upstream_repo !== runtimeMetadata.upstream_repo) errors.push(`${version} runtime upstream_repo`);
+      if (runtimeAdapter.upstream_ref !== runtimeMetadata.upstream_ref) errors.push(`${version} runtime upstream_ref`);
+      if (runtimeAdapter.upstream_commit !== runtimeAdapterMetadata?.upstream_commit) errors.push(`${version} runtime upstream_commit`);
+      if (runtimeAdapter.repair_profile !== runtimeAdapterMetadata?.repair_profile) errors.push(`${version} runtime repair_profile`);
+      const adapterPaths = sortedStrings(Object.keys(runtimeAdapter.pristine_sha256 || {}));
+      if (JSON.stringify(adapterPaths) !== JSON.stringify(contractPaths)) {
+        errors.push(`${version} contract_paths`);
+      }
+    }
+  }
+
+  if (JSON.stringify(sortedStrings(runtimeMetadata.contract_paths || [])) !== JSON.stringify(contractPaths)) {
+    errors.push('runtime contract_paths');
+  }
+  if (adapters && currentAdapter !== adapters[runtimeMetadata.current_version]) errors.push('current adapter selection');
+
+  if (errors.length) {
+    const error = new Error(`n8n Skills compatibility contract/runtime parity failed: ${errors.join(', ')}`);
+    error.code = 'compatibility-contract-drift';
+    throw error;
+  }
+  return { ok: true, contract, contractPath, sourceLock, sourceLockPath };
+}
 
 function normalizeRelPath(value) {
   return String(value || '').replace(/\\/g, '/');
@@ -428,8 +591,14 @@ function wrapperText() {
     '',
     '$process = [System.Diagnostics.Process]::Start($psi)',
     '$stdin = [Console]::In.ReadToEnd()',
-    '$process.StandardInput.Write($stdin)',
-    '$process.StandardInput.Close()',
+    'if ($stdin.Length -gt 0 -and $stdin[0] -eq [char]0xFEFF) {',
+    '  $stdin = $stdin.Substring(1)',
+    '} elseif ($stdin.Length -ge 3 -and $stdin[0] -eq [char]0x00EF -and $stdin[1] -eq [char]0x00BB -and $stdin[2] -eq [char]0x00BF) {',
+    '  $stdin = $stdin.Substring(3)',
+    '}',
+    '$stdinBytes = [System.Text.UTF8Encoding]::new($false).GetBytes($stdin)',
+    '$process.StandardInput.BaseStream.Write($stdinBytes, 0, $stdinBytes.Length)',
+    '$process.StandardInput.BaseStream.Close()',
     '$process.WaitForExit()',
     'exit $process.ExitCode',
     ''
@@ -487,6 +656,9 @@ function canonicalizeCrLfBytes(bytes) {
 }
 
 function sha256File(filePath, options = {}) {
+  const stat = fs.statSync(filePath);
+  const maxBytes = options.maxBytes || N8N_SKILLS_CONTRACT_FILE_MAX_BYTES;
+  if (stat.size > maxBytes) throw new Error('declared compatibility file exceeds the supported byte limit');
   const bytes = fs.readFileSync(filePath);
   const canonicalBytes = options.canonicalTextEol ? canonicalizeCrLfBytes(bytes) : bytes;
   return crypto.createHash('sha256').update(canonicalBytes).digest('hex');
@@ -508,6 +680,28 @@ function n8nSkillsCompatibilityFingerprints(pluginRoot, expected, adapter = N8N_
   return fingerprints;
 }
 
+function sha256RegularFileBounded(filePath, size, maxBytes) {
+  if (size > maxBytes) throw new Error('plugin cache regular file exceeds the supported byte limit');
+  const hash = crypto.createHash('sha256');
+  const buffer = Buffer.allocUnsafe(64 * 1024);
+  const descriptor = fs.openSync(filePath, 'r');
+  try {
+    let offset = 0;
+    while (offset < size) {
+      const bytesRead = fs.readSync(descriptor, buffer, 0, Math.min(buffer.length, size - offset), offset);
+      if (bytesRead <= 0) throw new Error('plugin cache regular file changed while its identity was inspected');
+      hash.update(buffer.subarray(0, bytesRead));
+      offset += bytesRead;
+    }
+    if (fs.fstatSync(descriptor).size !== size) {
+      throw new Error('plugin cache regular file changed while its identity was inspected');
+    }
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  return hash.digest('hex');
+}
+
 function fingerprintsMatch(pluginRoot, expected, adapter) {
   const actual = n8nSkillsCompatibilityFingerprints(pluginRoot, expected, adapter);
   return Object.entries(expected).every(([relPath, expectedSha256]) => actual[relPath] === expectedSha256);
@@ -521,33 +715,46 @@ function fingerprintDigest(fingerprints) {
   return crypto.createHash('sha256').update(canonical, 'utf8').digest('hex');
 }
 
-function n8nSkillsTreeIdentity(pluginRoot, adapter) {
+function n8nSkillsTreeIdentity(pluginRoot, adapter, limits = N8N_SKILLS_TREE_LIMITS) {
+  const repairedVariants = adapter.repaired_sha256_variants || [adapter.repaired_sha256];
   const changedPaths = new Set([
     ...Object.keys(adapter.pristine_sha256),
-    ...Object.keys(adapter.repaired_sha256)
-  ].filter((relPath) => adapter.pristine_sha256[relPath] !== adapter.repaired_sha256[relPath]));
+    ...repairedVariants.flatMap((variant) => Object.keys(variant))
+  ].filter((relPath) => repairedVariants.some((variant) => adapter.pristine_sha256[relPath] !== variant[relPath])));
   const allRows = [];
   const preservedRows = [];
+  let fileCount = 0;
+  let directoryCount = 0;
+  let totalBytes = 0;
 
-  function visit(currentPath, relDir = '') {
+  function visit(currentPath, relDir = '', depth = 0) {
+    if (depth > limits.max_depth) throw new Error('plugin cache tree exceeds the supported directory depth');
     const currentStat = fs.lstatSync(currentPath);
     if (currentStat.isSymbolicLink() || !currentStat.isDirectory()) {
       throw new Error(`${relDir || 'plugin root'} is not a direct regular directory`);
     }
     if (relDir) {
+      directoryCount += 1;
+      if (directoryCount > limits.max_directories) throw new Error('plugin cache tree exceeds the supported directory count');
       const row = `directory\0${relDir}\n`;
       allRows.push(row);
       preservedRows.push(row);
     }
-    for (const entry of fs.readdirSync(currentPath, { withFileTypes: true })) {
+    const entries = fs.readdirSync(currentPath, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of entries) {
       const fullPath = path.join(currentPath, entry.name);
       const relPath = normalizeRelPath(path.join(relDir, entry.name));
       const stat = fs.lstatSync(fullPath);
       if (stat.isSymbolicLink()) throw new Error(`${relPath} is a symbolic link or junction`);
       if (stat.isDirectory()) {
-        visit(fullPath, relPath);
+        visit(fullPath, relPath, depth + 1);
       } else if (stat.isFile()) {
-        const row = `file\0${relPath}\0${sha256File(fullPath)}\n`;
+        fileCount += 1;
+        totalBytes += stat.size;
+        if (fileCount > limits.max_files) throw new Error('plugin cache tree exceeds the supported regular-file count');
+        if (totalBytes > limits.max_total_bytes) throw new Error('plugin cache tree exceeds the supported total byte limit');
+        const row = `file\0${relPath}\0${sha256RegularFileBounded(fullPath, stat.size, limits.max_file_bytes)}\n`;
         allRows.push(row);
         if (!changedPaths.has(relPath)) preservedRows.push(row);
       } else {
@@ -626,10 +833,11 @@ function validateCriticalLayout(pluginRoot, adapter) {
   if (walked.error) return walked.error;
   const actual = walked.files.sort();
   const pristine = Object.keys(adapter.pristine_sha256).filter((relPath) => relPath.startsWith('hooks/')).sort();
-  const repaired = Object.keys(adapter.repaired_sha256).filter((relPath) => relPath.startsWith('hooks/')).sort();
+  const repairedVariants = (adapter.repaired_sha256_variants || [adapter.repaired_sha256])
+    .map((variant) => Object.keys(variant).filter((relPath) => relPath.startsWith('hooks/')).sort());
   const same = (left, right) => left.length === right.length && left.every((value, index) => value === right[index]);
-  if (!same(actual, pristine) && !same(actual, repaired)) {
-    const allowed = new Set([...pristine, ...repaired]);
+  if (!same(actual, pristine) && !repairedVariants.some((repaired) => same(actual, repaired))) {
+    const allowed = new Set([...pristine, ...repairedVariants.flat()]);
     const unexpected = actual.filter((relPath) => !allowed.has(relPath));
     const missing = pristine.filter((relPath) => !actual.includes(relPath));
     if (unexpected.length) return `unexpected critical hook file(s): ${unexpected.join(', ')}`;
@@ -664,20 +872,26 @@ function classifyRecognizedAdapter(pluginRoot, manifest, adapter) {
     const fingerprints = n8nSkillsCompatibilityFingerprints(pluginRoot, adapter.pristine_sha256, adapter);
     return { ...compatibilityResult(adapter, 'repair-required', adapter.version), contract_digest: fingerprintDigest(fingerprints), ...treeIdentity };
   }
-  if (fingerprintsMatch(pluginRoot, adapter.repaired_sha256, adapter)) {
-    const fingerprints = n8nSkillsCompatibilityFingerprints(pluginRoot, adapter.repaired_sha256, adapter);
-    return { ...compatibilityResult(adapter, 'healthy', adapter.version), contract_digest: fingerprintDigest(fingerprints), ...treeIdentity };
+  const repairedVariants = adapter.repaired_sha256_variants || [adapter.repaired_sha256];
+  for (const repairedSha256 of repairedVariants) {
+    if (fingerprintsMatch(pluginRoot, repairedSha256, adapter)) {
+      const fingerprints = n8nSkillsCompatibilityFingerprints(pluginRoot, repairedSha256, adapter);
+      return { ...compatibilityResult(adapter, 'healthy', adapter.version), contract_digest: fingerprintDigest(fingerprints), ...treeIdentity };
+    }
   }
 
-  const unionPaths = [...new Set([...Object.keys(adapter.pristine_sha256), ...Object.keys(adapter.repaired_sha256)])];
+  const unionPaths = [...new Set([
+    ...Object.keys(adapter.pristine_sha256),
+    ...repairedVariants.flatMap((variant) => Object.keys(variant))
+  ])];
   const actual = n8nSkillsCompatibilityFingerprints(
     pluginRoot,
     Object.fromEntries(unionPaths.map((relPath) => [relPath, ''])),
     adapter
   );
-  const changedPaths = unionPaths.filter((relPath) => adapter.pristine_sha256[relPath] !== adapter.repaired_sha256[relPath]);
+  const changedPaths = unionPaths.filter((relPath) => repairedVariants.some((variant) => adapter.pristine_sha256[relPath] !== variant[relPath]));
   const hasPristine = changedPaths.some((relPath) => actual[relPath] === adapter.pristine_sha256[relPath]);
-  const hasRepaired = changedPaths.some((relPath) => actual[relPath] === adapter.repaired_sha256[relPath]);
+  const hasRepaired = changedPaths.some((relPath) => repairedVariants.some((variant) => actual[relPath] === variant[relPath]));
   const status = hasPristine && hasRepaired ? 'partial-repair' : 'identity-unverified';
   const reason = status === 'partial-repair'
     ? 'supported n8n Skills version contains a mixture of exact pristine and repaired compatibility bytes'
@@ -736,8 +950,8 @@ function patchSessionStartText(text) {
       '',
       `# ${N8N_NODE_FALLBACK_MARKER}`,
       'if command -v node >/dev/null 2>&1; then',
-      '  N8N_NODE_SOURCE="$(printf \'%s\' "${INPUT}" | node -e \'const fs=require("fs");let raw=fs.readFileSync(0,"utf8");let data={};try{data=raw.trim()?JSON.parse(raw):{};}catch{}process.stdout.write(String(data.source||""));\')"',
-      '  N8N_NODE_SESSION_ID="$(printf \'%s\' "${INPUT}" | node -e \'const fs=require("fs");let raw=fs.readFileSync(0,"utf8");let data={};try{data=raw.trim()?JSON.parse(raw):{};}catch{}process.stdout.write(String(data.session_id||""));\')"',
+      '  N8N_NODE_SOURCE="$(printf \'%s\' "${INPUT}" | node -e \'const fs=require("fs");let raw=fs.readFileSync(0,"utf8").replace(/^\\uFEFF/,"");let data={};try{data=raw.trim()?JSON.parse(raw):{};}catch{}process.stdout.write(String(data.source||""));\')"',
+      '  N8N_NODE_SESSION_ID="$(printf \'%s\' "${INPUT}" | node -e \'const fs=require("fs");let raw=fs.readFileSync(0,"utf8").replace(/^\\uFEFF/,"");let data={};try{data=raw.trim()?JSON.parse(raw):{};}catch{}process.stdout.write(String(data.session_id||""));\')"',
       '  if [[ "${N8N_NODE_SOURCE}" == "clear" || "${N8N_NODE_SOURCE}" == "compact" ]] && [[ -n "${N8N_NODE_SESSION_ID}" ]]; then',
       '    STATE_DIR="${TMPDIR:-/tmp}/n8n-skills-state"',
       '    rm -f "${STATE_DIR}/${N8N_NODE_SESSION_ID}-"*.loaded 2>/dev/null || true',
@@ -773,7 +987,7 @@ function patchPreEmitText(text) {
       `# ${N8N_NODE_FALLBACK_MARKER}`,
       'SESSION_ID=""',
       'if command -v node >/dev/null 2>&1; then',
-      '  SESSION_ID="$(printf \'%s\' "${INPUT}" | node -e \'const fs=require("fs");let raw=fs.readFileSync(0,"utf8");let data={};try{data=raw.trim()?JSON.parse(raw):{};}catch{}process.stdout.write(String(data.session_id||""));\')"',
+      '  SESSION_ID="$(printf \'%s\' "${INPUT}" | node -e \'const fs=require("fs");let raw=fs.readFileSync(0,"utf8").replace(/^\\uFEFF/,"");let data={};try{data=raw.trim()?JSON.parse(raw):{};}catch{}process.stdout.write(String(data.session_id||""));\')"',
       'elif command -v jq >/dev/null 2>&1; then',
       '  SESSION_ID="$(echo "${INPUT}" | jq -r \'.session_id // empty\' 2>/dev/null)"',
       'elif command -v python3 >/dev/null 2>&1; then',
@@ -810,8 +1024,8 @@ function patchGetNodeText(text) {
     [
       `# ${N8N_NODE_FALLBACK_MARKER}`,
       'if command -v node >/dev/null 2>&1; then',
-      '  SESSION_ID="$(printf \'%s\' "${INPUT}" | node -e \'const fs=require("fs");let raw=fs.readFileSync(0,"utf8");let data={};try{data=raw.trim()?JSON.parse(raw):{};}catch{}process.stdout.write(String(data.session_id||""));\')"',
-      '  NODE_NAMES="$(printf \'%s\' "${INPUT}" | node -e \'const fs=require("fs");let raw=fs.readFileSync(0,"utf8");let data={};try{data=raw.trim()?JSON.parse(raw):{};}catch{}const ids=(data.tool_input&&data.tool_input.ids)||[];for(const item of ids){if(item&&typeof item==="object")console.log(item.name||"");else console.log(String(item||""));}\')"',
+      '  SESSION_ID="$(printf \'%s\' "${INPUT}" | node -e \'const fs=require("fs");let raw=fs.readFileSync(0,"utf8").replace(/^\\uFEFF/,"");let data={};try{data=raw.trim()?JSON.parse(raw):{};}catch{}process.stdout.write(String(data.session_id||""));\')"',
+      '  NODE_NAMES="$(printf \'%s\' "${INPUT}" | node -e \'const fs=require("fs");let raw=fs.readFileSync(0,"utf8").replace(/^\\uFEFF/,"");let data={};try{data=raw.trim()?JSON.parse(raw):{};}catch{}const ids=(data.tool_input&&data.tool_input.ids)||[];for(const item of ids){if(item&&typeof item==="object")console.log(item.name||"");else console.log(String(item||""));}\')"',
       'elif command -v jq >/dev/null 2>&1; then',
       '  SESSION_ID="$(echo "${INPUT}" | jq -r \'.session_id // empty\' 2>/dev/null)"',
       '  NODE_NAMES="$(echo "${INPUT}" | jq -r \'',
@@ -859,7 +1073,7 @@ function patchPostValidateText(text) {
       `# ${N8N_NODE_FALLBACK_MARKER}`,
       'INPUT="$(cat)"',
       'if command -v node >/dev/null 2>&1; then',
-      '  CODE="$(printf \'%s\' "$INPUT" | node -e \'const fs=require("fs");let raw=fs.readFileSync(0,"utf8");let data={};try{data=raw.trim()?JSON.parse(raw):{};}catch{}process.stdout.write(String((data.tool_input&&data.tool_input.code)||""));\')"',
+      '  CODE="$(printf \'%s\' "$INPUT" | node -e \'const fs=require("fs");let raw=fs.readFileSync(0,"utf8").replace(/^\\uFEFF/,"");let data={};try{data=raw.trim()?JSON.parse(raw):{};}catch{}process.stdout.write(String((data.tool_input&&data.tool_input.code)||""));\')"',
       'elif command -v jq >/dev/null 2>&1; then',
       '  CODE="$(echo "$INPUT" | jq -r \'.tool_input.code // empty\' 2>/dev/null)"',
       'else',
@@ -943,6 +1157,7 @@ function repairPluginRoot(pluginRoot, options = {}) {
   const hooksJson = readJsonFile(hooksJsonPath, 'hooks/hooks.json');
   const entries = collectHookCommandEntries(hooksJson);
   const n8nPlugin = isN8nSkillsPlugin(pluginRoot, effectiveOptions);
+  if (n8nPlugin) validateN8nSkillsCompatibilityContractParity(options.compatibilityContract || {});
   if (n8nPlugin && !options.skipN8nCompatibilityCheck) {
     const compatibility = classifyN8nSkillsCompatibility(pluginRoot);
     if (compatibility.status === 'healthy') {
@@ -1021,6 +1236,7 @@ function repairPluginRoot(pluginRoot, options = {}) {
 }
 
 function reconcileN8nSkillsPlugin(pluginRoot, options = {}) {
+  validateN8nSkillsCompatibilityContractParity(options.compatibilityContract || {});
   const windows = options.windows ?? process.platform === 'win32';
   const write = Boolean(options.write);
   const before = classifyN8nSkillsCompatibility(pluginRoot);
@@ -1128,7 +1344,11 @@ if (require.main === module) {
 module.exports = {
   N8N_SKILLS_COMPATIBILITY,
   N8N_SKILLS_COMPATIBILITY_ADAPTERS,
+  N8N_SKILLS_RUNTIME_CONTRACT_METADATA,
   N8N_SKILLS_TEXT_EOL_PATHS,
+  N8N_SKILLS_TREE_LIMITS,
+  N8N_SKILLS_SOURCE_WATCH_POLICY,
+  N8N_SKILLS_CURRENT_UPSTREAM_WINDOWS_STATUS,
   N8N_NODE_FALLBACK_MARKER,
   WRAPPER_MARKER,
   canonicalizeCrLfBytes,
@@ -1140,5 +1360,6 @@ module.exports = {
   n8nSkillsCompatibilityFingerprints,
   reconcileN8nSkillsPlugin,
   repairPluginRoot,
+  validateN8nSkillsCompatibilityContractParity,
   tokenizeCommand
 };

@@ -9,6 +9,7 @@ const agentInstructionSync = require('./sync-agent-instruction-shims.cjs');
 const sourceLockAudit = require('./audit-project-source-locks.cjs');
 const skillPortabilityAudit = require('./audit-skill-portability.cjs');
 const projectSync = require('./sync-toolkit-projects.cjs');
+const n8nCompatibilityRuntime = require('./repair-codex-plugin-windows-hooks.cjs');
 
 function workspaceRootFromArgs(args = process.argv.slice(2)) {
   for (let i = 0; i < args.length; i += 1) {
@@ -2472,6 +2473,28 @@ function validateNoRepoWideMcpSurface(errors) {
   }
 }
 
+function validateN8nSkillsCompatibilityContractParity(errors) {
+  const runtimePath = path.join(root, 'repo', 'scripts', 'repair-codex-plugin-windows-hooks.cjs');
+  try {
+    const source = fs.readFileSync(runtimePath, 'utf8');
+    const begin = '/* AI-AGENT-TOOLKIT:N8N-SKILLS-RUNTIME-CONTRACT:BEGIN */';
+    const end = '/* AI-AGENT-TOOLKIT:N8N-SKILLS-RUNTIME-CONTRACT:END */';
+    const beginIndex = source.indexOf(begin);
+    const endIndex = source.indexOf(end);
+    if (beginIndex === -1 || endIndex === -1 || endIndex <= beginIndex || source.indexOf(begin, beginIndex + begin.length) !== -1 || source.indexOf(end, endIndex + end.length) !== -1) {
+      throw new Error('n8n Skills runtime compatibility metadata markers are missing, duplicated, or malformed');
+    }
+    const metadata = JSON.parse(source.slice(beginIndex + begin.length, endIndex).trim());
+    n8nCompatibilityRuntime.validateN8nSkillsCompatibilityContractParity({
+      workspaceRoot: root,
+      runtimeMetadata: metadata,
+      adapters: null
+    });
+  } catch (error) {
+    fail(errors, error.message);
+  }
+}
+
 function runValidation() {
   const errors = [];
   assertExpectedFiles(errors);
@@ -2511,6 +2534,7 @@ function runValidation() {
   validateMarkdownLinks(errors);
   validateAdvisoryTargets(errors);
   validateSourceWatchTruthfulness(errors);
+  validateN8nSkillsCompatibilityContractParity(errors);
   validateNoRepoWideMcpSurface(errors);
   return errors;
 }

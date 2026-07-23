@@ -25,6 +25,7 @@ const currentManifestPath = path.join(
 const {
   N8N_SKILLS_COMPATIBILITY,
   N8N_SKILLS_COMPATIBILITY_ADAPTERS,
+  N8N_SKILLS_TREE_LIMITS,
   classifyN8nSkillsCompatibility,
   n8nSkillsCompatibilityFingerprints,
   reconcileN8nSkillsPlugin
@@ -191,7 +192,7 @@ function runPowerShellWrapperHook(pluginRoot, relPath, input, envOverrides = {})
     ],
     {
       cwd: pluginRoot,
-      input: JSON.stringify(input),
+      input: Buffer.from(JSON.stringify(input), 'utf8'),
       encoding: 'utf8',
       env: {
         ...process.env,
@@ -1096,6 +1097,11 @@ test('n8n-skills Windows hook repair wraps hooks, adds Node fallbacks, and verif
     );
     assert.equal(wrapperWithHostilePath.status, 0, wrapperWithHostilePath.stderr);
     assert.doesNotMatch(wrapperWithHostilePath.stderr, /command not found/i);
+    assert.notEqual(
+      wrapperWithHostilePath.stdout.trim(),
+      '',
+      `wrapper must emit JSON under the bounded Node-only PATH: ${JSON.stringify(wrapperWithHostilePath)}`
+    );
     assert.equal(JSON.parse(wrapperWithHostilePath.stdout).hookSpecificOutput.hookEventName, 'PreToolUse');
   }
 
@@ -1256,6 +1262,78 @@ test('current n8n Skills 1.0.2 adapter is exact, repairable, verified, and idemp
   assert.equal(second.status, 'healthy');
   assert.equal(second.repaired, false);
   assertSnapshotEqual(pluginRoot, repairedSnapshot, 'current-version healthy rerun must be byte-identical');
+});
+
+test('previously repaired wrapper fingerprint remains healthy after BOM-safe wrapper update', () => {
+  const pluginRoot = copyCurrentSupportedFixture();
+  reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true });
+  const wrapperPath = path.join(pluginRoot, 'hooks', 'run-hook.ps1');
+  const current = fs.readFileSync(wrapperPath, 'utf8');
+  const legacy = current.replace(
+    [
+      'if ($stdin.Length -gt 0 -and $stdin[0] -eq [char]0xFEFF) {',
+      '  $stdin = $stdin.Substring(1)',
+      '} elseif ($stdin.Length -ge 3 -and $stdin[0] -eq [char]0x00EF -and $stdin[1] -eq [char]0x00BB -and $stdin[2] -eq [char]0x00BF) {',
+      '  $stdin = $stdin.Substring(3)',
+      '}',
+      ''
+    ].join('\r\n'),
+    ''
+  ).replace(
+    [
+      '$stdinBytes = [System.Text.UTF8Encoding]::new($false).GetBytes($stdin)',
+      '$process.StandardInput.BaseStream.Write($stdinBytes, 0, $stdinBytes.Length)',
+      '$process.StandardInput.BaseStream.Close()'
+    ].join('\r\n'),
+    '$process.StandardInput.Write($stdin)\r\n$process.StandardInput.Close()'
+  );
+  assert.notEqual(legacy, current, 'legacy wrapper fixture must remove only the BOM-safe input shim');
+  fs.writeFileSync(wrapperPath, legacy, 'utf8');
+  for (const relPath of [
+    'hooks/session-start.sh',
+    'hooks/pre-tool-use/_emit.sh',
+    'hooks/pre-tool-use/get-node.sh',
+    'hooks/post-tool-use/validate-workflow.sh'
+  ]) {
+    const filePath = path.join(pluginRoot, ...relPath.split('/'));
+    const bomSafe = fs.readFileSync(filePath, 'utf8');
+    const legacyHook = bomSafe.replaceAll('.replace(/^\\uFEFF/,"")', '');
+    assert.notEqual(legacyHook, bomSafe, `${relPath} must contain the BOM-safe parser shim`);
+    fs.writeFileSync(filePath, legacyHook, 'utf8');
+  }
+  assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'healthy');
+  const rerun = reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true });
+  assert.equal(rerun.status, 'healthy');
+  assert.equal(rerun.repaired, false);
+  assert.equal(fs.readFileSync(wrapperPath, 'utf8'), legacy, 'legacy healthy bytes remain an idempotent no-op');
+});
+
+test('selected cache tree identity rejects oversized unrelated files without buffering or mutation', () => {
+  const pluginRoot = copyCurrentSupportedFixture();
+  const oversized = path.join(pluginRoot, 'unrelated-large.bin');
+  fs.writeFileSync(oversized, Buffer.alloc(0));
+  fs.truncateSync(oversized, N8N_SKILLS_TREE_LIMITS.max_file_bytes + 1);
+  const before = fs.statSync(oversized).size;
+  const classification = classifyN8nSkillsCompatibility(pluginRoot);
+  assert.equal(classification.status, 'unsupported-layout');
+  assert.match(classification.reason, /regular file exceeds the supported byte limit/i);
+  assert.throws(() => reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true }), /supported byte limit/i);
+  assert.equal(fs.statSync(oversized).size, before);
+  assert.equal(fs.existsSync(path.join(pluginRoot, 'hooks', 'run-hook.ps1')), false);
+});
+
+test('selected cache tree identity rejects excessive unrelated directory depth before mutation', () => {
+  const pluginRoot = copyCurrentSupportedFixture();
+  let current = path.join(pluginRoot, 'unrelated-depth');
+  for (let index = 0; index <= N8N_SKILLS_TREE_LIMITS.max_depth; index += 1) {
+    current = path.join(current, `d${index}`);
+    fs.mkdirSync(current, { recursive: true });
+  }
+  const classification = classifyN8nSkillsCompatibility(pluginRoot);
+  assert.equal(classification.status, 'unsupported-layout');
+  assert.match(classification.reason, /supported directory depth/i);
+  assert.throws(() => reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true }), /supported directory depth/i);
+  assert.equal(fs.existsSync(path.join(pluginRoot, 'hooks', 'run-hook.ps1')), false);
 });
 
 test('supported refresh is repaired, verified, and byte-idempotent', () => {

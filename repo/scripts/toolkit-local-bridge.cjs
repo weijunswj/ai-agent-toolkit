@@ -13,8 +13,10 @@ const {
   verifyInstalledCacheFreshness
 } = require('./setup-codex-toolkit-plugin.cjs');
 const {
+  N8N_SKILLS_COMPATIBILITY_ADAPTERS,
   classifyN8nSkillsCompatibility,
-  reconcileN8nSkillsPlugin
+  reconcileN8nSkillsPlugin,
+  validateN8nSkillsCompatibilityContractParity
 } = require('./repair-codex-plugin-windows-hooks.cjs');
 const {
   auditOwnedStaging,
@@ -25,7 +27,7 @@ const {
 } = require('./toolkit-staging-generations.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.9.0';
+const BRIDGE_VERSION = '2.9.1';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -2606,7 +2608,7 @@ const LOCK_RECOVERY_MARKER_SUFFIX = '.recovery';
 // is always respected regardless of age; a provably dead owner is
 // recoverable immediately; unknown or indeterminate owners fall back to the
 // age rule (created_at, or file mtime when the lock is unreadable).
-function inspectLockForRecovery(lockPath, liveness = lockOwnerLiveness) {
+function inspectLockForRecovery(lockPath, liveness = lockOwnerLiveness, options = {}) {
   let lock = {};
   try {
     lock = readJsonIfExists(lockPath) || {};
@@ -2615,7 +2617,8 @@ function inspectLockForRecovery(lockPath, liveness = lockOwnerLiveness) {
     // fallback decides freshness.
   }
   const owner = liveness(lock.pid);
-  if (owner === 'alive') {
+  const liveLeaseExpired = owner === 'alive' && options.liveOwnerLeaseMs > 0 && lockAgeMs(lockPath, lock) >= options.liveOwnerLeaseMs;
+  if (owner === 'alive' && !liveLeaseExpired) {
     return { respected: true, message: `Toolkit bridge lock at ${lockPath} is held by live process ${lock.pid}` };
   }
   if (owner !== 'dead') {
@@ -2637,10 +2640,14 @@ function inspectLockForRecovery(lockPath, liveness = lockOwnerLiveness) {
 // is alive or unverifiable, and are removed only through the identity-safe
 // retirement protocol once the owner is provably dead.
 const LOCK_ARTIFACT_GC_MS = 24 * 60 * 60 * 1000;
-const RECOVERY_CLAIM_TOMBSTONE_PATTERN = /^update\.lock\.recovery\.claim-[0-9a-f]{16}$/;
-const DISPLACED_RETIREMENT_TOMBSTONE_PATTERN = /^update\.lock\.displaced\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.retired-[0-9a-f]{16}$/;
+function lockNamePattern(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
-function cleanupSpentLockArtifacts(hubRoot) {
+function cleanupSpentLockArtifacts(hubRoot, lockName = 'update.lock') {
+  const escapedLockName = lockNamePattern(lockName);
+  const recoveryClaimTombstonePattern = new RegExp(`^${escapedLockName}\\.recovery\\.claim-[0-9a-f]{16}$`);
+  const displacedRetirementTombstonePattern = new RegExp(`^${escapedLockName}\\.displaced\\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.retired-[0-9a-f]{16}$`);
   let entries = [];
   try {
     entries = fs.readdirSync(hubRoot);
@@ -2648,7 +2655,7 @@ function cleanupSpentLockArtifacts(hubRoot) {
     return;
   }
   for (const entry of entries) {
-    if (!RECOVERY_CLAIM_TOMBSTONE_PATTERN.test(entry) && !DISPLACED_RETIREMENT_TOMBSTONE_PATTERN.test(entry)) continue;
+    if (!recoveryClaimTombstonePattern.test(entry) && !displacedRetirementTombstonePattern.test(entry)) continue;
     const fullPath = path.join(hubRoot, entry);
     try {
       const artifact = fs.lstatSync(fullPath);
@@ -2672,7 +2679,7 @@ function cleanupSpentLockArtifacts(hubRoot) {
 // - indeterminate owner (for example EPERM): fail closed, blocked;
 // - unusable owner data: age fallback (fresh blocks, stale is retirable);
 // - provably dead owner: retirable through the identity-safe protocol.
-function inspectDisplacedEvidenceFile(fullPath, liveness, testHooks = {}, phase = 'inspection') {
+function inspectDisplacedEvidenceFile(fullPath, liveness, testHooks = {}, phase = 'inspection', options = {}) {
   let raw = null;
   try {
     raw = testHooks.readDisplacedEvidence
@@ -2693,7 +2700,8 @@ function inspectDisplacedEvidenceFile(fullPath, liveness, testHooks = {}, phase 
     // Malformed evidence: owner is unusable; the age fallback decides.
   }
   const owner = liveness(displaced.pid);
-  if (owner === 'alive') {
+  const liveLeaseExpired = owner === 'alive' && options.liveOwnerLeaseMs > 0 && lockAgeMs(fullPath, displaced) >= options.liveOwnerLeaseMs;
+  if (owner === 'alive' && !liveLeaseExpired) {
     return {
       blocked: true,
       owner,
@@ -2741,7 +2749,7 @@ function inspectDisplacedEvidenceFile(fullPath, liveness, testHooks = {}, phase 
   return { blocked: false, owner, pid: displaced.pid, raw };
 }
 
-function inspectDisplacedEvidence(hubRoot, liveness = lockOwnerLiveness, testHooks = {}, phase = 'inspection') {
+function inspectDisplacedEvidence(hubRoot, liveness = lockOwnerLiveness, testHooks = {}, phase = 'inspection', lockName = 'update.lock', options = {}) {
   let entries = [];
   try {
     entries = testHooks.listDisplacedEvidence
@@ -2756,10 +2764,11 @@ function inspectDisplacedEvidence(hubRoot, liveness = lockOwnerLiveness, testHoo
     };
   }
   const retirable = [];
+  const displacedPattern = new RegExp(`^${lockNamePattern(lockName)}\\.displaced\\.[0-9a-f-]+$`, 'i');
   for (const entry of entries) {
-    if (!/^update\.lock\.displaced\.[0-9a-f-]+$/i.test(entry)) continue;
+    if (!displacedPattern.test(entry)) continue;
     const fullPath = path.join(hubRoot, entry);
-    const inspection = inspectDisplacedEvidenceFile(fullPath, liveness, testHooks, phase);
+    const inspection = inspectDisplacedEvidenceFile(fullPath, liveness, testHooks, phase, options);
     if (inspection.gone) continue;
     if (inspection.blocked) return { blocked: true, retirable, message: inspection.message };
     retirable.push({ fullPath, raw: inspection.raw });
@@ -2950,11 +2959,19 @@ function releaseRecoveryMarker(markerPath, token) {
 // call sites never pass it.
 function acquireLock(hubRoot, args, testHooks = {}) {
   fs.mkdirSync(hubRoot, { recursive: true });
-  cleanupSpentLockArtifacts(hubRoot);
-  const lockPath = path.join(hubRoot, 'update.lock');
+  const lockName = args.lockName || 'update.lock';
+  if (!/^[A-Za-z0-9._-]+$/.test(lockName) || lockName === '.' || lockName === '..') {
+    throw new Error('Toolkit bridge lock name must be a simple filename');
+  }
+  cleanupSpentLockArtifacts(hubRoot, lockName);
+  const lockPath = path.join(hubRoot, lockName);
   const markerPath = `${lockPath}${LOCK_RECOVERY_MARKER_SUFFIX}`;
   const liveness = testHooks.liveness || lockOwnerLiveness;
   const token = crypto.randomUUID();
+  const liveOwnerLeaseMs = Number.isFinite(args.liveOwnerLeaseMs) && args.liveOwnerLeaseMs > 0
+    ? args.liveOwnerLeaseMs
+    : 0;
+  const recoveryOptions = { liveOwnerLeaseMs };
 
   const skipOrThrow = (message) => {
     if (args.hook) return { acquired: false, lockPath, skipReason: message };
@@ -2962,13 +2979,15 @@ function acquireLock(hubRoot, args, testHooks = {}) {
   };
 
   const tryExclusiveCreate = () => {
-    const lockBody = `${JSON.stringify({
+    const lockRecord = {
       created_at: timestamp(),
       pid: process.pid,
       token,
       bridge_version: BRIDGE_VERSION,
       sync_source: args.syncSource
-    }, null, 2)}\n`;
+    };
+    if (liveOwnerLeaseMs) lockRecord.live_owner_lease_ms = liveOwnerLeaseMs;
+    const lockBody = `${JSON.stringify(lockRecord, null, 2)}\n`;
     try {
       fs.writeFileSync(lockPath, lockBody, { encoding: 'utf8', flag: 'wx' });
       return true;
@@ -2981,12 +3000,12 @@ function acquireLock(hubRoot, args, testHooks = {}) {
   // The initial scan is fail-fast only. A contender may pause after this
   // scan while another recovery creates evidence, so no retirement or lock
   // creation is permitted until the same checks repeat under marker ownership.
-  const initialEvidence = inspectDisplacedEvidence(hubRoot, liveness, testHooks, 'initial');
+  const initialEvidence = inspectDisplacedEvidence(hubRoot, liveness, testHooks, 'initial', lockName, recoveryOptions);
   if (initialEvidence.blocked) return skipOrThrow(initialEvidence.message);
   if (testHooks.afterInitialEvidenceInspect) testHooks.afterInitialEvidenceInspect();
 
   if (fs.existsSync(lockPath)) {
-    const inspection = inspectLockForRecovery(lockPath, liveness);
+    const inspection = inspectLockForRecovery(lockPath, liveness, recoveryOptions);
     if (inspection.respected) return skipOrThrow(inspection.message);
     if (testHooks.afterInspect) testHooks.afterInspect();
   }
@@ -2999,7 +3018,7 @@ function acquireLock(hubRoot, args, testHooks = {}) {
     // This is the authoritative barrier check. The marker remains owned
     // through retirement, main-lock recovery, and exclusive creation, so no
     // compliant recoverer can create evidence in a check-to-create gap.
-    const evidence = inspectDisplacedEvidence(hubRoot, liveness, testHooks, 'under-marker');
+    const evidence = inspectDisplacedEvidence(hubRoot, liveness, testHooks, 'under-marker', lockName, recoveryOptions);
     if (evidence.blocked) return skipOrThrow(evidence.message);
     if (evidence.retirable.length) {
       const retirement = retireDisplacedEvidence(evidence.retirable, testHooks);
@@ -3007,7 +3026,7 @@ function acquireLock(hubRoot, args, testHooks = {}) {
     }
 
     if (fs.existsSync(lockPath)) {
-      const recheck = inspectLockForRecovery(lockPath, liveness);
+      const recheck = inspectLockForRecovery(lockPath, liveness, recoveryOptions);
       if (recheck.respected) return skipOrThrow(recheck.message);
       if (testHooks.beforeDisplace) testHooks.beforeDisplace();
       // Displace by rename instead of deleting in place, then verify the
@@ -3028,7 +3047,8 @@ function acquireLock(hubRoot, args, testHooks = {}) {
           displacedPath,
           liveness,
           testHooks,
-          'post-displacement'
+          'post-displacement',
+          recoveryOptions
         );
         if (!displacedInspection.gone && displacedInspection.blocked) {
           if (testHooks.beforeRestorationCommit) testHooks.beforeRestorationCommit();
@@ -3616,7 +3636,16 @@ function selectCurrentN8nSkillsCache({ codexHome, pluginList, discovered }) {
       reason: `Codex reports current n8n-skills@n8n-io version ${version}, but its installed cache root is missing`
     };
   }
-  return { status: 'selected', entry, reason: '' };
+  return {
+    status: 'selected',
+    entry: {
+      ...entry,
+      selection_source: 'codex-installed-list',
+      selected_version: version,
+      directory_version: entry.version
+    },
+    reason: ''
+  };
 }
 
 function selectCurrentN8nSkillsCacheFromConfig({ codexHome, discovered }) {
@@ -3649,7 +3678,12 @@ function selectCurrentN8nSkillsCacheFromConfig({ codexHome, discovered }) {
   }
   return {
     status: 'selected',
-    entry: candidates[0],
+    entry: {
+      ...candidates[0],
+      selection_source: 'codex-config-cache-fallback',
+      selected_version: candidates[0].version,
+      directory_version: candidates[0].version
+    },
     reason: 'Selected by explicit Codex config enablement plus one exact n8n Skills cache candidate'
   };
 }
@@ -3663,77 +3697,164 @@ function sameN8nCompatibilityEvidence(left, right) {
     && left.tree_digest === right.tree_digest;
 }
 
+function failClosedN8nRepair(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function requireSelectedN8nVersionAgreement(entry, compatibility) {
+  const selectedVersion = String(entry.selected_version || entry.version || '').trim();
+  const directoryVersion = String(entry.directory_version || entry.version || '').trim();
+  const manifestVersion = String(compatibility?.version || '').trim();
+  const adapterVersion = String(N8N_SKILLS_COMPATIBILITY_ADAPTERS[manifestVersion]?.version || '').trim();
+  const identityVersions = [selectedVersion, directoryVersion, manifestVersion];
+  const recognizedAdapterMismatch = adapterVersion && adapterVersion !== selectedVersion;
+  const missingRecognizedAdapter = !adapterVersion && compatibility?.status !== 'unsupported-version';
+  if (identityVersions.some((version) => !version) || new Set(identityVersions).size !== 1 || recognizedAdapterMismatch || missingRecognizedAdapter) {
+    throw failClosedN8nRepair(
+      'selected-version-mismatch',
+      'n8n Skills selected identity, cache directory, package manifest, and compatibility adapter versions do not agree exactly'
+    );
+  }
+  return selectedVersion;
+}
+
+function n8nSkillsTargetLockIdentity(pluginRoot) {
+  const resolved = path.resolve(pluginRoot);
+  const identityInput = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  const identity = crypto.createHash('sha256').update(identityInput, 'utf8').digest('hex');
+  return {
+    hubRoot: path.dirname(resolved),
+    lockName: `.ai-agent-toolkit-n8n-target-${identity}.lock`
+  };
+}
+
+function acquireN8nSkillsTargetLock(pluginRoot, options = {}) {
+  const identity = n8nSkillsTargetLockIdentity(pluginRoot);
+  const attempts = options.attempts || 100;
+  const delayMs = options.delayMs || 25;
+  let lastLock = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    lastLock = acquireLock(identity.hubRoot, {
+      hook: true,
+      syncSource: 'codex-plugin',
+      lockName: identity.lockName,
+      // Target repairs are bounded by exact tree limits and should complete
+      // well inside this lease. An orphan whose numeric PID was later reused
+      // therefore cannot block this exact cache forever, while the existing
+      // token/rename/tombstone protocol still binds recovery to one lock generation.
+      liveOwnerLeaseMs: LOCK_STALE_MS
+    }, options.lockTestHooks || {});
+    if (lastLock.acquired) return lastLock;
+    if (attempt < attempts) sleepSync(delayMs);
+  }
+  throw failClosedN8nRepair(
+    'target-lock-contended',
+    'n8n Skills selected cache repair is already in progress; the target was not changed'
+  );
+}
+
+function releaseN8nSkillsTargetLock(lock) {
+  releaseLock(lock);
+}
+
 function reconcileSelectedN8nSkillsCache(entry, options = {}) {
   const pluginRoot = path.resolve(entry.plugin_root);
   const write = Boolean(options.write);
   const testHooks = options.testHooks || {};
+  validateN8nSkillsCompatibilityContractParity(options.compatibilityContract || {});
   const proposal = classifyN8nSkillsCompatibility(pluginRoot);
+  requireSelectedN8nVersionAgreement(entry, proposal);
   const preview = reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: false });
   if (!write || proposal.status === 'healthy') return preview;
   if (proposal.status !== 'repair-required') {
     throw new Error(proposal.reason || `n8n Skills compatibility state is ${proposal.status}`);
   }
 
-  if (testHooks.beforeN8nRepairRevalidation) {
-    testHooks.beforeN8nRepairRevalidation({ pluginRoot, proposal: { ...proposal } });
-  }
-  const revalidated = classifyN8nSkillsCompatibility(pluginRoot);
-  if (!sameN8nCompatibilityEvidence(proposal, revalidated)) {
-    throw new Error('n8n Skills repair approval is stale because the selected cache changed after inspection');
-  }
-
-  return withOwnedStaging({
-    target: pluginRoot,
-    stagePrefix: `.${path.basename(pluginRoot)}.staging-`,
-    operation: 'n8n-skills-plugin-repair',
-    sourceType: 'codex-plugin'
-  }, (stagePath) => {
-    const stagedPluginRoot = path.join(stagePath, 'plugin');
-    fs.cpSync(pluginRoot, stagedPluginRoot, { recursive: true });
-    const stagedRepair = reconcileN8nSkillsPlugin(stagedPluginRoot, { windows: true, write: true });
-    const stagedState = classifyN8nSkillsCompatibility(stagedPluginRoot);
-    if (
-      stagedState.status !== 'healthy'
-      || stagedState.adapter_id !== proposal.adapter_id
-      || stagedState.version !== proposal.version
-      || stagedState.preserved_tree_digest !== proposal.preserved_tree_digest
-    ) {
-      throw new Error('n8n Skills staged repair verification failed');
+  const lock = acquireN8nSkillsTargetLock(pluginRoot, testHooks.targetLockOptions || {});
+  try {
+    if (testHooks.afterN8nRepairLockAcquired) {
+      testHooks.afterN8nRepairLockAcquired({ pluginRoot, proposal: { ...proposal } });
+    }
+    if (testHooks.beforeN8nRepairRevalidation) {
+      testHooks.beforeN8nRepairRevalidation({ pluginRoot, proposal: { ...proposal } });
+    }
+    const revalidated = classifyN8nSkillsCompatibility(pluginRoot);
+    requireSelectedN8nVersionAgreement(entry, revalidated);
+    if (revalidated.status === 'healthy') {
+      return reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: false });
+    }
+    if (!sameN8nCompatibilityEvidence(proposal, revalidated)) {
+      throw failClosedN8nRepair(
+        'stale-repair-approval',
+        'n8n Skills repair approval is stale because the selected cache changed after inspection'
+      );
     }
 
-    if (testHooks.beforeN8nRepairReplacement) {
-      testHooks.beforeN8nRepairReplacement({ pluginRoot, stagedPluginRoot, proposal: { ...proposal } });
-    }
-    const immediatelyBeforeWrite = classifyN8nSkillsCompatibility(pluginRoot);
-    if (!sameN8nCompatibilityEvidence(proposal, immediatelyBeforeWrite)) {
-      throw new Error('n8n Skills repair approval is stale because the selected cache changed before replacement');
-    }
-
-    replaceDirectoryAtomically(stagedPluginRoot, pluginRoot, {
-      ...(testHooks.replaceDirectoryOptions || {}),
-      verifyTarget: (installedRoot) => {
-        if (testHooks.beforeN8nRepairVerification) {
-          testHooks.beforeN8nRepairVerification({ pluginRoot: installedRoot, proposal: { ...proposal } });
-        }
-        const verified = classifyN8nSkillsCompatibility(installedRoot);
-        if (
-          verified.status !== 'healthy'
-          || verified.adapter_id !== proposal.adapter_id
-          || verified.version !== proposal.version
-          || verified.preserved_tree_digest !== proposal.preserved_tree_digest
-        ) {
-          throw new Error(`n8n Skills repair verification failed: ${verified.reason || verified.status}`);
-        }
+    return withOwnedStaging({
+      target: pluginRoot,
+      stagePrefix: `.${path.basename(pluginRoot)}.staging-`,
+      operation: 'n8n-skills-plugin-repair',
+      sourceType: 'codex-plugin'
+    }, (stagePath) => {
+      const stagedPluginRoot = path.join(stagePath, 'plugin');
+      fs.cpSync(pluginRoot, stagedPluginRoot, { recursive: true });
+      const stagedRepair = reconcileN8nSkillsPlugin(stagedPluginRoot, { windows: true, write: true });
+      const stagedState = classifyN8nSkillsCompatibility(stagedPluginRoot);
+      if (
+        stagedState.status !== 'healthy'
+        || stagedState.adapter_id !== proposal.adapter_id
+        || stagedState.version !== proposal.version
+        || stagedState.preserved_tree_digest !== proposal.preserved_tree_digest
+      ) {
+        throw failClosedN8nRepair('verification-failed', 'n8n Skills staged repair verification failed');
       }
+
+      if (testHooks.beforeN8nRepairReplacement) {
+        testHooks.beforeN8nRepairReplacement({ pluginRoot, stagedPluginRoot, proposal: { ...proposal } });
+      }
+      const immediatelyBeforeWrite = classifyN8nSkillsCompatibility(pluginRoot);
+      requireSelectedN8nVersionAgreement(entry, immediatelyBeforeWrite);
+      if (!sameN8nCompatibilityEvidence(proposal, immediatelyBeforeWrite)) {
+        throw failClosedN8nRepair(
+          'stale-repair-approval',
+          'n8n Skills repair approval is stale because the selected cache changed before replacement'
+        );
+      }
+
+      replaceDirectoryAtomically(stagedPluginRoot, pluginRoot, {
+        ...(testHooks.replaceDirectoryOptions || {}),
+        verifyTarget: (installedRoot) => {
+          if (testHooks.beforeN8nRepairVerification) {
+            testHooks.beforeN8nRepairVerification({ pluginRoot: installedRoot, proposal: { ...proposal } });
+          }
+          const verified = classifyN8nSkillsCompatibility(installedRoot);
+          requireSelectedN8nVersionAgreement(entry, verified);
+          if (
+            verified.status !== 'healthy'
+            || verified.adapter_id !== proposal.adapter_id
+            || verified.version !== proposal.version
+            || verified.preserved_tree_digest !== proposal.preserved_tree_digest
+          ) {
+            throw failClosedN8nRepair(
+              'verification-failed',
+              `n8n Skills repair verification failed: ${verified.reason || verified.status}`
+            );
+          }
+        }
+      });
+      const finalState = classifyN8nSkillsCompatibility(pluginRoot);
+      return {
+        ...finalState,
+        status: 'repaired',
+        repaired: true,
+        actions: stagedRepair.actions || []
+      };
     });
-    const finalState = classifyN8nSkillsCompatibility(pluginRoot);
-    return {
-      ...finalState,
-      status: 'repaired',
-      repaired: true,
-      actions: stagedRepair.actions || []
-    };
-  });
+  } finally {
+    releaseN8nSkillsTargetLock(lock);
+  }
 }
 
 function repairThirdPartyCodexPluginHooks(options = {}) {
@@ -3827,6 +3948,7 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
         result.unchanged.push({ ...entry, classification: repair.status });
       }
     } catch (error) {
+      if (error.code) result.code = error.code;
       result.errors.push(`${entry.plugin_id}: ${error.message}`);
     }
   }
@@ -3835,9 +3957,12 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
   else if (result.errors.length) result.status = 'repair-failed';
   else if (result.repaired.length) result.status = 'repaired';
   else result.status = 'not-needed';
-  result.code = result.errors.some((message) => /verification failed/i.test(message))
-    ? 'verification-failed'
-    : result.status;
+  if (!result.errors.length) result.code = result.status;
+  else if (result.code === result.selection_status) {
+    result.code = result.errors.some((message) => /verification failed/i.test(message))
+      ? 'verification-failed'
+      : result.status;
+  }
   result.errors = result.errors.slice(0, THIRD_PARTY_HOOK_REPAIR_ERROR_LIMIT);
   return result;
 }
@@ -4442,5 +4567,7 @@ module.exports = {
   runAgentRulesPreflight,
   formatAgentRulesPreflight,
   discoverCodexPluginHookRoots,
-  repairThirdPartyCodexPluginHooks
+  repairThirdPartyCodexPluginHooks,
+  reconcileSelectedN8nSkillsCache,
+  n8nSkillsTargetLockIdentity
 };
