@@ -545,7 +545,10 @@ function runAdapter(name, root, toolsDir, files) {
       result = run(executable, ['-format', '{{json .}}'], { cwd: root });
       if (result.error || ![0, 1].includes(result.status)) throw new Error(result.error || `exit ${result.status}`);
       const lines = result.stdout.split(/\r?\n/).filter(Boolean);
-      parsed = lines.map((line) => parseJson(line, name));
+      parsed = lines.flatMap((line) => {
+        const value = parseJson(line, name);
+        return Array.isArray(value) ? value : [value];
+      });
     } else if (name === 'shellcheck') {
       const shellFiles = files.filter((file) => ['.sh', '.bash'].includes(path.extname(file.relative).toLowerCase()));
       if (shellFiles.length === 0) return { status: 'not_applicable', findings: [] };
@@ -560,14 +563,20 @@ function runAdapter(name, root, toolsDir, files) {
       const command = [
         `$items = @(${psFiles.map((file) => `'${file.full.replace(/'/g, "''")}'`).join(',')})`,
         `Import-Module '${modulePath.replace(/'/g, "''")}' -Force`,
-        '$results = foreach ($item in $items) { Invoke-ScriptAnalyzer -Path $item -Recurse:$false }',
+        "$securityRules = @('PSAvoidUsingConvertToSecureStringWithPlainText','PSAvoidUsingInvokeExpression','PSAvoidUsingPlainTextForPassword','PSAvoidUsingUsernameAndPasswordParams','PSUsePSCredentialType')",
+        '$results = foreach ($item in $items) { Invoke-ScriptAnalyzer -Path $item -Recurse:$false -IncludeRule $securityRules }',
         '$results | Select-Object RuleName,Severity,ScriptPath,Line | ConvertTo-Json -Depth 4 -Compress'
       ].join('; ');
       result = run('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command], { cwd: root });
       if (result.error || result.status !== 0) throw new Error(result.error || `exit ${result.status}`);
       parsed = result.stdout.trim() ? parseJson(result.stdout, name) : [];
       if (!Array.isArray(parsed)) parsed = [parsed];
-      parsed = parsed.map((item) => ({ rule: item.RuleName, severity: item.Severity, path: item.ScriptPath, line: item.Line }));
+      parsed = parsed.map((item) => ({
+        rule: item.RuleName,
+        severity: ({ 0: 'LOW', 1: 'MEDIUM', 2: 'HIGH' })[Number(item.Severity)] || item.Severity,
+        path: item.ScriptPath,
+        line: item.Line
+      }));
     } else if (name === 'gitleaks-cli') {
       const reportPath = path.join(temporary, 'gitleaks.json');
       result = run(executable, ['dir', root, '--no-banner', '--redact', '--report-format', 'json', '--report-path', reportPath], { cwd: root });
