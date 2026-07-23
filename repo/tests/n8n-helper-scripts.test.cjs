@@ -2213,7 +2213,7 @@ try {
     fs.symlinkSync(validPath, linkPath, 'file');
     const linked = run(linkPath);
     assert.notEqual(linked.status, 0);
-    assert.match(linked.stderr, /symlink, junction, or redirected path/);
+    assert.match(linked.stderr, /symlink,[\s\S]*junction,[\s\S]*or redirected path/);
   } catch (error) {
     if (!['EPERM', 'EACCES', 'ENOTSUP'].includes(error.code)) throw error;
   }

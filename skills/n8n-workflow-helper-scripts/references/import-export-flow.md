@@ -12,11 +12,11 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # Import Export Flow Reference
 
-Use this flow in a consumer repo, not from the toolkit repo.
+Use in a consumer repo, not the toolkit repo.
 
 ## Boundary
 
-This is a checklist, not the runtime guide. Non-live work may validate repo JSON and prepare local files. Live n8n or Docker work requires current-turn approval naming the repo, environment, operation, workflow set, and exclusions.
+This is a short safety checklist, not the full runtime guide. Non-live work may validate repo JSON and prepare local files. Live n8n or Docker work requires current-turn approval naming the repo, environment, operation, workflow set, and exclusions.
 
 ## Export Review
 
