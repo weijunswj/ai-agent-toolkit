@@ -2,4 +2,9 @@ interface:
   display_name: "Repository Security Gate"
   short_description: "Run the portable repository-owned security gate"
 policy:
+  products:
+    - chatgpt
+    - codex
+    - api
+    - atlas
   allow_implicit_invocation: false

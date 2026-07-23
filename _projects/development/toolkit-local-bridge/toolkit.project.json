@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.9.2",
+  "version": "2.9.3",
   "version_policy": "semver",
-  "version_notes": "Narrows the repository-owned PowerShell gate to high-signal security rules, fixes empty actionlint output normalisation, and synchronizes native plugin, bridge, setup, control, and delegation versions.",
+  "version_notes": "Completes repository-owned security-gate OpenAI product metadata after scanner normalisation hardening and synchronizes native plugin, bridge, setup, control, and delegation versions.",
   "outputs": [
     {
       "kind": "curated",
