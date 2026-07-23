@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.9.0",
+  "version": "2.9.1",
   "version_policy": "semver",
-  "version_notes": "Adds the Claude Toolkit-direct fail-closed n8n admission and completion hooks, binds their exact bytes into activation proof schema 4, and publishes the external-system router.",
+  "version_notes": "Aligns packaged router metadata and CI expectations after adding the Claude Toolkit-direct n8n admission boundary.",
   "outputs": [
     {
       "kind": "curated",

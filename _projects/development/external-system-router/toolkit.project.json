@@ -5,9 +5,9 @@
   "title": "External System Router",
   "module_path": "_projects/development/external-system-router",
   "main_path": "_projects/development/external-system-router/_main",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "version_policy": "semver",
-  "version_notes": "Initial first-party risk-scoped external-system router, reconciliation, schema, marker, host-adapter, receipt, and drift contracts.",
+  "version_notes": "Declares the router's OpenAI product surfaces and keeps its implicit safety-router policy covered by plugin evaluation.",
   "outputs": [
     {
       "kind": "copy",
