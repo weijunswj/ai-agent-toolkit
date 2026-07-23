@@ -253,21 +253,11 @@ test('Claude Toolkit plugin marketplace wrapper validator rejects wrong name/sou
   );
 });
 
-test('Claude Toolkit plugin SessionStart hook validator requires sync-source claude-plugin', () => {
+test('Claude Toolkit plugin hook validator requires the bridge and complete n8n admission hooks', () => {
   const dir = tmpRoot();
   const hooksPath = path.join(dir, 'hooks.json');
 
-  writeJson(hooksPath, {
-    hooks: {
-      SessionStart: [{
-        hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-local-bridge.cjs" --hook --sync-enabled --write --sync-source claude-plugin' }]
-      }],
-      PreToolUse: [{
-        matcher: 'Agent|Task',
-        hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-agent-hook.cjs"' }]
-      }]
-    }
-  });
+  writeJson(hooksPath, JSON.parse(fs.readFileSync(path.join(repoRoot, '.claude-plugin', 'hooks', 'hooks.json'), 'utf8')));
   assert.deepEqual(setup.verifySessionStartHook(hooksPath), []);
 
   writeJson(hooksPath, {
@@ -492,8 +482,8 @@ test('strict enforcement requires host-reported trust and active hooks bound to 
   assert.equal(summary.hook_active, true);
   assert.equal(summary.strict_enforcement_verified, true);
   assert.equal(summary.activation_proof.plugin_version, expectedVersion());
-  assert.equal(summary.activation_proof.schema, 3);
-  for (const key of ['cache_identity', 'hook_sha256', 'controller_sha256', 'process_launch_sha256', 'agent_hook_sha256']) {
+  assert.equal(summary.activation_proof.schema, 4);
+  for (const key of ['cache_identity', 'hook_sha256', 'controller_sha256', 'process_launch_sha256', 'agent_hook_sha256', 'n8n_admission_hook_sha256', 'n8n_domain_router_sha256']) {
     assert.match(summary.activation_proof[key], /^[a-f0-9]{64}$/);
   }
   const processLaunchBytes = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', 'claude-process-launch.cjs'));
@@ -963,6 +953,8 @@ test('installed enforcement byte verification rejects missing and stale cache fi
     'repo/scripts/toolkit-agent-control.cjs',
     'repo/scripts/claude-process-launch.cjs',
     'repo/scripts/toolkit-claude-agent-hook.cjs',
+    'repo/scripts/toolkit-claude-n8n-admission-hook.cjs',
+    'skills/external-system-router/scripts/n8n-domain-router.cjs',
     'repo/scripts/repo-ignore-hygiene.cjs',
     'repo/scripts/repo-local-backup.cjs',
     'repo/scripts/toolkit-local-bridge.cjs',
@@ -997,7 +989,8 @@ test('installed Claude SessionStart bridge must remain a regular cache file', { 
   for (const relPath of [
     '.claude-plugin/plugin.json', '.claude-plugin/hooks/hooks.json',
     'repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/claude-process-launch.cjs',
-    'repo/scripts/toolkit-claude-agent-hook.cjs', 'repo/scripts/toolkit-local-bridge.cjs',
+    'repo/scripts/toolkit-claude-agent-hook.cjs', 'repo/scripts/toolkit-claude-n8n-admission-hook.cjs',
+    'skills/external-system-router/scripts/n8n-domain-router.cjs', 'repo/scripts/toolkit-local-bridge.cjs',
     'repo/scripts/repo-ignore-hygiene.cjs', 'repo/scripts/repo-local-backup.cjs',
   ]) {
     const target = path.join(cache, ...relPath.split('/'));

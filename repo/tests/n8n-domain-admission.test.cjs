@@ -1,0 +1,338 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const n8n = require('../../skills/external-system-router/scripts/n8n-domain-router.cjs');
+const hook = require('../scripts/toolkit-claude-n8n-admission-hook.cjs');
+
+function sourceAttestation(skillName, overrides = {}) {
+  const contract = n8n.OFFICIAL_N8N_SKILLS_CONTRACT;
+  return {
+    verified: true,
+    stableCode: 'N8N_SKILL_SOURCE_VERIFIED',
+    skillName,
+    invokedName: `${contract.pluginNamespace}:${skillName}`,
+    packageId: contract.packageId,
+    packageVersion: contract.packageVersion,
+    sourceRepository: contract.sourceRepository,
+    sourceCommit: contract.sourceCommit,
+    compatibilityBaselineCommit: contract.compatibilityBaselineCommit,
+    compatibilityReference: contract.compatibilityOwner,
+    contentCompatibility: contract.contentCompatibility,
+    manifestBlob: contract.claudePluginManifestBlob,
+    skillBlob: n8n.OFFICIAL_N8N_SKILL_BLOBS[skillName],
+    sourceFingerprint: `sha256:${'a'.repeat(64)}`,
+    normalization: 'utf8-bom-stripped-crlf-to-lf-git-blob',
+    ...overrides
+  };
+}
+
+function record(ledger, skillName, overrides = {}) {
+  return n8n.recordSkillInvocation(ledger, {
+    invocationId: `invoke-${skillName}-${ledger.invocationEvidence.length}`,
+    skillName,
+    result: 'success',
+    sourceAttestation: sourceAttestation(skillName, overrides),
+    host: 'claude-toolkit-direct',
+    event: 'PostToolUse:Skill',
+    invokedAt: '2026-07-23T00:00:00.000Z'
+  });
+}
+
+function materialLedger(overrides = {}) {
+  return n8n.createN8nCapabilityLedger({
+    sessionId: 'session-286',
+    repositoryIdentity: 'repository-286',
+    objective: 'Edit the n8n workflow JSON and configure its nodes.',
+    operation: 'workflow-material-edit',
+    createdAt: '2026-07-23T00:00:00.000Z',
+    ...overrides
+  });
+}
+
+test('material n8n work detects intent, classifies the exact operation, and builds required official Skill ledger entries', () => {
+  const detected = n8n.detectN8nTask({ objective: 'Repair this n8n workflow JSON.' });
+  assert.equal(detected.detected, true);
+  const setupIntent = n8n.classifyN8nOperation({ objective: 'Set up n8n.' });
+  assert.equal(setupIntent.detected, true);
+  assert.equal(setupIntent.classificationRequired, true);
+  const classification = n8n.classifyN8nOperation({ objective: 'Edit this n8n workflow JSON.' });
+  assert.equal(classification.operation, 'workflow-material-edit');
+  const ledger = materialLedger();
+  const required = ledger.requiredCapabilities.map((entry) => entry.name);
+  assert.ok(required.includes('using-n8n-skills-official'));
+  assert.ok(required.includes('n8n-workflow-lifecycle-official'));
+  assert.ok(required.includes('n8n-node-configuration-official'));
+  assert.equal(n8n.auditN8nCompletion(ledger).complete, false);
+});
+
+test('failed, stale, malformed, unqualified, or ambiguous Skill attempts never satisfy the ledger', () => {
+  const ledger = materialLedger();
+  const skill = 'using-n8n-skills-official';
+  const failed = n8n.recordSkillInvocation(ledger, {
+    invocationId: 'failed-entry', skillName: skill, result: 'failed', sourceAttestation: sourceAttestation(skill)
+  });
+  assert.equal(failed.accepted, false);
+  const stale = record(ledger, skill, { packageVersion: '1.0.1' });
+  assert.equal(stale.accepted, false);
+  const malformed = n8n.recordSkillInvocation(ledger, {
+    invocationId: 'missing-source', skillName: skill, result: 'success', sourceAttestation: { verified: true, skillName: skill }
+  });
+  assert.equal(malformed.accepted, false);
+
+  const unqualified = n8n.attestClaudeOfficialSkillInvocation({ skillName: skill }, { pluginRecords: [] });
+  assert.equal(unqualified.verified, false);
+  assert.equal(unqualified.stableCode, 'N8N_SKILL_SOURCE_AMBIGUOUS');
+  const missing = n8n.attestClaudeOfficialSkillInvocation({ skillName: `n8n-skills:${skill}` }, { pluginRecords: [] });
+  assert.equal(missing.verified, false);
+  assert.equal(missing.stableCode, 'N8N_SKILL_SOURCE_AMBIGUOUS');
+});
+
+test('both exact reviewed 1.0.2 source commits satisfy evidence, while any other commit fails closed', () => {
+  const skill = 'using-n8n-skills-official';
+  for (const sourceCommit of n8n.OFFICIAL_N8N_SKILLS_CONTRACT.supportedSourceCommits) {
+    const result = record(materialLedger(), skill, { sourceCommit });
+    assert.equal(result.accepted, true, sourceCommit);
+  }
+  const unsupported = record(materialLedger(), skill, { sourceCommit: 'f'.repeat(40) });
+  assert.equal(unsupported.accepted, false);
+});
+
+test('official Skill attestation rejects a symlinked source path before reading content', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-skill-source-link-'));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-skill-source-outside-'));
+  fs.mkdirSync(path.join(outside, '.claude-plugin'), { recursive: true });
+  fs.writeFileSync(path.join(outside, '.claude-plugin', 'plugin.json'), '{}');
+  try {
+    fs.symlinkSync(path.join(outside, '.claude-plugin'), path.join(root, '.claude-plugin'), process.platform === 'win32' ? 'junction' : 'dir');
+  } catch (error) {
+    if (['EPERM', 'EACCES', 'ENOSYS'].includes(error.code)) return t.skip(`symlink creation is unavailable: ${error.code}`);
+    throw error;
+  }
+  const contract = n8n.OFFICIAL_N8N_SKILLS_CONTRACT;
+  const attestation = n8n.attestClaudeOfficialSkillInvocation(
+    { skillName: `${contract.pluginNamespace}:${contract.entryPoint}` },
+    { pluginRecords: [{ version: contract.packageVersion, gitCommitSha: contract.sourceCommit, installPath: root }] }
+  );
+  assert.equal(attestation.verified, false);
+  assert.equal(attestation.stableCode, 'N8N_SKILL_SOURCE_UNVERIFIED');
+});
+
+test('generic validator or mirrored workflow evidence cannot substitute for official Skills', () => {
+  const ledger = materialLedger();
+  const entry = ledger.requiredCapabilities.find((item) => item.kind === 'official-skill');
+  assert.throws(
+    () => n8n.recordCapabilityEvidence(ledger, { capabilityId: entry.capabilityId, result: 'verified', reference: 'test:generic-json-validator' }),
+    (error) => error.code === 'N8N_OFFICIAL_SKILL_INVOCATION_REQUIRED'
+  );
+  assert.equal(n8n.looksLikeN8nWorkflowMutation({
+    tool_name: 'Write',
+    tool_input: {
+      file_path: 'n8n-workflows/mirrored.json',
+      content: '{"nodes":[],"connections":{}}'
+    }
+  }), true);
+  assert.throws(
+    () => n8n.assertN8nMutationAdmitted(ledger, { toolName: 'Write' }),
+    (error) => error.code === 'N8N_CAPABILITY_MISSING' && /official-skill/.test(error.message)
+  );
+  assert.equal(n8n.looksLikeN8nWorkflowMutation({
+    tool_name: 'Write',
+    tool_input: { file_path: 'automation/workflow.json', content: '{"steps":[]}' }
+  }), false);
+  assert.equal(n8n.looksLikeN8nWorkflowMutation({
+    tool_name: 'PowerShell',
+    tool_input: { command: 'Get-Content n8n-workflows/example.json' }
+  }), false);
+});
+
+test('task-ledger capability and source-contract tampering fails closed', () => {
+  const missing = materialLedger();
+  missing.requiredCapabilities.pop();
+  assert.throws(() => n8n.validateN8nCapabilityLedger(missing), (error) => error.code === 'N8N_LEDGER_CAPABILITY_MISMATCH');
+
+  const stale = materialLedger();
+  stale.sourceContract = { ...stale.sourceContract, packageVersion: '1.0.1' };
+  assert.throws(() => n8n.validateN8nCapabilityLedger(stale), (error) => error.code === 'N8N_LEDGER_SOURCE_CONTRACT_MISMATCH');
+});
+
+test('workflow mutation is admitted only after every exact required official Skill invocation succeeds', () => {
+  let ledger = materialLedger();
+  for (const capability of ledger.requiredCapabilities.filter((entry) => entry.kind === 'official-skill')) {
+    const result = record(ledger, capability.name);
+    assert.equal(result.accepted, true, capability.name);
+    ledger = result.ledger;
+  }
+  assert.equal(n8n.auditN8nCompletion(ledger).complete, true);
+  assert.equal(n8n.assertN8nMutationAdmitted(ledger, { toolName: 'Write' }).admitted, true);
+
+  const reconciled = n8n.reconcileN8nCapabilityLedger(ledger, {
+    operation: 'workflow-material-edit',
+    evidenceText: '{"value":"={{ $json.body }}"}',
+    recordedAt: '2026-07-23T00:01:00.000Z'
+  });
+  assert.equal(reconciled.changed, true);
+  assert.equal(n8n.auditN8nCompletion(reconciled.ledger).missingCapability, 'official-skill:n8n-expressions-official');
+  assert.throws(() => n8n.assertN8nMutationAdmitted(reconciled.ledger, { toolName: 'Edit' }), (error) => error.code === 'N8N_CAPABILITY_MISSING');
+});
+
+test('helper/compiler and live operations require their own evidence and do not imply MCP', () => {
+  let helperLedger = n8n.createN8nCapabilityLedger({
+    sessionId: 'helper-session', repositoryIdentity: 'repo', objective: 'Compile this n8n workflow JSON.',
+    operation: 'workflow-compile', createdAt: '2026-07-23T00:00:00.000Z'
+  });
+  for (const capability of helperLedger.requiredCapabilities.filter((entry) => entry.kind === 'official-skill')) {
+    helperLedger = record(helperLedger, capability.name).ledger;
+  }
+  let audit = n8n.auditN8nCompletion(helperLedger);
+  assert.equal(audit.missingCapability, 'toolkit-helper:workflow-compile');
+  helperLedger = n8n.recordCapabilityEvidence(helperLedger, {
+    capabilityId: 'toolkit-helper:workflow-compile', result: 'verified', reference: 'receipt:compiler-synthetic'
+  });
+  assert.equal(n8n.auditN8nCompletion(helperLedger).complete, true);
+
+  const live = n8n.createN8nCapabilityLedger({
+    sessionId: 'live-session', repositoryIdentity: 'repo', objective: 'Update the live n8n workflow.',
+    operation: 'live-workflow-update', createdAt: '2026-07-23T00:00:00.000Z'
+  });
+  assert.ok(live.requiredCapabilities.some((entry) => entry.capabilityId === 'live-route:live-workflow-update'));
+  assert.ok(live.requiredCapabilities.some((entry) => entry.capabilityId === 'official-skill:using-n8n-skills-official'));
+  assert.equal(live.requiredCapabilities.some((entry) => /mcp/i.test(entry.capabilityId)), false);
+  assert.throws(() => n8n.recordCapabilityEvidence(live, {
+    capabilityId: 'live-route:live-workflow-update', result: 'verified', reference: 'test:generic-live-validator'
+  }), (error) => error.code === 'N8N_STRUCTURED_RECEIPT_REQUIRED');
+});
+
+test('Claude Toolkit-direct hook blocks writes, permits generic validation without credit, and unlocks only after attested Skill events', () => {
+  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-n8n-admission-'));
+  const base = {
+    session_id: 'claude-session-286',
+    cwd: 'C:/synthetic/repository',
+    timestamp: '2026-07-23T00:00:00.000Z'
+  };
+  const fakeRouter = {
+    ...n8n,
+    attestClaudeOfficialSkillInvocation({ skillName }) {
+      const normalized = n8n.normalizeSkillName(skillName);
+      return sourceAttestation(normalized, { invokedName: skillName });
+    }
+  };
+
+  const prompt = hook.handle({
+    ...base,
+    hook_event_name: 'UserPromptSubmit',
+    prompt: 'Edit this n8n workflow JSON.'
+  }, { router: fakeRouter, stateRoot });
+  assert.match(prompt.hookSpecificOutput.additionalContext, /missing official-skill:using-n8n-skills-official/);
+
+  const validator = hook.handle({
+    ...base,
+    hook_event_name: 'PreToolUse',
+    tool_name: 'Bash',
+    tool_input: { command: 'node scripts/validate-json.cjs n8n-workflows/example.json' }
+  }, { router: fakeRouter, stateRoot });
+  assert.deepEqual(validator, {});
+
+  const writeInput = {
+    ...base,
+    hook_event_name: 'PreToolUse',
+    tool_name: 'Write',
+    tool_input: { file_path: 'n8n-workflows/example.json', content: '{"nodes":[],"connections":{}}' }
+  };
+  const blocked = hook.handle(writeInput, { router: fakeRouter, stateRoot });
+  assert.equal(blocked.hookSpecificOutput.permissionDecision, 'deny');
+
+  const genericWrite = hook.handle({
+    ...base,
+    hook_event_name: 'PreToolUse',
+    tool_name: 'Edit',
+    tool_input: { file_path: 'automation/workflow.json', old_string: 'disabled', new_string: 'enabled' }
+  }, { router: fakeRouter, stateRoot });
+  assert.equal(genericWrite.hookSpecificOutput.permissionDecision, 'deny');
+
+  const opaqueShellWrite = hook.handle({
+    ...base,
+    hook_event_name: 'PreToolUse',
+    tool_name: 'PowerShell',
+    tool_input: { command: 'node scripts/change-file.cjs automation/workflow.json test', description: 'validate safely' }
+  }, { router: fakeRouter, stateRoot });
+  assert.equal(opaqueShellWrite.hookSpecificOutput.permissionDecision, 'deny');
+
+  let ledger = n8n.readTaskLedger(base, { stateRoot });
+  const entryPoint = ledger.requiredCapabilities.find((entry) => entry.name === 'using-n8n-skills-official');
+  hook.handle({
+    ...base,
+    hook_event_name: 'PostToolUse',
+    tool_name: 'Skill',
+    tool_use_id: 'tool-initial-entry-point',
+    tool_input: { skill: `n8n-skills:${entryPoint.name}` }
+  }, { router: fakeRouter, stateRoot });
+  hook.handle({
+    ...base,
+    hook_event_name: 'UserPromptSubmit',
+    prompt: 'Continue editing this n8n workflow and add error handling.'
+  }, { router: fakeRouter, stateRoot });
+  ledger = n8n.readTaskLedger(base, { stateRoot });
+  assert.equal(ledger.invocationEvidence.some((entry) => entry.invocationId === 'tool-initial-entry-point' && entry.accepted), true);
+  assert.equal(ledger.requiredCapabilities.some((entry) => entry.name === 'n8n-error-handling-official' && entry.status === 'pending'), true);
+
+  for (const capability of ledger.requiredCapabilities.filter((entry) => entry.kind === 'official-skill' && entry.status === 'pending')) {
+    hook.handle({
+      ...base,
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Skill',
+      tool_use_id: `tool-${capability.name}`,
+      tool_input: { skill: `n8n-skills:${capability.name}` }
+    }, { router: fakeRouter, stateRoot });
+  }
+  ledger = n8n.readTaskLedger(base, { stateRoot });
+  assert.equal(n8n.auditN8nCompletion(ledger).complete, true);
+  assert.deepEqual(hook.handle(writeInput, { router: fakeRouter, stateRoot }), {});
+});
+
+test('Claude completion audit blocks an incomplete n8n task and reports one supported next action', () => {
+  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-n8n-completion-'));
+  const input = { session_id: 'completion-session', cwd: 'C:/synthetic/repo', timestamp: '2026-07-23T00:00:00.000Z' };
+  hook.handle({ ...input, hook_event_name: 'UserPromptSubmit', prompt: 'Review this n8n workflow.' }, { router: n8n, stateRoot });
+  const completed = hook.handle({ ...input, hook_event_name: 'TaskCompleted' }, { router: n8n, stateRoot });
+  assert.equal(completed.exitCode, 2);
+  assert.equal(completed.toolkitCommandFailure, true);
+  assert.match(completed.stderr, /cannot be declared complete/);
+  assert.match(completed.stderr, /Invoke the official/);
+
+  const hookPath = path.join(__dirname, '..', 'scripts', 'toolkit-claude-n8n-admission-hook.cjs');
+  const emitted = require('node:child_process').spawnSync(process.execPath, ['-e', `require(${JSON.stringify(hookPath)}).emitHookResult({toolkitCommandFailure:true,exitCode:2,stderr:'synthetic completion denial'})`], { encoding: 'utf8' });
+  assert.equal(emitted.status, 2);
+  assert.match(emitted.stderr, /synthetic completion denial/);
+  assert.equal(emitted.stdout, '');
+});
+
+test('Claude fallback blocks n8n Stop/completion when the admission router cannot be verified', () => {
+  const decision = hook.fallbackDecision({
+    hook_event_name: 'Stop',
+    last_assistant_message: 'The n8n workflow JSON task is complete.'
+  }, new Error('synthetic missing router'));
+  assert.equal(decision.decision, 'block');
+  assert.match(decision.reason, /missing toolkit:n8n-domain-router/);
+  assert.match(decision.reason, /Restore the verified current Toolkit n8n domain router/);
+  const completion = hook.fallbackDecision({ hook_event_name: 'TaskCompleted', task_subject: 'Complete n8n workflow JSON work.' }, new Error('private path must not appear'));
+  assert.equal(completion.exitCode, 2);
+  assert.match(completion.stderr, /missing toolkit:n8n-domain-router/);
+  assert.doesNotMatch(JSON.stringify(completion), /private path/);
+});
+
+test('task-local ledger is bound to one session and repository and records no private absolute source path', () => {
+  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-n8n-state-'));
+  const binding = { session_id: 'bound-session', cwd: 'C:/synthetic/repo' };
+  let ledger = materialLedger({ sessionId: binding.session_id, repositoryIdentity: binding.cwd });
+  ledger = record(ledger, 'using-n8n-skills-official').ledger;
+  n8n.writeTaskLedger(binding, ledger, { stateRoot });
+  const stored = fs.readFileSync(n8n.stateFileFor(binding, { stateRoot }), 'utf8');
+  assert.doesNotMatch(stored, /Users|\\synthetic\\repo|C:\\/i);
+  const different = { session_id: 'different-session', cwd: binding.cwd };
+  fs.copyFileSync(n8n.stateFileFor(binding, { stateRoot }), n8n.stateFileFor(different, { stateRoot }));
+  assert.throws(() => n8n.readTaskLedger(different, { stateRoot }), (error) => error.code === 'N8N_LEDGER_BINDING_MISMATCH');
+});

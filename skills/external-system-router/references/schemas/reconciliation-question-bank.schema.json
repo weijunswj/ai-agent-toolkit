@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/weijunswj/ai-agent-toolkit/schemas/external-system/reconciliation-question-bank.v1.json",
+  "title": "External Capability Reconciliation Question Bank",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "contextDigest", "questions", "questionBankDigest"],
+  "properties": {
+    "schemaVersion": {"const": "ai-agent-toolkit.external-reconciliation-question-bank.v1"},
+    "contextDigest": {"$ref": "#/$defs/digest"},
+    "questions": {
+      "type": "array", "minItems": 20, "maxItems": 20,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["id", "prompt", "required"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1, "maxLength": 80},
+          "prompt": {"type": "string", "minLength": 1, "maxLength": 300},
+          "required": {"const": true}
+        }
+      }
+    },
+    "questionBankDigest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {"digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}}
+}

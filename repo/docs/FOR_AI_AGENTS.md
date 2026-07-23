@@ -43,7 +43,8 @@ Use installed skills only when they clearly match the task and improve correctne
 | --- | --- |
 | `ai-coding-agent-rules` | Generic execution-first `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` rule templates. |
 | `toolkit-setup` | AI Agent Toolkit plugin setup or refresh, Toolkit Local Bridge setup or troubleshooting, repo-backed Toolkit auto-update, OpenCode bridge support, AG2 adapter support, bridge audit, enabled-target sync, disable, stale bridge state, native Codex or Claude Code plugin update behavior, Windows hook repair, or bridge setup safety. |
-| `n8n-agent-rules` | Any n8n task, including [official n8n Skills](https://github.com/n8n-io/skills), their entry-point meta-skill currently named `using-n8n-skills`, workflow JSON, official n8n MCP, `n8n_live`, workflow creation or updates, helper scripts, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, or n8n safety. |
+| `external-system-router` | Provider APIs/CLIs/SDKs, MCP or typed connectors, provider-console graphical control, deployment, DNS, database, storage, workflow, OAuth, external-system setup, capability selection, receipts, or supported continuation. |
+| `n8n-agent-rules` | Any n8n task, including [official n8n Skills](https://github.com/n8n-io/skills), their entry-point meta-skill currently named `using-n8n-skills-official`, workflow JSON, official n8n MCP, `n8n_live`, workflow creation or updates, helper scripts, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, or n8n safety. |
 | `n8n-local-setup` | Safe n8n environment setup with the localhost/ngrok dev stack, the separate production Cloudflare Tunnel self-hosting stack for local/CGNAT machines, hosted n8n Hostinger Coolify VPS notes, stack templates, [official n8n Skills](https://github.com/n8n-io/skills) setup, official instance-level MCP config selection, or platform-specific n8n agent-rule setup. |
 | `n8n-workflow-helper-scripts` | Safe n8n workflow import/export hygiene, template sanitation, credential safety, validation, comparison, and repo/live sync planning. |
 | `n8n-workflow-templates` | Public generic inactive n8n workflow JSON templates. |
@@ -66,7 +67,7 @@ Use installed skills only when they clearly match the task and improve correctne
 - When changing skill names, `SKILL.md` frontmatter, or descriptions, update README skill tables when applicable, the routing partial, and generated AGENTS/CLAUDE/GEMINI equivalents.
 - When a new skill should not be auto-routed, document why it is intentionally omitted from routing.
 - Do not let the routing table become stale relative to current `skills/*/SKILL.md`.
-- For OpenAI/Codex packaged metadata, keep implicit invocation sparse. The intentional implicit skills are `toolkit-setup`, `n8n-agent-rules`, and `agent-skill-supply-chain-audit`; broad, heavy, production-sensitive, or companion skills should be explicit-only unless a future safety-router review documents otherwise. Native plugin `interface.defaultPrompt` should stay at three or fewer strong starter prompts.
+- For OpenAI/Codex packaged metadata, keep implicit invocation sparse. The intentional implicit skills are `toolkit-setup`, `external-system-router`, `n8n-agent-rules`, and `agent-skill-supply-chain-audit`; the router is implicit only as a safety gate and is not a generic executor. Broad, heavy, production-sensitive, or companion skills should be explicit-only unless a future safety-router review documents otherwise. Native plugin `interface.defaultPrompt` should stay at three or fewer strong starter prompts.
 
 ## Skill Creation Center
 

@@ -14,6 +14,8 @@ const PLUGIN_MANIFEST_REL_PATH = '.claude-plugin/plugin.json';
 const MARKETPLACE_REL_PATH = '.claude-plugin/marketplace.json';
 const DEFAULT_SCOPE = 'user';
 const VALID_SCOPES = ['user', 'project', 'local'];
+const N8N_ADMISSION_HOOK_COMMAND = 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-n8n-admission-hook.cjs"';
+const N8N_MUTATION_MATCHER = 'Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell';
 
 function slash(value) {
   return String(value || '').replace(/\\/g, '/');
@@ -161,6 +163,21 @@ function verifySessionStartHook(hooksPath) {
   if (!agentCommands.some((command) => command.includes('${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-agent-hook.cjs'))) {
     errors.push('PreToolUse Agent hook must call toolkit-claude-agent-hook.cjs through CLAUDE_PLUGIN_ROOT');
   }
+  const requiresExactHook = (eventName, matcher, label) => {
+    const groups = hooks?.hooks?.[eventName];
+    const exact = Array.isArray(groups) && groups.some((group) => (
+      (matcher === null || group?.matcher === matcher)
+      && Array.isArray(group?.hooks)
+      && group.hooks.some((hook) => hook?.type === 'command' && hook.command === N8N_ADMISSION_HOOK_COMMAND)
+    ));
+    if (!exact) errors.push(`${label} must call the exact Toolkit n8n admission hook through CLAUDE_PLUGIN_ROOT`);
+  };
+  requiresExactHook('PreToolUse', N8N_MUTATION_MATCHER, 'PreToolUse governed-mutation hook');
+  requiresExactHook('PostToolUse', 'Skill', 'PostToolUse Skill evidence hook');
+  requiresExactHook('UserPromptSubmit', null, 'UserPromptSubmit n8n intent hook');
+  requiresExactHook('UserPromptExpansion', null, 'UserPromptExpansion direct-Skill disclosure hook');
+  requiresExactHook('TaskCompleted', null, 'TaskCompleted n8n completion hook');
+  requiresExactHook('Stop', null, 'Stop n8n completion hook');
   return errors;
 }
 
@@ -218,7 +235,13 @@ function validateRepoPluginSource(repoRoot, expectedVersion = '') {
   for (const relPath of ['repo/scripts/repo-ignore-hygiene.cjs', 'repo/scripts/repo-local-backup.cjs']) {
     if (!fs.existsSync(path.join(repoRoot, ...relPath.split('/')))) errors.push(`Missing repo-local safety package file: ${relPath}`);
   }
-  for (const relPath of ['repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/toolkit-claude-agent-hook.cjs', 'repo/scripts/toolkit-local-bridge.cjs']) {
+  for (const relPath of [
+    'repo/scripts/toolkit-agent-control.cjs',
+    'repo/scripts/toolkit-claude-agent-hook.cjs',
+    'repo/scripts/toolkit-claude-n8n-admission-hook.cjs',
+    'repo/scripts/toolkit-local-bridge.cjs',
+    'skills/external-system-router/scripts/n8n-domain-router.cjs',
+  ]) {
     if (!fs.existsSync(path.join(repoRoot, ...relPath.split('/')))) errors.push(`Missing Claude agent-control package file: ${relPath}`);
   }
 
@@ -241,7 +264,9 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ['repo/scripts/toolkit-agent-control.cjs', false],
     ['repo/scripts/claude-process-launch.cjs', false],
     ['repo/scripts/toolkit-claude-agent-hook.cjs', false],
+    ['repo/scripts/toolkit-claude-n8n-admission-hook.cjs', false],
     ['repo/scripts/toolkit-local-bridge.cjs', false],
+    ['skills/external-system-router/scripts/n8n-domain-router.cjs', false],
     ['repo/scripts/repo-ignore-hygiene.cjs', false],
     ['repo/scripts/repo-local-backup.cjs', false],
   ];
@@ -268,11 +293,8 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     if (json && relPath.endsWith('hooks.json')) {
       try {
         const hooks = JSON.parse(installedBytes.toString('utf8'));
-        const groups = hooks?.hooks?.PreToolUse;
-        const exact = Array.isArray(groups) && groups.some((group) => group?.matcher === 'Agent|Task'
-          && Array.isArray(group.hooks) && group.hooks.some((hook) => hook?.type === 'command'
-            && hook.command === 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-agent-hook.cjs"'));
-        if (!exact) errors.push('installed plugin cache lacks the exact Agent|Task PreToolUse Toolkit hook');
+        const hookErrors = verifySessionStartHook(installedFile);
+        errors.push(...hookErrors.map((error) => `installed plugin cache ${error}`));
       } catch { errors.push('installed plugin hooks are invalid'); }
     }
   }
@@ -285,12 +307,14 @@ function installedActivationProof(installed, expectedVersion) {
   const controllerPath = path.join(cachePath, 'repo', 'scripts', 'toolkit-agent-control.cjs');
   const processLaunchPath = path.join(cachePath, 'repo', 'scripts', 'claude-process-launch.cjs');
   const agentHookPath = path.join(cachePath, 'repo', 'scripts', 'toolkit-claude-agent-hook.cjs');
-  for (const filePath of [hookPath, controllerPath, processLaunchPath, agentHookPath]) {
+  const n8nAdmissionHookPath = path.join(cachePath, 'repo', 'scripts', 'toolkit-claude-n8n-admission-hook.cjs');
+  const n8nDomainRouterPath = path.join(cachePath, 'skills', 'external-system-router', 'scripts', 'n8n-domain-router.cjs');
+  for (const filePath of [hookPath, controllerPath, processLaunchPath, agentHookPath, n8nAdmissionHookPath, n8nDomainRouterPath]) {
     const stat = fs.lstatSync(filePath);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Installed Claude enforcement path is not a regular file.');
   }
   return {
-    schema: 3,
+    schema: 4,
     source: 'claude-plugin-list',
     plugin_version: expectedVersion,
     cache_identity: crypto.createHash('sha256').update(cachePath).digest('hex'),
@@ -298,11 +322,24 @@ function installedActivationProof(installed, expectedVersion) {
     controller_sha256: crypto.createHash('sha256').update(fs.readFileSync(controllerPath)).digest('hex'),
     process_launch_sha256: crypto.createHash('sha256').update(fs.readFileSync(processLaunchPath)).digest('hex'),
     agent_hook_sha256: crypto.createHash('sha256').update(fs.readFileSync(agentHookPath)).digest('hex'),
+    n8n_admission_hook_sha256: crypto.createHash('sha256').update(fs.readFileSync(n8nAdmissionHookPath)).digest('hex'),
+    n8n_domain_router_sha256: crypto.createHash('sha256').update(fs.readFileSync(n8nDomainRouterPath)).digest('hex'),
   };
 }
 
 function sameActivationProof(left, right) {
-  return ['schema', 'source', 'plugin_version', 'cache_identity', 'hook_sha256', 'controller_sha256', 'process_launch_sha256', 'agent_hook_sha256']
+  return [
+    'schema',
+    'source',
+    'plugin_version',
+    'cache_identity',
+    'hook_sha256',
+    'controller_sha256',
+    'process_launch_sha256',
+    'agent_hook_sha256',
+    'n8n_admission_hook_sha256',
+    'n8n_domain_router_sha256',
+  ]
     .every((key) => left?.[key] === right?.[key]);
 }
 

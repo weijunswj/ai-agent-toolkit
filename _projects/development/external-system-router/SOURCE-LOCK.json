@@ -1,0 +1,11 @@
+{
+  "source_repo": "weijunswj/ai-agent-toolkit",
+  "source_ref": "first-party-authored",
+  "source_commit": "97ce5306fc9c6bc438173bcb6cbca6e684077de5",
+  "source_lifecycle": "retired_after_migration",
+  "source_role": "migration_provenance_only",
+  "source_update_policy": "none",
+  "public_attribution_required": false,
+  "notes": "First-party Toolkit source for TK-022. Official vendor documentation informed factual contracts only; no vendor code, schemas, credentials, private account material, provider output, or live state is copied or adapted. The n8n admission adapter pins source identities and Git blob digests, not copied upstream content; #244 remains the compatibility owner.",
+  "files": []
+}

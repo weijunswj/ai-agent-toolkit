@@ -5,9 +5,9 @@
   "title": "Local n8n Setup",
   "module_path": "_projects/n8n/local-setup",
   "main_path": "_projects/n8n/local-setup/_main",
-  "version": "4.0.3",
+  "version": "4.0.4",
   "version_policy": "semver",
-  "version_notes": "Removes automatic Docker Desktop installation and relaunch machinery, and amends the missing-Docker prerequisite pause to exit explicitly after one Enter while retaining manual guidance, installed-Docker startup, and production readiness gating.",
+  "version_notes": "Aligns every host setup reference with the current official n8n Skills entry point while keeping Skills and live MCP as separate capabilities.",
   "outputs": [
     {
       "kind": "curated",

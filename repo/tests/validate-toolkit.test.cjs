@@ -96,15 +96,11 @@ const curatedRepoLocalSafetyComment = [
   '-->'
 ].join('\n');
 
-function managedRepoLocalPayload(executionPrompt, n8nAdapter) {
+function managedRepoLocalPayload(executionPrompt) {
   return [
     '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->',
     executionPrompt.trimEnd(),
     '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:END GLOBAL-AGENTS.MD-TEMPLATE -->',
-    '',
-    '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->',
-    n8nAdapter.trimEnd(),
-    '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:END N8N-AGENT-RULES-ADAPTER -->',
     ''
   ].join('\n');
 }
@@ -516,13 +512,13 @@ test('Toolkit plugin packaged version surfaces stay aligned', () => {
   const bridgePath = path.join(cwd, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
   fs.writeFileSync(
     bridgePath,
-    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.8.2';", "const BRIDGE_VERSION = '2.2.1';"),
+    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.9.0';", "const BRIDGE_VERSION = '2.2.1';"),
     'utf8'
   );
 
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.8\.2/i);
+  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.9\.0/i);
 });
 
 test('skill discovery includes migrated skills', () => {
@@ -556,6 +552,7 @@ test('project manifests include the current project modules without repo-wide MC
     'design.google-design-md',
     'design.ui-ux-pro-max',
     'development.ai-coding-agent-rules',
+    'development.external-system-router',
     'development.hostinger-coolify-production-guide',
     'development.local-ai-stack-safety',
     'development.managed-app-foundation-review',
@@ -1674,7 +1671,6 @@ test('validator flags workspace-relative design generator commands in published 
 
 test('generated agent-rule templates keep manual global and repo-local lanes separate', () => {
   const executionPrompt = readTextFile(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', '_partials', 'ai-coding-agent-execution.md')).trimEnd();
-  const n8nAdapter = readTextFile(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', '_partials', 'n8n-agent-rules-adapter.md')).trimEnd();
 
   for (const rel of [
     '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
@@ -1691,7 +1687,7 @@ test('generated agent-rule templates keep manual global and repo-local lanes sep
 
   const withSafetyComment = (payload) => `${curatedRepoLocalSafetyComment}\n\n${payload}`;
   const expectedPayloads = new Map([
-    ['AGENTS.managed.template.md', withSafetyComment(managedRepoLocalPayload(executionPrompt, n8nAdapter))],
+    ['AGENTS.managed.template.md', withSafetyComment(managedRepoLocalPayload(executionPrompt))],
     ['CLAUDE.shim.template.md', withSafetyComment(readTextFile(path.join(repoRoot, 'CLAUDE.md')))],
     ['GEMINI.shim.template.md', withSafetyComment(readTextFile(path.join(repoRoot, 'GEMINI.md')))],
     ['antigravity-bootstrap.template.md', withSafetyComment(readTextFile(path.join(repoRoot, '.agents', 'rules', '00-agent-toolkit-bootstrap.md')))]

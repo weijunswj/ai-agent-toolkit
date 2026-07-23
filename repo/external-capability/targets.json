@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "ai-agent-toolkit.external-capability-drift-config.v1",
+  "targets": [
+    {
+      "key": "official-n8n-skills-main",
+      "kind": "upstream-release",
+      "mode": "git-public-ref-sha256",
+      "repository": "https://github.com/n8n-io/skills.git",
+      "ref": "refs/heads/main",
+      "expectedDigest": "sha256:db5dc9bd2384bb9f113063c601f8e2008ccbf59cf24daae11e652d416dc1eebd",
+      "publicReference": "https://github.com/n8n-io/skills/tree/eb18fc3ab3e2820c748c2d84386fb5496efc1516"
+    },
+    {
+      "key": "external-system-router-version",
+      "kind": "adapter-version",
+      "path": "_projects/development/external-system-router/toolkit.project.json",
+      "mode": "json-value-sha256",
+      "jsonPointer": "/version",
+      "expectedDigest": "sha256:92521fc3cbd964bdc9f584a991b89fddaa5754ed1cc96d6d42445338669c1305",
+      "publicReference": "https://github.com/weijunswj/ai-agent-toolkit/tree/main/_projects/development/external-system-router"
+    },
+    {
+      "key": "consumer-requirements-schema",
+      "kind": "repository-requirement",
+      "path": "_projects/development/external-system-router/_main/skill/references/schemas/consumer-requirements.schema.json",
+      "mode": "json-value-sha256",
+      "jsonPointer": "/properties/schemaVersion/const",
+      "expectedDigest": "sha256:09758fd5e14b628b14183df19486e016e2364aaa6c771b7707fbd36c162b7ac9",
+      "publicReference": "https://github.com/weijunswj/ai-agent-toolkit/tree/main/skills/external-system-router"
+    },
+    {
+      "key": "external-router-source-lock",
+      "kind": "source-lock",
+      "path": "_projects/development/external-system-router/SOURCE-LOCK.json",
+      "mode": "json-value-sha256",
+      "jsonPointer": "/source_commit",
+      "expectedDigest": "sha256:5e58c4304297103f7a2db911605ebbe40fa15d07ed0421da31ea47afeb86c019",
+      "publicReference": "https://github.com/weijunswj/ai-agent-toolkit/blob/main/_projects/development/external-system-router/SOURCE-LOCK.json"
+    },
+    {
+      "key": "external-router-capability-audit",
+      "kind": "stale-audit",
+      "lastAuditedAt": "2026-07-23T00:00:00.000Z",
+      "maxAgeHours": 720,
+      "expectedDigest": "sha256:1c2ecabb9896f2568b2a41c51c9ffc82320b2e239b26f7bba6902e96d90afea6",
+      "publicReference": "https://github.com/weijunswj/ai-agent-toolkit/issues/286"
+    }
+  ]
+}

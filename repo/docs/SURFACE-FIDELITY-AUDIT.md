@@ -1,7 +1,7 @@
 # Surface Fidelity Audit
 
 Date: 2026-05-18
-Latest update: 2026-07-09 (adds the portable docs-governance playbook to the generated ai-coding-agent-rules repo-local playbook set)
+Latest update: 2026-07-23 (adds the first-party external-system router as an exact `_main`-published skill surface)
 
 ## Current state
 
@@ -27,9 +27,9 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 
 | Metric | Current value |
 | --- | ---: |
-| projects | 16 |
-| publishedFiles | 236 |
-| declaredOutputFiles | 236 |
+| projects | 17 |
+| publishedFiles | 256 |
+| declaredOutputFiles | 256 |
 | packInstalledFiles | 84 |
 | undeclaredPublishedFiles | 0 |
 | packInstalledUndeclared | 0 |
@@ -38,7 +38,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | sharedSurfaceMetadataFindings | 0 |
 | suspiciousPublishedSurfaces | 0 |
 | duplicateProjectContentGroups | 0 |
-| boundaryRecipeOutputs | 236 |
+| boundaryRecipeOutputs | 256 |
 | boundaryRecipeFindings | 0 |
 | curatedDirectoryFindings | 1 |
 
@@ -46,7 +46,7 @@ Current published-file classifications:
 
 | Classification | Count |
 | --- | ---: |
-| declared_generated | 152 |
+| declared_generated | 172 |
 | pack_installed_declared | 84 |
 
 Current boundary recipe classifications:
@@ -64,7 +64,7 @@ Current boundary recipe classifications:
 | curated_template | 2 |
 | curated_template_index | 7 |
 | generated_cross_skill_reference | 3 |
-| main_full_fidelity | 174 |
+| main_full_fidelity | 194 |
 
 Known baseline context:
 
@@ -78,6 +78,7 @@ Known baseline context:
 - `_projects/design/google-design-md`
 - `_projects/design/ui-ux-pro-max`
 - `_projects/development/ai-coding-agent-rules`
+- `_projects/development/external-system-router`
 - `_projects/development/local-ai-stack-safety`
 - `_projects/development/managed-app-foundation-review`
 - `_projects/development/project-completion-audit`
@@ -97,6 +98,7 @@ Known baseline context:
 - `skills/ai-coding-agent-rules/`
 - `skills/context-preserving-ai-publisher/`
 - `skills/codex-ssh-hostinger-coolify-setup-maintainer/`
+- `skills/external-system-router/`
 - `skills/knowledge-index-updater/`
 - `skills/local-ai-stack-safety/`
 - `skills/managed-app-foundation-review/`

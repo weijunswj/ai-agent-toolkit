@@ -8,13 +8,26 @@ They also apply when using [official n8n Skills](https://github.com/n8n-io/skill
 
 For non-n8n tasks, prefer the current user request and local project files first. Do not use n8n MCP tools unless they clearly help.
 
-## MCP routing
+## Mandatory fail-closed domain admission
 
-Use [official n8n Skills](https://github.com/n8n-io/skills) first, then use the official n8n MCP tools that are actually available in the connected instance. Start by loading the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`, when [official n8n Skills](https://github.com/n8n-io/skills) are available.
+Every material n8n task must enter the n8n domain router before work begins. Detect n8n from the active objective plus bounded repository/task evidence, classify one exact operation, and create a task-local capability ledger bound to the session and repository.
 
-If the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill is unavailable, report that [official n8n Skills](https://github.com/n8n-io/skills) are not installed or not available in the session. Do not invent a fallback route or pretend the current entry-point skill exists.
+For workflow design, creation, material editing, repair, review, node configuration, expressions, or workflow JSON/SDK structure, the ledger must record successful loading of:
 
-Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities. When validation or build tools are available, use them before proposing or performing live-instance changes. If a needed MCP capability is unavailable, report the gap and do not invent fallback behaviour.
+- the current [official n8n Skills](https://github.com/n8n-io/skills) entry point, `using-n8n-skills-official`; and
+- every specialised official Skill relevant to the classified operation and detected workflow facets.
+
+A Skill attempt counts only when the host records a successful invocation and exact reviewed source/package/version evidence in the task ledger. Missing, failed, malformed, ambiguous, unqualified, or stale Skill calls do not count. Existing workflow examples, model knowledge, mirrored workflow patterns, generic JSON validation, and repository tests never substitute for required official Skills.
+
+If any required Skill or capability is unavailable, fail closed. Report the exact missing capability and exactly one supported next action. Do not continue through an improvised fallback. Before completion, audit the ledger: every required Skill, Toolkit helper/compiler operation, or approved live route must be verified, explicitly blocked, or proven unnecessary as the capability contract permits.
+
+The logical admission policy is host-neutral. Toolkit-direct Claude Code can enforce governed `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Bash`, and PowerShell mutations through reviewed `PreToolUse`/`PostToolUse`/completion hooks. Do not claim equivalent Codex hook enforcement unless separately proven; Codex must still follow the policy and report its enforcement boundary truthfully.
+
+## Capability and transport routing
+
+Official n8n Skills supply workflow, node, expression, and structure guidance. They do not install or imply MCP. Route canonical import/export, prepare-import, effective-payload comparison, and compiler work through the supported Toolkit helper family. Route live operations through the strongest admissible operation-specific structured interface selected by `external-system-router` under the task-authorisation envelope. A live read-only MCP must not block an admissible official API write, and mandatory n8n routing does not mean mandatory MCP.
+
+Discover available n8n structured interfaces before relying on validation, build, update, execution, or inspection capabilities. When a needed capability is unavailable, report the exact gap and do not invent fallback behaviour.
 
 Use [official n8n Skills](https://github.com/n8n-io/skills), documentation, or available MCP tools first for n8n workflow design and workflow JSON work, including:
 
@@ -27,7 +40,7 @@ Use [official n8n Skills](https://github.com/n8n-io/skills), documentation, or a
 - Validating workflow structure.
 - Confirming current n8n node behaviour.
 
-When both [official n8n Skills](https://github.com/n8n-io/skills) and `n8n_live` are available, use the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`, first. Then use the available n8n MCP inspection, validation, or build tools before `n8n_live` for workflow design, node configuration, expression syntax, and validation when those capabilities exist. Use `n8n_live` only for explicitly requested live-instance inspection or mutation.
+When both [official n8n Skills](https://github.com/n8n-io/skills) and a live interface are available, satisfy the entry-point and relevant specialised-Skill ledger first. Then use only the operation-specific live route selected under the authorisation envelope. Use a live interface only for explicitly requested live-instance inspection or mutation.
 
 Do not use n8n Skills, documentation, or available MCP workflow tools for:
 
@@ -71,7 +84,7 @@ Discover available n8n MCP tools before relying on validation, build, update, ex
 
 If a needed MCP capability is unavailable, report the gap and do not invent fallback behaviour.
 
-When an expected tool is unavailable, use [official n8n Skills](https://github.com/n8n-io/skills) or local repo validation only when those paths actually cover the gap, and clearly state the limitation.
+When an expected capability is unavailable, fail closed for any operation that requires it. Official Skills, Toolkit helpers, repository validation, and live transports are distinct capabilities; none may be credited as a substitute for another.
 
 Some n8n MCP capabilities are version-dependent. If a task depends on a specific capability, confirm tool availability before using it.
 

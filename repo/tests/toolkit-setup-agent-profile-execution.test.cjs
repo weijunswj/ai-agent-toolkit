@@ -39,7 +39,15 @@ function runInteractive(root, args, options = {}) {
     windowsHide: true,
   });
 }
-test('ordinary interactive topology selection keeps visible direct and derives automatic capacity', () => {
+
+function requireHostResourceCounters(t) {
+  if (control.inspectResourceCapability().supported) return true;
+  t.skip('validated host resource counters are unavailable; counter-loss fail-closed behavior is covered separately');
+  return false;
+}
+
+test('ordinary interactive topology selection keeps visible direct and derives automatic capacity', (t) => {
+  if (!requireHostResourceCounters(t)) return;
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const fake = recordingClaude(root);
@@ -63,7 +71,8 @@ test('ordinary interactive topology selection keeps visible direct and derives a
   assert.equal(sessions.filter((entry) => entry.args.includes('--print')).every((entry) => entry.capabilityProbe === '1'), true);
 });
 
-test('ordinary complete piped answers keep visible direct and derive automatic capacity', () => {
+test('ordinary complete piped answers keep visible direct and derive automatic capacity', (t) => {
+  if (!requireHostResourceCounters(t)) return;
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const fake = recordingClaude(root);
@@ -89,7 +98,8 @@ test('ordinary complete piped answers keep visible direct and derive automatic c
   assert.equal(sessions.filter((entry) => entry.args.includes('--print')).every((entry) => entry.capabilityProbe === '1'), true);
 });
 
-test('Claude recommended execution writes only the enforceable direct automatic profile', () => {
+test('Claude recommended execution writes only the enforceable direct automatic profile', (t) => {
+  if (!requireHostResourceCounters(t)) return;
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const fakeClaude = path.join(root, 'fake-claude.cjs');
@@ -119,7 +129,8 @@ test('Claude recommended execution writes only the enforceable direct automatic 
   assert.equal(fs.existsSync(codexConfig(root)), false);
 });
 
-test('keep current preserves compatible direct automatic and manual capacity without a hidden flag', () => {
+test('keep current preserves compatible direct automatic and manual capacity without a hidden flag', (t) => {
+  if (!requireHostResourceCounters(t)) return;
   for (const expectedMode of [control.CAPACITY_MODES.AUTO, control.CAPACITY_MODES.MANUAL]) {
     const root = tmpRoot();
     const { origin, setupRepo } = createGitBackedSetupRepo(root);
@@ -165,7 +176,8 @@ test('keep current preserves compatible direct automatic and manual capacity wit
   }
 });
 
-test('kept strict profile is invalidated after current enforcement capability disappears', () => {
+test('kept strict profile is invalidated after current enforcement capability disappears', (t) => {
+  if (!requireHostResourceCounters(t)) return;
   const root = tmpRoot();
   const { origin, setupRepo } = createGitBackedSetupRepo(root);
   const fakeClaude = path.join(root, 'fake-claude.cjs');

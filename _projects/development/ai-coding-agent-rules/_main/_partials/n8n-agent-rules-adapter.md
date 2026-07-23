@@ -1,5 +1,7 @@
 ## n8n Agent Rules Adapter
 
-If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, stop and load `skills/n8n-agent-rules` before planning or editing.
+If active intent or bounded repository/task evidence involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, nodes, expressions, SDK structure, or workflow JSON, stop and enter the mandatory fail-closed n8n domain router before planning or editing.
 If that skill or its full rules are unavailable, stop and report the limitation instead of continuing.
+Classify the exact operation and build the task-local n8n capability ledger. Material workflow design, creation, editing, repair, review, node configuration, expressions, or JSON/SDK structure requires successful invocation evidence for the current official `using-n8n-skills-official` entry point plus every relevant specialised official Skill. Existing workflow examples, model knowledge, mirrored patterns, generic JSON validation, and repository tests are never substitutes. If required evidence is unavailable, report the exact missing capability and one supported next action; do not mutate workflow material or declare completion.
+Use Toolkit helpers for canonical import/export/compiler work and the authorisation-envelope router for live operations. Mandatory routing does not imply mandatory MCP.
 Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, credential, deployment, or production actions without explicit current-turn approval naming the target and allowed operation.

@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "version_policy": "semver",
-  "version_notes": "Adopts the canonical underscore-prefixed repo-local backup and exact restore contract while retaining read-only legacy backup recognition.",
+  "version_notes": "Adds risk-scoped external-system routing, dynamic domain markers, and mandatory fail-closed n8n capability admission with exact official Skill evidence.",
   "outputs": [
     {
       "kind": "curated",

@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/weijunswj/ai-agent-toolkit/schemas/external-system/graphical-control-disclosure.v1.json",
+  "title": "Universal Graphical-Control Informed Disclosure",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "goal", "capability", "browserProfileOrApplication", "origin", "accountOrOrganisation", "project",
+    "environment", "resource", "structuredInterfacesInsufficientReason", "mayRead", "mayClick", "mayType",
+    "mayUpload", "mayDownload", "mayChange", "mayEncounter", "exposureRisks", "forbiddenScope", "expectedResult",
+    "verification", "rollbackOrSafeDisable"
+  ],
+  "properties": {
+    "goal": {"$ref": "#/$defs/statement"},
+    "capability": {"enum": ["browser", "chrome", "computer-use", "accessibility", "ui-automation", "screenshot-driven-control", "desktop-automation", "file-picker", "ui-clipboard", "graphical-control"]},
+    "browserProfileOrApplication": {"$ref": "#/$defs/statement"},
+    "origin": {"type": "string", "minLength": 1, "maxLength": 300, "pattern": "^(https://|local-registry://)"},
+    "accountOrOrganisation": {"$ref": "#/$defs/alias"},
+    "project": {"$ref": "#/$defs/alias"},
+    "environment": {"$ref": "#/$defs/alias"},
+    "resource": {"$ref": "#/$defs/alias"},
+    "structuredInterfacesInsufficientReason": {"$ref": "#/$defs/statement"},
+    "mayRead": {"$ref": "#/$defs/list"},
+    "mayClick": {"$ref": "#/$defs/list"},
+    "mayType": {"$ref": "#/$defs/list"},
+    "mayUpload": {"$ref": "#/$defs/list"},
+    "mayDownload": {"$ref": "#/$defs/list"},
+    "mayChange": {"$ref": "#/$defs/list"},
+    "mayEncounter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["credentials", "cookies", "browserHistory", "downloads", "clipboard", "customerOrPrivateData", "unrelatedWindows"],
+      "properties": {
+        "credentials": {"type": "boolean"},
+        "cookies": {"type": "boolean"},
+        "browserHistory": {"type": "boolean"},
+        "downloads": {"type": "boolean"},
+        "clipboard": {"type": "boolean"},
+        "customerOrPrivateData": {"type": "boolean"},
+        "unrelatedWindows": {"type": "boolean"}
+      }
+    },
+    "exposureRisks": {"$ref": "#/$defs/list"},
+    "forbiddenScope": {"$ref": "#/$defs/list"},
+    "expectedResult": {"$ref": "#/$defs/statement"},
+    "verification": {"$ref": "#/$defs/list"},
+    "rollbackOrSafeDisable": {"$ref": "#/$defs/list"}
+  },
+  "$defs": {
+    "statement": {"type": "string", "minLength": 1, "maxLength": 500},
+    "alias": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"},
+    "list": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1, "maxLength": 300}}
+  }
+}

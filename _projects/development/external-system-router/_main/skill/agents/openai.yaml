@@ -1,0 +1,6 @@
+interface:
+  display_name: "External System Router"
+  short_description: "Risk-scoped provider operation routing"
+  default_prompt: "Route this exact external-system objective through a task authorisation envelope and the strongest admissible operation-specific interface."
+policy:
+  allow_implicit_invocation: true
