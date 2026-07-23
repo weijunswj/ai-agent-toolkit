@@ -3,7 +3,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const REPORT_SCHEMA_VERSION = 1;
-const TOOLKIT_VERSION = '2.8.5';
+const TOOLKIT_VERSION = '2.9.7';
 const RETENTION_DAYS = 90;
 const MAX_HISTORY_REPORTS = 500;
 const STABLE_CODES = new Set([
@@ -43,6 +43,67 @@ const EXPLANATIONS = Object.freeze({
   N8N_POSTCONDITION_FAILED: 'The workflow import completed but the required inactive state could not be verified.',
   N8N_INTERNAL_ERROR: 'The helper encountered an unexpected internal failure.',
 });
+
+function credentialRequirementLabel(credentials) {
+  const credential = Array.isArray(credentials) ? credentials[0] : null;
+  if (!credential?.logicalName || !credential?.credentialType) return 'the exact reported logical credential name and type';
+  return `"${credential.logicalName}" (${credential.credentialType})`;
+}
+
+function nextActionForCode(code, context = {}) {
+  const credentialLabel = credentialRequirementLabel(context.credentials);
+  const actions = {
+    N8N_CREDENTIAL_MISSING: {
+      code: 'CREATE_CREDENTIAL_AND_RERUN',
+      message: `Create credential ${credentialLabel}, then rerun the unchanged official command.`,
+    },
+    N8N_CREDENTIAL_AMBIGUOUS: {
+      code: 'REMOVE_DUPLICATE_CREDENTIALS_AND_RERUN',
+      message: `Remove or rename duplicate target credentials for ${credentialLabel}, then rerun the unchanged official command.`,
+    },
+    N8N_CREDENTIAL_TYPE_MISMATCH: {
+      code: 'CORRECT_CREDENTIAL_TYPE_AND_RERUN',
+      message: `Create or rename the target credential so ${credentialLabel} matches exactly, then rerun the unchanged official command.`,
+    },
+    N8N_RESOURCE_BINDING_MISSING: {
+      code: 'ADD_RESOURCE_BINDING_AND_RERUN',
+      message: 'Add the exact declared local resource binding, then rerun the unchanged official command.',
+    },
+    N8N_POLICY_VALIDATION_FAILED: {
+      code: 'REPAIR_PORTABLE_POLICY_AND_RERUN',
+      message: 'Repair the portable policy or canonical document identified by the sanitized diagnostic, then rerun the unchanged official command.',
+    },
+    N8N_WORKFLOW_MATCH_AMBIGUOUS: {
+      code: 'CORRECT_WORKFLOW_IDENTITY_AND_RERUN',
+      message: 'Correct the dedicated local workflow identity or target naming ambiguity, then rerun the unchanged official command.',
+    },
+    N8N_NODE_MATCH_AMBIGUOUS: {
+      code: 'CORRECT_NODE_IDENTITY_AND_RERUN',
+      message: 'Correct the portable stable-node selector ambiguity, then rerun the unchanged official command.',
+    },
+    N8N_CANONICAL_INVARIANT_FAILED: {
+      code: 'RESTORE_OR_REVIEW_CANONICAL_SOURCE',
+      message: 'Restore canonical Git or explicitly review the intended canonical source change before rerunning.',
+    },
+    N8N_CREDENTIAL_DISCOVERY_UNAVAILABLE: {
+      code: 'RESTORE_CREDENTIAL_DISCOVERY_AND_RERUN',
+      message: 'Restore the supported encrypted credential metadata-discovery path, then rerun the unchanged official command.',
+    },
+    N8N_CREDENTIAL_CLEANUP_FAILED: {
+      code: 'COMPLETE_CREDENTIAL_TEMP_CLEANUP',
+      message: 'Complete exact cleanup of the encrypted credential temporary area before retrying.',
+    },
+    N8N_POSTCONDITION_FAILED: {
+      code: 'STOP_AND_ESCALATE_POSTCONDITION',
+      message: 'Do not activate or execute the workflow; escalate the inactive-postcondition failure using the sanitized operation ID.',
+    },
+    N8N_INTERNAL_ERROR: {
+      code: 'ESCALATE_TOOLKIT_DEFECT',
+      message: 'Escalate the Toolkit defect using the sanitized operation ID and phase.',
+    },
+  };
+  return actions[code] ? clone(actions[code]) : null;
+}
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -118,6 +179,7 @@ function validateReport(report) {
 }
 
 function createReport(input = {}) {
+  const mappedNextAction = nextActionForCode(input.code || 'N8N_INTERNAL_ERROR', input);
   const report = {
     schemaVersion: REPORT_SCHEMA_VERSION,
     toolkitVersion: input.toolkitVersion || TOOLKIT_VERSION,
@@ -136,7 +198,7 @@ function createReport(input = {}) {
     },
     activeState: input.activeState || 'unknown',
     executionState: input.executionState || 'not_executed',
-    nextAction: clone(input.nextAction || { code: 'ESCALATE_TOOLKIT_DEFECT', message: 'Inspect the sanitized report and escalate a Toolkit defect.' }),
+    nextAction: clone(mappedNextAction || input.nextAction || { code: 'ESCALATE_TOOLKIT_DEFECT', message: 'Escalate the Toolkit defect using the sanitized operation ID and phase.' }),
     unchangedScope: Array.isArray(input.unchangedScope) ? clone(input.unchangedScope) : [],
   };
   return validateReport(report);
@@ -301,6 +363,7 @@ module.exports = {
   MAX_HISTORY_REPORTS,
   STABLE_CODES,
   EXPLANATIONS,
+  nextActionForCode,
   validateReport,
   createReport,
   humanReport,

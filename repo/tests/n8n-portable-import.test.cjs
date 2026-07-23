@@ -91,7 +91,7 @@ test('canonical export retains portable logic and emits name/type credential dec
   assert.equal(canonical.nodes[0].parameters.columns.value.amount, '={{ $json.amount }}');
   assert.deepEqual(canonical.nodes[0].parameters.columns.matchingColumns, ['order_id']);
   assert.equal(canonical.nodes[0].parameters.options.valueInputMode, 'RAW');
-  assert.deepEqual(canonical.nodes[0].credentials.googleSheetsOAuth2Api, { id: null, name: 'Finance Sheets' });
+  assert.deepEqual(canonical.nodes[0].credentials.googleSheetsOAuth2Api, { name: 'Finance Sheets' });
   assert.equal(canonical.nodes[1].webhookId, undefined);
   assert.equal(requirement.nodes[0].credentialType, 'googleSheetsOAuth2Api');
   assert.equal(requirement.nodes[0].logicalName, 'Finance Sheets');
@@ -183,6 +183,59 @@ test('rerunning the unchanged preparation command binds a newly created unique t
   assert.deepEqual(options.canonicalWorkflow, canonical);
 });
 
+test('canonical credentials validate and complete a portable inactive round trip without target ID leakage', () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-credential-roundtrip-'));
+  const workflowDir = path.join(fixtureRoot, 'n8n-workflows');
+  const canonicalPath = path.join(workflowDir, 'portable.json');
+  const preparedDir = path.join(fixtureRoot, 'prepared');
+  const preparedPath = path.join(preparedDir, 'portable.live-import.json');
+  const live = workflow();
+  const canonical = portable.canonicalWorkflowForGit(live);
+  const credentialsDocument = {
+    schemaVersion: 1,
+    workflows: [portable.buildPortableCredentialDeclaration(canonical, canonicalPath)],
+  };
+  writeFixture(canonicalPath, canonical);
+
+  const canonicalValidation = spawnSync(process.execPath, [
+    path.join(helperRoot, 'validate-n8n-workflows.cjs'),
+    workflowDir,
+  ], { cwd: fixtureRoot, encoding: 'utf8' });
+  assert.equal(canonicalValidation.status, 0, canonicalValidation.stderr);
+  assert.deepEqual(canonical.nodes[0].credentials.googleSheetsOAuth2Api, { name: 'Finance Sheets' });
+
+  const result = portable.preparePortableWorkflow({
+    canonicalWorkflow: canonical,
+    workflowFile: canonicalPath,
+    credentialDeclarations: credentialsDocument,
+    credentialMetadata: [{ id: 'target-private-id', name: 'Finance Sheets', type: 'googleSheetsOAuth2Api' }],
+    deploymentPolicy: { schemaVersion: 1, workflows: [] },
+    resourceBindings: { schemaVersion: 1, workflows: [] },
+    targetWorkflowId: 'target-workflow-id',
+  });
+  writeFixture(preparedPath, result.preparedWorkflow);
+  const preparedValidation = spawnSync(process.execPath, [
+    path.join(helperRoot, 'validate-n8n-workflows.cjs'),
+    '--mode',
+    'prepared-import',
+    preparedDir,
+  ], { cwd: fixtureRoot, encoding: 'utf8' });
+  assert.equal(preparedValidation.status, 0, preparedValidation.stderr);
+  assert.equal(result.preparedWorkflow.active, false);
+  assert.equal(result.preparedWorkflow.nodes[0].credentials.googleSheetsOAuth2Api.id, 'target-private-id');
+  assert.doesNotMatch(JSON.stringify({ canonical, credentialsDocument, invariant: result.invariant }), /target-private-id/);
+
+  const legacyNull = structuredClone(live);
+  legacyNull.nodes[0].credentials.googleSheetsOAuth2Api.id = null;
+  assert.deepEqual(
+    portable.canonicalWorkflowForGit(legacyNull).nodes[0].credentials.googleSheetsOAuth2Api,
+    { name: 'Finance Sheets' }
+  );
+  const second = portable.canonicalWorkflowForGit(live);
+  assert.equal(`${JSON.stringify(canonical, null, 2)}\n`, `${JSON.stringify(second, null, 2)}\n`);
+  fs.rmSync(fixtureRoot, { recursive: true, force: true });
+});
+
 test('unresolved required credentials are limited to genuinely new workflows and existing bindings are preserved', () => {
   const canonical = portable.canonicalWorkflowForGit(workflow());
   const requiredDeclaration = declaration(canonical);
@@ -246,6 +299,108 @@ test('optional credential declarations survive node renames when stable node ide
   assert.equal(
     portable.buildPortableCredentialDeclaration(noIdRenamed, 'n8n-workflows/portable.json', noIdPrevious).nodes[0].required,
     true
+  );
+});
+
+test('optional credential misses remain informational while ambiguity still fails closed', () => {
+  const canonical = portable.canonicalWorkflowForGit(workflow());
+  const optionalDeclaration = declaration(canonical);
+  optionalDeclaration.workflows[0].nodes[0].required = false;
+  const options = {
+    canonicalWorkflow: canonical,
+    workflowFile: 'n8n-workflows/portable.json',
+    credentialDeclarations: optionalDeclaration,
+    deploymentPolicy: { schemaVersion: 1, workflows: [] },
+    resourceBindings: { schemaVersion: 1, workflows: [] },
+    allowUnresolvedImport: true,
+  };
+  const one = portable.preparePortableWorkflow({ ...options, credentialMetadata: [] });
+  assert.equal(one.credentialResult.blocking.length, 0);
+  assert.equal(one.credentialResult.requiredMissing.length, 0);
+  assert.equal(one.credentialResult.optionalMissing.length, 1);
+  assert.equal(one.credentialResult.unresolvedImport, false);
+  assert.equal(one.preparedWorkflow.nodes[0].credentials, undefined);
+
+  const multipleCanonical = structuredClone(canonical);
+  multipleCanonical.nodes[0].credentials.googleDriveOAuth2Api = { name: 'Optional Drive' };
+  const multipleDeclaration = declaration(multipleCanonical);
+  for (const requirement of multipleDeclaration.workflows[0].nodes) requirement.required = false;
+  const multiple = portable.preparePortableWorkflow({
+    ...options,
+    canonicalWorkflow: multipleCanonical,
+    credentialDeclarations: multipleDeclaration,
+    credentialMetadata: [],
+  });
+  assert.equal(multiple.credentialResult.optionalMissing.length, 2);
+  assert.equal(multiple.credentialResult.requiredMissing.length, 0);
+  assert.equal(multiple.credentialResult.blocking.length, 0);
+  multipleDeclaration.workflows[0].nodes[0].required = true;
+  const mixed = portable.preparePortableWorkflow({
+    ...options,
+    canonicalWorkflow: multipleCanonical,
+    credentialDeclarations: multipleDeclaration,
+    credentialMetadata: [],
+  });
+  assert.equal(mixed.credentialResult.requiredMissing.length, 1);
+  assert.equal(mixed.credentialResult.optionalMissing.length, 1);
+  assert.equal(mixed.credentialResult.unresolvedImport, true);
+
+  const ambiguousMetadata = [
+    { id: 'first-private-id', name: 'Finance Sheets', type: 'googleSheetsOAuth2Api' },
+    { id: 'second-private-id', name: 'Finance Sheets', type: 'googleSheetsOAuth2Api' },
+  ];
+  expectCode(
+    () => portable.preparePortableWorkflow({ ...options, credentialMetadata: ambiguousMetadata }),
+    'N8N_CREDENTIAL_AMBIGUOUS'
+  );
+});
+
+test('portable preparation strips canonical webhook IDs and restores only unique existing target identity', () => {
+  const canonical = portable.canonicalWorkflowForGit(workflow());
+  canonical.nodes[1].webhookId = 'CANONICAL_PLACEHOLDER';
+  const base = {
+    canonicalWorkflow: canonical,
+    workflowFile: 'n8n-workflows/portable.json',
+    credentialDeclarations: declaration(canonical),
+    credentialMetadata: [{ id: 'bound', name: 'Finance Sheets', type: 'googleSheetsOAuth2Api' }],
+    deploymentPolicy: { schemaVersion: 1, workflows: [] },
+    resourceBindings: { schemaVersion: 1, workflows: [] },
+  };
+  const before = JSON.stringify(canonical);
+  const created = portable.preparePortableWorkflow(base);
+  assert.equal('webhookId' in created.preparedWorkflow.nodes[1], false);
+  assert.equal(created.strippedWebhookIds, 1);
+  assert.equal(JSON.stringify(canonical), before);
+
+  canonical.nodes[1].webhookId = '00000000-0000-4000-8000-000000000001';
+  const createdUuid = portable.preparePortableWorkflow({ ...base, canonicalWorkflow: canonical });
+  assert.equal('webhookId' in createdUuid.preparedWorkflow.nodes[1], false);
+
+  const live = structuredClone(canonical);
+  live.nodes[1].webhookId = 'target-webhook-private-value';
+  const existing = portable.preparePortableWorkflow({ ...base, canonicalWorkflow: canonical, liveWorkflow: live });
+  assert.equal(existing.preparedWorkflow.nodes[1].webhookId, 'target-webhook-private-value');
+  assert.doesNotMatch(JSON.stringify(existing.invariant), /target-webhook-private-value/);
+
+  const conflicting = structuredClone(live);
+  conflicting.nodes[1].type = 'n8n-nodes-base.httpRequest';
+  conflicting.nodes.push({
+    id: 'fallback-webhook',
+    name: 'Intake',
+    type: 'n8n-nodes-base.webhook',
+    webhookId: 'must-not-restore',
+    parameters: {},
+  });
+  expectCode(
+    () => portable.preparePortableWorkflow({ ...base, canonicalWorkflow: canonical, liveWorkflow: conflicting }),
+    'N8N_POLICY_VALIDATION_FAILED'
+  );
+
+  const duplicate = structuredClone(live);
+  duplicate.nodes.push({ ...structuredClone(live.nodes[1]) });
+  expectCode(
+    () => portable.preparePortableWorkflow({ ...base, canonicalWorkflow: canonical, liveWorkflow: duplicate }),
+    'N8N_NODE_MATCH_AMBIGUOUS'
   );
 });
 
@@ -1373,6 +1528,54 @@ test('multi-workflow canonical replacement rolls back every byte after a late fa
   fs.rmSync(fixtureRoot, { recursive: true, force: true });
 });
 
+test('transactional replacement preserves target modes and uses a repository-safe mode for new files', () => {
+  assert.equal(exportSync.CANONICAL_NEW_FILE_MODE, 0o644);
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-export-modes-'));
+  const regular = path.join(fixtureRoot, 'regular.json');
+  const nonstandard = path.join(fixtureRoot, 'executable.json');
+  const created = path.join(fixtureRoot, 'created.json');
+  fs.writeFileSync(regular, '{"original":"regular"}\n');
+  fs.writeFileSync(nonstandard, '{"original":"nonstandard"}\n');
+  if (process.platform !== 'win32') {
+    fs.chmodSync(regular, 0o644);
+    fs.chmodSync(nonstandard, 0o750);
+  }
+  const originalModes = new Map([
+    [regular, fs.statSync(regular).mode & 0o777],
+    [nonstandard, fs.statSync(nonstandard).mode & 0o777],
+  ]);
+  const changes = [
+    { targetPath: regular, content: '{"next":"regular"}\n' },
+    { targetPath: nonstandard, content: '{"next":"nonstandard"}\n' },
+    { targetPath: created, content: '{"next":"created"}\n' },
+  ];
+  exportSync.replaceFilesTransactionally(changes);
+  if (process.platform !== 'win32') {
+    assert.equal(fs.statSync(regular).mode & 0o777, 0o644);
+    assert.equal(fs.statSync(nonstandard).mode & 0o777, 0o750);
+    assert.equal(fs.statSync(created).mode & 0o777, 0o644);
+    const beforeFailureBytes = fs.readFileSync(nonstandard);
+    const beforeFailureMode = fs.statSync(nonstandard).mode & 0o777;
+    assert.throws(
+      () => exportSync.replaceFilesTransactionally(
+        [{ targetPath: nonstandard, content: '{"changed-again":true}\n' }],
+        { beforeVerify(record) { fs.chmodSync(record.target, 0o600); } }
+      ),
+      /mode verification failed/
+    );
+    assert.equal(fs.readFileSync(nonstandard).equals(beforeFailureBytes), true);
+    assert.equal(fs.statSync(nonstandard).mode & 0o777, beforeFailureMode);
+  } else {
+    assert.equal(fs.existsSync(created), true);
+    assert.ok(originalModes.get(regular) >= 0);
+  }
+  assert.deepEqual(
+    fs.readdirSync(fixtureRoot).filter((name) => /\.(stage|backup|rollback)$/.test(name)),
+    []
+  );
+  fs.rmSync(fixtureRoot, { recursive: true, force: true });
+});
+
 test('multi-workflow export performs no canonical or declaration writes when a later target fails policy', () => {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-export-late-policy-'));
   const workflowDir = path.join(fixtureRoot, 'n8n-workflows');
@@ -1448,6 +1651,8 @@ test('reports are sanitized, retained locally, validated, and explained without 
     unchangedScope: ['activation', 'execution'],
   });
   assert.equal(report.code, 'N8N_CREDENTIAL_MISSING');
+  assert.equal(report.nextAction.code, 'CREATE_CREDENTIAL_AND_RERUN');
+  assert.match(report.nextAction.message, /"Finance Sheets" \(googleSheetsOAuth2Api\)/);
   assert.ok(fs.existsSync(path.join(reportRoot, 'latest-n8n-workflow-operation.json')));
   assert.ok(fs.existsSync(path.join(reportRoot, 'latest-n8n-workflow-operation.txt')));
   const serialized = fs.readFileSync(path.join(reportRoot, 'latest-n8n-workflow-operation.json'), 'utf8');
@@ -1456,6 +1661,59 @@ test('reports are sanitized, retained locally, validated, and explained without 
   assert.throws(() => reports.createReport({ code: 'N8N_INTERNAL_ERROR', workflows: [{ workflowFile: 'C:\\private\\workflow.json' }] }), /safe relative path/);
   assert.throws(() => reports.createReport({ code: 'N8N_INTERNAL_ERROR', operationId: '..\\..\\outside' }), /safe bounded file-name token/);
   fs.rmSync(fixtureRoot, { recursive: true, force: true });
+});
+
+test('failure reports map stable codes to concrete non-circular supported actions', () => {
+  const cases = new Map([
+    ['N8N_CREDENTIAL_MISSING', 'CREATE_CREDENTIAL_AND_RERUN'],
+    ['N8N_CREDENTIAL_AMBIGUOUS', 'REMOVE_DUPLICATE_CREDENTIALS_AND_RERUN'],
+    ['N8N_CREDENTIAL_TYPE_MISMATCH', 'CORRECT_CREDENTIAL_TYPE_AND_RERUN'],
+    ['N8N_RESOURCE_BINDING_MISSING', 'ADD_RESOURCE_BINDING_AND_RERUN'],
+    ['N8N_POLICY_VALIDATION_FAILED', 'REPAIR_PORTABLE_POLICY_AND_RERUN'],
+    ['N8N_WORKFLOW_MATCH_AMBIGUOUS', 'CORRECT_WORKFLOW_IDENTITY_AND_RERUN'],
+    ['N8N_NODE_MATCH_AMBIGUOUS', 'CORRECT_NODE_IDENTITY_AND_RERUN'],
+    ['N8N_CANONICAL_INVARIANT_FAILED', 'RESTORE_OR_REVIEW_CANONICAL_SOURCE'],
+    ['N8N_CREDENTIAL_DISCOVERY_UNAVAILABLE', 'RESTORE_CREDENTIAL_DISCOVERY_AND_RERUN'],
+    ['N8N_CREDENTIAL_CLEANUP_FAILED', 'COMPLETE_CREDENTIAL_TEMP_CLEANUP'],
+    ['N8N_POSTCONDITION_FAILED', 'STOP_AND_ESCALATE_POSTCONDITION'],
+    ['N8N_INTERNAL_ERROR', 'ESCALATE_TOOLKIT_DEFECT'],
+  ]);
+  for (const [code, actionCode] of cases) {
+    const report = reports.createReport({
+      code,
+      credentials: [{
+        logicalName: 'Finance Sheets',
+        credentialType: 'googleSheetsOAuth2Api',
+        required: true,
+        matchCount: 0,
+        nodeName: 'Append order',
+        nodeType: 'n8n-nodes-base.googleSheets',
+      }],
+      nextAction: { code: 'EXPLAIN_LAST_FAILURE', message: 'Run Explain again.' },
+    });
+    assert.equal(report.nextAction.code, actionCode);
+    assert.doesNotMatch(report.nextAction.message, /explain/i);
+  }
+});
+
+test('no-change reports retain optional credential metadata without required action status', () => {
+  const report = reports.createReport({
+    result: 'SUCCESS',
+    code: 'N8N_IMPORT_NO_CHANGES',
+    credentials: [{
+      logicalName: 'Optional Sheets',
+      credentialType: 'googleSheetsOAuth2Api',
+      required: false,
+      matchCount: 0,
+      nodeName: 'Optional append',
+      nodeType: 'n8n-nodes-base.googleSheets',
+    }],
+    nextAction: { code: 'NONE', message: 'No action is required; the effective inactive payload is unchanged.' },
+  });
+  assert.equal(report.result, 'SUCCESS');
+  assert.equal(report.nextAction.code, 'NONE');
+  assert.equal(report.credentials[0].required, false);
+  assert.doesNotMatch(JSON.stringify(report), /CREATE_CREDENTIAL/);
 });
 
 test('PowerShell surfaces are PS 5.1-compatible, do not restart, and make valid import confirmation optional', () => {
@@ -1473,6 +1731,10 @@ test('PowerShell surfaces are PS 5.1-compatible, do not restart, and make valid 
   assert.match(importScript, /Assert-NoCaseFoldedWorkflowFileCollisions \$workflowFiles/);
   assert.match(importScript, /if \(\$null -eq \$targetWorkflow\) \{\s+\$prepareArgs \+= "--allow-unresolved-import"/);
   assert.match(importScript, /N8N_CREDENTIAL_CLEANUP_FAILED/);
+  assert.match(importScript, /RequiredCredentialMisses/);
+  assert.match(importScript, /OptionalCredentialMisses/);
+  assert.match(importScript, /UnsafeCredentialFailures/);
+  assert.doesNotMatch(importScript, /\bMissingCredentials\b/);
   const targetResolution = importScript.match(/function Test-PortableTargetResolution[\s\S]*?function Get-RootWorkflowFiles/);
   assert.ok(targetResolution);
   assert.match(targetResolution[0], /Resolve-LiveWorkflowByName/);

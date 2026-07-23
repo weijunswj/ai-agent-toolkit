@@ -10,20 +10,22 @@ Use this flow in a consumer repo, not from the toolkit repo.
 
 ## Boundary
 
-This is a short safety checklist, not the full runtime guide. Scoped non-live actions may validate repo workflow JSON and prepare local files for the named consumer repo and operation. Live n8n or Docker actions require explicit current-turn approval naming the repo, instance/environment, operation, workflow set, and forbidden operations.
+This is a checklist, not the runtime guide. Non-live work may validate repo JSON and prepare local files. Live n8n or Docker work requires current-turn approval naming the repo, environment, operation, workflow set, and exclusions.
 
 ## Export Review
 
-- Preserve canonical logic, real sheet/tab names, approved non-secret locators, mappings, expressions, filters, matching columns, options, nodes, connections, and settings.
-- Replace credentials with portable `{ id: null, name }` references and logical name/type declarations; never commit IDs or values.
+- Preserve canonical logic, real sheet/tab names, approved locators, mappings, expressions, filters, matching columns, options, nodes, connections, and settings.
+- Replace credentials with canonical `{ name }` references plus logical name/type declarations; omit `id` entirely and never commit target IDs or values.
 - Remove target workflow/webhook metadata, force `active: false`, and protect generated mapping domains unless reviewed source-update mode is explicit.
 
 ## Import Review
 
 - Discover only safe credential metadata through a supported transport and resolve exactly one logical name/type match without exposing target IDs.
-- Rebuild from canonical Git, restore dedicated webhook identity, and apply only declared exact scalar resource bindings.
+- Rebuild from canonical Git, remove every canonical `webhookId`, restore webhook identity only for a uniquely matched existing target node, and apply only declared exact scalar resource bindings.
 - Validate the prepared workflow and canonical invariant before effective comparison. A valid non-dry-run import proceeds without routine confirmation, stays inactive, performs no execution, and verifies the postcondition.
 - For a supported unresolved first import, create the reported logical name/type and rerun the same command. Unsupported transports stop before mutation.
+- Treat missing optional credentials as informational; required misses and every ambiguous or unsafe match remain blocking.
+- Preserve existing file modes transactionally; use the repository mode for new files and keep temporary files private.
 
 Do not run live import/export in CI. Keep `.tmp/**` and `.n8n-local/**` ignored and local.
 

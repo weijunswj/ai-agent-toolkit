@@ -97,7 +97,7 @@ function portableCredentials(credentials) {
         `Credential type "${credentialType}" is missing a logical credential name.`
       );
     }
-    result[credentialType] = { id: null, name: logicalName };
+    result[credentialType] = { name: logicalName };
   }
   return result;
 }
@@ -574,9 +574,7 @@ function resolveCredentialRequirements(workflow, requirements, credentialMetadat
     else if (sameName.length > 0) code = 'N8N_CREDENTIAL_TYPE_MISMATCH';
     const issue = { code, ...sanitisedCredentialDetail(requirement, exact.length) };
     issues.push(issue);
-    if (allowUnresolvedImport && code === 'N8N_CREDENTIAL_MISSING') {
-      actions.push({ kind: 'unresolved', node, requirement });
-    } else if (requirement.required === false && code === 'N8N_CREDENTIAL_MISSING') {
+    if (requirement.required === false && code === 'N8N_CREDENTIAL_MISSING') {
       const liveNode = options.liveWorkflow
         ? selectNode(options.liveWorkflow, requirement, { allowStaleIdFallback: true })
         : null;
@@ -586,6 +584,8 @@ function resolveCredentialRequirements(workflow, requirements, credentialMetadat
       } else {
         actions.push({ kind: 'remove', node, requirement });
       }
+    } else if (allowUnresolvedImport && code === 'N8N_CREDENTIAL_MISSING') {
+      actions.push({ kind: 'unresolved', node, requirement });
     }
   }
 
@@ -593,6 +593,13 @@ function resolveCredentialRequirements(workflow, requirements, credentialMetadat
     if (issue.required === false && issue.code === 'N8N_CREDENTIAL_MISSING') return false;
     return !(allowUnresolvedImport && issue.code === 'N8N_CREDENTIAL_MISSING');
   });
+  const requiredMissing = issues.filter((issue) =>
+    issue.required !== false && issue.code === 'N8N_CREDENTIAL_MISSING'
+  );
+  const optionalMissing = issues.filter((issue) =>
+    issue.required === false && issue.code === 'N8N_CREDENTIAL_MISSING'
+  );
+  const unsafe = issues.filter((issue) => issue.code !== 'N8N_CREDENTIAL_MISSING');
   if (blocking.length === 0) {
     for (const action of actions) {
       const { node, requirement } = action;
@@ -620,7 +627,10 @@ function resolveCredentialRequirements(workflow, requirements, credentialMetadat
     resolvedCount: actions.filter((action) => action.kind === 'bind').length,
     issues,
     blocking,
-    unresolvedImport: allowUnresolvedImport && issues.some((issue) => issue.code === 'N8N_CREDENTIAL_MISSING'),
+    requiredMissing,
+    optionalMissing,
+    unsafe,
+    unresolvedImport: allowUnresolvedImport && requiredMissing.length > 0,
   };
 }
 
@@ -713,6 +723,18 @@ function restoreDedicatedWebhookMetadata(workflow, liveWorkflow, allowedPaths) {
     }
   }
   return restored;
+}
+
+function stripDedicatedWebhookMetadata(workflow, allowedPaths) {
+  let stripped = 0;
+  for (let index = 0; index < (workflow.nodes || []).length; index += 1) {
+    const node = workflow.nodes[index];
+    if (!Object.prototype.hasOwnProperty.call(node, 'webhookId')) continue;
+    delete node.webhookId;
+    allowedPaths.add(`nodes.${index}.webhookId`);
+    stripped += 1;
+  }
+  return stripped;
 }
 
 function collectDiffPaths(left, right, prefix = '', output = []) {
@@ -839,6 +861,7 @@ function preparePortableWorkflow(options) {
     'discover-target-credential-metadata',
   ];
 
+  const strippedWebhookIds = stripDedicatedWebhookMetadata(prepared, allowedPaths);
   prepared.active = false;
   const liveWorkflowId = typeof options.liveWorkflow?.id === 'string' ? options.liveWorkflow.id : '';
   const requestedWorkflowId = typeof options.targetWorkflowId === 'string' ? options.targetWorkflowId : '';
@@ -884,6 +907,7 @@ function preparePortableWorkflow(options) {
     const node = selectNode(prepared, requirement, { allowStaleIdFallback: true });
     const nodeIndex = prepared.nodes.indexOf(node);
     allowedPaths.add(`nodes.${nodeIndex}.credentials.${requirement.credentialType}`);
+    if (!node.credentials) allowedPaths.add(`nodes.${nodeIndex}.credentials`);
   }
   phases.push('apply-credential-bindings');
 
@@ -913,6 +937,7 @@ function preparePortableWorkflow(options) {
     credentialResult,
     resourceBindingCount,
     restoredWebhookIds,
+    strippedWebhookIds,
     invariant,
   };
 }

@@ -119,6 +119,24 @@ function assertRegularOrMissing(filePath, label) {
   }
 }
 
+const CANONICAL_NEW_FILE_MODE = 0o644;
+
+function permissionMode(statMode) {
+  return statMode & 0o777;
+}
+
+function applyInstalledMode(filePath, mode) {
+  if (process.platform === 'win32') return;
+  fs.chmodSync(filePath, mode);
+}
+
+function assertInstalledMode(filePath, mode) {
+  if (process.platform === 'win32') return;
+  if (permissionMode(fs.statSync(filePath).mode) !== mode) {
+    throw transactionError('Canonical transaction replacement mode verification failed.');
+  }
+}
+
 function replaceFilesTransactionally(changes, hooks = {}) {
   if (!Array.isArray(changes) || changes.length === 0) return;
   const token = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -156,6 +174,9 @@ function replaceFilesTransactionally(changes, hooks = {}) {
       originalExists: fs.existsSync(target),
       originalContent: fs.existsSync(target) ? fs.readFileSync(target) : null,
       originalMode: fs.existsSync(target) ? fs.statSync(target).mode : null,
+      installMode: fs.existsSync(target)
+        ? permissionMode(fs.statSync(target).mode)
+        : CANONICAL_NEW_FILE_MODE,
       originalMoved: false,
       installed: false,
     };
@@ -179,10 +200,12 @@ function replaceFilesTransactionally(changes, hooks = {}) {
       }
       fs.renameSync(record.stage, record.target);
       record.installed = true;
+      applyInstalledMode(record.target, record.installMode);
       if (typeof hooks.beforeVerify === 'function') hooks.beforeVerify(record, index);
       if (!fs.readFileSync(record.target).equals(record.content)) {
         throw transactionError('Canonical transaction replacement verification failed.');
       }
+      assertInstalledMode(record.target, record.installMode);
       if (typeof hooks.afterReplace === 'function') hooks.afterReplace(record, index);
     }
 
@@ -208,7 +231,7 @@ function replaceFilesTransactionally(changes, hooks = {}) {
         } else if (record.originalExists && !fs.existsSync(record.target)) {
           fs.writeFileSync(record.rollbackStage, record.originalContent, {
             flag: 'wx',
-            mode: record.originalMode,
+            mode: permissionMode(record.originalMode),
           });
           fs.renameSync(record.rollbackStage, record.target);
         }
@@ -216,6 +239,7 @@ function replaceFilesTransactionally(changes, hooks = {}) {
           if (!fs.existsSync(record.target) || !fs.readFileSync(record.target).equals(record.originalContent)) {
             throw transactionError('Canonical transaction rollback verification failed.');
           }
+          assertInstalledMode(record.target, permissionMode(record.originalMode));
         } else if (fs.existsSync(record.target)) {
           throw transactionError('Canonical transaction rollback left a newly created target behind.');
         }
@@ -527,4 +551,5 @@ module.exports = {
   readDeploymentPolicy,
   assertStrictChild,
   replaceFilesTransactionally,
+  CANONICAL_NEW_FILE_MODE,
 };

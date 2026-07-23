@@ -222,6 +222,9 @@ function safePortableResult(result) {
       resolvedCount: result.credentialResult.resolvedCount,
       unresolvedImport: result.credentialResult.unresolvedImport,
       requirements: result.credentialResult.issues,
+      blockingRequirements: result.credentialResult.requiredMissing,
+      optionalRequirements: result.credentialResult.optionalMissing,
+      unsafeRequirements: result.credentialResult.unsafe,
     },
     resourceBindingCount: result.resourceBindingCount,
     restoredWebhookIdCount: result.restoredWebhookIds,
@@ -418,6 +421,9 @@ function buildUniqueNodeIndex(nodes) {
 }
 
 function restoreLiveWebhookIds(workflow, liveWorkflow) {
+  for (const node of workflow.nodes || []) {
+    delete node.webhookId;
+  }
   if (!liveWorkflow || !Array.isArray(liveWorkflow.nodes)) {
     return 0;
   }
@@ -440,7 +446,7 @@ function restoreLiveWebhookIds(workflow, liveWorkflow) {
       if (matches.length === 1) {
         liveNode = matches[0];
       } else if (matches.length > 1) {
-        console.warn(`Skipped webhookId restore for node "${node.name || node.id || '(unknown)'}": live node name/type match is ambiguous.`);
+        throw new Error(`Webhook ID restore blocked for node "${node.name || node.id || '(unknown)'}": live node name/type match is ambiguous.`);
       }
     }
 

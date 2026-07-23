@@ -27,6 +27,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$DeploymentPolicyFileWasExplicit = $PSBoundParameters.ContainsKey("DeploymentPolicyFile")
+$script:PortablePolicyPreflightPassed = -not $DeploymentPolicyFileWasExplicit
 
 trap {
   $failure = $_
@@ -34,7 +36,7 @@ trap {
     Remove-Item -LiteralPath $credentialMetadataFile -Force -ErrorAction SilentlyContinue
   }
   try {
-    if (-not $script:OperationReportWritten -and (Get-Variable -Name ReportsDirPath -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath $PreparedDirPath -PathType Container)) {
+    if ($script:PortablePolicyPreflightPassed -and -not $script:OperationReportWritten -and (Get-Variable -Name ReportsDirPath -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath $PreparedDirPath -PathType Container)) {
       $failureCode = "N8N_INTERNAL_ERROR"
       $failurePhase = "internal"
       if ($failure.Exception.Message -match '^(N8N_[A-Z_]+):') {
@@ -42,8 +44,8 @@ trap {
         $failurePhase = if ($failureCode -eq "N8N_CREDENTIAL_DISCOVERY_UNAVAILABLE" -or $failureCode -eq "N8N_CREDENTIAL_CLEANUP_FAILED") { "discover-target-credential-metadata" } else { "internal" }
       }
       $reportWorkflows = if (Get-Variable -Name preflight -ErrorAction SilentlyContinue) { @($preflight.PlannedImports) } else { @() }
-      $reportCredentials = if (Get-Variable -Name preflight -ErrorAction SilentlyContinue) { @($preflight.MissingCredentials) } else { @() }
-      Write-N8nOperationReport "FAILED" $failureCode $failurePhase ([bool]$script:MutationAttempted) ([bool]$script:MutationPerformed) $reportWorkflows $reportCredentials "EXPLAIN_LAST_FAILURE" "Run Explain last n8n failure and inspect the sanitized report." "unknown"
+      $reportCredentials = if (Get-Variable -Name preflight -ErrorAction SilentlyContinue) { @($preflight.ReportCredentials) } else { @() }
+      Write-N8nOperationReport "FAILED" $failureCode $failurePhase ([bool]$script:MutationAttempted) ([bool]$script:MutationPerformed) $reportWorkflows $reportCredentials "MAP_FROM_FAILURE_CODE" "Use the deterministic supported action for this failure code." "unknown"
     }
   } catch {
     Write-Host "N8N_INTERNAL_ERROR: sanitized failure report could not be written." -ForegroundColor Red
@@ -386,6 +388,97 @@ function Assert-RunDirectoryPathHasNoUnsafeLinks($Path, $TmpRoot) {
   }
 
   throw "Refusing to clear unsafe run directory because its path components could not be verified under .tmp/: $resolvedPath"
+}
+
+function Assert-RepoFilePathHasNoUnsafeLinks($Path, $Label) {
+  $resolvedPath = Get-NormalizedFullPath $Path
+  $resolvedRepoRoot = Get-NormalizedFullPath $RepoRoot
+  $comparison = Get-PathStringComparison
+  $current = $resolvedPath
+
+  while (-not [string]::IsNullOrWhiteSpace($current)) {
+    if (Test-Path -LiteralPath $current) {
+      $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+      if (Test-PathItemIsUnsafeLink $item) {
+        throw "N8N_POLICY_VALIDATION_FAILED: $Label contains a symlink, junction, or redirected path."
+      }
+    }
+    if ($current.Equals($resolvedRepoRoot, $comparison)) {
+      return
+    }
+    $parent = Split-Path -Parent $current
+    if ([string]::IsNullOrWhiteSpace($parent) -or $parent.Equals($current, $comparison)) {
+      break
+    }
+    $current = Get-NormalizedFullPath $parent
+  }
+
+  throw "N8N_POLICY_VALIDATION_FAILED: $Label could not be verified inside the repository boundary."
+}
+
+function Get-ByteSha256($Bytes) {
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    return ([System.BitConverter]::ToString($sha.ComputeHash($Bytes))).Replace("-", "")
+  } finally {
+    $sha.Dispose()
+  }
+}
+
+function Read-SafeDeploymentPolicySnapshot {
+  Assert-StrictRepoChildPath $DeploymentPolicyFilePath "Deployment policy"
+  Assert-RepoFilePathHasNoUnsafeLinks $DeploymentPolicyFilePath "Deployment policy"
+  try {
+    $itemBefore = Get-Item -LiteralPath $DeploymentPolicyFilePath -Force -ErrorAction Stop
+    if (
+      $itemBefore -is [System.IO.FileInfo] -and
+      -not $itemBefore.PSIsContainer -and
+      -not (Test-PathItemIsUnsafeLink $itemBefore)
+    ) {
+      $bytes = [System.IO.File]::ReadAllBytes($DeploymentPolicyFilePath)
+    } else {
+      throw "not a safe regular file"
+    }
+    $itemAfter = Get-Item -LiteralPath $DeploymentPolicyFilePath -Force -ErrorAction Stop
+  } catch {
+    throw "N8N_POLICY_VALIDATION_FAILED: the explicitly configured deployment policy is unavailable or unreadable."
+  }
+  if (
+    -not ($itemAfter -is [System.IO.FileInfo]) -or
+    $itemAfter.PSIsContainer -or
+    (Test-PathItemIsUnsafeLink $itemAfter) -or
+    $itemBefore.FullName -ne $itemAfter.FullName -or
+    $itemBefore.Length -ne $itemAfter.Length -or
+    $itemBefore.CreationTimeUtc.Ticks -ne $itemAfter.CreationTimeUtc.Ticks -or
+    $itemBefore.LastWriteTimeUtc.Ticks -ne $itemAfter.LastWriteTimeUtc.Ticks
+  ) {
+    throw "N8N_POLICY_VALIDATION_FAILED: the explicitly configured deployment policy changed identity while it was read."
+  }
+  $text = [System.Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF)
+  try {
+    $null = $text | ConvertFrom-Json
+  } catch {
+    throw "N8N_POLICY_VALIDATION_FAILED: the explicitly configured deployment policy is invalid JSON."
+  }
+  return [PSCustomObject]@{
+    Content = $text
+    Hash = Get-ByteSha256 $bytes
+    Length = [long]$itemAfter.Length
+    CreationTimeUtcTicks = [long]$itemAfter.CreationTimeUtc.Ticks
+    LastWriteTimeUtcTicks = [long]$itemAfter.LastWriteTimeUtc.Ticks
+  }
+}
+
+function Assert-DeploymentPolicySnapshotCurrent($Snapshot) {
+  $current = Read-SafeDeploymentPolicySnapshot
+  if (
+    $current.Hash -ne $Snapshot.Hash -or
+    $current.Length -ne $Snapshot.Length -or
+    $current.CreationTimeUtcTicks -ne $Snapshot.CreationTimeUtcTicks -or
+    $current.LastWriteTimeUtcTicks -ne $Snapshot.LastWriteTimeUtcTicks
+  ) {
+    throw "N8N_POLICY_VALIDATION_FAILED: the explicitly configured deployment policy changed after validation."
+  }
 }
 
 function Get-DisplayPath($Path) {
@@ -1205,7 +1298,9 @@ function Invoke-PortableWorkflowPreflight($WorkflowFiles, $LiveWorkflows, $Crede
   $plannedImports = @()
   $resolvedTargetPlans = @()
   $blockedWorkflows = @()
-  $missingCredentials = @()
+  $requiredCredentialMisses = @()
+  $optionalCredentialMisses = @()
+  $unsafeCredentialFailures = @()
   $skippedCount = 0
   $missingLiveWorkflowCount = 0
   $nameMatchedWorkflowCount = 0
@@ -1308,8 +1403,8 @@ function Invoke-PortableWorkflowPreflight($WorkflowFiles, $LiveWorkflows, $Crede
     if (Test-Path -LiteralPath $PortableCredentialsFilePath -PathType Leaf) {
       $prepareArgs += @("--portable-credentials", $PortableCredentialsFilePath)
     }
-    if (Test-Path -LiteralPath $DeploymentPolicyFilePath -PathType Leaf) {
-      $prepareArgs += @("--deployment-policy", $DeploymentPolicyFilePath)
+    if (Test-Path -LiteralPath $EffectiveDeploymentPolicyFilePath -PathType Leaf) {
+      $prepareArgs += @("--deployment-policy", $EffectiveDeploymentPolicyFilePath)
     }
     if (Test-Path -LiteralPath $ResourceBindingsFilePath -PathType Leaf) {
       $prepareArgs += @("--resource-bindings", $ResourceBindingsFilePath)
@@ -1323,7 +1418,7 @@ function Invoke-PortableWorkflowPreflight($WorkflowFiles, $LiveWorkflows, $Crede
       $preparation = if (Test-Path -LiteralPath $resultFile -PathType Leaf) { Get-Content -LiteralPath $resultFile -Raw | ConvertFrom-Json } else { $null }
       $code = if ($null -ne $preparation -and $preparation.code) { [string]$preparation.code } else { "N8N_INTERNAL_ERROR" }
       foreach ($requirement in @($preparation.details.credentials)) {
-        $missingCredentials += [PSCustomObject]@{
+        $credentialIssue = [PSCustomObject]@{
           WorkflowFile = $workflowFile.Name
           NodeName = [string]$requirement.nodeName
           NodeType = [string]$requirement.nodeType
@@ -1333,14 +1428,45 @@ function Invoke-PortableWorkflowPreflight($WorkflowFiles, $LiveWorkflows, $Crede
           MatchCount = [int]$requirement.matchCount
           Code = if ($requirement.code) { [string]$requirement.code } else { $code }
         }
+        if (-not $credentialIssue.Required -and $credentialIssue.Code -eq "N8N_CREDENTIAL_MISSING") {
+          $optionalCredentialMisses += $credentialIssue
+        } elseif ($credentialIssue.Required -and $credentialIssue.Code -eq "N8N_CREDENTIAL_MISSING") {
+          $requiredCredentialMisses += $credentialIssue
+        } else {
+          $unsafeCredentialFailures += $credentialIssue
+        }
       }
       $blockedWorkflows += [PSCustomObject]@{ File = $workflowFile.Name; Reason = "$code`: portable preparation failed. Inspect the sanitized operation report."; Kind = $code }
       continue
     }
 
     $preparation = Get-Content -LiteralPath $resultFile -Raw | ConvertFrom-Json
-    foreach ($requirement in @($preparation.credentialResolution.requirements)) {
-      $missingCredentials += [PSCustomObject]@{
+    foreach ($requirement in @($preparation.credentialResolution.blockingRequirements)) {
+      $requiredCredentialMisses += [PSCustomObject]@{
+        WorkflowFile = $workflowFile.Name
+        NodeName = [string]$requirement.nodeName
+        NodeType = [string]$requirement.nodeType
+        LogicalName = [string]$requirement.logicalName
+        CredentialType = [string]$requirement.credentialType
+        Required = if ($null -eq $requirement.required) { $true } else { [bool]$requirement.required }
+        MatchCount = [int]$requirement.matchCount
+        Code = [string]$requirement.code
+      }
+    }
+    foreach ($requirement in @($preparation.credentialResolution.optionalRequirements)) {
+      $optionalCredentialMisses += [PSCustomObject]@{
+        WorkflowFile = $workflowFile.Name
+        NodeName = [string]$requirement.nodeName
+        NodeType = [string]$requirement.nodeType
+        LogicalName = [string]$requirement.logicalName
+        CredentialType = [string]$requirement.credentialType
+        Required = $false
+        MatchCount = [int]$requirement.matchCount
+        Code = [string]$requirement.code
+      }
+    }
+    foreach ($requirement in @($preparation.credentialResolution.unsafeRequirements)) {
+      $unsafeCredentialFailures += [PSCustomObject]@{
         WorkflowFile = $workflowFile.Name
         NodeName = [string]$requirement.nodeName
         NodeType = [string]$requirement.nodeType
@@ -1376,7 +1502,8 @@ function Invoke-PortableWorkflowPreflight($WorkflowFiles, $LiveWorkflows, $Crede
         TargetId = $targetWorkflowId
         UpdatesArchivedWorkflow = $updatesArchivedWorkflow
         Action = $plannedAction
-        MissingCredentials = @($preparation.credentialResolution.requirements)
+        RequiredCredentialMisses = @($preparation.credentialResolution.blockingRequirements)
+        OptionalCredentialMisses = @($preparation.credentialResolution.optionalRequirements)
       }
     }
   }
@@ -1390,7 +1517,10 @@ function Invoke-PortableWorkflowPreflight($WorkflowFiles, $LiveWorkflows, $Crede
   return [PSCustomObject]@{
     PlannedImports = @($plannedImports)
     BlockedWorkflows = @($blockedWorkflows)
-    MissingCredentials = @($missingCredentials)
+    RequiredCredentialMisses = @($requiredCredentialMisses)
+    OptionalCredentialMisses = @($optionalCredentialMisses)
+    UnsafeCredentialFailures = @($unsafeCredentialFailures)
+    ReportCredentials = @($requiredCredentialMisses) + @($optionalCredentialMisses) + @($unsafeCredentialFailures)
     SkippedCount = $skippedCount
     ComparisonWarningCount = 0
     MissingLiveWorkflowCount = $missingLiveWorkflowCount
@@ -1485,6 +1615,10 @@ $ReportsDirPath = Join-Path $RepoRoot $ReportsDir
 $PreparedDirPath = Join-Path $RepoRoot $PreparedDir
 $CredentialExportDirPath = Join-Path $RepoRoot $CredentialExportDir
 Assert-StrictRepoChildPath $WorkflowIdentityFilePath "Workflow identity state"
+$deploymentPolicySnapshot = $null
+if ($DeploymentPolicyFileWasExplicit) {
+  $deploymentPolicySnapshot = Read-SafeDeploymentPolicySnapshot
+}
 
 Write-Section "n8n workflow import"
 Write-Host ("Repo root        : {0}" -f $RepoRoot)
@@ -1518,6 +1652,10 @@ if (-not $DryRun) {
   }
 }
 
+if ($DeploymentPolicyFileWasExplicit) {
+  Assert-DeploymentPolicySnapshotCurrent $deploymentPolicySnapshot
+}
+
 $workflowFiles = Get-RootWorkflowFiles $WorkflowDirPath
 Assert-NoCaseFoldedWorkflowFileCollisions $workflowFiles
 
@@ -1527,6 +1665,8 @@ if ($validationResult.ExitCode -ne 0) {
   throw "Workflow JSON validation failed before live import.`n$($validationResult.Output -join "`n")"
 }
 Write-CommandOutput $validationResult.StdOut "VALID"
+
+Assert-PortableDocumentsReadable
 
 $transportResult = Invoke-CapturedCommand "node" @((Join-Path $HelperScriptDir "n8n-workflow-transport.cjs"), "capabilities", "docker-server-cli")
 if ($transportResult.ExitCode -ne 0) {
@@ -1538,17 +1678,28 @@ Invoke-LivePreflight
 $liveWorkflows = Get-LiveWorkflows
 Write-Step "LIVE" "Read $($liveWorkflows.Count) workflow(s) from live n8n."
 
+if ($DeploymentPolicyFileWasExplicit) {
+  Assert-DeploymentPolicySnapshotCurrent $deploymentPolicySnapshot
+  $script:PortablePolicyPreflightPassed = $true
+}
 Initialize-RunDirectory $PreparedDirPath
-Assert-PortableDocumentsReadable
+$EffectiveDeploymentPolicyFilePath = $DeploymentPolicyFilePath
+if ($DeploymentPolicyFileWasExplicit) {
+  $EffectiveDeploymentPolicyFilePath = Join-Path $PreparedDirPath "deployment-policy.snapshot.json"
+  Write-Utf8NoBomText $EffectiveDeploymentPolicyFilePath ($deploymentPolicySnapshot.Content.TrimEnd() + "`n")
+}
 $targetResolutionBlockers = Test-PortableTargetResolution $workflowFiles $liveWorkflows
 if ($targetResolutionBlockers.Count -gt 0) {
   $targetGate = [PSCustomObject]@{
     PlannedImports = @()
     BlockedWorkflows = @($targetResolutionBlockers)
-    MissingCredentials = @()
+    RequiredCredentialMisses = @()
+    OptionalCredentialMisses = @()
+    UnsafeCredentialFailures = @()
+    ReportCredentials = @()
     SkippedCount = 0
   }
-  Write-N8nOperationReport "BLOCKED" ([string]$targetResolutionBlockers[0].Kind) "resolve-target-workflow-and-node" $false $false $targetResolutionBlockers @() "EXPLAIN_LAST_FAILURE" "Run Explain last n8n failure, resolve the deterministic target or inactivity blocker, then rerun this unchanged command." "unchanged"
+  Write-N8nOperationReport "BLOCKED" ([string]$targetResolutionBlockers[0].Kind) "resolve-target-workflow-and-node" $false $false $targetResolutionBlockers @() "MAP_FROM_FAILURE_CODE" "Use the deterministic supported action for this failure code." "unchanged"
   Write-BlockedSummary $targetGate
   exit 1
 }
@@ -1559,7 +1710,7 @@ Remove-Item -LiteralPath $credentialMetadataFile -Force -ErrorAction SilentlyCon
 
 if ($preflight.BlockedWorkflows.Count -gt 0) {
   $firstBlockCode = [string]$preflight.BlockedWorkflows[0].Kind
-  Write-N8nOperationReport "BLOCKED" $firstBlockCode "prepare" $false $false $preflight.BlockedWorkflows $preflight.MissingCredentials "EXPLAIN_LAST_FAILURE" "Run Explain last n8n failure, follow its supported action, then rerun this unchanged command." "unchanged"
+  Write-N8nOperationReport "BLOCKED" $firstBlockCode "prepare" $false $false $preflight.BlockedWorkflows $preflight.ReportCredentials "MAP_FROM_FAILURE_CODE" "Use the deterministic supported action for this failure code." "unchanged"
   Write-BlockedSummary $preflight
   exit 1
 }
@@ -1582,7 +1733,7 @@ if ($DryRun) {
   } else {
     Write-Host "1. No import is needed right now."
   }
-  Write-N8nOperationReport "DRY_RUN" "N8N_IMPORT_NO_CHANGES" "plan" $false $false $preflight.PlannedImports $preflight.MissingCredentials "RERUN_WITHOUT_DRY_RUN" "Rerun this unchanged command without -DryRun when ready." "unchanged"
+  Write-N8nOperationReport "DRY_RUN" "N8N_IMPORT_NO_CHANGES" "plan" $false $false $preflight.PlannedImports $preflight.ReportCredentials "RERUN_WITHOUT_DRY_RUN" "Rerun this unchanged command without -DryRun when ready." "unchanged"
   exit 0
 }
 
@@ -1595,10 +1746,10 @@ if ($preflight.PlannedImports.Count -eq 0) {
   Write-Host ("Restart warnings  : {0}" -f $preflight.RestartWarningCount)
   Write-Host "Live n8n was not changed."
 
-  if ($preflight.MissingCredentials.Count -gt 0) {
-    Write-N8nOperationReport "ACTION_REQUIRED" "N8N_CREDENTIAL_MISSING" "credential-resolution" $false $false @() $preflight.MissingCredentials "CREATE_CREDENTIALS_AND_RERUN" "Create each reported logical credential name and type, then rerun this unchanged command." "inactive"
+  if ($preflight.RequiredCredentialMisses.Count -gt 0) {
+    Write-N8nOperationReport "ACTION_REQUIRED" "N8N_CREDENTIAL_MISSING" "credential-resolution" $false $false @() $preflight.RequiredCredentialMisses "CREATE_CREDENTIALS_AND_RERUN" "Create each reported logical credential name and type, then rerun this unchanged command." "inactive"
   } else {
-    Write-N8nOperationReport "SUCCESS" "N8N_IMPORT_NO_CHANGES" "effective-comparison" $false $false @() @() "NONE" "No action is required; the effective inactive payload is unchanged." "inactive"
+    Write-N8nOperationReport "SUCCESS" "N8N_IMPORT_NO_CHANGES" "effective-comparison" $false $false @() $preflight.OptionalCredentialMisses "NONE" "No action is required; the effective inactive payload is unchanged." "inactive"
   }
 
   Write-Section "Next Action Steps"
@@ -1665,7 +1816,7 @@ foreach ($plannedImport in $preflight.PlannedImports) {
   $postImportWorkflows = Get-LiveWorkflows
   $postconditionMatches = @($postImportWorkflows | Where-Object { [string]$_.id -eq [string]$plannedImport.TargetId })
   if ($postconditionMatches.Count -ne 1 -or $postconditionMatches[0].active -ne $false) {
-    Write-N8nOperationReport "FAILED" "N8N_POSTCONDITION_FAILED" "verify-postcondition" $true $true @($plannedImport) $preflight.MissingCredentials "STOP_AND_ESCALATE" "Do not activate or execute the workflow; inspect the sanitized report and escalate the Toolkit defect." "unknown"
+    Write-N8nOperationReport "FAILED" "N8N_POSTCONDITION_FAILED" "verify-postcondition" $true $true @($plannedImport) $preflight.ReportCredentials "STOP_AND_ESCALATE" "Do not activate or execute the workflow; inspect the sanitized report and escalate the Toolkit defect." "unknown"
     throw "N8N_POSTCONDITION_FAILED: imported workflow was not uniquely observable as inactive."
   }
   Write-Step "VERIFY" "$($plannedImport.File) postcondition is inactive; no workflow was executed."
@@ -1683,15 +1834,15 @@ Write-WorkflowActionSummary $preflight.PlannedImports "Done"
 
 Write-Section "Next Action Steps"
 if ($importedCount -gt 0) {
-  if ($preflight.MissingCredentials.Count -gt 0) {
+  if ($preflight.RequiredCredentialMisses.Count -gt 0) {
     Write-Host "Create the following credentials with exactly these logical names and types, then rerun this unchanged command:"
-    foreach ($credential in $preflight.MissingCredentials) {
+    foreach ($credential in $preflight.RequiredCredentialMisses) {
       Write-Host ("- {0} ({1})" -f $credential.LogicalName, $credential.CredentialType)
     }
-    Write-N8nOperationReport "ACTION_REQUIRED" "N8N_CREDENTIAL_MISSING" "postcondition" $true $true $preflight.PlannedImports $preflight.MissingCredentials "CREATE_CREDENTIALS_AND_RERUN" "Create each reported logical credential name and type, then rerun this unchanged command." "inactive"
+    Write-N8nOperationReport "ACTION_REQUIRED" "N8N_CREDENTIAL_MISSING" "postcondition" $true $true $preflight.PlannedImports $preflight.RequiredCredentialMisses "CREATE_CREDENTIALS_AND_RERUN" "Create each reported logical credential name and type, then rerun this unchanged command." "inactive"
   } else {
     Write-Host "No further import action is required. Activation remains a separate operator decision outside this helper."
-    Write-N8nOperationReport "SUCCESS" "N8N_IMPORT_SUCCESS" "receipt" $true $true $preflight.PlannedImports @() "NONE" "No further import action is required." "inactive"
+    Write-N8nOperationReport "SUCCESS" "N8N_IMPORT_SUCCESS" "receipt" $true $true $preflight.PlannedImports $preflight.OptionalCredentialMisses "NONE" "No further import action is required." "inactive"
   }
 } else {
   Write-Host "1. No live workflow changes were imported."

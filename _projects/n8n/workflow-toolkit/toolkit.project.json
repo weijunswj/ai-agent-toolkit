@@ -5,9 +5,9 @@
   "title": "n8n Workflow Toolkit",
   "module_path": "_projects/n8n/workflow-toolkit",
   "main_path": "_projects/n8n/workflow-toolkit/_main",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "version_policy": "semver",
-  "version_notes": "Preserves explicit deployment-policy intent, canonical absence, direct-document selector and migration semantics, unique import targets, and duplicate-free transaction targets.",
+  "version_notes": "Validates explicit import policies before live discovery, emits canonical name-only credentials, strips webhook IDs before restoration, preserves transaction modes, separates optional credential misses, and maps concrete failure remedies.",
   "outputs": [
     {
       "kind": "curated",
