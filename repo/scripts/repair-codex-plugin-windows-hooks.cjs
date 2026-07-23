@@ -681,12 +681,15 @@ function n8nSkillsCompatibilityFingerprints(pluginRoot, expected, adapter = N8N_
 }
 
 function stableStatIdentity(stat) {
+  const nanoseconds = (nsValue, msValue) => nsValue === undefined
+    ? String(Math.trunc(Number(msValue) * 1_000_000))
+    : String(nsValue);
   return {
     dev: String(stat.dev),
     ino: String(stat.ino),
     size: String(stat.size),
-    mtime_ms: String(stat.mtimeMs),
-    ctime_ms: String(stat.ctimeMs)
+    mtime_ns: nanoseconds(stat.mtimeNs, stat.mtimeMs),
+    ctime_ns: nanoseconds(stat.ctimeNs, stat.ctimeMs)
   };
 }
 
@@ -695,35 +698,67 @@ function stableStatIdentitiesMatch(left, right) {
     && left.dev === right.dev
     && left.ino === right.ino
     && left.size === right.size
-    && left.mtime_ms === right.mtime_ms
-    && left.ctime_ms === right.ctime_ms;
+    && left.mtime_ns === right.mtime_ns
+    && left.ctime_ns === right.ctime_ns;
 }
 
-function sha256RegularFileBounded(filePath, expectedStat, maxBytes) {
+function sha256RegularFileBounded(filePath, expectedStat, maxBytes, options = {}) {
   const expectedIdentity = stableStatIdentity(expectedStat);
-  const size = expectedStat.size;
+  const size = Number(expectedStat.size);
+  if (!Number.isSafeInteger(size) || size < 0) {
+    throw new Error('plugin cache regular file has an unsupported byte length');
+  }
   if (size > maxBytes) throw new Error('plugin cache regular file exceeds the supported byte limit');
-  const hash = crypto.createHash('sha256');
   const buffer = Buffer.allocUnsafe(64 * 1024);
   const descriptor = fs.openSync(filePath, 'r');
-  try {
-    if (!stableStatIdentitiesMatch(expectedIdentity, stableStatIdentity(fs.fstatSync(descriptor)))) {
-      throw new Error('plugin cache regular file changed while its identity was inspected');
-    }
+  const hashPass = (pass) => {
+    const hash = crypto.createHash('sha256');
     let offset = 0;
     while (offset < size) {
       const bytesRead = fs.readSync(descriptor, buffer, 0, Math.min(buffer.length, size - offset), offset);
       if (bytesRead <= 0) throw new Error('plugin cache regular file changed while its identity was inspected');
       hash.update(buffer.subarray(0, bytesRead));
       offset += bytesRead;
+      if (options.afterReadChunk) {
+        options.afterReadChunk({
+          bytesRead,
+          descriptor,
+          filePath,
+          offset,
+          pass,
+          relPath: options.relPath || '',
+          size
+        });
+      }
     }
-    if (!stableStatIdentitiesMatch(expectedIdentity, stableStatIdentity(fs.fstatSync(descriptor)))) {
+    return hash.digest('hex');
+  };
+  try {
+    if (!stableStatIdentitiesMatch(expectedIdentity, stableStatIdentity(fs.fstatSync(descriptor, { bigint: true })))) {
       throw new Error('plugin cache regular file changed while its identity was inspected');
     }
+    const firstDigest = hashPass(1);
+    if (options.afterFirstHashPass) {
+      options.afterFirstHashPass({ descriptor, filePath, relPath: options.relPath || '', size });
+    }
+    const secondDigest = hashPass(2);
+    const descriptorIdentity = stableStatIdentity(fs.fstatSync(descriptor, { bigint: true }));
+    const pathStat = fs.lstatSync(filePath, { bigint: true });
+    const pathIdentity = stableStatIdentity(pathStat);
+    if (
+      firstDigest !== secondDigest
+      || pathStat.isSymbolicLink()
+      || !pathStat.isFile()
+      || !stableStatIdentitiesMatch(expectedIdentity, descriptorIdentity)
+      || !stableStatIdentitiesMatch(expectedIdentity, pathIdentity)
+      || !sameResolvedPath(fs.realpathSync.native(filePath), filePath)
+    ) {
+      throw new Error('plugin cache regular file changed while its identity was inspected');
+    }
+    return firstDigest;
   } finally {
     fs.closeSync(descriptor);
   }
-  return hash.digest('hex');
 }
 
 function fingerprintsMatch(pluginRoot, expected, adapter) {
@@ -747,7 +782,7 @@ function sameResolvedPath(left, right) {
     : resolvedLeft === resolvedRight;
 }
 
-function inspectN8nSkillsTree(pluginRoot, adapter, limits = N8N_SKILLS_TREE_LIMITS) {
+function inspectN8nSkillsTree(pluginRoot, adapter, limits = N8N_SKILLS_TREE_LIMITS, options = {}) {
   const repairedVariants = adapter.repaired_sha256_variants || [adapter.repaired_sha256];
   const changedPaths = new Set([
     ...Object.keys(adapter.pristine_sha256),
@@ -763,7 +798,7 @@ function inspectN8nSkillsTree(pluginRoot, adapter, limits = N8N_SKILLS_TREE_LIMI
   while (pending.length) {
     const current = pending.pop();
     if (current.exit) {
-      const finalStat = fs.lstatSync(current.currentPath);
+      const finalStat = fs.lstatSync(current.currentPath, { bigint: true });
       if (
         finalStat.isSymbolicLink()
         || !finalStat.isDirectory()
@@ -775,7 +810,7 @@ function inspectN8nSkillsTree(pluginRoot, adapter, limits = N8N_SKILLS_TREE_LIMI
       continue;
     }
     if (current.depth > limits.max_depth) throw new Error('plugin cache tree exceeds the supported directory depth');
-    const currentStat = fs.lstatSync(current.currentPath);
+    const currentStat = fs.lstatSync(current.currentPath, { bigint: true });
     if (currentStat.isSymbolicLink() || !currentStat.isDirectory()) {
       throw new Error(`${current.relDir || 'plugin root'} is not a direct regular directory`);
     }
@@ -800,17 +835,25 @@ function inspectN8nSkillsTree(pluginRoot, adapter, limits = N8N_SKILLS_TREE_LIMI
     for (const entry of entries) {
       const fullPath = path.join(current.currentPath, entry.name);
       const relPath = normalizeRelPath(path.join(current.relDir, entry.name));
-      const stat = fs.lstatSync(fullPath);
+      const stat = fs.lstatSync(fullPath, { bigint: true });
       if (stat.isSymbolicLink()) throw new Error(`${relPath} is a symbolic link or junction`);
       if (stat.isDirectory()) {
         childDirectories.push({ currentPath: fullPath, relDir: relPath, depth: current.depth + 1 });
       } else if (stat.isFile()) {
+        const fileSize = Number(stat.size);
+        if (!Number.isSafeInteger(fileSize) || fileSize < 0) {
+          throw new Error('plugin cache regular file has an unsupported byte length');
+        }
         fileCount += 1;
-        totalBytes += stat.size;
+        totalBytes += fileSize;
         if (fileCount > limits.max_files) throw new Error('plugin cache tree exceeds the supported regular-file count');
-        if (stat.size > limits.max_file_bytes) throw new Error('plugin cache regular file exceeds the supported byte limit');
+        if (fileSize > limits.max_file_bytes) throw new Error('plugin cache regular file exceeds the supported byte limit');
         if (totalBytes > limits.max_total_bytes) throw new Error('plugin cache tree exceeds the supported total byte limit');
-        const row = `file\0${relPath}\0${sha256RegularFileBounded(fullPath, stat, limits.max_file_bytes)}\n`;
+        const row = `file\0${relPath}\0${sha256RegularFileBounded(fullPath, stat, limits.max_file_bytes, {
+          afterFirstHashPass: options.afterFirstHashPass,
+          afterReadChunk: options.afterReadChunk,
+          relPath
+        })}\n`;
         allRows.push(row);
         if (!changedPaths.has(relPath)) preservedRows.push(row);
         if (relPath.startsWith('hooks/')) hookFiles.push(relPath);

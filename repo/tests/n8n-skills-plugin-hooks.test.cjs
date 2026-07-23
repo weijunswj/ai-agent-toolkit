@@ -1371,27 +1371,33 @@ test('bounded hook tree inspection accepts a synthetic layout at every exact sup
 
 test('bounded hook tree inspection rejects same-size file replacement and directory entry races', () => {
   const adapter = N8N_SKILLS_COMPATIBILITY_ADAPTERS['1.0.2'];
-  const fileRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-skills-file-race-'));
-  const racedFile = path.join(fileRoot, 'hooks', 'raced.bin');
-  fs.mkdirSync(path.dirname(racedFile));
-  fs.writeFileSync(racedFile, Buffer.alloc(128 * 1024, 0x41));
-  const originalReadSync = fs.readSync;
-  let replaced = false;
-  fs.readSync = function patchedReadSync(...args) {
-    const bytesRead = originalReadSync.apply(this, args);
-    if (!replaced && bytesRead > 0) {
-      replaced = true;
-      fs.writeFileSync(racedFile, Buffer.alloc(128 * 1024, 0x42));
-    }
-    return bytesRead;
-  };
-  try {
+  for (let iteration = 0; iteration < 12; iteration += 1) {
+    const fileRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-skills-file-race-'));
+    const racedFile = path.join(fileRoot, 'hooks', 'raced.bin');
+    fs.mkdirSync(path.dirname(racedFile));
+    fs.writeFileSync(racedFile, Buffer.alloc(128 * 1024, 0x41));
+    const fixedTimestamp = new Date(Math.floor(Date.now() / 1000) * 1000);
+    fs.utimesSync(racedFile, fixedTimestamp, fixedTimestamp);
+    const originalStat = fs.statSync(racedFile);
+    let replaced = false;
     assert.throws(
-      () => inspectN8nSkillsTree(fileRoot, adapter),
+      () => inspectN8nSkillsTree(fileRoot, adapter, N8N_SKILLS_TREE_LIMITS, {
+        afterReadChunk({ pass, relPath }) {
+          if (replaced || pass !== 1 || relPath !== 'hooks/raced.bin') return;
+          replaced = true;
+          fs.writeFileSync(racedFile, Buffer.alloc(128 * 1024, 0x42));
+          fs.utimesSync(racedFile, originalStat.atime, originalStat.mtime);
+          const replacedStat = fs.statSync(racedFile);
+          assert.equal(replacedStat.size, originalStat.size);
+          assert.equal(String(replacedStat.dev), String(originalStat.dev));
+          assert.equal(String(replacedStat.ino), String(originalStat.ino));
+          assert.equal(Math.trunc(replacedStat.mtimeMs), Math.trunc(originalStat.mtimeMs));
+        }
+      }),
       /changed while its identity was inspected/i
     );
-  } finally {
-    fs.readSync = originalReadSync;
+    assert.equal(replaced, true, `iteration ${iteration} must perform the deterministic between-pass overwrite`);
+    assert.deepEqual(fs.readFileSync(racedFile), Buffer.alloc(128 * 1024, 0x42));
   }
 
   const directoryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-skills-directory-race-'));

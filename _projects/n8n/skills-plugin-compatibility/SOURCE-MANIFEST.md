@@ -8,7 +8,7 @@
 
 - `_main/compatibility-contract.json` records the reviewed package identity, supported adapter versions, current upstream state, contract file set, and immutable Git blob identities used to cross-check the executable adapter.
 
-Runtime enforcement derives critical hook paths and complete-tree identity from one bounded deterministic inspection. The first-party Bridge records exact target/stage/backup identity and transition evidence through the existing owned-generation mechanism so interrupted replacement can be adjudicated before current-cache selection without scanning backup-name patterns.
+Runtime enforcement derives critical hook paths and complete-tree identity from one bounded deterministic inspection. Each bounded regular file is opened once, checked with nanosecond stat identity when supported, hashed twice through the same descriptor, and rechecked through both descriptor and path identity so a synchronized same-size overwrite cannot hide behind coarse timestamps. The first-party Bridge records exact target/stage/backup identity and transition evidence through the existing owned-generation mechanism. It registers a target-untouched pre-transaction before copying, appends copy/transform evidence, and adjudicates that exact generation or a registered replacement before current-cache selection without scanning stage or backup name patterns.
 
 ## Excluded Upstream Material
 
