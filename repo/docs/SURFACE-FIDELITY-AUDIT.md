@@ -1,7 +1,7 @@
 # Surface Fidelity Audit
 
 Date: 2026-05-18
-Latest update: 2026-07-23 (adds the first-party external-system router as an exact `_main`-published skill surface)
+Latest update: 2026-07-23 (adds the declared standalone external-system-router runtime dependency surface)
 
 ## Current state
 
@@ -28,8 +28,8 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | Metric | Current value |
 | --- | ---: |
 | projects | 17 |
-| publishedFiles | 256 |
-| declaredOutputFiles | 256 |
+| publishedFiles | 257 |
+| declaredOutputFiles | 257 |
 | packInstalledFiles | 84 |
 | undeclaredPublishedFiles | 0 |
 | packInstalledUndeclared | 0 |
@@ -38,7 +38,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | sharedSurfaceMetadataFindings | 0 |
 | suspiciousPublishedSurfaces | 0 |
 | duplicateProjectContentGroups | 0 |
-| boundaryRecipeOutputs | 256 |
+| boundaryRecipeOutputs | 257 |
 | boundaryRecipeFindings | 0 |
 | curatedDirectoryFindings | 1 |
 
@@ -46,7 +46,7 @@ Current published-file classifications:
 
 | Classification | Count |
 | --- | ---: |
-| declared_generated | 172 |
+| declared_generated | 173 |
 | pack_installed_declared | 84 |
 
 Current boundary recipe classifications:
@@ -56,7 +56,7 @@ Current boundary recipe classifications:
 | curated_adapter | 3 |
 | curated_agent_metadata | 9 |
 | curated_index | 12 |
-| curated_metadata | 3 |
+| curated_metadata | 4 |
 | curated_pack_readme | 3 |
 | curated_reference | 7 |
 | curated_repo_local_agent_template | 4 |
