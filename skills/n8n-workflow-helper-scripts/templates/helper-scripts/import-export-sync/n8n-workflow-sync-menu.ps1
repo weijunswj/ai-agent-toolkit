@@ -579,6 +579,15 @@ function Command-RequiresConfirmation($Record) {
   return $Record.commandKind -eq "export"
 }
 
+function Resolve-CurrentPowerShellHost {
+  $hostName = if ($PSVersionTable.PSEdition -eq "Core") { "pwsh" } else { "powershell.exe" }
+  $hostPath = Join-Path ([string]$PSHOME) $hostName
+  if (-not (Test-Path -LiteralPath $hostPath -PathType Leaf)) {
+    throw "Could not resolve the current PowerShell host from PSHOME."
+  }
+  return [IO.Path]::GetFullPath($hostPath)
+}
+
 function Invoke-CommandRecord($Record, [bool]$SkipMenuConfirmation) {
   if (-not (Test-TrustedCommandRecord $Record)) {
     Write-Step "BLOCK" $script:CommandTrustFailureMessage
@@ -605,7 +614,8 @@ function Invoke-CommandRecord($Record, [bool]$SkipMenuConfirmation) {
   }
 
   if ($Record.commandKind -eq "export" -or $Record.commandKind -eq "import") {
-    & powershell -ExecutionPolicy Bypass -File $recordScript @commandArgs
+    $powerShellHost = Resolve-CurrentPowerShellHost
+    & $powerShellHost -ExecutionPolicy Bypass -File $recordScript @commandArgs
     $exitCode = $LASTEXITCODE
   } elseif ($Record.commandKind -eq "validate") {
     $nodePath = Resolve-NodeCommandPath

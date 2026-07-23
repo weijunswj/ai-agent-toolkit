@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -2449,11 +2450,22 @@ test('source-lock audit passes and catches exact-copy drift for retired sources'
   assert.equal(result.status, 0, result.stderr);
 
   const cwd = tempCopy();
-  const lock = readJsonFile(path.join(cwd, '_projects', 'n8n', 'workflow-toolkit', 'SOURCE-LOCK.json'));
+  const lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-toolkit', 'SOURCE-LOCK.json');
+  const lock = readJsonFile(lockPath);
   assert.equal(lock.source_lifecycle, 'retired_after_migration');
   assert.equal(lock.source_update_policy, 'none');
   assert.equal(lock.public_attribution_required, false);
   const copiedFile = path.join(cwd, '_projects', 'n8n', 'workflow-toolkit', '_main', 'helper-scripts', 'import-export-sync', 'should-import-n8n-workflow.cjs');
+  const copiedBuffer = fs.readFileSync(copiedFile);
+  const copiedHeader = Buffer.from(`blob ${copiedBuffer.length}\0`, 'utf8');
+  const copiedEntry = lock.files.find((entry) => entry.project_path.endsWith('/should-import-n8n-workflow.cjs'));
+  assert.ok(copiedEntry);
+  copiedEntry.mode = 'exact';
+  copiedEntry.source_blob_sha = crypto.createHash('sha1').update(copiedHeader).update(copiedBuffer).digest('hex');
+  delete copiedEntry.notes;
+  writeJsonFile(lockPath, lock);
+  result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
   fs.appendFileSync(copiedFile, '\nDrift test\n');
   result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
