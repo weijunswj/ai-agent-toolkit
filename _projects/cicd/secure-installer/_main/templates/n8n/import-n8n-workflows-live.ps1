@@ -39,7 +39,7 @@ trap {
       $failurePhase = "internal"
       if ($failure.Exception.Message -match '^(N8N_[A-Z_]+):') {
         $failureCode = $Matches[1]
-        $failurePhase = if ($failureCode -eq "N8N_CREDENTIAL_DISCOVERY_UNAVAILABLE") { "discover-target-credential-metadata" } else { "internal" }
+        $failurePhase = if ($failureCode -eq "N8N_CREDENTIAL_DISCOVERY_UNAVAILABLE" -or $failureCode -eq "N8N_CREDENTIAL_CLEANUP_FAILED") { "discover-target-credential-metadata" } else { "internal" }
       }
       $reportWorkflows = if (Get-Variable -Name preflight -ErrorAction SilentlyContinue) { @($preflight.PlannedImports) } else { @() }
       $reportCredentials = if (Get-Variable -Name preflight -ErrorAction SilentlyContinue) { @($preflight.MissingCredentials) } else { @() }
@@ -632,6 +632,7 @@ function Get-SafeCredentialMetadata {
   $localMetadata = Join-Path $PreparedDirPath "credential-metadata-$operationToken.json"
   $helperSource = Join-Path $HelperScriptDir "n8n-credential-metadata.cjs"
   $operationCreated = $false
+  $cleanupFailure = $null
 
   try {
     $stageCheckScript = "const fs=require('node:fs'),path=require('node:path');const p=path.resolve(process.argv[1]),base=path.resolve(process.argv[2]);const s=fs.lstatSync(base);if(s.isSymbolicLink()||fs.realpathSync.native(base)!==base||fs.existsSync(p))process.exit(1);"
@@ -677,11 +678,14 @@ function Get-SafeCredentialMetadata {
     if ($operationCreated) {
       $cleanupResult = Invoke-CapturedCommand "docker" @("exec", $Container, "node", $containerHelper, "cleanup", $containerOperationDir, $containerRoot)
       if ($cleanupResult.ExitCode -ne 0) {
-        Write-Step "WARN" "Credential metadata temporary cleanup did not complete; stop before retrying and inspect the Toolkit-owned target temporary directory."
+        $cleanupFailure = "N8N_CREDENTIAL_CLEANUP_FAILED: Encrypted credential metadata temporary cleanup did not complete; import is blocked."
       }
     }
     $removeHelperScript = "const fs=require('node:fs');const p=process.argv[1];if(fs.existsSync(p)){const s=fs.lstatSync(p);if(!s.isFile()||s.isSymbolicLink())process.exit(1);fs.rmSync(p,{force:false});}"
     $null = Invoke-CapturedCommand "docker" @("exec", $Container, "node", "-e", $removeHelperScript, $containerHelper)
+    if ($null -ne $cleanupFailure) {
+      throw $cleanupFailure
+    }
   }
 }
 
@@ -714,6 +718,14 @@ function Get-LocalWorkflowIdentityId($WorkflowFile, $WorkflowName) {
   }
   $identity = Get-Content -LiteralPath $resultFile -Raw | ConvertFrom-Json
   Remove-Item -LiteralPath $resultFile -Force -ErrorAction SilentlyContinue
+  if (-not [string]::IsNullOrWhiteSpace([string]$identity.targetWorkflowId)) {
+    if (-not [string]::Equals([string]$identity.workflowFile, [string]$WorkflowFile.Name, [System.StringComparison]::Ordinal)) {
+      throw "N8N_POLICY_VALIDATION_FAILED: local target workflow identity does not match the exact canonical workflow file."
+    }
+    if (-not [string]::Equals([string]$identity.workflowName, [string]$WorkflowName, [System.StringComparison]::Ordinal)) {
+      throw "N8N_POLICY_VALIDATION_FAILED: local target workflow identity does not match the intended workflow name."
+    }
+  }
   return [string]$identity.targetWorkflowId
 }
 
@@ -757,12 +769,14 @@ function Test-PortableTargetResolution($WorkflowFiles, $LiveWorkflows) {
       }
     }
     if ($null -eq $target) {
-      $nameMatches = @($LiveWorkflows | Where-Object { [string]$_.name -eq $workflowName })
-      if ($nameMatches.Count -gt 1) {
-        $blocked += [PSCustomObject]@{ File = $workflowFile.Name; WorkflowName = $workflowName; Reason = "N8N_WORKFLOW_MATCH_AMBIGUOUS: multiple target workflows matched the canonical workflow name."; Kind = "N8N_WORKFLOW_MATCH_AMBIGUOUS" }
+      $nameResolution = Resolve-LiveWorkflowByName $workflowName $workflowFile.Name $LiveWorkflows
+      if ($nameResolution.Status -eq "Blocked") {
+        $blocked += [PSCustomObject]@{ File = $workflowFile.Name; WorkflowName = $workflowName; Reason = "N8N_WORKFLOW_MATCH_AMBIGUOUS: $($nameResolution.Reason)"; Kind = "N8N_WORKFLOW_MATCH_AMBIGUOUS" }
         continue
       }
-      if ($nameMatches.Count -eq 1) { $target = $nameMatches[0] }
+      if ($nameResolution.Status -eq "Found" -or $nameResolution.Status -eq "FoundArchived") {
+        $target = $nameResolution.Workflow
+      }
     }
     if ($null -ne $target -and $target.active -eq $true) {
       $blocked += [PSCustomObject]@{ File = $workflowFile.Name; WorkflowName = $workflowName; Reason = "N8N_POLICY_VALIDATION_FAILED: target workflow is active, so inactive import cannot guarantee that no scheduled execution persists."; Kind = "N8N_POLICY_VALIDATION_FAILED" }
@@ -784,6 +798,17 @@ function Get-RootWorkflowFiles($WorkflowDirPath) {
   }
 
   return $workflowFiles
+}
+
+function Assert-NoCaseFoldedWorkflowFileCollisions($WorkflowFiles) {
+  $seen = New-Object 'System.Collections.Generic.Dictionary[string,string]' -ArgumentList ([System.StringComparer]::OrdinalIgnoreCase)
+  foreach ($workflowFile in @($WorkflowFiles)) {
+    $name = [string]$workflowFile.Name
+    if ($seen.ContainsKey($name) -and -not [string]::Equals($seen[$name], $name, [System.StringComparison]::Ordinal)) {
+      throw "N8N_WORKFLOW_MATCH_AMBIGUOUS: case-folded workflow filename collision must be resolved before target lookup."
+    }
+    $seen[$name] = $name
+  }
 }
 
 function Resolve-LiveWorkflowByName($WorkflowName, $WorkflowFileName, $LiveWorkflows) {
@@ -1199,16 +1224,16 @@ function Invoke-PortableWorkflowPreflight($WorkflowFiles, $LiveWorkflows, $Crede
     }
 
     if ($null -eq $targetWorkflow) {
-      $nameMatches = @($LiveWorkflows | Where-Object { [string]$_.name -eq $workflowName })
-      if ($nameMatches.Count -gt 1) {
-        $blockedWorkflows += [PSCustomObject]@{ File = $workflowFile.Name; Reason = "N8N_WORKFLOW_MATCH_AMBIGUOUS: multiple target workflows matched the canonical workflow name."; Kind = "N8N_WORKFLOW_MATCH_AMBIGUOUS" }
+      $nameResolution = Resolve-LiveWorkflowByName $workflowName $workflowFile.Name $LiveWorkflows
+      if ($nameResolution.Status -eq "Blocked") {
+        $blockedWorkflows += [PSCustomObject]@{ File = $workflowFile.Name; Reason = "N8N_WORKFLOW_MATCH_AMBIGUOUS: $($nameResolution.Reason)"; Kind = "N8N_WORKFLOW_MATCH_AMBIGUOUS" }
         continue
       }
-      if ($nameMatches.Count -eq 1) {
-        $targetWorkflow = $nameMatches[0]
+      if ($nameResolution.Status -eq "Found" -or $nameResolution.Status -eq "FoundArchived") {
+        $targetWorkflow = $nameResolution.Workflow
         $targetWorkflowId = [string]$targetWorkflow.id
         $nameMatchedWorkflowCount += 1
-        $plannedAction = "Update by unique workflow name"
+        $plannedAction = if ($nameResolution.Status -eq "FoundArchived") { "Update archived by unique workflow name" } else { "Update by unique workflow name" }
       } else {
         $missingLiveWorkflowCount += 1
         $targetWorkflowId = New-WorkflowId
@@ -1247,9 +1272,11 @@ function Invoke-PortableWorkflowPreflight($WorkflowFiles, $LiveWorkflows, $Crede
       "--output", $preparedFile,
       "--result", $resultFile,
       "--credential-metadata", $CredentialMetadataFile,
-      "--target-workflow-id", $targetWorkflowId,
-      "--allow-unresolved-import"
+      "--target-workflow-id", $targetWorkflowId
     )
+    if ($null -eq $targetWorkflow) {
+      $prepareArgs += "--allow-unresolved-import"
+    }
     if (Test-Path -LiteralPath $PortableCredentialsFilePath -PathType Leaf) {
       $prepareArgs += @("--portable-credentials", $PortableCredentialsFilePath)
     }
@@ -1458,6 +1485,7 @@ if (-not $DryRun) {
 }
 
 $workflowFiles = Get-RootWorkflowFiles $WorkflowDirPath
+Assert-NoCaseFoldedWorkflowFileCollisions $workflowFiles
 
 Write-Section "Workflow JSON Validation"
 $validationResult = Invoke-CapturedCommand "node" @((Join-Path $HelperScriptDir "validate-n8n-workflows.cjs"), $WorkflowDirPath)

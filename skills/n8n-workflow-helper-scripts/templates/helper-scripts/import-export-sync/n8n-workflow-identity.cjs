@@ -40,6 +40,19 @@ function safeWorkflowFile(value) {
   return normalised;
 }
 
+function assertNoCaseFoldedWorkflowFileCollisions(workflowFiles) {
+  const byFoldedFile = new Map();
+  for (const value of workflowFiles || []) {
+    const workflowFile = safeWorkflowFile(value);
+    const folded = workflowFile.toLowerCase();
+    const previous = byFoldedFile.get(folded);
+    if (previous && previous !== workflowFile) {
+      fail('N8N_WORKFLOW_MATCH_AMBIGUOUS', 'Case-folded workflow filename collision must be resolved before target lookup.');
+    }
+    byFoldedFile.set(folded, workflowFile);
+  }
+}
+
 function assertSafeResultPath(resultPath) {
   const result = path.resolve(resultPath);
   const temporaryRoot = path.resolve('.tmp');
@@ -65,16 +78,33 @@ function readState(statePath, repositoryRoot = process.cwd()) {
   if (parsed.schemaVersion !== 1 || !Array.isArray(parsed.workflows)) {
     fail('N8N_POLICY_VALIDATION_FAILED', 'Workflow identity state schema is invalid.');
   }
+  assertNoCaseFoldedWorkflowFileCollisions(
+    parsed.workflows.filter((entry) => entry.workflowFile).map((entry) => entry.workflowFile)
+  );
   return parsed;
 }
 
 function selectIdentity(state, workflowFile, workflowName) {
-  const file = safeWorkflowFile(workflowFile).toLowerCase();
-  const byFile = state.workflows.filter((entry) => String(entry.workflowFile || '').replace(/\\/g, '/').toLowerCase() === file);
-  const matches = byFile.length > 0 ? byFile : state.workflows.filter((entry) => entry.workflowName && entry.workflowName === workflowName);
-  if (matches.length > 1) fail('N8N_WORKFLOW_MATCH_AMBIGUOUS', 'Local workflow identity matched more than one target.');
-  const match = matches[0];
+  const file = safeWorkflowFile(workflowFile);
+  assertNoCaseFoldedWorkflowFileCollisions(
+    state.workflows.filter((entry) => entry.workflowFile).map((entry) => entry.workflowFile)
+  );
+  const exactMatches = state.workflows.filter((entry) => String(entry.workflowFile || '').replace(/\\/g, '/') === file);
+  if (exactMatches.length > 1) fail('N8N_WORKFLOW_MATCH_AMBIGUOUS', 'Local workflow identity matched more than one exact workflow file.');
+  if (exactMatches.length === 0) {
+    const foldedMatches = state.workflows.filter((entry) =>
+      String(entry.workflowFile || '').replace(/\\/g, '/').toLowerCase() === file.toLowerCase()
+    );
+    if (foldedMatches.length > 0) {
+      fail('N8N_WORKFLOW_MATCH_AMBIGUOUS', 'Local workflow identity differs only by filename case; refresh the exact workflow identity before import.');
+    }
+    return null;
+  }
+  const match = exactMatches[0];
   if (!match) return null;
+  if (match.workflowName && workflowName && match.workflowName !== workflowName) {
+    fail('N8N_POLICY_VALIDATION_FAILED', 'Local workflow identity name does not match the intended canonical workflow.');
+  }
   if (typeof match.targetWorkflowId !== 'string' || !match.targetWorkflowId) {
     fail('N8N_POLICY_VALIDATION_FAILED', 'Local workflow identity is missing its internal target workflow ID.');
   }
@@ -95,7 +125,13 @@ function recordIdentity(statePath, input, repositoryRoot = process.cwd()) {
     workflowName: String(input.workflowName || ''),
     targetWorkflowId: input.targetWorkflowId,
   };
-  const index = state.workflows.findIndex((candidate) => String(candidate.workflowFile || '').replace(/\\/g, '/').toLowerCase() === workflowFile.toLowerCase());
+  const foldedMatches = state.workflows.filter((candidate) =>
+    String(candidate.workflowFile || '').replace(/\\/g, '/').toLowerCase() === workflowFile.toLowerCase()
+  );
+  if (foldedMatches.some((candidate) => String(candidate.workflowFile || '').replace(/\\/g, '/') !== workflowFile)) {
+    fail('N8N_WORKFLOW_MATCH_AMBIGUOUS', 'Case-folded workflow filename collision must be resolved before recording target identity.');
+  }
+  const index = state.workflows.findIndex((candidate) => String(candidate.workflowFile || '').replace(/\\/g, '/') === workflowFile);
   if (index >= 0) state.workflows[index] = entry;
   else state.workflows.push(entry);
   state.workflows.sort((left, right) => left.workflowFile.localeCompare(right.workflowFile));
@@ -128,7 +164,11 @@ if (require.main === module) {
       const repositoryRoot = options['repo-root'] || process.cwd();
       const match = selectIdentity(readState(options.state, repositoryRoot), options['workflow-file'], options['workflow-name']);
       const resultPath = assertSafeResultPath(options.result);
-      fs.writeFileSync(resultPath, `${JSON.stringify({ targetWorkflowId: match?.targetWorkflowId || '' })}\n`, { mode: 0o600, flag: 'wx' });
+      fs.writeFileSync(resultPath, `${JSON.stringify({
+        workflowFile: match?.workflowFile || '',
+        workflowName: match?.workflowName || '',
+        targetWorkflowId: match?.targetWorkflowId || '',
+      })}\n`, { mode: 0o600, flag: 'wx' });
       console.log(match ? 'Local target workflow identity resolved internally.' : 'No local target workflow identity is recorded.');
     } else if (command === 'record') {
       recordIdentity(options.state, {
@@ -155,4 +195,5 @@ module.exports = {
   selectIdentity,
   recordIdentity,
   assertSafeResultPath,
+  assertNoCaseFoldedWorkflowFileCollisions,
 };

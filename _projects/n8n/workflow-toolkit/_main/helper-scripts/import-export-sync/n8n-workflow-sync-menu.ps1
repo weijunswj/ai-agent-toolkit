@@ -579,13 +579,34 @@ function Command-RequiresConfirmation($Record) {
   return $Record.commandKind -eq "export"
 }
 
-function Resolve-CurrentPowerShellHost {
-  $hostName = if ($PSVersionTable.PSEdition -eq "Core") { "pwsh" } else { "powershell.exe" }
-  $hostPath = Join-Path ([string]$PSHOME) $hostName
+function Resolve-PowerShellHostPath([string]$CurrentProcessPath, [string]$PowerShellHome, [string]$Edition, [bool]$WindowsHost) {
+  if (-not [string]::IsNullOrWhiteSpace($CurrentProcessPath) -and (Test-Path -LiteralPath $CurrentProcessPath -PathType Leaf)) {
+    return [IO.Path]::GetFullPath($CurrentProcessPath)
+  }
+  if ([string]::IsNullOrWhiteSpace($PowerShellHome)) {
+    throw "Could not resolve the current PowerShell host because PSHOME is unavailable."
+  }
+  $hostName = if ($Edition -eq "Core") {
+    if ($WindowsHost) { "pwsh.exe" } else { "pwsh" }
+  } else {
+    if ($WindowsHost) { "powershell.exe" } else { "powershell" }
+  }
+  $hostPath = Join-Path $PowerShellHome $hostName
   if (-not (Test-Path -LiteralPath $hostPath -PathType Leaf)) {
     throw "Could not resolve the current PowerShell host from PSHOME."
   }
   return [IO.Path]::GetFullPath($hostPath)
+}
+
+function Resolve-CurrentPowerShellHost {
+  $currentProcessPath = ""
+  try {
+    $currentProcessPath = [string]([System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName)
+  } catch {
+    $currentProcessPath = ""
+  }
+  $windowsHost = [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT
+  return Resolve-PowerShellHostPath $currentProcessPath ([string]$PSHOME) ([string]$PSVersionTable.PSEdition) $windowsHost
 }
 
 function Invoke-CommandRecord($Record, [bool]$SkipMenuConfirmation) {

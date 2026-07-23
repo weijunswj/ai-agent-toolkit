@@ -43,12 +43,10 @@ function logicalCredentialName(value) {
 }
 
 function requirementKey(requirement) {
-  return [
-    requirement.nodeId || '',
-    requirement.nodeName || '',
-    requirement.nodeType || '',
-    requirement.credentialType || '',
-  ].join('\u0000');
+  if (requirement.nodeId) {
+    return ['node-id', requirement.nodeId, requirement.nodeType || '', requirement.credentialType || ''].join('\u0000');
+  }
+  return ['node-name-type', requirement.nodeName || '', requirement.nodeType || '', requirement.credentialType || ''].join('\u0000');
 }
 
 function buildPortableCredentialDeclaration(workflow, workflowFile, previousDeclaration = null) {
@@ -179,15 +177,23 @@ function setAtPath(root, parts, value) {
   let target = root;
   for (let index = 0; index < parts.length - 1; index += 1) {
     const part = parts[index];
-    if (!target || typeof target !== 'object' || Array.isArray(target)) {
+    if (!target || typeof target !== 'object') {
       throw new N8nPortableWorkflowError('N8N_POLICY_VALIDATION_FAILED', `Overlay parent is not an object at ${parts.slice(0, index + 1).join('.')}.`);
     }
-    if (!Object.prototype.hasOwnProperty.call(target, part)) target[part] = {};
+    if (Array.isArray(target) && !/^(0|[1-9][0-9]*)$/.test(part)) {
+      throw new N8nPortableWorkflowError('N8N_POLICY_VALIDATION_FAILED', `Overlay array path requires a numeric index at ${parts.slice(0, index + 1).join('.')}.`);
+    }
+    if (!Object.prototype.hasOwnProperty.call(target, part)) {
+      target[part] = /^(0|[1-9][0-9]*)$/.test(parts[index + 1]) ? [] : {};
+    }
     target = target[part];
   }
   const leaf = parts.at(-1);
-  if (!target || typeof target !== 'object' || Array.isArray(target)) {
+  if (!target || typeof target !== 'object') {
     throw new N8nPortableWorkflowError('N8N_POLICY_VALIDATION_FAILED', `Overlay parent is not an object at ${parts.slice(0, -1).join('.')}.`);
+  }
+  if (Array.isArray(target) && !/^(0|[1-9][0-9]*)$/.test(leaf)) {
+    throw new N8nPortableWorkflowError('N8N_POLICY_VALIDATION_FAILED', `Overlay array path requires a numeric index at ${parts.join('.')}.`);
   }
   target[leaf] = clone(value);
 }
@@ -197,22 +203,32 @@ function deleteAtPath(root, parts) {
   if (parent.found && parent.value && typeof parent.value === 'object') delete parent.value[parts.at(-1)];
 }
 
-function sameSelector(entry, workflow, workflowFile) {
+function assessSelector(entry, workflow, workflowFile) {
   const selector = workflowSelector(workflow, workflowFile);
   const normalise = (value) => String(value || '').replace(/\\/g, '/').toLowerCase();
-  let compared = false;
+  const comparisons = [];
   for (const [key, normaliser] of [['workflowFile', normalise], ['workflowId', String], ['workflowName', String]]) {
     if (!entry[key] || !selector[key]) continue;
-    compared = true;
-    if (normaliser(entry[key]) !== normaliser(selector[key])) return false;
+    comparisons.push(normaliser(entry[key]) === normaliser(selector[key]));
   }
-  return compared;
+  return {
+    compared: comparisons.length > 0,
+    matches: comparisons.length > 0 && comparisons.every(Boolean),
+    disagrees: comparisons.some(Boolean) && comparisons.some((matches) => !matches),
+  };
 }
 
 function selectWorkflowEntry(document, workflow, workflowFile, label) {
   if (!document) return null;
   if (Array.isArray(document.workflows)) {
-    const matches = document.workflows.filter((entry) => sameSelector(entry, workflow, workflowFile));
+    const assessed = document.workflows.map((entry) => ({ entry, assessment: assessSelector(entry, workflow, workflowFile) }));
+    if (assessed.some(({ assessment }) => assessment.disagrees)) {
+      throw new N8nPortableWorkflowError(
+        'N8N_POLICY_VALIDATION_FAILED',
+        `Conflicting ${label} workflow selector metadata must be corrected before continuing.`
+      );
+    }
+    const matches = assessed.filter(({ assessment }) => assessment.matches).map(({ entry }) => entry);
     if (matches.length > 1) {
       throw new N8nPortableWorkflowError('N8N_WORKFLOW_MATCH_AMBIGUOUS', `Multiple ${label} entries match the canonical workflow.`);
     }
@@ -272,6 +288,7 @@ function resolveCredentialRequirements(workflow, requirements, credentialMetadat
 
   const issues = [];
   let resolvedCount = 0;
+  const allowUnresolvedImport = options.allowUnresolvedImport === true && !options.liveWorkflow;
   for (const requirement of requirements || []) {
     if (!requirement.credentialType || !requirement.logicalName) {
       throw new N8nPortableWorkflowError('N8N_POLICY_VALIDATION_FAILED', 'Credential declarations require credentialType and logicalName.');
@@ -301,22 +318,66 @@ function resolveCredentialRequirements(workflow, requirements, credentialMetadat
     else if (sameName.length > 0) code = 'N8N_CREDENTIAL_TYPE_MISMATCH';
     const issue = { code, ...sanitisedCredentialDetail(requirement, exact.length) };
     issues.push(issue);
-    node.credentials = node.credentials && typeof node.credentials === 'object' ? node.credentials : {};
-    node.credentials[requirement.credentialType] = { id: null, name: requirement.logicalName };
+    if (allowUnresolvedImport && code === 'N8N_CREDENTIAL_MISSING') {
+      node.credentials = node.credentials && typeof node.credentials === 'object' ? node.credentials : {};
+      node.credentials[requirement.credentialType] = { id: null, name: requirement.logicalName };
+    } else if (requirement.required === false && code === 'N8N_CREDENTIAL_MISSING') {
+      const liveNode = options.liveWorkflow ? selectNode(options.liveWorkflow, requirement) : null;
+      const liveBinding = liveNode?.credentials?.[requirement.credentialType];
+      if (liveBinding && typeof liveBinding === 'object' && typeof liveBinding.id === 'string' && liveBinding.id) {
+        node.credentials = node.credentials && typeof node.credentials === 'object' ? node.credentials : {};
+        node.credentials[requirement.credentialType] = clone(liveBinding);
+      } else if (node.credentials && typeof node.credentials === 'object') {
+        delete node.credentials[requirement.credentialType];
+        if (Object.keys(node.credentials).length === 0) delete node.credentials;
+      }
+    }
   }
 
   const blocking = issues.filter((issue) => {
     if (issue.required === false && issue.code === 'N8N_CREDENTIAL_MISSING') return false;
-    return !(options.allowUnresolvedImport && issue.code === 'N8N_CREDENTIAL_MISSING');
+    return !(allowUnresolvedImport && issue.code === 'N8N_CREDENTIAL_MISSING');
   });
-  return { resolvedCount, issues, blocking, unresolvedImport: issues.some((issue) => issue.code === 'N8N_CREDENTIAL_MISSING') };
+  return {
+    resolvedCount,
+    issues,
+    blocking,
+    unresolvedImport: allowUnresolvedImport && issues.some((issue) => issue.code === 'N8N_CREDENTIAL_MISSING'),
+  };
 }
 
 function uniqueResourceBinding(bindingEntry, node, resourcePath) {
-  const matchingNodes = (bindingEntry?.nodes || []).filter((entry) => {
-    if (entry.nodeId && node.id && entry.nodeId === node.id) return true;
-    return entry.nodeName === node.name && entry.nodeType === node.type;
-  });
+  const entries = bindingEntry?.nodes || [];
+  const idMatches = node.id ? entries.filter((entry) => entry.nodeId && entry.nodeId === node.id) : [];
+  if (idMatches.length > 1) {
+    throw new N8nPortableWorkflowError('N8N_NODE_MATCH_AMBIGUOUS', `Multiple resource-binding nodes match "${node.name || node.id}".`);
+  }
+  if (idMatches.length === 1) {
+    const [binding] = idMatches;
+    if (!binding.nodeType || binding.nodeType !== node.type || (binding.nodeName && binding.nodeName !== node.name)) {
+      throw new N8nPortableWorkflowError(
+        'N8N_POLICY_VALIDATION_FAILED',
+        `Resource binding for stable node ID is stale for "${node.name || node.id}".`
+      );
+    }
+  }
+  const staleIdFallbacks = idMatches.length === 0
+    ? entries.filter((entry) =>
+      entry.nodeId &&
+      entry.nodeId !== node.id &&
+      entry.nodeName === node.name &&
+      entry.nodeType === node.type
+    )
+    : [];
+  if (staleIdFallbacks.length > 0) {
+    throw new N8nPortableWorkflowError(
+      'N8N_POLICY_VALIDATION_FAILED',
+      `Resource binding stable node ID is stale for "${node.name || node.id}".`
+    );
+  }
+  const matchingNodes = idMatches.length > 0
+    ? idMatches
+    : entries.filter((entry) => !entry.nodeId && entry.nodeName === node.name && entry.nodeType === node.type);
   if (matchingNodes.length > 1) {
     throw new N8nPortableWorkflowError('N8N_NODE_MATCH_AMBIGUOUS', `Multiple resource-binding nodes match "${node.name || node.id}".`);
   }
@@ -465,14 +526,27 @@ function preparePortableWorkflow(options) {
   ];
 
   prepared.active = false;
-  const declarationEntry = selectWorkflowEntry(options.credentialDeclarations, prepared, options.workflowFile, 'credential declaration');
-  const policyEntry = selectWorkflowEntry(options.deploymentPolicy, prepared, options.workflowFile, 'deployment policy');
-  const bindingEntry = selectWorkflowEntry(options.resourceBindings, prepared, options.workflowFile, 'resource binding');
+  const liveWorkflowId = typeof options.liveWorkflow?.id === 'string' ? options.liveWorkflow.id : '';
+  const requestedWorkflowId = typeof options.targetWorkflowId === 'string' ? options.targetWorkflowId : '';
+  if (liveWorkflowId && requestedWorkflowId && liveWorkflowId !== requestedWorkflowId) {
+    throw new N8nPortableWorkflowError(
+      'N8N_POLICY_VALIDATION_FAILED',
+      'Resolved live workflow identity conflicts with the requested target workflow ID.'
+    );
+  }
+  const selectorWorkflow = {
+    ...prepared,
+    id: liveWorkflowId || requestedWorkflowId || prepared.id || '',
+  };
+  const declarationEntry = selectWorkflowEntry(options.credentialDeclarations, selectorWorkflow, options.workflowFile, 'credential declaration');
+  const policyEntry = selectWorkflowEntry(options.deploymentPolicy, selectorWorkflow, options.workflowFile, 'deployment policy');
+  const bindingEntry = selectWorkflowEntry(options.resourceBindings, selectorWorkflow, options.workflowFile, 'resource binding');
   const requirements = declarationEntry?.nodes || [];
   assertCredentialDeclarationCoverage(prepared, options.liveWorkflow, requirements);
 
   const credentialResult = resolveCredentialRequirements(prepared, requirements, options.credentialMetadata, {
     allowUnresolvedImport: options.allowUnresolvedImport === true,
+    liveWorkflow: options.liveWorkflow,
   });
   for (const requirement of requirements) {
     const node = selectNode(prepared, requirement);
@@ -564,7 +638,7 @@ function protectCanonicalMappingDomains(portable, previous, protectedChanges) {
         }
         return;
       }
-      if (!previousValue || typeof previousValue !== 'object' || Array.isArray(previousValue)) return;
+      if (!previousValue || typeof previousValue !== 'object') return;
       for (const [key, entry] of Object.entries(previousValue)) {
         preserveChangedExpressions(entry, portableValue && typeof portableValue === 'object' ? portableValue[key] : undefined, [...parts, key]);
       }
@@ -576,7 +650,7 @@ function protectCanonicalMappingDomains(portable, previous, protectedChanges) {
 function canonicaliseExport(options) {
   const portable = canonicalWorkflowForGit(options.liveWorkflow, { preserveTags: options.preserveTags });
   const previous = options.canonicalWorkflow ? clone(options.canonicalWorkflow) : null;
-  const policyEntry = selectWorkflowEntry(options.deploymentPolicy, portable, options.workflowFile, 'deployment policy');
+  const policyEntry = selectWorkflowEntry(options.deploymentPolicy, options.liveWorkflow, options.workflowFile, 'deployment policy');
   const protectedPaths = policyPathsForExport(policyEntry);
   const protectedChanges = [];
 
@@ -615,11 +689,22 @@ function mergeCredentialDeclarationDocument(document, declaration) {
   const next = document && typeof document === 'object' ? clone(document) : { schemaVersion: SCHEMA_VERSION, workflows: [] };
   next.schemaVersion = SCHEMA_VERSION;
   next.workflows = Array.isArray(next.workflows) ? next.workflows : [];
-  const index = next.workflows.findIndex((entry) => {
-    if (entry.workflowFile && declaration.workflowFile && entry.workflowFile.toLowerCase() === declaration.workflowFile.toLowerCase()) return true;
-    if (entry.workflowId && declaration.workflowId && entry.workflowId === declaration.workflowId) return true;
-    return false;
-  });
+  const exactFileIndex = next.workflows.findIndex((entry) => entry.workflowFile && entry.workflowFile === declaration.workflowFile);
+  const foldedFileMatches = next.workflows.filter((entry) =>
+    entry.workflowFile &&
+    declaration.workflowFile &&
+    entry.workflowFile.toLowerCase() === declaration.workflowFile.toLowerCase()
+  );
+  if (exactFileIndex < 0 && foldedFileMatches.length > 0) {
+    throw new N8nPortableWorkflowError(
+      'N8N_WORKFLOW_MATCH_AMBIGUOUS',
+      'Portable credential declarations contain case-folded workflow filename collisions.'
+    );
+  }
+  const idIndex = next.workflows.findIndex((entry) =>
+    entry.workflowId && declaration.workflowId && entry.workflowId === declaration.workflowId
+  );
+  const index = exactFileIndex >= 0 ? exactFileIndex : idIndex;
   if (index >= 0) next.workflows[index] = declaration;
   else next.workflows.push(declaration);
   next.workflows.sort((left, right) => String(left.workflowFile || left.workflowName).localeCompare(String(right.workflowFile || right.workflowName)));

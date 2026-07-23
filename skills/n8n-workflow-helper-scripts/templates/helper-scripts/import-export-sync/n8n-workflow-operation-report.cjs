@@ -3,7 +3,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const REPORT_SCHEMA_VERSION = 1;
-const TOOLKIT_VERSION = '2.7.33';
+const TOOLKIT_VERSION = '2.8.3';
 const RETENTION_DAYS = 90;
 const MAX_HISTORY_REPORTS = 500;
 const STABLE_CODES = new Set([
@@ -11,6 +11,7 @@ const STABLE_CODES = new Set([
   'N8N_CREDENTIAL_AMBIGUOUS',
   'N8N_CREDENTIAL_TYPE_MISMATCH',
   'N8N_CREDENTIAL_DISCOVERY_UNAVAILABLE',
+  'N8N_CREDENTIAL_CLEANUP_FAILED',
   'N8N_RESOURCE_BINDING_MISSING',
   'N8N_WORKFLOW_MATCH_AMBIGUOUS',
   'N8N_NODE_MATCH_AMBIGUOUS',
@@ -29,6 +30,7 @@ const EXPLANATIONS = Object.freeze({
   N8N_CREDENTIAL_AMBIGUOUS: 'More than one target credential has the required logical name and type.',
   N8N_CREDENTIAL_TYPE_MISMATCH: 'The logical credential name exists, but not with the required credential type.',
   N8N_CREDENTIAL_DISCOVERY_UNAVAILABLE: 'The supported target credential metadata provider could not return safe metadata.',
+  N8N_CREDENTIAL_CLEANUP_FAILED: 'Encrypted credential metadata temporary cleanup did not complete safely.',
   N8N_RESOURCE_BINDING_MISSING: 'A required environment-specific exact resource binding is missing.',
   N8N_WORKFLOW_MATCH_AMBIGUOUS: 'The target workflow selector matched more than one workflow.',
   N8N_NODE_MATCH_AMBIGUOUS: 'A stable node selector did not identify exactly one node.',

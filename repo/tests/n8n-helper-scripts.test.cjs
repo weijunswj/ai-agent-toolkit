@@ -222,6 +222,152 @@ try {
   });
 }
 
+function runMenuHostResolutionHarness(shell) {
+  const root = tempDir();
+  const powerShellHome = path.join(root, 'PowerShell Home With Spaces');
+  const fallbackExecutable = path.join(powerShellHome, 'pwsh.exe');
+  const currentExecutable = path.join(root, 'Current PowerShell With Spaces.exe');
+  const harnessPath = path.join(root, 'menu-host-resolution.ps1');
+  fs.mkdirSync(powerShellHome, { recursive: true });
+  fs.writeFileSync(fallbackExecutable, '');
+  fs.writeFileSync(currentExecutable, '');
+  fs.writeFileSync(harnessPath, `
+$ErrorActionPreference = "Stop"
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(${psSingleQuoted(path.join(sourceScriptDir, 'n8n-workflow-sync-menu.ps1'))}, [ref]$tokens, [ref]$errors)
+if ($errors.Count -gt 0) { throw $errors[0].Message }
+$function = $ast.Find({
+  param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq "Resolve-PowerShellHostPath"
+}, $true)
+Invoke-Expression $function.Extent.Text
+$preferred = Resolve-PowerShellHostPath ${psSingleQuoted(currentExecutable)} ${psSingleQuoted(path.join(root, 'missing home'))} "Core" $true
+$fallback = Resolve-PowerShellHostPath ${psSingleQuoted(path.join(root, 'missing.exe'))} ${psSingleQuoted(powerShellHome)} "Core" $true
+[PSCustomObject]@{ Preferred = $preferred; Fallback = $fallback } | ConvertTo-Json -Compress
+`, 'utf8');
+  const result = spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', harnessPath], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  return { root, result, currentExecutable, fallbackExecutable };
+}
+
+function runArchiveResolutionHarness(shell) {
+  const root = tempDir();
+  const harnessPath = path.join(root, 'archive-resolution.ps1');
+  fs.writeFileSync(harnessPath, `
+$ErrorActionPreference = "Stop"
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(${psSingleQuoted(path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1'))}, [ref]$tokens, [ref]$errors)
+if ($errors.Count -gt 0) { throw $errors[0].Message }
+$functionNames = @("Resolve-LiveWorkflowByName", "Assert-NoCaseFoldedWorkflowFileCollisions")
+$functions = $ast.FindAll({
+  param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $functionNames -contains $node.Name
+}, $true)
+foreach ($function in $functions) { Invoke-Expression $function.Extent.Text }
+function Write-Step($Status, $Message) {}
+$active = [PSCustomObject]@{ id = "active"; name = "Shared"; isArchived = $false; active = $false }
+$archivedOne = [PSCustomObject]@{ id = "archive-1"; name = "Shared"; isArchived = $true; active = $false }
+$archivedTwo = [PSCustomObject]@{ id = "archive-2"; name = "Shared"; isArchived = $true; active = $false }
+$secondActive = [PSCustomObject]@{ id = "active-2"; name = "Shared"; isArchived = $false; active = $false }
+$ArchivedByNameMode = "Block"
+$currentWins = Resolve-LiveWorkflowByName "Shared" "shared.json" @($active, $archivedOne)
+$ambiguousActive = Resolve-LiveWorkflowByName "Shared" "shared.json" @($active, $secondActive)
+$ArchivedByNameMode = "CreateNew"
+$createBesideArchives = Resolve-LiveWorkflowByName "Shared" "shared.json" @($archivedOne, $archivedTwo)
+$ArchivedByNameMode = "UpdateArchived"
+$updateOneArchive = Resolve-LiveWorkflowByName "Shared" "shared.json" @($archivedOne)
+$collisionCode = ""
+try {
+  Assert-NoCaseFoldedWorkflowFileCollisions @(
+    [PSCustomObject]@{ Name = "A.json" },
+    [PSCustomObject]@{ Name = "a.json" }
+  )
+} catch {
+  $collisionCode = $_.Exception.Message
+}
+[PSCustomObject]@{
+  CurrentWins = $currentWins.Status
+  CurrentId = $currentWins.Workflow.id
+  AmbiguousActive = $ambiguousActive.Status
+  CreateBesideArchives = $createBesideArchives.Status
+  UpdateOneArchive = $updateOneArchive.Status
+  CollisionCode = $collisionCode
+} | ConvertTo-Json -Compress
+`, 'utf8');
+  return {
+    root,
+    result: spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', harnessPath], {
+      cwd: root,
+      encoding: 'utf8',
+    }),
+  };
+}
+
+function runCredentialCleanupHarness(shell) {
+  const root = tempDir();
+  const preparedDir = path.join(root, 'prepared');
+  const harnessPath = path.join(root, 'credential-cleanup.ps1');
+  fs.mkdirSync(preparedDir, { recursive: true });
+  fs.writeFileSync(harnessPath, `
+$ErrorActionPreference = "Stop"
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(${psSingleQuoted(path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1'))}, [ref]$tokens, [ref]$errors)
+if ($errors.Count -gt 0) { throw $errors[0].Message }
+$functionNames = @("Test-NoCredentialsExportResult", "Get-SafeCredentialMetadata")
+$functions = $ast.FindAll({
+  param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $functionNames -contains $node.Name
+}, $true)
+foreach ($function in $functions) { Invoke-Expression $function.Extent.Text }
+function Write-Section($Title) {}
+function Write-Step($Status, $Message) {}
+$Container = "synthetic-container"
+$ContainerDir = "/tmp"
+$PreparedDirPath = ${psSingleQuoted(preparedDir)}
+$HelperScriptDir = ${psSingleQuoted(sourceScriptDir)}
+$script:FailCleanup = $false
+$script:CleanupCalls = 0
+function Invoke-CapturedCommand([string]$Command, [object[]]$Arguments) {
+  $exitCode = 0
+  if ($Arguments -contains "cleanup") {
+    $script:CleanupCalls += 1
+    if ($script:FailCleanup) { $exitCode = 9 }
+  }
+  if ($Arguments.Count -ge 3 -and $Arguments[0] -eq "cp" -and [string]$Arguments[1] -match "credential-metadata\\.json$") {
+    [IO.File]::WriteAllText([string]$Arguments[2], "[]")
+  }
+  return [PSCustomObject]@{ ExitCode = $exitCode; Output = @(); StdOut = @(); StdErr = @() }
+}
+$successPath = Get-SafeCredentialMetadata
+$successExists = Test-Path -LiteralPath $successPath -PathType Leaf
+Remove-Item -LiteralPath $successPath -Force
+$script:FailCleanup = $true
+$failureCode = ""
+try {
+  $null = Get-SafeCredentialMetadata
+} catch {
+  $failureCode = $_.Exception.Message
+}
+[PSCustomObject]@{
+  SuccessExists = $successExists
+  CleanupCalls = $script:CleanupCalls
+  FailureCode = $failureCode
+} | ConvertTo-Json -Compress
+`, 'utf8');
+  return {
+    root,
+    result: spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', harnessPath], {
+      cwd: root,
+      encoding: 'utf8',
+    }),
+  };
+}
+
 function runImportRunDirectoryHarness(shell, helperScriptPath) {
   const root = tempDir();
   const safeDir = path.join(root, '.tmp', 'n8n-live-import');
@@ -1643,6 +1789,64 @@ exit 0
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.equal(fs.readFileSync(invokedPath, 'utf8').trim(), 'True');
   assert.doesNotMatch(result.stdout + result.stderr, /restart prompt|Read-Host|Press R/i);
+});
+
+test('PowerShell menu host resolution prefers the exact process and falls back to pwsh.exe on Windows paths with spaces', (t) => {
+  const shell = findPowerShell();
+  if (!shell) {
+    t.skip('PowerShell is unavailable');
+    return;
+  }
+  const fixture = runMenuHostResolutionHarness(shell);
+  try {
+    assert.equal(fixture.result.status, 0, fixture.result.stdout + fixture.result.stderr);
+    const parsed = JSON.parse(fixture.result.stdout.trim());
+    assert.equal(path.resolve(parsed.Preferred), path.resolve(fixture.currentExecutable));
+    assert.equal(path.resolve(parsed.Fallback), path.resolve(fixture.fallbackExecutable));
+    assert.match(path.basename(parsed.Fallback), /^pwsh\.exe$/i);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('archive-aware name resolution prefers one current workflow and tolerates multiple archives only in CreateNew mode', (t) => {
+  const shell = findPowerShell();
+  if (!shell) {
+    t.skip('PowerShell is unavailable');
+    return;
+  }
+  const fixture = runArchiveResolutionHarness(shell);
+  try {
+    assert.equal(fixture.result.status, 0, fixture.result.stdout + fixture.result.stderr);
+    const parsed = JSON.parse(fixture.result.stdout.trim());
+    assert.equal(parsed.CurrentWins, 'Found');
+    assert.equal(parsed.CurrentId, 'active');
+    assert.equal(parsed.AmbiguousActive, 'Blocked');
+    assert.equal(parsed.CreateBesideArchives, 'ArchivedCreateNew');
+    assert.equal(parsed.UpdateOneArchive, 'FoundArchived');
+    assert.match(parsed.CollisionCode, /^N8N_WORKFLOW_MATCH_AMBIGUOUS:/);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('encrypted credential cleanup succeeds normally and a cleanup failure blocks preparation without secret output', (t) => {
+  const shell = findPowerShell();
+  if (!shell) {
+    t.skip('PowerShell is unavailable');
+    return;
+  }
+  const fixture = runCredentialCleanupHarness(shell);
+  try {
+    assert.equal(fixture.result.status, 0, fixture.result.stdout + fixture.result.stderr);
+    const parsed = JSON.parse(fixture.result.stdout.trim());
+    assert.equal(parsed.SuccessExists, true);
+    assert.equal(parsed.CleanupCalls, 2);
+    assert.match(parsed.FailureCode, /^N8N_CREDENTIAL_CLEANUP_FAILED:/);
+    assert.doesNotMatch(fixture.result.stdout + fixture.result.stderr, /encrypted-secret|oauthToken|credentialId|credentials\.encrypted\.json/i);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
 });
 
 test('PowerShell n8n helper scripts use colored sections, status tags, and clean failure blocks', () => {

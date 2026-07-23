@@ -71,6 +71,143 @@ function assertStrictChild(rootPath, targetPath, label) {
   return target;
 }
 
+function transactionError(message, cause) {
+  const error = new Error(message, cause ? { cause } : undefined);
+  error.code = 'N8N_INTERNAL_ERROR';
+  return error;
+}
+
+function assertRegularOrMissing(filePath, label) {
+  if (!fs.existsSync(filePath)) return;
+  const stat = fs.lstatSync(filePath);
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw transactionError(`${label} must be a regular file.`);
+  }
+}
+
+function replaceFilesTransactionally(changes, hooks = {}) {
+  if (!Array.isArray(changes) || changes.length === 0) return;
+  const token = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const foldedTargets = new Map();
+  const records = changes.map((change, index) => {
+    const target = path.resolve(change.targetPath);
+    const folded = target.toLowerCase();
+    const previous = foldedTargets.get(folded);
+    if (previous && previous !== target) {
+      const error = new Error('Case-folded workflow filename collision blocks canonical export.');
+      error.code = 'N8N_WORKFLOW_MATCH_AMBIGUOUS';
+      throw error;
+    }
+    foldedTargets.set(folded, target);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    assertRegularOrMissing(target, 'Canonical transaction target');
+    const stage = path.join(path.dirname(target), `.${path.basename(target)}.${token}.${index}.stage`);
+    const backup = path.join(path.dirname(target), `.${path.basename(target)}.${token}.${index}.backup`);
+    const rollbackStage = path.join(path.dirname(target), `.${path.basename(target)}.${token}.${index}.rollback`);
+    assertRegularOrMissing(stage, 'Canonical transaction stage');
+    assertRegularOrMissing(backup, 'Canonical transaction backup');
+    assertRegularOrMissing(rollbackStage, 'Canonical transaction rollback stage');
+    if (fs.existsSync(stage) || fs.existsSync(backup) || fs.existsSync(rollbackStage)) {
+      throw transactionError('Canonical transaction staging path was not unique.');
+    }
+    return {
+      ...change,
+      target,
+      stage,
+      backup,
+      rollbackStage,
+      content: Buffer.from(change.content, 'utf8'),
+      originalExists: fs.existsSync(target),
+      originalContent: fs.existsSync(target) ? fs.readFileSync(target) : null,
+      originalMode: fs.existsSync(target) ? fs.statSync(target).mode : null,
+      originalMoved: false,
+      installed: false,
+    };
+  });
+
+  let preserveRecoveryArtifacts = false;
+  try {
+    for (const record of records) {
+      fs.writeFileSync(record.stage, record.content, { flag: 'wx', mode: 0o600 });
+      if (!fs.readFileSync(record.stage).equals(record.content)) {
+        throw transactionError('Canonical transaction staging verification failed.');
+      }
+      if (typeof record.validate === 'function') record.validate(record.stage);
+    }
+
+    for (let index = 0; index < records.length; index += 1) {
+      const record = records[index];
+      if (record.originalExists) {
+        fs.renameSync(record.target, record.backup);
+        record.originalMoved = true;
+      }
+      fs.renameSync(record.stage, record.target);
+      record.installed = true;
+      if (typeof hooks.beforeVerify === 'function') hooks.beforeVerify(record, index);
+      if (!fs.readFileSync(record.target).equals(record.content)) {
+        throw transactionError('Canonical transaction replacement verification failed.');
+      }
+      if (typeof hooks.afterReplace === 'function') hooks.afterReplace(record, index);
+    }
+
+    for (let index = 0; index < records.length; index += 1) {
+      const record = records[index];
+      if (record.originalMoved && fs.existsSync(record.backup)) {
+        if (typeof hooks.beforeBackupCleanup === 'function') hooks.beforeBackupCleanup(record, index);
+        assertRegularOrMissing(record.backup, 'Canonical transaction backup');
+        fs.rmSync(record.backup, { force: false });
+      }
+    }
+  } catch (error) {
+    const rollbackErrors = [];
+    for (const record of [...records].reverse()) {
+      try {
+        if (record.installed && fs.existsSync(record.target)) {
+          assertRegularOrMissing(record.target, 'Canonical transaction replacement');
+          fs.rmSync(record.target, { force: false });
+        }
+        if (record.originalMoved && fs.existsSync(record.backup)) {
+          assertRegularOrMissing(record.backup, 'Canonical transaction backup');
+          fs.renameSync(record.backup, record.target);
+        } else if (record.originalExists && !fs.existsSync(record.target)) {
+          fs.writeFileSync(record.rollbackStage, record.originalContent, {
+            flag: 'wx',
+            mode: record.originalMode,
+          });
+          fs.renameSync(record.rollbackStage, record.target);
+        }
+        if (record.originalExists) {
+          if (!fs.existsSync(record.target) || !fs.readFileSync(record.target).equals(record.originalContent)) {
+            throw transactionError('Canonical transaction rollback verification failed.');
+          }
+        } else if (fs.existsSync(record.target)) {
+          throw transactionError('Canonical transaction rollback left a newly created target behind.');
+        }
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError);
+      }
+    }
+    if (rollbackErrors.length > 0) {
+      preserveRecoveryArtifacts = true;
+      throw transactionError('Canonical transaction rollback could not restore every original file.', error);
+    }
+    throw error;
+  } finally {
+    for (const record of records) {
+      for (const temporary of [record.stage, record.backup, record.rollbackStage]) {
+        if (preserveRecoveryArtifacts && (temporary === record.backup || temporary === record.rollbackStage)) continue;
+        if (!fs.existsSync(temporary)) continue;
+        try {
+          assertRegularOrMissing(temporary, 'Canonical transaction temporary file');
+          fs.rmSync(temporary, { force: false });
+        } catch {
+          // A failed rollback deliberately preserves its recovery artifact.
+        }
+      }
+    }
+  }
+}
+
 function writeStep(status, message) {
   console.log(`[${status.padEnd(7)}] ${message}`);
 }
@@ -182,6 +319,7 @@ function main() {
     ? readJson(options.portableCredentialsPath)
     : { schemaVersion: 1, workflows: [] };
   const receiptWorkflows = [];
+  const pendingWorkflowWrites = [];
 
   const targets = buildTargets(exportsDir, workflowDir, options.createMissingWorkflows, options.syncExportedOnly);
   if (!targets.length) {
@@ -264,21 +402,46 @@ function main() {
     receiptWorkflows.push({ workflowFile: relativePath(target.workflowFile), workflowName: cleanWorkflow.name || '' });
     portableCredentialDocument = mergeCredentialDeclarationDocument(portableCredentialDocument, exportResult.declaration);
     const previousSize = fs.existsSync(target.workflowFile) ? fs.statSync(target.workflowFile).size : 0;
-    fs.mkdirSync(path.dirname(target.workflowFile), { recursive: true });
-    fs.writeFileSync(target.workflowFile, JSON.stringify(cleanWorkflow, null, 2) + '\n');
-    const nextSize = fs.statSync(target.workflowFile).size;
-    const verification = readWorkflow(target.workflowFile);
-    writeStep(
-      target.isNewWorkflow ? 'CREATE' : 'WRITE',
-      `${path.basename(target.workflowFile)} ${previousSize} -> ${nextSize} bytes, active=${verification.active === false ? 'false' : String(verification.active)}, portable credential requirement(s)=${exportResult.declaration.nodes.length}`
-    );
-    if (exportResult.protectedChanges.length > 0) {
-      writeStep('PROTECT', `${path.basename(target.workflowFile)} retained ${exportResult.protectedChanges.length} canonical protected value(s); use --reviewed-source-update only for an intentional reviewed source change.`);
-    }
+    const targetPath = assertStrictChild(workflowDir, target.workflowFile, 'Canonical workflow');
+    const content = JSON.stringify(cleanWorkflow, null, 2) + '\n';
+    pendingWorkflowWrites.push({
+      targetPath,
+      content,
+      previousSize,
+      nextSize: Buffer.byteLength(content),
+      isNewWorkflow: target.isNewWorkflow,
+      declarationCount: exportResult.declaration.nodes.length,
+      protectedChangeCount: exportResult.protectedChanges.length,
+      validate(stagePath) {
+        const verification = readWorkflow(stagePath);
+        if (verification.active !== false) throw transactionError('Staged canonical workflow must remain inactive.');
+      },
+    });
   }
   if (!options.credentialsOnly) {
-    fs.mkdirSync(path.dirname(options.portableCredentialsPath), { recursive: true });
-    fs.writeFileSync(options.portableCredentialsPath, JSON.stringify(portableCredentialDocument, null, 2) + '\n');
+    const declarationContent = JSON.stringify(portableCredentialDocument, null, 2) + '\n';
+    replaceFilesTransactionally([
+      ...pendingWorkflowWrites,
+      {
+        targetPath: options.portableCredentialsPath,
+        content: declarationContent,
+        validate(stagePath) {
+          const parsed = readJson(stagePath);
+          if (parsed.schemaVersion !== 1 || !Array.isArray(parsed.workflows)) {
+            throw transactionError('Staged portable credential declaration is invalid.');
+          }
+        },
+      },
+    ]);
+    for (const pending of pendingWorkflowWrites) {
+      writeStep(
+        pending.isNewWorkflow ? 'CREATE' : 'WRITE',
+        `${path.basename(pending.targetPath)} ${pending.previousSize} -> ${pending.nextSize} bytes, active=false, portable credential requirement(s)=${pending.declarationCount}`
+      );
+      if (pending.protectedChangeCount > 0) {
+        writeStep('PROTECT', `${path.basename(pending.targetPath)} retained ${pending.protectedChangeCount} canonical protected value(s); use --reviewed-source-update only for an intentional reviewed source change.`);
+      }
+    }
     writeStep('SAVE', `${displayPath(options.portableCredentialsPath)} portable credential declarations updated without target credential IDs.`);
   }
 
@@ -307,4 +470,11 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { stripLiveOnlyFields, credentialBindings, buildTargets, parseArgs, assertStrictChild };
+module.exports = {
+  stripLiveOnlyFields,
+  credentialBindings,
+  buildTargets,
+  parseArgs,
+  assertStrictChild,
+  replaceFilesTransactionally,
+};
