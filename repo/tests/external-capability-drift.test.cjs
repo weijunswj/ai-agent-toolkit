@@ -114,10 +114,18 @@ test('hourly workflow is no-AI, credential-free, read-only, and uploads only new
   assert.match(workflow, /if: steps\.drift\.outputs\.material == 'true'/);
   assert.doesNotMatch(workflow, /openai|anthropic|playwright|secrets\./i);
   assert.doesNotMatch(workflow, /pull_request_target|contents: write|issues: write|git push|curl|Invoke-WebRequest/i);
+  assert.ok(
+    workflow.indexOf('Upload sanitized evidence only for new material drift')
+      < workflow.indexOf('Save deduplication state only after evidence upload succeeds'),
+    'deduplication state must be saved only after evidence upload'
+  );
   const upstream = config.targets.find((target) => target.key === 'official-n8n-skills-main');
   assert.equal(upstream.mode, 'git-public-ref-sha256');
   assert.equal(upstream.repository, 'https://github.com/n8n-io/skills.git');
   assert.equal(upstream.ref, 'refs/heads/main');
   assert.match(upstream.expectedDigest, /^sha256:[0-9a-f]{64}$/);
+  const routerTarget = config.targets.find((target) => target.key === 'external-system-router-version');
+  const routerProject = JSON.parse(fs.readFileSync(path.join(root, '_projects', 'development', 'external-system-router', 'toolkit.project.json'), 'utf8'));
+  assert.equal(routerTarget.expectedDigest, router.sha256(routerProject.version));
   assert.equal(JSON.stringify(config).includes('token'), false);
 });

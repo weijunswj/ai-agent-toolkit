@@ -482,12 +482,14 @@ test('strict enforcement requires host-reported trust and active hooks bound to 
   assert.equal(summary.hook_active, true);
   assert.equal(summary.strict_enforcement_verified, true);
   assert.equal(summary.activation_proof.plugin_version, expectedVersion());
-  assert.equal(summary.activation_proof.schema, 4);
-  for (const key of ['cache_identity', 'hook_sha256', 'controller_sha256', 'process_launch_sha256', 'agent_hook_sha256', 'n8n_admission_hook_sha256', 'n8n_domain_router_sha256']) {
+  assert.equal(summary.activation_proof.schema, 5);
+  for (const key of ['cache_identity', 'hook_sha256', 'controller_sha256', 'process_launch_sha256', 'agent_hook_sha256', 'n8n_admission_hook_sha256', 'external_system_router_sha256', 'n8n_domain_router_sha256']) {
     assert.match(summary.activation_proof[key], /^[a-f0-9]{64}$/);
   }
   const processLaunchBytes = fs.readFileSync(path.join(repoRoot, 'repo', 'scripts', 'claude-process-launch.cjs'));
   assert.equal(summary.activation_proof.process_launch_sha256, crypto.createHash('sha256').update(processLaunchBytes).digest('hex'));
+  const externalRouterBytes = fs.readFileSync(path.join(repoRoot, 'skills', 'external-system-router', 'scripts', 'external-system-router.cjs'));
+  assert.equal(summary.activation_proof.external_system_router_sha256, crypto.createHash('sha256').update(externalRouterBytes).digest('hex'));
 });
 
 test('plugin setup cannot manufacture native trust or hook activation', () => {
@@ -954,6 +956,7 @@ test('installed enforcement byte verification rejects missing and stale cache fi
     'repo/scripts/claude-process-launch.cjs',
     'repo/scripts/toolkit-claude-agent-hook.cjs',
     'repo/scripts/toolkit-claude-n8n-admission-hook.cjs',
+    'skills/external-system-router/scripts/external-system-router.cjs',
     'skills/external-system-router/scripts/n8n-domain-router.cjs',
     'repo/scripts/repo-ignore-hygiene.cjs',
     'repo/scripts/repo-local-backup.cjs',
@@ -978,6 +981,15 @@ test('installed enforcement byte verification rejects missing and stale cache fi
   state = setup.evaluateClaudeToolkitPluginState(installedList({ installPath: cache }), { repoRoot });
   assert.equal(state.ok, false);
   assert.match(state.errors.join('\n'), /stale.*toolkit-local-bridge/i);
+  fs.copyFileSync(path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), path.join(cache, 'repo', 'scripts', 'toolkit-local-bridge.cjs'));
+  fs.unlinkSync(path.join(cache, 'skills', 'external-system-router', 'scripts', 'external-system-router.cjs'));
+  state = setup.evaluateClaudeToolkitPluginState(installedList({ installPath: cache }), { repoRoot });
+  assert.equal(state.ok, false);
+  assert.match(state.errors.join('\n'), /missing.*external-system-router/i);
+  fs.copyFileSync(
+    path.join(repoRoot, 'skills', 'external-system-router', 'scripts', 'external-system-router.cjs'),
+    path.join(cache, 'skills', 'external-system-router', 'scripts', 'external-system-router.cjs')
+  );
   fs.rmSync(path.join(cache, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), { force: true });
   state = setup.evaluateClaudeToolkitPluginState(installedList({ installPath: cache }), { repoRoot });
   assert.equal(state.ok, false);
@@ -990,6 +1002,7 @@ test('installed Claude SessionStart bridge must remain a regular cache file', { 
     '.claude-plugin/plugin.json', '.claude-plugin/hooks/hooks.json',
     'repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/claude-process-launch.cjs',
     'repo/scripts/toolkit-claude-agent-hook.cjs', 'repo/scripts/toolkit-claude-n8n-admission-hook.cjs',
+    'skills/external-system-router/scripts/external-system-router.cjs',
     'skills/external-system-router/scripts/n8n-domain-router.cjs', 'repo/scripts/toolkit-local-bridge.cjs',
     'repo/scripts/repo-ignore-hygiene.cjs', 'repo/scripts/repo-local-backup.cjs',
   ]) {

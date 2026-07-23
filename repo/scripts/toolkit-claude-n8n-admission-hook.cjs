@@ -63,13 +63,26 @@ function skillNameFromInput(input) {
   return toolInput.skill || toolInput.skill_name || toolInput.name || toolInput.command_name || '';
 }
 
-function inferredMutationOperation(input) {
+function inferredMutationOperation(input, router) {
   const serialized = JSON.stringify(input.tool_input || {}).toLowerCase();
+  const exact = router?.inferN8nOperation?.(serialized);
+  if (exact && (router.HELPER_OPERATIONS.has(exact) || router.LIVE_OPERATIONS.has(exact) || exact === 'credential-or-oauth-setup')) return exact;
   if (/expression|\{\{/.test(serialized)) return 'expression-authoring';
   if (/node/.test(serialized) && /parameter|configuration|resource|operation/.test(serialized)) return 'node-configuration';
   if (/sdk/.test(serialized)) return 'workflow-sdk-structure';
-  if (/\.json|"nodes"|"connections"/.test(serialized)) return 'workflow-json-structure';
   return 'workflow-material-edit';
+}
+
+function isContinuationPrompt(prompt) {
+  return /^\s*(?:continue|resume|keep|also|then|next)\b/i.test(prompt);
+}
+
+function startsNewObjective(router, ledger, prompt, classification) {
+  if (ledger.objectiveDigest === router.sha256(prompt)) return false;
+  if (isContinuationPrompt(prompt)) return false;
+  if (classification.operation && classification.operation !== ledger.operation) return true;
+  if (ledger.status === 'complete') return true;
+  return true;
 }
 
 function startLedger(router, input, seed, options) {
@@ -99,14 +112,18 @@ function handle(input, options = {}) {
     if (!classification.detected) return {};
     let ledger = router.readTaskLedger(input, options);
     if (ledger) {
+      if (startsNewObjective(router, ledger, prompt, classification)) {
+        ledger = startLedger(router, input, { objective: prompt, operation: classification.operation }, options);
+      } else {
       const reconciliation = router.updateTaskLedger(input, (current) => router.reconcileN8nCapabilityLedger(current, {
-        operation: classification.operation || current.operation,
+        operation: isContinuationPrompt(prompt) ? current.operation : classification.operation || current.operation,
         evidenceText: prompt,
         recordedAt: input.timestamp || new Date().toISOString()
       }), options);
       ledger = reconciliation.mismatch
         ? startLedger(router, input, { objective: prompt, operation: classification.operation }, options)
         : reconciliation.ledger;
+      }
     } else {
       ledger = startLedger(router, input, { objective: prompt, operation: classification.operation }, options);
     }
@@ -126,6 +143,16 @@ function handle(input, options = {}) {
       : `The Skill event did not satisfy the n8n ledger because its name/source/version/compatibility evidence was missing, unsupported, ambiguous, or not required. Missing ${audit.missingCapability}. ${audit.supportedNextAction}`);
   }
 
+  if (eventName === 'PostToolUse' && ['Bash', 'PowerShell'].includes(String(input.tool_name || input.toolName))) {
+    const ledger = router.readTaskLedger(input, options);
+    if (!ledger || !router.isCapabilityReceiptIngestionToolUse(input)) return {};
+    const receipt = router.parseCapabilityReceiptOutput(input);
+    if (!receipt) return context('PostToolUse', 'The bounded capability-receipt command returned no receipt; no n8n capability evidence was recorded.');
+    const updated = router.updateTaskLedger(input, (current) => router.recordCapabilityReceipt(current, receipt, { input }), options);
+    const audit = router.auditN8nCompletion(updated);
+    return context('PostToolUse', `Recorded ${receipt.capabilityId} for ${updated.taskId}. ${audit.complete ? 'Required n8n capabilities are satisfied.' : `Next missing capability: ${audit.missingCapability}. ${audit.supportedNextAction}`}`);
+  }
+
   if (eventName === 'UserPromptExpansion') {
     const ledger = router.readTaskLedger(input, options);
     if (!ledger) return {};
@@ -139,11 +166,12 @@ function handle(input, options = {}) {
     const toolName = String(input.tool_name || input.toolName || '');
     if (!router.GOVERNED_MUTATION_TOOLS.has(toolName)) return {};
     let ledger = router.readTaskLedger(input, options);
+    if (ledger && router.isCapabilityReceiptIngestionToolUse(input)) return {};
     const detectedMutation = router.looksLikeN8nWorkflowMutation(input);
     if (!ledger && detectedMutation) {
       ledger = startLedger(router, input, {
         objective: 'Material n8n workflow mutation detected from bounded tool input.',
-        operation: inferredMutationOperation(input),
+        operation: inferredMutationOperation(input, router),
         evidenceText: JSON.stringify(input.tool_input || {}),
         n8nWorkflowStructure: true
       }, options);
@@ -152,7 +180,7 @@ function handle(input, options = {}) {
     const governedByActiveLedger = !router.isProvenReadOnlyToolUse(input);
     if (detectedMutation) {
       const reconciliation = router.updateTaskLedger(input, (current) => router.reconcileN8nCapabilityLedger(current, {
-          operation: inferredMutationOperation(input),
+          operation: inferredMutationOperation(input, router),
           evidenceText: JSON.stringify(input.tool_input || {}),
           recordedAt: input.timestamp || new Date().toISOString()
         }), options);
@@ -183,18 +211,26 @@ function handle(input, options = {}) {
   return {};
 }
 
-function fallbackDecision(input, error) {
+function fallbackDecision(input, error, options = {}) {
   const eventName = String(input.hook_event_name || input.hookEventName || '');
   const serialized = JSON.stringify(input || {}).toLowerCase().replace(/\\\\/g, '/');
   const looksN8n = /\bn8n\b|n8n-workflows?|"nodes"\s*:.*"connections"\s*:/.test(serialized);
-  if (eventName === 'PreToolUse' && looksN8n) {
+  let activeLedger = false;
+  try {
+    const router = options.router || loadRouter();
+    activeLedger = fs.existsSync(router.stateFileFor(input, options));
+  } catch {
+    activeLedger = false;
+  }
+  const governedTool = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'PowerShell'].includes(String(input.tool_name || input.toolName || ''));
+  if (eventName === 'PreToolUse' && (looksN8n || (activeLedger && governedTool))) {
     return preToolDeny({
       stableCode: 'N8N_ADMISSION_UNAVAILABLE',
       missingCapability: 'toolkit:n8n-domain-router',
       supportedNextAction: 'Restore the verified current Toolkit n8n domain router, then retry the exact operation.'
     });
   }
-  if ((eventName === 'TaskCompleted' || eventName === 'Stop') && looksN8n) {
+  if ((eventName === 'TaskCompleted' || eventName === 'Stop') && (looksN8n || activeLedger)) {
     const reason = 'N8N_ADMISSION_UNAVAILABLE: missing toolkit:n8n-domain-router. Restore the verified current Toolkit n8n domain router, then retry completion.';
     return eventName === 'TaskCompleted' ? commandFailure(reason) : { decision: 'block', reason };
   }
@@ -207,4 +243,4 @@ if (require.main === module) {
   catch (error) { emitHookResult(fallbackDecision(input, error)); }
 }
 
-module.exports = { loadRouter, readInput, preToolDeny, commandFailure, emitHookResult, skillNameFromInput, inferredMutationOperation, handle, fallbackDecision };
+module.exports = { loadRouter, readInput, preToolDeny, commandFailure, emitHookResult, skillNameFromInput, inferredMutationOperation, isContinuationPrompt, startsNewObjective, handle, fallbackDecision };

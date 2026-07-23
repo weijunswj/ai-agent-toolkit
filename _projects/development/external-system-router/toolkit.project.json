@@ -5,9 +5,9 @@
   "title": "External System Router",
   "module_path": "_projects/development/external-system-router",
   "main_path": "_projects/development/external-system-router/_main",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "version_policy": "semver",
-  "version_notes": "Declares the router's OpenAI product surfaces and keeps its implicit safety-router policy covered by plugin evaluation.",
+  "version_notes": "Closes exact-target, graphical-approval, secret-rejection, capability-ledger, n8n admission, and drift-review gaps with focused regressions.",
   "outputs": [
     {
       "kind": "copy",

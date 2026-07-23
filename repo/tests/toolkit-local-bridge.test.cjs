@@ -44,7 +44,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.9.1';
+const expectedBridgeVersion = '2.9.2';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 
 function tmpBaseDir() {
@@ -5281,6 +5281,7 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   const n8nAdmissionHooks = [
     ['PreToolUse', claudeHooks.hooks.PreToolUse[1], 'Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell'],
     ['PostToolUse', claudeHooks.hooks.PostToolUse[0], 'Skill'],
+    ['PostToolUse', claudeHooks.hooks.PostToolUse[1], 'Bash|PowerShell'],
     ['UserPromptSubmit', claudeHooks.hooks.UserPromptSubmit[0], undefined],
     ['UserPromptExpansion', claudeHooks.hooks.UserPromptExpansion[0], undefined],
     ['TaskCompleted', claudeHooks.hooks.TaskCompleted[0], undefined],

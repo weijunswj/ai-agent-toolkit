@@ -2,6 +2,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const router = require('../../skills/external-system-router/scripts/external-system-router.cjs');
 
 function envelope(overrides = {}) {
@@ -42,7 +44,7 @@ function operation(name, overrides = {}) {
 }
 
 function audit(interfaceId, interfaceKind, assuranceScore, overrides = {}) {
-  return {
+  const value = {
     schemaVersion: router.AUDIT_SCHEMA_VERSION,
     provider: 'coolify',
     targetAlias: 'coolify-swooshz-production',
@@ -53,7 +55,7 @@ function audit(interfaceId, interfaceKind, assuranceScore, overrides = {}) {
     identity: `${interfaceId} reviewed identity`,
     version: '2026-07-23',
     availableOperations: ['deploy-revision'],
-    targetBinding: 'coolify-swooshz-production',
+    targetFingerprint: `sha256:${'f'.repeat(64)}`,
     inputSchemaDigest: `sha256:${'1'.repeat(64)}`,
     authScopeStatus: 'configured scope status; no values recorded',
     redaction: ['Allowlisted response fields only.'],
@@ -69,6 +71,8 @@ function audit(interfaceId, interfaceKind, assuranceScore, overrides = {}) {
     evidenceReferences: ['public-doc:coolify-api'],
     ...overrides
   };
+  if (!Object.prototype.hasOwnProperty.call(overrides, 'targetBinding')) value.targetBinding = router.targetBindingDigest(value);
+  return value;
 }
 
 test('risk tiers and one established envelope govern exact operations without per-call prompting', () => {
@@ -111,6 +115,9 @@ function disclosure(overrides = {}) {
   return {
     goal: 'Configure one unsupported provider control.',
     capability: 'computer-use',
+    provider: 'coolify',
+    targetAlias: 'coolify-swooshz-production',
+    operation: 'deploy-revision',
     browserProfileOrApplication: 'Dedicated provider browser profile',
     origin: 'https://console.example.com',
     accountOrOrganisation: 'swooshz',
@@ -168,6 +175,43 @@ test('all graphical capabilities require complete informed disclosure and owner 
   }).oneDeclaredEnvelopeOnly, true);
 });
 
+test('authorization envelopes reject secret, protected identifier, and private-path material before CLI echo', () => {
+  for (const unsafe of [
+    { objective: `Use Bearer ${'x'.repeat(20)} for the deployment.` },
+    { verification: ['Read C:\\Users\\private-user\\secrets.txt.'] },
+    { expectedResult: 'project_id=customer-1234 is active.' }
+  ]) {
+    assert.throws(() => router.validateAuthorizationEnvelope(envelope(unsafe)), (error) =>
+      ['EXTERNAL_SECRET_REJECTED', 'EXTERNAL_PRIVATE_DATA_REJECTED'].includes(error.code));
+  }
+});
+
+test('authorization schema and runtime use the exact same alias contract including colons', () => {
+  const schema = JSON.parse(fs.readFileSync(path.join(
+    __dirname, '..', '..', '_projects', 'development', 'external-system-router', '_main', 'skill',
+    'references', 'schemas', 'authorization-envelope.schema.json'
+  ), 'utf8'));
+  assert.equal(schema.$defs.alias.pattern, router.ALIAS_PATTERN_SOURCE);
+  assert.equal(schema.$defs.operations.items.$ref, '#/$defs/alias');
+  assert.doesNotThrow(() => router.validateAuthorizationEnvelope(envelope({
+    targetAlias: 'team:production',
+    allowedOperations: ['read:revision'],
+    operationRiskTiers: { 'read:revision': 0 },
+    authorisedTier2Operations: [],
+    forbiddenOperations: ['write:revision']
+  })));
+});
+
+test('standalone AI coding rules explicitly declare the external-system-router runtime dependency', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', '..', 'skills', 'ai-coding-agent-rules', 'SKILL.md'), 'utf8');
+  const readme = fs.readFileSync(path.join(__dirname, '..', '..', 'skills', 'ai-coding-agent-rules', 'README.md'), 'utf8');
+  for (const text of [skill, readme]) {
+    assert.match(text, /external-system-router/);
+    assert.match(text, /standalone/i);
+    assert.match(text, /fail closed/i);
+  }
+});
+
 function historyRequest() {
   const saferPaths = Object.fromEntries(router.HISTORY_SAFER_PATHS.map((name) => [name, {
     attempted: true,
@@ -217,18 +261,39 @@ test('operation-specific assurance selects structured routes without a global MC
   const api = audit('coolify-api', 'api', 80);
   const readOnlyMcp = audit('coolify-mcp', 'mcp', 99, { readOnly: true });
   const browser = audit('coolify-browser', 'browser', 100);
-  const context = { provider: 'coolify', targetAlias: 'coolify-swooshz-production', environment: 'production', operation: 'deploy-revision', readOnly: false };
-  const apiSelected = router.selectStrongestAdmissibleInterface(context, [readOnlyMcp, browser, api], { graphicalApprovalValid: true });
+  const context = {
+    provider: 'coolify', targetAlias: 'coolify-swooshz-production', environment: 'production',
+    resource: 'one-application', targetFingerprint: `sha256:${'f'.repeat(64)}`,
+    operation: 'deploy-revision', readOnly: false
+  };
+  const graphicalApproval = router.bindGraphicalApproval(disclosure(), {
+    ownerApproved: true,
+    source: 'owner',
+    authorisationReference: 'owner-approved-disclosure',
+    disclosureDigest: router.sha256(disclosure())
+  });
+  const apiSelected = router.selectStrongestAdmissibleInterface(context, [readOnlyMcp, browser, api], { graphicalApproval });
   assert.equal(apiSelected.selectedInterface, 'coolify-api');
   assert.match(apiSelected.rejected.find((item) => item.interfaceId === 'coolify-mcp').reason, /read-only/);
 
   const typedMcp = audit('typed-coolify-mcp', 'mcp', 95);
   assert.equal(router.selectStrongestAdmissibleInterface(context, [api, typedMcp]).selectedInterface, 'typed-coolify-mcp');
-  assert.equal(router.selectStrongestAdmissibleInterface(context, [browser, api], { graphicalApprovalValid: true }).selectedInterface, 'coolify-api');
+  assert.equal(router.selectStrongestAdmissibleInterface(context, [browser, api], { graphicalApproval }).selectedInterface, 'coolify-api');
   const wrongOperation = audit('wrong-operation-mcp', 'mcp', 100, { operation: 'read-revision', availableOperations: ['read-revision'] });
   const operationScoped = router.selectStrongestAdmissibleInterface(context, [wrongOperation, api]);
   assert.equal(operationScoped.selectedInterface, 'coolify-api');
   assert.throws(() => router.selectStrongestAdmissibleInterface(context, [wrongOperation]), (error) => error.code === 'EXTERNAL_NO_ADMISSIBLE_ROUTE');
+  assert.throws(() => router.selectStrongestAdmissibleInterface(context, [
+    audit('wrong-target', 'api', 100, { targetBinding: router.sha256({ provider: 'coolify', targetAlias: 'staging', environment: 'production', targetFingerprint: `sha256:${'f'.repeat(64)}` }) })
+  ]), (error) => error.code === 'EXTERNAL_AUDIT_TARGET_MISMATCH');
+  assert.throws(() => router.selectStrongestAdmissibleInterface(
+    { ...context, targetFingerprint: `sha256:${'e'.repeat(64)}` }, [api]
+  ), (error) => error.code === 'EXTERNAL_NO_ADMISSIBLE_ROUTE');
+  assert.throws(() => router.selectStrongestAdmissibleInterface(context, [browser], { graphicalApprovalValid: true }),
+    (error) => error.code === 'EXTERNAL_NO_ADMISSIBLE_ROUTE');
+  assert.throws(() => router.selectStrongestAdmissibleInterface(context, [browser], {
+    graphicalApproval: { ...graphicalApproval, resource: 'different-resource' }
+  }), (error) => error.code === 'EXTERNAL_NO_ADMISSIBLE_ROUTE');
 });
 
 function target(alias, environment, credentials = ['credential-store://coolify/swooshz-production'], extra = {}) {

@@ -144,7 +144,13 @@ test('dynamic n8n markers preserve unmarked content and require the complete own
 
   const writeContext = { proposedWrite: { kind: 'target-registration', target: 'coolify-production' } };
   const writeBank = router.buildReconciliationQuestionBank(writeContext);
-  assert.equal(router.assertWriteGate(writeBank, completeAnswers(writeBank), {
+  assert.throws(() => router.assertWriteGate(writeBank, completeAnswers(writeBank), {
+    ...writeContext.proposedWrite,
+    context: writeContext
+  }), (error) => error.code === 'EXTERNAL_WRITE_APPROVAL_REQUIRED');
+  const approved = completeAnswers(writeBank);
+  approved.answers.targetRegistration = true;
+  assert.equal(router.assertWriteGate(writeBank, approved, {
     ...writeContext.proposedWrite,
     context: writeContext
   }).approved, true);
@@ -164,6 +170,28 @@ test('dynamic n8n markers preserve unmarked content and require the complete own
   const removeBank = router.buildReconciliationQuestionBank({ repository: 'consumer', proposedChange: 'remove-n8n-marker' });
   const removed = router.applyN8nMarkerChange(added.content, 'remove', removeBank, completeAnswers(removeBank, 'remove'));
   assert.equal(removed.content, original);
+});
+
+test('unrecognized substantive external-system intent remains pending instead of completing with zero capabilities', () => {
+  const reconciliation = router.reconcileCapabilities({
+    trigger: 'explicit-provider-intent',
+    objective: 'Deploy the application to AWS production.',
+    repositoryEvidence: { files: [] }
+  });
+  assert.deepEqual(reconciliation.requirements.map((entry) => `${entry.provider}/${entry.capability}`), [
+    'external-system/exact-provider-operation-classification'
+  ]);
+  const ledger = router.buildCapabilityLedger(reconciliation);
+  assert.equal(ledger.complete, false);
+  assert.throws(() => router.assertObjectiveComplete(ledger), (error) => error.code === 'EXTERNAL_CAPABILITY_LEDGER_INCOMPLETE');
+});
+
+test('mixed legacy and dynamic n8n marker families fail closed', () => {
+  const mixed = `${router.N8N_DOMAIN_MARKERS.begin}\ncurrent\n${router.N8N_DOMAIN_MARKERS.end}\n`
+    + '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->\n'
+    + 'legacy\n'
+    + '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:END N8N-AGENT-RULES-ADAPTER -->\n';
+  assert.throws(() => router.inspectN8nMarker(mixed), (error) => error.code === 'EXTERNAL_MARKER_MALFORMED');
 });
 
 function manifest(overrides = {}) {

@@ -5,14 +5,17 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "goal", "capability", "browserProfileOrApplication", "origin", "accountOrOrganisation", "project",
-    "environment", "resource", "structuredInterfacesInsufficientReason", "mayRead", "mayClick", "mayType",
+    "goal", "capability", "provider", "targetAlias", "operation", "browserProfileOrApplication", "origin",
+    "accountOrOrganisation", "project", "environment", "resource", "structuredInterfacesInsufficientReason", "mayRead", "mayClick", "mayType",
     "mayUpload", "mayDownload", "mayChange", "mayEncounter", "exposureRisks", "forbiddenScope", "expectedResult",
     "verification", "rollbackOrSafeDisable"
   ],
   "properties": {
     "goal": {"$ref": "#/$defs/statement"},
     "capability": {"enum": ["browser", "chrome", "computer-use", "accessibility", "ui-automation", "screenshot-driven-control", "desktop-automation", "file-picker", "ui-clipboard", "graphical-control"]},
+    "provider": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,63}$"},
+    "targetAlias": {"$ref": "#/$defs/alias"},
+    "operation": {"$ref": "#/$defs/alias"},
     "browserProfileOrApplication": {"$ref": "#/$defs/statement"},
     "origin": {"type": "string", "minLength": 1, "maxLength": 300, "pattern": "^(https://|local-registry://)"},
     "accountOrOrganisation": {"$ref": "#/$defs/alias"},

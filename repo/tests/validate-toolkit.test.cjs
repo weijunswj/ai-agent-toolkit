@@ -512,7 +512,7 @@ test('Toolkit plugin packaged version surfaces stay aligned', () => {
   const bridgePath = path.join(cwd, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
   fs.writeFileSync(
     bridgePath,
-    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.9.1';", "const BRIDGE_VERSION = '2.2.1';"),
+    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.9.2';", "const BRIDGE_VERSION = '2.2.1';"),
     'utf8'
   );
 

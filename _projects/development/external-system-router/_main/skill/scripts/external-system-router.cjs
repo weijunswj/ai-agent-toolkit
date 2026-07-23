@@ -49,7 +49,8 @@ const N8N_DOMAIN_BODY = [
   'Live n8n, Docker, credential, import/export, activation, execution, deployment, production, or destructive actions require the external-system task envelope and the applicable n8n approval boundary.'
 ].join('\n');
 
-const ALIAS_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/;
+const ALIAS_PATTERN_SOURCE = '^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$';
+const ALIAS_PATTERN = new RegExp(ALIAS_PATTERN_SOURCE);
 const PROVIDER_PATTERN = /^[a-z][a-z0-9-]{1,63}$/;
 const DIGEST_PATTERN = /^sha256:[0-9a-f]{16,64}$/;
 const CREDENTIAL_REFERENCE_PATTERN = /^(credential-store|os-keychain|password-manager|secret-broker|session-injection):\/\/[a-zA-Z0-9._/-]+$/;
@@ -207,11 +208,12 @@ function validateAuthorizationEnvelope(envelope) {
     invariant(Number.isFinite(expiresAt), 'lifetime.expiresAt must be an ISO date-time.');
   }
   if (envelope.sensitiveDataClasses !== undefined) requireStringArray(envelope.sensitiveDataClasses, 'sensitiveDataClasses', { unique: true, pattern: ALIAS_PATTERN });
-  if (envelope.interfaceRestrictions !== undefined) requireStringArray(envelope.interfaceRestrictions, 'interfaceRestrictions', { unique: true });
+  if (envelope.interfaceRestrictions !== undefined) requireStringArray(envelope.interfaceRestrictions, 'interfaceRestrictions', { unique: true, max: 200 });
   for (const operation of envelope.authorisedTier2Operations) invariant(envelope.allowedOperations.includes(operation), `Tier 2 operation ${operation} is not allowed.`);
   const tier2Operations = envelope.allowedOperations.filter((operation) => envelope.operationRiskTiers[operation] === RISK_TIERS.SENSITIVE_REVERSIBLE);
   invariant(tier2Operations.length === envelope.authorisedTier2Operations.length && tier2Operations.every((operation) => envelope.authorisedTier2Operations.includes(operation)), 'authorisedTier2Operations must exactly match the owner-approved Tier 2 operation map.');
   for (const operation of envelope.forbiddenOperations) invariant(!envelope.allowedOperations.includes(operation), `Forbidden operation ${operation} is also allowed.`);
+  assertNoSecretMaterial(envelope, 'Task authorisation envelope');
   return envelope;
 }
 
@@ -265,8 +267,8 @@ function assertOperationAuthorized(envelope, operation, options = {}) {
 function validateGraphicalDisclosure(disclosure) {
   requireObject(disclosure, 'Graphical-control disclosure');
   const allowed = new Set([
-    'goal', 'capability', 'browserProfileOrApplication', 'origin', 'accountOrOrganisation', 'project',
-    'environment', 'resource', 'structuredInterfacesInsufficientReason', 'mayRead', 'mayClick',
+    'goal', 'capability', 'provider', 'targetAlias', 'operation', 'browserProfileOrApplication', 'origin',
+    'accountOrOrganisation', 'project', 'environment', 'resource', 'structuredInterfacesInsufficientReason', 'mayRead', 'mayClick',
     'mayType', 'mayUpload', 'mayDownload', 'mayChange', 'mayEncounter', 'exposureRisks', 'forbiddenScope',
     'expectedResult', 'verification', 'rollbackOrSafeDisable'
   ]);
@@ -274,6 +276,8 @@ function validateGraphicalDisclosure(disclosure) {
   requireString(disclosure.goal, 'goal', { max: 500 });
   const capability = requireString(disclosure.capability, 'capability', { max: 80 });
   invariant(GRAPHICAL_CAPABILITIES.has(capability), `${capability} is not a recognised graphical-control capability.`);
+  requireString(disclosure.provider, 'provider', { pattern: PROVIDER_PATTERN });
+  for (const field of ['targetAlias', 'operation']) requireString(disclosure[field], field, { pattern: ALIAS_PATTERN });
   requireString(disclosure.browserProfileOrApplication, 'browserProfileOrApplication', { max: 200 });
   const origin = requireString(disclosure.origin, 'origin', { max: 300 });
   invariant(isPublicHttpsOrigin(origin) || /^local-registry:\/\/[a-zA-Z0-9._/-]+$/.test(origin), 'origin must be one intentionally public HTTPS origin or a sanitized local-registry reference.', 'EXTERNAL_PRIVATE_ORIGIN_REJECTED');
@@ -308,6 +312,11 @@ function bindGraphicalApproval(disclosure, approval) {
     ownerApproved: true,
     authorisationReference: approval.authorisationReference,
     disclosureDigest,
+    provider: disclosure.provider,
+    targetAlias: disclosure.targetAlias,
+    environment: disclosure.environment,
+    resource: disclosure.resource,
+    operation: disclosure.operation,
     oneDeclaredEnvelopeOnly: true
   };
 }
@@ -356,11 +365,20 @@ function validateHistoryDiscovery(request) {
   };
 }
 
+function targetBindingDigest(value) {
+  return sha256({
+    provider: value.provider,
+    targetAlias: value.targetAlias,
+    environment: value.environment,
+    targetFingerprint: value.targetFingerprint
+  });
+}
+
 function validateCapabilityAudit(audit) {
   requireObject(audit, 'Capability audit');
   const allowed = new Set([
     'schemaVersion', 'provider', 'targetAlias', 'environment', 'operation', 'interfaceId', 'interfaceKind',
-    'identity', 'version', 'availableOperations', 'targetBinding', 'inputSchemaDigest', 'authScopeStatus',
+    'identity', 'version', 'availableOperations', 'targetFingerprint', 'targetBinding', 'inputSchemaDigest', 'authScopeStatus',
     'redaction', 'retryIdempotency', 'preconditions', 'postconditions', 'rollback', 'failureSemantics',
     'capabilityDigest', 'assuranceScore', 'readOnly', 'auditedAt', 'evidenceReferences'
   ]);
@@ -373,7 +391,9 @@ function validateCapabilityAudit(audit) {
   requireString(audit.version, 'version', { max: 100 });
   const operations = requireStringArray(audit.availableOperations, 'availableOperations', { min: 1, unique: true, pattern: ALIAS_PATTERN });
   invariant(operations.includes(audit.operation), 'Capability audit does not prove the exact operation.');
-  requireString(audit.targetBinding, 'targetBinding', { pattern: ALIAS_PATTERN });
+  requireString(audit.targetFingerprint, 'targetFingerprint', { pattern: DIGEST_PATTERN });
+  requireString(audit.targetBinding, 'targetBinding', { pattern: DIGEST_PATTERN });
+  invariant(audit.targetBinding === targetBindingDigest(audit), 'Capability audit target binding does not match the exact provider target fingerprint.', 'EXTERNAL_AUDIT_TARGET_MISMATCH');
   requireString(audit.inputSchemaDigest, 'inputSchemaDigest', { pattern: DIGEST_PATTERN });
   requireString(audit.authScopeStatus, 'authScopeStatus', { max: 300 });
   requireStringArray(audit.redaction, 'redaction', { min: 1 });
@@ -387,14 +407,37 @@ function validateCapabilityAudit(audit) {
   return audit;
 }
 
+function graphicalApprovalMatchesOperation(approval, operationContext) {
+  try {
+    requireObject(approval, 'Graphical-control approval binding');
+    assertAllowedKeys(approval, new Set([
+      'ownerApproved', 'authorisationReference', 'disclosureDigest', 'provider', 'targetAlias',
+      'environment', 'resource', 'operation', 'oneDeclaredEnvelopeOnly'
+    ]), 'Graphical-control approval binding');
+    invariant(approval.ownerApproved === true && approval.oneDeclaredEnvelopeOnly === true, 'Graphical approval is not bound to one declared envelope.');
+    requireString(approval.authorisationReference, 'graphicalApproval.authorisationReference', { max: 200 });
+    requireString(approval.disclosureDigest, 'graphicalApproval.disclosureDigest', { pattern: DIGEST_PATTERN });
+    for (const field of ['provider', 'targetAlias', 'environment', 'resource', 'operation']) {
+      invariant(approval[field] === operationContext[field], `Graphical approval ${field} does not match the selected operation.`, 'EXTERNAL_GRAPHICAL_APPROVAL_MISMATCH');
+    }
+    assertNoSecretMaterial(approval, 'Graphical-control approval binding');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function selectStrongestAdmissibleInterface(operationContext, audits, options = {}) {
   requireObject(operationContext, 'Operation context');
   const operation = requireString(operationContext.operation, 'operation', { pattern: ALIAS_PATTERN });
+  requireString(operationContext.targetFingerprint, 'operationContext.targetFingerprint', { pattern: DIGEST_PATTERN });
   invariant(Array.isArray(audits) && audits.length > 0, 'At least one capability audit is required.');
   const audited = audits.map(validateCapabilityAudit).filter((audit) =>
     audit.provider === operationContext.provider
     && audit.targetAlias === operationContext.targetAlias
     && audit.environment === operationContext.environment
+    && audit.targetFingerprint === operationContext.targetFingerprint
+    && audit.targetBinding === targetBindingDigest(operationContext)
     && audit.operation === operation
   );
   invariant(audited.length > 0, 'No interface audit matches the exact target and operation.', 'EXTERNAL_NO_ADMISSIBLE_ROUTE');
@@ -402,7 +445,9 @@ function selectStrongestAdmissibleInterface(operationContext, audits, options = 
   const admissible = audited.filter((audit) => {
     if (mutation && audit.readOnly) return false;
     if (options.forbiddenInterfaces?.includes(audit.interfaceKind) || options.forbiddenInterfaces?.includes(audit.interfaceId)) return false;
-    if (audit.interfaceKind === 'browser' || audit.interfaceKind === 'computer-use') return options.graphicalApprovalValid === true;
+    if (audit.interfaceKind === 'browser' || audit.interfaceKind === 'computer-use') {
+      return graphicalApprovalMatchesOperation(options.graphicalApproval, operationContext);
+    }
     return true;
   });
   invariant(admissible.length > 0, 'No audited interface is admissible for the exact operation.', 'EXTERNAL_NO_ADMISSIBLE_ROUTE');
@@ -635,6 +680,14 @@ function inferIntentCapabilities(objective) {
   return requirements;
 }
 
+function isSubstantiveExternalObjective(objective, trigger) {
+  const text = String(objective || '').trim();
+  if (!text || /^(?:inspect|review|check)(?:\s+the)?\s+(?:repository|project)\s+(?:requirements|configuration)\.?$/i.test(text)) return false;
+  if (trigger === 'explicit-provider-intent') return true;
+  return /\b(?:deploy|provision|configure|connect|publish|activate|migrate|sync|create|update|delete|rotate|authenticate)\b/i.test(text)
+    && /\b(?:production|staging|cloud|provider|hosted|remote|aws|amazon|azure|gcp|google cloud|heroku|vercel|netlify|render|fly\.io|digitalocean|dns|oauth|database|storage|workflow|api)\b/i.test(text);
+}
+
 function inferRepositoryCapabilities(evidence) {
   requireObject(evidence, 'Repository evidence');
   const files = Array.isArray(evidence.files) ? evidence.files : [];
@@ -709,7 +762,16 @@ function reconcileCapabilities(input) {
   invariant(RECONCILIATION_TRIGGERS.includes(input.trigger), `Unsupported reconciliation trigger ${input.trigger}.`);
   const repository = inferRepositoryCapabilities(input.repositoryEvidence || {});
   const intent = inferIntentCapabilities(input.objective || 'Inspect repository requirements.');
-  const requirements = deduplicateCapabilities([...repository.requirements, ...intent]);
+  const combined = [...repository.requirements, ...intent];
+  if (combined.length === 0 && isSubstantiveExternalObjective(input.objective, input.trigger)) {
+    combined.push(capability(
+      'external-system',
+      'exact-provider-operation-classification',
+      'Substantive external-system intent requires exact provider, target, environment, resource, and operation classification.',
+      'intent'
+    ));
+  }
+  const requirements = deduplicateCapabilities(combined);
   return {
     schemaVersion: LEDGER_SCHEMA_VERSION,
     trigger: input.trigger,
@@ -893,6 +955,7 @@ function inspectN8nMarker(text) {
   const legacyEnd = countOccurrences(content, LEGACY_N8N_MARKERS.end);
   invariant(dynamicBegin === dynamicEnd && dynamicBegin <= 1, 'Malformed or duplicate dynamic n8n marker block.', 'EXTERNAL_MARKER_MALFORMED');
   invariant(legacyBegin === legacyEnd && legacyBegin <= 1, 'Malformed or duplicate legacy n8n marker block.', 'EXTERNAL_MARKER_MALFORMED');
+  invariant(!(dynamicBegin === 1 && legacyBegin === 1), 'Dynamic and legacy n8n marker blocks cannot coexist.', 'EXTERNAL_MARKER_MALFORMED');
   return {
     dynamic: dynamicBegin === 1,
     legacy: legacyBegin === 1,
@@ -946,6 +1009,18 @@ function assertWriteGate(questionBank, answers, proposedWrite) {
   invariant(sha256(proposedWrite.context) === questionBank.contextDigest, 'Proposed write does not match the question-bank context.', 'EXTERNAL_WRITE_CONTEXT_MISMATCH');
   invariant(proposedWrite.context.proposedWrite.kind === proposedWrite.kind && proposedWrite.context.proposedWrite.target === proposedWrite.target, 'Proposed write kind or target differs from the approved context.', 'EXTERNAL_WRITE_CONTEXT_MISMATCH');
   assertNoSecretMaterial(proposedWrite.context, 'Proposed write context');
+  const answerRules = {
+    'target-registration': () => answers.answers.targetRegistration === true
+      || answers.answers.targetRegistration === proposedWrite.target
+      || answers.answers.targetRegistration === 'approve:target-registration',
+    'credential-reference': () => answers.answers.credentialReference === proposedWrite.target,
+    'browser-fallback': () => answers.answers.browserFallbackAllowed === true,
+    'marker-change': () => answers.answers.markerChange === true
+      || answers.answers.markerChange === proposedWrite.target
+      || answers.answers.markerChange === `approve:${proposedWrite.target}`
+  };
+  invariant(answerRules[proposedWrite.kind], `Proposed write kind ${proposedWrite.kind} has no reconciliation-answer binding.`, 'EXTERNAL_WRITE_APPROVAL_REQUIRED');
+  invariant(answerRules[proposedWrite.kind](), `Reconciliation answers explicitly decline or do not authorise ${proposedWrite.kind}.`, 'EXTERNAL_WRITE_APPROVAL_REQUIRED');
   return {
     approved: true,
     kind: proposedWrite.kind,
@@ -1140,6 +1215,7 @@ module.exports = {
   ROUTE_LIFECYCLE_SCHEMA_VERSION,
   QUESTION_BANK_SCHEMA_VERSION,
   ANSWER_SCHEMA_VERSION,
+  ALIAS_PATTERN_SOURCE,
   RISK_TIERS,
   RECONCILIATION_TRIGGERS,
   HISTORY_SAFER_PATHS,
@@ -1157,6 +1233,7 @@ module.exports = {
   bindGraphicalApproval,
   validateHistoryDiscovery,
   validateCapabilityAudit,
+  targetBindingDigest,
   selectStrongestAdmissibleInterface,
   validateConsumerRequirements,
   defaultRegistryPath,

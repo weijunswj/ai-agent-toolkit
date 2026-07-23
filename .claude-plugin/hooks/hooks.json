@@ -40,6 +40,15 @@
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-n8n-admission-hook.cjs\""
           }
         ]
+      },
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-n8n-admission-hook.cjs\""
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [

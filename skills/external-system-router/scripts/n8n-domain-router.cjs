@@ -8,6 +8,7 @@ const crypto = require('node:crypto');
 const { sha256, assertNoSecretMaterial } = require('./external-system-router.cjs');
 
 const N8N_LEDGER_SCHEMA_VERSION = 'ai-agent-toolkit.n8n-capability-ledger.v1';
+const N8N_CAPABILITY_RECEIPT_SCHEMA_VERSION = 'ai-agent-toolkit.n8n-capability-receipt.v1';
 const OFFICIAL_N8N_SKILLS_CONTRACT = Object.freeze({
   packageId: 'n8n-skills@n8n-io',
   pluginNamespace: 'n8n-skills',
@@ -87,6 +88,7 @@ const FACET_SKILLS = Object.freeze({
   'extending-mcp': 'n8n-extending-mcp-official'
 });
 const GOVERNED_MUTATION_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'PowerShell']);
+const CAPABILITY_RECEIPT_MAX_BYTES = 32768;
 
 function fail(message, code = 'N8N_DOMAIN_ROUTER_INVALID', details = {}) {
   const error = new Error(message);
@@ -219,7 +221,8 @@ function detectN8nTask(input) {
   if (!isObject(input)) fail('n8n detection input must be an object.');
   const objective = String(input.objective || input.prompt || '').toLowerCase();
   const paths = Array.isArray(input.paths) ? input.paths.map((entry) => String(entry).replace(/\\/g, '/').toLowerCase()) : [];
-  const activeIntent = /\bn8n\b/.test(objective) && input.historicalMentionOnly !== true;
+  const materialIntent = /\b(?:workflow|node|expression|sdk|json|helper|compiler|import|export|live|production|publish|activate|execute|run|credential|oauth|webhook|mcp|create|edit|repair|review|design|configure|update|deploy|sync|setup|set\s+up|install)\b/.test(objective);
+  const activeIntent = /\bn8n\b/.test(objective) && materialIntent && input.historicalMentionOnly !== true;
   const workflowPath = paths.some((entry) => /(^|\/)n8n-workflows?\/.*\.json$/.test(entry) || /(^|\/)workflows?\/.*n8n.*\.json$/.test(entry));
   const boundedEvidence = input.ownsWorkflowJson === true || input.n8nWorkflowStructure === true || workflowPath;
   const historicalOnly = input.historicalMentionOnly === true && !activeIntent && !boundedEvidence;
@@ -259,6 +262,15 @@ function inferN8nOperation(objective) {
   add('webhook-contract-only', /\bwebhook[- ]only|consume\s+(?:an?\s+)?n8n\s+webhook/);
   const unique = [...new Set(matches)];
   if (unique.length === 1) return unique[0];
+  const liveMatches = unique.filter((operation) => LIVE_OPERATIONS.has(operation));
+  if (liveMatches.length === 1) return liveMatches[0];
+  if (liveMatches.length > 1) return null;
+  for (const specific of ['prepare-import', 'effective-payload-compare', 'workflow-compile']) {
+    if (unique.includes(specific)) return specific;
+  }
+  const helperMatches = unique.filter((operation) => HELPER_OPERATIONS.has(operation));
+  if (helperMatches.length === 1) return helperMatches[0];
+  if (unique.includes('credential-or-oauth-setup')) return 'credential-or-oauth-setup';
   if (unique.includes('workflow-material-edit') && unique.includes('workflow-json-structure') && unique.length === 2) return 'workflow-material-edit';
   return null;
 }
@@ -340,12 +352,7 @@ function reconcileN8nCapabilityLedger(ledger, input = {}) {
   validateN8nCapabilityLedger(ledger);
   const next = clone(ledger);
   const requestedOperation = input.operation && ALL_OPERATIONS.has(input.operation) ? input.operation : null;
-  const editCompatible = new Set([
-    'workflow-design', 'workflow-create', 'workflow-material-edit', 'workflow-repair',
-    'node-configuration', 'expression-authoring', 'workflow-json-structure', 'workflow-sdk-structure'
-  ]);
-  if (requestedOperation && requestedOperation !== next.operation
-      && !(editCompatible.has(requestedOperation) && editCompatible.has(next.operation))) {
+  if (requestedOperation && requestedOperation !== next.operation) {
     return {
       ledger: next,
       changed: false,
@@ -581,6 +588,80 @@ function recordCapabilityEvidence(ledger, evidence) {
   return next;
 }
 
+function validateCapabilityReceiptShape(receipt) {
+  if (!isObject(receipt)) fail('Capability receipt must be an object.', 'N8N_CAPABILITY_RECEIPT_INVALID');
+  const allowed = new Set([
+    'schemaVersion', 'taskId', 'operation', 'capabilityId', 'issuer', 'result', 'reference',
+    'blocker', 'commandDigest', 'recordedAt', 'receiptDigest'
+  ]);
+  for (const key of Object.keys(receipt)) if (!allowed.has(key)) fail(`Capability receipt contains unsupported field ${key}.`, 'N8N_CAPABILITY_RECEIPT_INVALID');
+  if (receipt.schemaVersion !== N8N_CAPABILITY_RECEIPT_SCHEMA_VERSION) fail('Unsupported n8n capability receipt schema.', 'N8N_CAPABILITY_RECEIPT_INVALID');
+  string(receipt.taskId, 'receipt.taskId', 128);
+  const operation = string(receipt.operation, 'receipt.operation', 100);
+  if (!ALL_OPERATIONS.has(operation)) fail('Capability receipt operation is invalid.', 'N8N_CAPABILITY_RECEIPT_INVALID');
+  string(receipt.capabilityId, 'receipt.capabilityId', 200);
+  if (!['toolkit-helper', 'external-system-router'].includes(receipt.issuer)) fail('Capability receipt issuer is unsupported.', 'N8N_CAPABILITY_RECEIPT_INVALID');
+  if (!['verified', 'blocked'].includes(receipt.result)) fail('Capability receipt result must be verified or blocked.', 'N8N_CAPABILITY_RECEIPT_INVALID');
+  if (receipt.result === 'verified') {
+    if (!/^receipt:[a-zA-Z0-9._/-]+$/.test(receipt.reference || '')) fail('Verified capability receipt requires one safe receipt reference.', 'N8N_CAPABILITY_RECEIPT_INVALID');
+    if (receipt.blocker !== undefined) fail('Verified capability receipt must not include a blocker.', 'N8N_CAPABILITY_RECEIPT_INVALID');
+  } else {
+    string(receipt.blocker, 'receipt.blocker', 500);
+    if (receipt.reference !== undefined) fail('Blocked capability receipt must not include a verified reference.', 'N8N_CAPABILITY_RECEIPT_INVALID');
+  }
+  if (!/^sha256:[0-9a-f]{64}$/.test(receipt.commandDigest || '')) fail('Capability receipt command digest is invalid.', 'N8N_CAPABILITY_RECEIPT_INVALID');
+  if (!Number.isFinite(Date.parse(receipt.recordedAt || ''))) fail('Capability receipt recordedAt is invalid.', 'N8N_CAPABILITY_RECEIPT_INVALID');
+  if (!/^sha256:[0-9a-f]{64}$/.test(receipt.receiptDigest || '')) fail('Capability receipt digest is invalid.', 'N8N_CAPABILITY_RECEIPT_INVALID');
+  const digestInput = { ...receipt };
+  delete digestInput.receiptDigest;
+  if (receipt.receiptDigest !== sha256(digestInput)) fail('Capability receipt digest does not match its bounded payload.', 'N8N_CAPABILITY_RECEIPT_INVALID');
+  assertNoSecretMaterial(receipt, 'n8n capability receipt');
+  return receipt;
+}
+
+function isCapabilityReceiptIngestionToolUse(input) {
+  if (!isObject(input)) return false;
+  const toolName = String(input.tool_name || input.toolName || '');
+  if (toolName !== 'Bash' && toolName !== 'PowerShell') return false;
+  const toolInput = isObject(input.tool_input) ? input.tool_input : isObject(input.toolInput) ? input.toolInput : {};
+  const command = String(toolInput.command || '').trim();
+  if (!command || command.length > 4096 || /[\r\n;&|><`]|\$\(/.test(command)) return false;
+  return /^node(?:\.exe)?\s+["']?[^\s"']*n8n-domain-router\.cjs["']?\s+ingest-capability-receipt\s+["']?[^\s"']+\.json["']?$/i.test(command);
+}
+
+function recordCapabilityReceipt(ledger, receipt, binding = {}) {
+  validateN8nCapabilityLedger(ledger);
+  validateCapabilityReceiptShape(receipt);
+  if (receipt.taskId !== ledger.taskId || receipt.operation !== ledger.operation) {
+    fail('Capability receipt is not bound to the active task and exact operation.', 'N8N_CAPABILITY_RECEIPT_MISMATCH');
+  }
+  const capability = ledger.requiredCapabilities.find((entry) => entry.capabilityId === receipt.capabilityId);
+  if (!capability || !['toolkit-helper', 'live-route', 'external-route'].includes(capability.kind)) {
+    fail('Capability receipt does not name one required non-Skill capability.', 'N8N_CAPABILITY_RECEIPT_MISMATCH');
+  }
+  const expectedIssuer = capability.kind === 'toolkit-helper' ? 'toolkit-helper' : 'external-system-router';
+  if (receipt.issuer !== expectedIssuer) fail('Capability receipt issuer does not own the required capability.', 'N8N_CAPABILITY_RECEIPT_MISMATCH');
+  if (!isCapabilityReceiptIngestionToolUse(binding.input || {})) fail('Capability receipt was not delivered through the supported bounded ingestion command.', 'N8N_CAPABILITY_RECEIPT_MISMATCH');
+  const toolInput = binding.input.tool_input || binding.input.toolInput || {};
+  if (receipt.commandDigest !== sha256(String(toolInput.command || '').trim())) fail('Capability receipt command binding does not match the completed tool use.', 'N8N_CAPABILITY_RECEIPT_MISMATCH');
+  return recordCapabilityEvidence(ledger, receipt.result === 'verified'
+    ? { capabilityId: receipt.capabilityId, result: 'verified', reference: receipt.reference, recordedAt: receipt.recordedAt }
+    : { capabilityId: receipt.capabilityId, result: 'blocked', blocker: receipt.blocker, recordedAt: receipt.recordedAt });
+}
+
+function parseCapabilityReceiptOutput(input) {
+  const raw = input.tool_response ?? input.toolResponse ?? input.tool_output ?? input.toolOutput ?? input.tool_result ?? input.toolResult;
+  if (raw === undefined || raw === null) return null;
+  const text = typeof raw === 'string' ? raw : JSON.stringify(raw);
+  if (Buffer.byteLength(text, 'utf8') > CAPABILITY_RECEIPT_MAX_BYTES) fail('Capability receipt output exceeds the bounded ingestion limit.', 'N8N_CAPABILITY_RECEIPT_INVALID');
+  try {
+    return validateCapabilityReceiptShape(typeof raw === 'string' ? JSON.parse(raw.trim()) : raw);
+  } catch (error) {
+    if (error.code) throw error;
+    fail('Capability receipt output is not one exact JSON object.', 'N8N_CAPABILITY_RECEIPT_INVALID');
+  }
+}
+
 function nextActionFor(capability) {
   if (capability.kind === 'classification') return 'State one exact n8n operation so the domain router can rebuild the task ledger.';
   if (capability.kind === 'official-skill') return `Invoke the official ${capability.name} Skill successfully through the host Skill tool, then retry the governed operation.`;
@@ -659,9 +740,20 @@ function isProvenReadOnlyToolUse(input) {
   if (!command || command.length > 10000 || /[\r\n;&|><`]|\$\(/.test(command)) return false;
   const normalized = command.toLowerCase().replace(/\\/g, '/');
   return /^(?:get-content|select-string|get-childitem|type|cat)\b/.test(normalized)
-    || /^git\s+(?:diff|status|show|log)\b/.test(normalized)
-    || /^node(?:\.exe)?\s+(?:--test\b|["']?[^\s"']*(?:validate|validator|check|inspect)[^\s"']*\.c?m?js["']?\b)/.test(normalized)
-    || /^npm(?:\.cmd)?\s+(?:test\b|run\s+(?:test|validate|check)(?::[a-z0-9._-]+)?\b)/.test(normalized);
+    || /^git\s+(?:diff|status|show|log)\b/.test(normalized);
+}
+
+function readCapabilityReceiptFile(filePath) {
+  const bytes = readRegularFile(path.resolve(filePath), 'n8n capability receipt');
+  if (bytes.length > CAPABILITY_RECEIPT_MAX_BYTES) fail('Capability receipt file exceeds the bounded ingestion limit.', 'N8N_CAPABILITY_RECEIPT_INVALID');
+  return validateCapabilityReceiptShape(JSON.parse(bytes.toString('utf8')));
+}
+
+function runCli(argv) {
+  const [command, file] = argv;
+  if (command !== 'ingest-capability-receipt' || !file) fail('Usage: n8n-domain-router.cjs ingest-capability-receipt <receipt.json>.', 'N8N_CAPABILITY_RECEIPT_INVALID');
+  process.stdout.write(`${JSON.stringify(readCapabilityReceiptFile(file))}\n`);
+  return 0;
 }
 
 function defaultStateRoot() {
@@ -775,6 +867,8 @@ function updateTaskLedger(input, updater, options = {}) {
 
 module.exports = {
   N8N_LEDGER_SCHEMA_VERSION,
+  N8N_CAPABILITY_RECEIPT_SCHEMA_VERSION,
+  sha256,
   OFFICIAL_N8N_SKILLS_CONTRACT,
   OFFICIAL_N8N_SKILL_BLOBS,
   MATERIAL_SKILL_OPERATIONS,
@@ -796,6 +890,10 @@ module.exports = {
   validateN8nCapabilityLedger,
   recordSkillInvocation,
   recordCapabilityEvidence,
+  validateCapabilityReceiptShape,
+  isCapabilityReceiptIngestionToolUse,
+  recordCapabilityReceipt,
+  parseCapabilityReceiptOutput,
   auditN8nCompletion,
   assertN8nMutationAdmitted,
   looksLikeN8nWorkflowMutation,
@@ -806,3 +904,12 @@ module.exports = {
   writeTaskLedger,
   updateTaskLedger
 };
+
+if (require.main === module) {
+  try {
+    process.exitCode = runCli(process.argv.slice(2));
+  } catch (error) {
+    process.stderr.write(`${error.code || 'N8N_DOMAIN_ROUTER_INVALID'}: ${error.message}\n`);
+    process.exitCode = 2;
+  }
+}

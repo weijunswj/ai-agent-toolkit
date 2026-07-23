@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "version_policy": "semver",
-  "version_notes": "Adds risk-scoped external-system routing, dynamic domain markers, and mandatory fail-closed n8n capability admission with exact official Skill evidence.",
+  "version_notes": "Declares the portable external-system-router dependency while preserving risk-scoped routing and fail-closed n8n admission.",
   "outputs": [
     {
       "kind": "curated",

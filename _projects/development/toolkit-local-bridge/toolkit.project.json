@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.9.1",
+  "version": "2.9.2",
   "version_policy": "semver",
-  "version_notes": "Aligns packaged router metadata and CI expectations after adding the Claude Toolkit-direct n8n admission boundary.",
+  "version_notes": "Adds bounded non-Skill receipt ingestion and hashes every required n8n router sibling in Claude activation proofs.",
   "outputs": [
     {
       "kind": "curated",

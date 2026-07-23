@@ -67,6 +67,7 @@ test('material n8n work detects intent, classifies the exact operation, and buil
   assert.ok(required.includes('n8n-workflow-lifecycle-official'));
   assert.ok(required.includes('n8n-node-configuration-official'));
   assert.equal(n8n.auditN8nCompletion(ledger).complete, false);
+  assert.equal(n8n.detectN8nTask({ objective: 'What is n8n?' }).detected, false);
 });
 
 test('failed, stale, malformed, unqualified, or ambiguous Skill attempts never satisfy the ledger', () => {
@@ -234,7 +235,16 @@ test('Claude Toolkit-direct hook blocks writes, permits generic validation witho
     tool_name: 'Bash',
     tool_input: { command: 'node scripts/validate-json.cjs n8n-workflows/example.json' }
   }, { router: fakeRouter, stateRoot });
-  assert.deepEqual(validator, {});
+  assert.equal(validator.hookSpecificOutput.permissionDecision, 'deny');
+  for (const command of [
+    'node --test repo/tests/n8n-domain-admission.test.cjs',
+    'npm test',
+    'npm run validate'
+  ]) {
+    assert.equal(n8n.isProvenReadOnlyToolUse({
+      tool_name: 'Bash', tool_input: { command }
+    }), false, command);
+  }
 
   const writeInput = {
     ...base,
@@ -293,6 +303,72 @@ test('Claude Toolkit-direct hook blocks writes, permits generic validation witho
   assert.deepEqual(hook.handle(writeInput, { router: fakeRouter, stateRoot }), {});
 });
 
+test('live and Toolkit-helper commands classify before workflow-edit fallback', () => {
+  assert.equal(hook.inferredMutationOperation({
+    tool_input: { command: 'n8n publish workflow 123' }
+  }, n8n), 'live-workflow-publish');
+  assert.equal(hook.inferredMutationOperation({
+    tool_input: { command: 'node n8n-workflows/scripts/prepare-import.cjs workflow.json' }
+  }, n8n), 'prepare-import');
+});
+
+test('changed material operations mismatch and new objectives receive fresh ledgers without prior evidence', () => {
+  const repair = n8n.createN8nCapabilityLedger({
+    sessionId: 'operation-change', repositoryIdentity: 'repo',
+    objective: 'Repair this n8n workflow.', operation: 'workflow-repair',
+    createdAt: '2026-07-23T00:00:00.000Z'
+  });
+  const mismatch = n8n.reconcileN8nCapabilityLedger(repair, { operation: 'workflow-material-edit' });
+  assert.equal(mismatch.mismatch.stableCode, 'N8N_OPERATION_MISMATCH');
+
+  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-n8n-new-objective-'));
+  const base = { session_id: 'new-objective', cwd: 'C:/synthetic/repo', timestamp: '2026-07-23T00:00:00.000Z' };
+  hook.handle({ ...base, hook_event_name: 'UserPromptSubmit', prompt: 'Edit workflow A in n8n JSON.' }, { router: n8n, stateRoot });
+  const first = n8n.readTaskLedger(base, { stateRoot });
+  hook.handle({ ...base, hook_event_name: 'UserPromptSubmit', prompt: 'Edit workflow B in n8n JSON.' }, { router: n8n, stateRoot });
+  const second = n8n.readTaskLedger(base, { stateRoot });
+  assert.notEqual(second.taskId, first.taskId);
+  assert.equal(second.invocationEvidence.length, 0);
+});
+
+test('bounded PostToolUse receipt ingestion records required non-Skill capability evidence', () => {
+  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-n8n-capability-receipt-'));
+  const base = { session_id: 'receipt-session', cwd: 'C:/synthetic/repo', timestamp: '2026-07-23T00:00:00.000Z' };
+  let ledger = n8n.createN8nCapabilityLedger({
+    sessionId: base.session_id, repositoryIdentity: base.cwd,
+    objective: 'Compile this n8n workflow JSON.', operation: 'workflow-compile',
+    createdAt: base.timestamp
+  });
+  for (const capability of ledger.requiredCapabilities.filter((entry) => entry.kind === 'official-skill')) {
+    ledger = record(ledger, capability.name).ledger;
+  }
+  n8n.writeTaskLedger(base, ledger, { stateRoot });
+  const command = 'node skills/external-system-router/scripts/n8n-domain-router.cjs ingest-capability-receipt receipt.json';
+  const receipt = {
+    schemaVersion: n8n.N8N_CAPABILITY_RECEIPT_SCHEMA_VERSION,
+    taskId: ledger.taskId,
+    operation: ledger.operation,
+    capabilityId: 'toolkit-helper:workflow-compile',
+    issuer: 'toolkit-helper',
+    result: 'verified',
+    reference: 'receipt:compiler-synthetic',
+    commandDigest: n8n.sha256(command),
+    recordedAt: '2026-07-23T00:01:00.000Z'
+  };
+  receipt.receiptDigest = n8n.sha256(receipt);
+  const toolInput = {
+    ...base, hook_event_name: 'PostToolUse', tool_name: 'Bash',
+    tool_input: { command }, tool_response: JSON.stringify(receipt)
+  };
+  const result = hook.handle(toolInput, { router: n8n, stateRoot });
+  assert.match(result.hookSpecificOutput.additionalContext, /Required n8n capabilities are satisfied/);
+  assert.equal(n8n.auditN8nCompletion(n8n.readTaskLedger(base, { stateRoot })).complete, true);
+  const forged = { ...receipt, commandDigest: n8n.sha256(`${command} --different`) };
+  forged.receiptDigest = n8n.sha256({ ...forged, receiptDigest: undefined });
+  assert.throws(() => n8n.recordCapabilityReceipt(ledger, forged, { input: toolInput }),
+    (error) => error.code === 'N8N_CAPABILITY_RECEIPT_INVALID' || error.code === 'N8N_CAPABILITY_RECEIPT_MISMATCH');
+});
+
 test('Claude completion audit blocks an incomplete n8n task and reports one supported next action', () => {
   const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-n8n-completion-'));
   const input = { session_id: 'completion-session', cwd: 'C:/synthetic/repo', timestamp: '2026-07-23T00:00:00.000Z' };
@@ -322,6 +398,22 @@ test('Claude fallback blocks n8n Stop/completion when the admission router canno
   assert.equal(completion.exitCode, 2);
   assert.match(completion.stderr, /missing toolkit:n8n-domain-router/);
   assert.doesNotMatch(JSON.stringify(completion), /private path/);
+});
+
+test('fallback denies governed events when an active ledger exists even without repeated n8n text', () => {
+  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-n8n-fallback-active-'));
+  const input = { session_id: 'active-fallback', cwd: 'C:/synthetic/repo' };
+  const ledgerFile = n8n.stateFileFor(input, { stateRoot });
+  fs.mkdirSync(path.dirname(ledgerFile), { recursive: true });
+  fs.writeFileSync(ledgerFile, '{invalid');
+  const edit = hook.fallbackDecision({
+    ...input, hook_event_name: 'PreToolUse', tool_name: 'Edit',
+    tool_input: { file_path: 'automation/config.json', old_string: 'a', new_string: 'b' }
+  }, new Error('synthetic ledger error'), { router: n8n, stateRoot });
+  assert.equal(edit.hookSpecificOutput.permissionDecision, 'deny');
+  const stop = hook.fallbackDecision({ ...input, hook_event_name: 'Stop', last_assistant_message: 'Done.' },
+    new Error('synthetic ledger error'), { router: n8n, stateRoot });
+  assert.equal(stop.decision, 'block');
 });
 
 test('task-local ledger is bound to one session and repository and records no private absolute source path', () => {

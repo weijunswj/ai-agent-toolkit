@@ -174,6 +174,7 @@ function verifySessionStartHook(hooksPath) {
   };
   requiresExactHook('PreToolUse', N8N_MUTATION_MATCHER, 'PreToolUse governed-mutation hook');
   requiresExactHook('PostToolUse', 'Skill', 'PostToolUse Skill evidence hook');
+  requiresExactHook('PostToolUse', 'Bash|PowerShell', 'PostToolUse non-Skill capability-receipt hook');
   requiresExactHook('UserPromptSubmit', null, 'UserPromptSubmit n8n intent hook');
   requiresExactHook('UserPromptExpansion', null, 'UserPromptExpansion direct-Skill disclosure hook');
   requiresExactHook('TaskCompleted', null, 'TaskCompleted n8n completion hook');
@@ -240,6 +241,7 @@ function validateRepoPluginSource(repoRoot, expectedVersion = '') {
     'repo/scripts/toolkit-claude-agent-hook.cjs',
     'repo/scripts/toolkit-claude-n8n-admission-hook.cjs',
     'repo/scripts/toolkit-local-bridge.cjs',
+    'skills/external-system-router/scripts/external-system-router.cjs',
     'skills/external-system-router/scripts/n8n-domain-router.cjs',
   ]) {
     if (!fs.existsSync(path.join(repoRoot, ...relPath.split('/')))) errors.push(`Missing Claude agent-control package file: ${relPath}`);
@@ -266,6 +268,7 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ['repo/scripts/toolkit-claude-agent-hook.cjs', false],
     ['repo/scripts/toolkit-claude-n8n-admission-hook.cjs', false],
     ['repo/scripts/toolkit-local-bridge.cjs', false],
+    ['skills/external-system-router/scripts/external-system-router.cjs', false],
     ['skills/external-system-router/scripts/n8n-domain-router.cjs', false],
     ['repo/scripts/repo-ignore-hygiene.cjs', false],
     ['repo/scripts/repo-local-backup.cjs', false],
@@ -308,13 +311,14 @@ function installedActivationProof(installed, expectedVersion) {
   const processLaunchPath = path.join(cachePath, 'repo', 'scripts', 'claude-process-launch.cjs');
   const agentHookPath = path.join(cachePath, 'repo', 'scripts', 'toolkit-claude-agent-hook.cjs');
   const n8nAdmissionHookPath = path.join(cachePath, 'repo', 'scripts', 'toolkit-claude-n8n-admission-hook.cjs');
+  const externalSystemRouterPath = path.join(cachePath, 'skills', 'external-system-router', 'scripts', 'external-system-router.cjs');
   const n8nDomainRouterPath = path.join(cachePath, 'skills', 'external-system-router', 'scripts', 'n8n-domain-router.cjs');
-  for (const filePath of [hookPath, controllerPath, processLaunchPath, agentHookPath, n8nAdmissionHookPath, n8nDomainRouterPath]) {
+  for (const filePath of [hookPath, controllerPath, processLaunchPath, agentHookPath, n8nAdmissionHookPath, externalSystemRouterPath, n8nDomainRouterPath]) {
     const stat = fs.lstatSync(filePath);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Installed Claude enforcement path is not a regular file.');
   }
   return {
-    schema: 4,
+    schema: 5,
     source: 'claude-plugin-list',
     plugin_version: expectedVersion,
     cache_identity: crypto.createHash('sha256').update(cachePath).digest('hex'),
@@ -323,6 +327,7 @@ function installedActivationProof(installed, expectedVersion) {
     process_launch_sha256: crypto.createHash('sha256').update(fs.readFileSync(processLaunchPath)).digest('hex'),
     agent_hook_sha256: crypto.createHash('sha256').update(fs.readFileSync(agentHookPath)).digest('hex'),
     n8n_admission_hook_sha256: crypto.createHash('sha256').update(fs.readFileSync(n8nAdmissionHookPath)).digest('hex'),
+    external_system_router_sha256: crypto.createHash('sha256').update(fs.readFileSync(externalSystemRouterPath)).digest('hex'),
     n8n_domain_router_sha256: crypto.createHash('sha256').update(fs.readFileSync(n8nDomainRouterPath)).digest('hex'),
   };
 }
@@ -338,6 +343,7 @@ function sameActivationProof(left, right) {
     'process_launch_sha256',
     'agent_hook_sha256',
     'n8n_admission_hook_sha256',
+    'external_system_router_sha256',
     'n8n_domain_router_sha256',
   ]
     .every((key) => left?.[key] === right?.[key]);

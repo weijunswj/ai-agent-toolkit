@@ -14,6 +14,10 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 Instruction-only skill for automatically checking and installing repo/folder-local AI coding agent instruction files and tiny platform shims.
 
+## Declared Runtime Dependency
+
+The portable managed `AGENTS.md` routes external-system operations through the sibling [external-system-router](../external-system-router/) skill. Standalone installations of this skill must also install the complete `external-system-router` folder in a supported skill location. The installer does not silently add it; external-system work must fail closed with that installation as the supported next action when the dependency is unavailable.
+
 The copied skill folder includes bare repo-local bootstrap payload templates. These files contain the curated-source safety comment plus marker-wrapped destination-file content and are safe to copy wholesale:
 
 - [repo-local/AGENTS.managed.template.md](repo-local/AGENTS.managed.template.md) is copied or merged into target repo `AGENTS.md`.

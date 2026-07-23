@@ -29,7 +29,7 @@
     "accountOrOrganisation": {"$ref": "#/$defs/alias"},
     "resource": {"$ref": "#/$defs/alias"},
     "environment": {"$ref": "#/$defs/alias"},
-    "objective": {"type": "string", "minLength": 3, "maxLength": 500},
+    "objective": {"type": "string", "minLength": 1, "maxLength": 500},
     "allowedOperations": {"$ref": "#/$defs/operations"},
     "operationRiskTiers": {"type": "object", "minProperties": 1, "propertyNames": {"$ref": "#/$defs/alias"}, "additionalProperties": {"type": "integer", "minimum": 0, "maximum": 3}},
     "authorisedTier2Operations": {"$ref": "#/$defs/operations"},
@@ -54,7 +54,7 @@
     "interfaceRestrictions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 200}}
   },
   "$defs": {
-    "alias": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$"},
-    "operations": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9._:-]{1,127}$"}}
+    "alias": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"},
+    "operations": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/alias"}}
   }
 }
