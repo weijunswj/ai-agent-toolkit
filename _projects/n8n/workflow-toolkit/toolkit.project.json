@@ -5,9 +5,9 @@
   "title": "n8n Workflow Toolkit",
   "module_path": "_projects/n8n/workflow-toolkit",
   "main_path": "_projects/n8n/workflow-toolkit/_main",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "version_policy": "semver",
-  "version_notes": "Adds portable canonical n8n export, logical name/type credential rebinding, exact resource overlays, canonical invariants, inactive no-confirmation import, transport capabilities, and sanitized operation reports.",
+  "version_notes": "Fails closed on malformed portable documents, conflicting stable node IDs, duplicate credential requirements, and canonical logical-name drift before applying any import or export overlay.",
   "outputs": [
     {
       "kind": "curated",

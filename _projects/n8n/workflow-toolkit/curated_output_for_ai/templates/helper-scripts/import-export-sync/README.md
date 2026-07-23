@@ -48,6 +48,8 @@ The `.cmd` wrappers invoke their co-located PowerShell scripts with `%~dp0<name>
 
 Normal operator flow is export canonical workflow JSON and portable logical credential name/type declarations to Git, create matching credentials on the target when reported missing, then rerun the unchanged import command. The helper resolves target IDs internally, rebuilds from canonical Git, applies only dedicated webhook metadata and declared exact resource paths, validates the canonical invariant, imports inactive without a routine confirmation, and verifies the inactive postcondition.
 
+Every present portable credential declaration, deployment policy, and resource binding must use schema version 1 and an exact supported container shape. Malformed present files, duplicate credential requirements, stable node-ID conflicts, or logical names that drift from canonical Git fail before any prepared workflow overlay. Name/type fallback is used only when the populated stable ID is absent and the specific helper contract permits that fallback.
+
 The helper never activates, executes, test-runs, publishes, or restarts n8n. An already-active target is blocked because scheduled activity cannot be guaranteed inactive without a separate restart. `-RequireConfirmation` is compatibility-only menu behavior and is not the default.
 
 Operation receipts are written to `.n8n-local/reports/latest-n8n-workflow-operation.{json,txt}` and bounded 90-day history. The menu's read-only Explain last n8n failure action validates the latest report and states one supported next action.

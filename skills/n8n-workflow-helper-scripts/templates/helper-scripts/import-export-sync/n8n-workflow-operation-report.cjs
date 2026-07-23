@@ -3,7 +3,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const REPORT_SCHEMA_VERSION = 1;
-const TOOLKIT_VERSION = '2.8.3';
+const TOOLKIT_VERSION = '2.8.4';
 const RETENTION_DAYS = 90;
 const MAX_HISTORY_REPORTS = 500;
 const STABLE_CODES = new Set([

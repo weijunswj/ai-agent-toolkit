@@ -339,6 +339,7 @@ test('normal export preserves approved canonical locator and blocks a new privat
   const live = structuredClone(previous);
   live.nodes[0].parameters.documentId.value = 'private-target-sheet';
   const deploymentPolicy = {
+    schemaVersion: 1,
     workflows: [{
       workflowName: previous.name,
       resourcePaths: [{ nodeId: 'sheet-node', nodeName: 'Append order', nodeType: 'n8n-nodes-base.googleSheets', path: 'parameters.documentId.value', environmentSpecific: true, required: true }],
@@ -369,22 +370,23 @@ test('normal export preserves approved canonical locator and blocks a new privat
 
 test('conflicting workflow and node selectors fail closed', () => {
   const canonical = portable.canonicalWorkflowForGit(workflow());
-  expectCode(() => portable.selectWorkflowEntry({ workflows: [{
+  expectCode(() => portable.selectWorkflowEntry({ schemaVersion: 1, workflows: [{
     workflowFile: 'n8n-workflows/other.json',
     workflowName: canonical.name,
     nodes: [],
-  }] }, canonical, 'n8n-workflows/portable.json', 'test'), 'N8N_POLICY_VALIDATION_FAILED');
-  assert.equal(portable.selectWorkflowEntry({ workflows: [{
+  }] }, canonical, 'n8n-workflows/portable.json', 'test', 'credential-declarations'), 'N8N_POLICY_VALIDATION_FAILED');
+  assert.equal(portable.selectWorkflowEntry({ schemaVersion: 1, workflows: [{
     workflowFile: 'n8n-workflows/other.json',
     workflowName: 'Other workflow',
     nodes: [],
-  }] }, canonical, 'n8n-workflows/portable.json', 'test'), null);
+  }] }, canonical, 'n8n-workflows/portable.json', 'test', 'credential-declarations'), null);
   const live = workflow();
   expectCode(() => portable.canonicaliseExport({
     liveWorkflow: live,
     canonicalWorkflow: canonical,
     workflowFile: 'n8n-workflows/portable.json',
     deploymentPolicy: {
+      schemaVersion: 1,
       workflows: [{
         workflowFile: 'n8n-workflows/portable.json',
         workflowId: 'stale-workflow-id',
@@ -401,6 +403,7 @@ test('conflicting workflow and node selectors fail closed', () => {
     credentialDeclarations: declaration(canonical),
     credentialMetadata: [{ id: 'bound', name: 'Finance Sheets', type: 'googleSheetsOAuth2Api' }],
     deploymentPolicy: {
+      schemaVersion: 1,
       workflows: [{
         workflowFile: 'n8n-workflows/portable.json',
         workflowId: 'stale-workflow-id',
@@ -424,6 +427,300 @@ test('conflicting workflow and node selectors fail closed', () => {
     nodes: [],
   }] }, { ...canonical, id: 'canonical-workflow' }, 'n8n-workflows/portable.json');
   assert.equal(legacy.blocked, true);
+});
+
+test('present malformed portable documents fail schema validation before preparation or export mutation', () => {
+  const canonical = portable.canonicalWorkflowForGit(workflow());
+  const liveTarget = workflow();
+  const validOptions = {
+    canonicalWorkflow: canonical,
+    workflowFile: 'n8n-workflows/portable.json',
+    credentialDeclarations: declaration(canonical),
+    credentialMetadata: [{ id: 'target-private-id', name: 'Finance Sheets', type: 'googleSheetsOAuth2Api' }],
+    deploymentPolicy: { schemaVersion: 1, workflows: [] },
+    resourceBindings: { schemaVersion: 1, workflows: [] },
+    liveWorkflow: liveTarget,
+  };
+  const malformedCases = [
+    ['credentialDeclarations', 'credential-declarations', { schemaVersion: 1, workflows: {} }],
+    ['credentialDeclarations', 'credential-declarations', { schemaVersion: 2, workflows: [] }],
+    ['credentialDeclarations', 'credential-declarations', { workflows: [] }],
+    ['credentialDeclarations', 'credential-declarations', null],
+    ['credentialDeclarations', 'credential-declarations', []],
+    ['credentialDeclarations', 'credential-declarations', { schemaVersion: 1, workflows: [null] }],
+    ['credentialDeclarations', 'credential-declarations', {
+      schemaVersion: 1,
+      workflows: [{ workflowName: canonical.name, nodes: [{ nodeName: 'Append order' }] }],
+    }],
+    ['credentialDeclarations', 'credential-declarations', {
+      schemaVersion: 1,
+      workflows: [],
+      nodes: [],
+    }],
+    ['credentialDeclarations', 'credential-declarations', {
+      schemaVersion: 1,
+      workflows: [{ workflowName: canonical.name, nodes: [], resourcePaths: [] }],
+    }],
+    ['deploymentPolicy', 'deployment-policy', {
+      schemaVersion: 1,
+      workflows: [{ workflowName: canonical.name, protectedPaths: {} }],
+    }],
+    ['deploymentPolicy', 'deployment-policy', {
+      schemaVersion: 1,
+      workflows: [{
+        workflowName: canonical.name,
+        resourcePaths: [{ nodeName: 'Append order', nodeType: 'n8n-nodes-base.googleSheets', path: 'parameters.*', environmentSpecific: true }],
+      }],
+    }],
+    ['deploymentPolicy', 'deployment-policy', { schemaVersion: 1, unknownPolicyEntries: [] }],
+    ['resourceBindings', 'resource-bindings', {
+      schemaVersion: 1,
+      workflows: [{ workflowName: canonical.name, nodes: [{ nodeName: 'Append order', nodeType: 'n8n-nodes-base.googleSheets', values: [] }] }],
+    }],
+    ['resourceBindings', 'resource-bindings', {
+      schemaVersion: 1,
+      workflows: [{
+        workflowName: canonical.name,
+        nodes: [{
+          nodeName: 'Append order',
+          nodeType: 'n8n-nodes-base.googleSheets',
+          values: { 'parameters.documentId.value': { private: true } },
+        }],
+      }],
+    }],
+  ];
+
+  const canonicalBytes = JSON.stringify(canonical);
+  const liveTargetBytes = JSON.stringify(liveTarget);
+  for (const [optionName, kind, malformed] of malformedCases) {
+    const malformedBytes = JSON.stringify(malformed);
+    expectCode(() => portable.validatePortableDocument(malformed, kind), 'N8N_POLICY_VALIDATION_FAILED');
+    expectCode(
+      () => portable.preparePortableWorkflow({ ...validOptions, [optionName]: malformed }),
+      'N8N_POLICY_VALIDATION_FAILED'
+    );
+    assert.equal(JSON.stringify(canonical), canonicalBytes);
+    assert.equal(JSON.stringify(liveTarget), liveTargetBytes);
+    assert.equal(JSON.stringify(malformed), malformedBytes);
+  }
+
+  const live = workflow();
+  const liveBytes = JSON.stringify(live);
+  expectCode(() => portable.canonicaliseExport({
+    liveWorkflow: live,
+    canonicalWorkflow: canonical,
+    workflowFile: 'n8n-workflows/portable.json',
+    deploymentPolicy: { schemaVersion: 1, workflows: {} },
+  }), 'N8N_POLICY_VALIDATION_FAILED');
+  assert.equal(JSON.stringify(live), liveBytes);
+  assert.equal(JSON.stringify(canonical), canonicalBytes);
+});
+
+test('malformed policy files create no prepared payload and leave canonical and declarations byte-identical', () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-malformed-policy-'));
+  const canonicalPath = path.join(fixtureRoot, 'n8n-workflows', 'portable.json');
+  const declarationsPath = path.join(fixtureRoot, 'n8n-workflows', 'toolkit', 'portable-credentials.json');
+  const policyPath = path.join(fixtureRoot, 'n8n-workflows', 'toolkit', 'deployment-policy.json');
+  const metadataPath = path.join(fixtureRoot, '.n8n-local', 'credential-metadata.json');
+  const outputPath = path.join(fixtureRoot, '.tmp', 'prepared.json');
+  const resultPath = path.join(fixtureRoot, '.n8n-local', 'result.json');
+  const canonical = portable.canonicalWorkflowForGit(workflow());
+  const declarations = declaration(canonical);
+  writeFixture(canonicalPath, canonical);
+  writeFixture(declarationsPath, declarations);
+  writeFixture(policyPath, { schemaVersion: 1, workflows: {} });
+  writeFixture(metadataPath, []);
+  const canonicalBytes = fs.readFileSync(canonicalPath, 'utf8');
+  const declarationBytes = fs.readFileSync(declarationsPath, 'utf8');
+
+  expectCode(() => preparation.preparePortableImport({
+    workflow: canonicalPath,
+    output: outputPath,
+    result: resultPath,
+    'portable-credentials': declarationsPath,
+    'deployment-policy': policyPath,
+    'credential-metadata': metadataPath,
+  }), 'N8N_POLICY_VALIDATION_FAILED');
+
+  assert.equal(fs.existsSync(outputPath), false);
+  assert.equal(fs.readFileSync(canonicalPath, 'utf8'), canonicalBytes);
+  assert.equal(fs.readFileSync(declarationsPath, 'utf8'), declarationBytes);
+  const result = JSON.parse(fs.readFileSync(resultPath, 'utf8'));
+  assert.equal(result.code, 'N8N_POLICY_VALIDATION_FAILED');
+  assert.doesNotMatch(JSON.stringify(result), /target-private-id/);
+  fs.rmSync(fixtureRoot, { recursive: true, force: true });
+});
+
+test('conflicting stable node IDs fail before name fallback or any credential, resource, or webhook overlay', () => {
+  const canonical = portable.canonicalWorkflowForGit(workflow());
+  const replacement = structuredClone(canonical.nodes[0]);
+  replacement.type = 'n8n-nodes-base.httpRequest';
+  replacement.name = 'Replacement node';
+  delete replacement.credentials;
+  const oldIdentity = structuredClone(canonical.nodes[0]);
+  oldIdentity.id = 'different-node-id';
+  canonical.nodes = [replacement, oldIdentity, canonical.nodes[1]];
+  const canonicalBytes = JSON.stringify(canonical);
+  const staleRequirement = {
+    nodeId: 'sheet-node',
+    nodeName: 'Append order',
+    nodeType: 'n8n-nodes-base.googleSheets',
+    credentialType: 'googleSheetsOAuth2Api',
+    logicalName: 'Finance Sheets',
+    required: true,
+  };
+  expectCode(() => portable.resolveCredentialRequirements(
+    canonical,
+    [staleRequirement],
+    [{ id: 'target-private-id', name: 'Finance Sheets', type: 'googleSheetsOAuth2Api' }]
+  ), 'N8N_POLICY_VALIDATION_FAILED');
+  assert.equal(JSON.stringify(canonical), canonicalBytes);
+  assert.equal(canonical.nodes[1].parameters.documentId.value, 'approved-shared-sheet');
+
+  const resourceWorkflow = structuredClone(canonical);
+  const resourceBytes = JSON.stringify(resourceWorkflow);
+  expectCode(() => portable.applyExactResourceBindings(
+    resourceWorkflow,
+    {
+      resourcePaths: [{
+        nodeId: 'sheet-node',
+        nodeName: 'Append order',
+        nodeType: 'n8n-nodes-base.googleSheets',
+        path: 'parameters.documentId.value',
+        environmentSpecific: true,
+        required: true,
+      }],
+    },
+    {
+      nodes: [{
+        nodeId: 'sheet-node',
+        nodeName: 'Append order',
+        nodeType: 'n8n-nodes-base.googleSheets',
+        values: { 'parameters.documentId.value': 'private-resource' },
+      }],
+    },
+    new Set()
+  ), 'N8N_POLICY_VALIDATION_FAILED');
+  assert.equal(JSON.stringify(resourceWorkflow), resourceBytes);
+
+  const webhookPrepared = portable.canonicalWorkflowForGit(workflow());
+  const live = workflow();
+  live.nodes[1].type = 'n8n-nodes-base.httpRequest';
+  live.nodes.push({
+    id: 'fallback-webhook-node',
+    name: 'Intake',
+    type: 'n8n-nodes-base.webhook',
+    webhookId: 'fallback-webhook-id',
+    parameters: { path: 'portable-intake' },
+  });
+  const webhookBytes = JSON.stringify(webhookPrepared);
+  expectCode(
+    () => portable.restoreDedicatedWebhookMetadata(webhookPrepared, live, new Set()),
+    'N8N_POLICY_VALIDATION_FAILED'
+  );
+  assert.equal(JSON.stringify(webhookPrepared), webhookBytes);
+});
+
+test('duplicate credential requirements fail as a complete plan before any binding is applied', () => {
+  const canonical = portable.canonicalWorkflowForGit(workflow());
+  const baseRequirement = declaration(canonical).workflows[0].nodes[0];
+  const variants = [
+    [structuredClone(baseRequirement), structuredClone(baseRequirement)],
+    [structuredClone(baseRequirement), { ...baseRequirement, logicalName: 'Different logical name' }],
+    [structuredClone(baseRequirement), { ...baseRequirement, required: false }],
+    [structuredClone(baseRequirement), { ...baseRequirement, nodeId: '' }],
+  ];
+  for (const requirements of variants) {
+    const candidate = structuredClone(canonical);
+    const before = JSON.stringify(candidate);
+    expectCode(() => portable.resolveCredentialRequirements(
+      candidate,
+      requirements,
+      [{ id: 'target-private-id', name: 'Finance Sheets', type: 'googleSheetsOAuth2Api' }]
+    ), 'N8N_POLICY_VALIDATION_FAILED');
+    assert.equal(JSON.stringify(candidate), before);
+  }
+
+  const duplicateDocument = declaration(canonical);
+  duplicateDocument.workflows[0].nodes.push({
+    ...duplicateDocument.workflows[0].nodes[0],
+    nodeId: '',
+  });
+  const canonicalBytes = JSON.stringify(canonical);
+  expectCode(() => portable.preparePortableWorkflow({
+    canonicalWorkflow: canonical,
+    workflowFile: 'n8n-workflows/portable.json',
+    credentialDeclarations: duplicateDocument,
+    credentialMetadata: [{ id: 'target-private-id', name: 'Finance Sheets', type: 'googleSheetsOAuth2Api' }],
+    deploymentPolicy: { schemaVersion: 1, workflows: [] },
+    resourceBindings: { schemaVersion: 1, workflows: [] },
+  }), 'N8N_POLICY_VALIDATION_FAILED');
+  assert.equal(JSON.stringify(canonical), canonicalBytes);
+});
+
+test('credential declaration coverage is one-to-one with canonical logical names before metadata discovery', () => {
+  const canonical = portable.canonicalWorkflowForGit(workflow());
+  const stale = declaration(canonical);
+  stale.workflows[0].nodes[0].logicalName = 'Old Sheets Name';
+  let staleError;
+  try {
+    portable.preparePortableWorkflow({
+      canonicalWorkflow: canonical,
+      workflowFile: 'n8n-workflows/portable.json',
+      credentialDeclarations: stale,
+      credentialMetadata: null,
+      deploymentPolicy: { schemaVersion: 1, workflows: [] },
+      resourceBindings: { schemaVersion: 1, workflows: [] },
+    });
+  } catch (error) {
+    staleError = error;
+  }
+  assert.equal(staleError.code, 'N8N_POLICY_VALIDATION_FAILED');
+  assert.doesNotMatch(JSON.stringify(staleError), /target-private-id/);
+
+  const extra = declaration(canonical);
+  extra.workflows[0].nodes.push({
+    ...extra.workflows[0].nodes[0],
+    credentialType: 'unreferencedCredentialType',
+    logicalName: 'Unused logical name',
+  });
+  expectCode(() => portable.assertCredentialDeclarationCoverage(
+    canonical,
+    null,
+    extra.workflows[0].nodes
+  ), 'N8N_POLICY_VALIDATION_FAILED');
+
+  const renamedCanonical = structuredClone(canonical);
+  renamedCanonical.nodes[0].credentials.googleSheetsOAuth2Api.name = 'Finance Sheets v2';
+  const updated = declaration(renamedCanonical);
+  const prepared = portable.preparePortableWorkflow({
+    canonicalWorkflow: renamedCanonical,
+    workflowFile: 'n8n-workflows/portable.json',
+    credentialDeclarations: updated,
+    credentialMetadata: [{ id: 'target-private-id', name: 'Finance Sheets v2', type: 'googleSheetsOAuth2Api' }],
+    deploymentPolicy: { schemaVersion: 1, workflows: [] },
+    resourceBindings: { schemaVersion: 1, workflows: [] },
+  });
+  assert.equal(prepared.credentialResult.resolvedCount, 1);
+
+  let ambiguousError;
+  try {
+    portable.preparePortableWorkflow({
+      canonicalWorkflow: renamedCanonical,
+      workflowFile: 'n8n-workflows/portable.json',
+      credentialDeclarations: updated,
+      credentialMetadata: [
+        { id: 'target-private-id-one', name: 'Finance Sheets v2', type: 'googleSheetsOAuth2Api' },
+        { id: 'target-private-id-two', name: 'Finance Sheets v2', type: 'googleSheetsOAuth2Api' },
+      ],
+      deploymentPolicy: { schemaVersion: 1, workflows: [] },
+      resourceBindings: { schemaVersion: 1, workflows: [] },
+    });
+  } catch (error) {
+    ambiguousError = error;
+  }
+  assert.equal(ambiguousError.code, 'N8N_CREDENTIAL_AMBIGUOUS');
+  assert.doesNotMatch(JSON.stringify(ambiguousError), /target-private-id/);
 });
 
 test('portable declaration output cannot escape the workflow directory', (t) => {

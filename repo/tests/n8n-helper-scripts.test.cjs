@@ -2628,7 +2628,7 @@ test('prepare-n8n-live-import.cjs restores credentials by node ID', () => {
   assert.deepEqual(prepared.nodes[0].credentials, { httpHeaderAuth: { id: 'cred_1', name: 'Local Credential' } });
 });
 
-test('prepare-n8n-live-import.cjs skips stale node ID binding when node type changed', () => {
+test('prepare-n8n-live-import.cjs blocks stale node ID binding before name/type fallback', () => {
   const cwd = tempDir();
   const workflowPath = path.join(cwd, 'n8n-workflows', 'workflow.json');
   const bindingsPath = path.join(cwd, '.n8n-local', 'bindings.json');
@@ -2660,13 +2660,12 @@ test('prepare-n8n-live-import.cjs skips stale node ID binding when node type cha
 
   const result = runNode(prepareScript, [workflowPath, bindingsPath, outputPath], { cwd });
 
-  assert.equal(result.status, 0, result.stderr + result.stdout);
-  const prepared = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
-  assert.equal('credentials' in prepared.nodes[0], false);
-  assert.match(result.stderr + result.stdout, /Skipped 1 binding\(s\) with no matching node: Notify Main Error Handler/);
+  assert.notEqual(result.status, 0, result.stderr + result.stdout);
+  assert.equal(fs.existsSync(outputPath), false);
+  assert.match(result.stderr + result.stdout, /Stable node ID resolves to a conflicting node type/);
 });
 
-test('compare-n8n-workflow-credentials.cjs ignores stale node ID binding when node type changed', () => {
+test('compare-n8n-workflow-credentials.cjs blocks stale node ID binding before name/type fallback', () => {
   const cwd = tempDir();
   const repoWorkflowPath = path.join(cwd, 'n8n-workflows', 'workflow.json');
   const liveWorkflowPath = path.join(cwd, '.tmp', 'live-workflow.json');
@@ -2698,8 +2697,8 @@ test('compare-n8n-workflow-credentials.cjs ignores stale node ID binding when no
 
   const result = runNode(compareCredentialsScript, [repoWorkflowPath, liveWorkflowPath, bindingsPath], { cwd });
 
-  assert.equal(result.status, 0, result.stderr + result.stdout);
-  assert.equal(result.stdout.trim(), 'MATCH');
+  assert.notEqual(result.status, 0, result.stderr + result.stdout);
+  assert.match(result.stderr + result.stdout, /stable node ID resolves to a conflicting node type/i);
 });
 
 test('prepare-n8n-live-import.cjs restores live webhookId from matching live workflow node', () => {
@@ -2765,6 +2764,47 @@ test('prepare-n8n-live-import.cjs restores live webhookId by unique node name an
 
   assert.equal(restored, 1);
   assert.equal(workflow.nodes[0].webhookId, 'name-type-live-webhook-id');
+});
+
+test('prepare-n8n-live-import.cjs blocks conflicting stable webhook node ID before name/type fallback', () => {
+  const workflow = safeWorkflow({
+    nodes: [{
+      id: 'stable_webhook_id',
+      name: 'Webhook',
+      type: 'n8n-nodes-base.webhook',
+      typeVersion: 2,
+      position: [0, 0],
+      parameters: {},
+    }],
+  });
+  const liveWorkflow = safeWorkflow({
+    nodes: [
+      {
+        id: 'stable_webhook_id',
+        name: 'Replacement',
+        type: 'n8n-nodes-base.httpRequest',
+        typeVersion: 4,
+        position: [0, 0],
+        parameters: {},
+      },
+      {
+        id: 'fallback_webhook_id',
+        name: 'Webhook',
+        type: 'n8n-nodes-base.webhook',
+        typeVersion: 2,
+        position: [0, 0],
+        parameters: {},
+        webhookId: 'must-not-be-restored',
+      },
+    ],
+  });
+  const before = JSON.stringify(workflow);
+
+  assert.throws(
+    () => restoreLiveWebhookIds(workflow, liveWorkflow),
+    /stable node ID resolves to a conflicting node type/
+  );
+  assert.equal(JSON.stringify(workflow), before);
 });
 
 test('prepare-n8n-live-import.cjs skips ambiguous live webhookId name and type matches', () => {

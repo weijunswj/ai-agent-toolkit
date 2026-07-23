@@ -5,6 +5,7 @@ const {
   canonicaliseExport,
   mergeCredentialDeclarationDocument,
   selectWorkflowEntry,
+  validatePortableDocument,
 } = require('./n8n-portable-workflow.cjs');
 const { writeReport } = require('./n8n-workflow-operation-report.cjs');
 
@@ -314,10 +315,12 @@ function main() {
   options.portableCredentialsPath = options.portableCredentialsPath || path.join(workflowDir, 'toolkit', 'portable-credentials.json');
   options.portableCredentialsPath = assertStrictChild(workflowDir, options.portableCredentialsPath, 'Portable credential declaration');
   options.deploymentPolicyPath = options.deploymentPolicyPath || path.join(workflowDir, 'toolkit', 'deployment-policy.json');
-  const deploymentPolicy = fs.existsSync(options.deploymentPolicyPath) ? readJson(options.deploymentPolicyPath) : null;
+  const deploymentPolicy = fs.existsSync(options.deploymentPolicyPath) ? readJson(options.deploymentPolicyPath) : undefined;
   let portableCredentialDocument = fs.existsSync(options.portableCredentialsPath)
     ? readJson(options.portableCredentialsPath)
     : { schemaVersion: 1, workflows: [] };
+  validatePortableDocument(deploymentPolicy, 'deployment-policy');
+  validatePortableDocument(portableCredentialDocument, 'credential-declarations');
   const receiptWorkflows = [];
   const pendingWorkflowWrites = [];
 
@@ -388,7 +391,13 @@ function main() {
       continue;
     }
 
-    const previousDeclaration = selectWorkflowEntry(portableCredentialDocument, liveWorkflow, target.workflowFile, 'credential declaration');
+    const previousDeclaration = selectWorkflowEntry(
+      portableCredentialDocument,
+      liveWorkflow,
+      target.workflowFile,
+      'credential declaration',
+      'credential-declarations'
+    );
     const exportResult = canonicaliseExport({
       liveWorkflow,
       canonicalWorkflow: repoWorkflow,
@@ -427,9 +436,7 @@ function main() {
         content: declarationContent,
         validate(stagePath) {
           const parsed = readJson(stagePath);
-          if (parsed.schemaVersion !== 1 || !Array.isArray(parsed.workflows)) {
-            throw transactionError('Staged portable credential declaration is invalid.');
-          }
+          validatePortableDocument(parsed, 'credential-declarations', { allowAbsent: false });
         },
       },
     ]);

@@ -5,9 +5,9 @@
   "title": "Secure CI/CD Installer",
   "module_path": "_projects/cicd/secure-installer",
   "main_path": "_projects/cicd/secure-installer/_main",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "version_policy": "semver",
-  "version_notes": "Keeps bundled n8n helper templates aligned with portable canonical export, logical credential rebinding, inactive no-confirmation import, transport capability checks, and sanitized diagnostics.",
+  "version_notes": "Keeps bundled n8n helpers aligned with fail-closed portable document validation, stable-node identity checks, duplicate credential rejection, and canonical logical-name coverage.",
   "outputs": [
     {
       "kind": "curated",

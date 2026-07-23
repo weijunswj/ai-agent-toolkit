@@ -352,7 +352,12 @@ function restoreCredentials(workflow, workflowBindings, migrationMap) {
     let allowTypeMigration = false;
     const idBinding = singleMatch(bindingsById.get(node.id), 'node ID', node.name || node.id || '(unknown node)');
 
-    if (idBinding && !isStaleNodeIdBinding(idBinding, node)) {
+    if (idBinding && isStaleNodeIdBinding(idBinding, node)) {
+      throw new Error(
+        `Credential restore blocked for node "${node.name || node.id || '(unknown node)'}". Stable node ID resolves to a conflicting node type.`
+      );
+    }
+    if (idBinding) {
       binding = idBinding;
     }
 
@@ -397,7 +402,11 @@ function buildUniqueNodeIndex(nodes) {
   const byNameType = new Map();
 
   for (const node of nodes || []) {
-    if (node.id) byId.set(node.id, node);
+    if (node.id) {
+      const idEntries = byId.get(node.id) || [];
+      idEntries.push(node);
+      byId.set(node.id, idEntries);
+    }
 
     const key = nodeKey(node);
     const entries = byNameType.get(key) || [];
@@ -417,7 +426,14 @@ function restoreLiveWebhookIds(workflow, liveWorkflow) {
   let restored = 0;
 
   for (const node of workflow.nodes || []) {
-    let liveNode = node.id ? byId.get(node.id) : null;
+    const idMatches = node.id ? byId.get(node.id) || [] : [];
+    if (idMatches.length > 1) {
+      throw new Error(`Webhook ID restore blocked for node "${node.name || node.id || '(unknown)'}": stable node ID is ambiguous.`);
+    }
+    let liveNode = idMatches[0] || null;
+    if (liveNode && node.type && liveNode.type && node.type !== liveNode.type) {
+      throw new Error(`Webhook ID restore blocked for node "${node.name || node.id || '(unknown)'}": stable node ID resolves to a conflicting node type.`);
+    }
 
     if (!liveNode) {
       const matches = byNameType.get(nodeKey(node)) || [];
