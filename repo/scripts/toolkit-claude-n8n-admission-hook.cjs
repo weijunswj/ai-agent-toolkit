@@ -79,7 +79,10 @@ function isContinuationPrompt(prompt) {
 
 function startsNewObjective(router, ledger, prompt, classification) {
   if (ledger.objectiveDigest === router.sha256(prompt)) return false;
-  if (isContinuationPrompt(prompt)) return false;
+  if (isContinuationPrompt(prompt)) {
+    const target = router.objectiveTargetBinding(prompt);
+    return target.specific && target.digest !== ledger.objectiveTargetDigest;
+  }
   if (classification.operation && classification.operation !== ledger.operation) return true;
   if (ledger.status === 'complete') return true;
   return true;

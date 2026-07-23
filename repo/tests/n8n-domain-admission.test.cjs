@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const n8n = require('../../skills/external-system-router/scripts/n8n-domain-router.cjs');
+const external = require('../../skills/external-system-router/scripts/external-system-router.cjs');
 const hook = require('../scripts/toolkit-claude-n8n-admission-hook.cjs');
 
 function sourceAttestation(skillName, overrides = {}) {
@@ -170,6 +171,16 @@ test('generic validator or mirrored workflow evidence cannot substitute for offi
     cwd: repository,
     tool_name: 'Edit',
     tool_input: { file_path: 'workflows/generic.json', old_string: 'steps', new_string: 'tasks' }
+  }), false);
+  assert.equal(n8n.looksLikeN8nWorkflowMutation({
+    cwd: repository,
+    tool_name: 'Bash',
+    tool_input: { command: 'node scripts/change-workflow.cjs workflows/orders.json' }
+  }), true);
+  assert.equal(n8n.looksLikeN8nWorkflowMutation({
+    cwd: repository,
+    tool_name: 'PowerShell',
+    tool_input: { command: 'node scripts/change-workflow.cjs workflows/generic.json' }
   }), false);
   for (const command of [
     'git show HEAD:n8n-workflows/example.json --output=n8n-workflows/live.json',
@@ -364,6 +375,10 @@ test('changed material operations mismatch and new objectives receive fresh ledg
   const second = n8n.readTaskLedger(base, { stateRoot });
   assert.notEqual(second.taskId, first.taskId);
   assert.equal(second.invocationEvidence.length, 0);
+  hook.handle({ ...base, hook_event_name: 'UserPromptSubmit', prompt: 'Also edit workflow C in n8n JSON.' }, { router: n8n, stateRoot });
+  const continuedNewObjective = n8n.readTaskLedger(base, { stateRoot });
+  assert.notEqual(continuedNewObjective.taskId, second.taskId);
+  assert.equal(continuedNewObjective.invocationEvidence.length, 0);
   hook.handle({ ...base, hook_event_name: 'UserPromptSubmit', prompt: 'Explain git rebase.' }, { router: n8n, stateRoot });
   assert.equal(n8n.readTaskLedger(base, { stateRoot }), null);
 });
@@ -416,6 +431,112 @@ test('bounded PostToolUse receipt ingestion records required non-Skill capabilit
   };
   assert.equal(n8n.isCapabilityReceiptIngestionToolUse(lookalikeInput), false);
   assert.equal(hook.handle(lookalikeInput, { router: n8n, stateRoot }).hookSpecificOutput.permissionDecision, 'deny');
+});
+
+test('external capability receipts require installed-router, envelope, target, operation, and operation-receipt authority', () => {
+  const ledger = n8n.createN8nCapabilityLedger({
+    sessionId: 'external-receipt',
+    repositoryIdentity: 'repo',
+    objective: 'Update the live n8n workflow.',
+    operation: 'live-workflow-update',
+    createdAt: '2026-07-23T00:00:00.000Z'
+  });
+  const routerPath = require.resolve('../../skills/external-system-router/scripts/n8n-domain-router.cjs');
+  const externalPath = require.resolve('../../skills/external-system-router/scripts/external-system-router.cjs');
+  const command = `node "${routerPath}" ingest-capability-receipt receipt.json`;
+  const authorisationEnvelope = {
+    schemaVersion: external.ENVELOPE_SCHEMA_VERSION,
+    provider: 'n8n',
+    targetAlias: 'n8n-production',
+    accountOrOrganisation: 'owner',
+    resource: 'workflow-orders',
+    environment: 'production',
+    objective: 'Authorize the exact reviewed live workflow route.',
+    allowedOperations: ['live-workflow-update'],
+    operationRiskTiers: { 'live-workflow-update': 2 },
+    authorisedTier2Operations: ['live-workflow-update'],
+    forbiddenOperations: [],
+    expectedResult: 'The exact route is ready for the governed operation.',
+    verification: ['Verify the target fingerprint and selected route.'],
+    rollbackOrSafeDisable: ['Do not attempt a mutation when preconditions fail.'],
+    lifetime: { kind: 'task' },
+    ownerApprovalReference: 'owner-approved-live-route',
+    sensitiveDataClasses: ['workflow-metadata'],
+    interfaceRestrictions: ['no-browser']
+  };
+  const operationContext = {
+    provider: 'n8n',
+    targetAlias: 'n8n-production',
+    accountOrOrganisation: 'owner',
+    resource: 'workflow-orders',
+    environment: 'production',
+    operation: 'live-workflow-update',
+    targetFingerprint: `sha256:${'a'.repeat(64)}`,
+    readOnly: false
+  };
+  const operationReceipt = external.createOperationReceipt({
+    schemaVersion: external.RECEIPT_SCHEMA_VERSION,
+    operationId: 'route-live-workflow-update',
+    operation: operationContext.operation,
+    provider: operationContext.provider,
+    adapter: 'n8n-api',
+    targetAlias: operationContext.targetAlias,
+    targetFingerprint: operationContext.targetFingerprint,
+    environment: operationContext.environment,
+    riskTier: 2,
+    authorisationReference: authorisationEnvelope.ownerApprovalReference,
+    authorisationEnvelope,
+    selectedInterface: 'n8n-api',
+    precondition: 'passed',
+    mutationAttempted: false,
+    mutationPerformed: false,
+    postcondition: 'not-applicable',
+    rollbackAttempted: false,
+    rollbackPerformed: false,
+    stableCode: 'EXTERNAL_ROUTE_AUTHORISED',
+    safeEvidenceReferences: ['test:exact-route-authority'],
+    supportedNextAction: 'Continue only through the selected exact route.',
+    unchangedScope: ['No live mutation was attempted.']
+  });
+  const receipt = {
+    schemaVersion: n8n.N8N_CAPABILITY_RECEIPT_SCHEMA_VERSION,
+    taskId: ledger.taskId,
+    operation: ledger.operation,
+    capabilityId: 'live-route:live-workflow-update',
+    issuer: 'external-system-router',
+    result: 'verified',
+    reference: `receipt:${operationReceipt.operationId}`,
+    commandDigest: n8n.sha256(command),
+    operationAuthority: {
+      routerSourceDigest: n8n.sha256(fs.readFileSync(externalPath)),
+      authorisationEnvelope,
+      operationContext,
+      operationReceipt
+    },
+    recordedAt: '2026-07-23T00:01:00.000Z'
+  };
+  receipt.receiptDigest = n8n.sha256(receipt);
+  const input = {
+    cwd: path.dirname(routerPath),
+    tool_name: 'Bash',
+    tool_input: { command }
+  };
+  const recorded = n8n.recordCapabilityReceipt(ledger, receipt, { input });
+  assert.equal(recorded.requiredCapabilities.find((entry) =>
+    entry.capabilityId === receipt.capabilityId).status, 'verified');
+
+  const issuerOnly = { ...receipt };
+  delete issuerOnly.operationAuthority;
+  issuerOnly.receiptDigest = n8n.sha256(issuerOnly);
+  assert.throws(() => n8n.recordCapabilityReceipt(ledger, issuerOnly, { input }),
+    (error) => error.code === 'N8N_CAPABILITY_RECEIPT_INVALID');
+
+  const wrongTarget = structuredClone(receipt);
+  wrongTarget.operationAuthority.operationContext.targetFingerprint = `sha256:${'b'.repeat(64)}`;
+  delete wrongTarget.receiptDigest;
+  wrongTarget.receiptDigest = n8n.sha256(wrongTarget);
+  assert.throws(() => n8n.recordCapabilityReceipt(ledger, wrongTarget, { input }),
+    (error) => error.code === 'EXTERNAL_RECEIPT_BINDING_MISMATCH');
 });
 
 test('the exact installed workflow compiler command is admitted and produces bound receipt evidence', () => {
@@ -566,4 +687,47 @@ test('ledger locks preserve live owners, reclaim only proven-dead owners, and re
   assert.equal(reclaimed.token, 'd'.repeat(32));
   reclaimedRelease();
   assert.equal(fs.existsSync(lockPath), false);
+
+  fs.mkdirSync(lockPath);
+  assert.throws(() => n8n.acquireTaskLedgerLock(input, {
+    stateRoot,
+    now: Date.now()
+  }), (error) => error.code === 'N8N_LEDGER_BUSY');
+  const staleTime = new Date(Date.now() - 60000);
+  fs.utimesSync(lockPath, staleTime, staleTime);
+  const ownerlessRelease = n8n.acquireTaskLedgerLock(input, {
+    stateRoot,
+    lockOwnerToken: 'e'.repeat(32),
+    now: Date.now()
+  });
+  assert.equal(JSON.parse(fs.readFileSync(ownerPath, 'utf8')).token, 'e'.repeat(32));
+  ownerlessRelease();
+
+  fs.mkdirSync(lockPath);
+  fs.writeFileSync(ownerPath, '{malformed');
+  assert.throws(() => n8n.acquireTaskLedgerLock(input, {
+    stateRoot,
+    now: Date.now()
+  }), (error) => error.code === 'N8N_LEDGER_BUSY');
+  fs.utimesSync(ownerPath, staleTime, staleTime);
+  fs.utimesSync(lockPath, staleTime, staleTime);
+  const malformedRelease = n8n.acquireTaskLedgerLock(input, {
+    stateRoot,
+    lockOwnerToken: 'f'.repeat(32),
+    now: Date.now()
+  });
+  assert.equal(JSON.parse(fs.readFileSync(ownerPath, 'utf8')).token, 'f'.repeat(32));
+  malformedRelease();
+
+  fs.mkdirSync(lockPath);
+  fs.writeFileSync(ownerPath, JSON.stringify({ schemaVersion: 1, token: 'invalid' }));
+  fs.utimesSync(ownerPath, staleTime, staleTime);
+  fs.utimesSync(lockPath, staleTime, staleTime);
+  const invalidOwnerRelease = n8n.acquireTaskLedgerLock(input, {
+    stateRoot,
+    lockOwnerToken: '1'.repeat(32),
+    now: Date.now()
+  });
+  assert.equal(JSON.parse(fs.readFileSync(ownerPath, 'utf8')).token, '1'.repeat(32));
+  invalidOwnerRelease();
 });

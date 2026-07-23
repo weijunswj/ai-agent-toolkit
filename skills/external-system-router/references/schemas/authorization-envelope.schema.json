@@ -51,7 +51,7 @@
     },
     "ownerApprovalReference": {"type": "string", "minLength": 1, "maxLength": 200},
     "sensitiveDataClasses": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/alias"}},
-    "interfaceRestrictions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 200}}
+    "interfaceRestrictions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^(?:(?:no|forbid)-|(?:forbid|require):)[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"}}
   },
   "$defs": {
     "alias": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"},

@@ -5,7 +5,7 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.9.4",
+  "version": "2.9.5",
   "version_policy": "semver",
   "version_notes": "Completes exact n8n admission, helper-receipt, target-binding, and schema-5 activation-proof documentation recovery.",
   "outputs": [

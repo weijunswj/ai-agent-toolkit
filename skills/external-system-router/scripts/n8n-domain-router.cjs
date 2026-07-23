@@ -5,7 +5,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { sha256, assertNoSecretMaterial } = require('./external-system-router.cjs');
+const externalRouter = require('./external-system-router.cjs');
+const { sha256, assertNoSecretMaterial } = externalRouter;
 
 const N8N_LEDGER_SCHEMA_VERSION = 'ai-agent-toolkit.n8n-capability-ledger.v1';
 const N8N_CAPABILITY_RECEIPT_SCHEMA_VERSION = 'ai-agent-toolkit.n8n-capability-receipt.v1';
@@ -241,6 +242,18 @@ function detectN8nTask(input) {
   };
 }
 
+function objectiveTargetBinding(value) {
+  const text = String(value || '').toLowerCase().replace(/\\/g, '/');
+  const references = new Set();
+  for (const match of text.matchAll(/(?:^|[\s"'(])([a-z0-9._/-]+\.json)\b/g)) references.add(match[1]);
+  for (const match of text.matchAll(/\bworkflow\s+(?:named\s+)?["']?([a-z0-9._-]+)["']?/g)) {
+    const reference = match[1].replace(/[._-]+$/, '');
+    if (!['and', 'in', 'json', 'that', 'the', 'this', 'to', 'with'].includes(reference)) references.add(`workflow:${reference}`);
+  }
+  const bounded = [...references].sort().slice(0, 20);
+  return { specific: bounded.length > 0, digest: sha256(bounded) };
+}
+
 function inferN8nOperation(objective) {
   const text = String(objective || '').toLowerCase();
   const matches = [];
@@ -409,6 +422,7 @@ function createN8nCapabilityLedger(input) {
     sessionFingerprint: sha256(sessionId),
     repositoryFingerprint: sha256(repositoryIdentity),
     objectiveDigest: sha256(input.objective || input.prompt || ''),
+    objectiveTargetDigest: objectiveTargetBinding(input.objective || input.prompt || '').digest,
     detection: classification.detection,
     operation: classification.operation,
     facets: classification.facets,
@@ -426,7 +440,7 @@ function createN8nCapabilityLedger(input) {
 function validateN8nCapabilityLedger(ledger) {
   if (!isObject(ledger) || ledger.schemaVersion !== N8N_LEDGER_SCHEMA_VERSION) fail('Unsupported n8n capability ledger schema.');
   string(ledger.taskId, 'taskId', 128);
-  for (const field of ['sessionFingerprint', 'repositoryFingerprint', 'objectiveDigest']) {
+  for (const field of ['sessionFingerprint', 'repositoryFingerprint', 'objectiveDigest', 'objectiveTargetDigest']) {
     if (!/^sha256:[0-9a-f]{64}$/.test(ledger[field] || '')) fail(`${field} is invalid.`);
   }
   if (!isObject(ledger.detection) || !/^sha256:[0-9a-f]{64}$/.test(ledger.detection.evidenceDigest || '')) fail('Ledger detection evidence is invalid.');
@@ -598,7 +612,7 @@ function validateCapabilityReceiptShape(receipt) {
   if (!isObject(receipt)) fail('Capability receipt must be an object.', 'N8N_CAPABILITY_RECEIPT_INVALID');
   const allowed = new Set([
     'schemaVersion', 'taskId', 'operation', 'capabilityId', 'issuer', 'result', 'reference',
-    'blocker', 'commandDigest', 'sourceDigest', 'recordedAt', 'receiptDigest'
+    'blocker', 'commandDigest', 'sourceDigest', 'operationAuthority', 'recordedAt', 'receiptDigest'
   ]);
   for (const key of Object.keys(receipt)) if (!allowed.has(key)) fail(`Capability receipt contains unsupported field ${key}.`, 'N8N_CAPABILITY_RECEIPT_INVALID');
   if (receipt.schemaVersion !== N8N_CAPABILITY_RECEIPT_SCHEMA_VERSION) fail('Unsupported n8n capability receipt schema.', 'N8N_CAPABILITY_RECEIPT_INVALID');
@@ -618,6 +632,12 @@ function validateCapabilityReceiptShape(receipt) {
   if (!/^sha256:[0-9a-f]{64}$/.test(receipt.commandDigest || '')) fail('Capability receipt command digest is invalid.', 'N8N_CAPABILITY_RECEIPT_INVALID');
   if (receipt.issuer === 'toolkit-helper' && !/^sha256:[0-9a-f]{64}$/.test(receipt.sourceDigest || '')) {
     fail('Toolkit-helper capability receipt source digest is invalid.', 'N8N_CAPABILITY_RECEIPT_INVALID');
+  }
+  if (receipt.issuer === 'toolkit-helper' && receipt.operationAuthority !== undefined) {
+    fail('Toolkit-helper capability receipt must not carry external operation authority.', 'N8N_CAPABILITY_RECEIPT_INVALID');
+  }
+  if (receipt.issuer === 'external-system-router' && receipt.result === 'verified' && !isObject(receipt.operationAuthority)) {
+    fail('Verified external capability receipt requires validated operation authority.', 'N8N_CAPABILITY_RECEIPT_INVALID');
   }
   if (!Number.isFinite(Date.parse(receipt.recordedAt || ''))) fail('Capability receipt recordedAt is invalid.', 'N8N_CAPABILITY_RECEIPT_INVALID');
   if (!/^sha256:[0-9a-f]{64}$/.test(receipt.receiptDigest || '')) fail('Capability receipt digest is invalid.', 'N8N_CAPABILITY_RECEIPT_INVALID');
@@ -773,6 +793,51 @@ function capabilityReceiptFromProducerToolUse(input, ledger, options = {}) {
   return validateCapabilityReceiptShape(receipt);
 }
 
+function validateExternalCapabilityReceiptAuthority(receipt, ledger) {
+  const authority = receipt.operationAuthority;
+  if (!isObject(authority)) fail('External capability receipt lacks operation authority.', 'N8N_CAPABILITY_RECEIPT_MISMATCH');
+  const allowed = new Set(['routerSourceDigest', 'authorisationEnvelope', 'operationContext', 'operationReceipt']);
+  for (const key of Object.keys(authority)) {
+    if (!allowed.has(key)) fail(`External capability authority contains unsupported field ${key}.`, 'N8N_CAPABILITY_RECEIPT_MISMATCH');
+  }
+  const installedDigest = sha256(readRegularFile(require.resolve('./external-system-router.cjs'), 'installed external-system router'));
+  if (authority.routerSourceDigest !== installedDigest) {
+    fail('External capability receipt is not bound to the exact installed router bytes.', 'N8N_CAPABILITY_RECEIPT_MISMATCH');
+  }
+  externalRouter.validateAuthorizationEnvelope(authority.authorisationEnvelope);
+  if (!isObject(authority.operationContext)) fail('External capability operation context is missing.', 'N8N_CAPABILITY_RECEIPT_MISMATCH');
+  const operationContext = authority.operationContext;
+  const contextAllowed = new Set([
+    'provider', 'targetAlias', 'accountOrOrganisation', 'resource', 'environment',
+    'operation', 'targetFingerprint', 'readOnly'
+  ]);
+  for (const key of Object.keys(operationContext)) {
+    if (!contextAllowed.has(key)) fail(`External capability operation context contains unsupported field ${key}.`, 'N8N_CAPABILITY_RECEIPT_MISMATCH');
+  }
+  for (const field of ['provider', 'targetAlias', 'accountOrOrganisation', 'resource', 'environment']) {
+    if (operationContext[field] !== authority.authorisationEnvelope[field]) {
+      fail(`External capability ${field} does not match the authorisation envelope.`, 'N8N_CAPABILITY_RECEIPT_MISMATCH');
+    }
+  }
+  if (operationContext.operation !== ledger.operation || !authority.authorisationEnvelope.allowedOperations.includes(ledger.operation)) {
+    fail('External capability operation does not match the active ledger and envelope.', 'N8N_CAPABILITY_RECEIPT_MISMATCH');
+  }
+  if (!/^sha256:[0-9a-f]{64}$/.test(operationContext.targetFingerprint || '')) {
+    fail('External capability target fingerprint is invalid.', 'N8N_CAPABILITY_RECEIPT_MISMATCH');
+  }
+  externalRouter.validateOperationReceipt(authority.operationReceipt, {
+    authorisationEnvelope: authority.authorisationEnvelope,
+    operationContext
+  });
+  if (authority.operationReceipt.authorisationReference !== authority.authorisationEnvelope.ownerApprovalReference
+    || authority.operationReceipt.precondition !== 'passed'
+    || (authority.operationReceipt.mutationPerformed && authority.operationReceipt.postcondition !== 'passed')
+    || receipt.reference !== `receipt:${authority.operationReceipt.operationId}`) {
+    fail('External capability operation receipt lacks exact owner, precondition, result, or reference binding.', 'N8N_CAPABILITY_RECEIPT_MISMATCH');
+  }
+  return authority;
+}
+
 function recordCapabilityReceipt(ledger, receipt, binding = {}) {
   validateN8nCapabilityLedger(ledger);
   validateCapabilityReceiptShape(receipt);
@@ -792,6 +857,9 @@ function recordCapabilityReceipt(ledger, receipt, binding = {}) {
   if (receipt.commandDigest !== sha256(String(toolInput.command || '').trim())) fail('Capability receipt command binding does not match the completed tool use.', 'N8N_CAPABILITY_RECEIPT_MISMATCH');
   if (producer && (receipt.capabilityId !== producer.capabilityId || receipt.sourceDigest !== producer.sourceDigest)) {
     fail('Capability receipt does not match the exact installed Toolkit helper bytes.', 'N8N_CAPABILITY_RECEIPT_MISMATCH');
+  }
+  if (receipt.issuer === 'external-system-router' && receipt.result === 'verified') {
+    validateExternalCapabilityReceiptAuthority(receipt, ledger);
   }
   return recordCapabilityEvidence(ledger, receipt.result === 'verified'
     ? { capabilityId: receipt.capabilityId, result: 'verified', reference: receipt.reference, recordedAt: receipt.recordedAt }
@@ -873,7 +941,9 @@ function looksLikeN8nWorkflowMutation(input) {
   const workflowPath = /(^|\/)n8n-workflows?\/.*\.json$/.test(targetPath) || /(^|\/)workflows?\/.*n8n.*\.json$/.test(targetPath);
   const workflowStructure = /"nodes"\s*:/.test(combined) && /"connections"\s*:/.test(combined);
   if (toolName === 'Bash' || toolName === 'PowerShell') {
-    const relevant = /n8n-workflows?|\bn8n\b.*\b(?:workflow|node|expression|sdk|json)\b/.test(combined) || workflowStructure;
+    const relevant = /n8n-workflows?|\bn8n\b.*\b(?:workflow|node|expression|sdk|json)\b/.test(combined)
+      || workflowStructure
+      || inspectExistingN8nWorkflowTarget(input);
     if (!relevant) return false;
     return !isProvenReadOnlyToolUse(input);
   }
@@ -900,30 +970,41 @@ function isProvenReadOnlyToolUse(input) {
 function inspectExistingN8nWorkflowTarget(input) {
   if (!isObject(input)) return false;
   const toolName = String(input.tool_name || input.toolName || '');
-  if (!['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(toolName)) return false;
   const toolInput = isObject(input.tool_input) ? input.tool_input : isObject(input.toolInput) ? input.toolInput : {};
-  const target = String(toolInput.file_path || toolInput.filePath || toolInput.path || toolInput.notebook_path || '');
-  if (!/\.json$/i.test(target)) return false;
   const cwd = path.resolve(typeof input.cwd === 'string' && input.cwd.trim() ? input.cwd : process.cwd());
-  const candidate = path.resolve(cwd, target);
-  if (!pathWithin(cwd, candidate)) return false;
-  const fullContent = typeof toolInput.content === 'string' ? toolInput.content : null;
-  if (fullContent && Buffer.byteLength(fullContent, 'utf8') <= N8N_WORKFLOW_MAX_BYTES) {
-    try {
-      const document = JSON.parse(fullContent);
-      if (isObject(document) && Array.isArray(document.nodes) && isObject(document.connections)) return true;
-    } catch {
-      // Existing target inspection below remains authoritative for partial edits.
+  let targets;
+  if (['Bash', 'PowerShell'].includes(toolName)) {
+    const tokens = tokenizeBoundedCommand(String(toolInput.command || '').trim());
+    if (!tokens) return false;
+    targets = tokens.filter((token) => /\.json$/i.test(token));
+  } else if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(toolName)) {
+    targets = [String(toolInput.file_path || toolInput.filePath || toolInput.path || toolInput.notebook_path || '')];
+  } else {
+    return false;
+  }
+  return targets.some((target) => {
+    if (!/\.json$/i.test(target)) return false;
+    const candidate = path.resolve(cwd, target);
+    if (!pathWithin(cwd, candidate)) return false;
+    const fullContent = typeof toolInput.content === 'string' ? toolInput.content : null;
+    if (fullContent && Buffer.byteLength(fullContent, 'utf8') <= N8N_WORKFLOW_MAX_BYTES) {
+      try {
+        const document = JSON.parse(fullContent);
+        if (isObject(document) && Array.isArray(document.nodes) && isObject(document.connections)) return true;
+      } catch {
+        // Existing target inspection below remains authoritative for partial edits.
+      }
     }
-  }
-  try {
-    const stat = fs.lstatSync(candidate);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > N8N_WORKFLOW_MAX_BYTES || !sameResolvedPath(fs.realpathSync(candidate), candidate)) return false;
-    const document = JSON.parse(fs.readFileSync(candidate, 'utf8'));
-    return isObject(document) && Array.isArray(document.nodes) && isObject(document.connections);
-  } catch {
-    return /(^|\/)workflows?\/.*\.json$/i.test(target.replace(/\\/g, '/'));
-  }
+    try {
+      const stat = fs.lstatSync(candidate);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > N8N_WORKFLOW_MAX_BYTES || !sameResolvedPath(fs.realpathSync(candidate), candidate)) return false;
+      const document = JSON.parse(fs.readFileSync(candidate, 'utf8'));
+      return isObject(document) && Array.isArray(document.nodes) && isObject(document.connections);
+    } catch {
+      return !['Bash', 'PowerShell'].includes(toolName)
+        && /(^|\/)workflows?\/.*\.json$/i.test(target.replace(/\\/g, '/'));
+    }
+  });
 }
 
 function readCapabilityReceiptFile(filePath) {
@@ -1001,6 +1082,36 @@ function acquireTaskLedgerLock(input, options = {}) {
       throw error;
     }
   };
+  const reclaimStaleUnowned = (lockStat, observedOwnerBytes) => {
+    let ownerMtime = 0;
+    try { ownerMtime = fs.lstatSync(ownerPath).mtimeMs; } catch {}
+    const observedMtime = Math.max(lockStat.mtimeMs, ownerMtime);
+    if (!Number.isFinite(observedMtime) || now - observedMtime <= LEDGER_LOCK_STALE_MS) {
+      fail('n8n task ledger lock owner is unavailable; capability evidence was not recorded.', 'N8N_LEDGER_BUSY');
+    }
+    let currentLock;
+    let currentOwnerBytes = null;
+    let currentOwnerMtime = 0;
+    try {
+      currentLock = fs.lstatSync(lockPath);
+      currentOwnerBytes = fs.existsSync(ownerPath) ? fs.readFileSync(ownerPath, 'utf8') : null;
+      if (currentOwnerBytes !== null) currentOwnerMtime = fs.lstatSync(ownerPath).mtimeMs;
+    } catch {
+      fail('n8n task ledger lock changed during reclamation.', 'N8N_LEDGER_BUSY');
+    }
+    if (currentLock.mtimeMs !== lockStat.mtimeMs
+      || currentOwnerMtime !== ownerMtime
+      || currentOwnerBytes !== observedOwnerBytes) {
+      fail('n8n task ledger lock changed during reclamation.', 'N8N_LEDGER_BUSY');
+    }
+    try {
+      if (currentOwnerBytes !== null) fs.unlinkSync(ownerPath);
+      fs.rmdirSync(lockPath);
+      create();
+    } catch {
+      fail('n8n task ledger lock changed during reclamation.', 'N8N_LEDGER_BUSY');
+    }
+  };
   try {
     create();
   } catch (error) {
@@ -1010,32 +1121,44 @@ function acquireTaskLedgerLock(input, options = {}) {
       fail('n8n task ledger is busy; capability evidence was not recorded.', 'N8N_LEDGER_BUSY');
     }
     let previous;
+    let previousOwnerBytes = null;
     try {
-      previous = JSON.parse(fs.readFileSync(ownerPath, 'utf8'));
+      previousOwnerBytes = fs.readFileSync(ownerPath, 'utf8');
+      previous = JSON.parse(previousOwnerBytes);
     } catch {
-      fail('n8n task ledger lock owner is unavailable; capability evidence was not recorded.', 'N8N_LEDGER_BUSY');
+      reclaimStaleUnowned(stat, previousOwnerBytes);
+      previous = null;
     }
-    const previousCreatedAt = Date.parse(previous.createdAt || '');
-    const isProcessAlive = options.isProcessAlive || ((pid) => {
-      try {
-        process.kill(pid, 0);
-        return true;
-      } catch (probeError) {
-        return probeError.code === 'EPERM';
+    if (previous) {
+      const previousCreatedAt = Date.parse(previous.createdAt || '');
+      const structurallyValid = previous.schemaVersion === 1
+        && /^[0-9a-f]{32}$/.test(previous.token || '')
+        && Number.isInteger(previous.pid)
+        && Number.isFinite(previousCreatedAt);
+      if (!structurallyValid) {
+        reclaimStaleUnowned(stat, previousOwnerBytes);
+      } else {
+        const isProcessAlive = options.isProcessAlive || ((pid) => {
+          try {
+            process.kill(pid, 0);
+            return true;
+          } catch (probeError) {
+            return probeError.code === 'EPERM';
+          }
+        });
+        if (now - previousCreatedAt <= LEDGER_LOCK_STALE_MS || isProcessAlive(previous.pid)) {
+          fail('n8n task ledger is busy; capability evidence was not recorded.', 'N8N_LEDGER_BUSY');
+        }
+        const currentOwnerBytes = fs.readFileSync(ownerPath, 'utf8');
+        const current = JSON.parse(currentOwnerBytes);
+        if (current.token !== previous.token || currentOwnerBytes !== previousOwnerBytes) {
+          fail('n8n task ledger lock owner changed during reclamation.', 'N8N_LEDGER_BUSY');
+        }
+        fs.unlinkSync(ownerPath);
+        fs.rmdirSync(lockPath);
+        create();
       }
-    });
-    if (!/^[0-9a-f]{32}$/.test(previous.token || '')
-      || !Number.isInteger(previous.pid)
-      || !Number.isFinite(previousCreatedAt)
-      || now - previousCreatedAt <= LEDGER_LOCK_STALE_MS
-      || isProcessAlive(previous.pid)) {
-      fail('n8n task ledger is busy; capability evidence was not recorded.', 'N8N_LEDGER_BUSY');
     }
-    const current = JSON.parse(fs.readFileSync(ownerPath, 'utf8'));
-    if (current.token !== previous.token) fail('n8n task ledger lock owner changed during reclamation.', 'N8N_LEDGER_BUSY');
-    fs.unlinkSync(ownerPath);
-    fs.rmdirSync(lockPath);
-    create();
   }
   let released = false;
   return () => {
@@ -1127,6 +1250,7 @@ module.exports = {
   readClaudePluginRecords,
   attestClaudeOfficialSkillInvocation,
   detectN8nTask,
+  objectiveTargetBinding,
   inferN8nOperation,
   inferN8nFacets,
   classifyN8nOperation,
@@ -1137,6 +1261,7 @@ module.exports = {
   recordSkillInvocation,
   recordCapabilityEvidence,
   validateCapabilityReceiptShape,
+  validateExternalCapabilityReceiptAuthority,
   isCapabilityReceiptIngestionToolUse,
   resolveToolkitHelperProducer,
   isCapabilityProducerToolUse,

@@ -50,7 +50,9 @@ const N8N_DOMAIN_BODY = [
 ].join('\n');
 
 const ALIAS_PATTERN_SOURCE = '^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$';
+const INTERFACE_RESTRICTION_PATTERN_SOURCE = '^(?:(?:no|forbid)-|(?:forbid|require):)[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$';
 const ALIAS_PATTERN = new RegExp(ALIAS_PATTERN_SOURCE);
+const INTERFACE_RESTRICTION_PATTERN = new RegExp(INTERFACE_RESTRICTION_PATTERN_SOURCE);
 const PROVIDER_PATTERN = /^[a-z][a-z0-9-]{1,63}$/;
 const DIGEST_PATTERN = /^sha256:[0-9a-f]{16,64}$/;
 const CREDENTIAL_REFERENCE_PATTERN = /^(credential-store|os-keychain|password-manager|secret-broker|session-injection):\/\/[a-zA-Z0-9._/-]+$/;
@@ -208,7 +210,13 @@ function validateAuthorizationEnvelope(envelope) {
     invariant(Number.isFinite(expiresAt), 'lifetime.expiresAt must be an ISO date-time.');
   }
   if (envelope.sensitiveDataClasses !== undefined) requireStringArray(envelope.sensitiveDataClasses, 'sensitiveDataClasses', { unique: true, pattern: ALIAS_PATTERN });
-  if (envelope.interfaceRestrictions !== undefined) requireStringArray(envelope.interfaceRestrictions, 'interfaceRestrictions', { unique: true, max: 200 });
+  if (envelope.interfaceRestrictions !== undefined) {
+    requireStringArray(envelope.interfaceRestrictions, 'interfaceRestrictions', {
+      unique: true,
+      max: 200,
+      pattern: INTERFACE_RESTRICTION_PATTERN
+    });
+  }
   for (const operation of envelope.authorisedTier2Operations) invariant(envelope.allowedOperations.includes(operation), `Tier 2 operation ${operation} is not allowed.`);
   const tier2Operations = envelope.allowedOperations.filter((operation) => envelope.operationRiskTiers[operation] === RISK_TIERS.SENSITIVE_REVERSIBLE);
   invariant(tier2Operations.length === envelope.authorisedTier2Operations.length && tier2Operations.every((operation) => envelope.authorisedTier2Operations.includes(operation)), 'authorisedTier2Operations must exactly match the owner-approved Tier 2 operation map.');
@@ -428,8 +436,9 @@ function validateCapabilityAudit(audit) {
   return audit;
 }
 
-function graphicalApprovalMatchesOperation(approval, operationContext) {
+function graphicalApprovalMatchesOperation(approval, operationContext, disclosure) {
   try {
+    validateGraphicalDisclosure(disclosure);
     requireObject(approval, 'Graphical-control approval binding');
     assertAllowedKeys(approval, new Set([
       'ownerApproved', 'authorisationReference', 'disclosureDigest', 'provider', 'targetAlias',
@@ -438,8 +447,10 @@ function graphicalApprovalMatchesOperation(approval, operationContext) {
     invariant(approval.ownerApproved === true && approval.oneDeclaredEnvelopeOnly === true, 'Graphical approval is not bound to one declared envelope.');
     requireString(approval.authorisationReference, 'graphicalApproval.authorisationReference', { max: 200 });
     requireString(approval.disclosureDigest, 'graphicalApproval.disclosureDigest', { pattern: DIGEST_PATTERN });
+    invariant(approval.disclosureDigest === sha256(disclosure), 'Graphical approval does not match the supplied disclosure.', 'EXTERNAL_GRAPHICAL_APPROVAL_MISMATCH');
     for (const field of ['provider', 'targetAlias', 'environment', 'resource', 'operation']) {
       invariant(approval[field] === operationContext[field], `Graphical approval ${field} does not match the selected operation.`, 'EXTERNAL_GRAPHICAL_APPROVAL_MISMATCH');
+      invariant(disclosure[field] === operationContext[field], `Graphical disclosure ${field} does not match the selected operation.`, 'EXTERNAL_GRAPHICAL_APPROVAL_MISMATCH');
     }
     assertNoSecretMaterial(approval, 'Graphical-control approval binding');
     return true;
@@ -448,10 +459,28 @@ function graphicalApprovalMatchesOperation(approval, operationContext) {
   }
 }
 
+function interfaceRestrictions(envelope) {
+  const forbidden = new Set();
+  const required = new Set();
+  for (const restriction of envelope.interfaceRestrictions || []) {
+    if (restriction.startsWith('require:')) required.add(restriction.slice('require:'.length));
+    else if (restriction.startsWith('forbid:')) forbidden.add(restriction.slice('forbid:'.length));
+    else forbidden.add(restriction.slice('no-'.length));
+  }
+  return { forbidden, required };
+}
+
 function selectStrongestAdmissibleInterface(operationContext, audits, options = {}) {
   requireObject(operationContext, 'Operation context');
   const operation = requireString(operationContext.operation, 'operation', { pattern: ALIAS_PATTERN });
   requireString(operationContext.targetFingerprint, 'operationContext.targetFingerprint', { pattern: DIGEST_PATTERN });
+  const envelope = validateAuthorizationEnvelope(options.authorizationEnvelope);
+  for (const field of ['provider', 'targetAlias', 'environment', 'resource']) {
+    invariant(envelope[field] === operationContext[field], `Authorisation envelope ${field} does not match the selected operation.`, 'EXTERNAL_REAUTHORISATION_REQUIRED');
+  }
+  invariant(envelope.allowedOperations.includes(operation) && !envelope.forbiddenOperations.includes(operation),
+    'Authorisation envelope does not allow the selected operation.', 'EXTERNAL_REAUTHORISATION_REQUIRED');
+  const restrictions = interfaceRestrictions(envelope);
   invariant(Array.isArray(audits) && audits.length > 0, 'At least one capability audit is required.');
   const audited = audits.map(validateCapabilityAudit).filter((audit) =>
     audit.provider === operationContext.provider
@@ -465,9 +494,14 @@ function selectStrongestAdmissibleInterface(operationContext, audits, options = 
   const mutation = operationContext.readOnly !== true;
   const admissible = audited.filter((audit) => {
     if (mutation && audit.readOnly) return false;
-    if (options.forbiddenInterfaces?.includes(audit.interfaceKind) || options.forbiddenInterfaces?.includes(audit.interfaceId)) return false;
+    if (restrictions.forbidden.has(audit.interfaceKind) || restrictions.forbidden.has(audit.interfaceId)) return false;
+    if (restrictions.required.size > 0
+      && !restrictions.required.has(audit.interfaceKind)
+      && !restrictions.required.has(audit.interfaceId)) return false;
     if (audit.interfaceKind === 'browser' || audit.interfaceKind === 'computer-use') {
-      return graphicalApprovalMatchesOperation(options.graphicalApproval, operationContext);
+      return graphicalApprovalMatchesOperation(options.graphicalApproval, operationContext, options.graphicalDisclosure)
+        && options.graphicalDisclosure.accountOrOrganisation === envelope.accountOrOrganisation
+        && options.graphicalApproval.authorisationReference === envelope.ownerApprovalReference;
     }
     return true;
   });
@@ -1297,6 +1331,7 @@ module.exports = {
   QUESTION_BANK_SCHEMA_VERSION,
   ANSWER_SCHEMA_VERSION,
   ALIAS_PATTERN_SOURCE,
+  INTERFACE_RESTRICTION_PATTERN_SOURCE,
   RISK_TIERS,
   RECONCILIATION_TRIGGERS,
   HISTORY_SAFER_PATHS,
