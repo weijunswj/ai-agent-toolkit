@@ -52,6 +52,10 @@ const manifestNames = new Set([
   'go.mod', 'go.sum', 'cargo.toml', 'cargo.lock', 'pom.xml', 'build.gradle',
   'build.gradle.kts', 'composer.json', 'composer.lock', 'gemfile', 'gemfile.lock'
 ]);
+const dependencyLockNames = new Set([
+  'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'poetry.lock',
+  'pipfile.lock', 'go.sum', 'cargo.lock', 'composer.lock', 'gemfile.lock'
+]);
 const deployNames = new Set([
   'dockerfile', 'compose.yml', 'compose.yaml', 'docker-compose.yml',
   'docker-compose.yaml', 'vercel.json', 'netlify.toml', 'fly.toml', 'render.yaml',
@@ -67,11 +71,15 @@ const webPackages = new Set([
 ]);
 
 function slash(value) {
-  return value.split(path.sep).join('/');
+  return String(value).replace(/\\/g, '/').split(path.sep).join('/');
 }
 
 function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function sourceBindingDigest(filePath) {
+  return sha256(fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n'));
 }
 
 function readJson(filePath) {
@@ -319,6 +327,9 @@ function validateToolLock(lock = readJson(TOOL_LOCK_PATH), today = new Date()) {
 
 function validateSuppressions(document, root, today = new Date()) {
   const errors = [];
+  const policy = readJson(POLICY_PATH);
+  const lock = readJson(TOOL_LOCK_PATH);
+  const rulesVersion = readJson(RULES_PATH).rules_version;
   if (!document || document.schema_version !== 1 || !Array.isArray(document.suppressions)) {
     return { valid: false, errors: ['suppression document must use schema_version 1 and an array'] };
   }
@@ -350,9 +361,12 @@ function validateSuppressions(document, root, today = new Date()) {
     if (!SHA40.test(item.introduction_commit || '')) errors.push(`${prefix}: introduction_commit must be exact`);
     try {
       const expiry = validateDate(item.expires, `${prefix}.expires`);
-      if (expiry.getTime() < Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())) {
+      const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+      if (expiry.getTime() < todayUtc) {
         errors.push(`${prefix}: suppression is expired`);
       }
+      const maximum = todayUtc + (policy.suppression_max_days * 24 * 60 * 60 * 1000);
+      if (expiry.getTime() > maximum) errors.push(`${prefix}: suppression exceeds the maximum lifetime`);
     } catch (error) {
       errors.push(error.message);
     }
@@ -361,9 +375,19 @@ function validateSuppressions(document, root, today = new Date()) {
     }
     const full = path.resolve(root, item.path || '');
     if (isWithin(root, full) && fs.existsSync(full) && fs.lstatSync(full).isFile()) {
-      if (sha256(fs.readFileSync(full)) !== item.source_sha256) errors.push(`${prefix}: source binding changed`);
+      if (sourceBindingDigest(full) !== item.source_sha256) errors.push(`${prefix}: source binding changed`);
     } else {
       errors.push(`${prefix}: suppression path is missing or outside repository`);
+    }
+    if (item.tool === 'toolkit-rules') {
+      if (item.tool_version !== rulesVersion || item.rule_version !== rulesVersion) {
+        errors.push(`${prefix}: Toolkit rule version binding changed`);
+      }
+    } else {
+      const record = lock.records.find((entry) => entry.name === item.tool && entry.state === 'active');
+      if (!record || item.tool_version !== record.release || item.rule_version !== record.rules_database_version) {
+        errors.push(`${prefix}: tool or rule version binding changed`);
+      }
     }
   }
   return { valid: errors.length === 0, errors };
@@ -472,14 +496,22 @@ function genericJsonFindings(tool, root, parsed) {
         for (const vulnerability of pkg.vulnerabilities || []) add(vulnerability.id, 'HIGH', result.source?.path, 0, 'Dependency vulnerability');
       }
     }
+  } else if (tool === 'zizmor') {
+    for (const audit of Array.isArray(parsed) ? parsed : []) {
+      for (const location of audit.locations || []) {
+        const filePath = location.symbolic?.key?.Local?.verbatim_path;
+        const row = location.concrete?.location?.start_point?.row;
+        add(audit.ident, audit.determinations?.severity || 'MEDIUM', filePath, Number.isInteger(row) ? row + 1 : 0, 'zizmor finding');
+      }
+    }
   } else {
     const list = Array.isArray(parsed) ? parsed : (parsed.findings || parsed.results || parsed.diagnostics || []);
     for (const item of list) {
       add(
-        item.rule || item.rule_id || item.ident || item.code || item.id,
+        item.rule || item.rule_id || item.RuleID || item.ident || item.kind || item.code || item.id,
         item.severity || item.level || 'MEDIUM',
-        item.path || item.file || item.filename || item.location?.path,
-        item.line || item.line_number || item.location?.line || 0,
+        item.path || item.file || item.File || item.filepath || item.filename || item.location?.path,
+        item.line || item.StartLine || item.line_number || item.location?.line || 0,
         `${tool} finding`
       );
     }
@@ -489,7 +521,9 @@ function genericJsonFindings(tool, root, parsed) {
 
 function runAdapter(name, root, toolsDir, files) {
   const executable = toolExecutable(toolsDir, name);
-  if (!fs.existsSync(executable)) return { status: 'missing', findings: [], failure: `${name}: verified binary is missing` };
+  if (name !== 'psscriptanalyzer' && !fs.existsSync(executable)) {
+    return { status: 'missing', findings: [], failure: `${name}: verified binary is missing` };
+  }
   let result;
   let parsed;
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-security-gate-'));
@@ -504,7 +538,8 @@ function runAdapter(name, root, toolsDir, files) {
       parsed = parseJson(result.stdout, name);
     } else if (name === 'zizmor') {
       result = run(executable, ['--format=json', path.join(root, '.github', 'workflows')], { cwd: root });
-      if (result.error || ![0, 1].includes(result.status)) throw new Error(result.error || `exit ${result.status}`);
+      // zizmor uses exit 14 when audits found reportable results.
+      if (result.error || ![0, 1, 14].includes(result.status)) throw new Error(result.error || `exit ${result.status}`);
       parsed = parseJson(result.stdout, name);
     } else if (name === 'actionlint') {
       result = run(executable, ['-format', '{{json .}}'], { cwd: root });
@@ -514,7 +549,7 @@ function runAdapter(name, root, toolsDir, files) {
     } else if (name === 'shellcheck') {
       const shellFiles = files.filter((file) => ['.sh', '.bash'].includes(path.extname(file.relative).toLowerCase()));
       if (shellFiles.length === 0) return { status: 'not_applicable', findings: [] };
-      result = run(executable, ['--format=json', ...shellFiles.map((file) => file.full)], { cwd: root });
+      result = run(executable, ['--format=json', '--severity=warning', ...shellFiles.map((file) => file.full)], { cwd: root });
       if (result.error || ![0, 1].includes(result.status)) throw new Error(result.error || `exit ${result.status}`);
       parsed = parseJson(result.stdout, name);
     } else if (name === 'psscriptanalyzer') {
@@ -535,7 +570,7 @@ function runAdapter(name, root, toolsDir, files) {
       parsed = parsed.map((item) => ({ rule: item.RuleName, severity: item.Severity, path: item.ScriptPath, line: item.Line }));
     } else if (name === 'gitleaks-cli') {
       const reportPath = path.join(temporary, 'gitleaks.json');
-      result = run(executable, ['detect', '--source', root, '--no-banner', '--redact', '--report-format', 'json', '--report-path', reportPath], { cwd: root });
+      result = run(executable, ['dir', root, '--no-banner', '--redact', '--report-format', 'json', '--report-path', reportPath], { cwd: root });
       if (result.error || ![0, 1].includes(result.status)) throw new Error(result.error || `exit ${result.status}`);
       parsed = fs.existsSync(reportPath) ? readJson(reportPath) : [];
     } else {
@@ -584,11 +619,13 @@ function runInvariants(root, mode, base, head) {
 function scannerApplicability(name, classification, files) {
   const hasActions = files.some((file) => file.relative.toLowerCase().startsWith('.github/workflows/'));
   const hasManifest = files.some((file) => manifestNames.has(path.basename(file.relative).toLowerCase()));
+  const hasDependencyLock = files.some((file) => dependencyLockNames.has(path.basename(file.relative).toLowerCase()));
   const hasIac = files.some((file) => deployNames.has(path.basename(file.relative).toLowerCase()) || path.extname(file.relative).toLowerCase() === '.tf');
   if (['actionlint', 'zizmor'].includes(name)) return hasActions;
   if (name === 'shellcheck') return files.some((file) => ['.sh', '.bash'].includes(path.extname(file.relative).toLowerCase()));
   if (name === 'psscriptanalyzer') return files.some((file) => ['.ps1', '.psm1', '.psd1'].includes(path.extname(file.relative).toLowerCase()));
-  if (['trivy', 'osv-scanner'].includes(name)) return hasManifest || hasIac;
+  if (name === 'trivy') return hasManifest || hasIac;
+  if (name === 'osv-scanner') return hasDependencyLock;
   if (name === 'gitleaks-cli') return classification.profile !== PROFILE_EXEMPT;
   return false;
 }

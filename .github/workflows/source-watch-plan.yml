@@ -13,6 +13,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
 
       - name: Render advisory source update plan
         run: node repo/scripts/watch-project-sources.cjs >> "$GITHUB_STEP_SUMMARY"

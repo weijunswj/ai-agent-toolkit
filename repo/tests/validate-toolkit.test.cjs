@@ -516,7 +516,7 @@ test('Toolkit plugin packaged version surfaces stay aligned', () => {
   const bridgePath = path.join(cwd, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
   fs.writeFileSync(
     bridgePath,
-    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.9.0';", "const BRIDGE_VERSION = '2.2.1';"),
+    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.9.1';", "const BRIDGE_VERSION = '2.2.1';"),
     'utf8'
   );
 
@@ -552,6 +552,7 @@ test('repo-local agent rules bootstrap skill metadata stays in the skill surface
 test('project manifests include the current project modules without repo-wide MCP publishing', () => {
   const ids = validator.projectManifests().map((entry) => entry.id).sort();
   assert.deepEqual(ids, [
+    'cicd.repository-security-gate',
     'cicd.secure-installer',
     'design.google-design-md',
     'design.ui-ux-pro-max',

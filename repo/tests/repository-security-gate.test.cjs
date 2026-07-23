@@ -119,9 +119,15 @@ test('suppressions require exact current source and expiry bindings', () => {
     const expired = structuredClone(valid);
     expired.suppressions[0].expires = '2026-07-22';
     assert.equal(validateSuppressions(expired, root, new Date('2026-07-23T00:00:00Z')).valid, false);
+    const permanent = structuredClone(valid);
+    permanent.suppressions[0].expires = '2027-07-23';
+    assert.equal(validateSuppressions(permanent, root, new Date('2026-07-23T00:00:00Z')).valid, false);
     const changed = structuredClone(valid);
     changed.suppressions[0].source_sha256 = 'c'.repeat(64);
     assert.equal(validateSuppressions(changed, root, new Date('2026-07-23T00:00:00Z')).valid, false);
+    const versionDrift = structuredClone(valid);
+    versionDrift.suppressions[0].rule_version = '2.0.0';
+    assert.equal(validateSuppressions(versionDrift, root, new Date('2026-07-23T00:00:00Z')).valid, false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

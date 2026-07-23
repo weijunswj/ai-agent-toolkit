@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "suppressions": [
+    {
+      "id": "guarded-auto-sync-pull-request-target",
+      "tool": "zizmor",
+      "rule": "dangerous-triggers",
+      "finding_identity": "f471d67134f725381ff5a2781149d9a408ff58165652f8f0694d24501925a080",
+      "path": ".github/workflows/auto-sync-generated-surfaces.yml",
+      "scope": "exact_line",
+      "exploitability_rationale": "The protected-base workflow treats the PR checkout as data, rejects forks and stale heads before checkout, runs only protected deterministic scripts, constrains the staged writeback paths, and has dedicated mutation tests for each trust boundary.",
+      "approver_reference": "https://github.com/weijunswj/ai-agent-toolkit/issues/284",
+      "introduction_commit": "0e940c2145a520b33f3c4b37a517b52e83674a4b",
+      "expires": "2026-10-21",
+      "compensating_test": "repo/tests/validate-toolkit.test.cjs",
+      "tool_version": "v1.28.0",
+      "rule_version": "builtin-v1.28.0",
+      "source_sha256": "195a4114eed32769f4282da0ba05fd274615f178f622f7305d621c9124b8cda2"
+    },
+    {
+      "id": "synthetic-private-prompt-fixture",
+      "tool": "gitleaks-cli",
+      "rule": "generic-api-key",
+      "finding_identity": "1649391968f90bc87c9cd07697765e8be5fced9f9423c339afefe3380f9015e7",
+      "path": "repo/tests/fixtures/security-gate/synthetic-private-prompt.txt",
+      "scope": "synthetic_fixture",
+      "exploitability_rationale": "Exact synthetic prompt fixture used to prove private prompt text is not propagated to child-agent process state.",
+      "approver_reference": "https://github.com/weijunswj/ai-agent-toolkit/issues/284",
+      "introduction_commit": "e1b6edb15fa01ad9acdeb57fec6f69c361411d5b",
+      "expires": "2026-10-21",
+      "compensating_test": "repo/tests/toolkit-agent-launch-lifecycle.test.cjs",
+      "tool_version": "v8.30.1",
+      "rule_version": "builtin-v8.30.1 plus repo config",
+      "source_sha256": "cb1faad6a6c8b573895c91916b202bc22a558d7534ef58e69af9ca2e59b702ff"
+    }
+  ]
+}

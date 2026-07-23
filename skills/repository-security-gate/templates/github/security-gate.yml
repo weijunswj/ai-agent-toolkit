@@ -115,6 +115,7 @@ jobs:
         run: |
           set -euo pipefail
           args=(scan --mode "$MODE" --repo . --tools-dir .security-tools --run-invariants)
+          if [ -f repo/security/security-gate-suppressions.json ]; then args+=(--suppressions repo/security/security-gate-suppressions.json); fi
           if [ -n "$BASE" ]; then args+=(--base "$BASE"); fi
           if [ -n "$HEAD" ]; then args+=(--head "$HEAD"); fi
           if [ -n "$ARTIFACT_DIGEST" ]; then args+=(--artifact-digest "$ARTIFACT_DIGEST"); fi

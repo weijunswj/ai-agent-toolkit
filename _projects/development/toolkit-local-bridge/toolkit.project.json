@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.9.0",
+  "version": "2.9.1",
   "version_policy": "semver",
-  "version_notes": "Adds the repository-owned security-gate skill and synchronizes native plugin, bridge, setup, control, and delegation versions.",
+  "version_notes": "Hardens the repository-owned security-gate adapters for cross-platform CI and synchronizes native plugin, bridge, setup, control, and delegation versions.",
   "outputs": [
     {
       "kind": "curated",
