@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "policy_version": "1.0.0",
+  "allowed_modes": [
+    "pr",
+    "full",
+    "scheduled",
+    "release"
+  ],
+  "states": [
+    "SECURITY_PASS",
+    "SECURITY_FINDINGS",
+    "SECURITY_GATE_UNVERIFIED",
+    "SECURITY_GATE_INFRA_BLOCKED",
+    "SECURITY_PROFILE_EXEMPT"
+  ],
+  "profiles": {
+    "SECURITY_PROFILE_EXEMPT": {
+      "required_layers": []
+    },
+    "SECURITY_PROFILE_LIGHTWEIGHT_CI": {
+      "required_layers": [
+        "tool_lock",
+        "toolkit_rules",
+        "actionlint",
+        "zizmor",
+        "gitleaks-cli"
+      ]
+    },
+    "SECURITY_PROFILE_TOOLING_LIBRARY": {
+      "required_layers": [
+        "tool_lock",
+        "toolkit_rules",
+        "osv-scanner",
+        "trivy",
+        "actionlint",
+        "zizmor",
+        "gitleaks-cli",
+        "shellcheck",
+        "psscriptanalyzer",
+        "toolkit_invariants"
+      ]
+    },
+    "SECURITY_PROFILE_WEB_API": {
+      "required_layers": [
+        "tool_lock",
+        "toolkit_rules",
+        "osv-scanner",
+        "trivy",
+        "actionlint",
+        "zizmor",
+        "gitleaks-cli",
+        "shellcheck",
+        "psscriptanalyzer",
+        "project_invariants"
+      ],
+      "deferred_layers": [
+        "isolated_preview_zap",
+        "authenticated_api_adversarial_tests"
+      ]
+    },
+    "SECURITY_PROFILE_WORKFLOW_INTEGRATION": {
+      "required_layers": [
+        "tool_lock",
+        "toolkit_rules",
+        "osv-scanner",
+        "trivy",
+        "actionlint",
+        "zizmor",
+        "gitleaks-cli",
+        "shellcheck",
+        "psscriptanalyzer",
+        "workflow_invariants"
+      ]
+    }
+  },
+  "security_critical_paths": [
+    ".github/workflows/",
+    "auth/",
+    "oauth/",
+    "api/",
+    "routes/",
+    "webhooks/",
+    "uploads/",
+    "storage/",
+    "transactions/",
+    "credentials/",
+    "deployment/",
+    "infrastructure/",
+    "security/",
+    "repo/scripts/",
+    "_projects/cicd/repository-security-gate/"
+  ],
+  "privileged_workflows": [
+    ".github/workflows/auto-sync-generated-surfaces.yml",
+    ".github/workflows/source-watch-pr.yml"
+  ],
+  "suppression_max_days": 90,
+  "tool_lock_max_age_days": 30,
+  "report_max_findings": 500,
+  "review_packet_max_files": 200,
+  "review_packet_max_locations": 400,
+  "forbidden_report_fields": [
+    "source",
+    "excerpt",
+    "environment",
+    "raw_output",
+    "absolute_path",
+    "secret"
+  ]
+}

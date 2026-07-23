@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://weijunswj.github.io/ai-agent-toolkit/security-gate/tool-lock.schema.json",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "lock_version",
+    "first_approved_date",
+    "last_verified_date",
+    "records"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "lock_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "first_approved_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "last_verified_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "records": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "purpose",
+          "upstream",
+          "publisher",
+          "release",
+          "commit",
+          "license",
+          "license_file",
+          "license_sha256",
+          "commercial_use",
+          "redistribution",
+          "expected_release_asset",
+          "release_checksum",
+          "signature_attestation",
+          "container_digest",
+          "supported_platforms",
+          "output_schema",
+          "rules_database_version",
+          "adoption_decision",
+          "state"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$"
+          },
+          "kind": {
+            "enum": [
+              "scanner",
+              "github_action",
+              "vulnerability_database",
+              "rule_source",
+              "container_image"
+            ]
+          },
+          "upstream": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+          },
+          "commit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "license_sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "release_checksum": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "container_digest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "adoption_decision": {
+            "enum": [
+              "ADOPT",
+              "DEFER",
+              "REJECT",
+              "REPLACE_WITH_ALTERNATIVE"
+            ]
+          },
+          "state": {
+            "enum": [
+              "active",
+              "superseded",
+              "blocked"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,242 @@
+{
+  "id": "cicd.repository-security-gate",
+  "category": "cicd",
+  "name": "repository-security-gate",
+  "title": "Repository Security Gate",
+  "module_path": "_projects/cicd/repository-security-gate",
+  "main_path": "_projects/cicd/repository-security-gate/_main",
+  "version": "1.0.0",
+  "version_policy": "semver",
+  "version_notes": "Initial repository-owned security-gate foundation, Toolkit pilot, provenance lock, source-watch contract, and bounded review packet.",
+  "outputs": [
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/repository-security-gate/SKILL.md",
+      "output": "skills/repository-security-gate/SKILL.md",
+      "notes": "Short explicit-only router for the generated portable security-gate pack.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/repository-security-gate/README.md",
+      "output": "skills/repository-security-gate/README.md",
+      "notes": "Generated consumer installation and use index.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/repository-security-gate/agents/openai.yaml",
+      "output": "skills/repository-security-gate/agents/openai.yaml",
+      "notes": "Explicit-only OpenAI skill metadata.",
+      "fidelity": "generated_metadata"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/docs/architecture.md",
+      "output": "skills/repository-security-gate/references/architecture.md",
+      "notes": "Full security-gate architecture and trust-boundary contract.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/docs/tool-adjudication.md",
+      "output": "skills/repository-security-gate/references/tool-adjudication.md",
+      "notes": "Official-source tool licence and provenance adjudication.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "json",
+      "source": "_main/config/tool-lock.json",
+      "output": "skills/repository-security-gate/config/tool-lock.json",
+      "notes": "Validated scanner and GitHub Action provenance lock.",
+      "fidelity": "generated_metadata"
+    },
+    {
+      "kind": "json",
+      "source": "_main/config/security-policy.json",
+      "output": "skills/repository-security-gate/config/security-policy.json",
+      "notes": "Toolkit security policy and profile requirements.",
+      "fidelity": "generated_metadata"
+    },
+    {
+      "kind": "json",
+      "source": "_main/config/invariants.json",
+      "output": "skills/repository-security-gate/config/invariants.json",
+      "notes": "Existing Toolkit tests consumed as security evidence.",
+      "fidelity": "generated_metadata"
+    },
+    {
+      "kind": "json",
+      "source": "_main/rules/toolkit-rules.json",
+      "output": "skills/repository-security-gate/rules/toolkit-rules.json",
+      "notes": "First-party static rules; no private or restricted rule pack.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "json",
+      "source": "_main/schemas/tool-lock.schema.json",
+      "output": "skills/repository-security-gate/schemas/tool-lock.schema.json",
+      "notes": "Machine-readable provenance-lock schema.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "json",
+      "source": "_main/schemas/report.schema.json",
+      "output": "skills/repository-security-gate/schemas/report.schema.json",
+      "notes": "Sanitised report contract schema.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "json",
+      "source": "_main/schemas/suppressions.schema.json",
+      "output": "skills/repository-security-gate/schemas/suppressions.schema.json",
+      "notes": "Exact expiring suppression schema.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "json",
+      "source": "_main/schemas/review-packet.schema.json",
+      "output": "skills/repository-security-gate/schemas/review-packet.schema.json",
+      "notes": "Bounded exact-head review packet schema.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/tools/security-gate.cjs",
+      "output": "skills/repository-security-gate/tools/security-gate.cjs",
+      "notes": "Portable local classifier, orchestrator, normaliser, and review-packet generator.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/tools/install-pinned-tools.cjs",
+      "output": "skills/repository-security-gate/tools/install-pinned-tools.cjs",
+      "notes": "Pinned official asset downloader with checksum verification.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/github/security-gate.yml",
+      "output": "skills/repository-security-gate/templates/github/security-gate.yml",
+      "notes": "Thin repo-local GitHub Actions integration template.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/templates/github/security-candidate-validation.yml",
+      "output": "skills/repository-security-gate/templates/github/security-candidate-validation.yml",
+      "notes": "Separate reviewed candidate-validation trust boundary template.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "json",
+      "source": "_main/fixtures/classification-cases.json",
+      "output": "skills/repository-security-gate/fixtures/classification-cases.json",
+      "notes": "Synthetic clean and malicious repository-classification fixtures.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "json",
+      "source": "_main/fixtures/rule-cases.json",
+      "output": "skills/repository-security-gate/fixtures/rule-cases.json",
+      "notes": "Synthetic positive and negative Toolkit-rule fixtures.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "json",
+      "source": "curated_output_for_ai/packs/repository-security-gate/pack.json",
+      "output": "skills/repository-security-gate/packs/repository-security-gate/pack.json",
+      "notes": "Portable version-pinned consumer pack metadata.",
+      "fidelity": "generated_metadata"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/packs/repository-security-gate/README.md",
+      "output": "skills/repository-security-gate/packs/repository-security-gate/README.md",
+      "notes": "Pack review and installation boundary.",
+      "fidelity": "reviewed_entrypoint"
+    }
+  ],
+  "writes": {
+    "allowed": [
+      "skills/repository-security-gate/SKILL.md",
+      "skills/repository-security-gate/README.md",
+      "skills/repository-security-gate/agents/openai.yaml",
+      "skills/repository-security-gate/references/architecture.md",
+      "skills/repository-security-gate/references/tool-adjudication.md",
+      "skills/repository-security-gate/config/tool-lock.json",
+      "skills/repository-security-gate/config/security-policy.json",
+      "skills/repository-security-gate/config/invariants.json",
+      "skills/repository-security-gate/rules/toolkit-rules.json",
+      "skills/repository-security-gate/schemas/tool-lock.schema.json",
+      "skills/repository-security-gate/schemas/report.schema.json",
+      "skills/repository-security-gate/schemas/suppressions.schema.json",
+      "skills/repository-security-gate/schemas/review-packet.schema.json",
+      "skills/repository-security-gate/tools/security-gate.cjs",
+      "skills/repository-security-gate/tools/install-pinned-tools.cjs",
+      "skills/repository-security-gate/templates/github/security-gate.yml",
+      "skills/repository-security-gate/templates/github/security-candidate-validation.yml",
+      "skills/repository-security-gate/fixtures/classification-cases.json",
+      "skills/repository-security-gate/fixtures/rule-cases.json",
+      "skills/repository-security-gate/packs/repository-security-gate/pack.json",
+      "skills/repository-security-gate/packs/repository-security-gate/README.md"
+    ],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**",
+      "security-reports/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false,
+  "skill_creation_review": {
+    "existing_skill_review": "Reviewed secure-cicd-installer, project-completion-audit, context-preserving-ai-publisher, ai-coding-agent-rules, current skills/**, project modules, README skill tables, toolkit skill routing, and the safety matrix. repository-security-gate is a distinct executable portable gate, not general CI installation guidance or a readiness-audit router.",
+    "trigger": "Use repository-security-gate when a user asks to classify a repository for the Toolkit security profile, run or integrate the repository-owned security gate, inspect its sanitised evidence, validate scanner locks/suppressions, or generate a stable-head security-review packet. Do not invoke it for live DAST, production targets, credentials, or generic feature implementation.",
+    "decision": "new_project_skill",
+    "decision_reason": "The gate has a distinct deterministic runtime, provenance lock, schemas, rules, fixtures, report states, source-watch contract, and consumer installation boundary that would bloat secure-cicd-installer and project-completion-audit.",
+    "unique_value": "Provides content-derived fail-closed classification, verified pinned scanner assets, Toolkit-owned exploit rules, exact expiring suppressions, sanitised ordinary CI evidence, source-watch/candidate trust separation, and stable-head risk packets without Codex Security or paid security dashboards.",
+    "runtime_footprint": "The SKILL.md is a short explicit-only router. Runtime detail stays in local references, JSON contracts, fixtures, and deterministic tools loaded only when the gate is used.",
+    "local_assets": "Includes exact first-party tools, schemas, policy, rules, clean/malicious synthetic fixtures, GitHub templates, provenance lock, and pack metadata. It includes no scanner binary or third-party rule pack.",
+    "output_contract": "Produce a repository profile and a sanitised JSON/Markdown report bound to exact base/head or release digest, with coverage, findings, suppressions, unverified layers, infrastructure failures, and next action; optionally produce a bounded exact-head review packet.",
+    "anti_bloat_review": "This is not generic security advice. The skill is justified by its executable local assets and portable evidence contract, remains explicit-only, and does not absorb consumer-specific web, workflow, or deployment tests.",
+    "safety_boundary": "No production/live target, credential, private data, browser history, Docker daemon, provider, database, object storage, or active DAST. Tool downloads require exact official assets and checksum verification. Candidate execution remains quarantined and manual. External failures fail closed.",
+    "source_provenance": "first_party",
+    "third_party_audit": "not_applicable_first_party; only official release/licence metadata is recorded. No third-party skill, scanner code, rule pack, or executable is copied.",
+    "publisher_workflow": "context-preserving-ai-publisher maintenance workflow with first-party _main source, small curated router metadata, exact deterministic generated outputs, source-watch integration, sync, audits, packaging, and focused tests.",
+    "routing": "repository-security-gate is explicitly routed for repository-owned security-gate integration and evidence work, and intentionally remains non-implicit because scans and downloads are context-heavy and approval-sensitive.",
+    "validation": [
+      "node --test repo/tests/repository-security-gate.test.cjs",
+      "node repo/scripts/sync-toolkit-projects.cjs --write",
+      "node repo/scripts/sync-toolkit-projects.cjs --check",
+      "node repo/scripts/audit-published-surfaces.cjs --check",
+      "node repo/scripts/package-skills.cjs --check",
+      "node repo/scripts/audit-skill-portability.cjs",
+      "node repo/scripts/validate-toolkit.cjs"
+    ]
+  },
+  "project": {
+    "name": "Repository Security Gate",
+    "category": "cicd",
+    "summary": "Portable repository-owned security classification, scanner orchestration, provenance, rules, reports, suppressions, and stable-head review packets."
+  },
+  "surface": {
+    "publish_as": "skill",
+    "skill": {
+      "status": "published",
+      "path": "skills/repository-security-gate",
+      "summary": "Versioned portable repository security-gate pack and local runner."
+    },
+    "mcp": {
+      "status": "not_applicable"
+    }
+  }
+}

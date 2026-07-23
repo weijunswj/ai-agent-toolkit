@@ -1,0 +1,181 @@
+{
+  "schema_version": 1,
+  "rules_version": "1.0.0",
+  "provenance": "first-party Toolkit rules derived from public vulnerability classes; no third-party rule pack",
+  "rules": [
+    {
+      "id": "TKSG001",
+      "title": "Untrusted input reaches process execution",
+      "severity": "HIGH",
+      "extensions": [
+        ".js",
+        ".cjs",
+        ".mjs",
+        ".ts",
+        ".py",
+        ".ps1"
+      ],
+      "pattern": "(?:exec|execFile|spawn|system|popen|Start-Process)\\s*\\([^\\n]*(?:req\\.|request\\.|process\\.argv|github\\.event|inputs?\\[)",
+      "message": "Untrusted request, event, argument, or input data appears to reach process execution."
+    },
+    {
+      "id": "TKSG002",
+      "title": "Read-only allowlist accepts write-capable flags",
+      "severity": "HIGH",
+      "extensions": [
+        ".js",
+        ".cjs",
+        ".mjs",
+        ".ts",
+        ".py",
+        ".ps1",
+        ".json"
+      ],
+      "pattern": "(?:const|let|var)\\s+[A-Za-z0-9_$]*(?:read.?only|allowlist)[A-Za-z0-9_$]*\\s*=\\s*[^\\n]{0,120}(?:--write|--force|--execute|--apply|--delete|--import|--sync)",
+      "message": "A read-only or allowlist contract appears to include a write-capable flag."
+    },
+    {
+      "id": "TKSG003",
+      "title": "Unsafe shell interpolation",
+      "severity": "HIGH",
+      "extensions": [
+        ".sh",
+        ".bash",
+        ".yml",
+        ".yaml"
+      ],
+      "pattern": "(?:eval\\s+\"?\\$|run:\\s*[^\\n]*\\$\\{\\{\\s*github\\.event\\.)",
+      "message": "Untrusted data appears to be interpolated into a shell evaluation boundary."
+    },
+    {
+      "id": "TKSG004",
+      "title": "Untrusted path resolution lacks an evident containment boundary",
+      "severity": "HIGH",
+      "extensions": [
+        ".js",
+        ".cjs",
+        ".mjs",
+        ".ts",
+        ".py"
+      ],
+      "pattern": "(?:path\\.(?:join|resolve)|os\\.path\\.join)\\s*\\([^\\n]*(?:req\\.|request\\.|process\\.argv|userInput|user_input)",
+      "message": "An untrusted path is resolved or joined without an evident strict root-containment check."
+    },
+    {
+      "id": "TKSG005",
+      "title": "Broad temporary-tree deletion",
+      "severity": "HIGH",
+      "extensions": [
+        ".js",
+        ".cjs",
+        ".mjs",
+        ".ts",
+        ".py",
+        ".ps1"
+      ],
+      "pattern": "(?:rmSync|rmdirSync|shutil\\.rmtree)\\s*\\(\\s*(?:os\\.tmpdir\\s*\\(\\s*\\)|process\\.env\\.(?:TEMP|TMP))[^\\n]*(?:recursive|force)|Remove-Item[^\\n]*(?:\\$env:(?:TEMP|TMP)|\\[System\\.IO\\.Path\\]::GetTempPath)[^\\n]*(?:-Recurse|-Force)",
+      "message": "A broad temporary path appears to be recursively deleted without exact operation ownership."
+    },
+    {
+      "id": "TKSG006",
+      "title": "Plaintext credential may enter logs or reports",
+      "severity": "CRITICAL",
+      "extensions": [
+        ".js",
+        ".cjs",
+        ".mjs",
+        ".ts",
+        ".py",
+        ".ps1"
+      ],
+      "pattern": "(?:console\\.(?:log|error)|print|Write-(?:Host|Output)|logger\\.(?:info|error))\\s*\\([^\\n]*(?:password|secret|token|privateKey|credentialValue)",
+      "message": "A credential-like value appears to enter output, logging, or reporting."
+    },
+    {
+      "id": "TKSG007",
+      "title": "Application credential substitutes for operator authority",
+      "severity": "CRITICAL",
+      "extensions": [
+        ".js",
+        ".cjs",
+        ".mjs",
+        ".ts",
+        ".py",
+        ".ps1"
+      ],
+      "pattern": "(?:operator|admin)[^\\n]{0,80}(?:credential|token)[^\\n]{0,80}(?:APP_|RUNTIME_|SERVICE_)(?:TOKEN|KEY|CREDENTIAL)",
+      "message": "An application/runtime credential appears to substitute for operator authority."
+    },
+    {
+      "id": "TKSG008",
+      "title": "Approval or receipt is not bound to target and operation",
+      "severity": "HIGH",
+      "extensions": [
+        ".js",
+        ".cjs",
+        ".mjs",
+        ".ts",
+        ".py"
+      ],
+      "pattern": "(?:approve|receipt|evidence)[^\\n]{0,100}(?:targetOnly|operationOnly|globalApproval|reusableReceipt)",
+      "message": "Approval, receipt, or evidence appears reusable without exact target and operation binding."
+    },
+    {
+      "id": "TKSG009",
+      "title": "Governed exception fails open",
+      "severity": "HIGH",
+      "extensions": [
+        ".js",
+        ".cjs",
+        ".mjs",
+        ".ts",
+        ".py"
+      ],
+      "pattern": "(?:enforce|govern|policy|approval)[^\\n]{0,100}(?:catch\\s*\\([^)]*\\)|except[^:]*:)[^\\n]{0,80}(?:return\\s+true|allow\\s*=\\s*true|status\\s*=\\s*['\"]pass)",
+      "message": "A governed exception appears to return an allow/pass result."
+    },
+    {
+      "id": "TKSG010",
+      "title": "Unpinned external download or action",
+      "severity": "HIGH",
+      "extensions": [
+        ".yml",
+        ".yaml",
+        ".sh",
+        ".bash",
+        ".ps1",
+        ".js",
+        ".cjs",
+        ".mjs"
+      ],
+      "pattern": "(?:uses:\\s*[^\\s]+@(?:main|master|latest|v\\d+)\\s*$|https?://[^\\s'\"]+/(?:latest|main|master)/|curl[^\\n]*\\|\\s*(?:sh|bash))",
+      "message": "An Action or external executable download is mutable or lacks provenance verification."
+    },
+    {
+      "id": "TKSG011",
+      "title": "Unsafe dynamic execution or deserialisation",
+      "severity": "HIGH",
+      "extensions": [
+        ".js",
+        ".cjs",
+        ".mjs",
+        ".ts",
+        ".py"
+      ],
+      "pattern": "(?:\\beval\\s*\\(|new\\s+Function\\s*\\(|pickle\\.loads?\\s*\\(|yaml\\.load\\s*\\([^\\n]*(?:req\\.|input|argv))",
+      "message": "Dynamic execution or unsafe deserialisation appears reachable."
+    },
+    {
+      "id": "TKSG012",
+      "title": "Invalid broad or permanent suppression",
+      "severity": "HIGH",
+      "extensions": [
+        ".json",
+        ".yml",
+        ".yaml"
+      ],
+      "pattern": "(?:ignore[_-]?all\\s*[:=]\\s*true|\"path\"\\s*:\\s*\"\\*\\*|\"expires\"\\s*:\\s*\"(?:never|9999-))",
+      "message": "A suppression appears wildcarded, repository-wide, or permanent."
+    }
+  ]
+}

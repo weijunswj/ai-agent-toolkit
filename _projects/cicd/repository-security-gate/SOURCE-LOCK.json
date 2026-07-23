@@ -1,0 +1,11 @@
+{
+  "source_repo": "weijunswj/ai-agent-toolkit",
+  "source_ref": "first-party-authored",
+  "source_commit": "97ce5306fc9c6bc438173bcb6cbca6e684077de5",
+  "source_lifecycle": "retired_after_migration",
+  "source_role": "migration_provenance_only",
+  "source_update_policy": "none",
+  "public_attribution_required": false,
+  "notes": "First-party repository-security-gate source. Scanner and action metadata in tool-lock.json is evidence only; no third-party executable or rule pack is copied or adapted.",
+  "files": []
+}

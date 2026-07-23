@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://weijunswj.github.io/ai-agent-toolkit/security-gate/suppressions.schema.json",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "suppressions"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "suppressions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "tool",
+          "rule",
+          "finding_identity",
+          "path",
+          "scope",
+          "exploitability_rationale",
+          "approver_reference",
+          "introduction_commit",
+          "expires",
+          "compensating_test",
+          "tool_version",
+          "rule_version",
+          "source_sha256"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]+$"
+          },
+          "finding_identity": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "path": {
+            "type": "string",
+            "pattern": "^(?!/)(?!.*\\.\\.)(?!.*[*?]).+$"
+          },
+          "scope": {
+            "enum": [
+              "exact_path",
+              "exact_line",
+              "synthetic_fixture"
+            ]
+          },
+          "introduction_commit": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "expires": {
+            "type": "string",
+            "format": "date"
+          },
+          "source_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

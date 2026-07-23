@@ -327,6 +327,7 @@ const allowedExecutablePrefixes = [
   'repo/scripts/',
   'repo/tests/',
   '.github/workflows/',
+  'skills/repository-security-gate/tools/',
   'skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/',
   'skills/ui-ux-secure-frontend-design/tools/design-system-generator/tests/',
   'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/',
@@ -1800,9 +1801,9 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
     .map((step, index) => ({ name: step.name, index, text: step.text, textIndex: text.indexOf(`      - name: ${step.name}`), uses: workflowStepUses(step.text) }))
     .filter((step) => step.uses);
   const requiredAutoSyncActionReferences = [
-    { stepName: 'Checkout trusted base revision', expectedUses: 'actions/checkout@v6' },
-    { stepName: 'Checkout PR head commit', expectedUses: 'actions/checkout@v6' },
-    { stepName: 'Set up Node.js', expectedUses: 'actions/setup-node@v6' }
+    { stepName: 'Checkout trusted base revision', expectedUses: 'actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803' },
+    { stepName: 'Checkout PR head commit', expectedUses: 'actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803' },
+    { stepName: 'Set up Node.js', expectedUses: 'actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38' }
   ];
   const expectedUsesByStepName = new Map(requiredAutoSyncActionReferences.map(({ stepName, expectedUses }) => [stepName, expectedUses]));
   if (
@@ -2173,8 +2174,8 @@ function validateSourceWatchPrWorkflow(entry, text, errors) {
   if (!/^name:\s*Source Watch PR Notifier\s*$/m.test(text)) {
     fail(errors, `${entry.relPath} workflow name must be Source Watch PR Notifier`);
   }
-  for (const cron of ['17 3 * * *', '43 9 * * *', '29 15 * * *']) {
-    if (!text.includes(`cron: "${cron}"`)) fail(errors, `${entry.relPath} missing staggered cron ${cron}`);
+  if (!text.includes('cron: "17 * * * *"')) {
+    fail(errors, `${entry.relPath} missing hourly deterministic cron 17 * * * *`);
   }
   const permissions = workflowPermissionLines(text) || [];
   const expectedPermissions = ['contents: write', 'pull-requests: write'];

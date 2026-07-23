@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "single-markdown-exempt",
+      "expected_profile": "SECURITY_PROFILE_EXEMPT",
+      "files": {
+        "README.md": "# Notes\n"
+      }
+    },
+    {
+      "id": "docs-with-hidden-action",
+      "expected_profile": "SECURITY_PROFILE_LIGHTWEIGHT_CI",
+      "files": {
+        "README.md": "# Docs\n",
+        ".GitHub/Workflows/publish.YML": "name: publish\njobs: {}\n"
+      }
+    },
+    {
+      "id": "nested-script",
+      "expected_profile": "SECURITY_PROFILE_TOOLING_LIBRARY",
+      "files": {
+        "docs/guide.md": "# Guide\n",
+        "examples/deep/NESTED.CJS": "'use strict';\n"
+      }
+    },
+    {
+      "id": "misleading-extension-shebang",
+      "expected_profile": "SECURITY_PROFILE_TOOLING_LIBRARY",
+      "files": {
+        "notes/readme.txt": "#!/usr/bin/env node\nprocess.exit(0)\n"
+      }
+    },
+    {
+      "id": "generated-executable",
+      "expected_profile": "SECURITY_PROFILE_TOOLING_LIBRARY",
+      "files": {
+        "generated/client.min.js": "(()=>{})();\n"
+      }
+    },
+    {
+      "id": "web-api",
+      "expected_profile": "SECURITY_PROFILE_WEB_API",
+      "files": {
+        "package.json": "{\"dependencies\":{\"express\":\"1.0.0\"}}\n",
+        "src/routes/users.js": "module.exports = {};\n"
+      }
+    },
+    {
+      "id": "workflow-integration",
+      "expected_profile": "SECURITY_PROFILE_WORKFLOW_INTEGRATION",
+      "files": {
+        "n8n-workflows/customer.json": "{\"nodes\":[],\"connections\":{}}\n"
+      }
+    },
+    {
+      "id": "hidden-deploy-config",
+      "expected_profile": "SECURITY_PROFILE_LIGHTWEIGHT_CI",
+      "files": {
+        ".vercel/project.json": "{\"projectId\":\"synthetic\"}\n",
+        "README.md": "# Docs\n"
+      }
+    }
+  ]
+}

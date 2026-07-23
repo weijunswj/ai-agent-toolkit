@@ -1,0 +1,5 @@
+interface:
+  display_name: "Repository Security Gate"
+  short_description: "Run the portable repository-owned security gate"
+policy:
+  allow_implicit_invocation: false

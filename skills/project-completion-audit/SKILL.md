@@ -27,7 +27,7 @@ Inspect only enough context to prepare a safe confirmation prompt:
 - Likely audit scope and whether a full-repo or scoped-folder audit is appropriate.
 - Relevant local docs/instructions available, such as `AGENTS.md`, playbook index, `MEMORY.md`, README, product specs, architecture notes, runbooks, test docs, or validation docs.
 - Whether UI, backend, data, deployment, auth, admin, upload, API, logging, privacy, payment, billing, entitlement, external integration, webhook, or other security-sensitive surfaces appear to exist.
-- Whether Codex Security skills or plugin capabilities appear installed/available, if detectable from the current environment.
+- Whether a repository-owned security gate is installed and applicable, if detectable from the current environment.
 - Whether Playwright, browser, screenshot, or click-through verification appears available, when the app has UI surfaces.
 
 During preflight, do not run broad validation, full builds, browser sweeps, security scans, live/deployment checks, external-service checks, remediation, or destructive cleanup.
@@ -40,8 +40,7 @@ After preflight, stop and ask the user to confirm all of the following:
 - Branch/ref.
 - Audit scope.
 - Full-repo audit or scoped-folder audit.
-- Whether Codex Security should be invoked if installed and available.
-- Whether standard security scan or deep security scan is approved.
+- Whether the repository-owned security gate should be run, and in which supported mode.
 - Whether screenshot and browser click-through verification is approved for UI apps.
 - Confirmation that no live-system, deployment, destructive, external-service, credential, payment, customer-data, or private-data actions are allowed without separate explicit current-turn approval naming the target and action.
 
@@ -94,7 +93,7 @@ Review at minimum:
 
 ## Security-Readiness Audit
 
-Explicitly invoke Codex Security if installed and available for final production-readiness audits and for security-sensitive changes involving:
+Run the repository-owned security gate when installed and applicable for final production-readiness audits and for security-sensitive changes involving:
 
 - Authentication or authorization.
 - Admin routes.
@@ -109,13 +108,13 @@ Explicitly invoke Codex Security if installed and available for final production
 - Database reads/writes.
 - Payment, billing, credits, or entitlement logic.
 
-Prefer a standard security scan first. Do not run a deep security scan unless the user explicitly approved deep scan in the confirmation step.
+Prefer the smallest documented gate mode that provides the required evidence. Do not substitute a proprietary workspace, dashboard, or opaque scanner for missing repository-owned evidence.
 
 Record in the audit report:
 
-- Whether Codex Security was available.
-- Whether it was invoked.
-- Scan type.
+- Whether the repository-owned gate was available and applicable.
+- Whether it was run.
+- Gate mode.
 - Scan target/scope.
 - Scan status.
 - Findings.
@@ -124,7 +123,7 @@ Record in the audit report:
 - Deferred findings.
 - Generated report or artifact paths.
 
-If Codex Security is unavailable, state that clearly and fall back to manual security review, static checks, and targeted tests where practical.
+If the repository-owned gate is unavailable, incomplete, or infrastructure-blocked, state that clearly. Use `SECURITY_GATE_UNVERIFIED` or `SECURITY_GATE_INFRA_BLOCKED` evidence where the gate supports it, and add bounded manual review, static checks, and targeted tests without converting missing coverage into a pass.
 
 ## Audit Report
 
@@ -170,7 +169,7 @@ Do not call the repo/app production-ready if:
 
 - Any P0 production blocker remains open.
 - Any P1 release blocker remains open.
-- Codex Security was skipped, unavailable, incomplete, or found unresolved high/critical-equivalent issues, unless the user explicitly accepts the risk and the exception is recorded.
+- The repository-owned security gate was skipped, unavailable, incomplete, infrastructure-blocked, or found unresolved release-blocking issues, unless the user explicitly accepts the risk and the exception is recorded.
 - Required validation failed, was skipped, or was inaccessible without clear disclosure.
 - Live/deployment/external-service/customer-data/private-data checks are assumed rather than verified or explicitly deferred.
 

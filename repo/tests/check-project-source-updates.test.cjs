@@ -16,6 +16,8 @@ const latestSha = '2222222222222222222222222222222222222222';
 const advisoryBaselineSha = '3333333333333333333333333333333333333333';
 const advisoryLatestSha = '4444444444444444444444444444444444444444';
 const bidiControlPattern = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u;
+const securityActionCommit = '5555555555555555555555555555555555555555';
+const securityLicense = 'Synthetic MIT licence fixture.\n';
 
 function writeJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -65,6 +67,57 @@ function retiredLock() {
     public_attribution_required: false,
     files: []
   };
+}
+
+function writeSecurityToolLock(workspace, overrides = {}) {
+  const record = {
+    name: 'synthetic-action',
+    kind: 'github_action',
+    purpose: 'Synthetic source-watch fixture',
+    upstream: 'example-owner/example-action',
+    publisher: 'example-owner',
+    release: securityActionCommit,
+    commit: securityActionCommit,
+    license: 'MIT',
+    license_file: 'LICENSE',
+    license_sha256: require('node:crypto').createHash('sha256').update(securityLicense).digest('hex'),
+    commercial_use: 'approved',
+    redistribution: 'approved',
+    expected_release_asset: null,
+    release_checksum: null,
+    signature_attestation: null,
+    container_digest: null,
+    supported_platforms: ['github-actions'],
+    output_schema: 'github-action',
+    rules_database_version: 'not_applicable',
+    adoption_decision: 'ADOPT',
+    state: 'active',
+    ...overrides
+  };
+  writeJson(path.join(workspace, 'skills', 'repository-security-gate', 'config', 'tool-lock.json'), {
+    schema_version: 1,
+    lock_version: '1.0.0',
+    first_approved_date: '2026-07-23',
+    last_verified_date: '2026-07-23',
+    records: [record]
+  });
+}
+
+function securityToolRoutes(commit = securityActionCommit) {
+  return [
+    {
+      match: /\/repos\/example-owner\/example-action$/,
+      body: { archived: false, disabled: false }
+    },
+    {
+      match: /\/repos\/example-owner\/example-action\/contents\/LICENSE\?ref=/,
+      body: { content: Buffer.from(securityLicense).toString('base64') }
+    },
+    {
+      match: /\/repos\/example-owner\/example-action\/commits\//,
+      body: { sha: commit }
+    }
+  ];
 }
 
 function advisoryDoc(targets) {
@@ -247,7 +300,7 @@ test('no active third-party changes exits cleanly without a PR-needed report', a
   await withMockGitHub(lockedSha, async (apiBaseUrl) => {
     const result = await runScript(workspace, reportRel, apiBaseUrl);
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /Checked 1 active third-party source lock\(s\); all pinned commits are current\./);
+    assert.match(result.stdout, /Checked 1 active third-party source lock\(s\) and 0 security-tool record\(s\); all pins are current\./);
     assert.equal(fs.existsSync(path.join(workspace, reportRel)), false);
   });
 });
@@ -327,6 +380,46 @@ test('source update check does not mutate _main content or SOURCE-LOCK pins', as
   assert.equal(fs.readFileSync(mainPath, 'utf8'), beforeMain);
 });
 
+test('security-tool metadata watch deduplicates unchanged exact evidence', async () => {
+  const workspace = tempWorkspace();
+  const reportRel = 'repo/source-watch/reviews/active-third-party-updates.md';
+  writeSecurityToolLock(workspace);
+  await withMockGitHubRoutes(securityToolRoutes(), async (apiBaseUrl, requests) => {
+    const result = await runScript(workspace, reportRel, apiBaseUrl);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /0 active third-party source lock\(s\) and 1 security-tool record\(s\); all pins are current/);
+    assert.equal(fs.existsSync(path.join(workspace, reportRel)), false);
+    assert.equal(requests.length, 3);
+  });
+});
+
+test('security-tool source failure is unverified and writes no misleading report', async () => {
+  const workspace = tempWorkspace();
+  const reportRel = 'repo/source-watch/reviews/active-third-party-updates.md';
+  writeSecurityToolLock(workspace);
+  await withMockGitHubRoutes(securityToolRoutes().slice(0, 1), async (apiBaseUrl) => {
+    const result = await runScript(workspace, reportRel, apiBaseUrl);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /GitHub API request failed \(404\)/);
+    assert.equal(fs.existsSync(path.join(workspace, reportRel)), false);
+  });
+});
+
+test('security-tool commit drift creates notification-only candidate handoff', async () => {
+  const workspace = tempWorkspace();
+  const reportRel = 'repo/source-watch/reviews/active-third-party-updates.md';
+  writeSecurityToolLock(workspace);
+  await withMockGitHubRoutes(securityToolRoutes('6666666666666666666666666666666666666666'), async (apiBaseUrl) => {
+    const result = await runScript(workspace, reportRel, apiBaseUrl);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /1 security-tool update/);
+    const report = fs.readFileSync(path.join(workspace, reportRel), 'utf8');
+    assert.match(report, /commit_drift/);
+    assert.match(report, /separate quarantined candidate-validation lane/);
+    assert.match(report, /No upstream code was executed/);
+  });
+});
+
 test('daily source-watch reports actionable advisory drift from the advisory document', async () => {
   const workspace = tempWorkspace();
   const reportRel = 'repo/source-watch/reviews/active-third-party-updates.md';
@@ -342,7 +435,7 @@ test('daily source-watch reports actionable advisory drift from the advisory doc
   ], async (apiBaseUrl) => {
     const result = await runScriptWithArgs(workspace, ['--report', reportRel, '--advisory-doc', advisoryRel], apiBaseUrl);
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /PR needed: yes \(0 source updates, 1 advisory action\)/);
+    assert.match(result.stdout, /PR needed: yes \(0 source updates, 0 security-tool updates, 1 advisory action\)/);
   });
 
   const report = fs.readFileSync(path.join(workspace, reportRel), 'utf8');
@@ -370,7 +463,7 @@ test('daily source-watch ignores non-actionable current advisory targets', async
   await withMockGitHub(lockedSha, async (apiBaseUrl, requests) => {
     const result = await runScriptWithArgs(workspace, ['--report', reportRel, '--advisory-doc', advisoryRel], apiBaseUrl);
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /Checked 1 active third-party source lock\(s\) and 1 advisory target\(s\); no actionable updates found\./);
+    assert.match(result.stdout, /Checked 1 active third-party source lock\(s\), 0 security-tool record\(s\), and 1 advisory target\(s\); no actionable updates found\./);
     assert.equal(fs.existsSync(path.join(workspace, reportRel)), false);
     assert.deepEqual(requests, ['/repos/example-owner/example-repo/commits/main']);
   });
@@ -392,7 +485,7 @@ test('daily source-watch reports pending manual advisory actions without GitHub 
   await withMockGitHub(latestSha, async (apiBaseUrl, requests) => {
     const result = await runScriptWithArgs(workspace, ['--report', reportRel, '--advisory-doc', advisoryRel], apiBaseUrl);
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /PR needed: yes \(0 source updates, 1 advisory action\)/);
+    assert.match(result.stdout, /PR needed: yes \(0 source updates, 0 security-tool updates, 1 advisory action\)/);
     assert.deepEqual(requests, []);
   });
 
@@ -420,7 +513,7 @@ test('daily source-watch reports due host-harness capability drift reviews witho
       { SOURCE_WATCH_TODAY: '2026-07-05' }
     );
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /PR needed: yes \(0 source updates, 1 advisory action\)/);
+    assert.match(result.stdout, /PR needed: yes \(0 source updates, 0 security-tool updates, 1 advisory action\)/);
     assert.deepEqual(requests, []);
   });
 
@@ -453,7 +546,7 @@ test('daily source-watch ignores host-harness capability drift reviews before ca
       { SOURCE_WATCH_TODAY: '2026-07-05' }
     );
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /Checked 0 active third-party source lock\(s\) and 1 advisory target\(s\); no actionable updates found\./);
+    assert.match(result.stdout, /Checked 0 active third-party source lock\(s\), 0 security-tool record\(s\), and 1 advisory target\(s\); no actionable updates found\./);
     assert.equal(fs.existsSync(path.join(workspace, reportRel)), false);
     assert.deepEqual(requests, []);
   });

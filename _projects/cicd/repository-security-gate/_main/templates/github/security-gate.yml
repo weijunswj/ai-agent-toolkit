@@ -1,0 +1,151 @@
+name: Repository security gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "23 2 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Full, scheduled, or release evidence mode"
+        required: true
+        default: "full"
+        type: choice
+        options:
+          - full
+          - scheduled
+          - release
+      artifact_digest:
+        description: "Optional exact sha256:<digest> for release evidence"
+        required: false
+        type: string
+      base:
+        description: "Exact base commit for a manual stable-head review packet"
+        required: false
+        type: string
+      generate_review_packet:
+        description: "Generate a bounded handoff after a green exact-head PR-mode rerun"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repository-security-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  security-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 22
+
+      - name: Resolve exact evidence mode
+        id: evidence
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_MODE: ${{ inputs.mode }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          CURRENT_SHA: ${{ github.sha }}
+          ARTIFACT_DIGEST: ${{ inputs.artifact_digest }}
+          REVIEW_BASE: ${{ inputs.base }}
+          GENERATE_REVIEW_PACKET: ${{ inputs.generate_review_packet }}
+        run: |
+          set -euo pipefail
+          mode=full
+          base=
+          head="$CURRENT_SHA"
+          if [ "$EVENT_NAME" = pull_request ]; then
+            mode=pr
+            base="$PR_BASE"
+            head="$PR_HEAD"
+          elif [ "$EVENT_NAME" = schedule ]; then
+            mode=scheduled
+          elif [ "$EVENT_NAME" = workflow_dispatch ]; then
+            mode="$INPUT_MODE"
+            if [ "$GENERATE_REVIEW_PACKET" = true ]; then
+              mode=pr
+              base="$REVIEW_BASE"
+            fi
+          fi
+          printf 'mode=%s\nbase=%s\nhead=%s\nartifact_digest=%s\n' \
+            "$mode" "$base" "$head" "$ARTIFACT_DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Validate provenance lock and fixtures
+        id: preflight
+        continue-on-error: true
+        run: |
+          node skills/repository-security-gate/tools/security-gate.cjs validate-lock
+          node skills/repository-security-gate/tools/security-gate.cjs self-test
+
+      - name: Install verified scanner assets
+        id: tools
+        continue-on-error: true
+        run: node skills/repository-security-gate/tools/install-pinned-tools.cjs --dest .security-tools
+
+      - name: Run repository security gate
+        id: gate
+        continue-on-error: true
+        shell: bash
+        env:
+          MODE: ${{ steps.evidence.outputs.mode }}
+          BASE: ${{ steps.evidence.outputs.base }}
+          HEAD: ${{ steps.evidence.outputs.head }}
+          ARTIFACT_DIGEST: ${{ steps.evidence.outputs.artifact_digest }}
+          PREFLIGHT_OUTCOME: ${{ steps.preflight.outcome }}
+          INSTALL_OUTCOME: ${{ steps.tools.outcome }}
+        run: |
+          set -euo pipefail
+          args=(scan --mode "$MODE" --repo . --tools-dir .security-tools --run-invariants)
+          if [ -n "$BASE" ]; then args+=(--base "$BASE"); fi
+          if [ -n "$HEAD" ]; then args+=(--head "$HEAD"); fi
+          if [ -n "$ARTIFACT_DIGEST" ]; then args+=(--artifact-digest "$ARTIFACT_DIGEST"); fi
+          if [ "$PREFLIGHT_OUTCOME" != success ]; then args+=(--preflight-failed); fi
+          if [ "$INSTALL_OUTCOME" != success ]; then args+=(--install-failed); fi
+          node skills/repository-security-gate/tools/security-gate.cjs "${args[@]}"
+
+      - name: Generate bounded stable-head review packet
+        if: steps.gate.outcome == 'success' && inputs.generate_review_packet
+        env:
+          BASE: ${{ steps.evidence.outputs.base }}
+          HEAD: ${{ steps.evidence.outputs.head }}
+        run: |
+          node skills/repository-security-gate/tools/security-gate.cjs review-packet \
+            --repo . --base "$BASE" --head "$HEAD" \
+            --report security-reports/security-gate.json
+
+      - name: Upload sanitised evidence
+        if: always() && hashFiles('security-reports/security-gate.json') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: repository-security-gate-${{ github.sha }}
+          path: |
+            security-reports/security-gate.json
+            security-reports/security-gate.md
+            security-reports/security-review-packet.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Enforce ordinary CI result
+        if: steps.gate.outcome != 'success'
+        run: |
+          echo "Repository security gate did not pass. Review the sanitised artifact." >&2
+          exit 1

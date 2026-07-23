@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://weijunswj.github.io/ai-agent-toolkit/security-gate/review-packet.schema.json",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "base",
+    "head",
+    "profile",
+    "risk_review_required",
+    "changed_files",
+    "sensitive_locations",
+    "references",
+    "scanner_summary",
+    "invariant_evidence",
+    "unresolved_findings",
+    "coverage_gaps",
+    "supported_outcomes"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "base": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "head": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "supported_outcomes": {
+      "const": [
+        "AI_SECURITY_PASS",
+        "AI_SECURITY_FINDINGS",
+        "AI_SECURITY_INCOMPLETE",
+        "AI_SECURITY_INFRA_BLOCKED"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

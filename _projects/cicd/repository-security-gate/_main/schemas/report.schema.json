@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://weijunswj.github.io/ai-agent-toolkit/security-gate/report.schema.json",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "state",
+    "repository",
+    "mode",
+    "base",
+    "head",
+    "artifact_digest",
+    "profile",
+    "versions",
+    "coverage",
+    "findings",
+    "suppressed_findings",
+    "unverified_areas",
+    "infrastructure_failures",
+    "next_action"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "state": {
+      "enum": [
+        "SECURITY_PASS",
+        "SECURITY_FINDINGS",
+        "SECURITY_GATE_UNVERIFIED",
+        "SECURITY_GATE_INFRA_BLOCKED",
+        "SECURITY_PROFILE_EXEMPT"
+      ]
+    },
+    "mode": {
+      "enum": [
+        "pr",
+        "full",
+        "scheduled",
+        "release"
+      ]
+    },
+    "profile": {
+      "enum": [
+        "SECURITY_PROFILE_EXEMPT",
+        "SECURITY_PROFILE_LIGHTWEIGHT_CI",
+        "SECURITY_PROFILE_TOOLING_LIBRARY",
+        "SECURITY_PROFILE_WEB_API",
+        "SECURITY_PROFILE_WORKFLOW_INTEGRATION"
+      ]
+    },
+    "findings": {
+      "type": "array"
+    },
+    "suppressed_findings": {
+      "type": "array"
+    },
+    "unverified_areas": {
+      "type": "array"
+    },
+    "infrastructure_failures": {
+      "type": "array"
+    }
+  },
+  "additionalProperties": false
+}
