@@ -1,7 +1,7 @@
 # Surface Fidelity Audit
 
 Date: 2026-05-18
-Latest update: 2026-07-09 (adds the portable docs-governance playbook to the generated ai-coding-agent-rules repo-local playbook set)
+Latest update: 2026-07-23 (adds the source-only n8n Skills plugin compatibility module)
 
 ## Current state
 
@@ -27,7 +27,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 
 | Metric | Current value |
 | --- | ---: |
-| projects | 16 |
+| projects | 17 |
 | publishedFiles | 236 |
 | declaredOutputFiles | 236 |
 | packInstalledFiles | 84 |
@@ -87,6 +87,7 @@ Known baseline context:
 - `_projects/development/windows-localhost-workflows`
 - `_projects/knowledge/knowledge-index-updater`
 - `_projects/n8n/local-setup`
+- `_projects/n8n/skills-plugin-compatibility`
 - `_projects/n8n/workflow-toolkit`
 - `_projects/repo-methodology/agent-skill-supply-chain-audit`
 - `_projects/repo-methodology/context-preserving-ai-publisher`
