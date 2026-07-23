@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.8.4",
+  "version": "2.8.5",
   "version_policy": "semver",
-  "version_notes": "Amends portable n8n import and export protections for selector consistency, nested expressions, transactional writes, cleanup failures, exact identity, and Windows PowerShell resolution.",
+  "version_notes": "Amends portable n8n import and export protections for explicit policy intent, canonical absence, direct-document migration, unique target plans, and duplicate-free transactions.",
   "outputs": [
     {
       "kind": "curated",

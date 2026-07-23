@@ -21,6 +21,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$DeploymentPolicyFileWasExplicit = $PSBoundParameters.ContainsKey("DeploymentPolicyFile")
 
 trap {
   Write-Host ""
@@ -673,6 +674,24 @@ $ExportDirPath = Join-Path $RepoRoot $ExportDir
 $BindingsFilePath = Join-Path $RepoRoot $BindingsFile
 $PortableCredentialsFilePath = Join-Path $RepoRoot $PortableCredentialsFile
 $DeploymentPolicyFilePath = Join-Path $RepoRoot $DeploymentPolicyFile
+if ($DeploymentPolicyFileWasExplicit) {
+  try {
+    $deploymentPolicyIsFile = Test-Path -LiteralPath $DeploymentPolicyFilePath -PathType Leaf
+    $deploymentPolicyItem = if ($deploymentPolicyIsFile) {
+      Get-Item -LiteralPath $DeploymentPolicyFilePath -Force
+    } else {
+      $null
+    }
+  } catch {
+    throw "N8N_POLICY_VALIDATION_FAILED: the explicitly configured deployment policy is unavailable."
+  }
+  if (-not $deploymentPolicyIsFile -or $null -eq $deploymentPolicyItem) {
+    throw "N8N_POLICY_VALIDATION_FAILED: the explicitly configured deployment policy is unavailable."
+  }
+  if (Test-PathItemIsUnsafeLink $deploymentPolicyItem) {
+    throw "N8N_POLICY_VALIDATION_FAILED: the explicitly configured deployment policy is not a safe regular file."
+  }
+}
 
 Write-Section "n8n workflow export"
 Write-Host ("Repo root        : {0}" -f $RepoRoot)
@@ -803,7 +822,10 @@ if ($Mode -eq "RepoTrackedOnly") {
   }
 
   $syncArgs = @((Join-Path $HelperScriptDir "sync-n8n-live-exports.cjs"), $ExportDirPath, $WorkflowDirPath, $BindingsFilePath, "--sync-exported-only")
-  $syncArgs += @("--portable-credentials=$PortableCredentialsFilePath", "--deployment-policy=$DeploymentPolicyFilePath")
+  $syncArgs += "--portable-credentials=$PortableCredentialsFilePath"
+  if ($DeploymentPolicyFileWasExplicit) {
+    $syncArgs += "--deployment-policy=$DeploymentPolicyFilePath"
+  }
   if ($ReviewedSourceUpdate) {
     $syncArgs += "--reviewed-source-update"
   }
@@ -935,7 +957,10 @@ Invoke-ProjectWorkflowHook "before-export-sync" @{
 }
 
 $syncAllArgs = @((Join-Path $HelperScriptDir "sync-n8n-live-exports.cjs"), $ExportDirPath, $WorkflowDirPath, $BindingsFilePath, "--create-missing-workflows", "--sync-exported-only")
-$syncAllArgs += @("--portable-credentials=$PortableCredentialsFilePath", "--deployment-policy=$DeploymentPolicyFilePath")
+$syncAllArgs += "--portable-credentials=$PortableCredentialsFilePath"
+if ($DeploymentPolicyFileWasExplicit) {
+  $syncAllArgs += "--deployment-policy=$DeploymentPolicyFilePath"
+}
 if ($ReviewedSourceUpdate) {
   $syncAllArgs += "--reviewed-source-update"
 }

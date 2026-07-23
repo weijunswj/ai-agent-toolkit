@@ -56,6 +56,10 @@ Normal operator flow is export canonical workflow JSON and portable logical cred
 
 Every present portable credential declaration, deployment policy, and resource binding must use schema version 1 and an exact supported container shape. Malformed present files, duplicate credential requirements, stable node-ID conflicts, or logical names that drift from canonical Git fail before any prepared workflow overlay. Name/type fallback is used only when the populated stable ID is absent and the specific helper contract permits that fallback.
 
+The root document owns `schemaVersion`; aggregate workflow entries use the dedicated entry schema. A supported direct credential declaration is migrated transactionally into one aggregate `workflows` entry while preserving its admitted workflow selectors and credential requirements. Every populated selector on direct and aggregate entries must agree before use. An explicitly supplied deployment-policy path is required to remain a readable regular file, while absence of the documented default policy remains optional.
+
+Normal export preserves both canonical values and canonical absence. Live-only protected leaves or complete mapping domains are removed from the portable result, or the export fails closed when safe deletion is not possible. Only explicit reviewed source-update mode may introduce protected logic. Transactions reject repeated normalized targets before staging, and import preflight rejects multiple canonical workflows resolving to one target workflow before any live or local identity mutation.
+
 The helper never activates, executes, test-runs, publishes, or restarts n8n. An already-active target is blocked because scheduled activity cannot be guaranteed inactive without a separate restart. `-RequireConfirmation` is compatibility-only menu behavior and is not the default.
 
 Operation receipts are written to `.n8n-local/reports/latest-n8n-workflow-operation.{json,txt}` and bounded 90-day history. The menu's read-only Explain last n8n failure action validates the latest report and states one supported next action.

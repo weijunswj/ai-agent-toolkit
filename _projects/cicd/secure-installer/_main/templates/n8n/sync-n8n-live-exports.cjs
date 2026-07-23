@@ -23,6 +23,39 @@ function readWorkflow(filePath) {
   return Array.isArray(raw) ? raw[0] : raw.workflow || raw;
 }
 
+function readDeploymentPolicy(filePath, options = {}) {
+  const required = options.required === true;
+  if (!filePath || !fs.existsSync(filePath)) {
+    if (required) {
+      const error = new Error('An explicitly configured deployment policy is unavailable.');
+      error.code = 'N8N_POLICY_VALIDATION_FAILED';
+      throw error;
+    }
+    return undefined;
+  }
+  let stat;
+  try {
+    stat = fs.lstatSync(filePath);
+  } catch {
+    const error = new Error('The configured deployment policy could not be inspected safely.');
+    error.code = 'N8N_POLICY_VALIDATION_FAILED';
+    throw error;
+  }
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    const error = new Error('The configured deployment policy must be a regular file.');
+    error.code = 'N8N_POLICY_VALIDATION_FAILED';
+    throw error;
+  }
+  if (typeof options.beforeRead === 'function') options.beforeRead();
+  try {
+    return readJson(filePath);
+  } catch {
+    const error = new Error('The configured deployment policy could not be read as JSON.');
+    error.code = 'N8N_POLICY_VALIDATION_FAILED';
+    throw error;
+  }
+}
+
 function stripLiveOnlyFields(workflow, options = {}) {
   return canonicalWorkflowForGit(workflow, options);
 }
@@ -90,18 +123,20 @@ function replaceFilesTransactionally(changes, hooks = {}) {
   if (!Array.isArray(changes) || changes.length === 0) return;
   const token = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const foldedTargets = new Map();
-  const records = changes.map((change, index) => {
-    const target = path.resolve(change.targetPath);
+  const resolvedTargets = changes.map((change) => path.resolve(change.targetPath));
+  for (const target of resolvedTargets) {
     const folded = target.toLowerCase();
-    const previous = foldedTargets.get(folded);
-    if (previous && previous !== target) {
-      const error = new Error('Case-folded workflow filename collision blocks canonical export.');
+    if (foldedTargets.has(folded)) {
+      const error = new Error('Duplicate or case-folded canonical transaction target blocks export.');
       error.code = 'N8N_WORKFLOW_MATCH_AMBIGUOUS';
       throw error;
     }
     foldedTargets.set(folded, target);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
     assertRegularOrMissing(target, 'Canonical transaction target');
+  }
+  const records = changes.map((change, index) => {
+    const target = resolvedTargets[index];
+    fs.mkdirSync(path.dirname(target), { recursive: true });
     const stage = path.join(path.dirname(target), `.${path.basename(target)}.${token}.${index}.stage`);
     const backup = path.join(path.dirname(target), `.${path.basename(target)}.${token}.${index}.backup`);
     const rollbackStage = path.join(path.dirname(target), `.${path.basename(target)}.${token}.${index}.rollback`);
@@ -230,6 +265,7 @@ function parseArgs(argv) {
     syncExportedOnly: flags.has('--sync-exported-only'),
     portableCredentialsPath: valueFor('portable-credentials'),
     deploymentPolicyPath: valueFor('deployment-policy'),
+    deploymentPolicyConfigured: argv.some((arg) => arg.startsWith('--deployment-policy=')),
     reviewedSourceUpdate: flags.has('--reviewed-source-update'),
   };
 }
@@ -308,18 +344,24 @@ function main() {
 
   if (!exportsDir || !workflowDir) usage();
 
+  options.portableCredentialsPath = options.portableCredentialsPath || path.join(workflowDir, 'toolkit', 'portable-credentials.json');
+  options.portableCredentialsPath = assertStrictChild(workflowDir, options.portableCredentialsPath, 'Portable credential declaration');
+  if (options.deploymentPolicyConfigured && !options.deploymentPolicyPath) {
+    const error = new Error('An explicitly configured deployment policy is unavailable.');
+    error.code = 'N8N_POLICY_VALIDATION_FAILED';
+    throw error;
+  }
+  options.deploymentPolicyPath = options.deploymentPolicyPath || path.join(workflowDir, 'toolkit', 'deployment-policy.json');
+  const deploymentPolicy = readDeploymentPolicy(options.deploymentPolicyPath, {
+    required: options.deploymentPolicyConfigured,
+  });
+  validatePortableDocument(deploymentPolicy, 'deployment-policy');
   if (options.createMissingWorkflows) {
     fs.mkdirSync(workflowDir, { recursive: true });
   }
-
-  options.portableCredentialsPath = options.portableCredentialsPath || path.join(workflowDir, 'toolkit', 'portable-credentials.json');
-  options.portableCredentialsPath = assertStrictChild(workflowDir, options.portableCredentialsPath, 'Portable credential declaration');
-  options.deploymentPolicyPath = options.deploymentPolicyPath || path.join(workflowDir, 'toolkit', 'deployment-policy.json');
-  const deploymentPolicy = fs.existsSync(options.deploymentPolicyPath) ? readJson(options.deploymentPolicyPath) : undefined;
   let portableCredentialDocument = fs.existsSync(options.portableCredentialsPath)
     ? readJson(options.portableCredentialsPath)
     : { schemaVersion: 1, workflows: [] };
-  validatePortableDocument(deploymentPolicy, 'deployment-policy');
   validatePortableDocument(portableCredentialDocument, 'credential-declarations');
   const receiptWorkflows = [];
   const pendingWorkflowWrites = [];
@@ -482,6 +524,7 @@ module.exports = {
   credentialBindings,
   buildTargets,
   parseArgs,
+  readDeploymentPolicy,
   assertStrictChild,
   replaceFilesTransactionally,
 };

@@ -1181,8 +1181,29 @@ function Invoke-WorkflowPreflight($WorkflowFiles, [bool]$BindingsFileExists, $Li
   }
 }
 
+function Get-PlannedTargetUniquenessBlockers($PlannedImports) {
+  $blockers = @()
+  $duplicateGroups = @(
+    $PlannedImports |
+      Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.TargetId) } |
+      Group-Object -Property TargetId |
+      Where-Object { $_.Count -gt 1 }
+  )
+  foreach ($group in $duplicateGroups) {
+    foreach ($planned in @($group.Group)) {
+      $blockers += [PSCustomObject]@{
+        File = [string]$planned.File
+        Reason = "N8N_WORKFLOW_MATCH_AMBIGUOUS: multiple canonical workflows resolve to one target workflow."
+        Kind = "N8N_WORKFLOW_MATCH_AMBIGUOUS"
+      }
+    }
+  }
+  return @($blockers)
+}
+
 function Invoke-PortableWorkflowPreflight($WorkflowFiles, $LiveWorkflows, $CredentialMetadataFile) {
   $plannedImports = @()
+  $resolvedTargetPlans = @()
   $blockedWorkflows = @()
   $missingCredentials = @()
   $skippedCount = 0
@@ -1257,6 +1278,13 @@ function Invoke-PortableWorkflowPreflight($WorkflowFiles, $LiveWorkflows, $Crede
         $plannedAction = "Create new beside archived name match"
         $missingLiveWorkflowCount += 1
       }
+    }
+
+    $resolvedTargetPlans += [PSCustomObject]@{
+      File = $workflowFile.Name
+      WorkflowName = $workflowName
+      TargetId = $targetWorkflowId
+      Action = $plannedAction
     }
 
     if ($null -ne $targetWorkflow) {
@@ -1351,6 +1379,12 @@ function Invoke-PortableWorkflowPreflight($WorkflowFiles, $LiveWorkflows, $Crede
         MissingCredentials = @($preparation.credentialResolution.requirements)
       }
     }
+  }
+
+  $targetUniquenessBlockers = Get-PlannedTargetUniquenessBlockers $resolvedTargetPlans
+  if ($targetUniquenessBlockers.Count -gt 0) {
+    $blockedWorkflows += $targetUniquenessBlockers
+    $plannedImports = @()
   }
 
   return [PSCustomObject]@{

@@ -2008,6 +2008,79 @@ test('import helper guards hooks, no-op imports, and prepared payload revalidati
   }
 });
 
+test('portable import plan rejects every duplicate live target before mutation or identity writes', () => {
+  const powerShell = findPowerShell();
+  const importText = readText(path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1'));
+  const functionStart = importText.indexOf('function Get-PlannedTargetUniquenessBlockers');
+  const functionEnd = importText.indexOf('\nfunction Invoke-PortableWorkflowPreflight', functionStart);
+  assert.notEqual(functionStart, -1);
+  assert.notEqual(functionEnd, -1);
+  assert.match(importText, /\$resolvedTargetPlans = @\(\)/);
+  assert.match(importText, /\$resolvedTargetPlans \+= \[PSCustomObject\]@\{[\s\S]*TargetId = \$targetWorkflowId/);
+  assert.match(importText, /\$targetUniquenessBlockers = Get-PlannedTargetUniquenessBlockers \$resolvedTargetPlans/);
+  assert.match(importText, /\$plannedImports = @\(\)/);
+  if (!powerShell) return;
+
+  const fixtureRoot = tempDir();
+  const fixturePath = path.join(fixtureRoot, 'plan-uniqueness-fixture.ps1');
+  const functionText = importText.slice(functionStart, functionEnd);
+  const script = `${functionText}
+$cases = @(
+  @(
+    [PSCustomObject]@{ File = "same-name-a.json"; WorkflowName = "Shared"; TargetId = "target-shared"; Action = "Update by unique workflow name" },
+    [PSCustomObject]@{ File = "same-name-b.json"; WorkflowName = "Shared"; TargetId = "target-shared"; Action = "Update by unique workflow name" }
+  ),
+  @(
+    [PSCustomObject]@{ File = "stored-a.json"; WorkflowName = "Stored A"; TargetId = "target-converged"; Action = "Update by canonical workflow ID" },
+    [PSCustomObject]@{ File = "stored-b.json"; WorkflowName = "Stored B"; TargetId = "target-converged"; Action = "Update by canonical workflow ID" }
+  ),
+  @(
+    [PSCustomObject]@{ File = "id.json"; WorkflowName = "By ID"; TargetId = "target-mixed"; Action = "Update by canonical workflow ID" },
+    [PSCustomObject]@{ File = "name.json"; WorkflowName = "By Name"; TargetId = "target-mixed"; Action = "Update archived by unique workflow name" }
+  )
+)
+$results = @()
+foreach ($case in $cases) {
+  $results += ,@(Get-PlannedTargetUniquenessBlockers $case)
+}
+$unique = @(Get-PlannedTargetUniquenessBlockers @(
+  [PSCustomObject]@{ File = "one.json"; TargetId = "target-one" },
+  [PSCustomObject]@{ File = "two.json"; TargetId = "target-two" },
+  [PSCustomObject]@{ File = "new.json"; TargetId = "" }
+))
+[PSCustomObject]@{ Results = $results; UniqueCount = $unique.Count } | ConvertTo-Json -Depth 10 -Compress
+`;
+  fs.writeFileSync(fixturePath, script);
+  const result = spawnSync(powerShell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', fixturePath], {
+    cwd: fixtureRoot,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const parsed = JSON.parse(result.stdout.trim());
+  assert.deepEqual(parsed.Results.map((entries) => entries.length), [2, 2, 2]);
+  for (const entries of parsed.Results) {
+    assert.ok(entries.every((entry) => entry.Kind === 'N8N_WORKFLOW_MATCH_AMBIGUOUS'));
+  }
+  assert.equal(parsed.UniqueCount, 0);
+  assert.doesNotMatch(result.stdout, /target-shared|target-converged|target-mixed/);
+  fs.rmSync(fixtureRoot, { recursive: true, force: true });
+});
+
+test('export helper preserves explicit deployment-policy intent through the Node sync boundary', () => {
+  for (const filePath of [
+    path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1'),
+    path.join(scriptDir, 'export-n8n-workflows-live.ps1'),
+    path.join(secureCicdN8nTemplateDir, 'export-n8n-workflows-live.ps1'),
+  ]) {
+    const text = readText(filePath);
+    assert.match(text, /\$DeploymentPolicyFileWasExplicit = \$PSBoundParameters\.ContainsKey\("DeploymentPolicyFile"\)/);
+    assert.match(text, /if \(\$DeploymentPolicyFileWasExplicit\) \{[\s\S]*N8N_POLICY_VALIDATION_FAILED/);
+    assert.match(text, /if \(\$DeploymentPolicyFileWasExplicit\) \{\s*\$syncArgs \+= "--deployment-policy=\$DeploymentPolicyFilePath"/);
+    assert.match(text, /if \(\$DeploymentPolicyFileWasExplicit\) \{\s*\$syncAllArgs \+= "--deployment-policy=\$DeploymentPolicyFilePath"/);
+    assert.doesNotMatch(text, /\$syncArgs \+= @\("--portable-credentials=\$PortableCredentialsFilePath", "--deployment-policy=/);
+  }
+});
+
 test('PowerShell n8n live helpers guard run-directory cleanup under .tmp', () => {
   for (const [label, filePath] of [
     ['workflow toolkit export helper', path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1')],

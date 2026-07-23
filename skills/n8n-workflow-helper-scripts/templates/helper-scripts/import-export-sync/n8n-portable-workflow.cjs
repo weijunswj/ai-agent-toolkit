@@ -254,13 +254,20 @@ function validateResourceBindingNode(binding, label) {
   }
 }
 
-function validateWorkflowDocumentEntry(entry, kind, label) {
+function validateWorkflowDocumentEntry(entry, kind, label, options = {}) {
   assertPlainObject(entry, label);
   validateWorkflowSelector(entry, label);
+  if (Object.prototype.hasOwnProperty.call(entry, 'schemaVersion') && entry.schemaVersion !== SCHEMA_VERSION) {
+    throw new N8nPortableWorkflowError(
+      'N8N_POLICY_VALIDATION_FAILED',
+      `${label}.schemaVersion must be ${SCHEMA_VERSION} when supplied for legacy migration.`
+    );
+  }
+  const versionFields = options.allowLegacySchemaVersion === true ? ['schemaVersion'] : [];
   if (kind === 'credential-declarations') {
     assertOnlyKeys(
       entry,
-      new Set(['schemaVersion', 'workflowFile', 'workflowId', 'workflowName', 'nodes']),
+      new Set([...versionFields, 'workflowFile', 'workflowId', 'workflowName', 'nodes']),
       label
     );
     if (!Array.isArray(entry.nodes)) {
@@ -272,7 +279,7 @@ function validateWorkflowDocumentEntry(entry, kind, label) {
   if (kind === 'deployment-policy') {
     assertOnlyKeys(
       entry,
-      new Set(['schemaVersion', 'workflowFile', 'workflowId', 'workflowName', 'protectedPaths', 'resourcePaths']),
+      new Set([...versionFields, 'workflowFile', 'workflowId', 'workflowName', 'protectedPaths', 'resourcePaths']),
       label
     );
     for (const [field, ruleKind] of [['protectedPaths', 'protected'], ['resourcePaths', 'resource']]) {
@@ -286,7 +293,7 @@ function validateWorkflowDocumentEntry(entry, kind, label) {
   if (kind === 'resource-bindings') {
     assertOnlyKeys(
       entry,
-      new Set(['schemaVersion', 'workflowFile', 'workflowId', 'workflowName', 'nodes']),
+      new Set([...versionFields, 'workflowFile', 'workflowId', 'workflowName', 'nodes']),
       label
     );
     if (!Array.isArray(entry.nodes)) {
@@ -329,9 +336,26 @@ function validatePortableDocument(document, kind, options = {}) {
     if (!Array.isArray(document.workflows)) {
       throw new N8nPortableWorkflowError('N8N_POLICY_VALIDATION_FAILED', `${kind} document.workflows must be an array.`);
     }
-    document.workflows.forEach((entry, index) =>
-      validateWorkflowDocumentEntry(entry, kind, `${kind} document.workflows[${index}]`)
-    );
+    const foldedWorkflowFiles = new Map();
+    document.workflows.forEach((entry, index) => {
+      validateWorkflowDocumentEntry(
+        entry,
+        kind,
+        `${kind} document.workflows[${index}]`,
+        { allowLegacySchemaVersion: true }
+      );
+      if (!entry.workflowFile) return;
+      const normalized = entry.workflowFile.replace(/\\/g, '/');
+      const folded = normalized.toLowerCase();
+      const previous = foldedWorkflowFiles.get(folded);
+      if (previous && previous !== normalized) {
+        throw new N8nPortableWorkflowError(
+          'N8N_WORKFLOW_MATCH_AMBIGUOUS',
+          `${kind} document contains case-folded workflow filename collisions.`
+        );
+      }
+      foldedWorkflowFiles.set(folded, normalized);
+    });
     return document;
   }
 
@@ -346,12 +370,10 @@ function validatePortableDocument(document, kind, options = {}) {
     throw new N8nPortableWorkflowError('N8N_POLICY_VALIDATION_FAILED', `${kind} document has an unsupported container form.`);
   }
   validateWorkflowDocumentEntry(
-    {
-      ...document,
-      workflowName: document.workflowName || options.workflowName || '(direct document)',
-    },
+    document,
     kind,
-    `${kind} direct document`
+    `${kind} direct document`,
+    { allowLegacySchemaVersion: true }
   );
   return document;
 }
@@ -394,7 +416,17 @@ function setAtPath(root, parts, value) {
 
 function deleteAtPath(root, parts) {
   const parent = getAtPath(root, parts.slice(0, -1));
-  if (parent.found && parent.value && typeof parent.value === 'object') delete parent.value[parts.at(-1)];
+  if (!parent.found || !parent.value || typeof parent.value !== 'object') return false;
+  const leaf = parts.at(-1);
+  if (Array.isArray(parent.value) && /^(0|[1-9][0-9]*)$/.test(leaf)) {
+    throw new N8nPortableWorkflowError(
+      'N8N_POLICY_VALIDATION_FAILED',
+      'Canonical protected-path absence cannot be restored by deleting an array element.'
+    );
+  }
+  if (!Object.prototype.hasOwnProperty.call(parent.value, leaf)) return false;
+  delete parent.value[leaf];
+  return true;
 }
 
 function assessSelector(entry, workflow, workflowFile) {
@@ -402,8 +434,8 @@ function assessSelector(entry, workflow, workflowFile) {
   const normalise = (value) => String(value || '').replace(/\\/g, '/').toLowerCase();
   const comparisons = [];
   for (const [key, normaliser] of [['workflowFile', normalise], ['workflowId', String], ['workflowName', String]]) {
-    if (!entry[key] || !selector[key]) continue;
-    comparisons.push(normaliser(entry[key]) === normaliser(selector[key]));
+    if (!entry[key]) continue;
+    comparisons.push(Boolean(selector[key]) && normaliser(entry[key]) === normaliser(selector[key]));
   }
   return {
     compared: comparisons.length > 0,
@@ -428,6 +460,13 @@ function selectWorkflowEntry(document, workflow, workflowFile, label, kind) {
       throw new N8nPortableWorkflowError('N8N_WORKFLOW_MATCH_AMBIGUOUS', `Multiple ${label} entries match the canonical workflow.`);
     }
     return matches[0] || null;
+  }
+  const assessment = assessSelector(document, workflow, workflowFile);
+  if (!assessment.compared || !assessment.matches) {
+    throw new N8nPortableWorkflowError(
+      'N8N_POLICY_VALIDATION_FAILED',
+      `Direct ${label} workflow selectors must all match the canonical workflow.`
+    );
   }
   return document;
 }
@@ -915,11 +954,22 @@ function protectCanonicalMappingDomains(portable, previous, protectedChanges) {
       },
       { allowStaleIdFallback: true }
     );
-    if (!portableNode || !previousNode.parameters || !portableNode.parameters) continue;
+    if (!portableNode || !portableNode.parameters || typeof portableNode.parameters !== 'object') continue;
+    const previousParameters = previousNode.parameters && typeof previousNode.parameters === 'object'
+      ? previousNode.parameters
+      : {};
 
     for (const key of PROTECTED_MAPPING_PARAMETER_KEYS) {
-      if (!Object.prototype.hasOwnProperty.call(previousNode.parameters, key)) continue;
-      const before = previousNode.parameters[key];
+      const canonicalHasKey = Object.prototype.hasOwnProperty.call(previousParameters, key);
+      const portableHasKey = Object.prototype.hasOwnProperty.call(portableNode.parameters, key);
+      if (!canonicalHasKey) {
+        if (portableHasKey) {
+          delete portableNode.parameters[key];
+          protectedChanges.push({ nodeName: portableNode.name || '', nodeType: portableNode.type || '', path: `parameters.${key}` });
+        }
+        continue;
+      }
+      const before = previousParameters[key];
       const after = portableNode.parameters[key];
       if (JSON.stringify(before) !== JSON.stringify(after)) {
         portableNode.parameters[key] = clone(before);
@@ -940,14 +990,19 @@ function protectCanonicalMappingDomains(portable, previous, protectedChanges) {
         preserveChangedExpressions(entry, portableValue && typeof portableValue === 'object' ? portableValue[key] : undefined, [...parts, key]);
       }
     };
-    preserveChangedExpressions(previousNode.parameters, portableNode.parameters, []);
+    preserveChangedExpressions(previousParameters, portableNode.parameters, []);
   }
 }
 
 function canonicaliseExport(options) {
   validatePortableDocument(options.deploymentPolicy, 'deployment-policy');
   if (options.previousDeclaration !== undefined && options.previousDeclaration !== null) {
-    validatePortableDocument(options.previousDeclaration, 'credential-declarations');
+    validateWorkflowDocumentEntry(
+      options.previousDeclaration,
+      'credential-declarations',
+      'selected credential declaration',
+      { allowLegacySchemaVersion: true }
+    );
   }
   const portable = canonicalWorkflowForGit(options.liveWorkflow, { preserveTags: options.preserveTags });
   const previous = options.canonicalWorkflow ? clone(options.canonicalWorkflow) : null;
@@ -979,6 +1034,11 @@ function canonicaliseExport(options) {
       );
     }
     if (options.reviewedSourceUpdate === true && !rule.privateResource) continue;
+    if (!previousValue.found && nextValue.found) {
+      deleteAtPath(portableNode, rule.parts);
+      protectedChanges.push({ nodeName: portableNode.name || '', nodeType: portableNode.type || '', path: rule.path });
+      continue;
+    }
     if (previousValue.found && JSON.stringify(previousValue.value) !== JSON.stringify(nextValue.value)) {
       setAtPath(portableNode, rule.parts, previousValue.value);
       protectedChanges.push({ nodeName: portableNode.name || '', nodeType: portableNode.type || '', path: rule.path });
@@ -992,17 +1052,41 @@ function canonicaliseExport(options) {
   };
 }
 
+function aggregateEntryFromDirectDocument(document) {
+  const entry = clone(document);
+  delete entry.schemaVersion;
+  return entry;
+}
+
+function declarationEntryForAggregate(declaration, selectorSource = null) {
+  const entry = aggregateEntryFromDirectDocument(declaration);
+  if (selectorSource) {
+    for (const field of ['workflowFile', 'workflowId', 'workflowName']) {
+      if (Object.prototype.hasOwnProperty.call(selectorSource, field)) entry[field] = selectorSource[field];
+      else delete entry[field];
+    }
+  }
+  return entry;
+}
+
 function mergeCredentialDeclarationDocument(document, declaration) {
   validatePortableDocument(document, 'credential-declarations');
   validatePortableDocument(declaration, 'credential-declarations');
-  const next = document === undefined ? { schemaVersion: SCHEMA_VERSION, workflows: [] } : clone(document);
-  next.schemaVersion = SCHEMA_VERSION;
-  next.workflows = Array.isArray(next.workflows) ? next.workflows : [];
-  const exactFileIndex = next.workflows.findIndex((entry) => entry.workflowFile && entry.workflowFile === declaration.workflowFile);
+  const directSource = document && !Array.isArray(document.workflows) ? document : null;
+  const next = {
+    schemaVersion: SCHEMA_VERSION,
+    workflows: document === undefined
+      ? []
+      : Array.isArray(document.workflows)
+        ? document.workflows.map(aggregateEntryFromDirectDocument)
+        : [aggregateEntryFromDirectDocument(document)],
+  };
+  const rawDeclarationEntry = declarationEntryForAggregate(declaration);
+  const exactFileIndex = next.workflows.findIndex((entry) => entry.workflowFile && entry.workflowFile === rawDeclarationEntry.workflowFile);
   const foldedFileMatches = next.workflows.filter((entry) =>
     entry.workflowFile &&
-    declaration.workflowFile &&
-    entry.workflowFile.toLowerCase() === declaration.workflowFile.toLowerCase()
+    rawDeclarationEntry.workflowFile &&
+    entry.workflowFile.toLowerCase() === rawDeclarationEntry.workflowFile.toLowerCase()
   );
   if (exactFileIndex < 0 && foldedFileMatches.length > 0) {
     throw new N8nPortableWorkflowError(
@@ -1011,12 +1095,38 @@ function mergeCredentialDeclarationDocument(document, declaration) {
     );
   }
   const idIndex = next.workflows.findIndex((entry) =>
-    entry.workflowId && declaration.workflowId && entry.workflowId === declaration.workflowId
+    entry.workflowId && rawDeclarationEntry.workflowId && entry.workflowId === rawDeclarationEntry.workflowId
   );
-  const index = exactFileIndex >= 0 ? exactFileIndex : idIndex;
-  if (index >= 0) next.workflows[index] = declaration;
-  else next.workflows.push(declaration);
+  const selectorMatches = next.workflows
+    .map((entry, index) => ({ entry, index }))
+    .filter(({ entry }) => ['workflowFile', 'workflowId', 'workflowName']
+      .filter((field) => entry[field])
+      .every((field) => {
+        if (!rawDeclarationEntry[field]) return false;
+        if (field === 'workflowFile') {
+          return entry[field].replace(/\\/g, '/') === rawDeclarationEntry[field].replace(/\\/g, '/');
+        }
+        return entry[field] === rawDeclarationEntry[field];
+      }));
+  if (exactFileIndex < 0 && idIndex < 0 && selectorMatches.length > 1) {
+    throw new N8nPortableWorkflowError(
+      'N8N_WORKFLOW_MATCH_AMBIGUOUS',
+      'Multiple portable credential declaration entries match the updated workflow.'
+    );
+  }
+  const index = directSource
+    ? 0
+    : exactFileIndex >= 0
+      ? exactFileIndex
+      : idIndex >= 0
+        ? idIndex
+        : selectorMatches[0]?.index ?? -1;
+  const selectorSource = directSource || (index >= 0 ? next.workflows[index] : null);
+  const declarationEntry = declarationEntryForAggregate(declaration, selectorSource);
+  if (index >= 0) next.workflows[index] = declarationEntry;
+  else next.workflows.push(declarationEntry);
   next.workflows.sort((left, right) => String(left.workflowFile || left.workflowName).localeCompare(String(right.workflowFile || right.workflowName)));
+  validatePortableDocument(next, 'credential-declarations', { allowAbsent: false });
   return next;
 }
 

@@ -334,6 +334,90 @@ test('normal export protects expressions nested in arrays with deterministic num
   assert.equal(reviewed.workflow.nodes[0].parameters.routingRules[0].conditions[0].leftValue, '={{ $json.attacker_controlled }}');
 });
 
+test('normal export preserves canonical absence for protected leaves and complete mapping domains', () => {
+  const canonical = portable.canonicalWorkflowForGit(workflow());
+  canonical.nodes[0].parameters.routingRules = [{
+    conditions: [{ rightValue: 'approved' }],
+  }];
+  for (const key of ['columns', 'mapping', 'assignments', 'filters', 'options', 'matchingColumns', 'valueInputMode']) {
+    delete canonical.nodes[0].parameters[key];
+  }
+  const live = structuredClone(canonical);
+  live.nodes[0].parameters.routingRules[0].conditions[0].leftValue = '={{ $json.live_only }}';
+  live.nodes[0].parameters.routingRules[0].conditions[0].nullable = null;
+  live.nodes[0].parameters.routingRules[0].conditions[0].empty = '';
+  Object.assign(live.nodes[0].parameters, {
+    columns: { mappingMode: 'defineBelow', value: { introduced: '={{ $json.introduced }}' } },
+    mapping: { introduced: true },
+    assignments: [{ name: 'introduced', value: '={{ $json.value }}' }],
+    filters: { conditions: [{ leftValue: '={{ $json.status }}', rightValue: 'ready' }] },
+    options: { valueInputMode: 'RAW' },
+    matchingColumns: ['introduced'],
+    valueInputMode: 'RAW',
+  });
+  const protectedPaths = ['leftValue', 'nullable', 'empty'].map((leaf) => ({
+    nodeId: 'sheet-node',
+    nodeName: 'Append order',
+    nodeType: 'n8n-nodes-base.googleSheets',
+    path: `parameters.routingRules.0.conditions.0.${leaf}`,
+  }));
+  const deploymentPolicy = {
+    schemaVersion: 1,
+    workflows: [{ workflowName: canonical.name, protectedPaths }],
+  };
+
+  const safe = portable.canonicaliseExport({
+    liveWorkflow: live,
+    canonicalWorkflow: canonical,
+    workflowFile: 'n8n-workflows/portable.json',
+    deploymentPolicy,
+  });
+  const safeParameters = safe.workflow.nodes[0].parameters;
+  assert.equal(Object.hasOwn(safeParameters.routingRules[0].conditions[0], 'leftValue'), false);
+  assert.equal(Object.hasOwn(safeParameters.routingRules[0].conditions[0], 'nullable'), false);
+  assert.equal(Object.hasOwn(safeParameters.routingRules[0].conditions[0], 'empty'), false);
+  for (const key of ['columns', 'mapping', 'assignments', 'filters', 'options', 'matchingColumns', 'valueInputMode']) {
+    assert.equal(Object.hasOwn(safeParameters, key), false, key);
+  }
+  assert.ok(safe.protectedChanges.some((entry) => entry.path === 'parameters.routingRules.0.conditions.0.leftValue'));
+  assert.ok(safe.protectedChanges.some((entry) => entry.path === 'parameters.columns'));
+
+  const reviewed = portable.canonicaliseExport({
+    liveWorkflow: live,
+    canonicalWorkflow: canonical,
+    workflowFile: 'n8n-workflows/portable.json',
+    deploymentPolicy,
+    reviewedSourceUpdate: true,
+  });
+  assert.equal(reviewed.workflow.nodes[0].parameters.routingRules[0].conditions[0].leftValue, '={{ $json.live_only }}');
+  assert.deepEqual(reviewed.workflow.nodes[0].parameters.columns, live.nodes[0].parameters.columns);
+  assert.deepEqual(reviewed.workflow.nodes[0].parameters.assignments, live.nodes[0].parameters.assignments);
+});
+
+test('normal export fails closed when protected absence would require deleting an array element', () => {
+  const canonical = portable.canonicalWorkflowForGit(workflow());
+  canonical.nodes[0].parameters.routingRules = [];
+  const live = structuredClone(canonical);
+  live.nodes[0].parameters.routingRules = [{ route: 'live-only' }];
+  expectCode(() => portable.canonicaliseExport({
+    liveWorkflow: live,
+    canonicalWorkflow: canonical,
+    workflowFile: 'n8n-workflows/portable.json',
+    deploymentPolicy: {
+      schemaVersion: 1,
+      workflows: [{
+        workflowName: canonical.name,
+        protectedPaths: [{
+          nodeId: 'sheet-node',
+          nodeName: 'Append order',
+          nodeType: 'n8n-nodes-base.googleSheets',
+          path: 'parameters.routingRules.0',
+        }],
+      }],
+    },
+  }), 'N8N_POLICY_VALIDATION_FAILED');
+});
+
 test('normal export preserves approved canonical locator and blocks a new private environment-specific locator', () => {
   const previous = portable.canonicalWorkflowForGit(workflow());
   const live = structuredClone(previous);
@@ -427,6 +511,111 @@ test('conflicting workflow and node selectors fail closed', () => {
     nodes: [],
   }] }, { ...canonical, id: 'canonical-workflow' }, 'n8n-workflows/portable.json');
   assert.equal(legacy.blocked, true);
+});
+
+test('direct portable documents enforce every selector before policy, credential, or resource admission', () => {
+  const canonical = portable.canonicalWorkflowForGit(workflow());
+  const workflowFile = path.resolve('n8n-workflows/portable.json');
+  const exactCredential = portable.buildPortableCredentialDeclaration(canonical, workflowFile);
+  delete exactCredential.workflowId;
+  assert.equal(
+    portable.selectWorkflowEntry(exactCredential, canonical, workflowFile, 'credential declaration', 'credential-declarations'),
+    exactCredential
+  );
+  for (const [field, value] of [
+    ['workflowFile', 'n8n-workflows/stale.json'],
+    ['workflowId', 'stale-workflow-id'],
+    ['workflowName', 'Stale workflow name'],
+  ]) {
+    const stale = structuredClone(exactCredential);
+    stale[field] = value;
+    expectCode(
+      () => portable.selectWorkflowEntry(stale, canonical, workflowFile, 'credential declaration', 'credential-declarations'),
+      'N8N_POLICY_VALIDATION_FAILED'
+    );
+  }
+  for (const [kind, direct] of [
+    ['credential-declarations', { schemaVersion: 1, workflowName: canonical.name, nodes: [] }],
+    ['deployment-policy', { schemaVersion: 1, workflowName: canonical.name, protectedPaths: [], resourcePaths: [] }],
+    ['resource-bindings', { schemaVersion: 1, workflowName: canonical.name, nodes: [] }],
+  ]) {
+    assert.equal(portable.selectWorkflowEntry(direct, canonical, workflowFile, kind, kind), direct);
+    expectCode(
+      () => portable.selectWorkflowEntry({ ...direct, workflowFile: 'stale.json' }, canonical, workflowFile, kind, kind),
+      'N8N_POLICY_VALIDATION_FAILED'
+    );
+  }
+  expectCode(
+    () => portable.validatePortableDocument({ schemaVersion: 1, nodes: [] }, 'credential-declarations'),
+    'N8N_POLICY_VALIDATION_FAILED'
+  );
+  expectCode(() => portable.validatePortableDocument({
+    schemaVersion: 1,
+    workflows: [
+      { workflowFile: 'n8n-workflows/Portable.json', nodes: [] },
+      { workflowFile: 'n8n-workflows/portable.json', nodes: [] },
+    ],
+  }, 'credential-declarations'), 'N8N_WORKFLOW_MATCH_AMBIGUOUS');
+});
+
+test('direct credential declarations migrate once to a root-versioned aggregate document', () => {
+  const canonical = portable.canonicalWorkflowForGit(workflow());
+  const initialDeclaration = portable.buildPortableCredentialDeclaration(canonical, 'n8n-workflows/portable.json');
+  const direct = {
+    schemaVersion: 1,
+    workflowName: canonical.name,
+    nodes: structuredClone(initialDeclaration.nodes),
+  };
+  direct.nodes[0].required = false;
+  const nextDeclaration = portable.buildPortableCredentialDeclaration(canonical, 'n8n-workflows/portable.json', direct);
+  const migrated = portable.mergeCredentialDeclarationDocument(direct, nextDeclaration);
+  assert.deepEqual(Object.keys(migrated).sort(), ['schemaVersion', 'workflows']);
+  assert.equal(migrated.workflows.length, 1);
+  assert.deepEqual(
+    Object.keys(migrated.workflows[0]).filter((key) => key.startsWith('workflow')),
+    ['workflowName']
+  );
+  assert.equal(migrated.workflows[0].schemaVersion, undefined);
+  assert.equal(migrated.workflows[0].nodes[0].required, false);
+  portable.validatePortableDocument(migrated, 'credential-declarations', { allowAbsent: false });
+  const rerun = portable.mergeCredentialDeclarationDocument(migrated, nextDeclaration);
+  assert.equal(`${JSON.stringify(rerun, null, 2)}\n`, `${JSON.stringify(migrated, null, 2)}\n`);
+
+  const empty = portable.mergeCredentialDeclarationDocument(undefined, nextDeclaration);
+  assert.equal(empty.workflows[0].schemaVersion, undefined);
+  const existingAggregate = portable.mergeCredentialDeclarationDocument({ schemaVersion: 1, workflows: [] }, nextDeclaration);
+  assert.deepEqual(existingAggregate, empty);
+});
+
+test('aggregate entries use the root schema version and round trip without standalone revalidation', () => {
+  const canonical = portable.canonicalWorkflowForGit(workflow());
+  const entry = portable.buildPortableCredentialDeclaration(canonical, 'n8n-workflows/portable.json');
+  delete entry.schemaVersion;
+  const aggregate = { schemaVersion: 1, workflows: [entry] };
+  portable.validatePortableDocument(aggregate, 'credential-declarations', { allowAbsent: false });
+  assert.equal(
+    portable.selectWorkflowEntry(
+      aggregate,
+      canonical,
+      path.resolve('n8n-workflows/portable.json'),
+      'credential declaration',
+      'credential-declarations'
+    ),
+    entry
+  );
+  const exported = portable.canonicaliseExport({
+    liveWorkflow: workflow(),
+    canonicalWorkflow: canonical,
+    workflowFile: path.resolve('n8n-workflows/portable.json'),
+    previousDeclaration: entry,
+  });
+  const merged = portable.mergeCredentialDeclarationDocument(aggregate, exported.declaration);
+  portable.validatePortableDocument(merged, 'credential-declarations', { allowAbsent: false });
+  assert.equal(merged.workflows[0].schemaVersion, undefined);
+  expectCode(
+    () => portable.validatePortableDocument({ schemaVersion: 2, workflows: [entry] }, 'credential-declarations'),
+    'N8N_POLICY_VALIDATION_FAILED'
+  );
 });
 
 test('present malformed portable documents fail schema validation before preparation or export mutation', () => {
@@ -988,6 +1177,136 @@ test('workflow identity rejects case-folded file collisions and verifies exact f
   const stateText = fs.readFileSync(statePath, 'utf8');
   assert.match(stateText, /target-a/);
   assert.doesNotMatch(stateText, /target-b/);
+  fs.rmSync(fixtureRoot, { recursive: true, force: true });
+});
+
+test('deployment policy reader distinguishes optional absence from explicit unsafe or missing configuration', () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-policy-intent-'));
+  const policyPath = path.join(fixtureRoot, 'deployment-policy.json');
+  const missingPath = path.join(fixtureRoot, 'missing-private-policy.json');
+  const directoryPath = path.join(fixtureRoot, 'policy-directory');
+  fs.mkdirSync(directoryPath);
+  writeFixture(policyPath, { schemaVersion: 1, workflows: [] });
+
+  assert.equal(exportSync.readDeploymentPolicy(missingPath), undefined);
+  assert.deepEqual(exportSync.readDeploymentPolicy(policyPath, { required: true }), { schemaVersion: 1, workflows: [] });
+  for (const unsafePath of [missingPath, directoryPath]) {
+    assert.throws(
+      () => exportSync.readDeploymentPolicy(unsafePath, { required: true }),
+      (error) => error.code === 'N8N_POLICY_VALIDATION_FAILED' && !error.message.includes(fixtureRoot)
+    );
+  }
+  assert.throws(
+    () => exportSync.readDeploymentPolicy(policyPath, {
+      required: true,
+      beforeRead() {
+        fs.rmSync(policyPath);
+      },
+    }),
+    (error) => error.code === 'N8N_POLICY_VALIDATION_FAILED' && !error.message.includes(fixtureRoot)
+  );
+
+  writeFixture(policyPath, { schemaVersion: 1, workflows: [] });
+  const redirectedPath = path.join(fixtureRoot, 'redirected-policy.json');
+  try {
+    fs.symlinkSync(policyPath, redirectedPath, 'file');
+    assert.throws(
+      () => exportSync.readDeploymentPolicy(redirectedPath, { required: true }),
+      (error) => error.code === 'N8N_POLICY_VALIDATION_FAILED' && !error.message.includes(fixtureRoot)
+    );
+  } catch (error) {
+    if (!['EPERM', 'EACCES', 'ENOTSUP'].includes(error.code)) throw error;
+  }
+
+  assert.equal(exportSync.parseArgs([]).deploymentPolicyConfigured, false);
+  assert.equal(exportSync.parseArgs([`--deployment-policy=${policyPath}`]).deploymentPolicyConfigured, true);
+  fs.rmSync(fixtureRoot, { recursive: true, force: true });
+});
+
+test('sync export blocks an explicitly missing policy before canonical, declaration, binding, or report mutation', () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-policy-cli-'));
+  const workflowDir = path.join(fixtureRoot, 'n8n-workflows');
+  const exportsDir = path.join(fixtureRoot, 'exports');
+  const toolkitDir = path.join(workflowDir, 'toolkit');
+  const workflowPath = path.join(workflowDir, 'portable.json');
+  const exportPath = path.join(exportsDir, 'portable.live-export.json');
+  const declarationPath = path.join(toolkitDir, 'portable-credentials.json');
+  const policyPath = path.join(toolkitDir, 'deployment-policy.json');
+  const missingPath = path.join(toolkitDir, 'deleted-policy.json');
+  const bindingsPath = path.join(fixtureRoot, '.n8n-local', 'bindings.json');
+  const reportPath = path.join(fixtureRoot, '.n8n-local', 'reports', 'latest-n8n-workflow-operation.json');
+  writeFixture(workflowPath, portable.canonicalWorkflowForGit(workflow()));
+  writeFixture(exportPath, workflow());
+  writeFixture(declarationPath, { schemaVersion: 1, workflows: [] });
+  const baseArgs = [
+    path.join(helperRoot, 'sync-n8n-live-exports.cjs'),
+    exportsDir,
+    workflowDir,
+    bindingsPath,
+    '--sync-exported-only',
+    `--portable-credentials=${declarationPath}`,
+  ];
+
+  const optionalDefault = spawnSync(process.execPath, baseArgs, { cwd: fixtureRoot, encoding: 'utf8' });
+  assert.equal(optionalDefault.status, 0, optionalDefault.stderr);
+  writeFixture(policyPath, { schemaVersion: 1, workflows: [] });
+  const explicitValid = spawnSync(process.execPath, [...baseArgs, `--deployment-policy=${policyPath}`], {
+    cwd: fixtureRoot,
+    encoding: 'utf8',
+  });
+  assert.equal(explicitValid.status, 0, explicitValid.stderr);
+
+  const originals = new Map([
+    [workflowPath, fs.readFileSync(workflowPath)],
+    [declarationPath, fs.readFileSync(declarationPath)],
+    [bindingsPath, fs.readFileSync(bindingsPath)],
+    [reportPath, fs.readFileSync(reportPath)],
+  ]);
+  for (const configuredPath of [missingPath, toolkitDir]) {
+    const failed = spawnSync(process.execPath, [...baseArgs, `--deployment-policy=${configuredPath}`], {
+      cwd: fixtureRoot,
+      encoding: 'utf8',
+    });
+    assert.notEqual(failed.status, 0);
+    assert.match(failed.stderr, /N8N_POLICY_VALIDATION_FAILED/);
+    assert.doesNotMatch(failed.stderr, new RegExp(configuredPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    for (const [filePath, content] of originals) assert.equal(fs.readFileSync(filePath).equals(content), true);
+  }
+  fs.rmSync(fixtureRoot, { recursive: true, force: true });
+});
+
+test('duplicate transaction targets fail before directories, stages, backups, or target writes', () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-duplicate-target-'));
+  const existing = path.join(fixtureRoot, 'existing.json');
+  fs.writeFileSync(existing, '{"original":true}\n');
+  const original = fs.readFileSync(existing);
+  const cases = [
+    [
+      { targetPath: existing, content: '{"workflow":1}\n' },
+      { targetPath: existing, content: '{"declaration":1}\n' },
+    ],
+    [
+      { targetPath: existing, content: '{"workflow":1}\n' },
+      { targetPath: path.join(fixtureRoot, '.', 'existing.json'), content: '{"workflow":2}\n' },
+    ],
+    [
+      { targetPath: path.join(fixtureRoot, 'CaseTarget.json'), content: '{"workflow":1}\n' },
+      { targetPath: path.join(fixtureRoot, 'casetarget.json'), content: '{"workflow":2}\n' },
+    ],
+    [
+      { targetPath: path.join(fixtureRoot, 'new', 'workflow.json'), content: '{"workflow":1}\n' },
+      { targetPath: path.join(fixtureRoot, 'new', '..', 'new', 'workflow.json'), content: '{"declaration":1}\n' },
+    ],
+  ];
+  for (const changes of cases) {
+    expectCode(() => exportSync.replaceFilesTransactionally(changes), 'N8N_WORKFLOW_MATCH_AMBIGUOUS');
+    assert.equal(fs.readFileSync(existing).equals(original), true);
+    assert.equal(fs.existsSync(path.join(fixtureRoot, 'new')), false);
+    assert.deepEqual(
+      fs.readdirSync(fixtureRoot).filter((name) => /\.(stage|backup|rollback)$/.test(name)),
+      []
+    );
+  }
   fs.rmSync(fixtureRoot, { recursive: true, force: true });
 });
 
