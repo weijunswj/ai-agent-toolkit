@@ -343,7 +343,8 @@ test('bounded PostToolUse receipt ingestion records required non-Skill capabilit
     ledger = record(ledger, capability.name).ledger;
   }
   n8n.writeTaskLedger(base, ledger, { stateRoot });
-  const command = 'node skills/external-system-router/scripts/n8n-domain-router.cjs ingest-capability-receipt receipt.json';
+  const routerPath = require.resolve('../../skills/external-system-router/scripts/n8n-domain-router.cjs');
+  const command = `node "${routerPath}" ingest-capability-receipt receipt.json`;
   const receipt = {
     schemaVersion: n8n.N8N_CAPABILITY_RECEIPT_SCHEMA_VERSION,
     taskId: ledger.taskId,
@@ -367,6 +368,16 @@ test('bounded PostToolUse receipt ingestion records required non-Skill capabilit
   forged.receiptDigest = n8n.sha256({ ...forged, receiptDigest: undefined });
   assert.throws(() => n8n.recordCapabilityReceipt(ledger, forged, { input: toolInput }),
     (error) => error.code === 'N8N_CAPABILITY_RECEIPT_INVALID' || error.code === 'N8N_CAPABILITY_RECEIPT_MISMATCH');
+
+  const lookalikeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-n8n-receipt-lookalike-'));
+  const lookalike = path.join(lookalikeRoot, 'n8n-domain-router.cjs');
+  fs.writeFileSync(lookalike, "'use strict';\n");
+  const lookalikeInput = {
+    ...base, hook_event_name: 'PreToolUse', tool_name: 'Bash',
+    tool_input: { command: `node "${lookalike}" ingest-capability-receipt receipt.json` }
+  };
+  assert.equal(n8n.isCapabilityReceiptIngestionToolUse(lookalikeInput), false);
+  assert.equal(hook.handle(lookalikeInput, { router: n8n, stateRoot }).hookSpecificOutput.permissionDecision, 'deny');
 });
 
 test('Claude completion audit blocks an incomplete n8n task and reports one supported next action', () => {

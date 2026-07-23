@@ -626,7 +626,22 @@ function isCapabilityReceiptIngestionToolUse(input) {
   const toolInput = isObject(input.tool_input) ? input.tool_input : isObject(input.toolInput) ? input.toolInput : {};
   const command = String(toolInput.command || '').trim();
   if (!command || command.length > 4096 || /[\r\n;&|><`]|\$\(/.test(command)) return false;
-  return /^node(?:\.exe)?\s+["']?[^\s"']*n8n-domain-router\.cjs["']?\s+ingest-capability-receipt\s+["']?[^\s"']+\.json["']?$/i.test(command);
+  const match = command.match(/^node(?:\.exe)?\s+(?:"([^"]+)"|'([^']+)'|([^\s"']+))\s+ingest-capability-receipt\s+(?:"([^"]+\.json)"|'([^']+\.json)'|([^\s"']+\.json))$/i);
+  if (!match) return false;
+  const scriptArgument = match[1] || match[2] || match[3];
+  const cwd = typeof input.cwd === 'string' && input.cwd.trim() ? input.cwd : process.cwd();
+  const candidate = path.resolve(cwd, scriptArgument);
+  try {
+    const stat = fs.lstatSync(candidate);
+    if (!stat.isFile() || stat.isSymbolicLink()) return false;
+    const actual = fs.realpathSync(candidate);
+    const expected = fs.realpathSync(__filename);
+    return process.platform === 'win32'
+      ? actual.toLowerCase() === expected.toLowerCase()
+      : actual === expected;
+  } catch {
+    return false;
+  }
 }
 
 function recordCapabilityReceipt(ledger, receipt, binding = {}) {
