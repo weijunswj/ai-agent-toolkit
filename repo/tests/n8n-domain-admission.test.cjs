@@ -57,8 +57,8 @@ test('material n8n work detects intent, classifies the exact operation, and buil
   const detected = n8n.detectN8nTask({ objective: 'Repair this n8n workflow JSON.' });
   assert.equal(detected.detected, true);
   const setupIntent = n8n.classifyN8nOperation({ objective: 'Set up n8n.' });
-  assert.equal(setupIntent.detected, true);
-  assert.equal(setupIntent.classificationRequired, true);
+  assert.equal(setupIntent.detected, false);
+  assert.equal(n8n.classifyN8nOperation({ objective: 'Install the official n8n Skills.' }).detected, false);
   const classification = n8n.classifyN8nOperation({ objective: 'Edit this n8n workflow JSON.' });
   assert.equal(classification.operation, 'workflow-material-edit');
   const ledger = materialLedger();
@@ -90,6 +90,15 @@ test('failed, stale, malformed, unqualified, or ambiguous Skill attempts never s
   const missing = n8n.attestClaudeOfficialSkillInvocation({ skillName: `n8n-skills:${skill}` }, { pluginRecords: [] });
   assert.equal(missing.verified, false);
   assert.equal(missing.stableCode, 'N8N_SKILL_SOURCE_AMBIGUOUS');
+  const competing = n8n.attestClaudeOfficialSkillInvocation({ skillName: `n8n-skills:${skill}` }, {
+    pluginRecords: [
+      { version: n8n.OFFICIAL_N8N_SKILLS_CONTRACT.packageVersion, installPath: 'C:/cache/current' },
+      { version: '1.0.1', installPath: 'C:/workspace/competing' }
+    ]
+  });
+  assert.equal(competing.verified, false);
+  assert.equal(competing.stableCode, 'N8N_SKILL_SOURCE_AMBIGUOUS');
+  assert.match(competing.reason, /competing scope or version/);
 });
 
 test('both exact reviewed 1.0.2 source commits satisfy evidence, while any other commit fails closed', () => {
@@ -148,6 +157,32 @@ test('generic validator or mirrored workflow evidence cannot substitute for offi
     tool_name: 'PowerShell',
     tool_input: { command: 'Get-Content n8n-workflows/example.json' }
   }), false);
+  const repository = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-generic-workflow-target-'));
+  fs.mkdirSync(path.join(repository, 'workflows'));
+  fs.writeFileSync(path.join(repository, 'workflows', 'orders.json'), '{"name":"Orders","nodes":[],"connections":{}}\n');
+  assert.equal(n8n.looksLikeN8nWorkflowMutation({
+    cwd: repository,
+    tool_name: 'Edit',
+    tool_input: { file_path: 'workflows/orders.json', old_string: '"Orders"', new_string: '"Orders v2"' }
+  }), true);
+  fs.writeFileSync(path.join(repository, 'workflows', 'generic.json'), '{"steps":[]}\n');
+  assert.equal(n8n.looksLikeN8nWorkflowMutation({
+    cwd: repository,
+    tool_name: 'Edit',
+    tool_input: { file_path: 'workflows/generic.json', old_string: 'steps', new_string: 'tasks' }
+  }), false);
+  for (const command of [
+    'git show HEAD:n8n-workflows/example.json --output=n8n-workflows/live.json',
+    'git diff --output result.patch',
+    'git log -oresult.txt',
+    'git show --ext-diff HEAD'
+  ]) {
+    assert.equal(n8n.isProvenReadOnlyToolUse({ tool_name: 'Bash', tool_input: { command } }), false, command);
+  }
+  assert.equal(n8n.isProvenReadOnlyToolUse({
+    tool_name: 'Bash',
+    tool_input: { command: 'git show HEAD:n8n-workflows/example.json' }
+  }), true);
 });
 
 test('task-ledger capability and source-contract tampering fails closed', () => {
@@ -329,6 +364,8 @@ test('changed material operations mismatch and new objectives receive fresh ledg
   const second = n8n.readTaskLedger(base, { stateRoot });
   assert.notEqual(second.taskId, first.taskId);
   assert.equal(second.invocationEvidence.length, 0);
+  hook.handle({ ...base, hook_event_name: 'UserPromptSubmit', prompt: 'Explain git rebase.' }, { router: n8n, stateRoot });
+  assert.equal(n8n.readTaskLedger(base, { stateRoot }), null);
 });
 
 test('bounded PostToolUse receipt ingestion records required non-Skill capability evidence', () => {
@@ -354,6 +391,7 @@ test('bounded PostToolUse receipt ingestion records required non-Skill capabilit
     result: 'verified',
     reference: 'receipt:compiler-synthetic',
     commandDigest: n8n.sha256(command),
+    sourceDigest: n8n.sha256('synthetic-helper-source'),
     recordedAt: '2026-07-23T00:01:00.000Z'
   };
   receipt.receiptDigest = n8n.sha256(receipt);
@@ -378,6 +416,51 @@ test('bounded PostToolUse receipt ingestion records required non-Skill capabilit
   };
   assert.equal(n8n.isCapabilityReceiptIngestionToolUse(lookalikeInput), false);
   assert.equal(hook.handle(lookalikeInput, { router: n8n, stateRoot }).hookSpecificOutput.permissionDecision, 'deny');
+});
+
+test('the exact installed workflow compiler command is admitted and produces bound receipt evidence', () => {
+  const repository = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-n8n-helper-producer-'));
+  const helperRoot = path.join(repository, 'installed-skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts');
+  const helperScript = path.join(helperRoot, 'sanitizer', 'prepare-n8n-template.js');
+  fs.mkdirSync(path.dirname(helperScript), { recursive: true });
+  fs.writeFileSync(helperScript, "'use strict';\n");
+  fs.writeFileSync(path.join(repository, 'source.json'), '{"nodes":[],"connections":{}}\n');
+  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-n8n-helper-producer-state-'));
+  const base = {
+    session_id: 'helper-producer-session',
+    cwd: repository,
+    timestamp: '2026-07-23T00:00:00.000Z'
+  };
+  let ledger = n8n.createN8nCapabilityLedger({
+    sessionId: base.session_id,
+    repositoryIdentity: base.cwd,
+    objective: 'Compile this n8n workflow JSON.',
+    operation: 'workflow-compile',
+    createdAt: base.timestamp
+  });
+  for (const capability of ledger.requiredCapabilities.filter((entry) => entry.kind === 'official-skill')) {
+    ledger = record(ledger, capability.name).ledger;
+  }
+  n8n.writeTaskLedger(base, ledger, { stateRoot });
+  const command = `node "${helperScript}" source.json output.json`;
+  const toolUse = {
+    ...base,
+    tool_name: 'Bash',
+    tool_input: { command }
+  };
+  const options = { router: n8n, stateRoot, toolkitHelperRoots: [helperRoot] };
+  assert.deepEqual(hook.handle({ ...toolUse, hook_event_name: 'PreToolUse' }, options), {});
+  const result = hook.handle({ ...toolUse, hook_event_name: 'PostToolUse' }, options);
+  assert.match(result.hookSpecificOutput.additionalContext, /exact installed Toolkit helper bytes/);
+  const completed = n8n.readTaskLedger(base, { stateRoot });
+  assert.equal(n8n.auditN8nCompletion(completed).complete, true);
+  assert.match(completed.requiredCapabilities.find((entry) =>
+    entry.capabilityId === 'toolkit-helper:workflow-compile').evidence[0], /^receipt:toolkit-helper-workflow-compile-/);
+  const arbitrary = {
+    ...toolUse,
+    tool_input: { command: 'node scripts/arbitrary-compiler.cjs source.json output.json' }
+  };
+  assert.equal(n8n.isCapabilityProducerToolUse(arbitrary, ledger, options), false);
 });
 
 test('Claude completion audit blocks an incomplete n8n task and reports one supported next action', () => {
@@ -438,4 +521,49 @@ test('task-local ledger is bound to one session and repository and records no pr
   const different = { session_id: 'different-session', cwd: binding.cwd };
   fs.copyFileSync(n8n.stateFileFor(binding, { stateRoot }), n8n.stateFileFor(different, { stateRoot }));
   assert.throws(() => n8n.readTaskLedger(different, { stateRoot }), (error) => error.code === 'N8N_LEDGER_BINDING_MISMATCH');
+});
+
+test('ledger locks preserve live owners, reclaim only proven-dead owners, and release by exact token', () => {
+  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-n8n-lock-owner-'));
+  const input = { session_id: 'lock-owner', cwd: 'C:/synthetic/repo' };
+  const lockPath = `${n8n.stateFileFor(input, { stateRoot })}.lock`;
+  const ownerPath = path.join(lockPath, 'owner.json');
+  const firstRelease = n8n.acquireTaskLedgerLock(input, {
+    stateRoot,
+    lockOwnerToken: 'a'.repeat(32),
+    now: Date.parse('2026-07-23T00:00:00.000Z')
+  });
+  fs.writeFileSync(ownerPath, JSON.stringify({
+    schemaVersion: 1,
+    token: 'b'.repeat(32),
+    pid: process.pid,
+    createdAt: '2026-07-23T00:00:00.000Z'
+  }));
+  firstRelease();
+  assert.equal(fs.existsSync(lockPath), true);
+  fs.unlinkSync(ownerPath);
+  fs.rmdirSync(lockPath);
+
+  fs.mkdirSync(lockPath);
+  fs.writeFileSync(ownerPath, JSON.stringify({
+    schemaVersion: 1,
+    token: 'c'.repeat(32),
+    pid: 424242,
+    createdAt: '2026-07-23T00:00:00.000Z'
+  }));
+  assert.throws(() => n8n.acquireTaskLedgerLock(input, {
+    stateRoot,
+    now: Date.parse('2026-07-23T00:01:00.000Z'),
+    isProcessAlive: () => true
+  }), (error) => error.code === 'N8N_LEDGER_BUSY');
+  const reclaimedRelease = n8n.acquireTaskLedgerLock(input, {
+    stateRoot,
+    lockOwnerToken: 'd'.repeat(32),
+    now: Date.parse('2026-07-23T00:01:00.000Z'),
+    isProcessAlive: () => false
+  });
+  const reclaimed = JSON.parse(fs.readFileSync(ownerPath, 'utf8'));
+  assert.equal(reclaimed.token, 'd'.repeat(32));
+  reclaimedRelease();
+  assert.equal(fs.existsSync(lockPath), false);
 });

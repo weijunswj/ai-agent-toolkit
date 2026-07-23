@@ -10,7 +10,7 @@ Instruction-only skill for automatically checking and installing repo/folder-loc
 
 ## Declared Runtime Dependency
 
-The portable managed `AGENTS.md` routes external-system operations through the sibling [external-system-router](../external-system-router/) skill. Standalone installations of this skill must also install the complete `external-system-router` folder in a supported skill location. The installer does not silently add it; external-system work must fail closed with that installation as the supported next action when the dependency is unavailable.
+The portable managed `AGENTS.md` routes external-system operations through the sibling [external-system-router](../external-system-router/) skill. [runtime-dependencies.json](runtime-dependencies.json) declares the compatible version, complete-folder install unit, and required sibling router/schema files for standalone installations. The installer does not silently add it; external-system work must fail closed with installation of the declared complete dependency as the supported next action when it is unavailable, incomplete, or incompatible.
 
 The copied skill folder includes bare repo-local bootstrap payload templates. These files contain the curated-source safety comment plus marker-wrapped destination-file content and are safe to copy wholesale:
 

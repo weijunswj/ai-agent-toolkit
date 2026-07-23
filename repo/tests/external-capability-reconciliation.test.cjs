@@ -108,13 +108,37 @@ test('capability completion ledger requires every capability to be verified, def
   });
   const pending = router.buildCapabilityLedger(reconciliation);
   assert.equal(pending.complete, false);
+  const ledgerSchema = JSON.parse(require('node:fs').readFileSync(path.join(
+    __dirname, '..', '..', '_projects', 'development', 'external-system-router', '_main', 'skill',
+    'references', 'schemas', 'capability-ledger.schema.json'
+  ), 'utf8'));
+  assert.ok(ledgerSchema.required.includes('repositoryDigest'));
+  assert.ok(ledgerSchema.required.includes('intentDigest'));
   assert.throws(() => router.assertObjectiveComplete(pending), (error) => error.code === 'EXTERNAL_CAPABILITY_LEDGER_INCOMPLETE');
 
   const [requirement] = reconciliation.requirements;
   const deferred = router.buildCapabilityLedger(reconciliation, {
+    reconciliationDigest: reconciliation.reconciliationDigest,
+    repositoryDigest: reconciliation.repositoryDigest,
+    intentDigest: reconciliation.intentDigest,
     deferred: [{ provider: requirement.provider, capability: requirement.capability, blocker: 'Native UAT requires a separately approved live target.' }]
   });
   assert.equal(router.assertObjectiveComplete(deferred).complete, true);
+  const changedIntent = router.reconcileCapabilities({
+    trigger: 'substantive-task',
+    objective: 'Deploy through Coolify to a different environment.',
+    repositoryEvidence: { files: [] }
+  });
+  assert.throws(() => router.buildCapabilityLedger(changedIntent, {
+    reconciliationDigest: reconciliation.reconciliationDigest,
+    repositoryDigest: reconciliation.repositoryDigest,
+    intentDigest: reconciliation.intentDigest,
+    verified: [{
+      provider: requirement.provider,
+      capability: requirement.capability,
+      verificationEvidence: 'receipt:prior-objective'
+    }]
+  }), (error) => error.code === 'EXTERNAL_RECONCILIATION_STATE_MISMATCH');
 
   const forged = structuredClone(pending);
   forged.capabilities[0].status = 'configured-and-verified';
@@ -159,6 +183,27 @@ test('dynamic n8n markers preserve unmarked content and require the complete own
     target: 'another-target',
     context: writeContext
   }), (error) => error.code === 'EXTERNAL_WRITE_CONTEXT_MISMATCH');
+
+  const unsafeCredentialContext = {
+    proposedWrite: { kind: 'credential-reference', target: 'plain-text-credential-value' }
+  };
+  const unsafeCredentialBank = router.buildReconciliationQuestionBank(unsafeCredentialContext);
+  const unsafeCredentialAnswers = completeAnswers(unsafeCredentialBank);
+  unsafeCredentialAnswers.answers.credentialReference = unsafeCredentialContext.proposedWrite.target;
+  assert.throws(() => router.assertWriteGate(unsafeCredentialBank, unsafeCredentialAnswers, {
+    ...unsafeCredentialContext.proposedWrite,
+    context: unsafeCredentialContext
+  }), (error) => error.code === 'EXTERNAL_WRITE_APPROVAL_REQUIRED');
+  const safeCredentialContext = {
+    proposedWrite: { kind: 'credential-reference', target: 'os-keychain://coolify/production/operator' }
+  };
+  const safeCredentialBank = router.buildReconciliationQuestionBank(safeCredentialContext);
+  const safeCredentialAnswers = completeAnswers(safeCredentialBank);
+  safeCredentialAnswers.answers.credentialReference = safeCredentialContext.proposedWrite.target;
+  assert.equal(router.assertWriteGate(safeCredentialBank, safeCredentialAnswers, {
+    ...safeCredentialContext.proposedWrite,
+    context: safeCredentialContext
+  }).approved, true);
 
   const original = '# Project rules\n\nOwner content stays here.\n';
   const added = router.applyN8nMarkerChange(original, 'add', bank, completeAnswers(bank, 'add'));

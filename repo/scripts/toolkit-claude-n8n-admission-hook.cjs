@@ -109,7 +109,11 @@ function handle(input, options = {}) {
   if (eventName === 'UserPromptSubmit') {
     const prompt = String(input.prompt || '');
     const classification = router.classifyN8nOperation({ prompt, objective: prompt });
-    if (!classification.detected) return {};
+    if (!classification.detected) {
+      const ledger = router.readTaskLedger(input, options);
+      if (ledger && !isContinuationPrompt(prompt)) router.retireTaskLedger(input, options);
+      return {};
+    }
     let ledger = router.readTaskLedger(input, options);
     if (ledger) {
       if (startsNewObjective(router, ledger, prompt, classification)) {
@@ -145,10 +149,18 @@ function handle(input, options = {}) {
 
   if (eventName === 'PostToolUse' && ['Bash', 'PowerShell'].includes(String(input.tool_name || input.toolName))) {
     const ledger = router.readTaskLedger(input, options);
-    if (!ledger || !router.isCapabilityReceiptIngestionToolUse(input)) return {};
+    if (!ledger) return {};
+    if (router.isCapabilityProducerToolUse(input, ledger, options)) {
+      const receipt = router.capabilityReceiptFromProducerToolUse(input, ledger, options);
+      const updated = router.updateTaskLedger(input, (current) =>
+        router.recordCapabilityReceipt(current, receipt, { input, options }), options);
+      const audit = router.auditN8nCompletion(updated);
+      return context('PostToolUse', `Recorded ${receipt.capabilityId} from the exact installed Toolkit helper bytes for ${updated.taskId}. ${audit.complete ? 'Required n8n capabilities are satisfied.' : `Next missing capability: ${audit.missingCapability}. ${audit.supportedNextAction}`}`);
+    }
+    if (!router.isCapabilityReceiptIngestionToolUse(input)) return {};
     const receipt = router.parseCapabilityReceiptOutput(input);
     if (!receipt) return context('PostToolUse', 'The bounded capability-receipt command returned no receipt; no n8n capability evidence was recorded.');
-    const updated = router.updateTaskLedger(input, (current) => router.recordCapabilityReceipt(current, receipt, { input }), options);
+    const updated = router.updateTaskLedger(input, (current) => router.recordCapabilityReceipt(current, receipt, { input, options }), options);
     const audit = router.auditN8nCompletion(updated);
     return context('PostToolUse', `Recorded ${receipt.capabilityId} for ${updated.taskId}. ${audit.complete ? 'Required n8n capabilities are satisfied.' : `Next missing capability: ${audit.missingCapability}. ${audit.supportedNextAction}`}`);
   }
@@ -167,6 +179,7 @@ function handle(input, options = {}) {
     if (!router.GOVERNED_MUTATION_TOOLS.has(toolName)) return {};
     let ledger = router.readTaskLedger(input, options);
     if (ledger && router.isCapabilityReceiptIngestionToolUse(input)) return {};
+    if (ledger && router.isCapabilityProducerToolUse(input, ledger, options)) return {};
     const detectedMutation = router.looksLikeN8nWorkflowMutation(input);
     if (!ledger && detectedMutation) {
       ledger = startLedger(router, input, {
@@ -214,7 +227,7 @@ function handle(input, options = {}) {
 function fallbackDecision(input, error, options = {}) {
   const eventName = String(input.hook_event_name || input.hookEventName || '');
   const serialized = JSON.stringify(input || {}).toLowerCase().replace(/\\\\/g, '/');
-  const looksN8n = /\bn8n\b|n8n-workflows?|"nodes"\s*:.*"connections"\s*:/.test(serialized);
+  const looksN8n = /\bn8n\b|n8n-workflows?|workflows?\/[^"\s]+\.json|"nodes"\s*:.*"connections"\s*:/.test(serialized);
   let activeLedger = false;
   try {
     const router = options.router || loadRouter();

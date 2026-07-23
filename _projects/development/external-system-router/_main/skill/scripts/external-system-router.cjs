@@ -227,6 +227,20 @@ function classifyRisk(operation) {
   return RISK_TIERS.REVERSIBLE;
 }
 
+function operationApprovalBinding(envelope, operation) {
+  return {
+    envelopeDigest: sha256(envelope),
+    operationDigest: sha256({
+      provider: operation.provider,
+      targetAlias: operation.targetAlias,
+      accountOrOrganisation: operation.accountOrOrganisation,
+      resource: operation.resource,
+      environment: operation.environment,
+      operation: operation.operation
+    })
+  };
+}
+
 function assertOperationAuthorized(envelope, operation, options = {}) {
   validateAuthorizationEnvelope(envelope);
   requireObject(operation, 'Operation context');
@@ -254,9 +268,16 @@ function assertOperationAuthorized(envelope, operation, options = {}) {
     invariant(envelope.authorisedTier2Operations.includes(operationName), `${operationName} is not explicitly authorised as Tier 2.`, 'EXTERNAL_TIER2_APPROVAL_REQUIRED');
   }
   if (tier === RISK_TIERS.DESTRUCTIVE) {
-    invariant(options.immediateApproval?.ownerApproved === true, 'Tier 3 requires exact immediate owner approval.', 'EXTERNAL_TIER3_APPROVAL_REQUIRED');
-    invariant(options.immediateApproval.operation === operationName, 'Tier 3 approval does not name the exact operation.', 'EXTERNAL_TIER3_APPROVAL_REQUIRED');
-    invariant(options.immediateApproval.authorisationReference, 'Tier 3 approval requires an authorisation reference.', 'EXTERNAL_TIER3_APPROVAL_REQUIRED');
+    const approval = options.immediateApproval;
+    invariant(approval?.ownerApproved === true, 'Tier 3 requires exact immediate owner approval.', 'EXTERNAL_TIER3_APPROVAL_REQUIRED');
+    const binding = operationApprovalBinding(envelope, operation);
+    for (const field of ['provider', 'targetAlias', 'accountOrOrganisation', 'resource', 'environment', 'operation']) {
+      invariant(approval[field] === operation[field], `Tier 3 approval ${field} does not match the exact operation.`, 'EXTERNAL_TIER3_APPROVAL_REQUIRED');
+    }
+    invariant(approval.envelopeDigest === binding.envelopeDigest, 'Tier 3 approval does not match the task authorisation envelope.', 'EXTERNAL_TIER3_APPROVAL_REQUIRED');
+    invariant(approval.operationDigest === binding.operationDigest, 'Tier 3 approval does not match the exact operation digest.', 'EXTERNAL_TIER3_APPROVAL_REQUIRED');
+    requireString(approval.authorisationReference, 'immediateApproval.authorisationReference', { max: 200 });
+    assertNoSecretMaterial(approval, 'Tier 3 immediate approval');
   }
   if (envelope.lifetime.kind === 'time-bounded') {
     invariant(Date.parse(envelope.lifetime.expiresAt) > (options.now || Date.now()), 'Task authorisation envelope has expired.', 'EXTERNAL_REAUTHORISATION_REQUIRED');
@@ -580,7 +601,16 @@ function buildHostAdapterPlan(target, host, capabilityAudits) {
   invariant(['codex', 'claude-code'].includes(host), 'host must be codex or claude-code.');
   invariant(Array.isArray(capabilityAudits), 'capabilityAudits must be an array.');
   const audits = capabilityAudits.map(validateCapabilityAudit).filter((audit) =>
-    audit.provider === target.provider && audit.targetAlias === target.targetAlias && audit.environment === target.environment
+    audit.provider === target.provider
+    && audit.targetAlias === target.targetAlias
+    && audit.environment === target.environment
+    && audit.targetFingerprint === target.sanitizedFingerprint
+    && audit.targetBinding === targetBindingDigest({
+      provider: target.provider,
+      targetAlias: target.targetAlias,
+      environment: target.environment,
+      targetFingerprint: target.sanitizedFingerprint
+    })
   );
   const supportedOperations = audits.map((audit) => ({
     operation: audit.operation,
@@ -780,13 +810,27 @@ function reconcileCapabilities(input) {
     requirements,
     n8n: repository.n8n,
     genericSetupInstallsNothing: true,
-    reconciliationDigest: sha256({ trigger: input.trigger, requirements })
+    reconciliationDigest: sha256({
+      trigger: input.trigger,
+      repositoryDigest: sha256(input.repositoryEvidence || {}),
+      intentDigest: sha256(input.objective || ''),
+      requirements
+    })
   };
 }
 
 function buildCapabilityLedger(reconciliation, state = {}) {
   requireObject(reconciliation, 'Reconciliation');
   invariant(reconciliation.schemaVersion === LEDGER_SCHEMA_VERSION, 'Unsupported reconciliation schema.');
+  const carriesPriorEvidence = ['verified', 'deferred', 'unnecessary']
+    .some((field) => Array.isArray(state[field]) && state[field].length > 0);
+  if (carriesPriorEvidence) {
+    invariant(state.reconciliationDigest === reconciliation.reconciliationDigest
+      && state.repositoryDigest === reconciliation.repositoryDigest
+      && state.intentDigest === reconciliation.intentDigest,
+    'Capability evidence belongs to a different repository, intent, or reconciliation.',
+    'EXTERNAL_RECONCILIATION_STATE_MISMATCH');
+  }
   const verified = new Map((state.verified || []).map((entry) => [`${entry.provider}\u0000${entry.capability}`, entry]));
   const deferred = new Map((state.deferred || []).map((entry) => [`${entry.provider}\u0000${entry.capability}`, entry]));
   const unnecessary = new Map((state.unnecessary || []).map((entry) => [`${entry.provider}\u0000${entry.capability}`, entry]));
@@ -812,6 +856,8 @@ function buildCapabilityLedger(reconciliation, state = {}) {
   return validateCapabilityLedger({
     schemaVersion: LEDGER_SCHEMA_VERSION,
     reconciliationDigest: reconciliation.reconciliationDigest,
+    repositoryDigest: reconciliation.repositoryDigest,
+    intentDigest: reconciliation.intentDigest,
     capabilities,
     complete: capabilities.every((entry) => entry.status !== 'pending'),
     updatedAt: state.updatedAt || new Date(0).toISOString()
@@ -820,9 +866,14 @@ function buildCapabilityLedger(reconciliation, state = {}) {
 
 function validateCapabilityLedger(ledger) {
   requireObject(ledger, 'Capability ledger');
-  assertAllowedKeys(ledger, new Set(['schemaVersion', 'reconciliationDigest', 'capabilities', 'complete', 'updatedAt']), 'Capability ledger');
+  assertAllowedKeys(ledger, new Set([
+    'schemaVersion', 'reconciliationDigest', 'repositoryDigest', 'intentDigest',
+    'capabilities', 'complete', 'updatedAt'
+  ]), 'Capability ledger');
   invariant(ledger.schemaVersion === LEDGER_SCHEMA_VERSION, 'Unsupported capability-ledger schema.');
-  requireString(ledger.reconciliationDigest, 'reconciliationDigest', { pattern: DIGEST_PATTERN });
+  for (const field of ['reconciliationDigest', 'repositoryDigest', 'intentDigest']) {
+    requireString(ledger[field], field, { pattern: DIGEST_PATTERN });
+  }
   invariant(Array.isArray(ledger.capabilities), 'capabilities must be an array.');
   const capabilityKeys = new Set();
   for (const [index, entry] of ledger.capabilities.entries()) {
@@ -1013,7 +1064,9 @@ function assertWriteGate(questionBank, answers, proposedWrite) {
     'target-registration': () => answers.answers.targetRegistration === true
       || answers.answers.targetRegistration === proposedWrite.target
       || answers.answers.targetRegistration === 'approve:target-registration',
-    'credential-reference': () => answers.answers.credentialReference === proposedWrite.target,
+    'credential-reference': () => CREDENTIAL_REFERENCE_PATTERN.test(proposedWrite.target)
+      && CREDENTIAL_REFERENCE_PATTERN.test(String(answers.answers.credentialReference || ''))
+      && answers.answers.credentialReference === proposedWrite.target,
     'browser-fallback': () => answers.answers.browserFallbackAllowed === true,
     'marker-change': () => answers.answers.markerChange === true
       || answers.answers.markerChange === proposedWrite.target
@@ -1031,19 +1084,43 @@ function assertWriteGate(questionBank, answers, proposedWrite) {
   };
 }
 
-function validateOperationReceipt(receipt) {
+function operationReceiptRouteDigest(receipt) {
+  return sha256({
+    provider: receipt.provider,
+    adapter: receipt.adapter,
+    targetAlias: receipt.targetAlias,
+    targetFingerprint: receipt.targetFingerprint,
+    environment: receipt.environment,
+    operation: receipt.operation,
+    selectedInterface: receipt.selectedInterface
+  });
+}
+
+function validateOperationReceipt(receipt, binding = {}) {
   requireObject(receipt, 'Operation receipt');
   const allowed = new Set([
-    'schemaVersion', 'operationId', 'provider', 'adapter', 'targetAlias', 'targetFingerprint',
-    'environment', 'riskTier', 'authorisationReference', 'selectedInterface', 'precondition',
+    'schemaVersion', 'operationId', 'operation', 'provider', 'adapter', 'targetAlias', 'targetFingerprint',
+    'environment', 'riskTier', 'authorisationReference', 'authorisationEnvelopeDigest',
+    'selectedInterface', 'selectedRouteDigest', 'precondition',
     'mutationAttempted', 'mutationPerformed', 'postcondition', 'rollbackAttempted', 'rollbackPerformed',
     'stableCode', 'safeEvidenceReferences', 'supportedNextAction', 'unchangedScope'
   ]);
   assertAllowedKeys(receipt, allowed, 'Operation receipt');
   invariant(receipt.schemaVersion === RECEIPT_SCHEMA_VERSION, 'Unsupported operation-receipt schema.');
-  for (const field of ['operationId', 'adapter', 'targetAlias', 'environment', 'selectedInterface']) requireString(receipt[field], field, { pattern: ALIAS_PATTERN });
+  for (const field of ['operationId', 'operation', 'adapter', 'targetAlias', 'environment', 'selectedInterface']) requireString(receipt[field], field, { pattern: ALIAS_PATTERN });
   requireString(receipt.provider, 'provider', { pattern: PROVIDER_PATTERN });
   requireString(receipt.targetFingerprint, 'targetFingerprint', { pattern: DIGEST_PATTERN });
+  requireString(receipt.authorisationEnvelopeDigest, 'authorisationEnvelopeDigest', { pattern: DIGEST_PATTERN });
+  requireString(receipt.selectedRouteDigest, 'selectedRouteDigest', { pattern: DIGEST_PATTERN });
+  invariant(receipt.selectedRouteDigest === operationReceiptRouteDigest(receipt), 'Operation receipt selected-route binding is invalid.', 'EXTERNAL_RECEIPT_BINDING_MISMATCH');
+  if (binding.authorisationEnvelope) {
+    invariant(receipt.authorisationEnvelopeDigest === sha256(binding.authorisationEnvelope), 'Operation receipt does not match the authorisation envelope.', 'EXTERNAL_RECEIPT_BINDING_MISMATCH');
+  }
+  if (binding.operationContext) {
+    for (const field of ['provider', 'targetAlias', 'targetFingerprint', 'environment', 'operation']) {
+      invariant(receipt[field] === binding.operationContext[field], `Operation receipt ${field} does not match the completed operation.`, 'EXTERNAL_RECEIPT_BINDING_MISMATCH');
+    }
+  }
   invariant(Number.isInteger(receipt.riskTier) && receipt.riskTier >= 0 && receipt.riskTier <= 3, 'riskTier must be 0-3.');
   requireString(receipt.authorisationReference, 'authorisationReference', { max: 200 });
   invariant(['passed', 'failed', 'not-applicable'].includes(receipt.precondition), 'Unsupported precondition state.');
@@ -1065,6 +1142,7 @@ function createOperationReceipt(input) {
   const receipt = {
     schemaVersion: RECEIPT_SCHEMA_VERSION,
     operationId: input.operationId,
+    operation: input.operation,
     provider: input.provider,
     adapter: input.adapter,
     targetAlias: input.targetAlias,
@@ -1072,7 +1150,10 @@ function createOperationReceipt(input) {
     environment: input.environment,
     riskTier: input.riskTier,
     authorisationReference: input.authorisationReference,
+    authorisationEnvelopeDigest: input.authorisationEnvelopeDigest
+      || (input.authorisationEnvelope ? sha256(input.authorisationEnvelope) : undefined),
     selectedInterface: input.selectedInterface,
+    selectedRouteDigest: operationReceiptRouteDigest(input),
     precondition: input.precondition,
     mutationAttempted: input.mutationAttempted,
     mutationPerformed: input.mutationPerformed,
@@ -1227,6 +1308,7 @@ module.exports = {
   isPublicHttpsReference,
   validateAuthorizationEnvelope,
   classifyRisk,
+  operationApprovalBinding,
   assertOperationAuthorized,
   validateGraphicalDisclosure,
   renderGraphicalApprovalQuestion,
@@ -1255,6 +1337,7 @@ module.exports = {
   applyN8nMarkerChange,
   assertWriteGate,
   validateOperationReceipt,
+  operationReceiptRouteDigest,
   createOperationReceipt,
   evaluateRouteLifecycle,
   sanitizeDriftEvidence,

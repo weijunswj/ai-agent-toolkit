@@ -102,13 +102,38 @@ test('risk tiers and one established envelope govern exact operations without pe
     () => router.assertOperationAuthorized(envelope(), operation('delete-application', { destructive: true, riskTier: 0 })),
     (error) => error.code === 'EXTERNAL_TIER3_APPROVAL_REQUIRED'
   );
+  const destructiveEnvelope = envelope();
+  const destructiveOperation = operation('delete-application', { destructive: true });
+  const destructiveBinding = router.operationApprovalBinding(destructiveEnvelope, destructiveOperation);
+  const immediateApproval = {
+    ownerApproved: true,
+    provider: destructiveOperation.provider,
+    targetAlias: destructiveOperation.targetAlias,
+    accountOrOrganisation: destructiveOperation.accountOrOrganisation,
+    resource: destructiveOperation.resource,
+    environment: destructiveOperation.environment,
+    operation: destructiveOperation.operation,
+    envelopeDigest: destructiveBinding.envelopeDigest,
+    operationDigest: destructiveBinding.operationDigest,
+    authorisationReference: 'immediate-owner-approval'
+  };
   const destructive = router.assertOperationAuthorized(
-    envelope(),
-    operation('delete-application', { destructive: true }),
-    { immediateApproval: { ownerApproved: true, operation: 'delete-application', authorisationReference: 'immediate-owner-approval' } }
+    destructiveEnvelope,
+    destructiveOperation,
+    { immediateApproval }
   );
   assert.equal(destructive.riskTier, 3);
   assert.equal(destructive.reuseWithoutPerCallPrompt, false);
+  assert.throws(() => router.assertOperationAuthorized(
+    destructiveEnvelope,
+    { ...destructiveOperation, resource: 'another-application' },
+    { immediateApproval }
+  ), (error) => error.code === 'EXTERNAL_REAUTHORISATION_REQUIRED');
+  assert.throws(() => router.assertOperationAuthorized(
+    destructiveEnvelope,
+    destructiveOperation,
+    { immediateApproval: { ...immediateApproval, targetAlias: 'another-target' } }
+  ), (error) => error.code === 'EXTERNAL_TIER3_APPROVAL_REQUIRED');
 });
 
 function disclosure(overrides = {}) {
@@ -210,6 +235,21 @@ test('standalone AI coding rules explicitly declare the external-system-router r
     assert.match(text, /standalone/i);
     assert.match(text, /fail closed/i);
   }
+  const dependencies = JSON.parse(fs.readFileSync(path.join(
+    __dirname, '..', '..', 'skills', 'ai-coding-agent-rules', 'runtime-dependencies.json'
+  ), 'utf8'));
+  assert.equal(dependencies.schemaVersion, 'ai-agent-toolkit.skill-runtime-dependencies.v1');
+  const externalRouter = dependencies.dependencies.find((entry) => entry.id === 'external-system-router');
+  assert.equal(externalRouter.compatibleVersion, '1.0.4');
+  assert.equal(externalRouter.installUnit, 'complete-skill-folder');
+  assert.equal(externalRouter.unavailableBehavior, 'fail-closed');
+  for (const required of [
+    'SKILL.md',
+    'scripts/external-system-router.cjs',
+    'scripts/n8n-domain-router.cjs',
+    'references/schemas/authorization-envelope.schema.json',
+    'references/schemas/operation-receipt.schema.json'
+  ]) assert.ok(externalRouter.requiredFiles.includes(required), required);
 });
 
 function historyRequest() {
@@ -327,17 +367,25 @@ test('provider target registry defaults to one credential, never guesses, and su
     () => router.validateProviderTargetRegistry({ schemaVersion: router.REGISTRY_SCHEMA_VERSION, targets: [target('coolify-swooshz-production', 'production', ['credential-store://coolify/read', 'credential-store://coolify/write'])] }),
     /multipleCredentialJustification/
   );
-  const codex = router.buildHostAdapterPlan(selected, 'codex', [audit('coolify-api', 'api', 80)]);
-  const claude = router.buildHostAdapterPlan(selected, 'claude-code', [audit('coolify-api', 'api', 80)]);
+  const exactAudit = audit('coolify-api', 'api', 80, {
+    targetFingerprint: selected.sanitizedFingerprint
+  });
+  exactAudit.targetBinding = router.targetBindingDigest(exactAudit);
+  const codex = router.buildHostAdapterPlan(selected, 'codex', [exactAudit]);
+  const claude = router.buildHostAdapterPlan(selected, 'claude-code', [exactAudit]);
   assert.deepEqual(codex.logicalTarget, claude.logicalTarget);
   assert.equal(codex.requiresProviderRediscoveryOnHostSwitch, false);
   assert.equal(claude.preserveOtherHostConfiguration, true);
   assert.equal(claude.copySecretsIntoRepository, false);
+  const wrongTarget = router.buildHostAdapterPlan(selected, 'codex', [audit('wrong-target', 'api', 80)]);
+  assert.equal(wrongTarget.capabilityAuditPassed, false);
+  assert.deepEqual(wrongTarget.supportedOperations, []);
 });
 
 test('receipts redact unsafe material and route lifecycle never auto-revokes', () => {
   const receipt = router.createOperationReceipt({
     operationId: 'deploy-286',
+    operation: 'deploy-revision',
     provider: 'coolify',
     adapter: 'coolify-api',
     targetAlias: 'coolify-swooshz-production',
@@ -345,6 +393,7 @@ test('receipts redact unsafe material and route lifecycle never auto-revokes', (
     environment: 'production',
     riskTier: 2,
     authorisationReference: 'issue-286-owner-approval',
+    authorisationEnvelopeDigest: router.sha256(envelope()),
     selectedInterface: 'coolify-api',
     precondition: 'passed',
     mutationAttempted: true,
@@ -358,6 +407,29 @@ test('receipts redact unsafe material and route lifecycle never auto-revokes', (
     unchangedScope: ['No credentials, DNS, database, or unrelated application changed.']
   });
   assert.equal(receipt.mutationPerformed, true);
+  assert.equal(receipt.operation, 'deploy-revision');
+  assert.equal(receipt.selectedRouteDigest, router.operationReceiptRouteDigest(receipt));
+  const receiptSchema = JSON.parse(fs.readFileSync(path.join(
+    __dirname, '..', '..', '_projects', 'development', 'external-system-router', '_main', 'skill',
+    'references', 'schemas', 'operation-receipt.schema.json'
+  ), 'utf8'));
+  for (const field of ['operation', 'authorisationEnvelopeDigest', 'selectedRouteDigest']) {
+    assert.ok(receiptSchema.required.includes(field), field);
+  }
+  assert.doesNotThrow(() => router.validateOperationReceipt(receipt, {
+    authorisationEnvelope: envelope(),
+    operationContext: {
+      provider: receipt.provider,
+      targetAlias: receipt.targetAlias,
+      targetFingerprint: receipt.targetFingerprint,
+      environment: receipt.environment,
+      operation: receipt.operation
+    }
+  }));
+  assert.throws(
+    () => router.validateOperationReceipt({ ...receipt, operation: 'delete-application' }),
+    (error) => error.code === 'EXTERNAL_RECEIPT_BINDING_MISMATCH'
+  );
   assert.throws(
     () => router.validateOperationReceipt({ ...receipt, supportedNextAction: `Retry with Bearer ${'x'.repeat(20)}` }),
     (error) => error.code === 'EXTERNAL_SECRET_REJECTED'

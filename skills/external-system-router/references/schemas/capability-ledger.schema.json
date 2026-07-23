@@ -4,10 +4,12 @@
   "title": "Progressive External Capability Ledger",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "reconciliationDigest", "capabilities", "complete", "updatedAt"],
+  "required": ["schemaVersion", "reconciliationDigest", "repositoryDigest", "intentDigest", "capabilities", "complete", "updatedAt"],
   "properties": {
     "schemaVersion": {"const": "ai-agent-toolkit.capability-ledger.v1"},
     "reconciliationDigest": {"$ref": "#/$defs/digest"},
+    "repositoryDigest": {"$ref": "#/$defs/digest"},
+    "intentDigest": {"$ref": "#/$defs/digest"},
     "capabilities": {
       "type": "array",
       "items": {
