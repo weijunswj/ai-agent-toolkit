@@ -8,6 +8,8 @@
 
 - `_main/compatibility-contract.json` records the reviewed package identity, supported adapter versions, current upstream state, contract file set, and immutable Git blob identities used to cross-check the executable adapter.
 
+Runtime enforcement derives critical hook paths and complete-tree identity from one bounded deterministic inspection. The first-party Bridge records exact target/stage/backup identity and transition evidence through the existing owned-generation mechanism so interrupted replacement can be adjudicated before current-cache selection without scanning backup-name patterns.
+
 ## Excluded Upstream Material
 
 The upstream marketplace wrappers, hook scripts, skill pack, README, and licence copy are not published or installed by this project. Their exact upstream paths and blob identities remain in `SOURCE-LOCK.json` so report-only source watch can flag ref movement for manual compatibility review. Upstream removed its mirrored-bundle synchronizer when Codex installation moved to the repository root.

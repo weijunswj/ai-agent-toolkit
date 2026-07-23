@@ -680,12 +680,36 @@ function n8nSkillsCompatibilityFingerprints(pluginRoot, expected, adapter = N8N_
   return fingerprints;
 }
 
-function sha256RegularFileBounded(filePath, size, maxBytes) {
+function stableStatIdentity(stat) {
+  return {
+    dev: String(stat.dev),
+    ino: String(stat.ino),
+    size: String(stat.size),
+    mtime_ms: String(stat.mtimeMs),
+    ctime_ms: String(stat.ctimeMs)
+  };
+}
+
+function stableStatIdentitiesMatch(left, right) {
+  return Boolean(left && right)
+    && left.dev === right.dev
+    && left.ino === right.ino
+    && left.size === right.size
+    && left.mtime_ms === right.mtime_ms
+    && left.ctime_ms === right.ctime_ms;
+}
+
+function sha256RegularFileBounded(filePath, expectedStat, maxBytes) {
+  const expectedIdentity = stableStatIdentity(expectedStat);
+  const size = expectedStat.size;
   if (size > maxBytes) throw new Error('plugin cache regular file exceeds the supported byte limit');
   const hash = crypto.createHash('sha256');
   const buffer = Buffer.allocUnsafe(64 * 1024);
   const descriptor = fs.openSync(filePath, 'r');
   try {
+    if (!stableStatIdentitiesMatch(expectedIdentity, stableStatIdentity(fs.fstatSync(descriptor)))) {
+      throw new Error('plugin cache regular file changed while its identity was inspected');
+    }
     let offset = 0;
     while (offset < size) {
       const bytesRead = fs.readSync(descriptor, buffer, 0, Math.min(buffer.length, size - offset), offset);
@@ -693,7 +717,7 @@ function sha256RegularFileBounded(filePath, size, maxBytes) {
       hash.update(buffer.subarray(0, bytesRead));
       offset += bytesRead;
     }
-    if (fs.fstatSync(descriptor).size !== size) {
+    if (!stableStatIdentitiesMatch(expectedIdentity, stableStatIdentity(fs.fstatSync(descriptor)))) {
       throw new Error('plugin cache regular file changed while its identity was inspected');
     }
   } finally {
@@ -715,7 +739,15 @@ function fingerprintDigest(fingerprints) {
   return crypto.createHash('sha256').update(canonical, 'utf8').digest('hex');
 }
 
-function n8nSkillsTreeIdentity(pluginRoot, adapter, limits = N8N_SKILLS_TREE_LIMITS) {
+function sameResolvedPath(left, right) {
+  const resolvedLeft = path.resolve(left);
+  const resolvedRight = path.resolve(right);
+  return process.platform === 'win32'
+    ? resolvedLeft.toLowerCase() === resolvedRight.toLowerCase()
+    : resolvedLeft === resolvedRight;
+}
+
+function inspectN8nSkillsTree(pluginRoot, adapter, limits = N8N_SKILLS_TREE_LIMITS) {
   const repairedVariants = adapter.repaired_sha256_variants || [adapter.repaired_sha256];
   const changedPaths = new Set([
     ...Object.keys(adapter.pristine_sha256),
@@ -723,51 +755,91 @@ function n8nSkillsTreeIdentity(pluginRoot, adapter, limits = N8N_SKILLS_TREE_LIM
   ].filter((relPath) => repairedVariants.some((variant) => adapter.pristine_sha256[relPath] !== variant[relPath])));
   const allRows = [];
   const preservedRows = [];
+  const hookFiles = [];
   let fileCount = 0;
   let directoryCount = 0;
   let totalBytes = 0;
-
-  function visit(currentPath, relDir = '', depth = 0) {
-    if (depth > limits.max_depth) throw new Error('plugin cache tree exceeds the supported directory depth');
-    const currentStat = fs.lstatSync(currentPath);
-    if (currentStat.isSymbolicLink() || !currentStat.isDirectory()) {
-      throw new Error(`${relDir || 'plugin root'} is not a direct regular directory`);
+  const pending = [{ currentPath: path.resolve(pluginRoot), relDir: '', depth: 0, exit: false }];
+  while (pending.length) {
+    const current = pending.pop();
+    if (current.exit) {
+      const finalStat = fs.lstatSync(current.currentPath);
+      if (
+        finalStat.isSymbolicLink()
+        || !finalStat.isDirectory()
+        || !stableStatIdentitiesMatch(current.directoryIdentity, stableStatIdentity(finalStat))
+        || !sameResolvedPath(fs.realpathSync.native(current.currentPath), current.currentPath)
+      ) {
+        throw new Error(`${current.relDir || 'plugin root'} changed while its identity was inspected`);
+      }
+      continue;
     }
-    if (relDir) {
+    if (current.depth > limits.max_depth) throw new Error('plugin cache tree exceeds the supported directory depth');
+    const currentStat = fs.lstatSync(current.currentPath);
+    if (currentStat.isSymbolicLink() || !currentStat.isDirectory()) {
+      throw new Error(`${current.relDir || 'plugin root'} is not a direct regular directory`);
+    }
+    if (!sameResolvedPath(fs.realpathSync.native(current.currentPath), current.currentPath)) {
+      throw new Error(`${current.relDir || 'plugin root'} is a redirected directory`);
+    }
+    if (current.relDir) {
       directoryCount += 1;
       if (directoryCount > limits.max_directories) throw new Error('plugin cache tree exceeds the supported directory count');
-      const row = `directory\0${relDir}\n`;
+      const row = `directory\0${current.relDir}\n`;
       allRows.push(row);
       preservedRows.push(row);
     }
-    const entries = fs.readdirSync(currentPath, { withFileTypes: true })
-      .sort((left, right) => left.name.localeCompare(right.name));
+    const entries = fs.readdirSync(current.currentPath, { withFileTypes: true })
+      .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+    pending.push({
+      ...current,
+      directoryIdentity: stableStatIdentity(currentStat),
+      exit: true
+    });
+    const childDirectories = [];
     for (const entry of entries) {
-      const fullPath = path.join(currentPath, entry.name);
-      const relPath = normalizeRelPath(path.join(relDir, entry.name));
+      const fullPath = path.join(current.currentPath, entry.name);
+      const relPath = normalizeRelPath(path.join(current.relDir, entry.name));
       const stat = fs.lstatSync(fullPath);
       if (stat.isSymbolicLink()) throw new Error(`${relPath} is a symbolic link or junction`);
       if (stat.isDirectory()) {
-        visit(fullPath, relPath, depth + 1);
+        childDirectories.push({ currentPath: fullPath, relDir: relPath, depth: current.depth + 1 });
       } else if (stat.isFile()) {
         fileCount += 1;
         totalBytes += stat.size;
         if (fileCount > limits.max_files) throw new Error('plugin cache tree exceeds the supported regular-file count');
+        if (stat.size > limits.max_file_bytes) throw new Error('plugin cache regular file exceeds the supported byte limit');
         if (totalBytes > limits.max_total_bytes) throw new Error('plugin cache tree exceeds the supported total byte limit');
-        const row = `file\0${relPath}\0${sha256RegularFileBounded(fullPath, stat.size, limits.max_file_bytes)}\n`;
+        const row = `file\0${relPath}\0${sha256RegularFileBounded(fullPath, stat, limits.max_file_bytes)}\n`;
         allRows.push(row);
         if (!changedPaths.has(relPath)) preservedRows.push(row);
+        if (relPath.startsWith('hooks/')) hookFiles.push(relPath);
       } else {
         throw new Error(`${relPath} is not a regular file or directory`);
       }
     }
+    for (let index = childDirectories.length - 1; index >= 0; index -= 1) {
+      pending.push(childDirectories[index]);
+    }
   }
-
-  visit(pluginRoot);
   const digest = (rows) => crypto.createHash('sha256').update(rows.join(''), 'utf8').digest('hex');
   return {
     tree_digest: digest(allRows),
-    preserved_tree_digest: digest(preservedRows)
+    preserved_tree_digest: digest(preservedRows),
+    hook_files: hookFiles.sort(),
+    counts: {
+      files: fileCount,
+      directories: directoryCount,
+      total_bytes: totalBytes
+    }
+  };
+}
+
+function n8nSkillsTreeIdentity(pluginRoot, adapter, limits = N8N_SKILLS_TREE_LIMITS) {
+  const inspected = inspectN8nSkillsTree(pluginRoot, adapter, limits);
+  return {
+    tree_digest: inspected.tree_digest,
+    preserved_tree_digest: inspected.preserved_tree_digest
   };
 }
 
@@ -802,25 +874,7 @@ function compatibilityResult(adapter, status, version, reason = '') {
   };
 }
 
-function walkRegularFiles(root, base = root, files = []) {
-  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-    const fullPath = path.join(root, entry.name);
-    const relPath = normalizeRelPath(path.relative(base, fullPath));
-    const stat = fs.lstatSync(fullPath);
-    if (stat.isSymbolicLink()) return { files, error: `critical hook path is a symbolic link: hooks/${relPath}` };
-    if (entry.isDirectory()) {
-      const nested = walkRegularFiles(fullPath, base, files);
-      if (nested.error) return nested;
-    } else if (entry.isFile()) {
-      files.push(`hooks/${relPath}`);
-    } else {
-      return { files, error: `critical hook path is not a regular file: hooks/${relPath}` };
-    }
-  }
-  return { files, error: '' };
-}
-
-function validateCriticalLayout(pluginRoot, adapter) {
+function validateCriticalLayout(pluginRoot, adapter, treeInspection) {
   const hooksRoot = path.join(pluginRoot, 'hooks');
   if (!fs.existsSync(hooksRoot)) {
     return 'required hooks directory is missing or is not a directory';
@@ -829,9 +883,7 @@ function validateCriticalLayout(pluginRoot, adapter) {
   if (hooksStat.isSymbolicLink() || !hooksStat.isDirectory()) {
     return 'required hooks directory is redirected or is not a direct directory';
   }
-  const walked = walkRegularFiles(hooksRoot);
-  if (walked.error) return walked.error;
-  const actual = walked.files.sort();
+  const actual = treeInspection.hook_files;
   const pristine = Object.keys(adapter.pristine_sha256).filter((relPath) => relPath.startsWith('hooks/')).sort();
   const repairedVariants = (adapter.repaired_sha256_variants || [adapter.repaired_sha256])
     .map((variant) => Object.keys(variant).filter((relPath) => relPath.startsWith('hooks/')).sort());
@@ -851,14 +903,18 @@ function classifyRecognizedAdapter(pluginRoot, manifest, adapter) {
   if (manifest.hooks !== './hooks/hooks.json' || manifest.skills !== './skills') {
     return compatibilityResult(adapter, 'unsupported-layout', adapter.version, 'official plugin manifest declares a moved hooks or skills path');
   }
-  const layoutError = validateCriticalLayout(pluginRoot, adapter);
-  if (layoutError) return compatibilityResult(adapter, 'unsupported-layout', adapter.version, layoutError);
-  let treeIdentity;
+  let treeInspection;
   try {
-    treeIdentity = n8nSkillsTreeIdentity(pluginRoot, adapter);
+    treeInspection = inspectN8nSkillsTree(pluginRoot, adapter);
   } catch (error) {
     return compatibilityResult(adapter, 'unsupported-layout', adapter.version, error.message);
   }
+  const layoutError = validateCriticalLayout(pluginRoot, adapter, treeInspection);
+  if (layoutError) return compatibilityResult(adapter, 'unsupported-layout', adapter.version, layoutError);
+  const treeIdentity = {
+    tree_digest: treeInspection.tree_digest,
+    preserved_tree_digest: treeInspection.preserved_tree_digest
+  };
   try {
     const hooks = readJsonFile(path.join(pluginRoot, 'hooks', 'hooks.json'), 'hooks/hooks.json');
     if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks) || !hooks.hooks || typeof hooks.hooks !== 'object') {
@@ -1356,6 +1412,7 @@ module.exports = {
   collectHookCommandEntries,
   classifyN8nSkillsCompatibility,
   fingerprintDigest,
+  inspectN8nSkillsTree,
   n8nSkillsTreeIdentity,
   n8nSkillsCompatibilityFingerprints,
   reconcileN8nSkillsPlugin,

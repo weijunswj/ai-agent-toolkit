@@ -27,6 +27,7 @@ const {
   N8N_SKILLS_COMPATIBILITY_ADAPTERS,
   N8N_SKILLS_TREE_LIMITS,
   classifyN8nSkillsCompatibility,
+  inspectN8nSkillsTree,
   n8nSkillsCompatibilityFingerprints,
   reconcileN8nSkillsPlugin
 } = require('../scripts/repair-codex-plugin-windows-hooks.cjs');
@@ -1334,6 +1335,88 @@ test('selected cache tree identity rejects excessive unrelated directory depth b
   assert.match(classification.reason, /supported directory depth/i);
   assert.throws(() => reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true }), /supported directory depth/i);
   assert.equal(fs.existsSync(path.join(pluginRoot, 'hooks', 'run-hook.ps1')), false);
+});
+
+test('bounded hook tree inspection accepts a synthetic layout at every exact supported ceiling', () => {
+  const pluginRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-skills-tree-limit-'));
+  const hooksRoot = path.join(pluginRoot, 'hooks');
+  fs.mkdirSync(hooksRoot);
+  let deepest = hooksRoot;
+  for (let index = 0; index < N8N_SKILLS_TREE_LIMITS.max_depth - 1; index += 1) {
+    deepest = path.join(deepest, `depth-${index}`);
+    fs.mkdirSync(deepest);
+  }
+  const remainingDirectories = N8N_SKILLS_TREE_LIMITS.max_directories - N8N_SKILLS_TREE_LIMITS.max_depth;
+  for (let index = 0; index < remainingDirectories; index += 1) {
+    fs.mkdirSync(path.join(hooksRoot, `directory-${index}`));
+  }
+  for (let index = 0; index < N8N_SKILLS_TREE_LIMITS.max_files; index += 1) {
+    const filePath = path.join(hooksRoot, `file-${index}.bin`);
+    fs.closeSync(fs.openSync(filePath, 'wx'));
+    if (index < 4) fs.truncateSync(filePath, N8N_SKILLS_TREE_LIMITS.max_file_bytes);
+  }
+
+  const inspected = inspectN8nSkillsTree(
+    pluginRoot,
+    N8N_SKILLS_COMPATIBILITY_ADAPTERS['1.0.2']
+  );
+  assert.deepEqual(inspected.counts, {
+    files: N8N_SKILLS_TREE_LIMITS.max_files,
+    directories: N8N_SKILLS_TREE_LIMITS.max_directories,
+    total_bytes: N8N_SKILLS_TREE_LIMITS.max_total_bytes
+  });
+  assert.equal(inspected.hook_files.length, N8N_SKILLS_TREE_LIMITS.max_files);
+  assert.equal(fs.existsSync(deepest), true);
+});
+
+test('bounded hook tree inspection rejects same-size file replacement and directory entry races', () => {
+  const adapter = N8N_SKILLS_COMPATIBILITY_ADAPTERS['1.0.2'];
+  const fileRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-skills-file-race-'));
+  const racedFile = path.join(fileRoot, 'hooks', 'raced.bin');
+  fs.mkdirSync(path.dirname(racedFile));
+  fs.writeFileSync(racedFile, Buffer.alloc(128 * 1024, 0x41));
+  const originalReadSync = fs.readSync;
+  let replaced = false;
+  fs.readSync = function patchedReadSync(...args) {
+    const bytesRead = originalReadSync.apply(this, args);
+    if (!replaced && bytesRead > 0) {
+      replaced = true;
+      fs.writeFileSync(racedFile, Buffer.alloc(128 * 1024, 0x42));
+    }
+    return bytesRead;
+  };
+  try {
+    assert.throws(
+      () => inspectN8nSkillsTree(fileRoot, adapter),
+      /changed while its identity was inspected/i
+    );
+  } finally {
+    fs.readSync = originalReadSync;
+  }
+
+  const directoryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-skills-directory-race-'));
+  const hooksRoot = path.join(directoryRoot, 'hooks');
+  fs.mkdirSync(hooksRoot);
+  fs.writeFileSync(path.join(hooksRoot, 'existing.bin'), 'existing\n');
+  const originalReaddirSync = fs.readdirSync;
+  let changed = false;
+  fs.readdirSync = function patchedReaddirSync(directoryPath, ...args) {
+    const entries = originalReaddirSync.call(this, directoryPath, ...args);
+    if (!changed && path.resolve(directoryPath) === path.resolve(hooksRoot)) {
+      changed = true;
+      fs.writeFileSync(path.join(hooksRoot, 'late.bin'), 'late\n');
+      fs.utimesSync(hooksRoot, new Date(1000), new Date(1000));
+    }
+    return entries;
+  };
+  try {
+    assert.throws(
+      () => inspectN8nSkillsTree(directoryRoot, adapter),
+      /changed while its identity was inspected/i
+    );
+  } finally {
+    fs.readdirSync = originalReaddirSync;
+  }
 });
 
 test('supported refresh is repaired, verified, and byte-idempotent', () => {

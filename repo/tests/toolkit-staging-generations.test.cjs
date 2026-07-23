@@ -12,7 +12,9 @@ const {
   createOwnedStagingGeneration,
   inspectOwnedGeneration,
   markOwnedStaging,
-  reconcileOwnedStaging
+  readOwnedStagingAuxiliary,
+  reconcileOwnedStaging,
+  writeOwnedStagingAuxiliary
 } = require('../scripts/toolkit-staging-generations.cjs');
 
 const bridgeVersion = '2.6.0';
@@ -335,4 +337,32 @@ test('audit diagnostics are bounded and never enumerate staging payload contents
   assert.equal(audit.entries.length, 3);
   assert.equal(audit.truncated, true);
   assert.doesNotMatch(JSON.stringify(audit), /customer-secret|secret-\d+\.txt/);
+});
+
+test('token-bound operation auxiliaries are exact-cleaned and special replacements fail closed', () => {
+  const parent = fixtureRoot('auxiliary');
+  const generation = createGeneration(parent);
+  const written = writeOwnedStagingAuxiliary(generation, 'test-transaction', { detail: 'bounded' });
+  assert.equal(readOwnedStagingAuxiliary(generation, 'test-transaction').value.detail, 'bounded');
+  markOwnedStaging(generation, 'completed');
+  const cleaned = cleanupOwnedGeneration(generation, {
+    currentOperation: true,
+    auxiliaryKinds: ['test-transaction']
+  });
+  assert.equal(cleaned.cleaned, true);
+  assert.equal(fs.existsSync(written.markerPath), false);
+
+  const special = createGeneration(parent, 'next');
+  const specialMarker = writeOwnedStagingAuxiliary(special, 'test-transaction', { detail: 'bounded' }).markerPath;
+  fs.rmSync(specialMarker);
+  fs.mkdirSync(specialMarker);
+  markOwnedStaging(special, 'completed');
+  const refused = cleanupOwnedGeneration(special, {
+    currentOperation: true,
+    auxiliaryKinds: ['test-transaction']
+  });
+  assert.equal(refused.cleaned, false);
+  assert.equal(refused.reason, 'owned-auxiliary-special');
+  assert.equal(fs.existsSync(special.stagePath), true);
+  assert.equal(fs.lstatSync(specialMarker).isDirectory(), true);
 });
