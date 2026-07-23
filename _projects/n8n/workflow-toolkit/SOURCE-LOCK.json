@@ -85,10 +85,11 @@
       "notes": "Toolkit-adapted after migration to skip stale node-ID credential bindings when both node name and node type differ."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "weijunswj/ai-cicd-installer:templates/n8n/should-import-n8n-workflow.cjs",
       "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/should-import-n8n-workflow.cjs",
-      "source_blob_sha": "133ad09249778e1a76ec6a6856da6a6c9f3432b1"
+      "source_blob_sha": "133ad09249778e1a76ec6a6856da6a6c9f3432b1",
+      "notes": "Toolkit-adapted after migration so effective comparison includes credential references, exact resource bindings, webhook metadata, and inactive state while ignoring only host-managed metadata."
     },
     {
       "mode": "adapted",

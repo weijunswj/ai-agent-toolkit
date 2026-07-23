@@ -5,9 +5,9 @@
   "title": "Secure CI/CD Installer",
   "module_path": "_projects/cicd/secure-installer",
   "main_path": "_projects/cicd/secure-installer/_main",
-  "version": "1.1.4",
+  "version": "1.2.0",
   "version_policy": "semver",
-  "version_notes": "Keeps bundled n8n helper templates aligned with workflow-toolkit import fail-closed and implicit Docker target ambiguity behavior.",
+  "version_notes": "Keeps bundled n8n helper templates aligned with portable canonical export, logical credential rebinding, inactive no-confirmation import, transport capability checks, and sanitized diagnostics.",
   "outputs": [
     {
       "kind": "curated",

@@ -697,6 +697,7 @@ function fakeMenuRepo(menuSourcePath) {
   fs.writeFileSync(trustedExportScript, `Set-Content -LiteralPath ${psSingleQuoted(trustedMarkerPath)} -Value 'trusted export executed'\n`, 'utf8');
   fs.writeFileSync(path.join(helperDir, 'import-n8n-workflows-live.ps1'), `Set-Content -LiteralPath ${psSingleQuoted(trustedMarkerPath)} -Value 'trusted import executed'\n`, 'utf8');
   fs.writeFileSync(path.join(helperDir, 'validate-n8n-workflows.cjs'), "console.log('trusted validation executed');\n", 'utf8');
+  fs.writeFileSync(path.join(helperDir, 'n8n-workflow-operation-report.cjs'), "console.log('trusted report helper executed');\n", 'utf8');
   fs.writeFileSync(maliciousExportScript, `Set-Content -LiteralPath ${psSingleQuoted(markerPath)} -Value 'malicious export executed'\n`, 'utf8');
 
   return {
@@ -1400,6 +1401,11 @@ test('generated n8n helper scripts are fresh copies of project source', () => {
     'export-n8n-workflows-live.ps1',
     'import-n8n-workflows-live.ps1',
     'n8n-workflow-sync-menu.ps1',
+    'n8n-portable-workflow.cjs',
+    'n8n-credential-metadata.cjs',
+    'n8n-workflow-transport.cjs',
+    'n8n-workflow-operation-report.cjs',
+    'n8n-workflow-identity.cjs',
     'prepare-n8n-live-import.cjs',
     'compare-n8n-workflow-credentials.cjs',
     'sync-n8n-live-exports.cjs',
@@ -1490,6 +1496,11 @@ test('Secure CI/CD n8n helper templates stay aligned with workflow toolkit sourc
     'export-n8n-workflows-live.ps1',
     'import-n8n-workflows-live.ps1',
     'n8n-workflow-sync-menu.ps1',
+    'n8n-portable-workflow.cjs',
+    'n8n-credential-metadata.cjs',
+    'n8n-workflow-transport.cjs',
+    'n8n-workflow-operation-report.cjs',
+    'n8n-workflow-identity.cjs',
     'prepare-n8n-live-import.cjs',
     'resolve-n8n-docker-target.cjs',
     'should-import-n8n-workflow.cjs',
@@ -1500,7 +1511,7 @@ test('Secure CI/CD n8n helper templates stay aligned with workflow toolkit sourc
   }
 });
 
-test('n8n command wrappers use framed colored retry output', () => {
+test('n8n command wrappers use framed colored output and import requires no routine input', () => {
   for (const [label, filePath] of [
     ['workflow toolkit export wrapper', path.join(sourceScriptDir, '_export-n8n-workflows-live.cmd')],
     ['workflow toolkit import wrapper', path.join(sourceScriptDir, '_import-n8n-workflows-live.cmd')],
@@ -1512,6 +1523,16 @@ test('n8n command wrappers use framed colored retry output', () => {
     ['Secure CI/CD import wrapper', path.join(secureCicdN8nTemplateDir, '_import-n8n-workflows-live.cmd')],
   ]) {
     const text = readText(filePath);
+
+    if (label.includes('import wrapper')) {
+      assert.match(text, /call :banner /, label);
+      assert.match(text, /call :status Red "FAIL  Import stopped with exit code %LAST_EXIT%\."/, label);
+      assert.match(text, /exit \/b %LAST_EXIT%/, label);
+      assert.doesNotMatch(text, /call :prompt|choice \/C|Read-Host|RestartContainerAfterImport|configure_restart/, label);
+      assert.match(text, /%SystemRoot%\\System32\\WindowsPowerShell\\v1\.0\\powershell\.exe/i, label);
+      assert.match(text, /"%~dp0import-n8n-workflows-live\.ps1"/, label);
+      continue;
+    }
 
     assert.match(text, /call :banner /, label);
     assert.match(text, /call :prompt "Press R to run again or E to exit\."/,
@@ -1569,7 +1590,7 @@ test('n8n command wrappers use framed colored retry output', () => {
   }
 });
 
-test('import command wrapper reruns on R and exits on E after successful import', { skip: process.platform !== 'win32' ? 'Windows-only cmd wrapper behavior' : false }, () => {
+test('import command wrapper runs exactly once without stdin after successful import', { skip: process.platform !== 'win32' ? 'Windows-only cmd wrapper behavior' : false }, () => {
   const cwd = tempDir();
   const wrapperPath = path.join(cwd, '_import-n8n-workflows-live.cmd');
   const helperPath = path.join(cwd, 'import-n8n-workflows-live.ps1');
@@ -1586,39 +1607,6 @@ Write-Host "dummy import run $count"
 exit 0
 `, 'utf8');
 
-  const result = spawnSync('cmd.exe', ['/d', '/c', wrapperPath, '-RestartContainerAfterImport'], {
-    cwd,
-    input: 'R\r\nE\r\n',
-    encoding: 'utf8',
-    timeout: 10000,
-  });
-
-  assert.equal(result.error && result.error.code, undefined, result.error && result.error.message);
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(fs.readFileSync(countPath, 'utf8').trim(), '2');
-  assert.match(result.stdout, /dummy import run 1/);
-  assert.match(result.stdout, /dummy import run 2/);
-  assert.doesNotMatch(result.stdout + result.stderr, /cannot find the batch label/i);
-  assert.doesNotMatch(result.stdout + result.stderr, /ERROR: The file is either empty/i);
-});
-
-test('import command wrapper stops before import when restart configuration fails', { skip: process.platform !== 'win32' ? 'Windows-only cmd wrapper behavior' : false }, () => {
-  const cwd = tempDir();
-  const wrapperPath = path.join(cwd, '_import-n8n-workflows-live.cmd');
-  const helperPath = path.join(cwd, 'import-n8n-workflows-live.ps1');
-  const invokedPath = path.join(cwd, 'import-invoked.txt');
-  const wrapperText = fs.readFileSync(path.join(sourceScriptDir, '_import-n8n-workflows-live.cmd'), 'utf8')
-    .replace(
-      /:read_yes_no\r?\n[\s\S]*?\r?\nexit \/b %ERRORLEVEL%/,
-      ':read_yes_no\r\nexit /b 2'
-    );
-
-  fs.writeFileSync(wrapperPath, wrapperText, 'utf8');
-  fs.writeFileSync(helperPath, `
-Set-Content -LiteralPath ${psSingleQuoted(invokedPath)} -Value 'import ran'
-exit 0
-`, 'utf8');
-
   const result = spawnSync('cmd.exe', ['/d', '/c', wrapperPath], {
     cwd,
     encoding: 'utf8',
@@ -1626,10 +1614,35 @@ exit 0
   });
 
   assert.equal(result.error && result.error.code, undefined, result.error && result.error.message);
-  assert.equal(result.status, 1, result.stdout + result.stderr);
-  assert.equal(fs.existsSync(invokedPath), false);
-  assert.match(result.stdout, /FAIL\s+Import setup terminated before live import\./);
-  assert.match(result.stdout, /Relaunch from an interactive Command Prompt and answer the restart prompt\./);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(countPath, 'utf8').trim(), '1');
+  assert.match(result.stdout, /dummy import run 1/);
+  assert.doesNotMatch(result.stdout + result.stderr, /cannot find the batch label/i);
+  assert.doesNotMatch(result.stdout + result.stderr, /ERROR: The file is either empty/i);
+});
+
+test('import command wrapper forwards arguments without a restart configuration prompt', { skip: process.platform !== 'win32' ? 'Windows-only cmd wrapper behavior' : false }, () => {
+  const cwd = tempDir();
+  const wrapperPath = path.join(cwd, '_import-n8n-workflows-live.cmd');
+  const helperPath = path.join(cwd, 'import-n8n-workflows-live.ps1');
+  const invokedPath = path.join(cwd, 'import-invoked.txt');
+  fs.copyFileSync(path.join(sourceScriptDir, '_import-n8n-workflows-live.cmd'), wrapperPath);
+  fs.writeFileSync(helperPath, `
+param([switch]$DryRun)
+Set-Content -LiteralPath ${psSingleQuoted(invokedPath)} -Value ([string]([bool]$DryRun))
+exit 0
+`, 'utf8');
+
+  const result = spawnSync('cmd.exe', ['/d', '/c', wrapperPath, '-DryRun'], {
+    cwd,
+    encoding: 'utf8',
+    timeout: 10000,
+  });
+
+  assert.equal(result.error && result.error.code, undefined, result.error && result.error.message);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(fs.readFileSync(invokedPath, 'utf8').trim(), 'True');
+  assert.doesNotMatch(result.stdout + result.stderr, /restart prompt|Read-Host|Press R/i);
 });
 
 test('PowerShell n8n helper scripts use colored sections, status tags, and clean failure blocks', () => {
@@ -1671,11 +1684,10 @@ test('PowerShell n8n helper scripts use colored sections, status tags, and clean
     assert.match(text, /\^Checked\\s\+/, label);
 
     if (label.includes('import helper')) {
-      assert.match(text, /function Read-RestartContainerChoice\(\$Prompt\)/, label);
-      assert.match(text, /Read-Host \$Prompt/, label);
-      assert.match(text, /Press R to restart n8n container now or E to skip/, label);
-      assert.match(text, /if \(Read-RestartContainerChoice "Press R to restart n8n container now or E to skip"\) \{\s+\$restartResult = Invoke-CapturedCommand "docker" @\("restart", \$Container\)/, label);
-      assert.doesNotMatch(text, /Write-Section "Container Restart"\s+\$restartResult = Invoke-CapturedCommand "docker" @\("restart", \$Container\)/, label);
+      assert.match(text, /--activeState=false/, label);
+      assert.match(text, /N8N_POSTCONDITION_FAILED/, label);
+      assert.match(text, /Get-SafeCredentialMetadata/, label);
+      assert.doesNotMatch(text, /function Read-RestartContainerChoice|docker" @\("restart"/, label);
     }
   }
 
@@ -2056,8 +2068,8 @@ test('n8n workflow sync menus resolve helper commands from their own folder', ()
     assert.match(text, /\$NodeCommandPath/, label);
     assert.match(text, /Write-Step "FAIL" "Command finished with exit code \$exitCode\."/,
       label);
-    assert.match(text, /if \(\$Record\.commandKind -eq "export" -or \$Record\.commandKind -eq "import"\) \{\s+Write-Host ""\s+\[void\]\(Read-Host "Press Enter to return after reviewing the error"\)/,
-      label);
+    assert.doesNotMatch(text, /Press Enter to return after reviewing the error/, label);
+    assert.match(text, /\$ReportHelperScript = Join-Path \$HelperScriptDir "n8n-workflow-operation-report\.cjs"/, label);
     assert.doesNotMatch(text, /New-CommandRecord\s+[^`r`n]*"node"/, label);
     assert.doesNotMatch(text, /&\s+node\b/, label);
     assert.doesNotMatch(text, /"\.\\scripts\\export-n8n-workflows-live\.ps1"/, label);
@@ -2088,9 +2100,10 @@ test('n8n workflow sync menus validate saved previous commands before replay', (
     assert.match(text, /commandKind = \$CommandKind/, label);
     assert.match(text, /helperScriptDir = \$HelperScriptDir/, label);
     assert.match(text, /schemaVersion", "commandKind", "commandName", "script", "args", "helperScriptDir"/, label);
-    assert.match(text, /Test-ExportCommandArgs \$args/, label);
-    assert.match(text, /Test-ImportCommandArgs \$args/, label);
-    assert.match(text, /\$recordValidateScript = Resolve-CanonicalPathOrNull \$args\[0\]/, label);
+    assert.match(text, /Test-ExportCommandArgs \$commandArgs/, label);
+    assert.match(text, /Test-ImportCommandArgs \$commandArgs/, label);
+    assert.match(text, /\$recordValidateScript = Resolve-CanonicalPathOrNull \$commandArgs\[0\]/, label);
+    assert.doesNotMatch(text, /function (?:Read-MenuArgs|Test-ExportCommandArgs|Test-ImportCommandArgs)[^(]*\([^)]*\$Args/, label);
     assert.match(text, /\$recordScript -ne \$TrustedExportHelperScript/, label);
     assert.match(text, /\$recordScript -ne \$TrustedImportHelperScript/, label);
     assert.match(text, /\$recordScript -ne \$trustedNodePath/, label);
@@ -2103,6 +2116,22 @@ test('n8n workflow sync menus validate saved previous commands before replay', (
     assert.match(text, /if \(-not \(Test-TrustedCommandRecord \$Record\)\)/, label);
     assert.match(text, /Unknown trusted command type/, label);
   }
+});
+
+test('n8n workflow sync menu valid import runs without a routine confirmation or Enter prompt', { skip: !findPowerShell() }, () => {
+  const powerShell = findPowerShell();
+  const repo = fakeMenuRepo(path.join(sourceScriptDir, 'n8n-workflow-sync-menu.ps1'));
+  const result = spawnSync(powerShell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', repo.menuPath], {
+    cwd: repo.root,
+    input: '2\r\n0\r\n',
+    encoding: 'utf8',
+    timeout: 15000,
+  });
+  const output = `${result.stdout}\n${result.stderr}`;
+  assert.equal(result.error && result.error.code, undefined, result.error && result.error.message);
+  assert.equal(result.status, 0, output);
+  assert.equal(fs.existsSync(repo.trustedMarkerPath), true, output);
+  assert.doesNotMatch(output, /Run this real import\/export command now|Press Enter|Continue\?/i);
 });
 
 test('n8n workflow sync menus block tampered previous command replay', () => {
@@ -2191,7 +2220,7 @@ test('n8n helper tests do not execute live n8n import or export helpers', () => 
   }
 });
 
-test('sync-n8n-live-exports.cjs strips live-only fields, credentials, and tags by default', () => {
+test('sync-n8n-live-exports.cjs strips live-only fields and target IDs while preserving portable credential names', () => {
   const cwd = tempDir();
   const workflowDir = path.join(cwd, 'n8n-workflows');
   const exportsDir = path.join(cwd, '.tmp', 'exports');
@@ -2234,8 +2263,18 @@ test('sync-n8n-live-exports.cjs strips live-only fields, credentials, and tags b
   assert.equal('pinData' in synced, false);
   assert.equal('tags' in synced, false);
   assert.equal('tagIds' in synced, false);
-  assert.equal('credentials' in synced.nodes[0], false);
+  assert.deepEqual(synced.nodes[0].credentials, {
+    httpHeaderAuth: { id: null, name: 'Local Credential' },
+  });
   assert.equal('webhookId' in synced.nodes[0], false);
+  const declarations = JSON.parse(fs.readFileSync(path.join(workflowDir, 'toolkit', 'portable-credentials.json'), 'utf8'));
+  assert.equal(declarations.workflows[0].nodes[0].credentialType, 'httpHeaderAuth');
+  assert.equal(declarations.workflows[0].nodes[0].logicalName, 'Local Credential');
+  assert.doesNotMatch(JSON.stringify({ synced, declarations }), /cred_1/);
+  const receipt = JSON.parse(fs.readFileSync(path.join(cwd, '.n8n-local', 'reports', 'latest-n8n-workflow-operation.json'), 'utf8'));
+  assert.equal(receipt.operationType, 'export');
+  assert.equal(receipt.code, 'N8N_EXPORT_SUCCESS');
+  assert.equal(receipt.executionState, 'not_executed');
 });
 
 test('sync-n8n-live-exports.cjs preserves tags with --preserve-tags', () => {
@@ -2333,7 +2372,7 @@ test('prepare-n8n-live-import.cjs selects bindings by exact file path first', ()
   const workflow = safeWorkflow({ id: 'wf_2', name: 'Same Name' });
   const selection = selectBindingsWithMeta({
     workflows: [
-      { workflowFile: 'n8n-workflows/a.json', workflowId: 'wf_1', workflowName: 'Same Name', nodes: [{ nodeId: 'a' }] },
+      { workflowFile: 'n8n-workflows/a.json', workflowId: 'wf_2', workflowName: 'Same Name', nodes: [{ nodeId: 'a' }] },
       { workflowFile: 'n8n-workflows/b.json', workflowId: 'wf_2', workflowName: 'Same Name', nodes: [{ nodeId: 'b' }] },
     ],
   }, workflow, path.join(process.cwd(), 'n8n-workflows', 'a.json'));
@@ -2385,7 +2424,7 @@ test('prepare-n8n-live-import.cjs restores credentials by node ID', () => {
   assert.deepEqual(prepared.nodes[0].credentials, { httpHeaderAuth: { id: 'cred_1', name: 'Local Credential' } });
 });
 
-test('prepare-n8n-live-import.cjs skips stale node ID binding when node name and type changed', () => {
+test('prepare-n8n-live-import.cjs skips stale node ID binding when node type changed', () => {
   const cwd = tempDir();
   const workflowPath = path.join(cwd, 'n8n-workflows', 'workflow.json');
   const bindingsPath = path.join(cwd, '.n8n-local', 'bindings.json');
@@ -2408,7 +2447,7 @@ test('prepare-n8n-live-import.cjs skips stale node ID binding when node name and
       workflowName: 'Safe Generic Workflow',
       nodes: [{
         nodeId: 'reused_node_id',
-        nodeName: 'Upsert Conversation Failed',
+        nodeName: 'Notify Main Error Handler',
         nodeType: 'n8n-nodes-base.googleSheets',
         credentials: { googleSheetsOAuth2Api: { id: 'cred_1', name: 'Sheets Credential' } },
       }],
@@ -2420,10 +2459,10 @@ test('prepare-n8n-live-import.cjs skips stale node ID binding when node name and
   assert.equal(result.status, 0, result.stderr + result.stdout);
   const prepared = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
   assert.equal('credentials' in prepared.nodes[0], false);
-  assert.match(result.stderr + result.stdout, /Skipped 1 binding\(s\) with no matching node: Upsert Conversation Failed/);
+  assert.match(result.stderr + result.stdout, /Skipped 1 binding\(s\) with no matching node: Notify Main Error Handler/);
 });
 
-test('compare-n8n-workflow-credentials.cjs ignores stale node ID binding when replacement node has no credentials', () => {
+test('compare-n8n-workflow-credentials.cjs ignores stale node ID binding when node type changed', () => {
   const cwd = tempDir();
   const repoWorkflowPath = path.join(cwd, 'n8n-workflows', 'workflow.json');
   const liveWorkflowPath = path.join(cwd, '.tmp', 'live-workflow.json');
@@ -2446,7 +2485,7 @@ test('compare-n8n-workflow-credentials.cjs ignores stale node ID binding when re
       workflowName: 'Safe Generic Workflow',
       nodes: [{
         nodeId: 'reused_node_id',
-        nodeName: 'Upsert Conversation Failed',
+        nodeName: 'Notify Main Error Handler',
         nodeType: 'n8n-nodes-base.googleSheets',
         credentials: { googleSheetsOAuth2Api: { id: 'cred_1', name: 'Sheets Credential' } },
       }],

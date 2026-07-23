@@ -11,9 +11,12 @@ param(
   [string]$ComposeService,
   [string]$ExportDir = ".tmp/n8n-live-exports",
   [string]$BindingsFile = ".n8n-local\n8n-credential-bindings.json",
+  [string]$PortableCredentialsFile = "n8n-workflows/toolkit/portable-credentials.json",
+  [string]$DeploymentPolicyFile = "n8n-workflows/toolkit/deployment-policy.json",
   [switch]$IncludeArchived,
   [switch]$PublishedOnly,
   [switch]$PreserveTags,
+  [switch]$ReviewedSourceUpdate,
   [switch]$DryRun
 )
 
@@ -156,12 +159,24 @@ function Write-CommandOutput($Lines, [string]$DefaultStatus = "INFO") {
   }
 }
 
+function ConvertTo-NativeArgument([string]$Value) {
+  if ($null -eq $Value) { $Value = "" }
+  if ($Value.Length -gt 0 -and $Value -notmatch '[\s"]') { return $Value }
+  $escaped = [regex]::Replace($Value, '(\\*)"', {
+    param($match)
+    return (-join ('\' * (($match.Groups[1].Value.Length * 2) + 1))) + '"'
+  })
+  $escaped = [regex]::Replace($escaped, '(\\+)$', {
+    param($match)
+    return $match.Value + $match.Value
+  })
+  return '"' + $escaped + '"'
+}
+
 function Invoke-CapturedCommand($Command, [string[]]$Arguments) {
   $process = [System.Diagnostics.Process]::new()
   $process.StartInfo.FileName = $Command
-  $process.StartInfo.Arguments = ($Arguments | ForEach-Object {
-    '"' + ($_ -replace '\\', '\\' -replace '"', '\"') + '"'
-  }) -join " "
+  $process.StartInfo.Arguments = ($Arguments | ForEach-Object { ConvertTo-NativeArgument ([string]$_) }) -join " "
   $process.StartInfo.RedirectStandardOutput = $true
   $process.StartInfo.RedirectStandardError = $true
   $process.StartInfo.UseShellExecute = $false
@@ -656,12 +671,16 @@ function Write-LiveWorkflowExportFile($Workflow, $ExportFile) {
 $WorkflowDirPath = Resolve-WorkflowDirPath
 $ExportDirPath = Join-Path $RepoRoot $ExportDir
 $BindingsFilePath = Join-Path $RepoRoot $BindingsFile
+$PortableCredentialsFilePath = Join-Path $RepoRoot $PortableCredentialsFile
+$DeploymentPolicyFilePath = Join-Path $RepoRoot $DeploymentPolicyFile
 
 Write-Section "n8n workflow export"
 Write-Host ("Repo root        : {0}" -f $RepoRoot)
 Write-Host ("Workflow dir     : {0}" -f (Get-DisplayPath $WorkflowDirPath))
 Write-Host ("Export dir       : {0}" -f (Get-DisplayPath $ExportDirPath))
 Write-Host ("Bindings file    : {0}" -f (Get-DisplayPath $BindingsFilePath))
+Write-Host ("Credential spec  : {0}" -f (Get-DisplayPath $PortableCredentialsFilePath))
+Write-Host ("Resource policy  : {0}" -f (Get-DisplayPath $DeploymentPolicyFilePath))
 Write-Host ("Docker target    : {0}" -f ($(if ([string]::IsNullOrWhiteSpace($Container) -and [string]::IsNullOrWhiteSpace($ContainerName) -and [string]::IsNullOrWhiteSpace($ContainerId) -and [string]::IsNullOrWhiteSpace($ComposeProject) -and [string]::IsNullOrWhiteSpace($ComposeService)) { "auto-detect or prompt" } else { "explicit override requested" })))
 Write-Host ("Mode             : {0}" -f $Mode)
 Write-Host ("Dry run          : {0}" -f ([bool]$DryRun))
@@ -757,7 +776,7 @@ if ($Mode -eq "RepoTrackedOnly") {
 
     Write-Section "Summary"
     Write-Host ("Would export : {0}" -f $plannedExports.Count)
-    Write-Host "No workflow files or credential bindings were changed."
+    Write-Host "No workflow files or portable credential declarations were changed."
     exit 0
   }
 
@@ -784,6 +803,10 @@ if ($Mode -eq "RepoTrackedOnly") {
   }
 
   $syncArgs = @((Join-Path $HelperScriptDir "sync-n8n-live-exports.cjs"), $ExportDirPath, $WorkflowDirPath, $BindingsFilePath, "--sync-exported-only")
+  $syncArgs += @("--portable-credentials=$PortableCredentialsFilePath", "--deployment-policy=$DeploymentPolicyFilePath")
+  if ($ReviewedSourceUpdate) {
+    $syncArgs += "--reviewed-source-update"
+  }
   if ($PreserveTags) {
     $syncArgs += "--preserve-tags"
   }
@@ -805,7 +828,7 @@ if ($Mode -eq "RepoTrackedOnly") {
 
   Write-Section "Summary"
   Write-Host ("Exported : {0}" -f $plannedExports.Count)
-  Write-Host "Credential bindings were refreshed under .n8n-local."
+  Write-Host "Canonical workflows and portable credential declarations were updated; compatibility bindings remain local."
   Write-Section "Next Action Steps"
   Write-Host "1. Review workflow JSON changes before committing."
   Write-Host "2. Keep .n8n-local and .tmp uncommitted."
@@ -883,7 +906,7 @@ if ($DryRun) {
   Write-Section "Summary"
   Write-Host ("Would export : {0}" -f $plannedAllLive.Count)
   Write-Host ("Skipped archived : {0}" -f $skippedArchived)
-  Write-Host "No workflow files or credential bindings were changed."
+  Write-Host "No workflow files or portable credential declarations were changed."
   exit 0
 }
 
@@ -912,6 +935,10 @@ Invoke-ProjectWorkflowHook "before-export-sync" @{
 }
 
 $syncAllArgs = @((Join-Path $HelperScriptDir "sync-n8n-live-exports.cjs"), $ExportDirPath, $WorkflowDirPath, $BindingsFilePath, "--create-missing-workflows", "--sync-exported-only")
+$syncAllArgs += @("--portable-credentials=$PortableCredentialsFilePath", "--deployment-policy=$DeploymentPolicyFilePath")
+if ($ReviewedSourceUpdate) {
+  $syncAllArgs += "--reviewed-source-update"
+}
 if ($PreserveTags) {
   $syncAllArgs += "--preserve-tags"
 }
@@ -934,7 +961,7 @@ Invoke-ProjectWorkflowHook "after-export-sync" @{
 Write-Section "Summary"
 Write-Host ("Exported          : {0}" -f $plannedAllLive.Count)
 Write-Host ("Skipped archived  : {0}" -f $skippedArchived)
-Write-Host "Credential bindings were refreshed under .n8n-local."
+Write-Host "Canonical workflows and portable credential declarations were updated; compatibility bindings remain local."
 
 Write-Section "Next Action Steps"
 Write-Host "1. Review all workflow JSON changes before committing."

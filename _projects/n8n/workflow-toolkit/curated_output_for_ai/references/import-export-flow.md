@@ -10,29 +10,20 @@ Use this flow in a consumer repo, not from the toolkit repo.
 
 ## Boundary
 
-This is a short skill-local reference and safety checklist. It is not the full runtime helper guide; live helper detail remains in local templates.
-
-Non-live local helper actions in a consumer repo may run only after scoped user approval for that repo and operation. Allowed non-live actions are validation, sanitising/checking local candidate exports, comparing already-exported local files, preparing `.tmp/**` import payloads, and checking ignored `.n8n-local/**` credential-binding metadata.
-
-Scoped non-live approval still does not allow live n8n access, Docker, deployment, activation, credential changes, or source-watch actions. Do not commit `.tmp/**`, `.n8n-local/**`, `.to-sanitise/**`, `.sanitised/**`, credential bindings, live payloads, `.env`, or secrets.
-
-Live n8n actions require explicit current-turn approval naming the target repo, target n8n instance/environment, allowed operation, workflow names/set, and forbidden operations. Live-gated actions include live export/import/sync, activation/deactivation, publish/unpublish, archive/delete, execution, and credential creation/update/delete/binding/replacement.
+This is a short safety checklist, not the full runtime guide. Scoped non-live actions may validate repo workflow JSON and prepare local files for the named consumer repo and operation. Live n8n or Docker actions require explicit current-turn approval naming the repo, instance/environment, operation, workflow set, and forbidden operations.
 
 ## Export Review
 
-1. Export live workflows to an ignored folder only after live approval.
-2. Strip live-only fields, credentials, credential IDs, webhook IDs, static data, pin data, and unneeded tag metadata.
-3. Force `active: false` for committed templates.
-4. Write credential binding metadata only to ignored `.n8n-local/`.
-5. Review the diff before commit.
+- Preserve canonical logic, real sheet/tab names, approved non-secret locators, mappings, expressions, filters, matching columns, options, nodes, connections, and settings.
+- Replace credentials with portable `{ id: null, name }` references and logical name/type declarations; never commit IDs or values.
+- Remove target workflow/webhook metadata, force `active: false`, and protect generated mapping domains unless reviewed source-update mode is explicit.
 
 ## Import Review
 
-1. Validate repo workflow JSON.
-2. Prepare import payloads in ignored `.tmp/`.
-3. Restore credential references only when binding metadata is unambiguous and local.
-4. Restore live webhook IDs only for existing live workflows with unique node matches.
-5. Import only after explicit confirmation of target instance and workflow set.
+- Discover only safe credential metadata through a supported transport and resolve exactly one logical name/type match without exposing target IDs.
+- Rebuild from canonical Git, restore dedicated webhook identity, and apply only declared exact scalar resource bindings.
+- Validate the prepared workflow and canonical invariant before effective comparison. A valid non-dry-run import proceeds without routine confirmation, stays inactive, performs no execution, and verifies the postcondition.
+- For a supported unresolved first import, create the reported logical name/type and rerun the same command. Unsupported transports stop before mutation.
 
 Do not run live import/export in CI. Keep `.tmp/**` and `.n8n-local/**` ignored and local.
 
@@ -43,9 +34,11 @@ Do not run live import/export in CI. Keep `.tmp/**` and `.n8n-local/**` ignored 
 - Live approval does not name the workflow set.
 - Operation is broader than approved.
 - Ambiguous workflow match.
-- Missing or stale credential bindings when credentials are required.
+- Credential discovery unavailable, zero/duplicate name/type matches, or same-name wrong-type matches.
+- Missing required exact resource binding.
+- Canonical invariant failure or an active target whose inactivity cannot be guaranteed without restart.
 - Credentials would be touched unexpectedly.
 - Workflow activation, publish, delete, archive, or execution would happen unexpectedly.
-- Ignored scratch folders contain commit-worthy changes.
-- Product/customer data in template JSON.
-- Workflow would activate or publish unexpectedly.
+- Ignored scratch folders contain commit-worthy changes or private/product data.
+
+Never run live helpers in CI. Never commit `.tmp/**`, `.n8n-local/**`, live payloads, `.env`, or secrets.

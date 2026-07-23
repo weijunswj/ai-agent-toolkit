@@ -70,10 +70,11 @@
       "notes": "Toolkit-adapted after migration to stay aligned with the n8n workflow-toolkit helper and skip stale node-ID credential bindings when both node name and node type differ."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "templates/n8n/should-import-n8n-workflow.cjs",
       "project_path": "_projects/cicd/secure-installer/_main/templates/n8n/should-import-n8n-workflow.cjs",
-      "source_blob_sha": "133ad09249778e1a76ec6a6856da6a6c9f3432b1"
+      "source_blob_sha": "133ad09249778e1a76ec6a6856da6a6c9f3432b1",
+      "notes": "Aligned with the n8n workflow toolkit effective comparator so credentials, resources, webhook metadata, and inactive state trigger import while host-managed metadata stays ignored."
     },
     {
       "mode": "adapted",

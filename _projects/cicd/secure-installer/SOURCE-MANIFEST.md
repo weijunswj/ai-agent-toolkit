@@ -16,7 +16,7 @@
   - `curated_output_for_ai/templates/cicd/safe-source-update-policy.md`
   - `curated_output_for_ai/templates/github-actions/README.md`
   - `curated_output_for_ai/packs/secure-cicd/README.md`
-- Toolkit-adapted n8n helper scripts remain preserved under `_main/templates/n8n/` as Secure CI/CD migration provenance from `weijunswj/ai-cicd-installer`.
+- Toolkit-adapted n8n helper scripts remain preserved under `_main/templates/n8n/` as Secure CI/CD migration provenance from `weijunswj/ai-cicd-installer`; executable copies are kept byte-aligned with the current workflow-toolkit source, including portable import modules.
 - Published n8n helper-script outputs are now owned by `n8n.workflow-toolkit` and generated from `_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/**`.
 
 ## Excluded

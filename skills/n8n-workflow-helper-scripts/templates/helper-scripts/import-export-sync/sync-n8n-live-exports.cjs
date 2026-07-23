@@ -1,8 +1,15 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const {
+  canonicalWorkflowForGit,
+  canonicaliseExport,
+  mergeCredentialDeclarationDocument,
+  selectWorkflowEntry,
+} = require('./n8n-portable-workflow.cjs');
+const { writeReport } = require('./n8n-workflow-operation-report.cjs');
 
 function usage() {
-  console.error('Usage: node scripts/sync-n8n-live-exports.cjs <exports-dir> <workflow-dir> [bindings.json] [--credentials-only] [--allow-missing-exports] [--preserve-tags] [--create-missing-workflows] [--sync-exported-only]');
+  console.error('Usage: node scripts/sync-n8n-live-exports.cjs <exports-dir> <workflow-dir> [bindings.json] [--credentials-only] [--allow-missing-exports] [--preserve-tags] [--create-missing-workflows] [--sync-exported-only] [--portable-credentials=file] [--deployment-policy=file] [--reviewed-source-update]');
   process.exit(1);
 }
 
@@ -16,41 +23,7 @@ function readWorkflow(filePath) {
 }
 
 function stripLiveOnlyFields(workflow, options = {}) {
-  const clean = JSON.parse(JSON.stringify(workflow));
-  const liveOnlyFields = [
-    'createdAt',
-    'updatedAt',
-    'isArchived',
-    'shared',
-    'staticData',
-    'pinData',
-    'activeVersionId',
-    'versionCounter',
-    'triggerCount',
-    'versionMetadata',
-  ];
-
-  for (const field of liveOnlyFields) {
-    delete clean[field];
-  }
-
-  if (!options.preserveTags) {
-    delete clean.tags;
-    delete clean.tagIds;
-  }
-
-  delete clean.credentials;
-  clean.active = false;
-
-  if (clean.description == null) delete clean.description;
-  if (clean.meta == null) delete clean.meta;
-
-  for (const node of clean.nodes || []) {
-    delete node.credentials;
-    delete node.webhookId;
-  }
-
-  return clean;
+  return canonicalWorkflowForGit(workflow, options);
 }
 
 function credentialBindings(workflow) {
@@ -72,6 +45,32 @@ function displayPath(filePath) {
   return path.relative(process.cwd(), filePath) || '.';
 }
 
+function comparablePath(filePath) {
+  const resolved = path.normalize(path.resolve(filePath)).replace(/[\\/]+$/, '');
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+function assertStrictChild(rootPath, targetPath, label) {
+  const root = path.resolve(rootPath);
+  const target = path.resolve(targetPath);
+  const relative = path.relative(root, target);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error(`${label} must remain a strict child of the workflow directory.`);
+  }
+  let current = target;
+  while (true) {
+    if (fs.existsSync(current)) {
+      const stat = fs.lstatSync(current);
+      if (stat.isSymbolicLink() || comparablePath(fs.realpathSync.native(current)) !== comparablePath(current)) {
+        throw new Error(`${label} contains a symlink, junction, or reparse escape.`);
+      }
+    }
+    if (comparablePath(current) === comparablePath(root)) break;
+    current = path.dirname(current);
+  }
+  return target;
+}
+
 function writeStep(status, message) {
   console.log(`[${status.padEnd(7)}] ${message}`);
 }
@@ -79,6 +78,11 @@ function writeStep(status, message) {
 function parseArgs(argv) {
   const flags = new Set(argv.filter((arg) => arg.startsWith('--')));
   const positional = argv.filter((arg) => !arg.startsWith('--'));
+  const valueFor = (name) => {
+    const prefix = `--${name}=`;
+    const match = argv.find((arg) => arg.startsWith(prefix));
+    return match ? match.slice(prefix.length) : '';
+  };
   return {
     bindingsPath: positional[0] || path.join('.n8n-local', 'n8n-credential-bindings.json'),
     credentialsOnly: flags.has('--credentials-only'),
@@ -86,6 +90,9 @@ function parseArgs(argv) {
     preserveTags: flags.has('--preserve-tags'),
     createMissingWorkflows: flags.has('--create-missing-workflows'),
     syncExportedOnly: flags.has('--sync-exported-only'),
+    portableCredentialsPath: valueFor('portable-credentials'),
+    deploymentPolicyPath: valueFor('deployment-policy'),
+    reviewedSourceUpdate: flags.has('--reviewed-source-update'),
   };
 }
 
@@ -167,6 +174,15 @@ function main() {
     fs.mkdirSync(workflowDir, { recursive: true });
   }
 
+  options.portableCredentialsPath = options.portableCredentialsPath || path.join(workflowDir, 'toolkit', 'portable-credentials.json');
+  options.portableCredentialsPath = assertStrictChild(workflowDir, options.portableCredentialsPath, 'Portable credential declaration');
+  options.deploymentPolicyPath = options.deploymentPolicyPath || path.join(workflowDir, 'toolkit', 'deployment-policy.json');
+  const deploymentPolicy = fs.existsSync(options.deploymentPolicyPath) ? readJson(options.deploymentPolicyPath) : null;
+  let portableCredentialDocument = fs.existsSync(options.portableCredentialsPath)
+    ? readJson(options.portableCredentialsPath)
+    : { schemaVersion: 1, workflows: [] };
+  const receiptWorkflows = [];
+
   const targets = buildTargets(exportsDir, workflowDir, options.createMissingWorkflows, options.syncExportedOnly);
   if (!targets.length) {
     throw new Error(`No workflow JSON files found in ${workflowDir}`);
@@ -180,6 +196,8 @@ function main() {
   console.log(`Workflow dir  : ${displayPath(workflowDir)}`);
   console.log(`Tags          : ${options.preserveTags ? 'Preserved' : 'Stripped'}`);
   console.log(`Targets       : ${options.syncExportedOnly ? 'Exported files only' : 'Workflow directory files'}`);
+  console.log(`Credentials   : ${options.credentialsOnly ? 'Local refresh only' : displayPath(options.portableCredentialsPath)}`);
+  console.log(`Source update : ${options.reviewedSourceUpdate ? 'Reviewed protected-path update enabled' : 'Canonical protected paths retained'}`);
 
   const bindings = {
     version: 2,
@@ -232,7 +250,19 @@ function main() {
       continue;
     }
 
-    const cleanWorkflow = stripLiveOnlyFields(liveWorkflow, { preserveTags: options.preserveTags });
+    const previousDeclaration = selectWorkflowEntry(portableCredentialDocument, liveWorkflow, target.workflowFile, 'credential declaration');
+    const exportResult = canonicaliseExport({
+      liveWorkflow,
+      canonicalWorkflow: repoWorkflow,
+      workflowFile: target.workflowFile,
+      deploymentPolicy,
+      previousDeclaration,
+      preserveTags: options.preserveTags,
+      reviewedSourceUpdate: options.reviewedSourceUpdate,
+    });
+    const cleanWorkflow = exportResult.workflow;
+    receiptWorkflows.push({ workflowFile: relativePath(target.workflowFile), workflowName: cleanWorkflow.name || '' });
+    portableCredentialDocument = mergeCredentialDeclarationDocument(portableCredentialDocument, exportResult.declaration);
     const previousSize = fs.existsSync(target.workflowFile) ? fs.statSync(target.workflowFile).size : 0;
     fs.mkdirSync(path.dirname(target.workflowFile), { recursive: true });
     fs.writeFileSync(target.workflowFile, JSON.stringify(cleanWorkflow, null, 2) + '\n');
@@ -240,18 +270,41 @@ function main() {
     const verification = readWorkflow(target.workflowFile);
     writeStep(
       target.isNewWorkflow ? 'CREATE' : 'WRITE',
-      `${path.basename(target.workflowFile)} ${previousSize} -> ${nextSize} bytes, active=${verification.active === false ? 'false' : String(verification.active)}, credentials removed=${nodeBindings.length}`
+      `${path.basename(target.workflowFile)} ${previousSize} -> ${nextSize} bytes, active=${verification.active === false ? 'false' : String(verification.active)}, portable credential requirement(s)=${exportResult.declaration.nodes.length}`
     );
+    if (exportResult.protectedChanges.length > 0) {
+      writeStep('PROTECT', `${path.basename(target.workflowFile)} retained ${exportResult.protectedChanges.length} canonical protected value(s); use --reviewed-source-update only for an intentional reviewed source change.`);
+    }
+  }
+  if (!options.credentialsOnly) {
+    fs.mkdirSync(path.dirname(options.portableCredentialsPath), { recursive: true });
+    fs.writeFileSync(options.portableCredentialsPath, JSON.stringify(portableCredentialDocument, null, 2) + '\n');
+    writeStep('SAVE', `${displayPath(options.portableCredentialsPath)} portable credential declarations updated without target credential IDs.`);
   }
 
   fs.mkdirSync(path.dirname(options.bindingsPath), { recursive: true });
   fs.writeFileSync(options.bindingsPath, JSON.stringify(bindings, null, 2) + '\n');
   const bindingsSize = fs.statSync(options.bindingsPath).size;
   writeStep('SAVE', `${displayPath(options.bindingsPath)} ${bindingsSize} bytes, credential bindings=${totalCredentialBindings}, skipped=${bindings.skippedWorkflows.length}`);
+  writeReport(path.join('.n8n-local', 'reports'), {
+    operationType: options.credentialsOnly ? 'credential-metadata-refresh' : 'export',
+    result: 'SUCCESS',
+    code: 'N8N_EXPORT_SUCCESS',
+    phase: 'receipt',
+    workflows: receiptWorkflows,
+    credentials: [],
+    resources: [],
+    mutation: { attempted: true, performed: true },
+    activeState: 'inactive-canonical-source',
+    executionState: 'not_executed',
+    nextAction: { code: 'REVIEW_CANONICAL_DIFF', message: 'Review canonical workflow and portable declaration changes before committing.' },
+    unchangedScope: ['activation', 'execution', 'credential values', 'exact local resource bindings'],
+  });
+  writeStep('REPORT', 'Sanitized export receipt written under .n8n-local/reports.');
 }
 
 if (require.main === module) {
   main();
 }
 
-module.exports = { stripLiveOnlyFields, credentialBindings, buildTargets };
+module.exports = { stripLiveOnlyFields, credentialBindings, buildTargets, parseArgs, assertStrictChild };

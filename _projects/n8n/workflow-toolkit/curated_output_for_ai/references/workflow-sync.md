@@ -8,34 +8,28 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 ## Goal
 
-Keep repo workflow templates reusable while avoiding live-only state, credentials, credential bindings, and accidental product data.
+Keep canonical repo workflows portable while avoiding live-only state, target credential IDs/values, private resource locators, and accidental product data.
 
 ## Boundary
 
-This is a short reviewed operating overview and safety wrapper. It is not the full runtime guide.
+This is a short safety wrapper, not the full runtime guide.
 
 ## Safe Operating Shape
 
-- After scoped user approval in a consumer repo, agents may run non-live local helper actions only for the approved repo and operation: validate repo workflow JSON, sanitise/check local candidate exports, compare/diff already-exported local files, prepare import payloads into ignored `.tmp/**`, or check ignored `.n8n-local/**` credential-binding metadata.
+- Scoped non-live approval permits validation and local preparation only for the named consumer repo and operation.
 - Move live workflow JSON through ignored scratch locations in the consumer repo.
-- Strip live-only fields, credentials, webhook IDs, static data, tags unless intentionally preserved, and pin data.
+- Strip live-only fields, target credential IDs, webhook IDs, static data, tags unless intentionally preserved, and pin data; preserve portable logical credential names/types and approved canonical workflow logic.
 - Keep repo workflow JSON inactive.
-- Store local credential binding metadata only in ignored `.n8n-local/`.
-- Review the diff before any live write.
+- Store exact private resource bindings and sanitized reports only in ignored `.n8n-local/`; target IDs remain transient.
+- Rebuild import payloads from canonical Git, validate the canonical invariant, and compare the effective prepared payload before any live write.
 - Prepare live payloads in ignored `.tmp/`.
 - Run live sync only after explicit current-turn approval naming the target repo, target n8n instance/environment, allowed operation, workflow names/set, and forbidden operations.
-
-The helper templates intentionally support scoped writes in consumer repos:
-
-- `n8n-workflows/*.json` for reviewed workflow source updates.
-- `.tmp/**` for transient live-sync payloads.
-- `.n8n-local/**` for local credential-binding metadata.
 
 Live-gated actions include live export/import/sync, activation/deactivation, publish/unpublish, archive/delete, execution, and credential creation/update/delete/binding/replacement.
 
 Never run live sync helpers in CI, and never commit `.tmp/**`, `.n8n-local/**`, `.to-sanitise/**`, `.sanitised/**`, live scratch payloads, credential binding files, `.env`, or secrets.
 
-Stop and ask again if approval does not name the target repo; live approval does not name the target instance/environment or workflow set; the operation is broader than approved; credentials would be touched unexpectedly; activation, publish, delete, archive, or execution would happen unexpectedly; workflow matching is ambiguous; credential bindings are missing, stale, or ambiguous; or ignored scratch folders contain commit-worthy changes. Use the approval examples in `SKILL.md`.
+Stop if approval or target scope is incomplete; workflow or node matching is ambiguous; credential discovery or exact name/type resolution fails; a required exact resource binding is missing; the canonical invariant fails; or activation, execution, publish, delete, archive, or an unexpected credential change could occur.
 
 ## Toolkit Templates
 

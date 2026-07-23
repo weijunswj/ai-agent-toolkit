@@ -28,6 +28,11 @@ Live import/export helper entry points are not run from this toolkit repo during
 - `validate-n8n-workflows.cjs`
 - `sync-n8n-live-exports.cjs`
 - `prepare-n8n-live-import.cjs`
+- `n8n-portable-workflow.cjs`
+- `n8n-credential-metadata.cjs`
+- `n8n-workflow-transport.cjs`
+- `n8n-workflow-operation-report.cjs`
+- `n8n-workflow-identity.cjs`
 - `compare-n8n-workflow-credentials.cjs`
 - `should-import-n8n-workflow.cjs`
 - `_export-n8n-workflows-live.cmd`
@@ -39,15 +44,13 @@ The live import/export PowerShell helpers support explicit Docker target overrid
 
 The `.cmd` wrappers invoke their co-located PowerShell scripts with `%~dp0<name>.ps1` and do not change directory themselves. The PowerShell scripts resolve and set their working directory from their script location.
 
-## Import Restart Warnings
+## Portable Import Contract
 
-`import-n8n-workflows-live.ps1` may print restart warnings when active or scheduled live workflows were touched. For Docker-backed n8n, pass `-RestartContainerAfterImport` to restart the configured container automatically after a successful import when those warnings exist:
+Normal operator flow is export canonical workflow JSON and portable logical credential name/type declarations to Git, create matching credentials on the target when reported missing, then rerun the unchanged import command. The helper resolves target IDs internally, rebuilds from canonical Git, applies only dedicated webhook metadata and declared exact resource paths, validates the canonical invariant, imports inactive without a routine confirmation, and verifies the inactive postcondition.
 
-```powershell
-.\import-n8n-workflows-live.ps1 -WorkflowDir n8n-workflows -RestartContainerAfterImport
-```
+The helper never activates, executes, test-runs, publishes, or restarts n8n. An already-active target is blocked because scheduled activity cannot be guaranteed inactive without a separate restart. `-RequireConfirmation` is compatibility-only menu behavior and is not the default.
 
-The direct `_import-n8n-workflows-live.cmd` wrapper prompts whether to enable that switch before each run. The helper never restarts during `-DryRun`, and it does not restart when no imported workflow needs the restart warning.
+Operation receipts are written to `.n8n-local/reports/latest-n8n-workflow-operation.{json,txt}` and bounded 90-day history. The menu's read-only Explain last n8n failure action validates the latest report and states one supported next action.
 
 ## Intended Scoped Writes
 
@@ -59,13 +62,13 @@ In a reviewed consumer repo, these helpers may write:
 - `.tmp/**`
 - `.n8n-local/**`
 
-`.tmp/**` and `.n8n-local/**` must stay ignored and uncommitted. They can hold transient live export/import payloads and local credential-binding metadata.
+`.tmp/**` and `.n8n-local/**` must stay ignored and uncommitted. They can hold transient prepared payloads, exact private resource bindings, and sanitized reports. Portable logical credential name/type declarations belong under `n8n-workflows/toolkit/` and may be committed.
 
 ## Safety Rules
 
 - Do not run live n8n import or export from this toolkit repo.
 - Do not run live n8n import/export in CI.
-- Do not commit `.tmp/**`, `.n8n-local/**`, live import/export JSON, credentials, credential bindings, private keys, or `.env` files.
+- Do not commit `.tmp/**`, `.n8n-local/**`, live import/export JSON, credential IDs/values, encrypted credential exports, private keys, or `.env` files.
 - Do not commit workflow JSON containing credentials, secrets, tokens, cookies, webhook secrets, private environment values, or production execution data. Use placeholder environment variable names only and document required variables separately.
 - Do not commit `.n8n/` runtime folders, n8n database files, binary backups, or live execution exports.
 - Helper scripts must not print secrets and must not default to destructive live actions.

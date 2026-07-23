@@ -1,6 +1,7 @@
 param(
   [switch]$UsePrevious,
-  [switch]$Yes
+  [switch]$Yes,
+  [switch]$RequireConfirmation
 )
 
 $ErrorActionPreference = "Stop"
@@ -64,6 +65,7 @@ $HelperScriptDir = (Resolve-Path -LiteralPath $PSScriptRoot).Path
 $ExportHelperScript = Join-Path $HelperScriptDir "export-n8n-workflows-live.ps1"
 $ImportHelperScript = Join-Path $HelperScriptDir "import-n8n-workflows-live.ps1"
 $ValidateHelperScript = Join-Path $HelperScriptDir "validate-n8n-workflows.cjs"
+$ReportHelperScript = Join-Path $HelperScriptDir "n8n-workflow-operation-report.cjs"
 
 function Resolve-TrustedHelperPath($Path, $Description) {
   try {
@@ -76,6 +78,7 @@ function Resolve-TrustedHelperPath($Path, $Description) {
 $TrustedExportHelperScript = Resolve-TrustedHelperPath $ExportHelperScript "export helper"
 $TrustedImportHelperScript = Resolve-TrustedHelperPath $ImportHelperScript "import helper"
 $TrustedValidateHelperScript = Resolve-TrustedHelperPath $ValidateHelperScript "validation helper"
+$TrustedReportHelperScript = Resolve-TrustedHelperPath $ReportHelperScript "operation report helper"
 $NodeCommandPath = $null
 
 $DefaultWorkflowDir = "n8n-workflows"
@@ -154,7 +157,7 @@ function Show-CommonSettingExplanations {
   Write-Host "- When to use it: Fill ContainerId, Container, or ComposeProject/ComposeService when auto-detection would be ambiguous."
   Write-Host ""
   Write-Host "BindingsFile"
-  Write-Host "- Meaning: Local file storing credential binding metadata from live workflows."
+  Write-Host "- Meaning: Compatibility-only local binding capture used by export; portable import does not consume target credential IDs from it."
   Write-Host "- Recommended default: .n8n-local\n8n-credential-bindings.json."
   Write-Host "- Effect: Import can restore credential references without committing credentials."
   Write-Host "- Risk level: Low if kept uncommitted. Do not commit .n8n-local."
@@ -282,36 +285,6 @@ function Read-UserId {
   return Read-Host "UserId, or blank"
 }
 
-function Read-AllowMissingCredentialBindings {
-  Write-Section "AllowMissingCredentialBindings"
-  Write-Host "- Meaning: Import even when local credential binding records are unavailable."
-  Write-Host "- Recommended: No."
-  Write-Host "- Effect: Imported workflows may need manual credential reassignment."
-  Write-Host "- Risk: Medium to high."
-  Write-Host "- Use when: First-time import or intentionally rebuilding credentials manually."
-  return Read-YesNo "Use -AllowMissingCredentialBindings?" $true
-}
-
-function Read-SkipCredentialBindingRefresh {
-  Write-Section "SkipCredentialBindingRefresh"
-  Write-Host "- Meaning: Do not try to refresh credential bindings from live workflows before import."
-  Write-Host "- Recommended: No."
-  Write-Host "- Effect: Faster, but less safe when bindings are stale/missing."
-  Write-Host "- Risk: Medium."
-  Write-Host "- Use when: You know bindings are already current."
-  return Read-YesNo "Use -SkipCredentialBindingRefresh?" $true
-}
-
-function Read-RestartContainerAfterImport {
-  Write-Section "RestartContainerAfterImport"
-  Write-Host "- Meaning: Restart Docker n8n after import when active/scheduled workflows were touched."
-  Write-Host "- Recommended: Yes for local Docker imports when a short n8n restart is acceptable; no for shared or production instances."
-  Write-Host "- Effect: Runs docker restart on the resolved n8n target only after a successful import when restart warnings exist."
-  Write-Host "- Risk: Medium because it interrupts local n8n."
-  Write-Host "- Use when: Schedule/cron trigger warning appears and this is local/staging."
-  return Read-YesNo "Use -RestartContainerAfterImport?" $true
-}
-
 function Read-CommonSettings {
   Show-CommonSettingExplanations
   $container = Read-Default "Container name override" $DefaultContainer
@@ -370,30 +343,30 @@ function Get-RecordArgs($Record) {
     return $null
   }
 
-  $args = @()
+  $commandArgs = @()
   foreach ($arg in @($Record.args)) {
     if (-not (Test-SafeCommandArg $arg)) {
       return $null
     }
-    $args += [string]$arg
+    $commandArgs += [string]$arg
   }
-  return [string[]]$args
+  return [string[]]$commandArgs
 }
 
-function Read-MenuArgs($Args, [string[]]$PairOptions, [string[]]$SwitchOptions, [string[]]$RequiredPairs, [hashtable]$AllowedValuesByPair) {
+function Read-MenuArgs($CommandArgs, [string[]]$PairOptions, [string[]]$SwitchOptions, [string[]]$RequiredPairs, [hashtable]$AllowedValuesByPair) {
   $pairs = @{}
   $switches = @{}
-  for ($index = 0; $index -lt $Args.Count; $index += 1) {
-    $arg = [string]$Args[$index]
+  for ($index = 0; $index -lt $CommandArgs.Count; $index += 1) {
+    $arg = [string]$CommandArgs[$index]
     if ($PairOptions -contains $arg) {
       if ($pairs.ContainsKey($arg)) {
         return $null
       }
       $index += 1
-      if ($index -ge $Args.Count) {
+      if ($index -ge $CommandArgs.Count) {
         return $null
       }
-      $value = [string]$Args[$index]
+      $value = [string]$CommandArgs[$index]
       if (-not (Test-SafeCommandArg $value)) {
         return $null
       }
@@ -427,8 +400,8 @@ function Read-MenuArgs($Args, [string[]]$PairOptions, [string[]]$SwitchOptions, 
   }
 }
 
-function Test-ExportCommandArgs([string[]]$Args) {
-  $parsed = Read-MenuArgs $Args `
+function Test-ExportCommandArgs([string[]]$CommandArgs) {
+  $parsed = Read-MenuArgs $CommandArgs `
     @("-WorkflowDir", "-Container", "-ContainerName", "-ContainerId", "-ComposeProject", "-ComposeService", "-BindingsFile", "-Mode", "-MissingLiveMode") `
     @("-PublishedOnly", "-IncludeArchived", "-PreserveTags", "-DryRun") `
     @("-WorkflowDir", "-BindingsFile", "-Mode", "-MissingLiveMode") `
@@ -446,11 +419,11 @@ function Test-ExportCommandArgs([string[]]$Args) {
   return $true
 }
 
-function Test-ImportCommandArgs([string[]]$Args) {
-  $parsed = Read-MenuArgs $Args `
+function Test-ImportCommandArgs([string[]]$CommandArgs) {
+  $parsed = Read-MenuArgs $CommandArgs `
     @("-WorkflowDir", "-Container", "-ContainerName", "-ContainerId", "-ComposeProject", "-ComposeService", "-BindingsFile", "-ArchivedByNameMode", "-ProjectId", "-UserId") `
-    @("-AllowMissingCredentialBindings", "-SkipCredentialBindingRefresh", "-RestartContainerAfterImport", "-DryRun") `
-    @("-WorkflowDir", "-BindingsFile", "-ArchivedByNameMode") `
+    @("-DryRun") `
+    @("-WorkflowDir", "-ArchivedByNameMode") `
     @{
       "-WorkflowDir" = @($DefaultWorkflowDir)
       "-ArchivedByNameMode" = @("CreateNew", "UpdateArchived", "Block")
@@ -469,13 +442,13 @@ function Set-CommandTrustFailure($Message) {
   return $false
 }
 
-function New-CommandRecord($CommandName, $CommandKind, $Script, [string[]]$Args) {
+function New-CommandRecord($CommandName, $CommandKind, $Script, [string[]]$CommandArgs) {
   [PSCustomObject]@{
     schemaVersion = $CommandSchemaVersion
     commandKind = $CommandKind
     commandName = $CommandName
     script = $Script
-    args = $Args
+    args = $CommandArgs
     cwd = $RepoRoot
     helperScriptDir = $HelperScriptDir
     createdAt = (Get-Date).ToUniversalTime().ToString("o")
@@ -544,8 +517,8 @@ function Test-TrustedCommandRecord($Record) {
     return Set-CommandTrustFailure $UntrustedPreviousCommandMessage
   }
 
-  $args = Get-RecordArgs $Record
-  if ($null -eq $args) {
+  $commandArgs = Get-RecordArgs $Record
+  if ($null -eq $commandArgs) {
     return Set-CommandTrustFailure $UntrustedPreviousCommandMessage
   }
 
@@ -555,14 +528,14 @@ function Test-TrustedCommandRecord($Record) {
   if ($commandKind -eq "export") {
     if ($commandName -ne $ExportCommandName) { return Set-CommandTrustFailure $UntrustedPreviousCommandMessage }
     if ($recordScript -ne $TrustedExportHelperScript) { return Set-CommandTrustFailure $UntrustedPreviousCommandMessage }
-    if (-not (Test-ExportCommandArgs $args)) { return Set-CommandTrustFailure $UntrustedPreviousCommandMessage }
+    if (-not (Test-ExportCommandArgs $commandArgs)) { return Set-CommandTrustFailure $UntrustedPreviousCommandMessage }
     return $true
   }
 
   if ($commandKind -eq "import") {
     if ($commandName -ne $ImportCommandName) { return Set-CommandTrustFailure $UntrustedPreviousCommandMessage }
     if ($recordScript -ne $TrustedImportHelperScript) { return Set-CommandTrustFailure $UntrustedPreviousCommandMessage }
-    if (-not (Test-ImportCommandArgs $args)) { return Set-CommandTrustFailure $UntrustedPreviousCommandMessage }
+    if (-not (Test-ImportCommandArgs $commandArgs)) { return Set-CommandTrustFailure $UntrustedPreviousCommandMessage }
     return $true
   }
 
@@ -574,10 +547,10 @@ function Test-TrustedCommandRecord($Record) {
       return Set-CommandTrustFailure $UntrustedPreviousCommandMessage
     }
     if ($recordScript -ne $trustedNodePath) { return Set-CommandTrustFailure $UntrustedPreviousCommandMessage }
-    if ($args.Count -ne 2) { return Set-CommandTrustFailure $UntrustedPreviousCommandMessage }
-    $recordValidateScript = Resolve-CanonicalPathOrNull $args[0]
+    if ($commandArgs.Count -ne 2) { return Set-CommandTrustFailure $UntrustedPreviousCommandMessage }
+    $recordValidateScript = Resolve-CanonicalPathOrNull $commandArgs[0]
     if ($recordValidateScript -ne $TrustedValidateHelperScript) { return Set-CommandTrustFailure $UntrustedPreviousCommandMessage }
-    if (-not (Test-SafeCommandArg $args[1])) { return Set-CommandTrustFailure $UntrustedPreviousCommandMessage }
+    if (-not (Test-SafeCommandArg $commandArgs[1])) { return Set-CommandTrustFailure $UntrustedPreviousCommandMessage }
     return $true
   }
 
@@ -600,9 +573,10 @@ function Show-PreviousCommand {
 }
 
 function Command-RequiresConfirmation($Record) {
-  $isImportExport = $Record.commandName -match 'Import|Export'
   $isDryRun = @($Record.args) -contains "-DryRun"
-  return $isImportExport -and -not $isDryRun
+  if ($isDryRun) { return $false }
+  if ($Record.commandKind -eq "import") { return [bool]$RequireConfirmation }
+  return $Record.commandKind -eq "export"
 }
 
 function Invoke-CommandRecord($Record, [bool]$SkipMenuConfirmation) {
@@ -611,7 +585,7 @@ function Invoke-CommandRecord($Record, [bool]$SkipMenuConfirmation) {
     return
   }
 
-  $args = Get-RecordArgs $Record
+  $commandArgs = Get-RecordArgs $Record
   $recordScript = Resolve-CanonicalPathOrNull $Record.script
 
   Write-Section "Command"
@@ -631,11 +605,11 @@ function Invoke-CommandRecord($Record, [bool]$SkipMenuConfirmation) {
   }
 
   if ($Record.commandKind -eq "export" -or $Record.commandKind -eq "import") {
-    & powershell -ExecutionPolicy Bypass -File $recordScript @args
+    & powershell -ExecutionPolicy Bypass -File $recordScript @commandArgs
     $exitCode = $LASTEXITCODE
   } elseif ($Record.commandKind -eq "validate") {
     $nodePath = Resolve-NodeCommandPath
-    & $nodePath @args
+    & $nodePath @commandArgs
     $exitCode = $LASTEXITCODE
   } else {
     Write-Step "BLOCK" "Unknown trusted command type. Clear previous command and rebuild it from the menu."
@@ -647,10 +621,6 @@ function Invoke-CommandRecord($Record, [bool]$SkipMenuConfirmation) {
     Write-Step "DONE" "Command finished with exit code $exitCode."
   } else {
     Write-Step "FAIL" "Command finished with exit code $exitCode."
-    if ($Record.commandKind -eq "export" -or $Record.commandKind -eq "import") {
-      Write-Host ""
-      [void](Read-Host "Press Enter to return after reviewing the error")
-    }
   }
 }
 
@@ -665,53 +635,46 @@ function Build-ExportCommand([bool]$DryRunMode) {
   $preserveTags = Read-PreserveTags
   $missingLiveMode = Read-MissingLiveMode
 
-  $args = @(
+  $commandArgs = @(
     "-WorkflowDir", $common.WorkflowDir,
     "-BindingsFile", $common.BindingsFile,
     "-Mode", $mode,
     "-MissingLiveMode", $missingLiveMode
   )
-  if (-not [string]::IsNullOrWhiteSpace($common.Container)) { $args += @("-Container", $common.Container) }
-  if (-not [string]::IsNullOrWhiteSpace($common.ContainerId)) { $args += @("-ContainerId", $common.ContainerId) }
-  if (-not [string]::IsNullOrWhiteSpace($common.ComposeProject)) { $args += @("-ComposeProject", $common.ComposeProject) }
-  if (-not [string]::IsNullOrWhiteSpace($common.ComposeService)) { $args += @("-ComposeService", $common.ComposeService) }
-  if ($publishedOnly) { $args += "-PublishedOnly" }
-  if ($includeArchived) { $args += "-IncludeArchived" }
-  if ($preserveTags) { $args += "-PreserveTags" }
-  if ($DryRunMode) { $args += "-DryRun" }
+  if (-not [string]::IsNullOrWhiteSpace($common.Container)) { $commandArgs += @("-Container", $common.Container) }
+  if (-not [string]::IsNullOrWhiteSpace($common.ContainerId)) { $commandArgs += @("-ContainerId", $common.ContainerId) }
+  if (-not [string]::IsNullOrWhiteSpace($common.ComposeProject)) { $commandArgs += @("-ComposeProject", $common.ComposeProject) }
+  if (-not [string]::IsNullOrWhiteSpace($common.ComposeService)) { $commandArgs += @("-ComposeService", $common.ComposeService) }
+  if ($publishedOnly) { $commandArgs += "-PublishedOnly" }
+  if ($includeArchived) { $commandArgs += "-IncludeArchived" }
+  if ($preserveTags) { $commandArgs += "-PreserveTags" }
+  if ($DryRunMode) { $commandArgs += "-DryRun" }
 
-  return New-CommandRecord $ExportCommandName "export" $TrustedExportHelperScript $args
+  return New-CommandRecord $ExportCommandName "export" $TrustedExportHelperScript $commandArgs
 }
 
 function Build-ImportCommand([bool]$DryRunMode) {
-  $common = Read-CommonSettings
-  $archivedMode = Read-ArchivedByNameMode
-  $projectId = Read-ProjectId
-  $userId = Read-UserId
-  if (-not [string]::IsNullOrWhiteSpace($projectId) -and -not [string]::IsNullOrWhiteSpace($userId)) {
-    throw "ProjectId and UserId cannot both be set. Choose one import target before running import."
-  }
-  $allowMissingBindings = Read-AllowMissingCredentialBindings
-  $skipRefresh = Read-SkipCredentialBindingRefresh
-  $restartAfterImport = Read-RestartContainerAfterImport
-
-  $args = @(
-    "-WorkflowDir", $common.WorkflowDir,
-    "-BindingsFile", $common.BindingsFile,
-    "-ArchivedByNameMode", $archivedMode
+  $commandArgs = @(
+    "-WorkflowDir", $DefaultWorkflowDir,
+    "-ArchivedByNameMode", "CreateNew"
   )
-  if (-not [string]::IsNullOrWhiteSpace($common.Container)) { $args += @("-Container", $common.Container) }
-  if (-not [string]::IsNullOrWhiteSpace($common.ContainerId)) { $args += @("-ContainerId", $common.ContainerId) }
-  if (-not [string]::IsNullOrWhiteSpace($common.ComposeProject)) { $args += @("-ComposeProject", $common.ComposeProject) }
-  if (-not [string]::IsNullOrWhiteSpace($common.ComposeService)) { $args += @("-ComposeService", $common.ComposeService) }
-  if (-not [string]::IsNullOrWhiteSpace($projectId)) { $args += @("-ProjectId", $projectId) }
-  if (-not [string]::IsNullOrWhiteSpace($userId)) { $args += @("-UserId", $userId) }
-  if ($allowMissingBindings) { $args += "-AllowMissingCredentialBindings" }
-  if ($skipRefresh) { $args += "-SkipCredentialBindingRefresh" }
-  if ($restartAfterImport) { $args += "-RestartContainerAfterImport" }
-  if ($DryRunMode) { $args += "-DryRun" }
+  if ($DryRunMode) { $commandArgs += "-DryRun" }
 
-  return New-CommandRecord $ImportCommandName "import" $TrustedImportHelperScript $args
+  return New-CommandRecord $ImportCommandName "import" $TrustedImportHelperScript $commandArgs
+}
+
+function Invoke-ExplainLastFailure {
+  Write-Section "Explain Last n8n Failure"
+  $nodePath = Resolve-NodeCommandPath
+  & $nodePath $TrustedReportHelperScript "validate" "--report-root" (Join-Path $RepoRoot ".n8n-local/reports")
+  if ($LASTEXITCODE -ne 0) {
+    Write-Step "FAIL" "The latest report is missing or invalid; no workflow mutation was attempted."
+    return
+  }
+  & $nodePath $TrustedReportHelperScript "explain" "--report-root" (Join-Path $RepoRoot ".n8n-local/reports")
+  if ($LASTEXITCODE -ne 0) {
+    Write-Step "FAIL" "The latest failure could not be explained; no workflow mutation was attempted."
+  }
 }
 
 function Build-ValidateCommand {
@@ -769,6 +732,7 @@ while ($true) {
   Write-Host "6. Use previous command."
   Write-Host "7. Show previous command."
   Write-Host "8. Clear previous command."
+  Write-Host "9. Explain last n8n failure (read-only)."
   Write-Host "0. Exit."
 
   $choice = Read-Host "Choose an option"
@@ -801,6 +765,9 @@ while ($true) {
     }
     "8" {
       Clear-PreviousCommand
+    }
+    "9" {
+      Invoke-ExplainLastFailure
     }
     "0" {
       exit 0
