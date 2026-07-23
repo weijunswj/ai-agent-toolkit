@@ -44,7 +44,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.9.5';
+const expectedBridgeVersion = '2.9.6';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 
 function tmpBaseDir() {
@@ -5279,7 +5279,7 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   assert.equal(claudeAgentHook.matcher, 'Agent|Task');
   assert.match(claudeAgentHook.hooks[0].command, /\$\{CLAUDE_PLUGIN_ROOT\}\/repo\/scripts\/toolkit-claude-agent-hook\.cjs/);
   const n8nAdmissionHooks = [
-    ['PreToolUse', claudeHooks.hooks.PreToolUse[1], 'Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell'],
+    ['PreToolUse', claudeHooks.hooks.PreToolUse[1], `Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell|${require('../../skills/external-system-router/scripts/n8n-domain-router.cjs').N8N_MCP_TOOL_PATTERN_SOURCE}`],
     ['PostToolUse', claudeHooks.hooks.PostToolUse[0], 'Skill'],
     ['PostToolUse', claudeHooks.hooks.PostToolUse[1], 'Bash|PowerShell'],
     ['UserPromptSubmit', claudeHooks.hooks.UserPromptSubmit[0], undefined],

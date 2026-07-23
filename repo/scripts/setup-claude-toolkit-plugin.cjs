@@ -15,7 +15,7 @@ const MARKETPLACE_REL_PATH = '.claude-plugin/marketplace.json';
 const DEFAULT_SCOPE = 'user';
 const VALID_SCOPES = ['user', 'project', 'local'];
 const N8N_ADMISSION_HOOK_COMMAND = 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-n8n-admission-hook.cjs"';
-const N8N_MUTATION_MATCHER = 'Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell';
+const N8N_MUTATION_MATCHER = 'Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell|^mcp__[^\\s]*n8n[^\\s]*__[^\\s]+$';
 
 function slash(value) {
   return String(value || '').replace(/\\/g, '/');

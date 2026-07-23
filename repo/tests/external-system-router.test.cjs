@@ -48,6 +48,7 @@ function audit(interfaceId, interfaceKind, assuranceScore, overrides = {}) {
     schemaVersion: router.AUDIT_SCHEMA_VERSION,
     provider: 'coolify',
     targetAlias: 'coolify-swooshz-production',
+    accountOrOrganisation: 'swooshz',
     environment: 'production',
     operation: 'deploy-revision',
     interfaceId,
@@ -219,6 +220,16 @@ test('authorization schema and runtime use the exact same alias contract includi
   assert.equal(schema.$defs.alias.pattern, router.ALIAS_PATTERN_SOURCE);
   assert.equal(schema.$defs.operations.items.$ref, '#/$defs/alias');
   assert.equal(schema.properties.interfaceRestrictions.items.pattern, router.INTERFACE_RESTRICTION_PATTERN_SOURCE);
+  const auditSchema = JSON.parse(fs.readFileSync(path.join(
+    __dirname, '..', '..', '_projects', 'development', 'external-system-router', '_main', 'skill',
+    'references', 'schemas', 'capability-audit.schema.json'
+  ), 'utf8'));
+  assert.ok(auditSchema.required.includes('accountOrOrganisation'));
+  const registrySchema = JSON.parse(fs.readFileSync(path.join(
+    __dirname, '..', '..', '_projects', 'development', 'external-system-router', '_main', 'skill',
+    'references', 'schemas', 'provider-target-registry.schema.json'
+  ), 'utf8'));
+  assert.ok(registrySchema.properties.targets.items.required.includes('accountOrOrganisation'));
   assert.doesNotThrow(() => router.validateAuthorizationEnvelope(envelope({
     targetAlias: 'team:production',
     allowedOperations: ['read:revision'],
@@ -244,7 +255,7 @@ test('standalone AI coding rules explicitly declare the external-system-router r
   ), 'utf8'));
   assert.equal(dependencies.schemaVersion, 'ai-agent-toolkit.skill-runtime-dependencies.v1');
   const externalRouter = dependencies.dependencies.find((entry) => entry.id === 'external-system-router');
-  assert.equal(externalRouter.compatibleVersion, '1.0.5');
+  assert.equal(externalRouter.compatibleVersion, '1.0.6');
   assert.equal(externalRouter.installUnit, 'complete-skill-folder');
   assert.equal(externalRouter.unavailableBehavior, 'fail-closed');
   for (const required of [
@@ -307,6 +318,7 @@ test('operation-specific assurance selects structured routes without a global MC
   const browser = audit('coolify-browser', 'browser', 100);
   const context = {
     provider: 'coolify', targetAlias: 'coolify-swooshz-production', environment: 'production',
+    accountOrOrganisation: 'swooshz',
     resource: 'one-application', targetFingerprint: `sha256:${'f'.repeat(64)}`,
     operation: 'deploy-revision', readOnly: false
   };
@@ -351,6 +363,39 @@ test('operation-specific assurance selects structured routes without a global MC
   }), (error) => error.code === 'EXTERNAL_NO_ADMISSIBLE_ROUTE');
   assert.throws(() => router.selectStrongestAdmissibleInterface(context, [browser], {
     ...options,
+    authorizationEnvelope: envelope({
+      resource: 'one-application',
+      interfaceRestrictions: ['forbid-browser'],
+      ownerApprovalReference: 'owner-approved-disclosure'
+    })
+  }), (error) => error.code === 'EXTERNAL_NO_ADMISSIBLE_ROUTE');
+  assert.throws(() => router.selectStrongestAdmissibleInterface(
+    { ...context, accountOrOrganisation: 'different-account' }, [api], options
+  ), (error) => error.code === 'EXTERNAL_REAUTHORISATION_REQUIRED');
+  const wrongAccountAudit = audit('wrong-account-api', 'api', 81, { accountOrOrganisation: 'different-account' });
+  assert.throws(() => router.selectStrongestAdmissibleInterface(
+    context, [wrongAccountAudit], options
+  ), (error) => error.code === 'EXTERNAL_NO_ADMISSIBLE_ROUTE');
+  assert.throws(() => router.selectStrongestAdmissibleInterface(context, [api], {
+    ...options,
+    now: Date.parse('2026-07-23T01:00:00.000Z'),
+    authorizationEnvelope: envelope({
+      resource: 'one-application',
+      lifetime: { kind: 'time-bounded', expiresAt: '2026-07-23T00:00:00.000Z' },
+      interfaceRestrictions: []
+    })
+  }), (error) => error.code === 'EXTERNAL_REAUTHORISATION_REQUIRED');
+  assert.throws(() => router.selectStrongestAdmissibleInterface(context, [api], {
+    ...options,
+    authorizationEnvelope: envelope({
+      resource: 'one-application',
+      operationRiskTiers: { 'read-revision': 0, 'deploy-revision': 0, 'delete-application': 3 },
+      authorisedTier2Operations: [],
+      interfaceRestrictions: []
+    })
+  }), (error) => error.code === 'EXTERNAL_TIER2_APPROVAL_REQUIRED');
+  assert.throws(() => router.selectStrongestAdmissibleInterface(context, [browser], {
+    ...options,
     graphicalDisclosure: disclosure({ mayClick: ['A different control.'] })
   }), (error) => error.code === 'EXTERNAL_NO_ADMISSIBLE_ROUTE');
   assert.throws(() => router.selectStrongestAdmissibleInterface(context, [browser], {
@@ -376,6 +421,7 @@ function target(alias, environment, credentials = ['credential-store://coolify/s
   return {
     provider: 'coolify',
     targetAlias: alias,
+    accountOrOrganisation: 'swooshz',
     environment,
     sanitizedFingerprint: `sha256:${alias === 'coolify-swooshz-production' ? 'a' : 'b'.repeat(1)}${'0'.repeat(63)}`,
     privateOriginReference: `local-registry://origins/${alias}`,
@@ -407,15 +453,28 @@ test('provider target registry defaults to one credential, never guesses, and su
     targetFingerprint: selected.sanitizedFingerprint
   });
   exactAudit.targetBinding = router.targetBindingDigest(exactAudit);
-  const codex = router.buildHostAdapterPlan(selected, 'codex', [exactAudit]);
-  const claude = router.buildHostAdapterPlan(selected, 'claude-code', [exactAudit]);
+  const currentTarget = { ...selected, capabilityDigests: [exactAudit.capabilityDigest] };
+  const codex = router.buildHostAdapterPlan(currentTarget, 'codex', [exactAudit]);
+  const claude = router.buildHostAdapterPlan(currentTarget, 'claude-code', [exactAudit]);
   assert.deepEqual(codex.logicalTarget, claude.logicalTarget);
   assert.equal(codex.requiresProviderRediscoveryOnHostSwitch, false);
   assert.equal(claude.preserveOtherHostConfiguration, true);
   assert.equal(claude.copySecretsIntoRepository, false);
-  const wrongTarget = router.buildHostAdapterPlan(selected, 'codex', [audit('wrong-target', 'api', 80)]);
+  const wrongTarget = router.buildHostAdapterPlan(currentTarget, 'codex', [audit('wrong-target', 'api', 80)]);
   assert.equal(wrongTarget.capabilityAuditPassed, false);
   assert.deepEqual(wrongTarget.supportedOperations, []);
+  const uninstalled = router.buildHostAdapterPlan({
+    ...currentTarget,
+    installedInterfaces: []
+  }, 'codex', [exactAudit]);
+  assert.equal(uninstalled.capabilityAuditPassed, false);
+  assert.deepEqual(uninstalled.supportedOperations, []);
+  const staleDigest = router.buildHostAdapterPlan({
+    ...currentTarget,
+    capabilityDigests: []
+  }, 'codex', [exactAudit]);
+  assert.equal(staleDigest.capabilityAuditPassed, false);
+  assert.deepEqual(staleDigest.supportedOperations, []);
 });
 
 test('receipts redact unsafe material and route lifecycle never auto-revokes', () => {

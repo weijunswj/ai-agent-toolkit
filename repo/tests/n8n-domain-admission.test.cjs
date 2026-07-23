@@ -69,6 +69,12 @@ test('material n8n work detects intent, classifies the exact operation, and buil
   assert.ok(required.includes('n8n-node-configuration-official'));
   assert.equal(n8n.auditN8nCompletion(ledger).complete, false);
   assert.equal(n8n.detectN8nTask({ objective: 'What is n8n?' }).detected, false);
+  const ledgerSchema = JSON.parse(fs.readFileSync(path.join(
+    __dirname, '..', '..', 'skills', 'external-system-router', 'references', 'schemas',
+    'n8n-capability-ledger.schema.json'
+  ), 'utf8'));
+  assert.ok(ledgerSchema.required.includes('objectiveTargetDigest'));
+  assert.deepEqual(ledgerSchema.properties.objectiveTargetDigest, { $ref: '#/$defs/digest' });
 });
 
 test('failed, stale, malformed, unqualified, or ambiguous Skill attempts never satisfy the ledger', () => {
@@ -158,6 +164,13 @@ test('generic validator or mirrored workflow evidence cannot substitute for offi
     tool_name: 'PowerShell',
     tool_input: { command: 'Get-Content n8n-workflows/example.json' }
   }), false);
+  assert.equal(n8n.looksLikeN8nWorkflowMutation({
+    tool_name: 'mcp__n8n__update_workflow',
+    tool_input: { workflowId: 'workflow-alias', nodes: [] }
+  }), true);
+  assert.equal(n8n.isGovernedN8nMutationTool('mcp__n8n__get_workflow'), false);
+  assert.equal(n8n.isGovernedN8nMutationTool('mcp__n8n__rename_workflow'), true);
+  assert.equal(n8n.inferGovernedMutationOperation('mcp__n8n__update_workflow'), 'live-workflow-update');
   const repository = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-generic-workflow-target-'));
   fs.mkdirSync(path.join(repository, 'workflows'));
   fs.writeFileSync(path.join(repository, 'workflows', 'orders.json'), '{"name":"Orders","nodes":[],"connections":{}}\n');
@@ -176,6 +189,11 @@ test('generic validator or mirrored workflow evidence cannot substitute for offi
     cwd: repository,
     tool_name: 'Bash',
     tool_input: { command: 'node scripts/change-workflow.cjs workflows/orders.json' }
+  }), true);
+  assert.equal(n8n.looksLikeN8nWorkflowMutation({
+    cwd: repository,
+    tool_name: 'Bash',
+    tool_input: { command: 'node scripts/change-workflow.cjs --file=workflows/orders.json' }
   }), true);
   assert.equal(n8n.looksLikeN8nWorkflowMutation({
     cwd: repository,
@@ -300,6 +318,19 @@ test('Claude Toolkit-direct hook blocks writes, permits generic validation witho
   };
   const blocked = hook.handle(writeInput, { router: fakeRouter, stateRoot });
   assert.equal(blocked.hookSpecificOutput.permissionDecision, 'deny');
+
+  const mcpBase = {
+    ...base,
+    session_id: 'claude-mcp-session-286',
+    hook_event_name: 'PreToolUse',
+    tool_name: 'mcp__n8n__update_workflow',
+    tool_input: { workflowId: 'workflow-alias', nodes: [] }
+  };
+  const blockedMcp = hook.handle(mcpBase, { router: fakeRouter, stateRoot });
+  assert.equal(blockedMcp.hookSpecificOutput.permissionDecision, 'deny');
+  const mcpLedger = n8n.readTaskLedger(mcpBase, { stateRoot });
+  assert.equal(mcpLedger.operation, 'live-workflow-update');
+  assert.ok(mcpLedger.requiredCapabilities.some((entry) => entry.capabilityId === 'live-route:live-workflow-update'));
 
   const genericWrite = hook.handle({
     ...base,
@@ -626,6 +657,11 @@ test('fallback denies governed events when an active ledger exists even without 
     tool_input: { file_path: 'automation/config.json', old_string: 'a', new_string: 'b' }
   }, new Error('synthetic ledger error'), { router: n8n, stateRoot });
   assert.equal(edit.hookSpecificOutput.permissionDecision, 'deny');
+  const mcp = hook.fallbackDecision({
+    ...input, hook_event_name: 'PreToolUse', tool_name: 'mcp__n8n__update_workflow',
+    tool_input: { workflowId: 'workflow-alias' }
+  }, new Error('synthetic ledger error'), { router: n8n, stateRoot });
+  assert.equal(mcp.hookSpecificOutput.permissionDecision, 'deny');
   const stop = hook.fallbackDecision({ ...input, hook_event_name: 'Stop', last_assistant_message: 'Done.' },
     new Error('synthetic ledger error'), { router: n8n, stateRoot });
   assert.equal(stop.decision, 'block');

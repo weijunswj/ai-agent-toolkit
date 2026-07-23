@@ -3484,7 +3484,7 @@ function verifyClaudeNativePluginMetadata(args) {
     ));
     if (!exact) throw new Error(`Claude Code plugin hooks must include the exact ${label} n8n admission hook`);
   };
-  requireExactN8nHook('PreToolUse', 'Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell', 'governed-mutation PreToolUse');
+  requireExactN8nHook('PreToolUse', 'Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell|^mcp__[^\\s]*n8n[^\\s]*__[^\\s]+$', 'governed-mutation PreToolUse');
   requireExactN8nHook('PostToolUse', 'Skill', 'Skill-evidence PostToolUse');
   requireExactN8nHook('UserPromptSubmit', null, 'intent-detection UserPromptSubmit');
   requireExactN8nHook('UserPromptExpansion', null, 'direct-Skill UserPromptExpansion');

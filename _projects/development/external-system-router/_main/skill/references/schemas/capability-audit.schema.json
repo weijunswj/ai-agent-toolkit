@@ -5,7 +5,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schemaVersion", "provider", "targetAlias", "environment", "operation", "interfaceId", "interfaceKind",
+    "schemaVersion", "provider", "targetAlias", "accountOrOrganisation", "environment", "operation", "interfaceId", "interfaceKind",
     "identity", "version", "availableOperations", "targetFingerprint", "targetBinding", "inputSchemaDigest", "authScopeStatus",
     "redaction", "retryIdempotency", "preconditions", "postconditions", "rollback", "failureSemantics",
     "capabilityDigest", "assuranceScore", "readOnly", "auditedAt", "evidenceReferences"
@@ -14,6 +14,7 @@
     "schemaVersion": {"const": "ai-agent-toolkit.capability-audit.v1"},
     "provider": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,63}$"},
     "targetAlias": {"$ref": "#/$defs/name"},
+    "accountOrOrganisation": {"$ref": "#/$defs/name"},
     "environment": {"$ref": "#/$defs/name"},
     "operation": {"$ref": "#/$defs/name"},
     "interfaceId": {"$ref": "#/$defs/name"},

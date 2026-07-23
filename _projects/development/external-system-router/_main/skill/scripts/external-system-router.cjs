@@ -227,10 +227,14 @@ function validateAuthorizationEnvelope(envelope) {
 
 function classifyRisk(operation) {
   requireObject(operation, 'Operation');
+  const operationName = String(operation.operation || '').toLowerCase();
   if (operation.destructive || operation.irreversible || operation.crossTarget || operation.revokesCredential
-    || operation.restoresData || operation.deletesDns || operation.highBlastRadius) return RISK_TIERS.DESTRUCTIVE;
+    || operation.restoresData || operation.deletesDns || operation.highBlastRadius
+    || /(?:^|[-_:])(?:delete|destroy|purge|drop|revoke|erase)(?:$|[-_:])/.test(operationName)) return RISK_TIERS.DESTRUCTIVE;
   if (operation.production || operation.sensitive || operation.changesCredential || operation.oauthSetup
-    || operation.deploys || operation.rollsBack || operation.writesEnvironment || operation.mutatesDatabase) return RISK_TIERS.SENSITIVE_REVERSIBLE;
+    || operation.deploys || operation.rollsBack || operation.writesEnvironment || operation.mutatesDatabase
+    || (operation.environment === 'production'
+      && /(?:^|[-_:])(?:deploy|publish|activate|deactivate|rollback|import|migrate)(?:$|[-_:])/.test(operationName))) return RISK_TIERS.SENSITIVE_REVERSIBLE;
   if (operation.readOnly === true && !operation.newSensitiveDataClass) return RISK_TIERS.INSPECTION;
   return RISK_TIERS.REVERSIBLE;
 }
@@ -343,6 +347,7 @@ function bindGraphicalApproval(disclosure, approval) {
     disclosureDigest,
     provider: disclosure.provider,
     targetAlias: disclosure.targetAlias,
+    accountOrOrganisation: disclosure.accountOrOrganisation,
     environment: disclosure.environment,
     resource: disclosure.resource,
     operation: disclosure.operation,
@@ -398,6 +403,7 @@ function targetBindingDigest(value) {
   return sha256({
     provider: value.provider,
     targetAlias: value.targetAlias,
+    accountOrOrganisation: value.accountOrOrganisation,
     environment: value.environment,
     targetFingerprint: value.targetFingerprint
   });
@@ -406,7 +412,7 @@ function targetBindingDigest(value) {
 function validateCapabilityAudit(audit) {
   requireObject(audit, 'Capability audit');
   const allowed = new Set([
-    'schemaVersion', 'provider', 'targetAlias', 'environment', 'operation', 'interfaceId', 'interfaceKind',
+    'schemaVersion', 'provider', 'targetAlias', 'accountOrOrganisation', 'environment', 'operation', 'interfaceId', 'interfaceKind',
     'identity', 'version', 'availableOperations', 'targetFingerprint', 'targetBinding', 'inputSchemaDigest', 'authScopeStatus',
     'redaction', 'retryIdempotency', 'preconditions', 'postconditions', 'rollback', 'failureSemantics',
     'capabilityDigest', 'assuranceScore', 'readOnly', 'auditedAt', 'evidenceReferences'
@@ -414,7 +420,7 @@ function validateCapabilityAudit(audit) {
   assertAllowedKeys(audit, allowed, 'Capability audit');
   invariant(audit.schemaVersion === AUDIT_SCHEMA_VERSION, 'Unsupported capability-audit schema.');
   requireString(audit.provider, 'provider', { pattern: PROVIDER_PATTERN });
-  for (const field of ['targetAlias', 'environment', 'operation', 'interfaceId']) requireString(audit[field], field, { pattern: ALIAS_PATTERN });
+  for (const field of ['targetAlias', 'accountOrOrganisation', 'environment', 'operation', 'interfaceId']) requireString(audit[field], field, { pattern: ALIAS_PATTERN });
   invariant(INTERFACE_KINDS.has(audit.interfaceKind), 'Unsupported interfaceKind.');
   requireString(audit.identity, 'identity', { max: 200 });
   requireString(audit.version, 'version', { max: 100 });
@@ -442,13 +448,13 @@ function graphicalApprovalMatchesOperation(approval, operationContext, disclosur
     requireObject(approval, 'Graphical-control approval binding');
     assertAllowedKeys(approval, new Set([
       'ownerApproved', 'authorisationReference', 'disclosureDigest', 'provider', 'targetAlias',
-      'environment', 'resource', 'operation', 'oneDeclaredEnvelopeOnly'
+      'accountOrOrganisation', 'environment', 'resource', 'operation', 'oneDeclaredEnvelopeOnly'
     ]), 'Graphical-control approval binding');
     invariant(approval.ownerApproved === true && approval.oneDeclaredEnvelopeOnly === true, 'Graphical approval is not bound to one declared envelope.');
     requireString(approval.authorisationReference, 'graphicalApproval.authorisationReference', { max: 200 });
     requireString(approval.disclosureDigest, 'graphicalApproval.disclosureDigest', { pattern: DIGEST_PATTERN });
     invariant(approval.disclosureDigest === sha256(disclosure), 'Graphical approval does not match the supplied disclosure.', 'EXTERNAL_GRAPHICAL_APPROVAL_MISMATCH');
-    for (const field of ['provider', 'targetAlias', 'environment', 'resource', 'operation']) {
+    for (const field of ['provider', 'targetAlias', 'accountOrOrganisation', 'environment', 'resource', 'operation']) {
       invariant(approval[field] === operationContext[field], `Graphical approval ${field} does not match the selected operation.`, 'EXTERNAL_GRAPHICAL_APPROVAL_MISMATCH');
       invariant(disclosure[field] === operationContext[field], `Graphical disclosure ${field} does not match the selected operation.`, 'EXTERNAL_GRAPHICAL_APPROVAL_MISMATCH');
     }
@@ -465,6 +471,7 @@ function interfaceRestrictions(envelope) {
   for (const restriction of envelope.interfaceRestrictions || []) {
     if (restriction.startsWith('require:')) required.add(restriction.slice('require:'.length));
     else if (restriction.startsWith('forbid:')) forbidden.add(restriction.slice('forbid:'.length));
+    else if (restriction.startsWith('forbid-')) forbidden.add(restriction.slice('forbid-'.length));
     else forbidden.add(restriction.slice('no-'.length));
   }
   return { forbidden, required };
@@ -475,7 +482,12 @@ function selectStrongestAdmissibleInterface(operationContext, audits, options = 
   const operation = requireString(operationContext.operation, 'operation', { pattern: ALIAS_PATTERN });
   requireString(operationContext.targetFingerprint, 'operationContext.targetFingerprint', { pattern: DIGEST_PATTERN });
   const envelope = validateAuthorizationEnvelope(options.authorizationEnvelope);
-  for (const field of ['provider', 'targetAlias', 'environment', 'resource']) {
+  assertOperationAuthorized(envelope, operationContext, {
+    establishedTier: options.establishedTier,
+    immediateApproval: options.immediateApproval,
+    now: options.now
+  });
+  for (const field of ['provider', 'targetAlias', 'accountOrOrganisation', 'environment', 'resource']) {
     invariant(envelope[field] === operationContext[field], `Authorisation envelope ${field} does not match the selected operation.`, 'EXTERNAL_REAUTHORISATION_REQUIRED');
   }
   invariant(envelope.allowedOperations.includes(operation) && !envelope.forbiddenOperations.includes(operation),
@@ -485,6 +497,7 @@ function selectStrongestAdmissibleInterface(operationContext, audits, options = 
   const audited = audits.map(validateCapabilityAudit).filter((audit) =>
     audit.provider === operationContext.provider
     && audit.targetAlias === operationContext.targetAlias
+    && audit.accountOrOrganisation === operationContext.accountOrOrganisation
     && audit.environment === operationContext.environment
     && audit.targetFingerprint === operationContext.targetFingerprint
     && audit.targetBinding === targetBindingDigest(operationContext)
@@ -586,12 +599,13 @@ function validateProviderTargetRegistry(registry) {
   for (const [index, target] of registry.targets.entries()) {
     requireObject(target, `targets[${index}]`);
     assertAllowedKeys(target, new Set([
-      'provider', 'targetAlias', 'environment', 'sanitizedFingerprint', 'privateOriginReference',
+      'provider', 'targetAlias', 'accountOrOrganisation', 'environment', 'sanitizedFingerprint', 'privateOriginReference',
       'resourceReferences', 'credentialReferences', 'multipleCredentialJustification', 'installedInterfaces',
       'capabilityDigests', 'routeSelections', 'lastAuditState', 'receiptReferences'
     ]), `targets[${index}]`);
     requireString(target.provider, 'provider', { pattern: PROVIDER_PATTERN });
     requireString(target.targetAlias, 'targetAlias', { pattern: ALIAS_PATTERN });
+    requireString(target.accountOrOrganisation, 'accountOrOrganisation', { pattern: ALIAS_PATTERN });
     requireString(target.environment, 'environment', { pattern: ALIAS_PATTERN });
     requireString(target.sanitizedFingerprint, 'sanitizedFingerprint', { pattern: DIGEST_PATTERN });
     if (target.privateOriginReference !== undefined) requireString(target.privateOriginReference, 'privateOriginReference', { pattern: PRIVATE_REFERENCE_PATTERN });
@@ -637,11 +651,15 @@ function buildHostAdapterPlan(target, host, capabilityAudits) {
   const audits = capabilityAudits.map(validateCapabilityAudit).filter((audit) =>
     audit.provider === target.provider
     && audit.targetAlias === target.targetAlias
+    && audit.accountOrOrganisation === target.accountOrOrganisation
     && audit.environment === target.environment
     && audit.targetFingerprint === target.sanitizedFingerprint
+    && target.installedInterfaces.includes(audit.interfaceId)
+    && target.capabilityDigests.includes(audit.capabilityDigest)
     && audit.targetBinding === targetBindingDigest({
       provider: target.provider,
       targetAlias: target.targetAlias,
+      accountOrOrganisation: target.accountOrOrganisation,
       environment: target.environment,
       targetFingerprint: target.sanitizedFingerprint
     })
@@ -657,6 +675,7 @@ function buildHostAdapterPlan(target, host, capabilityAudits) {
     logicalTarget: {
       provider: target.provider,
       targetAlias: target.targetAlias,
+      accountOrOrganisation: target.accountOrOrganisation,
       environment: target.environment,
       sanitizedFingerprint: target.sanitizedFingerprint
     },

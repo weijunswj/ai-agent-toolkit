@@ -12,10 +12,11 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["provider", "targetAlias", "environment", "sanitizedFingerprint", "credentialReferences", "installedInterfaces", "capabilityDigests", "routeSelections", "lastAuditState", "receiptReferences"],
+        "required": ["provider", "targetAlias", "accountOrOrganisation", "environment", "sanitizedFingerprint", "credentialReferences", "installedInterfaces", "capabilityDigests", "routeSelections", "lastAuditState", "receiptReferences"],
         "properties": {
           "provider": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,63}$"},
           "targetAlias": {"$ref": "#/$defs/name"},
+          "accountOrOrganisation": {"$ref": "#/$defs/name"},
           "environment": {"$ref": "#/$defs/name"},
           "sanitizedFingerprint": {"$ref": "#/$defs/digest"},
           "privateOriginReference": {"type": "string", "pattern": "^(credential-store|local-registry|os-keychain)://[a-zA-Z0-9._/-]+$"},

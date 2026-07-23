@@ -89,6 +89,9 @@ const FACET_SKILLS = Object.freeze({
   'extending-mcp': 'n8n-extending-mcp-official'
 });
 const GOVERNED_MUTATION_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'PowerShell']);
+const N8N_MCP_TOOL_PATTERN_SOURCE = '^mcp__[^\\s]*n8n[^\\s]*__[^\\s]+$';
+const N8N_MCP_TOOL_PATTERN = new RegExp(N8N_MCP_TOOL_PATTERN_SOURCE, 'i');
+const N8N_MCP_PROVEN_READ_ONLY_ACTION_PATTERN = /^(?:n8n_)?(?:get|list|search|describe|inspect|validate|health|status|schema|documentation|read)(?:_|$)/i;
 const CAPABILITY_RECEIPT_MAX_BYTES = 32768;
 const N8N_WORKFLOW_MAX_BYTES = 2 * 1024 * 1024;
 const LEDGER_LOCK_OWNER_FILE = 'owner.json';
@@ -114,6 +117,23 @@ function normalizeSkillName(value) {
   let name = String(value || '').trim().replace(/^\//, '');
   if (name.includes(':')) name = name.slice(name.lastIndexOf(':') + 1);
   return name;
+}
+
+function isGovernedN8nMutationTool(toolName) {
+  const normalized = String(toolName || '');
+  if (GOVERNED_MUTATION_TOOLS.has(normalized)) return true;
+  if (!N8N_MCP_TOOL_PATTERN.test(normalized)) return false;
+  return !N8N_MCP_PROVEN_READ_ONLY_ACTION_PATTERN.test(normalized.slice(normalized.lastIndexOf('__') + 2));
+}
+
+function inferGovernedMutationOperation(toolName) {
+  const normalized = String(toolName || '').toLowerCase();
+  if (!isGovernedN8nMutationTool(normalized) || !N8N_MCP_TOOL_PATTERN.test(normalized)) return null;
+  if (/credential|oauth/.test(normalized)) return 'credential-or-oauth-setup';
+  if (/(?:publish|unpublish|activate|deactivate)/.test(normalized)) return 'live-workflow-publish';
+  if (/(?:execute|run)/.test(normalized)) return 'live-workflow-execute';
+  if (/(?:import|create)/.test(normalized)) return 'live-workflow-import';
+  return 'live-workflow-update';
 }
 
 function normalizeOfficialText(bytes) {
@@ -917,7 +937,7 @@ function auditN8nCompletion(ledger) {
 function assertN8nMutationAdmitted(ledger, mutation = {}) {
   validateN8nCapabilityLedger(ledger);
   const toolName = string(mutation.toolName || 'unknown', 'toolName', 80);
-  if (!GOVERNED_MUTATION_TOOLS.has(toolName)) return { admitted: true, governed: false };
+  if (!isGovernedN8nMutationTool(toolName)) return { admitted: true, governed: false };
   const audit = auditN8nCompletion(ledger);
   if (!audit.complete) {
     fail(`${audit.stableCode}: ${audit.missingCapability}. ${audit.supportedNextAction}`, audit.stableCode, audit);
@@ -934,7 +954,8 @@ function assertN8nMutationAdmitted(ledger, mutation = {}) {
 function looksLikeN8nWorkflowMutation(input) {
   if (!isObject(input)) return false;
   const toolName = String(input.tool_name || input.toolName || '');
-  if (!GOVERNED_MUTATION_TOOLS.has(toolName)) return false;
+  if (!isGovernedN8nMutationTool(toolName)) return false;
+  if (N8N_MCP_TOOL_PATTERN.test(toolName)) return true;
   const toolInput = isObject(input.tool_input) ? input.tool_input : isObject(input.toolInput) ? input.toolInput : {};
   const combined = JSON.stringify(toolInput).toLowerCase().replace(/\\\\/g, '/');
   const targetPath = String(toolInput.file_path || toolInput.filePath || toolInput.path || toolInput.notebook_path || '').toLowerCase().replace(/\\/g, '/');
@@ -976,7 +997,10 @@ function inspectExistingN8nWorkflowTarget(input) {
   if (['Bash', 'PowerShell'].includes(toolName)) {
     const tokens = tokenizeBoundedCommand(String(toolInput.command || '').trim());
     if (!tokens) return false;
-    targets = tokens.filter((token) => /\.json$/i.test(token));
+    targets = tokens.map((token) => {
+      const equalsOption = /^--?[a-z][a-z0-9-]*=(.+\.json)$/i.exec(token);
+      return equalsOption ? equalsOption[1] : token;
+    }).filter((token) => /\.json$/i.test(token));
   } else if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(toolName)) {
     targets = [String(toolInput.file_path || toolInput.filePath || toolInput.path || toolInput.notebook_path || '')];
   } else {
@@ -1244,6 +1268,9 @@ module.exports = {
   HELPER_OPERATIONS,
   LIVE_OPERATIONS,
   GOVERNED_MUTATION_TOOLS,
+  N8N_MCP_TOOL_PATTERN_SOURCE,
+  isGovernedN8nMutationTool,
+  inferGovernedMutationOperation,
   normalizeSkillName,
   normalizeOfficialText,
   gitBlobSha1,

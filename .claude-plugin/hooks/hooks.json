@@ -22,7 +22,7 @@
         ]
       },
       {
-        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell",
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell|^mcp__[^\\s]*n8n[^\\s]*__[^\\s]+$",
         "hooks": [
           {
             "type": "command",

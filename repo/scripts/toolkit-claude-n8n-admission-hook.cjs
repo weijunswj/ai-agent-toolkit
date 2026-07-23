@@ -64,7 +64,10 @@ function skillNameFromInput(input) {
 }
 
 function inferredMutationOperation(input, router) {
-  const serialized = JSON.stringify(input.tool_input || {}).toLowerCase();
+  const toolName = String(input.tool_name || input.toolName || '');
+  const governedOperation = router?.inferGovernedMutationOperation?.(toolName);
+  if (governedOperation) return governedOperation;
+  const serialized = `${toolName} ${JSON.stringify(input.tool_input || {})}`.toLowerCase();
   const exact = router?.inferN8nOperation?.(serialized);
   if (exact && (router.HELPER_OPERATIONS.has(exact) || router.LIVE_OPERATIONS.has(exact) || exact === 'credential-or-oauth-setup')) return exact;
   if (/expression|\{\{/.test(serialized)) return 'expression-authoring';
@@ -179,7 +182,7 @@ function handle(input, options = {}) {
 
   if (eventName === 'PreToolUse') {
     const toolName = String(input.tool_name || input.toolName || '');
-    if (!router.GOVERNED_MUTATION_TOOLS.has(toolName)) return {};
+    if (!router.isGovernedN8nMutationTool(toolName)) return {};
     let ledger = router.readTaskLedger(input, options);
     if (ledger && router.isCapabilityReceiptIngestionToolUse(input)) return {};
     if (ledger && router.isCapabilityProducerToolUse(input, ledger, options)) return {};
@@ -238,7 +241,16 @@ function fallbackDecision(input, error, options = {}) {
   } catch {
     activeLedger = false;
   }
-  const governedTool = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'PowerShell'].includes(String(input.tool_name || input.toolName || ''));
+  const toolName = String(input.tool_name || input.toolName || '');
+  let governedTool = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'PowerShell'].includes(toolName);
+  try {
+    const router = options.router || loadRouter();
+    governedTool = router.isGovernedN8nMutationTool(toolName);
+  } catch {
+    governedTool = governedTool || (/^mcp__[^\s]*n8n[^\s]*__[^\s]+$/i.test(toolName)
+      && !/^(?:n8n_)?(?:get|list|search|describe|inspect|validate|health|status|schema|documentation|read)(?:_|$)/i
+        .test(toolName.slice(toolName.lastIndexOf('__') + 2)));
+  }
   if (eventName === 'PreToolUse' && (looksN8n || (activeLedger && governedTool))) {
     return preToolDeny({
       stableCode: 'N8N_ADMISSION_UNAVAILABLE',
