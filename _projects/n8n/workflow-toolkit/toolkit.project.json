@@ -5,9 +5,9 @@
   "title": "n8n Workflow Toolkit",
   "module_path": "_projects/n8n/workflow-toolkit",
   "main_path": "_projects/n8n/workflow-toolkit/_main",
-  "version": "1.3.4",
+  "version": "1.3.5",
   "version_policy": "semver",
-  "version_notes": "Revalidates exact target and backup identity at canonical transaction boundaries, preserves concurrent state, and reports bounded partial recovery.",
+  "version_notes": "Installs canonical candidates without overwrite, defines a coherent batch commit point, and preserves exact cleanup residue without subset rollback.",
   "outputs": [
     {
       "kind": "curated",

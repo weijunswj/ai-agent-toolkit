@@ -3,7 +3,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const REPORT_SCHEMA_VERSION = 1;
-const TOOLKIT_VERSION = '2.9.8';
+const TOOLKIT_VERSION = '2.9.9';
 const RETENTION_DAYS = 90;
 const MAX_HISTORY_REPORTS = 500;
 const STABLE_CODES = new Set([
@@ -18,6 +18,8 @@ const STABLE_CODES = new Set([
   'N8N_CANONICAL_INVARIANT_FAILED',
   'N8N_CANONICAL_TRANSACTION_DRIFT',
   'N8N_CANONICAL_TRANSACTION_PARTIAL_RECOVERY',
+  'N8N_CANONICAL_TRANSACTION_COMMITTED_CLEANUP_REQUIRED',
+  'N8N_CANONICAL_TRANSACTION_NO_OVERWRITE_UNAVAILABLE',
   'N8N_POLICY_VALIDATION_FAILED',
   'N8N_IMPORT_NO_CHANGES',
   'N8N_IMPORT_SUCCESS',
@@ -39,6 +41,8 @@ const EXPLANATIONS = Object.freeze({
   N8N_CANONICAL_INVARIANT_FAILED: 'Prepared output changed canonical workflow content outside authorised overlays.',
   N8N_CANONICAL_TRANSACTION_DRIFT: 'A canonical target changed after transaction authorization and was preserved without replacement.',
   N8N_CANONICAL_TRANSACTION_PARTIAL_RECOVERY: 'Concurrent canonical target changes prevented provably exact rollback, so bounded recovery evidence was preserved.',
+  N8N_CANONICAL_TRANSACTION_COMMITTED_CLEANUP_REQUIRED: 'The complete canonical candidate batch committed, but exact transaction-owned cleanup residue remains.',
+  N8N_CANONICAL_TRANSACTION_NO_OVERWRITE_UNAVAILABLE: 'The host filesystem could not provide the required atomic no-overwrite candidate installation primitive.',
   N8N_POLICY_VALIDATION_FAILED: 'The canonical workflow or deployment policy failed validation.',
   N8N_IMPORT_NO_CHANGES: 'The effective prepared workflow already matches the target.',
   N8N_IMPORT_SUCCESS: 'The prepared workflow imported and the inactive postcondition was verified.',
@@ -96,6 +100,14 @@ function nextActionForCode(code, context = {}) {
     N8N_CANONICAL_TRANSACTION_PARTIAL_RECOVERY: {
       code: 'RECONCILE_CANONICAL_RECOVERY_EVIDENCE',
       message: 'Do not rerun until the preserved canonical target and bounded recovery evidence have been reconciled.',
+    },
+    N8N_CANONICAL_TRANSACTION_COMMITTED_CLEANUP_REQUIRED: {
+      code: 'RECONCILE_CANONICAL_TRANSACTION_RESIDUE',
+      message: 'Keep the committed canonical files; verify and remove only the exact retained transaction-owned residue before rerunning.',
+    },
+    N8N_CANONICAL_TRANSACTION_NO_OVERWRITE_UNAVAILABLE: {
+      code: 'USE_SUPPORTED_CANONICAL_FILESYSTEM',
+      message: 'Move the repository to a filesystem that supports same-directory hard-link no-overwrite installation, then rerun the unchanged official command.',
     },
     N8N_CREDENTIAL_DISCOVERY_UNAVAILABLE: {
       code: 'RESTORE_CREDENTIAL_DISCOVERY_AND_RERUN',

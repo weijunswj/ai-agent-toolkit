@@ -31,7 +31,7 @@ This short safety checklist is not the full runtime guide. Live n8n or Docker wo
 - Validate the payload and canonical invariant before comparison. Valid non-dry-run import needs no routine confirmation, stays inactive, and verifies the postcondition without execution.
 - For a supported unresolved first import, create the reported name/type and rerun. Unsupported transports stop before mutation.
 - Optional misses are informational; required, ambiguous, or unsafe matches block.
-- Preserve modes transactionally, use repository mode for new files, and keep temporary files private. Revalidate exact target content, type, mode, identity, and parent topology immediately before displacement. Preserve drift; roll back only proven transaction-owned identities and retain bounded recovery evidence otherwise.
+- Revalidate exact target and parent identity before displacement, then install by atomic no-overwrite hard link. Keep exact originals through the batch commit. Before commit, roll back only proven transaction objects. After commit, preserve the coherent candidate batch and any exact cleanup residue; never subset-roll back.
 
 Do not run live import/export in CI. Keep `.tmp/**` and `.n8n-local/**` ignored and local.
 

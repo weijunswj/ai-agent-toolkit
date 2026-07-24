@@ -5,9 +5,9 @@
   "title": "Secure CI/CD Installer",
   "module_path": "_projects/cicd/secure-installer",
   "main_path": "_projects/cicd/secure-installer/_main",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "version_policy": "semver",
-  "version_notes": "Keeps bundled n8n helpers aligned with exact pre-displacement target identity validation and concurrency-safe bounded recovery.",
+  "version_notes": "Keeps bundled n8n helpers aligned with no-overwrite candidate installation and coherent canonical transaction commit semantics.",
   "outputs": [
     {
       "kind": "curated",

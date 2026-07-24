@@ -126,6 +126,24 @@ function transactionPartialRecoveryError(cause) {
   );
 }
 
+function transactionCommittedCleanupError(cause) {
+  return transactionError(
+    'Canonical transaction committed the complete candidate batch, but exact transaction-owned cleanup remains required.',
+    cause,
+    'N8N_CANONICAL_TRANSACTION_COMMITTED_CLEANUP_REQUIRED',
+    'committed_cleanup_required'
+  );
+}
+
+function transactionNoOverwriteUnavailableError(cause) {
+  return transactionError(
+    'Canonical transaction could not use the required no-overwrite candidate installation primitive.',
+    cause,
+    'N8N_CANONICAL_TRANSACTION_NO_OVERWRITE_UNAVAILABLE',
+    'preserved'
+  );
+}
+
 function assertRegularOrMissing(filePath, label) {
   if (!fs.existsSync(filePath)) return;
   const stat = fs.lstatSync(filePath);
@@ -322,10 +340,14 @@ function assertCanonicalIdentity(expected, current, message) {
 }
 
 function absentIdentityFor(record) {
+  return absentIdentityAt(record.target, record.originalIdentity.parent);
+}
+
+function absentIdentityAt(filePath, parentIdentity) {
   return {
     exists: false,
-    realPath: comparablePath(record.target),
-    parent: record.originalIdentity.parent,
+    realPath: comparablePath(filePath),
+    parent: parentIdentity,
   };
 }
 
@@ -365,6 +387,121 @@ function restoreBackupWithoutOverwrite(record, hooks, index) {
   return true;
 }
 
+function installCandidateWithoutOverwrite(record, hooks, index) {
+  if (typeof hooks.afterFinalTargetAbsence === 'function') {
+    hooks.afterFinalTargetAbsence(record, index);
+  }
+  if (!sameCanonicalIdentity(record.stageIdentity, captureCanonicalTargetIdentity(record.stage))) {
+    throw transactionDriftError('Canonical transaction stage changed at the no-overwrite installation boundary.');
+  }
+  try {
+    const linkCandidate = typeof hooks.linkCandidateNoOverwrite === 'function'
+      ? hooks.linkCandidateNoOverwrite
+      : (source, target) => fs.linkSync(source, target);
+    linkCandidate(record.stage, record.target, record, index);
+  } catch (error) {
+    if (error?.code === 'EEXIST') {
+      throw transactionDriftError('Canonical transaction target appeared at the no-overwrite installation boundary.');
+    }
+    throw transactionNoOverwriteUnavailableError(error);
+  }
+  record.installed = true;
+  record.mutatedByTransaction = true;
+  const installedBeforeMode = captureCanonicalTargetIdentity(record.target);
+  if (!sameMovedFileIdentity(record.stageIdentity, installedBeforeMode, record.stageIdentity.mode)) {
+    throw transactionDriftError('Canonical transaction candidate identity changed during no-overwrite installation.');
+  }
+  const stageAfterLink = captureCanonicalTargetIdentity(record.stage);
+  if (!sameMovedFileIdentity(record.stageIdentity, stageAfterLink, record.stageIdentity.mode)) {
+    throw transactionDriftError('Canonical transaction stage identity changed during no-overwrite installation.');
+  }
+  record.installedIdentity = installedBeforeMode;
+  record.stageIdentity = stageAfterLink;
+  applyInstalledMode(record.target, record.installMode);
+  const installed = captureCanonicalTargetIdentity(record.target);
+  if (!sameMovedFileIdentity(record.installedIdentity, installed, record.installMode)) {
+    throw transactionDriftError('Canonical transaction candidate mode or identity changed during installation.');
+  }
+  const staged = captureCanonicalTargetIdentity(record.stage);
+  if (!sameMovedFileIdentity(record.stageIdentity, staged, record.installMode)) {
+    throw transactionDriftError('Canonical transaction stage mode or identity changed during installation.');
+  }
+  record.installedIdentity = installed;
+  record.stageIdentity = staged;
+}
+
+function assertRecordPrecommitState(record) {
+  assertCanonicalIdentity(
+    record.installedIdentity,
+    captureCanonicalTargetIdentity(record.target),
+    'Canonical transaction candidate changed before commit.'
+  );
+  assertCanonicalIdentity(
+    record.stageIdentity,
+    captureCanonicalTargetIdentity(record.stage),
+    'Canonical transaction stage changed before commit.'
+  );
+  if (record.originalMoved) {
+    assertCanonicalIdentity(
+      record.backupIdentity,
+      captureCanonicalTargetIdentity(record.backup),
+      'Canonical transaction original quarantine changed before commit.'
+    );
+  }
+  const currentParent = captureParentIdentity(record.target);
+  if (!sameParentIdentity(record.originalIdentity.parent, currentParent)) {
+    throw transactionDriftError('Canonical transaction parent topology changed before commit.');
+  }
+}
+
+function assertCommittedCandidateBatch(records) {
+  for (const record of records) {
+    const current = captureCanonicalTargetIdentity(record.target);
+    if (!record.installedIdentity || !sameMovedFileIdentity(record.installedIdentity, current, record.installMode)) return false;
+    if (process.platform !== 'win32' && current.mode !== record.installMode) return false;
+    if (!sameParentIdentity(record.originalIdentity.parent, current.parent)) return false;
+    record.installedIdentity = current;
+  }
+  return true;
+}
+
+function cleanupExactTemporary(record, property, identityProperty, hooks, hookName, index) {
+  const filePath = record[property];
+  const expectedIdentity = record[identityProperty];
+  if (!expectedIdentity) return;
+  if (typeof hooks[hookName] === 'function') hooks[hookName](record, index);
+  const current = captureCanonicalTargetIdentity(filePath);
+  if (!sameCanonicalIdentity(expectedIdentity, current)) {
+    throw transactionPartialRecoveryError();
+  }
+  const removeTemporary = typeof hooks.removeExactTemporary === 'function'
+    ? hooks.removeExactTemporary
+    : (target) => fs.rmSync(target, { force: false });
+  removeTemporary(filePath, record, property, index);
+  const absent = captureCanonicalTargetIdentity(filePath);
+  if (!sameCanonicalIdentity(absentIdentityAt(filePath, expectedIdentity.parent), absent)) {
+    throw transactionPartialRecoveryError();
+  }
+  record[identityProperty] = null;
+}
+
+function assertCompleteTransactionPostcondition(records) {
+  for (const record of records) {
+    assertCanonicalIdentity(
+      record.installedIdentity,
+      captureCanonicalTargetIdentity(record.target),
+      'Canonical transaction final candidate postcondition failed.'
+    );
+    assertInstalledMode(record.target, record.installMode);
+    for (const temporary of [record.stage, record.backup, record.rollbackStage]) {
+      const absent = captureCanonicalTargetIdentity(temporary);
+      if (!sameCanonicalIdentity(absentIdentityAt(temporary, record.originalIdentity.parent), absent)) {
+        throw transactionPartialRecoveryError();
+      }
+    }
+  }
+}
+
 function rollbackTransaction(records, hooks) {
   let complete = true;
   for (let index = records.length - 1; index >= 0; index -= 1) {
@@ -399,6 +536,14 @@ function rollbackTransaction(records, hooks) {
           continue;
         }
         record.installed = false;
+        if (record.stageIdentity && fs.existsSync(record.stage)) {
+          const stageCurrent = captureCanonicalTargetIdentity(record.stage);
+          if (!sameMovedFileIdentity(record.stageIdentity, stageCurrent, record.stageIdentity.mode)) {
+            complete = false;
+            continue;
+          }
+          record.stageIdentity = stageCurrent;
+        }
       }
 
       if (record.originalMoved) {
@@ -438,7 +583,7 @@ function replaceFilesTransactionally(changes, hooks = {}) {
     const target = resolvedTargets[index];
     fs.mkdirSync(path.dirname(target), { recursive: true });
     const stage = path.join(path.dirname(target), `.${path.basename(target)}.${token}.${index}.stage`);
-    const backup = path.join(path.dirname(target), `.${path.basename(target)}.${token}.${index}.backup`);
+    const backup = path.join(path.dirname(target), `.${path.basename(target)}.${token}.${index}.quarantine`);
     const rollbackStage = path.join(path.dirname(target), `.${path.basename(target)}.${token}.${index}.rollback`);
     assertRegularOrMissing(stage, 'Canonical transaction stage');
     assertRegularOrMissing(backup, 'Canonical transaction backup');
@@ -464,6 +609,7 @@ function replaceFilesTransactionally(changes, hooks = {}) {
       originalMoved: false,
       installed: false,
       mutatedByTransaction: false,
+      phase: 'PREPARED',
     };
     record.originalExists = record.originalIdentity.exists;
     record.originalContent = record.originalIdentity.exists ? Buffer.from(record.originalIdentity.content) : null;
@@ -474,6 +620,7 @@ function replaceFilesTransactionally(changes, hooks = {}) {
 
   let failure = null;
   let recoveryIncomplete = false;
+  let phase = 'PREPARED';
   try {
     for (const record of records) {
       fs.writeFileSync(record.stage, record.content, { flag: 'wx', mode: 0o600 });
@@ -489,8 +636,10 @@ function replaceFilesTransactionally(changes, hooks = {}) {
       );
     }
 
+    phase = 'INSTALLING';
     for (let index = 0; index < records.length; index += 1) {
       const record = records[index];
+      record.phase = phase;
       if (typeof hooks.beforeTargetRevalidate === 'function') {
         hooks.beforeTargetRevalidate(record, index);
       }
@@ -504,6 +653,9 @@ function replaceFilesTransactionally(changes, hooks = {}) {
         throw transactionDriftError('Canonical transaction stage changed before installation.');
       }
       if (record.originalExists) {
+        if (typeof hooks.beforeOriginalQuarantine === 'function') {
+          hooks.beforeOriginalQuarantine(record, index);
+        }
         fs.renameSync(record.target, record.backup);
         record.originalMoved = true;
         record.mutatedByTransaction = true;
@@ -539,15 +691,7 @@ function replaceFilesTransactionally(changes, hooks = {}) {
       if (!sameCanonicalIdentity(record.stageIdentity, captureCanonicalTargetIdentity(record.stage))) {
         throw transactionDriftError('Canonical transaction stage changed before candidate installation.');
       }
-      fs.renameSync(record.stage, record.target);
-      record.installed = true;
-      record.mutatedByTransaction = true;
-      applyInstalledMode(record.target, record.installMode);
-      const installed = captureCanonicalTargetIdentity(record.target);
-      if (!sameMovedFileIdentity(record.stageIdentity, installed, record.installMode)) {
-        throw transactionDriftError('Canonical transaction candidate identity changed during installation.');
-      }
-      record.installedIdentity = installed;
+      installCandidateWithoutOverwrite(record, hooks, index);
       if (typeof hooks.beforeVerify === 'function') hooks.beforeVerify(record, index);
       const installedAfterHook = captureCanonicalTargetIdentity(record.target);
       if (!sameCanonicalIdentity(record.installedIdentity, installedAfterHook)) {
@@ -556,45 +700,71 @@ function replaceFilesTransactionally(changes, hooks = {}) {
       if (typeof hooks.afterReplace === 'function') hooks.afterReplace(record, index);
     }
 
+    phase = 'PRECOMMIT_VERIFIED';
     for (let index = 0; index < records.length; index += 1) {
       const record = records[index];
-      if (!record.originalMoved) continue;
-      if (typeof hooks.beforeBackupCleanup === 'function') hooks.beforeBackupCleanup(record, index);
-      const backupCurrent = captureCanonicalTargetIdentity(record.backup);
-      if (!sameCanonicalIdentity(record.backupIdentity, backupCurrent)) {
-        throw transactionDriftError('Canonical transaction backup changed before cleanup.');
-      }
-      const targetCurrent = captureCanonicalTargetIdentity(record.target);
-      if (!sameCanonicalIdentity(record.installedIdentity, targetCurrent)) {
-        throw transactionDriftError('Canonical transaction candidate changed before commit.');
-      }
+      record.phase = phase;
+      assertRecordPrecommitState(record);
     }
+    if (typeof hooks.afterPrecommitVerified === 'function') hooks.afterPrecommitVerified(records);
+    for (const record of records) assertRecordPrecommitState(record);
+
+    phase = 'COMMITTED';
+    for (const record of records) record.phase = phase;
+    if (typeof hooks.afterCommit === 'function') hooks.afterCommit(records);
+    if (!assertCommittedCandidateBatch(records)) {
+      throw transactionPartialRecoveryError();
+    }
+
+    phase = 'POST_COMMIT_CLEANUP';
     for (let index = 0; index < records.length; index += 1) {
       const record = records[index];
+      record.phase = phase;
+      cleanupExactTemporary(record, 'stage', 'stageIdentity', hooks, 'beforeStageCleanup', index);
+      const installedAfterStageCleanup = captureCanonicalTargetIdentity(record.target);
+      if (!sameMovedFileIdentity(record.installedIdentity, installedAfterStageCleanup, record.installMode)) {
+        throw transactionCommittedCleanupError();
+      }
+      record.installedIdentity = installedAfterStageCleanup;
       if (record.originalMoved) {
-        fs.rmSync(record.backup, { force: false });
+        cleanupExactTemporary(record, 'backup', 'backupIdentity', hooks, 'beforeBackupCleanup', index);
         record.originalMoved = false;
-        record.backupIdentity = null;
       }
     }
+    if (typeof hooks.beforeFinalPostcondition === 'function') hooks.beforeFinalPostcondition(records);
+    assertCompleteTransactionPostcondition(records);
+    phase = 'COMPLETE';
+    for (const record of records) record.phase = phase;
   } catch (error) {
     failure = error;
-    recoveryIncomplete = !rollbackTransaction(records, hooks);
+    if (phase === 'COMMITTED' || phase === 'POST_COMMIT_CLEANUP' || phase === 'COMPLETE') {
+      if (!assertCommittedCandidateBatch(records)) {
+        failure = transactionPartialRecoveryError(error);
+      } else if (error?.code !== 'N8N_CANONICAL_TRANSACTION_PARTIAL_RECOVERY') {
+        failure = error?.code === 'N8N_CANONICAL_TRANSACTION_COMMITTED_CLEANUP_REQUIRED'
+          ? error
+          : transactionCommittedCleanupError(error);
+      }
+    } else {
+      recoveryIncomplete = !rollbackTransaction(records, hooks);
+    }
   } finally {
-    for (const record of records) {
-      for (const [temporary, identity] of [
-        [record.stage, record.stageIdentity],
-        [record.rollbackStage, record.rollbackIdentity],
-      ]) {
-        if (!fs.existsSync(temporary)) continue;
-        try {
-          if (!exactTemporaryStillOwned(temporary, identity)) {
+    if (phase !== 'COMMITTED' && phase !== 'POST_COMMIT_CLEANUP' && phase !== 'COMPLETE') {
+      for (const record of records) {
+        for (const [temporary, identity] of [
+          [record.stage, record.stageIdentity],
+          [record.rollbackStage, record.rollbackIdentity],
+        ]) {
+          if (!fs.existsSync(temporary)) continue;
+          try {
+            if (!exactTemporaryStillOwned(temporary, identity)) {
+              recoveryIncomplete = true;
+              continue;
+            }
+            fs.rmSync(temporary, { force: false });
+          } catch {
             recoveryIncomplete = true;
-            continue;
           }
-          fs.rmSync(temporary, { force: false });
-        } catch {
-          recoveryIncomplete = true;
         }
       }
     }

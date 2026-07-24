@@ -1518,19 +1518,334 @@ test('multi-workflow canonical replacement rolls back every byte after a late fa
   assertOriginals();
   assert.throws(
     () => exportSync.replaceFilesTransactionally(changes, {
-      beforeBackupCleanup(_record, index) {
-        if (index === 1) throw new Error('synthetic backup cleanup failure');
+      afterPrecommitVerified() {
+        throw new Error('synthetic precommit failure');
       },
     }),
-    /synthetic backup cleanup failure/
+    /synthetic precommit failure/
   );
   assertOriginals();
 
-  exportSync.replaceFilesTransactionally(changes);
+  exportSync.replaceFilesTransactionally(changes, {
+    afterFinalTargetAbsence(record) {
+      if (process.platform !== 'win32') {
+        assert.equal(fs.statSync(record.stage).mode & 0o777, 0o600);
+      }
+    },
+  });
   const once = new Map(changes.map((change) => [change.targetPath, fs.readFileSync(change.targetPath)]));
   exportSync.replaceFilesTransactionally(changes);
   for (const change of changes) assert.equal(fs.readFileSync(change.targetPath).equals(once.get(change.targetPath)), true);
   fs.rmSync(fixtureRoot, { recursive: true, force: true });
+});
+
+test('candidate installation is atomic no-overwrite when a target appears after the final absence check', async (t) => {
+  const cases = [
+    ['different bytes', (record) => fs.writeFileSync(record.target, 'concurrent\n')],
+    ['candidate-identical bytes with different identity', (record) => fs.writeFileSync(record.target, record.content)],
+    ['directory', (record) => fs.mkdirSync(record.target)],
+    ['same-name hard-link object', (record, fixtureRoot) => {
+      const donor = path.join(fixtureRoot, 'donor.json');
+      fs.writeFileSync(donor, 'hard-link-concurrent\n');
+      fs.linkSync(donor, record.target);
+    }],
+  ];
+  for (const [label, appear] of cases) {
+    await t.test(label, () => {
+      const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-no-overwrite-'));
+      const target = path.join(fixtureRoot, 'workflow.json');
+      let appearedIdentity;
+      const error = expectCode(
+        () => exportSync.replaceFilesTransactionally(
+          [{ targetPath: target, content: '{"candidate":true}\n' }],
+          {
+            afterFinalTargetAbsence(record) {
+              appear(record, fixtureRoot);
+              appearedIdentity = fs.lstatSync(record.target);
+            },
+          }
+        ),
+        'N8N_CANONICAL_TRANSACTION_DRIFT'
+      );
+      assert.equal(error.recoveryState, 'preserved');
+      const after = fs.lstatSync(target);
+      assert.equal(after.isDirectory(), appearedIdentity.isDirectory());
+      if (!after.isDirectory()) {
+        assert.equal(after.size, appearedIdentity.size);
+        assert.equal(fs.readFileSync(target).equals(
+          label === 'candidate-identical bytes with different identity'
+            ? Buffer.from('{"candidate":true}\n')
+            : label === 'different bytes'
+              ? Buffer.from('concurrent\n')
+              : Buffer.from('hard-link-concurrent\n')
+        ), true);
+      }
+      assert.deepEqual(
+        fs.readdirSync(fixtureRoot).filter((name) => /\.(stage|quarantine|rollback)$/.test(name)),
+        []
+      );
+      fs.rmSync(fixtureRoot, { recursive: true, force: true });
+    });
+  }
+
+  await t.test('symbolic link where supported', (context) => {
+    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-no-overwrite-link-'));
+    const target = path.join(fixtureRoot, 'workflow.json');
+    const donor = path.join(fixtureRoot, 'donor.json');
+    fs.writeFileSync(donor, 'linked-concurrent\n');
+    try {
+      fs.symlinkSync(donor, target, 'file');
+      fs.rmSync(target);
+    } catch (error) {
+      fs.rmSync(fixtureRoot, { recursive: true, force: true });
+      context.skip(`symlink creation unavailable: ${error.code || error.message}`);
+      return;
+    }
+    expectCode(
+      () => exportSync.replaceFilesTransactionally(
+        [{ targetPath: target, content: '{"candidate":true}\n' }],
+        {
+          afterFinalTargetAbsence(record) {
+            fs.symlinkSync(donor, record.target, 'file');
+          },
+        }
+      ),
+      'N8N_CANONICAL_TRANSACTION_DRIFT'
+    );
+    assert.equal(fs.lstatSync(target).isSymbolicLink(), true);
+    assert.equal(fs.readFileSync(target, 'utf8'), 'linked-concurrent\n');
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  });
+});
+
+test('candidate installation fails closed when the host no-overwrite primitive is unavailable', () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-no-overwrite-unavailable-'));
+  const target = path.join(fixtureRoot, 'workflow.json');
+  fs.writeFileSync(target, 'original\n');
+  const unavailable = Object.assign(new Error('synthetic link unavailable'), { code: 'ENOTSUP' });
+  const error = expectCode(
+    () => exportSync.replaceFilesTransactionally(
+      [{ targetPath: target, content: 'candidate\n' }],
+      {
+        linkCandidateNoOverwrite() {
+          throw unavailable;
+        },
+      }
+    ),
+    'N8N_CANONICAL_TRANSACTION_NO_OVERWRITE_UNAVAILABLE'
+  );
+  assert.equal(error.recoveryState, 'preserved');
+  assert.equal(fs.readFileSync(target, 'utf8'), 'original\n');
+  assert.deepEqual(
+    fs.readdirSync(fixtureRoot).filter((name) => /\.(stage|quarantine|rollback)$/.test(name)),
+    []
+  );
+  fs.rmSync(fixtureRoot, { recursive: true, force: true });
+});
+
+test('precommit failures roll back the full exact batch while ambiguous drift preserves evidence', async (t) => {
+  await t.test('second original quarantine transition failure restores every original', () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-quarantine-failure-'));
+    const first = path.join(fixtureRoot, 'first.json');
+    const second = path.join(fixtureRoot, 'second.json');
+    fs.writeFileSync(first, 'first-original\n');
+    fs.writeFileSync(second, 'second-original\n');
+    assert.throws(
+      () => exportSync.replaceFilesTransactionally(
+        [
+          { targetPath: first, content: 'first-candidate\n' },
+          { targetPath: second, content: 'second-candidate\n' },
+        ],
+        {
+          beforeOriginalQuarantine(_record, index) {
+            if (index === 1) throw new Error('synthetic second quarantine transition failure');
+          },
+        }
+      ),
+      /second quarantine transition failure/
+    );
+    assert.equal(fs.readFileSync(first, 'utf8'), 'first-original\n');
+    assert.equal(fs.readFileSync(second, 'utf8'), 'second-original\n');
+    assert.deepEqual(
+      fs.readdirSync(fixtureRoot).filter((name) => /\.(stage|quarantine|rollback)$/.test(name)),
+      []
+    );
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  });
+
+  for (const mutation of ['candidate', 'quarantined original']) {
+    await t.test(`${mutation} drift after precommit verification is bounded`, () => {
+      const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-precommit-drift-'));
+      const target = path.join(fixtureRoot, 'workflow.json');
+      fs.writeFileSync(target, 'original\n');
+      let record;
+      const error = expectCode(
+        () => exportSync.replaceFilesTransactionally(
+          [{ targetPath: target, content: 'candidate\n' }],
+          {
+            afterPrecommitVerified(records) {
+              [record] = records;
+              fs.writeFileSync(
+                mutation === 'candidate' ? record.target : record.backup,
+                mutation === 'candidate' ? 'concurrent-target\n' : 'concurrent-quarantine\n'
+              );
+            },
+          }
+        ),
+        'N8N_CANONICAL_TRANSACTION_PARTIAL_RECOVERY'
+      );
+      assert.equal(error.recoveryState, 'partial_preserved');
+      if (mutation === 'candidate') {
+        assert.equal(fs.readFileSync(target, 'utf8'), 'concurrent-target\n');
+        assert.equal(fs.readFileSync(record.backup, 'utf8'), 'original\n');
+      } else {
+        assert.equal(fs.readFileSync(target, 'utf8'), 'candidate\n');
+        assert.equal(fs.readFileSync(record.backup, 'utf8'), 'concurrent-quarantine\n');
+      }
+      fs.rmSync(fixtureRoot, { recursive: true, force: true });
+    });
+  }
+});
+
+test('post-commit cleanup failure preserves one coherent candidate batch and exact residue', () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-committed-residue-'));
+  const workflow = path.join(fixtureRoot, 'workflow.json');
+  const declaration = path.join(fixtureRoot, 'portable-credentials.json');
+  fs.writeFileSync(workflow, 'workflow-original\n');
+  fs.writeFileSync(declaration, 'declaration-original\n');
+  const changes = [
+    { targetPath: workflow, content: 'workflow-candidate\n' },
+    { targetPath: declaration, content: 'declaration-candidate\n' },
+  ];
+  let secondResidue;
+  const error = expectCode(
+    () => exportSync.replaceFilesTransactionally(changes, {
+      removeExactTemporary(filePath, record, property, index) {
+        if (property === 'backup' && index === 1) {
+          secondResidue = record.backup;
+          throw new Error('synthetic second quarantine cleanup failure');
+        }
+        fs.rmSync(filePath, { force: false });
+      },
+    }),
+    'N8N_CANONICAL_TRANSACTION_COMMITTED_CLEANUP_REQUIRED'
+  );
+  assert.equal(error.recoveryState, 'committed_cleanup_required');
+  assert.equal(fs.readFileSync(workflow, 'utf8'), 'workflow-candidate\n');
+  assert.equal(fs.readFileSync(declaration, 'utf8'), 'declaration-candidate\n');
+  assert.equal(fs.readFileSync(secondResidue, 'utf8'), 'declaration-original\n');
+  assert.deepEqual(
+    fs.readdirSync(fixtureRoot).filter((name) => /\.stage$/.test(name)),
+    []
+  );
+
+  const residueIdentity = fs.statSync(secondResidue);
+  exportSync.replaceFilesTransactionally(changes);
+  assert.equal(fs.readFileSync(workflow, 'utf8'), 'workflow-candidate\n');
+  assert.equal(fs.readFileSync(declaration, 'utf8'), 'declaration-candidate\n');
+  const residueAfterRerun = fs.statSync(secondResidue);
+  assert.equal(residueAfterRerun.size, residueIdentity.size);
+  assert.equal(fs.readFileSync(secondResidue, 'utf8'), 'declaration-original\n');
+  fs.rmSync(fixtureRoot, { recursive: true, force: true });
+});
+
+test('post-commit drift never triggers subset rollback or unsafe temporary removal', async (t) => {
+  await t.test('candidate drift at the commit boundary preserves candidates and recovery evidence', () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-postcommit-target-drift-'));
+    const first = path.join(fixtureRoot, 'first.json');
+    const second = path.join(fixtureRoot, 'second.json');
+    fs.writeFileSync(first, 'first-original\n');
+    fs.writeFileSync(second, 'second-original\n');
+    let records;
+    const error = expectCode(
+      () => exportSync.replaceFilesTransactionally(
+        [
+          { targetPath: first, content: 'first-candidate\n' },
+          { targetPath: second, content: 'second-candidate\n' },
+        ],
+        {
+          afterCommit(committedRecords) {
+            records = committedRecords;
+            fs.writeFileSync(first, 'first-concurrent\n');
+          },
+        }
+      ),
+      'N8N_CANONICAL_TRANSACTION_PARTIAL_RECOVERY'
+    );
+    assert.equal(error.recoveryState, 'partial_preserved');
+    assert.equal(fs.readFileSync(first, 'utf8'), 'first-concurrent\n');
+    assert.equal(fs.readFileSync(second, 'utf8'), 'second-candidate\n');
+    assert.equal(fs.readFileSync(records[0].backup, 'utf8'), 'first-original\n');
+    assert.equal(fs.readFileSync(records[1].backup, 'utf8'), 'second-original\n');
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  });
+
+  await t.test('changed transaction path is retained instead of removed', () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-postcommit-stage-drift-'));
+    const target = path.join(fixtureRoot, 'workflow.json');
+    fs.writeFileSync(target, 'original\n');
+    let externalStage;
+    const error = expectCode(
+      () => exportSync.replaceFilesTransactionally(
+        [{ targetPath: target, content: 'candidate\n' }],
+        {
+          beforeStageCleanup(record) {
+            externalStage = record.stage;
+            fs.rmSync(record.stage);
+            fs.writeFileSync(record.stage, 'external-stage\n');
+          },
+        }
+      ),
+      'N8N_CANONICAL_TRANSACTION_PARTIAL_RECOVERY'
+    );
+    assert.equal(error.recoveryState, 'partial_preserved');
+    assert.equal(fs.readFileSync(target, 'utf8'), 'candidate\n');
+    assert.equal(fs.readFileSync(externalStage, 'utf8'), 'external-stage\n');
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  });
+
+  await t.test('changed original quarantine after commit is preserved as ambiguous evidence', () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-postcommit-quarantine-drift-'));
+    const target = path.join(fixtureRoot, 'workflow.json');
+    fs.writeFileSync(target, 'original\n');
+    let quarantine;
+    const error = expectCode(
+      () => exportSync.replaceFilesTransactionally(
+        [{ targetPath: target, content: 'candidate\n' }],
+        {
+          beforeBackupCleanup(record) {
+            quarantine = record.backup;
+            fs.writeFileSync(record.backup, 'concurrent-quarantine\n');
+          },
+        }
+      ),
+      'N8N_CANONICAL_TRANSACTION_PARTIAL_RECOVERY'
+    );
+    assert.equal(error.recoveryState, 'partial_preserved');
+    assert.equal(fs.readFileSync(target, 'utf8'), 'candidate\n');
+    assert.equal(fs.readFileSync(quarantine, 'utf8'), 'concurrent-quarantine\n');
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  });
+
+  await t.test('final postcondition drift is reported without post-commit rollback', () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-final-postcondition-'));
+    const target = path.join(fixtureRoot, 'workflow.json');
+    fs.writeFileSync(target, 'original\n');
+    const error = expectCode(
+      () => exportSync.replaceFilesTransactionally(
+        [{ targetPath: target, content: 'candidate\n' }],
+        {
+          beforeFinalPostcondition() {
+            fs.writeFileSync(target, 'postcommit-concurrent\n');
+          },
+        }
+      ),
+      'N8N_CANONICAL_TRANSACTION_PARTIAL_RECOVERY'
+    );
+    assert.equal(error.recoveryState, 'partial_preserved');
+    assert.equal(fs.readFileSync(target, 'utf8'), 'postcommit-concurrent\n');
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  });
 });
 
 test('transactional replacement preserves target modes and uses a repository-safe mode for new files', () => {
@@ -1948,6 +2263,8 @@ test('failure reports map stable codes to concrete non-circular supported action
     ['N8N_CANONICAL_INVARIANT_FAILED', 'RESTORE_OR_REVIEW_CANONICAL_SOURCE'],
     ['N8N_CANONICAL_TRANSACTION_DRIFT', 'RECONCILE_CANONICAL_TARGET_DRIFT'],
     ['N8N_CANONICAL_TRANSACTION_PARTIAL_RECOVERY', 'RECONCILE_CANONICAL_RECOVERY_EVIDENCE'],
+    ['N8N_CANONICAL_TRANSACTION_COMMITTED_CLEANUP_REQUIRED', 'RECONCILE_CANONICAL_TRANSACTION_RESIDUE'],
+    ['N8N_CANONICAL_TRANSACTION_NO_OVERWRITE_UNAVAILABLE', 'USE_SUPPORTED_CANONICAL_FILESYSTEM'],
     ['N8N_CREDENTIAL_DISCOVERY_UNAVAILABLE', 'RESTORE_CREDENTIAL_DISCOVERY_AND_RERUN'],
     ['N8N_CREDENTIAL_CLEANUP_FAILED', 'COMPLETE_CREDENTIAL_TEMP_CLEANUP'],
     ['N8N_POSTCONDITION_FAILED', 'STOP_AND_ESCALATE_POSTCONDITION'],
