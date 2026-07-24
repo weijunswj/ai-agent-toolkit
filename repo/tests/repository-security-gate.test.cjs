@@ -997,7 +997,7 @@ test('workflow uses protected trusted authority and treats the exact PR checkout
   assert.match(gate, /chmod 700 "\$reports"/);
   assert.match(gate, /sudo chown -R root:root trusted-gate candidate/);
   assert.match(gate, /sudo chmod -R a-w trusted-gate candidate/);
-  assert.match(gate, /sudo -u toolkitgate env HOME="\$sandbox_home" git config --global --add safe\.directory "\$GITHUB_WORKSPACE\/candidate"/);
+  assert.match(gate, /git config --file "\$sandbox_home\/\.gitconfig" --add safe\.directory "\$GITHUB_WORKSPACE\/candidate"[\s\S]*sudo chown -R toolkitgate:toolkitgate "\$sandbox_home"/);
   assert.match(gate, /CANDIDATE_REPOSITORY: \$\{\{ steps\.evidence\.outputs\.candidate_repository \}\}[\s\S]*--candidate-repository "\$CANDIDATE_REPOSITORY"/);
   const bootstrapAuthority = gate.match(/authority_commit="([0-9a-f]{40})"/);
   assert.ok(bootstrapAuthority, 'bootstrap authority must be pinned to an exact commit');

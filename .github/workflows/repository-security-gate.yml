@@ -172,8 +172,8 @@ jobs:
           sudo useradd --system --no-create-home --home-dir "$sandbox_home" toolkitgate
           sandbox_uid="$(id -u toolkitgate)"
           sandbox_gid="$(id -g toolkitgate)"
+          git config --file "$sandbox_home/.gitconfig" --add safe.directory "$GITHUB_WORKSPACE/candidate"
           sudo chown -R toolkitgate:toolkitgate "$sandbox_home"
-          sudo -u toolkitgate env HOME="$sandbox_home" git config --global --add safe.directory "$GITHUB_WORKSPACE/candidate"
           chmod 700 "$reports"
           git config --global --add safe.directory "$GITHUB_WORKSPACE/trusted-gate"
           git config --global --add safe.directory "$GITHUB_WORKSPACE/candidate"
