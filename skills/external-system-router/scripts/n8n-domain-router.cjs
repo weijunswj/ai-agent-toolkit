@@ -441,7 +441,7 @@ function createN8nCapabilityLedger(input) {
     taskId: `n8n-${taskFingerprint.slice('sha256:'.length, 'sha256:'.length + 24)}`,
     sessionFingerprint: sha256(sessionId),
     repositoryFingerprint: sha256(repositoryIdentity),
-    objectiveDigest: sha256(input.objective || input.prompt || ''),
+    objectiveDigest: externalRouter.objectiveAuthorityDigest(input.objective || input.prompt || ''),
     objectiveTargetDigest: objectiveTargetBinding(input.objective || input.prompt || '').digest,
     detection: classification.detection,
     operation: classification.operation,
@@ -829,7 +829,8 @@ function validateExternalCapabilityReceiptAuthority(receipt, ledger) {
   const operationContext = authority.operationContext;
   const contextAllowed = new Set([
     'provider', 'targetAlias', 'accountOrOrganisation', 'resource', 'environment',
-    'operation', 'targetFingerprint', 'readOnly'
+    'operation', 'targetFingerprint', 'readOnly', 'taskId', 'sessionFingerprint', 'objectiveDigest',
+    'inventoryGeneration', 'inventoryDigest'
   ]);
   for (const key of Object.keys(operationContext)) {
     if (!contextAllowed.has(key)) fail(`External capability operation context contains unsupported field ${key}.`, 'N8N_CAPABILITY_RECEIPT_MISMATCH');
@@ -841,6 +842,16 @@ function validateExternalCapabilityReceiptAuthority(receipt, ledger) {
   }
   if (operationContext.operation !== ledger.operation || !authority.authorisationEnvelope.allowedOperations.includes(ledger.operation)) {
     fail('External capability operation does not match the active ledger and envelope.', 'N8N_CAPABILITY_RECEIPT_MISMATCH');
+  }
+  if (authority.authorisationEnvelope.lifetime.kind !== 'task'
+    || operationContext.taskId !== ledger.taskId
+    || operationContext.sessionFingerprint !== ledger.sessionFingerprint
+    || operationContext.objectiveDigest !== ledger.objectiveDigest
+    || authority.authorisationEnvelope.lifetime.taskId !== ledger.taskId
+    || authority.authorisationEnvelope.lifetime.sessionFingerprint !== ledger.sessionFingerprint
+    || authority.authorisationEnvelope.lifetime.objectiveDigest !== ledger.objectiveDigest) {
+    fail('External capability authority does not match the active task, session, and objective.',
+      'N8N_CAPABILITY_RECEIPT_MISMATCH');
   }
   if (!/^sha256:[0-9a-f]{64}$/.test(operationContext.targetFingerprint || '')) {
     fail('External capability target fingerprint is invalid.', 'N8N_CAPABILITY_RECEIPT_MISMATCH');
@@ -980,12 +991,60 @@ function isProvenReadOnlyToolUse(input) {
   if (!command || command.length > 10000 || /[\r\n;&|><`]|\$\(/.test(command)) return false;
   const normalized = command.toLowerCase().replace(/\\/g, '/');
   if (/^(?:get-content|select-string|get-childitem|type|cat)\b/.test(normalized)) return true;
-  if (!/^git\s+(?:diff|status|show|log)\b/.test(normalized)) return false;
   const tokens = tokenizeBoundedCommand(command);
   if (!tokens) return false;
-  return !tokens.some((token) => /^--output(?:=|$)/i.test(token)
+  if (!/^git$/i.test(tokens[0] || '')) return false;
+  return isIsolatedGitInspection(tokens)
+    && !tokens.some((token) => /^--output(?:=|$)/i.test(token)
     || /^-o/i.test(token)
-    || /^--(?:ext-diff|textconv|exec-path)(?:=|$)/i.test(token));
+    || /^--(?:ext-diff|textconv|exec-path|show-signature|verify-signatures|config-env)(?:=|$)/i.test(token));
+}
+
+function isIsolatedGitInspection(tokens) {
+  if (!Array.isArray(tokens) || !/^git$/i.test(tokens[0] || '')) return false;
+  let noPager = false;
+  let noOptionalLocks = false;
+  const configs = new Map();
+  let index = 1;
+  while (index < tokens.length) {
+    const token = tokens[index];
+    if (token === '--no-pager') {
+      noPager = true;
+      index += 1;
+      continue;
+    }
+    if (token === '--no-optional-locks') {
+      noOptionalLocks = true;
+      index += 1;
+      continue;
+    }
+    let config = null;
+    if (token === '-c') {
+      config = tokens[index + 1];
+      index += 2;
+    } else if (/^-c.+/i.test(token)) {
+      config = token.slice(2);
+      index += 1;
+    } else {
+      break;
+    }
+    if (typeof config !== 'string' || !config.includes('=')) return false;
+    const separator = config.indexOf('=');
+    const key = config.slice(0, separator).toLowerCase();
+    const value = config.slice(separator + 1).toLowerCase();
+    if (!['core.fsmonitor', 'core.hookspath', 'diff.external'].includes(key) || configs.has(key)) return false;
+    configs.set(key, value);
+  }
+  const subcommand = String(tokens[index] || '').toLowerCase();
+  const args = tokens.slice(index + 1).map((token) => token.toLowerCase());
+  if (!noPager || !noOptionalLocks
+    || configs.get('core.fsmonitor') !== 'false'
+    || configs.get('core.hookspath') !== ''
+    || configs.get('diff.external') !== ''
+    || !['diff', 'log', 'show', 'status'].includes(subcommand)) return false;
+  if (args.some((token) => /^--(?:paginate|show-signature|verify-signatures|config-env)(?:=|$)/.test(token))) return false;
+  if (subcommand === 'status') return true;
+  return args.includes('--no-ext-diff') && args.includes('--no-textconv');
 }
 
 function inspectExistingN8nWorkflowTarget(input) {

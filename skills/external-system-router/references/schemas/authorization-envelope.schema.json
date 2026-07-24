@@ -43,10 +43,32 @@
       "required": ["kind"],
       "properties": {
         "kind": {"enum": ["task", "time-bounded"]},
-        "expiresAt": {"type": "string", "format": "date-time"}
+        "expiresAt": {"type": "string", "format": "date-time"},
+        "taskId": {"$ref": "#/$defs/alias"},
+        "sessionFingerprint": {"$ref": "#/$defs/digest"},
+        "objectiveDigest": {"$ref": "#/$defs/digest"}
       },
       "allOf": [
-        {"if": {"properties": {"kind": {"const": "time-bounded"}}}, "then": {"required": ["expiresAt"]}}
+        {
+          "if": {"properties": {"kind": {"const": "task"}}},
+          "then": {
+            "required": ["taskId", "sessionFingerprint", "objectiveDigest"],
+            "not": {"required": ["expiresAt"]}
+          }
+        },
+        {
+          "if": {"properties": {"kind": {"const": "time-bounded"}}},
+          "then": {
+            "required": ["expiresAt"],
+            "not": {
+              "anyOf": [
+                {"required": ["taskId"]},
+                {"required": ["sessionFingerprint"]},
+                {"required": ["objectiveDigest"]}
+              ]
+            }
+          }
+        }
       ]
     },
     "ownerApprovalReference": {"type": "string", "minLength": 1, "maxLength": 200},
@@ -55,6 +77,7 @@
   },
   "$defs": {
     "alias": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"},
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{16,64}$"},
     "operations": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/alias"}}
   }
 }

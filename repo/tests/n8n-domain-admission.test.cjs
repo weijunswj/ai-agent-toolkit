@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const n8n = require('../../skills/external-system-router/scripts/n8n-domain-router.cjs');
 const external = require('../../skills/external-system-router/scripts/external-system-router.cjs');
 const hook = require('../scripts/toolkit-claude-n8n-admission-hook.cjs');
@@ -210,8 +211,73 @@ test('generic validator or mirrored workflow evidence cannot substitute for offi
   }
   assert.equal(n8n.isProvenReadOnlyToolUse({
     tool_name: 'Bash',
-    tool_input: { command: 'git show HEAD:n8n-workflows/example.json' }
+    tool_input: {
+      command: 'git --no-pager --no-optional-locks -c core.fsmonitor=false -c core.hooksPath= -c diff.external= show --no-ext-diff --no-textconv HEAD:n8n-workflows/example.json'
+    }
   }), true);
+  assert.equal(n8n.isProvenReadOnlyToolUse({
+    tool_name: 'Bash',
+    tool_input: {
+      command: 'git --no-pager --no-optional-locks -c core.fsmonitor=false -c core.hooksPath= -c diff.external= log --no-ext-diff HEAD'
+    }
+  }), false);
+});
+
+test('isolated Git inspection cannot execute configured textconv or external diff helpers', () => {
+  function git(repository, args) {
+    const result = spawnSync('git', args, { cwd: repository, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    return result;
+  }
+
+  for (const helperKind of ['textconv', 'external']) {
+    const repository = fs.mkdtempSync(path.join(os.tmpdir(), `n8n-git-${helperKind}-`));
+    const sentinel = path.join(repository, 'sentinel.txt');
+    const helper = path.join(repository, 'helper.cjs');
+    fs.writeFileSync(helper, `'use strict';\nrequire('node:fs').writeFileSync(${JSON.stringify(sentinel)}, 'mutated');\n`);
+    fs.writeFileSync(path.join(repository, 'workflow.txt'), 'before\n');
+    git(repository, ['init']);
+    git(repository, ['config', 'user.email', 'synthetic@example.invalid']);
+    git(repository, ['config', 'user.name', 'Synthetic Fixture']);
+    if (helperKind === 'textconv') {
+      fs.writeFileSync(path.join(repository, '.gitattributes'), '*.txt diff=fixture\n');
+      git(repository, ['config', 'diff.fixture.textconv', `node "${helper.replace(/\\/g, '/')}"`]);
+    } else {
+      git(repository, ['config', 'diff.external', `node "${helper.replace(/\\/g, '/')}"`]);
+    }
+    const fixtureFiles = ['workflow.txt', '.gitattributes'].filter((entry) =>
+      fs.existsSync(path.join(repository, entry)));
+    git(repository, ['add', ...fixtureFiles]);
+    git(repository, ['commit', '-m', 'fixture']);
+    fs.writeFileSync(path.join(repository, 'workflow.txt'), 'after\n');
+
+    const unsafeCommand = 'git diff';
+    assert.equal(n8n.isProvenReadOnlyToolUse({
+      tool_name: 'Bash',
+      tool_input: { command: unsafeCommand }
+    }), false);
+    assert.equal(fs.existsSync(sentinel), false);
+    git(repository, ['diff']);
+    assert.equal(fs.existsSync(sentinel), true, `${helperKind} fixture proves the configured helper is executable`);
+    fs.unlinkSync(sentinel);
+
+    const safeArgs = [
+      '--no-pager', '--no-optional-locks',
+      '-c', 'core.fsmonitor=false',
+      '-c', 'core.hooksPath=',
+      '-c', 'diff.external=',
+      'diff', '--no-ext-diff', '--no-textconv'
+    ];
+    const safeCommand = `git ${safeArgs.map((value) => value.includes('=') && value.endsWith('=')
+      ? `"${value}"`
+      : value).join(' ')}`;
+    assert.equal(n8n.isProvenReadOnlyToolUse({
+      tool_name: 'Bash',
+      tool_input: { command: safeCommand }
+    }), true);
+    git(repository, safeArgs);
+    assert.equal(fs.existsSync(sentinel), false);
+  }
 });
 
 test('task-ledger capability and source-contract tampering fails closed', () => {
@@ -465,10 +531,11 @@ test('bounded PostToolUse receipt ingestion records required non-Skill capabilit
 });
 
 test('external capability receipts require installed-router, envelope, target, operation, and operation-receipt authority', () => {
+  const objective = 'Update the live n8n workflow.';
   const ledger = n8n.createN8nCapabilityLedger({
     sessionId: 'external-receipt',
     repositoryIdentity: 'repo',
-    objective: 'Update the live n8n workflow.',
+    objective,
     operation: 'live-workflow-update',
     createdAt: '2026-07-23T00:00:00.000Z'
   });
@@ -482,7 +549,7 @@ test('external capability receipts require installed-router, envelope, target, o
     accountOrOrganisation: 'owner',
     resource: 'workflow-orders',
     environment: 'production',
-    objective: 'Authorize the exact reviewed live workflow route.',
+    objective,
     allowedOperations: ['live-workflow-update'],
     operationRiskTiers: { 'live-workflow-update': 2 },
     authorisedTier2Operations: ['live-workflow-update'],
@@ -490,7 +557,12 @@ test('external capability receipts require installed-router, envelope, target, o
     expectedResult: 'The exact route is ready for the governed operation.',
     verification: ['Verify the target fingerprint and selected route.'],
     rollbackOrSafeDisable: ['Do not attempt a mutation when preconditions fail.'],
-    lifetime: { kind: 'task' },
+    lifetime: {
+      kind: 'task',
+      taskId: ledger.taskId,
+      sessionFingerprint: ledger.sessionFingerprint,
+      objectiveDigest: ledger.objectiveDigest
+    },
     ownerApprovalReference: 'owner-approved-live-route',
     sensitiveDataClasses: ['workflow-metadata'],
     interfaceRestrictions: ['no-browser']
@@ -503,7 +575,19 @@ test('external capability receipts require installed-router, envelope, target, o
     environment: 'production',
     operation: 'live-workflow-update',
     targetFingerprint: `sha256:${'a'.repeat(64)}`,
+    taskId: ledger.taskId,
+    sessionFingerprint: ledger.sessionFingerprint,
+    objectiveDigest: ledger.objectiveDigest,
+    inventoryGeneration: `sha256:${'b'.repeat(64)}`,
+    inventoryDigest: `sha256:${'c'.repeat(64)}`,
     readOnly: false
+  };
+  const selectedRoute = {
+    selectedInterface: 'n8n-api',
+    capabilityDigest: `sha256:${'d'.repeat(64)}`,
+    inventoryGeneration: operationContext.inventoryGeneration,
+    inventoryDigest: operationContext.inventoryDigest,
+    hostAdapterPlanDigest: null
   };
   const operationReceipt = external.createOperationReceipt({
     schemaVersion: external.RECEIPT_SCHEMA_VERSION,
@@ -512,12 +596,14 @@ test('external capability receipts require installed-router, envelope, target, o
     provider: operationContext.provider,
     adapter: 'n8n-api',
     targetAlias: operationContext.targetAlias,
+    accountOrOrganisation: operationContext.accountOrOrganisation,
+    resource: operationContext.resource,
     targetFingerprint: operationContext.targetFingerprint,
     environment: operationContext.environment,
     riskTier: 2,
     authorisationReference: authorisationEnvelope.ownerApprovalReference,
     authorisationEnvelope,
-    selectedInterface: 'n8n-api',
+    selectedRoute,
     precondition: 'passed',
     mutationAttempted: false,
     mutationPerformed: false,

@@ -13,6 +13,7 @@ const AUDIT_SCHEMA_VERSION = 'ai-agent-toolkit.capability-audit.v1';
 const LEDGER_SCHEMA_VERSION = 'ai-agent-toolkit.capability-ledger.v1';
 const RECEIPT_SCHEMA_VERSION = 'ai-agent-toolkit.operation-receipt.v1';
 const ROUTE_LIFECYCLE_SCHEMA_VERSION = 'ai-agent-toolkit.route-lifecycle.v1';
+const HOST_ADAPTER_PLAN_SCHEMA_VERSION = 'ai-agent-toolkit.host-adapter-plan.v1';
 const QUESTION_BANK_SCHEMA_VERSION = 'ai-agent-toolkit.external-reconciliation-question-bank.v1';
 const ANSWER_SCHEMA_VERSION = 'ai-agent-toolkit.external-reconciliation-answers.v1';
 
@@ -122,6 +123,10 @@ function sha256(value, length = 64) {
   return `sha256:${crypto.createHash('sha256').update(bytes).digest('hex').slice(0, length)}`;
 }
 
+function objectiveAuthorityDigest(objective) {
+  return sha256({ objective: requireString(objective, 'objective', { max: 500 }) });
+}
+
 function countOccurrences(text, marker) {
   return String(text).split(marker).length - 1;
 }
@@ -203,11 +208,23 @@ function validateAuthorizationEnvelope(envelope) {
   requireStringArray(envelope.rollbackOrSafeDisable, 'rollbackOrSafeDisable', { min: 1 });
   requireString(envelope.ownerApprovalReference, 'ownerApprovalReference', { max: 200 });
   requireObject(envelope.lifetime, 'lifetime');
-  assertAllowedKeys(envelope.lifetime, new Set(['kind', 'expiresAt']), 'lifetime');
+  assertAllowedKeys(envelope.lifetime, new Set([
+    'kind', 'expiresAt', 'taskId', 'sessionFingerprint', 'objectiveDigest'
+  ]), 'lifetime');
   invariant(['task', 'time-bounded'].includes(envelope.lifetime.kind), 'lifetime.kind must be task or time-bounded.');
-  if (envelope.lifetime.kind === 'time-bounded') {
+  if (envelope.lifetime.kind === 'task') {
+    requireString(envelope.lifetime.taskId, 'lifetime.taskId', { pattern: ALIAS_PATTERN });
+    requireString(envelope.lifetime.sessionFingerprint, 'lifetime.sessionFingerprint', { pattern: DIGEST_PATTERN });
+    requireString(envelope.lifetime.objectiveDigest, 'lifetime.objectiveDigest', { pattern: DIGEST_PATTERN });
+    invariant(envelope.lifetime.objectiveDigest === objectiveAuthorityDigest(envelope.objective),
+      'lifetime.objectiveDigest does not match the bounded approved objective.', 'EXTERNAL_TASK_AUTHORITY_MISMATCH');
+    invariant(envelope.lifetime.expiresAt === undefined, 'Task lifetime must not also declare expiresAt.');
+  } else {
     const expiresAt = Date.parse(requireString(envelope.lifetime.expiresAt, 'lifetime.expiresAt'));
     invariant(Number.isFinite(expiresAt), 'lifetime.expiresAt must be an ISO date-time.');
+    for (const field of ['taskId', 'sessionFingerprint', 'objectiveDigest']) {
+      invariant(envelope.lifetime[field] === undefined, `Time-bounded lifetime must not declare ${field}.`);
+    }
   }
   if (envelope.sensitiveDataClasses !== undefined) requireStringArray(envelope.sensitiveDataClasses, 'sensitiveDataClasses', { unique: true, pattern: ALIAS_PATTERN });
   if (envelope.interfaceRestrictions !== undefined) {
@@ -233,8 +250,7 @@ function classifyRisk(operation) {
     || /(?:^|[-_:])(?:delete|destroy|purge|drop|revoke|erase)(?:$|[-_:])/.test(operationName)) return RISK_TIERS.DESTRUCTIVE;
   if (operation.production || operation.sensitive || operation.changesCredential || operation.oauthSetup
     || operation.deploys || operation.rollsBack || operation.writesEnvironment || operation.mutatesDatabase
-    || (operation.environment === 'production'
-      && /(?:^|[-_:])(?:deploy|publish|activate|deactivate|rollback|import|migrate)(?:$|[-_:])/.test(operationName))) return RISK_TIERS.SENSITIVE_REVERSIBLE;
+    || (operation.environment === 'production' && operation.readOnly !== true)) return RISK_TIERS.SENSITIVE_REVERSIBLE;
   if (operation.readOnly === true && !operation.newSensitiveDataClass) return RISK_TIERS.INSPECTION;
   return RISK_TIERS.REVERSIBLE;
 }
@@ -248,9 +264,22 @@ function operationApprovalBinding(envelope, operation) {
       accountOrOrganisation: operation.accountOrOrganisation,
       resource: operation.resource,
       environment: operation.environment,
-      operation: operation.operation
+      operation: operation.operation,
+      taskId: operation.taskId,
+      sessionFingerprint: operation.sessionFingerprint,
+      objectiveDigest: operation.objectiveDigest
     })
   };
+}
+
+function assertTaskLifetimeAuthority(envelope, operation) {
+  if (envelope.lifetime.kind !== 'task') return;
+  for (const field of ['taskId', 'sessionFingerprint', 'objectiveDigest']) {
+    invariant(operation[field] === envelope.lifetime[field],
+      `${field} does not match the exact task-lifetime authority.`, 'EXTERNAL_TASK_AUTHORITY_MISMATCH');
+  }
+  invariant(operation.objectiveDigest === objectiveAuthorityDigest(envelope.objective),
+    'Operation objective digest does not match the bounded approved objective.', 'EXTERNAL_TASK_AUTHORITY_MISMATCH');
 }
 
 function assertOperationAuthorized(envelope, operation, options = {}) {
@@ -263,6 +292,7 @@ function assertOperationAuthorized(envelope, operation, options = {}) {
   for (const [field, expected] of comparisons) {
     invariant(operation[field] === expected, `${field} crosses the task authorisation envelope.`, 'EXTERNAL_REAUTHORISATION_REQUIRED');
   }
+  assertTaskLifetimeAuthority(envelope, operation);
   const operationName = requireString(operation.operation, 'operation.operation', { pattern: ALIAS_PATTERN });
   invariant(!envelope.forbiddenOperations.includes(operationName), `${operationName} is forbidden by the task envelope.`, 'EXTERNAL_OPERATION_FORBIDDEN');
   invariant(envelope.allowedOperations.includes(operationName), `${operationName} is outside allowed operations.`, 'EXTERNAL_REAUTHORISATION_REQUIRED');
@@ -283,7 +313,10 @@ function assertOperationAuthorized(envelope, operation, options = {}) {
     const approval = options.immediateApproval;
     invariant(approval?.ownerApproved === true, 'Tier 3 requires exact immediate owner approval.', 'EXTERNAL_TIER3_APPROVAL_REQUIRED');
     const binding = operationApprovalBinding(envelope, operation);
-    for (const field of ['provider', 'targetAlias', 'accountOrOrganisation', 'resource', 'environment', 'operation']) {
+    for (const field of [
+      'provider', 'targetAlias', 'accountOrOrganisation', 'resource', 'environment', 'operation',
+      'taskId', 'sessionFingerprint', 'objectiveDigest'
+    ]) {
       invariant(approval[field] === operation[field], `Tier 3 approval ${field} does not match the exact operation.`, 'EXTERNAL_TIER3_APPROVAL_REQUIRED');
     }
     invariant(approval.envelopeDigest === binding.envelopeDigest, 'Tier 3 approval does not match the task authorisation envelope.', 'EXTERNAL_TIER3_APPROVAL_REQUIRED');
@@ -477,6 +510,173 @@ function interfaceRestrictions(envelope) {
   return { forbidden, required };
 }
 
+function targetInventoryDigest(target) {
+  return sha256({
+    provider: target.provider,
+    targetAlias: target.targetAlias,
+    accountOrOrganisation: target.accountOrOrganisation,
+    environment: target.environment,
+    sanitizedFingerprint: target.sanitizedFingerprint,
+    inventoryGeneration: target.inventoryGeneration,
+    resourceReferences: [...(target.resourceReferences || [])].sort(),
+    installedInterfaces: [...(target.installedInterfaces || [])].sort(),
+    capabilityDigests: [...(target.capabilityDigests || [])].sort(),
+    routeSelections: target.routeSelections || {},
+    lastAuditState: target.lastAuditState
+  });
+}
+
+function currentInventoryAudits(target, capabilityAudits) {
+  validateProviderTargetRegistry({ schemaVersion: REGISTRY_SCHEMA_VERSION, targets: [target] });
+  invariant(target.lastAuditState === 'current', 'Target inventory audit state is not current.', 'EXTERNAL_STALE_TARGET_INVENTORY');
+  invariant(Array.isArray(capabilityAudits), 'capabilityAudits must be an array.');
+  return capabilityAudits.map(validateCapabilityAudit).filter((audit) =>
+    audit.provider === target.provider
+    && audit.targetAlias === target.targetAlias
+    && audit.accountOrOrganisation === target.accountOrOrganisation
+    && audit.environment === target.environment
+    && audit.targetFingerprint === target.sanitizedFingerprint
+    && target.installedInterfaces.includes(audit.interfaceId)
+    && target.capabilityDigests.includes(audit.capabilityDigest)
+    && audit.targetBinding === targetBindingDigest({
+      provider: target.provider,
+      targetAlias: target.targetAlias,
+      accountOrOrganisation: target.accountOrOrganisation,
+      environment: target.environment,
+      targetFingerprint: target.sanitizedFingerprint
+    })
+  );
+}
+
+function hostAdapterPlanDigest(plan) {
+  return sha256({
+    schemaVersion: plan.schemaVersion,
+    logicalTarget: plan.logicalTarget,
+    inventoryGeneration: plan.inventoryGeneration,
+    inventoryDigest: plan.inventoryDigest,
+    currentAuditState: plan.currentAuditState,
+    host: plan.host,
+    hostConfigurationScope: plan.hostConfigurationScope,
+    credentialReferences: plan.credentialReferences,
+    installedInterfaces: plan.installedInterfaces,
+    supportedOperations: plan.supportedOperations,
+    capabilityAuditPassed: plan.capabilityAuditPassed,
+    preserveOtherHostConfiguration: plan.preserveOtherHostConfiguration,
+    mutateProjectOwnedConfiguration: plan.mutateProjectOwnedConfiguration,
+    copySecretsIntoRepository: plan.copySecretsIntoRepository,
+    requiresProviderRediscoveryOnHostSwitch: plan.requiresProviderRediscoveryOnHostSwitch
+  });
+}
+
+function validateHostAdapterPlan(plan) {
+  requireObject(plan, 'Host adapter plan');
+  assertAllowedKeys(plan, new Set([
+    'schemaVersion', 'logicalTarget', 'inventoryGeneration', 'inventoryDigest', 'currentAuditState',
+    'host', 'hostConfigurationScope', 'credentialReferences', 'installedInterfaces', 'supportedOperations',
+    'capabilityAuditPassed', 'preserveOtherHostConfiguration', 'mutateProjectOwnedConfiguration',
+    'copySecretsIntoRepository', 'requiresProviderRediscoveryOnHostSwitch', 'planDigest'
+  ]), 'Host adapter plan');
+  invariant(plan.schemaVersion === HOST_ADAPTER_PLAN_SCHEMA_VERSION, 'Unsupported host-adapter-plan schema.');
+  requireObject(plan.logicalTarget, 'logicalTarget');
+  assertAllowedKeys(plan.logicalTarget, new Set([
+    'provider', 'targetAlias', 'accountOrOrganisation', 'environment', 'sanitizedFingerprint', 'resourceReferences'
+  ]), 'logicalTarget');
+  requireString(plan.logicalTarget.provider, 'logicalTarget.provider', { pattern: PROVIDER_PATTERN });
+  for (const field of ['targetAlias', 'accountOrOrganisation', 'environment']) {
+    requireString(plan.logicalTarget[field], `logicalTarget.${field}`, { pattern: ALIAS_PATTERN });
+  }
+  requireString(plan.logicalTarget.sanitizedFingerprint, 'logicalTarget.sanitizedFingerprint', { pattern: DIGEST_PATTERN });
+  requireStringArray(plan.logicalTarget.resourceReferences, 'logicalTarget.resourceReferences', { unique: true, pattern: ALIAS_PATTERN });
+  requireString(plan.inventoryGeneration, 'inventoryGeneration', { pattern: DIGEST_PATTERN });
+  requireString(plan.inventoryDigest, 'inventoryDigest', { pattern: DIGEST_PATTERN });
+  invariant(plan.currentAuditState === 'current', 'Host adapter plan audit state is not current.', 'EXTERNAL_STALE_TARGET_INVENTORY');
+  invariant(['codex', 'claude-code'].includes(plan.host), 'host must be codex or claude-code.');
+  requireString(plan.hostConfigurationScope, 'hostConfigurationScope', { max: 200 });
+  requireStringArray(plan.credentialReferences, 'credentialReferences', {
+    min: 1, unique: true, pattern: CREDENTIAL_REFERENCE_PATTERN
+  });
+  requireStringArray(plan.installedInterfaces, 'installedInterfaces', { unique: true, pattern: ALIAS_PATTERN });
+  invariant(Array.isArray(plan.supportedOperations), 'supportedOperations must be an array.');
+  const supportedKeys = new Set();
+  for (const [index, supported] of plan.supportedOperations.entries()) {
+    requireObject(supported, `supportedOperations[${index}]`);
+    assertAllowedKeys(supported, new Set([
+      'operation', 'interfaceId', 'interfaceKind', 'readOnly', 'capabilityDigest', 'targetFingerprint'
+    ]), `supportedOperations[${index}]`);
+    for (const field of ['operation', 'interfaceId']) requireString(supported[field], `supportedOperations[${index}].${field}`, { pattern: ALIAS_PATTERN });
+    invariant(INTERFACE_KINDS.has(supported.interfaceKind), `supportedOperations[${index}].interfaceKind is invalid.`);
+    invariant(typeof supported.readOnly === 'boolean', `supportedOperations[${index}].readOnly must be boolean.`);
+    requireString(supported.capabilityDigest, `supportedOperations[${index}].capabilityDigest`, { pattern: DIGEST_PATTERN });
+    requireString(supported.targetFingerprint, `supportedOperations[${index}].targetFingerprint`, { pattern: DIGEST_PATTERN });
+    invariant(plan.installedInterfaces.includes(supported.interfaceId), 'Host adapter plan contains an uninstalled interface.', 'EXTERNAL_STALE_TARGET_INVENTORY');
+    invariant(supported.targetFingerprint === plan.logicalTarget.sanitizedFingerprint,
+      'Host adapter plan operation belongs to a different target fingerprint.', 'EXTERNAL_STALE_TARGET_INVENTORY');
+    const key = `${supported.operation}\u0000${supported.interfaceId}\u0000${supported.capabilityDigest}`;
+    invariant(!supportedKeys.has(key), 'Host adapter plan contains duplicate operation inventory.', 'EXTERNAL_STALE_TARGET_INVENTORY');
+    supportedKeys.add(key);
+  }
+  invariant(plan.capabilityAuditPassed === (plan.supportedOperations.length > 0),
+    'Host adapter plan capability audit state does not match its supported operations.', 'EXTERNAL_STALE_TARGET_INVENTORY');
+  invariant(plan.preserveOtherHostConfiguration === true
+    && plan.mutateProjectOwnedConfiguration === false
+    && plan.copySecretsIntoRepository === false
+    && plan.requiresProviderRediscoveryOnHostSwitch === false,
+  'Host adapter plan violates the bounded host-configuration contract.', 'EXTERNAL_STALE_TARGET_INVENTORY');
+  requireString(plan.planDigest, 'planDigest', { pattern: DIGEST_PATTERN });
+  invariant(plan.planDigest === hostAdapterPlanDigest(plan), 'Host adapter plan digest is invalid.', 'EXTERNAL_STALE_TARGET_INVENTORY');
+  return plan;
+}
+
+function resolveCurrentInventory(operationContext, audits, options) {
+  requireString(operationContext.inventoryGeneration, 'operationContext.inventoryGeneration', { pattern: DIGEST_PATTERN });
+  requireString(operationContext.inventoryDigest, 'operationContext.inventoryDigest', { pattern: DIGEST_PATTERN });
+  const hasRecord = isPlainObject(options.targetRegistryRecord);
+  const hasPlan = isPlainObject(options.hostAdapterPlan);
+  invariant(hasRecord !== hasPlan,
+    'Final route selection requires exactly one current target registry record or validated host adapter plan.',
+    'EXTERNAL_CURRENT_INVENTORY_REQUIRED');
+  let currentAudits;
+  let inventoryGeneration;
+  let inventoryDigest;
+  let planDigest = null;
+  let target;
+  if (hasRecord) {
+    target = options.targetRegistryRecord;
+    currentAudits = currentInventoryAudits(target, audits);
+    inventoryGeneration = target.inventoryGeneration;
+    inventoryDigest = targetInventoryDigest(target);
+  } else {
+    const plan = validateHostAdapterPlan(options.hostAdapterPlan);
+    inventoryGeneration = plan.inventoryGeneration;
+    inventoryDigest = plan.inventoryDigest;
+    planDigest = plan.planDigest;
+    target = {
+      provider: plan.logicalTarget.provider,
+      targetAlias: plan.logicalTarget.targetAlias,
+      accountOrOrganisation: plan.logicalTarget.accountOrOrganisation,
+      environment: plan.logicalTarget.environment,
+      sanitizedFingerprint: plan.logicalTarget.sanitizedFingerprint,
+      resourceReferences: plan.logicalTarget.resourceReferences
+    };
+    const supported = new Set(plan.supportedOperations.map((entry) =>
+      `${entry.operation}\u0000${entry.interfaceId}\u0000${entry.capabilityDigest}\u0000${entry.targetFingerprint}`));
+    currentAudits = audits.map(validateCapabilityAudit).filter((audit) =>
+      supported.has(`${audit.operation}\u0000${audit.interfaceId}\u0000${audit.capabilityDigest}\u0000${audit.targetFingerprint}`));
+  }
+  for (const field of ['provider', 'targetAlias', 'accountOrOrganisation', 'environment']) {
+    invariant(target[field] === operationContext[field], `Current inventory ${field} does not match the operation.`, 'EXTERNAL_STALE_TARGET_INVENTORY');
+  }
+  invariant(target.sanitizedFingerprint === operationContext.targetFingerprint,
+    'Current inventory target fingerprint does not match the operation.', 'EXTERNAL_STALE_TARGET_INVENTORY');
+  invariant(target.resourceReferences.includes(operationContext.resource),
+    'Current inventory does not contain the exact operation resource.', 'EXTERNAL_STALE_TARGET_INVENTORY');
+  invariant(inventoryGeneration === operationContext.inventoryGeneration,
+    'Current inventory generation does not match the operation.', 'EXTERNAL_STALE_TARGET_INVENTORY');
+  invariant(inventoryDigest === operationContext.inventoryDigest,
+    'Current inventory digest does not match the operation.', 'EXTERNAL_STALE_TARGET_INVENTORY');
+  return { currentAudits, inventoryGeneration, inventoryDigest, planDigest };
+}
+
 function selectStrongestAdmissibleInterface(operationContext, audits, options = {}) {
   requireObject(operationContext, 'Operation context');
   const operation = requireString(operationContext.operation, 'operation', { pattern: ALIAS_PATTERN });
@@ -494,7 +694,8 @@ function selectStrongestAdmissibleInterface(operationContext, audits, options = 
     'Authorisation envelope does not allow the selected operation.', 'EXTERNAL_REAUTHORISATION_REQUIRED');
   const restrictions = interfaceRestrictions(envelope);
   invariant(Array.isArray(audits) && audits.length > 0, 'At least one capability audit is required.');
-  const audited = audits.map(validateCapabilityAudit).filter((audit) =>
+  const inventory = resolveCurrentInventory(operationContext, audits, options);
+  const audited = inventory.currentAudits.filter((audit) =>
     audit.provider === operationContext.provider
     && audit.targetAlias === operationContext.targetAlias
     && audit.accountOrOrganisation === operationContext.accountOrOrganisation
@@ -528,6 +729,27 @@ function selectStrongestAdmissibleInterface(operationContext, audits, options = 
     selectedInterface: selected.interfaceId,
     interfaceKind: selected.interfaceKind,
     capabilityDigest: selected.capabilityDigest,
+    inventoryGeneration: inventory.inventoryGeneration,
+    inventoryDigest: inventory.inventoryDigest,
+    hostAdapterPlanDigest: inventory.planDigest,
+    selectedRouteDigest: sha256({
+      authorisationEnvelopeDigest: sha256(envelope),
+      provider: operationContext.provider,
+      targetAlias: operationContext.targetAlias,
+      accountOrOrganisation: operationContext.accountOrOrganisation,
+      resource: operationContext.resource,
+      environment: operationContext.environment,
+      operation,
+      taskId: operationContext.taskId,
+      sessionFingerprint: operationContext.sessionFingerprint,
+      objectiveDigest: operationContext.objectiveDigest,
+      targetFingerprint: operationContext.targetFingerprint,
+      inventoryGeneration: inventory.inventoryGeneration,
+      inventoryDigest: inventory.inventoryDigest,
+      hostAdapterPlanDigest: inventory.planDigest,
+      selectedInterface: selected.interfaceId,
+      capabilityDigest: selected.capabilityDigest
+    }),
     rationale: structured.length > 0
       ? 'Selected the highest-assurance reviewed structured interface for this exact operation.'
       : selected.interfaceKind === 'owner-action'
@@ -601,13 +823,14 @@ function validateProviderTargetRegistry(registry) {
     assertAllowedKeys(target, new Set([
       'provider', 'targetAlias', 'accountOrOrganisation', 'environment', 'sanitizedFingerprint', 'privateOriginReference',
       'resourceReferences', 'credentialReferences', 'multipleCredentialJustification', 'installedInterfaces',
-      'capabilityDigests', 'routeSelections', 'lastAuditState', 'receiptReferences'
+      'capabilityDigests', 'routeSelections', 'lastAuditState', 'receiptReferences', 'inventoryGeneration'
     ]), `targets[${index}]`);
     requireString(target.provider, 'provider', { pattern: PROVIDER_PATTERN });
     requireString(target.targetAlias, 'targetAlias', { pattern: ALIAS_PATTERN });
     requireString(target.accountOrOrganisation, 'accountOrOrganisation', { pattern: ALIAS_PATTERN });
     requireString(target.environment, 'environment', { pattern: ALIAS_PATTERN });
     requireString(target.sanitizedFingerprint, 'sanitizedFingerprint', { pattern: DIGEST_PATTERN });
+    requireString(target.inventoryGeneration, 'inventoryGeneration', { pattern: DIGEST_PATTERN });
     if (target.privateOriginReference !== undefined) requireString(target.privateOriginReference, 'privateOriginReference', { pattern: PRIVATE_REFERENCE_PATTERN });
     requireStringArray(target.resourceReferences || [], 'resourceReferences', { unique: true, pattern: ALIAS_PATTERN });
     const credentialReferences = requireStringArray(target.credentialReferences || [], 'credentialReferences', { min: 1, unique: true, pattern: CREDENTIAL_REFERENCE_PATTERN });
@@ -621,7 +844,7 @@ function validateProviderTargetRegistry(registry) {
     }
     requireString(target.lastAuditState, 'lastAuditState', { pattern: ALIAS_PATTERN });
     requireStringArray(target.receiptReferences || [], 'receiptReferences', { unique: true, pattern: ALIAS_PATTERN });
-    const key = `${target.provider}\u0000${target.targetAlias}\u0000${target.environment}`;
+    const key = `${target.provider}\u0000${target.targetAlias}\u0000${target.accountOrOrganisation}\u0000${target.environment}`;
     invariant(!keys.has(key), `Duplicate provider target ${target.provider}/${target.targetAlias}/${target.environment}.`);
     keys.add(key);
   }
@@ -645,40 +868,29 @@ function resolveProviderTarget(registry, selector) {
 }
 
 function buildHostAdapterPlan(target, host, capabilityAudits) {
-  validateProviderTargetRegistry({ schemaVersion: REGISTRY_SCHEMA_VERSION, targets: [target] });
   invariant(['codex', 'claude-code'].includes(host), 'host must be codex or claude-code.');
-  invariant(Array.isArray(capabilityAudits), 'capabilityAudits must be an array.');
-  const audits = capabilityAudits.map(validateCapabilityAudit).filter((audit) =>
-    audit.provider === target.provider
-    && audit.targetAlias === target.targetAlias
-    && audit.accountOrOrganisation === target.accountOrOrganisation
-    && audit.environment === target.environment
-    && audit.targetFingerprint === target.sanitizedFingerprint
-    && target.installedInterfaces.includes(audit.interfaceId)
-    && target.capabilityDigests.includes(audit.capabilityDigest)
-    && audit.targetBinding === targetBindingDigest({
-      provider: target.provider,
-      targetAlias: target.targetAlias,
-      accountOrOrganisation: target.accountOrOrganisation,
-      environment: target.environment,
-      targetFingerprint: target.sanitizedFingerprint
-    })
-  );
+  const audits = currentInventoryAudits(target, capabilityAudits);
   const supportedOperations = audits.map((audit) => ({
     operation: audit.operation,
     interfaceId: audit.interfaceId,
     interfaceKind: audit.interfaceKind,
     readOnly: audit.readOnly,
-    capabilityDigest: audit.capabilityDigest
+    capabilityDigest: audit.capabilityDigest,
+    targetFingerprint: audit.targetFingerprint
   }));
-  return {
+  const plan = {
+    schemaVersion: HOST_ADAPTER_PLAN_SCHEMA_VERSION,
     logicalTarget: {
       provider: target.provider,
       targetAlias: target.targetAlias,
       accountOrOrganisation: target.accountOrOrganisation,
       environment: target.environment,
-      sanitizedFingerprint: target.sanitizedFingerprint
+      sanitizedFingerprint: target.sanitizedFingerprint,
+      resourceReferences: target.resourceReferences || []
     },
+    inventoryGeneration: target.inventoryGeneration,
+    inventoryDigest: targetInventoryDigest(target),
+    currentAuditState: target.lastAuditState,
     host,
     hostConfigurationScope: host === 'codex' ? 'user-scoped Codex config' : 'Claude local or user scope after workspace trust',
     credentialReferences: target.credentialReferences,
@@ -690,6 +902,8 @@ function buildHostAdapterPlan(target, host, capabilityAudits) {
     copySecretsIntoRepository: false,
     requiresProviderRediscoveryOnHostSwitch: false
   };
+  plan.planDigest = hostAdapterPlanDigest(plan);
+  return validateHostAdapterPlan(plan);
 }
 
 function recommendN8nComponents(evidence) {
@@ -1139,40 +1353,95 @@ function assertWriteGate(questionBank, answers, proposedWrite) {
 
 function operationReceiptRouteDigest(receipt) {
   return sha256({
+    authorisationEnvelopeDigest: receipt.authorisationEnvelopeDigest,
     provider: receipt.provider,
-    adapter: receipt.adapter,
     targetAlias: receipt.targetAlias,
+    accountOrOrganisation: receipt.accountOrOrganisation,
+    resource: receipt.resource,
     targetFingerprint: receipt.targetFingerprint,
     environment: receipt.environment,
     operation: receipt.operation,
-    selectedInterface: receipt.selectedInterface
+    taskId: receipt.taskId,
+    sessionFingerprint: receipt.sessionFingerprint,
+    objectiveDigest: receipt.objectiveDigest,
+    inventoryGeneration: receipt.inventoryGeneration,
+    inventoryDigest: receipt.inventoryDigest,
+    hostAdapterPlanDigest: receipt.hostAdapterPlanDigest || null,
+    selectedInterface: receipt.selectedInterface,
+    capabilityDigest: receipt.capabilityDigest
   });
 }
 
 function validateOperationReceipt(receipt, binding = {}) {
   requireObject(receipt, 'Operation receipt');
   const allowed = new Set([
-    'schemaVersion', 'operationId', 'operation', 'provider', 'adapter', 'targetAlias', 'targetFingerprint',
-    'environment', 'riskTier', 'authorisationReference', 'authorisationEnvelopeDigest',
-    'selectedInterface', 'selectedRouteDigest', 'precondition',
+    'schemaVersion', 'operationId', 'operation', 'provider', 'adapter', 'targetAlias', 'accountOrOrganisation',
+    'resource', 'targetFingerprint', 'environment', 'riskTier', 'authorisationReference',
+    'authorisationEnvelopeDigest', 'authorisationLifetimeKind', 'taskId', 'sessionFingerprint', 'objectiveDigest',
+    'selectedInterface', 'capabilityDigest', 'inventoryGeneration', 'inventoryDigest', 'hostAdapterPlanDigest',
+    'selectedRouteDigest', 'precondition',
     'mutationAttempted', 'mutationPerformed', 'postcondition', 'rollbackAttempted', 'rollbackPerformed',
     'stableCode', 'safeEvidenceReferences', 'supportedNextAction', 'unchangedScope'
   ]);
   assertAllowedKeys(receipt, allowed, 'Operation receipt');
   invariant(receipt.schemaVersion === RECEIPT_SCHEMA_VERSION, 'Unsupported operation-receipt schema.');
-  for (const field of ['operationId', 'operation', 'adapter', 'targetAlias', 'environment', 'selectedInterface']) requireString(receipt[field], field, { pattern: ALIAS_PATTERN });
+  for (const field of [
+    'operationId', 'operation', 'adapter', 'targetAlias', 'accountOrOrganisation', 'resource',
+    'environment', 'selectedInterface'
+  ]) requireString(receipt[field], field, { pattern: ALIAS_PATTERN });
   requireString(receipt.provider, 'provider', { pattern: PROVIDER_PATTERN });
   requireString(receipt.targetFingerprint, 'targetFingerprint', { pattern: DIGEST_PATTERN });
   requireString(receipt.authorisationEnvelopeDigest, 'authorisationEnvelopeDigest', { pattern: DIGEST_PATTERN });
+  invariant(['task', 'time-bounded'].includes(receipt.authorisationLifetimeKind), 'Unsupported authorisationLifetimeKind.');
+  if (receipt.authorisationLifetimeKind === 'task') {
+    requireString(receipt.taskId, 'taskId', { pattern: ALIAS_PATTERN });
+    requireString(receipt.sessionFingerprint, 'sessionFingerprint', { pattern: DIGEST_PATTERN });
+    requireString(receipt.objectiveDigest, 'objectiveDigest', { pattern: DIGEST_PATTERN });
+  } else {
+    for (const field of ['taskId', 'sessionFingerprint', 'objectiveDigest']) {
+      invariant(receipt[field] === undefined, `Time-bounded receipt must not declare ${field}.`);
+    }
+  }
+  requireString(receipt.capabilityDigest, 'capabilityDigest', { pattern: DIGEST_PATTERN });
+  requireString(receipt.inventoryGeneration, 'inventoryGeneration', { pattern: DIGEST_PATTERN });
+  requireString(receipt.inventoryDigest, 'inventoryDigest', { pattern: DIGEST_PATTERN });
+  if (receipt.hostAdapterPlanDigest !== undefined) requireString(receipt.hostAdapterPlanDigest, 'hostAdapterPlanDigest', { pattern: DIGEST_PATTERN });
   requireString(receipt.selectedRouteDigest, 'selectedRouteDigest', { pattern: DIGEST_PATTERN });
   invariant(receipt.selectedRouteDigest === operationReceiptRouteDigest(receipt), 'Operation receipt selected-route binding is invalid.', 'EXTERNAL_RECEIPT_BINDING_MISMATCH');
   if (binding.authorisationEnvelope) {
     invariant(receipt.authorisationEnvelopeDigest === sha256(binding.authorisationEnvelope), 'Operation receipt does not match the authorisation envelope.', 'EXTERNAL_RECEIPT_BINDING_MISMATCH');
+    invariant(receipt.authorisationLifetimeKind === binding.authorisationEnvelope.lifetime.kind,
+      'Operation receipt lifetime kind does not match the authorisation envelope.', 'EXTERNAL_RECEIPT_BINDING_MISMATCH');
+    if (binding.authorisationEnvelope.lifetime.kind === 'task') {
+      for (const field of ['taskId', 'sessionFingerprint', 'objectiveDigest']) {
+        invariant(receipt[field] === binding.authorisationEnvelope.lifetime[field],
+          `Operation receipt ${field} does not match the task authorisation envelope.`, 'EXTERNAL_RECEIPT_BINDING_MISMATCH');
+      }
+    }
   }
   if (binding.operationContext) {
-    for (const field of ['provider', 'targetAlias', 'targetFingerprint', 'environment', 'operation']) {
+    for (const field of [
+      'provider', 'targetAlias', 'accountOrOrganisation', 'resource', 'targetFingerprint', 'environment',
+      'operation', 'inventoryGeneration', 'inventoryDigest'
+    ]) {
       invariant(receipt[field] === binding.operationContext[field], `Operation receipt ${field} does not match the completed operation.`, 'EXTERNAL_RECEIPT_BINDING_MISMATCH');
     }
+    if (receipt.authorisationLifetimeKind === 'task') {
+      for (const field of ['taskId', 'sessionFingerprint', 'objectiveDigest']) {
+        invariant(receipt[field] === binding.operationContext[field],
+          `Operation receipt ${field} does not match the completed task.`, 'EXTERNAL_RECEIPT_BINDING_MISMATCH');
+      }
+    }
+  }
+  if (binding.selectedRoute) {
+    for (const field of [
+      'selectedInterface', 'capabilityDigest', 'inventoryGeneration', 'inventoryDigest', 'selectedRouteDigest'
+    ]) {
+      invariant(receipt[field] === binding.selectedRoute[field],
+        `Operation receipt ${field} does not match the selected route.`, 'EXTERNAL_RECEIPT_BINDING_MISMATCH');
+    }
+    invariant((receipt.hostAdapterPlanDigest || null) === (binding.selectedRoute.hostAdapterPlanDigest || null),
+      'Operation receipt host adapter plan does not match the selected route.', 'EXTERNAL_RECEIPT_BINDING_MISMATCH');
   }
   invariant(Number.isInteger(receipt.riskTier) && receipt.riskTier >= 0 && receipt.riskTier <= 3, 'riskTier must be 0-3.');
   requireString(receipt.authorisationReference, 'authorisationReference', { max: 200 });
@@ -1192,6 +1461,8 @@ function validateOperationReceipt(receipt, binding = {}) {
 }
 
 function createOperationReceipt(input) {
+  const envelope = input.authorisationEnvelope;
+  const route = input.selectedRoute || input;
   const receipt = {
     schemaVersion: RECEIPT_SCHEMA_VERSION,
     operationId: input.operationId,
@@ -1199,14 +1470,24 @@ function createOperationReceipt(input) {
     provider: input.provider,
     adapter: input.adapter,
     targetAlias: input.targetAlias,
+    accountOrOrganisation: input.accountOrOrganisation,
+    resource: input.resource,
     targetFingerprint: input.targetFingerprint,
     environment: input.environment,
     riskTier: input.riskTier,
     authorisationReference: input.authorisationReference,
     authorisationEnvelopeDigest: input.authorisationEnvelopeDigest
-      || (input.authorisationEnvelope ? sha256(input.authorisationEnvelope) : undefined),
-    selectedInterface: input.selectedInterface,
-    selectedRouteDigest: operationReceiptRouteDigest(input),
+      || (envelope ? sha256(envelope) : undefined),
+    authorisationLifetimeKind: input.authorisationLifetimeKind || envelope?.lifetime?.kind,
+    taskId: input.taskId || envelope?.lifetime?.taskId,
+    sessionFingerprint: input.sessionFingerprint || envelope?.lifetime?.sessionFingerprint,
+    objectiveDigest: input.objectiveDigest || envelope?.lifetime?.objectiveDigest,
+    selectedInterface: route.selectedInterface,
+    capabilityDigest: route.capabilityDigest,
+    inventoryGeneration: route.inventoryGeneration,
+    inventoryDigest: route.inventoryDigest,
+    hostAdapterPlanDigest: route.hostAdapterPlanDigest || undefined,
+    selectedRouteDigest: input.selectedRouteDigest || route.selectedRouteDigest,
     precondition: input.precondition,
     mutationAttempted: input.mutationAttempted,
     mutationPerformed: input.mutationPerformed,
@@ -1218,6 +1499,7 @@ function createOperationReceipt(input) {
     supportedNextAction: input.supportedNextAction,
     unchangedScope: input.unchangedScope
   };
+  if (!receipt.selectedRouteDigest) receipt.selectedRouteDigest = operationReceiptRouteDigest(receipt);
   return validateOperationReceipt(receipt);
 }
 
@@ -1347,6 +1629,7 @@ module.exports = {
   LEDGER_SCHEMA_VERSION,
   RECEIPT_SCHEMA_VERSION,
   ROUTE_LIFECYCLE_SCHEMA_VERSION,
+  HOST_ADAPTER_PLAN_SCHEMA_VERSION,
   QUESTION_BANK_SCHEMA_VERSION,
   ANSWER_SCHEMA_VERSION,
   ALIAS_PATTERN_SOURCE,
@@ -1357,6 +1640,7 @@ module.exports = {
   N8N_DOMAIN_MARKERS,
   N8N_DOMAIN_BODY,
   sha256,
+  objectiveAuthorityDigest,
   assertNoSecretMaterial,
   isPublicHttpsOrigin,
   isPublicHttpsReference,
@@ -1370,6 +1654,9 @@ module.exports = {
   validateHistoryDiscovery,
   validateCapabilityAudit,
   targetBindingDigest,
+  targetInventoryDigest,
+  hostAdapterPlanDigest,
+  validateHostAdapterPlan,
   selectStrongestAdmissibleInterface,
   validateConsumerRequirements,
   defaultRegistryPath,

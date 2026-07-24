@@ -19,8 +19,8 @@ Use this skill before planning or operating against any external provider or gra
 2. Reconcile repository evidence with the user's current objective. Do not install every integration during generic Toolkit setup.
    - For any material n8n task, also load `n8n-agent-rules`, classify the exact n8n operation, and create the fail-closed task ledger before workflow work.
 3. Resolve one exact provider target from the task context or the local target registry. Never guess from recent credentials, tabs, history, environment-variable order, or a generic token.
-4. Build and validate the task-authorisation envelope. Reuse it for in-scope API requests, CLI commands, MCP calls, and approved graphical steps; ask again only when a protected boundary changes.
-5. Audit candidate interfaces per operation and select the strongest reviewed admissible route. MCP is optional and has no global priority.
+4. Build and validate the task-authorisation envelope. Task lifetime must bind the exact task ID, session fingerprint, and canonical approved-objective digest. Reuse it for in-scope API requests, CLI commands, MCP calls, and approved graphical steps; ask again only when a protected boundary changes.
+5. Audit candidate interfaces per operation and select the strongest reviewed admissible route through the exact current registry record or validated host-adapter plan. Detached or stale audits cannot select a route. MCP is optional and has no global priority.
 6. Before graphical control, render the complete disclosure and ask one bold explicit owner-approval question. A host, browser, operating-system, OAuth, or tool popup is technical permission, not owner approval.
 7. Execute only named adapter operations. Do not expose a generic unrestricted HTTP, shell, MCP, connector, or browser path.
 8. Verify the postcondition and write a redacted structured receipt with exactly one supported next action.
@@ -30,7 +30,7 @@ Use this skill before planning or operating against any external provider or gra
 ## Safety Boundary
 
 - Broad tool permission never expands operational authority.
-- Tier 2 operations need task-scoped explicit owner authorisation. Tier 3 operations need exact immediate approval.
+- Every production mutation is at least Tier 2 and needs task-scoped explicit owner authorisation. Tier 3 operations need exact immediate approval.
 - Scheduled collectors, drift checks, and advisory AI reviews remain read-only and cannot mutate providers.
 - Never put secrets, tokens, cookies, connection strings, private origins, private identifiers, raw provider output, raw screenshots, customer/private payloads, or complete environment listings in Git, chat, reports, manifests, ledgers, matrices, or receipts.
 - Prefer provider/connector-managed credentials, then an OS credential manager or reviewed broker, then short-lived process injection. Plaintext files and persistent environment variables are compatibility fallbacks, not vaults.

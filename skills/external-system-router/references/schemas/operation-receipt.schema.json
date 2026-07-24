@@ -4,7 +4,7 @@
   "title": "External System Operation Receipt",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "operationId", "operation", "provider", "adapter", "targetAlias", "targetFingerprint", "environment", "riskTier", "authorisationReference", "authorisationEnvelopeDigest", "selectedInterface", "selectedRouteDigest", "precondition", "mutationAttempted", "mutationPerformed", "postcondition", "rollbackAttempted", "rollbackPerformed", "stableCode", "safeEvidenceReferences", "supportedNextAction", "unchangedScope"],
+  "required": ["schemaVersion", "operationId", "operation", "provider", "adapter", "targetAlias", "accountOrOrganisation", "resource", "targetFingerprint", "environment", "riskTier", "authorisationReference", "authorisationEnvelopeDigest", "authorisationLifetimeKind", "selectedInterface", "capabilityDigest", "inventoryGeneration", "inventoryDigest", "selectedRouteDigest", "precondition", "mutationAttempted", "mutationPerformed", "postcondition", "rollbackAttempted", "rollbackPerformed", "stableCode", "safeEvidenceReferences", "supportedNextAction", "unchangedScope"],
   "properties": {
     "schemaVersion": {"const": "ai-agent-toolkit.operation-receipt.v1"},
     "operationId": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$"},
@@ -12,12 +12,22 @@
     "provider": {"$ref": "#/$defs/name"},
     "adapter": {"$ref": "#/$defs/name"},
     "targetAlias": {"$ref": "#/$defs/name"},
+    "accountOrOrganisation": {"$ref": "#/$defs/name"},
+    "resource": {"$ref": "#/$defs/name"},
     "targetFingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{16,64}$"},
     "environment": {"$ref": "#/$defs/name"},
     "riskTier": {"type": "integer", "minimum": 0, "maximum": 3},
     "authorisationReference": {"type": "string", "minLength": 1, "maxLength": 200},
     "authorisationEnvelopeDigest": {"$ref": "#/$defs/digest"},
+    "authorisationLifetimeKind": {"enum": ["task", "time-bounded"]},
+    "taskId": {"$ref": "#/$defs/name"},
+    "sessionFingerprint": {"$ref": "#/$defs/digest"},
+    "objectiveDigest": {"$ref": "#/$defs/digest"},
     "selectedInterface": {"$ref": "#/$defs/name"},
+    "capabilityDigest": {"$ref": "#/$defs/digest"},
+    "inventoryGeneration": {"$ref": "#/$defs/digest"},
+    "inventoryDigest": {"$ref": "#/$defs/digest"},
+    "hostAdapterPlanDigest": {"$ref": "#/$defs/digest"},
     "selectedRouteDigest": {"$ref": "#/$defs/digest"},
     "precondition": {"enum": ["passed", "failed", "not-applicable"]},
     "mutationAttempted": {"type": "boolean"},
@@ -30,6 +40,24 @@
     "supportedNextAction": {"type": "string", "minLength": 1, "maxLength": 300},
     "unchangedScope": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 200}}
   },
+  "allOf": [
+    {
+      "if": {"properties": {"authorisationLifetimeKind": {"const": "task"}}},
+      "then": {"required": ["taskId", "sessionFingerprint", "objectiveDigest"]}
+    },
+    {
+      "if": {"properties": {"authorisationLifetimeKind": {"const": "time-bounded"}}},
+      "then": {
+        "not": {
+          "anyOf": [
+            {"required": ["taskId"]},
+            {"required": ["sessionFingerprint"]},
+            {"required": ["objectiveDigest"]}
+          ]
+        }
+      }
+    }
+  ],
   "$defs": {
     "name": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"},
     "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{16,64}$"}

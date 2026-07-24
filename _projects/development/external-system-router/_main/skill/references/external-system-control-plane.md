@@ -24,6 +24,8 @@ Do not use a global `MCP > API > browser` ladder. A read-only MCP cannot block a
 | 2 | Production or sensitive but reversible change, including deployment, exact env write, credential/OAuth setup, or approved rollback. | Explicitly listed task-scoped owner authorisation; complete the approved sequence and verification without repeated prompts. |
 | 3 | Destructive, irreversible, cross-target, credential revocation, data restore, DNS deletion, or similarly high-blast-radius action. | Exact immediate owner approval for that operation. |
 
+Every non-read-only production operation is at least Tier 2 even when its provider-specific operation name is unfamiliar. Caller metadata and provider-specific overrides may raise the tier but can never lower this production floor. Destructive, irreversible, cross-target, or high-blast-radius evidence still raises the operation to Tier 3.
+
 Forbidden operations override every tier. Crossing provider, target, account/organisation, resource, environment, tier, sensitive-data class, interface restriction, or material objective scope requires a new envelope or owner decision.
 
 ## Task-Authorisation Envelope
@@ -47,6 +49,21 @@ Record:
 - owner approval reference;
 - sensitive-data classes;
 - interface restrictions, when applicable.
+
+Task lifetime additionally binds one exact task ID, privacy-safe session fingerprint, and canonical digest of the bounded approved objective. A later task, another session, or changed objective requires a new envelope even when provider, target, and operation remain the same. Time-bounded envelopes keep their expiry semantics and do not carry task-identity fields.
+
+Example task lifetime fragment:
+
+```json
+{
+  "kind": "task",
+  "taskId": "task-286-amendment",
+  "sessionFingerprint": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "objectiveDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+}
+```
+
+The objective digest is produced by the router's canonical `objectiveAuthorityDigest()` helper from the exact bounded objective; it is not a caller-selected label.
 
 Do not ask before every API request, CLI command, MCP call, or browser click inside a valid envelope.
 
@@ -115,7 +132,9 @@ Resolve `provider + target alias + environment`. Default to one appropriately sc
 
 Never select a target from the most recently used credential, open tabs, browser history, the first environment variable, or a generic provider token. Resolve from repo/task context or ask once, then pin it in the envelope.
 
-The local registry may store sanitized target fingerprints, private-origin references, non-secret resource references, credential references (never values), installed interfaces, capability/version/schema digests, route selections, audit state, and structured receipt references. It is not a plaintext secret vault.
+The local registry may store sanitized target fingerprints, a current inventory generation, private-origin references, non-secret resource references, credential references (never values), installed interfaces, capability/version/schema digests, route selections, audit state, and structured receipt references. It is not a plaintext secret vault.
+
+Final mutation-capable route selection requires exactly one current registry record or validated host-adapter plan. Provider, target, account/organisation, resource, environment, target fingerprint, inventory generation and digest, installed interface, capability digest, current audit state, and supported operation must all agree. Detached or structurally valid stale audits cannot select a route, and graphical fallback has no inventory bypass.
 
 ## Secret Handling
 
@@ -150,7 +169,7 @@ Promote or demote one verified operation only. Retain the prior route until pari
 
 ## Receipts And Continuation
 
-Write one versioned local ignored receipt per operation with one supported next action and explicit unchanged scope. Exclude raw provider responses, secrets, tokens, cookies, full environment listings, raw screenshots, private absolute paths, and customer/private payloads.
+Write one versioned local ignored receipt per operation with one supported next action and explicit unchanged scope. Bind task-lifetime receipts to the exact task, session fingerprint, objective digest, selected current inventory, capability digest, and selected-route digest so evidence cannot cross tasks or inventory generations. Exclude raw provider responses, secrets, tokens, cookies, full environment listings, raw screenshots, private absolute paths, and customer/private payloads.
 
 Codex and Claude continue through named supported operations and receipts. They do not edit adapter scripts to improvise a new operation.
 

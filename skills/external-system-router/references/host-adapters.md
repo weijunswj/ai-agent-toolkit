@@ -4,7 +4,9 @@ Codex and Claude consume the same logical provider target profile. Host-specific
 
 ## Shared Profile
 
-The shared profile pins provider, target alias, environment, sanitized fingerprint, credential reference, audited interfaces, per-operation route, and schema/version digests. It contains no credential value or raw private origin.
+The shared profile pins provider, target alias, account/organisation, resource aliases, environment, sanitized fingerprint, current inventory generation and digest, credential reference, installed audited interfaces, per-operation route, and schema/version digests. It contains no credential value or raw private origin.
+
+Host plans are validated snapshots, not independent authority. Final route selection must match the exact current registry generation, target fingerprint, installed interface, capability digest, audit state, and operation represented by the plan. A prior plan is rejected after any inventory generation changes.
 
 ## Codex
 
