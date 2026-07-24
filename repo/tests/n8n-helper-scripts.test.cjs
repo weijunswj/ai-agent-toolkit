@@ -222,6 +222,152 @@ try {
   });
 }
 
+function runMenuHostResolutionHarness(shell) {
+  const root = tempDir();
+  const powerShellHome = path.join(root, 'PowerShell Home With Spaces');
+  const fallbackExecutable = path.join(powerShellHome, 'pwsh.exe');
+  const currentExecutable = path.join(root, 'Current PowerShell With Spaces.exe');
+  const harnessPath = path.join(root, 'menu-host-resolution.ps1');
+  fs.mkdirSync(powerShellHome, { recursive: true });
+  fs.writeFileSync(fallbackExecutable, '');
+  fs.writeFileSync(currentExecutable, '');
+  fs.writeFileSync(harnessPath, `
+$ErrorActionPreference = "Stop"
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(${psSingleQuoted(path.join(sourceScriptDir, 'n8n-workflow-sync-menu.ps1'))}, [ref]$tokens, [ref]$errors)
+if ($errors.Count -gt 0) { throw $errors[0].Message }
+$function = $ast.Find({
+  param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq "Resolve-PowerShellHostPath"
+}, $true)
+Invoke-Expression $function.Extent.Text
+$preferred = Resolve-PowerShellHostPath ${psSingleQuoted(currentExecutable)} ${psSingleQuoted(path.join(root, 'missing home'))} "Core" $true
+$fallback = Resolve-PowerShellHostPath ${psSingleQuoted(path.join(root, 'missing.exe'))} ${psSingleQuoted(powerShellHome)} "Core" $true
+[PSCustomObject]@{ Preferred = $preferred; Fallback = $fallback } | ConvertTo-Json -Compress
+`, 'utf8');
+  const result = spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', harnessPath], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  return { root, result, currentExecutable, fallbackExecutable };
+}
+
+function runArchiveResolutionHarness(shell) {
+  const root = tempDir();
+  const harnessPath = path.join(root, 'archive-resolution.ps1');
+  fs.writeFileSync(harnessPath, `
+$ErrorActionPreference = "Stop"
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(${psSingleQuoted(path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1'))}, [ref]$tokens, [ref]$errors)
+if ($errors.Count -gt 0) { throw $errors[0].Message }
+$functionNames = @("Resolve-LiveWorkflowByName", "Assert-NoCaseFoldedWorkflowFileCollisions")
+$functions = $ast.FindAll({
+  param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $functionNames -contains $node.Name
+}, $true)
+foreach ($function in $functions) { Invoke-Expression $function.Extent.Text }
+function Write-Step($Status, $Message) {}
+$active = [PSCustomObject]@{ id = "active"; name = "Shared"; isArchived = $false; active = $false }
+$archivedOne = [PSCustomObject]@{ id = "archive-1"; name = "Shared"; isArchived = $true; active = $false }
+$archivedTwo = [PSCustomObject]@{ id = "archive-2"; name = "Shared"; isArchived = $true; active = $false }
+$secondActive = [PSCustomObject]@{ id = "active-2"; name = "Shared"; isArchived = $false; active = $false }
+$ArchivedByNameMode = "Block"
+$currentWins = Resolve-LiveWorkflowByName "Shared" "shared.json" @($active, $archivedOne)
+$ambiguousActive = Resolve-LiveWorkflowByName "Shared" "shared.json" @($active, $secondActive)
+$ArchivedByNameMode = "CreateNew"
+$createBesideArchives = Resolve-LiveWorkflowByName "Shared" "shared.json" @($archivedOne, $archivedTwo)
+$ArchivedByNameMode = "UpdateArchived"
+$updateOneArchive = Resolve-LiveWorkflowByName "Shared" "shared.json" @($archivedOne)
+$collisionCode = ""
+try {
+  Assert-NoCaseFoldedWorkflowFileCollisions @(
+    [PSCustomObject]@{ Name = "A.json" },
+    [PSCustomObject]@{ Name = "a.json" }
+  )
+} catch {
+  $collisionCode = $_.Exception.Message
+}
+[PSCustomObject]@{
+  CurrentWins = $currentWins.Status
+  CurrentId = $currentWins.Workflow.id
+  AmbiguousActive = $ambiguousActive.Status
+  CreateBesideArchives = $createBesideArchives.Status
+  UpdateOneArchive = $updateOneArchive.Status
+  CollisionCode = $collisionCode
+} | ConvertTo-Json -Compress
+`, 'utf8');
+  return {
+    root,
+    result: spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', harnessPath], {
+      cwd: root,
+      encoding: 'utf8',
+    }),
+  };
+}
+
+function runCredentialCleanupHarness(shell) {
+  const root = tempDir();
+  const preparedDir = path.join(root, 'prepared');
+  const harnessPath = path.join(root, 'credential-cleanup.ps1');
+  fs.mkdirSync(preparedDir, { recursive: true });
+  fs.writeFileSync(harnessPath, `
+$ErrorActionPreference = "Stop"
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(${psSingleQuoted(path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1'))}, [ref]$tokens, [ref]$errors)
+if ($errors.Count -gt 0) { throw $errors[0].Message }
+$functionNames = @("Test-NoCredentialsExportResult", "Get-SafeCredentialMetadata")
+$functions = $ast.FindAll({
+  param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $functionNames -contains $node.Name
+}, $true)
+foreach ($function in $functions) { Invoke-Expression $function.Extent.Text }
+function Write-Section($Title) {}
+function Write-Step($Status, $Message) {}
+$Container = "synthetic-container"
+$ContainerDir = "/tmp"
+$PreparedDirPath = ${psSingleQuoted(preparedDir)}
+$HelperScriptDir = ${psSingleQuoted(sourceScriptDir)}
+$script:FailCleanup = $false
+$script:CleanupCalls = 0
+function Invoke-CapturedCommand([string]$Command, [object[]]$Arguments) {
+  $exitCode = 0
+  if ($Arguments -contains "cleanup") {
+    $script:CleanupCalls += 1
+    if ($script:FailCleanup) { $exitCode = 9 }
+  }
+  if ($Arguments.Count -ge 3 -and $Arguments[0] -eq "cp" -and [string]$Arguments[1] -match "credential-metadata\\.json$") {
+    [IO.File]::WriteAllText([string]$Arguments[2], "[]")
+  }
+  return [PSCustomObject]@{ ExitCode = $exitCode; Output = @(); StdOut = @(); StdErr = @() }
+}
+$successPath = Get-SafeCredentialMetadata
+$successExists = Test-Path -LiteralPath $successPath -PathType Leaf
+Remove-Item -LiteralPath $successPath -Force
+$script:FailCleanup = $true
+$failureCode = ""
+try {
+  $null = Get-SafeCredentialMetadata
+} catch {
+  $failureCode = $_.Exception.Message
+}
+[PSCustomObject]@{
+  SuccessExists = $successExists
+  CleanupCalls = $script:CleanupCalls
+  FailureCode = $failureCode
+} | ConvertTo-Json -Compress
+`, 'utf8');
+  return {
+    root,
+    result: spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', harnessPath], {
+      cwd: root,
+      encoding: 'utf8',
+    }),
+  };
+}
+
 function runImportRunDirectoryHarness(shell, helperScriptPath) {
   const root = tempDir();
   const safeDir = path.join(root, '.tmp', 'n8n-live-import');
@@ -697,6 +843,7 @@ function fakeMenuRepo(menuSourcePath) {
   fs.writeFileSync(trustedExportScript, `Set-Content -LiteralPath ${psSingleQuoted(trustedMarkerPath)} -Value 'trusted export executed'\n`, 'utf8');
   fs.writeFileSync(path.join(helperDir, 'import-n8n-workflows-live.ps1'), `Set-Content -LiteralPath ${psSingleQuoted(trustedMarkerPath)} -Value 'trusted import executed'\n`, 'utf8');
   fs.writeFileSync(path.join(helperDir, 'validate-n8n-workflows.cjs'), "console.log('trusted validation executed');\n", 'utf8');
+  fs.writeFileSync(path.join(helperDir, 'n8n-workflow-operation-report.cjs'), "console.log('trusted report helper executed');\n", 'utf8');
   fs.writeFileSync(maliciousExportScript, `Set-Content -LiteralPath ${psSingleQuoted(markerPath)} -Value 'malicious export executed'\n`, 'utf8');
 
   return {
@@ -1251,6 +1398,22 @@ test('validate-n8n-workflows.cjs fails credentials.id', () => {
 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /credentials\.id/);
+
+  const nullCwd = tempDir();
+  writeJson(path.join(nullCwd, 'n8n-workflows', 'legacy-null.json'), safeWorkflow({
+    nodes: [{
+      id: 'http_1',
+      name: 'HTTP Request',
+      type: 'n8n-nodes-base.httpRequest',
+      typeVersion: 4,
+      position: [0, 0],
+      parameters: {},
+      credentials: { httpHeaderAuth: { id: null, name: 'Local Credential' } },
+    }],
+  }));
+  const nullResult = runNode(validateScript, [], { cwd: nullCwd });
+  assert.notEqual(nullResult.status, 0);
+  assert.match(nullResult.stderr, /credentials\.id/);
 });
 
 test('validate-n8n-workflows.cjs has no SpaceKoncept-specific placeholder requirement', () => {
@@ -1400,6 +1563,11 @@ test('generated n8n helper scripts are fresh copies of project source', () => {
     'export-n8n-workflows-live.ps1',
     'import-n8n-workflows-live.ps1',
     'n8n-workflow-sync-menu.ps1',
+    'n8n-portable-workflow.cjs',
+    'n8n-credential-metadata.cjs',
+    'n8n-workflow-transport.cjs',
+    'n8n-workflow-operation-report.cjs',
+    'n8n-workflow-identity.cjs',
     'prepare-n8n-live-import.cjs',
     'compare-n8n-workflow-credentials.cjs',
     'sync-n8n-live-exports.cjs',
@@ -1490,6 +1658,11 @@ test('Secure CI/CD n8n helper templates stay aligned with workflow toolkit sourc
     'export-n8n-workflows-live.ps1',
     'import-n8n-workflows-live.ps1',
     'n8n-workflow-sync-menu.ps1',
+    'n8n-portable-workflow.cjs',
+    'n8n-credential-metadata.cjs',
+    'n8n-workflow-transport.cjs',
+    'n8n-workflow-operation-report.cjs',
+    'n8n-workflow-identity.cjs',
     'prepare-n8n-live-import.cjs',
     'resolve-n8n-docker-target.cjs',
     'should-import-n8n-workflow.cjs',
@@ -1500,7 +1673,7 @@ test('Secure CI/CD n8n helper templates stay aligned with workflow toolkit sourc
   }
 });
 
-test('n8n command wrappers use framed colored retry output', () => {
+test('n8n command wrappers use framed colored output and import requires no routine input', () => {
   for (const [label, filePath] of [
     ['workflow toolkit export wrapper', path.join(sourceScriptDir, '_export-n8n-workflows-live.cmd')],
     ['workflow toolkit import wrapper', path.join(sourceScriptDir, '_import-n8n-workflows-live.cmd')],
@@ -1512,6 +1685,16 @@ test('n8n command wrappers use framed colored retry output', () => {
     ['Secure CI/CD import wrapper', path.join(secureCicdN8nTemplateDir, '_import-n8n-workflows-live.cmd')],
   ]) {
     const text = readText(filePath);
+
+    if (label.includes('import wrapper')) {
+      assert.match(text, /call :banner /, label);
+      assert.match(text, /call :status Red "FAIL  Import stopped with exit code %LAST_EXIT%\."/, label);
+      assert.match(text, /exit \/b %LAST_EXIT%/, label);
+      assert.doesNotMatch(text, /call :prompt|choice \/C|Read-Host|RestartContainerAfterImport|configure_restart/, label);
+      assert.match(text, /%SystemRoot%\\System32\\WindowsPowerShell\\v1\.0\\powershell\.exe/i, label);
+      assert.match(text, /"%~dp0import-n8n-workflows-live\.ps1"/, label);
+      continue;
+    }
 
     assert.match(text, /call :banner /, label);
     assert.match(text, /call :prompt "Press R to run again or E to exit\."/,
@@ -1569,7 +1752,7 @@ test('n8n command wrappers use framed colored retry output', () => {
   }
 });
 
-test('import command wrapper reruns on R and exits on E after successful import', { skip: process.platform !== 'win32' ? 'Windows-only cmd wrapper behavior' : false }, () => {
+test('import command wrapper runs exactly once without stdin after successful import', { skip: process.platform !== 'win32' ? 'Windows-only cmd wrapper behavior' : false }, () => {
   const cwd = tempDir();
   const wrapperPath = path.join(cwd, '_import-n8n-workflows-live.cmd');
   const helperPath = path.join(cwd, 'import-n8n-workflows-live.ps1');
@@ -1586,39 +1769,6 @@ Write-Host "dummy import run $count"
 exit 0
 `, 'utf8');
 
-  const result = spawnSync('cmd.exe', ['/d', '/c', wrapperPath, '-RestartContainerAfterImport'], {
-    cwd,
-    input: 'R\r\nE\r\n',
-    encoding: 'utf8',
-    timeout: 10000,
-  });
-
-  assert.equal(result.error && result.error.code, undefined, result.error && result.error.message);
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(fs.readFileSync(countPath, 'utf8').trim(), '2');
-  assert.match(result.stdout, /dummy import run 1/);
-  assert.match(result.stdout, /dummy import run 2/);
-  assert.doesNotMatch(result.stdout + result.stderr, /cannot find the batch label/i);
-  assert.doesNotMatch(result.stdout + result.stderr, /ERROR: The file is either empty/i);
-});
-
-test('import command wrapper stops before import when restart configuration fails', { skip: process.platform !== 'win32' ? 'Windows-only cmd wrapper behavior' : false }, () => {
-  const cwd = tempDir();
-  const wrapperPath = path.join(cwd, '_import-n8n-workflows-live.cmd');
-  const helperPath = path.join(cwd, 'import-n8n-workflows-live.ps1');
-  const invokedPath = path.join(cwd, 'import-invoked.txt');
-  const wrapperText = fs.readFileSync(path.join(sourceScriptDir, '_import-n8n-workflows-live.cmd'), 'utf8')
-    .replace(
-      /:read_yes_no\r?\n[\s\S]*?\r?\nexit \/b %ERRORLEVEL%/,
-      ':read_yes_no\r\nexit /b 2'
-    );
-
-  fs.writeFileSync(wrapperPath, wrapperText, 'utf8');
-  fs.writeFileSync(helperPath, `
-Set-Content -LiteralPath ${psSingleQuoted(invokedPath)} -Value 'import ran'
-exit 0
-`, 'utf8');
-
   const result = spawnSync('cmd.exe', ['/d', '/c', wrapperPath], {
     cwd,
     encoding: 'utf8',
@@ -1626,10 +1776,93 @@ exit 0
   });
 
   assert.equal(result.error && result.error.code, undefined, result.error && result.error.message);
-  assert.equal(result.status, 1, result.stdout + result.stderr);
-  assert.equal(fs.existsSync(invokedPath), false);
-  assert.match(result.stdout, /FAIL\s+Import setup terminated before live import\./);
-  assert.match(result.stdout, /Relaunch from an interactive Command Prompt and answer the restart prompt\./);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(countPath, 'utf8').trim(), '1');
+  assert.match(result.stdout, /dummy import run 1/);
+  assert.doesNotMatch(result.stdout + result.stderr, /cannot find the batch label/i);
+  assert.doesNotMatch(result.stdout + result.stderr, /ERROR: The file is either empty/i);
+});
+
+test('import command wrapper forwards arguments without a restart configuration prompt', { skip: process.platform !== 'win32' ? 'Windows-only cmd wrapper behavior' : false }, () => {
+  const cwd = tempDir();
+  const wrapperPath = path.join(cwd, '_import-n8n-workflows-live.cmd');
+  const helperPath = path.join(cwd, 'import-n8n-workflows-live.ps1');
+  const invokedPath = path.join(cwd, 'import-invoked.txt');
+  fs.copyFileSync(path.join(sourceScriptDir, '_import-n8n-workflows-live.cmd'), wrapperPath);
+  fs.writeFileSync(helperPath, `
+param([switch]$DryRun)
+Set-Content -LiteralPath ${psSingleQuoted(invokedPath)} -Value ([string]([bool]$DryRun))
+exit 0
+`, 'utf8');
+
+  const result = spawnSync('cmd.exe', ['/d', '/c', wrapperPath, '-DryRun'], {
+    cwd,
+    encoding: 'utf8',
+    timeout: 10000,
+  });
+
+  assert.equal(result.error && result.error.code, undefined, result.error && result.error.message);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(fs.readFileSync(invokedPath, 'utf8').trim(), 'True');
+  assert.doesNotMatch(result.stdout + result.stderr, /restart prompt|Read-Host|Press R/i);
+});
+
+test('PowerShell menu host resolution prefers the exact process and falls back to pwsh.exe on Windows paths with spaces', (t) => {
+  const shell = findPowerShell();
+  if (!shell) {
+    t.skip('PowerShell is unavailable');
+    return;
+  }
+  const fixture = runMenuHostResolutionHarness(shell);
+  try {
+    assert.equal(fixture.result.status, 0, fixture.result.stdout + fixture.result.stderr);
+    const parsed = JSON.parse(fixture.result.stdout.trim());
+    assert.equal(path.resolve(parsed.Preferred), path.resolve(fixture.currentExecutable));
+    assert.equal(path.resolve(parsed.Fallback), path.resolve(fixture.fallbackExecutable));
+    assert.match(path.basename(parsed.Fallback), /^pwsh\.exe$/i);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('archive-aware name resolution prefers one current workflow and tolerates multiple archives only in CreateNew mode', (t) => {
+  const shell = findPowerShell();
+  if (!shell) {
+    t.skip('PowerShell is unavailable');
+    return;
+  }
+  const fixture = runArchiveResolutionHarness(shell);
+  try {
+    assert.equal(fixture.result.status, 0, fixture.result.stdout + fixture.result.stderr);
+    const parsed = JSON.parse(fixture.result.stdout.trim());
+    assert.equal(parsed.CurrentWins, 'Found');
+    assert.equal(parsed.CurrentId, 'active');
+    assert.equal(parsed.AmbiguousActive, 'Blocked');
+    assert.equal(parsed.CreateBesideArchives, 'ArchivedCreateNew');
+    assert.equal(parsed.UpdateOneArchive, 'FoundArchived');
+    assert.match(parsed.CollisionCode, /^N8N_WORKFLOW_MATCH_AMBIGUOUS:/);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('encrypted credential cleanup succeeds normally and a cleanup failure blocks preparation without secret output', (t) => {
+  const shell = findPowerShell();
+  if (!shell) {
+    t.skip('PowerShell is unavailable');
+    return;
+  }
+  const fixture = runCredentialCleanupHarness(shell);
+  try {
+    assert.equal(fixture.result.status, 0, fixture.result.stdout + fixture.result.stderr);
+    const parsed = JSON.parse(fixture.result.stdout.trim());
+    assert.equal(parsed.SuccessExists, true);
+    assert.equal(parsed.CleanupCalls, 2);
+    assert.match(parsed.FailureCode, /^N8N_CREDENTIAL_CLEANUP_FAILED:/);
+    assert.doesNotMatch(fixture.result.stdout + fixture.result.stderr, /encrypted-secret|oauthToken|credentialId|credentials\.encrypted\.json/i);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
 });
 
 test('PowerShell n8n helper scripts use colored sections, status tags, and clean failure blocks', () => {
@@ -1671,11 +1904,10 @@ test('PowerShell n8n helper scripts use colored sections, status tags, and clean
     assert.match(text, /\^Checked\\s\+/, label);
 
     if (label.includes('import helper')) {
-      assert.match(text, /function Read-RestartContainerChoice\(\$Prompt\)/, label);
-      assert.match(text, /Read-Host \$Prompt/, label);
-      assert.match(text, /Press R to restart n8n container now or E to skip/, label);
-      assert.match(text, /if \(Read-RestartContainerChoice "Press R to restart n8n container now or E to skip"\) \{\s+\$restartResult = Invoke-CapturedCommand "docker" @\("restart", \$Container\)/, label);
-      assert.doesNotMatch(text, /Write-Section "Container Restart"\s+\$restartResult = Invoke-CapturedCommand "docker" @\("restart", \$Container\)/, label);
+      assert.match(text, /--activeState=false/, label);
+      assert.match(text, /N8N_POSTCONDITION_FAILED/, label);
+      assert.match(text, /Get-SafeCredentialMetadata/, label);
+      assert.doesNotMatch(text, /function Read-RestartContainerChoice|docker" @\("restart"/, label);
     }
   }
 
@@ -1790,6 +2022,202 @@ test('import helper guards hooks, no-op imports, and prepared payload revalidati
     assert.match(text, /Prepared workflow JSON validation failed after before-live-import hook/, label);
     assert.match(text, /Live n8n was not changed\./, label);
   }
+});
+
+test('portable import plan rejects every duplicate live target before mutation or identity writes', () => {
+  const powerShell = findPowerShell();
+  const importText = readText(path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1'));
+  const functionStart = importText.indexOf('function Get-PlannedTargetUniquenessBlockers');
+  const functionEnd = importText.indexOf('\nfunction Invoke-PortableWorkflowPreflight', functionStart);
+  assert.notEqual(functionStart, -1);
+  assert.notEqual(functionEnd, -1);
+  assert.match(importText, /\$resolvedTargetPlans = @\(\)/);
+  assert.match(importText, /\$resolvedTargetPlans \+= \[PSCustomObject\]@\{[\s\S]*TargetId = \$targetWorkflowId/);
+  assert.match(importText, /\$targetUniquenessBlockers = Get-PlannedTargetUniquenessBlockers \$resolvedTargetPlans/);
+  assert.match(importText, /\$plannedImports = @\(\)/);
+  if (!powerShell) return;
+
+  const fixtureRoot = tempDir();
+  const fixturePath = path.join(fixtureRoot, 'plan-uniqueness-fixture.ps1');
+  const functionText = importText.slice(functionStart, functionEnd);
+  const script = `${functionText}
+$cases = @(
+  @(
+    [PSCustomObject]@{ File = "same-name-a.json"; WorkflowName = "Shared"; TargetId = "target-shared"; Action = "Update by unique workflow name" },
+    [PSCustomObject]@{ File = "same-name-b.json"; WorkflowName = "Shared"; TargetId = "target-shared"; Action = "Update by unique workflow name" }
+  ),
+  @(
+    [PSCustomObject]@{ File = "stored-a.json"; WorkflowName = "Stored A"; TargetId = "target-converged"; Action = "Update by canonical workflow ID" },
+    [PSCustomObject]@{ File = "stored-b.json"; WorkflowName = "Stored B"; TargetId = "target-converged"; Action = "Update by canonical workflow ID" }
+  ),
+  @(
+    [PSCustomObject]@{ File = "id.json"; WorkflowName = "By ID"; TargetId = "target-mixed"; Action = "Update by canonical workflow ID" },
+    [PSCustomObject]@{ File = "name.json"; WorkflowName = "By Name"; TargetId = "target-mixed"; Action = "Update archived by unique workflow name" }
+  )
+)
+$results = @()
+foreach ($case in $cases) {
+  $results += ,@(Get-PlannedTargetUniquenessBlockers $case)
+}
+$unique = @(Get-PlannedTargetUniquenessBlockers @(
+  [PSCustomObject]@{ File = "one.json"; TargetId = "target-one" },
+  [PSCustomObject]@{ File = "two.json"; TargetId = "target-two" },
+  [PSCustomObject]@{ File = "new.json"; TargetId = "" }
+))
+[PSCustomObject]@{ Results = $results; UniqueCount = $unique.Count } | ConvertTo-Json -Depth 10 -Compress
+`;
+  fs.writeFileSync(fixturePath, script);
+  const result = spawnSync(powerShell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', fixturePath], {
+    cwd: fixtureRoot,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const parsed = JSON.parse(result.stdout.trim());
+  assert.deepEqual(parsed.Results.map((entries) => entries.length), [2, 2, 2]);
+  for (const entries of parsed.Results) {
+    assert.ok(entries.every((entry) => entry.Kind === 'N8N_WORKFLOW_MATCH_AMBIGUOUS'));
+  }
+  assert.equal(parsed.UniqueCount, 0);
+  assert.doesNotMatch(result.stdout, /target-shared|target-converged|target-mixed/);
+  fs.rmSync(fixtureRoot, { recursive: true, force: true });
+});
+
+test('export helper preserves explicit deployment-policy intent through the Node sync boundary', () => {
+  for (const filePath of [
+    path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1'),
+    path.join(scriptDir, 'export-n8n-workflows-live.ps1'),
+    path.join(secureCicdN8nTemplateDir, 'export-n8n-workflows-live.ps1'),
+  ]) {
+    const text = readText(filePath);
+    assert.match(text, /\$DeploymentPolicyFileWasExplicit = \$PSBoundParameters\.ContainsKey\("DeploymentPolicyFile"\)/);
+    assert.match(text, /if \(\$DeploymentPolicyFileWasExplicit\) \{[\s\S]*N8N_POLICY_VALIDATION_FAILED/);
+    assert.match(text, /if \(\$DeploymentPolicyFileWasExplicit\) \{\s*\$syncArgs \+= "--deployment-policy=\$DeploymentPolicyFilePath"/);
+    assert.match(text, /if \(\$DeploymentPolicyFileWasExplicit\) \{\s*\$syncAllArgs \+= "--deployment-policy=\$DeploymentPolicyFilePath"/);
+    assert.doesNotMatch(text, /\$syncArgs \+= @\("--portable-credentials=\$PortableCredentialsFilePath", "--deployment-policy=/);
+  }
+});
+
+test('import helper validates explicit deployment-policy intent before any live or preparation work', () => {
+  const sourceImportPath = path.join(sourceScriptDir, 'import-n8n-workflows-live.ps1');
+  for (const filePath of [
+    sourceImportPath,
+    path.join(scriptDir, 'import-n8n-workflows-live.ps1'),
+    path.join(secureCicdN8nTemplateDir, 'import-n8n-workflows-live.ps1'),
+  ]) {
+    const text = readText(filePath);
+    assert.match(text, /\$DeploymentPolicyFileWasExplicit = \$PSBoundParameters\.ContainsKey\("DeploymentPolicyFile"\)/);
+    assert.match(text, /function Read-SafeDeploymentPolicySnapshot/);
+    assert.match(text, /function Assert-DeploymentPolicySnapshotCurrent/);
+    assert.match(text, /\$Label contains a symlink, junction, or redirected path/);
+    assert.match(text, /\$script:PortablePolicyPreflightPassed = -not \$DeploymentPolicyFileWasExplicit/);
+    assert.match(text, /if \(\$script:PortablePolicyPreflightPassed -and -not \$script:OperationReportWritten/);
+    const mainStart = text.indexOf('$deploymentPolicySnapshot = $null');
+    const firstValidation = text.indexOf('$deploymentPolicySnapshot = Read-SafeDeploymentPolicySnapshot', mainStart);
+    const hook = text.indexOf('Invoke-ProjectWorkflowHook "before-import-validation"', mainStart);
+    const live = text.indexOf('Invoke-LivePreflight', mainStart);
+    const prepareDirectory = text.indexOf('Initialize-RunDirectory $PreparedDirPath', mainStart);
+    assert.ok(mainStart >= 0 && firstValidation > mainStart, filePath);
+    assert.ok(firstValidation < hook, filePath);
+    assert.ok(firstValidation < live, filePath);
+    assert.ok(firstValidation < prepareDirectory, filePath);
+    assert.match(text.slice(hook, live), /Assert-DeploymentPolicySnapshotCurrent \$deploymentPolicySnapshot/);
+    assert.match(text.slice(live, prepareDirectory), /Assert-DeploymentPolicySnapshotCurrent \$deploymentPolicySnapshot/);
+    assert.match(text.slice(live, prepareDirectory), /\$script:PortablePolicyPreflightPassed = \$true/);
+    assert.match(text, /\$EffectiveDeploymentPolicyFilePath = Join-Path \$PreparedDirPath "deployment-policy\.snapshot\.json"/);
+  }
+
+  const powerShell = findPowerShell();
+  if (!powerShell) return;
+  const importText = readText(sourceImportPath);
+  const extractFunction = (name) => {
+    const start = importText.indexOf(`function ${name}`);
+    assert.notEqual(start, -1, name);
+    const end = importText.indexOf('\nfunction ', start + 10);
+    return importText.slice(start, end < 0 ? importText.length : end);
+  };
+  const functionText = [
+    'Assert-StrictRepoChildPath',
+    'Get-PathStringComparison',
+    'Get-NormalizedFullPath',
+    'Test-PathItemIsUnsafeLink',
+    'Assert-RepoFilePathHasNoUnsafeLinks',
+    'Get-ByteSha256',
+    'Read-SafeDeploymentPolicySnapshot',
+    'Assert-DeploymentPolicySnapshotCurrent',
+  ].map(extractFunction).join('\n\n');
+  const fixtureRoot = tempDir();
+  const validPath = path.join(fixtureRoot, 'policy.json');
+  const missingPath = path.join(fixtureRoot, 'missing.json');
+  const directoryPath = path.join(fixtureRoot, 'policy-directory');
+  const invalidPath = path.join(fixtureRoot, 'invalid.json');
+  fs.writeFileSync(validPath, '{"schemaVersion":1,"workflows":[]}\n');
+  fs.mkdirSync(directoryPath);
+  fs.writeFileSync(invalidPath, '{not-json');
+  const fixturePath = path.join(fixtureRoot, 'policy-preflight-fixture.ps1');
+  fs.writeFileSync(fixturePath, `param([string]$Repo, [string]$Policy, [switch]$DeleteAfterRead, [switch]$LockBeforeRead)
+$ErrorActionPreference = "Stop"
+$RepoRoot = $Repo
+$DeploymentPolicyFilePath = $Policy
+${functionText}
+try {
+  $lock = $null
+  if ($LockBeforeRead) {
+    $lock = [System.IO.File]::Open($DeploymentPolicyFilePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
+  }
+  try {
+    $snapshot = Read-SafeDeploymentPolicySnapshot
+  } finally {
+    if ($null -ne $lock) { $lock.Dispose() }
+  }
+  if ($DeleteAfterRead) { Remove-Item -LiteralPath $DeploymentPolicyFilePath -Force }
+  Assert-DeploymentPolicySnapshotCurrent $snapshot
+  Write-Output "PASS"
+} catch {
+  Write-Error $_.Exception.Message
+  exit 1
+}
+`);
+  const run = (policyPath, extra = []) => spawnSync(powerShell, [
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    fixturePath,
+    '-Repo',
+    fixtureRoot,
+    '-Policy',
+    policyPath,
+    ...extra,
+  ], { cwd: fixtureRoot, encoding: 'utf8' });
+  assert.equal(run(validPath).status, 0);
+  for (const policyPath of [missingPath, directoryPath, invalidPath]) {
+    const result = run(policyPath);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /N8N_POLICY_VALIDATION_FAILED/);
+    assert.doesNotMatch(result.stderr, new RegExp(policyPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  fs.writeFileSync(validPath, '{"schemaVersion":1,"workflows":[]}\n');
+  const deleted = run(validPath, ['-DeleteAfterRead']);
+  assert.notEqual(deleted.status, 0);
+  assert.match(deleted.stderr, /N8N_POLICY_VALIDATION_FAILED/);
+  assert.doesNotMatch(deleted.stderr, new RegExp(validPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  fs.writeFileSync(validPath, '{"schemaVersion":1,"workflows":[]}\n');
+  const unreadable = run(validPath, ['-LockBeforeRead']);
+  assert.notEqual(unreadable.status, 0);
+  assert.match(unreadable.stderr, /unavailable or unreadable/);
+  assert.doesNotMatch(unreadable.stderr, new RegExp(validPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+
+  const linkPath = path.join(fixtureRoot, 'redirected-policy.json');
+  fs.writeFileSync(validPath, '{"schemaVersion":1,"workflows":[]}\n');
+  try {
+    fs.symlinkSync(validPath, linkPath, 'file');
+    const linked = run(linkPath);
+    assert.notEqual(linked.status, 0);
+    assert.match(linked.stderr, /symlink,[\s\S]*junction,[\s\S]*or redirected path/);
+  } catch (error) {
+    if (!['EPERM', 'EACCES', 'ENOTSUP'].includes(error.code)) throw error;
+  }
+  fs.rmSync(fixtureRoot, { recursive: true, force: true });
 });
 
 test('PowerShell n8n live helpers guard run-directory cleanup under .tmp', () => {
@@ -2056,8 +2484,8 @@ test('n8n workflow sync menus resolve helper commands from their own folder', ()
     assert.match(text, /\$NodeCommandPath/, label);
     assert.match(text, /Write-Step "FAIL" "Command finished with exit code \$exitCode\."/,
       label);
-    assert.match(text, /if \(\$Record\.commandKind -eq "export" -or \$Record\.commandKind -eq "import"\) \{\s+Write-Host ""\s+\[void\]\(Read-Host "Press Enter to return after reviewing the error"\)/,
-      label);
+    assert.doesNotMatch(text, /Press Enter to return after reviewing the error/, label);
+    assert.match(text, /\$ReportHelperScript = Join-Path \$HelperScriptDir "n8n-workflow-operation-report\.cjs"/, label);
     assert.doesNotMatch(text, /New-CommandRecord\s+[^`r`n]*"node"/, label);
     assert.doesNotMatch(text, /&\s+node\b/, label);
     assert.doesNotMatch(text, /"\.\\scripts\\export-n8n-workflows-live\.ps1"/, label);
@@ -2088,9 +2516,10 @@ test('n8n workflow sync menus validate saved previous commands before replay', (
     assert.match(text, /commandKind = \$CommandKind/, label);
     assert.match(text, /helperScriptDir = \$HelperScriptDir/, label);
     assert.match(text, /schemaVersion", "commandKind", "commandName", "script", "args", "helperScriptDir"/, label);
-    assert.match(text, /Test-ExportCommandArgs \$args/, label);
-    assert.match(text, /Test-ImportCommandArgs \$args/, label);
-    assert.match(text, /\$recordValidateScript = Resolve-CanonicalPathOrNull \$args\[0\]/, label);
+    assert.match(text, /Test-ExportCommandArgs \$commandArgs/, label);
+    assert.match(text, /Test-ImportCommandArgs \$commandArgs/, label);
+    assert.match(text, /\$recordValidateScript = Resolve-CanonicalPathOrNull \$commandArgs\[0\]/, label);
+    assert.doesNotMatch(text, /function (?:Read-MenuArgs|Test-ExportCommandArgs|Test-ImportCommandArgs)[^(]*\([^)]*\$Args/, label);
     assert.match(text, /\$recordScript -ne \$TrustedExportHelperScript/, label);
     assert.match(text, /\$recordScript -ne \$TrustedImportHelperScript/, label);
     assert.match(text, /\$recordScript -ne \$trustedNodePath/, label);
@@ -2103,6 +2532,22 @@ test('n8n workflow sync menus validate saved previous commands before replay', (
     assert.match(text, /if \(-not \(Test-TrustedCommandRecord \$Record\)\)/, label);
     assert.match(text, /Unknown trusted command type/, label);
   }
+});
+
+test('n8n workflow sync menu valid import runs without a routine confirmation or Enter prompt', { skip: !findPowerShell() }, () => {
+  const powerShell = findPowerShell();
+  const repo = fakeMenuRepo(path.join(sourceScriptDir, 'n8n-workflow-sync-menu.ps1'));
+  const result = spawnSync(powerShell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', repo.menuPath], {
+    cwd: repo.root,
+    input: '2\r\n0\r\n',
+    encoding: 'utf8',
+    timeout: 15000,
+  });
+  const output = `${result.stdout}\n${result.stderr}`;
+  assert.equal(result.error && result.error.code, undefined, result.error && result.error.message);
+  assert.equal(result.status, 0, output);
+  assert.equal(fs.existsSync(repo.trustedMarkerPath), true, output);
+  assert.doesNotMatch(output, /Run this real import\/export command now|Press Enter|Continue\?/i);
 });
 
 test('n8n workflow sync menus block tampered previous command replay', () => {
@@ -2191,7 +2636,7 @@ test('n8n helper tests do not execute live n8n import or export helpers', () => 
   }
 });
 
-test('sync-n8n-live-exports.cjs strips live-only fields, credentials, and tags by default', () => {
+test('sync-n8n-live-exports.cjs strips live-only fields and target IDs while preserving portable credential names', () => {
   const cwd = tempDir();
   const workflowDir = path.join(cwd, 'n8n-workflows');
   const exportsDir = path.join(cwd, '.tmp', 'exports');
@@ -2234,8 +2679,18 @@ test('sync-n8n-live-exports.cjs strips live-only fields, credentials, and tags b
   assert.equal('pinData' in synced, false);
   assert.equal('tags' in synced, false);
   assert.equal('tagIds' in synced, false);
-  assert.equal('credentials' in synced.nodes[0], false);
+  assert.deepEqual(synced.nodes[0].credentials, {
+    httpHeaderAuth: { name: 'Local Credential' },
+  });
   assert.equal('webhookId' in synced.nodes[0], false);
+  const declarations = JSON.parse(fs.readFileSync(path.join(workflowDir, 'toolkit', 'portable-credentials.json'), 'utf8'));
+  assert.equal(declarations.workflows[0].nodes[0].credentialType, 'httpHeaderAuth');
+  assert.equal(declarations.workflows[0].nodes[0].logicalName, 'Local Credential');
+  assert.doesNotMatch(JSON.stringify({ synced, declarations }), /cred_1/);
+  const receipt = JSON.parse(fs.readFileSync(path.join(cwd, '.n8n-local', 'reports', 'latest-n8n-workflow-operation.json'), 'utf8'));
+  assert.equal(receipt.operationType, 'export');
+  assert.equal(receipt.code, 'N8N_EXPORT_SUCCESS');
+  assert.equal(receipt.executionState, 'not_executed');
 });
 
 test('sync-n8n-live-exports.cjs preserves tags with --preserve-tags', () => {
@@ -2333,7 +2788,7 @@ test('prepare-n8n-live-import.cjs selects bindings by exact file path first', ()
   const workflow = safeWorkflow({ id: 'wf_2', name: 'Same Name' });
   const selection = selectBindingsWithMeta({
     workflows: [
-      { workflowFile: 'n8n-workflows/a.json', workflowId: 'wf_1', workflowName: 'Same Name', nodes: [{ nodeId: 'a' }] },
+      { workflowFile: 'n8n-workflows/a.json', workflowId: 'wf_2', workflowName: 'Same Name', nodes: [{ nodeId: 'a' }] },
       { workflowFile: 'n8n-workflows/b.json', workflowId: 'wf_2', workflowName: 'Same Name', nodes: [{ nodeId: 'b' }] },
     ],
   }, workflow, path.join(process.cwd(), 'n8n-workflows', 'a.json'));
@@ -2385,7 +2840,7 @@ test('prepare-n8n-live-import.cjs restores credentials by node ID', () => {
   assert.deepEqual(prepared.nodes[0].credentials, { httpHeaderAuth: { id: 'cred_1', name: 'Local Credential' } });
 });
 
-test('prepare-n8n-live-import.cjs skips stale node ID binding when node name and type changed', () => {
+test('prepare-n8n-live-import.cjs blocks stale node ID binding before name/type fallback', () => {
   const cwd = tempDir();
   const workflowPath = path.join(cwd, 'n8n-workflows', 'workflow.json');
   const bindingsPath = path.join(cwd, '.n8n-local', 'bindings.json');
@@ -2408,7 +2863,7 @@ test('prepare-n8n-live-import.cjs skips stale node ID binding when node name and
       workflowName: 'Safe Generic Workflow',
       nodes: [{
         nodeId: 'reused_node_id',
-        nodeName: 'Upsert Conversation Failed',
+        nodeName: 'Notify Main Error Handler',
         nodeType: 'n8n-nodes-base.googleSheets',
         credentials: { googleSheetsOAuth2Api: { id: 'cred_1', name: 'Sheets Credential' } },
       }],
@@ -2417,13 +2872,12 @@ test('prepare-n8n-live-import.cjs skips stale node ID binding when node name and
 
   const result = runNode(prepareScript, [workflowPath, bindingsPath, outputPath], { cwd });
 
-  assert.equal(result.status, 0, result.stderr + result.stdout);
-  const prepared = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
-  assert.equal('credentials' in prepared.nodes[0], false);
-  assert.match(result.stderr + result.stdout, /Skipped 1 binding\(s\) with no matching node: Upsert Conversation Failed/);
+  assert.notEqual(result.status, 0, result.stderr + result.stdout);
+  assert.equal(fs.existsSync(outputPath), false);
+  assert.match(result.stderr + result.stdout, /Stable node ID resolves to a conflicting node type/);
 });
 
-test('compare-n8n-workflow-credentials.cjs ignores stale node ID binding when replacement node has no credentials', () => {
+test('compare-n8n-workflow-credentials.cjs blocks stale node ID binding before name/type fallback', () => {
   const cwd = tempDir();
   const repoWorkflowPath = path.join(cwd, 'n8n-workflows', 'workflow.json');
   const liveWorkflowPath = path.join(cwd, '.tmp', 'live-workflow.json');
@@ -2446,7 +2900,7 @@ test('compare-n8n-workflow-credentials.cjs ignores stale node ID binding when re
       workflowName: 'Safe Generic Workflow',
       nodes: [{
         nodeId: 'reused_node_id',
-        nodeName: 'Upsert Conversation Failed',
+        nodeName: 'Notify Main Error Handler',
         nodeType: 'n8n-nodes-base.googleSheets',
         credentials: { googleSheetsOAuth2Api: { id: 'cred_1', name: 'Sheets Credential' } },
       }],
@@ -2455,8 +2909,8 @@ test('compare-n8n-workflow-credentials.cjs ignores stale node ID binding when re
 
   const result = runNode(compareCredentialsScript, [repoWorkflowPath, liveWorkflowPath, bindingsPath], { cwd });
 
-  assert.equal(result.status, 0, result.stderr + result.stdout);
-  assert.equal(result.stdout.trim(), 'MATCH');
+  assert.notEqual(result.status, 0, result.stderr + result.stdout);
+  assert.match(result.stderr + result.stdout, /stable node ID resolves to a conflicting node type/i);
 });
 
 test('prepare-n8n-live-import.cjs restores live webhookId from matching live workflow node', () => {
@@ -2524,7 +2978,48 @@ test('prepare-n8n-live-import.cjs restores live webhookId by unique node name an
   assert.equal(workflow.nodes[0].webhookId, 'name-type-live-webhook-id');
 });
 
-test('prepare-n8n-live-import.cjs skips ambiguous live webhookId name and type matches', () => {
+test('prepare-n8n-live-import.cjs blocks conflicting stable webhook node ID before name/type fallback', () => {
+  const workflow = safeWorkflow({
+    nodes: [{
+      id: 'stable_webhook_id',
+      name: 'Webhook',
+      type: 'n8n-nodes-base.webhook',
+      typeVersion: 2,
+      position: [0, 0],
+      parameters: {},
+    }],
+  });
+  const liveWorkflow = safeWorkflow({
+    nodes: [
+      {
+        id: 'stable_webhook_id',
+        name: 'Replacement',
+        type: 'n8n-nodes-base.httpRequest',
+        typeVersion: 4,
+        position: [0, 0],
+        parameters: {},
+      },
+      {
+        id: 'fallback_webhook_id',
+        name: 'Webhook',
+        type: 'n8n-nodes-base.webhook',
+        typeVersion: 2,
+        position: [0, 0],
+        parameters: {},
+        webhookId: 'must-not-be-restored',
+      },
+    ],
+  });
+  const before = JSON.stringify(workflow);
+
+  assert.throws(
+    () => restoreLiveWebhookIds(workflow, liveWorkflow),
+    /stable node ID resolves to a conflicting node type/
+  );
+  assert.equal(JSON.stringify(workflow), before);
+});
+
+test('prepare-n8n-live-import.cjs blocks ambiguous live webhookId name and type matches', () => {
   const workflow = safeWorkflow({
     nodes: [{
       id: 'repo_webhook',
@@ -2557,21 +3052,11 @@ test('prepare-n8n-live-import.cjs skips ambiguous live webhookId name and type m
       },
     ],
   });
-  const warnings = [];
-  const originalWarn = console.warn;
-  console.warn = (message) => warnings.push(message);
-
-  try {
-    const restored = restoreLiveWebhookIds(workflow, liveWorkflow);
-
-    assert.equal(restored, 0);
-    assert.equal('webhookId' in workflow.nodes[0], false);
-  } finally {
-    console.warn = originalWarn;
-  }
-
-  assert.equal(warnings.length, 1);
-  assert.match(warnings[0], /ambiguous/);
+  assert.throws(
+    () => restoreLiveWebhookIds(workflow, liveWorkflow),
+    /name\/type match is ambiguous/
+  );
+  assert.equal('webhookId' in workflow.nodes[0], false);
 });
 
 test('prepare-n8n-live-import.cjs does not invent webhookId for new workflows', () => {
@@ -2587,6 +3072,7 @@ test('prepare-n8n-live-import.cjs does not invent webhookId for new workflows', 
       typeVersion: 2,
       position: [0, 0],
       parameters: {},
+      webhookId: 'CANONICAL_PLACEHOLDER',
     }],
   }));
   writeJson(bindingsPath, { version: 2, workflows: [] });

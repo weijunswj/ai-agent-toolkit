@@ -693,7 +693,7 @@ The agent should explain every created or changed file before committing.
 
 ## Reusable n8n workflow helpers
 
-For n8n workflow projects, use `n8n-workflows/` as the canonical folder for root-level workflow JSON files. The helper scripts keep `.n8n-local/` and `.tmp/` local only, strip live credential IDs and live-only `webhookId` values from repo workflow JSON, and default to inactive workflow templates.
+For n8n workflow projects, use `n8n-workflows/` as the canonical folder for root-level workflow JSON files. Canonical credential references retain only the logical `name` and omit `id`; the helper scripts keep `.n8n-local/` and `.tmp/` local only, strip live credential IDs and live-only `webhookId` values from repo workflow JSON, and default to inactive workflow templates.
 
 Common commands:
 
@@ -714,7 +714,7 @@ Create `n8n-workflow-policy.json` only when generic validator defaults are too s
 
 The credential migration map is optional and local-only. If needed, place it at `.n8n-local/n8n-credential-migration-map.json` in the target repo; do not commit it if it contains local credential migration details. The reference example lives in `docs/n8n/n8n-credential-migration-map.example.json` in this installer repo and is not required at runtime.
 
-During import, existing live `webhookId` values are restored only into the prepared import payload when live nodes match by exact node id or unique node name/type. New workflows let n8n generate `webhookId` values. Do not commit `webhookId` values into `n8n-workflows/`.
+During import, every canonical `webhookId` is removed first. Existing live `webhookId` values are restored only into the prepared import payload when live nodes match by exact node id or unique node name/type; ambiguous identity blocks. New workflows let n8n generate `webhookId` values. Do not commit `webhookId` values into `n8n-workflows/`.
 
 Preserving n8n tags is not the default. `export-n8n-workflows-live.ps1 -PreserveTags` passes `--preserve-tags` to the sync helper and keeps `tags` and `tagIds`, but that can create live/repo drift until import comparison and tag apply behavior are expanded later.
 

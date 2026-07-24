@@ -16,15 +16,16 @@ This is a short skill-local reference and safety checklist. It is not the full r
 
 - Never store real credential values in workflow JSON.
 - Never store credential exports in repo files.
-- Never commit credential binding files.
+- Never commit target-local credential IDs, encrypted credential exports, or credential values.
+- Commit only the portable logical credential name/type declarations emitted beside canonical workflows.
 - Never write tokens, private keys, passwords, or bearer values into sticky notes, examples, docs, or Set nodes.
 - Use n8n credentials on nodes instead of hardcoded headers or query parameters.
 
-## Local Binding Metadata
+## Target Metadata And Internal Binding
 
-Credential binding metadata can be useful during repo/live sync, but it must stay local and ignored. Use `.n8n-local/` in a consumer repo and never commit it.
+For the supported Docker/server CLI transport, encrypted credential export must remain inside restrictive Toolkit-owned target-local temporary storage. Extract only ID, name, and type, never decrypt, never print or report target IDs, reject link/reparse escapes, and clean up on success and failure.
 
-The sync helpers may write `.n8n-local/**` during reviewed local runs so imports can restore credential references without committing credential values. Treat those files as local machine state.
+Resolve only an exact unique logical name/type match. Missing, ambiguous, wrong-type, or unavailable discovery states stop or follow the officially supported unresolved inactive-import path; they never guess. Exact private resource bindings and sanitized reports remain ignored under `.n8n-local/**`.
 
 ## Templates
 

@@ -43,7 +43,10 @@ function nodeKey(node) {
 
 function bindingForRepoNode(bindingById, bindingByNameType, repoNode) {
   const idBinding = bindingById.get(repoNode.id);
-  if (idBinding && !isStaleNodeIdBinding(idBinding, repoNode)) {
+  if (idBinding && isStaleNodeIdBinding(idBinding, repoNode)) {
+    throw new Error(`Credential comparison blocked for node "${repoNode.name || repoNode.id || '(unknown node)'}": stable node ID resolves to a conflicting node type.`);
+  }
+  if (idBinding) {
     return idBinding;
   }
 
@@ -52,14 +55,14 @@ function bindingForRepoNode(bindingById, bindingByNameType, repoNode) {
 
 function liveNodeForRepoNode(liveById, liveByNameType, repoNode) {
   const idNode = liveById.get(repoNode.id);
-  if (
-    idNode &&
-    !isStaleNodeIdBinding({
+  if (idNode && isStaleNodeIdBinding({
       nodeId: idNode.id,
       nodeName: idNode.name,
       nodeType: idNode.type,
-    }, repoNode)
-  ) {
+    }, repoNode)) {
+    throw new Error(`Credential comparison blocked for node "${repoNode.name || repoNode.id || '(unknown node)'}": stable node ID resolves to a conflicting live node type.`);
+  }
+  if (idNode) {
     return idNode;
   }
 
@@ -85,7 +88,12 @@ function statusForCredentialDrift(repoWorkflow, liveWorkflow, bindingsPath, repo
   const bindingById = new Map();
   const bindingByNameType = new Map();
   for (const binding of workflowBindings.nodes || []) {
-    if (binding.nodeId) bindingById.set(binding.nodeId, binding);
+    if (binding.nodeId) {
+      if (bindingById.has(binding.nodeId)) {
+        throw new Error('Credential comparison blocked: stable node ID is ambiguous in credential bindings.');
+      }
+      bindingById.set(binding.nodeId, binding);
+    }
     if (binding.nodeName && binding.nodeType) {
       bindingByNameType.set(`${binding.nodeName}\u0000${binding.nodeType}`, binding);
     }
@@ -94,7 +102,12 @@ function statusForCredentialDrift(repoWorkflow, liveWorkflow, bindingsPath, repo
   const liveById = new Map();
   const liveByNameType = new Map();
   for (const node of liveWorkflow.nodes || []) {
-    if (node.id) liveById.set(node.id, node);
+    if (node.id) {
+      if (liveById.has(node.id)) {
+        throw new Error('Credential comparison blocked: stable node ID is ambiguous in the live workflow.');
+      }
+      liveById.set(node.id, node);
+    }
     liveByNameType.set(nodeKey(node), node);
   }
 

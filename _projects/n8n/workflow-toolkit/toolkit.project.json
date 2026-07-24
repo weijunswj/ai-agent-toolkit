@@ -5,9 +5,9 @@
   "title": "n8n Workflow Toolkit",
   "module_path": "_projects/n8n/workflow-toolkit",
   "main_path": "_projects/n8n/workflow-toolkit/_main",
-  "version": "1.2.22",
+  "version": "1.3.6",
   "version_policy": "semver",
-  "version_notes": "Fails closed before import when restart prompt setup cannot complete and keeps implicit Docker target discovery ambiguous when another n8n container is running globally.",
+  "version_notes": "Eliminates pathname-destructive canonical transaction operations by using identity-bound descriptor writes and exclusive missing-file creation.",
   "outputs": [
     {
       "kind": "curated",
@@ -170,6 +170,11 @@
       "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/prepare-n8n-live-import.cjs",
       "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/compare-n8n-workflow-credentials.cjs",
       "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/should-import-n8n-workflow.cjs",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/n8n-portable-workflow.cjs",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/n8n-credential-metadata.cjs",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/n8n-workflow-transport.cjs",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/n8n-workflow-operation-report.cjs",
+      "skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/n8n-workflow-identity.cjs",
       "skills/n8n-workflow-templates/SKILL.md",
       "skills/n8n-workflow-templates/README.md",
       "skills/n8n-workflow-templates/templates/README.md",

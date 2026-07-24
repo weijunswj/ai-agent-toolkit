@@ -57,7 +57,6 @@ function comparableWorkflow(workflow) {
   const clean = stripVolatile(JSON.parse(JSON.stringify(workflow)));
   const ignoredTopLevelFields = [
     'id',
-    'active',
     'createdAt',
     'updatedAt',
     'isArchived',
@@ -78,14 +77,7 @@ function comparableWorkflow(workflow) {
     delete clean[field];
   }
 
-  delete clean.credentials;
-
   if (clean.description == null) delete clean.description;
-
-  for (const node of clean.nodes || []) {
-    delete node.credentials;
-    delete node.webhookId;
-  }
 
   clean.nodes = sortNodes(clean.nodes);
 

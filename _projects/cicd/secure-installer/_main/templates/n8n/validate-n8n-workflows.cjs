@@ -427,10 +427,34 @@ for (const filePath of files) {
   }
 
   walk(workflow, (node, trail) => {
-    if (!preparedImportMode && node.credentials && typeof node.credentials === 'object') {
+    if (node.credentials && typeof node.credentials === 'object') {
       for (const [credentialName, credentialValue] of Object.entries(node.credentials)) {
-        if (credentialValue && typeof credentialValue === 'object' && 'id' in credentialValue) {
-          fail(`${relative} contains credentials.id at ${trailString(trail.concat(['credentials', credentialName, 'id']))}.`);
+        const credentialTrail = trail.concat(['credentials', credentialName]);
+        if (!credentialValue || typeof credentialValue !== 'object' || Array.isArray(credentialValue)) {
+          fail(`${relative} contains an invalid credential reference at ${trailString(credentialTrail)}.`);
+          continue;
+        }
+        const keys = Object.keys(credentialValue);
+        if (typeof credentialValue.name !== 'string' || !credentialValue.name.trim()) {
+          fail(`${relative} contains a credential reference without a logical name at ${trailString(credentialTrail)}.`);
+        }
+        if (!preparedImportMode) {
+          if ('id' in credentialValue) {
+            fail(`${relative} contains credentials.id at ${trailString(credentialTrail.concat(['id']))}.`);
+          }
+          if (keys.some((key) => key !== 'name')) {
+            fail(`${relative} contains unsupported canonical credential metadata at ${trailString(credentialTrail)}.`);
+          }
+        } else {
+          if (
+            !Object.prototype.hasOwnProperty.call(credentialValue, 'id') ||
+            (credentialValue.id !== null && (typeof credentialValue.id !== 'string' || !credentialValue.id))
+          ) {
+            fail(`${relative} prepared credential reference requires an exact resolved string ID or unresolved null at ${trailString(credentialTrail.concat(['id']))}.`);
+          }
+          if (keys.some((key) => !['id', 'name'].includes(key))) {
+            fail(`${relative} contains unsupported prepared credential metadata at ${trailString(credentialTrail)}.`);
+          }
         }
       }
     }

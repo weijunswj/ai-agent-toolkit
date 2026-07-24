@@ -34,6 +34,11 @@ Live import/export helper entry points are not run from this toolkit repo during
 - `validate-n8n-workflows.cjs`
 - `sync-n8n-live-exports.cjs`
 - `prepare-n8n-live-import.cjs`
+- `n8n-portable-workflow.cjs`
+- `n8n-credential-metadata.cjs`
+- `n8n-workflow-transport.cjs`
+- `n8n-workflow-operation-report.cjs`
+- `n8n-workflow-identity.cjs`
 - `compare-n8n-workflow-credentials.cjs`
 - `should-import-n8n-workflow.cjs`
 - `_export-n8n-workflows-live.cmd`
@@ -45,15 +50,25 @@ The live import/export PowerShell helpers support explicit Docker target overrid
 
 The `.cmd` wrappers invoke their co-located PowerShell scripts with `%~dp0<name>.ps1` and do not change directory themselves. The PowerShell scripts resolve and set their working directory from their script location.
 
-## Import Restart Warnings
+## Portable Import Contract
 
-`import-n8n-workflows-live.ps1` may print restart warnings when active or scheduled live workflows were touched. For Docker-backed n8n, pass `-RestartContainerAfterImport` to restart the configured container automatically after a successful import when those warnings exist:
+Normal operator flow is export canonical workflow JSON and portable logical credential name/type declarations to Git, create matching credentials on the target when reported missing, then rerun the unchanged import command. The helper resolves target IDs internally, rebuilds from canonical Git, applies only dedicated webhook metadata and declared exact resource paths, validates the canonical invariant, imports inactive without a routine confirmation, and verifies the inactive postcondition.
 
-```powershell
-.\import-n8n-workflows-live.ps1 -WorkflowDir n8n-workflows -RestartContainerAfterImport
-```
+Canonical Git stores credential references as `{ "name": "logical-name" }` and omits `id` entirely. Only the prepared payload may contain an exact resolved target ID or the supported new-workflow unresolved `id: null` form. Preparation strips every canonical `webhookId`; new workflows restore none, while existing workflows restore only a uniquely matched live node identity.
 
-The direct `_import-n8n-workflows-live.cmd` wrapper prompts whether to enable that switch before each run. The helper never restarts during `-DryRun`, and it does not restart when no imported workflow needs the restart warning.
+Every present portable credential declaration, deployment policy, and resource binding must use schema version 1 and an exact supported container shape. Malformed present files, duplicate credential requirements, stable node-ID conflicts, or logical names that drift from canonical Git fail before any prepared workflow overlay. Name/type fallback is used only when the populated stable ID is absent and the specific helper contract permits that fallback.
+
+The root document owns `schemaVersion`; aggregate workflow entries use the dedicated entry schema. A supported direct credential declaration is migrated transactionally into one aggregate `workflows` entry while preserving its admitted workflow selectors and credential requirements. Every populated selector on direct and aggregate entries must agree before use. An explicitly supplied deployment-policy path is required to remain a readable regular file, while absence of the documented default policy remains optional.
+
+Normal export preserves both canonical values and canonical absence. Live-only protected leaves or complete mapping domains are removed from the portable result, or the export fails closed when safe deletion is not possible. Only explicit reviewed source-update mode may introduce protected logic. Transactions reject repeated normalized targets before any directory or target write, validate the complete candidate batch in memory, preserve each existing regular-file mode, and use the ordinary repository mode for new files. Existing targets are opened without following links and the descriptor is bound to the authorised type, bytes/hash, size, mode, high-resolution identity and real parent topology before mutation. Candidate bytes and any precommit restore are written only through that exact descriptor. Missing targets use exclusive destination creation and never fall back to overwrite-capable rename.
+
+The explicit phases remain `PREPARED`, `INSTALLING`, `PRECOMMIT_VERIFIED`, `COMMITTED`, `POST_COMMIT_CLEANUP`, and `COMPLETE`. Named stages, quarantines and rollback paths are eliminated, so the canonical transaction contains no `rm`, `unlink`, destructive copy or `rename` boundary. Before `COMMITTED`, an existing target's exact opened descriptor and immutable in-process snapshot remain available. A failure restores bytes and mode only through that descriptor; because host-managed timestamps cannot be restored exactly, any post-mutation rollback is reported as `N8N_CANONICAL_TRANSACTION_PARTIAL_RECOVERY` rather than false exact success. An originally missing file created before a later failure is also retained as bounded evidence because exact absence cannot be restored without pathname deletion. After `COMMITTED`, no rollback is attempted. Ordinary success requires a final all-record descriptor/path identity, authorised mode and parent-topology postcondition. Import preflight rejects multiple canonical workflows resolving to one target workflow before any live or local identity mutation.
+
+An explicitly supplied import deployment-policy path is validated as a safe readable regular file inside the repository before live discovery or preparation, and its validated snapshot is rechecked before use. Required credential misses drive the create-and-rerun action. Optional zero-match requirements remain informational and do not turn an unchanged workflow into `ACTION_REQUIRED`; ambiguous or otherwise unsafe matches still fail closed. Failure receipts map each stable code to one concrete remedy, and Explain last failure displays that remedy without a self-referential loop.
+
+The helper never activates, executes, test-runs, publishes, or restarts n8n. An already-active target is blocked because scheduled activity cannot be guaranteed inactive without a separate restart. `-RequireConfirmation` is compatibility-only menu behavior and is not the default.
+
+Operation receipts are written to `.n8n-local/reports/latest-n8n-workflow-operation.{json,txt}` and bounded 90-day history. The menu's read-only Explain last n8n failure action validates the latest report and states one supported next action.
 
 ## Intended Scoped Writes
 
@@ -65,13 +80,13 @@ In a reviewed consumer repo, these helpers may write:
 - `.tmp/**`
 - `.n8n-local/**`
 
-`.tmp/**` and `.n8n-local/**` must stay ignored and uncommitted. They can hold transient live export/import payloads and local credential-binding metadata.
+`.tmp/**` and `.n8n-local/**` must stay ignored and uncommitted. They can hold transient prepared payloads, exact private resource bindings, and sanitized reports. Portable logical credential name/type declarations belong under `n8n-workflows/toolkit/` and may be committed.
 
 ## Safety Rules
 
 - Do not run live n8n import or export from this toolkit repo.
 - Do not run live n8n import/export in CI.
-- Do not commit `.tmp/**`, `.n8n-local/**`, live import/export JSON, credentials, credential bindings, private keys, or `.env` files.
+- Do not commit `.tmp/**`, `.n8n-local/**`, live import/export JSON, credential IDs/values, encrypted credential exports, private keys, or `.env` files.
 - Do not commit workflow JSON containing credentials, secrets, tokens, cookies, webhook secrets, private environment values, or production execution data. Use placeholder environment variable names only and document required variables separately.
 - Do not commit `.n8n/` runtime folders, n8n database files, binary backups, or live execution exports.
 - Helper scripts must not print secrets and must not default to destructive live actions.
