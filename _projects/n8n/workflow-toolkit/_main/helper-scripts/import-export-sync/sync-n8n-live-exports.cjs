@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const {
   canonicalWorkflowForGit,
   canonicaliseExport,
@@ -105,10 +106,24 @@ function assertStrictChild(rootPath, targetPath, label) {
   return target;
 }
 
-function transactionError(message, cause) {
+function transactionError(message, cause, code = 'N8N_INTERNAL_ERROR', recoveryState = 'not_required') {
   const error = new Error(message, cause ? { cause } : undefined);
-  error.code = 'N8N_INTERNAL_ERROR';
+  error.code = code;
+  error.recoveryState = recoveryState;
   return error;
+}
+
+function transactionDriftError(message = 'Canonical transaction target drift was detected before safe replacement.') {
+  return transactionError(message, undefined, 'N8N_CANONICAL_TRANSACTION_DRIFT', 'preserved');
+}
+
+function transactionPartialRecoveryError(cause) {
+  return transactionError(
+    'Canonical transaction stopped with bounded recovery evidence because exact rollback could not be proven safe.',
+    cause,
+    'N8N_CANONICAL_TRANSACTION_PARTIAL_RECOVERY',
+    'partial_preserved'
+  );
 }
 
 function assertRegularOrMissing(filePath, label) {
@@ -137,9 +152,276 @@ function assertInstalledMode(filePath, mode) {
   }
 }
 
+function bigintField(stat, nanosecondName, millisecondName) {
+  if (typeof stat[nanosecondName] === 'bigint') return stat[nanosecondName].toString();
+  const milliseconds = Number(stat[millisecondName]);
+  return Number.isFinite(milliseconds) ? String(Math.trunc(milliseconds * 1e6)) : null;
+}
+
+function filesystemObjectId(stat) {
+  const device = typeof stat.dev === 'bigint' ? stat.dev : BigInt(stat.dev || 0);
+  const inode = typeof stat.ino === 'bigint' ? stat.ino : BigInt(stat.ino || 0);
+  if (device === 0n || inode === 0n) return null;
+  return `${device}:${inode}`;
+}
+
+function statIdentity(stat, options = {}) {
+  return {
+    type: stat.isFile() ? 'file' : stat.isDirectory() ? 'directory' : 'other',
+    size: stat.size.toString(),
+    mode: process.platform === 'win32' || options.directory === true
+      ? null
+      : permissionMode(Number(stat.mode)),
+    mtimeNs: bigintField(stat, 'mtimeNs', 'mtimeMs'),
+    ctimeNs: bigintField(stat, 'ctimeNs', 'ctimeMs'),
+    birthtimeNs: bigintField(stat, 'birthtimeNs', 'birthtimeMs'),
+    objectId: filesystemObjectId(stat),
+  };
+}
+
+function safeLstat(filePath) {
+  try {
+    return fs.lstatSync(filePath, { bigint: true });
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw transactionDriftError('Canonical transaction filesystem identity could not be inspected safely.');
+  }
+}
+
+function captureParentIdentity(filePath) {
+  const parentPath = path.dirname(path.resolve(filePath));
+  const stat = safeLstat(parentPath);
+  if (!stat || !stat.isDirectory() || stat.isSymbolicLink()) {
+    throw transactionDriftError('Canonical transaction parent topology is no longer a safe directory.');
+  }
+  let realPath;
+  try {
+    realPath = fs.realpathSync.native(parentPath);
+  } catch {
+    throw transactionDriftError('Canonical transaction parent topology could not be resolved safely.');
+  }
+  if (comparablePath(realPath) !== comparablePath(parentPath)) {
+    throw transactionDriftError('Canonical transaction parent topology contains a redirected path.');
+  }
+  const identity = statIdentity(stat, { directory: true });
+  return {
+    realPath: comparablePath(realPath),
+    objectId: identity.objectId,
+    type: identity.type,
+  };
+}
+
+function sameParentIdentity(left, right) {
+  return Boolean(
+    left &&
+    right &&
+    left.type === 'directory' &&
+    right.type === 'directory' &&
+    left.realPath === right.realPath &&
+    (left.objectId === null || right.objectId === null || left.objectId === right.objectId)
+  );
+}
+
+function sameStatIdentity(left, right, options = {}) {
+  if (!left || !right) return false;
+  const fields = ['type', 'size', 'mode', 'mtimeNs', 'birthtimeNs'];
+  if (options.ignoreCtime !== true) fields.push('ctimeNs');
+  if (fields.some((field) => left[field] !== right[field])) return false;
+  if (left.objectId !== null && right.objectId !== null && left.objectId !== right.objectId) return false;
+  return true;
+}
+
+function captureCanonicalTargetIdentity(filePath) {
+  const target = path.resolve(filePath);
+  const parentBefore = captureParentIdentity(target);
+  const entryBefore = safeLstat(target);
+  if (!entryBefore) {
+    const parentAfter = captureParentIdentity(target);
+    if (!sameParentIdentity(parentBefore, parentAfter)) {
+      throw transactionDriftError('Canonical transaction parent topology changed during identity capture.');
+    }
+    return {
+      exists: false,
+      realPath: comparablePath(target),
+      parent: parentAfter,
+    };
+  }
+  if (!entryBefore.isFile() || entryBefore.isSymbolicLink()) {
+    throw transactionDriftError('Canonical transaction target is not a safe regular file.');
+  }
+
+  let realPathBefore;
+  let descriptor;
+  try {
+    realPathBefore = fs.realpathSync.native(target);
+    if (comparablePath(realPathBefore) !== comparablePath(target)) {
+      throw transactionDriftError('Canonical transaction target contains a redirected path.');
+    }
+    const noFollow = fs.constants.O_NOFOLLOW || 0;
+    descriptor = fs.openSync(target, fs.constants.O_RDONLY | noFollow);
+    const descriptorBefore = fs.fstatSync(descriptor, { bigint: true });
+    if (!descriptorBefore.isFile() || !sameStatIdentity(statIdentity(entryBefore), statIdentity(descriptorBefore))) {
+      throw transactionDriftError('Canonical transaction target changed before it could be read safely.');
+    }
+    const content = fs.readFileSync(descriptor);
+    const descriptorAfter = fs.fstatSync(descriptor, { bigint: true });
+    const entryAfter = safeLstat(target);
+    const parentAfter = captureParentIdentity(target);
+    const realPathAfter = fs.realpathSync.native(target);
+    if (
+      !entryAfter ||
+      !entryAfter.isFile() ||
+      entryAfter.isSymbolicLink() ||
+      comparablePath(realPathAfter) !== comparablePath(target) ||
+      !sameParentIdentity(parentBefore, parentAfter) ||
+      !sameStatIdentity(statIdentity(descriptorBefore), statIdentity(descriptorAfter)) ||
+      !sameStatIdentity(statIdentity(descriptorAfter), statIdentity(entryAfter))
+    ) {
+      throw transactionDriftError('Canonical transaction target changed during identity capture.');
+    }
+    const identity = statIdentity(descriptorAfter);
+    return {
+      exists: true,
+      realPath: comparablePath(realPathAfter),
+      parent: parentAfter,
+      ...identity,
+      sha256: crypto.createHash('sha256').update(content).digest('hex'),
+      content,
+    };
+  } catch (error) {
+    if (error?.code === 'N8N_CANONICAL_TRANSACTION_DRIFT') throw error;
+    throw transactionDriftError('Canonical transaction target could not be captured safely.');
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+  }
+}
+
+function sameCanonicalIdentity(expected, current) {
+  if (!expected || !current || expected.exists !== current.exists) return false;
+  if (!sameParentIdentity(expected.parent, current.parent)) return false;
+  if (!expected.exists) return expected.realPath === current.realPath;
+  return (
+    expected.realPath === current.realPath &&
+    expected.sha256 === current.sha256 &&
+    sameStatIdentity(expected, current)
+  );
+}
+
+function sameMovedFileIdentity(expected, current, expectedMode = expected?.mode) {
+  if (!expected?.exists || !current?.exists) return false;
+  if (!sameParentIdentity(expected.parent, current.parent)) return false;
+  if (expected.sha256 !== current.sha256 || expected.size !== current.size) return false;
+  if (process.platform !== 'win32' && current.mode !== expectedMode) return false;
+  if (expected.mtimeNs !== current.mtimeNs) return false;
+  if (expected.objectId !== null && current.objectId !== null && expected.objectId !== current.objectId) return false;
+  return true;
+}
+
+function assertCanonicalIdentity(expected, current, message) {
+  if (!sameCanonicalIdentity(expected, current)) throw transactionDriftError(message);
+}
+
+function absentIdentityFor(record) {
+  return {
+    exists: false,
+    realPath: comparablePath(record.target),
+    parent: record.originalIdentity.parent,
+  };
+}
+
+function exactTemporaryStillOwned(filePath, identity) {
+  if (!identity) return !fs.existsSync(filePath);
+  try {
+    return sameCanonicalIdentity(identity, captureCanonicalTargetIdentity(filePath));
+  } catch {
+    return false;
+  }
+}
+
+function restoreBackupWithoutOverwrite(record, hooks, index) {
+  if (typeof hooks.beforeRollbackBackupRestore === 'function') {
+    hooks.beforeRollbackBackupRestore(record, index);
+  }
+  const backupCurrent = captureCanonicalTargetIdentity(record.backup);
+  if (!sameCanonicalIdentity(record.backupIdentity, backupCurrent)) return false;
+  const targetCurrent = captureCanonicalTargetIdentity(record.target);
+  if (!sameCanonicalIdentity(absentIdentityFor(record), targetCurrent)) return false;
+  try {
+    fs.linkSync(record.backup, record.target);
+  } catch {
+    return false;
+  }
+  const restored = captureCanonicalTargetIdentity(record.target);
+  if (!sameMovedFileIdentity(record.originalIdentity, restored, record.installMode)) return false;
+  const backupAfterLink = captureCanonicalTargetIdentity(record.backup);
+  if (!sameMovedFileIdentity(record.backupIdentity, backupAfterLink, record.installMode)) return false;
+  try {
+    fs.rmSync(record.backup, { force: false });
+  } catch {
+    return false;
+  }
+  record.originalMoved = false;
+  record.backupIdentity = null;
+  return true;
+}
+
+function rollbackTransaction(records, hooks) {
+  let complete = true;
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    const record = records[index];
+    try {
+      if (!record.mutatedByTransaction) {
+        // The transaction never displaced or installed this target. Its
+        // current state belongs to the concurrent actor and must not be used
+        // as a rollback target.
+        continue;
+      }
+      if (record.installed) {
+        if (typeof hooks.beforeRollbackTargetRemoval === 'function') {
+          hooks.beforeRollbackTargetRemoval(record, index);
+        }
+        const targetCurrent = captureCanonicalTargetIdentity(record.target);
+        if (!record.installedIdentity || !sameCanonicalIdentity(record.installedIdentity, targetCurrent)) {
+          complete = false;
+          continue;
+        }
+        if (record.originalExists) {
+          const backupCurrent = captureCanonicalTargetIdentity(record.backup);
+          if (!record.backupIdentity || !sameCanonicalIdentity(record.backupIdentity, backupCurrent)) {
+            complete = false;
+            continue;
+          }
+        }
+        fs.rmSync(record.target, { force: false });
+        const absent = captureCanonicalTargetIdentity(record.target);
+        if (!sameCanonicalIdentity(absentIdentityFor(record), absent)) {
+          complete = false;
+          continue;
+        }
+        record.installed = false;
+      }
+
+      if (record.originalMoved) {
+        if (!restoreBackupWithoutOverwrite(record, hooks, index)) complete = false;
+      } else if (record.originalExists) {
+        const current = captureCanonicalTargetIdentity(record.target);
+        if (!sameCanonicalIdentity(record.originalIdentity, current)) complete = false;
+      } else if (!record.installed) {
+        const current = captureCanonicalTargetIdentity(record.target);
+        if (!sameCanonicalIdentity(record.originalIdentity, current)) {
+          complete = false;
+        }
+      }
+    } catch {
+      complete = false;
+    }
+  }
+  return complete;
+}
+
 function replaceFilesTransactionally(changes, hooks = {}) {
   if (!Array.isArray(changes) || changes.length === 0) return;
-  const token = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const token = crypto.randomBytes(12).toString('hex');
   const foldedTargets = new Map();
   const resolvedTargets = changes.map((change) => path.resolve(change.targetPath));
   for (const target of resolvedTargets) {
@@ -164,108 +446,161 @@ function replaceFilesTransactionally(changes, hooks = {}) {
     if (fs.existsSync(stage) || fs.existsSync(backup) || fs.existsSync(rollbackStage)) {
       throw transactionError('Canonical transaction staging path was not unique.');
     }
-    return {
+    const record = {
       ...change,
       target,
       stage,
       backup,
       rollbackStage,
       content: Buffer.from(change.content, 'utf8'),
-      originalExists: fs.existsSync(target),
-      originalContent: fs.existsSync(target) ? fs.readFileSync(target) : null,
-      originalMode: fs.existsSync(target) ? fs.statSync(target).mode : null,
-      installMode: fs.existsSync(target)
-        ? permissionMode(fs.statSync(target).mode)
-        : CANONICAL_NEW_FILE_MODE,
+      originalIdentity: captureCanonicalTargetIdentity(target),
+      originalExists: false,
+      originalContent: null,
+      originalMode: null,
+      installMode: CANONICAL_NEW_FILE_MODE,
+      stageIdentity: null,
+      backupIdentity: null,
+      installedIdentity: null,
       originalMoved: false,
       installed: false,
+      mutatedByTransaction: false,
     };
+    record.originalExists = record.originalIdentity.exists;
+    record.originalContent = record.originalIdentity.exists ? Buffer.from(record.originalIdentity.content) : null;
+    record.originalMode = record.originalIdentity.mode;
+    record.installMode = record.originalIdentity.exists ? record.originalIdentity.mode : CANONICAL_NEW_FILE_MODE;
+    return record;
   });
 
-  let preserveRecoveryArtifacts = false;
+  let failure = null;
+  let recoveryIncomplete = false;
   try {
     for (const record of records) {
       fs.writeFileSync(record.stage, record.content, { flag: 'wx', mode: 0o600 });
       if (!fs.readFileSync(record.stage).equals(record.content)) {
         throw transactionError('Canonical transaction staging verification failed.');
       }
+      record.stageIdentity = captureCanonicalTargetIdentity(record.stage);
       if (typeof record.validate === 'function') record.validate(record.stage);
+      assertCanonicalIdentity(
+        record.stageIdentity,
+        captureCanonicalTargetIdentity(record.stage),
+        'Canonical transaction stage changed during validation.'
+      );
     }
 
     for (let index = 0; index < records.length; index += 1) {
       const record = records[index];
+      if (typeof hooks.beforeTargetRevalidate === 'function') {
+        hooks.beforeTargetRevalidate(record, index);
+      }
+      const currentTarget = captureCanonicalTargetIdentity(record.target);
+      assertCanonicalIdentity(
+        record.originalIdentity,
+        currentTarget,
+        'Canonical transaction target changed after authorization.'
+      );
+      if (!sameCanonicalIdentity(record.stageIdentity, captureCanonicalTargetIdentity(record.stage))) {
+        throw transactionDriftError('Canonical transaction stage changed before installation.');
+      }
       if (record.originalExists) {
         fs.renameSync(record.target, record.backup);
         record.originalMoved = true;
+        record.mutatedByTransaction = true;
+        if (typeof hooks.afterTargetDisplaced === 'function') {
+          hooks.afterTargetDisplaced(record, index);
+        }
+        const backupCurrent = captureCanonicalTargetIdentity(record.backup);
+        if (!sameMovedFileIdentity(record.originalIdentity, backupCurrent, record.installMode)) {
+          throw transactionDriftError('Canonical transaction backup did not match the authorized target.');
+        }
+        record.backupIdentity = backupCurrent;
+        const targetAbsent = captureCanonicalTargetIdentity(record.target);
+        assertCanonicalIdentity(
+          absentIdentityFor(record),
+          targetAbsent,
+          'Canonical transaction target was recreated after displacement.'
+        );
+      }
+      if (typeof hooks.beforeCandidateInstall === 'function') {
+        hooks.beforeCandidateInstall(record, index);
+      }
+      if (record.originalMoved) {
+        const backupBeforeInstall = captureCanonicalTargetIdentity(record.backup);
+        if (!sameCanonicalIdentity(record.backupIdentity, backupBeforeInstall)) {
+          throw transactionDriftError('Canonical transaction backup changed before candidate installation.');
+        }
+      }
+      assertCanonicalIdentity(
+        absentIdentityFor(record),
+        captureCanonicalTargetIdentity(record.target),
+        'Canonical transaction target appeared before candidate installation.'
+      );
+      if (!sameCanonicalIdentity(record.stageIdentity, captureCanonicalTargetIdentity(record.stage))) {
+        throw transactionDriftError('Canonical transaction stage changed before candidate installation.');
       }
       fs.renameSync(record.stage, record.target);
       record.installed = true;
+      record.mutatedByTransaction = true;
       applyInstalledMode(record.target, record.installMode);
+      const installed = captureCanonicalTargetIdentity(record.target);
+      if (!sameMovedFileIdentity(record.stageIdentity, installed, record.installMode)) {
+        throw transactionDriftError('Canonical transaction candidate identity changed during installation.');
+      }
+      record.installedIdentity = installed;
       if (typeof hooks.beforeVerify === 'function') hooks.beforeVerify(record, index);
-      if (!fs.readFileSync(record.target).equals(record.content)) {
+      const installedAfterHook = captureCanonicalTargetIdentity(record.target);
+      if (!sameCanonicalIdentity(record.installedIdentity, installedAfterHook)) {
         throw transactionError('Canonical transaction replacement verification failed.');
       }
-      assertInstalledMode(record.target, record.installMode);
       if (typeof hooks.afterReplace === 'function') hooks.afterReplace(record, index);
     }
 
     for (let index = 0; index < records.length; index += 1) {
       const record = records[index];
-      if (record.originalMoved && fs.existsSync(record.backup)) {
-        if (typeof hooks.beforeBackupCleanup === 'function') hooks.beforeBackupCleanup(record, index);
-        assertRegularOrMissing(record.backup, 'Canonical transaction backup');
+      if (!record.originalMoved) continue;
+      if (typeof hooks.beforeBackupCleanup === 'function') hooks.beforeBackupCleanup(record, index);
+      const backupCurrent = captureCanonicalTargetIdentity(record.backup);
+      if (!sameCanonicalIdentity(record.backupIdentity, backupCurrent)) {
+        throw transactionDriftError('Canonical transaction backup changed before cleanup.');
+      }
+      const targetCurrent = captureCanonicalTargetIdentity(record.target);
+      if (!sameCanonicalIdentity(record.installedIdentity, targetCurrent)) {
+        throw transactionDriftError('Canonical transaction candidate changed before commit.');
+      }
+    }
+    for (let index = 0; index < records.length; index += 1) {
+      const record = records[index];
+      if (record.originalMoved) {
         fs.rmSync(record.backup, { force: false });
+        record.originalMoved = false;
+        record.backupIdentity = null;
       }
     }
   } catch (error) {
-    const rollbackErrors = [];
-    for (const record of [...records].reverse()) {
-      try {
-        if (record.installed && fs.existsSync(record.target)) {
-          assertRegularOrMissing(record.target, 'Canonical transaction replacement');
-          fs.rmSync(record.target, { force: false });
-        }
-        if (record.originalMoved && fs.existsSync(record.backup)) {
-          assertRegularOrMissing(record.backup, 'Canonical transaction backup');
-          fs.renameSync(record.backup, record.target);
-        } else if (record.originalExists && !fs.existsSync(record.target)) {
-          fs.writeFileSync(record.rollbackStage, record.originalContent, {
-            flag: 'wx',
-            mode: permissionMode(record.originalMode),
-          });
-          fs.renameSync(record.rollbackStage, record.target);
-        }
-        if (record.originalExists) {
-          if (!fs.existsSync(record.target) || !fs.readFileSync(record.target).equals(record.originalContent)) {
-            throw transactionError('Canonical transaction rollback verification failed.');
-          }
-          assertInstalledMode(record.target, permissionMode(record.originalMode));
-        } else if (fs.existsSync(record.target)) {
-          throw transactionError('Canonical transaction rollback left a newly created target behind.');
-        }
-      } catch (rollbackError) {
-        rollbackErrors.push(rollbackError);
-      }
-    }
-    if (rollbackErrors.length > 0) {
-      preserveRecoveryArtifacts = true;
-      throw transactionError('Canonical transaction rollback could not restore every original file.', error);
-    }
-    throw error;
+    failure = error;
+    recoveryIncomplete = !rollbackTransaction(records, hooks);
   } finally {
     for (const record of records) {
-      for (const temporary of [record.stage, record.backup, record.rollbackStage]) {
-        if (preserveRecoveryArtifacts && (temporary === record.backup || temporary === record.rollbackStage)) continue;
+      for (const [temporary, identity] of [
+        [record.stage, record.stageIdentity],
+        [record.rollbackStage, record.rollbackIdentity],
+      ]) {
         if (!fs.existsSync(temporary)) continue;
         try {
-          assertRegularOrMissing(temporary, 'Canonical transaction temporary file');
+          if (!exactTemporaryStillOwned(temporary, identity)) {
+            recoveryIncomplete = true;
+            continue;
+          }
           fs.rmSync(temporary, { force: false });
         } catch {
-          // A failed rollback deliberately preserves its recovery artifact.
+          recoveryIncomplete = true;
         }
       }
     }
   }
+  if (recoveryIncomplete) throw transactionPartialRecoveryError(failure);
+  if (failure) throw failure;
 }
 
 function writeStep(status, message) {

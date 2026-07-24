@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.9.7",
+  "version": "2.9.8",
   "version_policy": "semver",
-  "version_notes": "Amends portable n8n import and export protections for explicit policy intent, canonical absence, direct-document migration, unique target plans, and duplicate-free transactions.",
+  "version_notes": "Revalidates exact canonical file identity immediately before transactional displacement and preserves concurrent state during bounded recovery.",
   "outputs": [
     {
       "kind": "curated",
