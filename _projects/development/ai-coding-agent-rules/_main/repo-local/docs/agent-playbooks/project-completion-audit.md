@@ -11,7 +11,7 @@ During preflight, inspect only enough to identify:
 - Likely audit scope.
 - Relevant local docs/instructions available.
 - Whether UI, backend, data, deployment, auth, admin, uploads, APIs, logging, privacy, payments, external integrations, webhooks, or other security-sensitive surfaces appear to exist.
-- Whether Codex Security appears installed/available, if detectable.
+- Whether a repository-owned security gate appears installed and applicable, if detectable.
 - Whether Playwright/browser verification appears available, if applicable.
 
 Do not immediately run broad validation, full builds, browser sweeps, security scans, deployment/external-service checks, remediation, or destructive cleanup.
@@ -23,8 +23,7 @@ After preflight, stop and ask the user to confirm:
 - Branch/ref.
 - Audit scope.
 - Full-repo audit or scoped-folder audit.
-- Whether Codex Security should be invoked if installed and available.
-- Whether standard security scan or deep security scan is approved.
+- Whether the repository-owned security gate should be run and in which supported mode.
 - Whether screenshot/browser click-through verification is approved for UI apps.
 - That no live/deployment/destructive/external-service/credential/payment/customer-data/private-data actions are allowed without separate explicit current-turn approval naming target and action.
 
@@ -49,7 +48,7 @@ For UI projects, use approved browser/click-through verification where available
 Review user/admin/protected workflows, API/backend behavior, error handling, privacy-safe logging, generic user-facing errors with traceable references, Privacy Policy and Terms links for product-facing or data-handling apps, and security-sensitive auth, uploads, webhooks, integrations, secrets, database, private data, payment, billing, entitlement, and logging surfaces.
 
 ## Security Readiness
-Invoke Codex Security if installed and available. Prefer a standard security scan first. Do not run a deep security scan unless the user explicitly approved deep scan in the confirmation step.
+Run the repository-owned security gate when installed and applicable. Prefer the smallest documented gate mode that provides the required evidence. Missing, invalid, or infrastructure-blocked gate coverage remains unverified and must not become a pass.
 
 Record availability, invocation, scan type, target/scope, status, findings, unresolved/false-positive/deferred items, and report/artifact paths.
 
@@ -78,7 +77,7 @@ Do not claim "all security is covered" or imply perfect security. Prefer wording
 - `Security coverage is limited to the declared scan scope and validation evidence.`
 - `Unverified, unavailable, skipped, or deferred areas remain not production-cleared.`
 
-Do not call the repo/app production-ready if any P0/P1 remains open, Codex Security was skipped/unavailable/incomplete or found unresolved high/critical-equivalent issues without recorded risk acceptance, required validation failed or was skipped/inaccessible without disclosure, or live/external/private-data checks are assumed rather than verified or explicitly deferred.
+Do not call the repo/app production-ready if any P0/P1 remains open, the repository-owned gate was skipped/unavailable/incomplete/infrastructure-blocked or found unresolved release-blocking issues without recorded risk acceptance, required validation failed or was skipped/inaccessible without disclosure, or live/external/private-data checks are assumed rather than verified or explicitly deferred.
 
 ## Remediation
 Only remediate after the audit report exists. Fix P0 before P1, and P1 before P2 unless reprioritized. Keep batches small, run targeted validation after each batch, re-run affected UI checks, update the report, record closed/partial/deferred/new findings, commit to a non-main branch, push, and open/update a PR unless local-only.

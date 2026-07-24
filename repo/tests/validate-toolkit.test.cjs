@@ -516,13 +516,13 @@ test('Toolkit plugin packaged version surfaces stay aligned', () => {
   const bridgePath = path.join(cwd, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
   fs.writeFileSync(
     bridgePath,
-    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.8.2';", "const BRIDGE_VERSION = '2.2.1';"),
+    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.9.8';", "const BRIDGE_VERSION = '2.2.1';"),
     'utf8'
   );
 
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.8\.2/i);
+  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.9\.8/i);
 });
 
 test('skill discovery includes migrated skills', () => {
@@ -552,6 +552,7 @@ test('repo-local agent rules bootstrap skill metadata stays in the skill surface
 test('project manifests include the current project modules without repo-wide MCP publishing', () => {
   const ids = validator.projectManifests().map((entry) => entry.id).sort();
   assert.deepEqual(ids, [
+    'cicd.repository-security-gate',
     'cicd.secure-installer',
     'design.google-design-md',
     'design.ui-ux-pro-max',
@@ -1007,9 +1008,7 @@ test('validator rejects validation workflow that relies on npm validate script',
 test('source-watch PR notifier uses the stable review-notification PR contract', () => {
   const workflow = readTextFile(path.join(repoRoot, '.github', 'workflows', 'source-watch-pr.yml'));
   assert.match(workflow, /^name:\s*Source Watch PR Notifier\s*$/m);
-  for (const cron of ['17 3 * * *', '43 9 * * *', '29 15 * * *']) {
-    assert.ok(workflow.includes(`cron: "${cron}"`), cron);
-  }
+  assert.ok(workflow.includes('cron: "17 * * * *"'), 'hourly deterministic cadence');
   assert.match(workflow, /^  contents: write$/m);
   assert.match(workflow, /^  pull-requests: write$/m);
   assert.doesNotMatch(workflow, /^  issues: write$/m);
@@ -1029,6 +1028,9 @@ test('source-watch PR notifier uses the stable review-notification PR contract',
     'A human must review upstream changes, attribution/licence impact, allowlist scope, advisory recommendations, and host-harness drift evidence, then ask an AI agent to inspect before any real edits happen.',
     'Advisory actions, when present, are read from `repo/source-watch/advisory-targets.json`.',
     'No advisory tracking document was changed by this workflow.',
+    'Security-tool release, asset, checksum, licence, publisher, maintenance and database/ref evidence is read from `skills/repository-security-gate/config/tool-lock.json`.',
+    'Source or metadata failure is UNVERIFIED and cannot become no change.',
+    'Candidate execution belongs only to the separate manual quarantined workflow.',
     'If advisory action is taken, update the advisory document in a separate human-reviewed PR.',
     'If meaningful host-harness drift is found, open a separate PR with evidence, rationale, exact proposed modifications, and validation.',
     '',
@@ -1387,7 +1389,7 @@ test('auto-sync generated surfaces workflow keeps privileged preflight before ch
     ['base-sha git diff changed-file detection is forbidden', (text) => text.replace("gh api --paginate \\", 'git diff --name-only "$BASE_SHA" HEAD\n          gh api --paginate \\'), /must not compute PR changed files with git diff against the PR branch/],
     ['PR files API is required', (text) => text.replace('gh api --paginate \\', 'echo no api \\'), /must query PR changed files before checkout/],
     ['github token is not exposed to sync or validation', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write', 'GH_TOKEN="${{ github.token }}" node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write'), /must expose github.token only to preflight and final push steps/],
-    ['should_sync gates checkout and writeback', (text) => text.replace("        if: steps.preflight.outputs.should_sync == 'true'\n        uses: actions/checkout@v6", '        uses: actions/checkout@v6'), /must skip checkout and writeback steps when preflight should_sync is false/]
+    ['should_sync gates checkout and writeback', (text) => text.replace("        if: steps.preflight.outputs.should_sync == 'true'\n        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803", '        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803'), /must skip checkout and writeback steps when preflight should_sync is false/]
   ];
 
   const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
@@ -1405,18 +1407,18 @@ test('auto-sync generated surfaces workflow requires exact privileged action ref
   const cases = [
     [
       'trusted checkout v1 downgrade is rejected',
-      (text) => replaceWorkflowStepText(text, 'Checkout trusted base revision', /uses: actions\/checkout@v6/, 'uses: actions/checkout@v1'),
-      /Checkout trusted base revision must use actions\/checkout@v6/
+      (text) => replaceWorkflowStepText(text, 'Checkout trusted base revision', /uses: actions\/checkout@[0-9a-f]{40}/, 'uses: actions/checkout@v1'),
+      /Checkout trusted base revision must use actions\/checkout@d23441a48e516b6c34aea4fa41551a30e30af803/
     ],
     [
       'PR checkout v1 downgrade is rejected',
-      (text) => replaceWorkflowStepText(text, 'Checkout PR head commit', /uses: actions\/checkout@v6/, 'uses: actions/checkout@v1'),
-      /Checkout PR head commit must use actions\/checkout@v6/
+      (text) => replaceWorkflowStepText(text, 'Checkout PR head commit', /uses: actions\/checkout@[0-9a-f]{40}/, 'uses: actions/checkout@v1'),
+      /Checkout PR head commit must use actions\/checkout@d23441a48e516b6c34aea4fa41551a30e30af803/
     ],
     [
       'setup-node v1 downgrade is rejected',
-      (text) => replaceWorkflowStepText(text, 'Set up Node.js', /uses: actions\/setup-node@v6/, 'uses: actions/setup-node@v1'),
-      /Set up Node\.js must use actions\/setup-node@v6/
+      (text) => replaceWorkflowStepText(text, 'Set up Node.js', /uses: actions\/setup-node@[0-9a-f]{40}/, 'uses: actions/setup-node@v1'),
+      /Set up Node\.js must use actions\/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38/
     ]
   ];
 
@@ -1444,7 +1446,7 @@ test('auto-sync generated surfaces workflow rejects unexpected uses action steps
       'extra checkout v6 action after preflight is rejected',
       `      - name: Extra duplicate checkout
         if: steps.preflight.outputs.should_sync == 'true'
-        uses: actions/checkout@v6`,
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803`,
       /must allow only the reviewed uses action steps/
     ],
     [

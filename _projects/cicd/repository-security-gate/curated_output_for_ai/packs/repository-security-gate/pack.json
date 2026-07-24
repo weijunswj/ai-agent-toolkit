@@ -1,0 +1,58 @@
+{
+  "id": "repository-security-gate",
+  "title": "Repository Security Gate",
+  "description": "Portable repository-owned security classification, pinned scanner provenance, static rules, evidence contracts, and exact-head review packets.",
+  "status": "ready",
+  "risk_level": "high",
+  "source_refs": [
+    "_projects/cicd/repository-security-gate/",
+    "_projects/cicd/repository-security-gate/_main/",
+    "skills/repository-security-gate/"
+  ],
+  "suitable_for": [
+    "GitHub repositories",
+    "AI coding agents",
+    "human security reviewers"
+  ],
+  "installs": [
+    "skills/repository-security-gate/SKILL.md",
+    "skills/repository-security-gate/README.md",
+    "skills/repository-security-gate/config/",
+    "skills/repository-security-gate/fixtures/",
+    "skills/repository-security-gate/references/",
+    "skills/repository-security-gate/rules/",
+    "skills/repository-security-gate/schemas/",
+    "skills/repository-security-gate/templates/",
+    "skills/repository-security-gate/tools/"
+  ],
+  "writes_allowed": [
+    "declared generated toolkit outputs from _projects/cicd/repository-security-gate/toolkit.project.json",
+    "consumer repository workflow, policy, suppression, and security-report paths approved by the user"
+  ],
+  "writes_denied": [
+    ".env*",
+    ".n8n-local/**",
+    ".tmp/**",
+    "node_modules/**",
+    "dist/**",
+    "_dist/**",
+    "*.pem",
+    "*.key",
+    "*.p12",
+    "*.pfx",
+    "*credential*",
+    "live targets",
+    "production DAST",
+    "private data",
+    "scanner binaries",
+    "third-party rule packs"
+  ],
+  "requires_approval": true,
+  "run_commands": false,
+  "notes": [
+    "Install the complete version-pinned skill folder; do not depend solely on a mutable branch or cross-organisation reusable workflow.",
+    "The pack does not bundle scanner engines or third-party rule packs.",
+    "Tool downloads and quarantined candidate execution require explicit approval and exact lock verification.",
+    "No live target, production DAST, credential, private data, provider, database, object storage, browser history, or Docker daemon is authorised."
+  ]
+}

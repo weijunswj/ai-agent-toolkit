@@ -4,9 +4,7 @@ name: Source Watch PR Notifier
 # because it has contents: write and pull-requests: write permissions.
 on:
   schedule:
-    - cron: "17 3 * * *"
-    - cron: "43 9 * * *"
-    - cron: "29 15 * * *"
+    - cron: "17 * * * *"
 
 permissions:
   contents: write
@@ -21,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           ref: refs/heads/main
           fetch-depth: 0
@@ -34,7 +32,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
 
       - name: Set up Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: 22
 
@@ -121,6 +119,9 @@ jobs:
           A human must review upstream changes, attribution/licence impact, allowlist scope, advisory recommendations, and host-harness drift evidence, then ask an AI agent to inspect before any real edits happen.
           Advisory actions, when present, are read from `repo/source-watch/advisory-targets.json`.
           No advisory tracking document was changed by this workflow.
+          Security-tool release, asset, checksum, licence, publisher, maintenance and database/ref evidence is read from `skills/repository-security-gate/config/tool-lock.json`.
+          Source or metadata failure is UNVERIFIED and cannot become no change.
+          Candidate execution belongs only to the separate manual quarantined workflow.
           If advisory action is taken, update the advisory document in a separate human-reviewed PR.
           If meaningful host-harness drift is found, open a separate PR with evidence, rationale, exact proposed modifications, and validation.
 

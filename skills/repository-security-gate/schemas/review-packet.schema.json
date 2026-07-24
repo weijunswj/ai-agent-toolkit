@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://weijunswj.github.io/ai-agent-toolkit/security-gate/review-packet.schema.json",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "repository",
+    "candidate_repository",
+    "base",
+    "head",
+    "scanned_head_digest",
+    "scanned_tree_digest",
+    "scanned_manifest_digest",
+    "trusted_authority",
+    "security_report_digest",
+    "path_identity",
+    "profile",
+    "risk_review_required",
+    "changed_files",
+    "changed_file_manifest",
+    "sensitive_locations",
+    "references",
+    "scanner_summary",
+    "invariant_evidence",
+    "unresolved_findings",
+    "coverage_gaps",
+    "supported_outcomes"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 3
+    },
+    "repository": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    },
+    "candidate_repository": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    },
+    "base": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "head": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "scanned_head_digest": {
+      "type": "string",
+      "pattern": "^git-sha1:[0-9a-f]{40}$"
+    },
+    "scanned_tree_digest": {
+      "type": "string",
+      "pattern": "^git-sha1:[0-9a-f]{40}$"
+    },
+    "scanned_manifest_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "trusted_authority": {
+      "type": "object"
+    },
+    "security_report_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "path_identity": {
+      "type": "object"
+    },
+    "profile": {
+      "type": "string"
+    },
+    "risk_review_required": {
+      "type": "boolean"
+    },
+    "changed_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "changed_file_manifest": {
+      "type": "object",
+      "required": [
+        "total_count",
+        "included_count",
+        "omitted_count",
+        "sha256"
+      ],
+      "properties": {
+        "total_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "included_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "omitted_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sensitive_locations": {
+      "type": "array"
+    },
+    "references": {
+      "type": "array"
+    },
+    "scanner_summary": {
+      "type": "object"
+    },
+    "invariant_evidence": {
+      "type": "array"
+    },
+    "unresolved_findings": {
+      "type": "array"
+    },
+    "coverage_gaps": {
+      "type": "array"
+    },
+    "supported_outcomes": {
+      "const": [
+        "AI_SECURITY_PASS",
+        "AI_SECURITY_FINDINGS",
+        "AI_SECURITY_INCOMPLETE",
+        "AI_SECURITY_INFRA_BLOCKED"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

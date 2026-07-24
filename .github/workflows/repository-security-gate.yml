@@ -1,0 +1,329 @@
+name: Repository security gate
+
+on:
+  # The protected-base definition is the enforcement authority after promotion.
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  # PR #293 only: independently reviewable immutable bootstrap evidence. Remove
+  # this trigger after the protected workflow is promoted to main.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "23 2 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Full, scheduled, or release evidence mode"
+        required: true
+        default: "full"
+        type: choice
+        options:
+          - full
+          - scheduled
+          - release
+      artifact_digest:
+        description: "Optional exact sha256:<digest> for release evidence"
+        required: false
+        type: string
+      base:
+        description: "Exact base commit for a manual stable-head review packet"
+        required: false
+        type: string
+      candidate_head:
+        description: "Exact candidate commit for a manual stable-head review packet"
+        required: false
+        type: string
+      generate_review_packet:
+        description: "Generate a bounded handoff after green trusted PR evidence"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: trusted-repository-security-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'pull_request_target' }}
+
+jobs:
+  trusted-security-gate:
+    name: ${{ github.event_name == 'pull_request' && 'TK-023 bootstrap evidence (non-enforcement)' || 'Trusted repository security gate' }}
+    if: github.event_name != 'pull_request' || github.event.pull_request.number == 293
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Resolve immutable authority and candidate identities
+        id: evidence
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          CURRENT_SHA: ${{ github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          INPUT_MODE: ${{ inputs.mode }}
+          ARTIFACT_DIGEST: ${{ inputs.artifact_digest }}
+          INPUT_BASE: ${{ inputs.base }}
+          INPUT_HEAD: ${{ inputs.candidate_head }}
+          GENERATE_REVIEW_PACKET: ${{ inputs.generate_review_packet }}
+        run: |
+          set -euo pipefail
+          mode="full"
+          base=""
+          head="$CURRENT_SHA"
+          candidate_repository="$GITHUB_REPOSITORY"
+          authority_commit="$WORKFLOW_SHA"
+          authority_mode="protected-base"
+          invoking_workflow_commit="$WORKFLOW_SHA"
+          if [ "$EVENT_NAME" = pull_request ] || [ "$EVENT_NAME" = pull_request_target ]; then
+            mode="pr"
+            base="$PR_BASE"
+            head="$PR_HEAD"
+            candidate_repository="$PR_REPOSITORY"
+          fi
+          if [ "$EVENT_NAME" = pull_request ]; then
+            authority_commit="7b663af96b1650bd01e690a541c50ea1a1f54246"
+            authority_mode="bootstrap-immutable-review"
+            invoking_workflow_commit="$PR_HEAD"
+          elif [ "$EVENT_NAME" = schedule ]; then
+            mode="scheduled"
+          elif [ "$EVENT_NAME" = workflow_dispatch ]; then
+            mode="$INPUT_MODE"
+            if [ "$GENERATE_REVIEW_PACKET" = true ]; then
+              mode="pr"
+              base="$INPUT_BASE"
+              head="$INPUT_HEAD"
+            fi
+          fi
+          if ! [[ "$authority_commit" =~ ^[0-9a-f]{40}$ && "$head" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Authority or candidate identity is not exact." >&2
+            exit 1
+          fi
+          printf 'mode=%s\nbase=%s\nhead=%s\ncandidate_repository=%s\nauthority_commit=%s\nauthority_mode=%s\ninvoking_workflow_commit=%s\nartifact_digest=%s\n' \
+            "$mode" "$base" "$head" "$candidate_repository" "$authority_commit" "$authority_mode" \
+            "$invoking_workflow_commit" "$ARTIFACT_DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Verify current PR head before checkout
+        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target' || inputs.generate_review_packet
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_HEAD: ${{ steps.evidence.outputs.head }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          current="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)"
+          test "$current" = "$EXPECTED_HEAD"
+
+      - name: Checkout protected trusted gate authority
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ steps.evidence.outputs.authority_commit }}
+          path: trusted-gate
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact candidate as scanned data
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: ${{ steps.evidence.outputs.candidate_repository }}
+          ref: ${{ steps.evidence.outputs.head }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 22
+
+      - name: Fetch exact public base commit into candidate object database
+        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'
+        shell: bash
+        env:
+          GH_TOKEN: ""
+          GITHUB_TOKEN: ""
+          BASE: ${{ steps.evidence.outputs.base }}
+        run: |
+          set -euo pipefail
+          git -c protocol.version=2 -C candidate fetch --no-tags --depth=1 \
+            "https://github.com/$GITHUB_REPOSITORY.git" "$BASE"
+          test "$(git -C candidate rev-parse --verify "$BASE^{commit}")" = "$BASE"
+
+      - name: Prepare operation-owned roots and isolated invariant identity
+        id: topology
+        shell: bash
+        run: |
+          set -euo pipefail
+          operation="$RUNNER_TEMP/repository-security-gate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          tools="$operation/tools"
+          reports="$operation/reports"
+          scanner_home="$operation/scanner-home"
+          sandbox_home="$operation/invariant-home"
+          mkdir -p "$tools" "$reports" "$scanner_home" "$sandbox_home"
+          sudo useradd --system --no-create-home --home-dir "$sandbox_home" toolkitgate
+          sandbox_uid="$(id -u toolkitgate)"
+          sandbox_gid="$(id -g toolkitgate)"
+          git config --file "$sandbox_home/.gitconfig" --add safe.directory "$GITHUB_WORKSPACE/candidate"
+          sudo chown -R toolkitgate:toolkitgate "$sandbox_home"
+          chmod 700 "$reports"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/trusted-gate"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/candidate"
+          sudo chown -R root:root trusted-gate candidate
+          sudo chmod -R a-w trusted-gate candidate
+          printf 'operation=%s\ntools=%s\nreports=%s\nscanner_home=%s\nsandbox_home=%s\nsandbox_uid=%s\nsandbox_gid=%s\n' \
+            "$operation" "$tools" "$reports" "$scanner_home" "$sandbox_home" "$sandbox_uid" "$sandbox_gid" >> "$GITHUB_OUTPUT"
+
+      - name: Bind invoking workflow digest
+        id: workflow
+        shell: bash
+        env:
+          AUTHORITY_MODE: ${{ steps.evidence.outputs.authority_mode }}
+        run: |
+          set -euo pipefail
+          source_path="trusted-gate/.github/workflows/repository-security-gate.yml"
+          if [ "$AUTHORITY_MODE" = bootstrap-immutable-review ]; then
+            source_path="candidate/.github/workflows/repository-security-gate.yml"
+          fi
+          digest="$(sha256sum "$source_path" | cut -d ' ' -f 1)"
+          printf 'digest=sha256:%s\n' "$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Validate trusted provenance lock and fixtures
+        id: preflight
+        continue-on-error: true
+        working-directory: trusted-gate
+        env:
+          GH_TOKEN: ""
+          GITHUB_TOKEN: ""
+        run: |
+          node skills/repository-security-gate/tools/security-gate.cjs validate-lock
+          node skills/repository-security-gate/tools/security-gate.cjs self-test
+
+      - name: Install verified scanner assets from trusted lock
+        id: tools
+        continue-on-error: true
+        working-directory: trusted-gate
+        env:
+          GH_TOKEN: ""
+          GITHUB_TOKEN: ""
+          TOOLS_ROOT: ${{ steps.topology.outputs.tools }}
+        run: node skills/repository-security-gate/tools/install-pinned-tools.cjs --dest "$TOOLS_ROOT"
+
+      - name: Run trusted gate against candidate data
+        id: gate
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ""
+          GITHUB_TOKEN: ""
+          MODE: ${{ steps.evidence.outputs.mode }}
+          BASE: ${{ steps.evidence.outputs.base }}
+          HEAD: ${{ steps.evidence.outputs.head }}
+          AUTHORITY_MODE: ${{ steps.evidence.outputs.authority_mode }}
+          INVOKING_WORKFLOW_COMMIT: ${{ steps.evidence.outputs.invoking_workflow_commit }}
+          INVOKING_WORKFLOW_DIGEST: ${{ steps.workflow.outputs.digest }}
+          ARTIFACT_DIGEST: ${{ steps.evidence.outputs.artifact_digest }}
+          PREFLIGHT_OUTCOME: ${{ steps.preflight.outcome }}
+          INSTALL_OUTCOME: ${{ steps.tools.outcome }}
+          TOOLS_ROOT: ${{ steps.topology.outputs.tools }}
+          REPORT_ROOT: ${{ steps.topology.outputs.reports }}
+          SCANNER_HOME: ${{ steps.topology.outputs.scanner_home }}
+          SANDBOX_HOME: ${{ steps.topology.outputs.sandbox_home }}
+          SANDBOX_UID: ${{ steps.topology.outputs.sandbox_uid }}
+          SANDBOX_GID: ${{ steps.topology.outputs.sandbox_gid }}
+          CANDIDATE_REPOSITORY: ${{ steps.evidence.outputs.candidate_repository }}
+        run: |
+          set -euo pipefail
+          args=(run
+            --authority-root "$GITHUB_WORKSPACE/trusted-gate"
+            --candidate-root "$GITHUB_WORKSPACE/candidate"
+            --target-repository "$GITHUB_REPOSITORY"
+            --candidate-repository "$CANDIDATE_REPOSITORY"
+            --candidate-head "$HEAD"
+            --authority-mode "$AUTHORITY_MODE"
+            --invoking-workflow-commit "$INVOKING_WORKFLOW_COMMIT"
+            --invoking-workflow-digest "$INVOKING_WORKFLOW_DIGEST"
+            --mode "$MODE"
+            --tools-dir "$TOOLS_ROOT"
+            --report-root "$REPORT_ROOT"
+            --scanner-home "$SCANNER_HOME"
+            --sandbox-home "$SANDBOX_HOME"
+            --sandbox-uid "$SANDBOX_UID"
+            --sandbox-gid "$SANDBOX_GID"
+            --run-invariants)
+          if [ -n "$BASE" ]; then args+=(--base "$BASE"); fi
+          if [ -n "$ARTIFACT_DIGEST" ]; then args+=(--artifact-digest "$ARTIFACT_DIGEST"); fi
+          if [ -f candidate/repo/security/security-gate-suppressions.json ]; then
+            args+=(--suppressions repo/security/security-gate-suppressions.json)
+          fi
+          if [ "$PREFLIGHT_OUTCOME" != success ]; then args+=(--preflight-failed); fi
+          if [ "$INSTALL_OUTCOME" != success ]; then args+=(--install-failed); fi
+          node trusted-gate/skills/repository-security-gate/tools/trusted-security-gate.cjs "${args[@]}"
+
+      - name: Recheck exact PR head and invalidate stale evidence
+        id: stale
+        if: always() && (github.event_name == 'pull_request' || github.event_name == 'pull_request_target')
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_HEAD: ${{ steps.evidence.outputs.head }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPORT_ROOT: ${{ steps.topology.outputs.reports }}
+        run: |
+          set -euo pipefail
+          current="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)"
+          if [ "$current" != "$EXPECTED_HEAD" ]; then
+            if [ -f "$REPORT_ROOT/security-gate.json" ]; then
+              node trusted-gate/skills/repository-security-gate/tools/security-gate.cjs invalidate-report \
+                --report-root "$REPORT_ROOT" \
+                --report "$REPORT_ROOT/security-gate.json" \
+                --reason "PR head changed after trusted scan"
+            fi
+            exit 1
+          fi
+
+      - name: Generate bounded stable-head review packet
+        if: steps.gate.outcome == 'success' && inputs.generate_review_packet
+        shell: bash
+        env:
+          GH_TOKEN: ""
+          GITHUB_TOKEN: ""
+          BASE: ${{ steps.evidence.outputs.base }}
+          HEAD: ${{ steps.evidence.outputs.head }}
+          REPORT_ROOT: ${{ steps.topology.outputs.reports }}
+        run: |
+          set -euo pipefail
+          node trusted-gate/skills/repository-security-gate/tools/security-gate.cjs review-packet \
+            --repo candidate \
+            --base "$BASE" \
+            --head "$HEAD" \
+            --report "$REPORT_ROOT/security-gate.json" \
+            --report-root "$REPORT_ROOT"
+
+      - name: Upload bound sanitised evidence
+        if: always() && steps.topology.outputs.reports != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: trusted-repository-security-gate-${{ steps.evidence.outputs.head }}
+          path: |
+            ${{ steps.topology.outputs.reports }}/trusted-authority.json
+            ${{ steps.topology.outputs.reports }}/security-gate.json
+            ${{ steps.topology.outputs.reports }}/security-gate.md
+            ${{ steps.topology.outputs.reports }}/security-review-packet.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Enforce trusted result
+        if: steps.gate.outcome != 'success' || steps.stale.outcome == 'failure'
+        run: |
+          echo "Trusted repository security gate did not pass. Review the bound sanitised artifact." >&2
+          exit 1

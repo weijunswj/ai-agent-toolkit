@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "profile": "SECURITY_PROFILE_TOOLING_LIBRARY",
+  "evidence": [
+    {
+      "id": "authority-binding",
+      "covers": [
+        "provider",
+        "target",
+        "environment",
+        "resource",
+        "operation",
+        "exact target uniqueness",
+        "receipt reuse prevention"
+      ],
+      "tests": [
+        "repo/tests/repository-security-gate.test.cjs"
+      ]
+    },
+    {
+      "id": "credential-reference-and-output-privacy",
+      "covers": [
+        "credential-reference-only",
+        "no plaintext secret output"
+      ],
+      "tests": [
+        "repo/tests/repository-security-gate.test.cjs",
+        "repo/tests/audit-fallback-risk.test.cjs",
+        "repo/tests/toolkit-agent-launch-lifecycle.test.cjs"
+      ]
+    },
+    {
+      "id": "transaction-and-crash-boundaries",
+      "covers": [
+        "transaction rollback",
+        "crash-boundary safety",
+        "evidence reuse prevention"
+      ],
+      "tests": [
+        "repo/tests/source-watch-pr-workflow.test.cjs"
+      ]
+    },
+    {
+      "id": "bounded-filesystem",
+      "covers": [
+        "bounded traversal",
+        "redirected-entry rejection",
+        "unsafe file operation rejection"
+      ],
+      "tests": [
+        "repo/tests/repository-security-gate.test.cjs",
+        "repo/tests/agent-instruction-shims.test.cjs"
+      ]
+    },
+    {
+      "id": "fail-closed-and-read-only",
+      "covers": [
+        "fail-closed policy absence",
+        "read-only semantics"
+      ],
+      "tests": [
+        "repo/tests/audit-fallback-risk.test.cjs",
+        "repo/tests/source-watch-pr-workflow.test.cjs",
+        "repo/tests/check-project-source-updates.test.cjs"
+      ]
+    },
+    {
+      "id": "source-generated-alignment",
+      "covers": [
+        "source/generated alignment",
+        "scanner/provenance lock integrity"
+      ],
+      "tests": [
+        "repo/tests/agent-instruction-shims.test.cjs",
+        "repo/tests/skill-routing.test.cjs",
+        "repo/tests/repository-security-gate.test.cjs"
+      ]
+    }
+  ]
+}

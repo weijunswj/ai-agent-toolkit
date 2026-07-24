@@ -1,0 +1,70 @@
+name: Security scanner candidate validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      tool:
+        description: "Reviewed active lock record to validate in quarantine"
+        required: true
+        type: choice
+        options:
+          - trivy
+          - osv-scanner
+          - zizmor
+          - actionlint
+          - shellcheck
+          - psscriptanalyzer
+          - gitleaks-cli
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-candidate-validation-${{ inputs.tool }}
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout reviewed trusted main
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: refs/heads/main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 22
+
+      - name: Validate reviewed lock and synthetic corpus
+        run: |
+          node skills/repository-security-gate/tools/security-gate.cjs validate-lock
+          node skills/repository-security-gate/tools/security-gate.cjs self-test
+
+      - name: Download only the reviewed official asset
+        env:
+          CANDIDATE_TOOL: ${{ inputs.tool }}
+        run: node skills/repository-security-gate/tools/install-pinned-tools.cjs --dest .candidate-tools --tools "$CANDIDATE_TOOL"
+
+      - name: Record bounded recommendation evidence
+        shell: bash
+        env:
+          CANDIDATE_TOOL: ${{ inputs.tool }}
+          CANDIDATE_HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p candidate-evidence
+          printf '{"schema_version":1,"tool":"%s","trusted_main":"%s","lock":"verified","fixtures":"passed","recommendation":"manual_review_required"}\n' \
+            "$CANDIDATE_TOOL" "$CANDIDATE_HEAD" > candidate-evidence/recommendation.json
+
+      - name: Upload candidate evidence only
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: security-candidate-${{ inputs.tool }}-${{ github.sha }}
+          path: candidate-evidence/recommendation.json
+          if-no-files-found: error
+          retention-days: 7
