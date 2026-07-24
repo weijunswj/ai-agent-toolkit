@@ -5,9 +5,9 @@
   "title": "External System Router",
   "module_path": "_projects/development/external-system-router",
   "main_path": "_projects/development/external-system-router/_main",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "version_policy": "semver",
-  "version_notes": "Derives mutability from canonical operation semantics and requires loader-authenticated current inventory authority for every selected route and receipt.",
+  "version_notes": "Removes production synthetic inventory authority and admits only the canonical trusted-runtime inventory loader.",
   "outputs": [
     {
       "kind": "copy",

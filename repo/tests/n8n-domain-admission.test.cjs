@@ -9,6 +9,7 @@ const { spawnSync } = require('node:child_process');
 const n8n = require('../../skills/external-system-router/scripts/n8n-domain-router.cjs');
 const external = require('../../skills/external-system-router/scripts/external-system-router.cjs');
 const hook = require('../scripts/toolkit-claude-n8n-admission-hook.cjs');
+const { createExternalSystemRouterTestHarness } = require('./support/external-system-router-test-harness.cjs');
 
 function sourceAttestation(skillName, overrides = {}) {
   const contract = n8n.OFFICIAL_N8N_SKILLS_CONTRACT;
@@ -633,10 +634,13 @@ test('external capability receipts require installed-router, envelope, target, o
   };
   capabilityAudit.targetBinding = external.targetBindingDigest(capabilityAudit);
   capabilityAudit.capabilityDigest = external.capabilityAuditDigest(capabilityAudit);
-  const inventoryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-external-inventory-'));
-  const inventoryPath = path.join(inventoryRoot, 'provider-target-registry.json');
-  fs.writeFileSync(inventoryPath, '{}\n');
-  const identity = external.testInventoryAuthorityExpectations(inventoryPath);
+  const authorityHarness = createExternalSystemRouterTestHarness(
+    path.resolve('skills/external-system-router/scripts/external-system-router.cjs'),
+    'n8n-external-inventory-'
+  );
+  const inventoryPath = authorityHarness.sourcePath;
+  const identity = authorityHarness.identity;
+  const authorityExternal = authorityHarness.router;
   const target = {
     provider: operationContext.provider,
     targetAlias: operationContext.targetAlias,
@@ -664,16 +668,13 @@ test('external capability receipts require installed-router, envelope, target, o
     targets: [target]
   };
   fs.writeFileSync(inventoryPath, `${JSON.stringify(registry, null, 2)}\n`);
-  const inventoryAuthority = external.loadTrustedInventorySnapshot({
-    testOnly: true,
-    sourcePath: inventoryPath
-  });
-  const selectedRoute = external.selectStrongestAdmissibleInterface(
+  const inventoryAuthority = authorityExternal.loadTrustedInventorySnapshot();
+  const selectedRoute = authorityExternal.selectStrongestAdmissibleInterface(
     operationContext,
     [capabilityAudit],
     { authorizationEnvelope: authorisationEnvelope, inventoryAuthority }
   );
-  const operationReceipt = external.createOperationReceipt({
+  const operationReceipt = authorityExternal.createOperationReceipt({
     schemaVersion: external.RECEIPT_SCHEMA_VERSION,
     operationId: 'route-live-workflow-update',
     operation: operationContext.operation,

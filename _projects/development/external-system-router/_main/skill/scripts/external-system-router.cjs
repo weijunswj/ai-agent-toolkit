@@ -16,7 +16,7 @@ const ROUTE_LIFECYCLE_SCHEMA_VERSION = 'ai-agent-toolkit.route-lifecycle.v1';
 const HOST_ADAPTER_PLAN_SCHEMA_VERSION = 'ai-agent-toolkit.host-adapter-plan.v1';
 const INVENTORY_AUTHORITY_SCHEMA_VERSION = 'ai-agent-toolkit.inventory-authority.v1';
 const OPERATION_SEMANTICS_SCHEMA_VERSION = 'ai-agent-toolkit.operation-semantics.v1';
-const ROUTER_VERSION = '1.0.8';
+const ROUTER_VERSION = '1.0.9';
 const QUESTION_BANK_SCHEMA_VERSION = 'ai-agent-toolkit.external-reconciliation-question-bank.v1';
 const ANSWER_SCHEMA_VERSION = 'ai-agent-toolkit.external-reconciliation-answers.v1';
 const MAX_INVENTORY_BYTES = 1024 * 1024;
@@ -630,8 +630,24 @@ function interfaceRestrictions(envelope) {
   return { forbidden, required };
 }
 
+function trustedRuntimeHome() {
+  let user;
+  let realHome;
+  try {
+    user = os.userInfo();
+    realHome = user && typeof user.homedir === 'string'
+      ? fs.realpathSync.native(user.homedir)
+      : null;
+  } catch {
+    invariant(false, 'Trusted runtime home is unavailable.', 'EXTERNAL_INVENTORY_AUTHORITY_REQUIRED');
+  }
+  invariant(user && typeof user.homedir === 'string' && path.isAbsolute(user.homedir),
+    'Trusted runtime home is unavailable.', 'EXTERNAL_INVENTORY_AUTHORITY_REQUIRED');
+  return realHome;
+}
+
 function canonicalInventoryPath() {
-  return path.join(os.homedir(), '.ai-agent-toolkit', 'external-system', 'provider-target-registry.json');
+  return path.join(trustedRuntimeHome(), '.ai-agent-toolkit', 'external-system', 'provider-target-registry.json');
 }
 
 function samePath(left, right) {
@@ -690,8 +706,17 @@ function readBoundedRegularFile(filePath, maxBytes = MAX_INVENTORY_BYTES) {
   }
 }
 
+function readTrustedRegularFile(filePath, failureCode) {
+  try {
+    return readBoundedRegularFile(filePath);
+  } catch (error) {
+    if (typeof error?.code === 'string' && error.code.startsWith('EXTERNAL_')) throw error;
+    invariant(false, 'Trusted bounded file is unavailable.', failureCode);
+  }
+}
+
 function runtimeInventoryIdentity(sourcePath) {
-  const routerSource = readBoundedRegularFile(__filename);
+  const routerSource = readTrustedRegularFile(__filename, 'EXTERNAL_INVENTORY_AUTHORITY_MISMATCH');
   const repositoryRealPath = fs.realpathSync.native(process.cwd());
   const installationRealPath = fs.realpathSync.native(path.dirname(__filename));
   return {
@@ -704,27 +729,11 @@ function runtimeInventoryIdentity(sourcePath) {
   };
 }
 
-function isNodeTestProcess() {
-  return typeof process.env.NODE_TEST_CONTEXT === 'string' && process.env.NODE_TEST_CONTEXT.length > 0;
-}
-
-function testInventoryAuthorityExpectations(sourcePath) {
-  invariant(isNodeTestProcess(), 'Synthetic inventory authority is available only to the Node test runner.',
-    'EXTERNAL_TEST_AUTHORITY_FORBIDDEN');
-  const resolved = path.resolve(sourcePath);
-  const tempRoot = fs.realpathSync.native(os.tmpdir());
-  const realParent = fs.realpathSync.native(path.dirname(resolved));
-  invariant(samePath(realParent, tempRoot) || realParent.startsWith(`${tempRoot}${path.sep}`),
-    'Synthetic inventory authority must remain under the OS temporary directory.',
-    'EXTERNAL_TEST_AUTHORITY_FORBIDDEN');
-  return runtimeInventoryIdentity(resolved);
-}
-
 function revalidateInventoryAuthority(authority) {
   const state = INVENTORY_AUTHORITIES.get(authority);
   invariant(state, 'Inventory authority was not produced by the trusted bounded loader.',
     'EXTERNAL_INVENTORY_AUTHORITY_REQUIRED');
-  const current = readBoundedRegularFile(state.source.path);
+  const current = readTrustedRegularFile(state.source.path, 'EXTERNAL_INVENTORY_SOURCE_CHANGED');
   for (const field of ['realPath', 'realParent', 'dev', 'ino', 'size', 'birthtimeMs', 'mtimeMs', 'bytesDigest']) {
     invariant(current[field] === state.source[field],
       `Inventory source ${field} changed after authorisation.`, 'EXTERNAL_INVENTORY_SOURCE_CHANGED');
@@ -740,21 +749,12 @@ function revalidateInventoryAuthority(authority) {
   return state;
 }
 
-function loadTrustedInventorySnapshot(options = {}) {
-  requireObject(options, 'Inventory loader options');
-  assertAllowedKeys(options, new Set(['testOnly', 'sourcePath']), 'Inventory loader options');
-  const testOnly = options.testOnly === true;
-  invariant(!testOnly || isNodeTestProcess(),
-    'Synthetic inventory source injection is forbidden outside the Node test runner.',
-    'EXTERNAL_TEST_AUTHORITY_FORBIDDEN');
-  invariant(testOnly || options.sourcePath === undefined,
-    'Production inventory location is canonical and cannot be caller-selected.',
+function loadTrustedInventorySnapshot() {
+  invariant(arguments.length === 0,
+    'Production inventory authority accepts no caller-selected source or test options.',
     'EXTERNAL_INVENTORY_AUTHORITY_REQUIRED');
-  const sourcePath = testOnly
-    ? path.resolve(requireString(options.sourcePath, 'sourcePath', { max: 1000 }))
-    : canonicalInventoryPath();
-  if (testOnly) testInventoryAuthorityExpectations(sourcePath);
-  const source = readBoundedRegularFile(sourcePath);
+  const sourcePath = canonicalInventoryPath();
+  const source = readTrustedRegularFile(sourcePath, 'EXTERNAL_INVENTORY_AUTHORITY_REQUIRED');
   let registry;
   try {
     registry = JSON.parse(source.bytes.toString('utf8'));
@@ -798,7 +798,7 @@ function loadTrustedInventorySnapshot(options = {}) {
     generationSequence: registry.generationSequence,
     loadedAt: new Date().toISOString()
   });
-  INVENTORY_AUTHORITIES.set(authority, { source, registry, identity, testOnly });
+  INVENTORY_AUTHORITIES.set(authority, { source, registry, identity });
   return authority;
 }
 
@@ -2200,7 +2200,6 @@ module.exports = {
   hostAdapterPlanDigest,
   validateHostAdapterPlan,
   loadTrustedInventorySnapshot,
-  testInventoryAuthorityExpectations,
   selectStrongestAdmissibleInterface,
   validateConsumerRequirements,
   defaultRegistryPath,

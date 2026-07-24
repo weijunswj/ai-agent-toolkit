@@ -11,7 +11,7 @@
   ],
   "properties": {
     "schemaVersion": {"const": "ai-agent-toolkit.provider-target-registry.v1"},
-    "routerVersion": {"const": "1.0.8"},
+    "routerVersion": {"const": "1.0.9"},
     "routerSourceDigest": {"$ref": "#/$defs/digest"},
     "repositoryIdentity": {"$ref": "#/$defs/digest"},
     "hostIdentity": {"$ref": "#/$defs/digest"},

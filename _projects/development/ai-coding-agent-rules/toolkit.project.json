@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "3.1.6",
+  "version": "3.1.7",
   "version_policy": "semver",
-  "version_notes": "Publishes a machine-readable complete-folder external-system-router dependency contract for standalone installations.",
+  "version_notes": "Requires the production-only canonical inventory-authority boundary from external-system-router 1.0.9.",
   "outputs": [
     {
       "kind": "curated",

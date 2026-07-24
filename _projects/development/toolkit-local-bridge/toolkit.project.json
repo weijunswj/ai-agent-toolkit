@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.9.8",
+  "version": "2.9.9",
   "version_policy": "semver",
-  "version_notes": "Completes exact n8n admission, helper-receipt, target-binding, and schema-5 activation-proof documentation recovery.",
+  "version_notes": "Aligns native and bridge surfaces with the production-only external inventory-authority boundary.",
   "outputs": [
     {
       "kind": "curated",

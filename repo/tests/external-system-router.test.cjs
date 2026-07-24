@@ -5,7 +5,42 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const router = require('../../skills/external-system-router/scripts/external-system-router.cjs');
+const { createExternalSystemRouterTestHarness } = require('./support/external-system-router-test-harness.cjs');
+
+const publishedRouterPath = path.resolve('skills/external-system-router/scripts/external-system-router.cjs');
+const authoritativeRouterPath = path.resolve(
+  '_projects/development/external-system-router/_main/skill/scripts/external-system-router.cjs'
+);
+const productionRouter = require(publishedRouterPath);
+const inventoryRouterOwners = new WeakMap();
+const planRouterOwners = new WeakMap();
+const routeRouterOwners = new WeakMap();
+const router = Object.freeze({
+  ...productionRouter,
+  buildHostAdapterPlan(authority, ...args) {
+    const owner = inventoryRouterOwners.get(authority);
+    if (!owner) return productionRouter.buildHostAdapterPlan(authority, ...args);
+    const plan = owner.buildHostAdapterPlan(authority, ...args);
+    planRouterOwners.set(plan, owner);
+    return plan;
+  },
+  selectStrongestAdmissibleInterface(context, audits, options = {}) {
+    const authorityOwner = inventoryRouterOwners.get(options.inventoryAuthority);
+    const planOwner = planRouterOwners.get(options.hostAdapterPlan);
+    const owner = authorityOwner || planOwner;
+    if (!owner) return productionRouter.selectStrongestAdmissibleInterface(context, audits, options);
+    if (authorityOwner && planOwner && authorityOwner !== planOwner) {
+      return productionRouter.selectStrongestAdmissibleInterface(context, audits, options);
+    }
+    const route = owner.selectStrongestAdmissibleInterface(context, audits, options);
+    routeRouterOwners.set(route, owner);
+    return route;
+  },
+  createOperationReceipt(input) {
+    const owner = routeRouterOwners.get(input?.selectedRoute);
+    return (owner || productionRouter).createOperationReceipt(input);
+  }
+});
 
 function semanticsFor(operation, overrides = {}) {
   const readOnly = operation.startsWith('read-');
@@ -161,12 +196,10 @@ function currentTargetFor(audits, overrides = {}) {
   return value;
 }
 
-function inventorySource(audits, targetOverrides = {}, registryOverrides = {}) {
+function inventorySourceForRouter(routerSourcePath, audits, targetOverrides = {}, registryOverrides = {}) {
   const entries = Array.isArray(audits) ? audits : [audits];
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'external-inventory-authority-'));
-  const sourcePath = path.join(root, 'provider-target-registry.json');
-  fs.writeFileSync(sourcePath, '{}\n');
-  const identity = router.testInventoryAuthorityExpectations(sourcePath);
+  const harness = createExternalSystemRouterTestHarness(routerSourcePath, 'external-inventory-authority-');
+  const { root, sourcePath, identity } = harness;
   const inventoryGeneration = targetOverrides.inventoryGeneration || `sha256:${'9'.repeat(64)}`;
   const target = currentTargetFor(entries, { inventoryGeneration, ...targetOverrides });
   const registry = {
@@ -179,16 +212,31 @@ function inventorySource(audits, targetOverrides = {}, registryOverrides = {}) {
     ...registryOverrides
   };
   fs.writeFileSync(sourcePath, `${JSON.stringify(registry, null, 2)}\n`);
-  return { root, sourcePath, registry, target };
+  return { root, sourcePath, registry, target, harnessRouter: harness.router };
+}
+
+function inventorySource(audits, targetOverrides = {}, registryOverrides = {}) {
+  return inventorySourceForRouter(publishedRouterPath, audits, targetOverrides, registryOverrides);
 }
 
 function inventoryFixture(audits, targetOverrides = {}, registryOverrides = {}) {
   const source = inventorySource(audits, targetOverrides, registryOverrides);
-  const authority = router.loadTrustedInventorySnapshot({
-    testOnly: true,
-    sourcePath: source.sourcePath
-  });
+  const authority = source.harnessRouter.loadTrustedInventorySnapshot();
+  inventoryRouterOwners.set(authority, source.harnessRouter);
   return { ...source, authority };
+}
+
+function callerDerivableInventoryIdentity(routerModule, routerPath, sourcePath) {
+  const repositoryRealPath = fs.realpathSync.native(process.cwd());
+  const installationRealPath = fs.realpathSync.native(path.dirname(routerPath));
+  return {
+    routerVersion: routerModule.ROUTER_VERSION,
+    routerSourceDigest: routerModule.sha256(fs.readFileSync(routerPath)),
+    repositoryIdentity: routerModule.sha256({ repositoryRealPath }),
+    hostIdentity: routerModule.sha256({ platform: process.platform, hostname: os.hostname() }),
+    installationIdentity: routerModule.sha256({ installationRealPath }),
+    authorityPathDigest: routerModule.sha256({ authorityRealPath: fs.realpathSync.native(sourcePath) })
+  };
 }
 
 function bindCurrentInventory(context, target) {
@@ -450,7 +498,7 @@ test('standalone AI coding rules explicitly declare the external-system-router r
   ), 'utf8'));
   assert.equal(dependencies.schemaVersion, 'ai-agent-toolkit.skill-runtime-dependencies.v1');
   const externalRouter = dependencies.dependencies.find((entry) => entry.id === 'external-system-router');
-  assert.equal(externalRouter.compatibleVersion, '1.0.8');
+  assert.equal(externalRouter.compatibleVersion, '1.0.9');
   assert.equal(externalRouter.installUnit, 'complete-skill-folder');
   assert.equal(externalRouter.unavailableBehavior, 'fail-closed');
   for (const required of [
@@ -917,20 +965,17 @@ test('trusted inventory loader rejects forged, copied, stale, replaced, and cros
     hostAdapterPlan: forgedPlan
   }), (error) => error.code === 'EXTERNAL_CURRENT_INVENTORY_REQUIRED');
 
-  const copiedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'external-inventory-copy-'));
-  const copiedPath = path.join(copiedRoot, 'provider-target-registry.json');
-  fs.copyFileSync(valid.sourcePath, copiedPath);
-  assert.throws(() => router.loadTrustedInventorySnapshot({ testOnly: true, sourcePath: copiedPath }),
+  const copiedHarness = createExternalSystemRouterTestHarness(publishedRouterPath, 'external-inventory-copy-');
+  fs.copyFileSync(valid.sourcePath, copiedHarness.sourcePath);
+  assert.throws(() => copiedHarness.router.loadTrustedInventorySnapshot(),
     (error) => error.code === 'EXTERNAL_INVENTORY_AUTHORITY_MISMATCH');
 
   for (const field of ['routerVersion', 'routerSourceDigest', 'installationIdentity', 'repositoryIdentity', 'hostIdentity']) {
     const source = inventorySource(api, {}, {
       [field]: field === 'routerVersion' ? '0.0.0' : `sha256:${'e'.repeat(64)}`
     });
-    assert.throws(() => router.loadTrustedInventorySnapshot({
-      testOnly: true,
-      sourcePath: source.sourcePath
-    }), (error) => error.code === 'EXTERNAL_INVENTORY_AUTHORITY_MISMATCH');
+    assert.throws(() => source.harnessRouter.loadTrustedInventorySnapshot(),
+      (error) => error.code === 'EXTERNAL_INVENTORY_AUTHORITY_MISMATCH');
   }
 
   fs.writeFileSync(valid.sourcePath, `${JSON.stringify({
@@ -953,26 +998,22 @@ test('trusted inventory loader rejects forged, copied, stale, replaced, and cros
   ), (error) => error.code === 'EXTERNAL_INVENTORY_SOURCE_CHANGED');
 
   const rollback = inventorySource(api, {}, { generationSequence: 2 });
-  router.loadTrustedInventorySnapshot({ testOnly: true, sourcePath: rollback.sourcePath });
+  rollback.harnessRouter.loadTrustedInventorySnapshot();
   fs.writeFileSync(rollback.sourcePath, `${JSON.stringify({
     ...rollback.registry,
     generationSequence: 1
   }, null, 2)}\n`);
-  assert.throws(() => router.loadTrustedInventorySnapshot({
-    testOnly: true,
-    sourcePath: rollback.sourcePath
-  }), (error) => error.code === 'EXTERNAL_INVENTORY_GENERATION_ROLLBACK');
+  assert.throws(() => rollback.harnessRouter.loadTrustedInventorySnapshot(),
+    (error) => error.code === 'EXTERNAL_INVENTORY_GENERATION_ROLLBACK');
 
   const sameGeneration = inventorySource(api);
-  router.loadTrustedInventorySnapshot({ testOnly: true, sourcePath: sameGeneration.sourcePath });
+  sameGeneration.harnessRouter.loadTrustedInventorySnapshot();
   fs.writeFileSync(sameGeneration.sourcePath, `${JSON.stringify({
     ...sameGeneration.registry,
     generatedAt: '2026-07-24T00:00:01.000Z'
   }, null, 2)}\n`);
-  assert.throws(() => router.loadTrustedInventorySnapshot({
-    testOnly: true,
-    sourcePath: sameGeneration.sourcePath
-  }), (error) => error.code === 'EXTERNAL_INVENTORY_GENERATION_ROLLBACK');
+  assert.throws(() => sameGeneration.harnessRouter.loadTrustedInventorySnapshot(),
+    (error) => error.code === 'EXTERNAL_INVENTORY_GENERATION_ROLLBACK');
 
   const staleAuditState = inventoryFixture(api, { lastAuditState: 'stale' });
   assert.throws(() => router.selectStrongestAdmissibleInterface(
@@ -982,16 +1023,194 @@ test('trusted inventory loader rejects forged, copied, stale, replaced, and cros
   ), (error) => error.code === 'EXTERNAL_STALE_TARGET_INVENTORY');
 
   if (process.platform !== 'win32') {
-    const linkRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'external-inventory-link-'));
-    const linkedPath = path.join(linkRoot, 'provider-target-registry.json');
-    fs.symlinkSync(rollback.sourcePath, linkedPath);
-    assert.throws(() => router.loadTrustedInventorySnapshot({
-      testOnly: true,
-      sourcePath: linkedPath
-    }), (error) => error.code === 'EXTERNAL_INVENTORY_TOPOLOGY_MISMATCH');
+    const linked = inventorySource(api);
+    fs.unlinkSync(linked.sourcePath);
+    fs.symlinkSync(rollback.sourcePath, linked.sourcePath);
+    assert.throws(() => linked.harnessRouter.loadTrustedInventorySnapshot(),
+      (error) => error.code === 'EXTERNAL_INVENTORY_TOPOLOGY_MISMATCH');
   } else {
     t.diagnostic('link substitution is covered on hosts that permit unprivileged symlink fixtures');
   }
+});
+
+test('production public API cannot mint synthetic inventory authority from mutable test state', () => {
+  const api = audit('provider-api', 'api', 90);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'external-production-spoof-'));
+  const sourcePath = path.join(root, 'provider-target-registry.json');
+  fs.writeFileSync(sourcePath, '{}\n');
+  const inventoryGeneration = `sha256:${'d'.repeat(64)}`;
+  const target = currentTargetFor(api, {
+    inventoryGeneration,
+    resourceReferences: ['caller-forged-resource']
+  });
+  const registry = {
+    schemaVersion: productionRouter.REGISTRY_SCHEMA_VERSION,
+    ...callerDerivableInventoryIdentity(productionRouter, publishedRouterPath, sourcePath),
+    inventoryGeneration,
+    generationSequence: 1,
+    generatedAt: '2026-07-24T00:00:00.000Z',
+    targets: [target]
+  };
+  fs.writeFileSync(sourcePath, `${JSON.stringify(registry, null, 2)}\n`);
+  const context = bindCurrentInventory({
+    ...operation('deploy-revision'),
+    resource: 'caller-forged-resource',
+    targetFingerprint: api.targetFingerprint
+  }, target);
+  const routeEnvelope = envelope({
+    resource: 'caller-forged-resource',
+    interfaceRestrictions: []
+  });
+  const previousEnvironment = Object.fromEntries(
+    ['NODE_TEST_CONTEXT', 'NODE_ENV', 'JEST_WORKER_ID', 'VITEST', 'CI'].map((key) => [key, process.env[key]])
+  );
+  const previousArgv = [...process.argv];
+  const previousProcessFlag = process.testOnly;
+  const previousGlobalFlag = globalThis.__AI_AGENT_TOOLKIT_TEST_AUTHORITY__;
+  const errors = [];
+  let authority;
+  let plan;
+  let route;
+  let receipt;
+  try {
+    process.env.NODE_TEST_CONTEXT = 'child-v8';
+    process.env.NODE_ENV = 'test';
+    process.env.JEST_WORKER_ID = '1';
+    process.env.VITEST = 'true';
+    process.env.CI = 'true';
+    process.argv.push('--test-only-inventory', sourcePath);
+    process.testOnly = true;
+    globalThis.__AI_AGENT_TOOLKIT_TEST_AUTHORITY__ = { sourcePath };
+
+    assert.equal(typeof productionRouter.testInventoryAuthorityExpectations, 'undefined');
+    assert.equal(typeof productionRouter.runtimeInventoryIdentity, 'undefined');
+    assert.equal(productionRouter.loadTrustedInventorySnapshot.length, 0);
+    assert.throws(() => productionRouter.testInventoryAuthorityExpectations(sourcePath), (error) => {
+      errors.push(error);
+      return error instanceof TypeError;
+    });
+    for (const options of [
+      { testOnly: true, sourcePath },
+      { sourcePath },
+      { testOnly: true },
+      undefined
+    ]) {
+      assert.throws(() => {
+        authority = productionRouter.loadTrustedInventorySnapshot(options);
+      }, (error) => {
+        errors.push(error);
+        return error.code === 'EXTERNAL_INVENTORY_AUTHORITY_REQUIRED';
+      });
+    }
+
+    const forgedAuthority = Object.freeze({
+      schemaVersion: productionRouter.INVENTORY_AUTHORITY_SCHEMA_VERSION,
+      authorityId: productionRouter.sha256(registry),
+      sourceDigest: productionRouter.sha256(fs.readFileSync(sourcePath)),
+      inventoryGeneration,
+      generationSequence: 1,
+      loadedAt: '2026-07-24T00:00:00.000Z'
+    });
+    assert.throws(() => {
+      plan = productionRouter.buildHostAdapterPlan(forgedAuthority, {
+        provider: target.provider,
+        targetAlias: target.targetAlias,
+        environment: target.environment
+      }, 'codex', [api]);
+    }, (error) => {
+      errors.push(error);
+      return error.code === 'EXTERNAL_INVENTORY_AUTHORITY_REQUIRED';
+    });
+    assert.throws(() => {
+      route = productionRouter.selectStrongestAdmissibleInterface(context, [api], {
+        authorizationEnvelope: routeEnvelope,
+        inventoryAuthority: forgedAuthority,
+        targetRegistryRecord: target
+      });
+    }, (error) => {
+      errors.push(error);
+      return error.code === 'EXTERNAL_INVENTORY_AUTHORITY_REQUIRED';
+    });
+    assert.throws(() => {
+      receipt = productionRouter.createOperationReceipt({
+        authorisationEnvelope: routeEnvelope,
+        selectedRoute: {
+          snapshotAuthorityId: forgedAuthority.authorityId,
+          selectedRouteDigest: productionRouter.sha256('forged-route')
+        }
+      });
+    }, (error) => {
+      errors.push(error);
+      return error.code === 'EXTERNAL_ROUTE_AUTHORITY_REQUIRED';
+    });
+  } finally {
+    for (const [key, value] of Object.entries(previousEnvironment)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    process.argv.splice(0, process.argv.length, ...previousArgv);
+    if (previousProcessFlag === undefined) delete process.testOnly;
+    else process.testOnly = previousProcessFlag;
+    if (previousGlobalFlag === undefined) delete globalThis.__AI_AGENT_TOOLKIT_TEST_AUTHORITY__;
+    else globalThis.__AI_AGENT_TOOLKIT_TEST_AUTHORITY__ = previousGlobalFlag;
+  }
+  assert.equal(authority, undefined);
+  assert.equal(plan, undefined);
+  assert.equal(route, undefined);
+  assert.equal(receipt, undefined);
+  for (const error of errors) {
+    assert.equal(error.message.includes(root), false);
+    assert.equal(error.message.includes(sourcePath), false);
+    assert.equal(error.message.includes('caller-forged-resource'), false);
+    assert.equal(error.message.includes('"targets"'), false);
+  }
+  const productionSource = fs.readFileSync(publishedRouterPath, 'utf8');
+  for (const forbidden of [
+    'NODE_TEST_CONTEXT',
+    'testInventoryAuthorityExpectations',
+    'testOnly',
+    "new Set(['testOnly', 'sourcePath'])"
+  ]) assert.equal(productionSource.includes(forbidden), false, `production source must omit ${forbidden}`);
+});
+
+test('test-only authority harness is isolated across copies and absent from production surfaces', () => {
+  const publishedBytes = fs.readFileSync(publishedRouterPath);
+  const authoritativeBytes = fs.readFileSync(authoritativeRouterPath);
+  assert.deepEqual(publishedBytes, authoritativeBytes);
+  const authoritativeRouter = require(authoritativeRouterPath);
+  assert.deepEqual(Object.keys(productionRouter).sort(), Object.keys(authoritativeRouter).sort());
+  assert.equal(typeof authoritativeRouter.testInventoryAuthorityExpectations, 'undefined');
+  assert.equal(fs.existsSync(path.join('skills', 'external-system-router', 'support', 'external-system-router-test-harness.cjs')), false);
+  assert.equal(fs.existsSync(path.join('skills', 'external-system-router', 'scripts', 'external-system-router-test-harness.cjs')), false);
+
+  const api = audit('provider-api', 'api', 90);
+  const published = inventorySourceForRouter(publishedRouterPath, api);
+  const authoritative = inventorySourceForRouter(authoritativeRouterPath, api);
+  const firstAuthority = published.harnessRouter.loadTrustedInventorySnapshot();
+  const repeatedAuthority = published.harnessRouter.loadTrustedInventorySnapshot();
+  assert.notEqual(firstAuthority, repeatedAuthority);
+  assert.equal(firstAuthority.authorityId, repeatedAuthority.authorityId);
+  const selector = {
+    provider: published.target.provider,
+    targetAlias: published.target.targetAlias,
+    environment: published.target.environment
+  };
+  const firstPlan = published.harnessRouter.buildHostAdapterPlan(firstAuthority, selector, 'codex', [api]);
+  const repeatedPlan = published.harnessRouter.buildHostAdapterPlan(repeatedAuthority, selector, 'codex', [api]);
+  assert.equal(firstPlan.snapshotAuthorityId, repeatedPlan.snapshotAuthorityId);
+  assert.throws(() => authoritative.harnessRouter.buildHostAdapterPlan(firstAuthority, selector, 'codex', [api]),
+    (error) => error.code === 'EXTERNAL_INVENTORY_AUTHORITY_REQUIRED');
+  assert.throws(() => published.harnessRouter.buildHostAdapterPlan({ ...firstAuthority }, selector, 'codex', [api]),
+    (error) => error.code === 'EXTERNAL_INVENTORY_AUTHORITY_REQUIRED');
+
+  const resolvedPublished = require.resolve(publishedRouterPath);
+  const firstImport = require(resolvedPublished);
+  delete require.cache[resolvedPublished];
+  const reloadedImport = require(resolvedPublished);
+  assert.notEqual(firstImport, reloadedImport);
+  assert.deepEqual(Object.keys(firstImport).sort(), Object.keys(reloadedImport).sort());
+  assert.throws(() => reloadedImport.buildHostAdapterPlan(firstAuthority, selector, 'codex', [api]),
+    (error) => error.code === 'EXTERNAL_INVENTORY_AUTHORITY_REQUIRED');
 });
 
 function target(alias, environment, credentials = ['credential-store://coolify/swooshz-production'], extra = {}) {
@@ -1016,10 +1235,8 @@ function target(alias, environment, credentials = ['credential-store://coolify/s
 }
 
 test('provider target registry defaults to one credential, never guesses, and survives host switching', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'external-registry-validation-'));
-  const sourcePath = path.join(root, 'provider-target-registry.json');
-  fs.writeFileSync(sourcePath, '{}\n');
-  const identity = router.testInventoryAuthorityExpectations(sourcePath);
+  const harness = createExternalSystemRouterTestHarness(publishedRouterPath, 'external-registry-validation-');
+  const identity = harness.identity;
   const inventoryGeneration = `sha256:${'8'.repeat(64)}`;
   const registryBase = {
     schemaVersion: router.REGISTRY_SCHEMA_VERSION,
