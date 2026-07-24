@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "rules_version": "1.1.0",
+  "rules_version": "1.2.0",
   "provenance": "first-party Toolkit rules derived from public vulnerability classes; no third-party rule pack",
   "rules": [
     {

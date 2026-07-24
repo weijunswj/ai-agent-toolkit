@@ -11,7 +11,9 @@ Use this explicit-only skill for the deterministic Toolkit security gate.
 2. Run `node tools/security-gate.cjs classify --repo <repository>`.
 3. Validate the lock before any scanner execution:
    `node tools/security-gate.cjs validate-lock`.
-4. Run the applicable `pr`, `full`, `scheduled`, or `release` mode.
+4. Run the applicable `pr`, `full`, `scheduled`, or `release` mode through
+   `tools/trusted-security-gate.cjs` from a protected exact authority checkout.
+   Treat a direct candidate-owned runner as diagnostic-only and unverified.
 5. Treat missing tools, invalid output, checksum/publisher mismatch, stale required
    data, or parser failure as unverified/blocked, never as pass.
 6. Use only repository-relative, sanitised JSON and Markdown evidence.

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "policy_version": "1.1.0",
+  "policy_version": "1.2.0",
   "allowed_modes": [
     "pr",
     "full",
@@ -16,10 +16,15 @@
   ],
   "profiles": {
     "SECURITY_PROFILE_EXEMPT": {
-      "required_layers": []
+      "required_layers": [
+        "trusted_authority",
+        "git_path_identity"
+      ]
     },
     "SECURITY_PROFILE_LIGHTWEIGHT_CI": {
       "required_layers": [
+        "trusted_authority",
+        "git_path_identity",
         "tool_lock",
         "toolkit_rules",
         "actionlint",
@@ -29,6 +34,8 @@
     },
     "SECURITY_PROFILE_TOOLING_LIBRARY": {
       "required_layers": [
+        "trusted_authority",
+        "git_path_identity",
         "tool_lock",
         "toolkit_rules",
         "osv-scanner",
@@ -43,6 +50,8 @@
     },
     "SECURITY_PROFILE_WEB_API": {
       "required_layers": [
+        "trusted_authority",
+        "git_path_identity",
         "tool_lock",
         "toolkit_rules",
         "osv-scanner",
@@ -61,6 +70,8 @@
     },
     "SECURITY_PROFILE_WORKFLOW_INTEGRATION": {
       "required_layers": [
+        "trusted_authority",
+        "git_path_identity",
         "tool_lock",
         "toolkit_rules",
         "osv-scanner",

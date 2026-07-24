@@ -16,6 +16,21 @@ const CLASSIFICATION_FIXTURES_PATH = path.join(PACK_ROOT, 'fixtures', 'classific
 const RULE_FIXTURES_PATH = path.join(PACK_ROOT, 'fixtures', 'rule-cases.json');
 const SHA40 = /^[0-9a-f]{40}$/i;
 const SHA64 = /^[0-9a-f]{64}$/i;
+const GIT_PATH_LIMIT = 100000;
+const CASE_ALIAS_LIMIT = 200;
+const ENFORCEMENT_CONTROL_PATHS = [
+  '.github/workflows/repository-security-gate.yml',
+  '_projects/cicd/repository-security-gate/_main/config/',
+  '_projects/cicd/repository-security-gate/_main/rules/',
+  '_projects/cicd/repository-security-gate/_main/schemas/',
+  '_projects/cicd/repository-security-gate/_main/templates/github/security-gate.yml',
+  '_projects/cicd/repository-security-gate/_main/tools/',
+  'skills/repository-security-gate/config/',
+  'skills/repository-security-gate/rules/',
+  'skills/repository-security-gate/schemas/',
+  'skills/repository-security-gate/templates/github/security-gate.yml',
+  'skills/repository-security-gate/tools/'
+];
 const PROFILE_EXEMPT = 'SECURITY_PROFILE_EXEMPT';
 const PROFILE_LIGHTWEIGHT = 'SECURITY_PROFILE_LIGHTWEIGHT_CI';
 const PROFILE_TOOLING = 'SECURITY_PROFILE_TOOLING_LIBRARY';
@@ -87,6 +102,86 @@ function sourceBindingDigest(filePath) {
 
 function normalizedRelativePath(value) {
   return slash(value).replace(/^\.?\//, '');
+}
+
+function canonicalGitPath(value) {
+  const original = String(value || '');
+  if (!original || /[\u0000-\u001f\u007f]/.test(original) || path.isAbsolute(original) || /^[A-Za-z]:[\\/]/.test(original)) {
+    throw new Error('Git path must be a repository-relative path.');
+  }
+  const parts = slash(original).split('/').filter((part) => part !== '' && part !== '.');
+  if (parts.length === 0 || parts.includes('..')) {
+    throw new Error('Git path must not be empty or traverse outside the repository.');
+  }
+  return parts.join('/');
+}
+
+function enforcementControlChanges(paths) {
+  return paths.filter((candidate) => ENFORCEMENT_CONTROL_PATHS.some((control) =>
+    control.endsWith('/') ? candidate.startsWith(control) : candidate === control
+  ));
+}
+
+function trackedPathInventory(root, revision = 'HEAD', limit = GIT_PATH_LIMIT) {
+  const result = run('git', [
+    '-c', 'core.quotepath=false',
+    'ls-tree', '-r', '-z', '--full-tree', revision
+  ], { cwd: root, maxBuffer: OUTPUT_LIMIT });
+  if (result.error || result.status !== 0) throw new Error('Unable to enumerate the exact Git tree.');
+  if (result.stdout.length >= OUTPUT_LIMIT) throw new Error('Git tree inventory output reached the safety bound.');
+  const records = result.stdout.split('\0').filter(Boolean);
+  if (records.length > limit) throw new Error(`Tracked path safety bound ${limit} exceeded.`);
+  const entries = [];
+  const exact = new Map();
+  const aliases = new Map();
+  for (const record of records) {
+    const tab = record.indexOf('\t');
+    if (tab < 0) throw new Error('Git tree inventory is malformed.');
+    const metadata = record.slice(0, tab);
+    const relative = canonicalGitPath(record.slice(tab + 1));
+    if (exact.has(relative)) throw new Error(`Git tree contains duplicate exact path: ${relative}`);
+    exact.set(relative, metadata);
+    const folded = relative.toLowerCase();
+    const group = aliases.get(folded) || [];
+    group.push(relative);
+    aliases.set(folded, group);
+    entries.push(`${metadata}\t${relative}`);
+  }
+  const caseAliases = [...aliases.values()]
+    .filter((group) => group.length > 1)
+    .map((group) => [...group].sort())
+    .sort((left, right) => (left[0] < right[0] ? -1 : (left[0] > right[0] ? 1 : 0)));
+  if (caseAliases.length > CASE_ALIAS_LIMIT) {
+    throw new Error(`Case-fold alias safety bound ${CASE_ALIAS_LIMIT} exceeded.`);
+  }
+  return {
+    revision,
+    count: entries.length,
+    exact,
+    aliases,
+    caseAliases,
+    manifest_sha256: sha256(`${entries.sort().join('\0')}\0`)
+  };
+}
+
+function resolveScannerPath(root, value, inventory) {
+  if (typeof value !== 'string' || !value.trim() || value === '(repository)') return '(repository)';
+  let candidate = value;
+  if (path.isAbsolute(candidate) || /^[A-Za-z]:[\\/]/.test(candidate)) {
+    const absolute = path.resolve(candidate);
+    if (!isWithin(root, absolute)) throw new Error('Scanner reported a path outside the repository.');
+    candidate = path.relative(root, absolute);
+  }
+  const relative = canonicalGitPath(candidate);
+  if (inventory.exact.has(relative)) return relative;
+  const aliases = inventory.aliases.get(relative.toLowerCase()) || [];
+  if (aliases.length > 1) {
+    throw new Error(`Scanner path is ambiguous across case-fold aliases: ${relative}`);
+  }
+  if (aliases.length === 1) {
+    throw new Error(`Scanner path case does not match the exact Git path: ${relative}`);
+  }
+  throw new Error(`Scanner reported an untracked path: ${relative}`);
 }
 
 function readJson(filePath) {
@@ -407,13 +502,14 @@ function validateToolLock(lock = readJson(TOOL_LOCK_PATH), today = new Date()) {
 
 function commitTouchesPath(root, commit, relativePath) {
   try {
+    const exactPath = canonicalGitPath(relativePath);
     const resolved = git(root, ['rev-parse', '--verify', `${commit}^{commit}`]);
     if (resolved.toLowerCase() !== commit.toLowerCase()) return false;
-    const changed = git(root, ['diff-tree', '--root', '--no-commit-id', '--name-only', '-r', commit, '--', relativePath])
-      .split(/\r?\n/)
-      .filter(Boolean)
-      .map((item) => normalizedRelativePath(item).toLowerCase());
-    return changed.includes(normalizedRelativePath(relativePath).toLowerCase());
+    const changed = gitPathList(root, [
+      '-c', 'core.quotepath=false',
+      'diff-tree', '--root', '--no-commit-id', '--name-only', '-z', '-r', commit
+    ]);
+    return changed.includes(exactPath);
   } catch {
     return false;
   }
@@ -425,8 +521,14 @@ function validateSuppressions(document, root, today = new Date(), options = {}) 
   const lock = readJson(TOOL_LOCK_PATH);
   const rulesVersion = readJson(RULES_PATH).rules_version;
   const executedTests = options.executedTests instanceof Map ? options.executedTests : new Map();
-  if (!document || document.schema_version !== 2 || !Array.isArray(document.suppressions)) {
-    return { valid: false, errors: ['suppression document must use schema_version 2 and an array'] };
+  let pathInventory;
+  try {
+    pathInventory = trackedPathInventory(root);
+  } catch (error) {
+    return { valid: false, errors: [`suppression Git path inventory failed: ${error.message}`] };
+  }
+  if (!document || document.schema_version !== 3 || !Array.isArray(document.suppressions)) {
+    return { valid: false, errors: ['suppression document must use schema_version 3 and an array'] };
   }
   const ids = new Set();
   const findingIdentities = new Set();
@@ -452,7 +554,7 @@ function validateSuppressions(document, root, today = new Date(), options = {}) 
     const authorityScope = [
       String(item.tool || '').toLowerCase(),
       String(item.rule || '').toLowerCase(),
-      normalizedRelativePath(item.path || '').toLowerCase(),
+      normalizedRelativePath(item.path || ''),
       item.scope
     ].join('\n');
     if (authorityScopes.has(authorityScope)) errors.push(`${prefix}: overlapping suppression authority`);
@@ -492,7 +594,16 @@ function validateSuppressions(document, root, today = new Date(), options = {}) 
     if (item.scope === 'synthetic_fixture' && !/(?:^|\/)fixtures\//i.test(item.path || '')) {
       errors.push(`${prefix}: synthetic secret suppression must target an exact fixture`);
     }
-    const full = path.resolve(root, item.path || '');
+    let exactSourcePath = null;
+    try {
+      exactSourcePath = canonicalGitPath(item.path || '');
+      if (!pathInventory.exact.has(exactSourcePath)) {
+        errors.push(`${prefix}: suppression path does not exactly match a tracked Git path`);
+      }
+    } catch {
+      errors.push(`${prefix}: suppression path is not a canonical Git path`);
+    }
+    const full = path.resolve(root, exactSourcePath || item.path || '');
     if (
       isWithin(root, full) &&
       fs.existsSync(full) &&
@@ -504,7 +615,15 @@ function validateSuppressions(document, root, today = new Date(), options = {}) 
     } else {
       errors.push(`${prefix}: suppression path is missing or outside repository`);
     }
-    const testRelative = normalizedRelativePath(item.compensating_test || '');
+    let testRelative = '';
+    try {
+      testRelative = canonicalGitPath(item.compensating_test || '');
+      if (!pathInventory.exact.has(testRelative)) {
+        errors.push(`${prefix}: compensating_test does not exactly match a tracked Git path`);
+      }
+    } catch {
+      errors.push(`${prefix}: compensating_test is not a canonical Git path`);
+    }
     const testFull = path.resolve(root, testRelative);
     if (
       path.isAbsolute(item.compensating_test || '') ||
@@ -540,7 +659,9 @@ function validateSuppressions(document, root, today = new Date(), options = {}) 
 }
 
 function stableFinding(tool, rule, relativePath, line, message, options = {}) {
-  const normalizedPath = normalizedRelativePath(relativePath);
+  const normalizedPath = relativePath === '(repository)'
+    ? '(repository)'
+    : canonicalGitPath(relativePath);
   const normalizedMessage = String(message).replace(/\s+/g, ' ').trim().slice(0, 240);
   const diagnostic = String(options.diagnostic || `message-sha256:${sha256(normalizedMessage)}`)
     .replace(/\s+/g, ' ')
@@ -549,7 +670,7 @@ function stableFinding(tool, rule, relativePath, line, message, options = {}) {
   const canonical = {
     tool: String(tool),
     rule: String(rule),
-    path: normalizedPath.toLowerCase(),
+    path: normalizedPath,
     line: Number(line || 0),
     column: Number(options.column || 0),
     severity: String(options.severity || 'MEDIUM').toUpperCase(),
@@ -575,7 +696,7 @@ function canonicalFindingPayload(finding) {
   return JSON.stringify({
     tool: finding.tool,
     rule: finding.rule,
-    path: normalizedRelativePath(finding.path).toLowerCase(),
+    path: finding.path === '(repository)' ? '(repository)' : canonicalGitPath(finding.path),
     line: Number(finding.line || 0),
     column: Number(finding.column || 0),
     severity: String(finding.severity || 'MEDIUM').toUpperCase(),
@@ -698,15 +819,13 @@ function parseJson(text, label) {
   }
 }
 
-function relativeScannerPath(root, value) {
-  if (typeof value !== 'string' || !value.trim()) return '(repository)';
-  const absolute = path.isAbsolute(value) ? path.resolve(value) : path.resolve(root, value);
-  if (!isWithin(root, absolute)) return '(outside-repository-redacted)';
-  return slash(path.relative(root, absolute)) || '(repository)';
+function relativeScannerPath(root, value, inventory = trackedPathInventory(root)) {
+  return resolveScannerPath(root, value, inventory);
 }
 
-function genericJsonFindings(tool, root, parsed) {
+function genericJsonFindings(tool, root, parsed, options = {}) {
   const findings = [];
+  const inventory = options.pathInventory || trackedPathInventory(root);
   function add(rule, severity, filePath, line, column, discriminatorParts = []) {
     const normalizedRule = String(rule || 'finding').replace(/[^A-Za-z0-9._:-]/g, '-').slice(0, 120);
     const safeSeverity = String(severity || 'MEDIUM').toUpperCase();
@@ -715,7 +834,7 @@ function genericJsonFindings(tool, root, parsed) {
     findings.push(stableFinding(
       tool,
       normalizedRule,
-      relativeScannerPath(root, filePath),
+      relativeScannerPath(root, filePath, inventory),
       line,
       `${tool} diagnostic ${normalizedRule}`,
       { column, severity: safeSeverity, diagnostic }
@@ -790,6 +909,11 @@ function genericJsonFindings(tool, root, parsed) {
 
 function runAdapter(name, root, toolsDir, files, options = {}) {
   const execute = options.execute || run;
+  const executeScanner = (command, args, runOptions = {}) => execute(command, args, {
+    ...runOptions,
+    env: options.env || invariantEnvironment(options.sandboxHome)
+  });
+  const pathInventory = options.pathInventory || trackedPathInventory(root);
   const executable = toolExecutable(toolsDir, name);
   if (name !== 'psscriptanalyzer' && !isContainedRegularTool(toolsDir, executable)) {
     return { status: 'missing', findings: [], failure: `${name}: verified binary is missing` };
@@ -799,15 +923,15 @@ function runAdapter(name, root, toolsDir, files, options = {}) {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-security-gate-'));
   try {
     if (name === 'trivy') {
-      result = execute(executable, ['fs', '--format', 'json', '--scanners', 'vuln,secret,misconfig', '--exit-code', '0', root], { cwd: root });
+      result = executeScanner(executable, ['fs', '--format', 'json', '--scanners', 'vuln,secret,misconfig', '--exit-code', '0', root], { cwd: root });
       if (result.error || result.status !== 0) throw new Error(result.error || `exit ${result.status}`);
       parsed = parseJson(result.stdout, name);
     } else if (name === 'osv-scanner') {
-      result = execute(executable, ['scan', 'source', '-r', root, '--format', 'json'], { cwd: root });
+      result = executeScanner(executable, ['scan', 'source', '-r', root, '--format', 'json'], { cwd: root });
       if (result.error || ![0, 1].includes(result.status)) throw new Error(result.error || `exit ${result.status}`);
       parsed = parseJson(result.stdout, name);
     } else if (name === 'zizmor') {
-      result = execute(executable, ['--format=json', path.join(root, '.github', 'workflows')], { cwd: root });
+      result = executeScanner(executable, ['--format=json', path.join(root, '.github', 'workflows')], { cwd: root });
       // zizmor uses exit 14 when audits found reportable results.
       if (result.error || ![0, 1, 14].includes(result.status)) throw new Error(result.error || `exit ${result.status}`);
       parsed = parseJson(result.stdout, name);
@@ -820,7 +944,7 @@ function runAdapter(name, root, toolsDir, files, options = {}) {
           failure: 'actionlint: verified transitive ShellCheck binary is missing'
         };
       }
-      result = execute(
+      result = executeScanner(
         executable,
         ['-shellcheck', shellcheckExecutable, '-format', '{{json .}}'],
         { cwd: root, env: options.env || process.env }
@@ -831,12 +955,12 @@ function runAdapter(name, root, toolsDir, files, options = {}) {
         const value = parseJson(line, name);
         return Array.isArray(value) ? value : [value];
       });
-      const findings = genericJsonFindings(name, root, parsed);
+      const findings = genericJsonFindings(name, root, parsed, { pathInventory });
       return {
         status: 'complete',
         findings,
         evidence: {
-          shellcheck_binding: normalizedRelativePath(path.relative(root, shellcheckExecutable)),
+          shellcheck_binding: `operation-tools/${path.basename(shellcheckExecutable)}`,
           shellcheck_selection: 'actionlint -shellcheck <verified-path>'
         }
       };
@@ -854,7 +978,7 @@ function runAdapter(name, root, toolsDir, files, options = {}) {
       }
       parsed = [];
       for (const descriptor of inventory.supported) {
-        result = execute(
+        result = executeScanner(
           executable,
           ['--format=json', '--severity=warning', `--shell=${descriptor.dialect}`, descriptor.file.full],
           { cwd: root, env: options.env || process.env }
@@ -864,7 +988,7 @@ function runAdapter(name, root, toolsDir, files, options = {}) {
         }
         parsed.push(...parseJson(result.stdout, name));
       }
-      const findings = genericJsonFindings(name, root, parsed);
+      const findings = genericJsonFindings(name, root, parsed, { pathInventory });
       if (inventory.unsupported.length > 0) {
         return {
           status: 'unverified',
@@ -898,7 +1022,7 @@ function runAdapter(name, root, toolsDir, files, options = {}) {
         '$results = foreach ($item in $items) { Invoke-ScriptAnalyzer -Path $item -Recurse:$false -IncludeRule $securityRules }',
         '$results | Select-Object RuleName,Severity,ScriptPath,Line | ConvertTo-Json -Depth 4 -Compress'
       ].join('; ');
-      result = execute('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command], { cwd: root });
+      result = executeScanner('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command], { cwd: root });
       if (result.error || result.status !== 0) throw new Error(result.error || `exit ${result.status}`);
       parsed = result.stdout.trim() ? parseJson(result.stdout, name) : [];
       if (!Array.isArray(parsed)) parsed = [parsed];
@@ -910,13 +1034,13 @@ function runAdapter(name, root, toolsDir, files, options = {}) {
       }));
     } else if (name === 'gitleaks-cli') {
       const reportPath = path.join(temporary, 'gitleaks.json');
-      result = execute(executable, ['dir', root, '--no-banner', '--redact', '--report-format', 'json', '--report-path', reportPath], { cwd: root });
+      result = executeScanner(executable, ['dir', root, '--no-banner', '--redact', '--report-format', 'json', '--report-path', reportPath], { cwd: root });
       if (result.error || ![0, 1].includes(result.status)) throw new Error(result.error || `exit ${result.status}`);
       parsed = fs.existsSync(reportPath) ? readJson(reportPath) : [];
     } else {
       return { status: 'invalid', findings: [], failure: `${name}: adapter is not implemented` };
     }
-    return { status: 'complete', findings: genericJsonFindings(name, root, parsed) };
+    return { status: 'complete', findings: genericJsonFindings(name, root, parsed, { pathInventory }) };
   } catch (error) {
     return { status: 'invalid', findings: [], failure: `${name}: ${error.message}` };
   } finally {
@@ -928,7 +1052,55 @@ function runAdapter(name, root, toolsDir, files, options = {}) {
   }
 }
 
-function runInvariants(root, mode, base, head) {
+function invariantEnvironment(home) {
+  const operationHome = home || os.tmpdir();
+  const env = {
+    PATH: process.env.PATH || '',
+    HOME: operationHome,
+    TEMP: operationHome,
+    TMP: operationHome,
+    CI: 'true',
+    LANG: process.env.LANG || 'C.UTF-8',
+    LC_ALL: process.env.LC_ALL || 'C.UTF-8'
+  };
+  for (const name of ['SystemRoot', 'WINDIR', 'ComSpec', 'PATHEXT']) {
+    if (process.env[name]) env[name] = process.env[name];
+  }
+  return env;
+}
+
+function runInvariantCommand(command, args, options = {}) {
+  const env = invariantEnvironment(options.sandboxHome);
+  if (options.sandboxUid && options.sandboxGid && process.platform !== 'win32') {
+    return run('sudo', [
+      '-n',
+      'unshare',
+      '--net',
+      '--fork',
+      '--kill-child',
+      '--setgid', String(options.sandboxGid),
+      '--setuid', String(options.sandboxUid),
+      '--',
+      'env', '-i',
+      ...Object.entries(env).map(([name, value]) => `${name}=${value}`),
+      command,
+      ...args
+    ], {
+      cwd: options.cwd,
+      timeout: options.timeout,
+      maxBuffer: options.maxBuffer,
+      env
+    });
+  }
+  return run(command, args, {
+    cwd: options.cwd,
+    timeout: options.timeout,
+    maxBuffer: options.maxBuffer,
+    env
+  });
+}
+
+function runInvariants(root, mode, base, head, options = {}) {
   const document = readJson(INVARIANTS_PATH);
   const findings = [];
   const failures = [];
@@ -950,10 +1122,13 @@ function runInvariants(root, mode, base, head) {
         continue;
       }
       const digest = sourceBindingDigest(full);
-      const result = run(process.execPath, ['--test', relative], {
+      const result = runInvariantCommand(process.execPath, ['--test', relative], {
         cwd: root,
         timeout: 120000,
-        maxBuffer: INVARIANT_OUTPUT_LIMIT
+        maxBuffer: INVARIANT_OUTPUT_LIMIT,
+        sandboxUid: options.sandboxUid,
+        sandboxGid: options.sandboxGid,
+        sandboxHome: options.sandboxHome
       });
       consumed.push({ path: relative, sha256: digest, status: result.error || result.status !== 0 ? 'FINDINGS' : 'PASS' });
       if (result.error || result.status !== 0) {
@@ -995,7 +1170,7 @@ function consumerInvariantCommand(test) {
   return null;
 }
 
-function runConsumerInvariants(root, profile, manifestRelative, mode, base, head) {
+function runConsumerInvariants(root, profile, manifestRelative, mode, base, head, options = {}) {
   const findings = [];
   const failures = [];
   const consumed = [];
@@ -1071,10 +1246,13 @@ function runConsumerInvariants(root, profile, manifestRelative, mode, base, head
       continue;
     }
     const digest = sourceBindingDigest(full);
-    const result = run(command.command, command.args, {
+    const result = runInvariantCommand(command.command, command.args, {
       cwd: root,
       timeout: test.timeout_seconds * 1000,
-      maxBuffer: INVARIANT_OUTPUT_LIMIT
+      maxBuffer: INVARIANT_OUTPUT_LIMIT,
+      sandboxUid: options.sandboxUid,
+      sandboxGid: options.sandboxGid,
+      sandboxHome: options.sandboxHome
     });
     if (result.error) {
       failures.push(`${expectedLayer}/${test.id}: invariant execution did not complete`);
@@ -1179,6 +1357,13 @@ function git(root, args) {
   return result.stdout.trim();
 }
 
+function gitPathList(root, args) {
+  const result = run('git', args, { cwd: root });
+  if (result.error || result.status !== 0) throw new Error(`git ${args[0]} failed`);
+  if (result.stdout.length >= OUTPUT_LIMIT) throw new Error('Git path-list output reached the safety bound.');
+  return result.stdout.split('\0').filter(Boolean).map(canonicalGitPath);
+}
+
 function resolveExactCommit(root, revision, label) {
   if (!SHA40.test(revision || '')) throw new Error(`${label} must be an exact 40-character commit.`);
   let resolved;
@@ -1204,12 +1389,168 @@ function verifyExactCheckout(root, baseRevision, headRevision, requireBase) {
       throw new Error('Base commit is not reachable as an ancestor of the supplied head.');
     }
   }
-  const status = git(root, ['status', '--porcelain=v1', '--untracked-files=normal']);
+  const status = git(root, ['status', '--porcelain=v1', '--untracked-files=all', '--ignored=matching']);
   if (status) throw new Error('Exact-head evidence requires a clean working tree.');
   return {
     base,
     head,
     scanned_head_digest: `git-sha1:${head}`
+  };
+}
+
+function captureRepositoryIntegrity(root, head, inventory = trackedPathInventory(root, head)) {
+  return {
+    head: resolveExactCommit(root, git(root, ['rev-parse', 'HEAD']), 'integrity HEAD'),
+    tree: git(root, ['rev-parse', `${head}^{tree}`]).toLowerCase(),
+    manifest_sha256: inventory.manifest_sha256,
+    tracked_files: inventory.count,
+    status: git(root, ['status', '--porcelain=v1', '--untracked-files=all', '--ignored=matching'])
+  };
+}
+
+function compareRepositoryIntegrity(root, expected) {
+  try {
+    const inventory = trackedPathInventory(root, expected.head);
+    const current = captureRepositoryIntegrity(root, expected.head, inventory);
+    const changed = (
+      current.head !== expected.head ||
+      current.tree !== expected.tree ||
+      current.manifest_sha256 !== expected.manifest_sha256 ||
+      current.tracked_files !== expected.tracked_files ||
+      current.status !== expected.status
+    );
+    return { valid: !changed, current };
+  } catch (error) {
+    return { valid: false, error: error.message };
+  }
+}
+
+function exactFileDigest(filePath) {
+  return sha256(fs.readFileSync(filePath));
+}
+
+function validateTrustedAuthority(authority, candidateHead) {
+  const errors = [];
+  if (!authority || authority.schema_version !== 1) {
+    return { valid: false, errors: ['trusted authority schema is missing or invalid'] };
+  }
+  if (!['protected-base', 'bootstrap-immutable-review'].includes(authority.mode)) {
+    errors.push('trusted authority mode is invalid');
+  }
+  if (!SHA40.test(authority.commit || '') || !SHA40.test(authority.tree || '')) {
+    errors.push('trusted authority commit and tree must be exact Git identities');
+  }
+  if (authority.candidate_head !== candidateHead) errors.push('trusted authority candidate head does not match');
+  if (
+    !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(authority.target_repository || '') ||
+    !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(authority.candidate_repository || '')
+  ) {
+    errors.push('trusted authority repository identities are missing or invalid');
+  }
+  try {
+    if (authority.gate_version !== readJson(POLICY_PATH).policy_version) {
+      errors.push('trusted authority gate version does not match the trusted policy');
+    }
+  } catch {
+    errors.push('trusted authority policy is missing or unreadable');
+  }
+  const expectedTopology = {
+    trusted_gate: 'trusted-gate',
+    scanned_candidate: 'candidate',
+    operation_tools: 'operation/tools',
+    operation_reports: 'operation/reports',
+    operation_scanner_home: 'operation/scanner-home',
+    operation_invariant_home: 'operation/invariant-home',
+    executable_candidate_code: 'isolated-no-secret-no-network-worker-only'
+  };
+  if (JSON.stringify(authority.checkout_topology) !== JSON.stringify(expectedTopology)) {
+    errors.push('trusted authority checkout topology is invalid');
+  }
+  if (!/^sha256:[0-9a-f]{64}$/.test(authority.manifest_digest || '')) {
+    errors.push('trusted authority manifest digest is invalid');
+  }
+  if (
+    !authority.invoking_workflow ||
+    !SHA40.test(authority.invoking_workflow.commit || '') ||
+    !/^sha256:[0-9a-f]{64}$/.test(authority.invoking_workflow.sha256 || '')
+  ) {
+    errors.push('invoking workflow identity is missing or invalid');
+  }
+  const authorityRoot = (() => {
+    try {
+      return safeRepoRoot(git(PACK_ROOT, ['rev-parse', '--show-toplevel']));
+    } catch {
+      return null;
+    }
+  })();
+  if (!authorityRoot) {
+    errors.push('trusted authority repository root is unavailable');
+    return { valid: false, errors };
+  }
+  try {
+    const head = resolveExactCommit(authorityRoot, git(authorityRoot, ['rev-parse', 'HEAD']), 'trusted authority HEAD');
+    if (head !== authority.commit) errors.push('trusted authority checkout commit mismatch');
+    const tree = git(authorityRoot, ['rev-parse', `${authority.commit}^{tree}`]).toLowerCase();
+    if (tree !== authority.tree) errors.push('trusted authority tree mismatch');
+    const status = git(authorityRoot, ['status', '--porcelain=v1', '--untracked-files=all', '--ignored=matching']);
+    if (status) errors.push('trusted authority checkout is not clean');
+  } catch (error) {
+    errors.push(error.message);
+  }
+  const bindings = authority.bindings && typeof authority.bindings === 'object'
+    ? authority.bindings
+    : {};
+  const required = ['workflow', 'runner', 'trusted_runner', 'policy', 'rules', 'tool_lock', 'installer', 'report_schema', 'suppression_schema', 'invariant_schema'];
+  for (const name of required) {
+    const binding = bindings[name];
+    if (
+      !binding ||
+      typeof binding.path !== 'string' ||
+      !/^sha256:[0-9a-f]{64}$/.test(binding.sha256 || '')
+    ) {
+      errors.push(`trusted authority binding ${name} is missing or invalid`);
+      continue;
+    }
+    let relative;
+    try {
+      relative = canonicalGitPath(binding.path);
+    } catch {
+      errors.push(`trusted authority binding ${name} path is invalid`);
+      continue;
+    }
+    const full = path.resolve(authorityRoot, relative);
+    if (!isWithin(authorityRoot, full) || !fs.existsSync(full) || !fs.lstatSync(full).isFile() || fs.lstatSync(full).isSymbolicLink()) {
+      errors.push(`trusted authority binding ${name} is missing or redirected`);
+      continue;
+    }
+    if (`sha256:${exactFileDigest(full)}` !== binding.sha256) {
+      errors.push(`trusted authority binding ${name} digest mismatch`);
+    }
+  }
+  if (
+    authority.mode === 'protected-base' &&
+    authority.invoking_workflow &&
+    (
+      authority.invoking_workflow.commit !== authority.commit ||
+      authority.invoking_workflow.sha256 !== bindings.workflow?.sha256
+    )
+  ) {
+    errors.push('protected invoking workflow does not match trusted authority');
+  }
+  const unsigned = { ...authority };
+  delete unsigned.manifest_digest;
+  if (`sha256:${sha256(JSON.stringify(unsigned))}` !== authority.manifest_digest) {
+    errors.push('trusted authority manifest digest mismatch');
+  }
+  return { valid: errors.length === 0, errors, authorityRoot };
+}
+
+function sealReport(report) {
+  const unsigned = { ...report };
+  delete unsigned.report_digest;
+  return {
+    ...unsigned,
+    report_digest: `sha256:${sha256(`${JSON.stringify(unsigned)}\n`)}`
   };
 }
 
@@ -1237,12 +1578,19 @@ function markdownReport(report) {
     '',
     `- State: \`${report.state}\``,
     `- Repository: \`${report.repository}\``,
+    `- Candidate repository: \`${report.candidate_repository || 'unverified'}\``,
     `- Mode: \`${report.mode}\``,
     `- Base: \`${report.base || 'not_applicable'}\``,
     `- Head: \`${report.head || 'not_applicable'}\``,
     `- Scanned head digest: \`${report.scanned_head_digest || 'not_applicable'}\``,
+    `- Scanned tree digest: \`${report.scanned_tree_digest || 'not_applicable'}\``,
+    `- Scanned manifest digest: \`${report.scanned_manifest_digest || 'not_applicable'}\``,
+    `- Trusted gate commit: \`${report.trusted_authority?.commit || 'unverified'}\``,
+    `- Trusted workflow digest: \`${report.trusted_authority?.bindings?.workflow?.sha256 || 'unverified'}\``,
+    `- Trusted runner digest: \`${report.trusted_authority?.bindings?.runner?.sha256 || 'unverified'}\``,
     `- Artifact digest: \`${report.artifact_digest || 'not_applicable'}\``,
     `- Profile: \`${report.profile}\``,
+    `- Report digest: \`${report.report_digest || 'not_sealed'}\``,
     '',
     '## Coverage',
     ''
@@ -1274,15 +1622,27 @@ function markdownReport(report) {
 }
 
 function writeReportFiles(report, args, root) {
-  const jsonPath = path.resolve(root, args['report-json'] || 'security-reports/security-gate.json');
-  const markdownPath = path.resolve(root, args['report-md'] || 'security-reports/security-gate.md');
+  const explicitReportRoot = Boolean(args['report-root']);
+  const reportRoot = path.resolve(args['report-root'] || root);
+  if (!fs.existsSync(reportRoot)) fs.mkdirSync(reportRoot, { recursive: true });
+  const jsonPath = path.resolve(
+    reportRoot,
+    args['report-json'] || (explicitReportRoot ? 'security-gate.json' : 'security-reports/security-gate.json')
+  );
+  const markdownPath = path.resolve(
+    reportRoot,
+    args['report-md'] || (explicitReportRoot ? 'security-gate.md' : 'security-reports/security-gate.md')
+  );
   for (const target of [jsonPath, markdownPath]) {
-    if (!isWithin(root, target)) throw new Error('Report output must stay inside the repository.');
+    if (!isWithin(reportRoot, target)) throw new Error('Report output must stay inside the operation-owned report root.');
     fs.mkdirSync(path.dirname(target), { recursive: true });
   }
   fs.writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
   fs.writeFileSync(markdownPath, markdownReport(report), 'utf8');
-  return { json: slash(path.relative(root, jsonPath)), markdown: slash(path.relative(root, markdownPath)) };
+  return {
+    json: slash(path.relative(reportRoot, jsonPath)),
+    markdown: slash(path.relative(reportRoot, markdownPath))
+  };
 }
 
 function scanCommand(args) {
@@ -1311,6 +1671,49 @@ function scanCommand(args) {
       scannedHeadDigest = null;
     }
   }
+  const inventory = trackedPathInventory(root, head || 'HEAD');
+  const candidateIntegrity = captureRepositoryIntegrity(root, head, inventory);
+  const candidateTreeDigest = `git-sha1:${candidateIntegrity.tree}`;
+  const candidateManifestDigest = `sha256:${candidateIntegrity.manifest_sha256}`;
+  let authority = null;
+  let authorityResult = { valid: false, errors: ['trusted authority manifest was not supplied'] };
+  if (args['trusted-authority-file']) {
+    const authorityPath = path.resolve(args['trusted-authority-file']);
+    authority = readJson(authorityPath);
+    authorityResult = validateTrustedAuthority(authority, head);
+    if (
+      authorityResult.valid &&
+      repositoryIdentity(root).toLowerCase() !== authority.candidate_repository.toLowerCase()
+    ) {
+      authorityResult = { valid: false, errors: ['candidate checkout repository identity does not match trusted authority'] };
+    }
+  }
+  const reportRoot = path.resolve(args['report-root'] || root);
+  const toolsDir = path.resolve(args['tools-dir'] || path.join(root, '.security-tools'));
+  if (authorityResult.valid) {
+    const authorityRoot = authorityResult.authorityRoot;
+    if (
+      root === authorityRoot ||
+      isWithin(root, authorityRoot) ||
+      isWithin(authorityRoot, root)
+    ) {
+      authorityResult = { valid: false, errors: ['trusted authority and candidate checkouts are not separate'] };
+    } else if (
+      reportRoot === root ||
+      isWithin(root, reportRoot) ||
+      reportRoot === authorityRoot ||
+      isWithin(authorityRoot, reportRoot)
+    ) {
+      authorityResult = { valid: false, errors: ['report root is not operation-owned and separate from both checkouts'] };
+    } else if (
+      toolsDir === root ||
+      isWithin(root, toolsDir) ||
+      toolsDir === authorityRoot ||
+      isWithin(authorityRoot, toolsDir)
+    ) {
+      authorityResult = { valid: false, errors: ['tool root is not operation-owned and separate from both checkouts'] };
+    }
+  }
   const files = walkRepository(root);
   const classification = classifyRepository(root, files);
   const artifactDigest = args['artifact-digest'] || null;
@@ -1321,6 +1724,35 @@ function scanCommand(args) {
   const unverified = [];
   const infrastructureFailures = [];
   let findings = [];
+  if (!authorityResult.valid) {
+    coverage.push({ layer: 'trusted_authority', status: 'invalid' });
+    unverified.push(...authorityResult.errors.map((item) => `trusted authority: ${item}`));
+  } else {
+    coverage.push({ layer: 'trusted_authority', status: 'complete' });
+  }
+  coverage.push({
+    layer: 'git_path_identity',
+    status: 'complete',
+    tracked_files: inventory.count,
+    manifest_digest: candidateManifestDigest,
+    case_fold_alias_count: inventory.caseAliases.length
+  });
+  const assertIntegrity = (layer) => {
+    const candidateCheck = compareRepositoryIntegrity(root, candidateIntegrity);
+    if (!candidateCheck.valid) {
+      coverage.push({ layer: `${layer}_candidate_integrity`, status: 'invalid' });
+      unverified.push(`${layer}: candidate tree changed during trusted gate execution`);
+    }
+    let trustedCheck = { valid: authorityResult.valid };
+    if (authorityResult.valid) {
+      trustedCheck = validateTrustedAuthority(authority, head);
+      if (!trustedCheck.valid) {
+        coverage.push({ layer: `${layer}_trusted_integrity`, status: 'invalid' });
+        unverified.push(...trustedCheck.errors.map((item) => `${layer}: trusted authority ${item}`));
+      }
+    }
+    return candidateCheck.valid && trustedCheck.valid;
+  };
   if (args['preflight-failed']) {
     coverage.push({ layer: 'gate_preflight', status: 'invalid' });
     unverified.push('gate_preflight: provenance or fixture validation failed');
@@ -1333,19 +1765,32 @@ function scanCommand(args) {
   let ruleFiles = files;
   if (mode === 'pr') {
     const changed = new Set(
-      git(root, ['diff', '--name-only', '--diff-filter=ACMR', base, head])
-        .split(/\r?\n/).filter(Boolean).map((item) => slash(item).toLowerCase())
+      gitPathList(root, [
+        '-c', 'core.quotepath=false',
+        'diff', '--name-only', '-z', '--diff-filter=ACMR', base, head
+      ])
     );
     const critical = policy.security_critical_paths.some((prefix) =>
-      [...changed].some((item) => item.startsWith(prefix.toLowerCase()))
+      [...changed].some((item) => item.toLowerCase().startsWith(prefix.toLowerCase()))
     );
-    ruleFiles = critical ? files : files.filter((file) => changed.has(file.relative.toLowerCase()));
+    ruleFiles = critical ? files : files.filter((file) => changed.has(canonicalGitPath(file.relative)));
     coverage.push({
       layer: 'pr_scope',
       status: 'complete',
       changed_files: changed.size,
       security_critical_full_expansion: critical
     });
+    const controlChanges = enforcementControlChanges([...changed]);
+    if (controlChanges.length > 0) {
+      coverage.push({
+        layer: 'authority_promotion',
+        status: 'review_required',
+        changed_control_files: controlChanges.length
+      });
+      unverified.push('authority_promotion: enforcement-control changes require separate immutable independent review before promotion');
+    } else {
+      coverage.push({ layer: 'authority_promotion', status: 'complete' });
+    }
   }
   if (!lockResult.valid) {
     coverage.push({ layer: 'tool_lock', status: 'invalid' });
@@ -1354,32 +1799,44 @@ function scanCommand(args) {
     coverage.push({ layer: 'tool_lock', status: 'complete' });
   }
   if (classification.profile === PROFILE_EXEMPT) {
-    const report = sanitisedReport({
-      schema_version: 2,
-      state: PROFILE_EXEMPT,
-      repository: repositoryIdentity(root),
+    let state = authorityResult.valid ? PROFILE_EXEMPT : 'SECURITY_GATE_UNVERIFIED';
+    if (!assertIntegrity('report_sealing')) state = 'SECURITY_GATE_UNVERIFIED';
+    const report = sanitisedReport(sealReport({
+      schema_version: 3,
+      gate_version: policy.policy_version,
+      state,
+      repository: authorityResult.valid ? authority.target_repository : repositoryIdentity(root),
+      candidate_repository: authorityResult.valid ? authority.candidate_repository : null,
       mode,
       base,
       head,
       scanned_head_digest: scannedHeadDigest,
+      scanned_tree_digest: candidateTreeDigest,
+      scanned_manifest_digest: candidateManifestDigest,
       artifact_digest: artifactDigest,
       profile: classification.profile,
+      trusted_authority: authorityResult.valid ? authority : null,
+      path_identity: {
+        contract: 'exact-git-path-case-v1',
+        tracked_files: inventory.count,
+        manifest_digest: candidateManifestDigest,
+        case_fold_aliases: inventory.caseAliases
+      },
       versions: { lock: lock.lock_version, rules: readJson(RULES_PATH).rules_version, tools: [] },
       coverage,
       findings: [],
       finding_duplicates: [],
       suppressed_findings: [],
-      unverified_areas: [],
+      unverified_areas: unverified,
       infrastructure_failures: [],
       next_action: 'No executable repository surface was detected. Reclassify if content changes.'
-    });
+    }));
     const outputs = writeReportFiles(report, args, root);
     process.stdout.write(`${JSON.stringify({ state: report.state, profile: report.profile, outputs })}\n`);
-    return 0;
+    return report.state === PROFILE_EXEMPT ? 0 : 2;
   }
   findings.push(...scanToolkitRules(root, ruleFiles));
   coverage.push({ layer: 'toolkit_rules', status: 'complete' });
-  const toolsDir = args['tools-dir'] || path.join(root, '.security-tools');
   const externalEnabled = !args['internal-only'];
   const toolVersions = [];
   const scannerNames = ['trivy', 'osv-scanner', 'zizmor', 'actionlint', 'shellcheck', 'psscriptanalyzer', 'gitleaks-cli'];
@@ -1405,7 +1862,10 @@ function scanCommand(args) {
       unverified.push(`${name}: external execution intentionally disabled`);
       continue;
     }
-    const result = runAdapter(name, root, toolsDir, files);
+    const result = runAdapter(name, root, toolsDir, files, {
+      pathInventory: inventory,
+      env: invariantEnvironment(args['scanner-home'])
+    });
     const evidence = { ...(result.evidence || {}) };
     if (name === 'actionlint') {
       const shellcheckRecord = lock.records.find((item) => item.name === 'shellcheck' && item.state === 'active');
@@ -1421,12 +1881,21 @@ function scanCommand(args) {
       infrastructureFailures.push(result.failure);
       unverified.push(`${name}: required scanner did not complete`);
     }
+    assertIntegrity(name);
   }
   const executedInvariantTests = new Map();
   const requiresToolkitInvariants = classification.profile === PROFILE_TOOLING && fs.existsSync(path.join(root, 'repo', 'tests'));
   if (requiresToolkitInvariants) {
     if (args['run-invariants']) {
-      const invariantResult = runInvariants(root, mode, base, head);
+      if (authorityResult.valid && process.platform !== 'win32' && (!args['sandbox-uid'] || !args['sandbox-gid'] || !args['sandbox-home'])) {
+        coverage.push({ layer: 'invariant_isolation', status: 'invalid' });
+        unverified.push('toolkit_invariants: trusted execution requires an isolated no-network worker identity');
+      }
+      const invariantResult = runInvariants(root, mode, base, head, {
+        sandboxUid: args['sandbox-uid'],
+        sandboxGid: args['sandbox-gid'],
+        sandboxHome: args['sandbox-home']
+      });
       findings.push(...invariantResult.findings);
       unverified.push(...invariantResult.failures);
       for (const [relative, digest] of invariantResult.executedTests) executedInvariantTests.set(relative, digest);
@@ -1435,6 +1904,7 @@ function scanCommand(args) {
         status: invariantResult.failures.length === 0 ? 'complete' : 'unverified',
         consumed_tests: invariantResult.consumed
       });
+      assertIntegrity('toolkit_invariants');
     } else {
       coverage.push({ layer: 'toolkit_invariants', status: 'unverified' });
       unverified.push('toolkit_invariants: --run-invariants was not enabled');
@@ -1443,13 +1913,22 @@ function scanCommand(args) {
   if ([PROFILE_WEB, PROFILE_WORKFLOW].includes(classification.profile)) {
     const layer = classification.profile === PROFILE_WEB ? 'project_invariants' : 'workflow_invariants';
     if (args['run-invariants']) {
+      if (authorityResult.valid && process.platform !== 'win32' && (!args['sandbox-uid'] || !args['sandbox-gid'] || !args['sandbox-home'])) {
+        coverage.push({ layer: 'invariant_isolation', status: 'invalid' });
+        unverified.push(`${layer}: trusted execution requires an isolated no-network worker identity`);
+      }
       const invariantResult = runConsumerInvariants(
         root,
         classification.profile,
         args['invariant-manifest'] || policy.consumer_invariant_manifest,
         mode,
         base,
-        head
+        head,
+        {
+          sandboxUid: args['sandbox-uid'],
+          sandboxGid: args['sandbox-gid'],
+          sandboxHome: args['sandbox-home']
+        }
       );
       findings.push(...invariantResult.findings);
       unverified.push(...invariantResult.failures);
@@ -1464,6 +1943,7 @@ function scanCommand(args) {
         head,
         consumed_tests: invariantResult.consumed
       });
+      assertIntegrity(layer);
     } else {
       coverage.push({ layer, status: 'unverified' });
       unverified.push(`${layer}: --run-invariants was not enabled`);
@@ -1506,20 +1986,32 @@ function scanCommand(args) {
       unverified.push(`${required}: required layer status is ${layer.status}`);
     }
   }
+  assertIntegrity('report_sealing');
   let state = 'SECURITY_PASS';
   if (infrastructureFailures.length > 0) state = 'SECURITY_GATE_INFRA_BLOCKED';
   else if (unverified.length > 0 || !lockResult.valid) state = 'SECURITY_GATE_UNVERIFIED';
   else if (boundedFindings.length > 0) state = 'SECURITY_FINDINGS';
-  const report = sanitisedReport({
-    schema_version: 2,
+  const report = sanitisedReport(sealReport({
+    schema_version: 3,
+    gate_version: policy.policy_version,
     state,
-    repository: repositoryIdentity(root),
+    repository: authorityResult.valid ? authority.target_repository : repositoryIdentity(root),
+    candidate_repository: authorityResult.valid ? authority.candidate_repository : null,
     mode,
     base,
     head,
     scanned_head_digest: scannedHeadDigest,
+    scanned_tree_digest: candidateTreeDigest,
+    scanned_manifest_digest: candidateManifestDigest,
     artifact_digest: artifactDigest,
     profile: classification.profile,
+    trusted_authority: authorityResult.valid ? authority : null,
+    path_identity: {
+      contract: 'exact-git-path-case-v1',
+      tracked_files: inventory.count,
+      manifest_digest: candidateManifestDigest,
+      case_fold_aliases: inventory.caseAliases
+    },
     versions: { lock: lock.lock_version, rules: readJson(RULES_PATH).rules_version, tools: toolVersions },
     coverage,
     findings: boundedFindings,
@@ -1530,7 +2022,7 @@ function scanCommand(args) {
     next_action: state === 'SECURITY_PASS'
       ? 'Preserve this exact-head evidence and obtain independent review when the risk packet requires it.'
       : 'Keep the pull request open; resolve findings or restore complete verified coverage, then rerun at the same exact head.'
-  });
+  }));
   if (!REPORT_STATES.has(report.state)) throw new Error('Internal report state is invalid.');
   const outputs = writeReportFiles(report, args, root);
   process.stdout.write(`${JSON.stringify({ state: report.state, profile: report.profile, findings: report.findings.length, outputs })}\n`);
@@ -1541,7 +2033,7 @@ function riskClassification(changedFiles) {
   const sensitivePattern = /(^|\/)(?:auth|oauth|identity|session|authorization|tenan|workspace|admin|storage|database|api|route|webhook|upload|redirect|command|shell|process|filesystem|transaction|backup|credential|crypto|encrypt|security|deployment|infrastructure|workflow|dependency|package|lock)/i;
   const sensitiveExtensions = /\.(?:js|cjs|mjs|jsx|ts|tsx|py|go|rs|java|cs|php|rb|sh|ps1|yml|yaml|json|toml)$/i;
   const sensitive = changedFiles.filter((file) =>
-    file.startsWith('.github/workflows/') ||
+    file.toLowerCase().startsWith('.github/workflows/') ||
     sensitivePattern.test(file) ||
     (sensitiveExtensions.test(file) && !/\.(?:md|txt)$/i.test(file))
   );
@@ -1554,21 +2046,28 @@ function reviewPacketCommand(args) {
   const base = verified.base;
   const head = verified.head;
   const reportPath = path.resolve(root, args.report || 'security-reports/security-gate.json');
-  if (!isWithin(root, reportPath)) throw new Error('Report path must stay inside repository.');
   const report = readJson(reportPath);
+  const unsignedReport = { ...report };
+  delete unsignedReport.report_digest;
   if (
     report.head !== head ||
     report.base !== base ||
-    report.scanned_head_digest !== verified.scanned_head_digest
+    report.scanned_head_digest !== verified.scanned_head_digest ||
+    report.scanned_tree_digest !== `git-sha1:${git(root, ['rev-parse', `${head}^{tree}`]).toLowerCase()}` ||
+    report.report_digest !== `sha256:${sha256(`${JSON.stringify(unsignedReport)}\n`)}`
   ) {
     throw new Error('Review packet rejected: report exact-head evidence does not match.');
   }
+  const authorityResult = validateTrustedAuthority(report.trusted_authority, head);
+  if (!authorityResult.valid) {
+    throw new Error('Review packet rejected: trusted gate authority is missing or invalid.');
+  }
   if (report.state !== 'SECURITY_PASS') throw new Error('Review packet requires green deterministic evidence.');
   const policy = readJson(POLICY_PATH);
-  const completeChangedFiles = git(root, ['diff', '--name-only', '--diff-filter=ACMR', base, head])
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map(normalizedRelativePath);
+  const completeChangedFiles = gitPathList(root, [
+    '-c', 'core.quotepath=false',
+    'diff', '--name-only', '-z', '--diff-filter=ACMR', base, head
+  ]);
   if (completeChangedFiles.length > policy.review_manifest_max_files) {
     throw new Error(`Review packet rejected: changed-file safety bound ${policy.review_manifest_max_files} exceeded.`);
   }
@@ -1583,7 +2082,7 @@ function reviewPacketCommand(args) {
   ].slice(0, policy.review_packet_max_files);
   const diff = risk.sensitive.length === 0
     ? ''
-    : git(root, ['diff', '--unified=0', '--no-color', base, head, '--', ...risk.sensitive]);
+    : git(root, ['-c', 'core.quotepath=false', 'diff', '--unified=0', '--no-color', base, head, '--', ...risk.sensitive]);
   const locations = [];
   let currentFile = null;
   for (const line of diff.split(/\r?\n/)) {
@@ -1596,10 +2095,17 @@ function reviewPacketCommand(args) {
     throw new Error('Review packet rejected: complete security-sensitive location coverage cannot fit the packet.');
   }
   const packet = {
-    schema_version: 2,
+    schema_version: 3,
+    repository: report.repository,
+    candidate_repository: report.candidate_repository,
     base,
     head,
     scanned_head_digest: verified.scanned_head_digest,
+    scanned_tree_digest: report.scanned_tree_digest,
+    scanned_manifest_digest: report.scanned_manifest_digest,
+    trusted_authority: report.trusted_authority,
+    security_report_digest: report.report_digest,
+    path_identity: report.path_identity,
     profile: report.profile,
     risk_review_required: risk.required,
     changed_files: changedFiles,
@@ -1622,12 +2128,31 @@ function reviewPacketCommand(args) {
       'AI_SECURITY_INFRA_BLOCKED'
     ]
   };
-  const output = path.resolve(root, args.output || 'security-reports/security-review-packet.json');
-  if (!isWithin(root, output)) throw new Error('Packet output must stay inside repository.');
+  const outputRoot = path.resolve(args['report-root'] || root);
+  const output = path.resolve(outputRoot, args.output || 'security-review-packet.json');
+  if (!isWithin(outputRoot, output)) throw new Error('Packet output must stay inside the operation-owned report root.');
   fs.mkdirSync(path.dirname(output), { recursive: true });
   fs.writeFileSync(output, `${JSON.stringify(packet, null, 2)}\n`, 'utf8');
-  process.stdout.write(`${JSON.stringify({ risk_review_required: packet.risk_review_required, output: slash(path.relative(root, output)) })}\n`);
+  process.stdout.write(`${JSON.stringify({ risk_review_required: packet.risk_review_required, output: slash(path.relative(outputRoot, output)) })}\n`);
   return 0;
+}
+
+function invalidateReportCommand(args) {
+  const reportPath = path.resolve(args.report || '');
+  const reportRoot = path.resolve(args['report-root'] || path.dirname(reportPath));
+  if (!isWithin(reportRoot, reportPath)) throw new Error('Report must stay inside the operation-owned report root.');
+  const report = readJson(reportPath);
+  const reason = String(args.reason || '').replace(/\s+/g, ' ').trim();
+  if (!/^[A-Za-z0-9 ._:/()-]{1,200}$/.test(reason)) throw new Error('Invalidation reason is missing or unsafe.');
+  report.state = 'SECURITY_GATE_UNVERIFIED';
+  report.unverified_areas = [...new Set([...(report.unverified_areas || []), reason])];
+  report.next_action = 'Keep the pull request open and rerun the trusted gate at the current exact head.';
+  const sealed = sanitisedReport(sealReport(report));
+  fs.writeFileSync(reportPath, `${JSON.stringify(sealed, null, 2)}\n`, 'utf8');
+  const markdownPath = path.join(path.dirname(reportPath), 'security-gate.md');
+  if (isWithin(reportRoot, markdownPath)) fs.writeFileSync(markdownPath, markdownReport(sealed), 'utf8');
+  process.stdout.write('SECURITY_GATE_UNVERIFIED: sealed evidence was invalidated.\n');
+  return 2;
 }
 
 function selfTest() {
@@ -1669,7 +2194,8 @@ function usage() {
     '  node security-gate.cjs validate-suppressions --repo <path> --file <path> --run-invariants [--invariant-manifest <path>]',
     '  node security-gate.cjs self-test',
     '  node security-gate.cjs scan --mode <pr|full|scheduled|release> --repo <path> [--base <sha> --head <sha>] [--tools-dir <path>] [--run-invariants]',
-    '  node security-gate.cjs review-packet --repo <path> --base <sha> --head <sha> --report <path> [--output <path>]'
+    '  node security-gate.cjs review-packet --repo <path> --base <sha> --head <sha> --report <path> [--output <path>]',
+    '  node security-gate.cjs invalidate-report --report-root <path> --report <path> --reason <bounded reason>'
   ].join('\n');
 }
 
@@ -1726,6 +2252,7 @@ function main(argv = process.argv.slice(2)) {
   if (command === 'self-test') return selfTest();
   if (command === 'scan') return scanCommand(args);
   if (command === 'review-packet') return reviewPacketCommand(args);
+  if (command === 'invalidate-report') return invalidateReportCommand(args);
   throw new Error(`Unknown command: ${command}`);
 }
 
@@ -1740,10 +2267,15 @@ if (require.main === module) {
 
 module.exports = {
   applySuppressions,
+  canonicalFindingPayload,
+  canonicalGitPath,
   classifyRepository,
+  compareRepositoryIntegrity,
   deduplicateFindings,
+  enforcementControlChanges,
   genericJsonFindings,
   main,
+  resolveScannerPath,
   riskClassification,
   runAdapter,
   runConsumerInvariants,
@@ -1751,6 +2283,8 @@ module.exports = {
   shellDescriptor,
   shellInventory,
   stableFinding,
+  trackedPathInventory,
+  validateTrustedAuthority,
   validateSuppressions,
   validateToolLock
 };

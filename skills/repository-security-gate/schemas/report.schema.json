@@ -4,14 +4,20 @@
   "type": "object",
   "required": [
     "schema_version",
+    "gate_version",
     "state",
     "repository",
+    "candidate_repository",
     "mode",
     "base",
     "head",
     "scanned_head_digest",
+    "scanned_tree_digest",
+    "scanned_manifest_digest",
     "artifact_digest",
     "profile",
+    "trusted_authority",
+    "path_identity",
     "versions",
     "coverage",
     "findings",
@@ -19,11 +25,16 @@
     "suppressed_findings",
     "unverified_areas",
     "infrastructure_failures",
-    "next_action"
+    "next_action",
+    "report_digest"
   ],
   "properties": {
     "schema_version": {
-      "const": 2
+      "const": 3
+    },
+    "gate_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
     },
     "state": {
       "enum": [
@@ -34,6 +45,18 @@
         "SECURITY_PROFILE_EXEMPT"
       ]
     },
+    "repository": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "candidate_repository": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    },
     "mode": {
       "enum": [
         "pr",
@@ -42,12 +65,41 @@
         "release"
       ]
     },
+    "base": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "head": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{40}$"
+    },
     "scanned_head_digest": {
       "type": [
         "string",
         "null"
       ],
       "pattern": "^git-sha1:[0-9a-f]{40}$"
+    },
+    "scanned_tree_digest": {
+      "type": "string",
+      "pattern": "^git-sha1:[0-9a-f]{40}$"
+    },
+    "scanned_manifest_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "artifact_digest": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^sha256:[0-9a-f]{64}$"
     },
     "profile": {
       "enum": [
@@ -57,6 +109,55 @@
         "SECURITY_PROFILE_WEB_API",
         "SECURITY_PROFILE_WORKFLOW_INTEGRATION"
       ]
+    },
+    "trusted_authority": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "path_identity": {
+      "type": "object",
+      "required": [
+        "contract",
+        "tracked_files",
+        "manifest_digest",
+        "case_fold_aliases"
+      ],
+      "properties": {
+        "contract": {
+          "const": "exact-git-path-case-v1"
+        },
+        "tracked_files": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "manifest_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "case_fold_aliases": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "versions": {
+      "type": "object"
+    },
+    "coverage": {
+      "type": "array"
     },
     "findings": {
       "type": "array"
@@ -68,10 +169,25 @@
       "type": "array"
     },
     "unverified_areas": {
-      "type": "array"
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     },
     "infrastructure_failures": {
-      "type": "array"
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "next_action": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "report_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
     }
   },
   "additionalProperties": false

@@ -8,7 +8,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": 2
+      "const": 3
     },
     "suppressions": {
       "type": "array",
@@ -42,7 +42,8 @@
           },
           "path": {
             "type": "string",
-            "pattern": "^(?!/)(?!.*\\.\\.)(?!.*[*?]).+$"
+            "pattern": "^(?!/)(?!.*\\.\\.)(?!.*[*?]).+$",
+            "description": "Exact-case repository-relative Git path; validation rejects case-fold-only matches."
           },
           "scope": {
             "enum": [

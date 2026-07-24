@@ -5,9 +5,9 @@
   "title": "Repository Security Gate",
   "module_path": "_projects/cicd/repository-security-gate",
   "main_path": "_projects/cicd/repository-security-gate/_main",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "version_policy": "semver",
-  "version_notes": "Binds exact-head scans and actionlint's ShellCheck, preserves canonical finding identity, scans shebang executables, verifies suppression evidence, and adds bounded consumer invariants and complete-manifest risk packets.",
+  "version_notes": "Separates protected trusted gate authority from scanned candidate data, binds complete authority and checkout identities, and preserves exact-case Git path and suppression semantics.",
   "outputs": [
     {
       "kind": "curated",
@@ -116,6 +116,13 @@
     },
     {
       "kind": "copy",
+      "source": "_main/tools/trusted-security-gate.cjs",
+      "output": "skills/repository-security-gate/tools/trusted-security-gate.cjs",
+      "notes": "Protected-authority entrypoint that separates trusted gate code, scanned candidate data, tools, and reports.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
       "source": "_main/tools/install-pinned-tools.cjs",
       "output": "skills/repository-security-gate/tools/install-pinned-tools.cjs",
       "notes": "Pinned official asset downloader with checksum verification.",
@@ -181,6 +188,7 @@
       "skills/repository-security-gate/schemas/review-packet.schema.json",
       "skills/repository-security-gate/schemas/consumer-invariants.schema.json",
       "skills/repository-security-gate/tools/security-gate.cjs",
+      "skills/repository-security-gate/tools/trusted-security-gate.cjs",
       "skills/repository-security-gate/tools/install-pinned-tools.cjs",
       "skills/repository-security-gate/templates/github/security-gate.yml",
       "skills/repository-security-gate/templates/github/security-candidate-validation.yml",

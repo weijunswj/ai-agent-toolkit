@@ -12,21 +12,28 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 const moduleRoot = path.join(repoRoot, '_projects', 'cicd', 'repository-security-gate');
 const mainRoot = path.join(moduleRoot, '_main');
 const runnerPath = path.join(mainRoot, 'tools', 'security-gate.cjs');
+const trustedRunnerPath = path.join(mainRoot, 'tools', 'trusted-security-gate.cjs');
 const lockPath = path.join(mainRoot, 'config', 'tool-lock.json');
 const {
   applySuppressions,
+  canonicalGitPath,
   classifyRepository,
+  compareRepositoryIntegrity,
   deduplicateFindings,
+  enforcementControlChanges,
   genericJsonFindings,
+  resolveScannerPath,
   riskClassification,
   runAdapter,
   runConsumerInvariants,
   scanToolkitRules,
   shellDescriptor,
   stableFinding,
+  trackedPathInventory,
   validateSuppressions,
   validateToolLock
 } = require(runnerPath);
+const { buildAuthority } = require(trustedRunnerPath);
 
 function runNode(args, cwd = repoRoot) {
   return spawnSync(process.execPath, args, {
@@ -72,6 +79,75 @@ function temporaryGitRepository(files) {
   runGit(root, ['init', '-q']);
   const base = commitAll(root, 'base');
   return { root, base };
+}
+
+function exactPathInventory(paths) {
+  const exact = new Map(paths.map((item) => [item, '100644 blob synthetic']));
+  const aliases = new Map();
+  for (const item of paths) {
+    const folded = item.toLowerCase();
+    aliases.set(folded, [...(aliases.get(folded) || []), item]);
+  }
+  return { exact, aliases };
+}
+
+function createTrustedAuthority(candidateRoot, candidateHead) {
+  const container = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-trusted-authority-test-'));
+  const authorityRoot = path.join(container, 'trusted-gate');
+  const packRoot = path.join(authorityRoot, 'skills', 'repository-security-gate');
+  const operationRoot = path.join(container, 'operation');
+  const toolsRoot = path.join(operationRoot, 'tools');
+  const reportRoot = path.join(operationRoot, 'reports');
+  const scannerHome = path.join(operationRoot, 'scanner-home');
+  const sandboxHome = path.join(operationRoot, 'invariant-home');
+  const remotes = runGit(candidateRoot, ['remote']);
+  if (!remotes.split(/\r?\n/).includes('origin')) {
+    runGit(candidateRoot, ['remote', 'add', 'origin', 'https://github.com/synthetic/candidate.git']);
+  }
+  fs.mkdirSync(packRoot, { recursive: true });
+  fs.cpSync(mainRoot, packRoot, { recursive: true });
+  fs.mkdirSync(path.join(authorityRoot, '.github', 'workflows'), { recursive: true });
+  fs.writeFileSync(
+    path.join(authorityRoot, '.github', 'workflows', 'repository-security-gate.yml'),
+    'name: synthetic protected gate\non: pull_request_target\n',
+    'utf8'
+  );
+  runGit(authorityRoot, ['init', '-q']);
+  const authorityCommit = commitAll(authorityRoot, 'trusted authority');
+  fs.mkdirSync(toolsRoot, { recursive: true });
+  fs.mkdirSync(reportRoot, { recursive: true });
+  fs.mkdirSync(scannerHome, { recursive: true });
+  fs.mkdirSync(sandboxHome, { recursive: true });
+  const workflowBytes = fs.readFileSync(
+    path.join(authorityRoot, '.github', 'workflows', 'repository-security-gate.yml')
+  );
+  const authority = buildAuthority({
+    'authority-root': authorityRoot,
+    'candidate-root': candidateRoot,
+    'target-repository': 'synthetic/target',
+    'candidate-repository': 'synthetic/candidate',
+    'candidate-head': candidateHead,
+    'report-root': reportRoot,
+    'tools-dir': toolsRoot,
+    'scanner-home': scannerHome,
+    'sandbox-home': sandboxHome,
+    'authority-mode': 'protected-base',
+    'invoking-workflow-commit': authorityCommit,
+    'invoking-workflow-digest': `sha256:${sha256(workflowBytes)}`
+  });
+  return {
+    container,
+    authorityRoot,
+    authorityCommit,
+    authority,
+    packRoot,
+    reportRoot,
+    scannerHome,
+    sandboxHome,
+    toolsRoot,
+    runner: path.join(packRoot, 'tools', 'security-gate.cjs'),
+    trustedRunner: path.join(packRoot, 'tools', 'trusted-security-gate.cjs')
+  };
 }
 
 function fileRecord(root, relative) {
@@ -125,6 +201,8 @@ test('an invalid provenance lock blocks scanners before execution', () => {
     fs.cpSync(mainRoot, copiedMain, { recursive: true });
     fs.mkdirSync(repository);
     fs.writeFileSync(path.join(repository, 'package.json'), '{"name":"synthetic"}\n', 'utf8');
+    runGit(repository, ['init', '-q']);
+    commitAll(repository, 'synthetic repository');
     const copiedLockPath = path.join(copiedMain, 'config', 'tool-lock.json');
     const copiedLock = JSON.parse(fs.readFileSync(copiedLockPath, 'utf8'));
     copiedLock.records.find((item) => item.name === 'trivy').release_checksum = '0'.repeat(63);
@@ -154,13 +232,215 @@ test('stable findings are deterministic and repository-relative', () => {
   assert.doesNotMatch(JSON.stringify(first), /^[A-Za-z]:\\/);
 });
 
+test('enforcement-control changes require separate promotion review', () => {
+  assert.deepEqual(enforcementControlChanges([
+    'README.md',
+    '.github/workflows/repository-security-gate.yml',
+    'skills/repository-security-gate/config/security-policy.json',
+    '_projects/cicd/repository-security-gate/_main/tools/security-gate.cjs'
+  ]), [
+    '.github/workflows/repository-security-gate.yml',
+    'skills/repository-security-gate/config/security-policy.json',
+    '_projects/cicd/repository-security-gate/_main/tools/security-gate.cjs'
+  ]);
+});
+
+test('exact Git path identities preserve case and reject ambiguous case-fold scanner paths', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-git-path-identity-'));
+  try {
+    runGit(root, ['init', '-q']);
+    const content = path.join(root, 'content.txt');
+    fs.writeFileSync(content, 'echo synthetic\n', 'utf8');
+    const blob = runGit(root, ['hash-object', '-w', content]);
+    const treeInput = [
+      `100644 blob ${blob}\tFoo.sh`,
+      `100644 blob ${blob}\tfoo.sh`,
+      `100644 blob ${blob}\tGenerated.js`,
+      `100644 blob ${blob}\tgenerated.js`,
+      ''
+    ].join('\n');
+    const treeResult = spawnSync('git', ['mktree'], {
+      cwd: root,
+      input: treeInput,
+      encoding: 'utf8',
+      windowsHide: true
+    });
+    assert.equal(treeResult.status, 0, treeResult.stderr);
+    const tree = treeResult.stdout.trim();
+    for (const ignoreCase of ['true', 'false']) {
+      runGit(root, ['config', 'core.ignorecase', ignoreCase]);
+      const inventory = trackedPathInventory(root, tree);
+      assert.deepEqual(inventory.caseAliases, [
+        ['Foo.sh', 'foo.sh'],
+        ['Generated.js', 'generated.js']
+      ]);
+      assert.equal(resolveScannerPath(root, 'Foo.sh', inventory), 'Foo.sh');
+      assert.equal(resolveScannerPath(root, 'foo.sh', inventory), 'foo.sh');
+      assert.throws(() => resolveScannerPath(root, 'FOO.sh', inventory), /ambiguous/);
+      assert.throws(() => resolveScannerPath(root, '../Foo.sh', inventory), /traverse/);
+    }
+    const upper = stableFinding('shellcheck', 'SC2086', 'Foo.sh', 1, 'Synthetic diagnostic');
+    const lower = stableFinding('shellcheck', 'SC2086', 'foo.sh', 1, 'Synthetic diagnostic');
+    assert.notEqual(upper.identity, lower.identity);
+    const deduplicated = deduplicateFindings([upper, lower, upper]);
+    assert.equal(deduplicated.findings.length, 2);
+    assert.equal(deduplicated.findings.find((item) => item.path === 'Foo.sh').occurrence_count, 2);
+    const upperOnly = applySuppressions(deduplicated.findings, {
+      suppressions: [{
+        id: 'upper-only',
+        finding_identity: upper.identity,
+        path: 'Foo.sh',
+        rule: upper.rule,
+        tool: upper.tool,
+        expires: '2026-08-01'
+      }]
+    });
+    assert.deepEqual(upperOnly.suppressed.map((item) => item.path), ['Foo.sh']);
+    assert.deepEqual(upperOnly.active.map((item) => item.path), ['foo.sh']);
+    assert.equal(canonicalGitPath('.\\Foo.sh'), 'Foo.sh');
+    assert.notEqual(
+      stableFinding('shellcheck', 'SC2086', 'Before.sh', 1, 'Synthetic diagnostic').identity,
+      stableFinding('shellcheck', 'SC2086', 'before.sh', 1, 'Synthetic diagnostic').identity
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('trusted immutable checkout can certify an exempt candidate while candidate-owned gate replacements cannot self-certify', () => {
+  const clean = temporaryGitRepository({ 'README.md': '# synthetic documentation\n' });
+  let trusted = null;
+  try {
+    trusted = createTrustedAuthority(clean.root, clean.base);
+    const result = runNode([
+      trusted.trustedRunner, 'run',
+      '--authority-root', trusted.authorityRoot,
+      '--candidate-root', clean.root,
+      '--target-repository', 'synthetic/target',
+      '--candidate-repository', 'synthetic/candidate',
+      '--candidate-head', clean.base,
+      '--authority-mode', 'protected-base',
+      '--invoking-workflow-commit', trusted.authorityCommit,
+      '--invoking-workflow-digest', trusted.authority.bindings.workflow.sha256,
+      '--mode', 'full',
+      '--tools-dir', trusted.toolsRoot,
+      '--report-root', trusted.reportRoot,
+      '--scanner-home', trusted.scannerHome,
+      '--sandbox-home', trusted.sandboxHome
+    ], trusted.container);
+    assert.equal(result.status, 0, result.stderr);
+    const report = JSON.parse(fs.readFileSync(path.join(trusted.reportRoot, 'security-gate.json'), 'utf8'));
+    assert.equal(report.state, 'SECURITY_PROFILE_EXEMPT');
+    assert.equal(report.trusted_authority.commit, trusted.authorityCommit);
+    assert.equal(report.trusted_authority.bindings.runner.sha256, trusted.authority.bindings.runner.sha256);
+    assert.match(report.report_digest, /^sha256:[0-9a-f]{64}$/);
+    const syntheticCore = require(trusted.runner);
+    assert.equal(syntheticCore.validateTrustedAuthority(trusted.authority, clean.base).valid, true);
+    const digestMismatch = structuredClone(trusted.authority);
+    digestMismatch.bindings.runner.sha256 = `sha256:${'0'.repeat(64)}`;
+    assert.equal(syntheticCore.validateTrustedAuthority(digestMismatch, clean.base).valid, false);
+    fs.rmSync(path.join(trusted.packRoot, 'config', 'security-policy.json'));
+    assert.equal(syntheticCore.validateTrustedAuthority(trusted.authority, clean.base).valid, false);
+  } finally {
+    fs.rmSync(clean.root, { recursive: true, force: true });
+    if (trusted) fs.rmSync(trusted.container, { recursive: true, force: true });
+  }
+
+  const maliciousFiles = {
+    '.github/workflows/repository-security-gate.yml': 'jobs:\n  fake:\n    steps:\n      - run: exit 0\n',
+    'skills/repository-security-gate/tools/security-gate.cjs': "process.stdout.write('SECURITY_PASS\\n'); process.exit(0);\n",
+    'skills/repository-security-gate/tools/install-pinned-tools.cjs': 'process.exit(0);\n',
+    'skills/repository-security-gate/config/security-policy.json': '{"profiles":{"SECURITY_PROFILE_EXEMPT":{}}}\n',
+    'skills/repository-security-gate/config/tool-lock.json': '{"records":[]}\n',
+    'skills/repository-security-gate/rules/toolkit-rules.json': '{"rules":[]}\n',
+    'skills/repository-security-gate/schemas/suppressions.schema.json': '{"additionalProperties":true}\n',
+    'security/security-gate-invariants.json': '{"schema_version":1,"profile":"SECURITY_PROFILE_WEB_API","tests":[]}\n',
+    'security-reports/security-gate.json': '{"state":"SECURITY_PASS","counterfeit":true}\n'
+  };
+  const malicious = temporaryGitRepository(maliciousFiles);
+  trusted = null;
+  try {
+    trusted = createTrustedAuthority(malicious.root, malicious.base);
+    const result = runNode([
+      trusted.trustedRunner, 'run',
+      '--authority-root', trusted.authorityRoot,
+      '--candidate-root', malicious.root,
+      '--target-repository', 'synthetic/target',
+      '--candidate-repository', 'synthetic/candidate',
+      '--candidate-head', malicious.base,
+      '--authority-mode', 'protected-base',
+      '--invoking-workflow-commit', trusted.authorityCommit,
+      '--invoking-workflow-digest', trusted.authority.bindings.workflow.sha256,
+      '--mode', 'full',
+      '--tools-dir', trusted.toolsRoot,
+      '--report-root', trusted.reportRoot,
+      '--scanner-home', trusted.scannerHome,
+      '--sandbox-home', trusted.sandboxHome
+    ], trusted.container);
+    assert.notEqual(result.status, 0);
+    const report = JSON.parse(fs.readFileSync(path.join(trusted.reportRoot, 'security-gate.json'), 'utf8'));
+    assert.notEqual(report.state, 'SECURITY_PASS');
+    assert.equal(report.trusted_authority.commit, trusted.authorityCommit);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(malicious.root, 'security-reports', 'security-gate.json'))).counterfeit, true);
+  } finally {
+    fs.rmSync(malicious.root, { recursive: true, force: true });
+    if (trusted) fs.rmSync(trusted.container, { recursive: true, force: true });
+  }
+});
+
+test('candidate mutation is detected and invariant subprocesses receive no credential environment', () => {
+  const state = temporaryGitRepository({
+    'src/app.js': 'module.exports = true;\n',
+    'security/security-gate-invariants.json': `${JSON.stringify({
+      schema_version: 1,
+      profile: 'SECURITY_PROFILE_WEB_API',
+      tests: [{ id: 'credential-boundary', runner: 'node', path: 'security/invariants/credential.cjs', timeout_seconds: 5 }]
+    })}\n`,
+    'security/invariants/credential.cjs': [
+      "const leaked = process.env.SYNTHETIC_GATE_SECRET || process.env.GITHUB_TOKEN || process.env.GH_TOKEN;",
+      "process.stdout.write(JSON.stringify({schema_version:1,test_id:'credential-boundary',status:leaked?'FINDINGS':'PASS',evidence:['credential environment absent']}));",
+      ''
+    ].join('\n')
+  });
+  const previous = process.env.SYNTHETIC_GATE_SECRET;
+  process.env.SYNTHETIC_GATE_SECRET = 'synthetic-do-not-propagate';
+  try {
+    const inventory = trackedPathInventory(state.root, state.base);
+    const expected = {
+      head: state.base,
+      tree: runGit(state.root, ['rev-parse', `${state.base}^{tree}`]),
+      manifest_sha256: inventory.manifest_sha256,
+      tracked_files: inventory.count,
+      status: ''
+    };
+    const invariant = runConsumerInvariants(
+      state.root,
+      'SECURITY_PROFILE_WEB_API',
+      'security/security-gate-invariants.json',
+      'full',
+      null,
+      state.base
+    );
+    assert.deepEqual(invariant.failures, []);
+    assert.deepEqual(invariant.findings, []);
+    fs.writeFileSync(path.join(state.root, 'src', 'app.js'), 'module.exports = false;\n', 'utf8');
+    assert.equal(compareRepositoryIntegrity(state.root, expected).valid, false);
+  } finally {
+    if (previous === undefined) delete process.env.SYNTHETIC_GATE_SECRET;
+    else process.env.SYNTHETIC_GATE_SECRET = previous;
+    fs.rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
 test('scanner findings preserve diagnostics, deduplicate exact repeats, and fail closed on collisions', () => {
   const parsed = [
     { kind: 'shellcheck', filepath: '.github\\workflows\\ci.yml', line: 7, column: 3, message: 'shellcheck reported SC2086' },
     { kind: 'shellcheck', filepath: '.github/workflows/ci.yml', line: 7, column: 3, message: 'shellcheck reported SC2046' },
     { kind: 'shellcheck', filepath: '.github/workflows/ci.yml', line: 7, column: 3, message: 'shellcheck reported SC2086' }
   ];
-  const findings = genericJsonFindings('actionlint', repoRoot, parsed);
+  const findings = genericJsonFindings('actionlint', repoRoot, parsed, {
+    pathInventory: exactPathInventory(['.github/workflows/ci.yml'])
+  });
   assert.notEqual(findings[0].identity, findings[1].identity);
   assert.equal(findings[0].identity, findings[2].identity);
   assert.doesNotMatch(JSON.stringify(findings), /reported SC/);
@@ -200,7 +480,7 @@ test('suppressions require real authority, introduction, source, and executed te
   });
   const executedTests = new Map([['repo/tests/compensating.test.cjs', sha256(testContents)]]);
   const valid = {
-    schema_version: 2,
+    schema_version: 3,
     suppressions: [{
       id: 'synthetic-one',
       tool: 'toolkit-rules',
@@ -214,8 +494,8 @@ test('suppressions require real authority, introduction, source, and executed te
       expires: '2026-08-23',
       compensating_test: 'repo/tests/compensating.test.cjs',
       compensating_test_sha256: sha256(testContents),
-      tool_version: '1.1.0',
-      rule_version: '1.1.0',
+      tool_version: '1.2.0',
+      rule_version: '1.2.0',
       source_sha256: sha256(contents)
     }]
   };
@@ -235,6 +515,9 @@ test('suppressions require real authority, introduction, source, and executed te
     const changed = structuredClone(valid);
     changed.suppressions[0].source_sha256 = 'c'.repeat(64);
     assert.equal(validateSuppressions(changed, root, new Date('2026-07-23T00:00:00Z'), options).valid, false);
+    const incorrectCase = structuredClone(valid);
+    incorrectCase.suppressions[0].path = 'fixtures/synthetic/Sample.txt';
+    assert.equal(validateSuppressions(incorrectCase, root, new Date('2026-07-23T00:00:00Z'), options).valid, false);
     const versionDrift = structuredClone(valid);
     versionDrift.suppressions[0].rule_version = '2.0.0';
     assert.equal(validateSuppressions(versionDrift, root, new Date('2026-07-23T00:00:00Z'), options).valid, false);
@@ -264,7 +547,7 @@ test('suppressions require real authority, introduction, source, and executed te
 });
 
 test('missing scanners and invalid mode inputs fail closed without raw source output', () => {
-  const root = temporaryRepository({ 'src/index.js': 'module.exports = 1;\n', 'package.json': '{}\n' });
+  const { root } = temporaryGitRepository({ 'src/index.js': 'module.exports = 1;\n', 'package.json': '{}\n' });
   try {
     const scan = runNode([runnerPath, 'scan', '--mode', 'full', '--repo', root, '--tools-dir', path.join(root, 'missing')], root);
     assert.equal(scan.status, 2);
@@ -282,7 +565,7 @@ test('missing scanners and invalid mode inputs fail closed without raw source ou
 });
 
 test('actionlint binds the verified ShellCheck path and ignores a PATH decoy', () => {
-  const root = temporaryRepository({
+  const { root } = temporaryGitRepository({
     '.github/workflows/ci.yml': 'name: ci\non: push\njobs: {}\n',
     [`tools/${process.platform === 'win32' ? 'actionlint.exe' : 'actionlint'}`]: 'verified actionlint\n',
     [`tools/${process.platform === 'win32' ? 'shellcheck.exe' : 'shellcheck'}`]: 'verified shellcheck\n',
@@ -327,7 +610,7 @@ test('actionlint binds the verified ShellCheck path and ignores a PATH decoy', (
 });
 
 test('ShellCheck and first-party shell rules cover shebang and misleading-extension executables', () => {
-  const root = temporaryRepository({
+  const { root } = temporaryGitRepository({
     'bin/bash-tool': '#!/usr/bin/env bash\neval \"$INPUT\"\n',
     'scripts/misleading.txt': '#!/bin/bash\necho \"$value\"\n',
     'bin/posix-tool': '#!/bin/sh\necho \"$value\"\n',
@@ -368,7 +651,7 @@ test('ShellCheck and first-party shell rules cover shebang and misleading-extens
   }
 });
 
-test('PR mode binds evidence to the exact clean checkout for branch and detached HEAD', () => {
+test('PR mode binds the exact clean checkout but candidate-owned execution remains unverified', () => {
   function createPair() {
     const state = temporaryGitRepository({ '.gitignore': 'security-reports/\n', 'README.md': '# base\n' });
     fs.writeFileSync(path.join(state.root, 'README.md'), '# head\n', 'utf8');
@@ -381,10 +664,12 @@ test('PR mode binds evidence to the exact clean checkout for branch and detached
       runnerPath, 'scan', '--mode', 'pr', '--repo', ordinary.root,
       '--base', ordinary.base, '--head', ordinary.head, '--internal-only'
     ], ordinary.root);
-    assert.equal(match.status, 0, match.stderr);
+    assert.equal(match.status, 2, match.stderr);
     const report = JSON.parse(fs.readFileSync(path.join(ordinary.root, 'security-reports', 'security-gate.json'), 'utf8'));
     assert.equal(report.head, ordinary.head);
     assert.equal(report.scanned_head_digest, `git-sha1:${ordinary.head}`);
+    assert.equal(report.state, 'SECURITY_GATE_UNVERIFIED');
+    assert.match(report.unverified_areas.join('\n'), /trusted authority manifest was not supplied/);
   } finally {
     fs.rmSync(ordinary.root, { recursive: true, force: true });
   }
@@ -396,7 +681,7 @@ test('PR mode binds evidence to the exact clean checkout for branch and detached
       runnerPath, 'scan', '--mode', 'pr', '--repo', detached.root,
       '--base', detached.base, '--head', detached.head, '--internal-only'
     ], detached.root);
-    assert.equal(match.status, 0, match.stderr);
+    assert.equal(match.status, 2, match.stderr);
   } finally {
     fs.rmSync(detached.root, { recursive: true, force: true });
   }
@@ -428,13 +713,13 @@ test('PR mode rejects mismatched, missing, unreachable, and dirty exact-head cla
   }
 });
 
-test('release mode preserves exact-head and clean-tree guarantees while full and scheduled route', () => {
-  const root = temporaryRepository({ 'README.md': '# documentation\n' });
+test('release mode preserves exact-head and clean-tree guarantees while direct full and scheduled scans cannot self-certify', () => {
+  const { root } = temporaryGitRepository({ 'README.md': '# documentation\n' });
   try {
     for (const mode of ['full', 'scheduled']) {
       const result = runNode([runnerPath, 'scan', '--mode', mode, '--repo', root], root);
-      assert.equal(result.status, 0, result.stderr);
-      assert.match(result.stdout, /SECURITY_PROFILE_EXEMPT/);
+      assert.equal(result.status, 2, result.stderr);
+      assert.match(result.stdout, /SECURITY_GATE_UNVERIFIED/);
     }
     assert.equal(runNode([runnerPath, 'scan', '--mode', 'pr', '--repo', root], root).status, 2);
     assert.equal(runNode([runnerPath, 'scan', '--mode', 'release', '--repo', root, '--head', '0'.repeat(40)], root).status, 2);
@@ -447,9 +732,10 @@ test('release mode preserves exact-head and clean-tree guarantees while full and
       runnerPath, 'scan', '--mode', 'release', '--repo', state.root,
       '--head', state.base, '--internal-only'
     ], state.root);
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 2, result.stderr);
     const report = JSON.parse(fs.readFileSync(path.join(state.root, 'security-reports', 'security-gate.json'), 'utf8'));
     assert.equal(report.scanned_head_digest, `git-sha1:${state.base}`);
+    assert.equal(report.state, 'SECURITY_GATE_UNVERIFIED');
   } finally {
     fs.rmSync(state.root, { recursive: true, force: true });
   }
@@ -576,7 +862,7 @@ test('consumer and suppression contracts reject symlinked compensating tests whe
     assert.match(consumer.failures.join('\n'), /redirected/);
 
     const document = {
-      schema_version: 2,
+      schema_version: 3,
       suppressions: [{
         id: 'linked-test',
         tool: 'toolkit-rules',
@@ -590,8 +876,8 @@ test('consumer and suppression contracts reject symlinked compensating tests whe
         expires: '2026-08-23',
         compensating_test: 'repo/tests/linked.test.cjs',
         compensating_test_sha256: sourceDigest(path.join(root, 'repo/tests/real.test.cjs')),
-        tool_version: '1.1.0',
-        rule_version: '1.1.0',
+        tool_version: '1.2.0',
+        rule_version: '1.2.0',
         source_sha256: sha256('fixture\n')
       }]
     };
@@ -610,6 +896,7 @@ test('review packet classifies the complete changed-file manifest before bounded
     '.gitignore': 'security-reports/\n',
     'README.md': '# base\n'
   });
+  let trusted = null;
   try {
     for (let index = 0; index < 200; index += 1) {
       const relative = `docs/${String(index).padStart(3, '0')}.md`;
@@ -620,26 +907,52 @@ test('review packet classifies the complete changed-file manifest before bounded
     fs.mkdirSync(path.join(state.root, 'z-auth'), { recursive: true });
     fs.writeFileSync(path.join(state.root, 'z-auth', 'session.ts'), 'export const session = true;\n', 'utf8');
     const head = commitAll(state.root, 'large manifest');
-    const reportDir = path.join(state.root, 'security-reports');
-    fs.mkdirSync(reportDir, { recursive: true });
-    fs.writeFileSync(path.join(reportDir, 'security-gate.json'), `${JSON.stringify({
-      schema_version: 2,
+    trusted = createTrustedAuthority(state.root, head);
+    const inventory = trackedPathInventory(state.root, head);
+    const unsignedReport = {
+      schema_version: 3,
+      gate_version: '1.2.0',
       state: 'SECURITY_PASS',
+      repository: 'synthetic/repository',
+      candidate_repository: 'synthetic/candidate',
+      mode: 'pr',
       base: state.base,
       head,
       scanned_head_digest: `git-sha1:${head}`,
+      scanned_tree_digest: `git-sha1:${runGit(state.root, ['rev-parse', `${head}^{tree}`])}`,
+      scanned_manifest_digest: `sha256:${inventory.manifest_sha256}`,
+      artifact_digest: null,
       profile: 'SECURITY_PROFILE_TOOLING_LIBRARY',
+      trusted_authority: trusted.authority,
+      path_identity: {
+        contract: 'exact-git-path-case-v1',
+        tracked_files: inventory.count,
+        manifest_digest: `sha256:${inventory.manifest_sha256}`,
+        case_fold_aliases: inventory.caseAliases
+      },
       versions: {},
       coverage: [],
       findings: [],
+      finding_duplicates: [],
+      suppressed_findings: [],
       unverified_areas: []
-    })}\n`, 'utf8');
-    const packetPath = path.join(reportDir, 'packet.json');
+      ,
+      infrastructure_failures: [],
+      next_action: 'Synthetic trusted evidence.'
+    };
+    const report = {
+      ...unsignedReport,
+      report_digest: `sha256:${sha256(`${JSON.stringify(unsignedReport)}\n`)}`
+    };
+    const reportPath = path.join(trusted.reportRoot, 'security-gate.json');
+    fs.writeFileSync(reportPath, `${JSON.stringify(report)}\n`, 'utf8');
+    const packetPath = path.join(trusted.reportRoot, 'packet.json');
     const result = runNode([
-      runnerPath, 'review-packet', '--repo', state.root,
+      trusted.runner, 'review-packet', '--repo', state.root,
       '--base', state.base, '--head', head,
-      '--report', path.join(reportDir, 'security-gate.json'),
-      '--output', packetPath
+      '--report', reportPath,
+      '--report-root', trusted.reportRoot,
+      '--output', 'packet.json'
     ], state.root);
     assert.equal(result.status, 0, result.stderr);
     const packet = JSON.parse(fs.readFileSync(packetPath, 'utf8'));
@@ -651,25 +964,44 @@ test('review packet classifies the complete changed-file manifest before bounded
     assert.ok(packet.changed_files.includes('z-auth/session.ts'));
     assert.ok(packet.sensitive_locations.some((item) => item.path === 'z-auth/session.ts'));
     const second = runNode([
-      runnerPath, 'review-packet', '--repo', state.root,
+      trusted.runner, 'review-packet', '--repo', state.root,
       '--base', state.base, '--head', head,
-      '--report', path.join(reportDir, 'security-gate.json'),
-      '--output', packetPath
+      '--report', reportPath,
+      '--report-root', trusted.reportRoot,
+      '--output', 'packet.json'
     ], state.root);
     assert.equal(second.status, 0, second.stderr);
     assert.equal(JSON.parse(fs.readFileSync(packetPath, 'utf8')).changed_file_manifest.sha256, packet.changed_file_manifest.sha256);
   } finally {
     fs.rmSync(state.root, { recursive: true, force: true });
+    if (trusted) fs.rmSync(trusted.container, { recursive: true, force: true });
   }
 });
 
-test('workflows separate untrusted PR scans from privileged candidate execution', () => {
+test('workflow uses protected trusted authority and treats the exact PR checkout as untrusted data', () => {
   const gate = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'repository-security-gate.yml'), 'utf8');
+  const trustedRunner = fs.readFileSync(trustedRunnerPath, 'utf8');
   const candidate = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'security-candidate-validation.yml'), 'utf8');
   assert.match(gate, /^  pull_request:/m);
-  assert.doesNotMatch(gate, /pull_request_target/);
-  assert.match(gate, /permissions:\r?\n  contents: read/);
+  assert.match(gate, /^  pull_request_target:/m);
+  assert.match(gate, /permissions:\r?\n  contents: read\r?\n  pull-requests: read/);
   assert.doesNotMatch(gate, /\bsecrets\./);
+  assert.match(gate, /path: trusted-gate[\s\S]*persist-credentials: false/);
+  assert.match(gate, /path: candidate[\s\S]*persist-credentials: false/);
+  assert.match(gate, /candidate_repository="\$PR_REPOSITORY"/);
+  assert.match(gate, /git -c protocol\.version=2 -C candidate fetch --no-tags --depth=1/);
+  assert.match(gate, /trusted-security-gate\.cjs/);
+  assert.match(gate, /GH_TOKEN: ""[\s\S]*GITHUB_TOKEN: ""/);
+  assert.match(gate, /PR head changed after trusted scan/);
+  assert.match(gate, /gh api "repos\/\$GITHUB_REPOSITORY\/pulls\/\$PR_NUMBER"/);
+  assert.match(gate, /chmod 700 "\$reports"/);
+  assert.match(gate, /sudo chown -R root:root trusted-gate candidate/);
+  assert.match(gate, /sudo chmod -R a-w trusted-gate candidate/);
+  assert.match(gate, /__TK023_BOOTSTRAP_AUTHORITY_COMMIT__/);
+  assert.doesNotMatch(gate, /working-directory: candidate/);
+  assert.match(trustedRunner, /cwd: authorityRoot/);
+  assert.doesNotMatch(trustedRunner, /NODE_PATH/);
+  assert.doesNotMatch(trustedRunner, /env:\s*process\.env/);
   assert.match(candidate, /^  workflow_dispatch:/m);
   assert.doesNotMatch(candidate, /^  pull_request:/m);
   assert.match(candidate, /ref: refs\/heads\/main/);
