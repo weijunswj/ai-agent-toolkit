@@ -28,38 +28,19 @@ jobs:
       - name: Align validator and regression tests with action v7
         shell: bash
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          replacements = {
-              Path('repo/scripts/validate-toolkit.cjs'): {
-                  'actions/checkout@v6': 'actions/checkout@v7',
-                  'actions/setup-node@v6': 'actions/setup-node@v7',
-              },
-              Path('repo/tests/validate-toolkit.test.cjs'): {
-                  'actions/checkout@v6': 'actions/checkout@v7',
-                  'actions/setup-node@v6': 'actions/setup-node@v7',
-              },
-          }
-
-          for path, mapping in replacements.items():
-              text = path.read_text(encoding='utf-8')
-              original = text
-              for old, new in mapping.items():
-                  count = text.count(old)
-                  if count:
-                      print(f'{path}: replacing {count} occurrence(s) of {old}')
-                      text = text.replace(old, new)
-                  elif new not in text:
-                      raise SystemExit(f'{path}: neither {old} nor {new} is present')
-              if text != original:
-                  path.write_text(text, encoding='utf-8', newline='\n')
-
-          for path in replacements:
-              text = path.read_text(encoding='utf-8')
-              if 'actions/checkout@v6' in text or 'actions/setup-node@v6' in text:
-                  raise SystemExit(f'{path}: stale v6 action reference remains')
-          PY
+          set -euo pipefail
+          files=(
+            repo/scripts/validate-toolkit.cjs
+            repo/tests/validate-toolkit.test.cjs
+          )
+          for file in "${files[@]}"; do
+            sed -i 's#actions/checkout@v6#actions/checkout@v7#g' "$file"
+            sed -i 's#actions/setup-node@v6#actions/setup-node@v7#g' "$file"
+            if grep -Fq 'actions/checkout@v6' "$file" || grep -Fq 'actions/setup-node@v6' "$file"; then
+              echo "Stale v6 action reference remains in $file" >&2
+              exit 1
+            fi
+          done
 
       - name: Run focused validation
         shell: bash
