@@ -28,7 +28,7 @@ jobs:
       - name: Align validator and regression tests with action v7
         shell: bash
         run: |
-          python - <<'PY'
+          python3 - <<'PY'
           from pathlib import Path
 
           replacements = {
