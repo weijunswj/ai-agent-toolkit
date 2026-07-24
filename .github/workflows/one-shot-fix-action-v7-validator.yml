@@ -4,13 +4,19 @@ on:
   push:
     branches:
       - fix/github-actions-v7-validator
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
 
 jobs:
   repair:
-    if: github.repository == 'weijunswj/ai-agent-toolkit'
+    if: >-
+      github.repository == 'weijunswj/ai-agent-toolkit' &&
+      (github.ref == 'refs/heads/fix/github-actions-v7-validator' ||
+       github.head_ref == 'fix/github-actions-v7-validator')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repair branch
