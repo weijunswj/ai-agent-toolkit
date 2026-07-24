@@ -24,6 +24,7 @@ jobs:
         with:
           ref: fix/github-actions-v7-validator
           fetch-depth: 0
+          show-progress: false
 
       - name: Align validator and regression tests with action v7
         shell: bash
@@ -47,7 +48,22 @@ jobs:
         run: node repo/scripts/validate-toolkit.cjs
 
       - name: Run focused regression tests
-        run: node --test --test-name-pattern "auto-sync generated surfaces workflow" repo/tests/validate-toolkit.test.cjs
+        id: focused-tests
+        continue-on-error: true
+        shell: bash
+        run: node --test --test-name-pattern "auto-sync generated surfaces workflow" repo/tests/validate-toolkit.test.cjs > focused-test-output.txt 2>&1
+
+      - name: Upload focused test failure
+        if: steps.focused-tests.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: focused-test-failure
+          path: focused-test-output.txt
+          if-no-files-found: error
+
+      - name: Fail after diagnostic upload
+        if: steps.focused-tests.outcome == 'failure'
+        run: exit 1
 
       - name: Check whitespace
         run: git diff --check
