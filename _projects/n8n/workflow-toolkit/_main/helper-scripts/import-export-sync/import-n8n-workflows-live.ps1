@@ -7,7 +7,8 @@ param(
   [string]$ComposeProject,
   [string]$ComposeService,
   [string]$PreparedDir = ".tmp/n8n-live-import",
-  [string]$CredentialExportDir = ".tmp/n8n-live-credential-exports",
+  [Alias("CredentialExportDir")]
+  [string]$LocalMetadataExportDir = ".tmp/n8n-live-credential-exports",
   [string]$ContainerDir = "/tmp",
   [ValidateSet("CreateNew", "UpdateArchived", "Block")]
   [string]$ArchivedByNameMode = "CreateNew",
@@ -686,7 +687,7 @@ function Export-CredentialBindingsOnly($WorkflowFiles, $LiveWorkflows) {
   Write-Section "Credential Binding Refresh"
   Write-Step "START" "Exporting available live workflows only to refresh local credential bindings."
 
-  Initialize-RunDirectory $CredentialExportDirPath
+  Initialize-RunDirectory $LocalMetadataExportDirPath
   New-Item -ItemType Directory -Force -Path (Split-Path -Parent $BindingsFilePath) | Out-Null
 
   $exportedCount = 0
@@ -710,13 +711,13 @@ function Export-CredentialBindingsOnly($WorkflowFiles, $LiveWorkflows) {
       continue
     }
 
-    $exportFile = Join-Path $CredentialExportDirPath "$($workflowFile.BaseName).live-export.json"
+    $exportFile = Join-Path $LocalMetadataExportDirPath "$($workflowFile.BaseName).live-export.json"
     Write-WorkflowJson $liveWorkflow $exportFile
     $exportedCount += 1
     Write-Step "EXPORT" "$($workflowFile.Name) exported for credential binding refresh."
   }
 
-  $syncResult = Invoke-CapturedCommand "node" @((Join-Path $HelperScriptDir "sync-n8n-live-exports.cjs"), $CredentialExportDirPath, $WorkflowDirPath, $BindingsFilePath, "--credentials-only", "--allow-missing-exports")
+  $syncResult = Invoke-CapturedCommand "node" @((Join-Path $HelperScriptDir "sync-n8n-live-exports.cjs"), $LocalMetadataExportDirPath, $WorkflowDirPath, $BindingsFilePath, "--credentials-only", "--allow-missing-exports")
   if ($syncResult.ExitCode -ne 0) {
     Write-Step "FAIL" "Could not save refreshed credential bindings."
     Write-CommandOutput $syncResult.Output
@@ -1015,7 +1016,7 @@ function Write-WorkflowActionSummary($PlannedImports, $StatusLabel) {
 $WorkflowDirPath = Resolve-WorkflowDirPath
 $BindingsFilePath = Join-Path $RepoRoot $BindingsFile
 $PreparedDirPath = Join-Path $RepoRoot $PreparedDir
-$CredentialExportDirPath = Join-Path $RepoRoot $CredentialExportDir
+$LocalMetadataExportDirPath = Join-Path $RepoRoot $LocalMetadataExportDir
 
 Write-Section "n8n workflow import"
 Write-Host ("Repo root        : {0}" -f $RepoRoot)

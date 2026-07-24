@@ -17,6 +17,6 @@ repository-owned security gate.
 - `templates/github/`: thin repo-local CI and quarantined candidate templates.
 - `references/`: architecture and official-source tool adjudication.
 
-Consumers must pin module version `1.0.0` and commit a repo-local copy. They
+Consumers must pin module version `1.1.0` and commit a repo-local copy. They
 must not depend only on a mutable Toolkit branch or cross-organisation reusable
 workflow.

@@ -1810,7 +1810,7 @@ test('PowerShell n8n live helpers guard run-directory cleanup under .tmp', () =>
 
     if (label.includes('import helper')) {
       assert.match(text, /\[string\]\$PreparedDir = "\.tmp\/n8n-live-import"/, label);
-      assert.match(text, /\[string\]\$CredentialExportDir = "\.tmp\/n8n-live-credential-exports"/, label);
+      assert.match(text, /\[Alias\("CredentialExportDir"\)\]\s+\[string\]\$LocalMetadataExportDir = "\.tmp\/n8n-live-credential-exports"/, label);
     } else {
       assert.match(text, /\[string\]\$ExportDir = "\.tmp\/n8n-live-exports"/, label);
     }
@@ -2003,7 +2003,7 @@ test('PowerShell n8n import and export scratch directories are rooted under reso
 
   assert.match(exportText, /\$ExportDirPath = Join-Path \$RepoRoot \$ExportDir/);
   assert.match(importText, /\$PreparedDirPath = Join-Path \$RepoRoot \$PreparedDir/);
-  assert.match(importText, /\$CredentialExportDirPath = Join-Path \$RepoRoot \$CredentialExportDir/);
+  assert.match(importText, /\$LocalMetadataExportDirPath = Join-Path \$RepoRoot \$LocalMetadataExportDir/);
 
   for (const [label, text] of [
     ['export helper', exportText],

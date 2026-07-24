@@ -99,6 +99,31 @@
             ],
             "pattern": "^sha256:[0-9a-f]{64}$"
           },
+          "transitive_tools": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "selection",
+                "required"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9-]*$"
+                },
+                "selection": {
+                  "type": "string",
+                  "pattern": "^-[a-z0-9-]+$"
+                },
+                "required": {
+                  "const": true
+                }
+              },
+              "additionalProperties": false
+            }
+          },
           "adoption_decision": {
             "enum": [
               "ADOPT",

@@ -60,6 +60,34 @@
         ".vercel/project.json": "{\"projectId\":\"synthetic\"}\n",
         "README.md": "# Docs\n"
       }
+    },
+    {
+      "id": "extensionless-bash-script",
+      "expected_profile": "SECURITY_PROFILE_TOOLING_LIBRARY",
+      "files": {
+        "bin/install": "#!/usr/bin/env bash\nset -eu\n"
+      }
+    },
+    {
+      "id": "misleading-text-bash-script",
+      "expected_profile": "SECURITY_PROFILE_TOOLING_LIBRARY",
+      "files": {
+        "docs/install.txt": "#!/bin/bash\nset -eu\n"
+      }
+    },
+    {
+      "id": "unsupported-shell-script",
+      "expected_profile": "SECURITY_PROFILE_TOOLING_LIBRARY",
+      "files": {
+        "bin/install": "#!/usr/bin/env zsh\nset -eu\n"
+      }
+    },
+    {
+      "id": "ordinary-extensionless-text",
+      "expected_profile": "SECURITY_PROFILE_EXEMPT",
+      "files": {
+        "NOTICE": "Documentation without an executable marker.\n"
+      }
     }
   ]
 }

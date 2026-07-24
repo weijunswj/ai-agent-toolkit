@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "lock_version": "1.0.0",
+  "lock_version": "1.1.0",
   "first_approved_date": "2026-07-23",
-  "last_verified_date": "2026-07-23",
+  "last_verified_date": "2026-07-24",
   "records": [
     {
       "name": "semgrep-ce",
@@ -26,7 +26,7 @@
         "python-package"
       ],
       "output_schema": "semgrep-json",
-      "rules_database_version": "toolkit-rules-1.0.0",
+      "rules_database_version": "toolkit-rules-1.1.0",
       "adoption_decision": "DEFER",
       "state": "blocked",
       "reason": "Official GitHub release publishes no immutable binary and checksum asset; restricted Semgrep-maintained rules are excluded."
@@ -150,8 +150,15 @@
         "macos-arm64",
         "freebsd-x64"
       ],
-      "output_schema": "actionlint-json-lines-template-v1",
+      "output_schema": "actionlint-json-lines-template-v2-canonical",
       "rules_database_version": "builtin-v1.7.12",
+      "transitive_tools": [
+        {
+          "name": "shellcheck",
+          "selection": "-shellcheck",
+          "required": true
+        }
+      ],
       "adoption_decision": "ADOPT",
       "state": "active"
     },

@@ -23,7 +23,10 @@ production release adoption remain separate consumer work.
 | AI/human handoff | manual or label-driven stable-head request | Read-only packet | No automatic model call or API key; exact-head packet is handed to an independent reviewer |
 
 The source-watch and candidate-validation lanes are separate workflows.
-`pull_request_target` is not used. Fork pull requests receive no secrets.
+The ordinary security gate never uses `pull_request_target`. The existing
+generated-surface auto-sync workflow is a separately guarded same-repository
+writeback exception with executable trust-boundary evidence and an exact,
+expiring suppression. Fork pull requests receive no secrets.
 
 ## Repository profiles
 
@@ -47,7 +50,9 @@ are classified.
 
 - `pr`: binds exact base/head, scans changed files, expands security-critical
   changes to full relevant rules, checks dependency deltas, all Actions, and
-  affected invariants.
+  affected invariants. Both commits must resolve, base must be an ancestor of
+  head, the clean checkout must equal head, and the report records the verified
+  Git commit digest before any scanner runs.
 - `full`: scans the entire tree, dependencies, Actions, Docker/IaC, first-party
   rules, and all Toolkit invariants.
 - `scheduled`: full mode plus lock, database/rule freshness, blocked tools, and
@@ -64,6 +69,11 @@ and incomplete required coverage produce `SECURITY_GATE_UNVERIFIED` or
 `SECURITY_GATE_INFRA_BLOCKED`. A genuinely non-executable repository produces
 `SECURITY_PROFILE_EXEMPT`.
 
+An invalid provenance lock blocks every applicable scanner before execution.
+Scanner and transitive-tool paths must be regular, non-symlink entries inside
+the verified tool directory; actionlint selects ShellCheck only through its
+locked `-shellcheck` binding.
+
 No failure path discards implementation, terminates an agent session, invokes
 Codex Security, or claims unbounded security.
 
@@ -74,6 +84,12 @@ bounded line/column, versions, coverage states, suppression references,
 unverified layers, infrastructure failures, and next action. They exclude raw
 source excerpts, raw scanner output, credentials, environment values, private
 absolute paths, customer data, and private artifacts.
+
+Scanner identities hash a canonical payload containing tool, rule/code,
+case-folded repository-relative path, line/column, severity, a bounded
+diagnostic discriminator, and a safe generic message. Exact duplicate
+emissions collapse to one finding with an occurrence count. Any same-identity,
+different-payload collision makes the gate unverified.
 
 ## Toolkit security invariants
 
@@ -91,10 +107,30 @@ fixtures. `config/invariants.json` maps evidence to:
 - source/generated alignment;
 - scanner/provenance lock integrity.
 
+WEB_API and WORKFLOW_INTEGRATION consumers provide
+`security/security-gate-invariants.json` using the versioned consumer invariant
+schema. Entries name one contained, non-symlink regular test file and one
+allowlisted runner (`node`, `python`, or `powershell`); arbitrary shell strings
+and arguments are not accepted. Execution is timeout/output bounded. A valid
+result is structured PASS or FINDINGS evidence, bound to profile, exact
+base/head, manifest digest, and test-source digest.
+
+Suppressions use supported Toolkit issue or review-discussion authority, a
+real introduction commit that changed the exact source path, an exact expiring
+finding identity, and a contained compensating test. The test digest must match
+successful invariant evidence from the same run. Duplicate identities,
+overlapping authority, redirected tests, and source/tool/rule/test/approval
+drift fail closed.
+
+The review packet classifies the complete changed-file manifest under a
+separate hard bound before applying packet limits. It records total, included,
+and omitted counts plus the complete-manifest SHA-256. Every sensitive file and
+location must fit or packet generation fails closed.
+
 ## Consumer integration
 
 A consumer commits a complete copy of this generated folder and records module
-version `1.0.0`. Its workflow calls the repo-local runner and lock. The
+version `1.1.0`. Its workflow calls the repo-local runner and lock. The
 repository may refresh only through an independently reviewed Toolkit update.
 It never executes a mutable remote branch as its only gate.
 

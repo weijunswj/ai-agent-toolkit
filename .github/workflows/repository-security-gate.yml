@@ -70,19 +70,19 @@ jobs:
           GENERATE_REVIEW_PACKET: ${{ inputs.generate_review_packet }}
         run: |
           set -euo pipefail
-          mode=full
-          base=
+          mode="full"
+          base=""
           head="$CURRENT_SHA"
           if [ "$EVENT_NAME" = pull_request ]; then
-            mode=pr
+            mode="pr"
             base="$PR_BASE"
             head="$PR_HEAD"
           elif [ "$EVENT_NAME" = schedule ]; then
-            mode=scheduled
+            mode="scheduled"
           elif [ "$EVENT_NAME" = workflow_dispatch ]; then
             mode="$INPUT_MODE"
             if [ "$GENERATE_REVIEW_PACKET" = true ]; then
-              mode=pr
+              mode="pr"
               base="$REVIEW_BASE"
             fi
           fi

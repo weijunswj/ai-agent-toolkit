@@ -9,11 +9,13 @@
     "mode",
     "base",
     "head",
+    "scanned_head_digest",
     "artifact_digest",
     "profile",
     "versions",
     "coverage",
     "findings",
+    "finding_duplicates",
     "suppressed_findings",
     "unverified_areas",
     "infrastructure_failures",
@@ -21,7 +23,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": 1
+      "const": 2
     },
     "state": {
       "enum": [
@@ -40,6 +42,13 @@
         "release"
       ]
     },
+    "scanned_head_digest": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^git-sha1:[0-9a-f]{40}$"
+    },
     "profile": {
       "enum": [
         "SECURITY_PROFILE_EXEMPT",
@@ -50,6 +59,9 @@
       ]
     },
     "findings": {
+      "type": "array"
+    },
+    "finding_duplicates": {
       "type": "array"
     },
     "suppressed_findings": {

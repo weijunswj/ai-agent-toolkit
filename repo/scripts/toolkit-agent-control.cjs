@@ -9,7 +9,7 @@ const crypto = require('node:crypto');
 const processLaunch = require('./claude-process-launch.cjs');
 
 const SCHEMA = 1;
-const CONTROL_VERSION = '2.9.3';
+const CONTROL_VERSION = '2.9.7';
 const RESULTS = Object.freeze({ START: 'start', QUEUE: 'queue', REFUSE: 'refuse-root-only' });
 const CHECKER_RESULTS = Object.freeze({ PASS: 'PASS', FINDINGS: 'FINDINGS', ADMISSION_DENIED: 'ADMISSION_DENIED', SKIPPED_TRIVIAL: 'SKIPPED_TRIVIAL' });
 const HOSTS = Object.freeze({ CODEX: 'codex', CLAUDE: 'claude-code', OPENCODE: 'opencode' });
@@ -50,11 +50,31 @@ function statePath(options = {}) { return path.join(controlRoot(options), 'state
 function lockPath(options = {}) { return path.join(controlRoot(options), 'state.lock'); }
 function lockRecoveryPath(options = {}) { return `${lockPath(options)}.recovery`; }
 
+function renameSyncWithRetry(sourcePath, targetPath, attempts = 6, delayMs = 75) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      fs.renameSync(sourcePath, targetPath);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!['EPERM', 'EBUSY', 'ENOTEMPTY'].includes(error?.code) || attempt === attempts) break;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+    }
+  }
+  throw lastError;
+}
+
 function atomicWriteJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const temp = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
   fs.writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
-  fs.renameSync(temp, filePath);
+  try {
+    renameSyncWithRetry(temp, filePath);
+  } catch (error) {
+    try { fs.rmSync(temp, { force: true }); } catch {}
+    throw error;
+  }
   fs.chmodSync(filePath, 0o600);
   verifyPrivateRegularFile(filePath);
 }

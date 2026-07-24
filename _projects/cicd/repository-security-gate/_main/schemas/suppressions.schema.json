@@ -8,7 +8,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": 1
+      "const": 2
     },
     "suppressions": {
       "type": "array",
@@ -26,6 +26,7 @@
           "introduction_commit",
           "expires",
           "compensating_test",
+          "compensating_test_sha256",
           "tool_version",
           "rule_version",
           "source_sha256"
@@ -59,6 +60,18 @@
             "format": "date"
           },
           "source_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "approver_reference": {
+            "type": "string",
+            "pattern": "^https://github\\.com/weijunswj/ai-agent-toolkit/(?:issues/\\d+|pull/\\d+#discussion_r\\d+)$"
+          },
+          "compensating_test": {
+            "type": "string",
+            "pattern": "^(?!/)(?!.*\\.\\.)(?!.*[*?]).+$"
+          },
+          "compensating_test_sha256": {
             "type": "string",
             "pattern": "^[0-9a-f]{64}$"
           }

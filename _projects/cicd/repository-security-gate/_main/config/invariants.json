@@ -25,7 +25,8 @@
       ],
       "tests": [
         "repo/tests/repository-security-gate.test.cjs",
-        "repo/tests/audit-fallback-risk.test.cjs"
+        "repo/tests/audit-fallback-risk.test.cjs",
+        "repo/tests/toolkit-agent-launch-lifecycle.test.cjs"
       ]
     },
     {

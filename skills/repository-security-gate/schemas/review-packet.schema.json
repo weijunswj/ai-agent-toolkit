@@ -6,9 +6,11 @@
     "schema_version",
     "base",
     "head",
+    "scanned_head_digest",
     "profile",
     "risk_review_required",
     "changed_files",
+    "changed_file_manifest",
     "sensitive_locations",
     "references",
     "scanner_summary",
@@ -19,7 +21,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": 1
+      "const": 2
     },
     "base": {
       "type": "string",
@@ -28,6 +30,38 @@
     "head": {
       "type": "string",
       "pattern": "^[0-9a-f]{40}$"
+    },
+    "scanned_head_digest": {
+      "type": "string",
+      "pattern": "^git-sha1:[0-9a-f]{40}$"
+    },
+    "changed_file_manifest": {
+      "type": "object",
+      "required": [
+        "total_count",
+        "included_count",
+        "omitted_count",
+        "sha256"
+      ],
+      "properties": {
+        "total_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "included_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "omitted_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "additionalProperties": false
     },
     "supported_outcomes": {
       "const": [

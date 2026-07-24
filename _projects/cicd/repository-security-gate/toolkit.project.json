@@ -5,9 +5,9 @@
   "title": "Repository Security Gate",
   "module_path": "_projects/cicd/repository-security-gate",
   "main_path": "_projects/cicd/repository-security-gate/_main",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "version_policy": "semver",
-  "version_notes": "Initial repository-owned security-gate foundation, Toolkit pilot, provenance lock, source-watch contract, and bounded review packet.",
+  "version_notes": "Binds exact-head scans and actionlint's ShellCheck, preserves canonical finding identity, scans shebang executables, verifies suppression evidence, and adds bounded consumer invariants and complete-manifest risk packets.",
   "outputs": [
     {
       "kind": "curated",
@@ -101,6 +101,13 @@
       "fidelity": "exact"
     },
     {
+      "kind": "json",
+      "source": "_main/schemas/consumer-invariants.schema.json",
+      "output": "skills/repository-security-gate/schemas/consumer-invariants.schema.json",
+      "notes": "Versioned consumer-owned attacker-invariant manifest schema.",
+      "fidelity": "exact"
+    },
+    {
       "kind": "copy",
       "source": "_main/tools/security-gate.cjs",
       "output": "skills/repository-security-gate/tools/security-gate.cjs",
@@ -172,6 +179,7 @@
       "skills/repository-security-gate/schemas/report.schema.json",
       "skills/repository-security-gate/schemas/suppressions.schema.json",
       "skills/repository-security-gate/schemas/review-packet.schema.json",
+      "skills/repository-security-gate/schemas/consumer-invariants.schema.json",
       "skills/repository-security-gate/tools/security-gate.cjs",
       "skills/repository-security-gate/tools/install-pinned-tools.cjs",
       "skills/repository-security-gate/templates/github/security-gate.yml",

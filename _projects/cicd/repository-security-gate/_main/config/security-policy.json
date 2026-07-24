@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "policy_version": "1.0.0",
+  "policy_version": "1.1.0",
   "allowed_modes": [
     "pr",
     "full",
@@ -98,8 +98,10 @@
   "suppression_max_days": 90,
   "tool_lock_max_age_days": 30,
   "report_max_findings": 500,
+  "review_manifest_max_files": 5000,
   "review_packet_max_files": 200,
   "review_packet_max_locations": 400,
+  "consumer_invariant_manifest": "security/security-gate-invariants.json",
   "forbidden_report_fields": [
     "source",
     "excerpt",
