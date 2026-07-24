@@ -13,7 +13,7 @@
       "introduction_commit": "0e940c2145a520b33f3c4b37a517b52e83674a4b",
       "expires": "2026-10-21",
       "compensating_test": "repo/tests/repository-security-gate.test.cjs",
-      "compensating_test_sha256": "390589e084ea95cada05e5bffab4f51dbb1039f021db82440861db8b0dbd13f9",
+      "compensating_test_sha256": "18282b1d26f8e5d6d02cbbe466ec820ce82a4207224ccd18773392228c212c4c",
       "tool_version": "v1.28.0",
       "rule_version": "builtin-v1.28.0",
       "source_sha256": "195a4114eed32769f4282da0ba05fd274615f178f622f7305d621c9124b8cda2"

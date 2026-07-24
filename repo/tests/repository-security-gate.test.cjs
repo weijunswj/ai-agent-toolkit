@@ -997,7 +997,10 @@ test('workflow uses protected trusted authority and treats the exact PR checkout
   assert.match(gate, /chmod 700 "\$reports"/);
   assert.match(gate, /sudo chown -R root:root trusted-gate candidate/);
   assert.match(gate, /sudo chmod -R a-w trusted-gate candidate/);
-  assert.match(gate, /__TK023_BOOTSTRAP_AUTHORITY_COMMIT__/);
+  const bootstrapAuthority = gate.match(/authority_commit="([0-9a-f]{40})"/);
+  assert.ok(bootstrapAuthority, 'bootstrap authority must be pinned to an exact commit');
+  assert.doesNotMatch(gate, /__TK023_BOOTSTRAP_AUTHORITY_COMMIT__/);
+  runGit(repoRoot, ['cat-file', '-e', `${bootstrapAuthority[1]}^{commit}`]);
   assert.doesNotMatch(gate, /working-directory: candidate/);
   assert.match(trustedRunner, /cwd: authorityRoot/);
   assert.doesNotMatch(trustedRunner, /NODE_PATH/);
