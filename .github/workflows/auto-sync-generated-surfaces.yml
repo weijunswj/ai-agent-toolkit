@@ -160,7 +160,7 @@ jobs:
 
       - name: Set up Node.js
         if: steps.preflight.outputs.should_sync == 'true'
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 20
 
