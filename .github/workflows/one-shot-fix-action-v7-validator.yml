@@ -43,12 +43,14 @@ jobs:
           done
           rm -f .github/workflows/one-shot-fix-action-v7-validator.yml
 
-      - name: Run focused validation
-        shell: bash
-        run: |
-          node repo/scripts/validate-toolkit.cjs
-          node --test --test-name-pattern "auto-sync generated surfaces workflow" repo/tests/validate-toolkit.test.cjs
-          git diff --check
+      - name: Run validator
+        run: node repo/scripts/validate-toolkit.cjs
+
+      - name: Run focused regression tests
+        run: node --test --test-name-pattern "auto-sync generated surfaces workflow" repo/tests/validate-toolkit.test.cjs
+
+      - name: Check whitespace
+        run: git diff --check
 
       - name: Commit repair
         shell: bash
