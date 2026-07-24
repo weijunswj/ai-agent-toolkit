@@ -13,18 +13,26 @@ const {
   verifyInstalledCacheFreshness
 } = require('./setup-codex-toolkit-plugin.cjs');
 const {
-  reconcileN8nSkillsPlugin
+  N8N_SKILLS_COMPATIBILITY_ADAPTERS,
+  N8N_SKILLS_TREE_LIMITS,
+  classifyN8nSkillsCompatibility,
+  reconcileN8nSkillsPlugin,
+  validateN8nSkillsCompatibilityContractParity
 } = require('./repair-codex-plugin-windows-hooks.cjs');
 const {
+  RECORD_PREFIX,
   auditOwnedStaging,
   cleanupOwnedGeneration,
   createOwnedStagingGeneration,
+  inspectOwnedGeneration,
   markOwnedStaging,
-  reconcileOwnedStaging
+  readOwnedStagingAuxiliary,
+  reconcileOwnedStaging,
+  writeOwnedStagingAuxiliary
 } = require('./toolkit-staging-generations.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.8.2';
+const BRIDGE_VERSION = '2.9.6';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -44,6 +52,28 @@ const VALIDATE_TOOLKIT_TIMEOUT_MS = 120000;
 const HOOK_LIGHT_VALIDATION_TIMEOUT_MS = 30000;
 const NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT = 5;
 const THIRD_PARTY_HOOK_REPAIR_ERROR_LIMIT = 5;
+const N8N_PRE_TRANSACTION_AUXILIARY_KINDS = Object.freeze([
+  'n8n-pre-transaction',
+  'n8n-pre-transaction-phase-10-copied',
+  'n8n-pre-transaction-phase-15-transforming',
+  'n8n-pre-transaction-phase-20-transformed'
+]);
+const N8N_REPLACEMENT_AUXILIARY_KINDS = Object.freeze([
+  'n8n-replacement',
+  'n8n-replacement-phase-10-displace',
+  'n8n-replacement-phase-20-displaced',
+  'n8n-replacement-phase-30-install',
+  'n8n-replacement-phase-40-installed',
+  'n8n-replacement-phase-50-verify',
+  'n8n-replacement-phase-60-verified',
+  'n8n-replacement-phase-70-cleanup'
+]);
+const N8N_TRANSACTION_AUXILIARY_KINDS = Object.freeze([
+  ...N8N_PRE_TRANSACTION_AUXILIARY_KINDS,
+  ...N8N_REPLACEMENT_AUXILIARY_KINDS
+]);
+const N8N_REPLACEMENT_RECORD_LIMIT = 16;
+const N8N_REPLACEMENT_DIRECTORY_ENTRY_LIMIT = 4096;
 const GIT_CREDENTIAL_HELPERS = ['manager', 'manager-core'];
 const AGENT_RULES_TEMPLATE_DIR = path.join('skills', 'ai-coding-agent-rules', 'repo-local');
 const AGENT_RULES_PREFLIGHT_MAX_FINDINGS = 8;
@@ -2502,19 +2532,22 @@ function withOwnedStaging(options, callback) {
     }
     throw error;
   } finally {
-    const cleanup = cleanupOwnedGeneration(generation, {
-      currentOperation: true,
-      beforeDelete: options.beforeDelete
-    });
-    if (!cleanup.cleaned) {
-      const cleanupError = new Error(
-        `Owned staging generation ${generation.record.generation_id} was preserved because cleanup could not prove ownership: ${cleanup.reason}`
-      );
-      if (operationError) {
-        operationError.stagingCleanupError = cleanupError;
-        operationError.message = `${operationError.message}; ${cleanupError.message}`;
+    if (!operationError?.preserveOwnedStaging) {
+      const cleanup = cleanupOwnedGeneration(generation, {
+        currentOperation: true,
+        beforeDelete: options.beforeDelete,
+        auxiliaryKinds: options.auxiliaryKinds || []
+      });
+      if (!cleanup.cleaned) {
+        const cleanupError = new Error(
+          `Owned staging generation ${generation.record.generation_id} was preserved because cleanup could not prove ownership: ${cleanup.reason}`
+        );
+        if (operationError) {
+          operationError.stagingCleanupError = cleanupError;
+          operationError.message = `${operationError.message}; ${cleanupError.message}`;
+        }
+        else throw cleanupError;
       }
-      else throw cleanupError;
     }
   }
 }
@@ -2605,7 +2638,7 @@ const LOCK_RECOVERY_MARKER_SUFFIX = '.recovery';
 // is always respected regardless of age; a provably dead owner is
 // recoverable immediately; unknown or indeterminate owners fall back to the
 // age rule (created_at, or file mtime when the lock is unreadable).
-function inspectLockForRecovery(lockPath, liveness = lockOwnerLiveness) {
+function inspectLockForRecovery(lockPath, liveness = lockOwnerLiveness, options = {}) {
   let lock = {};
   try {
     lock = readJsonIfExists(lockPath) || {};
@@ -2614,7 +2647,8 @@ function inspectLockForRecovery(lockPath, liveness = lockOwnerLiveness) {
     // fallback decides freshness.
   }
   const owner = liveness(lock.pid);
-  if (owner === 'alive') {
+  const liveLeaseExpired = owner === 'alive' && options.liveOwnerLeaseMs > 0 && lockAgeMs(lockPath, lock) >= options.liveOwnerLeaseMs;
+  if (owner === 'alive' && !liveLeaseExpired) {
     return { respected: true, message: `Toolkit bridge lock at ${lockPath} is held by live process ${lock.pid}` };
   }
   if (owner !== 'dead') {
@@ -2636,10 +2670,14 @@ function inspectLockForRecovery(lockPath, liveness = lockOwnerLiveness) {
 // is alive or unverifiable, and are removed only through the identity-safe
 // retirement protocol once the owner is provably dead.
 const LOCK_ARTIFACT_GC_MS = 24 * 60 * 60 * 1000;
-const RECOVERY_CLAIM_TOMBSTONE_PATTERN = /^update\.lock\.recovery\.claim-[0-9a-f]{16}$/;
-const DISPLACED_RETIREMENT_TOMBSTONE_PATTERN = /^update\.lock\.displaced\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.retired-[0-9a-f]{16}$/;
+function lockNamePattern(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
-function cleanupSpentLockArtifacts(hubRoot) {
+function cleanupSpentLockArtifacts(hubRoot, lockName = 'update.lock') {
+  const escapedLockName = lockNamePattern(lockName);
+  const recoveryClaimTombstonePattern = new RegExp(`^${escapedLockName}\\.recovery\\.claim-[0-9a-f]{16}$`);
+  const displacedRetirementTombstonePattern = new RegExp(`^${escapedLockName}\\.displaced\\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.retired-[0-9a-f]{16}$`);
   let entries = [];
   try {
     entries = fs.readdirSync(hubRoot);
@@ -2647,7 +2685,7 @@ function cleanupSpentLockArtifacts(hubRoot) {
     return;
   }
   for (const entry of entries) {
-    if (!RECOVERY_CLAIM_TOMBSTONE_PATTERN.test(entry) && !DISPLACED_RETIREMENT_TOMBSTONE_PATTERN.test(entry)) continue;
+    if (!recoveryClaimTombstonePattern.test(entry) && !displacedRetirementTombstonePattern.test(entry)) continue;
     const fullPath = path.join(hubRoot, entry);
     try {
       const artifact = fs.lstatSync(fullPath);
@@ -2671,7 +2709,7 @@ function cleanupSpentLockArtifacts(hubRoot) {
 // - indeterminate owner (for example EPERM): fail closed, blocked;
 // - unusable owner data: age fallback (fresh blocks, stale is retirable);
 // - provably dead owner: retirable through the identity-safe protocol.
-function inspectDisplacedEvidenceFile(fullPath, liveness, testHooks = {}, phase = 'inspection') {
+function inspectDisplacedEvidenceFile(fullPath, liveness, testHooks = {}, phase = 'inspection', options = {}) {
   let raw = null;
   try {
     raw = testHooks.readDisplacedEvidence
@@ -2692,7 +2730,8 @@ function inspectDisplacedEvidenceFile(fullPath, liveness, testHooks = {}, phase 
     // Malformed evidence: owner is unusable; the age fallback decides.
   }
   const owner = liveness(displaced.pid);
-  if (owner === 'alive') {
+  const liveLeaseExpired = owner === 'alive' && options.liveOwnerLeaseMs > 0 && lockAgeMs(fullPath, displaced) >= options.liveOwnerLeaseMs;
+  if (owner === 'alive' && !liveLeaseExpired) {
     return {
       blocked: true,
       owner,
@@ -2740,7 +2779,7 @@ function inspectDisplacedEvidenceFile(fullPath, liveness, testHooks = {}, phase 
   return { blocked: false, owner, pid: displaced.pid, raw };
 }
 
-function inspectDisplacedEvidence(hubRoot, liveness = lockOwnerLiveness, testHooks = {}, phase = 'inspection') {
+function inspectDisplacedEvidence(hubRoot, liveness = lockOwnerLiveness, testHooks = {}, phase = 'inspection', lockName = 'update.lock', options = {}) {
   let entries = [];
   try {
     entries = testHooks.listDisplacedEvidence
@@ -2755,10 +2794,11 @@ function inspectDisplacedEvidence(hubRoot, liveness = lockOwnerLiveness, testHoo
     };
   }
   const retirable = [];
+  const displacedPattern = new RegExp(`^${lockNamePattern(lockName)}\\.displaced\\.[0-9a-f-]+$`, 'i');
   for (const entry of entries) {
-    if (!/^update\.lock\.displaced\.[0-9a-f-]+$/i.test(entry)) continue;
+    if (!displacedPattern.test(entry)) continue;
     const fullPath = path.join(hubRoot, entry);
-    const inspection = inspectDisplacedEvidenceFile(fullPath, liveness, testHooks, phase);
+    const inspection = inspectDisplacedEvidenceFile(fullPath, liveness, testHooks, phase, options);
     if (inspection.gone) continue;
     if (inspection.blocked) return { blocked: true, retirable, message: inspection.message };
     retirable.push({ fullPath, raw: inspection.raw });
@@ -2949,11 +2989,19 @@ function releaseRecoveryMarker(markerPath, token) {
 // call sites never pass it.
 function acquireLock(hubRoot, args, testHooks = {}) {
   fs.mkdirSync(hubRoot, { recursive: true });
-  cleanupSpentLockArtifacts(hubRoot);
-  const lockPath = path.join(hubRoot, 'update.lock');
+  const lockName = args.lockName || 'update.lock';
+  if (!/^[A-Za-z0-9._-]+$/.test(lockName) || lockName === '.' || lockName === '..') {
+    throw new Error('Toolkit bridge lock name must be a simple filename');
+  }
+  cleanupSpentLockArtifacts(hubRoot, lockName);
+  const lockPath = path.join(hubRoot, lockName);
   const markerPath = `${lockPath}${LOCK_RECOVERY_MARKER_SUFFIX}`;
   const liveness = testHooks.liveness || lockOwnerLiveness;
   const token = crypto.randomUUID();
+  const liveOwnerLeaseMs = Number.isFinite(args.liveOwnerLeaseMs) && args.liveOwnerLeaseMs > 0
+    ? args.liveOwnerLeaseMs
+    : 0;
+  const recoveryOptions = { liveOwnerLeaseMs };
 
   const skipOrThrow = (message) => {
     if (args.hook) return { acquired: false, lockPath, skipReason: message };
@@ -2961,13 +3009,15 @@ function acquireLock(hubRoot, args, testHooks = {}) {
   };
 
   const tryExclusiveCreate = () => {
-    const lockBody = `${JSON.stringify({
+    const lockRecord = {
       created_at: timestamp(),
       pid: process.pid,
       token,
       bridge_version: BRIDGE_VERSION,
       sync_source: args.syncSource
-    }, null, 2)}\n`;
+    };
+    if (liveOwnerLeaseMs) lockRecord.live_owner_lease_ms = liveOwnerLeaseMs;
+    const lockBody = `${JSON.stringify(lockRecord, null, 2)}\n`;
     try {
       fs.writeFileSync(lockPath, lockBody, { encoding: 'utf8', flag: 'wx' });
       return true;
@@ -2980,12 +3030,12 @@ function acquireLock(hubRoot, args, testHooks = {}) {
   // The initial scan is fail-fast only. A contender may pause after this
   // scan while another recovery creates evidence, so no retirement or lock
   // creation is permitted until the same checks repeat under marker ownership.
-  const initialEvidence = inspectDisplacedEvidence(hubRoot, liveness, testHooks, 'initial');
+  const initialEvidence = inspectDisplacedEvidence(hubRoot, liveness, testHooks, 'initial', lockName, recoveryOptions);
   if (initialEvidence.blocked) return skipOrThrow(initialEvidence.message);
   if (testHooks.afterInitialEvidenceInspect) testHooks.afterInitialEvidenceInspect();
 
   if (fs.existsSync(lockPath)) {
-    const inspection = inspectLockForRecovery(lockPath, liveness);
+    const inspection = inspectLockForRecovery(lockPath, liveness, recoveryOptions);
     if (inspection.respected) return skipOrThrow(inspection.message);
     if (testHooks.afterInspect) testHooks.afterInspect();
   }
@@ -2998,7 +3048,7 @@ function acquireLock(hubRoot, args, testHooks = {}) {
     // This is the authoritative barrier check. The marker remains owned
     // through retirement, main-lock recovery, and exclusive creation, so no
     // compliant recoverer can create evidence in a check-to-create gap.
-    const evidence = inspectDisplacedEvidence(hubRoot, liveness, testHooks, 'under-marker');
+    const evidence = inspectDisplacedEvidence(hubRoot, liveness, testHooks, 'under-marker', lockName, recoveryOptions);
     if (evidence.blocked) return skipOrThrow(evidence.message);
     if (evidence.retirable.length) {
       const retirement = retireDisplacedEvidence(evidence.retirable, testHooks);
@@ -3006,7 +3056,7 @@ function acquireLock(hubRoot, args, testHooks = {}) {
     }
 
     if (fs.existsSync(lockPath)) {
-      const recheck = inspectLockForRecovery(lockPath, liveness);
+      const recheck = inspectLockForRecovery(lockPath, liveness, recoveryOptions);
       if (recheck.respected) return skipOrThrow(recheck.message);
       if (testHooks.beforeDisplace) testHooks.beforeDisplace();
       // Displace by rename instead of deleting in place, then verify the
@@ -3027,7 +3077,8 @@ function acquireLock(hubRoot, args, testHooks = {}) {
           displacedPath,
           liveness,
           testHooks,
-          'post-displacement'
+          'post-displacement',
+          recoveryOptions
         );
         if (!displacedInspection.gone && displacedInspection.blocked) {
           if (testHooks.beforeRestorationCommit) testHooks.beforeRestorationCommit();
@@ -3095,30 +3146,45 @@ function replaceDirectoryAtomically(sourceDir, targetDir, options = {}) {
   fs.mkdirSync(parent, { recursive: true });
   const backup = path.join(parent, `.${path.basename(targetDir)}.backup-${process.pid}-${Date.now()}`);
   if (fs.existsSync(backup)) fs.rmSync(backup, { recursive: true, force: true });
-  if (fs.existsSync(targetDir)) renameSyncWithRetry(targetDir, backup, options);
+  let backupCreated = false;
+  let targetInstalled = false;
+  if (fs.existsSync(targetDir)) {
+    renameSyncWithRetry(targetDir, backup, options);
+    backupCreated = true;
+  }
   try {
-    renameSyncWithRetry(sourceDir, targetDir, options);
-  } catch (error) {
-    if (isTransientRenameError(error) && fs.existsSync(sourceDir) && !fs.existsSync(targetDir)) {
+    try {
+      renameSyncWithRetry(sourceDir, targetDir, options);
+      targetInstalled = true;
+    } catch (error) {
+      if (!isTransientRenameError(error) || !fs.existsSync(sourceDir) || fs.existsSync(targetDir)) throw error;
       try {
         fs.cpSync(sourceDir, targetDir, { recursive: true, force: false, errorOnExist: true });
+        targetInstalled = true;
         fs.rmSync(sourceDir, { recursive: true, force: true });
-        if (fs.existsSync(backup)) fs.rmSync(backup, { recursive: true, force: true });
-        return;
       } catch (copyError) {
         if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true, force: true });
+        targetInstalled = false;
         const fallbackError = new Error(
           `Failed to replace ${targetDir}: rename failed with ${error.code || error.message}; copy fallback failed with ${copyError.code || copyError.message}`
         );
         fallbackError.code = copyError.code || error.code;
         fallbackError.cause = copyError;
-        error = fallbackError;
+        throw fallbackError;
       }
     }
-    if (fs.existsSync(backup) && !fs.existsSync(targetDir)) renameSyncWithRetry(backup, targetDir, options);
+    if (options.verifyTarget) options.verifyTarget(targetDir);
+    if (backupCreated && fs.existsSync(backup)) fs.rmSync(backup, { recursive: true, force: true });
+  } catch (error) {
+    try {
+      if (targetInstalled && fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true, force: true });
+      if (backupCreated && fs.existsSync(backup)) renameSyncWithRetry(backup, targetDir, options);
+    } catch (rollbackError) {
+      error.message = `${error.message}; rollback failed: ${rollbackError.message}`;
+      error.rollbackError = rollbackError;
+    }
     throw error;
   }
-  if (fs.existsSync(backup)) fs.rmSync(backup, { recursive: true, force: true });
 }
 
 function copyDirectoryAtomically(sourceDir, targetDir, requiredRelPath = 'SKILL.md', options = {}) {
@@ -3555,7 +3621,282 @@ function discoverCodexPluginHookRoots({ codexHome = defaultCodexHome(), currentP
   return { roots, skipped };
 }
 
-function selectCurrentN8nSkillsCache({ codexHome, pluginList, discovered }) {
+function n8nInventoryEntryIdentity(stat) {
+  return {
+    dev: String(stat.dev),
+    ino: String(stat.ino),
+    mode: String(stat.mode),
+    nlink: String(stat.nlink),
+    size: String(stat.size),
+    birthtime_ms: String(stat.birthtimeMs),
+    mtime_ms: String(stat.mtimeMs),
+    ctime_ms: String(stat.ctimeMs)
+  };
+}
+
+function n8nInventoryEntryIdentitiesMatch(left, right) {
+  return Boolean(left && right)
+    && Object.keys(left).every((key) => String(left[key]) === String(right[key]));
+}
+
+function n8nInventoryOwnedEvidencePaths(transaction) {
+  if (!transaction) return new Set();
+  const generation = transaction.generation;
+  const recordBase = generation.recordPath.slice(0, -'.json'.length);
+  return new Set([
+    generation.recordPath,
+    `${recordBase}.ready.json`,
+    `${recordBase}.completed.json`,
+    `${recordBase}.failed.json`,
+    ...N8N_TRANSACTION_AUXILIARY_KINDS.map((kind) => `${recordBase}.${kind}.json`)
+  ].map((value) => normalizedN8nTargetPath(value)));
+}
+
+function n8nInventoryOwnedDirectory(transaction, entryPath) {
+  if (!transaction) return null;
+  const normalized = normalizedN8nTargetPath(entryPath);
+  const generation = transaction.generation;
+  const preTransaction = transaction.preTransaction?.preTransaction || transaction.preTransaction;
+  if (
+    normalized === normalizedN8nTargetPath(generation.stagePath)
+    && preTransaction?.creating_process?.lease_token === generation.record.ownership_token
+    && preTransaction?.created_at === generation.record.created_at
+  ) {
+    return {
+      kind: 'owned-stage',
+      identity: preTransaction.stage_directory_identity
+    };
+  }
+  if (
+    transaction.transaction
+    && normalized === normalizedN8nTargetPath(transaction.validated.backupPath)
+    && transaction.transaction.creating_process?.lease_token === generation.record.ownership_token
+    && transaction.transaction.created_at === generation.record.created_at
+  ) {
+    return {
+      kind: 'owned-backup',
+      identity: transaction.transaction.original_target_directory_identity
+    };
+  }
+  return null;
+}
+
+function n8nInventoryDigest(parentIdentity, entries, excludedOrdinaryRoots = []) {
+  const excluded = new Set(excludedOrdinaryRoots.map((value) => normalizedN8nTargetPath(value)));
+  const canonical = entries
+    .filter((entry) => entry.kind === 'ordinary-directory' && !excluded.has(entry.normalized_path))
+    .map((entry) => ({
+      identity: entry.identity,
+      kind: entry.kind,
+      name: entry.name
+    }))
+    .sort((left, right) => Buffer.compare(Buffer.from(left.name), Buffer.from(right.name)));
+  return crypto.createHash('sha256').update(JSON.stringify({
+    parent_identity: parentIdentity,
+    entries: canonical
+  }), 'utf8').digest('hex');
+}
+
+function discoverN8nSkillsCacheRoots(codexHome, options = {}) {
+  const parent = path.resolve(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills');
+  const roots = [];
+  if (!n8nPathExists(parent)) {
+    return {
+      roots,
+      skipped: [],
+      entries: [],
+      parent,
+      parent_directory_identity: null,
+      inventory_digest: n8nInventoryDigest(null, [])
+    };
+  }
+  const parentStat = requireOrdinaryN8nDirectory(parent, 'n8n Skills package cache parent');
+  const parentIdentity = n8nDirectoryIdentity(parentStat);
+  const parentObservationIdentity = n8nInventoryEntryIdentity(parentStat);
+  const parentRealPath = normalizedN8nTargetPath(fs.realpathSync.native(parent));
+  const ownedEvidence = n8nInventoryOwnedEvidencePaths(options.transaction);
+  const entries = [];
+  const names = [];
+  const directory = fs.opendirSync(parent);
+  let entryCount = 0;
+  try {
+    for (;;) {
+      const entry = directory.readSync();
+      if (!entry) break;
+      entryCount += 1;
+      if (entryCount > N8N_REPLACEMENT_DIRECTORY_ENTRY_LIMIT) {
+        throw failClosedN8nRepair('ambiguous-target', 'The n8n Skills package cache parent exceeds the bounded cache inventory');
+      }
+      names.push(entry.name);
+    }
+  } finally {
+    directory.closeSync();
+  }
+  names.sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
+  for (let index = 0; index < names.length; index += 1) {
+    const name = names[index];
+    const entryPath = path.resolve(parent, name);
+    const normalizedEntryPath = normalizedN8nTargetPath(entryPath);
+    if (normalizedN8nTargetPath(path.dirname(entryPath)) !== normalizedN8nTargetPath(parent)) {
+      throw failClosedN8nRepair('ambiguous-target', 'The n8n Skills cache inventory contains an entry outside the exact package parent');
+    }
+    let stat;
+    try {
+      stat = fs.lstatSync(entryPath);
+    } catch {
+      throw failClosedN8nRepair('ambiguous-target', 'An n8n Skills cache entry disappeared or could not be classified during inventory');
+    }
+    const identity = n8nInventoryEntryIdentity(stat);
+    if (options.testHooks?.afterN8nCacheInventoryEntryLstat) {
+      options.testHooks.afterN8nCacheInventoryEntryLstat({
+        entry_index: index,
+        entry_name: name,
+        entry_path: entryPath
+      });
+    }
+    let kind = '';
+    if (stat.isSymbolicLink()) {
+      kind = 'redirect';
+    } else if (stat.isDirectory()) {
+      let realPath;
+      try {
+        realPath = normalizedN8nTargetPath(fs.realpathSync.native(entryPath));
+      } catch {
+        throw failClosedN8nRepair('ambiguous-target', 'An n8n Skills cache directory could not be proven during inventory');
+      }
+      if (realPath !== normalizedEntryPath) {
+        kind = 'redirect';
+      } else {
+        const ownedDirectory = n8nInventoryOwnedDirectory(options.transaction, entryPath);
+        if (ownedDirectory) {
+          if (!n8nDirectoryIdentitiesMatch(ownedDirectory.identity, n8nDirectoryIdentity(stat))) {
+            throw failClosedN8nRepair('ambiguous-target', 'Exact owned n8n Skills transaction directory identity changed during inventory');
+          }
+          kind = ownedDirectory.kind;
+        } else {
+          kind = 'ordinary-directory';
+        }
+      }
+    } else if (stat.isFile()) {
+      if (ownedEvidence.has(normalizedEntryPath)) {
+        kind = 'owned-evidence';
+      } else if (
+        options.transaction
+        && normalizedEntryPath === normalizedN8nTargetPath(path.join(
+          path.dirname(options.transaction.validated.targetPath),
+          n8nSkillsTargetLockIdentity(options.transaction.validated.targetPath).lockName
+        ))
+      ) {
+        let lockRecord;
+        try {
+          lockRecord = JSON.parse(fs.readFileSync(entryPath, 'utf8'));
+        } catch {
+          throw failClosedN8nRepair('ambiguous-target', 'Recorded n8n Skills target-lock evidence could not be proven during inventory');
+        }
+        if (
+          !Number.isInteger(lockRecord.pid)
+          || !/^[0-9a-f-]{36}$/i.test(String(lockRecord.token || ''))
+          || lockRecord.sync_source !== 'codex-plugin'
+        ) {
+          throw failClosedN8nRepair('ambiguous-target', 'Recorded n8n Skills target-lock evidence is malformed');
+        }
+        kind = 'target-lock-evidence';
+      } else if (
+        options.activeLock?.acquired
+        && normalizedEntryPath === normalizedN8nTargetPath(options.activeLock.lockPath)
+      ) {
+        let lockRecord;
+        try {
+          lockRecord = JSON.parse(fs.readFileSync(entryPath, 'utf8'));
+        } catch {
+          throw failClosedN8nRepair('ambiguous-target', 'The exact n8n Skills target lock could not be proven during inventory');
+        }
+        if (lockRecord.token !== options.activeLock.token || lockRecord.pid !== process.pid) {
+          throw failClosedN8nRepair('ambiguous-target', 'The exact n8n Skills target lock identity changed during inventory');
+        }
+        kind = 'owned-lock';
+      } else if (options.allowUnclassifiedRegularFiles) {
+        kind = 'unclassified-file';
+      } else {
+        kind = 'regular-file';
+      }
+    } else {
+      kind = 'special-entry';
+    }
+    let afterStat;
+    try {
+      afterStat = fs.lstatSync(entryPath);
+    } catch {
+      throw failClosedN8nRepair('ambiguous-target', 'An n8n Skills cache entry disappeared during inventory');
+    }
+    if (!n8nInventoryEntryIdentitiesMatch(identity, n8nInventoryEntryIdentity(afterStat))) {
+      throw failClosedN8nRepair('ambiguous-target', 'An n8n Skills cache entry changed identity during inventory');
+    }
+    const inventoryEntry = {
+      identity,
+      kind,
+      name,
+      normalized_path: normalizedEntryPath,
+      plugin_root: entryPath
+    };
+    entries.push(inventoryEntry);
+    if (kind === 'ordinary-directory') {
+      roots.push({
+        plugin_id: 'n8n-skills@n8n-io',
+        version: name,
+        plugin_root: entryPath,
+        cache_directory_identity: n8nDirectoryIdentity(stat)
+      });
+    } else if (![
+      'owned-stage',
+      'owned-backup',
+      'owned-evidence',
+      'owned-lock',
+      'target-lock-evidence',
+      'unclassified-file'
+    ].includes(kind)) {
+      throw failClosedN8nRepair(
+        'ambiguous-target',
+        'The n8n Skills package cache contains a non-owned redirected, file, special, or unprovable entry'
+      );
+    }
+  }
+  if (options.testHooks?.beforeN8nCacheInventoryFinalRecheck) {
+    options.testHooks.beforeN8nCacheInventoryFinalRecheck({ parent });
+  }
+  let finalNames;
+  try {
+    finalNames = fs.readdirSync(parent)
+      .sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
+  } catch {
+    throw failClosedN8nRepair('ambiguous-target', 'The n8n Skills package cache parent changed during inventory');
+  }
+  const finalParentStat = requireOrdinaryN8nDirectory(parent, 'n8n Skills package cache parent');
+  if (
+    normalizedN8nTargetPath(fs.realpathSync.native(parent)) !== parentRealPath
+    || !n8nInventoryEntryIdentitiesMatch(parentObservationIdentity, n8nInventoryEntryIdentity(finalParentStat))
+    || JSON.stringify(finalNames) !== JSON.stringify(names)
+  ) {
+    throw failClosedN8nRepair('ambiguous-target', 'The n8n Skills package cache inventory changed before selection');
+  }
+  const inventoryDigest = n8nInventoryDigest(parentIdentity, entries);
+  for (const root of roots) {
+    root.parent_directory_identity = parentIdentity;
+    root.inventory_digest = inventoryDigest;
+    root.inventory_parent = parent;
+  }
+  roots.sort((left, right) => left.plugin_root.localeCompare(right.plugin_root));
+  return {
+    roots,
+    skipped: [],
+    entries,
+    parent,
+    parent_directory_identity: parentIdentity,
+    inventory_digest: inventoryDigest
+  };
+}
+
+function selectCurrentN8nSkillsCache({ codexHome, pluginList, discovered, allowMissingRoot = false }) {
   const matches = findInstalledPluginEntries(pluginList, {
     pluginId: 'n8n-skills@n8n-io',
     name: 'n8n-skills',
@@ -3573,11 +3914,18 @@ function selectCurrentN8nSkillsCache({ codexHome, pluginList, discovered }) {
   }
 
   const installed = matches[0];
+  if (installed.installed === false || installed.enabled === false) {
+    return {
+      status: 'disabled',
+      entry: null,
+      reason: 'Codex explicitly reports n8n-skills@n8n-io disabled or not installed'
+    };
+  }
   if (installed.installed !== true || installed.enabled !== true) {
     return {
-      status: 'not-installed',
+      status: 'identity-unverified',
       entry: null,
-      reason: 'Codex does not report n8n-skills@n8n-io as installed and enabled'
+      reason: 'Codex does not positively report n8n-skills@n8n-io as installed and enabled'
     };
   }
   const version = typeof installed.version === 'string' ? installed.version.trim() : '';
@@ -3594,13 +3942,39 @@ function selectCurrentN8nSkillsCache({ codexHome, pluginList, discovered }) {
     candidate.plugin_id === 'n8n-skills@n8n-io' && path.resolve(candidate.plugin_root) === expectedRoot
   ) || null;
   if (!entry) {
+    if (allowMissingRoot) {
+      return {
+        status: 'selected',
+        entry: {
+          plugin_id: 'n8n-skills@n8n-io',
+          version,
+          plugin_root: expectedRoot,
+          selection_source: 'codex-installed-list-recovery',
+          selected_version: version,
+          directory_version: version,
+          parent_directory_identity: discovered.parent_directory_identity,
+          inventory_digest: discovered.inventory_digest,
+          inventory_parent: discovered.parent
+        },
+        reason: 'Selected by positive Codex installed/enabled version binding during interrupted recovery'
+      };
+    }
     return {
       status: 'missing',
       entry: null,
       reason: `Codex reports current n8n-skills@n8n-io version ${version}, but its installed cache root is missing`
     };
   }
-  return { status: 'selected', entry, reason: '' };
+  return {
+    status: 'selected',
+    entry: {
+      ...entry,
+      selection_source: 'codex-installed-list',
+      selected_version: version,
+      directory_version: entry.version
+    },
+    reason: ''
+  };
 }
 
 function selectCurrentN8nSkillsCacheFromConfig({ codexHome, discovered }) {
@@ -3610,7 +3984,7 @@ function selectCurrentN8nSkillsCacheFromConfig({ codexHome, discovered }) {
   });
   if (configured.status === 'disabled') {
     return {
-      status: 'not-installed',
+      status: 'disabled',
       entry: null,
       reason: 'Codex config explicitly reports n8n-skills@n8n-io disabled'
     };
@@ -3633,9 +4007,1637 @@ function selectCurrentN8nSkillsCacheFromConfig({ codexHome, discovered }) {
   }
   return {
     status: 'selected',
-    entry: candidates[0],
+    entry: {
+      ...candidates[0],
+      selection_source: 'codex-config-cache-fallback',
+      selected_version: candidates[0].version,
+      directory_version: candidates[0].version
+    },
     reason: 'Selected by explicit Codex config enablement plus one exact n8n Skills cache candidate'
   };
+}
+
+function selectCurrentN8nSkillsCacheIdentity({
+  codexHome,
+  pluginInspection,
+  discovered,
+  allowMissingCliRoot = false
+}) {
+  const cliMatches = pluginInspection.ok
+    ? findInstalledPluginEntries(pluginInspection.pluginList, {
+      pluginId: 'n8n-skills@n8n-io',
+      name: 'n8n-skills',
+      marketplaceName: 'n8n-io'
+    })
+    : [];
+  if (pluginInspection.ok && cliMatches.length > 0) {
+    return selectCurrentN8nSkillsCache({
+      codexHome,
+      pluginList: pluginInspection.pluginList,
+      discovered,
+      allowMissingRoot: allowMissingCliRoot
+    });
+  }
+  return selectCurrentN8nSkillsCacheFromConfig({ codexHome, discovered });
+}
+
+function sameN8nCompatibilityEvidence(left, right) {
+  return Boolean(left && right)
+    && left.adapter_id === right.adapter_id
+    && left.version === right.version
+    && left.status === right.status
+    && left.contract_digest === right.contract_digest
+    && left.tree_digest === right.tree_digest;
+}
+
+function failClosedN8nRepair(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function requireSelectedN8nVersionAgreement(entry, compatibility) {
+  const selectedVersion = String(entry.selected_version || entry.version || '').trim();
+  const directoryVersion = String(entry.directory_version || entry.version || '').trim();
+  const manifestVersion = String(compatibility?.version || '').trim();
+  const adapterVersion = String(N8N_SKILLS_COMPATIBILITY_ADAPTERS[manifestVersion]?.version || '').trim();
+  const identityVersions = [selectedVersion, directoryVersion, manifestVersion];
+  const recognizedAdapterMismatch = adapterVersion && adapterVersion !== selectedVersion;
+  const missingRecognizedAdapter = !adapterVersion && compatibility?.status !== 'unsupported-version';
+  if (identityVersions.some((version) => !version) || new Set(identityVersions).size !== 1 || recognizedAdapterMismatch || missingRecognizedAdapter) {
+    throw failClosedN8nRepair(
+      'selected-version-mismatch',
+      'n8n Skills selected identity, cache directory, package manifest, and compatibility adapter versions do not agree exactly'
+    );
+  }
+  return selectedVersion;
+}
+
+function n8nSkillsTargetLockIdentity(pluginRoot) {
+  const resolved = path.resolve(pluginRoot);
+  const identityInput = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  const identity = crypto.createHash('sha256').update(identityInput, 'utf8').digest('hex');
+  return {
+    hubRoot: path.dirname(resolved),
+    lockName: `.ai-agent-toolkit-n8n-target-${identity}.lock`
+  };
+}
+
+function acquireN8nSkillsTargetLock(pluginRoot, options = {}) {
+  const identity = n8nSkillsTargetLockIdentity(pluginRoot);
+  const attempts = options.attempts || 100;
+  const delayMs = options.delayMs || 25;
+  let lastLock = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    lastLock = acquireLock(identity.hubRoot, {
+      hook: true,
+      syncSource: 'codex-plugin',
+      lockName: identity.lockName,
+      // Target repairs are bounded by exact tree limits and should complete
+      // well inside this lease. An orphan whose numeric PID was later reused
+      // therefore cannot block this exact cache forever, while the existing
+      // token/rename/tombstone protocol still binds recovery to one lock generation.
+      liveOwnerLeaseMs: LOCK_STALE_MS
+    }, options.lockTestHooks || {});
+    if (lastLock.acquired) return lastLock;
+    if (attempt < attempts) sleepSync(delayMs);
+  }
+  throw failClosedN8nRepair(
+    'target-lock-contended',
+    'n8n Skills selected cache repair is already in progress; the target was not changed'
+  );
+}
+
+function releaseN8nSkillsTargetLock(lock) {
+  releaseLock(lock);
+}
+
+function normalizedN8nTargetPath(value) {
+  const resolved = path.resolve(value);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+function n8nReplacementTargetIdentity(value) {
+  return crypto.createHash('sha256').update(normalizedN8nTargetPath(value), 'utf8').digest('hex');
+}
+
+function n8nPathExists(value) {
+  try {
+    fs.lstatSync(value);
+    return true;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+function requireOrdinaryN8nDirectory(value, label) {
+  const resolved = path.resolve(value);
+  const stat = fs.lstatSync(resolved);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    throw failClosedN8nRepair('recovery-evidence-invalid', `${label} is not an ordinary direct directory`);
+  }
+  if (normalizedN8nTargetPath(fs.realpathSync.native(resolved)) !== normalizedN8nTargetPath(resolved)) {
+    throw failClosedN8nRepair('recovery-evidence-invalid', `${label} is redirected outside its exact recorded identity`);
+  }
+  return stat;
+}
+
+function n8nDirectoryIdentity(stat) {
+  return {
+    dev: String(stat.dev),
+    ino: String(stat.ino),
+    birthtime_ms: String(stat.birthtimeMs)
+  };
+}
+
+function n8nDirectoryIdentitiesMatch(left, right) {
+  return Boolean(left && right)
+    && String(left.dev) === String(right.dev)
+    && String(left.ino) === String(right.ino)
+    && String(left.birthtime_ms) === String(right.birthtime_ms);
+}
+
+function n8nCompatibilityEvidenceMatches(expected, actual, status) {
+  return Boolean(expected && actual)
+    && actual.status === status
+    && actual.adapter_id === expected.adapter_id
+    && actual.version === expected.version
+    && actual.contract_digest === expected.contract_digest
+    && actual.tree_digest === expected.tree_digest
+    && actual.preserved_tree_digest === expected.preserved_tree_digest;
+}
+
+function n8nCompatibilityParityIdentity(parity) {
+  return {
+    compatibility_contract_sha256: crypto.createHash('sha256').update(fs.readFileSync(parity.contractPath)).digest('hex'),
+    source_lock_sha256: crypto.createHash('sha256').update(fs.readFileSync(parity.sourceLockPath)).digest('hex'),
+    source_watch_identity: {
+      source_repo: parity.sourceLock.source_repo,
+      source_ref: parity.sourceLock.source_ref,
+      source_commit: parity.sourceLock.source_commit,
+      source_update_policy: parity.sourceLock.source_update_policy
+    }
+  };
+}
+
+function n8nReplacementBackupPath(generation) {
+  return path.join(
+    generation.record.expected_parent,
+    `.${path.basename(generation.record.expected_final_target)}.n8n-repair-backup-${generation.record.generation_id}`
+  );
+}
+
+function writeN8nReplacementPhase(generation, kind, payload = {}) {
+  const existing = readOwnedStagingAuxiliary(generation, kind);
+  if (existing) return existing.value;
+  writeOwnedStagingAuxiliary(generation, kind, {
+    ...payload,
+    transaction_phase: kind.replace('n8n-replacement-phase-', '')
+  });
+}
+
+function n8nPlannedRepairedContractDigests(adapter) {
+  return [...new Set((adapter.repaired_sha256_variants || [adapter.repaired_sha256]).map((fingerprints) => {
+    const canonical = Object.entries(fingerprints)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([relPath, sha256]) => `${relPath}\0${sha256 || 'missing'}\n`)
+      .join('');
+    return crypto.createHash('sha256').update(canonical, 'utf8').digest('hex');
+  }))].sort();
+}
+
+function writeN8nPreTransactionPhase(generation, kind, payload = {}) {
+  const existing = readOwnedStagingAuxiliary(generation, kind);
+  if (existing) return existing.value;
+  return writeOwnedStagingAuxiliary(generation, kind, {
+    ...payload,
+    pre_transaction_phase: kind.replace('n8n-pre-transaction-phase-', '')
+  }).value;
+}
+
+function registerN8nPreTransaction(generation, entry, proposal, parityIdentity) {
+  const targetPath = path.resolve(generation.record.expected_final_target);
+  const stagePath = path.resolve(generation.stagePath);
+  const stagedPluginPath = path.join(stagePath, 'plugin');
+  const backupPath = n8nReplacementBackupPath(generation);
+  const adapter = N8N_SKILLS_COMPATIBILITY_ADAPTERS[proposal.version];
+  const targetDirectoryIdentity = n8nDirectoryIdentity(requireOrdinaryN8nDirectory(targetPath, 'selected n8n Skills target'));
+  const stageDirectoryIdentity = n8nDirectoryIdentity(requireOrdinaryN8nDirectory(stagePath, 'owned n8n Skills staging generation'));
+  return writeOwnedStagingAuxiliary(generation, 'n8n-pre-transaction', {
+    pre_transaction_schema_version: 1,
+    pre_transaction_phase: 'target-untouched',
+    target_identity: n8nReplacementTargetIdentity(targetPath),
+    target_path: targetPath,
+    selected_version: String(entry.selected_version || entry.version || ''),
+    directory_version: String(entry.directory_version || entry.version || ''),
+    manifest_version: proposal.version,
+    adapter_id: proposal.adapter_id,
+    repair_profile: adapter?.repair_profile || '',
+    upstream_commit: adapter?.upstream_commit || '',
+    compatibility_contract_sha256: parityIdentity.compatibility_contract_sha256,
+    source_lock_sha256: parityIdentity.source_lock_sha256,
+    source_watch_identity: parityIdentity.source_watch_identity,
+    approval_evidence: {
+      status: proposal.status,
+      adapter_id: proposal.adapter_id,
+      version: proposal.version,
+      contract_digest: proposal.contract_digest,
+      tree_digest: proposal.tree_digest,
+      preserved_tree_digest: proposal.preserved_tree_digest
+    },
+    planned_staged_evidence: {
+      status: 'healthy',
+      adapter_id: proposal.adapter_id,
+      version: proposal.version,
+      preserved_tree_digest: proposal.preserved_tree_digest,
+      contract_digests: n8nPlannedRepairedContractDigests(adapter)
+    },
+    stage_path: stagePath,
+    staged_plugin_path: stagedPluginPath,
+    stage_directory_identity: stageDirectoryIdentity,
+    original_target_directory_identity: targetDirectoryIdentity,
+    backup_path: backupPath,
+    creating_process: {
+      pid: process.pid,
+      lease_token: generation.record.ownership_token,
+      started_at: generation.record.creating_process.started_at
+    },
+    created_at: generation.record.created_at
+  }).value;
+}
+
+function validateN8nPreTransaction(generation, preTransaction, parityIdentity) {
+  const targetPath = path.resolve(generation.record.expected_final_target);
+  const parent = path.resolve(generation.record.expected_parent);
+  const stagePath = path.resolve(generation.stagePath);
+  const expectedStagePlugin = path.join(stagePath, 'plugin');
+  const expectedBackup = n8nReplacementBackupPath(generation);
+  const version = String(preTransaction?.selected_version || '');
+  const adapter = N8N_SKILLS_COMPATIBILITY_ADAPTERS[version];
+  const exactVersion = version
+    && version === preTransaction.directory_version
+    && version === preTransaction.manifest_version
+    && version === adapter?.version;
+  const evidence = preTransaction?.approval_evidence;
+  const planned = preTransaction?.planned_staged_evidence;
+  const validDirectoryIdentity = (identity) => Boolean(identity)
+    && /^\d+$/.test(String(identity.dev || ''))
+    && /^\d+$/.test(String(identity.ino || ''))
+    && /^\d+(?:\.\d+)?$/.test(String(identity.birthtime_ms || ''));
+  if (
+    preTransaction.pre_transaction_schema_version !== 1
+    || preTransaction.pre_transaction_phase !== 'target-untouched'
+    || preTransaction.target_identity !== n8nReplacementTargetIdentity(targetPath)
+    || normalizedN8nTargetPath(preTransaction.target_path || '') !== normalizedN8nTargetPath(targetPath)
+    || normalizedN8nTargetPath(path.dirname(targetPath)) !== normalizedN8nTargetPath(parent)
+    || path.basename(targetPath) !== version
+    || normalizedN8nTargetPath(preTransaction.stage_path || '') !== normalizedN8nTargetPath(stagePath)
+    || normalizedN8nTargetPath(preTransaction.staged_plugin_path || '') !== normalizedN8nTargetPath(expectedStagePlugin)
+    || normalizedN8nTargetPath(preTransaction.backup_path || '') !== normalizedN8nTargetPath(expectedBackup)
+    || normalizedN8nTargetPath(path.dirname(expectedBackup)) !== normalizedN8nTargetPath(parent)
+    || !exactVersion
+    || preTransaction.adapter_id !== adapter.adapter_id
+    || preTransaction.repair_profile !== adapter.repair_profile
+    || preTransaction.upstream_commit !== adapter.upstream_commit
+    || preTransaction.compatibility_contract_sha256 !== parityIdentity.compatibility_contract_sha256
+    || preTransaction.source_lock_sha256 !== parityIdentity.source_lock_sha256
+    || JSON.stringify(preTransaction.source_watch_identity) !== JSON.stringify(parityIdentity.source_watch_identity)
+    || preTransaction.creating_process?.pid !== generation.record.creating_process.pid
+    || preTransaction.creating_process?.lease_token !== generation.record.ownership_token
+    || preTransaction.created_at !== generation.record.created_at
+    || !validDirectoryIdentity(preTransaction.original_target_directory_identity)
+    || !validDirectoryIdentity(preTransaction.stage_directory_identity)
+    || evidence?.status !== 'repair-required'
+    || evidence?.adapter_id !== adapter.adapter_id
+    || evidence?.version !== version
+    || !/^[0-9a-f]{64}$/.test(String(evidence?.contract_digest || ''))
+    || !/^[0-9a-f]{64}$/.test(String(evidence?.tree_digest || ''))
+    || !/^[0-9a-f]{64}$/.test(String(evidence?.preserved_tree_digest || ''))
+    || planned?.status !== 'healthy'
+    || planned?.adapter_id !== adapter.adapter_id
+    || planned?.version !== version
+    || planned?.preserved_tree_digest !== evidence.preserved_tree_digest
+    || JSON.stringify(planned?.contract_digests) !== JSON.stringify(n8nPlannedRepairedContractDigests(adapter))
+  ) {
+    throw failClosedN8nRepair(
+      'recovery-evidence-invalid',
+      'Target-untouched n8n Skills staging evidence is malformed, mismatched, redirected, or unsupported'
+    );
+  }
+  return {
+    adapter,
+    backupPath: expectedBackup,
+    parent,
+    stagePath,
+    stagePluginPath: expectedStagePlugin,
+    targetPath,
+    version
+  };
+}
+
+function registerN8nReplacementTransaction(generation, entry, proposal, stagedState, parityIdentity) {
+  const targetPath = path.resolve(generation.record.expected_final_target);
+  const stagedPluginPath = path.join(generation.stagePath, 'plugin');
+  const backupPath = n8nReplacementBackupPath(generation);
+  const adapter = N8N_SKILLS_COMPATIBILITY_ADAPTERS[proposal.version];
+  const targetDirectoryIdentity = n8nDirectoryIdentity(requireOrdinaryN8nDirectory(targetPath, 'selected n8n Skills target'));
+  const stagedDirectoryIdentity = n8nDirectoryIdentity(requireOrdinaryN8nDirectory(stagedPluginPath, 'staged n8n Skills winner'));
+  return writeOwnedStagingAuxiliary(generation, 'n8n-replacement', {
+    transaction_schema_version: 1,
+    transaction_phase: 'registered',
+    target_identity: n8nReplacementTargetIdentity(targetPath),
+    target_path: targetPath,
+    selected_version: String(entry.selected_version || entry.version || ''),
+    directory_version: String(entry.directory_version || entry.version || ''),
+    manifest_version: proposal.version,
+    adapter_id: proposal.adapter_id,
+    repair_profile: adapter?.repair_profile || '',
+    upstream_commit: adapter?.upstream_commit || '',
+    compatibility_contract_sha256: parityIdentity.compatibility_contract_sha256,
+    source_lock_sha256: parityIdentity.source_lock_sha256,
+    source_watch_identity: parityIdentity.source_watch_identity,
+    approval_evidence: {
+      status: proposal.status,
+      adapter_id: proposal.adapter_id,
+      version: proposal.version,
+      contract_digest: proposal.contract_digest,
+      tree_digest: proposal.tree_digest,
+      preserved_tree_digest: proposal.preserved_tree_digest
+    },
+    staged_evidence: {
+      status: stagedState.status,
+      adapter_id: stagedState.adapter_id,
+      version: stagedState.version,
+      contract_digest: stagedState.contract_digest,
+      tree_digest: stagedState.tree_digest,
+      preserved_tree_digest: stagedState.preserved_tree_digest
+    },
+    staged_plugin_path: stagedPluginPath,
+    original_target_directory_identity: targetDirectoryIdentity,
+    staged_plugin_directory_identity: stagedDirectoryIdentity,
+    backup_path: backupPath,
+    creating_process: {
+      pid: process.pid,
+      lease_token: generation.record.ownership_token,
+      started_at: generation.record.creating_process.started_at
+    },
+    created_at: generation.record.created_at
+  }).value;
+}
+
+function validateN8nReplacementTransaction(generation, transaction, parityIdentity) {
+  const targetPath = path.resolve(generation.record.expected_final_target);
+  const parent = path.resolve(generation.record.expected_parent);
+  const expectedStagePlugin = path.join(generation.stagePath, 'plugin');
+  const expectedBackup = n8nReplacementBackupPath(generation);
+  const version = String(transaction?.selected_version || '');
+  const adapter = N8N_SKILLS_COMPATIBILITY_ADAPTERS[version];
+  const exactVersion = version
+    && version === transaction.directory_version
+    && version === transaction.manifest_version
+    && version === adapter?.version;
+  const validEvidence = (evidence, expectedStatus) => Boolean(evidence)
+    && evidence.status === expectedStatus
+    && evidence.adapter_id === adapter?.adapter_id
+    && evidence.version === version
+    && /^[0-9a-f]{64}$/.test(String(evidence.contract_digest || ''))
+    && /^[0-9a-f]{64}$/.test(String(evidence.tree_digest || ''))
+    && /^[0-9a-f]{64}$/.test(String(evidence.preserved_tree_digest || ''));
+  const validDirectoryIdentity = (identity) => Boolean(identity)
+    && /^\d+$/.test(String(identity.dev || ''))
+    && /^\d+$/.test(String(identity.ino || ''))
+    && /^\d+(?:\.\d+)?$/.test(String(identity.birthtime_ms || ''));
+  if (
+    transaction.transaction_schema_version !== 1
+    || transaction.transaction_phase !== 'registered'
+    || transaction.target_identity !== n8nReplacementTargetIdentity(targetPath)
+    || normalizedN8nTargetPath(transaction.target_path || '') !== normalizedN8nTargetPath(targetPath)
+    || normalizedN8nTargetPath(path.dirname(targetPath)) !== normalizedN8nTargetPath(parent)
+    || path.basename(targetPath) !== version
+    || normalizedN8nTargetPath(transaction.staged_plugin_path || '') !== normalizedN8nTargetPath(expectedStagePlugin)
+    || normalizedN8nTargetPath(transaction.backup_path || '') !== normalizedN8nTargetPath(expectedBackup)
+    || normalizedN8nTargetPath(path.dirname(expectedBackup)) !== normalizedN8nTargetPath(parent)
+    || !exactVersion
+    || transaction.adapter_id !== adapter.adapter_id
+    || transaction.repair_profile !== adapter.repair_profile
+    || transaction.upstream_commit !== adapter.upstream_commit
+    || transaction.compatibility_contract_sha256 !== parityIdentity.compatibility_contract_sha256
+    || transaction.source_lock_sha256 !== parityIdentity.source_lock_sha256
+    || JSON.stringify(transaction.source_watch_identity) !== JSON.stringify(parityIdentity.source_watch_identity)
+    || transaction.creating_process?.pid !== generation.record.creating_process.pid
+    || transaction.creating_process?.lease_token !== generation.record.ownership_token
+    || transaction.created_at !== generation.record.created_at
+    || !validDirectoryIdentity(transaction.original_target_directory_identity)
+    || !validDirectoryIdentity(transaction.staged_plugin_directory_identity)
+    || !validEvidence(transaction.approval_evidence, 'repair-required')
+    || !validEvidence(transaction.staged_evidence, 'healthy')
+  ) {
+    throw failClosedN8nRepair(
+      'recovery-evidence-invalid',
+      'Interrupted n8n Skills repair evidence is malformed, mismatched, redirected, or unsupported'
+    );
+  }
+  return {
+    adapter,
+    backupPath: expectedBackup,
+    parent,
+    stagePluginPath: expectedStagePlugin,
+    targetPath,
+    version
+  };
+}
+
+function inspectN8nPreTransactionPhases(generation, preTransaction, validated) {
+  let encounteredGap = false;
+  let latestPhase = 'target-untouched';
+  let copied = null;
+  let transforming = null;
+  let transformed = null;
+  for (const kind of N8N_PRE_TRANSACTION_AUXILIARY_KINDS.slice(1)) {
+    let phaseMarker;
+    try {
+      phaseMarker = readOwnedStagingAuxiliary(generation, kind);
+    } catch {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Owned n8n Skills pre-transaction phase evidence is malformed or identity-mismatched');
+    }
+    if (!phaseMarker) {
+      encounteredGap = true;
+      continue;
+    }
+    if (
+      encounteredGap
+      || phaseMarker.value.pre_transaction_phase !== kind.replace('n8n-pre-transaction-phase-', '')
+    ) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Owned n8n Skills pre-transaction phase sequence is malformed or ambiguous');
+    }
+    const directoryIdentity = phaseMarker.value.staged_plugin_directory_identity;
+    if (
+      !directoryIdentity
+      || !/^\d+$/.test(String(directoryIdentity.dev || ''))
+      || !/^\d+$/.test(String(directoryIdentity.ino || ''))
+      || !/^\d+(?:\.\d+)?$/.test(String(directoryIdentity.birthtime_ms || ''))
+    ) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Owned n8n Skills staged plugin directory identity is malformed');
+    }
+    if (kind.endsWith('10-copied')) {
+      if (!n8nCompatibilityEvidenceMatches(preTransaction.approval_evidence, phaseMarker.value.copied_evidence, 'repair-required')) {
+        throw failClosedN8nRepair('recovery-evidence-invalid', 'Owned n8n Skills copied tree evidence does not match the approved original');
+      }
+      copied = phaseMarker.value;
+    } else if (kind.endsWith('15-transforming')) {
+      if (!copied || !n8nDirectoryIdentitiesMatch(copied.staged_plugin_directory_identity, directoryIdentity)) {
+        throw failClosedN8nRepair('recovery-evidence-invalid', 'Owned n8n Skills transformation phase directory identity is inconsistent');
+      }
+      transforming = phaseMarker.value;
+    } else {
+      const staged = phaseMarker.value.staged_evidence;
+      if (
+        !staged
+        || staged.status !== 'healthy'
+        || staged.adapter_id !== validated.adapter.adapter_id
+        || staged.version !== validated.version
+        || staged.preserved_tree_digest !== preTransaction.planned_staged_evidence.preserved_tree_digest
+        || !preTransaction.planned_staged_evidence.contract_digests.includes(staged.contract_digest)
+        || !/^[0-9a-f]{64}$/.test(String(staged.tree_digest || ''))
+      ) {
+        throw failClosedN8nRepair('recovery-evidence-invalid', 'Owned n8n Skills transformed tree evidence does not match the planned repaired identity');
+      }
+      if (!transforming || !n8nDirectoryIdentitiesMatch(transforming.staged_plugin_directory_identity, directoryIdentity)) {
+        throw failClosedN8nRepair('recovery-evidence-invalid', 'Owned n8n Skills transformed tree directory identity is inconsistent');
+      }
+      transformed = phaseMarker.value;
+    }
+    latestPhase = phaseMarker.value.pre_transaction_phase;
+  }
+  return { copied, latestPhase, transformed, transforming };
+}
+
+function requireKnownN8nGenerationAuxiliaries(recordPath, directoryNames) {
+  const recordBase = path.basename(recordPath, '.json');
+  const prefix = `${recordBase}.`;
+  const allowed = new Set([
+    'ready',
+    'completed',
+    'failed',
+    ...N8N_TRANSACTION_AUXILIARY_KINDS
+  ].map((kind) => `${prefix}${kind}.json`));
+  const unexpected = directoryNames
+    .filter((name) => name !== path.basename(recordPath) && name.startsWith(prefix) && name.endsWith('.json') && !allowed.has(name));
+  if (unexpected.length) {
+    throw failClosedN8nRepair('recovery-evidence-invalid', 'Owned n8n Skills staging evidence contains an unknown or conflicting auxiliary record');
+  }
+}
+
+function inspectN8nReplacementRecords(codexHome, parityIdentity, options = {}) {
+  const parent = path.resolve(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills');
+  if (!n8nPathExists(parent)) return { parent, preTransactions: [], transactions: [] };
+  requireOrdinaryN8nDirectory(parent, 'n8n Skills package cache parent');
+  const recordPattern = new RegExp(`^${RECORD_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\\.json$`, 'i');
+  const directoryNames = [];
+  const names = [];
+  const directory = fs.opendirSync(parent);
+  let entryCount = 0;
+  try {
+    for (;;) {
+      const entry = directory.readSync();
+      if (!entry) break;
+      entryCount += 1;
+      if (entryCount > N8N_REPLACEMENT_DIRECTORY_ENTRY_LIMIT) {
+        throw failClosedN8nRepair('ambiguous-recovery', 'The n8n Skills package cache parent exceeds the bounded recovery inventory');
+      }
+      directoryNames.push(entry.name);
+      if (recordPattern.test(entry.name)) names.push(entry.name);
+      if (names.length > N8N_REPLACEMENT_RECORD_LIMIT) {
+        throw failClosedN8nRepair('ambiguous-recovery', 'Too many owned transaction records exist to adjudicate n8n Skills recovery safely');
+      }
+    }
+  } finally {
+    directory.closeSync();
+  }
+  names.sort();
+  const preTransactions = [];
+  const transactions = [];
+  for (const name of names) {
+    const recordPath = path.join(parent, name);
+    const inspected = inspectOwnedGeneration(recordPath, {
+      expectedParent: parent,
+      liveness: options.liveness
+    });
+    let record;
+    try {
+      record = JSON.parse(fs.readFileSync(recordPath, 'utf8'));
+    } catch {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'An owned n8n Skills transaction record is malformed');
+    }
+    if (record.operation !== 'n8n-skills-plugin-repair') {
+      throw failClosedN8nRepair('conflicting-recovery', 'A conflicting owned transaction targets the n8n Skills package cache');
+    }
+    const generation = { record, recordPath, stagePath: record.expected_staging_path };
+    requireKnownN8nGenerationAuxiliaries(recordPath, directoryNames);
+    let preTransactionMarker;
+    let transactionMarker;
+    try {
+      preTransactionMarker = readOwnedStagingAuxiliary(generation, 'n8n-pre-transaction');
+      transactionMarker = readOwnedStagingAuxiliary(generation, 'n8n-replacement');
+    } catch {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Owned n8n Skills replacement evidence is malformed or identity-mismatched');
+    }
+    if (!transactionMarker && !preTransactionMarker) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Owned n8n Skills replacement evidence is incomplete');
+    }
+    let preTransaction = null;
+    if (preTransactionMarker) {
+      const validated = validateN8nPreTransaction(generation, preTransactionMarker.value, parityIdentity);
+      const phases = inspectN8nPreTransactionPhases(generation, preTransactionMarker.value, validated);
+      preTransaction = {
+        generation,
+        inspected,
+        latestPhase: phases.latestPhase,
+        phases,
+        preTransaction: preTransactionMarker.value,
+        validated
+      };
+    }
+    if (!transactionMarker) {
+      for (const kind of N8N_REPLACEMENT_AUXILIARY_KINDS.slice(1)) {
+        let phaseMarker;
+        try {
+          phaseMarker = readOwnedStagingAuxiliary(generation, kind);
+        } catch {
+          throw failClosedN8nRepair('recovery-evidence-invalid', 'Target-untouched n8n Skills staging contains malformed replacement phase evidence');
+        }
+        if (phaseMarker) {
+          throw failClosedN8nRepair('recovery-evidence-invalid', 'Target-untouched n8n Skills staging conflicts with replacement transition evidence');
+        }
+      }
+      preTransactions.push(preTransaction);
+      continue;
+    }
+    const validated = validateN8nReplacementTransaction(generation, transactionMarker.value, parityIdentity);
+    let encounteredGap = false;
+    let latestPhase = 'registered';
+    for (const kind of N8N_REPLACEMENT_AUXILIARY_KINDS.slice(1)) {
+      let phaseMarker;
+      try {
+        phaseMarker = readOwnedStagingAuxiliary(generation, kind);
+      } catch {
+        throw failClosedN8nRepair('recovery-evidence-invalid', 'Owned n8n Skills transaction phase evidence is malformed or identity-mismatched');
+      }
+      if (!phaseMarker) {
+        encounteredGap = true;
+        continue;
+      }
+      if (
+        encounteredGap
+        || phaseMarker.value.transaction_phase !== kind.replace('n8n-replacement-phase-', '')
+      ) {
+        throw failClosedN8nRepair('recovery-evidence-invalid', 'Owned n8n Skills transaction phase sequence is malformed or ambiguous');
+      }
+      const expectedDirectoryIdentity = kind.endsWith('10-displace') || kind.endsWith('20-displaced')
+        ? transactionMarker.value.original_target_directory_identity
+        : kind.endsWith('30-install') || kind.endsWith('40-installed')
+          ? transactionMarker.value.staged_plugin_directory_identity
+          : null;
+      const recordedDirectoryIdentity = kind.endsWith('10-displace')
+        ? phaseMarker.value.original_target_directory_identity
+        : kind.endsWith('20-displaced')
+          ? phaseMarker.value.backup_directory_identity
+          : kind.endsWith('30-install')
+            ? phaseMarker.value.staged_plugin_directory_identity
+            : kind.endsWith('40-installed')
+              ? phaseMarker.value.installed_directory_identity
+              : null;
+      if (expectedDirectoryIdentity && !n8nDirectoryIdentitiesMatch(expectedDirectoryIdentity, recordedDirectoryIdentity)) {
+        throw failClosedN8nRepair('recovery-evidence-invalid', 'Owned n8n Skills transaction phase directory identity is mismatched');
+      }
+      if (
+        kind.endsWith('70-cleanup')
+        && (
+          phaseMarker.value.cleanup_authorized !== true
+          || !n8nDirectoryIdentitiesMatch(
+            transactionMarker.value.original_target_directory_identity,
+            phaseMarker.value.backup_directory_identity
+          )
+          || !n8nDirectoryIdentitiesMatch(
+            transactionMarker.value.staged_plugin_directory_identity,
+            phaseMarker.value.installed_directory_identity
+          )
+        )
+      ) {
+        throw failClosedN8nRepair('recovery-evidence-invalid', 'Owned n8n Skills backup cleanup authorization is malformed or identity-mismatched');
+      }
+      latestPhase = phaseMarker.value.transaction_phase;
+    }
+    if (preTransaction?.phases.transformed) {
+      const transformed = preTransaction.phases.transformed;
+      if (
+        !n8nCompatibilityEvidenceMatches(transformed.staged_evidence, transactionMarker.value.staged_evidence, 'healthy')
+        || !n8nDirectoryIdentitiesMatch(
+          transformed.staged_plugin_directory_identity,
+          transactionMarker.value.staged_plugin_directory_identity
+        )
+      ) {
+        throw failClosedN8nRepair('recovery-evidence-invalid', 'Registered n8n Skills transaction does not match its target-untouched staged evidence');
+      }
+    } else if (preTransaction) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Registered n8n Skills transaction is missing its completed staged-tree evidence');
+    }
+    transactions.push({ generation, inspected, latestPhase, preTransaction, transaction: transactionMarker.value, validated });
+  }
+  if (transactions.length + preTransactions.length > 1) {
+    throw failClosedN8nRepair('ambiguous-recovery', 'Multiple interrupted n8n Skills transactions are ambiguous and require review');
+  }
+  return { parent, preTransactions, transactions };
+}
+
+function requireExactN8nOriginalBackup(backupPath, transaction) {
+  const backupStat = requireOrdinaryN8nDirectory(backupPath, 'recorded n8n Skills backup');
+  if (!n8nDirectoryIdentitiesMatch(
+    transaction.original_target_directory_identity,
+    n8nDirectoryIdentity(backupStat)
+  )) {
+    throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup directory identity no longer matches its owned transaction');
+  }
+  const backupState = classifyN8nSkillsCompatibility(backupPath);
+  if (!n8nCompatibilityEvidenceMatches(transaction.approval_evidence, backupState, 'repair-required')) {
+    throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup no longer matches the exact approved original tree');
+  }
+  return backupState;
+}
+
+function inspectN8nBackupCleanupTree(backupPath) {
+  const rootStat = requireOrdinaryN8nDirectory(backupPath, 'recorded n8n Skills backup');
+  const entries = [];
+  const pending = [{
+    depth: 0,
+    fullPath: path.resolve(backupPath),
+    relativePath: '',
+    visited: false
+  }];
+  let directories = 0;
+  let files = 0;
+  let totalBytes = 0;
+  while (pending.length) {
+    const current = pending.pop();
+    const stat = fs.lstatSync(current.fullPath);
+    if (stat.isSymbolicLink()) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup cleanup contains a redirected entry');
+    }
+    if (stat.isDirectory()) {
+      if (normalizedN8nTargetPath(fs.realpathSync.native(current.fullPath)) !== normalizedN8nTargetPath(current.fullPath)) {
+        throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup cleanup contains an aliased directory');
+      }
+      if (current.visited) {
+        entries.push({
+          type: 'directory',
+          fullPath: current.fullPath,
+          relativePath: current.relativePath,
+          identity: n8nDirectoryIdentity(stat)
+        });
+        continue;
+      }
+      if (current.depth > N8N_SKILLS_TREE_LIMITS.max_depth) {
+        throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup cleanup exceeds the bounded directory depth');
+      }
+      if (current.relativePath) {
+        directories += 1;
+        if (directories > N8N_SKILLS_TREE_LIMITS.max_directories) {
+          throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup cleanup exceeds the bounded directory count');
+        }
+      }
+      pending.push({ ...current, visited: true });
+      const children = fs.readdirSync(current.fullPath).sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
+      for (let index = children.length - 1; index >= 0; index -= 1) {
+        const name = children[index];
+        const relativePath = current.relativePath ? `${current.relativePath}/${name}` : name;
+        pending.push({
+          depth: current.depth + 1,
+          fullPath: path.join(current.fullPath, name),
+          relativePath,
+          visited: false
+        });
+      }
+      continue;
+    }
+    if (!stat.isFile()) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup cleanup contains a special filesystem entry');
+    }
+    files += 1;
+    totalBytes += stat.size;
+    if (
+      files > N8N_SKILLS_TREE_LIMITS.max_files
+      || stat.size > N8N_SKILLS_TREE_LIMITS.max_file_bytes
+      || totalBytes > N8N_SKILLS_TREE_LIMITS.max_total_bytes
+    ) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup cleanup exceeds the bounded file or byte limits');
+    }
+    entries.push({
+      type: 'file',
+      fullPath: current.fullPath,
+      relativePath: current.relativePath,
+      identity: {
+        dev: String(stat.dev),
+        ino: String(stat.ino),
+        birthtime_ms: String(stat.birthtimeMs),
+        size: String(stat.size)
+      }
+    });
+  }
+  if (!n8nDirectoryIdentitiesMatch(n8nDirectoryIdentity(rootStat), entries.at(-1)?.identity)) {
+    throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup changed during cleanup inspection');
+  }
+  return entries;
+}
+
+function n8nCleanupEntryIdentityMatches(entry, stat) {
+  if (entry.type === 'directory') {
+    return stat.isDirectory()
+      && !stat.isSymbolicLink()
+      && n8nDirectoryIdentitiesMatch(entry.identity, n8nDirectoryIdentity(stat));
+  }
+  return stat.isFile()
+    && !stat.isSymbolicLink()
+    && String(stat.dev) === entry.identity.dev
+    && String(stat.ino) === entry.identity.ino
+    && String(stat.birthtimeMs) === entry.identity.birthtime_ms
+    && String(stat.size) === entry.identity.size;
+}
+
+function removeExactN8nBackupResumably(backupPath, transaction, options = {}) {
+  if (!n8nPathExists(backupPath)) return;
+  const backupStat = requireOrdinaryN8nDirectory(backupPath, 'recorded n8n Skills backup');
+  if (!n8nDirectoryIdentitiesMatch(
+    transaction.original_target_directory_identity,
+    n8nDirectoryIdentity(backupStat)
+  )) {
+    throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup root no longer matches its exact transaction');
+  }
+  if (!options.resuming) requireExactN8nOriginalBackup(backupPath, transaction);
+  const entries = inspectN8nBackupCleanupTree(backupPath);
+  let removed = 0;
+  for (const entry of entries) {
+    const stat = fs.lstatSync(entry.fullPath);
+    if (!n8nCleanupEntryIdentityMatches(entry, stat)) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup changed during resumable cleanup');
+    }
+    if (entry.type === 'directory') {
+      if (normalizedN8nTargetPath(fs.realpathSync.native(entry.fullPath)) !== normalizedN8nTargetPath(entry.fullPath)) {
+        throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup directory was redirected during cleanup');
+      }
+      fs.rmdirSync(entry.fullPath);
+    } else {
+      fs.unlinkSync(entry.fullPath);
+    }
+    removed += 1;
+    if (options.testHooks?.afterN8nBackupCleanupEntry) {
+      options.testHooks.afterN8nBackupCleanupEntry({
+        entry_type: entry.type,
+        relative_path: entry.relativePath,
+        removed
+      });
+    }
+  }
+}
+
+function authorizeN8nWinnerBackupCleanup(generation, transaction, backupPath, targetPath) {
+  requireExactN8nOriginalBackup(backupPath, transaction);
+  const targetStat = requireOrdinaryN8nDirectory(targetPath, 'verified n8n Skills winner');
+  if (!n8nDirectoryIdentitiesMatch(
+    transaction.staged_plugin_directory_identity,
+    n8nDirectoryIdentity(targetStat)
+  )) {
+    throw failClosedN8nRepair('recovery-evidence-invalid', 'Verified n8n Skills winner directory identity changed before backup cleanup');
+  }
+  return writeN8nReplacementPhase(generation, 'n8n-replacement-phase-70-cleanup', {
+    cleanup_authorized: true,
+    backup_directory_identity: transaction.original_target_directory_identity,
+    installed_directory_identity: transaction.staged_plugin_directory_identity
+  });
+}
+
+function n8nRecoveryPhaseOrdinal(transaction) {
+  if (!transaction?.transaction) return -1;
+  return transaction.latestPhase === 'registered'
+    ? 0
+    : Number.parseInt(String(transaction.latestPhase).split('-')[0], 10);
+}
+
+function requireN8nInventorySelectionBinding(selection, inventory, options = {}) {
+  const selectedRoot = normalizedN8nTargetPath(selection.plugin_root);
+  const candidate = inventory.roots.find((entry) =>
+    normalizedN8nTargetPath(entry.plugin_root) === selectedRoot
+    && entry.version === selection.selected_version
+  );
+  if (!candidate) {
+    throw failClosedN8nRepair('ambiguous-target', 'The exact selected n8n Skills cache disappeared during inventory revalidation');
+  }
+  if (
+    !n8nDirectoryIdentitiesMatch(selection.cache_directory_identity, candidate.cache_directory_identity)
+    || !n8nDirectoryIdentitiesMatch(selection.parent_directory_identity, inventory.parent_directory_identity)
+  ) {
+    throw failClosedN8nRepair('ambiguous-target', 'The exact selected n8n Skills cache or package parent identity changed during inventory revalidation');
+  }
+  const comparisonDigest = n8nInventoryDigest(
+    inventory.parent_directory_identity,
+    inventory.entries,
+    options.excludedOrdinaryRoots || []
+  );
+  if (selection.inventory_digest !== comparisonDigest) {
+    throw failClosedN8nRepair('ambiguous-target', 'The bounded n8n Skills cache inventory changed after current-cache selection');
+  }
+  return candidate;
+}
+
+function requireN8nRecoveryHostIdentity(codexHome, pluginInspection, transaction, options = {}) {
+  const discovered = discoverN8nSkillsCacheRoots(codexHome, {
+    activeLock: options.activeLock,
+    testHooks: options.testHooks,
+    transaction
+  });
+  const selection = selectCurrentN8nSkillsCacheIdentity({
+    codexHome,
+    pluginInspection,
+    discovered,
+    allowMissingCliRoot: true
+  });
+  if (selection.status === 'disabled') {
+    throw failClosedN8nRepair('disabled', 'Codex explicitly reports the n8n Skills plugin disabled or not installed; recovery did not mutate it');
+  }
+  if (selection.status !== 'selected') {
+    const code = selection.status === 'ambiguous' ? 'ambiguous-target' : 'identity-unverified';
+    throw failClosedN8nRepair(
+      code,
+      selection.reason || 'Current n8n Skills host identity cannot be proven for interrupted transaction recovery'
+    );
+  }
+  const currentVersion = String(selection.entry.selected_version || '').trim();
+  const directoryVersion = String(selection.entry.directory_version || '').trim();
+  const currentRoot = normalizedN8nTargetPath(selection.entry.plugin_root);
+  const expectedCurrentRoot = normalizedN8nTargetPath(
+    path.join(path.dirname(transaction.validated.targetPath), currentVersion)
+  );
+  if (
+    !currentVersion
+    || currentVersion !== directoryVersion
+    || currentRoot !== expectedCurrentRoot
+  ) {
+    throw failClosedN8nRepair(
+      'identity-unverified',
+      'Selected n8n Skills recovery identity is not bound to one exact canonical cache path and version'
+    );
+  }
+  const currentRootStat = n8nPathExists(selection.entry.plugin_root)
+    ? requireOrdinaryN8nDirectory(selection.entry.plugin_root, 'selected current n8n Skills cache')
+    : null;
+  const boundSelection = {
+    ...selection.entry,
+    ...(currentRootStat ? { cache_directory_identity: n8nDirectoryIdentity(currentRootStat) } : {}),
+    parent_directory_identity: discovered.parent_directory_identity,
+    inventory_digest: discovered.inventory_digest,
+    inventory_parent: discovered.parent
+  };
+  if (options.expectedSelection?.cache_directory_identity) {
+    requireN8nInventorySelectionBinding(options.expectedSelection, discovered);
+  } else if (
+    options.expectedSelection
+    && (
+      options.expectedSelection.inventory_digest !== discovered.inventory_digest
+      || !n8nDirectoryIdentitiesMatch(
+        options.expectedSelection.parent_directory_identity,
+        discovered.parent_directory_identity
+      )
+    )
+  ) {
+    throw failClosedN8nRepair('ambiguous-target', 'The bounded n8n Skills cache inventory changed before recovery mutation');
+  }
+  const transactionRoot = normalizedN8nTargetPath(transaction.validated.targetPath);
+  if (currentVersion === transaction.validated.version && currentRoot === transactionRoot) {
+    return { status: 'current', currentVersion, currentRoot, selection: boundSelection };
+  }
+  if (
+    options.allowObsolete
+    && currentVersion !== transaction.validated.version
+    && currentRoot !== transactionRoot
+    && currentRootStat
+  ) {
+    return {
+      status: 'obsolete',
+      currentVersion,
+      currentRoot,
+      selection: {
+        ...boundSelection,
+        recovery_historical_root: transaction.validated.targetPath
+      }
+    };
+  }
+  throw failClosedN8nRepair(
+    'selected-version-mismatch',
+    'Codex current cache identity does not match the interrupted n8n Skills transaction'
+  );
+}
+
+function revalidateN8nRecoverySelection(codexHome, selection, options = {}) {
+  const configured = inspectCodexConfiguredPluginState({
+    codexHome,
+    identity: 'n8n-skills@n8n-io'
+  });
+  if (configured.status !== 'enabled') {
+    return {
+      status: configured.status === 'disabled' ? 'disabled' : 'ambiguous',
+      entry: null,
+      reason: 'Codex config fallback changed after obsolete n8n Skills recovery'
+    };
+  }
+  let discovered;
+  let candidate;
+  try {
+    discovered = discoverN8nSkillsCacheRoots(codexHome, {
+      testHooks: options.testHooks
+    });
+    candidate = requireN8nInventorySelectionBinding(selection, discovered, {
+      excludedOrdinaryRoots: selection.recovery_historical_root
+        ? [selection.recovery_historical_root]
+        : []
+    });
+  } catch (error) {
+    return {
+      status: 'ambiguous',
+      entry: null,
+      reason: error.message || 'The exact config-selected n8n Skills cache inventory changed during obsolete transaction recovery'
+    };
+  }
+  return {
+    status: 'selected',
+    entry: {
+      ...candidate,
+      selection_source: 'codex-config-cache-fallback-revalidated',
+      selected_version: selection.selected_version,
+      directory_version: selection.directory_version,
+      cache_directory_identity: candidate.cache_directory_identity,
+      parent_directory_identity: discovered.parent_directory_identity,
+      inventory_digest: discovered.inventory_digest,
+      inventory_parent: discovered.parent
+    },
+    reason: 'Revalidated the exact config-selected current cache after obsolete transaction recovery'
+  };
+}
+
+function cleanupN8nReplacementTransaction(transaction, options = {}) {
+  const { generation, validated } = transaction;
+  if (n8nPathExists(validated.backupPath)) {
+    const cleanupMarker = readOwnedStagingAuxiliary(generation, 'n8n-replacement-phase-70-cleanup');
+    if (!cleanupMarker) {
+      authorizeN8nWinnerBackupCleanup(
+        generation,
+        transaction.transaction,
+        validated.backupPath,
+        validated.targetPath
+      );
+    }
+    removeExactN8nBackupResumably(validated.backupPath, transaction.transaction, {
+      resuming: Boolean(cleanupMarker),
+      testHooks: options.testHooks
+    });
+  }
+  markOwnedStaging(generation, 'completed');
+  const cleanup = cleanupOwnedGeneration(generation, {
+    liveness: () => 'dead',
+    auxiliaryKinds: N8N_TRANSACTION_AUXILIARY_KINDS
+  });
+  if (!cleanup.cleaned) {
+    throw failClosedN8nRepair('recovery-cleanup-failed', 'Verified n8n Skills transaction residue could not be removed safely');
+  }
+}
+
+function recoverTargetUntouchedN8nPreTransaction({
+  codexHome,
+  initial,
+  parityIdentity,
+  pluginInspection,
+  stagingLiveness,
+  write,
+  testHooks
+}) {
+  const initialHostIdentity = requireN8nRecoveryHostIdentity(codexHome, pluginInspection, initial, {
+    allowObsolete: true,
+    testHooks
+  });
+  if (!write) {
+    throw failClosedN8nRepair('recovery-required', 'An interrupted owned n8n Skills staging generation requires approved recovery before inspection can continue');
+  }
+  if (initial.inspected.classification === 'live-owned') {
+    throw failClosedN8nRepair('target-lock-contended', 'An owned n8n Skills staging generation is still active; recovery did not mutate it');
+  }
+  if (!initial.inspected.safe_to_reconcile) {
+    throw failClosedN8nRepair('recovery-evidence-invalid', 'Target-untouched n8n Skills ownership evidence is not safe to reconcile');
+  }
+  const lock = acquireN8nSkillsTargetLock(initial.validated.targetPath);
+  try {
+    const discovered = inspectN8nReplacementRecords(codexHome, parityIdentity, { liveness: stagingLiveness });
+    if (discovered.transactions.length !== 0 || discovered.preTransactions.length !== 1) {
+      throw failClosedN8nRepair('ambiguous-recovery', 'Target-untouched n8n Skills staging identity changed before recovery');
+    }
+    const preTransaction = discovered.preTransactions[0];
+    if (
+      preTransaction.generation.record.generation_id !== initial.generation.record.generation_id
+      || preTransaction.generation.record.ownership_token !== initial.generation.record.ownership_token
+    ) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Target-untouched n8n Skills staging ownership changed before recovery');
+    }
+    requireN8nRecoveryHostIdentity(codexHome, pluginInspection, preTransaction, {
+      activeLock: lock,
+      allowObsolete: true,
+      expectedSelection: initialHostIdentity.selection,
+      testHooks
+    });
+    if (!preTransaction.inspected.safe_to_reconcile) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Target-untouched n8n Skills owner is live or indeterminate');
+    }
+    const { backupPath, stagePath, stagePluginPath, targetPath } = preTransaction.validated;
+    if (n8nPathExists(backupPath)) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Target-untouched n8n Skills staging conflicts with an exact replacement backup');
+    }
+    const requireCanonicalTargetUntouched = () => {
+      const targetStat = requireOrdinaryN8nDirectory(targetPath, 'canonical n8n Skills target');
+      if (!n8nDirectoryIdentitiesMatch(
+        preTransaction.preTransaction.original_target_directory_identity,
+        n8nDirectoryIdentity(targetStat)
+      )) {
+        throw failClosedN8nRepair('recovery-evidence-invalid', 'Target-untouched n8n Skills target directory identity changed');
+      }
+      const targetState = classifyN8nSkillsCompatibility(targetPath);
+      if (!n8nCompatibilityEvidenceMatches(
+        preTransaction.preTransaction.approval_evidence,
+        targetState,
+        'repair-required'
+      )) {
+        throw failClosedN8nRepair('recovery-evidence-invalid', 'Canonical n8n Skills target changed after target-untouched staging began');
+      }
+      return targetState;
+    };
+    requireCanonicalTargetUntouched();
+    const stageStat = requireOrdinaryN8nDirectory(stagePath, 'owned n8n Skills staging generation');
+    if (
+      !n8nDirectoryIdentitiesMatch(
+        preTransaction.preTransaction.stage_directory_identity,
+        n8nDirectoryIdentity(stageStat)
+      )
+    ) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Target-untouched n8n Skills stage directory identity changed');
+    }
+    if (preTransaction.phases.copied) {
+      const stagePluginStat = requireOrdinaryN8nDirectory(stagePluginPath, 'copied n8n Skills staging tree');
+      if (!n8nDirectoryIdentitiesMatch(
+        preTransaction.phases.copied.staged_plugin_directory_identity,
+        n8nDirectoryIdentity(stagePluginStat)
+      )) {
+        throw failClosedN8nRepair('recovery-evidence-invalid', 'Copied n8n Skills staging tree directory identity changed');
+      }
+      if (preTransaction.phases.transformed || !preTransaction.phases.transforming) {
+        const stagedState = classifyN8nSkillsCompatibility(stagePluginPath);
+        const expectedEvidence = preTransaction.phases.transformed
+          ? preTransaction.phases.transformed.staged_evidence
+          : preTransaction.phases.copied.copied_evidence;
+        const expectedStatus = preTransaction.phases.transformed ? 'healthy' : 'repair-required';
+        if (!n8nCompatibilityEvidenceMatches(expectedEvidence, stagedState, expectedStatus)) {
+          throw failClosedN8nRepair('recovery-evidence-invalid', 'Owned n8n Skills staging tree changed after its durable phase evidence was recorded');
+        }
+      }
+    } else if (preTransaction.phases.transformed || !n8nPathExists(stagePath)) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Target-untouched n8n Skills staged-tree evidence is incomplete');
+    }
+    const cleanup = cleanupOwnedGeneration(preTransaction.generation, {
+      liveness: stagingLiveness,
+      beforeDelete: requireCanonicalTargetUntouched,
+      auxiliaryKinds: N8N_TRANSACTION_AUXILIARY_KINDS
+    });
+    if (!cleanup.cleaned) {
+      throw failClosedN8nRepair('recovery-cleanup-failed', 'Target-untouched n8n Skills staging residue could not be removed safely');
+    }
+    const reclassified = classifyN8nSkillsCompatibility(targetPath);
+    if (!n8nCompatibilityEvidenceMatches(
+      preTransaction.preTransaction.approval_evidence,
+      reclassified,
+      'repair-required'
+    )) {
+      throw failClosedN8nRepair('verification-failed', 'Canonical n8n Skills target changed while target-untouched staging was cleaned');
+    }
+    return { status: 'pre-transaction-cleaned' };
+  } finally {
+    releaseN8nSkillsTargetLock(lock);
+  }
+}
+
+function recoverInterruptedN8nReplacement({
+  codexHome,
+  pluginInspection,
+  write,
+  compatibilityContract = {},
+  stagingLiveness,
+  testHooks = {}
+}) {
+  const parityIdentity = n8nCompatibilityParityIdentity(
+    validateN8nSkillsCompatibilityContractParity(compatibilityContract)
+  );
+  discoverN8nSkillsCacheRoots(codexHome, {
+    allowUnclassifiedRegularFiles: true,
+    testHooks
+  });
+  let discovered = inspectN8nReplacementRecords(codexHome, parityIdentity, { liveness: stagingLiveness });
+  if (discovered.preTransactions.length === 1) {
+    return recoverTargetUntouchedN8nPreTransaction({
+      codexHome,
+      initial: discovered.preTransactions[0],
+      parityIdentity,
+      pluginInspection,
+      stagingLiveness,
+      write,
+      testHooks
+    });
+  }
+  if (discovered.transactions.length === 0) return { status: 'none' };
+  const initial = discovered.transactions[0];
+  const initialHostIdentity = requireN8nRecoveryHostIdentity(codexHome, pluginInspection, initial, {
+    allowObsolete: true,
+    testHooks
+  });
+  if (!write) {
+    throw failClosedN8nRepair('recovery-required', 'An interrupted owned n8n Skills transaction requires approved recovery before inspection can continue');
+  }
+  if (initial.inspected.classification === 'live-owned') {
+    throw failClosedN8nRepair('target-lock-contended', 'An owned n8n Skills transaction is still active; recovery did not mutate it');
+  }
+  if (!initial.inspected.safe_to_reconcile) {
+    throw failClosedN8nRepair('recovery-evidence-invalid', 'Interrupted n8n Skills ownership evidence is not safe to reconcile');
+  }
+  const lock = acquireN8nSkillsTargetLock(initial.validated.targetPath);
+  try {
+    discovered = inspectN8nReplacementRecords(codexHome, parityIdentity, { liveness: stagingLiveness });
+    if (discovered.transactions.length !== 1) {
+      throw failClosedN8nRepair('ambiguous-recovery', 'Interrupted n8n Skills transaction identity changed before recovery');
+    }
+    const transaction = discovered.transactions[0];
+    if (
+      transaction.generation.record.generation_id !== initial.generation.record.generation_id
+      || transaction.generation.record.ownership_token !== initial.generation.record.ownership_token
+    ) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Interrupted n8n Skills transaction ownership changed before recovery');
+    }
+    const hostIdentity = requireN8nRecoveryHostIdentity(
+      codexHome,
+      pluginInspection,
+      transaction,
+      {
+        activeLock: lock,
+        allowObsolete: true,
+        expectedSelection: initialHostIdentity.selection,
+        testHooks
+      }
+    );
+    const { backupPath, stagePluginPath, targetPath } = transaction.validated;
+    const targetExists = n8nPathExists(targetPath);
+    const backupExists = n8nPathExists(backupPath);
+    const stageExists = n8nPathExists(stagePluginPath);
+    const targetStat = targetExists ? requireOrdinaryN8nDirectory(targetPath, 'canonical n8n Skills target') : null;
+    const backupStat = backupExists ? requireOrdinaryN8nDirectory(backupPath, 'recorded n8n Skills backup') : null;
+    const stageStat = stageExists ? requireOrdinaryN8nDirectory(stagePluginPath, 'recorded n8n Skills stage') : null;
+    const targetState = targetExists ? classifyN8nSkillsCompatibility(targetPath) : null;
+    const backupState = backupExists ? classifyN8nSkillsCompatibility(backupPath) : null;
+    const stageState = stageExists ? classifyN8nSkillsCompatibility(stagePluginPath) : null;
+    const targetIsOriginal = n8nCompatibilityEvidenceMatches(transaction.transaction.approval_evidence, targetState, 'repair-required');
+    const targetIsWinner = n8nCompatibilityEvidenceMatches(transaction.transaction.staged_evidence, targetState, 'healthy');
+    const backupIsOriginal = n8nCompatibilityEvidenceMatches(transaction.transaction.approval_evidence, backupState, 'repair-required');
+    const stageIsWinner = n8nCompatibilityEvidenceMatches(transaction.transaction.staged_evidence, stageState, 'healthy');
+    const targetIsOwnedInstalledDirectory = targetStat && n8nDirectoryIdentitiesMatch(
+      transaction.transaction.staged_plugin_directory_identity,
+      n8nDirectoryIdentity(targetStat)
+    );
+    const phaseOrdinal = n8nRecoveryPhaseOrdinal(transaction);
+    if (
+      (targetIsOriginal && !n8nDirectoryIdentitiesMatch(transaction.transaction.original_target_directory_identity, n8nDirectoryIdentity(targetStat)))
+      || (backupIsOriginal && !n8nDirectoryIdentitiesMatch(transaction.transaction.original_target_directory_identity, n8nDirectoryIdentity(backupStat)))
+      || (targetIsWinner && !n8nDirectoryIdentitiesMatch(transaction.transaction.staged_plugin_directory_identity, n8nDirectoryIdentity(targetStat)))
+      || (stageIsWinner && !n8nDirectoryIdentitiesMatch(transaction.transaction.staged_plugin_directory_identity, n8nDirectoryIdentity(stageStat)))
+    ) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Interrupted n8n Skills directory identity no longer matches the exact owned transaction');
+    }
+
+    if (hostIdentity.status === 'obsolete') {
+      if (targetIsOriginal && !backupExists) {
+        cleanupN8nReplacementTransaction(transaction);
+        return { status: 'obsolete-original-preserved', currentSelection: hostIdentity.selection };
+      }
+      if (backupIsOriginal && !targetExists) {
+        renameSyncWithRetry(backupPath, targetPath);
+      } else if (
+        backupIsOriginal
+        && targetIsOwnedInstalledDirectory
+        && phaseOrdinal >= 40
+      ) {
+        fs.rmSync(targetPath, { recursive: true });
+        renameSyncWithRetry(backupPath, targetPath);
+      } else {
+        throw failClosedN8nRepair('conflicting-recovery', 'Obsolete n8n Skills transaction cannot be restored without changing an unrelated canonical target');
+      }
+      const restored = classifyN8nSkillsCompatibility(targetPath);
+      if (!n8nCompatibilityEvidenceMatches(transaction.transaction.approval_evidence, restored, 'repair-required')) {
+        throw failClosedN8nRepair('verification-failed', 'Obsolete n8n Skills transaction failed exact original restoration verification');
+      }
+      cleanupN8nReplacementTransaction(transaction);
+      return { status: 'obsolete-original-restored', currentSelection: hostIdentity.selection };
+    }
+
+    if (targetIsWinner) {
+      if (phaseOrdinal < 30) {
+        throw failClosedN8nRepair('recovery-evidence-invalid', 'Installed n8n Skills winner conflicts with the recorded transaction phase');
+      }
+      if (backupExists && !backupIsOriginal && phaseOrdinal < 70) {
+        throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup does not match the approved original tree');
+      }
+      cleanupN8nReplacementTransaction(transaction);
+      return { status: 'winner-preserved' };
+    }
+    if (targetIsOriginal && !backupExists) {
+      cleanupN8nReplacementTransaction(transaction);
+      return { status: 'original-preserved' };
+    }
+    if (!targetIsWinner && targetIsOwnedInstalledDirectory && backupIsOriginal && phaseOrdinal >= 40) {
+      requireExactN8nOriginalBackup(backupPath, transaction.transaction);
+      fs.rmSync(targetPath, { recursive: true });
+      renameSyncWithRetry(backupPath, targetPath);
+      const restored = classifyN8nSkillsCompatibility(targetPath);
+      if (!n8nCompatibilityEvidenceMatches(transaction.transaction.approval_evidence, restored, 'repair-required')) {
+        throw failClosedN8nRepair('verification-failed', 'Recovered n8n Skills original failed exact restoration verification');
+      }
+      cleanupN8nReplacementTransaction(transaction);
+      return { status: 'original-restored' };
+    }
+    if (targetExists) {
+      throw failClosedN8nRepair('conflicting-recovery', 'Canonical n8n Skills target conflicts with the interrupted owned transaction');
+    }
+    if (!backupIsOriginal) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'A missing canonical n8n Skills target has no exact verified owned backup');
+    }
+    if (phaseOrdinal < 10 || phaseOrdinal > 70) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Missing canonical n8n Skills target conflicts with the recorded transaction phase');
+    }
+    if (stageIsWinner && phaseOrdinal <= 30) {
+      writeN8nReplacementPhase(transaction.generation, 'n8n-replacement-phase-20-displaced', {
+        backup_directory_identity: transaction.transaction.original_target_directory_identity
+      });
+      writeN8nReplacementPhase(transaction.generation, 'n8n-replacement-phase-30-install', {
+        staged_plugin_directory_identity: transaction.transaction.staged_plugin_directory_identity
+      });
+      renameSyncWithRetry(stagePluginPath, targetPath);
+      writeN8nReplacementPhase(transaction.generation, 'n8n-replacement-phase-40-installed', {
+        installed_directory_identity: transaction.transaction.staged_plugin_directory_identity
+      });
+      const installed = classifyN8nSkillsCompatibility(targetPath);
+      if (!n8nCompatibilityEvidenceMatches(transaction.transaction.staged_evidence, installed, 'healthy')) {
+        requireExactN8nOriginalBackup(backupPath, transaction.transaction);
+        const installedStat = requireOrdinaryN8nDirectory(targetPath, 'failed recovered n8n Skills replacement');
+        if (!n8nDirectoryIdentitiesMatch(
+          transaction.transaction.staged_plugin_directory_identity,
+          n8nDirectoryIdentity(installedStat)
+        )) {
+          throw failClosedN8nRepair('recovery-evidence-invalid', 'Failed recovered n8n Skills target no longer matches the exact staged directory identity');
+        }
+        fs.rmSync(targetPath, { recursive: true });
+        renameSyncWithRetry(backupPath, targetPath);
+        throw failClosedN8nRepair('verification-failed', 'Recovered n8n Skills winner failed exact installed verification; the original was restored');
+      }
+      writeN8nReplacementPhase(transaction.generation, 'n8n-replacement-phase-60-verified');
+      cleanupN8nReplacementTransaction(transaction);
+      return { status: 'replacement-completed' };
+    }
+    renameSyncWithRetry(backupPath, targetPath);
+    const restored = classifyN8nSkillsCompatibility(targetPath);
+    if (!n8nCompatibilityEvidenceMatches(transaction.transaction.approval_evidence, restored, 'repair-required')) {
+      throw failClosedN8nRepair('verification-failed', 'Recovered n8n Skills original failed exact restoration verification');
+    }
+    cleanupN8nReplacementTransaction(transaction);
+    return { status: 'original-restored' };
+  } finally {
+    releaseN8nSkillsTargetLock(lock);
+  }
+}
+
+function revalidateN8nSelectedCacheInventory(entry, options = {}) {
+  if (!entry.inventory_digest || !entry.inventory_parent) return null;
+  const codexHome = path.resolve(entry.inventory_parent, '..', '..', '..', '..');
+  const inventory = discoverN8nSkillsCacheRoots(codexHome, {
+    activeLock: options.activeLock,
+    testHooks: options.testHooks,
+    transaction: options.transaction
+  });
+  requireN8nInventorySelectionBinding(entry, inventory);
+  return inventory;
+}
+
+function replaceSelectedN8nSkillsCache(
+  generation,
+  entry,
+  proposal,
+  stagedState,
+  parityIdentity,
+  testHooks = {},
+  inventoryOptions = {}
+) {
+  const targetPath = path.resolve(generation.record.expected_final_target);
+  const stagePluginPath = path.join(generation.stagePath, 'plugin');
+  const backupPath = n8nReplacementBackupPath(generation);
+  if (n8nPathExists(backupPath)) {
+    throw failClosedN8nRepair('conflicting-recovery', 'The exact n8n Skills transaction backup target already exists');
+  }
+  const transaction = registerN8nReplacementTransaction(generation, entry, proposal, stagedState, parityIdentity);
+  if (testHooks.afterN8nRepairTransactionRegistration) {
+    testHooks.afterN8nRepairTransactionRegistration({ generation, transaction });
+  }
+  const transactionContext = {
+    generation,
+    preTransaction: inventoryOptions.preTransactionContext,
+    transaction,
+    validated: validateN8nReplacementTransaction(generation, transaction, parityIdentity)
+  };
+  revalidateN8nSelectedCacheInventory(entry, {
+    activeLock: inventoryOptions.activeLock,
+    testHooks,
+    transaction: transactionContext
+  });
+  let backupCreated = false;
+  let targetInstalled = false;
+  let installedVerified = false;
+  try {
+    writeN8nReplacementPhase(generation, 'n8n-replacement-phase-10-displace', {
+      original_target_directory_identity: transaction.original_target_directory_identity
+    });
+    renameSyncWithRetry(targetPath, backupPath, testHooks.replaceDirectoryOptions || {});
+    backupCreated = true;
+    writeN8nReplacementPhase(generation, 'n8n-replacement-phase-20-displaced', {
+      backup_directory_identity: transaction.original_target_directory_identity
+    });
+    if (testHooks.afterN8nRepairTargetDisplaced) testHooks.afterN8nRepairTargetDisplaced({ generation });
+    writeN8nReplacementPhase(generation, 'n8n-replacement-phase-30-install', {
+      staged_plugin_directory_identity: transaction.staged_plugin_directory_identity
+    });
+    renameSyncWithRetry(stagePluginPath, targetPath, testHooks.replaceDirectoryOptions || {});
+    targetInstalled = true;
+    writeN8nReplacementPhase(generation, 'n8n-replacement-phase-40-installed', {
+      installed_directory_identity: transaction.staged_plugin_directory_identity
+    });
+    if (testHooks.afterN8nRepairStageInstalled) testHooks.afterN8nRepairStageInstalled({ generation });
+    writeN8nReplacementPhase(generation, 'n8n-replacement-phase-50-verify');
+    if (testHooks.beforeN8nRepairVerification) {
+      testHooks.beforeN8nRepairVerification({ pluginRoot: targetPath, proposal: { ...proposal } });
+    }
+    const verified = classifyN8nSkillsCompatibility(targetPath);
+    requireSelectedN8nVersionAgreement(entry, verified);
+    if (!n8nCompatibilityEvidenceMatches(transaction.staged_evidence, verified, 'healthy')) {
+      throw failClosedN8nRepair(
+        'verification-failed',
+        `n8n Skills repair verification failed: ${verified.reason || verified.status}`
+      );
+    }
+    writeN8nReplacementPhase(generation, 'n8n-replacement-phase-60-verified');
+    installedVerified = true;
+    if (testHooks.afterN8nRepairVerification) testHooks.afterN8nRepairVerification({ generation });
+    authorizeN8nWinnerBackupCleanup(generation, transaction, backupPath, targetPath);
+    if (testHooks.afterN8nBackupCleanupAuthorization) {
+      testHooks.afterN8nBackupCleanupAuthorization({ generation });
+    }
+    removeExactN8nBackupResumably(backupPath, transaction, {
+      resuming: true,
+      testHooks
+    });
+  } catch (error) {
+    if (installedVerified) {
+      error.preserveOwnedStaging = true;
+      throw error;
+    }
+    try {
+      const backupAvailable = backupCreated && n8nPathExists(backupPath);
+      if (backupCreated && !backupAvailable && targetInstalled) {
+        throw failClosedN8nRepair(
+          'recovery-evidence-invalid',
+          'Failed n8n Skills replacement retained its installed target because the exact original backup is unavailable'
+        );
+      }
+      if (backupAvailable) requireExactN8nOriginalBackup(backupPath, transaction);
+      if (targetInstalled && n8nPathExists(targetPath)) {
+        const failedTargetStat = requireOrdinaryN8nDirectory(targetPath, 'failed n8n Skills replacement');
+        if (!n8nDirectoryIdentitiesMatch(
+          transaction.staged_plugin_directory_identity,
+          n8nDirectoryIdentity(failedTargetStat)
+        )) {
+          throw failClosedN8nRepair('recovery-evidence-invalid', 'Failed n8n Skills replacement no longer matches the exact staged directory identity');
+        }
+        fs.rmSync(targetPath, { recursive: true });
+        if (testHooks.afterN8nRepairFailedTargetRemoved) {
+          testHooks.afterN8nRepairFailedTargetRemoved({ generation, transaction });
+        }
+      }
+      if (backupAvailable) {
+        renameSyncWithRetry(backupPath, targetPath, testHooks.replaceDirectoryOptions || {});
+        if (testHooks.afterN8nRepairBackupRestored) {
+          testHooks.afterN8nRepairBackupRestored({ generation, transaction });
+        }
+      }
+    } catch (rollbackError) {
+      error.preserveOwnedStaging = true;
+      error.message = `${error.message}; exact rollback could not be completed safely`;
+      error.rollbackError = rollbackError;
+    }
+    throw error;
+  }
+}
+
+function reconcileSelectedN8nSkillsCache(entry, options = {}) {
+  const pluginRoot = path.resolve(entry.plugin_root);
+  const write = Boolean(options.write);
+  const testHooks = options.testHooks || {};
+  const parityIdentity = n8nCompatibilityParityIdentity(
+    validateN8nSkillsCompatibilityContractParity(options.compatibilityContract || {})
+  );
+  const proposal = classifyN8nSkillsCompatibility(pluginRoot);
+  requireSelectedN8nVersionAgreement(entry, proposal);
+  const preview = reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: false });
+  if (!write || proposal.status === 'healthy') return preview;
+  if (proposal.status !== 'repair-required') {
+    throw new Error(proposal.reason || `n8n Skills compatibility state is ${proposal.status}`);
+  }
+
+  const lock = acquireN8nSkillsTargetLock(pluginRoot, testHooks.targetLockOptions || {});
+  try {
+    if (testHooks.afterN8nRepairLockAcquired) {
+      testHooks.afterN8nRepairLockAcquired({ pluginRoot, proposal: { ...proposal } });
+    }
+    if (testHooks.beforeN8nRepairRevalidation) {
+      testHooks.beforeN8nRepairRevalidation({ pluginRoot, proposal: { ...proposal } });
+    }
+    const revalidated = classifyN8nSkillsCompatibility(pluginRoot);
+    requireSelectedN8nVersionAgreement(entry, revalidated);
+    if (revalidated.status === 'healthy') {
+      return reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: false });
+    }
+    if (!sameN8nCompatibilityEvidence(proposal, revalidated)) {
+      throw failClosedN8nRepair(
+        'stale-repair-approval',
+        'n8n Skills repair approval is stale because the selected cache changed after inspection'
+      );
+    }
+    revalidateN8nSelectedCacheInventory(entry, {
+      activeLock: lock,
+      testHooks
+    });
+
+    return withOwnedStaging({
+      target: pluginRoot,
+      stagePrefix: `.${path.basename(pluginRoot)}.staging-`,
+      operation: 'n8n-skills-plugin-repair',
+      sourceType: 'codex-plugin',
+      auxiliaryKinds: N8N_TRANSACTION_AUXILIARY_KINDS
+    }, (stagePath, generation) => {
+      const stagedPluginRoot = path.join(stagePath, 'plugin');
+      const preTransaction = registerN8nPreTransaction(generation, entry, proposal, parityIdentity);
+      const preTransactionContext = {
+        generation,
+        preTransaction,
+        validated: validateN8nPreTransaction(generation, preTransaction, parityIdentity)
+      };
+      if (testHooks.afterN8nPreTransactionRegistration) {
+        testHooks.afterN8nPreTransactionRegistration({ generation, preTransaction });
+      }
+      revalidateN8nSelectedCacheInventory(entry, {
+        activeLock: lock,
+        testHooks,
+        transaction: preTransactionContext
+      });
+      if (testHooks.duringN8nRepairStageCopy) {
+        testHooks.duringN8nRepairStageCopy({ generation, pluginRoot, stagedPluginRoot });
+      }
+      fs.cpSync(pluginRoot, stagedPluginRoot, { recursive: true });
+      const copiedState = classifyN8nSkillsCompatibility(stagedPluginRoot);
+      if (!sameN8nCompatibilityEvidence(proposal, copiedState)) {
+        throw failClosedN8nRepair('verification-failed', 'n8n Skills staged copy does not match the exact approved original tree');
+      }
+      const stagedPluginDirectoryIdentity = n8nDirectoryIdentity(
+        requireOrdinaryN8nDirectory(stagedPluginRoot, 'copied n8n Skills staging tree')
+      );
+      writeN8nPreTransactionPhase(generation, 'n8n-pre-transaction-phase-10-copied', {
+        copied_evidence: {
+          status: copiedState.status,
+          adapter_id: copiedState.adapter_id,
+          version: copiedState.version,
+          contract_digest: copiedState.contract_digest,
+          tree_digest: copiedState.tree_digest,
+          preserved_tree_digest: copiedState.preserved_tree_digest
+        },
+        staged_plugin_directory_identity: stagedPluginDirectoryIdentity
+      });
+      writeN8nPreTransactionPhase(generation, 'n8n-pre-transaction-phase-15-transforming', {
+        staged_plugin_directory_identity: stagedPluginDirectoryIdentity
+      });
+      if (testHooks.duringN8nRepairStageTransformation) {
+        testHooks.duringN8nRepairStageTransformation({ generation, pluginRoot, stagedPluginRoot });
+      }
+      const stagedRepair = reconcileN8nSkillsPlugin(stagedPluginRoot, { windows: true, write: true });
+      const stagedState = classifyN8nSkillsCompatibility(stagedPluginRoot);
+      if (
+        stagedState.status !== 'healthy'
+        || stagedState.adapter_id !== proposal.adapter_id
+        || stagedState.version !== proposal.version
+        || stagedState.preserved_tree_digest !== proposal.preserved_tree_digest
+      ) {
+        throw failClosedN8nRepair('verification-failed', 'n8n Skills staged repair verification failed');
+      }
+      writeN8nPreTransactionPhase(generation, 'n8n-pre-transaction-phase-20-transformed', {
+        staged_evidence: {
+          status: stagedState.status,
+          adapter_id: stagedState.adapter_id,
+          version: stagedState.version,
+          contract_digest: stagedState.contract_digest,
+          tree_digest: stagedState.tree_digest,
+          preserved_tree_digest: stagedState.preserved_tree_digest
+        },
+        staged_plugin_directory_identity: stagedPluginDirectoryIdentity
+      });
+
+      if (testHooks.beforeN8nRepairReplacement) {
+        testHooks.beforeN8nRepairReplacement({ pluginRoot, stagedPluginRoot, proposal: { ...proposal } });
+      }
+      const immediatelyBeforeWrite = classifyN8nSkillsCompatibility(pluginRoot);
+      requireSelectedN8nVersionAgreement(entry, immediatelyBeforeWrite);
+      if (!sameN8nCompatibilityEvidence(proposal, immediatelyBeforeWrite)) {
+        throw failClosedN8nRepair(
+          'stale-repair-approval',
+          'n8n Skills repair approval is stale because the selected cache changed before replacement'
+        );
+      }
+
+      if (testHooks.beforeN8nRepairTransactionRegistration) {
+        testHooks.beforeN8nRepairTransactionRegistration({ generation, pluginRoot, stagedPluginRoot });
+      }
+      replaceSelectedN8nSkillsCache(
+        generation,
+        entry,
+        proposal,
+        stagedState,
+        parityIdentity,
+        testHooks,
+        { activeLock: lock, preTransactionContext }
+      );
+      const finalState = classifyN8nSkillsCompatibility(pluginRoot);
+      return {
+        ...finalState,
+        status: 'repaired',
+        repaired: true,
+        actions: stagedRepair.actions || []
+      };
+    });
+  } finally {
+    releaseN8nSkillsTargetLock(lock);
+  }
 }
 
 function repairThirdPartyCodexPluginHooks(options = {}) {
@@ -3643,9 +5645,66 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
   const windows = options.windows ?? process.platform === 'win32';
   const write = Boolean(options.write);
   const currentPluginRoot = options.currentPluginRoot || runtimeCodexPluginRoot();
-  const discovered = discoverCodexPluginHookRoots({ codexHome, currentPluginRoot });
+  const pluginInspection = windows
+    ? (Object.prototype.hasOwnProperty.call(options, 'pluginList')
+      ? { ok: true, pluginList: options.pluginList, errors: [] }
+      : inspectCodexPluginList({ codexCommand: options.codexCommand || '' }))
+    : { ok: false, pluginList: [], errors: [] };
+  let recoveryResult = { status: 'none' };
+  if (windows) {
+    try {
+      recoveryResult = recoverInterruptedN8nReplacement({
+        codexHome,
+        pluginInspection,
+        write,
+        compatibilityContract: options.compatibilityContract || {},
+        testHooks: options.testHooks || {}
+      });
+    } catch (error) {
+      return {
+        status: error.code === 'disabled' ? 'not-needed' : 'repair-failed',
+        code: error.code || 'recovery-failed',
+        codex_home: codexHome,
+        write,
+        scanned: 0,
+        skipped: [],
+        repaired: [],
+        unchanged: [],
+        errors: error.code === 'disabled' ? [] : [error.message],
+        selection_status: error.code === 'disabled' ? 'disabled' : (error.code || 'recovery-failed')
+      };
+    }
+  }
+  let n8nDiscovery;
+  try {
+    n8nDiscovery = discoverN8nSkillsCacheRoots(codexHome, {
+      testHooks: options.testHooks || {}
+    });
+  } catch (error) {
+    return {
+      status: 'repair-failed',
+      code: error.code || 'ambiguous-target',
+      codex_home: codexHome,
+      write,
+      scanned: 0,
+      skipped: [],
+      repaired: [],
+      unchanged: [],
+      errors: [error.message],
+      selection_status: error.code || 'ambiguous-target'
+    };
+  }
+  const broadDiscovery = discoverCodexPluginHookRoots({ codexHome, currentPluginRoot });
+  const discovered = {
+    roots: [
+      ...broadDiscovery.roots.filter((entry) => entry.plugin_id !== 'n8n-skills@n8n-io'),
+      ...n8nDiscovery.roots
+    ],
+    skipped: broadDiscovery.skipped
+  };
   const result = {
     status: windows ? 'not-needed' : 'not-supported',
+    code: windows ? 'not-needed' : 'not-supported',
     codex_home: codexHome,
     write,
     scanned: 0,
@@ -3657,9 +5716,9 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
 
   if (!windows) return result;
 
-  const n8nCandidates = [];
+  const n8nCandidates = [...n8nDiscovery.roots];
   for (const entry of discovered.roots) {
-    if (entry.plugin_id === 'n8n-skills@n8n-io') n8nCandidates.push(entry);
+    if (entry.plugin_id === 'n8n-skills@n8n-io') continue;
     else result.skipped.push({ ...entry, reason: 'unrelated plugin; n8n Skills reconciliation is target-specific' });
   }
   if (n8nCandidates.length === 0) {
@@ -3667,30 +5726,29 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
     return result;
   }
 
-  const pluginInspection = Object.prototype.hasOwnProperty.call(options, 'pluginList')
-    ? { ok: true, pluginList: options.pluginList, errors: [] }
-    : inspectCodexPluginList({ codexCommand: options.codexCommand || '' });
-  const cliMatches = pluginInspection.ok
-    ? findInstalledPluginEntries(pluginInspection.pluginList, {
-      pluginId: 'n8n-skills@n8n-io',
-      name: 'n8n-skills',
-      marketplaceName: 'n8n-io'
+  const selection = recoveryResult.currentSelection?.selection_source === 'codex-config-cache-fallback'
+    ? revalidateN8nRecoverySelection(codexHome, recoveryResult.currentSelection, {
+      testHooks: options.testHooks || {}
     })
-    : [];
-  const selection = pluginInspection.ok && cliMatches.length > 0
-    ? selectCurrentN8nSkillsCache({
+    : selectCurrentN8nSkillsCacheIdentity({
       codexHome,
-      pluginList: pluginInspection.pluginList,
-      discovered
-    })
-    : selectCurrentN8nSkillsCacheFromConfig({ codexHome, discovered });
+      pluginInspection,
+      discovered: n8nDiscovery
+    });
+  result.selection_status = selection.status === 'ambiguous'
+    ? 'ambiguous-target'
+    : selection.status === 'missing'
+      ? 'identity-unverified'
+      : selection.status;
+  result.code = result.selection_status;
   if (selection.status !== 'selected') {
     for (const entry of n8nCandidates) {
       result.skipped.push({ ...entry, reason: 'historical or unverified n8n Skills cache; not current according to Codex installed state' });
     }
     result.skipped.sort((left, right) => left.plugin_root.localeCompare(right.plugin_root));
-    if (selection.status === 'not-installed') return result;
+    if (selection.status === 'not-installed' || selection.status === 'disabled') return result;
     result.status = 'repair-failed';
+    result.code = result.selection_status;
     result.errors = [
       selection.reason,
       ...(!pluginInspection.ok ? (pluginInspection.errors || []) : [])
@@ -3708,9 +5766,9 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
 
   for (const entry of targets) {
     try {
-      const repair = reconcileN8nSkillsPlugin(entry.plugin_root, {
-        windows: true,
-        write
+      const repair = reconcileSelectedN8nSkillsCache(entry, {
+        write,
+        testHooks: options.testHooks || {}
       });
       if (repair.repaired) {
         result.repaired.push({
@@ -3721,6 +5779,7 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
         result.unchanged.push({ ...entry, classification: repair.status });
       }
     } catch (error) {
+      if (error.code) result.code = error.code;
       result.errors.push(`${entry.plugin_id}: ${error.message}`);
     }
   }
@@ -3729,6 +5788,12 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
   else if (result.errors.length) result.status = 'repair-failed';
   else if (result.repaired.length) result.status = 'repaired';
   else result.status = 'not-needed';
+  if (!result.errors.length) result.code = result.status;
+  else if (result.code === result.selection_status) {
+    result.code = result.errors.some((message) => /verification failed/i.test(message))
+      ? 'verification-failed'
+      : result.status;
+  }
   result.errors = result.errors.slice(0, THIRD_PARTY_HOOK_REPAIR_ERROR_LIMIT);
   return result;
 }
@@ -4333,5 +6398,9 @@ module.exports = {
   runAgentRulesPreflight,
   formatAgentRulesPreflight,
   discoverCodexPluginHookRoots,
-  repairThirdPartyCodexPluginHooks
+  discoverN8nSkillsCacheRoots,
+  repairThirdPartyCodexPluginHooks,
+  recoverInterruptedN8nReplacement,
+  reconcileSelectedN8nSkillsCache,
+  n8nSkillsTargetLockIdentity
 };

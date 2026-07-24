@@ -481,3 +481,67 @@ test('daily source-watch removes hidden bidirectional controls from advisory rep
   assert.match(report, /Planning note/);
   assert.match(report, /Review advisory concepts only\./);
 });
+function copyCurrentN8nCompatibilityProject(workspace) {
+  const source = path.join(repoRoot, '_projects', 'n8n', 'skills-plugin-compatibility');
+  const target = path.join(workspace, '_projects', 'n8n', 'skills-plugin-compatibility');
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.cpSync(source, target, { recursive: true });
+  return path.join(target, 'SOURCE-LOCK.json');
+}
+
+async function withUnavailableMockGitHub(fn) {
+  const server = http.createServer((_request, response) => {
+    response.writeHead(503, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ message: 'synthetic source unavailable' }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  try {
+    await fn(`http://127.0.0.1:${port}`);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+test('n8n Skills source watch detects exact ref drift without promoting or mutating the adapter', async () => {
+  const currentWorkspace = tempWorkspace();
+  const currentLockPath = copyCurrentN8nCompatibilityProject(currentWorkspace);
+  const currentBefore = fs.readFileSync(currentLockPath);
+  const reportRel = 'repo/source-watch/reviews/active-third-party-updates.md';
+  await withMockGitHub('eb18fc3ab3e2820c748c2d84386fb5496efc1516', async (apiBaseUrl) => {
+    const result = await runScript(currentWorkspace, reportRel, apiBaseUrl);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /all pinned commits are current/i);
+    assert.equal(fs.existsSync(path.join(currentWorkspace, reportRel)), false);
+  });
+  assert.deepEqual(fs.readFileSync(currentLockPath), currentBefore);
+
+  const driftWorkspace = tempWorkspace();
+  const driftLockPath = copyCurrentN8nCompatibilityProject(driftWorkspace);
+  const driftBefore = fs.readFileSync(driftLockPath);
+  await withMockGitHub('3333333333333333333333333333333333333333', async (apiBaseUrl) => {
+    const result = await runScript(driftWorkspace, reportRel, apiBaseUrl);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /PR needed: yes/);
+    const report = fs.readFileSync(path.join(driftWorkspace, reportRel), 'utf8');
+    assert.match(report, /Source repo: `n8n-io\/skills`/);
+    assert.match(report, /Source ref: `main`/);
+    assert.match(report, /`hooks\/hooks\.json`/);
+    assert.match(report, /No SOURCE-LOCK pins were changed/);
+  });
+  assert.deepEqual(fs.readFileSync(driftLockPath), driftBefore, 'drift detection must not promote or mutate the exact adapter source lock');
+});
+
+test('n8n Skills source-watch unavailability is unverified and performs no mutation', async () => {
+  const workspace = tempWorkspace();
+  const lockPath = copyCurrentN8nCompatibilityProject(workspace);
+  const before = fs.readFileSync(lockPath);
+  const reportRel = 'repo/source-watch/reviews/active-third-party-updates.md';
+  await withUnavailableMockGitHub(async (apiBaseUrl) => {
+    const result = await runScript(workspace, reportRel, apiBaseUrl);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /GitHub API request failed \(503\)/);
+    assert.equal(fs.existsSync(path.join(workspace, reportRel)), false);
+  });
+  assert.deepEqual(fs.readFileSync(lockPath), before, 'unavailable source must not mutate compatibility metadata');
+});

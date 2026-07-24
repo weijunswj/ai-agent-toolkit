@@ -59,6 +59,50 @@ function runValidate(cwd) {
   return spawnSync(process.execPath, [validateScript], { cwd, encoding: 'utf8' });
 }
 
+test('validator rejects n8n compatibility contract-only drift', () => {
+  const cwd = tempCopy();
+  const contractPath = path.join(cwd, '_projects', 'n8n', 'skills-plugin-compatibility', '_main', 'compatibility-contract.json');
+  const contract = readJsonFile(contractPath);
+  contract.supported_adapters[0].repair_profile = 'contract-only-drift';
+  writeJsonFile(contractPath, contract);
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(`${result.stdout}\n${result.stderr}`, /compatibility contract\/runtime parity failed.*repair_profile/i);
+});
+
+test('validator rejects n8n compatibility runtime-only drift', () => {
+  const cwd = tempCopy();
+  const runtimePath = path.join(cwd, 'repo', 'scripts', 'repair-codex-plugin-windows-hooks.cjs');
+  const runtime = fs.readFileSync(runtimePath, 'utf8');
+  const changed = runtime.replace(
+    '"upstream_commit": "c350f8b4bd8417108bce266d88e21b8a1bb966db"',
+    '"upstream_commit": "0000000000000000000000000000000000000000"'
+  );
+  assert.notEqual(changed, runtime, 'runtime fixture must modify one compatibility identity');
+  fs.writeFileSync(runtimePath, changed, 'utf8');
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(`${result.stdout}\n${result.stderr}`, /compatibility contract\/runtime parity failed.*upstream_commit/i);
+});
+
+test('trusted workspace validation parses n8n runtime metadata without executing workspace JavaScript', () => {
+  const cwd = tempCopy();
+  const runtimePath = path.join(cwd, 'repo', 'scripts', 'repair-codex-plugin-windows-hooks.cjs');
+  const markerPath = path.join(cwd, 'workspace-runtime-executed');
+  const runtime = fs.readFileSync(runtimePath, 'utf8');
+  fs.writeFileSync(
+    runtimePath,
+    `require('node:fs').writeFileSync(${JSON.stringify(markerPath)}, 'executed');\n${runtime}`,
+    'utf8'
+  );
+  const result = spawnSync(process.execPath, [validateScript, '--workspace', cwd], {
+    cwd: os.tmpdir(),
+    encoding: 'utf8'
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(markerPath), false, 'target-workspace runtime must remain inert validation data');
+});
+
 function readJsonFile(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
@@ -516,13 +560,13 @@ test('Toolkit plugin packaged version surfaces stay aligned', () => {
   const bridgePath = path.join(cwd, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
   fs.writeFileSync(
     bridgePath,
-    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.8.2';", "const BRIDGE_VERSION = '2.2.1';"),
+    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.9.6';", "const BRIDGE_VERSION = '2.2.1';"),
     'utf8'
   );
 
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.8\.2/i);
+  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.9\.6/i);
 });
 
 test('skill discovery includes migrated skills', () => {
@@ -565,6 +609,7 @@ test('project manifests include the current project modules without repo-wide MC
     'development.windows-localhost-workflows',
     'knowledge.knowledge-index-updater',
     'n8n.local-setup',
+    'n8n.skills-plugin-compatibility',
     'n8n.workflow-toolkit',
     'repo-methodology.agent-skill-supply-chain-audit',
     'repo-methodology.context-preserving-ai-publisher'

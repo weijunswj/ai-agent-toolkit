@@ -11,9 +11,23 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 const auditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-n8n-skills-plugin-hooks.cjs');
 const repairScript = path.join(repoRoot, 'repo', 'scripts', 'repair-codex-plugin-windows-hooks.cjs');
 const supportedFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
+const currentManifestPath = path.join(
+  repoRoot,
+  '_projects',
+  'n8n',
+  'skills-plugin-compatibility',
+  '_main',
+  'plugins',
+  'n8n-skills',
+  '.codex-plugin',
+  'plugin.json'
+);
 const {
   N8N_SKILLS_COMPATIBILITY,
+  N8N_SKILLS_COMPATIBILITY_ADAPTERS,
+  N8N_SKILLS_TREE_LIMITS,
   classifyN8nSkillsCompatibility,
+  inspectN8nSkillsTree,
   n8nSkillsCompatibilityFingerprints,
   reconcileN8nSkillsPlugin
 } = require('../scripts/repair-codex-plugin-windows-hooks.cjs');
@@ -43,6 +57,12 @@ function makePluginRoot() {
 
 function copySupportedFixture(pluginRoot = makePluginRoot()) {
   fs.cpSync(supportedFixtureRoot, pluginRoot, { recursive: true, force: true });
+  return pluginRoot;
+}
+
+function copyCurrentSupportedFixture(pluginRoot = makePluginRoot()) {
+  copySupportedFixture(pluginRoot);
+  fs.copyFileSync(currentManifestPath, path.join(pluginRoot, '.codex-plugin', 'plugin.json'));
   return pluginRoot;
 }
 
@@ -173,7 +193,7 @@ function runPowerShellWrapperHook(pluginRoot, relPath, input, envOverrides = {})
     ],
     {
       cwd: pluginRoot,
-      input: JSON.stringify(input),
+      input: Buffer.from(JSON.stringify(input), 'utf8'),
       encoding: 'utf8',
       env: {
         ...process.env,
@@ -1078,6 +1098,11 @@ test('n8n-skills Windows hook repair wraps hooks, adds Node fallbacks, and verif
     );
     assert.equal(wrapperWithHostilePath.status, 0, wrapperWithHostilePath.stderr);
     assert.doesNotMatch(wrapperWithHostilePath.stderr, /command not found/i);
+    assert.notEqual(
+      wrapperWithHostilePath.stdout.trim(),
+      '',
+      `wrapper must emit JSON under the bounded Node-only PATH: ${JSON.stringify(wrapperWithHostilePath)}`
+    );
     assert.equal(JSON.parse(wrapperWithHostilePath.stdout).hookSpecificOutput.hookEventName, 'PreToolUse');
   }
 
@@ -1186,10 +1211,10 @@ test('canonical compatibility accepts only CRLF-to-LF equivalence', () => {
     const pluginRoot = copySupportedCrlfFixture();
     entry.mutate(pluginRoot);
     const before = snapshotFiles(pluginRoot);
-    assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'malformed', entry.name);
+    assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'identity-unverified', entry.name);
     assert.throws(
       () => reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true }),
-      /malformed|partially repaired|fingerprint/i,
+      /source identity|partially repaired|fingerprint/i,
       entry.name
     );
     assertSnapshotEqual(pluginRoot, before, entry.name + ' must fail closed without writes');
@@ -1210,6 +1235,194 @@ test('supported n8n Skills 1.0.1 compatibility inspection is exact and write-fre
   assert.equal(inspection.status, 'repair-required');
   assert.ok(inspection.actions.length > 0);
   assertSnapshotEqual(pluginRoot, before, 'inspection-only reconciliation must not write');
+});
+
+test('current n8n Skills 1.0.2 adapter is exact, repairable, verified, and idempotent', () => {
+  const pluginRoot = copyCurrentSupportedFixture();
+  const pristine = snapshotFiles(pluginRoot);
+  const classification = classifyN8nSkillsCompatibility(pluginRoot);
+  assert.equal(classification.status, 'repair-required');
+  assert.equal(classification.version, '1.0.2');
+  assert.equal(classification.adapter_id, 'n8n-skills-1.0.2-windows-hooks-v1');
+  assert.equal(classification.upstream_commit, 'eb18fc3ab3e2820c748c2d84386fb5496efc1516');
+
+  const inspection = reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: false });
+  assert.ok(inspection.actions.length > 0);
+  assertSnapshotEqual(pluginRoot, pristine, 'current-version inspection must not write');
+
+  const repaired = reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true });
+  assert.equal(repaired.status, 'repaired');
+  const healthy = classifyN8nSkillsCompatibility(pluginRoot);
+  assert.equal(healthy.status, 'healthy');
+  assert.equal(healthy.compatibility_scope, 'declared-windows-hook-contract');
+  assert.match(healthy.reason, /unrelated plugin content.*not attested/i);
+  assert.equal(healthy.version, '1.0.2');
+  assert.equal(readJson(path.join(pluginRoot, '.codex-plugin', 'plugin.json')).version, '1.0.2');
+  const repairedSnapshot = snapshotFiles(pluginRoot);
+  const second = reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true });
+  assert.equal(second.status, 'healthy');
+  assert.equal(second.repaired, false);
+  assertSnapshotEqual(pluginRoot, repairedSnapshot, 'current-version healthy rerun must be byte-identical');
+});
+
+test('previously repaired wrapper fingerprint remains healthy after BOM-safe wrapper update', () => {
+  const pluginRoot = copyCurrentSupportedFixture();
+  reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true });
+  const wrapperPath = path.join(pluginRoot, 'hooks', 'run-hook.ps1');
+  const current = fs.readFileSync(wrapperPath, 'utf8');
+  const legacy = current.replace(
+    [
+      'if ($stdin.Length -gt 0 -and $stdin[0] -eq [char]0xFEFF) {',
+      '  $stdin = $stdin.Substring(1)',
+      '} elseif ($stdin.Length -ge 3 -and $stdin[0] -eq [char]0x00EF -and $stdin[1] -eq [char]0x00BB -and $stdin[2] -eq [char]0x00BF) {',
+      '  $stdin = $stdin.Substring(3)',
+      '}',
+      ''
+    ].join('\r\n'),
+    ''
+  ).replace(
+    [
+      '$stdinBytes = [System.Text.UTF8Encoding]::new($false).GetBytes($stdin)',
+      '$process.StandardInput.BaseStream.Write($stdinBytes, 0, $stdinBytes.Length)',
+      '$process.StandardInput.BaseStream.Close()'
+    ].join('\r\n'),
+    '$process.StandardInput.Write($stdin)\r\n$process.StandardInput.Close()'
+  );
+  assert.notEqual(legacy, current, 'legacy wrapper fixture must remove only the BOM-safe input shim');
+  fs.writeFileSync(wrapperPath, legacy, 'utf8');
+  for (const relPath of [
+    'hooks/session-start.sh',
+    'hooks/pre-tool-use/_emit.sh',
+    'hooks/pre-tool-use/get-node.sh',
+    'hooks/post-tool-use/validate-workflow.sh'
+  ]) {
+    const filePath = path.join(pluginRoot, ...relPath.split('/'));
+    const bomSafe = fs.readFileSync(filePath, 'utf8');
+    const legacyHook = bomSafe.replaceAll('.replace(/^\\uFEFF/,"")', '');
+    assert.notEqual(legacyHook, bomSafe, `${relPath} must contain the BOM-safe parser shim`);
+    fs.writeFileSync(filePath, legacyHook, 'utf8');
+  }
+  assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'healthy');
+  const rerun = reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true });
+  assert.equal(rerun.status, 'healthy');
+  assert.equal(rerun.repaired, false);
+  assert.equal(fs.readFileSync(wrapperPath, 'utf8'), legacy, 'legacy healthy bytes remain an idempotent no-op');
+});
+
+test('selected cache tree identity rejects oversized unrelated files without buffering or mutation', () => {
+  const pluginRoot = copyCurrentSupportedFixture();
+  const oversized = path.join(pluginRoot, 'unrelated-large.bin');
+  fs.writeFileSync(oversized, Buffer.alloc(0));
+  fs.truncateSync(oversized, N8N_SKILLS_TREE_LIMITS.max_file_bytes + 1);
+  const before = fs.statSync(oversized).size;
+  const classification = classifyN8nSkillsCompatibility(pluginRoot);
+  assert.equal(classification.status, 'unsupported-layout');
+  assert.match(classification.reason, /regular file exceeds the supported byte limit/i);
+  assert.throws(() => reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true }), /supported byte limit/i);
+  assert.equal(fs.statSync(oversized).size, before);
+  assert.equal(fs.existsSync(path.join(pluginRoot, 'hooks', 'run-hook.ps1')), false);
+});
+
+test('selected cache tree identity rejects excessive unrelated directory depth before mutation', () => {
+  const pluginRoot = copyCurrentSupportedFixture();
+  let current = path.join(pluginRoot, 'unrelated-depth');
+  for (let index = 0; index <= N8N_SKILLS_TREE_LIMITS.max_depth; index += 1) {
+    current = path.join(current, `d${index}`);
+    fs.mkdirSync(current, { recursive: true });
+  }
+  const classification = classifyN8nSkillsCompatibility(pluginRoot);
+  assert.equal(classification.status, 'unsupported-layout');
+  assert.match(classification.reason, /supported directory depth/i);
+  assert.throws(() => reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: true }), /supported directory depth/i);
+  assert.equal(fs.existsSync(path.join(pluginRoot, 'hooks', 'run-hook.ps1')), false);
+});
+
+test('bounded hook tree inspection accepts a synthetic layout at every exact supported ceiling', () => {
+  const pluginRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-skills-tree-limit-'));
+  const hooksRoot = path.join(pluginRoot, 'hooks');
+  fs.mkdirSync(hooksRoot);
+  let deepest = hooksRoot;
+  for (let index = 0; index < N8N_SKILLS_TREE_LIMITS.max_depth - 1; index += 1) {
+    deepest = path.join(deepest, `depth-${index}`);
+    fs.mkdirSync(deepest);
+  }
+  const remainingDirectories = N8N_SKILLS_TREE_LIMITS.max_directories - N8N_SKILLS_TREE_LIMITS.max_depth;
+  for (let index = 0; index < remainingDirectories; index += 1) {
+    fs.mkdirSync(path.join(hooksRoot, `directory-${index}`));
+  }
+  for (let index = 0; index < N8N_SKILLS_TREE_LIMITS.max_files; index += 1) {
+    const filePath = path.join(hooksRoot, `file-${index}.bin`);
+    fs.closeSync(fs.openSync(filePath, 'wx'));
+    if (index < 4) fs.truncateSync(filePath, N8N_SKILLS_TREE_LIMITS.max_file_bytes);
+  }
+
+  const inspected = inspectN8nSkillsTree(
+    pluginRoot,
+    N8N_SKILLS_COMPATIBILITY_ADAPTERS['1.0.2']
+  );
+  assert.deepEqual(inspected.counts, {
+    files: N8N_SKILLS_TREE_LIMITS.max_files,
+    directories: N8N_SKILLS_TREE_LIMITS.max_directories,
+    total_bytes: N8N_SKILLS_TREE_LIMITS.max_total_bytes
+  });
+  assert.equal(inspected.hook_files.length, N8N_SKILLS_TREE_LIMITS.max_files);
+  assert.equal(fs.existsSync(deepest), true);
+});
+
+test('bounded hook tree inspection rejects same-size file replacement and directory entry races', () => {
+  const adapter = N8N_SKILLS_COMPATIBILITY_ADAPTERS['1.0.2'];
+  for (let iteration = 0; iteration < 12; iteration += 1) {
+    const fileRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-skills-file-race-'));
+    const racedFile = path.join(fileRoot, 'hooks', 'raced.bin');
+    fs.mkdirSync(path.dirname(racedFile));
+    fs.writeFileSync(racedFile, Buffer.alloc(128 * 1024, 0x41));
+    const fixedTimestamp = new Date(Math.floor(Date.now() / 1000) * 1000);
+    fs.utimesSync(racedFile, fixedTimestamp, fixedTimestamp);
+    const originalStat = fs.statSync(racedFile);
+    let replaced = false;
+    assert.throws(
+      () => inspectN8nSkillsTree(fileRoot, adapter, N8N_SKILLS_TREE_LIMITS, {
+        afterReadChunk({ pass, relPath }) {
+          if (replaced || pass !== 1 || relPath !== 'hooks/raced.bin') return;
+          replaced = true;
+          fs.writeFileSync(racedFile, Buffer.alloc(128 * 1024, 0x42));
+          fs.utimesSync(racedFile, originalStat.atime, originalStat.mtime);
+          const replacedStat = fs.statSync(racedFile);
+          assert.equal(replacedStat.size, originalStat.size);
+          assert.equal(String(replacedStat.dev), String(originalStat.dev));
+          assert.equal(String(replacedStat.ino), String(originalStat.ino));
+          assert.equal(Math.trunc(replacedStat.mtimeMs), Math.trunc(originalStat.mtimeMs));
+        }
+      }),
+      /changed while its identity was inspected/i
+    );
+    assert.equal(replaced, true, `iteration ${iteration} must perform the deterministic between-pass overwrite`);
+    assert.deepEqual(fs.readFileSync(racedFile), Buffer.alloc(128 * 1024, 0x42));
+  }
+
+  const directoryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-skills-directory-race-'));
+  const hooksRoot = path.join(directoryRoot, 'hooks');
+  fs.mkdirSync(hooksRoot);
+  fs.writeFileSync(path.join(hooksRoot, 'existing.bin'), 'existing\n');
+  const originalReaddirSync = fs.readdirSync;
+  let changed = false;
+  fs.readdirSync = function patchedReaddirSync(directoryPath, ...args) {
+    const entries = originalReaddirSync.call(this, directoryPath, ...args);
+    if (!changed && path.resolve(directoryPath) === path.resolve(hooksRoot)) {
+      changed = true;
+      fs.writeFileSync(path.join(hooksRoot, 'late.bin'), 'late\n');
+      fs.utimesSync(hooksRoot, new Date(1000), new Date(1000));
+    }
+    return entries;
+  };
+  try {
+    assert.throws(
+      () => inspectN8nSkillsTree(directoryRoot, adapter),
+      /changed while its identity was inspected/i
+    );
+  } finally {
+    fs.readdirSync = originalReaddirSync;
+  }
 });
 
 test('supported refresh is repaired, verified, and byte-idempotent', () => {
@@ -1247,41 +1460,172 @@ test('supported refresh is repaired, verified, and byte-idempotent', () => {
 test('unknown and partially repaired n8n Skills shapes fail closed', () => {
   const unknownRoot = copySupportedFixture();
   const unknownManifest = readJson(path.join(unknownRoot, '.codex-plugin', 'plugin.json'));
-  unknownManifest.version = '1.0.2';
+  unknownManifest.version = '1.0.3';
   writeJson(path.join(unknownRoot, '.codex-plugin', 'plugin.json'), unknownManifest);
   const unknownBefore = snapshotFiles(unknownRoot);
-  assert.equal(classifyN8nSkillsCompatibility(unknownRoot).status, 'compatibility-drift');
+  assert.equal(classifyN8nSkillsCompatibility(unknownRoot).status, 'unsupported-version');
   assert.throws(
     () => reconcileN8nSkillsPlugin(unknownRoot, { windows: true, write: true }),
-    /compatibility contract changed|unsupported/i
+    /exact adapter|unsupported/i
   );
   assertSnapshotEqual(unknownRoot, unknownBefore, 'unknown versions must not be modified');
 
   const partialRoot = copySupportedFixture();
-  fs.appendFileSync(path.join(partialRoot, 'hooks', 'session-start.sh'), '# local drift\n', 'utf8');
+  reconcileN8nSkillsPlugin(partialRoot, { windows: true, write: true });
+  fs.copyFileSync(
+    path.join(supportedFixtureRoot, 'hooks', 'session-start.sh'),
+    path.join(partialRoot, 'hooks', 'session-start.sh')
+  );
   const partialBefore = snapshotFiles(partialRoot);
-  assert.equal(classifyN8nSkillsCompatibility(partialRoot).status, 'malformed');
+  assert.equal(classifyN8nSkillsCompatibility(partialRoot).status, 'partial-repair');
   assert.throws(
     () => reconcileN8nSkillsPlugin(partialRoot, { windows: true, write: true }),
-    /malformed|partially repaired|fingerprint/i
+    /mixture|partially repaired|source identity/i
   );
   assertSnapshotEqual(partialRoot, partialBefore, 'ambiguous supported-version state must not be modified');
 
   const missingRoot = copySupportedFixture();
   fs.unlinkSync(path.join(missingRoot, 'hooks', 'pre-tool-use', 'execute-workflow.sh'));
   const missingBefore = snapshotFiles(missingRoot);
-  assert.equal(classifyN8nSkillsCompatibility(missingRoot).status, 'malformed');
-  assert.throws(() => reconcileN8nSkillsPlugin(missingRoot, { windows: true, write: true }), /malformed|fingerprint/i);
+  assert.equal(classifyN8nSkillsCompatibility(missingRoot).status, 'unsupported-layout');
+  assert.throws(() => reconcileN8nSkillsPlugin(missingRoot, { windows: true, write: true }), /layout|missing/i);
   assertSnapshotEqual(missingRoot, missingBefore, 'missing required hook state must not be modified');
 });
 
+test('current adapter rejects wrong identity, unknown versions, malformed manifests, and layout drift', () => {
+  const cases = [
+    {
+      name: 'wrong source identity',
+      expected: 'identity-unverified',
+      mutate(root) {
+        const manifestPath = path.join(root, '.codex-plugin', 'plugin.json');
+        const manifest = readJson(manifestPath);
+        manifest.repository = 'https://github.com/example/not-official';
+        writeJson(manifestPath, manifest);
+      }
+    },
+    {
+      name: 'unknown older version',
+      expected: 'unsupported-version',
+      mutate(root) {
+        const manifestPath = path.join(root, '.codex-plugin', 'plugin.json');
+        const manifest = readJson(manifestPath);
+        manifest.version = '0.9.9';
+        writeJson(manifestPath, manifest);
+      }
+    },
+    {
+      name: 'unsupported hook path',
+      expected: 'unsupported-layout',
+      mutate(root) {
+        const manifestPath = path.join(root, '.codex-plugin', 'plugin.json');
+        const manifest = readJson(manifestPath);
+        manifest.hooks = './hooks/hooks-v2.json';
+        writeJson(manifestPath, manifest);
+      }
+    },
+    {
+      name: 'unexpected critical hook file',
+      expected: 'unsupported-layout',
+      mutate(root) {
+        fs.writeFileSync(path.join(root, 'hooks', 'unexpected-critical.sh'), '#!/usr/bin/env bash\n', 'utf8');
+      }
+    },
+    {
+      name: 'malformed hook manifest',
+      expected: 'malformed',
+      mutate(root) {
+        fs.writeFileSync(path.join(root, 'hooks', 'hooks.json'), '{not-json\n', 'utf8');
+      }
+    }
+  ];
+
+  for (const entry of cases) {
+    const root = copyCurrentSupportedFixture();
+    entry.mutate(root);
+    const before = snapshotFiles(root);
+    const classification = classifyN8nSkillsCompatibility(root);
+    assert.equal(classification.status, entry.expected, entry.name);
+    assert.equal(classification.mutation_allowed, false, entry.name);
+    assert.ok(classification.code, entry.name);
+    assert.ok(classification.next_action, entry.name);
+    assert.throws(() => reconcileN8nSkillsPlugin(root, { windows: true, write: true }), /./, entry.name);
+    assertSnapshotEqual(root, before, `${entry.name} must fail closed`);
+  }
+});
+
+test('current adapter rejects a redirected hooks root before any repair', (t) => {
+  const root = copyCurrentSupportedFixture();
+  const realHooks = path.join(root, 'real-hooks');
+  const hooksRoot = path.join(root, 'hooks');
+  fs.renameSync(hooksRoot, realHooks);
+  try {
+    fs.symlinkSync(realHooks, hooksRoot, process.platform === 'win32' ? 'junction' : 'dir');
+  } catch (error) {
+    if (error.code === 'EPERM' || error.code === 'EACCES') {
+      t.skip(`directory link creation is unavailable: ${error.code}`);
+      return;
+    }
+    throw error;
+  }
+
+  const classification = classifyN8nSkillsCompatibility(root);
+  assert.equal(classification.status, 'unsupported-layout');
+  assert.match(classification.reason, /redirected|symbolic link|junction/i);
+  assert.throws(() => reconcileN8nSkillsPlugin(root, { windows: true, write: true }), /redirected|symbolic link|junction/i);
+  assert.equal(fs.existsSync(path.join(realHooks, 'run-hook.ps1')), false);
+});
+
+test('current partial repair is distinct and never rewritten', () => {
+  const root = copyCurrentSupportedFixture();
+  reconcileN8nSkillsPlugin(root, { windows: true, write: true });
+  fs.copyFileSync(
+    path.join(supportedFixtureRoot, 'hooks', 'pre-tool-use', '_emit.sh'),
+    path.join(root, 'hooks', 'pre-tool-use', '_emit.sh')
+  );
+  const before = snapshotFiles(root);
+  assert.equal(classifyN8nSkillsCompatibility(root).status, 'partial-repair');
+  assert.throws(() => reconcileN8nSkillsPlugin(root, { windows: true, write: true }), /mixture/i);
+  assertSnapshotEqual(root, before, 'current partial repair must remain unchanged');
+});
+
 test('source-watch records the authoritative n8n Skills compatibility baseline without mutation authority', () => {
+  const sourceLockPath = path.join(repoRoot, '_projects', 'n8n', 'skills-plugin-compatibility', 'SOURCE-LOCK.json');
+  const before = fs.readFileSync(sourceLockPath);
+  const sourceLock = JSON.parse(before.toString('utf8'));
+  assert.equal(sourceLock.source_repo, 'n8n-io/skills');
+  assert.equal(sourceLock.source_ref, 'main');
+  assert.equal(sourceLock.source_commit, 'eb18fc3ab3e2820c748c2d84386fb5496efc1516');
+  assert.equal(sourceLock.source_update_policy, 'manual_review_required');
+  assert.deepEqual(sourceLock.upstream_root_surface_paths, ['skills/using-n8n-skills-official/SKILL.md']);
+  assert.deepEqual(sourceLock.files.map((entry) => entry.source_path), [
+    '.codex-plugin/plugin.json',
+    '.agents/plugins/marketplace.json',
+    '.claude-plugin/marketplace.json',
+    '.claude-plugin/plugin.json',
+    'hooks/hooks.json',
+    'hooks/session-start.sh',
+    'hooks/pre-tool-use/_emit.sh',
+    'hooks/pre-tool-use/create-workflow.sh',
+    'hooks/pre-tool-use/execute-workflow.sh',
+    'hooks/pre-tool-use/get-node.sh',
+    'hooks/pre-tool-use/test-workflow.sh',
+    'hooks/pre-tool-use/update-workflow.sh',
+    'hooks/pre-tool-use/validate-workflow.sh',
+    'hooks/post-tool-use/validate-workflow.sh',
+    'skills/using-n8n-skills-official/SKILL.md',
+    'README.md',
+    'LICENSE'
+  ]);
+  assert.match(sourceLock.notes, /report-only/i);
+  assert.ok(sourceLock.files.every((entry) => /^[0-9a-f]{40}$/.test(entry.source_blob_sha)));
+  assert.deepEqual(fs.readFileSync(sourceLockPath), before, 'source-watch metadata inspection must not mutate its lock');
+
   const advisory = readJson(path.join(repoRoot, 'repo', 'source-watch', 'advisory-targets.json'));
-  const target = advisory.targets.find((entry) => entry.id === 'n8n-skills-hook-compatibility');
-  assert.ok(target);
-  assert.equal(target.repo, 'n8n-io/skills');
-  assert.equal(target.ref, 'main');
-  assert.equal(target.baseline_sha, 'c350f8b4bd8417108bce266d88e21b8a1bb966db');
-  assert.match(target.recommendation, /must not mutate installed caches/i);
-  assert.match(target.remaining_work, /#248/);
+  assert.equal(
+    advisory.targets.some((entry) => entry.id === 'n8n-skills-hook-compatibility'),
+    false,
+    'active SOURCE-LOCK tracking replaces the temporary advisory target'
+  );
+  assert.deepEqual(Object.keys(N8N_SKILLS_COMPATIBILITY_ADAPTERS).sort(), ['1.0.1', '1.0.2']);
 });

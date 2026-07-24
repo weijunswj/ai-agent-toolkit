@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-07-23",
+  "package_id": "n8n-skills@n8n-io",
+  "package_name": "n8n-skills",
+  "current_version": "1.0.2",
+  "upstream_repo": "n8n-io/skills",
+  "upstream_ref": "main",
+  "upstream_commit": "eb18fc3ab3e2820c748c2d84386fb5496efc1516",
+  "release_or_tag": null,
+  "supported_hosts": [
+    "codex",
+    "claude-code",
+    "plain-skill-install-without-hooks"
+  ],
+  "supported_adapters": [
+    {
+      "version": "1.0.1",
+      "upstream_commit": "c350f8b4bd8417108bce266d88e21b8a1bb966db",
+      "repair_profile": "windows-shell-wrapper-node-json-fallback-v1"
+    },
+    {
+      "version": "1.0.2",
+      "upstream_commit": "eb18fc3ab3e2820c748c2d84386fb5496efc1516",
+      "equivalent_prior_source_commit": "2c26822deb522ea2862d864b0c808b767a13aa9a",
+      "repair_profile": "windows-shell-wrapper-node-json-fallback-v1"
+    }
+  ],
+  "codex_install_layout": "repository-root local marketplace plugin",
+  "upstream_layout_note": "The current ref removed the mirrored plugins/n8n-skills bundle and now installs the repository root; the manifest, hook, and entry meta-skill blobs used by the adapter remain byte-identical.",
+  "current_upstream_windows_status": "repair-required",
+  "contract_paths": [
+    ".codex-plugin/plugin.json",
+    "hooks/hooks.json",
+    "hooks/session-start.sh",
+    "hooks/pre-tool-use/_emit.sh",
+    "hooks/pre-tool-use/create-workflow.sh",
+    "hooks/pre-tool-use/execute-workflow.sh",
+    "hooks/pre-tool-use/get-node.sh",
+    "hooks/pre-tool-use/test-workflow.sh",
+    "hooks/pre-tool-use/update-workflow.sh",
+    "hooks/pre-tool-use/validate-workflow.sh",
+    "hooks/post-tool-use/validate-workflow.sh",
+    "skills/using-n8n-skills-official/SKILL.md"
+  ],
+  "source_watch_policy": "report-only-manual-review-required"
+}

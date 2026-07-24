@@ -9,7 +9,7 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const TOOLKIT_PLUGIN_NAME = 'ai-agent-toolkit';
 const TOOLKIT_MARKETPLACE_NAME = 'ai-agent-toolkit-local';
-const EXPECTED_TOOLKIT_VERSION = '2.8.2';
+const EXPECTED_TOOLKIT_VERSION = '2.9.6';
 const MARKETPLACE_REL_PATH = '.agents/plugins/marketplace.json';
 const SESSION_START_LAUNCHER_REL_PATH = 'repo/scripts/toolkit-codex-session-start.cjs';
 const SESSION_START_POWERSHELL_REL_PATH = 'repo/scripts/toolkit-codex-session-start.ps1';
@@ -18,6 +18,8 @@ const SESSION_START_ARGS = ['--hook', '--sync-enabled', '--write', '--sync-sourc
 const CACHE_FINGERPRINT_PATHS = [
   '.codex-plugin/plugin.json',
   '.codex-plugin/hooks/hooks.json',
+  '_projects/n8n/skills-plugin-compatibility/SOURCE-LOCK.json',
+  '_projects/n8n/skills-plugin-compatibility/_main/compatibility-contract.json',
   'repo/scripts/codex-delegation-backup.cjs',
   'repo/scripts/codex-delegation-common.cjs',
   'repo/scripts/codex-delegation-config.cjs',

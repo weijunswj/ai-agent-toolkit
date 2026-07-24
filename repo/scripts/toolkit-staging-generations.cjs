@@ -18,10 +18,15 @@ function auxiliaryPath(recordPath, kind) {
   return recordPath.replace(/\.json$/, `.${kind}.json`);
 }
 
+function validAuxiliaryKind(kind) {
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(String(kind || ''));
+}
+
 function writeExclusiveJson(filePath, value) {
   const handle = fs.openSync(filePath, 'wx', 0o600);
   try {
     fs.writeFileSync(handle, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    fs.fsyncSync(handle);
   } finally {
     fs.closeSync(handle);
   }
@@ -197,6 +202,37 @@ function markOwnedStaging(generation, state) {
   });
 }
 
+function writeOwnedStagingAuxiliary(generation, kind, payload = {}) {
+  if (!validAuxiliaryKind(kind)) throw new Error('owned staging auxiliary kind is invalid');
+  const markerPath = auxiliaryPath(generation.recordPath, kind);
+  const value = {
+    ...payload,
+    owner: OWNER,
+    schema_version: SCHEMA_VERSION,
+    generation_id: generation.record.generation_id,
+    ownership_token: generation.record.ownership_token,
+    state: kind,
+    recorded_at: payload.recorded_at || new Date().toISOString()
+  };
+  writeExclusiveJson(markerPath, value);
+  return { markerPath, value };
+}
+
+function readOwnedStagingAuxiliary(generation, kind) {
+  if (!validAuxiliaryKind(kind)) throw new Error('owned staging auxiliary kind is invalid');
+  const markerPath = auxiliaryPath(generation.recordPath, kind);
+  if (!pathExistsLstat(markerPath)) return null;
+  const stat = fs.lstatSync(markerPath);
+  if (!stat.isFile() || stat.isSymbolicLink() || !samePath(fs.realpathSync.native(markerPath), markerPath)) {
+    throw new Error('owned staging auxiliary is not an ordinary direct file');
+  }
+  const value = readJson(markerPath);
+  if (!auxiliaryMatches(value, generation.record, kind)) {
+    throw new Error('owned staging auxiliary identity does not match its generation');
+  }
+  return { markerPath, value };
+}
+
 function validateRecordShape(record, recordPath, expectedParent) {
   if (!record || typeof record !== 'object') return 'record-not-an-object';
   if (record.owner !== OWNER || record.schema_version !== SCHEMA_VERSION) return 'owner-or-schema-mismatch';
@@ -214,7 +250,7 @@ function validateRecordShape(record, recordPath, expectedParent) {
   const expectedStageName = record.operation === 'hub-snapshot-replacement'
     ? `.staging-${record.generation_id}`
     : `.${path.basename(record.expected_final_target)}.staging-${record.generation_id}`;
-  if (!['hub-snapshot-replacement', 'target-directory-copy', 'target-skill-replacement'].includes(record.operation)) return 'operation-mismatch';
+  if (!['hub-snapshot-replacement', 'target-directory-copy', 'target-skill-replacement', 'n8n-skills-plugin-repair'].includes(record.operation)) return 'operation-mismatch';
   if (path.basename(record.expected_staging_path) !== expectedStageName) return 'staging-name-mismatch';
   if (!/^\d+\.\d+\.\d+$/.test(String(record.bridge_version || ''))) return 'bridge-version-mismatch';
   if (record.state !== 'registered' || !Number.isFinite(Date.parse(record.created_at || '')) || !Number.isFinite(Date.parse(record.creating_process?.started_at || ''))) return 'generation-state-or-time-mismatch';
@@ -329,9 +365,29 @@ function cleanupOwnedGeneration(generation, options = {}) {
   });
   if (!inspected.safe_to_reconcile) return { cleaned: false, preserved: true, reason: inspected.classification, inspection: inspected };
   const expectedRecordBytes = fs.readFileSync(generation.recordPath);
+  const auxiliaryKinds = [...new Set((options.auxiliaryKinds || []).map(String))];
+  const expectedAuxiliaryBytes = new Map();
+  for (const kind of auxiliaryKinds) {
+    if (!validAuxiliaryKind(kind)) {
+      return { cleaned: false, preserved: true, reason: 'invalid-auxiliary-kind', inspection: inspected };
+    }
+    const markerPath = auxiliaryPath(generation.recordPath, kind);
+    if (pathExistsLstat(markerPath)) {
+      const markerStat = fs.lstatSync(markerPath);
+      if (!markerStat.isFile() || markerStat.isSymbolicLink() || !samePath(fs.realpathSync.native(markerPath), markerPath)) {
+        return { cleaned: false, preserved: true, reason: 'owned-auxiliary-special', inspection: inspected };
+      }
+      expectedAuxiliaryBytes.set(markerPath, fs.readFileSync(markerPath));
+    }
+  }
   if (options.beforeDelete) options.beforeDelete({ generation, inspection: inspected });
   if (!fs.readFileSync(generation.recordPath).equals(expectedRecordBytes)) {
     return { cleaned: false, preserved: true, reason: 'ownership-record-changed', inspection: inspected };
+  }
+  for (const [markerPath, expectedBytes] of expectedAuxiliaryBytes) {
+    if (!pathExistsLstat(markerPath) || !fs.readFileSync(markerPath).equals(expectedBytes)) {
+      return { cleaned: false, preserved: true, reason: 'owned-auxiliary-changed', inspection: inspected };
+    }
   }
   const rechecked = inspectOwnedGeneration(generation.recordPath, {
     expectedParent: generation.record.expected_parent,
@@ -341,6 +397,7 @@ function cleanupOwnedGeneration(generation, options = {}) {
     return { cleaned: false, preserved: true, reason: 'ownership-changed-before-delete', inspection: rechecked };
   }
   if (pathExistsLstat(generation.stagePath)) fs.rmSync(generation.stagePath, { recursive: true });
+  for (const kind of auxiliaryKinds) fs.rmSync(auxiliaryPath(generation.recordPath, kind), { force: true });
   for (const kind of ['ready', 'completed', 'failed']) fs.rmSync(auxiliaryPath(generation.recordPath, kind), { force: true });
   fs.rmSync(generation.recordPath, { force: true });
   return { cleaned: true, preserved: false, reason: '', inspection: rechecked };
@@ -505,6 +562,8 @@ module.exports = {
   inspectOwnedGeneration,
   lookupExactOwnedGeneration,
   markOwnedStaging,
+  readOwnedStagingAuxiliary,
   reconcileOwnedStaging,
-  stagingOwnerLiveness
+  stagingOwnerLiveness,
+  writeOwnedStagingAuxiliary
 };
