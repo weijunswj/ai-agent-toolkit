@@ -16,7 +16,7 @@ Use in a consumer repo, not the toolkit repo.
 
 ## Boundary
 
-This is a safety checklist, not the runtime guide. Live n8n or Docker work requires current-turn approval naming the repo, environment, operation, workflow set, and exclusions.
+This short safety checklist is not the full runtime guide. Live n8n or Docker work requires approval naming the repo, environment, operation, workflow set, and exclusions.
 
 ## Export Review
 
