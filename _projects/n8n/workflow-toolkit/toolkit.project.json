@@ -5,9 +5,9 @@
   "title": "n8n Workflow Toolkit",
   "module_path": "_projects/n8n/workflow-toolkit",
   "main_path": "_projects/n8n/workflow-toolkit/_main",
-  "version": "1.3.5",
+  "version": "1.3.6",
   "version_policy": "semver",
-  "version_notes": "Installs canonical candidates without overwrite, defines a coherent batch commit point, and preserves exact cleanup residue without subset rollback.",
+  "version_notes": "Eliminates pathname-destructive canonical transaction operations by using identity-bound descriptor writes and exclusive missing-file creation.",
   "outputs": [
     {
       "kind": "curated",

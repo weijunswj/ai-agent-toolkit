@@ -3,7 +3,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const REPORT_SCHEMA_VERSION = 1;
-const TOOLKIT_VERSION = '2.9.9';
+const TOOLKIT_VERSION = '2.9.10';
 const RETENTION_DAYS = 90;
 const MAX_HISTORY_REPORTS = 500;
 const STABLE_CODES = new Set([
@@ -107,7 +107,7 @@ function nextActionForCode(code, context = {}) {
     },
     N8N_CANONICAL_TRANSACTION_NO_OVERWRITE_UNAVAILABLE: {
       code: 'USE_SUPPORTED_CANONICAL_FILESYSTEM',
-      message: 'Move the repository to a filesystem that supports same-directory hard-link no-overwrite installation, then rerun the unchanged official command.',
+      message: 'Move the repository to a filesystem that supports exclusive regular-file creation, then rerun the unchanged official command.',
     },
     N8N_CREDENTIAL_DISCOVERY_UNAVAILABLE: {
       code: 'RESTORE_CREDENTIAL_DISCOVERY_AND_RERUN',

@@ -158,9 +158,9 @@ function permissionMode(statMode) {
   return statMode & 0o777;
 }
 
-function applyInstalledMode(filePath, mode) {
+function applyDescriptorMode(descriptor, mode) {
   if (process.platform === 'win32') return;
-  fs.chmodSync(filePath, mode);
+  fs.fchmodSync(descriptor, mode);
 }
 
 function assertInstalledMode(filePath, mode) {
@@ -325,16 +325,6 @@ function sameCanonicalIdentity(expected, current) {
   );
 }
 
-function sameMovedFileIdentity(expected, current, expectedMode = expected?.mode) {
-  if (!expected?.exists || !current?.exists) return false;
-  if (!sameParentIdentity(expected.parent, current.parent)) return false;
-  if (expected.sha256 !== current.sha256 || expected.size !== current.size) return false;
-  if (process.platform !== 'win32' && current.mode !== expectedMode) return false;
-  if (expected.mtimeNs !== current.mtimeNs) return false;
-  if (expected.objectId !== null && current.objectId !== null && expected.objectId !== current.objectId) return false;
-  return true;
-}
-
 function assertCanonicalIdentity(expected, current, message) {
   if (!sameCanonicalIdentity(expected, current)) throw transactionDriftError(message);
 }
@@ -351,83 +341,188 @@ function absentIdentityAt(filePath, parentIdentity) {
   };
 }
 
-function exactTemporaryStillOwned(filePath, identity) {
-  if (!identity) return !fs.existsSync(filePath);
-  try {
-    return sameCanonicalIdentity(identity, captureCanonicalTargetIdentity(filePath));
-  } catch {
-    return false;
+/*
+ * Canonical transaction filesystem boundary matrix:
+ *
+ * - Existing target admission: open without following links, then bind the
+ *   descriptor and pathname to the authorized object before any write.
+ * - Existing target mutation: truncate/write/fsync/fchmod through that exact
+ *   descriptor. No pathname rename, replacement, unlink, or copy is used.
+ * - Missing target installation: O_CREAT | O_EXCL creates the destination
+ *   without overwriting an entry that appears at the boundary.
+ * - Precommit rollback: restore bytes and mode only through the same opened
+ *   descriptor. If the pathname no longer names that object, preserve the
+ *   external pathname state and report partial recovery.
+ * - Stage/quarantine/finally cleanup: eliminated. Candidate validation occurs
+ *   in memory before mutation, and no transaction-owned pathname needs unlink.
+ *
+ * Node does not expose an atomic compare-and-unlink or identity-bound rename.
+ * This helper therefore never treats stat(path) followed by rm/rename as safe.
+ */
+const TRANSACTION_FILESYSTEM_AUDIT = Object.freeze([
+  Object.freeze({ boundary: 'existing-target-admission', classification: 'identity-bound-open-descriptor' }),
+  Object.freeze({ boundary: 'existing-target-mutation', classification: 'identity-bound-descriptor-write' }),
+  Object.freeze({ boundary: 'missing-target-installation', classification: 'safe-no-overwrite-exclusive-create' }),
+  Object.freeze({ boundary: 'precommit-rollback', classification: 'identity-bound-descriptor-write-or-partial-recovery' }),
+  Object.freeze({ boundary: 'stage-cleanup', classification: 'eliminated-no-pathname' }),
+  Object.freeze({ boundary: 'quarantine-transition', classification: 'eliminated-no-pathname' }),
+  Object.freeze({ boundary: 'quarantine-cleanup', classification: 'eliminated-no-pathname' }),
+  Object.freeze({ boundary: 'finally-cleanup', classification: 'eliminated-no-pathname' }),
+]);
+
+function readDescriptorContent(descriptor, size) {
+  const length = Number(size);
+  if (!Number.isSafeInteger(length) || length < 0) {
+    throw transactionDriftError('Canonical transaction descriptor size could not be represented safely.');
   }
+  const content = Buffer.alloc(length);
+  let offset = 0;
+  while (offset < length) {
+    const bytesRead = fs.readSync(descriptor, content, offset, length - offset, offset);
+    if (bytesRead <= 0) throw transactionDriftError('Canonical transaction descriptor could not be read completely.');
+    offset += bytesRead;
+  }
+  return content;
 }
 
-function restoreBackupWithoutOverwrite(record, hooks, index) {
-  if (typeof hooks.beforeRollbackBackupRestore === 'function') {
-    hooks.beforeRollbackBackupRestore(record, index);
+function captureDescriptorIdentity(descriptor, filePath, parentIdentity) {
+  const statBefore = fs.fstatSync(descriptor, { bigint: true });
+  if (!statBefore.isFile()) {
+    throw transactionDriftError('Canonical transaction descriptor is not a regular file.');
   }
-  const backupCurrent = captureCanonicalTargetIdentity(record.backup);
-  if (!sameCanonicalIdentity(record.backupIdentity, backupCurrent)) return false;
-  const targetCurrent = captureCanonicalTargetIdentity(record.target);
-  if (!sameCanonicalIdentity(absentIdentityFor(record), targetCurrent)) return false;
+  const content = readDescriptorContent(descriptor, statBefore.size);
+  const statAfter = fs.fstatSync(descriptor, { bigint: true });
+  if (!sameStatIdentity(statIdentity(statBefore), statIdentity(statAfter))) {
+    throw transactionDriftError('Canonical transaction descriptor changed during identity capture.');
+  }
+  return {
+    exists: true,
+    realPath: comparablePath(filePath),
+    parent: parentIdentity,
+    ...statIdentity(statAfter),
+    sha256: crypto.createHash('sha256').update(content).digest('hex'),
+    content,
+  };
+}
+
+function writeDescriptorContent(descriptor, content, mode) {
+  fs.ftruncateSync(descriptor, 0);
+  let offset = 0;
+  while (offset < content.length) {
+    const written = fs.writeSync(descriptor, content, offset, content.length - offset, offset);
+    if (written <= 0) throw transactionError('Canonical transaction descriptor write did not make progress.');
+    offset += written;
+  }
+  applyDescriptorMode(descriptor, mode);
+  fs.fsyncSync(descriptor);
+}
+
+function openVerifiedExistingTarget(record, hooks, index) {
+  const noFollow = fs.constants.O_NOFOLLOW || 0;
+  let descriptor;
   try {
-    fs.linkSync(record.backup, record.target);
-  } catch {
-    return false;
+    descriptor = fs.openSync(record.target, fs.constants.O_RDWR | noFollow);
+    const descriptorIdentity = captureDescriptorIdentity(
+      descriptor,
+      record.target,
+      record.originalIdentity.parent
+    );
+    if (!sameCanonicalIdentity(record.originalIdentity, descriptorIdentity)) {
+      throw transactionDriftError('Canonical transaction opened target did not match its authorized identity.');
+    }
+    const pathIdentity = captureCanonicalTargetIdentity(record.target);
+    if (!sameCanonicalIdentity(descriptorIdentity, pathIdentity)) {
+      throw transactionDriftError('Canonical transaction target changed while binding its descriptor.');
+    }
+    if (typeof hooks.afterExistingTargetIdentityProof === 'function') {
+      hooks.afterExistingTargetIdentityProof(record, index);
+    }
+    const pathAfterHook = captureCanonicalTargetIdentity(record.target);
+    if (!sameCanonicalIdentity(descriptorIdentity, pathAfterHook)) {
+      throw transactionDriftError('Canonical transaction target changed after descriptor identity proof.');
+    }
+    record.targetDescriptor = descriptor;
+    record.descriptorIdentity = descriptorIdentity;
+    descriptor = undefined;
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
   }
-  const restored = captureCanonicalTargetIdentity(record.target);
-  if (!sameMovedFileIdentity(record.originalIdentity, restored, record.installMode)) return false;
-  const backupAfterLink = captureCanonicalTargetIdentity(record.backup);
-  if (!sameMovedFileIdentity(record.backupIdentity, backupAfterLink, record.installMode)) return false;
-  try {
-    fs.rmSync(record.backup, { force: false });
-  } catch {
-    return false;
-  }
-  record.originalMoved = false;
-  record.backupIdentity = null;
-  return true;
 }
 
 function installCandidateWithoutOverwrite(record, hooks, index) {
   if (typeof hooks.afterFinalTargetAbsence === 'function') {
     hooks.afterFinalTargetAbsence(record, index);
   }
-  if (!sameCanonicalIdentity(record.stageIdentity, captureCanonicalTargetIdentity(record.stage))) {
-    throw transactionDriftError('Canonical transaction stage changed at the no-overwrite installation boundary.');
-  }
+  let descriptor;
   try {
-    const linkCandidate = typeof hooks.linkCandidateNoOverwrite === 'function'
-      ? hooks.linkCandidateNoOverwrite
-      : (source, target) => fs.linkSync(source, target);
-    linkCandidate(record.stage, record.target, record, index);
+    const openCandidate = typeof hooks.openCandidateNoOverwrite === 'function'
+      ? hooks.openCandidateNoOverwrite
+      : (target, mode) => fs.openSync(
+        target,
+        fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_RDWR,
+        mode
+      );
+    descriptor = openCandidate(record.target, record.installMode, record, index);
   } catch (error) {
     if (error?.code === 'EEXIST') {
       throw transactionDriftError('Canonical transaction target appeared at the no-overwrite installation boundary.');
     }
     throw transactionNoOverwriteUnavailableError(error);
   }
+  record.targetDescriptor = descriptor;
+  descriptor = undefined;
   record.installed = true;
   record.mutatedByTransaction = true;
-  const installedBeforeMode = captureCanonicalTargetIdentity(record.target);
-  if (!sameMovedFileIdentity(record.stageIdentity, installedBeforeMode, record.stageIdentity.mode)) {
-    throw transactionDriftError('Canonical transaction candidate identity changed during no-overwrite installation.');
-  }
-  const stageAfterLink = captureCanonicalTargetIdentity(record.stage);
-  if (!sameMovedFileIdentity(record.stageIdentity, stageAfterLink, record.stageIdentity.mode)) {
-    throw transactionDriftError('Canonical transaction stage identity changed during no-overwrite installation.');
-  }
-  record.installedIdentity = installedBeforeMode;
-  record.stageIdentity = stageAfterLink;
-  applyInstalledMode(record.target, record.installMode);
+  const writeCandidate = typeof hooks.writeDescriptorContent === 'function'
+    ? hooks.writeDescriptorContent
+    : writeDescriptorContent;
+  writeCandidate(record.targetDescriptor, record.content, record.installMode, record, index);
+  record.descriptorIdentity = captureDescriptorIdentity(
+    record.targetDescriptor,
+    record.target,
+    record.originalIdentity.parent
+  );
   const installed = captureCanonicalTargetIdentity(record.target);
-  if (!sameMovedFileIdentity(record.installedIdentity, installed, record.installMode)) {
-    throw transactionDriftError('Canonical transaction candidate mode or identity changed during installation.');
-  }
-  const staged = captureCanonicalTargetIdentity(record.stage);
-  if (!sameMovedFileIdentity(record.stageIdentity, staged, record.installMode)) {
-    throw transactionDriftError('Canonical transaction stage mode or identity changed during installation.');
+  if (!sameCanonicalIdentity(record.descriptorIdentity, installed)) {
+    throw transactionDriftError('Canonical transaction candidate identity changed during exclusive installation.');
   }
   record.installedIdentity = installed;
-  record.stageIdentity = staged;
+}
+
+function installCandidateThroughDescriptor(record, hooks, index) {
+  if (typeof hooks.afterExistingTargetIdentityProofBeforeWrite === 'function') {
+    hooks.afterExistingTargetIdentityProofBeforeWrite(record, index);
+  }
+  record.mutatedByTransaction = true;
+  const writeCandidate = typeof hooks.writeDescriptorContent === 'function'
+    ? hooks.writeDescriptorContent
+    : writeDescriptorContent;
+  writeCandidate(record.targetDescriptor, record.content, record.installMode, record, index);
+  record.installed = true;
+  const descriptorIdentity = captureDescriptorIdentity(
+    record.targetDescriptor,
+    record.target,
+    record.originalIdentity.parent
+  );
+  const expectedHash = crypto.createHash('sha256').update(record.content).digest('hex');
+  if (
+    descriptorIdentity.sha256 !== expectedHash ||
+    descriptorIdentity.size !== String(record.content.length) ||
+    (process.platform !== 'win32' && descriptorIdentity.mode !== record.installMode) ||
+    (
+      record.originalIdentity.objectId !== null &&
+      descriptorIdentity.objectId !== null &&
+      record.originalIdentity.objectId !== descriptorIdentity.objectId
+    )
+  ) {
+    throw transactionDriftError('Canonical transaction descriptor did not contain the intended candidate.');
+  }
+  record.descriptorIdentity = descriptorIdentity;
+  const installed = captureCanonicalTargetIdentity(record.target);
+  if (!sameCanonicalIdentity(descriptorIdentity, installed)) {
+    throw transactionDriftError('Canonical transaction pathname changed during descriptor-bound installation.');
+  }
+  record.installedIdentity = installed;
 }
 
 function assertRecordPrecommitState(record) {
@@ -436,17 +531,21 @@ function assertRecordPrecommitState(record) {
     captureCanonicalTargetIdentity(record.target),
     'Canonical transaction candidate changed before commit.'
   );
-  assertCanonicalIdentity(
-    record.stageIdentity,
-    captureCanonicalTargetIdentity(record.stage),
-    'Canonical transaction stage changed before commit.'
+  const descriptorCurrent = captureDescriptorIdentity(
+    record.targetDescriptor,
+    record.target,
+    record.originalIdentity.parent
   );
-  if (record.originalMoved) {
-    assertCanonicalIdentity(
-      record.backupIdentity,
-      captureCanonicalTargetIdentity(record.backup),
-      'Canonical transaction original quarantine changed before commit.'
-    );
+  if (!sameCanonicalIdentity(record.installedIdentity, descriptorCurrent)) {
+    throw transactionDriftError('Canonical transaction opened candidate changed before commit.');
+  }
+  if (record.originalExists) {
+    if (
+      record.originalSnapshot.sha256 !== record.originalIdentity.sha256 ||
+      !record.originalSnapshot.content.equals(record.originalIdentity.content)
+    ) {
+      throw transactionDriftError('Canonical transaction original snapshot changed before commit.');
+    }
   }
   const currentParent = captureParentIdentity(record.target);
   if (!sameParentIdentity(record.originalIdentity.parent, currentParent)) {
@@ -457,32 +556,12 @@ function assertRecordPrecommitState(record) {
 function assertCommittedCandidateBatch(records) {
   for (const record of records) {
     const current = captureCanonicalTargetIdentity(record.target);
-    if (!record.installedIdentity || !sameMovedFileIdentity(record.installedIdentity, current, record.installMode)) return false;
+    if (!record.installedIdentity || !sameCanonicalIdentity(record.installedIdentity, current)) return false;
     if (process.platform !== 'win32' && current.mode !== record.installMode) return false;
     if (!sameParentIdentity(record.originalIdentity.parent, current.parent)) return false;
     record.installedIdentity = current;
   }
   return true;
-}
-
-function cleanupExactTemporary(record, property, identityProperty, hooks, hookName, index) {
-  const filePath = record[property];
-  const expectedIdentity = record[identityProperty];
-  if (!expectedIdentity) return;
-  if (typeof hooks[hookName] === 'function') hooks[hookName](record, index);
-  const current = captureCanonicalTargetIdentity(filePath);
-  if (!sameCanonicalIdentity(expectedIdentity, current)) {
-    throw transactionPartialRecoveryError();
-  }
-  const removeTemporary = typeof hooks.removeExactTemporary === 'function'
-    ? hooks.removeExactTemporary
-    : (target) => fs.rmSync(target, { force: false });
-  removeTemporary(filePath, record, property, index);
-  const absent = captureCanonicalTargetIdentity(filePath);
-  if (!sameCanonicalIdentity(absentIdentityAt(filePath, expectedIdentity.parent), absent)) {
-    throw transactionPartialRecoveryError();
-  }
-  record[identityProperty] = null;
 }
 
 function assertCompleteTransactionPostcondition(records) {
@@ -493,11 +572,13 @@ function assertCompleteTransactionPostcondition(records) {
       'Canonical transaction final candidate postcondition failed.'
     );
     assertInstalledMode(record.target, record.installMode);
-    for (const temporary of [record.stage, record.backup, record.rollbackStage]) {
-      const absent = captureCanonicalTargetIdentity(temporary);
-      if (!sameCanonicalIdentity(absentIdentityAt(temporary, record.originalIdentity.parent), absent)) {
-        throw transactionPartialRecoveryError();
-      }
+    const descriptorCurrent = captureDescriptorIdentity(
+      record.targetDescriptor,
+      record.target,
+      record.originalIdentity.parent
+    );
+    if (!sameCanonicalIdentity(record.installedIdentity, descriptorCurrent)) {
+      throw transactionPartialRecoveryError();
     }
   }
 }
@@ -508,55 +589,51 @@ function rollbackTransaction(records, hooks) {
     const record = records[index];
     try {
       if (!record.mutatedByTransaction) {
-        // The transaction never displaced or installed this target. Its
-        // current state belongs to the concurrent actor and must not be used
-        // as a rollback target.
         continue;
       }
-      if (record.installed) {
-        if (typeof hooks.beforeRollbackTargetRemoval === 'function') {
-          hooks.beforeRollbackTargetRemoval(record, index);
-        }
-        const targetCurrent = captureCanonicalTargetIdentity(record.target);
-        if (!record.installedIdentity || !sameCanonicalIdentity(record.installedIdentity, targetCurrent)) {
-          complete = false;
-          continue;
-        }
-        if (record.originalExists) {
-          const backupCurrent = captureCanonicalTargetIdentity(record.backup);
-          if (!record.backupIdentity || !sameCanonicalIdentity(record.backupIdentity, backupCurrent)) {
-            complete = false;
-            continue;
-          }
-        }
-        fs.rmSync(record.target, { force: false });
-        const absent = captureCanonicalTargetIdentity(record.target);
-        if (!sameCanonicalIdentity(absentIdentityFor(record), absent)) {
-          complete = false;
-          continue;
-        }
-        record.installed = false;
-        if (record.stageIdentity && fs.existsSync(record.stage)) {
-          const stageCurrent = captureCanonicalTargetIdentity(record.stage);
-          if (!sameMovedFileIdentity(record.stageIdentity, stageCurrent, record.stageIdentity.mode)) {
-            complete = false;
-            continue;
-          }
-          record.stageIdentity = stageCurrent;
-        }
+      // This capture is evidence only. It never authorizes pathname removal.
+      // The restore below is bound to targetDescriptor even if a concurrent
+      // actor replaces the canonical pathname after this proof.
+      record.rollbackPathIdentity = captureCanonicalTargetIdentity(record.target);
+      if (typeof hooks.afterRollbackIdentityProofBeforeDescriptorRestore === 'function') {
+        hooks.afterRollbackIdentityProofBeforeDescriptorRestore(record, index);
       }
-
-      if (record.originalMoved) {
-        if (!restoreBackupWithoutOverwrite(record, hooks, index)) complete = false;
-      } else if (record.originalExists) {
-        const current = captureCanonicalTargetIdentity(record.target);
-        if (!sameCanonicalIdentity(record.originalIdentity, current)) complete = false;
-      } else if (!record.installed) {
-        const current = captureCanonicalTargetIdentity(record.target);
-        if (!sameCanonicalIdentity(record.originalIdentity, current)) {
-          complete = false;
-        }
+      if (!record.originalExists) {
+        // Restoring exact absence would require pathname deletion. Preserve
+        // the candidate and report partial recovery instead.
+        complete = false;
+        continue;
       }
+      writeDescriptorContent(
+        record.targetDescriptor,
+        record.originalSnapshot.content,
+        record.originalMode
+      );
+      record.installed = false;
+      const restoredDescriptor = captureDescriptorIdentity(
+        record.targetDescriptor,
+        record.target,
+        record.originalIdentity.parent
+      );
+      const pathCurrent = captureCanonicalTargetIdentity(record.target);
+      const sameObject = (
+        record.originalIdentity.objectId === null ||
+        restoredDescriptor.objectId === null ||
+        record.originalIdentity.objectId === restoredDescriptor.objectId
+      );
+      const restoredContent = (
+        restoredDescriptor.sha256 === record.originalIdentity.sha256 &&
+        restoredDescriptor.size === record.originalIdentity.size &&
+        sameObject &&
+        (process.platform === 'win32' || restoredDescriptor.mode === record.originalMode)
+      );
+      if (!restoredContent || !sameCanonicalIdentity(restoredDescriptor, pathCurrent)) {
+        complete = false;
+      }
+      // Descriptor-bound restore changes host-managed timestamps. It is safe
+      // for bytes/mode/object identity but cannot claim the original complete
+      // metadata identity, so any post-mutation rollback remains partial.
+      complete = false;
     } catch {
       complete = false;
     }
@@ -566,7 +643,6 @@ function rollbackTransaction(records, hooks) {
 
 function replaceFilesTransactionally(changes, hooks = {}) {
   if (!Array.isArray(changes) || changes.length === 0) return;
-  const token = crypto.randomBytes(12).toString('hex');
   const foldedTargets = new Map();
   const resolvedTargets = changes.map((change) => path.resolve(change.targetPath));
   for (const target of resolvedTargets) {
@@ -579,40 +655,36 @@ function replaceFilesTransactionally(changes, hooks = {}) {
     foldedTargets.set(folded, target);
     assertRegularOrMissing(target, 'Canonical transaction target');
   }
+  const preparedChanges = changes.map((change) => {
+    const content = Buffer.from(change.content, 'utf8');
+    if (typeof change.validateContent === 'function') change.validateContent(content);
+    return { ...change, content };
+  });
   const records = changes.map((change, index) => {
     const target = resolvedTargets[index];
     fs.mkdirSync(path.dirname(target), { recursive: true });
-    const stage = path.join(path.dirname(target), `.${path.basename(target)}.${token}.${index}.stage`);
-    const backup = path.join(path.dirname(target), `.${path.basename(target)}.${token}.${index}.quarantine`);
-    const rollbackStage = path.join(path.dirname(target), `.${path.basename(target)}.${token}.${index}.rollback`);
-    assertRegularOrMissing(stage, 'Canonical transaction stage');
-    assertRegularOrMissing(backup, 'Canonical transaction backup');
-    assertRegularOrMissing(rollbackStage, 'Canonical transaction rollback stage');
-    if (fs.existsSync(stage) || fs.existsSync(backup) || fs.existsSync(rollbackStage)) {
-      throw transactionError('Canonical transaction staging path was not unique.');
-    }
     const record = {
-      ...change,
+      ...preparedChanges[index],
       target,
-      stage,
-      backup,
-      rollbackStage,
-      content: Buffer.from(change.content, 'utf8'),
       originalIdentity: captureCanonicalTargetIdentity(target),
       originalExists: false,
-      originalContent: null,
+      originalSnapshot: null,
       originalMode: null,
       installMode: CANONICAL_NEW_FILE_MODE,
-      stageIdentity: null,
-      backupIdentity: null,
+      targetDescriptor: null,
+      descriptorIdentity: null,
       installedIdentity: null,
-      originalMoved: false,
       installed: false,
       mutatedByTransaction: false,
       phase: 'PREPARED',
     };
     record.originalExists = record.originalIdentity.exists;
-    record.originalContent = record.originalIdentity.exists ? Buffer.from(record.originalIdentity.content) : null;
+    record.originalSnapshot = record.originalIdentity.exists
+      ? {
+        sha256: record.originalIdentity.sha256,
+        content: Buffer.from(record.originalIdentity.content),
+      }
+      : null;
     record.originalMode = record.originalIdentity.mode;
     record.installMode = record.originalIdentity.exists ? record.originalIdentity.mode : CANONICAL_NEW_FILE_MODE;
     return record;
@@ -622,20 +694,6 @@ function replaceFilesTransactionally(changes, hooks = {}) {
   let recoveryIncomplete = false;
   let phase = 'PREPARED';
   try {
-    for (const record of records) {
-      fs.writeFileSync(record.stage, record.content, { flag: 'wx', mode: 0o600 });
-      if (!fs.readFileSync(record.stage).equals(record.content)) {
-        throw transactionError('Canonical transaction staging verification failed.');
-      }
-      record.stageIdentity = captureCanonicalTargetIdentity(record.stage);
-      if (typeof record.validate === 'function') record.validate(record.stage);
-      assertCanonicalIdentity(
-        record.stageIdentity,
-        captureCanonicalTargetIdentity(record.stage),
-        'Canonical transaction stage changed during validation.'
-      );
-    }
-
     phase = 'INSTALLING';
     for (let index = 0; index < records.length; index += 1) {
       const record = records[index];
@@ -649,49 +707,20 @@ function replaceFilesTransactionally(changes, hooks = {}) {
         currentTarget,
         'Canonical transaction target changed after authorization.'
       );
-      if (!sameCanonicalIdentity(record.stageIdentity, captureCanonicalTargetIdentity(record.stage))) {
-        throw transactionDriftError('Canonical transaction stage changed before installation.');
-      }
       if (record.originalExists) {
-        if (typeof hooks.beforeOriginalQuarantine === 'function') {
-          hooks.beforeOriginalQuarantine(record, index);
+        openVerifiedExistingTarget(record, hooks, index);
+        installCandidateThroughDescriptor(record, hooks, index);
+      } else {
+        if (typeof hooks.beforeCandidateInstall === 'function') {
+          hooks.beforeCandidateInstall(record, index);
         }
-        fs.renameSync(record.target, record.backup);
-        record.originalMoved = true;
-        record.mutatedByTransaction = true;
-        if (typeof hooks.afterTargetDisplaced === 'function') {
-          hooks.afterTargetDisplaced(record, index);
-        }
-        const backupCurrent = captureCanonicalTargetIdentity(record.backup);
-        if (!sameMovedFileIdentity(record.originalIdentity, backupCurrent, record.installMode)) {
-          throw transactionDriftError('Canonical transaction backup did not match the authorized target.');
-        }
-        record.backupIdentity = backupCurrent;
-        const targetAbsent = captureCanonicalTargetIdentity(record.target);
         assertCanonicalIdentity(
           absentIdentityFor(record),
-          targetAbsent,
-          'Canonical transaction target was recreated after displacement.'
+          captureCanonicalTargetIdentity(record.target),
+          'Canonical transaction target appeared before candidate installation.'
         );
+        installCandidateWithoutOverwrite(record, hooks, index);
       }
-      if (typeof hooks.beforeCandidateInstall === 'function') {
-        hooks.beforeCandidateInstall(record, index);
-      }
-      if (record.originalMoved) {
-        const backupBeforeInstall = captureCanonicalTargetIdentity(record.backup);
-        if (!sameCanonicalIdentity(record.backupIdentity, backupBeforeInstall)) {
-          throw transactionDriftError('Canonical transaction backup changed before candidate installation.');
-        }
-      }
-      assertCanonicalIdentity(
-        absentIdentityFor(record),
-        captureCanonicalTargetIdentity(record.target),
-        'Canonical transaction target appeared before candidate installation.'
-      );
-      if (!sameCanonicalIdentity(record.stageIdentity, captureCanonicalTargetIdentity(record.stage))) {
-        throw transactionDriftError('Canonical transaction stage changed before candidate installation.');
-      }
-      installCandidateWithoutOverwrite(record, hooks, index);
       if (typeof hooks.beforeVerify === 'function') hooks.beforeVerify(record, index);
       const installedAfterHook = captureCanonicalTargetIdentity(record.target);
       if (!sameCanonicalIdentity(record.installedIdentity, installedAfterHook)) {
@@ -717,20 +746,6 @@ function replaceFilesTransactionally(changes, hooks = {}) {
     }
 
     phase = 'POST_COMMIT_CLEANUP';
-    for (let index = 0; index < records.length; index += 1) {
-      const record = records[index];
-      record.phase = phase;
-      cleanupExactTemporary(record, 'stage', 'stageIdentity', hooks, 'beforeStageCleanup', index);
-      const installedAfterStageCleanup = captureCanonicalTargetIdentity(record.target);
-      if (!sameMovedFileIdentity(record.installedIdentity, installedAfterStageCleanup, record.installMode)) {
-        throw transactionCommittedCleanupError();
-      }
-      record.installedIdentity = installedAfterStageCleanup;
-      if (record.originalMoved) {
-        cleanupExactTemporary(record, 'backup', 'backupIdentity', hooks, 'beforeBackupCleanup', index);
-        record.originalMoved = false;
-      }
-    }
     if (typeof hooks.beforeFinalPostcondition === 'function') hooks.beforeFinalPostcondition(records);
     assertCompleteTransactionPostcondition(records);
     phase = 'COMPLETE';
@@ -749,23 +764,14 @@ function replaceFilesTransactionally(changes, hooks = {}) {
       recoveryIncomplete = !rollbackTransaction(records, hooks);
     }
   } finally {
-    if (phase !== 'COMMITTED' && phase !== 'POST_COMMIT_CLEANUP' && phase !== 'COMPLETE') {
-      for (const record of records) {
-        for (const [temporary, identity] of [
-          [record.stage, record.stageIdentity],
-          [record.rollbackStage, record.rollbackIdentity],
-        ]) {
-          if (!fs.existsSync(temporary)) continue;
-          try {
-            if (!exactTemporaryStillOwned(temporary, identity)) {
-              recoveryIncomplete = true;
-              continue;
-            }
-            fs.rmSync(temporary, { force: false });
-          } catch {
-            recoveryIncomplete = true;
-          }
+    for (const record of records) {
+      if (record.targetDescriptor !== null) {
+        try {
+          fs.closeSync(record.targetDescriptor);
+        } catch {
+          recoveryIncomplete = true;
         }
+        record.targetDescriptor = null;
       }
     }
   }
@@ -992,8 +998,9 @@ function main() {
       isNewWorkflow: target.isNewWorkflow,
       declarationCount: exportResult.declaration.nodes.length,
       protectedChangeCount: exportResult.protectedChanges.length,
-      validate(stagePath) {
-        const verification = readWorkflow(stagePath);
+      validateContent(candidateContent) {
+        const raw = JSON.parse(candidateContent.toString('utf8'));
+        const verification = Array.isArray(raw) ? raw[0] : raw.workflow || raw;
         if (verification.active !== false) throw transactionError('Staged canonical workflow must remain inactive.');
       },
     });
@@ -1005,8 +1012,8 @@ function main() {
       {
         targetPath: options.portableCredentialsPath,
         content: declarationContent,
-        validate(stagePath) {
-          const parsed = readJson(stagePath);
+        validateContent(candidateContent) {
+          const parsed = JSON.parse(candidateContent.toString('utf8'));
           validatePortableDocument(parsed, 'credential-declarations', { allowAbsent: false });
         },
       },
@@ -1056,5 +1063,6 @@ module.exports = {
   readDeploymentPolicy,
   assertStrictChild,
   replaceFilesTransactionally,
+  TRANSACTION_FILESYSTEM_AUDIT,
   CANONICAL_NEW_FILE_MODE,
 };

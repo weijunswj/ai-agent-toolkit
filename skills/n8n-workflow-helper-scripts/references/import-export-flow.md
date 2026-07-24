@@ -16,7 +16,7 @@ Use in a consumer repo, not the toolkit repo.
 
 ## Boundary
 
-This short safety checklist is not the full runtime guide. Live n8n or Docker work requires approval naming the repo, environment, operation, workflow set, and exclusions.
+Live n8n or Docker work requires approval naming the repo, environment, operation, workflow set, and exclusions.
 
 ## Export Review
 
@@ -31,7 +31,7 @@ This short safety checklist is not the full runtime guide. Live n8n or Docker wo
 - Validate the payload and canonical invariant before comparison. Valid non-dry-run import needs no routine confirmation, stays inactive, and verifies the postcondition without execution.
 - For a supported unresolved first import, create the reported name/type and rerun. Unsupported transports stop before mutation.
 - Optional misses are informational; required, ambiguous, or unsafe matches block.
-- Revalidate exact target and parent identity before displacement, then install by atomic no-overwrite hard link. Keep exact originals through the batch commit. Before commit, roll back only proven transaction objects. After commit, preserve the coherent candidate batch and any exact cleanup residue; never subset-roll back.
+- Validate the batch before mutation. Change or restore existing files only through their identity-bound opened descriptors; create missing files exclusively. The transaction never deletes or renames a pathname. Concurrent replacements survive and produce partial recovery rather than false success.
 
 Do not run live import/export in CI. Keep `.tmp/**` and `.n8n-local/**` ignored and local.
 
