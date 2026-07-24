@@ -30,40 +30,52 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          files=(
-            repo/scripts/validate-toolkit.cjs
-            repo/tests/validate-toolkit.test.cjs
-          )
-          for file in "${files[@]}"; do
-            sed -i 's#actions/checkout@v6#actions/checkout@v7#g' "$file"
-            sed -i 's#actions/setup-node@v6#actions/setup-node@v7#g' "$file"
-            if grep -Fq 'actions/checkout@v6' "$file" || grep -Fq 'actions/setup-node@v6' "$file"; then
-              echo "Stale v6 action reference remains in $file" >&2
-              exit 1
-            fi
-          done
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const replacements = new Map([
+            ['repo/scripts/validate-toolkit.cjs', [
+              ['actions/checkout@v6', 'actions/checkout@v7'],
+              ['actions/setup-node@v6', 'actions/setup-node@v7']
+            ]],
+            ['repo/tests/validate-toolkit.test.cjs', [
+              ['actions/checkout@v6', 'actions/checkout@v7'],
+              ['actions/setup-node@v6', 'actions/setup-node@v7'],
+              ['actions\\/checkout@v6', 'actions\\/checkout@v7'],
+              ['actions\\/setup-node@v6', 'actions\\/setup-node@v7'],
+              ['extra checkout v6 action after preflight is rejected', 'extra checkout v7 action after preflight is rejected']
+            ]]
+          ]);
+
+          for (const [file, pairs] of replacements) {
+            let text = fs.readFileSync(file, 'utf8');
+            for (const [before, after] of pairs) {
+              text = text.split(before).join(after);
+            }
+            fs.writeFileSync(file, text, 'utf8');
+          }
+
+          for (const file of replacements.keys()) {
+            const text = fs.readFileSync(file, 'utf8');
+            for (const stale of [
+              'actions/checkout@v6',
+              'actions/setup-node@v6',
+              'actions\\/checkout@v6',
+              'actions\\/setup-node@v6'
+            ]) {
+              if (text.includes(stale)) {
+                throw new Error(`Stale action reference ${stale} remains in ${file}`);
+              }
+            }
+          }
+          NODE
           rm -f .github/workflows/one-shot-fix-action-v7-validator.yml
 
       - name: Run validator
         run: node repo/scripts/validate-toolkit.cjs
 
       - name: Run focused regression tests
-        id: focused-tests
-        continue-on-error: true
-        shell: bash
-        run: node --test --test-name-pattern "auto-sync generated surfaces workflow" repo/tests/validate-toolkit.test.cjs > focused-test-output.txt 2>&1
-
-      - name: Upload focused test failure
-        if: steps.focused-tests.outcome == 'failure'
-        uses: actions/upload-artifact@v7
-        with:
-          name: focused-test-failure
-          path: focused-test-output.txt
-          if-no-files-found: error
-
-      - name: Fail after diagnostic upload
-        if: steps.focused-tests.outcome == 'failure'
-        run: exit 1
+        run: node --test --test-name-pattern "auto-sync generated surfaces workflow" repo/tests/validate-toolkit.test.cjs
 
       - name: Check whitespace
         run: git diff --check
