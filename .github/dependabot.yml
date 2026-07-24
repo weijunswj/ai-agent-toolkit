@@ -1,3 +1,4 @@
+# GitHub Actions major-version bumps must update the reviewed validator allowlists and paired regression tests.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
