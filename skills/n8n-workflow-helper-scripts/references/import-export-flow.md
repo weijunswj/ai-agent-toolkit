@@ -16,6 +16,8 @@ Use in a consumer repo, not the toolkit repo.
 
 ## Boundary
 
+This is a short reference, not the full runtime helper guide.
+
 Live n8n or Docker work requires approval naming the repo, environment, operation, workflow set, and exclusions.
 
 ## Export Review
