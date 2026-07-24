@@ -5,9 +5,9 @@
   "title": "Official n8n Skills Plugin Compatibility",
   "module_path": "_projects/n8n/skills-plugin-compatibility",
   "main_path": "_projects/n8n/skills-plugin-compatibility/_main",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "version_policy": "semver",
-  "version_notes": "Adds target-untouched staging reconciliation and deterministic same-size concurrent mutation detection.",
+  "version_notes": "Requires exact current-cache identity before config-fallback recovery mutation.",
   "outputs": [],
   "writes": {
     "allowed": [],

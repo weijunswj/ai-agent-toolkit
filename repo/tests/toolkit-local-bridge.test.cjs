@@ -51,7 +51,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.9.4';
+const expectedBridgeVersion = '2.9.5';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 const currentN8nManifestPath = path.join(
   repoRoot,
@@ -6040,7 +6040,8 @@ test('Codex n8n repair durably recovers every abrupt replacement transition', as
     'afterN8nRepairTransactionRegistration',
     'afterN8nRepairTargetDisplaced',
     'afterN8nRepairStageInstalled',
-    'afterN8nRepairVerification'
+    'afterN8nRepairVerification',
+    'afterN8nBackupCleanupAuthorization'
   ];
   for (const crashPoint of crashPoints) {
     const root = tmpRoot();
@@ -6209,16 +6210,204 @@ test('Codex n8n recovery requires positive enabled and installed host evidence',
     'enabled = false',
     ''
   ].join('\n'));
+  const disabledBefore = snapshotTree(path.dirname(pluginRoot));
   const disabled = repairThirdPartyCodexPluginHooks({
     codexHome,
     windows: true,
     write: true,
     pluginList: codexPluginList([])
   });
-  assert.equal(disabled.status, 'not-needed');
+  assert.equal(disabled.status, 'not-needed', JSON.stringify(disabled));
   assert.equal(disabled.code, 'disabled');
   assert.deepEqual(snapshotTree(pluginRoot), original, 'explicit config disablement must perform zero recovery mutation');
+  assert.deepEqual(snapshotTree(path.dirname(pluginRoot)), disabledBefore, 'disabled recovery preserves all exact transaction evidence');
   assert.notDeepEqual(n8nTransactionArtifacts(pluginRoot), [], 'disabled recovery preserves exact evidence');
+
+  const unprovableRoot = tmpRoot();
+  const unprovableHome = path.join(unprovableRoot, 'config-unprovable-home');
+  const unprovablePlugin = path.join(unprovableHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copyCurrentSupportedN8nPluginFixture(unprovablePlugin);
+  await waitForAbruptChild(spawnAbruptN8nRepair(
+    unprovablePlugin,
+    '1.0.2',
+    'afterN8nRepairTransactionRegistration'
+  ));
+  const unprovableBefore = snapshotTree(path.dirname(unprovablePlugin));
+  const unprovable = repairThirdPartyCodexPluginHooks({
+    codexHome: unprovableHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([])
+  });
+  assert.equal(unprovable.status, 'repair-failed', JSON.stringify(unprovable));
+  assert.equal(unprovable.code, 'ambiguous-target');
+  assert.deepEqual(
+    snapshotTree(path.dirname(unprovablePlugin)),
+    unprovableBefore,
+    'unprovable config recovery preserves the exact target, stage, backup, and transaction record'
+  );
+});
+
+test('Codex n8n config recovery preserves ambiguous target-untouched evidence byte-for-byte', async () => {
+  const root = tmpRoot();
+  const codexHome = path.join(root, 'codex-home');
+  const interruptedRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
+  const retainedRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copySupportedN8nPluginFixture(interruptedRoot);
+  copyCurrentSupportedN8nPluginFixture(retainedRoot);
+  writeFile(path.join(interruptedRoot, 'historical.txt'), 'ambiguous target-untouched original\n');
+  writeFile(path.join(retainedRoot, 'current.txt'), 'ambiguous retained current candidate\n');
+  await waitForAbruptChild(spawnAbruptN8nRepair(
+    interruptedRoot,
+    '1.0.1',
+    'afterN8nPreTransactionRegistration'
+  ));
+  writeFile(path.join(codexHome, 'config.toml'), [
+    '[plugins."n8n-skills@n8n-io"]',
+    'enabled = true',
+    ''
+  ].join('\n'));
+  const cacheParent = path.dirname(interruptedRoot);
+  const before = snapshotTree(cacheParent);
+
+  const blocked = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([])
+  });
+  assert.equal(blocked.status, 'repair-failed', JSON.stringify(blocked));
+  assert.equal(blocked.code, 'ambiguous-target');
+  assert.deepEqual(
+    snapshotTree(cacheParent),
+    before,
+    'ambiguous config fallback must preserve canonical caches, stage, and target-untouched transaction evidence exactly'
+  );
+});
+
+test('Codex n8n config recovery preserves every ambiguous registered crash state byte-for-byte', async () => {
+  const crashPoints = [
+    'afterN8nRepairTransactionRegistration',
+    'afterN8nRepairTargetDisplaced',
+    'afterN8nRepairStageInstalled',
+    'afterN8nRepairVerification',
+    'afterN8nBackupCleanupEntry'
+  ];
+  for (const crashPoint of crashPoints) {
+    const root = tmpRoot();
+    const codexHome = path.join(root, `codex-home-${crashPoint}`);
+    const interruptedRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
+    const retainedRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+    copySupportedN8nPluginFixture(interruptedRoot);
+    copyCurrentSupportedN8nPluginFixture(retainedRoot);
+    writeFile(path.join(interruptedRoot, 'historical.txt'), `ambiguous original ${crashPoint}\n`);
+    writeFile(path.join(retainedRoot, 'current.txt'), `ambiguous retained candidate ${crashPoint}\n`);
+    await waitForAbruptChild(spawnAbruptN8nRepair(interruptedRoot, '1.0.1', crashPoint));
+    if (!fs.existsSync(interruptedRoot)) {
+      copySupportedN8nPluginFixture(interruptedRoot);
+      writeFile(path.join(interruptedRoot, 'replacement-decoy.txt'), `preserve conflicting canonical target ${crashPoint}\n`);
+    }
+    writeFile(path.join(codexHome, 'config.toml'), [
+      '[plugins."n8n-skills@n8n-io"]',
+      'enabled = true',
+      ''
+    ].join('\n'));
+    const cacheParent = path.dirname(interruptedRoot);
+    const before = snapshotTree(cacheParent);
+
+    const blocked = repairThirdPartyCodexPluginHooks({
+      codexHome,
+      windows: true,
+      write: true,
+      pluginList: codexPluginList([])
+    });
+    assert.equal(blocked.status, 'repair-failed', `${crashPoint}: ${JSON.stringify(blocked)}`);
+    assert.equal(blocked.code, 'ambiguous-target', crashPoint);
+    assert.deepEqual(
+      snapshotTree(cacheParent),
+      before,
+      `${crashPoint} must preserve exact target, backup, stage, and transaction evidence`
+    );
+  }
+});
+
+test('Codex n8n config recovery permits only exact matching or exact obsolete cache identity', async () => {
+  const matchingRoot = tmpRoot();
+  const matchingHome = path.join(matchingRoot, 'matching-home');
+  const matchingPlugin = path.join(matchingHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
+  copySupportedN8nCrlfPluginFixture(matchingPlugin);
+  writeFile(path.join(matchingPlugin, 'preserved.txt'), 'matching transaction bytes\n');
+  await waitForAbruptChild(spawnAbruptN8nRepair(
+    matchingPlugin,
+    '1.0.1',
+    'afterN8nRepairTransactionRegistration'
+  ));
+  writeFile(path.join(matchingHome, 'config.toml'), [
+    '[plugins."n8n-skills@n8n-io"]',
+    'enabled = true',
+    ''
+  ].join('\n'));
+
+  const matching = repairThirdPartyCodexPluginHooks({
+    codexHome: matchingHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([])
+  });
+  assert.equal(matching.status, 'repaired', JSON.stringify(matching));
+  assert.equal(classifyN8nSkillsCompatibility(matchingPlugin).status, 'healthy');
+  assert.deepEqual(n8nTransactionArtifacts(matchingPlugin), []);
+  const matchingAfter = snapshotTree(path.dirname(matchingPlugin));
+  const matchingRetry = repairThirdPartyCodexPluginHooks({
+    codexHome: matchingHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([])
+  });
+  assert.equal(matchingRetry.status, 'not-needed');
+  assert.deepEqual(snapshotTree(path.dirname(matchingPlugin)), matchingAfter);
+  assert.deepEqual(n8nTransactionArtifacts(matchingPlugin), []);
+
+  const obsoleteRoot = tmpRoot();
+  const obsoleteHome = path.join(obsoleteRoot, 'obsolete-home');
+  const historicalPlugin = path.join(obsoleteHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
+  const currentPlugin = path.join(obsoleteHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copySupportedN8nPluginFixture(historicalPlugin);
+  copyCurrentSupportedN8nPluginFixture(currentPlugin);
+  writeFile(path.join(historicalPlugin, 'historical.txt'), 'restore exact obsolete original\n');
+  writeFile(path.join(currentPlugin, 'current.txt'), 'preserve exact selected current candidate\n');
+  const historicalOriginal = snapshotTree(historicalPlugin);
+  await waitForAbruptChild(spawnAbruptN8nRepair(
+    historicalPlugin,
+    '1.0.1',
+    'afterN8nRepairTargetDisplaced'
+  ));
+  writeFile(path.join(obsoleteHome, 'config.toml'), [
+    '[plugins."n8n-skills@n8n-io"]',
+    'enabled = true',
+    ''
+  ].join('\n'));
+
+  const obsolete = repairThirdPartyCodexPluginHooks({
+    codexHome: obsoleteHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([])
+  });
+  assert.equal(obsolete.status, 'repaired', JSON.stringify(obsolete));
+  assert.deepEqual(snapshotTree(historicalPlugin), historicalOriginal);
+  assert.equal(classifyN8nSkillsCompatibility(currentPlugin).status, 'healthy');
+  assert.deepEqual(n8nTransactionArtifacts(historicalPlugin), []);
+  assert.deepEqual(n8nTransactionArtifacts(currentPlugin), []);
+  const obsoleteAfter = snapshotTree(path.dirname(historicalPlugin));
+  assert.equal(recoverInterruptedN8nReplacement({
+    codexHome: obsoleteHome,
+    pluginInspection: { ok: true, pluginList: codexPluginList([]), errors: [] },
+    write: true
+  }).status, 'none');
+  assert.deepEqual(snapshotTree(path.dirname(historicalPlugin)), obsoleteAfter);
+  assert.deepEqual(n8nTransactionArtifacts(historicalPlugin), []);
+  assert.deepEqual(n8nTransactionArtifacts(currentPlugin), []);
 });
 
 test('Codex n8n interrupted replacement restores exact original bytes when the recorded stage is invalid', async () => {

@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.9.4",
+  "version": "2.9.5",
   "version_policy": "semver",
-  "version_notes": "Adds exact target-untouched staging recovery and deterministic two-pass compatibility-file mutation detection.",
+  "version_notes": "Binds interrupted config-fallback recovery to one exact current cache candidate before mutation.",
   "outputs": [
     {
       "kind": "curated",
