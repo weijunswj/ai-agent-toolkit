@@ -1,0 +1,44 @@
+name: Diagnose PR 309 full tests
+
+on:
+  push:
+    branches:
+      - fix/github-actions-v7-validator
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: fix/github-actions-v7-validator
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Remove diagnostic workflow from test workspace
+        run: rm -f .github/workflows/diagnose-pr309-tests.yml
+
+      - name: Run full tests and capture output
+        id: tests
+        continue-on-error: true
+        shell: bash
+        run: npm test > full-test-output.txt 2>&1
+
+      - name: Upload full test output
+        uses: actions/upload-artifact@v7
+        with:
+          name: pr309-full-test-output
+          path: full-test-output.txt
+          if-no-files-found: error
+
+      - name: Fail when tests failed
+        if: steps.tests.outcome == 'failure'
+        run: exit 1
