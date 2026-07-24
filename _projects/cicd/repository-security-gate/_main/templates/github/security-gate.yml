@@ -173,6 +173,7 @@ jobs:
           sandbox_uid="$(id -u toolkitgate)"
           sandbox_gid="$(id -g toolkitgate)"
           sudo chown -R toolkitgate:toolkitgate "$sandbox_home"
+          sudo -u toolkitgate env HOME="$sandbox_home" git config --global --add safe.directory "$GITHUB_WORKSPACE/candidate"
           chmod 700 "$reports"
           git config --global --add safe.directory "$GITHUB_WORKSPACE/trusted-gate"
           git config --global --add safe.directory "$GITHUB_WORKSPACE/candidate"
@@ -238,13 +239,14 @@ jobs:
           SANDBOX_HOME: ${{ steps.topology.outputs.sandbox_home }}
           SANDBOX_UID: ${{ steps.topology.outputs.sandbox_uid }}
           SANDBOX_GID: ${{ steps.topology.outputs.sandbox_gid }}
+          CANDIDATE_REPOSITORY: ${{ steps.evidence.outputs.candidate_repository }}
         run: |
           set -euo pipefail
           args=(run
             --authority-root "$GITHUB_WORKSPACE/trusted-gate"
             --candidate-root "$GITHUB_WORKSPACE/candidate"
             --target-repository "$GITHUB_REPOSITORY"
-            --candidate-repository "${{ steps.evidence.outputs.candidate_repository }}"
+            --candidate-repository "$CANDIDATE_REPOSITORY"
             --candidate-head "$HEAD"
             --authority-mode "$AUTHORITY_MODE"
             --invoking-workflow-commit "$INVOKING_WORKFLOW_COMMIT"
