@@ -18,6 +18,7 @@ const {
   runAgentRulesPreflight,
   formatAgentRulesPreflight,
   discoverCodexPluginHookRoots,
+  discoverN8nSkillsCacheRoots,
   repairThirdPartyCodexPluginHooks,
   recoverInterruptedN8nReplacement,
   reconcileSelectedN8nSkillsCache,
@@ -51,7 +52,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.9.5';
+const expectedBridgeVersion = '2.9.6';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 const currentN8nManifestPath = path.join(
   repoRoot,
@@ -801,6 +802,32 @@ function n8nInstalledEntry(version = '1.0.1', overrides = {}) {
     installed: true,
     enabled: true,
     ...overrides
+  };
+}
+
+function createDirectoryRedirect(target, redirected) {
+  try {
+    fs.symlinkSync(target, redirected, process.platform === 'win32' ? 'junction' : 'dir');
+    return true;
+  } catch (error) {
+    if (['EPERM', 'EACCES', 'ENOTSUP', 'UNKNOWN'].includes(error?.code)) return false;
+    throw error;
+  }
+}
+
+function writeEnabledN8nPluginConfig(codexHome) {
+  writeFile(path.join(codexHome, 'config.toml'), [
+    '[plugins."n8n-skills@n8n-io"]',
+    'enabled = true',
+    ''
+  ].join('\n'));
+}
+
+function snapshotRedirect(redirected) {
+  const stat = fs.lstatSync(redirected);
+  return {
+    is_symbolic_link: stat.isSymbolicLink(),
+    target: fs.readlinkSync(redirected)
   };
 }
 
@@ -5916,14 +5943,6 @@ test('Codex n8n repair reconciles exact dead target-untouched generations before
     copyCurrentSupportedN8nPluginFixture(pluginRoot);
     writeFile(path.join(pluginRoot, 'unrelated.txt'), `target remains untouched at ${crashPoint}\n`);
     const original = snapshotTree(pluginRoot);
-    const decoyStage = path.join(path.dirname(pluginRoot), `.1.0.2.staging-decoy-${crashPoint}`);
-    fs.mkdirSync(decoyStage);
-    writeFile(path.join(decoyStage, 'sentinel.txt'), 'unrelated decoy stage\n');
-    const decoyAuxiliary = path.join(
-      path.dirname(pluginRoot),
-      `${RECORD_PREFIX}00000000-0000-4000-8000-000000000000.n8n-pre-transaction.json`
-    );
-    writeFile(decoyAuxiliary, 'unrelated decoy auxiliary\n');
 
     await waitForAbruptChild(spawnAbruptN8nRepair(pluginRoot, '1.0.2', crashPoint));
     const owned = readSingleN8nOwnedGeneration(pluginRoot);
@@ -5939,8 +5958,6 @@ test('Codex n8n repair reconciles exact dead target-untouched generations before
     assert.deepEqual(snapshotTree(pluginRoot), original, `${crashPoint} cleanup must preserve the canonical target byte-for-byte`);
     assert.equal(fs.existsSync(owned.record.expected_staging_path), false, `${crashPoint} exact stage must be removed`);
     assert.equal(fs.existsSync(owned.recordPath), false, `${crashPoint} exact generation record must be removed`);
-    assert.equal(fs.readFileSync(path.join(decoyStage, 'sentinel.txt'), 'utf8'), 'unrelated decoy stage\n');
-    assert.equal(fs.readFileSync(decoyAuxiliary, 'utf8'), 'unrelated decoy auxiliary\n');
 
     const repaired = repairThirdPartyCodexPluginHooks({
       codexHome,
@@ -5957,10 +5974,6 @@ test('Codex n8n repair reconciles exact dead target-untouched generations before
       pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
     });
     assert.equal(retry.status, 'not-needed', `${crashPoint} retry must be idempotent`);
-    assert.equal(fs.existsSync(decoyStage), true, `${crashPoint} retry must preserve the decoy stage`);
-    assert.equal(fs.existsSync(decoyAuxiliary), true, `${crashPoint} retry must preserve the decoy auxiliary`);
-    fs.rmSync(decoyStage, { recursive: true });
-    fs.rmSync(decoyAuxiliary);
     assert.deepEqual(n8nTransactionArtifacts(pluginRoot), [], `${crashPoint} must leave no owned transaction residue`);
   }
 });
@@ -6285,6 +6298,291 @@ test('Codex n8n config recovery preserves ambiguous target-untouched evidence by
   );
 });
 
+test('Codex n8n target-untouched config recovery rejects every redirected version-root destination', async (t) => {
+  const destinations = [
+    'outside-parent',
+    'another-retained-version',
+    'interrupted-target',
+    'ordinary-decoy-directory',
+    'inside-parent-alias'
+  ];
+  for (const destination of destinations) {
+    const root = tmpRoot();
+    const codexHome = path.join(root, `redirect-${destination}`);
+    const cacheParent = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills');
+    const pluginRoot = path.join(cacheParent, '1.0.1');
+    copySupportedN8nPluginFixture(pluginRoot);
+    writeFile(path.join(pluginRoot, 'preserved.txt'), `${destination} target bytes\n`);
+    await waitForAbruptChild(spawnAbruptN8nRepair(
+      pluginRoot,
+      '1.0.1',
+      'afterN8nPreTransactionRegistration'
+    ));
+
+    let redirectTarget;
+    if (destination === 'another-retained-version') {
+      redirectTarget = path.join(cacheParent, '1.0.2');
+      copyCurrentSupportedN8nPluginFixture(redirectTarget);
+    } else if (destination === 'interrupted-target') {
+      redirectTarget = pluginRoot;
+    } else if (destination === 'inside-parent-alias') {
+      redirectTarget = path.join(cacheParent, 'ordinary-alias-source');
+      fs.mkdirSync(redirectTarget);
+      writeFile(path.join(redirectTarget, 'sentinel.txt'), 'inside parent alias target\n');
+    } else {
+      redirectTarget = path.join(root, destination === 'outside-parent' ? 'external-target' : 'ordinary-decoy');
+      fs.mkdirSync(redirectTarget);
+      writeFile(path.join(redirectTarget, 'sentinel.txt'), `${destination} redirect target\n`);
+    }
+    const redirected = path.join(cacheParent, `9.9.${destinations.indexOf(destination) + 1}`);
+    if (!createDirectoryRedirect(redirectTarget, redirected)) {
+      t.skip(`environment cannot create ${process.platform === 'win32' ? 'directory junction' : 'directory symbolic link'}`);
+      return;
+    }
+    writeEnabledN8nPluginConfig(codexHome);
+    const before = snapshotTree(cacheParent);
+    const redirectBefore = snapshotRedirect(redirected);
+
+    const blocked = repairThirdPartyCodexPluginHooks({
+      codexHome,
+      windows: true,
+      write: true,
+      pluginList: codexPluginList([])
+    });
+    assert.equal(blocked.status, 'repair-failed', `${destination}: ${JSON.stringify(blocked)}`);
+    assert.equal(blocked.code, 'ambiguous-target', destination);
+    assert.deepEqual(snapshotTree(cacheParent), before, `${destination} preserves target, stage, and pre-transaction evidence`);
+    assert.deepEqual(snapshotRedirect(redirected), redirectBefore, `${destination} redirect remains untouched`);
+  }
+});
+
+test('Codex n8n registered config recovery preserves every crash phase beside a redirected version root', async (t) => {
+  const crashPoints = [
+    'afterN8nRepairTransactionRegistration',
+    'afterN8nRepairTargetDisplaced',
+    'afterN8nRepairStageInstalled',
+    'afterN8nRepairVerification',
+    'afterN8nBackupCleanupAuthorization',
+    'afterN8nBackupCleanupEntry'
+  ];
+  for (const crashPoint of crashPoints) {
+    const root = tmpRoot();
+    const codexHome = path.join(root, `registered-redirect-${crashPoint}`);
+    const cacheParent = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills');
+    const pluginRoot = path.join(cacheParent, '1.0.2');
+    copyCurrentSupportedN8nPluginFixture(pluginRoot);
+    writeFile(path.join(pluginRoot, 'preserved.txt'), `${crashPoint} original bytes\n`);
+    await waitForAbruptChild(spawnAbruptN8nRepair(pluginRoot, '1.0.2', crashPoint));
+    const external = path.join(root, 'redirect-target');
+    fs.mkdirSync(external);
+    writeFile(path.join(external, 'sentinel.txt'), `${crashPoint} external bytes\n`);
+    const redirected = path.join(cacheParent, '9.9.9');
+    if (!createDirectoryRedirect(external, redirected)) {
+      t.skip(`environment cannot create ${process.platform === 'win32' ? 'directory junction' : 'directory symbolic link'}`);
+      return;
+    }
+    writeEnabledN8nPluginConfig(codexHome);
+    const before = snapshotTree(cacheParent);
+    const redirectBefore = snapshotRedirect(redirected);
+
+    const blocked = repairThirdPartyCodexPluginHooks({
+      codexHome,
+      windows: true,
+      write: true,
+      pluginList: codexPluginList([])
+    });
+    assert.equal(blocked.status, 'repair-failed', `${crashPoint}: ${JSON.stringify(blocked)}`);
+    assert.equal(blocked.code, 'ambiguous-target', crashPoint);
+    assert.deepEqual(snapshotTree(cacheParent), before, `${crashPoint} preserves exact target, backup, stage, records, and phases`);
+    assert.deepEqual(snapshotRedirect(redirected), redirectBefore, `${crashPoint} redirect remains untouched`);
+  }
+});
+
+test('Codex n8n config inventory excludes only exact owned stage and backup directories', async (t) => {
+  for (const decoyKind of ['stage', 'backup']) {
+    const root = tmpRoot();
+    const codexHome = path.join(root, `${decoyKind}-decoy-home`);
+    const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
+    copySupportedN8nPluginFixture(pluginRoot);
+    await waitForAbruptChild(spawnAbruptN8nRepair(
+      pluginRoot,
+      '1.0.1',
+      'afterN8nRepairTransactionRegistration'
+    ));
+    const decoy = path.join(
+      path.dirname(pluginRoot),
+      decoyKind === 'stage' ? '.1.0.1.staging-decoy' : '.1.0.1.n8n-repair-backup-decoy'
+    );
+    fs.mkdirSync(decoy);
+    writeFile(path.join(decoy, 'sentinel.txt'), `${decoyKind} decoy\n`);
+    writeEnabledN8nPluginConfig(codexHome);
+    const before = snapshotTree(path.dirname(pluginRoot));
+    const blocked = repairThirdPartyCodexPluginHooks({
+      codexHome,
+      windows: true,
+      write: true,
+      pluginList: codexPluginList([])
+    });
+    assert.equal(blocked.status, 'repair-failed', decoyKind);
+    assert.equal(blocked.code, 'ambiguous-target', decoyKind);
+    assert.deepEqual(snapshotTree(path.dirname(pluginRoot)), before, `${decoyKind} decoy is not excluded or mutated`);
+  }
+
+  for (const ownedKind of ['stage', 'backup']) {
+    const root = tmpRoot();
+    const codexHome = path.join(root, `${ownedKind}-redirect-home`);
+    const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
+    copySupportedN8nPluginFixture(pluginRoot);
+    await waitForAbruptChild(spawnAbruptN8nRepair(
+      pluginRoot,
+      '1.0.1',
+      ownedKind === 'stage'
+        ? 'afterN8nRepairTransactionRegistration'
+        : 'afterN8nRepairTargetDisplaced'
+    ));
+    const owned = readSingleN8nOwnedGeneration(pluginRoot);
+    const transaction = readJson(owned.recordPath.replace(/\.json$/, '.n8n-replacement.json'));
+    const recordedPath = ownedKind === 'stage' ? owned.record.expected_staging_path : transaction.backup_path;
+    const moved = path.join(root, `${ownedKind}-moved`);
+    fs.renameSync(recordedPath, moved);
+    if (!createDirectoryRedirect(moved, recordedPath)) {
+      t.skip(`environment cannot create ${process.platform === 'win32' ? 'directory junction' : 'directory symbolic link'}`);
+      return;
+    }
+    writeEnabledN8nPluginConfig(codexHome);
+    const before = snapshotTree(path.dirname(pluginRoot));
+    const redirectBefore = snapshotRedirect(recordedPath);
+    const blocked = repairThirdPartyCodexPluginHooks({
+      codexHome,
+      windows: true,
+      write: true,
+      pluginList: codexPluginList([])
+    });
+    assert.equal(blocked.status, 'repair-failed', ownedKind);
+    assert.equal(blocked.code, 'ambiguous-target', ownedKind);
+    assert.deepEqual(snapshotTree(path.dirname(pluginRoot)), before, `${ownedKind} redirect preserves all transaction evidence`);
+    assert.deepEqual(snapshotRedirect(recordedPath), redirectBefore, `${ownedKind} redirect remains untouched`);
+  }
+});
+
+test('Codex n8n cache inventory rejects appeared, disappeared, and changed direct children deterministically', () => {
+  for (const mode of ['appeared', 'disappeared', 'changed-identity']) {
+    const root = tmpRoot();
+    const codexHome = path.join(root, mode);
+    const cacheParent = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills');
+    const pluginRoot = path.join(cacheParent, '1.0.2');
+    copyCurrentSupportedN8nPluginFixture(pluginRoot);
+    const sibling = path.join(cacheParent, '1.0.1');
+    if (mode === 'disappeared') fs.mkdirSync(sibling);
+    let mutated = false;
+    assert.throws(
+      () => discoverN8nSkillsCacheRoots(codexHome, {
+        testHooks: mode === 'changed-identity'
+          ? {
+            afterN8nCacheInventoryEntryLstat({ entry_name: name, entry_path: entryPath }) {
+              if (mutated || name !== '1.0.2') return;
+              mutated = true;
+              const displaced = `${entryPath}-displaced`;
+              fs.renameSync(entryPath, displaced);
+              copyCurrentSupportedN8nPluginFixture(entryPath);
+            }
+          }
+          : {
+            beforeN8nCacheInventoryFinalRecheck() {
+              if (mutated) return;
+              mutated = true;
+              if (mode === 'appeared') fs.mkdirSync(sibling);
+              else fs.rmSync(sibling, { recursive: true });
+            }
+          }
+      }),
+      (error) => error?.code === 'ambiguous-target',
+      mode
+    );
+  }
+});
+
+test('Codex n8n recovery rejects changed generation and ownership identity without evidence mutation', async () => {
+  for (const field of ['generation_id', 'ownership_token']) {
+    const root = tmpRoot();
+    const codexHome = path.join(root, `${field}-home`);
+    const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+    copyCurrentSupportedN8nPluginFixture(pluginRoot);
+    await waitForAbruptChild(spawnAbruptN8nRepair(
+      pluginRoot,
+      '1.0.2',
+      'afterN8nRepairTransactionRegistration'
+    ));
+    const owned = readSingleN8nOwnedGeneration(pluginRoot);
+    const record = readJson(owned.recordPath);
+    record[field] = field === 'generation_id'
+      ? '00000000-0000-4000-8000-000000000001'
+      : '00000000-0000-4000-8000-000000000002';
+    writeJson(owned.recordPath, record);
+    writeEnabledN8nPluginConfig(codexHome);
+    const before = snapshotTree(path.dirname(pluginRoot));
+    const blocked = repairThirdPartyCodexPluginHooks({
+      codexHome,
+      windows: true,
+      write: true,
+      pluginList: codexPluginList([])
+    });
+    assert.equal(blocked.status, 'repair-failed', field);
+    assert.ok(['recovery-evidence-invalid', 'ambiguous-target'].includes(blocked.code), `${field}: ${JSON.stringify(blocked)}`);
+    assert.deepEqual(snapshotTree(path.dirname(pluginRoot)), before, `${field} mismatch preserves every byte of evidence`);
+  }
+});
+
+test('Codex n8n selected parent inventory is revalidated before staging and displacement', async (t) => {
+  for (const phase of ['before-staging', 'before-displacement']) {
+    const root = tmpRoot();
+    const codexHome = path.join(root, `${phase}-home`);
+    const cacheParent = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills');
+    const pluginRoot = path.join(cacheParent, '1.0.2');
+    copyCurrentSupportedN8nPluginFixture(pluginRoot);
+    writeFile(path.join(pluginRoot, 'preserved.txt'), `${phase} canonical bytes\n`);
+    const targetBefore = snapshotTree(pluginRoot);
+    const external = path.join(root, `${phase}-redirect-target`);
+    fs.mkdirSync(external);
+    writeFile(path.join(external, 'sentinel.txt'), `${phase} external bytes\n`);
+    const redirected = path.join(cacheParent, '9.9.9');
+    let redirectCreated = false;
+    const createRedirect = () => {
+      if (redirectCreated) return;
+      redirectCreated = createDirectoryRedirect(external, redirected);
+      if (!redirectCreated) throw Object.assign(new Error('redirect unsupported'), { code: 'TEST_REDIRECT_UNSUPPORTED' });
+    };
+    writeEnabledN8nPluginConfig(codexHome);
+    let blocked;
+    try {
+      blocked = repairThirdPartyCodexPluginHooks({
+        codexHome,
+        windows: true,
+        write: true,
+        pluginList: codexPluginList([]),
+        testHooks: phase === 'before-staging'
+          ? { afterN8nRepairLockAcquired: createRedirect }
+          : { beforeN8nRepairTransactionRegistration: createRedirect }
+      });
+    } catch (error) {
+      if (error?.code === 'TEST_REDIRECT_UNSUPPORTED') {
+        t.skip(`environment cannot create ${process.platform === 'win32' ? 'directory junction' : 'directory symbolic link'}`);
+        return;
+      }
+      throw error;
+    }
+    assert.equal(blocked.status, 'repair-failed', `${phase}: ${JSON.stringify(blocked)}`);
+    assert.equal(blocked.code, 'ambiguous-target', phase);
+    assert.deepEqual(snapshotTree(pluginRoot), targetBefore, `${phase} recheck preserves the canonical target`);
+    assert.equal(fs.existsSync(redirected), true, `${phase} redirect remains present`);
+    assert.equal(
+      fs.readdirSync(cacheParent).some((name) => name.includes('.n8n-repair-backup-')),
+      false,
+      `${phase} recheck occurs before target displacement`
+    );
+  }
+});
+
 test('Codex n8n config recovery preserves every ambiguous registered crash state byte-for-byte', async () => {
   const crashPoints = [
     'afterN8nRepairTransactionRegistration',
@@ -6408,6 +6706,60 @@ test('Codex n8n config recovery permits only exact matching or exact obsolete ca
   assert.deepEqual(snapshotTree(path.dirname(historicalPlugin)), obsoleteAfter);
   assert.deepEqual(n8nTransactionArtifacts(historicalPlugin), []);
   assert.deepEqual(n8nTransactionArtifacts(currentPlugin), []);
+});
+
+test('Codex n8n obsolete recovery revalidates redirected siblings before current selection', async (t) => {
+  const root = tmpRoot();
+  const codexHome = path.join(root, 'codex-home');
+  const cacheParent = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills');
+  const historicalPlugin = path.join(cacheParent, '1.0.1');
+  const currentPlugin = path.join(cacheParent, '1.0.2');
+  const redirectTarget = path.join(root, 'redirect-target');
+  const redirectRoot = path.join(cacheParent, '1.0.3');
+  copySupportedN8nPluginFixture(historicalPlugin);
+  copyCurrentSupportedN8nPluginFixture(currentPlugin);
+  fs.mkdirSync(redirectTarget, { recursive: true });
+  writeFile(path.join(historicalPlugin, 'historical.txt'), 'restore before redirect revalidation\n');
+  writeFile(path.join(currentPlugin, 'current.txt'), 'current candidate remains exact\n');
+  const historicalOriginal = snapshotTree(historicalPlugin);
+  const currentOriginal = snapshotTree(currentPlugin);
+  await waitForAbruptChild(spawnAbruptN8nRepair(
+    historicalPlugin,
+    '1.0.1',
+    'afterN8nRepairTargetDisplaced'
+  ));
+  writeEnabledN8nPluginConfig(codexHome);
+
+  let redirectCreated = false;
+  const result = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([]),
+    testHooks: {
+      afterN8nCacheInventoryEntryLstat() {
+        if (
+          !redirectCreated
+          && fs.existsSync(historicalPlugin)
+          && n8nTransactionArtifacts(historicalPlugin).length === 0
+        ) {
+          redirectCreated = createDirectoryRedirect(redirectTarget, redirectRoot);
+        }
+      }
+    }
+  });
+  if (!redirectCreated) {
+    t.skip('This environment cannot create a directory redirect for post-obsolete revalidation.');
+    return;
+  }
+
+  assert.equal(result.status, 'repair-failed', JSON.stringify(result));
+  assert.equal(result.code, 'ambiguous-target');
+  assert.deepEqual(snapshotTree(historicalPlugin), historicalOriginal);
+  assert.deepEqual(snapshotTree(currentPlugin), currentOriginal);
+  assert.deepEqual(n8nTransactionArtifacts(historicalPlugin), []);
+  assert.deepEqual(n8nTransactionArtifacts(currentPlugin), []);
+  assert.equal(fs.lstatSync(redirectRoot).isSymbolicLink(), true);
 });
 
 test('Codex n8n interrupted replacement restores exact original bytes when the recorded stage is invalid', async () => {

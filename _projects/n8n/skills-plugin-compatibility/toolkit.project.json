@@ -5,9 +5,9 @@
   "title": "Official n8n Skills Plugin Compatibility",
   "module_path": "_projects/n8n/skills-plugin-compatibility",
   "main_path": "_projects/n8n/skills-plugin-compatibility/_main",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "version_policy": "semver",
-  "version_notes": "Requires exact current-cache identity before config-fallback recovery mutation.",
+  "version_notes": "Requires a stable bounded direct-child inventory with exact transaction-owned exclusions before config-fallback mutation.",
   "outputs": [],
   "writes": {
     "allowed": [],
