@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "3.0.0",
+  "version": "3.1.7",
   "version_policy": "semver",
-  "version_notes": "Adopts the canonical underscore-prefixed repo-local backup and exact restore contract while retaining read-only legacy backup recognition.",
+  "version_notes": "Requires the production-only canonical inventory-authority boundary from external-system-router 1.0.9.",
   "outputs": [
     {
       "kind": "curated",
@@ -21,6 +21,13 @@
       "source": "curated_output_for_ai/skills/ai-coding-agent-rules/README.md",
       "output": "skills/ai-coding-agent-rules/README.md",
       "notes": "Published skill README generated from project-owned curated AI output.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "json",
+      "source": "curated_output_for_ai/skills/ai-coding-agent-rules/runtime-dependencies.json",
+      "output": "skills/ai-coding-agent-rules/runtime-dependencies.json",
+      "notes": "Machine-readable standalone runtime dependency contract for the complete compatible external-system-router sibling.",
       "fidelity": "reviewed_entrypoint"
     },
     {
@@ -170,6 +177,7 @@
     "allowed": [
       "skills/ai-coding-agent-rules/SKILL.md",
       "skills/ai-coding-agent-rules/README.md",
+      "skills/ai-coding-agent-rules/runtime-dependencies.json",
       "skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md",
       "skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md",
       "skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md",

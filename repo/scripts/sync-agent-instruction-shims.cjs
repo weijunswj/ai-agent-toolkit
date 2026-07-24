@@ -197,16 +197,14 @@ function fencedTemplate({ title, audience, destinationDisplay, activeNameText, i
   return `${body.join('\n').trimEnd()}\n`;
 }
 
-function managedPayload(executionPrompt, n8nAdapter) {
-  return [
+function managedPayload(executionPrompt, n8nAdapter, options = {}) {
+  const payload = [
     toolkitBegin,
     executionPrompt.trimEnd(),
-    toolkitEnd,
-    '',
-    n8nBegin,
-    n8nAdapter.trimEnd(),
-    n8nEnd
-  ].join('\n');
+    toolkitEnd
+  ];
+  if (options.includeN8n === true) payload.push('', n8nBegin, n8nAdapter.trimEnd(), n8nEnd);
+  return payload.join('\n');
 }
 
 function expectedSourceTemplates(executionPrompt) {
@@ -478,16 +476,15 @@ function validateAndSync(options = {}) {
   if ([managedAgentsTemplate, claudeTemplate, geminiTemplate, antigravityTemplate].some((value) => value === null)) return { errors };
 
   const source = {
-    root: managedPayload(executionPrompt, n8nAdapter),
+    root: managedPayload(executionPrompt, n8nAdapter, { includeN8n: true }),
     toolkit: extractManagedBlock(repoLocalTemplatePaths.managedAgents, managedAgentsTemplate, toolkitBegin, toolkitEnd, errors),
-    n8n: extractManagedBlock(repoLocalTemplatePaths.managedAgents, managedAgentsTemplate, n8nBegin, n8nEnd, errors),
     claude: claudeTemplate,
     gemini: geminiTemplate,
     antigravity: antigravityTemplate
   };
   if (Object.values(source).some((value) => value === null)) return { errors };
   if (managedAgentsTemplate.trimEnd() !== managedPayload(executionPrompt, n8nAdapter).trimEnd()) {
-    errors.push(`Stale curated repo-local managed AGENTS template: ${repoLocalTemplatePaths.managedAgents}. Update the curated source from ${executionPromptPath} and ${n8nAdapterPath}, keep the compact fail-closed n8n adapter, then run sync.`);
+    errors.push(`Stale curated repo-local managed AGENTS template: ${repoLocalTemplatePaths.managedAgents}. Update the portable baseline from ${executionPromptPath}; n8n belongs in an owner-approved dynamic domain marker, then run sync.`);
     return { errors };
   }
 

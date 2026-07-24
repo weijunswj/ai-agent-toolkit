@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/weijunswj/ai-agent-toolkit/schemas/external-system/authorization-envelope.v1.json",
+  "title": "External System Task Authorisation Envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "provider",
+    "targetAlias",
+    "accountOrOrganisation",
+    "resource",
+    "environment",
+    "objective",
+    "allowedOperations",
+    "operationRiskTiers",
+    "operationSemanticsDigests",
+    "authorisedTier2Operations",
+    "forbiddenOperations",
+    "expectedResult",
+    "verification",
+    "rollbackOrSafeDisable",
+    "lifetime",
+    "ownerApprovalReference"
+  ],
+  "properties": {
+    "schemaVersion": {"const": "ai-agent-toolkit.external-authorisation-envelope.v1"},
+    "provider": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,63}$"},
+    "targetAlias": {"$ref": "#/$defs/alias"},
+    "accountOrOrganisation": {"$ref": "#/$defs/alias"},
+    "resource": {"$ref": "#/$defs/alias"},
+    "environment": {"$ref": "#/$defs/alias"},
+    "objective": {"type": "string", "minLength": 1, "maxLength": 500},
+    "allowedOperations": {"$ref": "#/$defs/operations"},
+    "operationRiskTiers": {"type": "object", "minProperties": 1, "propertyNames": {"$ref": "#/$defs/alias"}, "additionalProperties": {"type": "integer", "minimum": 0, "maximum": 3}},
+    "operationSemanticsDigests": {"type": "object", "minProperties": 1, "propertyNames": {"$ref": "#/$defs/alias"}, "additionalProperties": {"$ref": "#/$defs/digest"}},
+    "authorisedTier2Operations": {"$ref": "#/$defs/operations"},
+    "forbiddenOperations": {"$ref": "#/$defs/operations"},
+    "expectedResult": {"type": "string", "minLength": 1, "maxLength": 500},
+    "verification": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1, "maxLength": 300}},
+    "rollbackOrSafeDisable": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1, "maxLength": 300}},
+    "lifetime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {"enum": ["task", "time-bounded"]},
+        "expiresAt": {"type": "string", "format": "date-time"},
+        "taskId": {"$ref": "#/$defs/alias"},
+        "sessionFingerprint": {"$ref": "#/$defs/digest"},
+        "objectiveDigest": {"$ref": "#/$defs/digest"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"kind": {"const": "task"}}},
+          "then": {
+            "required": ["taskId", "sessionFingerprint", "objectiveDigest"],
+            "not": {"required": ["expiresAt"]}
+          }
+        },
+        {
+          "if": {"properties": {"kind": {"const": "time-bounded"}}},
+          "then": {
+            "required": ["expiresAt"],
+            "not": {
+              "anyOf": [
+                {"required": ["taskId"]},
+                {"required": ["sessionFingerprint"]},
+                {"required": ["objectiveDigest"]}
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "ownerApprovalReference": {"type": "string", "minLength": 1, "maxLength": 200},
+    "sensitiveDataClasses": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/alias"}},
+    "interfaceRestrictions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^(?:(?:no|forbid)-|(?:forbid|require):)[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"}}
+  },
+  "$defs": {
+    "alias": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"},
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{16,64}$"},
+    "operations": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/alias"}}
+  }
+}

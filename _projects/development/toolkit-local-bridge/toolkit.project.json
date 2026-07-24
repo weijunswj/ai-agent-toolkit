@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.8.2",
+  "version": "2.9.9",
   "version_policy": "semver",
-  "version_notes": "Redacts private ignore-hygiene paths and closes restore and cleanup target-state races.",
+  "version_notes": "Aligns native and bridge surfaces with the production-only external inventory-authority boundary.",
   "outputs": [
     {
       "kind": "curated",
@@ -69,7 +69,7 @@
       "kind": "json",
       "source": "_main/claude-plugin/hooks/hooks.json",
       "output": ".claude-plugin/hooks/hooks.json",
-      "notes": "Claude Code native plugin hooks generated from first-party module source; SessionStart calls the shared updater and PreToolUse blocks native Agent bypass under strict Toolkit profiles.",
+      "notes": "Claude Code native plugin hooks generated from first-party module source; SessionStart calls the shared updater, strict profiles block native Agent bypass, and n8n workflow mutations fail closed until exact capability evidence is present.",
       "fidelity": "generated_metadata"
     },
     {

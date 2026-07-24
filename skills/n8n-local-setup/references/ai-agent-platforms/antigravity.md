@@ -15,7 +15,7 @@ This page is an optional Antigravity AI-coding-agent setup reference, not a requ
 | Item | Use |
 | --- | --- |
 | [Official n8n Skills](https://github.com/n8n-io/skills) | Workflow design, node guidance, validation, and build guidance when [official n8n Skills](https://github.com/n8n-io/skills) are installed. Plugin lifecycle hooks are available only on supported plugin platforms. |
-| Official entry-point meta-skill | The first [official n8n Skills](https://github.com/n8n-io/skills) skill to load when starting n8n workflow work; currently `using-n8n-skills`. |
+| Official entry-point meta-skill | The first [official n8n Skills](https://github.com/n8n-io/skills) skill to load when starting n8n workflow work; currently `using-n8n-skills-official`. |
 | `n8n_live` | Official instance-level MCP access for read-only inspection or explicitly approved live changes. |
 | Antigravity skill support | Platform-specific skill loading. Use official upstream n8n Skills inside an Antigravity plugin-scoped skill folder unless Antigravity later documents native n8n plugin parity. |
 | Antigravity MCP config | User-scoped MCP server setup. |
@@ -50,7 +50,7 @@ Do not copy, fork, vendor, mirror, or recreate the official [`n8n-io/skills`](ht
 
 The official [`n8n-io/skills`](https://github.com/n8n-io/skills) README documents plugin installs for Codex and Claude Code. Those plugin installs ship lifecycle hooks:
 
-- `SessionStart` loads the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`, automatically.
+- `SessionStart` loads the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills-official`, automatically.
 - `PreToolUse` nudges the agent to consult the matching skill before high-impact n8n MCP calls.
 - `PostToolUse` can provide follow-up reminders after tool use.
 
@@ -64,7 +64,7 @@ Use the official upstream package as the source, then install or copy the whole 
 | Installed version marker | `C:\Users\<user>\.gemini\config\plugins\n8n-skills\installed_version.json` |
 | Optional plugin README | `C:\Users\<user>\.gemini\config\plugins\n8n-skills\README.md` |
 | Official n8n skills root | `C:\Users\<user>\.gemini\config\plugins\n8n-skills\skills\` |
-| Required entry point | `C:\Users\<user>\.gemini\config\plugins\n8n-skills\skills\using-n8n-skills\SKILL.md` |
+| Required entry point | `C:\Users\<user>\.gemini\config\plugins\n8n-skills\skills\using-n8n-skills-official\SKILL.md` |
 
 Use BOM-less UTF-8 for metadata files. A plugin file that mirrors Antigravity's installed multi-skill plugin shape is:
 
@@ -93,7 +93,7 @@ If `skills.sh` supports your environment, use it only as the official upstream i
 npx skills add n8n-io/skills
 ```
 
-If that command writes to `$HOME\.agents\skills` or another non-Antigravity location, move or copy only the official n8n skill folders into the `n8n-skills` plugin-scoped `skills\` folder above. Keep each whole upstream skill folder, not just `SKILL.md`, so references and examples stay beside the skill. Do not stop after a successful `npx skills add` unless Antigravity can see `using-n8n-skills` from the plugin-scoped path.
+If that command writes to `$HOME\.agents\skills` or another non-Antigravity location, move or copy only the official n8n skill folders into the `n8n-skills` plugin-scoped `skills\` folder above. Keep each whole upstream skill folder, not just `SKILL.md`, so references and examples stay beside the skill. Do not stop after a successful `npx skills add` unless Antigravity can see `using-n8n-skills-official` from the plugin-scoped path.
 
 Compatibility varies by agent. Check [skills.sh](https://skills.sh) support for your Antigravity runtime.
 
@@ -101,11 +101,11 @@ Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or 
 
 ```markdown
 This project uses n8n. When working with workflows, nodes, expressions, or
-the n8n MCP tools, always start by loading the `using-n8n-skills` meta-skill
+the n8n MCP tools, always start by loading the `using-n8n-skills-official` meta-skill
 and follow its routing into the matching capability skill before acting.
 ```
 
-For the current session, explicitly ask Antigravity to load the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`, before any n8n workflow design, validation, or live-instance proposal.
+For the current session, explicitly ask Antigravity to load the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills-official`, before any n8n workflow design, validation, or live-instance proposal.
 
 Use [official n8n Skills](https://github.com/n8n-io/skills) first, then use the official n8n MCP tools that are actually available in the connected instance. Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities. Do not execute live changes without explicit current-turn approval naming the exact target and allowed operation.
 
@@ -152,7 +152,7 @@ This section is for this toolkit's own safety skills, not the upstream [official
 4. If Antigravity does not invoke toolkit skills automatically, keep any global `GEMINI.md` nudge tiny:
 
    ```text
-   Before editing files in any repository, always use the `ai-coding-agent-rules` skill once per new chat/session to check, bootstrap, or repair repo-local instructions. For n8n work, load the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`, and `n8n-agent-rules` before workflow design or live-instance proposals.
+   Before editing files in any repository, always use the `ai-coding-agent-rules` skill once per new chat/session to check, bootstrap, or repair repo-local instructions. For n8n work, load the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills-official`, and `n8n-agent-rules` before workflow design or live-instance proposals.
    ```
 
 ## 6. Antigravity MCP Config
@@ -181,7 +181,7 @@ This section is for this toolkit's own safety skills, not the upstream [official
 1. Confirm this file exists:
 
    ```text
-   C:\Users\<user>\.gemini\config\plugins\n8n-skills\skills\using-n8n-skills\SKILL.md
+   C:\Users\<user>\.gemini\config\plugins\n8n-skills\skills\using-n8n-skills-official\SKILL.md
    ```
 
 2. If the official skills were installed under `$HOME\.agents\skills` or `$HOME\.gemini\antigravity\skills`, copy the whole official n8n skill folders into the plugin-scoped `n8n-skills\skills` folder.

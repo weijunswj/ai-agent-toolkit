@@ -1,0 +1,109 @@
+{
+  "id": "development.external-system-router",
+  "category": "development",
+  "name": "external-system-router",
+  "title": "External System Router",
+  "module_path": "_projects/development/external-system-router",
+  "main_path": "_projects/development/external-system-router/_main",
+  "version": "1.0.9",
+  "version_policy": "semver",
+  "version_notes": "Removes production synthetic inventory authority and admits only the canonical trusted-runtime inventory loader.",
+  "outputs": [
+    {
+      "kind": "copy",
+      "source": "_main/skill/SKILL.md",
+      "output": "skills/external-system-router/SKILL.md",
+      "notes": "Exact first-party skill entry point.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/README.md",
+      "output": "skills/external-system-router/README.md",
+      "notes": "Exact first-party skill README.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/agents/openai.yaml",
+      "output": "skills/external-system-router/agents/openai.yaml",
+      "notes": "Exact first-party OpenAI-facing metadata.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/references",
+      "output": "skills/external-system-router/references",
+      "notes": "Complete reviewed control-plane references and schemas.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/skill/scripts",
+      "output": "skills/external-system-router/scripts",
+      "notes": "Complete deterministic router, n8n admission, and drift scripts.",
+      "fidelity": "exact"
+    }
+  ],
+  "writes": {
+    "allowed": [
+      "skills/external-system-router/SKILL.md",
+      "skills/external-system-router/README.md",
+      "skills/external-system-router/agents/openai.yaml",
+      "skills/external-system-router/references",
+      "skills/external-system-router/scripts"
+    ],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false,
+  "skill_creation_review": {
+    "existing_skill_review": "Reviewed external-system-router against ai-coding-agent-rules, toolkit-setup, n8n-agent-rules, n8n-local-setup, n8n-workflow-helper-scripts, project-completion-audit, self-hosted-service-safety, codex-ssh-hostinger-coolify-setup-maintainer, secure-cicd-installer, managed-app-foundation-review, source-watch, native plugin metadata, and the local bridge. Existing skills own domain safety or setup but none owns one reusable operation-level provider target, envelope, capability-audit, graphical approval, reconciliation, receipt, and route lifecycle contract.",
+    "trigger": "Provider APIs/CLIs/SDKs, MCP/connectors, provider-console browser/computer-use, deployment, DNS, database, storage, workflow, OAuth, provider setup/capability selection, operation receipts, or supported continuation.",
+    "decision": "new_project_skill",
+    "decision_reason": "The cross-provider operation router has a distinct universal trigger and safety boundary. Folding it into setup, Coolify, n8n, CI/CD, or self-hosted skills would duplicate policy and leave other provider operations uncovered.",
+    "unique_value": "Broad tool permission with narrow task authority; per-operation strongest-admissible routing; universal graphical disclosure; last-resort history; repo-and-intent reconciliation; host-neutral target profiles; redacted receipts; staged route migration.",
+    "runtime_footprint": "One compact safety-router SKILL, focused references, dependency-free Node runtime, and versioned JSON schemas. Provider-specific adapters remain separate projects/PRs.",
+    "local_assets": "No binaries, external packages, vendor code, credentials, provider output, screenshots, or live state.",
+    "output_contract": "Produce a validated envelope, target binding, per-operation capability audit and route, complete graphical disclosure when needed, verified result, redacted receipt, and completion ledger.",
+    "anti_bloat_review": "Not a generic executor and does not absorb provider-specific endpoint code. Detailed contracts remain in routed references and schemas instead of root instructions.",
+    "safety_boundary": "Live/external mutation, graphical control, credentials, private data, deployment, DNS, database, workflow, and destructive operations remain risk-tiered and owner-authorised. Scheduled paths are read-only.",
+    "source_provenance": "first_party",
+    "third_party_audit": "not_applicable_first_party; official documentation supplied facts only and no third-party skill or executable material was imported.",
+    "publisher_workflow": "Used context-preserving-ai-publisher for a source-first first-party project, deterministic exact publication from _main, routing/safety-matrix updates, plugin version alignment, sync, targeted tests, and final security review.",
+    "routing": "external-system-router is routed as the implicit universal safety gate for external-system and graphical-control operations; provider-specific implementation remains in companion skills/adapters.",
+    "validation": [
+      "node repo/scripts/sync-toolkit-projects.cjs --write",
+      "node repo/scripts/sync-toolkit-projects.cjs --check",
+      "node --test repo/tests/external-system-router.test.cjs",
+      "node --test repo/tests/external-capability-reconciliation.test.cjs",
+      "node repo/scripts/validate-toolkit.cjs"
+    ]
+  },
+  "project": {
+    "name": "External System Router",
+    "category": "development",
+    "summary": "Risk-scoped external-system routing, progressive capability reconciliation, graphical-control approval, host-neutral target profiles, and redacted operation receipts."
+  },
+  "surface": {
+    "publish_as": "skill",
+    "skill": {
+      "status": "published",
+      "path": "skills/external-system-router",
+      "summary": "Routes exact owner-authorised external-system operations through risk tiers and the strongest admissible operation-specific interface."
+    },
+    "mcp": {"status": "not_applicable"}
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/weijunswj/ai-agent-toolkit/schemas/external-system/capability-ledger.v1.json",
+  "title": "Progressive External Capability Ledger",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "reconciliationDigest", "repositoryDigest", "intentDigest", "capabilities", "complete", "updatedAt"],
+  "properties": {
+    "schemaVersion": {"const": "ai-agent-toolkit.capability-ledger.v1"},
+    "reconciliationDigest": {"$ref": "#/$defs/digest"},
+    "repositoryDigest": {"$ref": "#/$defs/digest"},
+    "intentDigest": {"$ref": "#/$defs/digest"},
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["provider", "capability", "sources", "reasons", "status"],
+        "properties": {
+          "provider": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,63}$"},
+          "capability": {"$ref": "#/$defs/name"},
+          "source": {"type": "string"},
+          "reason": {"type": "string"},
+          "sources": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["repository", "repository-manifest", "intent"]}},
+          "reasons": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 500}},
+          "status": {"enum": ["configured-and-verified", "deferred-with-blocker", "proven-unnecessary", "pending"]},
+          "verificationEvidence": {"type": "string", "minLength": 1, "maxLength": 500},
+          "blocker": {"type": "string", "minLength": 1, "maxLength": 500},
+          "evidence": {"type": "string", "minLength": 1, "maxLength": 500}
+        },
+        "allOf": [
+          {"if": {"properties": {"status": {"const": "configured-and-verified"}}, "required": ["status"]}, "then": {"required": ["verificationEvidence"]}},
+          {"if": {"properties": {"status": {"const": "deferred-with-blocker"}}, "required": ["status"]}, "then": {"required": ["blocker"]}},
+          {"if": {"properties": {"status": {"const": "proven-unnecessary"}}, "required": ["status"]}, "then": {"required": ["evidence"]}},
+          {"if": {"properties": {"status": {"const": "pending"}}, "required": ["status"]}, "then": {"not": {"anyOf": [{"required": ["verificationEvidence"]}, {"required": ["blocker"]}, {"required": ["evidence"]}]}}}
+        ]
+      }
+    },
+    "complete": {"type": "boolean"},
+    "updatedAt": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "name": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"},
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

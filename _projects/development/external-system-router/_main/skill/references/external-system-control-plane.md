@@ -1,0 +1,191 @@
+# External-System Control Plane
+
+## Governing Rule
+
+The owner authorises an exact objective and target. Toolkit classifies the operation risk, then selects the strongest reviewed interface admissible for that exact operation.
+
+Use this order of reasoning:
+
+```text
+strongest reviewed structured interface for the exact operation
+-> another admissible structured interface
+-> informed browser/computer-use fallback
+-> narrow owner action when delegation is unsafe
+```
+
+Do not use a global `MCP > API > browser` ladder. A read-only MCP cannot block an official API write. A complete typed MCP may outrank a weaker API only for the operation whose target binding, schema, redaction, failure semantics, preconditions, postconditions, and rollback have been proven.
+
+## Risk Tiers
+
+| Tier | Meaning | Approval |
+| --- | --- | --- |
+| 0 | Exact-target inspection that is read-only and does not expose a newly sensitive data class. | Standing permission inside the established task envelope. |
+| 1 | Bounded, reversible, normally non-production change. | Task-envelope approval; no per-request prompt. |
+| 2 | Production or sensitive but reversible change, including deployment, exact env write, credential/OAuth setup, or approved rollback. | Explicitly listed task-scoped owner authorisation; complete the approved sequence and verification without repeated prompts. |
+| 3 | Destructive, irreversible, cross-target, credential revocation, data restore, DNS deletion, or similarly high-blast-radius action. | Exact immediate owner approval for that operation. |
+
+Every non-read-only production operation is at least Tier 2 even when its provider-specific operation name is unfamiliar. Caller metadata and provider-specific overrides may raise the tier but can never lower this production floor. Destructive, irreversible, cross-target, or high-blast-radius evidence still raises the operation to Tier 3.
+
+Mutability is never established by a caller's `readOnly` field. Each admitted operation has one versioned canonical operation-semantics record defining mutation class, destructive/irreversible/cross-target/high-blast-radius state, environment risk floors, preconditions, postconditions, rollback or safe-disable requirements, and receipt class. The operation context, authorisation envelope, capability audit, authenticated target inventory, authenticated host plan, selected route, immediate approval, and receipt must bind the same semantics digest. Missing, unknown, stale, or conflicting semantics fail before route creation.
+
+Forbidden operations override every tier. Crossing provider, target, account/organisation, resource, environment, tier, sensitive-data class, interface restriction, or material objective scope requires a new envelope or owner decision.
+
+## Task-Authorisation Envelope
+
+Record:
+
+- provider;
+- target alias;
+- account or organisation alias;
+- exact instance, project, application, or resource alias;
+- environment;
+- objective;
+- allowed operations;
+- minimum risk tier for every allowed operation;
+- canonical operation-semantics digest for every allowed operation;
+- explicitly authorised Tier 2 operations;
+- forbidden operations;
+- expected result;
+- verification;
+- rollback or safe-disable;
+- lifetime;
+- owner approval reference;
+- sensitive-data classes;
+- interface restrictions, when applicable.
+
+Task lifetime additionally binds one exact task ID, privacy-safe session fingerprint, and canonical digest of the bounded approved objective. A later task, another session, or changed objective requires a new envelope even when provider, target, and operation remain the same. Time-bounded envelopes keep their expiry semantics and do not carry task-identity fields.
+
+Example task lifetime fragment:
+
+```json
+{
+  "kind": "task",
+  "taskId": "task-286-amendment",
+  "sessionFingerprint": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "objectiveDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+}
+```
+
+The objective digest is produced by the router's canonical `objectiveAuthorityDigest()` helper from the exact bounded objective; it is not a caller-selected label.
+
+Do not ask before every API request, CLI command, MCP call, or browser click inside a valid envelope.
+
+## Universal Graphical-Control Approval
+
+Before Chrome/browser plugins, computer use, accessibility or UI automation, screenshot-driven control, desktop automation, file pickers, UI clipboard interaction, or similar graphical control, state:
+
+- goal;
+- browser/profile or desktop application;
+- origin, account, project, environment, and resource;
+- why API, CLI, MCP, connector, or file access is insufficient;
+- what may be read;
+- what may be clicked, typed, uploaded, downloaded, or changed;
+- whether credentials, cookies, history, downloads, clipboard, customer/private data, or unrelated windows may be encountered;
+- forbidden scope;
+- expected result;
+- verification;
+- rollback or safe-disable.
+
+Then ask one bold explicit question. A technical permission popup is not informed owner approval. One approval covers only the disclosed envelope.
+
+## Browser-History Last Resort
+
+Try and document failure of these safer paths first:
+
+1. committed non-secret provider requirements;
+2. Toolkit local target registry;
+3. configured API, CLI, MCP, or connector metadata;
+4. current task context and approved origins;
+5. safe public/provider metadata, DNS, or approved open tabs;
+6. asking the owner for the URL.
+
+If history is still necessary, state the exact reason, browser/profile, bounded domains, bounded time range, unrelated information that may appear, and stop condition; then obtain explicit approval. Stop as soon as the target is found.
+
+## Progressive Reconciliation
+
+Reconcile repository evidence and current intent at:
+
+- new session or substantive task start;
+- branch switch or pull;
+- relevant repository change;
+- managed-marker drift;
+- provider assets appearing;
+- host switch;
+- capability failure or schema drift;
+- explicit provider setup intent.
+
+Repository evidence alone is insufficient when the objective adds a capability. Intent alone is insufficient when the repo proves additional boundaries or prohibitions. Maintain a progressive ledger and do not declare completion until every required capability is verified, blocked/deferred, or unnecessary with evidence.
+
+Generic Toolkit setup installs no provider integrations. Setup can be multi-step and may recommend owner-approved additions or removals.
+
+## Component-Based n8n Routing
+
+- Repo owns workflow JSON: recommend canonical `n8n-workflows/` rules and helper/compiler scripts.
+- Agent designs nodes or expressions: recommend official n8n Skills.
+- Live read/import/update: audit and select the strongest admissible API, supported CLI, MCP, or other structured transport for each operation.
+- Credential creation or OAuth: use an informed graphical fallback only where no safe structured operation exists.
+- Webhook-only consumer: do not install workflow helpers unless workflow ownership appears.
+- Historical mention only: install nothing and recommend owner-reviewed removal of stale n8n markers.
+
+Official n8n Skills and live n8n MCP are separate capabilities. Installing Skills never implies installing MCP. The current official n8n CLI/API client is not a production transport unless its then-current official support contract and an operation audit prove otherwise.
+
+## Target And Credential Model
+
+Resolve `provider + target alias + environment`. Default to one appropriately scoped credential per provider target. Additional credentials are optional only for provider limitations, ownership boundaries, or explicit isolation.
+
+Never select a target from the most recently used credential, open tabs, browser history, the first environment variable, or a generic provider token. Resolve from repo/task context or ask once, then pin it in the envelope.
+
+The canonical local registry is `~/.ai-agent-toolkit/external-system/provider-target-registry.json`. It may store sanitized target fingerprints, a monotonic current inventory generation, private-origin references, non-secret resource references, credential references (never values), installed interfaces, authenticated complete-audit digests, canonical operation semantics, route selections, audit state, and structured receipt references. It is not a plaintext secret vault.
+
+The router loads this registry through one bounded authority path derived from the operating system's current user profile rather than caller-controlled environment variables. The production loader accepts zero arguments and has no test flag, source-path override, dependency-injected reader, environment/argv/global switch, identity-expectation helper, or compatibility alias. The file and parent must be real regular non-link topology; size and record count are bounded; exact bytes, file identity, canonical path, router version/source digest, repository, host, installation, schema, generation, and target records are verified. The loader returns a process-local authority object whose visible hashes are evidence, not forgeable authority. Raw registry records, copied JSON, and recomputed hashes are never accepted by route selection.
+
+Final route selection requires exactly one loader-produced authority or a process-local host plan derived from it. Provider, target, account/organisation, resource, environment, target fingerprint, inventory generation and digest, installed interface, complete capability-audit digest, current audit state, and canonical operation semantics must all agree. The source is revalidated immediately before route creation and receipt creation. Detached, copied, recomputed, stale, replaced, cross-installation, or rollback-generation objects fail closed, and graphical fallback has no inventory bypass.
+
+### Authority Minting Invariants
+
+- `INVENTORY_AUTHORITIES` is written only by the zero-option production canonical loader after source topology, bytes, schema, generation, router, repository, host, installation, and authority-path identity pass.
+- `HOST_PLAN_AUTHORITIES` is written only by host-plan derivation after the exact inventory authority is found in `INVENTORY_AUTHORITIES` and its canonical source is revalidated.
+- `SELECTED_ROUTE_AUTHORITIES` is written only after current inventory resolution, exact target/audit/operation agreement, final risk recomputation, full authorisation, interface selection, and one last inventory revalidation.
+
+All three maps are module-private `WeakMap` instances. Serialized, spread, copied, reconstructed, rehashed, stale-generation, cross-module, or cross-runtime objects are absent from the relevant map and fail closed. Repository tests use a non-published harness that compiles an isolated router instance with its own temporary canonical fixture. That instance has separate private maps and cannot mint or inspect authority in either authoritative or generated production modules. The harness is outside project outputs, package exports, CLIs, setup helpers, native bridges, skills, and packs.
+
+## Secret Handling
+
+Preference order:
+
+1. Connector/provider-managed OAuth or credential store.
+2. OS credential manager, password manager, or reviewed local secret broker.
+3. Short-lived process/session injection.
+4. User environment variable or application-specific plaintext file as compatibility fallback.
+
+`~/.codex/.env` is plaintext. A repo `.env` is plaintext and adds Git/sync risk. Persistent user/Windows environment variables are not secure vaults. Secrets never enter repository files, chat, GitHub, reports, receipts, or ordinary logs.
+
+## Capability Audit
+
+Audit per operation and record sanitized evidence for identity/version, available operation, canonical semantics digest, target binding, input schema, auth/scope status without values, redaction, retry/idempotency, preconditions, postconditions, rollback, and failure semantics. The capability digest authenticates the complete audit record rather than acting as a caller-selected label. An interface is not sufficient merely because it is installed or authenticated.
+
+## Promotion And Demotion
+
+Required lifecycle:
+
+```text
+deterministic drift detection
+-> semantic review
+-> synthetic tests
+-> native UAT
+-> owner-approved migration
+-> observation period
+-> optional later removal/revocation approval
+```
+
+Promote or demote one verified operation only. Retain the prior route until parity and native UAT pass. Never automatically revoke credentials or delete working configuration.
+
+## Receipts And Continuation
+
+Write one versioned local ignored receipt per operation with one supported next action and explicit unchanged scope. Receipt creation accepts only the exact process-local selected-route authority and revalidates its inventory source. Bind task-lifetime receipts to the exact task, session fingerprint, objective digest, canonical mutation and receipt classes, operation-semantics version/digest, final risk, selected-audit read/write status, authenticated inventory authority/source, capability digest, precondition/result/verification/rollback evidence, and selected-route digest. A write-capable route can never create an inspection receipt. Exclude raw provider responses, secrets, tokens, cookies, full environment listings, raw screenshots, private absolute paths, and customer/private payloads.
+
+Codex and Claude continue through named supported operations and receipts. They do not edit adapter scripts to improvise a new operation.
+
+## Scheduled Boundary
+
+Hourly deterministic collectors and capability checks are read-only. An optional daily ChatGPT Scheduled Task may recommend one operation, but neither path may install, mutate, promote, demote, revoke, or execute a provider operation automatically.

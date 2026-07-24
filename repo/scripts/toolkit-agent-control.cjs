@@ -9,7 +9,7 @@ const crypto = require('node:crypto');
 const processLaunch = require('./claude-process-launch.cjs');
 
 const SCHEMA = 1;
-const CONTROL_VERSION = '2.8.2';
+const CONTROL_VERSION = '2.9.9';
 const RESULTS = Object.freeze({ START: 'start', QUEUE: 'queue', REFUSE: 'refuse-root-only' });
 const CHECKER_RESULTS = Object.freeze({ PASS: 'PASS', FINDINGS: 'FINDINGS', ADMISSION_DENIED: 'ADMISSION_DENIED', SKIPPED_TRIVIAL: 'SKIPPED_TRIVIAL' });
 const HOSTS = Object.freeze({ CODEX: 'codex', CLAUDE: 'claude-code', OPENCODE: 'opencode' });
@@ -296,9 +296,9 @@ function rootOnlyProfile(host, status, reason) {
 }
 
 function validActivationProof(proof, expected = {}) {
-  const structurallyValid = Boolean(proof && proof.schema === 3 && proof.source === 'claude-plugin-list'
+  const structurallyValid = Boolean(proof && proof.schema === 5 && proof.source === 'claude-plugin-list'
     && proof.plugin_version === CONTROL_VERSION
-    && ['cache_identity', 'hook_sha256', 'controller_sha256', 'process_launch_sha256', 'agent_hook_sha256']
+    && ['cache_identity', 'hook_sha256', 'controller_sha256', 'process_launch_sha256', 'agent_hook_sha256', 'n8n_admission_hook_sha256', 'external_system_router_sha256', 'n8n_domain_router_sha256']
       .every((key) => /^[a-f0-9]{64}$/.test(String(proof[key] || ''))));
   if (!structurallyValid) return false;
   if (expected.pluginVersion && proof.plugin_version !== expected.pluginVersion) return false;
@@ -333,7 +333,7 @@ function verifyCurrentClaudeEnforcement(profile, options = {}) {
     claudeCommand: effectiveClaudeCommand(profile, options), env,
   });
   return Boolean(current?.verified === true && validActivationProof(current.activation_proof)
-    && ['schema', 'source', 'plugin_version', 'cache_identity', 'hook_sha256', 'controller_sha256', 'process_launch_sha256', 'agent_hook_sha256']
+    && ['schema', 'source', 'plugin_version', 'cache_identity', 'hook_sha256', 'controller_sha256', 'process_launch_sha256', 'agent_hook_sha256', 'n8n_admission_hook_sha256', 'external_system_router_sha256', 'n8n_domain_router_sha256']
       .every((key) => current.activation_proof[key] === profile.activation_proof?.[key]));
 }
 

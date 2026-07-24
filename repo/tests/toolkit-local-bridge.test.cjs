@@ -44,7 +44,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.8.2';
+const expectedBridgeVersion = '2.9.9';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 
 function tmpBaseDir() {
@@ -5272,18 +5272,36 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
   assert.match(claudeCommand, /--sync-enabled/);
   assert.match(claudeCommand, /--sync-source claude-plugin/);
   assert.deepEqual(Object.keys(codexHooks.hooks).sort(), ['SessionStart']);
-  assert.deepEqual(Object.keys(claudeHooks.hooks).sort(), ['PreToolUse', 'SessionStart']);
+  assert.deepEqual(Object.keys(claudeHooks.hooks).sort(), [
+    'PostToolUse', 'PreToolUse', 'SessionStart', 'Stop', 'TaskCompleted', 'UserPromptExpansion', 'UserPromptSubmit'
+  ]);
   const claudeAgentHook = claudeHooks.hooks.PreToolUse[0];
   assert.equal(claudeAgentHook.matcher, 'Agent|Task');
   assert.match(claudeAgentHook.hooks[0].command, /\$\{CLAUDE_PLUGIN_ROOT\}\/repo\/scripts\/toolkit-claude-agent-hook\.cjs/);
+  const n8nAdmissionHooks = [
+    ['PreToolUse', claudeHooks.hooks.PreToolUse[1], `Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell|${require('../../skills/external-system-router/scripts/n8n-domain-router.cjs').N8N_MCP_TOOL_PATTERN_SOURCE}`],
+    ['PostToolUse', claudeHooks.hooks.PostToolUse[0], 'Skill'],
+    ['PostToolUse', claudeHooks.hooks.PostToolUse[1], 'Bash|PowerShell'],
+    ['UserPromptSubmit', claudeHooks.hooks.UserPromptSubmit[0], undefined],
+    ['UserPromptExpansion', claudeHooks.hooks.UserPromptExpansion[0], undefined],
+    ['TaskCompleted', claudeHooks.hooks.TaskCompleted[0], undefined],
+    ['Stop', claudeHooks.hooks.Stop[0], undefined]
+  ];
+  const n8nAdmissionCommands = [];
+  for (const [event, hook, matcher] of n8nAdmissionHooks) {
+    assert.equal(hook.matcher, matcher, `${event} uses the exact admission matcher`);
+    assert.equal(hook.hooks.length, 1, `${event} has one admission command`);
+    assert.match(hook.hooks[0].command, /\$\{CLAUDE_PLUGIN_ROOT\}\/repo\/scripts\/toolkit-claude-n8n-admission-hook\.cjs/, event);
+    n8nAdmissionCommands.push(hook.hooks[0].command);
+  }
   assert.equal(codexHooks.hooks.SessionEnd, undefined);
   assert.equal(claudeHooks.hooks.SessionEnd, undefined);
   assert.equal(codexHooks.hooks.Stop, undefined);
-  assert.equal(claudeHooks.hooks.Stop, undefined);
-  assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /--enable-target|--force-downgrade/);
-  assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /\.sh(?:$|[\s"'])/i);
-  assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /(?:^|\s)(?:bash|bash\.exe)(?:\s|$)|[A-Z]:\\WINDOWS\\system32\\bash\.exe/i);
-  assert.doesNotMatch(`${codexCommand}\n${claudeCommand}`, /\b(?:jq|python3)\b/i);
+  const allNativeCommands = [codexCommand, claudeCommand, claudeAgentHook.hooks[0].command, ...n8nAdmissionCommands].join('\n');
+  assert.doesNotMatch(allNativeCommands, /--enable-target|--force-downgrade/);
+  assert.doesNotMatch(allNativeCommands, /\.sh(?:$|[\s"'])/i);
+  assert.doesNotMatch(allNativeCommands, /(?:^|\s)(?:bash|bash\.exe)(?:\s|$)|[A-Z]:\\WINDOWS\\system32\\bash\.exe/i);
+  assert.doesNotMatch(allNativeCommands, /\b(?:jq|python3)\b/i);
 });
 
 test('toolkit setup skill documents the end-to-end English setup journey', () => {

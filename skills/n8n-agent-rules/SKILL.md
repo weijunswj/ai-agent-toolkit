@@ -1,6 +1,6 @@
 ---
 name: n8n-agent-rules
-description: Use when working on any n8n task, including [official n8n Skills](https://github.com/n8n-io/skills), using-n8n-skills, n8n workflow JSON, official n8n MCP, n8n_live, workflow creation, workflow updates, helper scripts, import/export, validation, credentials, webhook IDs, workflow activation, execution, repo/live sync, and n8n safety. Always apply before n8n workflow or live n8n work.
+description: Use when working on any n8n task, including [official n8n Skills](https://github.com/n8n-io/skills), using-n8n-skills-official, n8n workflow JSON, official n8n MCP, n8n_live, workflow creation, workflow updates, helper scripts, import/export, validation, credentials, webhook IDs, workflow activation, execution, repo/live sync, and n8n safety. Always apply before n8n workflow or live n8n work.
 ---
 
 <!--
@@ -21,7 +21,9 @@ Use this skill before any n8n workflow, helper-script, MCP, or live n8n work.
 
 ## Mandatory Rule
 
-Read [n8n-agent-rules.md](n8n-agent-rules.md) before planning or editing n8n material. Those rules are the full operating contract for [official n8n Skills](https://github.com/n8n-io/skills), their entry-point meta-skill currently named `using-n8n-skills`, n8n workflow JSON, official n8n MCP, `n8n_live`, workflow creation, workflow updates, helper scripts, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, and n8n safety.
+Read [n8n-agent-rules.md](n8n-agent-rules.md) before planning or editing n8n material. Those rules are the full operating contract for [official n8n Skills](https://github.com/n8n-io/skills), their entry-point meta-skill currently named `using-n8n-skills-official`, n8n workflow JSON, official n8n MCP, `n8n_live`, workflow creation, workflow updates, helper scripts, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, and n8n safety.
+
+Enter the fail-closed n8n domain router for every material task. Classify the exact operation and maintain its task-local capability ledger. Workflow design, creation, material editing, repair, review, node configuration, expressions, and workflow JSON/SDK structure require successful exact-source invocation evidence for `using-n8n-skills-official` plus every relevant specialised official Skill. Existing workflow examples, model knowledge, mirrored patterns, generic JSON validation, and repository tests never satisfy those ledger entries. If a required capability is unavailable, stop with the exact missing capability and one supported next action.
 
 ## Adapter Auto-Check Protocol
 
@@ -54,6 +56,7 @@ If Claude Code or Antigravity shim files are missing, stale, or unmanaged, use `
 ## Boundaries
 
 - This skill owns the full n8n operating ruleset.
+- `external-system-router` owns the reusable task ledger, host-specific enforcement declaration, target envelope, and live operation route selection. Its Claude Toolkit-direct hook can deny governed workflow mutations; do not claim equivalent Codex hook enforcement unless proven.
 - `n8n-local-setup` owns local n8n setup, Docker setup, tunnels, [official n8n Skills](https://github.com/n8n-io/skills) install notes, official instance-level MCP config, and platform setup notes.
 - `n8n-workflow-helper-scripts` owns helper scripts, sanitising, validation, import/export helpers, comparison, prepare-import, and repo/live workflow hygiene.
 - `n8n-workflow-templates` owns generic inactive reusable workflow templates.

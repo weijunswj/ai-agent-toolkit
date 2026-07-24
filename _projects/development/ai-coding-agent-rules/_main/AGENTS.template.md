@@ -125,6 +125,12 @@ Prior approval does not authorize a new risky action. Words like `continue`, `ne
 
 Never introduce secrets, credentials, tokens, private keys, `.env` values, or private values into repo files.
 
+## External-System Control Plane
+
+For provider operations via APIs, CLIs/SDKs, MCP/connectors, graphical consoles, deploy/DNS/data/storage/workflows/OAuth/setup, or receipts, load `external-system-router` before work. Access grants no authority: bind provider, target, environment, objective, operations, risk, verification, rollback, lifetime, and approval; choose the strongest reviewed route per operation. MCP has no default priority.
+
+Before graphical control, disclose goal/target, app/profile/origin, the structured-route gap, reads/actions, possible credential/cookie/history/download/clipboard/private or unrelated-window exposure, forbidden scope, result, verification, and rollback; ask one bold owner-approval question. Permission popups are not owner approval. History is last-resort after safer paths fail and separately approved. Scheduled checks are read-only; never install, mutate, promote/demote routes, revoke, or run production changes.
+
 ## Application Error, Logging, And Privacy Defaults
 
 When touching app behavior, use generic user-facing errors with a support-safe traceable reference, the same event/request ref in server logs, and no internal/private data. Keep privacy-minimized logs; do not log prompts/uploads/model outputs, secrets, auth headers/cookies, payment data, private connector data/files, or unneeded PII.

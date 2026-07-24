@@ -3474,6 +3474,22 @@ function verifyClaudeNativePluginMetadata(args) {
   if (!agentHookCommands.some((value) => value.includes('${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-agent-hook.cjs'))) {
     throw new Error('Claude Code plugin hooks must block native Agent launches through toolkit-claude-agent-hook.cjs');
   }
+  const n8nHookCommand = 'node "${CLAUDE_PLUGIN_ROOT}/repo/scripts/toolkit-claude-n8n-admission-hook.cjs"';
+  const requireExactN8nHook = (eventName, matcher, label) => {
+    const groups = hooks?.hooks?.[eventName];
+    const exact = Array.isArray(groups) && groups.some((group) => (
+      (matcher === null || group?.matcher === matcher)
+      && Array.isArray(group?.hooks)
+      && group.hooks.some((entry) => entry?.type === 'command' && entry.command === n8nHookCommand)
+    ));
+    if (!exact) throw new Error(`Claude Code plugin hooks must include the exact ${label} n8n admission hook`);
+  };
+  requireExactN8nHook('PreToolUse', 'Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell|^mcp__[^\\s]*n8n[^\\s]*__[^\\s]+$', 'governed-mutation PreToolUse');
+  requireExactN8nHook('PostToolUse', 'Skill', 'Skill-evidence PostToolUse');
+  requireExactN8nHook('UserPromptSubmit', null, 'intent-detection UserPromptSubmit');
+  requireExactN8nHook('UserPromptExpansion', null, 'direct-Skill UserPromptExpansion');
+  requireExactN8nHook('TaskCompleted', null, 'completion TaskCompleted');
+  requireExactN8nHook('Stop', null, 'completion Stop');
   console.log('Claude Code native plugin metadata verified.');
   console.log('If Claude Code reports the Toolkit plugin is missing, stale, disabled, or untrusted, refresh it through Claude Code native plugin UI/flow. Codex will not mutate Claude Code plugin cache.');
   return {

@@ -1937,11 +1937,11 @@ test('linked n8n Skills and MCP setup surfaces are shipped as secondary AI-codin
     const text = readText(repoRoot, page);
     assert.match(text, /official README's "Other platforms" category/, page);
     assert.match(text, /npx skills add n8n-io\/skills/, page);
-    assert.match(text, /`SessionStart` loads the \[official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) entry-point meta-skill, currently `using-n8n-skills`, automatically/, page);
+    assert.match(text, /`SessionStart` loads the \[official n8n Skills\]\(https:\/\/github\.com\/n8n-io\/skills\) entry-point meta-skill, currently `using-n8n-skills-official`, automatically/, page);
     assert.match(text, /`PreToolUse` nudges the agent to consult the matching skill/, page);
     assert.match(text, /`PostToolUse` can provide follow-up reminders/, page);
     assert.match(text, /Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or `PostToolUse` hooks/, page);
-    assert.match(text, /always start by loading the `using-n8n-skills` meta-skill/, page);
+    assert.match(text, /always start by loading the `using-n8n-skills-official` meta-skill/, page);
     assert.doesNotMatch(text, /Official plugin support is platform-dependent/, page);
   }
 

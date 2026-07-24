@@ -9,7 +9,7 @@ This page is an optional OpenCode AI-coding-agent setup reference, not a require
 | Item | Use |
 | --- | --- |
 | [Official n8n Skills](https://github.com/n8n-io/skills) | Workflow design, node guidance, validation, and build guidance when [official n8n Skills](https://github.com/n8n-io/skills) are installed. Plugin lifecycle hooks are available only on supported plugin platforms. |
-| Official entry-point meta-skill | The first [official n8n Skills](https://github.com/n8n-io/skills) skill to load when starting n8n workflow work; currently `using-n8n-skills`. |
+| Official entry-point meta-skill | The first [official n8n Skills](https://github.com/n8n-io/skills) skill to load when starting n8n workflow work; currently `using-n8n-skills-official`. |
 | `n8n_live` | Official instance-level MCP access for read-only inspection or explicitly approved live changes. |
 | OpenCode rules | User or repo instructions for safer agent behavior. |
 | OpenCode MCP config | User-scoped MCP server setup. |
@@ -48,7 +48,7 @@ Do not copy, fork, vendor, mirror, or recreate the official [`n8n-io/skills`](ht
 
 The official [`n8n-io/skills`](https://github.com/n8n-io/skills) README documents plugin installs for Codex and Claude Code. Those plugin installs ship lifecycle hooks:
 
-- `SessionStart` loads the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`, automatically.
+- `SessionStart` loads the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills-official`, automatically.
 - `PreToolUse` nudges the agent to consult the matching skill before high-impact n8n MCP calls.
 - `PostToolUse` can provide follow-up reminders after tool use.
 
@@ -64,11 +64,11 @@ Plain skill installs do not include the plugin `SessionStart`, `PreToolUse`, or 
 
 ```markdown
 This project uses n8n. When working with workflows, nodes, expressions, or
-the n8n MCP tools, always start by loading the `using-n8n-skills` meta-skill
+the n8n MCP tools, always start by loading the `using-n8n-skills-official` meta-skill
 and follow its routing into the matching capability skill before acting.
 ```
 
-For the current session, explicitly ask OpenCode to load the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`, before any n8n workflow design, validation, or live-instance proposal.
+For the current session, explicitly ask OpenCode to load the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills-official`, before any n8n workflow design, validation, or live-instance proposal.
 
 Use [official n8n Skills](https://github.com/n8n-io/skills) first, then use the official n8n MCP tools that are actually available in the connected instance. Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities. Do not execute live changes without explicit current-turn approval naming the exact target and allowed operation.
 
