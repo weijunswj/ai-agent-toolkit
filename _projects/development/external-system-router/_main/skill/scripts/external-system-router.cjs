@@ -14,12 +14,26 @@ const LEDGER_SCHEMA_VERSION = 'ai-agent-toolkit.capability-ledger.v1';
 const RECEIPT_SCHEMA_VERSION = 'ai-agent-toolkit.operation-receipt.v1';
 const ROUTE_LIFECYCLE_SCHEMA_VERSION = 'ai-agent-toolkit.route-lifecycle.v1';
 const HOST_ADAPTER_PLAN_SCHEMA_VERSION = 'ai-agent-toolkit.host-adapter-plan.v1';
+const INVENTORY_AUTHORITY_SCHEMA_VERSION = 'ai-agent-toolkit.inventory-authority.v1';
+const OPERATION_SEMANTICS_SCHEMA_VERSION = 'ai-agent-toolkit.operation-semantics.v1';
+const ROUTER_VERSION = '1.0.8';
 const QUESTION_BANK_SCHEMA_VERSION = 'ai-agent-toolkit.external-reconciliation-question-bank.v1';
 const ANSWER_SCHEMA_VERSION = 'ai-agent-toolkit.external-reconciliation-answers.v1';
+const MAX_INVENTORY_BYTES = 1024 * 1024;
+const MAX_INVENTORY_TARGETS = 100;
+const INVENTORY_AUTHORITIES = new WeakMap();
+const HOST_PLAN_AUTHORITIES = new WeakMap();
+const SELECTED_ROUTE_AUTHORITIES = new WeakMap();
+const LOADED_INVENTORY_GENERATIONS = new Map();
 
 const RISK_TIERS = Object.freeze({ INSPECTION: 0, REVERSIBLE: 1, SENSITIVE_REVERSIBLE: 2, DESTRUCTIVE: 3 });
-const INTERFACE_KINDS = new Set(['api', 'cli', 'sdk', 'mcp', 'connector', 'browser', 'computer-use', 'owner-action']);
-const STRUCTURED_INTERFACE_KINDS = new Set(['api', 'cli', 'sdk', 'mcp', 'connector']);
+const INTERFACE_KINDS = new Set([
+  'api', 'cli', 'sdk', 'mcp', 'connector', 'plugin', 'direct-protocol',
+  'browser', 'computer-use', 'owner-action'
+]);
+const STRUCTURED_INTERFACE_KINDS = new Set([
+  'api', 'cli', 'sdk', 'mcp', 'connector', 'plugin', 'direct-protocol'
+]);
 const GRAPHICAL_CAPABILITIES = new Set([
   'browser', 'chrome', 'computer-use', 'accessibility', 'ui-automation', 'screenshot-driven-control',
   'desktop-automation', 'file-picker', 'ui-clipboard', 'graphical-control'
@@ -127,6 +141,80 @@ function objectiveAuthorityDigest(objective) {
   return sha256({ objective: requireString(objective, 'objective', { max: 500 }) });
 }
 
+function operationSemanticsDigest(semantics) {
+  return sha256({
+    schemaVersion: semantics.schemaVersion,
+    operation: semantics.operation,
+    mutationClass: semantics.mutationClass,
+    destructive: semantics.destructive,
+    irreversible: semantics.irreversible,
+    crossTarget: semantics.crossTarget,
+    highBlastRadius: semantics.highBlastRadius,
+    minimumRiskByEnvironment: semantics.minimumRiskByEnvironment,
+    requiredPreconditions: semantics.requiredPreconditions,
+    requiredPostconditions: semantics.requiredPostconditions,
+    rollbackOrSafeDisable: semantics.rollbackOrSafeDisable,
+    receiptClass: semantics.receiptClass
+  });
+}
+
+function validateOperationSemantics(semantics) {
+  requireObject(semantics, 'Operation semantics');
+  assertAllowedKeys(semantics, new Set([
+    'schemaVersion', 'operation', 'mutationClass', 'destructive', 'irreversible', 'crossTarget',
+    'highBlastRadius', 'minimumRiskByEnvironment', 'requiredPreconditions', 'requiredPostconditions',
+    'rollbackOrSafeDisable', 'receiptClass', 'semanticsDigest'
+  ]), 'Operation semantics');
+  invariant(semantics.schemaVersion === OPERATION_SEMANTICS_SCHEMA_VERSION, 'Unsupported operation-semantics schema.', 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+  requireString(semantics.operation, 'operationSemantics.operation', { pattern: ALIAS_PATTERN });
+  invariant(['read-only', 'mutation'].includes(semantics.mutationClass), 'Unsupported operation mutationClass.', 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+  for (const field of ['destructive', 'irreversible', 'crossTarget', 'highBlastRadius']) {
+    invariant(typeof semantics[field] === 'boolean', `Operation semantics ${field} must be boolean.`, 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+  }
+  requireObject(semantics.minimumRiskByEnvironment, 'minimumRiskByEnvironment');
+  invariant(Number.isInteger(semantics.minimumRiskByEnvironment.default)
+    && semantics.minimumRiskByEnvironment.default >= 0
+    && semantics.minimumRiskByEnvironment.default <= 3,
+  'Operation semantics requires a default risk floor.', 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+  for (const [environment, tier] of Object.entries(semantics.minimumRiskByEnvironment)) {
+    requireString(environment, 'minimumRiskByEnvironment key', { pattern: ALIAS_PATTERN });
+    invariant(Number.isInteger(tier) && tier >= 0 && tier <= 3,
+      `Operation semantics risk floor for ${environment} must be 0-3.`, 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+  }
+  requireStringArray(semantics.requiredPreconditions, 'requiredPreconditions', {
+    min: semantics.mutationClass === 'mutation' ? 1 : 0, unique: true
+  });
+  requireStringArray(semantics.requiredPostconditions, 'requiredPostconditions', {
+    min: semantics.mutationClass === 'mutation' ? 1 : 0, unique: true
+  });
+  requireStringArray(semantics.rollbackOrSafeDisable, 'operationSemantics.rollbackOrSafeDisable', {
+    min: semantics.mutationClass === 'mutation' ? 1 : 0, unique: true
+  });
+  invariant(['inspection', 'mutation', 'destructive'].includes(semantics.receiptClass),
+    'Unsupported operation receiptClass.', 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+  invariant((semantics.mutationClass === 'read-only') === (semantics.receiptClass === 'inspection'),
+    'Operation receiptClass disagrees with mutationClass.', 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+  const destructive = semantics.destructive || semantics.irreversible
+    || semantics.crossTarget || semantics.highBlastRadius;
+  if (destructive) {
+    invariant(semantics.mutationClass === 'mutation' && semantics.receiptClass === 'destructive',
+      'Destructive operation semantics must be a destructive mutation.', 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+  }
+  invariant((semantics.receiptClass === 'destructive') === destructive,
+    'Destructive receipt semantics require an explicit destructive, irreversible, cross-target, or high-blast-radius classification.',
+    'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+  requireString(semantics.semanticsDigest, 'semanticsDigest', { pattern: DIGEST_PATTERN });
+  invariant(semantics.semanticsDigest === operationSemanticsDigest(semantics),
+    'Operation semantics digest is invalid.', 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+  return semantics;
+}
+
+function capabilityAuditDigest(audit) {
+  const value = { ...audit };
+  delete value.capabilityDigest;
+  return sha256(value);
+}
+
 function countOccurrences(text, marker) {
   return String(text).split(marker).length - 1;
 }
@@ -186,7 +274,7 @@ function validateAuthorizationEnvelope(envelope) {
   requireObject(envelope, 'Task authorisation envelope');
   const allowed = new Set([
     'schemaVersion', 'provider', 'targetAlias', 'accountOrOrganisation', 'resource', 'environment', 'objective',
-    'allowedOperations', 'operationRiskTiers', 'authorisedTier2Operations', 'forbiddenOperations', 'expectedResult', 'verification',
+    'allowedOperations', 'operationRiskTiers', 'operationSemanticsDigests', 'authorisedTier2Operations', 'forbiddenOperations', 'expectedResult', 'verification',
     'rollbackOrSafeDisable', 'lifetime', 'ownerApprovalReference', 'sensitiveDataClasses', 'interfaceRestrictions'
   ]);
   assertAllowedKeys(envelope, allowed, 'Task authorisation envelope');
@@ -198,8 +286,13 @@ function validateAuthorizationEnvelope(envelope) {
   requireObject(envelope.operationRiskTiers, 'operationRiskTiers');
   assertAllowedKeys(envelope.operationRiskTiers, new Set(envelope.allowedOperations), 'operationRiskTiers');
   invariant(Object.keys(envelope.operationRiskTiers).length === envelope.allowedOperations.length, 'Every allowed operation requires one owner-approved risk tier.');
+  requireObject(envelope.operationSemanticsDigests, 'operationSemanticsDigests');
+  assertAllowedKeys(envelope.operationSemanticsDigests, new Set(envelope.allowedOperations), 'operationSemanticsDigests');
+  invariant(Object.keys(envelope.operationSemanticsDigests).length === envelope.allowedOperations.length,
+    'Every allowed operation requires one canonical operation-semantics digest.', 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
   for (const operation of envelope.allowedOperations) {
     invariant(Number.isInteger(envelope.operationRiskTiers[operation]) && envelope.operationRiskTiers[operation] >= 0 && envelope.operationRiskTiers[operation] <= 3, `Risk tier for ${operation} must be 0-3.`);
+    requireString(envelope.operationSemanticsDigests[operation], `operationSemanticsDigests.${operation}`, { pattern: DIGEST_PATTERN });
   }
   requireStringArray(envelope.authorisedTier2Operations, 'authorisedTier2Operations', { unique: true, pattern: ALIAS_PATTERN });
   requireStringArray(envelope.forbiddenOperations, 'forbiddenOperations', { unique: true, pattern: ALIAS_PATTERN });
@@ -242,17 +335,32 @@ function validateAuthorizationEnvelope(envelope) {
   return envelope;
 }
 
-function classifyRisk(operation) {
+function classifyRisk(operation, semantics) {
   requireObject(operation, 'Operation');
-  const operationName = String(operation.operation || '').toLowerCase();
-  if (operation.destructive || operation.irreversible || operation.crossTarget || operation.revokesCredential
-    || operation.restoresData || operation.deletesDns || operation.highBlastRadius
-    || /(?:^|[-_:])(?:delete|destroy|purge|drop|revoke|erase)(?:$|[-_:])/.test(operationName)) return RISK_TIERS.DESTRUCTIVE;
-  if (operation.production || operation.sensitive || operation.changesCredential || operation.oauthSetup
-    || operation.deploys || operation.rollsBack || operation.writesEnvironment || operation.mutatesDatabase
-    || (operation.environment === 'production' && operation.readOnly !== true)) return RISK_TIERS.SENSITIVE_REVERSIBLE;
-  if (operation.readOnly === true && !operation.newSensitiveDataClass) return RISK_TIERS.INSPECTION;
-  return RISK_TIERS.REVERSIBLE;
+  validateOperationSemantics(semantics);
+  invariant(operation.operation === semantics.operation,
+    'Operation context names a different canonical operation.', 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+  invariant(typeof operation.readOnly === 'boolean'
+    && operation.readOnly === (semantics.mutationClass === 'read-only'),
+  'Operation context readOnly assertion disagrees with canonical semantics.', 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+  invariant(operation.operationSemanticsVersion === semantics.schemaVersion
+    && operation.operationSemanticsDigest === semantics.semanticsDigest,
+  'Operation context does not bind the canonical operation semantics.', 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+  for (const field of ['destructive', 'irreversible', 'crossTarget', 'highBlastRadius']) {
+    if (operation[field] !== undefined) invariant(operation[field] === semantics[field],
+      `Operation context ${field} assertion disagrees with canonical semantics.`, 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+  }
+  if (semantics.destructive || semantics.irreversible || semantics.crossTarget || semantics.highBlastRadius) {
+    return RISK_TIERS.DESTRUCTIVE;
+  }
+  const semanticsFloor = semantics.minimumRiskByEnvironment[operation.environment]
+    ?? semantics.minimumRiskByEnvironment.default;
+  const mutationFloor = semantics.mutationClass === 'read-only'
+    ? RISK_TIERS.INSPECTION
+    : operation.environment === 'production' || operation.sensitive === true
+      ? RISK_TIERS.SENSITIVE_REVERSIBLE
+      : RISK_TIERS.REVERSIBLE;
+  return Math.max(semanticsFloor, mutationFloor);
 }
 
 function operationApprovalBinding(envelope, operation) {
@@ -265,6 +373,8 @@ function operationApprovalBinding(envelope, operation) {
       resource: operation.resource,
       environment: operation.environment,
       operation: operation.operation,
+      operationSemanticsVersion: operation.operationSemanticsVersion,
+      operationSemanticsDigest: operation.operationSemanticsDigest,
       taskId: operation.taskId,
       sessionFingerprint: operation.sessionFingerprint,
       objectiveDigest: operation.objectiveDigest
@@ -294,9 +404,12 @@ function assertOperationAuthorized(envelope, operation, options = {}) {
   }
   assertTaskLifetimeAuthority(envelope, operation);
   const operationName = requireString(operation.operation, 'operation.operation', { pattern: ALIAS_PATTERN });
+  const semantics = validateOperationSemantics(options.operationSemantics);
+  invariant(envelope.operationSemanticsDigests[operationName] === semantics.semanticsDigest,
+    'Authorisation envelope does not bind the selected operation semantics.', 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
   invariant(!envelope.forbiddenOperations.includes(operationName), `${operationName} is forbidden by the task envelope.`, 'EXTERNAL_OPERATION_FORBIDDEN');
   invariant(envelope.allowedOperations.includes(operationName), `${operationName} is outside allowed operations.`, 'EXTERNAL_REAUTHORISATION_REQUIRED');
-  const inferredTier = classifyRisk(operation);
+  const inferredTier = classifyRisk(operation, semantics);
   const envelopeTier = envelope.operationRiskTiers[operationName];
   const declaredTier = operation.riskTier === undefined ? envelopeTier : operation.riskTier;
   invariant(Number.isInteger(declaredTier) && declaredTier >= 0 && declaredTier <= 3, 'Operation riskTier must be 0-3.');
@@ -315,6 +428,7 @@ function assertOperationAuthorized(envelope, operation, options = {}) {
     const binding = operationApprovalBinding(envelope, operation);
     for (const field of [
       'provider', 'targetAlias', 'accountOrOrganisation', 'resource', 'environment', 'operation',
+      'operationSemanticsVersion', 'operationSemanticsDigest',
       'taskId', 'sessionFingerprint', 'objectiveDigest'
     ]) {
       invariant(approval[field] === operation[field], `Tier 3 approval ${field} does not match the exact operation.`, 'EXTERNAL_TIER3_APPROVAL_REQUIRED');
@@ -448,6 +562,7 @@ function validateCapabilityAudit(audit) {
     'schemaVersion', 'provider', 'targetAlias', 'accountOrOrganisation', 'environment', 'operation', 'interfaceId', 'interfaceKind',
     'identity', 'version', 'availableOperations', 'targetFingerprint', 'targetBinding', 'inputSchemaDigest', 'authScopeStatus',
     'redaction', 'retryIdempotency', 'preconditions', 'postconditions', 'rollback', 'failureSemantics',
+    'operationSemanticsVersion', 'operationSemanticsDigest',
     'capabilityDigest', 'assuranceScore', 'readOnly', 'auditedAt', 'evidenceReferences'
   ]);
   assertAllowedKeys(audit, allowed, 'Capability audit');
@@ -463,11 +578,16 @@ function validateCapabilityAudit(audit) {
   requireString(audit.targetBinding, 'targetBinding', { pattern: DIGEST_PATTERN });
   invariant(audit.targetBinding === targetBindingDigest(audit), 'Capability audit target binding does not match the exact provider target fingerprint.', 'EXTERNAL_AUDIT_TARGET_MISMATCH');
   requireString(audit.inputSchemaDigest, 'inputSchemaDigest', { pattern: DIGEST_PATTERN });
+  invariant(audit.operationSemanticsVersion === OPERATION_SEMANTICS_SCHEMA_VERSION,
+    'Capability audit operation-semantics version is invalid.', 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+  requireString(audit.operationSemanticsDigest, 'operationSemanticsDigest', { pattern: DIGEST_PATTERN });
   requireString(audit.authScopeStatus, 'authScopeStatus', { max: 300 });
   requireStringArray(audit.redaction, 'redaction', { min: 1 });
   requireString(audit.retryIdempotency, 'retryIdempotency', { max: 300 });
   for (const field of ['preconditions', 'postconditions', 'rollback', 'failureSemantics', 'evidenceReferences']) requireStringArray(audit[field], field, { min: 1 });
   requireString(audit.capabilityDigest, 'capabilityDigest', { pattern: DIGEST_PATTERN });
+  invariant(audit.capabilityDigest === capabilityAuditDigest(audit),
+    'Capability audit digest does not authenticate the complete audit.', 'EXTERNAL_AUDIT_AUTHORITY_MISMATCH');
   invariant(Number.isInteger(audit.assuranceScore) && audit.assuranceScore >= 0 && audit.assuranceScore <= 100, 'assuranceScore must be an integer from 0 to 100.');
   invariant(typeof audit.readOnly === 'boolean', 'readOnly must be boolean.');
   invariant(Number.isFinite(Date.parse(requireString(audit.auditedAt, 'auditedAt'))), 'auditedAt must be an ISO date-time.');
@@ -510,6 +630,178 @@ function interfaceRestrictions(envelope) {
   return { forbidden, required };
 }
 
+function canonicalInventoryPath() {
+  return path.join(os.homedir(), '.ai-agent-toolkit', 'external-system', 'provider-target-registry.json');
+}
+
+function samePath(left, right) {
+  const normalize = (value) => process.platform === 'win32'
+    ? path.resolve(value).toLowerCase()
+    : path.resolve(value);
+  return normalize(left) === normalize(right);
+}
+
+function readBoundedRegularFile(filePath, maxBytes = MAX_INVENTORY_BYTES) {
+  const resolved = path.resolve(filePath);
+  const parent = path.dirname(resolved);
+  const parentStat = fs.lstatSync(parent);
+  invariant(parentStat.isDirectory() && !parentStat.isSymbolicLink(),
+    'Inventory parent must be a real directory.', 'EXTERNAL_INVENTORY_TOPOLOGY_MISMATCH');
+  const realParent = fs.realpathSync.native(parent);
+  invariant(samePath(realParent, parent),
+    'Inventory parent topology contains a link, junction, or redirect.', 'EXTERNAL_INVENTORY_TOPOLOGY_MISMATCH');
+  const before = fs.lstatSync(resolved);
+  invariant(before.isFile() && !before.isSymbolicLink(),
+    'Inventory source must be one existing regular non-link file.', 'EXTERNAL_INVENTORY_TOPOLOGY_MISMATCH');
+  invariant(before.size > 0 && before.size <= maxBytes,
+    'Inventory source exceeds the bounded size.', 'EXTERNAL_INVENTORY_BOUNDS_EXCEEDED');
+  const realPath = fs.realpathSync.native(resolved);
+  invariant(samePath(realPath, resolved),
+    'Inventory source resolves through a link or redirect.', 'EXTERNAL_INVENTORY_TOPOLOGY_MISMATCH');
+  const descriptor = fs.openSync(resolved, 'r');
+  try {
+    const opened = fs.fstatSync(descriptor);
+    invariant(opened.isFile()
+      && opened.dev === before.dev
+      && opened.ino === before.ino
+      && opened.size === before.size,
+    'Inventory source changed while opening.', 'EXTERNAL_INVENTORY_SOURCE_CHANGED');
+    const bytes = fs.readFileSync(descriptor);
+    const after = fs.fstatSync(descriptor);
+    invariant(after.dev === opened.dev
+      && after.ino === opened.ino
+      && after.size === opened.size
+      && after.mtimeMs === opened.mtimeMs,
+    'Inventory source changed while reading.', 'EXTERNAL_INVENTORY_SOURCE_CHANGED');
+    return {
+      path: resolved,
+      realPath,
+      realParent,
+      dev: after.dev,
+      ino: after.ino,
+      size: after.size,
+      birthtimeMs: after.birthtimeMs,
+      mtimeMs: after.mtimeMs,
+      bytes,
+      bytesDigest: sha256(bytes)
+    };
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+function runtimeInventoryIdentity(sourcePath) {
+  const routerSource = readBoundedRegularFile(__filename);
+  const repositoryRealPath = fs.realpathSync.native(process.cwd());
+  const installationRealPath = fs.realpathSync.native(path.dirname(__filename));
+  return {
+    routerVersion: ROUTER_VERSION,
+    routerSourceDigest: routerSource.bytesDigest,
+    repositoryIdentity: sha256({ repositoryRealPath }),
+    hostIdentity: sha256({ platform: process.platform, hostname: os.hostname() }),
+    installationIdentity: sha256({ installationRealPath }),
+    authorityPathDigest: sha256({ authorityRealPath: fs.realpathSync.native(sourcePath) })
+  };
+}
+
+function isNodeTestProcess() {
+  return typeof process.env.NODE_TEST_CONTEXT === 'string' && process.env.NODE_TEST_CONTEXT.length > 0;
+}
+
+function testInventoryAuthorityExpectations(sourcePath) {
+  invariant(isNodeTestProcess(), 'Synthetic inventory authority is available only to the Node test runner.',
+    'EXTERNAL_TEST_AUTHORITY_FORBIDDEN');
+  const resolved = path.resolve(sourcePath);
+  const tempRoot = fs.realpathSync.native(os.tmpdir());
+  const realParent = fs.realpathSync.native(path.dirname(resolved));
+  invariant(samePath(realParent, tempRoot) || realParent.startsWith(`${tempRoot}${path.sep}`),
+    'Synthetic inventory authority must remain under the OS temporary directory.',
+    'EXTERNAL_TEST_AUTHORITY_FORBIDDEN');
+  return runtimeInventoryIdentity(resolved);
+}
+
+function revalidateInventoryAuthority(authority) {
+  const state = INVENTORY_AUTHORITIES.get(authority);
+  invariant(state, 'Inventory authority was not produced by the trusted bounded loader.',
+    'EXTERNAL_INVENTORY_AUTHORITY_REQUIRED');
+  const current = readBoundedRegularFile(state.source.path);
+  for (const field of ['realPath', 'realParent', 'dev', 'ino', 'size', 'birthtimeMs', 'mtimeMs', 'bytesDigest']) {
+    invariant(current[field] === state.source[field],
+      `Inventory source ${field} changed after authorisation.`, 'EXTERNAL_INVENTORY_SOURCE_CHANGED');
+  }
+  const identity = runtimeInventoryIdentity(current.path);
+  for (const field of [
+    'routerVersion', 'routerSourceDigest', 'repositoryIdentity', 'hostIdentity',
+    'installationIdentity', 'authorityPathDigest'
+  ]) {
+    invariant(identity[field] === state.registry[field],
+      `Inventory ${field} no longer matches the current runtime.`, 'EXTERNAL_INVENTORY_AUTHORITY_MISMATCH');
+  }
+  return state;
+}
+
+function loadTrustedInventorySnapshot(options = {}) {
+  requireObject(options, 'Inventory loader options');
+  assertAllowedKeys(options, new Set(['testOnly', 'sourcePath']), 'Inventory loader options');
+  const testOnly = options.testOnly === true;
+  invariant(!testOnly || isNodeTestProcess(),
+    'Synthetic inventory source injection is forbidden outside the Node test runner.',
+    'EXTERNAL_TEST_AUTHORITY_FORBIDDEN');
+  invariant(testOnly || options.sourcePath === undefined,
+    'Production inventory location is canonical and cannot be caller-selected.',
+    'EXTERNAL_INVENTORY_AUTHORITY_REQUIRED');
+  const sourcePath = testOnly
+    ? path.resolve(requireString(options.sourcePath, 'sourcePath', { max: 1000 }))
+    : canonicalInventoryPath();
+  if (testOnly) testInventoryAuthorityExpectations(sourcePath);
+  const source = readBoundedRegularFile(sourcePath);
+  let registry;
+  try {
+    registry = JSON.parse(source.bytes.toString('utf8'));
+  } catch {
+    invariant(false, 'Inventory source is not one valid JSON object.', 'EXTERNAL_INVENTORY_FORMAT_INVALID');
+  }
+  validateProviderTargetRegistry(registry);
+  invariant(registry.targets.length <= MAX_INVENTORY_TARGETS,
+    'Inventory target count exceeds the bounded limit.', 'EXTERNAL_INVENTORY_BOUNDS_EXCEEDED');
+  const identity = runtimeInventoryIdentity(source.path);
+  for (const field of [
+    'routerVersion', 'routerSourceDigest', 'repositoryIdentity', 'hostIdentity',
+    'installationIdentity', 'authorityPathDigest'
+  ]) {
+    invariant(registry[field] === identity[field],
+      `Inventory ${field} does not match the current runtime.`, 'EXTERNAL_INVENTORY_AUTHORITY_MISMATCH');
+  }
+  const generationKey = `${source.realPath}\u0000${registry.repositoryIdentity}\u0000${registry.hostIdentity}\u0000${registry.installationIdentity}`;
+  const previous = LOADED_INVENTORY_GENERATIONS.get(generationKey);
+  if (previous) {
+    invariant(registry.generationSequence >= previous.sequence,
+      'Inventory generation rolled back.', 'EXTERNAL_INVENTORY_GENERATION_ROLLBACK');
+    invariant(registry.generationSequence !== previous.sequence || source.bytesDigest === previous.bytesDigest,
+      'Inventory bytes changed without a generation increment.', 'EXTERNAL_INVENTORY_GENERATION_ROLLBACK');
+  }
+  LOADED_INVENTORY_GENERATIONS.set(generationKey, {
+    sequence: registry.generationSequence,
+    bytesDigest: source.bytesDigest
+  });
+  const authority = Object.freeze({
+    schemaVersion: INVENTORY_AUTHORITY_SCHEMA_VERSION,
+    authorityId: sha256({
+      sourceDigest: source.bytesDigest,
+      generationSequence: registry.generationSequence,
+      inventoryGeneration: registry.inventoryGeneration,
+      routerSourceDigest: registry.routerSourceDigest,
+      installationIdentity: registry.installationIdentity
+    }),
+    sourceDigest: source.bytesDigest,
+    inventoryGeneration: registry.inventoryGeneration,
+    generationSequence: registry.generationSequence,
+    loadedAt: new Date().toISOString()
+  });
+  INVENTORY_AUTHORITIES.set(authority, { source, registry, identity, testOnly });
+  return authority;
+}
+
 function targetInventoryDigest(target) {
   return sha256({
     provider: target.provider,
@@ -521,13 +813,14 @@ function targetInventoryDigest(target) {
     resourceReferences: [...(target.resourceReferences || [])].sort(),
     installedInterfaces: [...(target.installedInterfaces || [])].sort(),
     capabilityDigests: [...(target.capabilityDigests || [])].sort(),
+    operationSemantics: target.operationSemantics || [],
     routeSelections: target.routeSelections || {},
     lastAuditState: target.lastAuditState
   });
 }
 
 function currentInventoryAudits(target, capabilityAudits) {
-  validateProviderTargetRegistry({ schemaVersion: REGISTRY_SCHEMA_VERSION, targets: [target] });
+  validateProviderTargetRecord(target, 'target');
   invariant(target.lastAuditState === 'current', 'Target inventory audit state is not current.', 'EXTERNAL_STALE_TARGET_INVENTORY');
   invariant(Array.isArray(capabilityAudits), 'capabilityAudits must be an array.');
   return capabilityAudits.map(validateCapabilityAudit).filter((audit) =>
@@ -538,6 +831,10 @@ function currentInventoryAudits(target, capabilityAudits) {
     && audit.targetFingerprint === target.sanitizedFingerprint
     && target.installedInterfaces.includes(audit.interfaceId)
     && target.capabilityDigests.includes(audit.capabilityDigest)
+    && target.operationSemantics.some((semantics) =>
+      semantics.operation === audit.operation
+      && semantics.schemaVersion === audit.operationSemanticsVersion
+      && semantics.semanticsDigest === audit.operationSemanticsDigest)
     && audit.targetBinding === targetBindingDigest({
       provider: target.provider,
       targetAlias: target.targetAlias,
@@ -551,6 +848,15 @@ function currentInventoryAudits(target, capabilityAudits) {
 function hostAdapterPlanDigest(plan) {
   return sha256({
     schemaVersion: plan.schemaVersion,
+    snapshotAuthorityId: plan.snapshotAuthorityId,
+    sourceDigest: plan.sourceDigest,
+    routerVersion: plan.routerVersion,
+    routerSourceDigest: plan.routerSourceDigest,
+    installationIdentity: plan.installationIdentity,
+    repositoryIdentity: plan.repositoryIdentity,
+    hostIdentity: plan.hostIdentity,
+    generationSequence: plan.generationSequence,
+    derivedAt: plan.derivedAt,
     logicalTarget: plan.logicalTarget,
     inventoryGeneration: plan.inventoryGeneration,
     inventoryDigest: plan.inventoryDigest,
@@ -572,11 +878,22 @@ function validateHostAdapterPlan(plan) {
   requireObject(plan, 'Host adapter plan');
   assertAllowedKeys(plan, new Set([
     'schemaVersion', 'logicalTarget', 'inventoryGeneration', 'inventoryDigest', 'currentAuditState',
+    'snapshotAuthorityId', 'sourceDigest', 'routerVersion', 'routerSourceDigest', 'installationIdentity',
+    'repositoryIdentity', 'hostIdentity', 'generationSequence', 'derivedAt',
     'host', 'hostConfigurationScope', 'credentialReferences', 'installedInterfaces', 'supportedOperations',
     'capabilityAuditPassed', 'preserveOtherHostConfiguration', 'mutateProjectOwnedConfiguration',
     'copySecretsIntoRepository', 'requiresProviderRediscoveryOnHostSwitch', 'planDigest'
   ]), 'Host adapter plan');
   invariant(plan.schemaVersion === HOST_ADAPTER_PLAN_SCHEMA_VERSION, 'Unsupported host-adapter-plan schema.');
+  for (const field of [
+    'snapshotAuthorityId', 'sourceDigest', 'routerSourceDigest', 'installationIdentity',
+    'repositoryIdentity', 'hostIdentity'
+  ]) requireString(plan[field], field, { pattern: DIGEST_PATTERN });
+  invariant(plan.routerVersion === ROUTER_VERSION, 'Host plan router version is stale.', 'EXTERNAL_INVENTORY_AUTHORITY_MISMATCH');
+  invariant(Number.isSafeInteger(plan.generationSequence) && plan.generationSequence >= 0,
+    'Host plan generationSequence is invalid.', 'EXTERNAL_STALE_TARGET_INVENTORY');
+  invariant(Number.isFinite(Date.parse(requireString(plan.derivedAt, 'derivedAt'))),
+    'Host plan derivedAt must be an ISO date-time.');
   requireObject(plan.logicalTarget, 'logicalTarget');
   assertAllowedKeys(plan.logicalTarget, new Set([
     'provider', 'targetAlias', 'accountOrOrganisation', 'environment', 'sanitizedFingerprint', 'resourceReferences'
@@ -601,11 +918,21 @@ function validateHostAdapterPlan(plan) {
   for (const [index, supported] of plan.supportedOperations.entries()) {
     requireObject(supported, `supportedOperations[${index}]`);
     assertAllowedKeys(supported, new Set([
-      'operation', 'interfaceId', 'interfaceKind', 'readOnly', 'capabilityDigest', 'targetFingerprint'
+      'operation', 'interfaceId', 'interfaceKind', 'readOnly', 'capabilityDigest', 'targetFingerprint',
+      'operationSemanticsVersion', 'operationSemanticsDigest', 'mutationClass', 'receiptClass'
     ]), `supportedOperations[${index}]`);
     for (const field of ['operation', 'interfaceId']) requireString(supported[field], `supportedOperations[${index}].${field}`, { pattern: ALIAS_PATTERN });
     invariant(INTERFACE_KINDS.has(supported.interfaceKind), `supportedOperations[${index}].interfaceKind is invalid.`);
     invariant(typeof supported.readOnly === 'boolean', `supportedOperations[${index}].readOnly must be boolean.`);
+    invariant(['read-only', 'mutation'].includes(supported.mutationClass),
+      `supportedOperations[${index}].mutationClass is invalid.`);
+    invariant(supported.readOnly === (supported.mutationClass === 'read-only'),
+      'Host plan operation mutability is inconsistent.', 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+    invariant(supported.operationSemanticsVersion === OPERATION_SEMANTICS_SCHEMA_VERSION,
+      'Host plan operation-semantics version is stale.', 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+    requireString(supported.operationSemanticsDigest, 'supported.operationSemanticsDigest', { pattern: DIGEST_PATTERN });
+    invariant(['inspection', 'mutation', 'destructive'].includes(supported.receiptClass),
+      'Host plan receiptClass is invalid.', 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
     requireString(supported.capabilityDigest, `supportedOperations[${index}].capabilityDigest`, { pattern: DIGEST_PATTERN });
     requireString(supported.targetFingerprint, `supportedOperations[${index}].targetFingerprint`, { pattern: DIGEST_PATTERN });
     invariant(plan.installedInterfaces.includes(supported.interfaceId), 'Host adapter plan contains an uninstalled interface.', 'EXTERNAL_STALE_TARGET_INVENTORY');
@@ -630,38 +957,66 @@ function validateHostAdapterPlan(plan) {
 function resolveCurrentInventory(operationContext, audits, options) {
   requireString(operationContext.inventoryGeneration, 'operationContext.inventoryGeneration', { pattern: DIGEST_PATTERN });
   requireString(operationContext.inventoryDigest, 'operationContext.inventoryDigest', { pattern: DIGEST_PATTERN });
-  const hasRecord = isPlainObject(options.targetRegistryRecord);
-  const hasPlan = isPlainObject(options.hostAdapterPlan);
-  invariant(hasRecord !== hasPlan,
-    'Final route selection requires exactly one current target registry record or validated host adapter plan.',
+  invariant(options.targetRegistryRecord === undefined,
+    'Raw target registry records are not inventory authority.', 'EXTERNAL_INVENTORY_AUTHORITY_REQUIRED');
+  const authorityState = INVENTORY_AUTHORITIES.get(options.inventoryAuthority);
+  const planState = HOST_PLAN_AUTHORITIES.get(options.hostAdapterPlan);
+  invariant(Boolean(authorityState) !== Boolean(planState),
+    'Final route selection requires exactly one loader-produced inventory authority or authenticated host plan.',
     'EXTERNAL_CURRENT_INVENTORY_REQUIRED');
-  let currentAudits;
-  let inventoryGeneration;
-  let inventoryDigest;
+  const authority = authorityState ? options.inventoryAuthority : planState.authority;
+  const state = revalidateInventoryAuthority(authority);
+  const target = state.registry.targets.find((entry) =>
+    entry.provider === operationContext.provider
+    && entry.targetAlias === operationContext.targetAlias
+    && entry.accountOrOrganisation === operationContext.accountOrOrganisation
+    && entry.environment === operationContext.environment);
+  invariant(target, 'Authenticated inventory does not contain the exact target.',
+    'EXTERNAL_STALE_TARGET_INVENTORY');
+  const semantics = target.operationSemantics.find((entry) => entry.operation === operationContext.operation);
+  invariant(semantics, 'Authenticated inventory does not define the requested operation.',
+    'EXTERNAL_UNKNOWN_OPERATION');
+  validateOperationSemantics(semantics);
+  const validatedAudits = audits.map(validateCapabilityAudit);
+  for (const audit of validatedAudits.filter((entry) =>
+    entry.provider === operationContext.provider
+    && entry.targetAlias === operationContext.targetAlias
+    && entry.accountOrOrganisation === operationContext.accountOrOrganisation
+    && entry.environment === operationContext.environment
+    && entry.operation === operationContext.operation)) {
+    invariant(audit.operationSemanticsVersion === semantics.schemaVersion
+      && audit.operationSemanticsDigest === semantics.semanticsDigest
+      && audit.readOnly === (semantics.mutationClass === 'read-only'),
+    'Capability audit disagrees with canonical operation semantics.',
+    'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+  }
+  let currentAudits = currentInventoryAudits(target, validatedAudits);
   let planDigest = null;
-  let target;
-  if (hasRecord) {
-    target = options.targetRegistryRecord;
-    currentAudits = currentInventoryAudits(target, audits);
-    inventoryGeneration = target.inventoryGeneration;
-    inventoryDigest = targetInventoryDigest(target);
-  } else {
+  if (planState) {
     const plan = validateHostAdapterPlan(options.hostAdapterPlan);
-    inventoryGeneration = plan.inventoryGeneration;
-    inventoryDigest = plan.inventoryDigest;
+    invariant(Date.now() - Date.parse(plan.derivedAt) <= 5 * 60 * 1000
+      && Date.parse(plan.derivedAt) <= Date.now() + 30 * 1000,
+    'Host plan is outside the bounded freshness window.', 'EXTERNAL_STALE_TARGET_INVENTORY');
+    invariant(planState.authority === authority
+      && planState.targetKey === `${target.provider}\u0000${target.targetAlias}\u0000${target.accountOrOrganisation}\u0000${target.environment}`,
+    'Host plan was derived from another authenticated snapshot or target.',
+    'EXTERNAL_INVENTORY_AUTHORITY_MISMATCH');
+    invariant(plan.snapshotAuthorityId === authority.authorityId
+      && plan.sourceDigest === authority.sourceDigest
+      && plan.generationSequence === state.registry.generationSequence,
+    'Host plan inventory authority is stale.', 'EXTERNAL_INVENTORY_AUTHORITY_MISMATCH');
+    for (const field of [
+      'routerVersion', 'routerSourceDigest', 'installationIdentity', 'repositoryIdentity', 'hostIdentity'
+    ]) {
+      invariant(plan[field] === state.registry[field],
+        `Host plan ${field} belongs to another runtime authority.`,
+        'EXTERNAL_INVENTORY_AUTHORITY_MISMATCH');
+    }
     planDigest = plan.planDigest;
-    target = {
-      provider: plan.logicalTarget.provider,
-      targetAlias: plan.logicalTarget.targetAlias,
-      accountOrOrganisation: plan.logicalTarget.accountOrOrganisation,
-      environment: plan.logicalTarget.environment,
-      sanitizedFingerprint: plan.logicalTarget.sanitizedFingerprint,
-      resourceReferences: plan.logicalTarget.resourceReferences
-    };
     const supported = new Set(plan.supportedOperations.map((entry) =>
-      `${entry.operation}\u0000${entry.interfaceId}\u0000${entry.capabilityDigest}\u0000${entry.targetFingerprint}`));
-    currentAudits = audits.map(validateCapabilityAudit).filter((audit) =>
-      supported.has(`${audit.operation}\u0000${audit.interfaceId}\u0000${audit.capabilityDigest}\u0000${audit.targetFingerprint}`));
+      `${entry.operation}\u0000${entry.interfaceId}\u0000${entry.capabilityDigest}\u0000${entry.targetFingerprint}\u0000${entry.operationSemanticsDigest}\u0000${entry.mutationClass}`));
+    currentAudits = currentAudits.filter((audit) =>
+      supported.has(`${audit.operation}\u0000${audit.interfaceId}\u0000${audit.capabilityDigest}\u0000${audit.targetFingerprint}\u0000${audit.operationSemanticsDigest}\u0000${audit.readOnly ? 'read-only' : 'mutation'}`));
   }
   for (const field of ['provider', 'targetAlias', 'accountOrOrganisation', 'environment']) {
     invariant(target[field] === operationContext[field], `Current inventory ${field} does not match the operation.`, 'EXTERNAL_STALE_TARGET_INVENTORY');
@@ -670,11 +1025,25 @@ function resolveCurrentInventory(operationContext, audits, options) {
     'Current inventory target fingerprint does not match the operation.', 'EXTERNAL_STALE_TARGET_INVENTORY');
   invariant(target.resourceReferences.includes(operationContext.resource),
     'Current inventory does not contain the exact operation resource.', 'EXTERNAL_STALE_TARGET_INVENTORY');
+  const inventoryGeneration = target.inventoryGeneration;
+  const inventoryDigest = targetInventoryDigest(target);
+  invariant(state.registry.inventoryGeneration === inventoryGeneration,
+    'Target inventory generation differs from the authenticated snapshot.', 'EXTERNAL_STALE_TARGET_INVENTORY');
   invariant(inventoryGeneration === operationContext.inventoryGeneration,
     'Current inventory generation does not match the operation.', 'EXTERNAL_STALE_TARGET_INVENTORY');
   invariant(inventoryDigest === operationContext.inventoryDigest,
     'Current inventory digest does not match the operation.', 'EXTERNAL_STALE_TARGET_INVENTORY');
-  return { currentAudits, inventoryGeneration, inventoryDigest, planDigest };
+  return {
+    authority,
+    target,
+    semantics,
+    currentAudits,
+    inventoryGeneration,
+    inventoryDigest,
+    planDigest,
+    sourceDigest: state.source.bytesDigest,
+    snapshotAuthorityId: authority.authorityId
+  };
 }
 
 function selectStrongestAdmissibleInterface(operationContext, audits, options = {}) {
@@ -682,7 +1051,10 @@ function selectStrongestAdmissibleInterface(operationContext, audits, options = 
   const operation = requireString(operationContext.operation, 'operation', { pattern: ALIAS_PATTERN });
   requireString(operationContext.targetFingerprint, 'operationContext.targetFingerprint', { pattern: DIGEST_PATTERN });
   const envelope = validateAuthorizationEnvelope(options.authorizationEnvelope);
-  assertOperationAuthorized(envelope, operationContext, {
+  invariant(Array.isArray(audits) && audits.length > 0, 'At least one capability audit is required.');
+  const inventory = resolveCurrentInventory(operationContext, audits, options);
+  const authorisation = assertOperationAuthorized(envelope, operationContext, {
+    operationSemantics: inventory.semantics,
     establishedTier: options.establishedTier,
     immediateApproval: options.immediateApproval,
     now: options.now
@@ -693,8 +1065,6 @@ function selectStrongestAdmissibleInterface(operationContext, audits, options = 
   invariant(envelope.allowedOperations.includes(operation) && !envelope.forbiddenOperations.includes(operation),
     'Authorisation envelope does not allow the selected operation.', 'EXTERNAL_REAUTHORISATION_REQUIRED');
   const restrictions = interfaceRestrictions(envelope);
-  invariant(Array.isArray(audits) && audits.length > 0, 'At least one capability audit is required.');
-  const inventory = resolveCurrentInventory(operationContext, audits, options);
   const audited = inventory.currentAudits.filter((audit) =>
     audit.provider === operationContext.provider
     && audit.targetAlias === operationContext.targetAlias
@@ -705,9 +1075,11 @@ function selectStrongestAdmissibleInterface(operationContext, audits, options = 
     && audit.operation === operation
   );
   invariant(audited.length > 0, 'No interface audit matches the exact target and operation.', 'EXTERNAL_NO_ADMISSIBLE_ROUTE');
-  const mutation = operationContext.readOnly !== true;
+  const mutation = inventory.semantics.mutationClass === 'mutation';
   const admissible = audited.filter((audit) => {
-    if (mutation && audit.readOnly) return false;
+    invariant(audit.readOnly === !mutation,
+      'Capability audit mutability disagrees with canonical operation semantics.',
+      'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
     if (restrictions.forbidden.has(audit.interfaceKind) || restrictions.forbidden.has(audit.interfaceId)) return false;
     if (restrictions.required.size > 0
       && !restrictions.required.has(audit.interfaceKind)
@@ -724,11 +1096,31 @@ function selectStrongestAdmissibleInterface(operationContext, audits, options = 
   const pool = structured.length > 0 ? structured : admissible;
   pool.sort((left, right) => right.assuranceScore - left.assuranceScore || left.interfaceId.localeCompare(right.interfaceId));
   const selected = pool[0];
-  return {
+  const finalAuthorisation = assertOperationAuthorized(envelope, {
+    ...operationContext,
+    readOnly: selected.readOnly
+  }, {
+    operationSemantics: inventory.semantics,
+    establishedTier: options.establishedTier,
+    immediateApproval: options.immediateApproval,
+    now: options.now
+  });
+  invariant(finalAuthorisation.riskTier === authorisation.riskTier,
+    'Selected audit changed the required operation risk.', 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+  revalidateInventoryAuthority(inventory.authority);
+  const route = {
     operation,
+    operationSemanticsVersion: inventory.semantics.schemaVersion,
+    operationSemanticsDigest: inventory.semantics.semanticsDigest,
+    mutationClass: inventory.semantics.mutationClass,
+    receiptClass: inventory.semantics.receiptClass,
+    finalRiskTier: finalAuthorisation.riskTier,
+    selectedAuditReadOnly: selected.readOnly,
     selectedInterface: selected.interfaceId,
     interfaceKind: selected.interfaceKind,
     capabilityDigest: selected.capabilityDigest,
+    snapshotAuthorityId: inventory.snapshotAuthorityId,
+    inventorySourceDigest: inventory.sourceDigest,
     inventoryGeneration: inventory.inventoryGeneration,
     inventoryDigest: inventory.inventoryDigest,
     hostAdapterPlanDigest: inventory.planDigest,
@@ -740,10 +1132,18 @@ function selectStrongestAdmissibleInterface(operationContext, audits, options = 
       resource: operationContext.resource,
       environment: operationContext.environment,
       operation,
+      operationSemanticsVersion: inventory.semantics.schemaVersion,
+      operationSemanticsDigest: inventory.semantics.semanticsDigest,
+      mutationClass: inventory.semantics.mutationClass,
+      receiptClass: inventory.semantics.receiptClass,
+      finalRiskTier: finalAuthorisation.riskTier,
+      selectedAuditReadOnly: selected.readOnly,
       taskId: operationContext.taskId,
       sessionFingerprint: operationContext.sessionFingerprint,
       objectiveDigest: operationContext.objectiveDigest,
       targetFingerprint: operationContext.targetFingerprint,
+      inventoryAuthorityId: inventory.snapshotAuthorityId,
+      inventorySourceDigest: inventory.sourceDigest,
       inventoryGeneration: inventory.inventoryGeneration,
       inventoryDigest: inventory.inventoryDigest,
       hostAdapterPlanDigest: inventory.planDigest,
@@ -757,13 +1157,21 @@ function selectStrongestAdmissibleInterface(operationContext, audits, options = 
         : 'No reviewed structured interface can perform the operation; the approved graphical fallback is bounded to this operation.',
     rejected: audited.filter((audit) => audit.interfaceId !== selected.interfaceId).map((audit) => ({
       interfaceId: audit.interfaceId,
-      reason: mutation && audit.readOnly
-        ? 'read-only interface cannot perform a write'
-        : STRUCTURED_INTERFACE_KINDS.has(selected.interfaceKind) && !STRUCTURED_INTERFACE_KINDS.has(audit.interfaceKind)
+      reason: STRUCTURED_INTERFACE_KINDS.has(selected.interfaceKind) && !STRUCTURED_INTERFACE_KINDS.has(audit.interfaceKind)
           ? 'structured interface outranks graphical fallback'
           : 'lower operation-specific assurance'
     }))
   };
+  Object.freeze(route.rejected);
+  Object.freeze(route);
+  SELECTED_ROUTE_AUTHORITIES.set(route, {
+    authority: inventory.authority,
+    operationContext: { ...operationContext },
+    envelopeDigest: sha256(envelope),
+    semanticsDigest: inventory.semantics.semanticsDigest,
+    selectedAuditDigest: selected.capabilityDigest
+  });
+  return route;
 }
 
 function validateConsumerRequirements(manifest) {
@@ -798,7 +1206,7 @@ function validateConsumerRequirements(manifest) {
 }
 
 function defaultRegistryPath() {
-  return path.join(os.homedir(), '.ai-agent-toolkit', 'external-system-targets.json');
+  return canonicalInventoryPath();
 }
 
 function defaultLocalStatePaths() {
@@ -812,19 +1220,13 @@ function defaultLocalStatePaths() {
   };
 }
 
-function validateProviderTargetRegistry(registry) {
-  requireObject(registry, 'Provider target registry');
-  assertAllowedKeys(registry, new Set(['schemaVersion', 'targets']), 'Provider target registry');
-  invariant(registry.schemaVersion === REGISTRY_SCHEMA_VERSION, 'Unsupported provider-target-registry schema.');
-  invariant(Array.isArray(registry.targets), 'registry.targets must be an array.');
-  const keys = new Set();
-  for (const [index, target] of registry.targets.entries()) {
-    requireObject(target, `targets[${index}]`);
+function validateProviderTargetRecord(target, label = 'target') {
+  requireObject(target, label);
     assertAllowedKeys(target, new Set([
       'provider', 'targetAlias', 'accountOrOrganisation', 'environment', 'sanitizedFingerprint', 'privateOriginReference',
       'resourceReferences', 'credentialReferences', 'multipleCredentialJustification', 'installedInterfaces',
-      'capabilityDigests', 'routeSelections', 'lastAuditState', 'receiptReferences', 'inventoryGeneration'
-    ]), `targets[${index}]`);
+      'capabilityDigests', 'operationSemantics', 'routeSelections', 'lastAuditState', 'receiptReferences', 'inventoryGeneration'
+    ]), label);
     requireString(target.provider, 'provider', { pattern: PROVIDER_PATTERN });
     requireString(target.targetAlias, 'targetAlias', { pattern: ALIAS_PATTERN });
     requireString(target.accountOrOrganisation, 'accountOrOrganisation', { pattern: ALIAS_PATTERN });
@@ -837,13 +1239,52 @@ function validateProviderTargetRegistry(registry) {
     if (credentialReferences.length > 1) requireString(target.multipleCredentialJustification, 'multipleCredentialJustification', { max: 500 });
     requireStringArray(target.installedInterfaces || [], 'installedInterfaces', { unique: true, pattern: ALIAS_PATTERN });
     requireStringArray(target.capabilityDigests || [], 'capabilityDigests', { unique: true, pattern: DIGEST_PATTERN });
+    invariant(Array.isArray(target.operationSemantics) && target.operationSemantics.length > 0,
+      'Target must define canonical operation semantics.', 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+    const semanticOperations = new Set();
+    for (const semantics of target.operationSemantics) {
+      validateOperationSemantics(semantics);
+      invariant(!semanticOperations.has(semantics.operation),
+        `Duplicate operation semantics for ${semantics.operation}.`, 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+      semanticOperations.add(semantics.operation);
+    }
     requireObject(target.routeSelections || {}, 'routeSelections');
     for (const [operation, interfaceId] of Object.entries(target.routeSelections || {})) {
       requireString(operation, 'routeSelections operation', { pattern: ALIAS_PATTERN });
       requireString(interfaceId, `routeSelections.${operation}`, { pattern: ALIAS_PATTERN });
+      invariant(semanticOperations.has(operation),
+        `Route selection ${operation} lacks canonical operation semantics.`, 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
     }
     requireString(target.lastAuditState, 'lastAuditState', { pattern: ALIAS_PATTERN });
     requireStringArray(target.receiptReferences || [], 'receiptReferences', { unique: true, pattern: ALIAS_PATTERN });
+  return target;
+}
+
+function validateProviderTargetRegistry(registry) {
+  requireObject(registry, 'Provider target registry');
+  assertAllowedKeys(registry, new Set([
+    'schemaVersion', 'routerVersion', 'routerSourceDigest', 'repositoryIdentity', 'hostIdentity',
+    'installationIdentity', 'authorityPathDigest', 'inventoryGeneration', 'generationSequence',
+    'generatedAt', 'targets'
+  ]), 'Provider target registry');
+  invariant(registry.schemaVersion === REGISTRY_SCHEMA_VERSION, 'Unsupported provider-target-registry schema.');
+  invariant(registry.routerVersion === ROUTER_VERSION, 'Provider target registry router version is stale.',
+    'EXTERNAL_INVENTORY_AUTHORITY_MISMATCH');
+  for (const field of [
+    'routerSourceDigest', 'repositoryIdentity', 'hostIdentity', 'installationIdentity',
+    'authorityPathDigest', 'inventoryGeneration'
+  ]) requireString(registry[field], field, { pattern: DIGEST_PATTERN });
+  invariant(Number.isSafeInteger(registry.generationSequence) && registry.generationSequence >= 0,
+    'generationSequence must be a non-negative safe integer.');
+  invariant(Number.isFinite(Date.parse(requireString(registry.generatedAt, 'generatedAt'))),
+    'generatedAt must be an ISO date-time.');
+  invariant(Array.isArray(registry.targets), 'registry.targets must be an array.');
+  const keys = new Set();
+  for (const [index, target] of registry.targets.entries()) {
+    validateProviderTargetRecord(target, `targets[${index}]`);
+    invariant(target.inventoryGeneration === registry.inventoryGeneration,
+      'Target generation differs from the authenticated registry generation.',
+      'EXTERNAL_INVENTORY_GENERATION_ROLLBACK');
     const key = `${target.provider}\u0000${target.targetAlias}\u0000${target.accountOrOrganisation}\u0000${target.environment}`;
     invariant(!keys.has(key), `Duplicate provider target ${target.provider}/${target.targetAlias}/${target.environment}.`);
     keys.add(key);
@@ -867,19 +1308,35 @@ function resolveProviderTarget(registry, selector) {
   return candidates[0];
 }
 
-function buildHostAdapterPlan(target, host, capabilityAudits) {
+function buildHostAdapterPlan(inventoryAuthority, selector, host, capabilityAudits) {
+  const state = revalidateInventoryAuthority(inventoryAuthority);
   invariant(['codex', 'claude-code'].includes(host), 'host must be codex or claude-code.');
+  const target = resolveProviderTarget(state.registry, selector);
   const audits = currentInventoryAudits(target, capabilityAudits);
   const supportedOperations = audits.map((audit) => ({
     operation: audit.operation,
     interfaceId: audit.interfaceId,
     interfaceKind: audit.interfaceKind,
     readOnly: audit.readOnly,
+    mutationClass: audit.readOnly ? 'read-only' : 'mutation',
+    operationSemanticsVersion: audit.operationSemanticsVersion,
+    operationSemanticsDigest: audit.operationSemanticsDigest,
+    receiptClass: target.operationSemantics.find((entry) =>
+      entry.operation === audit.operation).receiptClass,
     capabilityDigest: audit.capabilityDigest,
     targetFingerprint: audit.targetFingerprint
   }));
   const plan = {
     schemaVersion: HOST_ADAPTER_PLAN_SCHEMA_VERSION,
+    snapshotAuthorityId: inventoryAuthority.authorityId,
+    sourceDigest: inventoryAuthority.sourceDigest,
+    routerVersion: state.registry.routerVersion,
+    routerSourceDigest: state.registry.routerSourceDigest,
+    installationIdentity: state.registry.installationIdentity,
+    repositoryIdentity: state.registry.repositoryIdentity,
+    hostIdentity: state.registry.hostIdentity,
+    generationSequence: state.registry.generationSequence,
+    derivedAt: new Date().toISOString(),
     logicalTarget: {
       provider: target.provider,
       targetAlias: target.targetAlias,
@@ -903,7 +1360,14 @@ function buildHostAdapterPlan(target, host, capabilityAudits) {
     requiresProviderRediscoveryOnHostSwitch: false
   };
   plan.planDigest = hostAdapterPlanDigest(plan);
-  return validateHostAdapterPlan(plan);
+  validateHostAdapterPlan(plan);
+  Object.freeze(plan.supportedOperations);
+  Object.freeze(plan);
+  HOST_PLAN_AUTHORITIES.set(plan, {
+    authority: inventoryAuthority,
+    targetKey: `${target.provider}\u0000${target.targetAlias}\u0000${target.accountOrOrganisation}\u0000${target.environment}`
+  });
+  return plan;
 }
 
 function recommendN8nComponents(evidence) {
@@ -1361,9 +1825,17 @@ function operationReceiptRouteDigest(receipt) {
     targetFingerprint: receipt.targetFingerprint,
     environment: receipt.environment,
     operation: receipt.operation,
+    operationSemanticsVersion: receipt.operationSemanticsVersion,
+    operationSemanticsDigest: receipt.operationSemanticsDigest,
+    mutationClass: receipt.mutationClass,
+    receiptClass: receipt.receiptClass,
+    finalRiskTier: receipt.riskTier,
+    selectedAuditReadOnly: receipt.selectedAuditReadOnly,
     taskId: receipt.taskId,
     sessionFingerprint: receipt.sessionFingerprint,
     objectiveDigest: receipt.objectiveDigest,
+    inventoryAuthorityId: receipt.inventoryAuthorityId,
+    inventorySourceDigest: receipt.inventorySourceDigest,
     inventoryGeneration: receipt.inventoryGeneration,
     inventoryDigest: receipt.inventoryDigest,
     hostAdapterPlanDigest: receipt.hostAdapterPlanDigest || null,
@@ -1377,9 +1849,12 @@ function validateOperationReceipt(receipt, binding = {}) {
   const allowed = new Set([
     'schemaVersion', 'operationId', 'operation', 'provider', 'adapter', 'targetAlias', 'accountOrOrganisation',
     'resource', 'targetFingerprint', 'environment', 'riskTier', 'authorisationReference',
+    'operationSemanticsVersion', 'operationSemanticsDigest', 'mutationClass', 'receiptClass',
+    'selectedAuditReadOnly', 'inventoryAuthorityId', 'inventorySourceDigest',
     'authorisationEnvelopeDigest', 'authorisationLifetimeKind', 'taskId', 'sessionFingerprint', 'objectiveDigest',
     'selectedInterface', 'capabilityDigest', 'inventoryGeneration', 'inventoryDigest', 'hostAdapterPlanDigest',
     'selectedRouteDigest', 'precondition',
+    'preconditionEvidence', 'postconditionEvidence', 'rollbackEvidence',
     'mutationAttempted', 'mutationPerformed', 'postcondition', 'rollbackAttempted', 'rollbackPerformed',
     'stableCode', 'safeEvidenceReferences', 'supportedNextAction', 'unchangedScope'
   ]);
@@ -1392,6 +1867,20 @@ function validateOperationReceipt(receipt, binding = {}) {
   requireString(receipt.provider, 'provider', { pattern: PROVIDER_PATTERN });
   requireString(receipt.targetFingerprint, 'targetFingerprint', { pattern: DIGEST_PATTERN });
   requireString(receipt.authorisationEnvelopeDigest, 'authorisationEnvelopeDigest', { pattern: DIGEST_PATTERN });
+  invariant(receipt.operationSemanticsVersion === OPERATION_SEMANTICS_SCHEMA_VERSION,
+    'Operation receipt semantics version is invalid.', 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+  requireString(receipt.operationSemanticsDigest, 'operationSemanticsDigest', { pattern: DIGEST_PATTERN });
+  invariant(['read-only', 'mutation'].includes(receipt.mutationClass),
+    'Operation receipt mutationClass is invalid.', 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+  invariant(['inspection', 'mutation', 'destructive'].includes(receipt.receiptClass),
+    'Operation receipt receiptClass is invalid.', 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+  invariant(typeof receipt.selectedAuditReadOnly === 'boolean'
+    && receipt.selectedAuditReadOnly === (receipt.mutationClass === 'read-only')
+    && (receipt.receiptClass === 'inspection') === receipt.selectedAuditReadOnly,
+  'Operation receipt mutability disagrees with the selected audit or receipt class.',
+  'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+  requireString(receipt.inventoryAuthorityId, 'inventoryAuthorityId', { pattern: DIGEST_PATTERN });
+  requireString(receipt.inventorySourceDigest, 'inventorySourceDigest', { pattern: DIGEST_PATTERN });
   invariant(['task', 'time-bounded'].includes(receipt.authorisationLifetimeKind), 'Unsupported authorisationLifetimeKind.');
   if (receipt.authorisationLifetimeKind === 'task') {
     requireString(receipt.taskId, 'taskId', { pattern: ALIAS_PATTERN });
@@ -1435,18 +1924,32 @@ function validateOperationReceipt(receipt, binding = {}) {
   }
   if (binding.selectedRoute) {
     for (const field of [
-      'selectedInterface', 'capabilityDigest', 'inventoryGeneration', 'inventoryDigest', 'selectedRouteDigest'
+      'operationSemanticsVersion', 'operationSemanticsDigest', 'mutationClass', 'receiptClass',
+      'selectedAuditReadOnly', 'selectedInterface', 'capabilityDigest',
+      'inventoryGeneration', 'inventoryDigest', 'selectedRouteDigest'
     ]) {
       invariant(receipt[field] === binding.selectedRoute[field],
         `Operation receipt ${field} does not match the selected route.`, 'EXTERNAL_RECEIPT_BINDING_MISMATCH');
     }
     invariant((receipt.hostAdapterPlanDigest || null) === (binding.selectedRoute.hostAdapterPlanDigest || null),
       'Operation receipt host adapter plan does not match the selected route.', 'EXTERNAL_RECEIPT_BINDING_MISMATCH');
+    invariant(receipt.inventoryAuthorityId === binding.selectedRoute.snapshotAuthorityId
+      && receipt.inventorySourceDigest === binding.selectedRoute.inventorySourceDigest,
+    'Operation receipt inventory authority does not match the selected route.',
+    'EXTERNAL_RECEIPT_BINDING_MISMATCH');
+    invariant(receipt.riskTier === binding.selectedRoute.finalRiskTier,
+      'Operation receipt risk does not match final route authorisation.',
+      'EXTERNAL_RECEIPT_BINDING_MISMATCH');
   }
   invariant(Number.isInteger(receipt.riskTier) && receipt.riskTier >= 0 && receipt.riskTier <= 3, 'riskTier must be 0-3.');
   requireString(receipt.authorisationReference, 'authorisationReference', { max: 200 });
   invariant(['passed', 'failed', 'not-applicable'].includes(receipt.precondition), 'Unsupported precondition state.');
   invariant(typeof receipt.mutationAttempted === 'boolean' && typeof receipt.mutationPerformed === 'boolean', 'Mutation fields must be boolean.');
+  if (receipt.mutationClass === 'read-only') {
+    invariant(receipt.mutationAttempted === false && receipt.mutationPerformed === false,
+      'A read-only operation receipt cannot record mutation activity.',
+      'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+  }
   invariant(!receipt.mutationPerformed || receipt.mutationAttempted, 'A mutation cannot be performed when none was attempted.');
   invariant(['passed', 'failed', 'not-run', 'not-applicable'].includes(receipt.postcondition), 'Unsupported postcondition state.');
   invariant(typeof receipt.rollbackAttempted === 'boolean' && typeof receipt.rollbackPerformed === 'boolean', 'Rollback fields must be boolean.');
@@ -1454,6 +1957,11 @@ function validateOperationReceipt(receipt, binding = {}) {
   requireString(receipt.stableCode, 'stableCode', { pattern: /^[A-Z][A-Z0-9_]{2,127}$/ });
   const evidence = requireStringArray(receipt.safeEvidenceReferences, 'safeEvidenceReferences', { unique: true, pattern: /^(digest|receipt|test|public-doc|github-check):[a-zA-Z0-9._/-]+$/ });
   invariant(evidence.length <= 20, 'safeEvidenceReferences must remain bounded.');
+  for (const field of ['preconditionEvidence', 'postconditionEvidence', 'rollbackEvidence']) {
+    requireStringArray(receipt[field], field, {
+      min: 1, unique: true, pattern: /^(digest|receipt|test|public-doc|github-check):[a-zA-Z0-9._/-]+$/
+    });
+  }
   requireString(receipt.supportedNextAction, 'supportedNextAction', { max: 300 });
   requireStringArray(receipt.unchangedScope, 'unchangedScope', { min: 1, unique: true, max: 200 });
   assertNoSecretMaterial(receipt, 'Operation receipt');
@@ -1462,7 +1970,21 @@ function validateOperationReceipt(receipt, binding = {}) {
 
 function createOperationReceipt(input) {
   const envelope = input.authorisationEnvelope;
-  const route = input.selectedRoute || input;
+  const route = input.selectedRoute;
+  const routeAuthority = SELECTED_ROUTE_AUTHORITIES.get(route);
+  invariant(routeAuthority, 'Operation receipt requires one current loader-authorised selected route.',
+    'EXTERNAL_ROUTE_AUTHORITY_REQUIRED');
+  revalidateInventoryAuthority(routeAuthority.authority);
+  invariant(envelope && sha256(envelope) === routeAuthority.envelopeDigest,
+    'Operation receipt envelope differs from route authorisation.', 'EXTERNAL_RECEIPT_BINDING_MISMATCH');
+  for (const field of [
+    'provider', 'targetAlias', 'accountOrOrganisation', 'resource', 'environment', 'operation',
+    'targetFingerprint'
+  ]) {
+    invariant(input[field] === routeAuthority.operationContext[field],
+      `Operation receipt ${field} differs from selected-route authority.`,
+      'EXTERNAL_RECEIPT_BINDING_MISMATCH');
+  }
   const receipt = {
     schemaVersion: RECEIPT_SCHEMA_VERSION,
     operationId: input.operationId,
@@ -1474,7 +1996,14 @@ function createOperationReceipt(input) {
     resource: input.resource,
     targetFingerprint: input.targetFingerprint,
     environment: input.environment,
-    riskTier: input.riskTier,
+    riskTier: route.finalRiskTier,
+    operationSemanticsVersion: route.operationSemanticsVersion,
+    operationSemanticsDigest: route.operationSemanticsDigest,
+    mutationClass: route.mutationClass,
+    receiptClass: route.receiptClass,
+    selectedAuditReadOnly: route.selectedAuditReadOnly,
+    inventoryAuthorityId: route.snapshotAuthorityId,
+    inventorySourceDigest: route.inventorySourceDigest,
     authorisationReference: input.authorisationReference,
     authorisationEnvelopeDigest: input.authorisationEnvelopeDigest
       || (envelope ? sha256(envelope) : undefined),
@@ -1489,18 +2018,25 @@ function createOperationReceipt(input) {
     hostAdapterPlanDigest: route.hostAdapterPlanDigest || undefined,
     selectedRouteDigest: input.selectedRouteDigest || route.selectedRouteDigest,
     precondition: input.precondition,
+    preconditionEvidence: input.preconditionEvidence,
     mutationAttempted: input.mutationAttempted,
     mutationPerformed: input.mutationPerformed,
     postcondition: input.postcondition,
+    postconditionEvidence: input.postconditionEvidence,
     rollbackAttempted: input.rollbackAttempted,
     rollbackPerformed: input.rollbackPerformed,
+    rollbackEvidence: input.rollbackEvidence,
     stableCode: input.stableCode,
     safeEvidenceReferences: input.safeEvidenceReferences || [],
     supportedNextAction: input.supportedNextAction,
     unchangedScope: input.unchangedScope
   };
   if (!receipt.selectedRouteDigest) receipt.selectedRouteDigest = operationReceiptRouteDigest(receipt);
-  return validateOperationReceipt(receipt);
+  return validateOperationReceipt(receipt, {
+    authorisationEnvelope: envelope,
+    operationContext: routeAuthority.operationContext,
+    selectedRoute: route
+  });
 }
 
 function evaluateRouteLifecycle(record) {
@@ -1630,6 +2166,9 @@ module.exports = {
   RECEIPT_SCHEMA_VERSION,
   ROUTE_LIFECYCLE_SCHEMA_VERSION,
   HOST_ADAPTER_PLAN_SCHEMA_VERSION,
+  INVENTORY_AUTHORITY_SCHEMA_VERSION,
+  OPERATION_SEMANTICS_SCHEMA_VERSION,
+  ROUTER_VERSION,
   QUESTION_BANK_SCHEMA_VERSION,
   ANSWER_SCHEMA_VERSION,
   ALIAS_PATTERN_SOURCE,
@@ -1641,6 +2180,9 @@ module.exports = {
   N8N_DOMAIN_BODY,
   sha256,
   objectiveAuthorityDigest,
+  operationSemanticsDigest,
+  validateOperationSemantics,
+  capabilityAuditDigest,
   assertNoSecretMaterial,
   isPublicHttpsOrigin,
   isPublicHttpsReference,
@@ -1657,6 +2199,8 @@ module.exports = {
   targetInventoryDigest,
   hostAdapterPlanDigest,
   validateHostAdapterPlan,
+  loadTrustedInventorySnapshot,
+  testInventoryAuthorityExpectations,
   selectStrongestAdmissibleInterface,
   validateConsumerRequirements,
   defaultRegistryPath,

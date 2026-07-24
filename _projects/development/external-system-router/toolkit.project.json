@@ -5,9 +5,9 @@
   "title": "External System Router",
   "module_path": "_projects/development/external-system-router",
   "main_path": "_projects/development/external-system-router/_main",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "version_policy": "semver",
-  "version_notes": "Binds approvals, receipts, audits, reconciliation state, n8n helper evidence, generic workflow targets, Skill identity, and ledger locks to exact current authority.",
+  "version_notes": "Derives mutability from canonical operation semantics and requires loader-authenticated current inventory authority for every selected route and receipt.",
   "outputs": [
     {
       "kind": "copy",

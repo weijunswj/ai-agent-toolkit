@@ -532,6 +532,21 @@ test('bounded PostToolUse receipt ingestion records required non-Skill capabilit
 
 test('external capability receipts require installed-router, envelope, target, operation, and operation-receipt authority', () => {
   const objective = 'Update the live n8n workflow.';
+  const operationSemantics = {
+    schemaVersion: external.OPERATION_SEMANTICS_SCHEMA_VERSION,
+    operation: 'live-workflow-update',
+    mutationClass: 'mutation',
+    destructive: false,
+    irreversible: false,
+    crossTarget: false,
+    highBlastRadius: false,
+    minimumRiskByEnvironment: { default: 1, production: 2 },
+    requiredPreconditions: ['Exact target and authority are current.'],
+    requiredPostconditions: ['Verify the exact bounded result.'],
+    rollbackOrSafeDisable: ['Use the approved rollback or safe-disable path.'],
+    receiptClass: 'mutation'
+  };
+  operationSemantics.semanticsDigest = external.operationSemanticsDigest(operationSemantics);
   const ledger = n8n.createN8nCapabilityLedger({
     sessionId: 'external-receipt',
     repositoryIdentity: 'repo',
@@ -552,6 +567,9 @@ test('external capability receipts require installed-router, envelope, target, o
     objective,
     allowedOperations: ['live-workflow-update'],
     operationRiskTiers: { 'live-workflow-update': 2 },
+    operationSemanticsDigests: {
+      'live-workflow-update': operationSemantics.semanticsDigest
+    },
     authorisedTier2Operations: ['live-workflow-update'],
     forbiddenOperations: [],
     expectedResult: 'The exact route is ready for the governed operation.',
@@ -574,6 +592,8 @@ test('external capability receipts require installed-router, envelope, target, o
     resource: 'workflow-orders',
     environment: 'production',
     operation: 'live-workflow-update',
+    operationSemanticsVersion: operationSemantics.schemaVersion,
+    operationSemanticsDigest: operationSemantics.semanticsDigest,
     targetFingerprint: `sha256:${'a'.repeat(64)}`,
     taskId: ledger.taskId,
     sessionFingerprint: ledger.sessionFingerprint,
@@ -582,13 +602,77 @@ test('external capability receipts require installed-router, envelope, target, o
     inventoryDigest: `sha256:${'c'.repeat(64)}`,
     readOnly: false
   };
-  const selectedRoute = {
-    selectedInterface: 'n8n-api',
-    capabilityDigest: `sha256:${'d'.repeat(64)}`,
-    inventoryGeneration: operationContext.inventoryGeneration,
-    inventoryDigest: operationContext.inventoryDigest,
-    hostAdapterPlanDigest: null
+  const capabilityAudit = {
+    schemaVersion: external.AUDIT_SCHEMA_VERSION,
+    provider: operationContext.provider,
+    targetAlias: operationContext.targetAlias,
+    accountOrOrganisation: operationContext.accountOrOrganisation,
+    environment: operationContext.environment,
+    operation: operationContext.operation,
+    interfaceId: 'n8n-api',
+    interfaceKind: 'api',
+    identity: 'Synthetic installed n8n API',
+    version: 'test',
+    availableOperations: [operationContext.operation],
+    targetFingerprint: operationContext.targetFingerprint,
+    inputSchemaDigest: `sha256:${'1'.repeat(64)}`,
+    authScopeStatus: 'Synthetic scope; no values recorded.',
+    redaction: ['Allowlisted fields only.'],
+    retryIdempotency: 'No uncertain mutation retry.',
+    preconditions: ['Exact target and authority are current.'],
+    postconditions: ['Verify the exact bounded result.'],
+    rollback: ['Use the approved rollback or safe-disable path.'],
+    failureSemantics: ['Fail closed.'],
+    operationSemanticsVersion: operationSemantics.schemaVersion,
+    operationSemanticsDigest: operationSemantics.semanticsDigest,
+    capabilityDigest: `sha256:${'0'.repeat(64)}`,
+    assuranceScore: 90,
+    readOnly: false,
+    auditedAt: '2026-07-24T00:00:00.000Z',
+    evidenceReferences: ['test:n8n-route']
   };
+  capabilityAudit.targetBinding = external.targetBindingDigest(capabilityAudit);
+  capabilityAudit.capabilityDigest = external.capabilityAuditDigest(capabilityAudit);
+  const inventoryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-external-inventory-'));
+  const inventoryPath = path.join(inventoryRoot, 'provider-target-registry.json');
+  fs.writeFileSync(inventoryPath, '{}\n');
+  const identity = external.testInventoryAuthorityExpectations(inventoryPath);
+  const target = {
+    provider: operationContext.provider,
+    targetAlias: operationContext.targetAlias,
+    accountOrOrganisation: operationContext.accountOrOrganisation,
+    environment: operationContext.environment,
+    sanitizedFingerprint: operationContext.targetFingerprint,
+    inventoryGeneration: operationContext.inventoryGeneration,
+    privateOriginReference: 'local-registry://origins/n8n-production',
+    resourceReferences: [operationContext.resource],
+    credentialReferences: ['credential-store://n8n/production'],
+    installedInterfaces: [capabilityAudit.interfaceId],
+    capabilityDigests: [capabilityAudit.capabilityDigest],
+    operationSemantics: [operationSemantics],
+    routeSelections: { [operationContext.operation]: capabilityAudit.interfaceId },
+    lastAuditState: 'current',
+    receiptReferences: []
+  };
+  operationContext.inventoryDigest = external.targetInventoryDigest(target);
+  const registry = {
+    schemaVersion: external.REGISTRY_SCHEMA_VERSION,
+    ...identity,
+    inventoryGeneration: operationContext.inventoryGeneration,
+    generationSequence: 1,
+    generatedAt: '2026-07-24T00:00:00.000Z',
+    targets: [target]
+  };
+  fs.writeFileSync(inventoryPath, `${JSON.stringify(registry, null, 2)}\n`);
+  const inventoryAuthority = external.loadTrustedInventorySnapshot({
+    testOnly: true,
+    sourcePath: inventoryPath
+  });
+  const selectedRoute = external.selectStrongestAdmissibleInterface(
+    operationContext,
+    [capabilityAudit],
+    { authorizationEnvelope: authorisationEnvelope, inventoryAuthority }
+  );
   const operationReceipt = external.createOperationReceipt({
     schemaVersion: external.RECEIPT_SCHEMA_VERSION,
     operationId: 'route-live-workflow-update',
@@ -605,11 +689,14 @@ test('external capability receipts require installed-router, envelope, target, o
     authorisationEnvelope,
     selectedRoute,
     precondition: 'passed',
+    preconditionEvidence: ['test:precondition'],
     mutationAttempted: false,
     mutationPerformed: false,
     postcondition: 'not-applicable',
+    postconditionEvidence: ['test:postcondition'],
     rollbackAttempted: false,
     rollbackPerformed: false,
+    rollbackEvidence: ['test:rollback'],
     stableCode: 'EXTERNAL_ROUTE_AUTHORISED',
     safeEvidenceReferences: ['test:exact-route-authority'],
     supportedNextAction: 'Continue only through the selected exact route.',

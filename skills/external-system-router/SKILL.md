@@ -18,13 +18,14 @@ Use this skill before planning or operating against any external provider or gra
 1. Read [references/external-system-control-plane.md](references/external-system-control-plane.md) completely.
 2. Reconcile repository evidence with the user's current objective. Do not install every integration during generic Toolkit setup.
    - For any material n8n task, also load `n8n-agent-rules`, classify the exact n8n operation, and create the fail-closed task ledger before workflow work.
-3. Resolve one exact provider target from the task context or the local target registry. Never guess from recent credentials, tabs, history, environment-variable order, or a generic token.
+3. Load the canonical local target registry through the bounded trusted inventory loader, then resolve one exact provider target. Reject raw/caller-created records, copied snapshots, links, replaced bytes, identity drift, generation rollback, and recomputed plans. Never guess from recent credentials, tabs, history, environment-variable order, or a generic token.
 4. Build and validate the task-authorisation envelope. Task lifetime must bind the exact task ID, session fingerprint, and canonical approved-objective digest. Reuse it for in-scope API requests, CLI commands, MCP calls, and approved graphical steps; ask again only when a protected boundary changes.
-5. Audit candidate interfaces per operation and select the strongest reviewed admissible route through the exact current registry record or validated host-adapter plan. Detached or stale audits cannot select a route. MCP is optional and has no global priority.
-6. Before graphical control, render the complete disclosure and ask one bold explicit owner-approval question. A host, browser, operating-system, OAuth, or tool popup is technical permission, not owner approval.
-7. Execute only named adapter operations. Do not expose a generic unrestricted HTTP, shell, MCP, connector, or browser path.
-8. Verify the postcondition and write a redacted structured receipt with exactly one supported next action.
-9. Before declaring the objective complete, mark every required capability configured and verified, explicitly deferred with a blocker, or proven unnecessary.
+5. Resolve the versioned canonical operation semantics from the authenticated snapshot. Treat caller and audit read/write fields only as assertions, reject every mismatch, and bind the same semantics digest through the envelope, audit, plan, route, approval, and receipt.
+6. Audit candidate interfaces per operation and select the strongest reviewed admissible route through the loader-produced authority or its exact process-local host plan. Recompute final risk after selecting the exact audit and rerun full authorisation. Detached, copied, forged, or stale evidence cannot select a route. MCP is optional and has no global priority.
+7. Before graphical control, render the complete disclosure and ask one bold explicit owner-approval question. A host, browser, operating-system, OAuth, or tool popup is technical permission, not owner approval.
+8. Execute only named adapter operations. Do not expose a generic unrestricted HTTP, shell, MCP, connector, or browser path.
+9. Revalidate inventory immediately before route creation and receipt creation. Verify the postcondition and write a redacted structured receipt bound to canonical mutability, final risk, selected audit, authenticated source, and precondition/result/verification/rollback evidence, with exactly one supported next action.
+10. Before declaring the objective complete, mark every required capability configured and verified, explicitly deferred with a blocker, or proven unnecessary.
    - An n8n completion claim additionally requires every official Skill/helper/compiler/live-route ledger entry demanded by the exact operation.
 
 ## Safety Boundary

@@ -3,7 +3,7 @@
   "dependencies": [
     {
       "id": "external-system-router",
-      "compatibleVersion": "1.0.7",
+      "compatibleVersion": "1.0.8",
       "requiredFor": [
         "provider operations",
         "deployment, DNS, database, storage, workflow and OAuth operations",
@@ -17,6 +17,9 @@
         "scripts/external-system-router.cjs",
         "scripts/n8n-domain-router.cjs",
         "references/schemas/authorization-envelope.schema.json",
+        "references/schemas/operation-semantics.schema.json",
+        "references/schemas/capability-audit.schema.json",
+        "references/schemas/provider-target-registry.schema.json",
         "references/schemas/operation-receipt.schema.json"
       ],
       "unavailableBehavior": "fail-closed"

@@ -3,8 +3,34 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const router = require('../../skills/external-system-router/scripts/external-system-router.cjs');
+
+function semanticsFor(operation, overrides = {}) {
+  const readOnly = operation.startsWith('read-');
+  const destructive = operation.startsWith('delete-');
+  const value = {
+    schemaVersion: router.OPERATION_SEMANTICS_SCHEMA_VERSION,
+    operation,
+    mutationClass: readOnly ? 'read-only' : 'mutation',
+    destructive,
+    irreversible: destructive,
+    crossTarget: false,
+    highBlastRadius: false,
+    minimumRiskByEnvironment: {
+      default: readOnly ? 0 : destructive ? 3 : 1,
+      production: readOnly ? 0 : destructive ? 3 : 2
+    },
+    requiredPreconditions: readOnly ? [] : ['Exact target and authority are current.'],
+    requiredPostconditions: readOnly ? [] : ['Verify the exact bounded result.'],
+    rollbackOrSafeDisable: readOnly ? [] : ['Use the approved rollback or safe-disable path.'],
+    receiptClass: readOnly ? 'inspection' : destructive ? 'destructive' : 'mutation',
+    ...overrides
+  };
+  value.semanticsDigest = router.operationSemanticsDigest(value);
+  return value;
+}
 
 function envelope(overrides = {}) {
   const value = {
@@ -17,6 +43,10 @@ function envelope(overrides = {}) {
     objective: 'Deploy one exact reviewed revision.',
     allowedOperations: ['read-revision', 'deploy-revision', 'delete-application'],
     operationRiskTiers: { 'read-revision': 0, 'deploy-revision': 2, 'delete-application': 3 },
+    operationSemanticsDigests: Object.fromEntries(
+      ['read-revision', 'deploy-revision', 'delete-application'].map((operation) =>
+        [operation, semanticsFor(operation).semanticsDigest])
+    ),
     authorisedTier2Operations: ['deploy-revision'],
     forbiddenOperations: ['rotate-root-token'],
     expectedResult: 'The exact reviewed revision is healthy.',
@@ -28,6 +58,10 @@ function envelope(overrides = {}) {
     interfaceRestrictions: ['no-browser'],
     ...overrides
   };
+  if (!Object.prototype.hasOwnProperty.call(overrides, 'operationSemanticsDigests')) {
+    value.operationSemanticsDigests = Object.fromEntries(value.allowedOperations.map((operation) =>
+      [operation, semanticsFor(operation).semanticsDigest]));
+  }
   if (value.lifetime.kind === 'task') {
     value.lifetime = {
       taskId: 'task-286',
@@ -40,6 +74,7 @@ function envelope(overrides = {}) {
 }
 
 function operation(name, overrides = {}) {
+  const semantics = semanticsFor(name);
   const value = {
     provider: 'coolify',
     targetAlias: 'coolify-swooshz-production',
@@ -47,6 +82,9 @@ function operation(name, overrides = {}) {
     resource: 'spacekonceptrental',
     environment: 'production',
     operation: name,
+    operationSemanticsVersion: semantics.schemaVersion,
+    operationSemanticsDigest: semantics.semanticsDigest,
+    readOnly: semantics.mutationClass === 'read-only',
     sensitiveDataClasses: ['deployment-metadata'],
     ...overrides
   };
@@ -59,18 +97,20 @@ function operation(name, overrides = {}) {
 }
 
 function audit(interfaceId, interfaceKind, assuranceScore, overrides = {}) {
+  const operationName = overrides.operation || 'deploy-revision';
+  const semantics = overrides.semantics || semanticsFor(operationName);
   const value = {
     schemaVersion: router.AUDIT_SCHEMA_VERSION,
     provider: 'coolify',
     targetAlias: 'coolify-swooshz-production',
     accountOrOrganisation: 'swooshz',
     environment: 'production',
-    operation: 'deploy-revision',
+    operation: operationName,
     interfaceId,
     interfaceKind,
     identity: `${interfaceId} reviewed identity`,
     version: '2026-07-23',
-    availableOperations: ['deploy-revision'],
+    availableOperations: [operationName],
     targetFingerprint: `sha256:${'f'.repeat(64)}`,
     inputSchemaDigest: `sha256:${'1'.repeat(64)}`,
     authScopeStatus: 'configured scope status; no values recorded',
@@ -80,14 +120,18 @@ function audit(interfaceId, interfaceKind, assuranceScore, overrides = {}) {
     postconditions: ['Exact revision and health are verified.'],
     rollback: ['Verified previous revision is retained.'],
     failureSemantics: ['Stable failure code; no guessed continuation.'],
-    capabilityDigest: `sha256:${String(assuranceScore).padStart(64, '0')}`,
+    operationSemanticsVersion: semantics.schemaVersion,
+    operationSemanticsDigest: semantics.semanticsDigest,
+    capabilityDigest: `sha256:${'0'.repeat(64)}`,
     assuranceScore,
-    readOnly: false,
+    readOnly: semantics.mutationClass === 'read-only',
     auditedAt: '2026-07-23T00:00:00.000Z',
     evidenceReferences: ['public-doc:coolify-api'],
     ...overrides
   };
+  delete value.semantics;
   if (!Object.prototype.hasOwnProperty.call(overrides, 'targetBinding')) value.targetBinding = router.targetBindingDigest(value);
+  value.capabilityDigest = router.capabilityAuditDigest(value);
   return value;
 }
 
@@ -105,12 +149,46 @@ function currentTargetFor(audits, overrides = {}) {
     credentialReferences: ['credential-store://coolify/swooshz-production'],
     installedInterfaces: [...new Set(entries.map((entry) => entry.interfaceId))],
     capabilityDigests: [...new Set(entries.map((entry) => entry.capabilityDigest))],
+    operationSemantics: [...new Map(entries.map((entry) => [
+      entry.operation,
+      semanticsFor(entry.operation)
+    ])).values()],
     routeSelections: Object.fromEntries(entries.map((entry) => [entry.operation, entry.interfaceId])),
     lastAuditState: 'current',
     receiptReferences: [],
     ...overrides
   };
   return value;
+}
+
+function inventorySource(audits, targetOverrides = {}, registryOverrides = {}) {
+  const entries = Array.isArray(audits) ? audits : [audits];
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'external-inventory-authority-'));
+  const sourcePath = path.join(root, 'provider-target-registry.json');
+  fs.writeFileSync(sourcePath, '{}\n');
+  const identity = router.testInventoryAuthorityExpectations(sourcePath);
+  const inventoryGeneration = targetOverrides.inventoryGeneration || `sha256:${'9'.repeat(64)}`;
+  const target = currentTargetFor(entries, { inventoryGeneration, ...targetOverrides });
+  const registry = {
+    schemaVersion: router.REGISTRY_SCHEMA_VERSION,
+    ...identity,
+    inventoryGeneration,
+    generationSequence: 1,
+    generatedAt: '2026-07-24T00:00:00.000Z',
+    targets: [target],
+    ...registryOverrides
+  };
+  fs.writeFileSync(sourcePath, `${JSON.stringify(registry, null, 2)}\n`);
+  return { root, sourcePath, registry, target };
+}
+
+function inventoryFixture(audits, targetOverrides = {}, registryOverrides = {}) {
+  const source = inventorySource(audits, targetOverrides, registryOverrides);
+  const authority = router.loadTrustedInventorySnapshot({
+    testOnly: true,
+    sourcePath: source.sourcePath
+  });
+  return { ...source, authority };
 }
 
 function bindCurrentInventory(context, target) {
@@ -121,34 +199,39 @@ function bindCurrentInventory(context, target) {
   };
 }
 
-test('risk tiers and one established envelope govern exact operations without per-call prompting', () => {
-  assert.equal(router.classifyRisk({ readOnly: true }), 0);
-  assert.equal(router.classifyRisk({ readOnly: false }), 1);
-  assert.equal(router.classifyRisk({ operation: 'update-setting', environment: 'production', readOnly: false }), 2);
-  assert.equal(router.classifyRisk({ operation: 'update-setting', environment: 'uat', readOnly: false }), 1);
-  assert.equal(router.classifyRisk({ operation: 'update-setting', environment: 'local', readOnly: false }), 1);
-  assert.equal(router.classifyRisk({ deploys: true }), 2);
-  assert.equal(router.classifyRisk({ operation: 'delete-setting', environment: 'production', destructive: true }), 3);
+function authorize(authorisationEnvelope, operationContext, options = {}) {
+  return router.assertOperationAuthorized(authorisationEnvelope, operationContext, {
+    operationSemantics: semanticsFor(operationContext.operation),
+    ...options
+  });
+}
 
-  const read = router.assertOperationAuthorized(envelope(), operation('read-revision', { readOnly: true }), { establishedTier: 2 });
+test('risk tiers and one established envelope govern exact operations without per-call prompting', () => {
+  assert.equal(router.classifyRisk(operation('read-revision'), semanticsFor('read-revision')), 0);
+  assert.equal(router.classifyRisk(operation('update-setting', { environment: 'local' }), semanticsFor('update-setting')), 1);
+  assert.equal(router.classifyRisk(operation('update-setting'), semanticsFor('update-setting')), 2);
+  assert.equal(router.classifyRisk(operation('update-setting', { environment: 'uat' }), semanticsFor('update-setting')), 1);
+  assert.equal(router.classifyRisk(operation('delete-setting'), semanticsFor('delete-setting')), 3);
+
+  const read = authorize(envelope(), operation('read-revision'), { establishedTier: 2 });
   assert.deepEqual(read, { authorised: true, riskTier: 0, reuseWithoutPerCallPrompt: true });
-  const deploy = router.assertOperationAuthorized(envelope(), operation('deploy-revision', { deploys: true }), { establishedTier: 2 });
+  const deploy = authorize(envelope(), operation('deploy-revision'), { establishedTier: 2 });
   assert.equal(deploy.reuseWithoutPerCallPrompt, true);
   assert.equal(deploy.riskTier, 2);
   assert.throws(
-    () => router.assertOperationAuthorized(envelope(), operation('read-revision', { environment: 'staging', readOnly: true })),
+    () => authorize(envelope(), operation('read-revision', { environment: 'staging' })),
     (error) => error.code === 'EXTERNAL_REAUTHORISATION_REQUIRED' && /environment/.test(error.message)
   );
   assert.throws(
-    () => router.assertOperationAuthorized(envelope(), operation('deploy-revision', { deploys: true }), { establishedTier: 1 }),
+    () => authorize(envelope(), operation('deploy-revision'), { establishedTier: 1 }),
     (error) => error.code === 'EXTERNAL_REAUTHORISATION_REQUIRED'
   );
   assert.throws(
-    () => router.assertOperationAuthorized(envelope(), operation('delete-application')),
+    () => authorize(envelope(), operation('delete-application')),
     (error) => error.code === 'EXTERNAL_TIER3_APPROVAL_REQUIRED'
   );
   assert.throws(
-    () => router.assertOperationAuthorized(envelope(), operation('delete-application', { destructive: true, riskTier: 0 })),
+    () => authorize(envelope(), operation('delete-application', { destructive: true, riskTier: 0 })),
     (error) => error.code === 'EXTERNAL_TIER3_APPROVAL_REQUIRED'
   );
   const destructiveEnvelope = envelope();
@@ -162,6 +245,8 @@ test('risk tiers and one established envelope govern exact operations without pe
     resource: destructiveOperation.resource,
     environment: destructiveOperation.environment,
     operation: destructiveOperation.operation,
+    operationSemanticsVersion: destructiveOperation.operationSemanticsVersion,
+    operationSemanticsDigest: destructiveOperation.operationSemanticsDigest,
     taskId: destructiveOperation.taskId,
     sessionFingerprint: destructiveOperation.sessionFingerprint,
     objectiveDigest: destructiveOperation.objectiveDigest,
@@ -169,19 +254,19 @@ test('risk tiers and one established envelope govern exact operations without pe
     operationDigest: destructiveBinding.operationDigest,
     authorisationReference: 'immediate-owner-approval'
   };
-  const destructive = router.assertOperationAuthorized(
+  const destructive = authorize(
     destructiveEnvelope,
     destructiveOperation,
     { immediateApproval }
   );
   assert.equal(destructive.riskTier, 3);
   assert.equal(destructive.reuseWithoutPerCallPrompt, false);
-  assert.throws(() => router.assertOperationAuthorized(
+  assert.throws(() => authorize(
     destructiveEnvelope,
     { ...destructiveOperation, resource: 'another-application' },
     { immediateApproval }
   ), (error) => error.code === 'EXTERNAL_REAUTHORISATION_REQUIRED');
-  assert.throws(() => router.assertOperationAuthorized(
+  assert.throws(() => authorize(
     destructiveEnvelope,
     destructiveOperation,
     { immediateApproval: { ...immediateApproval, targetAlias: 'another-target' } }
@@ -194,12 +279,12 @@ test('risk tiers and one established envelope govern exact operations without pe
     forbiddenOperations: []
   });
   const unfamiliarProductionWrite = operation('update-setting', { riskTier: 0 });
-  assert.equal(router.assertOperationAuthorized(
+  assert.equal(authorize(
     unfamiliarEnvelope,
     unfamiliarProductionWrite,
     { establishedTier: 2 }
   ).riskTier, 2);
-  assert.throws(() => router.assertOperationAuthorized(
+  assert.throws(() => authorize(
     unfamiliarEnvelope,
     unfamiliarProductionWrite,
     { establishedTier: 1 }
@@ -209,13 +294,13 @@ test('risk tiers and one established envelope govern exact operations without pe
 test('task lifetime authority rejects cross-task and changed-objective replay', () => {
   const approvedEnvelope = envelope();
   const approvedOperation = operation('read-revision', { readOnly: true });
-  assert.equal(router.assertOperationAuthorized(approvedEnvelope, approvedOperation).authorised, true);
+  assert.equal(authorize(approvedEnvelope, approvedOperation).authorised, true);
   assert.throws(
-    () => router.assertOperationAuthorized(approvedEnvelope, { ...approvedOperation, taskId: 'task-later' }),
+    () => authorize(approvedEnvelope, { ...approvedOperation, taskId: 'task-later' }),
     (error) => error.code === 'EXTERNAL_TASK_AUTHORITY_MISMATCH'
   );
   assert.throws(
-    () => router.assertOperationAuthorized(approvedEnvelope, {
+    () => authorize(approvedEnvelope, {
       ...approvedOperation,
       objectiveDigest: router.objectiveAuthorityDigest('A changed later objective.')
     }),
@@ -328,6 +413,18 @@ test('authorization schema and runtime use the exact same alias contract includi
     'references', 'schemas', 'provider-target-registry.schema.json'
   ), 'utf8'));
   assert.ok(registrySchema.properties.targets.items.required.includes('accountOrOrganisation'));
+  const semanticsSchema = JSON.parse(fs.readFileSync(path.join(
+    __dirname, '..', '..', '_projects', 'development', 'external-system-router', '_main', 'skill',
+    'references', 'schemas', 'operation-semantics.schema.json'
+  ), 'utf8'));
+  const mutationRule = semanticsSchema.allOf.find((rule) =>
+    rule.if?.properties?.mutationClass?.const === 'mutation');
+  assert.equal(mutationRule.then.properties.requiredPreconditions.minItems, 1);
+  assert.equal(mutationRule.then.properties.requiredPostconditions.minItems, 1);
+  assert.equal(mutationRule.then.properties.rollbackOrSafeDisable.minItems, 1);
+  assert.throws(() => router.validateOperationSemantics(semanticsFor('invalid-destructive-receipt', {
+    receiptClass: 'destructive'
+  })), (error) => error.code === 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
   assert.doesNotThrow(() => router.validateAuthorizationEnvelope(envelope({
     targetAlias: 'team:production',
     allowedOperations: ['read:revision'],
@@ -353,7 +450,7 @@ test('standalone AI coding rules explicitly declare the external-system-router r
   ), 'utf8'));
   assert.equal(dependencies.schemaVersion, 'ai-agent-toolkit.skill-runtime-dependencies.v1');
   const externalRouter = dependencies.dependencies.find((entry) => entry.id === 'external-system-router');
-  assert.equal(externalRouter.compatibleVersion, '1.0.7');
+  assert.equal(externalRouter.compatibleVersion, '1.0.8');
   assert.equal(externalRouter.installUnit, 'complete-skill-folder');
   assert.equal(externalRouter.unavailableBehavior, 'fail-closed');
   for (const required of [
@@ -416,15 +513,11 @@ test('operation-specific assurance selects structured routes without a global MC
   const browser = audit('coolify-browser', 'browser', 100);
   const typedMcp = audit('typed-coolify-mcp', 'mcp', 95);
   const wrongOperation = audit('wrong-operation-mcp', 'mcp', 100, { operation: 'read-revision', availableOperations: ['read-revision'] });
-  const currentTarget = currentTargetFor([api, readOnlyMcp, browser, typedMcp, wrongOperation]);
+  const fixture = inventoryFixture([api, browser, typedMcp, wrongOperation]);
+  const currentTarget = fixture.target;
   const context = bindCurrentInventory({
-    provider: 'coolify', targetAlias: 'coolify-swooshz-production', environment: 'production',
-    accountOrOrganisation: 'swooshz',
+    ...operation('deploy-revision'),
     resource: 'one-application', targetFingerprint: `sha256:${'f'.repeat(64)}`,
-    operation: 'deploy-revision', readOnly: false,
-    taskId: 'task-286',
-    sessionFingerprint: router.sha256('session-286'),
-    objectiveDigest: router.objectiveAuthorityDigest('Deploy one exact reviewed revision.')
   }, currentTarget);
   const routeEnvelope = envelope({
     resource: 'one-application',
@@ -442,11 +535,12 @@ test('operation-specific assurance selects structured routes without a global MC
     authorizationEnvelope: routeEnvelope,
     graphicalApproval,
     graphicalDisclosure,
-    targetRegistryRecord: currentTarget
+    inventoryAuthority: fixture.authority
   };
-  const apiSelected = router.selectStrongestAdmissibleInterface(context, [readOnlyMcp, browser, api], options);
+  const apiSelected = router.selectStrongestAdmissibleInterface(context, [browser, api], options);
   assert.equal(apiSelected.selectedInterface, 'coolify-api');
-  assert.match(apiSelected.rejected.find((item) => item.interfaceId === 'coolify-mcp').reason, /read-only/);
+  assert.throws(() => router.selectStrongestAdmissibleInterface(context, [readOnlyMcp, api], options),
+    (error) => error.code === 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
 
   assert.equal(router.selectStrongestAdmissibleInterface(context, [api, typedMcp], options).selectedInterface, 'typed-coolify-mcp');
   assert.equal(router.selectStrongestAdmissibleInterface(context, [browser, api], options).selectedInterface, 'coolify-api');
@@ -461,7 +555,7 @@ test('operation-specific assurance selects structured routes without a global MC
   ), (error) => error.code === 'EXTERNAL_STALE_TARGET_INVENTORY');
   assert.throws(() => router.selectStrongestAdmissibleInterface(context, [browser], {
     authorizationEnvelope: routeEnvelope,
-    targetRegistryRecord: currentTarget,
+    inventoryAuthority: fixture.authority,
     graphicalApprovalValid: true
   }),
     (error) => error.code === 'EXTERNAL_NO_ADMISSIBLE_ROUTE');
@@ -479,7 +573,7 @@ test('operation-specific assurance selects structured routes without a global MC
   }), (error) => error.code === 'EXTERNAL_NO_ADMISSIBLE_ROUTE');
   assert.throws(() => router.selectStrongestAdmissibleInterface(
     { ...context, accountOrOrganisation: 'different-account' }, [api], options
-  ), (error) => error.code === 'EXTERNAL_REAUTHORISATION_REQUIRED');
+  ), (error) => error.code === 'EXTERNAL_STALE_TARGET_INVENTORY');
   const wrongAccountAudit = audit('wrong-account-api', 'api', 81, { accountOrOrganisation: 'different-account' });
   assert.throws(() => router.selectStrongestAdmissibleInterface(
     context, [wrongAccountAudit], options
@@ -528,31 +622,38 @@ test('operation-specific assurance selects structured routes without a global MC
 test('final route selection requires the exact current target inventory generation', () => {
   const api = audit('coolify-api', 'api', 80);
   const browser = audit('coolify-browser', 'browser', 90);
-  const currentTarget = currentTargetFor([api, browser]);
+  const fixture = inventoryFixture([api, browser]);
+  const currentTarget = fixture.target;
   const context = bindCurrentInventory({
-    ...operation('deploy-revision', { readOnly: false }),
+    ...operation('deploy-revision'),
     resource: 'one-application',
     targetFingerprint: api.targetFingerprint
   }, currentTarget);
   const routeEnvelope = envelope({ resource: 'one-application', interfaceRestrictions: [] });
   const selected = router.selectStrongestAdmissibleInterface(context, [api], {
     authorizationEnvelope: routeEnvelope,
-    targetRegistryRecord: currentTarget
+    inventoryAuthority: fixture.authority
   });
   assert.equal(selected.selectedInterface, api.interfaceId);
 
-  for (const staleTarget of [
-    { ...currentTarget, installedInterfaces: [browser.interfaceId] },
-    { ...currentTarget, capabilityDigests: [browser.capabilityDigest] }
+  for (const targetOverrides of [
+    { installedInterfaces: [browser.interfaceId] },
+    { capabilityDigests: [browser.capabilityDigest] }
   ]) {
-    const staleContext = bindCurrentInventory(context, staleTarget);
+    const staleFixture = inventoryFixture([api, browser], targetOverrides);
+    const staleContext = bindCurrentInventory(context, staleFixture.target);
     assert.throws(() => router.selectStrongestAdmissibleInterface(staleContext, [api], {
       authorizationEnvelope: routeEnvelope,
-      targetRegistryRecord: staleTarget
+      inventoryAuthority: staleFixture.authority
     }), (error) => error.code === 'EXTERNAL_NO_ADMISSIBLE_ROUTE');
   }
 
-  const plan = router.buildHostAdapterPlan(currentTarget, 'codex', [api, browser]);
+  const selector = {
+    provider: 'coolify',
+    targetAlias: currentTarget.targetAlias,
+    environment: currentTarget.environment
+  };
+  const plan = router.buildHostAdapterPlan(fixture.authority, selector, 'codex', [api, browser]);
   assert.equal(router.selectStrongestAdmissibleInterface(context, [api], {
     authorizationEnvelope: routeEnvelope,
     hostAdapterPlan: plan
@@ -563,7 +664,7 @@ test('final route selection requires the exact current target inventory generati
       ...plan,
       credentialReferences: ['credential-store://coolify/another-target']
     }
-  }), (error) => error.code === 'EXTERNAL_STALE_TARGET_INVENTORY');
+  }), (error) => error.code === 'EXTERNAL_CURRENT_INVENTORY_REQUIRED');
   assert.throws(() => router.selectStrongestAdmissibleInterface(context, [api], {
     authorizationEnvelope: routeEnvelope,
     hostAdapterPlan: {
@@ -574,7 +675,11 @@ test('final route selection requires the exact current target inventory generati
         inventoryGeneration: `sha256:${'7'.repeat(64)}`
       })
     }
-  }), (error) => error.code === 'EXTERNAL_STALE_TARGET_INVENTORY');
+  }), (error) => error.code === 'EXTERNAL_CURRENT_INVENTORY_REQUIRED');
+  assert.throws(() => router.selectStrongestAdmissibleInterface(context, [api], {
+    authorizationEnvelope: routeEnvelope,
+    targetRegistryRecord: currentTarget
+  }), (error) => error.code === 'EXTERNAL_INVENTORY_AUTHORITY_REQUIRED');
   assert.throws(() => router.selectStrongestAdmissibleInterface(context, [browser], {
     authorizationEnvelope: routeEnvelope,
     graphicalDisclosure: disclosure(),
@@ -585,6 +690,308 @@ test('final route selection requires the exact current target inventory generati
       disclosureDigest: router.sha256(disclosure())
     })
   }), (error) => error.code === 'EXTERNAL_CURRENT_INVENTORY_REQUIRED');
+});
+
+test('canonical mutability rejects every context, audit, inventory, and semantics disagreement', () => {
+  const writeAudit = audit('provider-api', 'api', 90);
+  const fixture = inventoryFixture(writeAudit);
+  const context = bindCurrentInventory({
+    ...operation('deploy-revision'),
+    resource: 'one-application',
+    targetFingerprint: writeAudit.targetFingerprint
+  }, fixture.target);
+  const routeEnvelope = envelope({ resource: 'one-application', interfaceRestrictions: [] });
+  const options = { authorizationEnvelope: routeEnvelope, inventoryAuthority: fixture.authority };
+
+  assert.throws(() => router.selectStrongestAdmissibleInterface(
+    { ...context, readOnly: true }, [writeAudit], options
+  ), (error) => error.code === 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+
+  const auditClaimsReadOnly = {
+    ...writeAudit,
+    readOnly: true,
+    capabilityDigest: `sha256:${'0'.repeat(64)}`
+  };
+  auditClaimsReadOnly.capabilityDigest = router.capabilityAuditDigest(auditClaimsReadOnly);
+  assert.throws(() => router.selectStrongestAdmissibleInterface(
+    context, [auditClaimsReadOnly], options
+  ), (error) => error.code === 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+
+  const readAuditClaimsWrite = audit('provider-read-api', 'api', 80, {
+    operation: 'read-revision',
+    readOnly: false
+  });
+  const readFixture = inventoryFixture(readAuditClaimsWrite, {
+    operationSemantics: [semanticsFor('read-revision')]
+  });
+  const readContext = bindCurrentInventory({
+    ...operation('read-revision', { readOnly: false }),
+    resource: 'one-application',
+    targetFingerprint: readAuditClaimsWrite.targetFingerprint
+  }, readFixture.target);
+  assert.throws(() => router.selectStrongestAdmissibleInterface(
+    readContext,
+    [readAuditClaimsWrite],
+    {
+      authorizationEnvelope: envelope({
+        resource: 'one-application',
+        allowedOperations: ['read-revision'],
+        operationRiskTiers: { 'read-revision': 0 },
+        authorisedTier2Operations: [],
+        forbiddenOperations: []
+      }),
+      inventoryAuthority: readFixture.authority
+    }
+  ), (error) => error.code === 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+
+  assert.throws(() => router.selectStrongestAdmissibleInterface(
+    {
+      ...context,
+      operation: 'unregistered-operation',
+      operationSemanticsVersion: router.OPERATION_SEMANTICS_SCHEMA_VERSION,
+      operationSemanticsDigest: semanticsFor('unregistered-operation').semanticsDigest
+    },
+    [writeAudit],
+    options
+  ), (error) => error.code === 'EXTERNAL_UNKNOWN_OPERATION');
+  assert.throws(() => router.selectStrongestAdmissibleInterface(
+    { ...context, operationSemanticsVersion: 'ai-agent-toolkit.operation-semantics.v0' },
+    [writeAudit],
+    options
+  ), (error) => error.code === 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+
+  const forgedRouteShape = {
+    ...router.selectStrongestAdmissibleInterface(context, [writeAudit], options),
+    selectedAuditReadOnly: true,
+    mutationClass: 'read-only',
+    receiptClass: 'inspection'
+  };
+  assert.throws(() => router.createOperationReceipt({
+    operationId: 'forged-read-only-receipt',
+    ...context,
+    adapter: 'provider-api',
+    authorisationReference: routeEnvelope.ownerApprovalReference,
+    authorisationEnvelope: routeEnvelope,
+    selectedRoute: forgedRouteShape,
+    precondition: 'passed',
+    preconditionEvidence: ['test:precondition'],
+    mutationAttempted: false,
+    mutationPerformed: false,
+    postcondition: 'not-applicable',
+    postconditionEvidence: ['test:postcondition'],
+    rollbackAttempted: false,
+    rollbackPerformed: false,
+    rollbackEvidence: ['test:rollback'],
+    stableCode: 'EXTERNAL_FORGED_RECEIPT',
+    safeEvidenceReferences: ['test:forged'],
+    supportedNextAction: 'Stop.',
+    unchangedScope: ['No mutation occurred.']
+  }), (error) => error.code === 'EXTERNAL_ROUTE_AUTHORITY_REQUIRED');
+});
+
+test('canonical mutability is identical across structured route kinds', () => {
+  for (const interfaceKind of ['api', 'cli', 'plugin', 'direct-protocol', 'mcp']) {
+    const interfaceAudit = audit(`provider-${interfaceKind}`, interfaceKind, 80);
+    const fixture = inventoryFixture(interfaceAudit);
+    const context = bindCurrentInventory({
+      ...operation('deploy-revision'),
+      resource: 'one-application',
+      targetFingerprint: interfaceAudit.targetFingerprint
+    }, fixture.target);
+    const selected = router.selectStrongestAdmissibleInterface(context, [interfaceAudit], {
+      authorizationEnvelope: envelope({ resource: 'one-application', interfaceRestrictions: [] }),
+      inventoryAuthority: fixture.authority
+    });
+    assert.equal(selected.interfaceKind, interfaceKind);
+    assert.equal(selected.mutationClass, 'mutation');
+    assert.equal(selected.finalRiskTier, 2);
+    assert.equal(selected.selectedAuditReadOnly, false);
+  }
+  const browserAudit = audit('provider-browser', 'browser', 80);
+  const browserFixture = inventoryFixture(browserAudit);
+  const browserContext = bindCurrentInventory({
+    ...operation('deploy-revision'),
+    resource: 'one-application',
+    targetFingerprint: browserAudit.targetFingerprint
+  }, browserFixture.target);
+  const browserEnvelope = envelope({
+    resource: 'one-application',
+    interfaceRestrictions: [],
+    ownerApprovalReference: 'owner-approved-disclosure'
+  });
+  const browserDisclosure = disclosure();
+  const browserApproval = router.bindGraphicalApproval(browserDisclosure, {
+    ownerApproved: true,
+    source: 'owner',
+    authorisationReference: browserEnvelope.ownerApprovalReference,
+    disclosureDigest: router.sha256(browserDisclosure)
+  });
+  assert.equal(router.selectStrongestAdmissibleInterface(browserContext, [browserAudit], {
+    authorizationEnvelope: browserEnvelope,
+    inventoryAuthority: browserFixture.authority,
+    graphicalDisclosure: browserDisclosure,
+    graphicalApproval: browserApproval
+  }).interfaceKind, 'browser');
+});
+
+test('read-only production inspection remains Tier 0 and cannot record mutation activity', () => {
+  const readAudit = audit('provider-read-api', 'api', 80, { operation: 'read-revision' });
+  const fixture = inventoryFixture(readAudit);
+  const context = bindCurrentInventory({
+    ...operation('read-revision'),
+    resource: 'one-application',
+    targetFingerprint: readAudit.targetFingerprint
+  }, fixture.target);
+  const routeEnvelope = envelope({
+    resource: 'one-application',
+    allowedOperations: ['read-revision'],
+    operationRiskTiers: { 'read-revision': 0 },
+    authorisedTier2Operations: [],
+    forbiddenOperations: [],
+    interfaceRestrictions: []
+  });
+  const route = router.selectStrongestAdmissibleInterface(context, [readAudit], {
+    authorizationEnvelope: routeEnvelope,
+    inventoryAuthority: fixture.authority
+  });
+  assert.equal(route.finalRiskTier, 0);
+  assert.equal(route.mutationClass, 'read-only');
+  const receiptInput = {
+    operationId: 'read-production',
+    ...context,
+    adapter: 'provider-read-api',
+    authorisationReference: routeEnvelope.ownerApprovalReference,
+    authorisationEnvelope: routeEnvelope,
+    selectedRoute: route,
+    precondition: 'passed',
+    preconditionEvidence: ['test:precondition'],
+    mutationAttempted: false,
+    mutationPerformed: false,
+    postcondition: 'passed',
+    postconditionEvidence: ['test:postcondition'],
+    rollbackAttempted: false,
+    rollbackPerformed: false,
+    rollbackEvidence: ['test:rollback-not-applicable'],
+    stableCode: 'EXTERNAL_READ_COMPLETE',
+    safeEvidenceReferences: ['test:read'],
+    supportedNextAction: 'Continue only within the same task authority.',
+    unchangedScope: ['No mutation occurred.']
+  };
+  const receipt = router.createOperationReceipt(receiptInput);
+  assert.equal(receipt.receiptClass, 'inspection');
+  assert.equal(receipt.riskTier, 0);
+  assert.throws(() => router.createOperationReceipt({
+    ...receiptInput,
+    mutationAttempted: true
+  }), (error) => error.code === 'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
+});
+
+test('trusted inventory loader rejects forged, copied, stale, replaced, and cross-installation authority', (t) => {
+  const api = audit('provider-api', 'api', 90);
+  const valid = inventoryFixture(api);
+  const context = bindCurrentInventory({
+    ...operation('deploy-revision'),
+    resource: 'one-application',
+    targetFingerprint: api.targetFingerprint
+  }, valid.target);
+  const routeEnvelope = envelope({ resource: 'one-application', interfaceRestrictions: [] });
+
+  const forgedRecord = structuredClone(valid.target);
+  forgedRecord.installedInterfaces = ['forged-api'];
+  forgedRecord.capabilityDigests = [api.capabilityDigest];
+  const forgedContext = bindCurrentInventory(context, forgedRecord);
+  assert.throws(() => router.selectStrongestAdmissibleInterface(forgedContext, [api], {
+    authorizationEnvelope: routeEnvelope,
+    targetRegistryRecord: forgedRecord
+  }), (error) => error.code === 'EXTERNAL_INVENTORY_AUTHORITY_REQUIRED');
+
+  const plan = router.buildHostAdapterPlan(valid.authority, {
+    provider: 'coolify',
+    targetAlias: valid.target.targetAlias,
+    environment: valid.target.environment
+  }, 'codex', [api]);
+  const forgedPlan = { ...plan };
+  forgedPlan.planDigest = router.hostAdapterPlanDigest(forgedPlan);
+  assert.throws(() => router.selectStrongestAdmissibleInterface(context, [api], {
+    authorizationEnvelope: routeEnvelope,
+    hostAdapterPlan: forgedPlan
+  }), (error) => error.code === 'EXTERNAL_CURRENT_INVENTORY_REQUIRED');
+
+  const copiedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'external-inventory-copy-'));
+  const copiedPath = path.join(copiedRoot, 'provider-target-registry.json');
+  fs.copyFileSync(valid.sourcePath, copiedPath);
+  assert.throws(() => router.loadTrustedInventorySnapshot({ testOnly: true, sourcePath: copiedPath }),
+    (error) => error.code === 'EXTERNAL_INVENTORY_AUTHORITY_MISMATCH');
+
+  for (const field of ['routerVersion', 'routerSourceDigest', 'installationIdentity', 'repositoryIdentity', 'hostIdentity']) {
+    const source = inventorySource(api, {}, {
+      [field]: field === 'routerVersion' ? '0.0.0' : `sha256:${'e'.repeat(64)}`
+    });
+    assert.throws(() => router.loadTrustedInventorySnapshot({
+      testOnly: true,
+      sourcePath: source.sourcePath
+    }), (error) => error.code === 'EXTERNAL_INVENTORY_AUTHORITY_MISMATCH');
+  }
+
+  fs.writeFileSync(valid.sourcePath, `${JSON.stringify({
+    ...valid.registry,
+    generationSequence: valid.registry.generationSequence + 1
+  }, null, 2)}\n`);
+  assert.throws(() => router.selectStrongestAdmissibleInterface(context, [api], {
+    authorizationEnvelope: routeEnvelope,
+    inventoryAuthority: valid.authority
+  }), (error) => error.code === 'EXTERNAL_INVENTORY_SOURCE_CHANGED');
+
+  const replaced = inventoryFixture(api);
+  const identicalBytes = fs.readFileSync(replaced.sourcePath);
+  fs.unlinkSync(replaced.sourcePath);
+  fs.writeFileSync(replaced.sourcePath, identicalBytes);
+  assert.throws(() => router.selectStrongestAdmissibleInterface(
+    bindCurrentInventory(context, replaced.target),
+    [api],
+    { authorizationEnvelope: routeEnvelope, inventoryAuthority: replaced.authority }
+  ), (error) => error.code === 'EXTERNAL_INVENTORY_SOURCE_CHANGED');
+
+  const rollback = inventorySource(api, {}, { generationSequence: 2 });
+  router.loadTrustedInventorySnapshot({ testOnly: true, sourcePath: rollback.sourcePath });
+  fs.writeFileSync(rollback.sourcePath, `${JSON.stringify({
+    ...rollback.registry,
+    generationSequence: 1
+  }, null, 2)}\n`);
+  assert.throws(() => router.loadTrustedInventorySnapshot({
+    testOnly: true,
+    sourcePath: rollback.sourcePath
+  }), (error) => error.code === 'EXTERNAL_INVENTORY_GENERATION_ROLLBACK');
+
+  const sameGeneration = inventorySource(api);
+  router.loadTrustedInventorySnapshot({ testOnly: true, sourcePath: sameGeneration.sourcePath });
+  fs.writeFileSync(sameGeneration.sourcePath, `${JSON.stringify({
+    ...sameGeneration.registry,
+    generatedAt: '2026-07-24T00:00:01.000Z'
+  }, null, 2)}\n`);
+  assert.throws(() => router.loadTrustedInventorySnapshot({
+    testOnly: true,
+    sourcePath: sameGeneration.sourcePath
+  }), (error) => error.code === 'EXTERNAL_INVENTORY_GENERATION_ROLLBACK');
+
+  const staleAuditState = inventoryFixture(api, { lastAuditState: 'stale' });
+  assert.throws(() => router.selectStrongestAdmissibleInterface(
+    bindCurrentInventory(context, staleAuditState.target),
+    [api],
+    { authorizationEnvelope: routeEnvelope, inventoryAuthority: staleAuditState.authority }
+  ), (error) => error.code === 'EXTERNAL_STALE_TARGET_INVENTORY');
+
+  if (process.platform !== 'win32') {
+    const linkRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'external-inventory-link-'));
+    const linkedPath = path.join(linkRoot, 'provider-target-registry.json');
+    fs.symlinkSync(rollback.sourcePath, linkedPath);
+    assert.throws(() => router.loadTrustedInventorySnapshot({
+      testOnly: true,
+      sourcePath: linkedPath
+    }), (error) => error.code === 'EXTERNAL_INVENTORY_TOPOLOGY_MISMATCH');
+  } else {
+    t.diagnostic('link substitution is covered on hosts that permit unprivileged symlink fixtures');
+  }
 });
 
 function target(alias, environment, credentials = ['credential-store://coolify/swooshz-production'], extra = {}) {
@@ -600,6 +1007,7 @@ function target(alias, environment, credentials = ['credential-store://coolify/s
     credentialReferences: credentials,
     installedInterfaces: ['coolify-api'],
     capabilityDigests: [`sha256:${'c'.repeat(64)}`],
+    operationSemantics: [semanticsFor('deploy-revision')],
     routeSelections: { 'deploy-revision': 'coolify-api' },
     lastAuditState: 'current',
     receiptReferences: [],
@@ -608,42 +1016,75 @@ function target(alias, environment, credentials = ['credential-store://coolify/s
 }
 
 test('provider target registry defaults to one credential, never guesses, and survives host switching', () => {
-  const registry = {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'external-registry-validation-'));
+  const sourcePath = path.join(root, 'provider-target-registry.json');
+  fs.writeFileSync(sourcePath, '{}\n');
+  const identity = router.testInventoryAuthorityExpectations(sourcePath);
+  const inventoryGeneration = `sha256:${'8'.repeat(64)}`;
+  const registryBase = {
     schemaVersion: router.REGISTRY_SCHEMA_VERSION,
-    targets: [target('coolify-swooshz-production', 'production'), target('coolify-xboundaries-production', 'production')]
+    ...identity,
+    inventoryGeneration,
+    generationSequence: 1,
+    generatedAt: '2026-07-24T00:00:00.000Z'
+  };
+  const registry = {
+    ...registryBase,
+    targets: [
+      target('coolify-swooshz-production', 'production', undefined, { inventoryGeneration }),
+      target('coolify-xboundaries-production', 'production', undefined, { inventoryGeneration })
+    ]
   };
   router.validateProviderTargetRegistry(registry);
   assert.throws(() => router.resolveProviderTarget(registry, { provider: 'coolify' }), (error) => error.code === 'EXTERNAL_TARGET_AMBIGUOUS');
   const selected = router.resolveProviderTarget(registry, { provider: 'coolify', targetAlias: 'coolify-swooshz-production', environment: 'production' });
   assert.equal(selected.credentialReferences.length, 1);
   assert.throws(
-    () => router.validateProviderTargetRegistry({ schemaVersion: router.REGISTRY_SCHEMA_VERSION, targets: [target('coolify-swooshz-production', 'production', ['credential-store://coolify/read', 'credential-store://coolify/write'])] }),
+    () => router.validateProviderTargetRegistry({
+      ...registryBase,
+      targets: [target('coolify-swooshz-production', 'production', [
+        'credential-store://coolify/read', 'credential-store://coolify/write'
+      ], { inventoryGeneration })]
+    }),
     /multipleCredentialJustification/
   );
   const exactAudit = audit('coolify-api', 'api', 80, {
     targetFingerprint: selected.sanitizedFingerprint
   });
   exactAudit.targetBinding = router.targetBindingDigest(exactAudit);
-  const currentTarget = { ...selected, capabilityDigests: [exactAudit.capabilityDigest] };
-  const codex = router.buildHostAdapterPlan(currentTarget, 'codex', [exactAudit]);
-  const claude = router.buildHostAdapterPlan(currentTarget, 'claude-code', [exactAudit]);
+  exactAudit.capabilityDigest = router.capabilityAuditDigest(exactAudit);
+  const planFixture = inventoryFixture(exactAudit, {
+    sanitizedFingerprint: selected.sanitizedFingerprint,
+    resourceReferences: ['spacekonceptrental']
+  });
+  const selector = {
+    provider: 'coolify',
+    targetAlias: 'coolify-swooshz-production',
+    environment: 'production'
+  };
+  const codex = router.buildHostAdapterPlan(planFixture.authority, selector, 'codex', [exactAudit]);
+  const claude = router.buildHostAdapterPlan(planFixture.authority, selector, 'claude-code', [exactAudit]);
   assert.deepEqual(codex.logicalTarget, claude.logicalTarget);
   assert.equal(codex.requiresProviderRediscoveryOnHostSwitch, false);
   assert.equal(claude.preserveOtherHostConfiguration, true);
   assert.equal(claude.copySecretsIntoRepository, false);
-  const wrongTarget = router.buildHostAdapterPlan(currentTarget, 'codex', [audit('wrong-target', 'api', 80)]);
+  const wrongTarget = router.buildHostAdapterPlan(planFixture.authority, selector, 'codex', [audit('wrong-target', 'api', 80)]);
   assert.equal(wrongTarget.capabilityAuditPassed, false);
   assert.deepEqual(wrongTarget.supportedOperations, []);
-  const uninstalled = router.buildHostAdapterPlan({
-    ...currentTarget,
+  const uninstalledFixture = inventoryFixture(exactAudit, {
+    sanitizedFingerprint: selected.sanitizedFingerprint,
+    resourceReferences: ['spacekonceptrental'],
     installedInterfaces: []
-  }, 'codex', [exactAudit]);
+  });
+  const uninstalled = router.buildHostAdapterPlan(uninstalledFixture.authority, selector, 'codex', [exactAudit]);
   assert.equal(uninstalled.capabilityAuditPassed, false);
   assert.deepEqual(uninstalled.supportedOperations, []);
-  const staleDigest = router.buildHostAdapterPlan({
-    ...currentTarget,
+  const staleFixture = inventoryFixture(exactAudit, {
+    sanitizedFingerprint: selected.sanitizedFingerprint,
+    resourceReferences: ['spacekonceptrental'],
     capabilityDigests: []
-  }, 'codex', [exactAudit]);
+  });
+  const staleDigest = router.buildHostAdapterPlan(staleFixture.authority, selector, 'codex', [exactAudit]);
   assert.equal(staleDigest.capabilityAuditPassed, false);
   assert.deepEqual(staleDigest.supportedOperations, []);
 });
@@ -654,17 +1095,18 @@ test('receipts redact unsafe material and route lifecycle never auto-revokes', (
     targetFingerprint: `sha256:${'d'.repeat(64)}`
   });
   receiptAudit.targetBinding = router.targetBindingDigest(receiptAudit);
-  const receiptTarget = currentTargetFor(receiptAudit, {
+  const receiptFixture = inventoryFixture(receiptAudit, {
     sanitizedFingerprint: receiptAudit.targetFingerprint,
     resourceReferences: ['spacekonceptrental']
   });
+  const receiptTarget = receiptFixture.target;
   const receiptContext = bindCurrentInventory({
     ...operation('deploy-revision', { deploys: true }),
     targetFingerprint: receiptAudit.targetFingerprint
   }, receiptTarget);
   const selectedRoute = router.selectStrongestAdmissibleInterface(receiptContext, [receiptAudit], {
     authorizationEnvelope: receiptEnvelope,
-    targetRegistryRecord: receiptTarget
+    inventoryAuthority: receiptFixture.authority
   });
   const receipt = router.createOperationReceipt({
     operationId: 'deploy-286',
@@ -681,11 +1123,14 @@ test('receipts redact unsafe material and route lifecycle never auto-revokes', (
     authorisationEnvelope: receiptEnvelope,
     selectedRoute,
     precondition: 'passed',
+    preconditionEvidence: ['test:precondition'],
     mutationAttempted: true,
     mutationPerformed: true,
     postcondition: 'passed',
+    postconditionEvidence: ['test:postcondition'],
     rollbackAttempted: false,
     rollbackPerformed: false,
+    rollbackEvidence: ['test:rollback-not-required'],
     stableCode: 'COOLIFY_DEPLOYED',
     safeEvidenceReferences: ['digest:revision-checked'],
     supportedNextAction: 'Observe the named application health.',

@@ -26,6 +26,8 @@ Do not use a global `MCP > API > browser` ladder. A read-only MCP cannot block a
 
 Every non-read-only production operation is at least Tier 2 even when its provider-specific operation name is unfamiliar. Caller metadata and provider-specific overrides may raise the tier but can never lower this production floor. Destructive, irreversible, cross-target, or high-blast-radius evidence still raises the operation to Tier 3.
 
+Mutability is never established by a caller's `readOnly` field. Each admitted operation has one versioned canonical operation-semantics record defining mutation class, destructive/irreversible/cross-target/high-blast-radius state, environment risk floors, preconditions, postconditions, rollback or safe-disable requirements, and receipt class. The operation context, authorisation envelope, capability audit, authenticated target inventory, authenticated host plan, selected route, immediate approval, and receipt must bind the same semantics digest. Missing, unknown, stale, or conflicting semantics fail before route creation.
+
 Forbidden operations override every tier. Crossing provider, target, account/organisation, resource, environment, tier, sensitive-data class, interface restriction, or material objective scope requires a new envelope or owner decision.
 
 ## Task-Authorisation Envelope
@@ -40,6 +42,7 @@ Record:
 - objective;
 - allowed operations;
 - minimum risk tier for every allowed operation;
+- canonical operation-semantics digest for every allowed operation;
 - explicitly authorised Tier 2 operations;
 - forbidden operations;
 - expected result;
@@ -132,9 +135,11 @@ Resolve `provider + target alias + environment`. Default to one appropriately sc
 
 Never select a target from the most recently used credential, open tabs, browser history, the first environment variable, or a generic provider token. Resolve from repo/task context or ask once, then pin it in the envelope.
 
-The local registry may store sanitized target fingerprints, a current inventory generation, private-origin references, non-secret resource references, credential references (never values), installed interfaces, capability/version/schema digests, route selections, audit state, and structured receipt references. It is not a plaintext secret vault.
+The canonical local registry is `~/.ai-agent-toolkit/external-system/provider-target-registry.json`. It may store sanitized target fingerprints, a monotonic current inventory generation, private-origin references, non-secret resource references, credential references (never values), installed interfaces, authenticated complete-audit digests, canonical operation semantics, route selections, audit state, and structured receipt references. It is not a plaintext secret vault.
 
-Final mutation-capable route selection requires exactly one current registry record or validated host-adapter plan. Provider, target, account/organisation, resource, environment, target fingerprint, inventory generation and digest, installed interface, capability digest, current audit state, and supported operation must all agree. Detached or structurally valid stale audits cannot select a route, and graphical fallback has no inventory bypass.
+The router loads this registry through one bounded authority path. The file and parent must be real regular non-link topology; size and record count are bounded; exact bytes, file identity, canonical path, router version/source digest, repository, host, installation, schema, generation, and target records are verified. The loader returns a process-local authority object whose visible hashes are evidence, not forgeable authority. Raw registry records, copied JSON, and recomputed hashes are never accepted by route selection.
+
+Final route selection requires exactly one loader-produced authority or a process-local host plan derived from it. Provider, target, account/organisation, resource, environment, target fingerprint, inventory generation and digest, installed interface, complete capability-audit digest, current audit state, and canonical operation semantics must all agree. The source is revalidated immediately before route creation and receipt creation. Detached, copied, recomputed, stale, replaced, cross-installation, or rollback-generation objects fail closed, and graphical fallback has no inventory bypass.
 
 ## Secret Handling
 
@@ -149,7 +154,7 @@ Preference order:
 
 ## Capability Audit
 
-Audit per operation and record sanitized evidence for identity/version, available operation, target binding, input schema, auth/scope status without values, redaction, retry/idempotency, preconditions, postconditions, rollback, and failure semantics. An interface is not sufficient merely because it is installed or authenticated.
+Audit per operation and record sanitized evidence for identity/version, available operation, canonical semantics digest, target binding, input schema, auth/scope status without values, redaction, retry/idempotency, preconditions, postconditions, rollback, and failure semantics. The capability digest authenticates the complete audit record rather than acting as a caller-selected label. An interface is not sufficient merely because it is installed or authenticated.
 
 ## Promotion And Demotion
 
@@ -169,7 +174,7 @@ Promote or demote one verified operation only. Retain the prior route until pari
 
 ## Receipts And Continuation
 
-Write one versioned local ignored receipt per operation with one supported next action and explicit unchanged scope. Bind task-lifetime receipts to the exact task, session fingerprint, objective digest, selected current inventory, capability digest, and selected-route digest so evidence cannot cross tasks or inventory generations. Exclude raw provider responses, secrets, tokens, cookies, full environment listings, raw screenshots, private absolute paths, and customer/private payloads.
+Write one versioned local ignored receipt per operation with one supported next action and explicit unchanged scope. Receipt creation accepts only the exact process-local selected-route authority and revalidates its inventory source. Bind task-lifetime receipts to the exact task, session fingerprint, objective digest, canonical mutation and receipt classes, operation-semantics version/digest, final risk, selected-audit read/write status, authenticated inventory authority/source, capability digest, precondition/result/verification/rollback evidence, and selected-route digest. A write-capable route can never create an inspection receipt. Exclude raw provider responses, secrets, tokens, cookies, full environment listings, raw screenshots, private absolute paths, and customer/private payloads.
 
 Codex and Claude continue through named supported operations and receipts. They do not edit adapter scripts to improvise a new operation.
 

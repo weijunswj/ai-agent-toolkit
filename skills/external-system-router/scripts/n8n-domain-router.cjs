@@ -830,6 +830,7 @@ function validateExternalCapabilityReceiptAuthority(receipt, ledger) {
   const contextAllowed = new Set([
     'provider', 'targetAlias', 'accountOrOrganisation', 'resource', 'environment',
     'operation', 'targetFingerprint', 'readOnly', 'taskId', 'sessionFingerprint', 'objectiveDigest',
+    'operationSemanticsVersion', 'operationSemanticsDigest',
     'inventoryGeneration', 'inventoryDigest'
   ]);
   for (const key of Object.keys(operationContext)) {
