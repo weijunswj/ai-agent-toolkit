@@ -1,0 +1,53 @@
+{
+  "snapshot_version": "1.0.0",
+  "repository": {
+    "fixture_id": "valid-toolkit-governed-full",
+    "governance_mode": "toolkit_governed",
+    "canonical_parent_tracker": 100,
+    "policy_version": "1.0.0"
+  },
+  "issues": [
+    {
+      "id": 100,
+      "state": "open",
+      "category": "canonical_parent_tracker",
+      "body": "# Programme Tracker\n\n**Repository:** test/repo\n**Governance mode:** `toolkit-governed`\n**Policy version:** 1.0.0\n**Canonical parent tracker:** #100\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\n## Active Tasks\n\n- [ ] #101 First task — IN PROGRESS\n- [ ] #102 Second task — PLANNED\n\n## Completed Tasks\n\n- [x] #103 Done task — COMPLETE",
+      "children": [101, 102, 103],
+      "checklist_items": [
+        { "checked": false, "text": "- [ ] #101 First task — IN PROGRESS", "linked_issue": 101 },
+        { "checked": false, "text": "- [ ] #102 Second task — PLANNED", "linked_issue": 102 },
+        { "checked": true, "text": "- [x] #103 Done task — COMPLETE", "linked_issue": 103 }
+      ]
+    },
+    {
+      "id": 101,
+      "state": "open",
+      "category": "active_multi_step_child",
+      "body": "# Current status\n\nIN PROGRESS\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\nParent tracker: #100\nImplementation PR: #200\nDepends on: none\nBlocks: none\nRelated: none\n\n# Why this issue exists\n\nTo implement feature X.\n\n# Goal and scope\n\nImplement feature X completely.\n\n## Non-goals\n\n- Feature Y\n\n# Completed work\n\n- Step 1 done\n\n# Current blockers and findings\n\n- none\n\n# Remaining steps\n\n- [ ] Step 2\n- [ ] Step 3\n\n# Acceptance criteria\n\n- [ ] Feature X works\n- [ ] Tests pass\n\n# Linked PRs and follow-ups\n\n- PR #200 — open\n\n# Decisions and durable evidence\n\n- Architecture approved 2026-07-25\n\n# Safety and authority\n\nController-owned: reconciliation, acceptance, closure.\nImplementer scope: implement, report, propose text.",
+      "parent": 100,
+      "linked_prs": [{ "number": 200, "state": "open", "merged": false }],
+      "reconciliation_timestamp": "25 July 2026, 12:00 SGT",
+      "acceptance_criteria_met": false
+    },
+    {
+      "id": 102,
+      "state": "open",
+      "category": "small_atomic_child",
+      "body": "# Current status\n\nPLANNED\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\nParent tracker: #100\nImplementation PR: none yet\n\n# Why this issue exists\n\nTo fix bug Y.\n\n# Completed work\n\n- none\n\n# Blockers\n\n- none\n\n# Remaining work\n\n- [ ] Fix bug Y\n\n# Acceptance criteria\n\n- [ ] Bug Y is fixed\n\n# Linked PRs or follow-ups\n\n- none\n\n# Safety and authority\n\nController-owned: acceptance, closure.\nImplementer scope: fix, report.",
+      "parent": 100,
+      "linked_prs": [],
+      "reconciliation_timestamp": "25 July 2026, 12:00 SGT",
+      "acceptance_criteria_met": false
+    },
+    {
+      "id": 103,
+      "state": "closed",
+      "category": "complete",
+      "body": "# Current status\n\nCOMPLETE\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\nParent tracker: #100\nImplementation PR: #201\n\n# Why this issue exists\n\nTo add feature Z.\n\n# Completed work\n\n- Feature Z added\n\n# Blockers\n\n- none\n\n# Remaining work\n\n- none\n\n# Acceptance criteria\n\n- [x] Feature Z works\n- [x] Tests pass\n\n# Linked PRs or follow-ups\n\n- PR #201 — merged\n\n# Safety and authority\n\nController-owned: acceptance verified.",
+      "parent": 100,
+      "linked_prs": [{ "number": 201, "state": "merged", "merged": true }],
+      "reconciliation_timestamp": "25 July 2026, 12:00 SGT",
+      "acceptance_criteria_met": true
+    }
+  ]
+}

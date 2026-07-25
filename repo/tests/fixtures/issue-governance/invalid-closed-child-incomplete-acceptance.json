@@ -1,0 +1,29 @@
+{
+  "snapshot_version": "1.0.0",
+  "repository": {
+    "fixture_id": "invalid-closed-child-incomplete-acceptance",
+    "governance_mode": "toolkit_governed",
+    "canonical_parent_tracker": 1600,
+    "policy_version": "1.0.0"
+  },
+  "issues": [
+    {
+      "id": 1600,
+      "state": "open",
+      "category": "canonical_parent_tracker",
+      "body": "# Programme Tracker\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\n- [x] #1601 Task\n",
+      "children": [1601],
+      "checklist_items": [
+        { "checked": true, "text": "- [x] #1601 Task", "linked_issue": 1601 }
+      ]
+    },
+    {
+      "id": 1601,
+      "state": "closed",
+      "category": "complete",
+      "body": "# Current status\n\nCLOSED\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\nParent tracker: #1600\n\n# Why this issue exists\n\nTo do something.\n\n# Completed work\n\n- Done\n\n# Blockers\n\n- none\n\n# Remaining work\n\n- none\n\n# Acceptance criteria\n\n- [ ] Not checked\n\n# Linked PRs or follow-ups\n\n- none\n\n# Safety and authority\n\nController-owned.",
+      "parent": 1600,
+      "acceptance_criteria_met": false
+    }
+  ]
+}

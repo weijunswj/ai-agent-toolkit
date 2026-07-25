@@ -25,6 +25,7 @@ Use the skill name, description, and local files to decide whether a skill appli
 | `windows-localhost-workflows` | Starting, relaunching, verifying, or troubleshooting localhost development workflows on Windows. |
 | `knowledge-index-updater` | Creating or updating a Notion/GitHub knowledge index, merging duplicates, categorising entries, maintaining stable source keys, or scheduling index checks. |
 | `ui-ux-secure-frontend-design` | Creating, reviewing, or improving frontend interfaces, design systems, landing pages, SaaS dashboards, forms, components, accessibility, responsive polish, privacy-safe UX, or implementation quality. |
+| `issue-governance` | Issue governance policy, issue templates, parent/child tracker structure, reconciliation timestamps, controller-vs-implementer authority, governance modes, issue snapshot validation, or advisory audits. Not for ordinary issue triage or live GitHub mutation. |
 
 ## Intentionally Omitted Skills
 

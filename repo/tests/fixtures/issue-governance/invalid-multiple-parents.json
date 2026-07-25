@@ -1,0 +1,26 @@
+{
+  "snapshot_version": "1.0.0",
+  "repository": {
+    "fixture_id": "invalid-multiple-parents",
+    "governance_mode": "toolkit_governed",
+    "policy_version": "1.0.0"
+  },
+  "issues": [
+    {
+      "id": 300,
+      "state": "open",
+      "category": "canonical_parent_tracker",
+      "body": "# Programme Tracker A\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n",
+      "children": [],
+      "checklist_items": []
+    },
+    {
+      "id": 301,
+      "state": "open",
+      "category": "canonical_parent_tracker",
+      "body": "# Programme Tracker B\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n",
+      "children": [],
+      "checklist_items": []
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "snapshot_version": "1.0.0",
+  "repository": {
+    "fixture_id": "valid-repository-native",
+    "governance_mode": "repository_native",
+    "policy_version": "1.0.0"
+  },
+  "issues": [
+    {
+      "id": 1,
+      "state": "open",
+      "category": "active_multi_step_child",
+      "body": "Some body without governance sections.",
+      "parent": null
+    }
+  ]
+}

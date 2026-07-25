@@ -1,0 +1,19 @@
+{
+  "snapshot_version": "1.0.0",
+  "repository": {
+    "fixture_id": "invalid-drift-policy-version",
+    "governance_mode": "toolkit_governed",
+    "canonical_parent_tracker": 1700,
+    "policy_version": "2.0.0"
+  },
+  "issues": [
+    {
+      "id": 1700,
+      "state": "open",
+      "category": "canonical_parent_tracker",
+      "body": "# Programme Tracker\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n",
+      "children": [],
+      "checklist_items": []
+    }
+  ]
+}

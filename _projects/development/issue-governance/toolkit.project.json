@@ -1,0 +1,97 @@
+{
+  "id": "development.issue-governance",
+  "category": "development",
+  "name": "issue-governance",
+  "title": "Issue Governance",
+  "module_path": "_projects/development/issue-governance",
+  "main_path": "_projects/development/issue-governance/_main",
+  "version": "1.0.0",
+  "version_policy": "semver",
+  "version_notes": "Initial first-party global issue-governance standard with policy, templates, snapshot schema, and advisory audit.",
+  "outputs": [
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/issue-governance/README.md",
+      "output": "skills/issue-governance/README.md",
+      "notes": "Issue governance skill README generated from first-party curated source.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/issue-governance/SKILL.md",
+      "output": "skills/issue-governance/SKILL.md",
+      "notes": "Issue governance skill entrypoint generated from first-party curated source.",
+      "fidelity": "reviewed_entrypoint"
+    },
+    {
+      "kind": "curated",
+      "source": "curated_output_for_ai/skills/issue-governance/agents/openai.yaml",
+      "output": "skills/issue-governance/agents/openai.yaml",
+      "notes": "OpenAI-facing metadata for the issue governance skill.",
+      "fidelity": "generated_metadata"
+    }
+  ],
+  "writes": {
+    "allowed": [
+      "skills/issue-governance/README.md",
+      "skills/issue-governance/SKILL.md",
+      "skills/issue-governance/agents/openai.yaml"
+    ],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "**/*.live-export.json",
+      "**/*.live-import.json",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false,
+  "skill_creation_review": {
+    "existing_skill_review": "Reviewed current skills and modules before adding issue-governance: ai-coding-agent-rules for baseline repo execution and portable playbooks, context-preserving-ai-publisher for generated-surface discipline, project-completion-audit for final readiness audits, toolkit-setup for toolkit plugin setup, README skill tables, toolkit skill routing source, and the skill safety matrix. No existing skill owns the global issue-governance standard, lean-parent/comprehensive-child templates, local snapshot schema, or deterministic advisory audit.",
+    "trigger": "Use issue-governance when the task involves issue governance policy, issue templates, parent/child tracker structure, reconciliation timestamps, controller-vs-implementer authority, governance modes, issue snapshot validation, or advisory audits. Do not use it for ordinary issue triage, live issue mutation, or GitHub API writes.",
+    "decision": "new_project_skill",
+    "decision_reason": "The trigger is a global governance standard with policy metadata, templates, schema, and audit logic. It has a distinct trigger, safety boundary, and validation path that does not fit any existing skill.",
+    "unique_value": "Provides the canonical Toolkit issue-governance policy, machine-readable templates, deterministic snapshot schema, stable finding codes, and read-only advisory audit for governed repositories.",
+    "runtime_footprint": "SKILL.md stays instruction-only and compact. Policy, templates, and schema are loaded on demand. No heavy runtime dependencies.",
+    "local_assets": "Policy JSON, templates, snapshot schema, and audit documentation. No external dependencies.",
+    "output_contract": "Return a structured advisory audit with stable finding codes, human-readable or JSON output, and explicit exit codes.",
+    "anti_bloat_review": "The skill is focused on governance policy and audit. It does not contain generic issue-triage advice or model-common knowledge.",
+    "safety_boundary": "Read-only audit only. Never mutates issues, ticks checkboxes, closes/reopens issues, or writes to GitHub. No credentials or network access required.",
+    "source_provenance": "first_party",
+    "third_party_audit": "not_applicable_first_party; no third-party text, scanner output, browser artifacts, code, or vendor docs copied or adapted.",
+    "publisher_workflow": "context-preserving-ai-publisher source-to-surface workflow with first-party _main source, curated skill outputs, deterministic copy outputs, toolkit skill routing update, README table update, safety matrix update, sync, and validation.",
+    "routing": "issue-governance is routed for issue governance policy, issue templates, parent/child tracker structure, reconciliation timestamps, controller-vs-implementer authority, governance modes, issue snapshot validation, and advisory audits. It is intentionally not routed for ordinary issue triage or live GitHub mutation.",
+    "validation": [
+      "node repo/scripts/sync-toolkit-projects.cjs --write",
+      "node repo/scripts/sync-toolkit-projects.cjs --check",
+      "node repo/scripts/audit-published-surfaces.cjs --check",
+      "node --test repo/tests/issue-governance.test.cjs",
+      "node repo/scripts/validate-toolkit.cjs"
+    ]
+  },
+  "project": {
+    "name": "Issue Governance",
+    "category": "development",
+    "summary": "Toolkit global issue-governance standard with policy metadata, lean-parent/comprehensive-child templates, local snapshot schema, and deterministic advisory audit."
+  },
+  "surface": {
+    "publish_as": "skill",
+    "skill": {
+      "status": "published",
+      "path": "skills/issue-governance",
+      "summary": "Toolkit global issue-governance standard with policy metadata, templates, snapshot schema, and advisory audit."
+    },
+    "mcp": {
+      "status": "not_applicable"
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "snapshot_version": "1.0.0",
+  "repository": {
+    "fixture_id": "invalid-checked-parent-incomplete-child",
+    "governance_mode": "toolkit_governed",
+    "canonical_parent_tracker": 400,
+    "policy_version": "1.0.0"
+  },
+  "issues": [
+    {
+      "id": 400,
+      "state": "open",
+      "category": "canonical_parent_tracker",
+      "body": "# Programme Tracker\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\n- [x] #401 Task — DONE\n",
+      "children": [401],
+      "checklist_items": [
+        { "checked": true, "text": "- [x] #401 Task — DONE", "linked_issue": 401 }
+      ]
+    },
+    {
+      "id": 401,
+      "state": "open",
+      "category": "active_multi_step_child",
+      "body": "# Current status\n\nIN PROGRESS\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\nParent tracker: #400\n\n# Why this issue exists\n\nTo do something.\n\n# Goal and scope\n\nDo something.\n\n# Completed work\n\n- none\n\n# Current blockers and findings\n\n- none\n\n# Remaining steps\n\n- [ ] Do it\n\n# Acceptance criteria\n\n- [ ] Not yet done\n\n# Linked PRs and follow-ups\n\n- none\n\n# Decisions and durable evidence\n\n- none\n\n# Safety and authority\n\nController-owned.",
+      "parent": 400,
+      "acceptance_criteria_met": false
+    }
+  ]
+}

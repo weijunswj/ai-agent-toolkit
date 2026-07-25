@@ -1,0 +1,28 @@
+{
+  "snapshot_version": "1.0.0",
+  "repository": {
+    "fixture_id": "invalid-missing-why",
+    "governance_mode": "toolkit_governed",
+    "canonical_parent_tracker": 900,
+    "policy_version": "1.0.0"
+  },
+  "issues": [
+    {
+      "id": 900,
+      "state": "open",
+      "category": "canonical_parent_tracker",
+      "body": "# Programme Tracker\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\n- [ ] #901 Task\n",
+      "children": [901],
+      "checklist_items": [
+        { "checked": false, "text": "- [ ] #901 Task", "linked_issue": 901 }
+      ]
+    },
+    {
+      "id": 901,
+      "state": "open",
+      "category": "active_multi_step_child",
+      "body": "# Current status\n\nIN PROGRESS\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\nParent tracker: #900\n\n# Goal and scope\n\nDo something.\n\n# Completed work\n\n- none\n\n# Current blockers and findings\n\n- none\n\n# Remaining steps\n\n- [ ] Do it\n\n# Acceptance criteria\n\n- [ ] Done\n\n# Linked PRs and follow-ups\n\n- none\n\n# Decisions and durable evidence\n\n- none\n\n# Safety and authority\n\nController-owned.",
+      "parent": 900
+    }
+  ]
+}

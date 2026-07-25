@@ -1,0 +1,11 @@
+{
+  "source_repo": "weijunswj/ai-agent-toolkit",
+  "source_ref": "first-party-authored",
+  "source_commit": "35e2dba4e3361ec818c5e1db5986b598ff40acdc",
+  "source_lifecycle": "retired_after_migration",
+  "source_role": "migration_provenance_only",
+  "source_update_policy": "none",
+  "public_attribution_required": false,
+  "notes": "First-party toolkit-authored source for issue-governance. No third-party source files, scanner outputs, browser artifacts, deployment logs, or vendor docs are copied or adapted. Local provenance is documented in SOURCE-MANIFEST.md.",
+  "files": []
+}

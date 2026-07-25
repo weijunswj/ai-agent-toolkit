@@ -1,0 +1,9 @@
+{
+  "snapshot_version": "1.0.0",
+  "repository": {
+    "fixture_id": "valid-unknown-mode",
+    "governance_mode": "unknown",
+    "policy_version": "1.0.0"
+  },
+  "issues": []
+}

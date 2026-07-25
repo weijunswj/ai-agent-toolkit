@@ -82,6 +82,7 @@ Open a project when you need maintained source, provenance, or the owner behind 
 | [Self-Hosted Service Safety](_projects/development/self-hosted-service-safety/) | Lightweight non-n8n Docker/VPS, public exposure, credential, backup, SSH, traffic-log, and first-run safety-review skill source. | [_main/](_projects/development/self-hosted-service-safety/_main/) |
 | [Windows Localhost Workflows](_projects/development/windows-localhost-workflows/) | Windows localhost dev-server verification skill source. | [_main/](_projects/development/windows-localhost-workflows/_main/) |
 | [Knowledge Index Updater](_projects/knowledge/knowledge-index-updater/) | Notion/GitHub knowledge-index skill source. | [_main/](_projects/knowledge/knowledge-index-updater/_main/) |
+| [Issue Governance](_projects/development/issue-governance/) | Toolkit global issue-governance standard with policy metadata, templates, snapshot schema, and advisory audit. | [_main/](_projects/development/issue-governance/_main/) |
 
 ## Skills
 
@@ -106,6 +107,7 @@ Skills are copyable folder packages. The portable package unit is `skills/<skill
 | [Secure UI/UX Frontend Design](skills/ui-ux-secure-frontend-design/) | Design or review frontend work with accessibility, responsive, privacy, and security guardrails. |
 | [Windows Localhost Workflows](skills/windows-localhost-workflows/) | Start and verify Windows localhost dev services. |
 | [Knowledge Index Updater](skills/knowledge-index-updater/) | Maintain a Notion/GitHub knowledge index with stable source keys and no duplicate rows. |
+| [Issue Governance](skills/issue-governance/) | Toolkit global issue-governance standard with policy metadata, templates, snapshot schema, and advisory audit for governed repositories. |
 
 ## Install Skills By Platform
 

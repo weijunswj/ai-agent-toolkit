@@ -1,0 +1,10 @@
+name: issue-governance
+description: >-
+  Use when working with issue governance policy, issue templates,
+  parent/child tracker structure, reconciliation timestamps,
+  controller-vs-implementer authority, governance modes,
+  issue snapshot validation, or advisory audits.
+metadata:
+  platform: openai
+  skill_version: "1.0.0"
+  allow_implicit_invocation: false
