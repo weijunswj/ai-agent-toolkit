@@ -4,7 +4,7 @@
     "fixture_id": "invalid-pr-merge-completion",
     "governance_mode": "toolkit_governed",
     "canonical_parent_tracker": 1100,
-    "policy_version": "1.0.0"
+    "policy_version": "1.1.0"
   },
   "issues": [
     {

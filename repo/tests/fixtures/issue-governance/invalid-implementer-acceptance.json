@@ -4,7 +4,7 @@
     "fixture_id": "invalid-implementer-acceptance",
     "governance_mode": "toolkit_governed",
     "canonical_parent_tracker": 1200,
-    "policy_version": "1.0.0"
+    "policy_version": "1.1.0"
   },
   "issues": [
     {

@@ -1,0 +1,17 @@
+{
+  "snapshot_version": "1.0.0",
+  "repository": { "fixture_id": "adversarial-fabricated", "governance_mode": "toolkit_governed", "canonical_parent_tracker": 2000, "policy_version": "1.1.0" },
+  "issues": [
+    {
+      "id": 2000, "state": "open", "category": "canonical_parent_tracker",
+      "body": "# Programme Tracker\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\n- [ ] #2001 Task — pending\n",
+      "children": [2001],
+      "checklist_items": [{ "checked": true, "text": "- [x] #2001 Task — DONE", "linked_issue": 2001 }]
+    },
+    {
+      "id": 2001, "state": "open", "category": "active_multi_step_child",
+      "body": "# Current status\n\nIN PROGRESS\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\nParent tracker: #2000\nImplementation PR: #2010\n\n# Why this issue exists\n\nTo do something.\n\n# Goal and scope\n\nDo something.\n\n# Completed work\n\n- none\n\n# Current blockers and findings\n\n- none\n\n# Remaining steps\n\n- [ ] Do it\n\n# Acceptance criteria\n\n- [ ] Not done\n\n# Linked PRs and follow-ups\n\n- none\n\n# Decisions and durable evidence\n\n- none\n\n# Safety and authority\n\nController-owned.",
+      "parent": 2000, "reconciliation_timestamp": "25 July 2026, 12:00 SGT", "acceptance_criteria_met": true
+    }
+  ]
+}

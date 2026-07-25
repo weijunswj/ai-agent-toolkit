@@ -3,7 +3,7 @@
   "repository": {
     "fixture_id": "valid-unknown-mode",
     "governance_mode": "unknown",
-    "policy_version": "1.0.0"
+    "policy_version": "1.1.0"
   },
   "issues": []
 }

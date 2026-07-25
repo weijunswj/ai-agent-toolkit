@@ -2,26 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/weijunswj/ai-agent-toolkit/schemas/issue-snapshot.schema.json",
   "title": "Issue Governance Snapshot",
-  "description": "Deterministic local snapshot of repository issue state for advisory audit. No credentials or network access required. Input is never mutated.",
+  "description": "Deterministic local snapshot of repository issue state for advisory audit.",
   "type": "object",
   "required": ["snapshot_version", "repository", "issues"],
   "additionalProperties": false,
   "properties": {
-    "snapshot_version": {
-      "type": "string",
-      "const": "1.0.0",
-      "description": "Schema version. Must be 1.0.0 for this schema."
-    },
-    "repository": {
-      "$ref": "#/$defs/repository_metadata"
-    },
-    "issues": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/issue_record"
-      },
-      "description": "All issues in the snapshot."
-    }
+    "snapshot_version": { "type": "string", "const": "1.0.0" },
+    "repository": { "$ref": "#/$defs/repository_metadata" },
+    "issues": { "type": "array", "items": { "$ref": "#/$defs/issue_record" } }
   },
   "$defs": {
     "repository_metadata": {
@@ -29,23 +17,10 @@
       "required": ["governance_mode"],
       "additionalProperties": false,
       "properties": {
-        "fixture_id": {
-          "type": "string",
-          "description": "Opaque repository fixture identifier for deterministic testing."
-        },
-        "governance_mode": {
-          "type": "string",
-          "enum": ["toolkit_governed", "repository_native", "unknown"],
-          "description": "Governance mode for this repository."
-        },
-        "canonical_parent_tracker": {
-          "type": ["integer", "string"],
-          "description": "Declared canonical parent issue number or opaque fixture identifier. Required when governance_mode is toolkit_governed."
-        },
-        "policy_version": {
-          "type": "string",
-          "description": "Declared policy version, e.g. 1.0.0."
-        }
+        "fixture_id": { "type": "string" },
+        "governance_mode": { "type": "string", "enum": ["toolkit_governed", "repository_native", "unknown"] },
+        "canonical_parent_tracker": { "type": ["integer", "string"] },
+        "policy_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" }
       }
     },
     "issue_record": {
@@ -53,89 +28,20 @@
       "required": ["id", "state", "category", "body"],
       "additionalProperties": false,
       "properties": {
-        "id": {
-          "type": ["integer", "string"],
-          "description": "Issue number or opaque fixture identifier."
-        },
-        "state": {
-          "type": "string",
-          "enum": ["open", "closed"],
-          "description": "Issue state."
-        },
-        "category": {
-          "type": "string",
-          "enum": [
-            "canonical_parent_tracker",
-            "active_multi_step_child",
-            "small_atomic_child",
-            "recurring_evidence_log",
-            "superseded_duplicate_not_planned",
-            "complete"
-          ],
-          "description": "Issue category."
-        },
-        "body": {
-          "type": "string",
-          "description": "Issue body text."
-        },
-        "parent": {
-          "type": ["integer", "string", "null"],
-          "description": "Parent issue number or identifier. Null if none."
-        },
-        "children": {
-          "type": "array",
-          "items": {
-            "type": ["integer", "string"]
-          },
-          "description": "Linked child issue numbers or identifiers."
-        },
-        "linked_prs": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["number"],
-            "additionalProperties": false,
-            "properties": {
-              "number": {
-                "type": ["integer", "string"],
-                "description": "PR number or identifier."
-              },
-              "state": {
-                "type": "string",
-                "enum": ["open", "closed", "merged"],
-                "description": "PR state."
-              },
-              "merged": {
-                "type": "boolean",
-                "description": "Whether the PR is merged."
-              }
-            }
-          },
-          "description": "Linked PR metadata."
-        },
-        "reconciliation_timestamp": {
-          "type": ["string", "null"],
-          "description": "Parsed reconciliation timestamp from body, if present."
-        },
-        "acceptance_criteria_met": {
-          "type": ["boolean", "null"],
-          "description": "Whether all acceptance criteria are checked. Null if not determinable."
-        },
-        "checklist_items": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/checklist_item"
-          },
-          "description": "Parsed checklist items from parent tracker body."
-        },
-        "successor": {
-          "type": ["integer", "string", "null"],
-          "description": "Successor issue for superseded/duplicate/not-planned issues."
-        },
-        "reason": {
-          "type": ["string", "null"],
-          "description": "Reason for superseded/duplicate/not-planned issues."
-        }
+        "id": { "type": ["integer", "string"] },
+        "state": { "type": "string", "enum": ["open", "closed"] },
+        "category": { "type": "string", "enum": ["canonical_parent_tracker", "active_multi_step_child", "small_atomic_child", "recurring_evidence_log", "superseded_duplicate_not_planned", "complete"] },
+        "body": { "type": "string", "minLength": 1 },
+        "parent": { "type": ["integer", "string", "null"] },
+        "children": { "type": "array", "items": { "type": ["integer", "string"] }, "uniqueItems": true },
+        "linked_prs": { "type": "array", "items": { "type": "object", "required": ["number"], "additionalProperties": false, "properties": { "number": { "type": ["integer", "string"] }, "state": { "type": "string", "enum": ["open", "closed", "merged"] }, "merged": { "type": "boolean" } } } },
+        "implementation_branch": { "type": ["string", "null"] },
+        "implementation_prs": { "type": "array", "items": { "type": "object", "required": ["number", "state"], "additionalProperties": false, "properties": { "number": { "type": ["integer", "string"] }, "state": { "type": "string", "enum": ["open", "closed", "merged"] }, "is_replacement": { "type": "boolean" }, "replacement_reason": { "type": ["string", "null"] }, "supersedes_pr": { "type": ["integer", "string", "null"] } } } },
+        "reconciliation_timestamp": { "type": ["string", "null"] },
+        "acceptance_criteria_met": { "type": ["boolean", "null"] },
+        "checklist_items": { "type": "array", "items": { "$ref": "#/$defs/checklist_item" } },
+        "successor": { "type": ["integer", "string", "null"] },
+        "reason": { "type": ["string", "null"] }
       }
     },
     "checklist_item": {
@@ -143,18 +49,9 @@
       "required": ["checked", "text"],
       "additionalProperties": false,
       "properties": {
-        "checked": {
-          "type": "boolean",
-          "description": "Whether the checkbox is ticked."
-        },
-        "text": {
-          "type": "string",
-          "description": "Full text of the checklist line."
-        },
-        "linked_issue": {
-          "type": ["integer", "string", "null"],
-          "description": "Parsed linked issue number from the checklist line."
-        }
+        "checked": { "type": "boolean" },
+        "text": { "type": "string" },
+        "linked_issue": { "type": ["integer", "string", "null"] }
       }
     }
   }

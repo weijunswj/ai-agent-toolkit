@@ -3,7 +3,7 @@
   "repository": {
     "fixture_id": "invalid-multiple-parents",
     "governance_mode": "toolkit_governed",
-    "policy_version": "1.0.0"
+    "policy_version": "1.1.0"
   },
   "issues": [
     {

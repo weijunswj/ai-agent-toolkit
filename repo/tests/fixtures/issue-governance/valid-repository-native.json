@@ -3,7 +3,7 @@
   "repository": {
     "fixture_id": "valid-repository-native",
     "governance_mode": "repository_native",
-    "policy_version": "1.0.0"
+    "policy_version": "1.1.0"
   },
   "issues": [
     {

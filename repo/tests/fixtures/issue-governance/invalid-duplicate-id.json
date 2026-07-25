@@ -1,0 +1,9 @@
+{
+  "snapshot_version": "1.0.0",
+  "repository": { "fixture_id": "invalid-duplicate-id", "governance_mode": "toolkit_governed", "canonical_parent_tracker": 2500, "policy_version": "1.1.0" },
+  "issues": [
+    { "id": 2500, "state": "open", "category": "canonical_parent_tracker", "body": "# Tracker\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\n- [ ] #2501 A\n", "children": [2501] },
+    { "id": 2501, "state": "open", "category": "active_multi_step_child", "body": "# Current status\n\nX\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\nParent tracker: #2500\nImplementation PR: #2510\n\n# Why this issue exists\n\nY\n\n# Goal and scope\n\nZ\n\n# Completed work\n\n- n\n\n# Current blockers and findings\n\n- n\n\n# Remaining steps\n\n- [ ] s\n\n# Acceptance criteria\n\n- [ ] a\n\n# Linked PRs and follow-ups\n\n- n\n\n# Decisions and durable evidence\n\n- n\n\n# Safety and authority\n\nC", "parent": 2500 },
+    { "id": 2501, "state": "open", "category": "small_atomic_child", "body": "# Current status\n\nX\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\nParent tracker: #2500\n\n# Why this issue exists\n\nY\n\n# Completed work\n\n- n\n\n# Blockers\n\n- n\n\n# Remaining work\n\n- [ ] s\n\n# Acceptance criteria\n\n- [ ] a\n\n# Linked PRs or follow-ups\n\n- n\n\n# Safety and authority\n\nC", "parent": 2500 }
+  ]
+}

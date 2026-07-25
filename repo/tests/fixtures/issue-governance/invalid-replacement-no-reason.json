@@ -1,0 +1,17 @@
+{
+  "snapshot_version": "1.0.0",
+  "repository": { "fixture_id": "invalid-replacement-no-reason", "governance_mode": "toolkit_governed", "canonical_parent_tracker": 2300, "policy_version": "1.1.0" },
+  "issues": [
+    {
+      "id": 2300, "state": "open", "category": "canonical_parent_tracker",
+      "body": "# Programme Tracker\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\n- [ ] #2301 Task\n",
+      "children": [2301]
+    },
+    {
+      "id": 2301, "state": "open", "category": "active_multi_step_child",
+      "body": "# Current status\n\nIN PROGRESS\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\nParent tracker: #2300\nImplementation PR: #2311\n\n# Why this issue exists\n\nTo do something.\n\n# Goal and scope\n\nDo something.\n\n# Completed work\n\n- none\n\n# Current blockers and findings\n\n- none\n\n# Remaining steps\n\n- [ ] Do it\n\n# Acceptance criteria\n\n- [ ] Done\n\n# Linked PRs and follow-ups\n\n- none\n\n# Decisions and durable evidence\n\n- none\n\n# Safety and authority\n\nController-owned.",
+      "parent": 2300,
+      "implementation_prs": [{ "number": 2311, "state": "open", "is_replacement": true, "supersedes_pr": 2310 }]
+    }
+  ]
+}

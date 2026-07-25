@@ -84,6 +84,17 @@ Small atomic tasks may use a shorter template but must retain:
 - Declare their own implementation accepted.
 - Resolve review findings.
 
+## Implementation PR Lifecycle
+
+One implementation issue maps to one implementation branch and one active implementation PR.
+
+- Amendments remain on the same PR.
+- Replacement PRs require a recorded exceptional reason and explicit supersession.
+- Body and structured implementation-PR metadata must agree.
+- Research, architecture-only and recurring-evidence issues are not required to have implementation PRs.
+
+The audit detects: multiple active implementation PRs, replacement PRs without reasons, and contradictory derived fields.
+
 ## Governance Modes
 
 | Mode | Description |
@@ -96,8 +107,17 @@ Small atomic tasks may use a shorter template but must retain:
 
 The canonical policy is versioned using semver (`MAJOR.MINOR.PATCH`).
 
-- Current version: `1.0.0`
+- Current version: `1.1.0`
 - Source: `_projects/development/issue-governance/_main/policy/issue-governance-policy.json`
+
+## Canonical Runtime Authority
+
+The canonical policy and JSON schema are the production authority:
+
+- Finding codes, governance modes, and required sections are loaded from the canonical policy JSON.
+- Input validation enforces the canonical schema's `additionalProperties`, type, and structural constraints.
+- Body content is the truth; structured derived fields are recomputed from or consistency-checked against the body.
+- The audit script never hardcodes policy data that exists in the canonical sources.
 
 ## Reconciliation Timestamp
 
@@ -162,7 +182,14 @@ node repo/scripts/audit-issue-governance.cjs --input <snapshot.json> --format hu
 | GOV017 | warning | superseded/duplicate/not-planned issue without a reason or successor |
 | GOV018 | error | body or fixture explicitly treats PR merge as sufficient completion |
 | GOV019 | error | implementer record or fixture claims independent acceptance without controller authority |
-| GOV020 | warning | policy-version or generated-surface drift |
+| GOV020 | warning | policy version drift between snapshot and canonical policy |
+| GOV021 | warning | unknown governance mode requires selection |
+| GOV022 | error | multiple active implementation PRs for one issue |
+| GOV023 | error | implementation branch and body metadata disagree |
+| GOV024 | error | replacement PR without recorded exceptional reason |
+| GOV025 | error | duplicate issue ID |
+| GOV026 | error | canonical parent identifier points to missing or non-parent issue |
+| GOV027 | error | structured derived field contradicts body content |
 
 ## Source / Generated Ownership
 

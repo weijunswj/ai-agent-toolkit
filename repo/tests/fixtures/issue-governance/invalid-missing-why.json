@@ -4,7 +4,7 @@
     "fixture_id": "invalid-missing-why",
     "governance_mode": "toolkit_governed",
     "canonical_parent_tracker": 900,
-    "policy_version": "1.0.0"
+    "policy_version": "1.1.0"
   },
   "issues": [
     {

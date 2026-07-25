@@ -1,23 +1,23 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "policy_id": "toolkit-issue-governance",
-  "policy_version": "1.0.0",
+  "policy_version": "1.1.0",
   "policy_version_policy": "semver",
   "title": "Toolkit Global Issue-Governance Standard",
-  "description": "Canonical machine-readable policy for Toolkit-governed repository issue tracking. Defines the lean-parent/comprehensive-child model, controller-versus-implementer authority, reconciliation timestamp contract, governance modes, and advisory audit rules.",
+  "description": "Canonical machine-readable policy for Toolkit-governed repository issue tracking.",
   "effective_date": "2026-07-25",
   "authority": "Issue #299 — TK-032",
   "governance_modes": {
     "toolkit_governed": {
-      "description": "The global standard applies. Versioned templates and audit assets may be distributed after explicit governance consent.",
+      "description": "The global standard applies.",
       "enforcement": "advisory_audit"
     },
     "repository_native": {
-      "description": "The repository's own issue process remains authoritative. Toolkit must not overwrite or impose its structure.",
+      "description": "The repository's own issue process remains authoritative.",
       "enforcement": "none"
     },
     "unknown": {
-      "description": "Governance mode must be selected. Toolkit must not silently install or enforce the standard.",
+      "description": "Governance mode must be selected.",
       "enforcement": "report_only"
     }
   },
@@ -29,50 +29,27 @@
     },
     "active_multi_step_child": {
       "description": "Full comprehensive standard for material tasks.",
+      "is_implementation_work": true,
       "required_sections": [
-        "current_status",
-        "reconciliation_timestamp",
-        "parent_tracker",
-        "implementation_pr",
-        "dependencies_blockers_related",
-        "why_this_issue_exists",
-        "goal_and_scope",
-        "completed_work",
-        "current_blockers_and_findings",
-        "remaining_steps",
-        "acceptance_criteria",
-        "linked_prs_and_followups",
-        "decisions_and_durable_evidence",
-        "safety_and_authority"
+        "current_status", "reconciliation_timestamp", "parent_tracker",
+        "implementation_pr", "dependencies", "blockers", "related_work",
+        "why_this_issue_exists", "goal_and_scope", "completed_work",
+        "current_blockers_and_findings", "remaining_steps", "acceptance_criteria",
+        "linked_prs_and_followups", "decisions_and_durable_evidence", "safety_and_authority"
       ]
     },
     "small_atomic_child": {
       "description": "Reduced standard for small tasks.",
+      "is_implementation_work": true,
       "required_sections": [
-        "current_status",
-        "reconciliation_timestamp",
-        "parent_link",
-        "why_this_issue_exists",
-        "completed_work",
-        "blockers",
-        "remaining_work",
-        "acceptance_criteria",
-        "linked_prs_or_followups",
-        "safety_and_authority"
+        "current_status", "reconciliation_timestamp", "parent_link",
+        "why_this_issue_exists", "completed_work", "blockers",
+        "remaining_work", "acceptance_criteria", "linked_prs_or_followups", "safety_and_authority"
       ]
     },
-    "recurring_evidence_log": {
-      "description": "Latest verdict first with bounded historical evidence."
-    },
-    "superseded_duplicate_not_planned": {
-      "description": "Reason and successor recorded before closure.",
-      "required_sections": [
-        "reason_or_successor"
-      ]
-    },
-    "complete": {
-      "description": "Acceptance and linked follow-ups independently verified."
-    }
+    "recurring_evidence_log": { "description": "Latest verdict first with bounded historical evidence.", "is_implementation_work": false },
+    "superseded_duplicate_not_planned": { "description": "Reason and successor recorded before closure.", "is_implementation_work": false },
+    "complete": { "description": "Acceptance and linked follow-ups independently verified.", "is_implementation_work": false }
   },
   "reconciliation_timestamp": {
     "format": "Last reconciled: **DD Month YYYY, HH:mm SGT**",
@@ -84,55 +61,35 @@
       "Replace the previous timestamp rather than stacking.",
       "Advance only after substantive reconciliation.",
       "Comments and GitHub edit history preserve chronology."
-    ],
-    "pattern": "^Last reconciled: \\*\\*\\d{1,2} [A-Z][a-z]+ \\d{4}, \\d{2}:\\d{2} SGT\\*\\*$"
+    ]
   },
   "authority_model": {
     "web_controller_default": [
-      "issue_body_reconciliation",
-      "parent_status_changes",
-      "parent_checklist_completion",
-      "acceptance_decisions",
-      "closure_or_reopening",
-      "successor_decisions",
+      "issue_body_reconciliation", "parent_status_changes", "parent_checklist_completion",
+      "acceptance_decisions", "closure_or_reopening", "successor_decisions",
       "verification_that_review_findings_resolved"
     ],
     "coding_agent_default": [
-      "read_parent_and_child_issues",
-      "implement_scoped_repository_task",
-      "report_exact_evidence",
-      "propose_clean_replacement_text",
+      "read_parent_and_child_issues", "implement_scoped_repository_task",
+      "report_exact_evidence", "propose_clean_replacement_text",
       "propose_concise_parent_status_line_update"
     ],
     "coding_agent_prohibited": [
-      "rewrite_live_issue",
-      "tick_parent_checklist_item",
-      "mark_acceptance_criteria_independently_verified",
-      "change_reconciliation_timestamp",
-      "close_or_reopen_issue",
-      "declare_own_implementation_accepted",
-      "resolve_review_findings",
-      "modify_tracker_issues"
+      "rewrite_live_issue", "tick_parent_checklist_item",
+      "mark_acceptance_criteria_independently_verified", "change_reconciliation_timestamp",
+      "close_or_reopen_issue", "declare_own_implementation_accepted",
+      "resolve_review_findings", "modify_tracker_issues"
     ]
   },
-  "parent_tracker_contract": {
-    "description": "One lean canonical parent tracker per governed repository.",
-    "line_format": "- [ ] #<number> Short task title — compact current status",
-    "line_components": [
-      "checkbox",
-      "linked_child_issue",
-      "short_task_title",
-      "compact_status",
-      "optional_active_pr_or_blocker"
-    ],
-    "bidirectional_links": true
-  },
-  "child_issue_contract": {
-    "bidirectional_links": true,
-    "requires_parent_link": true,
-    "requires_acceptance_criteria": true,
-    "requires_why_section": true,
-    "pr_merge_not_completion": true
+  "implementation_pr_lifecycle": {
+    "description": "One issue, one branch, one active implementation PR.",
+    "rules": [
+      "One implementation issue maps to one branch and one active implementation PR.",
+      "Amendments remain on the same PR.",
+      "Replacement PRs require recorded exceptional reason and explicit supersession.",
+      "Body and structured implementation-PR metadata must agree.",
+      "Research, architecture-only and recurring-evidence issues are not required to have implementation PRs."
+    ]
   },
   "finding_codes": {
     "GOV001": "toolkit_governed_no_canonical_parent",
@@ -154,11 +111,14 @@
     "GOV017": "superseded_no_reason_or_successor",
     "GOV018": "pr_merge_treated_as_completion",
     "GOV019": "implementer_claims_independent_acceptance",
-    "GOV020": "policy_version_or_surface_drift"
+    "GOV020": "policy_version_drift",
+    "GOV021": "unknown_governance_mode_requires_selection",
+    "GOV022": "multiple_active_implementation_prs",
+    "GOV023": "implementation_branch_body_metadata_disagree",
+    "GOV024": "replacement_pr_without_reason",
+    "GOV025": "duplicate_issue_id",
+    "GOV026": "canonical_parent_not_found_or_not_parent",
+    "GOV027": "contradictory_derived_field"
   },
-  "exit_codes": {
-    "0": "audit_no_violations",
-    "1": "audit_violations_found",
-    "2": "input_schema_or_execution_failure"
-  }
+  "exit_codes": { "0": "audit_no_violations", "1": "audit_violations_found", "2": "input_schema_or_execution_failure" }
 }

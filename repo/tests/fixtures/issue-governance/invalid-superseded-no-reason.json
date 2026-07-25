@@ -4,7 +4,7 @@
     "fixture_id": "invalid-superseded-no-reason",
     "governance_mode": "toolkit_governed",
     "canonical_parent_tracker": 1300,
-    "policy_version": "1.0.0"
+    "policy_version": "1.1.0"
   },
   "issues": [
     {
