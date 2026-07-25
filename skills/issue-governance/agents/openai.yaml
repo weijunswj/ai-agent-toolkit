@@ -8,3 +8,10 @@ metadata:
   platform: openai
   skill_version: "1.0.0"
   allow_implicit_invocation: false
+policy:
+  products:
+    - chatgpt
+    - codex
+    - api
+    - atlas
+  allow_implicit_invocation: false

@@ -1,7 +1,7 @@
 # Surface Fidelity Audit
 
 Date: 2026-05-18
-Latest update: 2026-07-09 (adds the portable docs-governance playbook to the generated ai-coding-agent-rules repo-local playbook set)
+Latest update: 2026-07-25 (adds issue-governance project module and skill)
 
 ## Current state
 
@@ -27,9 +27,9 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 
 | Metric | Current value |
 | --- | ---: |
-| projects | 16 |
-| publishedFiles | 236 |
-| declaredOutputFiles | 236 |
+| projects | 17 |
+| publishedFiles | 239 |
+| declaredOutputFiles | 239 |
 | packInstalledFiles | 84 |
 | undeclaredPublishedFiles | 0 |
 | packInstalledUndeclared | 0 |
@@ -38,7 +38,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | sharedSurfaceMetadataFindings | 0 |
 | suspiciousPublishedSurfaces | 0 |
 | duplicateProjectContentGroups | 0 |
-| boundaryRecipeOutputs | 236 |
+| boundaryRecipeOutputs | 239 |
 | boundaryRecipeFindings | 0 |
 | curatedDirectoryFindings | 1 |
 
@@ -46,7 +46,7 @@ Current published-file classifications:
 
 | Classification | Count |
 | --- | ---: |
-| declared_generated | 152 |
+| declared_generated | 155 |
 | pack_installed_declared | 84 |
 
 Current boundary recipe classifications:
@@ -54,13 +54,13 @@ Current boundary recipe classifications:
 | Classification | Count |
 | --- | ---: |
 | curated_adapter | 3 |
-| curated_agent_metadata | 9 |
-| curated_index | 12 |
+| curated_agent_metadata | 10 |
+| curated_index | 13 |
 | curated_metadata | 3 |
 | curated_pack_readme | 3 |
 | curated_reference | 7 |
 | curated_repo_local_agent_template | 4 |
-| curated_router | 9 |
+| curated_router | 10 |
 | curated_template | 2 |
 | curated_template_index | 7 |
 | generated_cross_skill_reference | 3 |
@@ -82,6 +82,7 @@ Known baseline context:
 - `_projects/development/managed-app-foundation-review`
 - `_projects/development/project-completion-audit`
 - `_projects/development/hostinger-coolify-production-guide`
+- `_projects/development/issue-governance`
 - `_projects/development/self-hosted-service-safety`
 - `_projects/development/toolkit-local-bridge`
 - `_projects/development/windows-localhost-workflows`
@@ -97,6 +98,7 @@ Known baseline context:
 - `skills/ai-coding-agent-rules/`
 - `skills/context-preserving-ai-publisher/`
 - `skills/codex-ssh-hostinger-coolify-setup-maintainer/`
+- `skills/issue-governance/`
 - `skills/knowledge-index-updater/`
 - `skills/local-ai-stack-safety/`
 - `skills/managed-app-foundation-review/`

@@ -557,6 +557,7 @@ test('project manifests include the current project modules without repo-wide MC
     'design.ui-ux-pro-max',
     'development.ai-coding-agent-rules',
     'development.hostinger-coolify-production-guide',
+    'development.issue-governance',
     'development.local-ai-stack-safety',
     'development.managed-app-foundation-review',
     'development.project-completion-audit',
