@@ -1,7 +1,7 @@
 # Lean Parent Programme Tracker
 
 **Governance mode:** `toolkit-governed`
-**Policy version:** 1.0.0
+**Policy version:** 2.0.0
 
 ## Instructions
 
@@ -24,7 +24,7 @@ Every Toolkit-governed repository declares exactly one canonical programme track
 ```yaml
 governance_mode: toolkit-governed
 canonical_parent_tracker: #<issue_number>
-policy_version: "1.0.0"
+policy_version: "2.0.0"
 ```
 
 ## Tracker Body Template
@@ -34,7 +34,7 @@ policy_version: "1.0.0"
 
 **Repository:** <owner/repo>
 **Governance mode:** `toolkit-governed`
-**Policy version:** 1.0.0
+**Policy version:** 2.0.0
 **Canonical parent tracker:** #<this_issue>
 
 Last reconciled: **DD Month YYYY, HH:mm SGT**

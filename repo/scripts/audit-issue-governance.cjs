@@ -3,218 +3,208 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const Ajv = require('ajv/dist/2020');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const POLICY_PATH = path.join(REPO_ROOT, '_projects', 'development', 'issue-governance', '_main', 'policy', 'issue-governance-policy.json');
 const SCHEMA_PATH = path.join(REPO_ROOT, '_projects', 'development', 'issue-governance', '_main', 'schema', 'issue-snapshot.schema.json');
 
-const VALID_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-
-const SECTION_HEADINGS = {
-  current_status: /^#\s+Current\s+status/im,
-  parent_tracker: /^Parent\s+tracker:\s*#/im,
-  implementation_pr: /^Implementation\s+PR:/im,
-  dependencies: /^Dep(?:endencies|ends)\s+on:/im,
-  related_work: /^Related:/im,
-  why_this_issue_exists: /^#\s+Why\s+this\s+issue\s+exists/im,
-  goal_and_scope: /^#\s+Goal\s+and\s+scope/im,
-  completed_work: /^#\s+Completed\s+work/im,
-  current_blockers_and_findings: /^#\s+(?:Current\s+)?[Bb]lockers(?:\s+and\s+findings)?/im,
-  remaining_steps: /^#\s+Remaining\s+(?:steps|work)/im,
-  acceptance_criteria: /^#\s+Acceptance\s+criteria/im,
-  linked_prs_and_followups: /^#\s+Linked\s+PRs(?:\s+and\s+follow-ups)?/im,
-  linked_prs_or_followups: /^#\s+Linked\s+PRs(?:\s+or\s+follow-ups)?/im,
-  decisions_and_durable_evidence: /^#\s+Decisions\s+and\s+durable\s+evidence/im,
-  safety_and_authority: /^#\s+Safety\s+and\s+authority/im,
-  blockers: /^#\s+[Bb]lockers/im,
-  parent_link: /^Parent\s+tracker:\s*#/im
-};
-
-const SECTION_LABELS = {
-  current_status: 'Current status',
-  parent_tracker: 'Parent tracker line (Parent tracker: #...)',
-  implementation_pr: 'Implementation PR line (Implementation PR: #...)',
-  dependencies: 'Dependencies line (Depends on: ...)',
-  related_work: 'Related work line (Related: ...)',
-  why_this_issue_exists: 'Why this issue exists',
-  goal_and_scope: 'Goal and scope',
-  completed_work: 'Completed work',
-  current_blockers_and_findings: 'Current blockers and findings',
-  remaining_steps: 'Remaining steps',
-  acceptance_criteria: 'Acceptance criteria',
-  linked_prs_and_followups: 'Linked PRs and follow-ups',
-  linked_prs_or_followups: 'Linked PRs or follow-ups',
-  decisions_and_durable_evidence: 'Decisions and durable evidence',
-  safety_and_authority: 'Safety and authority',
-  blockers: 'Blockers',
-  parent_link: 'Parent link (Parent tracker: #...)'
-};
+// --- Canonical source loaders ---
 
 let _policy = null;
 let _schema = null;
+let _ajvValidate = null;
+
 function loadPolicy() {
   if (!_policy) _policy = JSON.parse(fs.readFileSync(POLICY_PATH, 'utf8'));
   return _policy;
 }
+
 function loadSchema() {
   if (!_schema) _schema = JSON.parse(fs.readFileSync(SCHEMA_PATH, 'utf8'));
   return _schema;
 }
+
+function getValidator() {
+  if (!_ajvValidate) {
+    const schema = loadSchema();
+    const ajv = new Ajv({ allErrors: true, strict: true, allowUnionTypes: true });
+    _ajvValidate = ajv.compile(schema);
+  }
+  return _ajvValidate;
+}
+
 function getPolicyVersion() { return loadPolicy().policy_version; }
 function getSnapshotVersion() { return loadSchema().properties.snapshot_version.const; }
 function getFindingCodes() { return loadPolicy().finding_codes; }
 
-// --- Full schema validation ---
+// --- Policy-derived requirement handler registry ---
+// Single source: each handler keyed by canonical policy dimension name.
+// Pattern and label are runtime implementation; required sections come from policy.
+
+const HANDLER_REGISTRY = {
+  current_status: {
+    pattern: /^#\s+Current\s+status/im,
+    label: 'Current status',
+    semantic: function(body) { return this.pattern.test(body); }
+  },
+  reconciliation_timestamp: {
+    pattern: /^Last\s+reconciled:\s+/im,
+    label: 'Reconciliation timestamp',
+    semantic: function(body) { return this.pattern.test(body); }
+  },
+  parent_tracker: {
+    pattern: /^Parent\s+tracker:\s*#/im,
+    label: 'Parent tracker line',
+    semantic: function(body) { return this.pattern.test(body); }
+  },
+  implementation_branch: {
+    pattern: /^Implementation\s+branch:\s+/im,
+    label: 'Implementation branch line',
+    semantic: function(body) { return this.pattern.test(body); }
+  },
+  implementation_pr: {
+    pattern: /^Implementation\s+PR:\s+/im,
+    label: 'Implementation PR line',
+    semantic: function(body) { return this.pattern.test(body); }
+  },
+  dependencies: {
+    pattern: /^Dep(?:endencies|ends)\s+on:/im,
+    label: 'Dependencies',
+    semantic: function(body) { return this.pattern.test(body); }
+  },
+  blockers: {
+    pattern: /^#\s+(?:Current\s+)?[Bb]lockers(?:\s+and\s+findings)?/im,
+    label: 'Blockers',
+    semantic: function(body) { return this.pattern.test(body); }
+  },
+  related_work: {
+    pattern: /^Related:/im,
+    label: 'Related work',
+    semantic: function(body) { return this.pattern.test(body); }
+  },
+  why_this_issue_exists: {
+    pattern: /^#\s+Why\s+this\s+issue\s+exists/im,
+    label: 'Why this issue exists',
+    semantic: function(body) { return this.pattern.test(body); }
+  },
+  goal_and_scope: {
+    pattern: /^#\s+Goal\s+and\s+scope/im,
+    label: 'Goal and scope',
+    semantic: function(body) { return this.pattern.test(body); }
+  },
+  completed_work: {
+    pattern: /^#\s+Completed\s+work/im,
+    label: 'Completed work',
+    semantic: function(body) { return this.pattern.test(body); }
+  },
+  current_blockers_and_findings: {
+    pattern: /^#\s+(?:Current\s+)?[Bb]lockers(?:\s+and\s+findings)?/im,
+    label: 'Current blockers and findings',
+    semantic: function(body) { return this.pattern.test(body); }
+  },
+  remaining_steps: {
+    pattern: /^#\s+Remaining\s+(?:steps|work)/im,
+    label: 'Remaining steps',
+    semantic: function(body) { return this.pattern.test(body); }
+  },
+  acceptance_criteria: {
+    pattern: /^#\s+Acceptance\s+criteria/im,
+    label: 'Acceptance criteria',
+    semantic: function(body) { return this.pattern.test(body); }
+  },
+  linked_prs_and_followups: {
+    pattern: /^#\s+Linked\s+PRs(?:\s+and\s+follow-ups)?/im,
+    label: 'Linked PRs and follow-ups',
+    semantic: function(body) { return this.pattern.test(body); }
+  },
+  linked_prs_or_followups: {
+    pattern: /^#\s+Linked\s+PRs(?:\s+or\s+follow-ups)?/im,
+    label: 'Linked PRs or follow-ups',
+    semantic: function(body) { return this.pattern.test(body); }
+  },
+  decisions_and_durable_evidence: {
+    pattern: /^#\s+Decisions\s+and\s+durable\s+evidence/im,
+    label: 'Decisions and durable evidence',
+    semantic: function(body) { return this.pattern.test(body); }
+  },
+  safety_and_authority: {
+    pattern: /^#\s+Safety\s+and\s+authority/im,
+    label: 'Safety and authority',
+    semantic: function(body) { return this.pattern.test(body); }
+  },
+  parent_link: {
+    pattern: /^Parent\s+tracker:\s*#/im,
+    label: 'Parent link',
+    semantic: function(body) { return this.pattern.test(body); }
+  }
+};
+
+// --- Finding emission boundary ---
+
+function emitFinding(findings, code, severity, issueId, message) {
+  const policy = loadPolicy();
+  if (!policy.finding_codes[code]) {
+    throw new Error(`Undeclared finding code: ${code}`);
+  }
+  findings.push({ code, severity, issue_id: issueId, message: sanitize(message) });
+}
+
+// --- Schema validation via Ajv ---
 
 function validateAgainstSchema(data) {
-  const errors = [];
-  const schema = loadSchema();
-
   if (!data || typeof data !== 'object' || Array.isArray(data)) {
     return { ok: false, errors: ['Input must be a JSON object.'] };
   }
-
-  const allowedTop = new Set(Object.keys(schema.properties));
-  for (const key of Object.keys(data)) {
-    if (!allowedTop.has(key)) errors.push(`Unknown top-level property: ${JSON.stringify(key)}.`);
-  }
-  for (const req of schema.required) {
-    if (!(req in data)) errors.push(`Missing required top-level property: ${JSON.stringify(req)}.`);
-  }
-  if (errors.length) return { ok: false, errors };
-
-  if (data.snapshot_version !== schema.properties.snapshot_version.const) {
-    return { ok: false, errors: [`Unsupported snapshot version: ${JSON.stringify(data.snapshot_version)}. Expected ${schema.properties.snapshot_version.const}.`] };
-  }
-
-  const repo = data.repository;
-  if (!repo || typeof repo !== 'object' || Array.isArray(repo)) {
-    return { ok: false, errors: ['repository must be a JSON object.'] };
-  }
-  const repoSchema = schema.$defs.repository_metadata;
-  const allowedRepo = new Set(Object.keys(repoSchema.properties));
-  for (const key of Object.keys(repo)) {
-    if (!allowedRepo.has(key)) errors.push(`Unknown repository property: ${JSON.stringify(key)}.`);
-  }
-  for (const req of repoSchema.required) {
-    if (!(req in repo)) errors.push(`Missing required repository property: ${JSON.stringify(req)}.`);
-  }
-  if (!repoSchema.properties.governance_mode.enum.includes(repo.governance_mode)) {
-    errors.push(`Invalid governance_mode: ${JSON.stringify(repo.governance_mode)}.`);
-  }
-  if (repo.policy_version !== undefined && typeof repo.policy_version !== 'string') {
-    errors.push('repository.policy_version must be a string.');
-  }
-  if (repo.canonical_parent_tracker !== undefined) {
-    const cpt = repo.canonical_parent_tracker;
-    if (typeof cpt !== 'number' && typeof cpt !== 'string') {
-      errors.push('repository.canonical_parent_tracker must be an integer or string.');
+  const validate = getValidator();
+  const valid = validate(data);
+  if (valid) return { ok: true, data };
+  const errors = validate.errors.map(e => {
+    const ptr = e.instancePath || '/';
+    const kw = e.keyword;
+    if (kw === 'additionalProperties') {
+      return `Schema violation at ${ptr}: unknown property ${JSON.stringify(e.params.additionalProperty)}.`;
     }
-  }
-  if (errors.length) return { ok: false, errors };
-
-  if (!Array.isArray(data.issues)) {
-    return { ok: false, errors: ['issues must be an array.'] };
-  }
-
-  const issueSchema = schema.$defs.issue_record;
-  const allowedIssue = new Set(Object.keys(issueSchema.properties));
-  const validCategories = issueSchema.properties.category.enum;
-  const validStates = issueSchema.properties.state.enum;
-  const seenIds = new Set();
-
-  for (let i = 0; i < data.issues.length; i++) {
-    const issue = data.issues[i];
-    const pfx = `issues[${i}]`;
-    if (!issue || typeof issue !== 'object' || Array.isArray(issue)) {
-      errors.push(`${pfx} must be an object.`); continue;
+    if (kw === 'required') {
+      return `Schema violation at ${ptr}: missing required property ${JSON.stringify(e.params.missingProperty)}.`;
     }
-    for (const key of Object.keys(issue)) {
-      if (!allowedIssue.has(key)) errors.push(`${pfx} has unknown property: ${JSON.stringify(key)}.`);
+    if (kw === 'type') {
+      return `Schema violation at ${ptr}: expected ${e.params.type}.`;
     }
-    for (const req of issueSchema.required) {
-      if (!(req in issue)) errors.push(`${pfx} missing required property: ${JSON.stringify(req)}.`);
+    if (kw === 'enum') {
+      return `Schema violation at ${ptr}: value must be one of ${JSON.stringify(e.params.allowedValues)}.`;
     }
-    if (issue.id === undefined || issue.id === null) {
-      errors.push(`${pfx} must have an id.`);
-    } else {
-      const idStr = String(issue.id);
-      if (seenIds.has(idStr)) errors.push(`Duplicate issue id: ${JSON.stringify(issue.id)}.`);
-      seenIds.add(idStr);
+    if (kw === 'const') {
+      return `Schema violation at ${ptr}: expected ${JSON.stringify(e.params.allowedValue)}.`;
     }
-    if (issue.state !== undefined && !validStates.includes(issue.state)) {
-      errors.push(`${pfx} (id=${issue.id}) invalid state: ${JSON.stringify(issue.state)}.`);
+    if (kw === 'minLength') {
+      return `Schema violation at ${ptr}: minimum length ${e.params.limit}.`;
     }
-    if (issue.category !== undefined && !validCategories.includes(issue.category)) {
-      errors.push(`${pfx} (id=${issue.id}) invalid category: ${JSON.stringify(issue.category)}.`);
+    if (kw === 'pattern') {
+      return `Schema violation at ${ptr}: does not match pattern.`;
     }
-    if (issue.body !== undefined) {
-      if (typeof issue.body !== 'string') errors.push(`${pfx} (id=${issue.id}) body must be a string.`);
-      else if (issue.body.length === 0) errors.push(`${pfx} (id=${issue.id}) body must not be empty.`);
-    }
-    if (issue.parent !== undefined && issue.parent !== null) {
-      if (typeof issue.parent !== 'number' && typeof issue.parent !== 'string') {
-        errors.push(`${pfx} (id=${issue.id}) parent must be integer, string, or null.`);
-      }
-    }
-    if (issue.children !== undefined) {
-      if (!Array.isArray(issue.children)) {
-        errors.push(`${pfx} (id=${issue.id}) children must be an array.`);
-      } else {
-        const cSeen = new Set();
-        for (const c of issue.children) {
-          const cs = String(c);
-          if (cSeen.has(cs)) errors.push(`${pfx} (id=${issue.id}) duplicate child: ${JSON.stringify(c)}.`);
-          cSeen.add(cs);
-        }
-      }
-    }
-    if (issue.checklist_items !== undefined) {
-      if (!Array.isArray(issue.checklist_items)) {
-        errors.push(`${pfx} (id=${issue.id}) checklist_items must be an array.`);
-      } else {
-        const ciSchema = schema.$defs.checklist_item;
-        const allowedCI = new Set(Object.keys(ciSchema.properties));
-        for (let j = 0; j < issue.checklist_items.length; j++) {
-          const ci = issue.checklist_items[j];
-          if (!ci || typeof ci !== 'object' || Array.isArray(ci)) {
-            errors.push(`${pfx}.checklist_items[${j}] must be an object.`); continue;
-          }
-          for (const key of Object.keys(ci)) {
-            if (!allowedCI.has(key)) errors.push(`${pfx}.checklist_items[${j}] unknown property: ${JSON.stringify(key)}.`);
-          }
-          if (typeof ci.checked !== 'boolean') errors.push(`${pfx}.checklist_items[${j}] checked must be boolean.`);
-          if (typeof ci.text !== 'string') errors.push(`${pfx}.checklist_items[${j}] text must be string.`);
-        }
-      }
-    }
-    if (issue.linked_prs !== undefined && !Array.isArray(issue.linked_prs)) {
-      errors.push(`${pfx} (id=${issue.id}) linked_prs must be an array.`);
-    }
-    if (issue.implementation_prs !== undefined) {
-      if (!Array.isArray(issue.implementation_prs)) {
-        errors.push(`${pfx} (id=${issue.id}) implementation_prs must be an array.`);
-      } else {
-        for (let j = 0; j < issue.implementation_prs.length; j++) {
-          const ipr = issue.implementation_prs[j];
-          const ipPfx = `${pfx}.implementation_prs[${j}]`;
-          if (!ipr || typeof ipr !== 'object' || Array.isArray(ipr)) {
-            errors.push(`${ipPfx} must be an object.`); continue;
-          }
-          if (ipr.number === undefined) errors.push(`${ipPfx} must have number.`);
-          if (ipr.state !== undefined && !['open','closed','merged'].includes(ipr.state)) {
-            errors.push(`${ipPfx} invalid state: ${JSON.stringify(ipr.state)}.`);
-          }
-        }
-      }
-    }
-  }
-
-  if (errors.length) return { ok: false, errors };
-  return { ok: true, data };
+    return `Schema violation at ${ptr}: ${kw}.`;
+  });
+  return { ok: false, errors };
 }
 
-// --- Body parsing helpers ---
+// --- Body parsing ---
+
+const VALID_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+function parseChecklistFromBody(body) {
+  const items = [];
+  for (const line of body.split('\n')) {
+    const m = line.match(/^- \[([ xX])\]\s+(.*)/);
+    if (m) {
+      const checked = m[1] === 'x' || m[1] === 'X';
+      const text = line.trimEnd();
+      const linkMatch = m[2].match(/#(\d+)/);
+      items.push({ checked, text, linked_issue: linkMatch ? +linkMatch[1] : null });
+    }
+  }
+  return items;
+}
 
 function countTimestamps(body) {
   let count = 0;
@@ -228,7 +218,7 @@ function parseTimestamps(body) {
   const results = [];
   for (const line of body.split('\n')) {
     const trimmed = line.trim();
-    const m = trimmed.match(/^Last\s+reconciled:\s+\*\*(\d{1,2})\s+([A-Z][a-z]+)\s+(\d{4}),\s+(\d{2}):(\d{2})\s+SGT\*\*$/);
+    const m = trimmed.match(/^Last\s+reconciled:\s+\*\*(\d{2})\s+([A-Z][a-z]+)\s+(\d{4}),\s+(\d{2}):(\d{2})\s+SGT\*\*$/);
     if (m) {
       results.push({ day: +m[1], month: m[2], year: +m[3], hour: +m[4], minute: +m[5], raw: trimmed });
     }
@@ -248,32 +238,6 @@ function isRealTimestamp(ts) {
   return ts.day <= max;
 }
 
-function hasSection(body, key) {
-  const pat = SECTION_HEADINGS[key];
-  return pat ? pat.test(body) : false;
-}
-
-function parseChecklistFromBody(body) {
-  const items = [];
-  for (const line of body.split('\n')) {
-    const m = line.match(/^- \[([ xX])\]\s+(.*)/);
-    if (m) {
-      const checked = m[1] === 'x' || m[1] === 'X';
-      const linkMatch = m[2].match(/#(\d+)/);
-      items.push({ checked, text: line, linked_issue: linkMatch ? +linkMatch[1] : null });
-    }
-  }
-  return items;
-}
-
-function getIssueById(issues, id) {
-  return issues.find(i => String(i.id) === String(id)) || null;
-}
-
-function isChildCategory(cat) { return ['active_multi_step_child','small_atomic_child'].includes(cat); }
-function isChildLike(issue) { return isChildCategory(issue.category) || issue.category === 'complete'; }
-function isImplementationCat(cat) { return isChildCategory(cat); }
-
 function isAcceptanceCriteriaMet(body) {
   let inSection = false, hasCriteria = false, allChecked = true;
   for (const line of body.split('\n')) {
@@ -285,6 +249,32 @@ function isAcceptanceCriteriaMet(body) {
     }
   }
   return hasCriteria ? allChecked : null;
+}
+
+function parseImplBranchFromBody(body) {
+  const m = body.match(/^Implementation\s+branch:\s+(.+)$/im);
+  return m ? m[1].trim() : null;
+}
+
+function parseImplPRFromBody(body) {
+  const m = body.match(/^Implementation\s+PR:\s+(.+)$/im);
+  return m ? m[1].trim() : null;
+}
+
+function getIssueById(issues, id) {
+  return issues.find(i => String(i.id) === String(id)) || null;
+}
+
+function isChildCategory(cat) { return ['active_multi_step_child', 'small_atomic_child'].includes(cat); }
+function isImplementationCat(cat) {
+  const policy = loadPolicy();
+  const catDef = policy.issue_categories[cat];
+  return catDef && catDef.is_implementation_work === true;
+}
+
+function hasSection(body, key) {
+  const handler = HANDLER_REGISTRY[key];
+  return handler ? handler.semantic(body) : false;
 }
 
 function isNegatedContext(body, matchIndex, matchLength) {
@@ -303,78 +293,161 @@ function isNegatedContext(body, matchIndex, matchLength) {
   return false;
 }
 
+// --- Checklist exact multiset match ---
+
+function normalizeChecklistItem(item) {
+  return {
+    checked: item.checked,
+    text: item.text.trimEnd(),
+    linked_issue: item.linked_issue !== undefined && item.linked_issue !== null ? +item.linked_issue : null
+  };
+}
+
+function checklistMultisetMatch(bodyItems, suppliedItems) {
+  const errors = [];
+  const bNorm = bodyItems.map(normalizeChecklistItem);
+  const sNorm = suppliedItems.map(normalizeChecklistItem);
+
+  if (bNorm.length !== sNorm.length) {
+    errors.push(`Checklist cardinality mismatch: body has ${bNorm.length}, supplied has ${sNorm.length}.`);
+    return errors;
+  }
+
+  const bKey = bNorm.map(i => `${i.checked}|${i.text}|${i.linked_issue}`);
+  const sKey = sNorm.map(i => `${i.checked}|${i.text}|${i.linked_issue}`);
+
+  const bSorted = [...bKey].sort();
+  const sSorted = [...sKey].sort();
+
+  for (let i = 0; i < bSorted.length; i++) {
+    if (bSorted[i] !== sSorted[i]) {
+      const bParts = bSorted[i].split('|');
+      const sParts = sSorted[i].split('|');
+      if (bParts[0] !== sParts[0]) {
+        errors.push(`Checklist item checked-state mismatch: body has checked=${bParts[0]}, supplied has checked=${sParts[0]}.`);
+      } else if (bParts[2] !== sParts[2]) {
+        errors.push(`Checklist item linked_issue mismatch: body has #${bParts[2]}, supplied has #${sParts[2]}.`);
+      } else {
+        errors.push(`Checklist item text mismatch.`);
+      }
+    }
+  }
+  return errors;
+}
+
+// --- Parent children exact match ---
+
+function parentChildrenMatch(bodyChecklist, suppliedChildren) {
+  const errors = [];
+  const bodyChildIds = bodyChecklist
+    .filter(i => i.linked_issue !== null)
+    .map(i => String(i.linked_issue));
+  const suppliedIds = (suppliedChildren || []).map(String);
+
+  const bodySet = new Set(bodyChildIds);
+  const suppliedSet = new Set(suppliedIds);
+
+  for (const id of bodySet) {
+    if (!suppliedSet.has(id)) {
+      errors.push(`Child #${id} in body checklist but absent from structured children.`);
+    }
+  }
+  for (const id of suppliedSet) {
+    if (!bodySet.has(id)) {
+      errors.push(`Child #${id} in structured children but absent from body checklist.`);
+    }
+  }
+
+  // Check for duplicates
+  const bodyCounts = {};
+  for (const id of bodyChildIds) {
+    bodyCounts[id] = (bodyCounts[id] || 0) + 1;
+  }
+  for (const [id, count] of Object.entries(bodyCounts)) {
+    if (count > 1) errors.push(`Duplicate child identity #${id} in body checklist (${count} occurrences).`);
+  }
+
+  return errors;
+}
+
 // --- Audit checks ---
 
 function checkGovernanceMode(repo, issues, findings) {
+  const policy = loadPolicy();
   if (repo.governance_mode === 'unknown') {
-    findings.push({ code: 'GOV021', severity: 'warning', issue_id: null,
-      message: 'Governance mode is "unknown". Repository must select a governance mode.' });
+    emitFinding(findings, 'GOV021', 'warning', null, 'Governance mode is "unknown". Repository must select a governance mode.');
     return;
   }
   if (repo.governance_mode !== 'toolkit_governed') return;
 
   const parents = issues.filter(i => i.category === 'canonical_parent_tracker');
   if (parents.length === 0) {
-    findings.push({ code: 'GOV001', severity: 'error', issue_id: null, message: 'Toolkit-governed repository has no declared canonical parent tracker.' });
+    emitFinding(findings, 'GOV001', 'error', null, 'Toolkit-governed repository has no declared canonical parent tracker.');
   } else if (parents.length > 1) {
-    findings.push({ code: 'GOV002', severity: 'error', issue_id: null, message: `Toolkit-governed repository has ${parents.length} canonical parent trackers.` });
+    emitFinding(findings, 'GOV002', 'error', null, `Toolkit-governed repository has ${parents.length} canonical parent trackers.`);
   }
 
   if (repo.canonical_parent_tracker !== undefined) {
     const declared = getIssueById(issues, repo.canonical_parent_tracker);
     if (!declared) {
-      findings.push({ code: 'GOV026', severity: 'error', issue_id: null, message: `Declared canonical_parent_tracker #${repo.canonical_parent_tracker} not found.` });
+      emitFinding(findings, 'GOV026', 'error', null, `Declared canonical_parent_tracker #${repo.canonical_parent_tracker} not found.`);
     } else if (declared.category !== 'canonical_parent_tracker') {
-      findings.push({ code: 'GOV026', severity: 'error', issue_id: null, message: `Declared canonical_parent_tracker #${repo.canonical_parent_tracker} is not categorised as canonical_parent_tracker.` });
+      emitFinding(findings, 'GOV026', 'error', null, `Declared canonical_parent_tracker #${repo.canonical_parent_tracker} is not categorised as canonical_parent_tracker.`);
     }
   }
 }
 
 function checkParentChildLinks(repo, issues, findings) {
   const parents = issues.filter(i => i.category === 'canonical_parent_tracker');
-  const children = issues.filter(i => isChildLike(i) && i.category !== 'recurring_evidence_log');
+  const children = issues.filter(i => isChildCategory(i.category) && i.category !== 'recurring_evidence_log');
 
   for (const parent of parents) {
     const bodyCL = parseChecklistFromBody(parent.body);
     for (const item of bodyCL) {
       if (!item.linked_issue) {
-        findings.push({ code: 'GOV003', severity: 'warning', issue_id: parent.id, message: `Parent #${parent.id} checklist entry has no linked child.` });
+        emitFinding(findings, 'GOV003', 'warning', parent.id, `Parent #${parent.id} checklist entry has no linked child.`);
       }
     }
-    if (parent.checklist_items) {
-      for (const item of parent.checklist_items) {
-        if (!item.linked_issue) continue;
-        const bodyHas = bodyCL.some(bc => bc.linked_issue === item.linked_issue || bc.text.trim() === item.text.trim());
-        if (!bodyHas) {
-          findings.push({ code: 'GOV027', severity: 'error', issue_id: parent.id,
-            message: `Parent #${parent.id} structured checklist_item references child #${item.linked_issue} not found in body.` });
-        }
+
+    // Exact multiset match if structured checklist_items supplied
+    if (parent.checklist_items && parent.checklist_items.length > 0) {
+      const matchErrors = checklistMultisetMatch(bodyCL, parent.checklist_items);
+      for (const err of matchErrors) {
+        emitFinding(findings, 'GOV027', 'error', parent.id, `Parent #${parent.id}: ${err}`);
+      }
+    }
+
+    // Parent children exact match
+    if (parent.children) {
+      const childrenErrors = parentChildrenMatch(bodyCL, parent.children);
+      for (const err of childrenErrors) {
+        emitFinding(findings, 'GOV027', 'error', parent.id, `Parent #${parent.id}: ${err}`);
       }
     }
   }
 
   for (const child of children) {
     if (!child.parent && child.parent !== 0) {
-      findings.push({ code: 'GOV004', severity: 'error', issue_id: child.id, message: `Child #${child.id} has no parent link.` });
+      emitFinding(findings, 'GOV004', 'error', child.id, `Child #${child.id} has no parent link.`);
       continue;
     }
     const parentIssue = getIssueById(issues, child.parent);
     if (!parentIssue) {
-      findings.push({ code: 'GOV005', severity: 'error', issue_id: child.id, message: `Child #${child.id} parent #${child.parent} not found.` });
+      emitFinding(findings, 'GOV005', 'error', child.id, `Child #${child.id} parent #${child.parent} not found.`);
       continue;
     }
     if (parentIssue.category !== 'canonical_parent_tracker') {
-      findings.push({ code: 'GOV026', severity: 'error', issue_id: child.id, message: `Child #${child.id} parent #${child.parent} is not a canonical_parent_tracker.` });
+      emitFinding(findings, 'GOV026', 'error', child.id, `Child #${child.id} parent #${child.parent} is not a canonical_parent_tracker.`);
       continue;
     }
     const bodyCL = parseChecklistFromBody(parentIssue.body);
     const inBody = bodyCL.some(item => item.linked_issue && String(item.linked_issue) === String(child.id));
     if (!inBody) {
-      findings.push({ code: 'GOV005', severity: 'error', issue_id: child.id, message: `Child #${child.id} absent from parent #${child.parent} body checklist.` });
+      emitFinding(findings, 'GOV005', 'error', child.id, `Child #${child.id} absent from parent #${child.parent} body checklist.`);
     }
     const parentChildren = parentIssue.children || [];
     if (!parentChildren.some(c => String(c) === String(child.id))) {
-      findings.push({ code: 'GOV006', severity: 'error', issue_id: child.id, message: `Parent #${child.parent} children array does not list child #${child.id}.` });
+      emitFinding(findings, 'GOV006', 'error', child.id, `Parent #${child.parent} children array does not list child #${child.id}.`);
     }
   }
 }
@@ -389,36 +462,37 @@ function checkCompletionConsistency(issues, findings) {
       if (!child) continue;
       if (item.checked) {
         if (child.state === 'open') {
-          findings.push({ code: 'GOV007', severity: 'error', issue_id: parent.id, message: `Parent #${parent.id} item checked but child #${child.id} is still open.` });
+          emitFinding(findings, 'GOV007', 'error', parent.id, `Parent #${parent.id} item checked but child #${child.id} is still open.`);
         }
-        if (isChildLike(child)) {
+        if (isChildCategory(child.category)) {
           const met = isAcceptanceCriteriaMet(child.body);
           if (met === false) {
-            findings.push({ code: 'GOV007', severity: 'error', issue_id: parent.id, message: `Parent #${parent.id} item checked but child #${child.id} has incomplete acceptance.` });
+            emitFinding(findings, 'GOV007', 'error', parent.id, `Parent #${parent.id} item checked but child #${child.id} has incomplete acceptance.`);
           }
         }
       }
     }
   }
 
-  const completeChildren = issues.filter(i => (i.category === 'complete' || i.state === 'closed') && isChildLike(i));
-  for (const child of completeChildren) {
+  // GOV008: closed children with unchecked acceptance criteria
+  const closedChildren = issues.filter(i => i.state === 'closed' && isChildCategory(i.category));
+  for (const child of closedChildren) {
     if (!hasSection(child.body, 'acceptance_criteria')) continue;
     const met = isAcceptanceCriteriaMet(child.body);
     if (met === false) {
-      findings.push({ code: 'GOV008', severity: 'error', issue_id: child.id, message: `Closed/complete child #${child.id} has unchecked acceptance criteria.` });
+      emitFinding(findings, 'GOV008', 'error', child.id, `Closed child #${child.id} has unchecked acceptance criteria.`);
     }
   }
 
-  for (const child of issues.filter(i => isChildLike(i))) {
+  // GOV009: closed children with unchecked parent item
+  for (const child of issues.filter(i => isChildCategory(i.category) && i.state === 'closed')) {
     if (!child.parent && child.parent !== 0) continue;
-    if (child.category !== 'complete' && child.state !== 'closed') continue;
     const parentIssue = getIssueById(issues, child.parent);
     if (!parentIssue) continue;
     const bodyCL = parseChecklistFromBody(parentIssue.body);
     const item = bodyCL.find(ci => ci.linked_issue && String(ci.linked_issue) === String(child.id));
     if (item && !item.checked) {
-      findings.push({ code: 'GOV009', severity: 'warning', issue_id: child.id, message: `Complete child #${child.id} has unchecked parent item in #${parentIssue.id}.` });
+      emitFinding(findings, 'GOV009', 'warning', child.id, `Closed child #${child.id} has unchecked parent item in #${parentIssue.id}.`);
     }
   }
 }
@@ -426,71 +500,68 @@ function checkCompletionConsistency(issues, findings) {
 function checkRequiredSections(issue, findings) {
   const body = issue.body;
   const cat = issue.category;
+  const policy = loadPolicy();
+  const catDef = policy.issue_categories[cat];
+  if (!catDef || !catDef.required_sections) return;
 
+  // Specific semantic checks with dedicated finding codes
   if (!hasSection(body, 'current_status')) {
-    findings.push({ code: 'GOV010', severity: 'error', issue_id: issue.id, message: `Issue #${issue.id}: missing Current status section.` });
+    emitFinding(findings, 'GOV010', 'error', issue.id, `Issue #${issue.id}: missing Current status section.`);
   }
 
+  // Reconciliation timestamp count and validity
   const tsCount = countTimestamps(body);
   if (tsCount === 0) {
-    findings.push({ code: 'GOV011', severity: 'error', issue_id: issue.id, message: `Issue #${issue.id}: missing reconciliation timestamp.` });
+    emitFinding(findings, 'GOV011', 'error', issue.id, `Issue #${issue.id}: missing reconciliation timestamp.`);
   } else if (tsCount > 1) {
-    findings.push({ code: 'GOV012', severity: 'error', issue_id: issue.id, message: `Issue #${issue.id}: multiple reconciliation timestamps (${tsCount}).` });
+    emitFinding(findings, 'GOV012', 'error', issue.id, `Issue #${issue.id}: multiple reconciliation timestamps (${tsCount}).`);
   }
 
   if (tsCount > 0) {
     const timestamps = parseTimestamps(body);
     if (timestamps.length === 0) {
-      findings.push({ code: 'GOV013', severity: 'warning', issue_id: issue.id, message: `Issue #${issue.id}: timestamp present but malformed. Expected: Last reconciled: **DD Month YYYY, HH:mm SGT**` });
+      emitFinding(findings, 'GOV013', 'warning', issue.id, `Issue #${issue.id}: timestamp present but malformed. Expected: Last reconciled: **DD Month YYYY, HH:mm SGT**`);
     }
     for (const ts of timestamps) {
       if (!isRealTimestamp(ts)) {
-        findings.push({ code: 'GOV013', severity: 'warning', issue_id: issue.id, message: `Issue #${issue.id}: invalid date/time in timestamp.` });
+        emitFinding(findings, 'GOV013', 'warning', issue.id, `Issue #${issue.id}: invalid date/time in timestamp.`);
       }
     }
   }
 
   if (!hasSection(body, 'why_this_issue_exists')) {
-    findings.push({ code: 'GOV014', severity: 'error', issue_id: issue.id, message: `Issue #${issue.id}: missing "Why this issue exists" section.` });
+    emitFinding(findings, 'GOV014', 'error', issue.id, `Issue #${issue.id}: missing "Why this issue exists" section.`);
   }
 
-  if (cat === 'active_multi_step_child') {
-    const required = ['parent_tracker','implementation_pr','goal_and_scope','completed_work','current_blockers_and_findings','remaining_steps','linked_prs_and_followups','decisions_and_durable_evidence','safety_and_authority'];
-    for (const sec of required) {
-      if (!hasSection(body, sec)) {
-        findings.push({ code: 'GOV015', severity: 'error', issue_id: issue.id, message: `Issue #${issue.id}: missing required dimension "${SECTION_LABELS[sec] || sec}".` });
-      }
+  // Acceptance criteria section check
+  if (!hasSection(body, 'acceptance_criteria')) {
+    emitFinding(findings, 'GOV016', 'error', issue.id, `Issue #${issue.id}: missing Acceptance criteria section.`);
+  }
+
+  // GOV015: check all policy-required dimensions except those with dedicated codes
+  const dedicatedKeys = new Set(['current_status', 'reconciliation_timestamp', 'why_this_issue_exists', 'acceptance_criteria']);
+  for (const secKey of catDef.required_sections) {
+    if (dedicatedKeys.has(secKey)) continue;
+    const handler = HANDLER_REGISTRY[secKey];
+    if (!handler) continue;
+    if (!handler.semantic(body)) {
+      emitFinding(findings, 'GOV015', 'error', issue.id, `Issue #${issue.id}: missing required dimension "${handler.label}".`);
     }
   }
 
-  if (cat === 'small_atomic_child') {
-    const required = ['parent_link','completed_work','remaining_steps','linked_prs_or_followups','safety_and_authority'];
-    for (const sec of required) {
-      if (!hasSection(body, sec)) {
-        findings.push({ code: 'GOV015', severity: 'error', issue_id: issue.id, message: `Issue #${issue.id}: missing required dimension "${SECTION_LABELS[sec] || sec}".` });
-      }
-    }
-    if (!hasSection(body, 'blockers')) {
-      findings.push({ code: 'GOV015', severity: 'error', issue_id: issue.id, message: `Issue #${issue.id}: missing required dimension "Blockers".` });
-    }
-  }
-
-  if (isChildCategory(cat) && !hasSection(body, 'acceptance_criteria')) {
-    findings.push({ code: 'GOV016', severity: 'error', issue_id: issue.id, message: `Issue #${issue.id}: missing Acceptance criteria section.` });
-  }
-
+  // Structured field consistency
   if (issue.reconciliation_timestamp !== undefined && issue.reconciliation_timestamp !== null) {
     const bodyTs = parseTimestamps(body);
-    const bodyTsStr = bodyTs.length > 0 ? `${bodyTs[0].day} ${bodyTs[0].month} ${bodyTs[0].year}, ${String(bodyTs[0].hour).padStart(2,'0')}:${String(bodyTs[0].minute).padStart(2,'0')} SGT` : null;
+    const bodyTsStr = bodyTs.length > 0 ? `${String(bodyTs[0].day).padStart(2,'0')} ${bodyTs[0].month} ${bodyTs[0].year}, ${String(bodyTs[0].hour).padStart(2,'0')}:${String(bodyTs[0].minute).padStart(2,'0')} SGT` : null;
     if (bodyTsStr && issue.reconciliation_timestamp !== bodyTsStr) {
-      findings.push({ code: 'GOV027', severity: 'error', issue_id: issue.id, message: `Issue #${issue.id}: structured reconciliation_timestamp contradicts body.` });
+      emitFinding(findings, 'GOV027', 'error', issue.id, `Issue #${issue.id}: structured reconciliation_timestamp contradicts body.`);
     }
   }
 
   if (issue.acceptance_criteria_met !== undefined && issue.acceptance_criteria_met !== null && hasSection(body, 'acceptance_criteria')) {
     const bodyMet = isAcceptanceCriteriaMet(body);
     if (bodyMet !== null && issue.acceptance_criteria_met !== bodyMet) {
-      findings.push({ code: 'GOV027', severity: 'error', issue_id: issue.id, message: `Issue #${issue.id}: structured acceptance_criteria_met contradicts body.` });
+      emitFinding(findings, 'GOV027', 'error', issue.id, `Issue #${issue.id}: structured acceptance_criteria_met contradicts body.`);
     }
   }
 }
@@ -498,7 +569,7 @@ function checkRequiredSections(issue, findings) {
 function checkSupersededIssues(issues, findings) {
   for (const issue of issues) {
     if (issue.category === 'superseded_duplicate_not_planned' && !issue.reason && !issue.successor) {
-      findings.push({ code: 'GOV017', severity: 'warning', issue_id: issue.id, message: `Issue #${issue.id} is superseded/duplicate/not-planned but has no reason or successor.` });
+      emitFinding(findings, 'GOV017', 'warning', issue.id, `Issue #${issue.id} is superseded/duplicate/not-planned but has no reason or successor.`);
     }
   }
 }
@@ -506,18 +577,24 @@ function checkSupersededIssues(issues, findings) {
 function checkAntiPatterns(issues, findings) {
   for (const issue of issues) {
     const body = issue.body;
-    const prPat = /(?:pr|pull\s*request)\s*(?:#?\d+\s*)?(?:is\s*)?(?:merged|merge)\s*(?:=|equals|is|means|sufficient|enough|complete)/gi;
+    // GOV018: PR merge treated as completion
+    // Matches: "PR merged = task complete", "PR merge is sufficient", "pull request merged means done"
+    // Does NOT match negations: "PR merge is not task completion"
+    const prPat = /(?:pr|pull\s*request)\s*(?:#?\d+\s*)?(?:is\s*)?(?:merged|merge)\s+(?:=|equals|is|means|sufficient|enough|complete)/gi;
     let m;
     while ((m = prPat.exec(body)) !== null) {
       if (!isNegatedContext(body, m.index, m[0].length)) {
-        findings.push({ code: 'GOV018', severity: 'error', issue_id: issue.id, message: `Issue #${issue.id} body treats PR merge as sufficient completion.` });
+        emitFinding(findings, 'GOV018', 'error', issue.id, `Issue #${issue.id} body treats PR merge as sufficient completion.`);
         break;
       }
     }
-    const implPat = /(?:implementer|coding\s*agent|codex|claude|copilot)\s+(?:has\s+)?(?:independently\s+)?(?:verified|confirmed|accepted|certified|approved)\s+(?:independent\s+)?(?:review|acceptance|completion)/gi;
+    // GOV019: implementer self-acceptance claim
+    // Matches: "implementer has independently verified acceptance", "codex independently confirmed"
+    // The "independently" keyword is key; noun after verb is optional
+    const implPat = /(?:implementer|coding\s*agent|codex|claude|copilot)\s+(?:has\s+)?independently\s+(?:verified|confirmed|accepted|certified|approved)(?:\s+(?:independent\s+)?(?:review|acceptance|completion))?/gi;
     while ((m = implPat.exec(body)) !== null) {
       if (!isNegatedContext(body, m.index, m[0].length)) {
-        findings.push({ code: 'GOV019', severity: 'error', issue_id: issue.id, message: `Issue #${issue.id} body contains implementer self-acceptance claim.` });
+        emitFinding(findings, 'GOV019', 'error', issue.id, `Issue #${issue.id} body contains implementer self-acceptance claim.`);
         break;
       }
     }
@@ -527,28 +604,72 @@ function checkAntiPatterns(issues, findings) {
 function checkImplementationPR(issues, findings) {
   for (const issue of issues) {
     if (!isImplementationCat(issue.category)) continue;
-    if (!issue.implementation_prs || issue.implementation_prs.length === 0) continue;
+    const implPrs = issue.implementation_prs || [];
+    const activePrs = implPrs.filter(pr => pr.state === 'open');
 
-    const active = issue.implementation_prs.filter(pr => pr.state === 'open');
-    if (active.length > 1) {
-      findings.push({ code: 'GOV022', severity: 'error', issue_id: issue.id,
-        message: `Issue #${issue.id} has ${active.length} active implementation PRs.` });
+    // GOV022: multiple active PRs
+    if (activePrs.length > 1) {
+      emitFinding(findings, 'GOV022', 'error', issue.id, `Issue #${issue.id} has ${activePrs.length} active implementation PRs.`);
     }
 
-    for (const rep of issue.implementation_prs.filter(pr => pr.is_replacement)) {
-      if (!rep.replacement_reason) {
-        findings.push({ code: 'GOV024', severity: 'error', issue_id: issue.id,
-          message: `Issue #${issue.id} replacement PR #${rep.number} has no recorded reason.` });
+    // GOV023: branch/body PR metadata agreement
+    const bodyBranch = parseImplBranchFromBody(issue.body);
+    const bodyPR = parseImplPRFromBody(issue.body);
+
+    if (issue.implementation_branch !== undefined && issue.implementation_branch !== null) {
+      if (bodyBranch && issue.implementation_branch !== bodyBranch) {
+        emitFinding(findings, 'GOV023', 'error', issue.id, `Issue #${issue.id}: structured implementation_branch "${issue.implementation_branch}" disagrees with body "${bodyBranch}".`);
       }
     }
+
+    if (activePrs.length === 1) {
+      const soleOpenPR = activePrs[0];
+      if (bodyPR && bodyPR !== 'Not opened') {
+        const bodyPRNum = bodyPR.replace(/[^0-9]/g, '');
+        if (bodyPRNum && String(soleOpenPR.number) !== bodyPRNum) {
+          emitFinding(findings, 'GOV023', 'error', issue.id, `Issue #${issue.id}: sole open PR #${soleOpenPR.number} disagrees with body PR ${bodyPR}.`);
+        }
+      }
+      if (bodyPR === 'Not opened') {
+        emitFinding(findings, 'GOV023', 'error', issue.id, `Issue #${issue.id}: body says "Not opened" but open PR #${soleOpenPR.number} exists.`);
+      }
+    }
+
+    if (bodyPR && bodyPR !== 'Not opened' && activePrs.length === 0) {
+      const bodyPRNum = bodyPR.replace(/[^0-9]/g, '');
+      const hasMatchingClosed = implPrs.some(pr => String(pr.number) === bodyPRNum && pr.state !== 'open');
+      if (!hasMatchingClosed) {
+        emitFinding(findings, 'GOV023', 'error', issue.id, `Issue #${issue.id}: body identifies PR ${bodyPR} but no matching structured PR exists.`);
+      }
+    }
+
+    // GOV024: replacement PR requirements
+    for (const rep of implPrs.filter(pr => pr.is_replacement)) {
+      if (!rep.replacement_reason) {
+        emitFinding(findings, 'GOV024', 'error', issue.id, `Issue #${issue.id} replacement PR #${rep.number} has no recorded reason.`);
+      }
+      if (rep.supersedes_pr === undefined || rep.supersedes_pr === null) {
+        emitFinding(findings, 'GOV024', 'error', issue.id, `Issue #${issue.id} replacement PR #${rep.number} has no supersedes_pr.`);
+      }
+    }
+  }
+}
+
+function checkDuplicateIds(issues, findings) {
+  const seen = new Map();
+  for (const issue of issues) {
+    const norm = String(issue.id);
+    if (seen.has(norm)) {
+      emitFinding(findings, 'GOV025', 'error', issue.id, `Duplicate issue identity: ${JSON.stringify(issue.id)} and ${JSON.stringify(seen.get(norm))} resolve to the same identity.`);
+    }
+    seen.set(norm, issue.id);
   }
 }
 
 function checkPolicyDrift(repo, findings) {
   const pv = getPolicyVersion();
   if (repo.policy_version && repo.policy_version !== pv) {
-    findings.push({ code: 'GOV020', severity: 'warning', issue_id: null,
-      message: `Policy version drift: snapshot declares ${repo.policy_version}, canonical is ${pv}.` });
+    emitFinding(findings, 'GOV020', 'warning', null, `Policy version drift: snapshot declares ${repo.policy_version}, canonical is ${pv}.`);
   }
 }
 
@@ -575,20 +696,22 @@ function auditSnapshot(snapshot) {
   const issues = deepClone(snapshot.issues);
   const findings = [];
 
-  for (const issue of issues) {
-    if (issue.checklist_items === undefined) {
-      issue.checklist_items = parseChecklistFromBody(issue.body);
-    }
-  }
-
   checkGovernanceMode(repo, issues, findings);
 
   if (repo.governance_mode === 'toolkit_governed') {
+    // GOV025: duplicate IDs (semantic, not schema-level)
+    checkDuplicateIds(issues, findings);
+
     checkParentChildLinks(repo, issues, findings);
     checkCompletionConsistency(issues, findings);
+
+    // Required sections for ALL child categories (including closed children)
     for (const issue of issues) {
-      if (isChildCategory(issue.category)) checkRequiredSections(issue, findings);
+      if (isChildCategory(issue.category)) {
+        checkRequiredSections(issue, findings);
+      }
     }
+
     checkSupersededIssues(issues, findings);
     checkAntiPatterns(issues, findings);
     checkImplementationPR(issues, findings);
@@ -629,7 +752,7 @@ function formatHuman(findings, repo, schemaErrors) {
   lines.push('');
   for (const f of findings) {
     const ref = f.issue_id !== null ? ` [#${f.issue_id}]` : '';
-    lines.push(`  ${f.code} (${f.severity})${ref}: ${sanitize(f.message)}`);
+    lines.push(`  ${f.code} (${f.severity})${ref}: ${f.message}`);
   }
   return lines.join('\n');
 }
@@ -641,7 +764,7 @@ function formatJson(findings, repo, schemaErrors) {
     policy_version: repo.policy_version || null,
     schema_errors: (schemaErrors || []).map(e => sanitize(e)),
     finding_count: findings.length,
-    findings: findings.map(f => ({ code: f.code, severity: f.severity, issue_id: f.issue_id, message: sanitize(f.message) }))
+    findings: findings.map(f => ({ code: f.code, severity: f.severity, issue_id: f.issue_id, message: f.message }))
   }, null, 2);
 }
 
@@ -685,5 +808,7 @@ module.exports = {
   auditSnapshot, validateAgainstSchema, formatHuman, formatJson,
   getFindingCodes, getPolicyVersion, getSnapshotVersion, loadPolicy, loadSchema,
   isNegatedContext, isRealTimestamp, parseTimestamps, parseChecklistFromBody,
-  sanitize, POLICY_PATH, SCHEMA_PATH
+  parseImplBranchFromBody, parseImplPRFromBody,
+  sanitize, emitFinding, HANDLER_REGISTRY, POLICY_PATH, SCHEMA_PATH,
+  normalizeChecklistItem, checklistMultisetMatch, parentChildrenMatch
 };

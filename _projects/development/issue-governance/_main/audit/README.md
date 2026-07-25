@@ -15,7 +15,7 @@ The advisory audit is a deterministic, read-only command that validates local is
 - Never closes, reopens, or comments on issues.
 - Deterministic: identical input produces identical output.
 - Supports human-readable and structured JSON output.
-- Uses stable finding codes (GOV001–GOV020).
+- Uses stable finding codes (GOV001–GOV027).
 - Privacy-safe diagnostics: no full issue bodies or unnecessary private paths in output.
 
 ## Command
@@ -45,8 +45,8 @@ node repo/scripts/audit-issue-governance.cjs --input <snapshot.json> --format hu
 | GOV005 | error | active child absent from its declared parent checklist |
 | GOV006 | error | parent/child link that is not bidirectional |
 | GOV007 | error | checked parent item while the child remains open or acceptance is incomplete |
-| GOV008 | error | closed or complete child with unchecked acceptance criteria |
-| GOV009 | warning | complete child whose parent item remains unchecked or materially stale |
+| GOV008 | error | closed child with unchecked acceptance criteria |
+| GOV009 | warning | closed child whose parent item remains unchecked or materially stale |
 | GOV010 | error | missing current status |
 | GOV011 | error | missing reconciliation timestamp |
 | GOV012 | error | more than one reconciliation timestamp |
@@ -57,7 +57,14 @@ node repo/scripts/audit-issue-governance.cjs --input <snapshot.json> --format hu
 | GOV017 | warning | superseded/duplicate/not-planned issue without a reason or successor |
 | GOV018 | error | body or fixture explicitly treats PR merge as sufficient completion |
 | GOV019 | error | implementer record or fixture claims independent acceptance without controller authority |
-| GOV020 | warning | policy-version or generated-surface drift |
+| GOV020 | warning | policy version drift between snapshot and canonical policy |
+| GOV021 | warning | unknown governance mode requires selection |
+| GOV022 | error | multiple active implementation PRs for one issue |
+| GOV023 | error | implementation branch and body metadata disagree |
+| GOV024 | error | replacement PR without recorded exceptional reason or supersession |
+| GOV025 | error | duplicate issue identity |
+| GOV026 | error | canonical parent identifier points to missing or non-parent issue |
+| GOV027 | error | structured derived field contradicts body content |
 
 ## Semantic Rules
 
@@ -70,4 +77,4 @@ See `schema/issue-snapshot.schema.json` for the full input schema.
 ## Source
 
 Canonical source: `_projects/development/issue-governance/_main/`
-Policy version: 1.0.0
+Policy version: 2.0.0

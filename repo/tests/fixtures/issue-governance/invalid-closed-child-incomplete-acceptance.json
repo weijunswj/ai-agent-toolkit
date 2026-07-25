@@ -1,28 +1,26 @@
 {
-  "snapshot_version": "1.0.0",
+  "snapshot_version": "2.0.0",
   "repository": {
     "fixture_id": "invalid-closed-child-incomplete-acceptance",
     "governance_mode": "toolkit_governed",
-    "canonical_parent_tracker": 1600,
-    "policy_version": "1.1.0"
+    "canonical_parent_tracker": 1,
+    "policy_version": "2.0.0"
   },
   "issues": [
     {
-      "id": 1600,
+      "id": 1,
       "state": "open",
       "category": "canonical_parent_tracker",
-      "body": "# Programme Tracker\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\n- [x] #1601 Task\n",
-      "children": [1601],
-      "checklist_items": [
-        { "checked": true, "text": "- [x] #1601 Task", "linked_issue": 1601 }
-      ]
+      "body": "# Tracker\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\n- [x] #2 Task\n",
+      "children": [2],
+      "checklist_items": [{ "checked": true, "text": "- [x] #2 Task", "linked_issue": 2 }]
     },
     {
-      "id": 1601,
+      "id": 2,
       "state": "closed",
-      "category": "complete",
-      "body": "# Current status\n\nCLOSED\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\nParent tracker: #1600\n\n# Why this issue exists\n\nTo do something.\n\n# Completed work\n\n- Done\n\n# Blockers\n\n- none\n\n# Remaining work\n\n- none\n\n# Acceptance criteria\n\n- [ ] Not checked\n\n# Linked PRs or follow-ups\n\n- none\n\n# Safety and authority\n\nController-owned.",
-      "parent": 1600,
+      "category": "active_multi_step_child",
+      "body": "# Current status\n\nCLOSED\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\nParent tracker: #1\nImplementation branch: null\nImplementation PR: Not opened\n\nDepends on: none\nBlocks: none\nRelated: none\n\n this issue exists\n\nSomething.\n\n# Goal and scope\n\nSomething.\n\n# Completed work\n\n- Done\n\n# Current blockers and findings\n\n- none\n\n# Remaining steps\n\n- none\n\n# Acceptance criteria\n\n- [ ] Not checked\n\n# Linked PRs and follow-ups\n\n- none\n\n# Decisions and durable evidence\n\n- none\n\n# Safety and authority\n\nController-owned.",
+      "parent": 1,
       "acceptance_criteria_met": false
     }
   ]

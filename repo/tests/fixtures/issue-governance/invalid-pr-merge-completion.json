@@ -1,29 +1,25 @@
 {
-  "snapshot_version": "1.0.0",
+  "snapshot_version": "2.0.0",
   "repository": {
     "fixture_id": "invalid-pr-merge-completion",
     "governance_mode": "toolkit_governed",
-    "canonical_parent_tracker": 1100,
-    "policy_version": "1.1.0"
+    "canonical_parent_tracker": 1,
+    "policy_version": "2.0.0"
   },
   "issues": [
     {
-      "id": 1100,
+      "id": 1,
       "state": "open",
       "category": "canonical_parent_tracker",
-      "body": "# Programme Tracker\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\n- [ ] #1101 Task\n",
-      "children": [1101],
-      "checklist_items": [
-        { "checked": false, "text": "- [ ] #1101 Task", "linked_issue": 1101 }
-      ]
+      "body": "# Tracker\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\n- [ ] #2 Task\n",
+      "children": [2]
     },
     {
-      "id": 1101,
+      "id": 2,
       "state": "open",
       "category": "active_multi_step_child",
-      "body": "# Current status\n\nIN PROGRESS\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\nParent tracker: #1100\n\nPR #500 merged = task complete.\n\n# Why this issue exists\n\nTo do something.\n\n# Goal and scope\n\nDo something.\n\n# Completed work\n\n- none\n\n# Current blockers and findings\n\n- none\n\n# Remaining steps\n\n- [ ] Do it\n\n# Acceptance criteria\n\n- [ ] Done\n\n# Linked PRs and follow-ups\n\n- PR #500 — merged\n\n# Decisions and durable evidence\n\n- none\n\n# Safety and authority\n\nController-owned.",
-      "parent": 1100,
-      "linked_prs": [{ "number": 500, "state": "merged", "merged": true }]
+      "body": "# Current status\n\nIN PROGRESS\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\nParent tracker: #1\nImplementation branch: null\nImplementation PR: Not opened\nDepends on: none\nBlocks: none\nRelated: none\n\nThe PR merge is sufficient for completion.\n\n# Why this issue exists\n\nSomething.\n\n# Goal and scope\n\nSomething.\n\n# Completed work\n\n- none\n\n# Current blockers and findings\n\n- none\n\n# Remaining steps\n\n- [ ] Do it\n\n# Acceptance criteria\n\n- [ ] Done\n\n# Linked PRs and follow-ups\n\n- none\n\n# Decisions and durable evidence\n\n- none\n\n# Safety and authority\n\nController-owned.",
+      "parent": 1
     }
   ]
 }

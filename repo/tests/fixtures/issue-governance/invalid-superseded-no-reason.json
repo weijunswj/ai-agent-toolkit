@@ -1,26 +1,23 @@
 {
-  "snapshot_version": "1.0.0",
+  "snapshot_version": "2.0.0",
   "repository": {
     "fixture_id": "invalid-superseded-no-reason",
     "governance_mode": "toolkit_governed",
-    "canonical_parent_tracker": 1300,
-    "policy_version": "1.1.0"
+    "canonical_parent_tracker": 1,
+    "policy_version": "2.0.0"
   },
   "issues": [
     {
-      "id": 1300,
+      "id": 1,
       "state": "open",
       "category": "canonical_parent_tracker",
-      "body": "# Programme Tracker\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n",
-      "children": [],
-      "checklist_items": []
+      "body": "# Tracker\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n"
     },
     {
-      "id": 1301,
+      "id": 2,
       "state": "closed",
       "category": "superseded_duplicate_not_planned",
-      "body": "This issue is closed.",
-      "parent": null
+      "body": "This issue was superseded."
     }
   ]
 }

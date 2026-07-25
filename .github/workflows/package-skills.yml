@@ -24,6 +24,9 @@ jobs:
         with:
           node-version: 22
 
+      - name: Install dependencies
+        run: npm ci
+
       - name: Check packaging inputs
         run: node repo/scripts/package-skills.cjs --check
 

@@ -23,5 +23,8 @@
     "package:packs:check": "node repo/scripts/package-packs.cjs --check",
     "safe-source-update": "node repo/scripts/safe-source-update.cjs"
   },
-  "license": "UNLICENSED"
+  "license": "UNLICENSED",
+  "dependencies": {
+    "ajv": "8.20.0"
+  }
 }

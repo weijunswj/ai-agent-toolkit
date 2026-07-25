@@ -7,7 +7,7 @@
   "required": ["snapshot_version", "repository", "issues"],
   "additionalProperties": false,
   "properties": {
-    "snapshot_version": { "type": "string", "const": "1.0.0" },
+    "snapshot_version": { "type": "string", "const": "2.0.0" },
     "repository": { "$ref": "#/$defs/repository_metadata" },
     "issues": { "type": "array", "items": { "$ref": "#/$defs/issue_record" } }
   },
@@ -30,7 +30,7 @@
       "properties": {
         "id": { "type": ["integer", "string"] },
         "state": { "type": "string", "enum": ["open", "closed"] },
-        "category": { "type": "string", "enum": ["canonical_parent_tracker", "active_multi_step_child", "small_atomic_child", "recurring_evidence_log", "superseded_duplicate_not_planned", "complete"] },
+        "category": { "type": "string", "enum": ["canonical_parent_tracker", "active_multi_step_child", "small_atomic_child", "recurring_evidence_log", "superseded_duplicate_not_planned"] },
         "body": { "type": "string", "minLength": 1 },
         "parent": { "type": ["integer", "string", "null"] },
         "children": { "type": "array", "items": { "type": ["integer", "string"] }, "uniqueItems": true },

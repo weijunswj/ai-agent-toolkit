@@ -14,7 +14,7 @@ Toolkit global issue-governance standard for `toolkit-governed` repositories.
 - Provides machine-readable policy metadata and versioning.
 - Supplies templates for parent trackers, comprehensive children, and reduced atomic children.
 - Validates local issue snapshots with a deterministic advisory audit.
-- Produces stable finding codes (GOV001–GOV020).
+- Produces stable finding codes (GOV001–GOV027).
 - Enforces controller-vs. implementer authority boundaries.
 
 ## Quick Start
@@ -33,4 +33,4 @@ node repo/scripts/audit-issue-governance.cjs --input snapshot.json --format huma
 ## Source
 
 Canonical source: `_projects/development/issue-governance/_main/`
-Policy version: 1.0.0
+Policy version: 2.0.0

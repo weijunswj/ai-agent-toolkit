@@ -1,10 +1,10 @@
 {
-  "snapshot_version": "1.0.0",
+  "snapshot_version": "2.0.0",
   "repository": {
     "fixture_id": "valid-no-op-audit",
     "governance_mode": "toolkit_governed",
     "canonical_parent_tracker": 10,
-    "policy_version": "1.1.0"
+    "policy_version": "2.0.0"
   },
   "issues": [
     {
@@ -20,9 +20,11 @@
     {
       "id": 11,
       "state": "closed",
-      "category": "complete",
-      "body": "# Current status\n\nCOMPLETE\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\nParent tracker: #10\n\n# Why this issue exists\n\nDone task.\n\n# Completed work\n\n- Done\n\n# Blockers\n\n- none\n\n# Remaining work\n\n- none\n\n# Acceptance criteria\n\n- [x] Done\n\n# Linked PRs or follow-ups\n\n- none\n\n# Safety and authority\n\nController verified.",
+      "category": "active_multi_step_child",
+      "body": "# Current status\n\nCOMPLETE\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\nParent tracker: #10\nImplementation branch: done-branch\nImplementation PR: #50\nDepends on: none\nBlocks: none\nRelated: none\n\n# Why this issue exists\n\nDone task.\n\n# Goal and scope\n\nDone.\n\n# Completed work\n\n- Done\n\n# Current blockers and findings\n\n- none\n\n# Remaining steps\n\n- none\n\n# Acceptance criteria\n\n- [x] Done\n\n# Linked PRs and follow-ups\n\n- none\n\n# Decisions and durable evidence\n\n- Done 2026-07-25\n\n# Safety and authority\n\nController verified.",
       "parent": 10,
+      "implementation_branch": "done-branch",
+      "implementation_prs": [{ "number": 50, "state": "merged" }],
       "acceptance_criteria_met": true
     }
   ]

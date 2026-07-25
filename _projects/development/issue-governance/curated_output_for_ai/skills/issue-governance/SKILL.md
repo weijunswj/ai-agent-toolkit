@@ -43,9 +43,9 @@ Governance mode must be selected. Toolkit must not silently install or enforce t
 
 Each governed repository declares exactly one canonical programme tracker (the parent). The parent is a concise checklist-first queue, not a duplicate evidence archive.
 
-Each material task has one comprehensive child issue linked back to the parent. The child includes current status, reconciliation timestamp, parent link, why the issue exists, goal and scope, completed work, blockers, remaining steps, acceptance criteria, linked PRs, decisions, and safety/authority.
+Each material task has one comprehensive child issue linked back to the parent. The child includes current status, reconciliation timestamp, parent link, implementation branch and PR, dependencies, blockers, related work, why the issue exists, goal and scope, completed work, blockers, remaining steps, acceptance criteria, linked PRs, decisions, and safety/authority.
 
-Small atomic tasks may use a reduced template but must retain the core required dimensions.
+Closed issues retain their structural profile and must pass all required-section checks. Small atomic tasks may use a reduced template but must retain the core required dimensions.
 
 ## Authority Model
 
@@ -84,6 +84,7 @@ Rules:
 - Exactly one timestamp per issue body.
 - Replace rather than stack.
 - Advance only after substantive reconciliation.
+- Two-digit day required (DD format).
 
 ## Advisory Audit Command
 
@@ -100,10 +101,10 @@ Exit codes:
 
 ## Stable Finding Codes
 
-See `repo/docs/ISSUE-GOVERNANCE.md` for the complete list of GOV001–GOV020 finding codes.
+See `repo/docs/ISSUE-GOVERNANCE.md` for the complete list of GOV001–GOV027 finding codes.
 
 ## Source
 
 Canonical source: `_projects/development/issue-governance/_main/`
 Published surface: `skills/issue-governance/`
-Policy version: 1.0.0
+Policy version: 2.0.0

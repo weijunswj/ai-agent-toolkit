@@ -281,6 +281,8 @@ const allowedRootEntries = new Set([
   'README.md',
   '_projects',
   'package.json',
+  'package-lock.json',
+  'node_modules',
   'repo',
   'skills'
 ]);
@@ -295,7 +297,8 @@ const ignoredLocalDirs = new Set([
   'n8n-workflows',
   '.to-sanitise',
   '.sanitised',
-  '.n8n-workflow-backups'
+  '.n8n-workflow-backups',
+  'node_modules'
 ]);
 
 const allowedTrackedRuntimeTemplatePrefixes = [

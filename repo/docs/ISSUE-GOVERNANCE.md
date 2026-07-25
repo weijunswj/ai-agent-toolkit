@@ -28,10 +28,11 @@ A normal task line resembles:
 
 ### One comprehensive child per material task
 
-Every material task gets one child issue linked back to the repository's canonical parent tracker. The child must include at minimum:
+Every material task gets one child issue linked back to the repository's canonical parent tracker. Closed issues retain their structural profile and must pass all required-section checks. The child must include at minimum:
 
 - Current status and one reconciliation timestamp.
-- Parent tracker and implementation PR.
+- Parent tracker, implementation branch and implementation PR.
+- Dependencies, blockers and related work.
 - Why the issue exists.
 - Goal and scope, including non-goals.
 - Completed work.
@@ -47,7 +48,7 @@ Every material task gets one child issue linked back to the repository's canonic
 Small atomic tasks may use a shorter template but must retain:
 
 - Current status and reconciliation timestamp.
-- Parent link.
+- Parent link, implementation branch and implementation PR.
 - Why the task exists.
 - Completed work.
 - Blockers.
@@ -107,7 +108,8 @@ The audit detects: multiple active implementation PRs, replacement PRs without r
 
 The canonical policy is versioned using semver (`MAJOR.MINOR.PATCH`).
 
-- Current version: `1.1.0`
+- Current version: `2.0.0`
+- Snapshot schema version: `2.0.0`
 - Source: `_projects/development/issue-governance/_main/policy/issue-governance-policy.json`
 
 ## Canonical Runtime Authority
@@ -141,7 +143,7 @@ It supports:
 
 - Repository metadata: fixture ID, governance mode, canonical parent tracker, policy version.
 - Issue records: ID, state, category, body, parent, children, linked PRs, reconciliation metadata.
-- Issue categories: canonical_parent_tracker, active_multi_step_child, small_atomic_child, recurring_evidence_log, superseded_duplicate_not_planned, complete.
+- Issue categories: canonical_parent_tracker, active_multi_step_child, small_atomic_child, recurring_evidence_log, superseded_duplicate_not_planned.
 
 ## Advisory Audit Command
 
@@ -170,8 +172,8 @@ node repo/scripts/audit-issue-governance.cjs --input <snapshot.json> --format hu
 | GOV005 | error | active child absent from its declared parent checklist |
 | GOV006 | error | parent/child link that is not bidirectional |
 | GOV007 | error | checked parent item while the child remains open or acceptance is incomplete |
-| GOV008 | error | closed or complete child with unchecked acceptance criteria |
-| GOV009 | warning | complete child whose parent item remains unchecked or materially stale |
+| GOV008 | error | closed child with unchecked acceptance criteria |
+| GOV009 | warning | closed child whose parent item remains unchecked or materially stale |
 | GOV010 | error | missing current status |
 | GOV011 | error | missing reconciliation timestamp |
 | GOV012 | error | more than one reconciliation timestamp |
@@ -186,7 +188,7 @@ node repo/scripts/audit-issue-governance.cjs --input <snapshot.json> --format hu
 | GOV021 | warning | unknown governance mode requires selection |
 | GOV022 | error | multiple active implementation PRs for one issue |
 | GOV023 | error | implementation branch and body metadata disagree |
-| GOV024 | error | replacement PR without recorded exceptional reason |
+| GOV024 | error | replacement PR without recorded exceptional reason or supersession |
 | GOV025 | error | duplicate issue ID |
 | GOV026 | error | canonical parent identifier points to missing or non-parent issue |
 | GOV027 | error | structured derived field contradicts body content |

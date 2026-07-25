@@ -28,6 +28,9 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install dependencies
+        run: npm ci
+
       - name: Run validation
         run: |
           node repo/scripts/sync-repo-doc-contract.cjs --check

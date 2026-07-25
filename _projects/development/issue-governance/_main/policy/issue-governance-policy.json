@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "policy_id": "toolkit-issue-governance",
-  "policy_version": "1.1.0",
+  "policy_version": "2.0.0",
   "policy_version_policy": "semver",
   "title": "Toolkit Global Issue-Governance Standard",
   "description": "Canonical machine-readable policy for Toolkit-governed repository issue tracking.",
@@ -28,28 +28,28 @@
       "max_per_repository": 1
     },
     "active_multi_step_child": {
-      "description": "Full comprehensive standard for material tasks.",
+      "description": "Full comprehensive standard for material tasks. Retained when closed.",
       "is_implementation_work": true,
       "required_sections": [
         "current_status", "reconciliation_timestamp", "parent_tracker",
-        "implementation_pr", "dependencies", "blockers", "related_work",
-        "why_this_issue_exists", "goal_and_scope", "completed_work",
+        "implementation_branch", "implementation_pr", "dependencies", "blockers",
+        "related_work", "why_this_issue_exists", "goal_and_scope", "completed_work",
         "current_blockers_and_findings", "remaining_steps", "acceptance_criteria",
         "linked_prs_and_followups", "decisions_and_durable_evidence", "safety_and_authority"
       ]
     },
     "small_atomic_child": {
-      "description": "Reduced standard for small tasks.",
+      "description": "Reduced standard for small tasks. Retained when closed.",
       "is_implementation_work": true,
       "required_sections": [
         "current_status", "reconciliation_timestamp", "parent_link",
+        "implementation_branch", "implementation_pr",
         "why_this_issue_exists", "completed_work", "blockers",
         "remaining_work", "acceptance_criteria", "linked_prs_or_followups", "safety_and_authority"
       ]
     },
     "recurring_evidence_log": { "description": "Latest verdict first with bounded historical evidence.", "is_implementation_work": false },
-    "superseded_duplicate_not_planned": { "description": "Reason and successor recorded before closure.", "is_implementation_work": false },
-    "complete": { "description": "Acceptance and linked follow-ups independently verified.", "is_implementation_work": false }
+    "superseded_duplicate_not_planned": { "description": "Reason and successor recorded before closure.", "is_implementation_work": false }
   },
   "reconciliation_timestamp": {
     "format": "Last reconciled: **DD Month YYYY, HH:mm SGT**",
@@ -99,8 +99,8 @@
     "GOV005": "active_child_absent_from_parent_checklist",
     "GOV006": "parent_child_link_not_bidirectional",
     "GOV007": "checked_parent_incomplete_child",
-    "GOV008": "closed_complete_child_incomplete_acceptance",
-    "GOV009": "complete_child_parent_unchecked_or_stale",
+    "GOV008": "closed_child_incomplete_acceptance",
+    "GOV009": "closed_child_parent_unchecked_or_stale",
     "GOV010": "missing_current_status",
     "GOV011": "missing_reconciliation_timestamp",
     "GOV012": "multiple_reconciliation_timestamps",

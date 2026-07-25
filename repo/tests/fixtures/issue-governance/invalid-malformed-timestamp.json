@@ -1,28 +1,25 @@
 {
-  "snapshot_version": "1.0.0",
+  "snapshot_version": "2.0.0",
   "repository": {
     "fixture_id": "invalid-malformed-timestamp",
     "governance_mode": "toolkit_governed",
-    "canonical_parent_tracker": 800,
-    "policy_version": "1.1.0"
+    "canonical_parent_tracker": 1,
+    "policy_version": "2.0.0"
   },
   "issues": [
     {
-      "id": 800,
+      "id": 1,
       "state": "open",
       "category": "canonical_parent_tracker",
-      "body": "# Programme Tracker\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\n- [ ] #801 Task\n",
-      "children": [801],
-      "checklist_items": [
-        { "checked": false, "text": "- [ ] #801 Task", "linked_issue": 801 }
-      ]
+      "body": "# Tracker\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\n- [ ] #2 Task\n",
+      "children": [2]
     },
     {
-      "id": 801,
+      "id": 2,
       "state": "open",
       "category": "active_multi_step_child",
-      "body": "# Current status\n\nIN PROGRESS\n\nLast reconciled: 25 July 2026\n\nParent tracker: #800\n\n# Why this issue exists\n\nTo do something.\n\n# Goal and scope\n\nDo something.\n\n# Completed work\n\n- none\n\n# Current blockers and findings\n\n- none\n\n# Remaining steps\n\n- [ ] Do it\n\n# Acceptance criteria\n\n- [ ] Done\n\n# Linked PRs and follow-ups\n\n- none\n\n# Decisions and durable evidence\n\n- none\n\n# Safety and authority\n\nController-owned.",
-      "parent": 800
+      "body": "# Current status\n\nIN PROGRESS\n\nLast reconciled: 25 July 2026, 12:00 SGT\n\nParent tracker: #1\nImplementation branch: null\nImplementation PR: Not opened\n\nDepends on: none\nBlocks: none\nRelated: none\n\n this issue exists\n\nSomething.\n\n# Goal and scope\n\nSomething.\n\n# Completed work\n\n- none\n\n# Current blockers and findings\n\n- none\n\n# Remaining steps\n\n- [ ] Do it\n\n# Acceptance criteria\n\n- [ ] Done\n\n# Linked PRs and follow-ups\n\n- none\n\n# Decisions and durable evidence\n\n- none\n\n# Safety and authority\n\nController-owned.",
+      "parent": 1
     }
   ]
 }

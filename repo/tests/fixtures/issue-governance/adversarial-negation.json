@@ -1,16 +1,25 @@
 {
-  "snapshot_version": "1.0.0",
-  "repository": { "fixture_id": "adversarial-negation", "governance_mode": "toolkit_governed", "canonical_parent_tracker": 2100, "policy_version": "1.1.0" },
+  "snapshot_version": "2.0.0",
+  "repository": {
+    "fixture_id": "adversarial-negation",
+    "governance_mode": "toolkit_governed",
+    "canonical_parent_tracker": 1,
+    "policy_version": "2.0.0"
+  },
   "issues": [
     {
-      "id": 2100, "state": "open", "category": "canonical_parent_tracker",
-      "body": "# Programme Tracker\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\n- [ ] #2101 Task\n",
-      "children": [2101]
+      "id": 1,
+      "state": "open",
+      "category": "canonical_parent_tracker",
+      "body": "# Tracker\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\n- [ ] #2 Task\n",
+      "children": [2]
     },
     {
-      "id": 2101, "state": "open", "category": "active_multi_step_child",
-      "body": "# Current status\n\nIN PROGRESS\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\nParent tracker: #2100\nImplementation PR: #2110\n\nRemember: PR merge is not task completion. The implementer must not claim to have independently verified acceptance.\n\n# Why this issue exists\n\nTo do something.\n\n# Goal and scope\n\nDo something.\n\n# Completed work\n\n- none\n\n# Current blockers and findings\n\n- none\n\n# Remaining steps\n\n- [ ] Do it\n\n# Acceptance criteria\n\n- [ ] Done\n\n# Linked PRs and follow-ups\n\n- none\n\n# Decisions and durable evidence\n\n- none\n\n# Safety and authority\n\nController-owned.",
-      "parent": 2100
+      "id": 2,
+      "state": "open",
+      "category": "active_multi_step_child",
+      "body": "# Current status\n\nIN PROGRESS\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\nParent tracker: #1\nImplementation branch: null\nImplementation PR: Not opened\n\nPR merge is not task completion. The implementer must not claim independent acceptance.\n\n# Why this issue exists\n\nSomething.\n\n# Goal and scope\n\nSomething.\n\n# Completed work\n\n- none\n\n# Current blockers and findings\n\n- none\n\n# Remaining steps\n\n- [ ] Do it\n\n# Acceptance criteria\n\n- [ ] Done\n\n# Linked PRs and follow-ups\n\n- none\n\n# Decisions and durable evidence\n\n- none\n\n# Safety and authority\n\nController-owned.",
+      "parent": 1
     }
   ]
 }

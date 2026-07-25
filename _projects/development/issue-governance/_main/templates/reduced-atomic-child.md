@@ -1,11 +1,11 @@
 # Reduced Atomic Child Issue Template
 
 **Governance mode:** `toolkit-governed`
-**Policy version:** 1.0.0
+**Policy version:** 2.0.0
 
 ## Instructions
 
-Use this template for small, atomic tasks that do not require the full comprehensive structure.
+Use this template for small, atomic tasks that do not require the full comprehensive structure. Closed issues retain their structural profile and must pass all required-section checks.
 
 - This body is current authority. Comments preserve chronology.
 - PR merge does not automatically complete a task.
@@ -25,7 +25,11 @@ Use this template for small, atomic tasks that do not require the full comprehen
 Last reconciled: **DD Month YYYY, HH:mm SGT**
 
 Parent tracker: #<parent_issue>
-Implementation PR: #<pr_number> or `none yet`
+Implementation branch: <branch_name> or `null`
+Implementation PR: #<pr_number> or `Not opened`
+Depends on: #<issue_number> or `none`
+Blocks: #<issue_number> or `none`
+Related: #<issue_number> or `none`
 
 # Why this issue exists
 
@@ -59,11 +63,13 @@ Implementation PR: #<pr_number> or `none yet`
 
 ## Required Sections Checklist
 
-When auditing, these sections must be present:
+When auditing, these sections must be present (including for closed issues):
 
 - [ ] Current status (non-empty)
-- [ ] Reconciliation timestamp (exactly one, well-formed)
-- [ ] Parent tracker link
+- [ ] Reconciliation timestamp (exactly one, well-formed DD format)
+- [ ] Parent link
+- [ ] Implementation branch
+- [ ] Implementation PR
 - [ ] Why this issue exists
 - [ ] Completed work
 - [ ] Blockers
