@@ -1397,7 +1397,7 @@ test('sync export blocks an explicitly missing policy before canonical, declarat
   const reportPath = path.join(fixtureRoot, '.n8n-local', 'reports', 'latest-n8n-workflow-operation.json');
   writeFixture(workflowPath, portable.canonicalWorkflowForGit(workflow()));
   writeFixture(exportPath, workflow());
-  writeFixture(declarationPath, { schemaVersion: 1, workflows: [] });
+  fs.mkdirSync(toolkitDir, { recursive: true });
   const baseArgs = [
     path.join(helperRoot, 'sync-n8n-live-exports.cjs'),
     exportsDir,
@@ -1471,7 +1471,7 @@ test('duplicate transaction targets fail before directories, stages, backups, or
 });
 
 test('transaction validates the complete batch in memory before mutation and reruns byte-idempotently', () => {
-  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-descriptor-transaction-'));
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-transaction-batch-'));
   const first = path.join(fixtureRoot, 'first.json');
   const second = path.join(fixtureRoot, 'second.json');
   const created = path.join(fixtureRoot, 'created.json');
@@ -1479,8 +1479,8 @@ test('transaction validates the complete batch in memory before mutation and rer
   fs.writeFileSync(second, '{"original":2}\n');
   const originals = new Map([[first, fs.readFileSync(first)], [second, fs.readFileSync(second)]]);
   const changes = [
-    { targetPath: first, content: '{"next":1}\n', validateContent: (content) => JSON.parse(content) },
-    { targetPath: second, content: '{"next":2}\n', validateContent: (content) => JSON.parse(content) },
+    { targetPath: first, content: '{"original":1}\n', validateContent: (content) => JSON.parse(content) },
+    { targetPath: second, content: '{"original":2}\n', validateContent: (content) => JSON.parse(content) },
     { targetPath: created, content: '{"created":true}\n', validateContent: (content) => JSON.parse(content) },
   ];
   assert.throws(
@@ -1509,10 +1509,11 @@ test('transaction helper has no pathname-destructive boundary', () => {
   );
   assert.doesNotMatch(transactionSource, /\b(?:rmSync|unlinkSync|renameSync|copyFileSync|cpSync|rmdirSync)\s*\(/);
   assert.deepEqual(exportSync.TRANSACTION_FILESYSTEM_AUDIT, [
-    { boundary: 'existing-target-admission', classification: 'identity-bound-open-descriptor' },
-    { boundary: 'existing-target-mutation', classification: 'identity-bound-descriptor-write' },
+    { boundary: 'existing-target-admission', classification: 'read-only-identity-and-link-topology' },
+    { boundary: 'existing-target-mutation', classification: 'unsupported-fail-closed-manual-apply' },
+    { boundary: 'existing-target-noop', classification: 'supported-no-write-revalidation' },
     { boundary: 'missing-target-installation', classification: 'safe-no-overwrite-exclusive-create' },
-    { boundary: 'precommit-rollback', classification: 'identity-bound-descriptor-write-or-partial-recovery' },
+    { boundary: 'precommit-rollback', classification: 'new-target-evidence-retention-partial-recovery' },
     { boundary: 'stage-cleanup', classification: 'eliminated-no-pathname' },
     { boundary: 'quarantine-transition', classification: 'eliminated-no-pathname' },
     { boundary: 'quarantine-cleanup', classification: 'eliminated-no-pathname' },
@@ -1596,7 +1597,221 @@ test('missing-target installation fails closed when exclusive creation is unavai
   fs.rmSync(fixtureRoot, { recursive: true, force: true });
 });
 
-test('existing-target replacement after descriptor proof survives descriptor-bound mutation', async (t) => {
+test('existing-target capability is explicit and changed files fail closed with a complete manual batch', () => {
+  for (const platform of ['win32', 'linux', 'darwin', 'freebsd']) {
+    assert.deepEqual(exportSync.detectExistingTargetMutationCapability(platform), {
+      capability: 'conditional-single-target-existing-file-replacement',
+      supported: false,
+      reasonCode: 'NODE_CORE_ATOMIC_EXISTING_REPLACE_UNAVAILABLE',
+      platform,
+    });
+  }
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-manual-batch-'));
+  const manualRoot = path.join(fixtureRoot, '.n8n-local', 'manual-apply');
+  const workflow = path.join(fixtureRoot, 'workflow.json');
+  const declaration = path.join(fixtureRoot, 'portable-credentials.json');
+  fs.writeFileSync(workflow, 'workflow-original\n');
+  const error = expectCode(
+    () => exportSync.replaceFilesTransactionally(
+      [
+        { targetPath: workflow, content: 'workflow-candidate\n' },
+        { targetPath: declaration, content: 'declaration-candidate\n' },
+      ],
+      {
+        manualApplication: {
+          basePath: fixtureRoot,
+          rootPath: manualRoot,
+          operationId: 'manual-batch-fixture',
+        },
+      }
+    ),
+    'N8N_CANONICAL_TRANSACTION_MANUAL_APPLY_REQUIRED'
+  );
+  assert.equal(error.recoveryState, 'manual_apply_required');
+  assert.equal(error.transactionPhase, 'PREPARED');
+  assert.notEqual(error.recoveryState, 'rolled_back');
+  assert.notEqual(error.recoveryState, 'partial_preserved');
+  assert.notEqual(error.recoveryState, 'committed_cleanup_required');
+  assert.deepEqual(error.manualApplication, {
+    operationId: 'manual-batch-fixture',
+    candidateCount: 2,
+    preserved: true,
+  });
+  assert.equal(fs.readFileSync(workflow, 'utf8'), 'workflow-original\n');
+  assert.equal(fs.existsSync(declaration), false);
+  const bundle = path.join(manualRoot, 'manual-batch-fixture');
+  const manifest = JSON.parse(fs.readFileSync(path.join(bundle, 'manifest.json'), 'utf8'));
+  assert.deepEqual(manifest.targets.map((entry) => entry.target), [
+    'workflow.json',
+    'portable-credentials.json',
+  ]);
+  assert.equal(fs.readFileSync(path.join(bundle, 'candidate-000.json'), 'utf8'), 'workflow-candidate\n');
+  assert.equal(fs.readFileSync(path.join(bundle, 'candidate-001.json'), 'utf8'), 'declaration-candidate\n');
+  assert.equal(manifest.result, 'MANUAL_APPLICATION_REQUIRED');
+  assert.doesNotMatch(JSON.stringify(error), new RegExp(fixtureRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  fs.rmSync(fixtureRoot, { recursive: true, force: true });
+});
+
+test('changed existing export writes only a privacy-safe manual-action report and complete local candidate bundle', () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-manual-export-'));
+  const workflowDir = path.join(fixtureRoot, 'n8n-workflows');
+  const exportsDir = path.join(fixtureRoot, 'exports');
+  const toolkitDir = path.join(workflowDir, 'toolkit');
+  const workflowPath = path.join(workflowDir, 'portable.json');
+  const exportPath = path.join(exportsDir, 'portable.live-export.json');
+  const declarationPath = path.join(toolkitDir, 'portable-credentials.json');
+  const bindingsPath = path.join(fixtureRoot, '.n8n-local', 'bindings.json');
+  const canonical = portable.canonicalWorkflowForGit(workflow());
+  const live = structuredClone(workflow());
+  live.nodes[0].position = [640, 320];
+  writeFixture(workflowPath, canonical);
+  writeFixture(exportPath, live);
+  fs.mkdirSync(toolkitDir, { recursive: true });
+  const original = fs.readFileSync(workflowPath);
+
+  const result = spawnSync(process.execPath, [
+    path.join(helperRoot, 'sync-n8n-live-exports.cjs'),
+    exportsDir,
+    workflowDir,
+    bindingsPath,
+    '--sync-exported-only',
+    `--portable-credentials=${declarationPath}`,
+  ], { cwd: fixtureRoot, encoding: 'utf8' });
+
+  assert.equal(result.status, 2);
+  assert.equal(fs.readFileSync(workflowPath).equals(original), true);
+  assert.equal(fs.existsSync(declarationPath), false);
+  assert.equal(fs.existsSync(bindingsPath), false);
+  assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, new RegExp(fixtureRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  const reportText = fs.readFileSync(
+    path.join(fixtureRoot, '.n8n-local', 'reports', 'latest-n8n-workflow-operation.json'),
+    'utf8'
+  );
+  const report = JSON.parse(reportText);
+  assert.equal(report.result, 'ACTION_REQUIRED');
+  assert.equal(report.code, 'N8N_CANONICAL_TRANSACTION_MANUAL_APPLY_REQUIRED');
+  assert.deepEqual(report.mutation, { attempted: false, performed: false });
+  assert.equal(report.nextAction.code, 'APPLY_CANONICAL_BATCH_WITH_SUPPORTED_ATOMIC_TOOL');
+  assert.doesNotMatch(reportText, new RegExp(fixtureRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.doesNotMatch(reportText, /target credential ID|credentialValue|encryptedData|rawWorkflow/i);
+  const manualRoot = path.join(fixtureRoot, '.n8n-local', 'manual-apply');
+  const operationDirectories = fs.readdirSync(manualRoot);
+  assert.equal(operationDirectories.length, 1);
+  const manifest = JSON.parse(fs.readFileSync(
+    path.join(manualRoot, operationDirectories[0], 'manifest.json'),
+    'utf8'
+  ));
+  assert.equal(manifest.result, 'MANUAL_APPLICATION_REQUIRED');
+  assert.deepEqual(manifest.targets.map((entry) => entry.target), [
+    'n8n-workflows/portable.json',
+    'n8n-workflows/toolkit/portable-credentials.json',
+  ]);
+  fs.rmSync(fixtureRoot, { recursive: true, force: true });
+});
+
+test('same-inode edits after final admission are preserved and never overwritten', async (t) => {
+  for (const [label, externalContent] of [
+    ['different-size edit', 'external-content-with-a-different-size\n'],
+    ['same-size edit', 'external\n'],
+  ]) {
+    await t.test(label, () => {
+      const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-same-inode-race-'));
+      const target = path.join(fixtureRoot, 'workflow.json');
+      fs.writeFileSync(target, 'original\n');
+      const objectBefore = fs.statSync(target, { bigint: true });
+      const error = expectCode(
+        () => exportSync.replaceFilesTransactionally(
+          [{ targetPath: target, content: 'candidate\n' }],
+          {
+            afterExistingTargetFinalProof(record) {
+              fs.writeFileSync(record.target, externalContent);
+            },
+          }
+        ),
+        'N8N_CANONICAL_TRANSACTION_DRIFT'
+      );
+      const objectAfter = fs.statSync(target, { bigint: true });
+      assert.equal(objectAfter.dev, objectBefore.dev);
+      assert.equal(objectAfter.ino, objectBefore.ino);
+      assert.equal(fs.readFileSync(target, 'utf8'), externalContent);
+      assert.equal(error.recoveryState, 'preserved');
+      assert.notEqual(error.transactionPhase, 'COMMITTED');
+      fs.rmSync(fixtureRoot, { recursive: true, force: true });
+    });
+  }
+});
+
+test('external hard-link aliases are never mutated by changed canonical targets', async (t) => {
+  await t.test('pre-existing alias blocks automatic mutation', (context) => {
+    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-existing-hardlink-'));
+    const target = path.join(fixtureRoot, 'workflow.json');
+    const alias = path.join(fixtureRoot, 'external-alias.json');
+    fs.writeFileSync(target, 'original\n');
+    try {
+      fs.linkSync(target, alias);
+    } catch (error) {
+      fs.rmSync(fixtureRoot, { recursive: true, force: true });
+      context.skip(`hard-link creation unavailable: ${error.code || error.message}`);
+      return;
+    }
+    const identity = fs.statSync(alias, { bigint: true });
+    const error = expectCode(
+      () => exportSync.replaceFilesTransactionally(
+        [{ targetPath: target, content: 'candidate\n' }],
+        {
+          manualApplication: {
+            basePath: fixtureRoot,
+            rootPath: path.join(fixtureRoot, '.n8n-local', 'manual-apply'),
+            operationId: 'shared-inode',
+          },
+        }
+      ),
+      'N8N_CANONICAL_TRANSACTION_MANUAL_APPLY_REQUIRED'
+    );
+    assert.equal(error.transactionPhase, 'PREPARED');
+    assert.equal(fs.readFileSync(target, 'utf8'), 'original\n');
+    assert.equal(fs.readFileSync(alias, 'utf8'), 'original\n');
+    const after = fs.statSync(alias, { bigint: true });
+    assert.equal(after.dev, identity.dev);
+    assert.equal(after.ino, identity.ino);
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  });
+
+  for (const boundary of ['afterExistingTargetAdmission', 'afterExistingTargetFinalProof']) {
+    await t.test(`alias creation at ${boundary}`, (context) => {
+      const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-hardlink-boundary-'));
+      const target = path.join(fixtureRoot, 'workflow.json');
+      const alias = path.join(fixtureRoot, 'external-alias.json');
+      fs.writeFileSync(target, 'original\n');
+      try {
+        fs.linkSync(target, `${alias}.probe`);
+        fs.rmSync(`${alias}.probe`);
+      } catch (error) {
+        fs.rmSync(fixtureRoot, { recursive: true, force: true });
+        context.skip(`hard-link creation unavailable: ${error.code || error.message}`);
+        return;
+      }
+      const hooks = {
+        [boundary]() {
+          fs.linkSync(target, alias);
+        },
+      };
+      const error = expectCode(
+        () => exportSync.replaceFilesTransactionally(
+          [{ targetPath: target, content: 'candidate\n' }],
+          hooks
+        ),
+        'N8N_CANONICAL_TRANSACTION_DRIFT'
+      );
+      assert.equal(error.recoveryState, 'preserved');
+      assert.equal(fs.readFileSync(target, 'utf8'), 'original\n');
+      assert.equal(fs.readFileSync(alias, 'utf8'), 'original\n');
+      fs.rmSync(fixtureRoot, { recursive: true, force: true });
+    });
+  }
+});
+
+test('different-inode and non-file replacements after admission survive fail-closed detection', async (t) => {
   const cases = [
     ['different bytes', (record) => fs.writeFileSync(record.target, 'external-different\n')],
     ['identical bytes and different object', (record) => fs.writeFileSync(record.target, 'original\n')],
@@ -1617,16 +1832,16 @@ test('existing-target replacement after descriptor proof survives descriptor-bou
         () => exportSync.replaceFilesTransactionally(
           [{ targetPath: target, content: 'candidate\n' }],
           {
-            afterExistingTargetIdentityProofBeforeWrite(record) {
+            beforeExistingTargetCapabilityDecision(record) {
               fs.rmSync(record.target);
               replacement(record, fixtureRoot);
               expectedExternal = fs.lstatSync(record.target);
             },
           }
         ),
-        'N8N_CANONICAL_TRANSACTION_PARTIAL_RECOVERY'
+        'N8N_CANONICAL_TRANSACTION_DRIFT'
       );
-      assert.equal(error.recoveryState, 'partial_preserved');
+      assert.equal(error.recoveryState, 'preserved');
       const current = fs.lstatSync(target);
       assert.equal(current.isDirectory(), expectedExternal.isDirectory());
       if (!current.isDirectory()) assert.notEqual(fs.readFileSync(target, 'utf8'), 'candidate\n');
@@ -1652,13 +1867,13 @@ test('existing-target replacement after descriptor proof survives descriptor-bou
       () => exportSync.replaceFilesTransactionally(
         [{ targetPath: target, content: 'candidate\n' }],
         {
-          afterExistingTargetIdentityProofBeforeWrite(record) {
+          beforeExistingTargetCapabilityDecision(record) {
             fs.rmSync(record.target);
             fs.symlinkSync(donor, record.target, 'file');
           },
         }
       ),
-      'N8N_CANONICAL_TRANSACTION_PARTIAL_RECOVERY'
+      'N8N_CANONICAL_TRANSACTION_DRIFT'
     );
     assert.equal(fs.lstatSync(target).isSymbolicLink(), true);
     assert.equal(fs.readFileSync(target, 'utf8'), 'external-link\n');
@@ -1666,25 +1881,25 @@ test('existing-target replacement after descriptor proof survives descriptor-bou
   });
 });
 
-test('descriptor admission preserves pre-mutation target and parent topology guards', async (t) => {
-  await t.test('target bytes change before descriptor admission', () => {
-    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-descriptor-preflight-'));
+test('read-only admission preserves pre-mutation target and parent topology guards', async (t) => {
+  await t.test('target bytes change after admission', () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-readonly-preflight-'));
     const target = path.join(fixtureRoot, 'workflow.json');
     fs.writeFileSync(target, 'original\n');
     const error = expectCode(
       () => exportSync.replaceFilesTransactionally(
         [{ targetPath: target, content: 'candidate\n' }],
-        { beforeTargetRevalidate(record) { fs.writeFileSync(record.target, 'external-before-open\n'); } }
+        { afterExistingTargetAdmission(record) { fs.writeFileSync(record.target, 'external-after-admission\n'); } }
       ),
       'N8N_CANONICAL_TRANSACTION_DRIFT'
     );
     assert.equal(error.recoveryState, 'preserved');
-    assert.equal(fs.readFileSync(target, 'utf8'), 'external-before-open\n');
+    assert.equal(fs.readFileSync(target, 'utf8'), 'external-after-admission\n');
     fs.rmSync(fixtureRoot, { recursive: true, force: true });
   });
 
-  await t.test('parent object changes before descriptor admission', () => {
-    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-descriptor-parent-'));
+  await t.test('parent object changes after admission', () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-readonly-parent-'));
     const parent = path.join(fixtureRoot, 'canonical');
     const displacedParent = path.join(fixtureRoot, 'canonical-displaced');
     fs.mkdirSync(parent);
@@ -1694,7 +1909,7 @@ test('descriptor admission preserves pre-mutation target and parent topology gua
       () => exportSync.replaceFilesTransactionally(
         [{ targetPath: target, content: 'candidate\n' }],
         {
-          beforeTargetRevalidate() {
+          afterExistingTargetAdmission() {
             fs.renameSync(parent, displacedParent);
             fs.mkdirSync(parent);
           },
@@ -1709,58 +1924,12 @@ test('descriptor admission preserves pre-mutation target and parent topology gua
   });
 });
 
-test('rollback never unlinks a canonical replacement after identity proof', () => {
-  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-rollback-descriptor-'));
-  const target = path.join(fixtureRoot, 'workflow.json');
-  fs.writeFileSync(target, 'original\n');
-  const error = expectCode(
-    () => exportSync.replaceFilesTransactionally(
-      [{ targetPath: target, content: 'candidate\n' }],
-      {
-        afterReplace() {
-          throw new Error('synthetic precommit failure');
-        },
-        afterRollbackIdentityProofBeforeDescriptorRestore(record) {
-          fs.rmSync(record.target);
-          fs.writeFileSync(record.target, 'external-after-proof\n');
-        },
-      }
-    ),
-    'N8N_CANONICAL_TRANSACTION_PARTIAL_RECOVERY'
-  );
-  assert.equal(error.recoveryState, 'partial_preserved');
-  assert.equal(fs.readFileSync(target, 'utf8'), 'external-after-proof\n');
-  fs.rmSync(fixtureRoot, { recursive: true, force: true });
-});
-
-test('descriptor write failure after truncation enters bounded restore instead of escaping mutation tracking', () => {
-  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-descriptor-short-write-'));
-  const target = path.join(fixtureRoot, 'workflow.json');
-  fs.writeFileSync(target, 'original\n');
-  const error = expectCode(
-    () => exportSync.replaceFilesTransactionally(
-      [{ targetPath: target, content: 'candidate\n' }],
-      {
-        writeDescriptorContent(descriptor) {
-          fs.ftruncateSync(descriptor, 0);
-          fs.writeSync(descriptor, Buffer.from('partial'), 0, 7, 0);
-          throw new Error('synthetic descriptor write failure');
-        },
-      }
-    ),
-    'N8N_CANONICAL_TRANSACTION_PARTIAL_RECOVERY'
-  );
-  assert.equal(error.recoveryState, 'partial_preserved');
-  assert.equal(fs.readFileSync(target, 'utf8'), 'original\n');
-  fs.rmSync(fixtureRoot, { recursive: true, force: true });
-});
-
-test('precommit multi-record failure restores bytes through exact descriptors but never claims exact rollback', () => {
-  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-multi-descriptor-rollback-'));
+test('changed existing record prevents the complete mixed batch from entering INSTALLING', () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-mixed-manual-batch-'));
   const workflow = path.join(fixtureRoot, 'workflow.json');
   const declaration = path.join(fixtureRoot, 'portable-credentials.json');
   fs.writeFileSync(workflow, 'workflow-original\n');
-  fs.writeFileSync(declaration, 'declaration-original\n');
+  let installingReached = false;
   const error = expectCode(
     () => exportSync.replaceFilesTransactionally(
       [
@@ -1768,17 +1937,21 @@ test('precommit multi-record failure restores bytes through exact descriptors bu
         { targetPath: declaration, content: 'declaration-candidate\n' },
       ],
       {
-        afterReplace(_record, index) {
-          if (index === 1) throw new Error('synthetic second-record failure');
+        manualApplication: {
+          basePath: fixtureRoot,
+          rootPath: path.join(fixtureRoot, '.n8n-local', 'manual-apply'),
+          operationId: 'mixed-records',
         },
+        beforeCandidateInstall() { installingReached = true; },
       }
     ),
-    'N8N_CANONICAL_TRANSACTION_PARTIAL_RECOVERY'
+    'N8N_CANONICAL_TRANSACTION_MANUAL_APPLY_REQUIRED'
   );
-  assert.equal(error.recoveryState, 'partial_preserved');
+  assert.equal(error.recoveryState, 'manual_apply_required');
+  assert.equal(error.transactionPhase, 'PREPARED');
+  assert.equal(installingReached, false);
   assert.equal(fs.readFileSync(workflow, 'utf8'), 'workflow-original\n');
-  assert.equal(fs.readFileSync(declaration, 'utf8'), 'declaration-original\n');
-  assert.deepEqual(fs.readdirSync(fixtureRoot).sort(), ['portable-credentials.json', 'workflow.json']);
+  assert.equal(fs.existsSync(declaration), false);
   fs.rmSync(fixtureRoot, { recursive: true, force: true });
 });
 
@@ -1807,11 +1980,9 @@ test('precommit failure after creating a missing target preserves the candidate 
 });
 
 test('postcommit drift preserves external state and never starts subset rollback', () => {
-  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-postcommit-descriptor-'));
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-postcommit-exclusive-'));
   const workflow = path.join(fixtureRoot, 'workflow.json');
   const declaration = path.join(fixtureRoot, 'portable-credentials.json');
-  fs.writeFileSync(workflow, 'workflow-original\n');
-  fs.writeFileSync(declaration, 'declaration-original\n');
   const error = expectCode(
     () => exportSync.replaceFilesTransactionally(
       [
@@ -1834,9 +2005,8 @@ test('postcommit drift preserves external state and never starts subset rollback
 });
 
 test('final all-record postcondition refuses false COMPLETE', () => {
-  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-final-descriptor-'));
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-final-exclusive-'));
   const target = path.join(fixtureRoot, 'workflow.json');
-  fs.writeFileSync(target, 'original\n');
   const error = expectCode(
     () => exportSync.replaceFilesTransactionally(
       [{ targetPath: target, content: 'candidate\n' }],
@@ -1859,7 +2029,6 @@ test('eliminated stage and quarantine paths cannot delete same-name external sen
   const target = path.join(fixtureRoot, 'workflow.json');
   const stageSentinel = path.join(fixtureRoot, '.external.stage');
   const quarantineSentinel = path.join(fixtureRoot, '.external.quarantine');
-  fs.writeFileSync(target, 'original\n');
   fs.writeFileSync(stageSentinel, 'external-stage\n');
   fs.writeFileSync(quarantineSentinel, 'external-quarantine\n');
   exportSync.replaceFilesTransactionally([{ targetPath: target, content: 'candidate\n' }]);
@@ -1869,7 +2038,7 @@ test('eliminated stage and quarantine paths cannot delete same-name external sen
   fs.rmSync(fixtureRoot, { recursive: true, force: true });
 });
 
-test('transactional descriptor replacement preserves modes and uses repository-safe mode for new files', () => {
+test('transactional no-op preserves existing modes and exclusive creation uses repository-safe mode', () => {
   assert.equal(exportSync.CANONICAL_NEW_FILE_MODE, 0o644);
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-descriptor-modes-'));
   const regular = path.join(fixtureRoot, 'regular.json');
@@ -1882,10 +2051,19 @@ test('transactional descriptor replacement preserves modes and uses repository-s
     fs.chmodSync(nonstandard, 0o750);
   }
   exportSync.replaceFilesTransactionally([
-    { targetPath: regular, content: 'regular-candidate\n' },
-    { targetPath: nonstandard, content: 'executable-candidate\n' },
+    { targetPath: regular, content: 'regular-original\n' },
+    { targetPath: nonstandard, content: 'executable-original\n' },
     { targetPath: created, content: 'created-candidate\n' },
   ]);
+  const once = [regular, nonstandard, created].map((filePath) => fs.readFileSync(filePath));
+  exportSync.replaceFilesTransactionally([
+    { targetPath: regular, content: 'regular-original\n' },
+    { targetPath: nonstandard, content: 'executable-original\n' },
+    { targetPath: created, content: 'created-candidate\n' },
+  ]);
+  [regular, nonstandard, created].forEach((filePath, index) => {
+    assert.equal(fs.readFileSync(filePath).equals(once[index]), true);
+  });
   if (process.platform !== 'win32') {
     assert.equal(fs.statSync(regular).mode & 0o777, 0o644);
     assert.equal(fs.statSync(nonstandard).mode & 0o777, 0o750);
@@ -1995,6 +2173,7 @@ test('failure reports map stable codes to concrete non-circular supported action
     ['N8N_CANONICAL_TRANSACTION_PARTIAL_RECOVERY', 'RECONCILE_CANONICAL_RECOVERY_EVIDENCE'],
     ['N8N_CANONICAL_TRANSACTION_COMMITTED_CLEANUP_REQUIRED', 'RECONCILE_CANONICAL_TRANSACTION_RESIDUE'],
     ['N8N_CANONICAL_TRANSACTION_NO_OVERWRITE_UNAVAILABLE', 'USE_SUPPORTED_CANONICAL_FILESYSTEM'],
+    ['N8N_CANONICAL_TRANSACTION_MANUAL_APPLY_REQUIRED', 'APPLY_CANONICAL_BATCH_WITH_SUPPORTED_ATOMIC_TOOL'],
     ['N8N_CREDENTIAL_DISCOVERY_UNAVAILABLE', 'RESTORE_CREDENTIAL_DISCOVERY_AND_RERUN'],
     ['N8N_CREDENTIAL_CLEANUP_FAILED', 'COMPLETE_CREDENTIAL_TEMP_CLEANUP'],
     ['N8N_POSTCONDITION_FAILED', 'STOP_AND_ESCALATE_POSTCONDITION'],

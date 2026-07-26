@@ -2641,7 +2641,7 @@ test('sync-n8n-live-exports.cjs strips live-only fields and target IDs while pre
   const workflowDir = path.join(cwd, 'n8n-workflows');
   const exportsDir = path.join(cwd, '.tmp', 'exports');
   const bindingsPath = path.join(cwd, '.n8n-local', 'bindings.json');
-  writeJson(path.join(workflowDir, 'workflow.json'), safeWorkflow({ id: 'wf_1', name: 'Live Workflow' }));
+  fs.mkdirSync(path.join(workflowDir, 'toolkit'), { recursive: true });
   writeJson(path.join(exportsDir, 'workflow.live-export.json'), safeWorkflow({
     id: 'wf_1',
     name: 'Live Workflow',
@@ -2670,7 +2670,14 @@ test('sync-n8n-live-exports.cjs strips live-only fields and target IDs while pre
     ],
   }));
 
-  execFileSync(process.execPath, [syncScript, exportsDir, workflowDir, bindingsPath], { cwd, stdio: 'pipe' });
+  execFileSync(process.execPath, [
+    syncScript,
+    exportsDir,
+    workflowDir,
+    bindingsPath,
+    '--sync-exported-only',
+    '--create-missing-workflows',
+  ], { cwd, stdio: 'pipe' });
   const synced = JSON.parse(fs.readFileSync(path.join(workflowDir, 'workflow.json'), 'utf8'));
 
   assert.equal(synced.active, false);
@@ -2698,7 +2705,7 @@ test('sync-n8n-live-exports.cjs preserves tags with --preserve-tags', () => {
   const workflowDir = path.join(cwd, 'n8n-workflows');
   const exportsDir = path.join(cwd, '.tmp', 'exports');
   const bindingsPath = path.join(cwd, '.n8n-local', 'bindings.json');
-  writeJson(path.join(workflowDir, 'workflow.json'), safeWorkflow({ id: 'wf_1', name: 'Live Workflow' }));
+  fs.mkdirSync(path.join(workflowDir, 'toolkit'), { recursive: true });
   writeJson(path.join(exportsDir, 'workflow.live-export.json'), safeWorkflow({
     id: 'wf_1',
     name: 'Live Workflow',
@@ -2706,7 +2713,15 @@ test('sync-n8n-live-exports.cjs preserves tags with --preserve-tags', () => {
     tagIds: ['tag_1'],
   }));
 
-  execFileSync(process.execPath, [syncScript, exportsDir, workflowDir, bindingsPath, '--preserve-tags'], { cwd, stdio: 'pipe' });
+  execFileSync(process.execPath, [
+    syncScript,
+    exportsDir,
+    workflowDir,
+    bindingsPath,
+    '--preserve-tags',
+    '--sync-exported-only',
+    '--create-missing-workflows',
+  ], { cwd, stdio: 'pipe' });
   const synced = JSON.parse(fs.readFileSync(path.join(workflowDir, 'workflow.json'), 'utf8'));
 
   assert.deepEqual(synced.tags, [{ id: 'tag_1', name: 'Prod' }]);
@@ -2741,8 +2756,11 @@ test('sync-n8n-live-exports.cjs sync-exported-only updates only current exports'
   const workflowDir = path.join(cwd, 'n8n-workflows');
   const exportsDir = path.join(cwd, '.tmp', 'exports');
   const bindingsPath = path.join(cwd, '.n8n-local', 'bindings.json');
-  writeJson(path.join(workflowDir, 'current.json'), safeWorkflow({ id: 'wf_current', name: 'Current Before' }));
+  const currentCanonical = safeWorkflow({ name: 'Current After' });
+  delete currentCanonical.id;
+  writeJson(path.join(workflowDir, 'current.json'), currentCanonical);
   writeJson(path.join(workflowDir, 'missing.json'), safeWorkflow({ id: 'wf_missing', name: 'Missing Before' }));
+  fs.mkdirSync(path.join(workflowDir, 'toolkit'), { recursive: true });
   writeJson(path.join(exportsDir, 'current.live-export.json'), safeWorkflow({ id: 'wf_current', name: 'Current After' }));
 
   execFileSync(process.execPath, [
@@ -2766,7 +2784,10 @@ test('sync-n8n-live-exports.cjs displays local paths with native separators', ()
   const workflowDir = path.join(cwd, 'n8n-workflows');
   const exportsDir = path.join(cwd, '.tmp', 'exports');
   const bindingsPath = path.join(cwd, '.n8n-local', 'bindings.json');
-  writeJson(path.join(workflowDir, 'current.json'), safeWorkflow({ id: 'wf_current', name: 'Current Before' }));
+  const currentCanonical = safeWorkflow({ name: 'Current After' });
+  delete currentCanonical.id;
+  writeJson(path.join(workflowDir, 'current.json'), currentCanonical);
+  fs.mkdirSync(path.join(workflowDir, 'toolkit'), { recursive: true });
   writeJson(path.join(exportsDir, 'current.live-export.json'), safeWorkflow({ id: 'wf_current', name: 'Current After' }));
 
   const result = runNode(syncScript, [

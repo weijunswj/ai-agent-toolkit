@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.9.10",
+  "version": "2.9.11",
   "version_policy": "semver",
-  "version_notes": "Publishes descriptor-bound canonical transactions with no pathname unlink or rename boundary across Toolkit helper surfaces.",
+  "version_notes": "Publishes fail-closed single-target canonical transaction handling and preserved manual candidate batches across Toolkit helper surfaces.",
   "outputs": [
     {
       "kind": "curated",

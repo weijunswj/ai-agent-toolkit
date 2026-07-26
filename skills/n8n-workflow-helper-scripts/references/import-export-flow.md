@@ -18,7 +18,7 @@ Use in a consumer repo, not the toolkit repo.
 
 This is a short reference, not the full runtime helper guide.
 
-Live n8n or Docker work requires approval naming the repo, environment, operation, workflow set, and exclusions.
+Live n8n or Docker work requires approval naming repo, environment, operation, workflow set, and exclusions.
 
 ## Export Review
 
@@ -33,7 +33,7 @@ Live n8n or Docker work requires approval naming the repo, environment, operatio
 - Validate the payload and canonical invariant before comparison. Valid non-dry-run import needs no routine confirmation, stays inactive, and verifies the postcondition without execution.
 - For a supported unresolved first import, create the reported name/type and rerun. Unsupported transports stop before mutation.
 - Optional misses are informational; required, ambiguous, or unsafe matches block.
-- Validate the batch before mutation. Change or restore existing files only through their identity-bound opened descriptors; create missing files exclusively. The transaction never deletes or renames a pathname. Concurrent replacements survive and produce partial recovery rather than false success.
+- Validate the batch before mutation. Existing no-ops stay read-only; missing files use exclusive creation. Changed existing files fail in `PREPARED` with an ignored local batch because Node has no safe conditional replace. Descriptor writes, link evidence, hashes, checks, and locks never authorise mutation; the transaction never deletes or renames a pathname.
 
 Do not run live import/export in CI. Keep `.tmp/**` and `.n8n-local/**` ignored and local.
 
