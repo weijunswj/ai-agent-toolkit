@@ -2,6 +2,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const { spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -11,7 +13,82 @@ const publishedRouterPath = path.resolve('skills/external-system-router/scripts/
 const authoritativeRouterPath = path.resolve(
   '_projects/development/external-system-router/_main/skill/scripts/external-system-router.cjs'
 );
+const productionAdversaryPath = path.resolve(
+  'repo/tests/fixtures/external-system-router-production-adversary.cjs'
+);
 const productionRouter = require(publishedRouterPath);
+const expectedProductionExports = Object.freeze([
+  'ALIAS_PATTERN_SOURCE',
+  'ANSWER_SCHEMA_VERSION',
+  'AUDIT_SCHEMA_VERSION',
+  'CONSUMER_SCHEMA_VERSION',
+  'ENVELOPE_SCHEMA_VERSION',
+  'HISTORY_SAFER_PATHS',
+  'HOST_ADAPTER_PLAN_SCHEMA_VERSION',
+  'INTERFACE_RESTRICTION_PATTERN_SOURCE',
+  'INVENTORY_AUTHORITY_SCHEMA_VERSION',
+  'LEDGER_SCHEMA_VERSION',
+  'N8N_DOMAIN_BODY',
+  'N8N_DOMAIN_MARKERS',
+  'OPERATION_SEMANTICS_SCHEMA_VERSION',
+  'QUESTION_BANK_SCHEMA_VERSION',
+  'RECEIPT_SCHEMA_VERSION',
+  'RECONCILIATION_TRIGGERS',
+  'REGISTRY_SCHEMA_VERSION',
+  'RISK_TIERS',
+  'ROUTER_VERSION',
+  'ROUTE_LIFECYCLE_SCHEMA_VERSION',
+  'applyN8nMarkerChange',
+  'assertNoSecretMaterial',
+  'assertObjectiveComplete',
+  'assertOperationAuthorized',
+  'assertWriteGate',
+  'bindGraphicalApproval',
+  'buildCapabilityLedger',
+  'buildHostAdapterPlan',
+  'buildReconciliationQuestionBank',
+  'capabilityAuditDigest',
+  'classifyRisk',
+  'createOperationReceipt',
+  'deduplicateDriftEvidence',
+  'defaultLocalStatePaths',
+  'defaultRegistryPath',
+  'evaluateRouteLifecycle',
+  'hostAdapterPlanDigest',
+  'inferIntentCapabilities',
+  'inferRepositoryCapabilities',
+  'inspectN8nMarker',
+  'isPublicHttpsOrigin',
+  'isPublicHttpsReference',
+  'loadTrustedInventorySnapshot',
+  'objectiveAuthorityDigest',
+  'operationApprovalBinding',
+  'operationReceiptRouteDigest',
+  'operationSemanticsDigest',
+  'recommendN8nComponents',
+  'reconcileCapabilities',
+  'renderGraphicalApprovalQuestion',
+  'resolveProviderTarget',
+  'runCli',
+  'sanitizeDriftEvidence',
+  'selectStrongestAdmissibleInterface',
+  'sha256',
+  'targetBindingDigest',
+  'targetInventoryDigest',
+  'usage',
+  'validateAuthorizationEnvelope',
+  'validateCapabilityAudit',
+  'validateCapabilityLedger',
+  'validateConsumerRequirements',
+  'validateGraphicalDisclosure',
+  'validateHistoryDiscovery',
+  'validateHostAdapterPlan',
+  'validateOperationReceipt',
+  'validateOperationSemantics',
+  'validateProviderTargetRegistry',
+  'validateReconciliationAnswers',
+  'validateReconciliationQuestionBank'
+]);
 const inventoryRouterOwners = new WeakMap();
 const planRouterOwners = new WeakMap();
 const routeRouterOwners = new WeakMap();
@@ -196,9 +273,19 @@ function currentTargetFor(audits, overrides = {}) {
   return value;
 }
 
-function inventorySourceForRouter(routerSourcePath, audits, targetOverrides = {}, registryOverrides = {}) {
+function inventorySourceForRouter(
+  routerSourcePath,
+  audits,
+  targetOverrides = {},
+  registryOverrides = {},
+  harnessOptions = {}
+) {
   const entries = Array.isArray(audits) ? audits : [audits];
-  const harness = createExternalSystemRouterTestHarness(routerSourcePath, 'external-inventory-authority-');
+  const harness = createExternalSystemRouterTestHarness(
+    routerSourcePath,
+    'external-inventory-authority-',
+    harnessOptions
+  );
   const { root, sourcePath, identity } = harness;
   const inventoryGeneration = targetOverrides.inventoryGeneration || `sha256:${'9'.repeat(64)}`;
   const target = currentTargetFor(entries, { inventoryGeneration, ...targetOverrides });
@@ -212,7 +299,15 @@ function inventorySourceForRouter(routerSourcePath, audits, targetOverrides = {}
     ...registryOverrides
   };
   fs.writeFileSync(sourcePath, `${JSON.stringify(registry, null, 2)}\n`);
-  return { root, sourcePath, registry, target, harnessRouter: harness.router };
+  return {
+    root,
+    sourcePath,
+    modulePath: harness.modulePath,
+    identity,
+    registry,
+    target,
+    harnessRouter: harness.router
+  };
 }
 
 function inventorySource(audits, targetOverrides = {}, registryOverrides = {}) {
@@ -229,9 +324,14 @@ function inventoryFixture(audits, targetOverrides = {}, registryOverrides = {}) 
 function callerDerivableInventoryIdentity(routerModule, routerPath, sourcePath) {
   const repositoryRealPath = fs.realpathSync.native(process.cwd());
   const installationRealPath = fs.realpathSync.native(path.dirname(routerPath));
+  const routerSourceDigest = routerModule.sha256(fs.readFileSync(routerPath));
   return {
     routerVersion: routerModule.ROUTER_VERSION,
-    routerSourceDigest: routerModule.sha256(fs.readFileSync(routerPath)),
+    routerSourceDigest,
+    authorityBootstrapVersion: 'ai-agent-toolkit.external-authority-bootstrap.v1',
+    bootstrapSourceDigest: routerSourceDigest,
+    runtimeExecutableVersion: process.version,
+    runtimeExecutableDigest: routerModule.sha256(fs.readFileSync(process.execPath)),
     repositoryIdentity: routerModule.sha256({ repositoryRealPath }),
     hostIdentity: routerModule.sha256({ platform: process.platform, hostname: os.hostname() }),
     installationIdentity: routerModule.sha256({ installationRealPath }),
@@ -251,6 +351,81 @@ function authorize(authorisationEnvelope, operationContext, options = {}) {
   return router.assertOperationAuthorized(authorisationEnvelope, operationContext, {
     operationSemantics: semanticsFor(operationContext.operation),
     ...options
+  });
+}
+
+function authorityProcessArgs(routerPath, registryPath) {
+  return [
+    '--permission',
+    `--allow-fs-read=${process.execPath}`,
+    `--allow-fs-read=${routerPath}`,
+    `--allow-fs-read=${registryPath}`,
+    '--frozen-intrinsics',
+    '--disable-proto=throw',
+    '--no-addons',
+    routerPath,
+    'trusted-authority-session'
+  ];
+}
+
+function jsonLineReader(stream) {
+  let buffer = '';
+  const values = [];
+  const waiters = [];
+  stream.setEncoding('utf8');
+  stream.on('data', (chunk) => {
+    buffer += chunk;
+    let newline;
+    while ((newline = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, newline);
+      buffer = buffer.slice(newline + 1);
+      if (!line.trim()) continue;
+      const value = JSON.parse(line);
+      const waiter = waiters.shift();
+      if (waiter) waiter.resolve(value);
+      else values.push(value);
+    }
+  });
+  return {
+    next() {
+      if (values.length > 0) return Promise.resolve(values.shift());
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('Timed out waiting for a bounded authority frame.')), 5000);
+        waiters.push({
+          resolve(value) {
+            clearTimeout(timer);
+            resolve(value);
+          }
+        });
+      });
+    }
+  };
+}
+
+function unsignedBootstrapFrame(frame) {
+  const value = { ...frame };
+  delete value.signature;
+  delete value.signatureAlgorithm;
+  delete value.frameDigest;
+  return value;
+}
+
+function verifyBootstrapFrame(frame, publicKey) {
+  const unsigned = unsignedBootstrapFrame(frame);
+  assert.equal(frame.signatureAlgorithm, 'ed25519');
+  assert.equal(frame.frameDigest, productionRouter.sha256(unsigned));
+  assert.equal(crypto.verify(
+    null,
+    Buffer.from(productionRouter.sha256(unsigned).slice('sha256:'.length), 'hex'),
+    publicKey,
+    Buffer.from(frame.signature, 'base64')
+  ), true);
+}
+
+function childExit(child) {
+  return new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('exit', (code, signal) => resolve({ code, signal }));
   });
 }
 
@@ -461,6 +636,13 @@ test('authorization schema and runtime use the exact same alias contract includi
     'references', 'schemas', 'provider-target-registry.schema.json'
   ), 'utf8'));
   assert.ok(registrySchema.properties.targets.items.required.includes('accountOrOrganisation'));
+  assert.equal(registrySchema.properties.routerVersion.const, router.ROUTER_VERSION);
+  for (const field of [
+    'authorityBootstrapVersion',
+    'bootstrapSourceDigest',
+    'runtimeExecutableVersion',
+    'runtimeExecutableDigest'
+  ]) assert.ok(registrySchema.required.includes(field), field);
   const semanticsSchema = JSON.parse(fs.readFileSync(path.join(
     __dirname, '..', '..', '_projects', 'development', 'external-system-router', '_main', 'skill',
     'references', 'schemas', 'operation-semantics.schema.json'
@@ -498,7 +680,7 @@ test('standalone AI coding rules explicitly declare the external-system-router r
   ), 'utf8'));
   assert.equal(dependencies.schemaVersion, 'ai-agent-toolkit.skill-runtime-dependencies.v1');
   const externalRouter = dependencies.dependencies.find((entry) => entry.id === 'external-system-router');
-  assert.equal(externalRouter.compatibleVersion, '1.0.9');
+  assert.equal(externalRouter.compatibleVersion, '1.0.10');
   assert.equal(externalRouter.installUnit, 'complete-skill-folder');
   assert.equal(externalRouter.unavailableBehavior, 'fail-closed');
   for (const required of [
@@ -1173,15 +1355,267 @@ test('production public API cannot mint synthetic inventory authority from mutab
   ]) assert.equal(productionSource.includes(forbidden), false, `production source must omit ${forbidden}`);
 });
 
+test('isolated authority boundary rejects core-module, loader, cache, and preload influence', () => {
+  const syntheticRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'external-production-core-adversary-'));
+  const syntheticRegistryPath = path.join(
+    syntheticRoot,
+    '.ai-agent-toolkit',
+    'external-system',
+    'provider-target-registry.json'
+  );
+  fs.mkdirSync(path.dirname(syntheticRegistryPath), { recursive: true });
+  fs.writeFileSync(syntheticRegistryPath, `${JSON.stringify({
+    schemaVersion: productionRouter.REGISTRY_SCHEMA_VERSION,
+    routerVersion: productionRouter.ROUTER_VERSION,
+    inventoryGeneration: `sha256:${'e'.repeat(64)}`,
+    generationSequence: 1,
+    generatedAt: '2026-07-24T00:00:00.000Z',
+    targets: []
+  })}\n`);
+
+  for (const scenario of [
+    'before-require',
+    'after-require',
+    'module-load',
+    'cache-reload',
+    'cross-copy',
+    'reverse-cross-copy'
+  ]) {
+    const child = spawnSync(process.execPath, [
+      productionAdversaryPath,
+      scenario,
+      publishedRouterPath,
+      authoritativeRouterPath,
+      syntheticRoot
+    ], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        NODE_TEST_CONTEXT: 'adversarial',
+        NODE_ENV: 'test'
+      }
+    });
+    assert.equal(child.status, 0, child.stderr);
+    assert.equal(child.stderr, '');
+    assert.equal(child.stdout.includes(syntheticRoot), false);
+    assert.equal(child.stdout.includes(syntheticRegistryPath), false);
+    const report = JSON.parse(child.stdout);
+    for (const attempt of [report.published, report.authoritative].filter(Boolean)) {
+      assert.deepEqual({
+        authority: attempt.authority,
+        plan: attempt.plan,
+        route: attempt.route,
+        receipt: attempt.receipt
+      }, {
+        authority: false,
+        plan: false,
+        route: false,
+        receipt: false
+      });
+      assert.equal(attempt.codes.includes('EXTERNAL_INVENTORY_BOOTSTRAP_UNAVAILABLE'), true);
+      assert.equal(attempt.codes.includes('EXTERNAL_INVENTORY_AUTHORITY_REQUIRED'), true);
+      assert.equal(attempt.codes.includes('EXTERNAL_ROUTE_AUTHORITY_REQUIRED'), true);
+    }
+    assert.equal(report.exportsMatch, true);
+    assert.deepEqual(report.authorityCoreCalls, []);
+  }
+
+  const canonicalRegistryPath = path.join(
+    os.userInfo().homedir,
+    '.ai-agent-toolkit',
+    'external-system',
+    'provider-target-registry.json'
+  );
+  const exactArgs = authorityProcessArgs(publishedRouterPath, canonicalRegistryPath);
+  const preload = spawnSync(process.execPath, exactArgs, {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      NODE_OPTIONS: '--require=node:fs'
+    }
+  });
+  assert.equal(preload.status, 1);
+  assert.equal(preload.stdout, '');
+  assert.match(preload.stderr, /EXTERNAL_INVENTORY_BOOTSTRAP_UNAVAILABLE: Trusted authority bootstrap is unavailable\./);
+  assert.equal(preload.stderr.includes(canonicalRegistryPath), false);
+  assert.equal(preload.stderr.includes(os.userInfo().homedir), false);
+
+  const moduleSearch = spawnSync(process.execPath, exactArgs, {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      NODE_PATH: syntheticRoot
+    }
+  });
+  assert.equal(moduleSearch.status, 1);
+  assert.equal(moduleSearch.stdout, '');
+  assert.match(moduleSearch.stderr, /EXTERNAL_INVENTORY_BOOTSTRAP_UNAVAILABLE: Trusted authority bootstrap is unavailable\./);
+  assert.equal(moduleSearch.stderr.includes(syntheticRoot), false);
+
+  const unsupported = spawnSync(process.execPath, [
+    publishedRouterPath,
+    'trusted-authority-session'
+  ], {
+    encoding: 'utf8',
+    env: Object.fromEntries(Object.entries(process.env).filter(([key]) =>
+      key !== 'NODE_OPTIONS' && key !== 'NODE_PATH'))
+  });
+  assert.equal(unsupported.status, 1);
+  assert.equal(unsupported.stdout, '');
+  assert.match(unsupported.stderr, /EXTERNAL_INVENTORY_BOOTSTRAP_UNAVAILABLE: Trusted authority bootstrap is unavailable\./);
+  assert.equal(unsupported.stderr.includes(canonicalRegistryPath), false);
+
+  const routerPreloaded = spawnSync(process.execPath, exactArgs, {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      NODE_OPTIONS: `--require=${publishedRouterPath}`
+    }
+  });
+  assert.equal(routerPreloaded.status, 0);
+  assert.equal(routerPreloaded.stdout, '');
+  assert.equal(routerPreloaded.stderr.includes(canonicalRegistryPath), false);
+});
+
+test('isolated test-only bootstrap keeps inventory, plan, route, and receipt authority in one process', async () => {
+  const api = audit('provider-api', 'api', 90);
+  const source = inventorySourceForRouter(publishedRouterPath, api, {}, {}, {
+    isolatedProcess: true
+  });
+  const context = bindCurrentInventory({
+    ...operation('deploy-revision'),
+    resource: 'one-application',
+    targetFingerprint: api.targetFingerprint
+  }, source.target);
+  const routeEnvelope = envelope({
+    resource: 'one-application',
+    interfaceRestrictions: []
+  });
+  const child = spawn(process.execPath, authorityProcessArgs(source.modulePath, source.sourcePath), {
+    cwd: process.cwd(),
+    env: Object.fromEntries(Object.entries(process.env).filter(([key]) =>
+      key !== 'NODE_OPTIONS' && key !== 'NODE_PATH')),
+    stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true
+  });
+  const exit = childExit(child);
+  const lines = jsonLineReader(child.stdout);
+  let stderr = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk;
+  });
+
+  const ready = await lines.next();
+  const publicKey = crypto.createPublicKey({
+    key: Buffer.from(ready.publicKey, 'base64'),
+    format: 'der',
+    type: 'spki'
+  });
+  verifyBootstrapFrame(ready, publicKey);
+  assert.equal(ready.type, 'ready');
+  assert.equal(ready.routerVersion, productionRouter.ROUTER_VERSION);
+  assert.equal(ready.bootstrapSourceDigest, source.identity.bootstrapSourceDigest);
+  assert.equal(ready.runtimeExecutableDigest, source.identity.runtimeExecutableDigest);
+
+  const routeNonce = crypto.randomBytes(32).toString('hex');
+  child.stdin.write(`${JSON.stringify({
+    schemaVersion: 'ai-agent-toolkit.external-authority-bootstrap-request.v1',
+    type: 'select-route',
+    sessionId: ready.sessionId,
+    nonce: routeNonce,
+    selector: {
+      provider: source.target.provider,
+      targetAlias: source.target.targetAlias,
+      environment: source.target.environment
+    },
+    host: 'codex',
+    capabilityAudits: [api],
+    operationContext: context,
+    authorizationEnvelope: routeEnvelope,
+    establishedTier: 2
+  })}\n`);
+  const selected = await lines.next();
+  verifyBootstrapFrame(selected, publicKey);
+  assert.equal(selected.type, 'route');
+  assert.equal(selected.nonce, routeNonce);
+  assert.equal(selected.route.selectedInterface, api.interfaceId);
+  assert.equal(selected.route.snapshotAuthorityId, selected.plan.snapshotAuthorityId);
+  assert.equal(selected.route.authorityBootstrapVersion, 'ai-agent-toolkit.external-authority-bootstrap.v1');
+
+  const receiptNonce = crypto.randomBytes(32).toString('hex');
+  child.stdin.write(`${JSON.stringify({
+    schemaVersion: 'ai-agent-toolkit.external-authority-bootstrap-request.v1',
+    type: 'create-receipt',
+    sessionId: ready.sessionId,
+    nonce: receiptNonce,
+    receiptInput: {
+      operationId: 'isolated-deploy-286',
+      operation: context.operation,
+      provider: context.provider,
+      adapter: api.interfaceId,
+      targetAlias: context.targetAlias,
+      accountOrOrganisation: context.accountOrOrganisation,
+      resource: context.resource,
+      targetFingerprint: context.targetFingerprint,
+      environment: context.environment,
+      authorisationReference: routeEnvelope.ownerApprovalReference,
+      taskId: context.taskId,
+      sessionFingerprint: context.sessionFingerprint,
+      objectiveDigest: context.objectiveDigest,
+      selectedRouteDigest: selected.route.selectedRouteDigest,
+      precondition: 'passed',
+      preconditionEvidence: ['test:isolated-precondition'],
+      mutationAttempted: true,
+      mutationPerformed: true,
+      postcondition: 'passed',
+      postconditionEvidence: ['test:isolated-postcondition'],
+      rollbackAttempted: false,
+      rollbackPerformed: false,
+      rollbackEvidence: ['test:isolated-rollback-not-required'],
+      stableCode: 'EXTERNAL_ISOLATED_OPERATION_COMPLETE',
+      safeEvidenceReferences: ['test:isolated-authority'],
+      supportedNextAction: 'Retain the exact task-bound receipt.',
+      unchangedScope: ['No other target or operation changed.']
+    }
+  })}\n`);
+  const completed = await lines.next();
+  verifyBootstrapFrame(completed, publicKey);
+  assert.equal(completed.type, 'receipt');
+  assert.equal(completed.nonce, receiptNonce);
+  assert.equal(completed.receipt.selectedRouteDigest, selected.route.selectedRouteDigest);
+  assert.equal(completed.receipt.inventoryAuthorityId, selected.route.snapshotAuthorityId);
+  assert.equal(completed.receipt.runtimeExecutableDigest, ready.runtimeExecutableDigest);
+  assert.equal(completed.receipt.stableCode, 'EXTERNAL_ISOLATED_OPERATION_COMPLETE');
+
+  child.stdin.end();
+  const result = await exit;
+  assert.deepEqual(result, { code: 0, signal: null });
+  assert.equal(stderr.includes(source.root), false);
+  assert.equal(stderr.includes(source.sourcePath), false);
+  assert.equal(stderr.includes('"targets"'), false);
+});
+
 test('test-only authority harness is isolated across copies and absent from production surfaces', () => {
   const publishedBytes = fs.readFileSync(publishedRouterPath);
   const authoritativeBytes = fs.readFileSync(authoritativeRouterPath);
   assert.deepEqual(publishedBytes, authoritativeBytes);
   const authoritativeRouter = require(authoritativeRouterPath);
+  assert.deepEqual(Object.keys(productionRouter).sort(), [...expectedProductionExports].sort());
   assert.deepEqual(Object.keys(productionRouter).sort(), Object.keys(authoritativeRouter).sort());
-  assert.equal(typeof authoritativeRouter.testInventoryAuthorityExpectations, 'undefined');
+  for (const forbiddenExport of [
+    'testInventoryAuthorityExpectations',
+    'runtimeInventoryIdentity',
+    'authorityBootstrapExecArgv',
+    'runTrustedAuthoritySession',
+    'captureAuthorityRuntime',
+    'deserializeInventoryAuthority',
+    'inventoryReader',
+    'moduleLoader'
+  ]) assert.equal(typeof authoritativeRouter[forbiddenExport], 'undefined');
   assert.equal(fs.existsSync(path.join('skills', 'external-system-router', 'support', 'external-system-router-test-harness.cjs')), false);
   assert.equal(fs.existsSync(path.join('skills', 'external-system-router', 'scripts', 'external-system-router-test-harness.cjs')), false);
+  assert.equal(fs.existsSync(path.join('skills', 'external-system-router', 'fixtures', path.basename(productionAdversaryPath))), false);
 
   const api = audit('provider-api', 'api', 90);
   const published = inventorySourceForRouter(publishedRouterPath, api);
@@ -1369,7 +1803,8 @@ test('receipts redact unsafe material and route lifecycle never auto-revokes', (
   for (const field of [
     'operation', 'accountOrOrganisation', 'resource', 'authorisationEnvelopeDigest',
     'authorisationLifetimeKind', 'capabilityDigest', 'inventoryGeneration', 'inventoryDigest',
-    'selectedRouteDigest'
+    'selectedRouteDigest', 'authorityBootstrapVersion', 'bootstrapSourceDigest',
+    'runtimeExecutableVersion', 'runtimeExecutableDigest'
   ]) {
     assert.ok(receiptSchema.required.includes(field), field);
   }

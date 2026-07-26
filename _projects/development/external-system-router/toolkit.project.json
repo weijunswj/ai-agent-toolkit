@@ -5,9 +5,9 @@
   "title": "External System Router",
   "module_path": "_projects/development/external-system-router",
   "main_path": "_projects/development/external-system-router/_main",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "version_policy": "semver",
-  "version_notes": "Removes production synthetic inventory authority and admits only the canonical trusted-runtime inventory loader.",
+  "version_notes": "Moves production inventory authority into an exact permission-bounded isolated process and rejects mutable in-process core-module, loader, cache, and preload influence.",
   "outputs": [
     {
       "kind": "copy",

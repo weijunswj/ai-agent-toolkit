@@ -7,7 +7,7 @@ It provides:
 - Tier 0-3 risk classification and task-authorisation envelopes.
 - An unconditional Tier 2 floor for every production mutation plus task/session/objective-bound task lifetimes.
 - Canonical versioned operation semantics; caller read/write labels are assertions and never establish mutability.
-- A zero-option bounded canonical inventory loader with process-local authority, trusted OS runtime identity, source/topology checks, monotonic generations, no production test override, and unforgeable host-plan derivation.
+- A zero-option bounded canonical inventory loader that can mint authority only inside an exact permission-bounded isolated Node process, with process-local authority, runtime executable and router-source identity, source/topology checks, monotonic generations, no production test override, and parent-bound host-plan derivation.
 - Operation-specific interface audits and route selection without a global MCP/API/browser hierarchy.
 - Universal graphical-control disclosure and last-resort browser-history approval.
 - Repository-and-intent capability reconciliation, dynamic domain markers, and component-based n8n recommendations.

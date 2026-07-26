@@ -16,7 +16,7 @@
       "path": "_projects/development/external-system-router/toolkit.project.json",
       "mode": "json-value-sha256",
       "jsonPointer": "/version",
-      "expectedDigest": "sha256:d6f917c484e6a48fcf8b90ef09cde0286c3d86e5dead48b42faf0dae94fb2df5",
+      "expectedDigest": "sha256:aeff856af84f6fd019532674cd9e77aaa9865ccff9f4a412c408323a66753168",
       "publicReference": "https://github.com/weijunswj/ai-agent-toolkit/tree/main/_projects/development/external-system-router"
     },
     {

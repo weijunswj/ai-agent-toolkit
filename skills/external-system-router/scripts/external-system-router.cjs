@@ -16,15 +16,56 @@ const ROUTE_LIFECYCLE_SCHEMA_VERSION = 'ai-agent-toolkit.route-lifecycle.v1';
 const HOST_ADAPTER_PLAN_SCHEMA_VERSION = 'ai-agent-toolkit.host-adapter-plan.v1';
 const INVENTORY_AUTHORITY_SCHEMA_VERSION = 'ai-agent-toolkit.inventory-authority.v1';
 const OPERATION_SEMANTICS_SCHEMA_VERSION = 'ai-agent-toolkit.operation-semantics.v1';
-const ROUTER_VERSION = '1.0.9';
+const ROUTER_VERSION = '1.0.10';
 const QUESTION_BANK_SCHEMA_VERSION = 'ai-agent-toolkit.external-reconciliation-question-bank.v1';
 const ANSWER_SCHEMA_VERSION = 'ai-agent-toolkit.external-reconciliation-answers.v1';
+const AUTHORITY_BOOTSTRAP_PROTOCOL_VERSION = 'ai-agent-toolkit.external-authority-bootstrap.v1';
+const AUTHORITY_BOOTSTRAP_REQUEST_SCHEMA_VERSION = 'ai-agent-toolkit.external-authority-bootstrap-request.v1';
+const AUTHORITY_BOOTSTRAP_RESPONSE_SCHEMA_VERSION = 'ai-agent-toolkit.external-authority-bootstrap-response.v1';
+const AUTHORITY_BOOTSTRAP_COMMAND = 'trusted-authority-session';
+const AUTHORITY_BOOTSTRAP_STATIC_EXEC_ARGV = Object.freeze([
+  '--permission',
+  '--frozen-intrinsics',
+  '--disable-proto=throw',
+  '--no-addons'
+]);
 const MAX_INVENTORY_BYTES = 1024 * 1024;
 const MAX_INVENTORY_TARGETS = 100;
+const MAX_RUNTIME_EXECUTABLE_BYTES = 256 * 1024 * 1024;
+const MAX_BOOTSTRAP_FRAME_BYTES = 1024 * 1024;
 const INVENTORY_AUTHORITIES = new WeakMap();
 const HOST_PLAN_AUTHORITIES = new WeakMap();
 const SELECTED_ROUTE_AUTHORITIES = new WeakMap();
 const LOADED_INVENTORY_GENERATIONS = new Map();
+const AUTHORITY_BOOTSTRAP_MODE = require.main === module
+  && process.argv.length === 3
+  && process.argv[2] === AUTHORITY_BOOTSTRAP_COMMAND;
+const AUTHORITY_RUNTIME = AUTHORITY_BOOTSTRAP_MODE
+  ? captureAuthorityRuntime()
+  : null;
+
+function captureAuthorityRuntime() {
+  return Object.freeze({
+    closeSync: fs.closeSync.bind(fs),
+    cwd: process.cwd.bind(process),
+    execPath: process.execPath,
+    fstatSync: fs.fstatSync.bind(fs),
+    hostname: os.hostname.bind(os),
+    isAbsolute: path.isAbsolute.bind(path),
+    join: path.join.bind(path),
+    lstatSync: fs.lstatSync.bind(fs),
+    openSync: fs.openSync.bind(fs),
+    pathDelimiter: path.delimiter,
+    pathSeparator: path.sep,
+    platform: process.platform,
+    readFileSync: fs.readFileSync.bind(fs),
+    realpathSync: fs.realpathSync.native.bind(fs.realpathSync),
+    resolve: path.resolve.bind(path),
+    dirname: path.dirname.bind(path),
+    userInfo: os.userInfo.bind(os),
+    version: process.version
+  });
+}
 
 const RISK_TIERS = Object.freeze({ INSPECTION: 0, REVERSIBLE: 1, SENSITIVE_REVERSIBLE: 2, DESTRUCTIVE: 3 });
 const INTERFACE_KINDS = new Set([
@@ -630,60 +671,96 @@ function interfaceRestrictions(envelope) {
   return { forbidden, required };
 }
 
+function assertTrustedAuthorityBootstrap() {
+  invariant(AUTHORITY_BOOTSTRAP_MODE && AUTHORITY_RUNTIME,
+    'Trusted inventory authority is unavailable outside the isolated bootstrap process.',
+    'EXTERNAL_INVENTORY_BOOTSTRAP_UNAVAILABLE');
+  invariant(process.env.NODE_OPTIONS === undefined && process.env.NODE_PATH === undefined,
+    'Trusted inventory authority rejects preload and module-search influence.',
+    'EXTERNAL_INVENTORY_BOOTSTRAP_UNAVAILABLE');
+  const expectedExecArgv = authorityBootstrapExecArgv();
+  invariant(process.execArgv.length === expectedExecArgv.length
+    && process.execArgv.every((value, index) => value === expectedExecArgv[index]),
+  'Trusted inventory authority requires the exact isolated runtime flags.',
+  'EXTERNAL_INVENTORY_BOOTSTRAP_UNAVAILABLE');
+  invariant(typeof process.permission?.has === 'function'
+    && process.permission.has('fs.read', AUTHORITY_RUNTIME.execPath)
+    && process.permission.has('fs.read', __filename)
+    && process.permission.has('fs.read', canonicalInventoryPath()),
+  'Trusted inventory authority requires the runtime permission boundary.',
+  'EXTERNAL_INVENTORY_BOOTSTRAP_UNAVAILABLE');
+  const loadedModules = Object.keys(require.cache);
+  invariant(loadedModules.length === 1 && samePath(loadedModules[0], __filename),
+    'Trusted inventory authority rejects preloaded application modules.',
+    'EXTERNAL_INVENTORY_BOOTSTRAP_UNAVAILABLE');
+}
+
 function trustedRuntimeHome() {
   let user;
-  let realHome;
   try {
-    user = os.userInfo();
-    realHome = user && typeof user.homedir === 'string'
-      ? fs.realpathSync.native(user.homedir)
-      : null;
+    user = AUTHORITY_RUNTIME.userInfo();
   } catch {
     invariant(false, 'Trusted runtime home is unavailable.', 'EXTERNAL_INVENTORY_AUTHORITY_REQUIRED');
   }
-  invariant(user && typeof user.homedir === 'string' && path.isAbsolute(user.homedir),
+  invariant(user && typeof user.homedir === 'string' && AUTHORITY_RUNTIME.isAbsolute(user.homedir),
     'Trusted runtime home is unavailable.', 'EXTERNAL_INVENTORY_AUTHORITY_REQUIRED');
-  return realHome;
+  return AUTHORITY_RUNTIME.resolve(user.homedir);
 }
 
 function canonicalInventoryPath() {
-  return path.join(trustedRuntimeHome(), '.ai-agent-toolkit', 'external-system', 'provider-target-registry.json');
+  return AUTHORITY_RUNTIME.join(
+    trustedRuntimeHome(),
+    '.ai-agent-toolkit',
+    'external-system',
+    'provider-target-registry.json'
+  );
+}
+
+function authorityBootstrapExecArgv() {
+  invariant(AUTHORITY_BOOTSTRAP_MODE && AUTHORITY_RUNTIME,
+    'Trusted inventory authority is unavailable outside the isolated bootstrap process.',
+    'EXTERNAL_INVENTORY_BOOTSTRAP_UNAVAILABLE');
+  return Object.freeze([
+    AUTHORITY_BOOTSTRAP_STATIC_EXEC_ARGV[0],
+    `--allow-fs-read=${AUTHORITY_RUNTIME.execPath}`,
+    `--allow-fs-read=${__filename}`,
+    `--allow-fs-read=${canonicalInventoryPath()}`,
+    ...AUTHORITY_BOOTSTRAP_STATIC_EXEC_ARGV.slice(1)
+  ]);
 }
 
 function samePath(left, right) {
-  const normalize = (value) => process.platform === 'win32'
-    ? path.resolve(value).toLowerCase()
-    : path.resolve(value);
+  const pathApi = AUTHORITY_RUNTIME || {
+    platform: process.platform,
+    resolve: path.resolve.bind(path)
+  };
+  const normalize = (value) => pathApi.platform === 'win32'
+    ? pathApi.resolve(value).toLowerCase()
+    : pathApi.resolve(value);
   return normalize(left) === normalize(right);
 }
 
 function readBoundedRegularFile(filePath, maxBytes = MAX_INVENTORY_BYTES) {
-  const resolved = path.resolve(filePath);
-  const parent = path.dirname(resolved);
-  const parentStat = fs.lstatSync(parent);
-  invariant(parentStat.isDirectory() && !parentStat.isSymbolicLink(),
-    'Inventory parent must be a real directory.', 'EXTERNAL_INVENTORY_TOPOLOGY_MISMATCH');
-  const realParent = fs.realpathSync.native(parent);
-  invariant(samePath(realParent, parent),
-    'Inventory parent topology contains a link, junction, or redirect.', 'EXTERNAL_INVENTORY_TOPOLOGY_MISMATCH');
-  const before = fs.lstatSync(resolved);
+  assertTrustedAuthorityBootstrap();
+  const resolved = AUTHORITY_RUNTIME.resolve(filePath);
+  const before = AUTHORITY_RUNTIME.lstatSync(resolved);
   invariant(before.isFile() && !before.isSymbolicLink(),
     'Inventory source must be one existing regular non-link file.', 'EXTERNAL_INVENTORY_TOPOLOGY_MISMATCH');
   invariant(before.size > 0 && before.size <= maxBytes,
     'Inventory source exceeds the bounded size.', 'EXTERNAL_INVENTORY_BOUNDS_EXCEEDED');
-  const realPath = fs.realpathSync.native(resolved);
+  const realPath = AUTHORITY_RUNTIME.realpathSync(resolved);
   invariant(samePath(realPath, resolved),
     'Inventory source resolves through a link or redirect.', 'EXTERNAL_INVENTORY_TOPOLOGY_MISMATCH');
-  const descriptor = fs.openSync(resolved, 'r');
+  const descriptor = AUTHORITY_RUNTIME.openSync(resolved, 'r');
   try {
-    const opened = fs.fstatSync(descriptor);
+    const opened = AUTHORITY_RUNTIME.fstatSync(descriptor);
     invariant(opened.isFile()
       && opened.dev === before.dev
       && opened.ino === before.ino
       && opened.size === before.size,
     'Inventory source changed while opening.', 'EXTERNAL_INVENTORY_SOURCE_CHANGED');
-    const bytes = fs.readFileSync(descriptor);
-    const after = fs.fstatSync(descriptor);
+    const bytes = AUTHORITY_RUNTIME.readFileSync(descriptor);
+    const after = AUTHORITY_RUNTIME.fstatSync(descriptor);
     invariant(after.dev === opened.dev
       && after.ino === opened.ino
       && after.size === opened.size
@@ -692,7 +769,6 @@ function readBoundedRegularFile(filePath, maxBytes = MAX_INVENTORY_BYTES) {
     return {
       path: resolved,
       realPath,
-      realParent,
       dev: after.dev,
       ino: after.ino,
       size: after.size,
@@ -702,30 +778,49 @@ function readBoundedRegularFile(filePath, maxBytes = MAX_INVENTORY_BYTES) {
       bytesDigest: sha256(bytes)
     };
   } finally {
-    fs.closeSync(descriptor);
+    AUTHORITY_RUNTIME.closeSync(descriptor);
   }
 }
 
-function readTrustedRegularFile(filePath, failureCode) {
+function readTrustedRegularFile(filePath, failureCode, maxBytes = MAX_INVENTORY_BYTES) {
   try {
-    return readBoundedRegularFile(filePath);
+    return readBoundedRegularFile(filePath, maxBytes);
   } catch (error) {
     if (typeof error?.code === 'string' && error.code.startsWith('EXTERNAL_')) throw error;
     invariant(false, 'Trusted bounded file is unavailable.', failureCode);
   }
 }
 
+function runtimeExecutableIdentity() {
+  const executable = readTrustedRegularFile(
+    AUTHORITY_RUNTIME.execPath,
+    'EXTERNAL_INVENTORY_BOOTSTRAP_UNAVAILABLE',
+    MAX_RUNTIME_EXECUTABLE_BYTES
+  );
+  return {
+    runtimeExecutableVersion: AUTHORITY_RUNTIME.version,
+    runtimeExecutableDigest: executable.bytesDigest
+  };
+}
+
 function runtimeInventoryIdentity(sourcePath) {
   const routerSource = readTrustedRegularFile(__filename, 'EXTERNAL_INVENTORY_AUTHORITY_MISMATCH');
-  const repositoryRealPath = fs.realpathSync.native(process.cwd());
-  const installationRealPath = fs.realpathSync.native(path.dirname(__filename));
+  const repositoryRealPath = AUTHORITY_RUNTIME.resolve(AUTHORITY_RUNTIME.cwd());
+  const installationRealPath = AUTHORITY_RUNTIME.dirname(routerSource.realPath);
+  const executable = runtimeExecutableIdentity();
   return {
     routerVersion: ROUTER_VERSION,
     routerSourceDigest: routerSource.bytesDigest,
+    authorityBootstrapVersion: AUTHORITY_BOOTSTRAP_PROTOCOL_VERSION,
+    bootstrapSourceDigest: routerSource.bytesDigest,
+    ...executable,
     repositoryIdentity: sha256({ repositoryRealPath }),
-    hostIdentity: sha256({ platform: process.platform, hostname: os.hostname() }),
+    hostIdentity: sha256({
+      platform: AUTHORITY_RUNTIME.platform,
+      hostname: AUTHORITY_RUNTIME.hostname()
+    }),
     installationIdentity: sha256({ installationRealPath }),
-    authorityPathDigest: sha256({ authorityRealPath: fs.realpathSync.native(sourcePath) })
+    authorityPathDigest: sha256({ authorityRealPath: AUTHORITY_RUNTIME.realpathSync(sourcePath) })
   };
 }
 
@@ -734,13 +829,14 @@ function revalidateInventoryAuthority(authority) {
   invariant(state, 'Inventory authority was not produced by the trusted bounded loader.',
     'EXTERNAL_INVENTORY_AUTHORITY_REQUIRED');
   const current = readTrustedRegularFile(state.source.path, 'EXTERNAL_INVENTORY_SOURCE_CHANGED');
-  for (const field of ['realPath', 'realParent', 'dev', 'ino', 'size', 'birthtimeMs', 'mtimeMs', 'bytesDigest']) {
+  for (const field of ['realPath', 'dev', 'ino', 'size', 'birthtimeMs', 'mtimeMs', 'bytesDigest']) {
     invariant(current[field] === state.source[field],
       `Inventory source ${field} changed after authorisation.`, 'EXTERNAL_INVENTORY_SOURCE_CHANGED');
   }
   const identity = runtimeInventoryIdentity(current.path);
   for (const field of [
-    'routerVersion', 'routerSourceDigest', 'repositoryIdentity', 'hostIdentity',
+    'routerVersion', 'routerSourceDigest', 'authorityBootstrapVersion', 'bootstrapSourceDigest',
+    'runtimeExecutableVersion', 'runtimeExecutableDigest', 'repositoryIdentity', 'hostIdentity',
     'installationIdentity', 'authorityPathDigest'
   ]) {
     invariant(identity[field] === state.registry[field],
@@ -753,6 +849,7 @@ function loadTrustedInventorySnapshot() {
   invariant(arguments.length === 0,
     'Production inventory authority accepts no caller-selected source or test options.',
     'EXTERNAL_INVENTORY_AUTHORITY_REQUIRED');
+  assertTrustedAuthorityBootstrap();
   const sourcePath = canonicalInventoryPath();
   const source = readTrustedRegularFile(sourcePath, 'EXTERNAL_INVENTORY_AUTHORITY_REQUIRED');
   let registry;
@@ -766,7 +863,8 @@ function loadTrustedInventorySnapshot() {
     'Inventory target count exceeds the bounded limit.', 'EXTERNAL_INVENTORY_BOUNDS_EXCEEDED');
   const identity = runtimeInventoryIdentity(source.path);
   for (const field of [
-    'routerVersion', 'routerSourceDigest', 'repositoryIdentity', 'hostIdentity',
+    'routerVersion', 'routerSourceDigest', 'authorityBootstrapVersion', 'bootstrapSourceDigest',
+    'runtimeExecutableVersion', 'runtimeExecutableDigest', 'repositoryIdentity', 'hostIdentity',
     'installationIdentity', 'authorityPathDigest'
   ]) {
     invariant(registry[field] === identity[field],
@@ -791,6 +889,9 @@ function loadTrustedInventorySnapshot() {
       generationSequence: registry.generationSequence,
       inventoryGeneration: registry.inventoryGeneration,
       routerSourceDigest: registry.routerSourceDigest,
+      authorityBootstrapVersion: registry.authorityBootstrapVersion,
+      bootstrapSourceDigest: registry.bootstrapSourceDigest,
+      runtimeExecutableDigest: registry.runtimeExecutableDigest,
       installationIdentity: registry.installationIdentity
     }),
     sourceDigest: source.bytesDigest,
@@ -879,17 +980,24 @@ function validateHostAdapterPlan(plan) {
   assertAllowedKeys(plan, new Set([
     'schemaVersion', 'logicalTarget', 'inventoryGeneration', 'inventoryDigest', 'currentAuditState',
     'snapshotAuthorityId', 'sourceDigest', 'routerVersion', 'routerSourceDigest', 'installationIdentity',
-    'repositoryIdentity', 'hostIdentity', 'generationSequence', 'derivedAt',
+    'authorityBootstrapVersion', 'bootstrapSourceDigest', 'runtimeExecutableVersion',
+    'runtimeExecutableDigest', 'repositoryIdentity', 'hostIdentity', 'generationSequence', 'derivedAt',
     'host', 'hostConfigurationScope', 'credentialReferences', 'installedInterfaces', 'supportedOperations',
     'capabilityAuditPassed', 'preserveOtherHostConfiguration', 'mutateProjectOwnedConfiguration',
     'copySecretsIntoRepository', 'requiresProviderRediscoveryOnHostSwitch', 'planDigest'
   ]), 'Host adapter plan');
   invariant(plan.schemaVersion === HOST_ADAPTER_PLAN_SCHEMA_VERSION, 'Unsupported host-adapter-plan schema.');
   for (const field of [
-    'snapshotAuthorityId', 'sourceDigest', 'routerSourceDigest', 'installationIdentity',
+    'snapshotAuthorityId', 'sourceDigest', 'routerSourceDigest', 'bootstrapSourceDigest',
+    'runtimeExecutableDigest', 'installationIdentity',
     'repositoryIdentity', 'hostIdentity'
   ]) requireString(plan[field], field, { pattern: DIGEST_PATTERN });
   invariant(plan.routerVersion === ROUTER_VERSION, 'Host plan router version is stale.', 'EXTERNAL_INVENTORY_AUTHORITY_MISMATCH');
+  invariant(plan.authorityBootstrapVersion === AUTHORITY_BOOTSTRAP_PROTOCOL_VERSION,
+    'Host plan authority bootstrap version is stale.', 'EXTERNAL_INVENTORY_AUTHORITY_MISMATCH');
+  requireString(plan.runtimeExecutableVersion, 'runtimeExecutableVersion', {
+    pattern: /^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][a-zA-Z0-9.-]+)?$/
+  });
   invariant(Number.isSafeInteger(plan.generationSequence) && plan.generationSequence >= 0,
     'Host plan generationSequence is invalid.', 'EXTERNAL_STALE_TARGET_INVENTORY');
   invariant(Number.isFinite(Date.parse(requireString(plan.derivedAt, 'derivedAt'))),
@@ -1006,7 +1114,9 @@ function resolveCurrentInventory(operationContext, audits, options) {
       && plan.generationSequence === state.registry.generationSequence,
     'Host plan inventory authority is stale.', 'EXTERNAL_INVENTORY_AUTHORITY_MISMATCH');
     for (const field of [
-      'routerVersion', 'routerSourceDigest', 'installationIdentity', 'repositoryIdentity', 'hostIdentity'
+      'routerVersion', 'routerSourceDigest', 'authorityBootstrapVersion', 'bootstrapSourceDigest',
+      'runtimeExecutableVersion', 'runtimeExecutableDigest', 'installationIdentity',
+      'repositoryIdentity', 'hostIdentity'
     ]) {
       invariant(plan[field] === state.registry[field],
         `Host plan ${field} belongs to another runtime authority.`,
@@ -1042,7 +1152,11 @@ function resolveCurrentInventory(operationContext, audits, options) {
     inventoryDigest,
     planDigest,
     sourceDigest: state.source.bytesDigest,
-    snapshotAuthorityId: authority.authorityId
+    snapshotAuthorityId: authority.authorityId,
+    authorityBootstrapVersion: state.registry.authorityBootstrapVersion,
+    bootstrapSourceDigest: state.registry.bootstrapSourceDigest,
+    runtimeExecutableVersion: state.registry.runtimeExecutableVersion,
+    runtimeExecutableDigest: state.registry.runtimeExecutableDigest
   };
 }
 
@@ -1121,6 +1235,10 @@ function selectStrongestAdmissibleInterface(operationContext, audits, options = 
     capabilityDigest: selected.capabilityDigest,
     snapshotAuthorityId: inventory.snapshotAuthorityId,
     inventorySourceDigest: inventory.sourceDigest,
+    authorityBootstrapVersion: inventory.authorityBootstrapVersion,
+    bootstrapSourceDigest: inventory.bootstrapSourceDigest,
+    runtimeExecutableVersion: inventory.runtimeExecutableVersion,
+    runtimeExecutableDigest: inventory.runtimeExecutableDigest,
     inventoryGeneration: inventory.inventoryGeneration,
     inventoryDigest: inventory.inventoryDigest,
     hostAdapterPlanDigest: inventory.planDigest,
@@ -1144,6 +1262,10 @@ function selectStrongestAdmissibleInterface(operationContext, audits, options = 
       targetFingerprint: operationContext.targetFingerprint,
       inventoryAuthorityId: inventory.snapshotAuthorityId,
       inventorySourceDigest: inventory.sourceDigest,
+      authorityBootstrapVersion: inventory.authorityBootstrapVersion,
+      bootstrapSourceDigest: inventory.bootstrapSourceDigest,
+      runtimeExecutableVersion: inventory.runtimeExecutableVersion,
+      runtimeExecutableDigest: inventory.runtimeExecutableDigest,
       inventoryGeneration: inventory.inventoryGeneration,
       inventoryDigest: inventory.inventoryDigest,
       hostAdapterPlanDigest: inventory.planDigest,
@@ -1206,7 +1328,7 @@ function validateConsumerRequirements(manifest) {
 }
 
 function defaultRegistryPath() {
-  return canonicalInventoryPath();
+  return '~/.ai-agent-toolkit/external-system/provider-target-registry.json';
 }
 
 function defaultLocalStatePaths() {
@@ -1264,16 +1386,26 @@ function validateProviderTargetRegistry(registry) {
   requireObject(registry, 'Provider target registry');
   assertAllowedKeys(registry, new Set([
     'schemaVersion', 'routerVersion', 'routerSourceDigest', 'repositoryIdentity', 'hostIdentity',
-    'installationIdentity', 'authorityPathDigest', 'inventoryGeneration', 'generationSequence',
-    'generatedAt', 'targets'
+    'installationIdentity', 'authorityPathDigest', 'authorityBootstrapVersion',
+    'bootstrapSourceDigest', 'runtimeExecutableVersion', 'runtimeExecutableDigest',
+    'inventoryGeneration', 'generationSequence', 'generatedAt', 'targets'
   ]), 'Provider target registry');
   invariant(registry.schemaVersion === REGISTRY_SCHEMA_VERSION, 'Unsupported provider-target-registry schema.');
   invariant(registry.routerVersion === ROUTER_VERSION, 'Provider target registry router version is stale.',
     'EXTERNAL_INVENTORY_AUTHORITY_MISMATCH');
   for (const field of [
-    'routerSourceDigest', 'repositoryIdentity', 'hostIdentity', 'installationIdentity',
-    'authorityPathDigest', 'inventoryGeneration'
+    'routerSourceDigest', 'bootstrapSourceDigest', 'runtimeExecutableDigest', 'repositoryIdentity',
+    'hostIdentity', 'installationIdentity', 'authorityPathDigest', 'inventoryGeneration'
   ]) requireString(registry[field], field, { pattern: DIGEST_PATTERN });
+  invariant(registry.authorityBootstrapVersion === AUTHORITY_BOOTSTRAP_PROTOCOL_VERSION,
+    'Provider target registry authority bootstrap version is stale.',
+    'EXTERNAL_INVENTORY_AUTHORITY_MISMATCH');
+  requireString(registry.runtimeExecutableVersion, 'runtimeExecutableVersion', {
+    pattern: /^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][a-zA-Z0-9.-]+)?$/
+  });
+  invariant(registry.bootstrapSourceDigest === registry.routerSourceDigest,
+    'Provider target registry bootstrap source differs from the router source.',
+    'EXTERNAL_INVENTORY_AUTHORITY_MISMATCH');
   invariant(Number.isSafeInteger(registry.generationSequence) && registry.generationSequence >= 0,
     'generationSequence must be a non-negative safe integer.');
   invariant(Number.isFinite(Date.parse(requireString(registry.generatedAt, 'generatedAt'))),
@@ -1332,6 +1464,10 @@ function buildHostAdapterPlan(inventoryAuthority, selector, host, capabilityAudi
     sourceDigest: inventoryAuthority.sourceDigest,
     routerVersion: state.registry.routerVersion,
     routerSourceDigest: state.registry.routerSourceDigest,
+    authorityBootstrapVersion: state.registry.authorityBootstrapVersion,
+    bootstrapSourceDigest: state.registry.bootstrapSourceDigest,
+    runtimeExecutableVersion: state.registry.runtimeExecutableVersion,
+    runtimeExecutableDigest: state.registry.runtimeExecutableDigest,
     installationIdentity: state.registry.installationIdentity,
     repositoryIdentity: state.registry.repositoryIdentity,
     hostIdentity: state.registry.hostIdentity,
@@ -1836,6 +1972,10 @@ function operationReceiptRouteDigest(receipt) {
     objectiveDigest: receipt.objectiveDigest,
     inventoryAuthorityId: receipt.inventoryAuthorityId,
     inventorySourceDigest: receipt.inventorySourceDigest,
+    authorityBootstrapVersion: receipt.authorityBootstrapVersion,
+    bootstrapSourceDigest: receipt.bootstrapSourceDigest,
+    runtimeExecutableVersion: receipt.runtimeExecutableVersion,
+    runtimeExecutableDigest: receipt.runtimeExecutableDigest,
     inventoryGeneration: receipt.inventoryGeneration,
     inventoryDigest: receipt.inventoryDigest,
     hostAdapterPlanDigest: receipt.hostAdapterPlanDigest || null,
@@ -1851,6 +1991,8 @@ function validateOperationReceipt(receipt, binding = {}) {
     'resource', 'targetFingerprint', 'environment', 'riskTier', 'authorisationReference',
     'operationSemanticsVersion', 'operationSemanticsDigest', 'mutationClass', 'receiptClass',
     'selectedAuditReadOnly', 'inventoryAuthorityId', 'inventorySourceDigest',
+    'authorityBootstrapVersion', 'bootstrapSourceDigest', 'runtimeExecutableVersion',
+    'runtimeExecutableDigest',
     'authorisationEnvelopeDigest', 'authorisationLifetimeKind', 'taskId', 'sessionFingerprint', 'objectiveDigest',
     'selectedInterface', 'capabilityDigest', 'inventoryGeneration', 'inventoryDigest', 'hostAdapterPlanDigest',
     'selectedRouteDigest', 'precondition',
@@ -1881,6 +2023,14 @@ function validateOperationReceipt(receipt, binding = {}) {
   'EXTERNAL_OPERATION_SEMANTICS_MISMATCH');
   requireString(receipt.inventoryAuthorityId, 'inventoryAuthorityId', { pattern: DIGEST_PATTERN });
   requireString(receipt.inventorySourceDigest, 'inventorySourceDigest', { pattern: DIGEST_PATTERN });
+  invariant(receipt.authorityBootstrapVersion === AUTHORITY_BOOTSTRAP_PROTOCOL_VERSION,
+    'Operation receipt authority bootstrap version is invalid.',
+    'EXTERNAL_INVENTORY_AUTHORITY_MISMATCH');
+  requireString(receipt.bootstrapSourceDigest, 'bootstrapSourceDigest', { pattern: DIGEST_PATTERN });
+  requireString(receipt.runtimeExecutableVersion, 'runtimeExecutableVersion', {
+    pattern: /^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][a-zA-Z0-9.-]+)?$/
+  });
+  requireString(receipt.runtimeExecutableDigest, 'runtimeExecutableDigest', { pattern: DIGEST_PATTERN });
   invariant(['task', 'time-bounded'].includes(receipt.authorisationLifetimeKind), 'Unsupported authorisationLifetimeKind.');
   if (receipt.authorisationLifetimeKind === 'task') {
     requireString(receipt.taskId, 'taskId', { pattern: ALIAS_PATTERN });
@@ -1926,6 +2076,8 @@ function validateOperationReceipt(receipt, binding = {}) {
     for (const field of [
       'operationSemanticsVersion', 'operationSemanticsDigest', 'mutationClass', 'receiptClass',
       'selectedAuditReadOnly', 'selectedInterface', 'capabilityDigest',
+      'authorityBootstrapVersion', 'bootstrapSourceDigest', 'runtimeExecutableVersion',
+      'runtimeExecutableDigest',
       'inventoryGeneration', 'inventoryDigest', 'selectedRouteDigest'
     ]) {
       invariant(receipt[field] === binding.selectedRoute[field],
@@ -2004,6 +2156,10 @@ function createOperationReceipt(input) {
     selectedAuditReadOnly: route.selectedAuditReadOnly,
     inventoryAuthorityId: route.snapshotAuthorityId,
     inventorySourceDigest: route.inventorySourceDigest,
+    authorityBootstrapVersion: route.authorityBootstrapVersion,
+    bootstrapSourceDigest: route.bootstrapSourceDigest,
+    runtimeExecutableVersion: route.runtimeExecutableVersion,
+    runtimeExecutableDigest: route.runtimeExecutableDigest,
     authorisationReference: input.authorisationReference,
     authorisationEnvelopeDigest: input.authorisationEnvelopeDigest
       || (envelope ? sha256(envelope) : undefined),
@@ -2114,6 +2270,251 @@ function deduplicateDriftEvidence(evidence, previousFindingDigests = []) {
   };
 }
 
+function bootstrapSignaturePayload(frame) {
+  return Buffer.from(sha256(frame).slice('sha256:'.length), 'hex');
+}
+
+function signedBootstrapFrame(frame, privateKey) {
+  const frameDigest = sha256(frame);
+  return {
+    ...frame,
+    frameDigest,
+    signatureAlgorithm: 'ed25519',
+    signature: crypto.sign(null, bootstrapSignaturePayload(frame), privateKey).toString('base64')
+  };
+}
+
+function writeBootstrapFrame(frame, privateKey) {
+  const payload = `${JSON.stringify(signedBootstrapFrame(frame, privateKey))}\n`;
+  invariant(Buffer.byteLength(payload, 'utf8') <= MAX_BOOTSTRAP_FRAME_BYTES,
+    'Trusted authority response exceeds the bounded protocol size.',
+    'EXTERNAL_INVENTORY_BOOTSTRAP_PROTOCOL_INVALID');
+  process.stdout.write(payload);
+}
+
+function safeBootstrapFailure(error) {
+  const stableCode = typeof error?.code === 'string' && error.code.startsWith('EXTERNAL_')
+    ? error.code
+    : 'EXTERNAL_INVENTORY_BOOTSTRAP_PROTOCOL_INVALID';
+  const messages = {
+    EXTERNAL_INVENTORY_BOOTSTRAP_UNAVAILABLE: 'Trusted authority bootstrap is unavailable.',
+    EXTERNAL_INVENTORY_BOOTSTRAP_TIMEOUT: 'Trusted authority session timed out.'
+  };
+  return {
+    stableCode,
+    message: messages[stableCode] || 'Trusted authority session rejected the request.'
+  };
+}
+
+function validateBootstrapFrame(frame, state) {
+  requireObject(frame, 'Authority bootstrap frame');
+  assertAllowedKeys(frame, new Set([
+    'schemaVersion', 'type', 'sessionId', 'nonce', 'selector', 'host', 'capabilityAudits',
+    'operationContext', 'authorizationEnvelope', 'establishedTier', 'immediateApproval',
+    'graphicalApproval', 'graphicalDisclosure', 'receiptInput'
+  ]), 'Authority bootstrap frame');
+  invariant(frame.schemaVersion === AUTHORITY_BOOTSTRAP_REQUEST_SCHEMA_VERSION,
+    'Unsupported authority-bootstrap request schema.',
+    'EXTERNAL_INVENTORY_BOOTSTRAP_PROTOCOL_INVALID');
+  invariant(frame.sessionId === state.sessionId,
+    'Authority-bootstrap session identity mismatch.',
+    'EXTERNAL_INVENTORY_BOOTSTRAP_PROTOCOL_INVALID');
+  requireString(frame.nonce, 'nonce', { pattern: /^[0-9a-f]{64}$/ });
+  invariant(!state.nonces.has(frame.nonce),
+    'Authority-bootstrap nonce was replayed.',
+    'EXTERNAL_INVENTORY_BOOTSTRAP_PROTOCOL_INVALID');
+  state.nonces.add(frame.nonce);
+  return frame;
+}
+
+function bootstrapReceiptInput(input) {
+  requireObject(input, 'receiptInput');
+  assertAllowedKeys(input, new Set([
+    'operationId', 'operation', 'provider', 'adapter', 'targetAlias', 'accountOrOrganisation',
+    'resource', 'targetFingerprint', 'environment', 'authorisationReference',
+    'authorisationEnvelopeDigest', 'authorisationLifetimeKind', 'taskId', 'sessionFingerprint',
+    'objectiveDigest', 'selectedRouteDigest', 'precondition', 'preconditionEvidence',
+    'mutationAttempted', 'mutationPerformed', 'postcondition', 'postconditionEvidence',
+    'rollbackAttempted', 'rollbackPerformed', 'rollbackEvidence', 'stableCode',
+    'safeEvidenceReferences', 'supportedNextAction', 'unchangedScope'
+  ]), 'receiptInput');
+  return input;
+}
+
+function runTrustedAuthoritySession() {
+  assertTrustedAuthorityBootstrap();
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+  const state = {
+    sessionId: crypto.randomBytes(32).toString('hex'),
+    nonces: new Set(),
+    phase: 'select-route',
+    buffer: '',
+    totalBytes: 0,
+    authority: null,
+    route: null,
+    envelope: null,
+    timer: null,
+    finished: false
+  };
+  const runtimeIdentity = runtimeInventoryIdentity(canonicalInventoryPath());
+  const ready = {
+    schemaVersion: AUTHORITY_BOOTSTRAP_RESPONSE_SCHEMA_VERSION,
+    type: 'ready',
+    sessionId: state.sessionId,
+    authorityBootstrapVersion: AUTHORITY_BOOTSTRAP_PROTOCOL_VERSION,
+    routerVersion: ROUTER_VERSION,
+    routerSourceDigest: runtimeIdentity.routerSourceDigest,
+    bootstrapSourceDigest: runtimeIdentity.bootstrapSourceDigest,
+    runtimeExecutableVersion: runtimeIdentity.runtimeExecutableVersion,
+    runtimeExecutableDigest: runtimeIdentity.runtimeExecutableDigest,
+    publicKey: publicKey.export({ type: 'spki', format: 'der' }).toString('base64')
+  };
+
+  return new Promise((resolve) => {
+    const clearSessionTimer = () => {
+      if (state.timer) clearTimeout(state.timer);
+      state.timer = null;
+    };
+    const finish = (frame) => {
+      if (state.finished) return;
+      state.finished = true;
+      clearSessionTimer();
+      process.stdin.removeAllListeners('data');
+      process.stdin.removeAllListeners('end');
+      process.stdin.destroy();
+      writeBootstrapFrame(frame, privateKey);
+      resolve();
+    };
+    const fail = (error) => {
+      const failure = safeBootstrapFailure(error);
+      finish({
+        schemaVersion: AUTHORITY_BOOTSTRAP_RESPONSE_SCHEMA_VERSION,
+        type: 'error',
+        sessionId: state.sessionId,
+        ...failure
+      });
+    };
+    const armSessionTimer = () => {
+      clearSessionTimer();
+      state.timer = setTimeout(() => {
+        const error = new Error('Trusted authority session timed out.');
+        error.code = 'EXTERNAL_INVENTORY_BOOTSTRAP_TIMEOUT';
+        fail(error);
+      }, 30_000);
+    };
+    const handleFrame = (rawFrame) => {
+      if (state.finished) return;
+      try {
+        invariant(Buffer.byteLength(rawFrame, 'utf8') <= MAX_BOOTSTRAP_FRAME_BYTES,
+          'Authority-bootstrap request exceeds the bounded protocol size.',
+          'EXTERNAL_INVENTORY_BOOTSTRAP_PROTOCOL_INVALID');
+        const frame = validateBootstrapFrame(JSON.parse(rawFrame), state);
+        if (state.phase === 'select-route') {
+          invariant(frame.type === 'select-route',
+            'Authority-bootstrap expected one select-route frame.',
+            'EXTERNAL_INVENTORY_BOOTSTRAP_PROTOCOL_INVALID');
+          requireObject(frame.selector, 'selector');
+          requireString(frame.host, 'host', { pattern: ALIAS_PATTERN });
+          invariant(Array.isArray(frame.capabilityAudits) && frame.capabilityAudits.length > 0,
+            'select-route requires capability audits.',
+            'EXTERNAL_INVENTORY_BOOTSTRAP_PROTOCOL_INVALID');
+          state.authority = loadTrustedInventorySnapshot();
+          const plan = buildHostAdapterPlan(
+            state.authority,
+            frame.selector,
+            frame.host,
+            frame.capabilityAudits
+          );
+          state.envelope = frame.authorizationEnvelope;
+          state.route = selectStrongestAdmissibleInterface(
+            frame.operationContext,
+            frame.capabilityAudits,
+            {
+              authorizationEnvelope: frame.authorizationEnvelope,
+              hostAdapterPlan: plan,
+              establishedTier: frame.establishedTier,
+              immediateApproval: frame.immediateApproval,
+              graphicalApproval: frame.graphicalApproval,
+              graphicalDisclosure: frame.graphicalDisclosure
+            }
+          );
+          state.phase = 'receipt-or-close';
+          writeBootstrapFrame({
+            schemaVersion: AUTHORITY_BOOTSTRAP_RESPONSE_SCHEMA_VERSION,
+            type: 'route',
+            sessionId: state.sessionId,
+            nonce: frame.nonce,
+            plan,
+            route: state.route
+          }, privateKey);
+          armSessionTimer();
+          return;
+        }
+        invariant(state.phase === 'receipt-or-close',
+          'Authority-bootstrap session state is invalid.',
+          'EXTERNAL_INVENTORY_BOOTSTRAP_PROTOCOL_INVALID');
+        if (frame.type === 'close') {
+          finish({
+            schemaVersion: AUTHORITY_BOOTSTRAP_RESPONSE_SCHEMA_VERSION,
+            type: 'closed',
+            sessionId: state.sessionId,
+            nonce: frame.nonce
+          });
+          return;
+        }
+        invariant(frame.type === 'create-receipt',
+          'Authority-bootstrap expected one create-receipt or close frame.',
+          'EXTERNAL_INVENTORY_BOOTSTRAP_PROTOCOL_INVALID');
+        const receipt = createOperationReceipt({
+          ...bootstrapReceiptInput(frame.receiptInput),
+          authorisationEnvelope: state.envelope,
+          selectedRoute: state.route
+        });
+        finish({
+          schemaVersion: AUTHORITY_BOOTSTRAP_RESPONSE_SCHEMA_VERSION,
+          type: 'receipt',
+          sessionId: state.sessionId,
+          nonce: frame.nonce,
+          receipt
+        });
+      } catch (error) {
+        fail(error);
+      }
+    };
+
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (chunk) => {
+      if (state.finished) return;
+      state.totalBytes += Buffer.byteLength(chunk, 'utf8');
+      if (state.totalBytes > MAX_BOOTSTRAP_FRAME_BYTES * 2) {
+        const error = new Error('Authority-bootstrap session input is oversized.');
+        error.code = 'EXTERNAL_INVENTORY_BOOTSTRAP_PROTOCOL_INVALID';
+        fail(error);
+        return;
+      }
+      state.buffer += chunk;
+      let newline;
+      while (!state.finished && (newline = state.buffer.indexOf('\n')) !== -1) {
+        const frame = state.buffer.slice(0, newline);
+        state.buffer = state.buffer.slice(newline + 1);
+        if (frame.trim().length === 0) continue;
+        handleFrame(frame);
+      }
+    });
+    process.stdin.on('end', () => {
+      if (state.finished) return;
+      if (state.buffer.trim().length > 0) handleFrame(state.buffer);
+      if (!state.finished) {
+        const error = new Error('Authority-bootstrap session ended before completion.');
+        error.code = 'EXTERNAL_INVENTORY_BOOTSTRAP_PROTOCOL_INVALID';
+        fail(error);
+      }
+    });
+    writeBootstrapFrame(ready, privateKey);
+    armSessionTimer();
+  });
+}
+
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
@@ -2132,6 +2533,10 @@ function usage() {
     '  node scripts/external-system-router.cjs validate-registry <file>',
     '  node scripts/external-system-router.cjs validate-receipt <file>',
     '  node scripts/external-system-router.cjs reconcile <input-file>',
+    '',
+    'Isolated authority session:',
+    '  node --permission --allow-fs-read=<exact-node> --allow-fs-read=<exact-router> --allow-fs-read=<canonical-registry> --frozen-intrinsics --disable-proto=throw --no-addons scripts/external-system-router.cjs trusted-authority-session',
+    '  The session uses bounded signed JSON lines on stdin/stdout and never accepts an inventory path.',
     '',
     'This helper does not call providers, browsers, MCP servers, CLIs, or credential stores.'
   ].join('\n');
@@ -2231,10 +2636,20 @@ module.exports = {
 };
 
 if (require.main === module) {
-  try {
-    process.exitCode = runCli(process.argv.slice(2));
-  } catch (error) {
-    process.stderr.write(`${error.code || 'EXTERNAL_ROUTER_ERROR'}: ${error.message}\n`);
-    process.exitCode = 1;
+  if (AUTHORITY_BOOTSTRAP_MODE) {
+    Promise.resolve()
+      .then(() => runTrustedAuthoritySession())
+      .catch((error) => {
+        const failure = safeBootstrapFailure(error);
+        process.stderr.write(`${failure.stableCode}: ${failure.message}\n`);
+        process.exitCode = 1;
+      });
+  } else {
+    try {
+      process.exitCode = runCli(process.argv.slice(2));
+    } catch (error) {
+      process.stderr.write(`${error.code || 'EXTERNAL_ROUTER_ERROR'}: ${error.message}\n`);
+      process.exitCode = 1;
+    }
   }
 }
