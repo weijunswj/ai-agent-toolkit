@@ -11,6 +11,9 @@ const PACK_ROOT = path.resolve(__dirname, '..');
 const TOOL_LOCK_PATH = path.join(PACK_ROOT, 'config', 'tool-lock.json');
 const POLICY_PATH = path.join(PACK_ROOT, 'config', 'security-policy.json');
 const INVARIANTS_PATH = path.join(PACK_ROOT, 'config', 'invariants.json');
+const ACTIVE_SUPPRESSIONS_PATH = path.join(PACK_ROOT, 'config', 'active-suppressions.json');
+const SUPPRESSION_INVARIANTS_PATH = path.join(PACK_ROOT, 'config', 'suppression-invariants.json');
+const SUPPRESSION_PROPOSALS_PATH = 'repo/security/security-gate-suppression-proposals.json';
 const RULES_PATH = path.join(PACK_ROOT, 'rules', 'toolkit-rules.json');
 const CLASSIFICATION_FIXTURES_PATH = path.join(PACK_ROOT, 'fixtures', 'classification-cases.json');
 const RULE_FIXTURES_PATH = path.join(PACK_ROOT, 'fixtures', 'rule-cases.json');
@@ -21,15 +24,19 @@ const CASE_ALIAS_LIMIT = 200;
 const ENFORCEMENT_CONTROL_PATHS = [
   '.github/workflows/repository-security-gate.yml',
   '_projects/cicd/repository-security-gate/_main/config/',
+  '_projects/cicd/repository-security-gate/_main/invariants/',
   '_projects/cicd/repository-security-gate/_main/rules/',
   '_projects/cicd/repository-security-gate/_main/schemas/',
   '_projects/cicd/repository-security-gate/_main/templates/github/security-gate.yml',
   '_projects/cicd/repository-security-gate/_main/tools/',
   'skills/repository-security-gate/config/',
+  'skills/repository-security-gate/invariants/',
   'skills/repository-security-gate/rules/',
   'skills/repository-security-gate/schemas/',
   'skills/repository-security-gate/templates/github/security-gate.yml',
-  'skills/repository-security-gate/tools/'
+  'skills/repository-security-gate/tools/',
+  'repo/security/security-gate-suppressions.json',
+  SUPPRESSION_PROPOSALS_PATH
 ];
 const PROFILE_EXEMPT = 'SECURITY_PROFILE_EXEMPT';
 const PROFILE_LIGHTWEIGHT = 'SECURITY_PROFILE_LIGHTWEIGHT_CI';
@@ -520,15 +527,31 @@ function validateSuppressions(document, root, today = new Date(), options = {}) 
   const policy = readJson(POLICY_PATH);
   const lock = readJson(TOOL_LOCK_PATH);
   const rulesVersion = readJson(RULES_PATH).rules_version;
-  const executedTests = options.executedTests instanceof Map ? options.executedTests : new Map();
+  const trustedAuthority = options.trustedAuthority;
+  const trustedInvariants = options.trustedInvariants instanceof Map ? options.trustedInvariants : new Map();
+  const changedPaths = options.changedPaths instanceof Set ? options.changedPaths : new Set();
   let pathInventory;
   try {
     pathInventory = trackedPathInventory(root);
   } catch (error) {
     return { valid: false, errors: [`suppression Git path inventory failed: ${error.message}`] };
   }
-  if (!document || document.schema_version !== 3 || !Array.isArray(document.suppressions)) {
-    return { valid: false, errors: ['suppression document must use schema_version 3 and an array'] };
+  if (
+    !document ||
+    document.schema_version !== 4 ||
+    document.authority_source !== 'protected-trusted-checkout' ||
+    document.authority_binding !== 'exact-runtime-trusted-authority' ||
+    Object.keys(document).sort().join(',') !== 'authority_binding,authority_source,schema_version,suppressions' ||
+    !Array.isArray(document.suppressions)
+  ) {
+    return { valid: false, errors: ['active suppressions must use protected schema_version 4 authority'] };
+  }
+  if (
+    !trustedAuthority ||
+    !SHA40.test(trustedAuthority.commit || '') ||
+    !/^sha256:[0-9a-f]{64}$/.test(trustedAuthority.manifest_digest || '')
+  ) {
+    return { valid: false, errors: ['active suppression authority is not bound to an exact trusted checkout'] };
   }
   const ids = new Set();
   const findingIdentities = new Set();
@@ -538,7 +561,7 @@ function validateSuppressions(document, root, today = new Date(), options = {}) 
     const required = [
       'id', 'tool', 'rule', 'finding_identity', 'path', 'scope',
       'exploitability_rationale', 'approver_reference', 'introduction_commit',
-      'expires', 'compensating_test', 'compensating_test_sha256',
+      'expires', 'trusted_invariant_id', 'trusted_invariant_closure_sha256',
       'tool_version', 'rule_version', 'source_sha256'
     ];
     for (const field of required) {
@@ -547,6 +570,10 @@ function validateSuppressions(document, root, today = new Date(), options = {}) 
       }
     }
     if (!item) continue;
+    const allowedKeys = [...required, 'candidate_input_contract'].sort();
+    if (Object.keys(item).sort().join(',') !== allowedKeys.join(',')) {
+      errors.push(`${prefix}: active suppression fields do not match the protected schema`);
+    }
     if (ids.has(item.id)) errors.push(`${prefix}: duplicate id`);
     ids.add(item.id);
     if (findingIdentities.has(item.finding_identity)) errors.push(`${prefix}: duplicate finding identity`);
@@ -568,9 +595,9 @@ function validateSuppressions(document, root, today = new Date(), options = {}) 
     if (
       !SHA64.test(item.finding_identity || '') ||
       !SHA64.test(item.source_sha256 || '') ||
-      !SHA64.test(item.compensating_test_sha256 || '')
+      !SHA64.test(item.trusted_invariant_closure_sha256 || '')
     ) {
-      errors.push(`${prefix}: finding, source, and compensating-test digests must be SHA-256`);
+      errors.push(`${prefix}: finding, source, and trusted-invariant digests must be SHA-256`);
     }
     if (!APPROVAL_REFERENCE.test(item.approver_reference || '')) {
       errors.push(`${prefix}: approver_reference must be a supported Toolkit issue or review discussion`);
@@ -615,34 +642,60 @@ function validateSuppressions(document, root, today = new Date(), options = {}) 
     } else {
       errors.push(`${prefix}: suppression path is missing or outside repository`);
     }
-    let testRelative = '';
-    try {
-      testRelative = canonicalGitPath(item.compensating_test || '');
-      if (!pathInventory.exact.has(testRelative)) {
-        errors.push(`${prefix}: compensating_test does not exactly match a tracked Git path`);
-      }
-    } catch {
-      errors.push(`${prefix}: compensating_test is not a canonical Git path`);
-    }
-    const testFull = path.resolve(root, testRelative);
     if (
-      path.isAbsolute(item.compensating_test || '') ||
-      testRelative.split('/').includes('..') ||
-      !isWithin(root, testFull) ||
-      !fs.existsSync(testFull) ||
-      !fs.lstatSync(testFull).isFile() ||
-      fs.lstatSync(testFull).isSymbolicLink() ||
-      !isWithin(root, fs.realpathSync.native(testFull))
+      !Array.isArray(item.candidate_input_contract) ||
+      item.candidate_input_contract.length < 1 ||
+      item.candidate_input_contract.length > 20
     ) {
-      errors.push(`${prefix}: compensating_test must be a contained regular repository file`);
+      errors.push(`${prefix}: candidate_input_contract must be a bounded exact-path list`);
     } else {
-      const testDigest = sourceBindingDigest(testFull);
-      if (testDigest !== item.compensating_test_sha256) {
-        errors.push(`${prefix}: compensating test binding changed`);
+      const inputPaths = new Set();
+      for (const input of item.candidate_input_contract) {
+        let inputPath = '';
+        try {
+          inputPath = canonicalGitPath(input && input.path);
+        } catch {
+          errors.push(`${prefix}: candidate input path is invalid`);
+          continue;
+        }
+        if (
+          inputPaths.has(inputPath) ||
+          !pathInventory.exact.has(inputPath) ||
+          !SHA64.test(input && input.sha256 || '')
+        ) {
+          errors.push(`${prefix}: candidate input contract is duplicated, untracked, or malformed`);
+          continue;
+        }
+        inputPaths.add(inputPath);
+        const inputFull = path.resolve(root, inputPath);
+        if (
+          !isWithin(root, inputFull) ||
+          !fs.existsSync(inputFull) ||
+          !fs.lstatSync(inputFull).isFile() ||
+          fs.lstatSync(inputFull).isSymbolicLink() ||
+          !isWithin(root, fs.realpathSync.native(inputFull)) ||
+          sourceBindingDigest(inputFull) !== input.sha256
+        ) {
+          errors.push(`${prefix}: candidate input contract digest or containment changed`);
+        }
       }
-      if (executedTests.get(testRelative) !== testDigest) {
-        errors.push(`${prefix}: compensating test was not executed as invariant evidence at its bound digest`);
-      }
+    }
+    const trustedEvidence = trustedInvariants.get(item.trusted_invariant_id);
+    if (
+      !trustedEvidence ||
+      trustedEvidence.status !== 'PASS' ||
+      trustedEvidence.closure_sha256 !== item.trusted_invariant_closure_sha256
+    ) {
+      errors.push(`${prefix}: protected compensating invariant did not pass at its bound closure digest`);
+    }
+    const candidateControlChanged = [...changedPaths].some((changed) =>
+      changed === SUPPRESSION_PROPOSALS_PATH ||
+      ENFORCEMENT_CONTROL_PATHS.some((prefixPath) => changed === prefixPath || changed.startsWith(prefixPath)) ||
+      changed === item.path ||
+      (item.candidate_input_contract || []).some((input) => changed === input.path)
+    );
+    if (candidateControlChanged) {
+      errors.push(`${prefix}: same-candidate authority or input change requires separate protected promotion`);
     }
     if (item.tool === 'toolkit-rules') {
       if (item.tool_version !== rulesVersion || item.rule_version !== rulesVersion) {
@@ -655,7 +708,15 @@ function validateSuppressions(document, root, today = new Date(), options = {}) 
       }
     }
   }
-  return { valid: errors.length === 0, errors };
+  return {
+    valid: errors.length === 0,
+    errors,
+    authority: {
+      commit: trustedAuthority.commit,
+      manifest_digest: trustedAuthority.manifest_digest,
+      active_manifest_sha256: `sha256:${exactFileDigest(ACTIVE_SUPPRESSIONS_PATH)}`
+    }
+  };
 }
 
 function stableFinding(tool, rule, relativePath, line, message, options = {}) {
@@ -776,12 +837,23 @@ function run(command, args, options = {}) {
     maxBuffer: options.maxBuffer || OUTPUT_LIMIT,
     timeout: options.timeout
   });
-  if (result.error) return { status: null, stdout: '', stderr: '', error: result.error.message };
+  if (result.error) {
+    return {
+      status: null,
+      signal: result.signal || null,
+      stdout: '',
+      stderr: '',
+      error: result.error.message,
+      error_code: result.error.code || null
+    };
+  }
   return {
     status: result.status,
+    signal: result.signal || null,
     stdout: String(result.stdout || '').slice(0, OUTPUT_LIMIT),
     stderr: String(result.stderr || '').slice(0, OUTPUT_LIMIT),
-    error: null
+    error: null,
+    error_code: null
   };
 }
 
@@ -1100,6 +1172,35 @@ function runInvariantCommand(command, args, options = {}) {
   });
 }
 
+function classifyInvariantOutcome(result, options = {}) {
+  let status = 'PASS';
+  if (result.error_code === 'ETIMEDOUT') status = 'TIMEOUT';
+  else if (result.error_code === 'ENOBUFS') status = 'OUTPUT_LIMIT';
+  else if (result.error) status = 'EXECUTION_FAILED';
+  else if (
+    options.sandboxRequired &&
+    result.status !== 0 &&
+    /(?:unshare|operation not permitted|permission denied|sudo:)/i.test(String(result.stderr || ''))
+  ) {
+    status = 'SANDBOX_UNAVAILABLE';
+  } else if (result.signal || !Number.isInteger(result.status)) status = 'EXECUTION_FAILED';
+  else if (result.status !== 0) status = 'FINDINGS';
+  const exitCategory = Number.isInteger(result.status)
+    ? (result.status === 0 ? 'ZERO' : 'NONZERO')
+    : (result.signal ? 'SIGNAL' : 'UNAVAILABLE');
+  return {
+    status,
+    exit_category: exitCategory,
+    signal_category: result.signal ? 'TERMINATED' : 'NONE',
+    diagnostic_id: `sha256:${sha256(JSON.stringify({
+      status,
+      exit_category: exitCategory,
+      signal_category: result.signal ? 'TERMINATED' : 'NONE',
+      error_code: result.error_code || null
+    }))}`
+  };
+}
+
 function runInvariants(root, mode, base, head, options = {}) {
   const document = readJson(INVARIANTS_PATH);
   const findings = [];
@@ -1130,16 +1231,29 @@ function runInvariants(root, mode, base, head, options = {}) {
         sandboxGid: options.sandboxGid,
         sandboxHome: options.sandboxHome
       });
-      consumed.push({ path: relative, sha256: digest, status: result.error || result.status !== 0 ? 'FINDINGS' : 'PASS' });
-      if (result.error || result.status !== 0) {
+      let outcome = classifyInvariantOutcome(result, {
+        sandboxRequired: Boolean(options.sandboxUid && options.sandboxGid)
+      });
+      if (outcome.status === 'PASS' && sourceBindingDigest(full) !== digest) {
+        outcome = {
+          status: 'IDENTITY_DRIFT',
+          exit_category: 'ZERO',
+          signal_category: 'NONE',
+          diagnostic_id: `sha256:${sha256(`${relative}\nIDENTITY_DRIFT`)}`
+        };
+      }
+      consumed.push({ path: relative, sha256: digest, ...outcome });
+      if (outcome.status === 'FINDINGS') {
         findings.push({
           ...stableFinding('toolkit-invariants', evidence.id, relative, 0, 'Security invariant test failed', {
             severity: 'HIGH',
             diagnostic: evidence.id
           })
         });
-      } else {
+      } else if (outcome.status === 'PASS') {
         executedTests.set(relative, digest);
+      } else {
+        failures.push(`${evidence.id}: invariant outcome ${outcome.status}`);
       }
     }
   }
@@ -1254,12 +1368,18 @@ function runConsumerInvariants(root, profile, manifestRelative, mode, base, head
       sandboxGid: options.sandboxGid,
       sandboxHome: options.sandboxHome
     });
-    if (result.error) {
-      failures.push(`${expectedLayer}/${test.id}: invariant execution did not complete`);
-      consumed.push({ id: test.id, path: relative, sha256: digest, status: 'UNVERIFIED' });
-      continue;
+    let outcome = classifyInvariantOutcome(result, {
+      sandboxRequired: Boolean(options.sandboxUid && options.sandboxGid)
+    });
+    if (outcome.status === 'PASS' && sourceBindingDigest(full) !== digest) {
+      outcome = {
+        status: 'IDENTITY_DRIFT',
+        exit_category: 'ZERO',
+        signal_category: 'NONE',
+        diagnostic_id: `sha256:${sha256(`${relative}\nIDENTITY_DRIFT`)}`
+      };
     }
-    if (result.status !== 0) {
+    if (outcome.status === 'FINDINGS') {
       findings.push(stableFinding(
         'consumer-invariants',
         test.id,
@@ -1268,7 +1388,12 @@ function runConsumerInvariants(root, profile, manifestRelative, mode, base, head
         'Consumer attacker invariant failed',
         { severity: 'HIGH', diagnostic: test.id }
       ));
-      consumed.push({ id: test.id, path: relative, sha256: digest, status: 'FINDINGS' });
+      consumed.push({ id: test.id, path: relative, sha256: digest, ...outcome });
+      continue;
+    }
+    if (outcome.status !== 'PASS') {
+      failures.push(`${expectedLayer}/${test.id}: invariant outcome ${outcome.status}`);
+      consumed.push({ id: test.id, path: relative, sha256: digest, ...outcome });
       continue;
     }
     let payload;
@@ -1285,7 +1410,15 @@ function runConsumerInvariants(root, profile, manifestRelative, mode, base, head
       !safeInvariantEvidence(payload.evidence, root)
     ) {
       failures.push(`${expectedLayer}/${test.id}: invariant result is malformed or unsafe`);
-      consumed.push({ id: test.id, path: relative, sha256: digest, status: 'UNVERIFIED' });
+      consumed.push({
+        id: test.id,
+        path: relative,
+        sha256: digest,
+        status: 'MALFORMED_RESULT',
+        exit_category: outcome.exit_category,
+        signal_category: outcome.signal_category,
+        diagnostic_id: `sha256:${sha256(`${test.id}\nMALFORMED_RESULT`)}`
+      });
       continue;
     }
     if (payload.status === 'FINDINGS') {
@@ -1335,6 +1468,200 @@ function scannerApplicability(name, classification, files) {
   return false;
 }
 
+function loadTrustedSuppressionClosure() {
+  const manifest = readJson(SUPPRESSION_INVARIANTS_PATH);
+  const errors = [];
+  if (
+    !manifest ||
+    manifest.schema_version !== 1 ||
+    !/^\d+\.\d+\.\d+$/.test(manifest.closure_version || '') ||
+    !Array.isArray(manifest.closure_files) ||
+    manifest.closure_files.length < 1 ||
+    manifest.closure_files.length > 20 ||
+    !Array.isArray(manifest.invariants) ||
+    manifest.invariants.length < 1 ||
+    manifest.invariants.length > 50
+  ) {
+    return { valid: false, errors: ['protected invariant closure manifest is invalid'] };
+  }
+  const files = [];
+  for (const record of manifest.closure_files) {
+    let relative = '';
+    try {
+      relative = canonicalGitPath(record && record.path);
+    } catch {
+      errors.push('protected invariant closure path is invalid');
+      continue;
+    }
+    const full = path.resolve(PACK_ROOT, relative);
+    if (
+      !isWithin(PACK_ROOT, full) ||
+      !fs.existsSync(full) ||
+      !fs.lstatSync(full).isFile() ||
+      fs.lstatSync(full).isSymbolicLink() ||
+      !isWithin(PACK_ROOT, fs.realpathSync.native(full))
+    ) {
+      errors.push('protected invariant closure file is missing or redirected');
+      continue;
+    }
+    const digest = exactFileDigest(full);
+    if (!SHA64.test(record.sha256 || '') || digest !== record.sha256) {
+      errors.push('protected invariant closure digest mismatch');
+    }
+    files.push({ path: relative, sha256: digest, full });
+  }
+  const closureSha256 = sha256(JSON.stringify({
+    schema_version: manifest.schema_version,
+    closure_version: manifest.closure_version,
+    files: files.map(({ path: relative, sha256: digest }) => ({ path: relative, sha256: digest }))
+  }));
+  const ids = new Set();
+  for (const invariant of manifest.invariants) {
+    if (
+      !invariant ||
+      !/^[A-Za-z0-9._-]{1,100}$/.test(invariant.id || '') ||
+      ids.has(invariant.id) ||
+      !files.some((file) => file.path === invariant.harness)
+    ) {
+      errors.push('protected invariant entry is invalid');
+    }
+    ids.add(invariant && invariant.id);
+  }
+  return {
+    valid: errors.length === 0,
+    errors,
+    manifest,
+    manifest_sha256: exactFileDigest(SUPPRESSION_INVARIANTS_PATH),
+    closure_sha256: closureSha256,
+    files
+  };
+}
+
+function runTrustedSuppressionInvariants(root, document) {
+  const evidence = new Map();
+  const failures = [];
+  const closure = loadTrustedSuppressionClosure();
+  if (!closure.valid) {
+    failures.push(...closure.errors);
+    return { evidence, failures, closure };
+  }
+  const byId = new Map(closure.manifest.invariants.map((item) => [item.id, item]));
+  const seen = new Set();
+  for (const suppression of document.suppressions || []) {
+    const id = suppression.trusted_invariant_id;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const entry = byId.get(id);
+    if (!entry) {
+      failures.push(`${id}: protected invariant is not declared`);
+      continue;
+    }
+    const harnessFile = closure.files.find((file) => file.path === entry.harness);
+    try {
+      const harness = require(harnessFile.full);
+      const result = harness.evaluate(id, {
+        candidateRoot: root,
+        candidateInputs: suppression.candidate_input_contract
+      });
+      if (
+        !result ||
+        !['PASS', 'FINDINGS'].includes(result.status) ||
+        result.invariant_id !== id ||
+        !/^sha256:[0-9a-f]{64}$/.test(result.diagnostic_id || '') ||
+        !safeInvariantEvidence(result.inspected_paths, root)
+      ) {
+        failures.push(`${id}: protected invariant returned malformed evidence`);
+        evidence.set(id, {
+          status: 'MALFORMED_RESULT',
+          closure_sha256: closure.closure_sha256,
+          diagnostic_id: `sha256:${sha256(`${id}\nMALFORMED_RESULT`)}`
+        });
+        continue;
+      }
+      evidence.set(id, {
+        status: result.status,
+        closure_sha256: closure.closure_sha256,
+        diagnostic_id: result.diagnostic_id,
+        inspected_paths: result.inspected_paths
+      });
+    } catch {
+      failures.push(`${id}: protected invariant execution failed`);
+      evidence.set(id, {
+        status: 'EXECUTION_FAILED',
+        closure_sha256: closure.closure_sha256,
+        diagnostic_id: `sha256:${sha256(`${id}\nEXECUTION_FAILED`)}`
+      });
+    }
+  }
+  return { evidence, failures, closure };
+}
+
+function validateSuppressionProposals(document, root) {
+  const errors = [];
+  const proposals = [];
+  let inventory;
+  try {
+    inventory = trackedPathInventory(root);
+  } catch {
+    return { valid: false, errors: ['candidate proposal Git path inventory failed'], proposals };
+  }
+  if (
+    !document ||
+    document.schema_version !== 1 ||
+    Object.keys(document).sort().join(',') !== 'proposals,schema_version' ||
+    !Array.isArray(document.proposals) ||
+    document.proposals.length > 100
+  ) {
+    return { valid: false, errors: ['candidate suppression proposals must use schema_version 1 and a bounded array'], proposals };
+  }
+  const ids = new Set();
+  for (const proposal of document.proposals) {
+    let exactPath = '';
+    try {
+      exactPath = canonicalGitPath(proposal && proposal.path);
+    } catch {
+      errors.push('candidate suppression proposal path is invalid');
+      continue;
+    }
+    if (
+      !proposal ||
+      Object.keys(proposal).sort().join(',') !== [
+        'finding_identity',
+        'path',
+        'proposal_id',
+        'rationale',
+        'review_reference',
+        'rule',
+        'scope',
+        'tool'
+      ].join(',') ||
+      !/^[A-Za-z0-9._-]+$/.test(proposal.proposal_id || '') ||
+      ids.has(proposal.proposal_id) ||
+      !SHA64.test(proposal.finding_identity || '') ||
+      !inventory.exact.has(exactPath) ||
+      !['exact_path', 'exact_line', 'synthetic_fixture'].includes(proposal.scope) ||
+      typeof proposal.rationale !== 'string' ||
+      proposal.rationale.length < 20 ||
+      proposal.rationale.length > 1000 ||
+      !APPROVAL_REFERENCE.test(proposal.review_reference || '')
+    ) {
+      errors.push(`${proposal && proposal.proposal_id || '<unknown>'}: candidate suppression proposal is invalid`);
+      continue;
+    }
+    ids.add(proposal.proposal_id);
+    proposals.push({
+      proposal_id: proposal.proposal_id,
+      tool: String(proposal.tool || '').slice(0, 80),
+      rule: String(proposal.rule || '').slice(0, 160),
+      finding_identity: proposal.finding_identity,
+      path: exactPath,
+      scope: proposal.scope,
+      authority_promotion: 'review_required'
+    });
+  }
+  return { valid: errors.length === 0, errors, proposals };
+}
+
 function applySuppressions(findings, document) {
   if (!document) return { active: findings, suppressed: [] };
   const byIdentity = new Map(document.suppressions.map((item) => [item.finding_identity, item]));
@@ -1345,7 +1672,14 @@ function applySuppressions(findings, document) {
     if (!suppression || suppression.path !== finding.path || suppression.rule !== finding.rule || suppression.tool !== finding.tool) {
       active.push(finding);
     } else {
-      suppressed.push({ ...finding, suppression_id: suppression.id, expires: suppression.expires });
+      suppressed.push({
+        ...finding,
+        suppression_id: suppression.id,
+        expires: suppression.expires,
+        trusted_invariant_id: suppression.trusted_invariant_id,
+        trusted_authority_commit: suppression.trusted_authority_commit,
+        trusted_authority_manifest_digest: suppression.trusted_authority_manifest_digest
+      });
     }
   }
   return { active, suppressed };
@@ -1431,7 +1765,7 @@ function exactFileDigest(filePath) {
 
 function validateTrustedAuthority(authority, candidateHead) {
   const errors = [];
-  if (!authority || authority.schema_version !== 1) {
+  if (!authority || authority.schema_version !== 2) {
     return { valid: false, errors: ['trusted authority schema is missing or invalid'] };
   }
   if (!['protected-base', 'bootstrap-immutable-review'].includes(authority.mode)) {
@@ -1500,7 +1834,22 @@ function validateTrustedAuthority(authority, candidateHead) {
   const bindings = authority.bindings && typeof authority.bindings === 'object'
     ? authority.bindings
     : {};
-  const required = ['workflow', 'runner', 'trusted_runner', 'policy', 'rules', 'tool_lock', 'installer', 'report_schema', 'suppression_schema', 'invariant_schema'];
+  const required = [
+    'workflow',
+    'runner',
+    'trusted_runner',
+    'policy',
+    'rules',
+    'tool_lock',
+    'installer',
+    'report_schema',
+    'suppression_schema',
+    'suppression_proposal_schema',
+    'invariant_schema',
+    'active_suppressions',
+    'suppression_invariant_manifest',
+    'suppression_invariant_harness'
+  ];
   for (const name of required) {
     const binding = bindings[name];
     if (
@@ -1724,6 +2073,7 @@ function scanCommand(args) {
   const unverified = [];
   const infrastructureFailures = [];
   let findings = [];
+  let changedPaths = new Set();
   if (!authorityResult.valid) {
     coverage.push({ layer: 'trusted_authority', status: 'invalid' });
     unverified.push(...authorityResult.errors.map((item) => `trusted authority: ${item}`));
@@ -1770,6 +2120,7 @@ function scanCommand(args) {
         'diff', '--name-only', '-z', '--diff-filter=ACMR', base, head
       ])
     );
+    changedPaths = changed;
     const critical = policy.security_critical_paths.some((prefix) =>
       [...changed].some((item) => item.toLowerCase().startsWith(prefix.toLowerCase()))
     );
@@ -1802,7 +2153,7 @@ function scanCommand(args) {
     let state = authorityResult.valid ? PROFILE_EXEMPT : 'SECURITY_GATE_UNVERIFIED';
     if (!assertIntegrity('report_sealing')) state = 'SECURITY_GATE_UNVERIFIED';
     const report = sanitisedReport(sealReport({
-      schema_version: 3,
+      schema_version: 4,
       gate_version: policy.policy_version,
       state,
       repository: authorityResult.valid ? authority.target_repository : repositoryIdentity(root),
@@ -1827,6 +2178,7 @@ function scanCommand(args) {
       findings: [],
       finding_duplicates: [],
       suppressed_findings: [],
+      suppression_proposals: [],
       unverified_areas: unverified,
       infrastructure_failures: [],
       next_action: 'No executable repository surface was detected. Reclassify if content changes.'
@@ -1883,7 +2235,6 @@ function scanCommand(args) {
     }
     assertIntegrity(name);
   }
-  const executedInvariantTests = new Map();
   const requiresToolkitInvariants = classification.profile === PROFILE_TOOLING && fs.existsSync(path.join(root, 'repo', 'tests'));
   if (requiresToolkitInvariants) {
     if (args['run-invariants']) {
@@ -1898,7 +2249,6 @@ function scanCommand(args) {
       });
       findings.push(...invariantResult.findings);
       unverified.push(...invariantResult.failures);
-      for (const [relative, digest] of invariantResult.executedTests) executedInvariantTests.set(relative, digest);
       coverage.push({
         layer: 'toolkit_invariants',
         status: invariantResult.failures.length === 0 ? 'complete' : 'unverified',
@@ -1932,7 +2282,6 @@ function scanCommand(args) {
       );
       findings.push(...invariantResult.findings);
       unverified.push(...invariantResult.failures);
-      for (const [relative, digest] of invariantResult.executedTests) executedInvariantTests.set(relative, digest);
       coverage.push({
         layer,
         status: invariantResult.failures.length === 0 ? 'complete' : 'unverified',
@@ -1949,23 +2298,83 @@ function scanCommand(args) {
       unverified.push(`${layer}: --run-invariants was not enabled`);
     }
   }
-  let suppressionDocument = null;
-  if (args.suppressions) {
-    const suppressionPath = path.resolve(root, args.suppressions);
-    if (!isWithin(root, suppressionPath)) throw new Error('Suppressions must stay inside repository.');
-    suppressionDocument = readJson(suppressionPath);
-    const suppressionResult = validateSuppressions(suppressionDocument, root, new Date(), {
-      executedTests: executedInvariantTests
-    });
-    if (!suppressionResult.valid) {
-      unverified.push(...suppressionResult.errors.map((item) => `suppression: ${item}`));
-      coverage.push({ layer: 'suppressions', status: 'invalid' });
-      suppressionDocument = null;
+  let candidateSuppressionProposals = [];
+  const proposalPath = path.resolve(root, SUPPRESSION_PROPOSALS_PATH);
+  if (fs.existsSync(proposalPath)) {
+    const proposalResult = validateSuppressionProposals(readJson(proposalPath), root);
+    candidateSuppressionProposals = proposalResult.proposals;
+    if (!proposalResult.valid) {
+      coverage.push({ layer: 'candidate_suppression_proposals', status: 'invalid' });
+      unverified.push(...proposalResult.errors.map((item) => `suppression proposal: ${item}`));
     } else {
-      coverage.push({ layer: 'suppressions', status: 'complete' });
+      coverage.push({
+        layer: 'candidate_suppression_proposals',
+        status: changedPaths.has(SUPPRESSION_PROPOSALS_PATH) ? 'review_required' : 'complete',
+        proposal_count: candidateSuppressionProposals.length,
+        authority_promotion: candidateSuppressionProposals.length > 0 || changedPaths.has(SUPPRESSION_PROPOSALS_PATH)
+          ? 'review_required'
+          : 'not_requested'
+      });
     }
   } else {
-    coverage.push({ layer: 'suppressions', status: 'not_configured' });
+    coverage.push({ layer: 'candidate_suppression_proposals', status: 'not_configured' });
+  }
+  let suppressionDocument = null;
+  if (authorityResult.valid) {
+    const activeDocument = readJson(ACTIVE_SUPPRESSIONS_PATH);
+    const trustedInvariantResult = runTrustedSuppressionInvariants(root, activeDocument);
+    if (trustedInvariantResult.failures.length > 0) {
+      unverified.push(...trustedInvariantResult.failures.map((item) => `trusted suppression invariant: ${item}`));
+    }
+    coverage.push({
+      layer: 'trusted_suppression_invariants',
+      status: trustedInvariantResult.failures.length === 0 ? 'complete' : 'unverified',
+      manifest_sha256: trustedInvariantResult.closure.manifest_sha256
+        ? `sha256:${trustedInvariantResult.closure.manifest_sha256}`
+        : null,
+      closure_sha256: trustedInvariantResult.closure.closure_sha256
+        ? `sha256:${trustedInvariantResult.closure.closure_sha256}`
+        : null,
+      outcomes: [...trustedInvariantResult.evidence.entries()].map(([id, value]) => ({
+        id,
+        status: value.status,
+        diagnostic_id: value.diagnostic_id
+      }))
+    });
+    const suppressionResult = validateSuppressions(activeDocument, root, new Date(), {
+      trustedAuthority: authority,
+      trustedInvariants: trustedInvariantResult.evidence,
+      changedPaths
+    });
+    if (!suppressionResult.valid) {
+      unverified.push(...suppressionResult.errors.map((item) => `active suppression: ${item}`));
+      coverage.push({
+        layer: 'active_trusted_suppressions',
+        status: 'ineligible',
+        authority_commit: suppressionResult.authority?.commit || authority.commit,
+        authority_manifest_digest: suppressionResult.authority?.manifest_digest || authority.manifest_digest,
+        active_manifest_sha256: suppressionResult.authority?.active_manifest_sha256 ||
+          `sha256:${exactFileDigest(ACTIVE_SUPPRESSIONS_PATH)}`
+      });
+    } else {
+      suppressionDocument = {
+        ...activeDocument,
+        suppressions: activeDocument.suppressions.map((item) => ({
+          ...item,
+          trusted_authority_commit: suppressionResult.authority.commit,
+          trusted_authority_manifest_digest: suppressionResult.authority.manifest_digest
+        }))
+      };
+      coverage.push({
+        layer: 'active_trusted_suppressions',
+        status: 'complete',
+        authority_commit: suppressionResult.authority.commit,
+        authority_manifest_digest: suppressionResult.authority.manifest_digest,
+        active_manifest_sha256: suppressionResult.authority.active_manifest_sha256
+      });
+    }
+  } else {
+    coverage.push({ layer: 'active_trusted_suppressions', status: 'unverified' });
   }
   const normalizedFindings = deduplicateFindings(findings);
   if (normalizedFindings.collisions.length > 0) {
@@ -1992,7 +2401,7 @@ function scanCommand(args) {
   else if (unverified.length > 0 || !lockResult.valid) state = 'SECURITY_GATE_UNVERIFIED';
   else if (boundedFindings.length > 0) state = 'SECURITY_FINDINGS';
   const report = sanitisedReport(sealReport({
-    schema_version: 3,
+    schema_version: 4,
     gate_version: policy.policy_version,
     state,
     repository: authorityResult.valid ? authority.target_repository : repositoryIdentity(root),
@@ -2017,6 +2426,7 @@ function scanCommand(args) {
     findings: boundedFindings,
     finding_duplicates: normalizedFindings.duplicates,
     suppressed_findings: applied.suppressed,
+    suppression_proposals: candidateSuppressionProposals,
     unverified_areas: unverified,
     infrastructure_failures: infrastructureFailures,
     next_action: state === 'SECURITY_PASS'
@@ -2191,7 +2601,7 @@ function usage() {
     'Usage:',
     '  node security-gate.cjs classify --repo <path>',
     '  node security-gate.cjs validate-lock',
-    '  node security-gate.cjs validate-suppressions --repo <path> --file <path> --run-invariants [--invariant-manifest <path>]',
+    '  node security-gate.cjs validate-suppressions --repo <path> --file <protected-active-suppressions-path>',
     '  node security-gate.cjs self-test',
     '  node security-gate.cjs scan --mode <pr|full|scheduled|release> --repo <path> [--base <sha> --head <sha>] [--tools-dir <path>] [--run-invariants]',
     '  node security-gate.cjs review-packet --repo <path> --base <sha> --head <sha> --report <path> [--output <path>]',
@@ -2221,32 +2631,24 @@ function main(argv = process.argv.slice(2)) {
     const root = safeRepoRoot(args.repo || '.');
     const file = path.resolve(root, args.file || '');
     if (!isWithin(root, file)) throw new Error('Suppression path must stay inside repository.');
-    if (!args['run-invariants']) {
-      throw new Error('Suppression validation requires --run-invariants evidence.');
+    if (file !== path.resolve(ACTIVE_SUPPRESSIONS_PATH)) {
+      throw new Error('Only the protected active suppression manifest may be validated as authority.');
     }
-    const classification = classifyRepository(root);
-    const executedTests = new Map();
-    let invariantResult = null;
-    if (classification.profile === PROFILE_TOOLING && fs.existsSync(path.join(root, 'repo', 'tests'))) {
-      invariantResult = runInvariants(root, 'full', null, null);
-    } else if ([PROFILE_WEB, PROFILE_WORKFLOW].includes(classification.profile)) {
-      invariantResult = runConsumerInvariants(
-        root,
-        classification.profile,
-        args['invariant-manifest'] || readJson(POLICY_PATH).consumer_invariant_manifest,
-        'full',
-        null,
-        null
-      );
-    }
-    if (!invariantResult) throw new Error('No supported invariant evidence is available for suppression validation.');
-    if (invariantResult.failures.length > 0 || invariantResult.findings.length > 0) {
-      throw new Error('Invariant evidence did not pass; suppressions cannot be validated.');
-    }
-    for (const [relative, digest] of invariantResult.executedTests) executedTests.set(relative, digest);
-    const result = validateSuppressions(readJson(file), root, new Date(), { executedTests });
+    const document = readJson(file);
+    const invariantResult = runTrustedSuppressionInvariants(root, document);
+    if (invariantResult.failures.length > 0) throw new Error(invariantResult.failures.join('; '));
+    const authorityRoot = safeRepoRoot(git(PACK_ROOT, ['rev-parse', '--show-toplevel']));
+    const authorityCommit = resolveExactCommit(authorityRoot, git(authorityRoot, ['rev-parse', 'HEAD']), 'authority HEAD');
+    const result = validateSuppressions(document, root, new Date(), {
+      trustedAuthority: {
+        commit: authorityCommit,
+        manifest_digest: `sha256:${sha256(`${authorityCommit}\n${exactFileDigest(file)}`)}`
+      },
+      trustedInvariants: invariantResult.evidence,
+      changedPaths: new Set()
+    });
     if (!result.valid) throw new Error(result.errors.join('; '));
-    process.stdout.write('OK: suppressions are exact, current, and source-bound.\n');
+    process.stdout.write('OK: protected active suppressions are exact, current, source-bound, and closure-bound.\n');
     return 0;
   }
   if (command === 'self-test') return selfTest();
@@ -2271,6 +2673,7 @@ module.exports = {
   canonicalGitPath,
   classifyRepository,
   compareRepositoryIntegrity,
+  classifyInvariantOutcome,
   deduplicateFindings,
   enforcementControlChanges,
   genericJsonFindings,
@@ -2279,11 +2682,13 @@ module.exports = {
   riskClassification,
   runAdapter,
   runConsumerInvariants,
+  runTrustedSuppressionInvariants,
   scanToolkitRules,
   shellDescriptor,
   shellInventory,
   stableFinding,
   trackedPathInventory,
+  validateSuppressionProposals,
   validateTrustedAuthority,
   validateSuppressions,
   validateToolLock

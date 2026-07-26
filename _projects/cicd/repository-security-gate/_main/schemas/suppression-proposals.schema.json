@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://weijunswj.github.io/ai-agent-toolkit/security-gate/suppression-proposals.schema.json",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "proposals"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "proposals": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "required": [
+          "proposal_id",
+          "tool",
+          "rule",
+          "finding_identity",
+          "path",
+          "scope",
+          "rationale",
+          "review_reference"
+        ],
+        "properties": {
+          "proposal_id": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
+          "tool": { "type": "string", "minLength": 1, "maxLength": 80 },
+          "rule": { "type": "string", "minLength": 1, "maxLength": 160 },
+          "finding_identity": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "path": {
+            "type": "string",
+            "pattern": "^(?!/)(?!.*\\.\\.)(?!.*[*?]).+$",
+            "description": "Exact-case repository-relative Git path."
+          },
+          "scope": { "enum": ["exact_path", "exact_line", "synthetic_fixture"] },
+          "rationale": { "type": "string", "minLength": 20, "maxLength": 1000 },
+          "review_reference": {
+            "type": "string",
+            "pattern": "^https://github\\.com/weijunswj/ai-agent-toolkit/(?:issues/\\d+|pull/\\d+#discussion_r\\d+)$"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "policy_version": "1.2.0",
+  "policy_version": "1.2.1",
   "allowed_modes": [
     "pr",
     "full",

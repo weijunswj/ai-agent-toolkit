@@ -17,6 +17,7 @@ const lockPath = path.join(mainRoot, 'config', 'tool-lock.json');
 const {
   applySuppressions,
   canonicalGitPath,
+  classifyInvariantOutcome,
   classifyRepository,
   compareRepositoryIntegrity,
   deduplicateFindings,
@@ -26,10 +27,12 @@ const {
   riskClassification,
   runAdapter,
   runConsumerInvariants,
+  runTrustedSuppressionInvariants,
   scanToolkitRules,
   shellDescriptor,
   stableFinding,
   trackedPathInventory,
+  validateSuppressionProposals,
   validateSuppressions,
   validateToolLock
 } = require(runnerPath);
@@ -339,6 +342,12 @@ test('trusted immutable checkout can certify an exempt candidate while candidate
     const digestMismatch = structuredClone(trusted.authority);
     digestMismatch.bindings.runner.sha256 = `sha256:${'0'.repeat(64)}`;
     assert.equal(syntheticCore.validateTrustedAuthority(digestMismatch, clean.base).valid, false);
+    const suppressionManifestMismatch = structuredClone(trusted.authority);
+    suppressionManifestMismatch.bindings.active_suppressions.sha256 = `sha256:${'0'.repeat(64)}`;
+    assert.equal(syntheticCore.validateTrustedAuthority(suppressionManifestMismatch, clean.base).valid, false);
+    const closureMismatch = structuredClone(trusted.authority);
+    closureMismatch.bindings.suppression_invariant_harness.sha256 = `sha256:${'0'.repeat(64)}`;
+    assert.equal(syntheticCore.validateTrustedAuthority(closureMismatch, clean.base).valid, false);
     fs.rmSync(path.join(trusted.packRoot, 'config', 'security-policy.json'));
     assert.equal(syntheticCore.validateTrustedAuthority(trusted.authority, clean.base).valid, false);
   } finally {
@@ -352,8 +361,12 @@ test('trusted immutable checkout can certify an exempt candidate while candidate
     'skills/repository-security-gate/tools/install-pinned-tools.cjs': 'process.exit(0);\n',
     'skills/repository-security-gate/config/security-policy.json': '{"profiles":{"SECURITY_PROFILE_EXEMPT":{}}}\n',
     'skills/repository-security-gate/config/tool-lock.json': '{"records":[]}\n',
+    'skills/repository-security-gate/config/active-suppressions.json': '{"schema_version":4,"suppressions":[]}\n',
+    'skills/repository-security-gate/config/suppression-invariants.json': '{"schema_version":1,"invariants":[]}\n',
     'skills/repository-security-gate/rules/toolkit-rules.json': '{"rules":[]}\n',
     'skills/repository-security-gate/schemas/suppressions.schema.json': '{"additionalProperties":true}\n',
+    'skills/repository-security-gate/tools/suppression-authority-invariant.cjs': "module.exports={evaluate(){return {status:'PASS'}}};\n",
+    'repo/security/security-gate-suppression-proposals.json': '{"schema_version":1,"proposals":[]}\n',
     'security/security-gate-invariants.json': '{"schema_version":1,"profile":"SECURITY_PROFILE_WEB_API","tests":[]}\n',
     'security-reports/security-gate.json': '{"state":"SECURITY_PASS","counterfeit":true}\n'
   };
@@ -471,16 +484,19 @@ test('scanner findings preserve diagnostics, deduplicate exact repeats, and fail
   assert.equal(applied.active[0].identity, findings[1].identity);
 });
 
-test('suppressions require real authority, introduction, source, and executed test evidence', () => {
+test('active suppressions require protected authority and ignore candidate-authored compensating tests', () => {
   const contents = 'synthetic fixture\n';
-  const testContents = "'use strict';\nprocess.stdout.write('ok\\n');\n";
+  const testContents = "'use strict';\nprocess.exit(0);\n";
   const { root, base: introductionCommit } = temporaryGitRepository({
     'fixtures/synthetic/sample.txt': contents,
-    'repo/tests/compensating.test.cjs': testContents
+    'repo/tests/candidate-always-pass.test.cjs': testContents,
+    'repo/security/security-gate-suppression-proposals.json': '{"schema_version":1,"proposals":[]}\n'
   });
-  const executedTests = new Map([['repo/tests/compensating.test.cjs', sha256(testContents)]]);
+  const closure = 'e'.repeat(64);
   const valid = {
-    schema_version: 3,
+    schema_version: 4,
+    authority_source: 'protected-trusted-checkout',
+    authority_binding: 'exact-runtime-trusted-authority',
     suppressions: [{
       id: 'synthetic-one',
       tool: 'toolkit-rules',
@@ -492,17 +508,30 @@ test('suppressions require real authority, introduction, source, and executed te
       approver_reference: 'https://github.com/weijunswj/ai-agent-toolkit/issues/284',
       introduction_commit: introductionCommit,
       expires: '2026-08-23',
-      compensating_test: 'repo/tests/compensating.test.cjs',
-      compensating_test_sha256: sha256(testContents),
-      tool_version: '1.2.0',
-      rule_version: '1.2.0',
+      trusted_invariant_id: 'protected-synthetic-v1',
+      trusted_invariant_closure_sha256: closure,
+      candidate_input_contract: [{
+        path: 'fixtures/synthetic/sample.txt',
+        sha256: sha256(contents)
+      }],
+      tool_version: '1.2.1',
+      rule_version: '1.2.1',
       source_sha256: sha256(contents)
     }]
   };
+  const authority = {
+    commit: '1'.repeat(40),
+    manifest_digest: `sha256:${'2'.repeat(64)}`
+  };
+  const trustedInvariants = new Map([[
+    'protected-synthetic-v1',
+    { status: 'PASS', closure_sha256: closure }
+  ]]);
   try {
-    const options = { executedTests };
+    const options = { trustedAuthority: authority, trustedInvariants, changedPaths: new Set() };
     const initial = validateSuppressions(valid, root, new Date('2026-07-23T00:00:00Z'), options);
     assert.equal(initial.valid, true, initial.errors.join('\n'));
+    assert.equal(initial.authority.commit, authority.commit);
     const wildcard = structuredClone(valid);
     wildcard.suppressions[0].path = '**/*';
     assert.equal(validateSuppressions(wildcard, root, new Date('2026-07-23T00:00:00Z'), options).valid, false);
@@ -524,26 +553,150 @@ test('suppressions require real authority, introduction, source, and executed te
     const fakeCommit = structuredClone(valid);
     fakeCommit.suppressions[0].introduction_commit = 'b'.repeat(40);
     assert.equal(validateSuppressions(fakeCommit, root, new Date('2026-07-23T00:00:00Z'), options).valid, false);
-    const missingTest = structuredClone(valid);
-    missingTest.suppressions[0].compensating_test = 'repo/tests/missing.test.cjs';
-    assert.equal(validateSuppressions(missingTest, root, new Date('2026-07-23T00:00:00Z'), options).valid, false);
-    const nonExecuted = validateSuppressions(valid, root, new Date('2026-07-23T00:00:00Z'), { executedTests: new Map() });
-    assert.equal(nonExecuted.valid, false);
+    const candidateSelfCertified = structuredClone(valid);
+    candidateSelfCertified.suppressions[0].compensating_test = 'repo/tests/candidate-always-pass.test.cjs';
+    candidateSelfCertified.suppressions[0].compensating_test_sha256 = sha256(testContents);
+    assert.equal(
+      validateSuppressions(candidateSelfCertified, root, new Date('2026-07-23T00:00:00Z'), {
+        ...options,
+        trustedInvariants: new Map()
+      }).valid,
+      false
+    );
     const badApproval = structuredClone(valid);
     badApproval.suppressions[0].approver_reference = 'issue-284';
     assert.equal(validateSuppressions(badApproval, root, new Date('2026-07-23T00:00:00Z'), options).valid, false);
-    const testDrift = structuredClone(valid);
-    testDrift.suppressions[0].compensating_test_sha256 = 'd'.repeat(64);
-    assert.equal(validateSuppressions(testDrift, root, new Date('2026-07-23T00:00:00Z'), options).valid, false);
+    const closureDrift = structuredClone(valid);
+    closureDrift.suppressions[0].trusted_invariant_closure_sha256 = 'd'.repeat(64);
+    assert.equal(validateSuppressions(closureDrift, root, new Date('2026-07-23T00:00:00Z'), options).valid, false);
     const toolDrift = structuredClone(valid);
     toolDrift.suppressions[0].tool_version = '9.9.9';
     assert.equal(validateSuppressions(toolDrift, root, new Date('2026-07-23T00:00:00Z'), options).valid, false);
     const duplicate = structuredClone(valid);
     duplicate.suppressions.push({ ...duplicate.suppressions[0], id: 'synthetic-two' });
     assert.equal(validateSuppressions(duplicate, root, new Date('2026-07-23T00:00:00Z'), options).valid, false);
+    assert.equal(
+      validateSuppressions(valid, root, new Date('2026-07-23T00:00:00Z'), {
+        ...options,
+        changedPaths: new Set(['repo/tests/candidate-always-pass.test.cjs'])
+      }).valid,
+      true,
+      'candidate ordinary tests are not suppression authority'
+    );
+    for (const changed of [
+      'fixtures/synthetic/sample.txt',
+      'repo/security/security-gate-suppression-proposals.json',
+      '_projects/cicd/repository-security-gate/_main/tools/suppression-authority-invariant.cjs',
+      'repo/security/security-gate-suppressions.json'
+    ]) {
+      assert.equal(
+        validateSuppressions(valid, root, new Date('2026-07-23T00:00:00Z'), {
+          ...options,
+          changedPaths: new Set([changed])
+        }).valid,
+        false,
+        `${changed} must require separate protected promotion`
+      );
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('protected suppression invariant closure executes trusted bytes and rejects candidate helper weakening', () => {
+  const active = JSON.parse(fs.readFileSync(
+    path.join(mainRoot, 'config', 'active-suppressions.json'),
+    'utf8'
+  ));
+  const candidate = temporaryRepository({
+    '.github/workflows/auto-sync-generated-surfaces.yml': fs.readFileSync(
+      path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'),
+      'utf8'
+    ),
+    'repo/tests/fixtures/security-gate/synthetic-private-prompt.txt': fs.readFileSync(
+      path.join(repoRoot, 'repo', 'tests', 'fixtures', 'security-gate', 'synthetic-private-prompt.txt'),
+      'utf8'
+    ),
+    'repo/scripts/toolkit-agent-control.cjs': fs.readFileSync(
+      path.join(repoRoot, 'repo', 'scripts', 'toolkit-agent-control.cjs'),
+      'utf8'
+    ),
+    'repo/tests/candidate-always-pass.test.cjs': 'process.exit(0);\n'
+  });
+  try {
+    const initial = runTrustedSuppressionInvariants(candidate, active);
+    assert.deepEqual(initial.failures, []);
+    assert.deepEqual(
+      [...initial.evidence.values()].map((item) => item.status),
+      ['PASS', 'PASS']
+    );
+    fs.writeFileSync(
+      path.join(candidate, 'repo', 'tests', 'candidate-always-pass.test.cjs'),
+      'process.exit(0); // candidate rewrite cannot approve authority\n',
+      'utf8'
+    );
+    const ordinaryTestRewrite = runTrustedSuppressionInvariants(candidate, active);
+    assert.deepEqual(ordinaryTestRewrite.failures, []);
+    fs.writeFileSync(
+      path.join(candidate, 'repo', 'scripts', 'toolkit-agent-control.cjs'),
+      'module.exports = { alwaysPass: true };\n',
+      'utf8'
+    );
+    const weakenedHelper = runTrustedSuppressionInvariants(candidate, active);
+    assert.notDeepEqual(weakenedHelper.failures, []);
+    assert.equal(
+      weakenedHelper.evidence.get('synthetic-private-prompt-transport-v1').status,
+      'EXECUTION_FAILED'
+    );
+  } finally {
+    fs.rmSync(candidate, { recursive: true, force: true });
+  }
+});
+
+test('candidate suppression proposals are review-only and never suppress findings', () => {
+  const { root } = temporaryGitRepository({ 'src/Foo.sh': '#!/bin/sh\nexit 0\n' });
+  try {
+    const finding = stableFinding('shellcheck', 'SC2086', 'src/Foo.sh', 1, 'Synthetic finding');
+    const proposal = {
+      schema_version: 1,
+      proposals: [{
+        proposal_id: 'candidate-request',
+        tool: finding.tool,
+        rule: finding.rule,
+        finding_identity: finding.identity,
+        path: finding.path,
+        scope: 'exact_line',
+        rationale: 'Candidate requests separate protected review; it cannot alter this verdict.',
+        review_reference: 'https://github.com/weijunswj/ai-agent-toolkit/issues/284'
+      }]
+    };
+    const validated = validateSuppressionProposals(proposal, root);
+    assert.equal(validated.valid, true, validated.errors.join('\n'));
+    assert.equal(validated.proposals[0].authority_promotion, 'review_required');
+    assert.deepEqual(applySuppressions([finding], null).active.map((item) => item.identity), [finding.identity]);
+    const wrongCase = structuredClone(proposal);
+    wrongCase.proposals[0].path = 'src/foo.sh';
+    assert.equal(validateSuppressionProposals(wrongCase, root).valid, false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('invariant outcomes distinguish findings from sandbox and execution failures without raw output', () => {
+  assert.equal(classifyInvariantOutcome({ status: 0, signal: null, error: null, error_code: null, stderr: '' }).status, 'PASS');
+  assert.equal(classifyInvariantOutcome({ status: 1, signal: null, error: null, error_code: null, stderr: '' }).status, 'FINDINGS');
+  assert.equal(classifyInvariantOutcome({
+    status: 1,
+    signal: null,
+    error: null,
+    error_code: null,
+    stderr: 'unshare: operation not permitted: synthetic private path'
+  }, { sandboxRequired: true }).status, 'SANDBOX_UNAVAILABLE');
+  assert.equal(classifyInvariantOutcome({ status: null, signal: null, error: 'timed out', error_code: 'ETIMEDOUT', stderr: '' }).status, 'TIMEOUT');
+  assert.equal(classifyInvariantOutcome({ status: null, signal: null, error: 'limit', error_code: 'ENOBUFS', stderr: '' }).status, 'OUTPUT_LIMIT');
+  const failure = classifyInvariantOutcome({ status: null, signal: null, error: 'private details', error_code: 'ENOENT', stderr: '' });
+  assert.equal(failure.status, 'EXECUTION_FAILED');
+  assert.doesNotMatch(JSON.stringify(failure), /private details|synthetic private path/);
 });
 
 test('missing scanners and invalid mode inputs fail closed without raw source output', () => {
@@ -819,7 +972,7 @@ test('consumer invariant contract rejects missing, traversal, arbitrary shell, t
     assert.match(cases[0].result.failures.join('\n'), /manifest is missing/);
     assert.match(cases[1].result.failures.join('\n'), /manifest path is invalid/);
     assert.match(cases[2].result.failures.join('\n'), /entry is invalid/);
-    assert.match(cases[3].result.failures.join('\n'), /did not complete/);
+    assert.match(cases[3].result.failures.join('\n'), /invariant outcome TIMEOUT/);
     assert.match(cases[4].result.failures.join('\n'), /malformed or unsafe/);
     assert.match(cases[5].result.failures.join('\n'), /malformed or unsafe/);
     assert.equal(cases[6].result.findings.length, 1);
@@ -828,7 +981,7 @@ test('consumer invariant contract rejects missing, traversal, arbitrary shell, t
   }
 });
 
-test('consumer and suppression contracts reject symlinked compensating tests when supported', (t) => {
+test('consumer invariants and protected suppression inputs reject symlinks when supported', (t) => {
   const { root, base } = temporaryGitRepository({
     'fixtures/synthetic/sample.txt': 'fixture\n',
     'repo/tests/real.test.cjs': "process.stdout.write('ok');\n"
@@ -844,6 +997,7 @@ test('consumer and suppression contracts reject symlinked compensating tests whe
       }
       throw error;
     }
+    commitAll(root, 'track synthetic symlink');
     const consumerManifest = {
       schema_version: 1,
       profile: 'SECURITY_PROFILE_WEB_API',
@@ -862,7 +1016,9 @@ test('consumer and suppression contracts reject symlinked compensating tests whe
     assert.match(consumer.failures.join('\n'), /redirected/);
 
     const document = {
-      schema_version: 3,
+      schema_version: 4,
+      authority_source: 'protected-trusted-checkout',
+      authority_binding: 'exact-runtime-trusted-authority',
       suppressions: [{
         id: 'linked-test',
         tool: 'toolkit-rules',
@@ -874,18 +1030,27 @@ test('consumer and suppression contracts reject symlinked compensating tests whe
         approver_reference: 'https://github.com/weijunswj/ai-agent-toolkit/issues/284',
         introduction_commit: base,
         expires: '2026-08-23',
-        compensating_test: 'repo/tests/linked.test.cjs',
-        compensating_test_sha256: sourceDigest(path.join(root, 'repo/tests/real.test.cjs')),
-        tool_version: '1.2.0',
-        rule_version: '1.2.0',
+        trusted_invariant_id: 'protected-synthetic-v1',
+        trusted_invariant_closure_sha256: 'e'.repeat(64),
+        candidate_input_contract: [{
+          path: 'repo/tests/linked.test.cjs',
+          sha256: sourceDigest(path.join(root, 'repo/tests/real.test.cjs'))
+        }],
+        tool_version: '1.2.1',
+        rule_version: '1.2.1',
         source_sha256: sha256('fixture\n')
       }]
     };
     const suppression = validateSuppressions(document, root, new Date('2026-07-23T00:00:00Z'), {
-      executedTests: new Map([['repo/tests/linked.test.cjs', sourceDigest(path.join(root, 'repo/tests/real.test.cjs'))]])
+      trustedAuthority: { commit: '1'.repeat(40), manifest_digest: `sha256:${'2'.repeat(64)}` },
+      trustedInvariants: new Map([[
+        'protected-synthetic-v1',
+        { status: 'PASS', closure_sha256: 'e'.repeat(64) }
+      ]]),
+      changedPaths: new Set()
     });
     assert.equal(suppression.valid, false);
-    assert.match(suppression.errors.join('\n'), /regular repository file/);
+    assert.match(suppression.errors.join('\n'), /candidate input contract digest or containment changed/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -910,8 +1075,8 @@ test('review packet classifies the complete changed-file manifest before bounded
     trusted = createTrustedAuthority(state.root, head);
     const inventory = trackedPathInventory(state.root, head);
     const unsignedReport = {
-      schema_version: 3,
-      gate_version: '1.2.0',
+      schema_version: 4,
+      gate_version: '1.2.1',
       state: 'SECURITY_PASS',
       repository: 'synthetic/repository',
       candidate_repository: 'synthetic/candidate',
@@ -935,6 +1100,7 @@ test('review packet classifies the complete changed-file manifest before bounded
       findings: [],
       finding_duplicates: [],
       suppressed_findings: [],
+      suppression_proposals: [],
       unverified_areas: []
       ,
       infrastructure_failures: [],
@@ -991,8 +1157,11 @@ test('workflow uses protected trusted authority and treats the exact PR checkout
   assert.match(gate, /candidate_repository="\$PR_REPOSITORY"/);
   assert.match(gate, /git -c protocol\.version=2 -C candidate fetch --no-tags --depth=1/);
   assert.match(gate, /trusted-security-gate\.cjs/);
+  assert.doesNotMatch(gate, /--suppressions|security-gate-suppressions\.json/);
   assert.match(gate, /GH_TOKEN: ""[\s\S]*GITHUB_TOKEN: ""/);
   assert.match(gate, /PR head changed after trusted scan/);
+  assert.match(gate, /TK-023 bootstrap evidence sealed as \$\{report\.state\}; this job is explicitly non-enforcement/);
+  assert.match(gate, /bootstrap-immutable-review/);
   assert.match(gate, /gh api "repos\/\$GITHUB_REPOSITORY\/pulls\/\$PR_NUMBER"/);
   assert.match(gate, /chmod 700 "\$reports"/);
   assert.match(gate, /sudo chown -R root:root trusted-gate candidate/);
@@ -1002,9 +1171,14 @@ test('workflow uses protected trusted authority and treats the exact PR checkout
   const bootstrapAuthority = gate.match(/authority_commit="([0-9a-f]{40})"/);
   assert.ok(bootstrapAuthority, 'bootstrap authority must be pinned to an exact commit');
   assert.doesNotMatch(gate, /__TK023_BOOTSTRAP_AUTHORITY_COMMIT__/);
-  runGit(repoRoot, ['cat-file', '-e', `${bootstrapAuthority[1]}^{commit}`]);
+  assert.match(
+    gate,
+    /ref: \$\{\{ steps\.evidence\.outputs\.authority_commit \}\}[\s\S]*path: trusted-gate[\s\S]*fetch-depth: 0/,
+    'bootstrap authority is resolved and validated in the separate trusted checkout'
+  );
   assert.doesNotMatch(gate, /working-directory: candidate/);
   assert.match(trustedRunner, /cwd: authorityRoot/);
+  assert.doesNotMatch(trustedRunner, /args\.suppressions|--suppressions/);
   assert.doesNotMatch(trustedRunner, /NODE_PATH/);
   assert.doesNotMatch(trustedRunner, /env:\s*process\.env/);
   assert.match(candidate, /^  workflow_dispatch:/m);

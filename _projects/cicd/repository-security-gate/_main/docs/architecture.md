@@ -135,7 +135,7 @@ fixtures. `config/invariants.json` maps evidence to:
 - source/generated alignment;
 - scanner/provenance lock integrity.
 
-WEB_API and WORKFLOW_INTEGRATION consumers provide
+WEB_API and WORKFLOW_INTEGRATION consumers may provide
 `security/security-gate-invariants.json` using the versioned consumer invariant
 schema. Entries name one contained, non-symlink regular test file and one
 allowlisted runner (`node`, `python`, or `powershell`); arbitrary shell strings
@@ -147,12 +147,29 @@ candidate checkout. The trusted verifier rechecks candidate and authority
 identity after each executable scanner or invariant phase and before sealing;
 mutation is unverified.
 
-Suppressions use supported Toolkit issue or review-discussion authority, a
-real introduction commit that changed the exact source path, an exact expiring
-finding identity, and a contained compensating test. The test digest must match
-successful invariant evidence from the same run. Duplicate identities,
-overlapping authority, redirected tests, and source/tool/rule/test/approval
-drift fail closed.
+Consumer-owned invariant code can produce ordinary findings or advisory PASS
+evidence, but cannot authorise its own suppression. Invariant execution reports
+only bounded privacy-safe classes: `PASS`, `FINDINGS`, `TIMEOUT`,
+`SANDBOX_UNAVAILABLE`, `EXECUTION_FAILED`, `MALFORMED_RESULT`, `OUTPUT_LIMIT`,
+or `IDENTITY_DRIFT`. A failed no-network/user-namespace launch is not relabelled
+as a test finding and never falls back to unsandboxed candidate execution.
+
+Active suppressions live only in the protected trusted checkout. Each exact,
+expiring record binds a finding, exact-case Git path, source and tool/rule
+versions, introduction commit, review authority, protected invariant ID,
+complete protected harness closure digest, and exact candidate input contract.
+The wrapper binds the active manifest, closure manifest, harness, schemas,
+authority commit, and authority-manifest digest. The protected harness executes
+trusted bytes and treats the candidate strictly as bounded input data.
+
+`repo/security/security-gate-suppression-proposals.json` is candidate-owned and
+proposal-only. It never removes a finding and is reported as
+`authority_promotion: review_required`. A candidate change to active-authority
+surfaces, proposals, a protected invariant closure equivalent, or any source or
+input supporting a suppression makes that suppression ineligible for the same
+candidate. Promotion requires a later protected authority revision. Duplicate
+identities, overlapping authority, redirected inputs, and
+source/tool/rule/closure/approval drift fail closed.
 
 The review packet classifies the complete changed-file manifest under a
 separate hard bound before applying packet limits. It records total, included,
@@ -162,7 +179,7 @@ location must fit or packet generation fails closed.
 ## Consumer integration
 
 A consumer commits a complete copy of this generated folder and records module
-version `1.2.0`. Its workflow calls the repo-local runner and lock. The
+version `1.2.1`. Its workflow calls the repo-local runner and lock. The
 repository may refresh only through an independently reviewed Toolkit update.
 It never executes a mutable remote branch as its only gate.
 

@@ -153,7 +153,11 @@ function buildAuthority(args) {
     installer: binding(authorityRoot, 'skills/repository-security-gate/tools/install-pinned-tools.cjs'),
     report_schema: binding(authorityRoot, 'skills/repository-security-gate/schemas/report.schema.json'),
     suppression_schema: binding(authorityRoot, 'skills/repository-security-gate/schemas/suppressions.schema.json'),
-    invariant_schema: binding(authorityRoot, 'skills/repository-security-gate/schemas/consumer-invariants.schema.json')
+    suppression_proposal_schema: binding(authorityRoot, 'skills/repository-security-gate/schemas/suppression-proposals.schema.json'),
+    invariant_schema: binding(authorityRoot, 'skills/repository-security-gate/schemas/consumer-invariants.schema.json'),
+    active_suppressions: binding(authorityRoot, 'skills/repository-security-gate/config/active-suppressions.json'),
+    suppression_invariant_manifest: binding(authorityRoot, 'skills/repository-security-gate/config/suppression-invariants.json'),
+    suppression_invariant_harness: binding(authorityRoot, 'skills/repository-security-gate/tools/suppression-authority-invariant.cjs')
   };
   const invokingWorkflowDigest = String(args['invoking-workflow-digest'] || '');
   const invokingWorkflowCommit = String(args['invoking-workflow-commit'] || '').toLowerCase();
@@ -168,7 +172,7 @@ function buildAuthority(args) {
   }
   const policy = JSON.parse(fs.readFileSync(path.resolve(authorityRoot, bindings.policy.path), 'utf8'));
   const authority = {
-    schema_version: 1,
+    schema_version: 2,
     mode,
     commit,
     tree,
@@ -228,7 +232,6 @@ function main(argv = process.argv.slice(2)) {
   if (args['sandbox-gid']) forwarded.push('--sandbox-gid', String(args['sandbox-gid']));
   if (args['sandbox-home']) forwarded.push('--sandbox-home', path.resolve(args['sandbox-home']));
   if (args['scanner-home']) forwarded.push('--scanner-home', path.resolve(args['scanner-home']));
-  if (args.suppressions) forwarded.push('--suppressions', String(args.suppressions));
   const result = spawnSync(process.execPath, [core, ...forwarded], {
     cwd: authorityRoot,
     encoding: 'utf8',

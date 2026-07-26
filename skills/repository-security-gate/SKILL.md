@@ -23,7 +23,10 @@ Use this explicit-only skill for the deterministic Toolkit security gate.
 5. Treat missing tools, invalid output, checksum/publisher mismatch, stale required
    data, or parser failure as unverified/blocked, never as pass.
 6. Use only repository-relative, sanitised JSON and Markdown evidence.
-7. Generate `review-packet` only for a stable exact head when deterministic
+7. Load active suppressions and protected compensating invariant closure only
+   from the exact trusted checkout. Treat candidate suppression metadata as a
+   review proposal that cannot change the current verdict.
+8. Generate `review-packet` only for a stable exact head when deterministic
    evidence is green and risk classification requires independent review.
 
 Do not invoke Codex Security, paid dashboards, SARIF upload, live providers,

@@ -1,7 +1,7 @@
 # Surface Fidelity Audit
 
 Date: 2026-05-18
-Latest update: 2026-07-23 (adds the repository-owned security-gate module, pack, and generated skill surface)
+Latest update: 2026-07-24 (adds protected suppression authority, proposal schema, and invariant-closure outputs)
 
 ## Current state
 
@@ -28,9 +28,9 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | Metric | Current value |
 | --- | ---: |
 | projects | 17 |
-| publishedFiles | 258 |
-| declaredOutputFiles | 258 |
-| packInstalledFiles | 103 |
+| publishedFiles | 259 |
+| declaredOutputFiles | 263 |
+| packInstalledFiles | 104 |
 | undeclaredPublishedFiles | 0 |
 | packInstalledUndeclared | 0 |
 | crossOwnedOutputs | 0 |
@@ -38,7 +38,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | sharedSurfaceMetadataFindings | 0 |
 | suspiciousPublishedSurfaces | 0 |
 | duplicateProjectContentGroups | 0 |
-| boundaryRecipeOutputs | 258 |
+| boundaryRecipeOutputs | 263 |
 | boundaryRecipeFindings | 0 |
 | curatedDirectoryFindings | 1 |
 
@@ -47,7 +47,7 @@ Current published-file classifications:
 | Classification | Count |
 | --- | ---: |
 | declared_generated | 155 |
-| pack_installed_declared | 103 |
+| pack_installed_declared | 104 |
 
 Current boundary recipe classifications:
 
@@ -64,7 +64,7 @@ Current boundary recipe classifications:
 | curated_template | 2 |
 | curated_template_index | 7 |
 | generated_cross_skill_reference | 3 |
-| main_full_fidelity | 191 |
+| main_full_fidelity | 196 |
 
 Known baseline context:
 

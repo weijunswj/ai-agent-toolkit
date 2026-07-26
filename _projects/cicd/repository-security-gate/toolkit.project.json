@@ -5,9 +5,9 @@
   "title": "Repository Security Gate",
   "module_path": "_projects/cicd/repository-security-gate",
   "main_path": "_projects/cicd/repository-security-gate/_main",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "version_policy": "semver",
-  "version_notes": "Separates protected trusted gate authority from scanned candidate data, binds complete authority and checkout identities, and preserves exact-case Git path and suppression semantics.",
+  "version_notes": "Moves active suppressions and compensating invariant closure into protected authority, makes candidate suppression metadata proposal-only, and classifies isolated invariant outcomes without accepting candidate tests as approval authority.",
   "outputs": [
     {
       "kind": "curated",
@@ -67,6 +67,20 @@
     },
     {
       "kind": "json",
+      "source": "_main/config/active-suppressions.json",
+      "output": "skills/repository-security-gate/config/active-suppressions.json",
+      "notes": "Protected active suppression authority; candidate copies are never loaded as active authority.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "json",
+      "source": "_main/config/suppression-invariants.json",
+      "output": "skills/repository-security-gate/config/suppression-invariants.json",
+      "notes": "Protected compensating-invariant closure manifest.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "json",
       "source": "_main/rules/toolkit-rules.json",
       "output": "skills/repository-security-gate/rules/toolkit-rules.json",
       "notes": "First-party static rules; no private or restricted rule pack.",
@@ -95,6 +109,13 @@
     },
     {
       "kind": "json",
+      "source": "_main/schemas/suppression-proposals.schema.json",
+      "output": "skills/repository-security-gate/schemas/suppression-proposals.schema.json",
+      "notes": "Proposal-only candidate suppression schema.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "json",
       "source": "_main/schemas/review-packet.schema.json",
       "output": "skills/repository-security-gate/schemas/review-packet.schema.json",
       "notes": "Bounded exact-head review packet schema.",
@@ -112,6 +133,13 @@
       "source": "_main/tools/security-gate.cjs",
       "output": "skills/repository-security-gate/tools/security-gate.cjs",
       "notes": "Portable local classifier, orchestrator, normaliser, and review-packet generator.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/tools/suppression-authority-invariant.cjs",
+      "output": "skills/repository-security-gate/tools/suppression-authority-invariant.cjs",
+      "notes": "Protected data-only compensating invariant harness.",
       "fidelity": "exact"
     },
     {
@@ -181,13 +209,17 @@
       "skills/repository-security-gate/config/tool-lock.json",
       "skills/repository-security-gate/config/security-policy.json",
       "skills/repository-security-gate/config/invariants.json",
+      "skills/repository-security-gate/config/active-suppressions.json",
+      "skills/repository-security-gate/config/suppression-invariants.json",
       "skills/repository-security-gate/rules/toolkit-rules.json",
       "skills/repository-security-gate/schemas/tool-lock.schema.json",
       "skills/repository-security-gate/schemas/report.schema.json",
       "skills/repository-security-gate/schemas/suppressions.schema.json",
+      "skills/repository-security-gate/schemas/suppression-proposals.schema.json",
       "skills/repository-security-gate/schemas/review-packet.schema.json",
       "skills/repository-security-gate/schemas/consumer-invariants.schema.json",
       "skills/repository-security-gate/tools/security-gate.cjs",
+      "skills/repository-security-gate/tools/suppression-authority-invariant.cjs",
       "skills/repository-security-gate/tools/trusted-security-gate.cjs",
       "skills/repository-security-gate/tools/install-pinned-tools.cjs",
       "skills/repository-security-gate/templates/github/security-gate.yml",

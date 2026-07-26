@@ -23,13 +23,14 @@
     "findings",
     "finding_duplicates",
     "suppressed_findings",
+    "suppression_proposals",
     "unverified_areas",
     "infrastructure_failures",
     "next_action",
     "report_digest"
   ],
   "properties": {
-    "schema_version": { "const": 3 },
+    "schema_version": { "const": 4 },
     "gate_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
     "state": {
       "enum": [
@@ -86,6 +87,32 @@
     "findings": { "type": "array" },
     "finding_duplicates": { "type": "array" },
     "suppressed_findings": { "type": "array" },
+    "suppression_proposals": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "required": [
+          "proposal_id",
+          "tool",
+          "rule",
+          "finding_identity",
+          "path",
+          "scope",
+          "authority_promotion"
+        ],
+        "properties": {
+          "proposal_id": { "type": "string" },
+          "tool": { "type": "string" },
+          "rule": { "type": "string" },
+          "finding_identity": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "path": { "type": "string" },
+          "scope": { "enum": ["exact_path", "exact_line", "synthetic_fixture"] },
+          "authority_promotion": { "const": "review_required" }
+        },
+        "additionalProperties": false
+      }
+    },
     "unverified_areas": { "type": "array", "items": { "type": "string" } },
     "infrastructure_failures": { "type": "array", "items": { "type": "string" } },
     "next_action": { "type": "string", "minLength": 1, "maxLength": 500 },

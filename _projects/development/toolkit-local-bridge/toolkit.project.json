@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.9.8",
+  "version": "2.9.11",
   "version_policy": "semver",
-  "version_notes": "Publishes the amended repository-owned security-gate runtime, schemas, fixtures, and n8n helper correction while synchronizing native plugin, bridge, setup, control, and delegation versions.",
+  "version_notes": "Publishes protected suppression authority and invariant-closure evidence while synchronizing native plugin, bridge, setup, control, and delegation versions above active overlapping reservations.",
   "outputs": [
     {
       "kind": "curated",
