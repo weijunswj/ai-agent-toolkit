@@ -1801,9 +1801,9 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
     .map((step, index) => ({ name: step.name, index, text: step.text, textIndex: text.indexOf(`      - name: ${step.name}`), uses: workflowStepUses(step.text) }))
     .filter((step) => step.uses);
   const requiredAutoSyncActionReferences = [
-    { stepName: 'Checkout trusted base revision', expectedUses: 'actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803' },
-    { stepName: 'Checkout PR head commit', expectedUses: 'actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803' },
-    { stepName: 'Set up Node.js', expectedUses: 'actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38' }
+    { stepName: 'Checkout trusted base revision', expectedUses: 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' },
+    { stepName: 'Checkout PR head commit', expectedUses: 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' },
+    { stepName: 'Set up Node.js', expectedUses: 'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020' }
   ];
   const expectedUsesByStepName = new Map(requiredAutoSyncActionReferences.map(({ stepName, expectedUses }) => [stepName, expectedUses]));
   if (

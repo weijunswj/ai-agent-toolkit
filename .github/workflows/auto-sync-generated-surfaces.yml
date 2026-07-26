@@ -129,7 +129,7 @@ jobs:
 
       - name: Checkout trusted base revision
         if: steps.preflight.outputs.should_sync == 'true'
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.event.pull_request.base.sha }}
@@ -139,7 +139,7 @@ jobs:
 
       - name: Checkout PR head commit
         if: steps.preflight.outputs.should_sync == 'true'
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
@@ -160,7 +160,7 @@ jobs:
 
       - name: Set up Node.js
         if: steps.preflight.outputs.should_sync == 'true'
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 20
 

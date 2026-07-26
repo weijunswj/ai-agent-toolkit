@@ -1389,7 +1389,7 @@ test('auto-sync generated surfaces workflow keeps privileged preflight before ch
     ['base-sha git diff changed-file detection is forbidden', (text) => text.replace("gh api --paginate \\", 'git diff --name-only "$BASE_SHA" HEAD\n          gh api --paginate \\'), /must not compute PR changed files with git diff against the PR branch/],
     ['PR files API is required', (text) => text.replace('gh api --paginate \\', 'echo no api \\'), /must query PR changed files before checkout/],
     ['github token is not exposed to sync or validation', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write', 'GH_TOKEN="${{ github.token }}" node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write'), /must expose github.token only to preflight and final push steps/],
-    ['should_sync gates checkout and writeback', (text) => text.replace("        if: steps.preflight.outputs.should_sync == 'true'\n        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803", '        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803'), /must skip checkout and writeback steps when preflight should_sync is false/]
+    ['should_sync gates checkout and writeback', (text) => text.replace("        if: steps.preflight.outputs.should_sync == 'true'\n        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", '        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'), /must skip checkout and writeback steps when preflight should_sync is false/]
   ];
 
   const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
@@ -1408,17 +1408,17 @@ test('auto-sync generated surfaces workflow requires exact privileged action ref
     [
       'trusted checkout v1 downgrade is rejected',
       (text) => replaceWorkflowStepText(text, 'Checkout trusted base revision', /uses: actions\/checkout@[0-9a-f]{40}/, 'uses: actions/checkout@v1'),
-      /Checkout trusted base revision must use actions\/checkout@d23441a48e516b6c34aea4fa41551a30e30af803/
+      /Checkout trusted base revision must use actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1/
     ],
     [
       'PR checkout v1 downgrade is rejected',
       (text) => replaceWorkflowStepText(text, 'Checkout PR head commit', /uses: actions\/checkout@[0-9a-f]{40}/, 'uses: actions/checkout@v1'),
-      /Checkout PR head commit must use actions\/checkout@d23441a48e516b6c34aea4fa41551a30e30af803/
+      /Checkout PR head commit must use actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1/
     ],
     [
       'setup-node v1 downgrade is rejected',
       (text) => replaceWorkflowStepText(text, 'Set up Node.js', /uses: actions\/setup-node@[0-9a-f]{40}/, 'uses: actions/setup-node@v1'),
-      /Set up Node\.js must use actions\/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38/
+      /Set up Node\.js must use actions\/setup-node@820762786026740c76f36085b0efc47a31fe5020/
     ]
   ];
 
@@ -1443,10 +1443,10 @@ test('auto-sync generated surfaces workflow rejects unexpected uses action steps
       /must allow only the reviewed uses action steps/
     ],
     [
-      'extra checkout v6 action after preflight is rejected',
+      'extra checkout v7 action after preflight is rejected',
       `      - name: Extra duplicate checkout
         if: steps.preflight.outputs.should_sync == 'true'
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803`,
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1`,
       /must allow only the reviewed uses action steps/
     ],
     [
