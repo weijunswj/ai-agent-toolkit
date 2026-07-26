@@ -89,7 +89,7 @@ jobs:
             candidate_repository="$PR_REPOSITORY"
           fi
           if [ "$EVENT_NAME" = pull_request ]; then
-            authority_commit="7b663af96b1650bd01e690a541c50ea1a1f54246"
+            authority_commit="ec6cec2267b119253f288f3db1a11bbc17f99f9d"
             authority_mode="bootstrap-immutable-review"
             invoking_workflow_commit="$PR_HEAD"
           elif [ "$EVENT_NAME" = schedule ]; then
