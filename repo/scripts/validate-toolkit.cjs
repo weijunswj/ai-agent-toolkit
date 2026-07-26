@@ -334,7 +334,8 @@ const allowedExecutablePrefixes = [
   'skills/n8n-agent-rules/scripts/',
   'skills/n8n-local-setup/templates/.n8n-local/',
   'skills/n8n-local-setup/templates/.n8n-production-cloudflare/',
-  'skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/'
+  'skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/',
+  'skills/external-system-router/scripts/'
 ];
 
 const executableExtensions = new Set([

@@ -78,6 +78,12 @@ Prior approval does not authorize a new risky action. Words like `continue`, `ne
 
 Never introduce secrets, credentials, tokens, private keys, `.env` values, or private values into repo files.
 
+## External-System Control Plane
+
+For provider operations via APIs, CLIs/SDKs, MCP/connectors, graphical consoles, deploy/DNS/data/storage/workflows/OAuth/setup, or receipts, load `external-system-router` before work. Access grants no authority: bind provider, target, environment, objective, operations, risk, verification, rollback, lifetime, and approval; choose the strongest reviewed route per operation. MCP has no default priority.
+
+Before graphical control, disclose goal/target, app/profile/origin, the structured-route gap, reads/actions, possible credential/cookie/history/download/clipboard/private or unrelated-window exposure, forbidden scope, result, verification, and rollback; ask one bold owner-approval question. Permission popups are not owner approval. History is last-resort after safer paths fail and separately approved. Scheduled checks are read-only; never install, mutate, promote/demote routes, revoke, or run production changes.
+
 ## Application Error, Logging, And Privacy Defaults
 
 When touching app behavior, use generic user-facing errors with a support-safe traceable reference, the same event/request ref in server logs, and no internal/private data. Keep privacy-minimized logs; do not log prompts/uploads/model outputs, secrets, auth headers/cookies, payment data, private connector data/files, or unneeded PII.
@@ -174,8 +180,10 @@ Final repo reports include `Instruction sources used` and `MEMORY.md changed: Ye
 <!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->
 ## n8n Agent Rules Adapter
 
-If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, stop and load `skills/n8n-agent-rules` before planning or editing.
+If active intent or bounded repository/task evidence involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, nodes, expressions, SDK structure, or workflow JSON, stop and enter the mandatory fail-closed n8n domain router before planning or editing.
 If that skill or its full rules are unavailable, stop and report the limitation instead of continuing.
+Classify the exact operation and build the task-local n8n capability ledger. Material workflow design, creation, editing, repair, review, node configuration, expressions, or JSON/SDK structure requires successful invocation evidence for the current official `using-n8n-skills-official` entry point plus every relevant specialised official Skill. Existing workflow examples, model knowledge, mirrored patterns, generic JSON validation, and repository tests are never substitutes. If required evidence is unavailable, report the exact missing capability and one supported next action; do not mutate workflow material or declare completion.
+Use Toolkit helpers for canonical import/export/compiler work and the authorisation-envelope router for live operations. Mandatory routing does not imply mandatory MCP.
 Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, credential, deployment, or production actions without explicit current-turn approval naming the target and allowed operation.
 <!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:END N8N-AGENT-RULES-ADAPTER -->
 

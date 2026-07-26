@@ -107,7 +107,7 @@ test('n8n-agent-rules skill publishes the canonical full rules from development 
   assert.equal(frontMatter.name, 'n8n-agent-rules');
   for (const phrase of [
     officialN8nSkillsLink,
-    'using-n8n-skills',
+    'using-n8n-skills-official',
     'n8n workflow JSON',
     'official n8n MCP',
     'n8n_live',
@@ -131,12 +131,14 @@ test('n8n-agent-rules skill publishes the canonical full rules from development 
   assert.equal(published, canonical);
 
   for (const safetyPhrase of [
-    `Use ${officialN8nSkillsLink} first, then use the official n8n MCP tools that are actually available in the connected instance`,
-    `Start by loading the ${officialN8nSkillsLink} entry-point meta-skill, currently \`using-n8n-skills\`, when ${officialN8nSkillsLink} are available`,
-    `If the ${officialN8nSkillsLink} entry-point meta-skill is unavailable, report that ${officialN8nSkillsLink} are not installed or not available in the session`,
-    'Do not invent a fallback route or pretend the current entry-point skill exists',
+    'Every material n8n task must enter the n8n domain router before work begins',
+    `the current ${officialN8nSkillsLink} entry point, \`using-n8n-skills-official\``,
+    'A Skill attempt counts only when the host records a successful invocation and exact reviewed source/package/version evidence in the task ledger',
+    'Existing workflow examples, model knowledge, mirrored workflow patterns, generic JSON validation, and repository tests never substitute for required official Skills',
+    'If any required Skill or capability is unavailable, fail closed',
+    'Official n8n Skills supply workflow, node, expression, and structure guidance. They do not install or imply MCP',
+    'mandatory n8n routing does not mean mandatory MCP',
     'Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities',
-    'When validation or build tools are available, use them before proposing or performing live-instance changes',
     'If a needed MCP capability is unavailable, report the gap and do not invent fallback behaviour',
     'Use live n8n instance tools only when the user clearly asks',
     'Do not create or update a workflow from unvalidated workflow code when a validation tool is available',

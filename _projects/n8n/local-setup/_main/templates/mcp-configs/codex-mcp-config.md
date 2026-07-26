@@ -90,7 +90,7 @@ enabled = true
 3. Ask Codex to load the [official n8n Skills](https://github.com/n8n-io/skills):
 
    ```text
-   Load the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`, and confirm the [official n8n Skills](https://github.com/n8n-io/skills) are available. Do not use n8n_live and do not modify anything.
+   Load the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills-official`, and confirm the [official n8n Skills](https://github.com/n8n-io/skills) are available. Do not use n8n_live and do not modify anything.
    ```
 
 4. Perform a live read-only MCP check:
@@ -120,7 +120,7 @@ enabled = true
 
 ## 5. Troubleshooting
 
-1. If the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills`, is unavailable:
+1. If the [official n8n Skills](https://github.com/n8n-io/skills) entry-point meta-skill, currently `using-n8n-skills-official`, is unavailable:
 
    * Confirm the official plugin was installed with `codex plugin marketplace add n8n-io/skills` and `codex plugin add n8n-skills@n8n-io`.
    * Confirm `n8n-skills@n8n-io` is installed and enabled, not just listed as available.

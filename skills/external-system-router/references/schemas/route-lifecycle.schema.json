@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/weijunswj/ai-agent-toolkit/schemas/external-system/route-lifecycle.v1.json",
+  "title": "Operation Route Promotion Or Demotion",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "provider", "targetAlias", "environment", "operation", "previousRoute", "candidateRoute", "driftDetected", "semanticReview", "syntheticTests", "nativeUat", "ownerApprovedMigration", "observation", "previousRouteRetained", "automaticCredentialRevocation"],
+  "properties": {
+    "schemaVersion": {"const": "ai-agent-toolkit.route-lifecycle.v1"},
+    "provider": {"$ref": "#/$defs/name"},
+    "targetAlias": {"$ref": "#/$defs/name"},
+    "environment": {"$ref": "#/$defs/name"},
+    "operation": {"$ref": "#/$defs/name"},
+    "previousRoute": {"$ref": "#/$defs/name"},
+    "candidateRoute": {"$ref": "#/$defs/name"},
+    "driftDetected": {"type": "boolean"},
+    "semanticReview": {"enum": ["passed", "failed", "pending"]},
+    "syntheticTests": {"enum": ["passed", "failed", "pending"]},
+    "nativeUat": {"enum": ["passed", "failed", "pending"]},
+    "ownerApprovedMigration": {"type": "boolean"},
+    "observation": {"enum": ["pending", "in-progress", "passed", "failed"]},
+    "previousRouteRetained": {"type": "boolean"},
+    "automaticCredentialRevocation": {"const": false},
+    "laterRemovalApprovalReference": {"type": "string", "minLength": 1, "maxLength": 200}
+  },
+  "$defs": {
+    "name": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"}
+  }
+}

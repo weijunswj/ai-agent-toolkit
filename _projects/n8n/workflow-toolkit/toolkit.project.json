@@ -5,9 +5,9 @@
   "title": "n8n Workflow Toolkit",
   "module_path": "_projects/n8n/workflow-toolkit",
   "main_path": "_projects/n8n/workflow-toolkit/_main",
-  "version": "1.2.22",
+  "version": "1.2.23",
   "version_policy": "semver",
-  "version_notes": "Fails closed before import when restart prompt setup cannot complete and keeps implicit Docker target discovery ambiguous when another n8n container is running globally.",
+  "version_notes": "Routes workflow helpers and templates through the current official n8n Skills entry point without treating Skills as live MCP evidence.",
   "outputs": [
     {
       "kind": "curated",

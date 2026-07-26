@@ -1,0 +1,62 @@
+name: External Capability Drift
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: external-capability-drift
+  cancel-in-progress: false
+
+jobs:
+  deterministic-read-only-check:
+    if: github.repository == 'weijunswj/ai-agent-toolkit'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Restore unchanged-finding deduplication state
+        id: restore-drift-state
+        uses: actions/cache/restore@v5
+        with:
+          path: .tmp/external-capability-drift-state.json
+          key: external-capability-drift-${{ github.run_id }}
+          restore-keys: |
+            external-capability-drift-
+
+      - name: Run deterministic read-only drift check
+        id: drift
+        run: >-
+          node skills/external-system-router/scripts/external-capability-drift.cjs
+          --repository-root .
+          --config repo/external-capability/targets.json
+          --state .tmp/external-capability-drift-state.json
+          --output .tmp/external-capability-drift-report.json
+
+      - name: Upload sanitized evidence only for new material drift
+        if: steps.drift.outputs.material == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: external-capability-drift-${{ github.run_id }}
+          path: .tmp/external-capability-drift-report.json
+          if-no-files-found: error
+          retention-days: 14
+          include-hidden-files: true
+
+      - name: Save deduplication state only after evidence upload succeeds
+        if: steps.drift.outputs.material == 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: .tmp/external-capability-drift-state.json
+          key: external-capability-drift-${{ github.run_id }}
+
+      # This job makes no AI, browser, credential, provider, installation,
+      # configuration, promotion/demotion, revocation, or mutation call.

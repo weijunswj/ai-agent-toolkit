@@ -20,6 +20,7 @@ Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised
 | Full guide or source context | Open a project under [_projects/](_projects/), then its `_main/` folder. |
 | Set up Toolkit itself | Use [Toolkit Setup](#toolkit-setup), then ask Codex or Claude Code: `setup toolkit` or `refresh toolkit`. |
 | Install a skill | Copy the whole skill folder using [Install Skills By Platform](#install-skills-by-platform). |
+| Operate an external provider | Load [External System Router](skills/external-system-router/) to pin the target and task envelope, classify risk, audit operation-specific interfaces, and produce a redacted receipt. |
 | Review skill safety | Use the [Skill Safety Matrix](repo/docs/SKILL-SAFETY-MATRIX.md) before creating, extending, or importing skills. |
 | Maintenance work | Start with [repo/docs/](repo/docs/) and the validation commands below. |
 
@@ -74,6 +75,7 @@ Open a project when you need maintained source, provenance, or the owner behind 
 | [Context-Preserving AI Publisher](_projects/repo-methodology/context-preserving-ai-publisher/) | Source-to-surface publishing method and starter templates. | [_main/](_projects/repo-methodology/context-preserving-ai-publisher/_main/) |
 | [Agent Skill Supply-Chain Audit](_projects/repo-methodology/agent-skill-supply-chain-audit/) | Third-party skill provenance, safety, license, and conversion audit source. | [_main/](_projects/repo-methodology/agent-skill-supply-chain-audit/_main/) |
 | [AI Coding Agent Rules](_projects/development/ai-coding-agent-rules/) | Generic agent-rule templates, skill routing source, and n8n rules source. | [_main/](_projects/development/ai-coding-agent-rules/_main/) |
+| [External System Router](_projects/development/external-system-router/) | Risk-scoped provider routing, progressive repository-and-intent capability reconciliation, graphical-control approval, host-neutral target profiles, deterministic drift checks, and structured receipts. | [_main/](_projects/development/external-system-router/_main/) |
 | [Local AI Stack Safety](_projects/development/local-ai-stack-safety/) | Lightweight local AI runtime, model download, local AI web UI, and endpoint exposure safety-review skill source. | [_main/](_projects/development/local-ai-stack-safety/_main/) |
 | [Managed App Foundation Review](_projects/development/managed-app-foundation-review/) | Build-vs-buy planning for low-cost managed or owner-hosted auth, backend, database, workflow automation, CRM, forms, email, storage, analytics, ops, and account-security foundations. | [_main/](_projects/development/managed-app-foundation-review/_main/) |
 | [Project Completion Audit](_projects/development/project-completion-audit/) | Guarded final completion, production-readiness, release-candidate, QA, security-readiness, and remediation audit workflow. | [_main/](_projects/development/project-completion-audit/_main/) |
@@ -91,6 +93,7 @@ Skills are copyable folder packages. The portable package unit is `skills/<skill
 |---|---|
 | [AI Coding Agent Rules](skills/ai-coding-agent-rules/) | Install generic execution-first agent rules for supported coding agents. |
 | [Toolkit Setup](skills/toolkit-setup/) | Route Toolkit plugin setup, Windows hook repair, repo-backed auto-update, local bridge setup, OpenCode bridge support, Antigravity 2 adapter support, audit, sync, disable, stale-state, and bridge troubleshooting requests to the shared setup subsystem. |
+| [External System Router](skills/external-system-router/) | Route exact owner-authorised provider, deployment, DNS, database, storage, workflow, OAuth, API/CLI/MCP, or provider-console operations through risk tiers and the strongest admissible operation-specific interface. |
 | [n8n Agent Rules](skills/n8n-agent-rules/) | Apply the full n8n operating contract before n8n workflow, MCP, import/export, credential, execution, or live-instance work. |
 | [n8n Local Setup](skills/n8n-local-setup/) | Set up n8n with the localhost/ngrok dev stack, the separate production Cloudflare Tunnel self-hosting stack for local/CGNAT machines, Hostinger Coolify VPS guidance for hosted n8n, launcher/menu use, skills-first agent routing, and [official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references. |
 | [n8n Workflow Helper Scripts](skills/n8n-workflow-helper-scripts/) | Sanitise, validate, export, import, compare, prepare, or sync n8n workflow JSON safely. |

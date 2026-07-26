@@ -33,8 +33,8 @@ function spec(overrides = {}) {
   };
 }
 function activationProof(overrides = {}) {
-  return { schema: 3, source: 'claude-plugin-list', plugin_version: control.CONTROL_VERSION,
-    cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64), ...overrides };
+  return { schema: 5, source: 'claude-plugin-list', plugin_version: control.CONTROL_VERSION,
+    cache_identity: 'a'.repeat(64), hook_sha256: 'b'.repeat(64), controller_sha256: 'c'.repeat(64), process_launch_sha256: 'e'.repeat(64), agent_hook_sha256: 'd'.repeat(64), n8n_admission_hook_sha256: 'f'.repeat(64), external_system_router_sha256: '2'.repeat(64), n8n_domain_router_sha256: '1'.repeat(64), ...overrides };
 }
 let defaultVerifier;
 function configured(topology, capacity_mode, overrides = {}) {
@@ -56,7 +56,7 @@ function verifierFixture() {
   const work = root();
   const cache = path.join(work, 'cache');
   const sourceRoot = path.resolve(__dirname, '..', '..');
-  for (const rel of ['.claude-plugin/plugin.json', '.claude-plugin/hooks/hooks.json', 'repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/claude-process-launch.cjs', 'repo/scripts/toolkit-claude-agent-hook.cjs']) {
+  for (const rel of ['.claude-plugin/plugin.json', '.claude-plugin/hooks/hooks.json', 'repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/claude-process-launch.cjs', 'repo/scripts/toolkit-claude-agent-hook.cjs', 'repo/scripts/toolkit-claude-n8n-admission-hook.cjs', 'skills/external-system-router/scripts/external-system-router.cjs', 'skills/external-system-router/scripts/n8n-domain-router.cjs']) {
     const target = path.join(cache, ...rel.split('/'));
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(path.join(sourceRoot, ...rel.split('/')), target);
@@ -357,7 +357,7 @@ test('strict profiles require exact native activation proof and direct profiles 
   assert.equal(control.validActivationProof(activationProof(), { cachePath: work, pluginVersion: control.CONTROL_VERSION }), false);
 });
 
-test('schema-2 strict profiles fail closed while a correct schema-3 proof persists and revalidates', () => {
+test('legacy strict profiles fail closed while a correct schema-5 proof persists and revalidates', () => {
   const staleRoot = root();
   const staleTarget = control.profilePath('claude-code', { root: staleRoot });
   fs.mkdirSync(path.dirname(staleTarget), { recursive: true });
@@ -373,8 +373,11 @@ test('schema-2 strict profiles fail closed while a correct schema-3 proof persis
 
   const fixture = enforcementFixture();
   const persisted = control.readProfile('claude-code', { root: fixture.work });
-  assert.equal(persisted.activation_proof.schema, 3);
+  assert.equal(persisted.activation_proof.schema, 5);
   assert.match(persisted.activation_proof.process_launch_sha256, /^[a-f0-9]{64}$/);
+  assert.match(persisted.activation_proof.n8n_admission_hook_sha256, /^[a-f0-9]{64}$/);
+  assert.match(persisted.activation_proof.external_system_router_sha256, /^[a-f0-9]{64}$/);
+  assert.match(persisted.activation_proof.n8n_domain_router_sha256, /^[a-f0-9]{64}$/);
   assert.equal(control.verifyCurrentClaudeEnforcement(persisted, { claudeCli: fixture.cli }), true);
 });
 

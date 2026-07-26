@@ -44,14 +44,6 @@ const repoLocalShimTemplates = [
     end: '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md:END ANTIGRAVITY.BOOTSTRAP -->'
   }
 ];
-const expectedN8nBlock = `${n8nBegin}
-## n8n Agent Rules Adapter
-
-If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, stop and load \`skills/n8n-agent-rules\` before planning or editing.
-If that skill or its full rules are unavailable, stop and report the limitation instead of continuing.
-Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, credential, deployment, or production actions without explicit current-turn approval naming the target and allowed operation.
-${n8nEnd}`;
-
 const curatedRepoLocalSafetyComment = [
   '<!--',
   'Curated AI-facing source.',
@@ -460,19 +452,23 @@ test('root AGENTS is directly maintained while repo-local block comes from execu
   assert.equal(sourceToolkit, prompt);
 });
 
-test('n8n adapter is compact and fail-closed', () => {
+test('n8n adapter is dynamic, compact, and fail-closed', () => {
   for (const [label, text] of [
-    ['repo-local AGENTS managed template', repoLocalPayload(readText('_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'), 'repo-local AGENTS managed template')],
-    ['published repo-local AGENTS managed template', repoLocalPayload(readText('skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'), 'published repo-local AGENTS managed template')]
+    ['root AGENTS', readText('AGENTS.md')],
+    ['curated optional AGENTS n8n adapter', readText('_projects/development/ai-coding-agent-rules/curated_output_for_ai/adapters/AGENTS.n8n-brief.template.md')],
+    ['published optional AGENTS n8n adapter', readText('skills/n8n-agent-rules/adapters/AGENTS.n8n-brief.template.md')]
   ]) {
     const n8nBlock = block(text, n8nBegin, n8nEnd, label);
-    assert.equal(n8nBlock.trim(), expectedN8nBlock, label);
     const inner = n8nBlock.slice(n8nBlock.indexOf(n8nBegin) + n8nBegin.length, n8nBlock.indexOf(n8nEnd)).trim();
     assert.equal(inner, readText(n8nAdapterPath).trimEnd(), `${label} adapter comes from source partial`);
-    assert.ok(Buffer.byteLength(inner, 'utf8') < 700, `${label} adapter text stays compact`);
-    assert.ok(Buffer.byteLength(n8nBlock, 'utf8') < 900, `${label} block stays compact`);
-    assert.match(inner, /stop and load `skills\/n8n-agent-rules` before planning or editing/i, label);
+    assert.ok(Buffer.byteLength(inner, 'utf8') < 1600, `${label} adapter text stays compact`);
+    assert.ok(Buffer.byteLength(n8nBlock, 'utf8') < 1900, `${label} block stays compact`);
+    assert.match(inner, /mandatory fail-closed n8n domain router before planning or editing/i, label);
     assert.match(inner, /skill or its full rules are unavailable, stop and report the limitation instead of continuing/i, label);
+    assert.match(inner, /using-n8n-skills-official/i, label);
+    assert.match(inner, /generic JSON validation, and repository tests are never substitutes/i, label);
+    assert.match(inner, /one supported next action/i, label);
+    assert.match(inner, /Mandatory routing does not imply mandatory MCP/i, label);
     assert.match(inner, /explicit current-turn approval naming the target and allowed operation/i, label);
     for (const requiredTerm of [
       /live n8n/i,
@@ -489,6 +485,14 @@ test('n8n adapter is compact and fail-closed', () => {
       assert.match(inner, requiredTerm, `${label}: ${requiredTerm}`);
     }
     assert.doesNotMatch(inner, /n8n_live|webhook IDs|archive\/delete|Adapter Auto-Check Protocol|Keep workflows inactive/i, label);
+  }
+
+  for (const [label, text] of [
+    ['repo-local AGENTS managed template', repoLocalPayload(readText('_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'), 'repo-local AGENTS managed template')],
+    ['published repo-local AGENTS managed template', repoLocalPayload(readText('skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'), 'published repo-local AGENTS managed template')]
+  ]) {
+    assert.equal(markerCount(text, n8nBegin), 0, `${label} excludes n8n until detected or requested`);
+    assert.equal(markerCount(text, n8nEnd), 0, `${label} excludes n8n until detected or requested`);
   }
 });
 

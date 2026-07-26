@@ -8,6 +8,7 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..', '..');
 const intendedImplicitSkills = [
   'agent-skill-supply-chain-audit',
+  'external-system-router',
   'knowledge-index-updater',
   'n8n-agent-rules',
   'toolkit-setup'

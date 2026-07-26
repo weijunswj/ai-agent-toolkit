@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/weijunswj/ai-agent-toolkit/schemas/external-system/operation-semantics.v1.json",
+  "title": "Canonical External-System Operation Semantics",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "operation", "mutationClass", "destructive", "irreversible",
+    "crossTarget", "highBlastRadius", "minimumRiskByEnvironment",
+    "requiredPreconditions", "requiredPostconditions", "rollbackOrSafeDisable",
+    "receiptClass", "semanticsDigest"
+  ],
+  "properties": {
+    "schemaVersion": {"const": "ai-agent-toolkit.operation-semantics.v1"},
+    "operation": {"$ref": "#/$defs/name"},
+    "mutationClass": {"enum": ["read-only", "mutation"]},
+    "destructive": {"type": "boolean"},
+    "irreversible": {"type": "boolean"},
+    "crossTarget": {"type": "boolean"},
+    "highBlastRadius": {"type": "boolean"},
+    "minimumRiskByEnvironment": {
+      "type": "object",
+      "required": ["default"],
+      "propertyNames": {"$ref": "#/$defs/name"},
+      "additionalProperties": {"type": "integer", "minimum": 0, "maximum": 3}
+    },
+    "requiredPreconditions": {"$ref": "#/$defs/evidence"},
+    "requiredPostconditions": {"$ref": "#/$defs/evidence"},
+    "rollbackOrSafeDisable": {"$ref": "#/$defs/evidence"},
+    "receiptClass": {"enum": ["inspection", "mutation", "destructive"]},
+    "semanticsDigest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"mutationClass": {"const": "read-only"}}},
+      "then": {
+        "properties": {
+          "destructive": {"const": false},
+          "irreversible": {"const": false},
+          "crossTarget": {"const": false},
+          "highBlastRadius": {"const": false},
+          "receiptClass": {"const": "inspection"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"mutationClass": {"const": "mutation"}}},
+      "then": {
+        "properties": {
+          "requiredPreconditions": {"minItems": 1},
+          "requiredPostconditions": {"minItems": 1},
+          "rollbackOrSafeDisable": {"minItems": 1},
+          "receiptClass": {"enum": ["mutation", "destructive"]}
+        }
+      }
+    },
+    {
+      "if": {
+        "anyOf": [
+          {"properties": {"destructive": {"const": true}}},
+          {"properties": {"irreversible": {"const": true}}},
+          {"properties": {"crossTarget": {"const": true}}},
+          {"properties": {"highBlastRadius": {"const": true}}}
+        ]
+      },
+      "then": {
+        "properties": {
+          "mutationClass": {"const": "mutation"},
+          "receiptClass": {"const": "destructive"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"receiptClass": {"const": "destructive"}}},
+      "then": {
+        "anyOf": [
+          {"properties": {"destructive": {"const": true}}},
+          {"properties": {"irreversible": {"const": true}}},
+          {"properties": {"crossTarget": {"const": true}}},
+          {"properties": {"highBlastRadius": {"const": true}}}
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "name": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"},
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{16,64}$"},
+    "evidence": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 300}
+    }
+  }
+}
