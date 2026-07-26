@@ -359,6 +359,38 @@ function inspectOwnedGeneration(recordPath, options = {}) {
 }
 
 function cleanupOwnedGeneration(generation, options = {}) {
+  if (options.evidenceAuthority) {
+    if (
+      typeof options.revalidateEvidenceAuthority !== 'function'
+      || typeof options.cleanupEvidenceAuthority !== 'function'
+    ) {
+      return {
+        cleaned: false,
+        preserved: true,
+        reason: 'evidence-authority-handler-missing',
+        inspection: null
+      };
+    }
+    try {
+      options.revalidateEvidenceAuthority(options.evidenceAuthority, 'before-authority-cleanup');
+      if (options.beforeDelete) {
+        options.beforeDelete({
+          evidenceAuthority: options.evidenceAuthority,
+          generation,
+          inspection: null
+        });
+      }
+      return options.cleanupEvidenceAuthority(options.evidenceAuthority);
+    } catch (error) {
+      return {
+        cleaned: false,
+        preserved: true,
+        reason: error?.code || 'evidence-authority-cleanup-failed',
+        inspection: null,
+        error
+      };
+    }
+  }
   const inspected = inspectOwnedGeneration(generation.recordPath, {
     expectedParent: generation.record.expected_parent,
     liveness: options.currentOperation ? () => 'dead' : options.liveness

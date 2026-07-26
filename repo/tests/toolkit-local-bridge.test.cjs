@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -52,7 +53,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.9.6';
+const expectedBridgeVersion = '2.9.7';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 const currentN8nManifestPath = path.join(
   repoRoot,
@@ -871,6 +872,155 @@ function readSingleN8nOwnedGeneration(pluginRoot) {
   return {
     recordPath,
     record: readJson(recordPath)
+  };
+}
+
+const n8nEvidenceKinds = Object.freeze([
+  'generation-record',
+  'ready',
+  'stage-owner',
+  'completed',
+  'failed',
+  'n8n-pre-transaction',
+  'n8n-pre-transaction-phase-10-copied',
+  'n8n-pre-transaction-phase-15-transforming',
+  'n8n-pre-transaction-phase-20-transformed',
+  'n8n-replacement',
+  'n8n-replacement-phase-10-displace',
+  'n8n-replacement-phase-20-displaced',
+  'n8n-replacement-phase-30-install',
+  'n8n-replacement-phase-40-installed',
+  'n8n-replacement-phase-50-verify',
+  'n8n-replacement-phase-60-verified',
+  'n8n-replacement-phase-70-cleanup'
+]);
+
+function n8nEvidencePath(recordPath, kind, record = null) {
+  if (kind === 'stage-owner') {
+    if (!record?.expected_staging_path) throw new Error('stage-owner evidence requires its generation record');
+    return path.join(record.expected_staging_path, '.toolkit-staging-owner.json');
+  }
+  return kind === 'generation-record'
+    ? recordPath
+    : recordPath.replace(/\.json$/, `.${kind}.json`);
+}
+
+function snapshotExactPath(targetPath) {
+  let stat;
+  try {
+    stat = fs.lstatSync(targetPath);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { type: 'absent' };
+    throw error;
+  }
+  if (stat.isSymbolicLink()) {
+    return { type: 'redirect', target: fs.readlinkSync(targetPath) };
+  }
+  if (stat.isFile()) {
+    return {
+      type: 'file',
+      bytes: fs.readFileSync(targetPath).toString('base64')
+    };
+  }
+  if (stat.isDirectory()) {
+    return { type: 'directory', tree: snapshotTree(targetPath) };
+  }
+  return { type: 'special' };
+}
+
+function snapshotN8nRecoveryEvidence(pluginRoot, owned) {
+  const transactionPath = n8nEvidencePath(owned.recordPath, 'n8n-replacement');
+  const transaction = fs.existsSync(transactionPath) ? readJson(transactionPath) : null;
+  const paths = {
+    target: pluginRoot,
+    stage: owned.record.expected_staging_path,
+    backup: transaction?.backup_path || path.join(
+      path.dirname(pluginRoot),
+      `.${path.basename(pluginRoot)}.n8n-repair-backup-${owned.record.generation_id}`
+    )
+  };
+  const evidence = {};
+  for (const kind of n8nEvidenceKinds) {
+    evidence[kind] = snapshotExactPath(n8nEvidencePath(owned.recordPath, kind, owned.record));
+  }
+  return {
+    backup: snapshotExactPath(paths.backup),
+    evidence,
+    stage: snapshotExactPath(paths.stage),
+    target: snapshotExactPath(paths.target)
+  };
+}
+
+function replaceFileAtomically(filePath, bytes) {
+  const replacement = `${filePath}.adversarial-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(replacement, bytes);
+  fs.renameSync(replacement, filePath);
+}
+
+function mutateValidN8nEvidence(filePath, mutate) {
+  const value = readJson(filePath);
+  mutate(value);
+  replaceFileAtomically(filePath, Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'utf8'));
+}
+
+async function createInterruptedN8nEvidenceFixture(crashPoint, version = '1.0.2') {
+  const root = tmpRoot();
+  const codexHome = path.join(root, 'codex-home');
+  const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', version);
+  if (version === '1.0.1') copySupportedN8nPluginFixture(pluginRoot);
+  else copyCurrentSupportedN8nPluginFixture(pluginRoot);
+  writeFile(path.join(pluginRoot, 'evidence-authority.txt'), `${crashPoint}\n`);
+  await waitForAbruptChild(spawnAbruptN8nRepair(pluginRoot, version, crashPoint));
+  const owned = readSingleN8nOwnedGeneration(pluginRoot);
+  return { codexHome, owned, pluginRoot, version };
+}
+
+function relocateInterruptedN8nFixture(fixture, destinationPluginRoot) {
+  const sourceParent = path.dirname(fixture.pluginRoot);
+  const destinationParent = path.dirname(destinationPluginRoot);
+  fs.mkdirSync(destinationParent, { recursive: true });
+  fs.renameSync(fixture.pluginRoot, destinationPluginRoot);
+  const destinationStage = path.join(destinationParent, path.basename(fixture.owned.record.expected_staging_path));
+  fs.renameSync(fixture.owned.record.expected_staging_path, destinationStage);
+  const recordBase = path.basename(fixture.owned.recordPath, '.json');
+  for (const name of fs.readdirSync(sourceParent).filter((entry) => entry.startsWith(recordBase))) {
+    fs.renameSync(path.join(sourceParent, name), path.join(destinationParent, name));
+  }
+  const destinationRecordPath = path.join(destinationParent, path.basename(fixture.owned.recordPath));
+  const destinationBackup = path.join(
+    destinationParent,
+    `.${path.basename(destinationPluginRoot)}.n8n-repair-backup-${fixture.owned.record.generation_id}`
+  );
+  const normalizedDestination = process.platform === 'win32'
+    ? path.resolve(destinationPluginRoot).toLowerCase()
+    : path.resolve(destinationPluginRoot);
+  const targetIdentity = crypto.createHash('sha256')
+    .update(normalizedDestination, 'utf8')
+    .digest('hex');
+  const record = readJson(destinationRecordPath);
+  record.expected_parent = destinationParent;
+  record.expected_final_target = destinationPluginRoot;
+  record.expected_staging_path = destinationStage;
+  writeJson(destinationRecordPath, record);
+  for (const kind of ['n8n-pre-transaction', 'n8n-replacement']) {
+    const evidencePath = n8nEvidencePath(destinationRecordPath, kind);
+    const evidence = readJson(evidencePath);
+    evidence.target_path = destinationPluginRoot;
+    evidence.target_identity = targetIdentity;
+    evidence.stage_path = destinationStage;
+    evidence.staged_plugin_path = path.join(destinationStage, 'plugin');
+    evidence.backup_path = destinationBackup;
+    writeJson(evidencePath, evidence);
+  }
+  const sourceLock = n8nSkillsTargetLockIdentity(fixture.pluginRoot);
+  const destinationLock = n8nSkillsTargetLockIdentity(destinationPluginRoot);
+  const sourceLockPath = path.join(sourceLock.hubRoot, sourceLock.lockName);
+  if (fs.existsSync(sourceLockPath)) {
+    fs.renameSync(sourceLockPath, path.join(destinationLock.hubRoot, destinationLock.lockName));
+  }
+  return {
+    owned: { record, recordPath: destinationRecordPath },
+    pluginRoot: destinationPluginRoot
   };
 }
 
@@ -5965,7 +6115,7 @@ test('Codex n8n repair reconciles exact dead target-untouched generations before
       write: true,
       pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
     });
-    assert.equal(repaired.status, 'repaired', crashPoint);
+    assert.equal(repaired.status, 'repaired', `${crashPoint}: ${JSON.stringify(repaired)}`);
     assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'healthy', crashPoint);
     const retry = repairThirdPartyCodexPluginHooks({
       codexHome,
@@ -6941,6 +7091,392 @@ test('Codex n8n interrupted recovery requires the exact registered contract and 
   assert.deepEqual(n8nTransactionArtifacts(pluginRoot), []);
 });
 
+test('Codex n8n recovery binds every transaction evidence class from parsing through inventory', async () => {
+  const crashPointByKind = {
+    'generation-record': 'afterN8nRepairTransactionRegistration',
+    ready: 'afterN8nRepairTransactionRegistration',
+    'stage-owner': 'afterN8nRepairTransactionRegistration',
+    completed: 'afterN8nRepairTransactionRegistration',
+    failed: 'afterN8nRepairTransactionRegistration',
+    'n8n-pre-transaction': 'afterN8nRepairTransactionRegistration',
+    'n8n-pre-transaction-phase-10-copied': 'afterN8nRepairTransactionRegistration',
+    'n8n-pre-transaction-phase-15-transforming': 'afterN8nRepairTransactionRegistration',
+    'n8n-pre-transaction-phase-20-transformed': 'afterN8nRepairTransactionRegistration',
+    'n8n-replacement': 'afterN8nRepairTransactionRegistration',
+    'n8n-replacement-phase-10-displace': 'afterN8nRepairTargetDisplaced',
+    'n8n-replacement-phase-20-displaced': 'afterN8nRepairTargetDisplaced',
+    'n8n-replacement-phase-30-install': 'afterN8nRepairStageInstalled',
+    'n8n-replacement-phase-40-installed': 'afterN8nRepairStageInstalled',
+    'n8n-replacement-phase-50-verify': 'afterN8nRepairVerification',
+    'n8n-replacement-phase-60-verified': 'afterN8nRepairVerification',
+    'n8n-replacement-phase-70-cleanup': 'afterN8nBackupCleanupAuthorization'
+  };
+  for (const kind of n8nEvidenceKinds) {
+    const fixture = await createInterruptedN8nEvidenceFixture(crashPointByKind[kind]);
+    const evidencePath = n8nEvidencePath(fixture.owned.recordPath, kind, fixture.owned.record);
+    if (['completed', 'failed'].includes(kind)) {
+      writeJson(evidencePath, {
+        owner: 'ai-agent-toolkit-local-bridge',
+        schema_version: 1,
+        generation_id: fixture.owned.record.generation_id,
+        ownership_token: fixture.owned.record.ownership_token,
+        state: kind,
+        recorded_at: '2026-07-24T00:00:00.000Z'
+      });
+    }
+    assert.equal(fs.existsSync(evidencePath), true, `${kind} fixture evidence must exist`);
+    let mutated = false;
+    let expectedAfterMutation = null;
+    assert.throws(() => recoverInterruptedN8nReplacement({
+      codexHome: fixture.codexHome,
+      pluginInspection: {
+        ok: true,
+        pluginList: codexPluginList([n8nInstalledEntry(fixture.version)]),
+        errors: []
+      },
+      write: true,
+      testHooks: {
+        afterN8nEvidenceParsed() {
+          if (mutated) return;
+          mutateValidN8nEvidence(evidencePath, (value) => {
+            value.adversarial_same_owner_replacement = kind;
+          });
+          mutated = true;
+          expectedAfterMutation = snapshotN8nRecoveryEvidence(fixture.pluginRoot, fixture.owned);
+        }
+      }
+    }), (error) => error?.code === 'recovery-evidence-invalid', kind);
+    assert.equal(mutated, true, `${kind} must be replaced after parsing`);
+    assert.deepEqual(
+      snapshotN8nRecoveryEvidence(fixture.pluginRoot, fixture.owned),
+      expectedAfterMutation,
+      `${kind} replacement must remain exact and all target, stage, backup, and evidence state must remain unchanged`
+    );
+  }
+});
+
+test('Codex n8n recovery rejects post-parse deletion, byte-only drift, regular-file substitution, redirects, and new optional evidence', async (t) => {
+  const mutations = [
+    {
+      name: 'byte-different-semantically-equivalent',
+      kind: 'n8n-replacement',
+      mutate(filePath) {
+        const bytes = fs.readFileSync(filePath, 'utf8');
+        replaceFileAtomically(filePath, Buffer.from(bytes.replace(': ', ':\t'), 'utf8'));
+      }
+    },
+    {
+      name: 'another-regular-file',
+      kind: 'n8n-replacement',
+      mutate(filePath) {
+        replaceFileAtomically(filePath, Buffer.from('{}\n', 'utf8'));
+      }
+    },
+    {
+      name: 'deleted-present-file',
+      kind: 'n8n-replacement',
+      mutate(filePath) {
+        fs.unlinkSync(filePath);
+      }
+    },
+    {
+      name: 'redirected-file',
+      kind: 'n8n-replacement',
+      mutate(filePath, fixture) {
+        const target = `${filePath}.redirect-target`;
+        fs.renameSync(filePath, target);
+        fs.symlinkSync(target, filePath, 'file');
+      }
+    },
+    {
+      name: 'previously-absent-optional',
+      kind: 'failed',
+      mutate(filePath, fixture) {
+        writeJson(filePath, {
+          owner: 'ai-agent-toolkit-local-bridge',
+          schema_version: 1,
+          generation_id: fixture.owned.record.generation_id,
+          ownership_token: fixture.owned.record.ownership_token,
+          state: 'failed',
+          recorded_at: '2026-07-24T00:00:00.000Z'
+        });
+      }
+    }
+  ];
+  for (const mutation of mutations) {
+    await t.test(mutation.name, async (subtest) => {
+      if (mutation.name === 'redirected-file') {
+        const probeRoot = tmpRoot();
+        const probeTarget = path.join(probeRoot, 'target');
+        const probeLink = path.join(probeRoot, 'link');
+        writeFile(probeTarget, 'probe\n');
+        try {
+          fs.symlinkSync(probeTarget, probeLink, 'file');
+          fs.unlinkSync(probeLink);
+        } catch (error) {
+          if (['EPERM', 'EACCES', 'ENOTSUP', 'UNKNOWN'].includes(error?.code)) {
+            subtest.skip('environment does not permit file symbolic links');
+            return;
+          }
+          throw error;
+        }
+      }
+      const fixture = await createInterruptedN8nEvidenceFixture('afterN8nRepairTransactionRegistration');
+      const evidencePath = n8nEvidencePath(fixture.owned.recordPath, mutation.kind);
+      let mutated = false;
+      let expectedAfterMutation = null;
+      assert.throws(() => recoverInterruptedN8nReplacement({
+        codexHome: fixture.codexHome,
+        pluginInspection: {
+          ok: true,
+          pluginList: codexPluginList([n8nInstalledEntry(fixture.version)]),
+          errors: []
+        },
+        write: true,
+        testHooks: {
+          afterN8nEvidenceParsed() {
+            if (mutated) return;
+            mutation.mutate(evidencePath, fixture);
+            mutated = true;
+            expectedAfterMutation = snapshotN8nRecoveryEvidence(fixture.pluginRoot, fixture.owned);
+          }
+        }
+      }), (error) => error?.code === 'recovery-evidence-invalid', mutation.name);
+      assert.equal(mutated, true, mutation.name);
+      assert.deepEqual(
+        snapshotN8nRecoveryEvidence(fixture.pluginRoot, fixture.owned),
+        expectedAfterMutation,
+        `${mutation.name} must fail closed without any recovery mutation`
+      );
+    });
+  }
+});
+
+test('Codex n8n recovery rejects evidence drift after canonical inventory and before mutation', async () => {
+  const mutations = [
+    {
+      name: 'same-size-and-restored-mtime',
+      mutate(fixture) {
+        const filePath = n8nEvidencePath(fixture.owned.recordPath, 'n8n-replacement');
+        const original = fs.readFileSync(filePath);
+        const stat = fs.statSync(filePath);
+        const changed = Buffer.from(original);
+        const whitespace = changed.indexOf(Buffer.from(': '));
+        assert.notEqual(whitespace, -1);
+        changed[whitespace + 1] = 0x09;
+        replaceFileAtomically(filePath, changed);
+        fs.utimesSync(filePath, stat.atime, stat.mtime);
+      }
+    },
+    {
+      name: 'remove-and-recreate-same-bytes',
+      mutate(fixture) {
+        const filePath = n8nEvidencePath(fixture.owned.recordPath, 'n8n-replacement');
+        replaceFileAtomically(filePath, fs.readFileSync(filePath));
+      }
+    },
+    {
+      name: 'swap-two-phases',
+      mutate(fixture) {
+        const left = n8nEvidencePath(fixture.owned.recordPath, 'n8n-pre-transaction-phase-10-copied');
+        const right = n8nEvidencePath(fixture.owned.recordPath, 'n8n-pre-transaction-phase-15-transforming');
+        const leftBytes = fs.readFileSync(left);
+        const rightBytes = fs.readFileSync(right);
+        replaceFileAtomically(left, rightBytes);
+        replaceFileAtomically(right, leftBytes);
+      }
+    },
+    {
+      name: 'changed-generation-token',
+      mutate(fixture) {
+        mutateValidN8nEvidence(
+          n8nEvidencePath(fixture.owned.recordPath, 'n8n-replacement'),
+          (value) => { value.ownership_token = '0'.repeat(48); }
+        );
+      }
+    },
+    {
+      name: 'unknown-phase-shaped-file',
+      mutate(fixture) {
+        const unknown = fixture.owned.recordPath.replace(/\.json$/, '.n8n-replacement-phase-99-unknown.json');
+        writeJson(unknown, { state: 'unknown' });
+      }
+    }
+  ];
+  for (const mutation of mutations) {
+    const fixture = await createInterruptedN8nEvidenceFixture('afterN8nRepairTransactionRegistration');
+    let mutated = false;
+    let expectedAfterMutation = null;
+    assert.throws(() => recoverInterruptedN8nReplacement({
+      codexHome: fixture.codexHome,
+      pluginInspection: {
+        ok: true,
+        pluginList: codexPluginList([n8nInstalledEntry(fixture.version)]),
+        errors: []
+      },
+      write: true,
+      testHooks: {
+        beforeN8nEvidenceAuthorityRevalidation({ boundary }) {
+          if (mutated || boundary !== 'canonical-cache-inventory-final') return;
+          mutation.mutate(fixture);
+          mutated = true;
+          expectedAfterMutation = snapshotN8nRecoveryEvidence(fixture.pluginRoot, fixture.owned);
+        }
+      }
+    }), (error) => error?.code === 'recovery-evidence-invalid', mutation.name);
+    assert.equal(mutated, true, mutation.name);
+    assert.deepEqual(
+      snapshotN8nRecoveryEvidence(fixture.pluginRoot, fixture.owned),
+      expectedAfterMutation,
+      `${mutation.name} must preserve exact post-drift residue without mutation`
+    );
+  }
+});
+
+test('Codex n8n evidence cleanup never deletes a pre-cleanup replacement or newly appeared marker', async () => {
+  const mutations = [
+    {
+      name: 'generation-record-replacement',
+      boundary: 'cleanup-start',
+      mutate(fixture) {
+        mutateValidN8nEvidence(fixture.owned.recordPath, (value) => {
+          value.adversarial_cleanup_replacement = true;
+        });
+      }
+    },
+    {
+      name: 'phase-replacement',
+      boundary: 'cleanup-start',
+      mutate(fixture) {
+        mutateValidN8nEvidence(
+          n8nEvidencePath(fixture.owned.recordPath, 'n8n-pre-transaction-phase-10-copied'),
+          (value) => { value.adversarial_cleanup_replacement = true; }
+        );
+      }
+    },
+    {
+      name: 'same-path-different-object',
+      boundary: 'file-delete',
+      trigger: 'n8n-replacement',
+      mutate(fixture) {
+        const filePath = n8nEvidencePath(fixture.owned.recordPath, 'n8n-replacement');
+        replaceFileAtomically(filePath, fs.readFileSync(filePath));
+      }
+    },
+    {
+      name: 'previously-absent-terminal-marker',
+      boundary: 'cleanup-start',
+      mutate(fixture) {
+        writeJson(n8nEvidencePath(fixture.owned.recordPath, 'failed'), {
+          owner: 'ai-agent-toolkit-local-bridge',
+          schema_version: 1,
+          generation_id: fixture.owned.record.generation_id,
+          ownership_token: fixture.owned.record.ownership_token,
+          state: 'failed',
+          recorded_at: '2026-07-24T00:00:00.000Z'
+        });
+      }
+    }
+  ];
+  for (const mutation of mutations) {
+    const fixture = await createInterruptedN8nEvidenceFixture('afterN8nRepairTransactionRegistration');
+    let mutated = false;
+    let expectedAfterMutation = null;
+    assert.throws(() => recoverInterruptedN8nReplacement({
+      codexHome: fixture.codexHome,
+      pluginInspection: {
+        ok: true,
+        pluginList: codexPluginList([n8nInstalledEntry(fixture.version)]),
+        errors: []
+      },
+      write: true,
+      testHooks: {
+        beforeN8nEvidenceCleanup() {
+          if (mutated || mutation.boundary !== 'cleanup-start') return;
+          mutation.mutate(fixture);
+          mutated = true;
+          expectedAfterMutation = snapshotN8nRecoveryEvidence(fixture.pluginRoot, fixture.owned);
+        },
+        beforeN8nEvidenceCleanupDelete({ evidence_kind: kind }) {
+          if (
+            mutated
+            || mutation.boundary !== 'file-delete'
+            || kind !== mutation.trigger
+          ) return;
+          mutation.mutate(fixture);
+          mutated = true;
+          expectedAfterMutation = snapshotN8nRecoveryEvidence(fixture.pluginRoot, fixture.owned);
+        }
+      }
+    }), (error) => error?.code === 'recovery-evidence-invalid', mutation.name);
+    assert.equal(mutated, true, mutation.name);
+    assert.deepEqual(
+      snapshotN8nRecoveryEvidence(fixture.pluginRoot, fixture.owned),
+      expectedAfterMutation,
+      `${mutation.name} must preserve the replacement and all exact residue without subset cleanup`
+    );
+  }
+});
+
+test('Codex n8n evidence authority advances one append-only phase at a time and retries idempotently', () => {
+  const root = tmpRoot();
+  const codexHome = path.join(root, 'codex-home');
+  const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copyCurrentSupportedN8nPluginFixture(pluginRoot);
+  const transitions = [];
+  const repaired = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+    testHooks: {
+      afterN8nPreTransactionRegistration() {
+        transitions.push('n8n-pre-transaction');
+      },
+      afterN8nRepairTransactionRegistration() {
+        transitions.push('n8n-replacement');
+      },
+      afterN8nEvidencePhaseCreated({ evidence_kind: kind }) {
+        transitions.push(kind);
+      }
+    }
+  });
+  assert.equal(repaired.status, 'repaired', JSON.stringify(repaired));
+  assert.deepEqual(transitions, [
+    'n8n-pre-transaction',
+    'n8n-pre-transaction-phase-10-copied',
+    'n8n-pre-transaction-phase-15-transforming',
+    'n8n-pre-transaction-phase-20-transformed',
+    'n8n-replacement',
+    'n8n-replacement-phase-10-displace',
+    'n8n-replacement-phase-20-displaced',
+    'n8n-replacement-phase-30-install',
+    'n8n-replacement-phase-40-installed',
+    'n8n-replacement-phase-50-verify',
+    'n8n-replacement-phase-60-verified',
+    'n8n-replacement-phase-70-cleanup',
+    'completed'
+  ]);
+  assert.deepEqual(n8nTransactionArtifacts(pluginRoot), []);
+  const after = snapshotTree(path.dirname(pluginRoot));
+  const retryTransitions = [];
+  const retry = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+    testHooks: {
+      afterN8nEvidencePhaseCreated({ evidence_kind: kind }) {
+        retryTransitions.push(kind);
+      }
+    }
+  });
+  assert.equal(retry.status, 'not-needed');
+  assert.deepEqual(retryTransitions, []);
+  assert.deepEqual(snapshotTree(path.dirname(pluginRoot)), after);
+  assert.deepEqual(n8nTransactionArtifacts(pluginRoot), []);
+});
+
 test('Codex n8n interrupted recovery fails closed on malformed, mismatched, or ambiguous evidence', async () => {
   for (const mode of ['malformed', 'mismatched']) {
     const root = tmpRoot();
@@ -6973,11 +7509,13 @@ test('Codex n8n interrupted recovery fails closed on malformed, mismatched, or a
   const oldRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
   const currentRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
   copySupportedN8nPluginFixture(oldRoot);
-  copyCurrentSupportedN8nPluginFixture(currentRoot);
   const oldBefore = snapshotTree(oldRoot);
-  const currentBefore = snapshotTree(currentRoot);
   await waitForAbruptChild(spawnAbruptN8nRepair(oldRoot, '1.0.1', 'afterN8nRepairTransactionRegistration'));
-  await waitForAbruptChild(spawnAbruptN8nRepair(currentRoot, '1.0.2', 'afterN8nRepairTransactionRegistration'));
+  const independentCurrent = await createInterruptedN8nEvidenceFixture(
+    'afterN8nRepairTransactionRegistration'
+  );
+  const currentBefore = snapshotTree(independentCurrent.pluginRoot);
+  relocateInterruptedN8nFixture(independentCurrent, currentRoot);
   const ambiguous = repairThirdPartyCodexPluginHooks({
     codexHome,
     windows: true,
