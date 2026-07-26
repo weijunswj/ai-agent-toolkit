@@ -75,7 +75,7 @@
       "source_path": "weijunswj/ai-cicd-installer:templates/n8n/n8n-workflow-sync-menu.ps1",
       "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/n8n-workflow-sync-menu.ps1",
       "source_blob_sha": "d3f39fb0b5458c617727f062cc2b7ad77c2e171a",
-      "notes": "RestartContainerAfterImport menu guidance adapted to recommend the existing auto-restart option for local Docker imports when restart warnings appear. Repo-root resolution was added after rehome and hardened to refuse filesystem roots so .n8n-local command history is maintained only under a safe repo root instead of under helper folders or drive roots. Toolkit-adapted to resolve import, export, and validation helper commands from the co-located helper folder, canonicalize trusted replay paths, resolve Node explicitly, block old, malformed, or untrusted saved previous-command records, and provide colored section/status output."
+      "notes": "RestartContainerAfterImport menu guidance adapted to recommend the existing auto-restart option for local Docker imports when restart warnings appear. Repo-root resolution was added after rehome and hardened to refuse filesystem roots so .n8n-local command history is maintained only under a safe repo root instead of under helper folders or drive roots. Toolkit-adapted to resolve import, export, and validation helper commands from the co-located helper folder, canonicalize trusted replay paths, resolve Node explicitly, reuse the current absolute PowerShell host on Windows and non-Windows systems, block old, malformed, or untrusted saved previous-command records, and provide colored section/status output."
     },
     {
       "mode": "adapted",
@@ -85,10 +85,11 @@
       "notes": "Toolkit-adapted after migration to skip stale node-ID credential bindings when both node name and node type differ."
     },
     {
-      "mode": "exact",
+      "mode": "adapted",
       "source_path": "weijunswj/ai-cicd-installer:templates/n8n/should-import-n8n-workflow.cjs",
       "project_path": "_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync/should-import-n8n-workflow.cjs",
-      "source_blob_sha": "133ad09249778e1a76ec6a6856da6a6c9f3432b1"
+      "source_blob_sha": "133ad09249778e1a76ec6a6856da6a6c9f3432b1",
+      "notes": "Toolkit-adapted after migration so effective comparison includes credential references, exact resource bindings, webhook metadata, and inactive state while ignoring only host-managed metadata."
     },
     {
       "mode": "adapted",

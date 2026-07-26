@@ -28,8 +28,8 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | Metric | Current value |
 | --- | ---: |
 | projects | 16 |
-| publishedFiles | 236 |
-| declaredOutputFiles | 236 |
+| publishedFiles | 241 |
+| declaredOutputFiles | 241 |
 | packInstalledFiles | 84 |
 | undeclaredPublishedFiles | 0 |
 | packInstalledUndeclared | 0 |
@@ -38,7 +38,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | sharedSurfaceMetadataFindings | 0 |
 | suspiciousPublishedSurfaces | 0 |
 | duplicateProjectContentGroups | 0 |
-| boundaryRecipeOutputs | 236 |
+| boundaryRecipeOutputs | 241 |
 | boundaryRecipeFindings | 0 |
 | curatedDirectoryFindings | 1 |
 
@@ -46,7 +46,7 @@ Current published-file classifications:
 
 | Classification | Count |
 | --- | ---: |
-| declared_generated | 152 |
+| declared_generated | 157 |
 | pack_installed_declared | 84 |
 
 Current boundary recipe classifications:
@@ -64,7 +64,7 @@ Current boundary recipe classifications:
 | curated_template | 2 |
 | curated_template_index | 7 |
 | generated_cross_skill_reference | 3 |
-| main_full_fidelity | 174 |
+| main_full_fidelity | 179 |
 
 Known baseline context:
 
