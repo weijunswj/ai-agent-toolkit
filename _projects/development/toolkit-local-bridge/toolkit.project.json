@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.9.7",
+  "version": "2.9.12",
   "version_policy": "semver",
-  "version_notes": "Binds exact n8n transaction evidence bytes and filesystem identities through inventory, mutation, append-only progression, and identity-bound cleanup.",
+  "version_notes": "Publishes dedicated local n8n export identity resolution and deterministic transaction-race coverage across Toolkit helper surfaces.",
   "outputs": [
     {
       "kind": "curated",
