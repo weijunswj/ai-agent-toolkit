@@ -14,6 +14,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+
       - name: Render advisory source update plan
         run: node repo/scripts/watch-project-sources.cjs >> "$GITHUB_STEP_SUMMARY"
 

@@ -1,0 +1,208 @@
+{
+  "manifest_version": "1.0.0",
+  "policy_version": "2.0.0",
+  "entries": [
+    {
+      "fixture": "invalid-no-parent.json",
+      "kind": "isolated",
+      "target_code": "GOV001",
+      "expected_tuples": [
+        {"code": "GOV001", "severity": "error", "group": "parent_tracker", "subject": null, "message_key": "no_canonical_parent"}
+      ]
+    },
+    {
+      "fixture": "invalid-multiple-parents.json",
+      "kind": "isolated",
+      "target_code": "GOV002",
+      "expected_tuples": [
+        {"code": "GOV002", "severity": "error", "group": "parent_tracker", "subject": null, "message_key": "multiple_canonical_parents"}
+      ]
+    },
+    {
+      "fixture": "invalid-child-absent-from-parent.json",
+      "kind": "isolated",
+      "target_code": "GOV005",
+      "expected_tuples": [
+        {"code": "GOV005", "severity": "error", "group": "parent_child_link", "subject": "S2", "message_key": "child_absent_from_parent_checklist"}
+      ]
+    },
+    {
+      "fixture": "invalid-one-way-link.json",
+      "kind": "isolated",
+      "target_code": "GOV006",
+      "expected_tuples": [
+        {"code": "GOV006", "severity": "error", "group": "parent_child_link", "subject": "S2", "message_key": "not_bidirectional"}
+      ]
+    },
+    {
+      "fixture": "invalid-checked-parent-incomplete-child.json",
+      "kind": "isolated",
+      "target_code": "GOV007",
+      "expected_tuples": [
+        {"code": "GOV007", "severity": "error", "group": "completion_consistency", "subject": "S1", "message_key": "checked_parent_incomplete_acceptance"}
+      ]
+    },
+    {
+      "fixture": "invalid-closed-child-incomplete-acceptance.json",
+      "kind": "isolated",
+      "target_code": "GOV008",
+      "expected_tuples": [
+        {"code": "GOV008", "severity": "error", "group": "completion_consistency", "subject": "S2", "message_key": "closed_incomplete_acceptance"}
+      ]
+    },
+    {
+      "fixture": "invalid-complete-child-unchecked-parent.json",
+      "kind": "isolated",
+      "target_code": "GOV009",
+      "expected_tuples": [
+        {"code": "GOV009", "severity": "warning", "group": "completion_consistency", "subject": "S2", "message_key": "closed_unchecked_parent"}
+      ]
+    },
+    {
+      "fixture": "invalid-missing-status.json",
+      "kind": "isolated",
+      "target_code": "GOV010",
+      "expected_tuples": [
+        {"code": "GOV010", "severity": "error", "group": "required_sections", "subject": "S2", "message_key": "missing_current_status"}
+      ]
+    },
+    {
+      "fixture": "invalid-missing-timestamp.json",
+      "kind": "isolated",
+      "target_code": "GOV011",
+      "expected_tuples": [
+        {"code": "GOV011", "severity": "error", "group": "required_sections", "subject": "S2", "message_key": "missing_timestamp"}
+      ]
+    },
+    {
+      "fixture": "invalid-duplicate-timestamp.json",
+      "kind": "isolated",
+      "target_code": "GOV012",
+      "expected_tuples": [
+        {"code": "GOV012", "severity": "error", "group": "required_sections", "subject": "S2", "message_key": "multiple_timestamps"}
+      ]
+    },
+    {
+      "fixture": "invalid-malformed-timestamp.json",
+      "kind": "isolated",
+      "target_code": "GOV013",
+      "expected_tuples": [
+        {"code": "GOV013", "severity": "warning", "group": "required_sections", "subject": "S2", "message_key": "malformed_timestamp"}
+      ]
+    },
+    {
+      "fixture": "invalid-missing-why.json",
+      "kind": "isolated",
+      "target_code": "GOV014",
+      "expected_tuples": [
+        {"code": "GOV014", "severity": "error", "group": "required_sections", "subject": "S2", "message_key": "missing_why_section"}
+      ]
+    },
+    {
+      "fixture": "invalid-missing-acceptance.json",
+      "kind": "isolated",
+      "target_code": "GOV016",
+      "expected_tuples": [
+        {"code": "GOV016", "severity": "error", "group": "required_sections", "subject": "S2", "message_key": "missing_acceptance_criteria"}
+      ]
+    },
+    {
+      "fixture": "invalid-superseded-no-reason.json",
+      "kind": "isolated",
+      "target_code": "GOV017",
+      "expected_tuples": [
+        {"code": "GOV017", "severity": "warning", "group": "superseded", "subject": "S1", "message_key": "no_reason_or_successor"}
+      ]
+    },
+    {
+      "fixture": "invalid-pr-merge-completion.json",
+      "kind": "isolated",
+      "target_code": "GOV018",
+      "expected_tuples": [
+        {"code": "GOV018", "severity": "error", "group": "anti_patterns", "subject": "S2", "message_key": "pr_merge_as_completion"}
+      ]
+    },
+    {
+      "fixture": "invalid-implementer-acceptance.json",
+      "kind": "isolated",
+      "target_code": "GOV019",
+      "expected_tuples": [
+        {"code": "GOV019", "severity": "error", "group": "anti_patterns", "subject": "S2", "message_key": "implementer_self_acceptance"}
+      ]
+    },
+    {
+      "fixture": "invalid-drift-policy-version.json",
+      "kind": "isolated",
+      "target_code": "GOV020",
+      "expected_tuples": [
+        {"code": "GOV020", "severity": "warning", "group": "policy_drift", "subject": null, "message_key": "policy_version_drift"}
+      ]
+    },
+    {
+      "fixture": "valid-unknown-mode.json",
+      "kind": "isolated",
+      "target_code": "GOV021",
+      "expected_tuples": [
+        {"code": "GOV021", "severity": "warning", "group": "governance_mode", "subject": null, "message_key": "unknown_governance_mode"}
+      ]
+    },
+    {
+      "fixture": "invalid-multiple-impl-prs.json",
+      "kind": "isolated",
+      "target_code": "GOV022",
+      "expected_tuples": [
+        {"code": "GOV022", "severity": "error", "group": "implementation_pr", "subject": "S2", "message_key": "multiple_active_prs"}
+      ]
+    },
+    {
+      "fixture": "invalid-replacement-no-reason.json",
+      "kind": "isolated",
+      "target_code": "GOV024",
+      "expected_tuples": [
+        {"code": "GOV024", "severity": "error", "group": "implementation_pr", "subject": "S2", "message_key": "no_replacement_reason"}
+      ]
+    },
+    {
+      "fixture": "invalid-duplicate-id.json",
+      "kind": "isolated",
+      "target_code": "GOV025",
+      "expected_tuples": [
+        {"code": "GOV025", "severity": "error", "group": "identity", "subject": null, "message_key": "duplicate_identity"}
+      ]
+    },
+    {
+      "fixture": "invalid-parent-not-category.json",
+      "kind": "isolated",
+      "target_code": "GOV026",
+      "expected_tuples": [
+        {"code": "GOV026", "severity": "error", "group": "parent_tracker", "subject": null, "message_key": "canonical_parent_not_found"}
+      ]
+    },
+    {
+      "fixture": "adversarial-fabricated-checklist.json",
+      "kind": "isolated",
+      "target_code": "GOV027",
+      "expected_tuples": [
+        {"code": "GOV027", "severity": "error", "group": "body_authority", "subject": "S1", "message_key": "checklist_contradiction"}
+      ]
+    },
+    {
+      "fixture": "valid-full.json",
+      "kind": "isolated",
+      "target_code": null,
+      "expected_tuples": []
+    },
+    {
+      "fixture": "valid-no-op.json",
+      "kind": "isolated",
+      "target_code": null,
+      "expected_tuples": []
+    },
+    {
+      "fixture": "valid-replacement-with-reason.json",
+      "kind": "isolated",
+      "target_code": null,
+      "expected_tuples": []
+    }
+  ]
+}

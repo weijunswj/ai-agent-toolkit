@@ -163,35 +163,37 @@ node repo/scripts/audit-issue-governance.cjs --input <snapshot.json> --format hu
 
 ## Stable Finding Codes
 
-| Code | Severity | Description |
-|------|----------|-------------|
-| GOV001 | error | toolkit-governed repository with no declared canonical parent |
-| GOV002 | error | toolkit-governed repository with more than one canonical parent |
-| GOV003 | warning | parent checklist entry with no linked child |
-| GOV004 | error | active child with no parent link |
-| GOV005 | error | active child absent from its declared parent checklist |
-| GOV006 | error | parent/child link that is not bidirectional |
-| GOV007 | error | checked parent item while the child remains open or acceptance is incomplete |
-| GOV008 | error | closed child with unchecked acceptance criteria |
-| GOV009 | warning | closed child whose parent item remains unchecked or materially stale |
-| GOV010 | error | missing current status |
-| GOV011 | error | missing reconciliation timestamp |
-| GOV012 | error | more than one reconciliation timestamp |
-| GOV013 | warning | malformed reconciliation timestamp |
-| GOV014 | error | missing `Why this issue exists` section |
-| GOV015 | error | missing required child tracking dimensions |
-| GOV016 | error | missing acceptance criteria |
-| GOV017 | warning | superseded/duplicate/not-planned issue without a reason or successor |
-| GOV018 | error | body or fixture explicitly treats PR merge as sufficient completion |
-| GOV019 | error | implementer record or fixture claims independent acceptance without controller authority |
-| GOV020 | warning | policy version drift between snapshot and canonical policy |
-| GOV021 | warning | unknown governance mode requires selection |
-| GOV022 | error | multiple active implementation PRs for one issue |
-| GOV023 | error | implementation branch and body metadata disagree |
-| GOV024 | error | replacement PR without recorded exceptional reason or supersession |
-| GOV025 | error | duplicate issue ID |
-| GOV026 | error | canonical parent identifier points to missing or non-parent issue |
-| GOV027 | error | structured derived field contradicts body content |
+| Code | Severity | Group | Description |
+|------|----------|-------|-------------|
+| GOV001 | error | parent_tracker | Toolkit-governed repository with no canonical parent issue |
+| GOV002 | error | parent_tracker | Toolkit-governed repository with more than one canonical parent |
+| GOV003 | warning | parent_child_link | Parent checklist entry with no linked child |
+| GOV004 | error | parent_child_link | Active child with no parent link |
+| GOV005 | error | parent_child_link | Active child absent from parent checklist or parent not found |
+| GOV006 | error | parent_child_link | Parent/child link not bidirectional |
+| GOV007 | error | completion_consistency | Checked parent item while child remains open or acceptance incomplete |
+| GOV008 | error | completion_consistency | Closed child with unchecked acceptance criteria |
+| GOV009 | warning | completion_consistency | Closed child's parent item unchecked |
+| GOV010 | error | required_sections | Missing Current status section |
+| GOV011 | error | required_sections | Missing reconciliation timestamp |
+| GOV012 | error | required_sections | Multiple reconciliation timestamps |
+| GOV013 | warning | required_sections | Malformed or invalid reconciliation timestamp |
+| GOV014 | error | required_sections | Missing "Why this issue exists" section |
+| GOV015 | error | required_sections | Missing required tracking dimension |
+| GOV016 | error | required_sections | Missing Acceptance criteria section |
+| GOV017 | warning | superseded | Superseded/duplicate/not-planned without reason or successor |
+| GOV018 | error | anti_patterns | PR merge treated as sufficient completion (non-negated) |
+| GOV019 | error | anti_patterns | Implementer claims independent acceptance (non-negated) |
+| GOV020 | warning | policy_drift | Snapshot policy version differs from canonical |
+| GOV021 | warning | governance_mode | Unknown governance mode requires selection |
+| GOV022 | error | implementation_pr | Multiple active (draft/open) implementation PRs |
+| GOV023 | error | implementation_pr | Implementation branch/PR body metadata disagreement |
+| GOV024 | error | implementation_pr | Replacement PR without reason or supersedes_pr |
+| GOV025 | error | identity | Duplicate issue identity |
+| GOV026 | error | parent_tracker | Canonical parent identifier absent, unresolved, or mismatched |
+| GOV027 | error | body_authority | Structured derived field contradicts body content |
+
+Policy version: `2.0.0` (unmerged pre-release correction).
 
 ## Source / Generated Ownership
 

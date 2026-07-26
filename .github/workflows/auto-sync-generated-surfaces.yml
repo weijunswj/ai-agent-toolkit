@@ -164,6 +164,11 @@ jobs:
         with:
           node-version: 20
 
+      - name: Install locked dependencies
+        if: steps.preflight.outputs.should_sync == 'true'
+        run: npm ci --ignore-scripts
+        working-directory: ${{ github.workspace }}/trusted
+
       - name: Sync deterministic generated surfaces
         if: steps.preflight.outputs.should_sync == 'true'
         run: |

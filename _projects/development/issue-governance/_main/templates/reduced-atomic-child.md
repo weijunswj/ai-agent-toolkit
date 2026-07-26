@@ -27,6 +27,8 @@ Last reconciled: **DD Month YYYY, HH:mm SGT**
 Parent tracker: #<parent_issue>
 Implementation branch: <branch_name> or `null`
 Implementation PR: #<pr_number> or `Not opened`
+Replacement reason: <reason> (conditional — omit if not a replacement PR)
+Supersedes PR: #<pr_number> (conditional — omit if not a replacement PR)
 Depends on: #<issue_number> or `none`
 Blocks: #<issue_number> or `none`
 Related: #<issue_number> or `none`

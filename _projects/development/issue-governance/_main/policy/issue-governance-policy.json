@@ -5,7 +5,7 @@
   "policy_version_policy": "semver",
   "title": "Toolkit Global Issue-Governance Standard",
   "description": "Canonical machine-readable policy for Toolkit-governed repository issue tracking.",
-  "effective_date": "2026-07-25",
+  "effective_date": "2026-07-26",
   "authority": "Issue #299 — TK-032",
   "governance_modes": {
     "toolkit_governed": {
@@ -89,36 +89,368 @@
       "Replacement PRs require recorded exceptional reason and explicit supersession.",
       "Body and structured implementation-PR metadata must agree.",
       "Research, architecture-only and recurring-evidence issues are not required to have implementation PRs."
-    ]
+    ],
+    "states": ["draft", "open", "closed", "merged"],
+    "active_states": ["draft", "open"],
+    "terminal_states": ["closed", "merged"],
+    "max_active": 1
   },
   "finding_codes": {
-    "GOV001": "toolkit_governed_no_canonical_parent",
-    "GOV002": "toolkit_governed_multiple_canonical_parents",
-    "GOV003": "parent_checklist_entry_no_linked_child",
-    "GOV004": "active_child_no_parent_link",
-    "GOV005": "active_child_absent_from_parent_checklist",
-    "GOV006": "parent_child_link_not_bidirectional",
-    "GOV007": "checked_parent_incomplete_child",
-    "GOV008": "closed_child_incomplete_acceptance",
-    "GOV009": "closed_child_parent_unchecked_or_stale",
-    "GOV010": "missing_current_status",
-    "GOV011": "missing_reconciliation_timestamp",
-    "GOV012": "multiple_reconciliation_timestamps",
-    "GOV013": "malformed_reconciliation_timestamp",
-    "GOV014": "missing_why_section",
-    "GOV015": "missing_required_tracking_dimensions",
-    "GOV016": "missing_acceptance_criteria",
-    "GOV017": "superseded_no_reason_or_successor",
-    "GOV018": "pr_merge_treated_as_completion",
-    "GOV019": "implementer_claims_independent_acceptance",
-    "GOV020": "policy_version_drift",
-    "GOV021": "unknown_governance_mode_requires_selection",
-    "GOV022": "multiple_active_implementation_prs",
-    "GOV023": "implementation_branch_body_metadata_disagree",
-    "GOV024": "replacement_pr_without_reason",
-    "GOV025": "duplicate_issue_id",
-    "GOV026": "canonical_parent_not_found_or_not_parent",
-    "GOV027": "contradictory_derived_field"
+    "GOV001": {
+      "description": "toolkit_governed_no_canonical_parent",
+      "severity": "error",
+      "group": "parent_tracker",
+      "messages": {
+        "no_canonical_parent": {
+          "template": "Toolkit-governed repository has no declared canonical parent tracker.",
+          "context": {}
+        }
+      }
+    },
+    "GOV002": {
+      "description": "toolkit_governed_multiple_canonical_parents",
+      "severity": "error",
+      "group": "parent_tracker",
+      "messages": {
+        "multiple_canonical_parents": {
+          "template": "Toolkit-governed repository has {count} canonical parent trackers.",
+          "context": {
+            "count": { "type": "integer", "minimum": 0, "maximum": 10000 }
+          }
+        }
+      }
+    },
+    "GOV003": {
+      "description": "parent_checklist_entry_no_linked_child",
+      "severity": "warning",
+      "group": "parent_child_link",
+      "messages": {
+        "no_linked_child": {
+          "template": "Parent checklist entry has no linked child.",
+          "context": {}
+        }
+      }
+    },
+    "GOV004": {
+      "description": "active_child_no_parent_link",
+      "severity": "error",
+      "group": "parent_child_link",
+      "messages": {
+        "no_parent_link": {
+          "template": "Child issue has no parent link.",
+          "context": {}
+        }
+      }
+    },
+    "GOV005": {
+      "description": "active_child_absent_from_parent_checklist",
+      "severity": "error",
+      "group": "parent_child_link",
+      "messages": {
+        "child_absent_from_parent_checklist": {
+          "template": "Children absent from parent body checklist.",
+          "context": {}
+        },
+        "parent_not_found": {
+          "template": "Child parent not found in issues.",
+          "context": {}
+        }
+      }
+    },
+    "GOV006": {
+      "description": "parent_child_link_not_bidirectional",
+      "severity": "error",
+      "group": "parent_child_link",
+      "messages": {
+        "not_bidirectional": {
+          "template": "Parent children array does not list this child.",
+          "context": {}
+        }
+      }
+    },
+    "GOV007": {
+      "description": "checked_parent_incomplete_child",
+      "severity": "error",
+      "group": "completion_consistency",
+      "messages": {
+        "checked_parent_open_child": {
+          "template": "Parent item is checked but child is still open.",
+          "context": {}
+        },
+        "checked_parent_incomplete_acceptance": {
+          "template": "Parent item is checked but child has incomplete acceptance.",
+          "context": {}
+        }
+      }
+    },
+    "GOV008": {
+      "description": "closed_child_incomplete_acceptance",
+      "severity": "error",
+      "group": "completion_consistency",
+      "messages": {
+        "closed_incomplete_acceptance": {
+          "template": "Closed child has unchecked acceptance criteria.",
+          "context": {}
+        }
+      }
+    },
+    "GOV009": {
+      "description": "closed_child_parent_unchecked_or_stale",
+      "severity": "warning",
+      "group": "completion_consistency",
+      "messages": {
+        "closed_unchecked_parent": {
+          "template": "Closed child's parent item is not checked.",
+          "context": {}
+        }
+      }
+    },
+    "GOV010": {
+      "description": "missing_current_status",
+      "severity": "error",
+      "group": "required_sections",
+      "messages": {
+        "missing_current_status": {
+          "template": "Missing Current status section.",
+          "context": {}
+        }
+      }
+    },
+    "GOV011": {
+      "description": "missing_reconciliation_timestamp",
+      "severity": "error",
+      "group": "required_sections",
+      "messages": {
+        "missing_timestamp": {
+          "template": "Missing reconciliation timestamp.",
+          "context": {}
+        }
+      }
+    },
+    "GOV012": {
+      "description": "multiple_reconciliation_timestamps",
+      "severity": "error",
+      "group": "required_sections",
+      "messages": {
+        "multiple_timestamps": {
+          "template": "Multiple reconciliation timestamps found ({count}).",
+          "context": {
+            "count": { "type": "integer", "minimum": 2, "maximum": 10000 }
+          }
+        }
+      }
+    },
+    "GOV013": {
+      "description": "malformed_reconciliation_timestamp",
+      "severity": "warning",
+      "group": "required_sections",
+      "messages": {
+        "malformed_timestamp": {
+          "template": "Timestamp is present but malformed.",
+          "context": {}
+        },
+        "impossible_date": {
+          "template": "Timestamp contains an invalid date or time.",
+          "context": {}
+        }
+      }
+    },
+    "GOV014": {
+      "description": "missing_why_section",
+      "severity": "error",
+      "group": "required_sections",
+      "messages": {
+        "missing_why_section": {
+          "template": "Missing \"Why this issue exists\" section.",
+          "context": {}
+        }
+      }
+    },
+    "GOV015": {
+      "description": "missing_required_tracking_dimensions",
+      "severity": "error",
+      "group": "required_sections",
+      "messages": {
+        "missing_dimension": {
+          "template": "Missing required tracking dimension.",
+          "context": {}
+        }
+      }
+    },
+    "GOV016": {
+      "description": "missing_acceptance_criteria",
+      "severity": "error",
+      "group": "required_sections",
+      "messages": {
+        "missing_acceptance_criteria": {
+          "template": "Missing Acceptance criteria section.",
+          "context": {}
+        }
+      }
+    },
+    "GOV017": {
+      "description": "superseded_no_reason_or_successor",
+      "severity": "warning",
+      "group": "superseded",
+      "messages": {
+        "no_reason_or_successor": {
+          "template": "Issue is superseded/duplicate/not-planned but has no reason or successor.",
+          "context": {}
+        }
+      }
+    },
+    "GOV018": {
+      "description": "pr_merge_treated_as_completion",
+      "severity": "error",
+      "group": "anti_patterns",
+      "messages": {
+        "pr_merge_as_completion": {
+          "template": "Issue body treats PR merge as sufficient completion.",
+          "context": {}
+        }
+      }
+    },
+    "GOV019": {
+      "description": "implementer_claims_independent_acceptance",
+      "severity": "error",
+      "group": "anti_patterns",
+      "messages": {
+        "implementer_self_acceptance": {
+          "template": "Issue body contains implementer self-acceptance claim.",
+          "context": {}
+        }
+      }
+    },
+    "GOV020": {
+      "description": "policy_version_drift",
+      "severity": "warning",
+      "group": "policy_drift",
+      "messages": {
+        "policy_version_drift": {
+          "template": "Snapshot policy version differs from canonical policy.",
+          "context": {}
+        }
+      }
+    },
+    "GOV021": {
+      "description": "unknown_governance_mode_requires_selection",
+      "severity": "warning",
+      "group": "governance_mode",
+      "messages": {
+        "unknown_governance_mode": {
+          "template": "Governance mode is unknown. Repository must select a governance mode.",
+          "context": {}
+        }
+      }
+    },
+    "GOV022": {
+      "description": "multiple_active_implementation_prs",
+      "severity": "error",
+      "group": "implementation_pr",
+      "messages": {
+        "multiple_active_prs": {
+          "template": "Issue has {count} active implementation PRs.",
+          "context": {
+            "count": { "type": "integer", "minimum": 2, "maximum": 10000 }
+          }
+        }
+      }
+    },
+    "GOV023": {
+      "description": "implementation_branch_body_metadata_disagree",
+      "severity": "error",
+      "group": "implementation_pr",
+      "messages": {
+        "branch_disagree": {
+          "template": "Structured implementation branch disagrees with body.",
+          "context": {}
+        },
+        "pr_disagree": {
+          "template": "Implementation PR metadata disagrees with body.",
+          "context": {}
+        },
+        "body_not_opened_but_pr_exists": {
+          "template": "Body states Implementation PR: Not opened but PR record exists.",
+          "context": {}
+        },
+        "body_pr_not_in_structured": {
+          "template": "Body identifies an implementation PR but no matching structured record exists.",
+          "context": {}
+        },
+        "missing_body_implementation_pr": {
+          "template": "Implementation-work issue is missing required Implementation PR body metadata.",
+          "context": {}
+        }
+      }
+    },
+    "GOV024": {
+      "description": "replacement_pr_without_reason",
+      "severity": "error",
+      "group": "implementation_pr",
+      "messages": {
+        "no_replacement_reason": {
+          "template": "Replacement PR has no recorded exceptional reason.",
+          "context": {}
+        },
+        "no_supersedes_pr": {
+          "template": "Replacement PR has no supersedes_pr.",
+          "context": {}
+        }
+      }
+    },
+    "GOV025": {
+      "description": "duplicate_issue_id",
+      "severity": "error",
+      "group": "identity",
+      "messages": {
+        "duplicate_identity": {
+          "template": "Duplicate issue identity detected. Two or more issues resolve to the same canonical identifier.",
+          "context": {}
+        }
+      }
+    },
+    "GOV026": {
+      "description": "canonical_parent_not_found_or_not_parent",
+      "severity": "error",
+      "group": "parent_tracker",
+      "messages": {
+        "canonical_parent_not_found": {
+          "template": "Declared canonical_parent_tracker identifier is absent, unresolved, targets a non-parent issue or contradicts the uniquely identified canonical parent.",
+          "context": {}
+        }
+      }
+    },
+    "GOV027": {
+      "description": "contradictory_derived_field",
+      "severity": "error",
+      "group": "body_authority",
+      "messages": {
+        "checklist_contradiction": {
+          "template": "Structured checklist contradicts body.",
+          "context": {}
+        },
+        "children_contradiction": {
+          "template": "Structured children array contradicts body checklist.",
+          "context": {}
+        },
+        "reconciliation_contradiction": {
+          "template": "Structured reconciliation timestamp contradicts body.",
+          "context": {}
+        },
+        "acceptance_contradiction": {
+          "template": "Structured acceptance_criteria_met contradicts body.",
+          "context": {}
+        },
+        "parent_contradiction": {
+          "template": "Structured parent contradicts body Parent tracker line.",
+          "context": {}
+        },
+        "replacement_contradiction": {
+          "template": "Replacement metadata contradicts body or is structurally invalid.",
+          "context": {}
+        }
+      }
+    }
   },
   "exit_codes": { "0": "audit_no_violations", "1": "audit_violations_found", "2": "input_schema_or_execution_failure" }
 }

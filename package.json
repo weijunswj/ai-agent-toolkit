@@ -18,13 +18,16 @@
     "check:source-updates": "node repo/scripts/check-project-source-updates.cjs",
     "test:design": "node repo/scripts/run-design-tests.cjs",
     "test:bridge": "node --test repo/tests/toolkit-local-bridge.test.cjs",
-    "validate:all": "node repo/scripts/sync-repo-doc-contract.cjs --check && node repo/scripts/sync-toolkit-projects.cjs --check && node repo/scripts/audit-project-source-locks.cjs && node repo/scripts/audit-published-surfaces.cjs --check && node repo/scripts/audit-fallback-risk.cjs && node repo/scripts/validate-toolkit.cjs && node --test repo/tests/*.test.cjs && node repo/scripts/package-skills.cjs --check && node repo/scripts/audit-skill-portability.cjs && node repo/scripts/package-packs.cjs --check && node repo/scripts/run-design-tests.cjs && git diff --check",
+    "audit:issue-governance": "node repo/scripts/audit-issue-governance.cjs",
+    "test:workflow-inventory": "node repo/scripts/check-workflow-inventory.cjs",
+    "validate:all": "node repo/scripts/sync-repo-doc-contract.cjs --check && node repo/scripts/sync-toolkit-projects.cjs --check && node repo/scripts/audit-project-source-locks.cjs && node repo/scripts/audit-published-surfaces.cjs --check && node repo/scripts/audit-fallback-risk.cjs && node repo/scripts/validate-toolkit.cjs && node --test repo/tests/*.test.cjs && node repo/scripts/package-skills.cjs --check && node repo/scripts/audit-skill-portability.cjs && node repo/scripts/package-packs.cjs --check && node repo/scripts/run-design-tests.cjs && node repo/scripts/check-issue-governance-parity.cjs && node repo/scripts/check-workflow-inventory.cjs && git diff --check",
     "package:skills:check": "node repo/scripts/package-skills.cjs --check",
     "package:packs:check": "node repo/scripts/package-packs.cjs --check",
     "safe-source-update": "node repo/scripts/safe-source-update.cjs"
   },
   "license": "UNLICENSED",
   "dependencies": {
-    "ajv": "8.20.0"
+    "ajv": "8.20.0",
+    "yaml": "2.7.0"
   }
 }
