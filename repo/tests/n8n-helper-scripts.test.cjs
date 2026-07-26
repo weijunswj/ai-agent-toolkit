@@ -2445,6 +2445,104 @@ test('PowerShell n8n import and export scratch directories are rooted under reso
   }
 });
 
+test('PowerShell export resolves dedicated local workflow identity before any name fallback', () => {
+  for (const [label, filePath] of [
+    ['workflow toolkit export helper', path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1')],
+    ['generated export helper', path.join(scriptDir, 'export-n8n-workflows-live.ps1')],
+    ['Secure CI/CD export helper', path.join(secureCicdN8nTemplateDir, 'export-n8n-workflows-live.ps1')],
+  ]) {
+    const text = readText(filePath);
+    assert.match(text, /\[string\]\$WorkflowIdentityFile = "\.n8n-local\/n8n-workflow-identities\.json"/, label);
+    assert.match(text, /"resolve-export"[\s\S]*"--workflow-file", \$WorkflowFile\.Name[\s\S]*"--workflow-name", \$WorkflowName/, label);
+    assert.match(text, /HasDedicatedIdentity = -not \[string\]::IsNullOrWhiteSpace\(\$dedicatedWorkflowId\)/, label);
+    assert.match(text, /Dedicated local target workflow identity no longer exists; refusing a same-name fallback\./, label);
+    assert.doesNotMatch(text, /Write-Step "FOUND" "[^"]*live id/, label);
+
+    const validateIndex = text.lastIndexOf('\nAssert-WorkflowIdentityStateReadable\n');
+    const localResolutionIndex = text.indexOf('$repoWorkflowInfos += Read-RepoWorkflowInfo $workflowFile', validateIndex);
+    const livePreflightIndex = text.indexOf('\nInvoke-LivePreflight\n', validateIndex);
+    assert.ok(
+      validateIndex >= 0 && localResolutionIndex > validateIndex && livePreflightIndex > localResolutionIndex,
+      `${label}: identity state and every file-to-target identity must be admitted before live discovery`
+    );
+    const resolverStart = text.indexOf('function Resolve-LiveMatch');
+    const dedicatedMissingIndex = text.indexOf('if ($RepoWorkflow.HasDedicatedIdentity)', resolverStart);
+    const nameFallbackIndex = text.indexOf('$nameMatches = @(', resolverStart);
+    assert.ok(resolverStart >= 0 && dedicatedMissingIndex > resolverStart && nameFallbackIndex > dedicatedMissingIndex, `${label}: dedicated identity must be authoritative before name fallback`);
+    const allLiveIndex = text.indexOf('$existingFiles = @($workflowFiles)');
+    const nameGroupingGuard = text.indexOf('if (-not $workflowInfo.HasDedicatedIdentity)', allLiveIndex);
+    assert.ok(allLiveIndex >= 0 && nameGroupingGuard > allLiveIndex, `${label}: AllLive name fallback must exclude dedicated identities`);
+  }
+});
+
+test('PowerShell export keeps a renamed dedicated target authoritative over an old-name replacement', { skip: !findPowerShell() }, () => {
+  const shell = findPowerShell();
+  const fixtureRoot = tempDir();
+  const harnessPath = path.join(fixtureRoot, 'export-identity-match-harness.ps1');
+  fs.writeFileSync(harnessPath, `
+$ErrorActionPreference = "Stop"
+$sourceFile = ${psSingleQuoted(path.join(sourceScriptDir, 'export-n8n-workflows-live.ps1'))}
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($sourceFile, [ref]$tokens, [ref]$errors)
+if ($errors.Count -gt 0) {
+  throw "Could not parse source helper: $($errors[0].Message)"
+}
+$resolver = $ast.Find({
+  param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq "Resolve-LiveMatch"
+}, $true)
+Invoke-Expression $resolver.Extent.Text
+$IncludeArchived = $false
+$PublishedOnly = $false
+$repoWorkflow = [PSCustomObject]@{
+  Id = "synthetic-dedicated-target"
+  Name = "Canonical Name"
+  HasDedicatedIdentity = $true
+}
+$oldNameReplacement = [PSCustomObject]@{
+  id = "synthetic-other-target"
+  name = "Canonical Name"
+  isArchived = $false
+}
+$renamedDedicatedTarget = [PSCustomObject]@{
+  id = "synthetic-dedicated-target"
+  name = "Renamed Target"
+  isArchived = $false
+}
+$missing = Resolve-LiveMatch $repoWorkflow @($oldNameReplacement)
+$found = Resolve-LiveMatch $repoWorkflow @($oldNameReplacement, $renamedDedicatedTarget)
+$fallback = Resolve-LiveMatch ([PSCustomObject]@{
+  Id = ""
+  Name = "Canonical Name"
+  HasDedicatedIdentity = $false
+}) @($oldNameReplacement)
+[PSCustomObject]@{
+  missingStatus = $missing.Status
+  missingMessage = $missing.Message
+  foundStatus = $found.Status
+  foundName = $found.Workflow.name
+  fallbackStatus = $fallback.Status
+  fallbackName = $fallback.Workflow.name
+} | ConvertTo-Json -Compress
+`, 'utf8');
+
+  const result = spawnSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', harnessPath], {
+    cwd: fixtureRoot,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  const resolved = JSON.parse(result.stdout.trim());
+  assert.equal(resolved.missingStatus, 'Missing');
+  assert.match(resolved.missingMessage, /refusing a same-name fallback/);
+  assert.equal(resolved.foundStatus, 'Found');
+  assert.equal(resolved.foundName, 'Renamed Target');
+  assert.equal(resolved.fallbackStatus, 'Found');
+  assert.equal(resolved.fallbackName, 'Canonical Name');
+  assert.doesNotMatch(result.stdout + result.stderr, /synthetic-(?:dedicated|other)-target/);
+  fs.rmSync(fixtureRoot, { recursive: true, force: true });
+});
+
 test('PowerShell n8n helper scripts keep local staging and history at repo root after rehome', () => {
   const sanitizerText = readText(path.join(sanitizerDir, 'sanitise-n8n-template.ps1'));
   assert.match(sanitizerText, /function Resolve-RepoRootFromScript/);

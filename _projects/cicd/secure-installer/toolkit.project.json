@@ -5,9 +5,9 @@
   "title": "Secure CI/CD Installer",
   "module_path": "_projects/cicd/secure-installer",
   "main_path": "_projects/cicd/secure-installer/_main",
-  "version": "1.2.7",
+  "version": "1.2.8",
   "version_policy": "semver",
-  "version_notes": "Keeps bundled n8n helpers aligned with fail-closed existing-target handling, preserved manual candidate batches, and exclusive missing-file creation.",
+  "version_notes": "Keeps bundled n8n helpers aligned with dedicated local export identity resolution and deterministic fail-closed transaction coverage.",
   "outputs": [
     {
       "kind": "curated",

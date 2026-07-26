@@ -1309,6 +1309,51 @@ test('dedicated local workflow identity makes unchanged reruns deterministic wit
   fs.rmSync(fixtureRoot, { recursive: true, force: true });
 });
 
+test('export resolves a dedicated local workflow identity internally before any name fallback', () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-export-identity-'));
+  const statePath = path.join(fixtureRoot, '.n8n-local', 'n8n-workflow-identities.json');
+  const identityScript = path.join(helperRoot, 'n8n-workflow-identity.cjs');
+  identities.recordIdentity(statePath, {
+    workflowFile: 'portable.json',
+    workflowName: 'Portable Sheets Intake',
+    targetWorkflowId: 'synthetic-renamed-target-id',
+  }, fixtureRoot);
+
+  const resolved = spawnSync(process.execPath, [
+    identityScript,
+    'resolve-export',
+    '--state', statePath,
+    '--repo-root', fixtureRoot,
+    '--workflow-file', 'portable.json',
+    '--workflow-name', 'Portable Sheets Intake',
+  ], { cwd: fixtureRoot, encoding: 'utf8' });
+  assert.equal(resolved.status, 0, resolved.stderr);
+  assert.deepEqual(JSON.parse(resolved.stdout), {
+    workflowFile: 'portable.json',
+    workflowName: 'Portable Sheets Intake',
+    targetWorkflowId: 'synthetic-renamed-target-id',
+  });
+  assert.equal(resolved.stderr, '');
+
+  const absent = spawnSync(process.execPath, [
+    identityScript,
+    'resolve-export',
+    '--state', statePath,
+    '--repo-root', fixtureRoot,
+    '--workflow-file', 'other.json',
+    '--workflow-name', 'Other workflow',
+  ], { cwd: fixtureRoot, encoding: 'utf8' });
+  assert.equal(absent.status, 0, absent.stderr);
+  assert.deepEqual(JSON.parse(absent.stdout), {
+    workflowFile: '',
+    workflowName: '',
+    targetWorkflowId: '',
+  });
+  assert.equal(absent.stderr, '');
+
+  fs.rmSync(fixtureRoot, { recursive: true, force: true });
+});
+
 test('workflow identity rejects case-folded file collisions and verifies exact file and workflow identity', () => {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-identity-case-'));
   const statePath = path.join(fixtureRoot, '.n8n-local', 'n8n-workflow-identities.json');
@@ -1811,22 +1856,69 @@ test('external hard-link aliases are never mutated by changed canonical targets'
   }
 });
 
-test('different-inode and non-file replacements after admission survive fail-closed detection', async (t) => {
+test('deterministically distinct and non-file replacements after admission survive fail-closed detection', async (t) => {
   const cases = [
-    ['different bytes', (record) => fs.writeFileSync(record.target, 'external-different\n')],
-    ['identical bytes and different object', (record) => fs.writeFileSync(record.target, 'original\n')],
-    ['directory', (record) => fs.mkdirSync(record.target)],
-    ['hard link', (record, fixtureRoot) => {
-      const donor = path.join(fixtureRoot, 'donor.json');
-      fs.writeFileSync(donor, 'external-hard-link\n');
-      fs.linkSync(donor, record.target);
-    }],
+    {
+      label: 'different bytes',
+      replace(record) { fs.writeFileSync(record.target, 'external-different\n'); },
+    },
+    {
+      label: 'identical bytes and deterministically different object',
+      prepare(fixtureRoot) {
+        const donor = path.join(fixtureRoot, 'identical-donor.json');
+        fs.writeFileSync(donor, 'original\n');
+        return donor;
+      },
+      replace(record, fixtureRoot, donor) {
+        fs.linkSync(donor, record.target);
+      },
+      requiresHardLink: true,
+    },
+    {
+      label: 'directory',
+      replace(record) { fs.mkdirSync(record.target); },
+    },
+    {
+      label: 'hard link',
+      prepare(fixtureRoot) {
+        const donor = path.join(fixtureRoot, 'donor.json');
+        fs.writeFileSync(donor, 'external-hard-link\n');
+        return donor;
+      },
+      replace(record, fixtureRoot, donor) {
+        fs.linkSync(donor, record.target);
+      },
+      requiresHardLink: true,
+    },
   ];
-  for (const [label, replacement] of cases) {
-    await t.test(label, () => {
+  for (const fixture of cases) {
+    await t.test(fixture.label, (context) => {
       const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-descriptor-race-'));
       const target = path.join(fixtureRoot, 'workflow.json');
       fs.writeFileSync(target, 'original\n');
+      const originalObject = fs.lstatSync(target, { bigint: true });
+      const preparedReplacement = fixture.prepare?.(fixtureRoot);
+      if (fixture.requiresHardLink) {
+        const probe = path.join(fixtureRoot, 'hard-link-capability-probe');
+        try {
+          fs.linkSync(preparedReplacement, probe);
+          fs.rmSync(probe);
+        } catch (error) {
+          fs.rmSync(fixtureRoot, { recursive: true, force: true });
+          context.skip(`hard-link creation unavailable: ${error.code || error.message}`);
+          return;
+        }
+      }
+      if (preparedReplacement) {
+        const donorObject = fs.lstatSync(preparedReplacement, { bigint: true });
+        if (originalObject.dev !== 0n && originalObject.ino !== 0n && donorObject.dev !== 0n && donorObject.ino !== 0n) {
+          assert.notDeepEqual(
+            [originalObject.dev, originalObject.ino],
+            [donorObject.dev, donorObject.ino],
+            'the replacement donor must coexist with and differ from the admitted target object'
+          );
+        }
+      }
       let expectedExternal;
       const error = expectCode(
         () => exportSync.replaceFilesTransactionally(
@@ -1834,17 +1926,26 @@ test('different-inode and non-file replacements after admission survive fail-clo
           {
             beforeExistingTargetCapabilityDecision(record) {
               fs.rmSync(record.target);
-              replacement(record, fixtureRoot);
-              expectedExternal = fs.lstatSync(record.target);
+              fixture.replace(record, fixtureRoot, preparedReplacement);
+              expectedExternal = fs.lstatSync(record.target, { bigint: true });
             },
           }
         ),
         'N8N_CANONICAL_TRANSACTION_DRIFT'
       );
       assert.equal(error.recoveryState, 'preserved');
-      const current = fs.lstatSync(target);
+      const current = fs.lstatSync(target, { bigint: true });
       assert.equal(current.isDirectory(), expectedExternal.isDirectory());
-      if (!current.isDirectory()) assert.notEqual(fs.readFileSync(target, 'utf8'), 'candidate\n');
+      if (!current.isDirectory()) {
+        assert.notEqual(fs.readFileSync(target, 'utf8'), 'candidate\n');
+        if (expectedExternal.dev !== 0n && expectedExternal.ino !== 0n && current.dev !== 0n && current.ino !== 0n) {
+          assert.deepEqual(
+            [current.dev, current.ino],
+            [expectedExternal.dev, expectedExternal.ino],
+            'the exact externally installed replacement must survive'
+          );
+        }
+      }
       fs.rmSync(fixtureRoot, { recursive: true, force: true });
     });
   }

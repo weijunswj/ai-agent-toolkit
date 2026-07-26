@@ -160,16 +160,21 @@ if (require.main === module) {
   try {
     const command = process.argv[2];
     const options = parseArgs(process.argv.slice(3));
-    if (command === 'resolve') {
+    if (command === 'resolve' || command === 'resolve-export') {
       const repositoryRoot = options['repo-root'] || process.cwd();
       const match = selectIdentity(readState(options.state, repositoryRoot), options['workflow-file'], options['workflow-name']);
-      const resultPath = assertSafeResultPath(options.result);
-      fs.writeFileSync(resultPath, `${JSON.stringify({
+      const result = {
         workflowFile: match?.workflowFile || '',
         workflowName: match?.workflowName || '',
         targetWorkflowId: match?.targetWorkflowId || '',
-      })}\n`, { mode: 0o600, flag: 'wx' });
-      console.log(match ? 'Local target workflow identity resolved internally.' : 'No local target workflow identity is recorded.');
+      };
+      if (command === 'resolve-export') {
+        process.stdout.write(`${JSON.stringify(result)}\n`);
+      } else {
+        const resultPath = assertSafeResultPath(options.result);
+        fs.writeFileSync(resultPath, `${JSON.stringify(result)}\n`, { mode: 0o600, flag: 'wx' });
+        console.log(match ? 'Local target workflow identity resolved internally.' : 'No local target workflow identity is recorded.');
+      }
     } else if (command === 'record') {
       recordIdentity(options.state, {
         workflowFile: options['workflow-file'],
@@ -181,7 +186,7 @@ if (require.main === module) {
       readState(options.state, options['repo-root'] || process.cwd());
       console.log('Local target workflow identity state is valid.');
     } else {
-      fail('N8N_POLICY_VALIDATION_FAILED', 'Usage: node n8n-workflow-identity.cjs <resolve|record|validate> --state file ...');
+      fail('N8N_POLICY_VALIDATION_FAILED', 'Usage: node n8n-workflow-identity.cjs <resolve|resolve-export|record|validate> --state file ...');
     }
   } catch (error) {
     console.error(`${error.code || 'N8N_INTERNAL_ERROR'}: ${error.message}`);

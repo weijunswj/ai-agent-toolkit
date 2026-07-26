@@ -5,9 +5,9 @@
   "title": "n8n Workflow Toolkit",
   "module_path": "_projects/n8n/workflow-toolkit",
   "main_path": "_projects/n8n/workflow-toolkit/_main",
-  "version": "1.3.7",
+  "version": "1.3.8",
   "version_policy": "semver",
-  "version_notes": "Fails closed before changing existing canonical files when portable Node APIs cannot guarantee exclusive single-target replacement, while preserving exact no-ops and exclusive missing-file creation.",
+  "version_notes": "Resolves canonical exports through dedicated local workflow identities before name fallback and keeps replacement-race fixtures deterministic across filesystems.",
   "outputs": [
     {
       "kind": "curated",

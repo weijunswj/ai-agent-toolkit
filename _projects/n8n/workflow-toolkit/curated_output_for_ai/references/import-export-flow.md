@@ -6,17 +6,16 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # Import Export Flow Reference
 
-Use in a consumer repo, not the toolkit repo.
+Use only in a consumer repo.
 
 ## Boundary
 
-This is a short reference, not the full runtime helper guide.
-
-Live n8n or Docker work requires approval naming repo, environment, operation, workflow set, and exclusions.
+This short reference is not the full runtime guide. Live n8n or Docker work requires approval naming repo, environment, operation, workflow set, and exclusions.
 
 ## Export Review
 
 - Preserve canonical logic, sheet/tab names, approved locators, mappings, expressions, filters, options, nodes, connections, and settings.
+- Resolve a tracked export through its dedicated local file-to-target identity before name fallback. If that recorded target disappears, fail closed instead of selecting a same-name workflow.
 - Replace credentials with canonical `{ name }` references plus logical name/type declarations; omit `id` entirely and never commit target IDs or values.
 - Remove target workflow/webhook metadata, force `active: false`, and protect mappings unless reviewed source-update mode is explicit.
 
@@ -29,13 +28,9 @@ Live n8n or Docker work requires approval naming repo, environment, operation, w
 - Optional misses are informational; required, ambiguous, or unsafe matches block.
 - Validate the batch before mutation. Existing no-ops stay read-only; missing files use exclusive creation. Changed existing files fail in `PREPARED` with an ignored local batch because Node has no safe conditional replace. Descriptor writes, link evidence, hashes, checks, and locks never authorise mutation; the transaction never deletes or renames a pathname.
 
-Do not run live import/export in CI. Keep `.tmp/**` and `.n8n-local/**` ignored and local.
-
 ## Stop Conditions
 
-- Approval does not name the target repo.
-- Live approval does not name the target instance/environment.
-- Live approval does not name the workflow set.
+- Approval omits the target repo, instance/environment, or workflow set.
 - Operation is broader than approved.
 - Ambiguous workflow match.
 - Credential discovery unavailable, zero/duplicate name/type matches, or same-name wrong-type matches.
