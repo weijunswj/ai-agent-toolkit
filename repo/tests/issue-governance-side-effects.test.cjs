@@ -13,8 +13,18 @@ const interceptor = path.join(fixtureRoot, 'intercept-side-effects.cjs');
 const child = path.join(fixtureRoot, 'side-effect-child.cjs');
 const manifest = JSON.parse(fs.readFileSync(path.join(fixtureRoot, 'side-effect-manifest.json'), 'utf8'));
 
+function isolatedChildEnvironment() {
+  const env = { ...process.env, NODE_NO_WARNINGS: '1' };
+  delete env.NODE_TEST_CONTEXT;
+  return env;
+}
+
 function runEval(source) {
-  return spawnSync(process.execPath, ['-e', source], { encoding: 'utf8', timeout: 10000 });
+  return spawnSync(process.execPath, ['-e', source], {
+    encoding: 'utf8',
+    timeout: 10000,
+    env: isolatedChildEnvironment()
+  });
 }
 
 test('side-effect manifest has exactly 188 unique complete variants', function() {
@@ -44,7 +54,10 @@ test('parent observes strict guarded sentinel protocol', function() {
     return value.export_path === 'writeFileSync' && value.reference_acquisition === 'node-module-object-after';
   });
   const result = spawnSync(process.execPath, [child, Buffer.from(JSON.stringify(entry)).toString('base64url')], {
-    cwd: repoRoot, encoding: 'utf8', timeout: entry.timeout_ms
+    cwd: repoRoot,
+    encoding: 'utf8',
+    timeout: entry.timeout_ms,
+    env: isolatedChildEnvironment()
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stderr, '');
@@ -101,7 +114,8 @@ test('all four post-install module-object and destructured acquisition modes exe
     const result = spawnSync(process.execPath, [child, encoded], {
       cwd: repoRoot,
       encoding: 'utf8',
-      timeout: entry.timeout_ms
+      timeout: entry.timeout_ms,
+      env: isolatedChildEnvironment()
     });
     assert.equal(result.status, 0, entry.variant_id + ':' + result.stderr);
     assert.equal(result.stderr, '');

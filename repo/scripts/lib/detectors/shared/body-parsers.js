@@ -2,8 +2,29 @@
 
 const VALID_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
+function stripHtmlComments(value) {
+  let cursor = 0;
+  let output = '';
+  while (cursor < value.length) {
+    const open = value.indexOf('<!--', cursor);
+    const close = value.indexOf('-->', cursor);
+    if (close !== -1 && (open === -1 || close < open)) throw new Error('BODY_COMMENT_REVERSED');
+    if (open === -1) {
+      output += value.slice(cursor);
+      break;
+    }
+    output += value.slice(cursor, open);
+    const end = value.indexOf('-->', open + 4);
+    if (end === -1) throw new Error('BODY_COMMENT_UNCLOSED');
+    const nested = value.indexOf('<!--', open + 4);
+    if (nested !== -1 && nested < end) throw new Error('BODY_COMMENT_NESTED');
+    cursor = end + 3;
+  }
+  return output;
+}
+
 function markdownLines(body) {
-  const lines = String(body || '').normalize('NFC').replace(/\r\n?/g, '\n').replace(/<!--[\s\S]*?-->/g, '').split('\n');
+  const lines = stripHtmlComments(String(body || '').normalize('NFC').replace(/\r\n?/g, '\n')).split('\n');
   const visible = [];
   let fenced = false;
   for (const line of lines) {

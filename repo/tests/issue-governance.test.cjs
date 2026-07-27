@@ -472,6 +472,15 @@ test('inline authority rejects duplicate labels, comments, escapes and mixed for
     parser.parseImplBranchFromBody('Implementation branch: one\nImplementation branch: two');
   }, /BODY_AUTHORITY_DUPLICATE/);
   assert.equal(parser.parseImplBranchFromBody('<!-- Implementation branch: hidden -->'), null);
+  assert.throws(function() {
+    parser.parseImplBranchFromBody('<!-- outer <!-- Implementation branch: hidden --> -->');
+  }, /BODY_COMMENT_NESTED/);
+  assert.throws(function() {
+    parser.parseImplBranchFromBody('<!-- Implementation branch: hidden');
+  }, /BODY_COMMENT_UNCLOSED/);
+  assert.throws(function() {
+    parser.parseImplBranchFromBody('--> Implementation branch: hidden');
+  }, /BODY_COMMENT_REVERSED/);
   assert.equal(parser.parseImplBranchFromBody('\\Implementation branch: escaped'), null);
   assert.throws(function() {
     parser.parseImplBranchFromBody('Implementation branch: **`mixed`**');

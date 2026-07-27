@@ -17,6 +17,12 @@ const hostMajor = Number(process.versions.node.split('.')[0]);
 let executed = 0;
 let absent = 0;
 
+function isolatedChildEnvironment() {
+  const env = { ...process.env, NODE_NO_WARNINGS: '1' };
+  delete env.NODE_TEST_CONTEXT;
+  return env;
+}
+
 for (const entry of manifest.entries) {
   const applicable = entry.platform_constraints.applicable_os.includes(hostOs) && hostMajor >= entry.minimum_node_version;
   const selected = job === 'host-applicable' ? applicable : entry.platform_constraints.execution_jobs.includes(job);
@@ -35,7 +41,7 @@ for (const entry of manifest.entries) {
     encoding: 'utf8',
     timeout: entry.timeout_ms,
     windowsHide: true,
-    env: { ...process.env, NODE_NO_WARNINGS: '1' },
+    env: isolatedChildEnvironment(),
     maxBuffer: 1024 * 1024
   });
   assert.equal(result.status, 0, entry.variant_id + ' child exit');
