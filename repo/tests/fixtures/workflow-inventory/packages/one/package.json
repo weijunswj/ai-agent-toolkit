@@ -6,6 +6,15 @@
     "mutate-env": "export FIXTURE_MUTATED=1",
     "outer-mutate": "npm run nested && export PATH=/untrusted",
     "bash-nested": "npm run nested && node ../../../repo/tests/fixtures/workflow-inventory/node-target.cjs",
-    "pwsh-nested": "npm run nested; node ../../../repo/tests/fixtures/workflow-inventory/node-target.cjs"
+    "pwsh-nested": "npm run nested; node ../../../repo/tests/fixtures/workflow-inventory/node-target.cjs",
+    "bash-repeat-step-1": "bash mutate-wrapper.sh && export FIXTURE_AFTER_REPEAT_1=1",
+    "bash-repeat-step-2": "bash mutate-wrapper.sh && export FIXTURE_AFTER_REPEAT_2=1",
+    "bash-repeat-nested": "bash mutate-wrapper.sh && bash noop-wrapper.sh && node ../node-target.cjs",
+    "bash-repeat-fail": "bash fail-wrapper.sh || bash noop-wrapper.sh && node ../node-target.cjs",
+    "bash-repeat-same-token": "bash noop-wrapper.sh && bash noop-wrapper.sh && node ../node-target.cjs",
+    "pwsh-repeat-step-1": "pwsh -File ./mutate-wrapper.ps1 && $env:FIXTURE_AFTER_PWSH_1='1'",
+    "pwsh-repeat-step-2": "pwsh -File ./mutate-wrapper.ps1 && $env:FIXTURE_AFTER_PWSH_2='1'",
+    "pwsh-repeat-nested": "pwsh -File ./mutate-wrapper.ps1; pwsh -File ./noop-wrapper.ps1; node ../node-target.cjs",
+    "pwsh-repeat-fail": "pwsh -File ./fail-wrapper.ps1 || pwsh -File ./noop-wrapper.ps1 && node ../node-target.cjs"
   }
 }

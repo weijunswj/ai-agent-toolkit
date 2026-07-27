@@ -98,6 +98,57 @@ test('closure parser rejects every dynamic or computed execution/import form', f
   }
 });
 
+test('closure parser admits in-root direct require.resolve target', function() {
+  const root = fs.mkdtempSync(path.join(trusted, 'closure-resolve-test-'));
+  const child = path.join(root, 'child.cjs');
+  const entry = path.join(root, 'entry.cjs');
+  fs.writeFileSync(child, "'use strict';\n");
+  fs.writeFileSync(entry, "'use strict';\nconst c = require.resolve('./child.cjs');\n");
+  try {
+    const deps = builder.parseDependencies(entry);
+    assert.deepEqual(deps.map(function(d) { return path.relative(root, d).replace(/\\/g, '/'); }), ['child.cjs']);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('closure parser rejects non-relative, dynamic, package and escape require.resolve targets', function() {
+  const root = fs.mkdtempSync(path.join(trusted, 'closure-resolve-fail-test-'));
+  const entry = path.join(root, 'entry.cjs');
+  const cases = new Map([
+    ['package.cjs', "const c = require.resolve('acorn');\n", /TW_CLOSURE_PACKAGE_IMPORT/],
+    ['dynamic.cjs', "const c = require.resolve(value);\n", /TW_CLOSURE_LOADER_RESOLVE_CONTEXT/],
+    ['escape.cjs', "const c = require.resolve('../escape.cjs');\n", /TW_CLOSURE_ESCAPE/],
+    ['optional-chain.cjs', "const c = require?.resolve('./child.cjs');\n", /TW_CLOSURE_LOADER_CHAIN/],
+    ['optional-call.cjs', "const c = require.resolve?.('./child.cjs');\n", /TW_CLOSURE_LOADER_CHAIN/],
+    ['chain-chain.cjs', "const c = (require?.resolve)('./child.cjs');\n", /TW_CLOSURE_LOADER_CHAIN/]
+  ]);
+  try {
+    for (const [name, source, expected] of cases) {
+      const file = path.join(root, name);
+      fs.writeFileSync(file, "'use strict';\n" + source);
+      assert.throws(function() { builder.parseDependencies(file); }, expected, name);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('closure parser rejects capture and indirect require.resolve call', function() {
+  const root = fs.mkdtempSync(path.join(trusted, 'closure-resolve-indirect-test-'));
+  const entry = path.join(root, 'entry.cjs');
+  fs.writeFileSync(entry, [
+    "'use strict';",
+    "const r = require.resolve;",
+    "r('./child.cjs');"
+  ].join('\n'));
+  try {
+    assert.throws(function() { builder.parseDependencies(entry); }, /TW_CLOSURE_LOADER_ALIAS|TW_CLOSURE_LOADER_CHAIN|TW_CLOSURE_LOADER_RESOLVE_CONTEXT/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('bootstrap helper ownership and file mode are trusted-base safe', function() {
   for (const name of ['capture-node-toolchain.cjs', 'verify-closure-manifest.cjs']) {
     const file = path.join(trusted, name);

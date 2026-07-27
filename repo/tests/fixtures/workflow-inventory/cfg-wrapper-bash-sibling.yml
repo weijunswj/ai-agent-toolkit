@@ -1,4 +1,4 @@
-name: Nested wrapper parent token oracle with Bash
+name: Genuine repeated Bash wrapper caller-token oracle
 jobs:
   fixture:
     runs-on: ubuntu-latest
@@ -8,4 +8,8 @@ jobs:
         with:
           node-version: '22'
       - run: cd repo/tests/fixtures/workflow-inventory/packages/one && npm ci --ignore-scripts
-      - run: cd repo/tests/fixtures/workflow-inventory/packages/one/src && npm run bash-nested
+      - run: cd repo/tests/fixtures/workflow-inventory/packages/one/src && npm run bash-repeat-step-1
+      - run: cd repo/tests/fixtures/workflow-inventory/packages/one/src && npm run bash-repeat-step-2
+      - run: cd repo/tests/fixtures/workflow-inventory/packages/one/src && npm run bash-repeat-nested
+      - run: cd repo/tests/fixtures/workflow-inventory/packages/one/src && npm run bash-repeat-fail
+      - run: cd repo/tests/fixtures/workflow-inventory/packages/one/src && npm run bash-repeat-same-token

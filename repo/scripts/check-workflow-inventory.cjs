@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const acorn = require('acorn');
 const YAML = require('yaml');
-const { isRequireChainRoot, isRequireMainCompare, isRequireResolveCall, normaliseSignal, isValidSignal, VALID_SIGNALS } = require('./trusted-workflows/loader-policy.cjs');
+const { isDirectRequireCall, isRequireMainCompare, isRequireResolveCall, isSafeRequireMemberProperty, isRequireMainMember, isRequireResolveMember, normaliseSignal, isValidSignal, VALID_SIGNALS } = require('./trusted-workflows/loader-policy.cjs');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const WORKFLOWS_DIR = path.join(REPO_ROOT, '.github', 'workflows');
@@ -741,6 +741,22 @@ function walkAstWithParent(node, parent, visitor) {
 
 const REQUIRE_SAFE_PROPERTIES = new Set(['main', 'resolve']);
 
+function checkLoaderChainExpression(ast, location) {
+  walkAst(ast, (node) => {
+    if (node.type !== 'ChainExpression') return;
+    let found = false;
+    walkAst(node, (child) => {
+      if (child === node) return;
+      if (child.type === 'Identifier' && child.name === 'require') found = true;
+      if (child.type === 'MemberExpression' && !child.computed &&
+          child.object && child.object.type === 'Identifier' && child.object.name === 'require') {
+        found = true;
+      }
+    });
+    if (found) throw new InventoryError('WF_LOCAL_JS_LOADER_CHAIN', location);
+  });
+}
+
 function checkLoaderAliases(ast, location) {
   const parentMap = new Map();
   walkAst(ast, (node) => {
@@ -750,6 +766,7 @@ function checkLoaderAliases(ast, location) {
       else if (value && typeof value === 'object') parentMap.set(value, node);
     }
   });
+  checkLoaderChainExpression(ast, location);
   walkAst(ast, (node) => {
     if (node.type === 'Identifier' && node.name === 'createRequire') {
       throw new InventoryError('WF_LOCAL_JS_LOADER_CREATION', location);
@@ -760,14 +777,21 @@ function checkLoaderAliases(ast, location) {
         (node.arguments[0].value === 'module' || node.arguments[0].value === 'node:module')) {
       throw new InventoryError('WF_LOCAL_JS_LOADER_CREATION', location);
     }
-    if (node.type === 'CallExpression' && isRequireChainRoot(node.callee, 'resolve')) {
+    if (node.type === 'CallExpression' && node.optional &&
+        node.callee && node.callee.type === 'MemberExpression' &&
+        node.callee.object && node.callee.object.type === 'Identifier' && node.callee.object.name === 'require') {
       throw new InventoryError('WF_LOCAL_JS_LOADER_CHAIN', location);
     }
-    if (node.type === 'MemberExpression' && !node.computed &&
-        node.object && node.object.type === 'Identifier' && node.object.name === 'require' &&
-        node.property && node.property.type === 'Identifier') {
+    if (node.type === 'MemberExpression' &&
+        node.object && node.object.type === 'Identifier' && node.object.name === 'require') {
+      if (node.optional) throw new InventoryError('WF_LOCAL_JS_LOADER_CHAIN', location);
+      if (node.computed) throw new InventoryError('WF_LOCAL_JS_LOADER_CHAIN', location);
+      if (!node.property || node.property.type !== 'Identifier') throw new InventoryError('WF_LOCAL_JS_LOADER_CHAIN', location);
       const prop = node.property.name;
       const parent = parentMap.get(node);
+      if (parent && parent.type === 'MemberExpression' && parent.object === node) {
+        throw new InventoryError('WF_LOCAL_JS_LOADER_CHAIN', location);
+      }
       if (prop === 'main') {
         if (isRequireMainCompare(node, parent)) return;
         throw new InventoryError('WF_LOCAL_JS_LOADER_MAIN_CONTEXT', location);
@@ -776,6 +800,7 @@ function checkLoaderAliases(ast, location) {
         if (isRequireResolveCall(node, parent)) return;
         throw new InventoryError('WF_LOCAL_JS_LOADER_RESOLVE_CONTEXT', location);
       }
+      throw new InventoryError('WF_LOCAL_JS_LOADER_CHAIN', location);
     }
   });
   walkAstWithParent(ast, null, (node, parent) => {
@@ -783,7 +808,7 @@ function checkLoaderAliases(ast, location) {
       if (parent && parent.type === 'CallExpression' && parent.callee === node) return;
       if (parent && parent.type === 'MemberExpression' && parent.object === node &&
           parent.computed === false && parent.property && parent.property.type === 'Identifier' &&
-          REQUIRE_SAFE_PROPERTIES.has(parent.property.name)) return;
+          isSafeRequireMemberProperty(parent.property.name)) return;
       if (parent && parent.type === 'MemberExpression' && parent.property === node &&
           parent.computed === false) return;
       throw new InventoryError('WF_LOCAL_JS_LOADER_ALIAS', location);
@@ -818,14 +843,16 @@ function inspectLocalJavaScript(entry, actionRoot, context, location) {
       let specifier = null;
       if (node.type === 'ImportDeclaration' || node.type === 'ExportNamedDeclaration' || node.type === 'ExportAllDeclaration') {
         if (node.source) specifier = node.source.value;
-      } else if (node.type === 'CallExpression' && node.callee && node.callee.type === 'Identifier' && node.callee.name === 'require') {
+      } else if (node.type === 'CallExpression' && node.callee && node.callee.type === 'MemberExpression' &&
+          node.callee.object && node.callee.object.name === 'module' && node.callee.property && node.callee.property.name === 'require') {
+        throw new InventoryError('WF_LOCAL_JS_MODULE_REQUIRE', location);
+      } else if (node.type === 'CallExpression' && isDirectRequireCall(node) && node.callee && node.callee.type === 'Identifier' && node.callee.name === 'require') {
         if (node.arguments.length !== 1 || node.arguments[0].type !== 'Literal' || typeof node.arguments[0].value !== 'string') {
           throw new InventoryError('WF_LOCAL_JS_COMPUTED_REQUIRE', location);
         }
         specifier = node.arguments[0].value;
-      } else if (node.type === 'CallExpression' && node.callee && node.callee.type === 'MemberExpression' &&
-          node.callee.object && node.callee.object.name === 'module' && node.callee.property && node.callee.property.name === 'require') {
-        throw new InventoryError('WF_LOCAL_JS_MODULE_REQUIRE', location);
+      } else if (node.type === 'CallExpression' && isRequireResolveCall(node.callee, node)) {
+        specifier = node.arguments[0].value;
       }
       if (specifier === null) return;
       if (specifier === 'node:child_process' || specifier === 'node:worker_threads') {
@@ -1394,6 +1421,52 @@ function analyzeWorkflowFixture(relative) {
   return true;
 }
 
+function observeWrapperAnalysis(relative) {
+  const observations = { tokens: [], cacheKeys: [], cacheValues: [], finalTokens: [], finalStates: [] };
+  const authority = new Map();
+  const absolute = resolveContained(REPO_ROOT, relative, relative);
+  const workflow = parseDocument(absolute);
+  const privileged = PRIVILEGED.has(relative);
+  if (privileged) validatePrivilegedActions(relative, workflow, authority);
+  for (const [jobId, job] of Object.entries(workflow.jobs || {})) {
+    if (job.uses) continue;
+    const context = {
+      repoRoot: REPO_ROOT,
+      relative,
+      jobId,
+      privileged,
+      defaultShell: /windows/i.test(String(job['runs-on'] || 'ubuntu-latest')) ? 'pwsh' : 'bash',
+      activeActions: new Set(),
+      localJavaScriptMemo: new Map(),
+      activeWrappers: new Set(),
+      wrapperGraphs: new Map(),
+      wrapperResults: new Map(),
+      activePackageScripts: new Set(),
+      executionNodes: 0,
+      processTokenSeq: 0
+    };
+    const finalStates = analyzeSteps(Array.isArray(job.steps) ? job.steps : [], [initialExecutionState()], context);
+    for (const [key, value] of context.wrapperResults) {
+      observations.cacheKeys.push(key);
+      observations.cacheValues.push({
+        key,
+        successTokens: value.success.map((s) => s.processParentKey || null),
+        failureTokens: value.failure.map((s) => s.processParentKey || null)
+      });
+    }
+    for (const state of finalStates) {
+      observations.finalTokens.push(state.processParentKey || null);
+      observations.finalStates.push({
+        processParentKey: state.processParentKey || null,
+        pathIdentity: state.pathIdentity,
+        setupGeneration: state.setupGeneration,
+        capturedGeneration: state.capturedGeneration
+      });
+    }
+  }
+  return observations;
+}
+
 function runInventory(root = REPO_ROOT) {
   if (root !== REPO_ROOT) throw new InventoryError('WF_TEST_ROOT_UNSUPPORTED', String(root));
   const authority = loadActionAuthority();
@@ -1435,6 +1508,7 @@ module.exports = {
   resolveLocalActionMetadata,
   inspectLocalJavaScript,
   analyzeWorkflowFixture,
+  observeWrapperAnalysis,
   structuralPath,
   walkAstWithParent,
   checkLoaderAliases,

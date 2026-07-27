@@ -5,7 +5,7 @@ const acorn = require('acorn');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { isRequireChainRoot, isRequireMainCompare, isRequireResolveCall } = require('./loader-policy.cjs');
+const { isRequireMainCompare, isRequireResolveCall, isSafeRequireMemberProperty } = require('./loader-policy.cjs');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 const TRUSTED_ROOT = path.join(REPO_ROOT, 'repo', 'scripts', 'trusted-workflows');
@@ -55,16 +55,6 @@ function walkWithParent(node, parent, visitor) {
   }
 }
 
-function walkWithParent(node, parent, visitor) {
-  if (!node || typeof node !== 'object') return;
-  visitor(node, parent);
-  for (const [key, value] of Object.entries(node)) {
-    if (key === 'start' || key === 'end') continue;
-    if (Array.isArray(value)) value.forEach((item) => walkWithParent(item, node, visitor));
-    else if (value && typeof value === 'object') walkWithParent(value, node, visitor);
-  }
-}
-
 function resolveLiteral(fromFile, specifier) {
   if (!specifier.startsWith('.')) return null;
   if (!specifier.endsWith('.cjs') && !specifier.endsWith('.json')) die('TW_CLOSURE_EXTENSION', specifier);
@@ -88,6 +78,18 @@ function parseDependencies(file) {
     }
   });
   walk(ast, (node) => {
+    if (node.type === 'ChainExpression') {
+      let found = false;
+      walk(node, (child) => {
+        if (child === node) return;
+        if (child.type === 'Identifier' && child.name === 'require') found = true;
+        if (child.type === 'MemberExpression' && !child.computed &&
+            child.object && child.object.type === 'Identifier' && child.object.name === 'require') {
+          found = true;
+        }
+      });
+      if (found) die('TW_CLOSURE_LOADER_CHAIN', relative(file));
+    }
     if (node.type === 'ImportExpression') die('TW_CLOSURE_DYNAMIC_IMPORT', relative(file));
     if (node.type === 'CallExpression' && node.callee && node.callee.type === 'Identifier' &&
         ['eval', 'Function'].includes(node.callee.name)) die('TW_CLOSURE_DYNAMIC_CODE', relative(file));
@@ -101,9 +103,6 @@ function parseDependencies(file) {
         node.callee.property && ['register', 'registerHooks'].includes(node.callee.property.name)) {
       die('TW_CLOSURE_LOADER_HOOK', relative(file));
     }
-    if (node.type === 'CallExpression' && isRequireChainRoot(node.callee, 'resolve')) {
-      die('TW_CLOSURE_LOADER_CHAIN', relative(file));
-    }
     if (node.type === 'Identifier' && node.name === 'createRequire') die('TW_CLOSURE_LOADER_CREATION', relative(file));
     if (node.type === 'CallExpression' && node.callee && node.callee.type === 'Identifier' &&
         node.callee.name === 'require' && node.arguments.length === 1 &&
@@ -111,11 +110,21 @@ function parseDependencies(file) {
         (node.arguments[0].value === 'module' || node.arguments[0].value === 'node:module')) {
       die('TW_CLOSURE_LOADER_CREATION', relative(file));
     }
-    if (node.type === 'MemberExpression' && !node.computed &&
-        node.object && node.object.type === 'Identifier' && node.object.name === 'require' &&
-        node.property && node.property.type === 'Identifier') {
+    if (node.type === 'CallExpression' && node.optional &&
+        node.callee && node.callee.type === 'MemberExpression' &&
+        node.callee.object && node.callee.object.type === 'Identifier' && node.callee.object.name === 'require') {
+      die('TW_CLOSURE_LOADER_CHAIN', relative(file));
+    }
+    if (node.type === 'MemberExpression' &&
+        node.object && node.object.type === 'Identifier' && node.object.name === 'require') {
+      if (node.optional) die('TW_CLOSURE_LOADER_CHAIN', relative(file));
+      if (node.computed) die('TW_CLOSURE_LOADER_CHAIN', relative(file));
+      if (!node.property || node.property.type !== 'Identifier') die('TW_CLOSURE_LOADER_CHAIN', relative(file));
       const prop = node.property.name;
       const parent = parentMap.get(node);
+      if (parent && parent.type === 'MemberExpression' && parent.object === node) {
+        die('TW_CLOSURE_LOADER_CHAIN', relative(file));
+      }
       if (prop === 'main') {
         if (isRequireMainCompare(node, parent)) return;
         die('TW_CLOSURE_LOADER_MAIN_CONTEXT', relative(file));
@@ -131,6 +140,7 @@ function parseDependencies(file) {
         }
         die('TW_CLOSURE_LOADER_RESOLVE_CONTEXT', relative(file));
       }
+      die('TW_CLOSURE_LOADER_CHAIN', relative(file));
     }
     if (node.type !== 'CallExpression') return;
     if (node.callee && node.callee.type === 'MemberExpression' &&
@@ -152,7 +162,7 @@ function parseDependencies(file) {
       if (parent && parent.type === 'CallExpression' && parent.callee === node) return;
       if (parent && parent.type === 'MemberExpression' && parent.object === node &&
           parent.computed === false && parent.property && parent.property.type === 'Identifier' &&
-          parent.property.name === 'main') return;
+          isSafeRequireMemberProperty(parent.property.name)) return;
       if (parent && parent.type === 'MemberExpression' && parent.property === node &&
           parent.computed === false) return;
       die('TW_CLOSURE_LOADER_ALIAS', relative(file));

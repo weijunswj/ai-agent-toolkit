@@ -12,7 +12,7 @@
   "files": [
     {
       "path": "repo/scripts/trusted-workflows/auto-sync/classify-changed-files.cjs",
-      "sha256": "4bea1f62cc1a41250230f984ee0297eb6d994e78df9b3aad98bf9bb787518f14",
+      "sha256": "976b40e1c1b4b63bde6f4592639eb1ae001e84dcb697687cd88e69a86b3fc557",
       "module_type": "commonjs",
       "direct_literal_dependencies": [
         "repo/scripts/trusted-workflows/protocol.cjs"
@@ -21,7 +21,7 @@
     },
     {
       "path": "repo/scripts/trusted-workflows/auto-sync/classify-generated-diff.cjs",
-      "sha256": "9e0dbca9befea0df5e1202f71aac92c69e220aca3549d265ddf0813c27e8baa8",
+      "sha256": "a7821702db1560c45361e54e10a4246aa10a3f82910c9cccdf3adcc64cd529c4",
       "module_type": "commonjs",
       "direct_literal_dependencies": [
         "repo/scripts/trusted-workflows/protocol.cjs"
@@ -30,7 +30,7 @@
     },
     {
       "path": "repo/scripts/trusted-workflows/auto-sync/commit-push.cjs",
-      "sha256": "7955b1e9e15c11dd7e43138f3c75de841988955dd55aeb9d3b107ed11b609c1e",
+      "sha256": "4d1e15ee9a58ddcdf5999e6f9be93ead9ea39cd6e0bfb1f769da71111f31be04",
       "module_type": "commonjs",
       "direct_literal_dependencies": [
         "repo/scripts/trusted-workflows/protocol.cjs",
@@ -40,7 +40,7 @@
     },
     {
       "path": "repo/scripts/trusted-workflows/auto-sync/dry-run.cjs",
-      "sha256": "7bdaee1368028cf24417ed74839c6df8c1a94f19b253f3ce9bfb79f843f52f05",
+      "sha256": "9d4d77c54822fc880e1bb8e7879b63bf2889e9b3bc74b51e173141dae228bd32",
       "module_type": "commonjs",
       "direct_literal_dependencies": [
         "repo/scripts/trusted-workflows/protocol.cjs",
@@ -52,7 +52,7 @@
     },
     {
       "path": "repo/scripts/trusted-workflows/auto-sync/preflight.cjs",
-      "sha256": "83236659f42fa7c315b99928efabcc564b240ee87f212d7811a03b9b66684ed0",
+      "sha256": "41e2d868ee62ce36e80c94aa18d4e7ec323302218a6cb5ca02f5042923b4d53e",
       "module_type": "commonjs",
       "direct_literal_dependencies": [
         "repo/scripts/trusted-workflows/protocol.cjs",
@@ -64,7 +64,7 @@
     },
     {
       "path": "repo/scripts/trusted-workflows/auto-sync/revalidate-head.cjs",
-      "sha256": "d89b540f69c351a0ac9337be48205746423eabafaab1aff7fb367122919be6fc",
+      "sha256": "c073525babe08d481c634e45d03f57c88ba4c2400251805405c9070ebba4e4b9",
       "module_type": "commonjs",
       "direct_literal_dependencies": [
         "repo/scripts/trusted-workflows/protocol.cjs"
@@ -73,7 +73,7 @@
     },
     {
       "path": "repo/scripts/trusted-workflows/auto-sync/verify-rehearsal-pr.cjs",
-      "sha256": "a155215b75fc30ab0852f2fde1dc395ef444c8c18d76dee39a27deac64045851",
+      "sha256": "d9de14492542149dba2914c66e3ccb10b93b4c9f2b81e28e2dd879179d5c1534",
       "module_type": "commonjs",
       "direct_literal_dependencies": [
         "repo/scripts/trusted-workflows/protocol.cjs"
@@ -84,7 +84,7 @@
     },
     {
       "path": "repo/scripts/trusted-workflows/auto-sync/verify-write-scope.cjs",
-      "sha256": "7a4fc13eaf59074016a2759771f821826227cbf877bbd3731bdf6f46085c5380",
+      "sha256": "a02e79e3f039995f7e433b58796912f4fae6efdc53fde887c3b9611119a7a0d9",
       "module_type": "commonjs",
       "direct_literal_dependencies": [
         "repo/scripts/trusted-workflows/protocol.cjs",
@@ -94,7 +94,7 @@
     },
     {
       "path": "repo/scripts/trusted-workflows/capture-node-toolchain.cjs",
-      "sha256": "ecffc9c42136167ef5edc72b01c8e340f9ca0ef304285551a8b128f624bd5c55",
+      "sha256": "6e15f8c6b524ee4d08a46442070037256c0d315bafd3787a6e9d9284ff74bac7",
       "module_type": "commonjs",
       "direct_literal_dependencies": [],
       "root_ownership": [
@@ -103,21 +103,21 @@
     },
     {
       "path": "repo/scripts/trusted-workflows/external-actions-manifest.json",
-      "sha256": "e55730b55cf12eaa8c1cc5393a828a8adb1b94c79d9839aa9a04ea4c491b5824",
+      "sha256": "580a31fe87a6af2dc5ce82c963465b3210aab974ce090f16cd71944c31eb5fa6",
       "module_type": "json",
       "direct_literal_dependencies": [],
       "root_ownership": []
     },
     {
       "path": "repo/scripts/trusted-workflows/loader-policy.cjs",
-      "sha256": "8080985988bc2b047b2b32e746cb99a3a3233942e5529f0ace3c8510863d9521",
+      "sha256": "3e782182323e8e881f8012e81754613cec61916498c5f269af26d1cd71d3a9b0",
       "module_type": "commonjs",
       "direct_literal_dependencies": [],
       "root_ownership": []
     },
     {
       "path": "repo/scripts/trusted-workflows/protocol.cjs",
-      "sha256": "fc77f457cbe6f98308a1391dcc465d742c522a32ae8febf9452dc3e57e9bec80",
+      "sha256": "75c19ed9a3d4589ef222f561bd65e31ac5f188cf4d430bbe8000c8bf0ea5eacc",
       "module_type": "commonjs",
       "direct_literal_dependencies": [],
       "root_ownership": [
@@ -129,7 +129,7 @@
     },
     {
       "path": "repo/scripts/trusted-workflows/source-watch/dry-run.cjs",
-      "sha256": "3a061a0282788d2bfbd5154c84ac5c914ae08a507f046c2dca16385d1e02bb44",
+      "sha256": "998ad02752326f563222591fef209302df4ed3e29a7a64fa88c227742e024739",
       "module_type": "commonjs",
       "direct_literal_dependencies": [
         "repo/scripts/trusted-workflows/protocol.cjs",
@@ -141,7 +141,7 @@
     },
     {
       "path": "repo/scripts/trusted-workflows/source-watch/plan-notification.cjs",
-      "sha256": "d50333885b6c821323b37846eeedeac4f145cdb14dcbb85094080551ee4da9ba",
+      "sha256": "30bd4dc7a785ea60d0438fb8f50e00787f55c4e740a50de32875b140a3840719",
       "module_type": "commonjs",
       "direct_literal_dependencies": [
         "repo/scripts/trusted-workflows/protocol.cjs"
@@ -150,7 +150,7 @@
     },
     {
       "path": "repo/scripts/trusted-workflows/source-watch/update-notification.cjs",
-      "sha256": "b42adcfdbe22384ccf3d186ef5caec4c8fae0c28b4786cf61933ee2ef53d82dc",
+      "sha256": "164033dd8c4f882689570cbdd249ec9cb2b9bf96f17a0290c5518f184e5680c1",
       "module_type": "commonjs",
       "direct_literal_dependencies": [
         "repo/scripts/trusted-workflows/protocol.cjs",
@@ -160,7 +160,7 @@
     },
     {
       "path": "repo/scripts/trusted-workflows/source-watch/upsert-notification-pr.cjs",
-      "sha256": "a80c759acb52f0e8e20e2dd09fc1fd121e1af17311793838f4ebabecf4216b50",
+      "sha256": "7a859b2b42e16ec19a6817b28af5a248e081daed49ed7912be5d97cc665d64ba",
       "module_type": "commonjs",
       "direct_literal_dependencies": [
         "repo/scripts/trusted-workflows/protocol.cjs",
@@ -170,7 +170,7 @@
     },
     {
       "path": "repo/scripts/trusted-workflows/verify-closure-manifest.cjs",
-      "sha256": "493f87543561c4f967d768e525f81dfcdf824e27ad48e60b713756bfbf77e1ac",
+      "sha256": "10876856ae6af4e5a15b668c688b6e1720b387978200765dd3eaa93f1327cb01",
       "module_type": "commonjs",
       "direct_literal_dependencies": [],
       "root_ownership": [
@@ -179,7 +179,7 @@
     },
     {
       "path": "repo/scripts/trusted-workflows/writeback-policy.cjs",
-      "sha256": "a9c473aae3b819ea04d7f3fa8b9209973b36b434341bfad934489b591097bae1",
+      "sha256": "1a7ddf8fb0fbff480bc4f0345899e874801024713f082a079ece5d96cd50d136",
       "module_type": "commonjs",
       "direct_literal_dependencies": [],
       "root_ownership": [

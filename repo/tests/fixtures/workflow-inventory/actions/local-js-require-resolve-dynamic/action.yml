@@ -1,0 +1,4 @@
+name: JS require resolve dynamic target
+runs:
+  using: node24
+  main: main.cjs

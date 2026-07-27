@@ -1,4 +1,4 @@
-name: Nested wrapper parent token oracle with PowerShell
+name: Genuine repeated PowerShell wrapper caller-token oracle
 jobs:
   fixture:
     runs-on: windows-latest
@@ -7,5 +7,8 @@ jobs:
       - uses: actions/setup-node@fixture
         with:
           node-version: '22'
-      - run: cd repo/tests/fixtures/workflow-inventory/packages/one && npm ci --ignore-scripts
-      - run: cd repo/tests/fixtures/workflow-inventory/packages/one/src && npm run pwsh-nested
+      - run: Set-Location repo/tests/fixtures/workflow-inventory/packages/one && npm ci --ignore-scripts
+      - run: Set-Location repo/tests/fixtures/workflow-inventory/packages/one && npm run pwsh-repeat-step-1
+      - run: Set-Location repo/tests/fixtures/workflow-inventory/packages/one && npm run pwsh-repeat-step-2
+      - run: Set-Location repo/tests/fixtures/workflow-inventory/packages/one && npm run pwsh-repeat-nested
+      - run: Set-Location repo/tests/fixtures/workflow-inventory/packages/one && npm run pwsh-repeat-fail

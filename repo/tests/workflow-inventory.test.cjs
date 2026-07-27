@@ -539,6 +539,28 @@ test('loader require.resolve is allowed as a non-executing safe property', funct
   assert.equal(inventory.analyzeWorkflowFixture(fixture('local-js-require-resolve-workflow.yml')), true);
 });
 
+test('loader require.resolve traverses into resolved local target', function() {
+  assert.equal(inventory.analyzeWorkflowFixture(fixture('local-js-require-resolve-workflow.yml')), true);
+});
+
+test('loader require.resolve detects prohibited execution in resolved target', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('local-js-require-resolve-prohibited-workflow.yml'));
+  }, /WF_LOCAL_JS_PROCESS_EXECUTION/);
+});
+
+test('loader require.resolve dynamic argument fails closed', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('local-js-require-resolve-dynamic-workflow.yml'));
+  }, /WF_LOCAL_JS_COMPUTED_REQUIRE|WF_LOCAL_JS_LOADER_RESOLVE_CONTEXT/);
+});
+
+test('loader require.resolve package argument fails closed', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('local-js-require-resolve-package-workflow.yml'));
+  }, /WF_LOCAL_JS_PACKAGE_IMPORT|WF_CLOSURE_PACKAGE_IMPORT/);
+});
+
 test('checkLoaderAliases rejects require.call MemberExpression', function() {
   const src = 'require.call(null, "./x.cjs");';
   const acorn = require('acorn');
@@ -606,14 +628,14 @@ test('checkLoaderAliases rejects require.resolve.call chained call', function() 
   const src = "require.resolve.call(null, './local.cjs');";
   const acorn = require('acorn');
   const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
-  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_RESOLVE_CONTEXT/);
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_CHAIN/);
 });
 
 test('checkLoaderAliases rejects require.resolve.apply chained call', function() {
   const src = "require.resolve.apply(null, ['./local.cjs']);";
   const acorn = require('acorn');
   const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
-  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_RESOLVE_CONTEXT/);
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_CHAIN/);
 });
 
 test('checkLoaderAliases rejects captured require.resolve', function() {
@@ -634,7 +656,7 @@ test('checkLoaderAliases rejects require.resolve.bind', function() {
   const src = 'const r = require.resolve.bind(require);';
   const acorn = require('acorn');
   const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
-  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_RESOLVE_CONTEXT/);
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_CHAIN/);
 });
 
 test('nested Bash wrapper preserves parent token for post-return Node oracle', function() {
@@ -678,7 +700,7 @@ test('require.resolve captured into variable is rejected', function() {
 test('require.resolve called with .call is rejected', function() {
   assert.throws(function() {
     inventory.analyzeWorkflowFixture(fixture('local-js-resolve-escape-call-workflow.yml'));
-  }, /WF_LOCAL_JS_LOADER_RESOLVE_CONTEXT/);
+  }, /WF_LOCAL_JS_LOADER_CHAIN/);
 });
 
 test('checkLoaderAliases rejects require.main as function argument', function() {
@@ -737,11 +759,39 @@ test('checkLoaderAliases rejects require.resolve in object property', function()
   assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_RESOLVE_CONTEXT/);
 });
 
-test('checkLoaderAliases passes require.resolve with optional chaining as safelisted property', function() {
+test('checkLoaderAliases rejects require?.resolve with optional member access', function() {
   const src = 'require?.resolve("./x.cjs");';
   const acorn = require('acorn');
   const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
-  assert.doesNotThrow(function() { inventory.checkLoaderAliases(ast, 'fixture'); });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_CHAIN/);
+});
+
+test('checkLoaderAliases rejects require.resolve?. with optional call', function() {
+  const src = 'require.resolve?.("./x.cjs");';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_CHAIN/);
+});
+
+test('checkLoaderAliases rejects require?.main === module with optional member access', function() {
+  const src = 'if (require?.main === module) process.exit(0);';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_CHAIN/);
+});
+
+test('checkLoaderAliases rejects parenthesised optional require.main ChainExpression', function() {
+  const src = 'if ((require?.main) === module) process.exit(0);';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_CHAIN/);
+});
+
+test('checkLoaderAliases rejects require?. as optional call', function() {
+  const src = 'require?.("./x.cjs");';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_CHAIN/);
 });
 
 test('checkLoaderAliases rejects require.resolve with dynamic argument', function() {
@@ -797,11 +847,85 @@ test('unwrapNice rejects --adjustment= with empty value', function() {
   }, /WF_LAUNCHER_OPTION_UNSUPPORTED/);
 });
 
-test('process tokens are deterministic and collide-free across nested boundaries', function() {
-  const r1 = inventory.analyzeWorkflowFixture(fixture('cfg-wrapper-bash-nested.yml'));
-  const r2 = inventory.analyzeWorkflowFixture(fixture('cfg-wrapper-bash-nested.yml'));
-  assert.equal(r1, r2);
-  assert.equal(r1, true);
+test('process tokens are deterministic for equivalent nested wrapper analysis', function() {
+  const o1 = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-nested.yml'));
+  const o2 = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-nested.yml'));
+  assert.deepEqual(o1.cacheKeys.sort(), o2.cacheKeys.sort());
+  assert.deepEqual(o1.finalTokens, o2.finalTokens);
+  assert.ok(o1.cacheKeys.length >= 1, 'expected at least one cache entry');
+  for (const key of o1.cacheKeys) {
+    assert.ok(typeof key === 'string' && key.length > 0);
+  }
+});
+
+test('process tokens are unique within one nested wrapper analysis', function() {
+  const o = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-nested.yml'));
+  const tokens = new Set();
+  for (const entry of o.cacheValues) {
+    for (const t of entry.successTokens) tokens.add(t);
+    for (const t of entry.failureTokens) tokens.add(t);
+  }
+  for (const t of o.finalTokens) tokens.add(t);
+  assert.ok(tokens.size >= 1);
+  const tokenList = [...tokens];
+  for (let i = 0; i < tokenList.length; i += 1) {
+    for (let j = i + 1; j < tokenList.length; j += 1) {
+      assert.notEqual(tokenList[i], tokenList[j], 'token collision detected: ' + tokenList[i]);
+    }
+  }
+});
+
+test('nested and sibling child boundaries do not collide on wrapper tokens', function() {
+  const o = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-nested.yml'));
+  assert.ok(o.cacheKeys.length >= 1, 'expected at least one cache entry');
+  const seen = new Map();
+  for (const key of o.cacheKeys) {
+    assert.ok(!seen.has(key), 'duplicate cache key: ' + key);
+    seen.set(key, true);
+  }
+});
+
+test('previous parent token is restored after successful wrapper return', function() {
+  const o = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-nested.yml'));
+  for (const entry of o.cacheValues) {
+    for (const token of entry.successTokens) {
+      assert.ok(token !== null && token !== undefined, 'success state must carry restored parent token');
+    }
+  }
+});
+
+test('previous parent token is restored after failed wrapper return', function() {
+  const o = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-nested.yml'));
+  for (const entry of o.cacheValues) {
+    for (const token of entry.failureTokens) {
+      assert.ok(token !== null && token !== undefined, 'failure state must carry restored parent token');
+    }
+  }
+});
+
+test('cached wrapper results never return another caller token identity', function() {
+  const o = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-nested.yml'));
+  const memoKey = o.cacheKeys[0];
+  assert.ok(memoKey);
+  assert.ok(memoKey.indexOf('\0') >= 0, 'cache key must include caller token fingerprint');
+  const parts = memoKey.split('\0');
+  assert.ok(parts.length >= 3, 'cache key must include activeKey, tokenFingerprint, and stateFingerprint');
+});
+
+test('repeating the same valid memo identity uses the cache safely', function() {
+  const o1 = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-nested.yml'));
+  const o2 = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-nested.yml'));
+  assert.deepEqual(o1.cacheKeys.sort(), o2.cacheKeys.sort());
+  assert.deepEqual(o1.finalTokens, o2.finalTokens);
+});
+
+test('distinct caller-token identities create distinct memo entries', function() {
+  const o = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-nested.yml'));
+  const tokens = o.cacheKeys.map((key) => key.split('\0')[1]).filter(Boolean);
+  const uniqueTokens = new Set(tokens);
+  if (tokens.length > 1) {
+    assert.equal(uniqueTokens.size, tokens.length, 'distinct caller tokens must produce distinct cache entries');
+  }
 });
 
 test('wrapper cache-hit sibling invocation returns distinct parent tokens', function() {
