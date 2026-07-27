@@ -1272,7 +1272,82 @@
     {
       "test_id": "LOCKED-252",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "process token is deterministic across repeated analysis"
+      "name": "process tokens are deterministic and collide-free across nested boundaries"
+    },
+    {
+      "test_id": "LOCKED-253",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "wrapper cache-hit sibling invocation returns distinct parent tokens"
+    },
+    {
+      "test_id": "LOCKED-254",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "timeout -s TERM signal passes validation"
+    },
+    {
+      "test_id": "LOCKED-255",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "timeout -s SIGTERM normalised to TERM passes"
+    },
+    {
+      "test_id": "LOCKED-256",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "timeout --signal=TERM passes"
+    },
+    {
+      "test_id": "LOCKED-257",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "timeout -s lowercase term normalised passes"
+    },
+    {
+      "test_id": "LOCKED-258",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "timeout --signal= empty value fails"
+    },
+    {
+      "test_id": "LOCKED-259",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "timeout -s unknown signal fails"
+    },
+    {
+      "test_id": "LOCKED-260",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "timeout -s with punctuation fails"
+    },
+    {
+      "test_id": "LOCKED-261",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "timeout -k 5 passes"
+    },
+    {
+      "test_id": "LOCKED-262",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "timeout -k 0.5s passes"
+    },
+    {
+      "test_id": "LOCKED-263",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "timeout --kill-after=2m passes"
+    },
+    {
+      "test_id": "LOCKED-264",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "timeout --kill-after= empty value fails"
+    },
+    {
+      "test_id": "LOCKED-265",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "timeout -k alphabetic fails"
+    },
+    {
+      "test_id": "LOCKED-266",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "timeout -k negative fails"
+    },
+    {
+      "test_id": "LOCKED-267",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "timeout -k unsupported suffix fails"
     }
   ]
 }

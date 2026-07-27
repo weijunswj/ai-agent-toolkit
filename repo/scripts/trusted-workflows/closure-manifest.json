@@ -109,6 +109,13 @@
       "root_ownership": []
     },
     {
+      "path": "repo/scripts/trusted-workflows/loader-policy.cjs",
+      "sha256": "8080985988bc2b047b2b32e746cb99a3a3233942e5529f0ace3c8510863d9521",
+      "module_type": "commonjs",
+      "direct_literal_dependencies": [],
+      "root_ownership": []
+    },
+    {
       "path": "repo/scripts/trusted-workflows/protocol.cjs",
       "sha256": "fc77f457cbe6f98308a1391dcc465d742c522a32ae8febf9452dc3e57e9bec80",
       "module_type": "commonjs",

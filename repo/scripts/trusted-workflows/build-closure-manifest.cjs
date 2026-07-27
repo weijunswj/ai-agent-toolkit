@@ -5,6 +5,7 @@ const acorn = require('acorn');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { isRequireChainRoot, isRequireMainCompare, isRequireResolveCall } = require('./loader-policy.cjs');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 const TRUSTED_ROOT = path.join(REPO_ROOT, 'repo', 'scripts', 'trusted-workflows');
@@ -64,47 +65,6 @@ function walkWithParent(node, parent, visitor) {
   }
 }
 
-function isRequireChainLoad(callee, stopProperty) {
-  if (!callee || callee.type !== 'MemberExpression') return false;
-  if (callee.computed) return true;
-  if (callee.object && callee.object.type === 'Identifier' && callee.object.name === 'require') {
-    return !(callee.property && callee.property.type === 'Identifier' && callee.property.name === stopProperty);
-  }
-  if (callee.object && callee.object.type === 'MemberExpression') {
-    return isRequireChainLoad(callee.object, stopProperty);
-  }
-  return false;
-}
-
-function isRequireMainCompare(node, parent) {
-  if (!parent || parent.type !== 'BinaryExpression') return false;
-  if (parent.operator !== '===' && parent.operator !== '!==') return false;
-  const other = parent.left === node ? parent.right : parent.left;
-  return other && other.type === 'Identifier' && other.name === 'module';
-}
-
-function isRequireMainChain(node, parentMap) {
-  for (let current = node; current;) {
-    const parent = parentMap.get(current);
-    if (!parent) break;
-    if (parent.type === 'BinaryExpression' &&
-        (parent.operator === '===' || parent.operator === '!==')) {
-      const other = parent.left === current ? parent.right : parent.left;
-      if (other && other.type === 'Identifier' && other.name === 'module') return true;
-      return false;
-    }
-    current = parent;
-  }
-  return false;
-}
-
-function isRequireResolveCall(node, parent) {
-  if (!parent || parent.type !== 'CallExpression' || parent.callee !== node) return false;
-  if (parent.arguments.length !== 1) return false;
-  const arg = parent.arguments[0];
-  return arg && arg.type === 'Literal' && typeof arg.value === 'string';
-}
-
 function resolveLiteral(fromFile, specifier) {
   if (!specifier.startsWith('.')) return null;
   if (!specifier.endsWith('.cjs') && !specifier.endsWith('.json')) die('TW_CLOSURE_EXTENSION', specifier);
@@ -141,7 +101,7 @@ function parseDependencies(file) {
         node.callee.property && ['register', 'registerHooks'].includes(node.callee.property.name)) {
       die('TW_CLOSURE_LOADER_HOOK', relative(file));
     }
-    if (node.type === 'CallExpression' && isRequireChainLoad(node.callee, 'resolve')) {
+    if (node.type === 'CallExpression' && isRequireChainRoot(node.callee, 'resolve')) {
       die('TW_CLOSURE_LOADER_CHAIN', relative(file));
     }
     if (node.type === 'Identifier' && node.name === 'createRequire') die('TW_CLOSURE_LOADER_CREATION', relative(file));
@@ -157,7 +117,7 @@ function parseDependencies(file) {
       const prop = node.property.name;
       const parent = parentMap.get(node);
       if (prop === 'main') {
-        if (isRequireMainCompare(node, parent) || isRequireMainChain(node, parentMap)) return;
+        if (isRequireMainCompare(node, parent)) return;
         die('TW_CLOSURE_LOADER_MAIN_CONTEXT', relative(file));
       }
       if (prop === 'resolve') {

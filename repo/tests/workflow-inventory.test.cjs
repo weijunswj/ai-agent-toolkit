@@ -797,8 +797,98 @@ test('unwrapNice rejects --adjustment= with empty value', function() {
   }, /WF_LAUNCHER_OPTION_UNSUPPORTED/);
 });
 
-test('process token is deterministic across repeated analysis', function() {
-  const r1 = inventory.analyzeWorkflowFixture(fixture('cfg-success-install.yml'));
-  const r2 = inventory.analyzeWorkflowFixture(fixture('cfg-success-install.yml'));
+test('process tokens are deterministic and collide-free across nested boundaries', function() {
+  const r1 = inventory.analyzeWorkflowFixture(fixture('cfg-wrapper-bash-nested.yml'));
+  const r2 = inventory.analyzeWorkflowFixture(fixture('cfg-wrapper-bash-nested.yml'));
   assert.equal(r1, r2);
+  assert.equal(r1, true);
+});
+
+test('wrapper cache-hit sibling invocation returns distinct parent tokens', function() {
+  assert.equal(inventory.analyzeWorkflowFixture(fixture('cfg-wrapper-bash-sibling.yml')), true);
+  assert.equal(inventory.analyzeWorkflowFixture(fixture('cfg-wrapper-pwsh-sibling.yml')), true);
+});
+
+test('timeout -s TERM signal passes validation', function() {
+  const r = inventory.unwrapStaticLauncher(['timeout', '-s', 'TERM', '10', 'node', 'x.cjs'], 'fixture');
+  assert.equal(r.kind, 'execution');
+  assert.deepEqual(r.tokens, ['node', 'x.cjs']);
+});
+
+test('timeout -s SIGTERM normalised to TERM passes', function() {
+  const r = inventory.unwrapStaticLauncher(['timeout', '-s', 'SIGTERM', '10', 'node', 'x.cjs'], 'fixture');
+  assert.equal(r.kind, 'execution');
+  assert.deepEqual(r.tokens, ['node', 'x.cjs']);
+});
+
+test('timeout --signal=TERM passes', function() {
+  const r = inventory.unwrapStaticLauncher(['timeout', '--signal=TERM', '10', 'node', 'x.cjs'], 'fixture');
+  assert.equal(r.kind, 'execution');
+  assert.deepEqual(r.tokens, ['node', 'x.cjs']);
+});
+
+test('timeout -s lowercase term normalised passes', function() {
+  const r = inventory.unwrapStaticLauncher(['timeout', '-s', 'term', '10', 'node', 'x.cjs'], 'fixture');
+  assert.equal(r.kind, 'execution');
+  assert.deepEqual(r.tokens, ['node', 'x.cjs']);
+});
+
+test('timeout --signal= empty value fails', function() {
+  assert.throws(function() {
+    inventory.unwrapStaticLauncher(['timeout', '--signal=', '10', 'node', 'x.cjs'], 'fixture');
+  }, /WF_LAUNCHER_OPTION_UNSUPPORTED/);
+});
+
+test('timeout -s unknown signal fails', function() {
+  assert.throws(function() {
+    inventory.unwrapStaticLauncher(['timeout', '-s', 'XYZ', '10', 'node', 'x.cjs'], 'fixture');
+  }, /WF_LAUNCHER_OPTION_UNSUPPORTED/);
+});
+
+test('timeout -s with punctuation fails', function() {
+  assert.throws(function() {
+    inventory.unwrapStaticLauncher(['timeout', '-s', 'TERM!', '10', 'node', 'x.cjs'], 'fixture');
+  }, /WF_LAUNCHER_OPTION_UNSUPPORTED/);
+});
+
+test('timeout -k 5 passes', function() {
+  const r = inventory.unwrapStaticLauncher(['timeout', '-k', '5', '10', 'node', 'x.cjs'], 'fixture');
+  assert.equal(r.kind, 'execution');
+  assert.deepEqual(r.tokens, ['node', 'x.cjs']);
+});
+
+test('timeout -k 0.5s passes', function() {
+  const r = inventory.unwrapStaticLauncher(['timeout', '-k', '0.5s', '10', 'node', 'x.cjs'], 'fixture');
+  assert.equal(r.kind, 'execution');
+  assert.deepEqual(r.tokens, ['node', 'x.cjs']);
+});
+
+test('timeout --kill-after=2m passes', function() {
+  const r = inventory.unwrapStaticLauncher(['timeout', '--kill-after=2m', '10', 'node', 'x.cjs'], 'fixture');
+  assert.equal(r.kind, 'execution');
+  assert.deepEqual(r.tokens, ['node', 'x.cjs']);
+});
+
+test('timeout --kill-after= empty value fails', function() {
+  assert.throws(function() {
+    inventory.unwrapStaticLauncher(['timeout', '--kill-after=', '10', 'node', 'x.cjs'], 'fixture');
+  }, /WF_LAUNCHER_OPTION_UNSUPPORTED/);
+});
+
+test('timeout -k alphabetic fails', function() {
+  assert.throws(function() {
+    inventory.unwrapStaticLauncher(['timeout', '-k', 'abc', '10', 'node', 'x.cjs'], 'fixture');
+  }, /WF_LAUNCHER_OPTION_UNSUPPORTED/);
+});
+
+test('timeout -k negative fails', function() {
+  assert.throws(function() {
+    inventory.unwrapStaticLauncher(['timeout', '-k', '-5', '10', 'node', 'x.cjs'], 'fixture');
+  }, /WF_LAUNCHER_OPTION_UNSUPPORTED/);
+});
+
+test('timeout -k unsupported suffix fails', function() {
+  assert.throws(function() {
+    inventory.unwrapStaticLauncher(['timeout', '-k', '5x', '10', 'node', 'x.cjs'], 'fixture');
+  }, /WF_LAUNCHER_OPTION_UNSUPPORTED/);
 });

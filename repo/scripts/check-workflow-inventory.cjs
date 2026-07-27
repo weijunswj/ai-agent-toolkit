@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const acorn = require('acorn');
 const YAML = require('yaml');
+const { isRequireChainRoot, isRequireMainCompare, isRequireResolveCall, normaliseSignal, isValidSignal, VALID_SIGNALS } = require('./trusted-workflows/loader-policy.cjs');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const WORKFLOWS_DIR = path.join(REPO_ROOT, '.github', 'workflows');
@@ -433,14 +434,23 @@ function unwrapTimeout(tokens, location) {
   while (idx < tokens.length && /^--?(?!$)/.test(tokens[idx])) {
     const opt = tokens[idx];
     if (opt === '--') { idx += 1; break; }
-    if (/^--(signal|kill-after)=/.test(opt)) {
+    if (/^--signal=/.test(opt)) {
       const eqIdx = opt.indexOf('=');
       if (eqIdx < 0 || eqIdx + 1 >= opt.length) throw new InventoryError('WF_LAUNCHER_OPTION_UNSUPPORTED', location);
+      if (!isValidSignal(opt.slice(eqIdx + 1))) throw new InventoryError('WF_LAUNCHER_OPTION_UNSUPPORTED', location);
+      idx += 1; continue;
+    }
+    if (/^--kill-after=/.test(opt)) {
+      const eqIdx = opt.indexOf('=');
+      if (eqIdx < 0 || eqIdx + 1 >= opt.length) throw new InventoryError('WF_LAUNCHER_OPTION_UNSUPPORTED', location);
+      if (!DURATION_RE.test(opt.slice(eqIdx + 1))) throw new InventoryError('WF_LAUNCHER_OPTION_UNSUPPORTED', location);
       idx += 1; continue;
     }
     if (/^-[sk]$/.test(opt)) {
       idx += 1;
-      if (idx >= tokens.length || !/^[A-Za-z0-9][A-Za-z0-9]*$/.test(tokens[idx])) throw new InventoryError('WF_LAUNCHER_OPTION_UNSUPPORTED', location);
+      if (idx >= tokens.length) throw new InventoryError('WF_LAUNCHER_OPTION_UNSUPPORTED', location);
+      if (opt === '-s') { if (!isValidSignal(tokens[idx])) throw new InventoryError('WF_LAUNCHER_OPTION_UNSUPPORTED', location); }
+      else { if (!DURATION_RE.test(tokens[idx])) throw new InventoryError('WF_LAUNCHER_OPTION_UNSUPPORTED', location); }
       idx += 1; continue;
     }
     if (/^--/.test(opt)) throw new InventoryError('WF_LAUNCHER_OPTION_UNSUPPORTED', location);
@@ -750,7 +760,7 @@ function checkLoaderAliases(ast, location) {
         (node.arguments[0].value === 'module' || node.arguments[0].value === 'node:module')) {
       throw new InventoryError('WF_LOCAL_JS_LOADER_CREATION', location);
     }
-    if (node.type === 'CallExpression' && isRequireChainLoad(node.callee, 'resolve')) {
+    if (node.type === 'CallExpression' && isRequireChainRoot(node.callee, 'resolve')) {
       throw new InventoryError('WF_LOCAL_JS_LOADER_CHAIN', location);
     }
     if (node.type === 'MemberExpression' && !node.computed &&
@@ -760,7 +770,6 @@ function checkLoaderAliases(ast, location) {
       const parent = parentMap.get(node);
       if (prop === 'main') {
         if (isRequireMainCompare(node, parent)) return;
-        if (isRequireMainChain(node, parentMap)) return;
         throw new InventoryError('WF_LOCAL_JS_LOADER_MAIN_CONTEXT', location);
       }
       if (prop === 'resolve') {
@@ -780,55 +789,6 @@ function checkLoaderAliases(ast, location) {
       throw new InventoryError('WF_LOCAL_JS_LOADER_ALIAS', location);
     }
   });
-}
-
-function isRequireMainCompare(node, parent) {
-  if (!parent || parent.type !== 'BinaryExpression') return false;
-  if (parent.operator !== '===' && parent.operator !== '!==') return false;
-  const other = parent.left === node ? parent.right : parent.left;
-  return other && other.type === 'Identifier' && other.name === 'module';
-}
-
-function isRequireMainChain(node, parentMap) {
-  for (let current = node; current;) {
-    const parent = parentMap.get(current);
-    if (!parent) break;
-    if (parent.type === 'BinaryExpression' &&
-        (parent.operator === '===' || parent.operator === '!==')) {
-      const other = parent.left === current ? parent.right : parent.left;
-      if (other && other.type === 'Identifier' && other.name === 'module') return true;
-      return false;
-    }
-    current = parent;
-  }
-  return false;
-}
-
-function isRequireResolveCall(node, parent) {
-  if (!parent || parent.type !== 'CallExpression' || parent.callee !== node) return false;
-  if (parent.arguments.length !== 1) return false;
-  const arg = parent.arguments[0];
-  return arg && arg.type === 'Literal' && typeof arg.value === 'string';
-}
-
-function isRequireChainLoad(callee, stopProperty) {
-  if (!callee || callee.type !== 'MemberExpression') return false;
-  if (callee.computed) return true;
-  if (callee.object && callee.object.type === 'Identifier' && callee.object.name === 'require') {
-    return !(callee.property && callee.property.type === 'Identifier' && callee.property.name === stopProperty);
-  }
-  if (callee.object && callee.object.type === 'MemberExpression') {
-    return isRequireChainLoad(callee.object, stopProperty);
-  }
-  return false;
-}
-
-function isRequireChain(node) {
-  if (!node || node.type !== 'MemberExpression') return false;
-  if (node.computed) return true;
-  if (node.object && node.object.type === 'Identifier' && node.object.name === 'require') return true;
-  if (node.object && node.object.type === 'MemberExpression') return isRequireChain(node.object);
-  return false;
 }
 
 function inspectLocalJavaScript(entry, actionRoot, context, location) {
@@ -936,7 +896,8 @@ function evaluateWrapper(invocation, states, context, directory, root, location,
   const file = resolveStaticFile(context.repoRoot, directory, invocation.script, location);
   const activeKey = invocation.shell + '\0' + file;
   if (context.activeWrappers.has(activeKey)) throw new InventoryError('WF_WRAPPER_CYCLE', location);
-  const memoKey = activeKey + '\0' + uniqueStates(states, location).map(stateFingerprint).sort().join('\0');
+  const tokenFingerprint = states.map((s) => s.processParentKey || '').sort().join('\0');
+  const memoKey = activeKey + '\0' + tokenFingerprint + '\0' + uniqueStates(states, location).map(stateFingerprint).sort().join('\0');
   if (context.wrapperResults.has(memoKey)) {
     const cached = context.wrapperResults.get(memoKey);
     return { success: cloneStates(cached.success), failure: cloneStates(cached.failure) };
