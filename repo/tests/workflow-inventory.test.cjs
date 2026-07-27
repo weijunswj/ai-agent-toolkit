@@ -6,6 +6,9 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const inventory = require('../scripts/check-workflow-inventory.cjs');
+const fixture = function(name) {
+  return 'repo/tests/fixtures/workflow-inventory/' + name;
+};
 
 test('real workflow inventory and auto-sync preflight rewrite pass', function() {
   assert.deepEqual(inventory.runInventory(), { workflows: 7, privileged: 2 });
@@ -165,4 +168,88 @@ test('tokenizer wrapper grammar preserves quoted paths and rejects dynamic or un
   assert.doesNotThrow(function() { inventory.validateWrapper(['bash', '-eu', 'scripts/a b.sh'], 'fixture'); });
   assert.throws(function() { inventory.validateWrapper(['bash', '--mystery', 'script.sh'], 'fixture'); }, /WF_WRAPPER_OPTION/);
   assert.throws(function() { inventory.tokenize('bash $(choose-script)', 'fixture'); }, /WF_DYNAMIC_COMMAND/);
+});
+
+test('command graph preserves unconditional, success-only, failure-only and pipeline operators', function() {
+  const graph = inventory.parseCommandGraph('true; npm ci --ignore-scripts && node x.cjs || false | true', 'bash', 'fixture');
+  assert.equal(graph.type, 'sequence');
+  assert.equal(graph.members[1].type, 'or');
+  assert.equal(graph.members[1].left.type, 'and');
+  assert.equal(graph.members[1].right.type, 'pipeline');
+});
+
+test('whole workflow rejects npm ci failure-only Node execution', function() {
+  assert.throws(function() { inventory.analyzeWorkflowFixture(fixture('cfg-or-install.yml')); }, /WF_NODE_WITHOUT_INSTALL/);
+});
+
+test('whole workflow rejects failed installation followed by failure-only execution', function() {
+  assert.throws(function() { inventory.analyzeWorkflowFixture(fixture('cfg-continued-install-failure.yml')); }, /WF_NODE_WITHOUT_INSTALL/);
+});
+
+test('whole workflow rejects pipeline-derived installation authority', function() {
+  assert.throws(function() { inventory.analyzeWorkflowFixture(fixture('cfg-pipeline-install.yml')); }, /WF_NODE_WITHOUT_INSTALL/);
+});
+
+test('whole workflow rejects subshell-only installation authority', function() {
+  assert.throws(function() { inventory.analyzeWorkflowFixture(fixture('cfg-subshell-install.yml')); }, /WF_NODE_WITHOUT_INSTALL/);
+});
+
+test('whole workflow rejects a branch join where only one path installs dependencies', function() {
+  assert.throws(function() { inventory.analyzeWorkflowFixture(fixture('cfg-branch-join.yml')); }, /WF_NODE_WITHOUT_INSTALL/);
+});
+
+test('whole workflow admits Node only on the successful npm ci path', function() {
+  assert.equal(inventory.analyzeWorkflowFixture(fixture('cfg-success-install.yml')), true);
+});
+
+test('env PATH replacement is applied before child executable identity resolution', function() {
+  assert.throws(function() { inventory.analyzeWorkflowFixture(fixture('cfg-env-path-replacement.yml')); }, /WF_NODE_WITHOUT_SETUP/);
+});
+
+test('env non-PATH assignment preserves accepted child executable identity', function() {
+  assert.equal(inventory.analyzeWorkflowFixture(fixture('cfg-env-safe.yml')), true);
+});
+
+test('composite local action closure discovers hidden repository Node execution', function() {
+  assert.throws(function() { inventory.analyzeWorkflowFixture(fixture('local-composite-workflow.yml')); }, /WF_NODE_WITHOUT_INSTALL/);
+});
+
+test('local action.yaml metadata is resolved and traversed', function() {
+  assert.throws(function() { inventory.analyzeWorkflowFixture(fixture('local-action-yaml-workflow.yml')); }, /WF_NODE_WITHOUT_INSTALL/);
+});
+
+test('ambiguous local action.yml and action.yaml metadata fails closed', function() {
+  assert.throws(function() { inventory.analyzeWorkflowFixture(fixture('local-action-ambiguous-workflow.yml')); }, /WF_LOCAL_ACTION_METADATA_AMBIGUOUS/);
+});
+
+test('unsupported local Docker action fails closed', function() {
+  assert.throws(function() { inventory.analyzeWorkflowFixture(fixture('local-docker-workflow.yml')); }, /WF_LOCAL_DOCKER_UNSUPPORTED/);
+});
+
+test('local JavaScript action pre entry point is recursively inspected', function() {
+  assert.throws(function() { inventory.analyzeWorkflowFixture(fixture('local-js-pre-workflow.yml')); }, /WF_LOCAL_JS_PROCESS_EXECUTION:.*:pre/);
+});
+
+test('local JavaScript action main entry point is recursively inspected', function() {
+  assert.throws(function() { inventory.analyzeWorkflowFixture(fixture('local-js-main-workflow.yml')); }, /WF_LOCAL_JS_PROCESS_EXECUTION:.*:main/);
+});
+
+test('local JavaScript action post entry point is recursively inspected', function() {
+  assert.throws(function() { inventory.analyzeWorkflowFixture(fixture('local-js-post-workflow.yml')); }, /WF_LOCAL_JS_PROCESS_EXECUTION:.*:post/);
+});
+
+test('Bash wrapper closure discovers hidden repository Node execution', function() {
+  assert.throws(function() { inventory.analyzeWorkflowFixture(fixture('wrapper-bash-workflow.yml')); }, /WF_NODE_WITHOUT_INSTALL/);
+});
+
+test('PowerShell wrapper closure discovers hidden repository Node execution', function() {
+  assert.throws(function() { inventory.analyzeWorkflowFixture(fixture('wrapper-powershell-workflow.yml')); }, /WF_NODE_WITHOUT_INSTALL/);
+});
+
+test('CMD wrapper closure discovers hidden repository Node execution', function() {
+  assert.throws(function() { inventory.analyzeWorkflowFixture(fixture('wrapper-cmd-workflow.yml')); }, /WF_NODE_WITHOUT_INSTALL/);
+});
+
+test('recursive wrapper cycles fail closed through the active stack', function() {
+  assert.throws(function() { inventory.analyzeWorkflowFixture(fixture('wrapper-cycle-workflow.yml')); }, /WF_WRAPPER_CYCLE/);
 });

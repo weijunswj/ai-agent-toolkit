@@ -1,0 +1,6 @@
+name: Local JavaScript pre closure
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./repo/tests/fixtures/workflow-inventory/actions/local-js-pre

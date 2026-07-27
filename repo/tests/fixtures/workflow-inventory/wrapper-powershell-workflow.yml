@@ -1,0 +1,8 @@
+name: PowerShell wrapper closure
+jobs:
+  fixture:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@fixture
+      - uses: actions/setup-node@fixture
+      - run: pwsh -File repo/tests/fixtures/workflow-inventory/wrappers/hidden.ps1

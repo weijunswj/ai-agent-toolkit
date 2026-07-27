@@ -1,0 +1,6 @@
+name: Ambiguous local action metadata
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./repo/tests/fixtures/workflow-inventory/actions/local-action-ambiguous

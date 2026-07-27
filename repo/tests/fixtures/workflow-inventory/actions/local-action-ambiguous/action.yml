@@ -1,0 +1,4 @@
+name: Ambiguous yml
+runs:
+  using: composite
+  steps: []

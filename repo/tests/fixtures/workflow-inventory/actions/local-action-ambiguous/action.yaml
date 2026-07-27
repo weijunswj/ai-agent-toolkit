@@ -1,0 +1,4 @@
+name: Ambiguous yaml
+runs:
+  using: composite
+  steps: []

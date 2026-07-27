@@ -1,0 +1,11 @@
+name: CFG continued failed install
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fixture
+      - uses: actions/setup-node@fixture
+      - run: npm ci --ignore-scripts
+        continue-on-error: true
+      - if: ${{ failure() }}
+        run: node repo/tests/fixtures/workflow-inventory/node-target.cjs

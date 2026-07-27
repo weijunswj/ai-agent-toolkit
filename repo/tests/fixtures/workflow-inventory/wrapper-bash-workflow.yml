@@ -1,0 +1,8 @@
+name: Bash wrapper closure
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fixture
+      - uses: actions/setup-node@fixture
+      - run: bash repo/tests/fixtures/workflow-inventory/wrappers/hidden.sh

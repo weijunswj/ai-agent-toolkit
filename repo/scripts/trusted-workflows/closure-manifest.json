@@ -3,6 +3,8 @@
   "generated_by": "build-closure-manifest.cjs",
   "roots": [
     "repo/scripts/trusted-workflows/auto-sync/dry-run.cjs",
+    "repo/scripts/trusted-workflows/auto-sync/preflight.cjs",
+    "repo/scripts/trusted-workflows/auto-sync/verify-rehearsal-pr.cjs",
     "repo/scripts/trusted-workflows/source-watch/dry-run.cjs",
     "repo/scripts/trusted-workflows/capture-node-toolchain.cjs",
     "repo/scripts/trusted-workflows/verify-closure-manifest.cjs"
@@ -56,7 +58,9 @@
         "repo/scripts/trusted-workflows/protocol.cjs",
         "repo/scripts/trusted-workflows/writeback-policy.cjs"
       ],
-      "root_ownership": []
+      "root_ownership": [
+        "repo/scripts/trusted-workflows/auto-sync/preflight.cjs"
+      ]
     },
     {
       "path": "repo/scripts/trusted-workflows/auto-sync/revalidate-head.cjs",
@@ -66,6 +70,17 @@
         "repo/scripts/trusted-workflows/protocol.cjs"
       ],
       "root_ownership": []
+    },
+    {
+      "path": "repo/scripts/trusted-workflows/auto-sync/verify-rehearsal-pr.cjs",
+      "sha256": "a155215b75fc30ab0852f2fde1dc395ef444c8c18d76dee39a27deac64045851",
+      "module_type": "commonjs",
+      "direct_literal_dependencies": [
+        "repo/scripts/trusted-workflows/protocol.cjs"
+      ],
+      "root_ownership": [
+        "repo/scripts/trusted-workflows/auto-sync/verify-rehearsal-pr.cjs"
+      ]
     },
     {
       "path": "repo/scripts/trusted-workflows/auto-sync/verify-write-scope.cjs",
@@ -100,6 +115,8 @@
       "direct_literal_dependencies": [],
       "root_ownership": [
         "repo/scripts/trusted-workflows/auto-sync/dry-run.cjs",
+        "repo/scripts/trusted-workflows/auto-sync/preflight.cjs",
+        "repo/scripts/trusted-workflows/auto-sync/verify-rehearsal-pr.cjs",
         "repo/scripts/trusted-workflows/source-watch/dry-run.cjs"
       ]
     },
@@ -160,6 +177,7 @@
       "direct_literal_dependencies": [],
       "root_ownership": [
         "repo/scripts/trusted-workflows/auto-sync/dry-run.cjs",
+        "repo/scripts/trusted-workflows/auto-sync/preflight.cjs",
         "repo/scripts/trusted-workflows/source-watch/dry-run.cjs"
       ]
     }

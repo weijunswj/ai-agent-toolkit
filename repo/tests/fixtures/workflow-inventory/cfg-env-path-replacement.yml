@@ -1,0 +1,9 @@
+name: Environment PATH replacement
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fixture
+      - uses: actions/setup-node@fixture
+      - run: npm ci --ignore-scripts
+      - run: env PATH=/untrusted node repo/tests/fixtures/workflow-inventory/node-target.cjs

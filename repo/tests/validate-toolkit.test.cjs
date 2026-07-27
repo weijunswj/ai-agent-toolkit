@@ -1123,8 +1123,12 @@ test('validator rejects Stage A permission, action, bootstrap and reachability d
   const cases = [
     [(text) => text.replace('  contents: read\n', '  contents: write\n'), /contents: read/],
     [(text) => text.replace('actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1', 'actions\/checkout@v7'), /full-SHA manifest/],
-    [(text) => text.replace("        if: ${{ github.event_name == 'workflow_dispatch' }}", "        if: ${{ github.event_name == 'pull_request_target' }}"), /manual-only/],
+    [(text) => text.replace("        if: ${{ github.event_name == 'workflow_dispatch' }}", "        if: ${{ github.event_name == 'pull_request_target' }}"), /trusted read-only PR API verifier/],
     [(text) => text.replace('          path: pr', '          path: ${{ inputs.checkout_path }}'), /rooted at pr/],
+    [(text) => text.replace('          ref: ${{ steps.verify_rehearsal_pr.outputs.head_sha }}', '          ref: ${{ inputs.head_sha }}'), /exact-head pinned/],
+    [(text) => text.replace('steps.verify_rehearsal_pr.outputs.pr_number', 'inputs.pull_request'), /bind only the event or verified tuple/],
+    [(text) => text.replace('      - name: Revalidate manual rehearsal pull request', '      - name: Removed revalidation'), /bracket PR checkout and rehearsal/],
+    [(text) => text.replace('GITHUB_TOKEN: ${{ github.token }}', 'GITHUB_TOKEN: ${{ secrets.WRITE_TOKEN }}'), /two read-only API token bindings/],
     [(text) => text.replace('        if: ${{ false }}\n        run: node repo\/scripts\/trusted-workflows\/auto-sync\/commit-push.cjs', '        run: node repo\/scripts\/trusted-workflows\/auto-sync\/commit-push.cjs'), /statically unreachable/],
     [(text) => text.replace('      - name: Emit deterministic dry-run proposal', '      - name: Install\n        run: npm ci\n\n      - name: Emit deterministic dry-run proposal'), /must not install packages/],
     [(text) => text.replace('/usr/bin/sha256sum --binary -- repo/scripts/trusted-workflows/capture-node-toolchain.cjs', '/usr/bin/sha256sum repo/scripts/trusted-workflows/capture-node-toolchain.cjs'), /bootstrap both trusted helpers/],

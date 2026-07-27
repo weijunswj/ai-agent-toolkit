@@ -15,6 +15,7 @@ const sourcePath = path.join(repoRoot, '.github', 'workflows', 'source-watch-pr.
 const auto = YAML.parse(fs.readFileSync(autoPath, 'utf8'));
 const source = YAML.parse(fs.readFileSync(sourcePath, 'utf8'));
 const policies = require(path.join(trusted, 'writeback-policy.cjs'));
+const rehearsalVerifier = require(path.join(trusted, 'auto-sync', 'verify-rehearsal-pr.cjs'));
 
 function steps(workflow, job) {
   return workflow.jobs[job].steps;
@@ -25,10 +26,15 @@ test('pull_request_target executes the canonical base workflow authority', funct
   const values = steps(auto, 'auto-sync-generated-surfaces');
   const trustedIndex = values.findIndex(function(step) { return step.id === 'checkout_trusted_base'; });
   const preflightIndex = values.findIndex(function(step) { return step.name === 'Preflight guard'; });
+  const verifyIndex = values.findIndex(function(step) { return step.id === 'verify_rehearsal_pr'; });
   const prIndex = values.findIndex(function(step) { return step.id === 'checkout_pr_data'; });
-  assert.ok(trustedIndex >= 0 && trustedIndex < preflightIndex && preflightIndex < prIndex);
+  const dryRunIndex = values.findIndex(function(step) { return step.name === 'Emit deterministic dry-run proposal'; });
+  const revalidateIndex = values.findIndex(function(step) { return step.id === 'revalidate_rehearsal_pr'; });
+  assert.ok(trustedIndex >= 0 && trustedIndex < preflightIndex && preflightIndex < verifyIndex &&
+    verifyIndex < prIndex && prIndex < dryRunIndex && dryRunIndex < revalidateIndex);
   assert.equal(values[trustedIndex].with.ref, '${{ github.event.repository.default_branch }}');
   assert.equal(values[prIndex].if, "${{ github.event_name == 'workflow_dispatch' }}");
+  assert.equal(values[prIndex].with.ref, '${{ steps.verify_rehearsal_pr.outputs.head_sha }}');
 });
 
 test('Stage A auto-sync writeback is structurally disabled', function() {
@@ -104,6 +110,112 @@ test('Stage A manual rehearsal generates the exact proposal in PR data without e
   } finally {
     fs.rmSync(workspace, { recursive: true, force: true });
   }
+});
+
+function validPullRequestRecord() {
+  return {
+    number: 310,
+    state: 'open',
+    base: {
+      ref: 'main',
+      repo: { id: 10020053, full_name: 'weijunswj/ai-agent-toolkit' }
+    },
+    head: {
+      sha: '1'.repeat(40),
+      repo: { id: 10020053, full_name: 'weijunswj/ai-agent-toolkit' }
+    }
+  };
+}
+
+function expectedRehearsal(phase = 'initial') {
+  return rehearsalVerifier.expectedTuple(
+    phase,
+    '10020053',
+    'weijunswj/ai-agent-toolkit',
+    '310',
+    '1'.repeat(40)
+  );
+}
+
+test('manual rehearsal rejects the wrong PR number returned by API authority', function() {
+  assert.throws(function() {
+    rehearsalVerifier.verifyRecord({ ...validPullRequestRecord(), number: 311 }, expectedRehearsal());
+  }, /TW_REHEARSAL_PR_MISMATCH/);
+});
+
+test('manual rehearsal rejects a requested head that differs from the current PR head', function() {
+  const record = validPullRequestRecord();
+  record.head.sha = '2'.repeat(40);
+  assert.throws(function() { rehearsalVerifier.verifyRecord(record, expectedRehearsal()); }, /TW_REHEARSAL_HEAD_MISMATCH/);
+});
+
+test('manual rehearsal revalidation rejects head movement after the dry run', function() {
+  const frozen = rehearsalVerifier.verifyRecord(validPullRequestRecord(), expectedRehearsal());
+  const moved = validPullRequestRecord();
+  moved.head.sha = '2'.repeat(40);
+  const expected = rehearsalVerifier.expectedTuple(
+    'revalidate',
+    frozen.repository_id,
+    frozen.repository,
+    String(frozen.pr_number),
+    frozen.head_sha
+  );
+  assert.throws(function() { rehearsalVerifier.verifyRecord(moved, expected); }, /TW_REHEARSAL_HEAD_MISMATCH/);
+});
+
+test('manual rehearsal rejects a fork pull request', function() {
+  const record = validPullRequestRecord();
+  record.head.repo = { id: 999, full_name: 'fork/repository' };
+  assert.throws(function() { rehearsalVerifier.verifyRecord(record, expectedRehearsal()); }, /TW_REHEARSAL_FORK/);
+});
+
+test('manual rehearsal rejects a pull request targeting the wrong base', function() {
+  const record = validPullRequestRecord();
+  record.base.ref = 'release';
+  assert.throws(function() { rehearsalVerifier.verifyRecord(record, expectedRehearsal()); }, /TW_REHEARSAL_BASE/);
+});
+
+test('manual rehearsal revalidation rejects a PR closed during rehearsal', function() {
+  const record = validPullRequestRecord();
+  record.state = 'closed';
+  assert.throws(function() { rehearsalVerifier.verifyRecord(record, expectedRehearsal('revalidate')); }, /TW_REHEARSAL_NOT_OPEN/);
+});
+
+test('manual rehearsal accepts and freezes one exact verified PR tuple', function() {
+  const tuple = rehearsalVerifier.verifyRecord(validPullRequestRecord(), expectedRehearsal());
+  assert.deepEqual({
+    repository_id: tuple.repository_id,
+    repository: tuple.repository,
+    pr_number: tuple.pr_number,
+    head_sha: tuple.head_sha,
+    base_ref: tuple.base_ref,
+    state: tuple.state,
+    same_repository: tuple.same_repository
+  }, {
+    repository_id: '10020053',
+    repository: 'weijunswj/ai-agent-toolkit',
+    pr_number: 310,
+    head_sha: '1'.repeat(40),
+    base_ref: 'main',
+    state: 'open',
+    same_repository: true
+  });
+  assert.match(tuple.tuple_digest, /^[0-9a-f]{64}$/);
+});
+
+test('manual rehearsal workflow emits only verified tuple outputs after read-only API checks', function() {
+  const values = steps(auto, 'auto-sync-generated-surfaces');
+  const verify = values.find(function(step) { return step.id === 'verify_rehearsal_pr'; });
+  const dryRun = values.find(function(step) { return step.name === 'Emit deterministic dry-run proposal'; });
+  const revalidate = values.find(function(step) { return step.id === 'revalidate_rehearsal_pr'; });
+  assert.equal(verify.env.GITHUB_TOKEN, '${{ github.token }}');
+  assert.equal(verify.env.GITHUB_API_URL, '${{ github.api_url }}');
+  assert.match(verify.run, /verify-rehearsal-pr\.cjs/);
+  assert.equal(dryRun.env.PR_NUMBER, '${{ github.event.pull_request.number || steps.verify_rehearsal_pr.outputs.pr_number }}');
+  assert.equal(dryRun.env.HEAD_SHA, '${{ github.event.pull_request.head.sha || steps.verify_rehearsal_pr.outputs.head_sha }}');
+  assert.match(revalidate.run, /revalidate/);
+  assert.equal(rehearsalVerifier.TIMEOUT_MS, 10000);
+  assert.equal(rehearsalVerifier.MAX_RESPONSE_BYTES, 256 * 1024);
 });
 
 test('Stage A source-watch is inert for schedule and manual dispatch', function() {

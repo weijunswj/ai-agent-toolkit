@@ -1,0 +1,6 @@
+name: Hidden composite Node
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: node repo/tests/fixtures/workflow-inventory/node-target.cjs

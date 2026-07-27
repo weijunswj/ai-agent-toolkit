@@ -15,6 +15,8 @@ const VALIDATION_ONLY = new Set([
 ]);
 const ROOTS = [
   'repo/scripts/trusted-workflows/auto-sync/dry-run.cjs',
+  'repo/scripts/trusted-workflows/auto-sync/preflight.cjs',
+  'repo/scripts/trusted-workflows/auto-sync/verify-rehearsal-pr.cjs',
   'repo/scripts/trusted-workflows/source-watch/dry-run.cjs',
   'repo/scripts/trusted-workflows/capture-node-toolchain.cjs',
   'repo/scripts/trusted-workflows/verify-closure-manifest.cjs'

@@ -1,0 +1,6 @@
+name: Unsupported local Docker action
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./repo/tests/fixtures/workflow-inventory/actions/local-docker

@@ -1,0 +1,10 @@
+name: CFG partial install branch
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fixture
+      - uses: actions/setup-node@fixture
+      - if: ${{ github.ref == 'refs/heads/main' }}
+        run: npm ci --ignore-scripts
+      - run: node repo/tests/fixtures/workflow-inventory/node-target.cjs

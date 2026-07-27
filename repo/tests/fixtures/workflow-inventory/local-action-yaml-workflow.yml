@@ -1,0 +1,8 @@
+name: Local action.yaml closure
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fixture
+      - uses: actions/setup-node@fixture
+      - uses: ./repo/tests/fixtures/workflow-inventory/actions/local-action-yaml

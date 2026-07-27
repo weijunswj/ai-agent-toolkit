@@ -85,12 +85,26 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pull_request }}
         run: node repo/scripts/trusted-workflows/verify-closure-manifest.cjs repo/scripts/trusted-workflows/auto-sync/preflight.cjs "[\"$EVENT_NAME\",\"$REPOSITORY_ID\",\"$BASE_REF\",\"$PR_NUMBER\"]"
 
+      - name: Verify manual rehearsal pull request
+        id: verify_rehearsal_pr
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        working-directory: ${{ github.workspace }}/trusted
+        timeout-minutes: 1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          EXPECTED_REPOSITORY_ID: ${{ github.event.repository.id }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          REQUESTED_PR: ${{ inputs.pull_request }}
+          REQUESTED_HEAD: ${{ inputs.head_sha }}
+        run: node repo/scripts/trusted-workflows/verify-closure-manifest.cjs repo/scripts/trusted-workflows/auto-sync/verify-rehearsal-pr.cjs "[\"initial\",\"$EXPECTED_REPOSITORY_ID\",\"$EXPECTED_REPOSITORY\",\"$REQUESTED_PR\",\"$REQUESTED_HEAD\"]"
+
       - name: Checkout PR head commit
         id: checkout_pr_data
         if: ${{ github.event_name == 'workflow_dispatch' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ github.event.pull_request.head.sha || inputs.head_sha }}
+          ref: ${{ steps.verify_rehearsal_pr.outputs.head_sha }}
           persist-credentials: false
           path: pr
 
@@ -99,10 +113,24 @@ jobs:
         timeout-minutes: 1
         env:
           EVENT_NAME: ${{ github.event_name }}
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pull_request }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.head_sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number || steps.verify_rehearsal_pr.outputs.pr_number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || steps.verify_rehearsal_pr.outputs.head_sha }}
           PR_ROOT: ${{ github.workspace }}/pr
         run: node repo/scripts/trusted-workflows/verify-closure-manifest.cjs repo/scripts/trusted-workflows/auto-sync/dry-run.cjs "[\"$PR_NUMBER\",\"$HEAD_SHA\",\"$EVENT_NAME\",\"$PR_ROOT\"]"
+
+      - name: Revalidate manual rehearsal pull request
+        id: revalidate_rehearsal_pr
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        working-directory: ${{ github.workspace }}/trusted
+        timeout-minutes: 1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          EXPECTED_REPOSITORY_ID: ${{ steps.verify_rehearsal_pr.outputs.repository_id }}
+          EXPECTED_REPOSITORY: ${{ steps.verify_rehearsal_pr.outputs.repository }}
+          VERIFIED_PR: ${{ steps.verify_rehearsal_pr.outputs.pr_number }}
+          VERIFIED_HEAD: ${{ steps.verify_rehearsal_pr.outputs.head_sha }}
+        run: node repo/scripts/trusted-workflows/verify-closure-manifest.cjs repo/scripts/trusted-workflows/auto-sync/verify-rehearsal-pr.cjs "[\"revalidate\",\"$EXPECTED_REPOSITORY_ID\",\"$EXPECTED_REPOSITORY\",\"$VERIFIED_PR\",\"$VERIFIED_HEAD\"]"
 
       - name: Commit generated surfaces
         if: ${{ false }}

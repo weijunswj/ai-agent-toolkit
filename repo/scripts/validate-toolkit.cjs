@@ -1793,28 +1793,56 @@ function validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors) {
     fail(errors, `${entry.relPath} must bootstrap both trusted helpers with /usr/bin/sha256sum`);
   }
   const preflight = text.indexOf('- name: Preflight guard');
+  const verifyRehearsal = text.indexOf('- name: Verify manual rehearsal pull request');
   const prCheckout = text.indexOf('- name: Checkout PR head commit');
-  if (preflight < 0 || prCheckout < 0 || preflight > prCheckout) fail(errors, `${entry.relPath} preflight must dominate PR checkout`);
+  const dryRun = text.indexOf('- name: Emit deterministic dry-run proposal');
+  const revalidateRehearsal = text.indexOf('- name: Revalidate manual rehearsal pull request');
+  if (preflight < 0 || verifyRehearsal < 0 || prCheckout < 0 || dryRun < 0 || revalidateRehearsal < 0 ||
+      !(preflight < verifyRehearsal && verifyRehearsal < prCheckout && prCheckout < dryRun && dryRun < revalidateRehearsal)) {
+    fail(errors, `${entry.relPath} trusted API preflight and revalidation must bracket PR checkout and rehearsal`);
+  }
   const stepBlocks = workflowStepBlocks(text);
+  const verifyBlock = workflowStepText(stepBlocks, 'Verify manual rehearsal pull request');
   const checkoutBlock = workflowStepText(stepBlocks, 'Checkout PR head commit');
   if (!checkoutBlock ||
       !/if:\s*\$\{\{\s*github\.event_name\s*==\s*'workflow_dispatch'\s*\}\}/.test(checkoutBlock) ||
-      !/ref:\s*\$\{\{\s*github\.event\.pull_request\.head\.sha\s*\|\|\s*inputs\.head_sha\s*\}\}/.test(checkoutBlock) ||
+      !/ref:\s*\$\{\{\s*steps\.verify_rehearsal_pr\.outputs\.head_sha\s*\}\}/.test(checkoutBlock) ||
       !/persist-credentials:\s*false/.test(checkoutBlock) ||
       !/path:\s*pr(?:\s|$)/.test(checkoutBlock)) {
     fail(errors, `${entry.relPath} PR data checkout must be manual-only, exact-head pinned, credential-free and rooted at pr`);
   }
+  if (!verifyBlock ||
+      !/if:\s*\$\{\{\s*github\.event_name\s*==\s*'workflow_dispatch'\s*\}\}/.test(verifyBlock) ||
+      !/EXPECTED_REPOSITORY_ID:\s*\$\{\{\s*github\.event\.repository\.id\s*\}\}/.test(verifyBlock) ||
+      !/EXPECTED_REPOSITORY:\s*\$\{\{\s*github\.repository\s*\}\}/.test(verifyBlock) ||
+      !/GITHUB_TOKEN:\s*\$\{\{\s*github\.token\s*\}\}/.test(verifyBlock) ||
+      !/verify-rehearsal-pr\.cjs/.test(verifyBlock)) {
+    fail(errors, `${entry.relPath} manual rehearsal must use the trusted read-only PR API verifier`);
+  }
   const dryRunBlock = workflowStepText(stepBlocks, 'Emit deterministic dry-run proposal');
   if (!dryRunBlock ||
       !/EVENT_NAME:\s*\$\{\{\s*github\.event_name\s*\}\}/.test(dryRunBlock) ||
+      !/PR_NUMBER:\s*\$\{\{\s*github\.event\.pull_request\.number\s*\|\|\s*steps\.verify_rehearsal_pr\.outputs\.pr_number\s*\}\}/.test(dryRunBlock) ||
+      !/HEAD_SHA:\s*\$\{\{\s*github\.event\.pull_request\.head\.sha\s*\|\|\s*steps\.verify_rehearsal_pr\.outputs\.head_sha\s*\}\}/.test(dryRunBlock) ||
       !/PR_ROOT:\s*\$\{\{\s*github\.workspace\s*\}\}\/pr/.test(dryRunBlock)) {
-    fail(errors, `${entry.relPath} Stage A dry-run must bind the event and symbolic PR data root`);
+    fail(errors, `${entry.relPath} Stage A dry-run must bind only the event or verified tuple and symbolic PR data root`);
+  }
+  const revalidateBlock = workflowStepText(stepBlocks, 'Revalidate manual rehearsal pull request');
+  if (!revalidateBlock ||
+      !/EXPECTED_REPOSITORY_ID:\s*\$\{\{\s*steps\.verify_rehearsal_pr\.outputs\.repository_id\s*\}\}/.test(revalidateBlock) ||
+      !/VERIFIED_PR:\s*\$\{\{\s*steps\.verify_rehearsal_pr\.outputs\.pr_number\s*\}\}/.test(revalidateBlock) ||
+      !/VERIFIED_HEAD:\s*\$\{\{\s*steps\.verify_rehearsal_pr\.outputs\.head_sha\s*\}\}/.test(revalidateBlock) ||
+      !/verify-rehearsal-pr\.cjs/.test(revalidateBlock)) {
+    fail(errors, `${entry.relPath} manual rehearsal must re-fetch the frozen verified tuple`);
   }
   for (const step of ['Commit generated surfaces', 'Push generated surfaces']) {
     const block = workflowStepText(stepBlocks, step);
     if (!block || !/if:\s*\$\{\{ false \}\}/.test(block)) fail(errors, `${entry.relPath} Stage A step must be statically unreachable: ${step}`);
   }
-  if (/github\.token|GH_TOKEN|contents:\s*write|pull-requests:\s*write/i.test(text)) fail(errors, `${entry.relPath} Stage A must expose no write credential or permission`);
+  const tokenReferences = text.match(/GITHUB_TOKEN:\s*\$\{\{\s*github\.token\s*\}\}/g) || [];
+  if (tokenReferences.length !== 2 || /GH_TOKEN|contents:\s*write|pull-requests:\s*write/i.test(text)) {
+    fail(errors, `${entry.relPath} Stage A must expose only the two read-only API token bindings and no write permission`);
+  }
 }
 
 function validateWorkflows(errors) {

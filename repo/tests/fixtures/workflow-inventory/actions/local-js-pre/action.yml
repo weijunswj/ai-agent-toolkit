@@ -1,0 +1,6 @@
+name: JavaScript pre fixture
+runs:
+  using: node24
+  pre: pre.cjs
+  main: main.cjs
+  post: post.cjs

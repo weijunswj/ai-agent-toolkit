@@ -582,107 +582,247 @@
     {
       "test_id": "LOCKED-114",
       "file": "repo/tests/trusted-workflow-rollout.test.cjs",
-      "name": "Stage A source-watch is inert for schedule and manual dispatch"
+      "name": "manual rehearsal rejects the wrong PR number returned by API authority"
     },
     {
       "test_id": "LOCKED-115",
       "file": "repo/tests/trusted-workflow-rollout.test.cjs",
-      "name": "Stage B1 canary and Stage B2 general activation remain separate controller gates"
+      "name": "manual rehearsal rejects a requested head that differs from the current PR head"
     },
     {
       "test_id": "LOCKED-116",
       "file": "repo/tests/trusted-workflow-rollout.test.cjs",
-      "name": "all privileged external actions are full-SHA manifest-bound and used once"
+      "name": "manual rehearsal revalidation rejects head movement after the dry run"
     },
     {
       "test_id": "LOCKED-117",
       "file": "repo/tests/trusted-workflow-rollout.test.cjs",
-      "name": "bootstrap hashing uses only the locked absolute executable and exact arguments"
+      "name": "manual rehearsal rejects a fork pull request"
     },
     {
       "test_id": "LOCKED-118",
       "file": "repo/tests/trusted-workflow-rollout.test.cjs",
-      "name": "source-watch append-only planner refuses branch movement and never selects force"
+      "name": "manual rehearsal rejects a pull request targeting the wrong base"
     },
     {
       "test_id": "LOCKED-119",
       "file": "repo/tests/trusted-workflow-rollout.test.cjs",
-      "name": "source-watch notification PR deduplication is exact"
+      "name": "manual rehearsal revalidation rejects a PR closed during rehearsal"
     },
     {
       "test_id": "LOCKED-120",
-      "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "real workflow inventory and auto-sync preflight rewrite pass"
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "manual rehearsal accepts and freezes one exact verified PR tuple"
     },
     {
       "test_id": "LOCKED-121",
-      "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "symbolic GitHub workspace roots admit reviewed checkout identities only"
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "manual rehearsal workflow emits only verified tuple outputs after read-only API checks"
     },
     {
       "test_id": "LOCKED-122",
-      "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "environment alias reassignment and shadowing fail closed"
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "Stage A source-watch is inert for schedule and manual dispatch"
     },
     {
       "test_id": "LOCKED-123",
-      "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "PATH removal and replacement invalidate setup-node identity"
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "Stage B1 canary and Stage B2 general activation remain separate controller gates"
     },
     {
       "test_id": "LOCKED-124",
-      "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "command -p, xargs, find -exec and find -execdir are rejected"
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "all privileged external actions are full-SHA manifest-bound and used once"
     },
     {
       "test_id": "LOCKED-125",
-      "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "PowerShell pipeline chains segment and unsupported constructs fail closed"
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "bootstrap hashing uses only the locked absolute executable and exact arguments"
     },
     {
       "test_id": "LOCKED-126",
-      "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "PowerShell normal script preserves environment and location but not lexical scope"
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "source-watch append-only planner refuses branch movement and never selects force"
     },
     {
       "test_id": "LOCKED-127",
-      "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "PowerShell dot sourcing propagates lexical environment and location state"
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "source-watch notification PR deduplication is exact"
     },
     {
       "test_id": "LOCKED-128",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "PowerShell child process and separate runspace inherit isolated environment and location copies"
+      "name": "real workflow inventory and auto-sync preflight rewrite pass"
     },
     {
       "test_id": "LOCKED-129",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "runner command-file identities are step-scoped append-only and runner-temp is non-executable"
+      "name": "symbolic GitHub workspace roots admit reviewed checkout identities only"
     },
     {
       "test_id": "LOCKED-130",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "nearest package root is derived from the execution directory by path components"
+      "name": "environment alias reassignment and shadowing fail closed"
     },
     {
       "test_id": "LOCKED-131",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "package scripts resolve recursively from the nearest package root with separate memo and active stacks"
+      "name": "PATH removal and replacement invalidate setup-node identity"
     },
     {
       "test_id": "LOCKED-132",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "package-script cycles and unsupported prefix or workspace roots fail closed"
+      "name": "command -p, xargs, find -exec and find -execdir are rejected"
     },
     {
       "test_id": "LOCKED-133",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "dependency-tree and checkout replacement commands invalidate installation authority"
+      "name": "PowerShell pipeline chains segment and unsupported constructs fail closed"
     },
     {
       "test_id": "LOCKED-134",
       "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "PowerShell normal script preserves environment and location but not lexical scope"
+    },
+    {
+      "test_id": "LOCKED-135",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "PowerShell dot sourcing propagates lexical environment and location state"
+    },
+    {
+      "test_id": "LOCKED-136",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "PowerShell child process and separate runspace inherit isolated environment and location copies"
+    },
+    {
+      "test_id": "LOCKED-137",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "runner command-file identities are step-scoped append-only and runner-temp is non-executable"
+    },
+    {
+      "test_id": "LOCKED-138",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "nearest package root is derived from the execution directory by path components"
+    },
+    {
+      "test_id": "LOCKED-139",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "package scripts resolve recursively from the nearest package root with separate memo and active stacks"
+    },
+    {
+      "test_id": "LOCKED-140",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "package-script cycles and unsupported prefix or workspace roots fail closed"
+    },
+    {
+      "test_id": "LOCKED-141",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "dependency-tree and checkout replacement commands invalidate installation authority"
+    },
+    {
+      "test_id": "LOCKED-142",
+      "file": "repo/tests/workflow-inventory.test.cjs",
       "name": "tokenizer wrapper grammar preserves quoted paths and rejects dynamic or unknown wrapper options"
+    },
+    {
+      "test_id": "LOCKED-143",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "command graph preserves unconditional, success-only, failure-only and pipeline operators"
+    },
+    {
+      "test_id": "LOCKED-144",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "whole workflow rejects npm ci failure-only Node execution"
+    },
+    {
+      "test_id": "LOCKED-145",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "whole workflow rejects failed installation followed by failure-only execution"
+    },
+    {
+      "test_id": "LOCKED-146",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "whole workflow rejects pipeline-derived installation authority"
+    },
+    {
+      "test_id": "LOCKED-147",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "whole workflow rejects subshell-only installation authority"
+    },
+    {
+      "test_id": "LOCKED-148",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "whole workflow rejects a branch join where only one path installs dependencies"
+    },
+    {
+      "test_id": "LOCKED-149",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "whole workflow admits Node only on the successful npm ci path"
+    },
+    {
+      "test_id": "LOCKED-150",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "env PATH replacement is applied before child executable identity resolution"
+    },
+    {
+      "test_id": "LOCKED-151",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "env non-PATH assignment preserves accepted child executable identity"
+    },
+    {
+      "test_id": "LOCKED-152",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "composite local action closure discovers hidden repository Node execution"
+    },
+    {
+      "test_id": "LOCKED-153",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "local action.yaml metadata is resolved and traversed"
+    },
+    {
+      "test_id": "LOCKED-154",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "ambiguous local action.yml and action.yaml metadata fails closed"
+    },
+    {
+      "test_id": "LOCKED-155",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "unsupported local Docker action fails closed"
+    },
+    {
+      "test_id": "LOCKED-156",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "local JavaScript action pre entry point is recursively inspected"
+    },
+    {
+      "test_id": "LOCKED-157",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "local JavaScript action main entry point is recursively inspected"
+    },
+    {
+      "test_id": "LOCKED-158",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "local JavaScript action post entry point is recursively inspected"
+    },
+    {
+      "test_id": "LOCKED-159",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "Bash wrapper closure discovers hidden repository Node execution"
+    },
+    {
+      "test_id": "LOCKED-160",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "PowerShell wrapper closure discovers hidden repository Node execution"
+    },
+    {
+      "test_id": "LOCKED-161",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "CMD wrapper closure discovers hidden repository Node execution"
+    },
+    {
+      "test_id": "LOCKED-162",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "recursive wrapper cycles fail closed through the active stack"
     }
   ]
 }

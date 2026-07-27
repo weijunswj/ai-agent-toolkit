@@ -1,0 +1,4 @@
+name: Unsupported Docker action
+runs:
+  using: docker
+  image: Dockerfile
