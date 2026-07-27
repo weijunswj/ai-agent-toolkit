@@ -17,6 +17,7 @@ const {
   N8N_SKILLS_TREE_LIMITS,
   classifyN8nSkillsCompatibility,
   reconcileN8nSkillsPlugin,
+  renderN8nSkillsCompatibilityDecision,
   validateN8nSkillsCompatibilityContractParity
 } = require('./repair-codex-plugin-windows-hooks.cjs');
 const {
@@ -29,9 +30,23 @@ const {
   reconcileOwnedStaging,
   writeOwnedStagingAuxiliary
 } = require('./toolkit-staging-generations.cjs');
+const {
+  appendLogicalRetirement,
+  appendN8nRepairJournalRecord,
+  assertJournalAuthorityUnchanged,
+  bindJournalAuthority,
+  compactSupersededTransaction,
+  discoverN8nRepairJournalsForTarget,
+  journalPaths,
+  logicalRetirementManifest,
+  residueManifest,
+  revalidateLogicalRetirement,
+  targetJournalUsage,
+  writeTerminalCheckpoint
+} = require('./toolkit-n8n-repair-journal.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.9.12';
+const BRIDGE_VERSION = '2.9.13';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -76,6 +91,7 @@ const N8N_REPLACEMENT_DIRECTORY_ENTRY_LIMIT = 4096;
 const N8N_EVIDENCE_FILE_BYTE_LIMIT = 1024 * 1024;
 const N8N_EVIDENCE_CONTEXT = Symbol('n8n-evidence-context');
 const N8N_EVIDENCE_LIFECYCLE_OWNER = Symbol('n8n-evidence-lifecycle-owner');
+const N8N_JOURNAL_CONTEXT = Symbol('n8n-journal-context');
 const GIT_CREDENTIAL_HELPERS = ['manager', 'manager-core'];
 const AGENT_RULES_TEMPLATE_DIR = path.join('skills', 'ai-coding-agent-rules', 'repo-local');
 const AGENT_RULES_PREFLIGHT_MAX_FINDINGS = 8;
@@ -2544,10 +2560,19 @@ function withOwnedStaging(options, callback) {
           beforeDelete: options.beforeDelete,
           auxiliaryKinds: options.auxiliaryKinds || []
         });
-      if (!cleanup.cleaned) {
+      if (
+        cleanup.physicalCleanupError
+        || cleanup.checkpointCleanupError
+        || (!cleanup.cleaned && !cleanup.logicallyRetired)
+      ) {
         const cleanupError = new Error(
-          `Owned staging generation ${generation.record.generation_id} was preserved because cleanup could not prove ownership: ${cleanup.error?.message || cleanup.reason}`
+          `Owned staging generation ${generation.record.generation_id} was preserved because cleanup could not prove ownership: ${cleanup.checkpointCleanupError?.message || cleanup.physicalCleanupCause?.message || cleanup.error?.message || cleanup.physicalCleanupError || cleanup.reason}`
         );
+        cleanupError.code = cleanup.checkpointCleanupError?.code
+          || cleanup.physicalCleanupCause?.code
+          || cleanup.error?.code
+          || cleanup.physicalCleanupError
+          || 'physical-cleanup-pending';
         if (operationError) {
           operationError.stagingCleanupError = cleanupError;
           operationError.message = `${operationError.message}; ${cleanupError.message}`;
@@ -3133,14 +3158,21 @@ function sleepSync(ms) {
 function renameSyncWithRetry(sourcePath, targetPath, options = {}) {
   const attempts = options.renameAttempts || 6;
   const delayMs = options.retryDelayMs || 75;
+  const renameOperation = options.renameOperation || fs.renameSync;
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      fs.renameSync(sourcePath, targetPath);
+      if (options.beforeEachAttempt) {
+        options.beforeEachAttempt({ attempt, sourcePath, targetPath });
+      }
+      renameOperation(sourcePath, targetPath);
       return;
     } catch (error) {
       lastError = error;
       if (!isTransientRenameError(error) || attempt === attempts) break;
+      if (options.afterTransientFailure) {
+        options.afterTransientFailure({ attempt, code: error.code });
+      }
       sleepSync(delayMs);
     }
   }
@@ -3645,40 +3677,60 @@ function n8nInventoryEntryIdentitiesMatch(left, right) {
     && Object.keys(left).every((key) => String(left[key]) === String(right[key]));
 }
 
-function n8nInventoryOwnedEvidenceEntries(transaction) {
-  if (!transaction?.evidenceAuthority) return new Map();
-  return new Map(transaction.evidenceAuthority.entries.map((entry) => [entry.normalized_path, entry]));
+function n8nInventoryTransactions(options = {}) {
+  return [
+    ...(options.transactions || []),
+    ...(options.transaction ? [options.transaction] : [])
+  ].filter(Boolean);
 }
 
-function n8nInventoryOwnedDirectory(transaction, entryPath) {
-  if (!transaction) return null;
-  const normalized = normalizedN8nTargetPath(entryPath);
-  const generation = transaction.generation;
-  const preTransaction = transaction.preTransaction?.preTransaction || transaction.preTransaction;
-  if (
-    normalized === normalizedN8nTargetPath(generation.stagePath)
-    && preTransaction?.creating_process?.lease_token === generation.record.ownership_token
-    && preTransaction?.created_at === generation.record.created_at
-  ) {
-    return {
-      kind: 'owned-stage',
-      generation_id: generation.record.generation_id,
-      identity: preTransaction.stage_directory_identity,
-      ownership_token: generation.record.ownership_token
-    };
+function n8nInventoryOwnedEvidenceEntries(transactions) {
+  const result = new Map();
+  for (const transaction of transactions) {
+    for (const entry of transaction?.evidenceAuthority?.entries || []) {
+      if (result.has(entry.normalized_path)) {
+        throw failClosedN8nRepair('ambiguous-target', 'Two transaction authorities claim the same n8n Skills evidence path');
+      }
+      result.set(entry.normalized_path, entry);
+    }
   }
-  if (
-    transaction.transaction
-    && normalized === normalizedN8nTargetPath(transaction.validated.backupPath)
-    && transaction.transaction.creating_process?.lease_token === generation.record.ownership_token
-    && transaction.transaction.created_at === generation.record.created_at
-  ) {
-    return {
-      kind: 'owned-backup',
-      generation_id: generation.record.generation_id,
-      identity: transaction.transaction.original_target_directory_identity,
-      ownership_token: generation.record.ownership_token
-    };
+  return result;
+}
+
+function n8nInventoryOwnedDirectory(transactions, entryPath) {
+  const normalized = normalizedN8nTargetPath(entryPath);
+  for (const transaction of transactions) {
+    const generation = transaction.generation;
+    const preTransaction = transaction.preTransaction?.preTransaction || transaction.preTransaction;
+    if (
+      normalized === normalizedN8nTargetPath(generation.stagePath)
+      && preTransaction?.creating_process?.lease_token === generation.record.ownership_token
+      && preTransaction?.created_at === generation.record.created_at
+    ) {
+      return {
+        kind: transaction[N8N_JOURNAL_CONTEXT]?.status === 'logically-retired'
+          ? 'retired-stage'
+          : 'owned-stage',
+        generation_id: generation.record.generation_id,
+        identity: preTransaction.stage_directory_identity,
+        ownership_token: generation.record.ownership_token
+      };
+    }
+    if (
+      transaction.transaction
+      && normalized === normalizedN8nTargetPath(transaction.validated.backupPath)
+      && transaction.transaction.creating_process?.lease_token === generation.record.ownership_token
+      && transaction.transaction.created_at === generation.record.created_at
+    ) {
+      return {
+        kind: transaction[N8N_JOURNAL_CONTEXT]?.status === 'logically-retired'
+          ? 'retired-backup'
+          : 'owned-backup',
+        generation_id: generation.record.generation_id,
+        identity: transaction.transaction.original_target_directory_identity,
+        ownership_token: generation.record.ownership_token
+      };
+    }
   }
   return null;
 }
@@ -3726,13 +3778,20 @@ function discoverN8nSkillsCacheRoots(codexHome, options = {}) {
   const parentIdentity = n8nDirectoryIdentity(parentStat);
   const parentObservationIdentity = n8nInventoryEntryIdentity(parentStat);
   const parentRealPath = normalizedN8nTargetPath(fs.realpathSync.native(parent));
-  if (options.transaction?.evidenceAuthority) {
-    revalidateN8nEvidenceAuthority(options.transaction.evidenceAuthority, {
+  const inventoryTransactions = n8nInventoryTransactions(options);
+  for (const transaction of inventoryTransactions) {
+    revalidateN8nEvidenceAuthority(transaction.evidenceAuthority, {
       boundary: 'canonical-cache-inventory',
       testHooks: options.testHooks
     });
+    if (transaction[N8N_JOURNAL_CONTEXT]) {
+      revalidateN8nJournalAuthority(transaction, 'canonical-cache-inventory', options.testHooks);
+      if (transaction[N8N_JOURNAL_CONTEXT].status === 'logically-retired') {
+        revalidateLogicalRetirement(transaction[N8N_JOURNAL_CONTEXT]);
+      }
+    }
   }
-  const ownedEvidence = n8nInventoryOwnedEvidenceEntries(options.transaction);
+  const ownedEvidence = n8nInventoryOwnedEvidenceEntries(inventoryTransactions);
   const entries = [];
   const names = [];
   const directory = fs.opendirSync(parent);
@@ -3786,7 +3845,7 @@ function discoverN8nSkillsCacheRoots(codexHome, options = {}) {
       if (realPath !== normalizedEntryPath) {
         kind = 'redirect';
       } else {
-        const ownedDirectory = n8nInventoryOwnedDirectory(options.transaction, entryPath);
+        const ownedDirectory = n8nInventoryOwnedDirectory(inventoryTransactions, entryPath);
         if (ownedDirectory) {
           if (!n8nDirectoryIdentitiesMatch(ownedDirectory.identity, n8nDirectoryIdentity(stat))) {
             throw failClosedN8nRepair('ambiguous-target', 'Exact owned n8n Skills transaction directory identity changed during inventory');
@@ -3905,8 +3964,8 @@ function discoverN8nSkillsCacheRoots(codexHome, options = {}) {
         parsed_semantic_sha256: fileEvidence.parsed_semantic_sha256
       });
     }
-    const ownedDirectory = ['owned-stage', 'owned-backup'].includes(kind)
-      ? n8nInventoryOwnedDirectory(options.transaction, entryPath)
+    const ownedDirectory = ['owned-stage', 'owned-backup', 'retired-stage', 'retired-backup'].includes(kind)
+      ? n8nInventoryOwnedDirectory(inventoryTransactions, entryPath)
       : null;
     if (ownedDirectory) {
       Object.assign(inventoryEntry, {
@@ -3925,6 +3984,8 @@ function discoverN8nSkillsCacheRoots(codexHome, options = {}) {
     } else if (![
       'owned-stage',
       'owned-backup',
+      'retired-stage',
+      'retired-backup',
       'owned-evidence',
       'owned-lock',
       'target-lock-evidence',
@@ -3975,11 +4036,14 @@ function discoverN8nSkillsCacheRoots(codexHome, options = {}) {
   ) {
     throw failClosedN8nRepair('ambiguous-target', 'The n8n Skills package cache inventory changed before selection');
   }
-  if (options.transaction?.evidenceAuthority) {
-    revalidateN8nEvidenceAuthority(options.transaction.evidenceAuthority, {
+  for (const transaction of inventoryTransactions) {
+    revalidateN8nEvidenceAuthority(transaction.evidenceAuthority, {
       boundary: 'canonical-cache-inventory-final',
       testHooks: options.testHooks
     });
+    if (transaction[N8N_JOURNAL_CONTEXT]) {
+      revalidateN8nJournalAuthority(transaction, 'canonical-cache-inventory-final', options.testHooks);
+    }
   }
   const inventoryDigest = n8nInventoryDigest(parentIdentity, entries);
   for (const root of roots) {
@@ -4553,6 +4617,62 @@ function n8nBuildEvidenceAuthority(generation) {
   });
 }
 
+function n8nBuildRetiredEvidenceAuthority(generation, journal) {
+  if (!['C10_CLEANUP_PENDING', 'C20_CLEANUP_COMPLETE'].includes(journal.state)) {
+    throw failClosedN8nRepair(
+      'journal-retired-residue-drift',
+      'Missing v1 evidence is not authorised before durable physical-cleanup intent'
+    );
+  }
+  const manifest = logicalRetirementManifest(journal);
+  if (!manifest) {
+    throw failClosedN8nRepair(
+      'journal-retirement-corrupt',
+      'The physical-cleanup journal lacks its exact logical-retirement manifest'
+    );
+  }
+  const manifestByPath = new Map(manifest.entries.map((entry) => [
+    normalizedN8nTargetPath(entry.normalized_path),
+    entry
+  ]));
+  const entries = n8nEvidenceSpecifications(generation).map((specification) => {
+    if (n8nPathExists(specification.path)) {
+      return n8nReadEvidenceDescriptor(specification.path, specification);
+    }
+    const expected = manifestByPath.get(normalizedN8nTargetPath(specification.path));
+    if (!expected?.present) {
+      return n8nReadEvidenceDescriptor(specification.path, {
+        ...specification,
+        required: false,
+        mustExist: false
+      });
+    }
+    return Object.freeze({
+      bytes_sha256: '',
+      evidence_kind: specification.kind,
+      expected_absence: true,
+      generation_id: generation.record.generation_id,
+      normalized_path: normalizedN8nTargetPath(specification.path),
+      owner: 'ai-agent-toolkit-local-bridge',
+      ownership_token: generation.record.ownership_token,
+      parent_identity: n8nEvidenceParentIdentity(specification.parent),
+      parsed_semantic_sha256: '',
+      present: false,
+      required: false,
+      retired: true,
+      schema_version: 1,
+      state: specification.state
+    });
+  });
+  return Object.freeze({
+    digest: n8nEvidenceAuthorityDigest(entries),
+    entries: Object.freeze(entries),
+    generation_id: generation.record.generation_id,
+    ownership_token: generation.record.ownership_token,
+    parent_identity: n8nEvidenceParentIdentity(generation.record.expected_parent)
+  });
+}
+
 function n8nEvidenceEntry(authority, kind) {
   return authority.entries.find((entry) => entry.evidence_kind === kind) || null;
 }
@@ -4560,6 +4680,229 @@ function n8nEvidenceEntry(authority, kind) {
 function n8nEvidenceValue(authority, kind) {
   const entry = n8nEvidenceEntry(authority, kind);
   return entry?.present ? entry.parsed_value : null;
+}
+
+const N8N_V1_TO_V2_JOURNAL_KIND = Object.freeze({
+  'n8n-pre-transaction': 'P00_PREPARED',
+  'n8n-pre-transaction-phase-10-copied': 'P10_COPIED',
+  'n8n-pre-transaction-phase-15-transforming': 'P15_TRANSFORMING',
+  'n8n-pre-transaction-phase-20-transformed': 'P20_TRANSFORMED',
+  'n8n-replacement': 'T00_REGISTERED',
+  'n8n-replacement-phase-10-displace': 'T10_DISPLACE_INTENT',
+  'n8n-replacement-phase-20-displaced': 'T20_DISPLACED',
+  'n8n-replacement-phase-30-install': 'T30_INSTALL_INTENT',
+  'n8n-replacement-phase-40-installed': 'T40_INSTALLED',
+  'n8n-replacement-phase-50-verify': 'T50_VERIFY_INTENT',
+  'n8n-replacement-phase-60-verified': 'T60_VERIFIED',
+  'n8n-replacement-phase-70-cleanup': 'T70_CLEANUP_AUTHORIZED'
+});
+
+function n8nJournalCodexHome(context) {
+  return path.resolve(context.generation.record.expected_parent, '..', '..', '..', '..');
+}
+
+function n8nJournalEvidencePayload(entry) {
+  return {
+    evidence_bytes_sha256: entry.bytes_sha256,
+    evidence_filesystem_identity: entry.filesystem_identity || null,
+    evidence_kind: entry.evidence_kind,
+    evidence_semantic_sha256: entry.parsed_semantic_sha256,
+    v1_authority_entry_sha256: crypto.createHash('sha256')
+      .update(n8nCanonicalJson(n8nEvidenceEntryComparable(entry)), 'utf8')
+      .digest('hex')
+  };
+}
+
+function n8nRequireJournalMirrorEntry(journal, entry, journalKind) {
+  const mirrored = journal.records.find((record) =>
+    record.kind === journalKind && record.payload.evidence_kind === entry.evidence_kind
+  );
+  if (!mirrored) return false;
+  if (
+    mirrored.payload.evidence_bytes_sha256 !== entry.bytes_sha256
+    || mirrored.payload.evidence_semantic_sha256 !== entry.parsed_semantic_sha256
+    || mirrored.payload.v1_authority_entry_sha256 !== crypto.createHash('sha256')
+      .update(n8nCanonicalJson(n8nEvidenceEntryComparable(entry)), 'utf8')
+      .digest('hex')
+  ) {
+    throw failClosedN8nRepair(
+      'journal-v1-drift',
+      `The schema-2 journal no longer matches exact ${entry.evidence_kind} v1 authority`
+    );
+  }
+  return true;
+}
+
+function bindAndSynchronizeN8nJournal(context, options = {}) {
+  const write = Boolean(options.write);
+  let journal = bindJournalAuthority({
+    codexHome: n8nJournalCodexHome(context),
+    generationId: context.generation.record.generation_id,
+    ownershipToken: context.generation.record.ownership_token,
+    targetPath: context.validated.targetPath,
+    write
+  });
+  if (!journal.exists) {
+    context[N8N_JOURNAL_CONTEXT] = null;
+    return context;
+  }
+  const generationEntry = n8nEvidenceEntry(context.evidenceAuthority, 'generation-record');
+  const readyEntry = n8nEvidenceEntry(context.evidenceAuthority, 'ready');
+  const stageOwnerEntry = n8nEvidenceEntry(context.evidenceAuthority, 'stage-owner');
+  if (journal.records.length === 0) {
+    if (!write) {
+      context[N8N_JOURNAL_CONTEXT] = journal;
+      return context;
+    }
+    journal = appendN8nRepairJournalRecord(journal, 'M00_V1_MIGRATION', {
+      generation_record: n8nJournalEvidencePayload(generationEntry),
+      ownership_token: context.generation.record.ownership_token,
+      ready_record: readyEntry?.present ? n8nJournalEvidencePayload(readyEntry) : null,
+      stage_owner_record: stageOwnerEntry?.present ? n8nJournalEvidencePayload(stageOwnerEntry) : null,
+      v1_authority_digest_at_migration: context.evidenceAuthority.digest
+    }, options);
+  } else {
+    const migration = journal.records[0];
+    if (
+      migration.kind !== 'M00_V1_MIGRATION'
+      || migration.payload.generation_record?.evidence_bytes_sha256 !== generationEntry.bytes_sha256
+      || migration.payload.generation_record?.evidence_semantic_sha256 !== generationEntry.parsed_semantic_sha256
+    ) {
+      throw failClosedN8nRepair(
+        'journal-v1-drift',
+        'The schema-2 journal migration record does not match the exact v1 generation authority'
+      );
+    }
+  }
+  const orderedEvidenceKinds = [
+    'n8n-pre-transaction',
+    'n8n-pre-transaction-phase-10-copied',
+    'n8n-pre-transaction-phase-15-transforming',
+    'n8n-pre-transaction-phase-20-transformed',
+    'n8n-replacement',
+    'n8n-replacement-phase-10-displace',
+    'n8n-replacement-phase-20-displaced',
+    'n8n-replacement-phase-30-install',
+    'n8n-replacement-phase-40-installed',
+    'n8n-replacement-phase-50-verify',
+    'n8n-replacement-phase-60-verified',
+    'n8n-replacement-phase-70-cleanup'
+  ];
+  for (const evidenceKind of orderedEvidenceKinds) {
+    const entry = n8nEvidenceEntry(context.evidenceAuthority, evidenceKind);
+    if (!entry?.present) continue;
+    const journalKind = N8N_V1_TO_V2_JOURNAL_KIND[evidenceKind];
+    if (n8nRequireJournalMirrorEntry(journal, entry, journalKind)) continue;
+    if (!write) {
+      context[N8N_JOURNAL_CONTEXT] = journal;
+      return context;
+    }
+    journal = appendN8nRepairJournalRecord(
+      journal,
+      journalKind,
+      n8nJournalEvidencePayload(entry),
+      options
+    );
+  }
+  context[N8N_JOURNAL_CONTEXT] = journal;
+  return context;
+}
+
+function revalidateN8nJournalAuthority(context, boundary, testHooks = {}) {
+  const journal = context?.[N8N_JOURNAL_CONTEXT];
+  if (!journal?.exists) {
+    throw failClosedN8nRepair(
+      'journal-authority-missing',
+      `Schema-2 journal authority is missing at ${boundary}`
+    );
+  }
+  if (testHooks.beforeN8nJournalAuthorityRevalidation) {
+    testHooks.beforeN8nJournalAuthorityRevalidation({
+      boundary,
+      generation_id: context.generation.record.generation_id,
+      journal_digest: journal.digest
+    });
+  }
+  const current = assertJournalAuthorityUnchanged(journal);
+  context[N8N_JOURNAL_CONTEXT] = Object.freeze({
+    ...current,
+    ownership_token: journal.ownership_token,
+    target_path: journal.target_path
+  });
+  return context[N8N_JOURNAL_CONTEXT];
+}
+
+function n8nRetirementResidueManifest(context) {
+  return residueManifest(context.evidenceAuthority.entries
+    .filter((entry) => entry.present)
+    .map((entry) => ({
+      bytes_sha256: entry.bytes_sha256,
+      evidence_kind: entry.evidence_kind,
+      filesystem_identity: entry.filesystem_identity,
+      maximum_bytes: N8N_EVIDENCE_FILE_BYTE_LIMIT,
+      normalized_path: entry.normalized_path,
+      present: true
+    })));
+}
+
+function logicallyRetireN8nEvidence(context, options = {}) {
+  bindAndSynchronizeN8nJournal(context, {
+    write: true,
+    testHooks: options.testHooks
+  });
+  revalidateN8nEvidenceAuthority(context.evidenceAuthority, {
+    boundary: 'before-logical-retirement',
+    testHooks: options.testHooks
+  });
+  revalidateN8nJournalAuthority(context, 'before-logical-retirement', options.testHooks);
+  let journal = context[N8N_JOURNAL_CONTEXT];
+  let manifest;
+  if (['L20_LOGICALLY_RETIRED', 'C10_CLEANUP_PENDING', 'C20_CLEANUP_COMPLETE'].includes(journal.state)) {
+    const rebound = revalidateLogicalRetirement(journal);
+    journal = Object.freeze({
+      ...rebound,
+      ownership_token: journal.ownership_token,
+      target_path: journal.target_path
+    });
+    manifest = logicalRetirementManifest(journal);
+  } else {
+    manifest = n8nRetirementResidueManifest(context);
+    journal = appendLogicalRetirement(
+      journal,
+      manifest,
+      {
+        outcome: options.outcome || 'committed',
+        rollbackDigest: options.rollbackDigest || '',
+        testHooks: options.testHooks,
+        winnerDigest: options.winnerDigest || ''
+      }
+    );
+  }
+  context[N8N_JOURNAL_CONTEXT] = journal;
+  const checkpoint = writeTerminalCheckpoint(journal, { testHooks: options.testHooks });
+  let checkpointCleanupError = null;
+  try {
+    compactSupersededTransaction(journal, checkpoint, { testHooks: options.testHooks });
+  } catch (error) {
+    checkpointCleanupError = error;
+  }
+  journal = assertJournalAuthorityUnchanged(journal);
+  context[N8N_JOURNAL_CONTEXT] = Object.freeze({
+    ...journal,
+    ownership_token: context.generation.record.ownership_token,
+    target_path: context.validated.targetPath
+  });
+  return {
+    checkpoint,
+    checkpointCleanupError,
+    cleaned: false,
+    evidence_authority_digest: context.evidenceAuthority.digest,
+    journal_authority_digest: journal.digest,
+    logicallyRetired: true,
+    physicalCleanupPending: true,
+    preserved: true,
+    reason: 'physical-cleanup-pending'
+  };
 }
 
 function revalidateN8nEvidenceAuthority(authority, options = {}) {
@@ -5021,7 +5364,9 @@ function requireKnownN8nGenerationAuxiliaries(recordPath, directoryNames) {
 
 function inspectN8nReplacementRecords(codexHome, parityIdentity, options = {}) {
   const parent = path.resolve(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills');
-  if (!n8nPathExists(parent)) return { parent, preTransactions: [], transactions: [] };
+  if (!n8nPathExists(parent)) {
+    return { parent, preTransactions: [], retiredTransactions: [], transactions: [] };
+  }
   requireOrdinaryN8nDirectory(parent, 'n8n Skills package cache parent');
   const recordPattern = new RegExp(`^${RECORD_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\\.json$`, 'i');
   const directoryNames = [];
@@ -5047,6 +5392,7 @@ function inspectN8nReplacementRecords(codexHome, parityIdentity, options = {}) {
   }
   names.sort();
   const preTransactions = [];
+  const retiredTransactions = [];
   const transactions = [];
   for (const name of names) {
     const recordPath = path.join(parent, name);
@@ -5059,7 +5405,46 @@ function inspectN8nReplacementRecords(codexHome, parityIdentity, options = {}) {
     const record = provisionalRecordEntry.parsed_value;
     requireN8nProvisionalGenerationRecord(record, recordPath, parent);
     const generation = { record, recordPath, stagePath: record?.expected_staging_path };
-    const evidenceAuthority = n8nBuildEvidenceAuthority(generation);
+    let preliminaryJournal = bindJournalAuthority({
+      codexHome,
+      generationId: record.generation_id,
+      ownershipToken: record.ownership_token,
+      targetPath: record.expected_final_target,
+      write: false
+    });
+    if (preliminaryJournal.exists) {
+      preliminaryJournal = Object.freeze({
+        ...preliminaryJournal,
+        ownership_token: record.ownership_token,
+        target_path: path.resolve(record.expected_final_target)
+      });
+    }
+    const preliminaryMigration = preliminaryJournal.records?.[0] || null;
+    if (
+      preliminaryJournal.exists
+      && preliminaryJournal.records.length > 0
+      && (
+        preliminaryMigration?.kind !== 'M00_V1_MIGRATION'
+        || preliminaryMigration.payload.generation_record?.evidence_bytes_sha256
+          !== provisionalRecordEntry.bytes_sha256
+        || preliminaryMigration.payload.generation_record?.evidence_semantic_sha256
+          !== provisionalRecordEntry.parsed_semantic_sha256
+        || preliminaryMigration.payload.ownership_token !== record.ownership_token
+      )
+    ) {
+      throw failClosedN8nRepair(
+        'journal-v1-drift',
+        'The schema-2 journal does not match the exact surviving v1 generation authority'
+      );
+    }
+    if (preliminaryJournal.status === 'logically-retired') {
+      revalidateLogicalRetirement(preliminaryJournal);
+    }
+    const evidenceAuthority = ['C10_CLEANUP_PENDING', 'C20_CLEANUP_COMPLETE'].includes(
+      preliminaryJournal.state
+    )
+      ? n8nBuildRetiredEvidenceAuthority(generation, preliminaryJournal)
+      : n8nBuildEvidenceAuthority(generation);
     const authoritativeRecordEntry = n8nEvidenceEntry(evidenceAuthority, 'generation-record');
     if (
       JSON.stringify(n8nEvidenceEntryComparable(provisionalRecordEntry))
@@ -5075,6 +5460,25 @@ function inspectN8nReplacementRecords(codexHome, parityIdentity, options = {}) {
       throw failClosedN8nRepair('conflicting-recovery', 'A conflicting owned transaction targets the n8n Skills package cache');
     }
     requireKnownN8nGenerationAuxiliaries(recordPath, directoryNames);
+    if (['C10_CLEANUP_PENDING', 'C20_CLEANUP_COMPLETE'].includes(preliminaryJournal.state)) {
+      const retiredContext = {
+        evidenceAuthority,
+        generation,
+        inspected,
+        latestPhase: 'logically-retired',
+        preTransaction: null,
+        transaction: null,
+        validated: {
+          backupPath: n8nReplacementBackupPath(generation),
+          stagePath: path.resolve(generation.stagePath),
+          stagePluginPath: path.join(path.resolve(generation.stagePath), 'plugin'),
+          targetPath: path.resolve(generation.record.expected_final_target)
+        }
+      };
+      retiredContext[N8N_JOURNAL_CONTEXT] = preliminaryJournal;
+      retiredTransactions.push(retiredContext);
+      continue;
+    }
     const preTransactionValue = n8nEvidenceValue(evidenceAuthority, 'n8n-pre-transaction');
     const transactionValue = n8nEvidenceValue(evidenceAuthority, 'n8n-replacement');
     const preTransactionMarker = preTransactionValue ? { value: preTransactionValue } : null;
@@ -5100,6 +5504,12 @@ function inspectN8nReplacementRecords(codexHome, parityIdentity, options = {}) {
         preTransaction: preTransactionMarker.value,
         validated
       };
+      bindAndSynchronizeN8nJournal(preTransaction, { write: false });
+      if (preTransaction[N8N_JOURNAL_CONTEXT]?.status === 'logically-retired') {
+        revalidateLogicalRetirement(preTransaction[N8N_JOURNAL_CONTEXT]);
+        retiredTransactions.push(preTransaction);
+        continue;
+      }
     }
     if (!transactionMarker) {
       for (const kind of N8N_REPLACEMENT_AUXILIARY_KINDS.slice(1)) {
@@ -5197,6 +5607,12 @@ function inspectN8nReplacementRecords(codexHome, parityIdentity, options = {}) {
       transaction: transactionMarker.value,
       validated
     };
+    bindAndSynchronizeN8nJournal(context, { write: false });
+    if (context[N8N_JOURNAL_CONTEXT]?.status === 'logically-retired') {
+      revalidateLogicalRetirement(context[N8N_JOURNAL_CONTEXT]);
+      retiredTransactions.push(context);
+      continue;
+    }
     if (options.testHooks?.afterN8nEvidenceParsed) {
       options.testHooks.afterN8nEvidenceParsed({
         evidence_authority_digest: evidenceAuthority.digest,
@@ -5213,7 +5629,7 @@ function inspectN8nReplacementRecords(codexHome, parityIdentity, options = {}) {
   if (transactions.length + preTransactions.length > 1) {
     throw failClosedN8nRepair('ambiguous-recovery', 'Multiple interrupted n8n Skills transactions are ambiguous and require review');
   }
-  return { parent, preTransactions, transactions };
+  return { parent, preTransactions, retiredTransactions, transactions };
 }
 
 function n8nEvidenceContextCodexHome(context) {
@@ -5225,6 +5641,9 @@ function retainN8nEvidenceContext(context, previous = null) {
     || context[N8N_EVIDENCE_LIFECYCLE_OWNER]
     || context.generation;
   context[N8N_EVIDENCE_LIFECYCLE_OWNER] = lifecycleOwner;
+  if (previous?.[N8N_JOURNAL_CONTEXT] && !context[N8N_JOURNAL_CONTEXT]) {
+    context[N8N_JOURNAL_CONTEXT] = previous[N8N_JOURNAL_CONTEXT];
+  }
   lifecycleOwner[N8N_EVIDENCE_CONTEXT] = context;
   return context;
 }
@@ -5265,7 +5684,12 @@ function refreshN8nEvidenceContext(previous, parityIdentity, allowedKind, testHo
   }
   const current = candidates[0];
   requireN8nEvidenceAuthorityTransition(previous.evidenceAuthority, current.evidenceAuthority, allowedKind);
-  return retainN8nEvidenceContext(current, previous);
+  retainN8nEvidenceContext(current, previous);
+  bindAndSynchronizeN8nJournal(current, {
+    write: true,
+    testHooks
+  });
+  return current;
 }
 
 function advanceN8nEvidenceContext(context, kind, payload, parityIdentity, testHooks = {}) {
@@ -5273,6 +5697,7 @@ function advanceN8nEvidenceContext(context, kind, payload, parityIdentity, testH
     boundary: `before-${kind}`,
     testHooks
   });
+  revalidateN8nJournalAuthority(context, `before-${kind}`, testHooks);
   const existing = n8nEvidenceEntry(context.evidenceAuthority, kind);
   if (!existing) {
     throw failClosedN8nRepair('recovery-evidence-invalid', 'n8n Skills transaction evidence progression targeted an unknown phase');
@@ -5306,6 +5731,7 @@ function advanceN8nTerminalEvidenceContext(context, state, parityIdentity, testH
     boundary: `before-${state}`,
     testHooks
   });
+  revalidateN8nJournalAuthority(context, `before-${state}`, testHooks);
   const existing = n8nEvidenceEntry(context.evidenceAuthority, state);
   if (!existing) {
     throw failClosedN8nRepair('recovery-evidence-invalid', 'n8n Skills transaction terminal evidence path is missing from its authority');
@@ -5438,9 +5864,15 @@ function moveAuthorizedN8nEvidenceToQuarantine(expected, quarantinePath, testHoo
     throw failClosedN8nRepair('recovery-evidence-invalid', 'Quarantined n8n Skills cleanup evidence did not match its prior authority');
   }
   fs.unlinkSync(quarantinePath);
+  if (testHooks.afterN8nEvidenceCleanupDelete) {
+    testHooks.afterN8nEvidenceCleanupDelete({
+      evidence_kind: expected.evidence_kind,
+      generation_id: expected.generation_id
+    });
+  }
 }
 
-function cleanupN8nEvidenceAuthority(context, testHooks = {}) {
+function legacyPhysicalCleanupN8nEvidenceAuthority(context, testHooks = {}) {
   let authority = context.evidenceAuthority;
   revalidateN8nEvidenceAuthority(authority, {
     boundary: 'before-transaction-evidence-cleanup',
@@ -5503,7 +5935,10 @@ function cleanupN8nEvidenceAuthority(context, testHooks = {}) {
       });
       const stagePath = context.generation.stagePath;
       const expectedStageIdentity = context.preTransaction?.stage_directory_identity
-        || context.preTransaction?.preTransaction?.stage_directory_identity;
+        || context.preTransaction?.preTransaction?.stage_directory_identity
+        || context[N8N_JOURNAL_CONTEXT]?.records
+          ?.find((record) => record.kind === 'C10_CLEANUP_PENDING')
+          ?.payload?.stage_residue?.directory_identity;
       const stageStat = requireOrdinaryN8nDirectory(stagePath, 'owned n8n Skills staging generation');
       if (
         !expectedStageIdentity
@@ -5546,6 +5981,12 @@ function cleanupN8nEvidenceAuthority(context, testHooks = {}) {
         throw failClosedN8nRepair('recovery-evidence-invalid', 'Quarantined n8n Skills stage ownership evidence did not match its prior authority');
       }
       fs.rmSync(quarantinedStage, { recursive: true });
+      if (testHooks.afterN8nEvidenceCleanupDelete) {
+        testHooks.afterN8nEvidenceCleanupDelete({
+          evidence_kind: 'stage-owner',
+          generation_id: authority.generation_id
+        });
+      }
       authority = retireN8nEvidenceAuthorityEntry(authority, 'stage-owner');
       revalidateN8nEvidenceAuthority(authority, {
         boundary: 'after-owned-stage-cleanup',
@@ -5586,6 +6027,137 @@ function cleanupN8nEvidenceAuthority(context, testHooks = {}) {
         // A non-empty quarantine is intentional residue when identity-bound cleanup stops.
       }
     }
+  }
+}
+
+function cleanupN8nEvidenceAuthority(context, testHooks = {}) {
+  const logical = logicallyRetireN8nEvidence(context, {
+    outcome: context.transaction ? 'winner-or-original-committed' : 'target-untouched-preserved',
+    rollbackDigest: context.transaction?.approval_evidence?.tree_digest || '',
+    testHooks,
+    winnerDigest: context.transaction?.staged_evidence?.tree_digest || ''
+  });
+  if (testHooks.preventN8nPhysicalCleanup) return logical;
+  try {
+    revalidateN8nJournalAuthority(context, 'before-physical-cleanup', testHooks);
+    if (context[N8N_JOURNAL_CONTEXT].state === 'L20_LOGICALLY_RETIRED') {
+      const stageOwner = n8nEvidenceEntry(context.evidenceAuthority, 'stage-owner');
+      const stageIdentity = context.preTransaction?.stage_directory_identity
+        || context.preTransaction?.preTransaction?.stage_directory_identity
+        || null;
+      context[N8N_JOURNAL_CONTEXT] = appendN8nRepairJournalRecord(
+        context[N8N_JOURNAL_CONTEXT],
+        'C10_CLEANUP_PENDING',
+        {
+          checkpoint_digest: logical.checkpoint.digest,
+          stage_residue: stageOwner?.present && stageIdentity
+            ? {
+              directory_identity: stageIdentity,
+              normalized_path: path.resolve(context.generation.stagePath),
+              owner_bytes_sha256: stageOwner.bytes_sha256,
+              owner_filesystem_identity: stageOwner.filesystem_identity
+            }
+            : null,
+          residue_manifest_digest: logicalRetirementManifest(
+            context[N8N_JOURNAL_CONTEXT]
+          ).digest
+        },
+        { testHooks }
+      );
+    }
+    revalidateLogicalRetirement(context[N8N_JOURNAL_CONTEXT]);
+    const physical = legacyPhysicalCleanupN8nEvidenceAuthority(context, testHooks);
+    if (!physical.cleaned) return { ...logical, physicalCleanupError: physical.reason };
+    context[N8N_JOURNAL_CONTEXT] = appendN8nRepairJournalRecord(
+      context[N8N_JOURNAL_CONTEXT],
+      'C20_CLEANUP_COMPLETE',
+      {
+        checkpoint_digest: logical.checkpoint.digest,
+        residue_manifest_digest: n8nRetirementResidueManifest(context).digest
+      },
+      { testHooks }
+    );
+    const completionCheckpoint = writeTerminalCheckpoint(
+      context[N8N_JOURNAL_CONTEXT],
+      { testHooks }
+    );
+    let checkpointCleanupError = null;
+    try {
+      compactSupersededTransaction(
+        context[N8N_JOURNAL_CONTEXT],
+        completionCheckpoint,
+        { testHooks }
+      );
+    } catch (error) {
+      checkpointCleanupError = checkpointCleanupError || error;
+    }
+    return {
+      ...physical,
+      checkpoint: completionCheckpoint,
+      checkpointCleanupError,
+      journal_authority_digest: context[N8N_JOURNAL_CONTEXT].digest,
+      logicallyRetired: true,
+      physicalCleanupPending: false
+    };
+  } catch (error) {
+    return {
+      ...logical,
+      physicalCleanupCause: error,
+      physicalCleanupError: error?.code || 'physical-cleanup-failed'
+    };
+  }
+}
+
+function finalizeOrphanedN8nPhysicalCleanup(codexHome, targetPath, testHooks = {}) {
+  const journals = discoverN8nRepairJournalsForTarget({
+    codexHome,
+    targetPath,
+    write: true
+  });
+  for (let journal of journals) {
+    if (journal.state === 'C20_CLEANUP_COMPLETE') {
+      revalidateLogicalRetirement(journal);
+      continue;
+    }
+    if (journal.state !== 'C10_CLEANUP_PENDING') {
+      throw failClosedN8nRepair(
+        'journal-authority-missing',
+        'A retained transaction journal lacks surviving v1 recovery authority'
+      );
+    }
+    journal = Object.freeze({
+      ...revalidateLogicalRetirement(journal),
+      ownership_token: journal.ownership_token,
+      target_path: path.resolve(targetPath)
+    });
+    const manifest = logicalRetirementManifest(journal);
+    if (manifest.entries.some((entry) => entry.present && n8nPathExists(entry.normalized_path))) {
+      throw failClosedN8nRepair(
+        'physical-cleanup-pending',
+        'A retained C10 journal still has exact v1 residue requiring controlled cleanup'
+      );
+    }
+    const cleanupIntent = journal.records.find((record) => record.kind === 'C10_CLEANUP_PENDING');
+    if (
+      cleanupIntent?.payload?.stage_residue?.normalized_path
+      && n8nPathExists(cleanupIntent.payload.stage_residue.normalized_path)
+    ) {
+      throw failClosedN8nRepair(
+        'physical-cleanup-pending',
+        'A retained C10 journal still has exact stage residue requiring controlled cleanup'
+      );
+    }
+    journal = appendN8nRepairJournalRecord(
+      journal,
+      'C20_CLEANUP_COMPLETE',
+      {
+        checkpoint_digest: cleanupIntent?.payload?.checkpoint_digest || '',
+        residue_manifest_digest: manifest.digest
+      },
+      { testHooks }
+    );
+    const checkpoint = writeTerminalCheckpoint(journal, { testHooks });
+    compactSupersededTransaction(journal, checkpoint, { testHooks });
   }
 }
 
@@ -5763,6 +6335,140 @@ function n8nRecoveryPhaseOrdinal(transaction) {
     : Number.parseInt(String(transaction.latestPhase).split('-')[0], 10);
 }
 
+function requireExactN8nTreeBoundary(pluginRoot, expectedEvidence, expectedStatus, expectedIdentity, label) {
+  const stat = requireOrdinaryN8nDirectory(pluginRoot, label);
+  if (!n8nDirectoryIdentitiesMatch(expectedIdentity, n8nDirectoryIdentity(stat))) {
+    throw failClosedN8nRepair(
+      'destructive-boundary-drift',
+      `${label} filesystem identity changed at the destructive boundary`
+    );
+  }
+  const classified = classifyN8nSkillsCompatibility(pluginRoot);
+  if (!n8nCompatibilityEvidenceMatches(expectedEvidence, classified, expectedStatus)) {
+    throw failClosedN8nRepair(
+      'destructive-boundary-drift',
+      `${label} bytes changed at the destructive boundary`
+    );
+  }
+  return classified;
+}
+
+function requireExactN8nParentBoundary(parentPath, expectedIdentity, label) {
+  const stat = requireOrdinaryN8nDirectory(parentPath, label);
+  if (!n8nDirectoryIdentitiesMatch(expectedIdentity, n8nDirectoryIdentity(stat))) {
+    throw failClosedN8nRepair(
+      'destructive-boundary-drift',
+      `${label} identity changed at the destructive boundary`
+    );
+  }
+  return stat;
+}
+
+function n8nDestructiveRenameOptions(context, specification, testHooks = {}, baseOptions = {}) {
+  return {
+    ...baseOptions,
+    beforeEachAttempt({ attempt, sourcePath, targetPath }) {
+      if (testHooks.beforeN8nDestructiveOperation) {
+        testHooks.beforeN8nDestructiveOperation({
+          attempt,
+          boundary: specification.boundary,
+          generation_id: context.generation.record.generation_id
+        });
+      }
+      revalidateN8nEvidenceAuthority(context.evidenceAuthority, {
+        boundary: `${specification.boundary}-attempt-${attempt}`,
+        testHooks
+      });
+      revalidateN8nJournalAuthority(
+        context,
+        `${specification.boundary}-attempt-${attempt}`,
+        testHooks
+      );
+      for (const parent of specification.parents || []) {
+        requireExactN8nParentBoundary(parent.path, parent.identity, parent.label);
+      }
+      for (const tree of specification.trees || []) {
+        requireExactN8nTreeBoundary(
+          tree.path,
+          tree.evidence,
+          tree.status,
+          tree.identity,
+          tree.label
+        );
+      }
+      for (const absentPath of specification.absent || []) {
+        if (n8nPathExists(absentPath)) {
+          throw failClosedN8nRepair(
+            'destructive-boundary-drift',
+            'A destructive rename destination appeared before the exact rename operation'
+          );
+        }
+      }
+    }
+  };
+}
+
+function n8nBackupRestoreRenameOptions(context, hostIdentity, backupPath, targetPath, testHooks = {}) {
+  return n8nDestructiveRenameOptions(
+    context,
+    {
+      absent: [targetPath],
+      boundary: 'original-backup-restoration',
+      parents: [{
+        identity: hostIdentity.selection.parent_directory_identity,
+        label: 'n8n Skills package parent',
+        path: path.dirname(targetPath)
+      }],
+      trees: [{
+        evidence: context.transaction.approval_evidence,
+        identity: context.transaction.original_target_directory_identity,
+        label: 'recorded n8n Skills backup',
+        path: backupPath,
+        status: 'repair-required'
+      }]
+    },
+    testHooks
+  );
+}
+
+function requireN8nDestructiveDeleteBoundary(context, specification, testHooks = {}) {
+  if (testHooks.beforeN8nDestructiveOperation) {
+    testHooks.beforeN8nDestructiveOperation({
+      attempt: 1,
+      boundary: specification.boundary,
+      generation_id: context.generation.record.generation_id
+    });
+  }
+  revalidateN8nEvidenceAuthority(context.evidenceAuthority, {
+    boundary: specification.boundary,
+    testHooks
+  });
+  revalidateN8nJournalAuthority(context, specification.boundary, testHooks);
+  for (const parent of specification.parents || []) {
+    requireExactN8nParentBoundary(parent.path, parent.identity, parent.label);
+  }
+  for (const tree of specification.trees || []) {
+    if (tree.fresh) {
+      const stat = requireOrdinaryN8nDirectory(tree.path, tree.label);
+      if (!n8nDirectoryIdentitiesMatch(tree.identity, n8nDirectoryIdentity(stat))) {
+        throw failClosedN8nRepair(
+          'destructive-boundary-drift',
+          `${tree.label} filesystem identity changed at the destructive boundary`
+        );
+      }
+      classifyN8nSkillsCompatibility(tree.path);
+    } else {
+      requireExactN8nTreeBoundary(
+        tree.path,
+        tree.evidence,
+        tree.status,
+        tree.identity,
+        tree.label
+      );
+    }
+  }
+}
+
 function requireN8nInventorySelectionBinding(selection, inventory, options = {}) {
   const selectedRoot = normalizedN8nTargetPath(selection.plugin_root);
   const candidate = inventory.roots.find((entry) =>
@@ -5830,6 +6536,13 @@ function requireN8nRecoveryHostIdentity(codexHome, pluginInspection, transaction
     boundary: options.activeLock ? 'after-target-lock-before-host-identity' : 'before-host-identity',
     testHooks: options.testHooks
   });
+  if (transaction[N8N_JOURNAL_CONTEXT]) {
+    revalidateN8nJournalAuthority(
+      transaction,
+      options.activeLock ? 'after-target-lock-before-host-identity' : 'before-host-identity',
+      options.testHooks
+    );
+  }
   const discovered = discoverN8nSkillsCacheRoots(codexHome, {
     activeLock: options.activeLock,
     testHooks: options.testHooks,
@@ -5995,6 +6708,11 @@ function cleanupN8nReplacementTransaction(initialTransaction, options = {}) {
     boundary: 'before-replacement-transaction-cleanup',
     testHooks: options.testHooks
   });
+  revalidateN8nJournalAuthority(
+    transaction,
+    'before-replacement-transaction-cleanup',
+    options.testHooks
+  );
   if (n8nPathExists(validated.backupPath)) {
     if (n8nRecoveryPhaseOrdinal(transaction) < 50) {
       transaction = advanceN8nEvidenceContext(
@@ -6049,6 +6767,11 @@ function cleanupN8nReplacementTransaction(initialTransaction, options = {}) {
           boundary: 'before-each-resumable-backup-cleanup-operation',
           testHooks: options.testHooks
         });
+        revalidateN8nJournalAuthority(
+          transaction,
+          'before-each-resumable-backup-cleanup-operation',
+          options.testHooks
+        );
       }
     });
   }
@@ -6070,7 +6793,14 @@ function cleanupN8nReplacementTransaction(initialTransaction, options = {}) {
       return cleanupN8nEvidenceAuthority(transaction, options.testHooks);
     }
   });
-  if (!cleanup.cleaned) {
+  if (cleanup.physicalCleanupError || cleanup.checkpointCleanupError) {
+    if (cleanup.checkpointCleanupError) throw cleanup.checkpointCleanupError;
+    throw cleanup.physicalCleanupCause || failClosedN8nRepair(
+      cleanup.physicalCleanupError,
+      'Logically retired n8n Skills transaction has exact physical cleanup pending'
+    );
+  }
+  if (!cleanup.cleaned && !cleanup.logicallyRetired) {
     if (cleanup.error) throw cleanup.error;
     throw failClosedN8nRepair('recovery-cleanup-failed', 'Verified n8n Skills transaction residue could not be removed safely');
   }
@@ -6121,6 +6851,10 @@ function recoverTargetUntouchedN8nPreTransaction({
       'after-target-lock',
       testHooks
     );
+    bindAndSynchronizeN8nJournal(preTransaction, {
+      write: true,
+      testHooks
+    });
     requireN8nRecoveryHostIdentity(codexHome, pluginInspection, preTransaction, {
       activeLock: lock,
       allowObsolete: true,
@@ -6199,7 +6933,14 @@ function recoverTargetUntouchedN8nPreTransaction({
         return cleanupN8nEvidenceAuthority(preTransaction, testHooks);
       }
     });
-    if (!cleanup.cleaned) {
+    if (cleanup.physicalCleanupError || cleanup.checkpointCleanupError) {
+      if (cleanup.checkpointCleanupError) throw cleanup.checkpointCleanupError;
+      throw cleanup.physicalCleanupCause || failClosedN8nRepair(
+        cleanup.physicalCleanupError,
+        'Logically retired n8n Skills transaction has exact physical cleanup pending'
+      );
+    }
+    if (!cleanup.cleaned && !cleanup.logicallyRetired) {
       if (cleanup.error) throw cleanup.error;
       throw failClosedN8nRepair('recovery-cleanup-failed', 'Target-untouched n8n Skills staging residue could not be removed safely');
     }
@@ -6236,6 +6977,34 @@ function recoverInterruptedN8nReplacement({
     liveness: stagingLiveness,
     testHooks
   });
+  if (
+    discovered.retiredTransactions.length > 0
+    && discovered.preTransactions.length === 0
+    && discovered.transactions.length === 0
+  ) {
+    if (write) {
+      for (const retired of discovered.retiredTransactions) {
+        const cleanup = cleanupN8nEvidenceAuthority(retired, testHooks);
+        if (cleanup.physicalCleanupError || cleanup.checkpointCleanupError) {
+          if (cleanup.checkpointCleanupError) throw cleanup.checkpointCleanupError;
+          throw cleanup.physicalCleanupCause || failClosedN8nRepair(
+            cleanup.physicalCleanupError,
+            'Logically retired n8n Skills transaction has exact physical cleanup pending'
+          );
+        }
+      }
+      discovered = inspectN8nReplacementRecords(codexHome, parityIdentity, {
+        liveness: stagingLiveness,
+        testHooks
+      });
+    }
+    return {
+      status: discovered.retiredTransactions.length
+        ? 'physical-cleanup-pending'
+        : 'physical-cleanup-complete',
+      retiredTransactions: discovered.retiredTransactions
+    };
+  }
   if (discovered.preTransactions.length === 1) {
     return recoverTargetUntouchedN8nPreTransaction({
       codexHome,
@@ -6284,6 +7053,10 @@ function recoverInterruptedN8nReplacement({
       'after-target-lock',
       testHooks
     );
+    bindAndSynchronizeN8nJournal(transaction, {
+      write: true,
+      testHooks
+    });
     const hostIdentity = requireN8nRecoveryHostIdentity(
       codexHome,
       pluginInspection,
@@ -6338,16 +7111,42 @@ function recoverInterruptedN8nReplacement({
       }
       if (backupIsOriginal && !targetExists) {
         revalidateBeforeMutation('before-obsolete-backup-restoration');
-        renameSyncWithRetry(backupPath, targetPath);
+        renameSyncWithRetry(
+          backupPath,
+          targetPath,
+          n8nBackupRestoreRenameOptions(transaction, hostIdentity, backupPath, targetPath, testHooks)
+        );
       } else if (
         backupIsOriginal
         && targetIsOwnedInstalledDirectory
         && phaseOrdinal >= 40
       ) {
         revalidateBeforeMutation('before-obsolete-winner-deletion');
+        requireN8nDestructiveDeleteBoundary(
+          transaction,
+          {
+            boundary: 'before-obsolete-winner-deletion',
+            parents: [{
+              identity: hostIdentity.selection.parent_directory_identity,
+              label: 'n8n Skills package parent',
+              path: path.dirname(targetPath)
+            }],
+            trees: [{
+              fresh: true,
+              identity: transaction.transaction.staged_plugin_directory_identity,
+              label: 'obsolete installed n8n Skills winner',
+              path: targetPath
+            }]
+          },
+          testHooks
+        );
         fs.rmSync(targetPath, { recursive: true });
         revalidateBeforeMutation('before-obsolete-backup-restoration');
-        renameSyncWithRetry(backupPath, targetPath);
+        renameSyncWithRetry(
+          backupPath,
+          targetPath,
+          n8nBackupRestoreRenameOptions(transaction, hostIdentity, backupPath, targetPath, testHooks)
+        );
       } else {
         throw failClosedN8nRepair('conflicting-recovery', 'Obsolete n8n Skills transaction cannot be restored without changing an unrelated canonical target');
       }
@@ -6364,6 +7163,36 @@ function recoverInterruptedN8nReplacement({
       if (phaseOrdinal < 30) {
         throw failClosedN8nRepair('recovery-evidence-invalid', 'Installed n8n Skills winner conflicts with the recorded transaction phase');
       }
+      if (phaseOrdinal === 30) {
+        const installedStat = requireOrdinaryN8nDirectory(
+          targetPath,
+          'recovered installed n8n Skills winner'
+        );
+        if (!n8nDirectoryIdentitiesMatch(
+          transaction.transaction.staged_plugin_directory_identity,
+          n8nDirectoryIdentity(installedStat)
+        )) {
+          throw failClosedN8nRepair(
+            'recovery-evidence-invalid',
+            'Recovered installed n8n Skills winner does not match the exact staged identity'
+          );
+        }
+        revalidateN8nJournalAuthority(
+          transaction,
+          'before-recovered-phase-40-installed',
+          testHooks
+        );
+        transaction = advanceN8nEvidenceContext(
+          transaction,
+          'n8n-replacement-phase-40-installed',
+          {
+            installed_directory_identity:
+              transaction.transaction.staged_plugin_directory_identity
+          },
+          parityIdentity,
+          testHooks
+        );
+      }
       if (backupExists && !backupIsOriginal && phaseOrdinal < 70) {
         throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup does not match the approved original tree');
       }
@@ -6377,9 +7206,31 @@ function recoverInterruptedN8nReplacement({
     if (!targetIsWinner && targetIsOwnedInstalledDirectory && backupIsOriginal && phaseOrdinal >= 40) {
       requireExactN8nOriginalBackup(backupPath, transaction.transaction);
       revalidateBeforeMutation('before-recovery-failed-winner-deletion');
+      requireN8nDestructiveDeleteBoundary(
+        transaction,
+        {
+          boundary: 'before-recovery-failed-winner-deletion',
+          parents: [{
+            identity: hostIdentity.selection.parent_directory_identity,
+            label: 'n8n Skills package parent',
+            path: path.dirname(targetPath)
+          }],
+          trees: [{
+            fresh: true,
+            identity: transaction.transaction.staged_plugin_directory_identity,
+            label: 'failed installed n8n Skills winner',
+            path: targetPath
+          }]
+        },
+        testHooks
+      );
       fs.rmSync(targetPath, { recursive: true });
       revalidateBeforeMutation('before-recovery-backup-restoration');
-      renameSyncWithRetry(backupPath, targetPath);
+      renameSyncWithRetry(
+        backupPath,
+        targetPath,
+        n8nBackupRestoreRenameOptions(transaction, hostIdentity, backupPath, targetPath, testHooks)
+      );
       const restored = classifyN8nSkillsCompatibility(targetPath);
       if (!n8nCompatibilityEvidenceMatches(transaction.transaction.approval_evidence, restored, 'repair-required')) {
         throw failClosedN8nRepair('verification-failed', 'Recovered n8n Skills original failed exact restoration verification');
@@ -6417,7 +7268,46 @@ function recoverInterruptedN8nReplacement({
         );
       }
       revalidateBeforeMutation('before-recovered-staged-winner-installation');
-      renameSyncWithRetry(stagePluginPath, targetPath);
+      renameSyncWithRetry(
+        stagePluginPath,
+        targetPath,
+        n8nDestructiveRenameOptions(
+          transaction,
+          {
+            absent: [targetPath],
+            boundary: 'recovered-staged-winner-installation',
+            parents: [
+              {
+                identity: hostIdentity.selection.parent_directory_identity,
+                label: 'n8n Skills package parent',
+                path: path.dirname(targetPath)
+              },
+              {
+                identity: transaction.preTransaction.preTransaction.stage_directory_identity,
+                label: 'owned n8n Skills stage parent',
+                path: transaction.generation.stagePath
+              }
+            ],
+            trees: [
+              {
+                evidence: transaction.transaction.approval_evidence,
+                identity: transaction.transaction.original_target_directory_identity,
+                label: 'recorded n8n Skills backup',
+                path: backupPath,
+                status: 'repair-required'
+              },
+              {
+                evidence: transaction.transaction.staged_evidence,
+                identity: transaction.transaction.staged_plugin_directory_identity,
+                label: 'recorded n8n Skills stage',
+                path: stagePluginPath,
+                status: 'healthy'
+              }
+            ]
+          },
+          testHooks
+        )
+      );
       transaction = advanceN8nEvidenceContext(
         transaction,
         'n8n-replacement-phase-40-installed',
@@ -6443,9 +7333,31 @@ function recoverInterruptedN8nReplacement({
           throw failClosedN8nRepair('recovery-evidence-invalid', 'Failed recovered n8n Skills target no longer matches the exact staged directory identity');
         }
         revalidateBeforeMutation('before-failed-recovered-target-deletion');
+        requireN8nDestructiveDeleteBoundary(
+          transaction,
+          {
+            boundary: 'before-failed-recovered-target-deletion',
+            parents: [{
+              identity: hostIdentity.selection.parent_directory_identity,
+              label: 'n8n Skills package parent',
+              path: path.dirname(targetPath)
+            }],
+            trees: [{
+              fresh: true,
+              identity: transaction.transaction.staged_plugin_directory_identity,
+              label: 'failed recovered n8n Skills winner',
+              path: targetPath
+            }]
+          },
+          testHooks
+        );
         fs.rmSync(targetPath, { recursive: true });
         revalidateBeforeMutation('before-failed-recovered-backup-restoration');
-        renameSyncWithRetry(backupPath, targetPath);
+        renameSyncWithRetry(
+          backupPath,
+          targetPath,
+          n8nBackupRestoreRenameOptions(transaction, hostIdentity, backupPath, targetPath, testHooks)
+        );
         throw failClosedN8nRepair('verification-failed', 'Recovered n8n Skills winner failed exact installed verification; the original was restored');
       }
       transaction = advanceN8nEvidenceContext(
@@ -6459,7 +7371,11 @@ function recoverInterruptedN8nReplacement({
       return { status: 'replacement-completed' };
     }
     revalidateBeforeMutation('before-recovery-backup-restoration');
-    renameSyncWithRetry(backupPath, targetPath);
+    renameSyncWithRetry(
+      backupPath,
+      targetPath,
+      n8nBackupRestoreRenameOptions(transaction, hostIdentity, backupPath, targetPath, testHooks)
+    );
     const restored = classifyN8nSkillsCompatibility(targetPath);
     if (!n8nCompatibilityEvidenceMatches(transaction.transaction.approval_evidence, restored, 'repair-required')) {
       throw failClosedN8nRepair('verification-failed', 'Recovered n8n Skills original failed exact restoration verification');
@@ -6478,7 +7394,8 @@ function revalidateN8nSelectedCacheInventory(entry, options = {}) {
   const inventory = discoverN8nSkillsCacheRoots(codexHome, {
     activeLock: options.activeLock,
     testHooks: options.testHooks,
-    transaction: options.transaction
+    transaction: options.transaction,
+    transactions: entry.retired_transactions || []
   });
   requireN8nInventorySelectionBinding(entry, inventory);
   return inventory;
@@ -6503,6 +7420,11 @@ function replaceSelectedN8nSkillsCache(
     boundary: 'before-replacement-registration',
     testHooks
   });
+  revalidateN8nJournalAuthority(
+    inventoryOptions.preTransactionContext,
+    'before-replacement-registration',
+    testHooks
+  );
   if (n8nExpectedNextEvidenceKind(inventoryOptions.preTransactionContext) !== 'n8n-replacement') {
     throw failClosedN8nRepair('recovery-evidence-invalid', 'n8n Skills replacement registration attempted to skip staged evidence phases');
   }
@@ -6539,7 +7461,47 @@ function replaceSelectedN8nSkillsCache(
       boundary: 'before-canonical-target-displacement',
       testHooks
     });
-    renameSyncWithRetry(targetPath, backupPath, testHooks.replaceDirectoryOptions || {});
+    renameSyncWithRetry(
+      targetPath,
+      backupPath,
+      n8nDestructiveRenameOptions(
+        transactionContext,
+        {
+          absent: [backupPath],
+          boundary: 'canonical-target-displacement',
+          parents: [
+            {
+              identity: entry.parent_directory_identity,
+              label: 'n8n Skills package parent',
+              path: path.dirname(targetPath)
+            },
+            {
+              identity: transactionContext.preTransaction.preTransaction.stage_directory_identity,
+              label: 'owned n8n Skills stage parent',
+              path: generation.stagePath
+            }
+          ],
+          trees: [
+            {
+              evidence: transaction.approval_evidence,
+              identity: transaction.original_target_directory_identity,
+              label: 'canonical n8n Skills target',
+              path: targetPath,
+              status: 'repair-required'
+            },
+            {
+              evidence: transaction.staged_evidence,
+              identity: transaction.staged_plugin_directory_identity,
+              label: 'staged n8n Skills winner',
+              path: stagePluginPath,
+              status: 'healthy'
+            }
+          ]
+        },
+        testHooks,
+        testHooks.replaceDirectoryOptions || {}
+      )
+    );
     backupCreated = true;
     transactionContext = advanceN8nEvidenceContext(transactionContext, 'n8n-replacement-phase-20-displaced', {
       backup_directory_identity: transaction.original_target_directory_identity
@@ -6552,7 +7514,50 @@ function replaceSelectedN8nSkillsCache(
       boundary: 'before-staged-winner-installation',
       testHooks
     });
-    renameSyncWithRetry(stagePluginPath, targetPath, testHooks.replaceDirectoryOptions || {});
+    renameSyncWithRetry(
+      stagePluginPath,
+      targetPath,
+      n8nDestructiveRenameOptions(
+        transactionContext,
+        {
+          absent: [targetPath],
+          boundary: 'staged-winner-installation',
+          parents: [
+            {
+              identity: entry.parent_directory_identity,
+              label: 'n8n Skills package parent',
+              path: path.dirname(targetPath)
+            },
+            {
+              identity: transactionContext.preTransaction.preTransaction.stage_directory_identity,
+              label: 'owned n8n Skills stage parent',
+              path: generation.stagePath
+            }
+          ],
+          trees: [
+            {
+              evidence: transaction.approval_evidence,
+              identity: transaction.original_target_directory_identity,
+              label: 'recorded n8n Skills backup',
+              path: backupPath,
+              status: 'repair-required'
+            },
+            {
+              evidence: transaction.staged_evidence,
+              identity: transaction.staged_plugin_directory_identity,
+              label: 'staged n8n Skills winner',
+              path: stagePluginPath,
+              status: 'healthy'
+            }
+          ]
+        },
+        testHooks,
+        testHooks.replaceDirectoryOptions || {}
+      )
+    );
+    if (testHooks.afterN8nRepairStageRenameBeforeInstalledPhase) {
+      testHooks.afterN8nRepairStageRenameBeforeInstalledPhase({ generation });
+    }
     targetInstalled = true;
     transactionContext = advanceN8nEvidenceContext(transactionContext, 'n8n-replacement-phase-40-installed', {
       installed_directory_identity: transaction.staged_plugin_directory_identity
@@ -6613,6 +7618,11 @@ function replaceSelectedN8nSkillsCache(
           boundary: 'before-resumable-backup-cleanup-operation',
           testHooks
         });
+        revalidateN8nJournalAuthority(
+          transactionContext,
+          'before-resumable-backup-cleanup-operation',
+          testHooks
+        );
       }
     });
   } catch (error) {
@@ -6641,6 +7651,24 @@ function replaceSelectedN8nSkillsCache(
         )) {
           throw failClosedN8nRepair('recovery-evidence-invalid', 'Failed n8n Skills replacement no longer matches the exact staged directory identity');
         }
+        requireN8nDestructiveDeleteBoundary(
+          transactionContext,
+          {
+            boundary: 'before-failed-target-deletion',
+            parents: [{
+              identity: entry.parent_directory_identity,
+              label: 'n8n Skills package parent',
+              path: path.dirname(targetPath)
+            }],
+            trees: [{
+              fresh: true,
+              identity: transaction.staged_plugin_directory_identity,
+              label: 'failed n8n Skills replacement',
+              path: targetPath
+            }]
+          },
+          testHooks
+        );
         fs.rmSync(targetPath, { recursive: true });
         if (testHooks.afterN8nRepairFailedTargetRemoved) {
           testHooks.afterN8nRepairFailedTargetRemoved({ generation, transaction });
@@ -6651,7 +7679,31 @@ function replaceSelectedN8nSkillsCache(
           boundary: 'before-rollback-backup-restoration',
           testHooks
         });
-        renameSyncWithRetry(backupPath, targetPath, testHooks.replaceDirectoryOptions || {});
+        renameSyncWithRetry(
+          backupPath,
+          targetPath,
+          n8nDestructiveRenameOptions(
+            transactionContext,
+            {
+              absent: [targetPath],
+              boundary: 'rollback-backup-restoration',
+              parents: [{
+                identity: entry.parent_directory_identity,
+                label: 'n8n Skills package parent',
+                path: path.dirname(targetPath)
+              }],
+              trees: [{
+                evidence: transaction.approval_evidence,
+                identity: transaction.original_target_directory_identity,
+                label: 'recorded n8n Skills backup',
+                path: backupPath,
+                status: 'repair-required'
+              }]
+            },
+            testHooks,
+            testHooks.replaceDirectoryOptions || {}
+          )
+        );
         if (testHooks.afterN8nRepairBackupRestored) {
           testHooks.afterN8nRepairBackupRestored({ generation, transaction });
         }
@@ -6673,8 +7725,20 @@ function reconcileSelectedN8nSkillsCache(entry, options = {}) {
     validateN8nSkillsCompatibilityContractParity(options.compatibilityContract || {})
   );
   const proposal = classifyN8nSkillsCompatibility(pluginRoot);
+  if (testHooks.afterN8nCompleteClassification) {
+    testHooks.afterN8nCompleteClassification({
+      boundary: 'initial-proposal',
+      status: proposal.status
+    });
+  }
   requireSelectedN8nVersionAgreement(entry, proposal);
-  const preview = reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: false });
+  const healthyDecision = renderN8nSkillsCompatibilityDecision(proposal, { windows: true });
+  if (healthyDecision) return healthyDecision;
+  const preview = reconcileN8nSkillsPlugin(pluginRoot, {
+    classification: proposal,
+    windows: true,
+    write: false
+  });
   if (!write || proposal.status === 'healthy') return preview;
   if (proposal.status !== 'repair-required') {
     throw new Error(proposal.reason || `n8n Skills compatibility state is ${proposal.status}`);
@@ -6682,6 +7746,14 @@ function reconcileSelectedN8nSkillsCache(entry, options = {}) {
 
   const lock = acquireN8nSkillsTargetLock(pluginRoot, testHooks.targetLockOptions || {});
   try {
+    if (!entry.parent_directory_identity) {
+      entry = {
+        ...entry,
+        parent_directory_identity: n8nDirectoryIdentity(
+          requireOrdinaryN8nDirectory(path.dirname(pluginRoot), 'n8n Skills package parent')
+        )
+      };
+    }
     if (testHooks.afterN8nRepairLockAcquired) {
       testHooks.afterN8nRepairLockAcquired({ pluginRoot, proposal: { ...proposal } });
     }
@@ -6691,7 +7763,7 @@ function reconcileSelectedN8nSkillsCache(entry, options = {}) {
     const revalidated = classifyN8nSkillsCompatibility(pluginRoot);
     requireSelectedN8nVersionAgreement(entry, revalidated);
     if (revalidated.status === 'healthy') {
-      return reconcileN8nSkillsPlugin(pluginRoot, { windows: true, write: false });
+      return renderN8nSkillsCompatibilityDecision(revalidated, { windows: true });
     }
     if (!sameN8nCompatibilityEvidence(proposal, revalidated)) {
       throw failClosedN8nRepair(
@@ -6703,6 +7775,22 @@ function reconcileSelectedN8nSkillsCache(entry, options = {}) {
       activeLock: lock,
       testHooks
     });
+    const journalAdmissionPaths = journalPaths(
+      entry.inventory_parent
+        ? path.resolve(entry.inventory_parent, '..', '..', '..', '..')
+        : path.resolve(pluginRoot, '..', '..', '..', '..', '..'),
+      pluginRoot,
+      '00000000-0000-0000-0000-000000000000'
+    );
+    if (n8nPathExists(journalAdmissionPaths.target)) {
+      const usage = targetJournalUsage(journalAdmissionPaths);
+      if (usage.hard_limit) {
+        throw failClosedN8nRepair(
+          'journal-hard-limit',
+          'The target repair journal reached its locked hard storage limit; new staging is blocked'
+        );
+      }
+    }
 
     return withOwnedStaging({
       target: pluginRoot,
@@ -6766,6 +7854,10 @@ function reconcileSelectedN8nSkillsCache(entry, options = {}) {
       if (!preTransactionContext) {
         throw failClosedN8nRepair('recovery-evidence-invalid', 'New n8n Skills pre-transaction evidence could not be bound');
       }
+      bindAndSynchronizeN8nJournal(preTransactionContext, {
+        write: true,
+        testHooks
+      });
       preTransactionContext[N8N_EVIDENCE_LIFECYCLE_OWNER] = generation;
       retainN8nEvidenceContext(preTransactionContext);
       if (testHooks.afterN8nPreTransactionRegistration) {
@@ -6780,6 +7872,11 @@ function reconcileSelectedN8nSkillsCache(entry, options = {}) {
         boundary: 'before-candidate-staging',
         testHooks
       });
+      revalidateN8nJournalAuthority(
+        preTransactionContext,
+        'before-candidate-staging',
+        testHooks
+      );
       if (testHooks.duringN8nRepairStageCopy) {
         testHooks.duringN8nRepairStageCopy({ generation, pluginRoot, stagedPluginRoot });
       }
@@ -6812,6 +7909,11 @@ function reconcileSelectedN8nSkillsCache(entry, options = {}) {
         boundary: 'before-staged-tree-transformation',
         testHooks
       });
+      revalidateN8nJournalAuthority(
+        preTransactionContext,
+        'before-staged-tree-transformation',
+        testHooks
+      );
       const stagedRepair = reconcileN8nSkillsPlugin(stagedPluginRoot, { windows: true, write: true });
       const stagedState = classifyN8nSkillsCompatibility(stagedPluginRoot);
       if (
@@ -6909,6 +8011,7 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
   let n8nDiscovery;
   try {
     n8nDiscovery = discoverN8nSkillsCacheRoots(codexHome, {
+      transactions: recoveryResult.retiredTransactions || [],
       testHooks: options.testHooks || {}
     });
   } catch (error) {
@@ -6987,6 +8090,12 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
     return result;
   }
 
+  Object.defineProperty(selection.entry, 'retired_transactions', {
+    configurable: false,
+    enumerable: false,
+    value: recoveryResult.retiredTransactions || [],
+    writable: false
+  });
   const targets = [selection.entry];
   for (const entry of n8nCandidates) {
     if (path.resolve(entry.plugin_root) === path.resolve(selection.entry.plugin_root)) continue;
@@ -6997,6 +8106,13 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
 
   for (const entry of targets) {
     try {
+      if (write) {
+        finalizeOrphanedN8nPhysicalCleanup(
+          codexHome,
+          entry.plugin_root,
+          options.testHooks || {}
+        );
+      }
       const repair = reconcileSelectedN8nSkillsCache(entry, {
         write,
         testHooks: options.testHooks || {}

@@ -5,9 +5,9 @@
   "title": "Official n8n Skills Plugin Compatibility",
   "module_path": "_projects/n8n/skills-plugin-compatibility",
   "main_path": "_projects/n8n/skills-plugin-compatibility/_main",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "version_policy": "semver",
-  "version_notes": "Requires one immutable descriptor-inspected evidence authority from transaction parsing through mutation and cleanup.",
+  "version_notes": "Binds the supported-version compatibility contract to the DL-244-289-003 schema-2 journal lifecycle and exact destructive-boundary authority.",
   "outputs": [],
   "writes": {
     "allowed": [],

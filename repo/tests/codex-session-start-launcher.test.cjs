@@ -52,6 +52,7 @@ function createRealBridgePluginFixture(root) {
     'repo/scripts/setup-codex-toolkit-plugin.cjs',
     'repo/scripts/repair-codex-plugin-windows-hooks.cjs',
     'repo/scripts/audit-n8n-skills-plugin-hooks.cjs',
+    'repo/scripts/toolkit-n8n-repair-journal.cjs',
     'repo/scripts/toolkit-staging-generations.cjs',
   ]) copyFile(relPath, pluginRoot);
   writeFile(path.join(pluginRoot, '.codex-plugin', 'hooks', 'hooks.json'), `${JSON.stringify({

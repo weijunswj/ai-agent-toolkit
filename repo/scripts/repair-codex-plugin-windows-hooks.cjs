@@ -1334,13 +1334,24 @@ function repairPluginRoot(pluginRoot, options = {}) {
   };
 }
 
+function renderN8nSkillsCompatibilityDecision(classification, options = {}) {
+  const windows = options.windows ?? process.platform === 'win32';
+  if (!windows) {
+    return { ...classification, status: 'not-supported', repaired: false, actions: [] };
+  }
+  if (classification.status === 'healthy') {
+    return { ...classification, repaired: false, actions: [] };
+  }
+  return null;
+}
+
 function reconcileN8nSkillsPlugin(pluginRoot, options = {}) {
   validateN8nSkillsCompatibilityContractParity(options.compatibilityContract || {});
   const windows = options.windows ?? process.platform === 'win32';
   const write = Boolean(options.write);
-  const before = classifyN8nSkillsCompatibility(pluginRoot);
-  if (!windows) return { ...before, status: 'not-supported', repaired: false, actions: [] };
-  if (before.status === 'healthy') return { ...before, repaired: false, actions: [] };
+  const before = options.classification || classifyN8nSkillsCompatibility(pluginRoot);
+  const rendered = renderN8nSkillsCompatibilityDecision(before, { windows });
+  if (rendered) return rendered;
   if (before.status !== 'repair-required') {
     throw new Error(before.reason || `n8n Skills compatibility state is ${before.status}`);
   }
@@ -1458,6 +1469,7 @@ module.exports = {
   inspectN8nSkillsTree,
   n8nSkillsTreeIdentity,
   n8nSkillsCompatibilityFingerprints,
+  renderN8nSkillsCompatibilityDecision,
   reconcileN8nSkillsPlugin,
   repairPluginRoot,
   validateN8nSkillsCompatibilityContractParity,

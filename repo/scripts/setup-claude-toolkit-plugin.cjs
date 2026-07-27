@@ -218,7 +218,12 @@ function validateRepoPluginSource(repoRoot, expectedVersion = '') {
   for (const relPath of ['repo/scripts/repo-ignore-hygiene.cjs', 'repo/scripts/repo-local-backup.cjs']) {
     if (!fs.existsSync(path.join(repoRoot, ...relPath.split('/')))) errors.push(`Missing repo-local safety package file: ${relPath}`);
   }
-  for (const relPath of ['repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/toolkit-claude-agent-hook.cjs', 'repo/scripts/toolkit-local-bridge.cjs']) {
+  for (const relPath of [
+    'repo/scripts/toolkit-agent-control.cjs',
+    'repo/scripts/toolkit-claude-agent-hook.cjs',
+    'repo/scripts/toolkit-local-bridge.cjs',
+    'repo/scripts/toolkit-n8n-repair-journal.cjs'
+  ]) {
     if (!fs.existsSync(path.join(repoRoot, ...relPath.split('/')))) errors.push(`Missing Claude agent-control package file: ${relPath}`);
   }
 
@@ -242,6 +247,7 @@ function validateInstalledEnforcement(installed, repoRoot, expectedVersion) {
     ['repo/scripts/claude-process-launch.cjs', false],
     ['repo/scripts/toolkit-claude-agent-hook.cjs', false],
     ['repo/scripts/toolkit-local-bridge.cjs', false],
+    ['repo/scripts/toolkit-n8n-repair-journal.cjs', false],
     ['repo/scripts/repo-ignore-hygiene.cjs', false],
     ['repo/scripts/repo-local-backup.cjs', false],
   ];

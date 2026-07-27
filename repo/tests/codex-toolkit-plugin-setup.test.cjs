@@ -799,7 +799,8 @@ test('Codex cache fingerprints include every new installed setup dependency and 
     'repo/scripts/repo-ignore-hygiene.cjs',
     'repo/scripts/repo-local-backup.cjs',
     'repo/scripts/audit-n8n-skills-plugin-hooks.cjs',
-    'repo/scripts/repair-codex-plugin-windows-hooks.cjs'
+    'repo/scripts/repair-codex-plugin-windows-hooks.cjs',
+    'repo/scripts/toolkit-n8n-repair-journal.cjs'
   ];
   for (const relPath of dependencies) assert.equal(setup.CACHE_FINGERPRINT_PATHS.includes(relPath), true, relPath);
   for (const relPath of dependencies) {

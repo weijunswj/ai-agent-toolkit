@@ -966,6 +966,7 @@ test('installed enforcement byte verification rejects missing and stale cache fi
     'repo/scripts/repo-ignore-hygiene.cjs',
     'repo/scripts/repo-local-backup.cjs',
     'repo/scripts/toolkit-local-bridge.cjs',
+    'repo/scripts/toolkit-n8n-repair-journal.cjs',
   ]) {
     const target = path.join(cache, ...relPath.split('/'));
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -990,6 +991,15 @@ test('installed enforcement byte verification rejects missing and stale cache fi
   state = setup.evaluateClaudeToolkitPluginState(installedList({ installPath: cache }), { repoRoot });
   assert.equal(state.ok, false);
   assert.match(state.errors.join('\n'), /missing.*toolkit-local-bridge/i);
+  fs.copyFileSync(path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'), path.join(cache, 'repo', 'scripts', 'toolkit-local-bridge.cjs'));
+  fs.appendFileSync(path.join(cache, 'repo', 'scripts', 'toolkit-n8n-repair-journal.cjs'), ' ');
+  state = setup.evaluateClaudeToolkitPluginState(installedList({ installPath: cache }), { repoRoot });
+  assert.equal(state.ok, false);
+  assert.match(state.errors.join('\n'), /stale.*toolkit-n8n-repair-journal/i);
+  fs.rmSync(path.join(cache, 'repo', 'scripts', 'toolkit-n8n-repair-journal.cjs'), { force: true });
+  state = setup.evaluateClaudeToolkitPluginState(installedList({ installPath: cache }), { repoRoot });
+  assert.equal(state.ok, false);
+  assert.match(state.errors.join('\n'), /missing.*toolkit-n8n-repair-journal/i);
 });
 
 test('installed Claude SessionStart bridge must remain a regular cache file', { skip: process.platform === 'win32' }, (t) => {
@@ -998,6 +1008,7 @@ test('installed Claude SessionStart bridge must remain a regular cache file', { 
     '.claude-plugin/plugin.json', '.claude-plugin/hooks/hooks.json',
     'repo/scripts/toolkit-agent-control.cjs', 'repo/scripts/claude-process-launch.cjs',
     'repo/scripts/toolkit-claude-agent-hook.cjs', 'repo/scripts/toolkit-local-bridge.cjs',
+    'repo/scripts/toolkit-n8n-repair-journal.cjs',
     'repo/scripts/repo-ignore-hygiene.cjs', 'repo/scripts/repo-local-backup.cjs',
   ]) {
     const target = path.join(cache, ...relPath.split('/'));

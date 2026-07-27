@@ -1252,6 +1252,7 @@ function validateNativePluginPackages(errors) {
     '.claude-plugin/plugin.json',
     '.claude-plugin/hooks/hooks.json',
     'repo/scripts/toolkit-local-bridge.cjs',
+    'repo/scripts/toolkit-n8n-repair-journal.cjs',
     'repo/docs/TOOLKIT-LOCAL-BRIDGE.md'
   ].filter(existsRel).map((relPath) => ({ relPath, text: readText(relPath) }));
 

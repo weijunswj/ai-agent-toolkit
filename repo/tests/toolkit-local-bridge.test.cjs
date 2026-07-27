@@ -50,10 +50,13 @@ const {
   RECORD_PREFIX,
   createOwnedStagingGeneration
 } = require('../scripts/toolkit-staging-generations.cjs');
+const {
+  inspectN8nRepairJournal
+} = require('../scripts/toolkit-n8n-repair-journal.cjs');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.9.12';
+const expectedBridgeVersion = '2.9.13';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 const currentN8nManifestPath = path.join(
   repoRoot,
@@ -527,6 +530,7 @@ function writeCodexPluginRefreshFixture(repoPath) {
     '_projects/n8n/skills-plugin-compatibility/SOURCE-LOCK.json',
     'repo/scripts/audit-n8n-skills-plugin-hooks.cjs',
     'repo/scripts/repair-codex-plugin-windows-hooks.cjs',
+    'repo/scripts/toolkit-n8n-repair-journal.cjs',
     'repo/scripts/toolkit-codex-session-start.cjs',
     'repo/scripts/toolkit-codex-session-start.ps1',
   ]) {
@@ -5900,7 +5904,7 @@ test('Codex plugin hook reconciliation repairs only the exact supported n8n cach
     pluginList: codexPluginList([n8nInstalledEntry('1.0.1')])
   });
 
-  assert.equal(result.status, 'repaired');
+  assert.equal(result.status, 'repaired', JSON.stringify(result, null, 2));
   assert.deepEqual(result.repaired.map((entry) => entry.plugin_root), [n8nRoot]);
   assert.deepEqual(
     result.skipped.map((entry) => entry.plugin_root).sort(),
@@ -6078,6 +6082,393 @@ test('Codex n8n repair serializes two cross-process writers for one exact cache'
   assert.equal(finalState.status, 'healthy');
   assert.deepEqual(fs.readFileSync(path.join(pluginRoot, 'unrelated.txt')), Buffer.from('winner must preserve this exactly\n'));
   assert.deepEqual(n8nTransactionArtifacts(pluginRoot), [], 'success leaves no stage, backup, marker, or lock residue');
+});
+
+test('healthy n8n SessionStart consumes one complete classification through the pure renderer', () => {
+  const root = tmpRoot();
+  const pluginRoot = path.join(root, 'codex-home', 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copyCurrentSupportedN8nPluginFixture(pluginRoot);
+  repairPluginRoot(pluginRoot, { n8n: true, windows: true, write: true });
+  let classifications = 0;
+  const result = reconcileSelectedN8nSkillsCache({
+    plugin_id: 'n8n-skills@n8n-io',
+    version: '1.0.2',
+    selected_version: '1.0.2',
+    directory_version: '1.0.2',
+    plugin_root: pluginRoot
+  }, {
+    write: false,
+    testHooks: {
+      afterN8nCompleteClassification({ boundary }) {
+        assert.equal(boundary, 'initial-proposal');
+        classifications += 1;
+      }
+    }
+  });
+  assert.equal(result.status, 'healthy');
+  assert.equal(result.repaired, false);
+  assert.equal(classifications, 1);
+  assert.equal(
+    fs.existsSync(path.join(root, 'codex-home', '.ai-agent-toolkit-n8n-repair')),
+    false,
+    'healthy read-only classification must not create journal state'
+  );
+});
+
+test('installed winner durable only through phase 30 appends phase 40 before recovery cleanup', async () => {
+  const root = tmpRoot();
+  const codexHome = path.join(root, 'codex-home');
+  const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copyCurrentSupportedN8nPluginFixture(pluginRoot);
+  await waitForAbruptChild(
+    spawnAbruptN8nRepair(pluginRoot, '1.0.2', 'afterN8nRepairStageRenameBeforeInstalledPhase')
+  );
+  const owned = readSingleN8nOwnedGeneration(pluginRoot);
+  assert.equal(
+    fs.existsSync(owned.recordPath.replace(/\.json$/, '.n8n-replacement-phase-30-install.json')),
+    true
+  );
+  assert.equal(
+    fs.existsSync(owned.recordPath.replace(/\.json$/, '.n8n-replacement-phase-40-installed.json')),
+    false
+  );
+  assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'healthy');
+  const recovered = recoverInterruptedN8nReplacement({
+    codexHome,
+    pluginInspection: {
+      errors: [],
+      ok: true,
+      pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
+    },
+    write: true
+  });
+  assert.equal(recovered.status, 'winner-preserved');
+  assert.deepEqual(n8nTransactionArtifacts(pluginRoot), []);
+  assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'healthy');
+});
+
+test('exact v1 evidence migrates through a torn primary into TAIL_SEAL and repeated restart', async () => {
+  const root = tmpRoot();
+  const codexHome = path.join(root, 'codex-home');
+  const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copyCurrentSupportedN8nPluginFixture(pluginRoot);
+  const original = snapshotTree(pluginRoot);
+  await waitForAbruptChild(
+    spawnAbruptN8nRepair(pluginRoot, '1.0.2', 'afterN8nPreTransactionRegistration')
+  );
+  const v1 = readSingleN8nOwnedGeneration(pluginRoot);
+  const journalRoot = path.join(codexHome, '.ai-agent-toolkit-n8n-repair');
+  fs.rmSync(journalRoot, { recursive: true, force: true });
+  const firstAttemptRecord = fs.readFileSync(v1.recordPath);
+  const firstAttemptStage = snapshotTree(v1.record.expected_staging_path);
+  assert.throws(
+    () => recoverInterruptedN8nReplacement({
+      codexHome,
+      pluginInspection: {
+        errors: [],
+        ok: true,
+        pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
+      },
+      testHooks: {
+        n8nJournalWriteByteLimit({ size }) {
+          return size - 1;
+        }
+      },
+      write: true
+    }),
+    (error) => error.code === 'journal-incomplete-tail'
+  );
+  assert.deepEqual(snapshotTree(pluginRoot), original);
+  assert.deepEqual(fs.readFileSync(v1.recordPath), firstAttemptRecord);
+  assert.deepEqual(snapshotTree(v1.record.expected_staging_path), firstAttemptStage);
+  const recovered = recoverInterruptedN8nReplacement({
+    codexHome,
+    pluginInspection: {
+      errors: [],
+      ok: true,
+      pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
+    },
+    write: true
+  });
+  assert.equal(recovered.status, 'pre-transaction-cleaned');
+  assert.deepEqual(snapshotTree(pluginRoot), original);
+  assert.deepEqual(n8nTransactionArtifacts(pluginRoot), []);
+  const segmentNames = [];
+  const pending = [journalRoot];
+  while (pending.length) {
+    const current = pending.pop();
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory()) pending.push(fullPath);
+      else if (/\.jseg$/.test(entry.name)) segmentNames.push(entry.name);
+    }
+  }
+  assert.ok(segmentNames.some((name) => /-a1\.jseg$/.test(name)), 'recovery must retain its TAIL_SEAL rescue segment');
+});
+
+test('logical retirement remains truthful when physical cleanup is blocked and residue drift fails closed', () => {
+  const root = tmpRoot();
+  const codexHome = path.join(root, 'codex-home');
+  const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copyCurrentSupportedN8nPluginFixture(pluginRoot);
+  const repaired = reconcileSelectedN8nSkillsCache({
+    plugin_id: 'n8n-skills@n8n-io',
+    version: '1.0.2',
+    selected_version: '1.0.2',
+    directory_version: '1.0.2',
+    plugin_root: pluginRoot
+  }, {
+    testHooks: { preventN8nPhysicalCleanup: true },
+    write: true
+  });
+  assert.equal(repaired.status, 'repaired');
+  const residue = n8nTransactionArtifacts(pluginRoot);
+  assert.notDeepEqual(residue, []);
+  const healthyRetry = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+    windows: true,
+    write: false
+  });
+  assert.equal(healthyRetry.status, 'not-needed');
+  assert.deepEqual(n8nTransactionArtifacts(pluginRoot), residue);
+  const owned = readSingleN8nOwnedGeneration(pluginRoot);
+  fs.appendFileSync(owned.recordPath, ' ');
+  const changedResidue = fs.readFileSync(owned.recordPath);
+  const blocked = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+    windows: true,
+    write: true
+  });
+  assert.equal(blocked.status, 'repair-failed');
+  assert.ok(
+    ['journal-retired-residue-drift', 'journal-v1-drift', 'recovery-evidence-invalid'].includes(blocked.code),
+    JSON.stringify(blocked)
+  );
+  assert.deepEqual(fs.readFileSync(owned.recordPath), changedResidue);
+  assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'healthy');
+});
+
+test('logical retirement resumes exact physical cleanup through C10 and proves C20 only after absence', () => {
+  const root = tmpRoot();
+  const codexHome = path.join(root, 'codex-home');
+  const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copyCurrentSupportedN8nPluginFixture(pluginRoot);
+  const repaired = reconcileSelectedN8nSkillsCache({
+    plugin_id: 'n8n-skills@n8n-io',
+    version: '1.0.2',
+    selected_version: '1.0.2',
+    directory_version: '1.0.2',
+    plugin_root: pluginRoot
+  }, {
+    testHooks: { preventN8nPhysicalCleanup: true },
+    write: true
+  });
+  assert.equal(repaired.status, 'repaired');
+  const owned = readSingleN8nOwnedGeneration(pluginRoot);
+  assert.notDeepEqual(n8nTransactionArtifacts(pluginRoot), []);
+
+  const resumed = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+    windows: true,
+    write: true
+  });
+  assert.equal(resumed.status, 'not-needed', JSON.stringify(resumed, null, 2));
+  assert.deepEqual(n8nTransactionArtifacts(pluginRoot), []);
+  const journal = inspectN8nRepairJournal({
+    codexHome,
+    generationId: owned.record.generation_id,
+    ownershipToken: owned.record.ownership_token,
+    targetPath: pluginRoot
+  });
+  assert.equal(journal.state, 'C20_CLEANUP_COMPLETE');
+  assert.ok(journal.records.some((record) => record.kind === 'C10_CLEANUP_PENDING'));
+  assert.ok(journal.records.some((record) => record.kind === 'C20_CLEANUP_COMPLETE'));
+});
+
+test('C10 physical evidence cleanup resumes after a stop following one exact deletion', () => {
+  const root = tmpRoot();
+  const codexHome = path.join(root, 'codex-home');
+  const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copyCurrentSupportedN8nPluginFixture(pluginRoot);
+  const repaired = reconcileSelectedN8nSkillsCache({
+    plugin_id: 'n8n-skills@n8n-io',
+    version: '1.0.2',
+    selected_version: '1.0.2',
+    directory_version: '1.0.2',
+    plugin_root: pluginRoot
+  }, {
+    testHooks: { preventN8nPhysicalCleanup: true },
+    write: true
+  });
+  assert.equal(repaired.status, 'repaired');
+  let stopped = false;
+  const interrupted = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+    testHooks: {
+      afterN8nEvidenceCleanupDelete({ evidence_kind: evidenceKind }) {
+        if (stopped || evidenceKind !== 'n8n-replacement') return;
+        stopped = true;
+        const error = new Error('synthetic stop after exact evidence deletion');
+        error.code = 'SYNTHETIC_STOP';
+        throw error;
+      }
+    },
+    windows: true,
+    write: true
+  });
+  assert.equal(interrupted.status, 'repair-failed');
+  assert.equal(interrupted.code, 'SYNTHETIC_STOP');
+  assert.equal(stopped, true);
+  assert.notDeepEqual(n8nTransactionArtifacts(pluginRoot), []);
+
+  const resumed = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+    windows: true,
+    write: true
+  });
+  assert.equal(resumed.status, 'not-needed', JSON.stringify(resumed, null, 2));
+  assert.deepEqual(n8nTransactionArtifacts(pluginRoot), []);
+  assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'healthy');
+});
+
+test('C10 cleanup resumes after stage or final generation-record deletion without false C20', () => {
+  for (const stopKind of ['stage-owner', 'generation-record']) {
+    const root = tmpRoot();
+    const codexHome = path.join(root, `codex-home-${stopKind}`);
+    const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+    copyCurrentSupportedN8nPluginFixture(pluginRoot);
+    const repaired = reconcileSelectedN8nSkillsCache({
+      plugin_id: 'n8n-skills@n8n-io',
+      version: '1.0.2',
+      selected_version: '1.0.2',
+      directory_version: '1.0.2',
+      plugin_root: pluginRoot
+    }, {
+      testHooks: { preventN8nPhysicalCleanup: true },
+      write: true
+    });
+    assert.equal(repaired.status, 'repaired');
+    const owned = readSingleN8nOwnedGeneration(pluginRoot);
+    let stopped = false;
+    const interrupted = repairThirdPartyCodexPluginHooks({
+      codexHome,
+      pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+      testHooks: {
+        afterN8nEvidenceCleanupDelete({ evidence_kind: evidenceKind }) {
+          if (stopped || evidenceKind !== stopKind) return;
+          stopped = true;
+          const error = new Error(`synthetic stop after ${stopKind} deletion`);
+          error.code = 'SYNTHETIC_STOP';
+          throw error;
+        }
+      },
+      windows: true,
+      write: true
+    });
+    assert.equal(interrupted.status, 'repair-failed');
+    assert.equal(interrupted.code, 'SYNTHETIC_STOP');
+    assert.equal(stopped, true);
+    const pending = inspectN8nRepairJournal({
+      codexHome,
+      generationId: owned.record.generation_id,
+      ownershipToken: owned.record.ownership_token,
+      targetPath: pluginRoot
+    });
+    assert.equal(pending.state, 'C10_CLEANUP_PENDING');
+
+    const resumed = repairThirdPartyCodexPluginHooks({
+      codexHome,
+      pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+      windows: true,
+      write: true
+    });
+    assert.equal(resumed.status, 'not-needed', `${stopKind}: ${JSON.stringify(resumed, null, 2)}`);
+    assert.deepEqual(n8nTransactionArtifacts(pluginRoot), []);
+    const completed = inspectN8nRepairJournal({
+      codexHome,
+      generationId: owned.record.generation_id,
+      ownershipToken: owned.record.ownership_token,
+      targetPath: pluginRoot
+    });
+    assert.equal(completed.state, 'C20_CLEANUP_COMPLETE');
+  }
+});
+
+test('destructive displacement reclassifies the target after the final mutation hook', () => {
+  const root = tmpRoot();
+  const pluginRoot = path.join(root, 'codex-home', 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copyCurrentSupportedN8nPluginFixture(pluginRoot);
+  const mutationPath = path.join(pluginRoot, 'hooks', 'session-start.sh');
+  let mutated = false;
+  assert.throws(
+    () => reconcileSelectedN8nSkillsCache({
+      plugin_id: 'n8n-skills@n8n-io',
+      version: '1.0.2',
+      selected_version: '1.0.2',
+      directory_version: '1.0.2',
+      plugin_root: pluginRoot
+    }, {
+      testHooks: {
+        beforeN8nDestructiveOperation({ boundary }) {
+          if (!mutated && boundary === 'canonical-target-displacement') {
+            fs.appendFileSync(mutationPath, '# changed at final boundary\n');
+            mutated = true;
+          }
+        }
+      },
+      write: true
+    }),
+    (error) => error.code === 'destructive-boundary-drift'
+  );
+  assert.equal(mutated, true);
+  assert.match(fs.readFileSync(mutationPath, 'utf8'), /changed at final boundary/);
+  assert.equal(
+    fs.readdirSync(path.dirname(pluginRoot)).some((name) => name.includes('n8n-repair-backup')),
+    false
+  );
+});
+
+test('every sharing-violation retry obtains a fresh complete destructive-boundary authority', () => {
+  const root = tmpRoot();
+  const pluginRoot = path.join(root, 'codex-home', 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copyCurrentSupportedN8nPluginFixture(pluginRoot);
+  let displacementProofs = 0;
+  let injected = false;
+  const result = reconcileSelectedN8nSkillsCache({
+    plugin_id: 'n8n-skills@n8n-io',
+    version: '1.0.2',
+    selected_version: '1.0.2',
+    directory_version: '1.0.2',
+    plugin_root: pluginRoot
+  }, {
+    testHooks: {
+      beforeN8nDestructiveOperation({ boundary }) {
+        if (boundary === 'canonical-target-displacement') displacementProofs += 1;
+      },
+      replaceDirectoryOptions: {
+        renameOperation(sourcePath, targetPath) {
+          if (!injected && path.resolve(sourcePath) === path.resolve(pluginRoot)) {
+            injected = true;
+            const error = new Error('synthetic sharing violation');
+            error.code = 'EPERM';
+            throw error;
+          }
+          fs.renameSync(sourcePath, targetPath);
+        },
+        retryDelayMs: 0
+      }
+    },
+    write: true
+  });
+  assert.equal(result.status, 'repaired');
+  assert.equal(injected, true);
+  assert.equal(displacementProofs, 2);
+  assert.deepEqual(n8nTransactionArtifacts(pluginRoot), []);
 });
 
 test('Codex n8n repair reconciles exact dead target-untouched generations before retry', async () => {
