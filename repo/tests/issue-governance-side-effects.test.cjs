@@ -14,8 +14,10 @@ const child = path.join(fixtureRoot, 'side-effect-child.cjs');
 const manifest = JSON.parse(fs.readFileSync(path.join(fixtureRoot, 'side-effect-manifest.json'), 'utf8'));
 
 function isolatedChildEnvironment() {
-  const env = { ...process.env, NODE_NO_WARNINGS: '1' };
-  delete env.NODE_TEST_CONTEXT;
+  const env = { NODE_NO_WARNINGS: '1' };
+  for (const key of ['PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'SystemRoot', 'WINDIR', 'ComSpec', 'PATHEXT', 'LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH']) {
+    if (typeof process.env[key] === 'string') env[key] = process.env[key];
+  }
   return env;
 }
 

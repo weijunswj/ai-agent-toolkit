@@ -5,7 +5,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-function fail() {
+function fail(code) {
+  if (code) process.stderr.write(code + '\n');
   process.exit(2);
 }
 
@@ -81,17 +82,20 @@ function invocation(entry, root, guarded, acquired) {
 }
 
 async function main() {
-  if (process.argv.length !== 3) fail();
+  if (process.argv.length !== 3) fail('SIDE_EFFECT_CHILD_FAILURE:arguments');
   const entry = JSON.parse(Buffer.from(process.argv[2], 'base64url').toString('utf8'));
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'issue-governance-side-effect-'));
   const cleanup = fs.rmSync.bind(fs);
   let sentinelCalls = 0;
   let guardBlocked = false;
   let cleanupComplete = false;
+  let phase = 'positive-control';
   try {
     await invocation(entry, root, false);
     sentinelCalls += 1;
+    phase = 'guard-install';
     require('./intercept-side-effects.cjs');
+    phase = 'guarded-call';
     const acquired = acquireGuardedExport(entry);
     try {
       await invocation(entry, root, true, acquired);
@@ -99,11 +103,15 @@ async function main() {
       if (error && error.code === 'SIDE_EFFECT_GUARD_BLOCKED') guardBlocked = true;
       else throw error;
     }
+    phase = 'cleanup';
     cleanup(root, { recursive: true, force: true });
     cleanupComplete = !fs.existsSync(root);
-  } catch {
+  } catch (error) {
     try { cleanup(root, { recursive: true, force: true }); } catch {}
-    fail();
+    const errorCode = error && typeof error.code === 'string' && /^[A-Z0-9_]+$/.test(error.code)
+      ? error.code
+      : 'UNCLASSIFIED';
+    fail('SIDE_EFFECT_CHILD_FAILURE:' + phase + ':' + errorCode);
   }
   process.stdout.write(JSON.stringify({
     variant_id: entry.variant_id,
