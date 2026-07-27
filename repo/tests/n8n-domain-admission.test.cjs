@@ -825,31 +825,45 @@ test('workflow compiler producer rejects linked outputs and linked output ancest
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-n8n-helper-output-outside-'));
   const outsideFile = path.join(outside, 'outside.json');
   fs.writeFileSync(outsideFile, '{}\n');
+  let fileLinkCreated = false;
+  let ancestorLinkCreated = false;
   try {
     fs.symlinkSync(outsideFile, path.join(repository, 'output.json'), 'file');
-    fs.symlinkSync(outside, path.join(repository, 'generated'), 'dir');
+    fileLinkCreated = true;
   } catch (error) {
-    if (['EPERM', 'EACCES', 'UNKNOWN'].includes(error.code)) {
-      t.skip(`Symlink creation is unavailable: ${error.code}`);
-      return;
-    }
-    throw error;
+    if (!['EPERM', 'EACCES', 'UNKNOWN'].includes(error.code)) throw error;
+    t.diagnostic(`File symlink creation is unavailable: ${error.code}`);
+  }
+  try {
+    fs.symlinkSync(outside, path.join(repository, 'generated'), process.platform === 'win32' ? 'junction' : 'dir');
+    ancestorLinkCreated = true;
+  } catch (error) {
+    if (!['EPERM', 'EACCES', 'UNKNOWN'].includes(error.code)) throw error;
+    t.diagnostic(`Linked-directory creation is unavailable: ${error.code}`);
+  }
+  if (!fileLinkCreated && !ancestorLinkCreated) {
+    t.skip('No linked-output topology fixture is available on this host.');
+    return;
   }
   const input = (command) => ({
     cwd: repository,
     tool_name: 'Bash',
     tool_input: { command }
   });
-  assert.equal(n8n.isCapabilityProducerToolUse(
-    input(`node "${helperScript}" source.json output.json`),
-    verifiedLedger,
-    options
-  ), false);
-  assert.equal(n8n.isCapabilityProducerToolUse(
-    input(`node "${helperScript}" source.json generated/output.json`),
-    verifiedLedger,
-    options
-  ), false);
+  if (fileLinkCreated) {
+    assert.equal(n8n.isCapabilityProducerToolUse(
+      input(`node "${helperScript}" source.json output.json`),
+      verifiedLedger,
+      options
+    ), false);
+  }
+  if (ancestorLinkCreated) {
+    assert.equal(n8n.isCapabilityProducerToolUse(
+      input(`node "${helperScript}" source.json generated/output.json`),
+      verifiedLedger,
+      options
+    ), false);
+  }
 });
 
 test('Claude completion audit blocks an incomplete n8n task and reports one supported next action', () => {
