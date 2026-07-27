@@ -56,7 +56,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.9.14';
+const expectedBridgeVersion = '2.9.15';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 const currentN8nManifestPath = path.join(
   repoRoot,
@@ -6112,6 +6112,39 @@ test('healthy n8n SessionStart consumes one complete classification through the 
     fs.existsSync(path.join(root, 'codex-home', '.ai-agent-toolkit-n8n-repair')),
     false,
     'healthy read-only classification must not create journal state'
+  );
+});
+
+test('journal directory durability admission fails before canonical n8n cache displacement', () => {
+  const root = tmpRoot();
+  const pluginRoot = path.join(root, 'codex-home', 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copyCurrentSupportedN8nPluginFixture(pluginRoot);
+  const original = snapshotTree(pluginRoot);
+  assert.throws(
+    () => reconcileSelectedN8nSkillsCache({
+      plugin_id: 'n8n-skills@n8n-io',
+      version: '1.0.2',
+      selected_version: '1.0.2',
+      directory_version: '1.0.2',
+      plugin_root: pluginRoot
+    }, {
+      testHooks: {
+        fsyncN8nJournalDirectory() {
+          const error = new Error('synthetic parent-directory fsync failure');
+          error.code = 'EIO';
+          throw error;
+        },
+        n8nJournalPlatform: 'linux'
+      },
+      write: true
+    }),
+    { code: 'journal-durability-unavailable' }
+  );
+  assert.deepEqual(snapshotTree(pluginRoot), original);
+  assert.equal(
+    n8nTransactionArtifacts(pluginRoot)
+      .some((entry) => /\.backup-/.test(entry) || entry.includes('.staging-')),
+    false
   );
 });
 

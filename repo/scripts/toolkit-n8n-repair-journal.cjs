@@ -209,8 +209,17 @@ function requireOrdinaryDirectory(value, label) {
   });
 }
 
-function fsyncDirectoryIfSupported(directoryPath) {
-  if (process.platform === 'win32') return;
+function fsyncDirectoryIfSupported(directoryPath, options = {}) {
+  const platform = options.testHooks?.n8nJournalPlatform || process.platform;
+  if (platform === 'win32') return;
+  if (options.testHooks?.fsyncN8nJournalDirectory) {
+    try {
+      options.testHooks.fsyncN8nJournalDirectory({ path: path.resolve(directoryPath) });
+    } catch {
+      throw journalError('journal-durability-unavailable', 'Journal directory durability could not be admitted');
+    }
+    return;
+  }
   let descriptor;
   try {
     descriptor = fs.openSync(directoryPath, fs.constants.O_RDONLY);
@@ -222,26 +231,57 @@ function fsyncDirectoryIfSupported(directoryPath) {
   }
 }
 
-function ensureOrdinaryDirectory(directoryPath, parentPath, write) {
-  if (pathExists(directoryPath)) return requireOrdinaryDirectory(directoryPath, 'repair journal directory');
+function ensureOrdinaryDirectory(directoryPath, parentPath, write, options = {}) {
+  const existed = pathExists(directoryPath);
+  if (existed && !write) {
+    return requireOrdinaryDirectory(directoryPath, 'repair journal directory');
+  }
   if (!write) {
     throw journalError('journal-missing', 'The repair journal directory does not exist');
   }
-  const parent = requireOrdinaryDirectory(parentPath, 'repair journal parent');
-  try {
-    fs.mkdirSync(directoryPath, { mode: 0o700 });
-  } catch (error) {
-    if (error?.code !== 'EEXIST') {
-      throw journalError('journal-durability-unavailable', 'The repair journal directory could not be created exclusively');
+  const parentBefore = requireOrdinaryDirectory(parentPath, 'repair journal parent');
+  if (!existed) {
+    try {
+      fs.mkdirSync(directoryPath, { mode: 0o700 });
+    } catch (error) {
+      if (error?.code !== 'EEXIST') {
+        throw journalError('journal-durability-unavailable', 'The repair journal directory could not be created exclusively');
+      }
     }
   }
-  const created = requireOrdinaryDirectory(directoryPath, 'repair journal directory');
-  const parentAfter = requireOrdinaryDirectory(parentPath, 'repair journal parent');
-  if (!directoryIdentitySurvivedChildCreation(parent.identity, parentAfter.identity)) {
+  const childBeforeFsync = requireOrdinaryDirectory(directoryPath, 'repair journal directory');
+  const parentBeforeFsync = requireOrdinaryDirectory(parentPath, 'repair journal parent');
+  const parentSurvived = existed
+    ? directoryIdentitiesMatch(parentBefore.identity, parentBeforeFsync.identity)
+    : directoryIdentitySurvivedChildCreation(parentBefore.identity, parentBeforeFsync.identity);
+  if (!parentSurvived) {
     throw journalError('journal-topology-invalid', 'The repair journal parent changed during directory creation');
   }
-  fsyncDirectoryIfSupported(parentPath);
-  return created;
+  if (!existed && options.testHooks?.afterN8nJournalDirectoryCreatedBeforeParentFsync) {
+    options.testHooks.afterN8nJournalDirectoryCreatedBeforeParentFsync({
+      directory: path.resolve(directoryPath),
+      parent: path.resolve(parentPath)
+    });
+  }
+  if (options.testHooks?.beforeN8nJournalDirectoryParentFsync) {
+    options.testHooks.beforeN8nJournalDirectoryParentFsync({
+      directory: path.resolve(directoryPath),
+      existed,
+      parent: path.resolve(parentPath)
+    });
+  }
+  fsyncDirectoryIfSupported(parentPath, options);
+  const parentAfterFsync = requireOrdinaryDirectory(parentPath, 'repair journal parent');
+  const childAfterFsync = requireOrdinaryDirectory(directoryPath, 'repair journal directory');
+  if (
+    !directoryIdentitiesMatch(parentBeforeFsync.identity, parentAfterFsync.identity)
+    || !directoryIdentitiesMatch(childBeforeFsync.identity, childAfterFsync.identity)
+    || childBeforeFsync.normalized_path !== childAfterFsync.normalized_path
+    || childBeforeFsync.real_path !== childAfterFsync.real_path
+  ) {
+    throw journalError('journal-topology-invalid', 'The repair journal directory topology changed during parent durability admission');
+  }
+  return childAfterFsync;
 }
 
 function requireSupportedRuntime(write) {
@@ -294,7 +334,7 @@ function journalPaths(codexHome, targetPath, generationId) {
   });
 }
 
-function ensureJournalPaths(paths, write) {
+function ensureTargetJournalPaths(paths, write, options = {}) {
   requireOrdinaryDirectory(paths.codex_home, 'Codex home');
   const ordered = [
     [paths.base, paths.codex_home],
@@ -302,11 +342,17 @@ function ensureJournalPaths(paths, write) {
     [paths.targets, paths.v2],
     [paths.target, paths.targets],
     [paths.transactions, paths.target],
-    [paths.transaction, paths.transactions],
-    [paths.segments, paths.transaction],
     [paths.checkpoints, paths.target]
   ];
-  for (const [directory, parent] of ordered) ensureOrdinaryDirectory(directory, parent, write);
+  for (const [directory, parent] of ordered) {
+    ensureOrdinaryDirectory(directory, parent, write, options);
+  }
+}
+
+function ensureJournalPaths(paths, write, options = {}) {
+  ensureTargetJournalPaths(paths, write, options);
+  ensureOrdinaryDirectory(paths.transaction, paths.transactions, write, options);
+  ensureOrdinaryDirectory(paths.segments, paths.transaction, write, options);
   return Object.freeze({
     checkpoints: requireOrdinaryDirectory(paths.checkpoints, 'repair checkpoint directory'),
     segments: requireOrdinaryDirectory(paths.segments, 'repair journal segment directory'),
@@ -588,7 +634,7 @@ function writeExclusiveDurable(filePath, bytes, options = {}) {
       throw journalError('journal-durability-unavailable', 'The journal segment descriptor could not be closed');
     }
   }
-  fsyncDirectoryIfSupported(path.dirname(resolved));
+  fsyncDirectoryIfSupported(path.dirname(resolved), options);
   if (writeLimit !== bytes.length) {
     throw journalError('journal-incomplete-tail', 'The journal append stopped with one incomplete pre-authorised tail');
   }
@@ -798,20 +844,21 @@ function openN8nRepairJournal({
   generationId,
   ownershipToken,
   targetPath,
-  write = false
+  write = false,
+  testHooks
 }) {
   requireSupportedRuntime(write);
   const paths = journalPaths(codexHome, targetPath, generationId);
-  if (!pathExists(paths.transaction)) {
-    if (!write) return inspectN8nRepairJournal({
+  if (!pathExists(paths.transaction) && !write) {
+    return inspectN8nRepairJournal({
       codexHome,
       generationId,
       ownershipToken,
       targetPath,
       write
     });
-    ensureJournalPaths(paths, true);
   }
+  if (write) ensureJournalPaths(paths, true, { testHooks });
   return inspectN8nRepairJournal({
     codexHome,
     generationId,
@@ -845,13 +892,17 @@ function appendN8nRepairJournalRecord(authority, kind, payload = {}, options = {
     throw journalError('journal-state-invalid', 'The requested semantic journal transition is invalid');
   }
   const current = authority.exists
-    ? assertJournalAuthorityUnchanged(authority)
+    ? (() => {
+      ensureJournalPaths(authority.paths, true, options);
+      return assertJournalAuthorityUnchanged(authority);
+    })()
     : openN8nRepairJournal({
       codexHome: authority.paths.codex_home,
       generationId: authority.generation_id,
       ownershipToken: authority.ownership_token,
       targetPath: authority.target_path,
-      write: true
+      write: true,
+      testHooks: options.testHooks
     });
   const previousState = current.state || '';
   if (!(LEGAL_SUCCESSORS[previousState] || []).includes(kind)) {
@@ -931,14 +982,16 @@ function bindJournalAuthority({
   generationId,
   ownershipToken,
   targetPath,
-  write = false
+  write = false,
+  testHooks
 }) {
   const inspected = openN8nRepairJournal({
     codexHome,
     generationId,
     ownershipToken,
     targetPath,
-    write
+    write,
+    testHooks
   });
   return Object.freeze({
     ...inspected,
@@ -1147,7 +1200,70 @@ function transactionResidueManifest(authority) {
   });
 }
 
-function readCheckpointFile(checkpointPath, name) {
+function generationIdHex(value) {
+  const text = String(value || '').toLowerCase();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(text)) {
+    throw journalError('journal-checkpoint-corrupt', 'A checkpoint generation identifier is invalid');
+  }
+  return text.replace(/-/g, '');
+}
+
+function validDigest(value) {
+  return /^[0-9a-f]{64}$/.test(String(value || ''));
+}
+
+function requireCheckpointResidueManifest(value) {
+  if (
+    !value
+    || !Array.isArray(value.entries)
+    || !validDigest(value.digest)
+    || sha256(Buffer.from(canonicalJson(value.entries), 'utf8')) !== value.digest
+  ) {
+    throw journalError('journal-checkpoint-corrupt', 'A checkpoint transaction residue manifest is invalid');
+  }
+  return value;
+}
+
+function requireSupersededCheckpointShape(value, targetId) {
+  if (value === null) return null;
+  if (
+    !value
+    || !CHECKPOINT_PATTERN.test(String(value.name || ''))
+    || !validDigest(value.bytes_sha256)
+    || !validDigest(value.digest)
+    || !validDigest(value.ownership_token_digest)
+    || !validDigest(value.terminal_record_digest)
+    || !validDigest(value.transaction_authority_digest)
+    || value.target_id !== targetId
+    || generationIdHex(value.generation_id).length !== 32
+    || !['L20_LOGICALLY_RETIRED', 'C10_CLEANUP_PENDING', 'C20_CLEANUP_COMPLETE']
+      .includes(value.terminal_state)
+  ) {
+    throw journalError('journal-checkpoint-corrupt', 'A superseded checkpoint authority is invalid');
+  }
+  const match = CHECKPOINT_PATTERN.exec(value.name);
+  const epoch = Number(match[2]);
+  const slot = match[1];
+  if (
+    !Number.isSafeInteger(epoch)
+    || epoch < 1
+    || String(epoch).padStart(16, '0') !== match[2]
+    || value.epoch !== epoch
+    || value.family !== epoch
+    || value.slot !== slot
+    || slot !== (epoch % 2 === 1 ? 'a' : 'b')
+  ) {
+    throw journalError('journal-checkpoint-corrupt', 'A superseded checkpoint filename authority is inconsistent');
+  }
+  requireCheckpointResidueManifest(value.transaction_residue_manifest);
+  return value;
+}
+
+function readCheckpointFile(checkpointPath, name, expectedTargetId) {
+  const nameMatch = CHECKPOINT_PATTERN.exec(name);
+  if (!nameMatch || !validDigest(expectedTargetId)) {
+    throw journalError('journal-checkpoint-corrupt', 'A checkpoint filename or target namespace is invalid');
+  }
   const inspected = readExactFile(checkpointPath, JOURNAL_MAX_CHECKPOINT_BYTES);
   let frame;
   try {
@@ -1155,18 +1271,44 @@ function readCheckpointFile(checkpointPath, name) {
   } catch {
     throw journalError('journal-checkpoint-corrupt', 'A checkpoint authority is incomplete or corrupt');
   }
-  if (frame.classification !== 'complete' || frame.kind !== 'K10_CHECKPOINT_ACTIVE') {
+  const epoch = Number(nameMatch[2]);
+  const slot = nameMatch[1];
+  if (
+    !Number.isSafeInteger(epoch)
+    || epoch < 1
+    || String(epoch).padStart(16, '0') !== nameMatch[2]
+    || frame.classification !== 'complete'
+    || frame.kind !== 'K10_CHECKPOINT_ACTIVE'
+    || frame.attempt !== 0
+    || frame.target_id !== expectedTargetId
+    || frame.family !== epoch
+    || frame.payload.slot !== slot
+    || slot !== (epoch % 2 === 1 ? 'a' : 'b')
+    || frame.payload.generation_id === undefined
+    || generationIdHex(frame.payload.generation_id) !== frame.generation_id
+    || frame.payload.ownership_token_digest !== frame.ownership_token_digest
+    || frame.payload.previous_checkpoint_digest !== frame.previous_digest
+    || !validDigest(frame.payload.previous_checkpoint_digest)
+    || !validDigest(frame.payload.cumulative_terminal_root)
+    || !validDigest(frame.payload.residue_manifest_digest)
+    || !validDigest(frame.payload.terminal_record_digest)
+    || !validDigest(frame.payload.transaction_authority_digest)
+    || !['L20_LOGICALLY_RETIRED', 'C10_CLEANUP_PENDING', 'C20_CLEANUP_COMPLETE']
+      .includes(frame.payload.terminal_state)
+  ) {
     throw journalError('journal-checkpoint-corrupt', 'A checkpoint authority is incomplete or invalid');
   }
+  requireCheckpointResidueManifest(frame.payload.transaction_residue_manifest);
+  requireSupersededCheckpointShape(frame.payload.superseded_checkpoint, expectedTargetId);
   return Object.freeze({
-    epoch: Number(CHECKPOINT_PATTERN.exec(name)?.[2] || 0),
+    epoch,
     frame,
     inspected,
     name
   });
 }
 
-function checkpointInventory(checkpointsPath) {
+function checkpointInventory(checkpointsPath, expectedTargetId) {
   const active = [];
   const retired = [];
   let bytes = 0;
@@ -1179,14 +1321,22 @@ function checkpointInventory(checkpointsPath) {
     const activeMatch = CHECKPOINT_PATTERN.exec(name);
     const retiredMatch = RETIRED_CHECKPOINT_PATTERN.exec(name);
     if (activeMatch) {
-      const value = readCheckpointFile(path.join(checkpointsPath, name), name);
+      const value = readCheckpointFile(
+        path.join(checkpointsPath, name),
+        name,
+        expectedTargetId
+      );
       bytes += value.inspected.bytes.length;
       active.push(value);
       continue;
     }
     if (retiredMatch) {
       const sourceName = retiredMatch[1];
-      const value = readCheckpointFile(path.join(checkpointsPath, name), sourceName);
+      const value = readCheckpointFile(
+        path.join(checkpointsPath, name),
+        sourceName,
+        expectedTargetId
+      );
       bytes += value.inspected.bytes.length;
       retired.push(Object.freeze({
         ...value,
@@ -1214,16 +1364,57 @@ function checkpointInventory(checkpointsPath) {
       throw journalError('journal-checkpoint-corrupt', 'The active checkpoint chain is discontinuous');
     }
   }
+  for (const entry of active) {
+    const expected = entry.frame.payload.superseded_checkpoint;
+    if (!expected) continue;
+    const referenced = [
+      ...active.filter((candidate) => candidate.name === expected.name),
+      ...retired.filter((candidate) => candidate.name === expected.name)
+    ];
+    if (
+      referenced.length > 1
+      || (referenced[0] && !checkpointRetirementMatches(referenced[0], expected))
+    ) {
+      throw journalError('journal-checkpoint-drift', 'A superseded checkpoint conflicts with its activating checkpoint');
+    }
+  }
+  for (const entry of retired) {
+    const activating = active.filter((candidate) =>
+      candidate.frame.complete_digest === entry.activation_digest
+      && candidate.frame.payload.superseded_checkpoint?.name === entry.name
+    );
+    if (
+      activating.length !== 1
+      || !checkpointRetirementMatches(
+        entry,
+        activating[0].frame.payload.superseded_checkpoint
+      )
+    ) {
+      throw journalError('journal-checkpoint-drift', 'A retired checkpoint lacks exact same-target activation authority');
+    }
+  }
   return Object.freeze({
     active: Object.freeze(active),
-    retired: Object.freeze(retired)
+    retired: Object.freeze(retired),
+    target_id: expectedTargetId
   });
 }
 
 function checkpointRetirementMatches(entry, expected) {
   return entry.name === expected.name
     && entry.frame.complete_digest === expected.digest
-    && entry.inspected.bytes_sha256 === expected.bytes_sha256;
+    && entry.inspected.bytes_sha256 === expected.bytes_sha256
+    && entry.frame.target_id === expected.target_id
+    && entry.frame.family === expected.family
+    && entry.epoch === expected.epoch
+    && entry.frame.payload.slot === expected.slot
+    && entry.frame.payload.generation_id === expected.generation_id
+    && entry.frame.ownership_token_digest === expected.ownership_token_digest
+    && entry.frame.payload.terminal_record_digest === expected.terminal_record_digest
+    && entry.frame.payload.terminal_state === expected.terminal_state
+    && entry.frame.payload.transaction_authority_digest === expected.transaction_authority_digest
+    && canonicalJson(entry.frame.payload.transaction_residue_manifest)
+      === canonicalJson(expected.transaction_residue_manifest);
 }
 
 function resumeCheckpointRetention(checkpointsPath, inventory, options = {}) {
@@ -1253,7 +1444,7 @@ function resumeCheckpointRetention(checkpointsPath, inventory, options = {}) {
     }
     const quarantinePath = path.join(checkpointsPath, quarantineName);
     fs.renameSync(path.join(checkpointsPath, source.name), quarantinePath);
-    const moved = readCheckpointFile(quarantinePath, source.name);
+    const moved = readCheckpointFile(quarantinePath, source.name, inventory.target_id);
     if (!checkpointRetirementMatches(moved, expected)) {
       if (!pathExists(path.join(checkpointsPath, source.name))) {
         fs.renameSync(quarantinePath, path.join(checkpointsPath, source.name));
@@ -1269,7 +1460,7 @@ function resumeCheckpointRetention(checkpointsPath, inventory, options = {}) {
   }
   const quarantinePath = path.join(checkpointsPath, quarantineName);
   if (pathExists(quarantinePath)) {
-    const final = readCheckpointFile(quarantinePath, expected.name);
+    const final = readCheckpointFile(quarantinePath, expected.name, inventory.target_id);
     if (!checkpointRetirementMatches(final, expected)) {
       throw journalError('journal-checkpoint-drift', 'Checkpoint retirement residue changed before physical deletion');
     }
@@ -1279,14 +1470,18 @@ function resumeCheckpointRetention(checkpointsPath, inventory, options = {}) {
         checkpoint_name: expected.name
       });
     }
-    const finalBoundary = readCheckpointFile(quarantinePath, expected.name);
+    const finalBoundary = readCheckpointFile(
+      quarantinePath,
+      expected.name,
+      inventory.target_id
+    );
     if (!checkpointRetirementMatches(finalBoundary, expected)) {
       throw journalError('journal-checkpoint-drift', 'Checkpoint retirement residue changed at its deletion boundary');
     }
     fs.unlinkSync(quarantinePath);
-    fsyncDirectoryIfSupported(checkpointsPath);
+    fsyncDirectoryIfSupported(checkpointsPath, options);
   }
-  const recovered = checkpointInventory(checkpointsPath);
+  const recovered = checkpointInventory(checkpointsPath, inventory.target_id);
   if (recovered.active.length > 2 || recovered.retired.length) {
     throw journalError('journal-checkpoint-corrupt', 'Checkpoint retention did not reach its bounded restart state');
   }
@@ -1294,9 +1489,10 @@ function resumeCheckpointRetention(checkpointsPath, inventory, options = {}) {
 }
 
 function writeTerminalCheckpoint(authority, options = {}) {
+  ensureJournalPaths(authority.paths, true, options);
   let inventory = resumeCheckpointRetention(
     authority.paths.checkpoints,
-    checkpointInventory(authority.paths.checkpoints),
+    checkpointInventory(authority.paths.checkpoints, authority.paths.target_id),
     options
   );
   const previous = inventory.active.at(-1) || null;
@@ -1338,6 +1534,7 @@ function writeTerminalCheckpoint(authority, options = {}) {
     payload: {
       cumulative_terminal_root: cumulativeRoot,
       generation_id: authority.generation_id,
+      ownership_token_digest: transactionTokenDigest(authority.ownership_token),
       previous_checkpoint_digest: previous?.frame.complete_digest || ZERO_DIGEST,
       residue_manifest_digest: retirement.payload.residue_manifest.digest,
       slot,
@@ -1345,9 +1542,13 @@ function writeTerminalCheckpoint(authority, options = {}) {
         ? {
           bytes_sha256: superseded.inspected.bytes_sha256,
           digest: superseded.frame.complete_digest,
+          epoch: superseded.epoch,
+          family: superseded.frame.family,
           generation_id: superseded.frame.payload.generation_id,
           name: superseded.name,
           ownership_token_digest: superseded.frame.ownership_token_digest,
+          slot: superseded.frame.payload.slot,
+          target_id: superseded.frame.target_id,
           terminal_record_digest: superseded.frame.payload.terminal_record_digest,
           terminal_state: superseded.frame.payload.terminal_state,
           transaction_authority_digest: superseded.frame.payload.transaction_authority_digest,
@@ -1368,8 +1569,13 @@ function writeTerminalCheckpoint(authority, options = {}) {
     family: epoch,
     testHooks: options.testHooks
   });
-  const verified = decodeFrame(readExactFile(path.join(authority.paths.checkpoints, name), JOURNAL_MAX_CHECKPOINT_BYTES).bytes);
-  if (verified.classification !== 'complete' || verified.complete_digest !== encoded.complete_digest) {
+  const verifiedEntry = readCheckpointFile(
+    path.join(authority.paths.checkpoints, name),
+    name,
+    authority.paths.target_id
+  );
+  const verified = verifiedEntry.frame;
+  if (verified.complete_digest !== encoded.complete_digest) {
     throw journalError('journal-checkpoint-corrupt', 'The inactive checkpoint failed exact activation verification');
   }
   if (options.testHooks?.afterN8nCheckpointPublished) {
@@ -1381,7 +1587,7 @@ function writeTerminalCheckpoint(authority, options = {}) {
   }
   inventory = resumeCheckpointRetention(
     authority.paths.checkpoints,
-    checkpointInventory(authority.paths.checkpoints),
+    checkpointInventory(authority.paths.checkpoints, authority.paths.target_id),
     options
   );
   if (inventory.active.at(-1)?.frame.complete_digest !== verified.complete_digest) {
@@ -1403,15 +1609,32 @@ function movedFilesystemIdentityMatches(left, right) {
     );
 }
 
-function inspectCompactionResidue(rootPath, expectedManifest, allowMissing) {
+function inspectCompactionResidue(
+  rootPath,
+  expectedManifest,
+  allowMissing,
+  allowFinalPrefix = false
+) {
   if (!pathExists(rootPath)) return Object.freeze({ absent: true, entries: [] });
-  requireOrdinaryDirectory(rootPath, 'checkpointed transaction residue');
+  const root = requireOrdinaryDirectory(rootPath, 'checkpointed transaction residue');
   const segmentsPath = path.join(rootPath, 'segments');
-  requireOrdinaryDirectory(segmentsPath, 'checkpointed transaction segment residue');
-  const rootNames = fs.readdirSync(rootPath);
+  const rootNames = fs.readdirSync(rootPath)
+    .sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
+  if (rootNames.length === 0) {
+    if (!allowFinalPrefix) {
+      throw journalError('journal-compaction-drift', 'Checkpointed transaction residue is missing its segment authority');
+    }
+    return Object.freeze({
+      absent: false,
+      entries: Object.freeze([]),
+      final_prefix: true,
+      root
+    });
+  }
   if (rootNames.length !== 1 || rootNames[0] !== 'segments') {
     throw journalError('journal-compaction-drift', 'Checkpointed transaction residue contains an unknown entry');
   }
+  requireOrdinaryDirectory(segmentsPath, 'checkpointed transaction segment residue');
   const expected = new Map(expectedManifest.entries.map((entry) => [entry.relative_path, entry]));
   const entries = [];
   for (const name of fs.readdirSync(segmentsPath)
@@ -1439,12 +1662,24 @@ function inspectCompactionResidue(rootPath, expectedManifest, allowMissing) {
   if (!allowMissing && entries.length !== expectedManifest.entries.length) {
     throw journalError('journal-compaction-drift', 'Checkpointed transaction residue is incomplete before compaction');
   }
-  return Object.freeze({ absent: false, entries: Object.freeze(entries) });
+  return Object.freeze({
+    absent: false,
+    entries: Object.freeze(entries),
+    final_prefix: false,
+    root
+  });
 }
 
 function compactSupersededTransaction(authority, checkpoint, options = {}) {
-  const inventory = checkpointInventory(authority.paths.checkpoints);
+  ensureTargetJournalPaths(authority.paths, true, options);
+  const inventory = checkpointInventory(
+    authority.paths.checkpoints,
+    authority.paths.target_id
+  );
   const active = inventory.active.find((entry) => entry.frame.complete_digest === checkpoint.digest);
+  if (!active) {
+    throw journalError('journal-checkpoint-drift', 'The activating checkpoint is no longer exact current authority');
+  }
   const superseded = active?.frame.payload?.superseded_checkpoint || null;
   if (!superseded) return Object.freeze({ compacted: false, reason: 'no-superseded-transaction' });
   if (superseded.terminal_state !== 'C20_CLEANUP_COMPLETE') {
@@ -1481,14 +1716,28 @@ function compactSupersededTransaction(authority, checkpoint, options = {}) {
     }
   }
   if (!pathExists(quarantinePath)) {
+    const foreignNames = fs.readdirSync(authority.paths.transactions)
+      .filter((name) => name.startsWith(
+        `retired-transaction-${superseded.generation_id}-by-`
+      ));
+    if (foreignNames.length) {
+      throw journalError('journal-compaction-drift', 'Checkpointed transaction quarantine name conflicts with exact authority');
+    }
+    fsyncDirectoryIfSupported(authority.paths.transactions, options);
+    if (pathExists(sourcePath) || pathExists(quarantinePath)) {
+      throw journalError('journal-compaction-drift', 'Checkpointed transaction absence changed during parent durability admission');
+    }
     return Object.freeze({ compacted: true, reason: 'already-absent' });
   }
+  let finalPrefix = false;
   for (;;) {
     const residue = inspectCompactionResidue(
       quarantinePath,
       superseded.transaction_residue_manifest,
+      true,
       true
     );
+    finalPrefix = residue.final_prefix;
     const entry = residue.entries[0];
     if (!entry) break;
     if (options.testHooks?.beforeN8nTransactionCompactionDelete) {
@@ -1500,7 +1749,8 @@ function compactSupersededTransaction(authority, checkpoint, options = {}) {
     const final = inspectCompactionResidue(
       quarantinePath,
       superseded.transaction_residue_manifest,
-      true
+      true,
+      false
     ).entries.find((candidate) => candidate.relative_path === entry.relative_path);
     if (!final || final.bytes_sha256 !== entry.bytes_sha256) {
       throw journalError('journal-compaction-drift', 'Checkpointed transaction residue changed at its deletion boundary');
@@ -1513,23 +1763,100 @@ function compactSupersededTransaction(authority, checkpoint, options = {}) {
       });
     }
   }
-  fs.rmdirSync(path.join(quarantinePath, 'segments'));
+  if (!finalPrefix) {
+    const emptySegments = inspectCompactionResidue(
+      quarantinePath,
+      superseded.transaction_residue_manifest,
+      true,
+      false
+    );
+    if (emptySegments.entries.length !== 0) {
+      throw journalError('journal-compaction-drift', 'Checkpointed transaction residue is not empty at final compaction');
+    }
+    fs.rmdirSync(path.join(quarantinePath, 'segments'));
+    fsyncDirectoryIfSupported(quarantinePath, options);
+    if (options.testHooks?.afterN8nTransactionCompactionSegmentsRemoved) {
+      options.testHooks.afterN8nTransactionCompactionSegmentsRemoved({
+        generation_id: superseded.generation_id,
+        quarantine_name: quarantineName
+      });
+    }
+  }
+  const finalInventory = checkpointInventory(
+    authority.paths.checkpoints,
+    authority.paths.target_id
+  );
+  const finalCheckpoint = finalInventory.active.find((entry) =>
+    entry.frame.complete_digest === checkpoint.digest
+  );
+  if (
+    !finalCheckpoint
+    || canonicalJson(finalCheckpoint.frame.payload.superseded_checkpoint)
+      !== canonicalJson(superseded)
+    || pathExists(sourcePath)
+  ) {
+    throw journalError('journal-compaction-drift', 'Final compaction authority changed before quarantine removal');
+  }
+  const finalResidue = inspectCompactionResidue(
+    quarantinePath,
+    superseded.transaction_residue_manifest,
+    true,
+    true
+  );
+  if (
+    !finalResidue.final_prefix
+    || finalResidue.entries.length !== 0
+  ) {
+    throw journalError('journal-compaction-drift', 'Final compaction prefix is not the exact empty quarantine root');
+  }
+  if (options.testHooks?.beforeN8nTransactionCompactionRootDelete) {
+    options.testHooks.beforeN8nTransactionCompactionRootDelete({
+      generation_id: superseded.generation_id,
+      quarantine_name: quarantineName
+    });
+  }
+  const boundaryResidue = inspectCompactionResidue(
+    quarantinePath,
+    superseded.transaction_residue_manifest,
+    true,
+    true
+  );
+  if (
+    !boundaryResidue.final_prefix
+    || !directoryIdentitiesMatch(
+      finalResidue.root.identity,
+      boundaryResidue.root.identity
+    )
+    || pathExists(sourcePath)
+  ) {
+    throw journalError('journal-compaction-drift', 'Final compaction prefix changed at its removal boundary');
+  }
   fs.rmdirSync(quarantinePath);
-  fsyncDirectoryIfSupported(authority.paths.transactions);
+  fsyncDirectoryIfSupported(authority.paths.transactions, options);
+  if (pathExists(sourcePath) || pathExists(quarantinePath)) {
+    throw journalError('journal-compaction-drift', 'Checkpointed transaction paths remain after final compaction');
+  }
   return Object.freeze({ compacted: true, reason: 'checkpointed-transaction-removed' });
 }
 
-function discoverN8nRepairJournalsForTarget({ codexHome, targetPath, write = false }) {
+function discoverN8nRepairJournalsForTarget({
+  codexHome,
+  targetPath,
+  testHooks,
+  write = false
+}) {
   const targetPaths = journalPaths(
     codexHome,
     targetPath,
     '00000000-0000-0000-0000-000000000000'
   );
   if (!pathExists(targetPaths.transactions)) return Object.freeze([]);
-  requireOrdinaryDirectory(targetPaths.target, 'repair target journal directory');
-  requireOrdinaryDirectory(targetPaths.transactions, 'repair transaction journal directory');
+  ensureTargetJournalPaths(targetPaths, write, { testHooks });
   if (pathExists(targetPaths.checkpoints)) {
-    const initialCheckpoints = checkpointInventory(targetPaths.checkpoints);
+    const initialCheckpoints = checkpointInventory(
+      targetPaths.checkpoints,
+      targetPaths.target_id
+    );
     if (!write && (initialCheckpoints.active.length > 2 || initialCheckpoints.retired.length)) {
       throw journalError(
         'journal-checkpoint-maintenance-required',
@@ -1537,13 +1864,18 @@ function discoverN8nRepairJournalsForTarget({ codexHome, targetPath, write = fal
       );
     }
     const recoveredCheckpoints = write
-      ? resumeCheckpointRetention(targetPaths.checkpoints, initialCheckpoints)
+      ? resumeCheckpointRetention(
+        targetPaths.checkpoints,
+        initialCheckpoints,
+        { testHooks }
+      )
       : initialCheckpoints;
     const latest = recoveredCheckpoints.active.at(-1);
     if (write && latest?.frame.payload?.superseded_checkpoint) {
       compactSupersededTransaction(
         { paths: targetPaths },
-        { digest: latest.frame.complete_digest }
+        { digest: latest.frame.complete_digest },
+        { testHooks }
       );
     }
   }
@@ -1558,7 +1890,7 @@ function discoverN8nRepairJournalsForTarget({ codexHome, targetPath, write = fal
       throw journalError('journal-compaction-pending', 'The target journal contains unretired physical compaction residue');
     }
     const paths = journalPaths(codexHome, targetPath, generationId);
-    ensureJournalPaths(paths, false);
+    ensureJournalPaths(paths, write, { testHooks });
     const preliminary = scanSegmentDirectory(paths, generationId, '');
     const token = preliminary.records[0]?.payload?.ownership_token;
     if (

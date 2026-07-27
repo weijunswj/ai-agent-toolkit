@@ -46,7 +46,7 @@ const {
 } = require('./toolkit-n8n-repair-journal.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.9.14';
+const BRIDGE_VERSION = '2.9.15';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -4740,6 +4740,7 @@ function bindAndSynchronizeN8nJournal(context, options = {}) {
     generationId: context.generation.record.generation_id,
     ownershipToken: context.generation.record.ownership_token,
     targetPath: context.validated.targetPath,
+    testHooks: options.testHooks,
     write
   });
   if (!journal.exists) {
@@ -6111,6 +6112,7 @@ function cleanupN8nEvidenceAuthority(context, testHooks = {}) {
 function finalizeOrphanedN8nPhysicalCleanup(codexHome, targetPath, testHooks = {}) {
   const journals = discoverN8nRepairJournalsForTarget({
     codexHome,
+    testHooks,
     targetPath,
     write: true
   });

@@ -32,12 +32,13 @@ function fixture(root, generationId = GENERATION) {
   return { codexHome, generationId, targetPath };
 }
 
-function bind(fixtureValue, write = true) {
+function bind(fixtureValue, write = true, testHooks) {
   return journal.bindJournalAuthority({
     codexHome: fixtureValue.codexHome,
     generationId: fixtureValue.generationId,
     ownershipToken: TOKEN,
     targetPath: fixtureValue.targetPath,
+    testHooks,
     write
   });
 }
@@ -52,9 +53,248 @@ function migrated(authority) {
       evidence_bytes_sha256: 'c'.repeat(64),
       evidence_semantic_sha256: 'd'.repeat(64)
     },
+    ownership_token: TOKEN,
     v1_authority_digest_at_migration: 'e'.repeat(64)
   });
 }
+
+function completeForCheckpoint(value) {
+  let authority = migrated(bind(value, true));
+  authority = append(authority, 'P00_PREPARED', { evidence_kind: 'n8n-pre-transaction' });
+  authority = journal.appendLogicalRetirement(authority, journal.residueManifest([]));
+  return authority;
+}
+
+function checkpointNames(authority) {
+  return fs.readdirSync(authority.paths.checkpoints)
+    .filter((name) => /^checkpoint-[ab]-[0-9]{16}\.jseg$/.test(name))
+    .sort();
+}
+
+function rewriteCheckpoint(authority, name, modify) {
+  const checkpointPath = path.join(authority.paths.checkpoints, name);
+  const decoded = journal.decodeFrame(fs.readFileSync(checkpointPath));
+  const frame = {
+    attempt: 0,
+    family: decoded.family,
+    generationId: decoded.payload.generation_id,
+    kind: 'K10_CHECKPOINT_ACTIVE',
+    ownershipToken: authority.ownership_token,
+    payload: { ...decoded.payload },
+    previousDigest: decoded.previous_digest,
+    targetId: decoded.target_id
+  };
+  modify(frame, decoded);
+  const replacement = journal.encodeFrame(frame);
+  fs.rmSync(checkpointPath);
+  fs.writeFileSync(checkpointPath, replacement.bytes, { flag: 'wx' });
+  return replacement;
+}
+
+function completedCompactionPair(root) {
+  const firstValue = fixture(root, '44444444-4444-4444-8444-444444444441');
+  let first = completeForCheckpoint(firstValue);
+  journal.writeTerminalCheckpoint(first);
+  first = append(first, 'C10_CLEANUP_PENDING', {
+    residue_manifest_digest: journal.residueManifest([]).digest
+  });
+  first = append(first, 'C20_CLEANUP_COMPLETE', {
+    residue_manifest_digest: journal.residueManifest([]).digest
+  });
+  journal.writeTerminalCheckpoint(first);
+
+  const secondValue = fixture(root, '44444444-4444-4444-8444-444444444442');
+  let second = completeForCheckpoint(secondValue);
+  journal.writeTerminalCheckpoint(second);
+  second = append(second, 'C10_CLEANUP_PENDING', {
+    residue_manifest_digest: journal.residueManifest([]).digest
+  });
+  second = append(second, 'C20_CLEANUP_COMPLETE', {
+    residue_manifest_digest: journal.residueManifest([]).digest
+  });
+  const checkpoint = journal.writeTerminalCheckpoint(second);
+  return { checkpoint, first, second };
+}
+
+function interruptCompactionAfterSegments(root) {
+  const pair = completedCompactionPair(root);
+  assert.throws(
+    () => journal.compactSupersededTransaction(pair.second, pair.checkpoint, {
+      testHooks: {
+        afterN8nTransactionCompactionSegmentsRemoved() {
+          const error = new Error('synthetic stop after segments directory removal');
+          error.code = 'SYNTHETIC_STOP';
+          throw error;
+        }
+      }
+    }),
+    { code: 'SYNTHETIC_STOP' }
+  );
+  const quarantineName = fs.readdirSync(pair.second.paths.transactions)
+    .find((name) => name.startsWith(
+      `retired-transaction-${pair.first.generation_id}-by-`
+    ));
+  const quarantinePath = path.join(pair.second.paths.transactions, quarantineName);
+  assert.deepEqual(fs.readdirSync(quarantinePath), []);
+  return { ...pair, quarantineName, quarantinePath };
+}
+
+test('write admission re-fsyncs every pre-existing journal level after each mkdir crash prefix', () => {
+  const labels = [
+    'base',
+    'v2',
+    'targets',
+    'target',
+    'transactions',
+    'checkpoints',
+    'transaction',
+    'segments'
+  ];
+  for (const label of labels) {
+    const root = temporaryRoot();
+    try {
+      const value = fixture(root);
+      const paths = journal.journalPaths(value.codexHome, value.targetPath, value.generationId);
+      const interruptedDirectory = paths[label];
+      assert.throws(
+        () => bind(value, true, {
+          afterN8nJournalDirectoryCreatedBeforeParentFsync({ directory }) {
+            if (path.resolve(directory) !== path.resolve(interruptedDirectory)) return;
+            const error = new Error('synthetic process exit before parent fsync');
+            error.code = 'SYNTHETIC_STOP';
+            throw error;
+          },
+          fsyncN8nJournalDirectory() {},
+          n8nJournalPlatform: 'linux'
+        }),
+        { code: 'SYNTHETIC_STOP' },
+        label
+      );
+      assert.equal(fs.lstatSync(interruptedDirectory).isDirectory(), true, label);
+      const durableParents = [];
+      const resumed = bind(value, true, {
+        fsyncN8nJournalDirectory({ path: durableParent }) {
+          durableParents.push(path.resolve(durableParent));
+        },
+        n8nJournalPlatform: 'linux'
+      });
+      assert.equal(resumed.exists, true, label);
+      assert.ok(
+        durableParents.includes(path.resolve(path.dirname(interruptedDirectory))),
+        label
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('existing journal directory admission fails closed on fsync failure or parent identity change', () => {
+  const failureRoot = temporaryRoot();
+  try {
+    const value = fixture(failureRoot);
+    const initial = bind(value, true);
+    const targetBytes = Buffer.from('canonical-target-bytes');
+    const sentinel = path.join(value.targetPath, 'sentinel.txt');
+    fs.writeFileSync(sentinel, targetBytes);
+    assert.throws(
+      () => bind(value, true, {
+        fsyncN8nJournalDirectory({ path: durableParent }) {
+          if (path.resolve(durableParent) !== path.resolve(initial.paths.transaction)) return;
+          const error = new Error('synthetic fsync failure');
+          error.code = 'EIO';
+          throw error;
+        },
+        n8nJournalPlatform: 'linux'
+      }),
+      { code: 'journal-durability-unavailable' }
+    );
+    assert.deepEqual(fs.readFileSync(sentinel), targetBytes);
+  } finally {
+    fs.rmSync(failureRoot, { recursive: true, force: true });
+  }
+
+  const identityRoot = temporaryRoot();
+  try {
+    const value = fixture(identityRoot);
+    const initial = bind(value, true);
+    const displacedParent = `${initial.paths.transaction}-changed-parent`;
+    let changed = false;
+    assert.throws(
+      () => bind(value, true, {
+        beforeN8nJournalDirectoryParentFsync({ directory, parent }) {
+          if (
+            changed
+            || path.resolve(directory) !== path.resolve(initial.paths.segments)
+          ) return;
+          changed = true;
+          fs.renameSync(parent, displacedParent);
+          fs.mkdirSync(parent);
+        },
+        fsyncN8nJournalDirectory() {},
+        n8nJournalPlatform: 'linux'
+      }),
+      { code: 'journal-topology-invalid' }
+    );
+    assert.equal(changed, true);
+  } finally {
+    fs.rmSync(identityRoot, { recursive: true, force: true });
+  }
+});
+
+test('read-only inspection performs no directory durability mutation and Windows keeps its honest boundary', () => {
+  const root = temporaryRoot();
+  try {
+    const value = fixture(root);
+    bind(value, true);
+    let readOnlyFsyncs = 0;
+    const inspected = bind(value, false, {
+      fsyncN8nJournalDirectory() {
+        readOnlyFsyncs += 1;
+      },
+      n8nJournalPlatform: 'linux'
+    });
+    assert.equal(inspected.exists, true);
+    assert.equal(readOnlyFsyncs, 0);
+
+    let platformFsyncs = 0;
+    bind(value, true, {
+      fsyncN8nJournalDirectory() {
+        platformFsyncs += 1;
+      }
+    });
+    assert.equal(platformFsyncs, process.platform === 'win32' ? 0 : 8);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('existing redirected journal directory is rejected without changing the redirect target', (t) => {
+  const root = temporaryRoot();
+  try {
+    const value = fixture(root);
+    const authority = bind(value, true);
+    const decoy = path.join(root, 'redirect-decoy');
+    fs.mkdirSync(decoy);
+    fs.writeFileSync(path.join(decoy, 'preserved.txt'), 'preserved');
+    fs.rmdirSync(authority.paths.checkpoints);
+    try {
+      fs.symlinkSync(
+        decoy,
+        authority.paths.checkpoints,
+        process.platform === 'win32' ? 'junction' : 'dir'
+      );
+    } catch (error) {
+      t.skip(`environment cannot create the platform directory redirect: ${error.code || 'unsupported'}`);
+      return;
+    }
+    assert.throws(() => bind(value, true), { code: 'journal-topology-invalid' });
+    assert.equal(fs.readFileSync(path.join(decoy, 'preserved.txt'), 'utf8'), 'preserved');
+    assert.equal(fs.lstatSync(authority.paths.checkpoints).isSymbolicLink(), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('schema-2 frame rejects every torn byte boundary and accepts only the exact commit trailer', () => {
   const encoded = journal.encodeFrame({
@@ -328,6 +568,239 @@ test('alternating checkpoints preserve cumulative terminal roots with at most tw
   }
 });
 
+test('checkpoint inventory binds valid authority to the exact target, filename, family, slot, epoch, and generation', () => {
+  const mutations = [
+    {
+      label: 'wrong frame target',
+      mutate(frame) {
+        frame.targetId = 'f'.repeat(64);
+      }
+    },
+    {
+      label: 'wrong frame family',
+      mutate(frame) {
+        frame.family += 1;
+      }
+    },
+    {
+      label: 'wrong payload slot',
+      mutate(frame) {
+        frame.payload.slot = frame.payload.slot === 'a' ? 'b' : 'a';
+      }
+    },
+    {
+      label: 'payload generation differs from frame generation',
+      mutate(frame) {
+        frame.payload.generation_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+      }
+    },
+    {
+      label: 'ownership-token digest mismatch',
+      mutate(frame) {
+        frame.payload.ownership_token_digest = 'f'.repeat(64);
+      }
+    }
+  ];
+  for (const { label, mutate } of mutations) {
+    const root = temporaryRoot();
+    try {
+      const value = fixture(root);
+      const authority = completeForCheckpoint(value);
+      journal.writeTerminalCheckpoint(authority);
+      const name = checkpointNames(authority)[0];
+      rewriteCheckpoint(authority, name, mutate);
+      const before = fs.readdirSync(authority.paths.checkpoints).sort();
+      assert.throws(
+        () => journal.writeTerminalCheckpoint(authority),
+        { code: 'journal-checkpoint-corrupt' },
+        label
+      );
+      assert.deepEqual(fs.readdirSync(authority.paths.checkpoints).sort(), before, label);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  for (const renamed of [
+    'checkpoint-b-0000000000000001.jseg',
+    'checkpoint-a-0000000000000002.jseg',
+    'checkpoint-a-0000000000000000.jseg',
+    'checkpoint-a-9999999999999999.jseg'
+  ]) {
+    const root = temporaryRoot();
+    try {
+      const value = fixture(root);
+      const authority = completeForCheckpoint(value);
+      journal.writeTerminalCheckpoint(authority);
+      const original = checkpointNames(authority)[0];
+      fs.renameSync(
+        path.join(authority.paths.checkpoints, original),
+        path.join(authority.paths.checkpoints, renamed)
+      );
+      const before = fs.readdirSync(authority.paths.checkpoints).sort();
+      assert.throws(
+        () => journal.writeTerminalCheckpoint(authority),
+        { code: 'journal-checkpoint-corrupt' },
+        renamed
+      );
+      assert.deepEqual(fs.readdirSync(authority.paths.checkpoints).sort(), before);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('checkpoint bytes copied from another target namespace are rejected without publication or compaction', () => {
+  const root = temporaryRoot();
+  try {
+    const localValue = fixture(root, '55555555-5555-4555-8555-555555555551');
+    const local = completeForCheckpoint(localValue);
+    const foreignValue = {
+      ...fixture(root, '55555555-5555-4555-8555-555555555552'),
+      targetPath: path.join(root, 'foreign-target', '1.0.1')
+    };
+    fs.mkdirSync(foreignValue.targetPath, { recursive: true });
+    const foreign = completeForCheckpoint(foreignValue);
+    journal.writeTerminalCheckpoint(foreign);
+    const foreignName = checkpointNames(foreign)[0];
+    const foreignBytes = fs.readFileSync(path.join(foreign.paths.checkpoints, foreignName));
+    fs.writeFileSync(
+      path.join(local.paths.checkpoints, foreignName),
+      foreignBytes,
+      { flag: 'wx' }
+    );
+    const beforeCheckpoints = fs.readdirSync(local.paths.checkpoints).sort();
+    const beforeTransactions = fs.readdirSync(local.paths.transactions).sort();
+    assert.throws(
+      () => journal.writeTerminalCheckpoint(local),
+      { code: 'journal-checkpoint-corrupt' }
+    );
+    assert.deepEqual(fs.readdirSync(local.paths.checkpoints).sort(), beforeCheckpoints);
+    assert.deepEqual(fs.readdirSync(local.paths.transactions).sort(), beforeTransactions);
+    assert.deepEqual(
+      fs.readFileSync(path.join(local.paths.checkpoints, foreignName)),
+      foreignBytes
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('checkpoint chains reject foreign previous authority and foreign superseded authority', () => {
+  const previousRoot = temporaryRoot();
+  try {
+    const first = completeForCheckpoint(
+      fixture(previousRoot, '66666666-6666-4666-8666-666666666661')
+    );
+    journal.writeTerminalCheckpoint(first);
+    const second = completeForCheckpoint(
+      fixture(previousRoot, '66666666-6666-4666-8666-666666666662')
+    );
+    journal.writeTerminalCheckpoint(second);
+    const foreignValue = {
+      ...fixture(previousRoot, '66666666-6666-4666-8666-666666666663'),
+      targetPath: path.join(previousRoot, 'foreign-previous-target')
+    };
+    fs.mkdirSync(foreignValue.targetPath, { recursive: true });
+    const foreign = completeForCheckpoint(foreignValue);
+    const foreignCheckpoint = journal.writeTerminalCheckpoint(foreign);
+    const latestName = checkpointNames(second).at(-1);
+    rewriteCheckpoint(second, latestName, (frame) => {
+      frame.previousDigest = foreignCheckpoint.digest;
+      frame.payload.previous_checkpoint_digest = foreignCheckpoint.digest;
+    });
+    assert.throws(
+      () => journal.writeTerminalCheckpoint(second),
+      { code: 'journal-checkpoint-corrupt' }
+    );
+  } finally {
+    fs.rmSync(previousRoot, { recursive: true, force: true });
+  }
+
+  const supersededRoot = temporaryRoot();
+  try {
+    const authorities = [1, 2, 3].map((index) => completeForCheckpoint(
+      fixture(
+        supersededRoot,
+        `77777777-7777-4777-8777-${String(index).padStart(12, '0')}`
+      )
+    ));
+    journal.writeTerminalCheckpoint(authorities[0]);
+    journal.writeTerminalCheckpoint(authorities[1]);
+    assert.throws(
+      () => journal.writeTerminalCheckpoint(authorities[2], {
+        testHooks: {
+          afterN8nCheckpointPublished() {
+            const error = new Error('synthetic stop before checkpoint retirement');
+            error.code = 'SYNTHETIC_STOP';
+            throw error;
+          }
+        }
+      }),
+      { code: 'SYNTHETIC_STOP' }
+    );
+    const latestName = checkpointNames(authorities[2]).at(-1);
+    rewriteCheckpoint(authorities[2], latestName, (frame) => {
+      frame.payload.superseded_checkpoint = {
+        ...frame.payload.superseded_checkpoint,
+        target_id: 'f'.repeat(64)
+      };
+    });
+    const before = fs.readdirSync(authorities[2].paths.checkpoints).sort();
+    assert.throws(
+      () => journal.writeTerminalCheckpoint(authorities[2]),
+      { code: 'journal-checkpoint-corrupt' }
+    );
+    assert.deepEqual(fs.readdirSync(authorities[2].paths.checkpoints).sort(), before);
+  } finally {
+    fs.rmSync(supersededRoot, { recursive: true, force: true });
+  }
+});
+
+test('retired checkpoint filenames bind the exact source filename and activating digest', () => {
+  for (const variant of ['source', 'activation']) {
+    const root = temporaryRoot();
+    try {
+      const authorities = [1, 2, 3].map((index) => completeForCheckpoint(
+        fixture(root, `88888888-8888-4888-8888-${String(index).padStart(12, '0')}`)
+      ));
+      journal.writeTerminalCheckpoint(authorities[0]);
+      journal.writeTerminalCheckpoint(authorities[1]);
+      assert.throws(
+        () => journal.writeTerminalCheckpoint(authorities[2], {
+          testHooks: {
+            afterN8nCheckpointRetirementMove() {
+              const error = new Error('synthetic stop with retired checkpoint');
+              error.code = 'SYNTHETIC_STOP';
+              throw error;
+            }
+          }
+        }),
+        { code: 'SYNTHETIC_STOP' }
+      );
+      const retired = fs.readdirSync(authorities[2].paths.checkpoints)
+        .find((name) => /^retired-checkpoint-/.test(name));
+      const match = /^retired-(checkpoint-[ab]-[0-9]{16}\.jseg)-by-([0-9a-f]{64})\.jseg$/
+        .exec(retired);
+      const changed = variant === 'source'
+        ? `retired-checkpoint-b-9999999999999999.jseg-by-${match[2]}.jseg`
+        : `retired-${match[1]}-by-${'f'.repeat(64)}.jseg`;
+      fs.renameSync(
+        path.join(authorities[2].paths.checkpoints, retired),
+        path.join(authorities[2].paths.checkpoints, changed)
+      );
+      const before = fs.readdirSync(authorities[2].paths.checkpoints).sort();
+      assert.throws(
+        () => journal.writeTerminalCheckpoint(authorities[2]),
+        { code: variant === 'source' ? 'journal-checkpoint-corrupt' : 'journal-checkpoint-drift' }
+      );
+      assert.deepEqual(fs.readdirSync(authorities[2].paths.checkpoints).sort(), before);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
 test('checkpoint activation and superseded-retirement crash prefixes resume without a third authority', () => {
   const root = temporaryRoot();
   try {
@@ -481,6 +954,203 @@ test('checkpointed terminal transaction compaction resumes after move and partia
       false
     );
     assert.equal(fs.existsSync(second.paths.transaction), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('checkpoint compaction resumes after the final segment deletion and after segments-directory removal', () => {
+  const finalSegmentRoot = temporaryRoot();
+  try {
+    const pair = completedCompactionPair(finalSegmentRoot);
+    const expectedSegments = pair.first.records.length;
+    let deleted = 0;
+    assert.throws(
+      () => journal.compactSupersededTransaction(pair.second, pair.checkpoint, {
+        testHooks: {
+          afterN8nTransactionCompactionDelete() {
+            deleted += 1;
+            if (deleted !== expectedSegments) return;
+            const error = new Error('synthetic stop after final segment deletion');
+            error.code = 'SYNTHETIC_STOP';
+            throw error;
+          }
+        }
+      }),
+      { code: 'SYNTHETIC_STOP' }
+    );
+    assert.equal(deleted, expectedSegments);
+    const resumed = journal.compactSupersededTransaction(pair.second, pair.checkpoint);
+    assert.deepEqual(resumed, {
+      compacted: true,
+      reason: 'checkpointed-transaction-removed'
+    });
+  } finally {
+    fs.rmSync(finalSegmentRoot, { recursive: true, force: true });
+  }
+
+  const removedSegmentsRoot = temporaryRoot();
+  try {
+    const prefix = interruptCompactionAfterSegments(removedSegmentsRoot);
+    const resumed = journal.compactSupersededTransaction(prefix.second, prefix.checkpoint);
+    assert.deepEqual(resumed, {
+      compacted: true,
+      reason: 'checkpointed-transaction-removed'
+    });
+    assert.equal(fs.existsSync(prefix.quarantinePath), false);
+    assert.equal(fs.existsSync(prefix.first.paths.transaction), false);
+    const repeatedFsyncs = [];
+    assert.deepEqual(
+      journal.compactSupersededTransaction(prefix.second, prefix.checkpoint, {
+        testHooks: {
+          fsyncN8nJournalDirectory({ path: durableParent }) {
+            repeatedFsyncs.push(path.resolve(durableParent));
+          },
+          n8nJournalPlatform: 'linux'
+        }
+      }),
+      { compacted: true, reason: 'already-absent' }
+    );
+    assert.ok(repeatedFsyncs.includes(path.resolve(prefix.second.paths.transactions)));
+    const discovered = journal.discoverN8nRepairJournalsForTarget({
+      codexHome: prefix.second.paths.codex_home,
+      targetPath: prefix.second.target_path,
+      write: true
+    });
+    assert.ok(discovered.some((entry) => entry.generation_id === prefix.second.generation_id));
+  } finally {
+    fs.rmSync(removedSegmentsRoot, { recursive: true, force: true });
+  }
+});
+
+test('final compaction root-removal failure remains an exact resumable prefix', () => {
+  const root = temporaryRoot();
+  const originalRmdirSync = fs.rmdirSync;
+  try {
+    const prefix = interruptCompactionAfterSegments(root);
+    let injected = false;
+    fs.rmdirSync = function rmdirWithInjectedSharingFailure(directoryPath, ...args) {
+      if (path.resolve(directoryPath) === path.resolve(prefix.quarantinePath)) {
+        injected = true;
+        const error = new Error('synthetic quarantine root removal failure');
+        error.code = 'EBUSY';
+        throw error;
+      }
+      return originalRmdirSync.call(fs, directoryPath, ...args);
+    };
+    assert.throws(
+      () => journal.compactSupersededTransaction(prefix.second, prefix.checkpoint),
+      { code: 'EBUSY' }
+    );
+    fs.rmdirSync = originalRmdirSync;
+    assert.equal(injected, true);
+    assert.deepEqual(fs.readdirSync(prefix.quarantinePath), []);
+    assert.deepEqual(
+      journal.compactSupersededTransaction(prefix.second, prefix.checkpoint),
+      { compacted: true, reason: 'checkpointed-transaction-removed' }
+    );
+  } finally {
+    fs.rmdirSync = originalRmdirSync;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('final compaction prefix rejects unexpected, redirected, reappeared, or renamed authority', (t) => {
+  const unexpectedRoot = temporaryRoot();
+  try {
+    const prefix = interruptCompactionAfterSegments(unexpectedRoot);
+    const unexpected = path.join(prefix.quarantinePath, 'unexpected');
+    fs.writeFileSync(unexpected, 'preserve');
+    assert.throws(
+      () => journal.compactSupersededTransaction(prefix.second, prefix.checkpoint),
+      { code: 'journal-compaction-drift' }
+    );
+    assert.equal(fs.readFileSync(unexpected, 'utf8'), 'preserve');
+  } finally {
+    fs.rmSync(unexpectedRoot, { recursive: true, force: true });
+  }
+
+  const redirectedRoot = temporaryRoot();
+  try {
+    const prefix = interruptCompactionAfterSegments(redirectedRoot);
+    const decoy = path.join(redirectedRoot, 'redirect-target');
+    fs.mkdirSync(decoy);
+    const redirected = path.join(prefix.quarantinePath, 'redirected');
+    try {
+      fs.symlinkSync(
+        decoy,
+        redirected,
+        process.platform === 'win32' ? 'junction' : 'dir'
+      );
+    } catch (error) {
+      t.skip(`environment cannot create the platform directory redirect: ${error.code || 'unsupported'}`);
+      return;
+    }
+    if (fs.existsSync(redirected)) {
+      assert.throws(
+        () => journal.compactSupersededTransaction(prefix.second, prefix.checkpoint),
+        { code: 'journal-compaction-drift' }
+      );
+      assert.equal(fs.lstatSync(redirected).isSymbolicLink(), true);
+    }
+  } finally {
+    fs.rmSync(redirectedRoot, { recursive: true, force: true });
+  }
+
+  const reappearedRoot = temporaryRoot();
+  try {
+    const prefix = interruptCompactionAfterSegments(reappearedRoot);
+    fs.mkdirSync(prefix.first.paths.transaction);
+    assert.throws(
+      () => journal.compactSupersededTransaction(prefix.second, prefix.checkpoint),
+      { code: 'journal-compaction-drift' }
+    );
+    assert.equal(fs.lstatSync(prefix.first.paths.transaction).isDirectory(), true);
+  } finally {
+    fs.rmSync(reappearedRoot, { recursive: true, force: true });
+  }
+
+  const renamedRoot = temporaryRoot();
+  try {
+    const prefix = interruptCompactionAfterSegments(renamedRoot);
+    const wrongPath = `${prefix.quarantinePath}-wrong`;
+    fs.renameSync(prefix.quarantinePath, wrongPath);
+    assert.throws(
+      () => journal.compactSupersededTransaction(prefix.second, prefix.checkpoint),
+      { code: 'journal-compaction-drift' }
+    );
+    assert.equal(fs.lstatSync(wrongPath).isDirectory(), true);
+  } finally {
+    fs.rmSync(renamedRoot, { recursive: true, force: true });
+  }
+});
+
+test('final compaction prefix rejects activating-checkpoint drift and preserves unrelated transactions', () => {
+  const root = temporaryRoot();
+  try {
+    const prefix = interruptCompactionAfterSegments(root);
+    const unrelated = path.join(
+      prefix.second.paths.transactions,
+      '99999999-9999-4999-8999-999999999999'
+    );
+    fs.mkdirSync(unrelated);
+    fs.writeFileSync(path.join(unrelated, 'preserved'), 'unrelated');
+    const checkpointName = checkpointNames(prefix.second)
+      .find((name) => {
+        const decoded = journal.decodeFrame(
+          fs.readFileSync(path.join(prefix.second.paths.checkpoints, name))
+        );
+        return decoded.complete_digest === prefix.checkpoint.digest;
+      });
+    rewriteCheckpoint(prefix.second, checkpointName, (frame) => {
+      frame.payload.cumulative_terminal_root = 'f'.repeat(64);
+    });
+    assert.throws(
+      () => journal.compactSupersededTransaction(prefix.second, prefix.checkpoint),
+      { code: 'journal-checkpoint-drift' }
+    );
+    assert.equal(fs.readFileSync(path.join(unrelated, 'preserved'), 'utf8'), 'unrelated');
+    assert.equal(fs.lstatSync(prefix.quarantinePath).isDirectory(), true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
