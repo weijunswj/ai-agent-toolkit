@@ -55,6 +55,7 @@ export class MemoryRunState {
       nonces: new Map(seed.nonces || []),
       attestations: new Map(seed.attestations || []),
       heads: new Map(seed.heads || []),
+      meta: new Map(seed.meta || []),
       publicationSets: new Map(seed.publicationSets || []),
       audit: new Map(seed.audit || [])
     };
@@ -220,7 +221,8 @@ export class MemoryRunState {
     const effectiveActive = activeCorrelationCount(this.data.correlations) -
       (previousCorrelation && ACTIVE_STATES.has(previousCorrelation.state) ? 1 : 0);
     if (effectiveActive >= MAX_ACTIVE) return { ok: false, code: 'TK023_CORRELATION_STATE_LIMIT' };
-    const generation = head.generation + 1;
+    const durableSequence = Number(this.data.meta.get('attempt_generation') || 0);
+    const generation = Math.max(durableSequence, Number(head.generation || 0)) + 1;
     if (previousCorrelation && ACTIVE_STATES.has(previousCorrelation.state)) {
       previousCorrelation.state = 'superseded';
       previousCorrelation.failure_code = 'TK023_NEWER_ATTEMPT_ISSUED';
@@ -239,6 +241,7 @@ export class MemoryRunState {
       current_correlation_id: correlationId,
       updated_at: nowIso(now)
     });
+    this.data.meta.set('attempt_generation', generation);
     return { ok: true, duplicate: false, generation, existing: stored };
   }
 
@@ -491,6 +494,7 @@ async function loadStore(storage) {
     nonces: await storageMap(storage, 'nonces'),
     attestations: await storageMap(storage, 'attestations'),
     heads: await storageMap(storage, 'heads'),
+    meta: await storageMap(storage, 'meta'),
     publicationSets: await storageMap(storage, 'publicationSets'),
     audit: await storageMap(storage, 'audit')
   });

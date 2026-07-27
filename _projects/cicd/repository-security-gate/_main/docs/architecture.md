@@ -107,15 +107,20 @@ hash-chained audit buckets retained for 400 days; older buckets fold into an
 indefinitely retained cumulative anchor. A crash before commit changes nothing,
 and a crash after commit leaves a complete recoverable state transition.
 
-One head/context check owns successive App-issued generations. A strictly newer
-generation may replace the current terminal outcome; an older correlation,
-native workflow rerun, duplicate generation, or conflicting terminal digest
-cannot update it. Complete attempt evidence remains in the retained correlation,
-publication, and audit chains. The App records `dispatch_intent` before the API
-boundary and `dispatch_unknown` before sending. Unknown outcomes are reconciled
-by exact protected-workflow run title, authority SHA, event, branch, and
-correlation discovery. A unique discovered run resumes; an ambiguous run fails
-closed; an undiscovered expired intent is terminalized for all contexts.
+One head/context check owns successive App-issued generations. A durable
+repository-wide sequence watermark remains after terminal correlation and head
+compaction, so a later generation for the same head is always strictly newer.
+A newer generation may replace the current terminal outcome; an older
+correlation, native workflow rerun, duplicate generation, or conflicting
+terminal digest cannot update it. Complete attempt evidence remains in the
+retained correlation, publication, and audit chains. The App records
+`dispatch_intent` before the API boundary and `dispatch_unknown` before sending.
+Unknown outcomes are reconciled by exact protected-workflow run title, authority
+SHA, event, branch, and correlation discovery. Webhook redelivery performs this
+reconciliation immediately, while the configured five-minute Worker cron
+independently sweeps every enrolled repository Durable Object. A unique
+discovered run resumes; an ambiguous run fails closed; an undiscovered expired
+intent is sealed and terminalized as failure for all three contexts.
 
 The protected workflow recursively inventories workflow and local action
 producers under strict file/job/edge/depth/matrix/name bounds. It rejects

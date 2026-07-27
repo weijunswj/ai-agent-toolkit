@@ -524,6 +524,53 @@ test('required-check App authority adversarial fixture matrix', async (t) => {
     assert.equal(state.data.checks.values().next().value.conclusion, 'success');
   });
 
+  await t.test('same-head generation remains monotonic after terminal correlation and head compaction', async () => {
+    const state = new app.MemoryRunState();
+    const headSha = '1'.repeat(40);
+    const headKey = `1/2/${headSha}`;
+    const startedAt = Date.parse('2025-01-01T00:00:00.000Z');
+    const baseRecord = {
+      repository_id: 1,
+      installation_id: 2,
+      repository: 'synthetic/toolkit',
+      candidate_repository: 'synthetic/toolkit',
+      candidate_repository_id: 1,
+      pr_number: 2,
+      head_sha: headSha,
+      base_sha: '2'.repeat(40),
+      base_generation: 1,
+      authority_sha: '3'.repeat(40),
+      nonce: 'abcdefghijklmnopqrstuv',
+      delivery_id: 'delivery-before-compaction',
+      envelope_digest: `sha256:${'4'.repeat(64)}`
+    };
+    const first = await state.beginAttempt(headKey, 'correlation-before-compaction', baseRecord, startedAt);
+    await state.transitionCorrelation('correlation-before-compaction', 'dispatch_intent', {
+      ...first.existing,
+      state: 'failed',
+      failure_code: 'TK023_SYNTHETIC_FAILURE'
+    }, startedAt);
+    for (let index = 0; index < 256; index += 1) {
+      state.data.correlations.set(`newer-terminal-${index}`, {
+        repository_id: 1,
+        pr_number: index + 10,
+        head_sha: String(index % 10).repeat(40),
+        state: 'completed',
+        updated_at: '2025-01-02T00:00:00.000Z'
+      });
+    }
+    await state.compact(Date.parse('2026-07-27T00:00:00.000Z'));
+    assert.equal(state.data.correlations.has('correlation-before-compaction'), false);
+    assert.equal(state.data.heads.has(headKey), false);
+    const second = await state.beginAttempt(headKey, 'correlation-after-compaction', {
+      ...baseRecord,
+      nonce: 'zyxwvutsrqponmlkjihgfe',
+      delivery_id: 'delivery-after-compaction',
+      envelope_digest: `sha256:${'5'.repeat(64)}`
+    }, Date.parse('2026-07-27T00:01:00.000Z'));
+    assert.ok(second.generation > first.generation);
+  });
+
   await t.test('sealed three-context publication is immutable and resumes per-context progress', async () => {
     const state = new app.MemoryRunState();
     const headSha = '1'.repeat(40);
@@ -606,6 +653,66 @@ test('required-check App authority adversarial fixture matrix', async (t) => {
     assert.match(worker, /sealPublicationSet/);
     assert.match(worker, /markPublicationContext/);
     assert.doesNotMatch(worker, /if \(delivery\.duplicate\) return/);
+  });
+
+  await t.test('scheduled recovery terminalizes an expired unknown dispatch without a workflow run or redelivery', async () => {
+    const state = new app.MemoryRunState();
+    const github = fakeGithub();
+    const startedAt = Date.parse('2026-07-27T00:00:00.000Z');
+    const expiresAt = new Date(startedAt + 10 * 60 * 1000).toISOString();
+    const headSha = '1'.repeat(40);
+    const correlationId = 'correlation-scheduled-recovery';
+    const attempt = await state.beginAttempt(`1/2/${headSha}`, correlationId, {
+      repository_id: 1,
+      installation_id: 2,
+      repository: 'synthetic/toolkit',
+      candidate_repository: 'synthetic/toolkit',
+      candidate_repository_id: 1,
+      pr_number: 2,
+      head_sha: headSha,
+      base_sha: '2'.repeat(40),
+      base_generation: 1,
+      authority_sha: '3'.repeat(40),
+      nonce: 'abcdefghijklmnopqrstuv',
+      delivery_id: 'delivery-scheduled-recovery',
+      envelope_digest: `sha256:${'4'.repeat(64)}`,
+      default_branch: 'main',
+      expires_at: expiresAt
+    }, startedAt);
+    await state.transitionCorrelation(correlationId, 'dispatch_intent', {
+      ...attempt.existing,
+      state: 'dispatch_unknown'
+    }, startedAt);
+    let discoveryCalls = 0;
+    const result = await app.recoverExpiredDispatches({
+      APP_ID: '1',
+      APP_INTEGRATION_ID: '77',
+      APP_PRIVATE_KEY: 'synthetic',
+      DISPATCH_SIGNING_PRIVATE_KEY: 'synthetic',
+      WEBHOOK_SECRET: 'synthetic',
+      ENROLLED_REPOSITORY_IDS: '1'
+    }, {
+      now: startedAt + 11 * 60 * 1000,
+      stateForRepository: () => state,
+      tokenForInstallation: async () => 'synthetic-token',
+      githubForToken: () => github,
+      discoverRun: async () => {
+        discoveryCalls += 1;
+        return null;
+      }
+    });
+    assert.deepEqual(result, { ok: true, reconciled: 0, terminalized: 1 });
+    assert.equal(discoveryCalls, 1);
+    assert.equal(state.data.correlations.get(correlationId).state, 'failed');
+    const publication = await state.getPublicationSet(correlationId);
+    assert.equal(publication.state, 'published');
+    assert.deepEqual(Object.keys(publication.contexts).sort(), Object.keys(app.CHECK_CONTEXTS).sort());
+    assert.ok(Object.values(publication.contexts).every((context) => context.conclusion === 'failure'));
+    assert.ok(Object.values(publication.progress).every((progress) => progress === 'published'));
+    assert.equal(state.data.checks.size, 3);
+    assert.ok([...state.data.checks.values()].every((check) =>
+      check.state === 'completed' && check.conclusion === 'failure'
+    ));
   });
 
   await t.test('artifact admission requires one complete canonical ZIP entry', async () => {

@@ -180,7 +180,7 @@ function assertConfiguredIdentity(env) {
   return integrationId;
 }
 
-function assertRepositoryEnrollment(env, repositoryId) {
+function enrolledRepositoryIds(env) {
   const raw = requiredBounded(env.ENROLLED_REPOSITORY_IDS, 2048, 'TK023_REPOSITORY_ENROLLMENT_REQUIRED');
   const values = raw.split(',').map((value) => value.trim());
   if (
@@ -189,6 +189,11 @@ function assertRepositoryEnrollment(env, repositoryId) {
     new Set(values).size !== values.length ||
     values.some((value) => !/^[1-9][0-9]{0,19}$/.test(value))
   ) throw new Error('TK023_REPOSITORY_ENROLLMENT_INVALID');
+  return values;
+}
+
+function assertRepositoryEnrollment(env, repositoryId) {
+  const values = enrolledRepositoryIds(env);
   if (!values.includes(String(repositoryId))) throw new Error('TK023_REPOSITORY_NOT_ENROLLED');
 }
 
@@ -411,6 +416,82 @@ async function terminalizeDispatchFailure({
   }
   await publishSealedSet({ github, state, integrationId, repositoryId, owner, repo, correlation });
   await transitionState(state, correlation, 'publishing', 'failed', { failure_code: failureCode });
+}
+
+export async function recoverExpiredDispatches(env, options = {}) {
+  const integrationId = assertConfiguredIdentity(env);
+  const now = Number(options.now ?? Date.now());
+  if (!Number.isFinite(now)) throw new Error('TK023_RECOVERY_TIME_INVALID');
+  const stateForRepository = options.stateForRepository ||
+    ((repositoryId) => stateClient(env, repositoryId));
+  const tokenForInstallation = options.tokenForInstallation ||
+    ((installationId) => installationToken(env, installationId));
+  const githubForToken = options.githubForToken || githubFacade;
+  const discoverRun = options.discoverRun || discoverDispatchRun;
+  const tokenCache = new Map();
+  const failures = [];
+  let reconciled = 0;
+  let terminalized = 0;
+
+  for (const repositoryIdValue of enrolledRepositoryIds(env)) {
+    const repositoryId = requiredInteger(repositoryIdValue, 'TK023_REPOSITORY_ID_INVALID');
+    const state = stateForRepository(repositoryId);
+    const correlations = await state.listCorrelations();
+    for (const correlation of correlations) {
+      const record = correlation.record;
+      if (
+        record.repository_id !== repositoryId ||
+        record.state !== 'dispatch_unknown' ||
+        !Number.isFinite(Date.parse(record.expires_at || '')) ||
+        Date.parse(record.expires_at) >= now
+      ) continue;
+      const currentAttempt = await state.getCurrentAttempt(attemptHeadKey(record));
+      if (
+        !currentAttempt ||
+        currentAttempt.generation !== record.attempt_generation ||
+        currentAttempt.correlation_id !== correlation.id
+      ) continue;
+      try {
+        const [owner, repo, extra] = String(record.repository || '').split('/');
+        if (!owner || !repo || extra) throw new Error('TK023_REPOSITORY_INVALID');
+        const installationId = requiredInteger(record.installation_id, 'TK023_INSTALLATION_ID_INVALID');
+        if (!tokenCache.has(installationId)) {
+          tokenCache.set(installationId, Promise.resolve(tokenForInstallation(installationId)));
+        }
+        const token = await tokenCache.get(installationId);
+        const github = githubForToken(token);
+        const discovered = await discoverRun(
+          token,
+          owner,
+          repo,
+          requiredBounded(record.default_branch, 255, 'TK023_DEFAULT_BRANCH_INVALID'),
+          correlation
+        );
+        if (discovered) {
+          await transitionState(state, correlation, 'dispatch_unknown', 'dispatched', {
+            workflow_run_id: discovered.id
+          });
+          reconciled += 1;
+          continue;
+        }
+        await terminalizeDispatchFailure({
+          github,
+          state,
+          integrationId,
+          repositoryId,
+          owner,
+          repo,
+          correlation,
+          failureCode: 'TK023_DISPATCH_NOT_OBSERVED'
+        });
+        terminalized += 1;
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+  }
+  if (failures.length) throw new Error('TK023_SCHEDULED_RECOVERY_INCOMPLETE');
+  return { ok: true, reconciled, terminalized };
 }
 
 function dispatchEnvelopeFromCorrelation(correlation, integrationId) {
@@ -1180,5 +1261,10 @@ export async function handleRequest(request, env) {
 export { GateRunState };
 
 export default {
-  fetch: handleRequest
+  fetch: handleRequest,
+  scheduled(controller, env, context) {
+    context.waitUntil(recoverExpiredDispatches(env, {
+      now: Number(controller?.scheduledTime || Date.now())
+    }));
+  }
 };
