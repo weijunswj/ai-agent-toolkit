@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.9.11",
+  "version": "2.9.14",
   "version_policy": "semver",
-  "version_notes": "Publishes protected suppression authority and invariant-closure evidence while synchronizing native plugin, bridge, setup, control, and delegation versions above active overlapping reservations.",
+  "version_notes": "Publishes the protected required-check App authority and terminal evidence contract while preserving the accepted n8n transport, identity, credential-rebinding, and transaction behavior from Toolkit 2.9.12; 2.9.13 remains reserved by PR #310.",
   "outputs": [
     {
       "kind": "curated",

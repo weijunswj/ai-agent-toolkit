@@ -200,17 +200,13 @@ This repo has a source layer and a published layer.
   `node repo/scripts/sync-toolkit-projects.cjs --write`
 - Check generated freshness with:
   `node repo/scripts/sync-toolkit-projects.cjs --check`
-- CI checks generated freshness and may auto-sync deterministic generated outputs from the base/default branch workflow definition only on guarded same-repo PR branches targeting `main`; fork PRs and `main` are never writeback targets.
-- Auto-sync only republishes approved passive generated/synced outputs in `README.md`, `skills/**`, and the declared source-side agent-rule templates generated from `_projects/**/_main/_partials/**`. It must not write active root AI instruction files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`), update other source files, run live n8n, touch product repos, generate curated content from `_main`, or summarise/truncate source docs. If source changes require active root instruction outputs to change, the PR author must commit those files manually on the PR branch.
-- Because auto-sync writeback is privileged, it must not run generated test suites or PR-controlled generated executable code; full validation remains covered by normal read-only CI.
-- Auto-sync must not run full repo validation against raw PR heads; this avoids blocking otherwise valid behind-main PR branches.
-- Auto-sync static checks are limited to generated-surface freshness checks and git diff checks before committing generated output.
-- Auto-sync may run only deterministic generation, sync, check, or validator scripts from the protected base revision, with the PR checkout treated as data and passed through an explicit workspace target.
-- Auto-sync must stage and snapshot generated output after sync and recheck the index/workspace before commit so validation cannot add files to the writeback diff.
-- Auto-sync must pin the PR checkout to the event head SHA, refuse stale queued runs if the PR head changed, and refuse non-force pushes if the PR branch moved after checkout.
-- Auto-sync is optional convenience writeback, not the merge gate. `npm run validate:all` is the required read-only CI and `main` validation gate.
-- If a PR includes `_projects/**/_main/**` source/provenance changes other than declared agent-rule partial inputs and generated source-side agent-rule templates, auto-sync must skip successfully without checkout, writeback, commit, or push. The author or AI Coding Agent (i.e. Codex, Claude Code, Antigravity, OpenCode, etc.) must commit required generated outputs, source-lock/provenance updates, and audit baseline updates, then rely on the normal read-only validation gate.
-- If a writeback-eligible PR mixes eligible source/routing/contract edits with workflow, maintenance-script, test, docs, package, lockfile, or other source/maintenance paths, auto-sync must skip successfully instead of pushing. The author or AI Coding Agent (i.e. Codex, Claude Code, Antigravity, OpenCode, etc.) must commit generated outputs manually and rely on normal read-only validation.
+- CI checks generated freshness from protected default-branch authority. Candidate-controlled auto-sync and generated-output writeback are retired.
+- The protected repository-security authority checks out the exact candidate separately as inert data, runs exact protected generator bytes in an operation-owned directory, and compares the bounded expected-output manifest with candidate bytes.
+- Generated fidelity binds the protected authority commit and tree, candidate head and tree, exact source-manifest digest, generator path and digest, dependency-lock digest, expected-output manifest digest, and comparison result.
+- The protected generator receives no candidate workflow, controller, action, test, App token, repository write token, secret, commit path, push path, or writeback fallback.
+- A generated mismatch fails the check and leaves regeneration to the PR author or coding agent. Generated outputs remain committed source-controlled files produced locally from authoritative sources.
+- Fork PRs use the same read-only data comparison. Missing, stale, redirected, mutable, or ambiguous inputs fail closed.
+- Full protected validation remains separate from generated comparison. Neither path may use candidate bytes as the authority that certifies those same bytes.
 - Curated output must not weaken credential, `.env`, `.tmp`, `.n8n-local`, live n8n action, approval, attribution, or local-only safety constraints from the preserved source.
 - A generated/public surface must not replace a full working document with a lossy summary. Summaries are allowed only for catalogues, descriptions, navigation tables, or clearly marked overview files.
 - Required runtime context for a skill surface must be local, complete enough to use, and traceable to the project source. External links may support provenance or further reading, but must not be required for normal execution.

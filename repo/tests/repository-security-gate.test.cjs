@@ -13,6 +13,7 @@ const moduleRoot = path.join(repoRoot, '_projects', 'cicd', 'repository-security
 const mainRoot = path.join(moduleRoot, '_main');
 const runnerPath = path.join(mainRoot, 'tools', 'security-gate.cjs');
 const trustedRunnerPath = path.join(mainRoot, 'tools', 'trusted-security-gate.cjs');
+const installerPath = path.join(mainRoot, 'tools', 'install-pinned-tools.cjs');
 const lockPath = path.join(mainRoot, 'config', 'tool-lock.json');
 const {
   applySuppressions,
@@ -37,6 +38,7 @@ const {
   validateToolLock
 } = require(runnerPath);
 const { buildAuthority } = require(trustedRunnerPath);
+const { extractArchive } = require(installerPath);
 
 function runNode(args, cwd = repoRoot) {
   return spawnSync(process.execPath, args, {
@@ -64,6 +66,39 @@ function sha256(value) {
 function sourceDigest(filePath) {
   return sha256(fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n'));
 }
+
+test('pinned-tool installer extracts verified zip assets on Windows without a Unix unzip dependency', (t) => {
+  if (process.platform !== 'win32') {
+    t.skip('Windows archive adapter is exercised only on Windows');
+    return;
+  }
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-security-gate-installer-'));
+  try {
+    const source = path.join(root, 'source');
+    const extractRoot = path.join(root, 'extract');
+    const archive = path.join(root, 'fixture.zip');
+    fs.mkdirSync(path.join(source, 'PSScriptAnalyzer'), { recursive: true });
+    fs.mkdirSync(extractRoot);
+    fs.writeFileSync(path.join(source, 'PSScriptAnalyzer', 'PSScriptAnalyzer.psd1'), '@{}\n');
+    const create = spawnSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        '& { param($sourcePath, $archivePath) Compress-Archive -LiteralPath $sourcePath -DestinationPath $archivePath -Force }',
+        path.join(source, 'PSScriptAnalyzer'),
+        archive
+      ],
+      { encoding: 'utf8', windowsHide: true }
+    );
+    assert.equal(create.status, 0, create.stderr);
+    extractArchive(archive, 'fixture.nupkg', extractRoot, root, 'fixture', 'win32');
+    assert.equal(fs.readFileSync(path.join(extractRoot, 'PSScriptAnalyzer', 'PSScriptAnalyzer.psd1'), 'utf8'), '@{}\n');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 function runGit(root, args) {
   const result = spawnSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true });
@@ -112,7 +147,7 @@ function createTrustedAuthority(candidateRoot, candidateHead) {
   fs.mkdirSync(path.join(authorityRoot, '.github', 'workflows'), { recursive: true });
   fs.writeFileSync(
     path.join(authorityRoot, '.github', 'workflows', 'repository-security-gate.yml'),
-    'name: synthetic protected gate\non: pull_request_target\n',
+    'name: synthetic protected gate\non:\n  workflow_dispatch:\npermissions: {}\njobs:\n  placeholder:\n    name: synthetic placeholder\n    runs-on: ubuntu-latest\n    steps:\n      - run: exit 0\n',
     'utf8'
   );
   runGit(authorityRoot, ['init', '-q']);
@@ -331,7 +366,15 @@ test('trusted immutable checkout can certify an exempt candidate while candidate
       '--scanner-home', trusted.scannerHome,
       '--sandbox-home', trusted.sandboxHome
     ], trusted.container);
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(
+      result.status,
+      0,
+      result.stderr || (
+        fs.existsSync(path.join(trusted.reportRoot, 'security-gate.json'))
+          ? fs.readFileSync(path.join(trusted.reportRoot, 'security-gate.json'), 'utf8')
+          : 'trusted runner produced no report'
+      )
+    );
     const report = JSON.parse(fs.readFileSync(path.join(trusted.reportRoot, 'security-gate.json'), 'utf8'));
     assert.equal(report.state, 'SECURITY_PROFILE_EXEMPT');
     assert.equal(report.trusted_authority.commit, trusted.authorityCommit);
@@ -514,8 +557,8 @@ test('active suppressions require protected authority and ignore candidate-autho
         path: 'fixtures/synthetic/sample.txt',
         sha256: sha256(contents)
       }],
-      tool_version: '1.2.1',
-      rule_version: '1.2.1',
+      tool_version: '1.3.0',
+      rule_version: '1.3.0',
       source_sha256: sha256(contents)
     }]
   };
@@ -609,10 +652,6 @@ test('protected suppression invariant closure executes trusted bytes and rejects
     'utf8'
   ));
   const candidate = temporaryRepository({
-    '.github/workflows/auto-sync-generated-surfaces.yml': fs.readFileSync(
-      path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'),
-      'utf8'
-    ),
     'repo/tests/fixtures/security-gate/synthetic-private-prompt.txt': fs.readFileSync(
       path.join(repoRoot, 'repo', 'tests', 'fixtures', 'security-gate', 'synthetic-private-prompt.txt'),
       'utf8'
@@ -628,7 +667,7 @@ test('protected suppression invariant closure executes trusted bytes and rejects
     assert.deepEqual(initial.failures, []);
     assert.deepEqual(
       [...initial.evidence.values()].map((item) => item.status),
-      ['PASS', 'PASS']
+      ['PASS']
     );
     fs.writeFileSync(
       path.join(candidate, 'repo', 'tests', 'candidate-always-pass.test.cjs'),
@@ -1036,8 +1075,8 @@ test('consumer invariants and protected suppression inputs reject symlinks when 
           path: 'repo/tests/linked.test.cjs',
           sha256: sourceDigest(path.join(root, 'repo/tests/real.test.cjs'))
         }],
-        tool_version: '1.2.1',
-        rule_version: '1.2.1',
+        tool_version: '1.3.0',
+        rule_version: '1.3.0',
         source_sha256: sha256('fixture\n')
       }]
     };
@@ -1076,7 +1115,7 @@ test('review packet classifies the complete changed-file manifest before bounded
     const inventory = trackedPathInventory(state.root, head);
     const unsignedReport = {
       schema_version: 4,
-      gate_version: '1.2.1',
+      gate_version: '1.3.0',
       state: 'SECURITY_PASS',
       repository: 'synthetic/repository',
       candidate_repository: 'synthetic/candidate',
@@ -1144,38 +1183,28 @@ test('review packet classifies the complete changed-file manifest before bounded
   }
 });
 
-test('workflow uses protected trusted authority and treats the exact PR checkout as untrusted data', () => {
+test('workflow uses App-dispatched protected authority and treats the exact PR checkout as untrusted data', () => {
   const gate = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'repository-security-gate.yml'), 'utf8');
   const trustedRunner = fs.readFileSync(trustedRunnerPath, 'utf8');
   const candidate = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'security-candidate-validation.yml'), 'utf8');
-  assert.match(gate, /^  pull_request:/m);
-  assert.match(gate, /^  pull_request_target:/m);
-  assert.match(gate, /permissions:\r?\n  contents: read\r?\n  pull-requests: read/);
+  assert.match(gate, /^  workflow_dispatch:/m);
+  assert.doesNotMatch(gate, /^  pull_request(?:_target)?:/m);
+  assert.match(gate, /^permissions: \{\}$/m);
   assert.doesNotMatch(gate, /\bsecrets\./);
-  assert.match(gate, /path: trusted-gate[\s\S]*persist-credentials: false/);
+  assert.match(gate, /path: authority[\s\S]*persist-credentials: false/);
   assert.match(gate, /path: candidate[\s\S]*persist-credentials: false/);
-  assert.match(gate, /candidate_repository="\$PR_REPOSITORY"/);
-  assert.match(gate, /git -c protocol\.version=2 -C candidate fetch --no-tags --depth=1/);
+  assert.match(gate, /DISPATCH_PUBLIC_KEY: \$\{\{ vars\.TK023_DISPATCH_PUBLIC_KEY \}\}/);
+  assert.match(gate, /verify-dispatch/);
   assert.match(gate, /trusted-security-gate\.cjs/);
   assert.doesNotMatch(gate, /--suppressions|security-gate-suppressions\.json/);
   assert.match(gate, /GH_TOKEN: ""[\s\S]*GITHUB_TOKEN: ""/);
-  assert.match(gate, /PR head changed after trusted scan/);
-  assert.match(gate, /TK-023 bootstrap evidence sealed as \$\{report\.state\}; this job is explicitly non-enforcement/);
-  assert.match(gate, /bootstrap-immutable-review/);
-  assert.match(gate, /gh api "repos\/\$GITHUB_REPOSITORY\/pulls\/\$PR_NUMBER"/);
-  assert.match(gate, /chmod 700 "\$reports"/);
-  assert.match(gate, /sudo chown -R root:root trusted-gate candidate/);
-  assert.match(gate, /sudo chmod -R a-w trusted-gate candidate/);
-  assert.match(gate, /git config --file "\$sandbox_home\/\.gitconfig" --add safe\.directory "\$GITHUB_WORKSPACE\/candidate"[\s\S]*sudo chown -R toolkitgate:toolkitgate "\$sandbox_home"/);
-  assert.match(gate, /CANDIDATE_REPOSITORY: \$\{\{ steps\.evidence\.outputs\.candidate_repository \}\}[\s\S]*--candidate-repository "\$CANDIDATE_REPOSITORY"/);
-  const bootstrapAuthority = gate.match(/authority_commit="([0-9a-f]{40})"/);
-  assert.ok(bootstrapAuthority, 'bootstrap authority must be pinned to an exact commit');
-  assert.doesNotMatch(gate, /__TK023_BOOTSTRAP_AUTHORITY_COMMIT__/);
-  assert.match(
-    gate,
-    /ref: \$\{\{ steps\.evidence\.outputs\.authority_commit \}\}[\s\S]*path: trusted-gate[\s\S]*fetch-depth: 0/,
-    'bootstrap authority is resolved and validated in the separate trusted checkout'
-  );
+  assert.match(gate, /test -z "\$\(git -C candidate status --porcelain=v1 --untracked-files=all\)"/);
+  assert.match(gate, /required-check-terminal\.cjs inventory/);
+  assert.match(gate, /required-check-terminal\.cjs generated/);
+  assert.match(gate, /^  repository-security-terminal:/m);
+  assert.match(gate, /^  validate-terminal:/m);
+  assert.match(gate, /^  validate-toolkit-terminal:/m);
+  assert.equal((gate.match(/^\s{4}if: \$\{\{ always\(\) \}\}\s*$/gm) || []).length, 3);
   assert.doesNotMatch(gate, /working-directory: candidate/);
   assert.match(trustedRunner, /cwd: authorityRoot/);
   assert.doesNotMatch(trustedRunner, /args\.suppressions|--suppressions/);
@@ -1189,24 +1218,13 @@ test('workflow uses protected trusted authority and treats the exact PR checkout
   }
 });
 
-test('guarded auto-sync suppression is backed by executable trust-boundary evidence', () => {
-  const workflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), 'utf8');
-  const preflightIndex = workflow.indexOf('- name: Preflight guard');
-  const trustedCheckoutIndex = workflow.indexOf('- name: Checkout trusted base revision');
-  const prCheckoutIndex = workflow.indexOf('- name: Checkout PR head commit');
-  const syncIndex = workflow.indexOf('- name: Sync deterministic generated surfaces');
-  const pushIndex = workflow.indexOf('- name: Push generated surfaces');
-
-  assert.match(workflow, /^  pull_request_target:/m);
-  assert.match(workflow, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
-  assert.match(workflow, /if \(\( changed_file_count > 3000 \)\)/);
-  assert.match(workflow, /current_head_sha[\s\S]*if \[\[ "\$current_head_sha" != "\$HEAD_SHA" \]\]/);
-  assert.ok(preflightIndex >= 0 && preflightIndex < trustedCheckoutIndex);
-  assert.ok(trustedCheckoutIndex < prCheckoutIndex && prCheckoutIndex < syncIndex && syncIndex < pushIndex);
-  assert.match(workflow, /ref: \$\{\{ github\.event\.pull_request\.base\.sha \}\}[\s\S]*path: trusted[\s\S]*persist-credentials: false/);
-  assert.match(workflow, /ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}[\s\S]*path: pr[\s\S]*persist-credentials: false/);
-  assert.match(workflow, /node "\$TRUSTED_ROOT\/repo\/scripts\/sync-toolkit-projects\.cjs" --workspace "\$PR_ROOT" --write/);
-  assert.match(workflow, /remote_head_sha[\s\S]*if \[\[ "\$remote_head_sha" != "\$HEAD_SHA" \]\][\s\S]*push origin "HEAD:\$\{HEAD_REF\}"/);
+test('candidate-controlled auto-sync and writeback are retired in favor of protected generated fidelity', () => {
+  assert.equal(fs.existsSync(path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml')), false);
+  const workflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'repository-security-gate.yml'), 'utf8');
+  assert.match(workflow, /Generate expected surfaces in operation root/);
+  assert.match(workflow, /required-check-terminal\.cjs generated/);
+  assert.doesNotMatch(workflow, /\bgit\s+(?:commit|push)\b/);
+  assert.doesNotMatch(workflow, /contents:\s*write/);
 });
 
 test('authoritative surfaces contain no mandatory Codex Security workflow', () => {

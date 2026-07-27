@@ -4,29 +4,6 @@
   "authority_binding": "exact-runtime-trusted-authority",
   "suppressions": [
     {
-      "id": "guarded-auto-sync-pull-request-target",
-      "tool": "zizmor",
-      "rule": "dangerous-triggers",
-      "finding_identity": "8bf86b08ea9c57fc07a8d5d6d4d23621d13d6101e5871f6e414abed947a873b2",
-      "path": ".github/workflows/auto-sync-generated-surfaces.yml",
-      "scope": "exact_line",
-      "exploitability_rationale": "The protected-base workflow treats the PR checkout as data, rejects forks and stale heads before checkout, runs only protected deterministic scripts, constrains staged writeback paths, and is inspected by a protected invariant harness.",
-      "approver_reference": "https://github.com/weijunswj/ai-agent-toolkit/issues/284",
-      "introduction_commit": "0e940c2145a520b33f3c4b37a517b52e83674a4b",
-      "expires": "2026-10-21",
-      "trusted_invariant_id": "guarded-auto-sync-trust-boundary-v1",
-      "trusted_invariant_closure_sha256": "e48294417bec4cb0c2631618e1ebe2d0c43c95a135846b7e4620a7d6956e4a05",
-      "candidate_input_contract": [
-        {
-          "path": ".github/workflows/auto-sync-generated-surfaces.yml",
-          "sha256": "6a3799c21cd5033e86275e50a54112b43f64e4273f0f9eeb2c7a6fe7c76c8b01"
-        }
-      ],
-      "tool_version": "v1.28.0",
-      "rule_version": "builtin-v1.28.0",
-      "source_sha256": "6a3799c21cd5033e86275e50a54112b43f64e4273f0f9eeb2c7a6fe7c76c8b01"
-    },
-    {
       "id": "synthetic-private-prompt-fixture",
       "tool": "gitleaks-cli",
       "rule": "generic-api-key",
@@ -38,7 +15,7 @@
       "introduction_commit": "4d8c6e933af903c7f39a23720806b631d51d9a6e",
       "expires": "2026-10-21",
       "trusted_invariant_id": "synthetic-private-prompt-transport-v1",
-      "trusted_invariant_closure_sha256": "e48294417bec4cb0c2631618e1ebe2d0c43c95a135846b7e4620a7d6956e4a05",
+      "trusted_invariant_closure_sha256": "7224a64c572cb47c6fef9006d70c91d158ca18851204ee71f93ccbcfc9e705d3",
       "candidate_input_contract": [
         {
           "path": "repo/tests/fixtures/security-gate/synthetic-private-prompt.txt",
@@ -46,7 +23,7 @@
         },
         {
           "path": "repo/scripts/toolkit-agent-control.cjs",
-          "sha256": "03c16061522afbf4e7c1459704b34e9e4a8283fc02f6c6ceddfc98b900cf50c7"
+          "sha256": "aaf9f6fa372c761eca492d2e269ef9d5f9e853ff5f7b0d2e1ee47bdef2a2bd91"
         }
       ],
       "tool_version": "v8.30.1",

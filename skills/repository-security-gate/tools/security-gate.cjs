@@ -1207,54 +1207,162 @@ function runInvariants(root, mode, base, head, options = {}) {
   const failures = [];
   const consumed = [];
   const executedTests = new Map();
-  const seen = new Set();
-  for (const evidence of document.evidence) {
-    for (const relative of evidence.tests) {
-      if (seen.has(relative)) continue;
-      seen.add(relative);
-      const full = path.join(root, relative);
-      if (
-        !fs.existsSync(full) ||
-        !fs.lstatSync(full).isFile() ||
-        fs.lstatSync(full).isSymbolicLink() ||
-        !isWithin(root, fs.realpathSync.native(full))
-      ) {
-        failures.push(`${evidence.id}: missing ${relative}`);
-        continue;
-      }
-      const digest = sourceBindingDigest(full);
-      const result = runInvariantCommand(process.execPath, ['--test', relative], {
-        cwd: root,
-        timeout: 120000,
-        maxBuffer: INVARIANT_OUTPUT_LIMIT,
-        sandboxUid: options.sandboxUid,
-        sandboxGid: options.sandboxGid,
-        sandboxHome: options.sandboxHome
-      });
-      let outcome = classifyInvariantOutcome(result, {
-        sandboxRequired: Boolean(options.sandboxUid && options.sandboxGid)
-      });
-      if (outcome.status === 'PASS' && sourceBindingDigest(full) !== digest) {
-        outcome = {
-          status: 'IDENTITY_DRIFT',
-          exit_category: 'ZERO',
-          signal_category: 'NONE',
-          diagnostic_id: `sha256:${sha256(`${relative}\nIDENTITY_DRIFT`)}`
-        };
-      }
-      consumed.push({ path: relative, sha256: digest, ...outcome });
-      if (outcome.status === 'FINDINGS') {
-        findings.push({
-          ...stableFinding('toolkit-invariants', evidence.id, relative, 0, 'Security invariant test failed', {
-            severity: 'HIGH',
-            diagnostic: evidence.id
-          })
-        });
-      } else if (outcome.status === 'PASS') {
-        executedTests.set(relative, digest);
-      } else {
-        failures.push(`${evidence.id}: invariant outcome ${outcome.status}`);
-      }
+  const exactKeys = Object.keys(document).sort().join(',');
+  const expectedKeys = [
+    'contract', 'harness', 'individual_timeout_seconds', 'negative_fixtures',
+    'ordinary_required_ci', 'profile', 'protected_invariants', 'result_schema',
+    'schema_version', 'suite_timeout_seconds'
+  ].sort().join(',');
+  if (
+    exactKeys !== expectedKeys ||
+    document.schema_version !== 2 ||
+    document.contract !== 'tk.security.protected-toolkit-invariants/v1' ||
+    document.profile !== PROFILE_TOOLING ||
+    document.result_schema !== 'tk.security.protected-toolkit-invariant-result/v1' ||
+    document.individual_timeout_seconds !== 5 ||
+    !Number.isInteger(document.suite_timeout_seconds) ||
+    document.suite_timeout_seconds < 5 ||
+    document.suite_timeout_seconds > 60 ||
+    !Array.isArray(document.protected_invariants) ||
+    document.protected_invariants.length < 1 ||
+    document.protected_invariants.length > 32
+  ) {
+    return { findings, failures: ['toolkit_invariants: protected invariant manifest is invalid'], consumed, executedTests, mode, base, head };
+  }
+  const harnessRelative = normalizedRelativePath(document.harness?.path || '');
+  const fixturesRelative = normalizedRelativePath(document.negative_fixtures?.path || '');
+  const harness = path.resolve(PACK_ROOT, harnessRelative);
+  const fixtures = path.resolve(PACK_ROOT, fixturesRelative);
+  for (const [label, full, relative, expectedDigest] of [
+    ['harness', harness, harnessRelative, document.harness?.sha256],
+    ['negative fixtures', fixtures, fixturesRelative, document.negative_fixtures?.sha256]
+  ]) {
+    if (
+      !relative ||
+      relative.split('/').includes('..') ||
+      !isWithin(PACK_ROOT, full) ||
+      !fs.existsSync(full) ||
+      !fs.lstatSync(full).isFile() ||
+      fs.lstatSync(full).isSymbolicLink() ||
+      !isWithin(PACK_ROOT, fs.realpathSync.native(full)) ||
+      `sha256:${exactFileDigest(full)}` !== expectedDigest
+    ) {
+      failures.push(`toolkit_invariants: protected ${label} is missing, redirected, or drifted`);
+    }
+  }
+  if (failures.length > 0) return { findings, failures, consumed, executedTests, mode, base, head };
+  let authorityRoot;
+  try {
+    authorityRoot = safeRepoRoot(git(PACK_ROOT, ['rev-parse', '--show-toplevel']));
+  } catch {
+    failures.push('toolkit_invariants: trusted authority root is unavailable');
+    return { findings, failures, consumed, executedTests, mode, base, head };
+  }
+  const started = Date.now();
+  const runOptions = {
+    cwd: root,
+    timeout: document.individual_timeout_seconds * 1000,
+    maxBuffer: INVARIANT_OUTPUT_LIMIT,
+    sandboxUid: options.sandboxUid,
+    sandboxGid: options.sandboxGid,
+    sandboxHome: options.sandboxHome
+  };
+  const negative = runInvariantCommand(process.execPath, [
+    harness,
+    'self-test',
+    '--fixtures', fixtures
+  ], runOptions);
+  const negativeOutcome = classifyInvariantOutcome(negative, {
+    sandboxRequired: Boolean(options.sandboxUid && options.sandboxGid)
+  });
+  if (negativeOutcome.status !== 'PASS') {
+    failures.push(`toolkit_invariants: protected negative fixtures outcome ${negativeOutcome.status}`);
+    return { findings, failures, consumed, executedTests, mode, base, head };
+  }
+  const ids = new Set();
+  for (const invariant of document.protected_invariants) {
+    if (
+      !invariant ||
+      Object.keys(invariant).sort().join(',') !== 'classification,expected_status,id,immutable_inputs,property' ||
+      !/^TK023-INV-[A-Z0-9-]{1,64}$/.test(invariant.id || '') ||
+      ids.has(invariant.id) ||
+      !['trusted_gate', 'candidate_scan'].includes(invariant.classification) ||
+      invariant.expected_status !== 'PASS' ||
+      typeof invariant.property !== 'string' ||
+      invariant.property.length < 10 ||
+      invariant.property.length > 240 ||
+      !Array.isArray(invariant.immutable_inputs) ||
+      invariant.immutable_inputs.length < 1 ||
+      invariant.immutable_inputs.length > 16
+    ) {
+      failures.push('toolkit_invariants: protected invariant entry is invalid');
+      continue;
+    }
+    ids.add(invariant.id);
+    if (Date.now() - started > document.suite_timeout_seconds * 1000) {
+      failures.push('toolkit_invariants: protected invariant suite timed out');
+      break;
+    }
+    const result = runInvariantCommand(process.execPath, [
+      harness,
+      'run',
+      '--id', invariant.id,
+      '--authority-root', authorityRoot,
+      '--candidate-root', root
+    ], runOptions);
+    const launchOutcome = classifyInvariantOutcome(result, {
+      sandboxRequired: Boolean(options.sandboxUid && options.sandboxGid)
+    });
+    let evidence;
+    try {
+      evidence = JSON.parse(String(result.stdout || '').trim());
+    } catch {
+      evidence = null;
+    }
+    const expectedExit = evidence?.status === 'PASS' ? 0 : evidence?.status === 'FINDINGS' ? 1 : 2;
+    if (
+      !evidence ||
+      Object.keys(evidence).sort().join(',') !== 'diagnostic_id,input_count,input_manifest_digest,invariant_id,schema,status' ||
+      evidence.schema !== document.result_schema ||
+      evidence.invariant_id !== invariant.id ||
+      !['PASS', 'FINDINGS', 'UNVERIFIED'].includes(evidence.status) ||
+      !/^TK023_INVARIANT_[A-Z0-9_]{1,80}$/.test(evidence.diagnostic_id || '') ||
+      !/^sha256:[0-9a-f]{64}$/.test(evidence.input_manifest_digest || '') ||
+      !Number.isInteger(evidence.input_count) ||
+      evidence.input_count < 0 ||
+      evidence.input_count > 256 ||
+      result.status !== expectedExit ||
+      ['TIMEOUT', 'SANDBOX_UNAVAILABLE', 'EXECUTION_FAILED', 'OUTPUT_LIMIT'].includes(launchOutcome.status)
+    ) {
+      failures.push(`${invariant.id}: protected invariant evidence is malformed or unavailable`);
+      continue;
+    }
+    consumed.push({
+      id: invariant.id,
+      classification: invariant.classification,
+      harness_sha256: document.harness.sha256.replace(/^sha256:/, ''),
+      input_manifest_digest: evidence.input_manifest_digest,
+      input_count: evidence.input_count,
+      status: evidence.status,
+      diagnostic_id: evidence.diagnostic_id
+    });
+    if (evidence.status === 'FINDINGS') {
+      findings.push(stableFinding(
+        'toolkit-invariants',
+        invariant.id,
+        '.github/workflows/repository-security-gate.yml',
+        0,
+        'Protected security invariant failed',
+        { severity: 'HIGH', diagnostic: evidence.diagnostic_id }
+      ));
+    } else if (evidence.status === 'PASS') {
+      executedTests.set(invariant.id, evidence.input_manifest_digest.replace(/^sha256:/, ''));
+    } else {
+      failures.push(`${invariant.id}: protected invariant outcome ${evidence.status}`);
+    }
+    if (`sha256:${exactFileDigest(harness)}` !== document.harness.sha256) {
+      failures.push(`${invariant.id}: protected invariant harness identity drift`);
+      break;
     }
   }
   return { findings, failures, consumed, executedTests, mode, base, head };
@@ -1768,7 +1876,7 @@ function validateTrustedAuthority(authority, candidateHead) {
   if (!authority || authority.schema_version !== 2) {
     return { valid: false, errors: ['trusted authority schema is missing or invalid'] };
   }
-  if (!['protected-base', 'bootstrap-immutable-review'].includes(authority.mode)) {
+  if (!['protected-base', 'protected-app-dispatch', 'bootstrap-immutable-review'].includes(authority.mode)) {
     errors.push('trusted authority mode is invalid');
   }
   if (!SHA40.test(authority.commit || '') || !SHA40.test(authority.tree || '')) {
@@ -1848,7 +1956,16 @@ function validateTrustedAuthority(authority, candidateHead) {
     'invariant_schema',
     'active_suppressions',
     'suppression_invariant_manifest',
-    'suppression_invariant_harness'
+    'suppression_invariant_harness',
+    'toolkit_invariant_manifest',
+    'toolkit_invariant_harness',
+    'toolkit_invariant_negative_fixtures',
+    'required_check_config',
+    'protected_generator_lock',
+    'producer_inventory_schema',
+    'terminal_receipt_schema',
+    'publication_receipt_schema',
+    'required_check_terminal'
   ];
   for (const name of required) {
     const binding = bindings[name];
@@ -1877,7 +1994,7 @@ function validateTrustedAuthority(authority, candidateHead) {
     }
   }
   if (
-    authority.mode === 'protected-base' &&
+    ['protected-base', 'protected-app-dispatch'].includes(authority.mode) &&
     authority.invoking_workflow &&
     (
       authority.invoking_workflow.commit !== authority.commit ||
@@ -2592,7 +2709,23 @@ function selfTest() {
     if (!expression.test(fixture.malicious)) throw new Error(`${fixture.rule}: malicious fixture did not match`);
     if (expression.test(fixture.clean)) throw new Error(`${fixture.rule}: clean fixture matched`);
   }
-  process.stdout.write(`OK: ${classificationFixtures.cases.length} classification cases, ${ruleFixtures.cases.length} rule cases, and tool lock validated.\n`);
+  const invariants = readJson(INVARIANTS_PATH);
+  const harness = path.resolve(PACK_ROOT, normalizedRelativePath(invariants.harness?.path || ''));
+  const fixtures = path.resolve(PACK_ROOT, normalizedRelativePath(invariants.negative_fixtures?.path || ''));
+  if (
+    !isWithin(PACK_ROOT, harness) ||
+    !isWithin(PACK_ROOT, fixtures) ||
+    `sha256:${exactFileDigest(harness)}` !== invariants.harness?.sha256 ||
+    `sha256:${exactFileDigest(fixtures)}` !== invariants.negative_fixtures?.sha256
+  ) throw new Error('Protected Toolkit invariant closure drifted');
+  const invariantSelfTest = run(process.execPath, [harness, 'self-test', '--fixtures', fixtures], {
+    cwd: PACK_ROOT,
+    timeout: 5000,
+    maxBuffer: INVARIANT_OUTPUT_LIMIT,
+    env: invariantEnvironment()
+  });
+  if (invariantSelfTest.status !== 0) throw new Error('Protected Toolkit invariant negative fixtures did not fail as expected');
+  process.stdout.write(`OK: ${classificationFixtures.cases.length} classification cases, ${ruleFixtures.cases.length} rule cases, ${invariants.protected_invariants.length} protected invariant negative cases, and tool lock validated.\n`);
   return 0;
 }
 

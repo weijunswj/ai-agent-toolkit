@@ -15,10 +15,11 @@ This is a short skill-local reference and safety checklist. It is not the full r
 ## Safe Defaults
 
 - Use n8n credential objects in the live instance.
-- Keep local credential binding metadata in ignored `.n8n-local/` only.
+- Commit only portable logical credential names and credential types; keep target IDs and values out of Git.
+- Discover target metadata through a supported transport and retain only ID/name/type in restrictive temporary storage for internal binding.
 - Keep live import/export payloads in ignored `.tmp/` only.
 - Use obvious placeholders for template values.
-- Document manual credential assignment by node and field, not by secret value.
+- Document the logical credential name/type required by each stable node selector, not a target ID or secret value.
 
 ## Unsafe
 

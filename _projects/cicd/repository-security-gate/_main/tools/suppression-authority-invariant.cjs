@@ -64,25 +64,6 @@ function finding(id, reason, inspected) {
   };
 }
 
-function guardedAutoSync(candidateRoot, contract) {
-  const relative = '.github/workflows/auto-sync-generated-surfaces.yml';
-  const input = readInput(candidateRoot, contract, relative);
-  const required = [
-    /^  pull_request_target:/m,
-    /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/,
-    /- name: Checkout trusted base revision/,
-    /- name: Checkout PR head commit/,
-    /node "\$TRUSTED_ROOT\/repo\/scripts\/sync-toolkit-projects\.cjs" --workspace "\$PR_ROOT" --write/,
-    /current_head_sha[\s\S]*if \[\[ "\$current_head_sha" != "\$HEAD_SHA" \]\]/,
-    /remote_head_sha[\s\S]*if \[\[ "\$remote_head_sha" != "\$HEAD_SHA" \]\]/,
-    /persist-credentials: false/
-  ];
-  if (required.some((pattern) => !pattern.test(input.text))) {
-    return finding('guarded-auto-sync-trust-boundary-v1', 'protected-writeback-contract-missing', [relative]);
-  }
-  return pass('guarded-auto-sync-trust-boundary-v1', [relative]);
-}
-
 function syntheticPrompt(candidateRoot, contract) {
   const fixturePath = 'repo/tests/fixtures/security-gate/synthetic-private-prompt.txt';
   const controllerPath = 'repo/scripts/toolkit-agent-control.cjs';
@@ -107,7 +88,6 @@ function syntheticPrompt(candidateRoot, contract) {
 function evaluate(invariantId, options = {}) {
   const root = path.resolve(options.candidateRoot || '');
   const contract = Array.isArray(options.candidateInputs) ? options.candidateInputs : [];
-  if (invariantId === 'guarded-auto-sync-trust-boundary-v1') return guardedAutoSync(root, contract);
   if (invariantId === 'synthetic-private-prompt-transport-v1') return syntheticPrompt(root, contract);
   throw new Error('trusted invariant id is not implemented');
 }

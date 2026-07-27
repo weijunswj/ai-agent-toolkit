@@ -21,6 +21,21 @@ asset, checksum, signature/attestation, platform, and output-contract evidence.
 Those records are metadata, not copied software. Source-watch consumes the
 generated lock as notification-only input.
 
+## Source-only enforcement service
+
+`_main/app/` contains first-party source for the sole typed publisher of the
+three future required checks. It has no copied third-party runtime dependency,
+is not a generated skill output, and is not deployed or installed by Toolkit
+project sync.
+
+## Protected invariant closure
+
+`_main/tools/protected-toolkit-invariants.cjs`, its immutable manifest, and
+`_main/fixtures/protected-toolkit-invariants/negative-cases.json` are
+first-party purpose-built protected evidence. They execute no candidate test
+or helper code. The broader mapped Toolkit suites remain ordinary required CI
+and cannot grant suppression or publication authority.
+
 ## Published surface
 
 The whole generated `skills/repository-security-gate/` folder is the portable

@@ -1,17 +1,13 @@
 {
   "schema_version": 1,
-  "closure_version": "1.2.1",
+  "closure_version": "1.3.0",
   "closure_files": [
     {
       "path": "tools/suppression-authority-invariant.cjs",
-      "sha256": "7bf782f9257b5ac5d8d423153cf318dcc9cb2e40e3bcec203d132e69ffcf36c4"
+      "sha256": "25e155003d13ebe776dfec2388096f52e48ece773d70af1f13d82ac8a4bdee3f"
     }
   ],
   "invariants": [
-    {
-      "id": "guarded-auto-sync-trust-boundary-v1",
-      "harness": "tools/suppression-authority-invariant.cjs"
-    },
     {
       "id": "synthetic-private-prompt-transport-v1",
       "harness": "tools/suppression-authority-invariant.cjs"

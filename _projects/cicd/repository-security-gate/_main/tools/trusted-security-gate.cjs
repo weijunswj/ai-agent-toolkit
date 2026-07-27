@@ -101,8 +101,8 @@ function buildAuthority(args) {
   ) {
     throw new Error('Target and candidate repositories must use exact owner/name identities');
   }
-  if (!['protected-base', 'bootstrap-immutable-review'].includes(mode)) {
-    throw new Error('Authority mode must be protected-base or bootstrap-immutable-review');
+  if (!['protected-base', 'protected-app-dispatch', 'bootstrap-immutable-review'].includes(mode)) {
+    throw new Error('Authority mode must be protected-base, protected-app-dispatch, or bootstrap-immutable-review');
   }
   if (
     !fs.existsSync(candidateRoot) ||
@@ -157,7 +157,16 @@ function buildAuthority(args) {
     invariant_schema: binding(authorityRoot, 'skills/repository-security-gate/schemas/consumer-invariants.schema.json'),
     active_suppressions: binding(authorityRoot, 'skills/repository-security-gate/config/active-suppressions.json'),
     suppression_invariant_manifest: binding(authorityRoot, 'skills/repository-security-gate/config/suppression-invariants.json'),
-    suppression_invariant_harness: binding(authorityRoot, 'skills/repository-security-gate/tools/suppression-authority-invariant.cjs')
+    suppression_invariant_harness: binding(authorityRoot, 'skills/repository-security-gate/tools/suppression-authority-invariant.cjs'),
+    toolkit_invariant_manifest: binding(authorityRoot, 'skills/repository-security-gate/config/invariants.json'),
+    toolkit_invariant_harness: binding(authorityRoot, 'skills/repository-security-gate/tools/protected-toolkit-invariants.cjs'),
+    toolkit_invariant_negative_fixtures: binding(authorityRoot, 'skills/repository-security-gate/fixtures/protected-toolkit-invariants/negative-cases.json'),
+    required_check_config: binding(authorityRoot, 'skills/repository-security-gate/config/required-check-producers.json'),
+    protected_generator_lock: binding(authorityRoot, 'skills/repository-security-gate/config/protected-generator-lock.json'),
+    producer_inventory_schema: binding(authorityRoot, 'skills/repository-security-gate/schemas/producer-inventory.schema.json'),
+    terminal_receipt_schema: binding(authorityRoot, 'skills/repository-security-gate/schemas/terminal-receipt.schema.json'),
+    publication_receipt_schema: binding(authorityRoot, 'skills/repository-security-gate/schemas/publication-receipt.schema.json'),
+    required_check_terminal: binding(authorityRoot, 'skills/repository-security-gate/tools/required-check-terminal.cjs')
   };
   const invokingWorkflowDigest = String(args['invoking-workflow-digest'] || '');
   const invokingWorkflowCommit = String(args['invoking-workflow-commit'] || '').toLowerCase();
@@ -165,7 +174,7 @@ function buildAuthority(args) {
     throw new Error('Invoking workflow digest and commit must be exact');
   }
   if (
-    mode === 'protected-base' &&
+    ['protected-base', 'protected-app-dispatch'].includes(mode) &&
     (invokingWorkflowDigest !== bindings.workflow.sha256 || invokingWorkflowCommit !== commit)
   ) {
     throw new Error('Protected workflow identity does not match the trusted authority checkout');

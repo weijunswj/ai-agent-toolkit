@@ -5,9 +5,9 @@
   "title": "Repository Security Gate",
   "module_path": "_projects/cicd/repository-security-gate",
   "main_path": "_projects/cicd/repository-security-gate/_main",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "version_policy": "semver",
-  "version_notes": "Moves active suppressions and compensating invariant closure into protected authority, makes candidate suppression metadata proposal-only, and classifies isolated invariant outcomes without accepting candidate tests as approval authority.",
+  "version_notes": "Adds the source-only first-party App authority, protected dispatch and terminal receipts, recursive required-check producer inventory, protected generated-surface fidelity, and a non-applying ruleset promotion plan.",
   "outputs": [
     {
       "kind": "curated",
@@ -81,6 +81,27 @@
     },
     {
       "kind": "json",
+      "source": "_main/config/required-check-producers.json",
+      "output": "skills/repository-security-gate/config/required-check-producers.json",
+      "notes": "Protected required-check context, publisher, terminal, permission, and producer-inventory contract.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "json",
+      "source": "_main/config/protected-generator-lock.json",
+      "output": "skills/repository-security-gate/config/protected-generator-lock.json",
+      "notes": "Protected source-first generator and dependency lock used for inert candidate output comparison.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "json",
+      "source": "_main/config/ruleset-promotion-plan.json",
+      "output": "skills/repository-security-gate/config/ruleset-promotion-plan.json",
+      "notes": "Non-applying promotion plan that fails closed until a GitHub-assigned App integration ID is supplied.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "json",
       "source": "_main/rules/toolkit-rules.json",
       "output": "skills/repository-security-gate/rules/toolkit-rules.json",
       "notes": "First-party static rules; no private or restricted rule pack.",
@@ -129,6 +150,27 @@
       "fidelity": "exact"
     },
     {
+      "kind": "json",
+      "source": "_main/schemas/producer-inventory.schema.json",
+      "output": "skills/repository-security-gate/schemas/producer-inventory.schema.json",
+      "notes": "Strict protected producer-inventory evidence schema.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "json",
+      "source": "_main/schemas/terminal-receipt.schema.json",
+      "output": "skills/repository-security-gate/schemas/terminal-receipt.schema.json",
+      "notes": "Strict static-terminal receipt schema.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "json",
+      "source": "_main/schemas/publication-receipt.schema.json",
+      "output": "skills/repository-security-gate/schemas/publication-receipt.schema.json",
+      "notes": "Strict App publication receipt schema.",
+      "fidelity": "exact"
+    },
+    {
       "kind": "copy",
       "source": "_main/tools/security-gate.cjs",
       "output": "skills/repository-security-gate/tools/security-gate.cjs",
@@ -144,6 +186,13 @@
     },
     {
       "kind": "copy",
+      "source": "_main/tools/protected-toolkit-invariants.cjs",
+      "output": "skills/repository-security-gate/tools/protected-toolkit-invariants.cjs",
+      "notes": "Purpose-built protected data-only Toolkit invariant harness.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
       "source": "_main/tools/trusted-security-gate.cjs",
       "output": "skills/repository-security-gate/tools/trusted-security-gate.cjs",
       "notes": "Protected-authority entrypoint that separates trusted gate code, scanned candidate data, tools, and reports.",
@@ -154,6 +203,13 @@
       "source": "_main/tools/install-pinned-tools.cjs",
       "output": "skills/repository-security-gate/tools/install-pinned-tools.cjs",
       "notes": "Pinned official asset downloader with checksum verification.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "copy",
+      "source": "_main/tools/required-check-terminal.cjs",
+      "output": "skills/repository-security-gate/tools/required-check-terminal.cjs",
+      "notes": "Protected producer inventory, dispatch verifier, generated fidelity, terminal receipt, and promotion-plan utility.",
       "fidelity": "exact"
     },
     {
@@ -186,6 +242,13 @@
     },
     {
       "kind": "json",
+      "source": "_main/fixtures/protected-toolkit-invariants/negative-cases.json",
+      "output": "skills/repository-security-gate/fixtures/protected-toolkit-invariants/negative-cases.json",
+      "notes": "Synthetic negative fixtures for every protected Toolkit invariant.",
+      "fidelity": "exact"
+    },
+    {
+      "kind": "json",
       "source": "curated_output_for_ai/packs/repository-security-gate/pack.json",
       "output": "skills/repository-security-gate/packs/repository-security-gate/pack.json",
       "notes": "Portable version-pinned consumer pack metadata.",
@@ -211,6 +274,9 @@
       "skills/repository-security-gate/config/invariants.json",
       "skills/repository-security-gate/config/active-suppressions.json",
       "skills/repository-security-gate/config/suppression-invariants.json",
+      "skills/repository-security-gate/config/required-check-producers.json",
+      "skills/repository-security-gate/config/protected-generator-lock.json",
+      "skills/repository-security-gate/config/ruleset-promotion-plan.json",
       "skills/repository-security-gate/rules/toolkit-rules.json",
       "skills/repository-security-gate/schemas/tool-lock.schema.json",
       "skills/repository-security-gate/schemas/report.schema.json",
@@ -218,14 +284,20 @@
       "skills/repository-security-gate/schemas/suppression-proposals.schema.json",
       "skills/repository-security-gate/schemas/review-packet.schema.json",
       "skills/repository-security-gate/schemas/consumer-invariants.schema.json",
+      "skills/repository-security-gate/schemas/producer-inventory.schema.json",
+      "skills/repository-security-gate/schemas/terminal-receipt.schema.json",
+      "skills/repository-security-gate/schemas/publication-receipt.schema.json",
       "skills/repository-security-gate/tools/security-gate.cjs",
       "skills/repository-security-gate/tools/suppression-authority-invariant.cjs",
+      "skills/repository-security-gate/tools/protected-toolkit-invariants.cjs",
       "skills/repository-security-gate/tools/trusted-security-gate.cjs",
       "skills/repository-security-gate/tools/install-pinned-tools.cjs",
+      "skills/repository-security-gate/tools/required-check-terminal.cjs",
       "skills/repository-security-gate/templates/github/security-gate.yml",
       "skills/repository-security-gate/templates/github/security-candidate-validation.yml",
       "skills/repository-security-gate/fixtures/classification-cases.json",
       "skills/repository-security-gate/fixtures/rule-cases.json",
+      "skills/repository-security-gate/fixtures/protected-toolkit-invariants/negative-cases.json",
       "skills/repository-security-gate/packs/repository-security-gate/pack.json",
       "skills/repository-security-gate/packs/repository-security-gate/README.md"
     ],
@@ -263,6 +335,7 @@
     "routing": "repository-security-gate is explicitly routed for repository-owned security-gate integration and evidence work, and intentionally remains non-implicit because scans and downloads are context-heavy and approval-sensitive.",
     "validation": [
       "node --test repo/tests/repository-security-gate.test.cjs",
+      "node --test repo/tests/repository-security-gate-app.test.cjs",
       "node repo/scripts/sync-toolkit-projects.cjs --write",
       "node repo/scripts/sync-toolkit-projects.cjs --check",
       "node repo/scripts/audit-published-surfaces.cjs --check",

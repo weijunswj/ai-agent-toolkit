@@ -133,47 +133,58 @@ function findFile(root, basename) {
   return matches[0];
 }
 
+function extractArchive(assetPath, assetName, extractRoot, temporary, label, platform = process.platform) {
+  const lower = assetName.toLowerCase();
+  if (lower.endsWith('.tar.gz')) {
+    assertArchiveEntries(run('tar', ['-tzf', assetPath], temporary), label);
+    run('tar', ['-xzf', assetPath, '-C', extractRoot], temporary);
+    return;
+  }
+  if (lower.endsWith('.zip') || lower.endsWith('.nupkg')) {
+    if (platform === 'win32') {
+      assertArchiveEntries(run('tar', ['-tf', assetPath], temporary), label);
+      run('tar', ['-xf', assetPath, '-C', extractRoot], temporary);
+    } else {
+      assertArchiveEntries(run('unzip', ['-Z1', assetPath], temporary), label);
+      run('unzip', ['-q', assetPath, '-d', extractRoot], temporary);
+    }
+    return;
+  }
+  fs.copyFileSync(assetPath, path.join(extractRoot, assetName));
+}
+
 async function installRecord(record, destination) {
   if (record.state !== 'active' || record.kind !== 'scanner') throw new Error(`${record.name} is not an active scanner.`);
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), `toolkit-${record.name}-`));
   try {
     const assetPath = path.join(temporary, path.basename(record.expected_release_asset));
     const bytes = await request(record.asset_url);
-      const digest = crypto.createHash('sha256').update(bytes).digest('hex');
-      if (digest !== record.release_checksum) throw new Error(`${record.name} checksum mismatch.`);
-      fs.writeFileSync(assetPath, bytes, { flag: 'wx' });
-      const extractRoot = path.join(temporary, 'extract');
-      fs.mkdirSync(extractRoot);
-      const lower = record.expected_release_asset.toLowerCase();
-      if (lower.endsWith('.tar.gz')) {
-        assertArchiveEntries(run('tar', ['-tzf', assetPath], temporary), record.name);
-        run('tar', ['-xzf', assetPath, '-C', extractRoot], temporary);
-      } else if (lower.endsWith('.zip') || lower.endsWith('.nupkg')) {
-        assertArchiveEntries(run('unzip', ['-Z1', assetPath], temporary), record.name);
-        run('unzip', ['-q', assetPath, '-d', extractRoot], temporary);
-      } else {
-        fs.copyFileSync(assetPath, path.join(extractRoot, record.expected_release_asset));
-      }
-      assertExtractedTree(extractRoot);
-      if (record.name === 'psscriptanalyzer') {
-        const manifest = findFile(extractRoot, 'PSScriptAnalyzer.psd1');
-        const moduleDestination = path.join(destination, 'PSScriptAnalyzer');
-        fs.cpSync(path.dirname(manifest), moduleDestination, { recursive: true, errorOnExist: true });
-        return;
-      }
-      const binaryNames = {
-        trivy: 'trivy',
-        'osv-scanner': 'osv-scanner_linux_amd64',
-        zizmor: 'zizmor',
-        actionlint: 'actionlint',
-        shellcheck: 'shellcheck',
-        'gitleaks-cli': 'gitleaks'
-      };
-      const binary = findFile(extractRoot, binaryNames[record.name]);
-      const targetName = record.name === 'gitleaks-cli' ? 'gitleaks' : record.name;
-      const target = path.join(destination, targetName);
-      fs.copyFileSync(binary, target, fs.constants.COPYFILE_EXCL);
-      fs.chmodSync(target, 0o755);
+    const digest = crypto.createHash('sha256').update(bytes).digest('hex');
+    if (digest !== record.release_checksum) throw new Error(`${record.name} checksum mismatch.`);
+    fs.writeFileSync(assetPath, bytes, { flag: 'wx' });
+    const extractRoot = path.join(temporary, 'extract');
+    fs.mkdirSync(extractRoot);
+    extractArchive(assetPath, record.expected_release_asset, extractRoot, temporary, record.name);
+    assertExtractedTree(extractRoot);
+    if (record.name === 'psscriptanalyzer') {
+      const manifest = findFile(extractRoot, 'PSScriptAnalyzer.psd1');
+      const moduleDestination = path.join(destination, 'PSScriptAnalyzer');
+      fs.cpSync(path.dirname(manifest), moduleDestination, { recursive: true, errorOnExist: true });
+      return;
+    }
+    const binaryNames = {
+      trivy: 'trivy',
+      'osv-scanner': 'osv-scanner_linux_amd64',
+      zizmor: 'zizmor',
+      actionlint: 'actionlint',
+      shellcheck: 'shellcheck',
+      'gitleaks-cli': 'gitleaks'
+    };
+    const binary = findFile(extractRoot, binaryNames[record.name]);
+    const targetName = record.name === 'gitleaks-cli' ? 'gitleaks' : record.name;
+    const target = path.join(destination, targetName);
+    fs.copyFileSync(binary, target, fs.constants.COPYFILE_EXCL);
+    fs.chmodSync(target, 0o755);
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }
@@ -217,4 +228,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { main };
+module.exports = { extractArchive, main };

@@ -3,6 +3,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const docContractSync = require('./sync-repo-doc-contract.cjs');
 const agentInstructionSync = require('./sync-agent-instruction-shims.cjs');
@@ -185,7 +186,7 @@ const expectedFiles = [
   'repo/scripts/setup-toolkit.cjs',
   'repo/scripts/sync-repo-doc-contract.cjs',
   'repo/docs/published-surface-audit-baseline.json',
-  '.github/workflows/auto-sync-generated-surfaces.yml',
+  '.github/workflows/repository-security-gate.yml',
   '.github/workflows/source-watch-plan.yml',
   '.github/workflows/source-watch-pr.yml',
   '.github/workflows/validate.yml'
@@ -386,6 +387,10 @@ function readJson(relPath) {
   return JSON.parse(readText(relPath));
 }
 
+function sha256File(relPath) {
+  return `sha256:${crypto.createHash('sha256').update(fs.readFileSync(resolveRel(relPath))).digest('hex')}`;
+}
+
 function pngSize(relPath) {
   const buffer = fs.readFileSync(resolveRel(relPath));
   const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
@@ -441,7 +446,7 @@ function fail(errors, message) {
   errors.push(message);
 }
 
-const autoSyncGeneratedSurfacesWorkflowPath = '.github/workflows/auto-sync-generated-surfaces.yml';
+const retiredAutoSyncGeneratedSurfacesWorkflowPath = '.github/workflows/auto-sync-generated-surfaces.yml';
 const sourceWatchPrWorkflowPath = '.github/workflows/source-watch-pr.yml';
 const advisoryTargetsPath = 'repo/source-watch/advisory-targets.json';
 const sourceWatchPrNotificationRule = 'Scheduled source-watch is PR-notification-only. It may compare active SOURCE-LOCK pins and actionable advisory targets with upstream GitHub commits, then open or refresh a stable review PR. It must not copy upstream files, change SOURCE-LOCK/advisory records, execute upstream code, auto-merge, push to main, run live n8n actions, or treat notification as approval. Real updates require a separate human-approved PR.';
@@ -1739,26 +1744,288 @@ const explicitValidationWorkflowCommands = [
 ];
 
 function validateReadOnlyValidationWorkflow(entry, text, errors) {
-  const permissions = workflowPermissionLines(text) || [];
-  const expectedPermissions = ['contents: read'];
-  if (permissions.length !== expectedPermissions.length || expectedPermissions.some((permission) => !permissions.includes(permission))) {
-    fail(errors, `${entry.relPath} must grant only contents: read`);
+  if (!/^\s{2}workflow_call:\s*$/m.test(text)) fail(errors, `${entry.relPath} must be callable only by protected authority`);
+  for (const trigger of ['pull_request', 'pull_request_target', 'push', 'schedule', 'workflow_dispatch']) {
+    if (new RegExp(`^  ${trigger}:`, 'm').test(text)) fail(errors, `${entry.relPath} must not expose ${trigger}`);
+  }
+  if (!/^permissions:\s*\{\}\s*$/m.test(text)) fail(errors, `${entry.relPath} must deny permissions by default`);
+  if (!/persist-credentials:\s*false/.test(text)) fail(errors, `${entry.relPath} must disable checkout credential persistence`);
+  if (!/GH_TOKEN:\s*""/.test(text) || !/GITHUB_TOKEN:\s*""/.test(text)) {
+    fail(errors, `${entry.relPath} candidate execution must clear GitHub token variables`);
+  }
+  if (!/sudo\s+-H\s+-u\s+tk(?:validate|toolkit)/.test(text)) {
+    fail(errors, `${entry.relPath} must execute the candidate worker as the dedicated unprivileged identity`);
+  }
+  if (
+    !/sudo chown -R root:root "\$operation\/repo\/scripts" "\$operation\/repo\/tests"/.test(text) ||
+    !/sudo chmod -R a-w "\$operation\/repo\/scripts" "\$operation\/repo\/tests"/.test(text)
+  ) {
+    fail(errors, `${entry.relPath} must make the protected scripts and tests immutable`);
+  }
+  if (!/protected_digest=.*repo\/scripts.*repo\/tests/.test(text) || !/test "\$current_digest" =/.test(text)) {
+    fail(errors, `${entry.relPath} must bind and revalidate the protected executable closure`);
+  }
+  if (!/sudo ip netns exec tk(?:023validate|023toolkit)/.test(text) || !/sudo -H -u tk(?:validate|toolkit) env -i/.test(text)) {
+    fail(errors, `${entry.relPath} must execute in the dedicated no-network, empty-environment worker`);
+  }
+  if (!/test -z "\$\(git -C candidate status --porcelain=v1 --untracked-files=all\)"/.test(text)) {
+    fail(errors, `${entry.relPath} must revalidate the candidate checkout after execution`);
+  }
+  if (/sync-repo-doc-contract\.cjs\s+--write|sync-toolkit-projects\.cjs\s+--write|\bgit\s+(?:commit|push)\b/.test(text)) {
+    fail(errors, `${entry.relPath} must not write generated outputs, commit, or push`);
+  }
+  if (packageManagerCommandPattern.test(text) || npmValidateAllCommandPattern.test(text)) {
+    fail(errors, `${entry.relPath} must not install packages or use aggregate npm validation`);
+  }
+}
+
+function validateRequiredCheckAuthority(errors) {
+  const sourceRoot = '_projects/cicd/repository-security-gate/_main';
+  const configPath = `${sourceRoot}/config/required-check-producers.json`;
+  const invariantPath = `${sourceRoot}/config/invariants.json`;
+  const generatorLockPath = `${sourceRoot}/config/protected-generator-lock.json`;
+  const promotionPlanPath = `${sourceRoot}/config/ruleset-promotion-plan.json`;
+  const expectedAppFiles = [
+    'package.json',
+    'package-lock.json',
+    'wrangler.jsonc',
+    'src/worker.mjs',
+    'src/producer-inventory.mjs',
+    'src/evidence-verifier.mjs',
+    'src/check-publisher.mjs',
+    'src/run-state.mjs',
+    'src/canonical-json.mjs'
+  ];
+  const requiredFiles = [
+    configPath,
+    invariantPath,
+    generatorLockPath,
+    promotionPlanPath,
+    `${sourceRoot}/schemas/producer-inventory.schema.json`,
+    `${sourceRoot}/schemas/terminal-receipt.schema.json`,
+    `${sourceRoot}/schemas/publication-receipt.schema.json`,
+    `${sourceRoot}/tools/required-check-terminal.cjs`,
+    `${sourceRoot}/tools/protected-toolkit-invariants.cjs`,
+    `${sourceRoot}/fixtures/protected-toolkit-invariants/negative-cases.json`,
+    ...expectedAppFiles.map((relative) => `${sourceRoot}/app/${relative}`)
+  ];
+  for (const relPath of requiredFiles) {
+    if (!existsRel(relPath)) fail(errors, `${relPath} is required by the protected required-check authority`);
+  }
+  if (requiredFiles.some((relPath) => !existsRel(relPath))) return;
+
+  let config;
+  let invariants;
+  let generatorLock;
+  let promotionPlan;
+  try {
+    config = readJson(configPath);
+    invariants = readJson(invariantPath);
+    generatorLock = readJson(generatorLockPath);
+    promotionPlan = readJson(promotionPlanPath);
+  } catch (error) {
+    fail(errors, `Required-check authority JSON must parse: ${error.message}`);
+    return;
   }
 
-  if (npmValidateAllCommandPattern.test(text)) {
-    fail(errors, `${entry.relPath} must use explicit validation commands instead of npm run validate:all`);
+  if (config.contract !== 'tk.security.required-check-authority/v1') {
+    fail(errors, `${configPath} contract must be tk.security.required-check-authority/v1`);
+  }
+  const expectedPermissions = {
+    actions: 'write',
+    checks: 'write',
+    statuses: 'write',
+    contents: 'read',
+    pull_requests: 'read',
+    metadata: 'read'
+  };
+  if (JSON.stringify(config.app?.permissions) !== JSON.stringify(expectedPermissions)) {
+    fail(errors, `${configPath} App permissions must equal the locked least-privilege set`);
+  }
+  if (
+    config.app?.name !== 'weijunswj-toolkit-security-gate' ||
+    config.app?.runtime !== 'cloudflare-workers' ||
+    config.app?.deployment_state !== 'source_only_not_deployed' ||
+    config.app?.integration_id !== null ||
+    config.app?.publisher_module !== 'src/check-publisher.mjs' ||
+    config.app?.commit_status_publication !== false
+  ) {
+    fail(errors, `${configPath} must retain the source-only App identity and promotion-time integration binding`);
+  }
+  if (JSON.stringify(config.app?.source_files) !== JSON.stringify(expectedAppFiles)) {
+    fail(errors, `${configPath} must enumerate the exact App source closure`);
+  }
+  if (JSON.stringify(config.app?.subscribed_events) !== JSON.stringify(['pull_request', 'workflow_run'])) {
+    fail(errors, `${configPath} must subscribe only to pull_request and workflow_run`);
+  }
+  const requiredBindings = [
+    'APP_ID',
+    'APP_INTEGRATION_ID',
+    'APP_PRIVATE_KEY',
+    'DISPATCH_SIGNING_PRIVATE_KEY',
+    'WEBHOOK_SECRET',
+    'ENROLLED_REPOSITORY_IDS',
+    'RUN_STATE'
+  ];
+  if (JSON.stringify(config.app?.runtime_binding_names) !== JSON.stringify(requiredBindings)) {
+    fail(errors, `${configPath} runtime binding names must equal the locked App identity and state closure`);
+  }
+  const expectedContexts = [
+    ['repository-security-gate', 'Repository security gate', 'repository-security-terminal'],
+    ['validate', 'Validate', 'validate-terminal'],
+    ['validate-toolkit', 'Validate Toolkit', 'validate-toolkit-terminal']
+  ];
+  const actualContexts = (config.contexts || []).map((item) => [item.id, item.name, item.terminal_job_id]);
+  if (JSON.stringify(actualContexts) !== JSON.stringify(expectedContexts)) {
+    fail(errors, `${configPath} must enumerate exactly the three locked contexts and terminal jobs`);
   }
 
-  const steps = workflowStepBlocks(text);
-  const validationStep = workflowStepText(steps, 'Run validation');
-  const commands = workflowRunCommands(validationStep);
-  if (commands.length !== explicitValidationWorkflowCommands.length ||
-      explicitValidationWorkflowCommands.some((command, index) => commands[index] !== command)) {
-    fail(errors, `${entry.relPath} must run the canonical explicit validation command list`);
+  const appSources = expectedAppFiles
+    .filter((relative) => relative.endsWith('.mjs'))
+    .map((relative) => ({
+      relative,
+      text: readText(`${sourceRoot}/app/${relative}`)
+    }));
+  const checkApiSources = appSources.filter(({ text }) => /\/check-runs(?:[/?'"`]|$)/.test(text));
+  const statusApiSources = appSources.filter(({ text }) => /\/statuses(?:[/?'"`]|$)|createCommitStatus/i.test(text));
+  if (checkApiSources.length !== 1 || checkApiSources[0].relative !== config.app.publisher_module) {
+    fail(errors, `${configPath} exactly one typed publisher must contain every Checks API route`);
+  }
+  if (statusApiSources.length !== 0) {
+    fail(errors, `${configPath} App source must not publish commit statuses`);
+  }
+  const worker = appSources.find(({ relative }) => relative === 'src/worker.mjs')?.text || '';
+  for (const token of [
+    'assertRepositoryEnrollment',
+    'auditInstallationPermissions',
+    'APP_INTEGRATION_ID',
+    'ENROLLED_REPOSITORY_IDS',
+    'claims.check_run_id',
+    'claims.workflow_sha',
+    'claims.workflow_ref',
+    'claims.run_id',
+    'claims.run_attempt'
+  ]) {
+    if (!worker.includes(token)) fail(errors, `${sourceRoot}/app/src/worker.mjs missing required authority binding: ${token}`);
+  }
+  if (/\/check-runs(?:[/?'"`]|$)|\/statuses(?:[/?'"`]|$)/.test(worker)) {
+    fail(errors, `${sourceRoot}/app/src/worker.mjs must not directly publish Checks or Statuses`);
+  }
+  const appPackage = readJson(`${sourceRoot}/app/package.json`);
+  if (appPackage.private !== true || Object.keys(appPackage.dependencies || {}).length !== 0) {
+    fail(errors, `${sourceRoot}/app/package.json must be private and have zero runtime dependencies`);
+  }
+  const wrangler = readJson(`${sourceRoot}/app/wrangler.jsonc`);
+  if (wrangler.workers_dev !== false || wrangler.observability?.enabled !== false) {
+    fail(errors, `${sourceRoot}/app/wrangler.jsonc must disable public workers.dev and observability`);
   }
 
-  if (/sync-repo-doc-contract\.cjs\s+--write/.test(text) || /sync-toolkit-projects\.cjs\s+--write/.test(text)) {
-    fail(errors, `${entry.relPath} must not write generated outputs`);
+  const schemaIds = [
+    ['producer-inventory.schema.json', 'tk.security.required-check-producer-inventory/v1'],
+    ['terminal-receipt.schema.json', 'tk.security.required-check-terminal-receipt/v1'],
+    ['publication-receipt.schema.json', 'tk.security.required-check-publication/v1']
+  ];
+  for (const [name, id] of schemaIds) {
+    const schemaPath = `${sourceRoot}/schemas/${name}`;
+    const schema = readJson(schemaPath);
+    if (schema.$id !== id || schema.additionalProperties !== false) {
+      fail(errors, `${schemaPath} must use ${id} and reject unknown fields`);
+    }
+  }
+
+  if (
+    invariants.contract !== 'tk.security.protected-toolkit-invariants/v1' ||
+    !Array.isArray(invariants.protected_invariants) ||
+    invariants.protected_invariants.length !== 7 ||
+    new Set(invariants.protected_invariants.map((item) => item.id)).size !== 7 ||
+    invariants.individual_timeout_seconds !== 5 ||
+    invariants.suite_timeout_seconds !== 40
+  ) {
+    fail(errors, `${invariantPath} must retain seven single-property bounded protected invariants`);
+  }
+  const harnessPath = `${sourceRoot}/${invariants.harness?.path || ''}`;
+  const negativePath = `${sourceRoot}/${invariants.negative_fixtures?.path || ''}`;
+  if (
+    !existsRel(harnessPath) ||
+    invariants.harness?.sha256 !== sha256File(harnessPath) ||
+    !existsRel(negativePath) ||
+    invariants.negative_fixtures?.sha256 !== sha256File(negativePath)
+  ) {
+    fail(errors, `${invariantPath} must bind the exact protected harness and negative-fixture closure`);
+  }
+  const requiredOrdinarySuites = [
+    'repo/tests/repository-security-gate.test.cjs',
+    'repo/tests/audit-fallback-risk.test.cjs',
+    'repo/tests/toolkit-agent-launch-lifecycle.test.cjs',
+    'repo/tests/source-watch-pr-workflow.test.cjs',
+    'repo/tests/agent-instruction-shims.test.cjs',
+    'repo/tests/check-project-source-updates.test.cjs',
+    'repo/tests/skill-routing.test.cjs'
+  ];
+  if (JSON.stringify((invariants.ordinary_required_ci || []).map((item) => item.suite)) !== JSON.stringify(requiredOrdinarySuites)) {
+    fail(errors, `${invariantPath} must map all seven retained ordinary required-CI suites`);
+  }
+
+  for (const item of generatorLock.generators || []) {
+    if (!existsRel(item.path) || item.sha256 !== sha256File(item.path)) {
+      fail(errors, `${generatorLockPath} digest drift for ${item.path || 'unknown generator'}`);
+    }
+  }
+  const dependencyLockPath = generatorLock.dependency_lock?.path || '';
+  if (
+    generatorLock.network !== false ||
+    generatorLock.candidate_writeback !== false ||
+    !dependencyLockPath ||
+    !existsRel(dependencyLockPath) ||
+    generatorLock.dependency_lock?.sha256 !== sha256File(dependencyLockPath)
+  ) {
+    fail(errors, `${generatorLockPath} must bind no-network, no-writeback generator authority and its dependency lock`);
+  }
+
+  const promotionContexts = (promotionPlan.atomic_additions || []).map((item) => item.context);
+  if (
+    promotionPlan.contract !== 'tk.security.required-check-ruleset-promotion/v1' ||
+    promotionPlan.state !== 'PROMOTION_BLOCKED_MISSING_INTEGRATION_ID' ||
+    promotionPlan.required_integration_id !== null ||
+    JSON.stringify(promotionContexts) !== JSON.stringify(expectedContexts.map((item) => item[1])) ||
+    (promotionPlan.atomic_additions || []).some((item) => item.integration_id !== null) ||
+    promotionPlan.apply_automatically !== false ||
+    promotionPlan.preserve?.deletion_protection !== true ||
+    promotionPlan.preserve?.non_fast_forward_protection !== true ||
+    promotionPlan.preserve?.pull_request_rule !== true ||
+    promotionPlan.preserve?.code_scanning?.tool !== 'CodeQL' ||
+    promotionPlan.preserve?.code_quality?.severity !== 'errors'
+  ) {
+    fail(errors, `${promotionPlanPath} must remain blocked pending one real integration ID and preserve existing protections`);
+  }
+}
+
+function validateProtectedSecurityAuthorityWorkflow(entry, text, errors) {
+  if (!/^\s{2}workflow_dispatch:\s*$/m.test(text)) fail(errors, `${entry.relPath} must accept only App workflow_dispatch`);
+  for (const trigger of ['pull_request', 'pull_request_target', 'push', 'schedule', 'workflow_run']) {
+    if (new RegExp(`^  ${trigger}:`, 'm').test(text)) fail(errors, `${entry.relPath} must not expose ${trigger}`);
+  }
+  if (!/^permissions:\s*\{\}\s*$/m.test(text)) fail(errors, `${entry.relPath} must deny permissions by default`);
+  const terminals = [
+    ['repository-security-terminal', 'TK-023 authority / repository security terminal'],
+    ['validate-terminal', 'TK-023 authority / validate terminal'],
+    ['validate-toolkit-terminal', 'TK-023 authority / validate toolkit terminal']
+  ];
+  for (const [jobId, name] of terminals) {
+    const start = text.indexOf(`  ${jobId}:\n`);
+    if (start < 0) {
+      fail(errors, `${entry.relPath} missing static terminal ${jobId}`);
+      continue;
+    }
+    const next = text.slice(start + 3).search(/^  [a-z0-9-]+:\s*$/m);
+    const block = next < 0 ? text.slice(start) : text.slice(start, start + 3 + next);
+    if (!block.includes(`name: ${name}`)) fail(errors, `${entry.relPath} ${jobId} name is not locked`);
+    if (!/^\s{4}if: \$\{\{ always\(\) \}\}\s*$/m.test(block)) fail(errors, `${entry.relPath} ${jobId} must use exactly always()`);
+    if (/continue-on-error:/.test(block)) fail(errors, `${entry.relPath} ${jobId} must not continue on error`);
+    if (!/required-check-terminal\.cjs terminal/.test(block)) fail(errors, `${entry.relPath} ${jobId} must use the protected terminal verifier`);
+  }
+  if (/pull_request_target|git\s+(?:commit|push)|contents:\s*write|statuses:\s*write|checks:\s*write/.test(text)) {
+    fail(errors, `${entry.relPath} contains forbidden trigger or publication/write authority`);
   }
 }
 
@@ -2134,11 +2401,12 @@ function validateWorkflows(errors) {
   const scheduledSourceWatchWorkflows = [];
   for (const entry of workflowFiles) {
     const text = fs.readFileSync(entry.fullPath, 'utf8');
-    const isAutoSyncGeneratedSurfacesWorkflow = entry.relPath === autoSyncGeneratedSurfacesWorkflowPath;
+    const isAutoSyncGeneratedSurfacesWorkflow = entry.relPath === retiredAutoSyncGeneratedSurfacesWorkflowPath;
     const isSourceWatchPlanWorkflow = entry.relPath === '.github/workflows/source-watch-plan.yml';
     const isSourceWatchPrWorkflow = entry.relPath === sourceWatchPrWorkflowPath;
-    const isReadOnlyValidationWorkflow = entry.relPath === '.github/workflows/validate.yml';
-    if (!/^permissions:\s*$/m.test(text)) fail(errors, `${entry.relPath} missing explicit permissions block`);
+    const isReadOnlyValidationWorkflow = ['.github/workflows/validate.yml', '.github/workflows/validate-toolkit.yml'].includes(entry.relPath);
+    const isProtectedSecurityAuthorityWorkflow = entry.relPath === '.github/workflows/repository-security-gate.yml';
+    if (!/^permissions:\s*(?:\{\})?\s*$/m.test(text)) fail(errors, `${entry.relPath} missing explicit permissions block`);
     if (/^\s*issues:\s*write\b/im.test(text)) fail(errors, `${entry.relPath} must not request issues: write`);
     if (/contents:\s*write/i.test(text) && !isAutoSyncGeneratedSurfacesWorkflow && !isSourceWatchPrWorkflow) fail(errors, `${entry.relPath} uses contents: write`);
     if (/pull-requests:\s*write/i.test(text) && !isSourceWatchPrWorkflow) fail(errors, `${entry.relPath} uses pull-requests: write`);
@@ -2155,6 +2423,7 @@ function validateWorkflows(errors) {
     if (isSourceWatchPrWorkflow) validateSourceWatchPrWorkflow(entry, text, errors);
     if (isAutoSyncGeneratedSurfacesWorkflow) validateAutoSyncGeneratedSurfacesWorkflow(entry, text, errors);
     if (isReadOnlyValidationWorkflow) validateReadOnlyValidationWorkflow(entry, text, errors);
+    if (isProtectedSecurityAuthorityWorkflow) validateProtectedSecurityAuthorityWorkflow(entry, text, errors);
     if (entry.relPath.endsWith('safe-source-update.yml')) {
       fail(errors, `${entry.relPath} has been retired; source update notifications must use PRs, not issues`);
     }
@@ -2167,6 +2436,9 @@ function validateWorkflows(errors) {
   }
   if (scheduledSourceWatchWorkflows.length !== 1 || scheduledSourceWatchWorkflows[0] !== sourceWatchPrWorkflowPath) {
     fail(errors, `${sourceWatchPrWorkflowPath} must be the only scheduled source-watch workflow`);
+  }
+  if (existsRel(retiredAutoSyncGeneratedSurfacesWorkflowPath)) {
+    fail(errors, `${retiredAutoSyncGeneratedSurfacesWorkflowPath} is retired; protected App-dispatched authority owns generated-surface fidelity`);
   }
 }
 
@@ -2508,6 +2780,7 @@ function runValidation() {
   validateStaleReferences(errors);
   validateSecretStrings(errors);
   validateRemovedWeeklyRadar(errors);
+  validateRequiredCheckAuthority(errors);
   validateWorkflows(errors);
   validateMarkdownLinks(errors);
   validateAdvisoryTargets(errors);

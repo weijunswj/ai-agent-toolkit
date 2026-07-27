@@ -1,0 +1,197 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tk.security.required-check-terminal-receipt/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "context_id",
+    "context_name",
+    "repository",
+    "repository_id",
+    "pr_number",
+    "head_sha",
+    "head_tree",
+    "base_sha",
+    "base_generation",
+    "authority_commit",
+    "authority_tree",
+    "workflow_path",
+    "workflow_digest",
+    "run_id",
+    "run_attempt",
+    "job_id",
+    "github_job_id",
+    "correlation_id",
+    "nonce",
+    "producer_inventory_digest",
+    "mandatory_prerequisites",
+    "oidc_attestation_id",
+    "report_state",
+    "status",
+    "failure_codes",
+    "receipt_digest"
+  ],
+  "properties": {
+    "schema": {
+      "const": "tk.security.required-check-terminal-receipt/v1"
+    },
+    "context_id": {
+      "enum": [
+        "repository-security-gate",
+        "validate",
+        "validate-toolkit"
+      ]
+    },
+    "context_name": {
+      "enum": [
+        "Repository security gate",
+        "Validate",
+        "Validate Toolkit"
+      ]
+    },
+    "repository": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+      "maxLength": 200
+    },
+    "repository_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "pr_number": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "head_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "head_tree": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "base_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "base_generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "authority_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "authority_tree": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "workflow_path": {
+      "const": ".github/workflows/repository-security-gate.yml"
+    },
+    "workflow_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "run_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "run_attempt": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "job_id": {
+      "enum": [
+        "repository-security-terminal",
+        "validate-terminal",
+        "validate-toolkit-terminal"
+      ]
+    },
+    "github_job_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "correlation_id": {
+      "type": "string",
+      "pattern": "^tk023:[0-9]+:[0-9]+:[0-9a-f]{40}:[a-z0-9-]{8,64}$",
+      "maxLength": 180
+    },
+    "nonce": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{22,128}$"
+    },
+    "producer_inventory_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "mandatory_prerequisites": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "job_id",
+          "result"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]{1,80}$"
+          },
+          "result": {
+            "enum": [
+              "success",
+              "failure",
+              "cancelled",
+              "skipped",
+              "neutral",
+              "timed_out",
+              "action_required",
+              "unknown"
+            ]
+          }
+        }
+      }
+    },
+    "oidc_attestation_id": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "report_state": {
+      "enum": [
+        "SECURITY_PASS",
+        "SECURITY_FINDINGS",
+        "SECURITY_GATE_UNVERIFIED",
+        "SECURITY_GATE_INFRA_BLOCKED",
+        "SECURITY_PROFILE_EXEMPT",
+        "VALIDATION_PASS",
+        "VALIDATION_FINDINGS",
+        "VALIDATION_UNVERIFIED",
+        "VALIDATION_INFRA_BLOCKED",
+        "EVIDENCE_MISSING"
+      ]
+    },
+    "status": {
+      "enum": [
+        "PASS",
+        "FAIL"
+      ]
+    },
+    "failure_codes": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "pattern": "^TK023_[A-Z0-9_]{3,80}$"
+      }
+    },
+    "receipt_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}

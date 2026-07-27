@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "policy_version": "1.2.1",
+  "policy_version": "1.3.0",
   "allowed_modes": [
     "pr",
     "full",
@@ -103,7 +103,7 @@
     "_projects/cicd/repository-security-gate/"
   ],
   "privileged_workflows": [
-    ".github/workflows/auto-sync-generated-surfaces.yml",
+    ".github/workflows/repository-security-gate.yml",
     ".github/workflows/source-watch-pr.yml"
   ],
   "suppression_max_days": 90,

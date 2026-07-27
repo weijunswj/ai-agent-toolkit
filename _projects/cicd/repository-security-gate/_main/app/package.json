@@ -1,0 +1,14 @@
+{
+  "name": "@weijunswj/toolkit-security-gate-app",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Source-only first-party GitHub App authority for Toolkit repository security checks.",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {},
+  "scripts": {
+    "check": "node --check src/worker.mjs && node --check src/producer-inventory.mjs && node --check src/evidence-verifier.mjs && node --check src/check-publisher.mjs && node --check src/run-state.mjs && node --check src/canonical-json.mjs"
+  }
+}

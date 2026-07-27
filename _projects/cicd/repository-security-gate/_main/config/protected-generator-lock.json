@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "lock_version": "1.0.0",
+  "runtime": {
+    "name": "node",
+    "major": 22,
+    "external_packages": []
+  },
+  "generators": [
+    {
+      "path": "repo/scripts/sync-agent-instruction-shims.cjs",
+      "sha256": "sha256:58a38c1f43c27a7189061b045ac9b2be952f7e1224602291960554dc4e20883d",
+      "arguments": [
+        "--write"
+      ]
+    },
+    {
+      "path": "repo/scripts/sync-repo-doc-contract.cjs",
+      "sha256": "sha256:4edf46f703599843422abb125c9055e2cdf9e391ab5b674bbbac8016440d4918",
+      "arguments": [
+        "--write"
+      ]
+    },
+    {
+      "path": "repo/scripts/sync-toolkit-projects.cjs",
+      "sha256": "sha256:17775bb1d4ab1e76811487382f7084c7b0c36d419ea2e8982dd9d47d0a25a92d",
+      "arguments": [
+        "--write"
+      ]
+    }
+  ],
+  "dependency_lock": {
+    "path": "_projects/cicd/repository-security-gate/_main/app/package-lock.json",
+    "sha256": "sha256:3993459c99246a8f589ebff449f3bcce4bb493899972e6cbbff55097438b28b0",
+    "purpose": "Locks the zero-third-party-dependency first-party authority package used by the protected producer and publication implementation."
+  },
+  "network": false,
+  "candidate_writeback": false
+}
