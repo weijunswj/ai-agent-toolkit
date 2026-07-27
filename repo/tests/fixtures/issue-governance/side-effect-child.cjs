@@ -85,7 +85,7 @@ async function main() {
   if (process.argv.length !== 3) fail('SIDE_EFFECT_CHILD_FAILURE:arguments');
   const entry = JSON.parse(Buffer.from(process.argv[2], 'base64url').toString('utf8'));
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'issue-governance-side-effect-'));
-  const cleanup = fs.rmSync.bind(fs);
+  const cleanup = fs.rmSync;
   let sentinelCalls = 0;
   let guardBlocked = false;
   let cleanupComplete = false;
@@ -104,10 +104,14 @@ async function main() {
       else throw error;
     }
     phase = 'cleanup';
-    cleanup(root, { recursive: true, force: true });
+    fs.rmSync = cleanup;
+    cleanup.call(fs, root, { recursive: true, force: true });
     cleanupComplete = !fs.existsSync(root);
   } catch (error) {
-    try { cleanup(root, { recursive: true, force: true }); } catch {}
+    try {
+      fs.rmSync = cleanup;
+      cleanup.call(fs, root, { recursive: true, force: true });
+    } catch {}
     const errorCode = error && typeof error.code === 'string' && /^[A-Z0-9_]+$/.test(error.code)
       ? error.code
       : 'UNCLASSIFIED';
