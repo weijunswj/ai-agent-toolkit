@@ -399,52 +399,70 @@ function validateWrapper(tokens, location) {
 
 const STATIC_LAUNCHERS = new Set(['command', 'timeout', 'nice']);
 const REJECTED_DELEGATORS = new Set(['nohup', 'setsid', 'chroot', 'stdbuf', 'sudo', 'doas', 'start']);
+const DURATION_RE = /^(?:\d+|\d+\.\d+)[smhd]?$/;
 
 function unwrapStaticLauncher(tokens, location) {
   const base = path.basename(tokens[0] || '').toLowerCase().replace(/\.exe$/, '');
   if (REJECTED_DELEGATORS.has(base)) throw new InventoryError('WF_LAUNCHER_REJECTED', location);
-  if (!STATIC_LAUNCHERS.has(base)) return tokens;
+  if (!STATIC_LAUNCHERS.has(base)) return { kind: 'ordinary', tokens };
   if (tokens.length < 2) throw new InventoryError('WF_LAUNCHER_MISSING_COMMAND', location);
-  if (base === 'command') {
-    let idx = 1;
-    while (idx < tokens.length && /^-[Vv]$/.test(tokens[idx])) idx += 1;
-    if (idx >= tokens.length) throw new InventoryError('WF_LAUNCHER_LOOKUP_MODE', location);
-    if (tokens[idx] === '--') idx += 1;
+  if (base === 'command') return unwrapCommand(tokens, location);
+  if (base === 'timeout') return unwrapTimeout(tokens, location);
+  if (base === 'nice') return unwrapNice(tokens, location);
+  return { kind: 'ordinary', tokens };
+}
+
+function unwrapCommand(tokens, location) {
+  let idx = 1;
+  if (tokens[idx] === '--') {
+    idx += 1;
     if (idx >= tokens.length) throw new InventoryError('WF_LAUNCHER_MISSING_COMMAND', location);
-    return tokens.slice(idx);
+    return { kind: 'execution', tokens: tokens.slice(idx) };
   }
-  if (base === 'timeout') {
-    let idx = 1;
-    while (idx < tokens.length && /^--?(?!$)/.test(tokens[idx])) {
-      const opt = tokens[idx];
-      if (opt === '--') { idx += 1; break; }
-      if (/^--(signal|kill-after)=/.test(opt)) { idx += 1; continue; }
-      if (/^--/.test(opt)) throw new InventoryError('WF_LAUNCHER_OPTION_UNSUPPORTED', location);
-      idx += 1;
-      if (['-s', '-k'].includes(opt) && idx < tokens.length) idx += 1;
-    }
-    if (idx >= tokens.length) throw new InventoryError('WF_LAUNCHER_MISSING_COMMAND', location);
-    const duration = tokens[idx];
-    if (/^\d/.test(duration)) idx += 1;
-    else if (!/^--?(?!$)/.test(duration)) throw new InventoryError('WF_LAUNCHER_DURATION', location);
-    if (idx >= tokens.length) throw new InventoryError('WF_LAUNCHER_MISSING_COMMAND', location);
-    return tokens.slice(idx);
+  if (tokens[idx] === '-p') throw new InventoryError('WF_COMMAND_P_REJECTED', location);
+  if (/^-[Vv]$/.test(tokens[idx])) {
+    if (tokens.length <= idx + 1) throw new InventoryError('WF_LAUNCHER_LOOKUP_MODE', location);
+    throw new InventoryError('WF_LAUNCHER_LOOKUP_MODE', location);
   }
-  if (base === 'nice') {
-    let idx = 1;
-    while (idx < tokens.length && /^--?(?!$)/.test(tokens[idx])) {
-      const opt = tokens[idx];
-      if (opt === '--') { idx += 1; break; }
+  if (/^-/.test(tokens[idx])) throw new InventoryError('WF_LAUNCHER_OPTION_UNSUPPORTED', location);
+  return { kind: 'execution', tokens: tokens.slice(idx) };
+}
+
+function unwrapTimeout(tokens, location) {
+  let idx = 1;
+  while (idx < tokens.length && /^--?(?!$)/.test(tokens[idx])) {
+    const opt = tokens[idx];
+    if (opt === '--') { idx += 1; break; }
+    if (/^--(signal|kill-after)=/.test(opt)) { idx += 1; continue; }
+    if (/^-[svk]$/.test(opt)) { idx += 1; if (idx < tokens.length) idx += 1; continue; }
+    if (/^--/.test(opt)) throw new InventoryError('WF_LAUNCHER_OPTION_UNSUPPORTED', location);
+    throw new InventoryError('WF_LAUNCHER_OPTION_UNSUPPORTED', location);
+  }
+  if (idx >= tokens.length) throw new InventoryError('WF_LAUNCHER_MISSING_COMMAND', location);
+  if (!DURATION_RE.test(tokens[idx])) throw new InventoryError('WF_LAUNCHER_DURATION', location);
+  idx += 1;
+  if (idx >= tokens.length) throw new InventoryError('WF_LAUNCHER_MISSING_COMMAND', location);
+  return { kind: 'execution', tokens: tokens.slice(idx) };
+}
+
+function unwrapNice(tokens, location) {
+  let idx = 1;
+  while (idx < tokens.length) {
+    const opt = tokens[idx];
+    if (opt === '--') { idx += 1; break; }
+    if (/^--/.test(opt)) {
       if (/^--adjustment=/.test(opt)) { idx += 1; continue; }
-      if (/^--/.test(opt)) throw new InventoryError('WF_LAUNCHER_OPTION_UNSUPPORTED', location);
-      idx += 1;
+      throw new InventoryError('WF_LAUNCHER_OPTION_UNSUPPORTED', location);
     }
-    if (idx >= tokens.length) throw new InventoryError('WF_LAUNCHER_MISSING_COMMAND', location);
-    if (tokens[idx] === '-n' && idx + 1 < tokens.length && /^-?\d+$/.test(tokens[idx + 1])) idx += 2;
-    if (idx >= tokens.length) throw new InventoryError('WF_LAUNCHER_MISSING_COMMAND', location);
-    return tokens.slice(idx);
+    break;
   }
-  return tokens;
+  if (idx >= tokens.length) throw new InventoryError('WF_LAUNCHER_MISSING_COMMAND', location);
+  if (tokens[idx] === '-n') {
+    if (idx + 1 >= tokens.length || !/^-?\d+$/.test(tokens[idx + 1])) throw new InventoryError('WF_LAUNCHER_OPTION_UNSUPPORTED', location);
+    idx += 2;
+  }
+  if (idx >= tokens.length) throw new InventoryError('WF_LAUNCHER_MISSING_COMMAND', location);
+  return { kind: 'execution', tokens: tokens.slice(idx) };
 }
 
 function structuralPath(value, checkouts, env, location) {
@@ -699,9 +717,16 @@ function walkAstWithParent(node, parent, visitor) {
   }
 }
 
-const REQUIRE_SAFE_PROPERTIES = new Set(['main', 'resolve']);
+const REQUIRE_SAFE_PROPERTIES = new Set(['main']);
 
 function checkLoaderAliases(ast, location) {
+  walkAst(ast, (node) => {
+    if (node.type === 'VariableDeclarator' && node.init && node.init.type === 'MemberExpression' &&
+        !node.init.computed && node.init.object && node.init.object.type === 'Identifier' &&
+        node.init.object.name === 'require') {
+      throw new InventoryError('WF_LOCAL_JS_LOADER_ALIAS', location);
+    }
+  });
   walkAstWithParent(ast, null, (node, parent) => {
     if (node.type === 'Identifier' && node.name === 'createRequire') {
       throw new InventoryError('WF_LOCAL_JS_LOADER_CREATION', location);
@@ -712,16 +737,46 @@ function checkLoaderAliases(ast, location) {
         (node.arguments[0].value === 'module' || node.arguments[0].value === 'node:module')) {
       throw new InventoryError('WF_LOCAL_JS_LOADER_CREATION', location);
     }
+    if (node.type === 'CallExpression' && isRequireChainLoad(node.callee, 'resolve')) {
+      throw new InventoryError('WF_LOCAL_JS_LOADER_CHAIN', location);
+    }
     if (node.type === 'Identifier' && node.name === 'require') {
       if (parent && parent.type === 'CallExpression' && parent.callee === node) return;
       if (parent && parent.type === 'MemberExpression' && parent.object === node &&
-          parent.computed === false && parent.property && parent.property.type === 'Identifier' &&
-          REQUIRE_SAFE_PROPERTIES.has(parent.property.name)) return;
+          parent.computed === false && parent.property && parent.property.type === 'Identifier') {
+        if (parent.property.name === 'main') return;
+        if (parent.property.name === 'resolve') {
+          if (!isRequireChainLoad(parent, 'resolve')) return;
+        }
+        throw new InventoryError('WF_LOCAL_JS_LOADER_ALIAS', location);
+      }
       if (parent && parent.type === 'MemberExpression' && parent.property === node &&
           parent.computed === false) return;
       throw new InventoryError('WF_LOCAL_JS_LOADER_ALIAS', location);
     }
   });
+}
+
+function isRequireChainLoad(callee, stopProperty) {
+  if (!callee || callee.type !== 'MemberExpression') return false;
+  if (callee.computed) return true;
+  if (callee.object && callee.object.type === 'Identifier' && callee.object.name === 'require') {
+    return !(callee.property && callee.property.type === 'Identifier' && callee.property.name === stopProperty);
+  }
+  if (callee.object && callee.object.type === 'MemberExpression') {
+    const inner = isRequireChainLoad(callee.object, stopProperty);
+    if (!inner) return !(callee.property && callee.property.type === 'Identifier' && callee.property.name === stopProperty);
+    return true;
+  }
+  return false;
+}
+
+function isRequireChain(node) {
+  if (!node || node.type !== 'MemberExpression') return false;
+  if (node.computed) return true;
+  if (node.object && node.object.type === 'Identifier' && node.object.name === 'require') return true;
+  if (node.object && node.object.type === 'MemberExpression') return isRequireChain(node.object);
+  return false;
 }
 
 function inspectLocalJavaScript(entry, actionRoot, context, location) {
@@ -873,12 +928,14 @@ function evaluatePackageScript(name, states, context, directory, root, location,
   context.activePackageScripts.add(key);
   const graph = parseCommandGraph(document.scripts[name], 'bash', location + ':' + name);
   const scriptStates = cloneStates(states);
-  const keyPrefix = key + '\0' + depth;
   const parents = new Map();
   scriptStates.forEach((state, stateIndex) => {
-    const childKey = keyPrefix + '\0' + String(stateIndex);
+    const outerToken = state.processParentKey;
+    const childKey = String(depth) + '\0' + String(stateIndex) + '\0' + Math.random().toString(36).slice(2, 8);
     state.processParentKey = childKey;
-    parents.set(childKey, cloneExecutionState(states[stateIndex]));
+    const snapshot = cloneExecutionState(states[stateIndex]);
+    snapshot._savedProcessParentKey = outerToken;
+    parents.set(childKey, snapshot);
     state.workingDirectory = packageRoot;
     state.locationStack = [];
   });
@@ -890,17 +947,19 @@ function evaluatePackageScript(name, states, context, directory, root, location,
   }
   for (const collection of [result.success, result.failure]) {
     collection.forEach((state) => {
-      const parent = parents.get(state.processParentKey);
-      if (parent) {
-        state.env = parent.env;
-        state.workingDirectory = parent.workingDirectory;
-        state.locationStack = parent.locationStack.slice();
-        state.pathIdentity = parent.pathIdentity;
-        state.setupGeneration = parent.setupGeneration;
-        state.capturedGeneration = parent.capturedGeneration;
-        state.installed = parent.installed;
+      const snapshot = parents.get(state.processParentKey);
+      if (snapshot) {
+        state.env = snapshot.env;
+        state.workingDirectory = snapshot.workingDirectory;
+        state.locationStack = snapshot.locationStack.slice();
+        state.pathIdentity = snapshot.pathIdentity;
+        state.setupGeneration = snapshot.setupGeneration;
+        state.capturedGeneration = snapshot.capturedGeneration;
+        for (const [installKey, installEntry] of snapshot.installed) {
+          if (!state.installed.has(installKey)) state.installed.set(installKey, installEntry);
+        }
+        state.processParentKey = snapshot._savedProcessParentKey;
       }
-      delete state.processParentKey;
     });
   }
   return result;
@@ -971,7 +1030,7 @@ function evaluateCommand(tokens, states, context, directory, root, shell, locati
     return childResult;
   }
   const unwrapped = unwrapStaticLauncher(tokens, location);
-  if (unwrapped !== tokens) return evaluateCommand(unwrapped, states, context, directory, root, shell, location, depth + 1);
+  if (unwrapped.kind !== 'ordinary') return evaluateCommand(unwrapped.tokens, states, context, directory, root, shell, location, depth + 1);
   const invocation = wrapperInvocation(tokens);
   if (invocation) {
     const success = [];

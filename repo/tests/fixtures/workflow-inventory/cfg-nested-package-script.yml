@@ -1,4 +1,4 @@
-name: CFG nested package-script parent mapping
+name: CFG nested package-script parent token oracle
 jobs:
   fixture:
     runs-on: ubuntu-latest
@@ -8,4 +8,4 @@ jobs:
         with:
           node-version: '22'
       - run: cd repo/tests/fixtures/workflow-inventory/packages/one && npm ci --ignore-scripts
-      - run: cd repo/tests/fixtures/workflow-inventory/packages/one/src && npm run nested
+      - run: cd repo/tests/fixtures/workflow-inventory/packages/one/src && npm run outer-mutate

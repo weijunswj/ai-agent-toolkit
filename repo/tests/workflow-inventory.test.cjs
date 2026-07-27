@@ -324,7 +324,25 @@ test('destructured createRequire from node:module is rejected', function() {
   }, /WF_LOCAL_JS_LOADER_CREATION/);
 });
 
-test('unwrapStaticLauncher rejects timeout with missing command', function() {
+test('unwrapStaticLauncher returns execution token for timeout with duration', function() {
+  const r = inventory.unwrapStaticLauncher(['timeout', '10', 'node', 'x.cjs'], 'fixture');
+  assert.equal(r.kind, 'execution');
+  assert.deepEqual(r.tokens, ['node', 'x.cjs']);
+});
+
+test('unwrapStaticLauncher returns execution token for timeout with s suffix', function() {
+  const r = inventory.unwrapStaticLauncher(['timeout', '10s', 'node', 'x.cjs'], 'fixture');
+  assert.equal(r.kind, 'execution');
+  assert.deepEqual(r.tokens, ['node', 'x.cjs']);
+});
+
+test('unwrapStaticLauncher returns ordinary for non-launcher', function() {
+  const r = inventory.unwrapStaticLauncher(['echo', 'hello'], 'fixture');
+  assert.equal(r.kind, 'ordinary');
+  assert.deepEqual(r.tokens, ['echo', 'hello']);
+});
+
+test('unwrapStaticLauncher rejects timeout missing command', function() {
   assert.throws(function() {
     inventory.unwrapStaticLauncher(['timeout'], 'fixture');
   }, /WF_LAUNCHER_MISSING_COMMAND/);
@@ -333,9 +351,9 @@ test('unwrapStaticLauncher rejects timeout with missing command', function() {
   }, /WF_LAUNCHER_MISSING_COMMAND/);
 });
 
-test('unwrapStaticLauncher rejects command -v lookup mode', function() {
+test('unwrapStaticLauncher rejects command lookup mode', function() {
   assert.throws(function() {
-    inventory.unwrapStaticLauncher(['command', '-v'], 'fixture');
+    inventory.unwrapStaticLauncher(['command', '-v', 'node'], 'fixture');
   }, /WF_LAUNCHER_LOOKUP_MODE/);
 });
 
@@ -344,18 +362,50 @@ test('unwrapStaticLauncher rejects nice with missing command', function() {
     inventory.unwrapStaticLauncher(['nice'], 'fixture');
   }, /WF_LAUNCHER_MISSING_COMMAND/);
   assert.throws(function() {
-    inventory.unwrapStaticLauncher(['nice', '-n', '-5'], 'fixture');
-  }, /WF_LAUNCHER_MISSING_COMMAND/);
+    inventory.unwrapStaticLauncher(['nice', '-n'], 'fixture');
+  }, /WF_LAUNCHER_OPTION_UNSUPPORTED/);
 });
 
-test('non-delegating unknown executable is not treated as a launcher', function() {
-  const tokens = inventory.unwrapStaticLauncher(['echo', 'hello'], 'fixture');
-  assert.deepEqual(tokens, ['echo', 'hello']);
+test('unwrapStaticLauncher rejects nice -n with non-integer value', function() {
+  assert.throws(function() {
+    inventory.unwrapStaticLauncher(['nice', '-n', 'abc', 'node', 'x.cjs'], 'fixture');
+  }, /WF_LAUNCHER_OPTION_UNSUPPORTED/);
 });
 
-test('static launcher times out over-recursion depth', function() {
-  const tokens = ['timeout', '10', 'command'];
-  assert.deepEqual(inventory.unwrapStaticLauncher(tokens, 'fixture'), ['command']);
+test('unwrapStaticLauncher returns execution for nice -n adjustment', function() {
+  const r = inventory.unwrapStaticLauncher(['nice', '-n', '5', 'node', 'x.cjs'], 'fixture');
+  assert.equal(r.kind, 'execution');
+  assert.deepEqual(r.tokens, ['node', 'x.cjs']);
+});
+
+test('unwrapStaticLauncher returns execution for nice -- terminator', function() {
+  const r = inventory.unwrapStaticLauncher(['nice', '--', 'node', 'x.cjs'], 'fixture');
+  assert.equal(r.kind, 'execution');
+  assert.deepEqual(r.tokens, ['node', 'x.cjs']);
+});
+
+test('unwrapStaticLauncher rejects timeout invalid duration', function() {
+  assert.throws(function() {
+    inventory.unwrapStaticLauncher(['timeout', 'abc', 'node', 'x.cjs'], 'fixture');
+  }, /WF_LAUNCHER_DURATION/);
+});
+
+test('unwrapStaticLauncher rejects timeout unknown option', function() {
+  assert.throws(function() {
+    inventory.unwrapStaticLauncher(['timeout', '--foreground', '10', 'node', 'x.cjs'], 'fixture');
+  }, /WF_LAUNCHER_OPTION_UNSUPPORTED/);
+});
+
+test('unwrapStaticLauncher rejects timeout unknown short option', function() {
+  assert.throws(function() {
+    inventory.unwrapStaticLauncher(['timeout', '-x', '10', 'node', 'x.cjs'], 'fixture');
+  }, /WF_LAUNCHER_OPTION_UNSUPPORTED/);
+});
+
+test('unwrapStaticLauncher returns execution for timeout -- terminator with duration', function() {
+  const r = inventory.unwrapStaticLauncher(['timeout', '--', '5', 'node', 'x.cjs'], 'fixture');
+  assert.equal(r.kind, 'execution');
+  assert.deepEqual(r.tokens, ['node', 'x.cjs']);
 });
 
 test('checkLoaderAliases rejects createRequire identifier', function() {
@@ -403,16 +453,16 @@ test('command dash-dash terminator unwraps correctly', function() {
   assert.equal(inventory.analyzeWorkflowFixture(fixture('cfg-launcher-command-term.yml')), true);
 });
 
-test('command -v lookup mode strips and the Node falls through without install', function() {
+test('command -v lookup mode throws lookup error', function() {
   assert.throws(function() {
-    inventory.analyzeWorkflowFixture(fixture('cfg-launcher-command-lookup-v.yml'));
-  }, /WF_NODE_WITHOUT_INSTALL/);
+    inventory.analyzeWorkflowFixture(fixture('cfg-launcher-command-lookup-lower-v.yml'));
+  }, /WF_LAUNCHER_LOOKUP_MODE/);
 });
 
-test('command -V lookup mode strips and the Node falls through without install', function() {
+test('command -V lookup mode throws lookup error', function() {
   assert.throws(function() {
-    inventory.analyzeWorkflowFixture(fixture('cfg-launcher-command-lookup-V.yml'));
-  }, /WF_NODE_WITHOUT_INSTALL/);
+    inventory.analyzeWorkflowFixture(fixture('cfg-launcher-command-lookup-upper-v.yml'));
+  }, /WF_LAUNCHER_LOOKUP_MODE/);
 });
 
 test('timeout -s SIGNAL option passes through correctly', function() {
@@ -482,7 +532,7 @@ test('unwrapStaticLauncher rejects rejected delegator setsid', function() {
 test('loader require.call indirection is rejected', function() {
   assert.throws(function() {
     inventory.analyzeWorkflowFixture(fixture('local-js-call-bind-workflow.yml'));
-  }, /WF_LOCAL_JS_LOADER_ALIAS/);
+  }, /WF_LOCAL_JS_LOADER_CHAIN/);
 });
 
 test('loader require.resolve is allowed as a non-executing safe property', function() {
@@ -493,21 +543,21 @@ test('checkLoaderAliases rejects require.call MemberExpression', function() {
   const src = 'require.call(null, "./x.cjs");';
   const acorn = require('acorn');
   const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
-  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_ALIAS/);
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_CHAIN/);
 });
 
 test('checkLoaderAliases rejects require.apply MemberExpression', function() {
   const src = 'require.apply(null, ["./x.cjs"]);';
   const acorn = require('acorn');
   const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
-  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_ALIAS/);
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_CHAIN/);
 });
 
 test('checkLoaderAliases rejects require.bind capture', function() {
-  const src = 'const r = require.bind(null);';
+  const src = 'require.bind(null);';
   const acorn = require('acorn');
   const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
-  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_ALIAS/);
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_CHAIN/);
 });
 
 test('checkLoaderAliases rejects destructured call from require', function() {
@@ -521,7 +571,7 @@ test('checkLoaderAliases rejects computed require member access', function() {
   const src = 'require["call"](null, "./x.cjs");';
   const acorn = require('acorn');
   const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
-  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_ALIAS/);
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_CHAIN/);
 });
 
 test('checkLoaderAliases allows require.main as a safe property', function() {
@@ -536,4 +586,53 @@ test('checkLoaderAliases allows require.resolve as a safe non-executing property
   const acorn = require('acorn');
   const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
   assert.doesNotThrow(function() { inventory.checkLoaderAliases(ast, 'fixture'); });
+});
+
+test('checkLoaderAliases rejects require.main.require chained load', function() {
+  const src = "require.main.require('./local.cjs');";
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_CHAIN/);
+});
+
+test('checkLoaderAliases rejects require.main computed chained load', function() {
+  const src = "require.main['require']('./local.cjs');";
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_CHAIN/);
+});
+
+test('checkLoaderAliases rejects require.resolve.call chained call', function() {
+  const src = "require.resolve.call(null, './local.cjs');";
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_CHAIN/);
+});
+
+test('checkLoaderAliases rejects require.resolve.apply chained call', function() {
+  const src = "require.resolve.apply(null, ['./local.cjs']);";
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_CHAIN/);
+});
+
+test('checkLoaderAliases rejects captured require.resolve', function() {
+  const src = 'const resolve = require.resolve;';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_ALIAS/);
+});
+
+test('checkLoaderAliases rejects captured require.main', function() {
+  const src = 'const main = require.main;';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_ALIAS/);
+});
+
+test('checkLoaderAliases rejects require.resolve.bind', function() {
+  const src = 'const r = require.resolve.bind(require);';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_CHAIN/);
 });

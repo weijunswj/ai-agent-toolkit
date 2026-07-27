@@ -887,187 +887,262 @@
     {
       "test_id": "LOCKED-175",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unwrapStaticLauncher rejects timeout with missing command"
+      "name": "unwrapStaticLauncher returns execution token for timeout with duration"
     },
     {
       "test_id": "LOCKED-176",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unwrapStaticLauncher rejects command -v lookup mode"
+      "name": "unwrapStaticLauncher returns execution token for timeout with s suffix"
     },
     {
       "test_id": "LOCKED-177",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unwrapStaticLauncher rejects nice with missing command"
+      "name": "unwrapStaticLauncher returns ordinary for non-launcher"
     },
     {
       "test_id": "LOCKED-178",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "non-delegating unknown executable is not treated as a launcher"
+      "name": "unwrapStaticLauncher rejects timeout missing command"
     },
     {
       "test_id": "LOCKED-179",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "static launcher times out over-recursion depth"
+      "name": "unwrapStaticLauncher rejects command lookup mode"
     },
     {
       "test_id": "LOCKED-180",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects createRequire identifier"
+      "name": "unwrapStaticLauncher rejects nice with missing command"
     },
     {
       "test_id": "LOCKED-181",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require used in assignment right-hand side"
+      "name": "unwrapStaticLauncher rejects nice -n with non-integer value"
     },
     {
       "test_id": "LOCKED-182",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases does not reject direct literal require call"
+      "name": "unwrapStaticLauncher returns execution for nice -n adjustment"
     },
     {
       "test_id": "LOCKED-183",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "nested npm run outer-parent key is not overwritten by inner invocation"
+      "name": "unwrapStaticLauncher returns execution for nice -- terminator"
     },
     {
       "test_id": "LOCKED-184",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "PATH mutation inside a package script is not inherited by the parent shell"
+      "name": "unwrapStaticLauncher rejects timeout invalid duration"
     },
     {
       "test_id": "LOCKED-185",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "environment mutation inside a package script is not inherited by the parent shell"
+      "name": "unwrapStaticLauncher rejects timeout unknown option"
     },
     {
       "test_id": "LOCKED-186",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "same-named wrapper verdict changes when directory leak selects wrong file"
+      "name": "unwrapStaticLauncher rejects timeout unknown short option"
     },
     {
       "test_id": "LOCKED-187",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "command dash-dash terminator unwraps correctly"
+      "name": "unwrapStaticLauncher returns execution for timeout -- terminator with duration"
     },
     {
       "test_id": "LOCKED-188",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "command -v lookup mode strips and the Node falls through without install"
+      "name": "checkLoaderAliases rejects createRequire identifier"
     },
     {
       "test_id": "LOCKED-189",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "command -V lookup mode strips and the Node falls through without install"
+      "name": "checkLoaderAliases rejects require used in assignment right-hand side"
     },
     {
       "test_id": "LOCKED-190",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "timeout -s SIGNAL option passes through correctly"
+      "name": "checkLoaderAliases does not reject direct literal require call"
     },
     {
       "test_id": "LOCKED-191",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "timeout --signal=SIGNAL long option passes through correctly"
+      "name": "nested npm run outer-parent key is not overwritten by inner invocation"
     },
     {
       "test_id": "LOCKED-192",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "timeout -k kill-after option passes through correctly"
+      "name": "PATH mutation inside a package script is not inherited by the parent shell"
     },
     {
       "test_id": "LOCKED-193",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "timeout -- terminator passes through correctly"
+      "name": "environment mutation inside a package script is not inherited by the parent shell"
     },
     {
       "test_id": "LOCKED-194",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "nice -n adjustment passes through correctly"
+      "name": "same-named wrapper verdict changes when directory leak selects wrong file"
     },
     {
       "test_id": "LOCKED-195",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "nice --adjustment= long option passes through correctly"
+      "name": "command dash-dash terminator unwraps correctly"
     },
     {
       "test_id": "LOCKED-196",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "nice -- terminator passes through correctly"
+      "name": "command -v lookup mode throws lookup error"
     },
     {
       "test_id": "LOCKED-197",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "rejected delegator nohup fails closed"
+      "name": "command -V lookup mode throws lookup error"
     },
     {
       "test_id": "LOCKED-198",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "rejected delegator sudo fails closed"
+      "name": "timeout -s SIGNAL option passes through correctly"
     },
     {
       "test_id": "LOCKED-199",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unsupported timeout --foreground option fails closed"
+      "name": "timeout --signal=SIGNAL long option passes through correctly"
     },
     {
       "test_id": "LOCKED-200",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unsupported nice --priority option fails closed"
+      "name": "timeout -k kill-after option passes through correctly"
     },
     {
       "test_id": "LOCKED-201",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unwrapStaticLauncher rejects rejected delegator nohup"
+      "name": "timeout -- terminator passes through correctly"
     },
     {
       "test_id": "LOCKED-202",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unwrapStaticLauncher rejects rejected delegator setsid"
+      "name": "nice -n adjustment passes through correctly"
     },
     {
       "test_id": "LOCKED-203",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "loader require.call indirection is rejected"
+      "name": "nice --adjustment= long option passes through correctly"
     },
     {
       "test_id": "LOCKED-204",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "loader require.resolve is allowed as a non-executing safe property"
+      "name": "nice -- terminator passes through correctly"
     },
     {
       "test_id": "LOCKED-205",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require.call MemberExpression"
+      "name": "rejected delegator nohup fails closed"
     },
     {
       "test_id": "LOCKED-206",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require.apply MemberExpression"
+      "name": "rejected delegator sudo fails closed"
     },
     {
       "test_id": "LOCKED-207",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require.bind capture"
+      "name": "unsupported timeout --foreground option fails closed"
     },
     {
       "test_id": "LOCKED-208",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects destructured call from require"
+      "name": "unsupported nice --priority option fails closed"
     },
     {
       "test_id": "LOCKED-209",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects computed require member access"
+      "name": "unwrapStaticLauncher rejects rejected delegator nohup"
     },
     {
       "test_id": "LOCKED-210",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases allows require.main as a safe property"
+      "name": "unwrapStaticLauncher rejects rejected delegator setsid"
     },
     {
       "test_id": "LOCKED-211",
       "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "loader require.call indirection is rejected"
+    },
+    {
+      "test_id": "LOCKED-212",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "loader require.resolve is allowed as a non-executing safe property"
+    },
+    {
+      "test_id": "LOCKED-213",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases rejects require.call MemberExpression"
+    },
+    {
+      "test_id": "LOCKED-214",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases rejects require.apply MemberExpression"
+    },
+    {
+      "test_id": "LOCKED-215",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases rejects require.bind capture"
+    },
+    {
+      "test_id": "LOCKED-216",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases rejects destructured call from require"
+    },
+    {
+      "test_id": "LOCKED-217",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases rejects computed require member access"
+    },
+    {
+      "test_id": "LOCKED-218",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases allows require.main as a safe property"
+    },
+    {
+      "test_id": "LOCKED-219",
+      "file": "repo/tests/workflow-inventory.test.cjs",
       "name": "checkLoaderAliases allows require.resolve as a safe non-executing property"
+    },
+    {
+      "test_id": "LOCKED-220",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases rejects require.main.require chained load"
+    },
+    {
+      "test_id": "LOCKED-221",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases rejects require.main computed chained load"
+    },
+    {
+      "test_id": "LOCKED-222",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases rejects require.resolve.call chained call"
+    },
+    {
+      "test_id": "LOCKED-223",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases rejects require.resolve.apply chained call"
+    },
+    {
+      "test_id": "LOCKED-224",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases rejects captured require.resolve"
+    },
+    {
+      "test_id": "LOCKED-225",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases rejects captured require.main"
+    },
+    {
+      "test_id": "LOCKED-226",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases rejects require.resolve.bind"
     }
   ]
 }

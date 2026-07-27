@@ -3,6 +3,7 @@
     "check": "bash wrapper.sh",
     "nested": "npm run check",
     "mutate-path": "export PATH=/untrusted",
-    "mutate-env": "export FIXTURE_MUTATED=1"
+    "mutate-env": "export FIXTURE_MUTATED=1",
+    "outer-mutate": "npm run nested && export PATH=/untrusted"
   }
 }

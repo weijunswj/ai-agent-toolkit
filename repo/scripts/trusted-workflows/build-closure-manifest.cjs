@@ -54,6 +54,27 @@ function walkWithParent(node, parent, visitor) {
   }
 }
 
+function walkWithParent(node, parent, visitor) {
+  if (!node || typeof node !== 'object') return;
+  visitor(node, parent);
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'start' || key === 'end') continue;
+    if (Array.isArray(value)) value.forEach((item) => walkWithParent(item, node, visitor));
+    else if (value && typeof value === 'object') walkWithParent(value, node, visitor);
+  }
+}
+
+function requireChainLoad(callee) {
+  if (!callee || callee.type !== 'MemberExpression') return false;
+  if (callee.computed) return true;
+  if (callee.object && callee.object.type === 'Identifier' && callee.object.name === 'require') {
+    if (callee.property && callee.property.type === 'Identifier' && callee.property.name === 'resolve') return false;
+    return true;
+  }
+  if (callee.object && callee.object.type === 'MemberExpression') return requireChainLoad(callee.object);
+  return false;
+}
+
 function resolveLiteral(fromFile, specifier) {
   if (!specifier.startsWith('.')) return null;
   if (!specifier.endsWith('.cjs') && !specifier.endsWith('.json')) die('TW_CLOSURE_EXTENSION', specifier);
@@ -90,6 +111,7 @@ function parseDependencies(file) {
           (node.arguments[0].value === 'module' || node.arguments[0].value === 'node:module')) {
         die('TW_CLOSURE_LOADER_CREATION', relative(file));
       }
+      if (node.type === 'CallExpression' && requireChainLoad(node.callee)) die('TW_CLOSURE_LOADER_CHAIN', relative(file));
       if (node.type === 'Identifier' && node.name === 'require') {
         if (parent && parent.type === 'CallExpression' && parent.callee === node) return;
         if (parent && parent.type === 'MemberExpression' && parent.object === node &&
