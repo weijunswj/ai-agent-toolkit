@@ -149,6 +149,29 @@ function directoryIdentitiesMatch(left, right) {
     );
 }
 
+function directoryIdentitySurvivedChildCreation(left, right) {
+  if (
+    !left
+    || !right
+    || !['dev', 'ino', 'mode', 'birthtime_ns'].every((key) =>
+      String(left[key]) === String(right[key])
+    )
+  ) {
+    return false;
+  }
+  let beforeLinks;
+  let afterLinks;
+  try {
+    beforeLinks = BigInt(left.nlink);
+    afterLinks = BigInt(right.nlink);
+  } catch {
+    return false;
+  }
+  if (process.platform === 'win32') return beforeLinks === afterLinks;
+  // POSIX filesystems may add exactly one parent link for the newly created child directory.
+  return afterLinks === beforeLinks || afterLinks === beforeLinks + 1n;
+}
+
 function pathExists(value) {
   try {
     fs.lstatSync(value);
@@ -214,7 +237,7 @@ function ensureOrdinaryDirectory(directoryPath, parentPath, write) {
   }
   const created = requireOrdinaryDirectory(directoryPath, 'repair journal directory');
   const parentAfter = requireOrdinaryDirectory(parentPath, 'repair journal parent');
-  if (!directoryIdentitiesMatch(parent.identity, parentAfter.identity)) {
+  if (!directoryIdentitySurvivedChildCreation(parent.identity, parentAfter.identity)) {
     throw journalError('journal-topology-invalid', 'The repair journal parent changed during directory creation');
   }
   fsyncDirectoryIfSupported(parentPath);
