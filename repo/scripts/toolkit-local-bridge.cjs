@@ -46,7 +46,7 @@ const {
 } = require('./toolkit-n8n-repair-journal.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.9.15';
+const BRIDGE_VERSION = '2.9.16';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -5363,6 +5363,17 @@ function requireKnownN8nGenerationAuxiliaries(recordPath, directoryNames) {
   }
 }
 
+function n8nTerminalFailureInspection(inspected, evidenceAuthority) {
+  const failed = n8nEvidenceEntry(evidenceAuthority, 'failed');
+  if (inspected.classification !== 'live-owned' || !failed?.present) return inspected;
+  return {
+    ...inspected,
+    classification: 'failed-owned',
+    failed: true,
+    safe_to_reconcile: true
+  };
+}
+
 function inspectN8nReplacementRecords(codexHome, parityIdentity, options = {}) {
   const parent = path.resolve(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills');
   if (!n8nPathExists(parent)) {
@@ -5453,10 +5464,13 @@ function inspectN8nReplacementRecords(codexHome, parityIdentity, options = {}) {
     ) {
       throw failClosedN8nRepair('recovery-evidence-invalid', 'An owned n8n Skills transaction record changed during authority construction');
     }
-    const inspected = inspectOwnedGeneration(recordPath, {
-      expectedParent: parent,
-      liveness: options.liveness
-    });
+    const inspected = n8nTerminalFailureInspection(
+      inspectOwnedGeneration(recordPath, {
+        expectedParent: parent,
+        liveness: options.liveness
+      }),
+      evidenceAuthority
+    );
     if (record.operation !== 'n8n-skills-plugin-repair') {
       throw failClosedN8nRepair('conflicting-recovery', 'A conflicting owned transaction targets the n8n Skills package cache');
     }
@@ -6353,6 +6367,30 @@ function requireExactN8nTreeBoundary(pluginRoot, expectedEvidence, expectedStatu
     );
   }
   return classified;
+}
+
+function requireExactN8nFinalWinner(entry, transaction, targetPath, label) {
+  try {
+    const classified = requireExactN8nTreeBoundary(
+      targetPath,
+      transaction.staged_evidence,
+      'healthy',
+      transaction.staged_plugin_directory_identity,
+      label
+    );
+    requireSelectedN8nVersionAgreement(entry, classified);
+    return {
+      classification: classified,
+      directory_identity: transaction.staged_plugin_directory_identity
+    };
+  } catch (error) {
+    const drift = failClosedN8nRepair(
+      'final-winner-drift',
+      `${label} is no longer the exact identity-bound healthy n8n Skills winner`
+    );
+    drift.cause = error;
+    throw drift;
+  }
 }
 
 function requireExactN8nParentBoundary(parentPath, expectedIdentity, label) {
@@ -7592,6 +7630,12 @@ function replaceSelectedN8nSkillsCache(
     );
     installedVerified = true;
     if (testHooks.afterN8nRepairVerification) testHooks.afterN8nRepairVerification({ generation });
+    requireExactN8nFinalWinner(
+      entry,
+      transaction,
+      targetPath,
+      'Verified n8n Skills winner before backup retirement'
+    );
     revalidateN8nEvidenceAuthority(transactionContext.evidenceAuthority, {
       boundary: 'before-backup-cleanup-authorization',
       testHooks
@@ -7616,6 +7660,12 @@ function replaceSelectedN8nSkillsCache(
       resuming: true,
       testHooks,
       beforeEachCleanupOperation() {
+        requireExactN8nFinalWinner(
+          entry,
+          transaction,
+          targetPath,
+          'Verified n8n Skills winner during backup retirement'
+        );
         revalidateN8nEvidenceAuthority(transactionContext.evidenceAuthority, {
           boundary: 'before-resumable-backup-cleanup-operation',
           testHooks
@@ -7627,6 +7677,12 @@ function replaceSelectedN8nSkillsCache(
         );
       }
     });
+    return requireExactN8nFinalWinner(
+      entry,
+      transaction,
+      targetPath,
+      'Verified n8n Skills winner after backup retirement'
+    );
   } catch (error) {
     if (installedVerified) {
       error.preserveOwnedStaging = true;
@@ -7953,7 +8009,7 @@ function reconcileSelectedN8nSkillsCache(entry, options = {}) {
       if (testHooks.beforeN8nRepairTransactionRegistration) {
         testHooks.beforeN8nRepairTransactionRegistration({ generation, pluginRoot, stagedPluginRoot });
       }
-      replaceSelectedN8nSkillsCache(
+      const replacement = replaceSelectedN8nSkillsCache(
         generation,
         entry,
         proposal,
@@ -7962,13 +8018,48 @@ function reconcileSelectedN8nSkillsCache(entry, options = {}) {
         testHooks,
         { activeLock: lock, preTransactionContext }
       );
-      const finalState = classifyN8nSkillsCompatibility(pluginRoot);
-      return {
-        ...finalState,
-        status: 'repaired',
-        repaired: true,
-        actions: stagedRepair.actions || []
-      };
+      try {
+        if (testHooks.beforeN8nRepairSuccessReturn) {
+          testHooks.beforeN8nRepairSuccessReturn({ generation, pluginRoot });
+        }
+        const finalStat = requireOrdinaryN8nDirectory(
+          pluginRoot,
+          'verified n8n Skills winner at the success return boundary'
+        );
+        if (!n8nDirectoryIdentitiesMatch(
+          replacement.directory_identity,
+          n8nDirectoryIdentity(finalStat)
+        )) {
+          throw failClosedN8nRepair(
+            'final-winner-drift',
+            'Verified n8n Skills winner identity changed at the success return boundary'
+          );
+        }
+        const finalState = classifyN8nSkillsCompatibility(pluginRoot);
+        requireSelectedN8nVersionAgreement(entry, finalState);
+        if (!n8nCompatibilityEvidenceMatches(stagedState, finalState, 'healthy')) {
+          throw failClosedN8nRepair(
+            'final-winner-drift',
+            `Verified n8n Skills winner changed at the success return boundary: ${finalState.reason || finalState.status}`
+          );
+        }
+        return {
+          ...finalState,
+          status: 'repaired',
+          repaired: true,
+          actions: stagedRepair.actions || []
+        };
+      } catch (error) {
+        error.preserveOwnedStaging = true;
+        if (error.code === 'final-winner-drift') throw error;
+        const drift = failClosedN8nRepair(
+          'final-winner-drift',
+          'Verified n8n Skills winner could not be proven at the success return boundary'
+        );
+        drift.cause = error;
+        drift.preserveOwnedStaging = true;
+        throw drift;
+      }
     });
   } finally {
     releaseN8nSkillsTargetLock(lock);
@@ -7977,38 +8068,48 @@ function reconcileSelectedN8nSkillsCache(entry, options = {}) {
 
 function repairThirdPartyCodexPluginHooks(options = {}) {
   const codexHome = path.resolve(options.codexHome || defaultCodexHome());
-  const windows = options.windows ?? process.platform === 'win32';
+  const platform = options.platform || process.platform;
+  const windows = options.windows ?? platform === 'win32';
   const write = Boolean(options.write);
+  if (!windows) {
+    return {
+      status: 'not-supported',
+      code: 'not-supported',
+      codex_home: codexHome,
+      write,
+      scanned: 0,
+      skipped: [],
+      repaired: [],
+      unchanged: [],
+      errors: []
+    };
+  }
   const currentPluginRoot = options.currentPluginRoot || runtimeCodexPluginRoot();
-  const pluginInspection = windows
-    ? (Object.prototype.hasOwnProperty.call(options, 'pluginList')
-      ? { ok: true, pluginList: options.pluginList, errors: [] }
-      : inspectCodexPluginList({ codexCommand: options.codexCommand || '' }))
-    : { ok: false, pluginList: [], errors: [] };
+  const pluginInspection = Object.prototype.hasOwnProperty.call(options, 'pluginList')
+    ? { ok: true, pluginList: options.pluginList, errors: [] }
+    : inspectCodexPluginList({ codexCommand: options.codexCommand || '' });
   let recoveryResult = { status: 'none' };
-  if (windows) {
-    try {
-      recoveryResult = recoverInterruptedN8nReplacement({
-        codexHome,
-        pluginInspection,
-        write,
-        compatibilityContract: options.compatibilityContract || {},
-        testHooks: options.testHooks || {}
-      });
-    } catch (error) {
-      return {
-        status: error.code === 'disabled' ? 'not-needed' : 'repair-failed',
-        code: error.code || 'recovery-failed',
-        codex_home: codexHome,
-        write,
-        scanned: 0,
-        skipped: [],
-        repaired: [],
-        unchanged: [],
-        errors: error.code === 'disabled' ? [] : [error.message],
-        selection_status: error.code === 'disabled' ? 'disabled' : (error.code || 'recovery-failed')
-      };
-    }
+  try {
+    recoveryResult = recoverInterruptedN8nReplacement({
+      codexHome,
+      pluginInspection,
+      write,
+      compatibilityContract: options.compatibilityContract || {},
+      testHooks: options.testHooks || {}
+    });
+  } catch (error) {
+    return {
+      status: error.code === 'disabled' ? 'not-needed' : 'repair-failed',
+      code: error.code || 'recovery-failed',
+      codex_home: codexHome,
+      write,
+      scanned: 0,
+      skipped: [],
+      repaired: [],
+      unchanged: [],
+      errors: error.code === 'disabled' ? [] : [error.message],
+      selection_status: error.code === 'disabled' ? 'disabled' : (error.code || 'recovery-failed')
+    };
   }
   let n8nDiscovery;
   try {
@@ -8039,8 +8140,8 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
     skipped: broadDiscovery.skipped
   };
   const result = {
-    status: windows ? 'not-needed' : 'not-supported',
-    code: windows ? 'not-needed' : 'not-supported',
+    status: 'not-needed',
+    code: 'not-needed',
     codex_home: codexHome,
     write,
     scanned: 0,
@@ -8049,8 +8150,6 @@ function repairThirdPartyCodexPluginHooks(options = {}) {
     unchanged: [],
     errors: []
   };
-
-  if (!windows) return result;
 
   const n8nCandidates = [...n8nDiscovery.roots];
   for (const entry of discovered.roots) {

@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.9.15",
+  "version": "2.9.16",
   "version_policy": "semver",
-  "version_notes": "Implements the DL-244-289-003 immutable schema-2 n8n repair journal, destructive-boundary revalidation, logical retirement, bounded checkpoints, v1 migration, and single-classification healthy path.",
+  "version_notes": "Revalidates the final installed n8n Skills winner through backup retirement, preserves exact terminal failure evidence on drift, resumes that failed generation deterministically, and exits unsupported platforms before Windows cache inspection.",
   "outputs": [
     {
       "kind": "curated",

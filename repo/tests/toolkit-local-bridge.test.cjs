@@ -56,7 +56,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.9.15';
+const expectedBridgeVersion = '2.9.16';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 const currentN8nManifestPath = path.join(
   repoRoot,
@@ -5878,6 +5878,59 @@ test('Windows n8n plugin hook repair removes bare shell hooks and verifies hook 
   assert.deepEqual(errors, []);
 });
 
+test('unsupported Linux and macOS exit before every Windows cache inspection or mutation', (t) => {
+  for (const platform of ['linux', 'darwin']) {
+    const root = tmpRoot();
+    const codexHome = path.join(root, `${platform}-home`);
+    const cacheRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io');
+    const skillsRoot = path.join(cacheRoot, 'n8n-skills');
+    fs.mkdirSync(cacheRoot, { recursive: true });
+    if (platform === 'linux') {
+      writeFile(skillsRoot, 'malformed Windows cache path\n');
+    } else {
+      const redirected = path.join(root, 'redirected-cache');
+      fs.mkdirSync(redirected);
+      writeFile(path.join(redirected, 'sentinel.txt'), 'must remain untouched\n');
+      try {
+        fs.symlinkSync(redirected, skillsRoot, process.platform === 'win32' ? 'junction' : 'dir');
+      } catch (error) {
+        t.skip(`environment cannot create the cache redirect fixture: ${error.code || 'unsupported'}`);
+        return;
+      }
+    }
+    const before = snapshotTree(root);
+    const options = { codexHome, platform, write: true };
+    for (const property of ['currentPluginRoot', 'pluginList', 'compatibilityContract', 'testHooks']) {
+      Object.defineProperty(options, property, {
+        enumerable: true,
+        get() {
+          const error = new Error(`unsupported ${platform} caller inspected ${property}`);
+          error.code = 'EACCES';
+          throw error;
+        }
+      });
+    }
+    const result = repairThirdPartyCodexPluginHooks(options);
+    assert.deepEqual(result, {
+      status: 'not-supported',
+      code: 'not-supported',
+      codex_home: path.resolve(codexHome),
+      write: true,
+      scanned: 0,
+      skipped: [],
+      repaired: [],
+      unchanged: [],
+      errors: []
+    }, platform);
+    assert.deepEqual(snapshotTree(root), before, `${platform} must not inspect or mutate the cache`);
+    assert.equal(
+      fs.existsSync(path.join(codexHome, '.ai-agent-toolkit-n8n-repair')),
+      false,
+      `${platform} must not create repair journal state`
+    );
+  }
+});
+
 test('Codex plugin hook reconciliation repairs only the exact supported n8n cache', () => {
   const root = tmpRoot();
   const codexHome = path.join(root, 'Codex Home With Spaces');
@@ -8106,6 +8159,126 @@ test('Codex n8n repair blocks stale approval and restores exact bytes after veri
   assert.match(failed.errors.join('\n'), /verification failed/i);
   assert.deepEqual(snapshotTree(rollbackRoot), before, 'verification failure must restore the exact original cache');
   assert.deepEqual(n8nTransactionArtifacts(rollbackRoot), [], 'rollback failure path leaves no stage, backup, marker, or lock residue');
+});
+
+test('Codex n8n final winner drift never becomes repaired and preserves recovery authority', () => {
+  const cases = [
+    {
+      label: 'invalid after post-install verification',
+      hook: 'afterN8nRepairVerification',
+      mutate({ pluginRoot }) {
+        fs.appendFileSync(path.join(pluginRoot, 'hooks', 'session-start.sh'), '# final winner drift\n', 'utf8');
+      }
+    },
+    {
+      label: 'missing before backup retirement',
+      hook: 'afterN8nRepairVerification',
+      mutate({ pluginRoot }) {
+        fs.rmSync(pluginRoot, { recursive: true });
+      }
+    },
+    {
+      label: 'redirected before backup retirement',
+      hook: 'afterN8nRepairVerification',
+      mutate({ pluginRoot }) {
+        const displaced = `${pluginRoot}.displaced-by-test`;
+        const redirected = `${pluginRoot}.redirect-target`;
+        fs.renameSync(pluginRoot, displaced);
+        fs.mkdirSync(redirected);
+        fs.symlinkSync(redirected, pluginRoot, process.platform === 'win32' ? 'junction' : 'dir');
+      }
+    },
+    {
+      label: 'changed after backup retirement intent',
+      hook: 'afterN8nBackupCleanupAuthorization',
+      mutate({ pluginRoot }) {
+        fs.appendFileSync(path.join(pluginRoot, 'unrelated.txt'), 'retirement intent drift\n', 'utf8');
+      }
+    },
+    {
+      label: 'changed before the success return',
+      hook: 'beforeN8nRepairSuccessReturn',
+      mutate({ pluginRoot }) {
+        fs.appendFileSync(path.join(pluginRoot, 'unrelated.txt'), 'success boundary drift\n', 'utf8');
+      }
+    }
+  ];
+
+  for (const fixture of cases) {
+    const root = tmpRoot();
+    const codexHome = path.join(root, fixture.label.replace(/[^A-Za-z0-9]+/g, '-'));
+    const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+    copyCurrentSupportedN8nPluginFixture(pluginRoot);
+    writeFile(path.join(pluginRoot, 'unrelated.txt'), 'preserve recovery evidence\n');
+    const result = repairThirdPartyCodexPluginHooks({
+      codexHome,
+      windows: true,
+      write: true,
+      pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+      testHooks: {
+        [fixture.hook](context) {
+          fixture.mutate({ ...context, pluginRoot });
+        }
+      }
+    });
+    assert.equal(result.status, 'repair-failed', fixture.label);
+    assert.equal(result.code, 'final-winner-drift', fixture.label);
+    assert.equal(result.repaired.length, 0, fixture.label);
+    assert.notDeepEqual(
+      n8nTransactionArtifacts(pluginRoot),
+      [],
+      `${fixture.label} must retain exact recovery evidence`
+    );
+  }
+});
+
+test('Codex n8n restart after final-winner drift recovers once and then remains healthy', () => {
+  const root = tmpRoot();
+  const codexHome = path.join(root, 'restart-after-final-drift');
+  const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copyCurrentSupportedN8nPluginFixture(pluginRoot);
+  let drifted = false;
+  const failed = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+    testHooks: {
+      afterN8nBackupCleanupAuthorization() {
+        drifted = true;
+        fs.appendFileSync(path.join(pluginRoot, 'unrelated.txt'), 'one-time final drift\n', 'utf8');
+      }
+    }
+  });
+  assert.equal(drifted, true);
+  assert.equal(failed.status, 'repair-failed');
+  assert.equal(failed.code, 'final-winner-drift');
+  assert.notDeepEqual(n8nTransactionArtifacts(pluginRoot), []);
+  const failedGeneration = readSingleN8nOwnedGeneration(pluginRoot);
+  assert.equal(
+    fs.existsSync(failedGeneration.recordPath.replace(/\.json$/, '.failed.json')),
+    true,
+    'the returned failure must leave exact terminal evidence that authorizes deterministic recovery'
+  );
+
+  const recovered = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
+  });
+  assert.equal(recovered.status, 'repaired', JSON.stringify(recovered, null, 2));
+  assert.deepEqual(n8nTransactionArtifacts(pluginRoot), []);
+
+  const healthy = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
+  });
+  assert.equal(healthy.status, 'not-needed');
+  assert.equal(healthy.repaired.length, 0);
+  assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'healthy');
 });
 
 test('Codex plugin identity discovery exposes moved n8n hook layouts and fails closed', () => {
