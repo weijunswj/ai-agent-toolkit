@@ -428,6 +428,8 @@ export async function recoverExpiredDispatches(env, options = {}) {
     ((installationId) => installationToken(env, installationId));
   const githubForToken = options.githubForToken || githubFacade;
   const discoverRun = options.discoverRun || discoverDispatchRun;
+  const processCompletedRun = options.processCompletedRun ||
+    ((payload) => processWorkflowRun(payload, env));
   const tokenCache = new Map();
   const failures = [];
   let reconciled = 0;
@@ -468,6 +470,33 @@ export async function recoverExpiredDispatches(env, options = {}) {
           correlation
         );
         if (discovered) {
+          if (discovered.status === 'completed') {
+            try {
+              await processCompletedRun({
+                action: 'completed',
+                installation: { id: installationId },
+                repository: { id: repositoryId, full_name: record.repository },
+                workflow_run: discovered
+              });
+              reconciled += 1;
+            } catch (error) {
+              const failureCode = /^TK023_[A-Z0-9_]+$/.test(String(error?.message || ''))
+                ? error.message
+                : 'TK023_COMPLETED_RUN_RECOVERY_FAILED';
+              await terminalizeDispatchFailure({
+                github,
+                state,
+                integrationId,
+                repositoryId,
+                owner,
+                repo,
+                correlation,
+                failureCode
+              });
+              terminalized += 1;
+            }
+            continue;
+          }
           await transitionState(state, correlation, 'dispatch_unknown', 'dispatched', {
             workflow_run_id: discovered.id
           });

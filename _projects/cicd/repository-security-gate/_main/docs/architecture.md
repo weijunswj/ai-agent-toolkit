@@ -119,8 +119,12 @@ Unknown outcomes are reconciled by exact protected-workflow run title, authority
 SHA, event, branch, and correlation discovery. Webhook redelivery performs this
 reconciliation immediately, while the configured five-minute Worker cron
 independently sweeps every enrolled repository Durable Object. A unique
-discovered run resumes; an ambiguous run fails closed; an undiscovered expired
-intent is sealed and terminalized as failure for all three contexts.
+discovered active run resumes. A uniquely discovered completed run enters the
+same terminal artifact, OIDC, authority, and current-head verification path as
+a completion webhook; if that evidence cannot validate, the recovery sweep
+seals and publishes fail-closed outcomes for all three contexts. An ambiguous
+run fails closed; an undiscovered expired intent is sealed and terminalized as
+failure for all three contexts.
 
 The protected workflow recursively inventories workflow and local action
 producers under strict file/job/edge/depth/matrix/name bounds. It rejects
