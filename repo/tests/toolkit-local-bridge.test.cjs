@@ -56,7 +56,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.9.18';
+const expectedBridgeVersion = '2.9.19';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 const currentN8nManifestPath = path.join(
   repoRoot,
@@ -6765,6 +6765,66 @@ test('Codex n8n verified-winner backup cleanup resumes after abrupt partial dele
   });
   assert.equal(retry.status, 'not-needed');
   assert.deepEqual(n8nTransactionArtifacts(pluginRoot), [], 'cleanup retry remains idempotent');
+});
+
+test('Codex n8n resumed backup cleanup preserves authority when the installed winner drifts', async () => {
+  const root = tmpRoot();
+  const codexHome = path.join(root, 'resumed-cleanup-winner-drift');
+  const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copyCurrentSupportedN8nPluginFixture(pluginRoot);
+  writeFile(path.join(pluginRoot, 'unrelated.txt'), 'winner before resumed cleanup drift\n');
+
+  await waitForAbruptChild(
+    spawnAbruptN8nRepair(pluginRoot, '1.0.2', 'afterN8nBackupCleanupAuthorization')
+  );
+  const owned = readSingleN8nOwnedGeneration(pluginRoot);
+  const transaction = readJson(n8nEvidencePath(owned.recordPath, 'n8n-replacement'));
+  const cleanupPhasePath = n8nEvidencePath(
+    owned.recordPath,
+    'n8n-replacement-phase-70-cleanup'
+  );
+  const backupBeforeRecovery = snapshotTree(transaction.backup_path);
+  const evidenceBeforeRecovery = fs.readFileSync(cleanupPhasePath);
+  let drifted = false;
+  let expectedAfterDrift = null;
+
+  assert.throws(
+    () => recoverInterruptedN8nReplacement({
+      codexHome,
+      pluginInspection: {
+        errors: [],
+        ok: true,
+        pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
+      },
+      write: true,
+      testHooks: {
+        beforeN8nEvidenceAuthorityRevalidation({ boundary }) {
+          if (drifted || boundary !== 'before-each-resumable-backup-cleanup-operation') return;
+          fs.appendFileSync(
+            path.join(pluginRoot, 'unrelated.txt'),
+            'winner drift during resumed cleanup\n',
+            'utf8'
+          );
+          drifted = true;
+          expectedAfterDrift = snapshotN8nRecoveryEvidence(pluginRoot, owned);
+        }
+      }
+    }),
+    (error) => error?.code === 'final-winner-drift'
+  );
+  assert.equal(drifted, true);
+  assert.deepEqual(snapshotTree(transaction.backup_path), backupBeforeRecovery);
+  assert.deepEqual(fs.readFileSync(cleanupPhasePath), evidenceBeforeRecovery);
+  assert.deepEqual(
+    snapshotN8nRecoveryEvidence(pluginRoot, owned),
+    expectedAfterDrift,
+    'resumed cleanup must preserve the exact backup and evidence after winner drift'
+  );
+  assert.equal(
+    fs.existsSync(n8nEvidencePath(owned.recordPath, 'completed')),
+    false,
+    'winner drift must not emit a false completed terminal marker'
+  );
 });
 
 test('Codex n8n resumed backup cleanup rejects and preserves residue outside its phase-70 manifest', async () => {

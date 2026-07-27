@@ -46,7 +46,7 @@ const {
 } = require('./toolkit-n8n-repair-journal.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.9.18';
+const BRIDGE_VERSION = '2.9.19';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -7119,6 +7119,7 @@ function cleanupN8nReplacementTransaction(initialTransaction, options = {}) {
   let transaction = initialTransaction;
   const { generation, validated } = transaction;
   const parityIdentity = options.parityIdentity;
+  const winnerEntry = options.winnerEntry || null;
   if (!parityIdentity) {
     throw failClosedN8nRepair('recovery-evidence-invalid', 'n8n Skills cleanup is missing its compatibility evidence authority');
   }
@@ -7199,8 +7200,24 @@ function cleanupN8nReplacementTransaction(initialTransaction, options = {}) {
             'before-each-resumable-backup-cleanup-operation',
             options.testHooks
           );
+          if (winnerEntry) {
+            requireExactN8nFinalWinner(
+              winnerEntry,
+              transaction.transaction,
+              validated.targetPath,
+              'Verified recovered n8n Skills winner during backup retirement'
+            );
+          }
         }
       }
+    );
+  }
+  if (winnerEntry) {
+    requireExactN8nFinalWinner(
+      winnerEntry,
+      transaction.transaction,
+      validated.targetPath,
+      'Verified recovered n8n Skills winner after backup retirement'
     );
   }
   transaction = advanceN8nTerminalEvidenceContext(
@@ -7579,9 +7596,10 @@ function recoverInterruptedN8nReplacement({
       transaction.evidenceAuthority,
       { boundary, testHooks }
     );
-    const cleanupTransaction = () => cleanupN8nReplacementTransaction(transaction, {
+    const cleanupTransaction = (cleanupOptions = {}) => cleanupN8nReplacementTransaction(transaction, {
       parityIdentity,
-      testHooks
+      testHooks,
+      ...cleanupOptions
     });
     if (
       (
@@ -7691,7 +7709,7 @@ function recoverInterruptedN8nReplacement({
       if (backupExists && !backupIsOriginal && phaseOrdinal < 70) {
         throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup does not match the approved original tree');
       }
-      cleanupTransaction();
+      cleanupTransaction({ winnerEntry: hostIdentity.selection });
       return { status: 'winner-preserved' };
     }
     if (isFailedPhase70OwnedWinnerDrift) {
