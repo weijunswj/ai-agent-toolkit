@@ -4,6 +4,8 @@
     "nested": "npm run check",
     "mutate-path": "export PATH=/untrusted",
     "mutate-env": "export FIXTURE_MUTATED=1",
-    "outer-mutate": "npm run nested && export PATH=/untrusted"
+    "outer-mutate": "npm run nested && export PATH=/untrusted",
+    "bash-nested": "npm run nested && node ../../../repo/tests/fixtures/workflow-inventory/node-target.cjs",
+    "pwsh-nested": "npm run nested; node ../../../repo/tests/fixtures/workflow-inventory/node-target.cjs"
   }
 }

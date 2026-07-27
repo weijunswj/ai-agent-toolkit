@@ -1,0 +1,7 @@
+name: JS resolve escape arg workflow
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fixture
+      - uses: ./repo/tests/fixtures/workflow-inventory/actions/local-js-resolve-escape-arg

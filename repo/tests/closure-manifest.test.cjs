@@ -74,7 +74,7 @@ test('closure parser rejects every dynamic or computed execution/import form', f
     ['eval.cjs', ["eval('1')", /TW_CLOSURE_DYNAMIC_CODE/]],
     ['function.cjs', ["new Function('return 1')", /TW_CLOSURE_DYNAMIC_CODE/]],
     ['package.cjs', ["require('acorn')", /TW_CLOSURE_PACKAGE_IMPORT/]],
-    ['loader.cjs', ["require.extensions = {}", /TW_CLOSURE_LOADER_ALIAS/]],
+    ['loader.cjs', ["require.extensions = {}", /TW_CLOSURE_LOADER_HOOK/]],
     ['loader-alias.cjs', ["const r = require;", /TW_CLOSURE_LOADER_ALIAS/]],
     ['loader-create-require.cjs', ["const { createRequire } = require('node:module');", /TW_CLOSURE_LOADER_CREATION/]],
     ['loader-pass-require.cjs', ["(function(fn){fn()})(require);", /TW_CLOSURE_LOADER_ALIAS/]],
@@ -83,7 +83,7 @@ test('closure parser rejects every dynamic or computed execution/import form', f
     ['loader-bind.cjs', ["const r = require.bind(null);", /TW_CLOSURE_LOADER_CHAIN/]],
     ['loader-computed.cjs', ["require[\"call\"](null, './local.cjs');", /TW_CLOSURE_LOADER_CHAIN/]],
     ['loader-destructure-call.cjs', ["const { call } = require;", /TW_CLOSURE_LOADER_ALIAS/]],
-    ['loader-safe-resolve.cjs', ["require.resolve('./local.cjs');", null]],
+    ['loader-safe-resolve.cjs', ["require.resolve('./protocol.cjs');", /TW_CLOSURE_ESCAPE/]],
     ['loader-safe-main.cjs', ["if (require.main === module) process.exit(0);", null]]
   ]);
   try {

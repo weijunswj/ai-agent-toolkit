@@ -433,8 +433,16 @@ function unwrapTimeout(tokens, location) {
   while (idx < tokens.length && /^--?(?!$)/.test(tokens[idx])) {
     const opt = tokens[idx];
     if (opt === '--') { idx += 1; break; }
-    if (/^--(signal|kill-after)=/.test(opt)) { idx += 1; continue; }
-    if (/^-[svk]$/.test(opt)) { idx += 1; if (idx < tokens.length) idx += 1; continue; }
+    if (/^--(signal|kill-after)=/.test(opt)) {
+      const eqIdx = opt.indexOf('=');
+      if (eqIdx < 0 || eqIdx + 1 >= opt.length) throw new InventoryError('WF_LAUNCHER_OPTION_UNSUPPORTED', location);
+      idx += 1; continue;
+    }
+    if (/^-[sk]$/.test(opt)) {
+      idx += 1;
+      if (idx >= tokens.length || !/^[A-Za-z0-9][A-Za-z0-9]*$/.test(tokens[idx])) throw new InventoryError('WF_LAUNCHER_OPTION_UNSUPPORTED', location);
+      idx += 1; continue;
+    }
     if (/^--/.test(opt)) throw new InventoryError('WF_LAUNCHER_OPTION_UNSUPPORTED', location);
     throw new InventoryError('WF_LAUNCHER_OPTION_UNSUPPORTED', location);
   }
@@ -451,7 +459,11 @@ function unwrapNice(tokens, location) {
     const opt = tokens[idx];
     if (opt === '--') { idx += 1; break; }
     if (/^--/.test(opt)) {
-      if (/^--adjustment=/.test(opt)) { idx += 1; continue; }
+      if (/^--adjustment=/.test(opt)) {
+        const eqIdx = opt.indexOf('=');
+        if (eqIdx < 0 || !/^-?\d+$/.test(opt.slice(eqIdx + 1))) throw new InventoryError('WF_LAUNCHER_OPTION_UNSUPPORTED', location);
+        idx += 1; continue;
+      }
       throw new InventoryError('WF_LAUNCHER_OPTION_UNSUPPORTED', location);
     }
     break;
@@ -717,17 +729,18 @@ function walkAstWithParent(node, parent, visitor) {
   }
 }
 
-const REQUIRE_SAFE_PROPERTIES = new Set(['main']);
+const REQUIRE_SAFE_PROPERTIES = new Set(['main', 'resolve']);
 
 function checkLoaderAliases(ast, location) {
+  const parentMap = new Map();
   walkAst(ast, (node) => {
-    if (node.type === 'VariableDeclarator' && node.init && node.init.type === 'MemberExpression' &&
-        !node.init.computed && node.init.object && node.init.object.type === 'Identifier' &&
-        node.init.object.name === 'require') {
-      throw new InventoryError('WF_LOCAL_JS_LOADER_ALIAS', location);
+    for (const [key, value] of Object.entries(node)) {
+      if (key === 'start' || key === 'end') continue;
+      if (Array.isArray(value)) value.forEach((item) => { if (item && typeof item === 'object') parentMap.set(item, node); });
+      else if (value && typeof value === 'object') parentMap.set(value, node);
     }
   });
-  walkAstWithParent(ast, null, (node, parent) => {
+  walkAst(ast, (node) => {
     if (node.type === 'Identifier' && node.name === 'createRequire') {
       throw new InventoryError('WF_LOCAL_JS_LOADER_CREATION', location);
     }
@@ -740,21 +753,62 @@ function checkLoaderAliases(ast, location) {
     if (node.type === 'CallExpression' && isRequireChainLoad(node.callee, 'resolve')) {
       throw new InventoryError('WF_LOCAL_JS_LOADER_CHAIN', location);
     }
+    if (node.type === 'MemberExpression' && !node.computed &&
+        node.object && node.object.type === 'Identifier' && node.object.name === 'require' &&
+        node.property && node.property.type === 'Identifier') {
+      const prop = node.property.name;
+      const parent = parentMap.get(node);
+      if (prop === 'main') {
+        if (isRequireMainCompare(node, parent)) return;
+        if (isRequireMainChain(node, parentMap)) return;
+        throw new InventoryError('WF_LOCAL_JS_LOADER_MAIN_CONTEXT', location);
+      }
+      if (prop === 'resolve') {
+        if (isRequireResolveCall(node, parent)) return;
+        throw new InventoryError('WF_LOCAL_JS_LOADER_RESOLVE_CONTEXT', location);
+      }
+    }
+  });
+  walkAstWithParent(ast, null, (node, parent) => {
     if (node.type === 'Identifier' && node.name === 'require') {
       if (parent && parent.type === 'CallExpression' && parent.callee === node) return;
       if (parent && parent.type === 'MemberExpression' && parent.object === node &&
-          parent.computed === false && parent.property && parent.property.type === 'Identifier') {
-        if (parent.property.name === 'main') return;
-        if (parent.property.name === 'resolve') {
-          if (!isRequireChainLoad(parent, 'resolve')) return;
-        }
-        throw new InventoryError('WF_LOCAL_JS_LOADER_ALIAS', location);
-      }
+          parent.computed === false && parent.property && parent.property.type === 'Identifier' &&
+          REQUIRE_SAFE_PROPERTIES.has(parent.property.name)) return;
       if (parent && parent.type === 'MemberExpression' && parent.property === node &&
           parent.computed === false) return;
       throw new InventoryError('WF_LOCAL_JS_LOADER_ALIAS', location);
     }
   });
+}
+
+function isRequireMainCompare(node, parent) {
+  if (!parent || parent.type !== 'BinaryExpression') return false;
+  if (parent.operator !== '===' && parent.operator !== '!==') return false;
+  const other = parent.left === node ? parent.right : parent.left;
+  return other && other.type === 'Identifier' && other.name === 'module';
+}
+
+function isRequireMainChain(node, parentMap) {
+  for (let current = node; current;) {
+    const parent = parentMap.get(current);
+    if (!parent) break;
+    if (parent.type === 'BinaryExpression' &&
+        (parent.operator === '===' || parent.operator === '!==')) {
+      const other = parent.left === current ? parent.right : parent.left;
+      if (other && other.type === 'Identifier' && other.name === 'module') return true;
+      return false;
+    }
+    current = parent;
+  }
+  return false;
+}
+
+function isRequireResolveCall(node, parent) {
+  if (!parent || parent.type !== 'CallExpression' || parent.callee !== node) return false;
+  if (parent.arguments.length !== 1) return false;
+  const arg = parent.arguments[0];
+  return arg && arg.type === 'Literal' && typeof arg.value === 'string';
 }
 
 function isRequireChainLoad(callee, stopProperty) {
@@ -764,9 +818,7 @@ function isRequireChainLoad(callee, stopProperty) {
     return !(callee.property && callee.property.type === 'Identifier' && callee.property.name === stopProperty);
   }
   if (callee.object && callee.object.type === 'MemberExpression') {
-    const inner = isRequireChainLoad(callee.object, stopProperty);
-    if (!inner) return !(callee.property && callee.property.type === 'Identifier' && callee.property.name === stopProperty);
-    return true;
+    return isRequireChainLoad(callee.object, stopProperty);
   }
   return false;
 }
@@ -900,21 +952,35 @@ function evaluateWrapper(invocation, states, context, directory, root, location,
     context.wrapperGraphs.set(activeKey, graph);
   }
   context.activeWrappers.add(activeKey);
-  const parents = new Map(states.map((state) => [state.processParentKey, state]));
-  const result = evaluateGraph(graph, cloneStates(states), context, directory, root, invocation.shell, location, depth + 1);
+  const scriptStates = cloneStates(states);
+  const parents = new Map();
+  scriptStates.forEach((state, stateIndex) => {
+    const outerToken = state.processParentKey;
+    const childKey = 'wr' + '\0' + String(depth) + '\0' + String(stateIndex) + '\0' + String(context.processTokenSeq++);
+    state.processParentKey = childKey;
+    const snapshot = cloneExecutionState(states[stateIndex]);
+    snapshot._savedProcessParentKey = outerToken;
+    parents.set(childKey, snapshot);
+  });
+  const result = evaluateGraph(graph, scriptStates, context, directory, root, invocation.shell, location, depth + 1);
+  context.activeWrappers.delete(activeKey);
   for (const collection of [result.success, result.failure]) {
     for (const state of collection) {
-      const parent = parents.get(state.processParentKey) || states[0];
-      state.env = new Map(parent.env);
-      state.workingDirectory = parent.workingDirectory;
-      state.locationStack = parent.locationStack.slice();
-      state.pathIdentity = parent.pathIdentity;
-      state.setupGeneration = parent.setupGeneration;
-      state.capturedGeneration = parent.capturedGeneration;
-      delete state.processParentKey;
+      const snapshot = parents.get(state.processParentKey);
+      if (snapshot) {
+        state.env = snapshot.env;
+        state.workingDirectory = snapshot.workingDirectory;
+        state.locationStack = snapshot.locationStack.slice();
+        state.pathIdentity = snapshot.pathIdentity;
+        state.setupGeneration = snapshot.setupGeneration;
+        state.capturedGeneration = snapshot.capturedGeneration;
+        for (const [installKey, installEntry] of snapshot.installed) {
+          if (!state.installed.has(installKey)) state.installed.set(installKey, installEntry);
+        }
+        state.processParentKey = snapshot._savedProcessParentKey;
+      }
     }
   }
-  context.activeWrappers.delete(activeKey);
   context.wrapperResults.set(memoKey, { success: cloneStates(result.success), failure: cloneStates(result.failure) });
   return result;
 }
@@ -931,7 +997,7 @@ function evaluatePackageScript(name, states, context, directory, root, location,
   const parents = new Map();
   scriptStates.forEach((state, stateIndex) => {
     const outerToken = state.processParentKey;
-    const childKey = String(depth) + '\0' + String(stateIndex) + '\0' + Math.random().toString(36).slice(2, 8);
+    const childKey = 'ps' + '\0' + String(depth) + '\0' + String(stateIndex) + '\0' + String(context.processTokenSeq++);
     state.processParentKey = childKey;
     const snapshot = cloneExecutionState(states[stateIndex]);
     snapshot._savedProcessParentKey = outerToken;
@@ -1332,7 +1398,8 @@ function analyzeJob(relative, jobId, job, privileged, repoRoot = REPO_ROOT) {
     wrapperGraphs: new Map(),
     wrapperResults: new Map(),
     activePackageScripts: new Set(),
-    executionNodes: 0
+    executionNodes: 0,
+    processTokenSeq: 0
   };
   return analyzeSteps(Array.isArray(job.steps) ? job.steps : [], [initialExecutionState()], context);
 }

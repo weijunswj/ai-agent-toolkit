@@ -1,0 +1,4 @@
+name: JS resolve escape capture
+runs:
+  using: node24
+  main: main.cjs

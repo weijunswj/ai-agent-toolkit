@@ -1,0 +1,4 @@
+name: JS main escape obj
+runs:
+  using: node24
+  main: main.cjs

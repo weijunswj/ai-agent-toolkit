@@ -606,33 +606,199 @@ test('checkLoaderAliases rejects require.resolve.call chained call', function() 
   const src = "require.resolve.call(null, './local.cjs');";
   const acorn = require('acorn');
   const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
-  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_CHAIN/);
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_RESOLVE_CONTEXT/);
 });
 
 test('checkLoaderAliases rejects require.resolve.apply chained call', function() {
   const src = "require.resolve.apply(null, ['./local.cjs']);";
   const acorn = require('acorn');
   const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
-  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_CHAIN/);
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_RESOLVE_CONTEXT/);
 });
 
 test('checkLoaderAliases rejects captured require.resolve', function() {
   const src = 'const resolve = require.resolve;';
   const acorn = require('acorn');
   const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
-  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_ALIAS/);
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_RESOLVE_CONTEXT/);
 });
 
 test('checkLoaderAliases rejects captured require.main', function() {
   const src = 'const main = require.main;';
   const acorn = require('acorn');
   const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
-  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_ALIAS/);
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_MAIN_CONTEXT/);
 });
 
 test('checkLoaderAliases rejects require.resolve.bind', function() {
   const src = 'const r = require.resolve.bind(require);';
   const acorn = require('acorn');
   const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
-  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_CHAIN/);
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_RESOLVE_CONTEXT/);
+});
+
+test('nested Bash wrapper preserves parent token for post-return Node oracle', function() {
+  assert.equal(inventory.analyzeWorkflowFixture(fixture('cfg-wrapper-bash-nested.yml')), true);
+});
+
+test('nested PowerShell wrapper preserves parent token for post-return Node oracle', function() {
+  assert.equal(inventory.analyzeWorkflowFixture(fixture('cfg-wrapper-pwsh-nested.yml')), true);
+});
+
+test('require.main passed as function argument is rejected', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('local-js-main-escape-arg-workflow.yml'));
+  }, /WF_LOCAL_JS_LOADER_MAIN_CONTEXT/);
+});
+
+test('require.main returned from function is rejected', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('local-js-main-escape-return-workflow.yml'));
+  }, /WF_LOCAL_JS_LOADER_MAIN_CONTEXT/);
+});
+
+test('require.main stored in object property is rejected', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('local-js-main-escape-obj-workflow.yml'));
+  }, /WF_LOCAL_JS_LOADER_MAIN_CONTEXT/);
+});
+
+test('require.resolve passed as function argument is rejected', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('local-js-resolve-escape-arg-workflow.yml'));
+  }, /WF_LOCAL_JS_LOADER_RESOLVE_CONTEXT/);
+});
+
+test('require.resolve captured into variable is rejected', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('local-js-resolve-escape-capture-workflow.yml'));
+  }, /WF_LOCAL_JS_LOADER_RESOLVE_CONTEXT/);
+});
+
+test('require.resolve called with .call is rejected', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('local-js-resolve-escape-call-workflow.yml'));
+  }, /WF_LOCAL_JS_LOADER_RESOLVE_CONTEXT/);
+});
+
+test('checkLoaderAliases rejects require.main as function argument', function() {
+  const src = 'const f = (m) => m.require("./x.cjs"); f(require.main);';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_MAIN_CONTEXT/);
+});
+
+test('checkLoaderAliases rejects require.main in array', function() {
+  const src = 'const arr = [require.main]; arr[0].require("./x.cjs");';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_MAIN_CONTEXT/);
+});
+
+test('checkLoaderAliases rejects require.main in return', function() {
+  const src = 'const f = () => require.main; f();';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_MAIN_CONTEXT/);
+});
+
+test('checkLoaderAliases rejects require.main in object property', function() {
+  const src = 'const obj = { main: require.main }; obj.main.require("./x.cjs");';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_MAIN_CONTEXT/);
+});
+
+test('checkLoaderAliases rejects require.main in conditional', function() {
+  const src = 'const v = true ? require.main : null;';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_MAIN_CONTEXT/);
+});
+
+test('checkLoaderAliases rejects require.main in spread', function() {
+  const src = 'fn(...[require.main]);';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_MAIN_CONTEXT/);
+});
+
+test('checkLoaderAliases rejects require.resolve as function argument', function() {
+  const src = 'const r = (x) => x("./a.cjs"); r(require.resolve);';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_RESOLVE_CONTEXT/);
+});
+
+test('checkLoaderAliases rejects require.resolve in object property', function() {
+  const src = 'const obj = { resolve: require.resolve }; obj.resolve("./a.cjs");';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_RESOLVE_CONTEXT/);
+});
+
+test('checkLoaderAliases passes require.resolve with optional chaining as safelisted property', function() {
+  const src = 'require?.resolve("./x.cjs");';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.doesNotThrow(function() { inventory.checkLoaderAliases(ast, 'fixture'); });
+});
+
+test('checkLoaderAliases rejects require.resolve with dynamic argument', function() {
+  const src = 'require.resolve(dynamicValue);';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_RESOLVE_CONTEXT/);
+});
+
+test('checkLoaderAliases rejects require.resolve with multiple arguments', function() {
+  const src = 'require.resolve("./a.cjs", "./b.cjs");';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_RESOLVE_CONTEXT/);
+});
+
+test('checkLoaderAliases admits require.main === module comparison', function() {
+  const src = 'require.main === module;';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.doesNotThrow(function() { inventory.checkLoaderAliases(ast, 'fixture'); });
+});
+
+test('checkLoaderAliases admits require.main !== module inequality', function() {
+  const src = 'require.main !== module;';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.doesNotThrow(function() { inventory.checkLoaderAliases(ast, 'fixture'); });
+});
+
+test('checkLoaderAliases admits require.resolve with static literal', function() {
+  const src = 'require.resolve("./x.cjs");';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.doesNotThrow(function() { inventory.checkLoaderAliases(ast, 'fixture'); });
+});
+
+test('unwrapTimeout rejects -v unknown short option', function() {
+  assert.throws(function() {
+    inventory.unwrapStaticLauncher(['timeout', '-v'], 'fixture');
+  }, /WF_LAUNCHER_OPTION_UNSUPPORTED/);
+});
+
+test('unwrapNice rejects --adjustment= with decimal value', function() {
+  assert.throws(function() {
+    inventory.unwrapStaticLauncher(['nice', '--adjustment=1.5', 'node', 'x.cjs'], 'fixture');
+  }, /WF_LAUNCHER_OPTION_UNSUPPORTED/);
+});
+
+test('unwrapNice rejects --adjustment= with empty value', function() {
+  assert.throws(function() {
+    inventory.unwrapStaticLauncher(['nice', '--adjustment=', 'node', 'x.cjs'], 'fixture');
+  }, /WF_LAUNCHER_OPTION_UNSUPPORTED/);
+});
+
+test('process token is deterministic across repeated analysis', function() {
+  const r1 = inventory.analyzeWorkflowFixture(fixture('cfg-success-install.yml'));
+  const r2 = inventory.analyzeWorkflowFixture(fixture('cfg-success-install.yml'));
+  assert.equal(r1, r2);
 });

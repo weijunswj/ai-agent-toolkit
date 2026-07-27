@@ -1143,6 +1143,136 @@
       "test_id": "LOCKED-226",
       "file": "repo/tests/workflow-inventory.test.cjs",
       "name": "checkLoaderAliases rejects require.resolve.bind"
+    },
+    {
+      "test_id": "LOCKED-227",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "nested Bash wrapper preserves parent token for post-return Node oracle"
+    },
+    {
+      "test_id": "LOCKED-228",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "nested PowerShell wrapper preserves parent token for post-return Node oracle"
+    },
+    {
+      "test_id": "LOCKED-229",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "require.main passed as function argument is rejected"
+    },
+    {
+      "test_id": "LOCKED-230",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "require.main returned from function is rejected"
+    },
+    {
+      "test_id": "LOCKED-231",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "require.main stored in object property is rejected"
+    },
+    {
+      "test_id": "LOCKED-232",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "require.resolve passed as function argument is rejected"
+    },
+    {
+      "test_id": "LOCKED-233",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "require.resolve captured into variable is rejected"
+    },
+    {
+      "test_id": "LOCKED-234",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "require.resolve called with .call is rejected"
+    },
+    {
+      "test_id": "LOCKED-235",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases rejects require.main as function argument"
+    },
+    {
+      "test_id": "LOCKED-236",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases rejects require.main in array"
+    },
+    {
+      "test_id": "LOCKED-237",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases rejects require.main in return"
+    },
+    {
+      "test_id": "LOCKED-238",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases rejects require.main in object property"
+    },
+    {
+      "test_id": "LOCKED-239",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases rejects require.main in conditional"
+    },
+    {
+      "test_id": "LOCKED-240",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases rejects require.main in spread"
+    },
+    {
+      "test_id": "LOCKED-241",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases rejects require.resolve as function argument"
+    },
+    {
+      "test_id": "LOCKED-242",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases rejects require.resolve in object property"
+    },
+    {
+      "test_id": "LOCKED-243",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases passes require.resolve with optional chaining as safelisted property"
+    },
+    {
+      "test_id": "LOCKED-244",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases rejects require.resolve with dynamic argument"
+    },
+    {
+      "test_id": "LOCKED-245",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases rejects require.resolve with multiple arguments"
+    },
+    {
+      "test_id": "LOCKED-246",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases admits require.main === module comparison"
+    },
+    {
+      "test_id": "LOCKED-247",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases admits require.main !== module inequality"
+    },
+    {
+      "test_id": "LOCKED-248",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "checkLoaderAliases admits require.resolve with static literal"
+    },
+    {
+      "test_id": "LOCKED-249",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "unwrapTimeout rejects -v unknown short option"
+    },
+    {
+      "test_id": "LOCKED-250",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "unwrapNice rejects --adjustment= with decimal value"
+    },
+    {
+      "test_id": "LOCKED-251",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "unwrapNice rejects --adjustment= with empty value"
+    },
+    {
+      "test_id": "LOCKED-252",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "process token is deterministic across repeated analysis"
     }
   ]
 }

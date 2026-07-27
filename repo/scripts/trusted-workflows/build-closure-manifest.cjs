@@ -64,15 +64,45 @@ function walkWithParent(node, parent, visitor) {
   }
 }
 
-function requireChainLoad(callee) {
+function isRequireChainLoad(callee, stopProperty) {
   if (!callee || callee.type !== 'MemberExpression') return false;
   if (callee.computed) return true;
   if (callee.object && callee.object.type === 'Identifier' && callee.object.name === 'require') {
-    if (callee.property && callee.property.type === 'Identifier' && callee.property.name === 'resolve') return false;
-    return true;
+    return !(callee.property && callee.property.type === 'Identifier' && callee.property.name === stopProperty);
   }
-  if (callee.object && callee.object.type === 'MemberExpression') return requireChainLoad(callee.object);
+  if (callee.object && callee.object.type === 'MemberExpression') {
+    return isRequireChainLoad(callee.object, stopProperty);
+  }
   return false;
+}
+
+function isRequireMainCompare(node, parent) {
+  if (!parent || parent.type !== 'BinaryExpression') return false;
+  if (parent.operator !== '===' && parent.operator !== '!==') return false;
+  const other = parent.left === node ? parent.right : parent.left;
+  return other && other.type === 'Identifier' && other.name === 'module';
+}
+
+function isRequireMainChain(node, parentMap) {
+  for (let current = node; current;) {
+    const parent = parentMap.get(current);
+    if (!parent) break;
+    if (parent.type === 'BinaryExpression' &&
+        (parent.operator === '===' || parent.operator === '!==')) {
+      const other = parent.left === current ? parent.right : parent.left;
+      if (other && other.type === 'Identifier' && other.name === 'module') return true;
+      return false;
+    }
+    current = parent;
+  }
+  return false;
+}
+
+function isRequireResolveCall(node, parent) {
+  if (!parent || parent.type !== 'CallExpression' || parent.callee !== node) return false;
+  if (parent.arguments.length !== 1) return false;
+  const arg = parent.arguments[0];
+  return arg && arg.type === 'Literal' && typeof arg.value === 'string';
 }
 
 function resolveLiteral(fromFile, specifier) {
@@ -89,6 +119,14 @@ function parseDependencies(file) {
   const source = fs.readFileSync(file, 'utf8');
   const ast = acorn.parse(source, { ecmaVersion: 2022, sourceType: 'script', allowHashBang: true });
   const deps = [];
+  const parentMap = new Map();
+  walk(ast, (node) => {
+    for (const [key, value] of Object.entries(node)) {
+      if (key === 'start' || key === 'end') continue;
+      if (Array.isArray(value)) value.forEach((item) => { if (item && typeof item === 'object') parentMap.set(item, node); });
+      else if (value && typeof value === 'object') parentMap.set(value, node);
+    }
+  });
   walk(ast, (node) => {
     if (node.type === 'ImportExpression') die('TW_CLOSURE_DYNAMIC_IMPORT', relative(file));
     if (node.type === 'CallExpression' && node.callee && node.callee.type === 'Identifier' &&
@@ -103,25 +141,37 @@ function parseDependencies(file) {
         node.callee.property && ['register', 'registerHooks'].includes(node.callee.property.name)) {
       die('TW_CLOSURE_LOADER_HOOK', relative(file));
     }
-    walkWithParent(ast, null, (node, parent) => {
-      if (node.type === 'Identifier' && node.name === 'createRequire') die('TW_CLOSURE_LOADER_CREATION', relative(file));
-      if (node.type === 'CallExpression' && node.callee && node.callee.type === 'Identifier' &&
-          node.callee.name === 'require' && node.arguments.length === 1 &&
-          node.arguments[0].type === 'Literal' && typeof node.arguments[0].value === 'string' &&
-          (node.arguments[0].value === 'module' || node.arguments[0].value === 'node:module')) {
-        die('TW_CLOSURE_LOADER_CREATION', relative(file));
+    if (node.type === 'CallExpression' && isRequireChainLoad(node.callee, 'resolve')) {
+      die('TW_CLOSURE_LOADER_CHAIN', relative(file));
+    }
+    if (node.type === 'Identifier' && node.name === 'createRequire') die('TW_CLOSURE_LOADER_CREATION', relative(file));
+    if (node.type === 'CallExpression' && node.callee && node.callee.type === 'Identifier' &&
+        node.callee.name === 'require' && node.arguments.length === 1 &&
+        node.arguments[0].type === 'Literal' && typeof node.arguments[0].value === 'string' &&
+        (node.arguments[0].value === 'module' || node.arguments[0].value === 'node:module')) {
+      die('TW_CLOSURE_LOADER_CREATION', relative(file));
+    }
+    if (node.type === 'MemberExpression' && !node.computed &&
+        node.object && node.object.type === 'Identifier' && node.object.name === 'require' &&
+        node.property && node.property.type === 'Identifier') {
+      const prop = node.property.name;
+      const parent = parentMap.get(node);
+      if (prop === 'main') {
+        if (isRequireMainCompare(node, parent) || isRequireMainChain(node, parentMap)) return;
+        die('TW_CLOSURE_LOADER_MAIN_CONTEXT', relative(file));
       }
-      if (node.type === 'CallExpression' && requireChainLoad(node.callee)) die('TW_CLOSURE_LOADER_CHAIN', relative(file));
-      if (node.type === 'Identifier' && node.name === 'require') {
-        if (parent && parent.type === 'CallExpression' && parent.callee === node) return;
-        if (parent && parent.type === 'MemberExpression' && parent.object === node &&
-            parent.computed === false && parent.property && parent.property.type === 'Identifier' &&
-            (parent.property.name === 'main' || parent.property.name === 'resolve')) return;
-        if (parent && parent.type === 'MemberExpression' && parent.property === node &&
-            parent.computed === false) return;
-        die('TW_CLOSURE_LOADER_ALIAS', relative(file));
+      if (prop === 'resolve') {
+        if (isRequireResolveCall(node, parent)) {
+          const arg = parent.arguments[0];
+          if (!arg.value.startsWith('.')) die('TW_CLOSURE_PACKAGE_IMPORT', arg.value);
+          const resolved = resolveLiteral(file, arg.value);
+          if (!resolved) die('TW_CLOSURE_LOADER_RESOLVE_CONTEXT', relative(file));
+          deps.push(resolved);
+          return;
+        }
+        die('TW_CLOSURE_LOADER_RESOLVE_CONTEXT', relative(file));
       }
-    });
+    }
     if (node.type !== 'CallExpression') return;
     if (node.callee && node.callee.type === 'MemberExpression' &&
         node.callee.object && node.callee.object.name === 'module' &&
@@ -136,6 +186,17 @@ function parseDependencies(file) {
     if (!resolved) die('TW_CLOSURE_PACKAGE_IMPORT', specifier);
     if (resolved.endsWith('.json') && !specifier.endsWith('.json')) die('TW_CLOSURE_JSON_UNLISTED', specifier);
     deps.push(resolved);
+  });
+  walkWithParent(ast, null, (node, parent) => {
+    if (node.type === 'Identifier' && node.name === 'require') {
+      if (parent && parent.type === 'CallExpression' && parent.callee === node) return;
+      if (parent && parent.type === 'MemberExpression' && parent.object === node &&
+          parent.computed === false && parent.property && parent.property.type === 'Identifier' &&
+          parent.property.name === 'main') return;
+      if (parent && parent.type === 'MemberExpression' && parent.property === node &&
+          parent.computed === false) return;
+      die('TW_CLOSURE_LOADER_ALIAS', relative(file));
+    }
   });
   return [...new Set(deps)].sort();
 }
