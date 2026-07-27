@@ -74,16 +74,24 @@ test('closure parser rejects every dynamic or computed execution/import form', f
     ['eval.cjs', ["eval('1')", /TW_CLOSURE_DYNAMIC_CODE/]],
     ['function.cjs', ["new Function('return 1')", /TW_CLOSURE_DYNAMIC_CODE/]],
     ['package.cjs', ["require('acorn')", /TW_CLOSURE_PACKAGE_IMPORT/]],
-    ['loader.cjs', ["require.extensions = {}", /TW_CLOSURE_LOADER_HOOK/]],
+    ['loader.cjs', ["require.extensions = {}", /TW_CLOSURE_LOADER_ALIAS/]],
     ['loader-alias.cjs', ["const r = require;", /TW_CLOSURE_LOADER_ALIAS/]],
     ['loader-create-require.cjs', ["const { createRequire } = require('node:module');", /TW_CLOSURE_LOADER_CREATION/]],
-    ['loader-pass-require.cjs', ["(function(fn){fn()})(require);", /TW_CLOSURE_LOADER_ALIAS/]]
+    ['loader-pass-require.cjs', ["(function(fn){fn()})(require);", /TW_CLOSURE_LOADER_ALIAS/]],
+    ['loader-call.cjs', ["require.call(null, './local.cjs');", /TW_CLOSURE_LOADER_ALIAS/]],
+    ['loader-apply.cjs', ["require.apply(null, ['./local.cjs']);", /TW_CLOSURE_LOADER_ALIAS/]],
+    ['loader-bind.cjs', ["const r = require.bind(null);", /TW_CLOSURE_LOADER_ALIAS/]],
+    ['loader-computed.cjs', ["require[\"call\"](null, './local.cjs');", /TW_CLOSURE_LOADER_ALIAS/]],
+    ['loader-destructure-call.cjs', ["const { call } = require;", /TW_CLOSURE_LOADER_ALIAS/]],
+    ['loader-safe-resolve.cjs', ["require.resolve('./local.cjs');", null]],
+    ['loader-safe-main.cjs', ["if (require.main === module) process.exit(0);", null]]
   ]);
   try {
     for (const [name, definition] of cases) {
       const file = path.join(root, name);
       fs.writeFileSync(file, definition[0]);
-      assert.throws(function() { builder.parseDependencies(file); }, definition[1], name);
+      if (definition[1]) assert.throws(function() { builder.parseDependencies(file); }, definition[1], name);
+      else assert.doesNotThrow(function() { builder.parseDependencies(file); }, name);
     }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

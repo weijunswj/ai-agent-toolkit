@@ -1,5 +1,8 @@
 {
   "scripts": {
-    "check": "bash wrapper.sh"
+    "check": "bash wrapper.sh",
+    "nested": "npm run check",
+    "mutate-path": "export PATH=/untrusted",
+    "mutate-env": "export FIXTURE_MUTATED=1"
   }
 }

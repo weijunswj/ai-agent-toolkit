@@ -1,0 +1,4 @@
+name: JS call bind fixture
+runs:
+  using: node24
+  main: main.cjs

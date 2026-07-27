@@ -398,14 +398,18 @@ function validateWrapper(tokens, location) {
 }
 
 const STATIC_LAUNCHERS = new Set(['command', 'timeout', 'nice']);
+const REJECTED_DELEGATORS = new Set(['nohup', 'setsid', 'chroot', 'stdbuf', 'sudo', 'doas', 'start']);
 
 function unwrapStaticLauncher(tokens, location) {
   const base = path.basename(tokens[0] || '').toLowerCase().replace(/\.exe$/, '');
+  if (REJECTED_DELEGATORS.has(base)) throw new InventoryError('WF_LAUNCHER_REJECTED', location);
   if (!STATIC_LAUNCHERS.has(base)) return tokens;
   if (tokens.length < 2) throw new InventoryError('WF_LAUNCHER_MISSING_COMMAND', location);
   if (base === 'command') {
     let idx = 1;
     while (idx < tokens.length && /^-[Vv]$/.test(tokens[idx])) idx += 1;
+    if (idx >= tokens.length) throw new InventoryError('WF_LAUNCHER_LOOKUP_MODE', location);
+    if (tokens[idx] === '--') idx += 1;
     if (idx >= tokens.length) throw new InventoryError('WF_LAUNCHER_MISSING_COMMAND', location);
     return tokens.slice(idx);
   }
@@ -413,20 +417,30 @@ function unwrapStaticLauncher(tokens, location) {
     let idx = 1;
     while (idx < tokens.length && /^--?(?!$)/.test(tokens[idx])) {
       const opt = tokens[idx];
+      if (opt === '--') { idx += 1; break; }
+      if (/^--(signal|kill-after)=/.test(opt)) { idx += 1; continue; }
+      if (/^--/.test(opt)) throw new InventoryError('WF_LAUNCHER_OPTION_UNSUPPORTED', location);
       idx += 1;
       if (['-s', '-k'].includes(opt) && idx < tokens.length) idx += 1;
     }
     if (idx >= tokens.length) throw new InventoryError('WF_LAUNCHER_MISSING_COMMAND', location);
     const duration = tokens[idx];
     if (/^\d/.test(duration)) idx += 1;
-    else if (!/^--?(?!$)/.test(duration)) throw new InventoryError('WF_LAUNCHER_MISSING_COMMAND', location);
+    else if (!/^--?(?!$)/.test(duration)) throw new InventoryError('WF_LAUNCHER_DURATION', location);
     if (idx >= tokens.length) throw new InventoryError('WF_LAUNCHER_MISSING_COMMAND', location);
     return tokens.slice(idx);
   }
   if (base === 'nice') {
     let idx = 1;
+    while (idx < tokens.length && /^--?(?!$)/.test(tokens[idx])) {
+      const opt = tokens[idx];
+      if (opt === '--') { idx += 1; break; }
+      if (/^--adjustment=/.test(opt)) { idx += 1; continue; }
+      if (/^--/.test(opt)) throw new InventoryError('WF_LAUNCHER_OPTION_UNSUPPORTED', location);
+      idx += 1;
+    }
+    if (idx >= tokens.length) throw new InventoryError('WF_LAUNCHER_MISSING_COMMAND', location);
     if (tokens[idx] === '-n' && idx + 1 < tokens.length && /^-?\d+$/.test(tokens[idx + 1])) idx += 2;
-    while (idx < tokens.length && /^--?(?!$)/.test(tokens[idx])) idx += 1;
     if (idx >= tokens.length) throw new InventoryError('WF_LAUNCHER_MISSING_COMMAND', location);
     return tokens.slice(idx);
   }
@@ -685,6 +699,8 @@ function walkAstWithParent(node, parent, visitor) {
   }
 }
 
+const REQUIRE_SAFE_PROPERTIES = new Set(['main', 'resolve']);
+
 function checkLoaderAliases(ast, location) {
   walkAstWithParent(ast, null, (node, parent) => {
     if (node.type === 'Identifier' && node.name === 'createRequire') {
@@ -698,8 +714,11 @@ function checkLoaderAliases(ast, location) {
     }
     if (node.type === 'Identifier' && node.name === 'require') {
       if (parent && parent.type === 'CallExpression' && parent.callee === node) return;
-      if (parent && parent.type === 'MemberExpression' && parent.object === node && parent.computed === false) return;
-      if (parent && parent.type === 'MemberExpression' && parent.property === node && parent.computed === false) return;
+      if (parent && parent.type === 'MemberExpression' && parent.object === node &&
+          parent.computed === false && parent.property && parent.property.type === 'Identifier' &&
+          REQUIRE_SAFE_PROPERTIES.has(parent.property.name)) return;
+      if (parent && parent.type === 'MemberExpression' && parent.property === node &&
+          parent.computed === false) return;
       throw new InventoryError('WF_LOCAL_JS_LOADER_ALIAS', location);
     }
   });
@@ -854,25 +873,36 @@ function evaluatePackageScript(name, states, context, directory, root, location,
   context.activePackageScripts.add(key);
   const graph = parseCommandGraph(document.scripts[name], 'bash', location + ':' + name);
   const scriptStates = cloneStates(states);
+  const keyPrefix = key + '\0' + depth;
   const parents = new Map();
   scriptStates.forEach((state, stateIndex) => {
-    state.processParentKey = String(stateIndex);
-    parents.set(String(stateIndex), states[stateIndex]);
+    const childKey = keyPrefix + '\0' + String(stateIndex);
+    state.processParentKey = childKey;
+    parents.set(childKey, cloneExecutionState(states[stateIndex]));
     state.workingDirectory = packageRoot;
     state.locationStack = [];
   });
-  const result = evaluateGraph(graph, scriptStates, context, packageRoot, root, 'bash', location + ':' + name, depth + 1);
+  let result;
+  try {
+    result = evaluateGraph(graph, scriptStates, context, packageRoot, root, 'bash', location + ':' + name, depth + 1);
+  } finally {
+    context.activePackageScripts.delete(key);
+  }
   for (const collection of [result.success, result.failure]) {
     collection.forEach((state) => {
       const parent = parents.get(state.processParentKey);
       if (parent) {
+        state.env = parent.env;
         state.workingDirectory = parent.workingDirectory;
         state.locationStack = parent.locationStack.slice();
+        state.pathIdentity = parent.pathIdentity;
+        state.setupGeneration = parent.setupGeneration;
+        state.capturedGeneration = parent.capturedGeneration;
+        state.installed = parent.installed;
       }
       delete state.processParentKey;
     });
   }
-  context.activePackageScripts.delete(key);
   return result;
 }
 

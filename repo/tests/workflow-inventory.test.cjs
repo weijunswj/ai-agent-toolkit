@@ -333,10 +333,10 @@ test('unwrapStaticLauncher rejects timeout with missing command', function() {
   }, /WF_LAUNCHER_MISSING_COMMAND/);
 });
 
-test('unwrapStaticLauncher rejects command with no trailing command', function() {
+test('unwrapStaticLauncher rejects command -v lookup mode', function() {
   assert.throws(function() {
     inventory.unwrapStaticLauncher(['command', '-v'], 'fixture');
-  }, /WF_LAUNCHER_MISSING_COMMAND/);
+  }, /WF_LAUNCHER_LOOKUP_MODE/);
 });
 
 test('unwrapStaticLauncher rejects nice with missing command', function() {
@@ -378,6 +378,161 @@ test('checkLoaderAliases rejects require used in assignment right-hand side', fu
 
 test('checkLoaderAliases does not reject direct literal require call', function() {
   const src = 'require("node:path");';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.doesNotThrow(function() { inventory.checkLoaderAliases(ast, 'fixture'); });
+});
+
+test('nested npm run outer-parent key is not overwritten by inner invocation', function() {
+  assert.equal(inventory.analyzeWorkflowFixture(fixture('cfg-nested-package-script.yml')), true);
+});
+
+test('PATH mutation inside a package script is not inherited by the parent shell', function() {
+  assert.equal(inventory.analyzeWorkflowFixture(fixture('cfg-package-path-isolation.yml')), true);
+});
+
+test('environment mutation inside a package script is not inherited by the parent shell', function() {
+  assert.equal(inventory.analyzeWorkflowFixture(fixture('cfg-package-env-isolation.yml')), true);
+});
+
+test('same-named wrapper verdict changes when directory leak selects wrong file', function() {
+  assert.equal(inventory.analyzeWorkflowFixture(fixture('cfg-package-verdict-oracle.yml')), true);
+});
+
+test('command dash-dash terminator unwraps correctly', function() {
+  assert.equal(inventory.analyzeWorkflowFixture(fixture('cfg-launcher-command-term.yml')), true);
+});
+
+test('command -v lookup mode strips and the Node falls through without install', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('cfg-launcher-command-lookup-v.yml'));
+  }, /WF_NODE_WITHOUT_INSTALL/);
+});
+
+test('command -V lookup mode strips and the Node falls through without install', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('cfg-launcher-command-lookup-V.yml'));
+  }, /WF_NODE_WITHOUT_INSTALL/);
+});
+
+test('timeout -s SIGNAL option passes through correctly', function() {
+  assert.equal(inventory.analyzeWorkflowFixture(fixture('cfg-launcher-timeout-signal.yml')), true);
+});
+
+test('timeout --signal=SIGNAL long option passes through correctly', function() {
+  assert.equal(inventory.analyzeWorkflowFixture(fixture('cfg-launcher-timeout-signal-long.yml')), true);
+});
+
+test('timeout -k kill-after option passes through correctly', function() {
+  assert.equal(inventory.analyzeWorkflowFixture(fixture('cfg-launcher-timeout-kill-after.yml')), true);
+});
+
+test('timeout -- terminator passes through correctly', function() {
+  assert.equal(inventory.analyzeWorkflowFixture(fixture('cfg-launcher-timeout-term.yml')), true);
+});
+
+test('nice -n adjustment passes through correctly', function() {
+  assert.equal(inventory.analyzeWorkflowFixture(fixture('cfg-launcher-nice-adjust.yml')), true);
+});
+
+test('nice --adjustment= long option passes through correctly', function() {
+  assert.equal(inventory.analyzeWorkflowFixture(fixture('cfg-launcher-nice-adjust-long.yml')), true);
+});
+
+test('nice -- terminator passes through correctly', function() {
+  assert.equal(inventory.analyzeWorkflowFixture(fixture('cfg-launcher-nice-term.yml')), true);
+});
+
+test('rejected delegator nohup fails closed', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('cfg-launcher-rejected-nohup.yml'));
+  }, /WF_LAUNCHER_REJECTED/);
+});
+
+test('rejected delegator sudo fails closed', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('cfg-launcher-rejected-sudo.yml'));
+  }, /WF_LAUNCHER_REJECTED/);
+});
+
+test('unsupported timeout --foreground option fails closed', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('cfg-launcher-timeout-unsupported.yml'));
+  }, /WF_LAUNCHER_OPTION_UNSUPPORTED/);
+});
+
+test('unsupported nice --priority option fails closed', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('cfg-launcher-nice-unsupported.yml'));
+  }, /WF_LAUNCHER_OPTION_UNSUPPORTED/);
+});
+
+test('unwrapStaticLauncher rejects rejected delegator nohup', function() {
+  assert.throws(function() {
+    inventory.unwrapStaticLauncher(['nohup', 'node', 'x.cjs'], 'fixture');
+  }, /WF_LAUNCHER_REJECTED/);
+});
+
+test('unwrapStaticLauncher rejects rejected delegator setsid', function() {
+  assert.throws(function() {
+    inventory.unwrapStaticLauncher(['setsid', 'node', 'x.cjs'], 'fixture');
+  }, /WF_LAUNCHER_REJECTED/);
+});
+
+test('loader require.call indirection is rejected', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('local-js-call-bind-workflow.yml'));
+  }, /WF_LOCAL_JS_LOADER_ALIAS/);
+});
+
+test('loader require.resolve is allowed as a non-executing safe property', function() {
+  assert.equal(inventory.analyzeWorkflowFixture(fixture('local-js-require-resolve-workflow.yml')), true);
+});
+
+test('checkLoaderAliases rejects require.call MemberExpression', function() {
+  const src = 'require.call(null, "./x.cjs");';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_ALIAS/);
+});
+
+test('checkLoaderAliases rejects require.apply MemberExpression', function() {
+  const src = 'require.apply(null, ["./x.cjs"]);';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_ALIAS/);
+});
+
+test('checkLoaderAliases rejects require.bind capture', function() {
+  const src = 'const r = require.bind(null);';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_ALIAS/);
+});
+
+test('checkLoaderAliases rejects destructured call from require', function() {
+  const src = 'const { call } = require; call(null, "./x.cjs");';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_ALIAS/);
+});
+
+test('checkLoaderAliases rejects computed require member access', function() {
+  const src = 'require["call"](null, "./x.cjs");';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.throws(function() { inventory.checkLoaderAliases(ast, 'fixture'); }, /WF_LOCAL_JS_LOADER_ALIAS/);
+});
+
+test('checkLoaderAliases allows require.main as a safe property', function() {
+  const src = 'if (require.main === module) process.exit(0);';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.doesNotThrow(function() { inventory.checkLoaderAliases(ast, 'fixture'); });
+});
+
+test('checkLoaderAliases allows require.resolve as a safe non-executing property', function() {
+  const src = 'require.resolve("./x.cjs");';
   const acorn = require('acorn');
   const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
   assert.doesNotThrow(function() { inventory.checkLoaderAliases(ast, 'fixture'); });

@@ -1,0 +1,10 @@
+name: CFG launcher nice adjustment
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fixture
+      - uses: actions/setup-node@fixture
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts && nice -n 5 node repo/tests/fixtures/workflow-inventory/node-target.cjs

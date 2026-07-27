@@ -92,8 +92,11 @@ function parseDependencies(file) {
       }
       if (node.type === 'Identifier' && node.name === 'require') {
         if (parent && parent.type === 'CallExpression' && parent.callee === node) return;
-        if (parent && parent.type === 'MemberExpression' && parent.object === node && parent.computed === false) return;
-        if (parent && parent.type === 'MemberExpression' && parent.property === node && parent.computed === false) return;
+        if (parent && parent.type === 'MemberExpression' && parent.object === node &&
+            parent.computed === false && parent.property && parent.property.type === 'Identifier' &&
+            (parent.property.name === 'main' || parent.property.name === 'resolve')) return;
+        if (parent && parent.type === 'MemberExpression' && parent.property === node &&
+            parent.computed === false) return;
         die('TW_CLOSURE_LOADER_ALIAS', relative(file));
       }
     });

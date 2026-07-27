@@ -1,0 +1,10 @@
+name: CFG unknown unsupported nice option
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fixture
+      - uses: actions/setup-node@fixture
+        with:
+          node-version: '22'
+      - run: nice --priority=5 node repo/tests/fixtures/workflow-inventory/node-target.cjs
