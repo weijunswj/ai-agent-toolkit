@@ -36,7 +36,7 @@
         "children": { "type": "array", "items": { "type": ["integer", "string"] }, "uniqueItems": true },
         "linked_prs": { "type": "array", "items": { "type": "object", "required": ["number"], "additionalProperties": false, "properties": { "number": { "type": ["integer", "string"] }, "state": { "type": "string", "enum": ["draft", "open", "closed", "merged"] }, "merged": { "type": "boolean" } } } },
         "implementation_branch": { "type": ["string", "null"] },
-        "implementation_prs": { "type": "array", "items": { "type": "object", "required": ["number", "state"], "additionalProperties": false, "properties": { "number": { "type": ["integer", "string"] }, "state": { "type": "string", "enum": ["draft", "open", "closed", "merged"] }, "is_replacement": { "type": "boolean" }, "replacement_reason": { "type": ["string", "null"] }, "supersedes_pr": { "type": ["integer", "string", "null"] } } } },
+        "implementation_prs": { "type": "array", "items": { "type": "object", "required": ["number", "state", "draft", "merged"], "additionalProperties": false, "properties": { "number": { "type": ["integer", "string"] }, "state": { "type": "string", "enum": ["open", "closed"] }, "draft": { "type": "boolean" }, "merged": { "type": "boolean" }, "is_replacement": { "type": "boolean" }, "replacement_reason": { "type": ["string", "null"] }, "supersedes_pr": { "type": ["integer", "string", "null"] } } } },
         "reconciliation_timestamp": { "type": ["string", "null"] },
         "acceptance_criteria_met": { "type": ["boolean", "null"] },
         "checklist_items": { "type": "array", "items": { "$ref": "#/$defs/checklist_item" } },

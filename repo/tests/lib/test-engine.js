@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { buildSubjectMap } = require('../../scripts/lib/subject-map');
 const { validateAgainstSchema } = require('../../scripts/lib/schema-validate');
+const { emitFinding: productionEmitter } = require('../../scripts/lib/emit-finding');
 
 const detectorPath = path.resolve(__dirname, '..', '..', 'scripts', 'lib', 'detectors');
 
@@ -51,15 +52,18 @@ function buildTestRegistry(overrides) {
     if (!policyCodes.includes(code)) {
       throw new Error('Unknown finding code in override: ' + code);
     }
-    if (typeof overrides[code] !== 'function') {
-      throw new Error('Override for ' + code + ' must be a function');
+    if (typeof overrides[code] !== 'function' || overrides[code].length !== 5) {
+      throw new Error('Override for ' + code + ' must be a five-argument function');
     }
   }
 
   return Object.assign({}, detectorUnits, overrides);
 }
 
-function auditWithRegistry(registry, snapshot) {
+function auditWithRegistry(registry, snapshot, emitter) {
+  if (typeof emitter !== 'function') {
+    throw new TypeError('auditWithRegistry requires an explicit five-argument detector emitter');
+  }
   const schemaResult = validateAgainstSchema(snapshot);
   if (!schemaResult.ok) return { findings: [], schemaErrors: schemaResult.errors };
 
@@ -70,7 +74,10 @@ function auditWithRegistry(registry, snapshot) {
 
   const orderedCodes = Object.keys(registry).sort();
   for (const code of orderedCodes) {
-    registry[code](repo, issues, findings, subjects);
+    if (typeof registry[code] !== 'function' || registry[code].length !== 5) {
+      throw new TypeError('Detector ' + code + ' must use the five-argument signature');
+    }
+    registry[code](repo, issues, findings, subjects, emitter);
   }
 
   findings.sort(function(a, b) {
@@ -85,4 +92,8 @@ function auditWithRegistry(registry, snapshot) {
   return { findings, schemaErrors: [], subjects };
 }
 
-module.exports = { detectorUnits, buildTestRegistry, auditWithRegistry, loadPolicy };
+function auditWithProductionEmitter(registry, snapshot) {
+  return auditWithRegistry(registry, snapshot, productionEmitter);
+}
+
+module.exports = { detectorUnits, buildTestRegistry, auditWithRegistry, auditWithProductionEmitter, loadPolicy, productionEmitter };

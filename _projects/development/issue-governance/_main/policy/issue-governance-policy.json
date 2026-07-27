@@ -90,9 +90,14 @@
       "Body and structured implementation-PR metadata must agree.",
       "Research, architecture-only and recurring-evidence issues are not required to have implementation PRs."
     ],
-    "states": ["draft", "open", "closed", "merged"],
-    "active_states": ["draft", "open"],
-    "terminal_states": ["closed", "merged"],
+    "structured_representation": {
+      "open_draft": { "state": "open", "draft": true, "merged": false },
+      "open_ready": { "state": "open", "draft": false, "merged": false },
+      "closed_unmerged": { "state": "closed", "draft": false, "merged": false },
+      "merged": { "state": "closed", "draft": false, "merged": true }
+    },
+    "active_state": "open",
+    "terminal_state": "closed",
     "max_active": 1
   },
   "finding_codes": {
@@ -447,6 +452,38 @@
         },
         "replacement_contradiction": {
           "template": "Replacement metadata contradicts body or is structurally invalid.",
+          "context": {}
+        },
+        "replacement_reason_contradiction": {
+          "template": "Structured replacement reason contradicts body.",
+          "context": {}
+        },
+        "supersedes_pr_contradiction": {
+          "template": "Structured supersedes PR contradicts body.",
+          "context": {}
+        },
+        "unknown_predecessor": {
+          "template": "Replacement edge names an unknown predecessor.",
+          "context": {}
+        },
+        "self_edge": {
+          "template": "Replacement PR supersedes itself.",
+          "context": {}
+        },
+        "cycle": {
+          "template": "Replacement graph contains one cyclic strongly connected component.",
+          "context": {}
+        },
+        "multiple_successors": {
+          "template": "One predecessor has multiple direct successor PRs.",
+          "context": {}
+        },
+        "disconnected_graph": {
+          "template": "Implementation PR replacement graph is disconnected.",
+          "context": {}
+        },
+        "reactivation": {
+          "template": "A historical predecessor is active again.",
           "context": {}
         }
       }

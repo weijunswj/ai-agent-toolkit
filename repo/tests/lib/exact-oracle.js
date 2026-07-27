@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 
 function tupleToString(f) {
-  return f.code + '|' + f.severity + '|' + f.group + '|' + (f.subject || '@') + '|' + f.message_key;
+  return f.code + '|' + f.severity + '|' + f.group + '|' + (f.subject || '@') + '|' + f.message_key + '|' + f.message;
 }
 
 function assertExactTuples(actualFindings, expectedTuples) {

@@ -1,11 +1,12 @@
 'use strict';
 
-const { emitFinding, loadPolicy } = require('../emit-finding');
+const { loadPolicy } = require('../emit-finding');
 
-function detectGOV020(repo, issues, findings, subjects) {
+function detectGOV020(repo, issues, findings, subjects, emit) {
+  if (typeof emit !== 'function') throw new TypeError('detector emitter is required');
   const pv = loadPolicy().policy_version;
   if (repo.policy_version && repo.policy_version !== pv) {
-    emitFinding(findings, 'GOV020', null, 'policy_version_drift', {});
+    emit(findings, 'GOV020', null, 'policy_version_drift', {});
   }
 }
 

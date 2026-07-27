@@ -27,7 +27,7 @@
       "parent": 100,
       "linked_prs": [{ "number": 200, "state": "open", "merged": false }],
       "implementation_branch": "feature-x",
-      "implementation_prs": [{ "number": 200, "state": "open" }],
+      "implementation_prs": [{ "number": 200, "state": "open", "draft": false, "merged": false }],
       "reconciliation_timestamp": "25 July 2026, 12:00 SGT",
       "acceptance_criteria_met": false
     },
@@ -51,7 +51,7 @@
       "parent": 100,
       "linked_prs": [{ "number": 201, "state": "merged", "merged": true }],
       "implementation_branch": "feature-z",
-      "implementation_prs": [{ "number": 201, "state": "merged" }],
+      "implementation_prs": [{ "number": 201, "state": "closed", "draft": false, "merged": true }],
       "reconciliation_timestamp": "25 July 2026, 12:00 SGT",
       "acceptance_criteria_met": true
     }

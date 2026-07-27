@@ -21,8 +21,8 @@
       "body": "# Current status\n\nIN PROGRESS\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\nParent tracker: #1\nImplementation branch: null\nImplementation PR: Not opened\n\nDepends on: none\nBlocks: none\nRelated: none\n\n this issue exists\n\nSomething.\n\n# Goal and scope\n\nSomething.\n\n# Completed work\n\n- none\n\n# Current blockers and findings\n\n- none\n\n# Remaining steps\n\n- [ ] Do it\n\n# Acceptance criteria\n\n- [ ] Done\n\n# Linked PRs and follow-ups\n\n- none\n\n# Decisions and durable evidence\n\n- none\n\n# Safety and authority\n\nController-owned.",
       "parent": 1,
       "implementation_prs": [
-        { "number": 10, "state": "open" },
-        { "number": 11, "state": "open" }
+        { "number": 10, "state": "open", "draft": true, "merged": false },
+        { "number": 11, "state": "open", "draft": false, "merged": false }
       ]
     }
   ]

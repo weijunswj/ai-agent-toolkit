@@ -1,208 +1,904 @@
 {
-  "manifest_version": "1.0.0",
+  "manifest_version": "2.0.0",
   "policy_version": "2.0.0",
   "entries": [
     {
+      "fixture_id": "isolated-gov001",
       "fixture": "invalid-no-parent.json",
-      "kind": "isolated",
-      "target_code": "GOV001",
-      "expected_tuples": [
-        {"code": "GOV001", "severity": "error", "group": "parent_tracker", "subject": null, "message_key": "no_canonical_parent"}
-      ]
+      "kind": "isolated-target",
+      "target_detector_code": "GOV001",
+      "expected_production_tuples": [
+        {
+          "code": "GOV001",
+          "severity": "error",
+          "group": "parent_tracker",
+          "subject": null,
+          "message_key": "no_canonical_parent",
+          "message": "Toolkit-governed repository has no declared canonical parent tracker."
+        },
+        {
+          "code": "GOV005",
+          "severity": "error",
+          "group": "parent_child_link",
+          "subject": "S1",
+          "message_key": "parent_not_found",
+          "message": "Child parent not found in issues."
+        },
+        {
+          "code": "GOV014",
+          "severity": "error",
+          "group": "required_sections",
+          "subject": "S1",
+          "message_key": "missing_why_section",
+          "message": "Missing \"Why this issue exists\" section."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV001",
+          "subject": null,
+          "message_key": "no_canonical_parent",
+          "context": {}
+        }
+      ],
+      "non_target_detectors_may_emit": true,
+      "ordering_policy": "exact-multiset"
     },
     {
+      "fixture_id": "isolated-gov002",
       "fixture": "invalid-multiple-parents.json",
-      "kind": "isolated",
-      "target_code": "GOV002",
-      "expected_tuples": [
-        {"code": "GOV002", "severity": "error", "group": "parent_tracker", "subject": null, "message_key": "multiple_canonical_parents"}
-      ]
+      "kind": "isolated-target",
+      "target_detector_code": "GOV002",
+      "expected_production_tuples": [
+        {
+          "code": "GOV002",
+          "severity": "error",
+          "group": "parent_tracker",
+          "subject": null,
+          "message_key": "multiple_canonical_parents",
+          "message": "Toolkit-governed repository has 2 canonical parent trackers."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV002",
+          "subject": null,
+          "message_key": "multiple_canonical_parents",
+          "context": {
+            "count": 2
+          }
+        }
+      ],
+      "non_target_detectors_may_emit": false,
+      "ordering_policy": "exact-multiset"
     },
     {
+      "fixture_id": "isolated-gov003",
+      "fixture": "invalid-orphan-checklist.json",
+      "kind": "isolated-target",
+      "target_detector_code": "GOV003",
+      "expected_production_tuples": [
+        {
+          "code": "GOV003",
+          "severity": "warning",
+          "group": "parent_child_link",
+          "subject": "S1",
+          "message_key": "no_linked_child",
+          "message": "Parent checklist entry has no linked child."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV003",
+          "subject": "S1",
+          "message_key": "no_linked_child",
+          "context": {}
+        }
+      ],
+      "non_target_detectors_may_emit": false,
+      "ordering_policy": "exact-multiset"
+    },
+    {
+      "fixture_id": "isolated-gov004",
+      "fixture": "invalid-active-child-no-parent.json",
+      "kind": "isolated-target",
+      "target_detector_code": "GOV004",
+      "expected_production_tuples": [
+        {
+          "code": "GOV004",
+          "severity": "error",
+          "group": "parent_child_link",
+          "subject": "S2",
+          "message_key": "no_parent_link",
+          "message": "Child issue has no parent link."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV004",
+          "subject": "S2",
+          "message_key": "no_parent_link",
+          "context": {}
+        }
+      ],
+      "non_target_detectors_may_emit": false,
+      "ordering_policy": "exact-multiset"
+    },
+    {
+      "fixture_id": "isolated-gov005",
       "fixture": "invalid-child-absent-from-parent.json",
-      "kind": "isolated",
-      "target_code": "GOV005",
-      "expected_tuples": [
-        {"code": "GOV005", "severity": "error", "group": "parent_child_link", "subject": "S2", "message_key": "child_absent_from_parent_checklist"}
-      ]
+      "kind": "isolated-target",
+      "target_detector_code": "GOV005",
+      "expected_production_tuples": [
+        {
+          "code": "GOV005",
+          "severity": "error",
+          "group": "parent_child_link",
+          "subject": "S2",
+          "message_key": "child_absent_from_parent_checklist",
+          "message": "Children absent from parent body checklist."
+        },
+        {
+          "code": "GOV006",
+          "severity": "error",
+          "group": "parent_child_link",
+          "subject": "S2",
+          "message_key": "not_bidirectional",
+          "message": "Parent children array does not list this child."
+        },
+        {
+          "code": "GOV014",
+          "severity": "error",
+          "group": "required_sections",
+          "subject": "S2",
+          "message_key": "missing_why_section",
+          "message": "Missing \"Why this issue exists\" section."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV005",
+          "subject": "S2",
+          "message_key": "child_absent_from_parent_checklist",
+          "context": {}
+        }
+      ],
+      "non_target_detectors_may_emit": true,
+      "ordering_policy": "exact-multiset"
     },
     {
+      "fixture_id": "isolated-gov006",
       "fixture": "invalid-one-way-link.json",
-      "kind": "isolated",
-      "target_code": "GOV006",
-      "expected_tuples": [
-        {"code": "GOV006", "severity": "error", "group": "parent_child_link", "subject": "S2", "message_key": "not_bidirectional"}
-      ]
+      "kind": "isolated-target",
+      "target_detector_code": "GOV006",
+      "expected_production_tuples": [
+        {
+          "code": "GOV006",
+          "severity": "error",
+          "group": "parent_child_link",
+          "subject": "S2",
+          "message_key": "not_bidirectional",
+          "message": "Parent children array does not list this child."
+        },
+        {
+          "code": "GOV027",
+          "severity": "error",
+          "group": "body_authority",
+          "subject": "S1",
+          "message_key": "children_contradiction",
+          "message": "Structured children array contradicts body checklist."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV006",
+          "subject": "S2",
+          "message_key": "not_bidirectional",
+          "context": {}
+        }
+      ],
+      "non_target_detectors_may_emit": true,
+      "ordering_policy": "exact-multiset"
     },
     {
+      "fixture_id": "isolated-gov007",
       "fixture": "invalid-checked-parent-incomplete-child.json",
-      "kind": "isolated",
-      "target_code": "GOV007",
-      "expected_tuples": [
-        {"code": "GOV007", "severity": "error", "group": "completion_consistency", "subject": "S1", "message_key": "checked_parent_incomplete_acceptance"}
-      ]
+      "kind": "isolated-target",
+      "target_detector_code": "GOV007",
+      "expected_production_tuples": [
+        {
+          "code": "GOV007",
+          "severity": "error",
+          "group": "completion_consistency",
+          "subject": "S1",
+          "message_key": "checked_parent_incomplete_acceptance",
+          "message": "Parent item is checked but child has incomplete acceptance."
+        },
+        {
+          "code": "GOV007",
+          "severity": "error",
+          "group": "completion_consistency",
+          "subject": "S1",
+          "message_key": "checked_parent_open_child",
+          "message": "Parent item is checked but child is still open."
+        },
+        {
+          "code": "GOV014",
+          "severity": "error",
+          "group": "required_sections",
+          "subject": "S2",
+          "message_key": "missing_why_section",
+          "message": "Missing \"Why this issue exists\" section."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV007",
+          "subject": "S1",
+          "message_key": "checked_parent_open_child",
+          "context": {}
+        },
+        {
+          "code": "GOV007",
+          "subject": "S1",
+          "message_key": "checked_parent_incomplete_acceptance",
+          "context": {}
+        }
+      ],
+      "non_target_detectors_may_emit": true,
+      "ordering_policy": "exact-multiset"
     },
     {
+      "fixture_id": "isolated-gov008",
       "fixture": "invalid-closed-child-incomplete-acceptance.json",
-      "kind": "isolated",
-      "target_code": "GOV008",
-      "expected_tuples": [
-        {"code": "GOV008", "severity": "error", "group": "completion_consistency", "subject": "S2", "message_key": "closed_incomplete_acceptance"}
-      ]
+      "kind": "isolated-target",
+      "target_detector_code": "GOV008",
+      "expected_production_tuples": [
+        {
+          "code": "GOV007",
+          "severity": "error",
+          "group": "completion_consistency",
+          "subject": "S1",
+          "message_key": "checked_parent_incomplete_acceptance",
+          "message": "Parent item is checked but child has incomplete acceptance."
+        },
+        {
+          "code": "GOV008",
+          "severity": "error",
+          "group": "completion_consistency",
+          "subject": "S2",
+          "message_key": "closed_incomplete_acceptance",
+          "message": "Closed child has unchecked acceptance criteria."
+        },
+        {
+          "code": "GOV014",
+          "severity": "error",
+          "group": "required_sections",
+          "subject": "S2",
+          "message_key": "missing_why_section",
+          "message": "Missing \"Why this issue exists\" section."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV008",
+          "subject": "S2",
+          "message_key": "closed_incomplete_acceptance",
+          "context": {}
+        }
+      ],
+      "non_target_detectors_may_emit": true,
+      "ordering_policy": "exact-multiset"
     },
     {
+      "fixture_id": "isolated-gov009",
       "fixture": "invalid-complete-child-unchecked-parent.json",
-      "kind": "isolated",
-      "target_code": "GOV009",
-      "expected_tuples": [
-        {"code": "GOV009", "severity": "warning", "group": "completion_consistency", "subject": "S2", "message_key": "closed_unchecked_parent"}
-      ]
+      "kind": "isolated-target",
+      "target_detector_code": "GOV009",
+      "expected_production_tuples": [
+        {
+          "code": "GOV009",
+          "severity": "warning",
+          "group": "completion_consistency",
+          "subject": "S2",
+          "message_key": "closed_unchecked_parent",
+          "message": "Closed child's parent item is not checked."
+        },
+        {
+          "code": "GOV014",
+          "severity": "error",
+          "group": "required_sections",
+          "subject": "S2",
+          "message_key": "missing_why_section",
+          "message": "Missing \"Why this issue exists\" section."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV009",
+          "subject": "S2",
+          "message_key": "closed_unchecked_parent",
+          "context": {}
+        }
+      ],
+      "non_target_detectors_may_emit": true,
+      "ordering_policy": "exact-multiset"
     },
     {
+      "fixture_id": "isolated-gov010",
       "fixture": "invalid-missing-status.json",
-      "kind": "isolated",
-      "target_code": "GOV010",
-      "expected_tuples": [
-        {"code": "GOV010", "severity": "error", "group": "required_sections", "subject": "S2", "message_key": "missing_current_status"}
-      ]
+      "kind": "isolated-target",
+      "target_detector_code": "GOV010",
+      "expected_production_tuples": [
+        {
+          "code": "GOV010",
+          "severity": "error",
+          "group": "required_sections",
+          "subject": "S2",
+          "message_key": "missing_current_status",
+          "message": "Missing Current status section."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV010",
+          "subject": "S2",
+          "message_key": "missing_current_status",
+          "context": {}
+        }
+      ],
+      "non_target_detectors_may_emit": false,
+      "ordering_policy": "exact-multiset"
     },
     {
+      "fixture_id": "isolated-gov011",
       "fixture": "invalid-missing-timestamp.json",
-      "kind": "isolated",
-      "target_code": "GOV011",
-      "expected_tuples": [
-        {"code": "GOV011", "severity": "error", "group": "required_sections", "subject": "S2", "message_key": "missing_timestamp"}
-      ]
+      "kind": "isolated-target",
+      "target_detector_code": "GOV011",
+      "expected_production_tuples": [
+        {
+          "code": "GOV011",
+          "severity": "error",
+          "group": "required_sections",
+          "subject": "S2",
+          "message_key": "missing_timestamp",
+          "message": "Missing reconciliation timestamp."
+        },
+        {
+          "code": "GOV014",
+          "severity": "error",
+          "group": "required_sections",
+          "subject": "S2",
+          "message_key": "missing_why_section",
+          "message": "Missing \"Why this issue exists\" section."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV011",
+          "subject": "S2",
+          "message_key": "missing_timestamp",
+          "context": {}
+        }
+      ],
+      "non_target_detectors_may_emit": true,
+      "ordering_policy": "exact-multiset"
     },
     {
+      "fixture_id": "isolated-gov012",
       "fixture": "invalid-duplicate-timestamp.json",
-      "kind": "isolated",
-      "target_code": "GOV012",
-      "expected_tuples": [
-        {"code": "GOV012", "severity": "error", "group": "required_sections", "subject": "S2", "message_key": "multiple_timestamps"}
-      ]
+      "kind": "isolated-target",
+      "target_detector_code": "GOV012",
+      "expected_production_tuples": [
+        {
+          "code": "GOV012",
+          "severity": "error",
+          "group": "required_sections",
+          "subject": "S2",
+          "message_key": "multiple_timestamps",
+          "message": "Multiple reconciliation timestamps found (2)."
+        },
+        {
+          "code": "GOV014",
+          "severity": "error",
+          "group": "required_sections",
+          "subject": "S2",
+          "message_key": "missing_why_section",
+          "message": "Missing \"Why this issue exists\" section."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV012",
+          "subject": "S2",
+          "message_key": "multiple_timestamps",
+          "context": {
+            "count": 2
+          }
+        }
+      ],
+      "non_target_detectors_may_emit": true,
+      "ordering_policy": "exact-multiset"
     },
     {
+      "fixture_id": "isolated-gov013",
       "fixture": "invalid-malformed-timestamp.json",
-      "kind": "isolated",
-      "target_code": "GOV013",
-      "expected_tuples": [
-        {"code": "GOV013", "severity": "warning", "group": "required_sections", "subject": "S2", "message_key": "malformed_timestamp"}
-      ]
+      "kind": "isolated-target",
+      "target_detector_code": "GOV013",
+      "expected_production_tuples": [
+        {
+          "code": "GOV013",
+          "severity": "warning",
+          "group": "required_sections",
+          "subject": "S2",
+          "message_key": "malformed_timestamp",
+          "message": "Timestamp is present but malformed."
+        },
+        {
+          "code": "GOV014",
+          "severity": "error",
+          "group": "required_sections",
+          "subject": "S2",
+          "message_key": "missing_why_section",
+          "message": "Missing \"Why this issue exists\" section."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV013",
+          "subject": "S2",
+          "message_key": "malformed_timestamp",
+          "context": {}
+        }
+      ],
+      "non_target_detectors_may_emit": true,
+      "ordering_policy": "exact-multiset"
     },
     {
+      "fixture_id": "isolated-gov014",
       "fixture": "invalid-missing-why.json",
-      "kind": "isolated",
-      "target_code": "GOV014",
-      "expected_tuples": [
-        {"code": "GOV014", "severity": "error", "group": "required_sections", "subject": "S2", "message_key": "missing_why_section"}
-      ]
+      "kind": "isolated-target",
+      "target_detector_code": "GOV014",
+      "expected_production_tuples": [
+        {
+          "code": "GOV014",
+          "severity": "error",
+          "group": "required_sections",
+          "subject": "S2",
+          "message_key": "missing_why_section",
+          "message": "Missing \"Why this issue exists\" section."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV014",
+          "subject": "S2",
+          "message_key": "missing_why_section",
+          "context": {}
+        }
+      ],
+      "non_target_detectors_may_emit": false,
+      "ordering_policy": "exact-multiset"
     },
     {
+      "fixture_id": "isolated-gov015",
+      "fixture": "invalid-missing-tracking-dimension.json",
+      "kind": "isolated-target",
+      "target_detector_code": "GOV015",
+      "expected_production_tuples": [
+        {
+          "code": "GOV015",
+          "severity": "error",
+          "group": "required_sections",
+          "subject": "S2",
+          "message_key": "missing_dimension",
+          "message": "Missing required tracking dimension."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV015",
+          "subject": "S2",
+          "message_key": "missing_dimension",
+          "context": {}
+        }
+      ],
+      "non_target_detectors_may_emit": false,
+      "ordering_policy": "exact-multiset"
+    },
+    {
+      "fixture_id": "isolated-gov016",
       "fixture": "invalid-missing-acceptance.json",
-      "kind": "isolated",
-      "target_code": "GOV016",
-      "expected_tuples": [
-        {"code": "GOV016", "severity": "error", "group": "required_sections", "subject": "S2", "message_key": "missing_acceptance_criteria"}
-      ]
+      "kind": "isolated-target",
+      "target_detector_code": "GOV016",
+      "expected_production_tuples": [
+        {
+          "code": "GOV014",
+          "severity": "error",
+          "group": "required_sections",
+          "subject": "S2",
+          "message_key": "missing_why_section",
+          "message": "Missing \"Why this issue exists\" section."
+        },
+        {
+          "code": "GOV016",
+          "severity": "error",
+          "group": "required_sections",
+          "subject": "S2",
+          "message_key": "missing_acceptance_criteria",
+          "message": "Missing Acceptance criteria section."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV016",
+          "subject": "S2",
+          "message_key": "missing_acceptance_criteria",
+          "context": {}
+        }
+      ],
+      "non_target_detectors_may_emit": true,
+      "ordering_policy": "exact-multiset"
     },
     {
+      "fixture_id": "isolated-gov017",
       "fixture": "invalid-superseded-no-reason.json",
-      "kind": "isolated",
-      "target_code": "GOV017",
-      "expected_tuples": [
-        {"code": "GOV017", "severity": "warning", "group": "superseded", "subject": "S1", "message_key": "no_reason_or_successor"}
-      ]
+      "kind": "isolated-target",
+      "target_detector_code": "GOV017",
+      "expected_production_tuples": [
+        {
+          "code": "GOV017",
+          "severity": "warning",
+          "group": "superseded",
+          "subject": "S2",
+          "message_key": "no_reason_or_successor",
+          "message": "Issue is superseded/duplicate/not-planned but has no reason or successor."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV017",
+          "subject": "S2",
+          "message_key": "no_reason_or_successor",
+          "context": {}
+        }
+      ],
+      "non_target_detectors_may_emit": false,
+      "ordering_policy": "exact-multiset"
     },
     {
+      "fixture_id": "isolated-gov018",
       "fixture": "invalid-pr-merge-completion.json",
-      "kind": "isolated",
-      "target_code": "GOV018",
-      "expected_tuples": [
-        {"code": "GOV018", "severity": "error", "group": "anti_patterns", "subject": "S2", "message_key": "pr_merge_as_completion"}
-      ]
+      "kind": "isolated-target",
+      "target_detector_code": "GOV018",
+      "expected_production_tuples": [
+        {
+          "code": "GOV018",
+          "severity": "error",
+          "group": "anti_patterns",
+          "subject": "S2",
+          "message_key": "pr_merge_as_completion",
+          "message": "Issue body treats PR merge as sufficient completion."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV018",
+          "subject": "S2",
+          "message_key": "pr_merge_as_completion",
+          "context": {}
+        }
+      ],
+      "non_target_detectors_may_emit": false,
+      "ordering_policy": "exact-multiset"
     },
     {
+      "fixture_id": "isolated-gov019",
       "fixture": "invalid-implementer-acceptance.json",
-      "kind": "isolated",
-      "target_code": "GOV019",
-      "expected_tuples": [
-        {"code": "GOV019", "severity": "error", "group": "anti_patterns", "subject": "S2", "message_key": "implementer_self_acceptance"}
-      ]
+      "kind": "isolated-target",
+      "target_detector_code": "GOV019",
+      "expected_production_tuples": [
+        {
+          "code": "GOV019",
+          "severity": "error",
+          "group": "anti_patterns",
+          "subject": "S2",
+          "message_key": "implementer_self_acceptance",
+          "message": "Issue body contains implementer self-acceptance claim."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV019",
+          "subject": "S2",
+          "message_key": "implementer_self_acceptance",
+          "context": {}
+        }
+      ],
+      "non_target_detectors_may_emit": false,
+      "ordering_policy": "exact-multiset"
     },
     {
+      "fixture_id": "isolated-gov020",
       "fixture": "invalid-drift-policy-version.json",
-      "kind": "isolated",
-      "target_code": "GOV020",
-      "expected_tuples": [
-        {"code": "GOV020", "severity": "warning", "group": "policy_drift", "subject": null, "message_key": "policy_version_drift"}
-      ]
+      "kind": "isolated-target",
+      "target_detector_code": "GOV020",
+      "expected_production_tuples": [
+        {
+          "code": "GOV020",
+          "severity": "warning",
+          "group": "policy_drift",
+          "subject": null,
+          "message_key": "policy_version_drift",
+          "message": "Snapshot policy version differs from canonical policy."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV020",
+          "subject": null,
+          "message_key": "policy_version_drift",
+          "context": {}
+        }
+      ],
+      "non_target_detectors_may_emit": false,
+      "ordering_policy": "exact-multiset"
     },
     {
+      "fixture_id": "isolated-gov021",
       "fixture": "valid-unknown-mode.json",
-      "kind": "isolated",
-      "target_code": "GOV021",
-      "expected_tuples": [
-        {"code": "GOV021", "severity": "warning", "group": "governance_mode", "subject": null, "message_key": "unknown_governance_mode"}
-      ]
+      "kind": "isolated-target",
+      "target_detector_code": "GOV021",
+      "expected_production_tuples": [
+        {
+          "code": "GOV021",
+          "severity": "warning",
+          "group": "governance_mode",
+          "subject": null,
+          "message_key": "unknown_governance_mode",
+          "message": "Governance mode is unknown. Repository must select a governance mode."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV021",
+          "subject": null,
+          "message_key": "unknown_governance_mode",
+          "context": {}
+        }
+      ],
+      "non_target_detectors_may_emit": false,
+      "ordering_policy": "exact-multiset"
     },
     {
+      "fixture_id": "isolated-gov022",
       "fixture": "invalid-multiple-impl-prs.json",
-      "kind": "isolated",
-      "target_code": "GOV022",
-      "expected_tuples": [
-        {"code": "GOV022", "severity": "error", "group": "implementation_pr", "subject": "S2", "message_key": "multiple_active_prs"}
-      ]
+      "kind": "isolated-target",
+      "target_detector_code": "GOV022",
+      "expected_production_tuples": [
+        {
+          "code": "GOV014",
+          "severity": "error",
+          "group": "required_sections",
+          "subject": "S2",
+          "message_key": "missing_why_section",
+          "message": "Missing \"Why this issue exists\" section."
+        },
+        {
+          "code": "GOV022",
+          "severity": "error",
+          "group": "implementation_pr",
+          "subject": "S2",
+          "message_key": "multiple_active_prs",
+          "message": "Issue has 2 active implementation PRs."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV022",
+          "subject": "S2",
+          "message_key": "multiple_active_prs",
+          "context": {
+            "count": 2
+          }
+        }
+      ],
+      "non_target_detectors_may_emit": true,
+      "ordering_policy": "exact-multiset"
     },
     {
+      "fixture_id": "isolated-gov023",
+      "fixture": "invalid-branch-body-mismatch.json",
+      "kind": "isolated-target",
+      "target_detector_code": "GOV023",
+      "expected_production_tuples": [
+        {
+          "code": "GOV023",
+          "severity": "error",
+          "group": "implementation_pr",
+          "subject": "S2",
+          "message_key": "branch_disagree",
+          "message": "Structured implementation branch disagrees with body."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV023",
+          "subject": "S2",
+          "message_key": "branch_disagree",
+          "context": {}
+        }
+      ],
+      "non_target_detectors_may_emit": false,
+      "ordering_policy": "exact-multiset"
+    },
+    {
+      "fixture_id": "isolated-gov024",
       "fixture": "invalid-replacement-no-reason.json",
-      "kind": "isolated",
-      "target_code": "GOV024",
-      "expected_tuples": [
-        {"code": "GOV024", "severity": "error", "group": "implementation_pr", "subject": "S2", "message_key": "no_replacement_reason"}
-      ]
+      "kind": "isolated-target",
+      "target_detector_code": "GOV024",
+      "expected_production_tuples": [
+        {
+          "code": "GOV014",
+          "severity": "error",
+          "group": "required_sections",
+          "subject": "S2",
+          "message_key": "missing_why_section",
+          "message": "Missing \"Why this issue exists\" section."
+        },
+        {
+          "code": "GOV023",
+          "severity": "error",
+          "group": "implementation_pr",
+          "subject": "S2",
+          "message_key": "body_not_opened_but_pr_exists",
+          "message": "Body states Implementation PR: Not opened but PR record exists."
+        },
+        {
+          "code": "GOV024",
+          "severity": "error",
+          "group": "implementation_pr",
+          "subject": "S2",
+          "message_key": "no_replacement_reason",
+          "message": "Replacement PR has no recorded exceptional reason."
+        },
+        {
+          "code": "GOV027",
+          "severity": "error",
+          "group": "body_authority",
+          "subject": "S2",
+          "message_key": "unknown_predecessor",
+          "message": "Replacement edge names an unknown predecessor."
+        },
+        {
+          "code": "GOV027",
+          "severity": "error",
+          "group": "body_authority",
+          "subject": "S2",
+          "message_key": "supersedes_pr_contradiction",
+          "message": "Structured supersedes PR contradicts body."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV024",
+          "subject": "S2",
+          "message_key": "no_replacement_reason",
+          "context": {}
+        }
+      ],
+      "non_target_detectors_may_emit": true,
+      "ordering_policy": "exact-multiset"
     },
     {
+      "fixture_id": "isolated-gov025",
       "fixture": "invalid-duplicate-id.json",
-      "kind": "isolated",
-      "target_code": "GOV025",
-      "expected_tuples": [
-        {"code": "GOV025", "severity": "error", "group": "identity", "subject": null, "message_key": "duplicate_identity"}
-      ]
+      "kind": "isolated-target",
+      "target_detector_code": "GOV025",
+      "expected_production_tuples": [
+        {
+          "code": "GOV025",
+          "severity": "error",
+          "group": "identity",
+          "subject": null,
+          "message_key": "duplicate_identity",
+          "message": "Duplicate issue identity detected. Two or more issues resolve to the same canonical identifier."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV025",
+          "subject": null,
+          "message_key": "duplicate_identity",
+          "context": {}
+        }
+      ],
+      "non_target_detectors_may_emit": false,
+      "ordering_policy": "exact-multiset"
     },
     {
+      "fixture_id": "isolated-gov026",
       "fixture": "invalid-parent-not-category.json",
-      "kind": "isolated",
-      "target_code": "GOV026",
-      "expected_tuples": [
-        {"code": "GOV026", "severity": "error", "group": "parent_tracker", "subject": null, "message_key": "canonical_parent_not_found"}
-      ]
+      "kind": "isolated-target",
+      "target_detector_code": "GOV026",
+      "expected_production_tuples": [
+        {
+          "code": "GOV001",
+          "severity": "error",
+          "group": "parent_tracker",
+          "subject": null,
+          "message_key": "no_canonical_parent",
+          "message": "Toolkit-governed repository has no declared canonical parent tracker."
+        },
+        {
+          "code": "GOV004",
+          "severity": "error",
+          "group": "parent_child_link",
+          "subject": "S1",
+          "message_key": "no_parent_link",
+          "message": "Child issue has no parent link."
+        },
+        {
+          "code": "GOV014",
+          "severity": "error",
+          "group": "required_sections",
+          "subject": "S1",
+          "message_key": "missing_why_section",
+          "message": "Missing \"Why this issue exists\" section."
+        },
+        {
+          "code": "GOV026",
+          "severity": "error",
+          "group": "parent_tracker",
+          "subject": null,
+          "message_key": "canonical_parent_not_found",
+          "message": "Declared canonical_parent_tracker identifier is absent, unresolved, targets a non-parent issue or contradicts the uniquely identified canonical parent."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV026",
+          "subject": null,
+          "message_key": "canonical_parent_not_found",
+          "context": {}
+        }
+      ],
+      "non_target_detectors_may_emit": true,
+      "ordering_policy": "exact-multiset"
     },
     {
+      "fixture_id": "isolated-gov027",
       "fixture": "adversarial-fabricated-checklist.json",
-      "kind": "isolated",
-      "target_code": "GOV027",
-      "expected_tuples": [
-        {"code": "GOV027", "severity": "error", "group": "body_authority", "subject": "S1", "message_key": "checklist_contradiction"}
-      ]
-    },
-    {
-      "fixture": "valid-full.json",
-      "kind": "isolated",
-      "target_code": null,
-      "expected_tuples": []
-    },
-    {
-      "fixture": "valid-no-op.json",
-      "kind": "isolated",
-      "target_code": null,
-      "expected_tuples": []
-    },
-    {
-      "fixture": "valid-replacement-with-reason.json",
-      "kind": "isolated",
-      "target_code": null,
-      "expected_tuples": []
+      "kind": "isolated-target",
+      "target_detector_code": "GOV027",
+      "expected_production_tuples": [
+        {
+          "code": "GOV014",
+          "severity": "error",
+          "group": "required_sections",
+          "subject": "S2",
+          "message_key": "missing_why_section",
+          "message": "Missing \"Why this issue exists\" section."
+        },
+        {
+          "code": "GOV027",
+          "severity": "error",
+          "group": "body_authority",
+          "subject": "S1",
+          "message_key": "checklist_contradiction",
+          "message": "Structured checklist contradicts body."
+        }
+      ],
+      "expected_target_emitter_calls": [
+        {
+          "code": "GOV027",
+          "subject": "S1",
+          "message_key": "checklist_contradiction",
+          "context": {}
+        }
+      ],
+      "non_target_detectors_may_emit": true,
+      "ordering_policy": "exact-multiset"
     }
   ]
 }

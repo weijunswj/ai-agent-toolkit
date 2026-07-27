@@ -1,0 +1,8 @@
+{
+  "event_name": "schedule",
+  "expected_publication_mode": "dry-run",
+  "expected_branch_attempts": 0,
+  "expected_commit_attempts": 0,
+  "expected_push_attempts": 0,
+  "expected_pr_mutation_attempts": 0
+}

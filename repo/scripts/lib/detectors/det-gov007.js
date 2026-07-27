@@ -1,11 +1,11 @@
 'use strict';
 
-const { emitFinding } = require('../emit-finding');
 const { getSubjectForIssue } = require('../subject-map');
 const { parseChecklistFromBody, isAcceptanceCriteriaMet } = require('./shared/body-parsers');
 const { getCanonicalParents, getIssueById, isChildCategory } = require('./shared/relationship-index');
 
-function detectGOV007(repo, issues, findings, subjects) {
+function detectGOV007(repo, issues, findings, subjects, emit) {
+  if (typeof emit !== 'function') throw new TypeError('detector emitter is required');
   if (repo.governance_mode !== 'toolkit_governed') return;
   const parents = getCanonicalParents(issues);
   for (const parent of parents) {
@@ -16,12 +16,12 @@ function detectGOV007(repo, issues, findings, subjects) {
       const child = getIssueById(issues, item.linked_issue);
       if (!child) continue;
       if (child.state === 'open') {
-        emitFinding(findings, 'GOV007', getSubjectForIssue(subjects, parent.id), 'checked_parent_open_child', {});
+        emit(findings, 'GOV007', getSubjectForIssue(subjects, parent.id), 'checked_parent_open_child', {});
       }
       if (isChildCategory(child.category)) {
         const met = isAcceptanceCriteriaMet(child.body);
         if (met === false) {
-          emitFinding(findings, 'GOV007', getSubjectForIssue(subjects, parent.id), 'checked_parent_incomplete_acceptance', {});
+          emit(findings, 'GOV007', getSubjectForIssue(subjects, parent.id), 'checked_parent_incomplete_acceptance', {});
         }
       }
     }

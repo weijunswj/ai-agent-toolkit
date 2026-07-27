@@ -43,7 +43,7 @@ Source locks record exact, adapted, excluded, or linked provenance. `SOURCE-LOCK
 
 For third-party projects, the toolkit project version is the toolkit adaptation version, not the upstream version. Scheduled source-watch checks must use `SOURCE-LOCK.json` to identify upstream source and exact pins. Active third-party locks require manual review, public attribution, a full 40-character `source_commit`, and `source_blob_sha` pins for exact and adapted copied files.
 
-Scheduled source-watch is PR-notification-only. It may compare active SOURCE-LOCK pins and actionable advisory targets with upstream GitHub commits, then open or refresh a stable review PR. It must not copy upstream files, change SOURCE-LOCK/advisory records, execute upstream code, auto-merge, push to main, run live n8n actions, or treat notification as approval. Real updates require a separate human-approved PR.
+Stage A source-watch is proposal-only. Scheduled or manual dry-runs may compare active SOURCE-LOCK pins and actionable advisory targets with upstream GitHub commits, then emit deterministic review evidence. They must not create or update a branch, commit, push, create or edit a PR, mutate an issue, copy upstream files, change SOURCE-LOCK/advisory records, execute upstream code, auto-merge, push to main, run live n8n actions, or treat notification as approval. Privileged publication requires a separate activation issue, reviewed PR, bounded canary and controller acceptance.
 
 ## Updates
 

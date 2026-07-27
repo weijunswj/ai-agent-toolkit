@@ -42,13 +42,15 @@ test('schema loads from canonical path and defines snapshot_version 2.0.0', func
   assert.equal(s.properties.snapshot_version.const, '2.0.0');
 });
 
-test('schema has draft in enum for implementation_prs state', function() {
+test('schema represents draft and merged independently from GitHub PR state', function() {
   var s = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'development', 'issue-governance', '_main', 'schema', 'issue-snapshot.schema.json'), 'utf8'));
   var states = s.$defs.issue_record.properties.implementation_prs.items.properties.state.enum;
-  assert.ok(states.includes('draft'));
   assert.ok(states.includes('open'));
   assert.ok(states.includes('closed'));
-  assert.ok(states.includes('merged'));
+  assert.ok(!states.includes('draft'));
+  assert.ok(!states.includes('merged'));
+  assert.equal(s.$defs.issue_record.properties.implementation_prs.items.properties.draft.type, 'boolean');
+  assert.equal(s.$defs.issue_record.properties.implementation_prs.items.properties.merged.type, 'boolean');
 });
 
 test('complete category removed from schema enum', function() {
@@ -212,7 +214,7 @@ test('GOV024: replacement PR without reason', function() {
 test('GOV024: replacement PR without supersedes_pr', function() {
   var snap = { snapshot_version: '2.0.0', repository: { governance_mode: 'toolkit_governed', canonical_parent_tracker: 1, policy_version: '2.0.0' }, issues: [
     { id: 1, state: 'open', category: 'canonical_parent_tracker', body: '# T\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\n- [ ] #2 Task\n', children: [2] },
-    { id: 2, state: 'open', category: 'active_multi_step_child', body: '# Current status\n\nX\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\nParent tracker: #1\nImplementation branch: null\nImplementation PR: Not opened\n\n# Why this issue exists\n\nY\n\n# Goal and scope\n\nZ\n\n# Completed work\n\n- n\n\n# Current blockers and findings\n\n- n\n\n# Remaining steps\n\n- [ ] s\n\n# Acceptance criteria\n\n- [ ] a\n\n# Linked PRs and follow-ups\n\n- n\n\n# Decisions and durable evidence\n\n- n\n\n# Safety and authority\n\nC', parent: 1, implementation_prs: [{ number: 10, state: 'open', is_replacement: true, replacement_reason: 'reason' }] }
+    { id: 2, state: 'open', category: 'active_multi_step_child', body: '# Current status\n\nX\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\nParent tracker: #1\nImplementation branch: null\nImplementation PR: Not opened\n\n# Why this issue exists\n\nY\n\n# Goal and scope\n\nZ\n\n# Completed work\n\n- n\n\n# Current blockers and findings\n\n- n\n\n# Remaining steps\n\n- [ ] s\n\n# Acceptance criteria\n\n- [ ] a\n\n# Linked PRs and follow-ups\n\n- n\n\n# Decisions and durable evidence\n\n- n\n\n# Safety and authority\n\nC', parent: 1, implementation_prs: [{ number: 10, state: 'open', draft: false, merged: false, is_replacement: true, replacement_reason: 'reason' }] }
   ]};
   var result = audit.auditSnapshot(snap);
   assert.ok(findCodes(result.findings, 'GOV024').length >= 1);
@@ -286,7 +288,7 @@ test('production registry vs test engine identity parity', function() {
 test('test engine mutation does not alter production registry', function() {
   var { DETECTOR_REGISTRY } = require(path.join(repoRoot, 'repo', 'scripts', 'lib', 'detectors', 'index'));
   var original = Object.assign({}, DETECTOR_REGISTRY);
-  var testReg = buildTestRegistry({ GOV014: function() {} });
+  var testReg = buildTestRegistry({ GOV014: function(repo, issues, findings, subjects, emit) {} });
   assert.deepStrictEqual(Object.assign({}, DETECTOR_REGISTRY), original);
 });
 
@@ -297,19 +299,19 @@ test('exact oracle passes for valid-full', function() {
 
 test('exact oracle passes for isolated GOV014 fixture', function() {
   var result = audit.auditSnapshot(loadFixture('invalid-missing-why.json'));
-  var expected = [{ code: 'GOV014', severity: 'error', group: 'required_sections', subject: 'S2', message_key: 'missing_why_section' }];
+  var expected = [{ code: 'GOV014', severity: 'error', group: 'required_sections', subject: 'S2', message_key: 'missing_why_section', message: 'Missing "Why this issue exists" section.' }];
   assertExactTuples(result.findings, expected);
 });
 
 test('mutation of GOV014 detector causes expected oracle failure', function() {
   var snapshot = loadFixture('invalid-missing-why.json');
-  var expected = [{ code: 'GOV014', severity: 'error', group: 'required_sections', subject: 'S2', message_key: 'missing_why_section' }];
+  var expected = [{ code: 'GOV014', severity: 'error', group: 'required_sections', subject: 'S2', message_key: 'missing_why_section', message: 'Missing "Why this issue exists" section.' }];
 
-  var normalResult = auditWithRegistry(buildTestRegistry(), snapshot);
+  var normalResult = auditWithRegistry(buildTestRegistry(), snapshot, require('./lib/test-engine').productionEmitter);
   assertExactTuples(normalResult.findings, expected);
 
-  var mutatedReg = buildTestRegistry({ GOV014: function(repo, issues, findings, subjects) {} });
-  var mutResult = auditWithRegistry(mutatedReg, snapshot);
+  var mutatedReg = buildTestRegistry({ GOV014: function(repo, issues, findings, subjects, emit) {} });
+  var mutResult = auditWithRegistry(mutatedReg, snapshot, require('./lib/test-engine').productionEmitter);
 
   assert.throws(function() {
     assertExactTuples(mutResult.findings, expected);
@@ -318,11 +320,11 @@ test('mutation of GOV014 detector causes expected oracle failure', function() {
 
 test('mutation of one detector does not affect another code', function() {
   var snapshot = loadFixture('invalid-missing-status.json');
-  var normalResult = auditWithRegistry(buildTestRegistry(), snapshot);
+  var normalResult = auditWithRegistry(buildTestRegistry(), snapshot, require('./lib/test-engine').productionEmitter);
   assert.ok(normalResult.findings.some(function(f) { return f.code === 'GOV010'; }));
 
-  var mutatedReg = buildTestRegistry({ GOV014: function(repo, issues, findings, subjects) {} });
-  var mutResult = auditWithRegistry(mutatedReg, snapshot);
+  var mutatedReg = buildTestRegistry({ GOV014: function(repo, issues, findings, subjects, emit) {} });
+  var mutResult = auditWithRegistry(mutatedReg, snapshot, require('./lib/test-engine').productionEmitter);
   assert.ok(mutResult.findings.some(function(f) { return f.code === 'GOV010'; }));
 });
 
@@ -357,6 +359,138 @@ test('emitFinding throws on oversized count', function() {
 test('stable finding ordering', function() {
   var snap = loadFixture('invalid-missing-status.json');
   assert.deepEqual(audit.auditSnapshot(snap).findings, audit.auditSnapshot(snap).findings);
+});
+
+test('every production detector requires the five-argument signature', function() {
+  var { DETECTOR_REGISTRY } = require(path.join(repoRoot, 'repo', 'scripts', 'lib', 'detectors', 'index'));
+  for (var code of Object.keys(DETECTOR_REGISTRY)) {
+    assert.equal(DETECTOR_REGISTRY[code].length, 5, code + ' does not expose the locked signature');
+    assert.throws(function() {
+      DETECTOR_REGISTRY[code]({}, [], [], {});
+    }, /emitter is required/);
+  }
+});
+
+test('test engine omission of emitter fails immediately', function() {
+  assert.throws(function() {
+    auditWithRegistry(buildTestRegistry(), loadFixture('valid-full.json'));
+  }, /requires an explicit five-argument detector emitter/);
+});
+
+test('complete 27-code production, mutation and reachability manifest', function() {
+  var manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  var engine = require('./lib/test-engine');
+  var { emitFinding } = require(path.join(repoRoot, 'repo', 'scripts', 'lib', 'emit-finding'));
+  var { buildSubjectMap } = require(path.join(repoRoot, 'repo', 'scripts', 'lib', 'subject-map'));
+  var codes = Object.keys(engine.detectorUnits).sort();
+  assert.equal(manifest.manifest_version, '2.0.0');
+  assert.deepEqual(manifest.entries.map(function(entry) { return entry.target_detector_code; }).sort(), codes);
+
+  for (var entry of manifest.entries) {
+    assert.equal(entry.ordering_policy, 'exact-multiset');
+    assert.ok(entry.expected_target_emitter_calls.length > 0, entry.target_detector_code + ' has a zero-emission target fixture');
+    var snapshot = loadFixture(entry.fixture);
+
+    var production = audit.auditSnapshot(snapshot);
+    assertExactTuples(production.findings, entry.expected_production_tuples);
+
+    var targetIssues = JSON.parse(JSON.stringify(snapshot.issues));
+    var targetFindings = [];
+    var targetSubjects = buildSubjectMap(targetIssues);
+    var calls = [];
+    var capture = function(findings, code, subject, messageKey, context) {
+      calls.push({ code: code, subject: subject === undefined ? null : subject, message_key: messageKey, context: context });
+      emitFinding(findings, code, subject, messageKey, context);
+    };
+    engine.detectorUnits[entry.target_detector_code](
+      snapshot.repository, targetIssues, targetFindings, targetSubjects, capture
+    );
+    assert.deepEqual(calls, entry.expected_target_emitter_calls, entry.target_detector_code + ' reachability mismatch');
+
+    var overrides = {};
+    overrides[entry.target_detector_code] = function(repo, issues, findings, subjects, emitter) {};
+    var mutated = auditWithRegistry(engine.buildTestRegistry(overrides), snapshot, engine.productionEmitter);
+    var expectedMutation = entry.expected_production_tuples.filter(function(tuple) {
+      return tuple.code !== entry.target_detector_code;
+    });
+    assertExactTuples(mutated.findings, expectedMutation);
+  }
+});
+
+test('GOV022 and GOV027 replacement interaction tuple table is globally exclusive', function() {
+  var graph = require(path.join(repoRoot, 'repo', 'scripts', 'lib', 'detectors', 'det-gov027')).graphContradictions;
+  function pr(number, state, replacement, predecessor) {
+    var value = { number: number, state: state, draft: false, merged: false };
+    if (state === 'closed') value.merged = false;
+    if (replacement) {
+      value.is_replacement = true;
+      value.replacement_reason = 'reviewed reason';
+      value.supersedes_pr = predecessor;
+    }
+    return value;
+  }
+  function tuples(records) {
+    var active = records.filter(function(record) { return record.state === 'open' && record.merged === false; });
+    var values = [];
+    if (active.length > 1) values.push('GOV022:multiple_active_prs:' + active.length);
+    for (var key of graph({ implementation_prs: records })) values.push('GOV027:' + key);
+    return values.sort();
+  }
+  var scenarios = [
+    ['two unrelated active originals', [pr(1, 'open'), pr(2, 'open')], ['GOV022:multiple_active_prs:2']],
+    ['active original plus active replacement', [pr(1, 'open'), pr(2, 'open', true, 1)], ['GOV022:multiple_active_prs:2']],
+    ['two active replacements with one predecessor', [pr(1, 'closed'), pr(2, 'open', true, 1), pr(3, 'open', true, 1)], ['GOV022:multiple_active_prs:2', 'GOV027:multiple_successors']],
+    ['multiple successors where only one successor is active', [pr(1, 'closed'), pr(2, 'open', true, 1), pr(3, 'closed', true, 1)], ['GOV027:multiple_successors']],
+    ['multiple successors where multiple successors are active', [pr(1, 'closed'), pr(2, 'open', true, 1), pr(3, 'open', true, 1)], ['GOV022:multiple_active_prs:2', 'GOV027:multiple_successors']],
+    ['disconnected graph with no active PR', [pr(1, 'closed'), pr(2, 'closed')], ['GOV027:disconnected_graph']],
+    ['reactivated historical predecessor with valid cardinality', [pr(1, 'open'), pr(2, 'closed', true, 1)], ['GOV027:reactivation']],
+    ['independent self-edge and cycle plus multiple-active state', [pr(1, 'open', true, 1), pr(2, 'open', true, 3), pr(3, 'closed', true, 2)], ['GOV022:multiple_active_prs:2', 'GOV027:cycle', 'GOV027:self_edge']]
+  ];
+  for (var scenario of scenarios) assert.deepEqual(tuples(scenario[1]), scenario[2].slice().sort(), scenario[0]);
+});
+
+test('inline bold label parses canonical parent-template authority', function() {
+  var parser = require(path.join(repoRoot, 'repo', 'scripts', 'lib', 'detectors', 'shared', 'body-parsers'));
+  assert.deepEqual(parser.parseAuthorityField('**Implementation branch:** main', 'Implementation branch', ['plain', 'code']), { kind: 'plain', value: 'main' });
+});
+
+test('inline bold timestamp parses canonical child-template authority', function() {
+  var parser = require(path.join(repoRoot, 'repo', 'scripts', 'lib', 'detectors', 'shared', 'body-parsers'));
+  var values = parser.parseTimestamps('Last reconciled: **27 July 2026, 12:34 SGT**');
+  assert.equal(values.length, 1);
+  assert.equal(parser.timestampToStr(values[0]), '27 July 2026, 12:34 SGT');
+});
+
+test('code-spanned implementation branch preserves exact visible identity', function() {
+  var parser = require(path.join(repoRoot, 'repo', 'scripts', 'lib', 'detectors', 'shared', 'body-parsers'));
+  assert.equal(parser.parseImplBranchFromBody('Implementation branch: `feature/exact`'), 'feature/exact');
+});
+
+test('inline authority rejects duplicate labels, comments, escapes and mixed formatting', function() {
+  var parser = require(path.join(repoRoot, 'repo', 'scripts', 'lib', 'detectors', 'shared', 'body-parsers'));
+  assert.throws(function() {
+    parser.parseImplBranchFromBody('Implementation branch: one\nImplementation branch: two');
+  }, /BODY_AUTHORITY_DUPLICATE/);
+  assert.equal(parser.parseImplBranchFromBody('<!-- Implementation branch: hidden -->'), null);
+  assert.equal(parser.parseImplBranchFromBody('\\Implementation branch: escaped'), null);
+  assert.throws(function() {
+    parser.parseImplBranchFromBody('Implementation branch: **`mixed`**');
+  }, /BODY_AUTHORITY_INLINE_INVALID/);
+});
+
+test('every canonical issue-governance template parses its authority fields', function() {
+  var parser = require(path.join(repoRoot, 'repo', 'scripts', 'lib', 'detectors', 'shared', 'body-parsers'));
+  var directory = path.join(repoRoot, '_projects', 'development', 'issue-governance', '_main', 'templates');
+  for (var name of fs.readdirSync(directory).filter(function(value) { return value.endsWith('.md'); })) {
+    var body = fs.readFileSync(path.join(directory, name), 'utf8');
+    if (name !== 'lean-parent-tracker.md') {
+      var template = parser.extractCanonicalTemplate(body);
+      assert.deepEqual(parser.parseAuthorityField(template, 'Last reconciled', ['strong']).kind, 'strong', name + ' timestamp');
+      assert.notEqual(parser.parseImplBranchFromBody(template), null, name + ' branch');
+      assert.notEqual(parser.parseImplPRFromBody(template), null, name + ' PR');
+      assert.notEqual(parser.parseAuthorityField(template, 'Parent tracker', ['plain']), null, name + ' parent');
+    }
+  }
 });
 
 test('stable JSON output', function() {

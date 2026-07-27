@@ -24,14 +24,14 @@ Use this template for small, atomic tasks that do not require the full comprehen
 
 Last reconciled: **DD Month YYYY, HH:mm SGT**
 
-Parent tracker: #<parent_issue>
-Implementation branch: <branch_name> or `null`
-Implementation PR: #<pr_number> or `Not opened`
+Parent tracker: #<parent-issue>
+Implementation branch: <branch-name-or-null>
+Implementation PR: #<pr-number-or-not-opened>
 Replacement reason: <reason> (conditional — omit if not a replacement PR)
 Supersedes PR: #<pr_number> (conditional — omit if not a replacement PR)
-Depends on: #<issue_number> or `none`
-Blocks: #<issue_number> or `none`
-Related: #<issue_number> or `none`
+Depends on: <issue-identity-or-none>
+Blocks: <issue-identity-or-none>
+Related: <issue-identity-or-none>
 
 # Why this issue exists
 

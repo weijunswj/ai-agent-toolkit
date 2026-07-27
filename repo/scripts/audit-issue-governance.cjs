@@ -9,6 +9,7 @@ const { buildSubjectMap } = require('./lib/subject-map');
 const { validateAgainstSchema } = require('./lib/schema-validate');
 const { formatHuman, formatJson } = require('./lib/format-output');
 const { loadPolicy } = require('./lib/emit-finding');
+const { emitFinding } = require('./lib/emit-finding');
 
 function deepClone(obj) { return JSON.parse(JSON.stringify(obj)); }
 
@@ -23,7 +24,7 @@ function auditSnapshot(snapshot) {
 
   const orderedCodes = Object.keys(DETECTOR_REGISTRY).sort();
   for (const code of orderedCodes) {
-    DETECTOR_REGISTRY[code](repo, issues, findings, subjects);
+    DETECTOR_REGISTRY[code](repo, issues, findings, subjects, emitFinding);
   }
 
   findings.sort((a, b) => {

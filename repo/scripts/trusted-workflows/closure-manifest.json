@@ -1,0 +1,167 @@
+{
+  "schema_version": 1,
+  "generated_by": "build-closure-manifest.cjs",
+  "roots": [
+    "repo/scripts/trusted-workflows/auto-sync/dry-run.cjs",
+    "repo/scripts/trusted-workflows/source-watch/dry-run.cjs",
+    "repo/scripts/trusted-workflows/capture-node-toolchain.cjs",
+    "repo/scripts/trusted-workflows/verify-closure-manifest.cjs"
+  ],
+  "files": [
+    {
+      "path": "repo/scripts/trusted-workflows/auto-sync/classify-changed-files.cjs",
+      "sha256": "4bea1f62cc1a41250230f984ee0297eb6d994e78df9b3aad98bf9bb787518f14",
+      "module_type": "commonjs",
+      "direct_literal_dependencies": [
+        "repo/scripts/trusted-workflows/protocol.cjs"
+      ],
+      "root_ownership": []
+    },
+    {
+      "path": "repo/scripts/trusted-workflows/auto-sync/classify-generated-diff.cjs",
+      "sha256": "9e0dbca9befea0df5e1202f71aac92c69e220aca3549d265ddf0813c27e8baa8",
+      "module_type": "commonjs",
+      "direct_literal_dependencies": [
+        "repo/scripts/trusted-workflows/protocol.cjs"
+      ],
+      "root_ownership": []
+    },
+    {
+      "path": "repo/scripts/trusted-workflows/auto-sync/commit-push.cjs",
+      "sha256": "7955b1e9e15c11dd7e43138f3c75de841988955dd55aeb9d3b107ed11b609c1e",
+      "module_type": "commonjs",
+      "direct_literal_dependencies": [
+        "repo/scripts/trusted-workflows/protocol.cjs",
+        "repo/scripts/trusted-workflows/writeback-policy.cjs"
+      ],
+      "root_ownership": []
+    },
+    {
+      "path": "repo/scripts/trusted-workflows/auto-sync/dry-run.cjs",
+      "sha256": "7bdaee1368028cf24417ed74839c6df8c1a94f19b253f3ce9bfb79f843f52f05",
+      "module_type": "commonjs",
+      "direct_literal_dependencies": [
+        "repo/scripts/trusted-workflows/protocol.cjs",
+        "repo/scripts/trusted-workflows/writeback-policy.cjs"
+      ],
+      "root_ownership": [
+        "repo/scripts/trusted-workflows/auto-sync/dry-run.cjs"
+      ]
+    },
+    {
+      "path": "repo/scripts/trusted-workflows/auto-sync/preflight.cjs",
+      "sha256": "83236659f42fa7c315b99928efabcc564b240ee87f212d7811a03b9b66684ed0",
+      "module_type": "commonjs",
+      "direct_literal_dependencies": [
+        "repo/scripts/trusted-workflows/protocol.cjs",
+        "repo/scripts/trusted-workflows/writeback-policy.cjs"
+      ],
+      "root_ownership": []
+    },
+    {
+      "path": "repo/scripts/trusted-workflows/auto-sync/revalidate-head.cjs",
+      "sha256": "d89b540f69c351a0ac9337be48205746423eabafaab1aff7fb367122919be6fc",
+      "module_type": "commonjs",
+      "direct_literal_dependencies": [
+        "repo/scripts/trusted-workflows/protocol.cjs"
+      ],
+      "root_ownership": []
+    },
+    {
+      "path": "repo/scripts/trusted-workflows/auto-sync/verify-write-scope.cjs",
+      "sha256": "7a4fc13eaf59074016a2759771f821826227cbf877bbd3731bdf6f46085c5380",
+      "module_type": "commonjs",
+      "direct_literal_dependencies": [
+        "repo/scripts/trusted-workflows/protocol.cjs",
+        "repo/scripts/trusted-workflows/writeback-policy.cjs"
+      ],
+      "root_ownership": []
+    },
+    {
+      "path": "repo/scripts/trusted-workflows/capture-node-toolchain.cjs",
+      "sha256": "ecffc9c42136167ef5edc72b01c8e340f9ca0ef304285551a8b128f624bd5c55",
+      "module_type": "commonjs",
+      "direct_literal_dependencies": [],
+      "root_ownership": [
+        "repo/scripts/trusted-workflows/capture-node-toolchain.cjs"
+      ]
+    },
+    {
+      "path": "repo/scripts/trusted-workflows/external-actions-manifest.json",
+      "sha256": "e55730b55cf12eaa8c1cc5393a828a8adb1b94c79d9839aa9a04ea4c491b5824",
+      "module_type": "json",
+      "direct_literal_dependencies": [],
+      "root_ownership": []
+    },
+    {
+      "path": "repo/scripts/trusted-workflows/protocol.cjs",
+      "sha256": "fc77f457cbe6f98308a1391dcc465d742c522a32ae8febf9452dc3e57e9bec80",
+      "module_type": "commonjs",
+      "direct_literal_dependencies": [],
+      "root_ownership": [
+        "repo/scripts/trusted-workflows/auto-sync/dry-run.cjs",
+        "repo/scripts/trusted-workflows/source-watch/dry-run.cjs"
+      ]
+    },
+    {
+      "path": "repo/scripts/trusted-workflows/source-watch/dry-run.cjs",
+      "sha256": "3a061a0282788d2bfbd5154c84ac5c914ae08a507f046c2dca16385d1e02bb44",
+      "module_type": "commonjs",
+      "direct_literal_dependencies": [
+        "repo/scripts/trusted-workflows/protocol.cjs",
+        "repo/scripts/trusted-workflows/writeback-policy.cjs"
+      ],
+      "root_ownership": [
+        "repo/scripts/trusted-workflows/source-watch/dry-run.cjs"
+      ]
+    },
+    {
+      "path": "repo/scripts/trusted-workflows/source-watch/plan-notification.cjs",
+      "sha256": "d50333885b6c821323b37846eeedeac4f145cdb14dcbb85094080551ee4da9ba",
+      "module_type": "commonjs",
+      "direct_literal_dependencies": [
+        "repo/scripts/trusted-workflows/protocol.cjs"
+      ],
+      "root_ownership": []
+    },
+    {
+      "path": "repo/scripts/trusted-workflows/source-watch/update-notification.cjs",
+      "sha256": "b42adcfdbe22384ccf3d186ef5caec4c8fae0c28b4786cf61933ee2ef53d82dc",
+      "module_type": "commonjs",
+      "direct_literal_dependencies": [
+        "repo/scripts/trusted-workflows/protocol.cjs",
+        "repo/scripts/trusted-workflows/writeback-policy.cjs"
+      ],
+      "root_ownership": []
+    },
+    {
+      "path": "repo/scripts/trusted-workflows/source-watch/upsert-notification-pr.cjs",
+      "sha256": "a80c759acb52f0e8e20e2dd09fc1fd121e1af17311793838f4ebabecf4216b50",
+      "module_type": "commonjs",
+      "direct_literal_dependencies": [
+        "repo/scripts/trusted-workflows/protocol.cjs",
+        "repo/scripts/trusted-workflows/writeback-policy.cjs"
+      ],
+      "root_ownership": []
+    },
+    {
+      "path": "repo/scripts/trusted-workflows/verify-closure-manifest.cjs",
+      "sha256": "493f87543561c4f967d768e525f81dfcdf824e27ad48e60b713756bfbf77e1ac",
+      "module_type": "commonjs",
+      "direct_literal_dependencies": [],
+      "root_ownership": [
+        "repo/scripts/trusted-workflows/verify-closure-manifest.cjs"
+      ]
+    },
+    {
+      "path": "repo/scripts/trusted-workflows/writeback-policy.cjs",
+      "sha256": "a9c473aae3b819ea04d7f3fa8b9209973b36b434341bfad934489b591097bae1",
+      "module_type": "commonjs",
+      "direct_literal_dependencies": [],
+      "root_ownership": [
+        "repo/scripts/trusted-workflows/auto-sync/dry-run.cjs",
+        "repo/scripts/trusted-workflows/source-watch/dry-run.cjs"
+      ]
+    }
+  ]
+}

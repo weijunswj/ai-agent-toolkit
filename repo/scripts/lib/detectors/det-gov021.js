@@ -1,10 +1,10 @@
 'use strict';
 
-const { emitFinding } = require('../emit-finding');
 
-function detectGOV021(repo, issues, findings, subjects) {
+function detectGOV021(repo, issues, findings, subjects, emit) {
+  if (typeof emit !== 'function') throw new TypeError('detector emitter is required');
   if (repo.governance_mode === 'unknown') {
-    emitFinding(findings, 'GOV021', null, 'unknown_governance_mode', {});
+    emit(findings, 'GOV021', null, 'unknown_governance_mode', {});
   }
 }
 

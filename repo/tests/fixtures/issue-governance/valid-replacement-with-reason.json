@@ -22,7 +22,7 @@
       "parent": 1,
       "implementation_branch": "new-branch",
       "implementation_prs": [
-        { "number": 10, "state": "open", "is_replacement": true, "replacement_reason": "Branch corrupted", "supersedes_pr": 9 }
+        { "number": 10, "state": "open", "draft": false, "merged": false, "is_replacement": true, "replacement_reason": "Branch corrupted", "supersedes_pr": 9 }
       ]
     }
   ]

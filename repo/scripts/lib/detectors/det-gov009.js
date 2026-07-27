@@ -1,11 +1,11 @@
 'use strict';
 
-const { emitFinding } = require('../emit-finding');
 const { getSubjectForIssue } = require('../subject-map');
 const { parseChecklistFromBody } = require('./shared/body-parsers');
 const { getIssueById, isChildCategory } = require('./shared/relationship-index');
 
-function detectGOV009(repo, issues, findings, subjects) {
+function detectGOV009(repo, issues, findings, subjects, emit) {
+  if (typeof emit !== 'function') throw new TypeError('detector emitter is required');
   if (repo.governance_mode !== 'toolkit_governed') return;
   for (const issue of issues) {
     if (!isChildCategory(issue.category)) continue;
@@ -16,7 +16,7 @@ function detectGOV009(repo, issues, findings, subjects) {
     const bodyCL = parseChecklistFromBody(parentIssue.body);
     const item = bodyCL.find(ci => ci.linked_issue && String(ci.linked_issue) === String(issue.id));
     if (item && !item.checked) {
-      emitFinding(findings, 'GOV009', getSubjectForIssue(subjects, issue.id), 'closed_unchecked_parent', {});
+      emit(findings, 'GOV009', getSubjectForIssue(subjects, issue.id), 'closed_unchecked_parent', {});
     }
   }
 }

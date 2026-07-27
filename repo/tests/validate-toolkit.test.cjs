@@ -21,7 +21,7 @@ const sourceWatcher = require(path.join(repoRoot, 'repo', 'scripts', 'watch-proj
 const contractPartialPath = '_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md';
 const contractBegin = `<!-- AI-AGENT-TOOLKIT:${contractPartialPath}:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->`;
 const contractEnd = `<!-- AI-AGENT-TOOLKIT:${contractPartialPath}:END SOURCE-OF-TRUTH-CONTRACT -->`;
-const sourceWatchPrNotificationRule = 'Scheduled source-watch is PR-notification-only. It may compare active SOURCE-LOCK pins and actionable advisory targets with upstream GitHub commits, then open or refresh a stable review PR. It must not copy upstream files, change SOURCE-LOCK/advisory records, execute upstream code, auto-merge, push to main, run live n8n actions, or treat notification as approval. Real updates require a separate human-approved PR.';
+const sourceWatchPrNotificationRule = 'Stage A source-watch is proposal-only. Scheduled or manual dry-runs may compare active SOURCE-LOCK pins and actionable advisory targets with upstream GitHub commits, then emit deterministic review evidence. They must not create or update a branch, commit, push, create or edit a PR, mutate an issue, copy upstream files, change SOURCE-LOCK/advisory records, execute upstream code, auto-merge, push to main, run live n8n actions, or treat notification as approval. Privileged publication requires a separate activation issue, reviewed PR, bounded canary and controller acceptance.';
 
 function tempCopy() {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-validate-'));
@@ -516,13 +516,13 @@ test('Toolkit plugin packaged version surfaces stay aligned', () => {
   const bridgePath = path.join(cwd, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
   fs.writeFileSync(
     bridgePath,
-    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.8.2';", "const BRIDGE_VERSION = '2.2.1';"),
+    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.9.13';", "const BRIDGE_VERSION = '2.2.1';"),
     'utf8'
   );
 
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.8\.2/i);
+  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.9\.13/i);
 });
 
 test('skill discovery includes migrated skills', () => {
@@ -1005,84 +1005,36 @@ test('validator rejects validation workflow that relies on npm validate script',
   assert.match(result.stderr, /validate\.yml must use explicit validation commands instead of npm run validate:all/);
 });
 
-test('source-watch PR notifier uses the stable review-notification PR contract', () => {
+test('source-watch Stage A workflow is a read-only proposal contract', () => {
   const workflow = readTextFile(path.join(repoRoot, '.github', 'workflows', 'source-watch-pr.yml'));
-  assert.match(workflow, /^name:\s*Source Watch PR Notifier\s*$/m);
-  for (const cron of ['17 3 * * *', '43 9 * * *', '29 15 * * *']) {
-    assert.ok(workflow.includes(`cron: "${cron}"`), cron);
+  assert.match(workflow, /^name:\s*Source-watch notification proposal\s*$/m);
+  assert.match(workflow, /^  contents: read$/m);
+  assert.match(workflow, /^  pull-requests: read$/m);
+  assert.match(workflow, /^  workflow_dispatch:\s*$/m);
+  assert.match(workflow, /PUBLICATION_MODE: "dry-run"/);
+  assert.doesNotMatch(workflow, /git\s+(?:commit|push|switch|reset|rebase)|gh\s+pr\s+(?:create|edit|close)|force-with-lease/i);
+});
+
+test('validator rejects source-watch Stage A write permission or issue mutation permission', () => {
+  for (const mutation of [
+    (workflow) => workflow.replace('  contents: read\n', '  contents: write\n'),
+    (workflow) => workflow.replace('  pull-requests: read\n', '  pull-requests: read\n  issues: write\n')
+  ]) {
+    const cwd = tempCopy();
+    const workflowPath = path.join(cwd, '.github', 'workflows', 'source-watch-pr.yml');
+    fs.writeFileSync(workflowPath, mutation(readTextFile(workflowPath)));
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
   }
-  assert.match(workflow, /^  contents: write$/m);
-  assert.match(workflow, /^  pull-requests: write$/m);
-  assert.doesNotMatch(workflow, /^  issues: write$/m);
-  assert.match(workflow, /repo\/scripts\/check-project-source-updates\.cjs/);
-  assert.match(workflow, /source-watch\/review-active-third-party-updates/);
-  assert.match(workflow, /\[source-watch\] Review active source-watch updates/);
-  assert.match(workflow, /This PR is a review notification only\./);
-  assert.match(workflow, /No auto-merge is allowed\./);
-  assert.equal(sourceWatchPrBodyText(workflow), [
-    'This PR is a review notification only.',
-    'No source files or advisory tracking documents were updated.',
-    'No SOURCE-LOCK pins or advisory baselines were changed.',
-    'No SOURCE-LOCK pins were changed.',
-    'No toolkit rules, skills, hooks, memory guidance, repo-map guidance, or cleanup guidance were modified or deleted.',
-    'No upstream code was executed.',
-    'No auto-merge is allowed.',
-    'A human must review upstream changes, attribution/licence impact, allowlist scope, advisory recommendations, and host-harness drift evidence, then ask an AI agent to inspect before any real edits happen.',
-    'Advisory actions, when present, are read from `repo/source-watch/advisory-targets.json`.',
-    'No advisory tracking document was changed by this workflow.',
-    'If advisory action is taken, update the advisory document in a separate human-reviewed PR.',
-    'If meaningful host-harness drift is found, open a separate PR with evidence, rationale, exact proposed modifications, and validation.',
-    '',
-    '- [ ] Review upstream diff manually.',
-    '- [ ] Confirm changed files are within allowlist.',
-    '- [ ] Confirm attribution/licence notes still apply.',
-    '- [ ] Confirm no upstream code was executed.',
-    '- [ ] Decide whether a separate update PR should copy/adapt files.',
-    '- [ ] For Host Harness Capability Drift Review, classify affected toolkit components using the linked template before proposing changes.',
-    '- [ ] Confirm any shrink, move, host-native, or delete recommendation is implemented only in a separate evidence-backed PR.',
-    '- [ ] If advisory action is taken, update the advisory document in a separate human-reviewed PR.',
-    '- [ ] Run npm run validate:all before any real source update merge.'
-  ].join('\n'));
-  assert.match(workflow, /persist-credentials:\s*false/);
-  assert.match(workflow, /GH_TOKEN: \$\{\{ github\.token \}\}/);
-  assert.match(workflow, /git remote set-url origin "https:\/\/x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/);
-  assert.match(workflow, /git push --force-with-lease="refs\/heads\/\$BRANCH:\$remote_sha" origin "HEAD:\$BRANCH"/);
-  assert.doesNotMatch(workflow, /git push origin (?:HEAD:)?main\b/i);
-  assert.doesNotMatch(workflow, /git\s+push[^\n]*(?:--force(?!-with-lease)|-f\b)/i);
-  assert.doesNotMatch(workflow, /git\s+add[^\n]*(?:_projects|SOURCE-LOCK\.json)/i);
-  assert.doesNotMatch(workflow, /gh issue create|safe-source-update\.cjs|gh pr merge|--auto/i);
 });
 
-test('validator rejects source-watch PR notifier issue permission', () => {
-  const cwd = tempCopy();
-  const workflowPath = path.join(cwd, '.github', 'workflows', 'source-watch-pr.yml');
-  const workflow = readTextFile(workflowPath);
-  fs.writeFileSync(workflowPath, workflow.replace('  pull-requests: write\n', '  pull-requests: write\n  issues: write\n'));
-
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /source-watch-pr\.yml must grant only contents: write and pull-requests: write/);
-});
-
-test('validator rejects source-watch PR notifier issue permission with inline comment', () => {
-  const cwd = tempCopy();
-  const workflowPath = path.join(cwd, '.github', 'workflows', 'source-watch-pr.yml');
-  const workflow = readTextFile(workflowPath);
-  fs.writeFileSync(workflowPath, workflow.replace('  pull-requests: write\n', '  pull-requests: write\n  issues: write # not actually harmless\n'));
-
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /source-watch-pr\.yml must grant only contents: write and pull-requests: write/);
-});
-
-test('validator accepts expected workflow permissions with inline comments', () => {
+test('validator accepts read-only source-watch permissions with inline comments', () => {
   const cwd = tempCopy();
   const workflowPath = path.join(cwd, '.github', 'workflows', 'source-watch-pr.yml');
   const workflow = readTextFile(workflowPath)
-    .replace('  contents: write\n', '  contents: write # needed to update the stable notification branch\n')
-    .replace('  pull-requests: write\n', '  pull-requests: write # needed to create or update the stable notification PR\n');
+    .replace('  contents: read\n', '  contents: read # dry-run checkout only\n')
+    .replace('  pull-requests: read\n', '  pull-requests: read # bounded metadata only\n');
   fs.writeFileSync(workflowPath, workflow);
-
   const result = runValidate(cwd);
   assert.equal(result.status, 0, result.stderr);
 });
@@ -1156,378 +1108,34 @@ test('validator accepts the daily source-watch advisory document', () => {
   assert.equal(errors.filter((error) => /advisory-targets\.json/.test(error)).length, 0, errors.join('\n'));
 });
 
-test('auto-sync workflow owns agent instruction shim freshness', () => {
-  assert.equal(fs.existsSync(path.join(repoRoot, '.github', 'workflows', 'build-agent-rule-templates.yml')), false);
-  assert.equal(fs.existsSync(path.join(repoRoot, 'repo', 'scripts', 'agent-rule-template-specs.json')), false);
-  assert.equal(fs.existsSync(path.join(repoRoot, 'repo', 'scripts', 'build-agent-rule-templates.ps1')), false);
-  assert.equal(fs.existsSync(path.join(repoRoot, 'repo', 'scripts', '_build-agent-rule-templates.cmd')), false);
-
+test('auto-sync Stage A workflow is accepted by validation', () => {
   const workflow = readTextFile(path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'));
-  for (const rel of [
-    '_projects/development/ai-coding-agent-rules/_main/_partials/**'
-  ]) {
-    assert.match(workflow, new RegExp(`- "${escapeRegExp(rel)}"`), rel);
-  }
-  for (const command of [
-    'node "$TRUSTED_ROOT/repo/scripts/sync-agent-instruction-shims.cjs" --workspace "$PR_ROOT" --write',
-    'node "$TRUSTED_ROOT/repo/scripts/sync-agent-instruction-shims.cjs" --workspace "$PR_ROOT" --check',
-    'node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write',
-    'node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --check'
-  ]) {
-    assert.match(workflow, new RegExp(escapeRegExp(command)), command);
-  }
-  assert.doesNotMatch(workflow, /agent-rule-template-specs|build-agent-rule-templates/);
-});
-
-test('auto-sync generated surfaces workflow is accepted by validation', () => {
+  assert.match(workflow, /^  contents: read$/m);
+  assert.match(workflow, /^  pull-requests: read$/m);
+  assert.match(workflow, /WRITEBACK_ENABLED: "false"/);
+  assert.match(workflow, /GENERAL_ENABLED: "false"/);
   const errors = validator.runValidation();
   assert.equal(errors.filter((error) => /auto-sync-generated-surfaces\.yml/.test(error)).length, 0, errors.join('\n'));
 });
 
-test('validator rejects contents write outside the auto-sync generated surfaces workflow', () => {
-  const cwd = tempCopy();
-  fs.writeFileSync(
-    path.join(cwd, '.github', 'workflows', 'unsafe-write.yml'),
-    [
-      'name: Unsafe write',
-      'on:',
-      '  pull_request:',
-      'permissions:',
-      '  contents: write',
-      'jobs:',
-      '  unsafe:',
-      '    runs-on: ubuntu-latest',
-      '    steps:',
-      '      - run: echo unsafe'
-    ].join('\n')
-  );
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /unsafe-write\.yml uses contents: write/);
-});
-
-test('validator rejects git push outside the auto-sync generated surfaces workflow', () => {
-  const cwd = tempCopy();
-  fs.writeFileSync(
-    path.join(cwd, '.github', 'workflows', 'unsafe-push.yml'),
-    [
-      'name: Unsafe push',
-      'on:',
-      '  pull_request:',
-      'permissions:',
-      '  contents: read',
-      'jobs:',
-      '  unsafe:',
-      '    runs-on: ubuntu-latest',
-      '    steps:',
-      '      - run: git push origin HEAD:branch'
-    ].join('\n')
-  );
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /unsafe-push\.yml contains forbidden commit\/push behavior/);
-});
-
-test('auto-sync generated surfaces workflow rejects forbidden events and missing guards', () => {
-  const generatedScopePrefix = 'README.md|skills/*|';
+test('validator rejects Stage A permission, action, bootstrap and reachability drift', () => {
   const cases = [
-    ['pull_request is forbidden', (text) => text.replace('pull_request_target:', 'pull_request:'), /must use pull_request_target/],
-    ['push is forbidden', (text) => text.replace('pull_request_target:', 'push:\n  pull_request_target:'), /must not trigger on push/],
-    ['schedule is forbidden', (text) => text.replace('pull_request_target:', 'schedule:\n  pull_request_target:'), /must not trigger on schedule/],
-    ['workflow_run is forbidden', (text) => text.replace('pull_request_target:', 'workflow_run:\n  pull_request_target:'), /must not trigger on workflow_run/],
-    ['extra permissions are forbidden', (text) => text.replace('  pull-requests: read', '  pull-requests: read\n  issues: write'), /must grant only contents: write and pull-requests: read/],
-    ['same-repo guard is required', (text) => text.replaceAll('github.event.pull_request.head.repo.full_name == github.repository', 'true'), /missing same-repo PR guard/],
-    ['head main guard is required', (text) => text.replaceAll("github.event.pull_request.head.ref != 'main'", 'true'), /missing head\.ref != main guard/],
-    ['oversized PR file-list guard is required', (text) => text.replace('if (( changed_file_count > 3000 )); then', 'if false; then'), /preflight must reject PRs with more than 3000 changed files/],
-    ['post-sync changed-path validation is required', (text) => text.replaceAll('Forbidden post-sync change outside generated output scope', 'Removed post-sync guard'), /missing post-sync changed-path validation/],
-    ['_projects wildcard output scope stays rejected', (text) => text.replaceAll(generatedScopePrefix, `${generatedScopePrefix}_projects/*|`), /must not allow broad generated output paths/],
-    ['repo output scope stays rejected', (text) => text.replaceAll(generatedScopePrefix, `${generatedScopePrefix}repo/*|`), /must not allow broad generated output paths/],
-    ['.github output scope stays rejected', (text) => text.replaceAll(generatedScopePrefix, `${generatedScopePrefix}.github/*|`), /must not allow broad generated output paths/]
+    [(text) => text.replace('  contents: read\n', '  contents: write\n'), /contents: read/],
+    [(text) => text.replace('actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1', 'actions\/checkout@v7'), /full-SHA manifest/],
+    [(text) => text.replace("        if: ${{ github.event_name == 'workflow_dispatch' }}", "        if: ${{ github.event_name == 'pull_request_target' }}"), /manual-only/],
+    [(text) => text.replace('          path: pr', '          path: ${{ inputs.checkout_path }}'), /rooted at pr/],
+    [(text) => text.replace('        if: ${{ false }}\n        run: node repo\/scripts\/trusted-workflows\/auto-sync\/commit-push.cjs', '        run: node repo\/scripts\/trusted-workflows\/auto-sync\/commit-push.cjs'), /statically unreachable/],
+    [(text) => text.replace('      - name: Emit deterministic dry-run proposal', '      - name: Install\n        run: npm ci\n\n      - name: Emit deterministic dry-run proposal'), /must not install packages/],
+    [(text) => text.replace('/usr/bin/sha256sum --binary -- repo/scripts/trusted-workflows/capture-node-toolchain.cjs', '/usr/bin/sha256sum repo/scripts/trusted-workflows/capture-node-toolchain.cjs'), /bootstrap both trusted helpers/],
+    [(text) => text.replace('  GENERAL_ENABLED: "false"', '  GENERAL_ENABLED: "true"'), /missing inert policy value/]
   ];
-
-  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
-  const original = readTextFile(workflowPath);
-  for (const [name, mutate, expected] of cases) {
+  const original = readTextFile(path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'));
+  for (const [mutate, expected] of cases) {
     const cwd = tempCopy();
-    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
+    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), mutate(original));
     const result = runValidate(cwd);
-    assert.notEqual(result.status, 0, name);
-    assert.match(result.stderr, expected, name);
-  }
-});
-
-test('auto-sync generated surfaces workflow rejects forbidden commands and broad commit scopes', () => {
-  const cases = [
-    ['workflow_dispatch is forbidden', (text) => text.replace('pull_request_target:', 'workflow_dispatch:\n  pull_request_target:'), /must not trigger on workflow_dispatch/],
-    ['source-watch script is forbidden', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write', 'node "$TRUSTED_ROOT/repo/scripts/watch-project-sources.cjs" --workspace "$PR_ROOT"'), new RegExp('must not run source-watch or source-update ' + 'scripts')],
-    ['live n8n export is forbidden', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write', 'scr' + 'ipts/export-n8n-workflows-live.ps1'), /must not run live n8n import\/export/],
-    ['git add scope is fixed', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" add README.md skills', '/usr/bin/git -C "$PR_ROOT" add README.md skills repo'), /must commit only approved generated output paths/],
-    ['git add must not stage AGENTS.md', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" add README.md skills', '/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md skills mcp'), /must commit only approved generated output paths|must not stage active root AI instruction files/],
-    ['git add must not stage Claude shim', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" add README.md skills', '/usr/bin/git -C "$PR_ROOT" add README.md CLAUDE.md skills mcp'), /must commit only approved generated output paths|must not stage active root AI instruction files/],
-    ['commit bypasses hooks', (text) => text.replace('commit --no-verify -m', 'commit -m'), /must use git commit --no-verify/],
-    ['final push resets remote', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" remote set-url origin', 'echo remote'), /must set push remote with the GitHub token only in the final push step/]
-  ];
-
-  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
-  const original = readTextFile(workflowPath);
-  for (const [name, mutate, expected] of cases) {
-    const cwd = tempCopy();
-    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0, name);
-    assert.match(result.stderr, expected, name);
-  }
-});
-
-test('auto-sync generated surfaces workflow runs trusted scripts against the PR workspace', () => {
-  const cases = [
-    ['direct default-workspace script execution is forbidden', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --write', 'node repo/scripts/sync-repo-doc-contract.cjs --workspace "$PR_ROOT" --write'), /must not execute maintenance scripts from the default or PR workspace/],
-    ['PR workspace script execution is forbidden', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --write', 'node "$PR_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --write'), /must not execute maintenance scripts from the PR workspace/],
-    ['trusted checkout is required', (text) => text.replace('      - name: Checkout trusted base revision', '      - name: Removed trusted checkout'), /must check out trusted base and PR workspaces only after preflight/],
-    ['trusted checkout must use base SHA', (text) => text.replace('ref: ${{ github.event.pull_request.base.sha }}', 'ref: ${{ github.event.pull_request.base.ref }}'), /must check out the trusted base SHA to trusted\//],
-    ['PR checkout path is required', (text) => text.replace('path: pr', 'path: pull-request'), /must check out the guarded PR head SHA to pr\//],
-    ['sync scripts require explicit PR workspace', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --write', 'node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --write'), /must run trusted maintenance scripts with --workspace "\$PR_ROOT"/],
-    ['static checks require explicit PR workspace', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --check', 'node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --check'), /must run trusted maintenance scripts with --workspace "\$PR_ROOT"/],
-    ['git commands must target PR checkout', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" diff --name-only', 'git diff --name-only'), /git commands must explicitly target the PR workspace/]
-  ];
-
-  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
-  const original = readTextFile(workflowPath);
-  for (const [name, mutate, expected] of cases) {
-    const cwd = tempCopy();
-    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0, name);
-    assert.match(result.stderr, expected, name);
-  }
-});
-
-test('auto-sync generated surfaces workflow pins and rechecks the guarded PR head SHA', () => {
-  const cases = [
-    ['missing HEAD_SHA env is rejected', (text) => text.replace('      HEAD_SHA: ${{ github.event.pull_request.head.sha }}\n', ''), /missing guarded PR head SHA environment variable/],
-    ['PR checkout using head.ref is rejected', (text) => text.replace('ref: ${{ github.event.pull_request.head.sha }}', 'ref: ${{ github.event.pull_request.head.ref }}'), /must not check out the PR branch by mutable head\.ref/],
-    ['PR checkout using head.sha is required', (text) => text.replace('ref: ${{ github.event.pull_request.head.sha }}', 'ref: ${{ github.event.pull_request.head.repo.full_name }}'), /must check out the guarded PR head SHA to pr\//],
-    ['preflight current-head SHA query is required', (text) => text.replace('gh api "repos/${REPOSITORY_FULL_NAME}/pulls/${PR_NUMBER}" --jq \'.head.sha\'', 'echo "$HEAD_SHA"'), /preflight must verify the current PR head SHA from PR metadata/],
-    ['preflight stale-run rejection is required', (text) => text.replace('if [[ "$current_head_sha" != "$HEAD_SHA" ]]; then', 'if false; then'), /preflight must reject stale runs when the PR head SHA changed/],
-    ['preflight stale-run rejection must happen before optional skip', (text) => {
-      const start = text.indexOf('          current_head_sha="$(');
-      const end = text.indexOf('          for path in "${changed_files[@]}"; do', start);
-      assert.notEqual(start, -1);
-      assert.notEqual(end, -1);
-      const currentHeadBlock = text.slice(start, end);
-      return `${text.slice(0, start)}${text.slice(end).replace('          eligible=false', `${currentHeadBlock}          eligible=false`)}`;
-    }, /preflight must reject stale PR heads before optional auto-sync skips/],
-    ['post-checkout rev-parse verification is required', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" rev-parse HEAD', 'echo "$HEAD_SHA"'), /must verify the checked-out PR commit matches HEAD_SHA/],
-    ['post-checkout verification must run before sync', (text) => moveWorkflowStepAfter(text, 'Verify checked-out PR commit', 'Sync deterministic generated surfaces'), /must verify the checked-out PR commit before running sync/],
-    ['final remote branch SHA check is required before push', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" ls-remote origin "refs/heads/${HEAD_REF}"', 'echo "$HEAD_SHA"'), /final push must verify the PR branch still points to HEAD_SHA before pushing/],
-    ['force push is rejected', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" push origin "HEAD:${HEAD_REF}"', '/usr/bin/git -C "$PR_ROOT" push --force origin "HEAD:${HEAD_REF}"'), /must not force push generated output/]
-  ];
-
-  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
-  const original = readTextFile(workflowPath);
-  for (const [name, mutate, expected] of cases) {
-    const cwd = tempCopy();
-    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0, name);
-    assert.match(result.stderr, expected, name);
-  }
-});
-
-test('auto-sync generated surfaces workflow keeps static checks narrow', () => {
-  const cases = [
-    ['full validator against PR workspace is forbidden', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" diff --cached --check', 'node "$TRUSTED_ROOT/repo/scripts/validate-toolkit.cjs" --workspace "$PR_ROOT"\n          /usr/bin/git -C "$PR_ROOT" diff --cached --check'), /must not run full validation against the PR workspace/],
-    ['validate-toolkit workspace invocation is forbidden', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" diff --cached --check', 'node "$TRUSTED_ROOT/repo/scripts/validate-toolkit.cjs" --workspace "$PR_ROOT"\n          /usr/bin/git -C "$PR_ROOT" diff --cached --check'), /must not run full validation against the PR workspace/],
-    ['extra static command is forbidden', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" diff --check', '/usr/bin/git -C "$PR_ROOT" diff --check\n          echo extra'), /static generated surface checks must be limited to sync freshness and git diff checks/],
-    ['missing sync contract check is forbidden', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --check\n', ''), /static generated surface checks must be limited to sync freshness and git diff checks/]
-  ];
-
-  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
-  const original = readTextFile(workflowPath);
-  for (const [name, mutate, expected] of cases) {
-    const cwd = tempCopy();
-    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0, name);
-    assert.match(result.stderr, expected, name);
-  }
-});
-
-test('auto-sync generated surfaces workflow rejects PR-controlled test execution', () => {
-  const staticCheckAnchor = '/usr/bin/git -C "$PR_ROOT" diff --cached --check';
-  const preflightAnchor = '          if [[ "$HEAD_REPO_FULL_NAME" != "$REPOSITORY_FULL_NAME" ]]; then';
-  const cases = [
-    ['validate:all is forbidden', (text) => text.replace(staticCheckAnchor, `npm run validate:all\n          ${staticCheckAnchor}`), /must not run npm run validate:all/],
-    ['env-prefixed validate:all is forbidden', (text) => text.replace(preflightAnchor, `          GH_TOKEN=placeholder npm run validate:all\n${preflightAnchor}`), /must not run npm run validate:all/],
-    ['path-prefixed validate:all is forbidden', (text) => text.replace(preflightAnchor, `          /usr/bin/npm run validate:all\n${preflightAnchor}`), /must not run npm run validate:all/],
-    ['npm command is forbidden', (text) => text.replace(staticCheckAnchor, `npm ci\n          ${staticCheckAnchor}`), /must not run npm, pnpm, or yarn/],
-    ['env-prefixed npm command is forbidden', (text) => text.replace(preflightAnchor, `          NODE_ENV=test npm ci\n${preflightAnchor}`), /must not run npm, pnpm, or yarn/],
-    ['path-prefixed npm command is forbidden', (text) => text.replace(preflightAnchor, `          /usr/bin/npm ci\n${preflightAnchor}`), /must not run npm, pnpm, or yarn/],
-    ['pnpm command is forbidden', (text) => text.replace(staticCheckAnchor, `pnpm test\n          ${staticCheckAnchor}`), /must not run npm, pnpm, or yarn/],
-    ['yarn command is forbidden', (text) => text.replace(staticCheckAnchor, `yarn test\n          ${staticCheckAnchor}`), /must not run npm, pnpm, or yarn/],
-    ['node test command is forbidden', (text) => text.replace(staticCheckAnchor, `node --test repo/tests/*.test.cjs\n          ${staticCheckAnchor}`), /must not run generated Node test suites/],
-    ['python unit tests are forbidden', (text) => text.replace(staticCheckAnchor, 'python -m unittest discover -s skills/ui-ux-secure-frontend-design/tools/design-system-generator/' + 'tes' + `ts\n          ${staticCheckAnchor}`), new RegExp('must not run Python unit ' + 'tests')],
-    ['generated tool tests are forbidden', (text) => text.replace(staticCheckAnchor, 'node skills/ui-ux-secure-frontend-design/tools/design-system-generator/' + 'tes' + `ts/run.js\n          ${staticCheckAnchor}`), new RegExp('must not run generated tool ' + 'tests')]
-  ];
-
-  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
-  const original = readTextFile(workflowPath);
-  for (const [name, mutate, expected] of cases) {
-    const cwd = tempCopy();
-    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0, name);
-    assert.match(result.stderr, expected, name);
-  }
-});
-
-test('auto-sync generated surfaces workflow keeps privileged preflight before checkout', () => {
-  const cases = [
-    ['checkout before preflight is forbidden', (text) => text.replace('      - name: Preflight guard', '      - name: Checkout PR head branch'), /must run preflight before any checkout/],
-    ['persisted checkout credentials are forbidden', (text) => text.replace('persist-credentials: false', 'persist-credentials: true'), /must not use persisted checkout credentials/],
-    ['base-sha git diff changed-file detection is forbidden', (text) => text.replace("gh api --paginate \\", 'git diff --name-only "$BASE_SHA" HEAD\n          gh api --paginate \\'), /must not compute PR changed files with git diff against the PR branch/],
-    ['PR files API is required', (text) => text.replace('gh api --paginate \\', 'echo no api \\'), /must query PR changed files before checkout/],
-    ['github token is not exposed to sync or validation', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write', 'GH_TOKEN="${{ github.token }}" node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write'), /must expose github.token only to preflight and final push steps/],
-    ['should_sync gates checkout and writeback', (text) => text.replace("        if: steps.preflight.outputs.should_sync == 'true'\n        uses: actions/checkout@v7", '        uses: actions/checkout@v7'), /must skip checkout and writeback steps when preflight should_sync is false/]
-  ];
-
-  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
-  const original = readTextFile(workflowPath);
-  for (const [name, mutate, expected] of cases) {
-    const cwd = tempCopy();
-    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0, name);
-    assert.match(result.stderr, expected, name);
-  }
-});
-
-test('auto-sync generated surfaces workflow requires exact privileged action references', () => {
-  const cases = [
-    [
-      'trusted checkout v1 downgrade is rejected',
-      (text) => replaceWorkflowStepText(text, 'Checkout trusted base revision', /uses: actions\/checkout@v7/, 'uses: actions/checkout@v1'),
-      /Checkout trusted base revision must use actions\/checkout@v7/
-    ],
-    [
-      'PR checkout v1 downgrade is rejected',
-      (text) => replaceWorkflowStepText(text, 'Checkout PR head commit', /uses: actions\/checkout@v7/, 'uses: actions/checkout@v1'),
-      /Checkout PR head commit must use actions\/checkout@v7/
-    ],
-    [
-      'setup-node v1 downgrade is rejected',
-      (text) => replaceWorkflowStepText(text, 'Set up Node.js', /uses: actions\/setup-node@v7/, 'uses: actions/setup-node@v1'),
-      /Set up Node\.js must use actions\/setup-node@v7/
-    ]
-  ];
-
-  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
-  const original = readTextFile(workflowPath);
-  for (const [name, mutate, expected] of cases) {
-    const cwd = tempCopy();
-    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0, name);
-    assert.match(result.stderr, expected, name);
-  }
-});
-
-test('auto-sync generated surfaces workflow rejects unexpected uses action steps', () => {
-  const cases = [
-    [
-      'extra checkout v1 action after preflight is rejected',
-      `      - name: Extra unsafe checkout
-        if: steps.preflight.outputs.should_sync == 'true'
-        uses: actions/checkout@v1`,
-      /must allow only the reviewed uses action steps/
-    ],
-    [
-      'extra checkout v7 action after preflight is rejected',
-      `      - name: Extra duplicate checkout
-        if: steps.preflight.outputs.should_sync == 'true'
-        uses: actions/checkout@v7`,
-      /must allow only the reviewed uses action steps/
-    ],
-    [
-      'extra setup-node v1 action is rejected',
-      `      - name: Extra setup node
-        if: steps.preflight.outputs.should_sync == 'true'
-        uses: actions/setup-node@v1`,
-      /must allow only the reviewed uses action steps/
-    ],
-    [
-      'unrelated uses action is rejected',
-      `      - name: Extra unrelated action
-        if: steps.preflight.outputs.should_sync == 'true'
-        uses: actions/cache@v4`,
-      /must allow only the reviewed uses action steps/
-    ]
-  ];
-
-  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
-  const original = readTextFile(workflowPath);
-  for (const [name, stepText, expected] of cases) {
-    const cwd = tempCopy();
-    fs.writeFileSync(
-      path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'),
-      `${insertWorkflowStepBefore(original, 'Checkout trusted base revision', stepText)}\n`
-    );
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0, name);
-    assert.match(result.stderr, expected, name);
-  }
-});
-
-test('auto-sync generated surfaces workflow snapshots and rechecks staged output before commit', () => {
-  const cases = [
-    ['final recheck is required after validation', (text) => text.replace('      - name: Final pre-commit workspace recheck', '      - name: Removed pre-commit workspace recheck'), /must recheck the workspace and staged index after validation and before commit/],
-    ['post-sync staged index snapshot is required', (text) => text.replace('expected_index_tree="$(/usr/bin/git -C "$PR_ROOT" write-tree)"', 'expected_index_tree="$(/usr/bin/git -C "$PR_ROOT" rev-parse HEAD)"'), /must snapshot the staged index after the post-sync guard/],
-    ['staged index tree comparison is required', (text) => text.replace('if [[ "$current_index_tree" != "${EXPECTED_INDEX_TREE}" ]]; then', 'if false; then'), /final recheck must compare the staged index tree snapshot/],
-    ['commit step must not stage files', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" config user.name', '/usr/bin/git -C "$PR_ROOT" add README.md skills\n          /usr/bin/git -C "$PR_ROOT" config user.name'), /commit step must not run git add/],
-    ['final recheck rejects untracked files', (text) => text.replace('untracked_files="$(/usr/bin/git -C "$PR_ROOT" ls-files --others --exclude-standard)"', 'untracked_files=""'), /final recheck must reject untracked files before commit/],
-    ['final recheck rejects unstaged tracked changes', (text) => text.replace('if ! /usr/bin/git -C "$PR_ROOT" diff --quiet; then', 'if false; then'), /final recheck must reject unstaged tracked changes before commit/],
-    ['final recheck rejects staged paths outside generated outputs', (text) => replaceLast(text, '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md', '_projects/development/ai-coding-agent-rules/_main/AGENTS.md'), /final recheck must reject staged paths outside generated output scope/],
-    ['commit step resets dangerous git environment', (text) => text.replace('unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY GIT_SSH_COMMAND', 'echo no reset'), /commit step must reset dangerous git environment state/],
-    ['push step resets dangerous git environment', (text) => replaceLast(text, 'unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY GIT_SSH_COMMAND', 'echo no reset'), /push step must reset dangerous git environment state/]
-  ];
-
-  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
-  const original = readTextFile(workflowPath);
-  for (const [name, mutate, expected] of cases) {
-    const cwd = tempCopy();
-    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0, name);
-    assert.match(result.stderr, expected, name);
-  }
-});
-
-test('auto-sync generated surfaces workflow skips unsafe mixed preflight paths before writeback', () => {
-  const cases = [
-    ['repo docs skip is required', (text) => text.replace('repo/docs/*|', ''), /missing unsafe preflight fail handling for repo\/docs/],
-    ['_main skip is required', (text) => text.replace('_projects/*/_main/*|', ''), /missing unsafe preflight fail handling for _projects\/\*\*\/_main/],
-    ['.github skip is required', (text) => text.replace('.github/*|', ''), /missing unsafe preflight fail handling for \.github/],
-    ['repo scripts skip is required', (text) => text.replace('repo/scripts/*|', ''), new RegExp('missing unsafe preflight fail handling for repo/' + 'scripts')],
-    ['repo tests skip is required', (text) => text.replace('repo/tests/*|', ''), /missing unsafe preflight fail handling for repo\/tests/],
-    ['lockfile skip is required', (text) => text.replace('package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|', ''), /missing unsafe preflight fail handling for package\/lockfile changes/],
-    ['source-of-truth contract partial carve-out is required', (text) => text.replaceAll(contractPartialPath, '_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/other-contract.md'), /must allow source-of-truth contract partial changes as auto-sync eligible inputs/],
-    ['agent-rule partial carve-out is required', (text) => text.replaceAll('_projects/development/ai-coding-agent-rules/_main/_partials/*', '_projects/blocked/_main/_partials/*'), /must allow agent-rule partial changes as auto-sync eligible inputs/],
-    ['source-side agent-rule output carve-out is required', (text) => text.replaceAll('_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md', '_projects/development/ai-coding-agent-rules/_main/AGENTS.md'), /must allow generated source-side agent-rule templates in the guarded PR file set|missing generated source-side agent-rule template allowlist entry/],
-    ['clear skip notice is required', (text) => text.replace('Auto-sync skipped: this PR touches source/maintenance paths that require manual generated-output commits. Normal Validate checks remain the merge gate.', 'Auto-sync did something else'), /preflight must skip unsafe mixed maintenance\/source PRs without writeback/],
-    ['manual generated-output guidance is required', (text) => text.replace('Normal Validate checks remain the merge gate.', 'Generated outputs will be checked here.'), /preflight must skip unsafe mixed maintenance\/source PRs without writeback/],
-    ['unsafe path branch must set should_sync false', (text) => text.replace('echo "should_sync=false" >> "$GITHUB_OUTPUT"', 'echo "should_sync=true" >> "$GITHUB_OUTPUT"'), /preflight must skip unsafe mixed maintenance\/source PRs without writeback/],
-    ['unsafe path branch must exit successfully', (text) => text.replace('echo "should_sync=false" >> "$GITHUB_OUTPUT"\n                exit 0', 'echo "should_sync=false" >> "$GITHUB_OUTPUT"\n                exit 1'), /preflight must skip unsafe mixed maintenance\/source PRs without writeback/],
-    ['unsafe path branch must not red-fail', (text) => text.replace('Auto-sync skipped: this PR touches source/maintenance paths that require manual generated-output commits', 'Auto-sync refused: this PR mixes generated-sync-eligible changes'), /preflight must skip unsafe mixed maintenance\/source PRs without writeback/]
-  ];
-
-  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
-  const original = readTextFile(workflowPath);
-  for (const [name, mutate, expected] of cases) {
-    const cwd = tempCopy();
-    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0, name);
-    assert.match(result.stderr, expected, name);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, expected);
   }
 });
 

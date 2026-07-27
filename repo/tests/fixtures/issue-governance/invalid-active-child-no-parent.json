@@ -1,0 +1,24 @@
+{
+  "snapshot_version": "2.0.0",
+  "repository": {
+    "fixture_id": "invalid-active-child-no-parent",
+    "governance_mode": "toolkit_governed",
+    "canonical_parent_tracker": 1,
+    "policy_version": "2.0.0"
+  },
+  "issues": [
+    {
+      "id": 1,
+      "state": "open",
+      "category": "canonical_parent_tracker",
+      "body": "# Tracker\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\n- [ ] #2 Task\n",
+      "children": [2]
+    },
+    {
+      "id": 2,
+      "state": "open",
+      "category": "small_atomic_child",
+      "body": "# Current status\n\nPLANNED\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\nParent tracker: #1\nImplementation branch: null\nImplementation PR: Not opened\nDepends on: none\nBlocks: none\nRelated: none\n\n# Why this issue exists\n\nTask.\n\n# Completed work\n\n- none\n\n# Blockers\n\n- none\n\n# Remaining work\n\n- [ ] Work\n\n# Acceptance criteria\n\n- [ ] Done\n\n# Linked PRs or follow-ups\n\n- none\n\n# Safety and authority\n\nController-owned."
+    }
+  ]
+}

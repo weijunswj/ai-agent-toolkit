@@ -1,10 +1,10 @@
 'use strict';
 
-const { emitFinding } = require('../emit-finding');
 const { getSubjectForIssue } = require('../subject-map');
 const { getChildren, getIssueById } = require('./shared/relationship-index');
 
-function detectGOV006(repo, issues, findings, subjects) {
+function detectGOV006(repo, issues, findings, subjects, emit) {
+  if (typeof emit !== 'function') throw new TypeError('detector emitter is required');
   if (repo.governance_mode !== 'toolkit_governed') return;
   const children = getChildren(issues);
   for (const child of children) {
@@ -13,7 +13,7 @@ function detectGOV006(repo, issues, findings, subjects) {
     if (!parentIssue || parentIssue.category !== 'canonical_parent_tracker') continue;
     const parentChildren = parentIssue.children || [];
     if (!parentChildren.some(c => String(c) === String(child.id))) {
-      emitFinding(findings, 'GOV006', getSubjectForIssue(subjects, child.id), 'not_bidirectional', {});
+      emit(findings, 'GOV006', getSubjectForIssue(subjects, child.id), 'not_bidirectional', {});
     }
   }
 }

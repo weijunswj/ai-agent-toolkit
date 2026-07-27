@@ -1,0 +1,8 @@
+{
+  "event_name": "pull_request_target",
+  "repository": "weijunswj/ai-agent-toolkit",
+  "base_ref": "main",
+  "pull_request": "310",
+  "head_sha": "1ec500712bdf043ab261cbbe2b4003713d3ebfee",
+  "expected_writeback": false
+}

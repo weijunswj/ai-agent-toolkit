@@ -2,10 +2,57 @@
 
 const VALID_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
+function markdownLines(body) {
+  const lines = String(body || '').normalize('NFC').replace(/\r\n?/g, '\n').replace(/<!--[\s\S]*?-->/g, '').split('\n');
+  const visible = [];
+  let fenced = false;
+  for (const line of lines) {
+    if (/^\s*```/.test(line)) { fenced = !fenced; continue; }
+    if (!fenced) visible.push(line);
+  }
+  return visible;
+}
+
+function extractCanonicalTemplate(body) {
+  const match = String(body || '').normalize('NFC').replace(/\r\n?/g, '\n').match(/(?:^|\n)## Template\s*\n+```md\n([\s\S]*?)\n```(?:\n|$)/);
+  if (!match) throw new Error('BODY_TEMPLATE_BLOCK_MISSING');
+  return match[1];
+}
+
+function parseInlineValue(raw, allowed, field) {
+  const value = raw.trim();
+  const forms = [];
+  if (!/[`*_[\]\\]/.test(value)) forms.push({ kind: 'plain', value });
+  let match = value.match(/^`([^`\r\n]+)`$/);
+  if (match) forms.push({ kind: 'code', value: match[1] });
+  match = value.match(/^\*\*([^*\r\n]+)\*\*$/);
+  if (match) forms.push({ kind: 'strong', value: match[1] });
+  match = value.match(/^\[([^\]\r\n]+)\]\(([^()\s\r\n]+)\)$/);
+  if (match) forms.push({ kind: 'link', value: match[1], target: match[2] });
+  const accepted = forms.filter((form) => allowed.includes(form.kind));
+  if (accepted.length !== 1 || accepted[0].value.trim() === '' || /[`*_[\]\\]/.test(accepted[0].value)) {
+    throw new Error('BODY_AUTHORITY_INLINE_INVALID:' + field);
+  }
+  return accepted[0];
+}
+
+function parseAuthorityField(body, label, allowed) {
+  const matches = [];
+  const plainPrefix = label + ':';
+  const boldPrefix = '**' + label + ':**';
+  for (const original of markdownLines(body)) {
+    const line = original.trim();
+    if (line.startsWith(plainPrefix)) matches.push(line.slice(plainPrefix.length));
+    else if (line.startsWith(boldPrefix)) matches.push(line.slice(boldPrefix.length));
+  }
+  if (matches.length > 1) throw new Error('BODY_AUTHORITY_DUPLICATE:' + label);
+  return matches.length === 0 ? null : parseInlineValue(matches[0], allowed, label);
+}
+
 function parseChecklistFromBody(body) {
   const items = [];
   if (!body) return items;
-  for (const line of body.split('\n')) {
+  for (const line of markdownLines(body)) {
     const m = line.match(/^- \[([ xX])\]\s+(.*)/);
     if (m) {
       const checked = m[1] === 'x' || m[1] === 'X';
@@ -20,8 +67,8 @@ function parseChecklistFromBody(body) {
 function countTimestamps(body) {
   if (!body) return 0;
   let count = 0;
-  for (const line of body.split('\n')) {
-    if (/^Last\s+reconciled:\s+/.test(line.trim())) count += 1;
+  for (const line of markdownLines(body)) {
+    if (line.trim().startsWith('Last reconciled:')) count += 1;
   }
   return count;
 }
@@ -29,9 +76,9 @@ function countTimestamps(body) {
 function parseTimestamps(body) {
   const results = [];
   if (!body) return results;
-  for (const line of body.split('\n')) {
+  for (const line of markdownLines(body)) {
     const trimmed = line.trim();
-    const m = trimmed.match(/^Last\s+reconciled:\s+\*\*(\d{2})\s+([A-Z][a-z]+)\s+(\d{4}),\s+(\d{2}):(\d{2})\s+SGT\*\*$/);
+    const m = trimmed.match(/^Last reconciled:\s+\*\*(\d{2}) ([A-Z][a-z]+) (\d{4}), (\d{2}):(\d{2}) SGT\*\*$/);
     if (m) {
       results.push({ day: +m[1], month: m[2], year: +m[3], hour: +m[4], minute: +m[5], raw: trimmed });
     }
@@ -54,7 +101,7 @@ function isRealTimestamp(ts) {
 function isAcceptanceCriteriaMet(body) {
   if (!body) return null;
   let inSection = false, hasCriteria = false, allChecked = true;
-  for (const line of body.split('\n')) {
+  for (const line of markdownLines(body)) {
     if (/^#\s+Acceptance\s+criteria/im.test(line.trim())) { inSection = true; continue; }
     if (inSection && /^#\s+/.test(line.trim())) break;
     if (inSection) {
@@ -67,33 +114,32 @@ function isAcceptanceCriteriaMet(body) {
 }
 
 function parseImplBranchFromBody(body) {
-  if (!body) return null;
-  const m = body.match(/^Implementation\s+branch:\s+(.+)$/im);
-  return m ? m[1].trim() : null;
+  const parsed = parseAuthorityField(body, 'Implementation branch', ['plain', 'code', 'link']);
+  return parsed ? parsed.value : null;
 }
 
 function parseImplPRFromBody(body) {
-  if (!body) return null;
-  const m = body.match(/^Implementation\s+PR:\s+(.+)$/im);
-  return m ? m[1].trim() : null;
+  const parsed = parseAuthorityField(body, 'Implementation PR', ['plain']);
+  return parsed ? parsed.value : null;
 }
 
 function parseParentTrackerFromBody(body) {
-  if (!body) return null;
-  const m = body.match(/^Parent\s+tracker:\s*#(\d+)/im);
-  return m ? +m[1] : null;
+  const parsed = parseAuthorityField(body, 'Parent tracker', ['plain']);
+  if (!parsed) return null;
+  const match = parsed.value.match(/^#([1-9][0-9]*)$/);
+  return match ? +match[1] : null;
 }
 
 function parseReplacementReasonFromBody(body) {
-  if (!body) return null;
-  const m = body.match(/^Replacement\s+reason:\s+(.+)$/im);
-  return m ? m[1].trim() : null;
+  const parsed = parseAuthorityField(body, 'Replacement reason', ['plain']);
+  return parsed ? parsed.value : null;
 }
 
 function parseSupersedesPRFromBody(body) {
-  if (!body) return null;
-  const m = body.match(/^Supersedes\s+PR:\s*#(\d+)/im);
-  return m ? +m[1] : null;
+  const parsed = parseAuthorityField(body, 'Supersedes PR', ['plain']);
+  if (!parsed) return null;
+  const match = parsed.value.match(/^#([1-9][0-9]*)$/);
+  return match ? +match[1] : null;
 }
 
 function timestampToStr(ts) {
@@ -177,5 +223,5 @@ module.exports = {
   isAcceptanceCriteriaMet, parseImplBranchFromBody, parseImplPRFromBody,
   parseParentTrackerFromBody, parseReplacementReasonFromBody, parseSupersedesPRFromBody,
   timestampToStr, normalizeChecklistItem, checklistMultisetMatch, parentChildrenMatch,
-  VALID_MONTHS
+  parseInlineValue, parseAuthorityField, markdownLines, extractCanonicalTemplate, VALID_MONTHS
 };

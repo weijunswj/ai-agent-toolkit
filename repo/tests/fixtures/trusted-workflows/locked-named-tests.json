@@ -1,0 +1,688 @@
+{
+  "schema_version": 1,
+  "design_lock": "DL-299-310-003",
+  "scope_files": [
+    "repo/tests/closure-manifest.test.cjs",
+    "repo/tests/existing-base-autosync-proof.test.cjs",
+    "repo/tests/issue-governance-generated-parity.test.cjs",
+    "repo/tests/issue-governance-side-effects.test.cjs",
+    "repo/tests/issue-governance.test.cjs",
+    "repo/tests/locked-test-manifest.test.cjs",
+    "repo/tests/setup-node-identity.test.cjs",
+    "repo/tests/source-watch-pr-workflow.test.cjs",
+    "repo/tests/trusted-workflow-rollout.test.cjs",
+    "repo/tests/workflow-inventory.test.cjs"
+  ],
+  "tests": [
+    {
+      "test_id": "LOCKED-001",
+      "file": "repo/tests/closure-manifest.test.cjs",
+      "name": "Acorn closure parser manifest is current after npm ci --ignore-scripts"
+    },
+    {
+      "test_id": "LOCKED-002",
+      "file": "repo/tests/closure-manifest.test.cjs",
+      "name": "closure manifest has exact set and SHA-256 equality"
+    },
+    {
+      "test_id": "LOCKED-003",
+      "file": "repo/tests/closure-manifest.test.cjs",
+      "name": "built-in runtime verifier bootstrap and strict one-object protocol"
+    },
+    {
+      "test_id": "LOCKED-004",
+      "file": "repo/tests/closure-manifest.test.cjs",
+      "name": "bootstrap helper digests are workflow-pinned and current"
+    },
+    {
+      "test_id": "LOCKED-005",
+      "file": "repo/tests/closure-manifest.test.cjs",
+      "name": "closure parser ignores import-like text in comments, strings, templates and escapes"
+    },
+    {
+      "test_id": "LOCKED-006",
+      "file": "repo/tests/closure-manifest.test.cjs",
+      "name": "closure parser rejects every dynamic or computed execution/import form"
+    },
+    {
+      "test_id": "LOCKED-007",
+      "file": "repo/tests/closure-manifest.test.cjs",
+      "name": "bootstrap helper ownership and file mode are trusted-base safe"
+    },
+    {
+      "test_id": "LOCKED-008",
+      "file": "repo/tests/existing-base-autosync-proof.test.cjs",
+      "name": "existing-base evidence verifier accepts exact non-write synchronize proof"
+    },
+    {
+      "test_id": "LOCKED-009",
+      "file": "repo/tests/existing-base-autosync-proof.test.cjs",
+      "name": "existing-base evidence verifier rejects any reached commit or push step"
+    },
+    {
+      "test_id": "LOCKED-010",
+      "file": "repo/tests/existing-base-autosync-proof.test.cjs",
+      "name": "existing-base evidence verifier rejects missing, ambiguous or moved heads"
+    },
+    {
+      "test_id": "LOCKED-011",
+      "file": "repo/tests/issue-governance-generated-parity.test.cjs",
+      "name": "issue-governance generated surface parity is isolated, exact and idempotent"
+    },
+    {
+      "test_id": "LOCKED-012",
+      "file": "repo/tests/issue-governance-side-effects.test.cjs",
+      "name": "side-effect manifest has exactly 188 unique complete variants"
+    },
+    {
+      "test_id": "LOCKED-013",
+      "file": "repo/tests/issue-governance-side-effects.test.cjs",
+      "name": "side-effect manifest generator is exact and current"
+    },
+    {
+      "test_id": "LOCKED-014",
+      "file": "repo/tests/issue-governance-side-effects.test.cjs",
+      "name": "parent observes strict guarded sentinel protocol"
+    },
+    {
+      "test_id": "LOCKED-015",
+      "file": "repo/tests/issue-governance-side-effects.test.cjs",
+      "name": "Node fs.open exact string and numeric flag table"
+    },
+    {
+      "test_id": "LOCKED-016",
+      "file": "repo/tests/issue-governance-side-effects.test.cjs",
+      "name": "dns CommonJS, node specifier, promises and post-install destructuring are intercepted"
+    },
+    {
+      "test_id": "LOCKED-017",
+      "file": "repo/tests/issue-governance-side-effects.test.cjs",
+      "name": "all four post-install module-object and destructured acquisition modes execute the real export"
+    },
+    {
+      "test_id": "LOCKED-018",
+      "file": "repo/tests/issue-governance-side-effects.test.cjs",
+      "name": "pre-install destructured references are not claimed as interceptable"
+    },
+    {
+      "test_id": "LOCKED-019",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "policy loads from canonical path and has version 2.0.0"
+    },
+    {
+      "test_id": "LOCKED-020",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "schema loads from canonical path and defines snapshot_version 2.0.0"
+    },
+    {
+      "test_id": "LOCKED-021",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "schema represents draft and merged independently from GitHub PR state"
+    },
+    {
+      "test_id": "LOCKED-022",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "complete category removed from schema enum"
+    },
+    {
+      "test_id": "LOCKED-023",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "valid toolkit-governed with parent and children produces no findings"
+    },
+    {
+      "test_id": "LOCKED-024",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "valid repository-native is left unenforced"
+    },
+    {
+      "test_id": "LOCKED-025",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "valid unknown mode produces GOV021 advisory"
+    },
+    {
+      "test_id": "LOCKED-026",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "fully compliant snapshot produces no findings"
+    },
+    {
+      "test_id": "LOCKED-027",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "valid replacement PR with explicit reason produces no GOV024"
+    },
+    {
+      "test_id": "LOCKED-028",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV001: missing canonical parent"
+    },
+    {
+      "test_id": "LOCKED-029",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV002: multiple canonical parents"
+    },
+    {
+      "test_id": "LOCKED-030",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV004: active child with no parent link"
+    },
+    {
+      "test_id": "LOCKED-031",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV005: active child absent from parent checklist"
+    },
+    {
+      "test_id": "LOCKED-032",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV006: parent/child link not bidirectional"
+    },
+    {
+      "test_id": "LOCKED-033",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV007: checked parent with incomplete child"
+    },
+    {
+      "test_id": "LOCKED-034",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV008: closed child with incomplete acceptance"
+    },
+    {
+      "test_id": "LOCKED-035",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV009: closed child with unchecked parent item"
+    },
+    {
+      "test_id": "LOCKED-036",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV010: missing current status"
+    },
+    {
+      "test_id": "LOCKED-037",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV011: missing timestamp"
+    },
+    {
+      "test_id": "LOCKED-038",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV012: duplicate timestamps"
+    },
+    {
+      "test_id": "LOCKED-039",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV013: malformed timestamp"
+    },
+    {
+      "test_id": "LOCKED-040",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV013: impossible calendar date (31 Feb)"
+    },
+    {
+      "test_id": "LOCKED-041",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV014: missing why section"
+    },
+    {
+      "test_id": "LOCKED-042",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV015: missing required dimension (comprehensive child)"
+    },
+    {
+      "test_id": "LOCKED-043",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV016: missing acceptance criteria"
+    },
+    {
+      "test_id": "LOCKED-044",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV017: superseded issue without reason or successor"
+    },
+    {
+      "test_id": "LOCKED-045",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV018: PR merge as completion (genuine claim)"
+    },
+    {
+      "test_id": "LOCKED-046",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV018 NOT triggered by negated text"
+    },
+    {
+      "test_id": "LOCKED-047",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV019: implementer self-acceptance (genuine claim)"
+    },
+    {
+      "test_id": "LOCKED-048",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV020: policy version drift"
+    },
+    {
+      "test_id": "LOCKED-049",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV022: multiple active implementation PRs"
+    },
+    {
+      "test_id": "LOCKED-050",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV024: replacement PR without reason"
+    },
+    {
+      "test_id": "LOCKED-051",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV024: replacement PR without supersedes_pr"
+    },
+    {
+      "test_id": "LOCKED-052",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV023: branch disagrees with body"
+    },
+    {
+      "test_id": "LOCKED-053",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV025: duplicate numeric/string identity aliases"
+    },
+    {
+      "test_id": "LOCKED-054",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV026: canonical_parent_tracker points to non-parent category"
+    },
+    {
+      "test_id": "LOCKED-055",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV027: checklist checked-state mismatch (isolated)"
+    },
+    {
+      "test_id": "LOCKED-056",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV027: acceptance_criteria_met contradiction (isolated)"
+    },
+    {
+      "test_id": "LOCKED-057",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV003: parent checklist entry with no child"
+    },
+    {
+      "test_id": "LOCKED-058",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "production module exports only auditSnapshot, formatHuman, formatJson"
+    },
+    {
+      "test_id": "LOCKED-059",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "production registry vs test engine identity parity"
+    },
+    {
+      "test_id": "LOCKED-060",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "test engine mutation does not alter production registry"
+    },
+    {
+      "test_id": "LOCKED-061",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "exact oracle passes for valid-full"
+    },
+    {
+      "test_id": "LOCKED-062",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "exact oracle passes for isolated GOV014 fixture"
+    },
+    {
+      "test_id": "LOCKED-063",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "mutation of GOV014 detector causes expected oracle failure"
+    },
+    {
+      "test_id": "LOCKED-064",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "mutation of one detector does not affect another code"
+    },
+    {
+      "test_id": "LOCKED-065",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "emitFinding throws on undeclared context key"
+    },
+    {
+      "test_id": "LOCKED-066",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "emitFinding throws on missing context key"
+    },
+    {
+      "test_id": "LOCKED-067",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "emitFinding throws on wrong context type"
+    },
+    {
+      "test_id": "LOCKED-068",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "emitFinding throws on oversized count"
+    },
+    {
+      "test_id": "LOCKED-069",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "stable finding ordering"
+    },
+    {
+      "test_id": "LOCKED-070",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "every production detector requires the five-argument signature"
+    },
+    {
+      "test_id": "LOCKED-071",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "test engine omission of emitter fails immediately"
+    },
+    {
+      "test_id": "LOCKED-072",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "complete 27-code production, mutation and reachability manifest"
+    },
+    {
+      "test_id": "LOCKED-073",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV022 and GOV027 replacement interaction tuple table is globally exclusive"
+    },
+    {
+      "test_id": "LOCKED-074",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "inline bold label parses canonical parent-template authority"
+    },
+    {
+      "test_id": "LOCKED-075",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "inline bold timestamp parses canonical child-template authority"
+    },
+    {
+      "test_id": "LOCKED-076",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "code-spanned implementation branch preserves exact visible identity"
+    },
+    {
+      "test_id": "LOCKED-077",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "inline authority rejects duplicate labels, comments, escapes and mixed formatting"
+    },
+    {
+      "test_id": "LOCKED-078",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "every canonical issue-governance template parses its authority fields"
+    },
+    {
+      "test_id": "LOCKED-079",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "stable JSON output"
+    },
+    {
+      "test_id": "LOCKED-080",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "no input mutation"
+    },
+    {
+      "test_id": "LOCKED-081",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "CLI exit 0 for no violations"
+    },
+    {
+      "test_id": "LOCKED-082",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "CLI exit 1 for violations"
+    },
+    {
+      "test_id": "LOCKED-083",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "CLI exit 2 for malformed JSON"
+    },
+    {
+      "test_id": "LOCKED-084",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "CLI exit 2 for missing input"
+    },
+    {
+      "test_id": "LOCKED-085",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "CLI exit 2 for unsupported version"
+    },
+    {
+      "test_id": "LOCKED-086",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "diagnostics do not expose body text"
+    },
+    {
+      "test_id": "LOCKED-087",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "diagnostics sanitize secrets"
+    },
+    {
+      "test_id": "LOCKED-088",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "repeat execution is identical"
+    },
+    {
+      "test_id": "LOCKED-089",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "JSON output is valid JSON"
+    },
+    {
+      "test_id": "LOCKED-090",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "interceptor self-test: blocks http.request"
+    },
+    {
+      "test_id": "LOCKED-091",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "interceptor self-test: blocks fs.writeFileSync"
+    },
+    {
+      "test_id": "LOCKED-092",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "interceptor self-test: blocks child_process.exec"
+    },
+    {
+      "test_id": "LOCKED-093",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "interceptor self-test: blocks dns.lookup"
+    },
+    {
+      "test_id": "LOCKED-094",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "real CLI succeeds under interceptor (read-only audit)"
+    },
+    {
+      "test_id": "LOCKED-095",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "real CLI finds violations under interceptor"
+    },
+    {
+      "test_id": "LOCKED-096",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "semantic parity check passes"
+    },
+    {
+      "test_id": "LOCKED-097",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "closed multi-step child receives required-section checks"
+    },
+    {
+      "test_id": "LOCKED-098",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "subject map: reversed numeric/string produce identical subjects"
+    },
+    {
+      "test_id": "LOCKED-099",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "subject map: repeated audits produce identical subjects"
+    },
+    {
+      "test_id": "LOCKED-100",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "subject map: numeric keys sort numerically, strings lexicographically"
+    },
+    {
+      "test_id": "LOCKED-101",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "GOV025 uses subject null and no raw IDs in message"
+    },
+    {
+      "test_id": "LOCKED-102",
+      "file": "repo/tests/issue-governance.test.cjs",
+      "name": "workflow inventory check passes"
+    },
+    {
+      "test_id": "LOCKED-103",
+      "file": "repo/tests/locked-test-manifest.test.cjs",
+      "name": "standalone locked named-test manifest is exact, complete and current"
+    },
+    {
+      "test_id": "LOCKED-104",
+      "file": "repo/tests/setup-node-identity.test.cjs",
+      "name": "setup-node capture emits one strict public identity object with empty stderr"
+    },
+    {
+      "test_id": "LOCKED-105",
+      "file": "repo/tests/setup-node-identity.test.cjs",
+      "name": "setup-node capture generation is explicit and invalid arguments fail"
+    },
+    {
+      "test_id": "LOCKED-106",
+      "file": "repo/tests/source-watch-pr-workflow.test.cjs",
+      "name": "source-watch Stage A has schedule and manual dry-run triggers only"
+    },
+    {
+      "test_id": "LOCKED-107",
+      "file": "repo/tests/source-watch-pr-workflow.test.cjs",
+      "name": "source-watch Stage A permissions and policy are read-only"
+    },
+    {
+      "test_id": "LOCKED-108",
+      "file": "repo/tests/source-watch-pr-workflow.test.cjs",
+      "name": "source-watch Stage A has no branch, commit, push or PR mutation command"
+    },
+    {
+      "test_id": "LOCKED-109",
+      "file": "repo/tests/source-watch-pr-workflow.test.cjs",
+      "name": "source-watch trusted main is verified before its dry-run helper executes"
+    },
+    {
+      "test_id": "LOCKED-110",
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "pull_request_target executes the canonical base workflow authority"
+    },
+    {
+      "test_id": "LOCKED-111",
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "Stage A auto-sync writeback is structurally disabled"
+    },
+    {
+      "test_id": "LOCKED-112",
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "Stage A auto-sync dry-run emits strict no-write evidence"
+    },
+    {
+      "test_id": "LOCKED-113",
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "Stage A manual rehearsal generates the exact proposal in PR data without executing it"
+    },
+    {
+      "test_id": "LOCKED-114",
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "Stage A source-watch is inert for schedule and manual dispatch"
+    },
+    {
+      "test_id": "LOCKED-115",
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "Stage B1 canary and Stage B2 general activation remain separate controller gates"
+    },
+    {
+      "test_id": "LOCKED-116",
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "all privileged external actions are full-SHA manifest-bound and used once"
+    },
+    {
+      "test_id": "LOCKED-117",
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "bootstrap hashing uses only the locked absolute executable and exact arguments"
+    },
+    {
+      "test_id": "LOCKED-118",
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "source-watch append-only planner refuses branch movement and never selects force"
+    },
+    {
+      "test_id": "LOCKED-119",
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "source-watch notification PR deduplication is exact"
+    },
+    {
+      "test_id": "LOCKED-120",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "real workflow inventory and auto-sync preflight rewrite pass"
+    },
+    {
+      "test_id": "LOCKED-121",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "symbolic GitHub workspace roots admit reviewed checkout identities only"
+    },
+    {
+      "test_id": "LOCKED-122",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "environment alias reassignment and shadowing fail closed"
+    },
+    {
+      "test_id": "LOCKED-123",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "PATH removal and replacement invalidate setup-node identity"
+    },
+    {
+      "test_id": "LOCKED-124",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "command -p, xargs, find -exec and find -execdir are rejected"
+    },
+    {
+      "test_id": "LOCKED-125",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "PowerShell pipeline chains segment and unsupported constructs fail closed"
+    },
+    {
+      "test_id": "LOCKED-126",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "PowerShell normal script preserves environment and location but not lexical scope"
+    },
+    {
+      "test_id": "LOCKED-127",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "PowerShell dot sourcing propagates lexical environment and location state"
+    },
+    {
+      "test_id": "LOCKED-128",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "PowerShell child process and separate runspace inherit isolated environment and location copies"
+    },
+    {
+      "test_id": "LOCKED-129",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "runner command-file identities are step-scoped append-only and runner-temp is non-executable"
+    },
+    {
+      "test_id": "LOCKED-130",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "nearest package root is derived from the execution directory by path components"
+    },
+    {
+      "test_id": "LOCKED-131",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "package scripts resolve recursively from the nearest package root with separate memo and active stacks"
+    },
+    {
+      "test_id": "LOCKED-132",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "package-script cycles and unsupported prefix or workspace roots fail closed"
+    },
+    {
+      "test_id": "LOCKED-133",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "dependency-tree and checkout replacement commands invalidate installation authority"
+    },
+    {
+      "test_id": "LOCKED-134",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "tokenizer wrapper grammar preserves quoted paths and rejects dynamic or unknown wrapper options"
+    }
+  ]
+}

@@ -36,5 +36,50 @@ jobs:
       - name: Run tests
         run: node --test repo/tests/*.test.cjs
 
+      - name: Run Node 22 side-effect partition
+        run: node repo/tests/fixtures/issue-governance/side-effect-driver.cjs ubuntu-node22
+
       - name: Check whitespace
         run: git diff --check
+
+  side-effects-node24:
+    name: Ubuntu Node 24 side-effect compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Install dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      - name: Run Node 24 side-effect partition
+        run: node repo/tests/fixtures/issue-governance/side-effect-driver.cjs ubuntu-node24
+
+  side-effects-macos-node24:
+    name: macOS Node 24 lchmod compatibility
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Install dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      - name: Run macOS-only side-effect partition
+        run: node repo/tests/fixtures/issue-governance/side-effect-driver.cjs macos-node24

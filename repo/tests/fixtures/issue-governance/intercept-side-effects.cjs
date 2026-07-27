@@ -1,130 +1,108 @@
 #!/usr/bin/env node
 'use strict';
 
-const blocked = (family) => () => { throw new Error('BLOCKED: ' + family + ' call intercepted by test guard.'); };
-
-const http = require('node:http');
-const https = require('node:https');
-const dns = require('node:dns');
-const net = require('node:net');
-const tls = require('node:tls');
 const fs = require('node:fs');
-const cp = require('node:child_process');
+const constants = fs.constants;
 
-http.request = blocked('http.request');
-http.get = blocked('http.get');
-https.request = blocked('https.request');
-https.get = blocked('https.get');
-
-if (typeof globalThis.fetch === 'function') {
-  globalThis.fetch = blocked('fetch');
+function blocked(exportPath) {
+  return function guardedSideEffect() {
+    const error = new Error('SIDE_EFFECT_GUARD_BLOCKED:' + exportPath);
+    error.code = 'SIDE_EFFECT_GUARD_BLOCKED';
+    error.exportPath = exportPath;
+    throw error;
+  };
 }
 
-net.createConnection = blocked('net.createConnection');
-net.connect = blocked('net.connect');
-
-if (tls && tls.connect) tls.connect = blocked('tls.connect');
-if (tls && tls.createServer) tls.createServer = blocked('tls.createServer');
-
-dns.lookup = blocked('dns.lookup');
-dns.resolve = blocked('dns.resolve');
-dns.resolve4 = blocked('dns.resolve4');
-dns.resolve6 = blocked('dns.resolve6');
-dns.lookupService = blocked('dns.lookupService');
-
-if (dns.promises) {
-  dns.promises.lookup = blocked('dns.promises.lookup');
-  dns.promises.resolve = blocked('dns.promises.resolve');
-  dns.promises.resolve4 = blocked('dns.promises.resolve4');
-  dns.promises.resolve6 = blocked('dns.promises.resolve6');
-  dns.promises.lookupService = blocked('dns.promises.lookupService');
-}
-
-fs.writeFile = blocked('fs.writeFile');
-fs.writeFileSync = blocked('fs.writeFileSync');
-fs.appendFile = blocked('fs.appendFile');
-fs.appendFileSync = blocked('fs.appendFileSync');
-fs.mkdir = blocked('fs.mkdir');
-fs.mkdirSync = blocked('fs.mkdirSync');
-fs.unlink = blocked('fs.unlink');
-fs.unlinkSync = blocked('fs.unlinkSync');
-fs.rmdir = blocked('fs.rmdir');
-fs.rmdirSync = blocked('fs.rmdirSync');
-fs.rename = blocked('fs.rename');
-fs.renameSync = blocked('fs.renameSync');
-fs.copyFile = blocked('fs.copyFile');
-fs.copyFileSync = blocked('fs.copyFileSync');
-fs.truncate = blocked('fs.truncate');
-fs.truncateSync = blocked('fs.truncateSync');
-fs.rm = blocked('fs.rm');
-fs.rmSync = blocked('fs.rmSync');
-
-var origOpen = fs.open;
-var origOpenSync = fs.openSync;
-
-function isWriteFlag(flag) {
+const VALID_READ_FLAGS = new Set(['r', 'rs', 'sr']);
+const VALID_WRITE_FLAGS = new Set(['r+', 'rs+', 'sr+', 'w', 'wx', 'w+', 'wx+', 'a', 'ax', 'a+', 'ax+']);
+function classifyOpenFlag(flag) {
   if (typeof flag === 'string') {
-    var writePatterns = [/^w/, /^a/, /^x/, /^r\+/, /^rs\+/, /^sr\+/];
-    for (var p of writePatterns) {
-      if (p.test(flag)) return true;
-    }
-    return false;
+    if (VALID_READ_FLAGS.has(flag)) return 'read';
+    if (VALID_WRITE_FLAGS.has(flag)) return 'write';
+    return 'invalid';
   }
   if (typeof flag === 'number') {
-    var O_WRONLY = 1;
-    var O_RDWR = 2;
-    var O_CREAT = require('node:constants').O_CREAT || 64;
-    var O_TRUNC = require('node:constants').O_TRUNC || 512;
-    var O_APPEND = require('node:constants').O_APPEND || 1024;
-    if ((flag & O_WRONLY) || (flag & O_RDWR) || (flag & O_CREAT) || (flag & O_TRUNC) || (flag & O_APPEND)) {
-      return true;
-    }
+    const writeMask = constants.O_WRONLY | constants.O_RDWR | constants.O_CREAT | constants.O_TRUNC | constants.O_APPEND;
+    return (flag & writeMask) !== 0 ? 'write' : 'read';
   }
-  return false;
+  return 'invalid';
 }
 
-fs.open = function(path, flags, mode, callback) {
-  if (isWriteFlag(flags)) return blocked('fs.open (write)')();
-  return origOpen.apply(fs, arguments);
-};
-fs.openSync = function(path, flags, mode) {
-  if (isWriteFlag(flags)) return blocked('fs.openSync (write)')();
-  return origOpenSync.apply(fs, arguments);
-};
+function install(moduleObject, names, prefix) {
+  for (const name of names) {
+    if (typeof moduleObject[name] === 'function') moduleObject[name] = blocked(prefix + '.' + name);
+  }
+}
 
+install(require('node:http'), ['request', 'get', 'createServer'], 'http');
+install(require('node:https'), ['request', 'get', 'createServer'], 'https');
+install(require('node:net'), ['createConnection', 'connect', 'createServer'], 'net');
+install(require('node:tls'), ['connect', 'createServer'], 'tls');
+install(require('node:dgram'), ['createSocket'], 'dgram');
+install(require('node:http2'), ['connect', 'createServer', 'createSecureServer'], 'http2');
+install(require('node:dns'), ['lookup', 'resolve', 'resolve4', 'resolve6', 'reverse', 'lookupService'], 'dns');
+if (require('node:dns').promises) {
+  install(require('node:dns').promises, ['lookup', 'resolve', 'resolve4', 'resolve6', 'reverse', 'lookupService'], 'dns.promises');
+}
+install(require('node:child_process'), ['exec', 'execSync', 'execFile', 'execFileSync', 'spawn', 'spawnSync', 'fork'], 'child_process');
+
+const fsSync = [
+  'writeFileSync', 'appendFileSync', 'mkdirSync', 'unlinkSync', 'rmdirSync', 'renameSync',
+  'copyFileSync', 'truncateSync', 'rmSync', 'chmodSync', 'chownSync', 'utimesSync',
+  'symlinkSync', 'linkSync', 'lchmodSync', 'createWriteStream'
+];
+const fsCallback = [
+  'writeFile', 'appendFile', 'mkdir', 'unlink', 'rmdir', 'rename', 'copyFile', 'truncate',
+  'rm', 'chmod', 'chown', 'utimes', 'symlink', 'link', 'lchmod'
+];
+const fsPromise = [
+  'writeFile', 'appendFile', 'mkdir', 'unlink', 'rmdir', 'rename', 'copyFile', 'truncate',
+  'rm', 'chmod', 'chown', 'utimes', 'symlink', 'link'
+];
+install(fs, fsSync.concat(fsCallback), 'fs');
+if (fs.promises) install(fs.promises, fsPromise, 'fs.promises');
+
+const originalOpen = fs.open;
+const originalOpenSync = fs.openSync;
+const originalPromiseOpen = fs.promises && fs.promises.open;
+fs.open = function guardedOpen(target, flag) {
+  const classification = classifyOpenFlag(flag);
+  if (classification === 'write') return blocked('fs.open')();
+  if (classification === 'invalid') throw new TypeError('SIDE_EFFECT_INVALID_OPEN_FLAG');
+  return originalOpen.apply(fs, arguments);
+};
+fs.openSync = function guardedOpenSync(target, flag) {
+  const classification = classifyOpenFlag(flag);
+  if (classification === 'write') return blocked('fs.openSync')();
+  if (classification === 'invalid') throw new TypeError('SIDE_EFFECT_INVALID_OPEN_FLAG');
+  return originalOpenSync.apply(fs, arguments);
+};
 if (fs.promises) {
-  var origPromisesOpen = fs.promises.open;
-  fs.promises.open = function(path, flags, mode) {
-    if (isWriteFlag(flags)) return blocked('fs.promises.open (write)')();
-    return origPromisesOpen.apply(fs.promises, arguments);
+  fs.promises.open = function guardedPromiseOpen(target, flag) {
+    const classification = classifyOpenFlag(flag);
+    if (classification === 'write') return Promise.reject(blocked('fs.promises.open')());
+    if (classification === 'invalid') return Promise.reject(new TypeError('SIDE_EFFECT_INVALID_OPEN_FLAG'));
+    return originalPromiseOpen.apply(fs.promises, arguments);
   };
-  fs.promises.writeFile = blocked('fs.promises.writeFile');
-  fs.promises.appendFile = blocked('fs.promises.appendFile');
-  fs.promises.mkdir = blocked('fs.promises.mkdir');
-  fs.promises.unlink = blocked('fs.promises.unlink');
-  fs.promises.rmdir = blocked('fs.promises.rmdir');
-  fs.promises.rm = blocked('fs.promises.rm');
-  fs.promises.rename = blocked('fs.promises.rename');
-  fs.promises.copyFile = blocked('fs.promises.copyFile');
-  fs.promises.truncate = blocked('fs.promises.truncate');
 }
 
-fs.createWriteStream = blocked('fs.createWriteStream');
-
-cp.exec = blocked('child_process.exec');
-cp.execSync = blocked('child_process.execSync');
-cp.execFile = blocked('child_process.execFile');
-cp.execFileSync = blocked('child_process.execFileSync');
-cp.spawn = blocked('child_process.spawn');
-cp.spawnSync = blocked('child_process.spawnSync');
-cp.fork = blocked('child_process.fork');
-
+if (typeof globalThis.fetch === 'function') globalThis.fetch = blocked('global.fetch');
 try {
-  var worker_threads = require('node:worker_threads');
-  if (worker_threads && worker_threads.Worker) {
-    var OrigWorker = worker_threads.Worker;
-    worker_threads.Worker = function() {
-      return blocked('worker_threads.Worker')();
-    };
-  }
-} catch (e) {}
+  const workerThreads = require('node:worker_threads');
+  if (workerThreads.Worker) workerThreads.Worker = blocked('worker_threads.Worker');
+} catch {}
+try {
+  const cluster = require('node:cluster');
+  if (cluster.fork) cluster.fork = blocked('cluster.fork');
+} catch {}
+
+Object.defineProperty(globalThis, '__ISSUE_GOVERNANCE_SIDE_EFFECT_GUARD__', {
+  value: Object.freeze({
+    valid_read_flags: Object.freeze([...VALID_READ_FLAGS]),
+    valid_write_flags: Object.freeze([...VALID_WRITE_FLAGS]),
+    classifyOpenFlag
+  }),
+  configurable: false,
+  enumerable: false,
+  writable: false
+});

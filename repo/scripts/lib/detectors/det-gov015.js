@@ -1,12 +1,12 @@
 'use strict';
 
-const { emitFinding } = require('../emit-finding');
 const { getSubjectForIssue } = require('../subject-map');
 const { hasSection } = require('./shared/section-handlers');
 const { isChildCategory } = require('./shared/relationship-index');
 const { loadPolicy } = require('../emit-finding');
 
-function detectGOV015(repo, issues, findings, subjects) {
+function detectGOV015(repo, issues, findings, subjects, emit) {
+  if (typeof emit !== 'function') throw new TypeError('detector emitter is required');
   if (repo.governance_mode !== 'toolkit_governed') return;
   const policy = loadPolicy();
   for (const issue of issues) {
@@ -17,7 +17,7 @@ function detectGOV015(repo, issues, findings, subjects) {
     for (const secKey of catDef.required_sections) {
       if (dedicatedKeys.has(secKey)) continue;
       if (!hasSection(issue.body, secKey)) {
-        emitFinding(findings, 'GOV015', getSubjectForIssue(subjects, issue.id), 'missing_dimension', {});
+        emit(findings, 'GOV015', getSubjectForIssue(subjects, issue.id), 'missing_dimension', {});
         break;
       }
     }

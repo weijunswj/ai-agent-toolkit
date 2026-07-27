@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "actions": [
+    {
+      "owner": "actions",
+      "repository": "checkout",
+      "commit": "3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "action_type": "javascript",
+      "entrypoints": {
+        "main": "dist/index.js",
+        "post": "dist/index.js",
+        "runs_using": "node24"
+      },
+      "locations": [
+        ".github/workflows/auto-sync-generated-surfaces.yml#auto-sync-generated-surfaces.checkout_trusted_base",
+        ".github/workflows/auto-sync-generated-surfaces.yml#auto-sync-generated-surfaces.checkout_pr_data",
+        ".github/workflows/source-watch-pr.yml#notify.checkout_trusted_main"
+      ],
+      "review_process": "A full-SHA update requires ordinary validation, upstream action.yml review, entrypoint/type verification, and controller review."
+    },
+    {
+      "owner": "actions",
+      "repository": "setup-node",
+      "commit": "820762786026740c76f36085b0efc47a31fe5020",
+      "action_type": "javascript",
+      "entrypoints": {
+        "main": "dist/setup/index.js",
+        "post": "dist/cache-save/index.js",
+        "runs_using": "node24"
+      },
+      "locations": [
+        ".github/workflows/auto-sync-generated-surfaces.yml#auto-sync-generated-surfaces.setup_node",
+        ".github/workflows/source-watch-pr.yml#notify.setup_node"
+      ],
+      "review_process": "A full-SHA update requires ordinary validation, upstream action.yml review, entrypoint/type verification, and controller review."
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "snapshot_version": "2.0.0",
+  "repository": {
+    "fixture_id": "invalid-orphan-checklist",
+    "governance_mode": "toolkit_governed",
+    "canonical_parent_tracker": 1,
+    "policy_version": "2.0.0"
+  },
+  "issues": [
+    {
+      "id": 1,
+      "state": "open",
+      "category": "canonical_parent_tracker",
+      "body": "# Tracker\n\nLast reconciled: **25 July 2026, 12:00 SGT**\n\n- [ ] orphan\n",
+      "children": [],
+      "checklist_items": [
+        { "checked": false, "text": "- [ ] orphan", "linked_issue": null }
+      ]
+    }
+  ]
+}
