@@ -397,6 +397,42 @@ function validateWrapper(tokens, location) {
   }
 }
 
+const STATIC_LAUNCHERS = new Set(['command', 'timeout', 'nice']);
+
+function unwrapStaticLauncher(tokens, location) {
+  const base = path.basename(tokens[0] || '').toLowerCase().replace(/\.exe$/, '');
+  if (!STATIC_LAUNCHERS.has(base)) return tokens;
+  if (tokens.length < 2) throw new InventoryError('WF_LAUNCHER_MISSING_COMMAND', location);
+  if (base === 'command') {
+    let idx = 1;
+    while (idx < tokens.length && /^-[Vv]$/.test(tokens[idx])) idx += 1;
+    if (idx >= tokens.length) throw new InventoryError('WF_LAUNCHER_MISSING_COMMAND', location);
+    return tokens.slice(idx);
+  }
+  if (base === 'timeout') {
+    let idx = 1;
+    while (idx < tokens.length && /^--?(?!$)/.test(tokens[idx])) {
+      const opt = tokens[idx];
+      idx += 1;
+      if (['-s', '-k'].includes(opt) && idx < tokens.length) idx += 1;
+    }
+    if (idx >= tokens.length) throw new InventoryError('WF_LAUNCHER_MISSING_COMMAND', location);
+    const duration = tokens[idx];
+    if (/^\d/.test(duration)) idx += 1;
+    else if (!/^--?(?!$)/.test(duration)) throw new InventoryError('WF_LAUNCHER_MISSING_COMMAND', location);
+    if (idx >= tokens.length) throw new InventoryError('WF_LAUNCHER_MISSING_COMMAND', location);
+    return tokens.slice(idx);
+  }
+  if (base === 'nice') {
+    let idx = 1;
+    if (tokens[idx] === '-n' && idx + 1 < tokens.length && /^-?\d+$/.test(tokens[idx + 1])) idx += 2;
+    while (idx < tokens.length && /^--?(?!$)/.test(tokens[idx])) idx += 1;
+    if (idx >= tokens.length) throw new InventoryError('WF_LAUNCHER_MISSING_COMMAND', location);
+    return tokens.slice(idx);
+  }
+  return tokens;
+}
+
 function structuralPath(value, checkouts, env, location) {
   if (value === undefined) return { kind: 'WORKSPACE_ROOT' };
   if (typeof value !== 'string') throw new InventoryError('WF_STRUCTURAL_EXPRESSION', location);
@@ -639,6 +675,36 @@ function walkAst(node, visitor) {
   }
 }
 
+function walkAstWithParent(node, parent, visitor) {
+  if (!node || typeof node !== 'object') return;
+  visitor(node, parent);
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'start' || key === 'end') continue;
+    if (Array.isArray(value)) value.forEach((item) => walkAstWithParent(item, node, visitor));
+    else if (value && typeof value === 'object') walkAstWithParent(value, node, visitor);
+  }
+}
+
+function checkLoaderAliases(ast, location) {
+  walkAstWithParent(ast, null, (node, parent) => {
+    if (node.type === 'Identifier' && node.name === 'createRequire') {
+      throw new InventoryError('WF_LOCAL_JS_LOADER_CREATION', location);
+    }
+    if (node.type === 'CallExpression' && node.callee && node.callee.type === 'Identifier' &&
+        node.callee.name === 'require' && node.arguments.length === 1 &&
+        node.arguments[0].type === 'Literal' && typeof node.arguments[0].value === 'string' &&
+        (node.arguments[0].value === 'module' || node.arguments[0].value === 'node:module')) {
+      throw new InventoryError('WF_LOCAL_JS_LOADER_CREATION', location);
+    }
+    if (node.type === 'Identifier' && node.name === 'require') {
+      if (parent && parent.type === 'CallExpression' && parent.callee === node) return;
+      if (parent && parent.type === 'MemberExpression' && parent.object === node && parent.computed === false) return;
+      if (parent && parent.type === 'MemberExpression' && parent.property === node && parent.computed === false) return;
+      throw new InventoryError('WF_LOCAL_JS_LOADER_ALIAS', location);
+    }
+  });
+}
+
 function inspectLocalJavaScript(entry, actionRoot, context, location) {
   const visited = [];
   const active = new Set();
@@ -655,7 +721,9 @@ function inspectLocalJavaScript(entry, actionRoot, context, location) {
     active.add(file);
     const localVisited = [file];
     const dependencies = [];
-    walkAst(parseJavaScript(file, location), (node) => {
+    const ast = parseJavaScript(file, location);
+    checkLoaderAliases(ast, location);
+    walkAst(ast, (node) => {
       if (node.type === 'ImportExpression') throw new InventoryError('WF_LOCAL_JS_DYNAMIC_IMPORT', location);
       if ((node.type === 'CallExpression' || node.type === 'NewExpression') && node.callee &&
           node.callee.type === 'Identifier' && ['eval', 'Function'].includes(node.callee.name)) {
@@ -786,11 +854,24 @@ function evaluatePackageScript(name, states, context, directory, root, location,
   context.activePackageScripts.add(key);
   const graph = parseCommandGraph(document.scripts[name], 'bash', location + ':' + name);
   const scriptStates = cloneStates(states);
-  scriptStates.forEach((state) => {
+  const parents = new Map();
+  scriptStates.forEach((state, stateIndex) => {
+    state.processParentKey = String(stateIndex);
+    parents.set(String(stateIndex), states[stateIndex]);
     state.workingDirectory = packageRoot;
     state.locationStack = [];
   });
   const result = evaluateGraph(graph, scriptStates, context, packageRoot, root, 'bash', location + ':' + name, depth + 1);
+  for (const collection of [result.success, result.failure]) {
+    collection.forEach((state) => {
+      const parent = parents.get(state.processParentKey);
+      if (parent) {
+        state.workingDirectory = parent.workingDirectory;
+        state.locationStack = parent.locationStack.slice();
+      }
+      delete state.processParentKey;
+    });
+  }
   context.activePackageScripts.delete(key);
   return result;
 }
@@ -859,6 +940,8 @@ function evaluateCommand(tokens, states, context, directory, root, shell, locati
     }
     return childResult;
   }
+  const unwrapped = unwrapStaticLauncher(tokens, location);
+  if (unwrapped !== tokens) return evaluateCommand(unwrapped, states, context, directory, root, shell, location, depth + 1);
   const invocation = wrapperInvocation(tokens);
   if (invocation) {
     const success = [];
@@ -1231,10 +1314,13 @@ module.exports = {
   resolvePackageScriptGraph,
   mutatesDependencyTree,
   validateWrapper,
+  unwrapStaticLauncher,
   resolveLocalActionMetadata,
   inspectLocalJavaScript,
   analyzeWorkflowFixture,
   structuralPath,
+  walkAstWithParent,
+  checkLoaderAliases,
   PowerShellState,
   RunnerIdentityState,
   ExecutableIdentityState,

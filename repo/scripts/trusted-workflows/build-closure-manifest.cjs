@@ -44,6 +44,16 @@ function walk(node, visitor) {
   }
 }
 
+function walkWithParent(node, parent, visitor) {
+  if (!node || typeof node !== 'object') return;
+  visitor(node, parent);
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'start' || key === 'end') continue;
+    if (Array.isArray(value)) value.forEach((item) => walkWithParent(item, node, visitor));
+    else if (value && typeof value === 'object') walkWithParent(value, node, visitor);
+  }
+}
+
 function resolveLiteral(fromFile, specifier) {
   if (!specifier.startsWith('.')) return null;
   if (!specifier.endsWith('.cjs') && !specifier.endsWith('.json')) die('TW_CLOSURE_EXTENSION', specifier);
@@ -72,6 +82,21 @@ function parseDependencies(file) {
         node.callee.property && ['register', 'registerHooks'].includes(node.callee.property.name)) {
       die('TW_CLOSURE_LOADER_HOOK', relative(file));
     }
+    walkWithParent(ast, null, (node, parent) => {
+      if (node.type === 'Identifier' && node.name === 'createRequire') die('TW_CLOSURE_LOADER_CREATION', relative(file));
+      if (node.type === 'CallExpression' && node.callee && node.callee.type === 'Identifier' &&
+          node.callee.name === 'require' && node.arguments.length === 1 &&
+          node.arguments[0].type === 'Literal' && typeof node.arguments[0].value === 'string' &&
+          (node.arguments[0].value === 'module' || node.arguments[0].value === 'node:module')) {
+        die('TW_CLOSURE_LOADER_CREATION', relative(file));
+      }
+      if (node.type === 'Identifier' && node.name === 'require') {
+        if (parent && parent.type === 'CallExpression' && parent.callee === node) return;
+        if (parent && parent.type === 'MemberExpression' && parent.object === node && parent.computed === false) return;
+        if (parent && parent.type === 'MemberExpression' && parent.property === node && parent.computed === false) return;
+        die('TW_CLOSURE_LOADER_ALIAS', relative(file));
+      }
+    });
     if (node.type !== 'CallExpression') return;
     if (node.callee && node.callee.type === 'MemberExpression' &&
         node.callee.object && node.callee.object.name === 'module' &&

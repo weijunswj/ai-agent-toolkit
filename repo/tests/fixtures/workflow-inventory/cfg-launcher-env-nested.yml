@@ -1,0 +1,10 @@
+name: CFG env launcher nested concealment
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fixture
+      - uses: actions/setup-node@fixture
+        with:
+          node-version: '22'
+      - run: env FOO=bar timeout 10 node repo/tests/fixtures/workflow-inventory/node-target.cjs

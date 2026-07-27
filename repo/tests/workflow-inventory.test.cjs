@@ -253,3 +253,132 @@ test('CMD wrapper closure discovers hidden repository Node execution', function(
 test('recursive wrapper cycles fail closed through the active stack', function() {
   assert.throws(function() { inventory.analyzeWorkflowFixture(fixture('wrapper-cycle-workflow.yml')); }, /WF_WRAPPER_CYCLE/);
 });
+
+test('package-script parent directory is restored so nested same-named wrapper is correctly inspected', function() {
+  assert.equal(inventory.analyzeWorkflowFixture(fixture('cfg-package-parent-dir.yml')), true);
+});
+
+test('static launcher allowlist unwraps command concealment of repository Node execution', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('cfg-launcher-command.yml'));
+  }, /WF_NODE_WITHOUT_INSTALL/);
+});
+
+test('static launcher allowlist unwraps timeout concealment of repository Node execution', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('cfg-launcher-timeout.yml'));
+  }, /WF_NODE_WITHOUT_INSTALL/);
+});
+
+test('static launcher allowlist unwraps nice concealment of repository Node execution', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('cfg-launcher-nice.yml'));
+  }, /WF_NODE_WITHOUT_INSTALL/);
+});
+
+test('static launcher allowlist recursively unwraps nested launcher concealment', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('cfg-launcher-nested.yml'));
+  }, /WF_NODE_WITHOUT_INSTALL/);
+});
+
+test('env assignments around a launcher are correctly propagated before unwrapping', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('cfg-launcher-env-nested.yml'));
+  }, /WF_NODE_WITHOUT_INSTALL/);
+});
+
+test('loader alias capture through variable assignment is rejected', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('local-js-capture-alias-workflow.yml'));
+  }, /WF_LOCAL_JS_LOADER_ALIAS/);
+});
+
+test('createRequire loader creation is rejected', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('local-js-create-require-workflow.yml'));
+  }, /WF_LOCAL_JS_LOADER_CREATION/);
+});
+
+test('loader passed as function argument is rejected', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('local-js-pass-loader-workflow.yml'));
+  }, /WF_LOCAL_JS_LOADER_ALIAS/);
+});
+
+test('loader stored in object property is rejected', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('local-js-store-loader-workflow.yml'));
+  }, /WF_LOCAL_JS_LOADER_ALIAS/);
+});
+
+test('loader reassignment is rejected', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('local-js-reassign-loader-workflow.yml'));
+  }, /WF_LOCAL_JS_LOADER_ALIAS/);
+});
+
+test('destructured createRequire from node:module is rejected', function() {
+  assert.throws(function() {
+    inventory.analyzeWorkflowFixture(fixture('local-js-destructure-create-require-workflow.yml'));
+  }, /WF_LOCAL_JS_LOADER_CREATION/);
+});
+
+test('unwrapStaticLauncher rejects timeout with missing command', function() {
+  assert.throws(function() {
+    inventory.unwrapStaticLauncher(['timeout'], 'fixture');
+  }, /WF_LAUNCHER_MISSING_COMMAND/);
+  assert.throws(function() {
+    inventory.unwrapStaticLauncher(['timeout', '10'], 'fixture');
+  }, /WF_LAUNCHER_MISSING_COMMAND/);
+});
+
+test('unwrapStaticLauncher rejects command with no trailing command', function() {
+  assert.throws(function() {
+    inventory.unwrapStaticLauncher(['command', '-v'], 'fixture');
+  }, /WF_LAUNCHER_MISSING_COMMAND/);
+});
+
+test('unwrapStaticLauncher rejects nice with missing command', function() {
+  assert.throws(function() {
+    inventory.unwrapStaticLauncher(['nice'], 'fixture');
+  }, /WF_LAUNCHER_MISSING_COMMAND/);
+  assert.throws(function() {
+    inventory.unwrapStaticLauncher(['nice', '-n', '-5'], 'fixture');
+  }, /WF_LAUNCHER_MISSING_COMMAND/);
+});
+
+test('non-delegating unknown executable is not treated as a launcher', function() {
+  const tokens = inventory.unwrapStaticLauncher(['echo', 'hello'], 'fixture');
+  assert.deepEqual(tokens, ['echo', 'hello']);
+});
+
+test('static launcher times out over-recursion depth', function() {
+  const tokens = ['timeout', '10', 'command'];
+  assert.deepEqual(inventory.unwrapStaticLauncher(tokens, 'fixture'), ['command']);
+});
+
+test('checkLoaderAliases rejects createRequire identifier', function() {
+  assert.throws(function() {
+    const src = 'const r = createRequire(import.meta.url);';
+    const acorn = require('acorn');
+    const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+    inventory.checkLoaderAliases(ast, 'fixture');
+  }, /WF_LOCAL_JS_LOADER_CREATION/);
+});
+
+test('checkLoaderAliases rejects require used in assignment right-hand side', function() {
+  assert.throws(function() {
+    const src = 'const r = require;';
+    const acorn = require('acorn');
+    const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+    inventory.checkLoaderAliases(ast, 'fixture');
+  }, /WF_LOCAL_JS_LOADER_ALIAS/);
+});
+
+test('checkLoaderAliases does not reject direct literal require call', function() {
+  const src = 'require("node:path");';
+  const acorn = require('acorn');
+  const ast = acorn.parse(src, { ecmaVersion: 2022, sourceType: 'module' });
+  assert.doesNotThrow(function() { inventory.checkLoaderAliases(ast, 'fixture'); });
+});

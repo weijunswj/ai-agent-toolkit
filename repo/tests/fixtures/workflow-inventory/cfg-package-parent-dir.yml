@@ -1,0 +1,11 @@
+name: CFG package-script parent directory
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fixture
+      - uses: actions/setup-node@fixture
+        with:
+          node-version: '22'
+      - run: cd repo/tests/fixtures/workflow-inventory/packages/one && npm ci --ignore-scripts
+      - run: cd repo/tests/fixtures/workflow-inventory/packages/one/src && npm run check && bash wrapper.sh

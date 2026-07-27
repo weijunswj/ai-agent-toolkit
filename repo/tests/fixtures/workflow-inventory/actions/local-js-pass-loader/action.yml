@@ -1,0 +1,4 @@
+name: JS pass loader fixture
+runs:
+  using: node24
+  main: main.cjs

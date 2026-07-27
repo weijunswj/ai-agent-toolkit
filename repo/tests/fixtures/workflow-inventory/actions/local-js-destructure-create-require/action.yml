@@ -1,0 +1,4 @@
+name: JS destructure createRequire fixture
+runs:
+  using: node24
+  main: main.cjs

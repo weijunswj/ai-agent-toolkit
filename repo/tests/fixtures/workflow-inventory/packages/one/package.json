@@ -1,0 +1,5 @@
+{
+  "scripts": {
+    "check": "bash wrapper.sh"
+  }
+}

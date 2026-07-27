@@ -74,7 +74,10 @@ test('closure parser rejects every dynamic or computed execution/import form', f
     ['eval.cjs', ["eval('1')", /TW_CLOSURE_DYNAMIC_CODE/]],
     ['function.cjs', ["new Function('return 1')", /TW_CLOSURE_DYNAMIC_CODE/]],
     ['package.cjs', ["require('acorn')", /TW_CLOSURE_PACKAGE_IMPORT/]],
-    ['loader.cjs', ["require.extensions = {}", /TW_CLOSURE_LOADER_HOOK/]]
+    ['loader.cjs', ["require.extensions = {}", /TW_CLOSURE_LOADER_HOOK/]],
+    ['loader-alias.cjs', ["const r = require;", /TW_CLOSURE_LOADER_ALIAS/]],
+    ['loader-create-require.cjs', ["const { createRequire } = require('node:module');", /TW_CLOSURE_LOADER_CREATION/]],
+    ['loader-pass-require.cjs', ["(function(fn){fn()})(require);", /TW_CLOSURE_LOADER_ALIAS/]]
   ]);
   try {
     for (const [name, definition] of cases) {

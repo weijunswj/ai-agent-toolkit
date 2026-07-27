@@ -1,0 +1,4 @@
+name: JS store loader fixture
+runs:
+  using: node24
+  main: main.cjs
