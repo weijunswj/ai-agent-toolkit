@@ -29,6 +29,24 @@ function acquireGuardedExport(entry) {
   return { fn: null, owner, key };
 }
 
+function cleanupTree(target, cleanupFs) {
+  let stat;
+  try {
+    stat = cleanupFs.lstatSync(target);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return;
+    throw error;
+  }
+  if (stat.isDirectory() && !stat.isSymbolicLink()) {
+    for (const name of cleanupFs.readdirSync(target)) {
+      cleanupTree(path.join(target, name), cleanupFs);
+    }
+    cleanupFs.rmdirSync(target);
+  } else {
+    cleanupFs.unlinkSync(target);
+  }
+}
+
 function argsFor(entry, root, guarded, callback) {
   const source = path.join(root, guarded ? 'guard-source' : 'source');
   const target = path.join(root, guarded ? 'guard-target' : 'target');
@@ -85,7 +103,12 @@ async function main() {
   if (process.argv.length !== 3) fail('SIDE_EFFECT_CHILD_FAILURE:arguments');
   const entry = JSON.parse(Buffer.from(process.argv[2], 'base64url').toString('utf8'));
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'issue-governance-side-effect-'));
-  const cleanup = fs.rmSync;
+  const cleanupFs = {
+    lstatSync: fs.lstatSync,
+    readdirSync: fs.readdirSync,
+    rmdirSync: fs.rmdirSync,
+    unlinkSync: fs.unlinkSync
+  };
   let sentinelCalls = 0;
   let guardBlocked = false;
   let cleanupComplete = false;
@@ -104,13 +127,13 @@ async function main() {
       else throw error;
     }
     phase = 'cleanup';
-    fs.rmSync = cleanup;
-    cleanup.call(fs, root, { recursive: true, force: true });
+    Object.assign(fs, cleanupFs);
+    cleanupTree(root, cleanupFs);
     cleanupComplete = !fs.existsSync(root);
   } catch (error) {
     try {
-      fs.rmSync = cleanup;
-      cleanup.call(fs, root, { recursive: true, force: true });
+      Object.assign(fs, cleanupFs);
+      cleanupTree(root, cleanupFs);
     } catch {}
     const errorCode = error && typeof error.code === 'string' && /^[A-Z0-9_]+$/.test(error.code)
       ? error.code
