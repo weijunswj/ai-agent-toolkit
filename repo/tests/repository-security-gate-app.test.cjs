@@ -785,6 +785,114 @@ test('required-check App authority adversarial fixture matrix', async (t) => {
     assert.equal(state.data.checks.size, 3);
   });
 
+  await t.test('scheduled recovery resumes an immutable publication set after completed-run processing faults mid-publication', async () => {
+    const state = new app.MemoryRunState();
+    const github = fakeGithub();
+    const startedAt = Date.parse('2026-07-27T00:00:00.000Z');
+    const headSha = '1'.repeat(40);
+    const authoritySha = '3'.repeat(40);
+    const correlationId = 'correlation-partial-publication';
+    const attempt = await state.beginAttempt(`1/2/${headSha}`, correlationId, {
+      repository_id: 1,
+      installation_id: 2,
+      repository: 'synthetic/toolkit',
+      candidate_repository: 'synthetic/toolkit',
+      candidate_repository_id: 1,
+      pr_number: 2,
+      head_sha: headSha,
+      base_sha: '2'.repeat(40),
+      base_generation: 1,
+      authority_sha: authoritySha,
+      nonce: 'abcdefghijklmnopqrstuv',
+      delivery_id: 'delivery-partial-publication',
+      envelope_digest: `sha256:${'4'.repeat(64)}`,
+      default_branch: 'main',
+      expires_at: new Date(startedAt + 10 * 60 * 1000).toISOString()
+    }, startedAt);
+    await state.transitionCorrelation(correlationId, 'dispatch_intent', {
+      ...attempt.existing,
+      state: 'dispatch_unknown'
+    }, startedAt);
+    const contexts = Object.fromEntries(
+      Object.keys(app.CHECK_CONTEXTS).map((contextId, index) => [contextId, {
+        conclusion: 'failure',
+        summary: 'Synthetic immutable terminal outcome.',
+        terminalDigest: `sha256:${String(index + 5).repeat(64)}`
+      }])
+    );
+    const result = await app.recoverExpiredDispatches({
+      APP_ID: '1',
+      APP_INTEGRATION_ID: '77',
+      APP_PRIVATE_KEY: 'synthetic',
+      DISPATCH_SIGNING_PRIVATE_KEY: 'synthetic',
+      WEBHOOK_SECRET: 'synthetic',
+      ENROLLED_REPOSITORY_IDS: '1'
+    }, {
+      now: startedAt + 11 * 60 * 1000,
+      stateForRepository: () => state,
+      tokenForInstallation: async () => 'synthetic-token',
+      githubForToken: () => github,
+      discoverRun: async () => ({
+        id: 9002,
+        status: 'completed',
+        conclusion: 'success',
+        event: 'workflow_dispatch',
+        display_title: `TK-023 ${correlationId}`,
+        head_sha: authoritySha,
+        head_branch: 'main',
+        path: '.github/workflows/repository-security-gate.yml',
+        run_attempt: 1
+      }),
+      processCompletedRun: async () => {
+        await state.sealPublicationSet(correlationId, {
+          attempt_generation: attempt.generation,
+          contexts
+        });
+        const current = state.data.correlations.get(correlationId);
+        await state.transitionCorrelation(correlationId, 'dispatch_unknown', {
+          ...current,
+          state: 'publishing',
+          workflow_run_id: 9002
+        });
+        const firstContextId = Object.keys(app.CHECK_CONTEXTS)[0];
+        const firstContext = contexts[firstContextId];
+        await app.publishRequiredCheck({
+          github,
+          state,
+          integrationId: 77,
+          repositoryId: 1,
+          owner: 'synthetic',
+          repo: 'toolkit',
+          prNumber: 2,
+          headSha,
+          contextId: firstContextId,
+          status: 'completed',
+          conclusion: firstContext.conclusion,
+          summary: firstContext.summary,
+          terminalDigest: firstContext.terminalDigest,
+          attemptGeneration: attempt.generation,
+          correlationId
+        });
+        await state.markPublicationContext(
+          correlationId,
+          firstContextId,
+          firstContext.terminalDigest
+        );
+        throw new Error('TK023_SYNTHETIC_PARTIAL_PUBLICATION');
+      }
+    });
+    assert.deepEqual(result, { ok: true, reconciled: 1, terminalized: 0 });
+    assert.equal(state.data.correlations.get(correlationId).state, 'completed');
+    const publication = await state.getPublicationSet(correlationId);
+    assert.equal(publication.state, 'published');
+    assert.deepEqual(publication.contexts, contexts);
+    assert.ok(Object.values(publication.progress).every((progress) => progress === 'published'));
+    assert.equal(state.data.checks.size, 3);
+    assert.ok([...state.data.checks.values()].every((check) =>
+      check.state === 'completed' && check.conclusion === 'failure'
+    ));
+  });
+
   await t.test('artifact admission requires one complete canonical ZIP entry', async () => {
     const canonical = storedZip([['terminal-receipt.json', '{"ok":true}\n']], true);
     const document = await app.extractSingleJsonArtifact(new Response(canonical));

@@ -124,7 +124,11 @@ same terminal artifact, OIDC, authority, and current-head verification path as
 a completion webhook; if that evidence cannot validate, the recovery sweep
 seals and publishes fail-closed outcomes for all three contexts. An ambiguous
 run fails closed; an undiscovered expired intent is sealed and terminalized as
-failure for all three contexts.
+failure for all three contexts. The sweep also resumes current-attempt
+`publishing` correlations from their immutable sealed set and per-context
+progress. A verifier or publication fault after sealing therefore retries only
+the unpublished contexts and reaches `completed` or `failed` without replacing
+the sealed outcome or allowing a stale attempt to publish.
 
 The protected workflow recursively inventories workflow and local action
 producers under strict file/job/edge/depth/matrix/name bounds. It rejects

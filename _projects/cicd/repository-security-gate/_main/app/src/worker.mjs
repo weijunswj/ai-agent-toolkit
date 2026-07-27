@@ -325,6 +325,30 @@ async function publishSealedSet({
   return publication;
 }
 
+async function resumePublishingSet({
+  github,
+  state,
+  integrationId,
+  repositoryId,
+  owner,
+  repo,
+  correlation
+}) {
+  if (correlation.record.state !== 'publishing') {
+    throw new Error('TK023_PUBLICATION_STATE_INVALID');
+  }
+  await publishSealedSet({ github, state, integrationId, repositoryId, owner, repo, correlation });
+  const terminalState = correlation.record.failure_code ? 'failed' : 'completed';
+  await transitionState(
+    state,
+    correlation,
+    'publishing',
+    terminalState,
+    correlation.record.failure_code ? { failure_code: correlation.record.failure_code } : {}
+  );
+  return terminalState;
+}
+
 async function sealFailureSet(state, correlation, failureCode, runId = 0) {
   const failureDigest = await canonicalDigest({
     schema: 'tk.security.required-check-failure/v1',
@@ -441,11 +465,12 @@ export async function recoverExpiredDispatches(env, options = {}) {
     const correlations = await state.listCorrelations();
     for (const correlation of correlations) {
       const record = correlation.record;
+      const expiredUnknown = record.state === 'dispatch_unknown' &&
+        Number.isFinite(Date.parse(record.expires_at || '')) &&
+        Date.parse(record.expires_at) < now;
       if (
         record.repository_id !== repositoryId ||
-        record.state !== 'dispatch_unknown' ||
-        !Number.isFinite(Date.parse(record.expires_at || '')) ||
-        Date.parse(record.expires_at) >= now
+        (!expiredUnknown && record.state !== 'publishing')
       ) continue;
       const currentAttempt = await state.getCurrentAttempt(attemptHeadKey(record));
       if (
@@ -462,6 +487,19 @@ export async function recoverExpiredDispatches(env, options = {}) {
         }
         const token = await tokenCache.get(installationId);
         const github = githubForToken(token);
+        if (record.state === 'publishing') {
+          await resumePublishingSet({
+            github,
+            state,
+            integrationId,
+            repositoryId,
+            owner,
+            repo,
+            correlation
+          });
+          reconciled += 1;
+          continue;
+        }
         const discovered = await discoverRun(
           token,
           owner,
@@ -483,6 +521,32 @@ export async function recoverExpiredDispatches(env, options = {}) {
               const failureCode = /^TK023_[A-Z0-9_]+$/.test(String(error?.message || ''))
                 ? error.message
                 : 'TK023_COMPLETED_RUN_RECOVERY_FAILED';
+              const refreshed = (await state.listCorrelations())
+                .find((entry) => entry.id === correlation.id);
+              if (!refreshed) throw new Error('TK023_CORRELATION_STATE_MISSING');
+              const refreshedAttempt = await state.getCurrentAttempt(attemptHeadKey(refreshed.record));
+              if (
+                !refreshedAttempt ||
+                refreshedAttempt.generation !== refreshed.record.attempt_generation ||
+                refreshedAttempt.correlation_id !== refreshed.id
+              ) continue;
+              if (refreshed.record.state === 'publishing') {
+                await resumePublishingSet({
+                  github,
+                  state,
+                  integrationId,
+                  repositoryId,
+                  owner,
+                  repo,
+                  correlation: refreshed
+                });
+                reconciled += 1;
+                continue;
+              }
+              if (['completed', 'failed', 'superseded'].includes(refreshed.record.state)) {
+                reconciled += 1;
+                continue;
+              }
               await terminalizeDispatchFailure({
                 github,
                 state,
@@ -490,7 +554,7 @@ export async function recoverExpiredDispatches(env, options = {}) {
                 repositoryId,
                 owner,
                 repo,
-                correlation,
+                correlation: refreshed,
                 failureCode
               });
               terminalized += 1;
