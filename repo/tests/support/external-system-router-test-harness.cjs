@@ -76,6 +76,7 @@ function createExternalSystemRouterTestHarness(
   }
   fs.writeFileSync(modulePath, isolatedSource, 'utf8');
   fs.writeFileSync(sourcePath, '{}\n', 'utf8');
+  fs.writeFileSync(path.join(root, 'inventory-generation-anchor.jsonl'), '', { mode: 0o600 });
   const router = require(modulePath);
   const repositoryRealPath = fs.realpathSync.native(process.cwd());
   const installationRealPath = fs.realpathSync.native(path.dirname(modulePath));

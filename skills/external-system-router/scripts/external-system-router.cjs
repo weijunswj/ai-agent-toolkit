@@ -16,7 +16,7 @@ const ROUTE_LIFECYCLE_SCHEMA_VERSION = 'ai-agent-toolkit.route-lifecycle.v1';
 const HOST_ADAPTER_PLAN_SCHEMA_VERSION = 'ai-agent-toolkit.host-adapter-plan.v1';
 const INVENTORY_AUTHORITY_SCHEMA_VERSION = 'ai-agent-toolkit.inventory-authority.v1';
 const OPERATION_SEMANTICS_SCHEMA_VERSION = 'ai-agent-toolkit.operation-semantics.v1';
-const ROUTER_VERSION = '1.0.10';
+const ROUTER_VERSION = '1.0.11';
 const QUESTION_BANK_SCHEMA_VERSION = 'ai-agent-toolkit.external-reconciliation-question-bank.v1';
 const ANSWER_SCHEMA_VERSION = 'ai-agent-toolkit.external-reconciliation-answers.v1';
 const AUTHORITY_BOOTSTRAP_PROTOCOL_VERSION = 'ai-agent-toolkit.external-authority-bootstrap.v1';
@@ -33,10 +33,16 @@ const MAX_INVENTORY_BYTES = 1024 * 1024;
 const MAX_INVENTORY_TARGETS = 100;
 const MAX_RUNTIME_EXECUTABLE_BYTES = 256 * 1024 * 1024;
 const MAX_BOOTSTRAP_FRAME_BYTES = 1024 * 1024;
+const MAX_GENERATION_ANCHOR_BYTES = 1024 * 1024;
+const GENERATION_ANCHOR_SCHEMA_VERSION = 'ai-agent-toolkit.inventory-generation-anchor.v1';
+const BOOTSTRAP_IDLE_TIMEOUT_MS = 30_000;
+const BOOTSTRAP_READ_ONLY_LEASE_MS = 5 * 60_000;
+const BOOTSTRAP_MUTATION_LEASE_MS = 24 * 60 * 60_000;
+const MAX_BOOTSTRAP_KEEPALIVES = 2880;
+const PRODUCTION_ENVIRONMENT_ALIASES = new Set(['production', 'prod', 'live']);
 const INVENTORY_AUTHORITIES = new WeakMap();
 const HOST_PLAN_AUTHORITIES = new WeakMap();
 const SELECTED_ROUTE_AUTHORITIES = new WeakMap();
-const LOADED_INVENTORY_GENERATIONS = new Map();
 const AUTHORITY_BOOTSTRAP_MODE = require.main === module
   && process.argv.length === 3
   && process.argv[2] === AUTHORITY_BOOTSTRAP_COMMAND;
@@ -63,6 +69,7 @@ function captureAuthorityRuntime() {
     resolve: path.resolve.bind(path),
     dirname: path.dirname.bind(path),
     userInfo: os.userInfo.bind(os),
+    writeFileSync: fs.writeFileSync.bind(fs),
     version: process.version
   });
 }
@@ -398,10 +405,14 @@ function classifyRisk(operation, semantics) {
     ?? semantics.minimumRiskByEnvironment.default;
   const mutationFloor = semantics.mutationClass === 'read-only'
     ? RISK_TIERS.INSPECTION
-    : operation.environment === 'production' || operation.sensitive === true
+    : isProductionEnvironment(operation.environment) || operation.sensitive === true
       ? RISK_TIERS.SENSITIVE_REVERSIBLE
       : RISK_TIERS.REVERSIBLE;
   return Math.max(semanticsFloor, mutationFloor);
+}
+
+function isProductionEnvironment(environment) {
+  return PRODUCTION_ENVIRONMENT_ALIASES.has(String(environment || '').trim().toLowerCase());
 }
 
 function operationApprovalBinding(envelope, operation) {
@@ -686,7 +697,9 @@ function assertTrustedAuthorityBootstrap() {
   invariant(typeof process.permission?.has === 'function'
     && process.permission.has('fs.read', AUTHORITY_RUNTIME.execPath)
     && process.permission.has('fs.read', __filename)
-    && process.permission.has('fs.read', canonicalInventoryPath()),
+    && process.permission.has('fs.read', canonicalInventoryPath())
+    && process.permission.has('fs.read', inventoryGenerationAnchorPath())
+    && process.permission.has('fs.write', inventoryGenerationAnchorPath()),
   'Trusted inventory authority requires the runtime permission boundary.',
   'EXTERNAL_INVENTORY_BOOTSTRAP_UNAVAILABLE');
   const loadedModules = Object.keys(require.cache);
@@ -716,6 +729,13 @@ function canonicalInventoryPath() {
   );
 }
 
+function inventoryGenerationAnchorPath() {
+  return AUTHORITY_RUNTIME.join(
+    AUTHORITY_RUNTIME.dirname(canonicalInventoryPath()),
+    'inventory-generation-anchor.jsonl'
+  );
+}
+
 function authorityBootstrapExecArgv() {
   invariant(AUTHORITY_BOOTSTRAP_MODE && AUTHORITY_RUNTIME,
     'Trusted inventory authority is unavailable outside the isolated bootstrap process.',
@@ -725,6 +745,8 @@ function authorityBootstrapExecArgv() {
     `--allow-fs-read=${AUTHORITY_RUNTIME.execPath}`,
     `--allow-fs-read=${__filename}`,
     `--allow-fs-read=${canonicalInventoryPath()}`,
+    `--allow-fs-read=${inventoryGenerationAnchorPath()}`,
+    `--allow-fs-write=${inventoryGenerationAnchorPath()}`,
     ...AUTHORITY_BOOTSTRAP_STATIC_EXEC_ARGV.slice(1)
   ]);
 }
@@ -740,13 +762,13 @@ function samePath(left, right) {
   return normalize(left) === normalize(right);
 }
 
-function readBoundedRegularFile(filePath, maxBytes = MAX_INVENTORY_BYTES) {
+function readBoundedRegularFile(filePath, maxBytes = MAX_INVENTORY_BYTES, allowEmpty = false) {
   assertTrustedAuthorityBootstrap();
   const resolved = AUTHORITY_RUNTIME.resolve(filePath);
   const before = AUTHORITY_RUNTIME.lstatSync(resolved);
   invariant(before.isFile() && !before.isSymbolicLink(),
     'Inventory source must be one existing regular non-link file.', 'EXTERNAL_INVENTORY_TOPOLOGY_MISMATCH');
-  invariant(before.size > 0 && before.size <= maxBytes,
+  invariant((allowEmpty ? before.size >= 0 : before.size > 0) && before.size <= maxBytes,
     'Inventory source exceeds the bounded size.', 'EXTERNAL_INVENTORY_BOUNDS_EXCEEDED');
   const realPath = AUTHORITY_RUNTIME.realpathSync(resolved);
   invariant(samePath(realPath, resolved),
@@ -789,6 +811,118 @@ function readTrustedRegularFile(filePath, failureCode, maxBytes = MAX_INVENTORY_
     if (typeof error?.code === 'string' && error.code.startsWith('EXTERNAL_')) throw error;
     invariant(false, 'Trusted bounded file is unavailable.', failureCode);
   }
+}
+
+function generationAnchorRecordDigest(record) {
+  return sha256({
+    schemaVersion: record.schemaVersion,
+    generationKey: record.generationKey,
+    sequence: record.sequence,
+    bytesDigest: record.bytesDigest,
+    previousRecordDigest: record.previousRecordDigest
+  });
+}
+
+function readGenerationAnchor() {
+  assertTrustedAuthorityBootstrap();
+  const anchorPath = inventoryGenerationAnchorPath();
+  let source;
+  try {
+    source = readBoundedRegularFile(anchorPath, MAX_GENERATION_ANCHOR_BYTES, true);
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      invariant(false, 'Inventory generation anchor is missing.',
+        'EXTERNAL_INVENTORY_GENERATION_ROLLBACK');
+    }
+    throw error;
+  }
+  const text = source.bytes.toString('utf8');
+  if (text.length === 0) return { path: anchorPath, records: [], source };
+  invariant(text.endsWith('\n'), 'Inventory generation anchor is incomplete.',
+    'EXTERNAL_INVENTORY_GENERATION_ROLLBACK');
+  const records = [];
+  let previousRecordDigest = null;
+  for (const [index, line] of text.trimEnd().split('\n').entries()) {
+    let record;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      invariant(false, 'Inventory generation anchor is malformed.',
+        'EXTERNAL_INVENTORY_GENERATION_ROLLBACK');
+    }
+    requireObject(record, `Inventory generation anchor record ${index}`);
+    assertAllowedKeys(record, new Set([
+      'schemaVersion', 'generationKey', 'sequence', 'bytesDigest',
+      'previousRecordDigest', 'recordDigest'
+    ]), `Inventory generation anchor record ${index}`);
+    invariant(record.schemaVersion === GENERATION_ANCHOR_SCHEMA_VERSION,
+      'Inventory generation anchor schema is unsupported.',
+      'EXTERNAL_INVENTORY_GENERATION_ROLLBACK');
+    requireString(record.generationKey, 'generationKey', { pattern: DIGEST_PATTERN });
+    invariant(Number.isSafeInteger(record.sequence) && record.sequence >= 0,
+      'Inventory generation anchor sequence is invalid.',
+      'EXTERNAL_INVENTORY_GENERATION_ROLLBACK');
+    requireString(record.bytesDigest, 'bytesDigest', { pattern: DIGEST_PATTERN });
+    invariant(record.previousRecordDigest === previousRecordDigest,
+      'Inventory generation anchor chain is discontinuous.',
+      'EXTERNAL_INVENTORY_GENERATION_ROLLBACK');
+    invariant(record.recordDigest === generationAnchorRecordDigest(record),
+      'Inventory generation anchor digest is invalid.',
+      'EXTERNAL_INVENTORY_GENERATION_ROLLBACK');
+    previousRecordDigest = record.recordDigest;
+    records.push(record);
+  }
+  return { path: anchorPath, records, source };
+}
+
+function persistInventoryGeneration(generationKey, sequence, bytesDigest) {
+  const anchor = readGenerationAnchor();
+  const previous = [...anchor.records].reverse().find((record) => record.generationKey === generationKey);
+  if (previous) {
+    invariant(sequence >= previous.sequence,
+      'Inventory generation rolled back.', 'EXTERNAL_INVENTORY_GENERATION_ROLLBACK');
+    invariant(sequence !== previous.sequence || bytesDigest === previous.bytesDigest,
+      'Inventory bytes changed without a generation increment.',
+      'EXTERNAL_INVENTORY_GENERATION_ROLLBACK');
+    if (sequence === previous.sequence) return previous;
+  }
+  const record = {
+    schemaVersion: GENERATION_ANCHOR_SCHEMA_VERSION,
+    generationKey,
+    sequence,
+    bytesDigest,
+    previousRecordDigest: anchor.records.at(-1)?.recordDigest || null
+  };
+  record.recordDigest = generationAnchorRecordDigest(record);
+  const payload = `${JSON.stringify(record)}\n`;
+  const existingBytes = anchor.source?.size || 0;
+  invariant(existingBytes + Buffer.byteLength(payload, 'utf8') <= MAX_GENERATION_ANCHOR_BYTES,
+    'Inventory generation anchor exceeds the bounded size.',
+    'EXTERNAL_INVENTORY_BOUNDS_EXCEEDED');
+  let descriptor;
+  try {
+    descriptor = AUTHORITY_RUNTIME.openSync(anchor.path, 'a');
+    const opened = AUTHORITY_RUNTIME.fstatSync(descriptor);
+    invariant(opened.isFile()
+      && opened.dev === anchor.source.dev
+      && opened.ino === anchor.source.ino
+      && opened.size === anchor.source.size,
+    'Inventory generation anchor changed before append.',
+    'EXTERNAL_INVENTORY_GENERATION_ROLLBACK');
+    AUTHORITY_RUNTIME.writeFileSync(descriptor, payload, 'utf8');
+  } catch (error) {
+    if (typeof error?.code === 'string' && error.code.startsWith('EXTERNAL_')) throw error;
+    invariant(false, 'Inventory generation anchor could not be persisted safely.',
+      'EXTERNAL_INVENTORY_GENERATION_ROLLBACK');
+  } finally {
+    if (descriptor !== undefined) AUTHORITY_RUNTIME.closeSync(descriptor);
+  }
+  const verified = readGenerationAnchor();
+  const current = verified.records.at(-1);
+  invariant(current?.recordDigest === record.recordDigest,
+    'Inventory generation anchor append was not the terminal durable record.',
+    'EXTERNAL_INVENTORY_GENERATION_ROLLBACK');
+  return current;
 }
 
 function runtimeExecutableIdentity() {
@@ -871,17 +1005,11 @@ function loadTrustedInventorySnapshot() {
       `Inventory ${field} does not match the current runtime.`, 'EXTERNAL_INVENTORY_AUTHORITY_MISMATCH');
   }
   const generationKey = `${source.realPath}\u0000${registry.repositoryIdentity}\u0000${registry.hostIdentity}\u0000${registry.installationIdentity}`;
-  const previous = LOADED_INVENTORY_GENERATIONS.get(generationKey);
-  if (previous) {
-    invariant(registry.generationSequence >= previous.sequence,
-      'Inventory generation rolled back.', 'EXTERNAL_INVENTORY_GENERATION_ROLLBACK');
-    invariant(registry.generationSequence !== previous.sequence || source.bytesDigest === previous.bytesDigest,
-      'Inventory bytes changed without a generation increment.', 'EXTERNAL_INVENTORY_GENERATION_ROLLBACK');
-  }
-  LOADED_INVENTORY_GENERATIONS.set(generationKey, {
-    sequence: registry.generationSequence,
-    bytesDigest: source.bytesDigest
-  });
+  persistInventoryGeneration(
+    sha256({ generationKey }),
+    registry.generationSequence,
+    source.bytesDigest
+  );
   const authority = Object.freeze({
     schemaVersion: INVENTORY_AUTHORITY_SCHEMA_VERSION,
     authorityId: sha256({
@@ -1334,7 +1462,8 @@ function defaultRegistryPath() {
 function defaultLocalStatePaths() {
   const base = path.join(os.homedir(), '.ai-agent-toolkit');
   return {
-    registry: path.join(base, 'external-system-targets.json'),
+    registry: path.join(base, 'external-system', 'provider-target-registry.json'),
+    inventoryGenerationAnchor: path.join(base, 'external-system', 'inventory-generation-anchor.jsonl'),
     capabilityMatrix: path.join(base, 'capability-matrix.json'),
     capabilityLedger: path.join(base, 'capability-ledger.json'),
     receipts: path.join(base, 'operation-receipts'),
@@ -1433,9 +1562,11 @@ function resolveProviderTarget(registry, selector) {
   const provider = requireString(selector.provider, 'selector.provider', { pattern: PROVIDER_PATTERN });
   const candidates = registry.targets.filter((target) => target.provider === provider
     && (selector.targetAlias === undefined || target.targetAlias === selector.targetAlias)
+    && (selector.accountOrOrganisation === undefined
+      || target.accountOrOrganisation === selector.accountOrOrganisation)
     && (selector.environment === undefined || target.environment === selector.environment));
   invariant(candidates.length > 0, `No registered ${provider} target matches repository/task context.`, 'EXTERNAL_TARGET_NOT_FOUND');
-  invariant(candidates.length === 1, `Multiple ${provider} targets match; ask once and pin target alias plus environment in the envelope.`, 'EXTERNAL_TARGET_AMBIGUOUS');
+  invariant(candidates.length === 1, `Multiple ${provider} targets match; ask once and pin target alias, account or organisation, plus environment in the envelope.`, 'EXTERNAL_TARGET_AMBIGUOUS');
   invariant(selector.targetAlias && selector.environment, 'Target resolution must not guess from recent credentials, tabs, history, environment variables, or registration order.', 'EXTERNAL_TARGET_PIN_REQUIRED');
   return candidates[0];
 }
@@ -1860,6 +1991,14 @@ function validateReconciliationAnswers(questionBank, answers) {
     const value = answers.answers[id];
     invariant(value !== null && value !== undefined && !(typeof value === 'string' && value.trim() === ''), `Question ${id} requires an answer.`, 'EXTERNAL_QUESTION_BANK_INCOMPLETE');
   }
+  const canonicalApprovalReference = requireString(
+    answers.answers.ownerApprovalReference,
+    'answers.answers.ownerApprovalReference',
+    { max: 200 }
+  );
+  invariant(answers.ownerApprovalReference === canonicalApprovalReference,
+    'Top-level owner approval reference differs from the canonical question answer.',
+    'EXTERNAL_WRITE_APPROVAL_REQUIRED');
   invariant(answers.ownerApproved === true, 'Writes require owner approval after the complete question bank.', 'EXTERNAL_WRITE_APPROVAL_REQUIRED');
   assertNoSecretMaterial(answers, 'Reconciliation answers', { allowedSensitiveKeys: new Set(['credentialReference']) });
   return answers;
@@ -2349,10 +2488,11 @@ function runTrustedAuthoritySession() {
     nonces: new Set(),
     phase: 'select-route',
     buffer: '',
-    totalBytes: 0,
     authority: null,
     route: null,
     envelope: null,
+    leaseExpiresAtMs: null,
+    keepaliveCount: 0,
     timer: null,
     finished: false
   };
@@ -2396,11 +2536,17 @@ function runTrustedAuthoritySession() {
     };
     const armSessionTimer = () => {
       clearSessionTimer();
+      const remainingLease = state.leaseExpiresAtMs === null
+        ? BOOTSTRAP_IDLE_TIMEOUT_MS
+        : state.leaseExpiresAtMs - Date.now();
+      invariant(remainingLease > 0,
+        'Trusted authority operation lease expired.',
+        'EXTERNAL_INVENTORY_BOOTSTRAP_TIMEOUT');
       state.timer = setTimeout(() => {
         const error = new Error('Trusted authority session timed out.');
         error.code = 'EXTERNAL_INVENTORY_BOOTSTRAP_TIMEOUT';
         fail(error);
-      }, 30_000);
+      }, Math.min(BOOTSTRAP_IDLE_TIMEOUT_MS, remainingLease));
     };
     const handleFrame = (rawFrame) => {
       if (state.finished) return;
@@ -2439,13 +2585,19 @@ function runTrustedAuthoritySession() {
             }
           );
           state.phase = 'receipt-or-close';
+          const leaseDurationMs = state.route.mutationClass === 'read-only'
+            ? BOOTSTRAP_READ_ONLY_LEASE_MS
+            : BOOTSTRAP_MUTATION_LEASE_MS;
+          state.leaseExpiresAtMs = Date.now() + leaseDurationMs;
           writeBootstrapFrame({
             schemaVersion: AUTHORITY_BOOTSTRAP_RESPONSE_SCHEMA_VERSION,
             type: 'route',
             sessionId: state.sessionId,
             nonce: frame.nonce,
             plan,
-            route: state.route
+            route: state.route,
+            leaseExpiresAt: new Date(state.leaseExpiresAtMs).toISOString(),
+            keepaliveIntervalSeconds: BOOTSTRAP_IDLE_TIMEOUT_MS / 3000
           }, privateKey);
           armSessionTimer();
           return;
@@ -2462,8 +2614,27 @@ function runTrustedAuthoritySession() {
           });
           return;
         }
+        if (frame.type === 'keepalive') {
+          invariant(state.keepaliveCount < MAX_BOOTSTRAP_KEEPALIVES,
+            'Authority-bootstrap keepalive limit exceeded.',
+            'EXTERNAL_INVENTORY_BOOTSTRAP_TIMEOUT');
+          invariant(Date.now() < state.leaseExpiresAtMs,
+            'Trusted authority operation lease expired.',
+            'EXTERNAL_INVENTORY_BOOTSTRAP_TIMEOUT');
+          state.keepaliveCount += 1;
+          writeBootstrapFrame({
+            schemaVersion: AUTHORITY_BOOTSTRAP_RESPONSE_SCHEMA_VERSION,
+            type: 'keepalive-ack',
+            sessionId: state.sessionId,
+            nonce: frame.nonce,
+            leaseExpiresAt: new Date(state.leaseExpiresAtMs).toISOString(),
+            keepaliveCount: state.keepaliveCount
+          }, privateKey);
+          armSessionTimer();
+          return;
+        }
         invariant(frame.type === 'create-receipt',
-          'Authority-bootstrap expected one create-receipt or close frame.',
+          'Authority-bootstrap expected one keepalive, create-receipt, or close frame.',
           'EXTERNAL_INVENTORY_BOOTSTRAP_PROTOCOL_INVALID');
         const receipt = createOperationReceipt({
           ...bootstrapReceiptInput(frame.receiptInput),
@@ -2485,14 +2656,13 @@ function runTrustedAuthoritySession() {
     process.stdin.setEncoding('utf8');
     process.stdin.on('data', (chunk) => {
       if (state.finished) return;
-      state.totalBytes += Buffer.byteLength(chunk, 'utf8');
-      if (state.totalBytes > MAX_BOOTSTRAP_FRAME_BYTES * 2) {
-        const error = new Error('Authority-bootstrap session input is oversized.');
+      state.buffer += chunk;
+      if (Buffer.byteLength(state.buffer, 'utf8') > MAX_BOOTSTRAP_FRAME_BYTES) {
+        const error = new Error('Authority-bootstrap session input frame is oversized.');
         error.code = 'EXTERNAL_INVENTORY_BOOTSTRAP_PROTOCOL_INVALID';
         fail(error);
         return;
       }
-      state.buffer += chunk;
       let newline;
       while (!state.finished && (newline = state.buffer.indexOf('\n')) !== -1) {
         const frame = state.buffer.slice(0, newline);
@@ -2535,7 +2705,7 @@ function usage() {
     '  node scripts/external-system-router.cjs reconcile <input-file>',
     '',
     'Isolated authority session:',
-    '  node --permission --allow-fs-read=<exact-node> --allow-fs-read=<exact-router> --allow-fs-read=<canonical-registry> --frozen-intrinsics --disable-proto=throw --no-addons scripts/external-system-router.cjs trusted-authority-session',
+    '  node --permission --allow-fs-read=<exact-node> --allow-fs-read=<exact-router> --allow-fs-read=<canonical-registry> --allow-fs-read=<generation-anchor> --allow-fs-write=<generation-anchor> --frozen-intrinsics --disable-proto=throw --no-addons scripts/external-system-router.cjs trusted-authority-session',
     '  The session uses bounded signed JSON lines on stdin/stdout and never accepts an inventory path.',
     '',
     'This helper does not call providers, browsers, MCP servers, CLIs, or credential stores.'

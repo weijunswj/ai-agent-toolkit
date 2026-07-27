@@ -3,7 +3,7 @@
   "dependencies": [
     {
       "id": "external-system-router",
-      "compatibleVersion": "1.0.10",
+      "compatibleVersion": "1.0.11",
       "requiredFor": [
         "provider operations",
         "deployment, DNS, database, storage, workflow and OAuth operations",

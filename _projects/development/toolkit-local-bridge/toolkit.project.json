@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.9.11",
+  "version": "2.9.12",
   "version_policy": "semver",
-  "version_notes": "Aligns native and bridge surfaces with external-system-router 1.0.10 and its isolated permission-bounded inventory-authority bootstrap; 2.9.10 remains reserved by the overlapping open Toolkit lane.",
+  "version_notes": "Aligns native and bridge surfaces with external-system-router 1.0.11 and its exact-head review remediation; 2.9.10 remains reserved by the overlapping open Toolkit lane.",
   "outputs": [
     {
       "kind": "curated",

@@ -91,7 +91,17 @@ const FACET_SKILLS = Object.freeze({
 const GOVERNED_MUTATION_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'PowerShell']);
 const N8N_MCP_TOOL_PATTERN_SOURCE = '^mcp__[^\\s]*n8n[^\\s]*__[^\\s]+$';
 const N8N_MCP_TOOL_PATTERN = new RegExp(N8N_MCP_TOOL_PATTERN_SOURCE, 'i');
-const N8N_MCP_PROVEN_READ_ONLY_ACTION_PATTERN = /^(?:n8n_)?(?:get|list|search|describe|inspect|validate|health|status|schema|documentation|read)(?:_|$)/i;
+const N8N_MCP_PROVEN_READ_ONLY_ACTIONS = new Set([
+  'get_execution',
+  'get_node',
+  'get_workflow',
+  'health_check',
+  'list_executions',
+  'list_workflows',
+  'search_nodes',
+  'search_workflows',
+  'validate_workflow'
+]);
 const CAPABILITY_RECEIPT_MAX_BYTES = 32768;
 const N8N_WORKFLOW_MAX_BYTES = 2 * 1024 * 1024;
 const LEDGER_LOCK_OWNER_FILE = 'owner.json';
@@ -123,7 +133,8 @@ function isGovernedN8nMutationTool(toolName) {
   const normalized = String(toolName || '');
   if (GOVERNED_MUTATION_TOOLS.has(normalized)) return true;
   if (!N8N_MCP_TOOL_PATTERN.test(normalized)) return false;
-  return !N8N_MCP_PROVEN_READ_ONLY_ACTION_PATTERN.test(normalized.slice(normalized.lastIndexOf('__') + 2));
+  const action = normalized.slice(normalized.lastIndexOf('__') + 2).toLowerCase();
+  return !N8N_MCP_PROVEN_READ_ONLY_ACTIONS.has(action);
 }
 
 function inferGovernedMutationOperation(toolName) {
@@ -728,6 +739,40 @@ function pathWithin(root, candidate) {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
+function safeCompilerOutputPath(cwd, outputPath) {
+  let cwdReal;
+  try {
+    const cwdStat = fs.lstatSync(cwd);
+    if (!cwdStat.isDirectory() || cwdStat.isSymbolicLink()) return false;
+    cwdReal = fs.realpathSync(cwd);
+    if (!sameResolvedPath(cwdReal, cwd)) return false;
+  } catch {
+    return false;
+  }
+  try {
+    const outputStat = fs.lstatSync(outputPath);
+    if (!outputStat.isFile() || outputStat.isSymbolicLink() || outputStat.nlink !== 1) return false;
+    const outputReal = fs.realpathSync(outputPath);
+    return sameResolvedPath(outputReal, outputPath) && pathWithin(cwdReal, outputReal);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') return false;
+  }
+  let parent = path.dirname(outputPath);
+  while (true) {
+    try {
+      const parentStat = fs.lstatSync(parent);
+      if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) return false;
+      const parentReal = fs.realpathSync(parent);
+      return sameResolvedPath(parentReal, parent) && pathWithin(cwdReal, parentReal);
+    } catch (error) {
+      if (error?.code !== 'ENOENT') return false;
+      const next = path.dirname(parent);
+      if (next === parent) return false;
+      parent = next;
+    }
+  }
+}
+
 function resolveToolkitHelperProducer(input, ledger, options = {}) {
   if (!isObject(input) || !isObject(ledger) || ledger.operation !== 'workflow-compile') return null;
   const toolName = String(input.tool_name || input.toolName || '');
@@ -777,6 +822,7 @@ function resolveToolkitHelperProducer(input, ledger, options = {}) {
   } catch {
     return null;
   }
+  if (!safeCompilerOutputPath(cwd, resolvedOutput)) return null;
   const capabilityId = 'toolkit-helper:workflow-compile';
   const capability = ledger.requiredCapabilities.find((entry) => entry.capabilityId === capabilityId);
   if (!capability || capability.status !== 'pending') return null;

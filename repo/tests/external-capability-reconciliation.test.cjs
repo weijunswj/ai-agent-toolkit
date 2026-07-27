@@ -7,6 +7,7 @@ const router = require('../../skills/external-system-router/scripts/external-sys
 
 function completeAnswers(bank, markerChange = 'add') {
   const answers = Object.fromEntries(bank.questions.map((question) => [question.id, `answer:${question.id}`]));
+  answers.ownerApprovalReference = 'issue-286-owner-approval';
   answers.markerChange = markerChange;
   answers.browserFallbackAllowed = false;
   answers.targetRegistration = false;
@@ -178,6 +179,13 @@ test('dynamic n8n markers preserve unmarked content and require the complete own
     ...writeContext.proposedWrite,
     context: writeContext
   }).approved, true);
+  const mismatchedApproval = completeAnswers(writeBank);
+  mismatchedApproval.answers.targetRegistration = true;
+  mismatchedApproval.answers.ownerApprovalReference = 'different-owner-approval';
+  assert.throws(() => router.assertWriteGate(writeBank, mismatchedApproval, {
+    ...writeContext.proposedWrite,
+    context: writeContext
+  }), (error) => error.code === 'EXTERNAL_WRITE_APPROVAL_REQUIRED');
   assert.throws(() => router.assertWriteGate(writeBank, completeAnswers(writeBank), {
     kind: 'target-registration',
     target: 'another-target',

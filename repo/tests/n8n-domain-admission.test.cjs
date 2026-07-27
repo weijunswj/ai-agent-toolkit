@@ -171,6 +171,9 @@ test('generic validator or mirrored workflow evidence cannot substitute for offi
     tool_input: { workflowId: 'workflow-alias', nodes: [] }
   }), true);
   assert.equal(n8n.isGovernedN8nMutationTool('mcp__n8n__get_workflow'), false);
+  assert.equal(n8n.isGovernedN8nMutationTool('mcp__n8n__get_or_create_workflow'), true);
+  assert.equal(n8n.isGovernedN8nMutationTool('mcp__n8n__list_and_delete_workflows'), true);
+  assert.equal(n8n.isGovernedN8nMutationTool('mcp__n8n__future_read_but_mutate_action'), true);
   assert.equal(n8n.isGovernedN8nMutationTool('mcp__n8n__rename_workflow'), true);
   assert.equal(n8n.inferGovernedMutationOperation('mcp__n8n__update_workflow'), 'live-workflow-update');
   const repository = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-generic-workflow-target-'));
@@ -787,6 +790,66 @@ test('the exact installed workflow compiler command is admitted and produces bou
     tool_input: { command: 'node scripts/arbitrary-compiler.cjs source.json output.json' }
   };
   assert.equal(n8n.isCapabilityProducerToolUse(arbitrary, ledger, options), false);
+  const outsideHardlinkTarget = path.join(repository, 'outside-hardlink-target.json');
+  fs.writeFileSync(outsideHardlinkTarget, '{}\n');
+  fs.linkSync(outsideHardlinkTarget, path.join(repository, 'output-hardlink.json'));
+  assert.equal(n8n.isCapabilityProducerToolUse({
+    ...toolUse,
+    tool_input: { command: `node "${helperScript}" source.json output-hardlink.json` }
+  }, ledger, options), false);
+});
+
+test('workflow compiler producer rejects linked outputs and linked output ancestors', (t) => {
+  const repository = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-n8n-helper-output-links-'));
+  const helperRoot = path.join(repository, 'installed-skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts');
+  const helperScript = path.join(helperRoot, 'sanitizer', 'prepare-n8n-template.js');
+  fs.mkdirSync(path.dirname(helperScript), { recursive: true });
+  fs.writeFileSync(helperScript, "'use strict';\n");
+  fs.writeFileSync(path.join(repository, 'source.json'), '{"nodes":[],"connections":{}}\n');
+  const ledger = n8n.createN8nCapabilityLedger({
+    sessionId: 'linked-output-session',
+    repositoryIdentity: repository,
+    objective: 'Compile this n8n workflow JSON.',
+    operation: 'workflow-compile',
+    createdAt: '2026-07-27T00:00:00.000Z'
+  });
+  const verifiedLedger = structuredClone(ledger);
+  for (const capability of verifiedLedger.requiredCapabilities) {
+    if (capability.kind === 'official-skill') {
+      capability.status = 'verified';
+      capability.evidence = [`test:${capability.name}`];
+      capability.blocker = null;
+    }
+  }
+  const options = { toolkitHelperRoots: [helperRoot] };
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-n8n-helper-output-outside-'));
+  const outsideFile = path.join(outside, 'outside.json');
+  fs.writeFileSync(outsideFile, '{}\n');
+  try {
+    fs.symlinkSync(outsideFile, path.join(repository, 'output.json'), 'file');
+    fs.symlinkSync(outside, path.join(repository, 'generated'), 'dir');
+  } catch (error) {
+    if (['EPERM', 'EACCES', 'UNKNOWN'].includes(error.code)) {
+      t.skip(`Symlink creation is unavailable: ${error.code}`);
+      return;
+    }
+    throw error;
+  }
+  const input = (command) => ({
+    cwd: repository,
+    tool_name: 'Bash',
+    tool_input: { command }
+  });
+  assert.equal(n8n.isCapabilityProducerToolUse(
+    input(`node "${helperScript}" source.json output.json`),
+    verifiedLedger,
+    options
+  ), false);
+  assert.equal(n8n.isCapabilityProducerToolUse(
+    input(`node "${helperScript}" source.json generated/output.json`),
+    verifiedLedger,
+    options
+  ), false);
 });
 
 test('Claude completion audit blocks an incomplete n8n task and reports one supported next action', () => {

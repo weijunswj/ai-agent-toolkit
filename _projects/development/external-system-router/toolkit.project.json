@@ -5,9 +5,9 @@
   "title": "External System Router",
   "module_path": "_projects/development/external-system-router",
   "main_path": "_projects/development/external-system-router/_main",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "version_policy": "semver",
-  "version_notes": "Moves production inventory authority into an exact permission-bounded isolated process and rejects mutable in-process core-module, loader, cache, and preload influence.",
+  "version_notes": "Closes eight exact-head review gaps with canonical production aliases, exact read-only MCP actions, bounded receipt keepalives, canonical state paths, non-link compiler outputs, account-aware resolution, approval binding, and a persistent generation anchor.",
   "outputs": [
     {
       "kind": "copy",

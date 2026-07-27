@@ -355,11 +355,14 @@ function authorize(authorisationEnvelope, operationContext, options = {}) {
 }
 
 function authorityProcessArgs(routerPath, registryPath) {
+  const generationAnchorPath = path.join(path.dirname(registryPath), 'inventory-generation-anchor.jsonl');
   return [
     '--permission',
     `--allow-fs-read=${process.execPath}`,
     `--allow-fs-read=${routerPath}`,
     `--allow-fs-read=${registryPath}`,
+    `--allow-fs-read=${generationAnchorPath}`,
+    `--allow-fs-write=${generationAnchorPath}`,
     '--frozen-intrinsics',
     '--disable-proto=throw',
     '--no-addons',
@@ -433,6 +436,9 @@ test('risk tiers and one established envelope govern exact operations without pe
   assert.equal(router.classifyRisk(operation('read-revision'), semanticsFor('read-revision')), 0);
   assert.equal(router.classifyRisk(operation('update-setting', { environment: 'local' }), semanticsFor('update-setting')), 1);
   assert.equal(router.classifyRisk(operation('update-setting'), semanticsFor('update-setting')), 2);
+  assert.equal(router.classifyRisk(operation('update-setting', { environment: 'prod' }), semanticsFor('update-setting')), 2);
+  assert.equal(router.classifyRisk(operation('update-setting', { environment: 'live' }), semanticsFor('update-setting')), 2);
+  assert.equal(router.classifyRisk(operation('update-setting', { environment: 'Production' }), semanticsFor('update-setting')), 2);
   assert.equal(router.classifyRisk(operation('update-setting', { environment: 'uat' }), semanticsFor('update-setting')), 1);
   assert.equal(router.classifyRisk(operation('delete-setting'), semanticsFor('delete-setting')), 3);
 
@@ -680,7 +686,7 @@ test('standalone AI coding rules explicitly declare the external-system-router r
   ), 'utf8'));
   assert.equal(dependencies.schemaVersion, 'ai-agent-toolkit.skill-runtime-dependencies.v1');
   const externalRouter = dependencies.dependencies.find((entry) => entry.id === 'external-system-router');
-  assert.equal(externalRouter.compatibleVersion, '1.0.10');
+  assert.equal(externalRouter.compatibleVersion, '1.0.11');
   assert.equal(externalRouter.installUnit, 'complete-skill-folder');
   assert.equal(externalRouter.unavailableBehavior, 'fail-closed');
   for (const required of [
@@ -1185,7 +1191,10 @@ test('trusted inventory loader rejects forged, copied, stale, replaced, and cros
     ...rollback.registry,
     generationSequence: 1
   }, null, 2)}\n`);
-  assert.throws(() => rollback.harnessRouter.loadTrustedInventorySnapshot(),
+  const rollbackModulePath = require.resolve(rollback.modulePath);
+  delete require.cache[rollbackModulePath];
+  const freshAuthorityProcess = require(rollbackModulePath);
+  assert.throws(() => freshAuthorityProcess.loadTrustedInventorySnapshot(),
     (error) => error.code === 'EXTERNAL_INVENTORY_GENERATION_ROLLBACK');
 
   const sameGeneration = inventorySource(api);
@@ -1537,11 +1546,27 @@ test('isolated test-only bootstrap keeps inventory, plan, route, and receipt aut
   })}\n`);
   const selected = await lines.next();
   verifyBootstrapFrame(selected, publicKey);
-  assert.equal(selected.type, 'route');
+  assert.equal(selected.type, 'route', JSON.stringify(selected));
   assert.equal(selected.nonce, routeNonce);
   assert.equal(selected.route.selectedInterface, api.interfaceId);
   assert.equal(selected.route.snapshotAuthorityId, selected.plan.snapshotAuthorityId);
   assert.equal(selected.route.authorityBootstrapVersion, 'ai-agent-toolkit.external-authority-bootstrap.v1');
+  assert.equal(Number.isFinite(Date.parse(selected.leaseExpiresAt)), true);
+  assert.equal(selected.keepaliveIntervalSeconds, 10);
+
+  const keepaliveNonce = crypto.randomBytes(32).toString('hex');
+  child.stdin.write(`${JSON.stringify({
+    schemaVersion: 'ai-agent-toolkit.external-authority-bootstrap-request.v1',
+    type: 'keepalive',
+    sessionId: ready.sessionId,
+    nonce: keepaliveNonce
+  })}\n`);
+  const keptAlive = await lines.next();
+  verifyBootstrapFrame(keptAlive, publicKey);
+  assert.equal(keptAlive.type, 'keepalive-ack');
+  assert.equal(keptAlive.nonce, keepaliveNonce);
+  assert.equal(keptAlive.leaseExpiresAt, selected.leaseExpiresAt);
+  assert.equal(keptAlive.keepaliveCount, 1);
 
   const receiptNonce = crypto.randomBytes(32).toString('hex');
   child.stdin.write(`${JSON.stringify({
@@ -1669,6 +1694,14 @@ function target(alias, environment, credentials = ['credential-store://coolify/s
 }
 
 test('provider target registry defaults to one credential, never guesses, and survives host switching', () => {
+  assert.equal(
+    router.defaultLocalStatePaths().registry,
+    path.join(os.homedir(), '.ai-agent-toolkit', 'external-system', 'provider-target-registry.json')
+  );
+  assert.equal(
+    router.defaultLocalStatePaths().inventoryGenerationAnchor,
+    path.join(os.homedir(), '.ai-agent-toolkit', 'external-system', 'inventory-generation-anchor.jsonl')
+  );
   const harness = createExternalSystemRouterTestHarness(publishedRouterPath, 'external-registry-validation-');
   const identity = harness.identity;
   const inventoryGeneration = `sha256:${'8'.repeat(64)}`;
@@ -1690,6 +1723,31 @@ test('provider target registry defaults to one credential, never guesses, and su
   assert.throws(() => router.resolveProviderTarget(registry, { provider: 'coolify' }), (error) => error.code === 'EXTERNAL_TARGET_AMBIGUOUS');
   const selected = router.resolveProviderTarget(registry, { provider: 'coolify', targetAlias: 'coolify-swooshz-production', environment: 'production' });
   assert.equal(selected.credentialReferences.length, 1);
+  const multiAccountRegistry = {
+    ...registryBase,
+    targets: [
+      target('shared-production', 'production', undefined, {
+        inventoryGeneration,
+        accountOrOrganisation: 'account-a'
+      }),
+      target('shared-production', 'production', undefined, {
+        inventoryGeneration,
+        accountOrOrganisation: 'account-b'
+      })
+    ]
+  };
+  router.validateProviderTargetRegistry(multiAccountRegistry);
+  assert.throws(() => router.resolveProviderTarget(multiAccountRegistry, {
+    provider: 'coolify',
+    targetAlias: 'shared-production',
+    environment: 'production'
+  }), (error) => error.code === 'EXTERNAL_TARGET_AMBIGUOUS');
+  assert.equal(router.resolveProviderTarget(multiAccountRegistry, {
+    provider: 'coolify',
+    targetAlias: 'shared-production',
+    accountOrOrganisation: 'account-b',
+    environment: 'production'
+  }).accountOrOrganisation, 'account-b');
   assert.throws(
     () => router.validateProviderTargetRegistry({
       ...registryBase,
