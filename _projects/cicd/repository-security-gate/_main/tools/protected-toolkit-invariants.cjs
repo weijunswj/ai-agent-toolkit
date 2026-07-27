@@ -127,11 +127,11 @@ function checkProperty(id, context) {
     );
   }
   if (id === 'TK023-INV-STATIC-TERMINAL-STRUCTURE') {
-    const text = context.fixture?.text || readText(
+    const text = (context.fixture?.text || readText(
       context.authorityRoot,
       '.github/workflows/repository-security-gate.yml',
       context.records
-    );
+    )).replace(/\r\n/g, '\n');
     const required = [
       ['repository-security-terminal', 'TK-023 authority / repository security terminal'],
       ['validate-terminal', 'TK-023 authority / validate terminal'],

@@ -654,6 +654,7 @@ function buildTerminalReceipt(options) {
     workflow_digest: options.workflowDigest,
     run_id: Number(options.runId),
     run_attempt: Number(options.runAttempt),
+    attempt_generation: Number(options.attemptGeneration),
     job_id: context.terminal_job_id,
     github_job_id: Number(options.githubJobId),
     correlation_id: options.correlationId,
@@ -869,7 +870,7 @@ function verifyDispatchEnvelope(options) {
     'schema', 'repository', 'repository_id', 'candidate_repository', 'candidate_repository_id',
     'installation_id', 'pr_number', 'base_ref', 'base_sha',
     'base_generation', 'head_sha', 'authority_sha', 'delivery_id', 'nonce', 'correlation_id',
-    'issued_at', 'expires_at', 'app_name', 'integration_id'
+    'attempt_generation', 'issued_at', 'expires_at', 'app_name', 'integration_id'
   ];
   if (canonicalJson(Object.keys(document).sort()) !== canonicalJson(keys.sort())) throw new Error('Dispatch envelope fields are invalid');
   if (document.schema !== DISPATCH_SCHEMA) throw new Error('Dispatch schema is invalid');
@@ -885,6 +886,8 @@ function verifyDispatchEnvelope(options) {
     document.pr_number < 1 ||
     !Number.isInteger(document.base_generation) ||
     document.base_generation < 1 ||
+    !Number.isInteger(document.attempt_generation) ||
+    document.attempt_generation < 1 ||
     typeof document.base_ref !== 'string' ||
     !/^[A-Za-z0-9._/-]{1,255}$/.test(document.base_ref) ||
     document.base_ref.split('/').includes('..') ||
@@ -1031,6 +1034,7 @@ async function main(argv = process.argv.slice(2)) {
       workflowDigest: args['workflow-digest'],
       runId: args['run-id'],
       runAttempt: args['run-attempt'],
+      attemptGeneration: args['attempt-generation'],
       githubJobId: args['github-job-id'],
       correlationId: args['correlation-id'],
       nonce: args.nonce,

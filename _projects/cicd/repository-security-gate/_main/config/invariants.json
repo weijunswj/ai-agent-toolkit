@@ -4,7 +4,7 @@
   "profile": "SECURITY_PROFILE_TOOLING_LIBRARY",
   "harness": {
     "path": "tools/protected-toolkit-invariants.cjs",
-    "sha256": "sha256:ef40f93d5037161476f2e05a027dd07147b36224552cd171b198cb227cd78b80"
+    "sha256": "sha256:fb0b1f28ca68d72e37c77b0ddaca21721138e47e92be7cf2703865ccb3c017de"
   },
   "negative_fixtures": {
     "path": "fixtures/protected-toolkit-invariants/negative-cases.json",

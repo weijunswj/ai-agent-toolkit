@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const zlib = require('node:zlib');
 const { spawnSync } = require('node:child_process');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -203,6 +204,7 @@ function terminalOptions(contextId = 'repository-security-gate') {
     workflowDigest: `sha256:${'6'.repeat(64)}`,
     runId: 7,
     runAttempt: 1,
+    attemptGeneration: 1,
     githubJobId: 8,
     correlationId: `tk023:1:2:${'1'.repeat(40)}:abcdef123456`,
     nonce: 'abcdefghijklmnopqrstuv',
@@ -226,6 +228,62 @@ function fakeGithub(checkRuns = []) {
       return { id: checkRunId, external_id: payload.external_id, app: { id: 77 } };
     }
   };
+}
+
+function crc32(bytes) {
+  let value = 0xffffffff;
+  for (const byte of bytes) {
+    value ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = (value >>> 1) ^ (0xedb88320 & -(value & 1));
+    }
+  }
+  return (value ^ 0xffffffff) >>> 0;
+}
+
+function storedZip(entries, compress = false) {
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+  for (const [name, contents] of entries) {
+    const nameBytes = Buffer.from(name, 'utf8');
+    const data = Buffer.from(contents, 'utf8');
+    const encoded = compress ? zlib.deflateRawSync(data) : data;
+    const method = compress ? 8 : 0;
+    const checksum = crc32(data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0x0800, 6);
+    local.writeUInt16LE(method, 8);
+    local.writeUInt32LE(checksum, 14);
+    local.writeUInt32LE(encoded.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBytes.length, 26);
+    locals.push(local, nameBytes, encoded);
+
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(0x0800, 8);
+    central.writeUInt16LE(method, 10);
+    central.writeUInt32LE(checksum, 16);
+    central.writeUInt32LE(encoded.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(nameBytes.length, 28);
+    central.writeUInt32LE(offset, 42);
+    centrals.push(central, nameBytes);
+    offset += local.length + nameBytes.length + encoded.length;
+  }
+  const centralBytes = Buffer.concat(centrals);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(entries.length, 8);
+  end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(centralBytes.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, centralBytes, end]);
 }
 
 test('required-check App authority adversarial fixture matrix', async (t) => {
@@ -326,6 +384,7 @@ test('required-check App authority adversarial fixture matrix', async (t) => {
       workflow_digest: `sha256:${'6'.repeat(64)}`,
       run_id: 7,
       run_attempt: 1,
+      attempt_generation: 1,
       job_id: 'repository-security-terminal',
       github_job_id: 8,
       correlation_id: terminalOptions().correlationId,
@@ -396,6 +455,180 @@ test('required-check App authority adversarial fixture matrix', async (t) => {
       terminalDigest: `sha256:${'2'.repeat(64)}`
     }), /TK023_TERMINAL_CONFLICT/);
     assert.equal(github.calls.length, callsBefore);
+  });
+
+  await t.test('a newer App-issued same-head generation replaces a terminal result and suppresses the stale attempt', async () => {
+    const state = new app.MemoryRunState();
+    const headSha = '1'.repeat(40);
+    const baseRecord = {
+      repository_id: 1,
+      installation_id: 2,
+      repository: 'synthetic/toolkit',
+      candidate_repository: 'synthetic/toolkit',
+      candidate_repository_id: 1,
+      pr_number: 2,
+      head_sha: headSha,
+      base_sha: '2'.repeat(40),
+      base_generation: 1,
+      authority_sha: '3'.repeat(40),
+      nonce: 'abcdefghijklmnopqrstuv',
+      delivery_id: 'delivery-one',
+      envelope_digest: `sha256:${'4'.repeat(64)}`
+    };
+    const headKey = `1/2/${headSha}`;
+    const first = await state.beginAttempt(headKey, 'correlation-one', baseRecord);
+    const github = fakeGithub();
+    const common = {
+      github,
+      state,
+      integrationId: 77,
+      repositoryId: 1,
+      owner: 'synthetic',
+      repo: 'toolkit',
+      prNumber: 2,
+      headSha,
+      contextId: 'validate',
+      summary: 'synthetic'
+    };
+    await app.publishRequiredCheck({
+      ...common,
+      status: 'completed',
+      conclusion: 'failure',
+      terminalDigest: `sha256:${'5'.repeat(64)}`,
+      attemptGeneration: first.generation,
+      correlationId: 'correlation-one'
+    });
+    const second = await state.beginAttempt(headKey, 'correlation-two', {
+      ...baseRecord,
+      nonce: 'zyxwvutsrqponmlkjihgfe',
+      delivery_id: 'delivery-two',
+      envelope_digest: `sha256:${'6'.repeat(64)}`
+    });
+    assert.equal(second.generation, 2);
+    await assert.rejects(app.publishRequiredCheck({
+      ...common,
+      status: 'completed',
+      conclusion: 'success',
+      terminalDigest: `sha256:${'7'.repeat(64)}`,
+      attemptGeneration: first.generation,
+      correlationId: 'correlation-one'
+    }), /TK023_STALE_ATTEMPT/);
+    await app.publishRequiredCheck({
+      ...common,
+      status: 'completed',
+      conclusion: 'success',
+      terminalDigest: `sha256:${'8'.repeat(64)}`,
+      attemptGeneration: second.generation,
+      correlationId: 'correlation-two'
+    });
+    assert.equal(state.data.checks.values().next().value.conclusion, 'success');
+  });
+
+  await t.test('sealed three-context publication is immutable and resumes per-context progress', async () => {
+    const state = new app.MemoryRunState();
+    const headSha = '1'.repeat(40);
+    const correlationId = 'correlation-sealed';
+    const attempt = await state.beginAttempt(`1/2/${headSha}`, correlationId, {
+      repository_id: 1,
+      installation_id: 2,
+      repository: 'synthetic/toolkit',
+      candidate_repository: 'synthetic/toolkit',
+      candidate_repository_id: 1,
+      pr_number: 2,
+      head_sha: headSha,
+      base_sha: '2'.repeat(40),
+      base_generation: 1,
+      authority_sha: '3'.repeat(40),
+      nonce: 'abcdefghijklmnopqrstuv',
+      delivery_id: 'delivery-sealed',
+      envelope_digest: `sha256:${'4'.repeat(64)}`
+    });
+    const contexts = Object.fromEntries(Object.keys(app.CHECK_CONTEXTS).map((contextId, index) => [contextId, {
+      conclusion: index === 0 ? 'failure' : 'success',
+      summary: 'sealed synthetic outcome',
+      terminalDigest: `sha256:${String(index + 1).repeat(64)}`
+    }]));
+    assert.equal((await state.sealPublicationSet(correlationId, {
+      attempt_generation: attempt.generation,
+      contexts
+    })).duplicate, false);
+    await state.markPublicationContext(
+      correlationId,
+      'repository-security-gate',
+      contexts['repository-security-gate'].terminalDigest
+    );
+    assert.equal((await state.getPublicationSet(correlationId)).progress['repository-security-gate'], 'published');
+    await assert.rejects(async () => {
+      const result = await state.sealPublicationSet(correlationId, {
+        attempt_generation: attempt.generation,
+        contexts: {
+          ...contexts,
+          validate: { ...contexts.validate, conclusion: 'failure' }
+        }
+      });
+      if (!result.ok) throw new Error(result.code);
+    }, /TK023_PUBLICATION_SET_CONFLICT/);
+  });
+
+  await t.test('terminal compaction retains active authority and archives bounded terminal history', async () => {
+    const correlations = [];
+    for (let index = 0; index < 300; index += 1) {
+      correlations.push([`terminal-${index}`, {
+        repository_id: 1,
+        pr_number: index + 1,
+        head_sha: String(index % 10).repeat(40),
+        state: 'completed',
+        updated_at: '2025-01-01T00:00:00.000Z'
+      }]);
+    }
+    correlations.push(['active', {
+      repository_id: 1,
+      pr_number: 999,
+      head_sha: 'a'.repeat(40),
+      state: 'dispatch_unknown',
+      updated_at: '2025-01-01T00:00:00.000Z'
+    }]);
+    const state = new app.MemoryRunState({ correlations });
+    await state.compact(Date.parse('2026-07-27T00:00:00.000Z'));
+    assert.equal(state.data.correlations.has('active'), true);
+    assert.equal([...state.data.correlations.values()].filter((record) => record.state === 'completed').length, 256);
+    assert.equal([...state.data.audit.values()].reduce((sum, record) => sum + (record.count || 0), 0), 44);
+    const source = fs.readFileSync(path.join(moduleRoot, 'app', 'src', 'run-state.mjs'), 'utf8');
+    assert.match(source, /storage\.transaction/);
+    assert.match(source, /storage\.delete/);
+  });
+
+  await t.test('dispatch intent and publication reconciliation are durable and duplicate deliveries re-enter reconciliation', () => {
+    const worker = fs.readFileSync(path.join(moduleRoot, 'app', 'src', 'worker.mjs'), 'utf8');
+    assert.match(worker, /dispatch_unknown/);
+    assert.match(worker, /discoverDispatchRun/);
+    assert.match(worker, /TK023_DISPATCH_OUTCOME_UNKNOWN/);
+    assert.match(worker, /sealPublicationSet/);
+    assert.match(worker, /markPublicationContext/);
+    assert.doesNotMatch(worker, /if \(delivery\.duplicate\) return/);
+  });
+
+  await t.test('artifact admission requires one complete canonical ZIP entry', async () => {
+    const canonical = storedZip([['terminal-receipt.json', '{"ok":true}\n']], true);
+    const document = await app.extractSingleJsonArtifact(new Response(canonical));
+    assert.deepEqual(document, { ok: true });
+    const cases = [
+      storedZip([
+        ['terminal-receipt.json', '{"ok":true}\n'],
+        ['extra.json', '{}\n']
+      ]),
+      storedZip([
+        ['terminal-receipt.json', '{"ok":true}\n'],
+        ['terminal-receipt.json', '{"ok":false}\n']
+      ]),
+      Buffer.concat([canonical, Buffer.from('trailing')])
+    ];
+    const corrupted = storedZip([['terminal-receipt.json', '{"ok":true}\n']]);
+    corrupted[corrupted.indexOf(Buffer.from('{"ok":true}'))] ^= 1;
+    cases.push(corrupted);
+    for (const archive of cases) {
+      await assert.rejects(app.extractSingleJsonArtifact(new Response(archive)), /TK023_ARTIFACT_/);
+    }
   });
 
   await t.test('unparseable workflow with duplicate keys is rejected', () => {
@@ -756,7 +989,7 @@ test('App dispatch resolves protected authority from the live default branch and
   const evidence = fs.readFileSync(path.join(moduleRoot, 'app', 'src', 'evidence-verifier.mjs'), 'utf8');
   assert.match(worker, /repositoryMetadata\.default_branch/);
   assert.match(worker, /defaultBranchState\.commit\?\.sha/);
-  assert.match(worker, /ref: defaultBranch/);
+  assert.match(worker, /ref: correlation\.record\.default_branch/);
   assert.doesNotMatch(worker, /authoritySha\s*=\s*requiredSha\([^;]*baseSha/s);
   assert.match(evidence, /oidc_attestation\.job_id !== expected\.terminal\.job_id/);
   assert.match(evidence, /oidc_attestation\.github_job_id !== expected\.github_job_id/);

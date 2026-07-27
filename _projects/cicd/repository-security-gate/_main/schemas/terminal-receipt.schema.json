@@ -20,6 +20,7 @@
     "workflow_digest",
     "run_id",
     "run_attempt",
+    "attempt_generation",
     "job_id",
     "github_job_id",
     "correlation_id",
@@ -99,6 +100,10 @@
       "minimum": 1
     },
     "run_attempt": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "attempt_generation": {
       "type": "integer",
       "minimum": 1
     },

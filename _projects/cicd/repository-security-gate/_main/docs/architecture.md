@@ -84,14 +84,38 @@ receipts, and requires a new protected pass before reactivation.
 Webhook signatures use `X-Hub-Signature-256`; delivery IDs and nonces are
 durably replay-protected. Dispatches bind repository and installation IDs, PR,
 base/ref/generation, exact head, exact protected authority, App name and
-integration ID, delivery, correlation, nonce, issue/expiry times, and the
-canonical envelope digest. The protected runner verifies the Ed25519 signature
-with a promotion-time public key and refuses a missing or changed authority.
+integration ID, delivery, correlation, nonce, the App-issued monotonic
+same-head attempt generation, issue/expiry times, and the canonical envelope
+digest. The protected runner verifies the Ed25519 signature with a
+promotion-time public key and refuses a missing or changed authority.
 The App resolves authority from the live protected default-branch tip rather
 than conflating authority with the PR's recorded base SHA. The terminal OIDC
 token must bind repository ID, repository name, workflow ref and SHA, event,
 run ID, first run attempt, and GitHub `check_run_id` to the exact static and
 numeric terminal job identities.
+
+Each repository Durable Object serializes mutation and commits state plus
+compaction in one storage transaction. All active correlations, unresolved
+dispatch intents, incomplete publication sets, and current-head authority are
+retained without age-based removal. Full terminal records retain at least the
+newest 256 correlations and publication sets; additional full records remain
+for 30 days up to a hard bound of 2,048 correlations and 512 publication sets.
+Delivery replay records retain at least the newest 512 and otherwise seven days
+up to 2,048. Attestations retain at least the newest 256 and otherwise 30 days
+up to 512. Nonces remain through expiry. Compacted records enter daily
+hash-chained audit buckets retained for 400 days; older buckets fold into an
+indefinitely retained cumulative anchor. A crash before commit changes nothing,
+and a crash after commit leaves a complete recoverable state transition.
+
+One head/context check owns successive App-issued generations. A strictly newer
+generation may replace the current terminal outcome; an older correlation,
+native workflow rerun, duplicate generation, or conflicting terminal digest
+cannot update it. Complete attempt evidence remains in the retained correlation,
+publication, and audit chains. The App records `dispatch_intent` before the API
+boundary and `dispatch_unknown` before sending. Unknown outcomes are reconciled
+by exact protected-workflow run title, authority SHA, event, branch, and
+correlation discovery. A unique discovered run resumes; an ambiguous run fails
+closed; an undiscovered expired intent is terminalized for all contexts.
 
 The protected workflow recursively inventories workflow and local action
 producers under strict file/job/edge/depth/matrix/name bounds. It rejects
@@ -111,6 +135,19 @@ infrastructure evidence can never publish success.
 Malformed or missing terminal evidence is converted to an explicit App
 `failure` conclusion when publication infrastructure remains available; if
 the App itself is unavailable, no successful required check exists.
+Before the first terminal Checks API call, the App seals one immutable set
+containing all three context outcomes for the accepted attempt. Per-context
+progress is durable. Redelivery replays only pending members of that exact set,
+so a crash or unknown API outcome cannot authorize a different digest, downgrade
+a verified success with unrelated failure evidence, or strand an unrecoverable
+mixed set.
+
+Artifact admission parses the complete bounded ZIP structure. It requires one
+disk, one local header at offset zero, exactly one matching central-directory
+entry, one canonical expected basename, matching flags/method/sizes/CRC,
+bounded decompression, a terminal end-of-central-directory record, and no
+duplicate name, second entry, data descriptor, ZIP64 sentinel, preamble, or
+trailing bytes.
 
 Generated-surface fidelity runs protected generator bytes in an operation-owned
 copy and compares candidate bytes only as inert inputs. Its lock binds authority

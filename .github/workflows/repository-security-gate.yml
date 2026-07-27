@@ -39,6 +39,7 @@ jobs:
       head_sha: ${{ steps.identity.outputs.head_sha }}
       authority_sha: ${{ steps.identity.outputs.authority_sha }}
       correlation_id: ${{ steps.identity.outputs.correlation_id }}
+      attempt_generation: ${{ steps.identity.outputs.attempt_generation }}
       nonce: ${{ steps.identity.outputs.nonce }}
       candidate_repository: ${{ steps.identity.outputs.candidate_repository }}
     steps:
@@ -80,7 +81,8 @@ jobs:
           const value = JSON.parse(fs.readFileSync(input, 'utf8'));
           const keys = [
             'repository', 'repository_id', 'pr_number', 'base_sha', 'base_generation',
-            'head_sha', 'authority_sha', 'correlation_id', 'nonce', 'candidate_repository'
+            'head_sha', 'authority_sha', 'correlation_id', 'attempt_generation', 'nonce',
+            'candidate_repository'
           ];
           fs.appendFileSync(output, keys.map((key) => `${key}=${value[key]}\n`).join(''));
           NODE
@@ -434,6 +436,7 @@ jobs:
             --authority-tree "${{ needs.producer-inventory.outputs.authority_tree }}" \
             --workflow-digest "${{ needs.producer-inventory.outputs.workflow_digest }}" \
             --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --attempt-generation "${{ needs.dispatch-authority.outputs.attempt_generation }}" \
             --github-job-id "$github_job_id" \
             --correlation-id "${{ needs.dispatch-authority.outputs.correlation_id }}" \
             --nonce "${{ needs.dispatch-authority.outputs.nonce }}" \
@@ -512,6 +515,7 @@ jobs:
             --authority-tree "${{ needs.producer-inventory.outputs.authority_tree }}" \
             --workflow-digest "${{ needs.producer-inventory.outputs.workflow_digest }}" \
             --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --attempt-generation "${{ needs.dispatch-authority.outputs.attempt_generation }}" \
             --github-job-id "$github_job_id" \
             --correlation-id "${{ needs.dispatch-authority.outputs.correlation_id }}" \
             --nonce "${{ needs.dispatch-authority.outputs.nonce }}" \
@@ -590,6 +594,7 @@ jobs:
             --authority-tree "${{ needs.producer-inventory.outputs.authority_tree }}" \
             --workflow-digest "${{ needs.producer-inventory.outputs.workflow_digest }}" \
             --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --attempt-generation "${{ needs.dispatch-authority.outputs.attempt_generation }}" \
             --github-job-id "$github_job_id" \
             --correlation-id "${{ needs.dispatch-authority.outputs.correlation_id }}" \
             --nonce "${{ needs.dispatch-authority.outputs.nonce }}" \

@@ -91,12 +91,26 @@ function stateClient(env, repositoryId) {
       correlation_id: correlationId,
       expires_at: expiresAt
     }),
-    reserveCheck: (key, record) => call('/checks/reserve', { key, record }),
-    bindCheckRun: (key, checkRunId) => call('/checks/bind', { key, check_run_id: checkRunId }),
-    completeCheck: (key, terminalDigest, conclusion) => call('/checks/complete', {
+    beginAttempt: (headKey, correlationId, record) => call('/attempts/begin', {
+      head_key: headKey,
+      correlation_id: correlationId,
+      record
+    }),
+    getCurrentAttempt: async (headKey) => (await call('/attempts/current', { head_key: headKey })).attempt,
+    findCorrelationByDelivery: async (deliveryId) => (await call('/correlations/by-delivery', {
+      delivery_id: deliveryId
+    })).correlation,
+    reserveCheck: (key, record, attempt = null) => call('/checks/reserve', { key, record, attempt }),
+    bindCheckRun: (key, checkRunId, attemptGeneration = null) => call('/checks/bind', {
+      key,
+      check_run_id: checkRunId,
+      attempt_generation: attemptGeneration
+    }),
+    completeCheck: (key, terminalDigest, conclusion, attempt = null) => call('/checks/complete', {
       key,
       terminal_digest: terminalDigest,
-      conclusion
+      conclusion,
+      attempt
     }),
     putCorrelation: (correlationId, record) => call('/correlations/put', {
       correlation_id: correlationId,
@@ -108,6 +122,18 @@ function stateClient(env, repositoryId) {
       record
     }),
     listCorrelations: async () => (await call('/correlations/list', {})).correlations,
+    sealPublicationSet: (correlationId, record) => call('/publications/seal', {
+      correlation_id: correlationId,
+      record
+    }),
+    getPublicationSet: async (correlationId) => (await call('/publications/get', {
+      correlation_id: correlationId
+    })).publication,
+    markPublicationContext: (correlationId, contextId, publicationDigest) => call('/publications/mark', {
+      correlation_id: correlationId,
+      context_id: contextId,
+      publication_digest: publicationDigest
+    }),
     putAttestation: (attestationId, record) => call('/attestations/put', {
       attestation_id: attestationId,
       record
@@ -192,7 +218,11 @@ async function githubRequest(token, url, init = {}) {
       ...(init.headers || {})
     }
   });
-  if (!response.ok) throw new Error(`TK023_GITHUB_${response.status}`);
+  if (!response.ok) {
+    const error = new Error(`TK023_GITHUB_${response.status}`);
+    error.githubStatus = response.status;
+    throw error;
+  }
   return response.status === 204 ? null : response.json();
 }
 
@@ -234,30 +264,241 @@ function githubFacade(token) {
   };
 }
 
+function attemptHeadKey(record) {
+  return `${record.repository_id}/${record.pr_number}/${record.head_sha}`;
+}
+
+async function transitionState(state, correlation, expectedState, nextState, patch = {}) {
+  const next = { ...correlation.record, ...patch, state: nextState };
+  await state.transitionCorrelation(correlation.id, expectedState, next);
+  correlation.record = next;
+  return correlation;
+}
+
+async function sealPublicationSet(state, correlation, contexts) {
+  const sealed = await state.sealPublicationSet(correlation.id, {
+    attempt_generation: correlation.record.attempt_generation,
+    contexts
+  });
+  return sealed.publication;
+}
+
+async function publishSealedSet({
+  github,
+  state,
+  integrationId,
+  repositoryId,
+  owner,
+  repo,
+  correlation
+}) {
+  let publication = await state.getPublicationSet(correlation.id);
+  if (!publication) throw new Error('TK023_PUBLICATION_SET_MISSING');
+  for (const contextId of Object.keys(CHECK_CONTEXTS)) {
+    if (publication.progress[contextId] === 'published') continue;
+    const context = publication.contexts[contextId];
+    await publishRequiredCheck({
+      github,
+      state,
+      integrationId,
+      repositoryId,
+      owner,
+      repo,
+      prNumber: correlation.record.pr_number,
+      headSha: correlation.record.head_sha,
+      contextId,
+      status: 'completed',
+      conclusion: context.conclusion,
+      summary: context.summary,
+      terminalDigest: context.terminalDigest,
+      attemptGeneration: correlation.record.attempt_generation,
+      correlationId: correlation.id
+    });
+    await state.markPublicationContext(correlation.id, contextId, context.terminalDigest);
+    publication = await state.getPublicationSet(correlation.id);
+  }
+  return publication;
+}
+
+async function sealFailureSet(state, correlation, failureCode, runId = 0) {
+  const failureDigest = await canonicalDigest({
+    schema: 'tk.security.required-check-failure/v1',
+    correlation_id: correlation.id,
+    attempt_generation: correlation.record.attempt_generation,
+    workflow_run_id: Number(runId || 0),
+    failure_code: failureCode
+  });
+  return sealPublicationSet(state, correlation, Object.fromEntries(
+    Object.keys(CHECK_CONTEXTS).map((contextId) => [contextId, {
+      conclusion: 'failure',
+      summary: 'Protected evidence was missing, malformed, stale, conflicting, or unavailable.',
+      terminalDigest: failureDigest
+    }])
+  ));
+}
+
 async function cancelSupersededChecks({ github, state, integrationId, repositoryId, owner, repo, prNumber, currentHead }) {
   const correlations = await state.listCorrelations();
   for (const entry of correlations) {
     const record = entry.record;
-    if (record.pr_number !== prNumber || record.head_sha === currentHead || record.state === 'superseded') continue;
-    for (const contextId of Object.keys(CHECK_CONTEXTS)) {
-      await publishRequiredCheck({
+    if (
+      record.pr_number !== prNumber ||
+      record.head_sha === currentHead ||
+      !['dispatch_intent', 'dispatch_unknown', 'dispatched', 'publishing'].includes(record.state)
+    ) continue;
+    const existing = await state.getPublicationSet(entry.id);
+    if (!existing) {
+      const digest = await canonicalDigest({
+        schema: 'tk.security.required-check-superseded/v1',
+        correlation_id: entry.id,
+        attempt_generation: record.attempt_generation,
+        current_head: currentHead
+      });
+      await sealPublicationSet(state, entry, Object.fromEntries(
+        Object.keys(CHECK_CONTEXTS).map((contextId) => [contextId, {
+          conclusion: 'cancelled',
+          summary: 'Superseded by a newer pull-request head.',
+          terminalDigest: digest
+        }])
+      ));
+    }
+    if (record.state !== 'publishing') {
+      await transitionState(state, entry, record.state, 'publishing', {
+        failure_code: 'TK023_HEAD_SUPERSEDED'
+      });
+    }
+    await publishSealedSet({ github, state, integrationId, repositoryId, owner, repo, correlation: entry });
+    await transitionState(state, entry, 'publishing', 'superseded', {
+      failure_code: 'TK023_HEAD_SUPERSEDED'
+    });
+  }
+}
+
+async function discoverDispatchRun(token, owner, repo, defaultBranch, correlation) {
+  const runs = await githubRequest(
+    token,
+    `/repos/${owner}/${repo}/actions/workflows/${encodeURIComponent(WORKFLOW_PATH)}/runs?event=workflow_dispatch&branch=${encodeURIComponent(defaultBranch)}&per_page=100`
+  );
+  const matches = (runs.workflow_runs || []).filter((run) =>
+    run.display_title === `TK-023 ${correlation.id}` &&
+    run.head_sha === correlation.record.authority_sha &&
+    run.event === 'workflow_dispatch'
+  );
+  if (matches.length > 1) throw new Error('TK023_DISPATCH_RUN_AMBIGUOUS');
+  return matches[0] || null;
+}
+
+async function terminalizeDispatchFailure({
+  github,
+  state,
+  integrationId,
+  repositoryId,
+  owner,
+  repo,
+  correlation,
+  failureCode
+}) {
+  const existing = await state.getPublicationSet(correlation.id);
+  if (!existing) await sealFailureSet(state, correlation, failureCode);
+  if (correlation.record.state !== 'publishing') {
+    await transitionState(
+      state,
+      correlation,
+      ['dispatch_intent', 'dispatch_unknown', 'dispatched'],
+      'publishing',
+      { failure_code: failureCode }
+    );
+  }
+  await publishSealedSet({ github, state, integrationId, repositoryId, owner, repo, correlation });
+  await transitionState(state, correlation, 'publishing', 'failed', { failure_code: failureCode });
+}
+
+function dispatchEnvelopeFromCorrelation(correlation, integrationId) {
+  const record = correlation.record;
+  return {
+    schema: DISPATCH_SCHEMA,
+    repository: record.repository,
+    repository_id: record.repository_id,
+    candidate_repository: record.candidate_repository,
+    candidate_repository_id: record.candidate_repository_id,
+    installation_id: record.installation_id,
+    pr_number: record.pr_number,
+    base_ref: record.base_ref,
+    base_sha: record.base_sha,
+    base_generation: record.base_generation,
+    head_sha: record.head_sha,
+    authority_sha: record.authority_sha,
+    delivery_id: record.delivery_id,
+    nonce: record.nonce,
+    correlation_id: correlation.id,
+    attempt_generation: record.attempt_generation,
+    issued_at: record.issued_at,
+    expires_at: record.expires_at,
+    app_name: APP_NAME,
+    integration_id: integrationId
+  };
+}
+
+async function sendDispatchIntent({
+  token,
+  github,
+  state,
+  integrationId,
+  repositoryId,
+  owner,
+  repo,
+  correlation
+}) {
+  if (correlation.record.state === 'dispatch_intent') {
+    await transitionState(state, correlation, 'dispatch_intent', 'dispatch_unknown', {
+      dispatch_started_at: new Date().toISOString()
+    });
+  }
+  try {
+    await githubRequest(token, `/repos/${owner}/${repo}/actions/workflows/${encodeURIComponent(WORKFLOW_PATH)}/dispatches`, {
+      method: 'POST',
+      body: canonicalJson({
+        ref: correlation.record.default_branch,
+        inputs: {
+          dispatch_envelope: correlation.record.signed_envelope,
+          dispatch_signature: correlation.record.signed_signature,
+          dispatch_correlation: correlation.id
+        }
+      })
+    });
+    await transitionState(state, correlation, 'dispatch_unknown', 'dispatched');
+  } catch (error) {
+    const discovered = await discoverDispatchRun(
+      token,
+      owner,
+      repo,
+      correlation.record.default_branch,
+      correlation
+    );
+    if (discovered) {
+      await transitionState(state, correlation, 'dispatch_unknown', 'dispatched', {
+        workflow_run_id: discovered.id
+      });
+    } else if (
+      Number.isInteger(error.githubStatus) &&
+      error.githubStatus >= 400 &&
+      error.githubStatus < 500 &&
+      ![408, 429].includes(error.githubStatus)
+    ) {
+      await terminalizeDispatchFailure({
         github,
         state,
         integrationId,
         repositoryId,
         owner,
         repo,
-        prNumber,
-        headSha: record.head_sha,
-        contextId,
-        status: 'completed',
-        conclusion: 'cancelled',
-        summary: 'Superseded by a newer pull-request head.',
-        terminalDigest: `sha256:${'0'.repeat(64)}`
+        correlation,
+        failureCode: error.message
       });
+      throw error;
+    } else {
+      throw new Error('TK023_DISPATCH_OUTCOME_UNKNOWN');
     }
-    record.state = 'superseded';
-    await state.transitionCorrelation(entry.id, 'dispatched', record);
   }
 }
 
@@ -297,10 +538,138 @@ async function dispatchForPullRequest(payload, deliveryId, env) {
   const state = stateClient(env, repositoryId);
   const github = githubFacade(token);
   await cancelSupersededChecks({ github, state, integrationId, repositoryId, owner, repo, prNumber, currentHead: headSha });
+  const previousDelivery = await state.findCorrelationByDelivery(deliveryId);
+  if (previousDelivery) {
+    const correlation = previousDelivery;
+    if (
+      correlation.record.repository_id !== repositoryId ||
+      correlation.record.pr_number !== prNumber ||
+      correlation.record.head_sha !== headSha ||
+      correlation.record.base_sha !== baseSha ||
+      correlation.record.authority_sha !== authoritySha
+    ) throw new Error('TK023_DELIVERY_CORRELATION_CONFLICT');
+    if (correlation.record.state === 'publishing') {
+      await publishSealedSet({ github, state, integrationId, repositoryId, owner, repo, correlation });
+      await transitionState(
+        state,
+        correlation,
+        'publishing',
+        correlation.record.failure_code ? 'failed' : 'completed'
+      );
+      return { accepted: true, duplicate: true, correlation_id: correlation.id };
+    }
+    if (correlation.record.state === 'dispatch_unknown') {
+      const discovered = await discoverDispatchRun(token, owner, repo, defaultBranch, correlation);
+      if (discovered) {
+        await transitionState(state, correlation, 'dispatch_unknown', 'dispatched', {
+          workflow_run_id: discovered.id
+        });
+        return { accepted: true, reconciled: true, correlation_id: correlation.id };
+      }
+      if (Date.parse(correlation.record.expires_at || '') < Date.now()) {
+        await terminalizeDispatchFailure({
+          github,
+          state,
+          integrationId,
+          repositoryId,
+          owner,
+          repo,
+          correlation,
+          failureCode: 'TK023_DISPATCH_NOT_OBSERVED'
+        });
+        return { accepted: false, terminalized: true, correlation_id: correlation.id };
+      }
+      throw new Error('TK023_DISPATCH_OUTCOME_UNKNOWN');
+    }
+    if (correlation.record.state === 'dispatch_intent') {
+      if (Date.parse(correlation.record.expires_at || '') < Date.now()) {
+        await terminalizeDispatchFailure({
+          github,
+          state,
+          integrationId,
+          repositoryId,
+          owner,
+          repo,
+          correlation,
+          failureCode: 'TK023_DISPATCH_INTENT_EXPIRED'
+        });
+        return { accepted: false, terminalized: true, correlation_id: correlation.id };
+      }
+      if (!correlation.record.signed_envelope || !correlation.record.signed_signature) {
+        const signed = await signDispatch(
+          dispatchEnvelopeFromCorrelation(correlation, integrationId),
+          env.DISPATCH_SIGNING_PRIVATE_KEY
+        );
+        correlation.record = {
+          ...correlation.record,
+          envelope_digest: signed.digest,
+          signed_envelope: signed.envelope,
+          signed_signature: signed.signature
+        };
+        await state.acceptNonce(
+          correlation.record.nonce,
+          correlation.id,
+          correlation.record.expires_at
+        );
+        await state.putCorrelation(correlation.id, correlation.record);
+      }
+      for (const contextId of Object.keys(CHECK_CONTEXTS)) {
+        await publishRequiredCheck({
+          github,
+          state,
+          integrationId,
+          repositoryId,
+          owner,
+          repo,
+          prNumber,
+          headSha,
+          contextId,
+          status: 'in_progress',
+          summary: 'Protected repository authority is evaluating this exact pull-request head.',
+          attemptGeneration: correlation.record.attempt_generation,
+          correlationId: correlation.id
+        });
+      }
+      await sendDispatchIntent({
+        token,
+        github,
+        state,
+        integrationId,
+        repositoryId,
+        owner,
+        repo,
+        correlation
+      });
+      return { accepted: true, recovered: true, correlation_id: correlation.id };
+    }
+    return { accepted: true, duplicate: true, correlation_id: correlation.id };
+  }
   const issued = new Date();
   const expires = new Date(issued.getTime() + 10 * 60 * 1000);
   const nonce = randomId();
   const correlationId = `tk023:${repositoryId}:${prNumber}:${headSha}:${randomHex(12)}`;
+  const headKey = `${repositoryId}/${prNumber}/${headSha}`;
+  const attempt = await state.beginAttempt(headKey, correlationId, {
+    repository_id: repositoryId,
+    installation_id: installationId,
+    repository,
+    candidate_repository: candidateRepository,
+    candidate_repository_id: candidateRepositoryId,
+    pr_number: prNumber,
+    head_sha: headSha,
+    base_sha: baseSha,
+    base_generation: Math.max(1, Math.floor(Date.parse(livePr.updated_at) / 1000)),
+    authority_sha: authoritySha,
+    nonce,
+    delivery_id: deliveryId,
+    envelope_digest: null,
+    base_ref: livePr.base.ref,
+    default_branch: defaultBranch,
+    integration_id: integrationId,
+    issued_at: issued.toISOString(),
+    expires_at: expires.toISOString()
+  });
+  if (!attempt.ok) throw new Error(attempt.code);
   const envelopeDocument = {
     schema: DISPATCH_SCHEMA,
     repository,
@@ -317,6 +686,7 @@ async function dispatchForPullRequest(payload, deliveryId, env) {
     delivery_id: deliveryId,
     nonce,
     correlation_id: correlationId,
+    attempt_generation: attempt.generation,
     issued_at: issued.toISOString(),
     expires_at: expires.toISOString(),
     app_name: APP_NAME,
@@ -324,22 +694,34 @@ async function dispatchForPullRequest(payload, deliveryId, env) {
   };
   const signed = await signDispatch(envelopeDocument, env.DISPATCH_SIGNING_PRIVATE_KEY);
   await state.acceptNonce(nonce, correlationId, envelopeDocument.expires_at);
-  await state.putCorrelation(correlationId, {
-    repository_id: repositoryId,
-    installation_id: installationId,
-    repository,
-    candidate_repository: candidateRepository,
-    candidate_repository_id: candidateRepositoryId,
-    pr_number: prNumber,
-    head_sha: headSha,
-    base_sha: baseSha,
-    base_generation: envelopeDocument.base_generation,
-    authority_sha: authoritySha,
-    nonce,
-    delivery_id: deliveryId,
-    envelope_digest: signed.digest,
-    state: 'dispatched'
-  });
+  const correlation = {
+    id: correlationId,
+    record: {
+      repository_id: repositoryId,
+      installation_id: installationId,
+      repository,
+      candidate_repository: candidateRepository,
+      candidate_repository_id: candidateRepositoryId,
+      pr_number: prNumber,
+      head_sha: headSha,
+      base_ref: livePr.base.ref,
+      base_sha: baseSha,
+      base_generation: envelopeDocument.base_generation,
+      authority_sha: authoritySha,
+      integration_id: integrationId,
+      nonce,
+      delivery_id: deliveryId,
+      envelope_digest: signed.digest,
+      attempt_generation: attempt.generation,
+      issued_at: envelopeDocument.issued_at,
+      expires_at: envelopeDocument.expires_at,
+      signed_envelope: signed.envelope,
+      signed_signature: signed.signature,
+      default_branch: defaultBranch,
+      state: 'dispatch_intent'
+    }
+  };
+  await state.putCorrelation(correlationId, correlation.record);
   for (const contextId of Object.keys(CHECK_CONTEXTS)) {
     await publishRequiredCheck({
       github,
@@ -352,19 +734,20 @@ async function dispatchForPullRequest(payload, deliveryId, env) {
       headSha,
       contextId,
       status: 'in_progress',
-      summary: 'Protected repository authority is evaluating this exact pull-request head.'
+      summary: 'Protected repository authority is evaluating this exact pull-request head.',
+      attemptGeneration: attempt.generation,
+      correlationId
     });
   }
-  await githubRequest(token, `/repos/${owner}/${repo}/actions/workflows/${encodeURIComponent(WORKFLOW_PATH)}/dispatches`, {
-    method: 'POST',
-    body: canonicalJson({
-      ref: defaultBranch,
-      inputs: {
-        dispatch_envelope: signed.envelope,
-        dispatch_signature: signed.signature,
-        dispatch_correlation: correlationId
-      }
-    })
+  await sendDispatchIntent({
+    token,
+    github,
+    state,
+    integrationId,
+    repositoryId,
+    owner,
+    repo,
+    correlation
   });
   return { accepted: true, correlation_id: correlationId };
 }
@@ -458,12 +841,35 @@ async function processWorkflowRun(payload, env) {
     entry.record.repository_id === repositoryId &&
     entry.record.authority_sha === payload.workflow_run.head_sha &&
     payload.workflow_run.display_title === `TK-023 ${entry.id}` &&
-    entry.record.state === 'dispatched'
+    ['dispatch_unknown', 'dispatched', 'publishing', 'completed'].includes(entry.record.state)
   );
   if (candidates.length !== 1) throw new Error('TK023_CORRELATION_AMBIGUOUS');
   const correlation = candidates[0];
+  const currentAttempt = await state.getCurrentAttempt(attemptHeadKey(correlation.record));
+  if (
+    !currentAttempt ||
+    currentAttempt.generation !== correlation.record.attempt_generation ||
+    currentAttempt.correlation_id !== correlation.id
+  ) throw new Error('TK023_STALE_ATTEMPT');
   const integrationId = assertConfiguredIdentity(env);
   const token = await installationToken(env, installationId);
+  const github = githubFacade(token);
+  if (correlation.record.state === 'publishing') {
+    await publishSealedSet({ github, state, integrationId, repositoryId, owner, repo, correlation });
+    await transitionState(
+      state,
+      correlation,
+      'publishing',
+      correlation.record.failure_code ? 'failed' : 'completed'
+    );
+    return { accepted: true, reconciled: true };
+  }
+  if (correlation.record.state === 'completed') return { accepted: true, duplicate: true };
+  if (correlation.record.state === 'dispatch_unknown') {
+    await transitionState(state, correlation, 'dispatch_unknown', 'dispatched', {
+      workflow_run_id: payload.workflow_run.id
+    });
+  }
   const repositoryMetadata = await githubRequest(token, `/repos/${owner}/${repo}`);
   const livePr = await githubRequest(token, `/repos/${owner}/${repo}/pulls/${correlation.record.pr_number}`);
   if (
@@ -550,7 +956,7 @@ async function processWorkflowRun(payload, env) {
     securityEvidence.document.trusted_authority?.tree !== authorityCommit.tree.sha ||
     !/^sha256:[0-9a-f]{64}$/.test(securityEvidence.document.report_digest)
   ) throw new Error('TK023_SECURITY_REPORT_INVALID');
-  const github = githubFacade(token);
+  const contexts = {};
   for (const [contextId, contextName] of Object.entries(CHECK_CONTEXTS)) {
     const expectedName = `tk023-terminal-${contextId}-${correlation.record.head_sha}`;
     const matching = (artifacts.artifacts || []).filter((artifact) => artifact.name === expectedName && !artifact.expired);
@@ -602,6 +1008,7 @@ async function processWorkflowRun(payload, env) {
         workflow_digest: terminal?.workflow_digest,
         run_id: payload.workflow_run.id,
         run_attempt: payload.workflow_run.run_attempt,
+        attempt_generation: correlation.record.attempt_generation,
         job_id: `${contextId === 'repository-security-gate' ? 'repository-security' : contextId}-terminal`,
         github_job_id: githubJobId,
         correlation_id: correlation.id,
@@ -640,6 +1047,7 @@ async function processWorkflowRun(payload, env) {
       authority_commit: correlation.record.authority_sha,
       workflow_run_id: payload.workflow_run.id,
       workflow_run_attempt: payload.workflow_run.run_attempt,
+      attempt_generation: correlation.record.attempt_generation,
       terminal_job_id: expected.terminal.job_id,
       github_job_id: terminal?.github_job_id || 0,
       artifact_id: matching[0]?.id || 0,
@@ -656,24 +1064,25 @@ async function processWorkflowRun(payload, env) {
       publication_status: verification.ok ? 'PUBLISHED' : 'REJECTED',
       failure_codes: verification.failures
     });
-    await publishRequiredCheck({
-      github,
-      state,
-      integrationId,
-      repositoryId,
-      owner,
-      repo,
-      prNumber: correlation.record.pr_number,
-      headSha: correlation.record.head_sha,
-      contextId,
-      status: 'completed',
+    contexts[contextId] = {
       conclusion,
       summary: verification.ok ? 'Protected terminal evidence verified.' : 'Protected terminal evidence failed closed.',
       terminalDigest: publication.publication_digest
-    });
+    };
   }
-  correlation.record.state = 'completed';
-  await state.transitionCorrelation(correlation.id, 'dispatched', correlation.record);
+  const finalPr = await githubRequest(token, `/repos/${owner}/${repo}/pulls/${correlation.record.pr_number}`);
+  if (
+    finalPr.state !== 'open' ||
+    finalPr.head.sha !== correlation.record.head_sha ||
+    finalPr.head.repo.full_name !== correlation.record.candidate_repository ||
+    Number(finalPr.head.repo.id) !== correlation.record.candidate_repository_id
+  ) throw new Error('TK023_PR_HEAD_STALE');
+  await sealPublicationSet(state, correlation, contexts);
+  await transitionState(state, correlation, 'dispatched', 'publishing', {
+    workflow_run_id: payload.workflow_run.id
+  });
+  await publishSealedSet({ github, state, integrationId, repositoryId, owner, repo, correlation });
+  await transitionState(state, correlation, 'publishing', 'completed');
   return { accepted: true };
 }
 
@@ -689,39 +1098,44 @@ async function failWorkflowRunChecks(payload, env, failureCode) {
     entry.record.repository_id === repositoryId &&
     entry.record.authority_sha === payload.workflow_run?.head_sha &&
     payload.workflow_run?.display_title === `TK-023 ${entry.id}` &&
-    entry.record.state === 'dispatched'
+    ['dispatch_unknown', 'dispatched', 'publishing', 'completed', 'failed'].includes(entry.record.state)
   );
   if (candidates.length !== 1) return false;
   const correlation = candidates[0];
+  const currentAttempt = await state.getCurrentAttempt(attemptHeadKey(correlation.record));
+  if (
+    !currentAttempt ||
+    currentAttempt.generation !== correlation.record.attempt_generation ||
+    currentAttempt.correlation_id !== correlation.id
+  ) return false;
   const integrationId = assertConfiguredIdentity(env);
   const token = await installationToken(env, installationId);
   const github = githubFacade(token);
-  const failureDigest = await canonicalDigest({
-    schema: 'tk.security.required-check-failure/v1',
-    correlation_id: correlation.id,
-    workflow_run_id: Number(payload.workflow_run?.id || 0),
-    failure_code: failureCode
-  });
-  for (const contextId of Object.keys(CHECK_CONTEXTS)) {
-    await publishRequiredCheck({
-      github,
-      state,
-      integrationId,
-      repositoryId,
-      owner,
-      repo,
-      prNumber: correlation.record.pr_number,
-      headSha: correlation.record.head_sha,
-      contextId,
-      status: 'completed',
-      conclusion: 'failure',
-      summary: 'Protected evidence was missing, malformed, stale, conflicting, or unavailable.',
-      terminalDigest: failureDigest
-    });
+  if (correlation.record.state === 'completed' || correlation.record.state === 'failed') return true;
+  const existing = await state.getPublicationSet(correlation.id);
+  if (!existing) {
+    await sealFailureSet(state, correlation, failureCode, payload.workflow_run?.id);
   }
-  correlation.record.state = 'failed';
-  correlation.record.failure_code = failureCode;
-  await state.transitionCorrelation(correlation.id, 'dispatched', correlation.record);
+  if (correlation.record.state !== 'publishing') {
+    const transitionPatch = { workflow_run_id: Number(payload.workflow_run?.id || 0) };
+    if (!existing) transitionPatch.failure_code = failureCode;
+    await transitionState(
+      state,
+      correlation,
+      ['dispatch_unknown', 'dispatched'],
+      'publishing',
+      transitionPatch
+    );
+  }
+  await publishSealedSet({ github, state, integrationId, repositoryId, owner, repo, correlation });
+  const publicationFailed = Boolean(correlation.record.failure_code);
+  await transitionState(
+    state,
+    correlation,
+    'publishing',
+    publicationFailed ? 'failed' : 'completed',
+    publicationFailed ? { failure_code: correlation.record.failure_code } : {}
+  );
   return true;
 }
 
@@ -744,12 +1158,11 @@ export async function handleRequest(request, env) {
     const repositoryId = requiredInteger(payload.repository?.id, 'TK023_REPOSITORY_ID_INVALID');
     const state = stateClient(env, repositoryId);
     const delivery = await state.acceptDelivery(deliveryId, await sha256Digest(bytes));
-    if (delivery.duplicate) return Response.json({ ok: true, duplicate: true });
     let result;
     if (event === 'pull_request') result = await dispatchForPullRequest(payload, deliveryId, env);
     else if (event === 'workflow_run') result = await processWorkflowRun(payload, env);
     else return fail('TK023_WEBHOOK_EVENT_FORBIDDEN', 400);
-    return Response.json({ ok: true, ...result });
+    return Response.json({ ok: true, duplicate_delivery: delivery.duplicate, ...result });
   } catch (error) {
     const code = /^TK023_[A-Z0-9_]+$/.test(String(error?.message || '')) ? error.message : 'TK023_APP_INTERNAL_FAILURE';
     if (event === 'workflow_run' && payload) {
@@ -760,7 +1173,7 @@ export async function handleRequest(request, env) {
         // evidence remains blocking even when the failure receipt cannot post.
       }
     }
-    return fail(code, 500);
+    return fail(code, code === 'TK023_DISPATCH_OUTCOME_UNKNOWN' ? 503 : 500);
   }
 }
 
