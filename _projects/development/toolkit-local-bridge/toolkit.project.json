@@ -7,7 +7,7 @@
   "main_path": "_projects/development/toolkit-local-bridge/_main",
   "version": "2.9.13",
   "version_policy": "semver",
-  "version_notes": "Redacts private ignore-hygiene paths and closes restore and cleanup target-state races.",
+  "version_notes": "Publishes dedicated local n8n export identity resolution and deterministic transaction-race coverage across Toolkit helper surfaces.",
   "outputs": [
     {
       "kind": "curated",

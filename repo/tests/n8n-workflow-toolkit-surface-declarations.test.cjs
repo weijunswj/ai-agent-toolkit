@@ -226,12 +226,11 @@ test('n8n workflow toolkit cmd wrappers invoke co-located PowerShell scripts', (
       assert.doesNotMatch(wrapperText, /(^|\r?\n)\s*pwsh\b/i, relPath);
       if (wrapper.ps1Name === 'import-n8n-workflows-live.ps1') {
         assert.equal(
-          wrapperText.includes(`"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0${wrapper.ps1Name}" %* %RESTART_ARG%`),
+          wrapperText.includes(`"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0${wrapper.ps1Name}" %*`),
           true,
           relPath
         );
-        assert.match(wrapperText, /call :prompt "Auto-restart n8n container if restart warning is true\?"/, relPath);
-        assert.match(wrapperText, /-RestartContainerAfterImport/, relPath);
+        assert.doesNotMatch(wrapperText, /choice\s+\/C|Read-Host|:prompt|-RestartContainerAfterImport|docker\s+restart/i, relPath);
       } else {
         assert.equal(
           wrapperText.includes(`"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0${wrapper.ps1Name}" %*`),
@@ -321,7 +320,7 @@ test('n8n helper docs distinguish non-live and live approval requirements', () =
     'Yes, in this repo, run the live export helper against my local n8n instance only',
     'Yes, in this repo, run the prepared live import against my local n8n instance only'
   ]) {
-    assert.match(docs, new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), phrase);
+    assert.match(docs, new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), phrase);
   }
 });
 

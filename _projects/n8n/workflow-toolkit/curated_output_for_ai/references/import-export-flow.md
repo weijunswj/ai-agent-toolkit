@@ -6,46 +6,38 @@ Review rule: Preserve safety constraints from preserved source. Do not weaken cr
 
 # Import Export Flow Reference
 
-Use this flow in a consumer repo, not from the toolkit repo.
+Use only in a consumer repo.
 
 ## Boundary
 
-This is a short skill-local reference and safety checklist. It is not the full runtime helper guide; live helper detail remains in local templates.
-
-Non-live local helper actions in a consumer repo may run only after scoped user approval for that repo and operation. Allowed non-live actions are validation, sanitising/checking local candidate exports, comparing already-exported local files, preparing `.tmp/**` import payloads, and checking ignored `.n8n-local/**` credential-binding metadata.
-
-Scoped non-live approval still does not allow live n8n access, Docker, deployment, activation, credential changes, or source-watch actions. Do not commit `.tmp/**`, `.n8n-local/**`, `.to-sanitise/**`, `.sanitised/**`, credential bindings, live payloads, `.env`, or secrets.
-
-Live n8n actions require explicit current-turn approval naming the target repo, target n8n instance/environment, allowed operation, workflow names/set, and forbidden operations. Live-gated actions include live export/import/sync, activation/deactivation, publish/unpublish, archive/delete, execution, and credential creation/update/delete/binding/replacement.
+This short reference is not the full runtime guide. Live n8n or Docker work requires approval naming repo, environment, operation, workflow set, and exclusions.
 
 ## Export Review
 
-1. Export live workflows to an ignored folder only after live approval.
-2. Strip live-only fields, credentials, credential IDs, webhook IDs, static data, pin data, and unneeded tag metadata.
-3. Force `active: false` for committed templates.
-4. Write credential binding metadata only to ignored `.n8n-local/`.
-5. Review the diff before commit.
+- Preserve canonical logic, sheet/tab names, approved locators, mappings, expressions, filters, options, nodes, connections, and settings.
+- Resolve a tracked export through its dedicated local file-to-target identity before name fallback. If that recorded target disappears, fail closed instead of selecting a same-name workflow.
+- Replace credentials with canonical `{ name }` references plus logical name/type declarations; omit `id` entirely and never commit target IDs or values.
+- Remove target workflow/webhook metadata, force `active: false`, and protect mappings unless reviewed source-update mode is explicit.
 
 ## Import Review
 
-1. Validate repo workflow JSON.
-2. Prepare import payloads in ignored `.tmp/`.
-3. Restore credential references only when binding metadata is unambiguous and local.
-4. Restore live webhook IDs only for existing live workflows with unique node matches.
-5. Import only after explicit confirmation of target instance and workflow set.
-
-Do not run live import/export in CI. Keep `.tmp/**` and `.n8n-local/**` ignored and local.
+- Discover only safe credential metadata through a supported transport and resolve one exact logical name/type match without exposing IDs.
+- Rebuild from canonical Git, remove every canonical `webhookId`, restore webhook identity only for a uniquely matched existing target node, and apply only declared exact scalar resource bindings.
+- Validate the payload and canonical invariant before comparison. Valid non-dry-run import needs no routine confirmation, stays inactive, and verifies the postcondition without execution.
+- For a supported unresolved first import, create the reported name/type and rerun. Unsupported transports stop before mutation.
+- Optional misses are informational; required, ambiguous, or unsafe matches block.
+- Validate the batch before mutation. Existing no-ops stay read-only; missing files use exclusive creation. Changed existing files fail in `PREPARED` with an ignored local batch because Node has no safe conditional replace. Descriptor writes, link evidence, hashes, checks, and locks never authorise mutation; the transaction never deletes or renames a pathname.
 
 ## Stop Conditions
 
-- Approval does not name the target repo.
-- Live approval does not name the target instance/environment.
-- Live approval does not name the workflow set.
+- Approval omits the target repo, instance/environment, or workflow set.
 - Operation is broader than approved.
 - Ambiguous workflow match.
-- Missing or stale credential bindings when credentials are required.
+- Credential discovery unavailable, zero/duplicate name/type matches, or same-name wrong-type matches.
+- Missing required exact resource binding.
+- Canonical invariant failure or a target whose inactivity cannot be guaranteed.
 - Credentials would be touched unexpectedly.
 - Workflow activation, publish, delete, archive, or execution would happen unexpectedly.
-- Ignored scratch folders contain commit-worthy changes.
-- Product/customer data in template JSON.
-- Workflow would activate or publish unexpectedly.
+- Ignored scratch folders contain commit-worthy changes or private/product data.
+
+Never run live helpers in CI. Never commit `.tmp/**`, `.n8n-local/**`, live payloads, `.env`, or secrets.
