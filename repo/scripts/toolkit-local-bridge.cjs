@@ -46,7 +46,7 @@ const {
 } = require('./toolkit-n8n-repair-journal.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.9.16';
+const BRIDGE_VERSION = '2.9.17';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -89,6 +89,8 @@ const N8N_TRANSACTION_AUXILIARY_KINDS = Object.freeze([
 const N8N_REPLACEMENT_RECORD_LIMIT = 16;
 const N8N_REPLACEMENT_DIRECTORY_ENTRY_LIMIT = 4096;
 const N8N_EVIDENCE_FILE_BYTE_LIMIT = 1024 * 1024;
+const N8N_BACKUP_RESIDUE_MANIFEST_BYTE_LIMIT = 4 * 1024 * 1024;
+const N8N_PHASE_70_EVIDENCE_FILE_BYTE_LIMIT = 5 * 1024 * 1024;
 const N8N_EVIDENCE_CONTEXT = Symbol('n8n-evidence-context');
 const N8N_EVIDENCE_LIFECYCLE_OWNER = Symbol('n8n-evidence-lifecycle-owner');
 const N8N_JOURNAL_CONTEXT = Symbol('n8n-journal-context');
@@ -4406,7 +4408,10 @@ function n8nReadEvidenceDescriptor(filePath, specification = {}) {
     throw failClosedN8nRepair('recovery-evidence-invalid', 'n8n Skills transaction evidence is not an ordinary non-link file');
   }
   const initialIdentity = n8nEvidenceStatIdentity(initialStat);
-  if (BigInt(initialIdentity.size) > BigInt(N8N_EVIDENCE_FILE_BYTE_LIMIT)) {
+  const evidenceByteLimit = specification.kind === 'n8n-replacement-phase-70-cleanup'
+    ? N8N_PHASE_70_EVIDENCE_FILE_BYTE_LIMIT
+    : N8N_EVIDENCE_FILE_BYTE_LIMIT;
+  if (BigInt(initialIdentity.size) > BigInt(evidenceByteLimit)) {
     throw failClosedN8nRepair('recovery-evidence-invalid', 'n8n Skills transaction evidence exceeds the bounded byte limit');
   }
   let initialRealPath;
@@ -5597,6 +5602,13 @@ function inspectN8nReplacementRecords(codexHome, parityIdentity, options = {}) {
       ) {
         throw failClosedN8nRepair('recovery-evidence-invalid', 'Owned n8n Skills backup cleanup authorization is malformed or identity-mismatched');
       }
+      if (kind.endsWith('70-cleanup')) {
+        requireValidN8nBackupResidueManifest(
+          phaseMarker.value.backup_residue_manifest,
+          validated.backupPath,
+          transactionMarker.value.original_target_directory_identity
+        );
+      }
       latestPhase = phaseMarker.value.transaction_phase;
     }
     if (preTransaction?.phases.transformed) {
@@ -6192,36 +6204,114 @@ function requireExactN8nOriginalBackup(backupPath, transaction) {
   return backupState;
 }
 
+function n8nBackupCleanupEntryOrder(left, right) {
+  const leftDepth = left.relative_path ? left.relative_path.split('/').length : 0;
+  const rightDepth = right.relative_path ? right.relative_path.split('/').length : 0;
+  return rightDepth - leftDepth
+    || Buffer.compare(Buffer.from(left.relative_path), Buffer.from(right.relative_path));
+}
+
+function n8nHashBackupCleanupFile(filePath, expectedStat) {
+  const expectedIdentity = n8nEvidenceStatIdentity(expectedStat);
+  const size = Number(expectedStat.size);
+  if (
+    !Number.isSafeInteger(size)
+    || size < 0
+    || size > N8N_SKILLS_TREE_LIMITS.max_file_bytes
+  ) {
+    throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup cleanup contains an unsupported file size');
+  }
+  const noFollow = Number.isInteger(fs.constants.O_NOFOLLOW) ? fs.constants.O_NOFOLLOW : 0;
+  const descriptor = fs.openSync(filePath, fs.constants.O_RDONLY | noFollow);
+  const hashPass = () => {
+    const hash = crypto.createHash('sha256');
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    let offset = 0;
+    while (offset < size) {
+      const bytesRead = fs.readSync(
+        descriptor,
+        buffer,
+        0,
+        Math.min(buffer.length, size - offset),
+        offset
+      );
+      if (bytesRead <= 0) {
+        throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup file changed during cleanup inspection');
+      }
+      hash.update(buffer.subarray(0, bytesRead));
+      offset += bytesRead;
+    }
+    return hash.digest('hex');
+  };
+  try {
+    const descriptorStat = fs.fstatSync(descriptor, { bigint: true });
+    if (
+      !descriptorStat.isFile()
+      || !n8nEvidenceStatIdentitiesMatch(expectedIdentity, n8nEvidenceStatIdentity(descriptorStat))
+    ) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup file changed before cleanup inspection');
+    }
+    const firstDigest = hashPass();
+    const secondDigest = hashPass();
+    const finalDescriptorIdentity = n8nEvidenceStatIdentity(fs.fstatSync(descriptor, { bigint: true }));
+    const finalStat = fs.lstatSync(filePath, { bigint: true });
+    if (
+      firstDigest !== secondDigest
+      || finalStat.isSymbolicLink()
+      || !finalStat.isFile()
+      || !n8nEvidenceStatIdentitiesMatch(expectedIdentity, finalDescriptorIdentity)
+      || !n8nEvidenceStatIdentitiesMatch(expectedIdentity, n8nEvidenceStatIdentity(finalStat))
+      || normalizedN8nTargetPath(fs.realpathSync.native(filePath)) !== normalizedN8nTargetPath(filePath)
+    ) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup file changed during cleanup inspection');
+    }
+    return firstDigest;
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+function n8nBackupResidueManifestComparable(manifest) {
+  return {
+    schema_version: manifest.schema_version,
+    root_normalized_path: manifest.root_normalized_path,
+    root_directory_identity: manifest.root_directory_identity,
+    entries: manifest.entries,
+    counts: manifest.counts
+  };
+}
+
+function n8nBackupResidueManifestDigest(manifest) {
+  return crypto.createHash('sha256')
+    .update(n8nCanonicalJson(n8nBackupResidueManifestComparable(manifest)), 'utf8')
+    .digest('hex');
+}
+
 function inspectN8nBackupCleanupTree(backupPath) {
-  const rootStat = requireOrdinaryN8nDirectory(backupPath, 'recorded n8n Skills backup');
+  const resolvedBackupPath = path.resolve(backupPath);
+  const rootStat = requireOrdinaryN8nDirectory(
+    resolvedBackupPath,
+    'recorded n8n Skills backup'
+  );
   const entries = [];
+  const directoryAuthorities = [];
   const pending = [{
     depth: 0,
-    fullPath: path.resolve(backupPath),
-    relativePath: '',
-    visited: false
+    fullPath: resolvedBackupPath,
+    relativePath: ''
   }];
   let directories = 0;
   let files = 0;
   let totalBytes = 0;
   while (pending.length) {
     const current = pending.pop();
-    const stat = fs.lstatSync(current.fullPath);
+    const stat = fs.lstatSync(current.fullPath, { bigint: true });
     if (stat.isSymbolicLink()) {
       throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup cleanup contains a redirected entry');
     }
     if (stat.isDirectory()) {
       if (normalizedN8nTargetPath(fs.realpathSync.native(current.fullPath)) !== normalizedN8nTargetPath(current.fullPath)) {
         throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup cleanup contains an aliased directory');
-      }
-      if (current.visited) {
-        entries.push({
-          type: 'directory',
-          fullPath: current.fullPath,
-          relativePath: current.relativePath,
-          identity: n8nDirectoryIdentity(stat)
-        });
-        continue;
       }
       if (current.depth > N8N_SKILLS_TREE_LIMITS.max_depth) {
         throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup cleanup exceeds the bounded directory depth');
@@ -6232,16 +6322,26 @@ function inspectN8nBackupCleanupTree(backupPath) {
           throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup cleanup exceeds the bounded directory count');
         }
       }
-      pending.push({ ...current, visited: true });
-      const children = fs.readdirSync(current.fullPath).sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
+      const children = fs.readdirSync(current.fullPath)
+        .sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
+      const directoryIdentity = n8nDirectoryIdentity(fs.lstatSync(current.fullPath));
+      entries.push({
+        type: 'directory',
+        relative_path: current.relativePath,
+        directory_identity: directoryIdentity
+      });
+      directoryAuthorities.push({
+        child_names: children,
+        directory_identity: directoryIdentity,
+        full_path: current.fullPath,
+        relative_path: current.relativePath
+      });
       for (let index = children.length - 1; index >= 0; index -= 1) {
         const name = children[index];
-        const relativePath = current.relativePath ? `${current.relativePath}/${name}` : name;
         pending.push({
           depth: current.depth + 1,
           fullPath: path.join(current.fullPath, name),
-          relativePath,
-          visited: false
+          relativePath: current.relativePath ? `${current.relativePath}/${name}` : name
         });
       }
       continue;
@@ -6249,79 +6349,315 @@ function inspectN8nBackupCleanupTree(backupPath) {
     if (!stat.isFile()) {
       throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup cleanup contains a special filesystem entry');
     }
+    const size = Number(stat.size);
     files += 1;
-    totalBytes += stat.size;
+    totalBytes += size;
     if (
-      files > N8N_SKILLS_TREE_LIMITS.max_files
-      || stat.size > N8N_SKILLS_TREE_LIMITS.max_file_bytes
+      !Number.isSafeInteger(size)
+      || size < 0
+      || files > N8N_SKILLS_TREE_LIMITS.max_files
+      || size > N8N_SKILLS_TREE_LIMITS.max_file_bytes
       || totalBytes > N8N_SKILLS_TREE_LIMITS.max_total_bytes
     ) {
       throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup cleanup exceeds the bounded file or byte limits');
     }
     entries.push({
       type: 'file',
-      fullPath: current.fullPath,
-      relativePath: current.relativePath,
-      identity: {
-        dev: String(stat.dev),
-        ino: String(stat.ino),
-        birthtime_ms: String(stat.birthtimeMs),
-        size: String(stat.size)
-      }
+      relative_path: current.relativePath,
+      filesystem_identity: n8nEvidenceStatIdentity(stat),
+      bytes_sha256: n8nHashBackupCleanupFile(current.fullPath, stat)
     });
   }
-  if (!n8nDirectoryIdentitiesMatch(n8nDirectoryIdentity(rootStat), entries.at(-1)?.identity)) {
-    throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup changed during cleanup inspection');
-  }
-  return entries;
-}
-
-function n8nCleanupEntryIdentityMatches(entry, stat) {
-  if (entry.type === 'directory') {
-    return stat.isDirectory()
-      && !stat.isSymbolicLink()
-      && n8nDirectoryIdentitiesMatch(entry.identity, n8nDirectoryIdentity(stat));
-  }
-  return stat.isFile()
-    && !stat.isSymbolicLink()
-    && String(stat.dev) === entry.identity.dev
-    && String(stat.ino) === entry.identity.ino
-    && String(stat.birthtimeMs) === entry.identity.birthtime_ms
-    && String(stat.size) === entry.identity.size;
-}
-
-function removeExactN8nBackupResumably(backupPath, transaction, options = {}) {
-  if (options.beforeEachCleanupOperation) options.beforeEachCleanupOperation();
-  if (!n8nPathExists(backupPath)) return;
-  const backupStat = requireOrdinaryN8nDirectory(backupPath, 'recorded n8n Skills backup');
-  if (!n8nDirectoryIdentitiesMatch(
-    transaction.original_target_directory_identity,
-    n8nDirectoryIdentity(backupStat)
-  )) {
-    throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup root no longer matches its exact transaction');
-  }
-  if (!options.resuming) requireExactN8nOriginalBackup(backupPath, transaction);
-  const entries = inspectN8nBackupCleanupTree(backupPath);
-  let removed = 0;
-  for (const entry of entries) {
-    if (options.beforeEachCleanupOperation) options.beforeEachCleanupOperation();
-    const stat = fs.lstatSync(entry.fullPath);
-    if (!n8nCleanupEntryIdentityMatches(entry, stat)) {
-      throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup changed during resumable cleanup');
+  for (const entry of entries.filter((candidate) => candidate.type === 'file')) {
+    const fullPath = path.join(resolvedBackupPath, ...entry.relative_path.split('/'));
+    const stat = fs.lstatSync(fullPath, { bigint: true });
+    if (
+      !n8nEvidenceStatIdentitiesMatch(entry.filesystem_identity, n8nEvidenceStatIdentity(stat))
+      || n8nHashBackupCleanupFile(fullPath, stat) !== entry.bytes_sha256
+    ) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup file changed before cleanup authorization completed');
     }
-    if (entry.type === 'directory') {
-      if (normalizedN8nTargetPath(fs.realpathSync.native(entry.fullPath)) !== normalizedN8nTargetPath(entry.fullPath)) {
-        throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup directory was redirected during cleanup');
+  }
+  for (const authority of directoryAuthorities) {
+    const stat = fs.lstatSync(authority.full_path);
+    const childNames = fs.readdirSync(authority.full_path)
+      .sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
+    if (
+      stat.isSymbolicLink()
+      || !stat.isDirectory()
+      || !n8nDirectoryIdentitiesMatch(authority.directory_identity, n8nDirectoryIdentity(stat))
+      || normalizedN8nTargetPath(fs.realpathSync.native(authority.full_path))
+        !== normalizedN8nTargetPath(authority.full_path)
+      || JSON.stringify(childNames) !== JSON.stringify(authority.child_names)
+    ) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup directory changed before cleanup authorization completed');
+    }
+  }
+  entries.sort(n8nBackupCleanupEntryOrder);
+  const manifest = {
+    schema_version: 1,
+    root_normalized_path: normalizedN8nTargetPath(resolvedBackupPath),
+    root_directory_identity: n8nDirectoryIdentity(rootStat),
+    entries,
+    counts: {
+      files,
+      directories,
+      total_bytes: totalBytes
+    }
+  };
+  manifest.digest = n8nBackupResidueManifestDigest(manifest);
+  if (
+    Buffer.byteLength(JSON.stringify(manifest, null, 2), 'utf8')
+    > N8N_BACKUP_RESIDUE_MANIFEST_BYTE_LIMIT
+  ) {
+    throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup cleanup manifest exceeds its bounded byte limit');
+  }
+  return manifest;
+}
+
+function requireValidN8nBackupResidueManifest(manifest, backupPath, expectedRootIdentity) {
+  const expectedManifestKeys = [
+    'counts',
+    'digest',
+    'entries',
+    'root_directory_identity',
+    'root_normalized_path',
+    'schema_version'
+  ];
+  const validIdentity = (identity, keys) => Boolean(identity)
+    && JSON.stringify(Object.keys(identity).sort()) === JSON.stringify([...keys].sort())
+    && keys.every((key) => (
+      key === 'birthtime_ms'
+        ? /^-?\d+(?:\.\d+)?$/
+        : /^-?\d+$/
+    ).test(String(identity[key] || '')));
+  if (
+    !manifest
+    || typeof manifest !== 'object'
+    || Array.isArray(manifest)
+    || JSON.stringify(Object.keys(manifest).sort()) !== JSON.stringify(expectedManifestKeys)
+    || manifest.schema_version !== 1
+    || manifest.root_normalized_path !== normalizedN8nTargetPath(backupPath)
+    || !n8nDirectoryIdentitiesMatch(expectedRootIdentity, manifest.root_directory_identity)
+    || !validIdentity(manifest.root_directory_identity, ['dev', 'ino', 'birthtime_ms'])
+    || !Array.isArray(manifest.entries)
+    || !/^[0-9a-f]{64}$/.test(String(manifest.digest || ''))
+    || manifest.digest !== n8nBackupResidueManifestDigest(manifest)
+    || !manifest.counts
+    || JSON.stringify(Object.keys(manifest.counts).sort())
+      !== JSON.stringify(['directories', 'files', 'total_bytes'])
+    || !Number.isSafeInteger(manifest.counts.files)
+    || !Number.isSafeInteger(manifest.counts.directories)
+    || !Number.isSafeInteger(manifest.counts.total_bytes)
+    || manifest.counts.files < 0
+    || manifest.counts.files > N8N_SKILLS_TREE_LIMITS.max_files
+    || manifest.counts.directories < 0
+    || manifest.counts.directories > N8N_SKILLS_TREE_LIMITS.max_directories
+    || manifest.counts.total_bytes < 0
+    || manifest.counts.total_bytes > N8N_SKILLS_TREE_LIMITS.max_total_bytes
+    || Buffer.byteLength(JSON.stringify(manifest, null, 2), 'utf8')
+      > N8N_BACKUP_RESIDUE_MANIFEST_BYTE_LIMIT
+  ) {
+    throw failClosedN8nRepair('recovery-evidence-invalid', 'Owned n8n Skills backup cleanup manifest is malformed or mismatched');
+  }
+  const paths = new Set();
+  let files = 0;
+  let directories = 0;
+  let totalBytes = 0;
+  const indexByPath = new Map();
+  for (let index = 0; index < manifest.entries.length; index += 1) {
+    const entry = manifest.entries[index];
+    const relativePath = String(entry?.relative_path ?? '');
+    const segments = relativePath ? relativePath.split('/') : [];
+    if (
+      !entry
+      || typeof entry !== 'object'
+      || Array.isArray(entry)
+      || paths.has(relativePath)
+      || relativePath.includes('\\')
+      || path.isAbsolute(relativePath)
+      || segments.some((segment) => !segment || segment === '.' || segment === '..')
+    ) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Owned n8n Skills backup cleanup manifest contains an invalid path');
+    }
+    paths.add(relativePath);
+    indexByPath.set(relativePath, index);
+    if (entry.type === 'file') {
+      const fileIdentityKeys = [
+        'dev',
+        'ino',
+        'mode',
+        'nlink',
+        'size',
+        'birthtime_ns',
+        'mtime_ns',
+        'ctime_ns'
+      ];
+      if (
+        JSON.stringify(Object.keys(entry).sort())
+          !== JSON.stringify(['bytes_sha256', 'filesystem_identity', 'relative_path', 'type'])
+        || !relativePath
+        || !validIdentity(entry.filesystem_identity, fileIdentityKeys)
+        || !/^[0-9a-f]{64}$/.test(String(entry.bytes_sha256 || ''))
+      ) {
+        throw failClosedN8nRepair('recovery-evidence-invalid', 'Owned n8n Skills backup cleanup manifest contains malformed file authority');
       }
-      fs.rmdirSync(entry.fullPath);
+      const size = Number(entry.filesystem_identity.size);
+      if (!Number.isSafeInteger(size) || size < 0 || size > N8N_SKILLS_TREE_LIMITS.max_file_bytes) {
+        throw failClosedN8nRepair('recovery-evidence-invalid', 'Owned n8n Skills backup cleanup manifest contains an invalid file size');
+      }
+      files += 1;
+      totalBytes += size;
+    } else if (entry.type === 'directory') {
+      if (
+        JSON.stringify(Object.keys(entry).sort())
+          !== JSON.stringify(['directory_identity', 'relative_path', 'type'])
+        || !validIdentity(entry.directory_identity, ['dev', 'ino', 'birthtime_ms'])
+      ) {
+        throw failClosedN8nRepair('recovery-evidence-invalid', 'Owned n8n Skills backup cleanup manifest contains malformed directory authority');
+      }
+      if (relativePath) directories += 1;
     } else {
-      fs.unlinkSync(entry.fullPath);
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Owned n8n Skills backup cleanup manifest contains an unsupported entry');
+    }
+  }
+  const canonicalEntries = [...manifest.entries].sort(n8nBackupCleanupEntryOrder);
+  if (
+    JSON.stringify(canonicalEntries) !== JSON.stringify(manifest.entries)
+    || manifest.entries.at(-1)?.type !== 'directory'
+    || manifest.entries.at(-1)?.relative_path !== ''
+    || !n8nDirectoryIdentitiesMatch(
+      manifest.root_directory_identity,
+      manifest.entries.at(-1)?.directory_identity
+    )
+    || files !== manifest.counts.files
+    || directories !== manifest.counts.directories
+    || totalBytes !== manifest.counts.total_bytes
+  ) {
+    throw failClosedN8nRepair('recovery-evidence-invalid', 'Owned n8n Skills backup cleanup manifest is not canonical or count-bound');
+  }
+  for (let index = 0; index < manifest.entries.length; index += 1) {
+    const entry = manifest.entries[index];
+    if (!entry.relative_path) continue;
+    const parentPath = entry.relative_path.includes('/')
+      ? entry.relative_path.slice(0, entry.relative_path.lastIndexOf('/'))
+      : '';
+    const parentIndex = indexByPath.get(parentPath);
+    if (
+      parentIndex === undefined
+      || parentIndex <= index
+      || manifest.entries[parentIndex].type !== 'directory'
+    ) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Owned n8n Skills backup cleanup manifest violates child-before-parent order');
+    }
+  }
+  return manifest;
+}
+
+function n8nBackupCleanupEntriesMatch(expected, current) {
+  if (expected.type !== current.type || expected.relative_path !== current.relative_path) return false;
+  return expected.type === 'directory'
+    ? n8nDirectoryIdentitiesMatch(expected.directory_identity, current.directory_identity)
+    : expected.bytes_sha256 === current.bytes_sha256
+      && n8nEvidenceStatIdentitiesMatch(
+        expected.filesystem_identity,
+        current.filesystem_identity
+      );
+}
+
+function inspectN8nBackupCleanupProgress(backupPath, manifest, expectedRootIdentity) {
+  requireValidN8nBackupResidueManifest(manifest, backupPath, expectedRootIdentity);
+  if (!n8nPathExists(backupPath)) {
+    return { complete: true, next_index: manifest.entries.length };
+  }
+  const current = inspectN8nBackupCleanupTree(backupPath);
+  if (!n8nDirectoryIdentitiesMatch(manifest.root_directory_identity, current.root_directory_identity)) {
+    throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup root changed during resumable cleanup');
+  }
+  const authorizedByPath = new Map(manifest.entries.map((entry) => [entry.relative_path, entry]));
+  const currentByPath = new Map();
+  for (const entry of current.entries) {
+    const authorized = authorizedByPath.get(entry.relative_path);
+    if (!authorized || !n8nBackupCleanupEntriesMatch(authorized, entry)) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup contains added or replaced residue');
+    }
+    currentByPath.set(entry.relative_path, entry);
+  }
+  let seenPresent = false;
+  let nextIndex = manifest.entries.length;
+  for (let index = 0; index < manifest.entries.length; index += 1) {
+    const present = currentByPath.has(manifest.entries[index].relative_path);
+    if (present && !seenPresent) {
+      seenPresent = true;
+      nextIndex = index;
+    } else if (!present && seenPresent) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup cleanup progress is not an exact authorized prefix');
+    }
+  }
+  return { complete: !seenPresent, next_index: nextIndex };
+}
+
+function requireExactN8nBackupCleanupEntry(backupPath, entry) {
+  const fullPath = entry.relative_path
+    ? path.join(path.resolve(backupPath), ...entry.relative_path.split('/'))
+    : path.resolve(backupPath);
+  if (entry.type === 'directory') {
+    const stat = fs.lstatSync(fullPath);
+    if (
+      stat.isSymbolicLink()
+      || !stat.isDirectory()
+      || !n8nDirectoryIdentitiesMatch(entry.directory_identity, n8nDirectoryIdentity(stat))
+      || normalizedN8nTargetPath(fs.realpathSync.native(fullPath))
+        !== normalizedN8nTargetPath(fullPath)
+      || fs.readdirSync(fullPath).length !== 0
+    ) {
+      throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup directory changed before resumable cleanup');
+    }
+    return fullPath;
+  }
+  const stat = fs.lstatSync(fullPath, { bigint: true });
+  if (
+    stat.isSymbolicLink()
+    || !stat.isFile()
+    || !n8nEvidenceStatIdentitiesMatch(
+      entry.filesystem_identity,
+      n8nEvidenceStatIdentity(stat)
+    )
+    || n8nHashBackupCleanupFile(fullPath, stat) !== entry.bytes_sha256
+  ) {
+    throw failClosedN8nRepair('recovery-evidence-invalid', 'Recorded n8n Skills backup file changed before resumable cleanup');
+  }
+  return fullPath;
+}
+
+function removeExactN8nBackupResumably(backupPath, transaction, manifest, options = {}) {
+  requireValidN8nBackupResidueManifest(
+    manifest,
+    backupPath,
+    transaction.original_target_directory_identity
+  );
+  if (options.beforeEachCleanupOperation) options.beforeEachCleanupOperation();
+  const progress = inspectN8nBackupCleanupProgress(
+    backupPath,
+    manifest,
+    transaction.original_target_directory_identity
+  );
+  if (progress.complete) return;
+  let removed = 0;
+  for (let index = progress.next_index; index < manifest.entries.length; index += 1) {
+    if (options.beforeEachCleanupOperation) options.beforeEachCleanupOperation();
+    const entry = manifest.entries[index];
+    const fullPath = requireExactN8nBackupCleanupEntry(backupPath, entry);
+    if (entry.type === 'directory') {
+      fs.rmdirSync(fullPath);
+    } else {
+      fs.unlinkSync(fullPath);
     }
     removed += 1;
     if (options.testHooks?.afterN8nBackupCleanupEntry) {
       options.testHooks.afterN8nBackupCleanupEntry({
         entry_type: entry.type,
-        relative_path: entry.relativePath,
+        relative_path: entry.relative_path,
         removed
       });
     }
@@ -6330,6 +6666,7 @@ function removeExactN8nBackupResumably(backupPath, transaction, options = {}) {
 
 function authorizeN8nWinnerBackupCleanup(generation, transaction, backupPath, targetPath) {
   requireExactN8nOriginalBackup(backupPath, transaction);
+  const backupResidueManifest = inspectN8nBackupCleanupTree(backupPath);
   const targetStat = requireOrdinaryN8nDirectory(targetPath, 'verified n8n Skills winner');
   if (!n8nDirectoryIdentitiesMatch(
     transaction.staged_plugin_directory_identity,
@@ -6340,7 +6677,8 @@ function authorizeN8nWinnerBackupCleanup(generation, transaction, backupPath, ta
   return {
     cleanup_authorized: true,
     backup_directory_identity: transaction.original_target_directory_identity,
-    installed_directory_identity: transaction.staged_plugin_directory_identity
+    installed_directory_identity: transaction.staged_plugin_directory_identity,
+    backup_residue_manifest: backupResidueManifest
   };
 }
 
@@ -6799,21 +7137,30 @@ function cleanupN8nReplacementTransaction(initialTransaction, options = {}) {
         options.testHooks
       );
     }
-    removeExactN8nBackupResumably(validated.backupPath, transaction.transaction, {
-      resuming: true,
-      testHooks: options.testHooks,
-      beforeEachCleanupOperation() {
-        revalidateN8nEvidenceAuthority(transaction.evidenceAuthority, {
-          boundary: 'before-each-resumable-backup-cleanup-operation',
-          testHooks: options.testHooks
-        });
-        revalidateN8nJournalAuthority(
-          transaction,
-          'before-each-resumable-backup-cleanup-operation',
-          options.testHooks
-        );
+    const cleanupPhase = n8nEvidenceValue(
+      transaction.evidenceAuthority,
+      'n8n-replacement-phase-70-cleanup'
+    );
+    removeExactN8nBackupResumably(
+      validated.backupPath,
+      transaction.transaction,
+      cleanupPhase.backup_residue_manifest,
+      {
+        resuming: true,
+        testHooks: options.testHooks,
+        beforeEachCleanupOperation() {
+          revalidateN8nEvidenceAuthority(transaction.evidenceAuthority, {
+            boundary: 'before-each-resumable-backup-cleanup-operation',
+            testHooks: options.testHooks
+          });
+          revalidateN8nJournalAuthority(
+            transaction,
+            'before-each-resumable-backup-cleanup-operation',
+            options.testHooks
+          );
+        }
       }
-    });
+    );
   }
   transaction = advanceN8nTerminalEvidenceContext(
     transaction,
@@ -7656,27 +8003,36 @@ function replaceSelectedN8nSkillsCache(
     if (testHooks.afterN8nBackupCleanupAuthorization) {
       testHooks.afterN8nBackupCleanupAuthorization({ generation });
     }
-    removeExactN8nBackupResumably(backupPath, transaction, {
-      resuming: true,
-      testHooks,
-      beforeEachCleanupOperation() {
-        requireExactN8nFinalWinner(
-          entry,
-          transaction,
-          targetPath,
-          'Verified n8n Skills winner during backup retirement'
-        );
-        revalidateN8nEvidenceAuthority(transactionContext.evidenceAuthority, {
-          boundary: 'before-resumable-backup-cleanup-operation',
-          testHooks
-        });
-        revalidateN8nJournalAuthority(
-          transactionContext,
-          'before-resumable-backup-cleanup-operation',
-          testHooks
-        );
+    const cleanupPhase = n8nEvidenceValue(
+      transactionContext.evidenceAuthority,
+      'n8n-replacement-phase-70-cleanup'
+    );
+    removeExactN8nBackupResumably(
+      backupPath,
+      transaction,
+      cleanupPhase.backup_residue_manifest,
+      {
+        resuming: true,
+        testHooks,
+        beforeEachCleanupOperation() {
+          requireExactN8nFinalWinner(
+            entry,
+            transaction,
+            targetPath,
+            'Verified n8n Skills winner during backup retirement'
+          );
+          revalidateN8nEvidenceAuthority(transactionContext.evidenceAuthority, {
+            boundary: 'before-resumable-backup-cleanup-operation',
+            testHooks
+          });
+          revalidateN8nJournalAuthority(
+            transactionContext,
+            'before-resumable-backup-cleanup-operation',
+            testHooks
+          );
+        }
       }
-    });
+    );
     return requireExactN8nFinalWinner(
       entry,
       transaction,

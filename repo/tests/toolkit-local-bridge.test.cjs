@@ -56,7 +56,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.9.16';
+const expectedBridgeVersion = '2.9.17';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 const currentN8nManifestPath = path.join(
   repoRoot,
@@ -6767,6 +6767,91 @@ test('Codex n8n verified-winner backup cleanup resumes after abrupt partial dele
   assert.deepEqual(n8nTransactionArtifacts(pluginRoot), [], 'cleanup retry remains idempotent');
 });
 
+test('Codex n8n resumed backup cleanup rejects and preserves residue outside its phase-70 manifest', async () => {
+  const cases = [
+    {
+      label: 'added residue after cleanup authorization',
+      crashPoint: 'afterN8nBackupCleanupAuthorization',
+      mutate(backupPath, manifest) {
+        const addedPath = path.join(backupPath, 'adversarial-added.txt');
+        assert.equal(
+          manifest.entries.some((entry) => entry.relative_path === 'adversarial-added.txt'),
+          false
+        );
+        writeFile(addedPath, 'not authorized by phase 70\n');
+      }
+    },
+    {
+      label: 'replaced residue after partial cleanup',
+      crashPoint: 'afterN8nBackupCleanupEntry',
+      mutate(backupPath, manifest) {
+        const remaining = manifest.entries.find((entry) => {
+          if (entry.type !== 'file' || Number(entry.filesystem_identity.size) < 1) return false;
+          return fs.existsSync(path.join(backupPath, ...entry.relative_path.split('/')));
+        });
+        assert.ok(remaining, 'partial cleanup fixture must retain an authorized non-empty file');
+        const filePath = path.join(backupPath, ...remaining.relative_path.split('/'));
+        const replacement = fs.readFileSync(filePath);
+        replacement[0] ^= 0xff;
+        fs.writeFileSync(filePath, replacement);
+      }
+    }
+  ];
+
+  for (const fixture of cases) {
+    const root = tmpRoot();
+    const codexHome = path.join(root, fixture.label.replace(/[^A-Za-z0-9]+/g, '-'));
+    const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+    copyCurrentSupportedN8nPluginFixture(pluginRoot);
+    writeFile(path.join(pluginRoot, 'unrelated.txt'), `${fixture.label}\n`);
+    await waitForAbruptChild(spawnAbruptN8nRepair(pluginRoot, '1.0.2', fixture.crashPoint));
+
+    const owned = readSingleN8nOwnedGeneration(pluginRoot);
+    const transaction = readJson(owned.recordPath.replace(/\.json$/, '.n8n-replacement.json'));
+    const cleanupPhasePath = owned.recordPath.replace(
+      /\.json$/,
+      '.n8n-replacement-phase-70-cleanup.json'
+    );
+    const cleanupPhaseBytes = fs.readFileSync(cleanupPhasePath);
+    const manifest = readJson(cleanupPhasePath).backup_residue_manifest;
+    assert.equal(manifest.schema_version, 1);
+    assert.match(manifest.digest, /^[0-9a-f]{64}$/);
+    assert.equal(
+      manifest.entries.at(-1).relative_path,
+      '',
+      'canonical manifest must retire the backup root last'
+    );
+    assert.equal(fs.existsSync(transaction.backup_path), true);
+
+    fixture.mutate(transaction.backup_path, manifest);
+    const mutatedBackup = snapshotTree(transaction.backup_path);
+    assert.throws(
+      () => recoverInterruptedN8nReplacement({
+        codexHome,
+        pluginInspection: {
+          errors: [],
+          ok: true,
+          pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
+        },
+        write: true
+      }),
+      (error) => error.code === 'recovery-evidence-invalid',
+      fixture.label
+    );
+    assert.deepEqual(
+      snapshotTree(transaction.backup_path),
+      mutatedBackup,
+      `${fixture.label} must remain byte-for-byte preserved`
+    );
+    assert.deepEqual(
+      fs.readFileSync(cleanupPhasePath),
+      cleanupPhaseBytes,
+      `${fixture.label} must not rewrite phase-70 authority`
+    );
+    assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'healthy');
+  }
+});
+
 test('Codex n8n recovery retires obsolete version transactions before current selection', async () => {
   const crashPoints = [
     'afterN8nRepairTransactionRegistration',
@@ -8279,6 +8364,41 @@ test('Codex n8n restart after final-winner drift recovers once and then remains 
   assert.equal(healthy.status, 'not-needed');
   assert.equal(healthy.repaired.length, 0);
   assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'healthy');
+});
+
+test('bounded n8n tree inspection rejects an earlier file overwritten while a later file is read', () => {
+  const root = tmpRoot();
+  const pluginRoot = path.join(root, 'n8n-skills');
+  copyCurrentSupportedN8nPluginFixture(pluginRoot);
+  const licensePath = path.join(pluginRoot, 'LICENSE');
+  const original = fs.readFileSync(licensePath);
+  const replacement = Buffer.from(original);
+  replacement[0] ^= 0xff;
+  const originalStat = fs.statSync(licensePath);
+  let overwritten = false;
+
+  assert.throws(
+    () => inspectN8nSkillsTree(
+      pluginRoot,
+      N8N_SKILLS_COMPATIBILITY_ADAPTERS['1.0.2'],
+      N8N_SKILLS_TREE_LIMITS,
+      {
+        afterReadChunk({ pass, relPath }) {
+          if (overwritten || pass !== 1 || relPath !== 'PROVENANCE.md') return;
+          overwritten = true;
+          fs.writeFileSync(licensePath, replacement);
+          fs.utimesSync(licensePath, originalStat.atime, originalStat.mtime);
+        }
+      }
+    ),
+    /LICENSE changed before the bounded tree inspection completed/i
+  );
+  assert.equal(overwritten, true);
+  assert.deepEqual(
+    fs.readFileSync(licensePath),
+    replacement,
+    'stale inspection must not authorize mutation or restore the overwritten file'
+  );
 });
 
 test('Codex plugin identity discovery exposes moved n8n hook layouts and fails closed', () => {

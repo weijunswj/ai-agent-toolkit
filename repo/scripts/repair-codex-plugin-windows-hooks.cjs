@@ -791,6 +791,8 @@ function inspectN8nSkillsTree(pluginRoot, adapter, limits = N8N_SKILLS_TREE_LIMI
   const allRows = [];
   const preservedRows = [];
   const hookFiles = [];
+  const fileAuthorities = [];
+  const directoryAuthorities = [];
   let fileCount = 0;
   let directoryCount = 0;
   let totalBytes = 0;
@@ -826,6 +828,12 @@ function inspectN8nSkillsTree(pluginRoot, adapter, limits = N8N_SKILLS_TREE_LIMI
     }
     const entries = fs.readdirSync(current.currentPath, { withFileTypes: true })
       .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+    directoryAuthorities.push({
+      entryNames: entries.map((entry) => entry.name),
+      fullPath: current.currentPath,
+      identity: stableStatIdentity(currentStat),
+      relDir: current.relDir
+    });
     pending.push({
       ...current,
       directoryIdentity: stableStatIdentity(currentStat),
@@ -849,20 +857,58 @@ function inspectN8nSkillsTree(pluginRoot, adapter, limits = N8N_SKILLS_TREE_LIMI
         if (fileCount > limits.max_files) throw new Error('plugin cache tree exceeds the supported regular-file count');
         if (fileSize > limits.max_file_bytes) throw new Error('plugin cache regular file exceeds the supported byte limit');
         if (totalBytes > limits.max_total_bytes) throw new Error('plugin cache tree exceeds the supported total byte limit');
-        const row = `file\0${relPath}\0${sha256RegularFileBounded(fullPath, stat, limits.max_file_bytes, {
+        const sha256 = sha256RegularFileBounded(fullPath, stat, limits.max_file_bytes, {
           afterFirstHashPass: options.afterFirstHashPass,
           afterReadChunk: options.afterReadChunk,
           relPath
-        })}\n`;
+        });
+        const row = `file\0${relPath}\0${sha256}\n`;
         allRows.push(row);
         if (!changedPaths.has(relPath)) preservedRows.push(row);
         if (relPath.startsWith('hooks/')) hookFiles.push(relPath);
+        fileAuthorities.push({
+          fullPath,
+          identity: stableStatIdentity(stat),
+          relPath,
+          sha256
+        });
       } else {
         throw new Error(`${relPath} is not a regular file or directory`);
       }
     }
     for (let index = childDirectories.length - 1; index >= 0; index -= 1) {
       pending.push(childDirectories[index]);
+    }
+  }
+  for (const authority of fileAuthorities) {
+    const stat = fs.lstatSync(authority.fullPath, { bigint: true });
+    if (
+      stat.isSymbolicLink()
+      || !stat.isFile()
+      || !stableStatIdentitiesMatch(authority.identity, stableStatIdentity(stat))
+      || !sameResolvedPath(fs.realpathSync.native(authority.fullPath), authority.fullPath)
+      || sha256RegularFileBounded(
+        authority.fullPath,
+        stat,
+        limits.max_file_bytes,
+        { relPath: authority.relPath }
+      ) !== authority.sha256
+    ) {
+      throw new Error(`${authority.relPath} changed before the bounded tree inspection completed`);
+    }
+  }
+  for (const authority of directoryAuthorities) {
+    const stat = fs.lstatSync(authority.fullPath, { bigint: true });
+    const entryNames = fs.readdirSync(authority.fullPath)
+      .sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
+    if (
+      stat.isSymbolicLink()
+      || !stat.isDirectory()
+      || !stableStatIdentitiesMatch(authority.identity, stableStatIdentity(stat))
+      || !sameResolvedPath(fs.realpathSync.native(authority.fullPath), authority.fullPath)
+      || JSON.stringify(entryNames) !== JSON.stringify(authority.entryNames)
+    ) {
+      throw new Error(`${authority.relDir || 'plugin root'} changed before the bounded tree inspection completed`);
     }
   }
   const digest = (rows) => crypto.createHash('sha256').update(rows.join(''), 'utf8').digest('hex');

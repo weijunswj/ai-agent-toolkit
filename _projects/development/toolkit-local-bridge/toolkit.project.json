@@ -5,7 +5,7 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.9.16",
+  "version": "2.9.17",
   "version_policy": "semver",
   "version_notes": "Revalidates the final installed n8n Skills winner through backup retirement, preserves exact terminal failure evidence on drift, resumes that failed generation deterministically, and exits unsupported platforms before Windows cache inspection.",
   "outputs": [
