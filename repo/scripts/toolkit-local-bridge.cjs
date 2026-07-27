@@ -46,7 +46,7 @@ const {
 } = require('./toolkit-n8n-repair-journal.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.9.17';
+const BRIDGE_VERSION = '2.9.18';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -4845,7 +4845,9 @@ function n8nRetirementResidueManifest(context) {
       bytes_sha256: entry.bytes_sha256,
       evidence_kind: entry.evidence_kind,
       filesystem_identity: entry.filesystem_identity,
-      maximum_bytes: N8N_EVIDENCE_FILE_BYTE_LIMIT,
+      maximum_bytes: entry.evidence_kind === 'n8n-replacement-phase-70-cleanup'
+        ? N8N_PHASE_70_EVIDENCE_FILE_BYTE_LIMIT
+        : N8N_EVIDENCE_FILE_BYTE_LIMIT,
       normalized_path: entry.normalized_path,
       present: true
     })));
@@ -6057,12 +6059,17 @@ function legacyPhysicalCleanupN8nEvidenceAuthority(context, testHooks = {}) {
   }
 }
 
-function cleanupN8nEvidenceAuthority(context, testHooks = {}) {
+function cleanupN8nEvidenceAuthority(context, testHooks = {}, retirement = {}) {
   const logical = logicallyRetireN8nEvidence(context, {
-    outcome: context.transaction ? 'winner-or-original-committed' : 'target-untouched-preserved',
-    rollbackDigest: context.transaction?.approval_evidence?.tree_digest || '',
+    outcome: retirement.outcome
+      || (context.transaction ? 'winner-or-original-committed' : 'target-untouched-preserved'),
+    rollbackDigest: retirement.rollbackDigest
+      ?? context.transaction?.approval_evidence?.tree_digest
+      ?? '',
     testHooks,
-    winnerDigest: context.transaction?.staged_evidence?.tree_digest || ''
+    winnerDigest: retirement.winnerDigest
+      ?? context.transaction?.staged_evidence?.tree_digest
+      ?? ''
   });
   if (testHooks.preventN8nPhysicalCleanup) return logical;
   try {
@@ -6664,9 +6671,42 @@ function removeExactN8nBackupResumably(backupPath, transaction, manifest, option
   }
 }
 
-function authorizeN8nWinnerBackupCleanup(generation, transaction, backupPath, targetPath) {
+function authorizeN8nWinnerBackupCleanup(
+  generation,
+  transaction,
+  backupPath,
+  targetPath,
+  testHooks = {}
+) {
   requireExactN8nOriginalBackup(backupPath, transaction);
+  if (testHooks.beforeN8nBackupCleanupManifestInspection) {
+    testHooks.beforeN8nBackupCleanupManifestInspection({
+      backupPath,
+      generation,
+      targetPath
+    });
+  }
   const backupResidueManifest = inspectN8nBackupCleanupTree(backupPath);
+  if (!n8nDirectoryIdentitiesMatch(
+    transaction.original_target_directory_identity,
+    backupResidueManifest.root_directory_identity
+  )) {
+    throw failClosedN8nRepair(
+      'recovery-evidence-invalid',
+      'Recorded n8n Skills backup identity changed before cleanup authorization'
+    );
+  }
+  const approvedBackup = classifyN8nSkillsCompatibility(backupPath);
+  if (!n8nCompatibilityEvidenceMatches(
+    transaction.approval_evidence,
+    approvedBackup,
+    'repair-required'
+  )) {
+    throw failClosedN8nRepair(
+      'recovery-evidence-invalid',
+      'Recorded n8n Skills backup changed after its approval proof and before cleanup authorization'
+    );
+  }
   const targetStat = requireOrdinaryN8nDirectory(targetPath, 'verified n8n Skills winner');
   if (!n8nDirectoryIdentitiesMatch(
     transaction.staged_plugin_directory_identity,
@@ -7127,7 +7167,8 @@ function cleanupN8nReplacementTransaction(initialTransaction, options = {}) {
         generation,
         transaction.transaction,
         validated.backupPath,
-        validated.targetPath
+        validated.targetPath,
+        options.testHooks
       );
       transaction = advanceN8nEvidenceContext(
         transaction,
@@ -7192,6 +7233,60 @@ function cleanupN8nReplacementTransaction(initialTransaction, options = {}) {
     throw failClosedN8nRepair('recovery-cleanup-failed', 'Verified n8n Skills transaction residue could not be removed safely');
   }
   return transaction;
+}
+
+function retireFailedN8nWinnerDriftTransaction(transaction, options = {}) {
+  const failed = n8nEvidenceEntry(transaction.evidenceAuthority, 'failed');
+  const completed = n8nEvidenceEntry(transaction.evidenceAuthority, 'completed');
+  if (!failed?.present || completed?.present) {
+    throw failClosedN8nRepair(
+      'recovery-evidence-invalid',
+      'Drifted phase-70 n8n Skills winner lacks exact failed terminal authority'
+    );
+  }
+  revalidateN8nEvidenceAuthority(transaction.evidenceAuthority, {
+    boundary: 'before-failed-phase-70-audit-retirement',
+    testHooks: options.testHooks
+  });
+  revalidateN8nJournalAuthority(
+    transaction,
+    'before-failed-phase-70-audit-retirement',
+    options.testHooks
+  );
+  const cleanup = cleanupOwnedGeneration(transaction.generation, {
+    evidenceAuthority: transaction.evidenceAuthority,
+    revalidateEvidenceAuthority(authority, boundary) {
+      return revalidateN8nEvidenceAuthority(authority, {
+        boundary,
+        testHooks: options.testHooks
+      });
+    },
+    cleanupEvidenceAuthority() {
+      return cleanupN8nEvidenceAuthority(
+        transaction,
+        options.testHooks,
+        {
+          outcome: 'failed-winner-drift-preserved',
+          rollbackDigest: transaction.transaction.approval_evidence.tree_digest,
+          winnerDigest: ''
+        }
+      );
+    }
+  });
+  if (cleanup.physicalCleanupError || cleanup.checkpointCleanupError) {
+    if (cleanup.checkpointCleanupError) throw cleanup.checkpointCleanupError;
+    throw cleanup.physicalCleanupCause || failClosedN8nRepair(
+      cleanup.physicalCleanupError,
+      'Failed phase-70 n8n Skills audit has exact physical cleanup pending'
+    );
+  }
+  if (!cleanup.cleaned && !cleanup.logicallyRetired) {
+    if (cleanup.error) throw cleanup.error;
+    throw failClosedN8nRepair(
+      'recovery-cleanup-failed',
+      'Failed phase-70 n8n Skills audit could not be retired safely'
+    );
+  }
 }
 
 function recoverTargetUntouchedN8nPreTransaction({
@@ -7474,6 +7569,12 @@ function recoverInterruptedN8nReplacement({
       n8nDirectoryIdentity(targetStat)
     );
     const phaseOrdinal = n8nRecoveryPhaseOrdinal(transaction);
+    const isFailedPhase70OwnedWinnerDrift = (
+      !targetIsWinner
+      && targetIsOwnedInstalledDirectory
+      && !backupExists
+      && phaseOrdinal >= 70
+    );
     const revalidateBeforeMutation = (boundary) => revalidateN8nEvidenceAuthority(
       transaction.evidenceAuthority,
       { boundary, testHooks }
@@ -7483,7 +7584,14 @@ function recoverInterruptedN8nReplacement({
       testHooks
     });
     if (
-      (targetIsOriginal && !n8nDirectoryIdentitiesMatch(transaction.transaction.original_target_directory_identity, n8nDirectoryIdentity(targetStat)))
+      (
+        targetIsOriginal
+        && !isFailedPhase70OwnedWinnerDrift
+        && !n8nDirectoryIdentitiesMatch(
+          transaction.transaction.original_target_directory_identity,
+          n8nDirectoryIdentity(targetStat)
+        )
+      )
       || (backupIsOriginal && !n8nDirectoryIdentitiesMatch(transaction.transaction.original_target_directory_identity, n8nDirectoryIdentity(backupStat)))
       || (targetIsWinner && !n8nDirectoryIdentitiesMatch(transaction.transaction.staged_plugin_directory_identity, n8nDirectoryIdentity(targetStat)))
       || (stageIsWinner && !n8nDirectoryIdentitiesMatch(transaction.transaction.staged_plugin_directory_identity, n8nDirectoryIdentity(stageStat)))
@@ -7585,6 +7693,13 @@ function recoverInterruptedN8nReplacement({
       }
       cleanupTransaction();
       return { status: 'winner-preserved' };
+    }
+    if (isFailedPhase70OwnedWinnerDrift) {
+      retireFailedN8nWinnerDriftTransaction(transaction, { testHooks });
+      throw failClosedN8nRepair(
+        'final-winner-drift',
+        'Failed phase-70 n8n Skills winner audit was retired; drifted canonical bytes were preserved and require a fresh repair'
+      );
     }
     if (targetIsOriginal && !backupExists) {
       cleanupTransaction();
@@ -7991,7 +8106,8 @@ function replaceSelectedN8nSkillsCache(
       generation,
       transaction,
       backupPath,
-      targetPath
+      targetPath,
+      testHooks
     );
     transactionContext = advanceN8nEvidenceContext(
       transactionContext,

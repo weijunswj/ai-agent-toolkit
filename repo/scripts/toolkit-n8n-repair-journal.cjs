@@ -1729,6 +1729,19 @@ function compactSupersededTransaction(authority, checkpoint, options = {}) {
     }
     return Object.freeze({ compacted: true, reason: 'already-absent' });
   }
+  inspectCompactionResidue(
+    quarantinePath,
+    superseded.transaction_residue_manifest,
+    true,
+    true
+  );
+  fsyncDirectoryIfSupported(authority.paths.transactions, options);
+  if (pathExists(sourcePath) || !pathExists(quarantinePath)) {
+    throw journalError(
+      'journal-compaction-drift',
+      'Checkpointed transaction quarantine changed during parent durability admission'
+    );
+  }
   let finalPrefix = false;
   for (;;) {
     const residue = inspectCompactionResidue(

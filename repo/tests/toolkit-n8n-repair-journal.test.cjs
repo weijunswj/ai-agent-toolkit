@@ -959,6 +959,68 @@ test('checkpointed terminal transaction compaction resumes after move and partia
   }
 });
 
+test('POSIX transaction compaction fsyncs the verified quarantine move before deletion and on restart', () => {
+  const root = temporaryRoot();
+  try {
+    const pair = completedCompactionPair(root);
+    let moved = false;
+    let durabilityRejected = false;
+    assert.throws(
+      () => journal.compactSupersededTransaction(pair.second, pair.checkpoint, {
+        testHooks: {
+          afterN8nTransactionCompactionMove() {
+            moved = true;
+          },
+          fsyncN8nJournalDirectory({ path: durableParent }) {
+            if (
+              moved
+              && path.resolve(durableParent) === path.resolve(pair.second.paths.transactions)
+            ) {
+              durabilityRejected = true;
+              throw new Error('synthetic crash before quarantine move durability');
+            }
+          },
+          n8nJournalPlatform: 'linux'
+        }
+      }),
+      { code: 'journal-durability-unavailable' }
+    );
+    assert.equal(durabilityRejected, true);
+    assert.equal(fs.existsSync(pair.first.paths.transaction), false);
+    const quarantineName = fs.readdirSync(pair.second.paths.transactions)
+      .find((name) => name.startsWith(
+        `retired-transaction-${pair.first.generation_id}-by-`
+      ));
+    const quarantinePath = path.join(pair.second.paths.transactions, quarantineName);
+    assert.equal(
+      fs.readdirSync(path.join(quarantinePath, 'segments')).length,
+      pair.first.records.length,
+      'durability failure must precede every quarantine deletion'
+    );
+
+    const events = [];
+    const resumed = journal.compactSupersededTransaction(pair.second, pair.checkpoint, {
+      testHooks: {
+        beforeN8nTransactionCompactionDelete() {
+          events.push('delete');
+        },
+        fsyncN8nJournalDirectory({ path: durableParent }) {
+          if (path.resolve(durableParent) === path.resolve(pair.second.paths.transactions)) {
+            events.push('transactions-fsync');
+          }
+        },
+        n8nJournalPlatform: 'linux'
+      }
+    });
+    assert.equal(resumed.compacted, true);
+    assert.ok(events.filter((event) => event === 'transactions-fsync').length >= 2);
+    assert.ok(events.indexOf('transactions-fsync') < events.indexOf('delete'));
+    assert.equal(fs.existsSync(quarantinePath), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('checkpoint compaction resumes after the final segment deletion and after segments-directory removal', () => {
   const finalSegmentRoot = temporaryRoot();
   try {

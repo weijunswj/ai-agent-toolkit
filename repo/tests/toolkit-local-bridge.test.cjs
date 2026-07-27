@@ -56,7 +56,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.9.17';
+const expectedBridgeVersion = '2.9.18';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 const currentN8nManifestPath = path.join(
   repoRoot,
@@ -6852,6 +6852,115 @@ test('Codex n8n resumed backup cleanup rejects and preserves residue outside its
   }
 });
 
+test('Codex n8n phase-70 retirement admits bounded evidence above the ordinary evidence limit', () => {
+  const root = tmpRoot();
+  const codexHome = path.join(root, 'large-phase-70-evidence');
+  const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copyCurrentSupportedN8nPluginFixture(pluginRoot);
+  const paddingRoot = path.join(pluginRoot, `phase-70-padding-${'p'.repeat(160)}`);
+  fs.mkdirSync(paddingRoot);
+  for (let index = 0; index < 1300; index += 1) {
+    fs.closeSync(fs.openSync(
+      path.join(
+        paddingRoot,
+        `evidence-${String(index).padStart(4, '0')}-${'x'.repeat(160)}.txt`
+      ),
+      'wx'
+    ));
+  }
+
+  const stopped = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+    testHooks: {
+      afterN8nBackupCleanupAuthorization() {
+        const error = new Error('synthetic stop with large phase-70 evidence');
+        error.code = 'SYNTHETIC_STOP';
+        throw error;
+      }
+    }
+  });
+  assert.equal(stopped.status, 'repair-failed');
+  assert.equal(stopped.code, 'SYNTHETIC_STOP');
+  const owned = readSingleN8nOwnedGeneration(pluginRoot);
+  const cleanupPhasePath = owned.recordPath.replace(
+    /\.json$/,
+    '.n8n-replacement-phase-70-cleanup.json'
+  );
+  const cleanupPhaseBytes = fs.statSync(cleanupPhasePath).size;
+  assert.ok(cleanupPhaseBytes > 1024 * 1024, `phase-70 evidence was only ${cleanupPhaseBytes} bytes`);
+  assert.ok(cleanupPhaseBytes <= 5 * 1024 * 1024, `phase-70 evidence was ${cleanupPhaseBytes} bytes`);
+
+  const recovered = recoverInterruptedN8nReplacement({
+    codexHome,
+    pluginInspection: {
+      errors: [],
+      ok: true,
+      pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
+    },
+    write: true
+  });
+  assert.equal(recovered.status, 'winner-preserved');
+  assert.deepEqual(n8nTransactionArtifacts(pluginRoot), []);
+  const journal = inspectN8nRepairJournal({
+    codexHome,
+    generationId: owned.record.generation_id,
+    ownershipToken: owned.record.ownership_token,
+    targetPath: pluginRoot
+  });
+  const retirement = journal.records.find((record) => record.kind === 'L20_LOGICALLY_RETIRED');
+  const retiredPhase70 = retirement.payload.residue_manifest.entries.find(
+    (entry) => entry.kind === 'n8n-replacement-phase-70-cleanup'
+  );
+  assert.equal(retiredPhase70.maximum_bytes, 5 * 1024 * 1024);
+  assert.equal(journal.state, 'C20_CLEANUP_COMPLETE');
+});
+
+test('Codex n8n phase-70 authorization rejects backup drift before manifest inspection', () => {
+  const root = tmpRoot();
+  const codexHome = path.join(root, 'pre-manifest-backup-drift');
+  const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copyCurrentSupportedN8nPluginFixture(pluginRoot);
+  writeFile(path.join(pluginRoot, 'unrelated.txt'), 'approved original bytes\n');
+  let backupPath = '';
+  let mutatedBackup = null;
+
+  const result = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+    testHooks: {
+      beforeN8nBackupCleanupManifestInspection(context) {
+        backupPath = context.backupPath;
+        fs.appendFileSync(
+          path.join(backupPath, 'unrelated.txt'),
+          'changed after approval proof\n',
+          'utf8'
+        );
+        mutatedBackup = snapshotTree(backupPath);
+      }
+    }
+  });
+  assert.equal(result.status, 'repair-failed');
+  assert.equal(result.code, 'recovery-evidence-invalid');
+  assert.match(result.errors.join('\n'), /changed after its approval proof/i);
+  assert.ok(backupPath);
+  assert.deepEqual(snapshotTree(backupPath), mutatedBackup);
+  const owned = readSingleN8nOwnedGeneration(pluginRoot);
+  assert.equal(
+    fs.existsSync(owned.recordPath.replace(
+      /\.json$/,
+      '.n8n-replacement-phase-70-cleanup.json'
+    )),
+    false,
+    'drifted backup bytes must never become phase-70 authority'
+  );
+  assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'healthy');
+});
+
 test('Codex n8n recovery retires obsolete version transactions before current selection', async () => {
   const crashPoints = [
     'afterN8nRepairTransactionRegistration',
@@ -8364,6 +8473,72 @@ test('Codex n8n restart after final-winner drift recovers once and then remains 
   assert.equal(healthy.status, 'not-needed');
   assert.equal(healthy.repaired.length, 0);
   assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'healthy');
+});
+
+test('Codex n8n phase-70 success-boundary drift retires a failure audit before fresh repair', () => {
+  const root = tmpRoot();
+  const codexHome = path.join(root, 'phase-70-success-boundary-drift');
+  const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  const pristineRoot = path.join(root, 'pristine-n8n-skills');
+  copyCurrentSupportedN8nPluginFixture(pluginRoot);
+  copyCurrentSupportedN8nPluginFixture(pristineRoot);
+  const failed = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+    testHooks: {
+      beforeN8nRepairSuccessReturn() {
+        fs.cpSync(pristineRoot, pluginRoot, { force: true, recursive: true });
+        fs.rmSync(path.join(pluginRoot, 'hooks', 'run-hook.ps1'), { force: true });
+      }
+    }
+  });
+  assert.equal(failed.status, 'repair-failed');
+  assert.equal(failed.code, 'final-winner-drift');
+  const failedGeneration = readSingleN8nOwnedGeneration(pluginRoot);
+  const driftedTree = snapshotTree(pluginRoot);
+
+  const adjudicated = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
+  });
+  assert.equal(adjudicated.status, 'repair-failed');
+  assert.equal(adjudicated.code, 'final-winner-drift', JSON.stringify(adjudicated, null, 2));
+  assert.notEqual(adjudicated.code, 'conflicting-recovery');
+  assert.deepEqual(snapshotTree(pluginRoot), driftedTree);
+  assert.deepEqual(n8nTransactionArtifacts(pluginRoot), []);
+  const audit = inspectN8nRepairJournal({
+    codexHome,
+    generationId: failedGeneration.record.generation_id,
+    ownershipToken: failedGeneration.record.ownership_token,
+    targetPath: pluginRoot
+  });
+  assert.equal(audit.state, 'C20_CLEANUP_COMPLETE');
+  assert.equal(
+    audit.records.find((record) => record.kind === 'B80_BUSINESS_COMMITTED').payload.outcome,
+    'failed-winner-drift-preserved'
+  );
+
+  const repaired = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
+  });
+  assert.equal(repaired.status, 'repaired', JSON.stringify(repaired, null, 2));
+  assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'healthy');
+
+  const steady = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
+  });
+  assert.equal(steady.status, 'not-needed');
+  assert.equal(steady.repaired.length, 0);
 });
 
 test('bounded n8n tree inspection rejects an earlier file overwritten while a later file is read', () => {
