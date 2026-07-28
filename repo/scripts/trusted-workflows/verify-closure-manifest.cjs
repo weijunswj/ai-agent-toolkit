@@ -7,10 +7,11 @@ const path = require('node:path');
 const childProcess = require('node:child_process');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
-const MANIFEST_PATH = path.join(__dirname, 'closure-manifest.json');
+const TRUSTED_ROOT = path.join(REPO_ROOT, 'repo', 'scripts', 'trusted-workflows');
+const MANIFEST_PATH = path.join(TRUSTED_ROOT, 'closure-manifest.json');
 const VALIDATION_ONLY = new Set([
-  'repo/scripts/trusted-workflows/build-closure-manifest.cjs',
-  'repo/scripts/trusted-workflows/update-bootstrap-digests.cjs'
+  'build-closure-manifest.cjs',
+  'update-bootstrap-digests.cjs'
 ]);
 
 function fail(code) {
@@ -26,14 +27,13 @@ function contained(relative) {
   if (typeof relative !== 'string' || relative === '' || path.isAbsolute(relative)) fail('TW_VERIFY_PATH');
   const parts = relative.replace(/\\/g, '/').split('/');
   if (parts.some((part) => part === '' || part === '.' || part === '..')) fail('TW_VERIFY_PATH');
-  const absolute = path.resolve(REPO_ROOT, ...parts);
-  const rel = path.relative(REPO_ROOT, absolute);
+  const absolute = path.resolve(TRUSTED_ROOT, ...parts);
+  const rel = path.relative(TRUSTED_ROOT, absolute);
   if (rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) fail('TW_VERIFY_ESCAPE');
   return absolute;
 }
 
 function listTrustedFiles() {
-  const root = path.join(REPO_ROOT, 'repo', 'scripts', 'trusted-workflows');
   const result = [];
   const visit = (directory) => {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -41,12 +41,12 @@ function listTrustedFiles() {
       if (entry.isSymbolicLink()) fail('TW_VERIFY_SYMLINK');
       if (entry.isDirectory()) visit(absolute);
       else if (entry.isFile() && entry.name !== 'closure-manifest.json') {
-        const relative = path.relative(REPO_ROOT, absolute).replace(/\\/g, '/');
-        if (!VALIDATION_ONLY.has(relative)) result.push(relative);
+        const relative = path.relative(TRUSTED_ROOT, absolute).replace(/\\/g, '/');
+        if (!VALIDATION_ONLY.has(entry.name)) result.push(relative);
       }
     }
   };
-  visit(root);
+  visit(TRUSTED_ROOT);
   return result.sort();
 }
 
@@ -67,6 +67,8 @@ function main() {
   if (JSON.stringify(actual) !== JSON.stringify([...listed].sort())) fail('TW_VERIFY_SET');
   for (const entry of manifest.files) {
     const file = contained(entry.path);
+    const bytes = fs.readFileSync(file);
+    if (bytes.includes(0x0d)) fail('TW_VERIFY_NON_CANONICAL_LF');
     if (!fs.statSync(file).isFile() || digest(file) !== entry.sha256) fail('TW_VERIFY_HASH');
   }
   const requestedRoot = process.argv[2];

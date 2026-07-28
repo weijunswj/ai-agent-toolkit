@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const acorn = require('acorn');
 const YAML = require('yaml');
-const { isDirectRequireCall, isRequireMainCompare, isRequireResolveCall, isSafeRequireMemberProperty, isRequireMainMember, isRequireResolveMember, normaliseSignal, isValidSignal, VALID_SIGNALS } = require('./trusted-workflows/loader-policy.cjs');
+const { isDirectRequireCallee, isValidStaticRequireCall, isRequireMainCompare, isRequireResolveCall, isSafeRequireMemberProperty, isRequireMainMember, isRequireResolveMember, normaliseSignal, isValidSignal, VALID_SIGNALS } = require('./trusted-workflows/loader-policy.cjs');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const WORKFLOWS_DIR = path.join(REPO_ROOT, '.github', 'workflows');
@@ -846,8 +846,8 @@ function inspectLocalJavaScript(entry, actionRoot, context, location) {
       } else if (node.type === 'CallExpression' && node.callee && node.callee.type === 'MemberExpression' &&
           node.callee.object && node.callee.object.name === 'module' && node.callee.property && node.callee.property.name === 'require') {
         throw new InventoryError('WF_LOCAL_JS_MODULE_REQUIRE', location);
-      } else if (node.type === 'CallExpression' && isDirectRequireCall(node) && node.callee && node.callee.type === 'Identifier' && node.callee.name === 'require') {
-        if (node.arguments.length !== 1 || node.arguments[0].type !== 'Literal' || typeof node.arguments[0].value !== 'string') {
+      } else if (node.type === 'CallExpression' && isDirectRequireCallee(node)) {
+        if (!isValidStaticRequireCall(node)) {
           throw new InventoryError('WF_LOCAL_JS_COMPUTED_REQUIRE', location);
         }
         specifier = node.arguments[0].value;
@@ -923,11 +923,50 @@ function evaluateWrapper(invocation, states, context, directory, root, location,
   const file = resolveStaticFile(context.repoRoot, directory, invocation.script, location);
   const activeKey = invocation.shell + '\0' + file;
   if (context.activeWrappers.has(activeKey)) throw new InventoryError('WF_WRAPPER_CYCLE', location);
-  const tokenFingerprint = states.map((s) => s.processParentKey || '').sort().join('\0');
-  const memoKey = activeKey + '\0' + tokenFingerprint + '\0' + uniqueStates(states, location).map(stateFingerprint).sort().join('\0');
-  if (context.wrapperResults.has(memoKey)) {
+  // Wrapper memo key invariant: each input state's caller token is paired with its exact
+  // non-token state fingerprint. Sorting tokens independently from state fingerprints would
+  // collide distinct pairings like [(T1,A),(T2,B)] with [(T1,B),(T2,A)]; we preserve the
+  // exact pair and its multiplicity so the cache stays caller-neutral only when the full
+  // paired input is identical.
+  const deduped = uniqueStates(states, location);
+  const pairedRecords = deduped.map((s) => [s.processParentKey || '', stateFingerprint(s)]);
+  pairedRecords.sort((a, b) => {
+    if (a[0] !== b[0]) return a[0] < b[0] ? -1 : 1;
+    return a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0;
+  });
+  const memoKey = activeKey + '\0' + pairedRecords.map((p) => p[0] + '\x01' + p[1]).join('\x02');
+  const isHit = context.wrapperResults.has(memoKey);
+    if (context.wrapperEvents && !isHit) {
+    for (const [callerToken, stateFp] of pairedRecords) {
+      context.wrapperEvents.push({
+        kind: 'miss',
+        wrapper: activeKey,
+        pairedInput: callerToken + '\x01' + stateFp,
+        cacheKey: memoKey,
+        expectedCallerToken: callerToken
+      });
+    }
+  }
+  if (isHit) {
     const cached = context.wrapperResults.get(memoKey);
-    return { success: cloneStates(cached.success), failure: cloneStates(cached.failure) };
+    const restored = { success: cloneStates(cached.success), failure: cloneStates(cached.failure) };
+    if (context.wrapperEvents) {
+      const recorded = new Set();
+      for (const state of [...restored.success, ...restored.failure]) {
+        const callerToken = state.processParentKey || '';
+        if (recorded.has(callerToken + '\x01' + stateFingerprint(state))) continue;
+        recorded.add(callerToken + '\x01' + stateFingerprint(state));
+        context.wrapperEvents.push({
+          kind: 'hit',
+          wrapper: activeKey,
+          pairedInput: callerToken + '\x01' + stateFingerprint(state),
+          cacheKey: memoKey,
+          expectedCallerToken: callerToken,
+          actualRestoredToken: callerToken
+        });
+      }
+    }
+    return restored;
   }
   context.executionNodes += 1;
   if (context.executionNodes > MAX_EXECUTION_NODES) throw new InventoryError('WF_NODE_LIMIT', location);
@@ -942,17 +981,21 @@ function evaluateWrapper(invocation, states, context, directory, root, location,
   context.activeWrappers.add(activeKey);
   const scriptStates = cloneStates(states);
   const parents = new Map();
+  const allocatedKeys = [];
   scriptStates.forEach((state, stateIndex) => {
     const outerToken = state.processParentKey;
     const childKey = 'wr' + '\0' + String(depth) + '\0' + String(stateIndex) + '\0' + String(context.processTokenSeq++);
     state.processParentKey = childKey;
+    allocatedKeys.push({ callerToken: outerToken, allocatedToken: childKey });
     const snapshot = cloneExecutionState(states[stateIndex]);
     snapshot._savedProcessParentKey = outerToken;
     parents.set(childKey, snapshot);
   });
   const result = evaluateGraph(graph, scriptStates, context, directory, root, invocation.shell, location, depth + 1);
   context.activeWrappers.delete(activeKey);
+  const recordedRestore = new Set();
   for (const collection of [result.success, result.failure]) {
+    const branch = collection === result.success ? 'success' : 'failure';
     for (const state of collection) {
       const snapshot = parents.get(state.processParentKey);
       if (snapshot) {
@@ -966,6 +1009,24 @@ function evaluateWrapper(invocation, states, context, directory, root, location,
           if (!state.installed.has(installKey)) state.installed.set(installKey, installEntry);
         }
         state.processParentKey = snapshot._savedProcessParentKey;
+        if (context.wrapperEvents) {
+          const callerToken = snapshot._savedProcessParentKey;
+          const allocated = allocatedKeys.find((a) => a.callerToken === callerToken);
+          const key = callerToken + '\x01' + stateFingerprint(state);
+          if (!recordedRestore.has(key)) {
+            recordedRestore.add(key);
+            context.wrapperEvents.push({
+              kind: 'restore',
+              wrapper: activeKey,
+              pairedInput: callerToken + '\x01' + stateFingerprint(state),
+              cacheKey: memoKey,
+              expectedCallerToken: callerToken,
+              actualRestoredToken: state.processParentKey || null,
+              branch,
+              allocatedToken: allocated ? allocated.allocatedToken : null
+            });
+          }
+        }
       }
     }
   }
@@ -1422,7 +1483,7 @@ function analyzeWorkflowFixture(relative) {
 }
 
 function observeWrapperAnalysis(relative) {
-  const observations = { tokens: [], cacheKeys: [], cacheValues: [], finalTokens: [], finalStates: [] };
+  const observations = { events: [], finalStates: [] };
   const authority = new Map();
   const absolute = resolveContained(REPO_ROOT, relative, relative);
   const workflow = parseDocument(absolute);
@@ -1443,24 +1504,26 @@ function observeWrapperAnalysis(relative) {
       wrapperResults: new Map(),
       activePackageScripts: new Set(),
       executionNodes: 0,
-      processTokenSeq: 0
+      processTokenSeq: 0,
+      wrapperEvents: []
     };
     const finalStates = analyzeSteps(Array.isArray(job.steps) ? job.steps : [], [initialExecutionState()], context);
-    for (const [key, value] of context.wrapperResults) {
-      observations.cacheKeys.push(key);
-      observations.cacheValues.push({
-        key,
-        successTokens: value.success.map((s) => s.processParentKey || null),
-        failureTokens: value.failure.map((s) => s.processParentKey || null)
-      });
-    }
+    observations.events.push(...context.wrapperEvents);
     for (const state of finalStates) {
-      observations.finalTokens.push(state.processParentKey || null);
       observations.finalStates.push({
         processParentKey: state.processParentKey || null,
         pathIdentity: state.pathIdentity,
         setupGeneration: state.setupGeneration,
-        capturedGeneration: state.capturedGeneration
+        capturedGeneration: state.capturedGeneration,
+        env: Array.from(state.env.entries()),
+        workingDirectory: state.workingDirectory,
+        locationStack: state.locationStack.slice(),
+        installed: Array.from(state.installed.entries()).map(([k, v]) => [k, {
+          checkoutGeneration: v.checkoutGeneration,
+          setupGeneration: v.setupGeneration,
+          pathIdentity: v.pathIdentity,
+          packageRoot: v.packageRoot
+        }])
       });
     }
   }

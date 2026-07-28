@@ -24,13 +24,19 @@ function isRequireResolveMember(node) {
   return true;
 }
 
-function isDirectRequireCall(node) {
-  if (!node || node.type !== 'CallExpression') return false;
-  if (node.optional) return false;
-  if (!node.callee || node.callee.type !== 'Identifier' || node.callee.name !== 'require') return false;
-  if (node.arguments.length !== 1) return false;
-  const arg = node.arguments[0];
-  return arg && arg.type === 'Literal' && typeof arg.value === 'string';
+function isDirectRequireCallee(call) {
+  if (!call || call.type !== 'CallExpression') return false;
+  if (call.optional) return false;
+  if (!call.callee || call.callee.type !== 'Identifier' || call.callee.name !== 'require') return false;
+  return true;
+}
+
+function isValidStaticRequireCall(call) {
+  if (!isDirectRequireCallee(call)) return false;
+  if (call.arguments.length !== 1) return false;
+  const arg = call.arguments[0];
+  if (!arg || arg.type !== 'Literal' || typeof arg.value !== 'string') return false;
+  return true;
 }
 
 function isRequireMainCompare(node, parent) {
@@ -64,7 +70,8 @@ function isValidSignal(raw) {
 }
 
 module.exports = {
-  isDirectRequireCall,
+  isDirectRequireCallee,
+  isValidStaticRequireCall,
   isRequireMainMember,
   isRequireResolveMember,
   isRequireMainCompare,

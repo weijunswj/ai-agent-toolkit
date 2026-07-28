@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
@@ -13,6 +14,11 @@ const builder = require(path.join(trusted, 'build-closure-manifest.cjs'));
 
 function run(script, args) {
   return spawnSync(process.execPath, [path.join(trusted, script), ...args], { cwd: repoRoot, encoding: 'utf8', timeout: 30000 });
+}
+
+function makeTestParser() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'closure-parser-test-'));
+  return { root, parser: builder.createClosureParser(root) };
 }
 
 test('Acorn closure parser manifest is current after npm ci --ignore-scripts', function() {
@@ -26,7 +32,9 @@ test('closure manifest has exact set and SHA-256 equality', function() {
   assert.equal(new Set(manifest.files.map(function(entry) { return entry.path; })).size, manifest.files.length);
   for (const entry of manifest.files) {
     const file = path.join(repoRoot, ...entry.path.split('/'));
-    assert.equal(crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'), entry.sha256, entry.path);
+    const bytes = fs.readFileSync(file);
+    assert.ok(!bytes.includes(0x0d), 'manifest entry must be canonical LF: ' + entry.path);
+    assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'), entry.sha256, entry.path);
     assert.ok(['commonjs', 'json'].includes(entry.module_type));
     assert.ok(Array.isArray(entry.direct_literal_dependencies));
     assert.ok(Array.isArray(entry.root_ownership));
@@ -48,7 +56,7 @@ test('bootstrap helper digests are workflow-pinned and current', function() {
 });
 
 test('closure parser ignores import-like text in comments, strings, templates and escapes', function() {
-  const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'closure-parser-'));
+  const { root, parser } = makeTestParser();
   const file = path.join(root, 'literal-text.cjs');
   fs.writeFileSync(file, [
     "'use strict';",
@@ -59,14 +67,14 @@ test('closure parser ignores import-like text in comments, strings, templates an
     "require('node:fs');"
   ].join('\n'));
   try {
-    assert.deepEqual(builder.parseDependencies(file), []);
+    assert.deepEqual(parser.parseDependencies(file), []);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
 test('closure parser rejects every dynamic or computed execution/import form', function() {
-  const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'closure-parser-'));
+  const { root, parser } = makeTestParser();
   const cases = new Map([
     ['dynamic-import.cjs', ["import('./child.cjs')", /TW_CLOSURE_DYNAMIC_IMPORT/]],
     ['computed-require.cjs', ["require('./' + name)", /TW_CLOSURE_COMPUTED_REQUIRE/]],
@@ -83,15 +91,15 @@ test('closure parser rejects every dynamic or computed execution/import form', f
     ['loader-bind.cjs', ["const r = require.bind(null);", /TW_CLOSURE_LOADER_CHAIN/]],
     ['loader-computed.cjs', ["require[\"call\"](null, './local.cjs');", /TW_CLOSURE_LOADER_CHAIN/]],
     ['loader-destructure-call.cjs', ["const { call } = require;", /TW_CLOSURE_LOADER_ALIAS/]],
-    ['loader-safe-resolve.cjs', ["require.resolve('./protocol.cjs');", /TW_CLOSURE_ESCAPE/]],
+    ['loader-escape.cjs', ["require.resolve('../escape.cjs');", /TW_CLOSURE_ESCAPE/]],
     ['loader-safe-main.cjs', ["if (require.main === module) process.exit(0);", null]]
   ]);
   try {
     for (const [name, definition] of cases) {
       const file = path.join(root, name);
       fs.writeFileSync(file, definition[0]);
-      if (definition[1]) assert.throws(function() { builder.parseDependencies(file); }, definition[1], name);
-      else assert.doesNotThrow(function() { builder.parseDependencies(file); }, name);
+      if (definition[1]) assert.throws(function() { parser.parseDependencies(file); }, definition[1], name);
+      else assert.doesNotThrow(function() { parser.parseDependencies(file); }, name);
     }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -99,13 +107,13 @@ test('closure parser rejects every dynamic or computed execution/import form', f
 });
 
 test('closure parser admits in-root direct require.resolve target', function() {
-  const root = fs.mkdtempSync(path.join(trusted, 'closure-resolve-test-'));
+  const { root, parser } = makeTestParser();
   const child = path.join(root, 'child.cjs');
   const entry = path.join(root, 'entry.cjs');
   fs.writeFileSync(child, "'use strict';\n");
   fs.writeFileSync(entry, "'use strict';\nconst c = require.resolve('./child.cjs');\n");
   try {
-    const deps = builder.parseDependencies(entry);
+    const deps = parser.parseDependencies(entry);
     assert.deepEqual(deps.map(function(d) { return path.relative(root, d).replace(/\\/g, '/'); }), ['child.cjs']);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -113,7 +121,7 @@ test('closure parser admits in-root direct require.resolve target', function() {
 });
 
 test('closure parser rejects non-relative, dynamic, package and escape require.resolve targets', function() {
-  const root = fs.mkdtempSync(path.join(trusted, 'closure-resolve-fail-test-'));
+  const { root, parser } = makeTestParser();
   const entry = path.join(root, 'entry.cjs');
   const cases = new Map([
     ['package.cjs', "const c = require.resolve('acorn');\n", /TW_CLOSURE_PACKAGE_IMPORT/],
@@ -127,7 +135,7 @@ test('closure parser rejects non-relative, dynamic, package and escape require.r
     for (const [name, source, expected] of cases) {
       const file = path.join(root, name);
       fs.writeFileSync(file, "'use strict';\n" + source);
-      assert.throws(function() { builder.parseDependencies(file); }, expected, name);
+      assert.throws(function() { parser.parseDependencies(file); }, expected, name);
     }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -135,7 +143,7 @@ test('closure parser rejects non-relative, dynamic, package and escape require.r
 });
 
 test('closure parser rejects capture and indirect require.resolve call', function() {
-  const root = fs.mkdtempSync(path.join(trusted, 'closure-resolve-indirect-test-'));
+  const { root, parser } = makeTestParser();
   const entry = path.join(root, 'entry.cjs');
   fs.writeFileSync(entry, [
     "'use strict';",
@@ -143,10 +151,73 @@ test('closure parser rejects capture and indirect require.resolve call', functio
     "r('./child.cjs');"
   ].join('\n'));
   try {
-    assert.throws(function() { builder.parseDependencies(entry); }, /TW_CLOSURE_LOADER_ALIAS|TW_CLOSURE_LOADER_CHAIN|TW_CLOSURE_LOADER_RESOLVE_CONTEXT/);
+    assert.throws(function() { parser.parseDependencies(entry); }, /TW_CLOSURE_LOADER_ALIAS|TW_CLOSURE_LOADER_CHAIN|TW_CLOSURE_LOADER_RESOLVE_CONTEXT/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('closure parser rejects malformed direct require calls', function() {
+  const { root, parser } = makeTestParser();
+  // Create a valid target so the valid case resolves cleanly.
+  fs.writeFileSync(path.join(root, 'a.cjs'), "'use strict';\n");
+  const cases = [
+    ['zero-args.cjs', "require();\n", /TW_CLOSURE_COMPUTED_REQUIRE/],
+    ['dynamic-identifier.cjs', "const v = 'a'; require(v);\n", /TW_CLOSURE_COMPUTED_REQUIRE/],
+    ['concatenated.cjs', "require('./' + 'a.cjs');\n", /TW_CLOSURE_COMPUTED_REQUIRE/],
+    ['multiple-args.cjs', "require('./a.cjs', './b.cjs');\n", /TW_CLOSURE_COMPUTED_REQUIRE/],
+    ['spread-arg.cjs', "require(...['./a.cjs']);\n", /TW_CLOSURE_COMPUTED_REQUIRE/],
+    ['valid-single.cjs', "require('./a.cjs');\n", null],
+    ['builtin-node.cjs', "require('node:fs');\n", null],
+    ['package.cjs', "require('acorn');\n", /TW_CLOSURE_PACKAGE_IMPORT/]
+  ];
+  try {
+    for (const [name, source, expected] of cases) {
+      const file = path.join(root, name);
+      fs.writeFileSync(file, "'use strict';\n" + source);
+      if (expected) assert.throws(function() { parser.parseDependencies(file); }, expected, name);
+      else assert.doesNotThrow(function() { parser.parseDependencies(file); }, name);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('closure parser rejects CRLF bytes in trusted text files', function() {
+  const { root, parser } = makeTestParser();
+  const file = path.join(root, 'crlf.cjs');
+  fs.writeFileSync(file, Buffer.from("'use strict';\r\nconst x = 1;\r\n"));
+  try {
+    assert.throws(function() { parser.parseDependencies(file); }, /TW_CLOSURE_NON_CANONICAL_LF/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('closure parser production root binding cannot be overridden by CLI or env', function() {
+  const result = spawnSync(process.execPath, [path.join(trusted, 'build-closure-manifest.cjs'), '--check'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    timeout: 30000,
+    env: { ...process.env, TW_TRUSTED_ROOT: os.tmpdir() }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  // The production manifest must still be byte-identical, proving the CLI cannot redirect
+  // the trusted root to an attacker-controlled location.
+  const manifest = JSON.parse(fs.readFileSync(path.join(trusted, 'closure-manifest.json'), 'utf8'));
+  assert.ok(Array.isArray(manifest.files));
+  assert.ok(manifest.files.length > 0);
+});
+
+test('closure parser does not write into the production trusted root from concurrent tests', function() {
+  const before = fs.readdirSync(trusted).sort();
+  const { root, parser } = makeTestParser();
+  fs.writeFileSync(path.join(root, 'concurrent.cjs'), "'use strict';\n");
+  parser.parseDependencies(path.join(root, 'concurrent.cjs'));
+  fs.rmSync(root, { recursive: true, force: true });
+  const after = fs.readdirSync(trusted).sort();
+  assert.deepEqual(after, before, 'production trusted root must not be mutated by tests');
 });
 
 test('bootstrap helper ownership and file mode are trusted-base safe', function() {

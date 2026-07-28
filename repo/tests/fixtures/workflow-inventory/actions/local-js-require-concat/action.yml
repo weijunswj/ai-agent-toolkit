@@ -1,0 +1,4 @@
+name: JS require concat fixture
+runs:
+  using: node24
+  main: main.cjs

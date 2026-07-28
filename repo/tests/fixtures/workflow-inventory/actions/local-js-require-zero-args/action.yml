@@ -1,0 +1,4 @@
+name: JS require zero args fixture
+runs:
+  using: node24
+  main: main.cjs
