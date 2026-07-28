@@ -116,6 +116,15 @@
       "root_ownership": []
     },
     {
+      "path": "repo/scripts/trusted-workflows/path-authority.cjs",
+      "sha256": "f5cb4a63f3c33ba82a0a449e8419aa952f835731b956f6631299939f37cf1e82",
+      "module_type": "commonjs",
+      "direct_literal_dependencies": [],
+      "root_ownership": [
+        "repo/scripts/trusted-workflows/verify-closure-manifest.cjs"
+      ]
+    },
+    {
       "path": "repo/scripts/trusted-workflows/protocol.cjs",
       "sha256": "fc77f457cbe6f98308a1391dcc465d742c522a32ae8febf9452dc3e57e9bec80",
       "module_type": "commonjs",
@@ -170,9 +179,11 @@
     },
     {
       "path": "repo/scripts/trusted-workflows/verify-closure-manifest.cjs",
-      "sha256": "493f87543561c4f967d768e525f81dfcdf824e27ad48e60b713756bfbf77e1ac",
+      "sha256": "17cefd9ce987a533a1f25da1330a4763c386eaf44d7bbc2656ef8e6986ae241f",
       "module_type": "commonjs",
-      "direct_literal_dependencies": [],
+      "direct_literal_dependencies": [
+        "repo/scripts/trusted-workflows/path-authority.cjs"
+      ],
       "root_ownership": [
         "repo/scripts/trusted-workflows/verify-closure-manifest.cjs"
       ]

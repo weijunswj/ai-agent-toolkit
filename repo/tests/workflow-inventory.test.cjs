@@ -943,45 +943,23 @@ test('nested and sibling child boundaries do not collide on distinct miss cache 
 });
 
 test('previous parent token is restored after successful wrapper return', function() {
-  const o = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-nested.yml'));
-  const restoreEvents = o.events.filter((e) => e.kind === 'restore' && e.branch === 'success');
-  assert.ok(restoreEvents.length >= 1, 'expected at least one success restore event');
-  for (const ev of restoreEvents) {
-    assert.equal(ev.actualRestoredToken, ev.expectedCallerToken,
-      'success state must restore exact expected caller token, got ' + ev.actualRestoredToken + ' expected ' + ev.expectedCallerToken);
+  const o = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-sibling.yml'));
+  const restoreSuccesses = o.events.filter((e) => e.kind === 'restore' && e.branch === 'success');
+  assert.ok(restoreSuccesses.length > 0, 'must test a fixture that produces a success restore event');
+  for (const ev of restoreSuccesses) {
+    assert.strictEqual(ev.actualRestoredToken, ev.expectedCallerToken, 'success state must restore exact expected caller token');
+    assert.ok(ev.expectedCallerToken, 'caller token must be populated');
   }
 });
 
 test('previous parent token is restored after failed wrapper return', function() {
-  const o = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-nested.yml'));
-  const restoreEvents = o.events.filter((e) => e.kind === 'restore' && e.branch === 'failure');
-  if (restoreEvents.length === 0) {
-    // No failure branch in this fixture; the test passes vacuously but we assert the
-    // event-recording shape is correct.
-    assert.ok(true);
-    return;
+  const o = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-sibling.yml'));
+  const restoreFailures = o.events.filter((e) => e.kind === 'restore' && e.branch === 'failure');
+  assert.ok(restoreFailures.length > 0, 'must test a fixture that actually produces a failure restore event');
+  for (const ev of restoreFailures) {
+    assert.strictEqual(ev.actualRestoredToken, ev.expectedCallerToken, 'failure state must restore exact expected caller token');
+    assert.ok(ev.expectedCallerToken, 'caller token must be populated');
   }
-  for (const ev of restoreEvents) {
-    assert.equal(ev.actualRestoredToken, ev.expectedCallerToken,
-      'failure state must restore exact expected caller token, got ' + ev.actualRestoredToken + ' expected ' + ev.expectedCallerToken);
-  }
-});
-
-test('cached wrapper results never return another caller token identity', function() {
-  const o = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-nested.yml'));
-  const hitEvents = o.events.filter((e) => e.kind === 'hit');
-  for (const ev of hitEvents) {
-    const parts = ev.cacheKey.split('\0');
-    assert.ok(parts.length >= 2, 'cache key must include activeKey and paired records');
-    assert.equal(ev.actualRestoredToken, ev.expectedCallerToken,
-      'hit must return exact expected caller token');
-  }
-});
-
-test('repeating the same valid memo identity uses the cache safely', function() {
-  const o1 = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-nested.yml'));
-  const o2 = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-nested.yml'));
-  assert.deepEqual(o1.events, o2.events);
 });
 
 test('distinct caller-token identities create distinct memo entries', function() {
@@ -989,53 +967,41 @@ test('distinct caller-token identities create distinct memo entries', function()
   const missEvents = o.events.filter((e) => e.kind === 'miss');
   const tokens = missEvents.map((e) => e.expectedCallerToken);
   const uniqueTokens = new Set(tokens);
-  if (tokens.length > 1) {
-    assert.ok(uniqueTokens.size >= 1, 'expected at least one distinct caller token');
-  }
+  assert.ok(uniqueTokens.size >= 2, 'expected at least two distinct caller tokens in the fixture');
 });
 
-test('first invocation produces a miss and second identical invocation produces a hit', function() {
-  const o = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-nested.yml'));
-  const missEvents = o.events.filter((e) => e.kind === 'miss');
-  const hitEvents = o.events.filter((e) => e.kind === 'hit');
-  assert.ok(missEvents.length >= 1, 'expected at least one miss event');
-  // In a single analysis, the first invocation is always a miss; subsequent identical
-  // invocations within the same analysis should produce hits.
-  const cacheKeys = new Set(missEvents.map((e) => e.cacheKey));
-  for (const key of cacheKeys) {
-    const missesForKey = missEvents.filter((e) => e.cacheKey === key).length;
-    const hitsForKey = hitEvents.filter((e) => e.cacheKey === key).length;
-    assert.ok(missesForKey >= 1, 'first invocation must be a miss for key ' + key);
-    if (missesForKey === 1 && hitEvents.length > 0) {
-      // Only assert hit if there were subsequent identical invocations
-      assert.ok(true);
-    }
-  }
-});
-
-test('different paired input produces a different cache key', function() {
+test('genuine repeated identical paired input produces a cache hit and preserves caller token exactly', function() {
   const o = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-sibling.yml'));
-  const missEvents = o.events.filter((e) => e.kind === 'miss');
-  const keysByPairedInput = new Map();
-  for (const ev of missEvents) {
-    if (!keysByPairedInput.has(ev.pairedInput)) {
-      keysByPairedInput.set(ev.pairedInput, new Set());
-    }
-    keysByPairedInput.get(ev.pairedInput).add(ev.cacheKey);
+  const misses = o.events.filter(e => e.kind === 'miss');
+  const hits = o.events.filter(e => e.kind === 'hit');
+  assert.ok(misses.length >= 2, 'expected misses to populate cache');
+  assert.ok(hits.length >= 1, 'expected at least one genuine cache hit');
+  for (const ev of hits) {
+    assert.strictEqual(ev.actualRestoredToken, ev.expectedCallerToken, 'hit must return exact expected caller token');
+    assert.ok(ev.expectedCallerToken, 'caller token must not be empty');
   }
-  // Each distinct paired input should produce at least one cache key
-  assert.ok(keysByPairedInput.size >= 1, 'expected at least one distinct paired input');
 });
 
-test('caller token is exactly preserved through cache hit and restore events', function() {
-  const o = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-nested.yml'));
-  const restoreEvents = o.events.filter((e) => e.kind === 'restore');
-  assert.ok(restoreEvents.length >= 1, 'expected at least one restore event');
-  for (const ev of restoreEvents) {
-    assert.equal(ev.expectedCallerToken, ev.actualRestoredToken,
-      'restore must preserve exact caller token, got ' + ev.actualRestoredToken + ' expected ' + ev.expectedCallerToken);
-    assert.ok(ev.allocatedToken, 'restore must record the allocated child token');
-  }
+test('pairing and permutation contract produces distinct cache keys for swapped associations', function() {
+  const inventoryInternals = require('../scripts/check-workflow-inventory.cjs');
+  const sA = { processParentKey: 'T1', setupGeneration: 1, capturedGeneration: 1, pathIdentity: 'p1', locationStack: ['L1'], installed: new Map(), workingDirectory: 'D1', checkouts: new Map(), env: new Map(), checkoutGeneration: 1 };
+  const sB = { processParentKey: 'T2', setupGeneration: 1, capturedGeneration: 1, pathIdentity: 'p1', locationStack: ['L2'], installed: new Map(), workingDirectory: 'D1', checkouts: new Map(), env: new Map(), checkoutGeneration: 1 };
+  const sA_swap = { processParentKey: 'T2', setupGeneration: 1, capturedGeneration: 1, pathIdentity: 'p1', locationStack: ['L1'], installed: new Map(), workingDirectory: 'D1', checkouts: new Map(), env: new Map(), checkoutGeneration: 1 };
+  const sB_swap = { processParentKey: 'T1', setupGeneration: 1, capturedGeneration: 1, pathIdentity: 'p1', locationStack: ['L2'], installed: new Map(), workingDirectory: 'D1', checkouts: new Map(), env: new Map(), checkoutGeneration: 1 };
+  
+  const pair1 = inventoryInternals.getPairedRecords([sA, sB]);
+  const pair2 = inventoryInternals.getPairedRecords([sA_swap, sB_swap]);
+  
+  assert.equal(pair1.length, 2, 'pairing must return explicit expected pairs');
+  assert.equal(pair1[0][0], 'T1');
+  assert.equal(pair1[1][0], 'T2');
+  
+  const key1 = pair1.map(p => p[0] + String.fromCharCode(1) + p[1]).join(String.fromCharCode(2));
+  const key2 = pair2.map(p => p[0] + String.fromCharCode(1) + p[1]).join(String.fromCharCode(2));
+  assert.notEqual(key1, key2, 'swapped token-to-state associations must produce different cache keys');
+  
+  const pair3 = inventoryInternals.getPairedRecords([sA, sA]);
+  assert.equal(pair3.length, 2, 'multiplicity of identical pairs must be preserved');
 });
 
 test('wrapper cache-hit sibling invocation returns distinct parent tokens', function() {

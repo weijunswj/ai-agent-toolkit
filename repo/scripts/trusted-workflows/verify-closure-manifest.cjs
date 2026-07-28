@@ -6,13 +6,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const childProcess = require('node:child_process');
 
-const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
-const TRUSTED_ROOT = path.join(REPO_ROOT, 'repo', 'scripts', 'trusted-workflows');
+const authority = require('./path-authority.cjs');
+const REPO_ROOT = authority.REPO_ROOT;
+const TRUSTED_ROOT = authority.TRUSTED_ROOT;
 const MANIFEST_PATH = path.join(TRUSTED_ROOT, 'closure-manifest.json');
-const VALIDATION_ONLY = new Set([
-  'build-closure-manifest.cjs',
-  'update-bootstrap-digests.cjs'
-]);
 
 function fail(code) {
   process.stderr.write(code + '\n');
@@ -24,30 +21,29 @@ function digest(file) {
 }
 
 function contained(relative) {
-  if (typeof relative !== 'string' || relative === '' || path.isAbsolute(relative)) fail('TW_VERIFY_PATH');
-  const parts = relative.replace(/\\/g, '/').split('/');
-  if (parts.some((part) => part === '' || part === '.' || part === '..')) fail('TW_VERIFY_PATH');
-  const absolute = path.resolve(TRUSTED_ROOT, ...parts);
-  const rel = path.relative(TRUSTED_ROOT, absolute);
-  if (rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) fail('TW_VERIFY_ESCAPE');
-  return absolute;
+  try {
+    return authority.verifyContainment(relative);
+  } catch (err) {
+    if (err.message.startsWith('TW_VERIFY_')) fail(err.message.split(':')[0]);
+    fail('TW_VERIFY_PATH');
+  }
 }
 
 function listTrustedFiles() {
   const result = [];
   const visit = (directory) => {
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => authority.compareCodeUnits(a.name, b.name))) {
       const absolute = path.join(directory, entry.name);
       if (entry.isSymbolicLink()) fail('TW_VERIFY_SYMLINK');
       if (entry.isDirectory()) visit(absolute);
       else if (entry.isFile() && entry.name !== 'closure-manifest.json') {
-        const relative = path.relative(TRUSTED_ROOT, absolute).replace(/\\/g, '/');
-        if (!VALIDATION_ONLY.has(entry.name)) result.push(relative);
+        const relative = authority.normalizeRepoRelative(absolute);
+        if (!authority.VALIDATION_ONLY.has(relative)) result.push(relative);
       }
     }
   };
   visit(TRUSTED_ROOT);
-  return result.sort();
+  return result.sort(authority.compareCodeUnits);
 }
 
 function main() {
@@ -64,7 +60,7 @@ function main() {
   const listed = manifest.files.map((entry) => entry.path);
   if (new Set(listed).size !== listed.length) fail('TW_VERIFY_DUPLICATE');
   const actual = listTrustedFiles();
-  if (JSON.stringify(actual) !== JSON.stringify([...listed].sort())) fail('TW_VERIFY_SET');
+  if (JSON.stringify(actual) !== JSON.stringify([...listed].sort(authority.compareCodeUnits))) fail('TW_VERIFY_SET');
   for (const entry of manifest.files) {
     const file = contained(entry.path);
     const bytes = fs.readFileSync(file);

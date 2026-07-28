@@ -598,6 +598,16 @@ function uniqueStates(states, location) {
   return [...values.values()];
 }
 
+function getPairedRecords(states) {
+  const pairs = states.map((s) => [s.processParentKey || '', stateFingerprint(s)]);
+  pairs.sort((a, b) => {
+    if (a[0] !== b[0]) return a[0] < b[0] ? -1 : 1;
+    if (a[1] !== b[1]) return a[1] < b[1] ? -1 : 1;
+    return 0;
+  });
+  return pairs;
+}
+
 function cloneStates(states) {
   return states.map(cloneExecutionState);
 }
@@ -928,12 +938,7 @@ function evaluateWrapper(invocation, states, context, directory, root, location,
   // collide distinct pairings like [(T1,A),(T2,B)] with [(T1,B),(T2,A)]; we preserve the
   // exact pair and its multiplicity so the cache stays caller-neutral only when the full
   // paired input is identical.
-  const deduped = uniqueStates(states, location);
-  const pairedRecords = deduped.map((s) => [s.processParentKey || '', stateFingerprint(s)]);
-  pairedRecords.sort((a, b) => {
-    if (a[0] !== b[0]) return a[0] < b[0] ? -1 : 1;
-    return a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0;
-  });
+  const pairedRecords = getPairedRecords(states);
   const memoKey = activeKey + '\0' + pairedRecords.map((p) => p[0] + '\x01' + p[1]).join('\x02');
   const isHit = context.wrapperResults.has(memoKey);
     if (context.wrapperEvents && !isHit) {
@@ -1578,5 +1583,6 @@ module.exports = {
   PowerShellState,
   RunnerIdentityState,
   ExecutableIdentityState,
-  runInventory
+  runInventory,
+  getPairedRecords
 };

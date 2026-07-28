@@ -229,3 +229,52 @@ test('bootstrap helper ownership and file mode are trusted-base safe', function(
     if (process.platform !== 'win32') assert.equal((stat.mode & 0o022), 0, name + ' is group/world writable');
   }
 });
+
+test('exact locale-independent ordering contract is enforced', function() {
+  const authority = require(path.join(trusted, 'path-authority.cjs'));
+  const input = [
+    'a', 'B', 'a.b', 'a-b', 'a_b', 'a/b', '1', '10', '2', 'A'
+  ];
+  const sorted = [...input].sort(authority.compareCodeUnits);
+  // Code unit order: '1', '10', '2', 'A', 'B', 'a', 'a-b', 'a.b', 'a/b', 'a_b'
+  // (Assuming typical ascii codes: '1' is 49, 'A' is 65, 'a' is 97, '-' is 45, '.' is 46, '/' is 47, '_' is 95)
+  // Let's verify:
+  // '1' (49), '10' (49, 48), '2' (50), 'A' (65), 'B' (66), 'a' (97), 'a-b' (97, 45), 'a.b' (97, 46), 'a/b' (97, 47), 'a_b' (97, 95)
+  // Wait, wait.
+  // '-' (45) < '.' (46) < '/' (47) < '_' (95) < 'a' (97). But 'a' alone is length 1.
+  // 'a' < 'a-' because 'a' is a prefix.
+  // So: '1', '10', '2', 'A', 'B', 'a', 'a-b', 'a.b', 'a/b', 'a_b'
+  const expected = ['1', '10', '2', 'A', 'B', 'a', 'a-b', 'a.b', 'a/b', 'a_b'];
+  assert.deepEqual(sorted, expected, 'ordering must use exact code-unit comparison');
+});
+
+test('builder and verifier use identical repo-root-relative path strings', function() {
+  const manifest = JSON.parse(fs.readFileSync(path.join(trusted, 'closure-manifest.json'), 'utf8'));
+  const authority = require(path.join(trusted, 'path-authority.cjs'));
+  // Builder puts `repo/scripts/trusted-workflows/...` in manifest
+  // Verifier uses `verifyContainment` which expects `repo-root-relative` path
+  for (const entry of manifest.files) {
+    assert.ok(entry.path.startsWith('repo/scripts/trusted-workflows/'), 'builder path must be repo-root-relative');
+    const contained = authority.verifyContainment(entry.path);
+    assert.ok(path.isAbsolute(contained), 'verifier must resolve to absolute real path');
+  }
+});
+
+test('runtime verifier containment checks', function() {
+  const authority = require(path.join(trusted, 'path-authority.cjs'));
+  
+  // Repo-root-relative root is admitted
+  assert.doesNotThrow(() => authority.verifyContainment('repo/scripts/trusted-workflows/auto-sync/preflight.cjs'));
+  
+  // Trusted-root-relative shortened path is rejected
+  assert.throws(() => authority.verifyContainment('auto-sync/preflight.cjs'), /TW_VERIFY_ESCAPE/);
+  
+  // Doubled path is rejected
+  assert.throws(() => authority.verifyContainment('repo/scripts/trusted-workflows/repo/scripts/trusted-workflows/auto-sync/preflight.cjs'), /TW_VERIFY_SYMLINK/);
+  
+  // Escape paths fail closed
+  assert.throws(() => authority.verifyContainment('repo/scripts/trusted-workflows/../../package.json'), /TW_VERIFY_ESCAPE/);
+  
+  // Absolute paths fail closed
+  assert.throws(() => authority.verifyContainment(path.join(repoRoot, 'repo/scripts/trusted-workflows/auto-sync/preflight.cjs')), /TW_VERIFY_PATH/);
+});

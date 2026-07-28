@@ -13,13 +13,11 @@ const {
   isSafeRequireMemberProperty
 } = require('./loader-policy.cjs');
 
-const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
-const TRUSTED_ROOT = path.join(REPO_ROOT, 'repo', 'scripts', 'trusted-workflows');
+const authority = require('./path-authority.cjs');
+const REPO_ROOT = authority.REPO_ROOT;
+const TRUSTED_ROOT = authority.TRUSTED_ROOT;
 const MANIFEST_PATH = path.join(TRUSTED_ROOT, 'closure-manifest.json');
-const VALIDATION_ONLY = new Set([
-  'repo/scripts/trusted-workflows/build-closure-manifest.cjs',
-  'repo/scripts/trusted-workflows/update-bootstrap-digests.cjs'
-]);
+const VALIDATION_ONLY = authority.VALIDATION_ONLY;
 const ROOTS = [
   'repo/scripts/trusted-workflows/auto-sync/dry-run.cjs',
   'repo/scripts/trusted-workflows/auto-sync/preflight.cjs',
@@ -185,13 +183,13 @@ function createClosureParser(trustedRoot, repoRoot) {
         die('TW_CLOSURE_LOADER_ALIAS', relative(file));
       }
     });
-    return [...new Set(deps)].sort();
+    return [...new Set(deps)].sort(authority.compareCodeUnits);
   }
 
   function collectFiles() {
     const result = [];
     const visit = (directory) => {
-      for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => authority.compareCodeUnits(a.name, b.name))) {
         const absolute = path.join(directory, entry.name);
         if (entry.isSymbolicLink()) die('TW_CLOSURE_SYMLINK', relative(absolute));
         if (entry.isDirectory()) visit(absolute);
@@ -213,7 +211,7 @@ function createClosureParser(trustedRoot, repoRoot) {
         direct_literal_dependencies: dependencies,
         root_ownership: []
       };
-    }).sort((a, b) => a.path.localeCompare(b.path));
+    }).sort((a, b) => authority.compareCodeUnits(a.path, b.path));
     const entryMap = new Map(entries.map((entry) => [entry.path, entry]));
     for (const root of ROOTS) {
       if (!entryMap.has(root)) die('TW_CLOSURE_ROOT_MISSING', root);
@@ -244,7 +242,7 @@ function createClosureParser(trustedRoot, repoRoot) {
     };
     for (const entry of entries) {
       validateAcyclic(entry.path);
-      entry.root_ownership.sort();
+      entry.root_ownership.sort(authority.compareCodeUnits);
     }
     return { schema_version: 1, generated_by: 'build-closure-manifest.cjs', roots: ROOTS, files: entries };
   }
