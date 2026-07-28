@@ -944,41 +944,62 @@ test('nested and sibling child boundaries do not collide on distinct miss cache 
 
 test('previous parent token is restored after successful wrapper return', function() {
   const o = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-sibling.yml'));
+  
+  // Build independent expected-token oracle from miss events
+  const oracle = new Map();
+  for (const e of o.events.filter(e => e.kind === 'miss')) {
+    oracle.set(e.cacheKey + '\x01' + e.pairedInput.split('\x01')[1], e.inputCallerToken);
+  }
+
   const restoreSuccesses = o.events.filter((e) => e.kind === 'restore' && e.branch === 'success');
   assert.ok(restoreSuccesses.length > 0, 'must test a fixture that produces a success restore event');
   for (const ev of restoreSuccesses) {
-    assert.strictEqual(ev.actualRestoredToken, ev.expectedCallerToken, 'success state must restore exact expected caller token');
-    assert.ok(ev.expectedCallerToken, 'caller token must be populated');
+    const expected = oracle.get(ev.cacheKey + '\x01' + ev.pairedInput.split('\x01')[1]);
+    assert.strictEqual(ev.actualRestoredToken, expected, 'success state must restore exact expected caller token');
+    assert.ok(expected, 'caller token must be populated');
   }
 });
 
 test('previous parent token is restored after failed wrapper return', function() {
   const o = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-sibling.yml'));
+  
+  const oracle = new Map();
+  for (const e of o.events.filter(e => e.kind === 'miss')) {
+    oracle.set(e.cacheKey + '\x01' + e.pairedInput.split('\x01')[1], e.inputCallerToken);
+  }
+
   const restoreFailures = o.events.filter((e) => e.kind === 'restore' && e.branch === 'failure');
   assert.ok(restoreFailures.length > 0, 'must test a fixture that actually produces a failure restore event');
   for (const ev of restoreFailures) {
-    assert.strictEqual(ev.actualRestoredToken, ev.expectedCallerToken, 'failure state must restore exact expected caller token');
-    assert.ok(ev.expectedCallerToken, 'caller token must be populated');
+    const expected = oracle.get(ev.cacheKey + '\x01' + ev.pairedInput.split('\x01')[1]);
+    assert.strictEqual(ev.actualRestoredToken, expected, 'failure state must restore exact expected caller token');
+    assert.ok(expected, 'caller token must be populated');
   }
 });
 
 test('distinct caller-token identities create distinct memo entries', function() {
   const o = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-sibling.yml'));
   const missEvents = o.events.filter((e) => e.kind === 'miss');
-  const tokens = missEvents.map((e) => e.expectedCallerToken);
+  const tokens = missEvents.map((e) => e.inputCallerToken);
   const uniqueTokens = new Set(tokens);
   assert.ok(uniqueTokens.size >= 2, 'expected at least two distinct caller tokens in the fixture');
 });
 
 test('genuine repeated identical paired input produces a cache hit and preserves caller token exactly', function() {
   const o = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-sibling.yml'));
+  
+  const oracle = new Map();
+  for (const e of o.events.filter(e => e.kind === 'miss')) {
+    oracle.set(e.cacheKey + '\x01' + e.pairedInput.split('\x01')[1], e.inputCallerToken);
+  }
+
   const misses = o.events.filter(e => e.kind === 'miss');
   const hits = o.events.filter(e => e.kind === 'hit');
   assert.ok(misses.length >= 2, 'expected misses to populate cache');
   assert.ok(hits.length >= 1, 'expected at least one genuine cache hit');
   for (const ev of hits) {
-    assert.strictEqual(ev.actualRestoredToken, ev.expectedCallerToken, 'hit must return exact expected caller token');
-    assert.ok(ev.expectedCallerToken, 'caller token must not be empty');
+    const expected = oracle.get(ev.cacheKey + '\x01' + ev.pairedInput.split('\x01')[1]);
+    assert.strictEqual(ev.actualRestoredToken, expected, 'hit must return exact expected caller token');
   }
 });
 

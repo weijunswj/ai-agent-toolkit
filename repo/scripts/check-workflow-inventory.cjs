@@ -593,7 +593,10 @@ function stateFingerprint(state) {
 
 function uniqueStates(states, location) {
   const values = new Map();
-  for (const state of states) values.set(stateFingerprint(state), state);
+  for (const state of states) {
+    const key = (state.processParentKey || '') + '\0' + stateFingerprint(state);
+    values.set(key, state);
+  }
   if (values.size > MAX_EXECUTION_PATHS) throw new InventoryError('WF_PATH_LIMIT', location);
   return [...values.values()];
 }
@@ -948,7 +951,7 @@ function evaluateWrapper(invocation, states, context, directory, root, location,
         wrapper: activeKey,
         pairedInput: callerToken + '\x01' + stateFp,
         cacheKey: memoKey,
-        expectedCallerToken: callerToken
+        inputCallerToken: callerToken
       });
     }
   }
@@ -966,7 +969,6 @@ function evaluateWrapper(invocation, states, context, directory, root, location,
           wrapper: activeKey,
           pairedInput: callerToken + '\x01' + stateFingerprint(state),
           cacheKey: memoKey,
-          expectedCallerToken: callerToken,
           actualRestoredToken: callerToken
         });
       }
@@ -1025,7 +1027,6 @@ function evaluateWrapper(invocation, states, context, directory, root, location,
               wrapper: activeKey,
               pairedInput: callerToken + '\x01' + stateFingerprint(state),
               cacheKey: memoKey,
-              expectedCallerToken: callerToken,
               actualRestoredToken: state.processParentKey || null,
               branch,
               allocatedToken: allocated ? allocated.allocatedToken : null
@@ -1159,9 +1160,7 @@ function evaluateCommand(tokens, states, context, directory, root, shell, locati
     for (const state of states) {
       const key = state.workingDirectory;
       if (!groups.has(key)) groups.set(key, []);
-      const child = cloneExecutionState(state);
-      child.processParentKey = stateFingerprint(state);
-      groups.get(key).push(child);
+      groups.get(key).push(state);
     }
     for (const [workingDirectory, values] of groups) {
       const value = evaluateWrapper(invocation, values, context, workingDirectory, root, location, depth);
