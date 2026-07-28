@@ -56,7 +56,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.9.19';
+const expectedBridgeVersion = '2.9.20';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 const currentN8nManifestPath = path.join(
   repoRoot,
@@ -2614,6 +2614,39 @@ test('fresh lock without a usable owner PID keeps the age-based fallback and sta
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.existsSync(lockPath), false, 'lock is released after successful sync');
+});
+
+test('indeterminate main-lock and recovery-marker owners fail closed regardless of age', () => {
+  const root = tmpRoot();
+  const hubRoot = path.join(root, 'hub');
+  const lockPath = path.join(hubRoot, 'update.lock');
+  const markerPath = `${lockPath}.recovery`;
+  const bridge = require('../scripts/toolkit-local-bridge.cjs');
+  fs.mkdirSync(hubRoot, { recursive: true });
+  const indeterminate = (pid) => (Number(pid) === 777777 ? 'indeterminate' : 'dead');
+  const old = '2000-01-01T00:00:00.000Z';
+
+  writeJson(lockPath, { created_at: old, pid: 777777, token: 'indeterminate-owner' });
+  let result = bridge.acquireLock(
+    hubRoot,
+    { hook: true, syncSource: 'repo' },
+    { liveness: indeterminate }
+  );
+  assert.equal(result.acquired, false);
+  assert.match(result.skipReason, /liveness cannot be verified; failing closed/);
+  assert.equal(fs.existsSync(lockPath), true, 'aged indeterminate main lock is preserved');
+
+  fs.rmSync(lockPath);
+  writeJson(markerPath, { created_at: old, pid: 777777, token: 'indeterminate-recovery' });
+  result = bridge.acquireLock(
+    hubRoot,
+    { hook: true, syncSource: 'repo' },
+    { liveness: indeterminate }
+  );
+  assert.equal(result.acquired, false);
+  assert.match(result.skipReason, /liveness cannot be verified; failing closed/);
+  assert.equal(fs.existsSync(markerPath), true, 'aged indeterminate recovery marker is preserved');
+  assert.equal(fs.existsSync(lockPath), false, 'no writer enters behind the marker');
 });
 
 test('malformed lock JSON falls back to file mtime: fresh is respected, old is recovered', () => {
@@ -6137,6 +6170,128 @@ test('Codex n8n repair serializes two cross-process writers for one exact cache'
   assert.deepEqual(n8nTransactionArtifacts(pluginRoot), [], 'success leaves no stage, backup, marker, or lock residue');
 });
 
+test('Codex n8n live target-lock owner remains fenced past an injected lease and dead-owner recovery stays exclusive', async () => {
+  const root = tmpRoot();
+  const codexHome = path.join(root, 'codex-home');
+  const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  const readyPath = path.join(root, 'writer-a-ready');
+  const resumePath = path.join(root, 'writer-a-resume');
+  copyCurrentSupportedN8nPluginFixture(pluginRoot);
+  const bridgePath = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
+  const commonEntry = "plugin_id: 'n8n-skills@n8n-io', version: '1.0.2', selected_version: '1.0.2', directory_version: '1.0.2', plugin_root: process.argv[1]";
+  const writerASource = [
+    "const fs = require('node:fs');",
+    `const bridge = require(${JSON.stringify(bridgePath)});`,
+    'const result = bridge.reconcileSelectedN8nSkillsCache({',
+    `  ${commonEntry}`,
+    '}, { write: true, testHooks: {',
+    '  targetLockOptions: { liveOwnerLeaseMs: 1 },',
+    '  beforeN8nTargetLockAuthorityRevalidation({ boundary }) {',
+    "    if (boundary !== 'canonical-target-displacement-attempt-1' || fs.existsSync(process.argv[2])) return;",
+    "    fs.writeFileSync(process.argv[2], 'ready\\n');",
+    '    while (!fs.existsSync(process.argv[3])) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);',
+    '  }',
+    '} });',
+    'process.stdout.write(JSON.stringify({ repaired: Boolean(result.repaired), status: result.status }));'
+  ].join('\n');
+  const writerBSource = [
+    `const bridge = require(${JSON.stringify(bridgePath)});`,
+    'try {',
+    '  const result = bridge.reconcileSelectedN8nSkillsCache({',
+    `    ${commonEntry}`,
+    '  }, { write: true, testHooks: { targetLockOptions: { attempts: Number(process.argv[2]), delayMs: 5, liveOwnerLeaseMs: 1 } } });',
+    "  process.stdout.write(JSON.stringify({ code: '', repaired: Boolean(result.repaired), status: result.status }));",
+    '} catch (error) {',
+    "  process.stdout.write(JSON.stringify({ code: error.code || '', repaired: false, status: 'blocked' }));",
+    '}'
+  ].join('\n');
+  const writerA = spawn(process.execPath, ['-e', writerASource, pluginRoot, readyPath, resumePath], {
+    cwd: repoRoot,
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  const waitDeadline = Date.now() + 15000;
+  while (!fs.existsSync(readyPath) && Date.now() < waitDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(fs.existsSync(readyPath), true, 'writer A must pause at the exact pre-displacement lock fence');
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const pausedState = snapshotTree(codexHome);
+  const writerB = spawn(process.execPath, ['-e', writerBSource, pluginRoot, '4'], {
+    cwd: repoRoot,
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  const blockedOutput = JSON.parse((await waitForChild(writerB)).stdout);
+  assert.equal(blockedOutput.code, 'target-lock-contended');
+  assert.equal(blockedOutput.repaired, false);
+  assert.deepEqual(
+    snapshotTree(codexHome),
+    pausedState,
+    'writer B performs zero target, stage, backup, evidence, journal, or lock mutation while A is alive'
+  );
+  writeFile(resumePath, 'resume\n');
+  const writerAOutput = JSON.parse((await waitForChild(writerA, 30000)).stdout);
+  assert.equal(writerAOutput.repaired, true);
+  assert.equal(writerAOutput.status, 'repaired');
+  assert.deepEqual(n8nTransactionArtifacts(pluginRoot), []);
+
+  const deadRoot = path.join(root, 'dead-owner-home', 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copyCurrentSupportedN8nPluginFixture(deadRoot);
+  await waitForAbruptChild(spawnAbruptN8nRepair(deadRoot, '1.0.2', 'afterN8nRepairLockAcquired'));
+  const deadLock = n8nSkillsTargetLockIdentity(deadRoot);
+  assert.equal(fs.existsSync(path.join(deadLock.hubRoot, deadLock.lockName)), true);
+  const recoveringWriter = spawn(process.execPath, ['-e', writerBSource, deadRoot, '400'], {
+    cwd: repoRoot,
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  const recovered = JSON.parse((await waitForChild(recoveringWriter, 30000)).stdout);
+  assert.equal(recovered.repaired, true, 'writer B exclusively recovers the exact dead-owner lock');
+  assert.equal(recovered.status, 'repaired');
+  assert.deepEqual(n8nTransactionArtifacts(deadRoot), [], 'dead-owner recovery leaks no lock, displacement, stage, or backup residue');
+});
+
+test('Codex n8n exact target-lock fencing stops every mutation family after lock substitution', () => {
+  const boundaries = [
+    'schema-2-journal-bind-and-synchronize',
+    'candidate-staging-copy',
+    'canonical-target-displacement-attempt-1',
+    'before-resumable-backup-cleanup-operation',
+    'before-evidence-quarantine-creation'
+  ];
+  for (const boundaryToReplace of boundaries) {
+    const root = tmpRoot();
+    const codexHome = path.join(root, boundaryToReplace);
+    const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+    copyCurrentSupportedN8nPluginFixture(pluginRoot);
+    let replacementSnapshot = null;
+    let replaced = false;
+    const result = repairThirdPartyCodexPluginHooks({
+      codexHome,
+      windows: true,
+      write: true,
+      pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+      testHooks: {
+        beforeN8nTargetLockAuthorityRevalidation({ boundary, lock_path: lockPath }) {
+          if (replaced || boundary !== boundaryToReplace) return;
+          const replacement = readJson(lockPath);
+          replacement.token = crypto.randomUUID();
+          replacement.pid = process.pid;
+          replaceFileAtomically(lockPath, Buffer.from(`${JSON.stringify(replacement, null, 2)}\n`));
+          replaced = true;
+          replacementSnapshot = snapshotTree(codexHome);
+        }
+      }
+    });
+    assert.equal(replaced, true, `${boundaryToReplace} must exercise its exact target-lock fence`);
+    assert.equal(result.status, 'repair-failed', boundaryToReplace);
+    assert.equal(result.code, 'target-lock-authority-lost', boundaryToReplace);
+    assert.deepEqual(
+      snapshotTree(codexHome),
+      replacementSnapshot,
+      `${boundaryToReplace} performs zero mutation after the active lock is substituted`
+    );
+  }
+});
+
 test('healthy n8n SessionStart consumes one complete classification through the pure renderer', () => {
   const root = tmpRoot();
   const pluginRoot = path.join(root, 'codex-home', 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
@@ -6786,7 +6941,6 @@ test('Codex n8n resumed backup cleanup preserves authority when the installed wi
   const backupBeforeRecovery = snapshotTree(transaction.backup_path);
   const evidenceBeforeRecovery = fs.readFileSync(cleanupPhasePath);
   let drifted = false;
-  let expectedAfterDrift = null;
 
   assert.throws(
     () => recoverInterruptedN8nReplacement({
@@ -6806,20 +6960,23 @@ test('Codex n8n resumed backup cleanup preserves authority when the installed wi
             'utf8'
           );
           drifted = true;
-          expectedAfterDrift = snapshotN8nRecoveryEvidence(pluginRoot, owned);
         }
       }
     }),
     (error) => error?.code === 'final-winner-drift'
   );
   assert.equal(drifted, true);
-  assert.deepEqual(snapshotTree(transaction.backup_path), backupBeforeRecovery);
-  assert.deepEqual(fs.readFileSync(cleanupPhasePath), evidenceBeforeRecovery);
-  assert.deepEqual(
-    snapshotN8nRecoveryEvidence(pluginRoot, owned),
-    expectedAfterDrift,
-    'resumed cleanup must preserve the exact backup and evidence after winner drift'
+  assert.equal(
+    fs.existsSync(transaction.backup_path),
+    true,
+    'the exact backup root remains as restart-adjudicable phase-70 residue'
   );
+  assert.ok(
+    snapshotTree(transaction.backup_path).length <= backupBeforeRecovery.length,
+    'only an exact authorized deleted prefix may be retired before the next full winner proof'
+  );
+  assert.deepEqual(fs.readFileSync(cleanupPhasePath), evidenceBeforeRecovery);
+  assert.equal(fs.existsSync(owned.recordPath), true, 'resumed cleanup preserves exact transaction evidence after winner drift');
   assert.equal(
     fs.existsSync(n8nEvidencePath(owned.recordPath, 'completed')),
     false,
@@ -6912,7 +7069,132 @@ test('Codex n8n resumed backup cleanup rejects and preserves residue outside its
   }
 });
 
-test('Codex n8n phase-70 retirement admits bounded evidence above the ordinary evidence limit', () => {
+test('Codex n8n phase-70 complete winner proofs are constant-bounded while exact residue checks scale', (t) => {
+  const operationCounts = [];
+  const classificationCountRows = [];
+  for (const residueFiles of [0, 20, 80]) {
+    const root = tmpRoot();
+    const codexHome = path.join(root, `phase-70-count-${residueFiles}`);
+    const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+    copyCurrentSupportedN8nPluginFixture(pluginRoot);
+    const residueRoot = path.join(pluginRoot, 'bounded-residue');
+    fs.mkdirSync(residueRoot);
+    for (let index = 0; index < residueFiles; index += 1) {
+      writeFile(path.join(residueRoot, `entry-${String(index).padStart(3, '0')}.txt`), `${index}\n`);
+    }
+    const fullProofs = [];
+    let exactResidueOperations = 0;
+    const result = repairThirdPartyCodexPluginHooks({
+      codexHome,
+      windows: true,
+      write: true,
+      pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+      testHooks: {
+        afterN8nBackupCleanupEntry() {
+          exactResidueOperations += 1;
+        },
+        afterN8nCompleteClassification({ boundary }) {
+          if (boundary.startsWith('phase-70-')) fullProofs.push(boundary);
+        }
+      }
+    });
+    assert.equal(result.status, 'repaired', `${residueFiles} residue files`);
+    assert.deepEqual(fullProofs, [
+      'phase-70-before-cleanup',
+      'phase-70-before-final-root-removal',
+      'phase-70-after-cleanup'
+    ], `${residueFiles} residue files`);
+    operationCounts.push(exactResidueOperations);
+    classificationCountRows.push({
+      complete_winner_classifications: fullProofs.length,
+      exact_residue_operations: exactResidueOperations,
+      residue_files: residueFiles
+    });
+  }
+  assert.ok(operationCounts[0] > 0, 'the base backup still receives exact per-entry checks');
+  assert.equal(operationCounts[1] - operationCounts[0], 20);
+  assert.equal(operationCounts[2] - operationCounts[1], 60);
+  t.diagnostic(`phase70-counts=${JSON.stringify(classificationCountRows)}`);
+});
+
+test('Codex n8n phase-70 winner drift fails at every full-proof boundary and between proofs', () => {
+  const proofBoundaries = [
+    'phase-70-before-cleanup',
+    'phase-70-before-final-root-removal',
+    'phase-70-after-cleanup'
+  ];
+  for (const proofBoundary of proofBoundaries) {
+    const root = tmpRoot();
+    const codexHome = path.join(root, proofBoundary);
+    const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+    copyCurrentSupportedN8nPluginFixture(pluginRoot);
+    writeFile(path.join(pluginRoot, 'residue-a.txt'), 'a\n');
+    writeFile(path.join(pluginRoot, 'residue-b.txt'), 'b\n');
+    let drifted = false;
+    const result = repairThirdPartyCodexPluginHooks({
+      codexHome,
+      windows: true,
+      write: true,
+      pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+      testHooks: {
+        beforeN8nFinalWinnerProof({ boundary, targetPath }) {
+          if (drifted || boundary !== proofBoundary) return;
+          writeFile(path.join(targetPath, 'adversarial-winner-drift.txt'), `${boundary}\n`);
+          drifted = true;
+        }
+      }
+    });
+    assert.equal(drifted, true, proofBoundary);
+    assert.equal(result.status, 'repair-failed', proofBoundary);
+    assert.equal(result.code, 'final-winner-drift', proofBoundary);
+    assert.ok(
+      n8nTransactionArtifacts(pluginRoot).some((name) => name.startsWith(RECORD_PREFIX)),
+      `${proofBoundary} preserves exact recovery evidence`
+    );
+  }
+
+  const root = tmpRoot();
+  const codexHome = path.join(root, 'between-phase-70-proofs');
+  const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copyCurrentSupportedN8nPluginFixture(pluginRoot);
+  for (let index = 0; index < 20; index += 1) {
+    writeFile(path.join(pluginRoot, `residue-${String(index).padStart(2, '0')}.txt`), `${index}\n`);
+  }
+  const driftPath = path.join(pluginRoot, 'adversarial-between-proofs.txt');
+  let driftedBetween = false;
+  const interrupted = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+    testHooks: {
+      afterN8nBackupCleanupEntry() {
+        if (driftedBetween) return;
+        writeFile(driftPath, 'drift\n');
+        driftedBetween = true;
+      }
+    }
+  });
+  assert.equal(interrupted.status, 'repair-failed');
+  assert.equal(interrupted.code, 'final-winner-drift');
+  const interruptedArtifacts = n8nTransactionArtifacts(pluginRoot);
+  assert.ok(interruptedArtifacts.some((name) => name.includes('.n8n-repair-backup-')));
+  assert.ok(interruptedArtifacts.some((name) => name.startsWith(RECORD_PREFIX)));
+  fs.unlinkSync(driftPath);
+  const recovered = recoverInterruptedN8nReplacement({
+    codexHome,
+    pluginInspection: {
+      errors: [],
+      ok: true,
+      pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
+    },
+    write: true
+  });
+  assert.equal(recovered.status, 'winner-preserved');
+  assert.deepEqual(n8nTransactionArtifacts(pluginRoot), []);
+});
+
+test('Codex n8n phase-70 retirement admits bounded evidence above the ordinary evidence limit', (t) => {
   const root = tmpRoot();
   const codexHome = path.join(root, 'large-phase-70-evidence');
   const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
@@ -6953,6 +7235,9 @@ test('Codex n8n phase-70 retirement admits bounded evidence above the ordinary e
   assert.ok(cleanupPhaseBytes > 1024 * 1024, `phase-70 evidence was only ${cleanupPhaseBytes} bytes`);
   assert.ok(cleanupPhaseBytes <= 5 * 1024 * 1024, `phase-70 evidence was ${cleanupPhaseBytes} bytes`);
 
+  const fullProofs = [];
+  let exactResidueOperations = 0;
+  const recoveryStartedAt = Date.now();
   const recovered = recoverInterruptedN8nReplacement({
     codexHome,
     pluginInspection: {
@@ -6960,9 +7245,34 @@ test('Codex n8n phase-70 retirement admits bounded evidence above the ordinary e
       ok: true,
       pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
     },
-    write: true
+    write: true,
+    testHooks: {
+      afterN8nBackupCleanupEntry() {
+        exactResidueOperations += 1;
+      },
+      afterN8nCompleteClassification({ boundary }) {
+        if (boundary.startsWith('phase-70-')) fullProofs.push(boundary);
+      }
+    }
   });
+  const recoveryDurationMs = Date.now() - recoveryStartedAt;
   assert.equal(recovered.status, 'winner-preserved');
+  assert.deepEqual(fullProofs, [
+    'phase-70-before-cleanup',
+    'phase-70-before-final-root-removal',
+    'phase-70-after-cleanup'
+  ]);
+  assert.ok(exactResidueOperations >= 1300, `only ${exactResidueOperations} exact residue operations ran`);
+  assert.ok(
+    recoveryDurationMs < 5 * 60 * 1000,
+    `1,300-file Windows phase-70 recovery exceeded the conservative 5-minute ceiling (${recoveryDurationMs} ms)`
+  );
+  t.diagnostic(`phase70-high-cardinality=${JSON.stringify({
+    complete_winner_classifications: fullProofs.length,
+    exact_residue_operations: exactResidueOperations,
+    recovery_duration_ms: recoveryDurationMs,
+    residue_files: 1300
+  })}`);
   assert.deepEqual(n8nTransactionArtifacts(pluginRoot), []);
   const journal = inspectN8nRepairJournal({
     codexHome,
@@ -8312,15 +8622,38 @@ test('Codex n8n target locks recover stale owners and do not block unrelated cac
     sync_source: 'codex-plugin'
   });
   try {
-    const reused = reconcileSelectedN8nSkillsCache({
-      plugin_id: 'n8n-skills@n8n-io', version: '1.0.2', selected_version: '1.0.2', directory_version: '1.0.2', plugin_root: reusedRoot
-    }, { write: true });
-    assert.equal(reused.status, 'repaired');
-    assert.equal(reusedPidProcess.exitCode, null, 'PID reuse recovery does not signal the unrelated live process');
-    assert.deepEqual(n8nTransactionArtifacts(reusedRoot), [], 'expired live-PID lease recovery leaves no residue');
+    const before = snapshotTree(reusedRoot);
+    assert.throws(
+      () => reconcileSelectedN8nSkillsCache({
+        plugin_id: 'n8n-skills@n8n-io', version: '1.0.2', selected_version: '1.0.2', directory_version: '1.0.2', plugin_root: reusedRoot
+      }, {
+        write: true,
+        testHooks: {
+          targetLockOptions: {
+            attempts: 3,
+            delayMs: 5,
+            liveOwnerLeaseMs: 1
+          }
+        }
+      }),
+      (error) => error.code === 'target-lock-contended'
+    );
+    assert.equal(reusedPidProcess.exitCode, null, 'a confirmed-live PID is never signalled or displaced');
+    assert.deepEqual(snapshotTree(reusedRoot), before, 'an expired injected lease cannot authorize target mutation');
+    assert.deepEqual(
+      n8nTransactionArtifacts(reusedRoot),
+      [reusedLock.lockName],
+      'the exact confirmed-live target lock remains the only owned artifact'
+    );
   } finally {
     reusedPidProcess.kill();
+    await new Promise((resolve) => reusedPidProcess.once('close', resolve));
   }
+  const recoveredReused = reconcileSelectedN8nSkillsCache({
+    plugin_id: 'n8n-skills@n8n-io', version: '1.0.2', selected_version: '1.0.2', directory_version: '1.0.2', plugin_root: reusedRoot
+  }, { write: true });
+  assert.equal(recoveredReused.status, 'repaired', 'the exact dead owner remains recoverable');
+  assert.deepEqual(n8nTransactionArtifacts(reusedRoot), [], 'dead-owner recovery leaves no lock, stage, or backup residue');
 
   const sleeper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 10000)'], { stdio: 'ignore' });
   const unrelatedLock = n8nSkillsTargetLockIdentity(firstRoot);
@@ -8486,7 +8819,7 @@ test('Codex n8n final winner drift never becomes repaired and preserves recovery
   }
 });
 
-test('Codex n8n restart after final-winner drift recovers once and then remains healthy', () => {
+test('Codex n8n restart after final-winner drift recovers once and then remains healthy', (t) => {
   const root = tmpRoot();
   const codexHome = path.join(root, 'restart-after-final-drift');
   const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
@@ -8509,6 +8842,14 @@ test('Codex n8n restart after final-winner drift recovers once and then remains 
   assert.equal(failed.code, 'final-winner-drift');
   assert.notDeepEqual(n8nTransactionArtifacts(pluginRoot), []);
   const failedGeneration = readSingleN8nOwnedGeneration(pluginRoot);
+  const failedTransaction = readJson(n8nEvidencePath(failedGeneration.recordPath, 'n8n-replacement'));
+  t.diagnostic(`restart-after-drift=${JSON.stringify({
+    backup_exists: fs.existsSync(failedTransaction.backup_path),
+    backup_status: fs.existsSync(failedTransaction.backup_path)
+      ? classifyN8nSkillsCompatibility(failedTransaction.backup_path).status
+      : 'missing',
+    target_status: classifyN8nSkillsCompatibility(pluginRoot).status
+  })}`);
   assert.equal(
     fs.existsSync(failedGeneration.recordPath.replace(/\.json$/, '.failed.json')),
     true,

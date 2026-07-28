@@ -46,7 +46,7 @@ const {
 } = require('./toolkit-n8n-repair-journal.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.9.19';
+const BRIDGE_VERSION = '2.9.20';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -94,6 +94,7 @@ const N8N_PHASE_70_EVIDENCE_FILE_BYTE_LIMIT = 5 * 1024 * 1024;
 const N8N_EVIDENCE_CONTEXT = Symbol('n8n-evidence-context');
 const N8N_EVIDENCE_LIFECYCLE_OWNER = Symbol('n8n-evidence-lifecycle-owner');
 const N8N_JOURNAL_CONTEXT = Symbol('n8n-journal-context');
+const N8N_TARGET_LOCK_AUTHORITY = Symbol('n8n-target-lock-authority');
 const GIT_CREDENTIAL_HELPERS = ['manager', 'manager-core'];
 const AGENT_RULES_TEMPLATE_DIR = path.join('skills', 'ai-coding-agent-rules', 'repo-local');
 const AGENT_RULES_PREFLIGHT_MAX_FINDINGS = 8;
@@ -2669,9 +2670,10 @@ const LOCK_RECOVERY_MARKER_SUFFIX = '.recovery';
 
 // Decide whether an existing lock must be respected. A live recorded owner
 // is always respected regardless of age; a provably dead owner is
-// recoverable immediately; unknown or indeterminate owners fall back to the
-// age rule (created_at, or file mtime when the lock is unreadable).
-function inspectLockForRecovery(lockPath, liveness = lockOwnerLiveness, options = {}) {
+// recoverable immediately; an indeterminate owner fails closed; only
+// unusable/unknown owner data falls back to the age rule (created_at, or
+// file mtime when the lock is unreadable).
+function inspectLockForRecovery(lockPath, liveness = lockOwnerLiveness) {
   let lock = {};
   try {
     lock = readJsonIfExists(lockPath) || {};
@@ -2680,9 +2682,14 @@ function inspectLockForRecovery(lockPath, liveness = lockOwnerLiveness, options 
     // fallback decides freshness.
   }
   const owner = liveness(lock.pid);
-  const liveLeaseExpired = owner === 'alive' && options.liveOwnerLeaseMs > 0 && lockAgeMs(lockPath, lock) >= options.liveOwnerLeaseMs;
-  if (owner === 'alive' && !liveLeaseExpired) {
+  if (owner === 'alive') {
     return { respected: true, message: `Toolkit bridge lock at ${lockPath} is held by live process ${lock.pid}` };
+  }
+  if (owner === 'indeterminate') {
+    return {
+      respected: true,
+      message: `Toolkit bridge lock at ${lockPath} records process ${lock.pid} whose liveness cannot be verified; failing closed`
+    };
   }
   if (owner !== 'dead') {
     const age = lockAgeMs(lockPath, lock);
@@ -2742,7 +2749,7 @@ function cleanupSpentLockArtifacts(hubRoot, lockName = 'update.lock') {
 // - indeterminate owner (for example EPERM): fail closed, blocked;
 // - unusable owner data: age fallback (fresh blocks, stale is retirable);
 // - provably dead owner: retirable through the identity-safe protocol.
-function inspectDisplacedEvidenceFile(fullPath, liveness, testHooks = {}, phase = 'inspection', options = {}) {
+function inspectDisplacedEvidenceFile(fullPath, liveness, testHooks = {}, phase = 'inspection') {
   let raw = null;
   try {
     raw = testHooks.readDisplacedEvidence
@@ -2763,8 +2770,7 @@ function inspectDisplacedEvidenceFile(fullPath, liveness, testHooks = {}, phase 
     // Malformed evidence: owner is unusable; the age fallback decides.
   }
   const owner = liveness(displaced.pid);
-  const liveLeaseExpired = owner === 'alive' && options.liveOwnerLeaseMs > 0 && lockAgeMs(fullPath, displaced) >= options.liveOwnerLeaseMs;
-  if (owner === 'alive' && !liveLeaseExpired) {
+  if (owner === 'alive') {
     return {
       blocked: true,
       owner,
@@ -2812,7 +2818,7 @@ function inspectDisplacedEvidenceFile(fullPath, liveness, testHooks = {}, phase 
   return { blocked: false, owner, pid: displaced.pid, raw };
 }
 
-function inspectDisplacedEvidence(hubRoot, liveness = lockOwnerLiveness, testHooks = {}, phase = 'inspection', lockName = 'update.lock', options = {}) {
+function inspectDisplacedEvidence(hubRoot, liveness = lockOwnerLiveness, testHooks = {}, phase = 'inspection', lockName = 'update.lock') {
   let entries = [];
   try {
     entries = testHooks.listDisplacedEvidence
@@ -2831,7 +2837,7 @@ function inspectDisplacedEvidence(hubRoot, liveness = lockOwnerLiveness, testHoo
   for (const entry of entries) {
     if (!displacedPattern.test(entry)) continue;
     const fullPath = path.join(hubRoot, entry);
-    const inspection = inspectDisplacedEvidenceFile(fullPath, liveness, testHooks, phase, options);
+    const inspection = inspectDisplacedEvidenceFile(fullPath, liveness, testHooks, phase);
     if (inspection.gone) continue;
     if (inspection.blocked) return { blocked: true, retirable, message: inspection.message };
     retirable.push({ fullPath, raw: inspection.raw });
@@ -2905,6 +2911,15 @@ function inspectRecoveryMarker(markerPath, liveness = lockOwnerLiveness) {
   const owner = liveness(marker.pid);
   if (owner === 'alive') {
     return { present: true, active: true, raw, marker, message: `Toolkit bridge lock recovery at ${markerPath} is in progress by live process ${marker.pid}` };
+  }
+  if (owner === 'indeterminate') {
+    return {
+      present: true,
+      active: true,
+      raw,
+      marker,
+      message: `Toolkit bridge lock recovery at ${markerPath} records process ${marker.pid} whose liveness cannot be verified; failing closed`
+    };
   }
   if (owner !== 'dead') {
     const age = lockAgeMs(markerPath, marker);
@@ -3031,11 +3046,6 @@ function acquireLock(hubRoot, args, testHooks = {}) {
   const markerPath = `${lockPath}${LOCK_RECOVERY_MARKER_SUFFIX}`;
   const liveness = testHooks.liveness || lockOwnerLiveness;
   const token = crypto.randomUUID();
-  const liveOwnerLeaseMs = Number.isFinite(args.liveOwnerLeaseMs) && args.liveOwnerLeaseMs > 0
-    ? args.liveOwnerLeaseMs
-    : 0;
-  const recoveryOptions = { liveOwnerLeaseMs };
-
   const skipOrThrow = (message) => {
     if (args.hook) return { acquired: false, lockPath, skipReason: message };
     throw new Error(message);
@@ -3049,7 +3059,6 @@ function acquireLock(hubRoot, args, testHooks = {}) {
       bridge_version: BRIDGE_VERSION,
       sync_source: args.syncSource
     };
-    if (liveOwnerLeaseMs) lockRecord.live_owner_lease_ms = liveOwnerLeaseMs;
     const lockBody = `${JSON.stringify(lockRecord, null, 2)}\n`;
     try {
       fs.writeFileSync(lockPath, lockBody, { encoding: 'utf8', flag: 'wx' });
@@ -3063,12 +3072,12 @@ function acquireLock(hubRoot, args, testHooks = {}) {
   // The initial scan is fail-fast only. A contender may pause after this
   // scan while another recovery creates evidence, so no retirement or lock
   // creation is permitted until the same checks repeat under marker ownership.
-  const initialEvidence = inspectDisplacedEvidence(hubRoot, liveness, testHooks, 'initial', lockName, recoveryOptions);
+  const initialEvidence = inspectDisplacedEvidence(hubRoot, liveness, testHooks, 'initial', lockName);
   if (initialEvidence.blocked) return skipOrThrow(initialEvidence.message);
   if (testHooks.afterInitialEvidenceInspect) testHooks.afterInitialEvidenceInspect();
 
   if (fs.existsSync(lockPath)) {
-    const inspection = inspectLockForRecovery(lockPath, liveness, recoveryOptions);
+    const inspection = inspectLockForRecovery(lockPath, liveness);
     if (inspection.respected) return skipOrThrow(inspection.message);
     if (testHooks.afterInspect) testHooks.afterInspect();
   }
@@ -3081,7 +3090,7 @@ function acquireLock(hubRoot, args, testHooks = {}) {
     // This is the authoritative barrier check. The marker remains owned
     // through retirement, main-lock recovery, and exclusive creation, so no
     // compliant recoverer can create evidence in a check-to-create gap.
-    const evidence = inspectDisplacedEvidence(hubRoot, liveness, testHooks, 'under-marker', lockName, recoveryOptions);
+    const evidence = inspectDisplacedEvidence(hubRoot, liveness, testHooks, 'under-marker', lockName);
     if (evidence.blocked) return skipOrThrow(evidence.message);
     if (evidence.retirable.length) {
       const retirement = retireDisplacedEvidence(evidence.retirable, testHooks);
@@ -3089,7 +3098,7 @@ function acquireLock(hubRoot, args, testHooks = {}) {
     }
 
     if (fs.existsSync(lockPath)) {
-      const recheck = inspectLockForRecovery(lockPath, liveness, recoveryOptions);
+      const recheck = inspectLockForRecovery(lockPath, liveness);
       if (recheck.respected) return skipOrThrow(recheck.message);
       if (testHooks.beforeDisplace) testHooks.beforeDisplace();
       // Displace by rename instead of deleting in place, then verify the
@@ -3110,8 +3119,7 @@ function acquireLock(hubRoot, args, testHooks = {}) {
           displacedPath,
           liveness,
           testHooks,
-          'post-displacement',
-          recoveryOptions
+          'post-displacement'
         );
         if (!displacedInspection.gone && displacedInspection.blocked) {
           if (testHooks.beforeRestorationCommit) testHooks.beforeRestorationCommit();
@@ -4262,14 +4270,17 @@ function acquireN8nSkillsTargetLock(pluginRoot, options = {}) {
     lastLock = acquireLock(identity.hubRoot, {
       hook: true,
       syncSource: 'codex-plugin',
-      lockName: identity.lockName,
-      // Target repairs are bounded by exact tree limits and should complete
-      // well inside this lease. An orphan whose numeric PID was later reused
-      // therefore cannot block this exact cache forever, while the existing
-      // token/rename/tombstone protocol still binds recovery to one lock generation.
-      liveOwnerLeaseMs: LOCK_STALE_MS
+      lockName: identity.lockName
     }, options.lockTestHooks || {});
-    if (lastLock.acquired) return lastLock;
+    if (lastLock.acquired) {
+      Object.defineProperty(lastLock, N8N_TARGET_LOCK_AUTHORITY, {
+        configurable: false,
+        enumerable: false,
+        value: captureN8nTargetLockAuthority(lastLock, pluginRoot),
+        writable: false
+      });
+      return lastLock;
+    }
     if (attempt < attempts) sleepSync(delayMs);
   }
   throw failClosedN8nRepair(
@@ -4289,6 +4300,167 @@ function normalizedN8nTargetPath(value) {
 
 function n8nReplacementTargetIdentity(value) {
   return crypto.createHash('sha256').update(normalizedN8nTargetPath(value), 'utf8').digest('hex');
+}
+
+function readN8nTargetLockDescriptor(lockPath) {
+  const resolved = path.resolve(lockPath);
+  const parent = path.dirname(resolved);
+  const parentStat = requireOrdinaryN8nDirectory(parent, 'n8n Skills target-lock parent');
+  let initialStat;
+  try {
+    initialStat = fs.lstatSync(resolved, { bigint: true });
+  } catch (error) {
+    const failure = failClosedN8nRepair(
+      'target-lock-authority-lost',
+      'The exact n8n Skills target lock is missing before a protected mutation'
+    );
+    failure.cause = error;
+    throw failure;
+  }
+  if (
+    !initialStat.isFile()
+    || initialStat.isSymbolicLink()
+    || initialStat.nlink !== 1n
+    || normalizedN8nTargetPath(fs.realpathSync.native(resolved)) !== normalizedN8nTargetPath(resolved)
+  ) {
+    throw failClosedN8nRepair(
+      'target-lock-authority-lost',
+      'The n8n Skills target lock was redirected or is not an exact ordinary single-link file'
+    );
+  }
+  if (initialStat.size < 1n || initialStat.size > 16n * 1024n) {
+    throw failClosedN8nRepair(
+      'target-lock-authority-lost',
+      'The n8n Skills target lock exceeds its bounded authority size'
+    );
+  }
+  const bytes = fs.readFileSync(resolved);
+  const finalStat = fs.lstatSync(resolved, { bigint: true });
+  if (
+    !n8nEvidenceStatIdentitiesMatch(
+      n8nEvidenceStatIdentity(initialStat),
+      n8nEvidenceStatIdentity(finalStat)
+    )
+    || BigInt(bytes.length) !== initialStat.size
+  ) {
+    throw failClosedN8nRepair(
+      'target-lock-authority-lost',
+      'The n8n Skills target lock changed while its authority was being proved'
+    );
+  }
+  let record;
+  try {
+    record = JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/, ''));
+  } catch (error) {
+    const failure = failClosedN8nRepair(
+      'target-lock-authority-lost',
+      'The n8n Skills target lock is not valid exact JSON authority'
+    );
+    failure.cause = error;
+    throw failure;
+  }
+  return Object.freeze({
+    bytes_sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
+    filesystem_identity: Object.freeze(n8nEvidenceStatIdentity(finalStat)),
+    lock_path: normalizedN8nTargetPath(resolved),
+    parent_directory_identity: Object.freeze(n8nDirectoryIdentity(parentStat)),
+    parent_path: normalizedN8nTargetPath(parent),
+    record: Object.freeze({ ...record })
+  });
+}
+
+function captureN8nTargetLockAuthority(lock, targetPath) {
+  if (!lock?.acquired || !lock.lockPath || !lock.token) {
+    throw failClosedN8nRepair(
+      'target-lock-authority-lost',
+      'The n8n Skills repair did not acquire exact target-lock authority'
+    );
+  }
+  const identity = n8nSkillsTargetLockIdentity(targetPath);
+  const descriptor = readN8nTargetLockDescriptor(lock.lockPath);
+  if (
+    descriptor.lock_path !== normalizedN8nTargetPath(path.join(identity.hubRoot, identity.lockName))
+    || descriptor.record.token !== lock.token
+    || descriptor.record.pid !== process.pid
+    || descriptor.record.sync_source !== 'codex-plugin'
+  ) {
+    throw failClosedN8nRepair(
+      'target-lock-authority-lost',
+      'The acquired n8n Skills target lock is not bound to this process, token, source, and target'
+    );
+  }
+  return Object.freeze({
+    ...descriptor,
+    owner_pid: process.pid,
+    target_identity: n8nReplacementTargetIdentity(targetPath),
+    token: lock.token
+  });
+}
+
+function bindN8nTargetLockAuthority(context, lock) {
+  const authority = lock?.[N8N_TARGET_LOCK_AUTHORITY] || lock;
+  if (!context || !authority?.token) {
+    throw failClosedN8nRepair(
+      'target-lock-authority-lost',
+      'The n8n Skills transaction cannot bind missing target-lock authority'
+    );
+  }
+  if (
+    context.validated?.targetPath
+    && authority.target_identity !== n8nReplacementTargetIdentity(context.validated.targetPath)
+  ) {
+    throw failClosedN8nRepair(
+      'target-lock-authority-lost',
+      'The n8n Skills target lock is bound to a different transaction target'
+    );
+  }
+  Object.defineProperty(context, N8N_TARGET_LOCK_AUTHORITY, {
+    configurable: true,
+    enumerable: false,
+    value: authority,
+    writable: true
+  });
+  return context;
+}
+
+function requireExactN8nTargetLockAuthority(subject, boundary, testHooks = {}) {
+  const authority = subject?.[N8N_TARGET_LOCK_AUTHORITY] || subject;
+  if (!authority?.token || !authority.lock_path) {
+    throw failClosedN8nRepair(
+      'target-lock-authority-lost',
+      `Exact n8n Skills target-lock authority is missing at ${boundary}`
+    );
+  }
+  if (testHooks.beforeN8nTargetLockAuthorityRevalidation) {
+    testHooks.beforeN8nTargetLockAuthorityRevalidation({
+      boundary,
+      lock_path: authority.lock_path,
+      target_identity: authority.target_identity
+    });
+  }
+  const current = readN8nTargetLockDescriptor(authority.lock_path);
+  if (
+    current.bytes_sha256 !== authority.bytes_sha256
+    || current.lock_path !== authority.lock_path
+    || !n8nEvidenceStatIdentitiesMatch(
+      current.filesystem_identity,
+      authority.filesystem_identity
+    )
+    || !n8nDirectoryIdentitiesMatch(
+      current.parent_directory_identity,
+      authority.parent_directory_identity
+    )
+    || current.parent_path !== authority.parent_path
+    || current.record.token !== authority.token
+    || current.record.pid !== authority.owner_pid
+    || current.record.sync_source !== 'codex-plugin'
+  ) {
+    throw failClosedN8nRepair(
+      'target-lock-authority-lost',
+      `The exact n8n Skills target lock changed before protected mutation ${boundary}`
+    );
+  }
+  return authority;
 }
 
 function n8nPathExists(value) {
@@ -4740,6 +4912,13 @@ function n8nRequireJournalMirrorEntry(journal, entry, journalKind) {
 
 function bindAndSynchronizeN8nJournal(context, options = {}) {
   const write = Boolean(options.write);
+  if (write) {
+    requireExactN8nTargetLockAuthority(
+      context,
+      'schema-2-journal-bind-and-synchronize',
+      options.testHooks
+    );
+  }
   let journal = bindJournalAuthority({
     codexHome: n8nJournalCodexHome(context),
     generationId: context.generation.record.generation_id,
@@ -4854,6 +5033,11 @@ function n8nRetirementResidueManifest(context) {
 }
 
 function logicallyRetireN8nEvidence(context, options = {}) {
+  requireExactN8nTargetLockAuthority(
+    context,
+    'logical-evidence-retirement',
+    options.testHooks
+  );
   bindAndSynchronizeN8nJournal(context, {
     write: true,
     testHooks: options.testHooks
@@ -4875,6 +5059,7 @@ function logicallyRetireN8nEvidence(context, options = {}) {
     manifest = logicalRetirementManifest(journal);
   } else {
     manifest = n8nRetirementResidueManifest(context);
+    requireExactN8nTargetLockAuthority(context, 'journal-logical-retirement-transition', options.testHooks);
     journal = appendLogicalRetirement(
       journal,
       manifest,
@@ -4887,9 +5072,11 @@ function logicallyRetireN8nEvidence(context, options = {}) {
     );
   }
   context[N8N_JOURNAL_CONTEXT] = journal;
+  requireExactN8nTargetLockAuthority(context, 'terminal-checkpoint-logical-retirement', options.testHooks);
   const checkpoint = writeTerminalCheckpoint(journal, { testHooks: options.testHooks });
   let checkpointCleanupError = null;
   try {
+    requireExactN8nTargetLockAuthority(context, 'transaction-compaction-logical-retirement', options.testHooks);
     compactSupersededTransaction(journal, checkpoint, { testHooks: options.testHooks });
   } catch (error) {
     checkpointCleanupError = error;
@@ -5673,6 +5860,9 @@ function retainN8nEvidenceContext(context, previous = null) {
   if (previous?.[N8N_JOURNAL_CONTEXT] && !context[N8N_JOURNAL_CONTEXT]) {
     context[N8N_JOURNAL_CONTEXT] = previous[N8N_JOURNAL_CONTEXT];
   }
+  if (previous?.[N8N_TARGET_LOCK_AUTHORITY] && !context[N8N_TARGET_LOCK_AUTHORITY]) {
+    bindN8nTargetLockAuthority(context, previous[N8N_TARGET_LOCK_AUTHORITY]);
+  }
   lifecycleOwner[N8N_EVIDENCE_CONTEXT] = context;
   return context;
 }
@@ -5722,6 +5912,7 @@ function refreshN8nEvidenceContext(previous, parityIdentity, allowedKind, testHo
 }
 
 function advanceN8nEvidenceContext(context, kind, payload, parityIdentity, testHooks = {}) {
+  requireExactN8nTargetLockAuthority(context, `evidence-transition-${kind}`, testHooks);
   revalidateN8nEvidenceAuthority(context.evidenceAuthority, {
     boundary: `before-${kind}`,
     testHooks
@@ -5756,6 +5947,7 @@ function advanceN8nTerminalEvidenceContext(context, state, parityIdentity, testH
   if (!['completed', 'failed'].includes(state)) {
     throw failClosedN8nRepair('recovery-evidence-invalid', 'n8n Skills transaction attempted an unsupported terminal evidence transition');
   }
+  requireExactN8nTargetLockAuthority(context, `terminal-evidence-transition-${state}`, testHooks);
   revalidateN8nEvidenceAuthority(context.evidenceAuthority, {
     boundary: `before-${state}`,
     testHooks
@@ -5903,6 +6095,11 @@ function moveAuthorizedN8nEvidenceToQuarantine(expected, quarantinePath, testHoo
 
 function legacyPhysicalCleanupN8nEvidenceAuthority(context, testHooks = {}) {
   let authority = context.evidenceAuthority;
+  const revalidateCleanupAuthority = (boundary) => {
+    requireExactN8nTargetLockAuthority(context, boundary, testHooks);
+    return revalidateN8nEvidenceAuthority(authority, { boundary, testHooks });
+  };
+  requireExactN8nTargetLockAuthority(context, 'before-transaction-evidence-cleanup', testHooks);
   revalidateN8nEvidenceAuthority(authority, {
     boundary: 'before-transaction-evidence-cleanup',
     testHooks
@@ -5922,6 +6119,7 @@ function legacyPhysicalCleanupN8nEvidenceAuthority(context, testHooks = {}) {
     parent,
     `.ai-agent-toolkit-evidence-quarantine-${crypto.randomUUID()}`
   );
+  requireExactN8nTargetLockAuthority(context, 'before-evidence-quarantine-creation', testHooks);
   fs.mkdirSync(quarantineRoot);
   try {
     const recordEntry = n8nEvidenceEntry(authority, 'generation-record');
@@ -5936,18 +6134,12 @@ function legacyPhysicalCleanupN8nEvidenceAuthority(context, testHooks = {}) {
         Buffer.from(right.normalized_path)
       ));
     for (const expected of directEvidence) {
-      revalidateN8nEvidenceAuthority(authority, {
-        boundary: 'before-each-transaction-evidence-cleanup-operation',
-        testHooks
-      });
+      revalidateCleanupAuthority('before-each-transaction-evidence-cleanup-operation');
       moveAuthorizedN8nEvidenceToQuarantine(
         expected,
         path.join(quarantineRoot, `${crypto.randomUUID()}.json`),
         testHooks,
-        () => revalidateN8nEvidenceAuthority(authority, {
-          boundary: 'at-each-transaction-evidence-cleanup-operation',
-          testHooks
-        })
+        () => revalidateCleanupAuthority('at-each-transaction-evidence-cleanup-operation')
       );
       authority = retireN8nEvidenceAuthorityEntry(authority, expected.evidence_kind);
       revalidateN8nEvidenceAuthority(authority, {
@@ -5958,6 +6150,7 @@ function legacyPhysicalCleanupN8nEvidenceAuthority(context, testHooks = {}) {
 
     const stageOwner = n8nEvidenceEntry(authority, 'stage-owner');
     if (stageOwner?.present) {
+      requireExactN8nTargetLockAuthority(context, 'before-owned-stage-cleanup', testHooks);
       revalidateN8nEvidenceAuthority(authority, {
         boundary: 'before-owned-stage-cleanup',
         testHooks
@@ -5981,6 +6174,7 @@ function legacyPhysicalCleanupN8nEvidenceAuthority(context, testHooks = {}) {
           generation_id: authority.generation_id
         });
       }
+      requireExactN8nTargetLockAuthority(context, 'at-owned-stage-cleanup', testHooks);
       revalidateN8nEvidenceAuthority(authority, {
         boundary: 'at-owned-stage-cleanup',
         testHooks
@@ -6027,14 +6221,12 @@ function legacyPhysicalCleanupN8nEvidenceAuthority(context, testHooks = {}) {
       boundary: 'before-generation-record-cleanup',
       testHooks
     });
+    requireExactN8nTargetLockAuthority(context, 'before-generation-record-cleanup', testHooks);
     moveAuthorizedN8nEvidenceToQuarantine(
       recordEntry,
       path.join(quarantineRoot, `${crypto.randomUUID()}.json`),
       testHooks,
-      () => revalidateN8nEvidenceAuthority(authority, {
-        boundary: 'at-generation-record-cleanup',
-        testHooks
-      })
+      () => revalidateCleanupAuthority('at-generation-record-cleanup')
     );
     authority = retireN8nEvidenceAuthorityEntry(authority, 'generation-record');
     revalidateN8nEvidenceAuthority(authority, {
@@ -6050,6 +6242,7 @@ function legacyPhysicalCleanupN8nEvidenceAuthority(context, testHooks = {}) {
     };
   } finally {
     if (n8nPathExists(quarantineRoot)) {
+      requireExactN8nTargetLockAuthority(context, 'evidence-quarantine-removal', testHooks);
       try {
         fs.rmdirSync(quarantineRoot);
       } catch {
@@ -6075,6 +6268,7 @@ function cleanupN8nEvidenceAuthority(context, testHooks = {}, retirement = {}) {
   try {
     revalidateN8nJournalAuthority(context, 'before-physical-cleanup', testHooks);
     if (context[N8N_JOURNAL_CONTEXT].state === 'L20_LOGICALLY_RETIRED') {
+      requireExactN8nTargetLockAuthority(context, 'journal-cleanup-pending-transition', testHooks);
       const stageOwner = n8nEvidenceEntry(context.evidenceAuthority, 'stage-owner');
       const stageIdentity = context.preTransaction?.stage_directory_identity
         || context.preTransaction?.preTransaction?.stage_directory_identity
@@ -6102,6 +6296,7 @@ function cleanupN8nEvidenceAuthority(context, testHooks = {}, retirement = {}) {
     revalidateLogicalRetirement(context[N8N_JOURNAL_CONTEXT]);
     const physical = legacyPhysicalCleanupN8nEvidenceAuthority(context, testHooks);
     if (!physical.cleaned) return { ...logical, physicalCleanupError: physical.reason };
+    requireExactN8nTargetLockAuthority(context, 'journal-cleanup-complete-transition', testHooks);
     context[N8N_JOURNAL_CONTEXT] = appendN8nRepairJournalRecord(
       context[N8N_JOURNAL_CONTEXT],
       'C20_CLEANUP_COMPLETE',
@@ -6111,12 +6306,14 @@ function cleanupN8nEvidenceAuthority(context, testHooks = {}, retirement = {}) {
       },
       { testHooks }
     );
+    requireExactN8nTargetLockAuthority(context, 'terminal-checkpoint-completion', testHooks);
     const completionCheckpoint = writeTerminalCheckpoint(
       context[N8N_JOURNAL_CONTEXT],
       { testHooks }
     );
     let checkpointCleanupError = null;
     try {
+      requireExactN8nTargetLockAuthority(context, 'transaction-compaction-completion', testHooks);
       compactSupersededTransaction(
         context[N8N_JOURNAL_CONTEXT],
         completionCheckpoint,
@@ -6143,13 +6340,16 @@ function cleanupN8nEvidenceAuthority(context, testHooks = {}, retirement = {}) {
 }
 
 function finalizeOrphanedN8nPhysicalCleanup(codexHome, targetPath, testHooks = {}) {
-  const journals = discoverN8nRepairJournalsForTarget({
-    codexHome,
-    testHooks,
-    targetPath,
-    write: true
-  });
-  for (let journal of journals) {
+  const lock = acquireN8nSkillsTargetLock(targetPath);
+  try {
+    requireExactN8nTargetLockAuthority(lock, 'orphaned-journal-discovery', testHooks);
+    const journals = discoverN8nRepairJournalsForTarget({
+      codexHome,
+      testHooks,
+      targetPath,
+      write: true
+    });
+    for (let journal of journals) {
     if (journal.state === 'C20_CLEANUP_COMPLETE') {
       revalidateLogicalRetirement(journal);
       continue;
@@ -6182,7 +6382,8 @@ function finalizeOrphanedN8nPhysicalCleanup(codexHome, targetPath, testHooks = {
         'A retained C10 journal still has exact stage residue requiring controlled cleanup'
       );
     }
-    journal = appendN8nRepairJournalRecord(
+      requireExactN8nTargetLockAuthority(lock, 'orphaned-journal-cleanup-complete', testHooks);
+      journal = appendN8nRepairJournalRecord(
       journal,
       'C20_CLEANUP_COMPLETE',
       {
@@ -6191,8 +6392,13 @@ function finalizeOrphanedN8nPhysicalCleanup(codexHome, targetPath, testHooks = {
       },
       { testHooks }
     );
-    const checkpoint = writeTerminalCheckpoint(journal, { testHooks });
-    compactSupersededTransaction(journal, checkpoint, { testHooks });
+      requireExactN8nTargetLockAuthority(lock, 'orphaned-terminal-checkpoint', testHooks);
+      const checkpoint = writeTerminalCheckpoint(journal, { testHooks });
+      requireExactN8nTargetLockAuthority(lock, 'orphaned-transaction-compaction', testHooks);
+      compactSupersededTransaction(journal, checkpoint, { testHooks });
+    }
+  } finally {
+    releaseN8nSkillsTargetLock(lock);
   }
 }
 
@@ -6643,17 +6849,29 @@ function removeExactN8nBackupResumably(backupPath, transaction, manifest, option
     backupPath,
     transaction.original_target_directory_identity
   );
-  if (options.beforeEachCleanupOperation) options.beforeEachCleanupOperation();
+  if (options.beforeCleanupInspection) options.beforeCleanupInspection();
   const progress = inspectN8nBackupCleanupProgress(
     backupPath,
     manifest,
     transaction.original_target_directory_identity
   );
-  if (progress.complete) return;
+  if (progress.complete) {
+    if (options.afterCleanup) options.afterCleanup();
+    return;
+  }
   let removed = 0;
   for (let index = progress.next_index; index < manifest.entries.length; index += 1) {
-    if (options.beforeEachCleanupOperation) options.beforeEachCleanupOperation();
     const entry = manifest.entries[index];
+    if (options.beforeEachCleanupOperation) {
+      options.beforeEachCleanupOperation({ entry, index });
+    }
+    if (
+      entry.type === 'directory'
+      && entry.relative_path === ''
+      && options.beforeFinalCleanupOperation
+    ) {
+      options.beforeFinalCleanupOperation({ entry, index });
+    }
     const fullPath = requireExactN8nBackupCleanupEntry(backupPath, entry);
     if (entry.type === 'directory') {
       fs.rmdirSync(fullPath);
@@ -6669,6 +6887,7 @@ function removeExactN8nBackupResumably(backupPath, transaction, manifest, option
       });
     }
   }
+  if (options.afterCleanup) options.afterCleanup();
 }
 
 function authorizeN8nWinnerBackupCleanup(
@@ -6747,8 +6966,14 @@ function requireExactN8nTreeBoundary(pluginRoot, expectedEvidence, expectedStatu
   return classified;
 }
 
-function requireExactN8nFinalWinner(entry, transaction, targetPath, label) {
+function requireExactN8nFinalWinner(entry, transaction, targetPath, label, testHooks = {}, boundary = '') {
   try {
+    if (testHooks.beforeN8nFinalWinnerProof) {
+      testHooks.beforeN8nFinalWinnerProof({
+        boundary: boundary || 'exact-final-winner-proof',
+        targetPath
+      });
+    }
     const classified = requireExactN8nTreeBoundary(
       targetPath,
       transaction.staged_evidence,
@@ -6757,6 +6982,12 @@ function requireExactN8nFinalWinner(entry, transaction, targetPath, label) {
       label
     );
     requireSelectedN8nVersionAgreement(entry, classified);
+    if (testHooks.afterN8nCompleteClassification) {
+      testHooks.afterN8nCompleteClassification({
+        boundary: boundary || 'exact-final-winner-proof',
+        status: classified.status
+      });
+    }
     return {
       classification: classified,
       directory_identity: transaction.staged_plugin_directory_identity
@@ -6765,6 +6996,30 @@ function requireExactN8nFinalWinner(entry, transaction, targetPath, label) {
     const drift = failClosedN8nRepair(
       'final-winner-drift',
       `${label} is no longer the exact identity-bound healthy n8n Skills winner`
+    );
+    drift.cause = error;
+    throw drift;
+  }
+}
+
+function requireExactN8nFinalWinnerIdentity(transaction, targetPath, label) {
+  try {
+    const targetStat = requireOrdinaryN8nDirectory(targetPath, label);
+    if (!n8nDirectoryIdentitiesMatch(
+      transaction.staged_plugin_directory_identity,
+      n8nDirectoryIdentity(targetStat)
+    )) {
+      throw failClosedN8nRepair(
+        'final-winner-drift',
+        `${label} directory identity changed`
+      );
+    }
+    return targetStat;
+  } catch (error) {
+    if (error?.code === 'final-winner-drift') throw error;
+    const drift = failClosedN8nRepair(
+      'final-winner-drift',
+      `${label} is missing, redirected, or no longer the installed winner identity`
     );
     drift.cause = error;
     throw drift;
@@ -6793,6 +7048,11 @@ function n8nDestructiveRenameOptions(context, specification, testHooks = {}, bas
           generation_id: context.generation.record.generation_id
         });
       }
+      requireExactN8nTargetLockAuthority(
+        context,
+        `${specification.boundary}-attempt-${attempt}`,
+        testHooks
+      );
       revalidateN8nEvidenceAuthority(context.evidenceAuthority, {
         boundary: `${specification.boundary}-attempt-${attempt}`,
         testHooks
@@ -6857,6 +7117,7 @@ function requireN8nDestructiveDeleteBoundary(context, specification, testHooks =
       generation_id: context.generation.record.generation_id
     });
   }
+  requireExactN8nTargetLockAuthority(context, specification.boundary, testHooks);
   revalidateN8nEvidenceAuthority(context.evidenceAuthority, {
     boundary: specification.boundary,
     testHooks
@@ -7120,9 +7381,15 @@ function cleanupN8nReplacementTransaction(initialTransaction, options = {}) {
   const { generation, validated } = transaction;
   const parityIdentity = options.parityIdentity;
   const winnerEntry = options.winnerEntry || null;
+  let finalWinnerProved = false;
   if (!parityIdentity) {
     throw failClosedN8nRepair('recovery-evidence-invalid', 'n8n Skills cleanup is missing its compatibility evidence authority');
   }
+  requireExactN8nTargetLockAuthority(
+    transaction,
+    'replacement-transaction-cleanup',
+    options.testHooks
+  );
   revalidateN8nEvidenceAuthority(transaction.evidenceAuthority, {
     boundary: 'before-replacement-transaction-cleanup',
     testHooks: options.testHooks
@@ -7183,6 +7450,16 @@ function cleanupN8nReplacementTransaction(initialTransaction, options = {}) {
       transaction.evidenceAuthority,
       'n8n-replacement-phase-70-cleanup'
     );
+    if (winnerEntry) {
+      requireExactN8nFinalWinner(
+        winnerEntry,
+        transaction.transaction,
+        validated.targetPath,
+        'Verified recovered n8n Skills winner before backup retirement',
+        options.testHooks,
+        'phase-70-before-cleanup'
+      );
+    }
     removeExactN8nBackupResumably(
       validated.backupPath,
       transaction.transaction,
@@ -7190,7 +7467,28 @@ function cleanupN8nReplacementTransaction(initialTransaction, options = {}) {
       {
         resuming: true,
         testHooks: options.testHooks,
+        beforeCleanupInspection() {
+          requireExactN8nTargetLockAuthority(
+            transaction,
+            'before-resumable-backup-cleanup-inspection',
+            options.testHooks
+          );
+          revalidateN8nEvidenceAuthority(transaction.evidenceAuthority, {
+            boundary: 'before-resumable-backup-cleanup-inspection',
+            testHooks: options.testHooks
+          });
+          revalidateN8nJournalAuthority(
+            transaction,
+            'before-resumable-backup-cleanup-inspection',
+            options.testHooks
+          );
+        },
         beforeEachCleanupOperation() {
+          requireExactN8nTargetLockAuthority(
+            transaction,
+            'before-each-resumable-backup-cleanup-operation',
+            options.testHooks
+          );
           revalidateN8nEvidenceAuthority(transaction.evidenceAuthority, {
             boundary: 'before-each-resumable-backup-cleanup-operation',
             testHooks: options.testHooks
@@ -7200,24 +7498,41 @@ function cleanupN8nReplacementTransaction(initialTransaction, options = {}) {
             'before-each-resumable-backup-cleanup-operation',
             options.testHooks
           );
-          if (winnerEntry) {
-            requireExactN8nFinalWinner(
-              winnerEntry,
-              transaction.transaction,
-              validated.targetPath,
-              'Verified recovered n8n Skills winner during backup retirement'
-            );
-          }
+        },
+        beforeFinalCleanupOperation() {
+          if (!winnerEntry) return;
+          requireExactN8nFinalWinner(
+            winnerEntry,
+            transaction.transaction,
+            validated.targetPath,
+            'Verified recovered n8n Skills winner before final backup-root retirement',
+            options.testHooks,
+            'phase-70-before-final-root-removal'
+          );
+        },
+        afterCleanup() {
+          if (!winnerEntry) return;
+          requireExactN8nFinalWinner(
+            winnerEntry,
+            transaction.transaction,
+            validated.targetPath,
+            'Verified recovered n8n Skills winner after backup retirement',
+            options.testHooks,
+            'phase-70-after-cleanup'
+          );
+          finalWinnerProved = true;
         }
       }
     );
   }
-  if (winnerEntry) {
+  if (winnerEntry && !finalWinnerProved) {
     requireExactN8nFinalWinner(
       winnerEntry,
       transaction.transaction,
       validated.targetPath,
-      'Verified recovered n8n Skills winner after backup retirement'
+      'Verified recovered n8n Skills winner before terminal completion',
+      options.testHooks,
+      'terminal-before-completion'
     );
   }
   transaction = advanceN8nTerminalEvidenceContext(
@@ -7229,6 +7544,7 @@ function cleanupN8nReplacementTransaction(initialTransaction, options = {}) {
   const cleanup = cleanupOwnedGeneration(generation, {
     evidenceAuthority: transaction.evidenceAuthority,
     revalidateEvidenceAuthority(authority, boundary) {
+      requireExactN8nTargetLockAuthority(transaction, boundary, options.testHooks);
       return revalidateN8nEvidenceAuthority(authority, {
         boundary,
         testHooks: options.testHooks
@@ -7253,6 +7569,11 @@ function cleanupN8nReplacementTransaction(initialTransaction, options = {}) {
 }
 
 function retireFailedN8nWinnerDriftTransaction(transaction, options = {}) {
+  requireExactN8nTargetLockAuthority(
+    transaction,
+    'failed-phase-70-audit-retirement',
+    options.testHooks
+  );
   const failed = n8nEvidenceEntry(transaction.evidenceAuthority, 'failed');
   const completed = n8nEvidenceEntry(transaction.evidenceAuthority, 'completed');
   if (!failed?.present || completed?.present) {
@@ -7273,6 +7594,7 @@ function retireFailedN8nWinnerDriftTransaction(transaction, options = {}) {
   const cleanup = cleanupOwnedGeneration(transaction.generation, {
     evidenceAuthority: transaction.evidenceAuthority,
     revalidateEvidenceAuthority(authority, boundary) {
+      requireExactN8nTargetLockAuthority(transaction, boundary, options.testHooks);
       return revalidateN8nEvidenceAuthority(authority, {
         boundary,
         testHooks: options.testHooks
@@ -7350,6 +7672,7 @@ function recoverTargetUntouchedN8nPreTransaction({
       'after-target-lock',
       testHooks
     );
+    bindN8nTargetLockAuthority(preTransaction, lock);
     bindAndSynchronizeN8nJournal(preTransaction, {
       write: true,
       testHooks
@@ -7423,9 +7746,17 @@ function recoverTargetUntouchedN8nPreTransaction({
       testHooks
     );
     const cleanup = cleanupOwnedGeneration(preTransaction.generation, {
-      beforeDelete: requireCanonicalTargetUntouched,
+      beforeDelete() {
+        requireExactN8nTargetLockAuthority(
+          preTransaction,
+          'target-untouched-owned-stage-cleanup',
+          testHooks
+        );
+        requireCanonicalTargetUntouched();
+      },
       evidenceAuthority: preTransaction.evidenceAuthority,
       revalidateEvidenceAuthority(authority, boundary) {
+        requireExactN8nTargetLockAuthority(preTransaction, boundary, testHooks);
         return revalidateN8nEvidenceAuthority(authority, { boundary, testHooks });
       },
       cleanupEvidenceAuthority() {
@@ -7483,13 +7814,19 @@ function recoverInterruptedN8nReplacement({
   ) {
     if (write) {
       for (const retired of discovered.retiredTransactions) {
-        const cleanup = cleanupN8nEvidenceAuthority(retired, testHooks);
-        if (cleanup.physicalCleanupError || cleanup.checkpointCleanupError) {
-          if (cleanup.checkpointCleanupError) throw cleanup.checkpointCleanupError;
-          throw cleanup.physicalCleanupCause || failClosedN8nRepair(
-            cleanup.physicalCleanupError,
-            'Logically retired n8n Skills transaction has exact physical cleanup pending'
-          );
+        const retiredLock = acquireN8nSkillsTargetLock(retired.validated.targetPath);
+        try {
+          bindN8nTargetLockAuthority(retired, retiredLock);
+          const cleanup = cleanupN8nEvidenceAuthority(retired, testHooks);
+          if (cleanup.physicalCleanupError || cleanup.checkpointCleanupError) {
+            if (cleanup.checkpointCleanupError) throw cleanup.checkpointCleanupError;
+            throw cleanup.physicalCleanupCause || failClosedN8nRepair(
+              cleanup.physicalCleanupError,
+              'Logically retired n8n Skills transaction has exact physical cleanup pending'
+            );
+          }
+        } finally {
+          releaseN8nSkillsTargetLock(retiredLock);
         }
       }
       discovered = inspectN8nReplacementRecords(codexHome, parityIdentity, {
@@ -7552,6 +7889,7 @@ function recoverInterruptedN8nReplacement({
       'after-target-lock',
       testHooks
     );
+    bindN8nTargetLockAuthority(transaction, lock);
     bindAndSynchronizeN8nJournal(transaction, {
       write: true,
       testHooks
@@ -7592,10 +7930,13 @@ function recoverInterruptedN8nReplacement({
       && !backupExists
       && phaseOrdinal >= 70
     );
-    const revalidateBeforeMutation = (boundary) => revalidateN8nEvidenceAuthority(
-      transaction.evidenceAuthority,
-      { boundary, testHooks }
-    );
+    const revalidateBeforeMutation = (boundary) => {
+      requireExactN8nTargetLockAuthority(transaction, boundary, testHooks);
+      return revalidateN8nEvidenceAuthority(
+        transaction.evidenceAuthority,
+        { boundary, testHooks }
+      );
+    };
     const cleanupTransaction = (cleanupOptions = {}) => cleanupN8nReplacementTransaction(transaction, {
       parityIdentity,
       testHooks,
@@ -7948,6 +8289,11 @@ function replaceSelectedN8nSkillsCache(
   if (n8nExpectedNextEvidenceKind(inventoryOptions.preTransactionContext) !== 'n8n-replacement') {
     throw failClosedN8nRepair('recovery-evidence-invalid', 'n8n Skills replacement registration attempted to skip staged evidence phases');
   }
+  requireExactN8nTargetLockAuthority(
+    inventoryOptions.preTransactionContext,
+    'replacement-transaction-registration',
+    testHooks
+  );
   const registeredTransaction = registerN8nReplacementTransaction(
     generation,
     entry,
@@ -8110,11 +8456,10 @@ function replaceSelectedN8nSkillsCache(
     );
     installedVerified = true;
     if (testHooks.afterN8nRepairVerification) testHooks.afterN8nRepairVerification({ generation });
-    requireExactN8nFinalWinner(
-      entry,
+    requireExactN8nFinalWinnerIdentity(
       transaction,
       targetPath,
-      'Verified n8n Skills winner before backup retirement'
+      'Verified n8n Skills winner before backup-cleanup authorization'
     );
     revalidateN8nEvidenceAuthority(transactionContext.evidenceAuthority, {
       boundary: 'before-backup-cleanup-authorization',
@@ -8137,10 +8482,19 @@ function replaceSelectedN8nSkillsCache(
     if (testHooks.afterN8nBackupCleanupAuthorization) {
       testHooks.afterN8nBackupCleanupAuthorization({ generation });
     }
+    requireExactN8nFinalWinner(
+      entry,
+      transaction,
+      targetPath,
+      'Verified n8n Skills winner after durable backup-cleanup authorization',
+      testHooks,
+      'phase-70-before-cleanup'
+    );
     const cleanupPhase = n8nEvidenceValue(
       transactionContext.evidenceAuthority,
       'n8n-replacement-phase-70-cleanup'
     );
+    let finalWinner = null;
     removeExactN8nBackupResumably(
       backupPath,
       transaction,
@@ -8148,12 +8502,27 @@ function replaceSelectedN8nSkillsCache(
       {
         resuming: true,
         testHooks,
+        beforeCleanupInspection() {
+          requireExactN8nTargetLockAuthority(
+            transactionContext,
+            'before-resumable-backup-cleanup-inspection',
+            testHooks
+          );
+          revalidateN8nEvidenceAuthority(transactionContext.evidenceAuthority, {
+            boundary: 'before-resumable-backup-cleanup-inspection',
+            testHooks
+          });
+          revalidateN8nJournalAuthority(
+            transactionContext,
+            'before-resumable-backup-cleanup-inspection',
+            testHooks
+          );
+        },
         beforeEachCleanupOperation() {
-          requireExactN8nFinalWinner(
-            entry,
-            transaction,
-            targetPath,
-            'Verified n8n Skills winner during backup retirement'
+          requireExactN8nTargetLockAuthority(
+            transactionContext,
+            'before-resumable-backup-cleanup-operation',
+            testHooks
           );
           revalidateN8nEvidenceAuthority(transactionContext.evidenceAuthority, {
             boundary: 'before-resumable-backup-cleanup-operation',
@@ -8164,15 +8533,36 @@ function replaceSelectedN8nSkillsCache(
             'before-resumable-backup-cleanup-operation',
             testHooks
           );
+        },
+        beforeFinalCleanupOperation() {
+          requireExactN8nFinalWinner(
+            entry,
+            transaction,
+            targetPath,
+            'Verified n8n Skills winner before final backup-root retirement',
+            testHooks,
+            'phase-70-before-final-root-removal'
+          );
+        },
+        afterCleanup() {
+          finalWinner = requireExactN8nFinalWinner(
+            entry,
+            transaction,
+            targetPath,
+            'Verified n8n Skills winner after backup retirement',
+            testHooks,
+            'phase-70-after-cleanup'
+          );
         }
       }
     );
-    return requireExactN8nFinalWinner(
-      entry,
-      transaction,
-      targetPath,
-      'Verified n8n Skills winner after backup retirement'
-    );
+    if (!finalWinner) {
+      throw failClosedN8nRepair(
+        'final-winner-drift',
+        'n8n Skills backup retirement completed without a final exact winner proof'
+      );
+    }
+    return finalWinner;
   } catch (error) {
     if (installedVerified) {
       error.preserveOwnedStaging = true;
@@ -8340,6 +8730,7 @@ function reconcileSelectedN8nSkillsCache(entry, options = {}) {
       }
     }
 
+    requireExactN8nTargetLockAuthority(lock, 'owned-staging-registration', testHooks);
     return withOwnedStaging({
       target: pluginRoot,
       stagePrefix: `.${path.basename(pluginRoot)}.staging-`,
@@ -8367,6 +8758,7 @@ function reconcileSelectedN8nSkillsCache(entry, options = {}) {
             testHooks
           );
         } else {
+          requireExactN8nTargetLockAuthority(lock, 'unbound-staging-failure-transition', testHooks);
           markOwnedStaging(generation, 'failed');
         }
       },
@@ -8374,6 +8766,9 @@ function reconcileSelectedN8nSkillsCache(entry, options = {}) {
         const context = generation[N8N_EVIDENCE_CONTEXT];
         if (!context) {
           return cleanupOwnedGeneration(generation, {
+            beforeDelete() {
+              requireExactN8nTargetLockAuthority(lock, 'unbound-owned-staging-cleanup', testHooks);
+            },
             currentOperation: true,
             auxiliaryKinds: N8N_TRANSACTION_AUXILIARY_KINDS
           });
@@ -8381,6 +8776,7 @@ function reconcileSelectedN8nSkillsCache(entry, options = {}) {
         return cleanupOwnedGeneration(generation, {
           evidenceAuthority: context.evidenceAuthority,
           revalidateEvidenceAuthority(authority, boundary) {
+            requireExactN8nTargetLockAuthority(context, boundary, testHooks);
             return revalidateN8nEvidenceAuthority(authority, { boundary, testHooks });
           },
           cleanupEvidenceAuthority() {
@@ -8390,6 +8786,7 @@ function reconcileSelectedN8nSkillsCache(entry, options = {}) {
       }
     }, (stagePath, generation) => {
       const stagedPluginRoot = path.join(stagePath, 'plugin');
+      requireExactN8nTargetLockAuthority(lock, 'pre-transaction-registration', testHooks);
       const preTransaction = registerN8nPreTransaction(generation, entry, proposal, parityIdentity);
       let preTransactionContext = inspectN8nReplacementRecords(
         path.resolve(generation.record.expected_parent, '..', '..', '..', '..'),
@@ -8402,6 +8799,7 @@ function reconcileSelectedN8nSkillsCache(entry, options = {}) {
       if (!preTransactionContext) {
         throw failClosedN8nRepair('recovery-evidence-invalid', 'New n8n Skills pre-transaction evidence could not be bound');
       }
+      bindN8nTargetLockAuthority(preTransactionContext, lock);
       bindAndSynchronizeN8nJournal(preTransactionContext, {
         write: true,
         testHooks
@@ -8428,6 +8826,7 @@ function reconcileSelectedN8nSkillsCache(entry, options = {}) {
       if (testHooks.duringN8nRepairStageCopy) {
         testHooks.duringN8nRepairStageCopy({ generation, pluginRoot, stagedPluginRoot });
       }
+      requireExactN8nTargetLockAuthority(preTransactionContext, 'candidate-staging-copy', testHooks);
       fs.cpSync(pluginRoot, stagedPluginRoot, { recursive: true });
       const copiedState = classifyN8nSkillsCompatibility(stagedPluginRoot);
       if (!sameN8nCompatibilityEvidence(proposal, copiedState)) {
@@ -8453,6 +8852,7 @@ function reconcileSelectedN8nSkillsCache(entry, options = {}) {
       if (testHooks.duringN8nRepairStageTransformation) {
         testHooks.duringN8nRepairStageTransformation({ generation, pluginRoot, stagedPluginRoot });
       }
+      requireExactN8nTargetLockAuthority(preTransactionContext, 'staged-tree-transformation', testHooks);
       revalidateN8nEvidenceAuthority(preTransactionContext.evidenceAuthority, {
         boundary: 'before-staged-tree-transformation',
         testHooks

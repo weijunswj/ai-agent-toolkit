@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.9.19",
+  "version": "2.9.20",
   "version_policy": "semver",
-  "version_notes": "Revalidates the final installed n8n Skills winner through backup retirement, preserves exact terminal failure evidence on drift, resumes that failed generation deterministically, and exits unsupported platforms before Windows cache inspection.",
+  "version_notes": "Keeps live and indeterminate n8n target-lock owners non-recoverable by age, fences protected mutation boundaries with exact lock authority, and bounds phase-70 full winner proofs while retaining exact per-entry cleanup checks.",
   "outputs": [
     {
       "kind": "curated",
