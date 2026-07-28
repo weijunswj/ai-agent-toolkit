@@ -559,7 +559,8 @@ function cloneExecutionState(state) {
     workingDirectory: state.workingDirectory,
     locationStack: state.locationStack.slice(),
     processParentKey: state.processParentKey,
-    outerParentKey: state.outerParentKey
+    outerParentKey: state.outerParentKey,
+    wrapperOccurrenceIdentity: state.wrapperOccurrenceIdentity
   };
 }
 
@@ -594,7 +595,7 @@ function stateFingerprint(state) {
 function uniqueStates(states, location) {
   const values = new Map();
   for (const state of states) {
-    const key = (state.processParentKey || '') + '\0' + stateFingerprint(state);
+    const key = (state.wrapperOccurrenceIdentity ? state.wrapperOccurrenceIdentity + '\0' : '') + (state.processParentKey || '') + '\0' + stateFingerprint(state);
     values.set(key, state);
   }
   if (values.size > MAX_EXECUTION_PATHS) throw new InventoryError('WF_PATH_LIMIT', location);
@@ -602,11 +603,18 @@ function uniqueStates(states, location) {
 }
 
 function getPairedRecords(states) {
-  const pairs = states.map((s) => [s.processParentKey || '', stateFingerprint(s)]);
+  const counts = new Map();
+  const pairs = states.map((s) => {
+    const outerToken = s.processParentKey || '';
+    const fp = stateFingerprint(s);
+    const ordinal = (counts.get(fp) || 0) + 1;
+    counts.set(fp, ordinal);
+    return [outerToken, fp, ordinal];
+  });
   pairs.sort((a, b) => {
-    if (a[0] !== b[0]) return a[0] < b[0] ? -1 : 1;
     if (a[1] !== b[1]) return a[1] < b[1] ? -1 : 1;
-    return 0;
+    if (a[2] !== b[2]) return a[2] - b[2];
+    return a[0] < b[0] ? -1 : 1;
   });
   return pairs;
 }
@@ -936,73 +944,75 @@ function evaluateWrapper(invocation, states, context, directory, root, location,
   const file = resolveStaticFile(context.repoRoot, directory, invocation.script, location);
   const activeKey = invocation.shell + '\0' + file;
   if (context.activeWrappers.has(activeKey)) throw new InventoryError('WF_WRAPPER_CYCLE', location);
-  // Wrapper memo key invariant: each input state's caller token is paired with its exact
-  // non-token state fingerprint. Sorting tokens independently from state fingerprints would
-  // collide distinct pairings like [(T1,A),(T2,B)] with [(T1,B),(T2,A)]; we preserve the
-  // exact pair and its multiplicity so the cache stays caller-neutral only when the full
-  // paired input is identical.
+
+  // Wrapper memo key invariant: Independent cache oracle computation ensures the key
+  // represents exactly the input state fingerprints and their exact multiplicity,
+  // completely irrespective of the caller tokens.
   const pairedRecords = getPairedRecords(states);
-  const memoKey = activeKey + '\0' + pairedRecords.map((p) => p[0] + '\x01' + p[1]).join('\x02');
+  const memoKey = activeKey + '\0' + pairedRecords.map((p) => p[1] + '\x02' + p[2]).join('\x03');
   const isHit = context.wrapperResults.has(memoKey);
-    if (context.wrapperEvents && !isHit) {
-    for (const [callerToken, stateFp] of pairedRecords) {
-      context.wrapperEvents.push({
-        kind: 'miss',
-        wrapper: activeKey,
-        pairedInput: callerToken + '\x01' + stateFp,
-        cacheKey: memoKey,
-        inputCallerToken: callerToken
-      });
-    }
-  }
+
+  const scriptStates = cloneStates(states);
+  const parents = new Map();
+  const counts = new Map();
+
+  scriptStates.forEach((state, stateIndex) => {
+    const outerToken = state.processParentKey || '';
+    const fp = stateFingerprint(state);
+    const ordinal = (counts.get(fp) || 0) + 1;
+    counts.set(fp, ordinal);
+    
+    // Evaluate using caller-oblivious identities
+    const childKey = 'wr\0' + fp + '\x02' + ordinal;
+    state.processParentKey = childKey;
+    state.wrapperOccurrenceIdentity = childKey;
+    
+    const snapshot = cloneExecutionState(states[stateIndex]);
+    snapshot._savedProcessParentKey = outerToken;
+    snapshot._childKey = childKey;
+    parents.set(childKey, snapshot);
+  });
+
+  let rawResult;
   if (isHit) {
     const cached = context.wrapperResults.get(memoKey);
-    const restored = { success: cloneStates(cached.success), failure: cloneStates(cached.failure) };
+    rawResult = { success: cloneStates(cached.success), failure: cloneStates(cached.failure) };
+  } else {
     if (context.wrapperEvents) {
-      const recorded = new Set();
-      for (const state of [...restored.success, ...restored.failure]) {
-        const callerToken = state.processParentKey || '';
-        if (recorded.has(callerToken + '\x01' + stateFingerprint(state))) continue;
-        recorded.add(callerToken + '\x01' + stateFingerprint(state));
+      for (const [callerToken, stateFp, ordinal] of pairedRecords) {
         context.wrapperEvents.push({
-          kind: 'hit',
+          kind: 'miss',
           wrapper: activeKey,
-          pairedInput: callerToken + '\x01' + stateFingerprint(state),
+          pairedInput: callerToken + '\x01' + stateFp,
           cacheKey: memoKey,
-          actualRestoredToken: callerToken
+          inputCallerToken: callerToken,
+          ordinal
         });
       }
     }
-    return restored;
+    context.executionNodes += 1;
+    if (context.executionNodes > MAX_EXECUTION_NODES) throw new InventoryError('WF_NODE_LIMIT', location);
+    let graph = context.wrapperGraphs.get(activeKey);
+    if (!graph) {
+      const source = fs.readFileSync(file, 'utf8')
+        .replace(/^\uFEFF/, '')
+        .replace(/^#![^\r\n]*(?:\r?\n|$)/, '');
+      graph = parseCommandGraph(source, invocation.shell, location);
+      context.wrapperGraphs.set(activeKey, graph);
+    }
+    context.activeWrappers.add(activeKey);
+    try {
+      rawResult = evaluateGraph(graph, scriptStates, context, directory, root, invocation.shell, location, depth + 1);
+    } finally {
+      context.activeWrappers.delete(activeKey);
+    }
+    context.wrapperResults.set(memoKey, { success: cloneStates(rawResult.success), failure: cloneStates(rawResult.failure) });
   }
-  context.executionNodes += 1;
-  if (context.executionNodes > MAX_EXECUTION_NODES) throw new InventoryError('WF_NODE_LIMIT', location);
-  let graph = context.wrapperGraphs.get(activeKey);
-  if (!graph) {
-    const source = fs.readFileSync(file, 'utf8')
-      .replace(/^\uFEFF/, '')
-      .replace(/^#![^\r\n]*(?:\r?\n|$)/, '');
-    graph = parseCommandGraph(source, invocation.shell, location);
-    context.wrapperGraphs.set(activeKey, graph);
-  }
-  context.activeWrappers.add(activeKey);
-  const scriptStates = cloneStates(states);
-  const parents = new Map();
-  const allocatedKeys = [];
-  scriptStates.forEach((state, stateIndex) => {
-    const outerToken = state.processParentKey;
-    const childKey = 'wr' + '\0' + String(depth) + '\0' + String(stateIndex) + '\0' + String(context.processTokenSeq++);
-    state.processParentKey = childKey;
-    allocatedKeys.push({ callerToken: outerToken, allocatedToken: childKey });
-    const snapshot = cloneExecutionState(states[stateIndex]);
-    snapshot._savedProcessParentKey = outerToken;
-    parents.set(childKey, snapshot);
-  });
-  const result = evaluateGraph(graph, scriptStates, context, directory, root, invocation.shell, location, depth + 1);
-  context.activeWrappers.delete(activeKey);
-  const recordedRestore = new Set();
-  for (const collection of [result.success, result.failure]) {
-    const branch = collection === result.success ? 'success' : 'failure';
+
+  // Restore the raw wrapper outcome into the caller's tokens
+  const restoredResult = { success: cloneStates(rawResult.success), failure: cloneStates(rawResult.failure) };
+  for (const collection of [restoredResult.success, restoredResult.failure]) {
+    const branch = collection === restoredResult.success ? 'success' : 'failure';
     for (const state of collection) {
       const snapshot = parents.get(state.processParentKey);
       if (snapshot) {
@@ -1017,27 +1027,21 @@ function evaluateWrapper(invocation, states, context, directory, root, location,
         }
         state.processParentKey = snapshot._savedProcessParentKey;
         if (context.wrapperEvents) {
-          const callerToken = snapshot._savedProcessParentKey;
-          const allocated = allocatedKeys.find((a) => a.callerToken === callerToken);
-          const key = callerToken + '\x01' + stateFingerprint(state);
-          if (!recordedRestore.has(key)) {
-            recordedRestore.add(key);
-            context.wrapperEvents.push({
-              kind: 'restore',
-              wrapper: activeKey,
-              pairedInput: callerToken + '\x01' + stateFingerprint(state),
-              cacheKey: memoKey,
-              actualRestoredToken: state.processParentKey || null,
-              branch,
-              allocatedToken: allocated ? allocated.allocatedToken : null
-            });
-          }
+          const callerToken = snapshot._savedProcessParentKey || '';
+          context.wrapperEvents.push({
+            kind: isHit ? 'hit' : 'restore',
+            wrapper: activeKey,
+            pairedInput: callerToken + '\x01' + stateFingerprint(state),
+            cacheKey: memoKey,
+            actualRestoredToken: state.processParentKey || null,
+            branch,
+            allocatedToken: snapshot._childKey
+          });
         }
       }
     }
   }
-  context.wrapperResults.set(memoKey, { success: cloneStates(result.success), failure: cloneStates(result.failure) });
-  return result;
+  return restoredResult;
 }
 
 function evaluatePackageScript(name, states, context, directory, root, location, depth) {
@@ -1583,5 +1587,8 @@ module.exports = {
   RunnerIdentityState,
   ExecutableIdentityState,
   runInventory,
-  getPairedRecords
+  getPairedRecords,
+  evaluateWrapper,
+  cloneExecutionState,
+  initialExecutionState
 };

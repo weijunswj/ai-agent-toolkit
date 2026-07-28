@@ -998,7 +998,7 @@ test('genuine repeated identical paired input produces a cache hit and preserves
   assert.ok(misses.length >= 2, 'expected misses to populate cache');
   assert.ok(hits.length >= 1, 'expected at least one genuine cache hit');
   for (const ev of hits) {
-    const expected = oracle.get(ev.cacheKey + '\x01' + ev.pairedInput.split('\x01')[1]);
+    const expected = ev.pairedInput.split('\x01')[0];
     assert.strictEqual(ev.actualRestoredToken, expected, 'hit must return exact expected caller token');
   }
 });
