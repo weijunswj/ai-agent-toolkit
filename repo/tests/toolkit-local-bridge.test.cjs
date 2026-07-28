@@ -56,7 +56,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.9.21';
+const expectedBridgeVersion = '2.9.22';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 const currentN8nManifestPath = path.join(
   repoRoot,
@@ -865,6 +865,47 @@ function spawnAbruptN8nRepair(pluginRoot, version, hookName) {
     cwd: repoRoot,
     stdio: ['ignore', 'pipe', 'pipe']
   });
+}
+
+function stopTargetLockProtocol(pluginRoot, hookName) {
+  const identity = n8nSkillsTargetLockIdentity(pluginRoot);
+  const childSource = [
+    `const bridge = require(${JSON.stringify(path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'))});`,
+    'const hubRoot = process.argv[1];',
+    'const lockName = process.argv[2];',
+    'const hookName = process.argv[3];',
+    'const hooks = {};',
+    'hooks[hookName] = () => process.exit(73);',
+    'bridge.acquireLock(hubRoot, { hook: true, lockName, syncSource: "codex-plugin" }, hooks);',
+    'process.exit(74);'
+  ].join('\n');
+  const stopped = spawnSync(
+    process.execPath,
+    ['-e', childSource, identity.hubRoot, identity.lockName, hookName],
+    {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      timeout: 30000,
+      windowsHide: true
+    }
+  );
+  assert.equal(
+    stopped.status,
+    73,
+    `target-lock protocol did not stop at ${hookName}\nstdout:\n${stopped.stdout}\nstderr:\n${stopped.stderr}`
+  );
+  return identity;
+}
+
+function validStoppedLockRecord(overrides = {}) {
+  return {
+    created_at: new Date().toISOString(),
+    pid: 2147483647,
+    token: crypto.randomUUID(),
+    bridge_version: expectedBridgeVersion,
+    sync_source: 'codex-plugin',
+    ...overrides
+  };
 }
 
 function readSingleN8nOwnedGeneration(pluginRoot) {
@@ -3417,10 +3458,19 @@ test('artifact cleanup removes only exact Toolkit tombstone namespaces', () => {
   const spentRetire = path.join(hubRoot, 'update.lock.displaced.bbbb2222-33cc-4ddd-8eee-ffff66660000.retired-abcdef0123456789');
   const unrelatedSuffix = path.join(hubRoot, 'user-notes.retired-deadbeef');
   const unrelatedFile = path.join(hubRoot, 'unrelated-user-file.txt');
-  const unrelatedDirectory = path.join(hubRoot, 'update.lock.displaced.cccc3333-44dd-4eee-8fff-aaaa77771111.retired-0123456789abcdef');
+  const unrelatedDirectory = path.join(hubRoot, 'update.lock.displaced.cccc3333-44dd-4eee-8fff-aaaa77771111.retired-0123456789abcdef-extra');
   writeJson(liveEvidence, { created_at: new Date(old).toISOString(), pid: 777777, token: 'live-owner' });
-  writeJson(spentReclaim, { created_at: new Date(old).toISOString(), pid: 999998 });
-  writeJson(spentRetire, { created_at: new Date(old).toISOString(), pid: 999997 });
+  writeJson(spentReclaim, {
+    created_at: new Date(old).toISOString(),
+    pid: 999998,
+    token: crypto.randomUUID(),
+    reclaimed_marker_identity: 'deadbeefdeadbeef'
+  });
+  writeJson(spentRetire, {
+    created_at: new Date(old).toISOString(),
+    pid: 999997,
+    retired_identity: 'abcdef0123456789'
+  });
   fs.writeFileSync(unrelatedSuffix, 'keep similar suffix\n', 'utf8');
   fs.writeFileSync(unrelatedFile, 'keep unrelated file\n', 'utf8');
   fs.mkdirSync(unrelatedDirectory);
@@ -3434,8 +3484,8 @@ test('artifact cleanup removes only exact Toolkit tombstone namespaces', () => {
 
   assert.equal(result.acquired, false, 'the live evidence still blocks after cleanup ran');
   assert.equal(fs.existsSync(liveEvidence), true, 'live displaced evidence is never age-collected');
-  assert.equal(fs.existsSync(spentReclaim), false, 'spent reclaim tombstones age out');
-  assert.equal(fs.existsSync(spentRetire), false, 'spent retirement tombstones age out');
+  assert.equal(fs.existsSync(spentReclaim), false, 'exact dead-owner reclaim tombstones retire immediately');
+  assert.equal(fs.existsSync(spentRetire), false, 'exact dead-owner retirement tombstones retire immediately');
   assert.equal(fs.readFileSync(unrelatedSuffix, 'utf8'), 'keep similar suffix\n', 'a similar retirement suffix is unrelated and preserved');
   assert.equal(fs.readFileSync(unrelatedFile, 'utf8'), 'keep unrelated file\n', 'an unrelated file is preserved');
   assert.equal(fs.readFileSync(path.join(unrelatedDirectory, 'keep.txt'), 'utf8'), 'keep unrelated directory\n', 'an unrelated directory is preserved even when its name matches the file namespace');
@@ -3454,6 +3504,299 @@ test('recovery marker release is token-guarded', () => {
   assert.equal(fs.existsSync(markerPath), true, 'a forged token cannot remove the winning marker');
   bridge.releaseRecoveryMarker(markerPath, 'winning-recovery');
   assert.equal(fs.existsSync(markerPath), false, 'the owner token releases its own marker');
+});
+
+test('Codex n8n exact target-lock artifacts survive process stops without inventory wedges', (t) => {
+  const cases = [
+    {
+      label: 'recovery-marker',
+      prepare(pluginRoot) {
+        stopTargetLockProtocol(pluginRoot, 'afterMarkerClaim');
+      }
+    },
+    {
+      label: 'recovery-claim',
+      prepare(pluginRoot) {
+        const identity = n8nSkillsTargetLockIdentity(pluginRoot);
+        writeJson(
+          path.join(identity.hubRoot, `${identity.lockName}.recovery`),
+          validStoppedLockRecord()
+        );
+        stopTargetLockProtocol(pluginRoot, 'afterMarkerClaimTombstoneCreated');
+      }
+    },
+    {
+      label: 'displaced-lock',
+      prepare(pluginRoot) {
+        const identity = n8nSkillsTargetLockIdentity(pluginRoot);
+        writeJson(
+          path.join(identity.hubRoot, identity.lockName),
+          validStoppedLockRecord()
+        );
+        stopTargetLockProtocol(pluginRoot, 'afterDisplace');
+      }
+    },
+    {
+      label: 'displaced-retirement',
+      prepare(pluginRoot) {
+        const identity = n8nSkillsTargetLockIdentity(pluginRoot);
+        const displacementToken = crypto.randomUUID();
+        writeJson(
+          path.join(
+            identity.hubRoot,
+            `${identity.lockName}.displaced.${displacementToken}`
+          ),
+          validStoppedLockRecord()
+        );
+        stopTargetLockProtocol(pluginRoot, 'afterDisplacedRetirementTombstoneCreated');
+      }
+    }
+  ];
+  for (const current of cases) {
+    const codexHome = tmpRoot();
+    const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+    copyCurrentSupportedN8nPluginFixture(pluginRoot);
+    current.prepare(pluginRoot);
+    const stoppedArtifacts = n8nTransactionArtifacts(pluginRoot);
+    assert.ok(stoppedArtifacts.length > 0, `${current.label}: stopped protocol left exact authority`);
+    const inventory = discoverN8nSkillsCacheRoots(codexHome, {
+      targetPaths: [pluginRoot]
+    });
+    assert.ok(
+      inventory.lock_artifact_authority.entries.length > 0,
+      `${current.label}: strict inventory carries separate lock-artifact authority`
+    );
+    const recovered = repairThirdPartyCodexPluginHooks({
+      codexHome,
+      windows: true,
+      write: true,
+      pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
+    });
+    assert.equal(recovered.status, 'repaired', `${current.label}: ${JSON.stringify(recovered)}`);
+    assert.notEqual(recovered.code, 'ambiguous-target', current.label);
+    let completeClassifications = 0;
+    const healthy = repairThirdPartyCodexPluginHooks({
+      codexHome,
+      windows: true,
+      write: true,
+      pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+      testHooks: {
+        afterN8nCompleteClassification() {
+          completeClassifications += 1;
+        }
+      }
+    });
+    assert.equal(healthy.status, 'not-needed', current.label);
+    assert.equal(
+      completeClassifications,
+      1,
+      `${current.label}: healthy SessionStart retains one complete classification`
+    );
+    t.diagnostic(`${current.label}=recovered`);
+  }
+});
+
+test('Codex n8n malformed and decoy target-lock artifacts fail closed without mutation', (t) => {
+  const cases = [
+    {
+      label: 'near-matching-name',
+      create(pluginRoot, identity) {
+        writeJson(
+          path.join(identity.hubRoot, `${identity.lockName}.recovery-extra`),
+          validStoppedLockRecord()
+        );
+      }
+    },
+    {
+      label: 'wrong-target-hash',
+      create(pluginRoot, identity) {
+        const wrong = n8nSkillsTargetLockIdentity(`${pluginRoot}-other`);
+        writeJson(
+          path.join(identity.hubRoot, `${wrong.lockName}.recovery`),
+          validStoppedLockRecord()
+        );
+      }
+    },
+    {
+      label: 'wrong-token-form',
+      create(pluginRoot, identity) {
+        writeJson(
+          path.join(identity.hubRoot, identity.lockName),
+          validStoppedLockRecord({ token: 'not-a-lock-token' })
+        );
+      }
+    },
+    {
+      label: 'directory-instead-of-file',
+      create(pluginRoot, identity) {
+        fs.mkdirSync(path.join(identity.hubRoot, `${identity.lockName}.recovery`));
+      }
+    },
+    {
+      label: 'redirected-file',
+      optional: true,
+      create(pluginRoot, identity, fixtureRoot) {
+        const target = path.join(fixtureRoot, 'redirect-target.json');
+        writeJson(target, validStoppedLockRecord());
+        try {
+          fs.symlinkSync(
+            target,
+            path.join(identity.hubRoot, `${identity.lockName}.recovery`),
+            'file'
+          );
+          return true;
+        } catch (error) {
+          if (['EPERM', 'EACCES', 'ENOTSUP', 'UNKNOWN'].includes(error?.code)) return false;
+          throw error;
+        }
+      }
+    }
+  ];
+  for (const current of cases) {
+    const fixtureRoot = tmpRoot();
+    const codexHome = path.join(fixtureRoot, 'codex-home');
+    const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+    copyCurrentSupportedN8nPluginFixture(pluginRoot);
+    const identity = n8nSkillsTargetLockIdentity(pluginRoot);
+    const supported = current.create(pluginRoot, identity, fixtureRoot) !== false;
+    if (!supported && current.optional) {
+      t.diagnostic(`${current.label}=skipped: file symlinks are unavailable`);
+      continue;
+    }
+    const before = snapshotTree(pluginRoot);
+    const artifactNames = fs.readdirSync(identity.hubRoot)
+      .filter((name) => name !== path.basename(pluginRoot))
+      .sort();
+    const result = repairThirdPartyCodexPluginHooks({
+      codexHome,
+      windows: true,
+      write: true,
+      pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
+    });
+    assert.equal(result.status, 'repair-failed', current.label);
+    assert.equal(result.code, 'ambiguous-target', current.label);
+    assert.deepEqual(snapshotTree(pluginRoot), before, `${current.label}: target remains untouched`);
+    assert.deepEqual(
+      fs.readdirSync(identity.hubRoot)
+        .filter((name) => name !== path.basename(pluginRoot))
+        .sort(),
+      artifactNames,
+      `${current.label}: decoy authority remains untouched`
+    );
+  }
+});
+
+test('Codex n8n target-lock namespace is exact to the selected parent and target', () => {
+  const firstHome = tmpRoot();
+  const secondHome = tmpRoot();
+  const firstRoot = path.join(firstHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  const secondRoot = path.join(secondHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copyCurrentSupportedN8nPluginFixture(firstRoot);
+  copyCurrentSupportedN8nPluginFixture(secondRoot);
+  const firstIdentity = n8nSkillsTargetLockIdentity(firstRoot);
+  const secondParent = path.dirname(secondRoot);
+  writeJson(
+    path.join(secondParent, `${firstIdentity.lockName}.recovery`),
+    validStoppedLockRecord()
+  );
+  const before = snapshotTree(secondRoot);
+  const result = repairThirdPartyCodexPluginHooks({
+    codexHome: secondHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
+  });
+  assert.equal(result.status, 'repair-failed');
+  assert.equal(result.code, 'ambiguous-target');
+  assert.deepEqual(snapshotTree(secondRoot), before);
+  assert.equal(
+    fs.existsSync(path.join(secondParent, `${firstIdentity.lockName}.recovery`)),
+    true,
+    'same artifact name under the wrong target parent is preserved'
+  );
+});
+
+test('Codex n8n multiple exact lock artifacts are deterministic and conflicting ownership blocks', async () => {
+  const compatibleHome = tmpRoot();
+  const compatibleRoot = path.join(compatibleHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copyCurrentSupportedN8nPluginFixture(compatibleRoot);
+  const compatibleIdentity = n8nSkillsTargetLockIdentity(compatibleRoot);
+  writeJson(
+    path.join(compatibleIdentity.hubRoot, `${compatibleIdentity.lockName}.recovery.claim-1111111111111111`),
+    {
+      created_at: new Date().toISOString(),
+      pid: 2147483647,
+      token: crypto.randomUUID(),
+      reclaimed_marker_identity: '1111111111111111'
+    }
+  );
+  const displacementToken = crypto.randomUUID();
+  writeJson(
+    path.join(
+      compatibleIdentity.hubRoot,
+      `${compatibleIdentity.lockName}.displaced.${displacementToken}.retired-2222222222222222`
+    ),
+    {
+      created_at: new Date().toISOString(),
+      pid: 2147483647,
+      retired_identity: '2222222222222222'
+    }
+  );
+  const compatibleInventory = discoverN8nSkillsCacheRoots(compatibleHome, {
+    targetPaths: [compatibleRoot]
+  });
+  assert.equal(compatibleInventory.lock_artifact_authority.entries.length, 2);
+  const compatible = repairThirdPartyCodexPluginHooks({
+    codexHome: compatibleHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
+  });
+  assert.equal(compatible.status, 'repaired', JSON.stringify(compatible));
+
+  const conflictHome = tmpRoot();
+  const conflictRoot = path.join(conflictHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copyCurrentSupportedN8nPluginFixture(conflictRoot);
+  const conflictIdentity = n8nSkillsTargetLockIdentity(conflictRoot);
+  const sleeper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 10000)'], {
+    stdio: 'ignore',
+    windowsHide: true
+  });
+  const markerPath = path.join(conflictIdentity.hubRoot, `${conflictIdentity.lockName}.recovery`);
+  const displacedPath = path.join(
+    conflictIdentity.hubRoot,
+    `${conflictIdentity.lockName}.displaced.${crypto.randomUUID()}`
+  );
+  writeJson(markerPath, validStoppedLockRecord({ pid: sleeper.pid }));
+  writeJson(displacedPath, validStoppedLockRecord());
+  const before = snapshotTree(conflictRoot);
+  try {
+    const conflictInventory = discoverN8nSkillsCacheRoots(conflictHome, {
+      targetPaths: [conflictRoot]
+    });
+    assert.equal(conflictInventory.lock_artifact_authority.entries.length, 2);
+    assert.throws(
+      () => reconcileSelectedN8nSkillsCache({
+        ...conflictInventory.roots[0],
+        selected_version: '1.0.2',
+        directory_version: '1.0.2'
+      }, {
+        write: true,
+        testHooks: {
+          targetLockOptions: {
+            attempts: 1
+          }
+        }
+      }),
+      (error) => error.code === 'target-lock-contended'
+    );
+    assert.deepEqual(snapshotTree(conflictRoot), before);
+    assert.equal(fs.existsSync(markerPath), true, 'live marker remains a hard barrier');
+    assert.equal(fs.existsSync(displacedPath), true, 'no evidence is retired before the live marker claim');
+  } finally {
+    sleeper.kill();
+    await new Promise((resolve) => sleeper.once('close', resolve));
+  }
 });
 
 test('lockOwnerLiveness classifies alive, dead, indeterminate, and unusable PIDs safely', () => {
@@ -8028,7 +8371,7 @@ test('Codex n8n interrupted replacement restores exact original bytes when the r
   assert.deepEqual(n8nTransactionArtifacts(pluginRoot), [], 'post-recovery retry must remain residue-free');
 });
 
-test('Codex n8n interrupted rollback restores the exact original after the failed target was removed', async () => {
+test('Codex n8n interrupted rollback restores the exact original after an unchanged failed target was removed', async () => {
   const root = tmpRoot();
   const codexHome = path.join(root, 'codex-home');
   const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
@@ -8036,14 +8379,12 @@ test('Codex n8n interrupted rollback restores the exact original after the faile
   writeFile(path.join(pluginRoot, 'unrelated.txt'), 'original rollback bytes\n');
   const original = snapshotTree(pluginRoot);
   const childSource = [
-    "const fs = require('node:fs');",
-    "const path = require('node:path');",
     `const bridge = require(${JSON.stringify(path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'))});`,
     'const pluginRoot = process.argv[1];',
     'bridge.reconcileSelectedN8nSkillsCache({',
     "  plugin_id: 'n8n-skills@n8n-io', version: '1.0.2', selected_version: '1.0.2', directory_version: '1.0.2', plugin_root: pluginRoot",
     '}, { write: true, testHooks: {',
-    "  beforeN8nRepairVerification({ pluginRoot: installed }) { fs.appendFileSync(path.join(installed, 'unrelated.txt'), 'verification drift\\n'); },",
+    "  beforeN8nRepairVerification() { throw new Error('injected exact-target verification interruption'); },",
     '  afterN8nRepairFailedTargetRemoved() { process.exit(73); }',
     '} });',
     'process.exit(74);'
@@ -8065,7 +8406,7 @@ test('Codex n8n interrupted rollback restores the exact original after the faile
   assert.deepEqual(n8nTransactionArtifacts(pluginRoot), [], 'interrupted rollback recovery must leave no residue');
 });
 
-test('Codex n8n interrupted verification restores an identity-bound installed directory that drifted', async () => {
+test('Codex n8n interrupted verification preserves an identity-bound installed directory that drifted', async () => {
   const root = tmpRoot();
   const codexHome = path.join(root, 'codex-home');
   const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
@@ -8090,32 +8431,37 @@ test('Codex n8n interrupted verification restores an identity-bound installed di
   });
   await waitForAbruptChild(child);
   assert.equal(fs.existsSync(pluginRoot), true, 'fixture must leave the installed owned directory present');
+  const drifted = snapshotTree(pluginRoot);
 
-  const recovery = recoverInterruptedN8nReplacement({
-    codexHome,
-    pluginInspection: { ok: true, pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]), errors: [] },
-    write: true
-  });
-  assert.equal(recovery.status, 'original-restored');
-  assert.deepEqual(snapshotTree(pluginRoot), original, 'interrupted verification must restore exact original bytes');
-  assert.deepEqual(n8nTransactionArtifacts(pluginRoot), [], 'interrupted verification recovery must leave no residue');
+  assert.throws(
+    () => recoverInterruptedN8nReplacement({
+      codexHome,
+      pluginInspection: { ok: true, pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]), errors: [] },
+      write: true
+    }),
+    (error) => error.code === 'destructive-boundary-drift'
+  );
+  assert.deepEqual(snapshotTree(pluginRoot), drifted, 'interrupted verification drift remains untouched');
+  const artifacts = n8nTransactionArtifacts(pluginRoot);
+  const backupName = artifacts.find((name) => name.includes('.n8n-repair-backup-'));
+  assert.ok(backupName, 'the exact original remains preserved as backup');
+  assert.deepEqual(snapshotTree(path.join(path.dirname(pluginRoot), backupName)), original);
+  assert.ok(artifacts.some((name) => name.startsWith(RECORD_PREFIX)), 'recovery evidence remains');
 });
 
-test('Codex n8n recovery cleans an exact original restored before abrupt rollback cleanup', async () => {
+test('Codex n8n recovery cleans an exact original restored after unchanged-target rollback', async () => {
   const root = tmpRoot();
   const codexHome = path.join(root, 'codex-home');
   const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
   copyCurrentSupportedN8nPluginFixture(pluginRoot);
   const original = snapshotTree(pluginRoot);
   const childSource = [
-    "const fs = require('node:fs');",
-    "const path = require('node:path');",
     `const bridge = require(${JSON.stringify(path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'))});`,
     'const pluginRoot = process.argv[1];',
     'bridge.reconcileSelectedN8nSkillsCache({',
     "  plugin_id: 'n8n-skills@n8n-io', version: '1.0.2', selected_version: '1.0.2', directory_version: '1.0.2', plugin_root: pluginRoot",
     '}, { write: true, testHooks: {',
-    "  beforeN8nRepairVerification({ pluginRoot: installed }) { fs.appendFileSync(path.join(installed, 'hooks', 'session-start.sh'), '# verification drift\\n'); },",
+    "  beforeN8nRepairVerification() { throw new Error('injected exact-target verification interruption'); },",
     '  afterN8nRepairBackupRestored() { process.exit(73); }',
     '} });',
     'process.exit(74);'
@@ -8703,15 +9049,18 @@ test('Codex n8n target locks recover stale owners and do not block unrelated cac
   writeJson(path.join(unrelatedLock.hubRoot, unrelatedLock.lockName), {
     created_at: new Date().toISOString(),
     pid: sleeper.pid,
-    token: 'live-unrelated-test-owner',
+    token: crypto.randomUUID(),
     bridge_version: expectedBridgeVersion,
     sync_source: 'codex-plugin'
   });
   try {
-    const unrelated = reconcileSelectedN8nSkillsCache({
-      plugin_id: 'n8n-skills@n8n-io', version: '1.0.2', selected_version: '1.0.2', directory_version: '1.0.2', plugin_root: secondRoot
-    }, { write: true });
-    assert.equal(unrelated.status, 'repaired');
+    const unrelated = repairThirdPartyCodexPluginHooks({
+      codexHome: path.join(root, 'codex-home'),
+      windows: true,
+      write: true,
+      pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
+    });
+    assert.equal(unrelated.status, 'repaired', JSON.stringify(unrelated));
     assert.equal(fs.existsSync(path.join(unrelatedLock.hubRoot, unrelatedLock.lockName)), true, 'unrelated target lock remains owned and untouched');
     assert.deepEqual(n8nTransactionArtifacts(secondRoot), [], 'unrelated target repair leaves no transaction residue');
   } finally {
@@ -8726,7 +9075,7 @@ test('Codex n8n target locks recover stale owners and do not block unrelated cac
   assert.equal(Boolean(retry.repaired), false, 'retry is idempotent');
 });
 
-test('Codex n8n repair blocks stale approval and restores exact bytes after verification failure', () => {
+test('Codex n8n repair blocks stale approval and preserves drift before unsafe rollback', () => {
   const root = tmpRoot();
   const staleHome = path.join(root, 'stale-home');
   const staleRoot = path.join(staleHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
@@ -8773,6 +9122,7 @@ test('Codex n8n repair blocks stale approval and restores exact bytes after veri
   const rollbackUnrelated = path.join(rollbackRoot, 'unrelated.txt');
   writeFile(rollbackUnrelated, 'preserve exact bytes\n');
   const before = snapshotTree(rollbackRoot);
+  let drifted;
   const failed = repairThirdPartyCodexPluginHooks({
     codexHome: rollbackHome,
     windows: true,
@@ -8781,14 +9131,199 @@ test('Codex n8n repair blocks stale approval and restores exact bytes after veri
     testHooks: {
       beforeN8nRepairVerification({ pluginRoot }) {
         fs.appendFileSync(path.join(pluginRoot, 'unrelated.txt'), 'verification drift\n', 'utf8');
+        drifted = snapshotTree(pluginRoot);
       }
     }
   });
   assert.equal(failed.status, 'repair-failed');
   assert.equal(failed.code, 'verification-failed');
-  assert.match(failed.errors.join('\n'), /verification failed/i);
-  assert.deepEqual(snapshotTree(rollbackRoot), before, 'verification failure must restore the exact original cache');
-  assert.deepEqual(n8nTransactionArtifacts(rollbackRoot), [], 'rollback failure path leaves no stage, backup, marker, or lock residue');
+  assert.match(failed.errors.join('\n'), /verification failed.*rollback could not be completed safely/i);
+  assert.deepEqual(snapshotTree(rollbackRoot), drifted, 'drifted installed bytes must not be recursively deleted');
+  const rollbackArtifacts = n8nTransactionArtifacts(rollbackRoot);
+  const backupName = rollbackArtifacts.find((name) => name.includes('.n8n-repair-backup-'));
+  assert.ok(backupName, 'the exact original backup remains available');
+  assert.deepEqual(snapshotTree(path.join(path.dirname(rollbackRoot), backupName)), before);
+  assert.ok(
+    rollbackArtifacts.some((name) => name.startsWith(RECORD_PREFIX)),
+    'transaction evidence remains available for restart adjudication'
+  );
+});
+
+test('Codex n8n failed-target deletion requires exact fresh tree evidence for content and topology drift', (t) => {
+  const cases = [
+    {
+      label: 'added-file',
+      mutate(pluginRoot) {
+        writeFile(path.join(pluginRoot, 'added-after-install.txt'), 'unapproved bytes\n');
+      }
+    },
+    {
+      label: 'same-length-rewrite',
+      prepare(pluginRoot) {
+        writeFile(path.join(pluginRoot, 'same-length.txt'), 'AAAA1111\n');
+      },
+      mutate(pluginRoot) {
+        writeFile(path.join(pluginRoot, 'same-length.txt'), 'BBBB2222\n');
+      }
+    },
+    {
+      label: 'added-directory',
+      mutate(pluginRoot) {
+        writeFile(path.join(pluginRoot, 'added-directory', 'entry.txt'), 'unapproved topology\n');
+      }
+    },
+    {
+      label: 'removed-entry',
+      mutate(pluginRoot) {
+        fs.rmSync(path.join(pluginRoot, 'hooks', 'session-start.sh'));
+      }
+    },
+    {
+      label: 'redirected-entry',
+      optional: true,
+      mutate(pluginRoot, fixtureRoot) {
+        const hooksPath = path.join(pluginRoot, 'hooks');
+        const redirectTarget = path.join(fixtureRoot, 'redirected-hooks');
+        fs.renameSync(hooksPath, redirectTarget);
+        return createDirectoryRedirect(redirectTarget, hooksPath);
+      }
+    }
+  ];
+  for (const current of cases) {
+    const fixtureRoot = tmpRoot();
+    const codexHome = path.join(fixtureRoot, 'codex-home');
+    const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+    copyCurrentSupportedN8nPluginFixture(pluginRoot);
+    if (current.prepare) current.prepare(pluginRoot);
+    const original = snapshotTree(pluginRoot);
+    let drifted = null;
+    let supported = true;
+    const result = repairThirdPartyCodexPluginHooks({
+      codexHome,
+      windows: true,
+      write: true,
+      pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+      testHooks: {
+        beforeN8nRepairVerification({ pluginRoot: installedRoot }) {
+          supported = current.mutate(installedRoot, fixtureRoot) !== false;
+          if (supported) drifted = snapshotTree(installedRoot);
+        }
+      }
+    });
+    if (!supported && current.optional) {
+      t.diagnostic(`${current.label}=skipped: directory redirects are unavailable`);
+      continue;
+    }
+    assert.equal(result.status, 'repair-failed', current.label);
+    assert.equal(result.code, 'verification-failed', current.label);
+    assert.match(
+      result.errors.join('\n'),
+      /rollback could not be completed safely/i,
+      current.label
+    );
+    assert.deepEqual(snapshotTree(pluginRoot), drifted, `${current.label}: changed target is preserved`);
+    const artifacts = n8nTransactionArtifacts(pluginRoot);
+    const backupName = artifacts.find((name) => name.includes('.n8n-repair-backup-'));
+    assert.ok(backupName, `${current.label}: original backup remains`);
+    assert.deepEqual(
+      snapshotTree(path.join(path.dirname(pluginRoot), backupName)),
+      original,
+      `${current.label}: backup bytes remain exact`
+    );
+    assert.ok(
+      artifacts.some((name) => name.startsWith(RECORD_PREFIX)),
+      `${current.label}: transaction evidence remains`
+    );
+  }
+});
+
+test('Codex n8n exact unchanged failed target can still be removed and original restored', () => {
+  const codexHome = tmpRoot();
+  const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copyCurrentSupportedN8nPluginFixture(pluginRoot);
+  writeFile(path.join(pluginRoot, 'rollback-control.txt'), 'exact original\n');
+  const original = snapshotTree(pluginRoot);
+  const failed = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+    testHooks: {
+      beforeN8nRepairVerification() {
+        throw new Error('injected verification interruption');
+      }
+    }
+  });
+  assert.equal(failed.status, 'repair-failed');
+  assert.match(failed.errors.join('\n'), /injected verification interruption/i);
+  assert.deepEqual(snapshotTree(pluginRoot), original);
+  assert.deepEqual(
+    n8nTransactionArtifacts(pluginRoot),
+    [],
+    'exact failed target, backup, and transaction residue are retired after restoration'
+  );
+});
+
+test('Codex n8n interrupted recovered-target drift is preserved before recursive deletion', async () => {
+  const codexHome = tmpRoot();
+  const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copyCurrentSupportedN8nPluginFixture(pluginRoot);
+  writeFile(path.join(pluginRoot, 'recovery-drift.txt'), 'AAAA1111\n');
+  const original = snapshotTree(pluginRoot);
+  await waitForAbruptChild(
+    spawnAbruptN8nRepair(pluginRoot, '1.0.2', 'afterN8nRepairTargetDisplaced')
+  );
+  let drifted;
+  const recovered = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+    testHooks: {
+      afterN8nEvidencePhaseCreated({ evidence_kind }) {
+        if (evidence_kind !== 'n8n-replacement-phase-50-verify') return;
+        writeFile(path.join(pluginRoot, 'recovery-drift.txt'), 'BBBB2222\n');
+        drifted = snapshotTree(pluginRoot);
+      }
+    }
+  });
+  assert.equal(recovered.status, 'repair-failed');
+  assert.equal(recovered.code, 'destructive-boundary-drift');
+  assert.deepEqual(snapshotTree(pluginRoot), drifted, 'drifted recovered target remains exact');
+  const artifacts = n8nTransactionArtifacts(pluginRoot);
+  const backupName = artifacts.find((name) => name.includes('.n8n-repair-backup-'));
+  assert.ok(backupName, 'recovered original backup remains');
+  assert.deepEqual(snapshotTree(path.join(path.dirname(pluginRoot), backupName)), original);
+  const generation = readSingleN8nOwnedGeneration(pluginRoot);
+  const journal = inspectN8nRepairJournal({
+    codexHome,
+    generationId: generation.record.generation_id,
+    ownershipToken: generation.record.ownership_token,
+    targetPath: pluginRoot
+  });
+  assert.ok(journal.records.length > 0, 'journal authority remains restart-adjudicable');
+  assert.equal(
+    fs.existsSync(n8nEvidencePath(
+      generation.recordPath,
+      'n8n-replacement-phase-50-verify',
+      generation.record
+    )),
+    true,
+    'phase evidence remains available'
+  );
+});
+
+test('Codex n8n fresh destructive-delete specifications are centrally evidence-mandatory', () => {
+  const source = fs.readFileSync(script, 'utf8');
+  assert.match(
+    source,
+    /tree\.fresh && \(!tree\.evidence \|\| typeof tree\.status !== 'string' \|\| !tree\.status\)/
+  );
+  for (const match of source.matchAll(/trees:\s*\[\{([\s\S]*?)\}\]/g)) {
+    if (!/\bfresh:\s*true\b/.test(match[1])) continue;
+    assert.match(match[1], /\bevidence:/, 'fresh tree caller must provide exact evidence');
+    assert.match(match[1], /\bstatus:/, 'fresh tree caller must provide an exact required status');
+  }
 });
 
 test('Codex n8n final winner drift never becomes repaired and preserves recovery authority', () => {
@@ -8862,7 +9397,7 @@ test('Codex n8n final winner drift never becomes repaired and preserves recovery
   }
 });
 
-test('Codex n8n restart after final-winner drift recovers once and then remains healthy', (t) => {
+test('Codex n8n restart after final-winner drift adjudicates once and then remains healthy', (t) => {
   const root = tmpRoot();
   const codexHome = path.join(root, 'restart-after-final-drift');
   const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
@@ -8899,14 +9434,33 @@ test('Codex n8n restart after final-winner drift recovers once and then remains 
     'the returned failure must leave exact terminal evidence that authorizes deterministic recovery'
   );
 
+  let observedSafeFailedBackupRetirement = false;
   const recovered = repairThirdPartyCodexPluginHooks({
     codexHome,
     windows: true,
     write: true,
-    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+    testHooks: {
+      afterN8nBackupCleanupEntry({ relative_path: relativePath }) {
+        if (relativePath !== '' || observedSafeFailedBackupRetirement) return;
+        observedSafeFailedBackupRetirement = true;
+        assert.equal(
+          fs.readFileSync(path.join(pluginRoot, 'unrelated.txt'), 'utf8'),
+          'one-time final drift\n',
+          'failed phase-70 backup retirement must leave the drifted canonical target untouched'
+        );
+      }
+    }
   });
-  assert.equal(recovered.status, 'repaired', JSON.stringify(recovered, null, 2));
+  assert.equal(recovered.status, 'not-needed', JSON.stringify(recovered, null, 2));
+  assert.equal(recovered.repaired.length, 0);
+  assert.equal(observedSafeFailedBackupRetirement, true);
   assert.deepEqual(n8nTransactionArtifacts(pluginRoot), []);
+  assert.equal(
+    fs.readFileSync(path.join(pluginRoot, 'unrelated.txt'), 'utf8'),
+    'one-time final drift\n',
+    'post-retirement adjudication must not claim repair or replace the healthy drifted target'
+  );
 
   const healthy = repairThirdPartyCodexPluginHooks({
     codexHome,

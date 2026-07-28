@@ -5,7 +5,7 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.9.21",
+  "version": "2.9.22",
   "version_policy": "semver",
   "version_notes": "Keeps live and indeterminate n8n target-lock owners non-recoverable by age, fences protected mutations, bounds phase-70 winner proofs, preserves proofs on recovered installs, and durably publishes POSIX auxiliary entries.",
   "outputs": [
