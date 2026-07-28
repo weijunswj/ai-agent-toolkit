@@ -30,6 +30,26 @@ function writeExclusiveJson(filePath, value) {
   } finally {
     fs.closeSync(handle);
   }
+  if (process.platform === 'win32') return;
+  const parentPath = path.dirname(path.resolve(filePath));
+  const initialParent = fs.lstatSync(parentPath);
+  if (
+    !initialParent.isDirectory()
+    || initialParent.isSymbolicLink()
+    || !samePath(fs.realpathSync.native(parentPath), parentPath)
+  ) {
+    throw new Error('owned staging authoritative file parent is unsafe before durability flush');
+  }
+  const parentHandle = fs.openSync(parentPath, 'r');
+  try {
+    const openedParent = fs.fstatSync(parentHandle);
+    if (!identitiesMatch(directoryIdentity(initialParent), directoryIdentity(openedParent))) {
+      throw new Error('owned staging authoritative file parent changed before durability flush');
+    }
+    fs.fsyncSync(parentHandle);
+  } finally {
+    fs.closeSync(parentHandle);
+  }
 }
 
 function readJson(filePath) {

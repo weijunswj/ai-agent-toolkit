@@ -56,7 +56,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.9.20';
+const expectedBridgeVersion = '2.9.21';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 const currentN8nManifestPath = path.join(
   repoRoot,
@@ -6981,6 +6981,49 @@ test('Codex n8n resumed backup cleanup preserves authority when the installed wi
     fs.existsSync(n8nEvidencePath(owned.recordPath, 'completed')),
     false,
     'winner drift must not emit a false completed terminal marker'
+  );
+});
+
+test('Codex n8n recovered staged-winner cleanup retains final-winner proofs', async () => {
+  const root = tmpRoot();
+  const codexHome = path.join(root, 'recovered-staged-winner-drift');
+  const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+  copyCurrentSupportedN8nPluginFixture(pluginRoot);
+  writeFile(path.join(pluginRoot, 'unrelated.txt'), 'original backup residue\n');
+
+  await waitForAbruptChild(
+    spawnAbruptN8nRepair(pluginRoot, '1.0.2', 'afterN8nRepairTargetDisplaced')
+  );
+  const owned = readSingleN8nOwnedGeneration(pluginRoot);
+  const transaction = readJson(n8nEvidencePath(owned.recordPath, 'n8n-replacement'));
+  let drifted = false;
+
+  assert.throws(
+    () => recoverInterruptedN8nReplacement({
+      codexHome,
+      pluginInspection: {
+        errors: [],
+        ok: true,
+        pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
+      },
+      write: true,
+      testHooks: {
+        afterN8nBackupCleanupEntry() {
+          if (drifted) return;
+          writeFile(path.join(pluginRoot, 'recovered-winner-drift.txt'), 'drift\n');
+          drifted = true;
+        }
+      }
+    }),
+    (error) => error?.code === 'final-winner-drift'
+  );
+  assert.equal(drifted, true);
+  assert.equal(fs.existsSync(transaction.backup_path), true, 'remaining exact original backup residue is preserved');
+  assert.equal(fs.existsSync(owned.recordPath), true, 'transaction evidence remains restart-adjudicable');
+  assert.equal(
+    fs.existsSync(n8nEvidencePath(owned.recordPath, 'completed')),
+    false,
+    'recovered-install winner drift must not emit completion'
   );
 });
 

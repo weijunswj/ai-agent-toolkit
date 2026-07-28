@@ -46,7 +46,7 @@ const {
 } = require('./toolkit-n8n-repair-journal.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.9.20';
+const BRIDGE_VERSION = '2.9.21';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -8228,7 +8228,7 @@ function recoverInterruptedN8nReplacement({
         parityIdentity,
         testHooks
       );
-      cleanupTransaction();
+      cleanupTransaction({ winnerEntry: hostIdentity.selection });
       return { status: 'replacement-completed' };
     }
     revalidateBeforeMutation('before-recovery-backup-restoration');

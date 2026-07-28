@@ -366,3 +366,46 @@ test('token-bound operation auxiliaries are exact-cleaned and special replacemen
   assert.equal(fs.existsSync(special.stagePath), true);
   assert.equal(fs.lstatSync(specialMarker).isDirectory(), true);
 });
+
+test('POSIX auxiliary publication fsyncs the exact containing directory after the file', {
+  skip: process.platform === 'win32' ? 'Windows has no supported directory-fsync contract' : false
+}, () => {
+  const parent = fixtureRoot('auxiliary-durability');
+  const generation = createGeneration(parent);
+  const markerPath = generation.recordPath.replace(/\.json$/, '.durability-proof.json');
+  const events = [];
+  const descriptors = new Map();
+  const originalOpenSync = fs.openSync;
+  const originalFsyncSync = fs.fsyncSync;
+  const originalCloseSync = fs.closeSync;
+  fs.openSync = function trackedOpenSync(targetPath, flags, ...rest) {
+    const descriptor = originalOpenSync.call(fs, targetPath, flags, ...rest);
+    descriptors.set(descriptor, path.resolve(targetPath));
+    events.push(`open:${path.resolve(targetPath)}:${flags}`);
+    return descriptor;
+  };
+  fs.fsyncSync = function trackedFsyncSync(descriptor) {
+    events.push(`fsync:${descriptors.get(descriptor) || descriptor}`);
+    return originalFsyncSync.call(fs, descriptor);
+  };
+  fs.closeSync = function trackedCloseSync(descriptor) {
+    events.push(`close:${descriptors.get(descriptor) || descriptor}`);
+    descriptors.delete(descriptor);
+    return originalCloseSync.call(fs, descriptor);
+  };
+  try {
+    writeOwnedStagingAuxiliary(generation, 'durability-proof');
+  } finally {
+    fs.openSync = originalOpenSync;
+    fs.fsyncSync = originalFsyncSync;
+    fs.closeSync = originalCloseSync;
+  }
+  assert.deepEqual(events, [
+    `open:${markerPath}:wx`,
+    `fsync:${markerPath}`,
+    `close:${markerPath}`,
+    `open:${parent}:r`,
+    `fsync:${parent}`,
+    `close:${parent}`
+  ]);
+});
