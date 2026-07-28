@@ -46,7 +46,7 @@ const {
 } = require('./toolkit-n8n-repair-journal.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.9.22';
+const BRIDGE_VERSION = '2.9.23';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -2671,9 +2671,30 @@ const LOCK_ARTIFACT_FILE_BYTE_LIMIT = 16 * 1024;
 const LOCK_ARTIFACT_ID_PATTERN = '[0-9a-f]{16}';
 const LOCK_TOKEN_PATTERN = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 
-function classifyLockArtifactName(entryName, lockName) {
+function isStrictN8nTargetLockName(lockName) {
+  return /^\.ai-agent-toolkit-n8n-target-[0-9a-f]{64}\.lock$/.test(String(lockName));
+}
+
+function classifyLockArtifactName(entryName, lockName, allowRetirement = true) {
   const entry = String(entryName);
   const escapedLockName = lockNamePattern(lockName);
+  if (allowRetirement) {
+    const retirement = entry.match(new RegExp(
+      `^(.+)\\.quarantine-(${LOCK_ARTIFACT_ID_PATTERN})$`
+    ));
+    if (retirement) {
+      const sourceArtifact = classifyLockArtifactName(retirement[1], lockName, false);
+      if (sourceArtifact) {
+        return Object.freeze({
+          artifact_identity: retirement[2],
+          kind: 'retirement-quarantine',
+          lock_name: lockName,
+          source_artifact: sourceArtifact,
+          source_name: retirement[1]
+        });
+      }
+    }
+  }
   if (entry === lockName) return Object.freeze({ kind: 'main-lock', lock_name: lockName });
   if (entry === `${lockName}${LOCK_RECOVERY_MARKER_SUFFIX}`) {
     return Object.freeze({ kind: 'recovery-marker', lock_name: lockName });
@@ -2884,18 +2905,47 @@ function readExactLockArtifact(hubRoot, entryName, lockName, options = {}) {
       'Target-lock artifact or its exact parent changed during inspection'
     );
   }
+  const semanticArtifact = artifact.source_artifact || artifact;
+  const allowUnusableArtifact = options.allowUnusableOwner && (
+    ['main-lock', 'displaced-lock'].includes(semanticArtifact.kind)
+    || options.allowLegacyToken
+  );
   let record;
+  let unusableOwner = false;
   try {
     record = JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/, ''));
   } catch (error) {
-    const failure = failClosedN8nRepair(
-      'target-lock-artifact-invalid',
-      'Target-lock artifact JSON is malformed'
-    );
-    failure.cause = error;
-    throw failure;
+    if (
+      allowUnusableArtifact
+    ) {
+      record = {};
+      unusableOwner = true;
+    } else {
+      const failure = failClosedN8nRepair(
+        'target-lock-artifact-invalid',
+        'Target-lock artifact JSON is malformed'
+      );
+      failure.cause = error;
+      throw failure;
+    }
   }
-  validateLockArtifactRecord(artifact, record, options.expectedSyncSource || '');
+  if (!unusableOwner) {
+    try {
+      validateLockArtifactRecord(
+        semanticArtifact,
+        record,
+        options.expectedSyncSource || ''
+      );
+    } catch (error) {
+      if (
+        allowUnusableArtifact
+      ) {
+        unusableOwner = true;
+      } else {
+        throw error;
+      }
+    }
+  }
   return Object.freeze({
     artifact,
     bytes_sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
@@ -2905,8 +2955,201 @@ function readExactLockArtifact(hubRoot, entryName, lockName, options = {}) {
     parsed_semantic_sha256: crypto.createHash('sha256')
       .update(n8nCanonicalJson(record), 'utf8')
       .digest('hex'),
-    record: Object.freeze({ ...record })
+    record: Object.freeze({ ...record }),
+    legacy_token_authority: Boolean(options.allowLegacyToken),
+    unusable_owner: unusableOwner
   });
+}
+
+function exactLockArtifactAuthoritiesMatch(left, right) {
+  return Boolean(left && right)
+    && left.bytes_sha256 === right.bytes_sha256
+    && left.normalized_path === right.normalized_path
+    && left.parsed_semantic_sha256 === right.parsed_semantic_sha256
+    && n8nEvidenceStatIdentitiesMatch(left.filesystem_identity, right.filesystem_identity)
+    && n8nDirectoryIdentitiesMatch(
+      left.parent_directory_identity,
+      right.parent_directory_identity
+    );
+}
+
+function exactMovedLockArtifactMatches(moved, source) {
+  const stableMovedIdentity = (left, right) => Boolean(left && right)
+    && ['dev', 'ino', 'mode', 'nlink', 'size', 'birthtime_ns', 'mtime_ns']
+      .every((field) => String(left[field]) === String(right[field]));
+  return Boolean(moved && source)
+    && moved.bytes_sha256 === source.bytes_sha256
+    && moved.parsed_semantic_sha256 === source.parsed_semantic_sha256
+    && stableMovedIdentity(moved.filesystem_identity, source.filesystem_identity)
+    && n8nDirectoryIdentitiesMatch(
+      moved.parent_directory_identity,
+      source.parent_directory_identity
+    );
+}
+
+// Retire one exact lock-artifact generation through a unique quarantine name.
+// The source is re-proved immediately before rename, the moved generation is
+// re-opened twice around the test-only interruption seam, and only that moved
+// generation may be unlinked. A source replacement or moved-object replacement
+// is preserved and fails closed. Existing quarantine residue is restartable,
+// while a simultaneous source and quarantine is an explicit conflict.
+function retireExactLockArtifact(
+  hubRoot,
+  entryName,
+  lockName,
+  expected,
+  options = {}
+) {
+  const sourceArtifact = expected?.artifact?.kind === 'retirement-quarantine'
+    ? expected.artifact.source_artifact
+    : expected?.artifact;
+  const sourceName = expected?.artifact?.kind === 'retirement-quarantine'
+    ? expected.artifact.source_name
+    : entryName;
+  const identity = expected?.bytes_sha256?.slice(0, 16);
+  const quarantineName = expected?.artifact?.kind === 'retirement-quarantine'
+    ? entryName
+    : `${entryName}.quarantine-${identity}`;
+  const sourcePath = path.join(hubRoot, sourceName);
+  const quarantinePath = path.join(hubRoot, quarantineName);
+  if (
+    !sourceArtifact
+    || !new RegExp(`^${LOCK_ARTIFACT_ID_PATTERN}$`).test(String(identity || ''))
+    || Buffer.byteLength(quarantineName, 'utf8') > 240
+    || classifyLockArtifactName(quarantineName, lockName)?.kind !== 'retirement-quarantine'
+  ) {
+    return {
+      retired: false,
+      message: `Toolkit bridge lock artifact at ${sourcePath} lacks bounded exact retirement authority`
+    };
+  }
+
+  if (expected.artifact.kind !== 'retirement-quarantine') {
+    let current;
+    try {
+      current = readExactLockArtifact(hubRoot, sourceName, lockName, {
+        allowLegacyToken: Boolean(expected.legacy_token_authority),
+        allowUnusableOwner: Boolean(expected.unusable_owner)
+      });
+    } catch {
+      return {
+        retired: false,
+        message: `Toolkit bridge lock artifact at ${sourcePath} changed before quarantine retirement`
+      };
+    }
+    if (!exactLockArtifactAuthoritiesMatch(current, expected)) {
+      return {
+        retired: false,
+        message: `Toolkit bridge lock artifact at ${sourcePath} changed before quarantine retirement`
+      };
+    }
+    if (options.testHooks?.beforeLockArtifactRetirementMove) {
+      options.testHooks.beforeLockArtifactRetirementMove({
+        artifact_kind: sourceArtifact.kind,
+        quarantine_path: quarantinePath,
+        source_path: sourcePath
+      });
+    }
+    try {
+      current = readExactLockArtifact(hubRoot, sourceName, lockName, {
+        allowLegacyToken: Boolean(expected.legacy_token_authority),
+        allowUnusableOwner: Boolean(expected.unusable_owner)
+      });
+    } catch {
+      return {
+        retired: false,
+        message: `Toolkit bridge lock artifact at ${sourcePath} changed at its quarantine boundary`
+      };
+    }
+    if (!exactLockArtifactAuthoritiesMatch(current, expected)) {
+      return {
+        retired: false,
+        message: `Toolkit bridge lock artifact at ${sourcePath} changed at its quarantine boundary`
+      };
+    }
+    if (n8nPathExists(quarantinePath)) {
+      return {
+        retired: false,
+        message: `Toolkit bridge lock artifact retirement at ${quarantinePath} conflicts with retained residue`
+      };
+    }
+    try {
+      fs.renameSync(sourcePath, quarantinePath);
+    } catch (error) {
+      return {
+        retired: false,
+        message: `Toolkit bridge lock artifact at ${sourcePath} could not be quarantined safely (${error?.code || 'unknown I/O error'})`
+      };
+    }
+  }
+
+  if (options.testHooks?.afterLockArtifactRetirementMove) {
+    options.testHooks.afterLockArtifactRetirementMove({
+      artifact_kind: sourceArtifact.kind,
+      quarantine_path: quarantinePath,
+      source_path: sourcePath
+    });
+  }
+  if (n8nPathExists(sourcePath)) {
+    return {
+      retired: false,
+      message: `Toolkit bridge lock artifact source at ${sourcePath} reappeared after quarantine`
+    };
+  }
+  let moved;
+  try {
+    moved = readExactLockArtifact(hubRoot, quarantineName, lockName, {
+      allowLegacyToken: Boolean(expected.legacy_token_authority),
+      allowUnusableOwner: Boolean(expected.unusable_owner)
+    });
+  } catch {
+    return {
+      retired: false,
+      message: `Toolkit bridge lock artifact quarantine at ${quarantinePath} is no longer exact`
+    };
+  }
+  if (
+    moved.artifact.artifact_identity !== identity
+    || !exactMovedLockArtifactMatches(moved, expected)
+  ) {
+    return {
+      retired: false,
+      message: `Toolkit bridge lock artifact quarantine at ${quarantinePath} changed before deletion`
+    };
+  }
+  if (options.testHooks?.afterLockArtifactRetirementVerification) {
+    options.testHooks.afterLockArtifactRetirementVerification({
+      artifact_kind: sourceArtifact.kind,
+      quarantine_path: quarantinePath,
+      source_path: sourcePath
+    });
+  }
+  let finalMoved;
+  try {
+    finalMoved = readExactLockArtifact(hubRoot, quarantineName, lockName, {
+      allowLegacyToken: Boolean(expected.legacy_token_authority),
+      allowUnusableOwner: Boolean(expected.unusable_owner)
+    });
+  } catch {
+    return {
+      retired: false,
+      message: `Toolkit bridge lock artifact quarantine at ${quarantinePath} changed at its deletion boundary`
+    };
+  }
+  if (!exactMovedLockArtifactMatches(finalMoved, expected)) {
+    return {
+      retired: false,
+      message: `Toolkit bridge lock artifact quarantine at ${quarantinePath} changed at its deletion boundary`
+    };
+  }
+  fs.unlinkSync(quarantinePath);
+  if (n8nPathExists(sourcePath) || n8nPathExists(quarantinePath)) {
+    return {
+      retired: false,
+      message: `Toolkit bridge lock artifact retirement at ${quarantinePath} did not reach exact absence`
+    };
+  }
+  return { retired: true };
 }
 
 // Decide whether an existing lock must be respected. A live recorded owner
@@ -2958,7 +3201,8 @@ function lockNamePattern(value) {
 function cleanupSpentLockArtifacts(
   hubRoot,
   lockName = 'update.lock',
-  liveness = lockOwnerLiveness
+  liveness = lockOwnerLiveness,
+  testHooks = {}
 ) {
   let entries = [];
   try {
@@ -2972,11 +3216,22 @@ function cleanupSpentLockArtifacts(
   entries.sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
   for (const entry of entries) {
     const artifact = classifyLockArtifactName(entry, lockName);
-    if (!artifact || !['recovery-claim', 'displaced-retirement'].includes(artifact.kind)) continue;
+    if (
+      !artifact
+      || !['recovery-claim', 'displaced-retirement', 'retirement-quarantine']
+        .includes(artifact.kind)
+    ) continue;
     const fullPath = path.join(hubRoot, entry);
     let exact;
     try {
-      exact = readExactLockArtifact(hubRoot, entry, lockName);
+      exact = readExactLockArtifact(hubRoot, entry, lockName, {
+        allowLegacyToken: !isStrictN8nTargetLockName(lockName),
+        allowUnusableOwner: !isStrictN8nTargetLockName(lockName)
+          || (
+            artifact.kind === 'retirement-quarantine'
+            && ['main-lock', 'displaced-lock'].includes(artifact.source_artifact?.kind)
+          )
+      });
     } catch {
       return {
         blocked: true,
@@ -3012,36 +3267,18 @@ function cleanupSpentLockArtifacts(
         message: `Toolkit bridge lock artifact at ${fullPath} has no safely recoverable owner; failing closed`
       };
     }
-    let current;
-    try {
-      current = readExactLockArtifact(hubRoot, entry, lockName);
-    } catch {
+    const retirement = retireExactLockArtifact(
+      hubRoot,
+      entry,
+      lockName,
+      exact,
+      { testHooks }
+    );
+    if (!retirement.retired) {
       return {
         blocked: true,
-        message: `Toolkit bridge lock artifact at ${fullPath} changed before identity-safe retirement`
+        message: retirement.message
       };
-    }
-    if (
-      current.bytes_sha256 !== exact.bytes_sha256
-      || !n8nEvidenceStatIdentitiesMatch(
-        current.filesystem_identity,
-        exact.filesystem_identity
-      )
-    ) {
-      return {
-        blocked: true,
-        message: `Toolkit bridge lock artifact at ${fullPath} changed before identity-safe retirement`
-      };
-    }
-    try {
-      fs.rmSync(fullPath);
-    } catch (error) {
-      if (error?.code !== 'ENOENT') {
-        return {
-          blocked: true,
-          message: `Toolkit bridge lock artifact at ${fullPath} could not be retired safely (${error?.code || 'unknown I/O error'})`
-        };
-      }
     }
   }
   return { blocked: false };
@@ -3150,7 +3387,30 @@ function inspectDisplacedEvidence(hubRoot, liveness = lockOwnerLiveness, testHoo
     const inspection = inspectDisplacedEvidenceFile(fullPath, liveness, testHooks, phase);
     if (inspection.gone) continue;
     if (inspection.blocked) return { blocked: true, retirable, message: inspection.message };
-    retirable.push({ fullPath, raw: inspection.raw });
+    let exact;
+    try {
+      exact = readExactLockArtifact(hubRoot, entry, lockName, {
+        allowLegacyToken: !isStrictN8nTargetLockName(lockName),
+        allowUnusableOwner: true
+      });
+    } catch {
+      return {
+        blocked: true,
+        retirable,
+        message: `Toolkit bridge displaced lock evidence at ${fullPath} is identity-ambiguous; failing closed`
+      };
+    }
+    if (
+      crypto.createHash('sha256').update(inspection.raw, 'utf8').digest('hex')
+      !== exact.bytes_sha256
+    ) {
+      return {
+        blocked: true,
+        retirable,
+        message: `Toolkit bridge displaced lock evidence at ${fullPath} changed during exact inspection`
+      };
+    }
+    retirable.push({ entry, exact, fullPath, hubRoot, lockName, raw: inspection.raw });
   }
   return { blocked: false, retirable };
 }
@@ -3161,7 +3421,7 @@ function inspectDisplacedEvidence(hubRoot, liveness = lockOwnerLiveness, testHoo
 // re-read and remove the evidence only when it is still that generation. A
 // changed generation is left untouched and this contender yields.
 function retireDisplacedEvidence(retirable, testHooks = {}) {
-  for (const { fullPath, raw } of retirable) {
+  for (const { entry, exact, fullPath, hubRoot, lockName, raw } of retirable) {
     if (testHooks.afterEvidenceInspect) testHooks.afterEvidenceInspect();
     const identity = lockGenerationIdentity(raw);
     const tombstonePath = `${fullPath}.retired-${identity}`;
@@ -3183,23 +3443,35 @@ function retireDisplacedEvidence(retirable, testHooks = {}) {
         tombstone_path: tombstonePath
       });
     }
-    let current = null;
-    try {
-      current = testHooks.readDisplacedEvidence
-        ? testHooks.readDisplacedEvidence(fullPath, 'retirement-verification')
-        : fs.readFileSync(fullPath, 'utf8');
-    } catch (error) {
-      if (error && error.code === 'ENOENT') continue;
-      const code = error?.code || 'unknown I/O error';
-      return {
-        retired: false,
-        message: `Toolkit bridge displaced lock evidence at ${fullPath} became unreadable during retirement verification (${code}); failing closed without removing it`
-      };
+    if (testHooks.readDisplacedEvidence) {
+      let boundaryRaw;
+      try {
+        boundaryRaw = testHooks.readDisplacedEvidence(
+          fullPath,
+          'retirement-verification'
+        );
+      } catch (error) {
+        if (error?.code === 'ENOENT') continue;
+        return {
+          retired: false,
+          message: `Toolkit bridge displaced lock evidence at ${fullPath} became unreadable during retirement verification (${error?.code || 'unknown I/O error'}); failing closed without removing it`
+        };
+      }
+      if (boundaryRaw !== raw) {
+        return {
+          retired: false,
+          message: `Toolkit bridge displaced lock evidence at ${fullPath} changed during retirement verification`
+        };
+      }
     }
-    if (current !== raw) {
-      return { retired: false, message: `Toolkit bridge displaced lock evidence at ${fullPath} changed while being retired` };
-    }
-    fs.rmSync(fullPath, { force: true });
+    const retirement = retireExactLockArtifact(
+      hubRoot,
+      entry,
+      lockName,
+      exact,
+      { testHooks }
+    );
+    if (!retirement.retired) return retirement;
   }
   return { retired: true };
 }
@@ -3283,6 +3555,30 @@ function claimRecoveryMarker(markerPath, token, liveness = lockOwnerLiveness, te
     return { claimed: false, message: `Toolkit bridge lock recovery marker at ${markerPath} was re-created by another process` };
   }
   if (inspection.active) return { claimed: false, message: inspection.message };
+  const hubRoot = path.dirname(markerPath);
+  const markerName = path.basename(markerPath);
+  const lockName = markerName.slice(0, -LOCK_RECOVERY_MARKER_SUFFIX.length);
+  let exactMarker;
+  try {
+    exactMarker = readExactLockArtifact(hubRoot, markerName, lockName, {
+      allowLegacyToken: !isStrictN8nTargetLockName(lockName),
+      allowUnusableOwner: !isStrictN8nTargetLockName(lockName)
+    });
+  } catch {
+    return {
+      claimed: false,
+      message: `Toolkit bridge lock recovery marker at ${markerPath} is identity-ambiguous; failing closed`
+    };
+  }
+  if (
+    crypto.createHash('sha256').update(inspection.raw, 'utf8').digest('hex')
+    !== exactMarker.bytes_sha256
+  ) {
+    return {
+      claimed: false,
+      message: `Toolkit bridge lock recovery marker at ${markerPath} changed during exact inspection`
+    };
+  }
   if (testHooks.afterMarkerInspect) testHooks.afterMarkerInspect();
 
   const identity = lockGenerationIdentity(inspection.raw);
@@ -3306,32 +3602,36 @@ function claimRecoveryMarker(markerPath, token, liveness = lockOwnerLiveness, te
     });
   }
 
-  // Verify under the tombstone: only the inspected generation may be
-  // removed. A different generation means another process already cycled
-  // the marker; it is left untouched and this contender yields.
-  let current = null;
-  try {
-    current = fs.readFileSync(markerPath, 'utf8');
-  } catch {
-    // Marker gone: fall through to the exclusive create below.
+  const retirement = retireExactLockArtifact(
+    hubRoot,
+    markerName,
+    lockName,
+    exactMarker,
+    { testHooks }
+  );
+  if (!retirement.retired) {
+    return { claimed: false, message: retirement.message };
   }
-  if (current !== null && current !== inspection.raw) {
-    return { claimed: false, message: `Toolkit bridge lock recovery marker at ${markerPath} changed while being reclaimed` };
-  }
-  if (current !== null) fs.rmSync(markerPath, { force: true });
 
   if (tryCreateMarker()) return { claimed: true };
   return { claimed: false, message: `Toolkit bridge lock recovery marker at ${markerPath} was re-created by another process` };
 }
 
-function releaseRecoveryMarker(markerPath, token) {
-  let marker = null;
+function releaseRecoveryMarker(markerPath, token, testHooks = {}) {
+  const hubRoot = path.dirname(markerPath);
+  const markerName = path.basename(markerPath);
+  const lockName = markerName.slice(0, -LOCK_RECOVERY_MARKER_SUFFIX.length);
+  let exact;
   try {
-    marker = readJsonIfExists(markerPath);
+    exact = readExactLockArtifact(hubRoot, markerName, lockName, {
+      allowLegacyToken: !isStrictN8nTargetLockName(lockName),
+      allowUnusableOwner: !isStrictN8nTargetLockName(lockName)
+    });
   } catch {
     return;
   }
-  if (marker && marker.token === token) fs.rmSync(markerPath, { force: true });
+  if (exact.record.token !== token) return;
+  retireExactLockArtifact(hubRoot, markerName, lockName, exact, { testHooks });
 }
 
 // acquireLock protocol:
@@ -3371,7 +3671,7 @@ function acquireLock(hubRoot, args, testHooks = {}) {
     if (args.hook) return { acquired: false, lockPath, skipReason: message };
     throw new Error(message);
   };
-  const spentArtifacts = cleanupSpentLockArtifacts(hubRoot, lockName, liveness);
+  const spentArtifacts = cleanupSpentLockArtifacts(hubRoot, lockName, liveness, testHooks);
   if (spentArtifacts.blocked) return skipOrThrow(spentArtifacts.message);
 
   const tryExclusiveCreate = () => {
@@ -3451,13 +3751,39 @@ function acquireLock(hubRoot, args, testHooks = {}) {
           }
           return skipOrThrow(`${displacedInspection.message}; no-clobber restoration is not guaranteed, so the displaced lock is preserved; not acquiring`);
         }
-        if (!displacedInspection.gone) fs.rmSync(displacedPath, { force: true });
+        if (!displacedInspection.gone) {
+          const displacedName = path.basename(displacedPath);
+          let exactDisplaced;
+          try {
+            exactDisplaced = readExactLockArtifact(hubRoot, displacedName, lockName, {
+              allowLegacyToken: !isStrictN8nTargetLockName(lockName),
+              allowUnusableOwner: true
+            });
+          } catch {
+            return skipOrThrow(`Toolkit bridge displaced lock evidence at ${displacedPath} became identity-ambiguous; not acquiring`);
+          }
+          if (
+            crypto.createHash('sha256')
+              .update(displacedInspection.raw, 'utf8')
+              .digest('hex') !== exactDisplaced.bytes_sha256
+          ) {
+            return skipOrThrow(`Toolkit bridge displaced lock evidence at ${displacedPath} changed during exact inspection; not acquiring`);
+          }
+          const retirement = retireExactLockArtifact(
+            hubRoot,
+            displacedName,
+            lockName,
+            exactDisplaced,
+            { testHooks }
+          );
+          if (!retirement.retired) return skipOrThrow(retirement.message);
+        }
       }
     }
     if (tryExclusiveCreate()) return { acquired: true, lockPath, token };
     return skipOrThrow(`Toolkit bridge lock at ${lockPath} was created by another process`);
   } finally {
-    releaseRecoveryMarker(markerPath, token);
+    releaseRecoveryMarker(markerPath, token, testHooks);
   }
 }
 
@@ -3467,16 +3793,21 @@ function acquireLock(hubRoot, args, testHooks = {}) {
 // path. The token check is stable because no other process may recover a
 // lock whose recorded owner is alive, and this process is alive while
 // releasing.
-function releaseLock(lock) {
+function releaseLock(lock, testHooks = {}) {
   if (!lock?.acquired || !lock.lockPath) return;
-  let current = null;
+  const hubRoot = path.dirname(lock.lockPath);
+  const lockName = path.basename(lock.lockPath);
+  let exact;
   try {
-    current = readJsonIfExists(lock.lockPath);
+    exact = readExactLockArtifact(hubRoot, lockName, lockName, {
+      allowLegacyToken: !isStrictN8nTargetLockName(lockName),
+      allowUnusableOwner: !isStrictN8nTargetLockName(lockName)
+    });
   } catch {
     return;
   }
-  if (!current || current.token !== lock.token) return;
-  fs.rmSync(lock.lockPath, { force: true });
+  if (exact.record.token !== lock.token) return;
+  retireExactLockArtifact(hubRoot, lockName, lockName, exact, { testHooks });
 }
 
 function isTransientRenameError(error) {
@@ -6869,48 +7200,46 @@ function finalizeOrphanedN8nPhysicalCleanup(codexHome, targetPath, testHooks = {
       write: true
     });
     for (let journal of journals) {
-    if (journal.state === 'C20_CLEANUP_COMPLETE') {
-      revalidateLogicalRetirement(journal);
-      continue;
-    }
-    if (journal.state !== 'C10_CLEANUP_PENDING') {
-      throw failClosedN8nRepair(
-        'journal-authority-missing',
-        'A retained transaction journal lacks surviving v1 recovery authority'
-      );
-    }
-    journal = Object.freeze({
-      ...revalidateLogicalRetirement(journal),
-      ownership_token: journal.ownership_token,
-      target_path: path.resolve(targetPath)
-    });
-    const manifest = logicalRetirementManifest(journal);
-    if (manifest.entries.some((entry) => entry.present && n8nPathExists(entry.normalized_path))) {
-      throw failClosedN8nRepair(
-        'physical-cleanup-pending',
-        'A retained C10 journal still has exact v1 residue requiring controlled cleanup'
-      );
-    }
-    const cleanupIntent = journal.records.find((record) => record.kind === 'C10_CLEANUP_PENDING');
-    if (
-      cleanupIntent?.payload?.stage_residue?.normalized_path
-      && n8nPathExists(cleanupIntent.payload.stage_residue.normalized_path)
-    ) {
-      throw failClosedN8nRepair(
-        'physical-cleanup-pending',
-        'A retained C10 journal still has exact stage residue requiring controlled cleanup'
-      );
-    }
+      if (!['C10_CLEANUP_PENDING', 'C20_CLEANUP_COMPLETE'].includes(journal.state)) {
+        throw failClosedN8nRepair(
+          'journal-authority-missing',
+          'A retained transaction journal lacks surviving v1 recovery authority'
+        );
+      }
+      journal = Object.freeze({
+        ...revalidateLogicalRetirement(journal),
+        ownership_token: journal.ownership_token,
+        target_path: path.resolve(targetPath)
+      });
+      const manifest = logicalRetirementManifest(journal);
+      if (manifest.entries.some((entry) => entry.present && n8nPathExists(entry.normalized_path))) {
+        throw failClosedN8nRepair(
+          'physical-cleanup-pending',
+          'A retained terminal journal still has exact v1 residue requiring controlled cleanup'
+        );
+      }
+      const cleanupIntent = journal.records.find((record) => record.kind === 'C10_CLEANUP_PENDING');
+      if (
+        cleanupIntent?.payload?.stage_residue?.normalized_path
+        && n8nPathExists(cleanupIntent.payload.stage_residue.normalized_path)
+      ) {
+        throw failClosedN8nRepair(
+          'physical-cleanup-pending',
+          'A retained terminal journal still has exact stage residue requiring controlled cleanup'
+        );
+      }
+      if (journal.state === 'C10_CLEANUP_PENDING') {
       requireExactN8nTargetLockAuthority(lock, 'orphaned-journal-cleanup-complete', testHooks);
       journal = appendN8nRepairJournalRecord(
-      journal,
-      'C20_CLEANUP_COMPLETE',
-      {
-        checkpoint_digest: cleanupIntent?.payload?.checkpoint_digest || '',
-        residue_manifest_digest: manifest.digest
-      },
-      { testHooks }
-    );
+          journal,
+          'C20_CLEANUP_COMPLETE',
+          {
+            checkpoint_digest: cleanupIntent?.payload?.checkpoint_digest || '',
+            residue_manifest_digest: manifest.digest
+          },
+          { testHooks }
+        );
+      }
       requireExactN8nTargetLockAuthority(lock, 'orphaned-terminal-checkpoint', testHooks);
       const checkpoint = writeTerminalCheckpoint(journal, { testHooks });
       requireExactN8nTargetLockAuthority(lock, 'orphaned-transaction-compaction', testHooks);
@@ -9335,7 +9664,7 @@ function reconcileSelectedN8nSkillsCache(entry, options = {}) {
       '00000000-0000-0000-0000-000000000000'
     );
     if (n8nPathExists(journalAdmissionPaths.target)) {
-      const usage = targetJournalUsage(journalAdmissionPaths);
+      const usage = targetJournalUsage(journalAdmissionPaths, { testHooks });
       if (usage.hard_limit) {
         throw failClosedN8nRepair(
           'journal-hard-limit',
@@ -10357,6 +10686,7 @@ module.exports = {
   formatAgentRulesPreflight,
   discoverCodexPluginHookRoots,
   discoverN8nSkillsCacheRoots,
+  finalizeOrphanedN8nPhysicalCleanup,
   repairThirdPartyCodexPluginHooks,
   recoverInterruptedN8nReplacement,
   reconcileSelectedN8nSkillsCache,

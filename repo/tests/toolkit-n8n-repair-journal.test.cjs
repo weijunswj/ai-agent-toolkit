@@ -7,6 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const journal = require('../scripts/toolkit-n8n-repair-journal.cjs');
+const bridge = require('../scripts/toolkit-local-bridge.cjs');
 
 const GENERATION = '11111111-1111-4111-8111-111111111111';
 const TOKEN = 'a'.repeat(48);
@@ -1360,25 +1361,208 @@ test('target journal inventory rejects a child that appears during final name-se
   const root = temporaryRoot();
   const value = fixture(root);
   const authority = bind(value, true);
-  const originalReaddirSync = fs.readdirSync;
-  let targetReads = 0;
+  let injected = false;
   try {
-    fs.readdirSync = function readdirWithDrift(directoryPath, ...args) {
-      if (path.resolve(directoryPath) === path.resolve(authority.paths.target)) {
-        targetReads += 1;
-        if (targetReads === 2) {
-          fs.writeFileSync(path.join(authority.paths.target, 'appeared-during-inventory'), '');
-        }
-      }
-      return originalReaddirSync.call(fs, directoryPath, ...args);
-    };
     assert.throws(
-      () => journal.targetJournalUsage(authority.paths),
+      () => journal.targetJournalUsage(authority.paths, {
+        testHooks: {
+          beforeN8nJournalDirectoryEnumeration(event) {
+            if (
+              !injected
+              && event.phase === 'revalidation'
+              && path.resolve(event.directory_path) === path.resolve(authority.paths.target)
+            ) {
+              injected = true;
+              fs.writeFileSync(path.join(authority.paths.target, 'appeared-during-inventory'), '');
+            }
+          }
+        }
+      }),
       { code: 'journal-topology-invalid' }
     );
-    assert.equal(targetReads, 2);
+    assert.equal(injected, true);
   } finally {
-    fs.readdirSync = originalReaddirSync;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('target journal enumeration stops at the locked ceiling and closes every directory handle', () => {
+  const exactRoot = temporaryRoot();
+  try {
+    const authority = bind(fixture(exactRoot), true);
+    const limitRoot = path.join(authority.paths.target, 'exact-enumeration-limit');
+    fs.mkdirSync(limitRoot);
+    const baseline = journal.targetJournalUsage(authority.paths).entries;
+    for (let index = baseline; index < journal.JOURNAL_MAX_TARGET_ENTRIES; index += 1) {
+      fs.writeFileSync(path.join(limitRoot, `entry-${String(index).padStart(5, '0')}`), '');
+    }
+    assert.equal(
+      journal.targetJournalUsage(authority.paths).entries,
+      journal.JOURNAL_MAX_TARGET_ENTRIES
+    );
+    fs.writeFileSync(path.join(limitRoot, 'entry-over-limit'), '');
+    let visited = 0;
+    assert.throws(
+      () => journal.targetJournalUsage(authority.paths, {
+        testHooks: {
+          afterN8nJournalDirectoryEntry(event) {
+            if (event.phase === 'inventory') visited += 1;
+          }
+        }
+      }),
+      { code: 'journal-hard-limit' }
+    );
+    assert.equal(visited, journal.JOURNAL_MAX_TARGET_ENTRIES + 1);
+  } finally {
+    fs.rmSync(exactRoot, { recursive: true, force: true });
+  }
+
+  const closeRoot = temporaryRoot();
+  const originalOpendirSync = fs.opendirSync;
+  let opened = 0;
+  let closed = 0;
+  try {
+    const authority = bind(fixture(closeRoot), true);
+    fs.opendirSync = function trackedOpendirSync(...args) {
+      const directory = originalOpendirSync.apply(fs, args);
+      const closeSync = directory.closeSync.bind(directory);
+      opened += 1;
+      directory.closeSync = function trackedCloseSync() {
+        closed += 1;
+        return closeSync();
+      };
+      return directory;
+    };
+    journal.targetJournalUsage(authority.paths);
+    assert.equal(closed, opened);
+    opened = 0;
+    closed = 0;
+    assert.throws(
+      () => journal.targetJournalUsage(authority.paths, {
+        testHooks: {
+          afterN8nJournalDirectoryEntry() {
+            const error = new Error('synthetic bounded-enumeration failure');
+            error.code = 'SYNTHETIC_STOP';
+            throw error;
+          }
+        }
+      }),
+      { code: 'SYNTHETIC_STOP' }
+    );
+    assert.equal(closed, opened);
+  } finally {
+    fs.opendirSync = originalOpendirSync;
+    fs.rmSync(closeRoot, { recursive: true, force: true });
+  }
+});
+
+test('orphaned C20 publishes or reuses one exact checkpoint without appending another C20', () => {
+  const root = temporaryRoot();
+  try {
+    const value = fixture(root, '91919191-9191-4191-8191-919191919191');
+    let authority = completeForCheckpoint(value);
+    authority = append(authority, 'C10_CLEANUP_PENDING', {
+      residue_manifest_digest: journal.residueManifest([]).digest
+    });
+    authority = append(authority, 'C20_CLEANUP_COMPLETE', {
+      residue_manifest_digest: journal.residueManifest([]).digest
+    });
+    assert.equal(checkpointNames(authority).length, 0);
+    assert.throws(
+      () => bridge.finalizeOrphanedN8nPhysicalCleanup(
+        value.codexHome,
+        value.targetPath,
+        {
+          afterN8nCheckpointPublished() {
+            const error = new Error('synthetic stop after orphan checkpoint publication');
+            error.code = 'SYNTHETIC_STOP';
+            throw error;
+          }
+        }
+      ),
+      { code: 'SYNTHETIC_STOP' }
+    );
+    assert.equal(checkpointNames(authority).length, 1);
+    bridge.finalizeOrphanedN8nPhysicalCleanup(value.codexHome, value.targetPath);
+    bridge.finalizeOrphanedN8nPhysicalCleanup(value.codexHome, value.targetPath);
+    const rebound = journal.bindJournalAuthority({
+      codexHome: value.codexHome,
+      generationId: value.generationId,
+      ownershipToken: TOKEN,
+      targetPath: value.targetPath,
+      write: false
+    });
+    assert.equal(
+      rebound.records.filter((record) => record.kind === 'C20_CLEANUP_COMPLETE').length,
+      1
+    );
+    assert.equal(checkpointNames(rebound).length, 1);
+
+    const checkpointName = checkpointNames(rebound)[0];
+    rewriteCheckpoint(rebound, checkpointName, (frame) => {
+      frame.payload.transaction_authority_digest = 'f'.repeat(64);
+    });
+    assert.throws(
+      () => bridge.finalizeOrphanedN8nPhysicalCleanup(value.codexHome, value.targetPath),
+      { code: 'journal-checkpoint-drift' }
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('multiple orphaned C20 journals resume interrupted compaction and remain bounded', () => {
+  const root = temporaryRoot();
+  try {
+    const values = [1, 2, 3].map((index) => fixture(
+      root,
+      `92929292-9292-4292-8292-${String(index).padStart(12, '0')}`
+    ));
+    const authorities = values.map((value) => {
+      let authority = completeForCheckpoint(value);
+      authority = append(authority, 'C10_CLEANUP_PENDING', {
+        residue_manifest_digest: journal.residueManifest([]).digest
+      });
+      return append(authority, 'C20_CLEANUP_COMPLETE', {
+        residue_manifest_digest: journal.residueManifest([]).digest
+      });
+    });
+    assert.throws(
+      () => bridge.finalizeOrphanedN8nPhysicalCleanup(
+        values[0].codexHome,
+        values[0].targetPath,
+        {
+          afterN8nTransactionCompactionMove() {
+            const error = new Error('synthetic stop during orphan transaction compaction');
+            error.code = 'SYNTHETIC_STOP';
+            throw error;
+          }
+        }
+      ),
+      { code: 'SYNTHETIC_STOP' }
+    );
+    bridge.finalizeOrphanedN8nPhysicalCleanup(values[0].codexHome, values[0].targetPath);
+    bridge.finalizeOrphanedN8nPhysicalCleanup(values[0].codexHome, values[0].targetPath);
+    const transactionNames = fs.readdirSync(authorities[0].paths.transactions).sort();
+    assert.deepEqual(
+      transactionNames,
+      [authorities[1].generation_id, authorities[2].generation_id].sort()
+    );
+    assert.equal(checkpointNames(authorities[2]).length, 2);
+    for (const authority of authorities.slice(1)) {
+      const rebound = journal.bindJournalAuthority({
+        codexHome: values[0].codexHome,
+        generationId: authority.generation_id,
+        ownershipToken: TOKEN,
+        targetPath: values[0].targetPath,
+        write: false
+      });
+      assert.equal(
+        rebound.records.filter((record) => record.kind === 'C20_CLEANUP_COMPLETE').length,
+        1
+      );
+    }
+  } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

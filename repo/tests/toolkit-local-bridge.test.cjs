@@ -56,7 +56,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.9.22';
+const expectedBridgeVersion = '2.9.23';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 const currentN8nManifestPath = path.join(
   repoRoot,
@@ -3440,7 +3440,7 @@ test('displaced evidence replaced after inspection is not deleted and the conten
   });
 
   assert.equal(result.acquired, false, 'the contender yields when the evidence generation changed');
-  assert.match(result.skipReason, /changed while being retired/);
+  assert.match(result.skipReason, /changed before quarantine retirement/);
   assert.equal(readJson(evidencePath).token, 'replaced-generation', 'the changed generation is not deleted');
   assert.equal(fs.existsSync(lockPath), false, 'no second writer enters');
 });
@@ -3504,6 +3504,204 @@ test('recovery marker release is token-guarded', () => {
   assert.equal(fs.existsSync(markerPath), true, 'a forged token cannot remove the winning marker');
   bridge.releaseRecoveryMarker(markerPath, 'winning-recovery');
   assert.equal(fs.existsSync(markerPath), false, 'the owner token releases its own marker');
+});
+
+test('lock-artifact retirement preserves source and quarantine replacements and resumes crash prefixes', () => {
+  const bridge = require('../scripts/toolkit-local-bridge.cjs');
+
+  const sourceRoot = tmpRoot();
+  const sourceMarker = path.join(sourceRoot, 'update.lock.recovery');
+  fs.mkdirSync(sourceRoot, { recursive: true });
+  writeJson(sourceMarker, {
+    created_at: new Date().toISOString(),
+    pid: process.pid,
+    token: 'source-owner'
+  });
+  bridge.releaseRecoveryMarker(sourceMarker, 'source-owner', {
+    beforeLockArtifactRetirementMove(event) {
+      fs.rmSync(event.source_path);
+      writeJson(event.source_path, {
+        created_at: new Date().toISOString(),
+        pid: process.pid,
+        token: 'replacement-owner'
+      });
+    }
+  });
+  assert.equal(readJson(sourceMarker).token, 'replacement-owner');
+  assert.deepEqual(
+    fs.readdirSync(sourceRoot).filter((name) => name.includes('.quarantine-')),
+    []
+  );
+
+  const movedRoot = tmpRoot();
+  const movedMarker = path.join(movedRoot, 'update.lock.recovery');
+  fs.mkdirSync(movedRoot, { recursive: true });
+  writeJson(movedMarker, {
+    created_at: new Date().toISOString(),
+    pid: process.pid,
+    token: 'moved-owner'
+  });
+  let replacementQuarantine = '';
+  bridge.releaseRecoveryMarker(movedMarker, 'moved-owner', {
+    afterLockArtifactRetirementVerification(event) {
+      replacementQuarantine = event.quarantine_path;
+      fs.rmSync(event.quarantine_path);
+      writeJson(event.quarantine_path, {
+        created_at: new Date().toISOString(),
+        pid: process.pid,
+        token: 'quarantine-replacement'
+      });
+    }
+  });
+  assert.equal(readJson(replacementQuarantine).token, 'quarantine-replacement');
+
+  for (const hookName of [
+    'afterLockArtifactRetirementMove',
+    'afterLockArtifactRetirementVerification'
+  ]) {
+    const restartRoot = tmpRoot();
+    const restartMarker = path.join(restartRoot, 'update.lock.recovery');
+    fs.mkdirSync(restartRoot, { recursive: true });
+    writeJson(restartMarker, {
+      created_at: new Date().toISOString(),
+      pid: process.pid,
+      token: 'restart-owner'
+    });
+    assert.throws(
+      () => bridge.releaseRecoveryMarker(restartMarker, 'restart-owner', {
+        [hookName]() {
+          const error = new Error(`synthetic stop at ${hookName}`);
+          error.code = 'SYNTHETIC_STOP';
+          throw error;
+        }
+      }),
+      { code: 'SYNTHETIC_STOP' }
+    );
+    assert.equal(fs.existsSync(restartMarker), false);
+    assert.equal(
+      fs.readdirSync(restartRoot).filter((name) => name.includes('.quarantine-')).length,
+      1
+    );
+    const recovered = bridge.acquireLock(
+      restartRoot,
+      { hook: true, syncSource: 'repo' },
+      { liveness: () => 'dead' }
+    );
+    assert.equal(recovered.acquired, true);
+    bridge.releaseLock(recovered);
+    assert.deepEqual(fs.readdirSync(restartRoot), []);
+  }
+});
+
+test('claim, marker, displaced evidence, and retirement tombstone use exact quarantine fencing', () => {
+  const bridge = require('../scripts/toolkit-local-bridge.cjs');
+  const cases = [
+    {
+      kind: 'recovery-claim',
+      name: 'update.lock.recovery.claim-1111111111111111',
+      record: {
+        created_at: new Date().toISOString(),
+        pid: 991111,
+        reclaimed_marker_identity: '1111111111111111',
+        token: 'claim-owner'
+      }
+    },
+    {
+      kind: 'displaced-retirement',
+      name: 'update.lock.displaced.11111111-1111-4111-8111-111111111111.retired-2222222222222222',
+      record: {
+        created_at: new Date().toISOString(),
+        pid: 992222,
+        retired_identity: '2222222222222222'
+      }
+    }
+  ];
+  for (const fixtureValue of cases) {
+    const root = tmpRoot();
+    fs.mkdirSync(root, { recursive: true });
+    const artifactPath = path.join(root, fixtureValue.name);
+    writeJson(artifactPath, fixtureValue.record);
+    const result = bridge.acquireLock(
+      root,
+      { hook: true, syncSource: 'repo' },
+      {
+        beforeLockArtifactRetirementMove(event) {
+          if (event.artifact_kind !== fixtureValue.kind) return;
+          fs.rmSync(event.source_path);
+          writeJson(event.source_path, {
+            ...fixtureValue.record,
+            created_at: new Date(Date.now() + 1000).toISOString()
+          });
+        },
+        liveness: () => 'dead'
+      }
+    );
+    assert.equal(result.acquired, false);
+    assert.equal(fs.existsSync(artifactPath), true);
+    assert.deepEqual(
+      fs.readdirSync(root).filter((name) => name.includes('.quarantine-')),
+      []
+    );
+  }
+
+  const markerRoot = tmpRoot();
+  fs.mkdirSync(markerRoot, { recursive: true });
+  const markerPath = path.join(markerRoot, 'update.lock.recovery');
+  writeJson(markerPath, {
+    created_at: new Date().toISOString(),
+    pid: 993333,
+    token: 'marker-owner'
+  });
+  const markerResult = bridge.acquireLock(
+    markerRoot,
+    { hook: true, syncSource: 'repo' },
+    {
+      beforeLockArtifactRetirementMove(event) {
+        if (event.artifact_kind !== 'recovery-marker') return;
+        fs.rmSync(event.source_path);
+        writeJson(event.source_path, {
+          created_at: new Date().toISOString(),
+          pid: 993334,
+          token: 'marker-replacement'
+        });
+      },
+      liveness: () => 'dead'
+    }
+  );
+  assert.equal(markerResult.acquired, false);
+  assert.equal(readJson(markerPath).token, 'marker-replacement');
+
+  const displacedRoot = tmpRoot();
+  fs.mkdirSync(displacedRoot, { recursive: true });
+  const displacedName = 'update.lock.displaced.33333333-3333-4333-8333-333333333333';
+  const displacedPath = path.join(displacedRoot, displacedName);
+  writeJson(displacedPath, {
+    bridge_version: bridge.BRIDGE_VERSION,
+    created_at: new Date().toISOString(),
+    pid: 994444,
+    sync_source: 'repo',
+    token: '33333333-3333-4333-8333-333333333333'
+  });
+  const displacedResult = bridge.acquireLock(
+    displacedRoot,
+    { hook: true, syncSource: 'repo' },
+    {
+      beforeLockArtifactRetirementMove(event) {
+        if (event.artifact_kind !== 'displaced-lock') return;
+        fs.rmSync(event.source_path);
+        writeJson(event.source_path, {
+          bridge_version: bridge.BRIDGE_VERSION,
+          created_at: new Date().toISOString(),
+          pid: 994445,
+          sync_source: 'repo',
+          token: '33333333-3333-4333-8333-333333333333'
+        });
+      },
+      liveness: () => 'dead'
+    }
+  );
+  assert.equal(displacedResult.acquired, false);
+  assert.equal(readJson(displacedPath).pid, 994445);
 });
 
 test('Codex n8n exact target-lock artifacts survive process stops without inventory wedges', (t) => {

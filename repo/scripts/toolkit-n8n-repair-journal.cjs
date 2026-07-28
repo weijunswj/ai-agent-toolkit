@@ -1091,24 +1091,65 @@ function revalidateLogicalRetirement(authority) {
   return current;
 }
 
-function targetJournalUsage(paths) {
+function boundedJournalDirectoryNames(directoryPath, state, options, phase) {
+  const names = [];
+  if (options.testHooks?.beforeN8nJournalDirectoryEnumeration) {
+    options.testHooks.beforeN8nJournalDirectoryEnumeration({
+      directory_path: directoryPath,
+      phase
+    });
+  }
+  const directory = fs.opendirSync(directoryPath);
+  try {
+    let entry;
+    while ((entry = directory.readSync()) !== null) {
+      state.entries += 1;
+      if (options.testHooks?.afterN8nJournalDirectoryEntry) {
+        options.testHooks.afterN8nJournalDirectoryEntry({
+          directory_path: directoryPath,
+          entries: state.entries,
+          name: entry.name,
+          phase
+        });
+      }
+      if (state.entries > JOURNAL_MAX_TARGET_ENTRIES) {
+        throw journalError('journal-hard-limit', 'The target journal exceeds its locked hard storage limit');
+      }
+      names.push(entry.name);
+    }
+  } finally {
+    directory.closeSync();
+    if (options.testHooks?.afterN8nJournalDirectoryClosed) {
+      options.testHooks.afterN8nJournalDirectoryClosed({
+        directory_path: directoryPath,
+        phase
+      });
+    }
+  }
+  names.sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
+  return names;
+}
+
+function targetJournalUsage(paths, options = {}) {
   let entries = 0;
   let bytes = 0;
   const directories = [];
   const files = [];
   const pending = [paths.target];
+  const inventoryState = { entries: 0 };
   while (pending.length) {
     const current = pending.pop();
     const stat = fs.lstatSync(current, { bigint: true });
     if (stat.isSymbolicLink()) throw journalError('journal-topology-invalid', 'The repair journal contains a redirect');
     if (stat.isDirectory()) {
       const before = requireOrdinaryDirectory(current, 'repair journal inventory directory');
-      const names = fs.readdirSync(current)
-        .sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
-      entries += names.length;
-      if (entries > JOURNAL_MAX_TARGET_ENTRIES) {
-        throw journalError('journal-hard-limit', 'The target journal exceeds its locked hard storage limit');
-      }
+      const names = boundedJournalDirectoryNames(
+        current,
+        inventoryState,
+        options,
+        'inventory'
+      );
+      entries = inventoryState.entries;
       const after = requireOrdinaryDirectory(current, 'repair journal inventory directory');
       if (!directoryIdentitiesMatch(before.identity, after.identity)) {
         throw journalError('journal-topology-invalid', 'The repair journal changed during bounded inventory');
@@ -1132,10 +1173,15 @@ function targetJournalUsage(paths) {
       throw journalError('journal-hard-limit', 'The target journal exceeds its locked hard storage limit');
     }
   }
+  const revalidationState = { entries: 0 };
   for (const directory of directories) {
     const current = requireOrdinaryDirectory(directory.path, 'repair journal inventory directory');
-    const names = fs.readdirSync(directory.path)
-      .sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
+    const names = boundedJournalDirectoryNames(
+      directory.path,
+      revalidationState,
+      options,
+      'revalidation'
+    );
     if (
       !directoryIdentitiesMatch(directory.identity, current.identity)
       || canonicalJson(names) !== canonicalJson(directory.names)
@@ -1505,16 +1551,78 @@ function writeTerminalCheckpoint(authority, options = {}) {
   ) {
     throw journalError('journal-state-invalid', 'A terminal checkpoint requires logical-retirement authority');
   }
-  if (
-    previous?.frame.payload?.terminal_record_digest === terminal.complete_digest
-    && previous.frame.payload.terminal_state === authority.state
-  ) {
+  const transactionManifest = transactionResidueManifest(authority);
+  const expectedOwnershipDigest = transactionTokenDigest(authority.ownership_token);
+  const candidates = inventory.active.map((entry) => ({
+    cumulative_terminal_root: entry.frame.payload.cumulative_terminal_root,
+    digest: entry.frame.complete_digest,
+    epoch: entry.epoch,
+    frame: entry.frame,
+    name: entry.name,
+    slot: entry.frame.payload.slot
+  }));
+  const latestSuperseded = previous?.frame.payload?.superseded_checkpoint || null;
+  if (latestSuperseded) {
+    candidates.push({
+      cumulative_terminal_root: null,
+      digest: latestSuperseded.digest,
+      epoch: latestSuperseded.epoch,
+      frame: {
+        ownership_token_digest: latestSuperseded.ownership_token_digest,
+        payload: {
+          generation_id: latestSuperseded.generation_id,
+          ownership_token_digest: latestSuperseded.ownership_token_digest,
+          residue_manifest_digest: retirement.payload.residue_manifest.digest,
+          slot: latestSuperseded.slot,
+          terminal_record_digest: latestSuperseded.terminal_record_digest,
+          terminal_state: latestSuperseded.terminal_state,
+          transaction_authority_digest: latestSuperseded.transaction_authority_digest,
+          transaction_residue_manifest: latestSuperseded.transaction_residue_manifest
+        }
+      },
+      name: latestSuperseded.name,
+      slot: latestSuperseded.slot
+    });
+  }
+  let matching = null;
+  for (const candidate of candidates) {
+    const payload = candidate.frame.payload;
+    if (
+      payload.generation_id !== authority.generation_id
+      || payload.terminal_state !== authority.state
+    ) {
+      continue;
+    }
+    const exact = (
+      candidate.frame.ownership_token_digest === expectedOwnershipDigest
+      && payload.ownership_token_digest === expectedOwnershipDigest
+      && payload.terminal_record_digest === terminal.complete_digest
+      && payload.transaction_authority_digest === authority.digest
+      && payload.residue_manifest_digest === retirement.payload.residue_manifest.digest
+      && canonicalJson(payload.transaction_residue_manifest) === canonicalJson(transactionManifest)
+    );
+    if (!exact) {
+      throw journalError(
+        'journal-checkpoint-drift',
+        'A checkpoint conflicts with the exact terminal transaction authority'
+      );
+    }
+    if (matching && matching.digest !== candidate.digest) {
+      throw journalError(
+        'journal-checkpoint-drift',
+        'Multiple checkpoints claim the same exact terminal transaction authority'
+      );
+    }
+    matching = candidate;
+  }
+  if (matching) {
     return Object.freeze({
-      cumulative_terminal_root: previous.frame.payload.cumulative_terminal_root,
-      digest: previous.frame.complete_digest,
-      epoch: previous.epoch,
-      name: previous.name,
-      slot: previous.frame.payload.slot
+      compaction_digest: previous?.frame.complete_digest || matching.digest,
+      cumulative_terminal_root: matching.cumulative_terminal_root,
+      digest: matching.digest,
+      epoch: matching.epoch,
+      name: matching.name,
+      slot: matching.slot
     });
   }
   const epoch = previous ? previous.epoch + 1 : 1;
@@ -1558,7 +1666,7 @@ function writeTerminalCheckpoint(authority, options = {}) {
       terminal_record_digest: terminal.complete_digest,
       terminal_state: authority.state,
       transaction_authority_digest: authority.digest,
-      transaction_residue_manifest: transactionResidueManifest(authority)
+      transaction_residue_manifest: transactionManifest
     },
     previousDigest: previous?.frame.complete_digest || ZERO_DIGEST,
     targetId: authority.paths.target_id
@@ -1676,7 +1784,9 @@ function compactSupersededTransaction(authority, checkpoint, options = {}) {
     authority.paths.checkpoints,
     authority.paths.target_id
   );
-  const active = inventory.active.find((entry) => entry.frame.complete_digest === checkpoint.digest);
+  const active = inventory.active.find((entry) =>
+    entry.frame.complete_digest === (checkpoint.compaction_digest || checkpoint.digest)
+  );
   if (!active) {
     throw journalError('journal-checkpoint-drift', 'The activating checkpoint is no longer exact current authority');
   }
