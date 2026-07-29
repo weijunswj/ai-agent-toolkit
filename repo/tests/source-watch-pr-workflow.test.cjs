@@ -115,6 +115,18 @@ test('source-watch PR lifecycle never reopens historical closed PRs', () => {
   assert.match(script, /create\)[\s\S]*verify_fresh_plan create[\s\S]*gh pr create[\s\S]*verify_open/);
 });
 
+test('source-watch PR lifecycle assigns the repository owner on create and update', () => {
+  const script = lifecycleScript();
+  assert.match(
+    script,
+    /gh pr edit "\$PR_NUMBER"[^\n]*--add-assignee "\$EXPECTED_OWNER"/
+  );
+  assert.match(
+    script,
+    /gh pr create[\s\S]*--assignee "\$EXPECTED_OWNER"[\s\S]*--title "\$PR_TITLE"/
+  );
+});
+
 test('source-watch PR lifecycle fails closed on ambiguous open matches', () => {
   const script = lifecycleScript();
   const ambiguous = script.slice(
