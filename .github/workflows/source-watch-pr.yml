@@ -101,15 +101,97 @@ jobs:
           fi
           echo "pushed=true" >> "$GITHUB_OUTPUT"
 
-      - name: Open or update review notification PR
+      - name: Plan exact review notification PR lifecycle
+        id: plan_pr
         if: steps.source_updates.outputs.pr_needed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH: source-watch/review-active-third-party-updates
+          BASE_BRANCH: main
+          EXPECTED_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          PR_METADATA="$RUNNER_TEMP/source-watch-pr-metadata.json"
+          gh pr list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state all \
+            --base "$BASE_BRANCH" \
+            --head "$BRANCH" \
+            --limit 1000 \
+            --json number,state,headRefName,baseRefName,headRepositoryOwner,headRepository,isCrossRepository,updatedAt \
+            > "$PR_METADATA"
+          node repo/scripts/plan-source-watch-pr-lifecycle.cjs \
+            --mode plan \
+            --input "$PR_METADATA" \
+            --repository "$GITHUB_REPOSITORY" \
+            --owner "$EXPECTED_OWNER" \
+            --head "$BRANCH" \
+            --base "$BASE_BRANCH" \
+            --actionable true \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Apply exact review notification PR lifecycle
+        if: steps.source_updates.outputs.pr_needed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: source-watch/review-active-third-party-updates
+          BASE_BRANCH: main
+          EXPECTED_OWNER: ${{ github.repository_owner }}
+          ACTION: ${{ steps.plan_pr.outputs.action }}
+          PR_NUMBER: ${{ steps.plan_pr.outputs.pr_number }}
+          CONFLICTING_PR_NUMBERS: ${{ steps.plan_pr.outputs.conflicting_pr_numbers }}
           PR_TITLE: "[source-watch] Review active source-watch updates"
           PR_BODY: ${{ runner.temp }}/source-watch-pr-body.md
         run: |
           set -euo pipefail
+          query_exact_prs() {
+            gh pr list \
+              --repo "$GITHUB_REPOSITORY" \
+              --state all \
+              --base "$BASE_BRANCH" \
+              --head "$BRANCH" \
+              --limit 1000 \
+              --json number,state,headRefName,baseRefName,headRepositoryOwner,headRepository,isCrossRepository,updatedAt
+          }
+          verify_open() {
+            local expected_number="${1:-}"
+            local metadata="$RUNNER_TEMP/source-watch-pr-verify.json"
+            query_exact_prs > "$metadata"
+            local args=(
+              --mode verify-open
+              --input "$metadata"
+              --repository "$GITHUB_REPOSITORY"
+              --owner "$EXPECTED_OWNER"
+              --head "$BRANCH"
+              --base "$BASE_BRANCH"
+              --actionable true
+            )
+            if [ -n "$expected_number" ]; then
+              args+=(--expected-number "$expected_number")
+            fi
+            node repo/scripts/plan-source-watch-pr-lifecycle.cjs "${args[@]}"
+          }
+          verify_fresh_plan() {
+            local expected_action="$1"
+            local expected_number="${2:-}"
+            local metadata="$RUNNER_TEMP/source-watch-pr-fresh-plan.json"
+            query_exact_prs > "$metadata"
+            local args=(
+              --mode verify-plan
+              --input "$metadata"
+              --repository "$GITHUB_REPOSITORY"
+              --owner "$EXPECTED_OWNER"
+              --head "$BRANCH"
+              --base "$BASE_BRANCH"
+              --actionable true
+              --expected-action "$expected_action"
+            )
+            if [ -n "$expected_number" ]; then
+              args+=(--expected-number "$expected_number")
+            fi
+            node repo/scripts/plan-source-watch-pr-lifecycle.cjs "${args[@]}"
+          }
+
           cat > "$PR_BODY" <<'EOF'
           This PR is a review notification only.
           No source files or advisory tracking documents were updated.
@@ -134,8 +216,41 @@ jobs:
           - [ ] If advisory action is taken, update the advisory document in a separate human-reviewed PR.
           - [ ] Run npm run validate:all before any real source update merge.
           EOF
-          if gh pr view "$BRANCH" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh pr edit "$BRANCH" --repo "$GITHUB_REPOSITORY" --title "$PR_TITLE" --body-file "$PR_BODY"
-          else
-            gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" --title "$PR_TITLE" --body-file "$PR_BODY"
-          fi
+
+          case "$ACTION" in
+            fail-ambiguous-open)
+              echo "Refusing source-watch PR mutation: multiple exact matching open PRs: $CONFLICTING_PR_NUMBERS" >&2
+              exit 1
+              ;;
+            update-open)
+              test -n "$PR_NUMBER"
+              verify_fresh_plan update-open "$PR_NUMBER"
+              gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --title "$PR_TITLE" --body-file "$PR_BODY"
+              verify_open "$PR_NUMBER"
+              ;;
+            reopen-and-update)
+              test -n "$PR_NUMBER"
+              verify_fresh_plan reopen-and-update "$PR_NUMBER"
+              gh pr reopen "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"
+              verify_open "$PR_NUMBER"
+              gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --title "$PR_TITLE" --body-file "$PR_BODY"
+              verify_open "$PR_NUMBER"
+              ;;
+            create)
+              verify_fresh_plan create
+              gh pr create \
+                --repo "$GITHUB_REPOSITORY" \
+                --base "$BASE_BRANCH" \
+                --head "$BRANCH" \
+                --title "$PR_TITLE" \
+                --body-file "$PR_BODY"
+              verify_open
+              ;;
+            none)
+              echo "No actionable source-watch finding; no PR lifecycle mutation."
+              ;;
+            *)
+              echo "Refusing unknown source-watch PR lifecycle action: $ACTION" >&2
+              exit 1
+              ;;
+          esac

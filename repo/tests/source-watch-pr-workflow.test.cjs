@@ -24,6 +24,13 @@ function updateBranchScript() {
   return workflow.slice(start, nextStep);
 }
 
+function lifecycleScript() {
+  const marker = '      - name: Apply exact review notification PR lifecycle';
+  const start = workflow.indexOf(marker);
+  assert.notEqual(start, -1, 'PR lifecycle step is present');
+  return workflow.slice(start);
+}
+
 test('source-watch PR notifier remains scheduled-only with minimum write permissions', () => {
   assert.match(workflow, /^name:\s*Source Watch PR Notifier\s*$/m);
   assert.doesNotMatch(workflow, /^\s*workflow_dispatch:\s*$/m);
@@ -78,10 +85,107 @@ test('source-watch report writes reject symlinks and push with a lease', () => {
 test('source-watch PR notifier does not become a source updater', () => {
   assert.doesNotMatch(workflow, /gh issue create/i);
   assert.doesNotMatch(workflow, /gh pr merge|--auto/i);
+  assert.doesNotMatch(workflow, /\$\{\{\s*secrets\./i);
   assert.doesNotMatch(workflow, /repo\/scripts\/safe-source-update\.cjs/i);
+  assert.doesNotMatch(workflow, /git clone|npm (?:install|exec)|\bnpx\b/i);
   assert.doesNotMatch(workflow, /git add[^\n]*(?:_projects|SOURCE-LOCK\.json)/i);
   assert.doesNotMatch(workflow, /cp .*_projects|install .*_projects/i);
   assert.doesNotMatch(workflow, /git push[^\n]*(?:HEAD:)?main\b/i);
+});
+
+test('source-watch PR lifecycle metadata and plans use exact repository authority', () => {
+  assert.match(workflow, /--repo "\$GITHUB_REPOSITORY"/);
+  assert.match(workflow, /--state all/);
+  assert.match(workflow, /--base "\$BASE_BRANCH"/);
+  assert.match(workflow, /--head "\$BRANCH"/);
+  assert.match(
+    workflow,
+    /--json number,state,headRefName,baseRefName,headRepositoryOwner,headRepository,isCrossRepository,updatedAt/
+  );
+  assert.match(workflow, /plan-source-watch-pr-lifecycle\.cjs/);
+  assert.doesNotMatch(workflow, /gh pr view "\$BRANCH"/);
+});
+
+test('source-watch PR lifecycle reopens and verifies before updating a closed PR', () => {
+  const script = lifecycleScript();
+  assert.match(script, /run: \|\n\s+set -euo pipefail/);
+  const reopenCase = script.slice(
+    script.indexOf('            reopen-and-update)'),
+    script.indexOf('            create)')
+  );
+  const reopen = reopenCase.indexOf('gh pr reopen "$PR_NUMBER"');
+  const firstVerification = reopenCase.indexOf('verify_open "$PR_NUMBER"', reopen);
+  const update = reopenCase.indexOf('gh pr edit "$PR_NUMBER"', firstVerification);
+  const finalVerification = reopenCase.indexOf('verify_open "$PR_NUMBER"', update);
+  assert.ok(reopen >= 0, 'closed PR is reopened');
+  assert.ok(firstVerification > reopen, 'reopened PR is re-fetched and verified before update');
+  assert.ok(update > firstVerification, 'title/body update follows successful reopen verification');
+  assert.ok(finalVerification > update, 'final open state is confirmed after update');
+});
+
+test('source-watch PR lifecycle fails closed on ambiguous open matches', () => {
+  const script = lifecycleScript();
+  const ambiguous = script.slice(
+    script.indexOf('            fail-ambiguous-open)'),
+    script.indexOf('            update-open)')
+  );
+  assert.match(ambiguous, /multiple exact matching open PRs/);
+  assert.match(ambiguous, /exit 1/);
+  assert.doesNotMatch(ambiguous, /gh pr (?:edit|reopen|create)/);
+});
+
+test('source-watch PR lifecycle confirms an open exact match after every mutation', () => {
+  const script = lifecycleScript();
+  assert.match(script, /query_exact_prs > "\$metadata"/);
+  assert.match(script, /--mode verify-open/);
+  assert.match(
+    script,
+    /update-open\)[\s\S]*verify_fresh_plan update-open "\$PR_NUMBER"[\s\S]*gh pr edit "\$PR_NUMBER"[\s\S]*verify_open "\$PR_NUMBER"/
+  );
+  assert.match(
+    script,
+    /verify_fresh_plan reopen-and-update "\$PR_NUMBER"[\s\S]*gh pr reopen "\$PR_NUMBER"[\s\S]*verify_open "\$PR_NUMBER"[\s\S]*gh pr edit/
+  );
+  assert.match(script, /verify_fresh_plan create[\s\S]*gh pr create[\s\S]*verify_open/);
+});
+
+test('every PR mutation is immediately preceded by a fresh exact lifecycle plan', () => {
+  const script = lifecycleScript();
+  assert.match(script, /query_exact_prs > "\$metadata"[\s\S]*--mode verify-plan/);
+  assert.match(
+    script,
+    /verify_fresh_plan update-open "\$PR_NUMBER"\n\s+gh pr edit "\$PR_NUMBER"/
+  );
+  assert.match(
+    script,
+    /verify_fresh_plan reopen-and-update "\$PR_NUMBER"\n\s+gh pr reopen "\$PR_NUMBER"/
+  );
+  assert.match(script, /verify_fresh_plan create\n\s+gh pr create/);
+});
+
+test('fresh ambiguity is checked before any PR mutation', () => {
+  const script = lifecycleScript();
+  const firstFreshPlan = script.indexOf('verify_fresh_plan update-open "$PR_NUMBER"');
+  const firstMutation = script.indexOf('gh pr edit "$PR_NUMBER"');
+  assert.ok(firstFreshPlan >= 0 && firstFreshPlan < firstMutation);
+  assert.match(script, /--mode verify-plan/);
+  assert.match(script, /stale source-watch PR lifecycle plan|expected-action/);
+  assert.match(script, /gh pr create[\s\S]*verify_open/);
+});
+
+test('no actionable drift skips branch and PR lifecycle steps', () => {
+  assert.match(
+    workflow,
+    /- name: Update review notification branch[\s\S]*?if: steps\.source_updates\.outputs\.pr_needed == 'true'/
+  );
+  assert.match(
+    workflow,
+    /- name: Plan exact review notification PR lifecycle[\s\S]*?if: steps\.source_updates\.outputs\.pr_needed == 'true'/
+  );
+  assert.match(
+    workflow,
+    /- name: Apply exact review notification PR lifecycle[\s\S]*?if: steps\.source_updates\.outputs\.pr_needed == 'true'/
+  );
 });
 
 test('source-watch PR notifier documents advisory actions as report-only', () => {
