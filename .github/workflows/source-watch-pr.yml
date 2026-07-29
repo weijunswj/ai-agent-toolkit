@@ -16,12 +16,16 @@ concurrency:
   group: source-watch-pr-notifier
   cancel-in-progress: false
 
+env:
+  CAPTURE_NODE_TOOLCHAIN_SHA256: ecffc9c42136167ef5edc72b01c8e340f9ca0ef304285551a8b128f624bd5c55
+  VERIFY_CLOSURE_MANIFEST_SHA256: 17cefd9ce987a533a1f25da1330a4763c386eaf44d7bbc2656ef8e6986ae241f
 jobs:
   notify:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        id: checkout_trusted_main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: refs/heads/main
           fetch-depth: 0
@@ -34,9 +38,29 @@ jobs:
           test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
 
       - name: Set up Node
-        uses: actions/setup-node@v7
+        id: setup_node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
-          node-version: 22
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Bootstrap trusted helper bytes
+        shell: bash
+        timeout-minutes: 1
+        run: |
+          set -euo pipefail
+          capture_line=$(/usr/bin/sha256sum --binary -- repo/scripts/trusted-workflows/capture-node-toolchain.cjs)
+          verifier_line=$(/usr/bin/sha256sum --binary -- repo/scripts/trusted-workflows/verify-closure-manifest.cjs)
+          test "$capture_line" = "$CAPTURE_NODE_TOOLCHAIN_SHA256 *repo/scripts/trusted-workflows/capture-node-toolchain.cjs"
+          test "$verifier_line" = "$VERIFY_CLOSURE_MANIFEST_SHA256 *repo/scripts/trusted-workflows/verify-closure-manifest.cjs"
+
+      - name: Capture setup-node executable identity
+        timeout-minutes: 1
+        run: node repo/scripts/trusted-workflows/capture-node-toolchain.cjs 1
+
+      - name: Verify trusted execution closure
+        timeout-minutes: 1
+        run: node repo/scripts/trusted-workflows/verify-closure-manifest.cjs repo/scripts/trusted-workflows/verify-closure-manifest.cjs
 
       - name: Validate source locks
         run: node repo/scripts/audit-project-source-locks.cjs
@@ -201,7 +225,7 @@ jobs:
           No upstream code was executed.
           No auto-merge is allowed.
           A human must review upstream changes, attribution/licence impact, allowlist scope, advisory recommendations, and host-harness drift evidence, then ask an AI agent to inspect before any real edits happen.
-          Advisory actions, when present, are read from `repo/source-watch/advisory-targets.json`.
+          Advisory actions, when present, are read from 'repo/source-watch/advisory-targets.json'.
           No advisory tracking document was changed by this workflow.
           If advisory action is taken, update the advisory document in a separate human-reviewed PR.
           If meaningful host-harness drift is found, open a separate PR with evidence, rationale, exact proposed modifications, and validation.

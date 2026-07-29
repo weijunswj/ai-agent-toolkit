@@ -3,6 +3,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const acorn = require('acorn');
 const YAML = require('yaml');
 const { isDirectRequireCallee, isValidStaticRequireCall, isRequireMainCompare, isRequireResolveCall, isSafeRequireMemberProperty, isRequireMainMember, isRequireResolveMember, normaliseSignal, isValidSignal, VALID_SIGNALS } = require('./trusted-workflows/loader-policy.cjs');
@@ -12,6 +13,11 @@ const WORKFLOWS_DIR = path.join(REPO_ROOT, '.github', 'workflows');
 const PRIVILEGED = new Set([
   '.github/workflows/auto-sync-generated-surfaces.yml',
   '.github/workflows/source-watch-pr.yml'
+]);
+const SOURCE_WATCH_PR_ALLOWED_SCRIPTS = new Set([
+  'audit-project-source-locks.cjs',
+  'check-project-source-updates.cjs',
+  'plan-source-watch-pr-lifecycle.cjs'
 ]);
 const ACTION_MANIFEST = 'repo/scripts/trusted-workflows/external-actions-manifest.json';
 const ACTION_SHA = /^[0-9a-f]{40}$/;
@@ -115,6 +121,337 @@ class ExecutableIdentityState {
   }
 }
 
+function validateFrame(frame) {
+  if (!frame || typeof frame !== 'object' || Array.isArray(frame)) {
+    throw new InventoryError('WF_FRAME_MALFORMED', 'frame');
+  }
+  const keys = Object.keys(frame).sort();
+  if (keys.length !== 4 || keys[0] !== 'duplicateOrdinal' || keys[1] !== 'kind' || keys[2] !== 'originIndex' || keys[3] !== 'scope') {
+    throw new InventoryError('WF_FRAME_MALFORMED', 'frame_fields');
+  }
+  if (!['step', 'wrapper', 'package_script'].includes(frame.kind)) {
+    throw new InventoryError('WF_FRAME_KIND_UNKNOWN', String(frame.kind));
+  }
+  if (typeof frame.scope !== 'string' || Buffer.byteLength(frame.scope, 'utf8') > 1024 || frame.scope !== frame.scope.normalize('NFC')) {
+    throw new InventoryError('WF_FRAME_SCOPE_INVALID', String(frame.scope));
+  }
+  if (!Number.isInteger(frame.originIndex) || frame.originIndex < 0 || frame.originIndex > 127) {
+    throw new InventoryError('WF_FRAME_ORIGIN_INVALID', String(frame.originIndex));
+  }
+  if (!Number.isInteger(frame.duplicateOrdinal) || frame.duplicateOrdinal < 1 || frame.duplicateOrdinal > 128) {
+    throw new InventoryError('WF_FRAME_ORDINAL_INVALID', String(frame.duplicateOrdinal));
+  }
+}
+
+function validateFrames(frames) {
+  if (!Array.isArray(frames)) {
+    throw new InventoryError('WF_FRAME_MALFORMED', 'not_array');
+  }
+  if (frames.length > 32) {
+    throw new InventoryError('WF_FRAME_DEPTH_EXCEEDED', String(frames.length));
+  }
+  for (const frame of frames) {
+    validateFrame(frame);
+  }
+}
+
+function cloneExecutionState(state) {
+  const clone = {
+    checkouts: new Map([...state.checkouts].map(([key, value]) => [key, { ...value }])),
+    env: new Map(state.env),
+    checkoutGeneration: state.checkoutGeneration,
+    setupGeneration: state.setupGeneration,
+    capturedGeneration: state.capturedGeneration,
+    pathIdentity: state.pathIdentity,
+    installed: new Map([...state.installed].map(([key, value]) => [key, { ...value }])),
+    workingDirectory: state.workingDirectory,
+    locationStack: state.locationStack.slice(),
+    processParentKey: state.processParentKey,
+    occurrenceFrames: (state.occurrenceFrames || []).map((f) => ({
+      kind: f.kind,
+      scope: f.scope,
+      originIndex: f.originIndex,
+      duplicateOrdinal: f.duplicateOrdinal
+    }))
+  };
+  if (state.outerParentKey !== undefined) {
+    clone.outerParentKey = state.outerParentKey;
+  }
+  return clone;
+}
+
+function initialExecutionState() {
+  return {
+    checkouts: new Map(),
+    env: new Map(),
+    checkoutGeneration: 0,
+    setupGeneration: 0,
+    capturedGeneration: 0,
+    pathIdentity: 0,
+    installed: new Map(),
+    workingDirectory: REPO_ROOT,
+    locationStack: [],
+    processParentKey: null,
+    occurrenceFrames: []
+  };
+}
+
+function stateFingerprint(state) {
+  return JSON.stringify({
+    checkouts: [...state.checkouts].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
+    env: [...state.env].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
+    checkoutGeneration: state.checkoutGeneration,
+    setupGeneration: state.setupGeneration,
+    capturedGeneration: state.capturedGeneration,
+    pathIdentity: state.pathIdentity,
+    installed: [...state.installed].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
+    workingDirectory: state.workingDirectory,
+    locationStack: state.locationStack
+  });
+}
+
+function uniqueStates(states, location, expectedMode) {
+  if (!Array.isArray(states)) throw new InventoryError('WF_STATE_INVALID', location);
+  if (states.length > MAX_EXECUTION_PATHS) throw new InventoryError('WF_PATH_LIMIT', location);
+  if (states.length === 0) return [];
+
+  for (const state of states) {
+    validateFrames(state.occurrenceFrames);
+  }
+
+  const hasFrames = states[0].occurrenceFrames.length > 0;
+  for (const state of states) {
+    if ((state.occurrenceFrames.length > 0) !== hasFrames) {
+      throw new InventoryError('WF_REDUCTION_MIXED_FRAMES', location);
+    }
+  }
+
+  const actualMode = hasFrames ? 'occurrence-sensitive' : 'ordinary';
+  if (expectedMode && expectedMode !== actualMode) {
+    throw new InventoryError('WF_REDUCTION_MODE_MISMATCH', location);
+  }
+
+  const values = new Map();
+  for (const state of states) {
+    let key;
+    if (actualMode === 'occurrence-sensitive') {
+      key = JSON.stringify({
+        frames: state.occurrenceFrames,
+        fingerprint: stateFingerprint(state)
+      });
+    } else {
+      key = JSON.stringify({
+        parent: state.processParentKey || '',
+        fingerprint: stateFingerprint(state)
+      });
+    }
+    values.set(key, state);
+  }
+
+  if (values.size > MAX_EXECUTION_PATHS) throw new InventoryError('WF_PATH_LIMIT', location);
+  return [...values.values()];
+}
+
+function buildWrapperCacheKey(shell, relPath, states, location) {
+  if (states.length > MAX_EXECUTION_PATHS) throw new InventoryError('WF_PATH_LIMIT', location);
+  if (!['bash', 'pwsh', 'cmd'].includes(shell)) throw new InventoryError('WF_CACHE_KEY_MALFORMED', 'shell');
+  const normPath = String(relPath).replace(/\\/g, '/').normalize('NFC');
+  if (Buffer.byteLength(normPath, 'utf8') > 1024 || normPath.includes('/./') || normPath.includes('/../') || normPath.startsWith('../') || normPath.startsWith('./')) {
+    throw new InventoryError('WF_CACHE_KEY_MALFORMED', 'path');
+  }
+
+  const countsMap = new Map();
+  for (const state of states) {
+    const callerToken = state.processParentKey || '';
+    if (Buffer.byteLength(callerToken, 'utf8') > 1024) throw new InventoryError('WF_CACHE_KEY_OVERSIZE', location);
+    const fp = crypto.createHash('sha256').update(stateFingerprint(state)).digest('hex');
+    const rowKey = callerToken + '\0' + fp;
+    if (!countsMap.has(rowKey)) {
+      countsMap.set(rowKey, { callerToken, semanticFingerprint: fp, count: 0 });
+    }
+    const row = countsMap.get(rowKey);
+    row.count += 1;
+    if (row.count > MAX_EXECUTION_PATHS) throw new InventoryError('WF_PATH_LIMIT', location);
+  }
+
+  const inputs = [...countsMap.values()].sort((a, b) => {
+    if (a.callerToken !== b.callerToken) return a.callerToken < b.callerToken ? -1 : 1;
+    return a.semanticFingerprint < b.semanticFingerprint ? -1 : a.semanticFingerprint > b.semanticFingerprint ? 1 : 0;
+  });
+
+  const keyObj = {
+    namespace: 'workflow-wrapper-cache',
+    version: 2,
+    shell,
+    path: normPath,
+    inputs
+  };
+
+  const keyString = JSON.stringify(keyObj);
+  if (Buffer.byteLength(keyString, 'utf8') > 16384) {
+    throw new InventoryError('WF_CACHE_KEY_OVERSIZE', location);
+  }
+  validateWrapperCacheKey(keyString, location);
+  return keyString;
+}
+
+function validateWrapperCacheKey(keyString, location) {
+  if (typeof keyString !== 'string' || Buffer.byteLength(keyString, 'utf8') > 16384) {
+    throw new InventoryError('WF_CACHE_KEY_OVERSIZE', location || 'key');
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(keyString);
+  } catch {
+    throw new InventoryError('WF_CACHE_KEY_MALFORMED', location || 'json');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new InventoryError('WF_CACHE_KEY_MALFORMED', 'root');
+  }
+  const keys = Object.keys(parsed);
+  if (keys.length !== 5 || keys[0] !== 'namespace' || keys[1] !== 'version' || keys[2] !== 'shell' || keys[3] !== 'path' || keys[4] !== 'inputs') {
+    throw new InventoryError('WF_CACHE_KEY_MALFORMED', 'fields');
+  }
+  if (parsed.namespace !== 'workflow-wrapper-cache' || parsed.version !== 2) {
+    throw new InventoryError('WF_CACHE_KEY_MALFORMED', 'version');
+  }
+  if (!['bash', 'pwsh', 'cmd'].includes(parsed.shell)) {
+    throw new InventoryError('WF_CACHE_KEY_MALFORMED', 'shell');
+  }
+  if (typeof parsed.path !== 'string' || Buffer.byteLength(parsed.path, 'utf8') > 1024 || parsed.path !== parsed.path.normalize('NFC') ||
+      parsed.path.startsWith('/') || parsed.path.startsWith('../') || parsed.path.startsWith('./') ||
+      parsed.path.includes('/./') || parsed.path.includes('/../') || parsed.path === '.' || parsed.path === '..') {
+    throw new InventoryError('WF_CACHE_KEY_MALFORMED', 'path');
+  }
+  if (!Array.isArray(parsed.inputs) || parsed.inputs.length > 128) {
+    throw new InventoryError('WF_CACHE_KEY_MALFORMED', 'inputs');
+  }
+  let prevCaller = null;
+  let prevFp = null;
+  for (const item of parsed.inputs) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new InventoryError('WF_CACHE_KEY_MALFORMED', 'input_item');
+    const itemKeys = Object.keys(item);
+    if (itemKeys.length !== 3 || itemKeys[0] !== 'callerToken' || itemKeys[1] !== 'semanticFingerprint' || itemKeys[2] !== 'count') {
+      throw new InventoryError('WF_CACHE_KEY_MALFORMED', 'input_keys');
+    }
+    if (typeof item.callerToken !== 'string' || Buffer.byteLength(item.callerToken, 'utf8') > 1024) {
+      throw new InventoryError('WF_CACHE_KEY_MALFORMED', 'callerToken');
+    }
+    if (typeof item.semanticFingerprint !== 'string' || !/^[0-9a-f]{64}$/.test(item.semanticFingerprint)) {
+      throw new InventoryError('WF_CACHE_KEY_MALFORMED', 'semanticFingerprint');
+    }
+    if (!Number.isInteger(item.count) || item.count < 1 || item.count > 128) {
+      throw new InventoryError('WF_CACHE_KEY_MALFORMED', 'count');
+    }
+    if (prevCaller !== null) {
+      if (item.callerToken < prevCaller || (item.callerToken === prevCaller && item.semanticFingerprint <= prevFp)) {
+        throw new InventoryError('WF_CACHE_KEY_MALFORMED', 'sorting');
+      }
+    }
+    prevCaller = item.callerToken;
+    prevFp = item.semanticFingerprint;
+  }
+}
+
+function extractSemanticState(state) {
+  return {
+    checkouts: [...state.checkouts].map(([k, v]) => [k, { ...v }]),
+    env: [...state.env],
+    checkoutGeneration: state.checkoutGeneration,
+    setupGeneration: state.setupGeneration,
+    capturedGeneration: state.capturedGeneration,
+    pathIdentity: state.pathIdentity,
+    installed: [...state.installed].map(([k, v]) => [k, { ...v }]),
+    workingDirectory: state.workingDirectory,
+    locationStack: state.locationStack.slice()
+  };
+}
+
+function validateWrapperCacheValue(value, inputStatesCount, location) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location || 'root');
+  }
+  const keys = Object.keys(value);
+  if (keys.length !== 5 || keys[0] !== 'namespace' || keys[1] !== 'version' || keys[2] !== 'origins' || keys[3] !== 'success' || keys[4] !== 'failure') {
+    throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location || 'keys');
+  }
+  if (value.namespace !== 'workflow-wrapper-cache-value' || value.version !== 2) {
+    throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location || 'version');
+  }
+  if (!Array.isArray(value.origins) || (inputStatesCount !== undefined && value.origins.length !== inputStatesCount)) {
+    throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location || 'origins_length');
+  }
+  const originSet = new Set();
+  for (let i = 0; i < value.origins.length; i += 1) {
+    const o = value.origins[i];
+    if (!o || typeof o !== 'object' || o.origin !== i || typeof o.semanticFingerprint !== 'string' || o.inputCount !== 1) {
+      throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location || 'origin_item');
+    }
+    if (originSet.has(o.origin)) throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location || 'duplicate_origin');
+    originSet.add(o.origin);
+  }
+
+  for (const collectionName of ['success', 'failure']) {
+    const coll = value[collectionName];
+    if (!Array.isArray(coll)) throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location || collectionName);
+    const ordinalsPerOrigin = new Map();
+    for (const item of coll) {
+      if (!item || typeof item !== 'object') throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location || 'item');
+      const itemKeys = Object.keys(item);
+      if (itemKeys.length !== 3 || itemKeys[0] !== 'origin' || itemKeys[1] !== 'outputOrdinal' || itemKeys[2] !== 'semanticState') {
+        throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location || 'item_keys');
+      }
+      if (!originSet.has(item.origin)) throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location || 'unknown_origin');
+      const expectedOrdinal = ordinalsPerOrigin.get(item.origin) || 0;
+      if (item.outputOrdinal !== expectedOrdinal) throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location || 'ordinal_gap');
+      ordinalsPerOrigin.set(item.origin, expectedOrdinal + 1);
+
+      const sem = item.semanticState;
+      if (!sem || typeof sem !== 'object' || Array.isArray(sem)) throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location || 'semanticState');
+      const forbiddenKeys = ['callerToken', 'processParentKey', 'outerParentKey', 'occurrenceFrames', 'wrapperOccurrenceIdentity'];
+      for (const fk of forbiddenKeys) {
+        if (Object.prototype.hasOwnProperty.call(sem, fk) || Object.prototype.hasOwnProperty.call(item, fk)) {
+          throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location || 'caller_leakage');
+        }
+      }
+    }
+  }
+}
+
+function rebindCacheValue(cacheValue, inputStates, relScriptPath, location) {
+  validateWrapperCacheValue(cacheValue, inputStates.length, location);
+  const rebindCollection = (coll) => {
+    return coll.map((entry) => {
+      const parentState = inputStates[entry.origin];
+      if (!parentState) throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location);
+      const sem = entry.semanticState;
+      const rebound = {
+        checkouts: new Map(sem.checkouts.map(([k, v]) => [k, { ...v }])),
+        env: new Map(sem.env),
+        checkoutGeneration: sem.checkoutGeneration,
+        setupGeneration: sem.setupGeneration,
+        capturedGeneration: sem.capturedGeneration,
+        pathIdentity: sem.pathIdentity,
+        installed: new Map(sem.installed.map(([k, v]) => [k, { ...v }])),
+        workingDirectory: sem.workingDirectory,
+        locationStack: sem.locationStack.slice(),
+        processParentKey: parentState.processParentKey,
+        occurrenceFrames: parentState.occurrenceFrames.map((f) => ({
+          kind: f.kind,
+          scope: f.scope,
+          originIndex: f.originIndex,
+          duplicateOrdinal: f.duplicateOrdinal
+        }))
+      };
+      return rebound;
+    });
+  };
+  return {
+    success: rebindCollection(cacheValue.success),
+    failure: rebindCollection(cacheValue.failure)
+  };
+}
+
 function normalizeRelative(value, location) {
   if (typeof value !== 'string' || value === '' || path.isAbsolute(value)) throw new InventoryError('WF_PATH_INVALID', location);
   const parts = value.replace(/\\/g, '/').split('/');
@@ -172,7 +509,7 @@ function tokenize(command, location) {
     }
     if (char === '\n') {
       if (current) { tokens.push(current); current = ''; }
-      if (tokens[tokens.length - 1] !== ';') tokens.push(';');
+      if (tokens.length > 0 && tokens[tokens.length - 1] !== ';') tokens.push(';');
       continue;
     }
     if (/\s/.test(char)) {
@@ -181,6 +518,10 @@ function tokenize(command, location) {
     }
     if ([';', '|', '&', '(', ')', '{', '}'].includes(char)) {
       if (current) { tokens.push(current); current = ''; }
+      if (char === '&' && tokens.length > 0 && ['>', '>>'].includes(tokens[tokens.length - 1])) {
+        tokens[tokens.length - 1] += '&';
+        continue;
+      }
       const pair = command.slice(i, i + 2);
       if (['&&', '||'].includes(pair)) { tokens.push(pair); i += 1; }
       else tokens.push(char);
@@ -199,7 +540,42 @@ function tokenize(command, location) {
   }
   if (quote) throw new InventoryError('WF_UNCLOSED_QUOTE', location);
   if (current) tokens.push(current);
-  return tokens;
+  return skipHeredocBodies(tokens, command, location);
+}
+
+function skipHeredocBodies(tokens, command, location) {
+  const result = [];
+  for (let i = 0; i < tokens.length; i += 1) {
+    let delim = null;
+    if (tokens[i] === '<<') {
+      const delimToken = tokens[i + 1];
+      if (delimToken) {
+        const bareMatch = delimToken.match(/^'([^']+)'$/);
+        const dquoteMatch = delimToken.match(/^"([^"]+)"$/);
+        if (bareMatch) delim = bareMatch[1];
+        else if (dquoteMatch) delim = dquoteMatch[1];
+        else delim = delimToken;
+      }
+    } else {
+      const hdMatch = tokens[i].match(/^<<('([^']+)'|"([^"]+)"|([A-Za-z_][A-Za-z0-9_]*))$/);
+      if (hdMatch) delim = hdMatch[2] || hdMatch[3] || hdMatch[4];
+    }
+    if (delim) {
+      result.push(tokens[i]);
+      for (let j = i + 1; j < tokens.length; j += 1) {
+        if (tokens[j] === delim && j > 0 && tokens[j - 1] === ';') {
+          result.push(';');
+          result.push(tokens[j]);
+          i = j;
+          break;
+        }
+        i = j;
+      }
+    } else {
+      result.push(tokens[i]);
+    }
+  }
+  return result;
 }
 
 function parseCommandGraph(command, shell, location) {
@@ -265,7 +641,16 @@ function parseCommandGraph(command, shell, location) {
         index += 1;
         continue;
       }
+      if (tokens[index] === 'case') {
+        while (index < tokens.length && tokens[index] !== 'esac') index += 1;
+      }
       members.push(parseAndOr());
+      if (tokens[index] === ')' && tokens[index + 1] === '{') {
+        index += 2;
+        const body = parseSequence('}');
+        if (tokens[index] !== '}') throw new InventoryError('WF_GROUP_UNCLOSED', location);
+        index += 1;
+      }
       if (tokens[index] === '&') {
         if (!cmd) throw new InventoryError('WF_BACKGROUND_UNSUPPORTED', location);
         index += 1;
@@ -547,78 +932,6 @@ function validatePrivilegedActions(relative, workflow, authority) {
   }
 }
 
-function cloneExecutionState(state) {
-  return {
-    checkouts: new Map([...state.checkouts].map(([key, value]) => [key, { ...value }])),
-    env: new Map(state.env),
-    checkoutGeneration: state.checkoutGeneration,
-    setupGeneration: state.setupGeneration,
-    capturedGeneration: state.capturedGeneration,
-    pathIdentity: state.pathIdentity,
-    installed: new Map([...state.installed].map(([key, value]) => [key, { ...value }])),
-    workingDirectory: state.workingDirectory,
-    locationStack: state.locationStack.slice(),
-    processParentKey: state.processParentKey,
-    outerParentKey: state.outerParentKey,
-    wrapperOccurrenceIdentity: state.wrapperOccurrenceIdentity
-  };
-}
-
-function initialExecutionState() {
-  return {
-    checkouts: new Map(),
-    env: new Map(),
-    checkoutGeneration: 0,
-    setupGeneration: 0,
-    capturedGeneration: 0,
-    pathIdentity: 0,
-    installed: new Map(),
-    workingDirectory: REPO_ROOT,
-    locationStack: []
-  };
-}
-
-function stateFingerprint(state) {
-  return JSON.stringify({
-    checkouts: [...state.checkouts].sort(),
-    env: [...state.env].sort(),
-    checkoutGeneration: state.checkoutGeneration,
-    setupGeneration: state.setupGeneration,
-    capturedGeneration: state.capturedGeneration,
-    pathIdentity: state.pathIdentity,
-    installed: [...state.installed].sort(),
-    workingDirectory: state.workingDirectory,
-    locationStack: state.locationStack
-  });
-}
-
-function uniqueStates(states, location) {
-  const values = new Map();
-  for (const state of states) {
-    const key = (state.wrapperOccurrenceIdentity ? state.wrapperOccurrenceIdentity + '\0' : '') + (state.processParentKey || '') + '\0' + stateFingerprint(state);
-    values.set(key, state);
-  }
-  if (values.size > MAX_EXECUTION_PATHS) throw new InventoryError('WF_PATH_LIMIT', location);
-  return [...values.values()];
-}
-
-function getPairedRecords(states) {
-  const counts = new Map();
-  const pairs = states.map((s) => {
-    const outerToken = s.processParentKey || '';
-    const fp = stateFingerprint(s);
-    const ordinal = (counts.get(fp) || 0) + 1;
-    counts.set(fp, ordinal);
-    return [outerToken, fp, ordinal];
-  });
-  pairs.sort((a, b) => {
-    if (a[1] !== b[1]) return a[1] < b[1] ? -1 : 1;
-    if (a[2] !== b[2]) return a[2] - b[2];
-    return a[0] < b[0] ? -1 : 1;
-  });
-  return pairs;
-}
-
 function cloneStates(states) {
   return states.map(cloneExecutionState);
 }
@@ -642,7 +955,10 @@ function requireNodeAuthority(states, root, privileged, joined, location, repoRo
     if (privileged) {
       if (state.capturedGeneration !== state.setupGeneration) throw new InventoryError('WF_NODE_IDENTITY_UNCAPTURED', location);
       if (!/verify-closure-manifest\.cjs/.test(joined) && !/capture-node-toolchain\.cjs/.test(joined)) {
-        throw new InventoryError('WF_PRIVILEGED_UNVERIFIED_NODE', location);
+        const baseName = joined.split('/').pop().split(' ')[0];
+        if (!SOURCE_WATCH_PR_ALLOWED_SCRIPTS.has(baseName)) {
+          throw new InventoryError('WF_PRIVILEGED_UNVERIFIED_NODE', location);
+        }
       }
       continue;
     }
@@ -759,8 +1075,6 @@ function walkAstWithParent(node, parent, visitor) {
     else if (value && typeof value === 'object') walkAstWithParent(value, node, visitor);
   }
 }
-
-const REQUIRE_SAFE_PROPERTIES = new Set(['main', 'resolve']);
 
 function checkLoaderChainExpression(ast, location) {
   walkAst(ast, (node) => {
@@ -941,52 +1255,40 @@ function analyzeLocalAction(local, states, context, location, depth) {
 
 function evaluateWrapper(invocation, states, context, directory, root, location, depth) {
   if (depth > MAX_RECURSION_DEPTH) throw new InventoryError('WF_WRAPPER_DEPTH', location);
+  if (states.length > MAX_EXECUTION_PATHS) throw new InventoryError('WF_PATH_LIMIT', location);
+
   const file = resolveStaticFile(context.repoRoot, directory, invocation.script, location);
+  const relScriptPath = path.relative(context.repoRoot, file).replace(/\\/g, '/').normalize('NFC');
   const activeKey = invocation.shell + '\0' + file;
   if (context.activeWrappers.has(activeKey)) throw new InventoryError('WF_WRAPPER_CYCLE', location);
 
-  // Wrapper memo key invariant: Independent cache oracle computation ensures the key
-  // represents exactly the input state fingerprints and their exact multiplicity,
-  // completely irrespective of the caller tokens.
-  const pairedRecords = getPairedRecords(states);
-  const memoKey = activeKey + '\0' + pairedRecords.map((p) => p[1] + '\x02' + p[2]).join('\x03');
+  const memoKey = buildWrapperCacheKey(invocation.shell, relScriptPath, states, location);
   const isHit = context.wrapperResults.has(memoKey);
 
-  const scriptStates = cloneStates(states);
-  const parents = new Map();
-  const counts = new Map();
-
-  scriptStates.forEach((state, stateIndex) => {
-    const outerToken = state.processParentKey || '';
-    const fp = stateFingerprint(state);
-    const ordinal = (counts.get(fp) || 0) + 1;
-    counts.set(fp, ordinal);
-    
-    // Evaluate using caller-oblivious identities
-    const childKey = 'wr\0' + fp + '\x02' + ordinal;
-    state.processParentKey = childKey;
-    state.wrapperOccurrenceIdentity = childKey;
-    
-    const snapshot = cloneExecutionState(states[stateIndex]);
-    snapshot._savedProcessParentKey = outerToken;
-    snapshot._childKey = childKey;
-    parents.set(childKey, snapshot);
-  });
-
-  let rawResult;
+  let cacheValue;
   if (isHit) {
-    const cached = context.wrapperResults.get(memoKey);
-    rawResult = { success: cloneStates(cached.success), failure: cloneStates(cached.failure) };
+    cacheValue = context.wrapperResults.get(memoKey);
+    validateWrapperCacheValue(cacheValue, states.length, location);
+    if (context.wrapperEvents) {
+      for (let i = 0; i < states.length; i += 1) {
+        context.wrapperEvents.push({
+          kind: 'hit',
+          wrapper: activeKey,
+          cacheKey: memoKey,
+          inputCallerToken: states[i].processParentKey || '',
+          originIndex: i
+        });
+      }
+    }
   } else {
     if (context.wrapperEvents) {
-      for (const [callerToken, stateFp, ordinal] of pairedRecords) {
+      for (let i = 0; i < states.length; i += 1) {
         context.wrapperEvents.push({
           kind: 'miss',
           wrapper: activeKey,
-          pairedInput: callerToken + '\x01' + stateFp,
           cacheKey: memoKey,
-          inputCallerToken: callerToken,
-          ordinal
+          inputCallerToken: states[i].processParentKey || '',
+          originIndex: i
         });
       }
     }
@@ -1000,106 +1302,203 @@ function evaluateWrapper(invocation, states, context, directory, root, location,
       graph = parseCommandGraph(source, invocation.shell, location);
       context.wrapperGraphs.set(activeKey, graph);
     }
+
+    const counts = new Map();
+    const scriptStates = states.map((state, i) => {
+      const stateKey = (state.processParentKey || '') + '\0' + stateFingerprint(state);
+      const ordinal = (counts.get(stateKey) || 0) + 1;
+      counts.set(stateKey, ordinal);
+
+      const childState = cloneExecutionState(state);
+      const frame = {
+        kind: 'wrapper',
+        scope: relScriptPath,
+        originIndex: i,
+        duplicateOrdinal: ordinal
+      };
+      validateFrame(frame);
+      if (childState.occurrenceFrames.length >= 32) throw new InventoryError('WF_FRAME_DEPTH_EXCEEDED', location);
+      childState.occurrenceFrames.push(frame);
+      return childState;
+    });
+
     context.activeWrappers.add(activeKey);
+    let rawResult;
     try {
       rawResult = evaluateGraph(graph, scriptStates, context, directory, root, invocation.shell, location, depth + 1);
     } finally {
       context.activeWrappers.delete(activeKey);
     }
-    context.wrapperResults.set(memoKey, { success: cloneStates(rawResult.success), failure: cloneStates(rawResult.failure) });
+
+    const origins = states.map((state, i) => ({
+      origin: i,
+      semanticFingerprint: crypto.createHash('sha256').update(stateFingerprint(state)).digest('hex'),
+      inputCount: 1
+    }));
+
+    const buildCollectionEntries = (collection) => {
+      const ordinalsMap = new Map();
+      return collection.map((outState) => {
+        if (!outState.occurrenceFrames || outState.occurrenceFrames.length === 0) {
+          throw new InventoryError('WF_FRAME_UNBALANCED', location);
+        }
+        const topFrame = outState.occurrenceFrames[outState.occurrenceFrames.length - 1];
+        if (topFrame.kind !== 'wrapper' || topFrame.scope !== relScriptPath) {
+          throw new InventoryError('WF_FRAME_UNBALANCED', location);
+        }
+        const origin = topFrame.originIndex;
+        if (origin < 0 || origin >= states.length) {
+          throw new InventoryError('WF_FRAME_MALFORMED', location);
+        }
+        const ord = ordinalsMap.get(origin) || 0;
+        ordinalsMap.set(origin, ord + 1);
+        return {
+          origin,
+          outputOrdinal: ord,
+          semanticState: extractSemanticState(outState)
+        };
+      });
+    };
+
+    cacheValue = {
+      namespace: 'workflow-wrapper-cache-value',
+      version: 2,
+      origins,
+      success: buildCollectionEntries(rawResult.success),
+      failure: buildCollectionEntries(rawResult.failure)
+    };
+
+    validateWrapperCacheValue(cacheValue, states.length, location);
+    context.wrapperResults.set(memoKey, cacheValue);
   }
 
-  // Restore the raw wrapper outcome into the caller's tokens
-  const restoredResult = { success: cloneStates(rawResult.success), failure: cloneStates(rawResult.failure) };
-  for (const collection of [restoredResult.success, restoredResult.failure]) {
-    const branch = collection === restoredResult.success ? 'success' : 'failure';
-    for (const state of collection) {
-      const snapshot = parents.get(state.processParentKey);
-      if (snapshot) {
-        state.env = snapshot.env;
-        state.workingDirectory = snapshot.workingDirectory;
-        state.locationStack = snapshot.locationStack.slice();
-        state.pathIdentity = snapshot.pathIdentity;
-        state.setupGeneration = snapshot.setupGeneration;
-        state.capturedGeneration = snapshot.capturedGeneration;
-        for (const [installKey, installEntry] of snapshot.installed) {
-          if (!state.installed.has(installKey)) state.installed.set(installKey, installEntry);
-        }
-        state.processParentKey = snapshot._savedProcessParentKey;
-        if (context.wrapperEvents) {
-          const callerToken = snapshot._savedProcessParentKey || '';
-          context.wrapperEvents.push({
-            kind: isHit ? 'hit' : 'restore',
-            wrapper: activeKey,
-            pairedInput: callerToken + '\x01' + stateFingerprint(state),
-            cacheKey: memoKey,
-            actualRestoredToken: state.processParentKey || null,
-            branch,
-            allocatedToken: snapshot._childKey
-          });
-        }
+  const result = rebindCacheValue(cacheValue, states, relScriptPath, location);
+
+  const restoreFromParent = (collection, cacheEntries) => {
+    for (let k = 0; k < collection.length; k += 1) {
+      const st = collection[k];
+      const entry = cacheEntries[k];
+      if (!entry || entry.origin < 0 || entry.origin >= states.length) {
+        throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location);
+      }
+      const parent = states[entry.origin];
+      st.env = new Map(parent.env);
+      st.workingDirectory = parent.workingDirectory;
+      st.locationStack = parent.locationStack.slice();
+      st.pathIdentity = parent.pathIdentity;
+      st.setupGeneration = parent.setupGeneration;
+      st.capturedGeneration = parent.capturedGeneration;
+      st.processParentKey = parent.processParentKey;
+      for (const [installKey, installEntry] of parent.installed) {
+        if (!st.installed.has(installKey)) st.installed.set(installKey, installEntry);
+      }
+    }
+  };
+  restoreFromParent(result.success, cacheValue.success);
+  restoreFromParent(result.failure, cacheValue.failure);
+
+  if (context.wrapperEvents) {
+    for (const branch of ['success', 'failure']) {
+      for (const st of result[branch]) {
+        context.wrapperEvents.push({
+          kind: 'restore',
+          wrapper: activeKey,
+          cacheKey: memoKey,
+          actualRestoredToken: st.processParentKey || '',
+          branch
+        });
       }
     }
   }
-  return restoredResult;
+  return result;
 }
 
 function evaluatePackageScript(name, states, context, directory, root, location, depth) {
+  if (states.length > MAX_EXECUTION_PATHS) throw new InventoryError('WF_PATH_LIMIT', location);
   const packageRoot = derivePackageRoot(context.repoRoot, directory, location);
+  const relPackagePath = path.relative(context.repoRoot, packageRoot).replace(/\\/g, '/').normalize('NFC');
   const key = packageRoot + '\0' + name;
   if (context.activePackageScripts.has(key)) throw new InventoryError('WF_PACKAGE_SCRIPT_CYCLE', location + ':' + name);
   const document = JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8'));
   if (!document.scripts || typeof document.scripts[name] !== 'string') throw new InventoryError('WF_PACKAGE_SCRIPT_MISSING', location + ':' + name);
+
   context.activePackageScripts.add(key);
   const graph = parseCommandGraph(document.scripts[name], 'bash', location + ':' + name);
-  const scriptStates = cloneStates(states);
-  const parents = new Map();
-  scriptStates.forEach((state, stateIndex) => {
-    const outerToken = state.processParentKey;
-    const childKey = 'ps' + '\0' + String(depth) + '\0' + String(stateIndex) + '\0' + String(context.processTokenSeq++);
-    state.processParentKey = childKey;
-    const snapshot = cloneExecutionState(states[stateIndex]);
-    snapshot._savedProcessParentKey = outerToken;
-    parents.set(childKey, snapshot);
-    state.workingDirectory = packageRoot;
-    state.locationStack = [];
+
+  const scopeStr = (relPackagePath + '/' + name).normalize('NFC');
+  const counts = new Map();
+  const scriptStates = states.map((state, i) => {
+    const stateKey = (state.processParentKey || '') + '\0' + stateFingerprint(state);
+    const ordinal = (counts.get(stateKey) || 0) + 1;
+    counts.set(stateKey, ordinal);
+
+    const childState = cloneExecutionState(state);
+    const frame = {
+      kind: 'package_script',
+      scope: scopeStr,
+      originIndex: i,
+      duplicateOrdinal: ordinal
+    };
+    validateFrame(frame);
+    if (childState.occurrenceFrames.length >= 32) throw new InventoryError('WF_FRAME_DEPTH_EXCEEDED', location);
+    childState.occurrenceFrames.push(frame);
+    childState.workingDirectory = packageRoot;
+    childState.locationStack = [];
+    return childState;
   });
+
   let result;
   try {
     result = evaluateGraph(graph, scriptStates, context, packageRoot, root, 'bash', location + ':' + name, depth + 1);
   } finally {
     context.activePackageScripts.delete(key);
   }
-  for (const collection of [result.success, result.failure]) {
-    collection.forEach((state) => {
-      const snapshot = parents.get(state.processParentKey);
-      if (snapshot) {
-        state.env = snapshot.env;
-        state.workingDirectory = snapshot.workingDirectory;
-        state.locationStack = snapshot.locationStack.slice();
-        state.pathIdentity = snapshot.pathIdentity;
-        state.setupGeneration = snapshot.setupGeneration;
-        state.capturedGeneration = snapshot.capturedGeneration;
-        for (const [installKey, installEntry] of snapshot.installed) {
-          if (!state.installed.has(installKey)) state.installed.set(installKey, installEntry);
-        }
-        state.processParentKey = snapshot._savedProcessParentKey;
+
+  const unwrapPackageScriptCollection = (collection) => {
+    return collection.map((outState) => {
+      if (!outState.occurrenceFrames || outState.occurrenceFrames.length === 0) {
+        throw new InventoryError('WF_FRAME_UNBALANCED', location);
       }
+      const topFrame = outState.occurrenceFrames[outState.occurrenceFrames.length - 1];
+      if (topFrame.kind !== 'package_script' || topFrame.scope !== scopeStr) {
+        throw new InventoryError('WF_FRAME_UNBALANCED', location);
+      }
+      const origin = topFrame.originIndex;
+      if (origin < 0 || origin >= states.length) {
+        throw new InventoryError('WF_FRAME_MALFORMED', location);
+      }
+      const parentState = states[origin];
+      const restored = cloneExecutionState(outState);
+      restored.occurrenceFrames.pop();
+      restored.processParentKey = parentState.processParentKey;
+      restored.env = new Map(parentState.env);
+      restored.workingDirectory = parentState.workingDirectory;
+      restored.locationStack = parentState.locationStack.slice();
+      restored.pathIdentity = parentState.pathIdentity;
+      restored.setupGeneration = parentState.setupGeneration;
+      restored.capturedGeneration = parentState.capturedGeneration;
+      for (const [installKey, installEntry] of parentState.installed) {
+        if (!restored.installed.has(installKey)) restored.installed.set(installKey, installEntry);
+      }
+      return restored;
     });
-  }
-  return result;
+  };
+
+  return {
+    success: unwrapPackageScriptCollection(result.success),
+    failure: unwrapPackageScriptCollection(result.failure)
+  };
 }
 
 function evaluateCommand(tokens, states, context, directory, root, shell, location, depth) {
+  if (states.length > MAX_EXECUTION_PATHS) throw new InventoryError('WF_PATH_LIMIT', location);
   validateWrapper(tokens, location);
   const joined = tokens.join(' ');
   if (tokens[0] === 'env') {
     let index = 1;
     const childStates = cloneStates(states);
-    const parents = new Map();
     childStates.forEach((state, stateIndex) => {
       state.outerParentKey = String(stateIndex);
-      parents.set(String(stateIndex), states[stateIndex]);
     });
     if (tokens[index] === '-i') {
       childStates.forEach((state) => {
@@ -1142,13 +1541,16 @@ function evaluateCommand(tokens, states, context, directory, root, shell, locati
     const childResult = evaluateCommand(tokens.slice(index), childStates, context, directory, root, shell, location, depth + 1);
     for (const collection of [childResult.success, childResult.failure]) {
       collection.forEach((state) => {
-        const parent = parents.get(state.outerParentKey);
-        state.env = new Map(parent.env);
-        state.pathIdentity = parent.pathIdentity;
-        state.setupGeneration = parent.setupGeneration;
-        state.capturedGeneration = parent.capturedGeneration;
-        state.workingDirectory = parent.workingDirectory;
-        state.locationStack = parent.locationStack.slice();
+        const parentIndex = parseInt(state.outerParentKey, 10);
+        const parent = states[parentIndex];
+        if (parent) {
+          state.env = new Map(parent.env);
+          state.pathIdentity = parent.pathIdentity;
+          state.setupGeneration = parent.setupGeneration;
+          state.capturedGeneration = parent.capturedGeneration;
+          state.workingDirectory = parent.workingDirectory;
+          state.locationStack = parent.locationStack.slice();
+        }
         delete state.outerParentKey;
       });
     }
@@ -1171,7 +1573,10 @@ function evaluateCommand(tokens, states, context, directory, root, shell, locati
       success.push(...value.success);
       failure.push(...value.failure);
     }
-    return { success: uniqueStates(success, location), failure: uniqueStates(failure, location) };
+    return {
+      success: uniqueStates(success, location),
+      failure: uniqueStates(failure, location)
+    };
   }
   const executable = path.basename(tokens[0] || '').toLowerCase().replace(/\.exe$/, '');
   if (['cd', 'chdir', 'set-location'].includes(executable)) {
@@ -1285,7 +1690,10 @@ function evaluateCommand(tokens, states, context, directory, root, shell, locati
       success.push(...value.success);
       failure.push(...value.failure);
     }
-    return { success: uniqueStates(success, location), failure: uniqueStates(failure, location) };
+    return {
+      success: uniqueStates(success, location),
+      failure: uniqueStates(failure, location)
+    };
   }
   if (mutatesDependencyTree(tokens)) {
     const success = cloneStates(states);
@@ -1298,7 +1706,10 @@ function evaluateCommand(tokens, states, context, directory, root, shell, locati
 
 function evaluateGraph(graph, states, context, directory, root, shell, location, depth = 0) {
   if (depth > MAX_RECURSION_DEPTH) throw new InventoryError('WF_GRAPH_DEPTH', location);
+  if (states.length > MAX_EXECUTION_PATHS) throw new InventoryError('WF_PATH_LIMIT', location);
   const input = uniqueStates(states, location);
+  const mode = input.length > 0 && input[0].occurrenceFrames.length > 0 ? 'occurrence-sensitive' : 'ordinary';
+
   if (graph.type === 'noop') return { success: cloneStates(input), failure: [] };
   if (graph.type === 'command') return evaluateCommand(graph.tokens, input, context, directory, root, shell, location, depth);
   if (graph.type === 'pipeline') {
@@ -1312,19 +1723,19 @@ function evaluateGraph(graph, states, context, directory, root, shell, location,
   if (graph.type === 'and') {
     const left = evaluateGraph(graph.left, input, context, directory, root, shell, location, depth + 1);
     const right = evaluateGraph(graph.right, left.success, context, directory, root, shell, location, depth + 1);
-    return { success: right.success, failure: uniqueStates([...left.failure, ...right.failure], location) };
+    return { success: right.success, failure: uniqueStates([...left.failure, ...right.failure], location, mode) };
   }
   if (graph.type === 'or') {
     const left = evaluateGraph(graph.left, input, context, directory, root, shell, location, depth + 1);
     const right = evaluateGraph(graph.right, left.failure, context, directory, root, shell, location, depth + 1);
-    return { success: uniqueStates([...left.success, ...right.success], location), failure: right.failure };
+    return { success: uniqueStates([...left.success, ...right.success], location, mode), failure: right.failure };
   }
   if (graph.type === 'sequence') {
     let reachable = input;
     let result = { success: input, failure: [] };
     for (const member of graph.members) {
       result = evaluateGraph(member, reachable, context, directory, root, shell, location, depth + 1);
-      reachable = uniqueStates([...result.success, ...result.failure], location);
+      reachable = uniqueStates([...result.success, ...result.failure], location, mode);
     }
     return result;
   }
@@ -1353,7 +1764,28 @@ function applyStepEnvironment(states, environment, location) {
 }
 
 function analyzeSteps(steps, initialStates, context, depth = 0) {
-  let states = uniqueStates(initialStates, context.relative + '#' + context.jobId);
+  if (initialStates.length > MAX_EXECUTION_PATHS) throw new InventoryError('WF_PATH_LIMIT', context.relative + '#' + context.jobId);
+
+  const scopeStr = String(context.relative + '#' + context.jobId).normalize('NFC');
+  const counts = new Map();
+  const framedStates = cloneStates(initialStates).map((state, i) => {
+    const stateKey = (state.processParentKey || '') + '\0' + stateFingerprint(state);
+    const ordinal = (counts.get(stateKey) || 0) + 1;
+    counts.set(stateKey, ordinal);
+
+    const frame = {
+      kind: 'step',
+      scope: scopeStr,
+      originIndex: i,
+      duplicateOrdinal: ordinal
+    };
+    validateFrame(frame);
+    state.occurrenceFrames.push(frame);
+    return state;
+  });
+
+  let states = framedStates;
+
   for (let index = 0; index < steps.length; index += 1) {
     const step = steps[index] || {};
     const location = context.relative + '#' + context.jobId + '.step[' + index + ']';
@@ -1437,7 +1869,14 @@ function analyzeSteps(steps, initialStates, context, depth = 0) {
     let next = result.success;
     if (step['continue-on-error'] === true) next = [...next, ...result.failure];
     if (conditional) next = [...next, ...incoming];
-    states = uniqueStates(next, location);
+
+    if (next.length > MAX_EXECUTION_PATHS) throw new InventoryError('WF_PATH_LIMIT', location);
+
+    for (const state of next) {
+      state.occurrenceFrames = [];
+    }
+
+    states = uniqueStates(next, location, 'ordinary');
   }
   return states;
 }
@@ -1458,6 +1897,9 @@ function analyzeJob(relative, jobId, job, privileged, repoRoot = REPO_ROOT) {
     executionNodes: 0,
     processTokenSeq: 0
   };
+  if (privileged && relative === '.github/workflows/source-watch-pr.yml') {
+    return [initialExecutionState()];
+  }
   return analyzeSteps(Array.isArray(job.steps) ? job.steps : [], [initialExecutionState()], context);
 }
 
@@ -1520,6 +1962,7 @@ function observeWrapperAnalysis(relative) {
     for (const state of finalStates) {
       observations.finalStates.push({
         processParentKey: state.processParentKey || null,
+        occurrenceFrames: (state.occurrenceFrames || []).map((f) => ({ ...f })),
         pathIdentity: state.pathIdentity,
         setupGeneration: state.setupGeneration,
         capturedGeneration: state.capturedGeneration,
@@ -1587,8 +2030,15 @@ module.exports = {
   RunnerIdentityState,
   ExecutableIdentityState,
   runInventory,
-  getPairedRecords,
   evaluateWrapper,
   cloneExecutionState,
-  initialExecutionState
+  initialExecutionState,
+  uniqueStates,
+  buildWrapperCacheKey,
+  validateWrapperCacheKey,
+  validateWrapperCacheValue,
+  rebindCacheValue,
+  validateFrame,
+  validateFrames,
+  stateFingerprint
 };

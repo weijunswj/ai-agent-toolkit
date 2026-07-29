@@ -48,7 +48,7 @@ test('source-watch PR notifier remains scheduled-only with minimum write permiss
 });
 
 test('source-watch PR notifier runs trusted main code before branch writes', () => {
-  assert.match(workflow, /uses:\s*actions\/checkout@v7/);
+  assert.match(workflow, /uses:\s*actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1/);
   assert.match(workflow, /^\s*ref:\s*refs\/heads\/main\s*$/m);
   assert.match(workflow, /^\s*fetch-depth:\s*0\s*$/m);
   assert.match(workflow, /^\s*persist-credentials:\s*false\s*$/m);
@@ -190,7 +190,7 @@ test('no actionable drift skips branch and PR lifecycle steps', () => {
 
 test('source-watch PR notifier documents advisory actions as report-only', () => {
   assert.match(workflow, /\[source-watch\] Review active source-watch updates/);
-  assert.match(workflow, /Advisory actions, when present, are read from `repo\/source-watch\/advisory-targets\.json`\./);
+  assert.match(workflow, /Advisory actions, when present, are read from 'repo\/source-watch\/advisory-targets\.json'\./);
   assert.match(workflow, /No advisory tracking document was changed by this workflow\./);
   assert.match(workflow, /If advisory action is taken, update the advisory document in a separate human-reviewed PR\./);
   assert.match(workflow, /No toolkit rules, skills, hooks, memory guidance, repo-map guidance, or cleanup guidance were modified or deleted\./);

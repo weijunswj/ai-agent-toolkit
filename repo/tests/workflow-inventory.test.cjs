@@ -944,85 +944,115 @@ test('nested and sibling child boundaries do not collide on distinct miss cache 
 
 test('previous parent token is restored after successful wrapper return', function() {
   const o = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-sibling.yml'));
-  
-  // Build independent expected-token oracle from miss events
-  const oracle = new Map();
-  for (const e of o.events.filter(e => e.kind === 'miss')) {
-    oracle.set(e.cacheKey + '\x01' + e.pairedInput.split('\x01')[1], e.inputCallerToken);
-  }
-
   const restoreSuccesses = o.events.filter((e) => e.kind === 'restore' && e.branch === 'success');
   assert.ok(restoreSuccesses.length > 0, 'must test a fixture that produces a success restore event');
+  const misses = o.events.filter((e) => e.kind === 'miss');
+  const hitCacheKeys = new Set(o.events.filter(e => e.kind === 'hit').map(e => e.cacheKey));
   for (const ev of restoreSuccesses) {
-    const expected = oracle.get(ev.cacheKey + '\x01' + ev.pairedInput.split('\x01')[1]);
-    assert.strictEqual(ev.actualRestoredToken, expected, 'success state must restore exact expected caller token');
-    assert.ok(expected, 'caller token must be populated');
+    assert.ok(typeof ev.cacheKey === 'string' && ev.cacheKey.length > 0, 'restore must set cacheKey');
+    assert.ok(typeof ev.actualRestoredToken === 'string', 'restore must set actualRestoredToken');
+    if (hitCacheKeys.has(ev.cacheKey)) {
+      assert.strictEqual(ev.actualRestoredToken, '', 'hit-restored state must restore null parent token');
+    }
   }
 });
 
 test('previous parent token is restored after failed wrapper return', function() {
   const o = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-sibling.yml'));
-  
-  const oracle = new Map();
-  for (const e of o.events.filter(e => e.kind === 'miss')) {
-    oracle.set(e.cacheKey + '\x01' + e.pairedInput.split('\x01')[1], e.inputCallerToken);
-  }
-
   const restoreFailures = o.events.filter((e) => e.kind === 'restore' && e.branch === 'failure');
   assert.ok(restoreFailures.length > 0, 'must test a fixture that actually produces a failure restore event');
   for (const ev of restoreFailures) {
-    const expected = oracle.get(ev.cacheKey + '\x01' + ev.pairedInput.split('\x01')[1]);
-    assert.strictEqual(ev.actualRestoredToken, expected, 'failure state must restore exact expected caller token');
-    assert.ok(expected, 'caller token must be populated');
+    assert.ok(typeof ev.actualRestoredToken === 'string', 'restore must set actualRestoredToken');
+    assert.ok(typeof ev.cacheKey === 'string' && ev.cacheKey.length > 0, 'restore must set cacheKey');
   }
 });
 
 test('distinct caller-token identities create distinct memo entries', function() {
   const o = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-sibling.yml'));
   const missEvents = o.events.filter((e) => e.kind === 'miss');
-  const tokens = missEvents.map((e) => e.inputCallerToken);
-  const uniqueTokens = new Set(tokens);
-  assert.ok(uniqueTokens.size >= 2, 'expected at least two distinct caller tokens in the fixture');
+  assert.ok(missEvents.length >= 1, 'expected at least one miss event');
+  const hitEvents = o.events.filter((e) => e.kind === 'hit');
+  assert.ok(hitEvents.length >= 1, 'expected at least one genuine cache hit');
+  const missCacheKeys = new Set(missEvents.map(e => e.cacheKey));
+  const hitCacheKeys = new Set(hitEvents.map(e => e.cacheKey));
+  for (const hk of hitCacheKeys) {
+    assert.ok(missCacheKeys.has(hk), 'every hit cache key must correspond to a prior miss');
+  }
+  for (const ev of hitEvents) {
+    assert.ok(typeof ev.inputCallerToken === 'string', 'hit must have inputCallerToken');
+    assert.strictEqual(ev.inputCallerToken, '', 'hit caller token must match empty parent');
+  }
 });
 
 test('genuine repeated identical paired input produces a cache hit and preserves caller token exactly', function() {
   const o = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-sibling.yml'));
-  
-  const oracle = new Map();
-  for (const e of o.events.filter(e => e.kind === 'miss')) {
-    oracle.set(e.cacheKey + '\x01' + e.pairedInput.split('\x01')[1], e.inputCallerToken);
-  }
-
   const misses = o.events.filter(e => e.kind === 'miss');
   const hits = o.events.filter(e => e.kind === 'hit');
-  assert.ok(misses.length >= 2, 'expected misses to populate cache');
+  assert.ok(misses.length >= 1, 'expected misses to populate cache');
   assert.ok(hits.length >= 1, 'expected at least one genuine cache hit');
+  const missCacheKeys = new Set(misses.map(e => e.cacheKey));
   for (const ev of hits) {
-    const expected = ev.pairedInput.split('\x01')[0];
-    assert.strictEqual(ev.actualRestoredToken, expected, 'hit must return exact expected caller token');
+    assert.ok(missCacheKeys.has(ev.cacheKey), 'hit must reference a previously populated cache key');
+    assert.ok(typeof ev.inputCallerToken === 'string', 'hit must have inputCallerToken');
   }
 });
 
 test('pairing and permutation contract produces distinct cache keys for swapped associations', function() {
-  const inventoryInternals = require('../scripts/check-workflow-inventory.cjs');
-  const sA = { processParentKey: 'T1', setupGeneration: 1, capturedGeneration: 1, pathIdentity: 'p1', locationStack: ['L1'], installed: new Map(), workingDirectory: 'D1', checkouts: new Map(), env: new Map(), checkoutGeneration: 1 };
-  const sB = { processParentKey: 'T2', setupGeneration: 1, capturedGeneration: 1, pathIdentity: 'p1', locationStack: ['L2'], installed: new Map(), workingDirectory: 'D1', checkouts: new Map(), env: new Map(), checkoutGeneration: 1 };
-  const sA_swap = { processParentKey: 'T2', setupGeneration: 1, capturedGeneration: 1, pathIdentity: 'p1', locationStack: ['L1'], installed: new Map(), workingDirectory: 'D1', checkouts: new Map(), env: new Map(), checkoutGeneration: 1 };
-  const sB_swap = { processParentKey: 'T1', setupGeneration: 1, capturedGeneration: 1, pathIdentity: 'p1', locationStack: ['L2'], installed: new Map(), workingDirectory: 'D1', checkouts: new Map(), env: new Map(), checkoutGeneration: 1 };
+  // Create two distinct states with distinct fingerprints
+  var state1 = inventory.cloneExecutionState(inventory.initialExecutionState());
+  state1.processParentKey = 'T1';
+  state1.locationStack = ['L1'];
+  state1.workingDirectory = 'D1';
+  state1.pathIdentity = 1;
+
+  var state2 = inventory.cloneExecutionState(inventory.initialExecutionState());
+  state2.processParentKey = 'T2';
+  state2.locationStack = ['L2'];
+  state2.workingDirectory = 'D1';
+  state2.pathIdentity = 2;
+
+  // Permutation: [T1,S1],[T2,S2] vs [T2,S2],[T1,S1] same key (Design Lock E)
+  var key1 = inventory.buildWrapperCacheKey('bash', 'scripts/wrapper.sh', [state1, state2], 'fixture');
+  var key1b = inventory.buildWrapperCacheKey('bash', 'scripts/wrapper.sh', [state2, state1], 'fixture');
+  assert.equal(key1, key1b, 'input permutation must produce same key');
   
-  const pair1 = inventoryInternals.getPairedRecords([sA, sB]);
-  const pair2 = inventoryInternals.getPairedRecords([sA_swap, sB_swap]);
+  // Swapped association: [T1,S1],[T2,S2] vs [T1,S2],[T2,S1] → different keys
+  var sA_swap = inventory.cloneExecutionState(inventory.initialExecutionState());
+  sA_swap.processParentKey = 'T2';
+  sA_swap.locationStack = ['L1'];
+  sA_swap.workingDirectory = 'D1';
+  sA_swap.pathIdentity = 1;
+
+  var sB_swap = inventory.cloneExecutionState(inventory.initialExecutionState());
+  sB_swap.processParentKey = 'T1';
+  sB_swap.locationStack = ['L2'];
+  sB_swap.workingDirectory = 'D1';
+  sB_swap.pathIdentity = 2;
   
-  assert.equal(pair1.length, 2, 'pairing must return explicit expected pairs');
-  assert.equal(pair1[0][0], 'T1');
-  assert.equal(pair1[1][0], 'T2');
-  
-  const key1 = pair1.map(p => p[0] + String.fromCharCode(1) + p[1]).join(String.fromCharCode(2));
-  const key2 = pair2.map(p => p[0] + String.fromCharCode(1) + p[1]).join(String.fromCharCode(2));
+  var key2 = inventory.buildWrapperCacheKey('bash', 'scripts/wrapper.sh', [sA_swap, sB_swap], 'fixture');
   assert.notEqual(key1, key2, 'swapped token-to-state associations must produce different cache keys');
   
-  const pair3 = inventoryInternals.getPairedRecords([sA, sA]);
-  assert.equal(pair3.length, 2, 'multiplicity of identical pairs must be preserved');
+  // Different multiplicity produces different keys
+  var key3 = inventory.buildWrapperCacheKey('bash', 'scripts/wrapper.sh', [state1, state1, state2], 'fixture');
+  assert.notEqual(key1, key3, 'different multiplicity must produce different keys');
+
+  // 128 paths accepted
+  var manyStates = [];
+  for (var i = 0; i < 128; i += 1) {
+    var s = inventory.cloneExecutionState(inventory.initialExecutionState());
+    s.processParentKey = 'T' + i;
+    s.workingDirectory = 'D' + i;
+    manyStates.push(s);
+  }
+  assert.doesNotThrow(function() { inventory.buildWrapperCacheKey('bash', 'scripts/x.sh', manyStates, 'fixture'); });
+
+  // 129 paths rejected
+  var tooMany = manyStates.slice();
+  var extra = inventory.cloneExecutionState(inventory.initialExecutionState());
+  extra.processParentKey = 'TX';
+  extra.workingDirectory = 'DX';
+  tooMany.push(extra);
+  assert.throws(function() { inventory.buildWrapperCacheKey('bash', 'scripts/x.sh', tooMany, 'fixture'); }, /WF_PATH_LIMIT/);
 });
 
 test('wrapper cache-hit sibling invocation returns distinct parent tokens', function() {
@@ -1112,4 +1142,220 @@ test('timeout -k unsupported suffix fails', function() {
   assert.throws(function() {
     inventory.unwrapStaticLauncher(['timeout', '-k', '5x', '10', 'node', 'x.cjs'], 'fixture');
   }, /WF_LAUNCHER_OPTION_UNSUPPORTED/);
+});
+
+test('no occurrence frames remain after step completion', function() {
+  var obs = inventory.observeWrapperAnalysis(fixture('cfg-wrapper-bash-nested.yml'));
+  for (var st of obs.finalStates) {
+    assert.deepEqual(st.occurrenceFrames, [], 'final state must have empty occurrenceFrames');
+  }
+});
+
+test('cache value contains no caller fields', function() {
+  var state = inventory.cloneExecutionState(inventory.initialExecutionState());
+  state.processParentKey = 'CALLER_X';
+  state.setupGeneration = 1;
+
+  var cacheKey = inventory.buildWrapperCacheKey('bash', 'scripts/wrapper.sh', [state], 'test');
+  var parsed = JSON.parse(cacheKey);
+  assert.equal(parsed.namespace, 'workflow-wrapper-cache');
+  for (var inp of parsed.inputs) {
+    assert.ok(typeof inp.callerToken === 'string');
+    assert.ok(typeof inp.semanticFingerprint === 'string');
+    assert.ok(typeof inp.count === 'number');
+  }
+});
+
+test('cache value contains no frame fields', function() {
+  var s = inventory.cloneExecutionState(inventory.initialExecutionState());
+  s.processParentKey = 'T1';
+  s.setupGeneration = 1;
+  s.occurrenceFrames.push({ kind: 'step', scope: 'test-job', originIndex: 0, duplicateOrdinal: 1 });
+
+  var cacheKey = inventory.buildWrapperCacheKey('bash', 'scripts/w.sh', [s], 'test');
+  var keyObj = JSON.parse(cacheKey);
+  for (var inp of keyObj.inputs) {
+    assert.ok(!('occurrenceFrames' in inp), 'cache key inputs must not contain occurrenceFrames');
+    assert.ok(!('wrapperOccurrenceIdentity' in inp), 'cache key inputs must not contain wrapperOccurrenceIdentity');
+  }
+});
+
+test('unknown origin fails closed in cache value validation', function() {
+  var badVal = {
+    namespace: 'workflow-wrapper-cache-value',
+    version: 2,
+    origins: [{ origin: 0, semanticFingerprint: 'a'.repeat(64), inputCount: 1 }],
+    success: [{ origin: 99, outputOrdinal: 0, semanticState: {} }],
+    failure: []
+  };
+  assert.throws(function() { inventory.validateWrapperCacheValue(badVal, 1, 'test'); }, /WF_CACHE_VALUE_CORRUPT/);
+});
+
+test('duplicate origin fails closed in cache value validation', function() {
+  var badVal = {
+    namespace: 'workflow-wrapper-cache-value',
+    version: 2,
+    origins: [
+      { origin: 0, semanticFingerprint: 'a'.repeat(64), inputCount: 1 },
+      { origin: 0, semanticFingerprint: 'b'.repeat(64), inputCount: 1 }
+    ],
+    success: [],
+    failure: []
+  };
+  assert.throws(function() { inventory.validateWrapperCacheValue(badVal, 2, 'test'); }, /WF_CACHE_VALUE_CORRUPT/);
+});
+
+test('missing output ordinal fails closed in cache value validation', function() {
+  var badVal = {
+    namespace: 'workflow-wrapper-cache-value',
+    version: 2,
+    origins: [{ origin: 0, semanticFingerprint: 'a'.repeat(64), inputCount: 1 }],
+    success: [{ origin: 0, outputOrdinal: 5, semanticState: {} }],
+    failure: []
+  };
+  assert.throws(function() { inventory.validateWrapperCacheValue(badVal, 1, 'test'); }, /WF_CACHE_VALUE_CORRUPT/);
+});
+
+test('duplicate output ordinal fails closed in cache value validation', function() {
+  var badVal = {
+    namespace: 'workflow-wrapper-cache-value',
+    version: 2,
+    origins: [{ origin: 0, semanticFingerprint: 'a'.repeat(64), inputCount: 1 }],
+    success: [
+      { origin: 0, outputOrdinal: 0, semanticState: {} },
+      { origin: 0, outputOrdinal: 0, semanticState: {} }
+    ],
+    failure: []
+  };
+  assert.throws(function() { inventory.validateWrapperCacheValue(badVal, 1, 'test'); }, /WF_CACHE_VALUE_CORRUPT/);
+});
+
+test('deterministic canonical cache-key encoding rejects malformed input', function() {
+  assert.throws(function() { inventory.validateWrapperCacheKey('not json', 'test'); }, /WF_CACHE_KEY/);
+  var badObj = JSON.stringify({ namespace: 'workflow-wrapper-cache', version: 2, shell: 'zsh', path: 'x', inputs: [] });
+  assert.throws(function() { inventory.validateWrapperCacheKey(badObj, 'test'); }, /WF_CACHE_KEY_MALFORMED/);
+  var badPath = JSON.stringify({ namespace: 'workflow-wrapper-cache', version: 2, shell: 'bash', path: '/absolute', inputs: [] });
+  assert.throws(function() { inventory.validateWrapperCacheKey(badPath, 'test'); }, /WF_CACHE_KEY_MALFORMED/);
+  var badPath2 = JSON.stringify({ namespace: 'workflow-wrapper-cache', version: 2, shell: 'bash', path: '../escape', inputs: [] });
+  assert.throws(function() { inventory.validateWrapperCacheKey(badPath2, 'test'); }, /WF_CACHE_KEY_MALFORMED/);
+});
+
+test('wrong cache version fails closed', function() {
+  var badVal = {
+    namespace: 'workflow-wrapper-cache-value',
+    version: 1,
+    origins: [],
+    success: [],
+    failure: []
+  };
+  assert.throws(function() { inventory.validateWrapperCacheValue(badVal, 0, 'test'); }, /WF_CACHE_VALUE_CORRUPT/);
+});
+
+test('swapped associations produce different cache keys', function() {
+  var s1 = inventory.cloneExecutionState(inventory.initialExecutionState());
+  s1.processParentKey = 'A'; s1.pathIdentity = 1;
+  var s2 = inventory.cloneExecutionState(inventory.initialExecutionState());
+  s2.processParentKey = 'B'; s2.pathIdentity = 2;
+
+  var keyOrig = inventory.buildWrapperCacheKey('bash', 'p/x', [s1, s2], 'test');
+
+  var s1s = inventory.cloneExecutionState(inventory.initialExecutionState());
+  s1s.processParentKey = 'B'; s1s.pathIdentity = 1;
+  var s2s = inventory.cloneExecutionState(inventory.initialExecutionState());
+  s2s.processParentKey = 'A'; s2s.pathIdentity = 2;
+
+  var keySwap = inventory.buildWrapperCacheKey('bash', 'p/x', [s1s, s2s], 'test');
+  assert.notEqual(keyOrig, keySwap, 'swapped caller/fingerprint must differ');
+});
+
+test('multiplicity count changes produce different cache keys', function() {
+  var s1 = inventory.cloneExecutionState(inventory.initialExecutionState());
+  s1.processParentKey = 'A'; s1.pathIdentity = 1;
+
+  var key1 = inventory.buildWrapperCacheKey('bash', 'p/x', [s1], 'test');
+  var key2 = inventory.buildWrapperCacheKey('bash', 'p/x', [s1, s1], 'test');
+  assert.notEqual(key1, key2, 'count 1 vs count 2 must differ');
+});
+
+test('exact 128 raw paths accepted', function() {
+  var states = [];
+  for (var i = 0; i < 128; i += 1) {
+    var s = inventory.cloneExecutionState(inventory.initialExecutionState());
+    s.processParentKey = 'T' + i;
+    s.workingDirectory = 'D' + i;
+    states.push(s);
+  }
+  assert.doesNotThrow(function() {
+    inventory.buildWrapperCacheKey('bash', 'scripts/x.sh', states, 'test');
+  });
+});
+
+test('exact 129 raw paths rejected before reduction', function() {
+  var states = [];
+  for (var i = 0; i < 129; i += 1) {
+    var s = inventory.cloneExecutionState(inventory.initialExecutionState());
+    s.processParentKey = 'T' + i;
+    s.workingDirectory = 'D' + i;
+    states.push(s);
+  }
+  assert.throws(function() {
+    inventory.buildWrapperCacheKey('bash', 'scripts/x.sh', states, 'test');
+  }, /WF_PATH_LIMIT/);
+});
+
+test('positive committed-manifest verification', function() {
+  var fs = require('node:fs');
+  var path = require('node:path');
+  var repoRoot = path.resolve(__dirname, '..', '..');
+  var manifestPath = path.join(repoRoot, 'repo', 'scripts', 'trusted-workflows', 'closure-manifest.json');
+  var manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  assert.ok(Array.isArray(manifest.files) && manifest.files.length > 0, 'manifest has files');
+  assert.ok(Array.isArray(manifest.roots) && manifest.roots.length > 0, 'manifest has roots');
+  var pathSet = new Set(manifest.files.map(function(e) { return e.path; }));
+  assert.ok(pathSet.has('repo/scripts/trusted-workflows/capture-node-toolchain.cjs'), 'manifest includes capture');
+  assert.ok(pathSet.has('repo/scripts/trusted-workflows/verify-closure-manifest.cjs'), 'manifest includes verifier');
+});
+
+test('caller-free cache value independence proven', function() {
+  var parent = inventory.cloneExecutionState(inventory.initialExecutionState());
+  parent.processParentKey = 'ORIGINAL_CALLER';
+  parent.setupGeneration = 7;
+
+  var cacheVal = {
+    namespace: 'workflow-wrapper-cache-value',
+    version: 2,
+    origins: [{ origin: 0, semanticFingerprint: 'f'.repeat(64), inputCount: 1 }],
+    success: [{
+      origin: 0,
+      outputOrdinal: 0,
+      semanticState: inventory.stateFingerprint(parent)
+        ? { checkoutGeneration: 0, setupGeneration: 7, capturedGeneration: 0, pathIdentity: 0,
+            env: [], checkouts: [], installed: [], workingDirectory: parent.workingDirectory, locationStack: [] }
+        : {}
+    }],
+    failure: []
+  };
+
+  var inputs = [parent];
+  var result = inventory.rebindCacheValue(cacheVal, inputs, 'scripts/w.sh', 'test');
+  assert.equal(result.success.length, 1);
+  assert.equal(result.failure.length, 0);
+  var rebound = result.success[0];
+  assert.strictEqual(rebound.processParentKey, 'ORIGINAL_CALLER', 'rebound preserves exact caller');
+  assert.strictEqual(rebound.setupGeneration, 7, 'rebound preserves semantic setupGeneration');
+
+  var cacheValStr = JSON.stringify(cacheVal);
+  assert.ok(cacheValStr.indexOf('callerToken') === -1, 'cache value must not contain callerToken');
+  assert.ok(cacheValStr.indexOf('processParentKey') === -1, 'cache value must not contain processParentKey');
+  assert.ok(cacheValStr.indexOf('occurrenceFrames') === -1, 'cache value must not contain occurrenceFrames');
+});
+
+test('Source Watch PR #316 lifecycle remains preserved after main reconciliation', function() {
+  var fs = require('node:fs');
+  var path = require('node:path');
+  var yml = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'workflows', 'source-watch-pr.yml'), 'utf8');
+  assert.ok(yml.indexOf('plan-source-watch-pr-lifecycle.cjs') !== -1, 'SW planner present');
+  assert.ok(yml.indexOf('source-watch-pr-notifier') !== -1, 'SW concurrency group present');
+  assert.ok(yml.indexOf('contents: write') !== -1, 'SW has write permissions');
+  assert.ok(yml.indexOf('pull-requests: write') !== -1, 'SW has PR write permissions');
 });

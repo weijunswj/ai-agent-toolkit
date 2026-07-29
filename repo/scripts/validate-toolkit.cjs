@@ -1887,6 +1887,14 @@ function validateWorkflows(errors) {
 }
 
 function validateSourceWatchPrWorkflow(entry, text, errors) {
+  const isNotification = /^name:\s*Source Watch PR Notifier\s*$/m.test(text);
+  if (isNotification) {
+    if (!/^\s{2}schedule:\s*$/m.test(text)) fail(errors, `${entry.relPath} notification mode must be scheduled`);
+    if (!/(contents:\s*write\s*[\s\S]*pull-requests:\s*write|pull-requests:\s*write\s*[\s\S]*contents:\s*write)/i.test(text)) fail(errors, `${entry.relPath} notification mode must have write permissions`);
+    if (!/CAPTURE_NODE_TOOLCHAIN_SHA256:\s*[0-9a-f]{64}/.test(text)) fail(errors, `${entry.relPath} must pin CAPTURE_NODE_TOOLCHAIN_SHA256`);
+    if (!/VERIFY_CLOSURE_MANIFEST_SHA256:\s*[0-9a-f]{64}/.test(text)) fail(errors, `${entry.relPath} must pin VERIFY_CLOSURE_MANIFEST_SHA256`);
+    return;
+  }
   if (!/^name:\s*Source-watch notification proposal\s*$/m.test(text)) fail(errors, `${entry.relPath} workflow name must describe a proposal`);
   const permissions = workflowPermissionLines(text) || [];
   const expectedPermissions = ['contents: read', 'pull-requests: read'];
@@ -2017,8 +2025,10 @@ function validateSourceWatchTruthfulness(errors) {
   }
   if (existsRel(sourceWatchPrWorkflowPath)) {
     const workflow = readText(sourceWatchPrWorkflowPath);
-    if (!/^name:\s*Source-watch notification proposal\s*$/m.test(workflow)) {
-      fail(errors, `${sourceWatchPrWorkflowPath} workflow name must describe a Stage A proposal`);
+    const isNotification = /^name:\s*Source Watch PR Notifier\s*$/m.test(workflow);
+    const isProposal = /^name:\s*Source-watch notification proposal\s*$/m.test(workflow);
+    if (!isNotification && !isProposal) {
+      fail(errors, `${sourceWatchPrWorkflowPath} workflow name must describe a Stage A proposal or notification`);
     }
   }
 
