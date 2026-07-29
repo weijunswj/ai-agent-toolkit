@@ -6,7 +6,6 @@ const fs = require('node:fs');
 const ACTIONS = new Set([
   'none',
   'update-open',
-  'reopen-and-update',
   'create',
   'fail-ambiguous-open'
 ]);
@@ -72,21 +71,6 @@ function sortedNumbers(pullRequests) {
     .sort((left, right) => left - right);
 }
 
-function closedSelectionOrder(left, right) {
-  const leftTime = Date.parse(left.updatedAt);
-  const rightTime = Date.parse(right.updatedAt);
-  if (leftTime !== rightTime) return rightTime - leftTime;
-  return requirePullRequestNumber(right.number) - requirePullRequestNumber(left.number);
-}
-
-function validateClosedPullRequest(pr) {
-  requirePullRequestNumber(pr.number);
-  if (!Number.isFinite(Date.parse(pr.updatedAt))) {
-    throw new Error('matching closed pull requests require valid updatedAt timestamps');
-  }
-  return pr;
-}
-
 function assertPlan(plan) {
   if (!plan || typeof plan !== 'object' || !ACTIONS.has(plan.action)) {
     throw new Error('planner returned an invalid action');
@@ -99,7 +83,7 @@ function assertPlan(plan) {
   for (const number of plan.conflictingPrNumbers) {
     requirePullRequestNumber(number, 'conflicting pull request number');
   }
-  const expectsNumber = plan.action === 'update-open' || plan.action === 'reopen-and-update';
+  const expectsNumber = plan.action === 'update-open';
   if (hasNumber !== expectsNumber) {
     throw new Error(`${plan.action} has an invalid pull request number`);
   }
@@ -145,18 +129,6 @@ function planLifecycle(input) {
     return assertPlan({
       action: 'update-open',
       prNumber: requirePullRequestNumber(open[0].number),
-      conflictingPrNumbers: []
-    });
-  }
-
-  const closed = pullRequests
-    .filter((pr) => pr.state === 'CLOSED')
-    .map(validateClosedPullRequest)
-    .sort(closedSelectionOrder);
-  if (closed.length > 0) {
-    return assertPlan({
-      action: 'reopen-and-update',
-      prNumber: requirePullRequestNumber(closed[0].number),
       conflictingPrNumbers: []
     });
   }

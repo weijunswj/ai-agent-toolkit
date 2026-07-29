@@ -93,34 +93,26 @@ test('source-watch PR notifier does not become a source updater', () => {
   assert.doesNotMatch(workflow, /git push[^\n]*(?:HEAD:)?main\b/i);
 });
 
-test('source-watch PR lifecycle metadata and plans use exact repository authority', () => {
+test('source-watch PR lifecycle metadata queries only exact open PRs', () => {
   assert.match(workflow, /--repo "\$GITHUB_REPOSITORY"/);
-  assert.match(workflow, /--state all/);
+  assert.match(workflow, /--state open/);
+  assert.doesNotMatch(workflow, /--state all/);
   assert.match(workflow, /--base "\$BASE_BRANCH"/);
   assert.match(workflow, /--head "\$BRANCH"/);
   assert.match(
     workflow,
-    /--json number,state,headRefName,baseRefName,headRepositoryOwner,headRepository,isCrossRepository,updatedAt/
+    /--json number,state,headRefName,baseRefName,headRepositoryOwner,headRepository,isCrossRepository/
   );
   assert.match(workflow, /plan-source-watch-pr-lifecycle\.cjs/);
   assert.doesNotMatch(workflow, /gh pr view "\$BRANCH"/);
 });
 
-test('source-watch PR lifecycle reopens and verifies before updating a closed PR', () => {
+test('source-watch PR lifecycle never reopens historical closed PRs', () => {
   const script = lifecycleScript();
   assert.match(script, /run: \|\n\s+set -euo pipefail/);
-  const reopenCase = script.slice(
-    script.indexOf('            reopen-and-update)'),
-    script.indexOf('            create)')
-  );
-  const reopen = reopenCase.indexOf('gh pr reopen "$PR_NUMBER"');
-  const firstVerification = reopenCase.indexOf('verify_open "$PR_NUMBER"', reopen);
-  const update = reopenCase.indexOf('gh pr edit "$PR_NUMBER"', firstVerification);
-  const finalVerification = reopenCase.indexOf('verify_open "$PR_NUMBER"', update);
-  assert.ok(reopen >= 0, 'closed PR is reopened');
-  assert.ok(firstVerification > reopen, 'reopened PR is re-fetched and verified before update');
-  assert.ok(update > firstVerification, 'title/body update follows successful reopen verification');
-  assert.ok(finalVerification > update, 'final open state is confirmed after update');
+  assert.doesNotMatch(script, /reopen-and-update/);
+  assert.doesNotMatch(script, /gh pr reopen/);
+  assert.match(script, /create\)[\s\S]*verify_fresh_plan create[\s\S]*gh pr create[\s\S]*verify_open/);
 });
 
 test('source-watch PR lifecycle fails closed on ambiguous open matches', () => {
@@ -142,10 +134,6 @@ test('source-watch PR lifecycle confirms an open exact match after every mutatio
     script,
     /update-open\)[\s\S]*verify_fresh_plan update-open "\$PR_NUMBER"[\s\S]*gh pr edit "\$PR_NUMBER"[\s\S]*verify_open "\$PR_NUMBER"/
   );
-  assert.match(
-    script,
-    /verify_fresh_plan reopen-and-update "\$PR_NUMBER"[\s\S]*gh pr reopen "\$PR_NUMBER"[\s\S]*verify_open "\$PR_NUMBER"[\s\S]*gh pr edit/
-  );
   assert.match(script, /verify_fresh_plan create[\s\S]*gh pr create[\s\S]*verify_open/);
 });
 
@@ -155,10 +143,6 @@ test('every PR mutation is immediately preceded by a fresh exact lifecycle plan'
   assert.match(
     script,
     /verify_fresh_plan update-open "\$PR_NUMBER"\n\s+gh pr edit "\$PR_NUMBER"/
-  );
-  assert.match(
-    script,
-    /verify_fresh_plan reopen-and-update "\$PR_NUMBER"\n\s+gh pr reopen "\$PR_NUMBER"/
   );
   assert.match(script, /verify_fresh_plan create\n\s+gh pr create/);
 });

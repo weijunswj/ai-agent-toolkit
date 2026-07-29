@@ -114,11 +114,11 @@ jobs:
           PR_METADATA="$RUNNER_TEMP/source-watch-pr-metadata.json"
           gh pr list \
             --repo "$GITHUB_REPOSITORY" \
-            --state all \
+            --state open \
             --base "$BASE_BRANCH" \
             --head "$BRANCH" \
             --limit 1000 \
-            --json number,state,headRefName,baseRefName,headRepositoryOwner,headRepository,isCrossRepository,updatedAt \
+            --json number,state,headRefName,baseRefName,headRepositoryOwner,headRepository,isCrossRepository \
             > "$PR_METADATA"
           node repo/scripts/plan-source-watch-pr-lifecycle.cjs \
             --mode plan \
@@ -147,11 +147,11 @@ jobs:
           query_exact_prs() {
             gh pr list \
               --repo "$GITHUB_REPOSITORY" \
-              --state all \
+              --state open \
               --base "$BASE_BRANCH" \
               --head "$BRANCH" \
               --limit 1000 \
-              --json number,state,headRefName,baseRefName,headRepositoryOwner,headRepository,isCrossRepository,updatedAt
+              --json number,state,headRefName,baseRefName,headRepositoryOwner,headRepository,isCrossRepository
           }
           verify_open() {
             local expected_number="${1:-}"
@@ -225,14 +225,6 @@ jobs:
             update-open)
               test -n "$PR_NUMBER"
               verify_fresh_plan update-open "$PR_NUMBER"
-              gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --title "$PR_TITLE" --body-file "$PR_BODY"
-              verify_open "$PR_NUMBER"
-              ;;
-            reopen-and-update)
-              test -n "$PR_NUMBER"
-              verify_fresh_plan reopen-and-update "$PR_NUMBER"
-              gh pr reopen "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"
-              verify_open "$PR_NUMBER"
               gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --title "$PR_TITLE" --body-file "$PR_BODY"
               verify_open "$PR_NUMBER"
               ;;
