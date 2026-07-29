@@ -218,19 +218,24 @@ test('manual rehearsal workflow emits only verified tuple outputs after read-onl
   assert.equal(rehearsalVerifier.MAX_RESPONSE_BYTES, 256 * 1024);
 });
 
-test('Stage A source-watch is inert for schedule and manual dispatch', function() {
+test('Stage A source-watch is a scheduled-only notification with canonical PR #316 lifecycle', function() {
   assert.ok(source.on.schedule);
-  assert.ok(Object.hasOwn(source.on, 'workflow_dispatch'));
-  assert.deepEqual(source.permissions, { contents: 'read', 'pull-requests': 'read' });
-  assert.deepEqual(policies.SOURCE_WATCH_POLICY, {
-    rollout_stage: 'A',
-    publication_mode: 'dry-run',
-    scheduled_write_enabled: false,
-    manual_canary_enabled: false,
-    general_publication_enabled: false
-  });
+  assert.equal(Object.hasOwn(source.on, 'workflow_dispatch'), false);
+  assert.equal(Object.hasOwn(source.on, 'repository_dispatch'), false);
+  assert.equal(Object.hasOwn(source.on, 'pull_request'), false);
+  assert.equal(Object.hasOwn(source.on, 'pull_request_target'), false);
+  assert.equal(Object.hasOwn(source.on, 'workflow_call'), false);
+  assert.deepEqual(source.permissions, { contents: 'write', 'pull-requests': 'write' });
   const text = fs.readFileSync(sourcePath, 'utf8');
-  for (const forbidden of ['git push', 'gh pr create', 'git commit', 'force-with-lease']) assert.equal(text.includes(forbidden), false);
+  assert.equal(/^\s*issues:\s*write\s*$/m.test(text), false, 'no issues: write');
+  assert.equal(/^\s*id-token:\s*write\s*$/m.test(text), false, 'no id-token: write');
+  assert.equal(/^\s*actions:\s*write\s*$/m.test(text), false, 'no actions: write');
+  assert.ok(text.includes('plan-source-watch-pr-lifecycle.cjs'), 'planner present');
+  assert.ok(text.includes('--mode plan'), 'plan mode present');
+  assert.ok(text.includes('--mode verify-plan'), 'stale-plan check present');
+  assert.ok(text.includes('verify_fresh_plan'), 'fresh plan guard present');
+  assert.ok(text.includes('CAPTURE_NODE_TOOLCHAIN_SHA256'), 'bootstrap digest pin present');
+  assert.ok(text.includes('VERIFY_CLOSURE_MANIFEST_SHA256'), 'bootstrap digest pin present');
 });
 
 test('Stage B1 canary and Stage B2 general activation remain separate controller gates', function() {

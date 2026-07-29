@@ -1181,14 +1181,16 @@ test('cache value contains no frame fields', function() {
 });
 
 test('unknown origin fails closed in cache value validation', function() {
+  var s = inventory.cloneExecutionState(inventory.initialExecutionState());
+  var cacheKey = inventory.buildWrapperCacheKey('bash', 'scripts/x.sh', [s], 'test');
   var badVal = {
     namespace: 'workflow-wrapper-cache-value',
     version: 2,
-    origins: [{ origin: 0, semanticFingerprint: 'a'.repeat(64), inputCount: 1 }],
-    success: [{ origin: 99, outputOrdinal: 0, semanticState: {} }],
+    origins: [{ semanticFingerprint: 'a'.repeat(64), ordinal: 1 }],
+    success: [{ identity: ['b'.repeat(64), 1], outputOrdinal: 0, semanticState: {} }],
     failure: []
   };
-  assert.throws(function() { inventory.validateWrapperCacheValue(badVal, 1, 'test'); }, /WF_CACHE_VALUE_CORRUPT/);
+  assert.throws(function() { inventory.rebindCacheValue(badVal, cacheKey, [s], 'x', 'test'); }, /WF_CACHE_VALUE_CORRUPT/);
 });
 
 test('duplicate origin fails closed in cache value validation', function() {
@@ -1196,34 +1198,42 @@ test('duplicate origin fails closed in cache value validation', function() {
     namespace: 'workflow-wrapper-cache-value',
     version: 2,
     origins: [
-      { origin: 0, semanticFingerprint: 'a'.repeat(64), inputCount: 1 },
-      { origin: 0, semanticFingerprint: 'b'.repeat(64), inputCount: 1 }
+      { semanticFingerprint: 'a'.repeat(64), ordinal: 1 },
+      { semanticFingerprint: 'a'.repeat(64), ordinal: 1 }
     ],
     success: [],
     failure: []
   };
-  assert.throws(function() { inventory.validateWrapperCacheValue(badVal, 2, 'test'); }, /WF_CACHE_VALUE_CORRUPT/);
+  var s = inventory.cloneExecutionState(inventory.initialExecutionState());
+  var cacheKey = inventory.buildWrapperCacheKey('bash', 'scripts/x.sh', [s, s], 'test');
+  assert.throws(function() {
+    inventory.rebindCacheValue(badVal, cacheKey, [s, s], 'x', 'test');
+  }, /WF_CACHE_VALUE_CORRUPT/);
 });
 
 test('missing output ordinal fails closed in cache value validation', function() {
+  var s = inventory.cloneExecutionState(inventory.initialExecutionState());
+  var fp = require('node:crypto').createHash('sha256').update(inventory.stateFingerprint(s)).digest('hex');
   var badVal = {
     namespace: 'workflow-wrapper-cache-value',
     version: 2,
-    origins: [{ origin: 0, semanticFingerprint: 'a'.repeat(64), inputCount: 1 }],
-    success: [{ origin: 0, outputOrdinal: 5, semanticState: {} }],
+    origins: [{ semanticFingerprint: fp, ordinal: 1 }],
+    success: [{ identity: [fp, 1], outputOrdinal: 5, semanticState: {} }],
     failure: []
   };
   assert.throws(function() { inventory.validateWrapperCacheValue(badVal, 1, 'test'); }, /WF_CACHE_VALUE_CORRUPT/);
 });
 
 test('duplicate output ordinal fails closed in cache value validation', function() {
+  var s = inventory.cloneExecutionState(inventory.initialExecutionState());
+  var fp = require('node:crypto').createHash('sha256').update(inventory.stateFingerprint(s)).digest('hex');
   var badVal = {
     namespace: 'workflow-wrapper-cache-value',
     version: 2,
-    origins: [{ origin: 0, semanticFingerprint: 'a'.repeat(64), inputCount: 1 }],
+    origins: [{ semanticFingerprint: fp, ordinal: 1 }],
     success: [
-      { origin: 0, outputOrdinal: 0, semanticState: {} },
-      { origin: 0, outputOrdinal: 0, semanticState: {} }
+      { identity: [fp, 1], outputOrdinal: 0, semanticState: {} },
+      { identity: [fp, 1], outputOrdinal: 0, semanticState: {} }
     ],
     failure: []
   };
@@ -1317,27 +1327,28 @@ test('positive committed-manifest verification', function() {
 });
 
 test('caller-free cache value independence proven', function() {
+  var crypto = require('node:crypto');
   var parent = inventory.cloneExecutionState(inventory.initialExecutionState());
   parent.processParentKey = 'ORIGINAL_CALLER';
   parent.setupGeneration = 7;
+  var realFp = crypto.createHash('sha256').update(inventory.stateFingerprint(parent)).digest('hex');
 
   var cacheVal = {
     namespace: 'workflow-wrapper-cache-value',
     version: 2,
-    origins: [{ origin: 0, semanticFingerprint: 'f'.repeat(64), inputCount: 1 }],
+    origins: [{ semanticFingerprint: realFp, ordinal: 1 }],
     success: [{
-      origin: 0,
+      identity: [realFp, 1],
       outputOrdinal: 0,
-      semanticState: inventory.stateFingerprint(parent)
-        ? { checkoutGeneration: 0, setupGeneration: 7, capturedGeneration: 0, pathIdentity: 0,
-            env: [], checkouts: [], installed: [], workingDirectory: parent.workingDirectory, locationStack: [] }
-        : {}
+      semanticState: { checkoutGeneration: 0, setupGeneration: 7, capturedGeneration: 0, pathIdentity: 0,
+        env: [], checkouts: [], installed: [], workingDirectory: parent.workingDirectory, locationStack: [] }
     }],
     failure: []
   };
 
   var inputs = [parent];
-  var result = inventory.rebindCacheValue(cacheVal, inputs, 'scripts/w.sh', 'test');
+  var cacheKey = inventory.buildWrapperCacheKey('bash', 'scripts/w.sh', inputs, 'test');
+  var result = inventory.rebindCacheValue(cacheVal, cacheKey, inputs, 'scripts/w.sh', 'test');
   assert.equal(result.success.length, 1);
   assert.equal(result.failure.length, 0);
   var rebound = result.success[0];

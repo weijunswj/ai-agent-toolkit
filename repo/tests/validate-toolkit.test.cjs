@@ -1006,20 +1006,25 @@ test('validator rejects validation workflow that relies on npm validate script',
   assert.match(result.stderr, /validate\.yml must use explicit validation commands instead of npm run validate:all/);
 });
 
-test('source-watch Stage A workflow is a read-only proposal contract', () => {
+test('source-watch notification workflow is a scheduled-only write contract', () => {
   const workflow = readTextFile(path.join(repoRoot, '.github', 'workflows', 'source-watch-pr.yml'));
-  assert.match(workflow, /^name:\s*Source-watch notification proposal\s*$/m);
-  assert.match(workflow, /^  contents: read$/m);
-  assert.match(workflow, /^  pull-requests: read$/m);
-  assert.match(workflow, /^  workflow_dispatch:\s*$/m);
-  assert.match(workflow, /PUBLICATION_MODE: "dry-run"/);
-  assert.doesNotMatch(workflow, /git\s+(?:commit|push|switch|reset|rebase)|gh\s+pr\s+(?:create|edit|close)|force-with-lease/i);
+  assert.match(workflow, /^name:\s*Source Watch PR Notifier\s*$/m);
+  assert.match(workflow, /^  contents: write$/m);
+  assert.match(workflow, /^  pull-requests: write$/m);
+  assert.doesNotMatch(workflow, /^  workflow_dispatch:\s*$/m);
+  assert.doesNotMatch(workflow, /^  issues:\s*write\s*$/m);
 });
 
-test('validator rejects source-watch Stage A write permission or issue mutation permission', () => {
+test('validator accepts source-watch notification write permissions', () => {
+  const cwd = tempCopy();
+  const result = runValidate(cwd);
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('validator rejects source-watch notification with broadened permissions', () => {
   for (const mutation of [
-    (workflow) => workflow.replace('  contents: read\n', '  contents: write\n'),
-    (workflow) => workflow.replace('  pull-requests: read\n', '  pull-requests: read\n  issues: write\n')
+    (workflow) => workflow.replace('  contents: write\n', '  contents: write\n  issues: write\n'),
+    (workflow) => workflow.replace('  pull-requests: write\n', '  pull-requests: write\n  id-token: write\n')
   ]) {
     const cwd = tempCopy();
     const workflowPath = path.join(cwd, '.github', 'workflows', 'source-watch-pr.yml');
@@ -1027,17 +1032,6 @@ test('validator rejects source-watch Stage A write permission or issue mutation 
     const result = runValidate(cwd);
     assert.notEqual(result.status, 0);
   }
-});
-
-test('validator accepts read-only source-watch permissions with inline comments', () => {
-  const cwd = tempCopy();
-  const workflowPath = path.join(cwd, '.github', 'workflows', 'source-watch-pr.yml');
-  const workflow = readTextFile(workflowPath)
-    .replace('  contents: read\n', '  contents: read # dry-run checkout only\n')
-    .replace('  pull-requests: read\n', '  pull-requests: read # bounded metadata only\n');
-  fs.writeFileSync(workflowPath, workflow);
-  const result = runValidate(cwd);
-  assert.equal(result.status, 0, result.stderr);
 });
 
 test('source-watch advisory plan is manual-only', () => {

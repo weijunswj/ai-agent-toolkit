@@ -191,7 +191,7 @@ function initialExecutionState() {
     installed: new Map(),
     workingDirectory: REPO_ROOT,
     locationStack: [],
-    processParentKey: null,
+    processParentKey: '',
     occurrenceFrames: []
   };
 }
@@ -262,10 +262,13 @@ function buildWrapperCacheKey(shell, relPath, states, location) {
 
   const countsMap = new Map();
   for (const state of states) {
-    const callerToken = state.processParentKey || '';
+    const callerToken = state.processParentKey;
+    if (callerToken === null || callerToken === undefined) throw new InventoryError('WF_CACHE_KEY_MALFORMED', location);
+    if (typeof callerToken !== 'string') throw new InventoryError('WF_CACHE_KEY_MALFORMED', location);
+    if (callerToken.includes('\0')) throw new InventoryError('WF_CACHE_KEY_MALFORMED', location);
     if (Buffer.byteLength(callerToken, 'utf8') > 1024) throw new InventoryError('WF_CACHE_KEY_OVERSIZE', location);
     const fp = crypto.createHash('sha256').update(stateFingerprint(state)).digest('hex');
-    const rowKey = callerToken + '\0' + fp;
+    const rowKey = JSON.stringify([callerToken, fp]);
     if (!countsMap.has(rowKey)) {
       countsMap.set(rowKey, { callerToken, semanticFingerprint: fp, count: 0 });
     }
@@ -351,6 +354,11 @@ function validateWrapperCacheKey(keyString, location) {
     prevCaller = item.callerToken;
     prevFp = item.semanticFingerprint;
   }
+
+  const canonical = JSON.stringify(parsed);
+  if (canonical !== keyString) {
+    throw new InventoryError('WF_CACHE_KEY_MALFORMED', 'non_canonical');
+  }
 }
 
 function extractSemanticState(state) {
@@ -384,27 +392,35 @@ function validateWrapperCacheValue(value, inputStatesCount, location) {
   const originSet = new Set();
   for (let i = 0; i < value.origins.length; i += 1) {
     const o = value.origins[i];
-    if (!o || typeof o !== 'object' || o.origin !== i || typeof o.semanticFingerprint !== 'string' || o.inputCount !== 1) {
+    if (!o || typeof o !== 'object' || typeof o.semanticFingerprint !== 'string' || !Number.isInteger(o.ordinal)) {
       throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location || 'origin_item');
     }
-    if (originSet.has(o.origin)) throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location || 'duplicate_origin');
-    originSet.add(o.origin);
+    const originKey = JSON.stringify([o.semanticFingerprint, o.ordinal]);
+    if (originSet.has(originKey)) throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location || 'duplicate_origin');
+    originSet.add(originKey);
   }
 
   for (const collectionName of ['success', 'failure']) {
     const coll = value[collectionName];
     if (!Array.isArray(coll)) throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location || collectionName);
-    const ordinalsPerOrigin = new Map();
+    const ordinalsPerIdentity = new Map();
     for (const item of coll) {
       if (!item || typeof item !== 'object') throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location || 'item');
       const itemKeys = Object.keys(item);
-      if (itemKeys.length !== 3 || itemKeys[0] !== 'origin' || itemKeys[1] !== 'outputOrdinal' || itemKeys[2] !== 'semanticState') {
+      if (itemKeys.length !== 3 || itemKeys[0] !== 'identity' || itemKeys[1] !== 'outputOrdinal' || itemKeys[2] !== 'semanticState') {
         throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location || 'item_keys');
       }
-      if (!originSet.has(item.origin)) throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location || 'unknown_origin');
-      const expectedOrdinal = ordinalsPerOrigin.get(item.origin) || 0;
+      if (!Array.isArray(item.identity) || item.identity.length !== 2 ||
+          typeof item.identity[0] !== 'string' || !Number.isInteger(item.identity[1])) {
+        throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location || 'identity');
+      }
+      if (!Number.isInteger(item.outputOrdinal) || item.outputOrdinal < 0) {
+        throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location || 'outputOrdinal');
+      }
+      const identKey = JSON.stringify(item.identity);
+      const expectedOrdinal = ordinalsPerIdentity.get(identKey) || 0;
       if (item.outputOrdinal !== expectedOrdinal) throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location || 'ordinal_gap');
-      ordinalsPerOrigin.set(item.origin, expectedOrdinal + 1);
+      ordinalsPerIdentity.set(identKey, expectedOrdinal + 1);
 
       const sem = item.semanticState;
       if (!sem || typeof sem !== 'object' || Array.isArray(sem)) throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location || 'semanticState');
@@ -418,13 +434,54 @@ function validateWrapperCacheValue(value, inputStatesCount, location) {
   }
 }
 
-function rebindCacheValue(cacheValue, inputStates, relScriptPath, location) {
+function buildIdentityStateMap(states) {
+  const map = new Map();
+  const idCounts = new Map();
+  for (let i = 0; i < states.length; i += 1) {
+    const fp = crypto.createHash('sha256').update(stateFingerprint(states[i])).digest('hex');
+    const ident = JSON.stringify([fp]);
+    const ord = (idCounts.get(ident) || 0) + 1;
+    idCounts.set(ident, ord);
+    const triple = JSON.stringify([fp, ord]);
+    if (!map.has(triple)) {
+      map.set(triple, []);
+    }
+    map.get(triple).push(states[i]);
+  }
+  return map;
+}
+
+function rebindCacheValue(cacheValue, cacheKey, inputStates, relScriptPath, location) {
   validateWrapperCacheValue(cacheValue, inputStates.length, location);
+
+  const keyObj = JSON.parse(cacheKey);
+  const callerTokens = keyObj.inputs.map((inp) => inp.callerToken);
+  const identityToCaller = new Map();
+  for (let i = 0; i < cacheValue.origins.length; i += 1) {
+    const o = cacheValue.origins[i];
+    const ident = JSON.stringify([o.semanticFingerprint, o.ordinal]);
+    identityToCaller.set(ident, callerTokens[i] || '');
+  }
+
+  const currentIdentityIndex = new Map();
+  const idCounts = new Map();
+  for (let i = 0; i < inputStates.length; i += 1) {
+    const fp = crypto.createHash('sha256').update(stateFingerprint(inputStates[i])).digest('hex');
+    const ident = JSON.stringify([fp]);
+    const ord = (idCounts.get(ident) || 0) + 1;
+    idCounts.set(ident, ord);
+    const triple = JSON.stringify([fp, ord]);
+    currentIdentityIndex.set(triple, i);
+  }
+
   const rebindCollection = (coll) => {
     return coll.map((entry) => {
-      const parentState = inputStates[entry.origin];
-      if (!parentState) throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location);
+      const triple = JSON.stringify(entry.identity);
+      const idx = currentIdentityIndex.get(triple);
+      if (idx === undefined) throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location);
+      const parentState = inputStates[idx];
       const sem = entry.semanticState;
+      const callerToken = identityToCaller.get(triple) || parentState.processParentKey;
       const rebound = {
         checkouts: new Map(sem.checkouts.map(([k, v]) => [k, { ...v }])),
         env: new Map(sem.env),
@@ -435,7 +492,7 @@ function rebindCacheValue(cacheValue, inputStates, relScriptPath, location) {
         installed: new Map(sem.installed.map(([k, v]) => [k, { ...v }])),
         workingDirectory: sem.workingDirectory,
         locationStack: sem.locationStack.slice(),
-        processParentKey: parentState.processParentKey,
+        processParentKey: callerToken,
         occurrenceFrames: parentState.occurrenceFrames.map((f) => ({
           kind: f.kind,
           scope: f.scope,
@@ -707,7 +764,7 @@ function resolvePackageScriptGraph(checkoutRoot, executionDirectory, scriptName,
   const memo = new Set();
   const visited = [];
   const visit = (name) => {
-    const key = packageRoot + '\0' + name;
+  const key = JSON.stringify([packageRoot, name]);
     if (active.has(key)) throw new InventoryError('WF_PACKAGE_SCRIPT_CYCLE', location + ':' + name);
     if (memo.has(key)) return;
     if (!Object.prototype.hasOwnProperty.call(scripts, name) || typeof scripts[name] !== 'string') {
@@ -1305,7 +1362,7 @@ function evaluateWrapper(invocation, states, context, directory, root, location,
 
     const counts = new Map();
     const scriptStates = states.map((state, i) => {
-      const stateKey = (state.processParentKey || '') + '\0' + stateFingerprint(state);
+      const stateKey = JSON.stringify([state.processParentKey, stateFingerprint(state)]);
       const ordinal = (counts.get(stateKey) || 0) + 1;
       counts.set(stateKey, ordinal);
 
@@ -1330,11 +1387,16 @@ function evaluateWrapper(invocation, states, context, directory, root, location,
       context.activeWrappers.delete(activeKey);
     }
 
-    const origins = states.map((state, i) => ({
-      origin: i,
-      semanticFingerprint: crypto.createHash('sha256').update(stateFingerprint(state)).digest('hex'),
-      inputCount: 1
-    }));
+    const ordinalsMap = new Map();
+    const origins = states.map((state) => {
+      const k = JSON.stringify([state.processParentKey, stateFingerprint(state)]);
+      const ord = (ordinalsMap.get(k) || 0) + 1;
+      ordinalsMap.set(k, ord);
+      return {
+        semanticFingerprint: crypto.createHash('sha256').update(stateFingerprint(state)).digest('hex'),
+        ordinal: ord
+      };
+    });
 
     const buildCollectionEntries = (collection) => {
       const ordinalsMap = new Map();
@@ -1346,14 +1408,16 @@ function evaluateWrapper(invocation, states, context, directory, root, location,
         if (topFrame.kind !== 'wrapper' || topFrame.scope !== relScriptPath) {
           throw new InventoryError('WF_FRAME_UNBALANCED', location);
         }
-        const origin = topFrame.originIndex;
-        if (origin < 0 || origin >= states.length) {
+        const originIdx = topFrame.originIndex;
+        if (originIdx < 0 || originIdx >= states.length) {
           throw new InventoryError('WF_FRAME_MALFORMED', location);
         }
-        const ord = ordinalsMap.get(origin) || 0;
-        ordinalsMap.set(origin, ord + 1);
+        const originEntry = origins[originIdx];
+        const ident = JSON.stringify([originEntry.semanticFingerprint, originEntry.ordinal]);
+        const ord = ordinalsMap.get(ident) || 0;
+        ordinalsMap.set(ident, ord + 1);
         return {
-          origin,
+          identity: [originEntry.semanticFingerprint, originEntry.ordinal],
           outputOrdinal: ord,
           semanticState: extractSemanticState(outState)
         };
@@ -1372,16 +1436,22 @@ function evaluateWrapper(invocation, states, context, directory, root, location,
     context.wrapperResults.set(memoKey, cacheValue);
   }
 
-  const result = rebindCacheValue(cacheValue, states, relScriptPath, location);
+  const result = rebindCacheValue(cacheValue, memoKey, states, relScriptPath, location);
 
+  const identityToStateMap = buildIdentityStateMap(states);
   const restoreFromParent = (collection, cacheEntries) => {
     for (let k = 0; k < collection.length; k += 1) {
       const st = collection[k];
       const entry = cacheEntries[k];
-      if (!entry || entry.origin < 0 || entry.origin >= states.length) {
+      if (!entry || !Array.isArray(entry.identity) || entry.identity.length !== 2) {
         throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location);
       }
-      const parent = states[entry.origin];
+      const identKey = JSON.stringify(entry.identity);
+      const pending = identityToStateMap.get(identKey);
+      if (!pending || !pending.length) {
+        throw new InventoryError('WF_CACHE_VALUE_CORRUPT', location);
+      }
+      const parent = pending.shift();
       st.env = new Map(parent.env);
       st.workingDirectory = parent.workingDirectory;
       st.locationStack = parent.locationStack.slice();
@@ -1417,7 +1487,7 @@ function evaluatePackageScript(name, states, context, directory, root, location,
   if (states.length > MAX_EXECUTION_PATHS) throw new InventoryError('WF_PATH_LIMIT', location);
   const packageRoot = derivePackageRoot(context.repoRoot, directory, location);
   const relPackagePath = path.relative(context.repoRoot, packageRoot).replace(/\\/g, '/').normalize('NFC');
-  const key = packageRoot + '\0' + name;
+    const key = JSON.stringify([packageRoot, name]);
   if (context.activePackageScripts.has(key)) throw new InventoryError('WF_PACKAGE_SCRIPT_CYCLE', location + ':' + name);
   const document = JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8'));
   if (!document.scripts || typeof document.scripts[name] !== 'string') throw new InventoryError('WF_PACKAGE_SCRIPT_MISSING', location + ':' + name);
@@ -1428,7 +1498,7 @@ function evaluatePackageScript(name, states, context, directory, root, location,
   const scopeStr = (relPackagePath + '/' + name).normalize('NFC');
   const counts = new Map();
   const scriptStates = states.map((state, i) => {
-    const stateKey = (state.processParentKey || '') + '\0' + stateFingerprint(state);
+    const stateKey = JSON.stringify([state.processParentKey, stateFingerprint(state)]);
     const ordinal = (counts.get(stateKey) || 0) + 1;
     counts.set(stateKey, ordinal);
 
@@ -1769,7 +1839,7 @@ function analyzeSteps(steps, initialStates, context, depth = 0) {
   const scopeStr = String(context.relative + '#' + context.jobId).normalize('NFC');
   const counts = new Map();
   const framedStates = cloneStates(initialStates).map((state, i) => {
-    const stateKey = (state.processParentKey || '') + '\0' + stateFingerprint(state);
+    const stateKey = JSON.stringify([state.processParentKey, stateFingerprint(state)]);
     const ordinal = (counts.get(stateKey) || 0) + 1;
     counts.set(stateKey, ordinal);
 

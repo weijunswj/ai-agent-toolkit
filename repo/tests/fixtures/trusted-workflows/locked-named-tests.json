@@ -592,917 +592,1042 @@
     {
       "test_id": "LOCKED-116",
       "file": "repo/tests/source-watch-pr-workflow.test.cjs",
-      "name": "source-watch Stage A has schedule and manual dry-run triggers only"
+      "name": "source-watch PR notifier remains scheduled-only with minimum write permissions"
     },
     {
       "test_id": "LOCKED-117",
       "file": "repo/tests/source-watch-pr-workflow.test.cjs",
-      "name": "source-watch Stage A permissions and policy are read-only"
+      "name": "source-watch PR notifier runs trusted main code before branch writes"
     },
     {
       "test_id": "LOCKED-118",
       "file": "repo/tests/source-watch-pr-workflow.test.cjs",
-      "name": "source-watch Stage A has no branch, commit, push or PR mutation command"
+      "name": "source-watch review branch is rebuilt from main and only the report can be staged"
     },
     {
       "test_id": "LOCKED-119",
       "file": "repo/tests/source-watch-pr-workflow.test.cjs",
-      "name": "source-watch trusted main is verified before its dry-run helper executes"
+      "name": "source-watch report writes reject symlinks and push with a lease"
     },
     {
       "test_id": "LOCKED-120",
-      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
-      "name": "pull_request_target executes the canonical base workflow authority"
+      "file": "repo/tests/source-watch-pr-workflow.test.cjs",
+      "name": "source-watch PR notifier does not become a source updater"
     },
     {
       "test_id": "LOCKED-121",
-      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
-      "name": "Stage A auto-sync writeback is structurally disabled"
+      "file": "repo/tests/source-watch-pr-workflow.test.cjs",
+      "name": "source-watch PR lifecycle metadata and plans use exact repository authority"
     },
     {
       "test_id": "LOCKED-122",
-      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
-      "name": "Stage A auto-sync dry-run emits strict no-write evidence"
+      "file": "repo/tests/source-watch-pr-workflow.test.cjs",
+      "name": "source-watch PR lifecycle reopens and verifies before updating a closed PR"
     },
     {
       "test_id": "LOCKED-123",
-      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
-      "name": "Stage A manual rehearsal generates the exact proposal in PR data without executing it"
+      "file": "repo/tests/source-watch-pr-workflow.test.cjs",
+      "name": "source-watch PR lifecycle fails closed on ambiguous open matches"
     },
     {
       "test_id": "LOCKED-124",
-      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
-      "name": "manual rehearsal rejects the wrong PR number returned by API authority"
+      "file": "repo/tests/source-watch-pr-workflow.test.cjs",
+      "name": "source-watch PR lifecycle confirms an open exact match after every mutation"
     },
     {
       "test_id": "LOCKED-125",
-      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
-      "name": "manual rehearsal rejects a requested head that differs from the current PR head"
+      "file": "repo/tests/source-watch-pr-workflow.test.cjs",
+      "name": "every PR mutation is immediately preceded by a fresh exact lifecycle plan"
     },
     {
       "test_id": "LOCKED-126",
-      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
-      "name": "manual rehearsal revalidation rejects head movement after the dry run"
+      "file": "repo/tests/source-watch-pr-workflow.test.cjs",
+      "name": "fresh ambiguity is checked before any PR mutation"
     },
     {
       "test_id": "LOCKED-127",
-      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
-      "name": "manual rehearsal rejects a fork pull request"
+      "file": "repo/tests/source-watch-pr-workflow.test.cjs",
+      "name": "no actionable drift skips branch and PR lifecycle steps"
     },
     {
       "test_id": "LOCKED-128",
-      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
-      "name": "manual rehearsal rejects a pull request targeting the wrong base"
+      "file": "repo/tests/source-watch-pr-workflow.test.cjs",
+      "name": "source-watch PR notifier documents advisory actions as report-only"
     },
     {
       "test_id": "LOCKED-129",
       "file": "repo/tests/trusted-workflow-rollout.test.cjs",
-      "name": "manual rehearsal revalidation rejects a PR closed during rehearsal"
+      "name": "pull_request_target executes the canonical base workflow authority"
     },
     {
       "test_id": "LOCKED-130",
       "file": "repo/tests/trusted-workflow-rollout.test.cjs",
-      "name": "manual rehearsal accepts and freezes one exact verified PR tuple"
+      "name": "Stage A auto-sync writeback is structurally disabled"
     },
     {
       "test_id": "LOCKED-131",
       "file": "repo/tests/trusted-workflow-rollout.test.cjs",
-      "name": "manual rehearsal workflow emits only verified tuple outputs after read-only API checks"
+      "name": "Stage A auto-sync dry-run emits strict no-write evidence"
     },
     {
       "test_id": "LOCKED-132",
       "file": "repo/tests/trusted-workflow-rollout.test.cjs",
-      "name": "Stage A source-watch is inert for schedule and manual dispatch"
+      "name": "Stage A manual rehearsal generates the exact proposal in PR data without executing it"
     },
     {
       "test_id": "LOCKED-133",
       "file": "repo/tests/trusted-workflow-rollout.test.cjs",
-      "name": "Stage B1 canary and Stage B2 general activation remain separate controller gates"
+      "name": "manual rehearsal rejects the wrong PR number returned by API authority"
     },
     {
       "test_id": "LOCKED-134",
       "file": "repo/tests/trusted-workflow-rollout.test.cjs",
-      "name": "all privileged external actions are full-SHA manifest-bound and used once"
+      "name": "manual rehearsal rejects a requested head that differs from the current PR head"
     },
     {
       "test_id": "LOCKED-135",
       "file": "repo/tests/trusted-workflow-rollout.test.cjs",
-      "name": "bootstrap hashing uses only the locked absolute executable and exact arguments"
+      "name": "manual rehearsal revalidation rejects head movement after the dry run"
     },
     {
       "test_id": "LOCKED-136",
       "file": "repo/tests/trusted-workflow-rollout.test.cjs",
-      "name": "source-watch append-only planner refuses branch movement and never selects force"
+      "name": "manual rehearsal rejects a fork pull request"
     },
     {
       "test_id": "LOCKED-137",
       "file": "repo/tests/trusted-workflow-rollout.test.cjs",
-      "name": "source-watch notification PR deduplication is exact"
+      "name": "manual rehearsal rejects a pull request targeting the wrong base"
     },
     {
       "test_id": "LOCKED-138",
-      "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "real workflow inventory and auto-sync preflight rewrite pass"
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "manual rehearsal revalidation rejects a PR closed during rehearsal"
     },
     {
       "test_id": "LOCKED-139",
-      "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "symbolic GitHub workspace roots admit reviewed checkout identities only"
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "manual rehearsal accepts and freezes one exact verified PR tuple"
     },
     {
       "test_id": "LOCKED-140",
-      "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "environment alias reassignment and shadowing fail closed"
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "manual rehearsal workflow emits only verified tuple outputs after read-only API checks"
     },
     {
       "test_id": "LOCKED-141",
-      "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "PATH removal and replacement invalidate setup-node identity"
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "Stage A source-watch is a scheduled-only notification with canonical PR #316 lifecycle"
     },
     {
       "test_id": "LOCKED-142",
-      "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "command -p, xargs, find -exec and find -execdir are rejected"
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "Stage B1 canary and Stage B2 general activation remain separate controller gates"
     },
     {
       "test_id": "LOCKED-143",
-      "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "PowerShell pipeline chains segment and unsupported constructs fail closed"
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "all privileged external actions are full-SHA manifest-bound and used once"
     },
     {
       "test_id": "LOCKED-144",
-      "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "PowerShell normal script preserves environment and location but not lexical scope"
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "bootstrap hashing uses only the locked absolute executable and exact arguments"
     },
     {
       "test_id": "LOCKED-145",
-      "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "PowerShell dot sourcing propagates lexical environment and location state"
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "source-watch append-only planner refuses branch movement and never selects force"
     },
     {
       "test_id": "LOCKED-146",
-      "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "PowerShell child process and separate runspace inherit isolated environment and location copies"
+      "file": "repo/tests/trusted-workflow-rollout.test.cjs",
+      "name": "source-watch notification PR deduplication is exact"
     },
     {
       "test_id": "LOCKED-147",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "runner command-file identities are step-scoped append-only and runner-temp is non-executable"
+      "name": "real workflow inventory and auto-sync preflight rewrite pass"
     },
     {
       "test_id": "LOCKED-148",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "nearest package root is derived from the execution directory by path components"
+      "name": "symbolic GitHub workspace roots admit reviewed checkout identities only"
     },
     {
       "test_id": "LOCKED-149",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "package scripts resolve recursively from the nearest package root with separate memo and active stacks"
+      "name": "environment alias reassignment and shadowing fail closed"
     },
     {
       "test_id": "LOCKED-150",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "package-script cycles and unsupported prefix or workspace roots fail closed"
+      "name": "PATH removal and replacement invalidate setup-node identity"
     },
     {
       "test_id": "LOCKED-151",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "dependency-tree and checkout replacement commands invalidate installation authority"
+      "name": "command -p, xargs, find -exec and find -execdir are rejected"
     },
     {
       "test_id": "LOCKED-152",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "tokenizer wrapper grammar preserves quoted paths and rejects dynamic or unknown wrapper options"
+      "name": "PowerShell pipeline chains segment and unsupported constructs fail closed"
     },
     {
       "test_id": "LOCKED-153",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "command graph preserves unconditional, success-only, failure-only and pipeline operators"
+      "name": "PowerShell normal script preserves environment and location but not lexical scope"
     },
     {
       "test_id": "LOCKED-154",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "whole workflow rejects npm ci failure-only Node execution"
+      "name": "PowerShell dot sourcing propagates lexical environment and location state"
     },
     {
       "test_id": "LOCKED-155",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "whole workflow rejects failed installation followed by failure-only execution"
+      "name": "PowerShell child process and separate runspace inherit isolated environment and location copies"
     },
     {
       "test_id": "LOCKED-156",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "whole workflow rejects pipeline-derived installation authority"
+      "name": "runner command-file identities are step-scoped append-only and runner-temp is non-executable"
     },
     {
       "test_id": "LOCKED-157",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "whole workflow rejects subshell-only installation authority"
+      "name": "nearest package root is derived from the execution directory by path components"
     },
     {
       "test_id": "LOCKED-158",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "whole workflow rejects a branch join where only one path installs dependencies"
+      "name": "package scripts resolve recursively from the nearest package root with separate memo and active stacks"
     },
     {
       "test_id": "LOCKED-159",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "whole workflow admits Node only on the successful npm ci path"
+      "name": "package-script cycles and unsupported prefix or workspace roots fail closed"
     },
     {
       "test_id": "LOCKED-160",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "env PATH replacement is applied before child executable identity resolution"
+      "name": "dependency-tree and checkout replacement commands invalidate installation authority"
     },
     {
       "test_id": "LOCKED-161",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "env non-PATH assignment preserves accepted child executable identity"
+      "name": "tokenizer wrapper grammar preserves quoted paths and rejects dynamic or unknown wrapper options"
     },
     {
       "test_id": "LOCKED-162",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "composite local action closure discovers hidden repository Node execution"
+      "name": "command graph preserves unconditional, success-only, failure-only and pipeline operators"
     },
     {
       "test_id": "LOCKED-163",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "local action.yaml metadata is resolved and traversed"
+      "name": "whole workflow rejects npm ci failure-only Node execution"
     },
     {
       "test_id": "LOCKED-164",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "ambiguous local action.yml and action.yaml metadata fails closed"
+      "name": "whole workflow rejects failed installation followed by failure-only execution"
     },
     {
       "test_id": "LOCKED-165",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unsupported local Docker action fails closed"
+      "name": "whole workflow rejects pipeline-derived installation authority"
     },
     {
       "test_id": "LOCKED-166",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "local JavaScript action pre entry point is recursively inspected"
+      "name": "whole workflow rejects subshell-only installation authority"
     },
     {
       "test_id": "LOCKED-167",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "local JavaScript action main entry point is recursively inspected"
+      "name": "whole workflow rejects a branch join where only one path installs dependencies"
     },
     {
       "test_id": "LOCKED-168",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "local JavaScript action post entry point is recursively inspected"
+      "name": "whole workflow admits Node only on the successful npm ci path"
     },
     {
       "test_id": "LOCKED-169",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "Bash wrapper closure discovers hidden repository Node execution"
+      "name": "env PATH replacement is applied before child executable identity resolution"
     },
     {
       "test_id": "LOCKED-170",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "PowerShell wrapper closure discovers hidden repository Node execution"
+      "name": "env non-PATH assignment preserves accepted child executable identity"
     },
     {
       "test_id": "LOCKED-171",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "CMD wrapper closure discovers hidden repository Node execution"
+      "name": "composite local action closure discovers hidden repository Node execution"
     },
     {
       "test_id": "LOCKED-172",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "recursive wrapper cycles fail closed through the active stack"
+      "name": "local action.yaml metadata is resolved and traversed"
     },
     {
       "test_id": "LOCKED-173",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "package-script parent directory is restored so nested same-named wrapper is correctly inspected"
+      "name": "ambiguous local action.yml and action.yaml metadata fails closed"
     },
     {
       "test_id": "LOCKED-174",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "static launcher allowlist unwraps command concealment of repository Node execution"
+      "name": "unsupported local Docker action fails closed"
     },
     {
       "test_id": "LOCKED-175",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "static launcher allowlist unwraps timeout concealment of repository Node execution"
+      "name": "local JavaScript action pre entry point is recursively inspected"
     },
     {
       "test_id": "LOCKED-176",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "static launcher allowlist unwraps nice concealment of repository Node execution"
+      "name": "local JavaScript action main entry point is recursively inspected"
     },
     {
       "test_id": "LOCKED-177",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "static launcher allowlist recursively unwraps nested launcher concealment"
+      "name": "local JavaScript action post entry point is recursively inspected"
     },
     {
       "test_id": "LOCKED-178",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "env assignments around a launcher are correctly propagated before unwrapping"
+      "name": "Bash wrapper closure discovers hidden repository Node execution"
     },
     {
       "test_id": "LOCKED-179",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "loader alias capture through variable assignment is rejected"
+      "name": "PowerShell wrapper closure discovers hidden repository Node execution"
     },
     {
       "test_id": "LOCKED-180",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "createRequire loader creation is rejected"
+      "name": "CMD wrapper closure discovers hidden repository Node execution"
     },
     {
       "test_id": "LOCKED-181",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "loader passed as function argument is rejected"
+      "name": "recursive wrapper cycles fail closed through the active stack"
     },
     {
       "test_id": "LOCKED-182",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "loader stored in object property is rejected"
+      "name": "package-script parent directory is restored so nested same-named wrapper is correctly inspected"
     },
     {
       "test_id": "LOCKED-183",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "loader reassignment is rejected"
+      "name": "static launcher allowlist unwraps command concealment of repository Node execution"
     },
     {
       "test_id": "LOCKED-184",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "destructured createRequire from node:module is rejected"
+      "name": "static launcher allowlist unwraps timeout concealment of repository Node execution"
     },
     {
       "test_id": "LOCKED-185",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unwrapStaticLauncher returns execution token for timeout with duration"
+      "name": "static launcher allowlist unwraps nice concealment of repository Node execution"
     },
     {
       "test_id": "LOCKED-186",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unwrapStaticLauncher returns execution token for timeout with s suffix"
+      "name": "static launcher allowlist recursively unwraps nested launcher concealment"
     },
     {
       "test_id": "LOCKED-187",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unwrapStaticLauncher returns ordinary for non-launcher"
+      "name": "env assignments around a launcher are correctly propagated before unwrapping"
     },
     {
       "test_id": "LOCKED-188",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unwrapStaticLauncher rejects timeout missing command"
+      "name": "loader alias capture through variable assignment is rejected"
     },
     {
       "test_id": "LOCKED-189",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unwrapStaticLauncher rejects command lookup mode"
+      "name": "createRequire loader creation is rejected"
     },
     {
       "test_id": "LOCKED-190",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unwrapStaticLauncher rejects nice with missing command"
+      "name": "loader passed as function argument is rejected"
     },
     {
       "test_id": "LOCKED-191",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unwrapStaticLauncher rejects nice -n with non-integer value"
+      "name": "loader stored in object property is rejected"
     },
     {
       "test_id": "LOCKED-192",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unwrapStaticLauncher returns execution for nice -n adjustment"
+      "name": "loader reassignment is rejected"
     },
     {
       "test_id": "LOCKED-193",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unwrapStaticLauncher returns execution for nice -- terminator"
+      "name": "destructured createRequire from node:module is rejected"
     },
     {
       "test_id": "LOCKED-194",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unwrapStaticLauncher rejects timeout invalid duration"
+      "name": "unwrapStaticLauncher returns execution token for timeout with duration"
     },
     {
       "test_id": "LOCKED-195",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unwrapStaticLauncher rejects timeout unknown option"
+      "name": "unwrapStaticLauncher returns execution token for timeout with s suffix"
     },
     {
       "test_id": "LOCKED-196",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unwrapStaticLauncher rejects timeout unknown short option"
+      "name": "unwrapStaticLauncher returns ordinary for non-launcher"
     },
     {
       "test_id": "LOCKED-197",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unwrapStaticLauncher returns execution for timeout -- terminator with duration"
+      "name": "unwrapStaticLauncher rejects timeout missing command"
     },
     {
       "test_id": "LOCKED-198",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects createRequire identifier"
+      "name": "unwrapStaticLauncher rejects command lookup mode"
     },
     {
       "test_id": "LOCKED-199",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require used in assignment right-hand side"
+      "name": "unwrapStaticLauncher rejects nice with missing command"
     },
     {
       "test_id": "LOCKED-200",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases does not reject direct literal require call"
+      "name": "unwrapStaticLauncher rejects nice -n with non-integer value"
     },
     {
       "test_id": "LOCKED-201",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "nested npm run outer-parent key is not overwritten by inner invocation"
+      "name": "unwrapStaticLauncher returns execution for nice -n adjustment"
     },
     {
       "test_id": "LOCKED-202",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "PATH mutation inside a package script is not inherited by the parent shell"
+      "name": "unwrapStaticLauncher returns execution for nice -- terminator"
     },
     {
       "test_id": "LOCKED-203",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "environment mutation inside a package script is not inherited by the parent shell"
+      "name": "unwrapStaticLauncher rejects timeout invalid duration"
     },
     {
       "test_id": "LOCKED-204",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "same-named wrapper verdict changes when directory leak selects wrong file"
+      "name": "unwrapStaticLauncher rejects timeout unknown option"
     },
     {
       "test_id": "LOCKED-205",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "command dash-dash terminator unwraps correctly"
+      "name": "unwrapStaticLauncher rejects timeout unknown short option"
     },
     {
       "test_id": "LOCKED-206",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "command -v lookup mode throws lookup error"
+      "name": "unwrapStaticLauncher returns execution for timeout -- terminator with duration"
     },
     {
       "test_id": "LOCKED-207",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "command -V lookup mode throws lookup error"
+      "name": "checkLoaderAliases rejects createRequire identifier"
     },
     {
       "test_id": "LOCKED-208",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "timeout -s SIGNAL option passes through correctly"
+      "name": "checkLoaderAliases rejects require used in assignment right-hand side"
     },
     {
       "test_id": "LOCKED-209",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "timeout --signal=SIGNAL long option passes through correctly"
+      "name": "checkLoaderAliases does not reject direct literal require call"
     },
     {
       "test_id": "LOCKED-210",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "timeout -k kill-after option passes through correctly"
+      "name": "nested npm run outer-parent key is not overwritten by inner invocation"
     },
     {
       "test_id": "LOCKED-211",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "timeout -- terminator passes through correctly"
+      "name": "PATH mutation inside a package script is not inherited by the parent shell"
     },
     {
       "test_id": "LOCKED-212",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "nice -n adjustment passes through correctly"
+      "name": "environment mutation inside a package script is not inherited by the parent shell"
     },
     {
       "test_id": "LOCKED-213",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "nice --adjustment= long option passes through correctly"
+      "name": "same-named wrapper verdict changes when directory leak selects wrong file"
     },
     {
       "test_id": "LOCKED-214",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "nice -- terminator passes through correctly"
+      "name": "command dash-dash terminator unwraps correctly"
     },
     {
       "test_id": "LOCKED-215",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "rejected delegator nohup fails closed"
+      "name": "command -v lookup mode throws lookup error"
     },
     {
       "test_id": "LOCKED-216",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "rejected delegator sudo fails closed"
+      "name": "command -V lookup mode throws lookup error"
     },
     {
       "test_id": "LOCKED-217",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unsupported timeout --foreground option fails closed"
+      "name": "timeout -s SIGNAL option passes through correctly"
     },
     {
       "test_id": "LOCKED-218",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unsupported nice --priority option fails closed"
+      "name": "timeout --signal=SIGNAL long option passes through correctly"
     },
     {
       "test_id": "LOCKED-219",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unwrapStaticLauncher rejects rejected delegator nohup"
+      "name": "timeout -k kill-after option passes through correctly"
     },
     {
       "test_id": "LOCKED-220",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unwrapStaticLauncher rejects rejected delegator setsid"
+      "name": "timeout -- terminator passes through correctly"
     },
     {
       "test_id": "LOCKED-221",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "loader require.call indirection is rejected"
+      "name": "nice -n adjustment passes through correctly"
     },
     {
       "test_id": "LOCKED-222",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "loader require.resolve is allowed as a non-executing safe property"
+      "name": "nice --adjustment= long option passes through correctly"
     },
     {
       "test_id": "LOCKED-223",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "loader require.resolve traverses into resolved local target"
+      "name": "nice -- terminator passes through correctly"
     },
     {
       "test_id": "LOCKED-224",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "loader require.resolve detects prohibited execution in resolved target"
+      "name": "rejected delegator nohup fails closed"
     },
     {
       "test_id": "LOCKED-225",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "loader require.resolve dynamic argument fails closed"
+      "name": "rejected delegator sudo fails closed"
     },
     {
       "test_id": "LOCKED-226",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "loader require.resolve package argument fails closed"
+      "name": "unsupported timeout --foreground option fails closed"
     },
     {
       "test_id": "LOCKED-227",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "loader require() with zero arguments fails closed"
+      "name": "unsupported nice --priority option fails closed"
     },
     {
       "test_id": "LOCKED-228",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "loader require(dynamic) fails closed"
+      "name": "unwrapStaticLauncher rejects rejected delegator nohup"
     },
     {
       "test_id": "LOCKED-229",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "loader require(./a + ./b) concatenated fails closed"
+      "name": "unwrapStaticLauncher rejects rejected delegator setsid"
     },
     {
       "test_id": "LOCKED-230",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "loader require(a, b) multiple arguments fails closed"
+      "name": "loader require.call indirection is rejected"
     },
     {
       "test_id": "LOCKED-231",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "loader require(...args) spread argument fails closed"
+      "name": "loader require.resolve is allowed as a non-executing safe property"
     },
     {
       "test_id": "LOCKED-232",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "inventory and closure share direct require call classification"
+      "name": "loader require.resolve traverses into resolved local target"
     },
     {
       "test_id": "LOCKED-233",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require.call MemberExpression"
+      "name": "loader require.resolve detects prohibited execution in resolved target"
     },
     {
       "test_id": "LOCKED-234",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require.apply MemberExpression"
+      "name": "loader require.resolve dynamic argument fails closed"
     },
     {
       "test_id": "LOCKED-235",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require.bind capture"
+      "name": "loader require.resolve package argument fails closed"
     },
     {
       "test_id": "LOCKED-236",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects destructured call from require"
+      "name": "loader require() with zero arguments fails closed"
     },
     {
       "test_id": "LOCKED-237",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects computed require member access"
+      "name": "loader require(dynamic) fails closed"
     },
     {
       "test_id": "LOCKED-238",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases allows require.main as a safe property"
+      "name": "loader require(./a + ./b) concatenated fails closed"
     },
     {
       "test_id": "LOCKED-239",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases allows require.resolve as a safe non-executing property"
+      "name": "loader require(a, b) multiple arguments fails closed"
     },
     {
       "test_id": "LOCKED-240",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require.main.require chained load"
+      "name": "loader require(...args) spread argument fails closed"
     },
     {
       "test_id": "LOCKED-241",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require.main computed chained load"
+      "name": "inventory and closure share direct require call classification"
     },
     {
       "test_id": "LOCKED-242",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require.resolve.call chained call"
+      "name": "checkLoaderAliases rejects require.call MemberExpression"
     },
     {
       "test_id": "LOCKED-243",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require.resolve.apply chained call"
+      "name": "checkLoaderAliases rejects require.apply MemberExpression"
     },
     {
       "test_id": "LOCKED-244",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects captured require.resolve"
+      "name": "checkLoaderAliases rejects require.bind capture"
     },
     {
       "test_id": "LOCKED-245",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects captured require.main"
+      "name": "checkLoaderAliases rejects destructured call from require"
     },
     {
       "test_id": "LOCKED-246",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require.resolve.bind"
+      "name": "checkLoaderAliases rejects computed require member access"
     },
     {
       "test_id": "LOCKED-247",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "nested Bash wrapper preserves parent token for post-return Node oracle"
+      "name": "checkLoaderAliases allows require.main as a safe property"
     },
     {
       "test_id": "LOCKED-248",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "nested PowerShell wrapper preserves parent token for post-return Node oracle"
+      "name": "checkLoaderAliases allows require.resolve as a safe non-executing property"
     },
     {
       "test_id": "LOCKED-249",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "require.main passed as function argument is rejected"
+      "name": "checkLoaderAliases rejects require.main.require chained load"
     },
     {
       "test_id": "LOCKED-250",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "require.main returned from function is rejected"
+      "name": "checkLoaderAliases rejects require.main computed chained load"
     },
     {
       "test_id": "LOCKED-251",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "require.main stored in object property is rejected"
+      "name": "checkLoaderAliases rejects require.resolve.call chained call"
     },
     {
       "test_id": "LOCKED-252",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "require.resolve passed as function argument is rejected"
+      "name": "checkLoaderAliases rejects require.resolve.apply chained call"
     },
     {
       "test_id": "LOCKED-253",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "require.resolve captured into variable is rejected"
+      "name": "checkLoaderAliases rejects captured require.resolve"
     },
     {
       "test_id": "LOCKED-254",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "require.resolve called with .call is rejected"
+      "name": "checkLoaderAliases rejects captured require.main"
     },
     {
       "test_id": "LOCKED-255",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require.main as function argument"
+      "name": "checkLoaderAliases rejects require.resolve.bind"
     },
     {
       "test_id": "LOCKED-256",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require.main in array"
+      "name": "nested Bash wrapper preserves parent token for post-return Node oracle"
     },
     {
       "test_id": "LOCKED-257",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require.main in return"
+      "name": "nested PowerShell wrapper preserves parent token for post-return Node oracle"
     },
     {
       "test_id": "LOCKED-258",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require.main in object property"
+      "name": "require.main passed as function argument is rejected"
     },
     {
       "test_id": "LOCKED-259",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require.main in conditional"
+      "name": "require.main returned from function is rejected"
     },
     {
       "test_id": "LOCKED-260",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require.main in spread"
+      "name": "require.main stored in object property is rejected"
     },
     {
       "test_id": "LOCKED-261",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require.resolve as function argument"
+      "name": "require.resolve passed as function argument is rejected"
     },
     {
       "test_id": "LOCKED-262",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require.resolve in object property"
+      "name": "require.resolve captured into variable is rejected"
     },
     {
       "test_id": "LOCKED-263",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require?.resolve with optional member access"
+      "name": "require.resolve called with .call is rejected"
     },
     {
       "test_id": "LOCKED-264",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require.resolve?. with optional call"
+      "name": "checkLoaderAliases rejects require.main as function argument"
     },
     {
       "test_id": "LOCKED-265",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require?.main === module with optional member access"
+      "name": "checkLoaderAliases rejects require.main in array"
     },
     {
       "test_id": "LOCKED-266",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects parenthesised optional require.main ChainExpression"
+      "name": "checkLoaderAliases rejects require.main in return"
     },
     {
       "test_id": "LOCKED-267",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require?. as optional call"
+      "name": "checkLoaderAliases rejects require.main in object property"
     },
     {
       "test_id": "LOCKED-268",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require.resolve with dynamic argument"
+      "name": "checkLoaderAliases rejects require.main in conditional"
     },
     {
       "test_id": "LOCKED-269",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases rejects require.resolve with multiple arguments"
+      "name": "checkLoaderAliases rejects require.main in spread"
     },
     {
       "test_id": "LOCKED-270",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases admits require.main === module comparison"
+      "name": "checkLoaderAliases rejects require.resolve as function argument"
     },
     {
       "test_id": "LOCKED-271",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases admits require.main !== module inequality"
+      "name": "checkLoaderAliases rejects require.resolve in object property"
     },
     {
       "test_id": "LOCKED-272",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "checkLoaderAliases admits require.resolve with static literal"
+      "name": "checkLoaderAliases rejects require?.resolve with optional member access"
     },
     {
       "test_id": "LOCKED-273",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unwrapTimeout rejects -v unknown short option"
+      "name": "checkLoaderAliases rejects require.resolve?. with optional call"
     },
     {
       "test_id": "LOCKED-274",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unwrapNice rejects --adjustment= with decimal value"
+      "name": "checkLoaderAliases rejects require?.main === module with optional member access"
     },
     {
       "test_id": "LOCKED-275",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "unwrapNice rejects --adjustment= with empty value"
+      "name": "checkLoaderAliases rejects parenthesised optional require.main ChainExpression"
     },
     {
       "test_id": "LOCKED-276",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "process tokens are deterministic for equivalent nested wrapper analysis"
+      "name": "checkLoaderAliases rejects require?. as optional call"
     },
     {
       "test_id": "LOCKED-277",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "process tokens are unique within one nested wrapper analysis"
+      "name": "checkLoaderAliases rejects require.resolve with dynamic argument"
     },
     {
       "test_id": "LOCKED-278",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "nested and sibling child boundaries do not collide on distinct miss cache keys"
+      "name": "checkLoaderAliases rejects require.resolve with multiple arguments"
     },
     {
       "test_id": "LOCKED-279",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "previous parent token is restored after successful wrapper return"
+      "name": "checkLoaderAliases admits require.main === module comparison"
     },
     {
       "test_id": "LOCKED-280",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "previous parent token is restored after failed wrapper return"
+      "name": "checkLoaderAliases admits require.main !== module inequality"
     },
     {
       "test_id": "LOCKED-281",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "distinct caller-token identities create distinct memo entries"
+      "name": "checkLoaderAliases admits require.resolve with static literal"
     },
     {
       "test_id": "LOCKED-282",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "genuine repeated identical paired input produces a cache hit and preserves caller token exactly"
+      "name": "unwrapTimeout rejects -v unknown short option"
     },
     {
       "test_id": "LOCKED-283",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "pairing and permutation contract produces distinct cache keys for swapped associations"
+      "name": "unwrapNice rejects --adjustment= with decimal value"
     },
     {
       "test_id": "LOCKED-284",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "wrapper cache-hit sibling invocation returns distinct parent tokens"
+      "name": "unwrapNice rejects --adjustment= with empty value"
     },
     {
       "test_id": "LOCKED-285",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "timeout -s TERM signal passes validation"
+      "name": "process tokens are deterministic for equivalent nested wrapper analysis"
     },
     {
       "test_id": "LOCKED-286",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "timeout -s SIGTERM normalised to TERM passes"
+      "name": "process tokens are unique within one nested wrapper analysis"
     },
     {
       "test_id": "LOCKED-287",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "timeout --signal=TERM passes"
+      "name": "nested and sibling child boundaries do not collide on distinct miss cache keys"
     },
     {
       "test_id": "LOCKED-288",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "timeout -s lowercase term normalised passes"
+      "name": "previous parent token is restored after successful wrapper return"
     },
     {
       "test_id": "LOCKED-289",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "timeout --signal= empty value fails"
+      "name": "previous parent token is restored after failed wrapper return"
     },
     {
       "test_id": "LOCKED-290",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "timeout -s unknown signal fails"
+      "name": "distinct caller-token identities create distinct memo entries"
     },
     {
       "test_id": "LOCKED-291",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "timeout -s with punctuation fails"
+      "name": "genuine repeated identical paired input produces a cache hit and preserves caller token exactly"
     },
     {
       "test_id": "LOCKED-292",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "timeout -k 5 passes"
+      "name": "pairing and permutation contract produces distinct cache keys for swapped associations"
     },
     {
       "test_id": "LOCKED-293",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "timeout -k 0.5s passes"
+      "name": "wrapper cache-hit sibling invocation returns distinct parent tokens"
     },
     {
       "test_id": "LOCKED-294",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "timeout --kill-after=2m passes"
+      "name": "timeout -s TERM signal passes validation"
     },
     {
       "test_id": "LOCKED-295",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "timeout --kill-after= empty value fails"
+      "name": "timeout -s SIGTERM normalised to TERM passes"
     },
     {
       "test_id": "LOCKED-296",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "timeout -k alphabetic fails"
+      "name": "timeout --signal=TERM passes"
     },
     {
       "test_id": "LOCKED-297",
       "file": "repo/tests/workflow-inventory.test.cjs",
-      "name": "timeout -k negative fails"
+      "name": "timeout -s lowercase term normalised passes"
     },
     {
       "test_id": "LOCKED-298",
       "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "timeout --signal= empty value fails"
+    },
+    {
+      "test_id": "LOCKED-299",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "timeout -s unknown signal fails"
+    },
+    {
+      "test_id": "LOCKED-300",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "timeout -s with punctuation fails"
+    },
+    {
+      "test_id": "LOCKED-301",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "timeout -k 5 passes"
+    },
+    {
+      "test_id": "LOCKED-302",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "timeout -k 0.5s passes"
+    },
+    {
+      "test_id": "LOCKED-303",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "timeout --kill-after=2m passes"
+    },
+    {
+      "test_id": "LOCKED-304",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "timeout --kill-after= empty value fails"
+    },
+    {
+      "test_id": "LOCKED-305",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "timeout -k alphabetic fails"
+    },
+    {
+      "test_id": "LOCKED-306",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "timeout -k negative fails"
+    },
+    {
+      "test_id": "LOCKED-307",
+      "file": "repo/tests/workflow-inventory.test.cjs",
       "name": "timeout -k unsupported suffix fails"
+    },
+    {
+      "test_id": "LOCKED-308",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "no occurrence frames remain after step completion"
+    },
+    {
+      "test_id": "LOCKED-309",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "cache value contains no caller fields"
+    },
+    {
+      "test_id": "LOCKED-310",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "cache value contains no frame fields"
+    },
+    {
+      "test_id": "LOCKED-311",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "unknown origin fails closed in cache value validation"
+    },
+    {
+      "test_id": "LOCKED-312",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "duplicate origin fails closed in cache value validation"
+    },
+    {
+      "test_id": "LOCKED-313",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "missing output ordinal fails closed in cache value validation"
+    },
+    {
+      "test_id": "LOCKED-314",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "duplicate output ordinal fails closed in cache value validation"
+    },
+    {
+      "test_id": "LOCKED-315",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "deterministic canonical cache-key encoding rejects malformed input"
+    },
+    {
+      "test_id": "LOCKED-316",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "wrong cache version fails closed"
+    },
+    {
+      "test_id": "LOCKED-317",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "swapped associations produce different cache keys"
+    },
+    {
+      "test_id": "LOCKED-318",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "multiplicity count changes produce different cache keys"
+    },
+    {
+      "test_id": "LOCKED-319",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "exact 128 raw paths accepted"
+    },
+    {
+      "test_id": "LOCKED-320",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "exact 129 raw paths rejected before reduction"
+    },
+    {
+      "test_id": "LOCKED-321",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "positive committed-manifest verification"
+    },
+    {
+      "test_id": "LOCKED-322",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "caller-free cache value independence proven"
+    },
+    {
+      "test_id": "LOCKED-323",
+      "file": "repo/tests/workflow-inventory.test.cjs",
+      "name": "Source Watch PR #316 lifecycle remains preserved after main reconciliation"
     }
   ]
 }
