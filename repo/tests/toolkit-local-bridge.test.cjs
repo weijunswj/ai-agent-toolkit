@@ -24,6 +24,8 @@ const {
   recoverInterruptedN8nReplacement,
   reconcileSelectedN8nSkillsCache,
   n8nSkillsTargetLockIdentity,
+  requireN8nCleanupManifestByteAdmission,
+  requireN8nRetainedQuarantineCapacity,
   adapterPayloads,
   payloadChecksum,
   updateReportSignature,
@@ -56,7 +58,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.9.23';
+const expectedBridgeVersion = '2.9.24';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 const currentN8nManifestPath = path.join(
   repoRoot,
@@ -207,13 +209,49 @@ function n8nTransactionArtifacts(pluginRoot) {
   if (!fs.existsSync(parent)) return [];
   const lockName = n8nSkillsTargetLockIdentity(pluginRoot).lockName;
   return fs.readdirSync(parent).filter((name) => (
+    !name.includes('.quarantine-')
+    && !(
+      name.startsWith(`.${path.basename(pluginRoot)}.n8n-repair-backup-`)
+      && name.includes('.retired-')
+    )
+    && (
     name.startsWith(`.${path.basename(pluginRoot)}.staging-`)
     || name.startsWith(`.${path.basename(pluginRoot)}.backup-`)
     || name.startsWith(`.${path.basename(pluginRoot)}.n8n-repair-backup-`)
     || name === lockName
     || name.startsWith(`${lockName}.`)
     || name.startsWith(RECORD_PREFIX)
+    )
   ));
+}
+
+function n8nRetainedLogicalRetirementArtifacts(pluginRoot) {
+  const parent = path.dirname(pluginRoot);
+  if (!fs.existsSync(parent)) return [];
+  const lockName = n8nSkillsTargetLockIdentity(pluginRoot).lockName;
+  return fs.readdirSync(parent)
+    .filter((name) => (
+      name.startsWith(`${lockName}.`) && name.includes('.quarantine-')
+    ) || (
+      name.startsWith(`.${path.basename(pluginRoot)}.n8n-repair-backup-`)
+      && name.includes('.retired-')
+    ))
+    .sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
+}
+
+function snapshotN8nActiveTree(pluginRoot) {
+  const parent = path.dirname(pluginRoot);
+  const retained = new Set(n8nRetainedLogicalRetirementArtifacts(pluginRoot));
+  return snapshotTree(parent).filter((entry) => {
+    const firstColon = entry.indexOf(':');
+    const secondColon = entry.indexOf(':', firstColon + 1);
+    const relativePath = entry.slice(
+      firstColon + 1,
+      secondColon === -1 ? undefined : secondColon
+    );
+    const directChild = relativePath.split('/')[0];
+    return !retained.has(directChild);
+  });
 }
 
 function waitForChild(child, timeoutMs = 15000) {
@@ -865,6 +903,44 @@ function spawnAbruptN8nRepair(pluginRoot, version, hookName) {
     cwd: repoRoot,
     stdio: ['ignore', 'pipe', 'pipe']
   });
+}
+
+function spawnBarrierInterruptedN8nRepair(pluginRoot, version, barrierRoot, participant) {
+  const childSource = [
+    "const fs = require('node:fs');",
+    "const path = require('node:path');",
+    `const bridge = require(${JSON.stringify(path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'))});`,
+    'const pluginRoot = process.argv[1];',
+    'const version = process.argv[2];',
+    'const barrierRoot = process.argv[3];',
+    'const participant = process.argv[4];',
+    'bridge.reconcileSelectedN8nSkillsCache({',
+    "  plugin_id: 'n8n-skills@n8n-io', version, selected_version: version, directory_version: version, plugin_root: pluginRoot",
+    '}, {',
+    '  write: true,',
+    '  testHooks: {',
+    '    afterN8nPreTransactionEvidenceWritten() {',
+    '      fs.mkdirSync(barrierRoot, { recursive: true });',
+    "      fs.writeFileSync(path.join(barrierRoot, `${participant}.ready`), 'ready\\n', { flag: 'wx' });",
+    '      const deadline = Date.now() + 30000;',
+    "      while (fs.readdirSync(barrierRoot).filter((name) => name.endsWith('.ready')).length < 2) {",
+    "        if (Date.now() >= deadline) throw new Error('pre-transaction barrier timed out');",
+    '        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);',
+    '      }',
+    '      process.exit(73);',
+    '    }',
+    '  }',
+    '});',
+    'process.exit(74);'
+  ].join('\n');
+  return spawn(
+    process.execPath,
+    ['-e', childSource, pluginRoot, version, barrierRoot, participant],
+    {
+      cwd: repoRoot,
+      stdio: ['ignore', 'pipe', 'pipe']
+    }
+  );
 }
 
 function stopTargetLockProtocol(pluginRoot, hookName) {
@@ -2268,7 +2344,14 @@ test('writer recomputes its complete snapshot from state committed before lock a
 
   const hubRoot = path.dirname(hub);
   const residuePattern = /^(?:update\.lock(?:$|\.recovery(?:$|\.)|\.displaced\.)|\.staging-)/;
-  assert.deepEqual(fs.readdirSync(hubRoot).filter((name) => residuePattern.test(name)), []);
+  assert.deepEqual(
+    fs.readdirSync(hubRoot).filter((name) => residuePattern.test(name) && !name.includes('.quarantine-')),
+    []
+  );
+  assert.ok(
+    fs.readdirSync(hubRoot).some((name) => residuePattern.test(name) && name.includes('.quarantine-')),
+    'released writer locks remain as inert logical-retirement authority'
+  );
 
   const firstChecksum = manifest.checksum;
   const firstVersions = finalState.bridge_versions_by_source;
@@ -2291,7 +2374,10 @@ test('writer recomputes its complete snapshot from state committed before lock a
   assert.deepEqual(rerunState.future_bridge_metadata, { owner: 'future-version', preserve: true });
   assert.equal(rerunState.targets.opencode.synced_checksum, firstChecksum);
   assert.match(fs.readFileSync(path.join(sourceBTarget, 'alpha', 'SKILL.md'), 'utf8'), /source B after writer B/);
-  assert.deepEqual(fs.readdirSync(hubRoot).filter((name) => residuePattern.test(name)), []);
+  assert.deepEqual(
+    fs.readdirSync(hubRoot).filter((name) => residuePattern.test(name) && !name.includes('.quarantine-')),
+    []
+  );
 
   const rerunAudit = run(['--hub', hub, '--audit', '--sync-source', 'repo'], { env });
   assert.equal(rerunAudit.status, 0, rerunAudit.stderr);
@@ -3555,6 +3641,98 @@ test('lock-artifact retirement preserves source and quarantine replacements and 
   });
   assert.equal(readJson(replacementQuarantine).token, 'quarantine-replacement');
 
+  const conflictRoot = tmpRoot();
+  const conflictMarker = path.join(conflictRoot, 'update.lock.recovery');
+  fs.mkdirSync(conflictRoot, { recursive: true });
+  writeJson(conflictMarker, {
+    created_at: new Date().toISOString(),
+    pid: process.pid,
+    token: 'conflict-owner'
+  });
+  const conflict = bridge.releaseRecoveryMarker(conflictMarker, 'conflict-owner', {
+    beforeLockArtifactRetirementMove(event) {
+      writeJson(event.quarantine_path, {
+        created_at: new Date().toISOString(),
+        pid: process.pid,
+        token: 'conflicting-quarantine'
+      });
+    }
+  });
+  assert.equal(conflict.retired, false);
+  assert.equal(readJson(conflictMarker).token, 'conflict-owner');
+  assert.ok(fs.readdirSync(conflictRoot).some((name) => name.includes('.quarantine-')));
+
+  const reappearedRoot = tmpRoot();
+  const reappearedMarker = path.join(reappearedRoot, 'update.lock.recovery');
+  fs.mkdirSync(reappearedRoot, { recursive: true });
+  writeJson(reappearedMarker, {
+    created_at: new Date().toISOString(),
+    pid: process.pid,
+    token: 'reappeared-owner'
+  });
+  const reappeared = bridge.releaseRecoveryMarker(reappearedMarker, 'reappeared-owner', {
+    afterLockArtifactRetirementMove(event) {
+      writeJson(event.source_path, {
+        created_at: new Date().toISOString(),
+        pid: process.pid,
+        token: 'source-reappeared'
+      });
+    }
+  });
+  assert.equal(reappeared.retired, false);
+  assert.equal(readJson(reappearedMarker).token, 'source-reappeared');
+  assert.ok(fs.readdirSync(reappearedRoot).some((name) => name.includes('.quarantine-')));
+
+  const sharingRoot = tmpRoot();
+  const sharingMarker = path.join(sharingRoot, 'update.lock.recovery');
+  fs.mkdirSync(sharingRoot, { recursive: true });
+  writeJson(sharingMarker, {
+    created_at: new Date().toISOString(),
+    pid: process.pid,
+    token: 'sharing-owner'
+  });
+  const sharing = bridge.releaseRecoveryMarker(sharingMarker, 'sharing-owner', {
+    lockArtifactRetirementRenameOperation() {
+      throw fsError('EBUSY');
+    }
+  });
+  assert.equal(sharing.retired, false);
+  assert.equal(readJson(sharingMarker).token, 'sharing-owner');
+  assert.deepEqual(
+    fs.readdirSync(sharingRoot).filter((name) => name.includes('.quarantine-')),
+    []
+  );
+
+  const mainRoot = tmpRoot();
+  fs.mkdirSync(mainRoot, { recursive: true });
+  const mainLock = bridge.acquireLock(
+    mainRoot,
+    { hook: true, syncSource: 'repo' },
+    { liveness: () => 'dead' }
+  );
+  assert.equal(mainLock.acquired, true);
+  const mainRetirement = bridge.releaseLock(mainLock, {
+    afterLockArtifactRetirementMove(event) {
+      if (event.artifact_kind !== 'main-lock') return;
+      writeJson(event.source_path, {
+        bridge_version: expectedBridgeVersion,
+        created_at: new Date().toISOString(),
+        pid: process.pid,
+        sync_source: 'repo',
+        token: 'replacement-main-lock'
+      });
+    }
+  });
+  assert.equal(mainRetirement.retired, false);
+  assert.equal(readJson(mainLock.lockPath).token, 'replacement-main-lock');
+  const blockedByReplacement = bridge.acquireLock(
+    mainRoot,
+    { hook: true, syncSource: 'repo' },
+    { liveness: () => 'alive' }
+  );
+  assert.equal(blockedByReplacement.acquired, false);
+  assert.match(blockedByReplacement.skipReason, /held by live process/);
+
   for (const hookName of [
     'afterLockArtifactRetirementMove',
     'afterLockArtifactRetirementVerification'
@@ -3589,8 +3767,317 @@ test('lock-artifact retirement preserves source and quarantine replacements and 
     );
     assert.equal(recovered.acquired, true);
     bridge.releaseLock(recovered);
-    assert.deepEqual(fs.readdirSync(restartRoot), []);
+    const retained = fs.readdirSync(restartRoot);
+    assert.ok(retained.length >= 3);
+    assert.equal(
+      retained.every((name) => name.includes('.quarantine-')),
+      true,
+      'restart leaves only inert logical-retirement authority'
+    );
   }
+});
+
+test('logical-retirement count and byte ceilings admit the exact bound and reject limit plus one', () => {
+  const root = tmpRoot();
+  fs.mkdirSync(root, { recursive: true });
+  const exactObjects = requireN8nRetainedQuarantineCapacity(root, {
+    additionalBytes: 512 * 1024 * 1024,
+    additionalObjects: 64,
+    lockName: 'update.lock'
+  });
+  assert.deepEqual(exactObjects, { bytes: 0, objects: 0, observed: 0 });
+  assert.throws(
+    () => requireN8nRetainedQuarantineCapacity(root, {
+      additionalBytes: 512 * 1024 * 1024 + 1,
+      additionalObjects: 64,
+      lockName: 'update.lock'
+    }),
+    { code: 'offline-cleanup-required' }
+  );
+  assert.throws(
+    () => requireN8nRetainedQuarantineCapacity(root, {
+      additionalBytes: 512 * 1024 * 1024,
+      additionalObjects: 65,
+      lockName: 'update.lock'
+    }),
+    { code: 'offline-cleanup-required' }
+  );
+
+  const crossTargetRoot = tmpRoot();
+  fs.mkdirSync(crossTargetRoot, { recursive: true });
+  const lockA = n8nSkillsTargetLockIdentity(
+    path.join(crossTargetRoot, '1.0.1')
+  ).lockName;
+  const lockB = n8nSkillsTargetLockIdentity(
+    path.join(crossTargetRoot, '1.0.2')
+  ).lockName;
+  let retainedBytes = 0;
+  for (let index = 0; index < 57; index += 1) {
+    const bytes = Buffer.from(`${JSON.stringify({
+      bridge_version: expectedBridgeVersion,
+      created_at: new Date(index * 1000).toISOString(),
+      pid: 700000 + index,
+      sync_source: 'codex-plugin',
+      token: crypto.randomUUID()
+    }, null, 2)}\n`, 'utf8');
+    retainedBytes += bytes.length;
+    const identity = crypto.createHash('sha256').update(bytes).digest('hex').slice(0, 16);
+    fs.writeFileSync(
+      path.join(crossTargetRoot, `${lockA}.quarantine-${identity}`),
+      bytes,
+      { flag: 'wx' }
+    );
+  }
+  assert.deepEqual(
+    requireN8nRetainedQuarantineCapacity(crossTargetRoot, {
+      additionalBytes: 0,
+      additionalObjects: 0,
+      lockName: lockB
+    }),
+    { bytes: retainedBytes, objects: 57, observed: 57 },
+    'all exact target-lock namespaces contribute to one shared parent ceiling'
+  );
+  assert.throws(
+    () => requireN8nRetainedQuarantineCapacity(crossTargetRoot, {
+      additionalBytes: 8 * 16 * 1024,
+      additionalObjects: 8,
+      lockName: lockB
+    }),
+    { code: 'offline-cleanup-required' },
+    'another target cannot ignore the first target namespace and over-admit retained objects'
+  );
+});
+
+test('cross-target logical-retirement admission is atomic at the shared parent ceiling', async () => {
+  const root = tmpRoot();
+  const parent = path.join(
+    root,
+    'codex-home',
+    'plugins',
+    'cache',
+    'n8n-io',
+    'n8n-skills'
+  );
+  const signals = path.join(root, 'signals');
+  fs.mkdirSync(parent, { recursive: true });
+  fs.mkdirSync(signals, { recursive: true });
+  const lockA = n8nSkillsTargetLockIdentity(path.join(parent, '1.0.1')).lockName;
+  const lockB = n8nSkillsTargetLockIdentity(path.join(parent, '1.0.2')).lockName;
+  const childSource = [
+    "const fs = require('node:fs');",
+    "const path = require('node:path');",
+    `const bridge = require(${JSON.stringify(path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs'))});`,
+    'const parent = process.argv[1];',
+    'const lockName = process.argv[2];',
+    'const signals = process.argv[3];',
+    'const participant = process.argv[4];',
+    'const pause = process.argv[5] === "pause";',
+    'const lock = bridge.acquireLock(parent, { hook: true, lockName, syncSource: "codex-plugin" });',
+    'if (!lock.acquired) throw new Error(lock.skipReason || "target lock not acquired");',
+    'fs.writeFileSync(path.join(signals, `${participant}.ready`), "ready\\n", { flag: "wx" });',
+    'while (!fs.existsSync(path.join(signals, `${participant}.start`))) {',
+    '  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);',
+    '}',
+    'const retirement = bridge.releaseLock(lock, {',
+    '  afterN8nRetentionCapacityLockAcquired() {',
+    '    fs.writeFileSync(path.join(signals, `${participant}.capacity`), "held\\n", { flag: "wx" });',
+    '    while (pause && !fs.existsSync(path.join(signals, `${participant}.continue`))) {',
+    '      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);',
+    '    }',
+    '  }',
+    '});',
+    'process.stdout.write(`${JSON.stringify(retirement)}\\n`);'
+  ].join('\n');
+  const childA = spawn(
+    process.execPath,
+    ['-e', childSource, parent, lockA, signals, 'a', 'pause'],
+    { cwd: repoRoot, stdio: ['ignore', 'pipe', 'pipe'] }
+  );
+  const childB = spawn(
+    process.execPath,
+    ['-e', childSource, parent, lockB, signals, 'b', 'continue'],
+    { cwd: repoRoot, stdio: ['ignore', 'pipe', 'pipe'] }
+  );
+  const resultA = waitForChild(childA, 60000);
+  const resultB = waitForChild(childB, 60000);
+  const waitForSignal = async (name, timeoutMs = 30000) => {
+    const signalPath = path.join(signals, name);
+    const deadline = Date.now() + timeoutMs;
+    while (!fs.existsSync(signalPath)) {
+      if (Date.now() >= deadline) throw new Error(`signal timed out: ${name}`);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  };
+  await Promise.all([waitForSignal('a.ready'), waitForSignal('b.ready')]);
+
+  let retained = requireN8nRetainedQuarantineCapacity(parent, {
+    additionalBytes: 0,
+    additionalObjects: 0,
+    lockName: lockA
+  });
+  for (let index = 0; retained.objects < 63; index += 1) {
+    const bytes = Buffer.from(`${JSON.stringify({
+      bridge_version: expectedBridgeVersion,
+      created_at: new Date(index * 1000).toISOString(),
+      pid: 800000 + index,
+      sync_source: 'codex-plugin',
+      token: crypto.randomUUID()
+    }, null, 2)}\n`, 'utf8');
+    const identity = crypto.createHash('sha256').update(bytes).digest('hex').slice(0, 16);
+    const retainedPath = path.join(parent, `${lockA}.quarantine-${identity}`);
+    if (!fs.existsSync(retainedPath)) fs.writeFileSync(retainedPath, bytes, { flag: 'wx' });
+    retained = requireN8nRetainedQuarantineCapacity(parent, {
+      additionalBytes: 0,
+      additionalObjects: 0,
+      lockName: lockA
+    });
+  }
+  assert.equal(retained.objects, 63);
+
+  writeFile(path.join(signals, 'a.start'), 'start\n');
+  await waitForSignal('a.capacity');
+  writeFile(path.join(signals, 'b.start'), 'start\n');
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  assert.equal(fs.existsSync(path.join(signals, 'b.capacity')), false);
+  assert.equal(childB.exitCode, null, 'the second target waits outside the shared capacity boundary');
+  assert.equal(
+    requireN8nRetainedQuarantineCapacity(parent, {
+      additionalBytes: 0,
+      additionalObjects: 0,
+      lockName: lockA
+    }).objects,
+    63
+  );
+
+  writeFile(path.join(signals, 'a.continue'), 'continue\n');
+  const completedA = JSON.parse((await resultA).stdout.trim());
+  const completedB = JSON.parse((await resultB).stdout.trim());
+  assert.equal(completedA.retired, true);
+  assert.equal(completedB.retired, false);
+  assert.match(completedB.message, /capacity is exhausted/i);
+  assert.equal(
+    requireN8nRetainedQuarantineCapacity(parent, {
+      additionalBytes: 0,
+      additionalObjects: 0,
+      lockName: lockA
+    }).objects,
+    64,
+    'the shared parent never exceeds its exact retained-object ceiling'
+  );
+  assert.equal(fs.existsSync(path.join(parent, lockA)), false);
+  assert.equal(fs.existsSync(path.join(parent, lockB)), true);
+});
+
+test('target-lock retirement failure prevents a repaired success and resumes exact dead-owner recovery', () => {
+  const root = tmpRoot();
+  const codexHome = path.join(root, 'target-lock-release-failure');
+  const pluginRoot = path.join(
+    codexHome,
+    'plugins',
+    'cache',
+    'n8n-io',
+    'n8n-skills',
+    '1.0.2'
+  );
+  copyCurrentSupportedN8nPluginFixture(pluginRoot);
+  let blockedRelease = false;
+  const failed = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+    testHooks: {
+      lockArtifactRetirementRenameOperation(sourcePath, retirementPath) {
+        if (
+          !blockedRelease
+          && path.basename(sourcePath)
+            === n8nSkillsTargetLockIdentity(pluginRoot).lockName
+          && classifyN8nSkillsCompatibility(pluginRoot).status === 'healthy'
+        ) {
+          blockedRelease = true;
+          throw fsError('EBUSY');
+        }
+        fs.renameSync(sourcePath, retirementPath);
+      }
+    }
+  });
+  assert.equal(blockedRelease, true);
+  assert.equal(failed.status, 'repair-failed');
+  assert.equal(failed.code, 'target-lock-retirement-failed');
+  assert.equal(failed.repaired.length, 0);
+  const lockPath = path.join(
+    path.dirname(pluginRoot),
+    n8nSkillsTargetLockIdentity(pluginRoot).lockName
+  );
+  assert.equal(fs.existsSync(lockPath), true, 'sharing failure preserves the exact active lock generation');
+  assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'healthy');
+
+  const recovered = repairThirdPartyCodexPluginHooks({
+    codexHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
+  });
+  assert.equal(recovered.status, 'not-needed');
+  assert.equal(recovered.repaired.length, 0);
+  assert.equal(fs.existsSync(lockPath), false);
+});
+
+test('a thrown target-lock release error never replaces the primary operation failure', () => {
+  const root = tmpRoot();
+  const pluginRoot = path.join(
+    root,
+    'codex-home',
+    'plugins',
+    'cache',
+    'n8n-io',
+    'n8n-skills',
+    '1.0.2'
+  );
+  copyCurrentSupportedN8nPluginFixture(pluginRoot);
+  const primary = new Error('synthetic primary repair failure');
+  primary.code = 'synthetic-primary-repair-failure';
+  assert.throws(
+    () => reconcileSelectedN8nSkillsCache({
+      plugin_id: 'n8n-skills@n8n-io',
+      version: '1.0.2',
+      selected_version: '1.0.2',
+      directory_version: '1.0.2',
+      plugin_root: pluginRoot
+    }, {
+      write: true,
+      testHooks: {
+        afterLockArtifactRetirementMove({ artifact_kind: kind, source_path: sourcePath }) {
+          if (
+            kind === 'main-lock'
+            && path.basename(sourcePath).startsWith('.ai-agent-toolkit-n8n-target-')
+          ) {
+            const releaseError = new Error('synthetic thrown target-lock release failure');
+            releaseError.code = 'synthetic-target-lock-release-failure';
+            throw releaseError;
+          }
+        },
+        afterN8nRepairLockAcquired() {
+          throw primary;
+        }
+      }
+    }),
+    (error) => (
+      error === primary
+      && error.code === 'synthetic-primary-repair-failure'
+      && error.targetLockRetirementError?.code === 'synthetic-target-lock-release-failure'
+    )
+  );
+  assert.equal(
+    fs.readdirSync(path.dirname(pluginRoot)).some(
+      (name) => (
+        name.startsWith('.ai-agent-toolkit-n8n-target-')
+        && name.includes('.quarantine-')
+      )
+    ),
+    true,
+    'the moved exact lock generation remains retained despite the synthetic release throw'
+  );
 });
 
 test('claim, marker, displaced evidence, and retirement tombstone use exact quarantine fencing', () => {
@@ -6275,6 +6762,56 @@ test('bridge docs document cache-first setup and release branch auto-update boun
   assert.match(text, /Claude Code: run `setup toolkit --host claude-code`/i);
 });
 
+test('target-lock PID-reuse documentation matches the live-owner fail-closed runtime contract', () => {
+  const text = [
+    fs.readFileSync(
+      path.join(repoRoot, 'repo', 'docs', 'TOOLKIT-LOCAL-BRIDGE.md'),
+      'utf8'
+    ),
+    fs.readFileSync(
+      path.join(
+        repoRoot,
+        '_projects',
+        'development',
+        'toolkit-local-bridge',
+        'SOURCE-MANIFEST.md'
+      ),
+      'utf8'
+    )
+  ].join('\n');
+  assert.match(text, /confirmed-live (?:target-lock )?owner is never recovered by age/i);
+  assert.match(text, /Numeric PID reuse can therefore retain (?:target-lock )?contention until that PID is (?:no longer alive|absent)/i);
+  assert.match(text, /stop(?:ping)? all Toolkit and Codex maintenance processes/i);
+  assert.match(text, /restart the host/i);
+  assert.match(text, /Manual lock deletion, token editing and forced recovery are prohibited|Never delete a lock artifact manually, edit its token, or force recovery/i);
+  assert.doesNotMatch(text, /live-owner lease .* PID reuse|PID reuse .* bounded (?:interval|lease)|reused PID .* automatically recovered/i);
+
+  const bridge = require('../scripts/toolkit-local-bridge.cjs');
+  const root = tmpRoot();
+  const lockPath = path.join(root, 'update.lock');
+  fs.mkdirSync(root, { recursive: true });
+  writeJson(lockPath, validStoppedLockRecord({
+    created_at: new Date(0).toISOString(),
+    pid: 777777
+  }));
+  const live = bridge.acquireLock(
+    root,
+    { hook: true, syncSource: 'repo' },
+    { liveness: () => 'alive' }
+  );
+  assert.equal(live.acquired, false);
+  assert.match(live.skipReason, /held by live process/);
+  assert.equal(fs.existsSync(lockPath), true);
+
+  const dead = bridge.acquireLock(
+    root,
+    { hook: true, syncSource: 'repo' },
+    { liveness: (pid) => (Number(pid) === process.pid ? 'alive' : 'dead') }
+  );
+  assert.equal(dead.acquired, true);
+  bridge.releaseLock(dead);
+});
+
 test('Toolkit exposes a local Codex marketplace wrapper for supported plugin install', () => {
   const marketplace = readJson(path.join(repoRoot, '.agents', 'plugins', 'marketplace.json'));
   assert.equal(marketplace.name, 'ai-agent-toolkit-local');
@@ -7426,7 +7963,7 @@ test('Codex n8n repair durably recovers every abrupt replacement transition', as
   }
 });
 
-test('Codex n8n verified-winner backup cleanup resumes after abrupt partial deletion', async () => {
+test('Codex n8n verified-winner whole-backup retirement resumes after abrupt interruption', async () => {
   const root = tmpRoot();
   const codexHome = path.join(root, 'codex-home');
   const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
@@ -7437,11 +7974,13 @@ test('Codex n8n verified-winner backup cleanup resumes after abrupt partial dele
   assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'healthy', 'verified canonical winner must remain installed');
   const owned = readSingleN8nOwnedGeneration(pluginRoot);
   const transaction = readJson(owned.recordPath.replace(/\.json$/, '.n8n-replacement.json'));
-  assert.equal(fs.existsSync(transaction.backup_path), true, 'fixture must retain the exact partially deleted backup');
-  assert.notEqual(
-    classifyN8nSkillsCompatibility(transaction.backup_path).status,
+  const retirementPath = transaction.cleanup_manifest_admission.retirement_path;
+  assert.equal(fs.existsSync(transaction.backup_path), false, 'active backup namespace is logically retired');
+  assert.equal(fs.existsSync(retirementPath), true, 'fixture retains the exact whole original backup');
+  assert.equal(
+    classifyN8nSkillsCompatibility(retirementPath).status,
     'repair-required',
-    'partial backup no longer has the complete original fingerprint'
+    'retained retirement remains the complete original fingerprint'
   );
 
   const recovered = recoverInterruptedN8nReplacement({
@@ -7451,7 +7990,8 @@ test('Codex n8n verified-winner backup cleanup resumes after abrupt partial dele
   });
   assert.equal(recovered.status, 'winner-preserved');
   assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'healthy');
-  assert.deepEqual(n8nTransactionArtifacts(pluginRoot), [], 'resumed cleanup removes only exact owned backup and transaction residue');
+  assert.deepEqual(n8nTransactionArtifacts(pluginRoot), [], 'resumed cleanup retires exact transaction authority');
+  assert.equal(fs.existsSync(retirementPath), true, 'resumed cleanup preserves inert retained retirement');
 
   const retry = repairThirdPartyCodexPluginHooks({
     codexHome,
@@ -7510,11 +8050,17 @@ test('Codex n8n resumed backup cleanup preserves authority when the installed wi
   assert.equal(
     fs.existsSync(transaction.backup_path),
     true,
-    'the exact backup root remains as restart-adjudicable phase-70 residue'
+    'winner drift before capacity admission preserves the exact active backup root'
   );
-  assert.ok(
-    snapshotTree(transaction.backup_path).length <= backupBeforeRecovery.length,
-    'only an exact authorized deleted prefix may be retired before the next full winner proof'
+  assert.deepEqual(
+    snapshotTree(transaction.backup_path),
+    backupBeforeRecovery,
+    'winner drift preserves every exact manifest-authorized backup entry before retirement'
+  );
+  assert.equal(
+    fs.existsSync(transaction.cleanup_manifest_admission.retirement_path),
+    false,
+    'winner drift cannot publish logical retirement after the target-lock fence'
   );
   assert.deepEqual(fs.readFileSync(cleanupPhasePath), evidenceBeforeRecovery);
   assert.equal(fs.existsSync(owned.recordPath), true, 'resumed cleanup preserves exact transaction evidence after winner drift');
@@ -7559,7 +8105,11 @@ test('Codex n8n recovered staged-winner cleanup retains final-winner proofs', as
     (error) => error?.code === 'final-winner-drift'
   );
   assert.equal(drifted, true);
-  assert.equal(fs.existsSync(transaction.backup_path), true, 'remaining exact original backup residue is preserved');
+  assert.equal(
+    fs.existsSync(transaction.cleanup_manifest_admission.retirement_path),
+    true,
+    'the exact original backup is preserved under retained logical-retirement authority'
+  );
   assert.equal(fs.existsSync(owned.recordPath), true, 'transaction evidence remains restart-adjudicable');
   assert.equal(
     fs.existsSync(n8nEvidencePath(owned.recordPath, 'completed')),
@@ -7622,10 +8172,13 @@ test('Codex n8n resumed backup cleanup rejects and preserves residue outside its
       '',
       'canonical manifest must retire the backup root last'
     );
-    assert.equal(fs.existsSync(transaction.backup_path), true);
+    const residuePath = fs.existsSync(transaction.backup_path)
+      ? transaction.backup_path
+      : transaction.cleanup_manifest_admission.retirement_path;
+    assert.equal(fs.existsSync(residuePath), true);
 
-    fixture.mutate(transaction.backup_path, manifest);
-    const mutatedBackup = snapshotTree(transaction.backup_path);
+    fixture.mutate(residuePath, manifest);
+    const mutatedBackup = snapshotTree(residuePath);
     assert.throws(
       () => recoverInterruptedN8nReplacement({
         codexHome,
@@ -7636,11 +8189,11 @@ test('Codex n8n resumed backup cleanup rejects and preserves residue outside its
         },
         write: true
       }),
-      (error) => error.code === 'recovery-evidence-invalid',
+      (error) => ['ambiguous-target', 'recovery-evidence-invalid'].includes(error.code),
       fixture.label
     );
     assert.deepEqual(
-      snapshotTree(transaction.backup_path),
+      snapshotTree(residuePath),
       mutatedBackup,
       `${fixture.label} must remain byte-for-byte preserved`
     );
@@ -7650,6 +8203,273 @@ test('Codex n8n resumed backup cleanup rejects and preserves residue outside its
       `${fixture.label} must not rewrite phase-70 authority`
     );
     assert.equal(classifyN8nSkillsCompatibility(pluginRoot).status, 'healthy');
+  }
+});
+
+test('cleanup-manifest admission enforces exact bytes and counts UTF-8 long paths before staging', () => {
+  assert.deepEqual(
+    requireN8nCleanupManifestByteAdmission(4 * 1024 * 1024, 240),
+    {
+      manifest_serialized_bytes: 4 * 1024 * 1024,
+      retirement_name_utf8_bytes: 240
+    }
+  );
+  assert.throws(
+    () => requireN8nCleanupManifestByteAdmission(4 * 1024 * 1024 + 1, 240),
+    { code: 'cleanup-manifest-admission-failed' }
+  );
+  assert.throws(
+    () => requireN8nCleanupManifestByteAdmission(4 * 1024 * 1024, 241),
+    { code: 'cleanup-manifest-admission-failed' }
+  );
+
+  const measure = (label, configure) => {
+    const root = tmpRoot();
+    const codexHome = path.join(root, label);
+    const pluginRoot = path.join(
+      codexHome,
+      'plugins',
+      'cache',
+      'n8n-io',
+      'n8n-skills',
+      '1.0.2'
+    );
+    copyCurrentSupportedN8nPluginFixture(pluginRoot);
+    if (configure) configure(pluginRoot);
+    const before = snapshotTree(pluginRoot);
+    let admission = null;
+    const result = repairThirdPartyCodexPluginHooks({
+      codexHome,
+      windows: true,
+      write: true,
+      pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+      testHooks: {
+        afterN8nCleanupManifestPreflight(value) {
+          admission = value;
+          const error = new Error('synthetic stop after cleanup-manifest admission');
+          error.code = 'SYNTHETIC_STOP';
+          throw error;
+        }
+      }
+    });
+    assert.equal(result.status, 'repair-failed');
+    assert.equal(result.code, 'SYNTHETIC_STOP');
+    assert.deepEqual(snapshotTree(pluginRoot), before, 'admission stop leaves the target exact');
+    assert.deepEqual(n8nTransactionArtifacts(pluginRoot), [], 'admission stop creates no transaction or staging authority');
+    return admission;
+  };
+
+  const baseline = measure('manifest-baseline');
+  const utf8Name = `多字节-${'界'.repeat(24)}.txt`;
+  const longDirectoryA = `long-a-${'a'.repeat(96)}`;
+  const longDirectoryB = `long-b-${'b'.repeat(96)}`;
+  const extended = measure('manifest-utf8-long-path', (pluginRoot) => {
+    writeFile(
+      path.join(pluginRoot, longDirectoryA, longDirectoryB, utf8Name),
+      'exact multibyte path admission\n'
+    );
+  });
+  const expectedAddedPathBytes = Buffer.byteLength(
+    `${longDirectoryA}/${longDirectoryB}/${utf8Name}`,
+    'utf8'
+  ) + Buffer.byteLength(
+    `${longDirectoryA}/${longDirectoryB}`,
+    'utf8'
+  ) + Buffer.byteLength(longDirectoryA, 'utf8');
+  assert.equal(
+    extended.relative_path_utf8_bytes - baseline.relative_path_utf8_bytes,
+    expectedAddedPathBytes,
+    'every added directory and file path is counted by exact UTF-8 bytes'
+  );
+  assert.equal(extended.counts.files, baseline.counts.files + 1);
+  assert.equal(extended.counts.directories, baseline.counts.directories + 2);
+  assert.ok(extended.manifest_serialized_bytes > baseline.manifest_serialized_bytes);
+});
+
+test('whole-backup logical retirement preserves substitutions, conflicts, sharing failures, and crash prefixes', async () => {
+  const adversarialCases = [
+    {
+      label: 'source-file-substitution',
+      hook: 'beforeN8nBackupLogicalRetirementMove',
+      mutate(context) {
+        fs.appendFileSync(
+          path.join(context.backup_path, 'hooks', 'run-hook.js'),
+          '\n// substituted before retirement\n',
+          'utf8'
+        );
+      },
+      verify(context) {
+        assert.equal(fs.existsSync(context.backup_path), true);
+        assert.equal(fs.existsSync(context.retirement_path), false);
+      }
+    },
+    {
+      label: 'source-directory-substitution',
+      hook: 'beforeN8nBackupLogicalRetirementMove',
+      mutate(context) {
+        writeFile(
+          path.join(context.backup_path, 'adversarial-directory', 'replacement.txt'),
+          'directory substitution\n'
+        );
+      },
+      verify(context) {
+        assert.equal(fs.existsSync(context.backup_path), true);
+        assert.equal(fs.existsSync(context.retirement_path), false);
+      }
+    },
+    {
+      label: 'destination-conflict',
+      hook: 'beforeN8nBackupLogicalRetirementMove',
+      mutate(context) {
+        writeFile(path.join(context.retirement_path, 'conflict.txt'), 'preserve conflict\n');
+      },
+      verify(context) {
+        assert.equal(fs.existsSync(context.backup_path), true);
+        assert.equal(
+          fs.readFileSync(path.join(context.retirement_path, 'conflict.txt'), 'utf8'),
+          'preserve conflict\n'
+        );
+      }
+    },
+    {
+      label: 'source-reappearance',
+      hook: 'afterN8nBackupLogicalRetirementMove',
+      mutate(context) {
+        writeFile(path.join(context.backup_path, 'reappeared.txt'), 'preserve source replacement\n');
+      },
+      verify(context) {
+        assert.equal(
+          fs.readFileSync(path.join(context.backup_path, 'reappeared.txt'), 'utf8'),
+          'preserve source replacement\n'
+        );
+        assert.equal(fs.existsSync(context.retirement_path), true);
+      }
+    },
+    {
+      label: 'moved-object-substitution',
+      hook: 'afterN8nBackupLogicalRetirementVerification',
+      mutate(context) {
+        const saved = path.join(
+          path.dirname(context.retirement_path),
+          `.saved-original-retirement-${crypto.randomUUID()}`
+        );
+        fs.renameSync(context.retirement_path, saved);
+        writeFile(
+          path.join(context.retirement_path, 'replacement.txt'),
+          'preserve moved replacement\n'
+        );
+        context.saved_path = saved;
+      },
+      verify(context) {
+        assert.equal(
+          fs.readFileSync(path.join(context.retirement_path, 'replacement.txt'), 'utf8'),
+          'preserve moved replacement\n'
+        );
+        assert.equal(fs.existsSync(context.saved_path), true, 'the original moved generation is also preserved');
+      }
+    }
+  ];
+
+  for (const fixtureValue of adversarialCases) {
+    const root = tmpRoot();
+    const codexHome = path.join(root, fixtureValue.label);
+    const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+    copyCurrentSupportedN8nPluginFixture(pluginRoot);
+    writeFile(path.join(pluginRoot, 'unrelated.txt'), `${fixtureValue.label}\n`);
+    let observed = null;
+    const result = repairThirdPartyCodexPluginHooks({
+      codexHome,
+      windows: true,
+      write: true,
+      pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+      testHooks: {
+        [fixtureValue.hook](context) {
+          if (observed) return;
+          observed = { ...context };
+          fixtureValue.mutate(observed);
+        }
+      }
+    });
+    assert.equal(result.status, 'repair-failed', fixtureValue.label);
+    assert.equal(result.repaired.length, 0, fixtureValue.label);
+    assert.ok(observed, fixtureValue.label);
+    fixtureValue.verify(observed);
+    assert.ok(
+      n8nTransactionArtifacts(pluginRoot).some((name) => name.startsWith(RECORD_PREFIX)),
+      `${fixtureValue.label} retains restart authority`
+    );
+  }
+
+  const sharingRoot = tmpRoot();
+  const sharingHome = path.join(sharingRoot, 'sharing-failure');
+  const sharingPlugin = path.join(
+    sharingHome,
+    'plugins',
+    'cache',
+    'n8n-io',
+    'n8n-skills',
+    '1.0.2'
+  );
+  copyCurrentSupportedN8nPluginFixture(sharingPlugin);
+  let sharingAttempts = 0;
+  const sharingFailure = repairThirdPartyCodexPluginHooks({
+    codexHome: sharingHome,
+    windows: true,
+    write: true,
+    pluginList: codexPluginList([n8nInstalledEntry('1.0.2')]),
+    testHooks: {
+      backupRetirementRenameAttempts: 2,
+      backupRetirementRetryDelayMs: 1,
+      backupRetirementRenameOperation() {
+        sharingAttempts += 1;
+        throw fsError('EBUSY');
+      }
+    }
+  });
+  assert.equal(sharingFailure.status, 'repair-failed');
+  assert.equal(sharingFailure.code, 'EBUSY');
+  assert.equal(sharingAttempts, 2);
+  const sharingOwned = readSingleN8nOwnedGeneration(sharingPlugin);
+  const sharingTransaction = readJson(n8nEvidencePath(sharingOwned.recordPath, 'n8n-replacement'));
+  assert.equal(fs.existsSync(sharingTransaction.backup_path), true);
+  assert.equal(
+    fs.existsSync(sharingTransaction.cleanup_manifest_admission.retirement_path),
+    false
+  );
+
+  for (const crashPoint of [
+    'afterN8nBackupLogicalRetirementMove',
+    'afterN8nBackupLogicalRetirementPublished'
+  ]) {
+    const root = tmpRoot();
+    const codexHome = path.join(root, crashPoint);
+    const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
+    copyCurrentSupportedN8nPluginFixture(pluginRoot);
+    await waitForAbruptChild(spawnAbruptN8nRepair(pluginRoot, '1.0.2', crashPoint));
+    const owned = readSingleN8nOwnedGeneration(pluginRoot);
+    const transaction = readJson(n8nEvidencePath(owned.recordPath, 'n8n-replacement'));
+    assert.equal(fs.existsSync(transaction.backup_path), false, crashPoint);
+    assert.equal(
+      fs.existsSync(transaction.cleanup_manifest_admission.retirement_path),
+      true,
+      crashPoint
+    );
+    const recovered = recoverInterruptedN8nReplacement({
+      codexHome,
+      pluginInspection: {
+        errors: [],
+        ok: true,
+        pluginList: codexPluginList([n8nInstalledEntry('1.0.2')])
+      },
+      write: true
+    });
+    assert.equal(recovered.status, 'winner-preserved', crashPoint);
+    assert.deepEqual(n8nTransactionArtifacts(pluginRoot), [], crashPoint);
+    assert.equal(
+      fs.existsSync(transaction.cleanup_manifest_admission.retirement_path),
+      true,
+      `${crashPoint} leaves exact inert retained authority`
+    );
   }
 });
 
@@ -7695,9 +8515,11 @@ test('Codex n8n phase-70 complete winner proofs are constant-bounded while exact
       residue_files: residueFiles
     });
   }
-  assert.ok(operationCounts[0] > 0, 'the base backup still receives exact per-entry checks');
-  assert.equal(operationCounts[1] - operationCounts[0], 20);
-  assert.equal(operationCounts[2] - operationCounts[1], 60);
+  assert.deepEqual(
+    operationCounts,
+    [1, 1, 1],
+    'one exact whole-root logical-retirement operation replaces pathname deletion at every size'
+  );
   t.diagnostic(`phase70-counts=${JSON.stringify(classificationCountRows)}`);
 });
 
@@ -7762,7 +8584,9 @@ test('Codex n8n phase-70 winner drift fails at every full-proof boundary and bet
   assert.equal(interrupted.status, 'repair-failed');
   assert.equal(interrupted.code, 'final-winner-drift');
   const interruptedArtifacts = n8nTransactionArtifacts(pluginRoot);
-  assert.ok(interruptedArtifacts.some((name) => name.includes('.n8n-repair-backup-')));
+  assert.ok(n8nRetainedLogicalRetirementArtifacts(pluginRoot).some(
+    (name) => name.includes('.n8n-repair-backup-')
+  ));
   assert.ok(interruptedArtifacts.some((name) => name.startsWith(RECORD_PREFIX)));
   fs.unlinkSync(driftPath);
   const recovered = recoverInterruptedN8nReplacement({
@@ -7846,7 +8670,11 @@ test('Codex n8n phase-70 retirement admits bounded evidence above the ordinary e
     'phase-70-before-final-root-removal',
     'phase-70-after-cleanup'
   ]);
-  assert.ok(exactResidueOperations >= 1300, `only ${exactResidueOperations} exact residue operations ran`);
+  assert.equal(
+    exactResidueOperations,
+    1,
+    'the exact 1,300-file tree is retired as one manifest-bound whole-root operation'
+  );
   assert.ok(
     recoveryDurationMs < 5 * 60 * 1000,
     `1,300-file Windows phase-70 recovery exceeded the conservative 5-minute ceiling (${recoveryDurationMs} ms)`
@@ -7900,7 +8728,10 @@ test('Codex n8n phase-70 authorization rejects backup drift before manifest insp
   });
   assert.equal(result.status, 'repair-failed');
   assert.equal(result.code, 'recovery-evidence-invalid');
-  assert.match(result.errors.join('\n'), /changed after its approval proof/i);
+  assert.match(
+    result.errors.join('\n'),
+    /does not match its pre-displacement admission|changed after its approval proof/i
+  );
   assert.ok(backupPath);
   assert.deepEqual(snapshotTree(backupPath), mutatedBackup);
   const owned = readSingleN8nOwnedGeneration(pluginRoot);
@@ -8430,7 +9261,7 @@ test('Codex n8n config recovery permits only exact matching or exact obsolete ca
   assert.equal(matching.status, 'repaired', JSON.stringify(matching));
   assert.equal(classifyN8nSkillsCompatibility(matchingPlugin).status, 'healthy');
   assert.deepEqual(n8nTransactionArtifacts(matchingPlugin), []);
-  const matchingAfter = snapshotTree(path.dirname(matchingPlugin));
+  const matchingAfter = snapshotN8nActiveTree(matchingPlugin);
   const matchingRetry = repairThirdPartyCodexPluginHooks({
     codexHome: matchingHome,
     windows: true,
@@ -8438,7 +9269,7 @@ test('Codex n8n config recovery permits only exact matching or exact obsolete ca
     pluginList: codexPluginList([])
   });
   assert.equal(matchingRetry.status, 'not-needed');
-  assert.deepEqual(snapshotTree(path.dirname(matchingPlugin)), matchingAfter);
+  assert.deepEqual(snapshotN8nActiveTree(matchingPlugin), matchingAfter);
   assert.deepEqual(n8nTransactionArtifacts(matchingPlugin), []);
 
   const obsoleteRoot = tmpRoot();
@@ -8472,13 +9303,13 @@ test('Codex n8n config recovery permits only exact matching or exact obsolete ca
   assert.equal(classifyN8nSkillsCompatibility(currentPlugin).status, 'healthy');
   assert.deepEqual(n8nTransactionArtifacts(historicalPlugin), []);
   assert.deepEqual(n8nTransactionArtifacts(currentPlugin), []);
-  const obsoleteAfter = snapshotTree(path.dirname(historicalPlugin));
+  const obsoleteAfter = snapshotN8nActiveTree(historicalPlugin);
   assert.equal(recoverInterruptedN8nReplacement({
     codexHome: obsoleteHome,
     pluginInspection: { ok: true, pluginList: codexPluginList([]), errors: [] },
     write: true
   }).status, 'none');
-  assert.deepEqual(snapshotTree(path.dirname(historicalPlugin)), obsoleteAfter);
+  assert.deepEqual(snapshotN8nActiveTree(historicalPlugin), obsoleteAfter);
   assert.deepEqual(n8nTransactionArtifacts(historicalPlugin), []);
   assert.deepEqual(n8nTransactionArtifacts(currentPlugin), []);
 });
@@ -9086,7 +9917,7 @@ test('Codex n8n evidence authority advances one append-only phase at a time and 
     'completed'
   ]);
   assert.deepEqual(n8nTransactionArtifacts(pluginRoot), []);
-  const after = snapshotTree(path.dirname(pluginRoot));
+  const after = snapshotN8nActiveTree(pluginRoot);
   const retryTransitions = [];
   const retry = repairThirdPartyCodexPluginHooks({
     codexHome,
@@ -9101,7 +9932,7 @@ test('Codex n8n evidence authority advances one append-only phase at a time and 
   });
   assert.equal(retry.status, 'not-needed');
   assert.deepEqual(retryTransitions, []);
-  assert.deepEqual(snapshotTree(path.dirname(pluginRoot)), after);
+  assert.deepEqual(snapshotN8nActiveTree(pluginRoot), after);
   assert.deepEqual(n8nTransactionArtifacts(pluginRoot), []);
 });
 
@@ -9137,13 +9968,24 @@ test('Codex n8n interrupted recovery fails closed on malformed, mismatched, or a
   const oldRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.1');
   const currentRoot = path.join(codexHome, 'plugins', 'cache', 'n8n-io', 'n8n-skills', '1.0.2');
   copySupportedN8nPluginFixture(oldRoot);
+  copyCurrentSupportedN8nPluginFixture(currentRoot);
   const oldBefore = snapshotTree(oldRoot);
-  await waitForAbruptChild(spawnAbruptN8nRepair(oldRoot, '1.0.1', 'afterN8nRepairTransactionRegistration'));
-  const independentCurrent = await createInterruptedN8nEvidenceFixture(
-    'afterN8nRepairTransactionRegistration'
-  );
-  const currentBefore = snapshotTree(independentCurrent.pluginRoot);
-  relocateInterruptedN8nFixture(independentCurrent, currentRoot);
+  const currentBefore = snapshotTree(currentRoot);
+  const barrierRoot = path.join(ambiguousRoot, 'pre-transaction-barrier');
+  await Promise.all([
+    waitForAbruptChild(spawnBarrierInterruptedN8nRepair(
+      oldRoot,
+      '1.0.1',
+      barrierRoot,
+      'old'
+    )),
+    waitForAbruptChild(spawnBarrierInterruptedN8nRepair(
+      currentRoot,
+      '1.0.2',
+      barrierRoot,
+      'current'
+    ))
+  ]);
   const ambiguous = repairThirdPartyCodexPluginHooks({
     codexHome,
     windows: true,
