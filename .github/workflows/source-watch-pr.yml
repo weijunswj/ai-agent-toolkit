@@ -225,7 +225,7 @@ jobs:
             update-open)
               test -n "$PR_NUMBER"
               verify_fresh_plan update-open "$PR_NUMBER"
-              gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --title "$PR_TITLE" --body-file "$PR_BODY"
+              gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --title "$PR_TITLE" --body-file "$PR_BODY" --add-assignee "$EXPECTED_OWNER"
               verify_open "$PR_NUMBER"
               ;;
             create)
@@ -234,6 +234,7 @@ jobs:
                 --repo "$GITHUB_REPOSITORY" \
                 --base "$BASE_BRANCH" \
                 --head "$BRANCH" \
+                --assignee "$EXPECTED_OWNER" \
                 --title "$PR_TITLE" \
                 --body-file "$PR_BODY"
               verify_open
