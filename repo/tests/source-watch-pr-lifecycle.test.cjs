@@ -35,7 +35,7 @@ function plan(pullRequests, actionable = true) {
   return planLifecycle({ ...target, actionable, pullRequests });
 }
 
-test('exactly one matching open PR is updated without create or reopen', () => {
+test('exactly one matching open PR is updated without creating another', () => {
   assert.deepEqual(plan([pullRequest({ number: 201, state: 'OPEN' })]), {
     action: 'update-open',
     prNumber: 201,
@@ -43,36 +43,27 @@ test('exactly one matching open PR is updated without create or reopen', () => {
   });
 });
 
-test('historical closed PR #164 is reopened and updated rather than accepted as open', () => {
-  const result = plan([pullRequest()]);
-  assert.deepEqual(result, {
-    action: 'reopen-and-update',
-    prNumber: 164,
+test('historical closed PR #164 does not block creation of a new notification PR', () => {
+  assert.deepEqual(plan([pullRequest()]), {
+    action: 'create',
+    prNumber: null,
     conflictingPrNumbers: []
   });
-  assert.notEqual(result.action, 'update-open');
 });
 
-test('most recently updated closed exact match is selected deterministically', () => {
+test('multiple historical closed PRs do not affect lifecycle selection', () => {
   assert.deepEqual(plan([
-    pullRequest({ number: 164, updatedAt: '2026-07-05T16:31:51Z' }),
-    pullRequest({ number: 170, updatedAt: '2026-07-06T10:00:00Z' }),
-    pullRequest({ number: 171, updatedAt: '2026-07-06T09:59:59Z' })
+    pullRequest({ number: 164 }),
+    pullRequest({ number: 170 }),
+    pullRequest({ number: 171 })
   ]), {
-    action: 'reopen-and-update',
-    prNumber: 170,
+    action: 'create',
+    prNumber: null,
     conflictingPrNumbers: []
   });
 });
 
-test('equal closed timestamps use descending PR number as a stable tie-break', () => {
-  assert.equal(plan([
-    pullRequest({ number: 164 }),
-    pullRequest({ number: 170 })
-  ]).prNumber, 170);
-});
-
-test('no exact open or closed match creates one notification PR', () => {
+test('no matching open PR creates one notification PR', () => {
   assert.deepEqual(plan([]), {
     action: 'create',
     prNumber: null,
@@ -117,7 +108,7 @@ test('matching is exact and does not trim or fold case', () => {
   assert.equal(plan(nonMatches).action, 'create');
 });
 
-test('merged PRs are not candidates for reopen', () => {
+test('merged PRs do not block creation', () => {
   assert.equal(plan([pullRequest({ state: 'MERGED' })]).action, 'create');
 });
 
@@ -129,31 +120,18 @@ test('no actionable drift returns none even when matching PR metadata exists', (
   });
 });
 
-test('invalid matching closed timestamps fail closed', () => {
-  assert.throws(
-    () => plan([pullRequest({ updatedAt: 'not-a-timestamp' })]),
-    /valid updatedAt timestamps/
-  );
-});
-
-test('an open PR appearing between planning and reopen rejects the stale plan', () => {
-  const original = plan([pullRequest()]);
-  const fresh = plan([pullRequest(), pullRequest({ number: 201, state: 'OPEN' })]);
-  assert.throws(() => requireFreshPlan(original, fresh), /stale source-watch PR lifecycle plan/);
-});
-
-test('an open PR appearing between planning and create rejects the stale plan', () => {
-  const original = plan([]);
-  const fresh = plan([pullRequest({ number: 201, state: 'OPEN' })]);
-  assert.throws(() => requireFreshPlan(original, fresh), /stale source-watch PR lifecycle plan/);
-});
-
-test('a changed closed PR selection rejects the stale reopen plan', () => {
+test('closed PR metadata changes do not stale a create plan', () => {
   const original = plan([pullRequest()]);
   const fresh = plan([
     pullRequest(),
     pullRequest({ number: 170, updatedAt: '2026-07-06T10:00:00Z' })
   ]);
+  assert.deepEqual(requireFreshPlan(original, fresh), fresh);
+});
+
+test('an open PR appearing between planning and create rejects the stale plan', () => {
+  const original = plan([pullRequest()]);
+  const fresh = plan([pullRequest(), pullRequest({ number: 201, state: 'OPEN' })]);
   assert.throws(() => requireFreshPlan(original, fresh), /stale source-watch PR lifecycle plan/);
 });
 
@@ -163,7 +141,7 @@ test('a changed open PR selection rejects the stale edit plan', () => {
   assert.throws(() => requireFreshPlan(original, fresh), /stale source-watch PR lifecycle plan/);
 });
 
-test('an unchanged fresh plan proceeds normally', () => {
+test('an unchanged fresh create plan proceeds normally', () => {
   const original = plan([pullRequest()]);
   const fresh = plan([pullRequest()]);
   assert.deepEqual(requireFreshPlan(original, fresh), fresh);
