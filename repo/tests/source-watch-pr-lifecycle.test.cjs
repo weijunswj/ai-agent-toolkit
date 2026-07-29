@@ -5,7 +5,8 @@ const test = require('node:test');
 
 const {
   exactPullRequests,
-  planLifecycle
+  planLifecycle,
+  requireFreshPlan
 } = require('../scripts/plan-source-watch-pr-lifecycle.cjs');
 
 const target = {
@@ -133,4 +134,46 @@ test('invalid matching closed timestamps fail closed', () => {
     () => plan([pullRequest({ updatedAt: 'not-a-timestamp' })]),
     /valid updatedAt timestamps/
   );
+});
+
+test('an open PR appearing between planning and reopen rejects the stale plan', () => {
+  const original = plan([pullRequest()]);
+  const fresh = plan([pullRequest(), pullRequest({ number: 201, state: 'OPEN' })]);
+  assert.throws(() => requireFreshPlan(original, fresh), /stale source-watch PR lifecycle plan/);
+});
+
+test('an open PR appearing between planning and create rejects the stale plan', () => {
+  const original = plan([]);
+  const fresh = plan([pullRequest({ number: 201, state: 'OPEN' })]);
+  assert.throws(() => requireFreshPlan(original, fresh), /stale source-watch PR lifecycle plan/);
+});
+
+test('a changed closed PR selection rejects the stale reopen plan', () => {
+  const original = plan([pullRequest()]);
+  const fresh = plan([
+    pullRequest(),
+    pullRequest({ number: 170, updatedAt: '2026-07-06T10:00:00Z' })
+  ]);
+  assert.throws(() => requireFreshPlan(original, fresh), /stale source-watch PR lifecycle plan/);
+});
+
+test('a changed open PR selection rejects the stale edit plan', () => {
+  const original = plan([pullRequest({ number: 201, state: 'OPEN' })]);
+  const fresh = plan([pullRequest({ number: 202, state: 'OPEN' })]);
+  assert.throws(() => requireFreshPlan(original, fresh), /stale source-watch PR lifecycle plan/);
+});
+
+test('an unchanged fresh plan proceeds normally', () => {
+  const original = plan([pullRequest()]);
+  const fresh = plan([pullRequest()]);
+  assert.deepEqual(requireFreshPlan(original, fresh), fresh);
+});
+
+test('fresh ambiguity rejects the original single-open plan', () => {
+  const original = plan([pullRequest({ number: 201, state: 'OPEN' })]);
+  const fresh = plan([
+    pullRequest({ number: 201, state: 'OPEN' }),
+    pullRequest({ number: 202, state: 'OPEN' })
+  ]);
+  assert.throws(() => requireFreshPlan(original, fresh), /fresh plan is fail-ambiguous-open/);
 });

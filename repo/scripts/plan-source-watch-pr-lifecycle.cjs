@@ -109,6 +109,20 @@ function assertPlan(plan) {
   return plan;
 }
 
+function requireFreshPlan(expectedPlan, freshPlan) {
+  assertPlan(expectedPlan);
+  assertPlan(freshPlan);
+  if (freshPlan.action !== expectedPlan.action || freshPlan.prNumber !== expectedPlan.prNumber) {
+    const expectedNumber = expectedPlan.prNumber === null ? '' : ` #${expectedPlan.prNumber}`;
+    const freshNumber = freshPlan.prNumber === null ? '' : ` #${freshPlan.prNumber}`;
+    throw new Error(
+      `stale source-watch PR lifecycle plan: expected ${expectedPlan.action}${expectedNumber}, ` +
+      `fresh plan is ${freshPlan.action}${freshNumber}`
+    );
+  }
+  return freshPlan;
+}
+
 function planLifecycle(input) {
   targetFromInput(input);
   if (typeof input.actionable !== 'boolean') {
@@ -229,6 +243,20 @@ function runCli(argv) {
     return plan.prNumber;
   }
 
+  if (mode === 'verify-plan') {
+    input.actionable = true;
+    const action = requireExactString(args['expected-action'], 'expected-action');
+    const number = args['expected-number'] === undefined ? null : Number(args['expected-number']);
+    const expectedPlan = assertPlan({
+      action,
+      prNumber: number,
+      conflictingPrNumbers: []
+    });
+    const freshPlan = requireFreshPlan(expectedPlan, planLifecycle(input));
+    process.stdout.write(`${JSON.stringify(freshPlan)}\n`);
+    return freshPlan;
+  }
+
   throw new Error(`unsupported mode: ${mode}`);
 }
 
@@ -247,5 +275,6 @@ module.exports = {
   exactPullRequests,
   isExactLifecycleMatch,
   planLifecycle,
+  requireFreshPlan,
   runCli
 };

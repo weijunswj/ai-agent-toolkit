@@ -140,9 +140,36 @@ test('source-watch PR lifecycle confirms an open exact match after every mutatio
   assert.match(script, /--mode verify-open/);
   assert.match(
     script,
-    /update-open\)[\s\S]*verify_open "\$PR_NUMBER"[\s\S]*gh pr edit "\$PR_NUMBER"[\s\S]*verify_open "\$PR_NUMBER"/
+    /update-open\)[\s\S]*verify_fresh_plan update-open "\$PR_NUMBER"[\s\S]*gh pr edit "\$PR_NUMBER"[\s\S]*verify_open "\$PR_NUMBER"/
   );
-  assert.match(script, /gh pr reopen "\$PR_NUMBER"[\s\S]*verify_open "\$PR_NUMBER"[\s\S]*gh pr edit/);
+  assert.match(
+    script,
+    /verify_fresh_plan reopen-and-update "\$PR_NUMBER"[\s\S]*gh pr reopen "\$PR_NUMBER"[\s\S]*verify_open "\$PR_NUMBER"[\s\S]*gh pr edit/
+  );
+  assert.match(script, /verify_fresh_plan create[\s\S]*gh pr create[\s\S]*verify_open/);
+});
+
+test('every PR mutation is immediately preceded by a fresh exact lifecycle plan', () => {
+  const script = lifecycleScript();
+  assert.match(script, /query_exact_prs > "\$metadata"[\s\S]*--mode verify-plan/);
+  assert.match(
+    script,
+    /verify_fresh_plan update-open "\$PR_NUMBER"\n\s+gh pr edit "\$PR_NUMBER"/
+  );
+  assert.match(
+    script,
+    /verify_fresh_plan reopen-and-update "\$PR_NUMBER"\n\s+gh pr reopen "\$PR_NUMBER"/
+  );
+  assert.match(script, /verify_fresh_plan create\n\s+gh pr create/);
+});
+
+test('fresh ambiguity is checked before any PR mutation', () => {
+  const script = lifecycleScript();
+  const firstFreshPlan = script.indexOf('verify_fresh_plan update-open "$PR_NUMBER"');
+  const firstMutation = script.indexOf('gh pr edit "$PR_NUMBER"');
+  assert.ok(firstFreshPlan >= 0 && firstFreshPlan < firstMutation);
+  assert.match(script, /--mode verify-plan/);
+  assert.match(script, /stale source-watch PR lifecycle plan|expected-action/);
   assert.match(script, /gh pr create[\s\S]*verify_open/);
 });
 

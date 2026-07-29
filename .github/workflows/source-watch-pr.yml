@@ -171,6 +171,26 @@ jobs:
             fi
             node repo/scripts/plan-source-watch-pr-lifecycle.cjs "${args[@]}"
           }
+          verify_fresh_plan() {
+            local expected_action="$1"
+            local expected_number="${2:-}"
+            local metadata="$RUNNER_TEMP/source-watch-pr-fresh-plan.json"
+            query_exact_prs > "$metadata"
+            local args=(
+              --mode verify-plan
+              --input "$metadata"
+              --repository "$GITHUB_REPOSITORY"
+              --owner "$EXPECTED_OWNER"
+              --head "$BRANCH"
+              --base "$BASE_BRANCH"
+              --actionable true
+              --expected-action "$expected_action"
+            )
+            if [ -n "$expected_number" ]; then
+              args+=(--expected-number "$expected_number")
+            fi
+            node repo/scripts/plan-source-watch-pr-lifecycle.cjs "${args[@]}"
+          }
 
           cat > "$PR_BODY" <<'EOF'
           This PR is a review notification only.
@@ -204,18 +224,20 @@ jobs:
               ;;
             update-open)
               test -n "$PR_NUMBER"
-              verify_open "$PR_NUMBER"
+              verify_fresh_plan update-open "$PR_NUMBER"
               gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --title "$PR_TITLE" --body-file "$PR_BODY"
               verify_open "$PR_NUMBER"
               ;;
             reopen-and-update)
               test -n "$PR_NUMBER"
+              verify_fresh_plan reopen-and-update "$PR_NUMBER"
               gh pr reopen "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"
               verify_open "$PR_NUMBER"
               gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --title "$PR_TITLE" --body-file "$PR_BODY"
               verify_open "$PR_NUMBER"
               ;;
             create)
+              verify_fresh_plan create
               gh pr create \
                 --repo "$GITHUB_REPOSITORY" \
                 --base "$BASE_BRANCH" \
