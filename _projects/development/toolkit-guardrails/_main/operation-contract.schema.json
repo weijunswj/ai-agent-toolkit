@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.guardrail.operation.v1",
+  "title": "Toolkit Adapter-Neutral Operation Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "session", "repository", "operation", "native_state", "approval", "authority"],
+  "properties": {
+    "contract_version": { "const": "toolkit.guardrail.operation.v1" },
+    "session": {
+      "$ref": "#/$defs/session"
+    },
+    "repository": {
+      "$ref": "#/$defs/repository"
+    },
+    "operation": {
+      "$ref": "#/$defs/operation"
+    },
+    "native_state": {
+      "$ref": "#/$defs/nativeState"
+    },
+    "approval": {
+      "anyOf": [
+        { "$ref": "#/$defs/approval" },
+        { "type": "null" }
+      ]
+    },
+    "authority": {
+      "anyOf": [
+        { "$ref": "#/$defs/authority" },
+        { "type": "null" }
+      ]
+    }
+  },
+  "$defs": {
+    "nullableString": { "type": ["string", "null"] },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "host_version", "session_id", "turn_id", "call_id", "lifecycle_event"],
+      "properties": {
+        "host": { "$ref": "#/$defs/nullableString" },
+        "host_version": { "$ref": "#/$defs/nullableString" },
+        "session_id": { "$ref": "#/$defs/nullableString" },
+        "turn_id": { "$ref": "#/$defs/nullableString" },
+        "call_id": { "$ref": "#/$defs/nullableString" },
+        "lifecycle_event": { "$ref": "#/$defs/nullableString" }
+      }
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cwd", "repo_root", "worktree_root", "authorised_directories", "canonicalisation_evidence", "path_resolution_status", "canonical_target_paths", "approved_additional_roots", "resolution_evidence"],
+      "properties": {
+        "cwd": { "$ref": "#/$defs/nullableString" },
+        "repo_root": { "$ref": "#/$defs/nullableString" },
+        "worktree_root": { "$ref": "#/$defs/nullableString" },
+        "authorised_directories": { "type": "array", "items": { "type": "string" } },
+        "canonicalisation_evidence": { "type": ["object", "null"] },
+        "path_resolution_status": { "type": "string" },
+        "canonical_target_paths": { "type": "array", "items": { "type": "object" } },
+        "approved_additional_roots": { "type": "array", "items": { "type": "object" } },
+        "resolution_evidence": { "type": ["object", "null"] }
+      }
+    },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host_tool", "canonical_route", "structured_input", "opaque_input", "command", "shell", "operation_cwd", "targets", "external_targets", "mutation_class", "mcp_server", "mcp_tool", "input_digest", "target_digest", "scope", "transaction_evidence"],
+      "properties": {
+        "host_tool": { "$ref": "#/$defs/nullableString" },
+        "canonical_route": { "$ref": "#/$defs/nullableString" },
+        "structured_input": { "type": ["object", "null"] },
+        "opaque_input": { "type": ["object", "null"] },
+        "command": { "$ref": "#/$defs/nullableString" },
+        "shell": { "$ref": "#/$defs/nullableString" },
+        "operation_cwd": { "$ref": "#/$defs/nullableString" },
+        "targets": { "type": "array", "items": { "type": "object" } },
+        "external_targets": { "type": "array", "items": { "type": "object" } },
+        "mutation_class": { "type": "string" },
+        "mcp_server": { "$ref": "#/$defs/nullableString" },
+        "mcp_tool": { "$ref": "#/$defs/nullableString" },
+        "input_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "target_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "scope": { "$ref": "#/$defs/nullableString" },
+        "transaction_evidence": { "type": ["object", "null"] }
+      }
+    },
+    "nativeState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["permission_mode", "auto_or_bypass", "native_permission_route", "hook_order_evidence", "capability_evidence"],
+      "properties": {
+        "permission_mode": { "$ref": "#/$defs/nullableString" },
+        "auto_or_bypass": { "type": ["boolean", "null"] },
+        "native_permission_route": { "$ref": "#/$defs/nullableString" },
+        "hook_order_evidence": { "type": ["object", "null"] },
+        "capability_evidence": { "type": ["object", "null"] }
+      }
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

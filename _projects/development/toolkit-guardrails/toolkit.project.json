@@ -1,0 +1,52 @@
+{
+  "id": "development.toolkit-guardrails",
+  "category": "development",
+  "name": "toolkit-guardrails",
+  "title": "Toolkit Guardrails",
+  "module_path": "_projects/development/toolkit-guardrails",
+  "main_path": "_projects/development/toolkit-guardrails/_main",
+  "version": "1.0.0",
+  "version_policy": "semver",
+  "version_notes": "Initial first-party canonical guardrail policy, pure shared engine contracts, deterministic fixtures, and source-only explanatory projection for issue #313.",
+  "outputs": [],
+  "writes": {
+    "allowed": [],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "GEMINI.md",
+      ".agents/**",
+      ".codex-plugin/**",
+      ".claude-plugin/**",
+      "user-home/**",
+      "host-adapters/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false,
+  "project": {
+    "name": "Toolkit Guardrails",
+    "category": "development",
+    "summary": "Canonical host-neutral guardrail policy and pure deterministic shared engine contracts for repository boundaries, command classification, approvals, and four-way decisions."
+  },
+  "surface": {
+    "publish_as": "source_only",
+    "skill": {
+      "status": "not_applicable"
+    },
+    "mcp": {
+      "status": "not_applicable"
+    }
+  }
+}
