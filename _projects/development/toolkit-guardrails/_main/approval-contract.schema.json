@@ -28,7 +28,35 @@
     "trusted_user_channel": { "type": "string", "minLength": 1 },
     "exact_operation_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "exact_targets_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-    "canonical_target_set": { "type": "array", "items": { "type": "object" } },
+    "canonical_target_set": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["target_class", "status", "link_type", "path_digest"],
+        "properties": {
+          "target_class": {
+            "enum": [
+              "canonical-repository",
+              "canonical-worktree",
+              "approved-additional-root",
+              "sibling-repository",
+              "parent-workspace",
+              "outside-repository",
+              "external-system",
+              "secret-bearing",
+              "protected-target",
+              "unresolved-target",
+              "mixed-targets",
+              "unknown-target"
+            ]
+          },
+          "status": { "type": "string" },
+          "link_type": { "enum": ["none", "symlink", "junction", "reparse-point"] },
+          "path_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
     "session_id": { "type": "string", "minLength": 1 },
     "turn_id": { "type": "string", "minLength": 1 },
     "call_id": { "type": "string", "minLength": 1 },
@@ -39,6 +67,29 @@
     "consumed": { "type": "boolean" },
     "consumed_count": { "type": "integer", "minimum": 0 },
     "max_repeat_count": { "type": "integer", "minimum": 1 },
-    "replay_detected": { "type": "boolean" }
-  }
+    "replay_detected": { "const": false }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "one_shot": { "const": true } } },
+      "then": {
+        "properties": {
+          "consumed": { "const": false },
+          "consumed_count": { "const": 0 }
+        },
+        "not": { "required": ["max_repeat_count"] }
+      }
+    },
+    {
+      "if": { "properties": { "one_shot": { "const": false } } },
+      "then": {
+        "required": ["consumed_count", "max_repeat_count"],
+        "properties": {
+          "consumed": { "const": false },
+          "consumed_count": { "type": "integer", "minimum": 0 },
+          "max_repeat_count": { "type": "integer", "minimum": 1, "maximum": 8 }
+        }
+      }
+    }
+  ]
 }

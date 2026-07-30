@@ -23,7 +23,9 @@ function detectPathSemantics(value, explicit = {}) {
   const win32 = platform === 'win32' || platform === 'windows';
   return {
     platform: win32 ? 'win32' : platform,
-    case_sensitive: explicit.case_sensitive === undefined ? !win32 : Boolean(explicit.case_sensitive),
+    case_sensitive: explicit.case_sensitive === undefined
+      ? !win32
+      : (typeof explicit.case_sensitive === 'boolean' ? explicit.case_sensitive : !win32),
     separator: win32 ? '\\' : '/',
   };
 }
@@ -99,6 +101,39 @@ function normalizeLinkType(value) {
   return 'none';
 }
 
+function nullableString(value) {
+  return value === undefined || value === null ? null : String(value);
+}
+
+function normalizeEvidenceMap(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return Object.keys(value).reduce((result, key) => {
+    result[key] = normalizeResolutionEvidence(value[key]);
+    return result;
+  }, {});
+}
+
+function normalizeResolutionEvidence(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return {
+    status: nullableString(value.status),
+    resolution_status: nullableString(value.resolution_status),
+    source: nullableString(value.source),
+    provenance: nullableString(value.provenance),
+    filesystem_verified: value.filesystem_verified === undefined || value.filesystem_verified === null
+      ? null
+      : (typeof value.filesystem_verified === 'boolean' ? value.filesystem_verified : null),
+    link_type: normalizeLinkType(value.link_type),
+    resolved_path: nullableString(value.resolved_path),
+    canonical_path: nullableString(value.canonical_path),
+    target_class: nullableString(value.target_class),
+    repository_root: nullableString(value.repository_root),
+    worktree_root: nullableString(value.worktree_root),
+    roots: normalizeEvidenceMap(value.roots),
+    targets: normalizeEvidenceMap(value.targets),
+  };
+}
+
 function defaultFsResolver() {
   return {
     realpath(value) {
@@ -122,18 +157,57 @@ function readLinkType(stats) {
 }
 
 function evidenceForPath(context, rawPath, target = {}) {
-  const evidence = context?.resolution_evidence;
-  const table = evidence && typeof evidence.targets === 'object' ? evidence.targets : {};
-  return firstDefined(target.resolution_evidence, table[rawPath], table[rawPath?.replaceAll('\\', '/')], trustedEvidence(evidence) ? evidence : null);
+  const evidence = normalizeResolutionEvidence(context?.resolution_evidence);
+  const table = evidence?.targets && typeof evidence.targets === 'object' && !Array.isArray(evidence.targets) ? evidence.targets : {};
+  return firstDefined(
+    normalizeResolutionEvidence(target.resolution_evidence),
+    normalizeResolutionEvidence(table[rawPath]),
+    normalizeResolutionEvidence(table[rawPath?.replaceAll('\\', '/')]),
+    trustedEvidence(evidence) ? evidence : null,
+  );
 }
 
 function trustedEvidence(evidence) {
-  return Boolean(evidence && (
+  const source = firstDefined(evidence?.source, evidence?.provenance, null);
+  if (!evidence || typeof evidence !== 'object' || typeof source !== 'string' || !source.trim()) return false;
+  if (/(?:caller|model|executor|transcript|untrusted|input)/i.test(source)) return false;
+  return Boolean(
+    (
     evidence.status === 'trusted' ||
     evidence.status === 'resolved' ||
     evidence.resolution_status === 'resolved' ||
     evidence.filesystem_verified === true
-  ));
+    )
+  );
+}
+
+function normalizeGitEvidence(value, semantics, basePath) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const canonicalize = (candidate) => {
+    if (candidate === undefined || candidate === null || candidate === '') return null;
+    try {
+      return canonicalPath(String(candidate), semantics, basePath);
+    } catch (error) {
+      return null;
+    }
+  };
+  const source = nullableString(value.source);
+  const provenance = nullableString(value.provenance);
+  const status = nullableString(value.status || value.resolution_status);
+  const provenanceTrusted = Boolean(
+    (source || provenance)
+    && !/(?:caller|model|executor|transcript|untrusted|input)/i.test(String(source || provenance))
+    && ['trusted', 'resolved', 'verified'].includes(String(status || '').toLowerCase()),
+  );
+  const trusted = provenanceTrusted && (value.trusted === true || ['trusted', 'resolved', 'verified'].includes(String(status || '').toLowerCase()));
+  return {
+    repository_root: canonicalize(value.repository_root || value.repo_root),
+    common_directory: canonicalize(value.common_directory || value.git_common_dir),
+    source,
+    provenance,
+    status: status || 'unresolved',
+    trusted,
+  };
 }
 
 function resolveWithEvidence(rawPath, basePath, semantics, evidence, fsResolver, options = {}) {
@@ -147,6 +221,15 @@ function resolveWithEvidence(rawPath, basePath, semantics, evidence, fsResolver,
 
   if (resolvedPath) {
     resolvedPath = canonicalPath(String(resolvedPath), semantics, basePath);
+  } else if (linkType !== 'none') {
+    return {
+      raw_path: rawPath,
+      lexical_path: lexicalPath,
+      canonical_path: null,
+      link_type: linkType,
+      status: 'unresolved',
+      evidence: evidence || null,
+    };
   } else if (!trustedEvidence(evidence)) {
     return {
       raw_path: rawPath,
@@ -175,9 +258,13 @@ function resolveWithEvidence(rawPath, basePath, semantics, evidence, fsResolver,
 }
 
 function rootEvidence(context, name) {
-  const evidence = context?.resolution_evidence;
+  const evidence = normalizeResolutionEvidence(context?.resolution_evidence);
   if (!evidence || typeof evidence !== 'object') return null;
-  return firstDefined(evidence[name], evidence.roots?.[name], trustedEvidence(evidence) ? evidence : null);
+  return firstDefined(
+    normalizeResolutionEvidence(evidence[name]),
+    normalizeResolutionEvidence(evidence.roots?.[name]),
+    trustedEvidence(evidence) ? evidence : null,
+  );
 }
 
 function resolveRepositoryContext(input, options = {}) {
@@ -196,8 +283,8 @@ function resolveRepositoryContext(input, options = {}) {
     authorised_directories: [],
     approved_additional_roots: [],
     canonical_target_paths: [],
-    canonicalisation_evidence: context.canonicalisation_evidence || context.resolution_evidence || null,
-    resolution_evidence: context.resolution_evidence || null,
+    canonicalisation_evidence: normalizeResolutionEvidence(firstDefined(context.canonicalisation_evidence, context.resolution_evidence, null)),
+    resolution_evidence: normalizeResolutionEvidence(context.resolution_evidence),
     path_resolution_status: 'missing-context',
     path_semantics: semantics,
     git_evidence: null,
@@ -219,13 +306,32 @@ function resolveRepositoryContext(input, options = {}) {
       ? resolver.showTopLevel(cwd || proposedRepo)
       : (typeof resolver.resolve === 'function' ? resolver.resolve(cwd || proposedRepo) : null);
     const gitCommon = typeof resolver.showCommonDir === 'function' ? resolver.showCommonDir(cwd || proposedRepo) : null;
-    baseResult.git_evidence = { repository_root: gitRoot || null, common_directory: gitCommon || null, source: 'injected-git-resolver' };
-    if (gitRoot && repo.canonical_path && !samePath(canonicalPath(gitRoot, semantics, cwd || undefined), repo.canonical_path, semantics)) {
+    baseResult.git_evidence = normalizeGitEvidence({
+      repository_root: gitRoot,
+      common_directory: gitCommon,
+      source: 'injected-git-resolver',
+      provenance: 'injected-git-resolver',
+      status: gitRoot ? 'trusted' : 'unresolved',
+      trusted: Boolean(gitRoot),
+    }, semantics, cwd || proposedRepo);
+    if (!baseResult.git_evidence?.trusted) {
+      baseResult.path_resolution_status = 'ambiguous';
+      return baseResult;
+    }
+    if (gitRoot && repo.canonical_path && !samePath(baseResult.git_evidence.repository_root, repo.canonical_path, semantics)) {
       baseResult.path_resolution_status = 'ambiguous';
       return baseResult;
     }
   } else if (context.git_evidence) {
-    baseResult.git_evidence = context.git_evidence;
+    baseResult.git_evidence = normalizeGitEvidence(context.git_evidence, semantics, cwd || proposedRepo);
+    if (!baseResult.git_evidence?.trusted) {
+      baseResult.path_resolution_status = 'ambiguous';
+      return baseResult;
+    }
+    if (baseResult.git_evidence.repository_root && repo.canonical_path && !samePath(baseResult.git_evidence.repository_root, repo.canonical_path, semantics)) {
+      baseResult.path_resolution_status = 'ambiguous';
+      return baseResult;
+    }
   }
 
   const additional = firstDefined(context.approved_additional_roots, context.authorised_additional_roots, []);
@@ -235,7 +341,9 @@ function resolveRepositoryContext(input, options = {}) {
       baseResult.approved_additional_roots.push({ path: null, canonical_path: null, status: 'unresolved', kind: 'unknown' });
       continue;
     }
-    const evidence = typeof entry === 'object' ? entry.resolution_evidence : null;
+    const evidence = typeof entry === 'object'
+      ? firstDefined(entry.resolution_evidence, context.resolution_evidence, null)
+      : context.resolution_evidence;
     const resolved = resolveWithEvidence(raw, cwd || proposedRepo, semantics, evidence, fsResolver, options);
     baseResult.approved_additional_roots.push({
       path: raw,
@@ -305,11 +413,7 @@ function resolveTarget(targetInput, repositoryContext, options = {}) {
   }
 
   const canonical = resolved.canonical_path;
-  const explicitClass = firstDefined(target.target_class, target.safe_target_class, evidence?.target_class, null);
-  if (explicitClass && ['sibling-repository', 'parent-workspace', 'outside-repository', 'approved-additional-root', 'canonical-repository', 'canonical-worktree'].includes(explicitClass)) {
-    result.target_class = explicitClass;
-    result.resolved_inside = ['approved-additional-root', 'canonical-repository', 'canonical-worktree'].includes(explicitClass);
-  } else if (isWithin(context.canonical_repository_root, canonical, semantics)) {
+  if (isWithin(context.canonical_repository_root, canonical, semantics)) {
     result.target_class = 'canonical-repository';
     result.resolved_inside = true;
   } else if (isWithin(context.canonical_worktree_root, canonical, semantics)) {
@@ -370,4 +474,7 @@ module.exports = {
   targetSetClass,
   targetsInsideAuthorisedRoots,
   defaultFsResolver,
+  normalizeResolutionEvidence,
+  normalizeGitEvidence,
+  trustedEvidence,
 };

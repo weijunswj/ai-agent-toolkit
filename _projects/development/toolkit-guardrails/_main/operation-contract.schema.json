@@ -7,21 +7,14 @@
   "required": ["contract_version", "session", "repository", "operation", "native_state", "approval", "authority"],
   "properties": {
     "contract_version": { "const": "toolkit.guardrail.operation.v1" },
-    "session": {
-      "$ref": "#/$defs/session"
-    },
-    "repository": {
-      "$ref": "#/$defs/repository"
-    },
-    "operation": {
-      "$ref": "#/$defs/operation"
-    },
-    "native_state": {
-      "$ref": "#/$defs/nativeState"
-    },
+    "session": { "$ref": "#/$defs/session" },
+    "repository": { "$ref": "#/$defs/repository" },
+    "operation": { "$ref": "#/$defs/operation" },
+    "native_state": { "$ref": "#/$defs/nativeState" },
     "approval": {
       "anyOf": [
         { "$ref": "#/$defs/approval" },
+        { "$ref": "#/$defs/malformedApproval" },
         { "type": "null" }
       ]
     },
@@ -34,6 +27,7 @@
   },
   "$defs": {
     "nullableString": { "type": ["string", "null"] },
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "session": {
       "type": "object",
       "additionalProperties": false,
@@ -47,20 +41,166 @@
         "lifecycle_event": { "$ref": "#/$defs/nullableString" }
       }
     },
+    "resolutionEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": { "type": ["string", "null"] },
+        "resolution_status": { "type": ["string", "null"] },
+        "source": { "$ref": "#/$defs/nullableString" },
+        "provenance": { "$ref": "#/$defs/nullableString" },
+        "filesystem_verified": { "type": ["boolean", "null"] },
+        "link_type": { "enum": ["none", "symlink", "junction", "reparse-point", null] },
+        "resolved_path": { "$ref": "#/$defs/nullableString" },
+        "canonical_path": { "$ref": "#/$defs/nullableString" },
+        "target_class": { "$ref": "#/$defs/nullableString" },
+        "repository_root": { "$ref": "#/$defs/nullableString" },
+        "worktree_root": { "$ref": "#/$defs/nullableString" },
+        "roots": {
+          "type": ["object", "null"],
+          "additionalProperties": { "$ref": "#/$defs/resolutionEvidence" }
+        },
+        "targets": {
+          "type": ["object", "null"],
+          "additionalProperties": { "$ref": "#/$defs/resolutionEvidence" }
+        }
+      }
+    },
+    "pathSemantics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "case_sensitive", "separator"],
+      "properties": {
+        "platform": { "type": "string" },
+        "case_sensitive": { "type": "boolean" },
+        "separator": { "type": "string", "minLength": 1, "maxLength": 1 }
+      }
+    },
+    "gitEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository_root", "common_directory", "source", "provenance", "status", "trusted"],
+      "properties": {
+        "repository_root": { "$ref": "#/$defs/nullableString" },
+        "common_directory": { "$ref": "#/$defs/nullableString" },
+        "source": { "$ref": "#/$defs/nullableString" },
+        "provenance": { "$ref": "#/$defs/nullableString" },
+        "status": { "$ref": "#/$defs/nullableString" },
+        "trusted": { "type": "boolean" }
+      }
+    },
+    "targetClass": {
+      "enum": [
+        "canonical-repository",
+        "canonical-worktree",
+        "approved-additional-root",
+        "sibling-repository",
+        "parent-workspace",
+        "outside-repository",
+        "external-system",
+        "secret-bearing",
+        "protected-target",
+        "unresolved-target",
+        "mixed-targets",
+        "unknown-target"
+      ]
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["raw_path", "lexical_path", "canonical_path", "status", "target_class", "link_type", "resolved_inside", "approved_root", "evidence"],
+      "properties": {
+        "raw_path": { "$ref": "#/$defs/nullableString" },
+        "lexical_path": { "$ref": "#/$defs/nullableString" },
+        "canonical_path": { "$ref": "#/$defs/nullableString" },
+        "status": { "enum": ["resolved", "missing-context", "unresolved", "ambiguous", "stale", "outside", "resolver-error"] },
+        "target_class": { "$ref": "#/$defs/targetClass" },
+        "link_type": { "enum": ["none", "symlink", "junction", "reparse-point"] },
+        "resolved_inside": { "type": "boolean" },
+        "approved_root": { "$ref": "#/$defs/nullableString" },
+        "evidence": {
+          "anyOf": [
+            { "$ref": "#/$defs/resolutionEvidence" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "additionalRoot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "canonical_path", "status", "link_type", "kind"],
+      "properties": {
+        "path": { "$ref": "#/$defs/nullableString" },
+        "canonical_path": { "$ref": "#/$defs/nullableString" },
+        "status": { "enum": ["resolved", "missing-context", "unresolved", "ambiguous", "stale", "outside", "resolver-error"] },
+        "link_type": { "enum": ["none", "symlink", "junction", "reparse-point"] },
+        "kind": { "type": "string" }
+      }
+    },
     "repository": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["cwd", "repo_root", "worktree_root", "authorised_directories", "canonicalisation_evidence", "path_resolution_status", "canonical_target_paths", "approved_additional_roots", "resolution_evidence"],
+      "required": ["context_version", "cwd", "repo_root", "worktree_root", "canonical_repository_root", "canonical_worktree_root", "authorised_directories", "approved_additional_roots", "canonical_target_paths", "canonicalisation_evidence", "resolution_evidence", "path_resolution_status", "path_semantics", "git_evidence"],
       "properties": {
+        "context_version": { "const": "toolkit.guardrail.repository-context.v1" },
         "cwd": { "$ref": "#/$defs/nullableString" },
         "repo_root": { "$ref": "#/$defs/nullableString" },
         "worktree_root": { "$ref": "#/$defs/nullableString" },
+        "canonical_repository_root": { "$ref": "#/$defs/nullableString" },
+        "canonical_worktree_root": { "$ref": "#/$defs/nullableString" },
         "authorised_directories": { "type": "array", "items": { "type": "string" } },
-        "canonicalisation_evidence": { "type": ["object", "null"] },
-        "path_resolution_status": { "type": "string" },
-        "canonical_target_paths": { "type": "array", "items": { "type": "object" } },
-        "approved_additional_roots": { "type": "array", "items": { "type": "object" } },
-        "resolution_evidence": { "type": ["object", "null"] }
+        "approved_additional_roots": { "type": "array", "items": { "$ref": "#/$defs/additionalRoot" } },
+        "canonical_target_paths": { "type": "array", "items": { "$ref": "#/$defs/target" } },
+        "canonicalisation_evidence": {
+          "anyOf": [
+            { "$ref": "#/$defs/resolutionEvidence" },
+            { "type": "null" }
+          ]
+        },
+        "resolution_evidence": {
+          "anyOf": [
+            { "$ref": "#/$defs/resolutionEvidence" },
+            { "type": "null" }
+          ]
+        },
+        "path_resolution_status": { "enum": ["resolved", "missing-context", "unresolved", "ambiguous", "stale", "outside", "resolver-error"] },
+        "path_semantics": { "$ref": "#/$defs/pathSemantics" },
+        "git_evidence": {
+          "anyOf": [
+            { "$ref": "#/$defs/gitEvidence" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "opaqueInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["present", "digest"],
+      "properties": {
+        "present": { "const": true },
+        "digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "externalTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["class", "digest"],
+      "properties": {
+        "class": { "type": "string", "minLength": 1 },
+        "digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "transactionEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "owned_by_toolkit": { "type": ["boolean", "null"] },
+        "created_by_same_transaction": { "type": ["boolean", "null"] },
+        "exact_target_set": { "type": ["boolean", "null"] },
+        "transaction_id": { "$ref": "#/$defs/nullableString" },
+        "expected_postconditions_digest": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] }
       }
     },
     "operation": {
@@ -71,19 +211,69 @@
         "host_tool": { "$ref": "#/$defs/nullableString" },
         "canonical_route": { "$ref": "#/$defs/nullableString" },
         "structured_input": { "type": ["object", "null"] },
-        "opaque_input": { "type": ["object", "null"] },
+        "opaque_input": {
+          "anyOf": [
+            { "$ref": "#/$defs/opaqueInput" },
+            { "type": "null" }
+          ]
+        },
         "command": { "$ref": "#/$defs/nullableString" },
         "shell": { "$ref": "#/$defs/nullableString" },
         "operation_cwd": { "$ref": "#/$defs/nullableString" },
-        "targets": { "type": "array", "items": { "type": "object" } },
-        "external_targets": { "type": "array", "items": { "type": "object" } },
+        "targets": { "type": "array", "items": { "$ref": "#/$defs/target" } },
+        "external_targets": { "type": "array", "items": { "$ref": "#/$defs/externalTarget" } },
         "mutation_class": { "type": "string" },
         "mcp_server": { "$ref": "#/$defs/nullableString" },
         "mcp_tool": { "$ref": "#/$defs/nullableString" },
-        "input_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-        "target_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "input_digest": { "$ref": "#/$defs/digest" },
+        "target_digest": { "$ref": "#/$defs/digest" },
         "scope": { "$ref": "#/$defs/nullableString" },
-        "transaction_evidence": { "type": ["object", "null"] }
+        "transaction_evidence": {
+          "anyOf": [
+            { "$ref": "#/$defs/transactionEvidence" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "hookEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "source", "pre_execution", "position", "version"],
+      "properties": {
+        "status": { "$ref": "#/$defs/nullableString" },
+        "source": { "$ref": "#/$defs/nullableString" },
+        "pre_execution": { "type": ["boolean", "null"] },
+        "position": { "$ref": "#/$defs/nullableString" },
+        "version": { "$ref": "#/$defs/nullableString" }
+      }
+    },
+    "capabilityEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "host", "host_version", "route_identity", "route_supported", "enforcement_level", "adapter_state", "hook_order_evidence", "evidence_freshness", "trusted_ask", "adapter_required", "operation_preflight", "version_status", "expected_host_version", "fresh", "auto_mode_safe"],
+      "properties": {
+        "status": { "$ref": "#/$defs/nullableString" },
+        "host": { "$ref": "#/$defs/nullableString" },
+        "host_version": { "$ref": "#/$defs/nullableString" },
+        "route_identity": { "$ref": "#/$defs/nullableString" },
+        "route_supported": { "type": ["boolean", "null"] },
+        "enforcement_level": { "$ref": "#/$defs/nullableString" },
+        "adapter_state": { "$ref": "#/$defs/nullableString" },
+        "hook_order_evidence": {
+          "anyOf": [
+            { "$ref": "#/$defs/hookEvidence" },
+            { "type": "null" }
+          ]
+        },
+        "evidence_freshness": { "$ref": "#/$defs/nullableString" },
+        "trusted_ask": { "type": ["boolean", "null"] },
+        "adapter_required": { "type": ["boolean", "null"] },
+        "operation_preflight": { "$ref": "#/$defs/nullableString" },
+        "version_status": { "$ref": "#/$defs/nullableString" },
+        "expected_host_version": { "$ref": "#/$defs/nullableString" },
+        "fresh": { "type": ["boolean", "null"] },
+        "auto_mode_safe": { "type": ["boolean", "null"] }
       }
     },
     "nativeState": {
@@ -94,17 +284,109 @@
         "permission_mode": { "$ref": "#/$defs/nullableString" },
         "auto_or_bypass": { "type": ["boolean", "null"] },
         "native_permission_route": { "$ref": "#/$defs/nullableString" },
-        "hook_order_evidence": { "type": ["object", "null"] },
-        "capability_evidence": { "type": ["object", "null"] }
+        "hook_order_evidence": {
+          "anyOf": [
+            { "$ref": "#/$defs/hookEvidence" },
+            { "type": "null" }
+          ]
+        },
+        "capability_evidence": {
+          "anyOf": [
+            { "$ref": "#/$defs/capabilityEvidence" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "canonicalTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_class", "status", "link_type", "path_digest"],
+      "properties": {
+        "target_class": { "$ref": "#/$defs/targetClass" },
+        "status": { "type": "string" },
+        "link_type": { "enum": ["none", "symlink", "junction", "reparse-point"] },
+        "path_digest": { "$ref": "#/$defs/digest" }
       }
     },
     "approval": {
       "type": "object",
-      "additionalProperties": true
+      "additionalProperties": false,
+      "required": ["contract_version", "host", "source", "trusted_user_channel", "exact_operation_digest", "exact_targets_digest", "canonical_target_set", "session_id", "turn_id", "call_id", "operation_class", "issued_at", "expires_at", "one_shot", "consumed"],
+      "properties": {
+        "contract_version": { "const": "toolkit.guardrail.approval.v1" },
+        "host": { "type": "string", "minLength": 1 },
+        "source": { "type": "string", "minLength": 1 },
+        "trusted_user_channel": { "type": "string", "minLength": 1 },
+        "exact_operation_digest": { "$ref": "#/$defs/digest" },
+        "exact_targets_digest": { "$ref": "#/$defs/digest" },
+        "canonical_target_set": { "type": "array", "items": { "$ref": "#/$defs/canonicalTarget" } },
+        "session_id": { "type": "string", "minLength": 1 },
+        "turn_id": { "type": "string", "minLength": 1 },
+        "call_id": { "type": "string", "minLength": 1 },
+        "operation_class": { "type": "string", "minLength": 1 },
+        "issued_at": { "type": ["string", "integer"] },
+        "expires_at": { "type": ["string", "integer"] },
+        "one_shot": { "type": "boolean" },
+        "consumed": { "type": "boolean" },
+        "consumed_count": { "type": "integer", "minimum": 0 },
+        "max_repeat_count": { "type": "integer", "minimum": 1 },
+        "replay_detected": { "const": false }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "one_shot": { "const": true } } },
+          "then": {
+            "properties": {
+              "consumed": { "const": false },
+              "consumed_count": { "const": 0 }
+            },
+            "not": { "required": ["max_repeat_count"] }
+          }
+        },
+        {
+          "if": { "properties": { "one_shot": { "const": false } } },
+          "then": {
+            "required": ["consumed_count", "max_repeat_count"],
+            "properties": {
+              "consumed": { "const": false },
+              "consumed_count": { "type": "integer", "minimum": 0 },
+              "max_repeat_count": { "type": "integer", "minimum": 1, "maximum": 8 }
+            }
+          }
+        }
+      ]
+    },
+    "malformedApproval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["malformed", "digest"],
+      "properties": {
+        "malformed": { "const": true },
+        "digest": { "$ref": "#/$defs/digest" }
+      }
     },
     "authority": {
       "type": "object",
-      "additionalProperties": true
+      "additionalProperties": false,
+      "required": ["prompt_active", "role_name", "role_allowed", "branch_name", "authorized_branch", "branch_protected", "push_authorized", "design_lock_id", "design_lock_status", "allowed_operation_classes", "allowed_scopes", "controller_hold", "controller_authorized", "controller_operation_classes", "role"],
+      "properties": {
+        "prompt_active": { "type": ["boolean", "null"] },
+        "role_name": { "$ref": "#/$defs/nullableString" },
+        "role_allowed": { "type": ["boolean", "null"] },
+        "branch_name": { "$ref": "#/$defs/nullableString" },
+        "authorized_branch": { "$ref": "#/$defs/nullableString" },
+        "branch_protected": { "type": ["boolean", "null"] },
+        "push_authorized": { "type": ["boolean", "null"] },
+        "design_lock_id": { "$ref": "#/$defs/nullableString" },
+        "design_lock_status": { "$ref": "#/$defs/nullableString" },
+        "allowed_operation_classes": { "type": "array", "items": { "type": "string" } },
+        "allowed_scopes": { "type": "array", "items": { "type": "string" } },
+        "controller_hold": { "type": "boolean" },
+        "controller_authorized": { "type": ["boolean", "null"] },
+        "controller_operation_classes": { "type": "array", "items": { "type": "string" } },
+        "role": { "$ref": "#/$defs/nullableString" }
+      }
     }
   }
 }

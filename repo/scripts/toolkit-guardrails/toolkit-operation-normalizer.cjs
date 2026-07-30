@@ -37,6 +37,16 @@ function valueOrNull(value) {
   return value === undefined ? null : value;
 }
 
+function strictBoolean(value, fallback = null) {
+  if (value === undefined || value === null) return fallback;
+  return typeof value === 'boolean' ? value : null;
+}
+
+function failClosedBoolean(value, fallback = false) {
+  if (value === undefined || value === null) return fallback;
+  return typeof value === 'boolean' ? value : true;
+}
+
 function normalizeSession(input = {}) {
   const session = input.session && typeof input.session === 'object' ? input.session : input;
   return {
@@ -56,8 +66,61 @@ function normalizeNativeState(input = {}) {
     permission_mode: valueOrNull(firstDefined(state.permission_mode, input.permission_mode)),
     auto_or_bypass: valueOrNull(firstDefined(state.auto_or_bypass, input.auto_or_bypass)),
     native_permission_route: valueOrNull(firstDefined(state.native_permission_route, input.native_permission_route)),
-    hook_order_evidence: valueOrNull(firstDefined(state.hook_order_evidence, input.hook_order_evidence, null)),
-    capability_evidence: valueOrNull(capability),
+    hook_order_evidence: normalizeHookEvidence(firstDefined(state.hook_order_evidence, input.hook_order_evidence, null)),
+    capability_evidence: normalizeCapabilityEvidence(capability),
+  };
+}
+
+function normalizeHookEvidence(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return {
+    status: valueOrNull(value.status),
+    source: valueOrNull(value.source || value.provenance),
+    pre_execution: strictBoolean(value.pre_execution),
+    position: valueOrNull(value.position),
+    version: valueOrNull(value.version),
+  };
+}
+
+function normalizeCapabilityEvidence(value) {
+  if (value === null || value === undefined) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {
+      status: 'malformed',
+      host: null,
+      host_version: null,
+      route_identity: null,
+      route_supported: null,
+      enforcement_level: null,
+      adapter_state: null,
+      hook_order_evidence: null,
+      evidence_freshness: null,
+      trusted_ask: null,
+      adapter_required: null,
+      operation_preflight: null,
+      version_status: null,
+      expected_host_version: null,
+      fresh: null,
+      auto_mode_safe: null,
+    };
+  }
+  return {
+    status: valueOrNull(firstDefined(value.status, value.evidence_status, null)),
+    host: valueOrNull(value.host),
+    host_version: valueOrNull(value.host_version),
+    route_identity: valueOrNull(firstDefined(value.route_identity, value.route, null)),
+    route_supported: strictBoolean(value.route_supported),
+    enforcement_level: valueOrNull(value.enforcement_level),
+    adapter_state: valueOrNull(value.adapter_state),
+    hook_order_evidence: normalizeHookEvidence(value.hook_order_evidence),
+    evidence_freshness: valueOrNull(firstDefined(value.evidence_freshness, value.freshness, null)),
+    trusted_ask: strictBoolean(value.trusted_ask),
+    adapter_required: strictBoolean(value.adapter_required),
+    operation_preflight: valueOrNull(value.operation_preflight),
+    version_status: valueOrNull(value.version_status),
+    expected_host_version: valueOrNull(value.expected_host_version),
+    fresh: strictBoolean(value.fresh),
+    auto_mode_safe: strictBoolean(value.auto_mode_safe),
   };
 }
 
@@ -67,6 +130,7 @@ function normalizeAuthority(input = {}) {
   const role = authority.role && typeof authority.role === 'object' ? authority.role : {};
   const branch = authority.branch && typeof authority.branch === 'object' ? authority.branch : {};
   const lock = authority.design_lock && typeof authority.design_lock === 'object' ? authority.design_lock : {};
+  const controller = authority.controller && typeof authority.controller === 'object' ? authority.controller : {};
   const promptActive = firstDefined(
     authority.prompt_active,
     authority.prompt_authorized,
@@ -86,14 +150,22 @@ function normalizeAuthority(input = {}) {
   );
   const lockId = firstDefined(authority.design_lock_id, typeof authority.design_lock === 'string' ? authority.design_lock : undefined, lock.id, null);
   const lockStatus = firstDefined(authority.design_lock_status, lock.status, lockId ? 'active' : null);
+  const controllerOperationClasses = firstDefined(
+    authority.controller_operation_classes,
+    authority.github_authorized_operations,
+    controller.operation_classes,
+    null,
+  );
+  const controllerAuthorized = firstDefined(authority.controller_authorized, controller.authorized, null);
+  const controllerHold = firstDefined(authority.controller_hold, authority.hold, false);
   return {
-    prompt_active: promptActive === null ? null : Boolean(promptActive),
+    prompt_active: strictBoolean(promptActive),
     role_name: valueOrNull(roleName),
-    role_allowed: valueOrNull(firstDefined(authority.role_allowed, role.allowed, null)),
+    role_allowed: strictBoolean(firstDefined(authority.role_allowed, role.allowed, null)),
     branch_name: valueOrNull(branchName),
     authorized_branch: valueOrNull(authorizedBranch),
-    branch_protected: valueOrNull(firstDefined(authority.branch_protected, branch.protected, false)),
-    push_authorized: valueOrNull(firstDefined(authority.push_authorized, authority.allow_push, prompt.allow_push, false)),
+    branch_protected: strictBoolean(firstDefined(authority.branch_protected, branch.protected, null)),
+    push_authorized: strictBoolean(firstDefined(authority.push_authorized, authority.allow_push, prompt.allow_push, null)),
     design_lock_id: valueOrNull(lockId),
     design_lock_status: valueOrNull(lockStatus),
     allowed_operation_classes: Array.isArray(firstDefined(authority.allowed_operation_classes, prompt.allowed_operation_classes, null))
@@ -102,7 +174,9 @@ function normalizeAuthority(input = {}) {
     allowed_scopes: Array.isArray(firstDefined(authority.allowed_scopes, lock.allowed_scopes, null))
       ? [...firstDefined(authority.allowed_scopes, lock.allowed_scopes)]
       : [],
-    controller_hold: Boolean(firstDefined(authority.controller_hold, authority.hold, false)),
+    controller_hold: failClosedBoolean(controllerHold),
+    controller_authorized: strictBoolean(controllerAuthorized),
+    controller_operation_classes: Array.isArray(controllerOperationClasses) ? [...controllerOperationClasses] : [],
     role: valueOrNull(roleName),
   };
 }
@@ -176,25 +250,108 @@ function normalizeExternalTargets(value) {
   });
 }
 
+const APPROVAL_VERSION = 'toolkit.guardrail.approval.v1';
+const APPROVAL_FIELDS = new Set([
+  'contract_version',
+  'host',
+  'source',
+  'trusted_user_channel',
+  'exact_operation_digest',
+  'exact_targets_digest',
+  'canonical_target_set',
+  'session_id',
+  'turn_id',
+  'call_id',
+  'operation_class',
+  'issued_at',
+  'expires_at',
+  'one_shot',
+  'consumed',
+  'consumed_count',
+  'max_repeat_count',
+  'replay_detected',
+]);
+const APPROVAL_TARGET_CLASSES = new Set([
+  'canonical-repository',
+  'canonical-worktree',
+  'approved-additional-root',
+  'sibling-repository',
+  'parent-workspace',
+  'outside-repository',
+  'external-system',
+  'secret-bearing',
+  'protected-target',
+  'unresolved-target',
+  'mixed-targets',
+  'unknown-target',
+]);
+const APPROVAL_LINK_TYPES = new Set(['none', 'symlink', 'junction', 'reparse-point']);
+
+function isDigest(value) {
+  return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+}
+
+function isApprovalTimestamp(value) {
+  if (typeof value === 'number') return Number.isInteger(value) && Number.isFinite(value);
+  return typeof value === 'string' && Boolean(value.trim()) && Number.isFinite(Date.parse(value));
+}
+
+function isSchemaValidApproval(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  if (Object.keys(value).some((key) => !APPROVAL_FIELDS.has(key))) return false;
+  if (value.contract_version !== APPROVAL_VERSION) return false;
+  for (const key of [
+    'host',
+    'source',
+    'trusted_user_channel',
+    'session_id',
+    'turn_id',
+    'call_id',
+    'operation_class',
+  ]) {
+    if (typeof value[key] !== 'string' || !value[key].trim()) return false;
+  }
+  if (!isDigest(value.exact_operation_digest) || !isDigest(value.exact_targets_digest)) return false;
+  if (!Array.isArray(value.canonical_target_set)) return false;
+  if (!value.canonical_target_set.every((target) => (
+    target
+    && typeof target === 'object'
+    && !Array.isArray(target)
+    && Object.keys(target).every((key) => ['target_class', 'status', 'link_type', 'path_digest'].includes(key))
+    && APPROVAL_TARGET_CLASSES.has(target.target_class)
+    && typeof target.status === 'string'
+    && target.status.length > 0
+    && APPROVAL_LINK_TYPES.has(target.link_type)
+    && isDigest(target.path_digest)
+  ))) return false;
+  if (!isApprovalTimestamp(value.issued_at) || !isApprovalTimestamp(value.expires_at)) return false;
+  if (typeof value.one_shot !== 'boolean' || typeof value.consumed !== 'boolean') return false;
+  if (Object.hasOwn(value, 'replay_detected') && value.replay_detected !== false) return false;
+  if (Object.hasOwn(value, 'consumed_count') && (!Number.isInteger(value.consumed_count) || value.consumed_count < 0)) return false;
+  if (Object.hasOwn(value, 'max_repeat_count') && (!Number.isInteger(value.max_repeat_count) || value.max_repeat_count < 1)) return false;
+  if (value.one_shot === true) {
+    if (value.consumed !== false || Object.hasOwn(value, 'max_repeat_count')) return false;
+    if (Object.hasOwn(value, 'consumed_count') && value.consumed_count !== 0) return false;
+  } else if (
+    value.consumed !== false
+    || !Object.hasOwn(value, 'consumed_count')
+    || !Object.hasOwn(value, 'max_repeat_count')
+    || value.max_repeat_count > 8
+  ) return false;
+  return true;
+}
+
 function normalizeApproval(value) {
   if (value === null || value === undefined) return null;
-  if (!value || typeof value !== 'object') return { malformed: true, digest: sha256(value) };
+  const malformed = (reason) => ({ malformed: true, digest: sha256({ reason, keys: value && typeof value === 'object' ? Object.keys(value).sort() : [] }) });
+  if (!isSchemaValidApproval(value)) return malformed('approval-schema');
   const result = { ...clone(value) };
-  for (const key of ['source', 'trusted_user_channel', 'host', 'exact_operation_digest', 'exact_targets_digest', 'session_id', 'turn_id', 'call_id', 'operation_class', 'issued_at', 'expires_at', 'one_shot', 'consumed', 'consumed_count', 'max_repeat_count', 'replay_detected', 'contract_version']) {
-    if (!(key in result)) result[key] = null;
-  }
-  if (Array.isArray(result.canonical_target_set)) {
-    result.canonical_target_set = result.canonical_target_set.map((entry) => ({
-      target_class: entry?.target_class || null,
-      status: entry?.status || null,
-      link_type: entry?.link_type || 'none',
-      path_digest: entry?.path_digest || null,
-    }));
-  } else {
-    result.canonical_target_set = null;
-  }
-  delete result.command;
-  delete result.prompt;
+  result.canonical_target_set = value.canonical_target_set.map((entry) => ({
+    target_class: entry?.target_class || null,
+    status: entry?.status || null,
+    link_type: entry?.link_type || 'none',
+    path_digest: entry?.path_digest || null,
+  }));
   return result;
 }
 
@@ -236,7 +393,6 @@ function computeOperationDigest(record, classification = null) {
 
 function repositoryFromInput(input, options) {
   const supplied = firstDefined(input.repository_context, input.repository, null);
-  if (supplied && supplied.context_version === 'toolkit.guardrail.repository-context.v1') return supplied;
   const source = supplied && typeof supplied === 'object' ? supplied : input;
   if (typeof options.resolveRepositoryContext === 'function') return options.resolveRepositoryContext(source, options);
   return resolveRepositoryContext(source, options);
@@ -303,6 +459,8 @@ module.exports = {
   NULL_NATIVE_STATE,
   normalizeSession,
   normalizeNativeState,
+  normalizeHookEvidence,
+  normalizeCapabilityEvidence,
   normalizeAuthority,
   sanitizeStructured,
   extractTargets,
