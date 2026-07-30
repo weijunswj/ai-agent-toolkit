@@ -1,6 +1,7 @@
 param(
   [string]$WorkflowDir = "n8n-workflows",
-  [string]$PortableCredentialsFile = "n8n-workflows/toolkit/portable-credentials.json",
+  [Alias("PortableCredentialsFile")]
+  [string]$PortableBindingDeclarationsFile = "n8n-workflows/toolkit/portable-credentials.json",
   [string]$DeploymentPolicyFile = "n8n-workflows/toolkit/deployment-policy.json",
   [string]$ResourceBindingsFile = ".n8n-local/n8n-resource-bindings.json",
   [string]$WorkflowIdentityFile = ".n8n-local/n8n-workflow-identities.json",
@@ -12,7 +13,8 @@ param(
   [string]$ComposeProject,
   [string]$ComposeService,
   [string]$PreparedDir = ".tmp/n8n-live-import",
-  [string]$CredentialExportDir = ".tmp/n8n-live-credential-exports",
+  [Alias("CredentialExportDir")]
+  [string]$LocalMetadataExportDir = ".tmp/n8n-live-credential-exports",
   [string]$ContainerDir = "/tmp",
   [ValidateSet("CreateNew", "UpdateArchived", "Block")]
   [string]$ArchivedByNameMode = "CreateNew",
@@ -987,7 +989,7 @@ function Export-CredentialBindingsOnly($WorkflowFiles, $LiveWorkflows) {
   Write-Section "Credential Binding Refresh"
   Write-Step "START" "Exporting available live workflows only to refresh local credential bindings."
 
-  Initialize-RunDirectory $CredentialExportDirPath
+  Initialize-RunDirectory $LocalMetadataExportDirPath
   New-Item -ItemType Directory -Force -Path (Split-Path -Parent $BindingsFilePath) | Out-Null
 
   $exportedCount = 0
@@ -1011,13 +1013,13 @@ function Export-CredentialBindingsOnly($WorkflowFiles, $LiveWorkflows) {
       continue
     }
 
-    $exportFile = Join-Path $CredentialExportDirPath "$($workflowFile.BaseName).live-export.json"
+    $exportFile = Join-Path $LocalMetadataExportDirPath "$($workflowFile.BaseName).live-export.json"
     Write-WorkflowJson $liveWorkflow $exportFile
     $exportedCount += 1
     Write-Step "EXPORT" "$($workflowFile.Name) exported for credential binding refresh."
   }
 
-  $syncResult = Invoke-CapturedCommand "node" @((Join-Path $HelperScriptDir "sync-n8n-live-exports.cjs"), $CredentialExportDirPath, $WorkflowDirPath, $BindingsFilePath, "--credentials-only", "--allow-missing-exports")
+  $syncResult = Invoke-CapturedCommand "node" @((Join-Path $HelperScriptDir "sync-n8n-live-exports.cjs"), $LocalMetadataExportDirPath, $WorkflowDirPath, $BindingsFilePath, "--credentials-only", "--allow-missing-exports")
   if ($syncResult.ExitCode -ne 0) {
     Write-Step "FAIL" "Could not save refreshed credential bindings."
     Write-CommandOutput $syncResult.Output
@@ -1294,7 +1296,7 @@ function Get-PlannedTargetUniquenessBlockers($PlannedImports) {
   return @($blockers)
 }
 
-function Invoke-PortableWorkflowPreflight($WorkflowFiles, $LiveWorkflows, $CredentialMetadataFile) {
+function Invoke-PortableWorkflowPreflight($WorkflowFiles, $LiveWorkflows, $LocalMetadataFile) {
   $plannedImports = @()
   $resolvedTargetPlans = @()
   $blockedWorkflows = @()
@@ -1394,7 +1396,7 @@ function Invoke-PortableWorkflowPreflight($WorkflowFiles, $LiveWorkflows, $Crede
       "--workflow", $workflowFile.FullName,
       "--output", $preparedFile,
       "--result", $resultFile,
-      "--credential-metadata", $CredentialMetadataFile,
+      "--credential-metadata", $LocalMetadataFile,
       "--target-workflow-id", $targetWorkflowId
     )
     if ($null -eq $targetWorkflow) {
@@ -1566,13 +1568,13 @@ function Write-WorkflowActionSummary($PlannedImports, $StatusLabel) {
   }
 }
 
-function Write-N8nOperationReport($Result, $Code, $Phase, [bool]$Attempted, [bool]$Performed, $Workflows, $Credentials, $NextActionCode, $NextActionMessage, $ActiveState) {
+function Write-N8nOperationReport($Result, $Code, $Phase, [bool]$Attempted, [bool]$Performed, $Workflows, $BindingSummaries, $NextActionCode, $NextActionMessage, $ActiveState) {
   if ([string]::IsNullOrWhiteSpace($ReportsDirPath)) { return }
   $reportInput = Join-Path $PreparedDirPath "operation-report-input.json"
   $safeWorkflows = @($Workflows | ForEach-Object {
     [ordered]@{ workflowFile = [string]$_.File; workflowName = [string]$_.WorkflowName }
   })
-  $safeCredentials = @($Credentials | ForEach-Object {
+  $safeCredentials = @($BindingSummaries | ForEach-Object {
     [ordered]@{
       logicalName = [string]$_.LogicalName
       credentialType = [string]$_.CredentialType
@@ -1607,13 +1609,13 @@ function Write-N8nOperationReport($Result, $Code, $Phase, [bool]$Attempted, [boo
 
 $WorkflowDirPath = Resolve-WorkflowDirPath
 $BindingsFilePath = Join-Path $RepoRoot $BindingsFile
-$PortableCredentialsFilePath = Join-Path $RepoRoot $PortableCredentialsFile
+$PortableCredentialsFilePath = Join-Path $RepoRoot $PortableBindingDeclarationsFile
 $DeploymentPolicyFilePath = Join-Path $RepoRoot $DeploymentPolicyFile
 $ResourceBindingsFilePath = Join-Path $RepoRoot $ResourceBindingsFile
 $WorkflowIdentityFilePath = Join-Path $RepoRoot $WorkflowIdentityFile
 $ReportsDirPath = Join-Path $RepoRoot $ReportsDir
 $PreparedDirPath = Join-Path $RepoRoot $PreparedDir
-$CredentialExportDirPath = Join-Path $RepoRoot $CredentialExportDir
+$LocalMetadataExportDirPath = Join-Path $RepoRoot $LocalMetadataExportDir
 Assert-StrictRepoChildPath $WorkflowIdentityFilePath "Workflow identity state"
 $deploymentPolicySnapshot = $null
 if ($DeploymentPolicyFileWasExplicit) {

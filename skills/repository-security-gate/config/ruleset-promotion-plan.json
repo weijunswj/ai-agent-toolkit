@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "contract": "tk.security.required-check-ruleset-promotion/v1",
+  "state": "PROMOTION_BLOCKED_MISSING_INTEGRATION_ID",
+  "repository": "weijunswj/ai-agent-toolkit",
+  "ruleset": {
+    "id": 16483742,
+    "name": "protect-main",
+    "target": "branch",
+    "enforcement": "active",
+    "include": [
+      "~DEFAULT_BRANCH"
+    ]
+  },
+  "required_integration_id": null,
+  "integration_id_source": "GitHub-assigned numeric ID for weijunswj-toolkit-security-gate",
+  "atomic_additions": [
+    {
+      "context": "Repository security gate",
+      "integration_id": null
+    },
+    {
+      "context": "Validate",
+      "integration_id": null
+    },
+    {
+      "context": "Validate Toolkit",
+      "integration_id": null
+    }
+  ],
+  "preserve": {
+    "deletion_protection": true,
+    "non_fast_forward_protection": true,
+    "pull_request_rule": true,
+    "code_scanning": {
+      "tool": "CodeQL",
+      "alerts_threshold": "errors",
+      "security_alerts_threshold": "high_or_higher"
+    },
+    "code_quality": {
+      "severity": "errors"
+    }
+  },
+  "activation_guards": {
+    "strict_mode": true,
+    "latest_commit_required": true,
+    "missing_check_blocks": true,
+    "stale_head_rejected": true,
+    "superseded_evidence_rejected": true,
+    "duplicate_or_conflicting_evidence_rejected": true,
+    "read_back_verification_required": true,
+    "negative_merge_block_proof_required": true,
+    "positive_clean_merge_proof_required": true,
+    "rollback_snapshot_required": true
+  },
+  "apply_automatically": false,
+  "next_action": "Supply the independently verified GitHub-assigned numeric integration ID only during the separately approved promotion phase, regenerate the plan, verify one atomic ruleset update and retain the exact rollback snapshot."
+}

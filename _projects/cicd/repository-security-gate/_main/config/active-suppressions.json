@@ -1,0 +1,34 @@
+{
+  "schema_version": 4,
+  "authority_source": "protected-trusted-checkout",
+  "authority_binding": "exact-runtime-trusted-authority",
+  "suppressions": [
+    {
+      "id": "synthetic-private-prompt-fixture",
+      "tool": "gitleaks-cli",
+      "rule": "generic-api-key",
+      "finding_identity": "1649391968f90bc87c9cd07697765e8be5fced9f9423c339afefe3380f9015e7",
+      "path": "repo/tests/fixtures/security-gate/synthetic-private-prompt.txt",
+      "scope": "synthetic_fixture",
+      "exploitability_rationale": "Exact synthetic prompt fixture whose protected invariant harness verifies bounded stdin-only prompt transport against exact candidate inputs.",
+      "approver_reference": "https://github.com/weijunswj/ai-agent-toolkit/issues/284",
+      "introduction_commit": "4d8c6e933af903c7f39a23720806b631d51d9a6e",
+      "expires": "2026-10-21",
+      "trusted_invariant_id": "synthetic-private-prompt-transport-v1",
+      "trusted_invariant_closure_sha256": "7224a64c572cb47c6fef9006d70c91d158ca18851204ee71f93ccbcfc9e705d3",
+      "candidate_input_contract": [
+        {
+          "path": "repo/tests/fixtures/security-gate/synthetic-private-prompt.txt",
+          "sha256": "cb1faad6a6c8b573895c91916b202bc22a558d7534ef58e69af9ca2e59b702ff"
+        },
+        {
+          "path": "repo/scripts/toolkit-agent-control.cjs",
+          "sha256": "aaf9f6fa372c761eca492d2e269ef9d5f9e853ff5f7b0d2e1ee47bdef2a2bd91"
+        }
+      ],
+      "tool_version": "v8.30.1",
+      "rule_version": "builtin-v8.30.1 plus repo config",
+      "source_sha256": "cb1faad6a6c8b573895c91916b202bc22a558d7534ef58e69af9ca2e59b702ff"
+    }
+  ]
+}

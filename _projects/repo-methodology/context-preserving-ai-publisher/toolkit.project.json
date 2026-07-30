@@ -5,9 +5,9 @@
   "title": "Context-Preserving AI Publisher",
   "module_path": "_projects/repo-methodology/context-preserving-ai-publisher",
   "main_path": "_projects/repo-methodology/context-preserving-ai-publisher/_main",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "version_policy": "semver",
-  "version_notes": "Adds OpenAI invocation-policy metadata so source-to-surface publishing guidance remains explicit-only in packaged Plugin Eval budgets.",
+  "version_notes": "Pins GitHub Actions in generated-surface workflow templates to immutable reviewed commits.",
   "outputs": [
     {
       "kind": "curated",

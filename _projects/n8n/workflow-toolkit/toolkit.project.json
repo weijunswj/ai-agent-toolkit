@@ -5,9 +5,9 @@
   "title": "n8n Workflow Toolkit",
   "module_path": "_projects/n8n/workflow-toolkit",
   "main_path": "_projects/n8n/workflow-toolkit/_main",
-  "version": "1.3.8",
+  "version": "1.3.10",
   "version_policy": "semver",
-  "version_notes": "Resolves canonical exports through dedicated local workflow identities before name fallback and keeps replacement-race fixtures deterministic across filesystems.",
+  "version_notes": "Preserves canonical export identity, transport, credential rebinding, and transaction behavior while giving ordinary path and report-summary parameters PSScriptAnalyzer-safe names with their existing command-line names retained as compatibility aliases.",
   "outputs": [
     {
       "kind": "curated",

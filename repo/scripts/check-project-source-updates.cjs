@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
 const https = require('node:https');
@@ -17,6 +18,7 @@ const {
 } = require('./source-watch-advisory-targets.cjs');
 
 const defaultReportPath = 'repo/source-watch/reviews/active-third-party-updates.md';
+const defaultSecurityToolLockPath = 'skills/repository-security-gate/config/tool-lock.json';
 const githubApiBaseUrl = 'https://api.github.com';
 
 function slash(value) {
@@ -45,9 +47,106 @@ function usage() {
   return [
     'Usage: node repo/scripts/check-project-source-updates.cjs [--workspace <dir>] [--report <path>] [--advisory-doc <path>]',
     '',
-    'Checks active third-party SOURCE-LOCK.json entries and actionable advisory targets against GitHub.',
+    'Checks active third-party SOURCE-LOCK.json entries, security-tool provenance records, and actionable advisory targets against GitHub.',
     'When review is needed, writes a review-notification report only. It never copies upstream files, updates SOURCE-LOCK.json or advisory target documents, or changes toolkit components.'
   ].join('\n');
+}
+
+function securityToolLock(workspace, relPath = defaultSecurityToolLockPath) {
+  const fullPath = path.join(workspace, relPath);
+  if (!fs.existsSync(fullPath)) return { records: [], relPath, present: false };
+  const lock = readJson(fullPath);
+  if (lock.schema_version !== 1 || !Array.isArray(lock.records)) {
+    throw new Error(`${relPath} must use schema_version 1 with records`);
+  }
+  const records = lock.records.filter((record) => record && record.state === 'active');
+  for (const record of records) {
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(record.upstream || '')) {
+      throw new Error(`${record.name || '<unknown>'} has an invalid security-tool upstream`);
+    }
+    if (!/^[0-9a-f]{40}$/i.test(record.commit || '')) {
+      throw new Error(`${record.name || '<unknown>'} active security-tool record requires a full commit`);
+    }
+    if (!/^[0-9a-f]{64}$/i.test(record.license_sha256 || '')) {
+      throw new Error(`${record.name || '<unknown>'} active security-tool record requires a licence digest`);
+    }
+  }
+  return { records, relPath, present: true };
+}
+
+function githubRequestUrl(env, pathname) {
+  const apiBase = (env.SOURCE_WATCH_GITHUB_API_BASE_URL || env.GITHUB_API_URL || githubApiBaseUrl).replace(/\/+$/, '');
+  return new URL(`${apiBase}${pathname}`);
+}
+
+function githubHeaders(env) {
+  const headers = {};
+  if (env.GITHUB_TOKEN) headers.authorization = `Bearer ${env.GITHUB_TOKEN}`;
+  return headers;
+}
+
+async function securityToolFindings(workspace, env = process.env) {
+  const lock = securityToolLock(workspace);
+  const findings = [];
+  for (const record of lock.records) {
+    const { owner, repo } = parseGitHubRepo(record.upstream);
+    const repository = await requestJson(
+      githubRequestUrl(env, `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`),
+      githubHeaders(env)
+    );
+    if (repository.archived || repository.disabled) {
+      findings.push({ record, type: 'maintenance_state', detail: repository.archived ? 'archived' : 'disabled' });
+    }
+    const license = await requestJson(
+      githubRequestUrl(
+        env,
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodeURIComponent(record.license_file)}?ref=${encodeURIComponent(record.commit)}`
+      ),
+      githubHeaders(env)
+    );
+    if (!license || typeof license.content !== 'string') {
+      throw new Error(`${record.name} licence source returned no content`);
+    }
+    const licenceDigest = crypto.createHash('sha256')
+      .update(Buffer.from(license.content.replace(/\s/g, ''), 'base64'))
+      .digest('hex');
+    if (licenceDigest !== record.license_sha256) {
+      findings.push({ record, type: 'license_drift', detail: licenceDigest });
+    }
+
+    if (record.kind === 'scanner') {
+      const release = await requestJson(
+        githubRequestUrl(env, `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases/latest`),
+        githubHeaders(env)
+      );
+      if (release.tag_name !== record.release) {
+        findings.push({ record, type: 'release_drift', detail: release.tag_name || 'missing tag' });
+        continue;
+      }
+      const asset = (release.assets || []).find((item) => item.name === record.expected_release_asset);
+      if (!asset) {
+        findings.push({ record, type: 'asset_missing', detail: record.expected_release_asset });
+      } else if (asset.digest !== `sha256:${record.release_checksum}`) {
+        findings.push({ record, type: 'asset_checksum_drift', detail: asset.digest || 'missing digest' });
+      }
+      continue;
+    }
+
+    const latest = await requestJson(
+      githubRequestUrl(
+        env,
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${encodeURIComponent(record.release)}`
+      ),
+      githubHeaders(env)
+    );
+    if (!latest || !/^[0-9a-f]{40}$/i.test(latest.sha || '')) {
+      throw new Error(`${record.name} source returned no full commit`);
+    }
+    if (latest.sha.toLowerCase() !== record.commit.toLowerCase()) {
+      findings.push({ record, type: 'commit_drift', detail: latest.sha });
+    }
+  }
+  return { findings, record_count: lock.records.length, lock_path: lock.relPath };
 }
 
 function walk(dir, entries = []) {
@@ -187,7 +286,35 @@ function renderSourceUpdatesSection(updates) {
   ];
 }
 
-function renderReviewReport({ updates, advisoryUpdates, advisoryDocPath }) {
+function renderSecurityToolSection(findings, lockPath = defaultSecurityToolLockPath) {
+  if (findings.length === 0) {
+    return [
+      '## Security Tool Provenance Updates',
+      '',
+      'No security-tool provenance drift was detected.',
+      ''
+    ];
+  }
+  return [
+    '## Security Tool Provenance Updates',
+    '',
+    `Tool lock: \`${lockPath}\`. Detection is metadata-only and executed no upstream code.`,
+    '',
+    ...findings.flatMap((finding) => [
+      `### ${sanitizeGeneratedMarkdown(finding.record.name)}`,
+      '',
+      `- Upstream: \`${sanitizeGeneratedMarkdown(finding.record.upstream)}\``,
+      `- Locked release/ref: \`${sanitizeGeneratedMarkdown(finding.record.release)}\``,
+      `- Locked commit: \`${sanitizeGeneratedMarkdown(finding.record.commit)}\``,
+      `- Finding: \`${sanitizeGeneratedMarkdown(finding.type)}\``,
+      `- Current evidence: \`${sanitizeGeneratedMarkdown(finding.detail)}\``,
+      '- Next action: use the separate quarantined candidate-validation lane; do not mutate this lock or main from source-watch.',
+      ''
+    ])
+  ];
+}
+
+function renderReviewReport({ updates, securityToolUpdates = [], securityToolLockPath = defaultSecurityToolLockPath, advisoryUpdates, advisoryDocPath }) {
   const notificationText = [
     'This PR is a review notification only.',
     'No source files or advisory tracking documents were updated.',
@@ -227,6 +354,7 @@ function renderReviewReport({ updates, advisoryUpdates, advisoryDocPath }) {
     ...checklist,
     '',
     ...renderSourceUpdatesSection(updates),
+    ...renderSecurityToolSection(securityToolUpdates, securityToolLockPath),
     ...renderAdvisorySection(advisoryUpdates, advisoryDocPath)
   ].join('\n'));
 }
@@ -267,15 +395,18 @@ async function checkProjectSourceUpdates({ workspace, report, advisoryDoc = defa
       tracked_files: Array.isArray(lock.files) ? lock.files : []
     });
   }
+  const securityToolResult = await securityToolFindings(workspace, env);
+  const securityToolUpdates = securityToolResult.findings;
   const advisoryResult = await advisoryFindings({ workspace, advisoryDocPath: advisoryDoc }, env);
   const advisoryUpdates = advisoryResult.findings;
 
-  if (updates.length === 0 && advisoryUpdates.length === 0) {
+  if (updates.length === 0 && securityToolUpdates.length === 0 && advisoryUpdates.length === 0) {
     removeReportIfPresent(workspace, report);
-    if (activeLocks.length === 0 && advisoryResult.target_count === 0) {
+    if (activeLocks.length === 0 && securityToolResult.record_count === 0 && advisoryResult.target_count === 0) {
       return {
         report_written: false,
         updates: [],
+        security_tool_updates: [],
         advisory_updates: [],
         summary: 'No active third-party source update candidates found.'
       };
@@ -283,15 +414,18 @@ async function checkProjectSourceUpdates({ workspace, report, advisoryDoc = defa
     return {
       report_written: false,
       updates,
+      security_tool_updates: securityToolUpdates,
       advisory_updates: advisoryUpdates,
       summary: advisoryResult.target_count > 0
-        ? `Checked ${activeLocks.length} active third-party source lock(s) and ${advisoryResult.target_count} advisory target(s); no actionable updates found.`
-        : `Checked ${activeLocks.length} active third-party source lock(s); all pinned commits are current.`
+        ? `Checked ${activeLocks.length} active third-party source lock(s), ${securityToolResult.record_count} security-tool record(s), and ${advisoryResult.target_count} advisory target(s); no actionable updates found.`
+        : `Checked ${activeLocks.length} active third-party source lock(s) and ${securityToolResult.record_count} security-tool record(s); all pins are current.`
     };
   }
 
   const reportPath = writeReport(workspace, report, renderReviewReport({
     updates,
+    securityToolUpdates,
+    securityToolLockPath: securityToolResult.lock_path,
     advisoryUpdates,
     advisoryDocPath: advisoryDoc
   }));
@@ -299,10 +433,9 @@ async function checkProjectSourceUpdates({ workspace, report, advisoryDoc = defa
     report_written: true,
     report_path: reportPath,
     updates,
+    security_tool_updates: securityToolUpdates,
     advisory_updates: advisoryUpdates,
-    summary: advisoryUpdates.length > 0
-      ? `PR needed: yes (${updates.length} source update${updates.length === 1 ? '' : 's'}, ${advisoryUpdates.length} advisory action${advisoryUpdates.length === 1 ? '' : 's'}).`
-      : `PR needed: yes (${updates.length} active third-party source update${updates.length === 1 ? '' : 's'} detected).`
+    summary: `PR needed: yes (${updates.length} source update${updates.length === 1 ? '' : 's'}, ${securityToolUpdates.length} security-tool update${securityToolUpdates.length === 1 ? '' : 's'}, ${advisoryUpdates.length} advisory action${advisoryUpdates.length === 1 ? '' : 's'}).`
   };
 }
 
@@ -333,5 +466,8 @@ module.exports = {
   parseArgs,
   parseGitHubRepo,
   renderReviewReport,
+  renderSecurityToolSection,
+  securityToolFindings,
+  securityToolLock,
   renderSourceUpdatesSection
 };

@@ -20,6 +20,10 @@ _dist/
 dist/
 node_modules/
 coverage/
+.security-tools/
+.candidate-tools/
+security-reports/
+candidate-evidence/
 __pycache__/
 *.pyc
 *.zip

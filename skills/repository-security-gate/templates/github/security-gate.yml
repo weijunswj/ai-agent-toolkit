@@ -1,0 +1,36 @@
+# Install this file only after the source-only first-party App is independently
+# deployed and the promotion-time integration identity is verified. The App
+# dispatches the protected default-branch workflow; a candidate branch never
+# executes or publishes a required check from this template.
+#
+# The authoritative Toolkit repository workflow is
+# .github/workflows/repository-security-gate.yml. Consumers receive the exact
+# version-pinned pack and must regenerate this template from protected authority.
+name: TK-023 protected repository authority
+
+on:
+  workflow_dispatch:
+    inputs:
+      dispatch_envelope:
+        required: true
+        type: string
+      dispatch_signature:
+        required: true
+        type: string
+      dispatch_correlation:
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  promotion-required:
+    name: TK-023 promotion required
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Refuse an unpromoted portable template
+        run: |
+          echo "Install the independently reviewed protected workflow from the exact pinned Toolkit release." >&2
+          exit 1

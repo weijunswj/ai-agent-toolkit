@@ -52,24 +52,16 @@ Human-facing navigational paths and URLs must be clickable Markdown links. Do no
 
 For third-party projects, the toolkit project version is the toolkit adaptation version, not the upstream third-party version. Scheduled source-watch tasks must read normal upstream tracking from `SOURCE-LOCK.json`, not `toolkit.project.json`, including `source_update_policy`. Separate actionable advisory targets may live in `repo/source-watch/advisory-targets.json` until they are implemented, rejected, or moved into SOURCE-LOCK tracking. Periodic host-harness capability drift review also lives under `repo/source-watch/` and may only recommend separate evidence-backed PRs. Notification PRs may report that an upstream ref moved or a manual review is due, but they must not update source pins, advisory baselines, advisory target documents, toolkit components, or copy upstream files. Git tags, package tags, and GitHub release tags are not substitutes for toolkit project versions, and this repo does not use per-file versions.
 
-## Guarded Generated Auto-Sync
+## Protected Generated-Surface Fidelity
 
-The `Auto-sync generated toolkit surfaces` workflow is only a deterministic generated-output writeback helper. It is optional convenience, not the merge gate. The required merge gate is the normal read-only validation workflow running `npm run validate:all`.
+Candidate-controlled generated auto-sync and PR-branch writeback are retired. The protected App-dispatched repository-security authority now owns deterministic generated-surface verification.
 
-The privileged workflow definition runs from the base/default branch, then writes only to eligible same-repo PR branches targeting `main`.
-
-- Fork PRs are never written to.
-- `main` is never written to.
-- The workflow only republishes declared passive generated/synced outputs such as `README.md`, `skills/**`, and the source-side agent-rule templates generated from declared agent-rule partials.
-- The workflow must not write active root AI instruction files: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`. If source changes require those outputs to change, the PR author must commit them manually on the PR branch and rely on the normal read-only validation workflow.
-- It does not update other sources, run source-watch writeback, run live n8n, touch product repos, generate curated content from `_main`, or address skill portability.
-- Because the workflow is privileged, it does not run generated test suites, PR-controlled generated executable code, or full repo validation against raw PR heads; full validation remains covered by normal read-only CI.
-- The privileged static checks are limited to generated-surface freshness checks and git diff checks before committing generated output, which avoids blocking otherwise valid behind-main PR branches.
-- The workflow only runs deterministic generation, sync, check, or validator scripts from the protected base revision. The PR checkout is treated as data and passed to those scripts through an explicit workspace target.
-- The workflow stages and snapshots generated output after sync, then rechecks the index/workspace before commit so validation cannot add files to the writeback diff.
-- The workflow pins the PR checkout to the event head SHA, refuses stale queued runs if the PR head changed, verifies the remote PR branch before pushing, and never force pushes.
-- If a PR includes `_projects/**/_main/**` source/provenance changes other than declared agent-rule partial inputs and generated source-side agent-rule templates, auto-sync skips successfully without checking out, writing, committing, or pushing. The author or AI Coding Agent (i.e. Codex, Claude Code, Antigravity, OpenCode, etc.) must commit any required generated outputs, source-lock/provenance updates, and audit baseline updates, then rely on the normal read-only validation gate.
-- If a writeback-eligible PR is mixed with workflow, maintenance-script, test, docs, package, lockfile, or other source/maintenance paths, the workflow skips successfully instead of pushing. The author or AI Coding Agent (i.e. Codex, Claude Code, Antigravity, OpenCode, etc.) must commit generated outputs manually and rely on normal read-only validation.
+- The exact default-branch authority and exact candidate head are checked out into separate roots.
+- Candidate workflows, controllers, generators, actions, and tests are inert data and cannot select the generator or publish a result.
+- Protected generator paths, bytes, dependency lock, source manifest, authority tree, candidate tree, expected output manifest, and comparison result are digest-bound.
+- Generation occurs only in an operation-owned directory. No candidate branch commit, push, force push, token, secret, or writeback path exists.
+- An aligned candidate passes. A mismatch fails with bounded path-only evidence and local regeneration guidance; the author commits source-first outputs normally.
+- Forks and same-repository PRs use the same no-secret, read-only comparison. Missing, stale, redirected, mutable, or ambiguous evidence fails closed.
 
 ## Skill-Local Packs
 

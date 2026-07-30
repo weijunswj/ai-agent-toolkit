@@ -1,37 +1,110 @@
-name: Validate toolkit
+name: TK-023 protected validate toolkit worker
 
 on:
-  pull_request:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      authority_sha:
+        required: true
+        type: string
+      candidate_repository:
+        required: true
+        type: string
+      candidate_head:
+        required: true
+        type: string
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
-  validate:
+  protected-validate-toolkit-worker:
+    name: TK-023 worker / Toolkit validation
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+      - name: Checkout protected validation authority
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
+          ref: ${{ inputs.authority_sha }}
+          path: authority
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact candidate as untrusted data
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: ${{ inputs.candidate_repository }}
+          ref: ${{ inputs.candidate_head }}
+          path: candidate
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: 22
 
-      - name: Check validator syntax
-        run: node --check repo/scripts/validate-toolkit.cjs
+      - name: Prepare read-only candidate worker
+        id: worker
+        shell: bash
+        env:
+          AUTHORITY_SHA: ${{ inputs.authority_sha }}
+          CANDIDATE_SHA: ${{ inputs.candidate_head }}
+        run: |
+          set -euo pipefail
+          test "$(git -C authority rev-parse HEAD)" = "$AUTHORITY_SHA"
+          test "$(git -C candidate rev-parse HEAD)" = "$CANDIDATE_SHA"
+          operation="$RUNNER_TEMP/tk023-validate-toolkit-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          home="$RUNNER_TEMP/tk023-validate-toolkit-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$operation" "$home"
+          cp -a candidate/. "$operation/"
+          rm -rf "$operation/repo/scripts" "$operation/repo/tests"
+          mkdir -p "$operation/repo"
+          cp -a authority/repo/scripts "$operation/repo/scripts"
+          cp -a authority/repo/tests "$operation/repo/tests"
+          sudo useradd --system --no-create-home --home-dir "$home" tktoolkit
+          sudo ip netns add tk023toolkit
+          sudo ip netns exec tk023toolkit ip link set lo up
+          sudo chown -R tktoolkit:tktoolkit "$operation" "$home"
+          sudo chown root:root "$operation" "$operation/repo"
+          sudo chmod 0755 "$operation" "$operation/repo"
+          sudo chown -R root:root "$operation/repo/scripts" "$operation/repo/tests"
+          sudo chmod -R a-w "$operation/repo/scripts" "$operation/repo/tests"
+          protected_digest="$(find "$operation/repo/scripts" "$operation/repo/tests" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)"
+          printf 'operation=%s\nhome=%s\nprotected_digest=%s\n' "$operation" "$home" "$protected_digest" >> "$GITHUB_OUTPUT"
 
-      - name: Validate toolkit
-        run: node repo/scripts/validate-toolkit.cjs
+      - name: Validate Toolkit using protected tests and runner
+        shell: bash
+        env:
+          GH_TOKEN: ""
+          GITHUB_TOKEN: ""
+          CANDIDATE_ROOT: ${{ steps.worker.outputs.operation }}
+          HOME_PATH: ${{ steps.worker.outputs.home }}
+        run: |
+          set -euo pipefail
+          sudo ip netns exec tk023toolkit \
+            sudo -H -u tktoolkit env -i \
+              PATH="$PATH" HOME="$HOME_PATH" TMPDIR="$HOME_PATH" TEMP="$HOME_PATH" TMP="$HOME_PATH" \
+              CI=true LANG=C.UTF-8 LC_ALL=C.UTF-8 CANDIDATE_ROOT="$CANDIDATE_ROOT" \
+              bash -c 'cd "$CANDIDATE_ROOT" &&
+              node --check repo/scripts/validate-toolkit.cjs &&
+              node repo/scripts/validate-toolkit.cjs &&
+              node --test repo/tests/*.test.cjs &&
+              git diff --check'
 
-      - name: Run tests
-        run: node --test repo/tests/*.test.cjs
+      - name: Remove isolated network namespace
+        if: ${{ always() }}
+        shell: bash
+        run: sudo ip netns delete tk023toolkit || true
 
-      - name: Check whitespace
-        run: git diff --check
+      - name: Revalidate immutable inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C authority rev-parse HEAD)" = "${{ inputs.authority_sha }}"
+          test "$(git -C candidate rev-parse HEAD)" = "${{ inputs.candidate_head }}"
+          test -z "$(git -C authority status --porcelain=v1 --untracked-files=all)"
+          test -z "$(git -C candidate status --porcelain=v1 --untracked-files=all)"
+          current_digest="$(find "${{ steps.worker.outputs.operation }}/repo/scripts" "${{ steps.worker.outputs.operation }}/repo/tests" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)"
+          test "$current_digest" = "${{ steps.worker.outputs.protected_digest }}"

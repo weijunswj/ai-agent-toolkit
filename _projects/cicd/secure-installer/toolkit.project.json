@@ -5,9 +5,9 @@
   "title": "Secure CI/CD Installer",
   "module_path": "_projects/cicd/secure-installer",
   "main_path": "_projects/cicd/secure-installer/_main",
-  "version": "1.2.8",
+  "version": "1.2.10",
   "version_policy": "semver",
-  "version_notes": "Keeps bundled n8n helpers aligned with dedicated local export identity resolution and deterministic fail-closed transaction coverage.",
+  "version_notes": "Preserves the accepted local export identity, transport, credential rebinding, and fail-closed transaction behavior while giving ordinary path and report-summary parameters PSScriptAnalyzer-safe names with their existing command-line names retained as compatibility aliases.",
   "outputs": [
     {
       "kind": "curated",

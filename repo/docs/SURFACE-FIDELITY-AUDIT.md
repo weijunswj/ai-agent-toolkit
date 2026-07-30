@@ -1,7 +1,7 @@
 # Surface Fidelity Audit
 
 Date: 2026-05-18
-Latest update: 2026-07-09 (adds the portable docs-governance playbook to the generated ai-coding-agent-rules repo-local playbook set)
+Latest update: 2026-07-24 (adds protected suppression authority, proposal schema, and invariant-closure outputs)
 
 ## Current state
 
@@ -27,10 +27,10 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 
 | Metric | Current value |
 | --- | ---: |
-| projects | 16 |
-| publishedFiles | 241 |
-| declaredOutputFiles | 241 |
-| packInstalledFiles | 84 |
+| projects | 17 |
+| publishedFiles | 268 |
+| declaredOutputFiles | 277 |
+| packInstalledFiles | 108 |
 | undeclaredPublishedFiles | 0 |
 | packInstalledUndeclared | 0 |
 | crossOwnedOutputs | 0 |
@@ -38,7 +38,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | sharedSurfaceMetadataFindings | 0 |
 | suspiciousPublishedSurfaces | 0 |
 | duplicateProjectContentGroups | 0 |
-| boundaryRecipeOutputs | 241 |
+| boundaryRecipeOutputs | 277 |
 | boundaryRecipeFindings | 0 |
 | curatedDirectoryFindings | 1 |
 
@@ -46,25 +46,25 @@ Current published-file classifications:
 
 | Classification | Count |
 | --- | ---: |
-| declared_generated | 157 |
-| pack_installed_declared | 84 |
+| declared_generated | 160 |
+| pack_installed_declared | 108 |
 
 Current boundary recipe classifications:
 
 | Classification | Count |
 | --- | ---: |
 | curated_adapter | 3 |
-| curated_agent_metadata | 9 |
-| curated_index | 12 |
-| curated_metadata | 3 |
-| curated_pack_readme | 3 |
+| curated_agent_metadata | 10 |
+| curated_index | 13 |
+| curated_metadata | 4 |
+| curated_pack_readme | 4 |
 | curated_reference | 7 |
 | curated_repo_local_agent_template | 4 |
-| curated_router | 9 |
+| curated_router | 10 |
 | curated_template | 2 |
 | curated_template_index | 7 |
 | generated_cross_skill_reference | 3 |
-| main_full_fidelity | 179 |
+| main_full_fidelity | 210 |
 
 Known baseline context:
 
@@ -74,6 +74,7 @@ Known baseline context:
 
 ## Current project modules
 
+- `_projects/cicd/repository-security-gate`
 - `_projects/cicd/secure-installer`
 - `_projects/design/google-design-md`
 - `_projects/design/ui-ux-pro-max`

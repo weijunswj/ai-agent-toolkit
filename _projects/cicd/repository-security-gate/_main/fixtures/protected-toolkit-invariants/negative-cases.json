@@ -1,0 +1,100 @@
+{
+  "schema": "tk.security.protected-toolkit-invariant-negative-fixtures/v1",
+  "cases": [
+    {
+      "id": "TK023-INV-APP-PERMISSION-BOUNDARY",
+      "input": {
+        "document": {
+          "app": {
+            "permissions": {
+              "actions": "write",
+              "checks": "write",
+              "statuses": "write",
+              "contents": "write",
+              "pull_requests": "read",
+              "metadata": "read"
+            },
+            "forbidden_permissions": [],
+            "commit_status_publication": false
+          }
+        }
+      }
+    },
+    {
+      "id": "TK023-INV-CANDIDATE-WORKFLOWS-NONPUBLISHING",
+      "input": {
+        "texts": [
+          "name: Validate\npermissions:\n  checks: write\n"
+        ]
+      }
+    },
+    {
+      "id": "TK023-INV-STATIC-TERMINAL-STRUCTURE",
+      "input": {
+        "text": "\n  repository-security-terminal:\n    name: TK-023 authority / repository security terminal\n    if: ${{ success() }}\n"
+      }
+    },
+    {
+      "id": "TK023-INV-SUPPRESSION-AUTHORITY-ONLY",
+      "input": {
+        "trusted": "candidate chooses active suppressions",
+        "core": "candidate suppression is active"
+      }
+    },
+    {
+      "id": "TK023-INV-REPORT-PRIVACY",
+      "input": {
+        "policy": {
+          "forbidden_report_fields": []
+        },
+        "schema": {
+          "additionalProperties": true,
+          "properties": {
+            "secret": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "TK023-INV-PROTECTED-GENERATOR-DATA-ONLY",
+      "input": {
+        "lock": {
+          "network": true,
+          "candidate_writeback": true,
+          "runtime": {
+            "external_packages": [
+              "mutable-generator"
+            ]
+          }
+        },
+        "authority": {
+          "generated_surface": {
+            "writeback": true
+          }
+        }
+      }
+    },
+    {
+      "id": "TK023-INV-APP-PUBLISHER-UNIQUE",
+      "input": {
+        "config": {
+          "app": {
+            "publisher_module": "src/check-publisher.mjs"
+          }
+        },
+        "files": [
+          {
+            "path": "src/check-publisher.mjs",
+            "text": "/check-runs"
+          },
+          {
+            "path": "src/worker.mjs",
+            "text": "/check-runs"
+          }
+        ]
+      }
+    }
+  ]
+}

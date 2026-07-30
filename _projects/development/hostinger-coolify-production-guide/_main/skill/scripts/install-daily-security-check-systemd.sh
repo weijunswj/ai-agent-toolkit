@@ -39,7 +39,8 @@ fi
 backup_existing() {
   local target="$1"
   if [ -e "$target" ]; then
-    local backup="$target.bak.$(date -u +%Y%m%d%H%M%S)"
+    local backup
+    backup="$target.bak.$(date -u +%Y%m%d%H%M%S)"
     cp -a "$target" "$backup"
     echo "Backed up existing unit to $backup"
   fi

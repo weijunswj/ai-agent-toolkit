@@ -48,6 +48,7 @@ Use installed skills only when they clearly match the task and improve correctne
 | `n8n-workflow-helper-scripts` | Safe n8n workflow import/export hygiene, template sanitation, credential safety, validation, comparison, and repo/live sync planning. |
 | `n8n-workflow-templates` | Public generic inactive n8n workflow JSON templates. |
 | `secure-cicd-installer` | Secure CI/CD installer planning, GitHub Actions setup, CI security gates, approval-gated writes, or safe status tracking. |
+| `repository-security-gate` | Content-derived repository security classification, pinned scanner gates, provenance/suppression validation, sanitised evidence, and exact-head review packets. |
 | `context-preserving-ai-publisher` | Source-traceable AI-facing repo surfaces, generated skills, templates, manifests, source locks, audits, or anti-drift docs. |
 | `agent-skill-supply-chain-audit` | Reviewing third-party agent skills, `SKILL.md` folders, skill packs, or GitHub skill repositories for provenance, license, safety, toolkit conversion fit, and usefulness/token-bloat risk before import. |
 | `local-ai-stack-safety` | Reviewing local AI runtime, model download, GPU/runtime, local AI web UI, or local AI endpoint exposure risk before setup. |

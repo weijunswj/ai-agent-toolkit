@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "rule": "TKSG001",
+      "malicious": "exec(request.body.command)",
+      "clean": "execFile('/usr/bin/git', ['status'], { shell: false })"
+    },
+    {
+      "rule": "TKSG002",
+      "malicious": "const readOnlyAllowlist = ['status', '--force'];",
+      "clean": "const readOnlyAllowlist = ['status', '--short'];"
+    },
+    {
+      "rule": "TKSG003",
+      "malicious": "run: echo ${{ github.event.issue.title }}",
+      "clean": "run: node repo/scripts/validate-toolkit.cjs"
+    },
+    {
+      "rule": "TKSG004",
+      "malicious": "const target = path.resolve(root, request.query.path);",
+      "clean": "const target = safeWorkspacePath(relativePath);"
+    },
+    {
+      "rule": "TKSG005",
+      "malicious": "fs.rmSync(os.tmpdir(), { recursive: true, force: true });",
+      "clean": "fs.rmSync(operationOwnedPath, { recursive: true });"
+    },
+    {
+      "rule": "TKSG006",
+      "malicious": "console.log(credentialValue);",
+      "clean": "console.log('credential reference present');"
+    },
+    {
+      "rule": "TKSG007",
+      "malicious": "operatorToken = process.env.APP_TOKEN;",
+      "clean": "operatorCredentialRef = request.operatorCredentialRef;"
+    },
+    {
+      "rule": "TKSG008",
+      "malicious": "const reusableReceipt = approve(globalApproval);",
+      "clean": "const receipt = approve({ provider, target, environment, resource, operation });"
+    },
+    {
+      "rule": "TKSG009",
+      "malicious": "governPolicy(); try { enforce(); } catch (error) { return true; }",
+      "clean": "try { enforce(); } catch (error) { return false; }"
+    },
+    {
+      "rule": "TKSG010",
+      "malicious": "uses: actions/checkout@v6",
+      "clean": "uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803"
+    },
+    {
+      "rule": "TKSG011",
+      "malicious": "const handler = new Function(userInput);",
+      "clean": "const handler = approvedHandlers.get(handlerId);"
+    },
+    {
+      "rule": "TKSG012",
+      "malicious": "{\"path\":\"**/*\",\"expires\":\"never\"}",
+      "clean": "{\"path\":\"fixtures/synthetic/token.txt\",\"expires\":\"2026-08-01\"}"
+    }
+  ]
+}

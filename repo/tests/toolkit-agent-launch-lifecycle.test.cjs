@@ -22,7 +22,10 @@ test('detached Claude supervisor forces medium non-fast invocation and releases 
   }
   const pluginEntry = { id: pluginSetup.pluginId(), version: control.CONTROL_VERSION, enabled: true, trusted: true, hooksActive: true, installPath: cache };
   const fake = path.join(root, 'fake-claude.cjs');
-  const secretPrompt = 'UNIQUE_PRIVATE_PROMPT_8f06f6c1 repository customer fixture';
+  const secretPrompt = fs.readFileSync(
+    path.join(sourceRoot, 'repo', 'tests', 'fixtures', 'security-gate', 'synthetic-private-prompt.txt'),
+    'utf8'
+  ).trim();
   const optionMarker = 'ONLY_IN_OPTIONS_ENV_47c1';
   const requiredConfig = 'REQUIRED_CHILD_CONFIG_2a91';
   const parentMarker = 'PARENT_ONLY_ENV_990e';

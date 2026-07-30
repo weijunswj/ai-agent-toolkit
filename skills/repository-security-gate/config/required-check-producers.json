@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "contract": "tk.security.required-check-authority/v1",
+  "app": {
+    "name": "weijunswj-toolkit-security-gate",
+    "source_root": "_projects/cicd/repository-security-gate/_main/app",
+    "runtime": "cloudflare-workers",
+    "integration_id": null,
+    "integration_id_source": "promotion-time GitHub-assigned App identity",
+    "deployment_state": "source_only_not_deployed",
+    "deployment_authority": "separately governed owner-controlled Cloudflare Worker release",
+    "installation_owner": "weijunswj",
+    "repository_enrollment": "exact numeric repository IDs in ENROLLED_REPOSITORY_IDS and an explicit GitHub App installation",
+    "publisher_module": "src/check-publisher.mjs",
+    "source_files": [
+      "package.json",
+      "package-lock.json",
+      "wrangler.jsonc",
+      "src/worker.mjs",
+      "src/producer-inventory.mjs",
+      "src/evidence-verifier.mjs",
+      "src/check-publisher.mjs",
+      "src/run-state.mjs",
+      "src/canonical-json.mjs"
+    ],
+    "state_binding": "RUN_STATE",
+    "runtime_binding_names": [
+      "APP_ID",
+      "APP_INTEGRATION_ID",
+      "APP_PRIVATE_KEY",
+      "DISPATCH_SIGNING_PRIVATE_KEY",
+      "WEBHOOK_SECRET",
+      "ENROLLED_REPOSITORY_IDS",
+      "RUN_STATE"
+    ],
+    "permissions": {
+      "actions": "write",
+      "checks": "write",
+      "statuses": "write",
+      "contents": "read",
+      "pull_requests": "read",
+      "metadata": "read"
+    },
+    "forbidden_permissions": [
+      "administration",
+      "actions_secrets",
+      "contents_write",
+      "deployments",
+      "discussions",
+      "environments",
+      "issues_write",
+      "packages",
+      "repository_variables_write",
+      "secrets",
+      "workflows_write"
+    ],
+    "subscribed_events": [
+      "pull_request",
+      "workflow_run"
+    ],
+    "commit_status_publication": false
+  },
+  "workflow": {
+    "path": ".github/workflows/repository-security-gate.yml",
+    "name": "TK-023 protected repository authority",
+    "dispatch_event": "workflow_dispatch",
+    "protected_ref_policy": "exact-default-branch-authority",
+    "candidate_role": "data-only",
+    "dispatch_public_key_source": "promotion-time repository variable TK023_DISPATCH_PUBLIC_KEY",
+    "app_callback_source": "promotion-time repository variable TK023_APP_CALLBACK_URL"
+  },
+  "contexts": [
+    {
+      "id": "repository-security-gate",
+      "name": "Repository security gate",
+      "terminal_job_id": "repository-security-terminal",
+      "terminal_job_name": "TK-023 authority / repository security terminal",
+      "mandatory_prerequisites": [
+        "dispatch-authority",
+        "producer-inventory",
+        "repository-security-scan",
+        "generated-surface-fidelity"
+      ],
+      "artifact_prefix": "tk023-terminal-repository-security-gate"
+    },
+    {
+      "id": "validate",
+      "name": "Validate",
+      "terminal_job_id": "validate-terminal",
+      "terminal_job_name": "TK-023 authority / validate terminal",
+      "mandatory_prerequisites": [
+        "dispatch-authority",
+        "producer-inventory",
+        "generated-surface-fidelity",
+        "validate-worker"
+      ],
+      "artifact_prefix": "tk023-terminal-validate"
+    },
+    {
+      "id": "validate-toolkit",
+      "name": "Validate Toolkit",
+      "terminal_job_id": "validate-toolkit-terminal",
+      "terminal_job_name": "TK-023 authority / validate toolkit terminal",
+      "mandatory_prerequisites": [
+        "dispatch-authority",
+        "producer-inventory",
+        "generated-surface-fidelity",
+        "validate-toolkit-worker"
+      ],
+      "artifact_prefix": "tk023-terminal-validate-toolkit"
+    }
+  ],
+  "producer_inventory": {
+    "schema": "tk.security.required-check-producer-inventory/v1",
+    "bounds": {
+      "workflow_files": 256,
+      "jobs": 1024,
+      "edges": 1024,
+      "reusable_depth": 8,
+      "matrix_expansions_per_job": 64,
+      "produced_job_names": 4096
+    },
+    "external_reusable_workflows": []
+  },
+  "generated_surface": {
+    "generator_paths": [
+      "repo/scripts/sync-agent-instruction-shims.cjs",
+      "repo/scripts/sync-repo-doc-contract.cjs",
+      "repo/scripts/sync-toolkit-projects.cjs"
+    ],
+    "generator_lock": "_projects/cicd/repository-security-gate/_main/config/protected-generator-lock.json",
+    "operation_directory": "operation/generated-candidate",
+    "writeback": false
+  }
+}

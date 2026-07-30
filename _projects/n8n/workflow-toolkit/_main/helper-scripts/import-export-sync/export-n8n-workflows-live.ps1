@@ -12,7 +12,8 @@ param(
   [string]$ExportDir = ".tmp/n8n-live-exports",
   [string]$BindingsFile = ".n8n-local\n8n-credential-bindings.json",
   [string]$WorkflowIdentityFile = ".n8n-local/n8n-workflow-identities.json",
-  [string]$PortableCredentialsFile = "n8n-workflows/toolkit/portable-credentials.json",
+  [Alias("PortableCredentialsFile")]
+  [string]$PortableBindingDeclarationsFile = "n8n-workflows/toolkit/portable-credentials.json",
   [string]$DeploymentPolicyFile = "n8n-workflows/toolkit/deployment-policy.json",
   [switch]$IncludeArchived,
   [switch]$PublishedOnly,
@@ -740,7 +741,7 @@ $WorkflowDirPath = Resolve-WorkflowDirPath
 $ExportDirPath = Join-Path $RepoRoot $ExportDir
 $BindingsFilePath = Join-Path $RepoRoot $BindingsFile
 $WorkflowIdentityFilePath = Join-Path $RepoRoot $WorkflowIdentityFile
-$PortableCredentialsFilePath = Join-Path $RepoRoot $PortableCredentialsFile
+$PortableCredentialsFilePath = Join-Path $RepoRoot $PortableBindingDeclarationsFile
 $DeploymentPolicyFilePath = Join-Path $RepoRoot $DeploymentPolicyFile
 if ($DeploymentPolicyFileWasExplicit) {
   try {

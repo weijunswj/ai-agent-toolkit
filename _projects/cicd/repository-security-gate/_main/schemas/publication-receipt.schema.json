@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tk.security.required-check-publication/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "context_id",
+    "context_name",
+    "repository_id",
+    "pr_number",
+    "head_sha",
+    "base_sha",
+    "authority_commit",
+    "workflow_run_id",
+    "workflow_run_attempt",
+    "attempt_generation",
+    "terminal_job_id",
+    "github_job_id",
+    "artifact_id",
+    "artifact_digest",
+    "terminal_receipt_digest",
+    "producer_inventory_digest",
+    "generated_surface_digest",
+    "security_report_digest",
+    "integration_id",
+    "external_id",
+    "correlation_id",
+    "nonce",
+    "report_state",
+    "check_conclusion",
+    "publication_status",
+    "failure_codes",
+    "publication_digest"
+  ],
+  "properties": {
+    "schema": {
+      "const": "tk.security.required-check-publication/v1"
+    },
+    "context_id": {
+      "enum": [
+        "repository-security-gate",
+        "validate",
+        "validate-toolkit"
+      ]
+    },
+    "context_name": {
+      "enum": [
+        "Repository security gate",
+        "Validate",
+        "Validate Toolkit"
+      ]
+    },
+    "repository_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "pr_number": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "head_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "base_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "authority_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "workflow_run_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "workflow_run_attempt": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "attempt_generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "terminal_job_id": {
+      "enum": [
+        "repository-security-terminal",
+        "validate-terminal",
+        "validate-toolkit-terminal"
+      ]
+    },
+    "github_job_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "artifact_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "artifact_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "terminal_receipt_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "producer_inventory_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "generated_surface_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "security_report_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "integration_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "external_id": {
+      "type": "string",
+      "pattern": "^tk023/[0-9]+/[0-9]+/[0-9a-f]{40}/(repository-security-gate|validate|validate-toolkit)$",
+      "maxLength": 180
+    },
+    "correlation_id": {
+      "type": "string",
+      "pattern": "^tk023:[0-9]+:[0-9]+:[0-9a-f]{40}:[a-z0-9-]{8,64}$",
+      "maxLength": 180
+    },
+    "nonce": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{22,128}$"
+    },
+    "report_state": {
+      "enum": [
+        "SECURITY_PASS",
+        "SECURITY_FINDINGS",
+        "SECURITY_GATE_UNVERIFIED",
+        "SECURITY_GATE_INFRA_BLOCKED",
+        "VALIDATION_PASS",
+        "VALIDATION_FAILED"
+      ]
+    },
+    "check_conclusion": {
+      "enum": [
+        "success",
+        "failure",
+        "timed_out",
+        "cancelled"
+      ]
+    },
+    "publication_status": {
+      "enum": [
+        "PUBLISHED",
+        "REUSED_IDENTICAL",
+        "REJECTED"
+      ]
+    },
+    "failure_codes": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "pattern": "^TK023_[A-Z0-9_]{3,80}$"
+      }
+    },
+    "publication_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}

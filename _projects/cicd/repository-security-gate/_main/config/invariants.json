@@ -1,0 +1,243 @@
+{
+  "schema_version": 2,
+  "contract": "tk.security.protected-toolkit-invariants/v1",
+  "profile": "SECURITY_PROFILE_TOOLING_LIBRARY",
+  "harness": {
+    "path": "tools/protected-toolkit-invariants.cjs",
+    "sha256": "sha256:fb0b1f28ca68d72e37c77b0ddaca21721138e47e92be7cf2703865ccb3c017de"
+  },
+  "negative_fixtures": {
+    "path": "fixtures/protected-toolkit-invariants/negative-cases.json",
+    "sha256": "sha256:1166a64fa92ec96211449f79764dd85934eeb9492350b3de32326fd8c5a13baa"
+  },
+  "individual_timeout_seconds": 5,
+  "suite_timeout_seconds": 40,
+  "result_schema": "tk.security.protected-toolkit-invariant-result/v1",
+  "protected_invariants": [
+    {
+      "id": "TK023-INV-APP-PERMISSION-BOUNDARY",
+      "classification": "trusted_gate",
+      "property": "The first-party App authority requests only the locked permission set and forbids commit-status publication.",
+      "immutable_inputs": [
+        {
+          "scope": "authority",
+          "path": "_projects/cicd/repository-security-gate/_main/config/required-check-producers.json"
+        }
+      ],
+      "expected_status": "PASS"
+    },
+    {
+      "id": "TK023-INV-CANDIDATE-WORKFLOWS-NONPUBLISHING",
+      "classification": "candidate_scan",
+      "property": "Candidate workflows cannot publish or impersonate any required context and cannot use pull_request_target.",
+      "immutable_inputs": [
+        {
+          "scope": "candidate",
+          "path_prefix": ".github/workflows/",
+          "max_files": 256
+        }
+      ],
+      "expected_status": "PASS"
+    },
+    {
+      "id": "TK023-INV-STATIC-TERMINAL-STRUCTURE",
+      "classification": "trusted_gate",
+      "property": "Each protected terminal is static, always runs, and cannot continue on error or delegate to candidate-controlled authority.",
+      "immutable_inputs": [
+        {
+          "scope": "authority",
+          "path": ".github/workflows/repository-security-gate.yml"
+        }
+      ],
+      "expected_status": "PASS"
+    },
+    {
+      "id": "TK023-INV-SUPPRESSION-AUTHORITY-ONLY",
+      "classification": "trusted_gate",
+      "property": "Active suppressions are loaded only from immutable trusted authority while candidate records remain proposals.",
+      "immutable_inputs": [
+        {
+          "scope": "authority",
+          "path": "_projects/cicd/repository-security-gate/_main/tools/trusted-security-gate.cjs"
+        },
+        {
+          "scope": "authority",
+          "path": "_projects/cicd/repository-security-gate/_main/tools/security-gate.cjs"
+        }
+      ],
+      "expected_status": "PASS"
+    },
+    {
+      "id": "TK023-INV-REPORT-PRIVACY",
+      "classification": "trusted_gate",
+      "property": "Sealed security reports reject unknown fields and exclude raw source, environment, absolute-path and secret-bearing fields.",
+      "immutable_inputs": [
+        {
+          "scope": "authority",
+          "path": "_projects/cicd/repository-security-gate/_main/config/security-policy.json"
+        },
+        {
+          "scope": "authority",
+          "path": "_projects/cicd/repository-security-gate/_main/schemas/report.schema.json"
+        }
+      ],
+      "expected_status": "PASS"
+    },
+    {
+      "id": "TK023-INV-PROTECTED-GENERATOR-DATA-ONLY",
+      "classification": "trusted_gate",
+      "property": "Protected generation has no network, package installation, candidate writeback, commit or push authority.",
+      "immutable_inputs": [
+        {
+          "scope": "authority",
+          "path": "_projects/cicd/repository-security-gate/_main/config/protected-generator-lock.json"
+        },
+        {
+          "scope": "authority",
+          "path": "_projects/cicd/repository-security-gate/_main/config/required-check-producers.json"
+        }
+      ],
+      "expected_status": "PASS"
+    },
+    {
+      "id": "TK023-INV-APP-PUBLISHER-UNIQUE",
+      "classification": "trusted_gate",
+      "property": "Exactly one typed App module owns Checks publication and no App source publishes commit statuses.",
+      "immutable_inputs": [
+        {
+          "scope": "authority",
+          "path": "_projects/cicd/repository-security-gate/_main/config/required-check-producers.json"
+        },
+        {
+          "scope": "authority",
+          "path_prefix": "_projects/cicd/repository-security-gate/_main/app/",
+          "max_files": 64
+        }
+      ],
+      "expected_status": "PASS"
+    }
+  ],
+  "ordinary_required_ci": [
+    {
+      "suite": "repo/tests/repository-security-gate.test.cjs",
+      "context": "Validate Toolkit",
+      "authority_owner": "TK-023",
+      "protected_execution_required": false,
+      "reason": "The broad synthetic suite remains mandatory protected-test CI, but it is not suppression or gate-authority evidence.",
+      "assertions": [
+        "self-test covers all profile and malicious classification fixtures",
+        "content-derived classification cannot self-declare exemption",
+        "tool lock rejects checksum, licence, publisher, transitive binding, stale, blocked-active, and superseded-active drift",
+        "an invalid provenance lock blocks scanners before execution",
+        "stable findings are deterministic and repository-relative",
+        "enforcement-control changes require separate promotion review",
+        "exact Git path identities preserve case and reject ambiguous case-fold scanner paths",
+        "trusted immutable checkout can certify an exempt candidate while candidate-owned gate replacements cannot self-certify",
+        "candidate mutation is detected and invariant subprocesses receive no credential environment",
+        "scanner findings preserve diagnostics, deduplicate exact repeats, and fail closed on collisions",
+        "active suppressions require protected authority and ignore candidate-authored compensating tests",
+        "protected suppression invariant closure executes trusted bytes and rejects candidate helper weakening",
+        "candidate suppression proposals are review-only and never suppress findings",
+        "invariant outcomes distinguish findings from sandbox and execution failures without raw output",
+        "missing scanners and invalid mode inputs fail closed without raw source output",
+        "actionlint binds the verified ShellCheck path and ignores a PATH decoy",
+        "ShellCheck and first-party shell rules cover shebang and misleading-extension executables",
+        "PR mode binds the exact clean checkout but candidate-owned execution remains unverified",
+        "PR mode rejects mismatched, missing, unreachable, and dirty exact-head claims before reports",
+        "release mode preserves exact-head and clean-tree guarantees while direct full and scheduled scans cannot self-certify",
+        "AI risk classifier skips docs and triggers on security-sensitive executable changes",
+        "consumer invariant manifests execute bounded WEB_API and WORKFLOW_INTEGRATION attacker contracts",
+        "consumer invariant contract rejects missing, traversal, arbitrary shell, timeout, malformed, private, and failing evidence",
+        "consumer invariants and protected suppression inputs reject symlinks when supported",
+        "review packet classifies the complete changed-file manifest before bounded inclusion",
+        "workflow uses App-dispatched protected authority and treats the exact PR checkout as untrusted data",
+        "candidate-controlled auto-sync and writeback are retired in favor of protected generated fidelity",
+        "authoritative surfaces contain no mandatory Codex Security workflow",
+        "source-watch remains notification-only and candidate validation is a separate handoff"
+      ]
+    },
+    {
+      "suite": "repo/tests/audit-fallback-risk.test.cjs",
+      "context": "Validate",
+      "authority_owner": "repo-methodology/fallback-risk",
+      "protected_execution_required": false,
+      "reason": "Fallback-policy lint is ordinary required CI; it does not grant suppression authority.",
+      "assertions": [
+        "fallback-risk audit allows approved restrictive fallback policy wording",
+        "fallback-risk audit warns for ambiguous compatibility fallback wording",
+        "fallback-risk audit rejects broad or hidden compatibility wording",
+        "fallback-risk audit CLI exits nonzero only for error findings"
+      ]
+    },
+    {
+      "suite": "repo/tests/toolkit-agent-launch-lifecycle.test.cjs",
+      "context": "Validate Toolkit",
+      "authority_owner": "development/toolkit-agent-control",
+      "protected_execution_required": false,
+      "reason": "Agent lifecycle process behavior needs an ordinary disposable worker and is not an authority-bearing invariant.",
+      "assertions": [
+        "detached Claude supervisor forces medium non-fast invocation and releases its reservation",
+        "checker execution clears failures and completes only validated structured results"
+      ]
+    },
+    {
+      "suite": "repo/tests/source-watch-pr-workflow.test.cjs",
+      "context": "Validate",
+      "authority_owner": "TK-022/source-watch",
+      "protected_execution_required": false,
+      "reason": "Source-watch workflow behavior remains ordinary required CI and notification-only.",
+      "assertions": [
+        "source-watch PR notifier remains scheduled-only with minimum write permissions",
+        "source-watch PR notifier runs trusted main code before branch writes",
+        "source-watch review branch is rebuilt from main and only the report can be staged",
+        "source-watch report writes reject symlinks and push with a lease",
+        "source-watch PR notifier does not become a source updater",
+        "source-watch PR notifier documents advisory actions as report-only"
+      ]
+    },
+    {
+      "suite": "repo/tests/agent-instruction-shims.test.cjs",
+      "context": "Validate Toolkit",
+      "authority_owner": "development/ai-coding-agent-rules",
+      "protected_execution_required": false,
+      "reason": "Instruction publication and routing fidelity remains ordinary required CI; generated fidelity is separately protected.",
+      "assertions": [
+        "managed markers and source/generated instruction surfaces remain aligned",
+        "delegation and non-fast safety rules remain present",
+        "GitHub issue tracking remains repository-scoped",
+        "n8n adapter remains compact and fail-closed",
+        "platform shims remain minimal and source-owned"
+      ]
+    },
+    {
+      "suite": "repo/tests/check-project-source-updates.test.cjs",
+      "context": "Validate",
+      "authority_owner": "TK-022/source-watch",
+      "protected_execution_required": false,
+      "reason": "Notification-only provenance checks use synthetic HTTP fixtures in ordinary required CI.",
+      "assertions": [
+        "active third-party drift produces notification evidence without pin mutation",
+        "retired and no-update locks do not execute upstream code",
+        "source-watch failure is unverified",
+        "unchanged security-tool evidence is deduplicated",
+        "candidate handoff never mutates main or source locks",
+        "advisory and host-harness review targets remain bounded and privacy-safe"
+      ]
+    },
+    {
+      "suite": "repo/tests/skill-routing.test.cjs",
+      "context": "Validate Toolkit",
+      "authority_owner": "development/ai-coding-agent-rules",
+      "protected_execution_required": false,
+      "reason": "Skill routing, safety-matrix and documentation topology are ordinary required CI; symlink containment remains tested there.",
+      "assertions": [
+        "toolkit skill routing covers current skill folders or documents omissions",
+        "skill safety matrix covers current skill folders and safety boundaries",
+        "README skill table covers current skill folders exactly once",
+        "toolkit skill routing stays routing-only",
+        "markdown file walker skips symlinks and stays inside the selected root",
+        "n8n plugin repair intents remain narrowly routed"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,611 @@
+name: TK-023 protected repository authority
+run-name: TK-023 ${{ inputs.dispatch_correlation }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      dispatch_envelope:
+        description: "Canonical signed App dispatch envelope"
+        required: true
+        type: string
+      dispatch_signature:
+        description: "Ed25519 signature for the canonical dispatch envelope"
+        required: true
+        type: string
+      dispatch_correlation:
+        description: "App correlation identity duplicated outside the signed envelope for run discovery"
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: tk023-protected-${{ inputs.dispatch_correlation }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch-authority:
+    name: TK-023 authority / verify App dispatch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      repository: ${{ steps.identity.outputs.repository }}
+      repository_id: ${{ steps.identity.outputs.repository_id }}
+      pr_number: ${{ steps.identity.outputs.pr_number }}
+      base_sha: ${{ steps.identity.outputs.base_sha }}
+      base_generation: ${{ steps.identity.outputs.base_generation }}
+      head_sha: ${{ steps.identity.outputs.head_sha }}
+      authority_sha: ${{ steps.identity.outputs.authority_sha }}
+      correlation_id: ${{ steps.identity.outputs.correlation_id }}
+      attempt_generation: ${{ steps.identity.outputs.attempt_generation }}
+      nonce: ${{ steps.identity.outputs.nonce }}
+      candidate_repository: ${{ steps.identity.outputs.candidate_repository }}
+    steps:
+      - name: Checkout protected authority
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify signed dispatch
+        id: identity
+        shell: bash
+        env:
+          DISPATCH_ENVELOPE: ${{ inputs.dispatch_envelope }}
+          DISPATCH_SIGNATURE: ${{ inputs.dispatch_signature }}
+          DISPATCH_CORRELATION: ${{ inputs.dispatch_correlation }}
+          DISPATCH_PUBLIC_KEY: ${{ vars.TK023_DISPATCH_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_SHA" = "${{ github.workflow_sha }}"
+          test -n "$DISPATCH_PUBLIC_KEY"
+          umask 077
+          operation="$RUNNER_TEMP/tk023-dispatch-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$operation"
+          printf '%s' "$DISPATCH_PUBLIC_KEY" > "$operation/dispatch-public.pem"
+          node _projects/cicd/repository-security-gate/_main/tools/required-check-terminal.cjs verify-dispatch \
+            --envelope "$DISPATCH_ENVELOPE" \
+            --signature "$DISPATCH_SIGNATURE" \
+            --public-key "$operation/dispatch-public.pem" \
+            --repository "$GITHUB_REPOSITORY" \
+            --repository-id "$GITHUB_REPOSITORY_ID" \
+            --authority-sha "$GITHUB_SHA" \
+            --output "$operation/dispatch.json"
+          node - "$operation/dispatch.json" "$GITHUB_OUTPUT" <<'NODE'
+          const fs = require('node:fs');
+          const [input, output] = process.argv.slice(2);
+          const value = JSON.parse(fs.readFileSync(input, 'utf8'));
+          const keys = [
+            'repository', 'repository_id', 'pr_number', 'base_sha', 'base_generation',
+            'head_sha', 'authority_sha', 'correlation_id', 'attempt_generation', 'nonce',
+            'candidate_repository'
+          ];
+          fs.appendFileSync(output, keys.map((key) => `${key}=${value[key]}\n`).join(''));
+          NODE
+          test "$(node -p "require('$operation/dispatch.json').correlation_id")" = "$DISPATCH_CORRELATION"
+
+      - name: Revalidate protected workflow identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+  producer-inventory:
+    name: TK-023 authority / required-check producer inventory
+    needs: [dispatch-authority]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      digest: ${{ steps.inventory.outputs.digest }}
+      candidate_tree: ${{ steps.inventory.outputs.candidate_tree }}
+      authority_tree: ${{ steps.inventory.outputs.authority_tree }}
+      workflow_digest: ${{ steps.inventory.outputs.workflow_digest }}
+    steps:
+      - name: Checkout protected authority
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ needs.dispatch-authority.outputs.authority_sha }}
+          path: authority
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact candidate as data
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: ${{ needs.dispatch-authority.outputs.candidate_repository }}
+          ref: ${{ needs.dispatch-authority.outputs.head_sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Inventory all check producers
+        id: inventory
+        shell: bash
+        env:
+          AUTHORITY_SHA: ${{ needs.dispatch-authority.outputs.authority_sha }}
+          CANDIDATE_SHA: ${{ needs.dispatch-authority.outputs.head_sha }}
+          EXPECTED_REPOSITORY: ${{ needs.dispatch-authority.outputs.repository }}
+        run: |
+          set -euo pipefail
+          operation="$RUNNER_TEMP/tk023-inventory-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$operation"
+          test "$(git -C authority rev-parse HEAD)" = "$AUTHORITY_SHA"
+          test "$(git -C candidate rev-parse HEAD)" = "$CANDIDATE_SHA"
+          node authority/_projects/cicd/repository-security-gate/_main/tools/required-check-terminal.cjs inventory \
+            --authority-root authority \
+            --candidate-root candidate \
+            --authority-commit "$AUTHORITY_SHA" \
+            --candidate-head "$CANDIDATE_SHA" \
+            --repository "$EXPECTED_REPOSITORY" \
+            --output "$operation/producer-inventory.json"
+          node - "$operation/producer-inventory.json" "$GITHUB_OUTPUT" <<'NODE'
+          const fs = require('node:fs');
+          const crypto = require('node:crypto');
+          const [input, output] = process.argv.slice(2);
+          const value = JSON.parse(fs.readFileSync(input, 'utf8'));
+          const workflow = fs.readFileSync('authority/.github/workflows/repository-security-gate.yml');
+          fs.appendFileSync(output,
+            `digest=${value.inventory_digest}\n` +
+            `candidate_tree=${value.candidate_tree}\n` +
+            `authority_tree=${value.authority_tree}\n` +
+            `workflow_digest=sha256:${crypto.createHash('sha256').update(workflow).digest('hex')}\n`);
+          NODE
+          cp "$operation/producer-inventory.json" producer-inventory.json
+
+      - name: Upload bounded producer inventory
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: tk023-producer-inventory-${{ needs.dispatch-authority.outputs.head_sha }}
+          path: producer-inventory.json
+          if-no-files-found: error
+          retention-days: 7
+
+  repository-security-scan:
+    name: TK-023 authority / repository security worker
+    needs: [dispatch-authority, producer-inventory]
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    outputs:
+      report_state: ${{ steps.result.outputs.report_state }}
+      report_digest: ${{ steps.result.outputs.report_digest }}
+    steps:
+      - name: Checkout protected authority
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ needs.dispatch-authority.outputs.authority_sha }}
+          path: authority
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact candidate as data
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: ${{ needs.dispatch-authority.outputs.candidate_repository }}
+          ref: ${{ needs.dispatch-authority.outputs.head_sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prepare operation-owned roots
+        id: roots
+        shell: bash
+        run: |
+          set -euo pipefail
+          operation="$RUNNER_TEMP/tk023-security-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$operation/tools" "$operation/reports" "$operation/scanner-home" "$operation/invariant-home"
+          sudo useradd --system --no-create-home --home-dir "$operation/invariant-home" tkgate
+          sudo chown root:root "$operation/invariant-home"
+          sudo chmod 0555 "$operation/invariant-home"
+          invariant_uid="$(id -u tkgate)"
+          invariant_gid="$(id -g tkgate)"
+          printf 'operation=%s\ntools=%s\nreports=%s\nscanner_home=%s\ninvariant_home=%s\ninvariant_uid=%s\ninvariant_gid=%s\n' \
+            "$operation" "$operation/tools" "$operation/reports" "$operation/scanner-home" "$operation/invariant-home" \
+            "$invariant_uid" "$invariant_gid" >> "$GITHUB_OUTPUT"
+
+      - name: Validate protected lock and fixtures
+        working-directory: authority
+        env:
+          GH_TOKEN: ""
+          GITHUB_TOKEN: ""
+        run: |
+          node _projects/cicd/repository-security-gate/_main/tools/security-gate.cjs validate-lock
+          node _projects/cicd/repository-security-gate/_main/tools/security-gate.cjs self-test
+
+      - name: Install exact pinned scanners
+        working-directory: authority
+        env:
+          GH_TOKEN: ""
+          GITHUB_TOKEN: ""
+          TOOLS_ROOT: ${{ steps.roots.outputs.tools }}
+        run: node _projects/cicd/repository-security-gate/_main/tools/install-pinned-tools.cjs --dest "$TOOLS_ROOT"
+
+      - name: Scan candidate with protected runner
+        env:
+          GH_TOKEN: ""
+          GITHUB_TOKEN: ""
+          BASE_SHA: ${{ needs.dispatch-authority.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.dispatch-authority.outputs.head_sha }}
+          AUTHORITY_SHA: ${{ needs.dispatch-authority.outputs.authority_sha }}
+          WORKFLOW_DIGEST: ${{ needs.producer-inventory.outputs.workflow_digest }}
+          TOOLS_ROOT: ${{ steps.roots.outputs.tools }}
+          REPORT_ROOT: ${{ steps.roots.outputs.reports }}
+          SCANNER_HOME: ${{ steps.roots.outputs.scanner_home }}
+          INVARIANT_HOME: ${{ steps.roots.outputs.invariant_home }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          before="$(git -C candidate status --porcelain=v1 --untracked-files=all)"
+          test -z "$before"
+          node authority/_projects/cicd/repository-security-gate/_main/tools/trusted-security-gate.cjs run \
+            --authority-root "$GITHUB_WORKSPACE/authority" \
+            --candidate-root "$GITHUB_WORKSPACE/candidate" \
+            --target-repository "$GITHUB_REPOSITORY" \
+            --candidate-repository "${{ needs.dispatch-authority.outputs.candidate_repository }}" \
+            --candidate-head "$HEAD_SHA" \
+            --authority-mode protected-app-dispatch \
+            --invoking-workflow-commit "$AUTHORITY_SHA" \
+            --invoking-workflow-digest "$WORKFLOW_DIGEST" \
+            --mode pr \
+            --base "$BASE_SHA" \
+            --tools-dir "$TOOLS_ROOT" \
+            --report-root "$REPORT_ROOT" \
+            --scanner-home "$SCANNER_HOME" \
+            --sandbox-home "$INVARIANT_HOME" \
+            --sandbox-uid "${{ steps.roots.outputs.invariant_uid }}" \
+            --sandbox-gid "${{ steps.roots.outputs.invariant_gid }}" \
+            --run-invariants
+          test -z "$(git -C candidate status --porcelain=v1 --untracked-files=all)"
+          test -z "$(git -C authority status --porcelain=v1 --untracked-files=all)"
+
+      - name: Bind security result
+        id: result
+        env:
+          REPORT_ROOT: ${{ steps.roots.outputs.reports }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - "$REPORT_ROOT/security-gate.json" "$GITHUB_OUTPUT" <<'NODE'
+          const fs = require('node:fs');
+          const [input, output] = process.argv.slice(2);
+          const report = JSON.parse(fs.readFileSync(input, 'utf8'));
+          if (report.state !== 'SECURITY_PASS') process.exit(2);
+          fs.appendFileSync(output, `report_state=${report.state}\nreport_digest=${report.report_digest}\n`);
+          NODE
+
+      - name: Upload bounded security report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: tk023-security-report-${{ needs.dispatch-authority.outputs.head_sha }}
+          path: ${{ steps.roots.outputs.reports }}/security-gate.json
+          if-no-files-found: error
+          retention-days: 7
+
+  generated-surface-fidelity:
+    name: TK-023 authority / generated-surface fidelity
+    needs: [dispatch-authority, producer-inventory]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      report_state: ${{ steps.generated.outputs.report_state }}
+      result_digest: ${{ steps.generated.outputs.result_digest }}
+    steps:
+      - name: Checkout protected authority
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ needs.dispatch-authority.outputs.authority_sha }}
+          path: authority
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact candidate as data
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: ${{ needs.dispatch-authority.outputs.candidate_repository }}
+          ref: ${{ needs.dispatch-authority.outputs.head_sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Generate expected surfaces in operation root
+        id: generated
+        shell: bash
+        env:
+          AUTHORITY_SHA: ${{ needs.dispatch-authority.outputs.authority_sha }}
+          CANDIDATE_SHA: ${{ needs.dispatch-authority.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          operation="$RUNNER_TEMP/tk023-generated-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          report="$RUNNER_TEMP/tk023-generated-result.json"
+          mkdir -p "$operation"
+          node authority/_projects/cicd/repository-security-gate/_main/tools/required-check-terminal.cjs generated \
+            --authority-root authority \
+            --candidate-root candidate \
+            --operation-root "$operation" \
+            --authority-commit "$AUTHORITY_SHA" \
+            --candidate-head "$CANDIDATE_SHA" \
+            --output "$report"
+          node - "$report" "$GITHUB_OUTPUT" <<'NODE'
+          const fs = require('node:fs');
+          const [input, output] = process.argv.slice(2);
+          const value = JSON.parse(fs.readFileSync(input, 'utf8'));
+          fs.appendFileSync(output, `report_state=${value.status === 'PASS' ? 'VALIDATION_PASS' : 'VALIDATION_FINDINGS'}\nresult_digest=${value.result_digest}\n`);
+          NODE
+          cp "$report" generated-surface-result.json
+
+      - name: Upload bounded generated comparison
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: tk023-generated-surface-${{ needs.dispatch-authority.outputs.head_sha }}
+          path: generated-surface-result.json
+          if-no-files-found: error
+          retention-days: 7
+
+  validate-worker:
+    name: TK-023 authority / validate worker
+    needs: [dispatch-authority, producer-inventory]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/validate.yml
+    with:
+      authority_sha: ${{ needs.dispatch-authority.outputs.authority_sha }}
+      candidate_repository: ${{ needs.dispatch-authority.outputs.candidate_repository }}
+      candidate_head: ${{ needs.dispatch-authority.outputs.head_sha }}
+
+  validate-toolkit-worker:
+    name: TK-023 authority / validate toolkit worker
+    needs: [dispatch-authority, producer-inventory]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/validate-toolkit.yml
+    with:
+      authority_sha: ${{ needs.dispatch-authority.outputs.authority_sha }}
+      candidate_repository: ${{ needs.dispatch-authority.outputs.candidate_repository }}
+      candidate_head: ${{ needs.dispatch-authority.outputs.head_sha }}
+
+  repository-security-terminal:
+    name: TK-023 authority / repository security terminal
+    if: ${{ always() }}
+    needs: [dispatch-authority, producer-inventory, repository-security-scan, generated-surface-fidelity]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout protected authority
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ needs.dispatch-authority.outputs.authority_sha }}
+          persist-credentials: false
+      - name: Seal repository security terminal
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          APP_CALLBACK_URL: ${{ vars.TK023_APP_CALLBACK_URL }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          operation="$RUNNER_TEMP/tk023-terminal-repository-security-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$operation"
+          printf '%s' "$NEEDS_JSON" > "$operation/needs.json"
+          test -n "$APP_CALLBACK_URL"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > "$operation/jobs.json"
+          node - "$operation/jobs.json" "$operation/binding.json" <<'NODE'
+          const fs = require('node:fs');
+          const [jobsPath, output] = process.argv.slice(2);
+          const jobs = JSON.parse(fs.readFileSync(jobsPath, 'utf8')).jobs || [];
+          const matches = jobs.filter((job) => job.name === 'TK-023 authority / repository security terminal');
+          if (matches.length !== 1 || !Number.isInteger(matches[0].id)) process.exit(2);
+          fs.writeFileSync(output, `${JSON.stringify({
+            repository_id: Number(process.env.GITHUB_REPOSITORY_ID),
+            workflow_ref: `${process.env.GITHUB_REPOSITORY}/.github/workflows/repository-security-gate.yml@${process.env.GITHUB_REF}`,
+            authority_commit: process.env.GITHUB_SHA,
+            run_id: Number(process.env.GITHUB_RUN_ID),
+            run_attempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+            job_id: process.env.GITHUB_JOB,
+            github_job_id: matches[0].id
+          })}\n`);
+          NODE
+          attestation_id="$(node _projects/cicd/repository-security-gate/_main/tools/required-check-terminal.cjs attest \
+            --app-url "$APP_CALLBACK_URL" --binding "$operation/binding.json")"
+          github_job_id="$(node -p "require('$operation/binding.json').github_job_id")"
+          node _projects/cicd/repository-security-gate/_main/tools/required-check-terminal.cjs terminal \
+            --context repository-security-gate \
+            --config _projects/cicd/repository-security-gate/_main/config/required-check-producers.json \
+            --needs-file "$operation/needs.json" \
+            --repository "${{ needs.dispatch-authority.outputs.repository }}" \
+            --repository-id "${{ needs.dispatch-authority.outputs.repository_id }}" \
+            --pr-number "${{ needs.dispatch-authority.outputs.pr_number }}" \
+            --head-sha "${{ needs.dispatch-authority.outputs.head_sha }}" \
+            --head-tree "${{ needs.producer-inventory.outputs.candidate_tree }}" \
+            --base-sha "${{ needs.dispatch-authority.outputs.base_sha }}" \
+            --base-generation "${{ needs.dispatch-authority.outputs.base_generation }}" \
+            --authority-commit "${{ needs.dispatch-authority.outputs.authority_sha }}" \
+            --authority-tree "${{ needs.producer-inventory.outputs.authority_tree }}" \
+            --workflow-digest "${{ needs.producer-inventory.outputs.workflow_digest }}" \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --attempt-generation "${{ needs.dispatch-authority.outputs.attempt_generation }}" \
+            --github-job-id "$github_job_id" \
+            --correlation-id "${{ needs.dispatch-authority.outputs.correlation_id }}" \
+            --nonce "${{ needs.dispatch-authority.outputs.nonce }}" \
+            --producer-inventory-digest "${{ needs.producer-inventory.outputs.digest }}" \
+            --oidc-attestation-id "$attestation_id" \
+            --report-state "${{ needs.repository-security-scan.outputs.report_state }}" \
+            --output terminal-receipt.json
+      - name: Upload terminal receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: tk023-terminal-repository-security-gate-${{ needs.dispatch-authority.outputs.head_sha }}
+          path: terminal-receipt.json
+          if-no-files-found: error
+          retention-days: 7
+
+  validate-terminal:
+    name: TK-023 authority / validate terminal
+    if: ${{ always() }}
+    needs: [dispatch-authority, producer-inventory, generated-surface-fidelity, validate-worker]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout protected authority
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ needs.dispatch-authority.outputs.authority_sha }}
+          persist-credentials: false
+      - name: Seal validate terminal
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          APP_CALLBACK_URL: ${{ vars.TK023_APP_CALLBACK_URL }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          operation="$RUNNER_TEMP/tk023-terminal-validate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$operation"
+          printf '%s' "$NEEDS_JSON" > "$operation/needs.json"
+          test -n "$APP_CALLBACK_URL"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > "$operation/jobs.json"
+          node - "$operation/jobs.json" "$operation/binding.json" <<'NODE'
+          const fs = require('node:fs');
+          const [jobsPath, output] = process.argv.slice(2);
+          const jobs = JSON.parse(fs.readFileSync(jobsPath, 'utf8')).jobs || [];
+          const matches = jobs.filter((job) => job.name === 'TK-023 authority / validate terminal');
+          if (matches.length !== 1 || !Number.isInteger(matches[0].id)) process.exit(2);
+          fs.writeFileSync(output, `${JSON.stringify({
+            repository_id: Number(process.env.GITHUB_REPOSITORY_ID),
+            workflow_ref: `${process.env.GITHUB_REPOSITORY}/.github/workflows/repository-security-gate.yml@${process.env.GITHUB_REF}`,
+            authority_commit: process.env.GITHUB_SHA,
+            run_id: Number(process.env.GITHUB_RUN_ID),
+            run_attempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+            job_id: process.env.GITHUB_JOB,
+            github_job_id: matches[0].id
+          })}\n`);
+          NODE
+          attestation_id="$(node _projects/cicd/repository-security-gate/_main/tools/required-check-terminal.cjs attest \
+            --app-url "$APP_CALLBACK_URL" --binding "$operation/binding.json")"
+          github_job_id="$(node -p "require('$operation/binding.json').github_job_id")"
+          node _projects/cicd/repository-security-gate/_main/tools/required-check-terminal.cjs terminal \
+            --context validate \
+            --config _projects/cicd/repository-security-gate/_main/config/required-check-producers.json \
+            --needs-file "$operation/needs.json" \
+            --repository "${{ needs.dispatch-authority.outputs.repository }}" \
+            --repository-id "${{ needs.dispatch-authority.outputs.repository_id }}" \
+            --pr-number "${{ needs.dispatch-authority.outputs.pr_number }}" \
+            --head-sha "${{ needs.dispatch-authority.outputs.head_sha }}" \
+            --head-tree "${{ needs.producer-inventory.outputs.candidate_tree }}" \
+            --base-sha "${{ needs.dispatch-authority.outputs.base_sha }}" \
+            --base-generation "${{ needs.dispatch-authority.outputs.base_generation }}" \
+            --authority-commit "${{ needs.dispatch-authority.outputs.authority_sha }}" \
+            --authority-tree "${{ needs.producer-inventory.outputs.authority_tree }}" \
+            --workflow-digest "${{ needs.producer-inventory.outputs.workflow_digest }}" \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --attempt-generation "${{ needs.dispatch-authority.outputs.attempt_generation }}" \
+            --github-job-id "$github_job_id" \
+            --correlation-id "${{ needs.dispatch-authority.outputs.correlation_id }}" \
+            --nonce "${{ needs.dispatch-authority.outputs.nonce }}" \
+            --producer-inventory-digest "${{ needs.producer-inventory.outputs.digest }}" \
+            --oidc-attestation-id "$attestation_id" \
+            --report-state VALIDATION_PASS \
+            --output terminal-receipt.json
+      - name: Upload terminal receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: tk023-terminal-validate-${{ needs.dispatch-authority.outputs.head_sha }}
+          path: terminal-receipt.json
+          if-no-files-found: error
+          retention-days: 7
+
+  validate-toolkit-terminal:
+    name: TK-023 authority / validate toolkit terminal
+    if: ${{ always() }}
+    needs: [dispatch-authority, producer-inventory, generated-surface-fidelity, validate-toolkit-worker]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout protected authority
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ needs.dispatch-authority.outputs.authority_sha }}
+          persist-credentials: false
+      - name: Seal validate toolkit terminal
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          APP_CALLBACK_URL: ${{ vars.TK023_APP_CALLBACK_URL }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          operation="$RUNNER_TEMP/tk023-terminal-validate-toolkit-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$operation"
+          printf '%s' "$NEEDS_JSON" > "$operation/needs.json"
+          test -n "$APP_CALLBACK_URL"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > "$operation/jobs.json"
+          node - "$operation/jobs.json" "$operation/binding.json" <<'NODE'
+          const fs = require('node:fs');
+          const [jobsPath, output] = process.argv.slice(2);
+          const jobs = JSON.parse(fs.readFileSync(jobsPath, 'utf8')).jobs || [];
+          const matches = jobs.filter((job) => job.name === 'TK-023 authority / validate toolkit terminal');
+          if (matches.length !== 1 || !Number.isInteger(matches[0].id)) process.exit(2);
+          fs.writeFileSync(output, `${JSON.stringify({
+            repository_id: Number(process.env.GITHUB_REPOSITORY_ID),
+            workflow_ref: `${process.env.GITHUB_REPOSITORY}/.github/workflows/repository-security-gate.yml@${process.env.GITHUB_REF}`,
+            authority_commit: process.env.GITHUB_SHA,
+            run_id: Number(process.env.GITHUB_RUN_ID),
+            run_attempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+            job_id: process.env.GITHUB_JOB,
+            github_job_id: matches[0].id
+          })}\n`);
+          NODE
+          attestation_id="$(node _projects/cicd/repository-security-gate/_main/tools/required-check-terminal.cjs attest \
+            --app-url "$APP_CALLBACK_URL" --binding "$operation/binding.json")"
+          github_job_id="$(node -p "require('$operation/binding.json').github_job_id")"
+          node _projects/cicd/repository-security-gate/_main/tools/required-check-terminal.cjs terminal \
+            --context validate-toolkit \
+            --config _projects/cicd/repository-security-gate/_main/config/required-check-producers.json \
+            --needs-file "$operation/needs.json" \
+            --repository "${{ needs.dispatch-authority.outputs.repository }}" \
+            --repository-id "${{ needs.dispatch-authority.outputs.repository_id }}" \
+            --pr-number "${{ needs.dispatch-authority.outputs.pr_number }}" \
+            --head-sha "${{ needs.dispatch-authority.outputs.head_sha }}" \
+            --head-tree "${{ needs.producer-inventory.outputs.candidate_tree }}" \
+            --base-sha "${{ needs.dispatch-authority.outputs.base_sha }}" \
+            --base-generation "${{ needs.dispatch-authority.outputs.base_generation }}" \
+            --authority-commit "${{ needs.dispatch-authority.outputs.authority_sha }}" \
+            --authority-tree "${{ needs.producer-inventory.outputs.authority_tree }}" \
+            --workflow-digest "${{ needs.producer-inventory.outputs.workflow_digest }}" \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --attempt-generation "${{ needs.dispatch-authority.outputs.attempt_generation }}" \
+            --github-job-id "$github_job_id" \
+            --correlation-id "${{ needs.dispatch-authority.outputs.correlation_id }}" \
+            --nonce "${{ needs.dispatch-authority.outputs.nonce }}" \
+            --producer-inventory-digest "${{ needs.producer-inventory.outputs.digest }}" \
+            --oidc-attestation-id "$attestation_id" \
+            --report-state VALIDATION_PASS \
+            --output terminal-receipt.json
+      - name: Upload terminal receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: tk023-terminal-validate-toolkit-${{ needs.dispatch-authority.outputs.head_sha }}
+          path: terminal-receipt.json
+          if-no-files-found: error
+          retention-days: 7
