@@ -4,7 +4,6 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const Ajv2020 = require('ajv/dist/2020');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const projectRoot = path.join(repoRoot, '_projects', 'development', 'toolkit-guardrails');
@@ -25,6 +24,344 @@ const NOW = '2026-07-30T10:00:00.000Z';
 
 function readJson(relativePath) {
   return JSON.parse(fs.readFileSync(path.join(repoRoot, relativePath), 'utf8'));
+}
+
+const SCHEMA_ANNOTATION_KEYWORDS = new Set([
+  '$schema',
+  '$id',
+  '$comment',
+  'title',
+  'description',
+  'default',
+  'examples',
+  'deprecated',
+  'readOnly',
+  'writeOnly',
+]);
+
+const SCHEMA_VALIDATION_KEYWORDS = new Set([
+  '$defs',
+  '$ref',
+  'type',
+  'const',
+  'enum',
+  'required',
+  'properties',
+  'additionalProperties',
+  'items',
+  'anyOf',
+  'oneOf',
+  'allOf',
+  'if',
+  'then',
+  'else',
+  'not',
+  'pattern',
+  'minLength',
+  'maxLength',
+  'minimum',
+  'maximum',
+  'multipleOf',
+  'minItems',
+  'maxItems',
+  'uniqueItems',
+  'minProperties',
+  'maxProperties',
+]);
+
+const SCHEMA_KEYWORDS = new Set([
+  ...SCHEMA_ANNOTATION_KEYWORDS,
+  ...SCHEMA_VALIDATION_KEYWORDS,
+]);
+
+function pointerPart(value) {
+  return String(value).replaceAll('~', '~0').replaceAll('/', '~1');
+}
+
+function schemaPath(pathValue, property) {
+  return pathValue + '/' + pointerPart(property);
+}
+
+function instancePath(pathValue, property) {
+  return pathValue + '/' + pointerPart(property);
+}
+
+function validationError(schemaPathValue, instancePathValue, reasonCode) {
+  return {
+    schema_path: schemaPathValue,
+    instance_path: instancePathValue,
+    reason_code: reasonCode,
+  };
+}
+
+function isSchemaObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function deepEqual(left, right) {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left)
+      && Array.isArray(right)
+      && left.length === right.length
+      && left.every((value, index) => deepEqual(value, right[index]));
+  }
+  if (isSchemaObject(left) || isSchemaObject(right)) {
+    if (!isSchemaObject(left) || !isSchemaObject(right)) return false;
+    const leftKeys = Object.keys(left).sort();
+    const rightKeys = Object.keys(right).sort();
+    return deepEqual(leftKeys, rightKeys)
+      && leftKeys.every((key) => deepEqual(left[key], right[key]));
+  }
+  return false;
+}
+
+function matchesType(value, expectedType) {
+  switch (expectedType) {
+    case 'null':
+      return value === null;
+    case 'boolean':
+      return typeof value === 'boolean';
+    case 'object':
+      return isSchemaObject(value);
+    case 'array':
+      return Array.isArray(value);
+    case 'string':
+      return typeof value === 'string';
+    case 'integer':
+      return typeof value === 'number' && Number.isInteger(value) && Number.isFinite(value);
+    case 'number':
+      return typeof value === 'number' && Number.isFinite(value);
+    default:
+      throw new Error('UNKNOWN_SCHEMA_TYPE');
+  }
+}
+
+class LocalSchemaValidator {
+  constructor(schema) {
+    this.schema = schema;
+    this.assertKnownSchema(schema, '#');
+  }
+
+  assertKnownSchema(schema, schemaPathValue) {
+    if (typeof schema === 'boolean') return;
+    if (!isSchemaObject(schema)) throw new Error('MALFORMED_SCHEMA');
+    for (const key of Object.keys(schema)) {
+      if (!SCHEMA_KEYWORDS.has(key)) {
+        throw new Error(JSON.stringify(validationError(
+          schemaPath(schemaPathValue, key),
+          '',
+          'UNKNOWN_SCHEMA_KEYWORD',
+        )));
+      }
+    }
+    if (schema.$defs !== undefined) {
+      if (!isSchemaObject(schema.$defs)) throw new Error('MALFORMED_SCHEMA_DEFS');
+      for (const [key, childSchema] of Object.entries(schema.$defs)) {
+        this.assertKnownSchema(childSchema, schemaPath(schemaPathValue, '$defs') + '/' + pointerPart(key));
+      }
+    }
+    if (schema.properties !== undefined) {
+      if (!isSchemaObject(schema.properties)) throw new Error('MALFORMED_SCHEMA_PROPERTIES');
+      for (const [key, childSchema] of Object.entries(schema.properties)) {
+        this.assertKnownSchema(childSchema, schemaPath(schemaPathValue, 'properties') + '/' + pointerPart(key));
+      }
+    }
+    if (schema.additionalProperties !== undefined && typeof schema.additionalProperties === 'object') {
+      this.assertKnownSchema(schema.additionalProperties, schemaPath(schemaPathValue, 'additionalProperties'));
+    }
+    if (schema.items !== undefined && typeof schema.items === 'object') {
+      this.assertKnownSchema(schema.items, schemaPath(schemaPathValue, 'items'));
+    }
+    for (const keyword of ['anyOf', 'oneOf', 'allOf']) {
+      if (schema[keyword] === undefined) continue;
+      if (!Array.isArray(schema[keyword])) throw new Error('MALFORMED_SCHEMA_COMBINATION');
+      schema[keyword].forEach((childSchema, index) => {
+        this.assertKnownSchema(childSchema, schemaPath(schemaPathValue, keyword) + '/' + index);
+      });
+    }
+    for (const keyword of ['if', 'then', 'else', 'not']) {
+      if (schema[keyword] !== undefined) {
+        this.assertKnownSchema(schema[keyword], schemaPath(schemaPathValue, keyword));
+      }
+    }
+  }
+
+  resolveReference(reference) {
+    if (reference === '#') return { schema: this.schema, path: '#' };
+    if (typeof reference !== 'string' || !reference.startsWith('#/')) {
+      throw new Error('UNSUPPORTED_SCHEMA_REFERENCE');
+    }
+    const parts = reference.slice(2).split('/').map((part) => part.replaceAll('~1', '/').replaceAll('~0', '~'));
+    let current = this.schema;
+    for (const part of parts) {
+      if (!current || typeof current !== 'object' || !Object.hasOwn(current, part)) {
+        throw new Error('UNKNOWN_SCHEMA_REFERENCE');
+      }
+      current = current[part];
+    }
+    return { schema: current, path: reference };
+  }
+
+  validate(instance) {
+    const errors = [];
+    this.visit(this.schema, instance, '#', '', errors);
+    return { valid: errors.length === 0, errors };
+  }
+
+  visit(schema, instance, schemaPathValue, instancePathValue, errors) {
+    if (schema === true) return;
+    if (schema === false) {
+      errors.push(validationError(schemaPathValue, instancePathValue, 'FALSE_SCHEMA'));
+      return;
+    }
+    if (schema.$ref !== undefined) {
+      const reference = this.resolveReference(schema.$ref);
+      this.visit(reference.schema, instance, reference.path, instancePathValue, errors);
+    }
+    if (schema.type !== undefined) {
+      const types = Array.isArray(schema.type) ? schema.type : [schema.type];
+      if (!types.some((type) => matchesType(instance, type))) {
+        errors.push(validationError(schemaPath(schemaPathValue, 'type'), instancePathValue, 'TYPE_MISMATCH'));
+        return;
+      }
+    }
+    if (schema.const !== undefined && !deepEqual(instance, schema.const)) {
+      errors.push(validationError(schemaPath(schemaPathValue, 'const'), instancePathValue, 'CONST_MISMATCH'));
+    }
+    if (schema.enum !== undefined && !schema.enum.some((value) => deepEqual(instance, value))) {
+      errors.push(validationError(schemaPath(schemaPathValue, 'enum'), instancePathValue, 'ENUM_MISMATCH'));
+    }
+    if (schema.required !== undefined && isSchemaObject(instance)) {
+      for (const required of schema.required) {
+        if (!Object.hasOwn(instance, required)) {
+          errors.push(validationError(schemaPath(schemaPathValue, 'required'), instancePath(instancePathValue, required), 'REQUIRED_PROPERTY'));
+        }
+      }
+    }
+    if (isSchemaObject(instance) && schema.properties) {
+      for (const [key, childSchema] of Object.entries(schema.properties)) {
+        if (Object.hasOwn(instance, key)) {
+          this.visit(childSchema, instance[key], schemaPath(schemaPathValue, 'properties') + '/' + pointerPart(key), instancePath(instancePathValue, key), errors);
+        }
+      }
+    }
+    if (isSchemaObject(instance) && schema.additionalProperties !== undefined) {
+      const declared = new Set(Object.keys(schema.properties || {}));
+      for (const key of Object.keys(instance)) {
+        if (declared.has(key)) continue;
+        if (schema.additionalProperties === false) {
+          errors.push(validationError(schemaPath(schemaPathValue, 'additionalProperties'), instancePath(instancePathValue, key), 'ADDITIONAL_PROPERTY'));
+        } else if (schema.additionalProperties !== true) {
+          this.visit(schema.additionalProperties, instance[key], schemaPath(schemaPathValue, 'additionalProperties'), instancePath(instancePathValue, key), errors);
+        }
+      }
+    }
+    if (Array.isArray(instance) && schema.items !== undefined) {
+      if (Array.isArray(schema.items)) {
+        instance.forEach((value, index) => {
+          if (schema.items[index] !== undefined) {
+            this.visit(schema.items[index], value, schemaPath(schemaPathValue, 'items') + '/' + index, instancePath(instancePathValue, index), errors);
+          }
+        });
+      } else {
+        instance.forEach((value, index) => {
+          this.visit(schema.items, value, schemaPath(schemaPathValue, 'items'), instancePath(instancePathValue, index), errors);
+        });
+      }
+    }
+    if (typeof instance === 'string') {
+      if (schema.minLength !== undefined && instance.length < schema.minLength) {
+        errors.push(validationError(schemaPath(schemaPathValue, 'minLength'), instancePathValue, 'MIN_LENGTH'));
+      }
+      if (schema.maxLength !== undefined && instance.length > schema.maxLength) {
+        errors.push(validationError(schemaPath(schemaPathValue, 'maxLength'), instancePathValue, 'MAX_LENGTH'));
+      }
+      if (schema.pattern !== undefined) {
+        let matches = false;
+        try {
+          matches = new RegExp(schema.pattern).test(instance);
+        } catch {
+          throw new Error('MALFORMED_SCHEMA_PATTERN');
+        }
+        if (!matches) errors.push(validationError(schemaPath(schemaPathValue, 'pattern'), instancePathValue, 'PATTERN_MISMATCH'));
+      }
+    }
+    if (typeof instance === 'number' && Number.isFinite(instance)) {
+      if (schema.minimum !== undefined && instance < schema.minimum) {
+        errors.push(validationError(schemaPath(schemaPathValue, 'minimum'), instancePathValue, 'MINIMUM'));
+      }
+      if (schema.maximum !== undefined && instance > schema.maximum) {
+        errors.push(validationError(schemaPath(schemaPathValue, 'maximum'), instancePathValue, 'MAXIMUM'));
+      }
+      if (schema.multipleOf !== undefined && instance % schema.multipleOf !== 0) {
+        errors.push(validationError(schemaPath(schemaPathValue, 'multipleOf'), instancePathValue, 'MULTIPLE_OF'));
+      }
+    }
+    if (Array.isArray(instance)) {
+      if (schema.minItems !== undefined && instance.length < schema.minItems) {
+        errors.push(validationError(schemaPath(schemaPathValue, 'minItems'), instancePathValue, 'MIN_ITEMS'));
+      }
+      if (schema.maxItems !== undefined && instance.length > schema.maxItems) {
+        errors.push(validationError(schemaPath(schemaPathValue, 'maxItems'), instancePathValue, 'MAX_ITEMS'));
+      }
+      if (schema.uniqueItems === true) {
+        for (let left = 0; left < instance.length; left += 1) {
+          for (let right = left + 1; right < instance.length; right += 1) {
+            if (deepEqual(instance[left], instance[right])) {
+              errors.push(validationError(schemaPath(schemaPathValue, 'uniqueItems'), instancePathValue, 'UNIQUE_ITEMS'));
+              left = instance.length;
+              break;
+            }
+          }
+        }
+      }
+    }
+    if (isSchemaObject(instance)) {
+      if (schema.minProperties !== undefined && Object.keys(instance).length < schema.minProperties) {
+        errors.push(validationError(schemaPath(schemaPathValue, 'minProperties'), instancePathValue, 'MIN_PROPERTIES'));
+      }
+      if (schema.maxProperties !== undefined && Object.keys(instance).length > schema.maxProperties) {
+        errors.push(validationError(schemaPath(schemaPathValue, 'maxProperties'), instancePathValue, 'MAX_PROPERTIES'));
+      }
+    }
+    for (const keyword of ['anyOf', 'oneOf']) {
+      if (schema[keyword] === undefined) continue;
+      const matches = schema[keyword].filter((childSchema, index) => {
+        const branchErrors = [];
+        this.visit(childSchema, instance, schemaPath(schemaPathValue, keyword) + '/' + index, instancePathValue, branchErrors);
+        return branchErrors.length === 0;
+      }).length;
+      if ((keyword === 'anyOf' && matches === 0) || (keyword === 'oneOf' && matches !== 1)) {
+        errors.push(validationError(schemaPath(schemaPathValue, keyword), instancePathValue, keyword === 'anyOf' ? 'ANY_OF_FAILED' : 'ONE_OF_FAILED'));
+      }
+    }
+    if (schema.allOf !== undefined) {
+      schema.allOf.forEach((childSchema, index) => {
+        this.visit(childSchema, instance, schemaPath(schemaPathValue, 'allOf') + '/' + index, instancePathValue, errors);
+      });
+    }
+    if (schema.if !== undefined) {
+      const conditionErrors = [];
+      this.visit(schema.if, instance, schemaPath(schemaPathValue, 'if'), instancePathValue, conditionErrors);
+      if (conditionErrors.length === 0 && schema.then !== undefined) {
+        this.visit(schema.then, instance, schemaPath(schemaPathValue, 'then'), instancePathValue, errors);
+      } else if (conditionErrors.length > 0 && schema.else !== undefined) {
+        this.visit(schema.else, instance, schemaPath(schemaPathValue, 'else'), instancePathValue, errors);
+      }
+    }
+    if (schema.not !== undefined) {
+      const notErrors = [];
+      this.visit(schema.not, instance, schemaPath(schemaPathValue, 'not'), instancePathValue, notErrors);
+      if (notErrors.length === 0) {
+        errors.push(validationError(schemaPath(schemaPathValue, 'not'), instancePathValue, 'NOT_VIOLATED'));
+      }
+    }
+  }
+}
+
+function createLocalSchemaValidator(schema) {
+  return new LocalSchemaValidator(schema);
 }
 
 function fixtureRepository(overrides = {}) {
@@ -463,23 +800,48 @@ test('normalizer preserves explicit nulls and produces the versioned adapter-neu
 });
 
 test('real normalized operation and approval records validate mechanically against the locked schemas', () => {
-  const ajv = new Ajv2020({ allErrors: true, strict: false });
+  const policyDocument = readJson('_projects/development/toolkit-guardrails/_main/guardrail-policy.json');
+  const policySchema = readJson('_projects/development/toolkit-guardrails/_main/guardrail-policy.schema.json');
   const operationSchema = readJson('_projects/development/toolkit-guardrails/_main/operation-contract.schema.json');
   const approvalSchema = readJson('_projects/development/toolkit-guardrails/_main/approval-contract.schema.json');
-  const validateOperation = ajv.compile(operationSchema);
-  const validateApproval = ajv.compile(approvalSchema);
+  const validatePolicy = createLocalSchemaValidator(policySchema);
+  const validateOperation = createLocalSchemaValidator(operationSchema);
+  const validateApproval = createLocalSchemaValidator(approvalSchema);
+  const policyResult = validatePolicy.validate(policyDocument);
+  assert.equal(policyResult.valid, true, JSON.stringify(policyResult.errors));
   const outside = fixtureInput(structured('edit', `${SIBLING}\\schema-record.txt`));
   const approval = buildApproval(outside);
   const record = normalizer.normalizeOperation({ ...outside, approval });
   const classification = classifier.classifyOperation(record);
   normalizer.refreshOperationDigests(record, classification);
-  assert.equal(validateOperation(record), true, JSON.stringify(validateOperation.errors));
-  assert.equal(validateApproval(approval), true, JSON.stringify(validateApproval.errors));
-  assert.equal(validateOperation({ ...record, repository: { ...record.repository, undeclared_runtime_property: true } }), false);
-  assert.equal(validateApproval({ ...approval, undeclared_runtime_property: true }), false);
+  const operationResult = validateOperation.validate(record);
+  const approvalResult = validateApproval.validate(approval);
+  assert.equal(operationResult.valid, true, JSON.stringify(operationResult.errors));
+  assert.equal(approvalResult.valid, true, JSON.stringify(approvalResult.errors));
+  assert.equal(validateOperation.validate({ ...record, repository: { ...record.repository, undeclared_runtime_property: true } }).valid, false);
+  assert.equal(validateApproval.validate({ ...approval, undeclared_runtime_property: true }).valid, false);
   const malformedApprovalRecord = normalizer.normalizeOperation({ ...outside, approval: { ...approval, one_shot: 'true' } });
   assert.equal(malformedApprovalRecord.approval.malformed, true);
-  assert.equal(validateOperation(malformedApprovalRecord), true, JSON.stringify(validateOperation.errors));
+  const malformedResult = validateOperation.validate(malformedApprovalRecord);
+  assert.equal(malformedResult.valid, true, JSON.stringify(malformedResult.errors));
+});
+
+test('local schema validator rejects unknown keywords with privacy-safe deterministic errors', () => {
+  const schema = readJson('_projects/development/toolkit-guardrails/_main/operation-contract.schema.json');
+  assert.throws(
+    () => createLocalSchemaValidator({ ...schema, unknown_validation_keyword: true }),
+    (error) => {
+      assert.equal(
+        error.message,
+        JSON.stringify({
+          schema_path: '#/unknown_validation_keyword',
+          instance_path: '',
+          reason_code: 'UNKNOWN_SCHEMA_KEYWORD',
+        }),
+      );
+      return true;
+    },
+  );
 });
 
 function expectDecision(input, expected, reason = null) {
@@ -690,9 +1052,9 @@ const fixtureCaseAssertions = new Map([
     assert.doesNotMatch(output, /\.env|send-to-redaction-check|redaction-check-value|private-fixture|fixture\\workspace/i);
   }],
   ['schema.runtime-record', () => {
-    const ajv = new Ajv2020({ allErrors: true, strict: false });
-    const validate = ajv.compile(readJson('_projects/development/toolkit-guardrails/_main/operation-contract.schema.json'));
-    assert.equal(validate(normalizedRecord(editInside()).record), true, JSON.stringify(validate.errors));
+    const validate = createLocalSchemaValidator(readJson('_projects/development/toolkit-guardrails/_main/operation-contract.schema.json'));
+    const result = validate.validate(normalizedRecord(editInside()).record);
+    assert.equal(result.valid, true, JSON.stringify(result.errors));
   }],
   ['source.schema.fixture-alignment', () => {
     const fixtures = readJson('_projects/development/toolkit-guardrails/_main/fixtures/fixture-manifest.json');
