@@ -309,6 +309,13 @@ function decideOne(record, classification, options = {}) {
   const inside = targetsInsideAuthorisedRoots(targets) || (!targets.length && record.repository?.path_resolution_status === 'resolved');
   const outside = targets.some((target) => !target.resolved_inside || ['outside-repository', 'sibling-repository', 'parent-workspace', 'mixed-targets', 'unknown-target'].includes(target.target_class));
 
+  if (targetClass === 'secret-bearing' && !ASK_CLASSES.has(classification.operation_class)) {
+    const approvedSecret = approvalDecision(record, options);
+    if (approvedSecret.decision === 'allow') return make('allow', approvedSecret.reason, 'trusted-one-shot-approval');
+    if (approvedSecret.decision === 'unsupported') return make('unsupported', approvedSecret.reason, 'stop-before-execution');
+    return make('ask', 'SECRET_ACCESS_REQUIRES_APPROVAL', 'trusted-one-shot-approval', 'secret-bearing', 'secret-access');
+  }
+
   if (GITHUB_MUTATION_CLASSES.has(classification.operation_class) && authority.reason === 'CONTROLLER_GITHUB_AUTHORIZED') return make('allow', authority.reason, 'controller-authority', 'external-system');
 
   if (classification.operation_class === 'git-push') {

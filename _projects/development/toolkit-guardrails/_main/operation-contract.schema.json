@@ -129,13 +129,55 @@
     "additionalRoot": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["path", "canonical_path", "status", "link_type", "kind"],
+      "required": ["path", "canonical_path", "status", "link_type", "kind", "authorization_status", "authority_provenance", "authority_binding"],
       "properties": {
         "path": { "$ref": "#/$defs/nullableString" },
         "canonical_path": { "$ref": "#/$defs/nullableString" },
         "status": { "enum": ["resolved", "missing-context", "unresolved", "ambiguous", "stale", "outside", "resolver-error"] },
         "link_type": { "enum": ["none", "symlink", "junction", "reparse-point"] },
-        "kind": { "type": "string" }
+        "kind": { "type": "string" },
+        "authorization_status": { "enum": ["authorized", "unauthorized"] },
+        "authority_provenance": { "$ref": "#/$defs/nullableString" },
+        "authority_binding": { "$ref": "#/$defs/additionalRootAuthorityBinding" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "authorization_status": { "const": "authorized" } } },
+          "then": {
+            "properties": {
+              "authority_provenance": { "type": "string", "minLength": 1 },
+              "authority_binding": {
+                "properties": {
+                  "trusted": { "const": true },
+                  "kind": { "type": "string", "minLength": 1 }
+                }
+              }
+            },
+            "anyOf": [
+              { "properties": { "authority_binding": { "properties": { "canonical_path": { "type": "string", "minLength": 1 } } } } },
+              { "properties": { "authority_binding": { "properties": { "canonical_path_digest": { "$ref": "#/$defs/digest" } } } } }
+            ]
+          }
+        },
+        {
+          "if": { "properties": { "authorization_status": { "const": "unauthorized" } } },
+          "then": {
+            "properties": {
+              "authority_binding": { "properties": { "trusted": { "const": false } } }
+            }
+          }
+        }
+      ]
+    },
+    "additionalRootAuthorityBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canonical_path", "canonical_path_digest", "kind", "trusted"],
+      "properties": {
+        "canonical_path": { "$ref": "#/$defs/nullableString" },
+        "canonical_path_digest": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
+        "kind": { "$ref": "#/$defs/nullableString" },
+        "trusted": { "type": "boolean" }
       }
     },
     "repository": {

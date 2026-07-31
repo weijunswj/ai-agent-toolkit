@@ -6,7 +6,7 @@ const { resolveTargets } = require('./toolkit-active-repository.cjs');
 const CLASS_DECISION_RANK = Object.freeze({ allow: 0, ask: 1, unsupported: 2, deny: 3 });
 const SHELL_NAMES = new Set(['sh', 'bash', 'zsh', 'dash', 'fish', 'pwsh', 'powershell', 'cmd', 'cmd.exe']);
 const READ_COMMANDS = new Set(['get-content', 'get-childitem', 'dir', 'ls', 'find', 'grep', 'rg', 'sed', 'awk', 'cat', 'type', 'more', 'head', 'tail', 'pwd', 'where', 'findstr']);
-const DELETE_COMMANDS = new Set(['rm', 'rmdir', 'del', 'erase', 'remove-item']);
+const DELETE_COMMANDS = new Set(['rm', 'rmdir', 'rd', 'rmdir.exe', 'rd.exe', 'del', 'erase', 'remove-item']);
 const MOVE_COMMANDS = new Set(['mv', 'move', 'move-item', 'ren', 'rename', 'rename-item']);
 const COPY_COMMANDS = new Set(['cp', 'copy', 'copy-item', 'install']);
 const CREATE_COMMANDS = new Set(['touch', 'mkdir', 'md', 'new-item', 'tee']);
@@ -18,7 +18,26 @@ function lower(value) {
   return String(value || '').toLowerCase();
 }
 
-function splitTopLevel(command) {
+function isWindowsShell(shell) {
+  return ['cmd', 'cmd.exe', 'powershell', 'pwsh'].includes(lower(shell));
+}
+
+function escapeCharacter(shell) {
+  const name = lower(shell);
+  if (name === 'powershell' || name === 'pwsh') return '`';
+  if (name === 'cmd' || name === 'cmd.exe') return '^';
+  return '\\';
+}
+
+function shouldEscape(command, index, shell, quote) {
+  const char = command[index];
+  const escape = escapeCharacter(shell);
+  if (char !== escape) return false;
+  if (escape === '\\' && quote === '"') return false;
+  return true;
+}
+
+function splitTopLevel(command, shell = 'posix') {
   const parts = [];
   let current = '';
   let quote = null;
@@ -31,7 +50,7 @@ function splitTopLevel(command) {
       escaped = false;
       continue;
     }
-    if (char === '\\' && quote !== '"') {
+    if (shouldEscape(command, index, shell, quote)) {
       current += char;
       escaped = true;
       continue;
@@ -59,7 +78,7 @@ function splitTopLevel(command) {
   return parts;
 }
 
-function hasTopLevelSingleAmpersand(command) {
+function hasTopLevelSingleAmpersand(command, shell = 'posix') {
   let quote = null;
   let escaped = false;
   for (let index = 0; index < command.length; index += 1) {
@@ -69,7 +88,7 @@ function hasTopLevelSingleAmpersand(command) {
       escaped = false;
       continue;
     }
-    if (char === '\\' && quote !== '"') {
+    if (shouldEscape(command, index, shell, quote)) {
       escaped = true;
       continue;
     }
@@ -83,15 +102,16 @@ function hasTopLevelSingleAmpersand(command) {
   return false;
 }
 
-function hasUnclosedQuote(command) {
+function hasUnclosedQuote(command, shell = 'posix') {
   let quote = null;
   let escaped = false;
-  for (const char of command) {
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index];
     if (escaped) {
       escaped = false;
       continue;
     }
-    if (char === '\\' && quote !== '"') {
+    if (shouldEscape(command, index, shell, quote)) {
       escaped = true;
       continue;
     }
@@ -100,7 +120,7 @@ function hasUnclosedQuote(command) {
   return quote !== null;
 }
 
-function tokenize(command) {
+function tokenize(command, shell = 'posix') {
   const tokens = [];
   let current = '';
   let quote = null;
@@ -116,9 +136,10 @@ function tokenize(command) {
       escaped = false;
       continue;
     }
-    if (char === '\\' && quote !== '"') {
+    if (shouldEscape(command, index, shell, quote)) {
       const next = command[index + 1];
-      if (next && /[\s|;&$`"'\\]/.test(next)) {
+      const escape = escapeCharacter(shell);
+      if (next && (escape !== '\\' || /[\s|;&$`"'\\]/.test(next))) {
         escaped = true;
         continue;
       }
@@ -149,12 +170,16 @@ function commandName(tokens) {
   return lower(tokens[index] || '').replace(/^.*[\\/]/, '');
 }
 
-function isOption(token) {
-  return typeof token === 'string' && token.startsWith('-');
+function isOption(token, shell = 'posix') {
+  if (typeof token !== 'string') return false;
+  if (token.startsWith('-')) return true;
+  return lower(shell) === 'cmd' || lower(shell) === 'cmd.exe'
+    ? /^\/[A-Za-z][A-Za-z0-9_-]*$/.test(token)
+    : false;
 }
 
-function pathLike(token) {
-  if (!token || isOption(token)) return false;
+function pathLike(token, shell = 'posix') {
+  if (!token || isOption(token, shell)) return false;
   if (token === '.' || token === '..' || token.startsWith('./') || token.startsWith('../') || token.startsWith('.\\') || token.startsWith('..\\')) return true;
   if (/^[A-Za-z]:[\\/]/.test(token) || token.startsWith('/') || token.startsWith('\\\\')) return true;
   return /[\\/]/.test(token) || /\.(?:md|json|js|cjs|mjs|ts|txt|log|env|key|pem|sh|ps1|cmd|bat|py)$/i.test(token) || /^\.env(?:\.|$)/i.test(token);
@@ -162,17 +187,18 @@ function pathLike(token) {
 
 function extractPathTokens(tokens, start = 1, options = {}) {
   const paths = [];
+  const shell = options.shell || 'posix';
   for (let index = start; index < tokens.length; index += 1) {
     const token = tokens[index];
-    if (isOption(token)) {
+    if (isOption(token, shell)) {
       if (['-path', '--path', '-literalpath', '--literal-path', '-destination', '--destination', '-source', '--source', '--output', '-o', '/path', '/d'].includes(lower(token))) {
         const value = tokens[index + 1];
-        if (value && !isOption(value)) paths.push({ path: value, kind: 'command-target' });
+        if (value && !isOption(value, shell)) paths.push({ path: value, kind: 'command-target' });
         index += 1;
       }
       continue;
     }
-    if (pathLike(token) || options.all_positionals === true) paths.push({ path: token, kind: 'command-target' });
+    if (pathLike(token, shell) || options.all_positionals === true) paths.push({ path: token, kind: 'command-target' });
   }
   return paths;
 }
@@ -221,6 +247,12 @@ function isBulkSecretPath(value) {
     || /(?:^|[\\/])(?:\.ssh|\.aws|\.gnupg)(?:[\\/]*$)/i.test(text)
     || /(?:^|[\\/])(?:credentials|private[_-]?key)(?:[\\/]*)$/i.test(text)
     || /(?:^|[\\/])(?:shadow|gshadow|SAM|SECURITY)(?:$|[\\/])/i.test(text);
+}
+
+function isSecretVariableReference(value) {
+  const text = String(value || '');
+  return /^(?:env:|\$env:)[A-Za-z_][A-Za-z0-9_]*$/i.test(text)
+    || /^%[A-Za-z_][A-Za-z0-9_]*%$/i.test(text);
 }
 
 function secretDumpCommand(name, command) {
@@ -290,11 +322,11 @@ function classifyGithub(tokens) {
   return commonResult('github-repository-workflow-mutation', 'unsupported', [], { external_targets: external, opaque: true, reason_codes: ['UNSUPPORTED_ROUTE'] });
 }
 
-function classifyGit(tokens) {
+function classifyGit(tokens, shell = 'posix') {
   const subcommand = lower(tokens[1] || '');
   if (!subcommand) return commonResult('opaque-command', 'unsupported', [], { opaque: true, reason_codes: ['OPAQUE_COMMAND_UNSUPPORTED'] });
-  if (['status', 'diff', 'log', 'show', 'rev-parse', 'ls-files', 'branch'].includes(subcommand) && !tokens.some((token) => ['-d', '-D', '--delete'].includes(token))) return commonResult('git-local-read', 'allow', extractPathTokens(tokens, 2), { reason_codes: ['ROUTINE_GIT_OPERATION'] });
-  if (subcommand === 'add') return commonResult('git-stage', 'allow', extractPathTokens(tokens, 2), { reason_codes: ['ROUTINE_GIT_OPERATION'] });
+  if (['status', 'diff', 'log', 'show', 'rev-parse', 'ls-files', 'branch'].includes(subcommand) && !tokens.some((token) => ['-d', '-D', '--delete'].includes(token))) return commonResult('git-local-read', 'allow', extractPathTokens(tokens, 2, { shell }), { reason_codes: ['ROUTINE_GIT_OPERATION'] });
+  if (subcommand === 'add') return commonResult('git-stage', 'allow', extractPathTokens(tokens, 2, { shell }), { reason_codes: ['ROUTINE_GIT_OPERATION'] });
   if (subcommand === 'commit') {
     const destructive = tokens.some((token) => ['--amend', '--no-verify'].includes(lower(token)));
     return commonResult(destructive ? 'git-destructive' : 'git-commit', destructive ? 'ask' : 'allow', [], { reason_codes: [destructive ? 'DESTRUCTIVE_OPERATION_REQUIRES_APPROVAL' : 'ROUTINE_GIT_OPERATION'] });
@@ -322,11 +354,11 @@ function classifyGit(tokens) {
   }
   if (subcommand === 'reset' && tokens.some((token) => lower(token) === '--hard')) return commonResult('git-destructive', 'ask', [], { reason_codes: ['DESTRUCTIVE_OPERATION_REQUIRES_APPROVAL'] });
   if (['clean', 'rebase', 'filter-branch', 'filter-repo'].includes(subcommand)) return commonResult('git-destructive', 'ask', [], { reason_codes: ['DESTRUCTIVE_OPERATION_REQUIRES_APPROVAL'] });
-  if (subcommand === 'restore' || (subcommand === 'checkout' && tokens.some((token) => token === '--'))) return commonResult('git-destructive', 'ask', extractPathTokens(tokens, 2), { reason_codes: ['DESTRUCTIVE_OPERATION_REQUIRES_APPROVAL'] });
+  if (subcommand === 'restore' || (subcommand === 'checkout' && tokens.some((token) => token === '--'))) return commonResult('git-destructive', 'ask', extractPathTokens(tokens, 2, { shell }), { reason_codes: ['DESTRUCTIVE_OPERATION_REQUIRES_APPROVAL'] });
   if (subcommand === 'branch' && tokens.some((token) => ['-d', '-D', '--delete'].includes(token))) return commonResult('git-destructive', 'ask', [], { reason_codes: ['DESTRUCTIVE_OPERATION_REQUIRES_APPROVAL'] });
   if (subcommand === 'tag' && tokens.some((token) => ['-d', '--delete'].includes(token))) return commonResult('git-destructive', 'ask', [], { reason_codes: ['DESTRUCTIVE_OPERATION_REQUIRES_APPROVAL'] });
   if (['remote', 'config', 'clone', 'fetch', 'pull', 'submodule'].includes(subcommand)) return commonResult('external-mutation', 'ask', [], { external_targets: [{ class: 'git-remote', digest: sha256({ subcommand }) }], reason_codes: ['EXTERNAL_MUTATION_REQUIRES_APPROVAL'] });
-  return commonResult('opaque-command', 'unsupported', extractPathTokens(tokens, 2), { opaque: true, reason_codes: ['OPAQUE_COMMAND_UNSUPPORTED'] });
+  return commonResult('opaque-command', 'unsupported', extractPathTokens(tokens, 2, { shell }), { opaque: true, reason_codes: ['OPAQUE_COMMAND_UNSUPPORTED'] });
 }
 
 function hasDynamicExpansion(command) {
@@ -335,7 +367,7 @@ function hasDynamicExpansion(command) {
 }
 
 function classifyAtomic(command, shell) {
-  const tokens = tokenize(command);
+  const tokens = tokenize(command, shell);
   const name = commandName(tokens);
   const normalized = lower(command);
   const allPositionalTargets = new Set([
@@ -354,7 +386,7 @@ function classifyAtomic(command, shell) {
     'ls',
     'findstr',
   ]);
-  const targets = extractPathTokens(tokens, 1, { all_positionals: allPositionalTargets.has(name) });
+  const targets = extractPathTokens(tokens, 1, { all_positionals: allPositionalTargets.has(name), shell });
   const secretTargets = targets.filter((entry) => isSecretPath(entry.path));
   const catastrophicTargets = targets.filter((entry) => catastrophicPath(entry.path));
 
@@ -363,11 +395,11 @@ function classifyAtomic(command, shell) {
   if (secretVariable) return commonResult('secret-access', 'ask', [{ path: 'env:' + secretVariable, kind: 'secret-variable' }], { secret_target: true, reason_codes: ['SECRET_ACCESS_REQUIRES_APPROVAL'] });
   if (secretDumpCommand(name, command)) return commonResult('secret-dump', 'deny', secretTargets, { secret_target: true, reason_codes: ['SECRET_DUMP_DENIED'] });
   if (hasDynamicExpansion(command)) return commonResult('opaque-command', 'unsupported', [], { opaque: true, reason_codes: ['DYNAMIC_TARGET_UNSUPPORTED'] });
-  if (hasUnclosedQuote(command)) return commonResult('opaque-command', 'unsupported', [], { opaque: true, reason_codes: ['OPAQUE_COMMAND_UNSUPPORTED'] });
+  if (hasUnclosedQuote(command, shell)) return commonResult('opaque-command', 'unsupported', [], { opaque: true, reason_codes: ['OPAQUE_COMMAND_UNSUPPORTED'] });
   if (name === 'gh') return classifyGithub(tokens);
-  if (name === 'git') return classifyGit(tokens);
+  if (name === 'git') return classifyGit(tokens, shell);
   if (SHELL_NAMES.has(name) && hasNestedShell(tokens, shell)) return commonResult('opaque-command', 'unsupported', [], { nested: true, opaque: true, reason_codes: ['OPAQUE_COMMAND_UNSUPPORTED'] });
-  if (['node', 'node.exe', 'python', 'python3', 'pwsh', 'powershell', 'cmd', 'cmd.exe'].includes(name) && tokens.slice(1).some((token) => /\.(?:cjs|js|mjs|py|ps1|sh|bat|cmd)$/i.test(token))) return commonResult('opaque-command', 'unsupported', extractPathTokens(tokens, 1), { opaque: true, reason_codes: ['OPAQUE_COMMAND_UNSUPPORTED'] });
+  if (['node', 'node.exe', 'python', 'python3', 'pwsh', 'powershell', 'cmd', 'cmd.exe'].includes(name) && tokens.slice(1).some((token) => /\.(?:cjs|js|mjs|py|ps1|sh|bat|cmd)$/i.test(token))) return commonResult('opaque-command', 'unsupported', extractPathTokens(tokens, 1, { shell }), { opaque: true, reason_codes: ['OPAQUE_COMMAND_UNSUPPORTED'] });
 
   if (secretTargets.length && (NETWORK_COMMANDS.has(name) || /(?:base64|convertto-base64|send|upload|post|put)/i.test(command))) return commonResult('secret-exfiltration', 'deny', secretTargets, { secret_target: true, reason_codes: ['SECRET_EXFILTRATION_DENIED'] });
   if (secretTargets.length && SECRET_READ_COMMANDS.has(name) && secretTargets.length === 1 && !isBulkSecretPath(secretTargets[0].path)) return commonResult('secret-access', 'ask', secretTargets, { secret_target: true, reason_codes: ['SECRET_ACCESS_REQUIRES_APPROVAL'] });
@@ -411,11 +443,12 @@ function mergeResults(results) {
 
 function classifyCommand(command, options = {}) {
   if (typeof command !== 'string' || !command.trim()) return commonResult('opaque-command', 'unsupported', [], { opaque: true, reason_codes: ['OPAQUE_COMMAND_UNSUPPORTED'] });
-  const parts = splitTopLevel(command);
-  const results = parts.map((part) => classifyAtomic(part, options.shell));
+  const shell = options.shell || 'posix';
+  const parts = splitTopLevel(command, shell);
+  const results = parts.map((part) => classifyAtomic(part, shell));
   const hasPipeline = /(^|[^\\])\|([^|]|$)/.test(command);
   const hasRedirection = /(?:^|\s)\d{0,2}(?:>>|>)/.test(command);
-  const hasSingleAmpersand = hasTopLevelSingleAmpersand(command);
+  const hasSingleAmpersand = hasTopLevelSingleAmpersand(command, shell);
   const redirection = redirectionTargets(command);
   const merged = mergeResults(results);
   merged.pipeline = hasPipeline;
@@ -469,6 +502,27 @@ function classifyStructuredOperation(operation, options = {}) {
   const action = declaredAction && declaredAction !== 'unknown' ? declaredAction : lower(structured.action || structured.operation || structured.type || '');
   const route = lower(operation?.canonical_route || operation?.host_tool || '');
   const targets = operation.targets || [];
+  const resolvedSecretTargets = targets.filter((target) => {
+    if (!target || target.status !== 'resolved') return false;
+    const canonical = target.canonical_path;
+    return (typeof canonical === 'string' && (isSecretPath(canonical) || isBulkSecretPath(canonical)))
+      || target.evidence?.source === 'operation-variable';
+  });
+  const structuredVariableReference = [structured.target, structured.path, structured.variable, structured.environment_variable]
+    .flatMap((value) => Array.isArray(value) ? value : [value])
+    .some((value) => typeof value === 'string' && isSecretVariableReference(value));
+  const structuredSecretVariable = structuredVariableReference || ['variable', 'environment_variable', 'environment_variable_name', 'env'].some((key) => (
+    Object.hasOwn(structured, key) && structured[key] !== null && structured[key] !== undefined
+  ));
+  const hasExternalRoute = Boolean(
+    operation?.mcp_server
+      || operation?.mcp_tool
+      || operation?.external_targets?.length
+      || /(?:database|cloud|provider|deploy|production|external|mcp)/.test(route),
+  );
+  if ((resolvedSecretTargets.length || structuredSecretVariable) && hasExternalRoute) {
+    return commonResult('secret-exfiltration', 'deny', resolvedSecretTargets.length ? resolvedSecretTargets : targets, { secret_target: true, reason_codes: ['SECRET_EXFILTRATION_DENIED'] });
+  }
   if (/github/.test(route)) {
     const routeClass = /review/.test(route) ? 'github-review-mutation' : /issue/.test(route) ? 'github-issue-mutation' : /(?:pull|pr)/.test(route) ? 'github-pr-mutation' : 'github-repository-workflow-mutation';
     if (['read', 'status', 'diff', 'list', 'view', 'checks'].includes(action)) return commonResult('github-read', 'allow', targets, { external_targets: [{ class: 'github', digest: sha256({ route }) }], reason_codes: ['ROUTINE_GITHUB_READ'] });
@@ -476,9 +530,15 @@ function classifyStructuredOperation(operation, options = {}) {
   }
   if (operation?.mcp_server || operation?.mcp_tool || operation?.external_targets?.length || /(?:database|cloud|provider|deploy|production|external|mcp)/.test(route)) return commonResult('external-mutation', 'ask', targets, { external_targets: operation.external_targets || [{ class: route || 'external-system', digest: sha256({ route }) }], reason_codes: ['EXTERNAL_MUTATION_REQUIRES_APPROVAL'] });
   if (['secret-exfiltration', 'secret-dump', 'credential-dump'].includes(action)) return commonResult('secret-dump', 'deny', targets, { secret_target: true, reason_codes: ['SECRET_DUMP_DENIED'] });
+  if (['dump', 'export', 'exfiltrate', 'read-all', 'list-secrets'].includes(action)) return commonResult('secret-dump', 'deny', targets, { secret_target: true, reason_codes: ['SECRET_DUMP_DENIED'] });
   if (action === 'secret-access' || action === 'read-secret') return commonResult('secret-access', 'ask', targets, { secret_target: true, reason_codes: ['SECRET_ACCESS_REQUIRES_APPROVAL'] });
   if (['guardrail-bypass', 'bypass', 'disable-guardrail', 'disable-hook'].includes(action)) return commonResult('guardrail-bypass', 'deny', targets, { reason_codes: ['GUARDRAIL_BYPASS_DENIED'] });
   if (['overwrite', 'truncate', 'delete', 'git-destructive', 'git-force-push'].includes(action)) return commonResult(action, 'ask', targets, { reason_codes: ['DESTRUCTIVE_OPERATION_REQUIRES_APPROVAL'] });
+  if (['read', 'edit', 'create', 'rename'].includes(action) && (resolvedSecretTargets.length || structuredSecretVariable)) {
+    const bulk = resolvedSecretTargets.some((target) => isBulkSecretPath(target.canonical_path)) || (structuredSecretVariable && ['dump', 'export', 'read-all'].includes(action));
+    if (bulk) return commonResult('secret-dump', 'deny', resolvedSecretTargets.length ? resolvedSecretTargets : targets, { secret_target: true, reason_codes: ['SECRET_DUMP_DENIED'] });
+    return commonResult('secret-access', 'ask', resolvedSecretTargets.length ? resolvedSecretTargets : targets, { secret_target: true, reason_codes: ['SECRET_ACCESS_REQUIRES_APPROVAL'] });
+  }
   if (['read', 'edit', 'create', 'rename', 'git-local-read', 'git-stage', 'git-commit', 'git-push', 'toolkit-temp-cleanup'].includes(action)) return commonResult(action, 'allow', targets, { reason_codes: [action.startsWith('git-') ? 'ROUTINE_GIT_OPERATION' : 'ROUTINE_REPOSITORY_OPERATION'] });
   if (action) return commonResult(action, 'unsupported', targets, { opaque: true, reason_codes: ['UNSUPPORTED_ROUTE'] });
   return commonResult('opaque-command', 'unsupported', targets, { opaque: true, reason_codes: ['OPAQUE_COMMAND_UNSUPPORTED'] });

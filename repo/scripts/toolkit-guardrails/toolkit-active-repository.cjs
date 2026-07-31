@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { sha256 } = require('./toolkit-guardrail-policy.cjs');
 
 const RESOLUTION_STATUSES = Object.freeze([
   'resolved',
@@ -257,6 +258,67 @@ function resolveWithEvidence(rawPath, basePath, semantics, evidence, fsResolver,
   };
 }
 
+function unauthorisedAdditionalRootAuthority(kind) {
+  return {
+    authorization_status: 'unauthorized',
+    authority_provenance: null,
+    authority_binding: {
+      canonical_path: null,
+      canonical_path_digest: null,
+      kind: typeof kind === 'string' && kind.trim() ? kind : null,
+      trusted: false,
+    },
+  };
+}
+
+function safeAuthorityProvenance(value) {
+  return typeof value === 'string'
+    && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)
+    && !/(?:secret|token|credential|password|private|untrusted|caller|input|executor)/i.test(value)
+    ? value
+    : null;
+}
+
+function verifyAdditionalRootAuthority(canonicalRoot, intendedKind, semantics, options = {}, stringOnly = false) {
+  const denied = unauthorisedAdditionalRootAuthority(intendedKind);
+  if (stringOnly || typeof options.additionalRootAuthorityVerifier !== 'function' || !canonicalRoot || !intendedKind) return denied;
+  let evidence;
+  try {
+    evidence = options.additionalRootAuthorityVerifier(canonicalRoot, intendedKind);
+  } catch (error) {
+    return denied;
+  }
+  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return denied;
+  const allowedKeys = new Set(['status', 'authorized', 'trusted', 'provenance', 'canonical_path', 'canonical_path_digest', 'kind']);
+  if (Object.keys(evidence).some((key) => !allowedKeys.has(key))) return denied;
+  if (
+    evidence.status !== 'verified'
+    || evidence.authorized !== true
+    || evidence.trusted !== true
+    || evidence.kind !== intendedKind
+  ) return denied;
+  const provenance = safeAuthorityProvenance(evidence.provenance);
+  if (!provenance) return denied;
+  const canonicalPathMatches = typeof evidence.canonical_path === 'string'
+    && samePath(evidence.canonical_path, canonicalRoot, semantics);
+  const digestMatches = typeof evidence.canonical_path_digest === 'string'
+    && evidence.canonical_path_digest === sha256(canonicalRoot);
+  if (!Object.hasOwn(evidence, 'canonical_path') && !Object.hasOwn(evidence, 'canonical_path_digest')) return denied;
+  if (Object.hasOwn(evidence, 'canonical_path') && !canonicalPathMatches) return denied;
+  if (Object.hasOwn(evidence, 'canonical_path_digest') && !digestMatches) return denied;
+  if (!canonicalPathMatches && !digestMatches) return denied;
+  return {
+    authorization_status: 'authorized',
+    authority_provenance: provenance,
+    authority_binding: {
+      canonical_path: canonicalPathMatches ? canonicalRoot : null,
+      canonical_path_digest: digestMatches ? sha256(canonicalRoot) : null,
+      kind: intendedKind,
+      trusted: true,
+    },
+  };
+}
+
 function rootEvidence(context, name) {
   const evidence = normalizeResolutionEvidence(context?.resolution_evidence);
   if (!evidence || typeof evidence !== 'object') return null;
@@ -337,27 +399,44 @@ function resolveRepositoryContext(input, options = {}) {
   const additional = firstDefined(context.approved_additional_roots, context.authorised_additional_roots, []);
   for (const entry of Array.isArray(additional) ? additional : []) {
     const raw = typeof entry === 'string' ? entry : firstDefined(entry?.path, entry?.root, null);
+    const stringOnly = typeof entry === 'string';
+    const intendedKind = typeof entry === 'object' && entry !== null && Object.hasOwn(entry, 'kind')
+      ? (typeof entry.kind === 'string' && entry.kind.trim() ? entry.kind : null)
+      : 'approved-additional-root';
     if (!raw) {
-      baseResult.approved_additional_roots.push({ path: null, canonical_path: null, status: 'unresolved', kind: 'unknown' });
+      baseResult.approved_additional_roots.push({
+        path: null,
+        canonical_path: null,
+        status: 'unresolved',
+        link_type: 'none',
+        kind: intendedKind || 'unknown',
+        ...unauthorisedAdditionalRootAuthority(intendedKind),
+      });
       continue;
     }
     const evidence = typeof entry === 'object'
       ? firstDefined(entry.resolution_evidence, context.resolution_evidence, null)
       : context.resolution_evidence;
     const resolved = resolveWithEvidence(raw, cwd || proposedRepo, semantics, evidence, fsResolver, options);
+    const authority = resolved.status === 'resolved'
+      ? verifyAdditionalRootAuthority(resolved.canonical_path, intendedKind, semantics, options, stringOnly)
+      : unauthorisedAdditionalRootAuthority(intendedKind);
     baseResult.approved_additional_roots.push({
       path: raw,
       canonical_path: resolved.canonical_path,
       status: resolved.status,
       link_type: resolved.link_type,
-      kind: typeof entry === 'object' ? (entry.kind || 'approved-additional-root') : 'approved-additional-root',
+      kind: intendedKind || 'unknown',
+      ...authority,
     });
   }
 
   baseResult.authorised_directories = [
     baseResult.canonical_repository_root,
     baseResult.canonical_worktree_root,
-    ...baseResult.approved_additional_roots.map((entry) => entry.canonical_path),
+    ...baseResult.approved_additional_roots
+      .filter((entry) => entry.authorization_status === 'authorized')
+      .map((entry) => entry.canonical_path),
   ].filter(Boolean);
 
   const targetInputs = Array.isArray(context.canonical_target_paths) ? context.canonical_target_paths : [];
@@ -421,7 +500,9 @@ function resolveTarget(targetInput, repositoryContext, options = {}) {
     result.resolved_inside = true;
   } else {
     const additional = (context.approved_additional_roots || []).find((entry) => (
-      entry.status === 'resolved' && isWithin(entry.canonical_path, canonical, semantics)
+      entry.status === 'resolved'
+      && entry.authorization_status === 'authorized'
+      && isWithin(entry.canonical_path, canonical, semantics)
     ));
     if (additional) {
       result.target_class = 'approved-additional-root';

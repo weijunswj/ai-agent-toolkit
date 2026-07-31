@@ -378,6 +378,18 @@ function fixtureRepository(overrides = {}) {
   };
 }
 
+function trustedAdditionalRootVerifier(expectedPath = ADDITIONAL, expectedKind = 'additional-worktree') {
+  return (canonicalRoot, kind) => ({
+    status: 'verified',
+    authorized: canonicalRoot === expectedPath && kind === expectedKind,
+    trusted: true,
+    provenance: 'controller-fixture',
+    canonical_path: expectedPath,
+    canonical_path_digest: policy.sha256(expectedPath),
+    kind: expectedKind,
+  });
+}
+
 function fixtureAuthority(overrides = {}) {
   return {
     prompt: { active: true },
@@ -552,10 +564,13 @@ test('repository resolver requires explicit repository context and recognizes Wi
 });
 
 test('repository resolver distinguishes approved additional roots and unauthorized roots', () => {
-  const resolved = repository.resolveRepositoryContext(fixtureRepository({
+  const input = fixtureRepository({
     approved_additional_roots: [{ path: ADDITIONAL, kind: 'additional-worktree', resolution_evidence: { status: 'trusted', source: 'deterministic-fixture' } }],
-  }));
+  });
+  const resolved = repository.resolveRepositoryContext(input, { additionalRootAuthorityVerifier: trustedAdditionalRootVerifier() });
   assert.equal(resolved.path_resolution_status, 'resolved');
+  assert.equal(resolved.approved_additional_roots[0].authorization_status, 'authorized');
+  assert.equal(resolved.approved_additional_roots[0].authority_binding.trusted, true);
   assert.equal(repository.resolveTarget({ path: `${ADDITIONAL}\\src\\file.txt` }, resolved).target_class, 'approved-additional-root');
   const unauthorized = repository.resolveTarget({ path: 'C:\\fixture\\workspace\\unapproved-root\\file.txt' }, resolved);
   assert.equal(unauthorized.resolved_inside, false);
@@ -622,6 +637,11 @@ test('routine edit inside the canonical repository returns allow with safe diges
 
 test('structured create, destructive overwrite, truncation, and deletion use the expected boundary', () => {
   assert.equal(decision(fixtureInput(structured('create', `${ROOT}\\new.txt`))).decision, 'allow');
+  const secretRead = decision(fixtureInput(structured('read', `${ROOT}\\.env`)));
+  assert.equal(secretRead.decision, 'ask');
+  assert.equal(secretRead.reason_code, 'SECRET_ACCESS_REQUIRES_APPROVAL');
+  assert.equal(secretRead.safe_target_class, 'secret-bearing');
+  assert.equal(decision(fixtureInput(structured('read', `${ROOT}\\README.md`))).decision, 'allow');
   assert.equal(decision(fixtureInput(structured('overwrite', `${ROOT}\\existing.txt`))).decision, 'ask');
   assert.equal(decision(fixtureInput(structured('truncate', `${ROOT}\\existing.txt`))).decision, 'ask');
   assert.equal(decision(fixtureInput(structured('delete', `${ROOT}\\existing.txt`))).decision, 'ask');
@@ -699,6 +719,13 @@ test('POSIX, PowerShell, CMD, redirection, pipeline, nested shell, and opaque sc
   assert.ok(powershellTarget.target_inputs.some((entry) => entry.path === 'repo/file.txt'));
   assert.equal(decision(fixtureInput({ command: 'type repo/file.txt', shell: 'cmd' })).decision, 'allow');
   assert.equal(decision(fixtureInput({ command: 'del repo/file.txt', shell: 'cmd' })).decision, 'ask');
+  assert.deepEqual(classifier.tokenize('rmdir C:\\ /s /q', 'cmd'), ['rmdir', 'C:\\', '/s', '/q']);
+  assert.equal(decision(fixtureInput({ command: 'rmdir C:\\ /s /q', shell: 'cmd' })).decision, 'deny');
+  assert.equal(decision(fixtureInput({ command: 'rd /s /q C:\\', shell: 'cmd' })).decision, 'deny');
+  const ordinaryDirectory = decision(fixtureInput({ command: `rmdir ${ROOT}\\dir /s /q`, shell: 'cmd' }));
+  assert.equal(ordinaryDirectory.decision, 'ask');
+  assert.equal(ordinaryDirectory.reason_code, 'DESTRUCTIVE_OPERATION_REQUIRES_APPROVAL');
+  assert.notEqual(ordinaryDirectory.safe_target_class, 'protected-target');
   assert.equal(decision(fixtureInput({ command: 'cat repo/file.txt | grep value', shell: 'posix' })).decision, 'unsupported');
   assert.equal(decision(fixtureInput({ command: 'bash -c "rm repo/file.txt"', shell: 'posix' })).decision, 'unsupported');
   assert.equal(decision(fixtureInput({ command: 'node repo/scripts/custom.cjs', shell: 'posix' })).decision, 'unsupported');
@@ -818,6 +845,29 @@ test('real normalized operation and approval records validate mechanically again
   const approvalResult = validateApproval.validate(approval);
   assert.equal(operationResult.valid, true, JSON.stringify(operationResult.errors));
   assert.equal(approvalResult.valid, true, JSON.stringify(approvalResult.errors));
+  const additionalInput = fixtureInput(structured('edit', `${ADDITIONAL}\\schema-extra.txt`), {
+    repository: fixtureRepository({
+      approved_additional_roots: [{ path: ADDITIONAL, kind: 'additional-worktree', resolution_evidence: { status: 'trusted', source: 'deterministic-fixture' } }],
+    }),
+  });
+  const unauthorisedAdditional = normalizer.normalizeOperation(additionalInput);
+  assert.equal(unauthorisedAdditional.repository.approved_additional_roots[0].authorization_status, 'unauthorized');
+  assert.equal(validateOperation.validate(unauthorisedAdditional).valid, true);
+  const authorisedAdditional = normalizer.normalizeOperation(additionalInput, { additionalRootAuthorityVerifier: trustedAdditionalRootVerifier() });
+  assert.equal(authorisedAdditional.repository.approved_additional_roots[0].authorization_status, 'authorized');
+  assert.ok(authorisedAdditional.repository.authorised_directories.includes(ADDITIONAL));
+  assert.equal(validateOperation.validate(authorisedAdditional).valid, true);
+  const malformedAdditional = {
+    ...unauthorisedAdditional,
+    repository: {
+      ...unauthorisedAdditional.repository,
+      approved_additional_roots: [{
+        ...unauthorisedAdditional.repository.approved_additional_roots[0],
+        authority_binding: { canonical_path: null, canonical_path_digest: null, kind: 'additional-worktree' },
+      }],
+    },
+  };
+  assert.equal(validateOperation.validate(malformedAdditional).valid, false);
   assert.equal(validateOperation.validate({ ...record, repository: { ...record.repository, undeclared_runtime_property: true } }).valid, false);
   assert.equal(validateApproval.validate({ ...approval, undeclared_runtime_property: true }).valid, false);
   const malformedApprovalRecord = normalizer.normalizeOperation({ ...outside, approval: { ...approval, one_shot: 'true' } });
@@ -871,8 +921,94 @@ const fixtureCaseAssertions = new Map([
   ['repository.parent', () => assert.equal(repository.resolveTarget({ path: PARENT_FILE }, repository.resolveRepositoryContext(fixtureRepository())).target_class, 'parent-workspace')],
   ['repository.escape', () => assert.equal(repository.resolveTarget({ path: `${ROOT}\\..\\notes.txt` }, repository.resolveRepositoryContext(fixtureRepository())).target_class, 'parent-workspace')],
   ['repository.additional-worktree', () => {
-    const context = repository.resolveRepositoryContext(fixtureRepository({ approved_additional_roots: [{ path: ADDITIONAL, kind: 'additional-worktree', resolution_evidence: { status: 'trusted', source: 'deterministic-fixture' } }] }));
+    const context = repository.resolveRepositoryContext(fixtureRepository({ approved_additional_roots: [{ path: ADDITIONAL, kind: 'additional-worktree', resolution_evidence: { status: 'trusted', source: 'deterministic-fixture' } }] }), { additionalRootAuthorityVerifier: trustedAdditionalRootVerifier() });
     assert.equal(repository.resolveTarget({ path: `${ADDITIONAL}\\file.txt` }, context).target_class, 'approved-additional-root');
+  }],
+  ['repository.additional-root-generic-evidence', () => {
+    const input = fixtureInput(structured('edit', `${ADDITIONAL}\\generic.txt`), {
+      repository: fixtureRepository({ approved_additional_roots: [{ path: ADDITIONAL, kind: 'additional-worktree' }] }),
+    });
+    const context = repository.resolveRepositoryContext(input.repository);
+    assert.equal(context.approved_additional_roots[0].status, 'resolved');
+    assert.equal(context.approved_additional_roots[0].authorization_status, 'unauthorized');
+    assert.equal(context.authorised_directories.includes(ADDITIONAL), false);
+    assert.equal(decision(input).decision, 'ask');
+  }],
+  ['repository.additional-root-no-verifier', () => {
+    const input = fixtureInput(structured('edit', `${ADDITIONAL}\\no-verifier.txt`), {
+      repository: fixtureRepository({ approved_additional_roots: [{ path: ADDITIONAL, kind: 'additional-worktree', resolution_evidence: { status: 'trusted', source: 'deterministic-fixture' } }] }),
+    });
+    const context = repository.resolveRepositoryContext(input.repository);
+    assert.equal(context.approved_additional_roots[0].authorization_status, 'unauthorized');
+    assert.equal(context.authorised_directories.includes(ADDITIONAL), false);
+    assert.equal(decision(input).decision, 'ask');
+    const stringInput = fixtureInput(structured('edit', `${ADDITIONAL}\\string-entry.txt`), {
+      repository: fixtureRepository({ approved_additional_roots: [ADDITIONAL] }),
+    });
+    const stringContext = repository.resolveRepositoryContext(stringInput.repository);
+    assert.equal(stringContext.approved_additional_roots[0].authorization_status, 'unauthorized');
+    assert.equal(stringContext.authorised_directories.includes(ADDITIONAL), false);
+    assert.equal(decision(stringInput).decision, 'ask');
+  }],
+  ['repository.additional-root-verifier-exception', () => {
+    const input = fixtureInput(structured('edit', `${ADDITIONAL}\\exception.txt`), {
+      repository: fixtureRepository({ approved_additional_roots: [{ path: ADDITIONAL, kind: 'additional-worktree' }] }),
+    });
+    const context = repository.resolveRepositoryContext(input.repository, { additionalRootAuthorityVerifier() { throw new Error('fixture'); } });
+    assert.equal(context.approved_additional_roots[0].authorization_status, 'unauthorized');
+    assert.equal(context.authorised_directories.includes(ADDITIONAL), false);
+    assert.equal(decision(input, { additionalRootAuthorityVerifier() { throw new Error('fixture'); } }).decision, 'ask');
+  }],
+  ['repository.additional-root-binding-mismatch', () => {
+    const input = fixtureInput(structured('edit', `${ADDITIONAL}\\mismatch.txt`), {
+      repository: fixtureRepository({ approved_additional_roots: [{ path: ADDITIONAL, kind: 'additional-worktree' }] }),
+    });
+    const mismatchVerifiers = [
+      () => ({ status: 'verified', authorized: true, trusted: true, provenance: 'controller-fixture', canonical_path: SIBLING, canonical_path_digest: policy.sha256(SIBLING), kind: 'additional-worktree' }),
+      () => ({ status: 'verified', authorized: true, trusted: true, provenance: 'controller-fixture', canonical_path: SIBLING, canonical_path_digest: policy.sha256(ADDITIONAL), kind: 'additional-worktree' }),
+      () => ({ status: 'verified', authorized: true, trusted: true, provenance: 'controller-fixture', canonical_path_digest: '0'.repeat(64), kind: 'additional-worktree' }),
+      () => ({ status: 'verified', authorized: true, trusted: true, provenance: 'controller-fixture', canonical_path: ADDITIONAL, canonical_path_digest: policy.sha256(ADDITIONAL), kind: 'wrong-kind' }),
+      () => ({ status: 'stale', authorized: true, trusted: true, provenance: 'controller-fixture', canonical_path: ADDITIONAL, canonical_path_digest: policy.sha256(ADDITIONAL), kind: 'additional-worktree' }),
+      () => ({ status: 'verified', authorized: true, trusted: false, provenance: 'controller-fixture', canonical_path: ADDITIONAL, canonical_path_digest: policy.sha256(ADDITIONAL), kind: 'additional-worktree' }),
+      () => ({ status: 'verified', authorized: true, trusted: true, provenance: 'controller-fixture', canonical_path: ADDITIONAL, canonical_path_digest: policy.sha256(ADDITIONAL), kind: 'additional-worktree', raw: 'unexpected' }),
+    ];
+    for (const additionalRootAuthorityVerifier of mismatchVerifiers) {
+      const context = repository.resolveRepositoryContext(input.repository, { additionalRootAuthorityVerifier });
+      assert.equal(context.approved_additional_roots[0].authorization_status, 'unauthorized');
+      assert.equal(context.authorised_directories.includes(ADDITIONAL), false);
+    }
+    assert.equal(decision(input, { additionalRootAuthorityVerifier: mismatchVerifiers[0] }).decision, 'ask');
+  }],
+  ['repository.additional-root-verified', () => {
+    const input = fixtureInput(structured('edit', `${ADDITIONAL}\\verified.txt`), {
+      repository: fixtureRepository({ approved_additional_roots: [{ path: ADDITIONAL, kind: 'additional-worktree' }] }),
+    });
+    const options = { additionalRootAuthorityVerifier: trustedAdditionalRootVerifier() };
+    const context = repository.resolveRepositoryContext(input.repository, options);
+    assert.equal(context.approved_additional_roots[0].authorization_status, 'authorized');
+    assert.equal(context.approved_additional_roots[0].authority_binding.kind, 'additional-worktree');
+    assert.equal(context.authorised_directories.includes(ADDITIONAL), true);
+    assert.equal(decision(input, options).decision, 'allow');
+    const digestOnlyContext = repository.resolveRepositoryContext(input.repository, {
+      additionalRootAuthorityVerifier: (canonicalRoot, kind) => ({
+        status: 'verified',
+        authorized: true,
+        trusted: true,
+        provenance: 'controller-fixture',
+        canonical_path_digest: policy.sha256(canonicalRoot),
+        kind,
+      }),
+    });
+    assert.equal(digestOnlyContext.approved_additional_roots[0].authorization_status, 'authorized');
+  }],
+  ['repository.additional-root-caller-spoof', () => {
+    const input = fixtureInput(structured('edit', `${ADDITIONAL}\\spoof.txt`), {
+      repository: fixtureRepository({ approved_additional_roots: [{ path: ADDITIONAL, kind: 'additional-worktree', approved: true, authorised: true, trusted: true, target_class: 'approved-additional-root' }] }),
+    });
+    const context = repository.resolveRepositoryContext(input.repository);
+    assert.equal(context.approved_additional_roots[0].authorization_status, 'unauthorized');
+    assert.equal(context.authorised_directories.includes(ADDITIONAL), false);
+    assert.equal(decision(input).decision, 'ask');
   }],
   ['repository.unauthorized-root', () => assert.notEqual(repository.resolveTarget({ path: 'C:\\fixture\\workspace\\not-approved\\file.txt' }, repository.resolveRepositoryContext(fixtureRepository())).target_class, 'approved-additional-root')],
   ['repository.unresolved', () => assert.equal(repository.resolveTarget({ path: `${ROOT}\\missing.txt`, resolution_evidence: { status: 'unresolved', source: 'deterministic-fixture' } }, repository.resolveRepositoryContext(fixtureRepository())).target_class, 'unresolved-target')],
@@ -912,10 +1048,28 @@ const fixtureCaseAssertions = new Map([
   ['operation.secret-dump', () => {
     for (const [command, shell] of [['printenv', 'posix'], ['env', 'posix'], ['Get-ChildItem env:', 'powershell'], ['set', 'cmd']]) expectDecision(fixtureInput({ command, shell }), 'deny', 'SECRET_DUMP_DENIED');
     expectDecision(fixtureInput({ command: 'Get-Content .env*', shell: 'powershell' }), 'deny', 'SECRET_DUMP_DENIED');
+    expectDecision(fixtureInput(structured('read', `${ROOT}\\.env*`)), 'deny', 'SECRET_DUMP_DENIED');
+  }],
+  ['operation.structured-secret-read', () => {
+    const result = expectDecision(fixtureInput(structured('read', `${ROOT}\\.env`)), 'ask', 'SECRET_ACCESS_REQUIRES_APPROVAL');
+    assert.equal(result.safe_target_class, 'secret-bearing');
+  }],
+  ['operation.structured-nonsecret-read', () => expectDecision(fixtureInput(structured('read', `${ROOT}\\README.md`)), 'allow')],
+  ['operation.structured-secret-dump', () => {
+    expectDecision(fixtureInput(structured('read', `${ROOT}\\.env*`)), 'deny', 'SECRET_DUMP_DENIED');
+    expectDecision(fixtureInput({ ...structured('read', `${ROOT}\\.env`), mcp_server: 'fixture-upload', mcp_tool: 'send' }), 'deny', 'SECRET_EXFILTRATION_DENIED');
   }],
   ['operation.catastrophic-root', () => {
     expectDecision(fixtureInput({ command: 'rm /', shell: 'posix' }), 'deny', 'CATASTROPHIC_TARGET_DENIED');
     expectDecision(fixtureInput({ command: 'Remove-Item -Recurse C:\\', shell: 'powershell' }), 'deny', 'CATASTROPHIC_TARGET_DENIED');
+  }],
+  ['operation.cmd-catastrophic-root', () => {
+    const result = expectDecision(fixtureInput({ command: 'rmdir C:\\ /s /q', shell: 'cmd' }), 'deny', 'CATASTROPHIC_TARGET_DENIED');
+    assert.equal(result.safe_target_class, 'protected-target');
+  }],
+  ['operation.cmd-ordinary-directory-delete', () => {
+    const result = expectDecision(fixtureInput({ command: `rmdir ${ROOT}\\dir /s /q`, shell: 'cmd' }), 'ask', 'DESTRUCTIVE_OPERATION_REQUIRES_APPROVAL');
+    assert.notEqual(result.safe_target_class, 'protected-target');
   }],
   ['operation.guardrail-bypass', () => expectDecision(fixtureInput({ command: 'tool --dangerously-skip-permissions', shell: 'posix' }), 'deny')],
   ['target.class-spoofing', () => {
