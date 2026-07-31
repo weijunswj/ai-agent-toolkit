@@ -13,7 +13,7 @@
       "repository": "n8n-io/skills",
       "ref": "main",
       "advisory_target_id": "n8n-skills-hook-compatibility",
-      "reviewed_through_sha": "046c330c9308bbfc55ceab1adbe3d8fc6bebc8fa",
+      "reviewed_through_sha": "046c330c9308bbfc54ceab1adbe3d8fc6bebc8fa",
       "reviewed_at": "2026-07-30",
       "disposition": "READ_ONLY_REVIEW_REQUIRED",
       "owning_tracker": "#244"

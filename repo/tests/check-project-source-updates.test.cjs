@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { execFileSync, spawn } = require('node:child_process');
 const test = require('node:test');
 const reviewState = require('../scripts/source-watch-review-state.cjs');
 
@@ -400,7 +400,7 @@ test('a missing source review cursor falls back to the adopted source pin', asyn
 test('seeded Google, UI/UX Pro Max, and n8n review identities suppress exactly their approved states', async () => {
   const googleSha = '9bf8eae67128b6cc55ad9bf86665767deb4c11cd';
   const uiUxSha = '4857a2c5ef989794751a0f66b8545a4a49566286';
-  const n8nSha = '046c330c9308bbfc55ceab1adbe3d8fc6bebc8fa';
+  const n8nSha = '046c330c9308bbfc54ceab1adbe3d8fc6bebc8fa';
   const workspace = tempWorkspace();
   const reportRel = 'repo/source-watch/reviews/active-third-party-updates.md';
   const advisoryRel = 'repo/source-watch/advisory-targets.json';
@@ -460,6 +460,27 @@ test('seeded Google, UI/UX Pro Max, and n8n review identities suppress exactly t
     assert.match(result.stdout, /no actionable updates found/);
   });
   assert.equal(fs.existsSync(path.join(workspace, reportRel)), false);
+});
+
+test('repository seeds the exact authorized n8n cursor and excludes the prior typo', () => {
+  const authorizedSha = '046c330c9308bbfc54ceab1adbe3d8fc6bebc8fa';
+  const invalidSha = ['046c330c9308bbfc5', '5ceab1adbe3d8fc6', 'bebc8fa'].join('');
+  const reviewStatePath = path.join(repoRoot, 'repo', 'source-watch', 'review-state.json');
+  const reviewStateText = fs.readFileSync(reviewStatePath, 'utf8');
+  const document = JSON.parse(reviewStateText);
+  const record = document.records.find((candidate) => candidate.target_key === 'advisory:n8n-skills-hook-compatibility');
+  assert.ok(record, 'the seeded n8n review record exists');
+  assert.equal(record.reviewed_through_sha, authorizedSha);
+  assert.doesNotMatch(reviewStateText, new RegExp(invalidSha));
+  assert.throws(
+    () => execFileSync('git', ['grep', '-n', invalidSha, '--', '.'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    }),
+    (error) => error && error.status === 1,
+    'the prior invalid SHA is absent from tracked repository content'
+  );
 });
 
 test('a commit newer than a seeded cursor appears exactly once', async () => {

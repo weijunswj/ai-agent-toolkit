@@ -78,6 +78,11 @@ test('source-watch compares the generated report to the exact remote report befo
   const reportInspectionIndex = script.indexOf('git ls-tree "$remote_sha" -- "$REPORT_PATH"');
   const branchCheckoutIndex = script.indexOf('git switch -C "$BRANCH" origin/main');
   assert.ok(remoteShaIndex >= 0, 'remote branch SHA is read');
+  assert.match(script, /\[\[ "\$remote_sha" =~ \^\[0-9a-fA-F\]\{40\}\$ \]\]/);
+  assert.match(script, /git fetch --no-tags --force origin "refs\/heads\/\$BRANCH:\$inspection_ref"/);
+  assert.match(script, /fetched_sha="\$\(git rev-parse "\$inspection_ref\^\{commit\}"/);
+  assert.match(script, /\[ "\$fetched_sha" = "\$remote_sha" \]/);
+  assert.match(script, /git cat-file -e "\$remote_sha\^\{tree\}"/);
   assert.ok(reportInspectionIndex > remoteShaIndex, 'report inspection follows the remote SHA read');
   assert.ok(branchCheckoutIndex > reportInspectionIndex, 'trusted-main branch checkout follows report inspection');
   assert.match(script, /generated_report_blob="\$\(git hash-object -- "\$REPORT_TEMP"\)"/);
@@ -88,13 +93,57 @@ test('source-watch compares the generated report to the exact remote report befo
 
 test('identical report bytes emit pushed=false without moving, committing, or pushing the branch', () => {
   const script = updateBranchScript();
-  const noOpIndex = script.indexOf('if [ -n "$remote_report_blob" ] && [ "$generated_report_blob" = "$remote_report_blob" ]; then');
+  const noOpIndex = script.indexOf('if [ "$remote_no_op_verified" = true ]; then');
   const noOpExitIndex = script.indexOf('exit 0', noOpIndex);
   const branchCheckoutIndex = script.indexOf('git switch -C "$BRANCH" origin/main');
   assert.ok(noOpIndex >= 0, 'identical report comparison is present');
   assert.ok(noOpExitIndex > noOpIndex && noOpExitIndex < branchCheckoutIndex, 'no-op exits before checkout');
   assert.match(script.slice(noOpIndex, noOpExitIndex), /pushed=false/);
   assert.doesNotMatch(script.slice(noOpIndex, noOpExitIndex), /git (?:commit|push|switch)/);
+  assert.match(script, /remote_no_op_verified=false/);
+  assert.match(script, /remote_no_op_verified=true/);
+  assert.doesNotMatch(script, /if \[ -n "\$remote_report_blob" \] && \[ "\$generated_report_blob" = "\$remote_report_blob" \]/);
+});
+
+test('notification no-op requires an exact one-parent report-only commit whose parent is trusted main', () => {
+  const script = updateBranchScript();
+  assert.match(script, /git rev-list --parents -n 1 "\$remote_sha"/);
+  assert.match(script, /remote_parent_count=.*NF - 1/);
+  assert.match(script, /\[ "\$remote_parent_count" = "1" \]/);
+  assert.match(script, /git merge-base --is-ancestor "\$remote_parent" origin\/main/);
+  assert.match(script, /git diff-tree --no-commit-id --name-only --no-renames -r "\$remote_parent" "\$remote_sha"/);
+  assert.match(script, /\[ "\$remote_changed_paths" = "\$REPORT_PATH" \]/);
+});
+
+test('notification no-op requires a regular non-symlink report blob with the expected mode and object type', () => {
+  const script = updateBranchScript();
+  assert.match(script, /\[ "\$remote_report_mode" = "100644" \]/);
+  assert.match(script, /\[ "\$remote_report_type" = "blob" \]/);
+  assert.match(script, /\[ "\$remote_report_path" = "\$REPORT_PATH" \]/);
+  assert.match(script, /\[\[ "\$remote_report_blob" =~ \^\[0-9a-fA-F\]\{40\}\$ \]\]/);
+  assert.match(script, /remote_report_blob_type="\$\(git cat-file -t "\$remote_report_blob"/);
+  assert.match(script, /\[ "\$remote_report_blob_type" = "blob" \]/);
+  assert.match(script, /\[ "\$generated_report_blob" = "\$remote_report_blob" \]/);
+});
+
+test('notification no-op fails closed for unavailable, merge, zero-parent, unrelated-parent, or multi-path commits', () => {
+  const script = updateBranchScript();
+  const verification = script.slice(script.indexOf('remote_object_verified=false'), script.indexOf('if [ "$remote_no_op_verified" = true ]; then'));
+  assert.match(verification, /if git fetch --no-tags --force origin/);
+  assert.match(verification, /remote_object_verified=true/);
+  assert.match(verification, /remote_parent_count.*= "1"/);
+  assert.match(verification, /remote_parent.*NF == 2/);
+  assert.match(verification, /remote_changed_paths/);
+  assert.match(verification, /remote_no_op_verified=true/);
+  assert.ok(verification.indexOf('remote_no_op_verified=true') > verification.indexOf('remote_changed_paths'));
+});
+
+test('notification no-op retains main-advancement tolerance and exact initial lease authority for rebuilds', () => {
+  const script = updateBranchScript();
+  assert.match(script, /git merge-base --is-ancestor "\$remote_parent" origin\/main/);
+  assert.match(script, /git switch -C "\$BRANCH" origin\/main/);
+  assert.match(script, /git push --force-with-lease="refs\/heads\/\$BRANCH:\$remote_sha" origin "HEAD:\$BRANCH"/);
+  assert.doesNotMatch(script, /remote_sha=.*git rev-parse/);
 });
 
 test('an unverifiable existing remote report takes the safe rebuild path from trusted main', () => {
@@ -102,7 +151,7 @@ test('an unverifiable existing remote report takes the safe rebuild path from tr
   const reportInspectionIndex = script.indexOf('remote_report_entry=');
   const branchCheckoutIndex = script.indexOf('git switch -C "$BRANCH" origin/main');
   const inspection = script.slice(reportInspectionIndex, branchCheckoutIndex);
-  assert.match(inspection, /remote_report_blob=""/);
+  assert.match(script, /remote_report_blob=""/);
   assert.match(inspection, /remote_report_type.*blob/);
   assert.match(inspection, /remote_report_mode.*100644/);
   assert.ok(branchCheckoutIndex > reportInspectionIndex);
