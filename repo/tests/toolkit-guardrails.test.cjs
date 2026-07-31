@@ -1266,7 +1266,11 @@ const fixtureCaseAssertions = new Map([
   ['shell.posix', () => expectDecision(fixtureInput({ command: 'cat repo/file.txt', shell: 'posix' }), 'allow')],
   ['shell.powershell', () => expectDecision(fixtureInput({ command: 'Get-Content repo/file.txt', shell: 'powershell' }), 'allow')],
   ['shell.cmd', () => expectDecision(fixtureInput({ command: 'type repo/file.txt', shell: 'cmd' }), 'allow')],
-  ['shell.compound', () => expectDecision(fixtureInput({ command: 'git status; rm repo/file.txt', shell: 'posix' }), 'ask')],
+  ['shell.compound', () => {
+    const result = expectDecision(fixtureInput({ command: 'git status; rm repo/file.txt', shell: 'posix' }), 'ask');
+    assert.match(result.component_digest, /^[a-f0-9]{64}$/);
+    assert.ok(result.component_count >= 2);
+  }],
   ['shell.redirection', () => {
     const result = expectDecision(fixtureInput({ command: 'printf value > repo/file.txt', shell: 'posix' }), 'ask');
     const classified = classifier.classifyCommand('cat repo/file.txt > repo/out.txt', { shell: 'posix' });
