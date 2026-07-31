@@ -9,6 +9,7 @@ const agentInstructionSync = require('./sync-agent-instruction-shims.cjs');
 const sourceLockAudit = require('./audit-project-source-locks.cjs');
 const skillPortabilityAudit = require('./audit-skill-portability.cjs');
 const projectSync = require('./sync-toolkit-projects.cjs');
+const sourceWatchReviewState = require('./source-watch-review-state.cjs');
 
 function workspaceRootFromArgs(args = process.argv.slice(2)) {
   for (let i = 0; i < args.length; i += 1) {
@@ -165,7 +166,9 @@ const expectedFiles = [
   'repo/scripts/watch-project-sources.cjs',
   'repo/scripts/check-project-source-updates.cjs',
   'repo/scripts/source-watch-advisory-targets.cjs',
+  'repo/scripts/source-watch-review-state.cjs',
   'repo/source-watch/advisory-targets.json',
+  'repo/source-watch/review-state.json',
   'repo/scripts/package-skills.cjs',
   'repo/scripts/package-packs.cjs',
   'repo/scripts/audit-skill-portability.cjs',
@@ -443,6 +446,7 @@ function fail(errors, message) {
 const autoSyncGeneratedSurfacesWorkflowPath = '.github/workflows/auto-sync-generated-surfaces.yml';
 const sourceWatchPrWorkflowPath = '.github/workflows/source-watch-pr.yml';
 const advisoryTargetsPath = 'repo/source-watch/advisory-targets.json';
+const reviewStatePath = 'repo/source-watch/review-state.json';
 const sourceWatchPrNotificationRule = 'Scheduled source-watch is PR-notification-only. It may compare active SOURCE-LOCK pins and actionable advisory targets with upstream GitHub commits, then open or refresh a stable review PR. It must not copy upstream files, change SOURCE-LOCK/advisory records, execute upstream code, auto-merge, push to main, run live n8n actions, or treat notification as approval. Real updates require a separate human-approved PR.';
 const autoSyncGeneratedAgentRuleTemplateOutputs = [
   '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
@@ -2214,6 +2218,7 @@ function validateSourceWatchPrWorkflow(entry, text, errors) {
   for (const required of [
     'This PR is a review notification only.',
     'No source files or advisory tracking documents were updated.',
+    'No review-state cursors were changed.',
     'No SOURCE-LOCK pins or advisory baselines were changed.',
     'No SOURCE-LOCK pins were changed.',
     'No upstream code was executed.',
@@ -2357,7 +2362,9 @@ function validateSourceWatchTruthfulness(errors) {
     if (rel === 'repo/scripts/watch-project-sources.cjs') return true;
     if (rel === 'repo/scripts/check-project-source-updates.cjs') return true;
     if (rel === 'repo/scripts/source-watch-advisory-targets.cjs') return true;
+    if (rel === 'repo/scripts/source-watch-review-state.cjs') return true;
     if (rel === advisoryTargetsPath) return true;
+    if (rel === reviewStatePath) return true;
     if (rel.startsWith('skills/') && /\.(md|json|ya?ml)$/i.test(rel)) return true;
     return false;
   });
@@ -2438,6 +2445,41 @@ function validateAdvisoryTargets(errors) {
   }
 }
 
+function validateSourceWatchReviewState(errors) {
+  let document;
+  try {
+    document = readJson(reviewStatePath);
+  } catch (error) {
+    fail(errors, `${reviewStatePath} must be valid JSON: ${error.message}`);
+    return;
+  }
+
+  const identities = [];
+  try {
+    for (const entry of listFiles().filter((candidate) => candidate.relPath.endsWith('/SOURCE-LOCK.json'))) {
+      const lock = readJson(entry.relPath);
+      if (sourceLockAudit.isActiveThirdPartyAttributionLock(lock)) {
+        identities.push(sourceWatchReviewState.sourceLockIdentity({ relPath: entry.relPath, lock }));
+      }
+    }
+    const advisoryDocument = readJson(advisoryTargetsPath);
+    for (const target of advisoryDocument.targets || []) {
+      if (target && target.enabled !== false && ['github_repo', 'github_path'].includes(target.kind)) {
+        identities.push(sourceWatchReviewState.advisoryIdentity(target));
+      }
+    }
+  } catch (error) {
+    fail(errors, `${reviewStatePath} target identity validation failed: ${error.message}`);
+    return;
+  }
+
+  try {
+    sourceWatchReviewState.validateReviewStateDocument(document, reviewStatePath, identities);
+  } catch (error) {
+    fail(errors, error.message);
+  }
+}
+
 function validateRemovedWeeklyRadar(errors) {
   for (const relPath of [
     '.github/workflows/weekly-ecosystem-radar.yml',
@@ -2510,6 +2552,7 @@ function runValidation() {
   validateWorkflows(errors);
   validateMarkdownLinks(errors);
   validateAdvisoryTargets(errors);
+  validateSourceWatchReviewState(errors);
   validateSourceWatchTruthfulness(errors);
   validateNoRepoWideMcpSurface(errors);
   return errors;

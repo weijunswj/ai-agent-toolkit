@@ -67,9 +67,36 @@ jobs:
         run: |
           set -euo pipefail
           test -f "$REPORT_TEMP"
+          test ! -L "$REPORT_TEMP"
+          remote_sha="$(git ls-remote --heads origin "refs/heads/$BRANCH" | awk 'NF {print $1; exit}')"
+          if [ -n "$remote_sha" ] && ! [[ "$remote_sha" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "Unable to verify the exact remote source-watch branch SHA: $remote_sha" >&2
+            exit 1
+          fi
+          generated_report_blob="$(git hash-object -- "$REPORT_TEMP")"
+          remote_report_blob=""
+          if [ -n "$remote_sha" ]; then
+            remote_report_entry="$(git ls-tree "$remote_sha" -- "$REPORT_PATH" || true)"
+            if [ -n "$remote_report_entry" ]; then
+              remote_report_mode="${remote_report_entry%% *}"
+              remote_report_rest="${remote_report_entry#* }"
+              remote_report_type="${remote_report_rest%% *}"
+              remote_report_rest="${remote_report_rest#* }"
+              remote_report_blob="${remote_report_rest%%$'\t'*}"
+              remote_report_path="${remote_report_rest#*$'\t'}"
+              if [ "$remote_report_type" != "blob" ] || [ "$remote_report_path" != "$REPORT_PATH" ] ||
+                 { [ "$remote_report_mode" != "100644" ] && [ "$remote_report_mode" != "100755" ]; }; then
+                remote_report_blob=""
+              fi
+            fi
+          fi
+          if [ -n "$remote_report_blob" ] && [ "$generated_report_blob" = "$remote_report_blob" ]; then
+            echo "Generated source-watch report is identical to the exact remote branch report; no commit or push."
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          remote_sha="$(git ls-remote --heads origin "$BRANCH" | awk '{print $1}')"
           git switch -C "$BRANCH" origin/main
           mkdir -p "$(dirname "$REPORT_PATH")"
           if [ -L "$REPORT_PATH" ]; then
@@ -195,6 +222,7 @@ jobs:
           cat > "$PR_BODY" <<'EOF'
           This PR is a review notification only.
           No source files or advisory tracking documents were updated.
+          No review-state cursors were changed.
           No SOURCE-LOCK pins or advisory baselines were changed.
           No SOURCE-LOCK pins were changed.
           No toolkit rules, skills, hooks, memory guidance, repo-map guidance, or cleanup guidance were modified or deleted.

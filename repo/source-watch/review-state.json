@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "policy": {
+    "cursor_advancement": "human_advanced_only",
+    "runtime_updates": "forbidden",
+    "adoption_and_review_are_distinct": true,
+    "description": "A reviewed-through cursor records the exact upstream state that a human reviewed and dispositioned. It does not adopt that state into Toolkit, change a SOURCE-LOCK pin, change an advisory baseline, or record the latest observed commit."
+  },
+  "records": [
+    {
+      "target_key": "advisory:n8n-skills-hook-compatibility",
+      "target_kind": "advisory",
+      "repository": "n8n-io/skills",
+      "ref": "main",
+      "advisory_target_id": "n8n-skills-hook-compatibility",
+      "reviewed_through_sha": "046c330c9308bbfc55ceab1adbe3d8fc6bebc8fa",
+      "reviewed_at": "2026-07-30",
+      "disposition": "READ_ONLY_REVIEW_REQUIRED",
+      "owning_tracker": "#244"
+    },
+    {
+      "target_key": "source-lock:_projects/design/google-design-md",
+      "target_kind": "source_lock",
+      "repository": "google-labs-code/design.md",
+      "ref": "main",
+      "source_lock_path": "_projects/design/google-design-md/SOURCE-LOCK.json",
+      "reviewed_through_sha": "9bf8eae67128b6cc55ad9bf86665767deb4c11cd",
+      "reviewed_at": "2026-07-30",
+      "disposition": "SEPARATE_IMPLEMENTATION_PR_RECOMMENDED",
+      "owning_tracker": "#322"
+    },
+    {
+      "target_key": "source-lock:_projects/design/ui-ux-pro-max",
+      "target_kind": "source_lock",
+      "repository": "nextlevelbuilder/ui-ux-pro-max-skill",
+      "ref": "main",
+      "source_lock_path": "_projects/design/ui-ux-pro-max/SOURCE-LOCK.json",
+      "reviewed_through_sha": "4857a2c5ef989794751a0f66b8545a4a49566286",
+      "reviewed_at": "2026-07-30",
+      "disposition": "READ_ONLY_REVIEW_REQUIRED",
+      "owning_tracker": "#323"
+    }
+  ]
+}

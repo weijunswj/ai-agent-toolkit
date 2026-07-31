@@ -1,6 +1,6 @@
 # Safe Updates
 
-The scheduled source-watch notifier is a PR-based human-review notification. It reads SOURCE-LOCK metadata plus `repo/source-watch/advisory-targets.json`, checks the latest upstream GitHub commit for active third-party sources and actionable advisory targets, and opens or updates one stable review PR only when source drift or an advisory action needs review.
+The scheduled source-watch notifier is a PR-based human-review notification. It reads SOURCE-LOCK metadata, `repo/source-watch/advisory-targets.json`, and the human-maintained `repo/source-watch/review-state.json`, checks the latest upstream GitHub commit for active third-party sources and actionable advisory targets, and opens or updates one stable review PR only when source drift or an advisory action needs review.
 
 The notification PR is not a source update PR. It does not copy upstream files, update SOURCE-LOCK.json, update advisory baselines, execute upstream code, auto-merge, push to main, or mutate live systems.
 
@@ -13,12 +13,13 @@ Current scheduled notification flow:
 1. Read `_projects/**/SOURCE-LOCK.json`.
 2. Separate active update candidates from retired provenance sources.
 3. Use active third-party source locks to identify upstream repo, source ref, locked commit, update policy, attribution requirement, allowlisted files, and exact blob pins.
-4. Query the GitHub API for the latest commit at the locked source ref.
-5. Read `repo/source-watch/advisory-targets.json` for separate advisory targets that are not yet normal SOURCE-LOCK-tracked source dependencies.
-6. Report advisory targets only when they are actionable: a baseline is missing, an upstream advisory target moved from its human baseline, or the target is explicitly marked `pending_action`.
-7. If no active third-party source changed and no advisory target is actionable, write a short summary and do not open a PR.
-8. If review is needed, write `repo/source-watch/reviews/active-third-party-updates.md` on the stable `source-watch/review-active-third-party-updates` branch and open or update `[source-watch] Review active source-watch updates`.
-9. The PR body and report must say that no source files, SOURCE-LOCK pins, advisory baselines, advisory tracking documents, or upstream code were changed or executed, and that no auto-merge is allowed.
+4. Read identity-bound reviewed-through cursors from `repo/source-watch/review-state.json`; these are human-advanced only and are never written by the scheduled workflow.
+5. Query the GitHub API for the latest commit at the locked source ref.
+6. Read `repo/source-watch/advisory-targets.json` for separate advisory targets that are not yet normal SOURCE-LOCK-tracked source dependencies.
+7. Report advisory targets only when they are actionable: a reviewed-through cursor or compatibility baseline differs, a baseline is missing, or the target is explicitly marked `pending_action`.
+8. If no active third-party source changed and no advisory target is actionable, write a short summary and do not open a PR.
+9. If review is needed, write `repo/source-watch/reviews/active-third-party-updates.md` on the stable `source-watch/review-active-third-party-updates` branch and open or update `[source-watch] Review active source-watch updates`.
+10. The PR body and report must say that no source files, SOURCE-LOCK pins, advisory baselines, advisory tracking documents, review cursors, or upstream code were changed or executed, and that no auto-merge is allowed.
 
 Advisory target lifecycle:
 

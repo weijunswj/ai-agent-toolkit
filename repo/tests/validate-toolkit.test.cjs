@@ -1022,6 +1022,7 @@ test('source-watch PR notifier uses the stable review-notification PR contract',
   assert.equal(sourceWatchPrBodyText(workflow), [
     'This PR is a review notification only.',
     'No source files or advisory tracking documents were updated.',
+    'No review-state cursors were changed.',
     'No SOURCE-LOCK pins or advisory baselines were changed.',
     'No SOURCE-LOCK pins were changed.',
     'No toolkit rules, skills, hooks, memory guidance, repo-map guidance, or cleanup guidance were modified or deleted.',
@@ -1154,6 +1155,56 @@ test('validator rejects weekly ecosystem radar resurrection', () => {
 test('validator accepts the daily source-watch advisory document', () => {
   const errors = validator.runValidation();
   assert.equal(errors.filter((error) => /advisory-targets\.json/.test(error)).length, 0, errors.join('\n'));
+});
+
+test('validator accepts the source-watch review-state document and its seeded identities', () => {
+  const errors = validator.runValidation();
+  assert.equal(errors.filter((error) => /review-state\.json/.test(error)).length, 0, errors.join('\n'));
+});
+
+test('validator rejects malformed or identity-mismatched source-watch review cursors', () => {
+  const cases = [
+    {
+      label: 'abbreviated SHA',
+      mutate(record) { record.reviewed_through_sha = '1234'; },
+      expected: /reviewed_through_sha must be a 40-character SHA/
+    },
+    {
+      label: 'invalid date',
+      mutate(record) { record.reviewed_at = '2026-02-30'; },
+      expected: /reviewed_at must be a valid calendar date/
+    },
+    {
+      label: 'unsupported disposition',
+      mutate(record) { record.disposition = 'MAYBE'; },
+      expected: /disposition is unsupported/
+    },
+    {
+      label: 'identity mismatch',
+      mutate(record) { record.repository = 'different-owner/different-repo'; },
+      expected: /review-state\.json identity mismatch/
+    }
+  ];
+
+  for (const testCase of cases) {
+    const cwd = tempCopy();
+    const statePath = path.join(cwd, 'repo', 'source-watch', 'review-state.json');
+    const state = readJsonFile(statePath);
+    testCase.mutate(state.records[0]);
+    writeJsonFile(statePath, state);
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0, testCase.label);
+    assert.match(result.stderr, testCase.expected, testCase.label);
+  }
+
+  const duplicateCwd = tempCopy();
+  const duplicatePath = path.join(duplicateCwd, 'repo', 'source-watch', 'review-state.json');
+  const duplicateState = readJsonFile(duplicatePath);
+  duplicateState.records.push({ ...duplicateState.records[0] });
+  writeJsonFile(duplicatePath, duplicateState);
+  const duplicateResult = runValidate(duplicateCwd);
+  assert.notEqual(duplicateResult.status, 0);
+  assert.match(duplicateResult.stderr, /review-state\.json has duplicate target key/);
 });
 
 test('auto-sync workflow owns agent instruction shim freshness', () => {

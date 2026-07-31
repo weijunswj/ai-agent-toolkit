@@ -72,6 +72,43 @@ test('source-watch review branch is rebuilt from main and only the report can be
   assert.doesNotMatch(script, /git add\s+(?!.*-- "\$REPORT_PATH")/);
 });
 
+test('source-watch compares the generated report to the exact remote report before checking out the notification branch', () => {
+  const script = updateBranchScript();
+  const remoteShaIndex = script.indexOf('remote_sha=');
+  const reportInspectionIndex = script.indexOf('git ls-tree "$remote_sha" -- "$REPORT_PATH"');
+  const branchCheckoutIndex = script.indexOf('git switch -C "$BRANCH" origin/main');
+  assert.ok(remoteShaIndex >= 0, 'remote branch SHA is read');
+  assert.ok(reportInspectionIndex > remoteShaIndex, 'report inspection follows the remote SHA read');
+  assert.ok(branchCheckoutIndex > reportInspectionIndex, 'trusted-main branch checkout follows report inspection');
+  assert.match(script, /generated_report_blob="\$\(git hash-object -- "\$REPORT_TEMP"\)"/);
+  assert.match(script, /remote_report_entry="\$\(git ls-tree "\$remote_sha" -- "\$REPORT_PATH"/);
+  assert.doesNotMatch(script.slice(0, branchCheckoutIndex), /git show "\$remote_sha:/);
+  assert.doesNotMatch(script.slice(0, branchCheckoutIndex), /source-watch\/review-active-third-party-updates.*(?:source|exec)/i);
+});
+
+test('identical report bytes emit pushed=false without moving, committing, or pushing the branch', () => {
+  const script = updateBranchScript();
+  const noOpIndex = script.indexOf('if [ -n "$remote_report_blob" ] && [ "$generated_report_blob" = "$remote_report_blob" ]; then');
+  const noOpExitIndex = script.indexOf('exit 0', noOpIndex);
+  const branchCheckoutIndex = script.indexOf('git switch -C "$BRANCH" origin/main');
+  assert.ok(noOpIndex >= 0, 'identical report comparison is present');
+  assert.ok(noOpExitIndex > noOpIndex && noOpExitIndex < branchCheckoutIndex, 'no-op exits before checkout');
+  assert.match(script.slice(noOpIndex, noOpExitIndex), /pushed=false/);
+  assert.doesNotMatch(script.slice(noOpIndex, noOpExitIndex), /git (?:commit|push|switch)/);
+});
+
+test('an unverifiable existing remote report takes the safe rebuild path from trusted main', () => {
+  const script = updateBranchScript();
+  const reportInspectionIndex = script.indexOf('remote_report_entry=');
+  const branchCheckoutIndex = script.indexOf('git switch -C "$BRANCH" origin/main');
+  const inspection = script.slice(reportInspectionIndex, branchCheckoutIndex);
+  assert.match(inspection, /remote_report_blob=""/);
+  assert.match(inspection, /remote_report_type.*blob/);
+  assert.match(inspection, /remote_report_mode.*100644/);
+  assert.ok(branchCheckoutIndex > reportInspectionIndex);
+  assert.match(script, /install -m 0644 "\$REPORT_TEMP" "\$REPORT_PATH"/);
+});
+
 test('source-watch report writes reject symlinks and push with a lease', () => {
   const script = updateBranchScript();
   assert.match(script, /mkdir -p "\$\(dirname "\$REPORT_PATH"\)"/);
