@@ -15,6 +15,13 @@ const allowedDispositions = new Set([
   'UNVERIFIED'
 ]);
 const allowedTargetKinds = new Set(['source_lock', 'advisory']);
+const allowedDocumentFields = new Set(['schema_version', 'policy', 'records']);
+const allowedPolicyFields = new Set([
+  'cursor_advancement',
+  'runtime_updates',
+  'adoption_and_review_are_distinct',
+  'description'
+]);
 const commonRecordFields = new Set([
   'target_key',
   'target_kind',
@@ -148,9 +155,15 @@ function validateReviewStateDocument(document, relPath = defaultReviewStatePath,
   if (!document || typeof document !== 'object' || Array.isArray(document)) {
     throw new Error(`${relPath} must be a JSON object`);
   }
+  for (const field of Object.keys(document)) {
+    if (!allowedDocumentFields.has(field)) throw new Error(`${relPath} contains unsupported top-level field ${field}`);
+  }
   if (document.schema_version !== 1) throw new Error(`${relPath} schema_version must be 1`);
   if (!document.policy || typeof document.policy !== 'object' || Array.isArray(document.policy)) {
     throw new Error(`${relPath} policy must be an object`);
+  }
+  for (const field of Object.keys(document.policy)) {
+    if (!allowedPolicyFields.has(field)) throw new Error(`${relPath} policy contains unsupported field ${field}`);
   }
   if (document.policy.cursor_advancement !== 'human_advanced_only') {
     throw new Error(`${relPath} policy must state cursor_advancement human_advanced_only`);
@@ -160,6 +173,9 @@ function validateReviewStateDocument(document, relPath = defaultReviewStatePath,
   }
   if (document.policy.adoption_and_review_are_distinct !== true) {
     throw new Error(`${relPath} policy must distinguish adoption and review`);
+  }
+  if ('description' in document.policy) {
+    requireString(document.policy.description, `${relPath} policy.description`);
   }
   if (!Array.isArray(document.records)) throw new Error(`${relPath} records must be an array`);
 

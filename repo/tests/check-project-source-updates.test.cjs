@@ -530,6 +530,40 @@ test('a review-state identity mismatch cannot suppress a source-watch finding', 
 
 test('review-state validation rejects malformed SHA, duplicate key, date, disposition, and identity', () => {
   const valid = sourceReviewRecord();
+  const validDocument = reviewStateDoc([valid]);
+  assert.doesNotThrow(() => reviewState.validateReviewStateDocument(validDocument, 'review-state.json'));
+  assert.throws(
+    () => reviewState.validateReviewStateDocument({ ...validDocument, unsupported: true }, 'review-state.json'),
+    /unsupported top-level field unsupported/
+  );
+  assert.throws(
+    () => reviewState.validateReviewStateDocument({
+      ...validDocument,
+      policy: { ...validDocument.policy, unsupported: true }
+    }, 'review-state.json'),
+    /policy contains unsupported field unsupported/
+  );
+  assert.throws(
+    () => reviewState.validateReviewStateDocument({
+      ...validDocument,
+      records: [{ ...valid, unsupported: true }]
+    }, 'review-state.json'),
+    /contains unsupported field unsupported/
+  );
+  assert.throws(
+    () => reviewState.validateReviewStateDocument({
+      ...validDocument,
+      policy: { ...validDocument.policy, description: 42 }
+    }, 'review-state.json'),
+    /policy\.description must be a non-empty string/
+  );
+  assert.throws(
+    () => reviewState.validateReviewStateDocument({
+      ...validDocument,
+      policy: { ...validDocument.policy, description: '   ' }
+    }, 'review-state.json'),
+    /policy\.description must be a non-empty string/
+  );
   assert.throws(
     () => reviewState.validateReviewStateDocument(reviewStateDoc([{ ...valid, reviewed_through_sha: '1234' }]), 'review-state.json'),
     /40-character SHA/

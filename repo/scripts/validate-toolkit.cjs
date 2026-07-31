@@ -167,6 +167,7 @@ const expectedFiles = [
   'repo/scripts/check-project-source-updates.cjs',
   'repo/scripts/source-watch-advisory-targets.cjs',
   'repo/scripts/source-watch-review-state.cjs',
+  'repo/scripts/update-source-watch-review-branch.sh',
   'repo/source-watch/advisory-targets.json',
   'repo/source-watch/review-state.json',
   'repo/scripts/package-skills.cjs',
@@ -2194,8 +2195,8 @@ function validateSourceWatchPrWorkflow(entry, text, errors) {
   if (!/GH_TOKEN:\s*\$\{\{ github\.token \}\}/.test(text)) {
     fail(errors, `${entry.relPath} must scope GH_TOKEN to write/PR steps`);
   }
-  if (!/git remote set-url origin "https:\/\/x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/.test(text)) {
-    fail(errors, `${entry.relPath} must set authenticated remote immediately before push`);
+  if (!/bash repo\/scripts\/update-source-watch-review-branch\.sh/.test(text)) {
+    fail(errors, `${entry.relPath} must invoke the trusted Source Watch branch-update helper`);
   }
   if (/git\s+push[^\n]*(?:--force(?!-with-lease)|-f\b)/i.test(text)) {
     fail(errors, `${entry.relPath} must not force-push without a lease`);
@@ -2214,6 +2215,27 @@ function validateSourceWatchPrWorkflow(entry, text, errors) {
   }
   if (!/\[source-watch\] Review active source-watch updates/.test(text)) {
     fail(errors, `${entry.relPath} must use the stable source-watch review PR title`);
+  }
+  const helperPath = 'repo/scripts/update-source-watch-review-branch.sh';
+  if (!existsRel(helperPath)) {
+    fail(errors, `${helperPath} is required by ${entry.relPath}`);
+  } else {
+    const helper = readText(helperPath);
+    for (const required of [
+      'set -euo pipefail',
+      "OBS_STATE='unverified'",
+      "OBS_STATE='absent'",
+      "OBS_STATE='present'",
+      'git push --force-with-lease="refs/heads/$BRANCH:" origin "HEAD:$BRANCH"',
+      'git push --force-with-lease="refs/heads/$BRANCH:$remote_sha" origin "HEAD:$BRANCH"',
+      'observe_remote_branch',
+      'Source Watch branch changed or became unverifiable during no-op verification.'
+    ]) {
+      if (!helper.includes(required)) fail(errors, `${helperPath} missing required CAS guard: ${required}`);
+    }
+    if (/git\s+push\s+origin\s+"HEAD:\$BRANCH"/.test(helper)) {
+      fail(errors, `${helperPath} must never fall back to an ordinary branch push`);
+    }
   }
   for (const required of [
     'This PR is a review notification only.',
@@ -2363,6 +2385,7 @@ function validateSourceWatchTruthfulness(errors) {
     if (rel === 'repo/scripts/check-project-source-updates.cjs') return true;
     if (rel === 'repo/scripts/source-watch-advisory-targets.cjs') return true;
     if (rel === 'repo/scripts/source-watch-review-state.cjs') return true;
+    if (rel === 'repo/scripts/update-source-watch-review-branch.sh') return true;
     if (rel === advisoryTargetsPath) return true;
     if (rel === reviewStatePath) return true;
     if (rel.startsWith('skills/') && /\.(md|json|ya?ml)$/i.test(rel)) return true;

@@ -1046,8 +1046,12 @@ test('source-watch PR notifier uses the stable review-notification PR contract',
   ].join('\n'));
   assert.match(workflow, /persist-credentials:\s*false/);
   assert.match(workflow, /GH_TOKEN: \$\{\{ github\.token \}\}/);
-  assert.match(workflow, /git remote set-url origin "https:\/\/x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/);
-  assert.match(workflow, /git push --force-with-lease="refs\/heads\/\$BRANCH:\$remote_sha" origin "HEAD:\$BRANCH"/);
+  assert.match(workflow, /bash repo\/scripts\/update-source-watch-review-branch\.sh/);
+  const helper = readTextFile(path.join(repoRoot, 'repo', 'scripts', 'update-source-watch-review-branch.sh'));
+  assert.match(helper, /git remote set-url origin "https:\/\/x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/);
+  assert.match(helper, /git push --force-with-lease="refs\/heads\/\$BRANCH:\$remote_sha" origin "HEAD:\$BRANCH"/);
+  assert.match(helper, /git push --force-with-lease="refs\/heads\/\$BRANCH:" origin "HEAD:\$BRANCH"/);
+  assert.doesNotMatch(helper, /git push origin "HEAD:\$BRANCH"/);
   assert.doesNotMatch(workflow, /git push origin (?:HEAD:)?main\b/i);
   assert.doesNotMatch(workflow, /git\s+push[^\n]*(?:--force(?!-with-lease)|-f\b)/i);
   assert.doesNotMatch(workflow, /git\s+add[^\n]*(?:_projects|SOURCE-LOCK\.json)/i);
@@ -1183,6 +1187,31 @@ test('validator rejects malformed or identity-mismatched source-watch review cur
       label: 'identity mismatch',
       mutate(record) { record.repository = 'different-owner/different-repo'; },
       expected: /review-state\.json identity mismatch/
+    },
+    {
+      label: 'unsupported top-level key',
+      mutate(_record, state) { state.unsupported = true; },
+      expected: /review-state\.json contains unsupported top-level field unsupported/
+    },
+    {
+      label: 'unsupported policy key',
+      mutate(_record, state) { state.policy.unsupported = true; },
+      expected: /review-state\.json policy contains unsupported field unsupported/
+    },
+    {
+      label: 'unsupported record key',
+      mutate(record) { record.unsupported = true; },
+      expected: /contains unsupported field unsupported/
+    },
+    {
+      label: 'invalid description type',
+      mutate(_record, state) { state.policy.description = 42; },
+      expected: /policy\.description must be a non-empty string/
+    },
+    {
+      label: 'empty description',
+      mutate(_record, state) { state.policy.description = '   '; },
+      expected: /policy\.description must be a non-empty string/
     }
   ];
 
@@ -1190,7 +1219,7 @@ test('validator rejects malformed or identity-mismatched source-watch review cur
     const cwd = tempCopy();
     const statePath = path.join(cwd, 'repo', 'source-watch', 'review-state.json');
     const state = readJsonFile(statePath);
-    testCase.mutate(state.records[0]);
+    testCase.mutate(state.records[0], state);
     writeJsonFile(statePath, state);
     const result = runValidate(cwd);
     assert.notEqual(result.status, 0, testCase.label);

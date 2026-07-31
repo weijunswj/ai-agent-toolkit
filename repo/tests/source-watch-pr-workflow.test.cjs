@@ -7,7 +7,9 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const workflowPath = path.join(repoRoot, '.github', 'workflows', 'source-watch-pr.yml');
+const helperPath = path.join(repoRoot, 'repo', 'scripts', 'update-source-watch-review-branch.sh');
 const workflow = fs.readFileSync(workflowPath, 'utf8').replace(/\r\n/g, '\n');
+const helper = fs.readFileSync(helperPath, 'utf8').replace(/\r\n/g, '\n');
 
 function workflowPermissions() {
   const match = workflow.match(/^permissions:\n((?:  [A-Za-z-]+: [A-Za-z-]+\n?)+)/m);
@@ -56,116 +58,87 @@ test('source-watch PR notifier runs trusted main code before branch writes', () 
   assert.match(workflow, /test "\$\(git rev-parse HEAD\)" = "\$\(git rev-parse origin\/main\)"/);
 });
 
-test('source-watch review branch is rebuilt from main and only the report can be staged', () => {
+test('source-watch review branch delegates to the trusted helper', () => {
   const script = updateBranchScript();
-  assert.match(script, /git switch -C "\$BRANCH" origin\/main/);
-  assert.doesNotMatch(script, /origin\/\$BRANCH/);
-  assert.doesNotMatch(script, /origin\/"\$BRANCH"/);
-  assert.doesNotMatch(script, /refs\/remotes\/origin\/\$BRANCH/);
-
-  const afterSwitch = script.slice(script.indexOf('git switch -C "$BRANCH" origin/main'));
-  assert.doesNotMatch(afterSwitch, /node repo\/scripts\//);
+  assert.match(script, /REPORT_TEMP: \$\{\{ steps\.source_updates\.outputs\.report_temp \}\}/);
   assert.match(script, /REPORT_PATH: repo\/source-watch\/reviews\/active-third-party-updates\.md/);
-  assert.match(script, /git add -- "\$REPORT_PATH"/);
-  assert.match(script, /staged_files="\$\(git diff --cached --name-only\)"/);
-  assert.match(script, /if \[ "\$staged_files" != "\$REPORT_PATH" \]; then/);
-  assert.doesNotMatch(script, /git add\s+(?!.*-- "\$REPORT_PATH")/);
+  assert.match(script, /bash repo\/scripts\/update-source-watch-review-branch\.sh/);
+  assert.doesNotMatch(script, /git\s+(?:commit|push|switch|ls-remote|fetch)/);
 });
 
-test('source-watch compares the generated report to the exact remote report before checking out the notification branch', () => {
-  const script = updateBranchScript();
-  const remoteShaIndex = script.indexOf('remote_sha=');
-  const reportInspectionIndex = script.indexOf('git ls-tree "$remote_sha" -- "$REPORT_PATH"');
-  const branchCheckoutIndex = script.indexOf('git switch -C "$BRANCH" origin/main');
-  assert.ok(remoteShaIndex >= 0, 'remote branch SHA is read');
-  assert.match(script, /\[\[ "\$remote_sha" =~ \^\[0-9a-fA-F\]\{40\}\$ \]\]/);
-  assert.match(script, /git fetch --no-tags --force origin "refs\/heads\/\$BRANCH:\$inspection_ref"/);
-  assert.match(script, /fetched_sha="\$\(git rev-parse "\$inspection_ref\^\{commit\}"/);
-  assert.match(script, /\[ "\$fetched_sha" = "\$remote_sha" \]/);
-  assert.match(script, /git cat-file -e "\$remote_sha\^\{tree\}"/);
-  assert.ok(reportInspectionIndex > remoteShaIndex, 'report inspection follows the remote SHA read');
-  assert.ok(branchCheckoutIndex > reportInspectionIndex, 'trusted-main branch checkout follows report inspection');
-  assert.match(script, /generated_report_blob="\$\(git hash-object -- "\$REPORT_TEMP"\)"/);
-  assert.match(script, /remote_report_entry="\$\(git ls-tree "\$remote_sha" -- "\$REPORT_PATH"/);
-  assert.doesNotMatch(script.slice(0, branchCheckoutIndex), /git show "\$remote_sha:/);
-  assert.doesNotMatch(script.slice(0, branchCheckoutIndex), /source-watch\/review-active-third-party-updates.*(?:source|exec)/i);
+test('source-watch helper models present, absent, and unverified observations', () => {
+  assert.match(helper, /set -euo pipefail/);
+  assert.match(helper, /OBS_STATE='unverified'/);
+  assert.match(helper, /OBS_STATE='absent'/);
+  assert.match(helper, /OBS_STATE='present'/);
+  assert.match(helper, /Initial Source Watch branch observation was unverified/);
+  assert.match(helper, /Unable to establish a valid Source Watch branch authority/);
 });
 
-test('identical report bytes emit pushed=false without moving, committing, or pushing the branch', () => {
-  const script = updateBranchScript();
-  const noOpIndex = script.indexOf('if [ "$remote_no_op_verified" = true ]; then');
-  const noOpExitIndex = script.indexOf('exit 0', noOpIndex);
-  const branchCheckoutIndex = script.indexOf('git switch -C "$BRANCH" origin/main');
-  assert.ok(noOpIndex >= 0, 'identical report comparison is present');
-  assert.ok(noOpExitIndex > noOpIndex && noOpExitIndex < branchCheckoutIndex, 'no-op exits before checkout');
-  assert.match(script.slice(noOpIndex, noOpExitIndex), /pushed=false/);
-  assert.doesNotMatch(script.slice(noOpIndex, noOpExitIndex), /git (?:commit|push|switch)/);
-  assert.match(script, /remote_no_op_verified=false/);
-  assert.match(script, /remote_no_op_verified=true/);
-  assert.doesNotMatch(script, /if \[ -n "\$remote_report_blob" \] && \[ "\$generated_report_blob" = "\$remote_report_blob" \]/);
+test('source-watch helper verifies the report-only commit before a no-op and rechecks the exact ref', () => {
+  assert.match(helper, /git fetch --no-tags --force origin "refs\/heads\/\$BRANCH:\$inspection_ref"/);
+  assert.match(helper, /git rev-list --parents -n 1 "\$remote_sha"/);
+  assert.match(helper, /git merge-base --is-ancestor "\$remote_parent" origin\/main/);
+  assert.match(helper, /git diff-tree --no-commit-id --name-only --no-renames -r "\$remote_parent" "\$remote_sha"/);
+  assert.match(helper, /git ls-tree "\$remote_sha" -- "\$REPORT_PATH"/);
+  const noOpIndex = helper.indexOf("if [[ \"$remote_no_op_verified\" == true ]]; then");
+  const finalObserveIndex = helper.indexOf('observe_remote_branch', noOpIndex);
+  const noOpOutputIndex = helper.indexOf("write_output 'pushed=false'", finalObserveIndex);
+  assert.ok(noOpIndex >= 0 && finalObserveIndex > noOpIndex && noOpOutputIndex > finalObserveIndex);
+  assert.match(helper, /\[\[ "\$OBS_STATE" != 'present' \|\| "\$OBS_SHA" != "\$remote_sha" \]\]/);
 });
 
-test('notification no-op requires an exact one-parent report-only commit whose parent is trusted main', () => {
-  const script = updateBranchScript();
-  assert.match(script, /git rev-list --parents -n 1 "\$remote_sha"/);
-  assert.match(script, /remote_parent_count=.*NF - 1/);
-  assert.match(script, /\[ "\$remote_parent_count" = "1" \]/);
-  assert.match(script, /git merge-base --is-ancestor "\$remote_parent" origin\/main/);
-  assert.match(script, /git diff-tree --no-commit-id --name-only --no-renames -r "\$remote_parent" "\$remote_sha"/);
-  assert.match(script, /\[ "\$remote_changed_paths" = "\$REPORT_PATH" \]/);
+test('source-watch helper stages only the report and uses both exact lease forms', () => {
+  assert.match(helper, /git switch -C "\$BRANCH" origin\/main/);
+  assert.match(helper, /git add -- "\$REPORT_PATH"/);
+  assert.match(helper, /staged_files="\$\(git diff --cached --name-only\)"/);
+  assert.match(helper, /\[\[ "\$staged_files" != "\$REPORT_PATH" \]\]/);
+  assert.match(helper, /git push --force-with-lease="refs\/heads\/\$BRANCH:" origin "HEAD:\$BRANCH"/);
+  assert.match(helper, /git push --force-with-lease="refs\/heads\/\$BRANCH:\$remote_sha" origin "HEAD:\$BRANCH"/);
+  assert.doesNotMatch(helper, /git\s+push\s+origin\s+"HEAD:\$BRANCH"/);
+  assert.doesNotMatch(helper, /git\s+push[^\n]*HEAD:main\b/i);
 });
 
-test('notification no-op requires a regular non-symlink report blob with the expected mode and object type', () => {
-  const script = updateBranchScript();
-  assert.match(script, /\[ "\$remote_report_mode" = "100644" \]/);
-  assert.match(script, /\[ "\$remote_report_type" = "blob" \]/);
-  assert.match(script, /\[ "\$remote_report_path" = "\$REPORT_PATH" \]/);
-  assert.match(script, /\[\[ "\$remote_report_blob" =~ \^\[0-9a-fA-F\]\{40\}\$ \]\]/);
-  assert.match(script, /remote_report_blob_type="\$\(git cat-file -t "\$remote_report_blob"/);
-  assert.match(script, /\[ "\$remote_report_blob_type" = "blob" \]/);
-  assert.match(script, /\[ "\$generated_report_blob" = "\$remote_report_blob" \]/);
+test('source-watch helper rejects symlink reports and never sources notification content', () => {
+  assert.match(helper, /-L "\$REPORT_TEMP"/);
+  assert.match(helper, /-L "\$REPORT_PATH"/);
+  assert.doesNotMatch(helper, /git\s+show\s+"\$remote_sha:/);
+  assert.doesNotMatch(helper, /(^|\n)\s*source\s+"/);
 });
 
-test('notification no-op fails closed for unavailable, merge, zero-parent, unrelated-parent, or multi-path commits', () => {
-  const script = updateBranchScript();
-  const verification = script.slice(script.indexOf('remote_object_verified=false'), script.indexOf('if [ "$remote_no_op_verified" = true ]; then'));
-  assert.match(verification, /if git fetch --no-tags --force origin/);
-  assert.match(verification, /remote_object_verified=true/);
-  assert.match(verification, /remote_parent_count.*= "1"/);
-  assert.match(verification, /remote_parent.*NF == 2/);
-  assert.match(verification, /remote_changed_paths/);
-  assert.match(verification, /remote_no_op_verified=true/);
-  assert.ok(verification.indexOf('remote_no_op_verified=true') > verification.indexOf('remote_changed_paths'));
+test('source-watch helper binds the exact notification branch and report path', () => {
+  assert.match(helper, /expected_branch='source-watch\/review-active-third-party-updates'/);
+  assert.match(helper, /expected_report_path='repo\/source-watch\/reviews\/active-third-party-updates\.md'/);
+  assert.match(helper, /Refusing unexpected Source Watch branch/);
+  assert.match(helper, /Refusing unexpected Source Watch report path/);
 });
 
-test('notification no-op retains main-advancement tolerance and exact initial lease authority for rebuilds', () => {
-  const script = updateBranchScript();
-  assert.match(script, /git merge-base --is-ancestor "\$remote_parent" origin\/main/);
-  assert.match(script, /git switch -C "\$BRANCH" origin\/main/);
-  assert.match(script, /git push --force-with-lease="refs\/heads\/\$BRANCH:\$remote_sha" origin "HEAD:\$BRANCH"/);
-  assert.doesNotMatch(script, /remote_sha=.*git rev-parse/);
+test('source-watch helper keeps unverified observations out of inspection refs and leases', () => {
+  const observationStart = helper.indexOf('observe_remote_branch()');
+  const observationEnd = helper.indexOf('\n}\n\nobserve_remote_branch', observationStart);
+  const observation = helper.slice(observationStart, observationEnd);
+  assert.match(observation, /OBS_STATE='unverified'/);
+  assert.match(observation, /OBS_SHA=''/);
+  assert.match(helper, /inspection_ref="refs\/source-watch\/inspect\/\$remote_sha"/);
+  assert.match(helper, /remote_sha="\$OBS_SHA"/);
+  assert.doesNotMatch(observation, /inspection_ref|force-with-lease/);
 });
 
-test('an unverifiable existing remote report takes the safe rebuild path from trusted main', () => {
-  const script = updateBranchScript();
-  const reportInspectionIndex = script.indexOf('remote_report_entry=');
-  const branchCheckoutIndex = script.indexOf('git switch -C "$BRANCH" origin/main');
-  const inspection = script.slice(reportInspectionIndex, branchCheckoutIndex);
-  assert.match(script, /remote_report_blob=""/);
-  assert.match(inspection, /remote_report_type.*blob/);
-  assert.match(inspection, /remote_report_mode.*100644/);
-  assert.ok(branchCheckoutIndex > reportInspectionIndex);
-  assert.match(script, /install -m 0644 "\$REPORT_TEMP" "\$REPORT_PATH"/);
+test('source-watch workflow only invokes the helper after report validation', () => {
+  const updateStep = updateBranchScript();
+  assert.ok(updateStep.indexOf('test -f "$REPORT_TEMP"') < updateStep.indexOf('bash repo/scripts/update-source-watch-review-branch.sh'));
+  assert.ok(updateStep.indexOf('test ! -L "$REPORT_TEMP"') < updateStep.indexOf('bash repo/scripts/update-source-watch-review-branch.sh'));
 });
 
-test('source-watch report writes reject symlinks and push with a lease', () => {
-  const script = updateBranchScript();
-  assert.match(script, /mkdir -p "\$\(dirname "\$REPORT_PATH"\)"/);
-  assert.match(script, /if \[ -L "\$REPORT_PATH" \]; then/);
-  assert.match(script, /install -m 0644 "\$REPORT_TEMP" "\$REPORT_PATH"/);
-  assert.match(script, /if \[ ! -f "\$REPORT_PATH" \] \|\| \[ -L "\$REPORT_PATH" \]; then/);
-  assert.match(script, /git push --force-with-lease="refs\/heads\/\$BRANCH:\$remote_sha" origin "HEAD:\$BRANCH"/);
-  assert.doesNotMatch(script, /git push origin "HEAD:main"/i);
+test('source-watch helper passes shell syntax validation', () => {
+  const bash = process.platform === 'win32'
+    ? ['C:\\Program Files\\Git\\bin\\bash.exe', 'C:\\Program Files\\Git\\usr\\bin\\bash.exe'].find((candidate) => fs.existsSync(candidate)) || 'bash'
+    : 'bash';
+  const result = require('node:child_process').spawnSync(bash, ['-n', helperPath], {
+    cwd: repoRoot,
+    encoding: 'utf8'
+  });
+  assert.equal(result.status, 0, result.stderr || result.error);
 });
 
 test('source-watch PR notifier does not become a source updater', () => {
