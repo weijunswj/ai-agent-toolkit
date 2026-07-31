@@ -15,6 +15,12 @@ const {
   renderAdvisorySection,
   sanitizeGeneratedMarkdown
 } = require('./source-watch-advisory-targets.cjs');
+const {
+  defaultReviewStatePath,
+  findMatchingReviewRecord,
+  readReviewState,
+  sourceLockIdentity
+} = require('./source-watch-review-state.cjs');
 
 const defaultReportPath = 'repo/source-watch/reviews/active-third-party-updates.md';
 const githubApiBaseUrl = 'https://api.github.com';
@@ -27,13 +33,15 @@ function parseArgs(argv) {
   const args = {
     workspace: process.cwd(),
     report: defaultReportPath,
-    advisoryDoc: defaultAdvisoryDocPath
+    advisoryDoc: defaultAdvisoryDocPath,
+    reviewState: defaultReviewStatePath
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--workspace') args.workspace = argv[++index] || args.workspace;
     else if (arg === '--report') args.report = argv[++index] || args.report;
     else if (arg === '--advisory-doc') args.advisoryDoc = argv[++index] || args.advisoryDoc;
+    else if (arg === '--review-state') args.reviewState = argv[++index] || args.reviewState;
     else if (arg === '--help' || arg === '-h') args.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -43,7 +51,7 @@ function parseArgs(argv) {
 
 function usage() {
   return [
-    'Usage: node repo/scripts/check-project-source-updates.cjs [--workspace <dir>] [--report <path>] [--advisory-doc <path>]',
+    'Usage: node repo/scripts/check-project-source-updates.cjs [--workspace <dir>] [--report <path>] [--advisory-doc <path>] [--review-state <path>]',
     '',
     'Checks active third-party SOURCE-LOCK.json entries and actionable advisory targets against GitHub.',
     'When review is needed, writes a review-notification report only. It never copies upstream files, updates SOURCE-LOCK.json or advisory target documents, or changes toolkit components.'
@@ -175,8 +183,12 @@ function renderSourceUpdatesSection(updates) {
       '',
       `- Source repo: \`${update.source_repo}\``,
       `- Source ref: \`${update.source_ref}\``,
-      `- Locked commit: \`${update.locked_commit}\``,
-      `- Latest commit: \`${update.latest_commit}\``,
+      `- Adopted commit: \`${update.adopted_commit}\``,
+      `- Reviewed-through commit: \`${update.reviewed_through_commit || '(none; adopted commit used)'}\``,
+      `- Latest observed commit: \`${update.latest_commit}\``,
+      `- Why a new review is required: ${update.review_reason}`,
+      ...(update.review_disposition ? [`- Prior disposition: \`${update.review_disposition}\``] : []),
+      ...(update.review_tracker ? [`- Owning tracker: \`${update.review_tracker}\``] : []),
       `- Update policy: \`${update.update_policy}\``,
       `- Public attribution required: \`${update.public_attribution_required}\``,
       '',
@@ -191,6 +203,7 @@ function renderReviewReport({ updates, advisoryUpdates, advisoryDocPath }) {
   const notificationText = [
     'This PR is a review notification only.',
     'No source files or advisory tracking documents were updated.',
+    'No review-state cursors were changed.',
     'No SOURCE-LOCK pins or advisory baselines were changed.',
     'No SOURCE-LOCK pins were changed.',
     'No toolkit rules, skills, hooks, memory guidance, repo-map guidance, or cleanup guidance were modified or deleted.',
@@ -247,27 +260,46 @@ function removeReportIfPresent(workspace, reportPath) {
   if (fs.existsSync(outPath)) fs.unlinkSync(outPath);
 }
 
-async function checkProjectSourceUpdates({ workspace, report, advisoryDoc = defaultAdvisoryDocPath }, env = process.env) {
+async function checkProjectSourceUpdates({
+  workspace,
+  report,
+  advisoryDoc = defaultAdvisoryDocPath,
+  reviewState = defaultReviewStatePath
+}, env = process.env) {
   const locks = discoverSourceLocks(workspace);
   const activeLocks = activeThirdPartyLocks(locks);
+  const reviewStateDocument = readReviewState(workspace, reviewState);
 
   const updates = [];
   for (const lockFile of activeLocks) {
     const lock = lockFile.lock;
     const latestCommit = await latestCommitForLock(lock, env);
-    if (latestCommit.toLowerCase() === String(lock.source_commit || '').toLowerCase()) continue;
+    const reviewRecord = findMatchingReviewRecord(reviewStateDocument, sourceLockIdentity(lockFile));
+    const comparisonCommit = reviewRecord ? reviewRecord.reviewed_through_sha : lock.source_commit;
+    if (latestCommit.toLowerCase() === String(comparisonCommit || '').toLowerCase()) continue;
     updates.push({
       project_path: projectPathFromLock(lockFile),
       source_repo: lock.source_repo,
       source_ref: lock.source_ref,
+      adopted_commit: lock.source_commit,
       locked_commit: lock.source_commit,
+      reviewed_through_commit: reviewRecord ? reviewRecord.reviewed_through_sha : null,
       latest_commit: latestCommit,
+      review_disposition: reviewRecord ? reviewRecord.disposition : null,
+      review_tracker: reviewRecord ? reviewRecord.owning_tracker : null,
+      review_reason: reviewRecord
+        ? 'The latest observed upstream commit differs from the human-reviewed-through commit.'
+        : 'The latest observed upstream commit differs from the adopted SOURCE-LOCK commit; no reviewed-through cursor exists.',
       update_policy: lock.source_update_policy,
       public_attribution_required: lock.public_attribution_required,
       tracked_files: Array.isArray(lock.files) ? lock.files : []
     });
   }
-  const advisoryResult = await advisoryFindings({ workspace, advisoryDocPath: advisoryDoc }, env);
+  const advisoryResult = await advisoryFindings({
+    workspace,
+    advisoryDocPath: advisoryDoc,
+    reviewStatePath: reviewState
+  }, env);
   const advisoryUpdates = advisoryResult.findings;
 
   if (updates.length === 0 && advisoryUpdates.length === 0) {
@@ -286,7 +318,7 @@ async function checkProjectSourceUpdates({ workspace, report, advisoryDoc = defa
       advisory_updates: advisoryUpdates,
       summary: advisoryResult.target_count > 0
         ? `Checked ${activeLocks.length} active third-party source lock(s) and ${advisoryResult.target_count} advisory target(s); no actionable updates found.`
-        : `Checked ${activeLocks.length} active third-party source lock(s); all pinned commits are current.`
+        : `Checked ${activeLocks.length} active third-party source lock(s); no actionable updates found.`
     };
   }
 

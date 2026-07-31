@@ -67,39 +67,8 @@ jobs:
         run: |
           set -euo pipefail
           test -f "$REPORT_TEMP"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          remote_sha="$(git ls-remote --heads origin "$BRANCH" | awk '{print $1}')"
-          git switch -C "$BRANCH" origin/main
-          mkdir -p "$(dirname "$REPORT_PATH")"
-          if [ -L "$REPORT_PATH" ]; then
-            echo "Refusing to overwrite symlink report path: $REPORT_PATH" >&2
-            exit 1
-          fi
-          install -m 0644 "$REPORT_TEMP" "$REPORT_PATH"
-          if [ ! -f "$REPORT_PATH" ] || [ -L "$REPORT_PATH" ]; then
-            echo "Report path is not a regular file: $REPORT_PATH" >&2
-            exit 1
-          fi
-          git add -- "$REPORT_PATH"
-          staged_files="$(git diff --cached --name-only)"
-          if [ "$staged_files" != "$REPORT_PATH" ]; then
-            echo "Refusing to stage unexpected files:" >&2
-            printf '%s\n' "$staged_files" >&2
-            exit 1
-          fi
-          if git diff --cached --quiet; then
-            echo "pushed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          git commit -m "Update active third-party source review report"
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          if [ -n "$remote_sha" ]; then
-            git push --force-with-lease="refs/heads/$BRANCH:$remote_sha" origin "HEAD:$BRANCH"
-          else
-            git push origin "HEAD:$BRANCH"
-          fi
-          echo "pushed=true" >> "$GITHUB_OUTPUT"
+          test ! -L "$REPORT_TEMP"
+          bash repo/scripts/update-source-watch-review-branch.sh
 
       - name: Plan exact review notification PR lifecycle
         id: plan_pr
@@ -195,6 +164,7 @@ jobs:
           cat > "$PR_BODY" <<'EOF'
           This PR is a review notification only.
           No source files or advisory tracking documents were updated.
+          No review-state cursors were changed.
           No SOURCE-LOCK pins or advisory baselines were changed.
           No SOURCE-LOCK pins were changed.
           No toolkit rules, skills, hooks, memory guidance, repo-map guidance, or cleanup guidance were modified or deleted.

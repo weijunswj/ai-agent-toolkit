@@ -1022,6 +1022,7 @@ test('source-watch PR notifier uses the stable review-notification PR contract',
   assert.equal(sourceWatchPrBodyText(workflow), [
     'This PR is a review notification only.',
     'No source files or advisory tracking documents were updated.',
+    'No review-state cursors were changed.',
     'No SOURCE-LOCK pins or advisory baselines were changed.',
     'No SOURCE-LOCK pins were changed.',
     'No toolkit rules, skills, hooks, memory guidance, repo-map guidance, or cleanup guidance were modified or deleted.',
@@ -1045,8 +1046,12 @@ test('source-watch PR notifier uses the stable review-notification PR contract',
   ].join('\n'));
   assert.match(workflow, /persist-credentials:\s*false/);
   assert.match(workflow, /GH_TOKEN: \$\{\{ github\.token \}\}/);
-  assert.match(workflow, /git remote set-url origin "https:\/\/x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/);
-  assert.match(workflow, /git push --force-with-lease="refs\/heads\/\$BRANCH:\$remote_sha" origin "HEAD:\$BRANCH"/);
+  assert.match(workflow, /bash repo\/scripts\/update-source-watch-review-branch\.sh/);
+  const helper = readTextFile(path.join(repoRoot, 'repo', 'scripts', 'update-source-watch-review-branch.sh'));
+  assert.match(helper, /git remote set-url origin "https:\/\/x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/);
+  assert.match(helper, /git push --force-with-lease="refs\/heads\/\$BRANCH:\$remote_sha" origin "HEAD:\$BRANCH"/);
+  assert.match(helper, /git push --force-with-lease="refs\/heads\/\$BRANCH:" origin "HEAD:\$BRANCH"/);
+  assert.doesNotMatch(helper, /git push origin "HEAD:\$BRANCH"/);
   assert.doesNotMatch(workflow, /git push origin (?:HEAD:)?main\b/i);
   assert.doesNotMatch(workflow, /git\s+push[^\n]*(?:--force(?!-with-lease)|-f\b)/i);
   assert.doesNotMatch(workflow, /git\s+add[^\n]*(?:_projects|SOURCE-LOCK\.json)/i);
@@ -1154,6 +1159,81 @@ test('validator rejects weekly ecosystem radar resurrection', () => {
 test('validator accepts the daily source-watch advisory document', () => {
   const errors = validator.runValidation();
   assert.equal(errors.filter((error) => /advisory-targets\.json/.test(error)).length, 0, errors.join('\n'));
+});
+
+test('validator accepts the source-watch review-state document and its seeded identities', () => {
+  const errors = validator.runValidation();
+  assert.equal(errors.filter((error) => /review-state\.json/.test(error)).length, 0, errors.join('\n'));
+});
+
+test('validator rejects malformed or identity-mismatched source-watch review cursors', () => {
+  const cases = [
+    {
+      label: 'abbreviated SHA',
+      mutate(record) { record.reviewed_through_sha = '1234'; },
+      expected: /reviewed_through_sha must be a 40-character SHA/
+    },
+    {
+      label: 'invalid date',
+      mutate(record) { record.reviewed_at = '2026-02-30'; },
+      expected: /reviewed_at must be a valid calendar date/
+    },
+    {
+      label: 'unsupported disposition',
+      mutate(record) { record.disposition = 'MAYBE'; },
+      expected: /disposition is unsupported/
+    },
+    {
+      label: 'identity mismatch',
+      mutate(record) { record.repository = 'different-owner/different-repo'; },
+      expected: /review-state\.json identity mismatch/
+    },
+    {
+      label: 'unsupported top-level key',
+      mutate(_record, state) { state.unsupported = true; },
+      expected: /review-state\.json contains unsupported top-level field unsupported/
+    },
+    {
+      label: 'unsupported policy key',
+      mutate(_record, state) { state.policy.unsupported = true; },
+      expected: /review-state\.json policy contains unsupported field unsupported/
+    },
+    {
+      label: 'unsupported record key',
+      mutate(record) { record.unsupported = true; },
+      expected: /contains unsupported field unsupported/
+    },
+    {
+      label: 'invalid description type',
+      mutate(_record, state) { state.policy.description = 42; },
+      expected: /policy\.description must be a non-empty string/
+    },
+    {
+      label: 'empty description',
+      mutate(_record, state) { state.policy.description = '   '; },
+      expected: /policy\.description must be a non-empty string/
+    }
+  ];
+
+  for (const testCase of cases) {
+    const cwd = tempCopy();
+    const statePath = path.join(cwd, 'repo', 'source-watch', 'review-state.json');
+    const state = readJsonFile(statePath);
+    testCase.mutate(state.records[0], state);
+    writeJsonFile(statePath, state);
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0, testCase.label);
+    assert.match(result.stderr, testCase.expected, testCase.label);
+  }
+
+  const duplicateCwd = tempCopy();
+  const duplicatePath = path.join(duplicateCwd, 'repo', 'source-watch', 'review-state.json');
+  const duplicateState = readJsonFile(duplicatePath);
+  duplicateState.records.push({ ...duplicateState.records[0] });
+  writeJsonFile(duplicatePath, duplicateState);
+  const duplicateResult = runValidate(duplicateCwd);
+  assert.notEqual(duplicateResult.status, 0);
+  assert.match(duplicateResult.stderr, /review-state\.json has duplicate target key/);
 });
 
 test('auto-sync workflow owns agent instruction shim freshness', () => {
