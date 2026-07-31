@@ -5,9 +5,9 @@
   "title": "Google DESIGN.md Design Reference",
   "module_path": "_projects/design/google-design-md",
   "main_path": "_projects/design/google-design-md/_main",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "version_policy": "semver",
-  "version_notes": "Initial third-party-attributed Toolkit reference for Google Labs DESIGN.md. Upstream repo, ref, commit, file pins, attribution, and manual-review update policy are tracked in SOURCE-LOCK.json.",
+  "version_notes": "Third-party-attributed Toolkit reference for Google Labs DESIGN.md with optional omitted-section and reason semantics. Upstream repo, ref, commit, file pins, attribution, and manual-review update policy are tracked in SOURCE-LOCK.json.",
   "outputs": [
     {
       "kind": "copy",
