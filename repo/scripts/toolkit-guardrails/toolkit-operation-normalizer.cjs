@@ -39,86 +39,82 @@ function valueOrNull(value) {
 
 function strictBoolean(value, fallback = null) {
   if (value === undefined || value === null) return fallback;
-  return typeof value === 'boolean' ? value : null;
+  return typeof value === 'boolean' ? value : value;
 }
 
 function failClosedBoolean(value, fallback = false) {
   if (value === undefined || value === null) return fallback;
-  return typeof value === 'boolean' ? value : true;
+  return typeof value === 'boolean' ? value : value;
+}
+
+function strictString(value, fallback = null) {
+  if (value === undefined || value === null) return fallback;
+  return typeof value === 'string' ? value : value;
+}
+
+function strictArray(value) {
+  if (value === undefined || value === null) return [];
+  return Array.isArray(value) ? [...value] : value;
 }
 
 function normalizeSession(input = {}) {
   const session = input.session && typeof input.session === 'object' ? input.session : input;
   return {
-    host: valueOrNull(firstDefined(session.host, session.provider_host)),
-    host_version: valueOrNull(firstDefined(session.host_version, session.version)),
-    session_id: valueOrNull(firstDefined(session.session_id, session.id)),
-    turn_id: valueOrNull(firstDefined(session.turn_id, session.turn)),
-    call_id: valueOrNull(firstDefined(session.call_id, session.call)),
-    lifecycle_event: valueOrNull(firstDefined(session.lifecycle_event, session.event)),
+    host: strictString(firstDefined(session.host, session.provider_host)),
+    host_version: strictString(firstDefined(session.host_version, session.version)),
+    session_id: strictString(firstDefined(session.session_id, session.id)),
+    turn_id: strictString(firstDefined(session.turn_id, session.turn)),
+    call_id: strictString(firstDefined(session.call_id, session.call)),
+    lifecycle_event: strictString(firstDefined(session.lifecycle_event, session.event)),
   };
 }
 
 function normalizeNativeState(input = {}) {
-  const state = input.native_state && typeof input.native_state === 'object' ? input.native_state : {};
+  const state = input.native_state === undefined || input.native_state === null
+    ? {}
+    : input.native_state;
   const capability = firstDefined(state.capability_evidence, input.capability_evidence, input.capability, null);
   return {
-    permission_mode: valueOrNull(firstDefined(state.permission_mode, input.permission_mode)),
-    auto_or_bypass: valueOrNull(firstDefined(state.auto_or_bypass, input.auto_or_bypass)),
-    native_permission_route: valueOrNull(firstDefined(state.native_permission_route, input.native_permission_route)),
+    permission_mode: strictString(firstDefined(state.permission_mode, input.permission_mode)),
+    auto_or_bypass: strictBoolean(firstDefined(state.auto_or_bypass, input.auto_or_bypass)),
+    native_permission_route: strictString(firstDefined(state.native_permission_route, input.native_permission_route)),
     hook_order_evidence: normalizeHookEvidence(firstDefined(state.hook_order_evidence, input.hook_order_evidence, null)),
     capability_evidence: normalizeCapabilityEvidence(capability),
   };
 }
 
 function normalizeHookEvidence(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  if (value === null || value === undefined) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
   return {
-    status: valueOrNull(value.status),
-    source: valueOrNull(value.source || value.provenance),
+    status: strictString(value.status),
+    source: strictString(value.source || value.provenance),
     pre_execution: strictBoolean(value.pre_execution),
-    position: valueOrNull(value.position),
-    version: valueOrNull(value.version),
+    position: strictString(value.position),
+    version: strictString(value.version),
   };
 }
 
 function normalizeCapabilityEvidence(value) {
   if (value === null || value === undefined) return null;
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return {
-      status: 'malformed',
-      host: null,
-      host_version: null,
-      route_identity: null,
-      route_supported: null,
-      enforcement_level: null,
-      adapter_state: null,
-      hook_order_evidence: null,
-      evidence_freshness: null,
-      trusted_ask: null,
-      adapter_required: null,
-      operation_preflight: null,
-      version_status: null,
-      expected_host_version: null,
-      fresh: null,
-      auto_mode_safe: null,
-    };
+    return value;
   }
   return {
-    status: valueOrNull(firstDefined(value.status, value.evidence_status, null)),
-    host: valueOrNull(value.host),
-    host_version: valueOrNull(value.host_version),
-    route_identity: valueOrNull(firstDefined(value.route_identity, value.route, null)),
+    status: strictString(firstDefined(value.status, value.evidence_status, null)),
+    host: strictString(value.host),
+    host_version: strictString(value.host_version),
+    route_identity: strictString(firstDefined(value.route_identity, value.route, null)),
     route_supported: strictBoolean(value.route_supported),
-    enforcement_level: valueOrNull(value.enforcement_level),
-    adapter_state: valueOrNull(value.adapter_state),
+    enforcement_level: strictString(value.enforcement_level),
+    adapter_state: strictString(value.adapter_state),
     hook_order_evidence: normalizeHookEvidence(value.hook_order_evidence),
-    evidence_freshness: valueOrNull(firstDefined(value.evidence_freshness, value.freshness, null)),
+    evidence_freshness: strictString(firstDefined(value.evidence_freshness, value.freshness, null)),
     trusted_ask: strictBoolean(value.trusted_ask),
     adapter_required: strictBoolean(value.adapter_required),
-    operation_preflight: valueOrNull(value.operation_preflight),
-    version_status: valueOrNull(value.version_status),
-    expected_host_version: valueOrNull(value.expected_host_version),
+    operation_preflight: strictString(value.operation_preflight),
+    version_status: strictString(value.version_status),
+    expected_host_version: strictString(value.expected_host_version),
     fresh: strictBoolean(value.fresh),
     auto_mode_safe: strictBoolean(value.auto_mode_safe),
   };
@@ -158,6 +154,27 @@ function normalizeAuthority(input = {}) {
   );
   const controllerAuthorized = firstDefined(authority.controller_authorized, controller.authorized, null);
   const controllerHold = firstDefined(authority.controller_hold, authority.hold, false);
+  const controllerAuthorization = firstDefined(authority.controller_authorization, controller.authorization, null);
+  const normalizedControllerAuthorization = controllerAuthorization === null || controllerAuthorization === undefined
+    ? null
+    : (!controllerAuthorization || typeof controllerAuthorization !== 'object' || Array.isArray(controllerAuthorization)
+      ? controllerAuthorization
+      : {
+        status: strictString(controllerAuthorization.status),
+        trusted: strictBoolean(controllerAuthorization.trusted),
+        operation_digest: strictString(controllerAuthorization.operation_digest),
+        target_digest: strictString(controllerAuthorization.target_digest),
+        request_digest: strictString(controllerAuthorization.request_digest),
+        external_target_digest: strictString(controllerAuthorization.external_target_digest),
+        operation_class: strictString(controllerAuthorization.operation_class),
+        component_digest: strictString(controllerAuthorization.component_digest),
+        scope: strictString(controllerAuthorization.scope),
+        expires_at: controllerAuthorization.expires_at === undefined || controllerAuthorization.expires_at === null
+          ? null
+          : controllerAuthorization.expires_at,
+      });
+  const allowedOperationClasses = firstDefined(authority.allowed_operation_classes, prompt.allowed_operation_classes, null);
+  const allowedScopes = firstDefined(authority.allowed_scopes, lock.allowed_scopes, null);
   return {
     prompt_active: strictBoolean(promptActive),
     role_name: valueOrNull(roleName),
@@ -168,15 +185,12 @@ function normalizeAuthority(input = {}) {
     push_authorized: strictBoolean(firstDefined(authority.push_authorized, authority.allow_push, prompt.allow_push, null)),
     design_lock_id: valueOrNull(lockId),
     design_lock_status: valueOrNull(lockStatus),
-    allowed_operation_classes: Array.isArray(firstDefined(authority.allowed_operation_classes, prompt.allowed_operation_classes, null))
-      ? [...firstDefined(authority.allowed_operation_classes, prompt.allowed_operation_classes)]
-      : [],
-    allowed_scopes: Array.isArray(firstDefined(authority.allowed_scopes, lock.allowed_scopes, null))
-      ? [...firstDefined(authority.allowed_scopes, lock.allowed_scopes)]
-      : [],
+    allowed_operation_classes: strictArray(allowedOperationClasses),
+    allowed_scopes: strictArray(allowedScopes),
     controller_hold: failClosedBoolean(controllerHold),
     controller_authorized: strictBoolean(controllerAuthorized),
-    controller_operation_classes: Array.isArray(controllerOperationClasses) ? [...controllerOperationClasses] : [],
+    controller_operation_classes: strictArray(controllerOperationClasses),
+    controller_authorization: normalizedControllerAuthorization,
     role: valueOrNull(roleName),
   };
 }
@@ -241,12 +255,14 @@ function extractTargets(operation, structured) {
 }
 
 function normalizeExternalTargets(value) {
-  const values = Array.isArray(value) ? value : (value ? [value] : []);
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) return value;
+  const values = value;
   return values.map((entry) => {
-    if (typeof entry === 'string') return { class: entry, digest: sha256(entry) };
-    if (!entry || typeof entry !== 'object') return { class: 'unknown-external-target', digest: sha256(String(entry)) };
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
     const className = firstDefined(entry.class, entry.kind, entry.type, 'unknown-external-target');
-    return { class: String(className), digest: sha256(entry) };
+    if (typeof className !== 'string') return entry;
+    return { class: className, digest: sha256(entry) };
   });
 }
 
@@ -368,6 +384,27 @@ function computeTargetDigest(targets) {
   return sha256(canonicalTargetSet(targets));
 }
 
+function canonicalComponents(classification) {
+  const components = Array.isArray(classification?.components) && classification.components.length
+    ? classification.components
+    : (classification?.operation_class ? [{
+      operation_class: classification.operation_class,
+      decision_hint: classification.decision_hint || null,
+      reason_code: classification.reason_codes?.[0] || null,
+    }] : []);
+  return components.map((component) => ({
+    operation_class: typeof component?.operation_class === 'string' ? component.operation_class : null,
+    decision_hint: typeof component?.decision_hint === 'string' ? component.decision_hint : null,
+    reason_code: typeof component?.reason_code === 'string' ? component.reason_code : null,
+    target_digest: typeof component?.target_digest === 'string' ? component.target_digest : sha256(component?.target_inputs || []),
+    external_target_digest: typeof component?.external_target_digest === 'string' ? component.external_target_digest : sha256(component?.external_targets || []),
+  }));
+}
+
+function computeComponentDigest(classification) {
+  return sha256(canonicalComponents(classification));
+}
+
 function computeOperationDigest(record, classification = null) {
   const operation = record?.operation || record || {};
   return sha256({
@@ -384,6 +421,8 @@ function computeOperationDigest(record, classification = null) {
     })),
     external_targets: operation.external_targets || [],
     mutation_class: classification?.operation_class || operation.mutation_class || null,
+    components: canonicalComponents(classification),
+    component_digest: classification ? computeComponentDigest(classification) : null,
     mcp_server: operation.mcp_server || null,
     mcp_tool: operation.mcp_tool || null,
     scope: operation.scope || null,
@@ -399,10 +438,16 @@ function repositoryFromInput(input, options) {
 }
 
 function normalizeOperation(input, options = {}) {
-  if (!input || typeof input !== 'object') throw new Error('OPERATION_INPUT_REQUIRED');
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('OPERATION_INPUT_REQUIRED');
+  if (Object.hasOwn(input, 'session') && (input.session === null || input.session === undefined || typeof input.session !== 'object' || Array.isArray(input.session))) throw new Error('SESSION_TYPE_INVALID');
+  if (Object.hasOwn(input, 'native_state') && (input.native_state === null || input.native_state === undefined || typeof input.native_state !== 'object' || Array.isArray(input.native_state))) throw new Error('NATIVE_STATE_TYPE_INVALID');
+  if (Object.hasOwn(input, 'repository') && (input.repository === null || typeof input.repository !== 'object' || Array.isArray(input.repository))) throw new Error('REPOSITORY_TYPE_INVALID');
+  if (Object.hasOwn(input, 'repository_context') && (input.repository_context === null || typeof input.repository_context !== 'object' || Array.isArray(input.repository_context))) throw new Error('REPOSITORY_CONTEXT_TYPE_INVALID');
+  if (Object.hasOwn(input, 'authority') && input.authority !== null && input.authority !== undefined && (typeof input.authority !== 'object' || Array.isArray(input.authority))) throw new Error('AUTHORITY_TYPE_INVALID');
   const operation = input.operation && typeof input.operation === 'object' ? input.operation : input;
+  if (Object.hasOwn(input, 'operation') && (input.operation === null || input.operation === undefined || typeof input.operation !== 'object' || Array.isArray(input.operation))) throw new Error('OPERATION_TYPE_INVALID');
   const structuredInput = firstDefined(operation.structured_input, operation.structuredInput, null);
-  const structured = structuredInput && typeof structuredInput === 'object' ? structuredInput : null;
+  const structured = structuredInput === undefined || structuredInput === null ? null : structuredInput;
   const repository = repositoryFromInput(input, options);
   const rawTargets = extractTargets(operation, structured);
   const operationCwd = firstDefined(operation.operation_cwd, operation.cwd, repository.cwd, null);
@@ -416,25 +461,25 @@ function normalizeOperation(input, options = {}) {
   const command = valueOrNull(firstDefined(operation.command, operation.opaque_command, null));
   const opaque = firstDefined(operation.opaque_input, operation.opaqueInput, null);
   const record = {
-    contract_version: CONTRACT_VERSION,
+    contract_version: input.contract_version === undefined ? CONTRACT_VERSION : input.contract_version,
     session,
     repository,
     operation: {
       host_tool: valueOrNull(firstDefined(operation.host_tool, operation.hostTool, input.host_tool, null)),
       canonical_route: valueOrNull(firstDefined(operation.canonical_route, operation.canonicalRoute, operation.route, null)),
-      structured_input: structured ? sanitizeStructured(structured) : null,
+      structured_input: structured === null ? null : sanitizeStructured(structured),
       opaque_input: opaque === null || opaque === undefined ? null : digestOnly(opaque),
-      command: command === null ? null : String(command),
-      shell: valueOrNull(firstDefined(operation.shell, input.shell, null)),
-      operation_cwd: valueOrNull(operationCwd),
+      command: command === null ? null : strictString(command),
+      shell: strictString(firstDefined(operation.shell, input.shell, null)),
+      operation_cwd: strictString(operationCwd),
       targets: resolvedTargets,
       external_targets: externalTargets,
-      mutation_class: String(firstDefined(operation.mutation_class, operation.mutationClass, operation.action, structured?.mutation_class, structured?.action, 'unknown')),
-      mcp_server: valueOrNull(firstDefined(operation.mcp_server, operation.mcpServer, null)),
-      mcp_tool: valueOrNull(firstDefined(operation.mcp_tool, operation.mcpTool, null)),
+      mutation_class: strictString(firstDefined(operation.mutation_class, operation.mutationClass, operation.action, structured?.mutation_class, structured?.action, 'unknown'), 'unknown'),
+      mcp_server: strictString(firstDefined(operation.mcp_server, operation.mcpServer, null)),
+      mcp_tool: strictString(firstDefined(operation.mcp_tool, operation.mcpTool, null)),
       input_digest: null,
       target_digest: computeTargetDigest(resolvedTargets),
-      scope: valueOrNull(firstDefined(operation.scope, input.scope, null)),
+      scope: strictString(firstDefined(operation.scope, input.scope, null)),
       transaction_evidence: valueOrNull(firstDefined(operation.transaction_evidence, operation.transaction, input.transaction_evidence, null)),
     },
     native_state: nativeState,
@@ -448,6 +493,16 @@ function normalizeOperation(input, options = {}) {
 function refreshOperationDigests(record, classification) {
   if (!record || !record.operation) throw new Error('NORMALIZED_OPERATION_REQUIRED');
   record.operation.mutation_class = classification?.operation_class || record.operation.mutation_class;
+  if (Array.isArray(classification?.external_targets) && classification.external_targets.length) {
+    const mergedExternal = [...(Array.isArray(record.operation.external_targets) ? record.operation.external_targets : []), ...classification.external_targets];
+    const seen = new Set();
+    record.operation.external_targets = mergedExternal.filter((entry) => {
+      const key = stableStringify(entry);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
   record.operation.target_digest = computeTargetDigest(record.operation.targets);
   record.operation.input_digest = computeOperationDigest(record, classification);
   return record;
@@ -467,6 +522,8 @@ module.exports = {
   normalizeApproval,
   canonicalTargetSet,
   computeTargetDigest,
+  canonicalComponents,
+  computeComponentDigest,
   computeOperationDigest,
   normalizeOperation,
   refreshOperationDigests,

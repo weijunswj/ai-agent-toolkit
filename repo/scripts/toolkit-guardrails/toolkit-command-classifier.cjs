@@ -236,8 +236,8 @@ function commonResult(operationClass, decisionHint, targets = [], extras = {}) {
 }
 
 function isSecretPath(value) {
-  return /(?:^|[\\/])(?:\.env(?:\.[^\\/]*)?|\.ssh(?:[\\/]|$)|\.aws(?:[\\/]credentials)?(?:[\\/]|$)|\.gnupg(?:[\\/]|$)|credentials(?:\.[^\\/]*)?|(?:id_rsa|id_ed25519|private[_-]?key)(?:\.[^\\/]*)?)(?:[\\/]|$)/i.test(String(value || ''))
-    || /^(?:\.env(?:\.[^\\/]*)?|credentials(?:\.[^\\/]*)?)$/i.test(String(value || ''))
+  return /(?:^|[\\/])(?:\.env[^\\/]*|\.ssh(?:[\\/]|$)|\.aws(?:[\\/]credentials)?(?:[\\/]|$)|\.gnupg(?:[\\/]|$)|credentials(?:\.[^\\/]*)?|(?:id_rsa|id_ed25519|private[_-]?key)(?:\.[^\\/]*)?)(?:[\\/]|$)/i.test(String(value || ''))
+    || /^(?:\.env[^\\/]*|credentials(?:\.[^\\/]*)?)$/i.test(String(value || ''))
     || /(?:^|[\\/])(?:shadow|gshadow|SAM|SECURITY)(?:$|[\\/])/i.test(String(value || ''));
 }
 
@@ -258,7 +258,7 @@ function isSecretVariableReference(value) {
 function secretDumpCommand(name, command) {
   return ['printenv', 'env', 'set'].includes(name)
     || /(?:get-childitem|get-item|dir|ls|gci)\s+(?:-[^\s]+\s+)*env:/i.test(command)
-    || /(?:cat|type|get-content|more|head|tail)\s+[^\n]*(?:\.env\*|\.ssh[\\/]*$|\.aws[\\/]*$|\.gnupg[\\/]*$)/i.test(command);
+    || /(?:cat|type|get-content|more|head|tail)\s+[^\n]*(?:\.env[^\s\\/]*\*|\.ssh[\\/]*$|\.aws[\\/]*$|\.gnupg[\\/]*$)/i.test(command);
 }
 
 function secretVariableName(name, tokens) {
@@ -332,20 +332,58 @@ function classifyGit(tokens, shell = 'posix') {
     return commonResult(destructive ? 'git-destructive' : 'git-commit', destructive ? 'ask' : 'allow', [], { reason_codes: [destructive ? 'DESTRUCTIVE_OPERATION_REQUIRES_APPROVAL' : 'ROUTINE_GIT_OPERATION'] });
   }
   if (subcommand === 'push') {
-    const force = tokens.some((token) => ['--force', '-f', '--force-with-lease'].includes(lower(token)) || token.startsWith('+'));
-    const deletion = tokens.some((token) => ['--delete', '-d'].includes(lower(token)));
-    const special = tokens.some((token) => ['--tags', '--all', '--mirror'].includes(lower(token)));
-    const args = tokens.slice(2).filter((token) => !token.startsWith('-'));
+    const valuedOptions = new Set(['--repo', '--receive-pack', '--exec', '--upload-pack', '--push-option', '-o']);
+    const args = [];
+    let force = false;
+    let deletion = false;
+    let special = false;
+    let ambiguousOption = false;
+    let optionValue = false;
+    for (let index = 2; index < tokens.length; index += 1) {
+      const token = tokens[index];
+      const normalizedToken = lower(token);
+      if (optionValue) {
+        optionValue = false;
+        continue;
+      }
+      if (token === '--') {
+        args.push(...tokens.slice(index + 1));
+        break;
+      }
+      if (normalizedToken === '--force' || normalizedToken === '--force-with-lease' || normalizedToken.startsWith('--force-with-lease=')) force = true;
+      if (token.startsWith('+')) force = true;
+      if (token.startsWith('-') && !token.startsWith('--') && token.slice(1).toLowerCase().includes('f')) force = true;
+      if (normalizedToken === '--delete' || normalizedToken === '-d' || (token.startsWith('-') && !token.startsWith('--') && token.slice(1).includes('d'))) deletion = true;
+      if (normalizedToken === '--tags' || normalizedToken === '--all' || normalizedToken === '--mirror') special = true;
+      if (normalizedToken === '--repo' || normalizedToken.startsWith('--repo=')) ambiguousOption = true;
+      if (token.startsWith('--') && valuedOptions.has(normalizedToken)) {
+        ambiguousOption = true;
+        optionValue = true;
+      } else if (token.startsWith('--') && valuedOptions.has(normalizedToken.split('=', 1)[0])) {
+        ambiguousOption = true;
+        optionValue = !token.includes('=');
+      }
+      else if (token.startsWith('-') && !token.startsWith('--')) {
+        const cluster = token.slice(1);
+        if (cluster && [...cluster].some((flag) => !'dDfuqv'.includes(flag))) ambiguousOption = true;
+      }
+      if (!token.startsWith('-')) args.push(token);
+    }
     const remote = args[0] || null;
     const refs = args.slice(1);
     const rawRef = refs.length === 1 ? refs[0] : null;
-    const destinationRef = rawRef ? (rawRef.includes(':') ? rawRef.split(':').pop() : rawRef) : null;
-    const evidenceComplete = Boolean(remote && rawRef && refs.length === 1 && !special);
+    const refParts = rawRef && rawRef.includes(':') ? rawRef.split(':') : null;
+    const rawDestinationRef = rawRef ? (refParts ? refParts[refParts.length - 1] : rawRef) : null;
+    const destinationRef = rawDestinationRef ? rawDestinationRef.replace(/^refs\/heads\//i, '') : null;
+    const deletionRef = Boolean(refParts && (refParts[refParts.length - 1] === '' || refParts[0] === ''));
+    if (refParts && refParts.length !== 2) ambiguousOption = true;
+    deletion = deletion || deletionRef;
+    const evidenceComplete = Boolean(remote && rawRef && refs.length === 1 && !special && !ambiguousOption);
     const otherTarget = Boolean(remote && remote !== 'origin')
-      || Boolean(destinationRef && !['HEAD', 'head', 'CURRENT_BRANCH'].includes(destinationRef))
       || special
-      || deletion;
-    const push = { remote, refs, force, deletion, other_target: otherTarget, destination_ref: destinationRef, evidence_complete: evidenceComplete };
+      || deletion
+      || ambiguousOption;
+    const push = { remote, refs, force, deletion, other_target: otherTarget, destination_ref: destinationRef, raw_ref: rawRef, evidence_complete: evidenceComplete, ambiguous: ambiguousOption };
     if (force) return commonResult('git-force-push', 'ask', [], { git_push: push, reason_codes: ['DESTRUCTIVE_OPERATION_REQUIRES_APPROVAL'] });
     if (deletion) return commonResult('git-other-target', 'ask', [], { git_push: push, reason_codes: ['DESTRUCTIVE_OPERATION_REQUIRES_APPROVAL'] });
     if (!evidenceComplete) return commonResult('git-push', 'unsupported', [], { git_push: push, reason_codes: ['GIT_PUSH_EVIDENCE_REQUIRED'] });
@@ -423,8 +461,21 @@ function classifyAtomic(command, shell) {
 function mergeResults(results) {
   const list = Array.isArray(results) ? results : [];
   if (!list.length) return commonResult('opaque-command', 'unsupported', [], { opaque: true, reason_codes: ['OPAQUE_COMMAND_UNSUPPORTED'] });
+  const authorityRank = (entry) => {
+    const operationClass = entry?.operation_class;
+    if (['secret-exfiltration', 'secret-dump', 'guardrail-bypass', 'protected-target', 'catastrophic-target', 'role-boundary-violation'].includes(operationClass)) return 100;
+    if (operationClass === 'secret-access') return 80;
+    if (operationClass.startsWith('github-')) return 75;
+    if (operationClass === 'git-force-push' || operationClass === 'git-destructive' || operationClass === 'delete') return 70;
+    if (operationClass === 'external-mutation') return 60;
+    return 0;
+  };
   let selected = list[0];
-  for (const candidate of list.slice(1)) if (CLASS_DECISION_RANK[candidate.decision_hint] > CLASS_DECISION_RANK[selected.decision_hint]) selected = candidate;
+  for (const candidate of list.slice(1)) {
+    const candidateRank = CLASS_DECISION_RANK[candidate.decision_hint] ?? 2;
+    const selectedRank = CLASS_DECISION_RANK[selected.decision_hint] ?? 2;
+    if (candidateRank > selectedRank || (candidateRank === selectedRank && authorityRank(candidate) > authorityRank(selected))) selected = candidate;
+  }
   const secondaryReasons = [...new Set(list.flatMap((entry) => entry.reason_codes || []).filter((reason) => reason !== selected.reason_codes?.[0]))];
   return {
     ...selected,
@@ -437,7 +488,13 @@ function mergeResults(results) {
     opaque: list.some((entry) => entry.opaque),
     secret_target: list.some((entry) => entry.secret_target),
     catastrophic_hint: list.some((entry) => entry.catastrophic_hint),
-    components: list.map((entry) => ({ operation_class: entry.operation_class, decision_hint: entry.decision_hint, reason_code: entry.reason_codes?.[0] || null })),
+    components: list.map((entry) => ({
+      operation_class: entry.operation_class,
+      decision_hint: entry.decision_hint,
+      reason_code: entry.reason_codes?.[0] || null,
+      target_digest: sha256(entry.target_inputs || []),
+      external_target_digest: sha256(entry.external_targets || []),
+    })),
   };
 }
 
@@ -454,11 +511,27 @@ function classifyCommand(command, options = {}) {
   merged.pipeline = hasPipeline;
   merged.redirection = hasRedirection;
   merged.target_inputs = [...merged.target_inputs, ...redirection];
+  if (hasRedirection) {
+    merged.components = [...(merged.components || []), {
+      operation_class: 'redirection',
+      decision_hint: 'ask',
+      reason_code: 'DESTRUCTIVE_OPERATION_REQUIRES_APPROVAL',
+      target_digest: sha256(redirection),
+      external_target_digest: sha256([]),
+    }];
+  }
 
   const hasSecretAccess = results.some((entry) => ['secret-access', 'secret-dump'].includes(entry.operation_class));
-  const hasNetworkComponent = results.some((entry) => entry.operation_class === 'external-mutation') || results.some((entry) => entry.external_targets?.some((target) => target.class === 'network-or-remote-system'));
+  const hasNetworkComponent = results.some((entry) => entry.operation_class === 'external-mutation' || entry.operation_class.startsWith('github-')) || results.some((entry) => entry.external_targets?.some((target) => ['network-or-remote-system', 'github'].includes(target.class)));
   const hasTransmissionComponent = /(?:^|[|;]\s*)(?:curl|curl\.exe|wget|invoke-webrequest|invoke-restmethod|send(?:-[A-Za-z0-9_-]+)?|upload|post|put)\b/i.test(command);
   if (hasSecretAccess && (hasNetworkComponent || hasTransmissionComponent || hasRedirection)) {
+    merged.components = [...(merged.components || []), {
+      operation_class: 'secret-exfiltration',
+      decision_hint: 'deny',
+      reason_code: 'SECRET_EXFILTRATION_DENIED',
+      target_digest: sha256(merged.target_inputs || []),
+      external_target_digest: sha256(merged.external_targets || []),
+    }];
     merged.operation_class = 'secret-exfiltration';
     merged.mutation_class = 'secret-exfiltration';
     merged.decision_hint = 'deny';
@@ -466,6 +539,13 @@ function classifyCommand(command, options = {}) {
     merged.secret_target = true;
   }
   if (hasPipeline && merged.decision_hint === 'allow') {
+    merged.components = [...(merged.components || []), {
+      operation_class: 'opaque-command',
+      decision_hint: 'unsupported',
+      reason_code: 'OPAQUE_COMMAND_UNSUPPORTED',
+      target_digest: sha256(merged.target_inputs || []),
+      external_target_digest: sha256(merged.external_targets || []),
+    }];
     merged.operation_class = 'opaque-command';
     merged.mutation_class = 'opaque-command';
     merged.decision_hint = 'unsupported';
@@ -473,12 +553,26 @@ function classifyCommand(command, options = {}) {
     merged.reason_codes = ['OPAQUE_COMMAND_UNSUPPORTED', ...merged.reason_codes.filter((reason) => reason !== 'OPAQUE_COMMAND_UNSUPPORTED')];
   }
   if (hasRedirection && merged.operation_class === 'read') {
+    merged.components = [...(merged.components || []), {
+      operation_class: 'overwrite',
+      decision_hint: 'ask',
+      reason_code: 'DESTRUCTIVE_OPERATION_REQUIRES_APPROVAL',
+      target_digest: sha256(redirection),
+      external_target_digest: sha256([]),
+    }];
     merged.operation_class = 'overwrite';
     merged.mutation_class = 'overwrite';
     merged.decision_hint = 'ask';
     merged.reason_codes = ['DESTRUCTIVE_OPERATION_REQUIRES_APPROVAL', ...merged.reason_codes.filter((reason) => reason !== 'DESTRUCTIVE_OPERATION_REQUIRES_APPROVAL')];
   }
   if (hasSingleAmpersand && merged.decision_hint !== 'deny') {
+    merged.components = [...(merged.components || []), {
+      operation_class: 'opaque-command',
+      decision_hint: 'unsupported',
+      reason_code: 'DYNAMIC_TARGET_UNSUPPORTED',
+      target_digest: sha256(merged.target_inputs || []),
+      external_target_digest: sha256(merged.external_targets || []),
+    }];
     merged.operation_class = 'opaque-command';
     merged.mutation_class = 'opaque-command';
     merged.decision_hint = 'unsupported';
@@ -520,6 +614,10 @@ function classifyStructuredOperation(operation, options = {}) {
       || operation?.external_targets?.length
       || /(?:database|cloud|provider|deploy|production|external|mcp)/.test(route),
   );
+  const catastrophicTargets = targets.filter((target) => target?.status === 'resolved' && catastrophicPath(target.canonical_path || target.raw_path));
+  if (catastrophicTargets.length && ['delete', 'remove', 'destroy', 'overwrite', 'truncate', 'format', 'reset', 'rmdir'].includes(action)) {
+    return commonResult('protected-target', 'deny', catastrophicTargets, { catastrophic_hint: true, reason_codes: ['CATASTROPHIC_TARGET_DENIED'] });
+  }
   if ((resolvedSecretTargets.length || structuredSecretVariable) && hasExternalRoute) {
     return commonResult('secret-exfiltration', 'deny', resolvedSecretTargets.length ? resolvedSecretTargets : targets, { secret_target: true, reason_codes: ['SECRET_EXFILTRATION_DENIED'] });
   }

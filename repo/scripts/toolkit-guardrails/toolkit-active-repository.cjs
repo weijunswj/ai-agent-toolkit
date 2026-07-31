@@ -95,7 +95,9 @@ function isParentWorkspace(candidate, repoRoot, semantics) {
 }
 
 function normalizeLinkType(value) {
-  const normalized = String(value || 'none').toLowerCase().replaceAll('_', '-');
+  if (value === undefined || value === null) return 'none';
+  if (typeof value !== 'string') return value;
+  const normalized = value.toLowerCase().replaceAll('_', '-');
   if (normalized === 'junction') return 'junction';
   if (normalized === 'reparse' || normalized === 'reparse-point') return 'reparse-point';
   if (normalized === 'symlink' || normalized === 'symbolic-link') return 'symlink';
@@ -103,7 +105,11 @@ function normalizeLinkType(value) {
 }
 
 function nullableString(value) {
-  return value === undefined || value === null ? null : String(value);
+  return value === undefined || value === null ? null : (typeof value === 'string' ? value : value);
+}
+
+function nullableDigest(value) {
+  return value === undefined || value === null ? null : (typeof value === 'string' ? value : value);
 }
 
 function normalizeEvidenceMap(value) {
@@ -123,13 +129,17 @@ function normalizeResolutionEvidence(value) {
     provenance: nullableString(value.provenance),
     filesystem_verified: value.filesystem_verified === undefined || value.filesystem_verified === null
       ? null
-      : (typeof value.filesystem_verified === 'boolean' ? value.filesystem_verified : null),
+      : (typeof value.filesystem_verified === 'boolean' ? value.filesystem_verified : value.filesystem_verified),
     link_type: normalizeLinkType(value.link_type),
     resolved_path: nullableString(value.resolved_path),
     canonical_path: nullableString(value.canonical_path),
     target_class: nullableString(value.target_class),
     repository_root: nullableString(value.repository_root),
     worktree_root: nullableString(value.worktree_root),
+    invocation_id: nullableDigest(firstDefined(value.invocation_id, value.resolver_invocation_id)),
+    target_digest: nullableDigest(firstDefined(value.target_digest, value.input_target_digest)),
+    repository_root_digest: nullableDigest(value.repository_root_digest),
+    worktree_root_digest: nullableDigest(value.worktree_root_digest),
     roots: normalizeEvidenceMap(value.roots),
     targets: normalizeEvidenceMap(value.targets),
   };
@@ -471,27 +481,137 @@ function resolveTarget(targetInput, repositoryContext, options = {}) {
     };
   }
 
-  const evidence = evidenceForPath(context, rawPath, target);
-  const fsResolver = options.fsResolver || null;
-  const resolved = resolveWithEvidence(rawPath, operationCwd || undefined, semantics, evidence, fsResolver, options);
-  const result = {
+  let lexicalPath;
+  try {
+    lexicalPath = canonicalPath(rawPath, semantics, operationCwd || context.cwd || context.repo_root || undefined);
+  } catch (error) {
+    return {
+      raw_path: rawPath,
+      lexical_path: null,
+      canonical_path: null,
+      status: 'missing-context',
+      target_class: 'unresolved-target',
+      link_type: 'none',
+      resolved_inside: false,
+      approved_root: null,
+      evidence: null,
+    };
+  }
+  const trustedResolver = options.trustedTargetResolver || options.trustedTargetResolutionResolver || options.targetResolutionResolver || options.targetResolver;
+  const invocation = {
+    invocation_id: sha256({
+      raw_path: rawPath,
+      lexical_path: lexicalPath,
+      operation_cwd: operationCwd || null,
+      repository_root: context.canonical_repository_root || null,
+      worktree_root: context.canonical_worktree_root || null,
+    }),
     raw_path: rawPath,
-    lexical_path: resolved.lexical_path,
-    canonical_path: resolved.canonical_path,
-    status: resolved.status,
-    target_class: 'unknown-target',
-    link_type: resolved.link_type,
-    resolved_inside: false,
-    approved_root: null,
-    evidence: resolved.evidence,
+    lexical_path: lexicalPath,
+    operation_cwd: operationCwd || null,
+    repository_root: context.canonical_repository_root || null,
+    worktree_root: context.canonical_worktree_root || null,
+    target_digest: sha256(rawPath),
+    repository_root_digest: sha256(context.canonical_repository_root || ''),
+    worktree_root_digest: sha256(context.canonical_worktree_root || ''),
   };
 
-  if (resolved.status !== 'resolved' || !resolved.canonical_path) {
-    result.target_class = resolved.link_type !== 'none' ? 'unresolved-target' : 'unresolved-target';
-    return result;
-  }
+  const unresolved = (status = 'unresolved', evidence = null) => ({
+    raw_path: rawPath,
+    lexical_path: lexicalPath,
+    canonical_path: null,
+    status: RESOLUTION_STATUSES.includes(status) ? status : 'unresolved',
+    target_class: 'unresolved-target',
+    link_type: 'none',
+    resolved_inside: false,
+    approved_root: null,
+    evidence,
+  });
 
-  const canonical = resolved.canonical_path;
+  if (typeof trustedResolver !== 'function' && !(trustedResolver && typeof trustedResolver.resolve === 'function')) return unresolved();
+
+  let supplied;
+  try {
+    const resolver = typeof trustedResolver === 'function' ? trustedResolver : trustedResolver.resolve.bind(trustedResolver);
+    supplied = resolver(Object.freeze({ ...invocation }), context);
+  } catch (error) {
+    return unresolved('resolver-error');
+  }
+  if (!supplied || typeof supplied !== 'object' || Array.isArray(supplied)) return unresolved();
+  const allowedKeys = new Set([
+    'status', 'raw_path', 'lexical_path', 'canonical_path', 'resolved_path', 'link_type',
+    'invocation_id', 'resolver_invocation_id', 'target_digest', 'input_target_digest',
+    'repository_root_digest', 'source', 'provenance', 'trusted', 'fresh', 'stale',
+    'ambiguous', 'filesystem_verified', 'worktree_root_digest',
+  ]);
+  if (Object.keys(supplied).some((key) => !allowedKeys.has(key))) return unresolved();
+  const status = supplied.status;
+  if (!RESOLUTION_STATUSES.includes(status)) return unresolved();
+  if (status !== 'resolved') return unresolved(status, normalizeResolutionEvidence(supplied));
+  const invocationMatches = (supplied.invocation_id !== undefined || supplied.resolver_invocation_id !== undefined)
+    && (supplied.invocation_id === undefined || supplied.invocation_id === invocation.invocation_id)
+    && (supplied.resolver_invocation_id === undefined || supplied.resolver_invocation_id === invocation.invocation_id);
+  const targetDigestMatches = (supplied.target_digest === undefined || supplied.target_digest === invocation.target_digest)
+    && (supplied.input_target_digest === undefined || supplied.input_target_digest === invocation.target_digest)
+    && (supplied.target_digest !== undefined || supplied.input_target_digest !== undefined);
+  if (
+    supplied.raw_path !== rawPath
+    || supplied.lexical_path !== lexicalPath
+    || !invocationMatches
+    || !targetDigestMatches
+    || supplied.repository_root_digest !== invocation.repository_root_digest
+    || supplied.worktree_root_digest !== invocation.worktree_root_digest
+    || supplied.trusted !== true
+    || supplied.fresh !== true
+    || supplied.filesystem_verified !== true
+    || supplied.stale === true
+    || supplied.ambiguous === true
+  ) return unresolved('ambiguous');
+  const source = firstDefined(supplied.source, supplied.provenance, null);
+  const provenance = firstDefined(supplied.provenance, supplied.source, null);
+  if (
+    typeof source !== 'string'
+    || !source.trim()
+    || typeof provenance !== 'string'
+    || !provenance.trim()
+    || /(?:caller|model|executor|transcript|untrusted|input)/i.test(`${source} ${provenance}`)
+  ) return unresolved();
+  const rawCanonical = firstDefined(supplied.canonical_path, supplied.resolved_path, null);
+  if (typeof rawCanonical !== 'string' || !rawCanonical.trim()) return unresolved();
+  if (supplied.canonical_path !== undefined && supplied.resolved_path !== undefined && supplied.canonical_path !== supplied.resolved_path) return unresolved('ambiguous');
+  let canonical;
+  try {
+    canonical = canonicalPath(rawCanonical, semantics, operationCwd || context.cwd || context.repo_root || undefined);
+  } catch (error) {
+    return unresolved('unresolved');
+  }
+  const linkType = supplied.link_type === undefined || supplied.link_type === null ? 'none' : normalizeLinkType(supplied.link_type);
+  if (supplied.link_type !== undefined && supplied.link_type !== null && (typeof supplied.link_type !== 'string' || !['none', 'symlink', 'junction', 'reparse-point'].includes(linkType))) return unresolved();
+  if (!['none', 'symlink', 'junction', 'reparse-point'].includes(linkType)) return unresolved();
+  const evidence = normalizeResolutionEvidence({
+    status: 'resolved',
+    source,
+    provenance,
+    filesystem_verified: true,
+    link_type: linkType,
+    resolved_path: canonical,
+    canonical_path: canonical,
+    invocation_id: invocation.invocation_id,
+    target_digest: invocation.target_digest,
+    repository_root_digest: invocation.repository_root_digest,
+    worktree_root_digest: invocation.worktree_root_digest,
+  });
+  const result = {
+    raw_path: rawPath,
+    lexical_path: lexicalPath,
+    canonical_path: canonical,
+    status: 'resolved',
+    target_class: 'unknown-target',
+    link_type: linkType,
+    resolved_inside: false,
+    approved_root: null,
+    evidence,
+  };
   if (isWithin(context.canonical_repository_root, canonical, semantics)) {
     result.target_class = 'canonical-repository';
     result.resolved_inside = true;
@@ -508,7 +628,7 @@ function resolveTarget(targetInput, repositoryContext, options = {}) {
       result.target_class = 'approved-additional-root';
       result.resolved_inside = true;
       result.approved_root = additional.canonical_path;
-    } else if (resolved.link_type !== 'none') {
+    } else if (linkType !== 'none') {
       result.target_class = 'outside-repository';
     } else if (isParentWorkspace(canonical, context.canonical_repository_root, semantics)) {
       result.target_class = 'parent-workspace';

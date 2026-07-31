@@ -56,6 +56,10 @@
         "target_class": { "$ref": "#/$defs/nullableString" },
         "repository_root": { "$ref": "#/$defs/nullableString" },
         "worktree_root": { "$ref": "#/$defs/nullableString" },
+        "invocation_id": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
+        "target_digest": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
+        "repository_root_digest": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
+        "worktree_root_digest": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
         "roots": {
           "type": ["object", "null"],
           "additionalProperties": { "$ref": "#/$defs/resolutionEvidence" }
@@ -411,7 +415,7 @@
     "authority": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["prompt_active", "role_name", "role_allowed", "branch_name", "authorized_branch", "branch_protected", "push_authorized", "design_lock_id", "design_lock_status", "allowed_operation_classes", "allowed_scopes", "controller_hold", "controller_authorized", "controller_operation_classes", "role"],
+      "required": ["prompt_active", "role_name", "role_allowed", "branch_name", "authorized_branch", "branch_protected", "push_authorized", "design_lock_id", "design_lock_status", "allowed_operation_classes", "allowed_scopes", "controller_hold", "controller_authorized", "controller_operation_classes", "controller_authorization", "role"],
       "properties": {
         "prompt_active": { "type": ["boolean", "null"] },
         "role_name": { "$ref": "#/$defs/nullableString" },
@@ -427,7 +431,30 @@
         "controller_hold": { "type": "boolean" },
         "controller_authorized": { "type": ["boolean", "null"] },
         "controller_operation_classes": { "type": "array", "items": { "type": "string" } },
+        "controller_authorization": {
+          "anyOf": [
+            { "$ref": "#/$defs/controllerAuthorization" },
+            { "type": "null" }
+          ]
+        },
         "role": { "$ref": "#/$defs/nullableString" }
+      }
+    },
+    "controllerAuthorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "trusted", "operation_digest", "target_digest", "request_digest", "external_target_digest", "operation_class", "component_digest", "scope", "expires_at"],
+      "properties": {
+        "status": { "const": "verified" },
+        "trusted": { "const": true },
+        "operation_digest": { "$ref": "#/$defs/digest" },
+        "target_digest": { "$ref": "#/$defs/digest" },
+        "request_digest": { "$ref": "#/$defs/digest" },
+        "external_target_digest": { "$ref": "#/$defs/digest" },
+        "operation_class": { "type": "string", "minLength": 1 },
+        "component_digest": { "$ref": "#/$defs/digest" },
+        "scope": { "$ref": "#/$defs/nullableString" },
+        "expires_at": { "type": ["string", "integer"] }
       }
     }
   }

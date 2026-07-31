@@ -104,6 +104,44 @@ function compareCanonicalTargetSet(expected, actual) {
   return stableStringify(expected) === stableStringify(actual);
 }
 
+function replayIdentity(record, approval) {
+  const operation = record?.operation || {};
+  return sha256({
+    contract_version: approval.contract_version,
+    host: approval.host,
+    source: approval.source,
+    trusted_user_channel: approval.trusted_user_channel,
+    exact_operation_digest: approval.exact_operation_digest,
+    exact_targets_digest: approval.exact_targets_digest,
+    canonical_target_set: approval.canonical_target_set,
+    session_id: approval.session_id,
+    turn_id: approval.turn_id,
+    call_id: approval.call_id,
+    operation_class: approval.operation_class,
+    issued_at: approval.issued_at,
+    expires_at: approval.expires_at,
+    operation_digest: operation.input_digest,
+    target_digest: operation.target_digest,
+    scope: record?.operation?.scope || null,
+  });
+}
+
+function consumeReplayState(state, identity, request) {
+  const consume = typeof state === 'function' ? state : state && typeof state.consume === 'function' ? state.consume.bind(state) : null;
+  if (!consume) return { ok: false, reason_code: 'APPROVAL_REPLAY_STATE_UNAVAILABLE' };
+  let result;
+  try {
+    result = consume(Object.freeze({ identity, ...request }));
+  } catch (error) {
+    return { ok: false, reason_code: 'APPROVAL_REPLAY_STATE_UNCERTAIN' };
+  }
+  if (!result || typeof result !== 'object' || Array.isArray(result) || result.atomic !== true) return { ok: false, reason_code: 'APPROVAL_REPLAY_STATE_UNCERTAIN' };
+  if (result.identity !== identity) return { ok: false, reason_code: 'APPROVAL_REPLAY_STATE_MISMATCH' };
+  if (result.status !== 'consumed') return { ok: false, reason_code: 'APPROVAL_REPLAY' };
+  if (result.remaining_count !== undefined && (!Number.isInteger(result.remaining_count) || result.remaining_count < 0)) return { ok: false, reason_code: 'APPROVAL_REPLAY_STATE_UNCERTAIN' };
+  return { ok: true, remaining_count: result.remaining_count };
+}
+
 function validateTargetSet(value) {
   if (!Array.isArray(value)) return false;
   return value.every((target) => {
@@ -202,16 +240,41 @@ function verifyApproval(record, approvalInput, options = {}) {
   if (![now, issued, expires].every(Number.isFinite) || issued > now || expires <= now || expires <= issued) return invalid('APPROVAL_EXPIRED');
 
   if (approval.replay_detected === true || approval.consumed === true) return invalid('APPROVAL_REPLAY');
+  const replayState = firstDefined(options.replayState, options.replayStore, null);
+  const identity = replayIdentity(record, approval);
   if (approval.one_shot === true) {
     if (Object.hasOwn(approval, 'max_repeat_count')) return invalid('APPROVAL_INVALID');
     if (Object.hasOwn(approval, 'consumed_count') && approval.consumed_count !== 0) return invalid('APPROVAL_REPLAY');
-    return valid(approval, { one_shot: true, repeat_count: 1 });
+    const consumed = consumeReplayState(replayState, identity, {
+      operation_digest: operation.input_digest,
+      target_digest: operation.target_digest,
+      scope: operation.scope || null,
+      expires_at: approval.expires_at,
+      one_shot: true,
+      expected_consumed_count: 0,
+      max_repeat_count: 1,
+    });
+    if (!consumed.ok) return invalid(consumed.reason_code);
+    if (consumed.remaining_count !== undefined && consumed.remaining_count !== 0) return invalid('APPROVAL_REPLAY_STATE_UNCERTAIN');
+    return valid(approval, { one_shot: true, repeat_count: 1, replay_identity: identity });
   }
 
   const count = approval.consumed_count;
   const max = approval.max_repeat_count;
   if (!Number.isInteger(count) || !Number.isInteger(max) || count < 0 || max < 1 || count >= max || max > (policy.approval?.max_repeat_count || 8)) return invalid('APPROVAL_INVALID');
-  return valid(approval, { one_shot: false, repeat_count: count + 1, max_repeat_count: max });
+  const consumed = consumeReplayState(replayState, identity, {
+    operation_digest: operation.input_digest,
+    target_digest: operation.target_digest,
+    scope: operation.scope || null,
+    expires_at: approval.expires_at,
+    one_shot: false,
+    expected_consumed_count: count,
+    max_repeat_count: max,
+  });
+  if (!consumed.ok) return invalid(consumed.reason_code);
+  const expectedRemaining = max - count - 1;
+  if (consumed.remaining_count !== expectedRemaining) return invalid('APPROVAL_REPLAY_STATE_UNCERTAIN');
+  return valid(approval, { one_shot: false, repeat_count: count + 1, max_repeat_count: max, replay_identity: identity, remaining_count: expectedRemaining });
 }
 
 function verifyApprovalEvidence(record, approvalInput, options = {}) {
@@ -222,6 +285,8 @@ module.exports = {
   APPROVAL_VERSION,
   timestamp,
   validateApprovalShape,
+  replayIdentity,
+  consumeReplayState,
   verifyApproval,
   verifyApprovalEvidence,
 };
