@@ -350,7 +350,6 @@ function renderAdvisoryFinding(finding) {
     lines.push('- Status: `Periodic review due`');
     lines.push(`- Review cadence: \`${target.review_cadence_days} day(s)\``);
     lines.push(`- Last reviewed: \`${sanitizeGeneratedMarkdown(target.last_reviewed_at || 'never')}\``);
-    lines.push(`- Today: \`${sanitizeGeneratedMarkdown(finding.today)}\``);
     lines.push(`- Due reason: ${sanitizeGeneratedMarkdown(finding.due_reason)}`);
   }
   if (target.review_template) lines.push(`- Review template: \`${sanitizeGeneratedMarkdown(target.review_template)}\``);
