@@ -22,6 +22,21 @@ The state machine is reconstructed per enrolled child/PR. A repository may have 
 | `COMPLETED` | All completion gates pass and no live prompt remains | `DISABLED` only after explicit schedule teardown |
 | `INVALID` | Fail-closed state requiring exact repair; no substantive mutation | `PREPARED`, `HELD`, or `DISABLED` after repair |
 
+The capability lifecycle labels below are distinct evidence states and must never be collapsed into one another. The operational states in the table above are substates and cannot skip a lifecycle prerequisite:
+
+| Lifecycle label | Required evidence | It is not equivalent to |
+| --- | --- | --- |
+| `SETUP` | An explicit repository-scoped setup operation is in progress; no capability is enabled yet | `PREPARED` or `SCHEDULED` |
+| `PREPARED` | Consent, inspectable source, managed block, parent/child structure, and prompts are valid; task identities remain user-created | `SCHEDULED`, `ENROLLED`, or `CLAIMED` |
+| `SCHEDULED` | Both exact user-created task identities are verified for this repository and are runnable; prepared prompts alone never set this state | `ENROLLED` or `RUNNING` |
+| `ENROLLED` | Parent, child, and PR binding blocks agree for one lane | `CLAIMED` or `RUNNING` |
+| `CLAIMED` | A trusted atomic read-back verifies one capability-issued lease bound to the packet, executor run, and observed head | `CLAIMING` before verification or `RUNNING` |
+| `RUNNING` | The assigned L1 executor is acting under the verified claim and within the assignment | `CLAIMED`, `ACCEPTED`, or `COMPLETED` |
+| `ACCEPTED` | The controller reconciled the result, committed state, exact head, checks, reviews, ledger, and user obligations; merge and teardown remain separate | A result merely existing, `RUNNING`, or `COMPLETE` |
+| `COMPLETE` | Finality gates pass, no live prompt/result/review obligation remains, and explicit teardown is complete | `ACCEPTED` or a prepared/scheduled prompt |
+
+`CLAIMING`, `EXECUTOR_TURN`, `RESULT_PENDING`, and `COMPLETED` remain useful operational states, but they are not permission to infer `CLAIMED`, `RUNNING`, `ACCEPTED`, or `COMPLETE` without the evidence above.
+
 ## 2. Controller cycle
 
 Each fresh controller run performs this order for all lanes:

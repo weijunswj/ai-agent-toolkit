@@ -46,7 +46,7 @@ Assigned role: <role>
 
 [ ORCHESTRATOR TO EXECUTOR: END ]
 
-After the result is reconciled, replace only the transient next-worker payload with the exact redaction marker defined in `protocol.md`. Preserve this audit record and all executor evidence.
+After the result is reconciled, replace only the transient next-worker payload with exactly `[ REDACTED \u2014 PROCESSED ]` (the source escape is decoded in the emitted result as one U+2014 em dash). Preserve this audit record and all executor evidence.
 
 [ CHILD CYCLE COMMENT: END ]
 ```

@@ -105,7 +105,7 @@ The controller rejects a missing, duplicated, malformed, or disagreeing block. `
 
 ## 4. Packet-scoped atomic claim
 
-Before substantive L1 launch, the future executor must acquire and verify an atomic packet-scoped create-if-absent claim primitive. The scheduled executor's L0 dispatcher is the sole claimant: it calls `createIfAbsent` once, then reads back the returned record. L1 verifies that existing read-back before substantive work and never calls `createIfAbsent` again. GitHub comments, comment IDs, timestamps, lease expiry, lowest-comment-ID rules, or local lock files are audit evidence only and are not mutual exclusion.
+Before substantive L1 launch, the future executor must acquire and verify an atomic packet-scoped, lease-bound create-if-absent claim primitive. The scheduled executor's L0 dispatcher is the sole claimant: it calls `createIfAbsent` once, then reads back the returned record. L1 verifies that existing read-back before substantive work and never calls `createIfAbsent` again. Each capability-owned record is bound to exactly one lease ID and lease expiry, one executor run, one packet, and one observed starting head. GitHub comments, comment IDs, timestamps, lowest-comment-ID rules, or local lock files are audit evidence only and are not mutual exclusion or leases.
 
 The trusted interface is abstract and harness-neutral:
 
@@ -118,13 +118,15 @@ PacketClaimCapability {
   packetId: <one packet id>
   executorRunId: <one executor run id>
   observedStartingHead: <live PR head at claim admission>
+  leaseId: <capability-issued lease id>
+  leaseExpiresAt: <capability-issued lease expiry>
   createIfAbsent(input): { created: true|false, claimId, storedRecord }
   readBack(claimId): { exactRecord, verified: true|false }
   retireOrSupersede: controller-owned operation only
 }
 ```
 
-`createIfAbsent` must atomically reject a second record for the same repository, child, PR, and Packet ID. A `created: false` result is not a claim for the current run and cannot launch L1. L0 must read back the existing record; L1 then compares every identity and the observed head before substantive work. A false `verified` result or any read-back identity/head mismatch fails the lane closed and requires controller reconciliation. The candidate-controlled packet cannot mint, validate, or replace the primitive. The claim primitive must not move the implementation PR head. Two successful claims for one packet are impossible by contract.
+`createIfAbsent` must atomically reject a second record for the same repository, child, PR, and Packet ID, and the trusted capability must issue the lease ID and expiry bound to that exact record. A `created: false` result is not a claim for the current run and cannot launch L1. L0 must read back the existing record; L1 then compares every identity, the observed head, and the capability-issued lease before substantive work. A false `verified` result or any read-back identity, head, lease, or expiry mismatch fails the lane closed and requires controller reconciliation. The candidate-controlled packet cannot mint, validate, renew, retire, supersede, or replace the primitive. The claim primitive must not move the implementation PR head. Two successful claims for one packet are impossible by contract.
 
 If the capability is missing, unsupported, non-atomic, unverifiable, or only simulated by comments, the exact result is:
 
@@ -134,7 +136,7 @@ The repository source uses the ASCII spelling `\u2014` for one emitted U+2014 em
 BLOCKED \u2014 ATOMIC CLAIM CAPABILITY UNAVAILABLE
 ```
 
-Time expiry never grants automatic takeover. Only the web controller may retire or supersede a claim, and only after inspecting the live PR head, claim state, GitHub evidence, local worktrees, and possible unpushed executor work. The design PR installs no claim ref, database, workflow, or live claim mechanism.
+Lease expiry never grants automatic takeover. Only the web controller may retire or supersede a capability-issued lease, and only after inspecting the live PR head, claim state, GitHub evidence, local worktrees, and possible unpushed executor work. The design PR installs no claim ref, database, workflow, or live claim mechanism.
 
 ## 5. Determining the turn
 
