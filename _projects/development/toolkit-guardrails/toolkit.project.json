@@ -5,9 +5,9 @@
   "title": "Toolkit Guardrails",
   "module_path": "_projects/development/toolkit-guardrails",
   "main_path": "_projects/development/toolkit-guardrails/_main",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "version_policy": "semver",
-  "version_notes": "Clarify deterministic classification and decision components, the trusted public-engine classifier boundary, and process-local replay-consuming approval verification within the non-durable source-only reference scope for issue #313.",
+  "version_notes": "A9 aligns the canonical public result catalog, makes classifier-option rejection proxy-safe, and documents the complete volatile replay boundary for the source-only reference implementation in issue #313.",
   "outputs": [],
   "writes": {
     "allowed": [],
@@ -38,7 +38,7 @@
   "project": {
     "name": "Toolkit Guardrails",
     "category": "development",
-    "summary": "Canonical host-neutral guardrail policy with deterministic classification and decision contracts, a trusted public-engine classifier boundary, and process-local replay-consuming approval verification in a non-durable source-only reference scope."
+    "summary": "Canonical host-neutral guardrail policy with deterministic normalisation, repository-resolution interpretation, command classification, policy lookup, and non-approval decision calculation contracts. Stateful approval verification consumes volatile, in-memory, process-local replay state that is non-durable, non-distributed, non-cross-process, and reset when the Node.js process restarts. This source-only reference implementation is not native-host enforcement, restart-safe production replay protection, or production-distributed replay protection."
   },
   "surface": {
     "publish_as": "source_only",

@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { types: utilTypes } = require('node:util');
 const {
   decisionRank,
   getPolicy,
@@ -77,6 +78,7 @@ const EXPLICIT_TARGET_CLASSES = new Set(['read', 'edit', 'create', 'rename']);
 const HARD_ENFORCEMENT_LEVELS = new Set(['hard-runtime-enforcement', 'hard-pre-execution']);
 const FRESHNESS_VALUES = new Set(['fresh', 'current', 'verified']);
 const PRE_EXECUTION_POSITIONS = new Set(['pre-execution', 'before-execution', 'preflight']);
+const CLASSIFIER_OPTION_MAX_PROTOTYPE_DEPTH = 16;
 const OPERATION_SCHEMA_PATH = path.resolve(__dirname, '..', '..', '..', '_projects', 'development', 'toolkit-guardrails', '_main', 'operation-contract.schema.json');
 let operationSchemaValidator;
 
@@ -86,10 +88,24 @@ function firstDefined(...values) {
 
 function hasClassifierAuthorityOption(options) {
   if (options === null || (typeof options !== 'object' && typeof options !== 'function')) return false;
+  // util.types.isProxy is trap-free. Check it before any own-property or
+  // prototype operation so hostile proxies cannot hang or execute caller code.
   let current = options;
-  while (current !== null) {
-    if (Object.hasOwn(current, 'classifier')) return true;
-    current = Object.getPrototypeOf(current);
+  const visited = new Set();
+  for (let depth = 0; current !== null; depth += 1) {
+    try {
+      if (utilTypes.isProxy(current)) return true;
+    } catch {
+      return true;
+    }
+    if (depth >= CLASSIFIER_OPTION_MAX_PROTOTYPE_DEPTH || visited.has(current)) return true;
+    visited.add(current);
+    try {
+      if (Object.hasOwn(current, 'classifier')) return true;
+      current = Object.getPrototypeOf(current);
+    } catch {
+      return true;
+    }
   }
   return false;
 }

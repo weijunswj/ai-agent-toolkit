@@ -1,7 +1,7 @@
 {
   "$schema": "./guardrail-policy.schema.json",
   "schema_version": "toolkit.guardrail.policy.v1",
-  "policy_version": "1.0.0",
+  "policy_version": "1.0.1",
   "design_lock": "DL-313-001",
   "issue": 313,
   "decision_contract": [
@@ -330,7 +330,11 @@
       "request_digest",
       "operation_digest",
       "target_digest",
-      "privacy_safe"
+      "component_digest",
+      "component_count",
+      "privacy_safe",
+      "secondary_reason_codes",
+      "mixed_components"
     ],
     "forbidden_result_content": [
       "raw_prompt",
@@ -361,8 +365,13 @@
     "APPROVAL_UNDECLARED_FIELD",
     "APPROVAL_EXPIRED",
     "APPROVAL_REPLAY",
+    "APPROVAL_REPLAY_STATE_UNCERTAIN",
+    "APPROVAL_REPLAY_POLICY_MISMATCH",
+    "APPROVAL_REPLAY_EXPIRY_MISMATCH",
+    "APPROVAL_REPLAY_STORE_UNTRUSTED",
     "APPROVAL_TARGET_EXPANSION",
     "APPROVAL_OPERATION_MISMATCH",
+    "APPROVAL_HOST_MISMATCH",
     "APPROVAL_SESSION_MISMATCH",
     "APPROVAL_TURN_MISMATCH",
     "APPROVAL_CALL_MISMATCH",
@@ -384,10 +393,15 @@
     "DYNAMIC_TARGET_UNSUPPORTED",
     "GIT_PUSH_EVIDENCE_REQUIRED",
     "GITHUB_MUTATION_AUTHORITY_REQUIRED",
+    "GITHUB_COMPONENT_AUTHORITY_REQUIRED",
+    "GITHUB_MUTATION_AUTHORITY_EXPIRED",
+    "GITHUB_MUTATION_AUTHORITY_MISMATCH",
     "MIXED_TARGET_RESTRICTION",
     "RESOLVER_FAILURE_UNSUPPORTED",
     "CLASSIFIER_FAILURE_UNSUPPORTED",
+    "APPROVAL_VERIFIER_OVERRIDE_REJECTED",
     "APPROVAL_VERIFIER_FAILURE_UNSUPPORTED",
+    "OPERATION_CONTRACT_INVALID",
     "MALFORMED_OPERATION_UNSUPPORTED",
     "ENGINE_FAILURE_UNSUPPORTED"
   ]

@@ -8,7 +8,7 @@ Verify Toolkit identity, the host projection, the version-bound capability evide
 
 ## `operation.preflight`
 
-Run before a consequential operation. Consume one normalized operation record and return exactly one of `allow`, `ask`, `deny`, or `unsupported`, plus a stable reason code, enforcement requirement, safe target class, and digests. Normalisation and command classification are deterministic; approval verification may consume volatile, process-local replay state. An adapter cannot claim durable, restart-safe, or cross-process replay protection from this source module. A host adapter must not claim `ask` unless its exact native route displays the complete request and returns trusted same-turn approval evidence. An unsupported route stops before execution.
+Run before a consequential operation. Consume one normalized operation record and return exactly one of `allow`, `ask`, `deny`, or `unsupported`, plus a stable reason code, enforcement requirement, safe target class, and digests. Normalisation, repository-resolution interpretation, command classification, policy lookup, and non-approval decision calculation are deterministic; stateful approval verification consumes replay state. That replay state is volatile, in-memory, process-local, non-durable, non-distributed, and non-cross-process, and resets when the Node.js process restarts. It is confined to this source-only reference implementation and is not native-host enforcement, restart-safe production replay protection, or production-distributed replay protection. A host adapter must not claim `ask` unless its exact native route displays the complete request and returns trusted same-turn approval evidence. An unsupported route stops before execution.
 
 ## `operation.finalize`
 
