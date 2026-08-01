@@ -84,6 +84,16 @@ function firstDefined(...values) {
   return values.find((value) => value !== undefined && value !== null);
 }
 
+function hasClassifierAuthorityOption(options) {
+  if (options === null || (typeof options !== 'object' && typeof options !== 'function')) return false;
+  let current = options;
+  while (current !== null) {
+    if (Object.hasOwn(current, 'classifier')) return true;
+    current = Object.getPrototypeOf(current);
+  }
+  return false;
+}
+
 function nonEmptyString(value) {
   return typeof value === 'string' && value.trim().length > 0;
 }
@@ -618,6 +628,7 @@ function decideOne(record, classification, options = {}) {
 }
 
 function evaluateOne(input, options = {}) {
+  if (hasClassifierAuthorityOption(options)) return safeFailure('CLASSIFIER_FAILURE_UNSUPPORTED', input);
   let record;
   try {
     record = normalizeOperation(input, options);
@@ -631,8 +642,7 @@ function evaluateOne(input, options = {}) {
   if (!contractResult.valid) return safeFailure('OPERATION_CONTRACT_INVALID', input);
   let classification;
   try {
-    const classifier = options.classifier || classifyOperation;
-    classification = classifier(record, options);
+    classification = classifyOperation(record, options);
     if (!classification || typeof classification.operation_class !== 'string') throw new Error('CLASSIFICATION_INVALID');
     ensureCommandTargets(record, classification, options);
     refreshOperationDigests(record, classification);

@@ -5,9 +5,9 @@
   "title": "Toolkit Guardrails",
   "module_path": "_projects/development/toolkit-guardrails",
   "main_path": "_projects/development/toolkit-guardrails/_main",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "version_policy": "semver",
-  "version_notes": "Initial first-party canonical guardrail policy, pure shared engine contracts, deterministic fixtures, and source-only explanatory projection for issue #313.",
+  "version_notes": "Clarify deterministic classification and decision components, the trusted public-engine classifier boundary, and process-local replay-consuming approval verification within the non-durable source-only reference scope for issue #313.",
   "outputs": [],
   "writes": {
     "allowed": [],
@@ -38,7 +38,7 @@
   "project": {
     "name": "Toolkit Guardrails",
     "category": "development",
-    "summary": "Canonical host-neutral guardrail policy and pure deterministic shared engine contracts for repository boundaries, command classification, approvals, and four-way decisions."
+    "summary": "Canonical host-neutral guardrail policy with deterministic classification and decision contracts, a trusted public-engine classifier boundary, and process-local replay-consuming approval verification in a non-durable source-only reference scope."
   },
   "surface": {
     "publish_as": "source_only",

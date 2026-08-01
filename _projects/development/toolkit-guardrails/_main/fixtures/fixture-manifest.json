@@ -97,6 +97,7 @@
     "github.api-short-equals-field-secret",
     "github.file-input-nonsecret-controller",
     "github.file-input-dynamic",
+    "github.file-input-secret-plus-dynamic",
     "github.compound-secret-file",
     "github.compound-redirection-secret",
     "github.structured-secret-upload",
@@ -188,11 +189,13 @@
     "failure.stale-capability",
     "failure.resolver-exception",
     "failure.classifier-exception",
+    "failure.classifier-override-injection",
     "failure.approval-verifier-exception",
     "failure.no-failure-allow",
     "privacy.no-raw-output",
     "schema.runtime-record",
-    "source.schema.fixture-alignment"
+    "source.schema.fixture-alignment",
+    "source.replay-process-local-contract"
   ],
   "privacy_exclusions": [
     "raw prompts",

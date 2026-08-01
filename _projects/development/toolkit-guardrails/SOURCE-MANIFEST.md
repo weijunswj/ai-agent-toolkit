@@ -8,7 +8,7 @@
 - `semantic-hooks.md` and `command-classification-contract.md`.
 - Deterministic fixture manifest under `fixtures/`.
 
-These files are first-party canonical policy and contract source for the pure shared engine. They are not copied from a host plugin, provider, external repository, or user configuration.
+These files are first-party canonical policy and contract source. Deterministic normalisation, repository-resolution interpretation, command classification, policy lookup, and non-approval decision calculation are distinct from stateful replay-consuming approval verification. They are not copied from a host plugin, provider, external repository, or user configuration.
 
 ## Curated projection
 
@@ -19,6 +19,7 @@ These files are first-party canonical policy and contract source for the pure sh
 
 - `repo/scripts/toolkit-guardrails/*.cjs` is first-party executable source kept separate from the source project because the repository's script convention owns runtime modules there.
 - `repo/tests/toolkit-guardrails.test.cjs` is the focused deterministic test surface.
+- Approval verification owns volatile, in-memory, process-local replay slots and per-slot serialisation. This state is non-durable, non-distributed, and non-cross-process; a Node.js process restart resets it. The source module is a source-only reference boundary, not restart-safe or production-distributed replay protection.
 
 ## Source-to-surface receipt
 

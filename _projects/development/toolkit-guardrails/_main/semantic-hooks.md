@@ -8,7 +8,7 @@ Verify Toolkit identity, the host projection, the version-bound capability evide
 
 ## `operation.preflight`
 
-Run before a consequential operation. Consume one normalized operation record and return exactly one of `allow`, `ask`, `deny`, or `unsupported`, plus a stable reason code, enforcement requirement, safe target class, and digests. The engine is pure. A host adapter must not claim `ask` unless its exact native route displays the complete request and returns trusted same-turn approval evidence. An unsupported route stops before execution.
+Run before a consequential operation. Consume one normalized operation record and return exactly one of `allow`, `ask`, `deny`, or `unsupported`, plus a stable reason code, enforcement requirement, safe target class, and digests. Normalisation and command classification are deterministic; approval verification may consume volatile, process-local replay state. An adapter cannot claim durable, restart-safe, or cross-process replay protection from this source module. A host adapter must not claim `ask` unless its exact native route displays the complete request and returns trusted same-turn approval evidence. An unsupported route stops before execution.
 
 ## `operation.finalize`
 
@@ -16,4 +16,4 @@ This lane does not implement a general post-tool audit. A later host-specific im
 
 ## Failure contract
 
-Missing, malformed, stale, timed-out, reordered, or unproven host evidence never becomes `allow`. A pure resolver, classifier, or approval-verifier exception produces a structured non-allow result or a hard test failure. The runtime does not parse `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or another prose file as executable policy.
+Missing, malformed, stale, timed-out, reordered, or unproven host evidence never becomes `allow`. A resolver or classifier exception, or an approval-verifier exception while consuming process-local replay state, produces a structured non-allow result or a hard test failure. The runtime does not parse `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or another prose file as executable policy.

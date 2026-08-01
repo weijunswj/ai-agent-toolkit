@@ -541,8 +541,6 @@ function classifyAtomic(command, shell) {
   const secretVariable = secretVariableName(name, tokens);
   if (secretVariable) return commonResult('secret-access', 'ask', [{ path: 'env:' + secretVariable, kind: 'secret-variable' }], { secret_target: true, reason_codes: ['SECRET_ACCESS_REQUIRES_APPROVAL'] });
   if (secretDumpCommand(name, command)) return commonResult('secret-dump', 'deny', secretTargets, { secret_target: true, reason_codes: ['SECRET_DUMP_DENIED'] });
-  if (hasDynamicExpansion(command)) return commonResult('opaque-command', 'unsupported', [], { opaque: true, reason_codes: ['DYNAMIC_TARGET_UNSUPPORTED'] });
-  if (hasUnclosedQuote(command, shell)) return commonResult('opaque-command', 'unsupported', [], { opaque: true, reason_codes: ['OPAQUE_COMMAND_UNSUPPORTED'] });
   if (name === 'gh') {
     const redirections = inputRedirectionTargets(command);
     const stdinBound = redirections.length === 1 && tokens.some((token, index) => {
@@ -551,8 +549,21 @@ function classifyAtomic(command, shell) {
       if (normalizedToken === '--input=-' || normalizedToken === '-i=-') return true;
       return token.startsWith('-i') && !token.startsWith('--') && token.slice(2) === '-';
     });
-    return classifyGithub(tokens, { stdin_bound: stdinBound });
+    const githubResult = classifyGithub(tokens, { stdin_bound: stdinBound });
+    if (githubResult.operation_class === 'secret-exfiltration' || githubResult.secret_target === true) return githubResult;
+    if (hasDynamicExpansion(command)) {
+      return commonResult('opaque-command', 'unsupported', githubResult.target_inputs || [], {
+        external_targets: githubResult.external_targets || [],
+        github_request_input: githubResult.github_request_input,
+        github_request_input_unresolved: true,
+        opaque: true,
+        reason_codes: ['DYNAMIC_TARGET_UNSUPPORTED'],
+      });
+    }
+    return githubResult;
   }
+  if (hasDynamicExpansion(command)) return commonResult('opaque-command', 'unsupported', [], { opaque: true, reason_codes: ['DYNAMIC_TARGET_UNSUPPORTED'] });
+  if (hasUnclosedQuote(command, shell)) return commonResult('opaque-command', 'unsupported', [], { opaque: true, reason_codes: ['OPAQUE_COMMAND_UNSUPPORTED'] });
   if (name === 'git') return classifyGit(tokens, shell);
   if (SHELL_NAMES.has(name) && hasNestedShell(tokens, shell)) return commonResult('opaque-command', 'unsupported', [], { nested: true, opaque: true, reason_codes: ['OPAQUE_COMMAND_UNSUPPORTED'] });
   if (['node', 'node.exe', 'python', 'python3', 'pwsh', 'powershell', 'cmd', 'cmd.exe'].includes(name) && tokens.slice(1).some((token) => /\.(?:cjs|js|mjs|py|ps1|sh|bat|cmd)$/i.test(token))) return commonResult('opaque-command', 'unsupported', extractPathTokens(tokens, 1, { shell }), { opaque: true, reason_codes: ['OPAQUE_COMMAND_UNSUPPORTED'] });
