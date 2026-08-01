@@ -411,17 +411,33 @@ function replayStore() {
   const state = new Map();
   return {
     consume(request) {
-      const current = state.get(request.identity) || 0;
-      if (request.one_shot) {
-        if (current > 0) return { status: 'already-consumed', atomic: true, identity: request.identity, remaining_count: 0 };
-        state.set(request.identity, 1);
-        return { status: 'consumed', atomic: true, identity: request.identity, remaining_count: 0 };
+      const current = state.get(request.identity);
+      if (!current) {
+        state.set(request.identity, {
+          consumed_count: 0,
+          repeat_policy_digest: request.repeat_policy_digest,
+        });
+      } else if (current.repeat_policy_digest !== request.repeat_policy_digest) {
+        return {
+          status: 'policy-mismatch',
+          atomic: true,
+          identity: request.identity,
+          repeat_policy_digest: current.repeat_policy_digest,
+          remaining_count: 0,
+        };
       }
-      if (current !== request.expected_consumed_count) return { status: 'already-consumed', atomic: true, identity: request.identity, remaining_count: Math.max(0, request.max_repeat_count - current) };
-      const next = current + 1;
-      if (next > request.max_repeat_count) return { status: 'exhausted', atomic: true, identity: request.identity, remaining_count: 0 };
-      state.set(request.identity, next);
-      return { status: 'consumed', atomic: true, identity: request.identity, remaining_count: request.max_repeat_count - next };
+      const pinned = state.get(request.identity);
+      const count = pinned.consumed_count;
+      if (request.one_shot) {
+        if (count > 0) return { status: 'already-consumed', atomic: true, identity: request.identity, repeat_policy_digest: pinned.repeat_policy_digest, remaining_count: 0 };
+        pinned.consumed_count = 1;
+        return { status: 'consumed', atomic: true, identity: request.identity, repeat_policy_digest: pinned.repeat_policy_digest, remaining_count: 0 };
+      }
+      if (count !== request.expected_consumed_count) return { status: 'already-consumed', atomic: true, identity: request.identity, repeat_policy_digest: pinned.repeat_policy_digest, remaining_count: Math.max(0, request.max_repeat_count - count) };
+      const next = count + 1;
+      if (next > request.max_repeat_count) return { status: 'exhausted', atomic: true, identity: request.identity, repeat_policy_digest: pinned.repeat_policy_digest, remaining_count: 0 };
+      pinned.consumed_count = next;
+      return { status: 'consumed', atomic: true, identity: request.identity, repeat_policy_digest: pinned.repeat_policy_digest, remaining_count: request.max_repeat_count - next };
     },
   };
 }
@@ -539,6 +555,14 @@ function buildApproval(input, overrides = {}) {
     consumed: false,
     ...overrides,
   };
+}
+
+function boundedApproval(input, maxRepeatCount, consumedCount = 0) {
+  return buildApproval(input, {
+    one_shot: false,
+    consumed_count: consumedCount,
+    max_repeat_count: maxRepeatCount,
+  });
 }
 
 function withApproval(input, overrides = {}) {
@@ -1406,9 +1430,15 @@ const fixtureCaseAssertions = new Map([
   ['approval.bounded-repeat', () => {
     const input = fixtureInput(structured('edit', `${SIBLING}\\approval.txt`));
     const { record } = normalizedRecord(input);
-    const verified = approvals.verifyApproval(record, buildApproval(input, { one_shot: false, consumed_count: 0, max_repeat_count: 2 }), approvalOptions());
+    const bounded = boundedApproval(input, 2);
+    const verified = approvals.verifyApproval(record, bounded, approvalOptions());
     assert.equal(verified.valid, true);
     assert.equal(verified.repeat_count, 1);
+    assert.deepEqual(verified.repeat_policy, { mode: 'bounded_repeat', max_count: 2 });
+    assert.match(verified.repeat_policy_digest, /^[a-f0-9]{64}$/);
+    const oneShot = approvals.verifyApproval(record, buildApproval(input), approvalOptions());
+    assert.notEqual(verified.approval_digest, oneShot.approval_digest);
+    assert.equal(approvals.replayIdentity(record, bounded), approvals.replayIdentity(record, buildApproval(input)));
   }],
   ['approval.replay-state', () => {
     const input = fixtureInput(structured('edit', `${SIBLING}\\replay.txt`));
@@ -1422,6 +1452,7 @@ const fixtureCaseAssertions = new Map([
     const second = { ...first, consumed_count: 1 };
     assert.equal(approvals.verifyApproval(record, first, { now: NOW, replayState: boundedState }).remaining_count, 1);
     assert.equal(approvals.verifyApproval(record, second, { now: NOW, replayState: boundedState }).remaining_count, 0);
+    assert.equal(approvals.verifyApproval(record, second, { now: NOW, replayState: boundedState }).reason_code, 'APPROVAL_REPLAY');
     assert.notEqual(approvals.verifyApproval(record, { ...second, consumed_count: 2 }, { now: NOW, replayState: boundedState }).valid, true);
   }],
   ['approval.replay-concurrent', () => {
@@ -1433,6 +1464,131 @@ const fixtureCaseAssertions = new Map([
     const mismatch = { consume: () => ({ status: 'consumed', atomic: true, identity: '0'.repeat(64), remaining_count: 0 }) };
     assert.equal(approvals.verifyApproval(record, approval, { now: NOW, replayState: mismatch }).reason_code, 'APPROVAL_REPLAY_STATE_MISMATCH');
     assert.equal(approvals.verifyApproval(record, approval, { now: NOW }).reason_code, 'APPROVAL_REPLAY_STATE_UNAVAILABLE');
+  }],
+  ['approval.replay-policy-widening', () => {
+    const input = fixtureInput(structured('edit', `${SIBLING}\\policy-widening.txt`));
+    const { record } = normalizedRecord(input);
+    const state = replayStore();
+    const first = boundedApproval(input, 2);
+    const widened = boundedApproval(input, 8, 1);
+    assert.equal(approvals.verifyApproval(record, first, { now: NOW, replayState: state }).valid, true);
+    assert.equal(approvals.verifyApproval(record, widened, { now: NOW, replayState: state }).reason_code, 'APPROVAL_REPLAY_POLICY_MISMATCH');
+    assert.equal(approvals.replayIdentity(record, first), approvals.replayIdentity(record, widened));
+  }],
+  ['approval.replay-policy-narrowing', () => {
+    const input = fixtureInput(structured('edit', `${SIBLING}\\policy-narrowing.txt`));
+    const { record } = normalizedRecord(input);
+    const state = replayStore();
+    const first = boundedApproval(input, 8);
+    const narrowed = boundedApproval(input, 2, 1);
+    assert.equal(approvals.verifyApproval(record, first, { now: NOW, replayState: state }).valid, true);
+    assert.equal(approvals.verifyApproval(record, narrowed, { now: NOW, replayState: state }).reason_code, 'APPROVAL_REPLAY_POLICY_MISMATCH');
+    assert.equal(approvals.replayIdentity(record, first), approvals.replayIdentity(record, narrowed));
+  }],
+  ['approval.replay-policy-other-change', () => {
+    const input = fixtureInput(structured('edit', `${SIBLING}\\policy-other-change.txt`));
+    const { record } = normalizedRecord(input);
+    for (const [initialMax, changedMax] of [[3, 4], [4, 3]]) {
+      const state = replayStore();
+      const first = boundedApproval(input, initialMax);
+      const changed = boundedApproval(input, changedMax, 1);
+      assert.equal(approvals.verifyApproval(record, first, { now: NOW, replayState: state }).valid, true);
+      assert.equal(approvals.verifyApproval(record, changed, { now: NOW, replayState: state }).reason_code, 'APPROVAL_REPLAY_POLICY_MISMATCH');
+      assert.equal(approvals.replayIdentity(record, first), approvals.replayIdentity(record, changed));
+    }
+  }],
+  ['approval.replay-policy-one-shot-to-bounded', () => {
+    const input = fixtureInput(structured('edit', `${SIBLING}\\policy-one-shot-to-bounded.txt`));
+    const { record } = normalizedRecord(input);
+    const state = replayStore();
+    const oneShot = buildApproval(input);
+    const bounded = boundedApproval(input, 2);
+    assert.equal(approvals.verifyApproval(record, oneShot, { now: NOW, replayState: state }).valid, true);
+    assert.equal(approvals.verifyApproval(record, bounded, { now: NOW, replayState: state }).reason_code, 'APPROVAL_REPLAY_POLICY_MISMATCH');
+    assert.equal(approvals.replayIdentity(record, oneShot), approvals.replayIdentity(record, bounded));
+  }],
+  ['approval.replay-policy-bounded-to-one-shot', () => {
+    const input = fixtureInput(structured('edit', `${SIBLING}\\policy-bounded-to-one-shot.txt`));
+    const { record } = normalizedRecord(input);
+    const state = replayStore();
+    const bounded = boundedApproval(input, 2);
+    const oneShot = { ...bounded, one_shot: true, consumed_count: 0 };
+    delete oneShot.max_repeat_count;
+    assert.equal(approvals.verifyApproval(record, bounded, { now: NOW, replayState: state }).valid, true);
+    assert.equal(approvals.verifyApproval(record, oneShot, { now: NOW, replayState: state }).reason_code, 'APPROVAL_REPLAY_POLICY_MISMATCH');
+    assert.equal(approvals.replayIdentity(record, bounded), approvals.replayIdentity(record, oneShot));
+  }],
+  ['approval.replay-policy-omitted', () => {
+    const input = fixtureInput(structured('edit', `${SIBLING}\\policy-omitted.txt`));
+    const { record } = normalizedRecord(input);
+    const approval = boundedApproval(input, 2);
+    const state = { consume(request) { return { status: 'consumed', atomic: true, identity: request.identity, remaining_count: 1 }; } };
+    assert.equal(approvals.verifyApproval(record, approval, { now: NOW, replayState: state }).reason_code, 'APPROVAL_REPLAY_POLICY_STATE_UNCERTAIN');
+  }],
+  ['approval.replay-policy-mismatch', () => {
+    const input = fixtureInput(structured('edit', `${SIBLING}\\policy-mismatch.txt`));
+    const { record } = normalizedRecord(input);
+    const approval = boundedApproval(input, 2);
+    const state = { consume(request) { return { status: 'consumed', atomic: true, identity: request.identity, repeat_policy_digest: '0'.repeat(64), remaining_count: 1 }; } };
+    assert.equal(approvals.verifyApproval(record, approval, { now: NOW, replayState: state }).reason_code, 'APPROVAL_REPLAY_POLICY_MISMATCH');
+  }],
+  ['approval.replay-policy-wrong-first-pin', () => {
+    const input = fixtureInput(structured('edit', `${SIBLING}\\policy-wrong-first-pin.txt`));
+    const { record } = normalizedRecord(input);
+    const approval = boundedApproval(input, 2);
+    const wrongPolicy = approvals.repeatPolicyDigest(boundedApproval(input, 8));
+    const state = { consume(request) { return { status: 'consumed', atomic: true, identity: request.identity, repeat_policy_digest: wrongPolicy, remaining_count: 1 }; } };
+    assert.equal(approvals.verifyApproval(record, approval, { now: NOW, replayState: state }).reason_code, 'APPROVAL_REPLAY_POLICY_MISMATCH');
+  }],
+  ['approval.replay-policy-inconsistent-count', () => {
+    const input = fixtureInput(structured('edit', `${SIBLING}\\policy-inconsistent-count.txt`));
+    const { record } = normalizedRecord(input);
+    const approval = boundedApproval(input, 2);
+    const state = { consume(request) { return { status: 'consumed', atomic: true, identity: request.identity, repeat_policy_digest: request.repeat_policy_digest, consumed_count: 1, remaining_count: 2 }; } };
+    assert.equal(approvals.verifyApproval(record, approval, { now: NOW, replayState: state }).reason_code, 'APPROVAL_REPLAY_STATE_UNCERTAIN');
+  }],
+  ['approval.replay-policy-concurrent-mismatch', () => {
+    const input = fixtureInput(structured('edit', `${SIBLING}\\policy-concurrent-mismatch.txt`));
+    const { record } = normalizedRecord(input);
+    const state = replayStore();
+    const pinned = boundedApproval(input, 2);
+    const conflicting = boundedApproval(input, 8);
+    assert.equal(approvals.verifyApproval(record, pinned, { now: NOW, replayState: state }).valid, true);
+    assert.equal(approvals.verifyApproval(record, conflicting, { now: NOW, replayState: state }).reason_code, 'APPROVAL_REPLAY_POLICY_MISMATCH');
+  }],
+  ['approval.replay-policy-after-consumption', () => {
+    const input = fixtureInput(structured('edit', `${SIBLING}\\policy-after-consumption.txt`));
+    const { record } = normalizedRecord(input);
+    const state = replayStore();
+    const first = boundedApproval(input, 2);
+    const changedAfterUse = boundedApproval(input, 8, 1);
+    assert.equal(approvals.verifyApproval(record, first, { now: NOW, replayState: state }).valid, true);
+    assert.equal(approvals.verifyApproval(record, changedAfterUse, { now: NOW, replayState: state }).reason_code, 'APPROVAL_REPLAY_POLICY_MISMATCH');
+  }],
+  ['approval.replay-policy-fresh-counter', () => {
+    const input = fixtureInput(structured('edit', `${SIBLING}\\policy-fresh-counter.txt`));
+    const { record } = normalizedRecord(input);
+    let used = false;
+    const state = {
+      consume(request) {
+        const identity = used ? policy.sha256({ stable_slot: request.identity, fresh_counter: true }) : request.identity;
+        used = true;
+        return { status: 'consumed', atomic: true, identity, repeat_policy_digest: request.repeat_policy_digest, remaining_count: request.max_repeat_count - 1 };
+      },
+    };
+    const first = boundedApproval(input, 2);
+    const changed = boundedApproval(input, 8, 1);
+    assert.equal(approvals.verifyApproval(record, first, { now: NOW, replayState: state }).valid, true);
+    assert.equal(approvals.verifyApproval(record, changed, { now: NOW, replayState: state }).reason_code, 'APPROVAL_REPLAY_STATE_MISMATCH');
+  }],
+  ['approval.replay-policy-digest', () => {
+    const input = fixtureInput(structured('edit', `${SIBLING}\\policy-digest.txt`));
+    const { record } = normalizedRecord(input);
+    const oneShot = approvals.verifyApproval(record, buildApproval(input), { now: NOW, replayState: replayStore() });
+    const bounded = approvals.verifyApproval(record, boundedApproval(input, 2), { now: NOW, replayState: replayStore() });
+    assert.notEqual(oneShot.approval_digest, bounded.approval_digest);
+    assert.notEqual(oneShot.repeat_policy_digest, bounded.repeat_policy_digest);
+    assert.equal(oneShot.replay_identity, bounded.replay_identity);
   }],
   ['capability.missing', () => expectDecision(fixtureInput(structured('edit', `${ROOT}\\capability.txt`), { native_state: {} }), 'unsupported', 'CAPABILITY_EVIDENCE_MISSING')],
   ['capability.malformed', () => expectDecision(fixtureInput(structured('edit', `${ROOT}\\capability.txt`), { native_state: { capability_evidence: 'bad' } }), 'unsupported', 'OPERATION_CONTRACT_INVALID')],
