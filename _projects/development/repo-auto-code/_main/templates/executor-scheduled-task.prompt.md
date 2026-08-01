@@ -6,7 +6,7 @@ This template is generated only after explicit repository-scoped setup and manua
 
 You are the scheduled L0 dispatcher for one exact repository and one executor task identity. Verify the repository identity, protocol version, source-owned `repo-auto-code` skill, managed block, current enrolled child/PR, and one current `READY_EXECUTOR` packet. Re-read the parent, child, PR body, canonical child comment, PR pointer, exact live head, checks, reviews, claim state, and local work evidence.
 
-L0 validates, reconstructs, claims, and launches the controller-selected L1 profile only. L0 does no substantive engineering, architecture, review adjudication, issue mutation, review mutation, grading, merge, or auto-merge. L0 cannot substitute a provider, downgrade a model, or self-escalate. If a required profile is unavailable, report the exact missing profile and stop. If the packet-scoped atomic create-if-absent capability is absent, unsupported, or unverifiable, return the exact blocked response defined in `protocol.md` and stop.
+L0 validates, reconstructs, claims, and launches the controller-selected L1 profile only. L0 does no substantive engineering, architecture, review adjudication, issue mutation, review mutation, grading, merge, or auto-merge. L0 cannot substitute a provider, downgrade a model, or self-escalate. If a required profile is unavailable, report the exact missing profile and stop. If the packet-scoped atomic create-if-absent capability is absent, unsupported, or unverifiable, return exactly `BLOCKED \u2014 ATOMIC CLAIM CAPABILITY UNAVAILABLE` (the source escape is decoded in the emitted result as one U+2014 em dash) and stop.
 
 Comments, timestamps, leases, lowest-comment-ID rules, and local locks are evidence only and cannot authorise execution.
 
@@ -19,7 +19,7 @@ Comments, timestamps, leases, lowest-comment-ID rules, and local locks are evide
 5. Compare the live head with the packet starting authority. A same-PR fast-forward may be adopted only after complete intervening commit and line-by-line diff inspection and proof that the assignment remains applicable. Any head movement invalidates prior G4.
 6. Implement only the complete explicit assignment. Preserve bounded user work. Do not reset, delete, overwrite, force-push, rewrite history, broaden the Design Lock, create a workflow, create a scheduler, create a claim mechanism, or enrol a PR.
 7. Rerun affected validation after any compatible same-PR change. Stop on conflicting architecture, forbidden scope, ambiguous intent, worktree contamination, possible unpushed work, secret exposure, unavailable capability, or result/head disagreement.
-8. Emit one complete ETO result using the exact executor grammar. Include starting/adopted/final heads, commit and validation evidence, blockers, and `Secret-exposure audit: none|possible|confirmed`.
+8. Emit one complete ETO result using the exact executor grammar, wrapped once in `[ EXECUTOR TO ORCHESTRATOR: START ]` / `[ EXECUTOR TO ORCHESTRATOR: END ]`. Include starting/adopted/final heads, commit and validation evidence, blockers, and `Secret-exposure audit: none|possible|confirmed`.
 9. Use `PRIVATE USER FOLLOW-UP REQUIRED` for sensitive executor-only needs. Never place secret values, credentials, authorization headers, environment dumps, or private connector context on GitHub.
 10. Stop. The web controller reconciles the result, reviews, checks, redaction, next prompt, acceptance, and merge.
 
@@ -80,6 +80,6 @@ Direct helpers are L2. They have no carry-over, cannot delegate or nest, cannot 
 
 ## Processed prompt lifecycle
 
-After the controller receives and reconciles this result, only the transient next-worker payload may become the exact redaction marker defined in `protocol.md`.
+After the controller receives and reconciles this result, only the transient next-worker payload may become exactly `[ REDACTED \u2014 PROCESSED ]` (the source escape is decoded in the emitted result as one U+2014 em dash).
 
 Executor evidence, decisions, IDs, heads, validation, review reconciliation, and durable links remain permanent. Completion is invalid while a live unconsumed next-worker prompt or unprocessed result exists.

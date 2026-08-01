@@ -194,8 +194,10 @@ function assertPublicationContract(protocol) {
 }
 
 function assertClaimContract(protocol) {
-  assert.match(protocol, /atomic packet-scoped create-if-absent claim primitive/);
-  assert.match(protocol, /Comments, timestamps, lease expiry|GitHub comments, comment IDs, timestamps, lease expiry/);
+  assert.match(protocol, /atomic packet-scoped, lease-bound create-if-absent claim primitive/);
+  assert.match(protocol, /leaseId:/);
+  assert.match(protocol, /leaseExpiresAt:/);
+  assert.match(protocol, /GitHub comments, comment IDs, timestamps, lowest-comment-ID rules/);
   assert.match(protocol, /createIfAbsent\(input\)/);
   assert.match(protocol, /readBack\(claimId\)/);
   assert.match(protocol, /must not move the implementation PR head/);
@@ -203,9 +205,9 @@ function assertClaimContract(protocol) {
   assert.match(protocol, /sole claimant/);
   assert.match(protocol, /created: false/);
   assert.match(protocol, /L1 verifies.*never calls `createIfAbsent` again/);
-  assert.match(protocol, /read-back identity\/head mismatch/);
+  assert.match(protocol, /read-back identity, head, lease, or expiry mismatch/);
   assert.ok(protocol.includes(protocolClaimUnavailable));
-  assert.match(protocol, /Time expiry never grants automatic takeover/);
+  assert.match(protocol, /Lease expiry never grants automatic takeover/);
   assert.match(protocol, /controller may retire or supersede/);
 }
 
@@ -258,6 +260,10 @@ function assertEnrolmentAgreement(enrolment) {
     assert.equal(new Set(parsed.map((surface) => surface[key])).size, 1, `enrolment ${key} agrees`);
   }
   assert.deepEqual(parsed.map((surface) => surface.surface), ['Surface: PARENT', 'Surface: CHILD', 'Surface: PR']);
+}
+
+function rejected(status) {
+  return { accepted: false, status, mutationProhibited: true };
 }
 
 function evaluateFixture(fixture) {
@@ -324,17 +330,17 @@ function evaluateFixture(fixture) {
       assert.equal(state.skill.available, false);
       assert.equal(state.skill.inspectable, false);
       assert.equal(fixture.expected.status, 'AUTO_CODE_SETUP_INVALID');
-      return { accepted: false, status: 'AUTO_CODE_SETUP_INVALID' };
+      return rejected('AUTO_CODE_SETUP_INVALID');
 
     case 'malformed_agents_block':
       assert.equal(state.managedBlock.end, 'missing');
       assert.equal(fixture.expected.status, 'AUTO_CODE_SETUP_INVALID');
-      return { accepted: false, status: 'AUTO_CODE_SETUP_INVALID' };
+      return rejected('AUTO_CODE_SETUP_INVALID');
 
     case 'missing_provider_routing':
       assert.equal(state.profiles.some((profile) => !profile.Reasoning), true);
       assert.equal(fixture.expected.status, 'BLOCKED_MISSING_WORKER_PROFILE');
-      return { accepted: false, status: 'BLOCKED_MISSING_WORKER_PROFILE' };
+      return rejected('BLOCKED_MISSING_WORKER_PROFILE');
 
     case 'partial_publication':
       assert.equal(state.publication.status, 'READY_EXECUTOR');
@@ -342,49 +348,49 @@ function evaluateFixture(fixture) {
       assert.equal(state.publication.parentBinding && state.publication.childBinding && state.publication.prBinding, false);
       assert.equal(state.publication.bodiesRereadBeforeReady, false);
       assert.equal(state.publication.readySetLast, false);
-      return { accepted: false, status: 'DRAFT_BINDING_INCOMPLETE' };
+      return rejected('DRAFT_BINDING_INCOMPLETE');
 
     case 'duplicate_packets':
       assert.notEqual(new Set(state.livePacketIds).size, state.livePacketIds.length);
       assert.equal(state.canonicalCount, 2);
-      return { accepted: false, status: 'DUPLICATE_PACKET' };
+      return rejected('DUPLICATE_PACKET');
 
     case 'duplicate_claims':
       assert.equal(state.claim.atomic, true);
       assert.equal(state.claim.winnerCount, 2);
       assert.equal(state.claim.readBackExact, false);
-      return { accepted: false, status: 'DUPLICATE_CLAIM' };
+      return rejected('DUPLICATE_CLAIM');
 
     case 'non_atomic_claim':
       assert.equal(state.claim.atomic, false);
       assert.ok(state.claim.leaseTimestamp);
       assert.equal(state.claim.lowestCommentIdRule, true);
       assert.notEqual(state.claim.capability, 'create-if-absent');
-      return { accepted: false, status: mandatedClaimUnavailable };
+      return rejected(mandatedClaimUnavailable);
 
     case 'body_comment_disagreement': {
       const ids = Object.values(state.surfaces);
       assert.notEqual(new Set(ids).size, 1);
-      return { accepted: false, status: 'AUTHORITY_DISAGREEMENT' };
+      return rejected('AUTHORITY_DISAGREEMENT');
     }
 
     case 'stale_g4':
       assert.notEqual(state.g4.reviewedHead, state.g4.currentHead);
       assert.equal(state.g4.headMoved, true);
-      return { accepted: false, status: 'STALE_G4' };
+      return rejected('STALE_G4');
 
     case 'secret_prompt': {
       assert.equal(looksSecretBearing(state.promptContent), true);
       const safe = `Secret name: ${state.secretName}; presence: ${state.presence}; value: ${state.redactedValue}`;
       assert.equal(looksSecretBearing(safe), false);
-      return { accepted: false, status: 'SECRET_EXPOSURE_DETECTED' };
+      return rejected('SECRET_EXPOSURE_DETECTED');
     }
 
     case 'final_live_prompt':
       assert.equal(state.completionRequested, true);
       assert.equal(state.prompt.live, true);
       assert.equal(state.prompt.processed, false);
-      return { accepted: false, status: 'LIVE_PROMPT_REMAINS' };
+      return rejected('LIVE_PROMPT_REMAINS');
 
     case 'incomplete_teardown':
       assert.equal(state.completionRequested, true);
@@ -392,7 +398,7 @@ function evaluateFixture(fixture) {
       assert.equal(state.schedules.controller.status, 'removed');
       assert.notEqual(state.schedules.executor.status, 'removed');
       assert.equal(state.otherRepositoryAffected, false);
-      return { accepted: false, status: 'INCOMPLETE_SCHEDULER_TEARDOWN' };
+      return rejected('INCOMPLETE_SCHEDULER_TEARDOWN');
 
     default:
       assert.fail(`unhandled fixture scenario: ${fixture.scenario}`);
@@ -447,6 +453,8 @@ test('both scheduled prompts require every routing field and preserve hierarchy 
     assert.match(prompt, /cannot delegate|cannot.*nest/i);
     assert.match(prompt, /review mutation|review state/i);
     assert.match(prompt, /manual.*scheduled task|manually create.*scheduled task/i);
+    assert.match(prompt, /BLOCKED \\u2014 ATOMIC CLAIM CAPABILITY UNAVAILABLE/);
+    assert.match(prompt, /\[ REDACTED \\u2014 PROCESSED \]/);
     assert.doesNotMatch(prompt, /ghp_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9]{8,}|-----BEGIN [A-Z ]+ PRIVATE KEY-----/i);
     assert.equal(looksSecretBearing(prompt), false);
     assert.ok([...prompt].every((character) => character.codePointAt(0) < 128), 'agent prompt uses ASCII punctuation');
@@ -470,6 +478,19 @@ test('failure matrix has required evidence, repair, and lane-isolation columns',
   assert.match(matrix, /\| F-041 \|[\s\S]*?\| `HELD` \|/);
 });
 
+test('controller prompt location and lifecycle state boundaries are explicit', () => {
+  const architecture = readModule('_main/architecture.md');
+  const lifecycle = readModule('_main/state-machine.md');
+  assert.match(architecture, /Manual controller prompts[\s\S]*active web conversation/);
+  assert.match(architecture, /not copied into GitHub bodies or comments or into scheduled-task payloads/);
+  for (const label of ['SETUP', 'PREPARED', 'SCHEDULED', 'ENROLLED', 'CLAIMED', 'RUNNING', 'ACCEPTED', 'COMPLETE']) {
+    assert.match(lifecycle, new RegExp('`' + label + '`'));
+  }
+  assert.match(lifecycle, /prepared prompts alone never set this state/);
+  assert.match(lifecycle, /A trusted atomic read-back verifies one capability-issued lease/);
+  assert.match(lifecycle, /merge and teardown remain separate/);
+});
+
 test('every authorised fixture is discovered, unique, executed, and behaviorally asserted', () => {
   const discovered = fs.readdirSync(fixtureRoot).filter((name) => name.endsWith('.json')).sort();
   assert.deepEqual(discovered, expectedFixtureFiles);
@@ -482,6 +503,7 @@ test('every authorised fixture is discovered, unique, executed, and behaviorally
     assert.equal(typeof fixture.expected.accepted, 'boolean', `${name} expected.accepted`);
     if (Object.prototype.hasOwnProperty.call(fixture.expected, 'mutationProhibited')) {
       assert.equal(typeof fixture.expected.mutationProhibited, 'boolean', `${name} mutationProhibited`);
+      assert.equal(fixture.expected.mutationProhibited, true, `${name} mutationProhibited must be true for a rejected fixture`);
     }
     return fixture;
   });
@@ -495,7 +517,7 @@ test('every authorised fixture is discovered, unique, executed, and behaviorally
     const actual = evaluateFixture(fixture);
     executed.add(fixture.id);
     assert.equal(actual.accepted, fixture.expected.accepted, fixture.id);
-    for (const key of ['status', 'turn', 'classification', 'selection', 'completion', 'capacity', 'adoptedHead', 'selectedChild', 'freshG4Required']) {
+    for (const key of ['status', 'turn', 'classification', 'selection', 'completion', 'capacity', 'adoptedHead', 'selectedChild', 'freshG4Required', 'mutationProhibited']) {
       if (Object.prototype.hasOwnProperty.call(fixture.expected, key)) {
         assert.equal(actual[key], fixture.expected[key], `${fixture.id} ${key}`);
       }

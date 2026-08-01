@@ -63,6 +63,8 @@ If the skill, managed block, or routing configuration is missing, malformed, dup
 
 The parent, child, and PR body must agree before automated mutation. Child comments are the canonical full copy. A compatibility mode may mirror a prompt into a PR comment only when the harness cannot follow the child comment; the child remains canonical and dual-redaction tests must prove that exactly one canonical copy controls the lifecycle.
 
+Manual controller prompts, including G1/G2, Design Lock, user-choice, and exceptional-review prompts, remain in the active web conversation. They are not copied into GitHub bodies or comments or into scheduled-task payloads. GitHub stores only protocol-governed audit and handoff packets, executor evidence, and discoverability pointers; a controller must not reconstruct a manual prompt from partial audit records.
+
 The exact three-surface binding grammar is defined in [`protocol.md`](protocol.md). Each parent queue entry, child body, and PR body has one `[ AUTO-CODE ENROLMENT: START ]` / `[ AUTO-CODE ENROLMENT: END ]` block with the same protocol version, repository, parent, child, PR, Packet ID, turn, and `ENROLLED` value. Only the expected `Surface` value differs (`PARENT`, `CHILD`, or `PR`). Missing, duplicated, extra-field, malformed, or disagreeing blocks fail the lane closed.
 
 ## 5. Explicit enrolment and queue selection
