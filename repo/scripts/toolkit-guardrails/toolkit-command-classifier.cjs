@@ -335,10 +335,13 @@ function githubRequestFileSources(tokens) {
     const token = tokens[index];
     const normalized = lower(token);
     const bodyFile = normalized === '--body-file' || normalized.startsWith('--body-file=');
-    const apiInput = normalized === '--input' || normalized.startsWith('--input=') || normalized === '-i' || normalized.startsWith('-i=');
+    const apiInput = normalized === '--input' || normalized.startsWith('--input=') || normalized === '-i' || normalized.startsWith('-i=')
+      || (token.startsWith('-i') && !token.startsWith('--') && token.length > 2);
     if (bodyFile || apiInput) {
       present = true;
-      const value = nextValue(index, token);
+      const value = apiInput && token.startsWith('-i') && !token.startsWith('--') && !token.includes('=') && token.length > 2
+        ? { value: token.slice(2) }
+        : nextValue(index, token);
       if (value.unresolved) unresolved = true;
       else add(value.value, bodyFile ? 'github-body-file' : 'github-input-file');
       if (value.unresolved === undefined && !token.includes('=')) index += 1;
@@ -385,11 +388,12 @@ function githubRequestFileSources(tokens) {
   };
 }
 
-function classifyGithub(tokens) {
+function classifyGithub(tokens, options = {}) {
   const kind = lower(tokens[1] || '');
   const subcommand = lower(tokens[2] || '');
   const external = [{ class: 'github', digest: sha256({ kind, subcommand }) }];
   const requestFiles = githubRequestFileSources(tokens);
+  if (options.stdin_bound === true && requestFiles.unresolved) requestFiles.unresolved = false;
   const requestExtras = requestFiles.present
     ? { github_request_input: true, github_request_input_unresolved: requestFiles.unresolved }
     : {};
@@ -539,7 +543,16 @@ function classifyAtomic(command, shell) {
   if (secretDumpCommand(name, command)) return commonResult('secret-dump', 'deny', secretTargets, { secret_target: true, reason_codes: ['SECRET_DUMP_DENIED'] });
   if (hasDynamicExpansion(command)) return commonResult('opaque-command', 'unsupported', [], { opaque: true, reason_codes: ['DYNAMIC_TARGET_UNSUPPORTED'] });
   if (hasUnclosedQuote(command, shell)) return commonResult('opaque-command', 'unsupported', [], { opaque: true, reason_codes: ['OPAQUE_COMMAND_UNSUPPORTED'] });
-  if (name === 'gh') return classifyGithub(tokens);
+  if (name === 'gh') {
+    const redirections = inputRedirectionTargets(command);
+    const stdinBound = redirections.length === 1 && tokens.some((token, index) => {
+      const normalizedToken = lower(token);
+      if (normalizedToken === '--input' || normalizedToken === '-i') return tokens[index + 1] === '-';
+      if (normalizedToken === '--input=-' || normalizedToken === '-i=-') return true;
+      return token.startsWith('-i') && !token.startsWith('--') && token.slice(2) === '-';
+    });
+    return classifyGithub(tokens, { stdin_bound: stdinBound });
+  }
   if (name === 'git') return classifyGit(tokens, shell);
   if (SHELL_NAMES.has(name) && hasNestedShell(tokens, shell)) return commonResult('opaque-command', 'unsupported', [], { nested: true, opaque: true, reason_codes: ['OPAQUE_COMMAND_UNSUPPORTED'] });
   if (['node', 'node.exe', 'python', 'python3', 'pwsh', 'powershell', 'cmd', 'cmd.exe'].includes(name) && tokens.slice(1).some((token) => /\.(?:cjs|js|mjs|py|ps1|sh|bat|cmd)$/i.test(token))) return commonResult('opaque-command', 'unsupported', extractPathTokens(tokens, 1, { shell }), { opaque: true, reason_codes: ['OPAQUE_COMMAND_UNSUPPORTED'] });
@@ -629,7 +642,10 @@ function classifyCommand(command, options = {}) {
   }
 
   const hasSecretAccess = results.some((entry) => ['secret-access', 'secret-dump'].includes(entry.operation_class));
-  const hasNetworkComponent = results.some((entry) => entry.operation_class === 'external-mutation' || entry.operation_class.startsWith('github-')) || results.some((entry) => entry.external_targets?.some((target) => ['network-or-remote-system', 'github'].includes(target.class)));
+  const hasGithubCommand = /(?:^|[|;&]\s*)gh(?:\.exe)?\b/i.test(command);
+  const hasNetworkComponent = hasGithubCommand
+    || results.some((entry) => entry.operation_class === 'external-mutation' || entry.operation_class.startsWith('github-'))
+    || results.some((entry) => entry.external_targets?.some((target) => ['network-or-remote-system', 'github'].includes(target.class)));
   const hasTransmissionComponent = /(?:^|[|;]\s*)(?:curl|curl\.exe|wget|invoke-webrequest|invoke-restmethod|send(?:-[A-Za-z0-9_-]+)?|upload|post|put)\b/i.test(command);
   const hasSecretTransmissionTarget = merged.target_inputs.some((entry) => isSecretPath(entry.path) && ['github-body-file', 'github-input-file', 'github-field-file', 'input-redirection'].includes(entry.kind));
   if (hasSecretAccess && (hasNetworkComponent || hasTransmissionComponent || hasRedirection)) {
@@ -776,6 +792,12 @@ function classifyStructuredOperation(operation, options = {}) {
   const resolvedTransmissionTargets = transmission.targets
     .map((target) => options.repository ? resolveTargets([target], options.repository, { ...options, operation_cwd: options.operation_cwd })[0] : null)
     .filter(Boolean);
+  const resolvedSecretTransmissionTargets = resolvedTransmissionTargets.filter((target) => (
+    target.status === 'resolved'
+      && (target.target_class === 'secret-bearing'
+        || isSecretPath(target.canonical_path || target.raw_path)
+        || target.evidence?.source === 'operation-variable')
+  ));
   const effectiveTargets = [...targets, ...resolvedTransmissionTargets];
   const effectiveInputs = [...targets, ...transmission.targets];
   const attachTransmission = (result) => {
@@ -787,6 +809,8 @@ function classifyStructuredOperation(operation, options = {}) {
       external_targets: result.external_targets?.length
         ? result.external_targets
         : [{ class: githubRoute ? 'github' : route || 'external-system', digest: sha256({ route }) }],
+      transmission_request_input: true,
+      transmission_input_unresolved: transmission.unresolved,
       github_request_input: githubRoute,
       github_request_input_unresolved: transmission.unresolved,
     };
@@ -795,7 +819,7 @@ function classifyStructuredOperation(operation, options = {}) {
   if (catastrophicTargets.length && ['delete', 'remove', 'destroy', 'overwrite', 'truncate', 'format', 'reset', 'rmdir'].includes(action)) {
     return commonResult('protected-target', 'deny', catastrophicTargets, { catastrophic_hint: true, reason_codes: ['CATASTROPHIC_TARGET_DENIED'] });
   }
-  if ((resolvedSecretTargets.length || structuredSecretVariable) && transmissionRoute) {
+  if ((resolvedSecretTargets.length || resolvedSecretTransmissionTargets.length || structuredSecretVariable) && transmissionRoute) {
     return attachTransmission(commonResult('secret-exfiltration', 'deny', effectiveInputs, { secret_target: true, reason_codes: ['SECRET_EXFILTRATION_DENIED'] }));
   }
   if (transmission.secret_targets?.length) {

@@ -12,7 +12,8 @@ const {
 const APPROVAL_VERSION = 'toolkit.guardrail.approval.v1';
 const REPLAY_STORE_CONTRACT_VERSION = 'toolkit.guardrail.replay-store.v1';
 const REPLAY_SLOT_KEYING = 'stable-replay-identity-only';
-const admittedReplayStores = new WeakSet();
+const authoritativeReplaySlots = new Map();
+const authoritativeReplayQueues = new Map();
 const APPROVAL_FIELDS = new Set([
   'contract_version',
   'host',
@@ -146,48 +147,11 @@ function replaySlotKey(record, approval) {
   return replayIdentity(record, approval);
 }
 
-function replaySlotProof(slotKey) {
-  return sha256({
-    contract_version: REPLAY_STORE_CONTRACT_VERSION,
-    keying: REPLAY_SLOT_KEYING,
-    slot_key: slotKey,
-  });
-}
-
-function createTrustedReplayStore(consume, provenance = {}) {
-  if (typeof consume !== 'function') return null;
-  const state = Object.freeze({
-    contract_version: REPLAY_STORE_CONTRACT_VERSION,
-    provenance: Object.freeze({ ...provenance }),
-    consume,
-  });
-  if (!trustedReplayStoreShape(state)) return null;
-  admittedReplayStores.add(state);
-  return state;
-}
-
-function trustedReplayStoreShape(state) {
-  if (!isRecord(state) || typeof state.consume !== 'function') return false;
-  if (state.contract_version !== REPLAY_STORE_CONTRACT_VERSION) return false;
-  const provenance = state.provenance;
-  return isRecord(provenance)
-    && provenance.status === 'verified'
-    && provenance.trusted === true
-    && nonEmptyString(provenance.source)
-    && provenance.capability === 'authoritative-replay-slot'
-    && provenance.keying === REPLAY_SLOT_KEYING;
-}
-
-function trustedReplayStore(state) {
-  return admittedReplayStores.has(state) && trustedReplayStoreShape(state);
-}
-
 function replayRequest(slotKey, request) {
   return Object.freeze({
     contract_version: REPLAY_STORE_CONTRACT_VERSION,
     keying: REPLAY_SLOT_KEYING,
     slot_key: slotKey,
-    slot_proof: replaySlotProof(slotKey),
     operation_digest: request.operation_digest,
     target_digest: request.target_digest,
     scope: request.scope,
@@ -200,71 +164,92 @@ function replayRequest(slotKey, request) {
   });
 }
 
-function validateReplayResponse(result, request) {
-  if (!isRecord(result)) return { ok: false, reason_code: 'APPROVAL_REPLAY_STATE_UNCERTAIN' };
-  if (result.contract_version !== REPLAY_STORE_CONTRACT_VERSION) return { ok: false, reason_code: 'APPROVAL_REPLAY_STORE_CONTRACT_INVALID' };
-  if (result.atomic !== true) return { ok: false, reason_code: 'APPROVAL_REPLAY_STATE_UNCERTAIN' };
-  if (result.slot_key !== request.slot_key) return { ok: false, reason_code: 'APPROVAL_REPLAY_SLOT_MISMATCH' };
-  if (!digest(result.slot_proof)) return { ok: false, reason_code: 'APPROVAL_REPLAY_SLOT_PROOF_UNCERTAIN' };
-  if (result.slot_proof !== replaySlotProof(request.slot_key)) return { ok: false, reason_code: 'APPROVAL_REPLAY_SLOT_PROOF_MISMATCH' };
-  if (!['consumed', 'already-consumed', 'exhausted', 'policy-mismatch', 'expiry-mismatch', 'state-mismatch'].includes(result.status)) return { ok: false, reason_code: 'APPROVAL_REPLAY_STATE_UNCERTAIN' };
-  if (!digest(result.pinned_policy_digest)) return { ok: false, reason_code: 'APPROVAL_REPLAY_POLICY_STATE_UNCERTAIN' };
-  if (!['one_shot', 'bounded_repeat'].includes(result.pinned_repeat_mode)) return { ok: false, reason_code: 'APPROVAL_REPLAY_POLICY_STATE_UNCERTAIN' };
-  if (!Number.isInteger(result.pinned_max_repeat_count) || result.pinned_max_repeat_count < 1) return { ok: false, reason_code: 'APPROVAL_REPLAY_POLICY_STATE_UNCERTAIN' };
-  if (!Number.isInteger(result.consumed_count) || result.consumed_count < 0 || result.consumed_count > result.pinned_max_repeat_count) return { ok: false, reason_code: 'APPROVAL_REPLAY_STATE_UNCERTAIN' };
-  if (!Number.isInteger(result.remaining_count) || result.remaining_count < 0 || result.remaining_count > result.pinned_max_repeat_count) return { ok: false, reason_code: 'APPROVAL_REPLAY_STATE_UNCERTAIN' };
-  if (result.consumed_count + result.remaining_count !== result.pinned_max_repeat_count) return { ok: false, reason_code: 'APPROVAL_REPLAY_STATE_UNCERTAIN' };
-  if (typeof result.exhausted !== 'boolean' || result.exhausted !== (result.remaining_count === 0)) return { ok: false, reason_code: 'APPROVAL_REPLAY_STATE_UNCERTAIN' };
-  if (!Number.isInteger(result.pinned_issued_at) || !Number.isInteger(result.pinned_expires_at)) return { ok: false, reason_code: 'APPROVAL_REPLAY_STATE_UNCERTAIN' };
-  if (result.pinned_issued_at !== request.issued_at || result.pinned_expires_at !== request.expires_at) return { ok: false, reason_code: 'APPROVAL_REPLAY_EXPIRY_MISMATCH' };
-  if (result.pinned_policy_digest !== request.policy_digest
-    || result.pinned_repeat_mode !== request.repeat_mode
-    || result.pinned_max_repeat_count !== request.max_repeat_count) return { ok: false, reason_code: 'APPROVAL_REPLAY_POLICY_MISMATCH' };
-  if (result.status === 'consumed') {
-    if (result.consumed_count !== request.expected_consumed_count + 1) return { ok: false, reason_code: 'APPROVAL_REPLAY_STATE_UNCERTAIN' };
-    return { ok: true, remaining_count: result.remaining_count, consumed_count: result.consumed_count, exhausted: result.exhausted };
-  }
-  return { ok: false, reason_code: result.status === 'expiry-mismatch' ? 'APPROVAL_REPLAY_EXPIRY_MISMATCH' : result.status === 'policy-mismatch' ? 'APPROVAL_REPLAY_POLICY_MISMATCH' : 'APPROVAL_REPLAY' };
+function validReplayRequest(request) {
+  return digest(request?.slot_key)
+    && digest(request?.policy_digest)
+    && ['one_shot', 'bounded_repeat'].includes(request?.repeat_mode)
+    && Number.isInteger(request?.max_repeat_count)
+    && request.max_repeat_count >= 1
+    && (request.repeat_mode !== 'one_shot' || request.max_repeat_count === 1)
+    && Number.isInteger(timestamp(request.issued_at))
+    && Number.isInteger(timestamp(request.expires_at))
+    && Number.isInteger(request?.expected_consumed_count)
+    && request.expected_consumed_count >= 0;
 }
 
-function consumeReplayState(state, slotKey, request) {
-  if (state === null || state === undefined) return { ok: false, reason_code: 'APPROVAL_REPLAY_STATE_UNAVAILABLE' };
-  if (!trustedReplayStore(state)) return { ok: false, reason_code: 'APPROVAL_REPLAY_STORE_UNTRUSTED' };
-  if (!digest(request?.repeat_policy_digest)
-    || !['one_shot', 'bounded_repeat'].includes(request?.repeat_mode)
-    || !Number.isInteger(request?.max_repeat_count)
-    || request.max_repeat_count < 1
-    || (request.repeat_mode === 'one_shot' && request.max_repeat_count !== 1)
-    || !Number.isInteger(timestamp(request.issued_at))
-    || !Number.isInteger(timestamp(request.expires_at))) return { ok: false, reason_code: 'APPROVAL_REPLAY_STATE_UNCERTAIN' };
-  let result;
-  try {
-    result = state.consume(replayRequest(slotKey, request));
-  } catch (error) {
-    return { ok: false, reason_code: 'APPROVAL_REPLAY_STATE_UNCERTAIN' };
-  }
-  if (result && typeof result.then === 'function') return { ok: false, reason_code: 'APPROVAL_REPLAY_STATE_UNCERTAIN' };
-  return validateReplayResponse(result, replayRequest(slotKey, request));
+function validReplayRecord(record) {
+  return isRecord(record)
+    && record.contract_version === REPLAY_STORE_CONTRACT_VERSION
+    && digest(record.slot_key)
+    && digest(record.pinned_policy_digest)
+    && ['one_shot', 'bounded_repeat'].includes(record.pinned_repeat_mode)
+    && Number.isInteger(record.pinned_max_repeat_count)
+    && record.pinned_max_repeat_count >= 1
+    && Number.isInteger(record.pinned_issued_at)
+    && Number.isInteger(record.pinned_expires_at)
+    && Number.isInteger(record.consumed_count)
+    && record.consumed_count >= 0
+    && record.consumed_count <= record.pinned_max_repeat_count;
 }
 
-async function consumeReplayStateAsync(state, slotKey, request) {
-  if (state === null || state === undefined) return { ok: false, reason_code: 'APPROVAL_REPLAY_STATE_UNAVAILABLE' };
-  if (!trustedReplayStore(state)) return { ok: false, reason_code: 'APPROVAL_REPLAY_STORE_UNTRUSTED' };
-  if (!digest(request?.repeat_policy_digest)
-    || !['one_shot', 'bounded_repeat'].includes(request?.repeat_mode)
-    || !Number.isInteger(request?.max_repeat_count)
-    || request.max_repeat_count < 1
-    || (request.repeat_mode === 'one_shot' && request.max_repeat_count !== 1)
-    || !Number.isInteger(timestamp(request.issued_at))
-    || !Number.isInteger(timestamp(request.expires_at))) return { ok: false, reason_code: 'APPROVAL_REPLAY_STATE_UNCERTAIN' };
+function replayFailure(reasonCode) {
+  return { ok: false, reason_code: reasonCode };
+}
+
+function consumeAuthoritativeReplay(slotKey, request) {
   const canonicalRequest = replayRequest(slotKey, request);
-  let result;
-  try {
-    result = await state.consume(canonicalRequest);
-  } catch (error) {
-    return { ok: false, reason_code: 'APPROVAL_REPLAY_STATE_UNCERTAIN' };
+  if (!validReplayRequest(canonicalRequest)) return replayFailure('APPROVAL_REPLAY_STATE_UNCERTAIN');
+
+  let record = authoritativeReplaySlots.get(slotKey);
+  if (!record) {
+    record = {
+      contract_version: REPLAY_STORE_CONTRACT_VERSION,
+      slot_key: slotKey,
+      pinned_policy_digest: canonicalRequest.policy_digest,
+      pinned_repeat_mode: canonicalRequest.repeat_mode,
+      pinned_max_repeat_count: canonicalRequest.max_repeat_count,
+      pinned_issued_at: canonicalRequest.issued_at,
+      pinned_expires_at: canonicalRequest.expires_at,
+      consumed_count: 0,
+    };
+    authoritativeReplaySlots.set(slotKey, record);
   }
-  return validateReplayResponse(result, canonicalRequest);
+  if (!validReplayRecord(record)) return replayFailure('APPROVAL_REPLAY_STATE_UNCERTAIN');
+  if (record.pinned_policy_digest !== canonicalRequest.policy_digest
+    || record.pinned_repeat_mode !== canonicalRequest.repeat_mode
+    || record.pinned_max_repeat_count !== canonicalRequest.max_repeat_count) {
+    return replayFailure('APPROVAL_REPLAY_POLICY_MISMATCH');
+  }
+  if (record.pinned_issued_at !== canonicalRequest.issued_at
+    || record.pinned_expires_at !== canonicalRequest.expires_at) {
+    return replayFailure('APPROVAL_REPLAY_EXPIRY_MISMATCH');
+  }
+  if (canonicalRequest.expected_consumed_count !== record.consumed_count) {
+    return replayFailure(canonicalRequest.expected_consumed_count < record.consumed_count
+      ? 'APPROVAL_REPLAY'
+      : 'APPROVAL_REPLAY_STATE_UNCERTAIN');
+  }
+  if (record.consumed_count >= record.pinned_max_repeat_count) return replayFailure('APPROVAL_REPLAY');
+
+  record.consumed_count += 1;
+  const remaining = record.pinned_max_repeat_count - record.consumed_count;
+  return {
+    ok: true,
+    consumed_count: record.consumed_count,
+    remaining_count: remaining,
+    exhausted: remaining === 0,
+  };
+}
+
+function consumeAuthoritativeReplayAsync(slotKey, request) {
+  const previous = authoritativeReplayQueues.get(slotKey) || Promise.resolve();
+  let release;
+  const current = new Promise((resolve) => { release = resolve; });
+  authoritativeReplayQueues.set(slotKey, current);
+  return previous.then(() => consumeAuthoritativeReplay(slotKey, request)).catch(() => replayFailure('APPROVAL_REPLAY_STATE_UNCERTAIN')).finally(() => {
+    release();
+    if (authoritativeReplayQueues.get(slotKey) === current) authoritativeReplayQueues.delete(slotKey);
+  });
 }
 
 function validateTargetSet(value) {
@@ -322,7 +307,26 @@ function validateApprovalShape(approval) {
   return null;
 }
 
+function hasInjectedReplayAuthority(options) {
+  if (!isRecord(options)) return false;
+  return Object.keys(options).some((key) => {
+    const normalized = key.toLowerCase().replace(/[-_]/g, '');
+    const suspicious = normalized.includes('replay')
+      || normalized === 'approvalverifier'
+      || normalized === 'verifier'
+      || normalized === 'verify'
+      || normalized.includes('approval')
+      || /(?:callback|consumer|consume|state|store|proof|slot|factory|register)/i.test(key);
+    if (!suspicious) return false;
+    if (normalized.includes('replay') || normalized.includes('approval') || normalized === 'verifier' || normalized === 'verify') return true;
+    if (options[key] === null || options[key] === undefined) return true;
+    if (typeof options[key] === 'function') return true;
+    return isRecord(options[key]) || options[key] instanceof Promise;
+  });
+}
+
 function prepareApprovalVerification(record, approvalInput, options = {}) {
+  if (hasInjectedReplayAuthority(options)) return invalid('APPROVAL_REPLAY_STORE_UNTRUSTED');
   const policy = options.policy || getPolicy();
   const approval = approvalInput === undefined ? record?.approval : approvalInput;
   if (!approval || typeof approval !== 'object' || Array.isArray(approval)) return invalid('APPROVAL_MISSING');
@@ -365,14 +369,12 @@ function prepareApprovalVerification(record, approvalInput, options = {}) {
   if (![now, issued, expires].every(Number.isFinite) || issued > now || expires <= now || expires <= issued) return invalid('APPROVAL_EXPIRED');
 
   if (approval.replay_detected === true || approval.consumed === true) return invalid('APPROVAL_REPLAY');
-  const replayState = firstDefined(options.replayState, options.replayStore, null);
   const identity = replaySlotKey(record, approval);
   if (approval.one_shot === true) {
     if (Object.hasOwn(approval, 'max_repeat_count')) return invalid('APPROVAL_INVALID');
     if (Object.hasOwn(approval, 'consumed_count') && approval.consumed_count !== 0) return invalid('APPROVAL_REPLAY');
     return {
       approval,
-      replayState,
       identity,
       one_shot: true,
       expected_remaining: 0,
@@ -395,7 +397,6 @@ function prepareApprovalVerification(record, approvalInput, options = {}) {
   if (!Number.isInteger(count) || !Number.isInteger(max) || count < 0 || max < 1 || count >= max || max > (policy.approval?.max_repeat_count || 8)) return invalid('APPROVAL_INVALID');
   return {
     approval,
-    replayState,
     identity,
     one_shot: false,
     expected_remaining: max - count - 1,
@@ -432,14 +433,14 @@ function finishApprovalVerification(prepared, consumed) {
 function verifyApproval(record, approvalInput, options = {}) {
   const prepared = prepareApprovalVerification(record, approvalInput, options);
   if (!prepared || prepared.valid === false) return prepared;
-  const consumed = consumeReplayState(prepared.replayState, prepared.identity, prepared.request);
+  const consumed = consumeAuthoritativeReplay(prepared.identity, prepared.request);
   return finishApprovalVerification(prepared, consumed);
 }
 
 async function verifyApprovalAsync(record, approvalInput, options = {}) {
   const prepared = prepareApprovalVerification(record, approvalInput, options);
   if (!prepared || prepared.valid === false) return prepared;
-  const consumed = await consumeReplayStateAsync(prepared.replayState, prepared.identity, prepared.request);
+  const consumed = await consumeAuthoritativeReplayAsync(prepared.identity, prepared.request);
   return finishApprovalVerification(prepared, consumed);
 }
 
@@ -461,11 +462,6 @@ module.exports = {
   repeatPolicyDigest,
   replayIdentity,
   replaySlotKey,
-  replaySlotProof,
-  createTrustedReplayStore,
-  trustedReplayStore,
-  consumeReplayState,
-  consumeReplayStateAsync,
   verifyApproval,
   verifyApprovalAsync,
   verifyApprovalEvidence,

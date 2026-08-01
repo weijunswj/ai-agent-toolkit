@@ -159,6 +159,8 @@
     "approval.replay-slot-outward-identity-internal",
     "approval.replay-slot-missing-proof",
     "approval.replay-store-self-reporting",
+    "approval.replay-store-public-factory-unavailable",
+    "approval.replay-store-option-injection-rejected",
     "approval.replay-store-version-missing",
     "approval.replay-store-version-null",
     "approval.replay-store-version-wrong",

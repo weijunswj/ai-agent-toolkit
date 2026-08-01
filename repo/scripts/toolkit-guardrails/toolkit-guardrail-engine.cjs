@@ -420,14 +420,18 @@ function transmissionBoundary(record, classification) {
     || (classification.external_targets || []).length > 0
     || (record.operation.external_targets || []).length > 0
     || Boolean(record.operation.mcp_server || record.operation.mcp_tool);
-  const requestInput = classification.github_request_input === true || classification.github_request_input_unresolved === true;
+  const requestInput = classification.transmission_request_input === true
+    || classification.github_request_input === true
+    || classification.github_request_input_unresolved === true;
   if (!requestInput || !external) return null;
   const targets = record.operation.targets || [];
-  if (classification.github_request_input_unresolved === true || targets.some((target) => target.status !== 'resolved')) {
-    return { decision: 'unsupported', reason: 'UNRESOLVED_TARGET_UNSUPPORTED' };
-  }
   const secretTarget = classification.secret_target === true || targets.some((target) => target.target_class === 'secret-bearing' || isSecretBearingPath(target));
   if (secretTarget) return { decision: 'deny', reason: 'SECRET_EXFILTRATION_DENIED' };
+  if (classification.transmission_input_unresolved === true
+    || classification.github_request_input_unresolved === true
+    || targets.some((target) => target.status !== 'resolved')) {
+    return { decision: 'unsupported', reason: 'UNRESOLVED_TARGET_UNSUPPORTED' };
+  }
   return null;
 }
 
@@ -481,14 +485,19 @@ function ensureCommandTargets(record, classification, options) {
 }
 
 function approvalDecision(record, options) {
+  if (Object.hasOwn(options || {}, 'approvalVerifier')) {
+    return { decision: 'unsupported', reason: 'APPROVAL_VERIFIER_OVERRIDE_REJECTED' };
+  }
   try {
-    const verifier = options.approvalVerifier || verifyApproval;
-    const verified = verifier(record, record.approval, {
+    const verified = verifyApproval(record, record.approval, {
       ...options,
       policy: options.policy,
       operation_decision: 'ask',
     });
     if (verified?.valid === true) return { decision: 'allow', reason: 'APPROVED_ONE_SHOT_OPERATION' };
+    if (verified?.reason_code === 'APPROVAL_REPLAY_STORE_UNTRUSTED') {
+      return { decision: 'unsupported', reason: verified.reason_code };
+    }
     return { decision: 'ask', reason: verified?.reason_code || 'APPROVAL_MISSING' };
   } catch (error) {
     return { decision: 'unsupported', reason: 'APPROVAL_VERIFIER_FAILURE_UNSUPPORTED' };
