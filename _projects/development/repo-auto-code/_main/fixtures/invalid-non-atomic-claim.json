@@ -1,0 +1,17 @@
+{
+  "id": "invalid-non-atomic-claim",
+  "scenario": "non_atomic_claim",
+  "expected": {
+    "accepted": false,
+    "status": "BLOCKED \u2014 ATOMIC CLAIM CAPABILITY UNAVAILABLE",
+    "mutationProhibited": true
+  },
+  "state": {
+    "claim": {
+      "capability": "github-comment",
+      "atomic": false,
+      "leaseTimestamp": "2026-08-01T00:00:00Z",
+      "lowestCommentIdRule": true
+    }
+  }
+}

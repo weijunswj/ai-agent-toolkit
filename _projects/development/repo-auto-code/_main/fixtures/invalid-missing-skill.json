@@ -1,0 +1,13 @@
+{
+  "id": "invalid-missing-skill",
+  "scenario": "missing_skill",
+  "expected": {
+    "accepted": false,
+    "status": "AUTO_CODE_SETUP_INVALID",
+    "mutationProhibited": true
+  },
+  "state": {
+    "skill": { "available": false, "inspectable": false },
+    "repair": "install-or-repair-source-owned-skill-then-restart"
+  }
+}

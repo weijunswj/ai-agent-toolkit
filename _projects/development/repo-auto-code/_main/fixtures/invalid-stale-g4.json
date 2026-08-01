@@ -1,0 +1,16 @@
+{
+  "id": "invalid-stale-g4",
+  "scenario": "stale_g4",
+  "expected": {
+    "accepted": false,
+    "status": "STALE_G4",
+    "mutationProhibited": true
+  },
+  "state": {
+    "g4": {
+      "reviewedHead": "5555555555555555555555555555555555555555",
+      "currentHead": "6666666666666666666666666666666666666666",
+      "headMoved": true
+    }
+  }
+}

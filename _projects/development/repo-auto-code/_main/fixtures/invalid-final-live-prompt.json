@@ -1,0 +1,15 @@
+{
+  "id": "invalid-final-live-prompt",
+  "scenario": "final_live_prompt",
+  "expected": {
+    "accepted": false,
+    "status": "LIVE_PROMPT_REMAINS",
+    "mutationProhibited": true
+  },
+  "state": {
+    "completionRequested": true,
+    "prompt": { "live": true, "processed": false },
+    "pendingResult": false,
+    "validOpenReviews": 0
+  }
+}

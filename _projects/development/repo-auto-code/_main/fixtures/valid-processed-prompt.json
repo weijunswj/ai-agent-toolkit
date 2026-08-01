@@ -1,0 +1,29 @@
+{
+  "id": "valid-processed-prompt",
+  "scenario": "processed_prompt",
+  "expected": {
+    "accepted": true,
+    "completion": "allowed_after_reconciliation"
+  },
+  "state": {
+    "prompt": {
+      "live": false,
+      "payload": "[ REDACTED \u2014 PROCESSED ]",
+      "processed": true
+    },
+    "durableAudit": {
+      "packetId": "OTE-PROCESSED-001",
+      "executorRunId": "EXEC-PROCESSED-001",
+      "resultingHead": "4444444444444444444444444444444444444444",
+      "reconciliationRef": "child-comment-100"
+    },
+    "executorEvidenceRetained": true,
+    "secretContext": {
+      "namesOnly": ["GITHUB_TOKEN"],
+      "presence": "present",
+      "value": "[REDACTED]"
+    },
+    "pendingResult": false,
+    "validOpenReviews": 0
+  }
+}

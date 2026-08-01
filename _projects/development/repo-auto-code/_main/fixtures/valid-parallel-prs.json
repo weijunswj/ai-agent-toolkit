@@ -1,0 +1,21 @@
+{
+  "id": "valid-parallel-prs",
+  "scenario": "parallel_prs",
+  "expected": {
+    "accepted": true,
+    "capacity": 1,
+    "selectedChild": "#329",
+    "selection": "parent_checklist_order"
+  },
+  "state": {
+    "capacity": 1,
+    "parentOrder": ["#329", "#330"],
+    "recentPrOrder": ["#700", "#501"],
+    "lanes": [
+      { "child": "#329", "pr": "#501", "packet": "OTE-A", "claim": "free" },
+      { "child": "#330", "pr": "#700", "packet": "OTE-B", "claim": "free" }
+    ],
+    "independentPacketState": true,
+    "independentClaimState": true
+  }
+}

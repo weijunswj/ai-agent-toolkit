@@ -1,0 +1,89 @@
+{
+  "id": "valid-existing-pr-adoption",
+  "scenario": "existing_pr_adoption",
+  "expected": {
+    "accepted": true,
+    "classification": "ADOPTION_ELIGIBLE",
+    "turn": "CONTROLLER_TURN"
+  },
+  "state": {
+    "repository": { "exact": true },
+    "consent": true,
+    "skill": { "available": true, "inspectable": true },
+    "managedBlock": { "status": "VALID" },
+    "pr": {
+      "classification": "ADOPTION_ELIGIBLE",
+      "completeDiffInspected": true,
+      "completeCommitsInspected": true,
+      "reviewsInspected": true,
+      "head": "1111111111111111111111111111111111111111",
+      "designLockApplies": true,
+      "forbiddenOverlap": false
+    },
+    "enrolment": {
+      "parent": {
+        "enrolled": true,
+        "surface": "PARENT",
+        "child": "#329",
+        "pr": "#501",
+        "packet": "NONE",
+        "bodyLines": [
+          "[ AUTO-CODE ENROLMENT: START ]",
+          "Protocol version: 1",
+          "Surface: PARENT",
+          "Repository: weijunswj/ai-agent-toolkit",
+          "Parent issue: #240",
+          "Child issue: #329",
+          "PR: #501",
+          "Packet ID: NONE",
+          "Turn: CONTROLLER",
+          "Enrolment: ENROLLED",
+          "[ AUTO-CODE ENROLMENT: END ]"
+        ]
+      },
+      "child": {
+        "enrolled": true,
+        "surface": "CHILD",
+        "child": "#329",
+        "pr": "#501",
+        "packet": "NONE",
+        "bodyLines": [
+          "[ AUTO-CODE ENROLMENT: START ]",
+          "Protocol version: 1",
+          "Surface: CHILD",
+          "Repository: weijunswj/ai-agent-toolkit",
+          "Parent issue: #240",
+          "Child issue: #329",
+          "PR: #501",
+          "Packet ID: NONE",
+          "Turn: CONTROLLER",
+          "Enrolment: ENROLLED",
+          "[ AUTO-CODE ENROLMENT: END ]"
+        ]
+      },
+      "pr": {
+        "enrolled": true,
+        "surface": "PR",
+        "child": "#329",
+        "pr": "#501",
+        "packet": "NONE",
+        "bodyLines": [
+          "[ AUTO-CODE ENROLMENT: START ]",
+          "Protocol version: 1",
+          "Surface: PR",
+          "Repository: weijunswj/ai-agent-toolkit",
+          "Parent issue: #240",
+          "Child issue: #329",
+          "PR: #501",
+          "Packet ID: NONE",
+          "Turn: CONTROLLER",
+          "Enrolment: ENROLLED",
+          "[ AUTO-CODE ENROLMENT: END ]"
+        ]
+      }
+    },
+    "schedules": { "controller": "absent", "executor": "absent" },
+    "claim": { "capability": "create_if_absent", "atomic": true, "winnerCount": 0 },
+    "pendingResult": false
+  }
+}

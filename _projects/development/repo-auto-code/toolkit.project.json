@@ -1,0 +1,55 @@
+{
+  "id": "development.repo-auto-code",
+  "category": "development",
+  "name": "repo-auto-code",
+  "title": "Repo-Scoped Scheduled Auto-Code Protocol Design",
+  "module_path": "_projects/development/repo-auto-code",
+  "main_path": "_projects/development/repo-auto-code/_main",
+  "version": "1.0.0",
+  "version_policy": "semver",
+  "version_notes": "Initial first-party source-only design module for the repo-scoped scheduled controller-executor auto-code protocol; no installed skill or consumer output is declared.",
+  "outputs": [],
+  "writes": {
+    "allowed": [],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**",
+      "skills/**",
+      ".github/**",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "GEMINI.md",
+      ".agents/**",
+      "scheduled-tasks/**",
+      "claim-refs/**",
+      "user-home/**",
+      "system-paths/**",
+      "arbitrary-output-paths/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false,
+  "project": {
+    "name": "Repo-Scoped Scheduled Auto-Code Protocol Design",
+    "category": "development",
+    "summary": "First-party source-only design and deterministic fixtures for a future repository-scoped scheduled controller-executor protocol."
+  },
+  "surface": {
+    "publish_as": "source_only",
+    "skill": {
+      "status": "not_applicable"
+    },
+    "mcp": {
+      "status": "not_applicable"
+    }
+  }
+}

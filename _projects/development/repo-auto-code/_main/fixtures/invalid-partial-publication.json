@@ -1,0 +1,20 @@
+{
+  "id": "invalid-partial-publication",
+  "scenario": "partial_publication",
+  "expected": {
+    "accepted": false,
+    "status": "DRAFT_BINDING_INCOMPLETE",
+    "mutationProhibited": true
+  },
+  "state": {
+    "publication": {
+      "status": "READY_EXECUTOR",
+      "draftPosted": true,
+      "parentBinding": true,
+      "childBinding": false,
+      "prBinding": true,
+      "bodiesRereadBeforeReady": false,
+      "readySetLast": false
+    }
+  }
+}

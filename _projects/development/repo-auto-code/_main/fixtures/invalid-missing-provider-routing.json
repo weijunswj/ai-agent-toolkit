@@ -1,0 +1,16 @@
+{
+  "id": "invalid-missing-provider-routing",
+  "scenario": "missing_provider_routing",
+  "expected": {
+    "accepted": false,
+    "status": "BLOCKED_MISSING_WORKER_PROFILE",
+    "mutationProhibited": true
+  },
+  "state": {
+    "profiles": [
+      { "name": "Scheduled dispatcher", "Provider": "OpenAI", "Model": "GPT-5.6", "Reasoning": "High" },
+      { "name": "Fresh G4", "Provider": "OpenAI", "Model": "GPT-5.6", "Reasoning": "" }
+    ],
+    "missing": "Fresh G4.Reasoning"
+  }
+}

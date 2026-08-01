@@ -1,0 +1,18 @@
+{
+  "id": "invalid-malformed-agents-block",
+  "scenario": "malformed_agents_block",
+  "expected": {
+    "accepted": false,
+    "status": "AUTO_CODE_SETUP_INVALID",
+    "mutationProhibited": true
+  },
+  "state": {
+    "managedBlock": {
+      "begin": "<!-- AI-AGENT-TOOLKIT:REPO-AUTO-CODE:BEGIN v1 -->",
+      "end": "missing",
+      "protocolVersion": "1",
+      "duplicated": false
+    },
+    "repair": "preserve-user-content-and-repair-one-source-owned-block"
+  }
+}
