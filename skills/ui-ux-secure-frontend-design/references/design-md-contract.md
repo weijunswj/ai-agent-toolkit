@@ -16,6 +16,32 @@ This Toolkit reference is adapted from Google Labs `design.md`, tracked in `_pro
 
 Treat it as a portable design-system contract that helps agents preserve visual direction across sessions and tools. The upstream format is alpha, so prefer conservative interpretation and manual review over strict automation.
 
+The optional YAML front matter may also declare sections that are intentionally omitted from a design system. An `omitted` declaration describes the contract's scope; it does not replace missing token values or ask an agent to invent them.
+
+## Optional Omitted Sections
+
+`omitted` is an optional array of sections that are intentionally omitted from the design system:
+
+```yaml
+omitted: <string[]|OmittedSection[]> # optional
+```
+
+Each entry can be either:
+
+- A string naming the omitted section, such as `spacing`.
+- An object of the form `{ section: string, reason?: string }`, where `section` names the omitted section and the optional `reason` documents why it does not apply.
+
+For example:
+
+```yaml
+omitted:
+  - spacing
+  - section: rounded
+    reason: "No rounded corners defined in brand book"
+```
+
+The `reason` field is optional. A string entry intentionally carries no reason; when a reason is supplied, it should explain the project-specific omission without pretending to define that section. The declaration may suppress compatible linter warnings for missing sections, but this Toolkit reference is documentation-only and does not add or run the upstream linter.
+
 ## When To Read An Existing DESIGN.md
 
 Read an existing `DESIGN.md` or `design.md` before changing frontend visuals, including colors, typography, spacing, radius, elevation, component variants, imagery, iconography, layout density, or page composition.
@@ -46,6 +72,7 @@ When drafting or updating a `DESIGN.md`:
 - Include token values only when they are public design values, not secrets or private data.
 - Keep guidance stack-neutral by default. Do not lock the contract to Tailwind, CSS variables, or any one framework unless the app already uses that source of truth.
 - Document component states, responsive behavior, accessibility constraints, and privacy/security boundaries when relevant.
+- Use `omitted` only for sections that are intentionally outside the contract. Keep any supplied `reason` concise and specific to the project.
 - Keep generated or proposed content reviewable. Mark uncertain sections as draft instead of presenting them as verified source truth.
 
 ## Tooling Boundary
