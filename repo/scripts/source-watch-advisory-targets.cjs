@@ -11,6 +11,12 @@ const githubApiBaseUrl = 'https://api.github.com';
 const fullCommitShaPattern = /^[0-9a-f]{40}$/i;
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
 const hiddenUnicodeControlPattern = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
+const {
+  advisoryIdentity,
+  defaultReviewStatePath,
+  findMatchingReviewRecord,
+  readReviewState
+} = require('./source-watch-review-state.cjs');
 
 function sanitizeGeneratedMarkdown(value) {
   return String(value).replace(hiddenUnicodeControlPattern, '');
@@ -260,8 +266,13 @@ async function latestCommitForGitHubPathTarget(target, env = process.env) {
   return sha;
 }
 
-async function advisoryFindings({ workspace, advisoryDocPath = defaultAdvisoryDocPath }, env = process.env) {
+async function advisoryFindings({
+  workspace,
+  advisoryDocPath = defaultAdvisoryDocPath,
+  reviewStatePath = defaultReviewStatePath
+}, env = process.env) {
   const { document } = readAdvisoryDocument(workspace, advisoryDocPath);
+  const reviewState = readReviewState(workspace, reviewStatePath);
   const findings = [];
   for (const rawTarget of document.targets) {
     const target = validateTarget(rawTarget);
@@ -273,7 +284,8 @@ async function advisoryFindings({ workspace, advisoryDocPath = defaultAdvisoryDo
     const periodicReview = periodicReviewFinding(target, env);
     if (periodicReview) findings.push(periodicReview);
     if (target.kind === 'manual') continue;
-    if (!target.baseline_sha) {
+    const reviewRecord = findMatchingReviewRecord(reviewState, advisoryIdentity(target));
+    if (!target.baseline_sha && !reviewRecord) {
       findings.push({
         type: 'advisory_baseline_required',
         target,
@@ -284,12 +296,20 @@ async function advisoryFindings({ workspace, advisoryDocPath = defaultAdvisoryDo
     const latest = target.kind === 'github_path'
       ? await latestCommitForGitHubPathTarget(target, env)
       : await latestCommitForGitHubRepoTarget(target, env);
-    if (latest.toLowerCase() === target.baseline_sha.toLowerCase()) continue;
+    const comparisonCommit = reviewRecord ? reviewRecord.reviewed_through_sha : target.baseline_sha;
+    if (latest.toLowerCase() === comparisonCommit.toLowerCase()) continue;
     findings.push({
       type: 'advisory_update',
       target,
-      baseline_sha: target.baseline_sha,
-      latest_sha: latest
+      baseline_sha: target.baseline_sha || null,
+      compatibility_baseline_sha: target.baseline_sha || null,
+      reviewed_through_sha: reviewRecord ? reviewRecord.reviewed_through_sha : null,
+      review_disposition: reviewRecord ? reviewRecord.disposition : null,
+      review_tracker: reviewRecord ? reviewRecord.owning_tracker : null,
+      latest_sha: latest,
+      review_reason: reviewRecord
+        ? 'The latest observed commit differs from the human-reviewed-through commit.'
+        : 'The latest observed commit differs from the compatibility baseline; no reviewed-through cursor exists.'
     });
   }
   return {
@@ -318,8 +338,14 @@ function renderAdvisoryFinding(finding) {
     lines.push(`- Baseline note: ${sanitizeGeneratedMarkdown(finding.baseline_note)}`);
   } else if (finding.type === 'advisory_update') {
     lines.push('- Status: `Advisory update detected`');
-    lines.push(`- Baseline commit: \`${sanitizeGeneratedMarkdown(finding.baseline_sha)}\``);
-    lines.push(`- Latest commit: \`${sanitizeGeneratedMarkdown(finding.latest_sha)}\``);
+    if (finding.compatibility_baseline_sha) {
+      lines.push(`- Compatibility baseline: \`${sanitizeGeneratedMarkdown(finding.compatibility_baseline_sha)}\``);
+    }
+    lines.push(`- Reviewed-through commit: \`${sanitizeGeneratedMarkdown(finding.reviewed_through_sha || '(none; compatibility baseline used)')}\``);
+    lines.push(`- Latest observed commit: \`${sanitizeGeneratedMarkdown(finding.latest_sha)}\``);
+    lines.push(`- Why a new review is required: ${sanitizeGeneratedMarkdown(finding.review_reason)}`);
+    if (finding.review_disposition) lines.push(`- Prior disposition: \`${sanitizeGeneratedMarkdown(finding.review_disposition)}\``);
+    if (finding.review_tracker) lines.push(`- Owning tracker: \`${sanitizeGeneratedMarkdown(finding.review_tracker)}\``);
   } else if (finding.type === 'periodic_review_due') {
     lines.push('- Status: `Periodic review due`');
     lines.push(`- Review cadence: \`${target.review_cadence_days} day(s)\``);
