@@ -232,7 +232,7 @@ function periodicReviewFinding(target, env = process.env) {
     target,
     today: today.toISOString().slice(0, 10),
     elapsed_days: elapsedDays,
-    due_reason: `${elapsedDays} day(s) since last_reviewed_at.`
+    due_reason: 'Review cadence has elapsed since last_reviewed_at.'
   };
 }
 
