@@ -414,6 +414,23 @@ function targetClassFor(record, classification) {
   return 'unknown-target';
 }
 
+function transmissionBoundary(record, classification) {
+  const classes = componentClasses(classification);
+  const external = classes.some((operationClass) => operationClass === 'external-mutation' || operationClass.startsWith('github-'))
+    || (classification.external_targets || []).length > 0
+    || (record.operation.external_targets || []).length > 0
+    || Boolean(record.operation.mcp_server || record.operation.mcp_tool);
+  const requestInput = classification.github_request_input === true || classification.github_request_input_unresolved === true;
+  if (!requestInput || !external) return null;
+  const targets = record.operation.targets || [];
+  if (classification.github_request_input_unresolved === true || targets.some((target) => target.status !== 'resolved')) {
+    return { decision: 'unsupported', reason: 'UNRESOLVED_TARGET_UNSUPPORTED' };
+  }
+  const secretTarget = classification.secret_target === true || targets.some((target) => target.target_class === 'secret-bearing' || isSecretBearingPath(target));
+  if (secretTarget) return { decision: 'deny', reason: 'SECRET_EXFILTRATION_DENIED' };
+  return null;
+}
+
 function ensureCommandTargets(record, classification, options) {
   if (Array.isArray(classification.targets) && classification.targets.length) {
     const rebound = [];
@@ -487,8 +504,6 @@ function askReason(classification) {
 
 function decideOne(record, classification, options = {}) {
   const policy = options.policy || getPolicy();
-  const authority = authorityCheck(record, classification, policy, options);
-  const capability = capabilityCheck(record, classification);
   const targetClass = targetClassFor(record, classification);
   const requestDigest = record.operation.input_digest;
   const operationDigest = record.operation.input_digest;
@@ -507,6 +522,12 @@ function decideOne(record, classification, options = {}) {
       componentCount: classificationComponents(classification).length,
     });
 
+  const transmission = transmissionBoundary(record, classification);
+  if (transmission?.decision === 'deny') return make('deny', transmission.reason, 'hard-deny', 'secret-bearing', 'secret-exfiltration');
+  if (transmission?.decision === 'unsupported') return make('unsupported', transmission.reason, 'stop-before-execution', 'unresolved-target');
+
+  const capability = capabilityCheck(record, classification);
+  const authority = authorityCheck(record, classification, policy, options);
   const classes = componentClasses(classification);
   const hasSecretComponent = classes.some((operationClass) => ['secret-access', 'secret-dump', 'secret-exfiltration'].includes(operationClass)) || classification.secret_target === true;
   const hasExternalComponent = classes.some((operationClass) => operationClass === 'external-mutation' || GITHUB_MUTATION_CLASSES.has(operationClass)) || (record.operation.external_targets || []).length > 0;

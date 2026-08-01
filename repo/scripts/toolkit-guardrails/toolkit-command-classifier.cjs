@@ -211,6 +211,14 @@ function redirectionTargets(command) {
   return result;
 }
 
+function inputRedirectionTargets(command) {
+  const result = [];
+  const pattern = /(?:^|\s)<(?:\s*)("[^"]+"|'[^']+'|[^\s|;&]+)/g;
+  let match;
+  while ((match = pattern.exec(command))) result.push({ path: match[1].replace(/^['"]|['"]$/g, ''), kind: 'input-redirection' });
+  return result;
+}
+
 function hasNestedShell(tokens, shell) {
   const name = commandName(tokens);
   const shellName = lower(shell);
@@ -300,26 +308,123 @@ function catastrophicPath(value) {
   return /^(?:[A-Za-z]:[\\/](?:Windows|Program Files|ProgramData|System32)|[\\/](?:etc|sys|boot|root|var[\\/]lib))(?:[\\/]|$)/i.test(`${text}\\`);
 }
 
+function githubRequestFileSources(tokens) {
+  const sources = [];
+  let present = false;
+  let unresolved = false;
+
+  const add = (value, kind) => {
+    present = true;
+    const raw = typeof value === 'string' ? value.trim() : '';
+    if (!raw || raw === '-' || hasDynamicExpansion(raw)) {
+      unresolved = true;
+      return;
+    }
+    sources.push({ path: raw, kind });
+  };
+
+  const nextValue = (index, token) => {
+    const equals = token.indexOf('=');
+    if (equals >= 0) return { value: token.slice(equals + 1) };
+    const value = tokens[index + 1];
+    if (!value || isOption(value)) return { unresolved: true };
+    return { value };
+  };
+
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const normalized = lower(token);
+    const bodyFile = normalized === '--body-file' || normalized.startsWith('--body-file=');
+    const apiInput = normalized === '--input' || normalized.startsWith('--input=') || normalized === '-i' || normalized.startsWith('-i=');
+    if (bodyFile || apiInput) {
+      present = true;
+      const value = nextValue(index, token);
+      if (value.unresolved) unresolved = true;
+      else add(value.value, bodyFile ? 'github-body-file' : 'github-input-file');
+      if (value.unresolved === undefined && !token.includes('=')) index += 1;
+      continue;
+    }
+
+    const fieldOption = normalized === '--field'
+      || normalized.startsWith('--field=')
+      || normalized === '--raw-field'
+      || normalized.startsWith('--raw-field=')
+      || normalized === '-f'
+      || normalized === '-F'
+      || normalized.startsWith('-f=')
+      || normalized.startsWith('-F=')
+      || (token.startsWith('-f') && !token.startsWith('--') && token.length > 2)
+      || (token.startsWith('-F') && !token.startsWith('--') && token.length > 2);
+    if (!fieldOption) continue;
+
+    present = true;
+    let value;
+    if (normalized.startsWith('--field=') || normalized.startsWith('--raw-field=') || normalized.startsWith('-f=') || normalized.startsWith('-F=')) {
+      value = token.slice(token.indexOf('=') + 1);
+    } else if ((token.startsWith('-f') || token.startsWith('-F')) && !token.startsWith('--') && token.length > 2) {
+      value = token.slice(2);
+    } else {
+      value = tokens[index + 1];
+      if (!value || isOption(value)) {
+        unresolved = true;
+        continue;
+      }
+      index += 1;
+    }
+    const fileMatch = /^(?:[^=]+)=@(.+)$/.exec(String(value || ''));
+    if (fileMatch) add(fileMatch[1], 'github-field-file');
+    else if (/^[^=]+=@$/.test(String(value || ''))) unresolved = true;
+  }
+
+  const secretTargets = sources.filter((entry) => isSecretPath(entry.path));
+  return {
+    present,
+    unresolved,
+    targets: sources,
+    secret_targets: secretTargets,
+  };
+}
+
 function classifyGithub(tokens) {
   const kind = lower(tokens[1] || '');
   const subcommand = lower(tokens[2] || '');
   const external = [{ class: 'github', digest: sha256({ kind, subcommand }) }];
+  const requestFiles = githubRequestFileSources(tokens);
+  const requestExtras = requestFiles.present
+    ? { github_request_input: true, github_request_input_unresolved: requestFiles.unresolved }
+    : {};
+  if (requestFiles.secret_targets.length) {
+    return commonResult('secret-exfiltration', 'deny', requestFiles.targets, {
+      ...requestExtras,
+      external_targets: external,
+      secret_target: true,
+      reason_codes: ['SECRET_EXFILTRATION_DENIED'],
+    });
+  }
+  if (requestFiles.unresolved) {
+    return commonResult('opaque-command', 'unsupported', requestFiles.targets, {
+      ...requestExtras,
+      external_targets: external,
+      opaque: true,
+      reason_codes: ['UNRESOLVED_TARGET_UNSUPPORTED'],
+    });
+  }
   const readActions = new Set(['view', 'list', 'status', 'checks', 'diff', 'show', 'watch']);
   if (kind === 'api') {
     const methodIndex = tokens.findIndex((token) => ['-x', '--method'].includes(lower(token)));
     const method = methodIndex >= 0 ? lower(tokens[methodIndex + 1]) : null;
-    if (method === 'get') return commonResult('github-read', 'allow', [], { external_targets: external, reason_codes: ['ROUTINE_GITHUB_READ'] });
-    return commonResult('github-repository-workflow-mutation', method ? 'ask' : 'unsupported', [], { external_targets: external, opaque: !method, reason_codes: [method ? 'EXTERNAL_MUTATION_REQUIRES_APPROVAL' : 'UNSUPPORTED_ROUTE'] });
+    if (method === 'get') return commonResult('github-read', 'allow', requestFiles.targets, { ...requestExtras, external_targets: external, reason_codes: ['ROUTINE_GITHUB_READ'] });
+    return commonResult('github-repository-workflow-mutation', method ? 'ask' : 'unsupported', requestFiles.targets, { ...requestExtras, external_targets: external, opaque: !method, reason_codes: [method ? 'EXTERNAL_MUTATION_REQUIRES_APPROVAL' : 'UNSUPPORTED_ROUTE'] });
   }
-  if (kind === 'pr' && subcommand === 'review') return commonResult('github-review-mutation', 'ask', [], { external_targets: external, reason_codes: ['EXTERNAL_MUTATION_REQUIRES_APPROVAL'] });
-  if ((kind === 'issue' || kind === 'pr') && readActions.has(subcommand)) return commonResult('github-read', 'allow', [], { external_targets: external, reason_codes: ['ROUTINE_GITHUB_READ'] });
-  if (kind === 'repo' && readActions.has(subcommand)) return commonResult('github-read', 'allow', [], { external_targets: external, reason_codes: ['ROUTINE_GITHUB_READ'] });
-  if (kind === 'run' && readActions.has(subcommand)) return commonResult('github-read', 'allow', [], { external_targets: external, reason_codes: ['ROUTINE_GITHUB_READ'] });
-  if (kind === 'issue') return commonResult('github-issue-mutation', 'ask', [], { external_targets: external, reason_codes: ['EXTERNAL_MUTATION_REQUIRES_APPROVAL'] });
-  if (kind === 'pr') return commonResult('github-pr-mutation', 'ask', [], { external_targets: external, reason_codes: ['EXTERNAL_MUTATION_REQUIRES_APPROVAL'] });
-  if (kind === 'review') return commonResult('github-review-mutation', 'ask', [], { external_targets: external, reason_codes: ['EXTERNAL_MUTATION_REQUIRES_APPROVAL'] });
-  if (kind === 'repo' || kind === 'workflow' || kind === 'run') return commonResult('github-repository-workflow-mutation', 'ask', [], { external_targets: external, reason_codes: ['EXTERNAL_MUTATION_REQUIRES_APPROVAL'] });
-  return commonResult('github-repository-workflow-mutation', 'unsupported', [], { external_targets: external, opaque: true, reason_codes: ['UNSUPPORTED_ROUTE'] });
+  if (kind === 'pr' && subcommand === 'review') return commonResult('github-review-mutation', 'ask', requestFiles.targets, { ...requestExtras, external_targets: external, reason_codes: ['EXTERNAL_MUTATION_REQUIRES_APPROVAL'] });
+  if ((kind === 'issue' || kind === 'pr') && readActions.has(subcommand)) return commonResult('github-read', 'allow', requestFiles.targets, { ...requestExtras, external_targets: external, reason_codes: ['ROUTINE_GITHUB_READ'] });
+  if (kind === 'repo' && readActions.has(subcommand)) return commonResult('github-read', 'allow', requestFiles.targets, { ...requestExtras, external_targets: external, reason_codes: ['ROUTINE_GITHUB_READ'] });
+  if (kind === 'run' && readActions.has(subcommand)) return commonResult('github-read', 'allow', requestFiles.targets, { ...requestExtras, external_targets: external, reason_codes: ['ROUTINE_GITHUB_READ'] });
+  if (kind === 'issue') return commonResult('github-issue-mutation', 'ask', requestFiles.targets, { ...requestExtras, external_targets: external, reason_codes: ['EXTERNAL_MUTATION_REQUIRES_APPROVAL'] });
+  if (kind === 'pr') return commonResult('github-pr-mutation', 'ask', requestFiles.targets, { ...requestExtras, external_targets: external, reason_codes: ['EXTERNAL_MUTATION_REQUIRES_APPROVAL'] });
+  if (kind === 'review') return commonResult('github-review-mutation', 'ask', requestFiles.targets, { ...requestExtras, external_targets: external, reason_codes: ['EXTERNAL_MUTATION_REQUIRES_APPROVAL'] });
+  if (kind === 'repo' || kind === 'workflow' || kind === 'run') return commonResult('github-repository-workflow-mutation', 'ask', requestFiles.targets, { ...requestExtras, external_targets: external, reason_codes: ['EXTERNAL_MUTATION_REQUIRES_APPROVAL'] });
+  return commonResult('github-repository-workflow-mutation', 'unsupported', requestFiles.targets, { ...requestExtras, external_targets: external, opaque: true, reason_codes: ['UNSUPPORTED_ROUTE'] });
 }
 
 function classifyGit(tokens, shell = 'posix') {
@@ -400,7 +505,7 @@ function classifyGit(tokens, shell = 'posix') {
 }
 
 function hasDynamicExpansion(command) {
-  return /\$\(|`[^`]*`|\$\{[^}]+\}|\$env:[A-Za-z_][A-Za-z0-9_]*|\$[A-Za-z_][A-Za-z0-9_]*|%[A-Za-z_][A-Za-z0-9_]*%|![A-Za-z_][A-Za-z0-9_]*!|[*?\[\]]/.test(command)
+  return /\$\(|`[^`]*`|<\s*\(|>\s*\(|\$\{[^}]+\}|\$env:[A-Za-z_][A-Za-z0-9_]*|\$[A-Za-z_][A-Za-z0-9_]*|%[A-Za-z_][A-Za-z0-9_]*%|![A-Za-z_][A-Za-z0-9_]*!|[*?\[\]]/.test(command)
     || /(?:^|\s)&\s*[A-Za-z]/.test(command);
 }
 
@@ -505,12 +610,14 @@ function classifyCommand(command, options = {}) {
   const results = parts.map((part) => classifyAtomic(part, shell));
   const hasPipeline = /(^|[^\\])\|([^|]|$)/.test(command);
   const hasRedirection = /(?:^|\s)\d{0,2}(?:>>|>)/.test(command);
+  const inputRedirection = inputRedirectionTargets(command);
+  const hasInputRedirection = inputRedirection.length > 0;
   const hasSingleAmpersand = hasTopLevelSingleAmpersand(command, shell);
   const redirection = redirectionTargets(command);
   const merged = mergeResults(results);
   merged.pipeline = hasPipeline;
-  merged.redirection = hasRedirection;
-  merged.target_inputs = [...merged.target_inputs, ...redirection];
+  merged.redirection = hasRedirection || hasInputRedirection;
+  merged.target_inputs = [...merged.target_inputs, ...redirection, ...inputRedirection];
   if (hasRedirection) {
     merged.components = [...(merged.components || []), {
       operation_class: 'redirection',
@@ -524,7 +631,22 @@ function classifyCommand(command, options = {}) {
   const hasSecretAccess = results.some((entry) => ['secret-access', 'secret-dump'].includes(entry.operation_class));
   const hasNetworkComponent = results.some((entry) => entry.operation_class === 'external-mutation' || entry.operation_class.startsWith('github-')) || results.some((entry) => entry.external_targets?.some((target) => ['network-or-remote-system', 'github'].includes(target.class)));
   const hasTransmissionComponent = /(?:^|[|;]\s*)(?:curl|curl\.exe|wget|invoke-webrequest|invoke-restmethod|send(?:-[A-Za-z0-9_-]+)?|upload|post|put)\b/i.test(command);
+  const hasSecretTransmissionTarget = merged.target_inputs.some((entry) => isSecretPath(entry.path) && ['github-body-file', 'github-input-file', 'github-field-file', 'input-redirection'].includes(entry.kind));
   if (hasSecretAccess && (hasNetworkComponent || hasTransmissionComponent || hasRedirection)) {
+    merged.components = [...(merged.components || []), {
+      operation_class: 'secret-exfiltration',
+      decision_hint: 'deny',
+      reason_code: 'SECRET_EXFILTRATION_DENIED',
+      target_digest: sha256(merged.target_inputs || []),
+      external_target_digest: sha256(merged.external_targets || []),
+    }];
+    merged.operation_class = 'secret-exfiltration';
+    merged.mutation_class = 'secret-exfiltration';
+    merged.decision_hint = 'deny';
+    merged.reason_codes = ['SECRET_EXFILTRATION_DENIED', ...merged.reason_codes.filter((reason) => reason !== 'SECRET_EXFILTRATION_DENIED')];
+    merged.secret_target = true;
+  }
+  if (hasSecretTransmissionTarget && hasNetworkComponent && merged.operation_class !== 'secret-exfiltration') {
     merged.components = [...(merged.components || []), {
       operation_class: 'secret-exfiltration',
       decision_hint: 'deny',
@@ -590,6 +712,38 @@ function classifyCommand(command, options = {}) {
   return merged;
 }
 
+function structuredTransmissionSources(value, key = '', state = { present: false, unresolved: false, targets: [] }, active = false) {
+  if (value === null || value === undefined) return state;
+  const normalizedKey = String(key || '').replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase().replace(/-/g, '_');
+  const fileKey = /(?:^|_)(?:file|path|source)$/.test(normalizedKey)
+    || /(?:^|_)(?:body|request_body|payload|input|upload|attachment)_(?:file|path|source)$/.test(normalizedKey)
+    || ['file', 'upload', 'attachment'].includes(normalizedKey);
+  const containerKey = /^(?:body|request|request_body|payload|input|upload|attachment)s?$/.test(normalizedKey);
+  const add = (rawValue) => {
+    state.present = true;
+    const raw = typeof rawValue === 'string' ? rawValue.trim() : '';
+    if (!raw || raw === '-' || hasDynamicExpansion(raw)) {
+      state.unresolved = true;
+      return;
+    }
+    state.targets.push({ path: raw, kind: 'structured-request-file' });
+  };
+
+  if (typeof value === 'string') {
+    if (fileKey || (active && /(?:file|path|source)$/.test(normalizedKey))) add(value);
+    return state;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry) => structuredTransmissionSources(entry, key, state, active || fileKey));
+    return state;
+  }
+  if (typeof value !== 'object') return state;
+  for (const [childKey, childValue] of Object.entries(value)) {
+    structuredTransmissionSources(childValue, childKey, state, active || fileKey || containerKey);
+  }
+  return state;
+}
+
 function classifyStructuredOperation(operation, options = {}) {
   const structured = operation?.structured_input || {};
   const declaredAction = lower(operation?.mutation_class || '');
@@ -614,19 +768,48 @@ function classifyStructuredOperation(operation, options = {}) {
       || operation?.external_targets?.length
       || /(?:database|cloud|provider|deploy|production|external|mcp)/.test(route),
   );
+  const githubRoute = /github/.test(route);
+  const transmissionRoute = hasExternalRoute || githubRoute;
+  const transmission = transmissionRoute
+    ? structuredTransmissionSources(structured)
+    : { present: false, unresolved: false, targets: [] };
+  const resolvedTransmissionTargets = transmission.targets
+    .map((target) => options.repository ? resolveTargets([target], options.repository, { ...options, operation_cwd: options.operation_cwd })[0] : null)
+    .filter(Boolean);
+  const effectiveTargets = [...targets, ...resolvedTransmissionTargets];
+  const effectiveInputs = [...targets, ...transmission.targets];
+  const attachTransmission = (result) => {
+    if (!transmission.present) return result;
+    return {
+      ...result,
+      target_inputs: effectiveInputs,
+      targets: effectiveTargets,
+      external_targets: result.external_targets?.length
+        ? result.external_targets
+        : [{ class: githubRoute ? 'github' : route || 'external-system', digest: sha256({ route }) }],
+      github_request_input: githubRoute,
+      github_request_input_unresolved: transmission.unresolved,
+    };
+  };
   const catastrophicTargets = targets.filter((target) => target?.status === 'resolved' && catastrophicPath(target.canonical_path || target.raw_path));
   if (catastrophicTargets.length && ['delete', 'remove', 'destroy', 'overwrite', 'truncate', 'format', 'reset', 'rmdir'].includes(action)) {
     return commonResult('protected-target', 'deny', catastrophicTargets, { catastrophic_hint: true, reason_codes: ['CATASTROPHIC_TARGET_DENIED'] });
   }
-  if ((resolvedSecretTargets.length || structuredSecretVariable) && hasExternalRoute) {
-    return commonResult('secret-exfiltration', 'deny', resolvedSecretTargets.length ? resolvedSecretTargets : targets, { secret_target: true, reason_codes: ['SECRET_EXFILTRATION_DENIED'] });
+  if ((resolvedSecretTargets.length || structuredSecretVariable) && transmissionRoute) {
+    return attachTransmission(commonResult('secret-exfiltration', 'deny', effectiveInputs, { secret_target: true, reason_codes: ['SECRET_EXFILTRATION_DENIED'] }));
   }
-  if (/github/.test(route)) {
+  if (transmission.secret_targets?.length) {
+    return attachTransmission(commonResult('secret-exfiltration', 'deny', effectiveInputs, { secret_target: true, reason_codes: ['SECRET_EXFILTRATION_DENIED'] }));
+  }
+  if (transmission.unresolved) {
+    return attachTransmission(commonResult('opaque-command', 'unsupported', effectiveInputs, { opaque: true, reason_codes: ['UNRESOLVED_TARGET_UNSUPPORTED'] }));
+  }
+  if (githubRoute) {
     const routeClass = /review/.test(route) ? 'github-review-mutation' : /issue/.test(route) ? 'github-issue-mutation' : /(?:pull|pr)/.test(route) ? 'github-pr-mutation' : 'github-repository-workflow-mutation';
-    if (['read', 'status', 'diff', 'list', 'view', 'checks'].includes(action)) return commonResult('github-read', 'allow', targets, { external_targets: [{ class: 'github', digest: sha256({ route }) }], reason_codes: ['ROUTINE_GITHUB_READ'] });
-    return commonResult(routeClass, 'ask', targets, { external_targets: [{ class: 'github', digest: sha256({ route }) }], reason_codes: ['EXTERNAL_MUTATION_REQUIRES_APPROVAL'] });
+    if (['read', 'status', 'diff', 'list', 'view', 'checks'].includes(action)) return attachTransmission(commonResult('github-read', 'allow', effectiveInputs, { external_targets: [{ class: 'github', digest: sha256({ route }) }], reason_codes: ['ROUTINE_GITHUB_READ'] }));
+    return attachTransmission(commonResult(routeClass, 'ask', effectiveInputs, { external_targets: [{ class: 'github', digest: sha256({ route }) }], reason_codes: ['EXTERNAL_MUTATION_REQUIRES_APPROVAL'] }));
   }
-  if (operation?.mcp_server || operation?.mcp_tool || operation?.external_targets?.length || /(?:database|cloud|provider|deploy|production|external|mcp)/.test(route)) return commonResult('external-mutation', 'ask', targets, { external_targets: operation.external_targets || [{ class: route || 'external-system', digest: sha256({ route }) }], reason_codes: ['EXTERNAL_MUTATION_REQUIRES_APPROVAL'] });
+  if (operation?.mcp_server || operation?.mcp_tool || operation?.external_targets?.length || /(?:database|cloud|provider|deploy|production|external|mcp)/.test(route)) return attachTransmission(commonResult('external-mutation', 'ask', effectiveInputs, { external_targets: operation.external_targets || [{ class: route || 'external-system', digest: sha256({ route }) }], reason_codes: ['EXTERNAL_MUTATION_REQUIRES_APPROVAL'] }));
   if (['secret-exfiltration', 'secret-dump', 'credential-dump'].includes(action)) return commonResult('secret-dump', 'deny', targets, { secret_target: true, reason_codes: ['SECRET_DUMP_DENIED'] });
   if (['dump', 'export', 'exfiltrate', 'read-all', 'list-secrets'].includes(action)) return commonResult('secret-dump', 'deny', targets, { secret_target: true, reason_codes: ['SECRET_DUMP_DENIED'] });
   if (action === 'secret-access' || action === 'read-secret') return commonResult('secret-access', 'ask', targets, { secret_target: true, reason_codes: ['SECRET_ACCESS_REQUIRES_APPROVAL'] });
@@ -653,6 +836,8 @@ module.exports = {
   splitTopLevel,
   extractPathTokens,
   redirectionTargets,
+  inputRedirectionTargets,
+  githubRequestFileSources,
   classifyCommand,
   classifyStructuredOperation,
   classifyOperation,
