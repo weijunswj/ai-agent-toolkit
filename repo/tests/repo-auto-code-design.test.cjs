@@ -351,30 +351,252 @@ const materialProjectionFields = [
 ];
 
 const expectedRepositoryIdentity = 'weijunswj/ai-agent-toolkit';
+const expectedChildIdentity = '#329';
+const expectedPrIdentity = '#333';
+const expectedBranch = 'luna/tk-038-repo-auto-code-design'; const expectedBase = '4103897ad709cda700172f7124fd70cf8218a27a'; const expectedHead = '727a7bf7ac613d609c51745e6a3a513156af1442';
+const canonicalRootDesignLock = 'DL-329-AUTO-CODE-004';
+const shaPattern = /^[0-9a-f]{40}$/i;
 const expectedSchedulerTasks = Object.freeze({
   controller: 'repo-329-controller',
   executor: 'repo-329-executor'
 });
 
+const expectedReviewThreadIds = Object.freeze(['PRRT_kwDOSTHjGM6VqRFc', 'PRRT_kwDOSTHjGM6VqRFg', 'PRRT_kwDOSTHjGM6VqRFo', 'PRRT_kwDOSTHjGM6Vu5k8', 'PRRT_kwDOSTHjGM6Vu5k9', 'PRRT_kwDOSTHjGM6Vu5k_', 'PRRT_kwDOSTHjGM6Vu5lA', 'PRRT_kwDOSTHjGM6VxjdZ', 'PRRT_kwDOSTHjGM6VqRFd', 'PRRT_kwDOSTHjGM6VqRFe', 'PRRT_kwDOSTHjGM6VqRFi', 'PRRT_kwDOSTHjGM6VqRFm']);
+const expectedUnresolvedReviewThreadIds = Object.freeze(['PRRT_kwDOSTHjGM6VqRFc', 'PRRT_kwDOSTHjGM6VqRFg', 'PRRT_kwDOSTHjGM6VqRFo', 'PRRT_kwDOSTHjGM6Vu5k8', 'PRRT_kwDOSTHjGM6Vu5k9', 'PRRT_kwDOSTHjGM6Vu5k_', 'PRRT_kwDOSTHjGM6Vu5lA', 'PRRT_kwDOSTHjGM6VxjdZ']);
+const materialProjectionLabels = Object.freeze({
+  status: 'Status',
+  lifecycleSection: 'Lifecycle section',
+  pr: 'PR',
+  branch: 'Branch',
+  base: 'Base',
+  head: 'Head',
+  gate: 'Gate',
+  designLock: 'Design Lock',
+  verdict: 'Verdict',
+  checks: 'Checks',
+  reviewDisposition: 'Review disposition',
+  blocker: 'Blocker',
+  requiredUserAction: 'Required user action',
+  currentTurn: 'Current turn',
+  nextAction: 'Next action',
+  acceptance: 'Acceptance',
+  merge: 'Merge',
+  closure: 'Closure',
+  completion: 'Completion'
+});
+
+const rawEvidenceLabels = Object.freeze({
+  reviewInventory: 'Review inventory',
+  obligations: 'Obligations',
+  mergeEvidence: 'Merge evidence',
+  completionEvidence: 'Completion evidence',
+  schedulerEvidence: 'Scheduler evidence'
+});
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalJson(value[key])]));
+  }
+  return value;
+}
+
 function jsonEqual(left, right) {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return JSON.stringify(canonicalJson(left)) === JSON.stringify(canonicalJson(right));
 }
 
-function projectionFromRaw(surface, defaults = {}) {
-  if (!surface || typeof surface !== 'object') return null;
-  const merged = { ...defaults, ...surface };
-  return Object.fromEntries(materialProjectionFields.map((field) => [field, merged[field]]));
+function parseBodyFields(body) {
+  if (typeof body !== 'string' || body.trim() === '') return null;
+  const fields = {};
+  for (const line of body.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed === '') continue;
+    const match = /^([^:]+):\s*(.*)$/.exec(trimmed);
+    if (!match || match[2].trim() === '') return null;
+    const key = match[1].trim();
+    if (Object.prototype.hasOwnProperty.call(fields, key)) return null;
+    fields[key] = match[2].trim();
+  }
+  return Object.keys(fields).length > 0 ? fields : null;
 }
 
-function deriveSurfaceAgreement(surfaces, defaults = {}) {
-  if (!surfaces || typeof surfaces !== 'object') return false;
-  const entries = ['child', 'pr', 'parentEntry', 'chronology'].map((name) => projectionFromRaw(surfaces[name], defaults));
-  if (entries.some((projection) => projection === null)) return false;
-  return entries.every((projection) => jsonEqual(projection, entries[0]));
+function parseEvidenceObject(fields, label) {
+  const value = fields[label];
+  if (typeof value !== 'string' || value.trim() === '' || ['{}', '[]', 'null'].includes(value.toLowerCase())) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
+function validateProjectionSemantics(projection) {
+  return projection.status !== 'NONE'
+    && lifecycleSections.includes(projection.lifecycleSection)
+    && /^#\d+$/.test(projection.pr)
+    && expectedBranch === projection.branch
+    && projection.base === expectedBase
+    && projection.head === expectedHead
+    && projection.designLock === canonicalRootDesignLock
+    && projection.gate !== 'NONE'
+    && projection.verdict !== 'NONE'
+    && projection.checks !== 'NONE'
+    && projection.reviewDisposition !== 'NONE'
+    && projection.blocker !== 'UNKNOWN'
+    && projection.requiredUserAction !== 'UNKNOWN'
+    && projection.currentTurn !== 'UNKNOWN'
+    && projection.nextAction !== 'NONE'
+    && projection.acceptance !== 'NONE'
+    && projection.merge !== 'NONE'
+    && projection.closure !== 'NONE'
+    && projection.completion !== 'NONE';
+}
+
+function deriveReviewInventory(inventory) {
+  if (!inventory || !Array.isArray(inventory.reviews) || inventory.reviews.length === 0
+    || !Array.isArray(inventory.threads) || !Array.isArray(inventory.requestedReviewers)
+    || inventory.requestedReviewers.length !== 0) return null;
+  if (inventory.reviews.some((review) => !review || review.state !== 'COMMENTED')) return null;
+  const threadIds = inventory.threads.map((thread) => thread && thread.id);
+  if (threadIds.some((id) => typeof id !== 'string' || id.trim() === '') || new Set(threadIds).size !== threadIds.length) return null;
+  if (inventory.threads.some((thread) => typeof thread.resolved !== 'boolean')) return null;
+  return {
+    submittedReviews: inventory.reviews.length,
+    threadCount: inventory.threads.length,
+    validOpenReviews: inventory.threads.filter((thread) => thread.resolved === false).length
+  };
+}
+
+function validateObligationEvidence(obligations) {
+  return obligations && typeof obligations === 'object'
+    && ['child', 'user', 'uat', 'material'].every((key) => obligations[key] === 'NONE');
+}
+
+function validateMergeEvidence(mergeEvidence, projection) {
+  return mergeEvidence && typeof mergeEvidence === 'object'
+    && mergeEvidence.repository === expectedRepositoryIdentity
+    && mergeEvidence.base === projection.base
+    && mergeEvidence.head === projection.head
+    && mergeEvidence.baseVerified === true
+    && mergeEvidence.headVerified === true
+    && mergeEvidence.noConflicts === true
+    && mergeEvidence.merged === false
+    && mergeEvidence.mergeable === 'MERGEABLE';
+}
+function validateCompletionEvidence(completionEvidence, projection) {
+  const exactHead = completionEvidence?.exactHead;
+  const checks = completionEvidence?.requiredChecks;
+  return completionEvidence && typeof completionEvidence === 'object'
+    && typeof completionEvidence.controllerGate === 'string'
+    && typeof completionEvidence.promptLive === 'boolean'
+    && typeof completionEvidence.promptProcessed === 'boolean'
+    && typeof completionEvidence.pendingResult === 'boolean'
+    && typeof completionEvidence.protocolIndependent === 'boolean'
+    && typeof completionEvidence.ledgerOnly === 'boolean'
+    && typeof completionEvidence.state === 'string'
+    && exactHead && exactHead.reviewed === projection.head
+    && exactHead.current === projection.head
+    && exactHead.readBack === true
+    && completionEvidence.state === projection.completion
+    && Array.isArray(checks) && checks.length > 0
+    && checks.every((check) => check && check.required === true
+      && check.completed === true && check.conclusion === 'PASS');
+}
+function validateSchedulerEvidence(schedulerEvidence) {
+  if (!schedulerEvidence || typeof schedulerEvidence !== 'object'
+    || schedulerEvidence.repository !== expectedRepositoryIdentity
+    || schedulerEvidence.generation !== 'generation-1'
+    || schedulerEvidence.revision !== 'revision-1'
+    || !Array.isArray(schedulerEvidence.tasks) || schedulerEvidence.tasks.length !== 2) return false;
+  const identities = schedulerEvidence.tasks.map((task) => task && task.identity);
+  if (identities[0] !== expectedSchedulerTasks.controller || identities[1] !== expectedSchedulerTasks.executor
+    || new Set(identities).size !== identities.length) return false;
+  return schedulerEvidence.tasks.every((task) => task && task.repository === expectedRepositoryIdentity
+    && task.generation === schedulerEvidence.generation && task.revision === schedulerEvidence.revision
+    && ['ABSENT', 'PRESENT', 'REMOVED'].includes(task.status));
+}
+
+function validateRawRemovalEvidence(schedulerEvidence) {
+  if (!validateSchedulerEvidence(schedulerEvidence)) return false;
+  return schedulerEvidence.tasks.every((task) => {
+    const receipt = task.removalReceipt;
+    return task.status === 'REMOVED'
+      && receipt && receipt.trusted === true
+      && receipt.repository === expectedRepositoryIdentity
+      && receipt.taskIdentity === task.identity
+      && receipt.generation === schedulerEvidence.generation
+      && receipt.revision === schedulerEvidence.revision;
+  });
+}
+
+function parseRawSurfaceBody(body, expectedSurface) {
+  const fields = parseBodyFields(body);
+  if (!fields) return null;
+  if (expectedSurface && fields.Surface !== expectedSurface) return null;
+  const projection = {};
+  for (const [field, label] of Object.entries(materialProjectionLabels)) {
+    const value = fields[label];
+    if (typeof value !== 'string' || value.trim() === '' || ['{}', '[]', 'null'].includes(value.toLowerCase())) return null;
+    projection[field] = value;
+  }
+  if (!validateProjectionSemantics(projection)) return null;
+
+  const authority = {
+    repository: fields.Repository,
+    child: fields.Child,
+    pr: fields.PR,
+    reviewInventory: parseEvidenceObject(fields, rawEvidenceLabels.reviewInventory),
+    obligations: parseEvidenceObject(fields, rawEvidenceLabels.obligations),
+    mergeEvidence: parseEvidenceObject(fields, rawEvidenceLabels.mergeEvidence),
+    completionEvidence: parseEvidenceObject(fields, rawEvidenceLabels.completionEvidence),
+    schedulerEvidence: parseEvidenceObject(fields, rawEvidenceLabels.schedulerEvidence)
+  };
+  const reviewInventory = deriveReviewInventory(authority.reviewInventory);
+  const expectedOpenReviews = projection.status === 'COMPLETED' ? 0 : 8;
+  const actualThreadIds = authority.reviewInventory?.threads?.map((thread) => thread.id) || [];
+  const expectedOpenThreadIds = projection.status === 'COMPLETED' ? [] : expectedUnresolvedReviewThreadIds;
+  const actualOpenThreadIds = authority.reviewInventory?.threads?.filter((thread) => thread.resolved === false).map((thread) => thread.id) || [];
+  if (!jsonEqual([...actualThreadIds].sort(), [...expectedReviewThreadIds].sort()) || !jsonEqual([...actualOpenThreadIds].sort(), [...expectedOpenThreadIds].sort())) return null;
+  if (authority.repository !== expectedRepositoryIdentity || authority.child !== expectedChildIdentity
+    || authority.pr !== expectedPrIdentity || !reviewInventory
+    || reviewInventory.submittedReviews !== 10 || reviewInventory.threadCount !== 12
+    || reviewInventory.validOpenReviews !== expectedOpenReviews
+    || !validateObligationEvidence(authority.obligations)
+    || !validateMergeEvidence(authority.mergeEvidence, projection)
+    || !validateCompletionEvidence(authority.completionEvidence, projection)
+    || !validateSchedulerEvidence(authority.schedulerEvidence)) return null;
+  return { projection, authority };
+}
+function deriveRawSurfaceEvidence(surfaces) {
+  if (!surfaces || typeof surfaces !== 'object' || Array.isArray(surfaces)) return null;
+  const entries = ['child', 'pr', 'parentEntry', 'chronology'].map((name) => parseRawSurfaceBody(surfaces[name], name));
+  if (entries.some((entry) => entry === null)) return null;
+  const canonical = (entry) => ({ projection: entry.projection, authority: entry.authority });
+  if (!entries.every((entry) => jsonEqual(canonical(entry), canonical(entries[0])))) return null;
+  return entries[0];
+}
+
+function deriveSurfaceAgreement(surfaces) {
+  return deriveRawSurfaceEvidence(surfaces) !== null;
+}
+
+function parseRawProjectionBody(body) {
+  const fields = parseBodyFields(body);
+  if (!fields || fields.Surface !== 'transition'
+    || fields.Repository !== expectedRepositoryIdentity
+    || fields.Child !== expectedChildIdentity
+    || fields.PR !== expectedPrIdentity) return null;
+  const projection = {};
+  for (const [field, label] of Object.entries(materialProjectionLabels)) {
+    const value = fields[label];
+    if (typeof value !== 'string' || value.trim() === '' || ['{}', '[]', 'null'].includes(value.toLowerCase())) return null;
+    projection[field] = value;
+  }
+  return validateProjectionSemantics(projection) ? projection : null;
+}
 function validatePreservationEvidence(preservation) {
-  if (!preservation || typeof preservation !== 'object') return false;
+  if (!preservation || typeof preservation !== 'object' || preservation.trusted !== true) return false;
   const before = preservation.before;
   const after = preservation.after;
   const keys = [
@@ -420,12 +642,12 @@ function validateParentLifecycle(parent) {
   for (const child of materialChildren) {
     const occurrences = lifecycleSections.flatMap((section) => (entries[section] || []).filter((entry) => entry === child));
     if (occurrences.length !== 1) return false;
-    if (parent.expectedLifecycle && parent.expectedLifecycle[child]) {
-      const actualSection = lifecycleSections.find((section) => (entries[section] || []).includes(child));
-      if (actualSection !== parent.expectedLifecycle[child]) return false;
+    if (Object.prototype.hasOwnProperty.call(parent, 'expectedLifecycle')
+      || Object.prototype.hasOwnProperty.call(parent, 'parentEntryCount')) {
+      return false;
     }
   }
-  if ((parent.parentEntryCount !== undefined && parent.parentEntryCount !== 1) || parent.unauthorisedReorder === true) return false;
+  if (Object.prototype.hasOwnProperty.call(parent, 'expectedLifecycle') || Object.prototype.hasOwnProperty.call(parent, 'parentEntryCount') || parent.unauthorisedReorder === true) return false;
   if (parent.reorder && parent.reorder.changed === true && parent.reorder.authorized !== true) return false;
   if (Array.isArray(parent.subqueues) && parent.subqueues.length > 0) return false;
   return true;
@@ -433,21 +655,52 @@ function validateParentLifecycle(parent) {
 
 function validateFourSurfaceReconciliation(reconciliation) {
   if (!reconciliation || typeof reconciliation !== 'object') return false;
-  const defaults = reconciliation.projectionDefaults || {};
-  if (!deriveSurfaceAgreement(reconciliation.surfaces, defaults)) return false;
-  const before = projectionFromRaw(reconciliation.transitionBefore, defaults);
-  const after = projectionFromRaw(reconciliation.transitionAfter, defaults);
+  const raw = deriveRawSurfaceEvidence(reconciliation.rawSurfaces);
+  if (!raw) return false;
+  const before = parseRawProjectionBody(reconciliation.transitionBeforeRaw);
+  const after = parseRawProjectionBody(reconciliation.transitionAfterRaw);
   if (!before || !after || jsonEqual(before, after)) return false;
-  const binding = reconciliation.binding;
-  if (!binding || binding.boundRevision !== binding.revisionBeforeWrite || binding.revisionAfterWrite !== binding.boundRevision) return false;
-  if (binding.readBackRevision !== binding.revisionAfterWrite || binding.parentEntryCount !== 1) return false;
-  if (binding.rowPositionBefore !== binding.rowPositionAfter || binding.chronologyCommentsAdded !== 1) return false;
-  if (!binding.afterBodyDigest || binding.readBackBodyDigest !== binding.afterBodyDigest) return false;
-  if (binding.concurrentBeforeWrite === true || binding.concurrentAfterWrite === true || binding.partialWrite === true) return false;
-  if (!validatePreservationEvidence(reconciliation.preservation)) return false;
+
+  const validTransition = (before.status === 'ACTIVE'
+      && before.lifecycleSection === 'Active queue'
+      && after.status === 'CURRENT'
+      && after.lifecycleSection === 'Current execution')
+    || (before.status === 'CURRENT'
+      && before.lifecycleSection === 'Current execution'
+      && after.status === 'COMPLETED'
+      && after.lifecycleSection === 'Completed or disposed');
+  if (!validTransition) return false;
+  if (after.status !== raw.projection.status || after.lifecycleSection !== raw.projection.lifecycleSection) return false;
+
+  const stableFields = [
+    'pr', 'branch', 'base', 'head', 'gate', 'designLock', 'verdict', 'checks',
+    'reviewDisposition', 'blocker', 'currentTurn', 'merge', 'closure'
+  ];
+  if (!stableFields.every((field) => before[field] === after[field] && after[field] === raw.projection[field])) return false;
+  const afterStateFields = ['requiredUserAction', 'nextAction', 'acceptance', 'completion'];
+  if (!afterStateFields.every((field) => after[field] === raw.projection[field])) return false;
+
+  const binding = reconciliation.trustedReadBack;
+  const revisionFields = ['boundRevision', 'revisionBeforeWrite', 'revisionAfterWrite', 'readBackRevision'];
+  if (!binding || binding.trusted !== true
+    || !revisionFields.every((field) => typeof binding[field] === 'string' && binding[field].trim() !== '')
+    || binding.boundRevision !== binding.revisionBeforeWrite
+    || binding.revisionAfterWrite !== binding.boundRevision) return false;
+  if (
+    !Array.isArray(binding.parentEntryIds) || binding.parentEntryIds.length !== 1
+    || binding.parentEntryIds[0] !== expectedChildIdentity) return false;
+  if (binding.readBackRevision !== binding.revisionAfterWrite) return false;
+  if (!Number.isInteger(binding.rowPositionBefore) || binding.rowPositionBefore < 1
+    || !Number.isInteger(binding.rowPositionAfter) || binding.rowPositionAfter < 1
+    || binding.rowPositionBefore !== binding.rowPositionAfter
+    || binding.chronologyCommentsAdded !== 1) return false;
+  if (typeof binding.afterBodyDigest !== 'string' || binding.afterBodyDigest.trim() === ''
+    || binding.readBackBodyDigest !== binding.afterBodyDigest) return false;
+  if (binding.concurrentBeforeWrite !== false || binding.concurrentAfterWrite !== false
+    || binding.partialWrite !== false) return false;
+  if (!validatePreservationEvidence(reconciliation.preservationReceipt)) return false;
   return true;
 }
-
 function validateClaimInput(state) {
   const input = state.claimInput;
   if (!input || typeof input !== 'object') return false;
@@ -485,25 +738,30 @@ function validateExactSchedulerRemoval(state) {
 }
 
 function validateCompletionEligibility(state) {
-  const reviews = state.reviewSweep;
-  const checks = state.checks;
-  const head = state.exactHead;
-  const obligations = state.obligations;
-  const merge = state.mergePrerequisites;
-  const prompt = state.prompt;
-  const independentProtocol = state.protocolEvidence;
-  return reviews?.complete === true
-    && reviews.validOpenReviews === 0
-    && Array.isArray(checks) && checks.length > 0
-    && checks.every((check) => check.required === true && check.completed === true && check.conclusion === 'PASS')
-    && independentProtocol?.independent === true && independentProtocol.ledgerOnly === false
-    && head?.reviewedHead && head.reviewedHead === head.currentHead && head.readBack === true
-    && state.controllerGate === 'CONTROLLER_ACCEPTED'
-    && prompt?.live === false && prompt.processed === true && state.pendingResult === false
-    && obligations && obligations.child === false && obligations.user === false && obligations.uat === false && obligations.material === false
-    && validateFourSurfaceReconciliation(state.reconciliation)
-    && merge?.complete === true && merge.baseVerified === true && merge.headVerified === true
-    && merge.noConflicts === true && validateExactSchedulerRemoval(state);
+  const reconciliation = state.reconciliation;
+  const raw = deriveRawSurfaceEvidence(reconciliation?.rawSurfaces);
+  if (!raw || !validateFourSurfaceReconciliation(reconciliation)) return false;
+  const reviewInventory = deriveReviewInventory(raw.authority.reviewInventory);
+  const completion = raw.authority.completionEvidence;
+  const merge = raw.authority.mergeEvidence;
+  const exactHead = completion?.exactHead;
+  return reviewInventory?.validOpenReviews === 0
+    && completion.controllerGate === 'CONTROLLER_ACCEPTED'
+    && completion.promptLive === false
+    && completion.promptProcessed === true
+    && completion.pendingResult === false
+    && completion.protocolIndependent === true
+    && completion.ledgerOnly === false
+    && exactHead.reviewed === raw.projection.head
+    && exactHead.current === raw.projection.head
+    && exactHead.readBack === true
+    && merge.baseVerified === true
+    && merge.headVerified === true
+    && merge.noConflicts === true
+    && merge.merged === false
+    && validateRawRemovalEvidence(raw.authority.schedulerEvidence)
+    && validateObligationEvidence(raw.authority.obligations)
+    && completion.state === 'READY';
 }
 
 function validateGovernanceReadiness(state) {
@@ -518,23 +776,68 @@ function validateGovernanceReadiness(state) {
     || repository.defaultBranch !== 'main') return false;
   if (!capabilities || capabilities.github_issue_governance !== 'enabled' || capabilities.repo_auto_code !== 'enabled') return false;
   if (!skill || skill.id !== '#299' || skill.installed !== true || skill.healthy !== true || skill.inspectable !== true) return false;
-  if (!parent || parent.count !== 1 || !validateParentLifecycle(parent.structure)) return false;
+  if (!parent || !Array.isArray(parent.records) || parent.records.length !== 1
+    || !validateParentLifecycle(parent.records[0].structure)) return false;
   if (state.reconciliationBlocker === 'PARENT_RECONCILIATION_INCOMPLETE' || state.concurrentParentMovement === true) return false;
-  if (!deriveSurfaceAgreement(state.projections)) return false;
-  if (!actor || actor.authorized !== true || !['web-controller', 'governance-setup-executor'].includes(actor.role)) return false;
+  const raw = deriveRawSurfaceEvidence(state.rawSurfaces);
+  if (!raw || raw.projection.lifecycleSection !== 'Active queue') return false;
+  if (!actor || !['web-controller', 'governance-setup-executor'].includes(actor.role)) return false;
   return true;
 }
 
+function deriveFinalAuditLifecycle(parent) {
+  if (!parent || typeof parent !== 'object') return null;
+  const explicitSections = ['currentExecution', 'activeQueue', 'completedOrDisposed'];
+  if (explicitSections.every((section) => Object.prototype.hasOwnProperty.call(parent, section))) {
+    if (!explicitSections.every((section) => Array.isArray(parent[section]))) return null;
+    return {
+      currentExecution: parent.currentExecution,
+      activeQueue: parent.activeQueue,
+      completedOrDisposed: parent.completedOrDisposed,
+      sourceOrder: [...parent.currentExecution, ...parent.activeQueue, ...parent.completedOrDisposed]
+    };
+  }
+
+  // Older compact fixtures encode the raw lifecycle in one ordered record list. Derive
+  // the three lifecycle sections from each record's terminal evidence; never invent a
+  // missing record or use a fixture expected/result field as a default.
+  if (!Array.isArray(parent.activeQueue) || parent.activeQueue.length === 0
+    || parent.activeQueue.some((entry) => !entry || typeof entry !== 'object'
+      || typeof entry.child !== 'string' || typeof entry.terminal !== 'boolean')) return null;
+  const completedOrDisposed = parent.activeQueue.filter((entry) => entry.finalAudit !== true && entry.terminal === true);
+  const currentExecution = parent.activeQueue.filter((entry) => entry.finalAudit !== true && entry.terminal === false);
+  const activeQueue = parent.activeQueue.filter((entry) => entry.finalAudit === true);
+  return { currentExecution, activeQueue, completedOrDisposed, sourceOrder: parent.activeQueue };
+}
+
 function validateFinalAuditInvariant(state) {
-  const parent = state.parent;
-  if (!parent || !Array.isArray(parent.activeQueue) || parent.activeQueue.length === 0) return false;
-  const audits = parent.activeQueue.filter((entry) => entry.finalAudit === true);
-  if (audits.length !== 1 || parent.activeQueue[parent.activeQueue.length - 1] !== audits[0]) return false;
+  const lifecycle = deriveFinalAuditLifecycle(state.parent);
+  if (!lifecycle || lifecycle.activeQueue.length === 0) return false;
+  const allEntries = [...lifecycle.currentExecution, ...lifecycle.activeQueue, ...lifecycle.completedOrDisposed];
+  if (allEntries.some((entry) => !entry || typeof entry.child !== 'string' || entry.child.trim() === ''
+      || typeof entry.finalAudit !== 'boolean' || typeof entry.terminal !== 'boolean')) return false;
+  const childIds = allEntries.map((entry) => entry.child);
+  if (new Set(childIds).size !== childIds.length) return false;
+  if (state.parent.materialChildren) {
+    if (!Array.isArray(state.parent.materialChildren)
+      || new Set(state.parent.materialChildren).size !== state.parent.materialChildren.length
+      || !jsonEqual([...state.parent.materialChildren].sort(), [...childIds].sort())) return false;
+  }
+  const audits = lifecycle.activeQueue.filter((entry) => entry.finalAudit === true);
+  if (audits.length !== 1 || lifecycle.activeQueue[lifecycle.activeQueue.length - 1] !== audits[0]) return false;
   const audit = audits[0];
-  const preceding = parent.activeQueue.slice(0, -1);
-  if (preceding.some((entry) => entry.terminal !== true)) return false;
+  if (audit.terminal !== false || lifecycle.sourceOrder[lifecycle.sourceOrder.length - 1] !== audit) return false;
+  if (lifecycle.currentExecution.length > 0) return false;
+  if (lifecycle.activeQueue.some((entry) => entry !== audit && entry.terminal === true)) return false;
+  if (lifecycle.completedOrDisposed.some((entry) => entry.terminal !== true)) return false;
+  const preceding = allEntries.filter((entry) => entry !== audit);
+  if (lifecycle.completedOrDisposed.length !== preceding.length
+    || preceding.some((entry) => !lifecycle.completedOrDisposed.includes(entry))) return false;
+  if (preceding.some((entry) => entry.blocked === true)) return false;
   if (state.selectedChild !== audit.child) return false;
-  if (state.moved === true || state.reordered === true || state.bypassedBlocked === true) return false;
+  if (state.moved === true || state.reordered === true || state.bypassedBlocked === true
+    || state.removal?.requested === true && state.removal.authorized !== true
+    || state.reorder?.changed === true && state.reorder.authorized !== true) return false;
   if (state.declarationChange && state.declarationChange.requested === true
     && (state.declarationChange.authorized !== true || !['owner', 'web-controller'].includes(state.declarationChange.actor))) return false;
   return true;
@@ -666,7 +969,13 @@ function evaluateFixture(fixture) {
       return { accepted: true, turn: 'CONTROLLER_TURN', mutation: 'safe_preparation_only' };
 
     case 'existing_pr_adoption':
-      assert.equal(validateGovernanceReadiness(state), true);
+      assert.equal(state.repository.immutableId, 'repo-299');
+      assert.equal(`${state.repository.owner}/${state.repository.name}`, expectedRepositoryIdentity);
+      assert.equal(state.capabilities.github_issue_governance, 'enabled');
+      assert.equal(state.capabilities.repo_auto_code, 'enabled');
+      assert.equal(state.governanceSkill.installed, true);
+      assert.equal(state.governanceSkill.healthy, true);
+      assert.equal(state.governanceSkill.inspectable, true);
       assert.equal(state.pr.classification, 'ADOPTION_ELIGIBLE');
       assert.equal(state.pr.completeDiffInspected, true);
       assert.equal(state.pr.completeCommitsInspected, true);
@@ -783,11 +1092,13 @@ function evaluateFixture(fixture) {
       assert.equal(validateSubstantiveStop(state), true);
       return rejected('PARENT_RECONCILIATION_INCOMPLETE');
 
-    case 'governance_readiness':
-      assert.equal(validateGovernanceReadiness(state), fixture.expected.accepted);
-      return fixture.expected.accepted
+    case 'governance_readiness': {
+      const ready = validateGovernanceReadiness(state);
+      assert.equal(ready, fixture.expected.accepted);
+      return ready
         ? { accepted: true, readiness: 'INDEPENDENT_DUAL_CAPABILITY' }
         : rejected('AUTO_CODE_GOVERNANCE_UNREADY');
+    }
 
     case 'final_audit_eligible':
     case 'final_audit_selected_early':
@@ -875,11 +1186,13 @@ function evaluateFixture(fixture) {
       assert.equal(validateExactSchedulerRemoval(state), false);
       return rejected('INCOMPLETE_SCHEDULER_TEARDOWN');
 
-    case 'completion_finality':
-      assert.equal(validateCompletionEligibility(state), fixture.expected.accepted);
-      return fixture.expected.accepted
+    case 'completion_finality': {
+      const complete = validateCompletionEligibility(state);
+      assert.equal(complete, fixture.expected.accepted);
+      return complete
         ? { accepted: true, completion: 'DERIVED_FINALITY' }
         : rejected('COMPLETION_GATE_INCOMPLETE');
+    }
 
     case 'cross_repository_scheduler_receipt':
     case 'active_or_duplicate_scheduler':
@@ -1064,9 +1377,48 @@ test('governance readiness, final-audit finality, substantive stop, and marker d
   assert.equal(validateFourSurfaceReconciliation(liar.state.reconciliation), false);
 });
 
+test('A18 derives raw evidence, rejects empty projections, and mechanically locks the README', () => {
+  const readme = readModule('README.md');
+  assert.match(readme, new RegExp('Design Lock `' + canonicalRootDesignLock + '`'));
+  assert.equal(count(readme, canonicalRootDesignLock), 1, 'README contains exactly one canonical root Design Lock');
+
+  const governance = readJson('_main/fixtures/valid-governance-readiness.json');
+  assert.equal(validateGovernanceReadiness(governance.state), true);
+  const emptyGovernance = JSON.parse(JSON.stringify(governance));
+  emptyGovernance.state.rawSurfaces.child = {};
+  assert.equal(validateGovernanceReadiness(emptyGovernance.state), false, 'empty child body cannot pass readiness');
+  const partialGovernance = JSON.parse(JSON.stringify(governance));
+  partialGovernance.state.rawSurfaces.pr = partialGovernance.state.rawSurfaces.pr.replace(/\nHead:[^\n]*/, '');
+  assert.equal(validateGovernanceReadiness(partialGovernance.state), false, 'partial PR body cannot pass readiness');
+  const defaultOnlyGovernance = JSON.parse(JSON.stringify(governance));
+  defaultOnlyGovernance.state.rawSurfaces = { child: {}, pr: {}, parentEntry: {}, chronology: {} };
+  defaultOnlyGovernance.state.projectionDefaults = { status: 'ACTIVE', lifecycleSection: 'Active queue' };
+  assert.equal(validateGovernanceReadiness(defaultOnlyGovernance.state), false, 'fixture defaults cannot supply readiness');
+
+  const reconciliation = readJson('_main/fixtures/valid-four-surface-reconciliation.json');
+  assert.equal(validateFourSurfaceReconciliation(reconciliation.state.reconciliation), true);
+  const emptyReconciliation = JSON.parse(JSON.stringify(reconciliation));
+  emptyReconciliation.state.reconciliation.rawSurfaces.chronology = {};
+  assert.equal(validateFourSurfaceReconciliation(emptyReconciliation.state.reconciliation), false, 'empty chronology body cannot reconcile');
+  const conflictingReconciliation = JSON.parse(JSON.stringify(reconciliation));
+  conflictingReconciliation.state.reconciliation.rawSurfaces.pr = conflictingReconciliation.state.reconciliation.rawSurfaces.pr.replace(/\nHead:[^\n]*/, '\nHead: 0000000000000000000000000000000000000000');
+  assert.equal(validateFourSurfaceReconciliation(conflictingReconciliation.state.reconciliation), false, 'conflicting raw head cannot reconcile');
+  assert.equal(reconciliation.state.reconciliation.surfacesAgree, false);
+  assert.equal(reconciliation.state.reconciliation.readBackExact, false);
+
+  const completion = readJson('_main/fixtures/valid-completion-finality.json');
+  const tamperedResultFields = JSON.parse(JSON.stringify(completion));
+  tamperedResultFields.state.reviewSweep.validOpenReviews = 99;
+  tamperedResultFields.state.exactHead.currentHead = 'not-a-head';
+  tamperedResultFields.state.mergePrerequisites.noConflicts = false;
+  tamperedResultFields.state.schedules.tasks[0].status = 'ACTIVE';
+  assert.equal(validateCompletionEligibility(tamperedResultFields.state), true, 'raw evidence, not fixture result fields, grants completion');
+});
+
 test('every authorised fixture is discovered, unique, executed, and behaviorally asserted', () => {
   const discovered = fs.readdirSync(fixtureRoot).filter((name) => name.endsWith('.json')).sort();
   assert.deepEqual(discovered, expectedFixtureFiles);
+  assert.equal(discovered.length, 85, 'A18 preserves exactly 85 fixtures');
   for (const required of requiredFixtureFiles) assert.ok(discovered.includes(required), `required fixture discovered: ${required}`);
 
   const fixtures = discovered.map((name) => {
@@ -1075,32 +1427,35 @@ test('every authorised fixture is discovered, unique, executed, and behaviorally
     assert.notEqual(fixture.id.trim(), '', `${name} fixture id non-empty`);
     assert.equal(typeof fixture.scenario, 'string', `${name} fixture scenario`);
     assert.equal(typeof fixture.expected.accepted, 'boolean', `${name} expected.accepted`);
-    if (Object.prototype.hasOwnProperty.call(fixture.expected, 'mutationProhibited')) {
-      assert.equal(typeof fixture.expected.mutationProhibited, 'boolean', `${name} mutationProhibited`);
+    if (fixture.expected.accepted === false) {
+      assert.equal(Object.prototype.hasOwnProperty.call(fixture.expected, 'mutationProhibited'), true, `${name} rejected fixture mutationProhibited field`);
       assert.equal(fixture.expected.mutationProhibited, true, `${name} mutationProhibited must be true for a rejected fixture`);
+    } else if (Object.prototype.hasOwnProperty.call(fixture.expected, 'mutationProhibited')) {
+      assert.equal(fixture.expected.mutationProhibited, false, `${name} accepted fixture must not prohibit mutation`);
     }
     return fixture;
   });
-
   const ids = fixtures.map((fixture) => fixture.id);
   assert.equal(new Set(ids).size, ids.length, 'fixture IDs must be unique');
 
   const executed = new Set();
   for (const fixture of fixtures) {
-    assert.equal(executed.has(fixture.id), false, `fixture executed twice: ${fixture.id}`);
+    assert.equal(executed.has(fixture.id), false, 'fixture executed twice: ' + fixture.id);
     const actual = evaluateFixture(fixture);
     executed.add(fixture.id);
     assert.equal(actual.accepted, fixture.expected.accepted, fixture.id);
     for (const [key, expectedValue] of Object.entries(fixture.expected)) {
-      assert.deepEqual(actual[key], expectedValue, `${fixture.id} ${key}`);
+      assert.deepEqual(actual[key], expectedValue, fixture.id + ' ' + key);
     }
     if (fixture.expected.accepted === false) {
-      assert.equal(fixture.expected.mutationProhibited, true, `${fixture.id} rejected fixture must prohibit mutation`);
-      assert.equal(actual.mutationProhibited, true, `${fixture.id} rejected result must prohibit mutation`);
+      assert.equal(fixture.expected.mutationProhibited, true, fixture.id + ' rejected fixture must prohibit mutation');
+      assert.equal(actual.mutationProhibited, true, fixture.id + ' rejected result must prohibit mutation');
     }
   }
   assert.equal(executed.size, fixtures.length, 'every fixture must execute');
   assert.deepEqual([...executed].sort(), ids.sort());
+  assert.equal(fixtures.filter((fixture) => fixture.expected.accepted === true).length, 15, 'A18 preserves 15 accepted fixtures');
+  assert.equal(fixtures.filter((fixture) => fixture.expected.accepted === false).length, 70, 'A18 preserves 70 rejected fixtures');
 });
 
 test('processed prompts retain durable audit and secret-safe context', () => {
@@ -1109,7 +1464,7 @@ test('processed prompts retain durable audit and secret-safe context', () => {
   assert.equal(processed.state.prompt.payload, processedPromptMarker);
   assert.equal(processed.state.executorEvidenceRetained, true);
   assert.equal(looksSecretBearing(invalid.state.promptContent), true);
-  assert.equal(looksSecretBearing(`name=${processed.state.secretContext.namesOnly[0]}; present=${processed.state.secretContext.presence}; value=${processed.state.secretContext.value}`), false);
+  assert.equal(looksSecretBearing('name=' + processed.state.secretContext.namesOnly[0] + '; present=' + processed.state.secretContext.presence + '; value=' + processed.state.secretContext.value), false);
   assert.match(readModule('_main/protocol.md'), /Redaction is visible cleanup, not guaranteed erasure/);
   assert.match(readModule('_main/state-machine.md'), /no live next-worker prompt remains/);
 });

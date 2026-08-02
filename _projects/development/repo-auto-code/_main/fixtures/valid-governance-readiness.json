@@ -1,33 +1,81 @@
 {
   "id": "valid-governance-readiness",
   "scenario": "governance_readiness",
-  "expected": { "accepted": true, "readiness": "INDEPENDENT_DUAL_CAPABILITY" },
+  "expected": {
+    "accepted": true,
+    "readiness": "INDEPENDENT_DUAL_CAPABILITY"
+  },
   "state": {
-    "repository": { "owner": "weijunswj", "name": "ai-agent-toolkit", "immutableId": "repo-299", "origin": "https://github.com/weijunswj/ai-agent-toolkit.git", "defaultBranch": "main" },
-    "capabilities": { "github_issue_governance": "enabled", "repo_auto_code": "enabled" },
-    "governanceSkill": { "id": "#299", "installed": true, "healthy": true, "inspectable": true },
+    "repository": {
+      "owner": "weijunswj",
+      "name": "ai-agent-toolkit",
+      "immutableId": "repo-299",
+      "origin": "https://github.com/weijunswj/ai-agent-toolkit.git",
+      "defaultBranch": "main"
+    },
+    "capabilities": {
+      "github_issue_governance": "enabled",
+      "repo_auto_code": "enabled"
+    },
+    "governanceSkill": {
+      "id": "#299",
+      "installed": true,
+      "healthy": true,
+      "inspectable": true
+    },
     "canonicalParent": {
-      "count": 1,
-      "structure": {
-        "sectionOrder": ["Queue authority", "Current execution", "Active queue", "Completed or disposed", "Completion gate", "Governance ownership", "Mandatory parent reconciliation"],
-        "linesBySection": { "Current execution": [], "Active queue": ["- #329", "- #330"], "Completed or disposed": [] },
-        "materialChildren": ["#329", "#330"],
-        "lifecycleEntries": { "Current execution": [], "Active queue": ["#329", "#330"], "Completed or disposed": [] },
-        "expectedLifecycle": { "#329": "Active queue", "#330": "Active queue" },
-        "parentEntryCount": 1,
-        "subqueues": []
-      }
+      "records": [
+        {
+          "structure": {
+            "sectionOrder": [
+              "Queue authority",
+              "Current execution",
+              "Active queue",
+              "Completed or disposed",
+              "Completion gate",
+              "Governance ownership",
+              "Mandatory parent reconciliation"
+            ],
+            "linesBySection": {
+              "Current execution": [],
+              "Active queue": [
+                "- #329",
+                "- #330"
+              ],
+              "Completed or disposed": []
+            },
+            "materialChildren": [
+              "#329",
+              "#330"
+            ],
+            "lifecycleEntries": {
+              "Current execution": [],
+              "Active queue": [
+                "#329",
+                "#330"
+              ],
+              "Completed or disposed": []
+            },
+
+
+
+
+            "subqueues": []
+          }
+        }
+      ]
     },
-    "projectionDefaults": {
-      "status": "ACTIVE", "lifecycleSection": "Active queue", "pr": "#333", "branch": "luna/tk-038-repo-auto-code-design",
-      "base": "4103897ad709cda700172f7124fd70cf8218a27a", "head": "7ff4e04b6f596ff6538fdc2fbdb0971cfbfd9499", "gate": "G3",
-      "designLock": "DL-329-AUTO-CODE-004", "verdict": "AMEND", "checks": "PASS", "reviewDisposition": "COMMENTED_OPEN",
-      "blocker": "NONE", "requiredUserAction": "NONE", "currentTurn": "CONTROLLER", "nextAction": "select-first-eligible",
-      "acceptance": "PENDING", "merge": "NOT_MERGED", "closure": "OPEN", "completion": "INCOMPLETE"
+    "rawSurfaces": {
+      "child": "Surface: child\nRepository: weijunswj/ai-agent-toolkit\nChild: #329\nStatus: ACTIVE\nLifecycle section: Active queue\nPR: #333\nBranch: luna/tk-038-repo-auto-code-design\nBase: 4103897ad709cda700172f7124fd70cf8218a27a\nHead: 727a7bf7ac613d609c51745e6a3a513156af1442\nGate: G3\nDesign Lock: DL-329-AUTO-CODE-004\nVerdict: AMEND\nChecks: PASS\nReview disposition: COMMENTED_OPEN\nBlocker: NONE\nRequired user action: NONE\nCurrent turn: CONTROLLER\nNext action: select-first-eligible\nAcceptance: PENDING\nMerge: NOT_MERGED\nClosure: OPEN\nCompletion: INCOMPLETE\nReview inventory: {\"reviews\":[{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"}],\"threads\":[{\"id\":\"PRRT_kwDOSTHjGM6VqRFc\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6VqRFg\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6VqRFo\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6Vu5k8\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6Vu5k9\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6Vu5k_\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6Vu5lA\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6VxjdZ\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6VqRFd\",\"resolved\":true},{\"id\":\"PRRT_kwDOSTHjGM6VqRFe\",\"resolved\":true},{\"id\":\"PRRT_kwDOSTHjGM6VqRFi\",\"resolved\":true},{\"id\":\"PRRT_kwDOSTHjGM6VqRFm\",\"resolved\":true}],\"requestedReviewers\":[]}\nObligations: {\"child\":\"NONE\",\"user\":\"NONE\",\"uat\":\"NONE\",\"material\":\"NONE\"}\nMerge evidence: {\"repository\":\"weijunswj/ai-agent-toolkit\",\"base\":\"4103897ad709cda700172f7124fd70cf8218a27a\",\"head\":\"727a7bf7ac613d609c51745e6a3a513156af1442\",\"baseVerified\":true,\"headVerified\":true,\"noConflicts\":true,\"merged\":false,\"mergeable\":\"MERGEABLE\"}\nCompletion evidence: {\"controllerGate\":\"GATE_AUTHORISED\",\"promptLive\":false,\"promptProcessed\":true,\"pendingResult\":false,\"protocolIndependent\":true,\"ledgerOnly\":false,\"state\":\"INCOMPLETE\",\"exactHead\":{\"reviewed\":\"727a7bf7ac613d609c51745e6a3a513156af1442\",\"current\":\"727a7bf7ac613d609c51745e6a3a513156af1442\",\"readBack\":true},\"requiredChecks\":[{\"required\":true,\"completed\":true,\"conclusion\":\"PASS\"}]}\nScheduler evidence: {\"repository\":\"weijunswj/ai-agent-toolkit\",\"generation\":\"generation-1\",\"revision\":\"revision-1\",\"tasks\":[{\"repository\":\"weijunswj/ai-agent-toolkit\",\"identity\":\"repo-329-controller\",\"generation\":\"generation-1\",\"revision\":\"revision-1\",\"status\":\"PRESENT\"},{\"repository\":\"weijunswj/ai-agent-toolkit\",\"identity\":\"repo-329-executor\",\"generation\":\"generation-1\",\"revision\":\"revision-1\",\"status\":\"PRESENT\"}]}",
+      "pr": "Surface: pr\nRepository: weijunswj/ai-agent-toolkit\nChild: #329\nStatus: ACTIVE\nLifecycle section: Active queue\nPR: #333\nBranch: luna/tk-038-repo-auto-code-design\nBase: 4103897ad709cda700172f7124fd70cf8218a27a\nHead: 727a7bf7ac613d609c51745e6a3a513156af1442\nGate: G3\nDesign Lock: DL-329-AUTO-CODE-004\nVerdict: AMEND\nChecks: PASS\nReview disposition: COMMENTED_OPEN\nBlocker: NONE\nRequired user action: NONE\nCurrent turn: CONTROLLER\nNext action: select-first-eligible\nAcceptance: PENDING\nMerge: NOT_MERGED\nClosure: OPEN\nCompletion: INCOMPLETE\nReview inventory: {\"reviews\":[{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"}],\"threads\":[{\"id\":\"PRRT_kwDOSTHjGM6VqRFc\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6VqRFg\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6VqRFo\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6Vu5k8\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6Vu5k9\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6Vu5k_\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6Vu5lA\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6VxjdZ\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6VqRFd\",\"resolved\":true},{\"id\":\"PRRT_kwDOSTHjGM6VqRFe\",\"resolved\":true},{\"id\":\"PRRT_kwDOSTHjGM6VqRFi\",\"resolved\":true},{\"id\":\"PRRT_kwDOSTHjGM6VqRFm\",\"resolved\":true}],\"requestedReviewers\":[]}\nObligations: {\"child\":\"NONE\",\"user\":\"NONE\",\"uat\":\"NONE\",\"material\":\"NONE\"}\nMerge evidence: {\"repository\":\"weijunswj/ai-agent-toolkit\",\"base\":\"4103897ad709cda700172f7124fd70cf8218a27a\",\"head\":\"727a7bf7ac613d609c51745e6a3a513156af1442\",\"baseVerified\":true,\"headVerified\":true,\"noConflicts\":true,\"merged\":false,\"mergeable\":\"MERGEABLE\"}\nCompletion evidence: {\"controllerGate\":\"GATE_AUTHORISED\",\"promptLive\":false,\"promptProcessed\":true,\"pendingResult\":false,\"protocolIndependent\":true,\"ledgerOnly\":false,\"state\":\"INCOMPLETE\",\"exactHead\":{\"reviewed\":\"727a7bf7ac613d609c51745e6a3a513156af1442\",\"current\":\"727a7bf7ac613d609c51745e6a3a513156af1442\",\"readBack\":true},\"requiredChecks\":[{\"required\":true,\"completed\":true,\"conclusion\":\"PASS\"}]}\nScheduler evidence: {\"repository\":\"weijunswj/ai-agent-toolkit\",\"generation\":\"generation-1\",\"revision\":\"revision-1\",\"tasks\":[{\"repository\":\"weijunswj/ai-agent-toolkit\",\"identity\":\"repo-329-controller\",\"generation\":\"generation-1\",\"revision\":\"revision-1\",\"status\":\"PRESENT\"},{\"repository\":\"weijunswj/ai-agent-toolkit\",\"identity\":\"repo-329-executor\",\"generation\":\"generation-1\",\"revision\":\"revision-1\",\"status\":\"PRESENT\"}]}",
+      "parentEntry": "Surface: parentEntry\nRepository: weijunswj/ai-agent-toolkit\nChild: #329\nStatus: ACTIVE\nLifecycle section: Active queue\nPR: #333\nBranch: luna/tk-038-repo-auto-code-design\nBase: 4103897ad709cda700172f7124fd70cf8218a27a\nHead: 727a7bf7ac613d609c51745e6a3a513156af1442\nGate: G3\nDesign Lock: DL-329-AUTO-CODE-004\nVerdict: AMEND\nChecks: PASS\nReview disposition: COMMENTED_OPEN\nBlocker: NONE\nRequired user action: NONE\nCurrent turn: CONTROLLER\nNext action: select-first-eligible\nAcceptance: PENDING\nMerge: NOT_MERGED\nClosure: OPEN\nCompletion: INCOMPLETE\nReview inventory: {\"reviews\":[{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"}],\"threads\":[{\"id\":\"PRRT_kwDOSTHjGM6VqRFc\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6VqRFg\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6VqRFo\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6Vu5k8\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6Vu5k9\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6Vu5k_\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6Vu5lA\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6VxjdZ\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6VqRFd\",\"resolved\":true},{\"id\":\"PRRT_kwDOSTHjGM6VqRFe\",\"resolved\":true},{\"id\":\"PRRT_kwDOSTHjGM6VqRFi\",\"resolved\":true},{\"id\":\"PRRT_kwDOSTHjGM6VqRFm\",\"resolved\":true}],\"requestedReviewers\":[]}\nObligations: {\"child\":\"NONE\",\"user\":\"NONE\",\"uat\":\"NONE\",\"material\":\"NONE\"}\nMerge evidence: {\"repository\":\"weijunswj/ai-agent-toolkit\",\"base\":\"4103897ad709cda700172f7124fd70cf8218a27a\",\"head\":\"727a7bf7ac613d609c51745e6a3a513156af1442\",\"baseVerified\":true,\"headVerified\":true,\"noConflicts\":true,\"merged\":false,\"mergeable\":\"MERGEABLE\"}\nCompletion evidence: {\"controllerGate\":\"GATE_AUTHORISED\",\"promptLive\":false,\"promptProcessed\":true,\"pendingResult\":false,\"protocolIndependent\":true,\"ledgerOnly\":false,\"state\":\"INCOMPLETE\",\"exactHead\":{\"reviewed\":\"727a7bf7ac613d609c51745e6a3a513156af1442\",\"current\":\"727a7bf7ac613d609c51745e6a3a513156af1442\",\"readBack\":true},\"requiredChecks\":[{\"required\":true,\"completed\":true,\"conclusion\":\"PASS\"}]}\nScheduler evidence: {\"repository\":\"weijunswj/ai-agent-toolkit\",\"generation\":\"generation-1\",\"revision\":\"revision-1\",\"tasks\":[{\"repository\":\"weijunswj/ai-agent-toolkit\",\"identity\":\"repo-329-controller\",\"generation\":\"generation-1\",\"revision\":\"revision-1\",\"status\":\"PRESENT\"},{\"repository\":\"weijunswj/ai-agent-toolkit\",\"identity\":\"repo-329-executor\",\"generation\":\"generation-1\",\"revision\":\"revision-1\",\"status\":\"PRESENT\"}]}",
+      "chronology": "Surface: chronology\nRepository: weijunswj/ai-agent-toolkit\nChild: #329\nStatus: ACTIVE\nLifecycle section: Active queue\nPR: #333\nBranch: luna/tk-038-repo-auto-code-design\nBase: 4103897ad709cda700172f7124fd70cf8218a27a\nHead: 727a7bf7ac613d609c51745e6a3a513156af1442\nGate: G3\nDesign Lock: DL-329-AUTO-CODE-004\nVerdict: AMEND\nChecks: PASS\nReview disposition: COMMENTED_OPEN\nBlocker: NONE\nRequired user action: NONE\nCurrent turn: CONTROLLER\nNext action: select-first-eligible\nAcceptance: PENDING\nMerge: NOT_MERGED\nClosure: OPEN\nCompletion: INCOMPLETE\nReview inventory: {\"reviews\":[{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"},{\"state\":\"COMMENTED\"}],\"threads\":[{\"id\":\"PRRT_kwDOSTHjGM6VqRFc\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6VqRFg\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6VqRFo\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6Vu5k8\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6Vu5k9\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6Vu5k_\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6Vu5lA\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6VxjdZ\",\"resolved\":false},{\"id\":\"PRRT_kwDOSTHjGM6VqRFd\",\"resolved\":true},{\"id\":\"PRRT_kwDOSTHjGM6VqRFe\",\"resolved\":true},{\"id\":\"PRRT_kwDOSTHjGM6VqRFi\",\"resolved\":true},{\"id\":\"PRRT_kwDOSTHjGM6VqRFm\",\"resolved\":true}],\"requestedReviewers\":[]}\nObligations: {\"child\":\"NONE\",\"user\":\"NONE\",\"uat\":\"NONE\",\"material\":\"NONE\"}\nMerge evidence: {\"repository\":\"weijunswj/ai-agent-toolkit\",\"base\":\"4103897ad709cda700172f7124fd70cf8218a27a\",\"head\":\"727a7bf7ac613d609c51745e6a3a513156af1442\",\"baseVerified\":true,\"headVerified\":true,\"noConflicts\":true,\"merged\":false,\"mergeable\":\"MERGEABLE\"}\nCompletion evidence: {\"controllerGate\":\"GATE_AUTHORISED\",\"promptLive\":false,\"promptProcessed\":true,\"pendingResult\":false,\"protocolIndependent\":true,\"ledgerOnly\":false,\"state\":\"INCOMPLETE\",\"exactHead\":{\"reviewed\":\"727a7bf7ac613d609c51745e6a3a513156af1442\",\"current\":\"727a7bf7ac613d609c51745e6a3a513156af1442\",\"readBack\":true},\"requiredChecks\":[{\"required\":true,\"completed\":true,\"conclusion\":\"PASS\"}]}\nScheduler evidence: {\"repository\":\"weijunswj/ai-agent-toolkit\",\"generation\":\"generation-1\",\"revision\":\"revision-1\",\"tasks\":[{\"repository\":\"weijunswj/ai-agent-toolkit\",\"identity\":\"repo-329-controller\",\"generation\":\"generation-1\",\"revision\":\"revision-1\",\"status\":\"PRESENT\"},{\"repository\":\"weijunswj/ai-agent-toolkit\",\"identity\":\"repo-329-executor\",\"generation\":\"generation-1\",\"revision\":\"revision-1\",\"status\":\"PRESENT\"}]}"
     },
-    "projections": { "child": {}, "pr": {}, "parentEntry": {}, "chronology": {} },
     "reconciliationBlocker": null,
     "concurrentParentMovement": false,
-    "actor": { "role": "web-controller", "authorized": true }
+    "actor": {
+      "role": "web-controller",
+      "authorized": true
+    }
   }
 }
