@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
+const Module = require('node:module');
 const path = require('node:path');
 const test = require('node:test');
 
@@ -25,6 +26,10 @@ const NOW = '2026-07-30T10:00:00.000Z';
 
 function readJson(relativePath) {
   return JSON.parse(fs.readFileSync(path.join(repoRoot, relativePath), 'utf8'));
+}
+
+function assertFixturePolicyBinding(fixtureManifest, canonicalPolicy) {
+  assert.equal(fixtureManifest.policy_version, canonicalPolicy.policy_version, 'fixture policy version must equal canonical policy version');
 }
 
 const SCHEMA_ANNOTATION_KEYWORDS = new Set([
@@ -631,8 +636,9 @@ test('source policy, schemas, fixtures, and source-only project metadata stay al
   assert.equal(policySchema.$id, sourcePolicy.schema_version);
   assert.equal(operationSchema.$id, 'toolkit.guardrail.operation.v1');
   assert.equal(approvalSchema.$id, 'toolkit.guardrail.approval.v1');
-  assert.equal(fixtures.policy_version, '1.0.0');
+  assert.equal(fixtures.policy_version, '1.0.1');
   assert.equal(sourcePolicy.policy_version, '1.0.1');
+  assertFixturePolicyBinding(fixtures, sourcePolicy);
   assert.equal(fixtures.design_lock, sourcePolicy.design_lock);
   assert.deepEqual(manifest.outputs, []);
   assert.equal(manifest.surface.publish_as, 'source_only');
@@ -2064,9 +2070,11 @@ const fixtureCaseAssertions = new Map([
 
     const project = readJson('_projects/development/toolkit-guardrails/toolkit.project.json');
     const sourcePolicy = readJson('_projects/development/toolkit-guardrails/_main/guardrail-policy.json');
-    assert.equal(project.version, '1.0.2');
+    const fixtureManifest = readJson('_projects/development/toolkit-guardrails/_main/fixtures/fixture-manifest.json');
+    assert.equal(project.version, '1.0.3');
     assert.equal(sourcePolicy.policy_version, '1.0.1');
-    assert.match(project.version_notes, /proxy-safe|canonical public result catalog/i);
+    assertFixturePolicyBinding(fixtureManifest, sourcePolicy);
+    assert.match(project.version_notes, /canonical public[- ]result catalogue|fixture manifest/i);
   }],
   ['failure.approval-verifier-exception', () => {
     const input = fixtureInput(structured('edit', `${SIBLING}\\approval-error.txt`));
@@ -2102,16 +2110,96 @@ test('every required fixture ID is registered and executed as an assertion', () 
   const manifest = readJson('_projects/development/toolkit-guardrails/_main/fixtures/fixture-manifest.json');
   const required = [...new Set(manifest.required_case_ids)].sort();
   const registered = [...fixtureCaseAssertions.keys()].sort();
+  assert.equal(required.length, 177);
+  assert.equal(registered.length, 177);
   assert.deepEqual(registered, required, 'fixture manifest and executable assertion registry differ');
 });
 
-test('canonical policy catalogs every public engine result field and reason code', () => {
+function replaceOnce(source, needle, replacement, label) {
+  const first = source.indexOf(needle);
+  assert.notEqual(first, -1, `${label}: marker must exist`);
+  assert.equal(source.indexOf(needle, first + needle.length), -1, `${label}: marker must be unique`);
+  return source.slice(0, first) + replacement + source.slice(first + needle.length);
+}
+
+function loadMutatedEngine(mutator) {
+  const filename = path.join(runtimeRoot, 'toolkit-guardrail-engine.cjs');
+  const source = fs.readFileSync(filename, 'utf8').replaceAll('\r\n', '\n');
+  const mutatedSource = mutator(source);
+  assert.notEqual(mutatedSource, source, 'mutation must change the in-memory engine source');
+  const syntheticModule = new Module(filename, module);
+  syntheticModule.filename = filename;
+  syntheticModule.paths = Module._nodeModulePaths(runtimeRoot);
+  syntheticModule._compile(mutatedSource, filename);
+  return syntheticModule.exports;
+}
+
+function mutateResultBlock(source, mutator) {
+  const start = source.indexOf('function result(');
+  const end = source.indexOf('\n}\n\nfunction canonicalFailureResult', start);
+  assert.notEqual(start, -1, 'result constructor must exist in test fixture');
+  assert.notEqual(end, -1, 'result constructor boundary must exist in test fixture');
+  const block = source.slice(start, end + 2);
+  const mutatedBlock = mutator(block);
+  assert.notEqual(mutatedBlock, block, 'result mutation must change the constructor');
+  return source.slice(0, start) + mutatedBlock + source.slice(end + 2);
+}
+
+function mutateSafeFailureBlock(source, mutator) {
+  const start = source.indexOf('function safeFailure(');
+  const end = source.indexOf('\n}\n\nfunction result(', start);
+  assert.notEqual(start, -1, 'safe-failure constructor must exist in test fixture');
+  assert.notEqual(end, -1, 'safe-failure constructor boundary must exist in test fixture');
+  const block = source.slice(start, end + 2);
+  const mutatedBlock = mutator(block);
+  assert.notEqual(mutatedBlock, block, 'safe-failure mutation must change the constructor');
+  return source.slice(0, start) + mutatedBlock + source.slice(end + 2);
+}
+
+function assertCanonicalFallback(value) {
+  assert.equal(value.decision, 'unsupported');
+  assert.equal(value.reason_code, 'ENGINE_FAILURE_UNSUPPORTED');
+  assert.deepEqual(Object.keys(value).sort(), [
+    'decision',
+    'enforcement_requirement',
+    'operation_class',
+    'operation_digest',
+    'privacy_safe',
+    'reason_code',
+    'request_digest',
+    'safe_target_class',
+    'target_digest',
+  ].sort());
+  assert.equal(value.privacy_safe, true);
+}
+
+function assertAllExportedBoundariesReject(engineModule, input) {
+  const options = { now: NOW, trustedTargetResolver };
+  for (const method of ['evaluate', 'evaluateOne', 'evaluateGuardrail']) {
+    assert.equal(typeof engineModule[method], 'function', method);
+    assertCanonicalFallback(engineModule[method](input, options));
+  }
+}
+
+function assertMergeBoundariesReject(engineModule, input) {
+  const options = { now: NOW, trustedTargetResolver };
+  for (const method of ['evaluate', 'evaluateGuardrail']) {
+    assert.equal(typeof engineModule[method], 'function', method);
+    assertCanonicalFallback(engineModule[method](input, options));
+  }
+}
+
+test('canonical policy catalogs every public engine result field and reason code at the exported boundary', () => {
   const sourcePolicy = readJson('_projects/development/toolkit-guardrails/_main/guardrail-policy.json');
+  const fixtures = readJson('_projects/development/toolkit-guardrails/_main/fixtures/fixture-manifest.json');
   const allowedFields = sourcePolicy.privacy.result_fields_allowed;
   const reasonCodes = sourcePolicy.reason_codes;
   assert.equal(sourcePolicy.policy_version, '1.0.1');
+  assert.equal(allowedFields.length, 13);
+  assert.equal(reasonCodes.length, 58);
   assert.equal(new Set(allowedFields).size, allowedFields.length, 'policy result fields must be unique');
   assert.equal(new Set(reasonCodes).size, reasonCodes.length, 'policy reason codes must be unique');
+  assertFixturePolicyBinding(fixtures, sourcePolicy);
 
   const publicFields = [
     'decision',
@@ -2130,18 +2218,6 @@ test('canonical policy catalogs every public engine result field and reason code
   ];
   assert.deepEqual([...allowedFields].sort(), [...publicFields].sort());
 
-  const engineSource = fs.readFileSync(path.join(runtimeRoot, 'toolkit-guardrail-engine.cjs'), 'utf8');
-  const publicResultSites = [...engineSource.matchAll(/function\s+(safeFailure|[A-Za-z0-9_]*(?:result|Result)[A-Za-z0-9_]*)\s*\(/g)].map((match) => match[1]).sort();
-  assert.deepEqual(publicResultSites, ['mergeResults', 'result', 'safeFailure']);
-  for (const field of publicFields) assert.match(engineSource, new RegExp(`\\b${field}\\b`));
-
-  const internalEngineCodes = new Set(['CLASSIFICATION_INVALID', 'CLASSIFICATION_TARGET_INVALID', 'HEAD']);
-  const decisionSource = engineSource.slice(engineSource.indexOf('function safeFailure'));
-  const literalEngineCodes = new Set([...decisionSource.matchAll(/['\"]([A-Z][A-Z0-9_]+)['\"]/g)].map((match) => match[1]));
-  for (const code of literalEngineCodes) {
-    if (!internalEngineCodes.has(code)) assert.ok(reasonCodes.includes(code), `engine reason code ${code} is not cataloged`);
-  }
-
   const approvedInput = withApproval(fixtureInput(structured('delete', `${SIBLING}\\policy-catalog-approval.txt`)));
   const replayedApproval = decision(approvedInput);
   const corpus = [
@@ -2156,17 +2232,48 @@ test('canonical policy catalogs every public engine result field and reason code
     decision(null),
   ];
   const observedFields = new Set();
-  for (const result of corpus) {
-    assert.equal(typeof result.reason_code, 'string');
-    for (const field of Object.keys(result)) {
+  for (const value of corpus) {
+    assert.equal(typeof value.reason_code, 'string');
+    for (const field of Object.keys(value)) {
       observedFields.add(field);
       assert.ok(allowedFields.includes(field), `public result field ${field} is not cataloged`);
     }
-    assert.ok(reasonCodes.includes(result.reason_code), `public reason code ${result.reason_code} is not cataloged`);
-    for (const code of result.secondary_reason_codes || []) assert.ok(reasonCodes.includes(code), `secondary reason code ${code} is not cataloged`);
-    for (const component of result.mixed_components || []) assert.ok(reasonCodes.includes(component.reason_code), `mixed-component reason code ${component.reason_code} is not cataloged`);
+    assert.ok(reasonCodes.includes(value.reason_code), `public reason code ${value.reason_code} is not cataloged`);
+    for (const code of value.secondary_reason_codes || []) assert.ok(reasonCodes.includes(code), `secondary reason code ${code} is not cataloged`);
+    for (const component of value.mixed_components || []) assert.ok(reasonCodes.includes(component.reason_code), `mixed-component reason code ${component.reason_code} is not cataloged`);
   }
   assert.deepEqual([...observedFields].sort(), [...publicFields].sort());
+
+  const baseInput = fixtureInput({ command: 'Get-Content $env:TARGET', shell: 'powershell' });
+  assertAllExportedBoundariesReject(loadMutatedEngine((source) => {
+    let mutated = mutateResultBlock(source, (block) => replaceOnce(block, '    privacy_safe: true,', '    uncommon_public_field: true,\n    privacy_safe: true,', 'uncommon public field'));
+    mutated = replaceOnce(mutated, 'function result(', 'function differentlyNamedResult(', 'differently named constructor');
+    mutated = replaceOnce(mutated, '=> result({', '=> differentlyNamedResult({', 'differently named constructor call');
+    return mutated;
+  }), baseInput);
+  assertAllExportedBoundariesReject(loadMutatedEngine((source) => mutateResultBlock(source, (block) => replaceOnce(block, '    reason_code: reasonCode(reason),', "    reason_code: ['UNDECLARED', 'COMPUTED'].join('_'),", 'computed reason code'))), editInside());
+  assertAllExportedBoundariesReject(loadMutatedEngine((source) => mutateResultBlock(source, (block) => {
+    let mutated = replaceOnce(block, '}) {\n', '}) {\n  const aliasedReasonCode = reasonCode;\n', 'aliased reason binding');
+    return replaceOnce(mutated, '    reason_code: reasonCode(reason),', "    reason_code: aliasedReasonCode('UNDECLARED_ALIASED_REASON'),", 'aliased reason code');
+  })), editInside());
+
+  const multiInput = {
+    ...fixtureInput(structured('edit', `${ROOT}\\catalogue-multi-a.txt`)),
+    operations: [
+      structured('edit', `${ROOT}\\catalogue-multi-a.txt`),
+      structured('delete', `${ROOT}\\catalogue-multi-b.txt`),
+    ],
+  };
+  assertMergeBoundariesReject(loadMutatedEngine((source) => replaceOnce(source, '  const secondaryReasonCodes = [...new Set(list.map((entry) => entry.reason_code).filter((code) => code && code !== selected.reason_code))];', "  const secondaryReasonCodes = ['UNDECLARED_SECONDARY_REASON'];", 'undeclared secondary reason')), multiInput);
+  assertMergeBoundariesReject(loadMutatedEngine((source) => replaceOnce(source, '      reason_code: entry.reason_code,', "      reason_code: 'UNDECLARED_MIXED_REASON',", 'undeclared mixed reason')), multiInput);
+
+  const malformedInput = null;
+  assertAllExportedBoundariesReject(loadMutatedEngine((source) => mutateSafeFailureBlock(source, (block) => replaceOnce(block, '    privacy_safe: true,', '    undeclared_safe_failure_field: true,\n    privacy_safe: true,', 'undeclared safe-failure field'))), malformedInput);
+  assertAllExportedBoundariesReject(loadMutatedEngine((source) => mutateSafeFailureBlock(source, (block) => replaceOnce(block, "reasonCode(reason, 'ENGINE_FAILURE_UNSUPPORTED')", "reasonCode('UNDECLARED_SAFE_FAILURE_REASON', 'ENGINE_FAILURE_UNSUPPORTED')", 'undeclared safe-failure reason'))), malformedInput);
+
+  assert.doesNotThrow(() => assertFixturePolicyBinding(fixtures, sourcePolicy));
+  assert.throws(() => assertFixturePolicyBinding({ ...fixtures, policy_version: '1.0.0' }, sourcePolicy), /fixture policy version/);
+  assert.throws(() => assertFixturePolicyBinding({ ...fixtures, policy_version: '1.0.2' }, sourcePolicy), /fixture policy version/);
 });
 
 const requiredFixtureCaseIds = [...new Set(readJson('_projects/development/toolkit-guardrails/_main/fixtures/fixture-manifest.json').required_case_ids)];

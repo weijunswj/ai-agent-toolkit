@@ -80,7 +80,21 @@ const FRESHNESS_VALUES = new Set(['fresh', 'current', 'verified']);
 const PRE_EXECUTION_POSITIONS = new Set(['pre-execution', 'before-execution', 'preflight']);
 const CLASSIFIER_OPTION_MAX_PROTOTYPE_DEPTH = 16;
 const OPERATION_SCHEMA_PATH = path.resolve(__dirname, '..', '..', '..', '_projects', 'development', 'toolkit-guardrails', '_main', 'operation-contract.schema.json');
+const PUBLIC_RESULT_MAX_ITEMS = 128;
+const PUBLIC_RESULT_REQUIRED_FIELDS = Object.freeze([
+  'decision',
+  'reason_code',
+  'enforcement_requirement',
+  'safe_target_class',
+  'operation_class',
+  'request_digest',
+  'operation_digest',
+  'target_digest',
+  'privacy_safe',
+]);
+const PUBLIC_RESULT_DIGEST = /^[a-f0-9]{64}$/;
 let operationSchemaValidator;
+let publicResultCatalogueCache;
 
 function firstDefined(...values) {
   return values.find((value) => value !== undefined && value !== null);
@@ -241,19 +255,16 @@ function validateNormalizedOperationContract(record) {
   }
 }
 
-function safeFailure(reason, input) {
+function safeFailure(reason) {
+  const failureReason = reasonCode(reason, 'ENGINE_FAILURE_UNSUPPORTED');
   return {
     decision: 'unsupported',
-    reason_code: reasonCode(reason, 'ENGINE_FAILURE_UNSUPPORTED'),
+    reason_code: failureReason,
     enforcement_requirement: 'stop-before-execution',
     safe_target_class: 'unknown-target',
     operation_class: 'unsupported-route',
-    request_digest: sha256({
-      reason: reasonCode(reason, 'ENGINE_FAILURE_UNSUPPORTED'),
-      host: input?.session?.host || input?.host || null,
-      route: input?.operation?.canonical_route || input?.canonical_route || null,
-    }),
-    operation_digest: sha256({ failure: reasonCode(reason, 'ENGINE_FAILURE_UNSUPPORTED') }),
+    request_digest: sha256({ failure: failureReason }),
+    operation_digest: sha256({ failure: failureReason }),
     target_digest: sha256([]),
     privacy_safe: true,
   };
@@ -272,6 +283,206 @@ function result({ decision, reason, enforcement, targetClass, operationClass, re
     ...(componentDigestValue ? { component_digest: componentDigestValue, component_count: componentCount } : {}),
     privacy_safe: true,
   };
+}
+
+function canonicalFailureResult() {
+  const digest = sha256({ failure: 'ENGINE_FAILURE_UNSUPPORTED' });
+  return {
+    decision: 'unsupported',
+    reason_code: 'ENGINE_FAILURE_UNSUPPORTED',
+    enforcement_requirement: 'stop-before-execution',
+    safe_target_class: 'unknown-target',
+    operation_class: 'unsupported-route',
+    request_digest: digest,
+    operation_digest: digest,
+    target_digest: sha256([]),
+    privacy_safe: true,
+  };
+}
+
+function uniqueStrings(values) {
+  return Array.isArray(values)
+    && values.every((value) => typeof value === 'string')
+    && new Set(values).size === values.length;
+}
+
+function loadPublicResultCatalogue() {
+  const policy = getPolicy();
+  const allowedFields = policy?.privacy?.result_fields_allowed;
+  const decisions = policy?.decision_contract;
+  const enforcementRequirements = policy?.enforcement_requirements;
+  const safeTargetClasses = policy?.safe_target_classes;
+  const operationClasses = Array.isArray(policy?.operation_classes)
+    ? policy.operation_classes.map((entry) => entry?.id)
+    : null;
+  const reasonCodes = policy?.reason_codes;
+  if (!uniqueStrings(allowedFields)
+    || !uniqueStrings(decisions)
+    || !uniqueStrings(enforcementRequirements)
+    || !uniqueStrings(safeTargetClasses)
+    || !uniqueStrings(operationClasses)
+    || !uniqueStrings(reasonCodes)
+    || !PUBLIC_RESULT_REQUIRED_FIELDS.every((field) => allowedFields.includes(field))) throw new Error('PUBLIC_RESULT_CATALOGUE_INVALID');
+  return {
+    allowedFields: new Set(allowedFields),
+    decisions: new Set(decisions),
+    enforcementRequirements: new Set(enforcementRequirements),
+    safeTargetClasses: new Set(safeTargetClasses),
+    operationClasses: new Set(operationClasses),
+    reasonCodes: new Set(reasonCodes),
+  };
+}
+
+function publicResultCatalogue() {
+  if (publicResultCatalogueCache !== undefined) return publicResultCatalogueCache;
+  try {
+    publicResultCatalogueCache = loadPublicResultCatalogue();
+  } catch {
+    publicResultCatalogueCache = null;
+  }
+  return publicResultCatalogueCache;
+}
+
+function dataDescriptors(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  try {
+    if (utilTypes.isProxy(value)) return null;
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    for (const key of Reflect.ownKeys(descriptors)) {
+      if (typeof key !== 'string' || !Object.hasOwn(descriptors[key], 'value')) return null;
+    }
+    return descriptors;
+  } catch {
+    return null;
+  }
+}
+
+function boundedStringArray(value, allowedValues) {
+  if (!Array.isArray(value)) return null;
+  try {
+    if (utilTypes.isProxy(value)) return null;
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const lengthDescriptor = descriptors.length;
+    if (!lengthDescriptor || !Object.hasOwn(lengthDescriptor, 'value') || !Number.isInteger(lengthDescriptor.value) || lengthDescriptor.value < 0 || lengthDescriptor.value > PUBLIC_RESULT_MAX_ITEMS) return null;
+    for (const key of Reflect.ownKeys(descriptors)) {
+      if (key === 'length') continue;
+      if (typeof key !== 'string' || !/^(?:0|[1-9][0-9]*)$/.test(key) || Number(key) >= lengthDescriptor.value) return null;
+    }
+    const values = [];
+    for (let index = 0; index < lengthDescriptor.value; index += 1) {
+      const descriptor = descriptors[index];
+      if (!descriptor || !Object.hasOwn(descriptor, 'value') || !allowedValues.has(descriptor.value)) return null;
+      values.push(descriptor.value);
+    }
+    return values;
+  } catch {
+    return null;
+  }
+}
+
+function mixedComponentValue(value, catalogue) {
+  const descriptors = dataDescriptors(value);
+  if (!descriptors) return null;
+  const keys = Reflect.ownKeys(descriptors);
+  const expected = ['decision', 'reason_code', 'operation_class', 'safe_target_class'];
+  if (keys.length !== expected.length || keys.some((key) => !expected.includes(key))) return null;
+  const decision = descriptors.decision.value;
+  const reason = descriptors.reason_code.value;
+  const operationClass = descriptors.operation_class.value;
+  const safeTargetClass = descriptors.safe_target_class.value;
+  if (!catalogue.decisions.has(decision)
+    || !catalogue.reasonCodes.has(reason)
+    || !catalogue.operationClasses.has(operationClass)
+    || !catalogue.safeTargetClasses.has(safeTargetClass)) return null;
+  return {
+    decision,
+    reason_code: reason,
+    operation_class: operationClass,
+    safe_target_class: safeTargetClass,
+  };
+}
+
+function finalizePublicResult(candidate) {
+  const catalogue = publicResultCatalogue();
+  if (!catalogue) return canonicalFailureResult();
+  try {
+    const descriptors = dataDescriptors(candidate);
+    if (!descriptors) return canonicalFailureResult();
+    const keys = Reflect.ownKeys(descriptors);
+    if (keys.length > catalogue.allowedFields.size || keys.some((key) => !catalogue.allowedFields.has(key))) return canonicalFailureResult();
+    if (PUBLIC_RESULT_REQUIRED_FIELDS.some((field) => !Object.hasOwn(descriptors, field))) return canonicalFailureResult();
+
+    const decision = descriptors.decision.value;
+    const reason = descriptors.reason_code.value;
+    const enforcement = descriptors.enforcement_requirement.value;
+    const safeTargetClass = descriptors.safe_target_class.value;
+    const operationClass = descriptors.operation_class.value;
+    if (!catalogue.decisions.has(decision)
+      || !catalogue.reasonCodes.has(reason)
+      || !catalogue.enforcementRequirements.has(enforcement)
+      || !catalogue.safeTargetClasses.has(safeTargetClass)
+      || !catalogue.operationClasses.has(operationClass)
+      || descriptors.privacy_safe.value !== true
+      || typeof descriptors.request_digest.value !== 'string'
+      || !PUBLIC_RESULT_DIGEST.test(descriptors.request_digest.value)
+      || typeof descriptors.operation_digest.value !== 'string'
+      || !PUBLIC_RESULT_DIGEST.test(descriptors.operation_digest.value)
+      || typeof descriptors.target_digest.value !== 'string'
+      || !PUBLIC_RESULT_DIGEST.test(descriptors.target_digest.value)) return canonicalFailureResult();
+
+    const hasComponentDigest = Object.hasOwn(descriptors, 'component_digest');
+    const hasComponentCount = Object.hasOwn(descriptors, 'component_count');
+    if (hasComponentDigest !== hasComponentCount) return canonicalFailureResult();
+    if (hasComponentDigest && (typeof descriptors.component_digest.value !== 'string'
+      || !PUBLIC_RESULT_DIGEST.test(descriptors.component_digest.value)
+      || !Number.isInteger(descriptors.component_count.value)
+      || descriptors.component_count.value < 0
+      || descriptors.component_count.value > PUBLIC_RESULT_MAX_ITEMS)) return canonicalFailureResult();
+
+    const secondaryReasonCodes = Object.hasOwn(descriptors, 'secondary_reason_codes')
+      ? boundedStringArray(descriptors.secondary_reason_codes.value, catalogue.reasonCodes)
+      : null;
+    if (Object.hasOwn(descriptors, 'secondary_reason_codes') && secondaryReasonCodes === null) return canonicalFailureResult();
+    const mixedComponents = Object.hasOwn(descriptors, 'mixed_components') ? descriptors.mixed_components.value : null;
+    let normalizedMixedComponents = null;
+    if (Object.hasOwn(descriptors, 'mixed_components')) {
+      if (!Array.isArray(mixedComponents)) return canonicalFailureResult();
+      try {
+        if (utilTypes.isProxy(mixedComponents)) return canonicalFailureResult();
+        const mixedDescriptors = Object.getOwnPropertyDescriptors(mixedComponents);
+        const lengthDescriptor = mixedDescriptors.length;
+        if (!lengthDescriptor || !Object.hasOwn(lengthDescriptor, 'value') || !Number.isInteger(lengthDescriptor.value) || lengthDescriptor.value < 0 || lengthDescriptor.value > PUBLIC_RESULT_MAX_ITEMS) return canonicalFailureResult();
+        for (const key of Reflect.ownKeys(mixedDescriptors)) {
+          if (key === 'length') continue;
+          if (typeof key !== 'string' || !/^(?:0|[1-9][0-9]*)$/.test(key) || Number(key) >= lengthDescriptor.value) return canonicalFailureResult();
+        }
+        normalizedMixedComponents = [];
+        for (let index = 0; index < lengthDescriptor.value; index += 1) {
+          const descriptor = mixedDescriptors[index];
+          if (!descriptor || !Object.hasOwn(descriptor, 'value')) return canonicalFailureResult();
+          const normalized = mixedComponentValue(descriptor.value, catalogue);
+          if (!normalized) return canonicalFailureResult();
+          normalizedMixedComponents.push(normalized);
+        }
+      } catch {
+        return canonicalFailureResult();
+      }
+    }
+
+    const normalized = {};
+    for (const field of PUBLIC_RESULT_REQUIRED_FIELDS) normalized[field] = descriptors[field].value;
+    if (hasComponentDigest) {
+      normalized.component_digest = descriptors.component_digest.value;
+      normalized.component_count = descriptors.component_count.value;
+    }
+    if (secondaryReasonCodes !== null) normalized.secondary_reason_codes = secondaryReasonCodes;
+    if (normalizedMixedComponents !== null) normalized.mixed_components = normalizedMixedComponents;
+    return normalized;
+  } catch {
+    return canonicalFailureResult();
+  }
 }
 
 function expectedRouteIdentity(record) {
@@ -591,7 +802,7 @@ function decideOne(record, classification, options = {}) {
     return make('ask', 'SECRET_ACCESS_REQUIRES_APPROVAL', 'trusted-one-shot-approval', 'secret-bearing', 'secret-access');
   }
 
-  if (GITHUB_MUTATION_CLASSES.has(classification.operation_class) && authority.reason === 'CONTROLLER_GITHUB_AUTHORIZED') return make('allow', authority.reason, 'controller-authority', 'external-system');
+  if (GITHUB_MUTATION_CLASSES.has(classification.operation_class) && authority.reason === 'CONTROLLER_GITHUB_AUTHORIZED') return make('allow', authority.reason, 'trusted-one-shot-approval', 'external-system');
 
   if (classification.operation_class === 'git-push') {
     const push = classification.git_push || {};
@@ -643,7 +854,7 @@ function decideOne(record, classification, options = {}) {
   return make(approved.decision === 'ask' ? 'ask' : 'unsupported', approved.decision === 'ask' ? 'OUTSIDE_REPOSITORY_TARGET' : approved.reason, approved.decision === 'ask' ? 'trusted-one-shot-approval' : 'stop-before-execution');
 }
 
-function evaluateOne(input, options = {}) {
+function evaluateOneCandidate(input, options = {}) {
   if (hasClassifierAuthorityOption(options)) return safeFailure('CLASSIFIER_FAILURE_UNSUPPORTED', input);
   let record;
   try {
@@ -667,6 +878,16 @@ function evaluateOne(input, options = {}) {
     return safeFailure(error?.message === 'CLASSIFICATION_TARGET_INVALID' ? 'OPERATION_CONTRACT_INVALID' : 'CLASSIFIER_FAILURE_UNSUPPORTED', input);
   }
   return decideOne(record, classification, options);
+}
+
+function evaluateOne(input, options = {}) {
+  let candidate;
+  try {
+    candidate = evaluateOneCandidate(input, options);
+  } catch {
+    candidate = safeFailure('ENGINE_FAILURE_UNSUPPORTED');
+  }
+  return finalizePublicResult(candidate);
 }
 
 function mergeResults(results, input) {
@@ -708,19 +929,28 @@ function mergeResults(results, input) {
 }
 
 function evaluate(input, options = {}) {
+  let candidate;
   try {
     if (Array.isArray(input?.operations)) {
-      const results = input.operations.map((operation) => evaluateOne({ ...input, operation, operations: undefined }, options));
-      return mergeResults(results, input);
+      const results = input.operations.map((operation) => evaluateOneCandidate({ ...input, operation, operations: undefined }, options));
+      candidate = mergeResults(results, input);
+    } else {
+      candidate = evaluateOneCandidate(input, options);
     }
-    return evaluateOne(input, options);
   } catch (error) {
-    return safeFailure('ENGINE_FAILURE_UNSUPPORTED', input);
+    candidate = safeFailure('ENGINE_FAILURE_UNSUPPORTED');
   }
+  return finalizePublicResult(candidate);
 }
 
 function evaluateGuardrail(input, options = {}) {
-  return evaluate(input, options);
+  let candidate;
+  try {
+    candidate = evaluate(input, options);
+  } catch {
+    candidate = safeFailure('ENGINE_FAILURE_UNSUPPORTED');
+  }
+  return finalizePublicResult(candidate);
 }
 
 module.exports = {

@@ -1,6 +1,6 @@
 {
   "fixture_manifest_version": "toolkit.guardrail.fixtures.v1",
-  "policy_version": "1.0.0",
+  "policy_version": "1.0.1",
   "design_lock": "DL-313-001",
   "source_only": true,
   "published_outputs": [],

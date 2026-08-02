@@ -5,9 +5,9 @@
   "title": "Toolkit Guardrails",
   "module_path": "_projects/development/toolkit-guardrails",
   "main_path": "_projects/development/toolkit-guardrails/_main",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "version_policy": "semver",
-  "version_notes": "A9 aligns the canonical public result catalog, makes classifier-option rejection proxy-safe, and documents the complete volatile replay boundary for the source-only reference implementation in issue #313.",
+  "version_notes": "A10 enforces the canonical public-result catalogue at every exported engine boundary and binds the fixture manifest to canonical policy 1.0.1.",
   "outputs": [],
   "writes": {
     "allowed": [],
