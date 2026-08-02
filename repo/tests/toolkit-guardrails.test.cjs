@@ -2071,10 +2071,10 @@ const fixtureCaseAssertions = new Map([
     const project = readJson('_projects/development/toolkit-guardrails/toolkit.project.json');
     const sourcePolicy = readJson('_projects/development/toolkit-guardrails/_main/guardrail-policy.json');
     const fixtureManifest = readJson('_projects/development/toolkit-guardrails/_main/fixtures/fixture-manifest.json');
-    assert.equal(project.version, '1.0.3');
+    assert.equal(project.version, '1.0.4');
     assert.equal(sourcePolicy.policy_version, '1.0.1');
     assertFixturePolicyBinding(fixtureManifest, sourcePolicy);
-    assert.match(project.version_notes, /canonical public[- ]result catalogue|fixture manifest/i);
+    assert.match(project.version_notes, /canonical-policy-only public evaluation/i);
   }],
   ['failure.approval-verifier-exception', () => {
     const input = fixtureInput(structured('edit', `${SIBLING}\\approval-error.txt`));
@@ -2274,6 +2274,197 @@ test('canonical policy catalogs every public engine result field and reason code
   assert.doesNotThrow(() => assertFixturePolicyBinding(fixtures, sourcePolicy));
   assert.throws(() => assertFixturePolicyBinding({ ...fixtures, policy_version: '1.0.0' }, sourcePolicy), /fixture policy version/);
   assert.throws(() => assertFixturePolicyBinding({ ...fixtures, policy_version: '1.0.2' }, sourcePolicy), /fixture policy version/);
+});
+
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function exportedResults(input, options) {
+  return Object.fromEntries(['evaluate', 'evaluateOne', 'evaluateGuardrail'].map((name) => [name, engine[name](input, options)]));
+}
+
+test('all exported evaluators use canonical policy authority and a closed verifier option projection', () => {
+  const options = { now: NOW, trustedTargetResolver };
+  const policyOverride = cloneJson(policy.getPolicy());
+  policyOverride.authority.forbidden_scopes = [];
+  const policyInput = fixtureInput({
+    ...structured('edit', `${ROOT}\\a11-policy-authority.txt`),
+    scope: 'production',
+  }, {
+    authority: fixtureAuthority({
+      design_lock: { id: 'DL-313-001', status: 'active', allowed_scopes: ['production'] },
+    }),
+  });
+  const canonical = exportedResults(policyInput, options);
+  for (const name of Object.keys(canonical)) {
+    assert.equal(canonical[name].decision, 'deny', name);
+    assert.equal(canonical[name].reason_code, 'DESIGN_LOCK_VIOLATION', name);
+    assert.deepEqual(exportedResults(policyInput, { ...options, policy: policyOverride })[name], canonical[name], name);
+  }
+
+  const inheritedOptions = Object.create({ policy: policyOverride });
+  Object.assign(inheritedOptions, options);
+  const inheritedResults = exportedResults(policyInput, inheritedOptions);
+  for (const name of Object.keys(canonical)) assert.deepEqual(inheritedResults[name], canonical[name], name);
+
+  let policyGetterCalls = 0;
+  const accessorOptions = { ...options };
+  Object.defineProperty(accessorOptions, 'policy', {
+    configurable: true,
+    get() {
+      policyGetterCalls += 1;
+      return policyOverride;
+    },
+  });
+  const accessorResults = exportedResults(policyInput, accessorOptions);
+  for (const name of Object.keys(canonical)) assert.deepEqual(accessorResults[name], canonical[name], name);
+  assert.equal(policyGetterCalls, 0);
+
+  let throwingPolicyGetterCalls = 0;
+  const throwingOptions = { ...options };
+  Object.defineProperty(throwingOptions, 'policy', {
+    configurable: true,
+    get() {
+      throwingPolicyGetterCalls += 1;
+      throw new Error('policy getter must not execute');
+    },
+  });
+  assert.doesNotThrow(() => {
+    const results = exportedResults(policyInput, throwingOptions);
+    for (const name of Object.keys(canonical)) assert.deepEqual(results[name], canonical[name], name);
+  });
+  assert.equal(throwingPolicyGetterCalls, 0);
+
+  let proxyTrapCalls = 0;
+  const proxyOptions = new Proxy({ ...options, policy: policyOverride }, {
+    get() {
+      proxyTrapCalls += 1;
+      throw new Error('options proxy get trap must not execute');
+    },
+    getOwnPropertyDescriptor() {
+      proxyTrapCalls += 1;
+      throw new Error('options proxy descriptor trap must not execute');
+    },
+    ownKeys() {
+      proxyTrapCalls += 1;
+      throw new Error('options proxy ownKeys trap must not execute');
+    },
+    getPrototypeOf() {
+      proxyTrapCalls += 1;
+      throw new Error('options proxy prototype trap must not execute');
+    },
+  });
+  for (const name of ['evaluate', 'evaluateOne', 'evaluateGuardrail']) {
+    const result = engine[name](policyInput, proxyOptions);
+    assert.equal(result.decision, 'unsupported', name);
+    assert.equal(result.reason_code, 'CLASSIFIER_FAILURE_UNSUPPORTED', name);
+  }
+  assert.equal(proxyTrapCalls, 0);
+
+  const widenedPolicy = cloneJson(policy.getPolicy());
+  widenedPolicy.authority.active_design_lock = 'DL-313-001-ATTACKER';
+  widenedPolicy.authority.permitted_roles.push('attacker');
+  widenedPolicy.authority.forbidden_scopes = [];
+  const widenedInput = fixtureInput({
+    ...structured('edit', `${ROOT}\\a11-widened-authority.txt`),
+    scope: 'production',
+  }, {
+    authority: fixtureAuthority({
+      role: { name: 'attacker', allowed: true },
+      design_lock: { id: 'DL-313-001-ATTACKER', status: 'active', allowed_scopes: ['production'] },
+    }),
+  });
+  const widenedCanonical = exportedResults(widenedInput, options);
+  for (const name of Object.keys(widenedCanonical)) {
+    assert.equal(widenedCanonical[name].decision, 'deny', name);
+    assert.equal(widenedCanonical[name].reason_code, 'DESIGN_LOCK_VIOLATION', name);
+    assert.deepEqual(exportedResults(widenedInput, { ...options, policy: widenedPolicy })[name], widenedCanonical[name], name);
+  }
+
+  const attackerApprovalInput = fixtureInput(structured('edit', `${SIBLING}\\a11-canonical-approval.txt`));
+  const attackerApproval = buildApproval(attackerApprovalInput, {
+    source: 'attacker-channel',
+    trusted_user_channel: 'attacker-channel',
+  });
+  const approvalInput = { ...attackerApprovalInput, approval: attackerApproval };
+  const widenedApprovalPolicy = cloneJson(policy.getPolicy());
+  widenedApprovalPolicy.approval.trusted_channels.push('attacker-channel');
+  const canonicalApproval = exportedResults(approvalInput, options);
+  for (const name of Object.keys(canonicalApproval)) {
+    assert.equal(canonicalApproval[name].decision, 'ask', name);
+    assert.equal(canonicalApproval[name].reason_code, 'OUTSIDE_REPOSITORY_TARGET', name);
+    assert.deepEqual(exportedResults(approvalInput, { ...options, policy: widenedApprovalPolicy })[name], canonicalApproval[name], name);
+  }
+
+  const ordinaryInput = editInside();
+  const ordinaryWithDeterministicOptions = exportedResults(ordinaryInput, options);
+  const ordinaryWithEquivalentOptions = exportedResults(ordinaryInput, { now: NOW, trustedTargetResolver });
+  for (const name of Object.keys(ordinaryWithDeterministicOptions)) assert.deepEqual(ordinaryWithEquivalentOptions[name], ordinaryWithDeterministicOptions[name], name);
+
+  const canonicalApprovalInput = withApproval(fixtureInput(structured('edit', `${SIBLING}\\a11-valid-approval.txt`)));
+  assert.equal(engine.evaluate(canonicalApprovalInput, options).decision, 'allow');
+});
+
+function mutateResultWithPublicArray(source, field, expression) {
+  return mutateResultBlock(source, (block) => replaceOnce(
+    block,
+    '    privacy_safe: true,',
+    `    ${field}: ${expression},\n    privacy_safe: true,`,
+    `${field} injected result array`,
+  ));
+}
+
+function publicArrayExpression(field, shape) {
+  const ordinary = field === 'secondary_reason_codes'
+    ? "['ROUTINE_REPOSITORY_OPERATION']"
+    : "[{ decision: 'allow', reason_code: 'ROUTINE_REPOSITORY_OPERATION', operation_class: 'edit', safe_target_class: 'canonical-repository' }]";
+  if (shape === 'ordinary') return ordinary;
+  if (shape === 'object-prototype') return `Object.setPrototypeOf(${ordinary}, {})`;
+  if (shape === 'null-prototype') return `Object.setPrototypeOf(${ordinary}, null)`;
+  if (shape === 'array-subclass') return field === 'secondary_reason_codes'
+    ? "new (class extends Array {})(...['ROUTINE_REPOSITORY_OPERATION'])"
+    : "new (class extends Array {})(... [{ decision: 'allow', reason_code: 'ROUTINE_REPOSITORY_OPERATION', operation_class: 'edit', safe_target_class: 'canonical-repository' }])";
+  if (shape === 'proxy') return `new Proxy(${ordinary}, { get() { globalThis.__a11NestedArrayTrapCalls += 1; throw new Error('nested array get trap must not execute'); }, getOwnPropertyDescriptor() { globalThis.__a11NestedArrayTrapCalls += 1; throw new Error('nested array descriptor trap must not execute'); }, getPrototypeOf() { globalThis.__a11NestedArrayTrapCalls += 1; throw new Error('nested array prototype trap must not execute'); } })`;
+  if (shape === 'sparse') return 'new Array(1)';
+  if (shape === 'accessor-index') return "Object.defineProperty(new Array(1), '0', { configurable: true, enumerable: true, get() { throw new Error('nested array accessor must not execute'); } })";
+  if (shape === 'oversized') return 'new Array(129)';
+  throw new Error(`unknown public array shape: ${shape}`);
+}
+
+test('exported result boundaries require ordinary dense nested result arrays', () => {
+  const input = editInside();
+  const shapes = [
+    'ordinary',
+    'object-prototype',
+    'null-prototype',
+    'array-subclass',
+    'proxy',
+    'sparse',
+    'accessor-index',
+    'oversized',
+  ];
+  globalThis.__a11NestedArrayTrapCalls = 0;
+  try {
+    for (const field of ['secondary_reason_codes', 'mixed_components']) {
+      for (const shape of shapes) {
+        const engineModule = loadMutatedEngine((source) => mutateResultWithPublicArray(source, field, publicArrayExpression(field, shape)));
+        if (shape === 'ordinary') {
+          for (const name of ['evaluate', 'evaluateOne', 'evaluateGuardrail']) {
+            const result = engineModule[name](input, { now: NOW, trustedTargetResolver });
+            assert.notEqual(result.reason_code, 'ENGINE_FAILURE_UNSUPPORTED', `${field}:${shape}:${name}`);
+            assert.ok(Array.isArray(result[field]), `${field}:${shape}:${name}`);
+            assert.strictEqual(Object.getPrototypeOf(result[field]), Array.prototype, `${field}:${shape}:${name}`);
+          }
+        } else {
+          assertAllExportedBoundariesReject(engineModule, input);
+        }
+      }
+    }
+    assert.equal(globalThis.__a11NestedArrayTrapCalls, 0);
+  } finally {
+    delete globalThis.__a11NestedArrayTrapCalls;
+  }
 });
 
 const requiredFixtureCaseIds = [...new Set(readJson('_projects/development/toolkit-guardrails/_main/fixtures/fixture-manifest.json').required_case_ids)];

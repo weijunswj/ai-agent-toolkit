@@ -79,6 +79,24 @@ const HARD_ENFORCEMENT_LEVELS = new Set(['hard-runtime-enforcement', 'hard-pre-e
 const FRESHNESS_VALUES = new Set(['fresh', 'current', 'verified']);
 const PRE_EXECUTION_POSITIONS = new Set(['pre-execution', 'before-execution', 'preflight']);
 const CLASSIFIER_OPTION_MAX_PROTOTYPE_DEPTH = 16;
+const PUBLIC_OPTION_KEYS = Object.freeze([
+  'now',
+  'trustedTargetResolver',
+  'trustedTargetResolutionResolver',
+  'targetResolutionResolver',
+  'targetResolver',
+  'resolveRepositoryContext',
+  'additionalRootAuthorityVerifier',
+  'path_semantics',
+  'use_filesystem',
+  'fsResolver',
+  'gitResolver',
+  'operation_cwd',
+  'shell',
+  'all_positionals',
+  'stdin_bound',
+]);
+const APPROVAL_VERIFIER_OPTION_PRESENT = Symbol('approvalVerifierOptionPresent');
 const OPERATION_SCHEMA_PATH = path.resolve(__dirname, '..', '..', '..', '_projects', 'development', 'toolkit-guardrails', '_main', 'operation-contract.schema.json');
 const PUBLIC_RESULT_MAX_ITEMS = 128;
 const PUBLIC_RESULT_REQUIRED_FIELDS = Object.freeze([
@@ -122,6 +140,66 @@ function hasClassifierAuthorityOption(options) {
     }
   }
   return false;
+}
+
+function hasOptionProperty(options, propertyName) {
+  if (options === null || (typeof options !== 'object' && typeof options !== 'function')) return false;
+  let current = options;
+  const visited = new Set();
+  for (let depth = 0; current !== null; depth += 1) {
+    try {
+      if (utilTypes.isProxy(current)) return true;
+      if (depth >= CLASSIFIER_OPTION_MAX_PROTOTYPE_DEPTH || visited.has(current)) return true;
+      visited.add(current);
+      if (Object.hasOwn(current, propertyName)) return true;
+      current = Object.getPrototypeOf(current);
+    } catch {
+      return true;
+    }
+  }
+  return false;
+}
+
+function projectPublicOptions(options) {
+  if (options === null || (typeof options !== 'object' && typeof options !== 'function')) return Object.create(null);
+  const projected = Object.create(null);
+  const visited = new Set();
+  const seenKeys = new Set();
+  let current = options;
+  for (let depth = 0; current !== null; depth += 1) {
+    try {
+      if (utilTypes.isProxy(current)) return null;
+      if (depth >= CLASSIFIER_OPTION_MAX_PROTOTYPE_DEPTH || visited.has(current)) return null;
+      visited.add(current);
+      for (const key of PUBLIC_OPTION_KEYS) {
+        if (seenKeys.has(key)) continue;
+        const descriptor = Object.getOwnPropertyDescriptor(current, key);
+        if (!descriptor) continue;
+        seenKeys.add(key);
+        if (Object.hasOwn(descriptor, 'value')) projected[key] = descriptor.value;
+      }
+      current = Object.getPrototypeOf(current);
+    } catch {
+      return null;
+    }
+  }
+  if (hasOptionProperty(options, 'approvalVerifier')) {
+    Object.defineProperty(projected, APPROVAL_VERIFIER_OPTION_PRESENT, { value: true });
+  }
+  return projected;
+}
+
+function deterministicNowOption(options) {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(options, 'now');
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')) return undefined;
+    const value = descriptor.value;
+    if (typeof value === 'string') return value;
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+  } catch {
+    return undefined;
+  }
+  return undefined;
 }
 
 function nonEmptyString(value) {
@@ -363,6 +441,7 @@ function boundedStringArray(value, allowedValues) {
   if (!Array.isArray(value)) return null;
   try {
     if (utilTypes.isProxy(value)) return null;
+    if (Object.getPrototypeOf(value) !== Array.prototype) return null;
     const descriptors = Object.getOwnPropertyDescriptors(value);
     const lengthDescriptor = descriptors.length;
     if (!lengthDescriptor || !Object.hasOwn(lengthDescriptor, 'value') || !Number.isInteger(lengthDescriptor.value) || lengthDescriptor.value < 0 || lengthDescriptor.value > PUBLIC_RESULT_MAX_ITEMS) return null;
@@ -451,6 +530,7 @@ function finalizePublicResult(candidate) {
       if (!Array.isArray(mixedComponents)) return canonicalFailureResult();
       try {
         if (utilTypes.isProxy(mixedComponents)) return canonicalFailureResult();
+        if (Object.getPrototypeOf(mixedComponents) !== Array.prototype) return canonicalFailureResult();
         const mixedDescriptors = Object.getOwnPropertyDescriptors(mixedComponents);
         const lengthDescriptor = mixedDescriptors.length;
         if (!lengthDescriptor || !Object.hasOwn(lengthDescriptor, 'value') || !Number.isInteger(lengthDescriptor.value) || lengthDescriptor.value < 0 || lengthDescriptor.value > PUBLIC_RESULT_MAX_ITEMS) return canonicalFailureResult();
@@ -590,7 +670,8 @@ function controllerAuthorityCheck(record, classification, options = {}) {
   return { decision: 'allow', reason: 'CONTROLLER_GITHUB_AUTHORIZED' };
 }
 
-function authorityCheck(record, classification, policy, options = {}) {
+function authorityCheck(record, classification, options = {}) {
+  const policy = getPolicy();
   const authority = record.authority;
   if (!authority || typeof authority !== 'object') return { decision: 'unsupported', reason: 'AUTHORITY_CONTEXT_MISSING' };
   if (authority.controller_hold === true) return { decision: 'deny', reason: 'CONTROLLER_HOLD_ACTIVE' };
@@ -722,15 +803,14 @@ function ensureCommandTargets(record, classification, options) {
 }
 
 function approvalDecision(record, options) {
-  if (Object.hasOwn(options || {}, 'approvalVerifier')) {
+  if (options?.[APPROVAL_VERIFIER_OPTION_PRESENT] === true) {
     return { decision: 'unsupported', reason: 'APPROVAL_VERIFIER_OVERRIDE_REJECTED' };
   }
   try {
-    const verified = verifyApproval(record, record.approval, {
-      ...options,
-      policy: options.policy,
-      operation_decision: 'ask',
-    });
+    const verifierOptions = { operation_decision: 'ask' };
+    const now = deterministicNowOption(options);
+    if (now !== undefined) verifierOptions.now = now;
+    const verified = verifyApproval(record, record.approval, verifierOptions);
     if (verified?.valid === true) return { decision: 'allow', reason: 'APPROVED_ONE_SHOT_OPERATION' };
     if (verified?.reason_code === 'APPROVAL_REPLAY_STORE_UNTRUSTED') {
       return { decision: 'unsupported', reason: verified.reason_code };
@@ -749,7 +829,6 @@ function askReason(classification) {
 }
 
 function decideOne(record, classification, options = {}) {
-  const policy = options.policy || getPolicy();
   const targetClass = targetClassFor(record, classification);
   const requestDigest = record.operation.input_digest;
   const operationDigest = record.operation.input_digest;
@@ -773,7 +852,7 @@ function decideOne(record, classification, options = {}) {
   if (transmission?.decision === 'unsupported') return make('unsupported', transmission.reason, 'stop-before-execution', 'unresolved-target');
 
   const capability = capabilityCheck(record, classification);
-  const authority = authorityCheck(record, classification, policy, options);
+  const authority = authorityCheck(record, classification, options);
   const classes = componentClasses(classification);
   const hasSecretComponent = classes.some((operationClass) => ['secret-access', 'secret-dump', 'secret-exfiltration'].includes(operationClass)) || classification.secret_target === true;
   const hasExternalComponent = classes.some((operationClass) => operationClass === 'external-mutation' || GITHUB_MUTATION_CLASSES.has(operationClass)) || (record.operation.external_targets || []).length > 0;
@@ -856,28 +935,30 @@ function decideOne(record, classification, options = {}) {
 
 function evaluateOneCandidate(input, options = {}) {
   if (hasClassifierAuthorityOption(options)) return safeFailure('CLASSIFIER_FAILURE_UNSUPPORTED', input);
+  const publicOptions = projectPublicOptions(options);
+  if (!publicOptions) return safeFailure('CLASSIFIER_FAILURE_UNSUPPORTED', input);
   let record;
   try {
-    record = normalizeOperation(input, options);
+    record = normalizeOperation(input, publicOptions);
   } catch (error) {
     const reason = /(?:_TYPE_INVALID|OPERATION_INPUT_REQUIRED)$/.test(String(error?.message || ''))
       ? 'OPERATION_CONTRACT_INVALID'
-      : (options.resolveRepositoryContext ? 'RESOLVER_FAILURE_UNSUPPORTED' : 'MALFORMED_OPERATION_UNSUPPORTED');
+      : (publicOptions.resolveRepositoryContext ? 'RESOLVER_FAILURE_UNSUPPORTED' : 'MALFORMED_OPERATION_UNSUPPORTED');
     return safeFailure(reason, input);
   }
   const contractResult = validateNormalizedOperationContract(record);
   if (!contractResult.valid) return safeFailure('OPERATION_CONTRACT_INVALID', input);
   let classification;
   try {
-    classification = classifyOperation(record, options);
+    classification = classifyOperation(record, publicOptions);
     if (!classification || typeof classification.operation_class !== 'string') throw new Error('CLASSIFICATION_INVALID');
-    ensureCommandTargets(record, classification, options);
+    ensureCommandTargets(record, classification, publicOptions);
     refreshOperationDigests(record, classification);
     if (!validateNormalizedOperationContract(record).valid) return safeFailure('OPERATION_CONTRACT_INVALID', input);
   } catch (error) {
     return safeFailure(error?.message === 'CLASSIFICATION_TARGET_INVALID' ? 'OPERATION_CONTRACT_INVALID' : 'CLASSIFIER_FAILURE_UNSUPPORTED', input);
   }
-  return decideOne(record, classification, options);
+  return decideOne(record, classification, publicOptions);
 }
 
 function evaluateOne(input, options = {}) {
