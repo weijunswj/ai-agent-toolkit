@@ -23,6 +23,7 @@ const SIBLING = 'C:\\fixture\\workspace\\sibling-repo';
 const PARENT_FILE = 'C:\\fixture\\workspace\\notes.txt';
 const ADDITIONAL = 'C:\\fixture\\workspace\\approved-worktree';
 const NOW = '2026-07-30T10:00:00.000Z';
+const HISTORICAL_NOW = '2026-07-30T09:30:00.000Z';
 
 function readJson(relativePath) {
   return JSON.parse(fs.readFileSync(path.join(repoRoot, relativePath), 'utf8'));
@@ -2410,9 +2411,12 @@ test('all exported evaluators use canonical policy authority and a closed verifi
 
 test('approval verification only receives own primitive deterministic time', () => {
   const methods = ['evaluate', 'evaluateOne', 'evaluateGuardrail'];
-  const expiredApprovalInput = () => withApproval(
+  const historicalApprovalInput = () => withApproval(
     fixtureInput(structured('edit', `${SIBLING}\\a12-expired-approval.txt`)),
-    { expires_at: '2026-07-30T09:59:00.000Z' },
+    {
+      issued_at: '2026-07-30T09:00:00.000Z',
+      expires_at: '2026-07-30T09:59:00.000Z',
+    },
   );
   const withoutNow = { trustedTargetResolver };
   const assertExpiredAsk = (result, label) => {
@@ -2431,15 +2435,34 @@ test('approval verification only receives own primitive deterministic time', () 
     }
   }
 
-  const inheritedOptions = Object.create({ now: NOW });
+  const inheritedOptions = Object.create({ now: HISTORICAL_NOW });
   inheritedOptions.trustedTargetResolver = trustedTargetResolver;
   assert.equal(Object.hasOwn(inheritedOptions, 'now'), false);
+
+  const vulnerableEngine = loadMutatedEngine((source) => replaceOnce(
+    source,
+    "        if (key === 'now' && depth > 0) continue;\n",
+    '',
+    'vulnerable inherited deterministic time projection',
+  ));
+  const originalDateNow = Date.now;
   for (const method of methods) {
-    const input = expiredApprovalInput();
-    const canonical = engine[method](input, withoutNow);
-    const inherited = engine[method](input, inheritedOptions);
-    assertExpiredAsk(canonical, `inherited-baseline:${method}`);
-    assert.deepEqual(inherited, canonical, `inherited-now:${method}`);
+    const input = historicalApprovalInput();
+    const canonical = engine[method](input, { now: NOW, trustedTargetResolver });
+    assertExpiredAsk(canonical, `canonical-current:${method}`);
+  }
+  try {
+    Date.now = () => Date.parse(NOW);
+    for (const method of methods) {
+      const vulnerable = vulnerableEngine[method](historicalApprovalInput(), inheritedOptions);
+      assert.equal(vulnerable.decision, 'allow', `vulnerable-inherited-now:${method}`);
+      assert.equal(vulnerable.reason_code, 'APPROVED_ONE_SHOT_OPERATION', `vulnerable-inherited-now:${method}`);
+
+      const currentHead = engine[method](historicalApprovalInput(), inheritedOptions);
+      assertExpiredAsk(currentHead, `current-head-inherited-now:${method}`);
+    }
+  } finally {
+    Date.now = originalDateNow;
   }
 
   let inheritedGetterCalls = 0;
@@ -2453,7 +2476,7 @@ test('approval verification only receives own primitive deterministic time', () 
   });
   const inheritedGetterOptions = Object.create(inheritedGetterPrototype);
   inheritedGetterOptions.trustedTargetResolver = trustedTargetResolver;
-  for (const method of methods) assertExpiredAsk(engine[method](expiredApprovalInput(), inheritedGetterOptions), `inherited-getter:${method}`);
+  for (const method of methods) assertExpiredAsk(engine[method](historicalApprovalInput(), inheritedGetterOptions), `inherited-getter:${method}`);
   assert.equal(inheritedGetterCalls, 0);
 
   let accessorCalls = 0;
@@ -2465,7 +2488,7 @@ test('approval verification only receives own primitive deterministic time', () 
       return NOW;
     },
   });
-  for (const method of methods) assertExpiredAsk(engine[method](expiredApprovalInput(), accessorOptions), `accessor:${method}`);
+  for (const method of methods) assertExpiredAsk(engine[method](historicalApprovalInput(), accessorOptions), `accessor:${method}`);
   assert.equal(accessorCalls, 0);
 
   let throwingGetterCalls = 0;
@@ -2478,7 +2501,7 @@ test('approval verification only receives own primitive deterministic time', () 
     },
   });
   for (const method of methods) {
-    assert.doesNotThrow(() => assertExpiredAsk(engine[method](expiredApprovalInput(), throwingOptions), `throwing:${method}`));
+    assert.doesNotThrow(() => assertExpiredAsk(engine[method](historicalApprovalInput(), throwingOptions), `throwing:${method}`));
   }
   assert.equal(throwingGetterCalls, 0);
 
@@ -2500,7 +2523,7 @@ test('approval verification only receives own primitive deterministic time', () 
   ];
   for (const [label, value] of invalidValues) {
     for (const method of methods) {
-      const input = expiredApprovalInput();
+      const input = historicalApprovalInput();
       const canonical = engine[method](input, withoutNow);
       const unauthorized = engine[method](input, { now: value, trustedTargetResolver });
       assert.deepEqual(unauthorized, canonical, `invalid-${label}:${method}`);
@@ -2528,7 +2551,7 @@ test('approval verification only receives own primitive deterministic time', () 
     },
   });
   for (const method of methods) {
-    const result = engine[method](expiredApprovalInput(), proxyOptions);
+    const result = engine[method](historicalApprovalInput(), proxyOptions);
     assert.equal(result.decision, 'unsupported', `proxy:${method}`);
     assert.equal(result.reason_code, 'CLASSIFIER_FAILURE_UNSUPPORTED', `proxy:${method}`);
   }
