@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.guardrail.approval.v1",
+  "title": "Toolkit Trusted Approval Evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "host",
+    "source",
+    "trusted_user_channel",
+    "exact_operation_digest",
+    "exact_targets_digest",
+    "canonical_target_set",
+    "session_id",
+    "turn_id",
+    "call_id",
+    "operation_class",
+    "issued_at",
+    "expires_at",
+    "one_shot",
+    "consumed"
+  ],
+  "properties": {
+    "contract_version": { "const": "toolkit.guardrail.approval.v1" },
+    "host": { "type": "string", "minLength": 1 },
+    "source": { "type": "string", "minLength": 1 },
+    "trusted_user_channel": { "type": "string", "minLength": 1 },
+    "exact_operation_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "exact_targets_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "canonical_target_set": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["target_class", "status", "link_type", "path_digest"],
+        "properties": {
+          "target_class": {
+            "enum": [
+              "canonical-repository",
+              "canonical-worktree",
+              "approved-additional-root",
+              "sibling-repository",
+              "parent-workspace",
+              "outside-repository",
+              "external-system",
+              "secret-bearing",
+              "protected-target",
+              "unresolved-target",
+              "mixed-targets",
+              "unknown-target"
+            ]
+          },
+          "status": { "type": "string" },
+          "link_type": { "enum": ["none", "symlink", "junction", "reparse-point"] },
+          "path_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "session_id": { "type": "string", "minLength": 1 },
+    "turn_id": { "type": "string", "minLength": 1 },
+    "call_id": { "type": "string", "minLength": 1 },
+    "operation_class": { "type": "string", "minLength": 1 },
+    "issued_at": { "type": ["string", "integer"] },
+    "expires_at": { "type": ["string", "integer"] },
+    "one_shot": { "type": "boolean" },
+    "consumed": { "type": "boolean" },
+    "consumed_count": { "type": "integer", "minimum": 0 },
+    "max_repeat_count": { "type": "integer", "minimum": 1 },
+    "replay_detected": { "const": false }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "one_shot": { "const": true } } },
+      "then": {
+        "properties": {
+          "consumed": { "const": false },
+          "consumed_count": { "const": 0 }
+        },
+        "not": { "required": ["max_repeat_count"] }
+      }
+    },
+    {
+      "if": { "properties": { "one_shot": { "const": false } } },
+      "then": {
+        "required": ["consumed_count", "max_repeat_count"],
+        "properties": {
+          "consumed": { "const": false },
+          "consumed_count": { "type": "integer", "minimum": 0 },
+          "max_repeat_count": { "type": "integer", "minimum": 1, "maximum": 8 }
+        }
+      }
+    }
+  ]
+}

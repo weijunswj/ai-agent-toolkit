@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.guardrail.policy.v1",
+  "title": "Toolkit Guardrail Policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema_version",
+    "policy_version",
+    "design_lock",
+    "issue",
+    "decision_contract",
+    "decision_precedence",
+    "enforcement_requirements",
+    "safe_target_classes",
+    "operation_classes",
+    "authority",
+    "approval",
+    "privacy",
+    "reason_codes"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema_version": { "const": "toolkit.guardrail.policy.v1" },
+    "policy_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "design_lock": { "const": "DL-313-001" },
+    "issue": { "const": 313 },
+    "decision_contract": {
+      "type": "array",
+      "const": ["allow", "ask", "deny", "unsupported"]
+    },
+    "decision_precedence": {
+      "type": "array",
+      "const": ["deny", "unsupported", "ask", "allow"]
+    },
+    "enforcement_requirements": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 4
+    },
+    "safe_target_classes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 8
+    },
+    "operation_classes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "default_decision", "enforcement_requirement", "routine", "destructive", "external"],
+        "properties": {
+          "id": { "type": "string" },
+          "default_decision": { "enum": ["allow", "ask", "deny", "unsupported"] },
+          "enforcement_requirement": { "type": "string" },
+          "routine": { "type": "boolean" },
+          "destructive": { "type": "boolean" },
+          "external": { "type": "boolean" }
+        }
+      },
+      "minItems": 10
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required_context", "active_design_lock", "permitted_roles", "controller_only_operation_classes", "forbidden_scopes"],
+      "properties": {
+        "required_context": { "type": "array", "items": { "type": "string" }, "minItems": 4 },
+        "active_design_lock": { "const": "DL-313-001" },
+        "permitted_roles": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "controller_only_operation_classes": { "type": "array", "items": { "type": "string" } },
+        "forbidden_scopes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trusted_channels", "native_state_non_equivalents", "max_repeat_count"],
+      "properties": {
+        "trusted_channels": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "native_state_non_equivalents": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "max_repeat_count": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["digest_algorithm", "result_fields_allowed", "forbidden_result_content"],
+      "properties": {
+        "digest_algorithm": { "const": "sha256" },
+        "result_fields_allowed": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "forbidden_result_content": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+      }
+    },
+    "reason_codes": { "type": "array", "items": { "type": "string" }, "minItems": 20 }
+  }
+}
