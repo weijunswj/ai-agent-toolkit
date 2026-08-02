@@ -2071,10 +2071,12 @@ const fixtureCaseAssertions = new Map([
     const project = readJson('_projects/development/toolkit-guardrails/toolkit.project.json');
     const sourcePolicy = readJson('_projects/development/toolkit-guardrails/_main/guardrail-policy.json');
     const fixtureManifest = readJson('_projects/development/toolkit-guardrails/_main/fixtures/fixture-manifest.json');
-    assert.equal(project.version, '1.0.4');
+    assert.equal(project.version, '1.0.5');
     assert.equal(sourcePolicy.policy_version, '1.0.1');
     assertFixturePolicyBinding(fixtureManifest, sourcePolicy);
-    assert.match(project.version_notes, /canonical-policy-only public evaluation/i);
+    assert.match(project.version_notes, /own-only deterministic verifier time/i);
+    assert.match(project.version_notes, /closed approval-verifier option projection/i);
+    assert.match(project.version_notes, /canonical nested-array descriptor enforcement/i);
   }],
   ['failure.approval-verifier-exception', () => {
     const input = fixtureInput(structured('edit', `${SIBLING}\\approval-error.txt`));
@@ -2406,6 +2408,133 @@ test('all exported evaluators use canonical policy authority and a closed verifi
   assert.equal(engine.evaluate(canonicalApprovalInput, options).decision, 'allow');
 });
 
+test('approval verification only receives own primitive deterministic time', () => {
+  const methods = ['evaluate', 'evaluateOne', 'evaluateGuardrail'];
+  const expiredApprovalInput = () => withApproval(
+    fixtureInput(structured('edit', `${SIBLING}\\a12-expired-approval.txt`)),
+    { expires_at: '2026-07-30T09:59:00.000Z' },
+  );
+  const withoutNow = { trustedTargetResolver };
+  const assertExpiredAsk = (result, label) => {
+    assert.equal(result.decision, 'ask', label);
+    assert.equal(result.reason_code, 'OUTSIDE_REPOSITORY_TARGET', label);
+  };
+
+  for (const [label, now] of [['string', NOW], ['finite-number', Date.parse(NOW)]]) {
+    for (const method of methods) {
+      const result = engine[method](
+        withApproval(fixtureInput(structured('edit', `${SIBLING}\\a12-own-${label}.txt`))),
+        { now, trustedTargetResolver },
+      );
+      assert.equal(result.decision, 'allow', `${label}:${method}`);
+      assert.equal(result.reason_code, 'APPROVED_ONE_SHOT_OPERATION', `${label}:${method}`);
+    }
+  }
+
+  const inheritedOptions = Object.create({ now: NOW });
+  inheritedOptions.trustedTargetResolver = trustedTargetResolver;
+  assert.equal(Object.hasOwn(inheritedOptions, 'now'), false);
+  for (const method of methods) {
+    const input = expiredApprovalInput();
+    const canonical = engine[method](input, withoutNow);
+    const inherited = engine[method](input, inheritedOptions);
+    assertExpiredAsk(canonical, `inherited-baseline:${method}`);
+    assert.deepEqual(inherited, canonical, `inherited-now:${method}`);
+  }
+
+  let inheritedGetterCalls = 0;
+  const inheritedGetterPrototype = {};
+  Object.defineProperty(inheritedGetterPrototype, 'now', {
+    configurable: true,
+    get() {
+      inheritedGetterCalls += 1;
+      return NOW;
+    },
+  });
+  const inheritedGetterOptions = Object.create(inheritedGetterPrototype);
+  inheritedGetterOptions.trustedTargetResolver = trustedTargetResolver;
+  for (const method of methods) assertExpiredAsk(engine[method](expiredApprovalInput(), inheritedGetterOptions), `inherited-getter:${method}`);
+  assert.equal(inheritedGetterCalls, 0);
+
+  let accessorCalls = 0;
+  const accessorOptions = { trustedTargetResolver };
+  Object.defineProperty(accessorOptions, 'now', {
+    configurable: true,
+    get() {
+      accessorCalls += 1;
+      return NOW;
+    },
+  });
+  for (const method of methods) assertExpiredAsk(engine[method](expiredApprovalInput(), accessorOptions), `accessor:${method}`);
+  assert.equal(accessorCalls, 0);
+
+  let throwingGetterCalls = 0;
+  const throwingOptions = { trustedTargetResolver };
+  Object.defineProperty(throwingOptions, 'now', {
+    configurable: true,
+    get() {
+      throwingGetterCalls += 1;
+      throw new Error('deterministic now getter must not execute');
+    },
+  });
+  for (const method of methods) {
+    assert.doesNotThrow(() => assertExpiredAsk(engine[method](expiredApprovalInput(), throwingOptions), `throwing:${method}`));
+  }
+  assert.equal(throwingGetterCalls, 0);
+
+  const invalidObject = {
+    valueOf() {
+      throw new Error('invalid now object must not be coerced');
+    },
+    toString() {
+      throw new Error('invalid now object must not be stringified');
+    },
+  };
+  const invalidValues = [
+    ['object', invalidObject],
+    ['function', () => NOW],
+    ['symbol', Symbol('invalid-now')],
+    ['bigint', 1n],
+    ['nan', NaN],
+    ['infinity', Infinity],
+  ];
+  for (const [label, value] of invalidValues) {
+    for (const method of methods) {
+      const input = expiredApprovalInput();
+      const canonical = engine[method](input, withoutNow);
+      const unauthorized = engine[method](input, { now: value, trustedTargetResolver });
+      assert.deepEqual(unauthorized, canonical, `invalid-${label}:${method}`);
+      assertExpiredAsk(unauthorized, `invalid-${label}:${method}`);
+    }
+  }
+
+  let proxyTrapCalls = 0;
+  const proxyOptions = new Proxy({ now: NOW, trustedTargetResolver }, {
+    get() {
+      proxyTrapCalls += 1;
+      throw new Error('options proxy get trap must not execute');
+    },
+    getOwnPropertyDescriptor() {
+      proxyTrapCalls += 1;
+      throw new Error('options proxy descriptor trap must not execute');
+    },
+    ownKeys() {
+      proxyTrapCalls += 1;
+      throw new Error('options proxy ownKeys trap must not execute');
+    },
+    getPrototypeOf() {
+      proxyTrapCalls += 1;
+      throw new Error('options proxy prototype trap must not execute');
+    },
+  });
+  for (const method of methods) {
+    const result = engine[method](expiredApprovalInput(), proxyOptions);
+    assert.equal(result.decision, 'unsupported', `proxy:${method}`);
+    assert.equal(result.reason_code, 'CLASSIFIER_FAILURE_UNSUPPORTED', `proxy:${method}`);
+  }
+  assert.equal(proxyTrapCalls, 0);
+});
+
 function mutateResultWithPublicArray(source, field, expression) {
   return mutateResultBlock(source, (block) => replaceOnce(
     block,
@@ -2419,6 +2548,9 @@ function publicArrayExpression(field, shape) {
   const ordinary = field === 'secondary_reason_codes'
     ? "['ROUTINE_REPOSITORY_OPERATION']"
     : "[{ decision: 'allow', reason_code: 'ROUTINE_REPOSITORY_OPERATION', operation_class: 'edit', safe_target_class: 'canonical-repository' }]";
+  const indexValue = field === 'secondary_reason_codes'
+    ? "'ROUTINE_REPOSITORY_OPERATION'"
+    : "{ decision: 'allow', reason_code: 'ROUTINE_REPOSITORY_OPERATION', operation_class: 'edit', safe_target_class: 'canonical-repository' }";
   if (shape === 'ordinary') return ordinary;
   if (shape === 'object-prototype') return `Object.setPrototypeOf(${ordinary}, {})`;
   if (shape === 'null-prototype') return `Object.setPrototypeOf(${ordinary}, null)`;
@@ -2428,6 +2560,10 @@ function publicArrayExpression(field, shape) {
   if (shape === 'proxy') return `new Proxy(${ordinary}, { get() { globalThis.__a11NestedArrayTrapCalls += 1; throw new Error('nested array get trap must not execute'); }, getOwnPropertyDescriptor() { globalThis.__a11NestedArrayTrapCalls += 1; throw new Error('nested array descriptor trap must not execute'); }, getPrototypeOf() { globalThis.__a11NestedArrayTrapCalls += 1; throw new Error('nested array prototype trap must not execute'); } })`;
   if (shape === 'sparse') return 'new Array(1)';
   if (shape === 'accessor-index') return "Object.defineProperty(new Array(1), '0', { configurable: true, enumerable: true, get() { throw new Error('nested array accessor must not execute'); } })";
+  if (shape === 'non-enumerable-index') return `Object.defineProperty(${ordinary}, '0', { value: ${indexValue}, writable: true, enumerable: false, configurable: true })`;
+  if (shape === 'non-writable-index') return `Object.defineProperty(${ordinary}, '0', { value: ${indexValue}, writable: false, enumerable: true, configurable: true })`;
+  if (shape === 'non-configurable-index') return `Object.defineProperty(${ordinary}, '0', { value: ${indexValue}, writable: true, enumerable: true, configurable: false })`;
+  if (shape === 'non-writable-length') return `Object.defineProperty(${ordinary}, 'length', { writable: false })`;
   if (shape === 'oversized') return 'new Array(129)';
   throw new Error(`unknown public array shape: ${shape}`);
 }
@@ -2442,6 +2578,10 @@ test('exported result boundaries require ordinary dense nested result arrays', (
     'proxy',
     'sparse',
     'accessor-index',
+    'non-enumerable-index',
+    'non-writable-index',
+    'non-configurable-index',
+    'non-writable-length',
     'oversized',
   ];
   globalThis.__a11NestedArrayTrapCalls = 0;

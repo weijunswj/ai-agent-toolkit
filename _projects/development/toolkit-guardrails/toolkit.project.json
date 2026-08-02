@@ -5,9 +5,9 @@
   "title": "Toolkit Guardrails",
   "module_path": "_projects/development/toolkit-guardrails",
   "main_path": "_projects/development/toolkit-guardrails/_main",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "version_policy": "semver",
-  "version_notes": "A11 enforces canonical-policy-only public evaluation, a closed approval-verifier option projection, and ordinary nested public result arrays; it remains a bounded source-only guardrail engine.",
+  "version_notes": "A12 enforces own-only deterministic verifier time, a closed approval-verifier option projection, and canonical nested-array descriptor enforcement; it remains a bounded source-only guardrail engine.",
   "outputs": [],
   "writes": {
     "allowed": [],

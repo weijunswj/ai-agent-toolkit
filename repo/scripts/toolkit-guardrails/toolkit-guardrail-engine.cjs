@@ -160,6 +160,10 @@ function hasOptionProperty(options, propertyName) {
   return false;
 }
 
+function isSupportedDeterministicNow(value) {
+  return typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value));
+}
+
 function projectPublicOptions(options) {
   if (options === null || (typeof options !== 'object' && typeof options !== 'function')) return Object.create(null);
   const projected = Object.create(null);
@@ -173,9 +177,14 @@ function projectPublicOptions(options) {
       visited.add(current);
       for (const key of PUBLIC_OPTION_KEYS) {
         if (seenKeys.has(key)) continue;
+        if (key === 'now' && depth > 0) continue;
         const descriptor = Object.getOwnPropertyDescriptor(current, key);
         if (!descriptor) continue;
         seenKeys.add(key);
+        if (key === 'now') {
+          if (Object.hasOwn(descriptor, 'value') && isSupportedDeterministicNow(descriptor.value)) projected.now = descriptor.value;
+          continue;
+        }
         if (Object.hasOwn(descriptor, 'value')) projected[key] = descriptor.value;
       }
       current = Object.getPrototypeOf(current);
@@ -194,8 +203,7 @@ function deterministicNowOption(options) {
     const descriptor = Object.getOwnPropertyDescriptor(options, 'now');
     if (!descriptor || !Object.hasOwn(descriptor, 'value')) return undefined;
     const value = descriptor.value;
-    if (typeof value === 'string') return value;
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (isSupportedDeterministicNow(value)) return value;
   } catch {
     return undefined;
   }
@@ -444,7 +452,14 @@ function boundedStringArray(value, allowedValues) {
     if (Object.getPrototypeOf(value) !== Array.prototype) return null;
     const descriptors = Object.getOwnPropertyDescriptors(value);
     const lengthDescriptor = descriptors.length;
-    if (!lengthDescriptor || !Object.hasOwn(lengthDescriptor, 'value') || !Number.isInteger(lengthDescriptor.value) || lengthDescriptor.value < 0 || lengthDescriptor.value > PUBLIC_RESULT_MAX_ITEMS) return null;
+    if (!lengthDescriptor
+      || !Object.hasOwn(lengthDescriptor, 'value')
+      || lengthDescriptor.writable !== true
+      || lengthDescriptor.enumerable !== false
+      || lengthDescriptor.configurable !== false
+      || !Number.isInteger(lengthDescriptor.value)
+      || lengthDescriptor.value < 0
+      || lengthDescriptor.value > PUBLIC_RESULT_MAX_ITEMS) return null;
     for (const key of Reflect.ownKeys(descriptors)) {
       if (key === 'length') continue;
       if (typeof key !== 'string' || !/^(?:0|[1-9][0-9]*)$/.test(key) || Number(key) >= lengthDescriptor.value) return null;
@@ -452,7 +467,12 @@ function boundedStringArray(value, allowedValues) {
     const values = [];
     for (let index = 0; index < lengthDescriptor.value; index += 1) {
       const descriptor = descriptors[index];
-      if (!descriptor || !Object.hasOwn(descriptor, 'value') || !allowedValues.has(descriptor.value)) return null;
+      if (!descriptor
+        || !Object.hasOwn(descriptor, 'value')
+        || descriptor.writable !== true
+        || descriptor.enumerable !== true
+        || descriptor.configurable !== true
+        || !allowedValues.has(descriptor.value)) return null;
       values.push(descriptor.value);
     }
     return values;
@@ -533,7 +553,14 @@ function finalizePublicResult(candidate) {
         if (Object.getPrototypeOf(mixedComponents) !== Array.prototype) return canonicalFailureResult();
         const mixedDescriptors = Object.getOwnPropertyDescriptors(mixedComponents);
         const lengthDescriptor = mixedDescriptors.length;
-        if (!lengthDescriptor || !Object.hasOwn(lengthDescriptor, 'value') || !Number.isInteger(lengthDescriptor.value) || lengthDescriptor.value < 0 || lengthDescriptor.value > PUBLIC_RESULT_MAX_ITEMS) return canonicalFailureResult();
+        if (!lengthDescriptor
+          || !Object.hasOwn(lengthDescriptor, 'value')
+          || lengthDescriptor.writable !== true
+          || lengthDescriptor.enumerable !== false
+          || lengthDescriptor.configurable !== false
+          || !Number.isInteger(lengthDescriptor.value)
+          || lengthDescriptor.value < 0
+          || lengthDescriptor.value > PUBLIC_RESULT_MAX_ITEMS) return canonicalFailureResult();
         for (const key of Reflect.ownKeys(mixedDescriptors)) {
           if (key === 'length') continue;
           if (typeof key !== 'string' || !/^(?:0|[1-9][0-9]*)$/.test(key) || Number(key) >= lengthDescriptor.value) return canonicalFailureResult();
@@ -541,7 +568,11 @@ function finalizePublicResult(candidate) {
         normalizedMixedComponents = [];
         for (let index = 0; index < lengthDescriptor.value; index += 1) {
           const descriptor = mixedDescriptors[index];
-          if (!descriptor || !Object.hasOwn(descriptor, 'value')) return canonicalFailureResult();
+          if (!descriptor
+            || !Object.hasOwn(descriptor, 'value')
+            || descriptor.writable !== true
+            || descriptor.enumerable !== true
+            || descriptor.configurable !== true) return canonicalFailureResult();
           const normalized = mixedComponentValue(descriptor.value, catalogue);
           if (!normalized) return canonicalFailureResult();
           normalizedMixedComponents.push(normalized);
