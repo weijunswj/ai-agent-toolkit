@@ -1,0 +1,17 @@
+{
+  "id": "invalid-ambiguous-scheduler",
+  "scenario": "ambiguous_scheduler",
+  "expected": {
+    "accepted": false,
+    "status": "INCOMPLETE_SCHEDULER_TEARDOWN",
+    "mutationProhibited": true
+  },
+  "state": {
+    "schedules": {
+      "tasks": [
+        { "identity": "repo-329-controller-a", "status": "AMBIGUOUS", "trustedRemovalReceipt": false, "receiptIdentityMatches": false },
+        { "identity": "repo-329-executor", "status": "REMOVED", "trustedRemovalReceipt": true, "receiptIdentityMatches": true }
+      ]
+    }
+  }
+}

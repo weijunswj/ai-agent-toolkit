@@ -1,0 +1,18 @@
+{
+  "id": "valid-first-eligible-pickup",
+  "scenario": "first_eligible_pickup",
+  "expected": {
+    "accepted": true,
+    "selectedChild": "#329",
+    "selection": "top_to_bottom_first_eligible"
+  },
+  "state": {
+    "parent": {
+      "activeQueue": [
+        { "child": "#329", "blocked": false, "eligible": true },
+        { "child": "#330", "blocked": false, "eligible": true }
+      ],
+      "recentPrOrder": ["#700", "#501"]
+    }
+  }
+}

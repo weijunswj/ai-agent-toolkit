@@ -10,6 +10,7 @@
   "state": {
     "capacity": 1,
     "parentOrder": ["#329", "#330"],
+    "subqueues": [],
     "recentPrOrder": ["#700", "#501"],
     "lanes": [
       { "child": "#329", "pr": "#501", "packet": "OTE-A", "claim": "free" },

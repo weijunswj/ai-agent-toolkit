@@ -1,0 +1,28 @@
+{
+  "id": "invalid-wrong-current-turn",
+  "scenario": "wrong_current_turn",
+  "expected": {
+    "accepted": false,
+    "status": "PARENT_RECONCILIATION_INCOMPLETE",
+    "mutationProhibited": true
+  },
+  "state": {
+    "reconciliation": {
+      "materialTransition": true,
+      "parentBinding": true,
+      "compareAndPreserve": true,
+      "boundRevision": "parent-r42",
+      "revisionBeforeWrite": "parent-r42",
+      "parentEntryCount": 1,
+      "rowPositionBefore": 3,
+      "rowPositionAfter": 3,
+      "chronologyCommentsAdded": 1,
+      "unrelatedContentPreserved": true,
+      "surfacesAgree": false,
+      "readBackExact": false,
+      "turn": { "child": "EXECUTOR", "parent": "CONTROLLER" },
+      "concurrentAfterWrite": false,
+      "partialWrite": false
+    }
+  }
+}

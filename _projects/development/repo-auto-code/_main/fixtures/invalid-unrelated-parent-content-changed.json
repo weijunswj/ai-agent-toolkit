@@ -1,0 +1,27 @@
+{
+  "id": "invalid-unrelated-parent-content-changed",
+  "scenario": "unrelated_parent_content_changed",
+  "expected": {
+    "accepted": false,
+    "status": "PARENT_RECONCILIATION_INCOMPLETE",
+    "mutationProhibited": true
+  },
+  "state": {
+    "reconciliation": {
+      "materialTransition": true,
+      "parentBinding": true,
+      "compareAndPreserve": true,
+      "boundRevision": "parent-r42",
+      "revisionBeforeWrite": "parent-r42",
+      "parentEntryCount": 1,
+      "rowPositionBefore": 3,
+      "rowPositionAfter": 3,
+      "chronologyCommentsAdded": 1,
+      "unrelatedContentPreserved": false,
+      "surfacesAgree": false,
+      "readBackExact": false,
+      "concurrentAfterWrite": false,
+      "partialWrite": false
+    }
+  }
+}

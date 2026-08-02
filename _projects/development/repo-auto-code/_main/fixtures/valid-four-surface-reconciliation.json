@@ -1,0 +1,35 @@
+{
+  "id": "valid-four-surface-reconciliation",
+  "scenario": "four_surface_reconciliation",
+  "expected": {
+    "accepted": true,
+    "reconciliation": "FOUR_SURFACE_READ_BACK",
+    "preservedUnrelated": true
+  },
+  "state": {
+    "reconciliation": {
+      "materialTransition": true,
+      "parentBinding": true,
+      "compareAndPreserve": true,
+      "boundRevision": "parent-r42",
+      "revisionBeforeWrite": "parent-r42",
+      "parentEntryCount": 1,
+      "rowPositionBefore": 5,
+      "rowPositionAfter": 5,
+      "chronologyCommentsAdded": 1,
+      "unrelatedContentPreserved": true,
+      "unrelatedParentContentBefore": ["owner note", "closed history", "extension note"],
+      "unrelatedParentContentAfter": ["owner note", "closed history", "extension note"],
+      "readBackSurfaces": [
+        { "surface": "child", "status": "CURRENT", "nextAction": "await-g4" },
+        { "surface": "pr", "status": "CURRENT", "nextAction": "await-g4" },
+        { "surface": "parent-entry", "status": "CURRENT", "nextAction": "await-g4" },
+        { "surface": "chronology", "status": "CURRENT", "nextAction": "await-g4" }
+      ],
+      "surfacesAgree": true,
+      "readBackExact": true,
+      "concurrentAfterWrite": false,
+      "partialWrite": false
+    }
+  }
+}

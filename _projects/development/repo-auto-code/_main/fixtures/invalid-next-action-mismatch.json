@@ -1,0 +1,28 @@
+{
+  "id": "invalid-next-action-mismatch",
+  "scenario": "next_action_mismatch",
+  "expected": {
+    "accepted": false,
+    "status": "PARENT_RECONCILIATION_INCOMPLETE",
+    "mutationProhibited": true
+  },
+  "state": {
+    "reconciliation": {
+      "materialTransition": true,
+      "parentBinding": true,
+      "compareAndPreserve": true,
+      "boundRevision": "parent-r42",
+      "revisionBeforeWrite": "parent-r42",
+      "parentEntryCount": 1,
+      "rowPositionBefore": 3,
+      "rowPositionAfter": 3,
+      "chronologyCommentsAdded": 1,
+      "unrelatedContentPreserved": true,
+      "surfacesAgree": false,
+      "readBackExact": false,
+      "nextAction": { "child": "run-g4", "parent": "wait-for-user" },
+      "concurrentAfterWrite": false,
+      "partialWrite": false
+    }
+  }
+}

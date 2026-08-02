@@ -1,0 +1,17 @@
+{
+  "id": "invalid-unverifiable-missing-scheduler",
+  "scenario": "unverifiable_missing_scheduler",
+  "expected": {
+    "accepted": false,
+    "status": "INCOMPLETE_SCHEDULER_TEARDOWN",
+    "mutationProhibited": true
+  },
+  "state": {
+    "schedules": {
+      "tasks": [
+        { "identity": "repo-329-controller", "status": "MISSING", "trustedRemovalReceipt": false, "receiptIdentityMatches": false },
+        { "identity": "repo-329-executor", "status": "REMOVED", "trustedRemovalReceipt": true, "receiptIdentityMatches": true }
+      ]
+    }
+  }
+}

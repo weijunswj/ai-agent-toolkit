@@ -1,0 +1,21 @@
+{
+  "id": "invalid-competing-category-subqueues",
+  "scenario": "competing_category_subqueues",
+  "expected": {
+    "accepted": false,
+    "status": "PARENT_RECONCILIATION_INCOMPLETE",
+    "mutationProhibited": true
+  },
+  "state": {
+    "parent": {
+      "sectionOrder": ["Queue authority", "Current execution", "Active queue", "Recovery queue", "Completed or disposed", "Completion gate", "Governance ownership", "Mandatory parent reconciliation"],
+      "extensionSections": ["Recovery queue"],
+      "linesBySection": { "Current execution": [], "Active queue": ["- #329"], "Completed or disposed": [] },
+      "materialChildren": ["#329"],
+      "lifecycleEntries": { "Current execution": [], "Active queue": ["#329"], "Completed or disposed": [] },
+      "expectedLifecycle": { "#329": "Active queue" },
+      "parentEntryCount": 1,
+      "subqueues": ["Recovery queue"]
+    }
+  }
+}

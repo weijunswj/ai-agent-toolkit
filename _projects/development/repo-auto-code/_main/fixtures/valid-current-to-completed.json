@@ -1,0 +1,19 @@
+{
+  "id": "valid-current-to-completed",
+  "scenario": "current_to_completed",
+  "expected": {
+    "accepted": true,
+    "transition": "CURRENT_TO_COMPLETED",
+    "selectedChild": "#329"
+  },
+  "state": {
+    "transition": {
+      "child": "#329",
+      "atomic": true,
+      "before": { "active": [], "current": ["#329"] },
+      "after": { "active": [], "current": [], "completed": ["#329"], "completedLineStyle": "- [x]" },
+      "parentEntryCount": 1,
+      "chronologyCommentsAdded": 1
+    }
+  }
+}

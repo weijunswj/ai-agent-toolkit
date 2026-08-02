@@ -1,0 +1,17 @@
+{
+  "id": "valid-exact-dual-scheduler-removal",
+  "scenario": "exact_dual_scheduler_removal",
+  "expected": {
+    "accepted": true,
+    "scheduler": "REMOVED",
+    "completion": "allowed_after_exact_dual_removal"
+  },
+  "state": {
+    "schedules": {
+      "tasks": [
+        { "identity": "repo-329-controller", "status": "REMOVED", "trustedRemovalReceipt": true, "receiptIdentityMatches": true },
+        { "identity": "repo-329-executor", "status": "REMOVED", "trustedRemovalReceipt": true, "receiptIdentityMatches": true }
+      ]
+    }
+  }
+}

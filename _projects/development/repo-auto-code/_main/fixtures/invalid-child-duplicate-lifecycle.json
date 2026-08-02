@@ -1,0 +1,20 @@
+{
+  "id": "invalid-child-duplicate-lifecycle",
+  "scenario": "child_duplicate_lifecycle",
+  "expected": {
+    "accepted": false,
+    "status": "PARENT_RECONCILIATION_INCOMPLETE",
+    "mutationProhibited": true
+  },
+  "state": {
+    "parent": {
+      "sectionOrder": ["Queue authority", "Current execution", "Active queue", "Completed or disposed", "Completion gate", "Governance ownership", "Mandatory parent reconciliation"],
+      "linesBySection": { "Current execution": [], "Active queue": [], "Completed or disposed": ["- [x] #329", "- [x] #329"] },
+      "materialChildren": ["#329"],
+      "lifecycleEntries": { "Current execution": [], "Active queue": [], "Completed or disposed": ["#329", "#329"] },
+      "expectedLifecycle": { "#329": "Completed or disposed" },
+      "parentEntryCount": 1,
+      "subqueues": []
+    }
+  }
+}
