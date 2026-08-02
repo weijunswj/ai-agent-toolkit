@@ -8,6 +8,12 @@
   },
   "state": {
     "reconciliation": {
+      "projectionDefaults": { "status": "CURRENT", "lifecycleSection": "Current execution", "nextAction": "await-g4" },
+      "transitionBefore": { "status": "ACTIVE", "lifecycleSection": "Active queue", "nextAction": "start" },
+      "transitionAfter": { "status": "CURRENT", "lifecycleSection": "Current execution", "nextAction": "await-g4" },
+      "surfaces": { "child": { "status": "CURRENT" }, "pr": { "status": "CURRENT" }, "parentEntry": { "status": "CURRENT" }, "chronology": { "status": "CURRENT" } },
+      "binding": { "boundRevision": "parent-r41", "revisionBeforeWrite": "parent-r41", "revisionAfterWrite": "parent-r42", "readBackRevision": "parent-r42", "parentEntryCount": 1, "rowPositionBefore": 4, "rowPositionAfter": 4, "chronologyCommentsAdded": 1, "afterBodyDigest": "digest-after", "readBackBodyDigest": "digest-after", "concurrentBeforeWrite": false, "concurrentAfterWrite": true, "partialWrite": false },
+      "preservation": { "before": { "unrelatedParentEntries": ["a"], "queueOrder": ["#329"], "extensionSections": ["x"], "completedHistory": ["#328"], "ownerAuthoredContent": ["owner"], "unrelatedChildren": ["#330"], "unrelatedPr": ["#700"], "unrelatedChronology": ["c1"] }, "after": { "unrelatedParentEntries": ["a"], "queueOrder": ["#329"], "extensionSections": ["x"], "completedHistory": ["#328"], "ownerAuthoredContent": ["owner"], "unrelatedChildren": ["#330"], "unrelatedPr": ["#700"], "unrelatedChronology": ["c1"] } },
       "materialTransition": true,
       "parentBinding": true,
       "compareAndPreserve": true,

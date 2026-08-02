@@ -21,7 +21,7 @@ The state machine is reconstructed per enrolled child/PR. A repository may have 
 | `HELD` | Ambiguous, stale, conflicting, unavailable, or potentially destructive state needs repair | `CONTROLLER_TURN`, `MANUAL_ONLY`, `DISABLED`, `INVALID` |
 | `COMPLETED` | All completion gates pass and no live prompt remains; scheduler finality is checked separately | `DISABLED` only after explicit schedule teardown reaches `REMOVED` |
 | `INVALID` | Fail-closed state requiring exact repair; no substantive mutation | `PREPARED`, `HELD`, or `DISABLED` after repair |
-| `PARENT_RECONCILIATION_INCOMPLETE` | The parent lifecycle entry or four-surface read-back is missing, duplicate, stale, conflicting, partially written, concurrently changed, or unverifiable | No worker prompt, pickup, claim, G4, acceptance, ready-state mutation, merge, closure, next-task selection, verification claim, or programme completion; controller/user repair only |
+| `PARENT_RECONCILIATION_INCOMPLETE` | The parent lifecycle entry or four-surface read-back is missing, duplicate, stale, conflicting, partially written, concurrently changed, or unverifiable | No worker prompt, pickup, claim, G4, acceptance, ready-state mutation, substantive execution, new commit, push, external mutation, merge, closure, next-task selection, verification claim, or programme completion; preserve safe local evidence and controller/user repair only |
 
 The capability lifecycle labels below are distinct evidence states and must never be collapsed into one another. The operational states in the table above are substates and cannot skip a lifecycle prerequisite:
 
@@ -50,9 +50,13 @@ The canonical parent body order is `Queue authority`, `Current execution`, `Acti
 
 Pickup uses only top-to-bottom position in the flat active list. Numeric prefixes are optional. Category, recovery, priority, parallel, capability, and model-specific subqueues are forbidden. A blocked item remains in place; a skip is recorded in chronology without moving it. Only the owner or explicitly authorised governance actor may reorder the list. A missing, duplicate, moved, wrongly styled, or ambiguously ordered entry is `PARENT_RECONCILIATION_INCOMPLETE`.
 
+If the parent declares a final whole-programme audit, that entry must remain the last material item in `Active queue`. It is ineligible while any preceding material child is current, active, blocked-but-nonterminal, or otherwise nonterminal. First-eligible pickup skips it until all preceding work is terminal; a blocked-item skip records chronology without moving or reordering either item. Auto-code cannot select, move, rewrite, or remove the declaration early. Only explicit owner/controller authority may change it, and that change is itself a material transition requiring four-surface reconciliation.
+
 Starting work atomically moves one child from active to current. Terminal acceptance or disposal atomically moves it from current to completed/disposed. No current child may remain active, and no terminal child may remain current or active.
 
 ## 3. Controller cycle
+
+Before each cycle, derive readiness for the exact repository. The two capabilities `github_issue_governance: enabled` and `repo_auto_code: enabled`, the healthy installed #299 governance skill, one canonical parent with the exact baseline, one lifecycle occurrence for every direct material child, agreeing parent/child/PR projections, no reconciliation or concurrent-movement blocker, and an actor authorised for the exact role are all required. A missing or unverifiable prerequisite returns `AUTO_CODE_GOVERNANCE_UNREADY` and prohibits claim, pickup, prompt issuance, governance repair by an ordinary worker, substantive execution, G4, acceptance, merge, and next-task selection. Governance/setup repair is limited to the web controller or an explicitly assigned governance/setup executor using the same installed skill and contract.
 
 Each fresh controller run performs this order for all lanes:
 
@@ -63,7 +67,7 @@ Each fresh controller run performs this order for all lanes:
 5. Reconcile `main` movement, same-PR user commits, other-PR dependencies, forbidden overlap, worktree contamination, and possible unpushed work.
 6. If checks are pending, enter `WAITING_CHECKS`. If user or private context is required, enter `WAITING_USER`. If the child is complete and has no live prompt, take no action.
 7. Validate the canonical parent baseline, one flat lifecycle list, exact child count, row style, current/active exclusivity, and queue order before any pickup. Reconcile every material transition through the four-surface compare-and-preserve contract and append one chronology comment.
-8. If parent reconciliation is incomplete, enter `PARENT_RECONCILIATION_INCOMPLETE` and stop all downstream progression. Do not select a next task, issue a worker prompt, claim, authorise G4, mark ready, accept, merge, close, or claim verification.
+8. If parent reconciliation is incomplete, enter `PARENT_RECONCILIATION_INCOMPLETE` and stop all downstream progression. Do not select a next task, issue a worker prompt, claim, authorise G4, mark ready, accept, merge, close, claim verification, or perform substantive execution. If the blocker appears after a prompt or claim, L1 stops before mutation, preserves safe local evidence, and performs no new commit, push, or external mutation until the controller reconciles.
 9. For an actionable enrolled lane, use the parent list position. Continue current execution before selecting the first eligible active entry. Never select by PR number, recency, author, branch prefix, category, or a parallel subqueue.
 10. Generate exactly one complete packet, post it as child `DRAFT`, bind parent/child/PR, reread, and mark `READY_EXECUTOR` last. A failed reread leaves the lane non-actionable.
 11. After a controller result is reconciled, redact only the transient next-worker payload. Preserve the full audit and executor evidence.

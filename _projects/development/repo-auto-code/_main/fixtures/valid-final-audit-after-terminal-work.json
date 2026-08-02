@@ -1,0 +1,6 @@
+{
+  "id": "valid-final-audit-after-terminal-work",
+  "scenario": "final_audit_eligible",
+  "expected": { "accepted": true, "selection": "FINAL_AUDIT_AFTER_TERMINAL_WORK" },
+  "state": { "parent": { "activeQueue": [ { "child": "#329", "finalAudit": false, "terminal": true }, { "child": "#251", "finalAudit": true, "terminal": false } ] }, "selectedChild": "#251", "moved": false, "reordered": false, "bypassedBlocked": false }
+}

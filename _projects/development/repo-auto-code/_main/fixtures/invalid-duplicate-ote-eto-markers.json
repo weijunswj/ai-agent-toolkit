@@ -7,6 +7,7 @@
     "mutationProhibited": true
   },
   "state": {
+    "promptText": "[ ORCHESTRATOR TO EXECUTOR: START ]\n[ ORCHESTRATOR TO EXECUTOR: START ]\n[ ORCHESTRATOR TO EXECUTOR: END ]\n[ EXECUTOR TO ORCHESTRATOR: START ]\n[ EXECUTOR TO ORCHESTRATOR: END ]\n[ EXECUTOR TO ORCHESTRATOR: END ]",
     "oteStartCount": 2,
     "oteEndCount": 1,
     "etoStartCount": 1,

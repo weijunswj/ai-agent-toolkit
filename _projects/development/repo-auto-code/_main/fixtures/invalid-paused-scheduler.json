@@ -8,9 +8,10 @@
   },
   "state": {
     "schedules": {
+      "authority": { "repository": "weijunswj/ai-agent-toolkit", "generation": "generation-1", "revision": "revision-1" },
       "tasks": [
-        { "identity": "repo-329-controller", "status": "REMOVED", "trustedRemovalReceipt": true, "receiptIdentityMatches": true },
-        { "identity": "repo-329-executor", "status": "PAUSED", "trustedRemovalReceipt": false, "receiptIdentityMatches": false }
+        { "repository": "weijunswj/ai-agent-toolkit", "identity": "repo-329-controller", "generation": "generation-1", "revision": "revision-1", "status": "REMOVED", "removalReceipt": { "trusted": true, "repository": "weijunswj/ai-agent-toolkit", "taskIdentity": "repo-329-controller", "generation": "generation-1", "revision": "revision-1" } },
+        { "repository": "weijunswj/ai-agent-toolkit", "identity": "repo-329-executor", "generation": "generation-1", "revision": "revision-1", "status": "PAUSED", "removalReceipt": { "trusted": false, "repository": "weijunswj/ai-agent-toolkit", "taskIdentity": "repo-329-executor", "generation": "generation-1", "revision": "revision-1" } }
       ]
     }
   }

@@ -7,7 +7,15 @@
     "turn": "CONTROLLER_TURN"
   },
   "state": {
-    "repository": { "exact": true },
+    "repository": { "owner": "weijunswj", "name": "ai-agent-toolkit", "immutableId": "repo-299", "origin": "https://github.com/weijunswj/ai-agent-toolkit.git", "defaultBranch": "main" },
+    "capabilities": { "github_issue_governance": "enabled", "repo_auto_code": "enabled" },
+    "governanceSkill": { "id": "#299", "installed": true, "healthy": true, "inspectable": true },
+    "canonicalParent": { "count": 1, "structure": { "sectionOrder": ["Queue authority", "Current execution", "Active queue", "Completed or disposed", "Completion gate", "Governance ownership", "Mandatory parent reconciliation"], "linesBySection": { "Current execution": ["- #329"], "Active queue": [], "Completed or disposed": [] }, "materialChildren": ["#329"], "lifecycleEntries": { "Current execution": ["#329"], "Active queue": [], "Completed or disposed": [] }, "expectedLifecycle": { "#329": "Current execution" }, "parentEntryCount": 1, "subqueues": [] } },
+    "projections": { "child": { "status": "CURRENT", "lifecycleSection": "Current execution" }, "pr": { "status": "CURRENT", "lifecycleSection": "Current execution" }, "parentEntry": { "status": "CURRENT", "lifecycleSection": "Current execution" }, "chronology": { "status": "CURRENT", "lifecycleSection": "Current execution" } },
+    "reconciliationBlocker": null,
+    "concurrentParentMovement": false,
+    "actor": { "role": "web-controller", "authorized": true },
+    "legacyRepositoryEvidence": { "exact": true },
     "consent": true,
     "skill": { "available": true, "inspectable": true },
     "managedBlock": { "status": "VALID" },

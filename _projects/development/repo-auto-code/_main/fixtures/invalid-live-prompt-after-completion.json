@@ -1,0 +1,6 @@
+{
+  "id": "invalid-live-prompt-after-completion",
+  "scenario": "live_prompt_after_completion",
+  "expected": { "accepted": false, "status": "LIVE_PROMPT_REMAINS", "mutationProhibited": true },
+  "state": { "promptText": "[ ORCHESTRATOR TO EXECUTOR: START ]\nassignment\n[ ORCHESTRATOR TO EXECUTOR: END ]\n[ EXECUTOR TO ORCHESTRATOR: START ]\nresult\n[ EXECUTOR TO ORCHESTRATOR: END ]\nLIVE NEXT-WORKER PROMPT" }
+}

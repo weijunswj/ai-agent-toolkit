@@ -8,28 +8,40 @@
   },
   "state": {
     "reconciliation": {
-      "materialTransition": true,
-      "parentBinding": true,
-      "compareAndPreserve": true,
-      "boundRevision": "parent-r42",
-      "revisionBeforeWrite": "parent-r42",
-      "parentEntryCount": 1,
-      "rowPositionBefore": 5,
-      "rowPositionAfter": 5,
-      "chronologyCommentsAdded": 1,
-      "unrelatedContentPreserved": true,
-      "unrelatedParentContentBefore": ["owner note", "closed history", "extension note"],
-      "unrelatedParentContentAfter": ["owner note", "closed history", "extension note"],
-      "readBackSurfaces": [
-        { "surface": "child", "status": "CURRENT", "nextAction": "await-g4" },
-        { "surface": "pr", "status": "CURRENT", "nextAction": "await-g4" },
-        { "surface": "parent-entry", "status": "CURRENT", "nextAction": "await-g4" },
-        { "surface": "chronology", "status": "CURRENT", "nextAction": "await-g4" }
-      ],
-      "surfacesAgree": true,
-      "readBackExact": true,
-      "concurrentAfterWrite": false,
-      "partialWrite": false
+      "projectionDefaults": {
+        "status": "CURRENT", "lifecycleSection": "Current execution", "pr": "#333",
+        "branch": "luna/tk-038-repo-auto-code-design", "base": "4103897ad709cda700172f7124fd70cf8218a27a",
+        "head": "7ff4e04b6f596ff6538fdc2fbdb0971cfbfd9499", "gate": "G3",
+        "designLock": "DL-329-AUTO-CODE-004", "verdict": "AMEND", "checks": "PASS",
+        "reviewDisposition": "COMMENTED_OPEN", "blocker": "NONE", "requiredUserAction": "CONTROLLER_REVERIFY",
+        "currentTurn": "CONTROLLER", "nextAction": "await-g4", "acceptance": "PENDING",
+        "merge": "NOT_MERGED", "closure": "OPEN", "completion": "INCOMPLETE"
+      },
+      "transitionBefore": { "status": "ACTIVE", "lifecycleSection": "Active queue", "nextAction": "start" },
+      "transitionAfter": { "status": "CURRENT", "lifecycleSection": "Current execution", "nextAction": "await-g4" },
+      "surfaces": { "child": {}, "pr": {}, "parentEntry": {}, "chronology": {} },
+      "binding": {
+        "boundRevision": "parent-r42", "revisionBeforeWrite": "parent-r42", "revisionAfterWrite": "parent-r42",
+        "readBackRevision": "parent-r42", "parentEntryCount": 1, "rowPositionBefore": 5, "rowPositionAfter": 5,
+        "chronologyCommentsAdded": 1, "afterBodyDigest": "digest-after", "readBackBodyDigest": "digest-after",
+        "concurrentBeforeWrite": false, "concurrentAfterWrite": false, "partialWrite": false
+      },
+      "preservation": {
+        "before": {
+          "unrelatedParentEntries": ["owner note"], "queueOrder": ["#329", "#330"],
+          "extensionSections": ["extension note"], "completedHistory": ["#328"],
+          "ownerAuthoredContent": ["owner note"], "unrelatedChildren": ["#330"],
+          "unrelatedPr": ["#700"], "unrelatedChronology": ["chronology-1"]
+        },
+        "after": {
+          "unrelatedParentEntries": ["owner note"], "queueOrder": ["#329", "#330"],
+          "extensionSections": ["extension note"], "completedHistory": ["#328"],
+          "ownerAuthoredContent": ["owner note"], "unrelatedChildren": ["#330"],
+          "unrelatedPr": ["#700"], "unrelatedChronology": ["chronology-1"]
+        }
+      },
+      "surfacesAgree": false,
+      "readBackExact": false
     }
   }
 }

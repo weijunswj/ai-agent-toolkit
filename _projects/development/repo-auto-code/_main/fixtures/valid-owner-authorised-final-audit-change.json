@@ -1,0 +1,6 @@
+{
+  "id": "valid-owner-authorised-final-audit-change",
+  "scenario": "owner_authorised_final_audit_change",
+  "expected": { "accepted": true, "selection": "FINAL_AUDIT_AFTER_TERMINAL_WORK" },
+  "state": { "parent": { "activeQueue": [ { "child": "#329", "finalAudit": false, "terminal": true }, { "child": "#251", "finalAudit": true, "terminal": false } ] }, "selectedChild": "#251", "moved": false, "reordered": false, "bypassedBlocked": false, "declarationChange": { "requested": true, "authorized": true, "actor": "owner" } }
+}

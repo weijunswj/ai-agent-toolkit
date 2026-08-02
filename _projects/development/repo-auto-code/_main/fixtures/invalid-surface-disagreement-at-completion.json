@@ -1,0 +1,6 @@
+{
+  "id": "invalid-surface-disagreement-at-completion",
+  "scenario": "completion_finality",
+  "expected": { "accepted": false, "status": "COMPLETION_GATE_INCOMPLETE", "mutationProhibited": true },
+  "state": { "reviewSweep": { "complete": true, "validOpenReviews": 0 }, "checks": [ { "required": true, "completed": true, "conclusion": "PASS" } ], "protocolEvidence": { "independent": true, "ledgerOnly": false }, "exactHead": { "reviewedHead": "aaa", "currentHead": "aaa", "readBack": true }, "controllerGate": "CONTROLLER_ACCEPTED", "prompt": { "live": false, "processed": true }, "pendingResult": false, "obligations": { "child": false, "user": false, "uat": false, "material": false }, "mergePrerequisites": { "complete": true, "baseVerified": true, "headVerified": true, "noConflicts": true }, "reconciliation": { "surfaces": { "child": { "status": "CURRENT" }, "pr": { "status": "READY" }, "parentEntry": { "status": "CURRENT" }, "chronology": { "status": "CURRENT" } } } }
+}
