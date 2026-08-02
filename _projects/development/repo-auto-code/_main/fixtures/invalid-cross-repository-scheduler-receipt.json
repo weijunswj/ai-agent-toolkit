@@ -1,0 +1,6 @@
+{
+  "id": "invalid-cross-repository-scheduler-receipt",
+  "scenario": "cross_repository_scheduler_receipt",
+  "expected": { "accepted": false, "status": "INCOMPLETE_SCHEDULER_TEARDOWN", "mutationProhibited": true },
+  "state": { "schedules": { "authority": { "repository": "weijunswj/ai-agent-toolkit", "generation": "generation-1", "revision": "revision-1" }, "tasks": [ { "repository": "other-owner/other-repo", "identity": "repo-329-controller", "generation": "generation-1", "revision": "revision-1", "status": "REMOVED", "removalReceipt": { "trusted": true, "repository": "other-owner/other-repo", "taskIdentity": "repo-329-controller", "generation": "generation-1", "revision": "revision-1" } }, { "repository": "weijunswj/ai-agent-toolkit", "identity": "repo-329-executor", "generation": "generation-1", "revision": "revision-1", "status": "REMOVED", "removalReceipt": { "trusted": true, "repository": "weijunswj/ai-agent-toolkit", "taskIdentity": "repo-329-executor", "generation": "generation-1", "revision": "revision-1" } } ] } }
+}

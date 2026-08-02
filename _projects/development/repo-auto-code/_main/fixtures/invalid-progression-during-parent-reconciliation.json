@@ -8,7 +8,7 @@
   },
   "state": {
     "blocker": "PARENT_RECONCILIATION_INCOMPLETE",
-    "attemptedActions": ["another worker prompt", "auto-code pickup or claim", "G4 authorisation", "controller acceptance", "ready-state mutation", "merge or auto-merge", "child closure", "next-task selection", "verification claims", "programme completion"],
-    "prohibitedActions": ["another worker prompt", "auto-code pickup or claim", "G4 authorisation", "controller acceptance", "ready-state mutation", "merge or auto-merge", "child closure", "next-task selection", "verification claims", "programme completion"]
+    "attemptedActions": ["another worker prompt", "auto-code pickup or claim", "G4 authorisation", "controller acceptance", "ready-state mutation", "substantive execution", "new commit", "push", "external mutation", "merge or auto-merge", "child closure", "next-task selection", "verification claims", "programme completion"],
+    "prohibitedActions": ["another worker prompt", "auto-code pickup or claim", "G4 authorisation", "controller acceptance", "ready-state mutation", "substantive execution", "new commit", "push", "external mutation", "merge or auto-merge", "child closure", "next-task selection", "verification claims", "programme completion"]
   }
 }

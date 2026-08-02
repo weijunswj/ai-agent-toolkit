@@ -1,0 +1,6 @@
+{
+  "id": "invalid-ordinary-executor-self-setup",
+  "scenario": "governance_readiness",
+  "expected": { "accepted": false, "status": "AUTO_CODE_GOVERNANCE_UNREADY", "mutationProhibited": true },
+  "state": { "repository": { "owner": "weijunswj", "name": "ai-agent-toolkit", "immutableId": "repo-299", "origin": "https://github.com/weijunswj/ai-agent-toolkit.git", "defaultBranch": "main" }, "capabilities": { "github_issue_governance": "enabled", "repo_auto_code": "enabled" }, "governanceSkill": { "id": "#299", "installed": true, "healthy": true, "inspectable": true }, "actor": { "role": "ordinary-executor", "authorized": true } }
+}

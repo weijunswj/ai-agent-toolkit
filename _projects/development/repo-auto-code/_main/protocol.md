@@ -13,9 +13,13 @@ The reconstruction order is:
 5. Determine the affected lane's turn using the state machine.
 6. Refuse to act on any partial, duplicate, malformed, contradictory, stale, or unbound state.
 
+Before an Auto-code cycle continues, the controller derives separate exact-repository capability readiness. `github_issue_governance: enabled` and `repo_auto_code: enabled` must both be present; generic repository consent is insufficient. The installed #299 governance skill must be present and healthy, exactly one canonical parent must satisfy the baseline, every direct material child must occur once, parent/child/PR projections must agree, no reconciliation blocker or concurrent movement may be pending, and the actor must be authorised for the exact role. A failure returns `AUTO_CODE_GOVERNANCE_UNREADY` and prohibits claim, pickup, prompt issuance, substantive execution, governance repair from an ordinary cycle, G4, acceptance, merge, and next-task selection. Only the web controller or a supported executor explicitly assigned the exact governance/setup role may initiate or repair governance, using the same installed skill and validation contract.
+
 ## 2. Closed handoff grammar
 
 The protocol has exactly two handoff marker names. A complete packet uses one start marker and one matching end marker, in order, with no nested packet. Metadata is intentionally minimal; facts reliably derivable from the live repository are not copied into packet headers.
+
+Marker validation parses the complete prompt or result text, not fixture-provided counts. It derives one OTE start, one OTE end, one ETO start, and one ETO end; global ordering; a typed stack with no nesting, crossing, overlap, or hidden duplicate; and the absence of a live prompt/result after completion. One-count markers in the wrong order, extra markers later in the text, missing markers, nested envelopes, and crossed envelopes are invalid and prohibit packet consumption, redaction, or completion.
 
 ### Controller to executor packet
 
@@ -133,11 +137,11 @@ Every material transition updates and re-reads all applicable surfaces:
 
 The controller first binds the current parent body with a trusted revision identity or body digest and resolves exactly one existing entry for the child. It must reject a missing, duplicate, moved, or ambiguous entry. It then projects the same complete material state to the child body, PR body, unchanged parent row position, and one chronology comment. The parent write is compare-and-preserve: patch only that row under the bound revision, preserve every unrelated entry, existing top-to-bottom order, repository-specific extension, owner-authored content, and completed history, and append exactly one new chronology comment. It must not replace a stale full parent body.
 
-The controller re-reads the four surfaces after the write and verifies the projected fields, row identity, row position, revision, chronology count, and preservation digest. A concurrent change before the write, a concurrent change after the write, a partial write, or any failed post-write read-back is not repaired by blind retry. It enters the exact blocker below and preserves the evidence for controller/user repair.
+The controller re-reads the four surfaces after the write and verifies the projected fields, row identity, row position, revision, chronology count, and preservation digest. A concurrent change before the write, a concurrent change after the write, a partial write, or any failed post-write read-back is not repaired by blind retry. It enters the exact blocker below and preserves the evidence for controller/user repair. The evaluator and controller derive these results from raw surface projections, revisions, bytes/digests, row positions, chronology records, and preservation snapshots; fixture-supplied `surfacesAgree`, `readBackExact`, or preservation booleans are never authority.
 
 ### `PARENT_RECONCILIATION_INCOMPLETE` blocker
 
-`PARENT_RECONCILIATION_INCOMPLETE` applies to missing, duplicate, stale, conflicting, partially written, concurrently changed, or unverifiable parent reconciliation state. While active, it prohibits another worker prompt, auto-code pickup or claim, G4 authorisation, controller acceptance, ready-state mutation, merge or auto-merge, child closure, next-task selection, verification claims, and programme completion. No downstream result may clear its own blocker.
+`PARENT_RECONCILIATION_INCOMPLETE` applies to missing, duplicate, stale, conflicting, partially written, concurrently changed, or unverifiable parent reconciliation state. While active, it prohibits another worker prompt, auto-code pickup or claim, G4 authorisation, controller acceptance, ready-state mutation, substantive execution, new commits, pushes, external mutation, merge or auto-merge, child closure, next-task selection, verification claims, and programme completion. If the blocker appears after a prompt or lease was issued, active or resumed L1 work stops before further substantive mutation and preserves safe local evidence; the controller must reconcile before continuation. No issued prompt, lease, `GATE_RUNNING`, or downstream result may clear its own blocker.
 
 Keep these gate states distinct and independently evidenced: `GATE_AUTHORISED`, `GATE_RUNNING`, `GATE_RESULT_RECEIVED`, and `CONTROLLER_ACCEPTED`. A prompt may be authorised without running, a run may finish without a result being accepted, and a result may be received without controller acceptance. None of these states proves its own parent reconciliation, review, checks, ledger-independent protocol, merge, or teardown prerequisites.
 
@@ -260,10 +264,14 @@ Completion eligibility requires all of the following, in a fresh current read:
 - the protocol, four-surface reconciliation, and exact-head acceptance are independently verified rather than proved by an evaluation ledger entry alone;
 - the controller has reached `CONTROLLER_ACCEPTED`, not merely `GATE_AUTHORISED`, `GATE_RUNNING`, or `GATE_RESULT_RECEIVED`;
 - no live final prompt or unprocessed result remains;
+- no pending child, user-action, UAT, or other material obligation remains;
+- parent, child, and PR material projections agree after the final read-back;
 - merge prerequisites are complete and any merge is controller-authorised and exact-head verified; and
 - teardown prerequisites are complete, including verified removal of both exact scheduled-task identities with the sole terminal scheduler state `REMOVED`.
 
 There is no live final prompt before completion. `DISABLED`, `PAUSED`, `ACTIVE`, `DUPLICATE`, `AMBIGUOUS`, partially removed, or missing-without-a-trusted-removal-receipt scheduler state is incomplete. The same state cannot prove its own review, check, protocol, acceptance, merge, or teardown gate.
+
+Scheduler finality is identity-bound, not a count of two strings. Each trusted removal receipt must bind the exact repository identity, the exact web-controller task identity, the exact executor task identity, and the required task generation or revision to the observed task record. A receipt for another repository, a receipt with a mismatched identity/generation/revision, or removal of one repository's task cannot satisfy this repository's completion gate; exactly two arbitrary distinct task names are insufficient.
 
 ## 9. Public-safe sensitive context
 

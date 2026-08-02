@@ -11,57 +11,21 @@ const mainRoot = path.join(moduleRoot, '_main');
 const fixtureRoot = path.join(mainRoot, 'fixtures');
 const templateRoot = path.join(mainRoot, 'templates');
 
-const expectedFixtureFiles = [
-  'invalid-ambiguous-scheduler.json',
-  'invalid-baseline-section-order.json',
-  'invalid-body-comment-disagreement.json',
-  'invalid-bullet-checkbox-style.json',
-  'invalid-caller-supplied-lease-fields.json',
-  'invalid-child-duplicate-lifecycle.json',
-  'invalid-child-missing-lifecycle.json',
-  'invalid-competing-category-subqueues.json',
-  'invalid-concurrent-edit-after-write.json',
-  'invalid-concurrent-edit-before-write.json',
-  'invalid-current-item-active.json',
-  'invalid-disabled-scheduler.json',
-  'invalid-duplicate-claims.json',
-  'invalid-duplicate-ote-eto-markers.json',
-  'invalid-duplicate-packets.json',
-  'invalid-duplicate-parent-entry.json',
-  'invalid-duplicate-scheduler.json',
-  'invalid-final-live-prompt.json',
-  'invalid-head-mismatch.json',
-  'invalid-incomplete-teardown.json',
-  'invalid-malformed-agents-block.json',
-  'invalid-missing-parent-chronology.json',
-  'invalid-missing-parent-entry.json',
-  'invalid-missing-provider-routing.json',
-  'invalid-missing-skill.json',
-  'invalid-missing-valid-open-reviews.json',
-  'invalid-next-action-mismatch.json',
-  'invalid-non-atomic-claim.json',
-  'invalid-parent-child-pr-status-mismatch.json',
-  'invalid-partial-publication.json',
-  'invalid-paused-scheduler.json',
-  'invalid-progression-during-parent-reconciliation.json',
-  'invalid-secret-prompt.json',
-  'invalid-stale-g4.json',
-  'invalid-terminal-item-nonterminal.json',
-  'invalid-unauthorised-queue-reorder.json',
-  'invalid-unrelated-parent-content-changed.json',
-  'invalid-unverifiable-missing-scheduler.json',
-  'invalid-wrong-current-turn.json',
-  'valid-active-to-current.json',
-  'valid-blocked-first-skip.json',
-  'valid-current-to-completed.json',
-  'valid-exact-dual-scheduler-removal.json',
-  'valid-existing-pr-adoption.json',
-  'valid-first-eligible-pickup.json',
-  'valid-first-run.json',
-  'valid-four-surface-reconciliation.json',
-  'valid-parallel-prs.json',
-  'valid-processed-prompt.json',
-  'valid-same-pr-fast-forward.json'
+const expectedFixtureFiles = fs.readdirSync(fixtureRoot).filter((name) => name.endsWith('.json')).sort();
+const requiredFixtureFiles = [
+  'invalid-missing-github-issue-governance.json', 'invalid-missing-repo-auto-code.json', 'invalid-generic-consent-only.json',
+  'invalid-governance-skill-missing.json', 'invalid-governance-skill-unhealthy.json', 'invalid-duplicate-canonical-parents.json',
+  'invalid-governance-parent-baseline.json', 'invalid-governance-pending-reconciliation.json', 'invalid-governance-repository-mismatch.json',
+  'invalid-ordinary-executor-self-setup.json', 'valid-governance-readiness.json', 'invalid-final-audit-selected-early.json',
+  'invalid-final-audit-reordered.json', 'invalid-final-audit-bypassed-blocked.json', 'invalid-final-audit-not-last.json',
+  'invalid-unauthorised-final-audit-change.json', 'valid-final-audit-after-terminal-work.json', 'valid-owner-authorised-final-audit-change.json',
+  'invalid-substantive-execution-during-reconciliation.json', 'invalid-lying-surfaces-agree.json', 'invalid-lying-read-back-exact.json',
+  'invalid-out-of-order-handoff-markers.json', 'invalid-nested-handoff-markers.json', 'invalid-crossed-handoff-markers.json',
+  'invalid-missing-handoff-marker.json', 'invalid-live-prompt-after-completion.json', 'invalid-incomplete-review-sweep.json',
+  'invalid-missing-exact-head-evidence.json', 'invalid-pending-user-action.json', 'invalid-pending-child-uat-material-obligation.json',
+  'invalid-surface-disagreement-at-completion.json', 'invalid-cross-repository-scheduler-receipt.json', 'invalid-active-or-duplicate-scheduler.json',
+  'valid-completion-finality.json', 'valid-exact-dual-scheduler-removal.json', 'valid-four-surface-reconciliation.json',
+  'invalid-valid-mutation-unrelated-drift.json'
 ];
 
 const routingProfiles = [
@@ -124,15 +88,52 @@ function extractCodePacket(text, startMarker, endMarker) {
   return text.slice(start, end + endMarker.length);
 }
 
-function assertExactEnvelopeCounts(text, label) {
-  for (const marker of [
-    '[ ORCHESTRATOR TO EXECUTOR: START ]',
-    '[ ORCHESTRATOR TO EXECUTOR: END ]',
-    '[ EXECUTOR TO ORCHESTRATOR: START ]',
-    '[ EXECUTOR TO ORCHESTRATOR: END ]'
-  ]) {
-    assert.equal(count(text, marker), 1, `${label}: exact one-count for ${marker}`);
+const envelopeMarkers = Object.freeze({
+  oteStart: '[ ORCHESTRATOR TO EXECUTOR: START ]',
+  oteEnd: '[ ORCHESTRATOR TO EXECUTOR: END ]',
+  etoStart: '[ EXECUTOR TO ORCHESTRATOR: START ]',
+  etoEnd: '[ EXECUTOR TO ORCHESTRATOR: END ]'
+});
+
+function parseEnvelopeEvidence(text) {
+  if (typeof text !== 'string') return { valid: false, reason: 'missing_text' };
+  const events = [];
+  for (const [kind, marker] of Object.entries(envelopeMarkers)) {
+    let offset = 0;
+    while (true) {
+      const index = text.indexOf(marker, offset);
+      if (index === -1) break;
+      events.push({ kind, marker, index });
+      offset = index + marker.length;
+    }
   }
+  events.sort((left, right) => left.index - right.index);
+  const counts = Object.fromEntries(Object.keys(envelopeMarkers).map((key) => [key, events.filter((event) => event.kind === key).length]));
+  if (Object.values(counts).some((value) => value !== 1)) return { valid: false, reason: 'count', counts, events };
+  const expectedOrder = ['oteStart', 'oteEnd', 'etoStart', 'etoEnd'];
+  if (events.map((event) => event.kind).join('|') !== expectedOrder.join('|')) return { valid: false, reason: 'order', counts, events };
+  const stack = [];
+  const pairs = { oteStart: 'oteEnd', etoStart: 'etoEnd' };
+  for (const event of events) {
+    if (pairs[event.kind]) {
+      if (stack.length > 0) return { valid: false, reason: 'nested', counts, events };
+      stack.push(event.kind);
+    } else {
+      const opening = stack.pop();
+      if (!opening || pairs[opening] !== event.kind) return { valid: false, reason: 'crossed', counts, events };
+    }
+  }
+  if (stack.length !== 0) return { valid: false, reason: 'unclosed', counts, events };
+  const finalEnd = events[events.length - 1];
+  const trailing = text.slice(finalEnd.index + finalEnd.marker.length);
+  const trailingLive = /(?:LIVE\s+NEXT[- ]WORKER\s+PROMPT|\[\s*(?:ORCHESTRATOR|EXECUTOR)\s+TO\s+)/i.test(trailing);
+  return { valid: !trailingLive, reason: trailingLive ? 'trailing_live_payload' : null, counts, events };
+}
+
+function assertExactEnvelopeCounts(text, label) {
+  const parsed = parseEnvelopeEvidence(text);
+  assert.equal(parsed.valid, true, `${label}: globally valid marker grammar (${parsed.reason || 'ok'})`);
+  assert.deepEqual(parsed.counts, { oteStart: 1, oteEnd: 1, etoStart: 1, etoEnd: 1 }, `${label}: derived marker counts`);
 }
 
 function assertPacketGrammar(protocol) {
@@ -180,8 +181,7 @@ function assertPacketGrammar(protocol) {
   assert.match(ote, /\[ ORCHESTRATOR TO EXECUTOR: END \]$/);
   assert.match(eto, /^\[ EXECUTOR TO ORCHESTRATOR: START \]/);
   assert.match(eto, /\[ EXECUTOR TO ORCHESTRATOR: END \]$/);
-  assert.ok(protocol.indexOf('[ ORCHESTRATOR TO EXECUTOR: START ]') < protocol.indexOf('[ ORCHESTRATOR TO EXECUTOR: END ]'));
-  assert.ok(protocol.indexOf('[ EXECUTOR TO ORCHESTRATOR: START ]') < protocol.indexOf('[ EXECUTOR TO ORCHESTRATOR: END ]'));
+  assert.equal(parseEnvelopeEvidence(protocol).valid, true);
   assertExactEnvelopeCounts(protocol, 'protocol');
 }
 
@@ -205,6 +205,11 @@ function assertManagedBlock(template) {
   assert.match(template, /Web-controller ownership/);
   assert.match(template, /Public-safe GitHub/);
   assert.match(template, /AUTO_CODE_SETUP_INVALID/);
+  assert.match(template, /github_issue_governance: enabled/);
+  assert.match(template, /repo_auto_code: enabled/);
+  assert.match(template, /AUTO_CODE_GOVERNANCE_UNREADY/);
+  assert.match(template, /final whole-programme audit/);
+  assert.match(template, /substantive execution/);
   assert.doesNotMatch(template, /Packet ID:/);
 }
 
@@ -339,6 +344,47 @@ const claimAuthorityFields = [
   'authority'
 ];
 
+const materialProjectionFields = [
+  'status', 'lifecycleSection', 'pr', 'branch', 'base', 'head', 'gate', 'designLock',
+  'verdict', 'checks', 'reviewDisposition', 'blocker', 'requiredUserAction', 'currentTurn',
+  'nextAction', 'acceptance', 'merge', 'closure', 'completion'
+];
+
+const expectedRepositoryIdentity = 'weijunswj/ai-agent-toolkit';
+const expectedSchedulerTasks = Object.freeze({
+  controller: 'repo-329-controller',
+  executor: 'repo-329-executor'
+});
+
+function jsonEqual(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function projectionFromRaw(surface, defaults = {}) {
+  if (!surface || typeof surface !== 'object') return null;
+  const merged = { ...defaults, ...surface };
+  return Object.fromEntries(materialProjectionFields.map((field) => [field, merged[field]]));
+}
+
+function deriveSurfaceAgreement(surfaces, defaults = {}) {
+  if (!surfaces || typeof surfaces !== 'object') return false;
+  const entries = ['child', 'pr', 'parentEntry', 'chronology'].map((name) => projectionFromRaw(surfaces[name], defaults));
+  if (entries.some((projection) => projection === null)) return false;
+  return entries.every((projection) => jsonEqual(projection, entries[0]));
+}
+
+function validatePreservationEvidence(preservation) {
+  if (!preservation || typeof preservation !== 'object') return false;
+  const before = preservation.before;
+  const after = preservation.after;
+  const keys = [
+    'unrelatedParentEntries', 'queueOrder', 'extensionSections', 'completedHistory',
+    'ownerAuthoredContent', 'unrelatedChildren', 'unrelatedPr', 'unrelatedChronology'
+  ];
+  return before && after && keys.every((key) => Object.prototype.hasOwnProperty.call(before, key)
+    && Object.prototype.hasOwnProperty.call(after, key) && jsonEqual(before[key], after[key]));
+}
+
 function rejected(status, details = {}) {
   return { ...details, accepted: false, status, mutationProhibited: true };
 }
@@ -386,22 +432,19 @@ function validateParentLifecycle(parent) {
 }
 
 function validateFourSurfaceReconciliation(reconciliation) {
-  if (!reconciliation || reconciliation.materialTransition !== true) return false;
-  if (reconciliation.parentBinding !== true || reconciliation.compareAndPreserve !== true) return false;
-  if (reconciliation.boundRevision !== reconciliation.revisionBeforeWrite) return false;
-  if (reconciliation.parentEntryCount !== 1) return false;
-  if (reconciliation.rowPositionBefore !== reconciliation.rowPositionAfter) return false;
-  if (reconciliation.chronologyCommentsAdded !== 1) return false;
-  if (reconciliation.unrelatedContentPreserved !== true) return false;
-  if (reconciliation.unrelatedParentContentBefore !== undefined || reconciliation.unrelatedParentContentAfter !== undefined) {
-    if (JSON.stringify(reconciliation.unrelatedParentContentBefore) !== JSON.stringify(reconciliation.unrelatedParentContentAfter)) return false;
-  }
-  if (Array.isArray(reconciliation.readBackSurfaces)) {
-    const projections = reconciliation.readBackSurfaces.map(({ surface, ...projection }) => projection);
-    if (projections.some((projection) => JSON.stringify(projection) !== JSON.stringify(projections[0]))) return false;
-  }
-  if (reconciliation.surfacesAgree !== true || reconciliation.readBackExact !== true) return false;
-  if (reconciliation.concurrentAfterWrite === true || reconciliation.partialWrite === true) return false;
+  if (!reconciliation || typeof reconciliation !== 'object') return false;
+  const defaults = reconciliation.projectionDefaults || {};
+  if (!deriveSurfaceAgreement(reconciliation.surfaces, defaults)) return false;
+  const before = projectionFromRaw(reconciliation.transitionBefore, defaults);
+  const after = projectionFromRaw(reconciliation.transitionAfter, defaults);
+  if (!before || !after || jsonEqual(before, after)) return false;
+  const binding = reconciliation.binding;
+  if (!binding || binding.boundRevision !== binding.revisionBeforeWrite || binding.revisionAfterWrite !== binding.boundRevision) return false;
+  if (binding.readBackRevision !== binding.revisionAfterWrite || binding.parentEntryCount !== 1) return false;
+  if (binding.rowPositionBefore !== binding.rowPositionAfter || binding.chronologyCommentsAdded !== 1) return false;
+  if (!binding.afterBodyDigest || binding.readBackBodyDigest !== binding.afterBodyDigest) return false;
+  if (binding.concurrentBeforeWrite === true || binding.concurrentAfterWrite === true || binding.partialWrite === true) return false;
+  if (!validatePreservationEvidence(reconciliation.preservation)) return false;
   return true;
 }
 
@@ -422,20 +465,92 @@ function schedulerIdentities(state) {
 function validateExactSchedulerRemoval(state) {
   const tasks = schedulerIdentities(state);
   if (tasks.length !== 2) return false;
+  const authority = state.schedules?.authority;
+  if (!authority || authority.repository !== expectedRepositoryIdentity
+    || authority.generation !== 'generation-1' || authority.revision !== 'revision-1') return false;
   const identities = tasks.map((task) => task.identity);
-  if (new Set(identities).size !== identities.length) return false;
-  return tasks.every((task) => task.status === 'REMOVED' && task.trustedRemovalReceipt === true && task.receiptIdentityMatches === true);
+  if (new Set(identities).size !== identities.length
+    || identities[0] !== expectedSchedulerTasks.controller
+    || identities[1] !== expectedSchedulerTasks.executor) return false;
+  return tasks.every((task) => {
+    if (task.repository !== expectedRepositoryIdentity || task.status !== 'REMOVED') return false;
+    if (task.generation !== authority.generation || task.revision !== authority.revision) return false;
+    const receipt = task.removalReceipt;
+    return receipt && receipt.trusted === true
+      && receipt.repository === expectedRepositoryIdentity
+      && receipt.taskIdentity === task.identity
+      && receipt.generation === authority.generation
+      && receipt.revision === authority.revision;
+  });
 }
 
 function validateCompletionEligibility(state) {
-  return state.validOpenReviews === 0
-    && state.requiredChecksComplete === true
-    && state.protocolIndependentlyVerified === true
+  const reviews = state.reviewSweep;
+  const checks = state.checks;
+  const head = state.exactHead;
+  const obligations = state.obligations;
+  const merge = state.mergePrerequisites;
+  const prompt = state.prompt;
+  const independentProtocol = state.protocolEvidence;
+  return reviews?.complete === true
+    && reviews.validOpenReviews === 0
+    && Array.isArray(checks) && checks.length > 0
+    && checks.every((check) => check.required === true && check.completed === true && check.conclusion === 'PASS')
+    && independentProtocol?.independent === true && independentProtocol.ledgerOnly === false
+    && head?.reviewedHead && head.reviewedHead === head.currentHead && head.readBack === true
     && state.controllerGate === 'CONTROLLER_ACCEPTED'
-    && state.liveFinalPrompt === false
-    && state.pendingResult === false
-    && state.mergePrerequisitesComplete === true
-    && validateExactSchedulerRemoval(state);
+    && prompt?.live === false && prompt.processed === true && state.pendingResult === false
+    && obligations && obligations.child === false && obligations.user === false && obligations.uat === false && obligations.material === false
+    && validateFourSurfaceReconciliation(state.reconciliation)
+    && merge?.complete === true && merge.baseVerified === true && merge.headVerified === true
+    && merge.noConflicts === true && validateExactSchedulerRemoval(state);
+}
+
+function validateGovernanceReadiness(state) {
+  const repository = state.repository;
+  const capabilities = state.capabilities;
+  const skill = state.governanceSkill;
+  const parent = state.canonicalParent;
+  const actor = state.actor;
+  if (!repository || `${repository.owner}/${repository.name}` !== expectedRepositoryIdentity
+    || repository.immutableId !== 'repo-299'
+    || repository.origin !== 'https://github.com/weijunswj/ai-agent-toolkit.git'
+    || repository.defaultBranch !== 'main') return false;
+  if (!capabilities || capabilities.github_issue_governance !== 'enabled' || capabilities.repo_auto_code !== 'enabled') return false;
+  if (!skill || skill.id !== '#299' || skill.installed !== true || skill.healthy !== true || skill.inspectable !== true) return false;
+  if (!parent || parent.count !== 1 || !validateParentLifecycle(parent.structure)) return false;
+  if (state.reconciliationBlocker === 'PARENT_RECONCILIATION_INCOMPLETE' || state.concurrentParentMovement === true) return false;
+  if (!deriveSurfaceAgreement(state.projections)) return false;
+  if (!actor || actor.authorized !== true || !['web-controller', 'governance-setup-executor'].includes(actor.role)) return false;
+  return true;
+}
+
+function validateFinalAuditInvariant(state) {
+  const parent = state.parent;
+  if (!parent || !Array.isArray(parent.activeQueue) || parent.activeQueue.length === 0) return false;
+  const audits = parent.activeQueue.filter((entry) => entry.finalAudit === true);
+  if (audits.length !== 1 || parent.activeQueue[parent.activeQueue.length - 1] !== audits[0]) return false;
+  const audit = audits[0];
+  const preceding = parent.activeQueue.slice(0, -1);
+  if (preceding.some((entry) => entry.terminal !== true)) return false;
+  if (state.selectedChild !== audit.child) return false;
+  if (state.moved === true || state.reordered === true || state.bypassedBlocked === true) return false;
+  if (state.declarationChange && state.declarationChange.requested === true
+    && (state.declarationChange.authorized !== true || !['owner', 'web-controller'].includes(state.declarationChange.actor))) return false;
+  return true;
+}
+
+function validateSubstantiveStop(state) {
+  if (state.blocker !== 'PARENT_RECONCILIATION_INCOMPLETE') return false;
+  if (!Array.isArray(state.attemptedActions) || !state.attemptedActions.includes('substantive execution')) return false;
+  if (!state.promptIssued || !state.claimIssued) return false;
+  const mutation = state.mutation;
+  return mutation && mutation.stopBeforeMutation === true
+    && mutation.localEvidencePreserved === true
+    && mutation.newCommit === false
+    && mutation.push === false
+    && mutation.externalMutation === false
+    && mutation.gate !== 'GATE_RUNNING';
 }
 
 function evaluateFixture(fixture) {
@@ -525,13 +640,22 @@ function evaluateFixture(fixture) {
       assert.equal(validateFourSurfaceReconciliation(state.reconciliation), true);
       return { accepted: true, reconciliation: 'FOUR_SURFACE_READ_BACK', preservedUnrelated: true };
 
+    case 'lying_surfaces_agree':
+    case 'lying_read_back_exact':
+    case 'valid_mutation_unrelated_drift':
+      assert.equal(validateFourSurfaceReconciliation(state.reconciliation), false);
+      return rejected('PARENT_RECONCILIATION_INCOMPLETE');
+
     case 'exact_dual_scheduler_removal':
       assert.equal(validateExactSchedulerRemoval(state), true);
       return { accepted: true, scheduler: 'REMOVED', completion: 'allowed_after_exact_dual_removal' };
 
     case 'first_run':
       assert.equal(state.repository.exact, true);
-      assert.equal(state.consent, true);
+      assert.equal(state.phase, 'SETUP');
+      assert.equal(state.capabilities.github_issue_governance, 'enabled');
+      assert.equal(state.capabilities.repo_auto_code, 'enabled');
+      assert.equal(state.setupActor.role, 'web-controller');
       assert.equal(state.skill.available, true);
       assert.equal(state.skill.inspectable, true);
       assert.equal(state.managedBlock.status, 'ABSENT');
@@ -542,6 +666,7 @@ function evaluateFixture(fixture) {
       return { accepted: true, turn: 'CONTROLLER_TURN', mutation: 'safe_preparation_only' };
 
     case 'existing_pr_adoption':
+      assert.equal(validateGovernanceReadiness(state), true);
       assert.equal(state.pr.classification, 'ADOPTION_ELIGIBLE');
       assert.equal(state.pr.completeDiffInspected, true);
       assert.equal(state.pr.completeCommitsInspected, true);
@@ -654,6 +779,30 @@ function evaluateFixture(fixture) {
       }
       return rejected('PARENT_RECONCILIATION_INCOMPLETE');
 
+    case 'substantive_execution_during_reconciliation':
+      assert.equal(validateSubstantiveStop(state), true);
+      return rejected('PARENT_RECONCILIATION_INCOMPLETE');
+
+    case 'governance_readiness':
+      assert.equal(validateGovernanceReadiness(state), fixture.expected.accepted);
+      return fixture.expected.accepted
+        ? { accepted: true, readiness: 'INDEPENDENT_DUAL_CAPABILITY' }
+        : rejected('AUTO_CODE_GOVERNANCE_UNREADY');
+
+    case 'final_audit_eligible':
+    case 'final_audit_selected_early':
+    case 'final_audit_reordered':
+    case 'final_audit_bypassed_blocked':
+    case 'final_audit_not_last':
+    case 'unauthorised_final_audit_change':
+    case 'owner_authorised_final_audit_change':
+      if (fixture.scenario === 'final_audit_eligible' || fixture.scenario === 'owner_authorised_final_audit_change') {
+        assert.equal(validateFinalAuditInvariant(state), true);
+        return { accepted: true, selection: 'FINAL_AUDIT_AFTER_TERMINAL_WORK' };
+      }
+      assert.equal(validateFinalAuditInvariant(state), false);
+      return rejected('PARENT_RECONCILIATION_INCOMPLETE');
+
     case 'caller_supplied_lease_fields':
       assert.equal(state.capability.rejectsCallerAuthorityFields, true);
       assert.equal(state.capability.callerCanMintLease, false);
@@ -664,9 +813,28 @@ function evaluateFixture(fixture) {
       assert.equal(validateClaimInput(state), false);
       return rejected('CLAIM_INPUT_AUTHORITY_FIELDS_REJECTED');
 
-    case 'duplicate_ote_eto_markers':
-      assert.ok(state.oteStartCount > 1 || state.oteEndCount > 1 || state.etoStartCount > 1 || state.etoEndCount > 1);
+    case 'duplicate_ote_eto_markers': {
+      const parsed = parseEnvelopeEvidence(state.promptText);
+      assert.equal(parsed.valid, false);
+      assert.equal(parsed.reason, 'count');
       return rejected('DUPLICATE_HANDOFF_MARKER');
+    }
+
+    case 'out_of_order_handoff_markers':
+    case 'nested_handoff_markers':
+    case 'crossed_handoff_markers':
+    case 'missing_handoff_marker': {
+      const parsed = parseEnvelopeEvidence(state.promptText);
+      assert.equal(parsed.valid, false);
+      return rejected('MALFORMED_HANDOFF_MARKER');
+    }
+
+    case 'live_prompt_after_completion': {
+      const parsed = parseEnvelopeEvidence(state.promptText);
+      assert.equal(parsed.valid, false);
+      assert.equal(parsed.reason, 'trailing_live_payload');
+      return rejected('LIVE_PROMPT_REMAINS');
+    }
 
     case 'missing_valid_open_reviews':
       assert.equal(Object.prototype.hasOwnProperty.call(state, 'validOpenReviews'), false);
@@ -703,9 +871,19 @@ function evaluateFixture(fixture) {
       assert.equal(state.completionRequested, true);
       assert.equal(state.userExplicitlyRequestedRemoval, true);
       assert.equal(state.teardownState, 'PARTIALLY_REMOVED');
-      assert.equal(state.schedules.controller.status, 'removed');
-      assert.notEqual(state.schedules.executor.status, 'removed');
       assert.equal(state.otherRepositoryAffected, false);
+      assert.equal(validateExactSchedulerRemoval(state), false);
+      return rejected('INCOMPLETE_SCHEDULER_TEARDOWN');
+
+    case 'completion_finality':
+      assert.equal(validateCompletionEligibility(state), fixture.expected.accepted);
+      return fixture.expected.accepted
+        ? { accepted: true, completion: 'DERIVED_FINALITY' }
+        : rejected('COMPLETION_GATE_INCOMPLETE');
+
+    case 'cross_repository_scheduler_receipt':
+    case 'active_or_duplicate_scheduler':
+      assert.equal(validateExactSchedulerRemoval(state), false);
       return rejected('INCOMPLETE_SCHEDULER_TEARDOWN');
 
     default:
@@ -783,7 +961,7 @@ test('failure matrix has required evidence, repair, and lane-isolation columns',
     'F-011', 'F-012', 'F-013', 'F-014', 'F-015', 'F-016', 'F-017', 'F-018', 'F-019', 'F-020',
     'F-021', 'F-022', 'F-023', 'F-024', 'F-025', 'F-026', 'F-027', 'F-028', 'F-029', 'F-030',
     'F-031', 'F-032', 'F-033', 'F-034', 'F-035', 'F-036', 'F-037', 'F-038', 'F-039', 'F-040', 'F-041',
-    'F-042', 'F-043', 'F-044', 'F-045', 'F-046', 'F-047', 'F-048', 'F-049', 'F-050'
+    'F-042', 'F-043', 'F-044', 'F-045', 'F-046', 'F-047', 'F-048', 'F-049', 'F-050', 'F-051', 'F-052', 'F-053', 'F-054'
   ]) {
     assert.match(matrix, new RegExp(`\\| ${id} \\|`), `failure row ${id}`);
   }
@@ -791,6 +969,10 @@ test('failure matrix has required evidence, repair, and lane-isolation columns',
   assert.match(matrix, /\| F-041 \|[\s\S]*?\| `HELD` \|/);
   assert.match(matrix, /PARENT_RECONCILIATION_INCOMPLETE/);
   assert.match(matrix, /sole verified terminal state `REMOVED`/);
+  assert.match(matrix, /AUTO_CODE_GOVERNANCE_UNREADY/);
+  assert.match(matrix, /final whole-programme audit/i);
+  assert.match(matrix, /substantive execution/);
+  assert.match(matrix, /fixture or result supplies/i);
 });
 
 test('controller prompt location and lifecycle state boundaries are explicit', () => {
@@ -802,6 +984,11 @@ test('controller prompt location and lifecycle state boundaries are explicit', (
   assert.match(architecture, /Visible numeric prefixes are optional; list position is authoritative/);
   assert.match(architecture, /blocked first item stays in place/);
   assert.match(architecture, /Only the owner or an explicitly authorised governance actor may reorder/);
+  assert.match(architecture, /final whole-programme audit/);
+  assert.match(architecture, /github_issue_governance: enabled/);
+  assert.match(architecture, /repo_auto_code: enabled/);
+  assert.match(architecture, /AUTO_CODE_GOVERNANCE_UNREADY/);
+  assert.match(architecture, /stops substantive execution/);
   assert.match(architecture, /Active queue -> Current execution -> Completed or disposed/);
   for (const label of ['SETUP', 'PREPARED', 'SCHEDULED', 'ENROLLED', 'CLAIMED', 'RUNNING', 'ACCEPTED', 'COMPLETE']) {
     assert.match(lifecycle, new RegExp('`' + label + '`'));
@@ -827,6 +1014,9 @@ test('material transitions use four-surface compare-and-preserve reconciliation 
   assert.match(protocol, /patch only that row/);
   assert.match(protocol, /preserve every unrelated entry/);
   assert.match(protocol, /PARENT_RECONCILIATION_INCOMPLETE/);
+  assert.match(protocol, /substantive execution/);
+  assert.match(protocol, /raw surface projections/);
+  assert.match(protocol, /exact web-controller task identity/);
   for (const action of ['another worker prompt', 'auto-code pickup or claim', 'G4 authorisation', 'controller acceptance', 'ready-state mutation', 'merge or auto-merge', 'child closure', 'next-task selection', 'verification claims', 'programme completion']) {
     assert.match(protocol, new RegExp(action.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
@@ -849,11 +1039,35 @@ test('completion finality requires independent review/check/merge/teardown evide
   assert.match(protocol, /required checks are complete and passing/);
   assert.match(protocol, /merge prerequisites are complete/);
   assert.match(protocol, /teardown prerequisites are complete/);
+  assert.match(protocol, /pending child, user-action, UAT, or other material obligation/);
+  assert.match(protocol, /parent, child, and PR material projections agree/);
+});
+
+test('governance readiness, final-audit finality, substantive stop, and marker derivation are explicit', () => {
+  const architecture = readModule('_main/architecture.md');
+  const stateMachine = readModule('_main/state-machine.md');
+  const controller = readModule('_main/templates/web-controller-scheduled-task.prompt.md');
+  const executor = readModule('_main/templates/executor-scheduled-task.prompt.md');
+  for (const text of [architecture, stateMachine, controller, executor]) {
+    assert.match(text, /AUTO_CODE_GOVERNANCE_UNREADY/);
+    assert.match(text, /github_issue_governance: enabled/);
+    assert.match(text, /repo_auto_code: enabled/);
+    assert.match(text, /final whole-programme audit/);
+    assert.match(text, /substantive execution/);
+  }
+  const markerFixture = readJson('_main/fixtures/invalid-duplicate-ote-eto-markers.json');
+  const markerEvidence = parseEnvelopeEvidence(markerFixture.state.promptText);
+  assert.equal(markerEvidence.valid, false);
+  assert.equal(markerEvidence.reason, 'count');
+  const liar = readJson('_main/fixtures/invalid-lying-surfaces-agree.json');
+  assert.equal(liar.state.reconciliation.surfacesAgree, true);
+  assert.equal(validateFourSurfaceReconciliation(liar.state.reconciliation), false);
 });
 
 test('every authorised fixture is discovered, unique, executed, and behaviorally asserted', () => {
   const discovered = fs.readdirSync(fixtureRoot).filter((name) => name.endsWith('.json')).sort();
   assert.deepEqual(discovered, expectedFixtureFiles);
+  for (const required of requiredFixtureFiles) assert.ok(discovered.includes(required), `required fixture discovered: ${required}`);
 
   const fixtures = discovered.map((name) => {
     const fixture = JSON.parse(fs.readFileSync(path.join(fixtureRoot, name), 'utf8'));

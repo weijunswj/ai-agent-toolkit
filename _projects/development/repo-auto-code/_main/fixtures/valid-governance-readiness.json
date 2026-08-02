@@ -1,0 +1,33 @@
+{
+  "id": "valid-governance-readiness",
+  "scenario": "governance_readiness",
+  "expected": { "accepted": true, "readiness": "INDEPENDENT_DUAL_CAPABILITY" },
+  "state": {
+    "repository": { "owner": "weijunswj", "name": "ai-agent-toolkit", "immutableId": "repo-299", "origin": "https://github.com/weijunswj/ai-agent-toolkit.git", "defaultBranch": "main" },
+    "capabilities": { "github_issue_governance": "enabled", "repo_auto_code": "enabled" },
+    "governanceSkill": { "id": "#299", "installed": true, "healthy": true, "inspectable": true },
+    "canonicalParent": {
+      "count": 1,
+      "structure": {
+        "sectionOrder": ["Queue authority", "Current execution", "Active queue", "Completed or disposed", "Completion gate", "Governance ownership", "Mandatory parent reconciliation"],
+        "linesBySection": { "Current execution": [], "Active queue": ["- #329", "- #330"], "Completed or disposed": [] },
+        "materialChildren": ["#329", "#330"],
+        "lifecycleEntries": { "Current execution": [], "Active queue": ["#329", "#330"], "Completed or disposed": [] },
+        "expectedLifecycle": { "#329": "Active queue", "#330": "Active queue" },
+        "parentEntryCount": 1,
+        "subqueues": []
+      }
+    },
+    "projectionDefaults": {
+      "status": "ACTIVE", "lifecycleSection": "Active queue", "pr": "#333", "branch": "luna/tk-038-repo-auto-code-design",
+      "base": "4103897ad709cda700172f7124fd70cf8218a27a", "head": "7ff4e04b6f596ff6538fdc2fbdb0971cfbfd9499", "gate": "G3",
+      "designLock": "DL-329-AUTO-CODE-004", "verdict": "AMEND", "checks": "PASS", "reviewDisposition": "COMMENTED_OPEN",
+      "blocker": "NONE", "requiredUserAction": "NONE", "currentTurn": "CONTROLLER", "nextAction": "select-first-eligible",
+      "acceptance": "PENDING", "merge": "NOT_MERGED", "closure": "OPEN", "completion": "INCOMPLETE"
+    },
+    "projections": { "child": {}, "pr": {}, "parentEntry": {}, "chronology": {} },
+    "reconciliationBlocker": null,
+    "concurrentParentMovement": false,
+    "actor": { "role": "web-controller", "authorized": true }
+  }
+}

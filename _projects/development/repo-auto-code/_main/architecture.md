@@ -24,6 +24,19 @@ This design does not implement the skill, controller, executor launcher, GitHub 
 
 The future setup operation may perform safe repository preparation after explicit repository-level authority. It must never be enabled by global Toolkit installation or refresh.
 
+### 2.1 Separate governance and Auto-code readiness
+
+Setup and every later Auto-code cycle verify two separately enabled capabilities for the exact repository:
+
+```text
+github_issue_governance: enabled
+repo_auto_code: enabled
+```
+
+Generic repository consent is not either capability and cannot satisfy both. Before claim, pickup, prompt issuance, substantive execution, G4, acceptance, merge, closure, or next-task selection, the controller derives readiness from live evidence: exact repository identity; the installed shared #299 governance skill being present, healthy, and inspectable; exactly one canonical parent; the exact parent baseline; every direct material child appearing once with no duplicate or missing lifecycle entry; agreement between parent, child, and linked PR projections; no `PARENT_RECONCILIATION_INCOMPLETE`; no concurrent or unverifiable parent movement; and an actor authorised for the exact role. Any missing, false, stale, conflicting, or unverifiable prerequisite returns the exact blocker `AUTO_CODE_GOVERNANCE_UNREADY` and prohibits all of those actions. A readiness boolean, generic consent field, PR pointer, or prior run cannot override raw evidence.
+
+Governance setup, governance consent, and Auto-code enablement are separate operations. Only the active web controller or a supported executor explicitly assigned the exact repository governance/setup role may initiate setup or repair. Both actors use the same installed #299 governance skill and validation contract. An ordinary implementation or Auto-code executor cannot self-authorise governance, install or repair the skill, enable consent, or continue an unhealthy cycle.
+
 1. Resolve the selected workspace to one exact repository identity: canonical owner/name, remote origin, default branch, and current commit. Reject missing, conflicting, redirected, detached-from-repository, or uninspectable identity. A repository name supplied only by a branch or PR is insufficient.
 2. Verify repository-specific Toolkit governance consent. Consent must name this repository and permit this capability. A global Toolkit install, a previous consent for another repository, or an inferred owner relationship is not enough.
 3. Locate and inspect the `repo-auto-code` skill from the selected source/install location. Read the whole skill and verify its version, source ownership, safety contract, and required references. If it is missing, unreadable, malformed, or not inspectable, fail the complete setup with `AUTO_CODE_SETUP_INVALID`; do not imitate it from memory.
@@ -105,11 +118,15 @@ Starting work atomically removes the child from `Active queue` and adds it to `C
 
 The first eligible entry from the top of the flat `Active queue` is selected. A blocked first item stays in place; a recorded skip adds chronology and does not move or reorder that item. Only the owner or an explicitly authorised governance actor may reorder the list, and an unauthorised or unexplained reorder fails closed. Parallel work may be represented as separate entries in this same list, never as a competing parallel queue.
 
+When the canonical parent declares a final whole-programme audit, that audit is a data-driven finality item: it must be the last material entry in `Active queue` and is ineligible until every preceding material child is terminal. A preceding current, active, blocked-but-nonterminal, or otherwise nonterminal child keeps the audit ineligible. First-eligible pickup records a blocked-item skip without moving or rewriting the audit and cannot bypass this invariant. Auto-code cannot select, move, or remove the declaration early; only explicit owner/controller authority may change it, with the resulting parent mutation reconciled across all required surfaces.
+
 ## 7. Material transitions and reconciliation boundary
 
 Any change to lifecycle section, status, gate, Design Lock, PR, branch, base, head, verdict, checks, review disposition, blocker, required user action, current turn, immediate next action, acceptance, merge, closure, or completion is a material transition. It uses the four-surface reconciliation contract in `protocol.md` before any downstream selection or proof.
 
 The parent row is an existing canonical entry, not a replaceable copy. The controller binds the parent revision or trusted body digest, resolves exactly one child entry, patches only that row without moving it, preserves unrelated owner-authored content and completed history, appends one chronology comment, and re-reads the child body, PR body when present, parent row, and chronology comment. Missing, duplicate, moved, stale, conflicting, partially written, concurrently changed, or unverifiable state is `PARENT_RECONCILIATION_INCOMPLETE`.
+
+`PARENT_RECONCILIATION_INCOMPLETE` also stops substantive execution. If reconciliation becomes incomplete after a prompt or claim was issued, an active or resumed L1 executor stops before further mutation, preserves safe local evidence, and performs no new commit, push, issue/PR mutation, or other external action. The controller must reconcile before continuation; a live prompt, lease, `GATE_RUNNING`, or executor result cannot override the blocker.
 
 ## 8. Manual work, exact heads, and non-destructive integration
 

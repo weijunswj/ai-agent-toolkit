@@ -1,0 +1,6 @@
+{
+  "id": "invalid-out-of-order-handoff-markers",
+  "scenario": "out_of_order_handoff_markers",
+  "expected": { "accepted": false, "status": "MALFORMED_HANDOFF_MARKER", "mutationProhibited": true },
+  "state": { "promptText": "[ ORCHESTRATOR TO EXECUTOR: END ]\n[ ORCHESTRATOR TO EXECUTOR: START ]\n[ EXECUTOR TO ORCHESTRATOR: START ]\n[ EXECUTOR TO ORCHESTRATOR: END ]" }
+}

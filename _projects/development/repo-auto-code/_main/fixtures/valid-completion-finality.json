@@ -1,0 +1,33 @@
+{
+  "id": "valid-completion-finality",
+  "scenario": "completion_finality",
+  "expected": { "accepted": true, "completion": "DERIVED_FINALITY" },
+  "state": {
+    "reviewSweep": { "complete": true, "validOpenReviews": 0 },
+    "checks": [ { "required": true, "completed": true, "conclusion": "PASS" } ],
+    "protocolEvidence": { "independent": true, "ledgerOnly": false },
+    "exactHead": { "reviewedHead": "7ff4e04b6f596ff6538fdc2fbdb0971cfbfd9499", "currentHead": "7ff4e04b6f596ff6538fdc2fbdb0971cfbfd9499", "readBack": true },
+    "controllerGate": "CONTROLLER_ACCEPTED",
+    "prompt": { "live": false, "processed": true },
+    "pendingResult": false,
+    "obligations": { "child": false, "user": false, "uat": false, "material": false },
+    "mergePrerequisites": { "complete": true, "baseVerified": true, "headVerified": true, "noConflicts": true },
+    "reconciliation": {
+      "projectionDefaults": {
+        "status": "CURRENT", "lifecycleSection": "Current execution", "pr": "#333", "branch": "luna/tk-038-repo-auto-code-design", "base": "4103897ad709cda700172f7124fd70cf8218a27a", "head": "7ff4e04b6f596ff6538fdc2fbdb0971cfbfd9499", "gate": "G4", "designLock": "DL-329-AUTO-CODE-004", "verdict": "PASS", "checks": "PASS", "reviewDisposition": "CLEAR", "blocker": "NONE", "requiredUserAction": "NONE", "currentTurn": "CONTROLLER", "nextAction": "teardown", "acceptance": "ACCEPTED", "merge": "READY", "closure": "OPEN", "completion": "READY"
+      },
+      "transitionBefore": { "status": "CURRENT", "lifecycleSection": "Current execution", "nextAction": "await-acceptance" },
+      "transitionAfter": { "status": "COMPLETED", "lifecycleSection": "Completed or disposed", "nextAction": "teardown" },
+      "surfaces": { "child": {}, "pr": {}, "parentEntry": {}, "chronology": {} },
+      "binding": { "boundRevision": "parent-r50", "revisionBeforeWrite": "parent-r50", "revisionAfterWrite": "parent-r50", "readBackRevision": "parent-r50", "parentEntryCount": 1, "rowPositionBefore": 5, "rowPositionAfter": 5, "chronologyCommentsAdded": 1, "afterBodyDigest": "digest-complete", "readBackBodyDigest": "digest-complete", "concurrentBeforeWrite": false, "concurrentAfterWrite": false, "partialWrite": false },
+      "preservation": { "before": { "unrelatedParentEntries": ["owner"], "queueOrder": ["#330"], "extensionSections": ["extension"], "completedHistory": ["#328"], "ownerAuthoredContent": ["owner"], "unrelatedChildren": ["#330"], "unrelatedPr": ["#700"], "unrelatedChronology": ["c1"] }, "after": { "unrelatedParentEntries": ["owner"], "queueOrder": ["#330"], "extensionSections": ["extension"], "completedHistory": ["#328"], "ownerAuthoredContent": ["owner"], "unrelatedChildren": ["#330"], "unrelatedPr": ["#700"], "unrelatedChronology": ["c1"] } }
+    },
+    "schedules": {
+      "authority": { "repository": "weijunswj/ai-agent-toolkit", "generation": "generation-1", "revision": "revision-1" },
+      "tasks": [
+        { "repository": "weijunswj/ai-agent-toolkit", "identity": "repo-329-controller", "generation": "generation-1", "revision": "revision-1", "status": "REMOVED", "removalReceipt": { "trusted": true, "repository": "weijunswj/ai-agent-toolkit", "taskIdentity": "repo-329-controller", "generation": "generation-1", "revision": "revision-1" } },
+        { "repository": "weijunswj/ai-agent-toolkit", "identity": "repo-329-executor", "generation": "generation-1", "revision": "revision-1", "status": "REMOVED", "removalReceipt": { "trusted": true, "repository": "weijunswj/ai-agent-toolkit", "taskIdentity": "repo-329-executor", "generation": "generation-1", "revision": "revision-1" } }
+      ]
+    }
+  }
+}
