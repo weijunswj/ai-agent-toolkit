@@ -1,0 +1,17 @@
+{
+  "id": "invalid-paused-scheduler",
+  "scenario": "paused_scheduler",
+  "expected": {
+    "accepted": false,
+    "status": "INCOMPLETE_SCHEDULER_TEARDOWN",
+    "mutationProhibited": true
+  },
+  "state": {
+    "schedules": {
+      "tasks": [
+        { "identity": "repo-329-controller", "status": "REMOVED", "trustedRemovalReceipt": true, "receiptIdentityMatches": true },
+        { "identity": "repo-329-executor", "status": "PAUSED", "trustedRemovalReceipt": false, "receiptIdentityMatches": false }
+      ]
+    }
+  }
+}

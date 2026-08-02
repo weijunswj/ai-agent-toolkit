@@ -55,7 +55,7 @@ If the skill, managed block, or routing configuration is missing, malformed, dup
 
 | Surface | Canonical responsibility | Required contents | Explicit exclusion |
 | --- | --- | --- | --- |
-| Parent body | Lean ordered queue and control state | Checklist order, active child/lane, current turn, packet or none, enrolled PRs, material parallel work, review/user action, immediate next action | Full prompts, executor evidence archive, historical packets |
+| Parent body | Lean ordered queue and control state | The canonical baseline sections, one flat lifecycle list, active child/lane, current turn, packet or none, enrolled PRs, review/user action, immediate next action, and a final reconciliation footer | Full prompts, executor evidence archive, historical packets, category or recovery subqueues |
 | Child body | Complete current authority for one material task | Status, parent/PR/head, gate and Design Lock, enrolment, live packet/turn, completed and remaining work, findings, blockers, acceptance criteria, next mutation | A second queue, hidden authority, stale copied history |
 | Child comments | Full audit and handoff chronology | Observation, independent verification, executor evidence, checks, head changes, review dispositions, verdict, remaining work, and the live marked prompt when issued | Deleting durable evidence after processing |
 | PR body | Exact implementation state | Parent/child links, enrolment marker, base/head, checks, review state, gate/verdict, packet, next authorised mutation | Authority inferred from author, branch, open state, or recency |
@@ -77,15 +77,47 @@ Automated mutation requires matching enrolment across three surfaces:
 
 The controller must re-read all three. Any missing, duplicate, malformed, stale, or contradictory binding fails the affected lane. Enrolment is never inferred from author, branch prefix, recency, open state, user ownership, or agent ownership. Unenrolled PRs remain observable for dependencies and review obligations but are manual-only.
 
-Parent checklist order is the v1 queue. Selection never uses PR recency, lowest PR number, branch prefix, or author. The controller reconciles results, unexpected state, checks, reviews, and dependencies first, then continues active lanes in checklist order, then selects the first eligible ready lane within capacity.
+Parent checklist order is the v1 queue. Selection never uses PR recency, lowest PR number, branch prefix, author, or a category-specific list. The controller reconciles results, unexpected state, checks, reviews, and dependencies first, then continues active lanes in top-to-bottom list order, then selects the first eligible ready lane within capacity.
 
-## 6. Manual work, exact heads, and non-destructive integration
+## 6. Canonical parent baseline, lifecycle, and pickup authority
+
+The rolling parent body has one canonical baseline in this exact order:
+
+1. `Queue authority`
+2. `Current execution`
+3. `Active queue`
+4. `Completed or disposed`
+5. `Completion gate`
+6. `Governance ownership`
+7. `Mandatory parent reconciliation`
+
+Repository-specific extension sections may appear only after `Active queue` and before `Completed or disposed`. An extension is descriptive material, not a second queue, and must not replace or reorder a baseline section. `Mandatory parent reconciliation` is the final operational footer and remains last unless the owner explicitly changes that requirement.
+
+The lifecycle is one ordered set of direct material children:
+
+```text
+Active queue -> Current execution -> Completed or disposed
+```
+
+Every material direct child appears exactly once across those three sections. `Current execution` and `Active queue` use ordinary bullet points. Only `Completed or disposed` uses checked Markdown checkboxes (`- [x]`). No competing category, recovery, priority, parallel, capability, or model-specific subqueue is an authority surface. Visible numeric prefixes are optional; list position is authoritative.
+
+Starting work atomically removes the child from `Active queue` and adds it to `Current execution` in one compare-and-preserve transition. Terminal acceptance or disposal atomically removes it from `Current execution` and adds it to `Completed or disposed` as a checked item. A child left in two sections, absent from all sections, current while still active, or terminal while still current/active is invalid.
+
+The first eligible entry from the top of the flat `Active queue` is selected. A blocked first item stays in place; a recorded skip adds chronology and does not move or reorder that item. Only the owner or an explicitly authorised governance actor may reorder the list, and an unauthorised or unexplained reorder fails closed. Parallel work may be represented as separate entries in this same list, never as a competing parallel queue.
+
+## 7. Material transitions and reconciliation boundary
+
+Any change to lifecycle section, status, gate, Design Lock, PR, branch, base, head, verdict, checks, review disposition, blocker, required user action, current turn, immediate next action, acceptance, merge, closure, or completion is a material transition. It uses the four-surface reconciliation contract in `protocol.md` before any downstream selection or proof.
+
+The parent row is an existing canonical entry, not a replaceable copy. The controller binds the parent revision or trusted body digest, resolves exactly one child entry, patches only that row without moving it, preserves unrelated owner-authored content and completed history, appends one chronology comment, and re-reads the child body, PR body when present, parent row, and chronology comment. Missing, duplicate, moved, stale, conflicting, partially written, concurrently changed, or unverifiable state is `PARENT_RECONCILIATION_INCOMPLETE`.
+
+## 8. Manual work, exact heads, and non-destructive integration
 
 User work on another PR is preserved unless it changes a dependency, canonical `main`, controlling architecture, or a forbidden shared surface. A same-PR fast-forward may be adopted only after complete intervening commit inspection and line-by-line diff inspection prove that the assignment remains applicable and within the Design Lock. A change during execution requires a fresh read of the live head, local status, worktree, commits, and diff; compatible work is integrated non-destructively, and ambiguous or conflicting work is held.
 
 Canonical `main` movement, conflicting architecture, forbidden-scope overlap, ambiguous user intent, worktree contamination, and possible unpushed executor work fail closed for the affected lane. Preserve bounded local work. Never force-push, reset, rewrite history, silently overwrite, or discard user/executor changes. Rerun every affected validation and obtain fresh exact-head G4 after every PR-head movement.
 
-## 7. Review-thread ownership
+## 9. Review-thread ownership
 
 Every controller cycle sweeps relevant open review conversations across open, closed, and merged PRs. The controller must truthfully disposition each finding:
 
@@ -98,8 +130,8 @@ Every controller cycle sweeps relevant open review conversations across open, cl
 
 The final sweep is mandatory before every next worker prompt, G4, acceptance, merge, child closure, next-task selection, or parent closure. The executor is read/report-only for issue and review state.
 
-## 8. Sensitive context and completion boundary
+## 10. Sensitive context and completion boundary
 
 GitHub may receive secret names, presence/absence, and privacy-safe verification results only. It must never receive secret values, credentials, environment dumps, authorization headers, private endpoints, or raw executor-only context. If a controller needs sensitive context, the executor packet uses `PRIVATE USER FOLLOW-UP REQUIRED` with a safe question and `[REDACTED]` values; the web controller asks the user in private chat. A raw secret requirement invalidates the affected run.
 
-Final completion requires no live unconsumed next-worker prompt, no unprocessed executor result, no unresolved valid review obligation, no pending child/UAT/ledger/user obligation, no contradictory parent/child/PR state, and explicit user instruction to remove both scheduled tasks. Teardown must verify that only this repository's two tasks were removed or disabled; another repository must remain untouched.
+Final completion requires no live unconsumed next-worker prompt, no unprocessed executor result, no unresolved valid review obligation, no pending child/UAT/ledger/user obligation, no contradictory parent/child/PR state, and explicit user instruction to remove both scheduled tasks. Teardown must verify that only this repository's two exact task identities reached `REMOVED` with trusted receipts; disabled, paused, active, duplicate, ambiguous, partially removed, or unverifiably missing tasks remain incomplete. Another repository must remain untouched.

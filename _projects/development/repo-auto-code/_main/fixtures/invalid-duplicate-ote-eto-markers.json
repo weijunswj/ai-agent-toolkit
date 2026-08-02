@@ -1,0 +1,15 @@
+{
+  "id": "invalid-duplicate-ote-eto-markers",
+  "scenario": "duplicate_ote_eto_markers",
+  "expected": {
+    "accepted": false,
+    "status": "DUPLICATE_HANDOFF_MARKER",
+    "mutationProhibited": true
+  },
+  "state": {
+    "oteStartCount": 2,
+    "oteEndCount": 1,
+    "etoStartCount": 1,
+    "etoEndCount": 2
+  }
+}

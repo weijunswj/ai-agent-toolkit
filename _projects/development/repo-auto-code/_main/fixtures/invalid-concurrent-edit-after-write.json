@@ -1,0 +1,27 @@
+{
+  "id": "invalid-concurrent-edit-after-write",
+  "scenario": "concurrent_edit_after_write",
+  "expected": {
+    "accepted": false,
+    "status": "PARENT_RECONCILIATION_INCOMPLETE",
+    "mutationProhibited": true
+  },
+  "state": {
+    "reconciliation": {
+      "materialTransition": true,
+      "parentBinding": true,
+      "compareAndPreserve": true,
+      "boundRevision": "parent-r41",
+      "revisionBeforeWrite": "parent-r41",
+      "parentEntryCount": 1,
+      "rowPositionBefore": 4,
+      "rowPositionAfter": 4,
+      "chronologyCommentsAdded": 1,
+      "unrelatedContentPreserved": true,
+      "surfacesAgree": false,
+      "readBackExact": false,
+      "concurrentAfterWrite": true,
+      "partialWrite": false
+    }
+  }
+}

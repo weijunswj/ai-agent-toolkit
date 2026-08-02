@@ -103,28 +103,91 @@ Enrolment: ENROLLED
 
 The controller rejects a missing, duplicated, malformed, or disagreeing block. `NONE` is valid only when no packet is live; a live staged packet must carry the same Packet ID and turn in all three surfaces. This grammar is the only enrolment authority; author, branch, recency, open state, or a PR pointer cannot substitute for it.
 
-## 4. Packet-scoped atomic claim
+## 4. Material-transition four-surface reconciliation
+
+A material transition is any change to one or more of these fields:
+
+- lifecycle section;
+- status;
+- gate;
+- Design Lock;
+- PR, branch, base, or head;
+- verdict;
+- checks;
+- review disposition;
+- blocker;
+- required user action;
+- current turn;
+- immediate next action;
+- acceptance;
+- merge;
+- closure; or
+- completion.
+
+Every material transition updates and re-reads all applicable surfaces:
+
+1. the child body;
+2. the PR body when a PR exists, or an explicit bound PR-absent state;
+3. exactly one existing parent lifecycle entry; and
+4. one new parent chronology comment.
+
+The controller first binds the current parent body with a trusted revision identity or body digest and resolves exactly one existing entry for the child. It must reject a missing, duplicate, moved, or ambiguous entry. It then projects the same complete material state to the child body, PR body, unchanged parent row position, and one chronology comment. The parent write is compare-and-preserve: patch only that row under the bound revision, preserve every unrelated entry, existing top-to-bottom order, repository-specific extension, owner-authored content, and completed history, and append exactly one new chronology comment. It must not replace a stale full parent body.
+
+The controller re-reads the four surfaces after the write and verifies the projected fields, row identity, row position, revision, chronology count, and preservation digest. A concurrent change before the write, a concurrent change after the write, a partial write, or any failed post-write read-back is not repaired by blind retry. It enters the exact blocker below and preserves the evidence for controller/user repair.
+
+### `PARENT_RECONCILIATION_INCOMPLETE` blocker
+
+`PARENT_RECONCILIATION_INCOMPLETE` applies to missing, duplicate, stale, conflicting, partially written, concurrently changed, or unverifiable parent reconciliation state. While active, it prohibits another worker prompt, auto-code pickup or claim, G4 authorisation, controller acceptance, ready-state mutation, merge or auto-merge, child closure, next-task selection, verification claims, and programme completion. No downstream result may clear its own blocker.
+
+Keep these gate states distinct and independently evidenced: `GATE_AUTHORISED`, `GATE_RUNNING`, `GATE_RESULT_RECEIVED`, and `CONTROLLER_ACCEPTED`. A prompt may be authorised without running, a run may finish without a result being accepted, and a result may be received without controller acceptance. None of these states proves its own parent reconciliation, review, checks, ledger-independent protocol, merge, or teardown prerequisites.
+
+## 5. Packet-scoped atomic claim
 
 Before substantive L1 launch, the future executor must acquire and verify an atomic packet-scoped, lease-bound create-if-absent claim primitive. The scheduled executor's L0 dispatcher is the sole claimant: it calls `createIfAbsent` once, then reads back the returned record. L1 verifies that existing read-back before substantive work and never calls `createIfAbsent` again. Each capability-owned record is bound to exactly one lease ID and lease expiry, one executor run, one packet, and one observed starting head. GitHub comments, comment IDs, timestamps, lowest-comment-ID rules, or local lock files are audit evidence only and are not mutual exclusion or leases.
 
-The trusted interface is abstract and harness-neutral:
+The trusted interface is abstract and harness-neutral, but its types are closed and separate:
 
 ```text
-PacketClaimCapability {
-  protocolVersion: <exact protocol version>
-  repositoryIdentity: <canonical owner/name and immutable repository id>
-  childIdentity: <direct child number or immutable id>
-  prIdentity: <enrolled PR number or immutable id>
-  packetId: <one packet id>
-  executorRunId: <one executor run id>
-  observedStartingHead: <live PR head at claim admission>
-  leaseId: <capability-issued lease id>
-  leaseExpiresAt: <capability-issued lease expiry>
-  createIfAbsent(input): { created: true|false, claimId, storedRecord }
-  readBack(claimId): { exactRecord, verified: true|false }
-  retireOrSupersede: controller-owned operation only
+type ClaimInput = {
+  protocolVersion: exact protocol version,
+  repositoryIdentity: canonical owner/name and immutable repository id,
+  childIdentity: direct child number or immutable id,
+  prIdentity: enrolled PR number or immutable id,
+  packetId: one packet id,
+  executorRunId: one executor run id,
+  observedStartingHead: live PR head at claim admission
+}
+
+type StoredClaimRecord = {
+  ...ClaimInput,
+  claimId: capability-issued claim id,
+  leaseId: capability-issued lease id,
+  leaseExpiresAt: capability-issued lease expiry,
+  issuedByCapability: true
+}
+
+type CapabilityClaimResult =
+  | { created: false, claimId: none, storedRecord: none }
+  | { created: true, claimId: capability-issued claim id, storedRecord: StoredClaimRecord }
+
+type ClaimReadBack = {
+  claimId: capability-issued claim id,
+  exactRecord: StoredClaimRecord or none,
+  verified: true or false
 }
 ```
+
+`ClaimInput`, `StoredClaimRecord`, `CapabilityClaimResult`, and `ClaimReadBack` are closed types: unknown or additional fields are rejected. In particular, `ClaimInput` has no `leaseId`, `leaseExpiresAt`, renewal, replacement, retirement, supersession, or authority field. The trusted capability alone creates `claimId`, `leaseId`, `leaseExpiresAt`, and the issued-authority record.
+
+The abstract operations are typed as:
+
+```text
+createIfAbsent(input: ClaimInput): CapabilityClaimResult
+readBack(claimId): ClaimReadBack
+retireOrSupersede(controllerAuthorisedCommand): controller-owned result only
+```
+
+The capability rejects caller-supplied lease or authority fields before claim admission and never copies them into a stored record. Such fields cannot mint a lease, replace a lease, renew a lease, validate ownership, or supersede a claim. Only a controller-authorised retirement or supersession command may release an abandoned lease, and only after complete live-state inspection.
 
 `createIfAbsent` must atomically reject a second record for the same repository, child, PR, and Packet ID, and the trusted capability must issue the lease ID and expiry bound to that exact record. A `created: false` result is not a claim for the current run and cannot launch L1. L0 must read back the existing record; L1 then compares every identity, the observed head, and the capability-issued lease before substantive work. A false `verified` result or any read-back identity, head, lease, or expiry mismatch fails the lane closed and requires controller reconciliation. The candidate-controlled packet cannot mint, validate, renew, retire, supersede, or replace the primitive. The claim primitive must not move the implementation PR head. Two successful claims for one packet are impossible by contract.
 
@@ -138,7 +201,7 @@ BLOCKED \u2014 ATOMIC CLAIM CAPABILITY UNAVAILABLE
 
 Lease expiry never grants automatic takeover. Only the web controller may retire or supersede a capability-issued lease, and only after inspecting the live PR head, claim state, GitHub evidence, local worktrees, and possible unpushed executor work. The design PR installs no claim ref, database, workflow, or live claim mechanism.
 
-## 5. Determining the turn
+## 6. Determining the turn
 
 The controller and executor use the following deterministic rules:
 
@@ -155,7 +218,7 @@ The controller and executor use the following deterministic rules:
 
 No worker invents the other side's next step. A pending check is not permission to code, a result is not acceptance, and an old G4 is not valid for a new head.
 
-## 6. Model routing and agent hierarchy
+## 7. Model routing and agent hierarchy
 
 Both future scheduled-task templates contain editable Provider, Model, and Reasoning fields for all of these profiles:
 
@@ -174,7 +237,7 @@ The hierarchy is:
 - **L1 - assigned substantive root executor or reviewer:** owns the explicitly assigned implementation or independent review, exact-head checks, focused validation, and evidence packet. L1 follows the Design Lock and cannot broaden it.
 - **L2 - direct prompt-bounded helper:** has no carry-over memory, cannot delegate or nest, cannot mutate issues or review state, cannot self-grade, and reports bounded evidence to L1. Unsupported host enforcement is stated as unsupported; Markdown alone is not hard enforcement.
 
-## 7. Redaction and audit retention
+## 8. Redaction, completion, and audit retention
 
 After the receiving side acts and the controller reconciles the result, replace only the transient next-worker payload with:
 
@@ -188,10 +251,24 @@ Keep the surrounding audit record, including controller summaries, executor evid
 
 Completion is invalid while any live unconsumed next-worker prompt remains. A processed executor evidence packet is never erased just because a controller consumed it.
 
-## 8. Public-safe sensitive context
+### Completion and finality gate
+
+Completion eligibility requires all of the following, in a fresh current read:
+
+- every relevant review conversation has been completely swept and `validOpenReviews === 0`;
+- required checks are complete and passing, with no pending or unobservable required check;
+- the protocol, four-surface reconciliation, and exact-head acceptance are independently verified rather than proved by an evaluation ledger entry alone;
+- the controller has reached `CONTROLLER_ACCEPTED`, not merely `GATE_AUTHORISED`, `GATE_RUNNING`, or `GATE_RESULT_RECEIVED`;
+- no live final prompt or unprocessed result remains;
+- merge prerequisites are complete and any merge is controller-authorised and exact-head verified; and
+- teardown prerequisites are complete, including verified removal of both exact scheduled-task identities with the sole terminal scheduler state `REMOVED`.
+
+There is no live final prompt before completion. `DISABLED`, `PAUSED`, `ACTIVE`, `DUPLICATE`, `AMBIGUOUS`, partially removed, or missing-without-a-trusted-removal-receipt scheduler state is incomplete. The same state cannot prove its own review, check, protocol, acceptance, merge, or teardown gate.
+
+## 9. Public-safe sensitive context
 
 GitHub content may contain secret names, booleans, presence/absence, and privacy-safe verification results. It may contain `[REDACTED]` markers but never values, credentials, authorization headers, environment dumps, private endpoints, or raw connector context. Sensitive executor-only needs use the exact private follow-up section in the ETO grammar. If a raw secret would be needed, stop the affected and dependent lane and report `SECRET_EXPOSURE_DETECTED` without repeating it.
 
-## 9. Adversarial review targets
+## 10. Adversarial review targets
 
 Every design or G4 review should actively test duplicate execution, stale authority, partial publication, atomic claim correctness, ambiguous adoption, same-PR races, split prompt authority, incomplete review sweeps, redaction lifecycle, secret leakage, scheduler teardown, main movement, forbidden-scope overlap, worktree contamination, possible unpushed work, and profile substitution. A green check or a closed PR is not evidence that any of these obligations disappeared.

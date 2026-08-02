@@ -12,20 +12,53 @@ const fixtureRoot = path.join(mainRoot, 'fixtures');
 const templateRoot = path.join(mainRoot, 'templates');
 
 const expectedFixtureFiles = [
+  'invalid-ambiguous-scheduler.json',
+  'invalid-baseline-section-order.json',
   'invalid-body-comment-disagreement.json',
+  'invalid-bullet-checkbox-style.json',
+  'invalid-caller-supplied-lease-fields.json',
+  'invalid-child-duplicate-lifecycle.json',
+  'invalid-child-missing-lifecycle.json',
+  'invalid-competing-category-subqueues.json',
+  'invalid-concurrent-edit-after-write.json',
+  'invalid-concurrent-edit-before-write.json',
+  'invalid-current-item-active.json',
+  'invalid-disabled-scheduler.json',
   'invalid-duplicate-claims.json',
+  'invalid-duplicate-ote-eto-markers.json',
   'invalid-duplicate-packets.json',
+  'invalid-duplicate-parent-entry.json',
+  'invalid-duplicate-scheduler.json',
   'invalid-final-live-prompt.json',
+  'invalid-head-mismatch.json',
   'invalid-incomplete-teardown.json',
   'invalid-malformed-agents-block.json',
+  'invalid-missing-parent-chronology.json',
+  'invalid-missing-parent-entry.json',
   'invalid-missing-provider-routing.json',
   'invalid-missing-skill.json',
+  'invalid-missing-valid-open-reviews.json',
+  'invalid-next-action-mismatch.json',
   'invalid-non-atomic-claim.json',
+  'invalid-parent-child-pr-status-mismatch.json',
   'invalid-partial-publication.json',
+  'invalid-paused-scheduler.json',
+  'invalid-progression-during-parent-reconciliation.json',
   'invalid-secret-prompt.json',
   'invalid-stale-g4.json',
+  'invalid-terminal-item-nonterminal.json',
+  'invalid-unauthorised-queue-reorder.json',
+  'invalid-unrelated-parent-content-changed.json',
+  'invalid-unverifiable-missing-scheduler.json',
+  'invalid-wrong-current-turn.json',
+  'valid-active-to-current.json',
+  'valid-blocked-first-skip.json',
+  'valid-current-to-completed.json',
+  'valid-exact-dual-scheduler-removal.json',
   'valid-existing-pr-adoption.json',
+  'valid-first-eligible-pickup.json',
   'valid-first-run.json',
+  'valid-four-surface-reconciliation.json',
   'valid-parallel-prs.json',
   'valid-processed-prompt.json',
   'valid-same-pr-fast-forward.json'
@@ -91,6 +124,17 @@ function extractCodePacket(text, startMarker, endMarker) {
   return text.slice(start, end + endMarker.length);
 }
 
+function assertExactEnvelopeCounts(text, label) {
+  for (const marker of [
+    '[ ORCHESTRATOR TO EXECUTOR: START ]',
+    '[ ORCHESTRATOR TO EXECUTOR: END ]',
+    '[ EXECUTOR TO ORCHESTRATOR: START ]',
+    '[ EXECUTOR TO ORCHESTRATOR: END ]'
+  ]) {
+    assert.equal(count(text, marker), 1, `${label}: exact one-count for ${marker}`);
+  }
+}
+
 function assertPacketGrammar(protocol) {
   const ote = extractCodePacket(
     protocol,
@@ -138,6 +182,7 @@ function assertPacketGrammar(protocol) {
   assert.match(eto, /\[ EXECUTOR TO ORCHESTRATOR: END \]$/);
   assert.ok(protocol.indexOf('[ ORCHESTRATOR TO EXECUTOR: START ]') < protocol.indexOf('[ ORCHESTRATOR TO EXECUTOR: END ]'));
   assert.ok(protocol.indexOf('[ EXECUTOR TO ORCHESTRATOR: START ]') < protocol.indexOf('[ EXECUTOR TO ORCHESTRATOR: END ]'));
+  assertExactEnvelopeCounts(protocol, 'protocol');
 }
 
 function assertManagedBlock(template) {
@@ -198,7 +243,7 @@ function assertClaimContract(protocol) {
   assert.match(protocol, /leaseId:/);
   assert.match(protocol, /leaseExpiresAt:/);
   assert.match(protocol, /GitHub comments, comment IDs, timestamps, lowest-comment-ID rules/);
-  assert.match(protocol, /createIfAbsent\(input\)/);
+  assert.match(protocol, /createIfAbsent\(input(?:: ClaimInput)?\)/);
   assert.match(protocol, /readBack\(claimId\)/);
   assert.match(protocol, /must not move the implementation PR head/);
   assert.match(protocol, /Two successful claims for one packet are impossible/);
@@ -209,6 +254,17 @@ function assertClaimContract(protocol) {
   assert.ok(protocol.includes(protocolClaimUnavailable));
   assert.match(protocol, /Lease expiry never grants automatic takeover/);
   assert.match(protocol, /controller may retire or supersede/);
+  for (const typeName of ['ClaimInput', 'CapabilityClaimResult', 'StoredClaimRecord', 'ClaimReadBack']) {
+    assert.match(protocol, new RegExp(`type ${typeName}`), `closed claim type ${typeName}`);
+  }
+  const claimInputStart = protocol.indexOf('type ClaimInput');
+  const claimInputEnd = protocol.indexOf('type StoredClaimRecord');
+  const claimInput = protocol.slice(claimInputStart, claimInputEnd);
+  for (const forbidden of ['leaseId', 'leaseExpiresAt', 'renewal', 'replacement', 'authority']) {
+    assert.doesNotMatch(claimInput, new RegExp(forbidden), `ClaimInput excludes ${forbidden}`);
+  }
+  assert.match(protocol, /caller-supplied lease or authority fields/);
+  assert.match(protocol, /cannot mint a lease, replace a lease, renew a lease, validate ownership, or supersede a claim/);
 }
 
 function looksSecretBearing(text) {
@@ -262,13 +318,217 @@ function assertEnrolmentAgreement(enrolment) {
   assert.deepEqual(parsed.map((surface) => surface.surface), ['Surface: PARENT', 'Surface: CHILD', 'Surface: PR']);
 }
 
-function rejected(status) {
-  return { accepted: false, status, mutationProhibited: true };
+const parentBaselineSections = [
+  'Queue authority',
+  'Current execution',
+  'Active queue',
+  'Completed or disposed',
+  'Completion gate',
+  'Governance ownership',
+  'Mandatory parent reconciliation'
+];
+
+const lifecycleSections = ['Current execution', 'Active queue', 'Completed or disposed'];
+const claimAuthorityFields = [
+  'leaseId',
+  'leaseExpiresAt',
+  'renewal',
+  'replacement',
+  'retirement',
+  'supersession',
+  'authority'
+];
+
+function rejected(status, details = {}) {
+  return { ...details, accepted: false, status, mutationProhibited: true };
+}
+
+function validateParentLifecycle(parent) {
+  if (!parent || !Array.isArray(parent.sectionOrder)) return false;
+  const extensionSections = parent.extensionSections || [];
+  const baselineOrder = parent.sectionOrder.filter((section) => !extensionSections.includes(section));
+  if (JSON.stringify(baselineOrder) !== JSON.stringify(parentBaselineSections)) return false;
+  const activeIndex = parent.sectionOrder.indexOf('Active queue');
+  const completedIndex = parent.sectionOrder.indexOf('Completed or disposed');
+  if (activeIndex === -1 || completedIndex === -1 || completedIndex <= activeIndex) return false;
+  if (extensionSections.some((section) => {
+    const index = parent.sectionOrder.indexOf(section);
+    return index <= activeIndex || index >= completedIndex;
+  })) return false;
+
+  const linesBySection = parent.linesBySection || {};
+  for (const section of ['Current execution', 'Active queue']) {
+    for (const line of linesBySection[section] || []) {
+      if (!/^\-\s+(?!\[[ xX]\])\S/.test(line)) return false;
+    }
+  }
+  for (const line of linesBySection['Completed or disposed'] || []) {
+    if (!/^\-\s+\[x\]\s+\S/.test(line)) return false;
+  }
+  for (const [section, lines] of Object.entries(linesBySection)) {
+    if (!lifecycleSections.includes(section) && lines.some((line) => /^\-\s+\[[ xX]\]/.test(line))) return false;
+  }
+
+  const entries = parent.lifecycleEntries || {};
+  const materialChildren = parent.materialChildren || [];
+  for (const child of materialChildren) {
+    const occurrences = lifecycleSections.flatMap((section) => (entries[section] || []).filter((entry) => entry === child));
+    if (occurrences.length !== 1) return false;
+    if (parent.expectedLifecycle && parent.expectedLifecycle[child]) {
+      const actualSection = lifecycleSections.find((section) => (entries[section] || []).includes(child));
+      if (actualSection !== parent.expectedLifecycle[child]) return false;
+    }
+  }
+  if ((parent.parentEntryCount !== undefined && parent.parentEntryCount !== 1) || parent.unauthorisedReorder === true) return false;
+  if (parent.reorder && parent.reorder.changed === true && parent.reorder.authorized !== true) return false;
+  if (Array.isArray(parent.subqueues) && parent.subqueues.length > 0) return false;
+  return true;
+}
+
+function validateFourSurfaceReconciliation(reconciliation) {
+  if (!reconciliation || reconciliation.materialTransition !== true) return false;
+  if (reconciliation.parentBinding !== true || reconciliation.compareAndPreserve !== true) return false;
+  if (reconciliation.boundRevision !== reconciliation.revisionBeforeWrite) return false;
+  if (reconciliation.parentEntryCount !== 1) return false;
+  if (reconciliation.rowPositionBefore !== reconciliation.rowPositionAfter) return false;
+  if (reconciliation.chronologyCommentsAdded !== 1) return false;
+  if (reconciliation.unrelatedContentPreserved !== true) return false;
+  if (reconciliation.unrelatedParentContentBefore !== undefined || reconciliation.unrelatedParentContentAfter !== undefined) {
+    if (JSON.stringify(reconciliation.unrelatedParentContentBefore) !== JSON.stringify(reconciliation.unrelatedParentContentAfter)) return false;
+  }
+  if (Array.isArray(reconciliation.readBackSurfaces)) {
+    const projections = reconciliation.readBackSurfaces.map(({ surface, ...projection }) => projection);
+    if (projections.some((projection) => JSON.stringify(projection) !== JSON.stringify(projections[0]))) return false;
+  }
+  if (reconciliation.surfacesAgree !== true || reconciliation.readBackExact !== true) return false;
+  if (reconciliation.concurrentAfterWrite === true || reconciliation.partialWrite === true) return false;
+  return true;
+}
+
+function validateClaimInput(state) {
+  const input = state.claimInput;
+  if (!input || typeof input !== 'object') return false;
+  if (Object.keys(input).some((key) => claimAuthorityFields.includes(key))) return false;
+  if (state.capability.rejectsCallerAuthorityFields !== true) return false;
+  if (state.capability.callerCanMintLease !== false || state.capability.callerCanReplaceLease !== false || state.capability.callerCanRenewLease !== false || state.capability.callerCanValidateLease !== false || state.capability.callerCanSupersedeLease !== false) return false;
+  return true;
+}
+
+function schedulerIdentities(state) {
+  if (Array.isArray(state.schedules?.tasks)) return state.schedules.tasks;
+  return ['controller', 'executor'].map((name) => state.schedules?.[name]).filter(Boolean);
+}
+
+function validateExactSchedulerRemoval(state) {
+  const tasks = schedulerIdentities(state);
+  if (tasks.length !== 2) return false;
+  const identities = tasks.map((task) => task.identity);
+  if (new Set(identities).size !== identities.length) return false;
+  return tasks.every((task) => task.status === 'REMOVED' && task.trustedRemovalReceipt === true && task.receiptIdentityMatches === true);
+}
+
+function validateCompletionEligibility(state) {
+  return state.validOpenReviews === 0
+    && state.requiredChecksComplete === true
+    && state.protocolIndependentlyVerified === true
+    && state.controllerGate === 'CONTROLLER_ACCEPTED'
+    && state.liveFinalPrompt === false
+    && state.pendingResult === false
+    && state.mergePrerequisitesComplete === true
+    && validateExactSchedulerRemoval(state);
 }
 
 function evaluateFixture(fixture) {
   const state = fixture.state;
   switch (fixture.scenario) {
+    case 'baseline_section_order':
+      assert.equal(validateParentLifecycle(state.parent), false);
+      return rejected('PARENT_RECONCILIATION_INCOMPLETE');
+
+    case 'bullet_checkbox_style':
+      assert.equal(validateParentLifecycle(state.parent), false);
+      return rejected('PARENT_RECONCILIATION_INCOMPLETE');
+
+    case 'child_duplicate_lifecycle':
+      assert.equal(validateParentLifecycle(state.parent), false);
+      return rejected('PARENT_RECONCILIATION_INCOMPLETE');
+
+    case 'child_missing_lifecycle':
+      assert.equal(validateParentLifecycle(state.parent), false);
+      return rejected('PARENT_RECONCILIATION_INCOMPLETE');
+
+    case 'current_item_active':
+      assert.equal(validateParentLifecycle(state.parent), false);
+      return rejected('PARENT_RECONCILIATION_INCOMPLETE');
+
+    case 'terminal_item_nonterminal':
+      assert.equal(validateParentLifecycle(state.parent), false);
+      return rejected('PARENT_RECONCILIATION_INCOMPLETE');
+
+    case 'duplicate_parent_entry':
+      assert.equal(validateParentLifecycle(state.parent), false);
+      return rejected('PARENT_RECONCILIATION_INCOMPLETE');
+
+    case 'missing_parent_entry':
+      assert.equal(validateParentLifecycle(state.parent), false);
+      return rejected('PARENT_RECONCILIATION_INCOMPLETE');
+
+    case 'unauthorised_queue_reorder':
+      assert.equal(validateParentLifecycle(state.parent), false);
+      return rejected('PARENT_RECONCILIATION_INCOMPLETE');
+
+    case 'competing_category_subqueues':
+      assert.equal(validateParentLifecycle(state.parent), false);
+      return rejected('PARENT_RECONCILIATION_INCOMPLETE');
+
+    case 'active_to_current': {
+      const transition = state.transition;
+      assert.equal(transition.atomic, true);
+      assert.equal(transition.before.active.includes(transition.child), true);
+      assert.equal(transition.after.active.includes(transition.child), false);
+      assert.equal(transition.after.current.includes(transition.child), true);
+      assert.equal(transition.parentEntryCount, 1);
+      assert.equal(transition.chronologyCommentsAdded, 1);
+      return { accepted: true, transition: 'ACTIVE_TO_CURRENT', selectedChild: transition.child };
+    }
+
+    case 'current_to_completed': {
+      const transition = state.transition;
+      assert.equal(transition.atomic, true);
+      assert.equal(transition.before.current.includes(transition.child), true);
+      assert.equal(transition.after.current.includes(transition.child), false);
+      assert.equal(transition.after.active.includes(transition.child), false);
+      assert.equal(transition.after.completed.includes(transition.child), true);
+      assert.equal(transition.after.completedLineStyle, '- [x]');
+      assert.equal(transition.parentEntryCount, 1);
+      assert.equal(transition.chronologyCommentsAdded, 1);
+      return { accepted: true, transition: 'CURRENT_TO_COMPLETED', selectedChild: transition.child };
+    }
+
+    case 'first_eligible_pickup': {
+      const eligible = state.parent.activeQueue.find((entry) => entry.eligible === true && entry.blocked !== true);
+      assert.ok(eligible);
+      assert.equal(eligible.child, state.parent.activeQueue[0].child);
+      return { accepted: true, selectedChild: eligible.child, selection: 'top_to_bottom_first_eligible' };
+    }
+
+    case 'blocked_first_skip': {
+      assert.equal(state.parent.activeQueue[0].blocked, true);
+      assert.deepEqual(state.parent.orderBefore, state.parent.orderAfter);
+      assert.equal(state.parent.skipRecorded, true);
+      assert.equal(state.parent.blockedItemMoved, false);
+      assert.equal(state.parent.selectedChild, state.parent.activeQueue[1].child);
+      return { accepted: true, selectedChild: state.parent.selectedChild, selection: 'skip_blocked_in_place' };
+    }
+
+    case 'four_surface_reconciliation':
+      assert.equal(validateFourSurfaceReconciliation(state.reconciliation), true);
+      return { accepted: true, reconciliation: 'FOUR_SURFACE_READ_BACK', preservedUnrelated: true };
+
+    case 'exact_dual_scheduler_removal':
+      assert.equal(validateExactSchedulerRemoval(state), true);
+      return { accepted: true, scheduler: 'REMOVED', completion: 'allowed_after_exact_dual_removal' };
+
     case 'first_run':
       assert.equal(state.repository.exact, true);
       assert.equal(state.consent, true);
@@ -279,7 +539,7 @@ function evaluateFixture(fixture) {
       assert.equal(state.schedules.executor, 'absent');
       assert.equal(state.packet.status, 'NONE');
       assert.equal(fixture.expected.mutation, 'safe_preparation_only');
-      return { accepted: true, turn: 'CONTROLLER_TURN' };
+      return { accepted: true, turn: 'CONTROLLER_TURN', mutation: 'safe_preparation_only' };
 
     case 'existing_pr_adoption':
       assert.equal(state.pr.classification, 'ADOPTION_ELIGIBLE');
@@ -300,6 +560,7 @@ function evaluateFixture(fixture) {
       assert.equal(state.independentPacketState, true);
       assert.equal(state.independentClaimState, true);
       assert.equal(state.recentPrOrder[0], '#700');
+      assert.deepEqual(state.subqueues, []);
       assert.equal(fixture.expected.selection, 'parent_checklist_order');
       return { accepted: true, capacity: 1, selectedChild: state.parentOrder[0], selection: 'parent_checklist_order' };
 
@@ -316,6 +577,7 @@ function evaluateFixture(fixture) {
       assert.equal(state.prompt.live, false);
       assert.equal(state.prompt.processed, true);
       assert.equal(state.prompt.payload, processedPromptMarker);
+      assert.equal(state.validOpenReviews, 0);
       for (const field of ['packetId', 'executorRunId', 'resultingHead', 'reconciliationRef']) {
         assert.ok(state.durableAudit[field], `durable field ${field}`);
       }
@@ -348,7 +610,7 @@ function evaluateFixture(fixture) {
       assert.equal(state.publication.parentBinding && state.publication.childBinding && state.publication.prBinding, false);
       assert.equal(state.publication.bodiesRereadBeforeReady, false);
       assert.equal(state.publication.readySetLast, false);
-      return rejected('DRAFT_BINDING_INCOMPLETE');
+      return rejected('PARENT_RECONCILIATION_INCOMPLETE');
 
     case 'duplicate_packets':
       assert.notEqual(new Set(state.livePacketIds).size, state.livePacketIds.length);
@@ -371,8 +633,53 @@ function evaluateFixture(fixture) {
     case 'body_comment_disagreement': {
       const ids = Object.values(state.surfaces);
       assert.notEqual(new Set(ids).size, 1);
-      return rejected('AUTHORITY_DISAGREEMENT');
+      return rejected('PARENT_RECONCILIATION_INCOMPLETE');
     }
+
+    case 'parent_child_pr_status_mismatch':
+    case 'head_mismatch':
+    case 'wrong_current_turn':
+    case 'next_action_mismatch':
+    case 'missing_parent_chronology':
+    case 'concurrent_edit_before_write':
+    case 'concurrent_edit_after_write':
+    case 'unrelated_parent_content_changed':
+      assert.equal(validateFourSurfaceReconciliation(state.reconciliation), false);
+      return rejected('PARENT_RECONCILIATION_INCOMPLETE');
+
+    case 'progression_during_parent_reconciliation':
+      assert.equal(state.blocker, 'PARENT_RECONCILIATION_INCOMPLETE');
+      for (const action of state.attemptedActions) {
+        assert.equal(state.prohibitedActions.includes(action), true, `prohibited action: ${action}`);
+      }
+      return rejected('PARENT_RECONCILIATION_INCOMPLETE');
+
+    case 'caller_supplied_lease_fields':
+      assert.equal(state.capability.rejectsCallerAuthorityFields, true);
+      assert.equal(state.capability.callerCanMintLease, false);
+      assert.equal(state.capability.callerCanReplaceLease, false);
+      assert.equal(state.capability.callerCanRenewLease, false);
+      assert.equal(state.capability.callerCanValidateLease, false);
+      assert.equal(state.capability.callerCanSupersedeLease, false);
+      assert.equal(validateClaimInput(state), false);
+      return rejected('CLAIM_INPUT_AUTHORITY_FIELDS_REJECTED');
+
+    case 'duplicate_ote_eto_markers':
+      assert.ok(state.oteStartCount > 1 || state.oteEndCount > 1 || state.etoStartCount > 1 || state.etoEndCount > 1);
+      return rejected('DUPLICATE_HANDOFF_MARKER');
+
+    case 'missing_valid_open_reviews':
+      assert.equal(Object.prototype.hasOwnProperty.call(state, 'validOpenReviews'), false);
+      assert.equal(validateCompletionEligibility(state), false);
+      return rejected('COMPLETION_GATE_INCOMPLETE');
+
+    case 'disabled_scheduler':
+    case 'paused_scheduler':
+    case 'duplicate_scheduler':
+    case 'ambiguous_scheduler':
+    case 'unverifiable_missing_scheduler':
+      assert.equal(validateExactSchedulerRemoval(state), false);
+      return rejected('INCOMPLETE_SCHEDULER_TEARDOWN');
 
     case 'stale_g4':
       assert.notEqual(state.g4.reviewedHead, state.g4.currentHead);
@@ -395,6 +702,7 @@ function evaluateFixture(fixture) {
     case 'incomplete_teardown':
       assert.equal(state.completionRequested, true);
       assert.equal(state.userExplicitlyRequestedRemoval, true);
+      assert.equal(state.teardownState, 'PARTIALLY_REMOVED');
       assert.equal(state.schedules.controller.status, 'removed');
       assert.notEqual(state.schedules.executor.status, 'removed');
       assert.equal(state.otherRepositoryAffected, false);
@@ -427,6 +735,9 @@ test('repo-auto-code design has an inert source-only module contract', () => {
   assert.equal(fs.existsSync(path.join(repoRoot, 'skills', 'repo-auto-code')), false);
   assert.equal(fs.existsSync(path.join(repoRoot, '.github', 'workflows', 'repo-auto-code.yml')), false);
   assert.equal(fs.existsSync(path.join(repoRoot, 'claim-refs')), false);
+  assert.equal(fs.existsSync(path.join(repoRoot, 'claim-backend')), false);
+  assert.equal(fs.existsSync(path.join(repoRoot, 'controller-runtime')), false);
+  assert.equal(fs.existsSync(path.join(repoRoot, 'executor-runtime')), false);
   assert.equal(fs.existsSync(path.join(repoRoot, 'scheduled-tasks')), false);
   assert.doesNotMatch(read('AGENTS.md'), /AI-AGENT-TOOLKIT:.*REPO-AUTO-CODE/);
   assert.match(readModule('README.md'), /does not install or activate a skill, managed `AGENTS\.md` block, GitHub workflow, scheduler, claim mechanism, PR enrolment, or runtime controller/i);
@@ -447,6 +758,7 @@ test('both scheduled prompts require every routing field and preserve hierarchy 
   assertRoutingProfiles(controller, 'controller prompt');
   assertRoutingProfiles(executor, 'executor prompt');
   for (const prompt of [controller, executor]) {
+    assertExactEnvelopeCounts(prompt, 'scheduled prompt');
     assert.match(prompt, /L0/);
     assert.match(prompt, /L1/);
     assert.match(prompt, /L2/);
@@ -470,12 +782,15 @@ test('failure matrix has required evidence, repair, and lane-isolation columns',
     'F-001', 'F-002', 'F-003', 'F-004', 'F-005', 'F-006', 'F-007', 'F-008', 'F-009', 'F-010',
     'F-011', 'F-012', 'F-013', 'F-014', 'F-015', 'F-016', 'F-017', 'F-018', 'F-019', 'F-020',
     'F-021', 'F-022', 'F-023', 'F-024', 'F-025', 'F-026', 'F-027', 'F-028', 'F-029', 'F-030',
-    'F-031', 'F-032', 'F-033', 'F-034', 'F-035', 'F-036', 'F-037', 'F-038', 'F-039', 'F-040', 'F-041'
+    'F-031', 'F-032', 'F-033', 'F-034', 'F-035', 'F-036', 'F-037', 'F-038', 'F-039', 'F-040', 'F-041',
+    'F-042', 'F-043', 'F-044', 'F-045', 'F-046', 'F-047', 'F-048', 'F-049', 'F-050'
   ]) {
     assert.match(matrix, new RegExp(`\\| ${id} \\|`), `failure row ${id}`);
   }
   assert.match(matrix, /\| F-034 \|[\s\S]*?\| `HELD` \|/);
   assert.match(matrix, /\| F-041 \|[\s\S]*?\| `HELD` \|/);
+  assert.match(matrix, /PARENT_RECONCILIATION_INCOMPLETE/);
+  assert.match(matrix, /sole verified terminal state `REMOVED`/);
 });
 
 test('controller prompt location and lifecycle state boundaries are explicit', () => {
@@ -483,12 +798,57 @@ test('controller prompt location and lifecycle state boundaries are explicit', (
   const lifecycle = readModule('_main/state-machine.md');
   assert.match(architecture, /Manual controller prompts[\s\S]*active web conversation/);
   assert.match(architecture, /not copied into GitHub bodies or comments or into scheduled-task payloads/);
+  assert.match(architecture, /Queue authority[\s\S]*Current execution[\s\S]*Active queue[\s\S]*Completed or disposed[\s\S]*Completion gate[\s\S]*Governance ownership[\s\S]*Mandatory parent reconciliation/);
+  assert.match(architecture, /Visible numeric prefixes are optional; list position is authoritative/);
+  assert.match(architecture, /blocked first item stays in place/);
+  assert.match(architecture, /Only the owner or an explicitly authorised governance actor may reorder/);
+  assert.match(architecture, /Active queue -> Current execution -> Completed or disposed/);
   for (const label of ['SETUP', 'PREPARED', 'SCHEDULED', 'ENROLLED', 'CLAIMED', 'RUNNING', 'ACCEPTED', 'COMPLETE']) {
     assert.match(lifecycle, new RegExp('`' + label + '`'));
   }
   assert.match(lifecycle, /prepared prompts alone never set this state/);
   assert.match(lifecycle, /A trusted atomic read-back verifies one capability-issued lease/);
   assert.match(lifecycle, /merge and teardown remain separate/);
+  assert.match(lifecycle, /PARENT_RECONCILIATION_INCOMPLETE/);
+  assert.match(lifecycle, /only terminal scheduler evidence state is `REMOVED`/);
+});
+
+test('material transitions use four-surface compare-and-preserve reconciliation and a hard progression blocker', () => {
+  const protocol = readModule('_main/protocol.md');
+  for (const field of [
+    'lifecycle section', 'status', 'gate', 'Design Lock', 'PR, branch, base, or head', 'verdict',
+    'checks', 'review disposition', 'blocker', 'required user action', 'current turn',
+    'immediate next action', 'acceptance', 'merge', 'closure', 'completion'
+  ]) {
+    assert.match(protocol, new RegExp(field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  assert.match(protocol, /child body[\s\S]*PR body when a PR exists[\s\S]*exactly one existing parent lifecycle entry[\s\S]*one new parent chronology comment/);
+  assert.match(protocol, /compare-and-preserve/);
+  assert.match(protocol, /patch only that row/);
+  assert.match(protocol, /preserve every unrelated entry/);
+  assert.match(protocol, /PARENT_RECONCILIATION_INCOMPLETE/);
+  for (const action of ['another worker prompt', 'auto-code pickup or claim', 'G4 authorisation', 'controller acceptance', 'ready-state mutation', 'merge or auto-merge', 'child closure', 'next-task selection', 'verification claims', 'programme completion']) {
+    assert.match(protocol, new RegExp(action.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  for (const gate of ['GATE_AUTHORISED', 'GATE_RUNNING', 'GATE_RESULT_RECEIVED', 'CONTROLLER_ACCEPTED']) {
+    assert.match(protocol, new RegExp(gate));
+  }
+});
+
+test('completion finality requires independent review/check/merge/teardown evidence', () => {
+  const protocol = readModule('_main/protocol.md');
+  const controller = readModule('_main/templates/web-controller-scheduled-task.prompt.md');
+  const executor = readModule('_main/templates/executor-scheduled-task.prompt.md');
+  for (const text of [protocol, controller, executor]) {
+    assert.match(text, /validOpenReviews/);
+    assert.match(text, /no live final prompt/i);
+    assert.match(text, /ledger/i);
+    assert.match(text, /CONTROLLER_ACCEPTED/);
+    assert.match(text, /REMOVED/);
+  }
+  assert.match(protocol, /required checks are complete and passing/);
+  assert.match(protocol, /merge prerequisites are complete/);
+  assert.match(protocol, /teardown prerequisites are complete/);
 });
 
 test('every authorised fixture is discovered, unique, executed, and behaviorally asserted', () => {
@@ -517,10 +877,12 @@ test('every authorised fixture is discovered, unique, executed, and behaviorally
     const actual = evaluateFixture(fixture);
     executed.add(fixture.id);
     assert.equal(actual.accepted, fixture.expected.accepted, fixture.id);
-    for (const key of ['status', 'turn', 'classification', 'selection', 'completion', 'capacity', 'adoptedHead', 'selectedChild', 'freshG4Required', 'mutationProhibited']) {
-      if (Object.prototype.hasOwnProperty.call(fixture.expected, key)) {
-        assert.equal(actual[key], fixture.expected[key], `${fixture.id} ${key}`);
-      }
+    for (const [key, expectedValue] of Object.entries(fixture.expected)) {
+      assert.deepEqual(actual[key], expectedValue, `${fixture.id} ${key}`);
+    }
+    if (fixture.expected.accepted === false) {
+      assert.equal(fixture.expected.mutationProhibited, true, `${fixture.id} rejected fixture must prohibit mutation`);
+      assert.equal(actual.mutationProhibited, true, `${fixture.id} rejected result must prohibit mutation`);
     }
   }
   assert.equal(executed.size, fixtures.length, 'every fixture must execute');

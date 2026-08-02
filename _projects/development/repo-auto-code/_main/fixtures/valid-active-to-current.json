@@ -1,0 +1,19 @@
+{
+  "id": "valid-active-to-current",
+  "scenario": "active_to_current",
+  "expected": {
+    "accepted": true,
+    "transition": "ACTIVE_TO_CURRENT",
+    "selectedChild": "#329"
+  },
+  "state": {
+    "transition": {
+      "child": "#329",
+      "atomic": true,
+      "before": { "active": ["#329", "#330"], "current": [] },
+      "after": { "active": ["#330"], "current": ["#329"] },
+      "parentEntryCount": 1,
+      "chronologyCommentsAdded": 1
+    }
+  }
+}

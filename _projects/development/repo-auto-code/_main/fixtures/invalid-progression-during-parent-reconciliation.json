@@ -1,0 +1,14 @@
+{
+  "id": "invalid-progression-during-parent-reconciliation",
+  "scenario": "progression_during_parent_reconciliation",
+  "expected": {
+    "accepted": false,
+    "status": "PARENT_RECONCILIATION_INCOMPLETE",
+    "mutationProhibited": true
+  },
+  "state": {
+    "blocker": "PARENT_RECONCILIATION_INCOMPLETE",
+    "attemptedActions": ["another worker prompt", "auto-code pickup or claim", "G4 authorisation", "controller acceptance", "ready-state mutation", "merge or auto-merge", "child closure", "next-task selection", "verification claims", "programme completion"],
+    "prohibitedActions": ["another worker prompt", "auto-code pickup or claim", "G4 authorisation", "controller acceptance", "ready-state mutation", "merge or auto-merge", "child closure", "next-task selection", "verification claims", "programme completion"]
+  }
+}

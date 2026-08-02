@@ -1,0 +1,21 @@
+{
+  "id": "invalid-unauthorised-queue-reorder",
+  "scenario": "unauthorised_queue_reorder",
+  "expected": {
+    "accepted": false,
+    "status": "PARENT_RECONCILIATION_INCOMPLETE",
+    "mutationProhibited": true
+  },
+  "state": {
+    "parent": {
+      "sectionOrder": ["Queue authority", "Current execution", "Active queue", "Completed or disposed", "Completion gate", "Governance ownership", "Mandatory parent reconciliation"],
+      "linesBySection": { "Current execution": [], "Active queue": ["- #330", "- #329"], "Completed or disposed": [] },
+      "materialChildren": ["#329", "#330"],
+      "lifecycleEntries": { "Current execution": [], "Active queue": ["#330", "#329"], "Completed or disposed": [] },
+      "expectedLifecycle": { "#329": "Active queue", "#330": "Active queue" },
+      "parentEntryCount": 1,
+      "reorder": { "changed": true, "authorized": false },
+      "subqueues": []
+    }
+  }
+}

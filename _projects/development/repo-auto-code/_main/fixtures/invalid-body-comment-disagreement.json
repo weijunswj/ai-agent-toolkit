@@ -3,7 +3,7 @@
   "scenario": "body_comment_disagreement",
   "expected": {
     "accepted": false,
-    "status": "AUTHORITY_DISAGREEMENT",
+    "status": "PARENT_RECONCILIATION_INCOMPLETE",
     "mutationProhibited": true
   },
   "state": {

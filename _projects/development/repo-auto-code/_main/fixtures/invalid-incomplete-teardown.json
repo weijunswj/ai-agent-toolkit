@@ -9,6 +9,7 @@
   "state": {
     "completionRequested": true,
     "userExplicitlyRequestedRemoval": true,
+    "teardownState": "PARTIALLY_REMOVED",
     "schedules": {
       "controller": { "identity": "repo-329-controller", "status": "removed" },
       "executor": { "identity": "repo-329-executor", "status": "active" }

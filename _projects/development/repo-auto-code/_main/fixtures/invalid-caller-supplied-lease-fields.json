@@ -1,0 +1,31 @@
+{
+  "id": "invalid-caller-supplied-lease-fields",
+  "scenario": "caller_supplied_lease_fields",
+  "expected": {
+    "accepted": false,
+    "status": "CLAIM_INPUT_AUTHORITY_FIELDS_REJECTED",
+    "mutationProhibited": true
+  },
+  "state": {
+    "claimInput": {
+      "protocolVersion": 1,
+      "repositoryIdentity": "weijunswj/ai-agent-toolkit",
+      "childIdentity": "#329",
+      "prIdentity": "#333",
+      "packetId": "OTE-CLAIM-INPUT-001",
+      "executorRunId": "EXEC-CLAIM-INPUT-001",
+      "observedStartingHead": "32b8dd9c667048ab2b162ad86b6262ef6006571e",
+      "leaseId": "caller-forged-lease",
+      "leaseExpiresAt": "2099-01-01T00:00:00Z",
+      "renewal": true
+    },
+    "capability": {
+      "rejectsCallerAuthorityFields": true,
+      "callerCanMintLease": false,
+      "callerCanReplaceLease": false,
+      "callerCanRenewLease": false,
+      "callerCanValidateLease": false,
+      "callerCanSupersedeLease": false
+    }
+  }
+}

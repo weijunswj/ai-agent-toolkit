@@ -1,0 +1,20 @@
+{
+  "id": "invalid-current-item-active",
+  "scenario": "current_item_active",
+  "expected": {
+    "accepted": false,
+    "status": "PARENT_RECONCILIATION_INCOMPLETE",
+    "mutationProhibited": true
+  },
+  "state": {
+    "parent": {
+      "sectionOrder": ["Queue authority", "Current execution", "Active queue", "Completed or disposed", "Completion gate", "Governance ownership", "Mandatory parent reconciliation"],
+      "linesBySection": { "Current execution": ["- #329"], "Active queue": ["- #329"], "Completed or disposed": [] },
+      "materialChildren": ["#329"],
+      "lifecycleEntries": { "Current execution": ["#329"], "Active queue": ["#329"], "Completed or disposed": [] },
+      "expectedLifecycle": { "#329": "Current execution" },
+      "parentEntryCount": 1,
+      "subqueues": []
+    }
+  }
+}
