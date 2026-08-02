@@ -5,7 +5,7 @@
   "title": "Repo-Scoped Scheduled Auto-Code Protocol Design",
   "module_path": "_projects/development/repo-auto-code",
   "main_path": "_projects/development/repo-auto-code/_main",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "version_policy": "semver",
   "version_notes": "Initial first-party source-only design module for the repo-scoped scheduled controller-executor auto-code protocol; no installed skill or consumer output is declared.",
   "outputs": [],

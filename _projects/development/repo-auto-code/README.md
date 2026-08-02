@@ -1,6 +1,6 @@
 # Repo-Scoped Scheduled Auto-Code Protocol Design
 
-First-party, source-only design material for issue #329 under Design Lock `DL-329-AUTO-CODE-001`.
+First-party, source-only design material for issue #329 under Design Lock `DL-329-AUTO-CODE-004`.
 
 ## Status
 
