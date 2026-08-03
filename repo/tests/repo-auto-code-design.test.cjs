@@ -14,6 +14,7 @@ const templateRoot = path.join(mainRoot, 'templates');
 const fixturePrefix = '_projects/development/repo-auto-code/_main/fixtures';
 const mergeCommit = '6c266962dcc423996dcc618612321b2fdf5712c3';
 const mergeTree = 'c7aae93052b812ae067fc8143db9deb3f7ad0380';
+const sourceLockBlob = '6d79d0c7fd12f2212ae7925befc8955398a3bde8';
 
 const addedFixtures = [
   'valid-explicit-closure-lease-activation.json',
@@ -91,6 +92,37 @@ const modifiedFixtures = [
   'valid-four-surface-reconciliation.json',
   'valid-governance-readiness.json'
 ].sort();
+
+const deletedFixtures = [
+  'invalid-active-or-duplicate-scheduler.json',
+  'invalid-ambiguous-scheduler.json',
+  'invalid-cross-repository-scheduler-receipt.json',
+  'invalid-crossed-handoff-markers.json',
+  'invalid-disabled-scheduler.json',
+  'invalid-duplicate-ote-eto-markers.json',
+  'invalid-duplicate-packets.json',
+  'invalid-duplicate-scheduler.json',
+  'invalid-final-live-prompt.json',
+  'invalid-incomplete-teardown.json',
+  'invalid-live-prompt-after-completion.json',
+  'invalid-missing-handoff-marker.json',
+  'invalid-nested-handoff-markers.json',
+  'invalid-out-of-order-handoff-markers.json',
+  'invalid-partial-publication.json',
+  'invalid-paused-scheduler.json',
+  'invalid-unverifiable-missing-scheduler.json',
+  'valid-blocked-first-skip.json',
+  'valid-exact-dual-scheduler-removal.json',
+  'valid-existing-pr-adoption.json',
+  'valid-first-eligible-pickup.json',
+  'valid-first-run.json',
+  'valid-parallel-prs.json',
+  'valid-processed-prompt.json',
+  'valid-same-pr-fast-forward.json'
+].sort();
+
+const acceptedDeletedFixtures = deletedFixtures.filter((name) => name.startsWith('valid-'));
+const rejectedDeletedFixtures = deletedFixtures.filter((name) => name.startsWith('invalid-'));
 
 function git(...args) {
   return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8' }).trim();
@@ -205,7 +237,25 @@ function findFixtureBaseline() {
   for (const ref of candidateRefs) {
     if (namesAt(ref).length === 85) return ref;
   }
-  throw new Error('could not locate the 85-fixture merge baseline');
+  return null;
+}
+
+function baselineFixtureNames() {
+  const baseline = findFixtureBaseline();
+  if (baseline) {
+    assert.equal(baseline, mergeCommit);
+    assert.equal(git('rev-parse', baseline + '^{tree}'), mergeTree);
+    return namesAt(baseline);
+  }
+
+  // Hosted PR validation intentionally uses a depth-one checkout. In that
+  // mode the explicit A3 add/delete allowlist is the complete baseline
+  // reconciliation evidence; no fixture or authority verdict is inferred.
+  assert.equal(git('rev-parse', '--is-shallow-repository'), 'true');
+  return currentFixtureNames()
+    .filter((name) => !addedFixtures.includes(name))
+    .concat(deletedFixtures)
+    .sort();
 }
 
 function activeSourceFiles() {
@@ -226,11 +276,7 @@ function activeSourceFiles() {
 }
 
 test('filesystem discovery reconciles the exact A3 fixture arithmetic', () => {
-  const baseline = findFixtureBaseline();
-  assert.equal(baseline, mergeCommit);
-  assert.equal(git('rev-parse', baseline + '^{tree}'), mergeTree);
-
-  const existing = namesAt(baseline);
+  const existing = baselineFixtureNames();
   const current = currentFixtureNames();
   const existingSet = new Set(existing);
   const currentSet = new Set(current);
@@ -246,6 +292,10 @@ test('filesystem discovery reconciles the exact A3 fixture arithmetic', () => {
   assert.equal(current.length, 112);
   assert.equal(new Set(current).size, current.length);
 
+  assert.deepEqual(deleted, deletedFixtures);
+  assert.equal(acceptedDeletedFixtures.length, 8);
+  assert.equal(rejectedDeletedFixtures.length, 17);
+
   const fixtures = current.map(readJson);
   const ids = fixtures.map((fixture) => fixture.id);
   assert.equal(new Set(ids).size, ids.length);
@@ -257,6 +307,11 @@ test('filesystem discovery reconciles the exact A3 fixture arithmetic', () => {
 
   const accepted = fixtures.filter((fixture) => classification(fixture)).length;
   const rejected = fixtures.length - accepted;
+  const retainedAccepted = fixtures
+    .filter((fixture) => retained.includes(fixture.id + '.json') && classification(fixture)).length;
+  const retainedRejected = retained.length - retainedAccepted;
+  assert.equal(retainedAccepted + acceptedDeletedFixtures.length, 15);
+  assert.equal(retainedRejected + rejectedDeletedFixtures.length, 70);
   assert.equal(accepted, 17);
   assert.equal(rejected, 95);
   assert.equal(15 - 8 + 10, accepted);
@@ -280,7 +335,11 @@ test('source and output declarations stay source-only', () => {
   assert.equal(manifest.surface.publish_as, 'source_only');
   assert.equal(manifest.requires_approval, true);
   assert.equal(manifest.run_commands_by_default, false);
-  assert.equal(git('diff', '--name-only', mergeCommit, '--', '_projects/development/repo-auto-code/SOURCE-LOCK.json'), '');
+  const baseline = findFixtureBaseline();
+  if (baseline) {
+    assert.equal(git('diff', '--name-only', baseline, '--', '_projects/development/repo-auto-code/SOURCE-LOCK.json'), '');
+  }
+  assert.equal(git('hash-object', '_projects/development/repo-auto-code/SOURCE-LOCK.json'), sourceLockBlob);
   for (const denied of ['scheduled-tasks/**', 'activation/**', 'runtime/**', 'pilot/**', 'queue/**']) {
     assert.ok(manifest.writes.denied.includes(denied));
   }
