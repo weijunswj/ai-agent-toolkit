@@ -419,6 +419,14 @@ test('new fixture decisions contain no authority-bearing defaults or route ident
     Buffer.from('R2VtaW5p', 'base64').toString()
   ];
 
+  const text = activeSourceFiles().map((file) => fs.readFileSync(file, 'utf8')).join('\n');
+  for (const literal of forbidden) assert.doesNotMatch(text, new RegExp(literal));
+  for (const name of addedFixtures.concat(modifiedFixtures)) {
+    const textOfFixture = fs.readFileSync(path.join(fixtureRoot, name), 'utf8');
+    assert.doesNotMatch(textOfFixture, /projectionDefaults|readinessVerdict|completionVerdict|fallback/);
+  }
+});
+
 
 const a4ContractFiles = [
   path.join(mainRoot, 'architecture.md'),
@@ -750,13 +758,6 @@ test('A4 preserves source-only uninstalled unscheduled inactive state', () => {
   assert.deepEqual(manifest.writes.allowed, []);
   for (const directory of ['scheduled-tasks', 'activation', 'runtime', 'pilot', 'queue', 'claim-refs']) {
     assert.equal(fs.existsSync(path.join(projectRoot, directory)), false, directory + ' must not exist');
-  }
-});
-  const text = activeSourceFiles().map((file) => fs.readFileSync(file, 'utf8')).join('\n');
-  for (const literal of forbidden) assert.doesNotMatch(text, new RegExp(literal));
-  for (const name of addedFixtures.concat(modifiedFixtures)) {
-    const textOfFixture = fs.readFileSync(path.join(fixtureRoot, name), 'utf8');
-    assert.doesNotMatch(textOfFixture, /projectionDefaults|readinessVerdict|completionVerdict|fallback/);
   }
 });
 
@@ -1269,4 +1270,528 @@ test('A6 source-only state remains uninstalled unscheduled and inactive', () => 
     surfaces: []
   }), { decision: 'SOURCE_ONLY_INACTIVE', dispatch: false });
   assertA6Terms(['source-only', 'uninstalled', 'unscheduled', 'inactive']);
+});
+
+function executionIdentity(overrides = {}) {
+  return {
+    provider: 'provider-g4-synthetic',
+    canonical_model: 'model-g4-synthetic',
+    reasoning: 'reasoning-g4-synthetic',
+    role: 'technical G4 reviewer',
+    surface: 'technical-g4-reviewer',
+    exact_head: 'head-synthetic',
+    assignment_source: 'current-chat-synthetic',
+    assignment_evidence: 'assignment-locator-synthetic',
+    ...overrides
+  };
+}
+
+function temporaryEvidence(overrides = {}) {
+  const value = {
+    rawEvidence: true,
+    exactHead: 'head-synthetic',
+    finalExactHead: true,
+    g4Verdict: 'PASS',
+    webVerified: true,
+    webAdjudicated: true,
+    freshTemporaryChatCount: 1,
+    g4ExecutionIdentity: executionIdentity(),
+    webExecutionIdentity: executionIdentity({
+      provider: 'provider-web-synthetic',
+      canonical_model: 'model-web-synthetic',
+      reasoning: 'reasoning-web-synthetic',
+      role: 'Web Temporary Chat assurance auditor',
+      surface: 'web-temporary-chat',
+      assignment_source: 'web-current-chat-synthetic'
+    }),
+    separateContext: true,
+    separateFrom: ['web-orchestrator', 'executor-root', 'implementation', 'amendment', 'technical-g4-reviewer'],
+    independentBoundedEvidence: true,
+    g4PacketOnly: false,
+    g4SelfAttestationOnly: false,
+    crossProviderModelDiversity: null,
+    verdict: 'CLEAR',
+    mergeAuthority: false,
+    githubAuthority: false,
+    acceptanceAuthority: false,
+    selectsWork: false
+  };
+  Object.assign(value, overrides);
+  value.crossProviderModelDiversity = value.crossProviderModelDiversity || {
+    providerDifferent: value.g4ExecutionIdentity.provider !== value.webExecutionIdentity.provider,
+    modelDifferent: value.g4ExecutionIdentity.canonical_model !== value.webExecutionIdentity.canonical_model,
+    sameModelFamily: false
+  };
+  return value;
+}
+
+function temporaryAssuranceGate(evidence) {
+  if (!evidence || evidence.rawEvidence !== true) return 'SURFACE_TOPOLOGY_INVALID';
+  if (evidence.g4Verdict !== 'PASS' || evidence.finalExactHead !== true || evidence.webVerified !== true ||
+      evidence.webAdjudicated !== true) return 'WEB_VERIFICATION_REQUIRED';
+  if (evidence.freshTemporaryChatCount !== 1) return 'TEMPORARY_ASSURANCE_REQUIRED';
+  const g4 = evidence.g4ExecutionIdentity;
+  const web = evidence.webExecutionIdentity;
+  if (!g4 || !web || g4.role !== 'technical G4 reviewer' || web.surface !== 'web-temporary-chat' ||
+      g4.exact_head !== evidence.exactHead || web.exact_head !== evidence.exactHead) {
+    return 'ASSURANCE_EVIDENCE_INDEPENDENCE_REQUIRED';
+  }
+  if (evidence.separateContext !== true || !Array.isArray(evidence.separateFrom) ||
+      !evidence.separateFrom.includes('executor-root') || !evidence.separateFrom.includes('implementation') ||
+      !evidence.separateFrom.includes('technical-g4-reviewer')) {
+    return 'SURFACE_TOPOLOGY_INVALID';
+  }
+  if (evidence.independentBoundedEvidence !== true || evidence.g4PacketOnly === true ||
+      evidence.g4SelfAttestationOnly === true) return 'ASSURANCE_EVIDENCE_INDEPENDENCE_REQUIRED';
+  const diversity = evidence.crossProviderModelDiversity;
+  if (!diversity || typeof diversity.providerDifferent !== 'boolean' ||
+      typeof diversity.modelDifferent !== 'boolean' || typeof diversity.sameModelFamily !== 'boolean' ||
+      diversity.providerDifferent !== (g4.provider !== web.provider) ||
+      diversity.modelDifferent !== (g4.canonical_model !== web.canonical_model)) {
+    return 'ASSURANCE_EVIDENCE_INDEPENDENCE_REQUIRED';
+  }
+  if (evidence.githubAuthority === true || evidence.acceptanceAuthority === true ||
+      evidence.mergeAuthority === true || evidence.selectsWork === true ||
+      !['CLEAR', 'CONCERN'].includes(evidence.verdict)) return 'SURFACE_TOPOLOGY_INVALID';
+  return evidence.verdict;
+}
+
+test('A6-C3 uses a model-neutral technical G4 function and independent G4 assignment', () => {
+  assertA6Terms([
+    'technical G4 reviewer',
+    'G4 is a technical-review function, not a structural model name',
+    'provider, canonical base model, and reasoning independently',
+    'may differ from the Web controller',
+    'Historical model identities'
+  ]);
+  const evidence = temporaryEvidence();
+  assert.equal(evidence.g4ExecutionIdentity.provider === evidence.webExecutionIdentity.provider, false);
+  assert.equal(evidence.g4ExecutionIdentity.canonical_model === evidence.webExecutionIdentity.canonical_model, false);
+  assert.equal(temporaryAssuranceGate(evidence), 'CLEAR');
+});
+
+test('A6-C3 requires exactly one fresh Temporary Chat after Web verification', () => {
+  assertA6Terms(['exactly one fresh Web Temporary Chat', 'fresh for that head', 'same model family']);
+  assert.equal(temporaryAssuranceGate(temporaryEvidence({ freshTemporaryChatCount: 0 })), 'TEMPORARY_ASSURANCE_REQUIRED');
+  assert.equal(temporaryAssuranceGate(temporaryEvidence({ freshTemporaryChatCount: 2 })), 'TEMPORARY_ASSURANCE_REQUIRED');
+  assert.equal(temporaryAssuranceGate(temporaryEvidence({ webVerified: false })), 'WEB_VERIFICATION_REQUIRED');
+});
+
+test('A6-C3 Temporary Chat independently records identities and can return CONCERN after PASS', () => {
+  const evidence = temporaryEvidence({ verdict: 'CONCERN' });
+  assert.equal(temporaryAssuranceGate(evidence), 'CONCERN');
+  assert.equal(evidence.g4Verdict, 'PASS');
+  assert.ok(evidence.g4ExecutionIdentity.assignment_evidence);
+  assert.ok(evidence.webExecutionIdentity.assignment_source);
+  assert.deepEqual(evidence.crossProviderModelDiversity, {
+    providerDifferent: true,
+    modelDifferent: true,
+    sameModelFamily: false
+  });
+});
+
+test('A6-C3 same-family routes still require diversity records and fresh assurance', () => {
+  const evidence = temporaryEvidence({
+    g4ExecutionIdentity: executionIdentity({
+      provider: 'provider-shared-synthetic',
+      canonical_model: 'model-family-synthetic/g4'
+    }),
+    webExecutionIdentity: executionIdentity({
+      provider: 'provider-shared-synthetic',
+      canonical_model: 'model-family-synthetic/web',
+      role: 'Web Temporary Chat assurance auditor',
+      surface: 'web-temporary-chat',
+      assignment_source: 'web-current-chat-synthetic'
+    })
+  });
+  evidence.crossProviderModelDiversity = { providerDifferent: false, modelDifferent: true, sameModelFamily: true };
+  assert.equal(temporaryAssuranceGate(evidence), 'CLEAR');
+  assert.equal(temporaryAssuranceGate({ ...evidence, crossProviderModelDiversity: null }), 'ASSURANCE_EVIDENCE_INDEPENDENCE_REQUIRED');
+});
+
+test('A6-C3 rejects packet-only, shared-context, and authority-bearing assurance', () => {
+  assert.equal(temporaryAssuranceGate(temporaryEvidence({ g4PacketOnly: true })), 'ASSURANCE_EVIDENCE_INDEPENDENCE_REQUIRED');
+  assert.equal(temporaryAssuranceGate(temporaryEvidence({ separateContext: false })), 'SURFACE_TOPOLOGY_INVALID');
+  assert.equal(temporaryAssuranceGate(temporaryEvidence({ mergeAuthority: true })), 'SURFACE_TOPOLOGY_INVALID');
+  assert.equal(temporaryAssuranceGate(temporaryEvidence({ verdict: 'PASS' })), 'SURFACE_TOPOLOGY_INVALID');
+  assertA6Terms(['not G5', 'does not replace G4', 'no GitHub']);
+});
+
+const invariantRequiredFields = [
+  'invariant_id',
+  'source_authority',
+  'required_semantics',
+  'candidate_evidence',
+  'negative_test',
+  'status',
+  'authorising_design_lock'
+];
+
+const expectedInvariantBundles = {
+  'AUTH-LEDGER-RECEIPT-001': {
+    semantics: {
+      matching_marker_and_run: 'The receipt marker and run identifier match the authorised operation.',
+      processor_authored_receipt: 'The processor that performed the operation authors the receipt.',
+      canonical_durable_readback: 'The receipt is read back from the canonical durable ledger surface.'
+    },
+    evidence: {
+      matching_marker_and_run: ['marker', 'run_id', 'authorised_operation'],
+      processor_authored_receipt: ['processor_id', 'receipt_author'],
+      canonical_durable_readback: ['canonical_ledger_ref', 'durable_readback', 'readback_digest']
+    }
+  },
+  'SCHEMA-EVAL-CANDIDATE-001': {
+    semantics: {
+      candidate_identity_and_result: 'The candidate records run_id, provider, base model, role, revision, result, and evidence.'
+    },
+    evidence: {
+      candidate_identity_and_result: ['run_id', 'provider', 'base_model', 'role', 'revision', 'result', 'evidence']
+    }
+  },
+  'SCOPE-GOV-TRACKING-001': {
+    semantics: {
+      authorised_repository: 'The repository is owned or explicitly authorised for the operation.',
+      relevant_task_work: 'Relevant task work exists and is bound to the governed repository.'
+    },
+    evidence: {
+      authorised_repository: ['repository', 'ownership_or_authorisation', 'authorisation_evidence'],
+      relevant_task_work: ['task_id', 'relevant_work', 'scope_binding']
+    }
+  },
+  'CONCURRENCY-GOV-WRITE-001': {
+    semantics: {
+      reread_and_bind: 'The actor rereads the current surface and binds its revision before preparing a write.',
+      compare_and_preserve: 'The actor compares the bound revision and preserves unrelated content and order.',
+      write_and_reread: 'The actor writes only after comparison and rereads the result to verify the bound update.'
+    },
+    evidence: {
+      reread_and_bind: ['reread_revision', 'bound_revision'],
+      compare_and_preserve: ['comparison_digest', 'unrelated_content_preserved', 'order_preserved'],
+      write_and_reread: ['write_digest', 'post_write_readback', 'readback_revision']
+    }
+  },
+  'REVIEW-STATE-RECONCILIATION-001': {
+    semantics: {
+      four_surface_reconciliation: 'Exact-head external-review completion is reconciled across the child body, PR body, exactly one parent entry, and one new parent chronology comment.',
+      stale_state_blocks_progression: 'Missing or stale review state blocks the next prompt, technical G4, and finality.'
+    },
+    evidence: {
+      four_surface_reconciliation: ['child_body', 'pr_body', 'parent_entry_count', 'parent_chronology_comment'],
+      stale_state_blocks_progression: ['review_state_fresh', 'next_prompt_allowed', 'g4_allowed', 'finality_allowed']
+    }
+  },
+  'G4-WEB-ASSURANCE-001': {
+    semantics: {
+      technical_function_and_independent_assignment: 'G4 is a technical-review function with an independently resolved provider, canonical model, and reasoning.',
+      fresh_assurance_after_verification: 'Exactly one fresh Temporary Chat follows final exact-head PASS and independent Web verification.',
+      bounded_non_authority: 'The Temporary Chat independently checks evidence, records both execution identities, returns only CLEAR or CONCERN, and has no finality or GitHub authority.'
+    },
+    evidence: {
+      technical_function_and_independent_assignment: ['g4_role', 'g4_provider', 'g4_canonical_model', 'g4_reasoning', 'assignment_source'],
+      fresh_assurance_after_verification: ['g4_verdict', 'final_exact_head', 'web_verified', 'fresh_temporary_chat_count'],
+      bounded_non_authority: ['g4_execution_identity', 'web_execution_identity', 'independent_evidence', 'verdict', 'merge_authority']
+    }
+  },
+  'EXECUTION-ADMISSION-DEFAULT-DENY-001': {
+    semantics: {
+      default_deny: 'Fast and Agent or spawn_agent delegation are denied without an exact current-turn grant.',
+      bound_non_replayable_grant: 'A grant binds run, session, turn, operation, model, reasoning, count, expiry, consumption, and non-inheritance.',
+      prelaunch_fail_closed: 'Supported ordinary spawning requires a trusted PreToolUse hook; missing or unverified coverage falls back to root-only Standard mode and SubagentStart is audit-only.'
+    },
+    evidence: {
+      default_deny: ['allow_fast', 'allow_agents', 'grant_present', 'default_decision', 'explicit_current_turn_user_request'],
+      bound_non_replayable_grant: ['issuer', 'explicit_current_turn_user_request', 'run_id', 'session_id', 'turn_id', 'operation', 'provider', 'canonical_model', 'reasoning', 'max_agents', 'expires_at', 'consumed', 'inheritance'],
+      prelaunch_fail_closed: ['hook_installed', 'hook_event', 'hook_identity', 'hook_bytes', 'hook_version', 'hook_trust', 'runtime_coverage', 'subagent_start_audit_only']
+    }
+  }
+};
+
+function invariantRegistry() {
+  const protocol = fs.readFileSync(path.join(mainRoot, 'protocol.md'), 'utf8');
+  const match = protocol.match(/## Cumulative semantic invariant registry[\s\S]*?```json\r?\n([\s\S]*?)\r?\n```/);
+  assert.ok(match, 'cumulative invariant JSON registry is required');
+  return JSON.parse(match[1]);
+}
+
+function invariantDecision(record, expected) {
+  if (!record || invariantRequiredFields.some((field) => !Object.hasOwn(record, field))) return 'INVARIANT_REGRESSION';
+  if (typeof record.invariant_id !== 'string' || typeof record.source_authority !== 'string' ||
+      typeof record.negative_test !== 'string' || typeof record.authorising_design_lock !== 'string' ||
+      !['preserved', 'amended', 'removed'].includes(record.status) ||
+      !Array.isArray(record.required_semantics) || !Array.isArray(record.candidate_evidence)) {
+    return 'INVARIANT_REGRESSION';
+  }
+  if (record.status !== 'preserved') {
+    const change = record.design_lock_change;
+    if (!change || change.invariant_id !== record.invariant_id ||
+        typeof change.replacement_or_disposal !== 'string' || !change.replacement_or_disposal ||
+        typeof change.rationale !== 'string' || !change.rationale) return 'INVARIANT_REGRESSION';
+  }
+  if (!expected) return 'INVARIANT_REGRESSION';
+  const semantics = new Map(record.required_semantics.map((entry) => [entry && entry.semantic_id, entry]));
+  const evidence = new Map(record.candidate_evidence.map((entry) => [entry && entry.semantic_id, entry]));
+  for (const [semanticId, requirement] of Object.entries(expected.semantics)) {
+    const semantic = semantics.get(semanticId);
+    const candidate = evidence.get(semanticId);
+    if (!semantic || semantic.requirement !== requirement || !candidate ||
+        !Array.isArray(candidate.evidence_fields) ||
+        JSON.stringify(candidate.evidence_fields) !== JSON.stringify(expected.evidence[semanticId])) {
+      return 'INVARIANT_REGRESSION';
+    }
+  }
+  if (semantics.size !== Object.keys(expected.semantics).length || evidence.size !== Object.keys(expected.evidence).length) {
+    return 'INVARIANT_REGRESSION';
+  }
+  return 'PRESERVED';
+}
+
+test('A6-C4 registry is machine-checkable and contains the complete seeded invariant bundles', () => {
+  assertA6Terms([
+    'cumulative invariant',
+    'INVARIANT_REGRESSION',
+    'regression_of',
+    'mechanical budget/format',
+    'semantic-invariant preservation',
+    'child body, PR body, exactly one parent entry, and one new parent chronology comment'
+  ]);
+  const registry = invariantRegistry();
+  assert.equal(registry.schema, 'cumulative-invariant/v1');
+  const records = new Map(registry.invariants.map((record) => [record.invariant_id, record]));
+  for (const [id, expected] of Object.entries(expectedInvariantBundles)) {
+    assert.ok(records.has(id), id + ' must be seeded');
+    assert.equal(invariantDecision(records.get(id), expected), 'PRESERVED', id);
+  }
+});
+
+test('A6-C4 partial and keyword-only invariant candidates fail with INVARIANT_REGRESSION', () => {
+  const record = invariantRegistry().invariants.find((entry) => entry.invariant_id === 'CONCURRENCY-GOV-WRITE-001');
+  const expected = expectedInvariantBundles[record.invariant_id];
+  const partial = JSON.parse(JSON.stringify(record));
+  partial.candidate_evidence = partial.candidate_evidence.filter((entry) => entry.semantic_id !== 'write_and_reread');
+  assert.equal(invariantDecision(partial, expected), 'INVARIANT_REGRESSION');
+  const keywordOnly = JSON.parse(JSON.stringify(record));
+  keywordOnly.required_semantics[1] = { semantic_id: 'compare_and_preserve', requirement: 'preserve' };
+  keywordOnly.candidate_evidence[1] = { semantic_id: 'compare_and_preserve', evidence_fields: ['preserve'] };
+  assert.equal(invariantDecision(keywordOnly, expected), 'INVARIANT_REGRESSION');
+});
+
+test('A6-C4 amendment and removal require a named Design Lock change and regression_of survives history', () => {
+  const record = invariantRegistry().invariants.find((entry) => entry.invariant_id === 'AUTH-LEDGER-RECEIPT-001');
+  const expected = expectedInvariantBundles[record.invariant_id];
+  const amended = JSON.parse(JSON.stringify(record));
+  amended.status = 'amended';
+  assert.equal(invariantDecision(amended, expected), 'INVARIANT_REGRESSION');
+  amended.design_lock_change = {
+    invariant_id: amended.invariant_id,
+    replacement_or_disposal: 'replace only with an equivalent receipt contract',
+    rationale: 'synthetic Design Lock test'
+  };
+  assert.equal(invariantDecision(amended, expected), 'PRESERVED');
+  assert.match('regression_of: ' + record.invariant_id, /regression_of: AUTH-LEDGER-RECEIPT-001/);
+});
+
+const trustedPreToolUseHook = {
+  installed: true,
+  event: 'PreToolUse',
+  matcher: ['Agent', 'spawn_agent'],
+  version: 'prelaunch-agent/v1',
+  bytes: 'sha256:hook-synthetic',
+  trust: 'trusted',
+  runtimeCoverage: ['ordinary-agent-spawn']
+};
+
+function admissionContext(overrides = {}) {
+  return {
+    run_id: 'run-synthetic',
+    session_id: 'session-synthetic',
+    turn_id: 'turn-synthetic',
+    now: 1000,
+    provider: 'provider-synthetic',
+    canonical_model: 'model-synthetic',
+    reasoning: 'reasoning-synthetic',
+    ...overrides
+  };
+}
+
+function structuredGrant(overrides = {}) {
+  return {
+    rawEvidence: true,
+    issuer: 'web-orchestrator',
+    explicit_current_turn_user_request: true,
+    run_id: 'run-synthetic',
+    session_id: 'session-synthetic',
+    turn_id: 'turn-synthetic',
+    operation: 'spawn_agent',
+    allow_fast: false,
+    allow_agents: true,
+    max_agents: 1,
+    provider: 'provider-synthetic',
+    canonical_model: 'model-synthetic',
+    reasoning: 'reasoning-synthetic',
+    expires_at: 1100,
+    consumed: false,
+    inheritance: false,
+    ...overrides
+  };
+}
+
+function normaliseAdmissionOperation(operation) {
+  return operation === 'Agent' || operation === 'spawn_agent' ? 'spawn_agent' : operation;
+}
+
+function grantMatches(request, context, grant) {
+  if (!grant || grant.rawEvidence !== true || grant.issuer !== 'web-orchestrator' ||
+      grant.explicit_current_turn_user_request !== true || grant.consumed !== false || grant.inheritance !== false ||
+      request.inherited === true || grant.run_id !== context.run_id || grant.session_id !== context.session_id ||
+      grant.turn_id !== context.turn_id || grant.operation !== normaliseAdmissionOperation(request.operation) ||
+      grant.provider !== context.provider || grant.canonical_model !== context.canonical_model ||
+      grant.reasoning !== context.reasoning || typeof grant.expires_at !== 'number' ||
+      grant.expires_at <= context.now) return false;
+  const operation = normaliseAdmissionOperation(request.operation);
+  if (operation === 'fast' && grant.allow_fast !== true) return false;
+  if (operation === 'spawn_agent' && (grant.allow_agents !== true ||
+      !Number.isInteger(request.requestedAgentCount) || request.requestedAgentCount < 1 ||
+      request.requestedAgentCount > grant.max_agents)) return false;
+  return true;
+}
+
+function hookIsTrusted(hook) {
+  return hook && hook.installed === true && hook.event === trustedPreToolUseHook.event &&
+    Array.isArray(hook.matcher) && trustedPreToolUseHook.matcher.every((value) => hook.matcher.includes(value)) &&
+    hook.version === trustedPreToolUseHook.version && hook.bytes === trustedPreToolUseHook.bytes &&
+    hook.trust === trustedPreToolUseHook.trust && Array.isArray(hook.runtimeCoverage) &&
+    hook.runtimeCoverage.includes('ordinary-agent-spawn');
+}
+
+function admissionDecision(request, context, grant, hook) {
+  if (request.event === 'SubagentStart') {
+    return { allowed: false, prevented: false, auditOnly: true, mode: 'AUDIT_ONLY', reason: 'AUDIT_ONLY' };
+  }
+  if (request.path === 'specialised' || request.bypass === true) {
+    return { allowed: false, prevented: true, mode: 'ROOT_ONLY_STANDARD', reason: 'UNSUPPORTED_DELEGATION' };
+  }
+  const operation = normaliseAdmissionOperation(request.operation);
+  const denied = (reason = 'ADMISSION_DENIED') => ({
+    allowed: false,
+    prevented: true,
+    mode: 'ROOT_ONLY_STANDARD',
+    reason
+  });
+  if (!grantMatches(request, context, grant)) return denied();
+  if (operation === 'spawn_agent' && !hookIsTrusted(hook)) return denied('ROOT_ONLY_STANDARD');
+  if (operation !== 'fast' && operation !== 'spawn_agent') return denied('UNSUPPORTED_DELEGATION');
+  return {
+    allowed: true,
+    prevented: false,
+    mode: operation === 'fast' ? 'FAST' : 'AGENT',
+    reason: 'ADMITTED',
+    grant: { ...grant, consumed: true }
+  };
+}
+
+test('A6-C5 no grant denies Fast and Agent spawning', () => {
+  const context = admissionContext();
+  assert.equal(admissionDecision({ operation: 'fast' }, context, null, null).reason, 'ADMISSION_DENIED');
+  assert.equal(admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1 }, context, null, trustedPreToolUseHook).reason, 'ADMISSION_DENIED');
+});
+
+test('A6-C5 prompt omission and generic speed wording do not grant admission', () => {
+  const context = admissionContext();
+  const request = { operation: 'fast', promptText: 'please be fast and use agents' };
+  assert.equal(admissionDecision(request, context, null, null).reason, 'ADMISSION_DENIED');
+  assert.equal(admissionDecision({ operation: 'fast' }, context,
+    structuredGrant({ operation: 'fast', allow_fast: true, explicit_current_turn_user_request: false }), null).reason, 'ADMISSION_DENIED');
+  assertA6Terms(['Silence, prompt omission, generic speed wording', 'does not interpret natural-language speed phrases']);
+});
+
+test('A6-C5 stale grants are denied', () => {
+  const context = admissionContext();
+  assert.equal(admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1 }, context,
+    structuredGrant({ expires_at: 1000 }), trustedPreToolUseHook).reason, 'ADMISSION_DENIED');
+});
+
+test('A6-C5 exact current-turn grant allows only its bound operation', () => {
+  const context = admissionContext();
+  const grant = structuredGrant();
+  assert.equal(admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1 }, context, grant, trustedPreToolUseHook).allowed, true);
+  assert.equal(admissionDecision({ operation: 'fast' }, context, grant, trustedPreToolUseHook).reason, 'ADMISSION_DENIED');
+});
+
+test('A6-C5 wrong run and session bindings are denied', () => {
+  const grant = structuredGrant();
+  assert.equal(admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1 }, admissionContext({ run_id: 'other-run' }), grant, trustedPreToolUseHook).reason, 'ADMISSION_DENIED');
+  assert.equal(admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1 }, admissionContext({ session_id: 'other-session' }), grant, trustedPreToolUseHook).reason, 'ADMISSION_DENIED');
+});
+
+test('A6-C5 wrong provider, model, and reasoning bindings are denied', () => {
+  const grant = structuredGrant();
+  assert.equal(admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1 }, admissionContext({ provider: 'other-provider' }), grant, trustedPreToolUseHook).reason, 'ADMISSION_DENIED');
+  assert.equal(admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1 }, admissionContext({ canonical_model: 'other-model' }), grant, trustedPreToolUseHook).reason, 'ADMISSION_DENIED');
+  assert.equal(admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1 }, admissionContext({ reasoning: 'other-reasoning' }), grant, trustedPreToolUseHook).reason, 'ADMISSION_DENIED');
+});
+
+test('A6-C5 excess agent count is denied', () => {
+  const context = admissionContext();
+  assert.equal(admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 2 }, context, structuredGrant({ max_agents: 1 }), trustedPreToolUseHook).reason, 'ADMISSION_DENIED');
+});
+
+test('A6-C5 inherited grants are denied', () => {
+  const context = admissionContext();
+  assert.equal(admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1, inherited: true }, context, structuredGrant(), trustedPreToolUseHook).reason, 'ADMISSION_DENIED');
+  assert.equal(admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1 }, context, structuredGrant({ inheritance: true }), trustedPreToolUseHook).reason, 'ADMISSION_DENIED');
+});
+
+test('A6-C5 consumed grants cannot be replayed', () => {
+  const context = admissionContext();
+  const first = admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1 }, context, structuredGrant(), trustedPreToolUseHook);
+  assert.equal(first.allowed, true);
+  assert.equal(admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1 }, context, first.grant, trustedPreToolUseHook).reason, 'ADMISSION_DENIED');
+});
+
+test('A6-C5 explicitly authorised Fast is not blocked', () => {
+  const context = admissionContext();
+  const grant = structuredGrant({ operation: 'fast', allow_fast: true, allow_agents: false });
+  const result = admissionDecision({ operation: 'fast' }, context, grant, null);
+  assert.equal(result.allowed, true);
+  assert.equal(result.mode, 'FAST');
+});
+
+test('A6-C5 SubagentStart is audit-only and cannot satisfy pre-launch prevention', () => {
+  const context = admissionContext();
+  const grant = structuredGrant();
+  const result = admissionDecision({ event: 'SubagentStart', operation: 'spawn_agent', requestedAgentCount: 1 }, context, grant, trustedPreToolUseHook);
+  assert.deepEqual(result, { allowed: false, prevented: false, auditOnly: true, mode: 'AUDIT_ONLY', reason: 'AUDIT_ONLY' });
+});
+
+test('A6-C5 missing or untrusted PreToolUse hook falls back to root-only Standard', () => {
+  const context = admissionContext();
+  const grant = structuredGrant();
+  assert.deepEqual(admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1 }, context, grant, null), {
+    allowed: false,
+    prevented: true,
+    mode: 'ROOT_ONLY_STANDARD',
+    reason: 'ROOT_ONLY_STANDARD'
+  });
+  assert.equal(admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1 }, context, grant,
+    { ...trustedPreToolUseHook, trust: 'untrusted' }).mode, 'ROOT_ONLY_STANDARD');
+  assert.equal(admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1 }, context, grant,
+    { ...trustedPreToolUseHook, installed: false }).mode, 'ROOT_ONLY_STANDARD');
+});
+
+test('A6-C5 specialised or bypass launch paths cannot silently bypass admission', () => {
+  const context = admissionContext();
+  const result = admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1, path: 'specialised' }, context, structuredGrant(), trustedPreToolUseHook);
+  assert.equal(result.allowed, false);
+  assert.equal(result.reason, 'UNSUPPORTED_DELEGATION');
+  assert.equal(result.mode, 'ROOT_ONLY_STANDARD');
+});
+
+test('A6-C5 source contract keeps hook installation host-specific and source-only', () => {
+  assertA6Terms([
+    'trusted pre-launch `PreToolUse` hook',
+    '`SubagentStart` is audit-only',
+    'root-only Standard',
+    'does not install, activate, or claim that a native host hook is operational'
+  ]);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(projectRoot, 'toolkit.project.json'), 'utf8')).surface.publish_as, 'source_only');
 });

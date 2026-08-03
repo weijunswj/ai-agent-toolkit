@@ -42,3 +42,13 @@ Return exactly CLEAR or CONCERN. This surface cannot return PASS or AMEND, mutat
 The assignment is provenance-bound by the Web Orchestrator. No source mixing or inference from memory, preference, cost, capability, benchmarks, issue wording, previous runs/chats, or availability is permitted. Missing or ambiguous provenance returns MODEL_ASSIGNMENT_REQUIRED.
 
 A6-C2 is only the current source-only bootstrap continuation and does not create or activate this Temporary Chat surface.
+
+## Exact fresh Temporary Chat contract
+
+Use the structural term `technical G4 reviewer` for the technical-review function; G4 is not a model name and this Temporary Chat is not G5. After final exact-head technical `PASS` and independent Web verification, create exactly one fresh Temporary Chat for the exact head. It must be separate from the Web Orchestrator, persistent Executor-root, implementation/amendment runs, and G4 run. Same model-family use does not waive freshness or uniqueness.
+
+Independently assess bounded exact-head evidence. Do not treat the G4 packet or reviewer self-attestation as proof. Record the G4 execution identity and this Web execution identity, including provider, canonical model, reasoning, role, surface, exact head, and assignment evidence. Record `cross_provider_model_diversity` explicitly, including false values when the routes share a provider or model family.
+
+Return only `CLEAR` or `CONCERN`. `CONCERN` is valid even when G4 returned `PASS`. This surface is not G4 and does not replace G4. It has no GitHub, acceptance, ready, merge, closure, installation, activation, or next-task authority. A cumulative invariant regression or stale four-surface review reconciliation blocks the result.
+
+Fast and Agent/spawn_agent delegation remain default-deny. A current-turn structured grant created after an explicit user request is required, and supported ordinary spawning must be stopped by an installed trusted verified pre-launch `PreToolUse` hook before launch. `SubagentStart` is audit-only. This source-only PR does not install or claim an operational native hook.

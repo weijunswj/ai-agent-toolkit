@@ -57,3 +57,45 @@ Ordinary review findings and a provably terminated non-mutating worker remain in
 | An unselected alternative model is introduced | MODEL_ASSIGNMENT_REQUIRED | No | Web |
 
 The A6-C2 continuation is a narrow source-only bootstrap implementation exception. It does not satisfy adoption, does not activate a surface, and must never be used to bypass the post-adoption fresh-run rule.
+
+## A6-C3 assurance failures
+
+| Condition | Required result | Continue? | Repair owner |
+| --- | --- | --- | --- |
+| G4 is named or routed as a structural model instead of the technical-review function | MODEL_ASSIGNMENT_REQUIRED | No | Web |
+| G4 provider, canonical model, or reasoning is inferred from or inherited from the Web controller | MODEL_ASSIGNMENT_REQUIRED | No | Web |
+| Final exact-head technical PASS lacks independent Web verification | WEB_VERIFICATION_REQUIRED | No | Web |
+| Final exact-head PASS has no Temporary Chat or has more than one exact-head Temporary Chat | TEMPORARY_ASSURANCE_REQUIRED | No | Web |
+| Temporary Chat shares an implementation, Executor-root, Web Orchestrator, or G4 context | SURFACE_TOPOLOGY_INVALID | No | Web |
+| Temporary Chat treats a G4 packet or self-attestation as proof, or omits an execution identity | ASSURANCE_EVIDENCE_INDEPENDENCE_REQUIRED | No | Web |
+| Temporary Chat returns a result other than CLEAR or CONCERN, or attempts finality authority | ASSURANCE_ORDER_INVALID | No | Web |
+| G4 PASS is treated as CLEAR without the independent Temporary Chat result | ASSURANCE_ORDER_INVALID | No | Web |
+
+## A6-C4 invariant failures
+
+| Condition | Required result | Continue? | Repair owner |
+| --- | --- | --- | --- |
+| Invariant record omits an ID, source authority, complete semantics, candidate evidence, negative test, status, or Design Lock | INVARIANT_REGRESSION | No | Web |
+| Candidate evidence is only a keyword, partial bundle, or weakened semantic substitute | INVARIANT_REGRESSION | No | Web |
+| An amendment or compression removes or weakens an invariant without a Design Lock naming the ID, replacement/disposal, and rationale | INVARIANT_REGRESSION | No | Web |
+| An accepted review finding is dropped because its thread was resolved, out-dated, or superseded | INVARIANT_REGRESSION | No | Web |
+| A repeated semantic finding lacks `regression_of` with the original invariant ID | INVARIANT_REGRESSION | No | Web |
+| Mechanical compression passes but semantic invariant preservation fails | INVARIANT_REGRESSION | No | Web |
+| Exact-head external-review completion is not reconciled across child, PR, one parent entry, and one new chronology comment | PARENT_RECONCILIATION_INCOMPLETE | No | Web |
+| Review state is stale at the next prompt, G4, or finality boundary | REVIEW_STATE_STALE | No | Web |
+
+## A6-C5 execution-admission failures
+
+| Condition | Required result | Continue? | Repair owner |
+| --- | --- | --- | --- |
+| Fast or Agent/spawn_agent is requested without an exact current-turn grant | ADMISSION_DENIED | No | Web |
+| Grant is absent because the prompt omitted an allowance, or only generic speed wording exists | ADMISSION_DENIED | No | Web |
+| Grant run, session, turn, operation, provider, canonical model, reasoning, or count does not match | ADMISSION_DENIED | No | Web |
+| Grant is stale, consumed, replayed, inherited, or has invalid expiry or consumption state | ADMISSION_DENIED | No | Web |
+| Explicit Fast grant is valid but the operation is not bound to Fast | ADMISSION_DENIED | No | Web |
+| Supported ordinary Agent/spawn_agent launch lacks a trusted pre-launch PreToolUse hook | ROOT_ONLY_STANDARD | No | Web |
+| Hook is missing, stale, malformed, untrusted, or lacks verified runtime coverage | ROOT_ONLY_STANDARD | No | Web |
+| SubagentStart is presented as prevention evidence | ROOT_ONLY_STANDARD | No | Web |
+| Specialised or bypass launch path is not explicitly supported and admitted | UNSUPPORTED_DELEGATION | No | Web |
+
+The source-only contract does not claim that a native hook is installed or operational. Host-specific installation and adapter wiring are separate authority and validation surfaces.

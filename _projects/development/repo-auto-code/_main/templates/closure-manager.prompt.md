@@ -50,3 +50,23 @@ The Executor-root consumes one complete assignment resolved by the Web Orchestra
 Every subordinate run starts fresh with its own independently clean exact-authority worktree or equivalent isolated checkout and a newly resolved assignment. The Executor-root cannot implement merely because it persists, mutate hosted governance, reply to or resolve review threads, accept, mark ready, merge, close, install, activate, select work, or use a retained or dirty workspace after adoption. Invalid topology or freshness returns SURFACE_TOPOLOGY_INVALID.
 
 A6-C2 permits the current source-only G3 implementation to continue in the existing chat and retained worktree solely to create this target contract. That fact is not a persistent Executor-root, does not activate the architecture, and is not a reusable runtime bypass.
+
+## Model-neutral technical G4 routing
+
+Use `technical G4 reviewer` as the structural function name. G4 is not a model name. Resolve the G4 provider, canonical base model, and reasoning independently from the controlling assignment source for that dispatch. Do not inherit the Web controller route, infer a model, or normalise a truthful historical model identity. An explicitly assigned G4 provider or model may differ from the Web controller; neither route, model, role, reasoning, nor surface identity grants authority.
+
+After every final exact-head technical `PASS`, require independent Web verification and exactly one fresh Web Temporary Chat for that exact head. The Temporary Chat must be separate from this manager, the Executor-root, implementation/amendment runs, and G4. It independently checks bounded exact-head evidence, records the G4 execution identity and its own Web execution identity, records provider/model diversity when present, and remains mandatory when both use the same model family. It does not accept the G4 packet or self-attestation as proof. G4 `PASS` is necessary but insufficient for `CLEAR`.
+
+The Temporary Chat returns only `CLEAR` or `CONCERN`. It is not G5, does not replace G4, and cannot mutate GitHub, accept, mark ready, merge, close, install, activate, or select work.
+
+## Cumulative invariant gate
+
+Load and validate the cumulative invariant registry before every prompt, G4, finality, or compression transition. Each record must contain `invariant_id`, `source_authority`, complete `required_semantics`, `candidate_evidence`, `negative_test`, `status`, and `authorising_design_lock`. Missing, partial, weakened, keyword-only, or stale evidence returns `INVARIANT_REGRESSION`. Accepted review findings remain permanent obligations after thread resolution, outdating, or supersession; repeated findings record `regression_of`. Mechanical budget/format and semantic preservation are independent compression gates.
+
+Exact-head external-review completion is material only after reconciling the child body, PR body, exactly one parent entry, and one new parent chronology comment. Stale review state blocks the next prompt, technical G4, and finality.
+
+## Default-deny execution admission
+
+Do not grant Fast or `Agent`/`spawn_agent` delegation from silence, omission, generic speed wording, a prior turn, or standing permission. Without a structured current-turn grant, return root-only Standard execution. The Web Orchestrator creates a grant only after an explicit current-turn user request. A valid grant binds issuer, explicit user-request proof, `run_id`, `session_id`, `turn_id`, operation, `allow_fast`, `allow_agents`, maximum agent count, provider, canonical model, reasoning, expiry, consumption, and `inheritance: false`; it is short-lived, non-inheritable, non-replayable, and consumed once by the bound operation.
+
+The hook must not interpret natural-language speed phrases. For supported ordinary agent spawning, require an installed trusted pre-launch `PreToolUse` hook whose event, matcher, version, exact bytes, trust, and runtime coverage are verified before launch. `SubagentStart` is audit-only. Missing, stale, malformed, untrusted, or unsupported coverage returns root-only Standard; specialised or bypass paths are denied or explicitly unsupported. This source-only contract does not install or claim an operational native hook.
