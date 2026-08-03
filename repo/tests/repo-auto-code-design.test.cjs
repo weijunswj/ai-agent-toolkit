@@ -15,6 +15,113 @@ const fixturePrefix = '_projects/development/repo-auto-code/_main/fixtures';
 const mergeCommit = '5556923fade39ad29afd2da8fcd0784fb6c1709f';
 const mergeTree = '23cf3c44ca858013195c7894be6ccc804c18a224';
 const sourceLockBlob = '6d79d0c7fd12f2212ae7925befc8955398a3bde8';
+const designLockChain = [
+  'DL-329-AUTO-CODE-005',
+  'DL-329-AUTO-CODE-005-A1',
+  'DL-329-AUTO-CODE-005-A2',
+  'DL-329-AUTO-CODE-005-A3',
+  'DL-329-AUTO-CODE-005-A4',
+  'DL-329-AUTO-CODE-005-A5',
+  'DL-329-AUTO-CODE-005-A6',
+  'DL-329-AUTO-CODE-005-A6-C2',
+  'DL-329-AUTO-CODE-005-A6-C3',
+  'DL-329-AUTO-CODE-005-A6-C4',
+  'DL-329-AUTO-CODE-005-A6-C5'
+];
+
+// This inventory is trusted evidence from the base tree, not a projection of the candidate checkout.
+const trustedBaseFixtureInventory = Object.freeze({
+  source: 'base-tree-fixture-inventory',
+  commit: mergeCommit,
+  tree: mergeTree,
+  names: Object.freeze([
+    'invalid-active-or-duplicate-scheduler.json',
+    'invalid-ambiguous-scheduler.json',
+    'invalid-baseline-section-order.json',
+    'invalid-body-comment-disagreement.json',
+    'invalid-bullet-checkbox-style.json',
+    'invalid-caller-supplied-lease-fields.json',
+    'invalid-child-duplicate-lifecycle.json',
+    'invalid-child-missing-lifecycle.json',
+    'invalid-competing-category-subqueues.json',
+    'invalid-concurrent-edit-after-write.json',
+    'invalid-concurrent-edit-before-write.json',
+    'invalid-cross-repository-scheduler-receipt.json',
+    'invalid-crossed-handoff-markers.json',
+    'invalid-current-item-active.json',
+    'invalid-disabled-scheduler.json',
+    'invalid-duplicate-canonical-parents.json',
+    'invalid-duplicate-claims.json',
+    'invalid-duplicate-ote-eto-markers.json',
+    'invalid-duplicate-packets.json',
+    'invalid-duplicate-parent-entry.json',
+    'invalid-duplicate-scheduler.json',
+    'invalid-final-audit-bypassed-blocked.json',
+    'invalid-final-audit-not-last.json',
+    'invalid-final-audit-reordered.json',
+    'invalid-final-audit-selected-early.json',
+    'invalid-final-live-prompt.json',
+    'invalid-generic-consent-only.json',
+    'invalid-governance-parent-baseline.json',
+    'invalid-governance-pending-reconciliation.json',
+    'invalid-governance-repository-mismatch.json',
+    'invalid-governance-skill-missing.json',
+    'invalid-governance-skill-unhealthy.json',
+    'invalid-head-mismatch.json',
+    'invalid-incomplete-review-sweep.json',
+    'invalid-incomplete-teardown.json',
+    'invalid-live-prompt-after-completion.json',
+    'invalid-lying-read-back-exact.json',
+    'invalid-lying-surfaces-agree.json',
+    'invalid-malformed-agents-block.json',
+    'invalid-missing-exact-head-evidence.json',
+    'invalid-missing-github-issue-governance.json',
+    'invalid-missing-handoff-marker.json',
+    'invalid-missing-parent-chronology.json',
+    'invalid-missing-parent-entry.json',
+    'invalid-missing-provider-routing.json',
+    'invalid-missing-repo-auto-code.json',
+    'invalid-missing-skill.json',
+    'invalid-missing-valid-open-reviews.json',
+    'invalid-nested-handoff-markers.json',
+    'invalid-next-action-mismatch.json',
+    'invalid-non-atomic-claim.json',
+    'invalid-ordinary-executor-self-setup.json',
+    'invalid-out-of-order-handoff-markers.json',
+    'invalid-parent-child-pr-status-mismatch.json',
+    'invalid-partial-publication.json',
+    'invalid-paused-scheduler.json',
+    'invalid-pending-child-uat-material-obligation.json',
+    'invalid-pending-user-action.json',
+    'invalid-progression-during-parent-reconciliation.json',
+    'invalid-secret-prompt.json',
+    'invalid-stale-g4.json',
+    'invalid-substantive-execution-during-reconciliation.json',
+    'invalid-surface-disagreement-at-completion.json',
+    'invalid-terminal-item-nonterminal.json',
+    'invalid-unauthorised-final-audit-change.json',
+    'invalid-unauthorised-queue-reorder.json',
+    'invalid-unrelated-parent-content-changed.json',
+    'invalid-unverifiable-missing-scheduler.json',
+    'invalid-valid-mutation-unrelated-drift.json',
+    'invalid-wrong-current-turn.json',
+    'valid-active-to-current.json',
+    'valid-blocked-first-skip.json',
+    'valid-completion-finality.json',
+    'valid-current-to-completed.json',
+    'valid-exact-dual-scheduler-removal.json',
+    'valid-existing-pr-adoption.json',
+    'valid-final-audit-after-terminal-work.json',
+    'valid-first-eligible-pickup.json',
+    'valid-first-run.json',
+    'valid-four-surface-reconciliation.json',
+    'valid-governance-readiness.json',
+    'valid-owner-authorised-final-audit-change.json',
+    'valid-parallel-prs.json',
+    'valid-processed-prompt.json',
+    'valid-same-pr-fast-forward.json'
+  ].sort())
+});
 
 const addedFixtures = [
   'valid-explicit-closure-lease-activation.json',
@@ -144,7 +251,7 @@ function readJson(name) {
   return fixture;
 }
 
-function classification(fixture) {
+function declaredClassification(fixture) {
   const accepted = typeof fixture.accepted === 'boolean'
     ? fixture.accepted
     : fixture.expected && typeof fixture.expected.accepted === 'boolean'
@@ -160,20 +267,63 @@ function classification(fixture) {
   return accepted;
 }
 
+function classification(fixture) {
+  return deriveDecision(fixture);
+}
+
 function allEqual(values) {
   return values.length > 0 && values.every((value) => value === values[0]);
 }
 
-function deriveDecision(fixture) {
-  if (fixture.evidence) {
-    assert.equal(fixture.evidence.rawEvidence, true, fixture.id + ' must use raw evidence');
-    if (fixture.evidence.valid === false) return false;
-    assert.equal(fixture.evidence.valid, true, fixture.id + ' accepted evidence must be valid');
-    const proof = fixture.evidence.proof || fixture.evidence;
-    assert.ok(proof && typeof proof === 'object', fixture.id + ' needs evidence proof');
+function hasOwnValues(value, keys) {
+  return value && typeof value === 'object' && keys.every((key) => Object.hasOwn(value, key));
+}
 
-    if (fixture.scenario === 'runtime-neutral-route') {
-      for (const key of [
+function nonEmptyString(value) {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function equalSurfaceValues(surfaces, requiredKeys) {
+  if (!surfaces || typeof surfaces !== 'object' || Object.keys(surfaces).sort().join('|') !== requiredKeys.join('|')) {
+    return false;
+  }
+  const values = requiredKeys.map((key) => surfaces[key]);
+  return values.every((value) => value !== undefined && value !== null && value !== '') && allEqual(values.map((value) => JSON.stringify(value)));
+}
+
+function rawEvidenceDecision(fixture) {
+  const evidence = fixture.evidence;
+  if (!evidence || evidence.rawEvidence !== true) return false;
+  const proof = evidence.proof;
+
+  switch (fixture.scenario) {
+    case 'explicit-activation':
+      return proof && proof.grant === 'exact' && nonEmptyString(proof.repository) &&
+        nonEmptyString(proof.scope) && proof.rootClaim === 'one' && proof.webIssued === true;
+    case 'bounded-mutation':
+      return proof && proof.exactAllowlist === true && proof.sourceLockUnchanged === true &&
+        Array.isArray(proof.outputs) && proof.outputs.length === 0 &&
+        Array.isArray(proof.allowedWrites) && proof.allowedWrites.length === 0 && proof.nonForceCommit === true;
+    case 'amendment-g4':
+      return proof && proof.priorHeadInvalidated === true && proof.freshG4 === true &&
+        proof.applicableFindingsPreserved === true && proof.sameRootCauseCount === 1;
+    case 'evaluation-staging':
+      return proof && proof.publicSafe === true && proof.sourceRevisionBound === true &&
+        proof.privateIdentifiers === false && proof.scores === false && proof.ledgerWrite === false;
+    case 'g4-pass-return':
+      return proof && proof.g4Verdict === 'PASS' && proof.authoritativeVerdictCount === 1 &&
+        proof.webAdjudicated === true && proof.mergeAuthorised === false;
+    case 'interrupted-recovery':
+      return proof && proof.priorActivityStopped === true && proof.expiryTransfersOwnership === false &&
+        proof.newExactGrant === true && proof.freshIsolation === true;
+    case 'pilot-containment':
+      return proof && nonEmptyString(proof.namedPilot) && proof.activePilots === 1 &&
+        proof.crossRepositoryFanout === false && proof.secondPilot === false;
+    case 'distinct-grants':
+      return proof && nonEmptyString(proof.designMergeGrant) && nonEmptyString(proof.installationGrant) &&
+        nonEmptyString(proof.closureLeaseGrant) && nonEmptyString(proof.pilotGrant) && proof.nonInterchangeable === true;
+    case 'runtime-neutral-route':
+      return proof && [
         'provider',
         'canonicalBaseModel',
         'reasoningOrEffort',
@@ -183,52 +333,168 @@ function deriveDecision(fixture) {
         'surface',
         'role',
         'exactAuthority'
-      ]) {
-        assert.equal(typeof proof[key], 'string', fixture.id + ' route field ' + key);
-      }
-      assert.equal(proof.fastMode, 'prohibited');
-      assert.equal(proof.substitution, 'prohibited');
+      ].every((key) => nonEmptyString(proof[key])) &&
+        proof.fastMode === 'prohibited' && proof.substitution === 'prohibited' && proof.capabilityProof === true;
+    case 'assurance-clear':
+      return proof && proof.g4Verdict === 'PASS' && proof.webAdjudicated === true &&
+        proof.assuranceVerdict === 'CLEAR' && proof.authoritativeG4Count === 1 &&
+        proof.mergeAuthorisedByAssurance === false;
+    case 'lifecycle-transition': {
+      const transition = evidence.transition;
+      return transition && transition.atomic === true &&
+        ((transition.before === 'ACTIVE' && transition.after === 'CURRENT') ||
+          (transition.before === 'CURRENT' && transition.after === 'COMPLETED')) &&
+        equalSurfaceValues(evidence.surfaces, ['child', 'chronology', 'parentEntry', 'pr']) &&
+        evidence.parentEntryCount === 1 && evidence.chronologyCommentsAdded === 1 &&
+        (transition.after !== 'COMPLETED' || evidence.nextTask === null);
     }
-    if (fixture.scenario === 'assurance-clear') {
-      assert.equal(proof.g4Verdict, 'PASS');
-      assert.equal(proof.webAdjudicated, true);
-      assert.equal(proof.assuranceVerdict, 'CLEAR');
-      assert.equal(proof.authoritativeG4Count, 1);
+    case 'completion-finality':
+    case 'final-audit':
+      return Array.isArray(evidence.lifecycleSections) && evidence.lifecycleSections.length > 0 &&
+        evidence.allSectionsTerminal === true && evidence.precedingWorkTerminal === true &&
+        evidence.materialChildOccurrences === 1 &&
+        (fixture.scenario !== 'completion-finality' || evidence.nextTask === null);
+    case 'four-surface-reconciliation': {
+      const surfaces = evidence.surfaces;
+      if (!surfaces || Object.keys(surfaces).sort().join('|') !== 'child|chronology|parentEntry|pr') return false;
+      const values = Object.values(surfaces);
+      return values.every((surface) => surface && nonEmptyString(surface.revision) && nonEmptyString(surface.body)) &&
+        allEqual(values.map((surface) => JSON.stringify(surface))) && evidence.parentEntryCount === 1 &&
+        evidence.chronologyCommentsAdded === 1 && evidence.unrelatedContentPreserved === true &&
+        evidence.compareAndPreserve === true;
     }
-    return true;
+    case 'governance-readiness': {
+      const surfaces = [evidence.child, evidence.pr, evidence.parentEntry, evidence.chronology];
+      return surfaces.every((surface) => surface && nonEmptyString(surface.authority) && nonEmptyString(surface.status)) &&
+        allEqual(surfaces.map((surface) => surface.authority)) && evidence.readinessDerived === true &&
+        evidence.projectionUsed === false;
+    }
+    default:
+      return false;
   }
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalJson(value[key])]));
+}
+
+function validParentLifecycle(parent) {
+  const expectedSections = ['Queue authority', 'Current execution', 'Active queue', 'Completed or disposed', 'Completion gate', 'Governance ownership', 'Mandatory parent reconciliation'];
+  if (!parent || parent.parentEntryCount !== 1 || !Array.isArray(parent.sectionOrder) ||
+      !Array.isArray(parent.subqueues) || parent.subqueues.length !== 0 ||
+      !parent.linesBySection || !parent.lifecycleEntries || !parent.expectedLifecycle ||
+      !Array.isArray(parent.materialChildren) ||
+      JSON.stringify(parent.sectionOrder) !== JSON.stringify(expectedSections)) return false;
+  if (parent.reorder && (parent.reorder.changed !== false || parent.reorder.authorized !== true)) return false;
+  const lifecycleSections = ['Current execution', 'Active queue', 'Completed or disposed'];
+  const entries = lifecycleSections.flatMap((section) => parent.lifecycleEntries[section] || []);
+  if (entries.length !== parent.materialChildren.length || new Set(entries).size !== entries.length ||
+      new Set(parent.materialChildren).size !== parent.materialChildren.length ||
+      entries.some((entry) => !parent.materialChildren.includes(entry))) return false;
+  for (const child of parent.materialChildren) {
+    const sections = lifecycleSections.filter((section) => (parent.lifecycleEntries[section] || []).includes(child));
+    if (sections.length !== 1 || parent.expectedLifecycle[child] !== sections[0]) return false;
+  }
+  const currentLines = parent.linesBySection['Current execution'] || [];
+  const activeLines = parent.linesBySection['Active queue'] || [];
+  const completedLines = parent.linesBySection['Completed or disposed'] || [];
+  return currentLines.every((line) => /^- (?!\[)/.test(line)) &&
+    activeLines.every((line) => /^- (?!\[)/.test(line)) &&
+    completedLines.every((line) => /^- \[x\] /.test(line));
+}
+
+function validGovernanceReadiness(state) {
+  const repository = state.repository;
+  const capabilities = state.capabilities || {};
+  const skill = state.governanceSkill;
+  const parent = state.canonicalParent;
+  return Boolean(repository && repository.owner === 'weijunswj' && repository.name === 'ai-agent-toolkit' &&
+    repository.immutableId === 'repo-299' && repository.defaultBranch === 'main' &&
+    capabilities.github_issue_governance === 'enabled' && capabilities.repo_auto_code === 'enabled' &&
+    skill && skill.id === '#299' && skill.installed === true && skill.healthy === true && skill.inspectable === true &&
+    parent && parent.count === 1 && parent.structure && Array.isArray(parent.structure.materialChildren) &&
+    parent.structure.materialChildren.length > 0 &&
+    validParentLifecycle(parent.structure));
+}
+
+function validFinalAuditState(state) {
+  const queue = state.parent && state.parent.activeQueue;
+  if (!Array.isArray(queue) || state.selectedChild === undefined || state.moved !== false ||
+      state.reordered !== false || state.bypassedBlocked !== false || queue.length === 0) return false;
+  const finalIndexes = queue.map((entry, index) => entry.finalAudit === true ? index : -1).filter((index) => index >= 0);
+  if (finalIndexes.length !== 1 || finalIndexes[0] !== queue.length - 1 || state.selectedChild !== queue[finalIndexes[0]].child) return false;
+  return queue.slice(0, finalIndexes[0]).every((entry) => entry.terminal === true) &&
+    queue[finalIndexes[0]].terminal === false;
+}
+
+function validReconciliationState(reconciliation) {
+  if (!reconciliation || reconciliation.materialTransition !== true) return false;
+  const surfaces = reconciliation.surfaces;
+  const surfaceKeys = ['child', 'chronology', 'parentEntry', 'pr'];
+  if (!surfaces || Object.keys(surfaces).sort().join('|') !== surfaceKeys.join('|') ||
+      Object.values(surfaces).some((surface) => !surface || Object.keys(surface).length === 0)) return false;
+  const surfaceValues = Object.values(surfaces).map((surface) => JSON.stringify(canonicalJson(surface)));
+  const binding = reconciliation.binding;
+  const preservation = reconciliation.preservation;
+  if (!binding || !preservation || !allEqual(surfaceValues) ||
+      binding.parentEntryCount !== 1 || binding.chronologyCommentsAdded !== 1 ||
+      binding.boundRevision !== binding.revisionBeforeWrite ||
+      binding.revisionBeforeWrite !== binding.revisionAfterWrite ||
+      binding.revisionAfterWrite !== binding.readBackRevision ||
+      binding.rowPositionBefore !== binding.rowPositionAfter ||
+      binding.afterBodyDigest !== binding.readBackBodyDigest ||
+      binding.partialWrite !== false || binding.concurrentBeforeWrite !== false || binding.concurrentAfterWrite !== false) return false;
+  return JSON.stringify(canonicalJson(preservation.before)) === JSON.stringify(canonicalJson(preservation.after));
+}
+
+function validCompletionState(state) {
+  const reviewSweep = state.reviewSweep;
+  const checks = state.checks;
+  const exactHead = state.exactHead;
+  const obligations = state.obligations;
+  const prompt = state.prompt;
+  return reviewSweep && reviewSweep.complete === true && Number.isInteger(reviewSweep.validOpenReviews) && reviewSweep.validOpenReviews === 0 &&
+    Array.isArray(checks) && checks.length > 0 && checks.every((check) => check.required === true && check.completed === true && check.conclusion === 'PASS') &&
+    state.protocolEvidence && state.protocolEvidence.independent === true && state.protocolEvidence.ledgerOnly === false &&
+    exactHead && exactHead.reviewedHead === exactHead.currentHead && exactHead.readBack === true &&
+    state.controllerGate === 'CONTROLLER_ACCEPTED' && prompt && prompt.live === false && prompt.processed === true &&
+    state.pendingResult === false && obligations && Object.values(obligations).every((value) => value === false) &&
+    (!state.mergePrerequisites || (state.mergePrerequisites.complete === true && state.mergePrerequisites.baseVerified === true &&
+      state.mergePrerequisites.headVerified === true && state.mergePrerequisites.noConflicts === true)) &&
+    (!state.reconciliation || validReconciliationState(state.reconciliation));
+}
+
+function deriveDecision(fixture) {
+  if (fixture.evidence) return Boolean(rawEvidenceDecision(fixture));
 
   const state = fixture.state || {};
   if (fixture.scenario === 'owner_authorised_final_audit_change') {
-    const queue = Array.isArray(state.parent && state.parent.activeQueue)
-      ? state.parent.activeQueue
-      : [];
-    return state.selectedChild === '#251' &&
-      state.moved === false &&
-      state.reordered === false &&
-      state.bypassedBlocked === false &&
-      state.declarationChange &&
-      state.declarationChange.requested === true &&
-      state.declarationChange.authorized === true &&
-      queue.some((entry) => entry.finalAudit === true && entry.terminal === false);
+    const queue = Array.isArray(state.parent && state.parent.activeQueue) ? state.parent.activeQueue : [];
+    return state.selectedChild === '#251' && state.moved === false && state.reordered === false &&
+      state.bypassedBlocked === false && state.declarationChange && state.declarationChange.requested === true &&
+      state.declarationChange.authorized === true && state.declarationChange.actor === 'owner' &&
+      queue.length === 2 && queue[0].terminal === true && queue[0].finalAudit === false &&
+      queue[1].child === '#251' && queue[1].finalAudit === true && queue[1].terminal === false;
   }
-
-  const reconciliation = state.reconciliation;
-  if (!reconciliation) return false;
-  const binding = reconciliation.binding || {};
-  const surfaces = reconciliation.surfaces || {};
-  const surfaceStatuses = Object.values(surfaces)
-    .map((surface) => surface && (surface.status || surface.bodyDigest || surface.body))
-    .filter((value) => value !== undefined);
-  const preservation = reconciliation.preservation || {};
-  return reconciliation.surfacesAgree === true &&
-    reconciliation.readBackExact === true &&
-    binding.parentEntryCount === 1 &&
-    binding.partialWrite === false &&
-    binding.concurrentBeforeWrite === false &&
-    binding.concurrentAfterWrite === false &&
-    allEqual(surfaceStatuses) &&
-    JSON.stringify(preservation.before || null) === JSON.stringify(preservation.after || null);
+  if (fixture.scenario === 'governance_readiness') return validGovernanceReadiness(state);
+  if (fixture.scenario.startsWith('final_audit_')) return validFinalAuditState(state);
+  if (fixture.scenario === 'secret_prompt') return state.presence === false;
+  if (fixture.scenario === 'completion_finality') return validCompletionState(state);
+  if (fixture.scenario === 'reconciliation' || fixture.scenario.endsWith('_mismatch') ||
+      fixture.scenario.endsWith('_changed') || fixture.scenario === 'wrong_current_turn' ||
+      fixture.scenario === 'lying_read_back_exact' || fixture.scenario === 'lying_surfaces_agree') {
+    return validReconciliationState(state.reconciliation);
+  }
+  if (fixture.scenario.includes('lifecycle') || fixture.scenario === 'baseline_section_order' ||
+      fixture.scenario === 'bullet_checkbox_style' || fixture.scenario === 'competing_category_subqueues' ||
+      fixture.scenario === 'current_item_active' || fixture.scenario === 'duplicate_parent_entry' ||
+      fixture.scenario === 'missing_parent_entry' || fixture.scenario === 'terminal_item_nonterminal' ||
+      fixture.scenario === 'unauthorised_queue_reorder') {
+    return validParentLifecycle(state.parent);
+  }
+  return false;
 }
 
 function findFixtureBaseline() {
@@ -245,17 +511,15 @@ function baselineFixtureNames() {
   if (baseline) {
     assert.equal(baseline, mergeCommit);
     assert.equal(git('rev-parse', baseline + '^{tree}'), mergeTree);
-    return namesAt(baseline);
+    const names = namesAt(baseline);
+    assert.deepEqual(names, trustedBaseFixtureInventory.names);
+    return names;
   }
 
-  // Hosted PR validation intentionally uses a depth-one checkout. In that
-  // mode the explicit A3 add/delete allowlist is the complete baseline
-  // reconciliation evidence; no fixture or authority verdict is inferred.
+  // Hosted PR validation may use a depth-one checkout. The trusted base-tree
+  // inventory remains the baseline; candidate filenames are never its source.
   assert.equal(git('rev-parse', '--is-shallow-repository'), 'true');
-  return currentFixtureNames()
-    .filter((name) => !addedFixtures.includes(name))
-    .concat(deletedFixtures)
-    .sort();
+  return [...trustedBaseFixtureInventory.names];
 }
 
 function activeSourceFiles() {
@@ -300,9 +564,9 @@ test('filesystem discovery reconciles the exact A3 fixture arithmetic', () => {
   const ids = fixtures.map((fixture) => fixture.id);
   assert.equal(new Set(ids).size, ids.length);
   for (const fixture of fixtures) {
-    const expected = classification(fixture);
+    const declared = declaredClassification(fixture);
     const derived = deriveDecision(fixture);
-    assert.equal(derived, expected, fixture.id + ' decision must derive from raw evidence');
+    assert.equal(derived, declared, fixture.id + ' declared classification must match the raw-evidence verdict');
   }
 
   const accepted = fixtures.filter((fixture) => classification(fixture)).length;
@@ -326,6 +590,41 @@ test('filesystem discovery reconciles the exact A3 fixture arithmetic', () => {
     assert.equal(Object.hasOwn(fixture, 'completionVerdict'), false);
     assert.equal(Object.hasOwn(fixture, 'fallback'), false);
   }
+});
+
+test('fixture verdicts ignore authored valid, violation, result, and accepted labels', () => {
+  const accepted = readJson('valid-explicit-closure-lease-activation.json');
+  const rejected = readJson('invalid-closure-lease-not-activated.json');
+  assert.equal(deriveDecision(accepted), true);
+  accepted.accepted = false;
+  accepted.evidence.valid = false;
+  accepted.evidence.violation = 'untrusted-label';
+  accepted.evidence.result = 'REJECTED';
+  assert.equal(deriveDecision(accepted), true);
+
+  assert.equal(deriveDecision(rejected), false);
+  rejected.accepted = true;
+  rejected.evidence.valid = true;
+  rejected.evidence.violation = 'untrusted-label';
+  rejected.evidence.result = 'ACCEPTED';
+  assert.equal(deriveDecision(rejected), false);
+});
+
+test('shallow fixture reconciliation uses trusted base-tree inventory evidence', () => {
+  assert.equal(trustedBaseFixtureInventory.source, 'base-tree-fixture-inventory');
+  assert.equal(trustedBaseFixtureInventory.commit, mergeCommit);
+  assert.equal(trustedBaseFixtureInventory.tree, mergeTree);
+  assert.deepEqual(baselineFixtureNames(), trustedBaseFixtureInventory.names);
+
+  const forgedCandidate = trustedBaseFixtureInventory.names
+    .filter((name) => name !== trustedBaseFixtureInventory.names[0])
+    .concat('unexpected-candidate-only.json')
+    .sort();
+  const baselineSet = new Set(trustedBaseFixtureInventory.names);
+  const added = forgedCandidate.filter((name) => !baselineSet.has(name));
+  const deleted = trustedBaseFixtureInventory.names.filter((name) => !forgedCandidate.includes(name));
+  assert.deepEqual(added, ['unexpected-candidate-only.json']);
+  assert.deepEqual(deleted, [trustedBaseFixtureInventory.names[0]]);
 });
 
 test('source and output declarations stay source-only', () => {
@@ -369,7 +668,12 @@ test('generic role templates require runtime route values and exact failure sema
     'Exact repository: {{repository}}',
     'Exact scope: {{scope}}',
     'Exact authority: {{authority}}',
-    'Fast mode: prohibited',
+    'Assignment source: {{assignment_source}}',
+    'Assignment evidence locator: {{assignment_evidence_locator}}',
+    'Fresh subordinate run ID: {{fresh_subordinate_run_id}}',
+    'Fresh workspace evidence locator: {{fresh_workspace_evidence_locator}}',
+    'Fast mode: {{fast_mode}}',
+    'Delegation: {{delegation_mode}}',
     'Route substitution: prohibited',
     'UNSUPPORTED_DELEGATION'
   ];
@@ -380,6 +684,34 @@ test('generic role templates require runtime route values and exact failure sema
   const candidate = fs.readFileSync(path.join(templateRoot, 'evaluation-candidate.comment.md'), 'utf8');
   assert.ok(candidate.includes('evaluation-candidate:v1'));
   assert.ok(candidate.includes('public_safe_label'));
+});
+
+test('A6 validates every runtime prompt contract, including managed and implementation templates', () => {
+  const required = [
+    'Assignment source: {{assignment_source}}',
+    'Assignment evidence locator: {{assignment_evidence_locator}}',
+    'Fresh subordinate run ID: {{fresh_subordinate_run_id}}',
+    'Fresh workspace evidence locator: {{fresh_workspace_evidence_locator}}',
+    'Fast mode: {{fast_mode}}',
+    'Delegation: {{delegation_mode}}'
+  ];
+  for (const file of a6PromptFiles) {
+    const text = fs.readFileSync(file, 'utf8');
+    for (const fragment of required) assert.ok(text.includes(fragment), path.basename(file) + ' missing ' + fragment);
+  }
+});
+
+test('module README and metadata retain the complete cumulative Design Lock chain', () => {
+  const readme = fs.readFileSync(path.join(projectRoot, 'README.md'), 'utf8');
+  const manifest = JSON.parse(fs.readFileSync(path.join(projectRoot, 'toolkit.project.json'), 'utf8'));
+  let previousIndex = -1;
+  for (const lock of designLockChain) {
+    const index = readme.indexOf(lock);
+    assert.ok(index > previousIndex, 'README Design Lock chain drifted at ' + lock);
+    previousIndex = index;
+  }
+  assert.ok(manifest.version_notes.includes(designLockChain.at(-1)));
+  assert.ok(a6ContractText().includes(designLockChain.at(-1)));
 });
 
 test('architecture contains the role, authority, reconciliation, G4, assurance, and continuation gates', () => {
@@ -456,11 +788,39 @@ function exactReviewIdentity(identity) {
   return ['repository', 'pr', 'head', 'capability'].map((key) => identity[key]).join('|');
 }
 
+function hostedReview(identity, state, overrides = {}) {
+  return {
+    identity: { ...identity },
+    state,
+    rawEvidence: true,
+    hostedEvidence: {
+      source: 'github-hosted-review',
+      reviewType: 'codex-pull-request-review',
+      actor: 'chatgpt-codex-connector',
+      mechanism: 'github-codex-review',
+      supported: true,
+      identity: { ...identity },
+      state,
+      ...overrides
+    }
+  };
+}
+
+function hasAuthoritativeHostedCapability(review) {
+  const hosted = review && review.hostedEvidence;
+  return hosted && hosted.source === 'github-hosted-review' &&
+    hosted.reviewType === 'codex-pull-request-review' &&
+    hosted.actor === 'chatgpt-codex-connector' &&
+    hosted.mechanism === 'github-codex-review' && hosted.supported === true;
+}
+
 function usableReview(review, expectedIdentity) {
-  if (!review || review.rawEvidence !== true) return false;
-  if (!review.identity || typeof review.identity !== 'object') return false;
-  if (review.state !== 'pending' && review.state !== 'completed') return false;
-  return exactReviewIdentity(review.identity) === exactReviewIdentity(expectedIdentity);
+  if (!hasAuthoritativeHostedCapability(review)) return null;
+  const hosted = review.hostedEvidence;
+  if (!hosted.identity || typeof hosted.identity !== 'object') return null;
+  if (hosted.state !== 'pending' && hosted.state !== 'completed') return null;
+  if (exactReviewIdentity(hosted.identity) !== exactReviewIdentity(expectedIdentity)) return null;
+  return { state: hosted.state, identity: hosted.identity };
 }
 
 function externalReviewGate(evidence) {
@@ -470,11 +830,14 @@ function externalReviewGate(evidence) {
   if (evidence.limitExhausted === true) {
     return { decision: 'REVIEW_LIMIT_EXHAUSTED', technicalVerdict: 'BLOCKED', freshG4Required: false };
   }
-  const matching = evidence.reviews.filter((review) => usableReview(review, evidence.identity));
-  if (matching.some((review) => review.state === 'pending')) {
+  const matching = evidence.reviews.map((review) => usableReview(review, evidence.identity)).filter(Boolean);
+  if (matching.length > 1) {
+    return { decision: 'EXTERNAL_REVIEW_AMBIGUOUS', technicalVerdict: 'BLOCKED', freshG4Required: false };
+  }
+  if (matching.length === 1 && matching[0].state === 'pending') {
     return { decision: 'PENDING_REVIEW_REUSED', technicalVerdict: 'WAIT', freshG4Required: false };
   }
-  if (matching.some((review) => review.state === 'completed')) {
+  if (matching.length === 1 && matching[0].state === 'completed') {
     return { decision: 'COMPLETED_REVIEW_CONSUMED', technicalVerdict: 'ADJUDICATE', freshG4Required: false };
   }
   const previousIdentity = evidence.previousIdentity;
@@ -488,11 +851,13 @@ function externalReviewGate(evidence) {
 }
 
 function g4ThreadPermission(evidence) {
+  assert.equal(typeof evidence.phase, 'string');
   assert.equal(typeof evidence.finalExactHead, 'boolean');
   assert.equal(typeof evidence.bounded, 'boolean');
   assert.equal(typeof evidence.evidenceBound, 'boolean');
   if (evidence.action === 'resolve') return false;
   if (evidence.phase === 'AMEND') return false;
+  if (evidence.phase !== 'FINAL') return false;
   return evidence.action === 'reply' &&
     evidence.verdict === 'PASS' &&
     evidence.finalExactHead === true &&
@@ -571,7 +936,7 @@ test('A4 suppresses a duplicate trigger for a pending usable review', () => {
     identity,
     previousIdentity: null,
     limitExhausted: false,
-    reviews: [{ identity, state: 'pending', rawEvidence: true }]
+    reviews: [hostedReview(identity, 'pending')]
   }), { decision: 'PENDING_REVIEW_REUSED', technicalVerdict: 'WAIT', freshG4Required: false });
 });
 
@@ -586,8 +951,51 @@ test('A4 consumes a completed usable review without retriggering', () => {
     identity,
     previousIdentity: null,
     limitExhausted: false,
-    reviews: [{ identity, state: 'completed', rawEvidence: true }]
+    reviews: [hostedReview(identity, 'completed')]
   }), { decision: 'COMPLETED_REVIEW_CONSUMED', technicalVerdict: 'ADJUDICATE', freshG4Required: false });
+});
+
+test('A4 rejects multiple matching pending or completed review states', () => {
+  const identity = {
+    repository: 'opaque/repository',
+    pr: 'pr-opaque',
+    head: 'head-a',
+    capability: 'external-review'
+  };
+  assert.equal(externalReviewGate({
+    identity,
+    limitExhausted: false,
+    reviews: [hostedReview(identity, 'pending'), hostedReview(identity, 'completed')]
+  }).decision, 'EXTERNAL_REVIEW_AMBIGUOUS');
+  assert.equal(externalReviewGate({
+    identity,
+    limitExhausted: false,
+    reviews: [hostedReview(identity, 'completed'), hostedReview(identity, 'completed')]
+  }).decision, 'EXTERNAL_REVIEW_AMBIGUOUS');
+});
+
+test('A4 requires authoritative hosted review capability rather than candidate labels', () => {
+  const identity = {
+    repository: 'opaque/repository',
+    pr: 'pr-opaque',
+    head: 'head-a',
+    capability: 'external-review'
+  };
+  assert.equal(externalReviewGate({
+    identity,
+    limitExhausted: false,
+    reviews: [{ identity, state: 'completed', rawEvidence: true, capability: 'external-review' }]
+  }).decision, 'NEW_REVIEW_REQUIRED');
+  assert.equal(externalReviewGate({
+    identity,
+    limitExhausted: false,
+    reviews: [hostedReview(identity, 'completed', { actor: 'candidate-labelled-reviewer' })]
+  }).decision, 'NEW_REVIEW_REQUIRED');
+  assert.equal(externalReviewGate({
+    identity,
+    limitExhausted: false,
+    reviews: [hostedReview(identity, 'completed')]
+  }).decision, 'COMPLETED_REVIEW_CONSUMED');
 });
 
 test('A4 requires new review and fresh G4 after a changed head', () => {
@@ -602,7 +1010,7 @@ test('A4 requires new review and fresh G4 after a changed head', () => {
     identity,
     previousIdentity,
     limitExhausted: false,
-    reviews: [{ identity: previousIdentity, state: 'completed', rawEvidence: true }]
+    reviews: [hostedReview(previousIdentity, 'completed')]
   }), { decision: 'NEW_REVIEW_REQUIRED', technicalVerdict: 'BLOCKED', freshG4Required: true });
 });
 
@@ -619,8 +1027,8 @@ test('A4 rejects unbound and unusable review evidence', () => {
     previousIdentity: null,
     limitExhausted: false,
     reviews: [
-      { identity: otherIdentity, state: 'completed', rawEvidence: true },
-      { identity, state: 'completed', rawEvidence: false }
+      hostedReview(otherIdentity, 'completed'),
+      { identity, state: 'completed', rawEvidence: true }
     ]
   }), { decision: 'NEW_REVIEW_REQUIRED', technicalVerdict: 'BLOCKED', freshG4Required: false });
 });
@@ -679,6 +1087,18 @@ test('A4 permits only a bounded evidence reply after final technical PASS', () =
   };
   assert.equal(g4ThreadPermission(evidence), true);
   assert.equal(g4ThreadPermission({ ...evidence, bounded: false }), false);
+});
+
+test('A4 rejects a technically complete reply outside the explicit FINAL phase', () => {
+  const evidence = {
+    phase: 'PRE_G4',
+    action: 'reply',
+    verdict: 'PASS',
+    finalExactHead: true,
+    bounded: true,
+    evidenceBound: true
+  };
+  assert.equal(g4ThreadPermission(evidence), false);
 });
 
 test('A4 requires web verification before assurance', () => {
@@ -790,13 +1210,17 @@ const a6ContractFiles = [
   path.join(mainRoot, 'protocol.md'),
   path.join(mainRoot, 'state-machine.md'),
   path.join(mainRoot, 'failure-matrix.md'),
+  path.join(templateRoot, 'AGENTS.auto-code.managed.md'),
   path.join(templateRoot, 'closure-manager.prompt.md'),
+  path.join(templateRoot, 'implementation-worker.prompt.md'),
   path.join(templateRoot, 'final-pre-g4-reviewer.prompt.md'),
   path.join(templateRoot, 'authoritative-g4-reviewer.prompt.md'),
   path.join(templateRoot, 'independent-assurance-audit.prompt.md')
 ];
 const a6PromptFiles = [
+  path.join(templateRoot, 'AGENTS.auto-code.managed.md'),
   path.join(templateRoot, 'closure-manager.prompt.md'),
+  path.join(templateRoot, 'implementation-worker.prompt.md'),
   path.join(templateRoot, 'final-pre-g4-reviewer.prompt.md'),
   path.join(templateRoot, 'authoritative-g4-reviewer.prompt.md'),
   path.join(templateRoot, 'independent-assurance-audit.prompt.md')
@@ -811,10 +1235,11 @@ function assertA6Terms(terms) {
   for (const term of terms) assert.ok(text.includes(term), 'A6 contract missing ' + term);
 }
 
-const assignmentFields = [
+const commonAssignmentFields = [
   'provider',
   'canonicalBaseModel',
   'reasoning',
+  'referenceFamilyReasoningEquivalent',
   'solEquivalentReasoning',
   'harnessAdapter',
   'surface',
@@ -822,13 +1247,22 @@ const assignmentFields = [
   'repository',
   'scope',
   'authority',
+  'evidenceLocator'
+];
+const customInstructionsFields = [
   'instructionsRepository',
   'instructionsFile',
   'instructionsRef',
   'instructionsCommit',
-  'instructionsBlob',
-  'evidenceLocator'
+  'instructionsBlob'
 ];
+const assignmentFields = commonAssignmentFields.concat(customInstructionsFields);
+
+function assignmentValues(value) {
+  return Object.fromEntries(assignmentFields
+    .filter((field) => Object.hasOwn(value, field))
+    .map((field) => [field, value[field]]));
+}
 
 function syntheticAssignment(overrides = {}) {
   return {
@@ -836,6 +1270,7 @@ function syntheticAssignment(overrides = {}) {
     provider: 'provider-synthetic',
     canonicalBaseModel: 'model-synthetic',
     reasoning: 'reasoning-synthetic',
+    referenceFamilyReasoningEquivalent: 'reference-synthetic',
     solEquivalentReasoning: 'sol-equivalent-synthetic',
     harnessAdapter: 'adapter-synthetic',
     surface: 'surface-synthetic',
@@ -843,19 +1278,31 @@ function syntheticAssignment(overrides = {}) {
     repository: 'repo-synthetic',
     scope: 'scope-synthetic',
     authority: 'authority-synthetic',
-    instructionsRepository: 'instructions-repository-synthetic',
-    instructionsFile: 'custom-instructions-synthetic.md',
-    instructionsRef: 'ref-synthetic',
-    instructionsCommit: 'c'.repeat(40),
-    instructionsBlob: 'b'.repeat(40),
     evidenceLocator: 'locator-synthetic',
     ...overrides
   };
 }
 
-function completeAssignment(value) {
-  return value && value.rawEvidence === true &&
-    assignmentFields.every((field) => typeof value[field] === 'string' && value[field].length > 0);
+function syntheticCanonicalAssignment(overrides = {}) {
+  return {
+    ...syntheticAssignment(),
+    instructionsRepository: 'instructions-repository-synthetic',
+    instructionsFile: 'custom-instructions-synthetic.md',
+    instructionsRef: 'ref-synthetic',
+    instructionsCommit: 'c'.repeat(40),
+    instructionsBlob: 'b'.repeat(40),
+    ...overrides
+  };
+}
+
+function completeAssignment(value, source) {
+  const required = source === 'canonical-custom-instructions'
+    ? assignmentFields
+    : commonAssignmentFields;
+  const hasMixedCustomInstructions = source === 'current-chat' &&
+    customInstructionsFields.some((field) => Object.hasOwn(value || {}, field));
+  return value && value.rawEvidence === true && !hasMixedCustomInstructions &&
+    required.every((field) => typeof value[field] === 'string' && value[field].length > 0);
 }
 
 function resolvedAssignment(source, value) {
@@ -863,7 +1310,7 @@ function resolvedAssignment(source, value) {
     decision: 'RESOLVED',
     source,
     evidenceLocator: value.evidenceLocator,
-    values: Object.fromEntries(assignmentFields.map((field) => [field, value[field]]))
+    values: assignmentValues(value)
   };
 }
 
@@ -876,13 +1323,13 @@ function resolveA6Assignment(evidence) {
   if (hasCurrent) {
     const current = evidence.currentChat;
     if (current.ambiguous === true || current.conflicting === true ||
-        current.unselectedAlternative !== undefined || !completeAssignment(current)) {
+        current.unselectedAlternative !== undefined || !completeAssignment(current, 'current-chat')) {
       return { decision: 'MODEL_ASSIGNMENT_REQUIRED' };
     }
     return resolvedAssignment('current-chat', current);
   }
   const canonical = evidence.canonicalInstructions;
-  if (!completeAssignment(canonical) || canonical.ambiguous === true || canonical.conflicting === true ||
+  if (!completeAssignment(canonical, 'canonical-custom-instructions') || canonical.ambiguous === true || canonical.conflicting === true ||
       canonical.unselectedAlternative !== undefined) {
     return { decision: 'MODEL_ASSIGNMENT_REQUIRED' };
   }
@@ -911,11 +1358,22 @@ function activeA6Topology(overrides = {}) {
 function topologyDecision(evidence) {
   assert.equal(evidence.rawEvidence, true);
   const grants = evidence.grants || {};
+  const surfaces = Array.isArray(evidence.surfaces) ? evidence.surfaces : [];
+  const temporary = evidence.temporaryChat;
   const active = grants.sourceAccepted === true && grants.designMerged === true &&
     grants.installed === true && grants.explicitActivation === true;
-  if (!active) return { decision: 'SOURCE_ONLY_INACTIVE', dispatch: false };
+  if (!active) {
+    if (surfaces.length > 0 || (temporary !== null && temporary !== undefined)) {
+      return { decision: 'SURFACE_TOPOLOGY_INVALID', dispatch: false };
+    }
+    return { decision: 'SOURCE_ONLY_INACTIVE', dispatch: false };
+  }
 
-  const surfaces = Array.isArray(evidence.surfaces) ? evidence.surfaces : [];
+  const admittedPersistentTypes = new Set(['web-orchestrator', 'executor-root']);
+  if (surfaces.length !== 2 || surfaces.some((surface) => !surface || surface.persistent !== true ||
+      !admittedPersistentTypes.has(surface.type))) {
+    return { decision: 'SURFACE_TOPOLOGY_INVALID', dispatch: false };
+  }
   const orchestrators = surfaces.filter((surface) => surface.type === 'web-orchestrator');
   const roots = surfaces.filter((surface) => surface.type === 'executor-root');
   if (orchestrators.length !== 1 || roots.length !== 1) {
@@ -931,13 +1389,13 @@ function topologyDecision(evidence) {
   }
 
   const runs = Array.isArray(evidence.subordinateRuns) ? evidence.subordinateRuns : [];
+  const admittedRunKinds = new Set(['implementation', 'amendment', 'pre-g4', 'technical-g4']);
   if (runs.some((run) => run.rawEvidence !== true || run.promptBounded !== true ||
       run.fresh !== true || run.clean !== true || run.exactAuthority !== true ||
-      run.inheritedAuthority !== false || run.retained !== false)) {
+      run.inheritedAuthority !== false || run.retained !== false || !admittedRunKinds.has(run.kind))) {
     return { decision: 'SURFACE_TOPOLOGY_INVALID', dispatch: false };
   }
 
-  const temporary = evidence.temporaryChat;
   if (temporary !== null && temporary !== undefined) {
     if (temporary.rawEvidence !== true || temporary.fresh !== true || temporary.readOnly !== true ||
         temporary.finalTechnicalVerdict !== 'PASS' || temporary.webVerified !== true ||
@@ -988,6 +1446,22 @@ test('A6 rejects duplicate surface identities', () => {
   assert.equal(topologyDecision(evidence).decision, 'SURFACE_TOPOLOGY_INVALID');
 });
 
+test('A6 rejects unknown or extra persistent surface types and enforces the active count', () => {
+  const base = activeA6Topology();
+  assert.equal(topologyDecision({
+    ...base,
+    surfaces: [...base.surfaces, {
+      type: 'unknown-controller', task: 'task-synthetic', repository: 'repo-synthetic', pr: 'pr-synthetic', persistent: true
+    }]
+  }).decision, 'SURFACE_TOPOLOGY_INVALID');
+  assert.equal(topologyDecision({
+    ...base,
+    surfaces: base.surfaces.map((surface) => surface.type === 'executor-root'
+      ? { ...surface, type: 'unknown-executor' }
+      : surface)
+  }).decision, 'SURFACE_TOPOLOGY_INVALID');
+});
+
 test('A6 rejects cross-task or cross-repository surfaces', () => {
   const evidence = activeA6Topology({
     surfaces: [
@@ -1001,7 +1475,7 @@ test('A6 rejects cross-task or cross-repository surfaces', () => {
 test('A6 requires fresh clean exact-authority subordinate workspaces after activation', () => {
   const run = {
     rawEvidence: true,
-    kind: 'implementation-synthetic',
+    kind: 'implementation',
     promptBounded: true,
     fresh: true,
     clean: true,
@@ -1016,13 +1490,27 @@ test('A6 requires fresh clean exact-authority subordinate workspaces after activ
 test('A6 rejects retained worktree reuse after activation', () => {
   const run = {
     rawEvidence: true,
-    kind: 'amendment-synthetic',
+    kind: 'amendment',
     promptBounded: true,
     fresh: false,
     clean: false,
     exactAuthority: true,
     inheritedAuthority: true,
     retained: true
+  };
+  assert.equal(topologyDecision(activeA6Topology({ subordinateRuns: [run] })).decision, 'SURFACE_TOPOLOGY_INVALID');
+});
+
+test('A6 rejects unknown subordinate run kinds', () => {
+  const run = {
+    rawEvidence: true,
+    kind: 'governance-repair',
+    promptBounded: true,
+    fresh: true,
+    clean: true,
+    exactAuthority: true,
+    inheritedAuthority: false,
+    retained: false
   };
   assert.equal(topologyDecision(activeA6Topology({ subordinateRuns: [run] })).decision, 'SURFACE_TOPOLOGY_INVALID');
 });
@@ -1034,6 +1522,19 @@ test('A6 source-only implementation does not activate A6', () => {
     grants: { sourceAccepted: false, designMerged: false, installed: false, explicitActivation: false },
     surfaces: []
   }), { decision: 'SOURCE_ONLY_INACTIVE', dispatch: false });
+});
+
+test('A6 rejects active or persistent surfaces when activation grants are incomplete', () => {
+  const evidence = activeA6Topology({
+    grants: { sourceAccepted: true, designMerged: true, installed: false, explicitActivation: false }
+  });
+  assert.deepEqual(topologyDecision(evidence), { decision: 'SURFACE_TOPOLOGY_INVALID', dispatch: false });
+  assert.deepEqual(topologyDecision({
+    rawEvidence: true,
+    grants: { sourceAccepted: true, designMerged: true, installed: false, explicitActivation: false },
+    surfaces: [],
+    temporaryChat: { rawEvidence: true }
+  }), { decision: 'SURFACE_TOPOLOGY_INVALID', dispatch: false });
 });
 
 test('A6 merge does not itself activate A6', () => {
@@ -1113,16 +1614,28 @@ test('A6 Temporary Chat has no hosted or finality authority', () => {
 
 test('A6 current-chat complete assignment overrides Custom Instructions', () => {
   const current = syntheticAssignment({ provider: 'provider-current-synthetic', evidenceLocator: 'current-chat-locator' });
-  const canonical = syntheticAssignment({ provider: 'provider-canonical-synthetic', evidenceLocator: 'canonical-locator' });
+  const canonical = syntheticCanonicalAssignment({ provider: 'provider-canonical-synthetic', evidenceLocator: 'canonical-locator' });
   const result = resolveA6Assignment({ currentChat: current, canonicalInstructions: canonical });
   assert.equal(result.decision, 'RESOLVED');
   assert.equal(result.source, 'current-chat');
   assert.equal(result.values.provider, 'provider-current-synthetic');
   assert.equal(result.evidenceLocator, 'current-chat-locator');
+  assert.equal(Object.hasOwn(result.values, 'instructionsRepository'), false);
+});
+
+test('A6 current-chat assignments use a source-specific schema without Custom Instructions pins', () => {
+  const current = syntheticAssignment();
+  assert.equal(resolveA6Assignment({ currentChat: current }).decision, 'RESOLVED');
+  assert.equal(resolveA6Assignment({
+    currentChat: { ...current, instructionsRepository: 'mixed-source' }
+  }).decision, 'MODEL_ASSIGNMENT_REQUIRED');
+  assert.equal(resolveA6Assignment({
+    canonicalInstructions: syntheticCanonicalAssignment({ instructionsBlob: undefined })
+  }).decision, 'MODEL_ASSIGNMENT_REQUIRED');
 });
 
 test('A6 no current-chat assignment permits complete canonical fallback', () => {
-  const canonical = syntheticAssignment({ evidenceLocator: 'canonical-locator' });
+  const canonical = syntheticCanonicalAssignment({ evidenceLocator: 'canonical-locator' });
   const result = resolveA6Assignment({ canonicalInstructions: canonical });
   assert.equal(result.decision, 'RESOLVED');
   assert.equal(result.source, 'canonical-custom-instructions');
@@ -1132,21 +1645,21 @@ test('A6 no current-chat assignment permits complete canonical fallback', () => 
 
 test('A6 partial current-chat assignment returns MODEL_ASSIGNMENT_REQUIRED', () => {
   const partial = syntheticAssignment();
-  delete partial.instructionsBlob;
-  assert.equal(resolveA6Assignment({ currentChat: partial, canonicalInstructions: syntheticAssignment() }).decision, 'MODEL_ASSIGNMENT_REQUIRED');
+  delete partial.evidenceLocator;
+  assert.equal(resolveA6Assignment({ currentChat: partial, canonicalInstructions: syntheticCanonicalAssignment() }).decision, 'MODEL_ASSIGNMENT_REQUIRED');
 });
 
 test('A6 ambiguous current-chat assignment returns MODEL_ASSIGNMENT_REQUIRED', () => {
-  assert.equal(resolveA6Assignment({ currentChat: syntheticAssignment({ ambiguous: true }), canonicalInstructions: syntheticAssignment() }).decision, 'MODEL_ASSIGNMENT_REQUIRED');
+  assert.equal(resolveA6Assignment({ currentChat: syntheticAssignment({ ambiguous: true }), canonicalInstructions: syntheticCanonicalAssignment() }).decision, 'MODEL_ASSIGNMENT_REQUIRED');
 });
 
 test('A6 conflicting current-chat assignment returns MODEL_ASSIGNMENT_REQUIRED', () => {
-  assert.equal(resolveA6Assignment({ currentChat: syntheticAssignment({ conflicting: true }), canonicalInstructions: syntheticAssignment() }).decision, 'MODEL_ASSIGNMENT_REQUIRED');
+  assert.equal(resolveA6Assignment({ currentChat: syntheticAssignment({ conflicting: true }), canonicalInstructions: syntheticCanonicalAssignment() }).decision, 'MODEL_ASSIGNMENT_REQUIRED');
 });
 
 test('A6 assignment sources cannot be mixed', () => {
   const current = syntheticAssignment({ provider: 'provider-current-synthetic' });
-  const canonical = syntheticAssignment({ provider: 'provider-canonical-synthetic' });
+  const canonical = syntheticCanonicalAssignment({ provider: 'provider-canonical-synthetic' });
   const result = resolveA6Assignment({ currentChat: current, canonicalInstructions: canonical });
   assert.equal(result.source, 'current-chat');
   assert.equal(result.values.provider, current.provider);
@@ -1201,7 +1714,7 @@ test('A6 model role and surface do not grant controller authority', () => {
 });
 
 test('A6 every subordinate run kind is fresh and prompt-bounded', () => {
-  const kinds = ['implementation-synthetic', 'amendment-synthetic', 'pre-g4-synthetic', 'g4-synthetic'];
+  const kinds = ['implementation', 'amendment', 'pre-g4', 'technical-g4'];
   const runs = kinds.map((kind) => ({
     rawEvidence: true,
     kind,
@@ -1325,6 +1838,21 @@ function temporaryEvidence(overrides = {}) {
   return value;
 }
 
+const assuranceIdentityFields = [
+  'provider',
+  'canonical_model',
+  'reasoning',
+  'assignment_source',
+  'assignment_evidence',
+  'role',
+  'surface',
+  'exact_head'
+];
+
+function completeAssuranceIdentity(identity) {
+  return identity && assuranceIdentityFields.every((field) => nonEmptyString(identity[field]));
+}
+
 function temporaryAssuranceGate(evidence) {
   if (!evidence || evidence.rawEvidence !== true) return 'SURFACE_TOPOLOGY_INVALID';
   if (evidence.g4Verdict !== 'PASS' || evidence.finalExactHead !== true || evidence.webVerified !== true ||
@@ -1332,13 +1860,14 @@ function temporaryAssuranceGate(evidence) {
   if (evidence.freshTemporaryChatCount !== 1) return 'TEMPORARY_ASSURANCE_REQUIRED';
   const g4 = evidence.g4ExecutionIdentity;
   const web = evidence.webExecutionIdentity;
-  if (!g4 || !web || g4.role !== 'technical G4 reviewer' || web.surface !== 'web-temporary-chat' ||
+  if (!completeAssuranceIdentity(g4) || !completeAssuranceIdentity(web) ||
+      g4.role !== 'technical G4 reviewer' || web.surface !== 'web-temporary-chat' ||
       g4.exact_head !== evidence.exactHead || web.exact_head !== evidence.exactHead) {
     return 'ASSURANCE_EVIDENCE_INDEPENDENCE_REQUIRED';
   }
+  const prohibitedContexts = ['web-orchestrator', 'executor-root', 'implementation', 'amendment', 'technical-g4-reviewer'];
   if (evidence.separateContext !== true || !Array.isArray(evidence.separateFrom) ||
-      !evidence.separateFrom.includes('executor-root') || !evidence.separateFrom.includes('implementation') ||
-      !evidence.separateFrom.includes('technical-g4-reviewer')) {
+      prohibitedContexts.some((context) => !evidence.separateFrom.includes(context))) {
     return 'SURFACE_TOPOLOGY_INVALID';
   }
   if (evidence.independentBoundedEvidence !== true || evidence.g4PacketOnly === true ||
@@ -1415,6 +1944,29 @@ test('A6-C3 rejects packet-only, shared-context, and authority-bearing assurance
   assert.equal(temporaryAssuranceGate(temporaryEvidence({ mergeAuthority: true })), 'SURFACE_TOPOLOGY_INVALID');
   assert.equal(temporaryAssuranceGate(temporaryEvidence({ verdict: 'PASS' })), 'SURFACE_TOPOLOGY_INVALID');
   assertA6Terms(['not G5', 'does not replace G4', 'no GitHub']);
+});
+
+test('A6-C3 requires complete G4 and Web assurance identities', () => {
+  for (const field of assuranceIdentityFields) {
+    const evidence = temporaryEvidence();
+    delete evidence.g4ExecutionIdentity[field];
+    assert.equal(temporaryAssuranceGate(evidence), 'ASSURANCE_EVIDENCE_INDEPENDENCE_REQUIRED', 'missing G4 ' + field);
+  }
+  for (const field of assuranceIdentityFields) {
+    const evidence = temporaryEvidence();
+    delete evidence.webExecutionIdentity[field];
+    assert.equal(temporaryAssuranceGate(evidence), 'ASSURANCE_EVIDENCE_INDEPENDENCE_REQUIRED', 'missing Web ' + field);
+  }
+});
+
+test('A6-C3 requires separation from every prohibited assurance context', () => {
+  for (const context of ['web-orchestrator', 'executor-root', 'implementation', 'amendment', 'technical-g4-reviewer']) {
+    const evidence = temporaryEvidence({
+      separateFrom: ['web-orchestrator', 'executor-root', 'implementation', 'amendment', 'technical-g4-reviewer']
+        .filter((candidate) => candidate !== context)
+    });
+    assert.equal(temporaryAssuranceGate(evidence), 'SURFACE_TOPOLOGY_INVALID', 'missing separation from ' + context);
+  }
 });
 
 const invariantRequiredFields = [
@@ -1506,11 +2058,48 @@ const expectedInvariantBundles = {
   }
 };
 
+const negativeTestReference = (invariantId) => 'repo/tests/repo-auto-code-design.test.cjs::negative::' + invariantId;
+const negativeTestContracts = new Map(Object.keys(expectedInvariantBundles)
+  .map((invariantId) => [invariantId, negativeTestReference(invariantId)]));
+const candidateSchemaMapping = {
+  base_model: 'canonical_base_model',
+  revision: 'source_revision',
+  result: 'technical_result'
+};
+
 function invariantRegistry() {
   const protocol = fs.readFileSync(path.join(mainRoot, 'protocol.md'), 'utf8');
   const match = protocol.match(/## Cumulative semantic invariant registry[\s\S]*?```json\r?\n([\s\S]*?)\r?\n```/);
   assert.ok(match, 'cumulative invariant JSON registry is required');
   return JSON.parse(match[1]);
+}
+
+function validReplacementContract(change) {
+  const replacement = change && change.replacement;
+  if (!replacement || !nonEmptyString(replacement.invariant_id) ||
+      !Array.isArray(replacement.required_semantics) || replacement.required_semantics.length === 0 ||
+      !Array.isArray(replacement.candidate_evidence) || replacement.candidate_evidence.length === 0 ||
+      replacement.negative_test !== negativeTestReference(replacement.invariant_id)) return false;
+  const semantics = new Set(replacement.required_semantics.map((entry) => entry && entry.semantic_id));
+  const evidence = new Set(replacement.candidate_evidence.map((entry) => entry && entry.semantic_id));
+  return !semantics.has(undefined) && semantics.size === replacement.required_semantics.length &&
+    !evidence.has(undefined) && evidence.size === replacement.candidate_evidence.length &&
+    replacement.required_semantics.every((entry) => nonEmptyString(entry.requirement)) &&
+    replacement.candidate_evidence.every((entry) => Array.isArray(entry.evidence_fields) && entry.evidence_fields.length > 0) &&
+    [...semantics].every((semanticId) => evidence.has(semanticId));
+}
+
+function validDisposalContract(change, invariantId) {
+  const disposal = change && change.disposal;
+  return disposal && disposal.invariant_id === invariantId &&
+    disposal.contract === 'repo/tests/repo-auto-code-design.test.cjs::disposal::' + invariantId &&
+    nonEmptyString(disposal.reason);
+}
+
+function validDesignLockChange(record) {
+  const change = record.design_lock_change;
+  return change && change.invariant_id === record.invariant_id && nonEmptyString(change.design_lock) &&
+    nonEmptyString(change.rationale);
 }
 
 function invariantDecision(record, expected) {
@@ -1521,11 +2110,13 @@ function invariantDecision(record, expected) {
       !Array.isArray(record.required_semantics) || !Array.isArray(record.candidate_evidence)) {
     return 'INVARIANT_REGRESSION';
   }
+  if (negativeTestContracts.get(record.invariant_id) !== record.negative_test &&
+      record.negative_test !== negativeTestReference(record.invariant_id)) return 'INVARIANT_REGRESSION';
   if (record.status !== 'preserved') {
-    const change = record.design_lock_change;
-    if (!change || change.invariant_id !== record.invariant_id ||
-        typeof change.replacement_or_disposal !== 'string' || !change.replacement_or_disposal ||
-        typeof change.rationale !== 'string' || !change.rationale) return 'INVARIANT_REGRESSION';
+    if (!validDesignLockChange(record)) return 'INVARIANT_REGRESSION';
+    if (record.status === 'amended' && !validReplacementContract(record.design_lock_change)) return 'INVARIANT_REGRESSION';
+    if (record.status === 'removed' && !validDisposalContract(record.design_lock_change, record.invariant_id)) return 'INVARIANT_REGRESSION';
+    return 'PRESERVED';
   }
   if (!expected) return 'INVARIANT_REGRESSION';
   const semantics = new Map(record.required_semantics.map((entry) => [entry && entry.semantic_id, entry]));
@@ -1545,6 +2136,18 @@ function invariantDecision(record, expected) {
   return 'PRESERVED';
 }
 
+function validateRegressionLinks(records, findings = []) {
+  const knownInvariantIds = new Set(records
+    .filter((record) => record && typeof record.invariant_id === 'string')
+    .map((record) => record.invariant_id));
+  return records.concat(findings).every((record) => {
+    if (!record) return false;
+    if (record.repeated === true && !Object.hasOwn(record, 'regression_of')) return false;
+    if (!Object.hasOwn(record, 'regression_of')) return true;
+    return nonEmptyString(record.regression_of) && knownInvariantIds.has(record.regression_of);
+  });
+}
+
 test('A6-C4 registry is machine-checkable and contains the complete seeded invariant bundles', () => {
   assertA6Terms([
     'cumulative invariant',
@@ -1561,6 +2164,7 @@ test('A6-C4 registry is machine-checkable and contains the complete seeded invar
     assert.ok(records.has(id), id + ' must be seeded');
     assert.equal(invariantDecision(records.get(id), expected), 'PRESERVED', id);
   }
+  assert.equal(validateRegressionLinks([...records.values()]), true);
 });
 
 test('A6-C4 partial and keyword-only invariant candidates fail with INVARIANT_REGRESSION', () => {
@@ -1575,7 +2179,7 @@ test('A6-C4 partial and keyword-only invariant candidates fail with INVARIANT_RE
   assert.equal(invariantDecision(keywordOnly, expected), 'INVARIANT_REGRESSION');
 });
 
-test('A6-C4 amendment and removal require a named Design Lock change and regression_of survives history', () => {
+test('A6-C4 amendment and removal validate named replacement or disposal contracts', () => {
   const record = invariantRegistry().invariants.find((entry) => entry.invariant_id === 'AUTH-LEDGER-RECEIPT-001');
   const expected = expectedInvariantBundles[record.invariant_id];
   const amended = JSON.parse(JSON.stringify(record));
@@ -1583,11 +2187,66 @@ test('A6-C4 amendment and removal require a named Design Lock change and regress
   assert.equal(invariantDecision(amended, expected), 'INVARIANT_REGRESSION');
   amended.design_lock_change = {
     invariant_id: amended.invariant_id,
-    replacement_or_disposal: 'replace only with an equivalent receipt contract',
+    design_lock: 'DL-329-AUTO-CODE-005-A6-C5',
+    replacement: {
+      invariant_id: 'AUTH-LEDGER-RECEIPT-REPLACEMENT-001',
+      required_semantics: [{ semantic_id: 'replacement_receipt', requirement: 'The replacement receipt contract is complete.' }],
+      candidate_evidence: [{ semantic_id: 'replacement_receipt', evidence_fields: ['replacement_receipt_contract'] }],
+      negative_test: negativeTestReference('AUTH-LEDGER-RECEIPT-REPLACEMENT-001')
+    },
     rationale: 'synthetic Design Lock test'
   };
   assert.equal(invariantDecision(amended, expected), 'PRESERVED');
-  assert.match('regression_of: ' + record.invariant_id, /regression_of: AUTH-LEDGER-RECEIPT-001/);
+
+  const removed = JSON.parse(JSON.stringify(record));
+  removed.status = 'removed';
+  removed.design_lock_change = {
+    invariant_id: removed.invariant_id,
+    design_lock: 'DL-329-AUTO-CODE-005-A6-C5',
+    disposal: {
+      invariant_id: removed.invariant_id,
+      contract: 'repo/tests/repo-auto-code-design.test.cjs::disposal::' + removed.invariant_id,
+      reason: 'synthetic disposal contract'
+    },
+    rationale: 'synthetic Design Lock disposal test'
+  };
+  assert.equal(invariantDecision(removed, expected), 'PRESERVED');
+});
+
+test('A6-C4 negative tests are concrete and regression links use parsed records', () => {
+  const registry = invariantRegistry();
+  const record = registry.invariants.find((entry) => entry.invariant_id === 'AUTH-LEDGER-RECEIPT-001');
+  const expected = expectedInvariantBundles[record.invariant_id];
+  for (const negativeTest of ['', 'unrelated text', 'repo/tests/other.test.cjs::negative::AUTH-LEDGER-RECEIPT-001']) {
+    const candidate = JSON.parse(JSON.stringify(record));
+    candidate.negative_test = negativeTest;
+    assert.equal(invariantDecision(candidate, expected), 'INVARIANT_REGRESSION');
+  }
+  const repeatedFinding = { finding_id: 'finding-repeat', repeated: true, regression_of: 'AUTH-LEDGER-RECEIPT-001' };
+  assert.equal(validateRegressionLinks(registry.invariants, [repeatedFinding]), true);
+  assert.equal(validateRegressionLinks(registry.invariants, [{ finding_id: 'missing-link' }]), true);
+  assert.equal(validateRegressionLinks(registry.invariants, [{ finding_id: 'unknown-link', regression_of: 'UNKNOWN-001' }]), false);
+  const nonRepeatedRecord = { ...record, invariant_id: 'AUTH-LEDGER-RECEIPT-NONREPEAT-001', repeated: false };
+  assert.equal(validateRegressionLinks(registry.invariants.concat(nonRepeatedRecord)), true);
+  const missingLink = { ...record, invariant_id: 'AUTH-LEDGER-RECEIPT-REPEAT-001', repeated: true };
+  assert.equal(validateRegressionLinks(registry.invariants.concat(missingLink)), false);
+  missingLink.regression_of = undefined;
+  assert.equal(validateRegressionLinks(registry.invariants.concat(missingLink)), false);
+});
+
+test('A6-C4 maps invariant evidence to the canonical evaluation-candidate schema', () => {
+  const registry = invariantRegistry();
+  const record = registry.invariants.find((entry) => entry.invariant_id === 'SCHEMA-EVAL-CANDIDATE-001');
+  assert.deepEqual(record.candidate_schema_mapping, candidateSchemaMapping);
+  const template = fs.readFileSync(path.join(templateRoot, 'evaluation-candidate.comment.md'), 'utf8');
+  const jsonText = template.match(/<!-- evaluation-candidate:v1 -->\r?\n([\s\S]*?\r?\n\})\r?\n\r?\nInvariant evidence mapping/)[1];
+  const schema = JSON.parse(jsonText);
+  for (const field of Object.values(candidateSchemaMapping)) assert.ok(Object.hasOwn(schema, field), field);
+  for (const semantic of record.candidate_evidence) {
+    for (const field of semantic.evidence_fields) {
+      assert.ok(Object.hasOwn(schema, candidateSchemaMapping[field] || field), field);
+    }
+  }
 });
 
 const trustedPreToolUseHook = {
@@ -1646,11 +2305,12 @@ function grantMatches(request, context, grant) {
       grant.turn_id !== context.turn_id || grant.operation !== normaliseAdmissionOperation(request.operation) ||
       grant.provider !== context.provider || grant.canonical_model !== context.canonical_model ||
       grant.reasoning !== context.reasoning || typeof grant.expires_at !== 'number' ||
-      grant.expires_at <= context.now) return false;
+      grant.expires_at <= context.now || !Number.isFinite(grant.max_agents) ||
+      !Number.isInteger(grant.max_agents) || grant.max_agents < 1) return false;
   const operation = normaliseAdmissionOperation(request.operation);
   if (operation === 'fast' && grant.allow_fast !== true) return false;
   if (operation === 'spawn_agent' && (grant.allow_agents !== true ||
-      !Number.isInteger(request.requestedAgentCount) || request.requestedAgentCount < 1 ||
+      !Number.isFinite(request.requestedAgentCount) || !Number.isInteger(request.requestedAgentCount) || request.requestedAgentCount < 1 ||
       request.requestedAgentCount > grant.max_agents)) return false;
   return true;
 }
@@ -1683,10 +2343,18 @@ function admissionDecision(request, context, grant, hook) {
   return {
     allowed: true,
     prevented: false,
-    mode: operation === 'fast' ? 'FAST' : 'AGENT',
+    mode: operation === 'fast' ? 'FAST' : grant.allow_fast === true ? 'AGENT_FAST' : 'AGENT_STANDARD',
     reason: 'ADMITTED',
+    fastAllowed: operation === 'fast' || grant.allow_fast === true,
+    delegationAllowed: operation === 'spawn_agent',
     grant: { ...grant, consumed: true }
   };
+}
+
+function renderAdmissionTemplate(text, grant) {
+  return text
+    .replaceAll('{{fast_mode}}', grant.allow_fast === true ? 'allowed' : 'prohibited')
+    .replaceAll('{{delegation_mode}}', grant.allow_agents === true ? 'allowed' : 'prohibited');
 }
 
 test('A6-C5 no grant denies Fast and Agent spawning', () => {
@@ -1733,6 +2401,49 @@ test('A6-C5 wrong provider, model, and reasoning bindings are denied', () => {
 test('A6-C5 excess agent count is denied', () => {
   const context = admissionContext();
   assert.equal(admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 2 }, context, structuredGrant({ max_agents: 1 }), trustedPreToolUseHook).reason, 'ADMISSION_DENIED');
+});
+
+test('A6-C5 requires a positive finite integer max_agents and bounded request count', () => {
+  const context = admissionContext();
+  for (const maxAgents of [undefined, 0, -1, 1.5, Infinity, '1']) {
+    assert.equal(admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1 }, context,
+      structuredGrant({ max_agents: maxAgents }), trustedPreToolUseHook).reason, 'ADMISSION_DENIED', String(maxAgents));
+  }
+  for (const requestedAgentCount of [undefined, 0, -1, 1.5, Infinity, '1']) {
+    assert.equal(admissionDecision({ operation: 'spawn_agent', requestedAgentCount }, context,
+      structuredGrant({ max_agents: 2 }), trustedPreToolUseHook).reason, 'ADMISSION_DENIED', String(requestedAgentCount));
+  }
+  assert.equal(admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 2 }, context,
+    structuredGrant({ max_agents: 2 }), trustedPreToolUseHook).allowed, true);
+});
+
+test('A6-C5 separates Fast and delegation permissions across all four grant combinations', () => {
+  const context = admissionContext();
+  for (const [allowFast, allowAgents] of [[false, false], [true, false], [false, true], [true, true]]) {
+    const fastGrant = structuredGrant({ operation: 'fast', allow_fast: allowFast, allow_agents: allowAgents });
+    const delegationGrant = structuredGrant({ operation: 'spawn_agent', allow_fast: allowFast, allow_agents: allowAgents });
+    const fast = admissionDecision({ operation: 'fast' }, context, fastGrant, null);
+    const delegated = admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1 }, context, delegationGrant, trustedPreToolUseHook);
+    assert.equal(fast.allowed, allowFast, 'Fast combination ' + allowFast + '/' + allowAgents);
+    assert.equal(delegated.allowed, allowAgents, 'delegation combination ' + allowFast + '/' + allowAgents);
+    if (allowFast) assert.equal(fast.mode, 'FAST');
+    if (allowAgents) {
+      assert.equal(delegated.mode, allowFast ? 'AGENT_FAST' : 'AGENT_STANDARD');
+      assert.equal(delegated.fastAllowed, allowFast);
+    }
+  }
+});
+
+test('A6-C5 runtime templates render structured Fast and delegation admission values', () => {
+  for (const [allowFast, allowAgents] of [[false, false], [true, false], [false, true], [true, true]]) {
+    const grant = structuredGrant({ allow_fast: allowFast, allow_agents: allowAgents });
+    for (const file of a6PromptFiles) {
+      const text = renderAdmissionTemplate(fs.readFileSync(file, 'utf8'), grant);
+      assert.ok(text.includes('Fast mode: ' + (allowFast ? 'allowed' : 'prohibited')), path.basename(file));
+      assert.ok(text.includes('Delegation: ' + (allowAgents ? 'allowed' : 'prohibited')), path.basename(file));
+      assert.equal(text.includes('Fast mode: prohibited') && allowFast, false, path.basename(file));
+    }
+  }
 });
 
 test('A6-C5 inherited grants are denied', () => {

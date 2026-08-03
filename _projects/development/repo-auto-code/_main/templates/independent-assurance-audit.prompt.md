@@ -13,7 +13,12 @@ Role: {{role}}
 Exact repository: {{repository}}
 Exact scope: {{scope}}
 Exact authority: {{authority}}
-Fast mode: prohibited
+Assignment source: {{assignment_source}}
+Assignment evidence locator: {{assignment_evidence_locator}}
+Fresh subordinate run ID: {{fresh_subordinate_run_id}}
+Fresh workspace evidence locator: {{fresh_workspace_evidence_locator}}
+Fast mode: {{fast_mode}}
+Delegation: {{delegation_mode}}
 Route substitution: prohibited
 
 Prove the assurance capability or return UNSUPPORTED_DELEGATION. Missing exact activation returns CLOSURE_LEASE_NOT_ACTIVATED.
