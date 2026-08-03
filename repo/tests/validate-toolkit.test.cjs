@@ -563,6 +563,7 @@ test('project manifests include the current project modules without repo-wide MC
     'development.project-completion-audit',
     'development.repo-auto-code',
     'development.self-hosted-service-safety',
+    'development.toolkit-guardrails',
     'development.toolkit-local-bridge',
     'development.windows-localhost-workflows',
     'knowledge.knowledge-index-updater',
