@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-root-governance-finality-mutation",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "worker-boundary",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "root_finality_mutation"
+                 }
+}

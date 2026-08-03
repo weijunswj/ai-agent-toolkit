@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-cross-repository-fanout",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "scope",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "cross_repository_fanout"
+                 }
+}

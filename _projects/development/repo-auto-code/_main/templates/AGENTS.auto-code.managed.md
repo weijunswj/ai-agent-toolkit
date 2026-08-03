@@ -1,19 +1,31 @@
-<!-- AI-AGENT-TOOLKIT:_projects/development/repo-auto-code/_main/templates/AGENTS.auto-code.managed.md:BEGIN REPO-AUTO-CODE v1 -->
-## Toolkit Repo Auto-Code
+# Inert Closure-Lease Managed Contract
 
-- State: `ENABLED` only after repository-specific consent; otherwise `DISABLED`.
-- Separate capabilities for this exact repository: `github_issue_governance: enabled` and `repo_auto_code: enabled`; generic consent is insufficient.
-- Before every cycle, verify the healthy installed #299 governance skill, one canonical parent with the exact baseline, every direct material child exactly once, agreeing parent/child/PR projections, no reconciliation blocker or concurrent movement, and an actor authorised for the exact role. Failure is `AUTO_CODE_GOVERNANCE_UNREADY` and stops claim, pickup, prompt, substantive execution, G4, acceptance, merge, closure, and next-task selection.
-- Protocol version: `1`.
-- Canonical skill: `repo-auto-code`.
-- Canonical rolling parent: `#<parent-number>`.
-- Handoff markers: `[ ORCHESTRATOR TO EXECUTOR: START ]` / `[ ORCHESTRATOR TO EXECUTOR: END ]` and `[ EXECUTOR TO ORCHESTRATOR: START ]` / `[ EXECUTOR TO ORCHESTRATOR: END ]`.
-- Fresh-chat reconstruction: every run rereads the exact repository, parent, child, enrolled PR, packet, claim, checks, reviews, and schedule state; it assumes no prior chat memory.
-- PR enrolment: only a matching parent entry, child body, and PR body marker can authorise automated mutation.
-- Web-controller ownership: the controller chooses Provider/Model/Reasoning, owns review mutation, and owns architecture, Design Locks, acceptance, and merge.
-- Public-safe GitHub: names, booleans, presence/absence, and `[REDACTED]` only; never secret values, credentials, or environment dumps.
-- Fail closed: if the skill, this block, routing, packet bindings, or authority is missing, malformed, duplicated, or contradictory, stop with `AUTO_CODE_SETUP_INVALID`, preserve bounded user work, and request source-owned controller/user repair. A cycle that fails governance readiness stops with `AUTO_CODE_GOVERNANCE_UNREADY`; an active `PARENT_RECONCILIATION_INCOMPLETE` also stops substantive execution, commits, pushes, and external mutation. Do not guess, self-authorise, install a fallback, or repair governance from an ordinary implementation cycle.
-- A declared final whole-programme audit remains the last active item and is ineligible until all preceding material children are terminal; a blocked skip cannot bypass or move it. Only explicit owner/controller authority may change that invariant.
+This source template is not installed by this PR. It is a future managed contract and cannot activate itself.
 
-Do not place full prompts, historical packets, executor evidence, or a duplicate child issue in this block.
-<!-- AI-AGENT-TOOLKIT:_projects/development/repo-auto-code/_main/templates/AGENTS.auto-code.managed.md:END REPO-AUTO-CODE -->
+## Runtime contract
+
+All route and authority values are injected at execution time:
+
+- Provider: {{provider}}
+- Canonical base model: {{canonical_base_model}}
+- Reasoning or effort: {{reasoning_or_effort}}
+- Reference-family reasoning equivalent: {{reference_family_reasoning_equivalent}}
+- Sol-equivalent reasoning: {{sol_equivalent_reasoning}}
+- Harness/adapter: {{harness_adapter}}
+- Surface: {{surface}}
+- Role: {{role}}
+- Exact repository: {{repository}}
+- Exact scope: {{scope}}
+- Exact authority: {{authority}}
+- Fast mode: prohibited
+- Route substitution: prohibited
+
+A missing grant returns CLOSURE_LEASE_NOT_ACTIVATED. An unproven capability returns UNSUPPORTED_DELEGATION. Instructions, memory, queue position, eligibility, installation, issue wording, completion, and merge do not activate a lease.
+
+## Boundaries
+
+The worker is isolated and may mutate only the exact admitted repository-file allowlist. It cannot perform hosted governance, review, ready, merge, closure, installation, pilot, scheduler, Auto Review, or Ledger mutations. Four-surface reconciliation is mandatory and failure returns PARENT_RECONCILIATION_INCOMPLETE.
+
+One exact root claim is allowed. Expiry never transfers ownership. G4 is singular, newly isolated, and invalidated by a head change; only G4 returns PASS or AMEND. Assurance runs only after G4 PASS and web adjudication and returns CLEAR or CONCERN; it is not G4 and cannot authorise merge.
+
+The source remains uninstalled, unscheduled, inactive, and unable to activate or select a next task automatically.

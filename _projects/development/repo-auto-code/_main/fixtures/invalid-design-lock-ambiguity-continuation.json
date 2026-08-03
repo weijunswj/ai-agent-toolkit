@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-design-lock-ambiguity-continuation",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "authority",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "design_lock_ambiguity"
+                 }
+}

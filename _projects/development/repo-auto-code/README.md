@@ -1,17 +1,9 @@
-# Repo-Scoped Scheduled Auto-Code Protocol Design
+# Repo-Scoped Default-Off Closure-Lease Auto-code Protocol
 
-First-party, source-only design material for issue #329 under Design Lock `DL-329-AUTO-CODE-004`.
+First-party source-only design for issue #329 and PR #333. Controlling authority: DL-329-AUTO-CODE-005 with A1, A2, and A3.
 
-## Status
+Final fixture universe: 112 total, 17 accepted, and 95 rejected. The module is uninstalled, unscheduled, inactive, and has no runtime activation or automatic next-task pickup.
 
-The design preserves `G1 architecture -> G2 controller Design Lock -> G3 implementation/amendment -> fresh exact-head G4`.
+The supported roles are web governance controller, closure manager, implementation/amendment worker, final pre-G4 reviewer, authoritative technical G4 reviewer, independent assurance auditor, and evaluation-staging lane. Capability failures return UNSUPPORTED_DELEGATION; missing activation returns CLOSURE_LEASE_NOT_ACTIVATED.
 
-This module has no installed skill entrypoint or consumer-facing output. It does not install or activate a skill, managed `AGENTS.md` block, GitHub workflow, scheduler, claim mechanism, PR enrolment, or runtime controller. The templates are inert design material. Global Toolkit installation and refresh never enable the future repository-scoped capability.
-
-## Source
-
-The full design, templates, and executable design-state fixtures are in [_main/](_main/). `SOURCE-MANIFEST.md` records ownership and the intentionally empty output boundary. `SOURCE-LOCK.json` records first-party provenance without copied or third-party file entries.
-
-## Validation
-
-The focused test discovers and executes every fixture: `node --test repo/tests/repo-auto-code-design.test.cjs`. Repository checks are `node repo/scripts/sync-toolkit-projects.cjs --check`, `node repo/scripts/audit-project-source-locks.cjs`, and `node repo/scripts/validate-toolkit.cjs`.
+Full source design and raw-evidence fixtures: [_main/](_main/). Focused validation: node --test repo/tests/repo-auto-code-design.test.cjs

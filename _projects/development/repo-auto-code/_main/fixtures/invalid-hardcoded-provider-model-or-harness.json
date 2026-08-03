@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-hardcoded-provider-model-or-harness",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "route",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "hardcoded_route_literal"
+                 }
+}

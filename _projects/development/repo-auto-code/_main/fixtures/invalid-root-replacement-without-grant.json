@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-root-replacement-without-grant",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "root-claim",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "replacement_without_revocation_and_grant"
+                 }
+}

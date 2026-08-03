@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-missing-reference-reasoning-equivalent",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "route",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "missing_reference_reasoning_equivalent"
+                 }
+}

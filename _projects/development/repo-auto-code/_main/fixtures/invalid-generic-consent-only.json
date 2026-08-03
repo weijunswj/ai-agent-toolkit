@@ -1,6 +1,11 @@
 {
   "id": "invalid-generic-consent-only",
-  "scenario": "governance_readiness",
-  "expected": { "accepted": false, "status": "AUTO_CODE_GOVERNANCE_UNREADY", "mutationProhibited": true },
-  "state": { "repository": { "owner": "weijunswj", "name": "ai-agent-toolkit", "immutableId": "repo-299", "origin": "https://github.com/weijunswj/ai-agent-toolkit.git", "defaultBranch": "main" }, "consent": true }
+  "accepted": false,
+  "mutationProhibited": true,
+  "scenario": "activation",
+  "evidence": {
+    "valid": false,
+    "violation": "generic_consent_without_exact_grant",
+    "rawEvidence": true
+  }
 }

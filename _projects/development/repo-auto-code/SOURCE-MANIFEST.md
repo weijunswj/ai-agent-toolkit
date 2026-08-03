@@ -1,40 +1,48 @@
-# Source Manifest: Repo-Scoped Scheduled Auto-Code Protocol Design
+# Source Manifest: Repo-Scoped Default-Off Closure-Lease Auto-code
 
 ## Ownership
 
-This is first-party Toolkit source authored for the bounded design-only G3 lane of issue #329. The module is `source_only`: it publishes no `skills/**` entrypoint, no native plugin metadata, no MCP surface, and no consumer-facing generated output.
+This is first-party Toolkit source for the bounded G3 implementation/amendment lane of issue #329. The module is source_only and publishes no skill entrypoint, native plugin metadata, MCP surface, installed instruction, or consumer-facing generated output.
 
 ## Preserved source files
 
-All runtime-critical design material is kept directly under `_main/`:
+Runtime-critical design material is kept directly under _main/:
 
-- `architecture.md`: scope, non-goals, future setup/cleanup, authority surfaces, adoption classes, review ownership, sensitive context, and completion boundary.
-- `protocol.md`: packet grammar, staged publication, atomic claim interface, turn prerequisites, routing, hierarchy, redaction, and prompt safety.
-- `state-machine.md`: controller/executor cycles, turn determination, parallel lanes, manual work, review sweep, and teardown invariants.
-- `failure-matrix.md`: detection evidence, prohibited mutation, state transition, exact repair, and unrelated-lane handling for every required failure class.
-- `templates/AGENTS.auto-code.managed.md`: compact source-owned consumer block; it is not installed by this PR.
-- `templates/web-controller-scheduled-task.prompt.md`: future fresh-chat L0/controller prompt and editable routing profiles.
-- `templates/executor-scheduled-task.prompt.md`: future fresh-chat L0/executor prompt and editable routing profiles.
-- `templates/child-cycle-comment.md`: canonical child audit/handoff comment template.
-- `templates/pr-handoff-pointer.md`: compact PR discoverability pointer template.
-- `fixtures/*.json`: design-state fixtures consumed by `repo/tests/repo-auto-code-design.test.cjs`.
+- architecture.md: roles, capabilities, authority, isolation, mutation scope, review, assurance, and finality.
+- protocol.md: prompt fields, admission, exact activation, claims, reconciliation, mutation, G4, assurance, and evidence contracts.
+- state-machine.md: default-off lifecycle and guarded transitions.
+- failure-matrix.md: evidence, prohibited mutation, exact return code, and repair boundary.
+- templates/AGENTS.auto-code.managed.md: inert source-only managed contract; it is not installed by this PR.
+- templates/closure-manager.prompt.md: generic closure-manager prompt contract.
+- templates/implementation-worker.prompt.md: generic implementation/amendment prompt contract.
+- templates/final-pre-g4-reviewer.prompt.md: generic pre-G4 prompt contract.
+- templates/authoritative-g4-reviewer.prompt.md: generic authoritative G4 prompt contract.
+- templates/independent-assurance-audit.prompt.md: generic assurance prompt contract.
+- templates/evaluation-candidate.comment.md: public-safe evaluation-staging payload contract.
+- fixtures/*.json: raw-evidence fixtures consumed by repo/tests/repo-auto-code-design.test.cjs.
 
 ## Output and write boundary
 
-There are no declared generated outputs. The project manifest therefore declares `outputs: []` and `writes.allowed: []`. Source edits in this module and the one authorised test are the only files in the G3 assignment; no manifest entry grants writes to root instructions, skills, workflows, schedulers, claim refs, GitHub state, or plugin metadata.
+The manifest declares outputs as an empty array and writes.allowed as an empty array. Scheduled-task, activation, claim, queue, runtime, installation, and arbitrary-output writes are denied. No generated or installed surface is created.
 
 ## Routing decision
 
 - Agent-usable skill: no.
 - Skill entrypoint: none.
-- Toolkit skill routing update: intentionally omitted because this PR designs a future capability without installing it.
-- MCP output: none; repo-wide MCP is not shipped by this repository.
+- Toolkit skill routing update: intentionally omitted because this PR remains uninstalled.
+- MCP output: none.
 - Generated output: none.
+
+## Fixture inventory
+
+Filesystem discovery is authoritative. The final universe is 112 fixtures: 17 accepted and 95 rejected. The arithmetic is 85 existing, minus 25 explicit deletions, plus 52 explicit additions. Every rejected fixture carries accepted:false and mutationProhibited:true, either as the current raw fixture fields or as the preserved legacy expected classification.
+
+The runner reconciles retained, deleted, and added names against the merge parent and rejects unexpected extras, duplicate IDs, missing additions, and undeleted retired files.
 
 ## Validation contract
 
-The focused test discovers every fixture file, validates exact packet and managed-block grammar, exercises each fixture ID, rejects unsafe or partial state, checks manifest non-activation, and verifies no generated surface is declared. The sync check and source-lock audit prove that the module remains source-owned and schema-conformant.
+The focused test parses raw evidence, derives lifecycle, route, reconciliation, claim, G4, assurance, evaluation, and cleanup decisions, and verifies that fixture projections or fallback defaults cannot self-certify readiness or completion. Sync, source-lock, surface, and repository audits prove that this module remains source-owned.
 
-## Third-party material
+## Provenance
 
-None. No third-party skill, prompt, workflow, source path, package, credential, or runtime mechanism is copied, imported, installed, or executed.
+No third-party material, package, credential, workflow, runtime state, or external service is copied, imported, installed, or executed.

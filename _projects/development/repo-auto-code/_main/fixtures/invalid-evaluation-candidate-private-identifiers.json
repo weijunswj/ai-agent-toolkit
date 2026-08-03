@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-evaluation-candidate-private-identifiers",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "evaluation",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "private_identifier_in_candidate"
+                 }
+}

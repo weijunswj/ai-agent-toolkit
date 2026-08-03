@@ -1,0 +1,16 @@
+{
+    "id":  "valid-g4-pass-return-to-web",
+    "accepted":  true,
+    "mutationProhibited":  false,
+    "scenario":  "g4-pass-return",
+    "evidence":  {
+                     "valid":  true,
+                     "rawEvidence":  true,
+                     "proof":  {
+                                   "g4Verdict":  "PASS",
+                                   "authoritativeVerdictCount":  1,
+                                   "webAdjudicated":  true,
+                                   "mergeAuthorised":  false
+                               }
+                 }
+}

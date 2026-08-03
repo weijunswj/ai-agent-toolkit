@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-unverified-harness-capability-substitution",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "route",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "unverified_harness_capability_substitution"
+                 }
+}

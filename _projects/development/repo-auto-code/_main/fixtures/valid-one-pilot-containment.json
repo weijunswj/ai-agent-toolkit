@@ -1,0 +1,16 @@
+{
+    "id":  "valid-one-pilot-containment",
+    "accepted":  true,
+    "mutationProhibited":  false,
+    "scenario":  "pilot-containment",
+    "evidence":  {
+                     "valid":  true,
+                     "rawEvidence":  true,
+                     "proof":  {
+                                   "namedPilot":  "pilot-alpha",
+                                   "activePilots":  1,
+                                   "crossRepositoryFanout":  false,
+                                   "secondPilot":  false
+                               }
+                 }
+}

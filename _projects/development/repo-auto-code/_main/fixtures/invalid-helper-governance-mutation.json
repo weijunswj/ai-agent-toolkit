@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-helper-governance-mutation",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "worker-boundary",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "helper_governance_mutation"
+                 }
+}

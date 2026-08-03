@@ -1,0 +1,16 @@
+{
+    "id":  "valid-consolidated-amend-fresh-g4",
+    "accepted":  true,
+    "mutationProhibited":  false,
+    "scenario":  "amendment-g4",
+    "evidence":  {
+                     "valid":  true,
+                     "rawEvidence":  true,
+                     "proof":  {
+                                   "priorHeadInvalidated":  true,
+                                   "freshG4":  true,
+                                   "applicableFindingsPreserved":  true,
+                                   "sameRootCauseCount":  1
+                               }
+                 }
+}

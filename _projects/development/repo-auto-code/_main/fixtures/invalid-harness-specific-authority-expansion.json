@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-harness-specific-authority-expansion",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "route",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "harness_specific_authority_expansion"
+                 }
+}

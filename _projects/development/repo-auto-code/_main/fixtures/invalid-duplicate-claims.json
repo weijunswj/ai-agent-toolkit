@@ -1,17 +1,11 @@
 {
   "id": "invalid-duplicate-claims",
-  "scenario": "duplicate_claims",
-  "expected": {
-    "accepted": false,
-    "status": "DUPLICATE_CLAIM",
-    "mutationProhibited": true
-  },
-  "state": {
-    "claim": {
-      "atomic": true,
-      "packetId": "OTE-CLAIM-001",
-      "winnerCount": 2,
-      "readBackExact": false
-    }
+  "accepted": false,
+  "mutationProhibited": true,
+  "scenario": "root-claim",
+  "evidence": {
+    "valid": false,
+    "violation": "duplicate_exact_roots",
+    "rawEvidence": true
   }
 }

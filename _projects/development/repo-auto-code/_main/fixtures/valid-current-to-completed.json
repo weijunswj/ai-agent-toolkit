@@ -1,19 +1,14 @@
 {
   "id": "valid-current-to-completed",
-  "scenario": "current_to_completed",
-  "expected": {
-    "accepted": true,
-    "transition": "CURRENT_TO_COMPLETED",
-    "selectedChild": "#329"
-  },
-  "state": {
-    "transition": {
-      "child": "#329",
-      "atomic": true,
-      "before": { "active": [], "current": ["#329"] },
-      "after": { "active": [], "current": [], "completed": ["#329"], "completedLineStyle": "- [x]" },
-      "parentEntryCount": 1,
-      "chronologyCommentsAdded": 1
-    }
+  "accepted": true,
+  "scenario": "lifecycle-transition",
+  "evidence": {
+    "valid": true,
+    "rawEvidence": true,
+    "transition": { "before": "CURRENT", "after": "COMPLETED", "atomic": true },
+    "surfaces": { "child": "d2", "pr": "d2", "parentEntry": "d2", "chronology": "d2" },
+    "parentEntryCount": 1,
+    "chronologyCommentsAdded": 1,
+    "nextTask": null
   }
 }

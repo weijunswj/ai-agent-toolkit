@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-retired-relay-residue",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "cleanup",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "retired_relay_residue"
+                 }
+}

@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-cross-pr-mutation",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "scope",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "cross_pr_mutation"
+                 }
+}
