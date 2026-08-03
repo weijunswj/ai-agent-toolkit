@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-direct-ledger-write",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "evaluation",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "direct_ledger_write"
+                 }
+}

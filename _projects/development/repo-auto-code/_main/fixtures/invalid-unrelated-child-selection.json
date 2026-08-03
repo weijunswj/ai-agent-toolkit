@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-unrelated-child-selection",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "scope",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "unrelated_child_selected"
+                 }
+}

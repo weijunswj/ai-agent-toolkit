@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-web-assurance-as-authoritative-g4",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "assurance",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "assurance_presented_as_g4"
+                 }
+}

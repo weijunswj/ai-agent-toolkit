@@ -1,17 +1,11 @@
 {
   "id": "invalid-body-comment-disagreement",
-  "scenario": "body_comment_disagreement",
-  "expected": {
-    "accepted": false,
-    "status": "PARENT_RECONCILIATION_INCOMPLETE",
-    "mutationProhibited": true
-  },
-  "state": {
-    "surfaces": {
-      "parentPacketId": "OTE-BODY-001",
-      "childPacketId": "OTE-BODY-001",
-      "prPacketId": "OTE-BODY-002",
-      "commentPacketId": "OTE-BODY-002"
-    }
+  "accepted": false,
+  "mutationProhibited": true,
+  "scenario": "surface-disagreement",
+  "evidence": {
+    "valid": false,
+    "violation": "child_and_comment_disagree",
+    "rawEvidence": true
   }
 }

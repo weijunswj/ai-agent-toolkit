@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-nonconvergence-third-amend",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "g4",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "third_amendment_nonconvergence"
+                 }
+}

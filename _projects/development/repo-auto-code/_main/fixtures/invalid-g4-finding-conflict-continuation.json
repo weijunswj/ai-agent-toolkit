@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-g4-finding-conflict-continuation",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "g4",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "conflicting_finding_continued_without_web"
+                 }
+}

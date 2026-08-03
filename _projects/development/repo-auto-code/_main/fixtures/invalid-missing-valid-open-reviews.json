@@ -1,23 +1,11 @@
 {
   "id": "invalid-missing-valid-open-reviews",
-  "scenario": "missing_valid_open_reviews",
-  "expected": {
-    "accepted": false,
-    "status": "COMPLETION_GATE_INCOMPLETE",
-    "mutationProhibited": true
-  },
-  "state": {
-    "requiredChecksComplete": true,
-    "protocolIndependentlyVerified": true,
-    "controllerGate": "CONTROLLER_ACCEPTED",
-    "liveFinalPrompt": false,
-    "pendingResult": false,
-    "mergePrerequisitesComplete": true,
-    "schedules": {
-      "tasks": [
-        { "identity": "repo-329-controller", "status": "REMOVED", "trustedRemovalReceipt": true, "receiptIdentityMatches": true },
-        { "identity": "repo-329-executor", "status": "REMOVED", "trustedRemovalReceipt": true, "receiptIdentityMatches": true }
-      ]
-    }
+  "accepted": false,
+  "mutationProhibited": true,
+  "scenario": "governance",
+  "evidence": {
+    "valid": false,
+    "violation": "missing_live_review_evidence",
+    "rawEvidence": true
   }
 }

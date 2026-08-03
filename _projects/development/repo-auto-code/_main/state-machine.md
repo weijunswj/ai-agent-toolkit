@@ -1,142 +1,28 @@
-# Repo-Scoped Scheduled Auto-Code Protocol: State Machine
+# Default-Off State Machine
 
-## 1. State vocabulary
+The state machine is descriptive source material. This PR does not install or activate it.
 
-The state machine is reconstructed per enrolled child/PR. A repository may have several independent lanes, but each lane has one packet and one claim state.
+| State | Entry guard | Allowed observation or action | Exit guard |
+| --- | --- | --- | --- |
+| INACTIVE | No explicit exact grant | No lease activity or mutation | Web issues an exact grant after reconciliation |
+| ADMITTED | Exact grant and capability proof | Bind route values, authority, scope, and fresh workspace | All raw surfaces still match |
+| RECONCILING | Material transition requested | Read child, PR, one parent entry, and chronology | Four-surface reconciliation is complete |
+| READY_FOR_WORK | Exact head and allowlist admitted | Worker may inspect and mutate only scope | Worker returns coherent commit evidence |
+| AMENDING | Candidate head differs from admitted head | Reconcile, validate, and preserve findings | New exact head is recorded |
+| PRE_G4 | Worker evidence is complete | Pre-G4 reviewer reports observations only | Web adjudication accepts review input |
+| G4_PENDING | Exact head has no valid verdict | Newly isolated technical review | Sole G4 returns PASS or AMEND |
+| G4_PASS_RETURN | Sole G4 PASS and web adjudication complete | Prepare assurance evidence | Assurance is eligible |
+| ASSURANCE_PENDING | G4 PASS plus ordinary web adjudication | Auditor returns CLEAR or CONCERN | CLEAR or web adjudicates CONCERN |
+| TERMINAL | All lifecycle sections and children are terminal | Report evidence to web; no next-task selection | Explicit separate grant is required for any future work |
 
-| State | Meaning | Allowed next state |
-| --- | --- | --- |
-| `DISABLED` | No repository-scoped auto-code preparation or schedules are active | `PREPARED`, `INVALID` |
-| `PREPARED` | Consent, skill, managed block, parent/child structure, and prompts are inspectable; schedules are still user-created | `ENROLLED`, `DISABLED`, `INVALID` |
-| `MANUAL_ONLY` | PR is observable but not explicitly enrolled | `ENROLLED` only after controller/user reconciliation, or remain manual |
-| `ENROLLED` | Parent, child, and PR markers agree for one lane | `CONTROLLER_TURN`, `HELD`, `COMPLETED` |
-| `CONTROLLER_TURN` | Controller must reconcile state or publish the next packet | `DRAFT`, `WAITING_CHECKS`, `WAITING_USER`, `HELD`, `COMPLETED` |
-| `DRAFT` | Canonical child handoff exists but is explicitly non-actionable | `READY_EXECUTOR`, `HELD`, `INVALID` |
-| `READY_EXECUTOR` | Packet and all bindings were reread and agree | `CLAIMING`, `HELD`, `INVALID` |
-| `CLAIMING` | Executor is verifying the packet-scoped atomic claim | `EXECUTOR_TURN`, `HELD`, `INVALID` |
-| `EXECUTOR_TURN` | One L1 executor is acting under a verified claim | `RESULT_PENDING`, `HELD`, `INVALID` |
-| `RESULT_PENDING` | Executor evidence exists but controller reconciliation is incomplete | `CONTROLLER_TURN`, `HELD`, `INVALID` |
-| `WAITING_CHECKS` | Required checks or exact-head evidence are pending | `CONTROLLER_TURN`, `HELD`, `INVALID` |
-| `WAITING_USER` | Safe private user action is required | `CONTROLLER_TURN`, `DISABLED`, `HELD` |
-| `HELD` | Ambiguous, stale, conflicting, unavailable, or potentially destructive state needs repair | `CONTROLLER_TURN`, `MANUAL_ONLY`, `DISABLED`, `INVALID` |
-| `COMPLETED` | All completion gates pass and no live prompt remains; scheduler finality is checked separately | `DISABLED` only after explicit schedule teardown reaches `REMOVED` |
-| `INVALID` | Fail-closed state requiring exact repair; no substantive mutation | `PREPARED`, `HELD`, or `DISABLED` after repair |
-| `PARENT_RECONCILIATION_INCOMPLETE` | The parent lifecycle entry or four-surface read-back is missing, duplicate, stale, conflicting, partially written, concurrently changed, or unverifiable | No worker prompt, pickup, claim, G4, acceptance, ready-state mutation, substantive execution, new commit, push, external mutation, merge, closure, next-task selection, verification claim, or programme completion; preserve safe local evidence and controller/user repair only |
+Guards apply on every transition:
 
-The capability lifecycle labels below are distinct evidence states and must never be collapsed into one another. The operational states in the table above are substates and cannot skip a lifecycle prerequisite:
-
-| Lifecycle label | Required evidence | It is not equivalent to |
-| --- | --- | --- |
-| `SETUP` | An explicit repository-scoped setup operation is in progress; no capability is enabled yet | `PREPARED` or `SCHEDULED` |
-| `PREPARED` | Consent, inspectable source, managed block, parent/child structure, and prompts are valid; task identities remain user-created | `SCHEDULED`, `ENROLLED`, or `CLAIMED` |
-| `SCHEDULED` | Both exact user-created task identities are verified for this repository and are runnable; prepared prompts alone never set this state | `ENROLLED` or `RUNNING` |
-| `ENROLLED` | Parent, child, and PR binding blocks agree for one lane | `CLAIMED` or `RUNNING` |
-| `CLAIMED` | A trusted atomic read-back verifies one capability-issued lease bound to the packet, executor run, and observed head | `CLAIMING` before verification or `RUNNING` |
-| `RUNNING` | The assigned L1 executor is acting under the verified claim and within the assignment | `CLAIMED`, `ACCEPTED`, or `COMPLETED` |
-| `ACCEPTED` | The controller reconciled the result, committed state, exact head, checks, reviews, ledger, and user obligations; merge and teardown remain separate | A result merely existing, `RUNNING`, or `COMPLETE` |
-| `COMPLETE` | Finality gates pass, no live prompt/result/review obligation remains, and explicit teardown is complete | `ACCEPTED` or a prepared/scheduled prompt |
-
-`CLAIMING`, `EXECUTOR_TURN`, `RESULT_PENDING`, and `COMPLETED` remain useful operational states, but they are not permission to infer `CLAIMED`, `RUNNING`, `ACCEPTED`, or `COMPLETE` without the evidence above.
-
-## 2. Parent lifecycle and canonical queue
-
-The parent lifecycle is a single flat list with this exact operational flow:
-
-```text
-Active queue -> Current execution -> Completed or disposed
-```
-
-The canonical parent body order is `Queue authority`, `Current execution`, `Active queue`, optional repository-specific extensions, `Completed or disposed`, `Completion gate`, `Governance ownership`, and final `Mandatory parent reconciliation`. Current and active entries are ordinary bullets; only completed/disposed entries are checked Markdown checkboxes. Each material direct child appears exactly once across the three lifecycle sections.
-
-Pickup uses only top-to-bottom position in the flat active list. Numeric prefixes are optional. Category, recovery, priority, parallel, capability, and model-specific subqueues are forbidden. A blocked item remains in place; a skip is recorded in chronology without moving it. Only the owner or explicitly authorised governance actor may reorder the list. A missing, duplicate, moved, wrongly styled, or ambiguously ordered entry is `PARENT_RECONCILIATION_INCOMPLETE`.
-
-If the parent declares a final whole-programme audit, that entry must remain the last material item in `Active queue`. It is ineligible while any preceding material child is current, active, blocked-but-nonterminal, or otherwise nonterminal. First-eligible pickup skips it until all preceding work is terminal; a blocked-item skip records chronology without moving or reordering either item. Auto-code cannot select, move, rewrite, or remove the declaration early. Only explicit owner/controller authority may change it, and that change is itself a material transition requiring four-surface reconciliation.
-
-Starting work atomically moves one child from active to current. Terminal acceptance or disposal atomically moves it from current to completed/disposed. No current child may remain active, and no terminal child may remain current or active.
-
-## 3. Controller cycle
-
-Before each cycle, derive readiness for the exact repository. The two capabilities `github_issue_governance: enabled` and `repo_auto_code: enabled`, the healthy installed #299 governance skill, one canonical parent with the exact baseline, one lifecycle occurrence for every direct material child, agreeing parent/child/PR projections, no reconciliation or concurrent-movement blocker, and an actor authorised for the exact role are all required. A missing or unverifiable prerequisite returns `AUTO_CODE_GOVERNANCE_UNREADY` and prohibits claim, pickup, prompt issuance, governance repair by an ordinary worker, substantive execution, G4, acceptance, merge, and next-task selection. Governance/setup repair is limited to the web controller or an explicitly assigned governance/setup executor using the same installed skill and contract.
-
-Each fresh controller run performs this order for all lanes:
-
-1. Verify exact repository identity, protocol version, consent, skill inspectability, managed block, and schedule identity. If a second controller or executor schedule is found, fail the affected repository setup and preserve both task records for user repair.
-2. Re-read parent, child, PR bodies, canonical comments, pointers, commits, live heads, checks, reviews, and claim records. Reconcile partial writes rather than assuming a previous call was atomic.
-3. Reconcile matching executor results. A result without the expected committed state or exact head becomes `HELD`; it is not accepted by its existence.
-4. Sweep every relevant review conversation across open, closed, and merged PRs. Disposition or carry every valid finding before publishing a new packet.
-5. Reconcile `main` movement, same-PR user commits, other-PR dependencies, forbidden overlap, worktree contamination, and possible unpushed work.
-6. If checks are pending, enter `WAITING_CHECKS`. If user or private context is required, enter `WAITING_USER`. If the child is complete and has no live prompt, take no action.
-7. Validate the canonical parent baseline, one flat lifecycle list, exact child count, row style, current/active exclusivity, and queue order before any pickup. Reconcile every material transition through the four-surface compare-and-preserve contract and append one chronology comment.
-8. If parent reconciliation is incomplete, enter `PARENT_RECONCILIATION_INCOMPLETE` and stop all downstream progression. Do not select a next task, issue a worker prompt, claim, authorise G4, mark ready, accept, merge, close, claim verification, or perform substantive execution. If the blocker appears after a prompt or claim, L1 stops before mutation, preserves safe local evidence, and performs no new commit, push, or external mutation until the controller reconciles.
-9. For an actionable enrolled lane, use the parent list position. Continue current execution before selecting the first eligible active entry. Never select by PR number, recency, author, branch prefix, category, or a parallel subqueue.
-10. Generate exactly one complete packet, post it as child `DRAFT`, bind parent/child/PR, reread, and mark `READY_EXECUTOR` last. A failed reread leaves the lane non-actionable.
-11. After a controller result is reconciled, redact only the transient next-worker payload. Preserve the full audit and executor evidence.
-
-## 4. Executor cycle
-
-Every fresh executor run:
-
-1. Reconstructs live state and finds at most one current `READY_EXECUTOR` packet for the selected repository/lane.
-2. Verifies exact packet grammar, current Gate/Design Lock, parent/child/PR identity, all three bindings, current head, review findings, checks, and no contradictory packet.
-3. L0 calls `createIfAbsent` exactly once and reads back the resulting record. L1 verifies that existing record and never calls `createIfAbsent`; comment claims and expired leases are insufficient. A `created: false` result, failed read-back, or identity/head mismatch enters `HELD` without code mutation. If the primitive is unavailable, return the exact protocol response defined in `protocol.md` without code mutation.
-4. Verifies that the live PR head equals the observed starting head or that the controller-authorised adoption rule is satisfied. A head movement invalidates old G4 and requires fresh inspection.
-5. Performs only the assigned implementation/amendment. It preserves bounded user work, uses no force-push or history rewrite, and stops on scope, authority, architecture, secret, or worktree ambiguity.
-6. Runs the assigned validation, records the exact head and commit, and emits one complete ETO result. It does not mutate issues, reviews, the ledger, or merge state.
-7. Stops. The controller determines the next turn after reconciling the result.
-
-## 5. Turn rules and lane independence
-
-The exact turn rules are:
-
-- Ready controller packet without matching result: executor turn.
-- Matching executor result not reconciled: controller turn.
-- No packet with actionable child: controller turn.
-- Pending checks: `WAITING_CHECKS`.
-- User action required: `WAITING_USER`.
-- Missing required worker profile: blocked.
-- Duplicate or contradictory authority: affected lane fails closed.
-- Completed child with no live prompt: no action.
-
-Independent enrolled PRs have independent packets, claims, heads, reviews, and results. Default substantive capacity is one L1 worker. More than one requires truthful harness capacity and explicit user configuration. Capacity exhaustion holds the selected lane without changing its authority; unrelated lanes may continue only if their dependencies and capacity rules allow it.
-
-## 6. Manual and concurrent work transitions
-
-| Event | Deterministic response |
-| --- | --- |
-| User changes another PR | Preserve it; continue only if dependency, base, architecture, and scope are unchanged |
-| User fast-forwards the same PR before claim | Re-read every intervening commit and inspect the complete line-by-line diff; adopt only if applicable and authorised |
-| User changes the same PR during execution | Stop at a safe boundary, preserve local work, compare exact commits/diff, integrate only clear compatible changes, rerun affected validation |
-| Canonical `main` moves | Reconcile the Design Lock/base relation; invalidate affected G4 and hold if the assignment is no longer exact |
-| Architecture conflicts | Hold only the affected lane and request controller G1/G2 reconciliation |
-| Forbidden-scope overlap | Do not mutate the overlap; report exact files and keep unrelated lanes independent when safe |
-| Ambiguous intent | `WAITING_USER`; do not choose for the user |
-| Worktree contamination | Preserve bounded local files, do not reset/delete, and hold until ownership is reconciled |
-| Possible unpushed worker work | Controller inspects local worktree, live head, claim, and evidence before claim retirement/supersession |
-
-Every accepted same-PR head movement requires new focused validation and fresh exact-head G4. No prior G4 is reusable after any head movement.
-
-## 7. Review and redaction transitions
-
-New reviews arriving mid-run cause the controller to sweep and disposition them before the next prompt, G4, acceptance, merge, closure, or next-task selection. A valid open finding appears in the next applicable worker prompt while remediation or verification is pending.
-
-After a result is reconciled, the controller edits only the transient next-worker payload to the exact redaction marker defined in `protocol.md`. The audit chronology, executor evidence, IDs, heads, validation, review dispositions, and durable links remain. The lane cannot enter `COMPLETED` while an unconsumed live prompt or unprocessed result exists.
-
-## 8. Completion and teardown
-
-The controller may mark a lane complete only when:
-
-- no live next-worker prompt remains;
-- no executor result is unprocessed;
-- no valid review obligation is unresolved;
-- `validOpenReviews === 0` has been freshly verified;
-- required checks are complete and passing;
-- protocol and exact-head evidence are independently read back and do not rely on a ledger entry proving itself;
-- no child, UAT, ledger, or user-action obligation is pending;
-- parent, child, and PR state agree;
-- the gate is `CONTROLLER_ACCEPTED`, not merely authorised, running, or result received;
-- exact-head acceptance is current; and
-- the controller has performed the final complete review sweep.
-
-Repository capability teardown is a separate transition. It requires explicit current user instruction to remove both schedules. The user, not setup, performs or authorises removal. The controller verifies both exact task identities belong to this repository, confirms no other repository is affected, and obtains a trusted removal receipt for each identity. The only terminal scheduler evidence state is `REMOVED`; `DISABLED`, `PAUSED`, `ACTIVE`, `DUPLICATE`, `AMBIGUOUS`, partially removed, or missing without a trusted removal receipt remains incomplete and blocks final completion. The managed block is removed/archived only through its source-owned repair path after both removals are verified.
-
-The scheduler evidence distinction is strict: prepared prompts are not schedules, a schedule is not a claim, a claim is not running, a result is not controller acceptance, and controller acceptance is not merge or teardown. No state proves its own prerequisite.
+- A changed head invalidates every prior G4 verdict.
+- Missing or invalid activation returns CLOSURE_LEASE_NOT_ACTIVATED.
+- Missing capability returns UNSUPPORTED_DELEGATION.
+- Authority movement returns EXACT_AUTHORITY_MOVEMENT.
+- Incomplete four-surface reconciliation returns PARENT_RECONCILIATION_INCOMPLETE.
+- Scope expansion returns SCOPE_AMBIGUITY.
+- Expiry stops activity and never transfers ownership.
+- Completion, merge, eligibility, queue position, and issue wording cannot activate or select a next task.
+- Installation and scheduling are not transitions in this source-only PR.

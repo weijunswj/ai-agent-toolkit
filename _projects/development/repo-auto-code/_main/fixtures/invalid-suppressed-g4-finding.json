@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-suppressed-g4-finding",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "g4",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "manager_suppresses_finding"
+                 }
+}

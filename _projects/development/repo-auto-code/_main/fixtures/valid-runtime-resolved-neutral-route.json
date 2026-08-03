@@ -1,0 +1,24 @@
+{
+    "id":  "valid-runtime-resolved-neutral-route",
+    "accepted":  true,
+    "mutationProhibited":  false,
+    "scenario":  "runtime-neutral-route",
+    "evidence":  {
+                     "valid":  true,
+                     "rawEvidence":  true,
+                     "proof":  {
+                                   "provider":  "synthetic-provider-7",
+                                   "canonicalBaseModel":  "opaque-base-3",
+                                   "reasoningOrEffort":  "effort-medium",
+                                   "referenceFamilyReasoningEquivalent":  "reference-high",
+                                   "solEquivalentReasoning":  "equivalent-high",
+                                   "harnessAdapter":  "adapter-opaque-2",
+                                   "surface":  "surface-clean",
+                                   "role":  "implementation-worker",
+                                   "exactAuthority":  "authority-a",
+                                   "fastMode":  "prohibited",
+                                   "substitution":  "prohibited",
+                                   "capabilityProof":  true
+                               }
+                 }
+}

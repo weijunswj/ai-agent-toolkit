@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-model-limit-continuation",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "capability",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "model_limit_continued"
+                 }
+}

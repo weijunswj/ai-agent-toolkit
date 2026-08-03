@@ -1,0 +1,16 @@
+{
+    "id":  "valid-interrupted-session-recovery",
+    "accepted":  true,
+    "mutationProhibited":  false,
+    "scenario":  "interrupted-recovery",
+    "evidence":  {
+                     "valid":  true,
+                     "rawEvidence":  true,
+                     "proof":  {
+                                   "priorActivityStopped":  true,
+                                   "expiryTransfersOwnership":  false,
+                                   "newExactGrant":  true,
+                                   "freshIsolation":  true
+                               }
+                 }
+}

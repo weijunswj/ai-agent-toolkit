@@ -1,6 +1,0 @@
-{
-  "id": "invalid-missing-handoff-marker",
-  "scenario": "missing_handoff_marker",
-  "expected": { "accepted": false, "status": "MALFORMED_HANDOFF_MARKER", "mutationProhibited": true },
-  "state": { "promptText": "[ ORCHESTRATOR TO EXECUTOR: START ]\nassignment\n[ ORCHESTRATOR TO EXECUTOR: END ]\n[ EXECUTOR TO ORCHESTRATOR: START ]\nresult" }
-}

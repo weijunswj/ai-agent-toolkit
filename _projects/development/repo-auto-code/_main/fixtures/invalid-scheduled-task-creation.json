@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-scheduled-task-creation",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "cleanup",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "scheduled_task_creation"
+                 }
+}

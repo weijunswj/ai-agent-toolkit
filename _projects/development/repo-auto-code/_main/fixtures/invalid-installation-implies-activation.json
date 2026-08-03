@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-installation-implies-activation",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "activation",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "installation_used_as_grant"
+                 }
+}

@@ -1,6 +1,0 @@
-{
-  "id": "invalid-crossed-handoff-markers",
-  "scenario": "crossed_handoff_markers",
-  "expected": { "accepted": false, "status": "MALFORMED_HANDOFF_MARKER", "mutationProhibited": true },
-  "state": { "promptText": "[ ORCHESTRATOR TO EXECUTOR: START ]\n[ EXECUTOR TO ORCHESTRATOR: START ]\n[ ORCHESTRATOR TO EXECUTOR: END ]\n[ EXECUTOR TO ORCHESTRATOR: END ]" }
-}

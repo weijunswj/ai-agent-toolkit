@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-nonconvergence-same-root-cause",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "g4",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "same_root_cause_nonconvergence"
+                 }
+}

@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-manager-g4-override",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "g4",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "manager_overrides_g4"
+                 }
+}

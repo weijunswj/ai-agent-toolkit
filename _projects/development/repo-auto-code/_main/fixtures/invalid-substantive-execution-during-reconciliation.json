@@ -1,12 +1,11 @@
 {
   "id": "invalid-substantive-execution-during-reconciliation",
-  "scenario": "substantive_execution_during_reconciliation",
-  "expected": { "accepted": false, "status": "PARENT_RECONCILIATION_INCOMPLETE", "mutationProhibited": true },
-  "state": {
-    "blocker": "PARENT_RECONCILIATION_INCOMPLETE",
-    "promptIssued": true,
-    "claimIssued": true,
-    "attemptedActions": ["substantive execution", "new commit", "push", "external mutation"],
-    "mutation": { "stopBeforeMutation": true, "localEvidencePreserved": true, "newCommit": false, "push": false, "externalMutation": false, "gate": "HELD" }
+  "accepted": false,
+  "mutationProhibited": true,
+  "scenario": "reconciliation",
+  "evidence": {
+    "valid": false,
+    "violation": "substantive_work_during_incomplete_reconciliation",
+    "rawEvidence": true
   }
 }

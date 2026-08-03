@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-auto-review-mutation",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "governance",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "auto_review_mutation"
+                 }
+}

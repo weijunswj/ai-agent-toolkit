@@ -1,0 +1,17 @@
+{
+    "id":  "valid-web-assurance-clear",
+    "accepted":  true,
+    "mutationProhibited":  false,
+    "scenario":  "assurance-clear",
+    "evidence":  {
+                     "valid":  true,
+                     "rawEvidence":  true,
+                     "proof":  {
+                                   "g4Verdict":  "PASS",
+                                   "webAdjudicated":  true,
+                                   "assuranceVerdict":  "CLEAR",
+                                   "authoritativeG4Count":  1,
+                                   "mergeAuthorisedByAssurance":  false
+                               }
+                 }
+}

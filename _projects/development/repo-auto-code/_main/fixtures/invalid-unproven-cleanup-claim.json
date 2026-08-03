@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-unproven-cleanup-claim",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "cleanup",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "cleanup_not_proven"
+                 }
+}

@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-automatic-next-task-activation",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "continuation",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "automatic_next_task_activation"
+                 }
+}

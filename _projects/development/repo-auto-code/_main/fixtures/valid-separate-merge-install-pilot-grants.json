@@ -1,0 +1,17 @@
+{
+    "id":  "valid-separate-merge-install-pilot-grants",
+    "accepted":  true,
+    "mutationProhibited":  false,
+    "scenario":  "distinct-grants",
+    "evidence":  {
+                     "valid":  true,
+                     "rawEvidence":  true,
+                     "proof":  {
+                                   "designMergeGrant":  "grant-design",
+                                   "installationGrant":  "grant-install",
+                                   "closureLeaseGrant":  "grant-lease",
+                                   "pilotGrant":  "grant-pilot",
+                                   "nonInterchangeable":  true
+                               }
+                 }
+}

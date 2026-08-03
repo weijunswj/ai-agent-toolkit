@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-second-pilot-activation",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "pilot",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "second_pilot_activation"
+                 }
+}
