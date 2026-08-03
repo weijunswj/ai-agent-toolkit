@@ -32,7 +32,9 @@ Every rendered contract requires these runtime values:
 - Role.
 - Exact repository and file scope.
 - Exact base, head, tree, merge-base, Design Lock, branch, PR, review, and parent authority.
-- Fast mode prohibited.
+- Assignment source and assignment evidence locator.
+- Fresh subordinate run ID and fresh workspace evidence locator.
+- Fast mode and delegation admission values rendered from the structured current-turn grant.
 - Route/model/harness substitution prohibited.
 
 ## Admission, activation, and isolation
@@ -61,11 +63,11 @@ Only after G4 PASS and ordinary web adjudication may the independent assurance a
 
 ## Exact-head review identity and closure loop
 
-The external-review trigger identity is the tuple repository + PR + exact head SHA + external-review capability. A review is usable only when raw review evidence binds all four values to the current exact head, proves the external-review capability, and gives one unambiguous pending or completed state. Unbound, ambiguous, stale, or otherwise unusable review evidence never satisfies the gate.
+The external-review trigger identity is the tuple repository + PR + exact head SHA + external-review capability. A review is usable only when authoritative hosted evidence proves the supported review type, actor, and mechanism, binds all four identity values to the current exact head, and gives exactly one unambiguous pending or completed state. Candidate-supplied labels, capability strings, and `rawEvidence` flags are not capability proof. Unbound, duplicate, ambiguous, stale, or otherwise unusable review evidence never satisfies the gate.
 
 For one unchanged identity, one usable pending review suppresses another trigger. One usable completed review is consumed for that identity; its findings are adjudicated without retriggering another review on the same head. Review or model limit exhaustion returns REVIEW_LIMIT_EXHAUSTED and never implies review success. A materially amended head creates a new identity and requires one new usable external review and one newly isolated authoritative G4.
 
-The authoritative G4 reviewer is the sole technical source of PASS or AMEND and never implements repository changes. During every AMEND cycle it returns one complete finding batch to the closure manager and must not reply to or resolve review threads. Only after technical PASS on the final exact head may that reviewer issue a bounded, evidence-backed technical reply; every review thread remains unresolved, and the reviewer never marks ready, accepts, merges, closes, deletes a branch, installs, activates a pilot, or selects another task.
+The authoritative G4 reviewer is the sole technical source of PASS or AMEND and never implements repository changes. During every AMEND cycle it returns one complete finding batch to the closure manager and must not reply to or resolve review threads. Only when the phase is explicitly FINAL, the verdict is PASS, and every final exact-head prerequisite is satisfied may that reviewer issue a bounded, evidence-backed technical reply; every review thread remains unresolved, and the reviewer never marks ready, accepts, merges, closes, deletes a branch, installs, activates a pilot, or selects another task.
 
 After final exact-head technical PASS, web must independently reread and verify the exact repository, branch, base, head, tree, complete commit graph, cumulative diff, file allowlist, source-only boundary, local validation, hosted checks, every review submission and thread, every finding-to-code/test/evidence mapping, and the absence of authority or governance movement. Assurance is ineligible until that web verification is complete.
 
@@ -85,13 +87,15 @@ The design remains uninstalled, unscheduled, and inactive in this PR. Source out
 
 This three-surface topology is target behaviour only after separate source acceptance, design merge, toolkit installation, and explicit activation. A source change is not source acceptance. Source acceptance, design merge, installation, and activation are distinct non-interchangeable grants; none implies another. This source-only PR remains uninstalled, unscheduled, inactive, and unable to activate these surfaces.
 
+When any adoption or activation grant is incomplete, the controller must first prove that no active or persistent surface exists; a present surface is a topology failure, not benign source-only inactivity. After activation, persistent topology contains exactly one Web Orchestrator and one Executor-root, no unknown surface type, and no extra persistent surface. The Temporary Chat is the separately admitted third surface only after final exact-head PASS and Web verification.
+
 ### Surface 1 - Persistent Web Orchestrator
 
 Exactly one persistent Web Orchestrator exists for each governed task or PR. It exclusively owns architecture, Design Locks, provider/model/reasoning assignment, dispatch, hosted governance, review disposition, exact-head acceptance, assurance eligibility, ready state, merge, closure, branch deletion, installation, activation, and next-task selection. No other surface or identity acquires controller authority.
 
 ### Surface 2 - Persistent Executor-root
 
-Exactly one persistent Executor-root exists for each governed task or PR after adoption and activation. It coordinates only prompt-bounded implementation, amendment, pre-G4, and G4 runs. Each subordinate run starts fresh in its own independently clean exact-authority worktree or equivalent isolated checkout. The Executor-root may collect and reconcile evidence packets, but persistence does not authorize implementation, controller decisions, hosted governance, thread replies or resolution, acceptance, ready state, merge, closure, installation, activation, or next-task selection.
+Exactly one persistent Executor-root exists for each governed task or PR after adoption and activation. It coordinates only prompt-bounded implementation, amendment, pre-G4, and G4 runs. The subordinate run kind allowlist is exactly implementation, amendment, pre-G4, and technical G4. Every subordinate run starts fresh in its own independently clean exact-authority worktree or equivalent isolated checkout. The Executor-root may collect and reconcile evidence packets, but persistence does not authorize implementation, controller decisions, hosted governance, thread replies or resolution, acceptance, ready state, merge, closure, installation, activation, or next-task selection.
 
 The Executor-root consumes a complete assignment resolved by the Web Orchestrator; it cannot select, infer, recommend, combine, or replace a model, provider, reasoning level, role, harness, surface, or authority. Model, role, reasoning, and surface identity never grant controller authority.
 
@@ -123,13 +127,13 @@ The final-head assurance order is mandatory for every final exact-head technical
 2. Web independently verifies the complete bounded exact-head evidence universe.
 3. Web creates exactly one fresh Web Temporary Chat for that exact head.
 
-The Temporary Chat is separate from the Web Orchestrator, Executor-root, implementation or amendment runs, and technical G4 run. It independently assesses bounded exact-head evidence and must not treat a G4 packet or reviewer self-attestation as proof. Its record contains the G4 execution identity, its own Web execution identity, and an explicit cross-provider/model diversity record when the identities differ. Diversity is informative only: the Temporary Chat remains mandatory when both executions use the same model family. It may return `CONCERN` after G4 `PASS`, so G4 `PASS` is necessary but insufficient for `CLEAR`.
+The Temporary Chat is separate from the Web Orchestrator, Executor-root, implementation, amendment, and technical G4 runs. It independently assesses bounded exact-head evidence and must not treat a G4 packet or reviewer self-attestation as proof. Both its G4 and Web execution identities must include provider, canonical model, reasoning, assignment source/provenance, role, surface, and exact head. Its record must explicitly list separation from every prohibited context and contain a cross-provider/model diversity record. Diversity is informative only: the Temporary Chat remains mandatory when both executions use the same model family. It may return `CONCERN` after G4 `PASS`, so G4 `PASS` is necessary but insufficient for `CLEAR`.
 
 The Temporary Chat returns only `CLEAR` or `CONCERN`. It is not G5, does not replace G4, and has no GitHub, acceptance, ready, merge, closure, installation, activation, or next-task authority.
 
 ## Cumulative semantic invariants
 
-Every accepted safety property is a cumulative invariant. The machine-readable registry in `protocol.md` is the canonical contract; every record has an invariant ID, source authority, complete required semantics, candidate evidence, a negative test, status, and an authorising Design Lock. Later amendments and compression preserve each record unless a Design Lock names the invariant, states its replacement or disposal, and gives the rationale.
+Every accepted safety property is a cumulative invariant. The machine-readable registry in `protocol.md` is the canonical contract; every record has an invariant ID, source authority, complete required semantics, candidate evidence, a concrete executable or mechanically validated negative test, status, and an authorising Design Lock. Later amendments and compression preserve each record unless a Design Lock names the invariant, states a validated replacement or disposal contract, and gives the rationale. Parsed repeated findings and invariant records carry `regression_of` to a known source invariant ID. The evaluation-candidate evidence mapping is explicit and mechanically checked against the canonical template schema.
 
 Missing, incomplete, weakened, keyword-only, or otherwise non-semantic evidence returns `INVARIANT_REGRESSION`. Accepted review findings become permanent invariant obligations even after a thread is resolved, out-dated, or superseded. A repeated finding records `regression_of` rather than creating a disposable duplicate. Compression must pass both its mechanical budget/format gate and its independent semantic-invariant preservation gate.
 
@@ -137,7 +141,7 @@ Completion of exact-head external review is a material transition. Before any ne
 
 ## Default-deny execution admission and pre-launch hook
 
-Without an explicit current-turn structured grant, Fast is disabled and `Agent`, `spawn_agent`, subagents, and equivalent delegation are denied. Silence, prompt omission, generic speed wording, prior-turn permission, and standing permission do not grant either capability. Unsupported or unverifiable enforcement falls back to root-only Standard execution.
+Without an explicit current-turn structured grant, Fast is disabled and `Agent`, `spawn_agent`, subagents, and equivalent delegation are denied. Fast and delegation are separate permissions: both false means root-only Standard; Fast only means root-only Fast; delegation only keeps root and agents Standard; both true permits authorised agents to use Fast within the exact grant. Silence, prompt omission, generic speed wording, prior-turn permission, and standing permission do not grant either capability. Unsupported or unverifiable enforcement falls back to root-only Standard execution.
 
 Only the Web Orchestrator may create a short-lived, current-turn grant after an explicit current-turn user request. The grant is bound to the exact `run_id`, `session_id`, current `turn_id`, issuer, user-request proof, operation, `allow_fast`, `allow_agents`, maximum agent count, provider, canonical model, reasoning, expiry, consumption state, and `inheritance: false`. The grant is consumed only by the bound operation, cannot be replayed or inherited, and is invalid for another run, session, model, reasoning level, or agent count. The hook does not interpret natural-language speed phrases; the Web controller creates the structured grant only after the explicit request is verified.
 

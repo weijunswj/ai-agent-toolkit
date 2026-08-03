@@ -5,9 +5,9 @@
   "title": "Repo-Scoped Default-Off Closure-Lease Protocol",
   "module_path": "_projects/development/repo-auto-code",
   "main_path": "_projects/development/repo-auto-code/_main",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "version_policy": "semver",
-  "version_notes": "Amends the first-party source-only design to a generic role-and-capability closure-lease contract with exact default-off activation and fixture arithmetic of 112 total, 17 accepted, and 95 rejected.",
+  "version_notes": "Hardens the first-party source-only closure-lease contract through DL-329-AUTO-CODE-005-A6-C5 with raw-evidence fixture derivation, exact runtime admission, assurance identity separation, and cumulative invariant validation; fixture arithmetic remains 112 total, 17 accepted, and 95 rejected.",
   "outputs": [],
   "writes": {
     "allowed": [],

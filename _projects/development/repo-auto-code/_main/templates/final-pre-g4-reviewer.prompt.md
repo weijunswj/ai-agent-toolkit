@@ -13,7 +13,12 @@ Role: {{role}}
 Exact repository: {{repository}}
 Exact scope: {{scope}}
 Exact authority: {{authority}}
-Fast mode: prohibited
+Assignment source: {{assignment_source}}
+Assignment evidence locator: {{assignment_evidence_locator}}
+Fresh subordinate run ID: {{fresh_subordinate_run_id}}
+Fresh workspace evidence locator: {{fresh_workspace_evidence_locator}}
+Fast mode: {{fast_mode}}
+Delegation: {{delegation_mode}}
 Route substitution: prohibited
 
 Prove the review capability or return UNSUPPORTED_DELEGATION. Missing exact activation returns CLOSURE_LEASE_NOT_ACTIVATED.
@@ -45,6 +50,6 @@ The structural term is `technical G4 reviewer`; G4 is a technical-review functio
 
 Before reporting assurance eligibility, prove the sequence: final exact-head technical PASS, independent Web verification, then exactly one fresh Web Temporary Chat for that head. The Temporary Chat is a separate context from the Executor-root, implementation/amendment runs, and G4. It independently evaluates bounded evidence, records both execution identities and provider/model diversity when present, and remains mandatory for same-family routes. It returns only CLEAR or CONCERN and is not G5 or a replacement for G4. A G4 packet or self-attestation is not independent proof.
 
-Validate the cumulative invariant registry and both compression gates before handoff. A missing, partial, weakened, keyword-only, or stale invariant returns `INVARIANT_REGRESSION`; stale four-surface review reconciliation blocks the next prompt, G4, and finality.
+Validate the cumulative invariant registry and both compression gates before handoff. A missing, partial, weakened, keyword-only, stale, unexecuted-negative-test, invalid replacement/disposal, unknown `regression_of`, or unmapped evaluation-candidate invariant returns `INVARIANT_REGRESSION`; stale four-surface review reconciliation blocks the next prompt, G4, and finality.
 
 Fast and Agent/spawn_agent delegation remain denied without an exact current-turn structured grant created after an explicit user request. Do not interpret natural-language speed wording. Supported ordinary spawning requires an installed trusted verified pre-launch `PreToolUse` hook; `SubagentStart` is audit-only, and missing or unverified coverage falls back to root-only Standard mode. This source-only PR does not install the hook.

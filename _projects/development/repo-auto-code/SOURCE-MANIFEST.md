@@ -35,7 +35,7 @@ The manifest declares outputs as an empty array and writes.allowed as an empty a
 
 ## Fixture inventory
 
-Filesystem discovery is authoritative. The final universe is 112 fixtures: 17 accepted and 95 rejected. The arithmetic is 85 existing, minus 25 explicit deletions, plus 52 explicit additions. Every rejected fixture carries accepted:false and mutationProhibited:true, either as the current raw fixture fields or as the preserved legacy expected classification.
+Filesystem discovery is authoritative for the candidate universe. The trusted base-tree inventory is bound to the recorded base commit/tree; a shallow checkout must not reconstruct the baseline from candidate filenames. The final universe is 112 fixtures: 17 accepted and 95 rejected. The arithmetic is 85 existing, minus 25 explicit deletions, plus 52 explicit additions. The focused runner derives each outcome from scenario evidence and uses authored accepted/valid/violation/result fields only as regression assertions; rejected outcomes require mutation prohibition.
 
 The runner reconciles retained, deleted, and added names against the merge parent and rejects unexpected extras, duplicate IDs, missing additions, and undeleted retired files.
 

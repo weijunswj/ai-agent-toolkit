@@ -13,7 +13,12 @@ Role: {{role}}
 Exact repository: {{repository}}
 Exact scope: {{scope}}
 Exact authority: {{authority}}
-Fast mode: prohibited
+Assignment source: {{assignment_source}}
+Assignment evidence locator: {{assignment_evidence_locator}}
+Fresh subordinate run ID: {{fresh_subordinate_run_id}}
+Fresh workspace evidence locator: {{fresh_workspace_evidence_locator}}
+Fast mode: {{fast_mode}}
+Delegation: {{delegation_mode}}
 Route substitution: prohibited
 
 Before acting, prove all role capabilities. If a capability is unavailable, return UNSUPPORTED_DELEGATION. Missing exact activation returns CLOSURE_LEASE_NOT_ACTIVATED.
@@ -61,7 +66,7 @@ The Temporary Chat returns only `CLEAR` or `CONCERN`. It is not G5, does not rep
 
 ## Cumulative invariant gate
 
-Load and validate the cumulative invariant registry before every prompt, G4, finality, or compression transition. Each record must contain `invariant_id`, `source_authority`, complete `required_semantics`, `candidate_evidence`, `negative_test`, `status`, and `authorising_design_lock`. Missing, partial, weakened, keyword-only, or stale evidence returns `INVARIANT_REGRESSION`. Accepted review findings remain permanent obligations after thread resolution, outdating, or supersession; repeated findings record `regression_of`. Mechanical budget/format and semantic preservation are independent compression gates.
+Load and validate the cumulative invariant registry before every prompt, G4, finality, or compression transition. Each record must contain `invariant_id`, `source_authority`, complete `required_semantics`, `candidate_evidence`, a concrete executable or mechanically mapped `negative_test`, `status`, and `authorising_design_lock`. Missing, partial, weakened, keyword-only, or stale evidence returns `INVARIANT_REGRESSION`. Amended records validate their named replacement contract; removed records validate their named disposal contract. Accepted review findings remain permanent obligations after thread resolution, outdating, or supersession; repeated parsed findings record `regression_of` to a known invariant. Mechanical budget/format and semantic preservation are independent compression gates, including the explicit evaluation-candidate schema mapping.
 
 Exact-head external-review completion is material only after reconciling the child body, PR body, exactly one parent entry, and one new parent chronology comment. Stale review state blocks the next prompt, technical G4, and finality.
 

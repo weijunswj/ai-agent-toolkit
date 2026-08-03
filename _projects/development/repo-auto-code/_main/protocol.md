@@ -17,7 +17,12 @@ Required fields:
 - Exact repository: {{repository}}
 - Exact scope: {{scope}}
 - Exact authority: {{authority}}
-- Fast mode: prohibited
+- Assignment source: {{assignment_source}}
+- Assignment evidence locator: {{assignment_evidence_locator}}
+- Fresh subordinate run ID: {{fresh_subordinate_run_id}}
+- Fresh workspace evidence locator: {{fresh_workspace_evidence_locator}}
+- Fast mode: {{fast_mode}}
+- Delegation: {{delegation_mode}}
 - Route substitution: prohibited
 
 The prompt carries the exact Design Lock, branch, PR, merge base, base commit, admitted head, tree, parent entry, review state, requested-reviewer state, and live body hashes. Omitted, generic, conflicting, or stale values fail admission.
@@ -44,7 +49,7 @@ Fixture projections, fallback bodies, declared readiness, declared completion, m
 
 ## A4 exact-head review and assurance contract
 
-Before an external review is requested or consumed, bind its identity to repository + PR + exact head SHA + external-review capability. Raw evidence must prove the exact binding, capability, and one unambiguous pending or completed state. An unusable, stale, unbound, or ambiguous review does not satisfy the gate. On an unchanged identity, a usable pending review suppresses a duplicate trigger; a usable completed review is consumed and its findings are adjudicated without retriggering. Review or model limit exhaustion returns REVIEW_LIMIT_EXHAUSTED, never PASS. A changed head creates a new identity and requires a new usable external review and a newly isolated G4.
+Before an external review is requested or consumed, bind its identity to repository + PR + exact head SHA + external-review capability. Authoritative hosted evidence must prove the supported review type, actor, and mechanism; candidate labels, `rawEvidence`, and capability strings are not capability proof. The exact identity must have exactly one usable pending or completed state. An unusable, stale, unbound, duplicate, or ambiguous review does not satisfy the gate. On an unchanged identity, one usable pending review suppresses a duplicate trigger; one usable completed review is consumed and its findings are adjudicated without retriggering. Review or model limit exhaustion returns REVIEW_LIMIT_EXHAUSTED, never PASS. A changed head creates a new identity and requires a new usable external review and a newly isolated G4.
 
 A technical G4 reviewer runs in a newly isolated context and is the sole source of PASS or AMEND for one exact head. It never implements repository changes. During every AMEND cycle it sends one complete finding batch to the closure manager and must not reply to or resolve review threads. Only after technical PASS on the final exact head may it send a bounded, evidence-backed technical reply; all threads remain unresolved. It never marks ready, accepts, merges, closes, deletes a branch, installs, activates a pilot, or selects another task. A changed head invalidates the prior verdict and requires a fresh G4. Findings remain binding. The closure manager cannot suppress, overrule, reinterpret, or self-accept.
 
@@ -72,7 +77,7 @@ The three-surface lifecycle begins only after separate source acceptance, design
 
 The Web Orchestrator is the sole persistent controller surface and exactly one exists per governed task or PR. It owns architecture, Design Locks, assignment resolution, dispatch, hosted governance, review disposition, exact-head acceptance, assurance eligibility, ready state, merge, closure, installation, activation, and next-task selection. The Executor-root and Temporary Chat never acquire those powers.
 
-After adoption and activation, exactly one persistent Executor-root coordinates prompt-bounded implementation, amendment, pre-G4, and G4 runs. Every subordinate run starts fresh with a newly resolved assignment and an independently clean exact-authority worktree. The root only collects and reconciles evidence packets; persistence is not implementation or governance authority. A retained, dirty, inherited, or ambiguous workspace returns SURFACE_TOPOLOGY_INVALID.
+After adoption and activation, exactly one persistent Executor-root coordinates prompt-bounded implementation, amendment, pre-G4, and G4 runs. Every subordinate run starts fresh with a newly resolved assignment and an independently clean exact-authority worktree. The admitted subordinate role allowlist is exactly `implementation`, `amendment`, `pre-g4`, and `technical-g4`; any other run kind returns SURFACE_TOPOLOGY_INVALID. The root only collects and reconciles evidence packets; persistence is not implementation or governance authority. A retained, dirty, inherited, or ambiguous workspace returns SURFACE_TOPOLOGY_INVALID.
 
 A fresh Web Temporary Chat is eligible only after final exact-head technical PASS and independent Web verification. It is read-only and returns exactly CLEAR or CONCERN. It cannot return PASS or AMEND, mutate hosted governance, authorise merge, or select work.
 
@@ -94,7 +99,7 @@ The Temporary Chat returns only `CLEAR` or `CONCERN`. It is not G5, does not rep
 
 ## Cumulative semantic invariant registry
 
-The following JSON block is the machine-readable cumulative source contract. Every record must retain all seven fields. `required_semantics` and `candidate_evidence` are complete semantic bundles, not keyword lists. A missing field, missing bundle member, weakened description, keyword-only substitute, or negative-test mismatch returns `INVARIANT_REGRESSION`.
+The following JSON block is the machine-readable cumulative source contract. Every record must retain all seven fields. `required_semantics` and `candidate_evidence` are complete semantic bundles, not keyword lists. A missing field, missing bundle member, weakened description, keyword-only substitute, or negative-test mismatch returns `INVARIANT_REGRESSION`. A record with status `amended` must carry `design_lock_change.replacement` with a replacement invariant ID, semantic/evidence bundles, and its concrete negative-test reference; a record with status `removed` must carry `design_lock_change.disposal` with the invariant ID, disposal contract reference, and reason. Those contracts are validated instead of requiring the superseded semantic bundle byte-for-byte. Repeated parsed findings or invariant records must carry `regression_of` to a known invariant ID.
 
 ```json
 {
@@ -113,7 +118,7 @@ The following JSON block is the machine-readable cumulative source contract. Eve
         {"semantic_id": "processor_authored_receipt", "evidence_fields": ["processor_id", "receipt_author"]},
         {"semantic_id": "canonical_durable_readback", "evidence_fields": ["canonical_ledger_ref", "durable_readback", "readback_digest"]}
       ],
-      "negative_test": "C4 rejects an AUTH-LEDGER-RECEIPT-001 candidate with any receipt semantic omitted",
+        "negative_test": "repo/tests/repo-auto-code-design.test.cjs::negative::AUTH-LEDGER-RECEIPT-001",
       "status": "preserved",
       "authorising_design_lock": "DL-329-AUTO-CODE-005-A6-C4"
     },
@@ -126,7 +131,12 @@ The following JSON block is the machine-readable cumulative source contract. Eve
       "candidate_evidence": [
         {"semantic_id": "candidate_identity_and_result", "evidence_fields": ["run_id", "provider", "base_model", "role", "revision", "result", "evidence"]}
       ],
-      "negative_test": "C4 rejects a SCHEMA-EVAL-CANDIDATE-001 candidate missing any required evaluation field",
+        "negative_test": "repo/tests/repo-auto-code-design.test.cjs::negative::SCHEMA-EVAL-CANDIDATE-001",
+        "candidate_schema_mapping": {
+          "base_model": "canonical_base_model",
+          "revision": "source_revision",
+          "result": "technical_result"
+        },
       "status": "preserved",
       "authorising_design_lock": "DL-329-AUTO-CODE-005-A6-C4"
     },
@@ -141,7 +151,7 @@ The following JSON block is the machine-readable cumulative source contract. Eve
         {"semantic_id": "authorised_repository", "evidence_fields": ["repository", "ownership_or_authorisation", "authorisation_evidence"]},
         {"semantic_id": "relevant_task_work", "evidence_fields": ["task_id", "relevant_work", "scope_binding"]}
       ],
-      "negative_test": "C4 rejects SCOPE-GOV-TRACKING-001 when ownership or relevant task work is absent",
+        "negative_test": "repo/tests/repo-auto-code-design.test.cjs::negative::SCOPE-GOV-TRACKING-001",
       "status": "preserved",
       "authorising_design_lock": "DL-329-AUTO-CODE-005-A6-C4"
     },
@@ -158,7 +168,7 @@ The following JSON block is the machine-readable cumulative source contract. Eve
         {"semantic_id": "compare_and_preserve", "evidence_fields": ["comparison_digest", "unrelated_content_preserved", "order_preserved"]},
         {"semantic_id": "write_and_reread", "evidence_fields": ["write_digest", "post_write_readback", "readback_revision"]}
       ],
-      "negative_test": "C4 rejects CONCURRENCY-GOV-WRITE-001 when reread, compare, preservation, write, or readback is missing",
+        "negative_test": "repo/tests/repo-auto-code-design.test.cjs::negative::CONCURRENCY-GOV-WRITE-001",
       "status": "preserved",
       "authorising_design_lock": "DL-329-AUTO-CODE-005-A6-C4"
     },
@@ -173,7 +183,7 @@ The following JSON block is the machine-readable cumulative source contract. Eve
         {"semantic_id": "four_surface_reconciliation", "evidence_fields": ["child_body", "pr_body", "parent_entry_count", "parent_chronology_comment"]},
         {"semantic_id": "stale_state_blocks_progression", "evidence_fields": ["review_state_fresh", "next_prompt_allowed", "g4_allowed", "finality_allowed"]}
       ],
-      "negative_test": "C4 rejects REVIEW-STATE-RECONCILIATION-001 when any governance surface is absent or stale",
+        "negative_test": "repo/tests/repo-auto-code-design.test.cjs::negative::REVIEW-STATE-RECONCILIATION-001",
       "status": "preserved",
       "authorising_design_lock": "DL-329-AUTO-CODE-005-A6-C4"
     },
@@ -190,7 +200,7 @@ The following JSON block is the machine-readable cumulative source contract. Eve
         {"semantic_id": "fresh_assurance_after_verification", "evidence_fields": ["g4_verdict", "final_exact_head", "web_verified", "fresh_temporary_chat_count"]},
         {"semantic_id": "bounded_non_authority", "evidence_fields": ["g4_execution_identity", "web_execution_identity", "independent_evidence", "verdict", "merge_authority"]}
       ],
-      "negative_test": "C4 rejects G4-WEB-ASSURANCE-001 when assurance is missing, duplicated, dependent, or authority-bearing",
+        "negative_test": "repo/tests/repo-auto-code-design.test.cjs::negative::G4-WEB-ASSURANCE-001",
       "status": "preserved",
       "authorising_design_lock": "DL-329-AUTO-CODE-005-A6-C4"
     },
@@ -207,7 +217,7 @@ The following JSON block is the machine-readable cumulative source contract. Eve
         {"semantic_id": "bound_non_replayable_grant", "evidence_fields": ["issuer", "explicit_current_turn_user_request", "run_id", "session_id", "turn_id", "operation", "provider", "canonical_model", "reasoning", "max_agents", "expires_at", "consumed", "inheritance"]},
         {"semantic_id": "prelaunch_fail_closed", "evidence_fields": ["hook_installed", "hook_event", "hook_identity", "hook_bytes", "hook_version", "hook_trust", "runtime_coverage", "subagent_start_audit_only"]}
       ],
-      "negative_test": "C4 rejects EXECUTION-ADMISSION-DEFAULT-DENY-001 when a grant or hook semantic is partial or bypassable",
+        "negative_test": "repo/tests/repo-auto-code-design.test.cjs::negative::EXECUTION-ADMISSION-DEFAULT-DENY-001",
       "status": "preserved",
       "authorising_design_lock": "DL-329-AUTO-CODE-005-A6-C4"
     }
@@ -219,6 +229,10 @@ An amendment, review finding, or compression may set a record to `amended` or `r
 
 ## Default-deny Fast and agent admission reference contract
 
-The default result without a valid grant is root-only Standard execution. The Web Orchestrator creates a grant only after an explicit current-turn user request. The structured grant is current-turn only, short-lived, non-inheritable, non-replayable, consumed only by its bound operation, and binds these exact fields: `run_id`, `session_id`, `turn_id`, `issuer`, `explicit_current_turn_user_request`, `operation`, `allow_fast`, `allow_agents`, `max_agents`, `provider`, `canonical_model`, `reasoning`, `expires_at`, `consumed`, and `inheritance: false`. Natural-language speed wording is not interpreted by the hook.
+This cumulative execution-admission contract is controlled through `DL-329-AUTO-CODE-005-A6-C5`.
+
+The default result without a valid grant is root-only Standard execution. Fast and delegation are separate permissions. The Web Orchestrator creates a grant only after an explicit current-turn user request. The structured grant is current-turn only, short-lived, non-inheritable, non-replayable, consumed only by its bound operation, and binds these exact fields: `run_id`, `session_id`, `turn_id`, `issuer`, `explicit_current_turn_user_request`, `operation`, `allow_fast`, `allow_agents`, `max_agents`, `provider`, `canonical_model`, `reasoning`, `expires_at`, `consumed`, and `inheritance: false`. A delegation grant is valid only when `max_agents` is a positive finite integer and the requested count is a positive finite integer bounded by it. Natural-language speed wording is not interpreted by the hook.
+
+The four permission outcomes are deterministic: `allow_fast=false, allow_agents=false` is root-only Standard; `allow_fast=true, allow_agents=false` is root-only Fast; `allow_fast=false, allow_agents=true` keeps root and agents Standard; and `allow_fast=true, allow_agents=true` permits authorised root and delegated agents to use Fast within the exact grant scope. Missing, malformed, stale, consumed, replayed, inherited, or mismatched grants remain denied.
 
 For ordinary `Agent` and `spawn_agent`, an installed trusted pre-launch `PreToolUse` hook must match before launch. Its verified identity includes installed state, event, matcher, version, exact bytes, trust, and runtime coverage. `SubagentStart` is audit-only. Missing, stale, malformed, untrusted, or unsupported coverage returns root-only Standard; specialised or bypass paths return `UNSUPPORTED_DELEGATION` or denial and cannot silently launch. This source-only PR does not install or activate the hook.

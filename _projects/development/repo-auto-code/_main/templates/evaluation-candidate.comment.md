@@ -19,4 +19,6 @@
   ]
 }
 
+Invariant evidence mapping: `base_model` maps to `canonical_base_model`, `revision` maps to `source_revision`, and `result` maps to `technical_result` in this canonical candidate schema.
+
 The candidate is public-safe evidence for web publication. Do not include scores, evaluation verdicts, hidden reasoning, secrets, environment values, private task or session identifiers, managed-session identifiers, adapter-internal identifiers, or Ledger receipt claims. The worker does not publish it directly.

@@ -47,7 +47,7 @@ Additional A4 guards:
 - A changed head invalidates the prior review identity, consumes no old review, and requires a new usable external review plus a newly isolated G4.
 - One usable pending review suppresses a duplicate trigger; one usable completed review is consumed without retriggering on the same exact head.
 - Unbound, ambiguous, stale, or unusable review evidence never satisfies the review gate; review/model limit exhaustion returns REVIEW_LIMIT_EXHAUSTED.
-- During G4_AMENDING, the authoritative reviewer cannot reply to or resolve threads. A bounded technical reply is allowed only after final exact-head PASS, and thread resolution is never allowed.
+- During G4_AMENDING, the authoritative reviewer cannot reply to or resolve threads. A bounded technical reply is allowed only when the phase is explicitly FINAL, final exact-head PASS prerequisites are all satisfied, and the reply is evidence-bound; thread resolution is never allowed.
 - Assurance cannot begin before WEB_VERIFICATION_REQUIRED is satisfied. CLEAR is non-authoritative and not merge authority; CONCERN returns only the remaining concern set to the review loop.
 - Previously resolved threads stay resolved unless regression or contrary evidence is proven, and only web may reopen them.
 
@@ -66,11 +66,13 @@ These target states are descriptive only. They become eligible only after separa
 
 Additional A6 guards:
 
-- Missing, duplicate, cross-task, cross-repository, cross-PR, replaced, or unverifiable surfaces return SURFACE_TOPOLOGY_INVALID and prohibit dispatch, G4, assurance, acceptance, merge, closure, activation, and next-task selection.
+- Missing, duplicate, cross-task, cross-repository, cross-PR, replaced, unknown-type, extra, or unverifiable surfaces return SURFACE_TOPOLOGY_INVALID and prohibit dispatch, G4, assurance, acceptance, merge, closure, activation, and next-task selection. After activation the persistent count is exactly one Web Orchestrator plus one Executor-root; the Temporary Chat is separately counted only after its finality prerequisites.
+- If adoption or activation grants are incomplete, any active or persistent surface returns SURFACE_TOPOLOGY_INVALID instead of SOURCE_ONLY_INACTIVE.
 - A retained, dirty, inherited, or ambiguous subordinate workspace after adoption returns SURFACE_TOPOLOGY_INVALID. The A6-C2 source-only bootstrap continuation is not a runtime exception.
 - A Temporary Chat before final exact-head PASS or before independent Web verification returns SURFACE_TOPOLOGY_INVALID. Temporary Chat may return only CLEAR or CONCERN and has no hosted or finality authority.
 - The Web Orchestrator resolves exactly one complete assignment from the latest applicable current-chat instruction or, only when none exists, the complete unambiguous canonical Custom Instructions source. Partial, ambiguous, conflicting, mixed, unbound, inferred, or alternative assignments return MODEL_ASSIGNMENT_REQUIRED.
-- Every prompt records assignment source and assignment evidence locator. Model, role, reasoning, and surface identity never grant controller authority.
+- Every prompt records assignment source, assignment evidence locator, fresh subordinate run ID, and fresh workspace evidence locator. Model, role, reasoning, and surface identity never grant controller authority.
+- Subordinate run kinds are allowlisted to implementation, amendment, pre-G4, and technical-g4 only.
 
 ## A6-C3 technical G4 and fresh assurance states
 
@@ -89,7 +91,7 @@ The Temporary Chat is invalid if it trusts only the G4 packet or self-attestatio
 
 Before any transition that changes review, prompt, G4, finality, or compression state, the machine validates the cumulative invariant registry. The mechanical budget/format gate runs independently from the semantic-invariant gate. Missing, partial, weakened, or keyword-only evidence returns `INVARIANT_REGRESSION`; an `amended` or `removed` record is valid only with an explicit Design Lock that names the invariant, replacement or disposal, and rationale.
 
-Exact-head external-review completion is not complete until the child body, PR body, exactly one parent entry, and one new parent chronology comment are reconciled. Stale review state blocks the next prompt, G4, and finality. Accepted review findings remain invariant obligations after their threads are resolved, out-dated, or superseded; repeated findings record `regression_of`.
+Exact-head external-review completion is not complete until the child body, PR body, exactly one parent entry, and one new parent chronology comment are reconciled. Stale review state blocks the next prompt, G4, and finality. Accepted review findings remain invariant obligations after their threads are resolved, out-dated, or superseded; repeated parsed findings record `regression_of` to a known invariant. Amended invariants require a named replacement contract and removed invariants require a named disposal contract; neither requires the superseded semantic bundle byte-for-byte.
 
 ## A6-C5 execution admission states
 
@@ -99,5 +101,7 @@ Exact-head external-review completion is not complete until the child body, PR b
 | GRANT_BOUND | Web created one exact current-turn grant after an explicit current-turn user request | Bind issuer, user-request proof, run, session, turn, operation, model, reasoning, count, expiry, consumption, and `inheritance: false` | Exact operation is admitted once or a denial is returned |
 | PRELAUNCH_AGENT_CHECK | Ordinary Agent or spawn_agent request is presented | Verify the trusted `PreToolUse` hook before launch | Hook and grant both pass, or root-only denial is returned |
 | ADMISSION_CONSUMED | The bound operation was admitted | Record consumption and prevent replay or inheritance | Operation ends; no second use is allowed |
+
+Fast and delegation are separate permissions. The four valid structured outcomes are root-only Standard, root-only Fast, Standard root plus Standard agents, and Fast root plus Fast authorised agents. A delegation grant must carry a positive finite integer `max_agents`, and every requested count must be a positive finite integer no greater than that value.
 
 The hook does not parse natural-language speed phrases. `SubagentStart` is audit-only and cannot prevent or satisfy pre-launch admission. Specialised or bypass paths are denied or explicitly unsupported. The source-only PR defines this contract and deterministic reference behaviour but does not install or activate a native hook.

@@ -17,10 +17,17 @@ All route and authority values are injected at execution time:
 - Exact repository: {{repository}}
 - Exact scope: {{scope}}
 - Exact authority: {{authority}}
-- Fast mode: prohibited
+- Assignment source: {{assignment_source}}
+- Assignment evidence locator: {{assignment_evidence_locator}}
+- Fresh subordinate run ID: {{fresh_subordinate_run_id}}
+- Fresh workspace evidence locator: {{fresh_workspace_evidence_locator}}
+- Fast mode: {{fast_mode}}
+- Delegation: {{delegation_mode}}
 - Route substitution: prohibited
 
 A missing grant returns CLOSURE_LEASE_NOT_ACTIVATED. An unproven capability returns UNSUPPORTED_DELEGATION. Instructions, memory, queue position, eligibility, installation, issue wording, completion, and merge do not activate a lease.
+
+After adoption and explicit activation, every implementation, amendment, pre-G4, and technical G4 dispatch must be a fresh prompt-bounded run in an independently clean exact-authority workspace. The assignment source, evidence locator, fresh run ID, and workspace evidence are runtime values; they are never inherited or inferred.
 
 ## Boundaries
 

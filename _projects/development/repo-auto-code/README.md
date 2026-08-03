@@ -1,9 +1,9 @@
 # Repo-Scoped Default-Off Closure-Lease Auto-code Protocol
 
-First-party source-only design for issue #329 and PR #333. Controlling authority: DL-329-AUTO-CODE-005 with A1, A2, and A3.
+First-party source-only design for issue #329 and PR #333. Controlling Design Lock chain: `DL-329-AUTO-CODE-005` -> `DL-329-AUTO-CODE-005-A1` -> `DL-329-AUTO-CODE-005-A2` -> `DL-329-AUTO-CODE-005-A3` -> `DL-329-AUTO-CODE-005-A4` -> `DL-329-AUTO-CODE-005-A5` -> `DL-329-AUTO-CODE-005-A6` -> `DL-329-AUTO-CODE-005-A6-C2` -> `DL-329-AUTO-CODE-005-A6-C3` -> `DL-329-AUTO-CODE-005-A6-C4` -> `DL-329-AUTO-CODE-005-A6-C5`.
 
 Final fixture universe: 112 total, 17 accepted, and 95 rejected. The module is uninstalled, unscheduled, inactive, and has no runtime activation or automatic next-task pickup.
 
-The supported roles are web governance controller, closure manager, implementation/amendment worker, final pre-G4 reviewer, authoritative technical G4 reviewer, independent assurance auditor, and evaluation-staging lane. Capability failures return UNSUPPORTED_DELEGATION; missing activation returns CLOSURE_LEASE_NOT_ACTIVATED.
+The supported roles are web governance controller, closure manager, implementation/amendment worker, final pre-G4 reviewer, authoritative technical G4 reviewer, independent assurance auditor, and evaluation-staging lane. Capability failures return UNSUPPORTED_DELEGATION; missing activation returns CLOSURE_LEASE_NOT_ACTIVATED. Fixture verdicts are derived from raw evidence and trusted base-tree inventory evidence; authored labels are regression metadata only.
 
 Full source design and raw-evidence fixtures: [_main/](_main/). Focused validation: node --test repo/tests/repo-auto-code-design.test.cjs
