@@ -5,7 +5,7 @@
   "title": "Repo-Scoped Default-Off Closure-Lease Protocol",
   "module_path": "_projects/development/repo-auto-code",
   "main_path": "_projects/development/repo-auto-code/_main",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "version_policy": "semver",
   "version_notes": "Amends the first-party source-only design to a generic role-and-capability closure-lease contract with exact default-off activation and fixture arithmetic of 112 total, 17 accepted, and 95 rejected.",
   "outputs": [],

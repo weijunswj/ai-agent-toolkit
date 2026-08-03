@@ -59,8 +59,54 @@ Applicable G4 findings remain binding. Conflicting, impossible, scope-expanding,
 
 Only after G4 PASS and ordinary web adjudication may the independent assurance auditor run. It returns only CLEAR or CONCERN; it is not a second G4 and cannot authorise merge. CONCERN blocks acceptance until web adjudicates it. Memory, Custom Instructions, and pasted conclusions are context only, never repository evidence.
 
+## Exact-head review identity and closure loop
+
+The external-review trigger identity is the tuple repository + PR + exact head SHA + external-review capability. A review is usable only when raw review evidence binds all four values to the current exact head, proves the external-review capability, and gives one unambiguous pending or completed state. Unbound, ambiguous, stale, or otherwise unusable review evidence never satisfies the gate.
+
+For one unchanged identity, one usable pending review suppresses another trigger. One usable completed review is consumed for that identity; its findings are adjudicated without retriggering another review on the same head. Review or model limit exhaustion returns REVIEW_LIMIT_EXHAUSTED and never implies review success. A materially amended head creates a new identity and requires one new usable external review and one newly isolated authoritative G4.
+
+The authoritative G4 reviewer is the sole technical source of PASS or AMEND and never implements repository changes. During every AMEND cycle it returns one complete finding batch to the closure manager and must not reply to or resolve review threads. Only after technical PASS on the final exact head may that reviewer issue a bounded, evidence-backed technical reply; every review thread remains unresolved, and the reviewer never marks ready, accepts, merges, closes, deletes a branch, installs, activates a pilot, or selects another task.
+
+After final exact-head technical PASS, web must independently reread and verify the exact repository, branch, base, head, tree, complete commit graph, cumulative diff, file allowlist, source-only boundary, local validation, hosted checks, every review submission and thread, every finding-to-code/test/evidence mapping, and the absence of authority or governance movement. Assurance is ineligible until that web verification is complete.
+
+The independent assurance context returns only CLEAR or CONCERN. It is not a second G4, cannot return PASS or AMEND, authorise merge, mutate hosted state, or select another task. CLEAR permits web to complete truthful review finality but does not authorise merge. On CONCERN, web must independently reply to and resolve every thread for every finding proven addressed, duplicate, stale, or not applicable, leaves concern-related, newly actionable, or insufficiently proven findings open, and returns only that remaining set to the review loop. Previously resolved threads remain resolved unless a later amendment regresses the relevant behavior or contrary evidence proves the disposition wrong; only web may reopen them.
+
+Ordinary findings and a provably terminated non-mutating worker remain inside the closure loop. Return to web is reserved for a genuine closed blocker: INTERRUPTED_SESSION_OWNERSHIP, EXACT_AUTHORITY_MOVEMENT, scope or Design Lock conflict, REVIEW_LIMIT_EXHAUSTED, NON_CONVERGENCE, secret exposure or required rotation, or a genuine user/controller decision.
+
+Only after G4 PASS, the mandatory web verification and ordinary web adjudication may the independent assurance auditor run. It returns only CLEAR or CONCERN; it is not a second G4 and cannot authorise merge. CONCERN blocks acceptance until web adjudicates it. Memory, Custom Instructions, and pasted conclusions are context only, never repository evidence.
+
 ## Finality and no automatic continuation
 
 Final-audit eligibility is derived from every lifecycle section and requires every material child exactly once with preceding work terminal. Completion, merge, queue position, and eligibility never activate or select a next task. Only an explicitly named pilot may be activated before pilot acceptance, and cross-repository and cross-PR mutation remain prohibited.
 
 The design remains uninstalled, unscheduled, and inactive in this PR. Source outputs and allowed generated writes are empty.
+
+## A6 target topology and model-source authority
+
+This three-surface topology is target behaviour only after separate source acceptance, design merge, toolkit installation, and explicit activation. A source change is not source acceptance. Source acceptance, design merge, installation, and activation are distinct non-interchangeable grants; none implies another. This source-only PR remains uninstalled, unscheduled, inactive, and unable to activate these surfaces.
+
+### Surface 1 - Persistent Web Orchestrator
+
+Exactly one persistent Web Orchestrator exists for each governed task or PR. It exclusively owns architecture, Design Locks, provider/model/reasoning assignment, dispatch, hosted governance, review disposition, exact-head acceptance, assurance eligibility, ready state, merge, closure, branch deletion, installation, activation, and next-task selection. No other surface or identity acquires controller authority.
+
+### Surface 2 - Persistent Executor-root
+
+Exactly one persistent Executor-root exists for each governed task or PR after adoption and activation. It coordinates only prompt-bounded implementation, amendment, pre-G4, and G4 runs. Each subordinate run starts fresh in its own independently clean exact-authority worktree or equivalent isolated checkout. The Executor-root may collect and reconcile evidence packets, but persistence does not authorize implementation, controller decisions, hosted governance, thread replies or resolution, acceptance, ready state, merge, closure, installation, activation, or next-task selection.
+
+The Executor-root consumes a complete assignment resolved by the Web Orchestrator; it cannot select, infer, recommend, combine, or replace a model, provider, reasoning level, role, harness, surface, or authority. Model, role, reasoning, and surface identity never grant controller authority.
+
+### Surface 3 - Fresh Web Temporary Chat
+
+One fresh Web Temporary Chat may be created only after final exact-head technical PASS and independent Web verification of the complete evidence universe. It is read-only, fresh for that final head, and returns only CLEAR or CONCERN. It cannot return PASS or AMEND, mutate hosted governance, authorise merge, accept, select work, or acquire controller authority.
+
+### Fresh subordinate-run rule
+
+After adoption and explicit activation, every implementation, amendment, pre-G4, and G4 run is prompt-bounded, fresh, and independently isolated at exact authority. It receives a newly resolved assignment and does not inherit authority, context, model selection, or a retained, dirty, or ambiguous worktree merely from the persistent Executor-root. Retained-worktree reuse after activation is invalid.
+
+### Model-assignment source authority
+
+Before every executor, reviewer, or assurance dispatch, the Web Orchestrator resolves one complete assignment from one source only. The latest applicable complete explicit user assignment in the current persistent Web Orchestrator chat takes precedence. Only when no applicable assignment exists there may the Web Orchestrator use a complete, unambiguous current canonical Custom Instructions repository, file, ref or commit, and blob. A present but partial, conflicting, or ambiguous current-chat assignment returns MODEL_ASSIGNMENT_REQUIRED and cannot fall through. Sources cannot be mixed.
+
+Every rendered prompt records the assignment source and assignment evidence locator, alongside provider, canonical base model, reasoning, Sol-equivalent reasoning, role, surface, exact repository, and exact authority. No model may be inferred, recommended, or introduced from memory, preference, cost, capability, benchmarks, issue wording, previous runs, previous chats, or provider availability. An unselected alternative model returns MODEL_ASSIGNMENT_REQUIRED. No dispatch occurs without a complete permitted assignment.
+
+A6-C2 permits this one source-only G3 continuation to use the existing implementation chat and retained worktree while creating this architecture. That bootstrap fact is not a persistent Executor-root, does not activate A6, and is not a reusable runtime bypass after adoption.
