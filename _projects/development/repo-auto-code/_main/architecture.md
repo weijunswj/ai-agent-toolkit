@@ -110,3 +110,37 @@ Before every executor, reviewer, or assurance dispatch, the Web Orchestrator res
 Every rendered prompt records the assignment source and assignment evidence locator, alongside provider, canonical base model, reasoning, Sol-equivalent reasoning, role, surface, exact repository, and exact authority. No model may be inferred, recommended, or introduced from memory, preference, cost, capability, benchmarks, issue wording, previous runs, previous chats, or provider availability. An unselected alternative model returns MODEL_ASSIGNMENT_REQUIRED. No dispatch occurs without a complete permitted assignment.
 
 A6-C2 permits this one source-only G3 continuation to use the existing implementation chat and retained worktree while creating this architecture. That bootstrap fact is not a persistent Executor-root, does not activate A6, and is not a reusable runtime bypass after adoption.
+
+## Model-neutral technical G4 and fresh Web assurance
+
+The structural role is the `technical G4 reviewer`. G4 is a technical-review function, not a structural model name. The word authoritative describes the single exact-head verdict capability; it never names or selects a provider, canonical model, reasoning level, harness, or surface. Historical execution identities remain recorded truthfully and are not normalised into a new model label.
+
+For every future dispatch, the Web Orchestrator resolves the technical G4 provider, canonical base model, and reasoning independently from the controlling assignment source. The G4 assignment is not inherited from the Web controller. An explicitly assigned G4 provider or model may differ from the Web controller provider or model. Model, role, reasoning, and surface identity never grant authority.
+
+The final-head assurance order is mandatory for every final exact-head technical `PASS`:
+
+1. The isolated technical G4 reviewer returns `PASS` for the exact head.
+2. Web independently verifies the complete bounded exact-head evidence universe.
+3. Web creates exactly one fresh Web Temporary Chat for that exact head.
+
+The Temporary Chat is separate from the Web Orchestrator, Executor-root, implementation or amendment runs, and technical G4 run. It independently assesses bounded exact-head evidence and must not treat a G4 packet or reviewer self-attestation as proof. Its record contains the G4 execution identity, its own Web execution identity, and an explicit cross-provider/model diversity record when the identities differ. Diversity is informative only: the Temporary Chat remains mandatory when both executions use the same model family. It may return `CONCERN` after G4 `PASS`, so G4 `PASS` is necessary but insufficient for `CLEAR`.
+
+The Temporary Chat returns only `CLEAR` or `CONCERN`. It is not G5, does not replace G4, and has no GitHub, acceptance, ready, merge, closure, installation, activation, or next-task authority.
+
+## Cumulative semantic invariants
+
+Every accepted safety property is a cumulative invariant. The machine-readable registry in `protocol.md` is the canonical contract; every record has an invariant ID, source authority, complete required semantics, candidate evidence, a negative test, status, and an authorising Design Lock. Later amendments and compression preserve each record unless a Design Lock names the invariant, states its replacement or disposal, and gives the rationale.
+
+Missing, incomplete, weakened, keyword-only, or otherwise non-semantic evidence returns `INVARIANT_REGRESSION`. Accepted review findings become permanent invariant obligations even after a thread is resolved, out-dated, or superseded. A repeated finding records `regression_of` rather than creating a disposable duplicate. Compression must pass both its mechanical budget/format gate and its independent semantic-invariant preservation gate.
+
+Completion of exact-head external review is a material transition. Before any next prompt, technical G4, or finality, Web reconciles the child body, PR body, exactly one parent entry, and one new parent chronology comment. Stale review state blocks progression even when a prior body or thread appears complete.
+
+## Default-deny execution admission and pre-launch hook
+
+Without an explicit current-turn structured grant, Fast is disabled and `Agent`, `spawn_agent`, subagents, and equivalent delegation are denied. Silence, prompt omission, generic speed wording, prior-turn permission, and standing permission do not grant either capability. Unsupported or unverifiable enforcement falls back to root-only Standard execution.
+
+Only the Web Orchestrator may create a short-lived, current-turn grant after an explicit current-turn user request. The grant is bound to the exact `run_id`, `session_id`, current `turn_id`, issuer, user-request proof, operation, `allow_fast`, `allow_agents`, maximum agent count, provider, canonical model, reasoning, expiry, consumption state, and `inheritance: false`. The grant is consumed only by the bound operation, cannot be replayed or inherited, and is invalid for another run, session, model, reasoning level, or agent count. The hook does not interpret natural-language speed phrases; the Web controller creates the structured grant only after the explicit request is verified.
+
+For supported ordinary `Agent` or `spawn_agent` calls, admission uses an installed trusted pre-launch `PreToolUse` hook matching those operations. Denial occurs before launch. `SubagentStart` is audit-only and never prevention. Installed hook identity, exact bytes, version, trust, and runtime coverage must be verified before enforcement is claimed. A missing, stale, malformed, untrusted, or unsupported hook returns root-only Standard mode. Specialised or bypass launch paths are denied or explicitly classified unsupported and cannot silently bypass admission.
+
+This PR contains only the source contract and deterministic reference behaviour. It does not install, activate, or claim that a native host hook is operational; host-specific installation and adapter wiring remain separately governed.

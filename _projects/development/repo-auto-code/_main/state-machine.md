@@ -71,3 +71,33 @@ Additional A6 guards:
 - A Temporary Chat before final exact-head PASS or before independent Web verification returns SURFACE_TOPOLOGY_INVALID. Temporary Chat may return only CLEAR or CONCERN and has no hosted or finality authority.
 - The Web Orchestrator resolves exactly one complete assignment from the latest applicable current-chat instruction or, only when none exists, the complete unambiguous canonical Custom Instructions source. Partial, ambiguous, conflicting, mixed, unbound, inferred, or alternative assignments return MODEL_ASSIGNMENT_REQUIRED.
 - Every prompt records assignment source and assignment evidence locator. Model, role, reasoning, and surface identity never grant controller authority.
+
+## A6-C3 technical G4 and fresh assurance states
+
+| State | Entry guard | Allowed observation or action | Exit guard |
+| --- | --- | --- | --- |
+| TECHNICAL_G4_ASSIGNMENT | Exact head is bound and one complete G4 assignment is resolved independently | Record the technical G4 provider, canonical model, reasoning, assignment source, and execution identity | Assignment is complete and the fresh G4 context is isolated |
+| TECHNICAL_G4_PASS | The technical G4 reviewer returns PASS for the final exact head | Web independently verifies bounded exact-head evidence | Web verification is complete |
+| TEMPORARY_CHAT_REQUIRED | Final exact-head technical PASS and independent Web verification are recorded | Create exactly one fresh Web Temporary Chat for that head | One separate read-only Temporary Chat is admitted |
+| TEMPORARY_CHAT_ASSESSING | The fresh Temporary Chat is separate from all implementation, Executor-root, Web Orchestrator, and G4 contexts | Independently assess bounded evidence and record both execution identities plus diversity | The Temporary Chat returns CLEAR or CONCERN only |
+
+G4 is a technical-review function, not a structural model name. The G4 assignment may differ from the Web controller assignment; neither model nor role identity grants authority. A Temporary Chat is not G5 and cannot replace G4. G4 PASS remains necessary but is insufficient for CLEAR.
+
+The Temporary Chat is invalid if it trusts only the G4 packet or self-attestation, omits either execution identity, omits the diversity record, uses a shared context, is duplicated for the exact head, or attempts GitHub, acceptance, ready, merge, closure, installation, activation, or next-task authority. The same model family does not remove the one-chat requirement.
+
+## A6-C4 invariant validation gates
+
+Before any transition that changes review, prompt, G4, finality, or compression state, the machine validates the cumulative invariant registry. The mechanical budget/format gate runs independently from the semantic-invariant gate. Missing, partial, weakened, or keyword-only evidence returns `INVARIANT_REGRESSION`; an `amended` or `removed` record is valid only with an explicit Design Lock that names the invariant, replacement or disposal, and rationale.
+
+Exact-head external-review completion is not complete until the child body, PR body, exactly one parent entry, and one new parent chronology comment are reconciled. Stale review state blocks the next prompt, G4, and finality. Accepted review findings remain invariant obligations after their threads are resolved, out-dated, or superseded; repeated findings record `regression_of`.
+
+## A6-C5 execution admission states
+
+| State | Entry guard | Allowed observation or action | Exit guard |
+| --- | --- | --- | --- |
+| ROOT_ONLY_STANDARD | No exact current-turn grant, or enforcement is unsupported or unverified | Deny Fast and Agent or spawn_agent launch; permit only root-owned Standard work | A valid bound grant and verified supported path are presented |
+| GRANT_BOUND | Web created one exact current-turn grant after an explicit current-turn user request | Bind issuer, user-request proof, run, session, turn, operation, model, reasoning, count, expiry, consumption, and `inheritance: false` | Exact operation is admitted once or a denial is returned |
+| PRELAUNCH_AGENT_CHECK | Ordinary Agent or spawn_agent request is presented | Verify the trusted `PreToolUse` hook before launch | Hook and grant both pass, or root-only denial is returned |
+| ADMISSION_CONSUMED | The bound operation was admitted | Record consumption and prevent replay or inheritance | Operation ends; no second use is allowed |
+
+The hook does not parse natural-language speed phrases. `SubagentStart` is audit-only and cannot prevent or satisfy pre-launch admission. Specialised or bypass paths are denied or explicitly unsupported. The source-only PR defines this contract and deterministic reference behaviour but does not install or activate a native hook.

@@ -38,3 +38,13 @@ Assignment evidence locator: {{assignment_evidence_locator}}
 After adoption and explicit activation, this pre-G4 review is a fresh prompt-bounded subordinate run with a newly resolved complete assignment and an independently clean exact-authority worktree. It does not inherit authority, context, model selection, or a retained workspace from the persistent Executor-root. Missing freshness, exact isolation, or assignment provenance returns SURFACE_TOPOLOGY_INVALID or MODEL_ASSIGNMENT_REQUIRED as applicable.
 
 The Web Orchestrator alone resolves the assignment from the latest applicable complete current-chat instruction, or only when none exists, the complete unambiguous canonical Custom Instructions source. Sources cannot be mixed; no model is inferred from memory, preference, cost, capability, benchmarks, issue wording, prior runs/chats, or availability. The reviewer reports evidence only and never acquires controller authority.
+
+## Technical G4 function and assurance handoff
+
+The structural term is `technical G4 reviewer`; G4 is a technical-review function, not a structural model name. The future G4 provider, canonical model, and reasoning are resolved independently for the G4 dispatch and may differ from the Web controller. Preserve truthful historical execution identities. No model, role, reasoning, surface, or provider grants authority.
+
+Before reporting assurance eligibility, prove the sequence: final exact-head technical PASS, independent Web verification, then exactly one fresh Web Temporary Chat for that head. The Temporary Chat is a separate context from the Executor-root, implementation/amendment runs, and G4. It independently evaluates bounded evidence, records both execution identities and provider/model diversity when present, and remains mandatory for same-family routes. It returns only CLEAR or CONCERN and is not G5 or a replacement for G4. A G4 packet or self-attestation is not independent proof.
+
+Validate the cumulative invariant registry and both compression gates before handoff. A missing, partial, weakened, keyword-only, or stale invariant returns `INVARIANT_REGRESSION`; stale four-surface review reconciliation blocks the next prompt, G4, and finality.
+
+Fast and Agent/spawn_agent delegation remain denied without an exact current-turn structured grant created after an explicit user request. Do not interpret natural-language speed wording. Supported ordinary spawning requires an installed trusted verified pre-launch `PreToolUse` hook; `SubagentStart` is audit-only, and missing or unverified coverage falls back to root-only Standard mode. This source-only PR does not install the hook.
