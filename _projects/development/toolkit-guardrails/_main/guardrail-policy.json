@@ -1,0 +1,408 @@
+{
+  "$schema": "./guardrail-policy.schema.json",
+  "schema_version": "toolkit.guardrail.policy.v1",
+  "policy_version": "1.0.1",
+  "design_lock": "DL-313-001",
+  "issue": 313,
+  "decision_contract": [
+    "allow",
+    "ask",
+    "deny",
+    "unsupported"
+  ],
+  "decision_precedence": [
+    "deny",
+    "unsupported",
+    "ask",
+    "allow"
+  ],
+  "enforcement_requirements": [
+    "routine-repository-authority",
+    "trusted-one-shot-approval",
+    "hard-deny",
+    "stop-before-execution"
+  ],
+  "safe_target_classes": [
+    "canonical-repository",
+    "canonical-worktree",
+    "approved-additional-root",
+    "sibling-repository",
+    "parent-workspace",
+    "outside-repository",
+    "external-system",
+    "secret-bearing",
+    "protected-target",
+    "unresolved-target",
+    "mixed-targets",
+    "unknown-target"
+  ],
+  "operation_classes": [
+    {
+      "id": "read",
+      "default_decision": "allow",
+      "enforcement_requirement": "routine-repository-authority",
+      "routine": true,
+      "destructive": false,
+      "external": false
+    },
+    {
+      "id": "edit",
+      "default_decision": "allow",
+      "enforcement_requirement": "routine-repository-authority",
+      "routine": true,
+      "destructive": false,
+      "external": false
+    },
+    {
+      "id": "create",
+      "default_decision": "allow",
+      "enforcement_requirement": "routine-repository-authority",
+      "routine": true,
+      "destructive": false,
+      "external": false
+    },
+    {
+      "id": "rename",
+      "default_decision": "allow",
+      "enforcement_requirement": "routine-repository-authority",
+      "routine": true,
+      "destructive": false,
+      "external": false
+    },
+    {
+      "id": "git-local-read",
+      "default_decision": "allow",
+      "enforcement_requirement": "routine-repository-authority",
+      "routine": true,
+      "destructive": false,
+      "external": false
+    },
+    {
+      "id": "git-stage",
+      "default_decision": "allow",
+      "enforcement_requirement": "routine-repository-authority",
+      "routine": true,
+      "destructive": false,
+      "external": false
+    },
+    {
+      "id": "git-commit",
+      "default_decision": "allow",
+      "enforcement_requirement": "routine-repository-authority",
+      "routine": true,
+      "destructive": false,
+      "external": false
+    },
+    {
+      "id": "git-push",
+      "default_decision": "allow",
+      "enforcement_requirement": "routine-repository-authority",
+      "routine": true,
+      "destructive": false,
+      "external": true
+    },
+    {
+      "id": "toolkit-temp-cleanup",
+      "default_decision": "allow",
+      "enforcement_requirement": "routine-repository-authority",
+      "routine": true,
+      "destructive": true,
+      "external": false
+    },
+    {
+      "id": "overwrite",
+      "default_decision": "ask",
+      "enforcement_requirement": "trusted-one-shot-approval",
+      "routine": false,
+      "destructive": true,
+      "external": false
+    },
+    {
+      "id": "truncate",
+      "default_decision": "ask",
+      "enforcement_requirement": "trusted-one-shot-approval",
+      "routine": false,
+      "destructive": true,
+      "external": false
+    },
+    {
+      "id": "delete",
+      "default_decision": "ask",
+      "enforcement_requirement": "trusted-one-shot-approval",
+      "routine": false,
+      "destructive": true,
+      "external": false
+    },
+    {
+      "id": "git-destructive",
+      "default_decision": "ask",
+      "enforcement_requirement": "trusted-one-shot-approval",
+      "routine": false,
+      "destructive": true,
+      "external": false
+    },
+    {
+      "id": "git-force-push",
+      "default_decision": "ask",
+      "enforcement_requirement": "trusted-one-shot-approval",
+      "routine": false,
+      "destructive": true,
+      "external": true
+    },
+    {
+      "id": "git-other-target",
+      "default_decision": "ask",
+      "enforcement_requirement": "trusted-one-shot-approval",
+      "routine": false,
+      "destructive": false,
+      "external": true
+    },
+    {
+      "id": "external-mutation",
+      "default_decision": "ask",
+      "enforcement_requirement": "trusted-one-shot-approval",
+      "routine": false,
+      "destructive": false,
+      "external": true
+    },
+    {
+      "id": "github-read",
+      "default_decision": "allow",
+      "enforcement_requirement": "routine-repository-authority",
+      "routine": true,
+      "destructive": false,
+      "external": true
+    },
+    {
+      "id": "github-issue-mutation",
+      "default_decision": "ask",
+      "enforcement_requirement": "trusted-one-shot-approval",
+      "routine": false,
+      "destructive": false,
+      "external": true
+    },
+    {
+      "id": "github-pr-mutation",
+      "default_decision": "ask",
+      "enforcement_requirement": "trusted-one-shot-approval",
+      "routine": false,
+      "destructive": false,
+      "external": true
+    },
+    {
+      "id": "github-review-mutation",
+      "default_decision": "ask",
+      "enforcement_requirement": "trusted-one-shot-approval",
+      "routine": false,
+      "destructive": false,
+      "external": true
+    },
+    {
+      "id": "github-repository-workflow-mutation",
+      "default_decision": "ask",
+      "enforcement_requirement": "trusted-one-shot-approval",
+      "routine": false,
+      "destructive": false,
+      "external": true
+    },
+    {
+      "id": "secret-access",
+      "default_decision": "ask",
+      "enforcement_requirement": "trusted-one-shot-approval",
+      "routine": false,
+      "destructive": false,
+      "external": false
+    },
+    {
+      "id": "secret-dump",
+      "default_decision": "deny",
+      "enforcement_requirement": "hard-deny",
+      "routine": false,
+      "destructive": false,
+      "external": true
+    },
+    {
+      "id": "opaque-command",
+      "default_decision": "unsupported",
+      "enforcement_requirement": "stop-before-execution",
+      "routine": false,
+      "destructive": false,
+      "external": false
+    },
+    {
+      "id": "secret-exfiltration",
+      "default_decision": "deny",
+      "enforcement_requirement": "hard-deny",
+      "routine": false,
+      "destructive": false,
+      "external": true
+    },
+    {
+      "id": "guardrail-bypass",
+      "default_decision": "deny",
+      "enforcement_requirement": "hard-deny",
+      "routine": false,
+      "destructive": false,
+      "external": false
+    },
+    {
+      "id": "protected-target",
+      "default_decision": "deny",
+      "enforcement_requirement": "hard-deny",
+      "routine": false,
+      "destructive": true,
+      "external": false
+    },
+    {
+      "id": "role-boundary-violation",
+      "default_decision": "deny",
+      "enforcement_requirement": "hard-deny",
+      "routine": false,
+      "destructive": false,
+      "external": true
+    },
+    {
+      "id": "unsupported-route",
+      "default_decision": "unsupported",
+      "enforcement_requirement": "stop-before-execution",
+      "routine": false,
+      "destructive": false,
+      "external": false
+    }
+  ],
+  "authority": {
+    "required_context": [
+      "prompt",
+      "role",
+      "branch",
+      "design_lock"
+    ],
+    "active_design_lock": "DL-313-001",
+    "permitted_roles": [
+      "executor",
+      "controller"
+    ],
+    "controller_only_operation_classes": [
+      "github-issue-mutation",
+      "github-pr-mutation",
+      "github-review-mutation",
+      "evaluation-ledger-mutation"
+    ],
+    "forbidden_scopes": [
+      "host-adapter",
+      "user-home",
+      "plugin-installation",
+      "trust-state",
+      "permission-state",
+      "bridge-state",
+      "live-system",
+      "production",
+      "credentials",
+      "database",
+      "deployment"
+    ]
+  },
+  "approval": {
+    "trusted_channels": [
+      "native-user-channel",
+      "trusted-user-channel",
+      "controller-user-channel"
+    ],
+    "native_state_non_equivalents": [
+      "always-allow",
+      "saved-permission",
+      "auto-mode",
+      "bypass-mode",
+      "permission-mode",
+      "transcript-text",
+      "executor-claim"
+    ],
+    "max_repeat_count": 8
+  },
+  "privacy": {
+    "digest_algorithm": "sha256",
+    "result_fields_allowed": [
+      "decision",
+      "reason_code",
+      "enforcement_requirement",
+      "safe_target_class",
+      "operation_class",
+      "request_digest",
+      "operation_digest",
+      "target_digest",
+      "component_digest",
+      "component_count",
+      "privacy_safe",
+      "secondary_reason_codes",
+      "mixed_components"
+    ],
+    "forbidden_result_content": [
+      "raw_prompt",
+      "raw_command",
+      "raw_target_path",
+      "secret_value",
+      "environment_value",
+      "unrestricted_tool_output"
+    ]
+  },
+  "reason_codes": [
+    "ROUTINE_REPOSITORY_OPERATION",
+    "ROUTINE_GIT_OPERATION",
+    "ROUTINE_GITHUB_READ",
+    "AUTHORISED_NORMAL_PUSH",
+    "APPROVED_ONE_SHOT_OPERATION",
+    "CONTROLLER_GITHUB_AUTHORIZED",
+    "OUTSIDE_REPOSITORY_TARGET",
+    "DESTRUCTIVE_OPERATION_REQUIRES_APPROVAL",
+    "EXTERNAL_MUTATION_REQUIRES_APPROVAL",
+    "SECRET_ACCESS_REQUIRES_APPROVAL",
+    "SECRET_DUMP_DENIED",
+    "CATASTROPHIC_TARGET_DENIED",
+    "APPROVAL_MISSING",
+    "APPROVAL_INVALID",
+    "APPROVAL_NATIVE_STATE_NOT_EQUIVALENT",
+    "APPROVAL_VERSION_INVALID",
+    "APPROVAL_UNDECLARED_FIELD",
+    "APPROVAL_EXPIRED",
+    "APPROVAL_REPLAY",
+    "APPROVAL_REPLAY_STATE_UNCERTAIN",
+    "APPROVAL_REPLAY_POLICY_MISMATCH",
+    "APPROVAL_REPLAY_EXPIRY_MISMATCH",
+    "APPROVAL_REPLAY_STORE_UNTRUSTED",
+    "APPROVAL_TARGET_EXPANSION",
+    "APPROVAL_OPERATION_MISMATCH",
+    "APPROVAL_HOST_MISMATCH",
+    "APPROVAL_SESSION_MISMATCH",
+    "APPROVAL_TURN_MISMATCH",
+    "APPROVAL_CALL_MISMATCH",
+    "DENY_NOT_OVERRIDEABLE",
+    "SECRET_EXFILTRATION_DENIED",
+    "GUARDRAIL_BYPASS_DENIED",
+    "PROTECTED_TARGET_DENIED",
+    "ROLE_AUTHORITY_VIOLATION",
+    "BRANCH_AUTHORITY_VIOLATION",
+    "DESIGN_LOCK_VIOLATION",
+    "CONTROLLER_HOLD_ACTIVE",
+    "AUTHORITY_CONTEXT_MISSING",
+    "UNRESOLVED_TARGET_UNSUPPORTED",
+    "STALE_CAPABILITY_UNSUPPORTED",
+    "CAPABILITY_EVIDENCE_MISSING",
+    "CAPABILITY_EVIDENCE_INVALID",
+    "UNSUPPORTED_ROUTE",
+    "OPAQUE_COMMAND_UNSUPPORTED",
+    "DYNAMIC_TARGET_UNSUPPORTED",
+    "GIT_PUSH_EVIDENCE_REQUIRED",
+    "GITHUB_MUTATION_AUTHORITY_REQUIRED",
+    "GITHUB_COMPONENT_AUTHORITY_REQUIRED",
+    "GITHUB_MUTATION_AUTHORITY_EXPIRED",
+    "GITHUB_MUTATION_AUTHORITY_MISMATCH",
+    "MIXED_TARGET_RESTRICTION",
+    "RESOLVER_FAILURE_UNSUPPORTED",
+    "CLASSIFIER_FAILURE_UNSUPPORTED",
+    "APPROVAL_VERIFIER_OVERRIDE_REJECTED",
+    "APPROVAL_VERIFIER_FAILURE_UNSUPPORTED",
+    "OPERATION_CONTRACT_INVALID",
+    "MALFORMED_OPERATION_UNSUPPORTED",
+    "ENGINE_FAILURE_UNSUPPORTED"
+  ]
+}
