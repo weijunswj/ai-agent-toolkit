@@ -87,6 +87,24 @@ G4 is a technical-review function, not a structural model name. The G4 assignmen
 
 The Temporary Chat is invalid if it trusts only the G4 packet or self-attestation, omits either execution identity, omits the diversity record, uses a shared context, is duplicated for the exact head, or attempts GitHub, acceptance, ready, merge, closure, installation, activation, or next-task authority. The same model family does not remove the one-chat requirement.
 
+## A6-C6 assurance launch and receipt states
+
+| State | Entry guard | Allowed observation or action | Exit guard |
+| --- | --- | --- | --- |
+| ASSURANCE_LAUNCH_VALIDATING | Final exact-head G4 PASS, ordinary Web adjudication, and Web verification receipt exist | Validate the `assurance-launch/v1` envelope, raw evidence domains, template revision, authority, expiry, and one-use state | Admitted and consumed once, or a closed launch failure is returned |
+| ASSURANCE_DISPATCH_READY | Launch envelope is admitted and the canonical assurance template is exact | Render the required repository-inspection assignment and bind it to the envelope | Fresh Temporary Chat is created, or `ASSURANCE_TEMPLATE_REQUIRED` is returned |
+| ASSURANCE_RECEIPT_VALIDATING | Fresh Temporary Chat returned a structured response | Validate the `assurance-evidence/v1` receipt, exact-head identity, every check, separation evidence, final recheck, and non-authority attestation | CLEAR is supported, or the operational result is CONCERN |
+| ASSURANCE_CLEAR_UNSUPPORTED | Receipt claims CLEAR but its mandatory evidence is absent, generic, inaccessible, circular, narrative-only, contradicted, stale, or unsupported | Treat the result as CONCERN and return it to Web | No technical, acceptance, merge, or next-task transition follows |
+
+Additional A6-C6 guards:
+
+- Missing Web verification receipt returns `WEB_VERIFICATION_REQUIRED`; missing or inaccessible mandatory raw evidence returns `ASSURANCE_EVIDENCE_INCOMPLETE`.
+- Stale or moved repository, PR, base, head, tree, graph, or authority returns `ASSURANCE_HEAD_MISMATCH`.
+- Missing or mismatched canonical assurance-template revision returns `ASSURANCE_TEMPLATE_REQUIRED`.
+- Duplicate, replayed, expired, or consumed launch envelopes return `ASSURANCE_LAUNCH_INVALID` before Temporary Chat creation.
+- A bare CLEAR or CONCERN, an empty check list, a candidate `rawEvidence`/`valid`/`verified` label, a packet conclusion, a generic PR URL, or a narrative locator is not a receipt.
+- A receipt that lists required evidence as missing or inaccessible cannot support CLEAR. Web returns `ASSURANCE_CLEAR_UNSUPPORTED` and records the operational result as CONCERN.
+
 ## A6-C4 invariant validation gates
 
 Before any transition that changes review, prompt, G4, finality, or compression state, the machine validates the cumulative invariant registry. The mechanical budget/format gate runs independently from the semantic-invariant gate. Missing, partial, weakened, or keyword-only evidence returns `INVARIANT_REGRESSION`; an `amended` or `removed` record is valid only with an explicit Design Lock that names the invariant, replacement or disposal, and rationale.
@@ -105,3 +123,32 @@ Exact-head external-review completion is not complete until the child body, PR b
 Fast and delegation are separate permissions. The four valid structured outcomes are root-only Standard, root-only Fast, Standard root plus Standard agents, and Fast root plus Fast authorised agents. A delegation grant must carry a positive finite integer `max_agents`, and every requested count must be a positive finite integer no greater than that value.
 
 The hook does not parse natural-language speed phrases. `SubagentStart` is audit-only and cannot prevent or satisfy pre-launch admission. Specialised or bypass paths are denied or explicitly unsupported. The source-only PR defines this contract and deterministic reference behaviour but does not install or activate a native hook.
+## A6-C7 normal finality states
+
+The C7 section supersedes earlier normal-path states that make Temporary Chat or CLEAR/CONCERN mandatory. The normal transition is:
+
+| State | Entry predicate | Action | Success |
+| --- | --- | --- | --- |
+| C7_REVIEW_CONVERGED | Review/amend findings are adjudicated at one exact head | Reconcile child, PR, relevant parent entry, Design Lock, scope, and requested-reviewer state | Exact-head G4 may be requested |
+| C7_G4_PASS | One fresh exact-head authoritative technical G4 returns PASS | Assemble the complete terminal packet and freeze the inspected head | Web final gate may begin |
+| C7_WEB_FINAL_GATE | Web independently rereads all authoritative repository, PR, graph, diff, scope, checks, reviews, threads, mappings, and safety evidence | Evaluate every finality predicate conjunctively | C7_FINALITY_ADMITTED or AMEND |
+| C7_FINALITY_ADMITTED | Every predicate is true and no contradiction, movement, hold, or unresolved required finding exists | Web records finality and may authorize the separately controlled acceptance/merge/closure boundary | Terminal packet is final |
+| C7_BLOCKED | Any predicate is false, stale, contradictory, incomplete, or moved | Record the typed reason and return AMEND or hold | No acceptance, merge, closure, or candidate |
+
+Root, manager, worker, pre-G4, technical G4, and assurance surfaces are evidence-only. Web is the sole comprehensive final authority and may return AMEND without a second technical review. A Temporary Chat is optional and exceptional only after an explicit pre-dispatch grant for cryptography, recovery, irreversible/destructive migration, a critical security boundary, or conflicting evidence.
+
+## A6-C8 authority snapshot and lease states
+
+| State | Required input | Transition guard | Failure |
+| --- | --- | --- | --- |
+| AUTHORITY_MACHINE_COLLECTED | Independent GitHub and local repository/issue/PR/base/head/tree/blob/scope readback | Byte-for-byte agreement and full 40-character Git object IDs | MACHINE_AUTHORITY_MISMATCH |
+| AUTHORITY_SNAPSHOT_SEALED | Canonical `toolkit-authority-snapshot/v1` bytes and SHA-256 digest | Stable relevant task projection | SNAPSHOT_DIGEST_MISMATCH |
+| LEASE_DRAFT | One snapshot digest, run identity, role, capabilities, issued/expiry times | No duplicate or conflicting active lease | DUPLICATE_DISPATCH or CONFLICTING_ACTIVE_LEASE |
+| LEASE_SEALED | Immutable lease fields and lease digest | One-run lifecycle and valid expiry | LEASE_INVALID |
+| LEASE_DISPATCHED | Exact manifest rendered from the lease/snapshot | Pre-dispatch tooling and final authority reread pass | No evaluation candidate |
+| LEASE_ADMITTED | Worker/reviewer independently re-admits exact machine authority and manifest | Relevant projection unchanged | CHILD_AUTHORITY_MOVED, PR_AUTHORITY_MOVED, PARENT_ENTRY_MOVED, HEAD_MOVED, TREE_MOVED, or SCOPE_MISMATCH |
+| LEASE_COMPLETED | Admission, work, terminal packet, and final readback complete | Lease not expired, consumed, or replayed | LEASE_ALREADY_CONSUMED or LEASE_EXPIRED |
+
+Sealed leases are immutable. Only DRAFT -> SEALED -> DISPATCHED -> ADMITTED -> COMPLETED or a terminal rejection is valid. Duplicate/replayed dispatch, consumed reuse, expiry, malformed JSON/duplicate fields, malformed SHA, prompt digest mismatch, and delimiter corruption return `toolkit-admission-receipt/v1` with `mutation_performed:false`. Pre-dispatch tooling failure creates no evaluation candidate.
+
+C8 comparisons use the child-keyed relevant parent marker only; unrelated sibling-parent chronology is not part of admission. Parent markers reject missing, duplicate, nested, ambiguous, or mismatched entries. `none`, `possible`, and `confirmed` visible-output classifications redact as required; confirmed credential exposure invokes evidence-based rotation disposition, confirmed non-credential exposure invokes containment, and no observed sensitive value is repeated.

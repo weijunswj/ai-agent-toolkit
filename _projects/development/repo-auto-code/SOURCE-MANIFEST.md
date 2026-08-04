@@ -2,15 +2,15 @@
 
 ## Ownership
 
-This is first-party Toolkit source for the bounded G3 implementation/amendment lane of issue #329. The module is source_only and publishes no skill entrypoint, native plugin metadata, MCP surface, installed instruction, or consumer-facing generated output.
+This is first-party Toolkit source for the bounded G3 implementation/amendment lane of issue #329 through cumulative A6-C8. The module is source_only and publishes no skill entrypoint, native plugin metadata, MCP surface, installed instruction, or consumer-facing generated output.
 
 ## Preserved source files
 
 Runtime-critical design material is kept directly under _main/:
 
 - architecture.md: roles, capabilities, authority, isolation, mutation scope, review, assurance, and finality.
-- protocol.md: prompt fields, admission, exact activation, claims, reconciliation, mutation, G4, assurance, and evidence contracts.
-- state-machine.md: default-off lifecycle and guarded transitions.
+- protocol.md: prompt fields, admission, exact activation, claims, reconciliation, C7 finality, C8 snapshots/leases, machine admission, assurance launch/receipt, and evidence contracts.
+- state-machine.md: default-off lifecycle, C7 finality states, C8 lease states, and guarded transitions.
 - failure-matrix.md: evidence, prohibited mutation, exact return code, and repair boundary.
 - templates/AGENTS.auto-code.managed.md: inert source-only managed contract; it is not installed by this PR.
 - templates/closure-manager.prompt.md: generic closure-manager prompt contract.
@@ -41,7 +41,7 @@ The runner reconciles retained, deleted, and added names against the merge paren
 
 ## Validation contract
 
-The focused test parses raw evidence, derives lifecycle, route, reconciliation, claim, G4, assurance, evaluation, and cleanup decisions, and verifies that fixture projections or fallback defaults cannot self-certify readiness or completion. Sync, source-lock, surface, and repository audits prove that this module remains source-owned.
+The focused test parses raw evidence, derives lifecycle, route, reconciliation, claim, G4, assurance launch/receipt, evaluation, and cleanup decisions, and verifies that fixture projections or fallback defaults cannot self-certify readiness or completion. Sync, source-lock, surface, and repository audits prove that this module remains source-owned.
 
 ## Provenance
 

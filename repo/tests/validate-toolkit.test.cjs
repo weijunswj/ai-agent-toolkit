@@ -3147,3 +3147,10 @@ test('safe-source-update classifies n8n helper templates as manual and workflow 
   assert.equal(safeSourceUpdate.classify('skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/sanitise-n8n-template.ps1'), 'manual');
   assert.equal(safeSourceUpdate.classify('n8n-workflows/customer-workflow.json'), 'blocked');
 });
+
+test('validator accepts public task-authority schema names without weakening key detection', () => {
+  const cwd = tempCopy();
+  fs.writeFileSync(path.join(cwd, 'repo', 'docs', 'authority-schema.md'), 'toolkit-authority-snapshot/v1 task-authority-projection/v1\n');
+  const result = runValidate(cwd);
+  assert.equal(result.status, 0, result.stderr);
+});

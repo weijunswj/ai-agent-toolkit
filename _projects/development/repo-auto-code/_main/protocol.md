@@ -53,7 +53,7 @@ Before an external review is requested or consumed, bind its identity to reposit
 
 A technical G4 reviewer runs in a newly isolated context and is the sole source of PASS or AMEND for one exact head. It never implements repository changes. During every AMEND cycle it sends one complete finding batch to the closure manager and must not reply to or resolve review threads. Only after technical PASS on the final exact head may it send a bounded, evidence-backed technical reply; all threads remain unresolved. It never marks ready, accepts, merges, closes, deletes a branch, installs, activates a pilot, or selects another task. A changed head invalidates the prior verdict and requires a fresh G4. Findings remain binding. The closure manager cannot suppress, overrule, reinterpret, or self-accept.
 
-After final exact-head G4 PASS and before assurance, web independently rereads and verifies the exact repository, branch, base, head, tree, complete commit graph, cumulative diff, file allowlist, source-only boundary, local validation, hosted checks, all review submissions and threads, every finding-to-code/test/evidence mapping, and the absence of unexpected authority or governance movement. Until this verification is recorded, assurance must not run and the result is WEB_VERIFICATION_REQUIRED.
+Before the comprehensive C7 Web final gate, Web independently rereads and verifies the exact repository, branch, base, head, tree, complete commit graph, cumulative diff, file allowlist, source-only boundary, local validation, hosted checks, all review submissions and threads, every finding-to-code/test/evidence mapping, and the absence of unexpected authority or governance movement. Until this verification is recorded, C7 finality is WEB_VERIFICATION_REQUIRED. An exceptional assurance dispatch also requires its separate explicit grant and exact machine admission.
 
 The independent assurance context returns exactly CLEAR or CONCERN. It is non-authoritative and cannot return PASS or AMEND, authorise merge, mutate hosted repository state or select another task. CLEAR allows web finality only; it does not authorise merge. On CONCERN, web must independently reply to and resolve every thread proven addressed, duplicate, stale, or not applicable, leaves concern-related, newly actionable, or insufficiently proven findings open, and sends only that remaining set back to the review loop. Previously resolved threads stay resolved unless a later amendment regresses the relevant behavior or contrary evidence is supplied; only web may reopen them.
 
@@ -93,9 +93,39 @@ A6-C2 is a narrow source-only implementation exception for this continuing G3 ch
 
 `technical G4 reviewer` is the structural term for the technical-review function. G4 is not a model name. The reviewer resolves its provider, canonical base model, and reasoning independently from the one controlling assignment source for that dispatch. A directly assigned G4 provider or model may differ from the Web controller. Historical model identities in retained evidence remain truthful historical values. Model, role, reasoning, and surface identity never grant authority.
 
-After every final exact-head technical `PASS`, Web must complete independent exact-head verification and then create exactly one fresh Web Temporary Chat for that exact head. The Temporary Chat is separate from the Executor-root, implementation/amendment runs, and G4 run. It independently assesses bounded exact-head evidence, does not treat a G4 packet or self-attestation as proof, records both the G4 execution identity and its own Web execution identity, and records cross-provider/model diversity when present. It remains mandatory when both executions use the same model family. It may return `CONCERN` despite G4 `PASS`.
+After a final exact-head technical `PASS`, C7 does not require a routine Temporary Chat. Normal finality is conjunctive: review/amend convergence, one fresh exact-head G4 `PASS`, a complete terminal packet, and a comprehensive independent Web final gate must all be current and non-contradictory. The A6-C3/A6-C6 assurance launch and receipt remain available only as an explicitly pre-authorized exceptional evidence path for cryptography, recovery, irreversible or destructive migration, critical security boundaries, or conflicting evidence.
 
 The Temporary Chat returns only `CLEAR` or `CONCERN`. It is not G5, does not replace G4, and has no GitHub, acceptance, ready, merge, closure, installation, activation, or next-task authority. G4 `PASS` is necessary but insufficient for `CLEAR`.
+
+## A6-C6 assurance launch envelope and evidence receipt
+
+The Web Orchestrator must admit assurance through two closed records. The launch record is `assurance-launch/v1`; the Temporary Chat result record is `assurance-evidence/v1`. Neither record may use a candidate-supplied `rawEvidence`, `valid`, `verified`, `accepted`, or equivalent label as proof. Decisions are derived from the structured authority, locator, identity, digest, inspection, lifecycle, and receipt fields below.
+
+### `assurance-launch/v1`
+
+The launch envelope is valid only when it contains all of these fields bound to the same live authority:
+
+- `schema`, unique `envelope_id`, `repository`, `pull_request`, branch and merge-state identity, and exact `base`, `head`, `tree`, and commit-graph identity.
+- `technical_g4_execution_identity` and `web_verification_execution_identity`, each with provider, canonical model, reasoning, assignment source and locator, role, surface, run/session/turn identity, and exact head.
+- `launch_identity` with a fresh run, session, and turn; `canonical_template_revision` with the accepted assurance-template source, revision, and digest; and `evidence_universe_revision` with a revision or digest.
+- `web_verification_receipt` with its exact-head recheck and evidence identity; `created_at`; `expires_at`; and a one-use lifecycle containing `state`, `consumed`, `use_count`, and `consumed_at`.
+- `evidence`, with exactly one record for each mandatory domain: `repository-pr-branch-merge`, `exact-authority-graph`, `cumulative-diff-allowlist`, `source-only-boundary`, `local-validation`, `hosted-checks-exact-head`, `review-submissions`, `review-threads`, `finding-mappings`, `governance-reconciliation`, `authority-movement`, and `applicable-archive-ledger-issue-state`.
+
+Every mandatory evidence record contains `check_id`, an `authoritative_locator`, `evidence_identity`, `what_inspected`, `inspection_result`, and explicit contradiction/limitation fields. An authoritative locator is a resolved raw record, not a label: it contains `source_class: authoritative-raw`, an allowed raw source kind, an exact locator that resolves to the inspected subresource, a resolved evidence identity, a content digest, inspected subject, observation time, access state, repository, PR, and exact head. The inspected subject and digest must be bound to the domain and the current authority. Generic PR URLs, circular links, narrative references, copied packet hashes, or locators marked inaccessible do not satisfy a mandatory item.
+
+The only acceptable proof class is `authoritative-raw` from the relevant repository, Git, hosted-check, review, issue, archive, digest, or Ledger source. The following classes are context only and are rejected as mandatory proof: `controller-narrative`, `web-narrative`, `g4-packet`, `executor-terminal-packet`, `copied-packet-hash`, `reviewer-self-attestation`, `actor-conclusion`, `memory`, `custom-instructions`, `candidate-label`, `generic-link`, and `circular-locator`.
+
+Launch admission is ordered and fail closed. Missing `web_verification_receipt` returns `WEB_VERIFICATION_REQUIRED`. Missing, unresolved, inaccessible, or source-class-invalid mandatory evidence returns `ASSURANCE_EVIDENCE_INCOMPLETE`. A moved or mismatched repository, PR, branch, merge state, base, head, tree, graph, or authority returns `ASSURANCE_HEAD_MISMATCH`. Missing or stale canonical template revision returns `ASSURANCE_TEMPLATE_REQUIRED`. Duplicate, replayed, expired, consumed, or otherwise non-one-use envelopes return `ASSURANCE_LAUNCH_INVALID`. None of these states creates Temporary Chat.
+
+The Web assurance dispatch is rendered only from the accepted canonical assurance-template bytes and the admitted launch envelope. The template must instruct the Temporary Chat to independently inspect authoritative evidence, reject supplied conclusions as proof, return `CONCERN` for missing access or evidence, claim verification only when inspection occurred, and retain no G4, GitHub, acceptance, ready, merge, closure, installation, activation, or next-task authority. A hand-written summary-consistency prompt is not an assurance dispatch.
+
+### `assurance-evidence/v1`
+
+The result receipt must contain `schema`, a verdict exactly `CLEAR` or `CONCERN`, repository/PR/base/head/tree, `launch_envelope_identity`, the fresh Temporary Chat execution identity and assignment provenance, the technical G4 execution identity, complete prohibited-context separation evidence, one check record for every mandatory domain, `missing_evidence`, a final-head recheck, receipt creation identity/time/sequence, and a non-authority attestation. Each check record repeats `check_id`, authoritative locator, evidence identity or digest, what was inspected, inspection result, contradiction, and limitation. The check locator and evidence identity must match the admitted launch universe.
+
+The separation evidence must enumerate and independently prove separation from the Web Orchestrator, Executor-root, implementation, amendment, and technical G4 contexts. The final-head recheck must match the launch authority. The non-authority attestation must explicitly deny G4 PASS/AMEND authority, GitHub mutation, acceptance, ready, merge, closure, installation, activation, and next-task selection.
+
+Web independently validates the receipt before using it. A bare verdict, empty check list, missing identity, missing separation evidence, missing final recheck, generic/narrative/circular/inaccessible locator, missing mandatory item, contradictory inspection, stale head, launch mismatch, or missing non-authority attestation cannot support `CLEAR`. Web returns `ASSURANCE_CLEAR_UNSUPPORTED`, treats the operational result as `CONCERN`, and does not convert it into technical `AMEND`, G5, acceptance, or merge authority. A complete evidence-backed `CONCERN` remains `CONCERN` and follows the existing Web concern-disposition path.
 
 ## Cumulative semantic invariant registry
 
@@ -205,6 +235,23 @@ The following JSON block is the machine-readable cumulative source contract. Eve
       "authorising_design_lock": "DL-329-AUTO-CODE-005-A6-C4"
     },
     {
+      "invariant_id": "ASSURANCE-EVIDENCE-ENFORCEMENT-001",
+      "source_authority": "A6-C6 assurance launch and receipt enforcement contract",
+      "required_semantics": [
+        {"semantic_id": "closed_launch_envelope", "requirement": "Temporary Chat creation requires one exact-head assurance-launch/v1 envelope with bound identities, template and evidence revisions, expiry, and one-use state."},
+        {"semantic_id": "authoritative_raw_domain_proof", "requirement": "Every mandatory assurance domain is proved by an accessible authoritative raw locator that identifies the exact inspected evidence and digest; narratives and packets are context only."},
+        {"semantic_id": "structured_receipt_admission", "requirement": "Web admits only an assurance-evidence/v1 receipt with every check, exact launch/head identity, context separation, final recheck, and non-authority attestation; unsupported CLEAR becomes operational CONCERN."}
+      ],
+      "candidate_evidence": [
+        {"semantic_id": "closed_launch_envelope", "evidence_fields": ["launch_schema", "repository", "pull_request", "base", "head", "tree", "commit_graph", "g4_execution_identity", "web_verification_execution_identity", "launch_identity", "template_revision", "evidence_universe_revision", "created_at", "expires_at", "consumed", "use_count"]},
+        {"semantic_id": "authoritative_raw_domain_proof", "evidence_fields": ["mandatory_domain_ids", "authoritative_locator", "source_class", "exact_locator", "evidence_identity", "content_digest", "what_inspected", "accessible"]},
+        {"semantic_id": "structured_receipt_admission", "evidence_fields": ["receipt_schema", "verdict", "launch_envelope_identity", "temporary_chat_execution_identity", "technical_g4_execution_identity", "prohibited_context_separation", "checks", "missing_evidence", "final_head_recheck", "receipt_creation", "non_authority_attestation"]}
+      ],
+      "negative_test": "repo/tests/repo-auto-code-design.test.cjs::negative::ASSURANCE-EVIDENCE-ENFORCEMENT-001",
+      "status": "preserved",
+      "authorising_design_lock": "DL-329-AUTO-CODE-005-A6-C6"
+    },
+    {
       "invariant_id": "EXECUTION-ADMISSION-DEFAULT-DENY-001",
       "source_authority": "A6-C5 default-deny execution admission contract",
       "required_semantics": [
@@ -220,6 +267,67 @@ The following JSON block is the machine-readable cumulative source contract. Eve
         "negative_test": "repo/tests/repo-auto-code-design.test.cjs::negative::EXECUTION-ADMISSION-DEFAULT-DENY-001",
       "status": "preserved",
       "authorising_design_lock": "DL-329-AUTO-CODE-005-A6-C4"
+    },
+    {
+      "invariant_id": "C7-FINALITY-WEB-GATE-001",
+      "source_authority": "DL-329-AUTO-CODE-005-A6-C7 normal finality and Web sole final authority",
+      "required_semantics": [
+        {"semantic_id": "conjunctive_finality", "requirement": "Review/amend convergence, one fresh exact-head G4 PASS, a complete terminal packet, and comprehensive independent Web verification are all required at the same exact head."},
+        {"semantic_id": "web_sole_final_authority", "requirement": "Web is the sole comprehensive final authority; root, manager, worker, reviewer, and assurance surfaces are evidence-only."},
+        {"semantic_id": "contradiction_rejection", "requirement": "Root, manager, worker, reviewer, or assurance claims of finality, acceptance, merge, closure, waiver, or Web authority reject finality."},
+        {"semantic_id": "direct_amend", "requirement": "Web may return AMEND directly for a live contradiction or missing predicate without a second technical review."},
+        {"semantic_id": "routine_assurance_not_required", "requirement": "A routine Temporary Chat and CLEAR/CONCERN assurance are not normal-path finality predicates."}
+      ],
+      "candidate_evidence": [
+        {"semantic_id": "conjunctive_finality", "evidence_fields": ["review_amend_converged", "fresh_exact_head_g4_pass", "terminal_packet_complete", "web_comprehensive_final_gate"]},
+        {"semantic_id": "web_sole_final_authority", "evidence_fields": ["web_final_authority", "non_web_surfaces_evidence_only", "merge_authority"]},
+        {"semantic_id": "contradiction_rejection", "evidence_fields": ["contradictory_role_claims", "waived_predicates", "finality_decision"]},
+        {"semantic_id": "direct_amend", "evidence_fields": ["web_verdict", "amend_reason", "second_review_required"]},
+        {"semantic_id": "routine_assurance_not_required", "evidence_fields": ["temporary_chat_required", "assurance_result_required", "normal_path_predicates"]}
+      ],
+      "negative_test": "repo/tests/repo-auto-code-design.test.cjs::negative::C7-FINALITY-WEB-GATE-001",
+      "status": "preserved",
+      "authorising_design_lock": "DL-329-AUTO-CODE-005-A6-C7"
+    },
+    {
+      "invariant_id": "C8-AUTHORITY-SNAPSHOT-LEASE-001",
+      "source_authority": "DL-329-AUTO-CODE-005-A6-C8 deterministic machine authority contract",
+      "required_semantics": [
+        {"semantic_id": "canonical_snapshot", "requirement": "toolkit-authority-snapshot/v1 is deterministic canonical JSON with sorted keys, normalized arrays, full SHAs, and a SHA-256 digest."},
+        {"semantic_id": "relevant_projection", "requirement": "Admission compares only the child-keyed relevant child, PR, and parent-entry projection; unrelated sibling-parent movement is non-invalidating."},
+        {"semantic_id": "immutable_one_run_lease", "requirement": "toolkit-authority-lease/v1 is immutable after sealing, one-run, duplicate-safe, expiry-bound, and cannot be replayed after consumption."},
+        {"semantic_id": "machine_byte_agreement", "requirement": "GitHub and local machine authority collections agree byte-for-byte for base, head, tree, blobs, identity, scope, role, capabilities, and relevant revisions."},
+        {"semantic_id": "manifest_round_trip", "requirement": "toolkit-authority-manifest/v1 renders and extracts with exact bytes and the same digest; malformed or altered manifests fail closed."}
+      ],
+      "candidate_evidence": [
+        {"semantic_id": "canonical_snapshot", "evidence_fields": ["snapshot_schema", "canonical_bytes", "snapshot_digest", "full_sha_validation"]},
+        {"semantic_id": "relevant_projection", "evidence_fields": ["child_key", "pr_revision", "parent_entry_revision", "unrelated_sibling_movement"]},
+        {"semantic_id": "immutable_one_run_lease", "evidence_fields": ["lease_schema", "lease_digest", "lifecycle", "sealed_immutable", "consumed"]},
+        {"semantic_id": "machine_byte_agreement", "evidence_fields": ["github_collection", "local_collection", "byte_for_byte_agreement", "mismatch_reason"]},
+        {"semantic_id": "manifest_round_trip", "evidence_fields": ["manifest_schema", "rendered_bytes", "extracted_bytes", "round_trip_digest"]}
+      ],
+      "negative_test": "repo/tests/repo-auto-code-design.test.cjs::negative::C8-AUTHORITY-SNAPSHOT-LEASE-001",
+      "status": "preserved",
+      "authorising_design_lock": "DL-329-AUTO-CODE-005-A6-C8"
+    },
+    {
+      "invariant_id": "C8-ADMISSION-MUTATION-BOUNDARY-001",
+      "source_authority": "DL-329-AUTO-CODE-005-A6-C8 typed admission and sensitivity boundary",
+      "required_semantics": [
+        {"semantic_id": "typed_fail_closed_receipts", "requirement": "Every authority, manifest, lease, tooling, or sensitivity failure returns a typed admission receipt with mutation_performed false."},
+        {"semantic_id": "pre_dispatch_no_candidate", "requirement": "A pre-dispatch tooling or authority failure creates no evaluation candidate and consumes no lease."},
+        {"semantic_id": "sensitivity_handling", "requirement": "none, possible, and confirmed output classes redact/no-repeat values and distinguish credential rotation from non-credential containment."},
+        {"semantic_id": "default_off_source_only", "requirement": "The machinery remains source-only, uninstalled, unscheduled, inactive, credential-free, and cannot enable Auto Review or automatic next-task pickup."}
+      ],
+      "candidate_evidence": [
+        {"semantic_id": "typed_fail_closed_receipts", "evidence_fields": ["receipt_schema", "reason", "mutation_performed", "sensitive_value_omitted"]},
+        {"semantic_id": "pre_dispatch_no_candidate", "evidence_fields": ["tooling_failure", "evaluation_candidate_created", "lease_consumed"]},
+        {"semantic_id": "sensitivity_handling", "evidence_fields": ["classification", "redacted", "pause_affected_path", "rotation_disposition", "containment_disposition"]},
+        {"semantic_id": "default_off_source_only", "evidence_fields": ["source_only", "installed", "scheduled", "auto_review", "next_task_pickup", "credentials"]}
+      ],
+      "negative_test": "repo/tests/repo-auto-code-design.test.cjs::negative::C8-ADMISSION-MUTATION-BOUNDARY-001",
+      "status": "preserved",
+      "authorising_design_lock": "DL-329-AUTO-CODE-005-A6-C8"
     }
   ]
 }
@@ -236,3 +344,28 @@ The default result without a valid grant is root-only Standard execution. Fast a
 The four permission outcomes are deterministic: `allow_fast=false, allow_agents=false` is root-only Standard; `allow_fast=true, allow_agents=false` is root-only Fast; `allow_fast=false, allow_agents=true` keeps root and agents Standard; and `allow_fast=true, allow_agents=true` permits authorised root and delegated agents to use Fast within the exact grant scope. Missing, malformed, stale, consumed, replayed, inherited, or mismatched grants remain denied.
 
 For ordinary `Agent` and `spawn_agent`, an installed trusted pre-launch `PreToolUse` hook must match before launch. Its verified identity includes installed state, event, matcher, version, exact bytes, trust, and runtime coverage. `SubagentStart` is audit-only. Missing, stale, malformed, untrusted, or unsupported coverage returns root-only Standard; specialised or bypass paths return `UNSUPPORTED_DELEGATION` or denial and cannot silently launch. This source-only PR does not install or activate the hook.
+## A6-C7 normal finality and the Web final gate
+
+This section supersedes any earlier normal-path wording that makes a Temporary Chat, a CLEAR/CONCERN result, or routine second assurance a required finality predicate.
+
+The normal path is conjunctive and ordered: review/amend convergence is current; one fresh exact-head authoritative technical G4 `PASS` exists; the complete terminal packet is assembled; and Web performs the comprehensive independent final gate. Web is the sole comprehensive final authority. Web may return `AMEND` directly when any predicate is false, contradictory, stale, incomplete, or outside scope; no technical reviewer, root, manager, worker, or assurance surface may waive a missing predicate or claim acceptance, merge, closure, or finality.
+
+The C7 finality predicate requires all of the following at the same exact head: current child, PR, and relevant parent-entry authority; current Design Lock and authorised scope; exact-base and exact-head/tree agreement; a fresh exact-head G4 `PASS`; no blocking review, check, movement, contradiction, or unresolved required finding; a complete terminal packet; and comprehensive independent Web verification of the live repository, PR, branch, graph, diff, scope, checks, reviews, threads, mappings, and safety boundary. These predicates are evaluated conjunctively, not by a majority, score, label, or fallback.
+
+A root, closure manager, implementation/amendment worker, pre-G4 reviewer, technical G4 reviewer, or independent assurance auditor may report evidence only. Their claims of finality, acceptance, merge, closure, waiver, or Web authority are contradiction evidence and reject finality. Web can adjudicate evidence and return `AMEND` without a second technical review. A changed relevant authority, head, tree, scope, Design Lock, review state, or terminal-packet field requires re-admission and a fresh exact-head G4 where applicable.
+
+A fresh Web Temporary Chat and CLEAR/CONCERN assurance are not required on this normal path. A second reviewer is exceptional only when Web has an explicit pre-authorisation before dispatch for cryptography, recovery, an irreversible or destructive migration, a critical security boundary, or conflicting evidence; that reviewer is fresh, isolated, read-only, non-authoritative, and cannot replace Web finality.
+
+## A6-C8 deterministic machine authority
+
+C8 is source-only, uninstalled, unscheduled, inactive, and default-deny. It defines executable evidence contracts named `toolkit-authority-snapshot/v1`, `toolkit-authority-lease/v1`, `toolkit-authority-manifest/v1`, and `toolkit-admission-receipt/v1`.
+
+The snapshot is deterministic canonical JSON with lexicographically sorted object keys, normalized sorted path and capability arrays, UTF-8 bytes, and a SHA-256 digest. It contains the repository owner/name; child issue number and authority revision; PR number and authority revision; cumulative Design Lock; canonical base SHA; exact remote head SHA; exact tree SHA; every authorised path with its full 40-character blob SHA; authorised source scope and empty output/write boundary; role and capabilities; and a task-authority projection containing only the relevant child, PR, and deterministic child-keyed parent-entry marker revision. Lease IDs, timestamps, expiry, lifecycle state, receipts, and unrelated sibling-parent chronology are excluded from the snapshot.
+
+The one-run lease is a separate immutable record. It binds one snapshot digest, run identity, role, capabilities, issued and expiry times, and a lease identity; it transitions only DRAFT -> SEALED -> DISPATCHED -> ADMITTED -> COMPLETED or a terminal rejection. Sealed records are immutable. Duplicate dispatch, conflicting active leases, expiry, stale relevant authority, replay, consumed leases, malformed manifests, and invalid transitions fail closed with typed `toolkit-admission-receipt/v1` records and `mutation_performed:false`.
+
+Machine authority is collected independently from GitHub and the local checkout. Base, head, tree, every authorised blob, repository/issue/PR identity, scope, role, capabilities, and relevant revisions must agree byte-for-byte; full 40-character Git object IDs are required and abbreviated or prefix-expanded values are invalid. Relevant authority projection compares only the task-keyed child, PR, and parent-entry values; unrelated sibling-parent movement does not invalidate an otherwise matching snapshot.
+
+The `toolkit-authority-manifest/v1` is rendered and extracted with exact delimiters and canonical bytes. Prompt render/extract round trips must reproduce the same canonical manifest digest; truncation, alteration, duplicate JSON fields, delimiter corruption, or digest mismatch is a typed pre-dispatch failure. Tooling failure before dispatch creates no evaluation candidate and no lease consumption.
+
+Visible-output handling is sensitivity-aware: `none` continues; `possible` is redacted and pauses only the affected Web classification path; `confirmed` emits `SECRET_EXPOSURE_DETECTED` without repeating the value. Confirmed credential exposure requires evidence-based rotation disposition; confirmed non-credential exposure requires containment, with unrelated work invalidated only for demonstrated shared exposure. No credential, secret, private value, installation, activation, scheduler, Auto Review, or automatic next-task pickup is introduced by this source contract.
