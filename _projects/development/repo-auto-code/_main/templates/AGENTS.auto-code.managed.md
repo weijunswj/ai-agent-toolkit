@@ -35,4 +35,11 @@ The worker is isolated and may mutate only the exact admitted repository-file al
 
 One exact root claim is allowed. Expiry never transfers ownership. G4 is singular, newly isolated, and invalidated by a head change; only G4 returns PASS or AMEND. Assurance runs only after G4 PASS and web adjudication and returns CLEAR or CONCERN; it is not G4 and cannot authorise merge.
 
+Temporary Chat assurance is admitted only from a validated `assurance-launch/v1` envelope and the accepted canonical assurance-template revision. The envelope must bind exact repository/PR/base/head/tree/graph authority, both execution identities, launch run/session/turn identity, evidence-universe revision, lifecycle expiry and one-use consumption, plus authoritative raw locators for every mandatory domain. Narratives, packets, copied hashes, self-attestations, actor conclusions, memory, Custom Instructions, candidate labels, and generic links are context only. A missing receipt, evidence, template, or exact authority fails closed before chat creation. The response must be an `assurance-evidence/v1` receipt; bare or unsupported CLEAR becomes `ASSURANCE_CLEAR_UNSUPPORTED` and operational CONCERN.
+
 The source remains uninstalled, unscheduled, inactive, and unable to activate or select a next task automatically.
+## Run 043 A6-C7 and A6-C8 amendment contract
+
+C7 normal finality is conjunctive and Web-only. Web is the sole comprehensive final authority; a routine Temporary Chat is not required.
+
+C8 uses toolkit-authority-snapshot/v1, toolkit-authority-lease/v1, toolkit-authority-manifest/v1, and toolkit-admission-receipt/v1 with full 40-character SHAs, immutable one-run leases, typed mutation_performed:false receipts, and no pre-dispatch evaluation candidate.

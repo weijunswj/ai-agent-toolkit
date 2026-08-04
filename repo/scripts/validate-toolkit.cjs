@@ -361,7 +361,7 @@ const designGeneratorForbiddenTokens = [
 ];
 
 const secretPatterns = [
-  { label: 'OpenAI-style API key', regex: /sk-[A-Za-z0-9_-]{20,}/ },
+  { label: 'OpenAI-style API key', regex: /(?:^|[^A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/ },
   { label: 'Google API key', regex: /AIza[0-9A-Za-z_-]{20,}/ },
   { label: 'Pinecone-looking API key', regex: /pcsk_[A-Za-z0-9_-]{20,}/i },
   { label: 'Bearer token literal', regex: /Bearer\s+[A-Za-z0-9._-]{20,}/i },

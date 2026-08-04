@@ -77,6 +77,22 @@ The A6-C2 continuation is a narrow source-only bootstrap implementation exceptio
 | Temporary Chat returns a result other than CLEAR or CONCERN, or attempts finality authority | ASSURANCE_ORDER_INVALID | No | Web |
 | G4 PASS is treated as CLEAR without the independent Temporary Chat result | ASSURANCE_ORDER_INVALID | No | Web |
 
+## A6-C6 assurance launch and receipt enforcement
+
+| Condition | Required result | Continue? | Repair owner |
+| --- | --- | --- | --- |
+| Temporary Chat launch has no Web verification receipt | WEB_VERIFICATION_REQUIRED | No; no Temporary Chat | Web |
+| Launch envelope omits, cannot resolve, or cannot access a mandatory raw evidence domain | ASSURANCE_EVIDENCE_INCOMPLETE | No; no Temporary Chat | Web |
+| Launch repository, PR, branch, merge state, base, head, tree, graph, or authority moved or mismatches the live readback | ASSURANCE_HEAD_MISMATCH | No; no Temporary Chat | Web |
+| Canonical assurance-template revision is missing, stale, or not used for rendering | ASSURANCE_TEMPLATE_REQUIRED | No; no Temporary Chat | Web |
+| Launch envelope is duplicated, replayed, expired, already consumed, or used more than once | ASSURANCE_LAUNCH_INVALID | No; no Temporary Chat | Web |
+| A mandatory item is proved only by a narrative, G4 packet, executor packet, copied hash/count, self-attestation, actor conclusion, memory, Custom Instructions, candidate label, generic link, or circular locator | ASSURANCE_EVIDENCE_INCOMPLETE | No; no Temporary Chat | Web |
+| Dispatch replaces the canonical repository-inspection assignment with a hand-written summary-consistency task | ASSURANCE_TEMPLATE_REQUIRED | No; no Temporary Chat | Web |
+| Assurance response is bare, has no schema, has an empty check list, or omits required receipt identity/separation/non-authority fields | ASSURANCE_CLEAR_UNSUPPORTED | No; operational result is CONCERN | Web |
+| Receipt claims CLEAR while a check is missing, generic, inaccessible, narrative-only, contradictory, stale, or listed as missing | ASSURANCE_CLEAR_UNSUPPORTED | No; operational result is CONCERN | Web |
+| Receipt locator claims inspection while its authoritative evidence is inaccessible | ASSURANCE_CLEAR_UNSUPPORTED | No; operational result is CONCERN | Web |
+| Receipt exact head or launch-envelope identity does not match the admitted launch | ASSURANCE_HEAD_MISMATCH or ASSURANCE_LAUNCH_INVALID | No; operational result is CONCERN | Web |
+
 ## A6-C4 invariant failures
 
 | Condition | Required result | Continue? | Repair owner |
@@ -112,3 +128,46 @@ The A6-C2 continuation is a narrow source-only bootstrap implementation exceptio
 | Specialised or bypass launch path is not explicitly supported and admitted | UNSUPPORTED_DELEGATION | No | Web |
 
 The source-only contract does not claim that a native hook is installed or operational. Host-specific installation and adapter wiring are separate authority and validation surfaces.
+## A6-C7 finality failures
+
+The C7 section supersedes earlier normal-path rows that require a Temporary Chat or an assurance CLEAR/CONCERN result.
+
+| Condition | Return code | Mutation/evaluation effect | Owner |
+| --- | --- | --- | --- |
+| Review/amend convergence is not current at the exact head | REVIEW_STATE_STALE | No G4 or finality | Web |
+| Fresh exact-head G4 PASS is absent, stale, or contradicted | G4_EXACT_HEAD_REQUIRED | No finality | Web |
+| Complete terminal packet is missing or internally inconsistent | TERMINAL_PACKET_INCOMPLETE | No candidate or acceptance | Web |
+| Comprehensive independent Web final gate is missing or incomplete | WEB_FINAL_GATE_REQUIRED | No acceptance, merge, or closure | Web |
+| Any required C7 conjunct is false, moved, contradictory, or waived by a non-Web actor | FINALITY_CONJUNCT_FALSE | Return AMEND; no finality | Web |
+| Root, manager, worker, pre-G4, G4, or assurance claims finality, acceptance, merge, closure, waiver, or Web authority | FINALITY_AUTHORITY_CONTRADICTION | Reject finality; preserve evidence | Web |
+| Web returns AMEND for a live concern without a second technical review | AMEND | Return to the bounded review/amend loop | Web |
+| Routine Temporary Chat or CLEAR/CONCERN is presented as a normal-path predicate | ROUTINE_ASSURANCE_NOT_REQUIRED | Ignore the routine path; no authority transfer | Web |
+| Exceptional second reviewer lacks an explicit pre-dispatch grant or exceeds its named category | EXCEPTIONAL_REVIEW_NOT_AUTHORISED | No dispatch or finality | Web |
+
+## A6-C8 authority, manifest, lease, and sensitivity failures
+
+| Condition | Return code | Mutation/evaluation effect | Owner |
+| --- | --- | --- | --- |
+| SHA is not exactly 40 lowercase hexadecimal characters | MALFORMED_SHA | No admission, no candidate | Web |
+| Blob, base, head, or tree is abbreviated, truncated, or prefix-expanded | MALFORMED_SHA | No admission, no candidate | Web |
+| Machine GitHub/local base differs | BASE_MOVED | Stop and preserve | Web |
+| Machine GitHub/local head differs | HEAD_MOVED | Stop and preserve | Web |
+| Machine GitHub/local tree differs | TREE_MOVED | Stop and preserve | Web |
+| An authorised blob differs or is missing | BLOB_MOVED | Stop and preserve | Web |
+| Repository, issue/PR identity, scope, role, or capability differs | SCOPE_MISMATCH | Stop and preserve | Web |
+| Child authority revision changed | CHILD_AUTHORITY_MOVED | Re-admit; no candidate | Web |
+| PR authority revision changed | PR_AUTHORITY_MOVED | Re-admit; no candidate | Web |
+| Relevant child-keyed parent marker changed, duplicated, nested, or mismatched | PARENT_ENTRY_MOVED | Re-admit; no candidate | Web |
+| Unrelated sibling-parent chronology changed while the relevant projection is stable | UNRELATED_PARENT_MOVEMENT | Do not invalidate relevant admission | Web |
+| Snapshot bytes or digest differ | SNAPSHOT_DIGEST_MISMATCH | No lease dispatch or candidate | Web |
+| Manifest schema, duplicate fields, delimiter, canonical bytes, or digest is invalid | MALFORMED_MANIFEST | No lease consumption or candidate | Web |
+| Prompt render/extract changes canonical manifest bytes | MANIFEST_ROUND_TRIP_MISMATCH | No dispatch or candidate | Web |
+| Lease is duplicated, replayed, already consumed, or conflicts with an active lease | DUPLICATE_DISPATCH / LEASE_ALREADY_CONSUMED / CONFLICTING_ACTIVE_LEASE | No second run | Web |
+| Lease has expired or transition is invalid | LEASE_EXPIRED / LEASE_INVALID | No admission or candidate | Web |
+| Pre-dispatch tooling, collection, extraction, or final reread fails | PRE_DISPATCH_TOOLING_FAILURE | `evaluation_candidate_created:false`; no lease consumption | Web |
+| Visible output is possible-sensitive | SENSITIVITY_POSSIBLE | Redact/no-repeat; pause affected Web path only | Web |
+| Confirmed credential exposure lacks evidence-based rotation disposition | SECRET_EXPOSURE_DETECTED | Stop affected path; contain/rotate per evidence | Web |
+| Confirmed non-credential exposure lacks containment | SECRET_EXPOSURE_DETECTED | Stop affected path; contain per evidence | Web |
+| Shared exposure is not demonstrated | SENSITIVITY_LOCAL_ONLY | Do not invalidate unrelated work | Web |
+
+No row permits installation, activation, scheduling, Auto Review, automatic next-task pickup, credential introduction, or governance mutation. All typed admission receipts carry `mutation_performed:false` and must not repeat sensitive observed values.
