@@ -53,3 +53,7 @@ Stop-Process -Id <PID> -Force
 - Use bounded waits for server startup checks.
 - If a command appears stuck, stop, inspect process, port, and log state, then choose a targeted recovery.
 - Do not keep retrying the same long-running command blindly.
+
+## Native lifecycle timeout boundary
+
+File-read, command, log, server-start and process timeout guidance applies to operating-system operations only. It does not apply to native agents, subagents, reviewers, tasks, chats or sessions. A native lifecycle is terminal only when the harness reports a terminal result, failure or loss. A bounded command wait ending is not a native-agent timeout.

@@ -1810,6 +1810,7 @@ function temporaryEvidence(overrides = {}) {
     webVerified: true,
     webAdjudicated: true,
     freshTemporaryChatCount: 1,
+    exceptionalAssuranceGrant: true,
     g4ExecutionIdentity: executionIdentity(),
     webExecutionIdentity: executionIdentity({
       provider: 'provider-web-synthetic',
@@ -1859,6 +1860,7 @@ function temporaryAssuranceGate(evidence) {
   if (!evidence || evidence.rawEvidence !== true) return 'SURFACE_TOPOLOGY_INVALID';
   if (evidence.g4Verdict !== 'PASS' || evidence.finalExactHead !== true || evidence.webVerified !== true ||
       evidence.webAdjudicated !== true) return 'WEB_VERIFICATION_REQUIRED';
+  if (evidence.exceptionalAssuranceGrant !== true) return 'ASSURANCE_GRANT_REQUIRED';
   if (evidence.freshTemporaryChatCount !== 1) return 'TEMPORARY_ASSURANCE_REQUIRED';
   const g4 = evidence.g4ExecutionIdentity;
   const web = evidence.webExecutionIdentity;
@@ -1901,8 +1903,9 @@ test('A6-C3 uses a model-neutral technical G4 function and independent G4 assign
   assert.equal(temporaryAssuranceGate(evidence), 'CLEAR');
 });
 
-test('A6-C3 requires exactly one fresh Temporary Chat after Web verification', () => {
+test('A6-C3 exceptional assurance requires an exact grant and one fresh Temporary Chat after Web verification', () => {
   assertA6Terms(['exactly one fresh Web Temporary Chat', 'fresh for that head', 'same model family']);
+  assert.equal(temporaryAssuranceGate(temporaryEvidence({ exceptionalAssuranceGrant: false })), 'ASSURANCE_GRANT_REQUIRED');
   assert.equal(temporaryAssuranceGate(temporaryEvidence({ freshTemporaryChatCount: 0 })), 'TEMPORARY_ASSURANCE_REQUIRED');
   assert.equal(temporaryAssuranceGate(temporaryEvidence({ freshTemporaryChatCount: 2 })), 'TEMPORARY_ASSURANCE_REQUIRED');
   assert.equal(temporaryAssuranceGate(temporaryEvidence({ webVerified: false })), 'WEB_VERIFICATION_REQUIRED');
@@ -1921,7 +1924,7 @@ test('A6-C3 Temporary Chat independently records identities and can return CONCE
   });
 });
 
-test('A6-C3 same-family routes still require diversity records and fresh assurance', () => {
+test('A6-C3 same-family routes still require diversity records when an exceptional grant admits assurance', () => {
   const evidence = temporaryEvidence({
     g4ExecutionIdentity: executionIdentity({
       provider: 'provider-shared-synthetic',
@@ -2716,18 +2719,18 @@ const expectedInvariantBundles = {
   'G4-WEB-ASSURANCE-001': {
     semantics: {
       technical_function_and_independent_assignment: 'G4 is a technical-review function with an independently resolved provider, canonical model, and reasoning.',
-      fresh_assurance_after_verification: 'Exactly one fresh Temporary Chat follows final exact-head PASS and independent Web verification.',
+      fresh_assurance_after_verification: 'Exceptional assurance requires an exact explicit pre-dispatch grant; when granted, one fresh Temporary Chat follows final exact-head PASS and independent Web verification.',
       bounded_non_authority: 'The Temporary Chat independently checks evidence, records both execution identities, returns only CLEAR or CONCERN, and has no finality or GitHub authority.'
     },
     evidence: {
       technical_function_and_independent_assignment: ['g4_role', 'g4_provider', 'g4_canonical_model', 'g4_reasoning', 'assignment_source'],
-      fresh_assurance_after_verification: ['g4_verdict', 'final_exact_head', 'web_verified', 'fresh_temporary_chat_count'],
+      fresh_assurance_after_verification: ['assurance_grant', 'g4_verdict', 'final_exact_head', 'web_verified', 'fresh_temporary_chat_count'],
       bounded_non_authority: ['g4_execution_identity', 'web_execution_identity', 'independent_evidence', 'verdict', 'merge_authority']
     }
   },
   'ASSURANCE-EVIDENCE-ENFORCEMENT-001': {
     semantics: {
-      closed_launch_envelope: 'Temporary Chat creation requires one exact-head assurance-launch/v1 envelope with bound identities, template and evidence revisions, expiry, and one-use state.',
+      closed_launch_envelope: 'Exceptional Temporary Chat creation requires an exact grant and one exact-head assurance-launch/v1 envelope with bound identities, template and evidence revisions, expiry, and one-use state.',
       authoritative_raw_domain_proof: 'Every mandatory assurance domain is proved by an accessible authoritative raw locator that identifies the exact inspected evidence and digest; narratives and packets are context only.',
       structured_receipt_admission: 'Web admits only an assurance-evidence/v1 receipt with every check, exact launch/head identity, context separation, final recheck, and non-authority attestation; unsupported CLEAR becomes operational CONCERN.'
     },
@@ -3616,7 +3619,7 @@ test('PRRT_kwDOSTHjGM6WPZdT requires evidence-derived final authority reread', (
   assert.equal(result.evaluation_candidate_created, false);
 });
 
-test('PRRT_kwDOSTHjGM6WPZdc propagates typed machine mismatch through pre-dispatch', () => {
+test('PRRT_kwDOSTHjGM6WPZdX preserves typed machine mismatch through pre-dispatch', () => {
   const machine = c8MachineAuthority(); machine.local.head_sha = c8Hash('moved');
   const result = c8PreDispatch({ machine });
   assert.equal(result.receipt.reason, 'HEAD_MOVED');
@@ -3646,22 +3649,22 @@ test('PRRT_kwDOSTHjGM6WPZd1 verifies Git object type and exact path binding', ()
   assert.equal(c8VerifyGitObjectBinding({ object_type: 'commit', expected_type: 'blob', path: 'x', tree_path: 'y' }), false);
 });
 
-test('PRRT_kwDOSTHjGM6WPZc3 keeps embedded API keys detectable', () => {
+test('PRRT_kwDOSTHjGM6WPZdc keeps embedded API keys detectable', () => {
   const key = ['x', ['s', 'k', '-'].join(''), 'A'.repeat(24)].join('');
   assert.equal(c10ContainsEmbeddedCredential(key), true);
 });
 
-test('PRRT_kwDOSTHjGM6WPZc2 derives sensitivity and returns typed no-mutation receipts', () => {
+test('PRRT_kwDOSTHjGM6WPZc2 prevents sensitivity labels from downgrading confirmed evidence', () => {
   assert.throws(() => c8ClassifyOutput({ classification: 'none', confirmedSensitive: true }), (error) => error.reason === 'SENSITIVITY_CLASSIFICATION_CONTRADICTION');
   const receipt = c8SensitivityReceipt({ classification: 'possible' });
   assert.equal(receipt.schema, c8Schemas.receipt); assert.equal(receipt.mutation_performed, false); assert.equal(receipt.evaluation_candidate_created, false);
 });
 
-test('PRRT_kwDOSTHjGM6WPZc9 rejects the configured review invocation in generic writers', () => {
+test('C10 generic writers reject the configured review invocation', () => {
   assert.throws(() => c10GenericGitHubWrite('comment ' + c10TriggerValue()), (error) => error.code === 'CODEX_TRIGGER_TOKEN_FORBIDDEN');
 });
 
-test('PRRT_kwDOSTHjGM6WPZcj rejects obfuscated and encoded invocation forms', () => {
+test('C10 generic writers reject obfuscated and encoded invocation forms', () => {
   const trigger = c10TriggerValue();
   for (const value of [c10ZeroWidth(trigger), trigger.toUpperCase(), Buffer.from(trigger).toString('base64'), '`' + trigger + '`']) {
     assert.throws(() => c10GenericGitHubWrite(value), (error) => error.code === 'CODEX_TRIGGER_TOKEN_FORBIDDEN');
@@ -3676,7 +3679,7 @@ test('PRRT_kwDOSTHjGM6WPZc9 admits only one exact-head G4 structured operation',
   assert.equal(c10ReviewRequestAdmission(valid).decision, 'REVIEW_REQUEST_REJECTED');
 });
 
-test('PRRT_kwDOSTHjGM6WPZdT preserves G4 reply-without-resolution and Web-only finality', () => {
+test('C10 preserves G4 reply-without-resolution and Web-only finality', () => {
   assert.equal(g4ConversationMutation({ phase: 'FINAL', verdict: 'PASS', reply: true, resolve: true }).decision, 'G4_MUTATION_REJECTED');
   assert.equal(g4ConversationMutation({ phase: 'FINAL', verdict: 'PASS', reply: true, resolve: false }).decision, 'G4_REPLY_ALLOWED');
   assert.equal(webFinalityMutation({ actor: 'manager', resolve: true }).decision, 'WEB_FINALITY_REJECTED');
@@ -3699,3 +3702,149 @@ test('C10 source has no custom waiting infrastructure or raw trigger literal', (
   assert.doesNotMatch(source, triggerPattern);
 });
 
+
+const c11InstructionSource = path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', '_partials', 'ai-coding-agent-execution.md');
+const c11WindowsSource = path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', 'repo-local', 'docs', 'agent-playbooks', 'windows-command-hygiene.md');
+const c11CuratedAgentsSource = path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', 'curated_output_for_ai', 'skills', 'ai-coding-agent-rules', 'repo-local', 'AGENTS.managed.template.md');
+
+function c11SourceText() {
+  return [
+    fs.readFileSync(c11InstructionSource, 'utf8'),
+    fs.readFileSync(c11WindowsSource, 'utf8'),
+    fs.readFileSync(c11CuratedAgentsSource, 'utf8'),
+    fs.readFileSync(path.join(mainRoot, 'architecture.md'), 'utf8'),
+    fs.readFileSync(path.join(mainRoot, 'protocol.md'), 'utf8'),
+    fs.readFileSync(path.join(mainRoot, 'state-machine.md'), 'utf8'),
+    ...a6PromptFiles.map((file) => fs.readFileSync(file, 'utf8'))
+  ].join(String.fromCharCode(10));
+}
+
+test('C11 exact live finding bindings are represented by regression subjects', () => {
+  const bindings = [
+    ['PRRT_kwDOSTHjGM6WPZcj', 'routine Temporary Chat'],
+    ['PRRT_kwDOSTHjGM6WPZco', 'verified Web execution identity'],
+    ['PRRT_kwDOSTHjGM6WPZcq', 'non-Git authority'],
+    ['PRRT_kwDOSTHjGM6WPZcv', 'admitted lease'],
+    ['PRRT_kwDOSTHjGM6WPZcx', 'consumption time'],
+    ['PRRT_kwDOSTHjGM6WPZc2', 'sensitivity'],
+    ['PRRT_kwDOSTHjGM6WPZc3', 'typed no-mutation'],
+    ['PRRT_kwDOSTHjGM6WPZc9', 'exceptional-review grant'],
+    ['PRRT_kwDOSTHjGM6WPZdE', 'locale-independent'],
+    ['PRRT_kwDOSTHjGM6WPZdI', 'nested markers'],
+    ['PRRT_kwDOSTHjGM6WPZdL', 'manifest role'],
+    ['PRRT_kwDOSTHjGM6WPZdP', 'sealed lease'],
+    ['PRRT_kwDOSTHjGM6WPZdT', 'fresh second machine'],
+    ['PRRT_kwDOSTHjGM6WPZdX', 'machine-mismatch receipt'],
+    ['PRRT_kwDOSTHjGM6WPZdc', 'embedded API-key'],
+    ['PRRT_kwDOSTHjGM6WPZdh', 'assurance envelope'],
+    ['PRRT_kwDOSTHjGM6WPZdn', 'admission grant'],
+    ['PRRT_kwDOSTHjGM6WPZdu', 'cryptographic digest'],
+    ['PRRT_kwDOSTHjGM6WPZd1', 'Git object type']
+  ];
+  const text = c11SourceText();
+  for (const [thread, subject] of bindings) {
+    assert.ok(text.includes(subject), thread + ' missing exact finding subject ' + subject);
+  }
+});
+
+test('C11 normal finality does not require routine assurance, while exceptional assurance requires an exact grant', () => {
+  const closure = fs.readFileSync(path.join(templateRoot, 'closure-manager.prompt.md'), 'utf8');
+  assert.match(closure, /routine Temporary Chat.*not required/i);
+  assert.match(c11SourceText(), /exceptional assurance.*explicit.*grant/i);
+});
+
+test('C11 default-deny delegation rejects silence, generic speed, malformed grants, and over-count launches', () => {
+  assert.equal(c11DelegationDecision({ operation: 'spawn_agent' }, {}).reason, 'DELEGATION_NOT_AUTHORISED');
+  assert.equal(c11DelegationDecision({ operation: 'spawn_agent', speed: 'faster' }, {}).reason, 'DELEGATION_NOT_AUTHORISED');
+  assert.equal(c11DelegationDecision({ operation: 'spawn_agent', requested_count: 2 }, c11Grant()).reason, 'DELEGATION_NOT_AUTHORISED');
+});
+
+test('C11 ordinary helper mode requires explicit non-overlapping scope and Auto-code admits one exclusive worker', () => {
+  assert.equal(c11DelegationDecision({ operation: 'helper', scope: ['src/a'] }, c11Grant({ mode: 'ordinary-helper', scope: ['src/b'] })).allowed, true);
+  assert.equal(c11DelegationDecision({ operation: 'helper', scope: ['src/a'] }, c11Grant({ mode: 'ordinary-helper', scope: ['src/a'] })).reason, 'SCOPE_OVERLAP');
+  assert.equal(c11DelegationDecision({ operation: 'spawn_agent' }, c11Grant({ mode: 'exclusive-auto-code', count: 1 })).allowed, true);
+  assert.equal(c11DelegationDecision({ operation: 'spawn_agent' }, c11Grant({ mode: 'exclusive-auto-code', count: 2 })).reason, 'DELEGATION_NOT_AUTHORISED');
+});
+
+test('C11 Auto-code manager suspends until native terminal return and never infers failure from time or quiet output', () => {
+  const active = c11AutoCodeLifecycle('worker-active');
+  assert.equal(active.manager_state, 'MANAGER_SUSPENDED_ON_NATIVE_WORKER');
+  assert.equal(active.progress_inspection, 'forbidden');
+  assert.equal(c11AutoCodeLifecycle('bounded-wait-expired').manager_state, 'MANAGER_SUSPENDED_ON_NATIVE_WORKER');
+  assert.equal(c11AutoCodeLifecycle('no-file-change').manager_state, 'MANAGER_SUSPENDED_ON_NATIVE_WORKER');
+  assert.equal(c11AutoCodeLifecycle('native-terminal-return').manager_state, 'MANAGER_READY_FOR_VALIDATION');
+});
+
+test('C11 user interruption preserves exclusive ownership and replacement requires terminal loss plus a new grant', () => {
+  assert.equal(c11AutoCodeLifecycle('user-interruption').workspace, 'preserved');
+  assert.equal(c11AutoCodeLifecycle('user-interruption').ownership, 'unchanged');
+  assert.equal(c11AutoCodeLifecycle('replacement-before-terminal').replacement, 'forbidden');
+  assert.equal(c11AutoCodeLifecycle('replacement-after-loss-with-new-grant').replacement, 'allowed');
+});
+
+test('C11 Windows command timeouts do not terminate native agent lifecycles', () => {
+  const text = fs.readFileSync(c11WindowsSource, 'utf8');
+  assert.match(text, /operating-system operations only/i);
+  assert.match(text, /native.*terminal only when the harness reports/i);
+  assert.match(text, /bounded command wait.*not.*native-agent timeout/i);
+});
+
+test('C11 source versions record behavioural contract additions', () => {
+  const rules = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', 'toolkit.project.json'), 'utf8'));
+  const autoCode = JSON.parse(fs.readFileSync(path.join(projectRoot, 'toolkit.project.json'), 'utf8'));
+  assert.equal(rules.version, '3.1.0');
+  assert.equal(autoCode.version, '1.4.0');
+  assert.match(rules.version_notes, /default-deny delegation|native worker/i);
+  assert.match(autoCode.version_notes, /C11/i);
+});
+
+test('PRRT_kwDOSTHjGM6WPZcj removes routine Temporary Chat from normal C7 finality', () => {
+  const evidence = Object.fromEntries(c7FinalityPredicates.map((key) => [key, true]));
+  const result = c7FinalityDecision({ ...evidence, g4Verdict: 'PASS', g4ExactHead: true, webExecutionIdentity: { actor: 'web' }, comprehensiveIndependentWebFinalGate: { actor: 'web' } });
+  assert.equal(result.finality, true);
+  assert.equal(result.routineAssuranceRequired, false);
+});
+
+test('PRRT_kwDOSTHjGM6WPZc3 returns typed no-mutation receipts for sensitivity stops', () => {
+  const receipt = c8SensitivityReceipt({ classification: 'confirmed' });
+  assert.equal(receipt.mutation_performed, false);
+  assert.equal(receipt.evaluation_candidate_created, false);
+});
+
+function c11Grant(overrides = {}) {
+  return {
+    schema: 'delegation-grant/v1',
+    run_id: 'run-047', session_id: 'session-047', turn_id: 'turn-047',
+    issuer: 'web', user_request_proof: 'explicit-current-turn-request',
+    mode: 'exclusive-auto-code', count: 1, role: 'implementation/amendment worker',
+    provider: ['Open', 'AI'].join(''), canonical_model: ['GPT', '-5.6 Luna'].join(''), reasoning: ['M', 'ax'].join(''),
+    repository: 'weijunswj/ai-agent-toolkit', scope: ['src/a'],
+    capabilities: ['read', 'mutate', 'test'], expires_at: '2099-01-01T00:00:00.000Z',
+    one_use: true, consumed: false, allow_further_delegation: false,
+    ...overrides
+  };
+}
+
+function c11DelegationDecision(operation = {}, grant = {}) {
+  const required = ['run_id', 'session_id', 'turn_id', 'issuer', 'user_request_proof', 'role', 'provider', 'canonical_model', 'reasoning', 'repository', 'scope', 'capabilities', 'expires_at'];
+  if (!grant || required.some((key) => grant[key] === undefined) || grant.one_use !== true || grant.consumed === true || grant.allow_further_delegation !== false) return { allowed: false, reason: 'DELEGATION_NOT_AUTHORISED' };
+  if (grant.repository !== 'weijunswj/ai-agent-toolkit' || !Array.isArray(grant.scope) || !Array.isArray(grant.capabilities) || Date.parse(grant.expires_at) <= Date.now()) return { allowed: false, reason: 'DELEGATION_NOT_AUTHORISED' };
+  const requestedCount = operation.requested_count || 1;
+  if (grant.count !== 1 || requestedCount !== 1) return { allowed: false, reason: 'DELEGATION_NOT_AUTHORISED' };
+  const requestedScope = Array.isArray(operation.scope) ? operation.scope : [];
+  if (operation.operation === 'helper') {
+    if (grant.mode !== 'ordinary-helper') return { allowed: false, reason: 'DELEGATION_NOT_AUTHORISED' };
+    if (requestedScope.some((entry) => grant.scope.includes(entry))) return { allowed: false, reason: 'SCOPE_OVERLAP' };
+    return { allowed: true, mode: grant.mode };
+  }
+  if (operation.operation !== 'spawn_agent' || grant.mode !== 'exclusive-auto-code' || grant.role !== 'implementation/amendment worker') return { allowed: false, reason: 'DELEGATION_NOT_AUTHORISED' };
+  return { allowed: true, mode: grant.mode, mutation_owner: 'exclusive-worker' };
+}
+
+function c11AutoCodeLifecycle(event) {
+  const suspended = { manager_state: "MANAGER_SUSPENDED_ON_NATIVE_WORKER", progress_inspection: "forbidden", overlapping_validation: "forbidden", status_nudge: "forbidden", interruption_for_progress: "forbidden", ownership: "exclusive-worker", workspace: "preserved", replacement: "forbidden" };
+  if (event === "native-terminal-return") return { ...suspended, manager_state: "MANAGER_READY_FOR_VALIDATION", ownership: "manager-validation" };
+  if (event === "user-interruption") return { ...suspended, manager_state: "USER_INTERRUPTED_PRESERVE", ownership: "unchanged" };
+  if (event === "replacement-after-loss-with-new-grant") return { ...suspended, manager_state: "REPLACEMENT_ADMITTED", replacement: "allowed" };
+  return suspended;
+}

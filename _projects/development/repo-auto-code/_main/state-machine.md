@@ -61,7 +61,7 @@ These target states are descriptive only. They become eligible only after separa
 | WEB_ORCHESTRATOR_ACTIVE | Exactly one persistent Web Orchestrator is bound to one task or PR | Own controller authority and resolve dispatch assignments | Authority moves or topology becomes invalid |
 | EXECUTOR_ROOT_ACTIVE | Exactly one persistent Executor-root is bound to the same task or PR | Coordinate evidence packets and fresh subordinate runs only | Duplicate, cross-task, or authority-expanding root appears |
 | FRESH_SUBORDINATE_RUN | New prompt-bounded run, complete assignment, clean exact-authority workspace | Implement or review only the assigned role and scope | Run ends, head changes, or freshness/evidence fails |
-| TEMPORARY_ASSURANCE_PENDING | Final exact-head G4 PASS plus independent Web verification | Fresh read-only Temporary Chat may inspect evidence | Auditor returns CLEAR or CONCERN only |
+| TEMPORARY_ASSURANCE_PENDING | Final exact-head G4 PASS, independent Web verification and exact exceptional assurance grant | Fresh read-only Temporary Chat may inspect evidence | Auditor returns CLEAR or CONCERN only |
 | TEMPORARY_ASSURANCE_RESULT | Fresh Temporary Chat returned CLEAR or CONCERN | Web adjudicates finality or remaining concerns | No merge or selection follows automatically |
 
 Additional A6 guards:
@@ -80,12 +80,12 @@ Additional A6 guards:
 | --- | --- | --- | --- |
 | TECHNICAL_G4_ASSIGNMENT | Exact head is bound and one complete G4 assignment is resolved independently | Record the technical G4 provider, canonical model, reasoning, assignment source, and execution identity | Assignment is complete and the fresh G4 context is isolated |
 | TECHNICAL_G4_PASS | The technical G4 reviewer returns PASS for the final exact head | Web independently verifies bounded exact-head evidence | Web verification is complete |
-| TEMPORARY_CHAT_REQUIRED | Final exact-head technical PASS and independent Web verification are recorded | Create exactly one fresh Web Temporary Chat for that head | One separate read-only Temporary Chat is admitted |
+| EXCEPTIONAL_ASSURANCE_GRANT_REQUIRED | An exact pre-dispatch assurance grant and final-head Web verification are recorded | Create one fresh Web Temporary Chat only for that admitted exception | One separate read-only Temporary Chat is admitted |
 | TEMPORARY_CHAT_ASSESSING | The fresh Temporary Chat is separate from all implementation, Executor-root, Web Orchestrator, and G4 contexts | Independently assess bounded evidence and record both execution identities plus diversity | The Temporary Chat returns CLEAR or CONCERN only |
 
 G4 is a technical-review function, not a structural model name. The G4 assignment may differ from the Web controller assignment; neither model nor role identity grants authority. A Temporary Chat is not G5 and cannot replace G4. G4 PASS remains necessary but is insufficient for CLEAR.
 
-The Temporary Chat is invalid if it trusts only the G4 packet or self-attestation, omits either execution identity, omits the diversity record, uses a shared context, is duplicated for the exact head, or attempts GitHub, acceptance, ready, merge, closure, installation, activation, or next-task authority. The same model family does not remove the one-chat requirement.
+The Temporary Chat is invalid if it trusts only the G4 packet or self-attestation, omits either execution identity, omits the diversity record, uses a shared context, is duplicated for the exact head, or attempts GitHub, acceptance, ready, merge, closure, installation, activation, or next-task authority. The same model family does not waive the exact exceptional assurance grant.
 
 ## A6-C6 assurance launch and receipt states
 
@@ -135,7 +135,7 @@ The C7 section supersedes earlier normal-path states that make Temporary Chat or
 | C7_FINALITY_ADMITTED | Every predicate is true and no contradiction, movement, hold, or unresolved required finding exists | Web records finality and may authorize the separately controlled acceptance/merge/closure boundary | Terminal packet is final |
 | C7_BLOCKED | Any predicate is false, stale, contradictory, incomplete, or moved | Record the typed reason and return AMEND or hold | No acceptance, merge, closure, or candidate |
 
-Root, manager, worker, pre-G4, technical G4, and assurance surfaces are evidence-only. Web is the sole comprehensive final authority and may return AMEND without a second technical review. A Temporary Chat is optional and exceptional only after an explicit pre-dispatch grant for cryptography, recovery, irreversible/destructive migration, a critical security boundary, or conflicting evidence.
+Root, manager, worker, pre-G4, technical G4, and assurance surfaces are evidence-only. Web is the sole comprehensive final authority and may return AMEND without a second technical review. A Temporary Chat is optional and exceptional only after an exact pre-dispatch grant for cryptography, recovery, irreversible/destructive migration, a critical security boundary, or conflicting evidence.
 
 ## A6-C8 authority snapshot and lease states
 
@@ -152,3 +152,11 @@ Root, manager, worker, pre-G4, technical G4, and assurance surfaces are evidence
 Sealed leases are immutable. Only DRAFT -> SEALED -> DISPATCHED -> ADMITTED -> COMPLETED or a terminal rejection is valid. Duplicate/replayed dispatch, consumed reuse, expiry, malformed JSON/duplicate fields, malformed SHA, prompt digest mismatch, and delimiter corruption return `toolkit-admission-receipt/v1` with `mutation_performed:false`. Pre-dispatch tooling failure creates no evaluation candidate.
 
 C8 comparisons use the child-keyed relevant parent marker only; unrelated sibling-parent chronology is not part of admission. Parent markers reject missing, duplicate, nested, ambiguous, or mismatched entries. `none`, `possible`, and `confirmed` visible-output classifications redact as required; confirmed credential exposure invokes evidence-based rotation disposition, confirmed non-credential exposure invokes containment, and no observed sensitive value is repeated.
+
+## C11 default-deny delegation and exclusive Auto-code lifecycle
+
+This section supersedes earlier generic launch wording. No agent, subagent, helper, reviewer, managed session, parallel lane or replacement worker launches without a structured current-run grant. The grant binds exact count, mode, role, provider, canonical model, reasoning, repository, mutation scope, capabilities, run/session/turn identity, expiry, one-use state and the further-delegation boundary. Complexity, capacity, expected speed-up, elapsed time, worker availability, host support, tool availability, silence, generic speed language and prior-turn permission never grant launch authority. Missing or incomplete authority returns DELEGATION_NOT_AUTHORISED. Further delegation requires a separate explicit grant.
+
+Ordinary concurrent-helper mode remains available only under its own explicit grant and requires root work to be separate and non-overlapping. Exclusive Auto-code mode is separately selected and admits exactly one implementation/amendment worker with exclusive mutation ownership for its exact workspace and scope. The manager enters MANAGER_SUSPENDED_ON_NATIVE_WORKER and awaits the normal harness-native terminal result. Elapsed time, quiet output, absent file writes and bounded command-wait expiry are not failure signals. While the worker is active the manager must not inspect workspace progress, run overlapping validation, send status or continue nudges, interrupt for progress, take over mutation, or launch a replacement.
+
+The manager resumes only on normal native terminal return, explicit harness-reported terminal failure, explicit result loss or unavailability, relevant authority movement, or direct user interruption/change. Normal return releases mutation ownership to the manager for validation, integration, commit and push. Replacement requires a new grant plus proven terminal failure or result loss. User interruption preserves the workspace and ownership state; it does not transfer implementation ownership automatically. This source-only module does not enable autonomous spawning.

@@ -222,12 +222,12 @@ The following JSON block is the machine-readable cumulative source contract. Eve
       "source_authority": "A6-C3 model-neutral technical G4 and fresh Web assurance contract",
       "required_semantics": [
         {"semantic_id": "technical_function_and_independent_assignment", "requirement": "G4 is a technical-review function with an independently resolved provider, canonical model, and reasoning."},
-        {"semantic_id": "fresh_assurance_after_verification", "requirement": "Exactly one fresh Temporary Chat follows final exact-head PASS and independent Web verification."},
+        {"semantic_id": "fresh_assurance_after_verification", "requirement": "Exceptional assurance requires an exact explicit pre-dispatch grant; when granted, one fresh Temporary Chat follows final exact-head PASS and independent Web verification."},
         {"semantic_id": "bounded_non_authority", "requirement": "The Temporary Chat independently checks evidence, records both execution identities, returns only CLEAR or CONCERN, and has no finality or GitHub authority."}
       ],
       "candidate_evidence": [
         {"semantic_id": "technical_function_and_independent_assignment", "evidence_fields": ["g4_role", "g4_provider", "g4_canonical_model", "g4_reasoning", "assignment_source"]},
-        {"semantic_id": "fresh_assurance_after_verification", "evidence_fields": ["g4_verdict", "final_exact_head", "web_verified", "fresh_temporary_chat_count"]},
+        {"semantic_id": "fresh_assurance_after_verification", "evidence_fields": ["assurance_grant", "g4_verdict", "final_exact_head", "web_verified", "fresh_temporary_chat_count"]},
         {"semantic_id": "bounded_non_authority", "evidence_fields": ["g4_execution_identity", "web_execution_identity", "independent_evidence", "verdict", "merge_authority"]}
       ],
         "negative_test": "repo/tests/repo-auto-code-design.test.cjs::negative::G4-WEB-ASSURANCE-001",
@@ -238,7 +238,7 @@ The following JSON block is the machine-readable cumulative source contract. Eve
       "invariant_id": "ASSURANCE-EVIDENCE-ENFORCEMENT-001",
       "source_authority": "A6-C6 assurance launch and receipt enforcement contract",
       "required_semantics": [
-        {"semantic_id": "closed_launch_envelope", "requirement": "Temporary Chat creation requires one exact-head assurance-launch/v1 envelope with bound identities, template and evidence revisions, expiry, and one-use state."},
+        {"semantic_id": "closed_launch_envelope", "requirement": "Exceptional Temporary Chat creation requires an exact grant and one exact-head assurance-launch/v1 envelope with bound identities, template and evidence revisions, expiry, and one-use state."},
         {"semantic_id": "authoritative_raw_domain_proof", "requirement": "Every mandatory assurance domain is proved by an accessible authoritative raw locator that identifies the exact inspected evidence and digest; narratives and packets are context only."},
         {"semantic_id": "structured_receipt_admission", "requirement": "Web admits only an assurance-evidence/v1 receipt with every check, exact launch/head identity, context separation, final recheck, and non-authority attestation; unsupported CLEAR becomes operational CONCERN."}
       ],
@@ -354,7 +354,7 @@ The C7 finality predicate requires all of the following at the same exact head: 
 
 A root, closure manager, implementation/amendment worker, pre-G4 reviewer, technical G4 reviewer, or independent assurance auditor may report evidence only. Their claims of finality, acceptance, merge, closure, waiver, or Web authority are contradiction evidence and reject finality. Web can adjudicate evidence and return `AMEND` without a second technical review. A changed relevant authority, head, tree, scope, Design Lock, review state, or terminal-packet field requires re-admission and a fresh exact-head G4 where applicable.
 
-A fresh Web Temporary Chat and CLEAR/CONCERN assurance are not required on this normal path. A second reviewer is exceptional only when Web has an explicit pre-authorisation before dispatch for cryptography, recovery, an irreversible or destructive migration, a critical security boundary, or conflicting evidence; that reviewer is fresh, isolated, read-only, non-authoritative, and cannot replace Web finality.
+A fresh Web Temporary Chat and CLEAR/CONCERN assurance are not required on this normal path; exceptional assurance remains grant-bound. A second reviewer is exceptional only when Web has an explicit pre-authorisation before dispatch for cryptography, recovery, an irreversible or destructive migration, a critical security boundary, or conflicting evidence; that reviewer is fresh, isolated, read-only, non-authoritative, and cannot replace Web finality.
 
 ## A6-C8 deterministic machine authority
 
@@ -377,3 +377,36 @@ C10 is a source-only, default-deny boundary for all generic GitHub writers. Ever
 Exactly one dedicated structured operation may construct the invocation internally. It is unavailable to Web, the bootstrap manager, ordinary writers, and implementation/amendment workers. Admission requires the authoritative technical G4 role, the exact repository and PR, the exact admitted head and tree, terminal-success checks, an exact one-run grant, per-head idempotency, no prior request for that material head, immediate comment readback, durable grant consumption, and a PR-conversation target. this source-only run does not exercise this live operation.
 
 The later technical G4 closure state machine is: inspect all applicable historical/current findings; verify genuine repair at the admitted head; admit at most one configured request per materially different head; await native review completion; adjudicate findings; route accepted amendments; and, only in FINAL after exact-head PASS, post bounded evidence-backed replies. G4 never resolves, reopens, dismisses, or otherwise changes conversations and never marks ready, merges, closes, or claims Web finality. Review-allowance exhaustion is a blocker, never PASS. Web alone owns conversation resolution and finality.
+
+## C11 corrected live finding binding matrix
+
+The following bindings are the current review subjects and are executable regression obligations:
+
+| Thread | Exact subject | Regression contract |
+| --- | --- | --- |
+| PRRT_kwDOSTHjGM6WPZcj | routine Temporary Chat | C7 normal finality does not require routine Temporary Chat; exceptional assurance requires an exact explicit grant. |
+| PRRT_kwDOSTHjGM6WPZco | verified Web execution identity | Finality uses independently verified Web identity and authoritative locators. |
+| PRRT_kwDOSTHjGM6WPZcq | non-Git authority | GitHub and local non-Git authority are independently collected and compared. |
+| PRRT_kwDOSTHjGM6WPZcv | admitted lease | Candidate creation requires an admitted live lease. |
+| PRRT_kwDOSTHjGM6WPZcx | consumption time | Lease expiry uses actual transition and consumption time. |
+| PRRT_kwDOSTHjGM6WPZc2 | sensitivity | Authored labels cannot downgrade confirmed sensitivity. |
+| PRRT_kwDOSTHjGM6WPZc3 | typed no-mutation | Possible and confirmed sensitivity stops return typed no-mutation receipts. |
+| PRRT_kwDOSTHjGM6WPZc9 | exceptional-review grant | Exceptional review binds authenticated Web authority, exact repository/PR/head/run/session/turn/expiry and one-use state. |
+| PRRT_kwDOSTHjGM6WPZdE | locale-independent | Ordering uses deterministic locale-independent bytes or code points. |
+| PRRT_kwDOSTHjGM6WPZdI | nested markers | Target-in-sibling and sibling-in-target marker nesting is rejected. |
+| PRRT_kwDOSTHjGM6WPZdL | manifest role | Manifest run identity, role and capabilities bind to snapshot and lease. |
+| PRRT_kwDOSTHjGM6WPZdP | sealed lease | Sealed lease bytes and digest are verified before every transition. |
+| PRRT_kwDOSTHjGM6WPZdT | fresh second machine | Final reread is a fresh second machine-authority collection and exact comparison. |
+| PRRT_kwDOSTHjGM6WPZdX | machine-mismatch receipt | Typed machine-mismatch receipts survive pre-dispatch. |
+| PRRT_kwDOSTHjGM6WPZdc | embedded API-key | Embedded API-key detection catches ASCII-alphanumeric prefixes and excludes only narrow public schema/config names. |
+| PRRT_kwDOSTHjGM6WPZdh | assurance envelope | Assurance envelopes are consumed atomically in durable authoritative state. |
+| PRRT_kwDOSTHjGM6WPZdn | admission grant | Admission grants are consumed atomically in durable authoritative state. |
+| PRRT_kwDOSTHjGM6WPZdu | cryptographic digest | Digest format is cryptographically valid and verified against resolved evidence bytes. |
+| PRRT_kwDOSTHjGM6WPZd1 | Git object type | Git objects resolve to the expected type and every authorised path binds to the exact tree entry. |
+## C11 default-deny delegation and exclusive Auto-code lifecycle
+
+This section preserves DL-329-AUTO-CODE-005-A6-C6 and supersedes earlier generic launch wording. No agent, subagent, helper, reviewer, managed session, parallel lane or replacement worker launches without a structured current-run grant. The grant binds exact count, mode, role, provider, canonical model, reasoning, repository, mutation scope, capabilities, run/session/turn identity, expiry, one-use state and the further-delegation boundary. Complexity, capacity, expected speed-up, elapsed time, worker availability, host support, tool availability, silence, generic speed language and prior-turn permission never grant launch authority. Missing or incomplete authority returns DELEGATION_NOT_AUTHORISED. Further delegation requires a separate explicit grant.
+
+Ordinary concurrent-helper mode remains available only under its own explicit grant and requires root work to be separate and non-overlapping. Exclusive Auto-code mode is separately selected and admits exactly one implementation/amendment worker with exclusive mutation ownership for its exact workspace and scope. The manager enters MANAGER_SUSPENDED_ON_NATIVE_WORKER and awaits the normal harness-native terminal result. Elapsed time, quiet output, absent file writes and bounded command-wait expiry are not failure signals. While the worker is active the manager must not inspect workspace progress, run overlapping validation, send status or continue nudges, interrupt for progress, take over mutation, or launch a replacement.
+
+The manager resumes only on normal native terminal return, explicit harness-reported terminal failure, explicit result loss or unavailability, relevant authority movement, or direct user interruption/change. Normal return releases mutation ownership to the manager for validation, integration, commit and push. Replacement requires a new grant plus proven terminal failure or result loss. User interruption preserves the workspace and ownership state; it does not transfer implementation ownership automatically. This source-only module does not enable autonomous spawning.

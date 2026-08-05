@@ -3154,3 +3154,12 @@ test('validator accepts public task-authority schema names without weakening key
   const result = runValidate(cwd);
   assert.equal(result.status, 0, result.stderr);
 });
+
+test('validator detects a credential-like value embedded after an ASCII alphanumeric', () => {
+  const cwd = tempCopy();
+  const embedded = ['x', ['s', 'k', '-'].join(''), 'A'.repeat(25)].join('');
+  fs.writeFileSync(path.join(cwd, 'repo', 'docs', 'embedded-key.md'), 'value=' + embedded + String.fromCharCode(10));
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /possible secret/i);
+});

@@ -201,4 +201,6 @@ For long tasks, update briefly at meaningful checkpoints; do not narrate command
 Report files/changes, exact validation results, generated-output status, remaining risks/manual checks, PR link, and checked CI status or why inaccessible.
 
 Final repo reports include `Instruction sources used` and `MEMORY.md changed: Yes/No`. Normally use `MEMORY.md changed: No; no memory file needed`. If changed, explain its durable value and why canonical docs were unsuitable.
+
+C11: delegation default-deny; one-use grants only. Auto-code suspends manager until native terminal; no autonomous spawning.
 ````````
