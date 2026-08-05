@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "version_policy": "semver",
-  "version_notes": "Adds the C11 default-deny delegation contract and explicitly selected exclusive Auto-code manager/worker native-lifecycle boundary while retaining the canonical backup and exact restore contract.",
+  "version_notes": "Integrates the C13 three-mode default-deny delegation law directly into the operative agent-topology contract while retaining the C11 native Auto-code lifecycle and canonical backup/restore contract.",
   "outputs": [
     {
       "kind": "curated",

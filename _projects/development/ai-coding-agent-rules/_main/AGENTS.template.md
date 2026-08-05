@@ -74,20 +74,21 @@ If instructions conflict, follow the higher-priority source and report material 
 
 ## Agent Topology And Delegation
 
-Ordinary work begins root-first. Root owns setup, orientation, narrow changes, checks, versioning, reviews, summaries, and root-capable verification; `setup toolkit` uses no subagents.
+Three mutually exclusive modes apply. Without a complete current-run launch grant, default is root-only.
 
-A host profile/capacity is a ceiling, never launch permission. Unverifiable topology, admission, effort, or non-fast enforcement means root-only. Never project controls across hosts or call policy hard enforcement. Generic helper/speed requests, child availability, UAT, or future tests cannot qualify launch.
+### Default root-only mode
 
-Workers require separable concurrent work and concrete critical-path/wall-clock speedup. Declare ownership, speedup, root's critical task, shorter/easier child tasks, productive root work, integration/validation, and medium non-fast admission. Missing/contradictory declarations refuse; Toolkit validates allocation, not duration.
+No agent/subagent/helper/reviewer/managed session/parallel lane/replacement worker may launch. Grant binds exact count, role, provider/model/reasoning, repository, scope, capabilities, expiry, one-use state, and delegation boundary. Complexity, capacity, expected speed-up, worker availability, host support, tools, elapsed time, generic helper/speed language, prior-turn permission never grant authority. Child availability/UAT/future tests do not qualify. Missing/partial/ambiguous/conflicting authority returns `DELEGATION_NOT_AUTHORISED`; autonomous spawning disabled. Further delegation needs explicit grant.
 
-Never delegate all work, give a child the longer task while root keeps the easy task, or launch because a child is available. Root continues critical work, not waiting/polling, and owns integration, conflicts, validation, and final judgment.
+### Explicit ordinary concurrent-helper mode
 
-The sole verification exception is one fresh direct read-only pre-PR checker after meaningful root changes, focused validation, and a ready diff. Bounded context/identity/admission applies; worker-speedup fields do not. It cannot mutate, publish, spawn, or use Fast; root owns fixes. Denial is `ADMISSION_DENIED`; root self-review is not independent.
+Current-run grant only. It binds exact helper count, role, provider/model/reasoning route, repository, scope, capabilities, and delegation boundary. Work must be genuinely separable and non-overlapping; root continues only separate work. The helper may not expand scope, mutate governance, or delegate.
 
-Every child uses atomic Toolkit admission: RAM after reservations is the hard gate; CPU is secondary. Reserve/release around launch and reclaim stale state identity-safely. Children default medium, never use Fast or nest; higher effort needs narrow escalation. Built-in, Security, plugin, multi-worker, third-party, and nested paths get no exception.
+### Explicit exclusive Auto-code manager/worker mode
 
-Use `fork_turns="none"` with required context. Full inheritance needs justification; do not claim unsupported controls.
+Explicit selection. Exactly one implementation/amendment worker owns exact workspace/scope. Manager enters `MANAGER_SUSPENDED_ON_NATIVE_WORKER` and awaits normal harness-native terminal return. Time, quiet output, no writes, bounded waits are not failure signals.
 
+While active, manager must not inspect progress, run overlapping tests/validation, send progress/status/continue/phase-report messages, interrupt for time/no writes, take over mutation, or launch a replacement worker. Resume after normal return, explicit harness failure, result loss/unavailability, authority movement, or user interruption/change. Normal return releases mutation ownership to manager for validation/integration/commit/push. Replacement needs a new exact grant plus proven terminal failure/loss. User interruption preserves workspace/ownership; authority does not automatically transfer.
 ## Local Documentation
 
 Treat repo-local documentation as active task context, not optional background.
@@ -216,6 +217,4 @@ For long tasks, update briefly at meaningful checkpoints; do not narrate command
 Report files/changes, exact validation results, generated-output status, remaining risks/manual checks, PR link, and checked CI status or why inaccessible.
 
 Final repo reports include `Instruction sources used` and `MEMORY.md changed: Yes/No`. Normally use `MEMORY.md changed: No; no memory file needed`. If changed, explain its durable value and why canonical docs were unsuitable.
-
-C11: delegation default-deny; one-use grants only. Auto-code suspends manager until native terminal; no autonomous spawning.
 ````````
