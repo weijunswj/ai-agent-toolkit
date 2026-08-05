@@ -69,7 +69,7 @@ The A6-C2 continuation is a narrow source-only bootstrap implementation exceptio
 | G4 is named or routed as a structural model instead of the technical-review function | MODEL_ASSIGNMENT_REQUIRED | No | Web |
 | G4 provider, canonical model, or reasoning is inferred from or inherited from the Web controller | MODEL_ASSIGNMENT_REQUIRED | No | Web |
 | Final exact-head technical PASS lacks independent Web verification | WEB_VERIFICATION_REQUIRED | No | Web |
-| Final exact-head PASS has no Temporary Chat or has more than one exact-head Temporary Chat | TEMPORARY_ASSURANCE_REQUIRED | No | Web |
+| Exceptional assurance is requested without an exact one-use grant | ASSURANCE_GRANT_REQUIRED | No | Web |
 | Temporary Chat shares an implementation, Executor-root, Web Orchestrator, or G4 context | SURFACE_TOPOLOGY_INVALID | No | Web |
 | Temporary Chat treats a G4 packet or self-attestation as proof, or omits an execution identity | ASSURANCE_EVIDENCE_INDEPENDENCE_REQUIRED | No | Web |
 | G4 or Web assurance identity omits provider, canonical model, reasoning, assignment provenance, role, surface, or exact head | ASSURANCE_EVIDENCE_INDEPENDENCE_REQUIRED | No | Web |

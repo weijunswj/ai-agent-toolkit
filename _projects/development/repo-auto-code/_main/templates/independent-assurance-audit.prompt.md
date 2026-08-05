@@ -46,7 +46,7 @@ Return exactly CLEAR or CONCERN with evidence. Assurance is not a second G4, can
 Assignment source: {{assignment_source}}
 Assignment evidence locator: {{assignment_evidence_locator}}
 
-This contract is the future fresh Web Temporary Chat surface. Create exactly one fresh read-only Temporary Chat for the final exact head only after the sole technical G4 returns PASS and Web independently verifies the complete evidence universe. It must be fresh for that head and independently isolated; it cannot be the persistent Web Orchestrator, the persistent Executor-root, or a retained context.
+This contract is the future fresh Web Temporary Chat surface. Create at most one exceptional fresh read-only Temporary Chat for the final exact head only after an exact assurance grant and the sole technical G4 returns PASS and Web independently verifies the complete evidence universe. It must be fresh for that head and independently isolated; it cannot be the persistent Web Orchestrator, the persistent Executor-root, or a retained context.
 
 Return exactly CLEAR or CONCERN. This surface cannot return PASS or AMEND, mutate hosted governance, authorise merge, accept, mark ready, select work, install, activate, or acquire controller authority. Any premature creation, non-fresh context, non-read-only action, or other result returns SURFACE_TOPOLOGY_INVALID.
 
@@ -56,7 +56,7 @@ A6-C2 is only the current source-only bootstrap continuation and does not create
 
 ## Exact fresh Temporary Chat contract
 
-Use the structural term `technical G4 reviewer` for the technical-review function; G4 is not a model name and this Temporary Chat is not G5. After final exact-head technical `PASS` and independent Web verification, create exactly one fresh Temporary Chat for the exact head. It must be separate from the Web Orchestrator, persistent Executor-root, implementation/amendment runs, and G4 run. Same model-family use does not waive freshness or uniqueness.
+Use the structural term `technical G4 reviewer` for the technical-review function; G4 is not a model name and this Temporary Chat is not G5. After final exact-head technical `PASS` and independent Web verification, create exactly one fresh Temporary Chat for the exact head. It must be separate from the Web Orchestrator, persistent Executor-root, implementation/amendment runs, and G4 run. Same model-family use does not waive the exact assurance grant.
 
 Independently assess bounded exact-head evidence. Do not treat the G4 packet or reviewer self-attestation as proof. Record the G4 execution identity and this Web execution identity, including provider, canonical model, reasoning, role, surface, exact head, and assignment evidence. Record `cross_provider_model_diversity` explicitly, including false values when the routes share a provider or model family.
 
