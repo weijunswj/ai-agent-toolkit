@@ -366,6 +366,45 @@ test('C13 integrates the three-mode delegation law into every consumed AGENTS su
   assert.match(topology.slice(helperStart, autoStart), /genuinely separable and non-overlapping/);
 });
 
+test('C14 restores common safeguards for authorised launches without granting launch authority', () => {
+  const surfaces = [
+    executionPromptPath,
+    '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
+    '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
+    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+    'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+    'AGENTS.md',
+  ];
+  const safeguards = [
+    /## Common Authorised-Launch Safeguards/,
+    /setup toolkit uses no subagents/,
+    /Host capacity is a ceiling, not launch permission/,
+    /RAM after existing reservations is the hard admission gate/,
+    /CPU is a secondary signal only/,
+    /Reserve capacity atomically before launch/,
+    /Release reservations after terminal completion/,
+    /Reclaim stale reservation state only through identity-safe verification/,
+    /Child reasoning defaults to the bounded ordinary level defined by current authority/,
+    /Higher reasoning requires an exact narrow escalation grant/,
+    /Fast mode is prohibited/,
+    /Nested or recursive delegation is prohibited unless separately and explicitly granted/,
+    /Built-in, security, plugin, third-party, multi-worker and nested routes receive no implicit exception/,
+    /Use minimal explicit context/,
+    /Use `fork_turns="none"` when supported unless an exact current-run grant justifies inheritance/,
+    /Full conversation inheritance requires an explicit necessity and privacy\/scope justification/,
+    /These safeguards constrain authorised launches; they do not grant launch authority/,
+  ];
+  for (const relPath of surfaces) {
+    const text = readText(relPath);
+    for (const rule of safeguards) assert.match(text, rule, `${relPath}: ${rule}`);
+  }
+  const prompt = readText(executionPromptPath);
+  const topologyEnd = prompt.indexOf('\n## Local Documentation');
+  const safeguardsStart = prompt.indexOf('## Common Authorised-Launch Safeguards');
+  assert.ok(safeguardsStart > 0 && safeguardsStart < topologyEnd, 'safeguards are scoped after topology and before local documentation');
+});
+
 test('speed-only C2 wording remains root-only without blocking qualified specialist workflows', () => {
   assert.match(failedSpeedOnlyC2Prompt, /^Use helpers to finish faster\./);
   const surfaces = [
