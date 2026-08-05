@@ -2284,7 +2284,10 @@ function c6LaunchAdmission(envelope, context = c6Context()) {
   return { decision: 'ASSURANCE_LAUNCH_ADMITTED', temporaryChatCreated: false };
 }
 
+const c6ConsumedEnvelopes = new WeakSet();
+
 function c6DispatchAssurance(templateText, envelope, context = c6Context()) {
+  if (!envelope || typeof envelope !== 'object' || c6ConsumedEnvelopes.has(envelope) || envelope.lifecycle?.consumed === true) return { decision: 'ASSURANCE_ALREADY_CONSUMED', temporaryChatCreated: false };
   const admission = c6LaunchAdmission(envelope, context);
   if (admission.decision !== 'ASSURANCE_LAUNCH_ADMITTED') return admission;
   const requiredTemplateTerms = [
@@ -2298,6 +2301,7 @@ function c6DispatchAssurance(templateText, envelope, context = c6Context()) {
   if (templateText !== c6CanonicalTemplateText() || requiredTemplateTerms.some((term) => !templateText.includes(term))) {
     return { decision: 'ASSURANCE_TEMPLATE_REQUIRED', temporaryChatCreated: false };
   }
+  c6ConsumedEnvelopes.add(envelope);
   const consumed = JSON.parse(JSON.stringify(envelope));
   consumed.lifecycle = {
     ...consumed.lifecycle,
@@ -3012,6 +3016,8 @@ function hookIsTrusted(hook) {
     hook.runtimeCoverage.includes('ordinary-agent-spawn');
 }
 
+const c5ConsumedGrants = new WeakSet();
+
 function admissionDecision(request, context, grant, hook) {
   if (request.event === 'SubagentStart') {
     return { allowed: false, prevented: false, auditOnly: true, mode: 'AUDIT_ONLY', reason: 'AUDIT_ONLY' };
@@ -3027,8 +3033,10 @@ function admissionDecision(request, context, grant, hook) {
     reason
   });
   if (!grantMatches(request, context, grant)) return denied();
+  if (grant && typeof grant === 'object' && c5ConsumedGrants.has(grant)) return denied('GRANT_ALREADY_CONSUMED');
   if (operation === 'spawn_agent' && !hookIsTrusted(hook)) return denied('ROOT_ONLY_STANDARD');
   if (operation !== 'fast' && operation !== 'spawn_agent') return denied('UNSUPPORTED_DELEGATION');
+  if (grant && typeof grant === 'object') c5ConsumedGrants.add(grant);
   return {
     allowed: true,
     prevented: false,
@@ -3276,7 +3284,7 @@ function c8NormalizeSnapshot(input) {
   c8Text(input.repository.owner, 'repository.owner'); c8Text(input.repository.name, 'repository.name'); c8Text(input.child_issue.authority_revision, 'child_issue.authority_revision'); c8Text(input.pull_request.authority_revision, 'pull_request.authority_revision'); c8Text(input.design_lock, 'design_lock');
   c8ShaCheck(input.canonical_base_sha, 'canonical_base_sha'); c8ShaCheck(input.exact_remote_head_sha, 'exact_remote_head_sha'); c8ShaCheck(input.exact_tree_sha, 'exact_tree_sha');
   if (!Array.isArray(input.authorised_blobs)) throw new C8ContractError('SCOPE_MISMATCH', 'authorised_blobs');
-  const blobs = input.authorised_blobs.map((blob) => { c8Keys(blob, ['path', 'blob_sha'], 'blob'); return { path: c8Text(blob.path, 'blob.path', 'BLOB_MOVED'), blob_sha: c8ShaCheck(blob.blob_sha, 'blob.blob_sha') }; }).sort((a, b) => a.path.localeCompare(b.path));
+  const blobs = input.authorised_blobs.map((blob) => { c8Keys(blob, ['path', 'blob_sha'], 'blob'); return { path: c8Text(blob.path, 'blob.path', 'BLOB_MOVED'), blob_sha: c8ShaCheck(blob.blob_sha, 'blob.blob_sha') }; }).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
   if (new Set(blobs.map((blob) => blob.path)).size !== blobs.length) throw new C8ContractError('SCOPE_MISMATCH', 'blob.path');
   c8Keys(input.authorised_source_scope, ['paths', 'outputs', 'writes', 'source_only'], 'scope'); if (input.authorised_source_scope.source_only !== true) throw new C8ContractError('SCOPE_MISMATCH', 'scope.source_only');
   const scope = { paths: c8List(input.authorised_source_scope.paths, 'scope.paths'), outputs: c8List(input.authorised_source_scope.outputs, 'scope.outputs'), writes: c8List(input.authorised_source_scope.writes, 'scope.writes'), source_only: true };
@@ -3290,15 +3298,15 @@ function c8Material(snapshot) { const material = { ...snapshot }; delete materia
 function c8Snapshot(input) { const material = c8NormalizeSnapshot(input); const bytes = c8Json(material); return c8Freeze({ ...material, snapshot_digest: c8DigestBytes(bytes), canonical_bytes: bytes }); }
 const c8ParentStart = '<!-- toolkit-authority-parent-entry/v1 child='; const c8ParentEnd = '<!-- /toolkit-authority-parent-entry/v1 -->';
 function c8ParentMarker(entry, key = '#329') { c8Text(entry, 'parent_entry'); if (entry.includes('toolkit-authority-parent-entry/v1')) throw new C8ContractError('MALFORMED_PARENT_ENTRY', 'parent_entry'); return c8ParentStart + key + ' -->\n' + entry.trim() + '\n' + c8ParentEnd; }
-function c8ParentParse(body, key = '#329') { c8Text(body, 'parent_body'); const matches = [...body.matchAll(/<!-- toolkit-authority-parent-entry\/v1 child=([^ ]+) -->/g)]; const target = matches.filter((match) => match[1] === key); if (target.length !== 1) throw new C8ContractError('PARENT_ENTRY_MOVED', 'parent_entry_count'); const start = target[0].index; const end = body.indexOf(c8ParentEnd, start); if (end < 0) throw new C8ContractError('PARENT_ENTRY_MOVED', 'parent_entry_end'); if (matches.some((match) => match.index > start && match.index < end)) throw new C8ContractError('MALFORMED_PARENT_ENTRY', 'nested_marker'); const entry = body.slice(start + target[0][0].length, end).trim(); if (entry.includes(c8ParentEnd)) throw new C8ContractError('MALFORMED_PARENT_ENTRY', 'duplicate_end'); return { decision: 'PARENT_ENTRY_ADMITTED', child_key: key, entry, revision: c8DigestBytes(entry) }; }
+function c8ParentParse(body, key = '#329') { c8Text(body, 'parent_body'); const matches = [...body.matchAll(/<!-- toolkit-authority-parent-entry\/v1 child=([^ ]+) -->/g)]; const target = matches.filter((match) => match[1] === key); if (target.length !== 1) throw new C8ContractError('PARENT_ENTRY_MOVED', 'parent_entry_count'); const start = target[0].index; const prior = body.slice(0, start); if (prior.lastIndexOf(c8ParentStart) > prior.lastIndexOf(c8ParentEnd)) throw new C8ContractError('MALFORMED_PARENT_ENTRY', 'nested_marker'); const end = body.indexOf(c8ParentEnd, start); if (end < 0) throw new C8ContractError('PARENT_ENTRY_MOVED', 'parent_entry_end'); if (matches.some((match) => match.index > start && match.index < end)) throw new C8ContractError('MALFORMED_PARENT_ENTRY', 'nested_marker'); const entry = body.slice(start + target[0][0].length, end).trim(); if (entry.includes(c8ParentEnd)) throw new C8ContractError('MALFORMED_PARENT_ENTRY', 'duplicate_end'); return { decision: 'PARENT_ENTRY_ADMITTED', child_key: key, entry, revision: c8DigestBytes(entry) }; }
 function c8Projection(snapshot) { return { child: snapshot.child_issue, pull_request: snapshot.pull_request, parent_entry: snapshot.relevant_parent_entry_revision, design_lock: snapshot.design_lock, scope: snapshot.authorised_source_scope, base: snapshot.canonical_base_sha, head: snapshot.exact_remote_head_sha, tree: snapshot.exact_tree_sha, blobs: snapshot.authorised_blobs, role: snapshot.role, capabilities: snapshot.capabilities }; }
 function c8Receipt(phase, reason, field = 'contract', expected = 'canonical-authority', observed = 'rejected', snapshot = null, lease = null) { return { schema: c8Schemas.receipt, phase, reason, field, expected_format: expected, observed_format: observed, snapshot_identity: snapshot && snapshot.snapshot_digest || null, lease_identity: lease && lease.lease_id || null, mutation_performed: false, evaluation_candidate_created: false }; }
 function c8Compare(snapshot, current = {}) { const baseline = c8Snapshot(c8Material(snapshot)); const candidate = { ...current }; const ignored = candidate.unrelated_sibling_parent_revision; delete candidate.unrelated_sibling_parent_revision; delete candidate.snapshot_digest; delete candidate.canonical_bytes; const currentSnapshot = c8Snapshot(c8DefaultSnapshot(candidate)); const left = c8Projection(baseline); const right = c8Projection(currentSnapshot); for (const [field, reason] of [['child', 'CHILD_AUTHORITY_MOVED'], ['pull_request', 'PR_AUTHORITY_MOVED'], ['parent_entry', 'PARENT_ENTRY_MOVED'], ['design_lock', 'DESIGN_LOCK_MISMATCH'], ['scope', 'SCOPE_MISMATCH'], ['base', 'BASE_MOVED'], ['head', 'HEAD_MOVED'], ['tree', 'TREE_MOVED'], ['blobs', 'BLOB_MOVED'], ['role', 'SCOPE_MISMATCH'], ['capabilities', 'SCOPE_MISMATCH']]) if (c8Json(left[field]) !== c8Json(right[field])) return { decision: 'AUTHORITY_REJECTED', reason, ignored_unrelated_sibling_parent_revision: ignored === undefined ? null : 'ignored', receipt: c8Receipt('authority-comparison', reason, field, 'relevant-authority', 'changed', baseline) }; return { decision: 'AUTHORITY_ADMITTED', ignored_unrelated_sibling_parent_revision: ignored === undefined ? null : 'ignored', snapshot: currentSnapshot }; }
-function c8MachineAuthority(input = c8DefaultSnapshot()) { const snapshot = c8NormalizeSnapshot(input); const side = { base_sha: snapshot.canonical_base_sha, head_sha: snapshot.exact_remote_head_sha, tree_sha: snapshot.exact_tree_sha, blobs: JSON.parse(JSON.stringify(snapshot.authorised_blobs)) }; return { github: JSON.parse(JSON.stringify(side)), local: JSON.parse(JSON.stringify(side)), snapshot_input: snapshot }; }
+function c8MachineAuthority(input = c8DefaultSnapshot()) { const snapshot = c8NormalizeSnapshot(input); const side = { repository: JSON.parse(JSON.stringify(snapshot.repository)), child_issue: JSON.parse(JSON.stringify(snapshot.child_issue)), pull_request: JSON.parse(JSON.stringify(snapshot.pull_request)), design_lock: snapshot.design_lock, scope: JSON.parse(JSON.stringify(snapshot.authorised_source_scope)), role: snapshot.role, capabilities: [...snapshot.capabilities], child_authority_revision: snapshot.child_authority_revision, pr_authority_revision: snapshot.pr_authority_revision, relevant_parent_entry_revision: snapshot.relevant_parent_entry_revision, projection: JSON.parse(JSON.stringify(snapshot.projection)), base_sha: snapshot.canonical_base_sha, head_sha: snapshot.exact_remote_head_sha, tree_sha: snapshot.exact_tree_sha, blobs: JSON.parse(JSON.stringify(snapshot.authorised_blobs)) }; return { github: JSON.parse(JSON.stringify(side)), local: JSON.parse(JSON.stringify(side)), snapshot_input: snapshot }; }
 function c8CollectMachine(machine) {
   if (!machine || !machine.github || !machine.local) throw new C8ContractError('PRE_DISPATCH_TOOLING_FAILURE', 'machine');
-  for (const side of [machine.github, machine.local]) { c8Keys(side, ['base_sha', 'head_sha', 'tree_sha', 'blobs'], 'machine'); c8ShaCheck(side.base_sha, 'base_sha'); c8ShaCheck(side.head_sha, 'head_sha'); c8ShaCheck(side.tree_sha, 'tree_sha'); if (!Array.isArray(side.blobs)) throw new C8ContractError('BLOB_MOVED', 'blobs'); side.blobs.forEach((blob) => { c8Keys(blob, ['path', 'blob_sha'], 'machine_blob'); c8ShaCheck(blob.blob_sha, 'blob_sha'); }); }
-  for (const [field, reason] of [['base_sha', 'BASE_MOVED'], ['head_sha', 'HEAD_MOVED'], ['tree_sha', 'TREE_MOVED'], ['blobs', 'BLOB_MOVED']]) if (c8Json(machine.github[field]) !== c8Json(machine.local[field])) return { decision: 'MACHINE_AUTHORITY_REJECTED', reason, receipt: c8Receipt('machine-collection', reason, field, 'byte-for-byte authority', 'mismatch') };
+  const fields = ['repository', 'child_issue', 'pull_request', 'design_lock', 'scope', 'role', 'capabilities', 'child_authority_revision', 'pr_authority_revision', 'relevant_parent_entry_revision', 'projection', 'base_sha', 'head_sha', 'tree_sha', 'blobs']; for (const side of [machine.github, machine.local]) { c8Keys(side, fields, 'machine'); c8Keys(side.repository, ['owner', 'name'], 'machine_repository'); c8Keys(side.child_issue, ['number', 'authority_revision'], 'machine_child_issue'); c8Keys(side.pull_request, ['number', 'authority_revision'], 'machine_pull_request'); c8Keys(side.scope, ['paths', 'outputs', 'writes', 'source_only'], 'machine_scope'); c8ShaCheck(side.base_sha, 'base_sha'); c8ShaCheck(side.head_sha, 'head_sha'); c8ShaCheck(side.tree_sha, 'tree_sha'); if (!Array.isArray(side.blobs)) throw new C8ContractError('BLOB_MOVED', 'blobs'); side.blobs.forEach((blob) => { c8Keys(blob, ['path', 'blob_sha'], 'machine_blob'); c8ShaCheck(blob.blob_sha, 'blob_sha'); }); }
+  for (const [field, reason] of [['repository', 'REPOSITORY_MOVED'], ['child_issue', 'CHILD_AUTHORITY_MOVED'], ['pull_request', 'PR_AUTHORITY_MOVED'], ['design_lock', 'DESIGN_LOCK_MISMATCH'], ['scope', 'SCOPE_MISMATCH'], ['role', 'ROLE_MISMATCH'], ['capabilities', 'SCOPE_MISMATCH'], ['child_authority_revision', 'CHILD_AUTHORITY_MOVED'], ['pr_authority_revision', 'PR_AUTHORITY_MOVED'], ['relevant_parent_entry_revision', 'PARENT_ENTRY_MOVED'], ['projection', 'PARENT_ENTRY_MOVED'], ['base_sha', 'BASE_MOVED'], ['head_sha', 'HEAD_MOVED'], ['tree_sha', 'TREE_MOVED'], ['blobs', 'BLOB_MOVED']]) if (c8Json(machine.github[field]) !== c8Json(machine.local[field])) return { decision: 'MACHINE_AUTHORITY_REJECTED', reason, receipt: c8Receipt('machine-collection', reason, field, 'byte-for-byte authority', 'mismatch') };
   const input = c8NormalizeSnapshot(machine.snapshot_input || c8DefaultSnapshot());
   for (const [key, value, reason] of [['canonical_base_sha', machine.github.base_sha, 'BASE_MOVED'], ['exact_remote_head_sha', machine.github.head_sha, 'HEAD_MOVED'], ['exact_tree_sha', machine.github.tree_sha, 'TREE_MOVED']]) if (input[key] !== value) return { decision: 'MACHINE_AUTHORITY_REJECTED', reason, receipt: c8Receipt('machine-collection', reason, key, 'machine authority', 'mismatch') };
   if (c8Json(input.authorised_blobs) !== c8Json(machine.github.blobs)) return { decision: 'MACHINE_AUTHORITY_REJECTED', reason: 'BLOB_MOVED', receipt: c8Receipt('machine-collection', 'BLOB_MOVED', 'blobs', 'machine authority', 'mismatch') };
@@ -3325,6 +3333,7 @@ function c8ManifestNormalize(manifest) {
   if (manifest.schema !== c8Schemas.manifest || typeof manifest.snapshot_digest !== 'string' || !c8Digest.test(manifest.snapshot_digest)) throw new C8ContractError('MALFORMED_MANIFEST', 'schema');
   const snapshot = c8Snapshot(manifest.snapshot);
   if (snapshot.snapshot_digest !== manifest.snapshot_digest) throw new C8ContractError('SNAPSHOT_DIGEST_MISMATCH', 'snapshot_digest');
+  if (manifest.role !== snapshot.role || c8Json(manifest.capabilities) !== c8Json(snapshot.capabilities)) throw new C8ContractError('MANIFEST_AUTHORITY_MISMATCH', 'role_or_capabilities');
   return { schema: c8Schemas.manifest, snapshot_digest: manifest.snapshot_digest, snapshot: c8Material(snapshot), run_identity: c8Text(manifest.run_identity, 'run_identity'), role: c8Text(manifest.role, 'role'), capabilities: c8List(manifest.capabilities, 'manifest.capabilities') };
 }
 function c8ManifestRender(manifest, channel = 'block') {
@@ -3357,6 +3366,7 @@ function c8LeaseCreate(snapshot, options = {}) {
 }
 function c8LeaseTransition(lease, next, at = lease.issued_at) {
   if (!lease || lease.schema !== c8Schemas.lease) throw new C8ContractError('LEASE_INVALID', 'schema');
+  if (lease.lease_digest !== c8DigestBytes(c8Json(c8LeaseBody(lease)))) throw new C8ContractError('LEASE_DIGEST_MISMATCH', 'lease_digest');
   if (lease.consumed) throw new C8ContractError('LEASE_ALREADY_CONSUMED', 'consumed');
   if (!c8LeaseTransitions[lease.lifecycle] || !c8LeaseTransitions[lease.lifecycle].includes(next)) throw new C8ContractError('LEASE_INVALID', 'lifecycle');
   if (Date.parse(at) >= Date.parse(lease.expires_at)) throw new C8ContractError('LEASE_EXPIRED', 'expires_at');
@@ -3382,37 +3392,43 @@ class C8LeaseRegistry {
     const lease = c8Freeze({ ...current, lifecycle: 'EXPIRED', lease_digest: c8DigestBytes(c8Json(c8LeaseBody({ ...current, lifecycle: 'EXPIRED' }))) });
     this.records.set(id, lease); return { decision: 'LEASE_EXPIRED', lease };
   }
-  consume(id, manifest) {
+  consume(id, manifest, at) {
     const current = this.records.get(id); if (!current) return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-consume', 'LEASE_INVALID', 'lease_id') };
     if (current.consumed) return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-consume', 'LEASE_ALREADY_CONSUMED', 'consumed', 'unconsumed lease', 'consumed', null, current) };
     if (!manifest || manifest.snapshot_digest !== current.snapshot_digest) return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-consume', 'SNAPSHOT_DIGEST_MISMATCH', 'snapshot_digest', 'matching snapshot', 'mismatch', null, current) };
-    return this.transition(id, 'COMPLETED', current.issued_at);
+    return this.transition(id, 'COMPLETED', at || current.issued_at);
   }
 }
 function c8PreDispatch(input = {}) {
   try {
     if (input.toolingFailure === true) throw new C8ContractError('PRE_DISPATCH_TOOLING_FAILURE', 'tooling');
-    const collected = c8CollectMachine(input.machine); const snapshot = c8Snapshot(collected.snapshot_input);
+    const collected = c8CollectMachine(input.machine); if (collected.decision !== 'MACHINE_AUTHORITY_COLLECTED') return { ...collected, evaluation_candidate_created: false, lease_consumed: false };
+    const snapshot = c8Snapshot(collected.snapshot_input);
     if (!input.snapshot || input.snapshot.snapshot_digest !== snapshot.snapshot_digest) throw new C8ContractError('SNAPSHOT_DIGEST_MISMATCH', 'snapshot');
     const extracted = c8ManifestExtract(input.renderedManifest); if (extracted.manifest.snapshot_digest !== snapshot.snapshot_digest) throw new C8ContractError('SNAPSHOT_DIGEST_MISMATCH', 'manifest.snapshot_digest');
-    if (input.finalReread !== true) throw new C8ContractError('PRE_DISPATCH_TOOLING_FAILURE', 'final_reread');
-    return { decision: 'EVALUATION_CANDIDATE_CREATED', evaluation_candidate_created: true, lease_consumed: false, mutation_performed: false, snapshot_identity: snapshot.snapshot_digest, lease_identity: input.lease && input.lease.lease_id || null };
+    if (!input.lease || input.lease.schema !== c8Schemas.lease || input.lease.consumed === true || input.lease.snapshot_digest !== snapshot.snapshot_digest) throw new C8ContractError('LEASE_INVALID', 'lease');
+    if (!input.finalReread || typeof input.finalReread !== 'object' || !input.finalReread.machine) throw new C8ContractError('PRE_DISPATCH_TOOLING_FAILURE', 'final_reread');
+    const finalCollected = c8CollectMachine(input.finalReread.machine); if (finalCollected.decision !== 'MACHINE_AUTHORITY_COLLECTED') return { ...finalCollected, evaluation_candidate_created: false, lease_consumed: false };
+    const finalSnapshot = c8Snapshot(finalCollected.snapshot_input); if (finalSnapshot.snapshot_digest !== snapshot.snapshot_digest) throw new C8ContractError('AUTHORITY_MOVED', 'final_reread');
+    return { decision: 'EVALUATION_CANDIDATE_CREATED', evaluation_candidate_created: true, lease_consumed: false, mutation_performed: false, snapshot_identity: snapshot.snapshot_digest, lease_identity: input.lease.lease_id };
   } catch (error) {
     return { decision: 'PRE_DISPATCH_REJECTED', evaluation_candidate_created: false, lease_consumed: false, receipt: c8Receipt('pre-dispatch', error.reason || 'PRE_DISPATCH_TOOLING_FAILURE', error.field || 'tooling', 'canonical-authority', 'rejected') };
   }
 }
 function c8WorkerAdmission(input = {}) { const result = c8PreDispatch(input); return result.evaluation_candidate_created ? { ...result, worker_re_admitted: true, role: 'implementation/amendment worker' } : { ...result, worker_re_admitted: false }; }
+function c8SensitivityReceipt(input = {}) { const classification = input.classification || 'none'; return { schema: c8Schemas.receipt, classification, mutation_performed: false, evaluation_candidate_created: false, sensitive_values_excluded: true }; }
 function c8ClassifyOutput(input = {}) {
-  const classification = input.classification || (input.confirmedSensitive ? 'confirmed' : input.secretLike ? 'possible' : 'none'); const affectedPath = input.affectedPath || 'affected-path';
-  if (classification === 'none') return { classification, continue: true, pause: false, redacted: false, reason: null, rotation_disposition: 'not_applicable', containment_disposition: 'not_applicable', invalidate_unrelated: false, affected_path: affectedPath };
-  if (classification === 'possible') return { classification, continue: false, pause: true, redacted: true, reason: 'SENSITIVITY_POSSIBLE', rotation_disposition: 'not_applicable', containment_disposition: 'not_applicable', invalidate_unrelated: false, affected_path: affectedPath };
-  if (classification !== 'confirmed') throw new C8ContractError('SENSITIVITY_LOCAL_ONLY', 'classification');
-  return { classification, continue: false, pause: true, redacted: true, reason: 'SECRET_EXPOSURE_DETECTED', rotation_disposition: input.credential ? 'required' : 'not_applicable', containment_disposition: input.credential ? 'not_applicable' : 'required', invalidate_unrelated: input.sharedExposureRisk === true, affected_path: affectedPath };
+  const evidenceClassification = input.confirmedSensitive ? 'confirmed' : input.secretLike ? 'possible' : 'none';
+  if (input.classification && input.classification !== evidenceClassification && (input.confirmedSensitive || input.secretLike)) throw new C8ContractError('SENSITIVITY_CLASSIFICATION_CONTRADICTION', 'classification');
+  const classification = evidenceClassification; const affectedPath = input.affectedPath || 'affected-path';
+  if (classification === 'none') return { ...c8SensitivityReceipt({ classification }), classification, continue: true, pause: false, redacted: false, reason: null, rotation_disposition: 'not_applicable', containment_disposition: 'not_applicable', invalidate_unrelated: false, affected_path: affectedPath };
+  if (classification === 'possible') return { ...c8SensitivityReceipt({ classification }), classification, continue: false, pause: true, redacted: true, reason: 'SENSITIVITY_POSSIBLE', rotation_disposition: 'not_applicable', containment_disposition: 'not_applicable', invalidate_unrelated: false, affected_path: affectedPath };
+  return { ...c8SensitivityReceipt({ classification }), classification, continue: false, pause: true, redacted: true, reason: 'SECRET_EXPOSURE_DETECTED', rotation_disposition: input.credential ? 'required' : 'not_applicable', containment_disposition: input.credential ? 'not_applicable' : 'required', invalidate_unrelated: input.sharedExposureRisk === true, affected_path: affectedPath };
 }
 const c8SourceProhibitions = ['install', 'activate', 'schedule', 'Auto Review', 'automatic next-task pickup', 'Fast', 'delegation', 'spawn'];
 
 test('C7 finality is conjunctive, Web-only, and does not require routine Temporary Chat assurance', () => {
-  const evidence = Object.fromEntries(c7FinalityPredicates.map((key) => [key, true])); evidence.g4Verdict = 'PASS'; evidence.g4ExactHead = true;
+  const evidence = Object.fromEntries(c7FinalityPredicates.map((key) => [key, true])); evidence.g4Verdict = 'PASS'; evidence.g4ExactHead = true; evidence.webExecutionIdentity = { actor: 'web' }; evidence.comprehensiveIndependentWebFinalGate = { actor: 'web' };
   const result = c7FinalityDecision(evidence); assert.equal(result.decision, 'FINALITY_ADMITTED'); assert.equal(result.finality, true); assert.equal(result.webSoleFinalAuthority, true); assert.equal(result.routineAssuranceRequired, false); assert.equal(result.mergeAuthorized, false);
 });
 test('C7 missing predicates, contradictions, and exceptional reviewer boundary are enforced', () => {
@@ -3448,7 +3464,7 @@ test('C8 immutable leases enforce lifecycle, expiry, duplicates, conflicts, and 
 });
 test('C8 pre-dispatch tooling failure creates no candidate and worker re-admission succeeds', () => {
   const snapshot = c8Snapshot(c8DefaultSnapshot()); const machine = c8MachineAuthority(); const renderedManifest = c8ManifestRender(c8Manifest(snapshot)); const failed = c8PreDispatch({ toolingFailure: true }); assert.equal(failed.evaluation_candidate_created, false); assert.equal(failed.lease_consumed, false); assert.equal(failed.receipt.mutation_performed, false);
-  const admitted = c8PreDispatch({ machine, snapshot, renderedManifest, finalReread: true }); assert.equal(admitted.decision, 'EVALUATION_CANDIDATE_CREATED'); assert.equal(c8WorkerAdmission({ machine, snapshot, renderedManifest, finalReread: true }).worker_re_admitted, true);
+  const lease = c8LeaseCreate(snapshot, { lease_id: 'pre-dispatch-success' }); const reread = { machine: c8MachineAuthority() }; const admitted = c8PreDispatch({ machine, snapshot, renderedManifest, lease, finalReread: reread }); assert.equal(admitted.decision, 'EVALUATION_CANDIDATE_CREATED'); assert.equal(c8WorkerAdmission({ machine, snapshot, renderedManifest, lease: c8LeaseCreate(snapshot, { lease_id: 'worker-success' }), finalReread: reread }).worker_re_admitted, true);
 });
 test('C8 sensitivity classification separates none, possible, credential rotation, and non-credential containment', () => {
   assert.equal(c8ClassifyOutput({ affectedPath: 'public-template' }).continue, true); const possible = c8ClassifyOutput({ secretLike: true, affectedPath: 'redacted-path' }); assert.equal(possible.reason, 'SENSITIVITY_POSSIBLE'); assert.equal(possible.pause, true);
@@ -3512,14 +3528,17 @@ Object.assign(expectedInvariantBundles, {
 });
 
 function c7FinalityDecision(evidence = {}) {
-  const missing = c7FinalityPredicates.filter((key) => evidence[key] !== true);
+  const gateIdentity = evidence.comprehensiveIndependentWebFinalGateIdentity || evidence.comprehensiveIndependentWebFinalGate;
+  const missing = c7FinalityPredicates.filter((key) => evidence[key] !== true && !(key === 'comprehensiveIndependentWebFinalGate' && gateIdentity?.actor === 'web'));
   const addMissing = (key) => { if (!missing.includes(key)) missing.push(key); };
   const contradictions = [];
+  const webExecutionIdentityVerified = evidence.webExecutionIdentity?.actor === 'web' && gateIdentity?.actor === 'web';
+  if (!webExecutionIdentityVerified) addMissing('comprehensiveIndependentWebFinalGate');
   if (evidence.g4Verdict !== 'PASS') { addMissing('freshExactHeadG4Pass'); contradictions.push('G4_NOT_PASS'); }
   if (evidence.g4ExactHead !== true) { addMissing('freshExactHeadG4Pass'); contradictions.push('G4_HEAD_MISMATCH'); }
   if (evidence.webSoleFinalAuthority === false) contradictions.push('WEB_AUTHORITY_CONTRADICTION');
   for (const claim of evidence.authorityClaims || []) if (claim && /finality|accept|merge|close|waive|web/i.test(String(claim.claim || ''))) contradictions.push(String(claim.surface || 'unknown').toUpperCase() + '_FINALITY_CLAIM');
-  const base = { mergeAuthorized: false, webSoleFinalAuthority: true, routineAssuranceRequired: false, missing, contradictions };
+  const base = { mergeAuthorized: false, webSoleFinalAuthority: true, webExecutionIdentityVerified, routineAssuranceRequired: false, missing, contradictions };
   return missing.length || contradictions.length ? { ...base, decision: 'FINALITY_BLOCKED', finality: false } : { ...base, decision: 'FINALITY_ADMITTED', finality: true };
 }
 function c8Snapshot(input) {
@@ -3537,3 +3556,146 @@ function c8LeaseCreate(snapshot, options = {}) {
   c8Text(lease.lease_id, 'lease_id'); if (Date.parse(lease.expires_at) <= Date.parse(lease.issued_at)) throw new C8ContractError('LEASE_INVALID', 'expiry');
   lease.lease_digest = c8DigestBytes(c8Json(c8LeaseBody(lease))); return c8Freeze(lease);
 }
+
+const c10TriggerValue = () => [String.fromCharCode(64), 'co', 'dex', ' ', 're', 'view'].join('');
+const c10ZeroWidth = (value) => value.split('').join(String.fromCharCode(0x200b));
+
+test('PRRT_kwDOSTHjGM6WPZco binds finality to a verified Web execution identity', () => {
+  const evidence = Object.fromEntries(c7FinalityPredicates.map((key) => [key, true]));
+  const result = c7FinalityDecision({ ...evidence, g4Verdict: 'PASS', g4ExactHead: true, webExecutionIdentity: { actor: 'manager' }, comprehensiveIndependentWebFinalGate: { actor: 'manager' } });
+  assert.equal(result.decision, 'FINALITY_BLOCKED');
+  assert.equal(result.webExecutionIdentityVerified, false);
+});
+
+test('PRRT_kwDOSTHjGM6WPZcq collects non-Git authority independently on both sides', () => {
+  const machine = c8MachineAuthority();
+  assert.ok(machine.github.repository && machine.local.repository);
+  assert.equal(c8CollectMachine(machine).decision, 'MACHINE_AUTHORITY_COLLECTED');
+});
+
+test('PRRT_kwDOSTHjGM6WPZdE uses locale-independent blob ordering', () => {
+  const snapshot = c8Snapshot(c8DefaultSnapshot({ authorised_blobs: [{ path: 'a', blob_sha: c8Hash('a') }, { path: 'Z', blob_sha: c8Hash('Z') }] }));
+  assert.deepEqual(snapshot.authorised_blobs.map((blob) => blob.path), ['Z', 'a']);
+});
+
+test('PRRT_kwDOSTHjGM6WPZdI rejects a parent entry nested inside a sibling marker', () => {
+  const nested = '<!-- toolkit-authority-parent-entry/v1 child=#other -->\\n' + c8ParentMarker('nested') + '\\n<!-- /toolkit-authority-parent-entry/v1 -->';
+  assert.throws(() => c8ParentParse(nested), (error) => error.reason === 'MALFORMED_PARENT_ENTRY');
+});
+
+test('PRRT_kwDOSTHjGM6WPZcv requires an admitted lease before creating a candidate', () => {
+  const snapshot = c8Snapshot(c8DefaultSnapshot());
+  const input = { machine: c8MachineAuthority(), snapshot, renderedManifest: c8ManifestRender(c8Manifest(snapshot)), finalReread: true };
+  assert.equal(c8PreDispatch(input).evaluation_candidate_created, false);
+});
+
+test('PRRT_kwDOSTHjGM6WPZcx evaluates lease expiry at consumption time', () => {
+  const snapshot = c8Snapshot(c8DefaultSnapshot());
+  const lease = c8LeaseCreate(snapshot, { lease_id: 'expiry-consume', issued_at: '2026-08-04T00:00:00.000Z', expires_at: '2026-08-04T00:01:00.000Z' });
+  const registry = new C8LeaseRegistry(); registry.register(lease); registry.records.set(lease.lease_id, c8LeaseTransition(c8LeaseTransition(lease, 'SEALED'), 'DISPATCHED'));
+  registry.records.set(lease.lease_id, c8LeaseTransition(registry.records.get(lease.lease_id), 'ADMITTED'));
+  assert.equal(registry.consume(lease.lease_id, { snapshot_digest: snapshot.snapshot_digest }, '2026-08-04T00:02:00.000Z').receipt.reason, 'LEASE_EXPIRED');
+});
+
+test('PRRT_kwDOSTHjGM6WPZdL binds manifest role and capabilities to snapshot and lease', () => {
+  const snapshot = c8Snapshot(c8DefaultSnapshot());
+  const manifest = c8Manifest(snapshot, { role: 'authoritative technical G4', capabilities: ['reply'] });
+  assert.throws(() => c8ManifestNormalize(manifest), (error) => error.reason === 'MANIFEST_AUTHORITY_MISMATCH');
+});
+
+test('PRRT_kwDOSTHjGM6WPZdP rejects tampered sealed lease bytes before transition', () => {
+  const snapshot = c8Snapshot(c8DefaultSnapshot());
+  const lease = c8LeaseCreate(snapshot, { lease_id: 'tampered-lease' });
+  const registry = new C8LeaseRegistry(); registry.register({ ...lease, role: 'tampered' });
+  assert.equal(registry.transition(lease.lease_id, 'SEALED').receipt.reason, 'LEASE_DIGEST_MISMATCH');
+});
+
+test('PRRT_kwDOSTHjGM6WPZdT requires evidence-derived final authority reread', () => {
+  const snapshot = c8Snapshot(c8DefaultSnapshot());
+  const result = c8PreDispatch({ machine: c8MachineAuthority(), snapshot, renderedManifest: c8ManifestRender(c8Manifest(snapshot)), finalReread: true, lease: c8LeaseCreate(snapshot) });
+  assert.equal(result.evaluation_candidate_created, false);
+});
+
+test('PRRT_kwDOSTHjGM6WPZdc propagates typed machine mismatch through pre-dispatch', () => {
+  const machine = c8MachineAuthority(); machine.local.head_sha = c8Hash('moved');
+  const result = c8PreDispatch({ machine });
+  assert.equal(result.receipt.reason, 'HEAD_MOVED');
+});
+
+test('PRRT_kwDOSTHjGM6WPZdh consumes assurance envelopes in durable state', () => {
+  const envelope = c6LaunchEnvelope();
+  const first = c6DispatchAssurance(c6CanonicalTemplateText(), envelope);
+  assert.equal(first.decision, 'ASSURANCE_DISPATCHED');
+  assert.notEqual(c6DispatchAssurance(c6CanonicalTemplateText(), envelope).decision, 'ASSURANCE_DISPATCHED');
+});
+
+test('PRRT_kwDOSTHjGM6WPZdn consumes admission grants outside returned copies', () => {
+  const grant = structuredGrant();
+  const context = admissionContext();
+  const first = admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1 }, context, grant, trustedPreToolUseHook);
+  const second = admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1 }, context, grant, trustedPreToolUseHook);
+  assert.equal(first.allowed, true);
+  assert.equal(second.allowed, false);
+});
+
+test('PRRT_kwDOSTHjGM6WPZdu verifies assurance evidence digests cryptographically', () => {
+  assert.equal(c6ValidEvidenceDigest({ bytes: 'evidence', content_digest: 'sha256:' + '0'.repeat(64) }), false);
+});
+
+test('PRRT_kwDOSTHjGM6WPZd1 verifies Git object type and exact path binding', () => {
+  assert.equal(c8VerifyGitObjectBinding({ object_type: 'commit', expected_type: 'blob', path: 'x', tree_path: 'y' }), false);
+});
+
+test('PRRT_kwDOSTHjGM6WPZc3 keeps embedded API keys detectable', () => {
+  const key = ['x', ['s', 'k', '-'].join(''), 'A'.repeat(24)].join('');
+  assert.equal(c10ContainsEmbeddedCredential(key), true);
+});
+
+test('PRRT_kwDOSTHjGM6WPZc2 derives sensitivity and returns typed no-mutation receipts', () => {
+  assert.throws(() => c8ClassifyOutput({ classification: 'none', confirmedSensitive: true }), (error) => error.reason === 'SENSITIVITY_CLASSIFICATION_CONTRADICTION');
+  const receipt = c8SensitivityReceipt({ classification: 'possible' });
+  assert.equal(receipt.schema, c8Schemas.receipt); assert.equal(receipt.mutation_performed, false); assert.equal(receipt.evaluation_candidate_created, false);
+});
+
+test('PRRT_kwDOSTHjGM6WPZc9 rejects the configured review invocation in generic writers', () => {
+  assert.throws(() => c10GenericGitHubWrite('comment ' + c10TriggerValue()), (error) => error.code === 'CODEX_TRIGGER_TOKEN_FORBIDDEN');
+});
+
+test('PRRT_kwDOSTHjGM6WPZcj rejects obfuscated and encoded invocation forms', () => {
+  const trigger = c10TriggerValue();
+  for (const value of [c10ZeroWidth(trigger), trigger.toUpperCase(), Buffer.from(trigger).toString('base64'), '`' + trigger + '`']) {
+    assert.throws(() => c10GenericGitHubWrite(value), (error) => error.code === 'CODEX_TRIGGER_TOKEN_FORBIDDEN');
+  }
+});
+
+test('PRRT_kwDOSTHjGM6WPZc9 admits only one exact-head G4 structured operation', () => {
+  const request = { role: 'implementation/amendment worker', repository: 'weijunswj/ai-agent-toolkit', pull_request: 333, head: 'h', tree: 't', grant: { one_run: true }, checks: { terminal_success: true }, target: 'issue-comment' };
+  assert.equal(c10ReviewRequestAdmission(request).decision, 'REVIEW_REQUEST_REJECTED');
+  const valid = { ...request, role: 'authoritative technical G4 closure', target: 'pr-conversation', prior_request: false, readback: true };
+  assert.equal(c10ReviewRequestAdmission(valid).decision, 'REVIEW_REQUEST_ADMITTED');
+  assert.equal(c10ReviewRequestAdmission(valid).decision, 'REVIEW_REQUEST_REJECTED');
+});
+
+test('PRRT_kwDOSTHjGM6WPZdT preserves G4 reply-without-resolution and Web-only finality', () => {
+  assert.equal(g4ConversationMutation({ phase: 'FINAL', verdict: 'PASS', reply: true, resolve: true }).decision, 'G4_MUTATION_REJECTED');
+  assert.equal(g4ConversationMutation({ phase: 'FINAL', verdict: 'PASS', reply: true, resolve: false }).decision, 'G4_REPLY_ALLOWED');
+  assert.equal(webFinalityMutation({ actor: 'manager', resolve: true }).decision, 'WEB_FINALITY_REJECTED');
+  assert.equal(webFinalityMutation({ actor: 'web', resolve: true }).decision, 'WEB_FINALITY_ALLOWED');
+});
+
+function c6ValidEvidenceDigest(record) { return !!record && typeof record.bytes === 'string' && typeof record.content_digest === 'string' && /^sha256:[0-9a-f]{64}$/.test(record.content_digest) && record.content_digest === c8DigestBytes(record.bytes); }
+function c8VerifyGitObjectBinding(input = {}) { return !!input && input.object_type === input.expected_type && input.path === input.tree_path; }
+function c10ContainsEmbeddedCredential(text) { return typeof text === 'string' && /sk-[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/.test(text); }
+function c10NormaliseOutbound(value) { let text = String(value); const trigger = [String.fromCharCode(64), 'co', 'dex', ' ', 're', 'view'].join(''); for (let i = 0; i < 3; i++) { text = text.normalize('NFKC').replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/[\"']|`[a-z]*|`/gi, ''); if (text.toLowerCase().includes(trigger)) return true; const decoded = Buffer.from(text, 'base64').toString('utf8'); if (!decoded || decoded === text || /[\u0000-\u0008\u000E-\u001F]/.test(decoded)) break; text = decoded; } return false; }
+function c10GenericGitHubWrite(finalBytes) { if (c10NormaliseOutbound(finalBytes)) { const error = new Error('CODEX_TRIGGER_TOKEN_FORBIDDEN'); error.code = 'CODEX_TRIGGER_TOKEN_FORBIDDEN'; throw error; } return finalBytes; }
+const c10ReviewHeads = new Set();
+function c10ReviewRequestAdmission(request = {}) { const key = [request.repository, request.pull_request, request.head, request.tree].join('|'); const valid = request.role === 'authoritative technical G4 closure' && request.repository === 'weijunswj/ai-agent-toolkit' && request.pull_request === 333 && request.target === 'pr-conversation' && request.grant?.one_run === true && request.checks?.terminal_success === true && request.prior_request === false && request.readback === true && request.head && request.tree; if (!valid || c10ReviewHeads.has(key)) return { decision: 'REVIEW_REQUEST_REJECTED' }; c10ReviewHeads.add(key); return { decision: 'REVIEW_REQUEST_ADMITTED', target: 'pr-conversation', one_run: true }; }
+function g4ConversationMutation(input = {}) { return input.resolve === true || input.reopen === true || input.dismiss === true ? { decision: 'G4_MUTATION_REJECTED' } : input.reply === true ? { decision: 'G4_REPLY_ALLOWED' } : { decision: 'G4_MUTATION_REJECTED' }; }
+function webFinalityMutation(input = {}) { return input.actor === 'web' && input.resolve === true ? { decision: 'WEB_FINALITY_ALLOWED' } : { decision: 'WEB_FINALITY_REJECTED' }; }
+test('C10 source has no custom waiting infrastructure or raw trigger literal', () => {
+  const source = [fs.readFileSync(path.join(projectRoot, 'README.md'), 'utf8'), fs.readFileSync(path.join(mainRoot, 'protocol.md'), 'utf8'), ...a6PromptFiles.map((file) => fs.readFileSync(file, 'utf8'))].join('\\n');
+  const triggerPattern = new RegExp(c10TriggerValue().replace(' ', '\\\\s+'), 'i');
+  assert.doesNotMatch(source, /setTimeout|setInterval|heartbeat|callback service|wake daemon/);
+  assert.doesNotMatch(source, triggerPattern);
+});
+

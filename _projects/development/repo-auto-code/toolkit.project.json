@@ -5,9 +5,9 @@
   "title": "Repo-Scoped Default-Off Closure-Lease Protocol",
   "module_path": "_projects/development/repo-auto-code",
   "main_path": "_projects/development/repo-auto-code/_main",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "version_policy": "semver",
-  "version_notes": "Completes the first-party source-only closure-lease contract through DL-329-AUTO-CODE-005-A6-C8 with C7 Web-only conjunctive finality and C8 deterministic authority snapshots, sealed one-run leases, machine admission, manifests, typed receipts, and sensitivity handling; fixture arithmetic remains 112 total, 17 accepted, and 95 rejected.",
+  "version_notes": "Extends DL-329-AUTO-CODE-005-A6-C8 with a source-only C10 safe review-request boundary, exact outbound normalization, one-shot structured technical-review admission, and Web-only conversation resolution/finality; retains the C7/C8 invariants and fixture arithmetic.",
   "outputs": [],
   "writes": {
     "allowed": [],
