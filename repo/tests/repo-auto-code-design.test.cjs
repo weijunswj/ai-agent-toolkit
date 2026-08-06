@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
@@ -13,6 +14,135 @@ const mainRoot = path.join(projectRoot, '_main');
 const fixtureRoot = path.join(mainRoot, 'fixtures');
 const templateRoot = path.join(mainRoot, 'templates');
 const fixturePrefix = '_projects/development/repo-auto-code/_main/fixtures';
+const c8AuthorityTempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-authority-reference-'));
+process.once('exit', () => { try { fs.rmSync(c8AuthorityTempRoot, { recursive: true, force: true }); } catch {} });
+
+function c8NewAuthorityStorePath(label = 'authority') {
+  return path.join(fs.mkdtempSync(path.join(c8AuthorityTempRoot, label + '-')), 'authority.json');
+}
+
+function c8Clone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function c8DurableRecordKey(record) {
+  return record && (record.envelope_id || record.grant_id || record.lease_id);
+}
+
+function c8DurableRecordDigest(record, kind) {
+  if (kind === 'assurance-envelope') return c6EnvelopeDigest(record);
+  if (kind === 'admission-grant') return c5GrantDigest(record);
+  if (kind === 'exceptional-review') return c7GrantDigest(record);
+  return record && (record.canonical_digest || record.lease_digest);
+}
+
+function c8DurableRecordState(record) {
+  return record && record.lifecycle && record.lifecycle.state;
+}
+
+function c8DurableConsumedRecord(record, consumedAt) {
+  const consumed = c8Clone(record);
+  consumed.lifecycle = {
+    ...consumed.lifecycle,
+    state: 'consumed',
+    consumed: true,
+    use_count: Number(consumed.lifecycle.use_count || 0) + 1,
+    consumed_at: consumedAt
+  };
+  if (Object.hasOwn(consumed, 'consumed')) consumed.consumed = true;
+  return consumed;
+}
+
+class C8DurableAuthorityRegistry {
+  constructor(filePath, kind = 'authority') {
+    this.filePath = filePath || c8NewAuthorityStorePath(kind);
+    this.kind = kind;
+    fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
+    if (!fs.existsSync(this.filePath)) fs.writeFileSync(this.filePath, JSON.stringify({ schema: 'durable-authority-store/v1', entries: {} }), 'utf8');
+  }
+
+  _readUnsafe() {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
+      if (!parsed || parsed.schema !== 'durable-authority-store/v1' || !parsed.entries || typeof parsed.entries !== 'object') throw new Error('invalid store');
+      return parsed;
+    } catch {
+      throw new C8ContractError('DURABLE_AUTHORITY_STORE_INVALID', 'authority_store');
+    }
+  }
+
+  _writeUnsafe(state) {
+    const temporary = this.filePath + '.' + process.pid + '.tmp';
+    fs.writeFileSync(temporary, JSON.stringify(state), 'utf8');
+    if (process.platform === 'win32') fs.rmSync(this.filePath, { force: true });
+    fs.renameSync(temporary, this.filePath);
+  }
+
+  _withLock(callback) {
+    const lockPath = this.filePath + '.lock';
+    let descriptor;
+    try {
+      descriptor = fs.openSync(lockPath, 'wx');
+      const state = this._readUnsafe();
+      const result = callback(state);
+      if (result && result.write) this._writeUnsafe(state);
+      return result && Object.hasOwn(result, 'value') ? result.value : result;
+    } finally {
+      if (descriptor !== undefined) fs.closeSync(descriptor);
+      fs.rmSync(lockPath, { force: true });
+    }
+  }
+
+  register(record) {
+    const key = c8DurableRecordKey(record);
+    const digest = c8DurableRecordDigest(record, this.kind);
+    if (!key || !c8Digest.test(digest || '') || digest !== (record.canonical_digest || record.lease_digest)) {
+      return { decision: 'AUTHORITY_REGISTRATION_REJECTED', reason: 'AUTHORITY_DIGEST_MISMATCH' };
+    }
+    return this._withLock((state) => {
+      const entry = state.entries[this.kind + ':' + key];
+      if (entry) {
+        if (entry.digest !== digest) return { value: { decision: 'AUTHORITY_REGISTRATION_REJECTED', reason: 'AUTHORITY_DIGEST_MISMATCH' } };
+        if (entry.state === 'consumed') return { value: { decision: 'AUTHORITY_REGISTRATION_REJECTED', reason: 'AUTHORITY_ALREADY_CONSUMED' } };
+        return { value: { decision: 'AUTHORITY_ALREADY_REGISTERED', record: c8Clone(entry.record) } };
+      }
+      state.entries[this.kind + ':' + key] = {
+        kind: this.kind,
+        key,
+        digest,
+        state: c8DurableRecordState(record) || 'issued',
+        record: c8Clone(record)
+      };
+      return { write: true, value: { decision: 'AUTHORITY_REGISTERED', record: c8Clone(record) } };
+    });
+  }
+
+  consume(record, options = {}) {
+    const key = c8DurableRecordKey(record);
+    const digest = c8DurableRecordDigest(record, this.kind);
+    if (!key || !c8Digest.test(digest || '') || digest !== (record.canonical_digest || record.lease_digest)) {
+      return { decision: 'AUTHORITY_REJECTED', reason: 'AUTHORITY_DIGEST_MISMATCH' };
+    }
+    return this._withLock((state) => {
+      const entryKey = this.kind + ':' + key;
+      const entry = state.entries[entryKey];
+      if (!entry) return { value: { decision: 'AUTHORITY_REJECTED', reason: 'AUTHORITY_NOT_REGISTERED' } };
+      if (entry.digest !== digest) return { value: { decision: 'AUTHORITY_REJECTED', reason: 'AUTHORITY_DIGEST_MISMATCH' } };
+      if (entry.state === 'consumed') return { value: { decision: 'AUTHORITY_REJECTED', reason: 'AUTHORITY_ALREADY_CONSUMED' } };
+      if (options.expectedState && entry.state !== options.expectedState) return { value: { decision: 'AUTHORITY_REJECTED', reason: 'AUTHORITY_STATE_MISMATCH' } };
+      const consumed = c8DurableConsumedRecord(record, options.consumed_at);
+      entry.state = 'consumed';
+      entry.record = c8Clone(consumed);
+      return { write: true, value: { decision: 'AUTHORITY_CONSUMED', record: consumed } };
+    });
+  }
+
+  read(key) {
+    const state = this._readUnsafe();
+    const entry = state.entries[this.kind + ':' + key];
+    return entry ? c8Clone(entry) : null;
+  }
+}
 const mergeCommit = '6c266962dcc423996dcc618612321b2fdf5712c3';
 const mergeTree = 'c7aae93052b812ae067fc8143db9deb3f7ad0380';
 const sourceLockBlob = '6d79d0c7fd12f2212ae7925befc8955398a3bde8';
@@ -2069,7 +2199,7 @@ function c6CanonicalTemplateText() {
 }
 
 function c6EvidenceLocator(domainId, overrides = {}) {
-  return {
+  const locator = {
     source_class: 'authoritative-raw',
     kind: domainId === 'exact-authority-graph' ? 'git-object' :
       domainId === 'cumulative-diff-allowlist' ? 'git-diff' :
@@ -2078,7 +2208,6 @@ function c6EvidenceLocator(domainId, overrides = {}) {
             domainId === 'applicable-archive-ledger-issue-state' ? 'archive' : 'github-api',
     exact_locator: 'raw://repository-synthetic/pr-333-synthetic/' + domainId + '#' + domainId,
     evidence_identity: 'evidence-' + domainId,
-    content_digest: 'sha256:' + domainId,
     inspected_subject: domainId,
     observed_at: '2026-08-03T23:00:00.000Z',
     accessible: true,
@@ -2087,6 +2216,37 @@ function c6EvidenceLocator(domainId, overrides = {}) {
     exact_head: c6Authority.head,
     ...overrides
   };
+  locator.resolved_locator = locator.resolved_locator || locator.exact_locator;
+  locator.resolved_evidence_identity = locator.resolved_evidence_identity || locator.evidence_identity;
+  locator.resolved_bytes = locator.resolved_bytes || c6ResolvedEvidenceBytes(locator);
+  locator.content_digest = c8DigestBytes(locator.resolved_bytes);
+  return locator;
+}
+
+function c6ResolvedEvidenceBytes(locator) {
+  return c8Json({
+    schema: 'resolved-assurance-evidence/v1',
+    exact_locator: locator.exact_locator,
+    evidence_identity: locator.evidence_identity,
+    inspected_subject: locator.inspected_subject,
+    repository: locator.repository,
+    pull_request: locator.pull_request,
+    exact_head: locator.exact_head,
+    kind: locator.kind
+  });
+}
+
+function c6EvidenceDigestReason(locator) {
+  if (!locator || locator.source_class !== 'authoritative-raw') return null;
+  if (!c8Digest.test(locator.content_digest || '') ||
+      typeof locator.resolved_locator !== 'string' || locator.resolved_locator !== locator.exact_locator ||
+      typeof locator.resolved_evidence_identity !== 'string' ||
+      locator.resolved_evidence_identity !== locator.evidence_identity ||
+      typeof locator.resolved_bytes !== 'string' ||
+      c8DigestBytes(locator.resolved_bytes) !== locator.content_digest) {
+    return 'ASSURANCE_EVIDENCE_DIGEST_INVALID';
+  }
+  return null;
 }
 
 function c6EvidenceRecords(overrides = {}) {
@@ -2099,11 +2259,12 @@ function c6EvidenceRecords(overrides = {}) {
           { id: 'thread-2', resolution: 'resolved', outdated: true }
         ]
         : undefined;
+    const locator = c6EvidenceLocator(domainId);
     return [domainId, {
       check_id: domainId,
-      authoritative_locator: c6EvidenceLocator(domainId),
+      authoritative_locator: locator,
       evidence_identity: 'evidence-' + domainId,
-      evidence_digest: 'sha256:' + domainId,
+      evidence_digest: locator.content_digest,
       what_inspected: domainId,
       inspection_result: 'confirmed',
       contradiction: [],
@@ -2152,7 +2313,7 @@ function c6WebVerificationReceipt(overrides = {}) {
 }
 
 function c6LaunchEnvelope(overrides = {}) {
-  return {
+  const envelope = {
     schema: 'assurance-launch/v1',
     envelope_id: 'launch-envelope-synthetic',
     authority: c6AuthorityValue(),
@@ -2181,9 +2342,23 @@ function c6LaunchEnvelope(overrides = {}) {
     evidence: c6EvidenceRecords(),
     ...overrides
   };
+  envelope.canonical_digest = c6EnvelopeDigest(envelope);
+  return envelope;
+}
+
+function c6EnvelopeBody(envelope) {
+  const body = c8Clone(envelope);
+  delete body.canonical_digest;
+  delete body.authority_store_path;
+  return body;
+}
+
+function c6EnvelopeDigest(envelope) {
+  return c8DigestBytes(c8Json(c6EnvelopeBody(envelope)));
 }
 
 function c6Context(overrides = {}) {
+  const assurance_store_path = overrides.assurance_store_path || c8NewAuthorityStorePath('assurance-envelope');
   return {
     authority: c6AuthorityValue(),
     now: '2026-08-03T23:30:00.000Z',
@@ -2194,6 +2369,8 @@ function c6Context(overrides = {}) {
     },
     requiredReviewSubmissionIds: ['review-1'],
     requiredReviewThreadIds: ['thread-1', 'thread-2'],
+    assurance_store_path,
+    assuranceRegistry: overrides.assuranceRegistry || new C8DurableAuthorityRegistry(assurance_store_path, 'assurance-envelope'),
     ...overrides
   };
 }
@@ -2209,15 +2386,16 @@ function c6CompleteExecutionIdentity(identity, expectedHead) {
 }
 
 function c6ValidRawLocator(locator, domainId, context) {
+  const digestReason = c6EvidenceDigestReason(locator);
   if (!locator || typeof locator !== 'object' || c6ProhibitedSourceClasses.has(locator.source_class) ||
       locator.source_class !== 'authoritative-raw' || !c6RawSourceKinds.has(locator.kind) ||
       !nonEmptyString(locator.exact_locator) || !locator.exact_locator.includes('#' + domainId) ||
       !nonEmptyString(locator.evidence_identity) || !nonEmptyString(locator.content_digest) ||
-      !nonEmptyString(locator.inspected_subject) || locator.inspected_subject !== domainId ||
-      !nonEmptyString(locator.observed_at) || locator.accessible !== true ||
-      locator.repository !== context.authority.repository || locator.pull_request !== context.authority.pull_request ||
-      locator.exact_head !== context.authority.head || locator.generic === true || locator.circular === true ||
-      locator.narrative_only === true) return false;
+       !nonEmptyString(locator.inspected_subject) || locator.inspected_subject !== domainId ||
+       !nonEmptyString(locator.observed_at) || locator.accessible !== true ||
+       locator.repository !== context.authority.repository || locator.pull_request !== context.authority.pull_request ||
+       locator.exact_head !== context.authority.head || locator.generic === true || locator.circular === true ||
+       locator.narrative_only === true || digestReason) return false;
   return true;
 }
 
@@ -2281,16 +2459,19 @@ function c6LaunchAdmission(envelope, context = c6Context()) {
     return invalid('ASSURANCE_LAUNCH_INVALID');
   }
   if (!envelope.evidence || Object.keys(envelope.evidence).sort().join('|') !== [...c6MandatoryDomainIds].sort().join('|') ||
-      c6MandatoryDomainIds.some((domainId) => !c6ValidEvidenceRecord(envelope.evidence[domainId], domainId, context))) {
+       c6MandatoryDomainIds.some((domainId) => !c6ValidEvidenceRecord(envelope.evidence[domainId], domainId, context))) {
+    const digestFailure = c6MandatoryDomainIds.some((domainId) => c6EvidenceDigestReason(envelope.evidence?.[domainId]?.authoritative_locator));
+    if (digestFailure) return invalid('ASSURANCE_EVIDENCE_DIGEST_INVALID');
     return invalid('ASSURANCE_EVIDENCE_INCOMPLETE');
+  }
+  if (!c8Digest.test(envelope.canonical_digest || '') || envelope.canonical_digest !== c6EnvelopeDigest(envelope)) {
+    return invalid('ASSURANCE_LAUNCH_INVALID');
   }
   return { decision: 'ASSURANCE_LAUNCH_ADMITTED', temporaryChatCreated: false };
 }
 
-const c6ConsumedEnvelopes = new WeakSet();
-
 function c6DispatchAssurance(templateText, envelope, context = c6Context()) {
-  if (!envelope || typeof envelope !== 'object' || c6ConsumedEnvelopes.has(envelope) || envelope.lifecycle?.consumed === true) return { decision: 'ASSURANCE_ALREADY_CONSUMED', temporaryChatCreated: false };
+  if (!envelope || typeof envelope !== 'object' || envelope.lifecycle?.consumed === true) return { decision: 'ASSURANCE_ALREADY_CONSUMED', temporaryChatCreated: false };
   const admission = c6LaunchAdmission(envelope, context);
   if (admission.decision !== 'ASSURANCE_LAUNCH_ADMITTED') return admission;
   const requiredTemplateTerms = [
@@ -2304,19 +2485,19 @@ function c6DispatchAssurance(templateText, envelope, context = c6Context()) {
   if (templateText !== c6CanonicalTemplateText() || requiredTemplateTerms.some((term) => !templateText.includes(term))) {
     return { decision: 'ASSURANCE_TEMPLATE_REQUIRED', temporaryChatCreated: false };
   }
-  c6ConsumedEnvelopes.add(envelope);
-  const consumed = JSON.parse(JSON.stringify(envelope));
-  consumed.lifecycle = {
-    ...consumed.lifecycle,
-    state: 'consumed',
-    consumed: true,
-    use_count: 1,
-    consumed_at: context.now
-  };
+  const registry = context.assuranceRegistry || new C8DurableAuthorityRegistry(context.assurance_store_path, 'assurance-envelope');
+  const registered = registry.register(envelope);
+  if (registered.reason === 'AUTHORITY_ALREADY_CONSUMED') return { decision: 'ASSURANCE_ALREADY_CONSUMED', temporaryChatCreated: false };
+  if (!['AUTHORITY_REGISTERED', 'AUTHORITY_ALREADY_REGISTERED'].includes(registered.decision)) {
+    return { decision: 'ASSURANCE_LAUNCH_INVALID', temporaryChatCreated: false };
+  }
+  const consumedResult = registry.consume(envelope, { expectedState: 'issued', consumed_at: context.now });
+  if (consumedResult.reason === 'AUTHORITY_ALREADY_CONSUMED') return { decision: 'ASSURANCE_ALREADY_CONSUMED', temporaryChatCreated: false };
+  if (consumedResult.decision !== 'AUTHORITY_CONSUMED') return { decision: 'ASSURANCE_LAUNCH_INVALID', temporaryChatCreated: false };
   return {
     decision: 'ASSURANCE_DISPATCHED',
     temporaryChatCreated: true,
-    launchEnvelope: consumed,
+    launchEnvelope: consumedResult.record,
     renderedPrompt: templateText
   };
 }
@@ -2969,7 +3150,10 @@ function admissionContext(overrides = {}) {
 }
 
 function structuredGrant(overrides = {}) {
-  return {
+  const grant = {
+    schema: 'toolkit-admission-grant/v1',
+    grant_id: 'grant-synthetic-' + (++structuredGrant.sequence),
+    authority_store_path: c8NewAuthorityStorePath('admission-grant'),
     rawEvidence: true,
     issuer: 'web-orchestrator',
     explicit_current_turn_user_request: true,
@@ -2986,8 +3170,28 @@ function structuredGrant(overrides = {}) {
     expires_at: 1100,
     consumed: false,
     inheritance: false,
+    lifecycle: {
+      state: 'issued',
+      consumed: false,
+      use_count: 0,
+      consumed_at: null
+    },
     ...overrides
   };
+  grant.canonical_digest = c5GrantDigest(grant);
+  return grant;
+}
+structuredGrant.sequence = 0;
+
+function c5GrantBody(grant) {
+  const body = c8Clone(grant);
+  delete body.canonical_digest;
+  delete body.authority_store_path;
+  return body;
+}
+
+function c5GrantDigest(grant) {
+  return c8DigestBytes(c8Json(c5GrantBody(grant)));
 }
 
 function normaliseAdmissionOperation(operation) {
@@ -2995,8 +3199,12 @@ function normaliseAdmissionOperation(operation) {
 }
 
 function grantMatches(request, context, grant) {
-  if (!grant || grant.rawEvidence !== true || grant.issuer !== 'web-orchestrator' ||
+  if (!grant || grant.schema !== 'toolkit-admission-grant/v1' || !nonEmptyString(grant.grant_id) ||
+      !nonEmptyString(grant.authority_store_path) || !c8Digest.test(grant.canonical_digest || '') ||
+      grant.canonical_digest !== c5GrantDigest(grant) || grant.rawEvidence !== true || grant.issuer !== 'web-orchestrator' ||
       grant.explicit_current_turn_user_request !== true || grant.consumed !== false || grant.inheritance !== false ||
+      !grant.lifecycle || grant.lifecycle.state !== 'issued' || grant.lifecycle.consumed !== false ||
+      grant.lifecycle.use_count !== 0 || grant.lifecycle.consumed_at !== null ||
       request.inherited === true || grant.run_id !== context.run_id || grant.session_id !== context.session_id ||
       grant.turn_id !== context.turn_id || grant.operation !== normaliseAdmissionOperation(request.operation) ||
       grant.provider !== context.provider || grant.canonical_model !== context.canonical_model ||
@@ -3019,9 +3227,7 @@ function hookIsTrusted(hook) {
     hook.runtimeCoverage.includes('ordinary-agent-spawn');
 }
 
-const c5ConsumedGrants = new WeakSet();
-
-function admissionDecision(request, context, grant, hook) {
+function admissionDecision(request, context, grant, hook, authorityRegistry) {
   if (request.event === 'SubagentStart') {
     return { allowed: false, prevented: false, auditOnly: true, mode: 'AUDIT_ONLY', reason: 'AUDIT_ONLY' };
   }
@@ -3036,10 +3242,15 @@ function admissionDecision(request, context, grant, hook) {
     reason
   });
   if (!grantMatches(request, context, grant)) return denied();
-  if (grant && typeof grant === 'object' && c5ConsumedGrants.has(grant)) return denied('GRANT_ALREADY_CONSUMED');
   if (operation === 'spawn_agent' && !hookIsTrusted(hook)) return denied('ROOT_ONLY_STANDARD');
   if (operation !== 'fast' && operation !== 'spawn_agent') return denied('UNSUPPORTED_DELEGATION');
-  if (grant && typeof grant === 'object') c5ConsumedGrants.add(grant);
+  const registry = authorityRegistry || new C8DurableAuthorityRegistry(grant.authority_store_path, 'admission-grant');
+  const registered = registry.register(grant);
+  if (registered.reason === 'AUTHORITY_ALREADY_CONSUMED') return denied('GRANT_ALREADY_CONSUMED');
+  if (!['AUTHORITY_REGISTERED', 'AUTHORITY_ALREADY_REGISTERED'].includes(registered.decision)) return denied('GRANT_DURABLE_STATE_INVALID');
+  const consumed = registry.consume(grant, { expectedState: 'issued', consumed_at: context.now });
+  if (consumed.reason === 'AUTHORITY_ALREADY_CONSUMED') return denied('GRANT_ALREADY_CONSUMED');
+  if (consumed.decision !== 'AUTHORITY_CONSUMED') return denied('GRANT_DURABLE_STATE_INVALID');
   return {
     allowed: true,
     prevented: false,
@@ -3047,7 +3258,7 @@ function admissionDecision(request, context, grant, hook) {
     reason: 'ADMITTED',
     fastAllowed: operation === 'fast' || grant.allow_fast === true,
     delegationAllowed: operation === 'spawn_agent',
-    grant: { ...grant, consumed: true }
+    grant: { ...consumed.record, consumed: true }
   };
 }
 
@@ -3260,10 +3471,107 @@ function c7FinalityDecision(evidence = {}) {
   const base = { mergeAuthorized: false, webSoleFinalAuthority: true, routineAssuranceRequired: false, missing, contradictions };
   return missing.length || contradictions.length ? { ...base, decision: 'FINALITY_BLOCKED', finality: false } : { ...base, decision: 'FINALITY_ADMITTED', finality: true };
 }
-function c7ExceptionalReviewerAdmission(grant = {}) {
-  const categories = ['cryptography', 'recovery', 'irreversible_migration', 'destructive_migration', 'critical_security_boundary', 'conflicting_evidence'];
-  const allowed = ['explicitPreauthorised', 'beforeDispatch', 'freshIsolated', 'readOnly', 'nonAuthoritative', 'exactHead'].every((key) => grant[key] === true) && categories.includes(grant.category);
-  return allowed ? { decision: 'SECOND_REVIEWER_ADMITTED', allowed: true, category: grant.category, replacesWebFinality: false } : { decision: 'SECOND_REVIEWER_NOT_AUTHORISED', allowed: false };
+const c7ExceptionalCategories = Object.freeze(['cryptography', 'recovery', 'irreversible_migration', 'destructive_migration', 'critical_security_boundary', 'conflicting_evidence']);
+let c7ExceptionalGrantSequence = 0;
+
+function c7ExceptionalGrantContext(overrides = {}) {
+  const snapshot = c8Snapshot(c8DefaultSnapshot());
+  return {
+    repository: 'weijunswj/ai-agent-toolkit',
+    pull_request: 333,
+    exact_head: snapshot.exact_remote_head_sha,
+    review: {
+      run_id: 'run-exceptional-synthetic',
+      session_id: 'session-exceptional-synthetic',
+      turn_id: 'turn-exceptional-synthetic'
+    },
+    governing_authority_revision: 'child-r1',
+    category: 'critical_security_boundary',
+    now: '2026-08-03T23:00:00.000Z',
+    ...overrides
+  };
+}
+
+function c7GrantBody(grant) {
+  const body = c8Clone(grant);
+  delete body.canonical_digest;
+  delete body.authority_store_path;
+  return body;
+}
+
+function c7GrantDigest(grant) {
+  return c8DigestBytes(c8Json(c7GrantBody(grant)));
+}
+
+function c7ExceptionalGrant(overrides = {}) {
+  const context = c7ExceptionalGrantContext();
+  const grant = {
+    schema: 'exceptional-review-grant/v1',
+    grant_id: 'exceptional-grant-synthetic-' + (++c7ExceptionalGrantSequence),
+    issuer: {
+      identity: 'web-orchestrator',
+      role: 'Web Orchestrator',
+      surface: 'web-orchestrator'
+    },
+    repository: context.repository,
+    pull_request: context.pull_request,
+    exact_head: context.exact_head,
+    review: c8Clone(context.review),
+    governing_authority_revision: context.governing_authority_revision,
+    category: context.category,
+    issued_at: '2026-08-03T22:59:00.000Z',
+    expires_at: '2026-08-04T00:00:00.000Z',
+    lifecycle: {
+      state: 'issued',
+      consumed: false,
+      use_count: 0,
+      consumed_at: null
+    },
+    authority_store_path: c8NewAuthorityStorePath('exceptional-review'),
+    ...overrides
+  };
+  grant.canonical_digest = c7GrantDigest(grant);
+  return grant;
+}
+
+function c7ExceptionalReviewerAdmission(grant = {}, context = c7ExceptionalGrantContext(), authorityRegistry) {
+  const rejected = (reason = 'EXCEPTIONAL_REVIEW_GRANT_INVALID') => ({
+    decision: reason,
+    allowed: false,
+    mutation_performed: false,
+    evaluation_candidate_created: false
+  });
+  if (!grant || grant.schema !== 'exceptional-review-grant/v1' ||
+      !nonEmptyString(grant.grant_id) || !c8Digest.test(grant.canonical_digest || '') ||
+      grant.canonical_digest !== c7GrantDigest(grant) ||
+      !grant.issuer || grant.issuer.identity !== 'web-orchestrator' ||
+      grant.issuer.role !== 'Web Orchestrator' || grant.issuer.surface !== 'web-orchestrator' ||
+      grant.repository !== context.repository || grant.pull_request !== context.pull_request ||
+      grant.exact_head !== context.exact_head ||
+      !grant.review || c8Json(grant.review) !== c8Json(context.review) ||
+      grant.governing_authority_revision !== context.governing_authority_revision ||
+      !c7ExceptionalCategories.includes(grant.category) || grant.category !== context.category ||
+      !nonEmptyString(grant.issued_at) || !nonEmptyString(grant.expires_at) ||
+      !Number.isFinite(Date.parse(grant.issued_at)) || !Number.isFinite(Date.parse(grant.expires_at)) ||
+      Date.parse(grant.issued_at) > Date.parse(context.now) || Date.parse(grant.expires_at) <= Date.parse(context.now) ||
+      !grant.lifecycle || grant.lifecycle.state !== 'issued' || grant.lifecycle.consumed !== false ||
+      grant.lifecycle.use_count !== 0 || grant.lifecycle.consumed_at !== null) return rejected();
+  const registry = authorityRegistry || new C8DurableAuthorityRegistry(grant.authority_store_path, 'exceptional-review');
+  const registered = registry.register(grant);
+  if (registered.reason === 'AUTHORITY_ALREADY_CONSUMED') return rejected('EXCEPTIONAL_REVIEW_GRANT_REPLAYED');
+  if (!['AUTHORITY_REGISTERED', 'AUTHORITY_ALREADY_REGISTERED'].includes(registered.decision)) return rejected('EXCEPTIONAL_REVIEW_GRANT_INVALID');
+  const consumed = registry.consume(grant, { expectedState: 'issued', consumed_at: context.now });
+  if (consumed.reason === 'AUTHORITY_ALREADY_CONSUMED') return rejected('EXCEPTIONAL_REVIEW_GRANT_REPLAYED');
+  if (consumed.decision !== 'AUTHORITY_CONSUMED') return rejected('EXCEPTIONAL_REVIEW_GRANT_INVALID');
+  return {
+    decision: 'SECOND_REVIEWER_ADMITTED',
+    allowed: true,
+    category: grant.category,
+    replacesWebFinality: false,
+    mutation_performed: false,
+    evaluation_candidate_created: false,
+    grant: consumed.record
+  };
 }
 
 const c8Sha = /^[0-9a-f]{40}$/; const c8Digest = /^sha256:[0-9a-f]{64}$/;
@@ -3278,13 +3586,55 @@ function c8Keys(value, allowed, field) { if (!value || typeof value !== 'object'
 function c8ShaCheck(value, field) { if (typeof value !== 'string' || !c8Sha.test(value)) throw new C8ContractError('MALFORMED_SHA', field); return value; }
 function c8Text(value, field, reason = 'SCOPE_MISMATCH') { if (typeof value !== 'string' || !value) throw new C8ContractError(reason, field); return value; }
 function c8List(value, field) { if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) throw new C8ContractError('SCOPE_MISMATCH', field); const sorted = [...value].sort(); if (new Set(sorted).size !== sorted.length) throw new C8ContractError('SCOPE_MISMATCH', field); return sorted; }
-function c8DefaultSnapshot(overrides = {}) { return c8Merge({ schema: c8Schemas.snapshot, repository: { owner: 'weijunswj', name: 'ai-agent-toolkit' }, child_issue: { number: 329, authority_revision: 'child-r1' }, pull_request: { number: 333, authority_revision: 'pr-r1' }, design_lock: 'DL-329-AUTO-CODE-005-A6-C8', canonical_base_sha: c8Hash('base'), exact_remote_head_sha: c8Hash('head'), exact_tree_sha: c8Hash('tree'), authorised_blobs: [{ path: '_projects/development/repo-auto-code/_main/protocol.md', blob_sha: c8Hash('protocol') }, { path: 'repo/tests/repo-auto-code-design.test.cjs', blob_sha: c8Hash('test') }], authorised_source_scope: { paths: ['_projects/development/repo-auto-code/_main', 'repo/tests/repo-auto-code-design.test.cjs'], outputs: [], writes: [], source_only: true }, role: 'implementation/amendment worker', capabilities: ['bounded_source_mutation', 'pre_dispatch_admission', 'read_authority'], child_authority_revision: 'child-r1', pr_authority_revision: 'pr-r1', relevant_parent_entry_revision: 'parent-r1', projection: { schema: 'task-authority-projection/v1', child_key: '#329', parent_entry_marker_schema: 'toolkit-authority-parent-entry/v1', relevant_parent_entry_revision: 'parent-r1', normalization: 'canonical-json-sorted-keys' } }, overrides); }
+function c8RealGitAuthority() {
+  const head = git('rev-parse', 'HEAD');
+  const base = git('rev-parse', 'HEAD^');
+  const tree = git('rev-parse', head + '^{tree}');
+  const paths = ['repo/tests/repo-auto-code-design.test.cjs'];
+  return {
+    canonical_base_sha: base,
+    exact_remote_head_sha: head,
+    exact_tree_sha: tree,
+    authorised_blobs: paths.map((filePath) => ({ path: filePath, blob_sha: git('rev-parse', head + ':' + filePath) }))
+  };
+}
+function c8DefaultSnapshot(overrides = {}) {
+  const authority = c8RealGitAuthority();
+  return c8Merge({
+    schema: c8Schemas.snapshot,
+    repository: { owner: 'weijunswj', name: 'ai-agent-toolkit' },
+    child_issue: { number: 329, authority_revision: 'child-r1' },
+    pull_request: { number: 333, authority_revision: 'pr-r1' },
+    relevant_parent_entry: { key: '#329', authority_revision: 'parent-r1' },
+    design_lock: 'DL-329-AUTO-CODE-005-A6-C21',
+    run_identity: '2026-08-06-toolkit-c21-nine-g4-findings-amendment-g3-056',
+    ...authority,
+    authorised_source_scope: {
+      paths: ['repo/tests/repo-auto-code-design.test.cjs'],
+      outputs: [],
+      writes: ['repo/tests/repo-auto-code-design.test.cjs'],
+      source_only: true
+    },
+    role: 'implementation/amendment worker',
+    capabilities: ['bounded_source_mutation', 'pre_dispatch_admission', 'read_authority'],
+    child_authority_revision: 'child-r1',
+    pr_authority_revision: 'pr-r1',
+    relevant_parent_entry_revision: 'parent-r1',
+    projection: {
+      schema: 'task-authority-projection/v1',
+      child_key: '#329',
+      parent_entry_marker_schema: 'toolkit-authority-parent-entry/v1',
+      relevant_parent_entry_revision: 'parent-r1',
+      normalization: 'canonical-json-sorted-keys'
+    }
+  }, overrides);
+}
 function c8NormalizeSnapshot(input) {
-  c8Keys(input, ['schema', 'repository', 'child_issue', 'pull_request', 'design_lock', 'canonical_base_sha', 'exact_remote_head_sha', 'exact_tree_sha', 'authorised_blobs', 'authorised_source_scope', 'role', 'capabilities', 'child_authority_revision', 'pr_authority_revision', 'relevant_parent_entry_revision', 'projection'], 'snapshot');
+  c8Keys(input, ['schema', 'repository', 'child_issue', 'pull_request', 'relevant_parent_entry', 'design_lock', 'run_identity', 'canonical_base_sha', 'exact_remote_head_sha', 'exact_tree_sha', 'authorised_blobs', 'authorised_source_scope', 'role', 'capabilities', 'child_authority_revision', 'pr_authority_revision', 'relevant_parent_entry_revision', 'projection'], 'snapshot');
   if (input.schema !== c8Schemas.snapshot) throw new C8ContractError('MALFORMED_SNAPSHOT', 'schema');
-  c8Keys(input.repository, ['owner', 'name'], 'repository'); c8Keys(input.child_issue, ['number', 'authority_revision'], 'child_issue'); c8Keys(input.pull_request, ['number', 'authority_revision'], 'pull_request');
+  c8Keys(input.repository, ['owner', 'name'], 'repository'); c8Keys(input.child_issue, ['number', 'authority_revision'], 'child_issue'); c8Keys(input.pull_request, ['number', 'authority_revision'], 'pull_request'); c8Keys(input.relevant_parent_entry, ['key', 'authority_revision'], 'parent_entry');
   if (!Number.isInteger(input.child_issue.number) || !Number.isInteger(input.pull_request.number)) throw new C8ContractError('SCOPE_MISMATCH', 'issue');
-  c8Text(input.repository.owner, 'repository.owner'); c8Text(input.repository.name, 'repository.name'); c8Text(input.child_issue.authority_revision, 'child_issue.authority_revision'); c8Text(input.pull_request.authority_revision, 'pull_request.authority_revision'); c8Text(input.design_lock, 'design_lock');
+  c8Text(input.repository.owner, 'repository.owner'); c8Text(input.repository.name, 'repository.name'); c8Text(input.child_issue.authority_revision, 'child_issue.authority_revision'); c8Text(input.pull_request.authority_revision, 'pull_request.authority_revision'); c8Text(input.relevant_parent_entry.key, 'parent_entry.key'); c8Text(input.relevant_parent_entry.authority_revision, 'parent_entry.authority_revision'); c8Text(input.design_lock, 'design_lock'); c8Text(input.run_identity, 'run_identity');
   c8ShaCheck(input.canonical_base_sha, 'canonical_base_sha'); c8ShaCheck(input.exact_remote_head_sha, 'exact_remote_head_sha'); c8ShaCheck(input.exact_tree_sha, 'exact_tree_sha');
   if (!Array.isArray(input.authorised_blobs)) throw new C8ContractError('SCOPE_MISMATCH', 'authorised_blobs');
   const blobs = input.authorised_blobs.map((blob) => { c8Keys(blob, ['path', 'blob_sha'], 'blob'); return { path: c8Text(blob.path, 'blob.path', 'BLOB_MOVED'), blob_sha: c8ShaCheck(blob.blob_sha, 'blob.blob_sha') }; }).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
@@ -3292,35 +3642,229 @@ function c8NormalizeSnapshot(input) {
   c8Keys(input.authorised_source_scope, ['paths', 'outputs', 'writes', 'source_only'], 'scope'); if (input.authorised_source_scope.source_only !== true) throw new C8ContractError('SCOPE_MISMATCH', 'scope.source_only');
   const scope = { paths: c8List(input.authorised_source_scope.paths, 'scope.paths'), outputs: c8List(input.authorised_source_scope.outputs, 'scope.outputs'), writes: c8List(input.authorised_source_scope.writes, 'scope.writes'), source_only: true };
   const capabilities = c8List(input.capabilities, 'capabilities'); c8Text(input.role, 'role'); c8Text(input.child_authority_revision, 'child_authority_revision'); c8Text(input.pr_authority_revision, 'pr_authority_revision'); c8Text(input.relevant_parent_entry_revision, 'parent_entry_revision');
+  if (input.relevant_parent_entry.key !== '#329' || input.relevant_parent_entry.authority_revision !== input.relevant_parent_entry_revision) throw new C8ContractError('PARENT_ENTRY_MOVED', 'parent_entry');
   c8Keys(input.projection, ['schema', 'child_key', 'parent_entry_marker_schema', 'relevant_parent_entry_revision', 'normalization'], 'projection');
   if (input.projection.schema !== 'task-authority-projection/v1' || input.projection.child_key !== '#329' || input.projection.parent_entry_marker_schema !== 'toolkit-authority-parent-entry/v1' || input.projection.relevant_parent_entry_revision !== input.relevant_parent_entry_revision || input.projection.normalization !== 'canonical-json-sorted-keys') throw new C8ContractError('PARENT_ENTRY_MOVED', 'projection');
   if (input.child_issue.authority_revision !== input.child_authority_revision || input.pull_request.authority_revision !== input.pr_authority_revision) throw new C8ContractError('CHILD_AUTHORITY_MOVED', 'authority_revision');
-  return { schema: c8Schemas.snapshot, repository: { ...input.repository }, child_issue: { ...input.child_issue }, pull_request: { ...input.pull_request }, design_lock: input.design_lock, canonical_base_sha: input.canonical_base_sha, exact_remote_head_sha: input.exact_remote_head_sha, exact_tree_sha: input.exact_tree_sha, authorised_blobs: blobs, authorised_source_scope: scope, role: input.role, capabilities, child_authority_revision: input.child_authority_revision, pr_authority_revision: input.pr_authority_revision, relevant_parent_entry_revision: input.relevant_parent_entry_revision, projection: { ...input.projection } };
+  return { schema: c8Schemas.snapshot, repository: { ...input.repository }, child_issue: { ...input.child_issue }, pull_request: { ...input.pull_request }, relevant_parent_entry: { ...input.relevant_parent_entry }, design_lock: input.design_lock, run_identity: input.run_identity, canonical_base_sha: input.canonical_base_sha, exact_remote_head_sha: input.exact_remote_head_sha, exact_tree_sha: input.exact_tree_sha, authorised_blobs: blobs, authorised_source_scope: scope, role: input.role, capabilities, child_authority_revision: input.child_authority_revision, pr_authority_revision: input.pr_authority_revision, relevant_parent_entry_revision: input.relevant_parent_entry_revision, projection: { ...input.projection } };
 }
 function c8Material(snapshot) { const material = { ...snapshot }; delete material.snapshot_digest; delete material.canonical_bytes; return c8NormalizeSnapshot(material); }
 function c8Snapshot(input) { const material = c8NormalizeSnapshot(input); const bytes = c8Json(material); return c8Freeze({ ...material, snapshot_digest: c8DigestBytes(bytes), canonical_bytes: bytes }); }
 const c8ParentStart = '<!-- toolkit-authority-parent-entry/v1 child='; const c8ParentEnd = '<!-- /toolkit-authority-parent-entry/v1 -->';
 function c8ParentMarker(entry, key = '#329') { c8Text(entry, 'parent_entry'); if (entry.includes('toolkit-authority-parent-entry/v1')) throw new C8ContractError('MALFORMED_PARENT_ENTRY', 'parent_entry'); return c8ParentStart + key + ' -->\n' + entry.trim() + '\n' + c8ParentEnd; }
 function c8ParentParse(body, key = '#329') { c8Text(body, 'parent_body'); const matches = [...body.matchAll(/<!-- toolkit-authority-parent-entry\/v1 child=([^ ]+) -->/g)]; const target = matches.filter((match) => match[1] === key); if (target.length !== 1) throw new C8ContractError('PARENT_ENTRY_MOVED', 'parent_entry_count'); const start = target[0].index; const prior = body.slice(0, start); if (prior.lastIndexOf(c8ParentStart) > prior.lastIndexOf(c8ParentEnd)) throw new C8ContractError('MALFORMED_PARENT_ENTRY', 'nested_marker'); const end = body.indexOf(c8ParentEnd, start); if (end < 0) throw new C8ContractError('PARENT_ENTRY_MOVED', 'parent_entry_end'); if (matches.some((match) => match.index > start && match.index < end)) throw new C8ContractError('MALFORMED_PARENT_ENTRY', 'nested_marker'); const entry = body.slice(start + target[0][0].length, end).trim(); if (entry.includes(c8ParentEnd)) throw new C8ContractError('MALFORMED_PARENT_ENTRY', 'duplicate_end'); return { decision: 'PARENT_ENTRY_ADMITTED', child_key: key, entry, revision: c8DigestBytes(entry) }; }
-function c8Projection(snapshot) { return { child: snapshot.child_issue, pull_request: snapshot.pull_request, parent_entry: snapshot.relevant_parent_entry_revision, design_lock: snapshot.design_lock, scope: snapshot.authorised_source_scope, base: snapshot.canonical_base_sha, head: snapshot.exact_remote_head_sha, tree: snapshot.exact_tree_sha, blobs: snapshot.authorised_blobs, role: snapshot.role, capabilities: snapshot.capabilities }; }
+function c8Projection(snapshot) {
+  return {
+    repository: snapshot.repository,
+    child: snapshot.child_issue,
+    pull_request: snapshot.pull_request,
+    parent_entry: snapshot.relevant_parent_entry,
+    parent_entry_revision: snapshot.relevant_parent_entry_revision,
+    design_lock: snapshot.design_lock,
+    run_identity: snapshot.run_identity,
+    scope: snapshot.authorised_source_scope,
+    base: snapshot.canonical_base_sha,
+    head: snapshot.exact_remote_head_sha,
+    tree: snapshot.exact_tree_sha,
+    blobs: snapshot.authorised_blobs,
+    role: snapshot.role,
+    capabilities: snapshot.capabilities
+  };
+}
 function c8Receipt(phase, reason, field = 'contract', expected = 'canonical-authority', observed = 'rejected', snapshot = null, lease = null) { return { schema: c8Schemas.receipt, phase, reason, field, expected_format: expected, observed_format: observed, snapshot_identity: snapshot && snapshot.snapshot_digest || null, lease_identity: lease && lease.lease_id || null, mutation_performed: false, evaluation_candidate_created: false }; }
 function c8Compare(snapshot, current = {}) { const baseline = c8Snapshot(c8Material(snapshot)); const candidate = { ...current }; const ignored = candidate.unrelated_sibling_parent_revision; delete candidate.unrelated_sibling_parent_revision; delete candidate.snapshot_digest; delete candidate.canonical_bytes; const currentSnapshot = c8Snapshot(c8DefaultSnapshot(candidate)); const left = c8Projection(baseline); const right = c8Projection(currentSnapshot); for (const [field, reason] of [['child', 'CHILD_AUTHORITY_MOVED'], ['pull_request', 'PR_AUTHORITY_MOVED'], ['parent_entry', 'PARENT_ENTRY_MOVED'], ['design_lock', 'DESIGN_LOCK_MISMATCH'], ['scope', 'SCOPE_MISMATCH'], ['base', 'BASE_MOVED'], ['head', 'HEAD_MOVED'], ['tree', 'TREE_MOVED'], ['blobs', 'BLOB_MOVED'], ['role', 'SCOPE_MISMATCH'], ['capabilities', 'SCOPE_MISMATCH']]) if (c8Json(left[field]) !== c8Json(right[field])) return { decision: 'AUTHORITY_REJECTED', reason, ignored_unrelated_sibling_parent_revision: ignored === undefined ? null : 'ignored', receipt: c8Receipt('authority-comparison', reason, field, 'relevant-authority', 'changed', baseline) }; return { decision: 'AUTHORITY_ADMITTED', ignored_unrelated_sibling_parent_revision: ignored === undefined ? null : 'ignored', snapshot: currentSnapshot }; }
-function c8MachineAuthority(input = c8DefaultSnapshot()) { const snapshot = c8NormalizeSnapshot(input); const side = { repository: JSON.parse(JSON.stringify(snapshot.repository)), child_issue: JSON.parse(JSON.stringify(snapshot.child_issue)), pull_request: JSON.parse(JSON.stringify(snapshot.pull_request)), design_lock: snapshot.design_lock, scope: JSON.parse(JSON.stringify(snapshot.authorised_source_scope)), role: snapshot.role, capabilities: [...snapshot.capabilities], child_authority_revision: snapshot.child_authority_revision, pr_authority_revision: snapshot.pr_authority_revision, relevant_parent_entry_revision: snapshot.relevant_parent_entry_revision, projection: JSON.parse(JSON.stringify(snapshot.projection)), base_sha: snapshot.canonical_base_sha, head_sha: snapshot.exact_remote_head_sha, tree_sha: snapshot.exact_tree_sha, blobs: JSON.parse(JSON.stringify(snapshot.authorised_blobs)) }; return { github: JSON.parse(JSON.stringify(side)), local: JSON.parse(JSON.stringify(side)), snapshot_input: snapshot }; }
+const c8MachineFields = Object.freeze(['schema', 'collector', 'repository', 'child_issue', 'pull_request', 'parent_entry', 'design_lock', 'run_identity', 'scope', 'role', 'capabilities', 'child_authority_revision', 'pr_authority_revision', 'relevant_parent_entry_revision', 'projection', 'base_sha', 'head_sha', 'tree_sha', 'blobs']);
+function c8MachineSideNormalize(side, expectedSource) {
+  if (!side || typeof side !== 'object' || Array.isArray(side)) throw new C8ContractError('MALFORMED_MACHINE_AUTHORITY', 'machine');
+  c8Keys(side, c8MachineFields, 'machine_authority');
+  if (side.schema !== 'machine-authority/v1') throw new C8ContractError('MALFORMED_MACHINE_AUTHORITY', 'schema');
+  c8Keys(side.collector, ['source', 'collection_id'], 'collector');
+  if (side.collector.source !== expectedSource || !nonEmptyString(side.collector.collection_id)) throw new C8ContractError('MALFORMED_MACHINE_AUTHORITY', 'collector');
+  c8Keys(side.repository, ['owner', 'name'], 'machine_repository');
+  c8Keys(side.child_issue, ['number', 'authority_revision'], 'machine_child_issue');
+  c8Keys(side.pull_request, ['number', 'authority_revision'], 'machine_pull_request');
+  c8Keys(side.parent_entry, ['key', 'authority_revision'], 'machine_parent_entry');
+  c8Keys(side.scope, ['paths', 'outputs', 'writes', 'source_only'], 'machine_scope');
+  c8Keys(side.projection, ['schema', 'child_key', 'parent_entry_marker_schema', 'relevant_parent_entry_revision', 'normalization'], 'machine_projection');
+  if (!Number.isInteger(side.child_issue.number) || !Number.isInteger(side.pull_request.number) ||
+      side.parent_entry.key !== '#329' || side.projection.schema !== 'task-authority-projection/v1' ||
+      side.projection.child_key !== '#329' || side.projection.parent_entry_marker_schema !== 'toolkit-authority-parent-entry/v1' ||
+      side.projection.normalization !== 'canonical-json-sorted-keys') throw new C8ContractError('MALFORMED_MACHINE_AUTHORITY', 'projection');
+  const scope = {
+    paths: c8List(side.scope.paths, 'machine.scope.paths'),
+    outputs: c8List(side.scope.outputs, 'machine.scope.outputs'),
+    writes: c8List(side.scope.writes, 'machine.scope.writes'),
+    source_only: side.scope.source_only
+  };
+  if (scope.source_only !== true) throw new C8ContractError('SCOPE_MISMATCH', 'machine.scope.source_only');
+  c8Text(side.repository.owner, 'machine.repository.owner'); c8Text(side.repository.name, 'machine.repository.name');
+  c8Text(side.child_issue.authority_revision, 'machine.child_issue.authority_revision');
+  c8Text(side.pull_request.authority_revision, 'machine.pull_request.authority_revision');
+  c8Text(side.parent_entry.authority_revision, 'machine.parent_entry.authority_revision');
+  c8Text(side.design_lock, 'machine.design_lock'); c8Text(side.run_identity, 'machine.run_identity');
+  c8Text(side.role, 'machine.role'); c8Text(side.child_authority_revision, 'machine.child_authority_revision');
+  c8Text(side.pr_authority_revision, 'machine.pr_authority_revision');
+  c8Text(side.relevant_parent_entry_revision, 'machine.parent_entry_revision');
+  const capabilities = c8List(side.capabilities, 'machine.capabilities');
+  c8ShaCheck(side.base_sha, 'base_sha'); c8ShaCheck(side.head_sha, 'head_sha'); c8ShaCheck(side.tree_sha, 'tree_sha');
+  if (!Array.isArray(side.blobs)) throw new C8ContractError('MALFORMED_MACHINE_AUTHORITY', 'blobs');
+  const blobs = side.blobs.map((blob) => {
+    c8Keys(blob, ['path', 'blob_sha'], 'machine_blob');
+    return { path: c8Text(blob.path, 'machine_blob.path'), blob_sha: c8ShaCheck(blob.blob_sha, 'machine_blob.blob_sha') };
+  }).sort((a, b) => a.path.localeCompare(b.path));
+  if (new Set(blobs.map((blob) => blob.path)).size !== blobs.length) throw new C8ContractError('MALFORMED_MACHINE_AUTHORITY', 'blob.path');
+  return {
+    schema: side.schema,
+    collector: { ...side.collector },
+    repository: { ...side.repository },
+    child_issue: { ...side.child_issue },
+    pull_request: { ...side.pull_request },
+    parent_entry: { ...side.parent_entry },
+    design_lock: side.design_lock,
+    run_identity: side.run_identity,
+    scope,
+    role: side.role,
+    capabilities,
+    child_authority_revision: side.child_authority_revision,
+    pr_authority_revision: side.pr_authority_revision,
+    relevant_parent_entry_revision: side.relevant_parent_entry_revision,
+    projection: { ...side.projection },
+    base_sha: side.base_sha,
+    head_sha: side.head_sha,
+    tree_sha: side.tree_sha,
+    blobs
+  };
+}
+function c8MachineAuthority(input = c8DefaultSnapshot()) {
+  const snapshot = c8NormalizeSnapshot(input && input.snapshot_digest ? c8Material(input) : input);
+  const common = {
+    schema: 'machine-authority/v1',
+    repository: c8Clone(snapshot.repository),
+    child_issue: c8Clone(snapshot.child_issue),
+    pull_request: c8Clone(snapshot.pull_request),
+    parent_entry: c8Clone(snapshot.relevant_parent_entry),
+    design_lock: snapshot.design_lock,
+    run_identity: snapshot.run_identity,
+    scope: c8Clone(snapshot.authorised_source_scope),
+    role: snapshot.role,
+    capabilities: [...snapshot.capabilities],
+    child_authority_revision: snapshot.child_authority_revision,
+    pr_authority_revision: snapshot.pr_authority_revision,
+    relevant_parent_entry_revision: snapshot.relevant_parent_entry_revision,
+    projection: c8Clone(snapshot.projection),
+    base_sha: snapshot.canonical_base_sha,
+    head_sha: snapshot.exact_remote_head_sha,
+    tree_sha: snapshot.exact_tree_sha,
+    blobs: c8Clone(snapshot.authorised_blobs)
+  };
+  return {
+    github: { ...c8Clone(common), collector: { source: 'github-api', collection_id: 'github-authority-record-v1' } },
+    local: { ...c8Clone(common), collector: { source: 'local-git', collection_id: 'local-authority-record-v1' } },
+    snapshot_input: c8Clone(snapshot)
+  };
+}
+function c8GitObjectType(objectId) {
+  try {
+    execFileSync('git', ['cat-file', '-e', objectId], { cwd: repoRoot, stdio: ['ignore', 'ignore', 'ignore'] });
+    return execFileSync('git', ['cat-file', '-t', objectId], { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    return null;
+  }
+}
+function c8ValidRepositoryPath(value) {
+  return typeof value === 'string' && value.length > 0 && !value.startsWith('/') && !value.includes('\\') &&
+    !/[\u0000-\u001f\u007f]/.test(value) && !value.includes(':') &&
+    value.split('/').every((part) => part && part !== '.' && part !== '..') &&
+    path.posix.normalize(value) === value;
+}
+function c8VerifyRealGitProjection(projection) {
+  if (c8GitObjectType(projection.base_sha) !== 'commit' || c8GitObjectType(projection.head_sha) !== 'commit') {
+    return { ok: false, reason: 'GIT_COMMIT_INVALID', field: 'head_sha' };
+  }
+  const treeType = c8GitObjectType(projection.tree_sha);
+  if (!treeType) return { ok: false, reason: 'GIT_TREE_INVALID', field: 'tree_sha' };
+  if (treeType !== 'tree') return { ok: false, reason: 'GIT_TREE_TYPE_INVALID', field: 'tree_sha' };
+  let expectedTree;
+  try { expectedTree = git('rev-parse', projection.head_sha + '^{tree}'); } catch { return { ok: false, reason: 'GIT_TREE_MISMATCH', field: 'tree_sha' }; }
+  if (expectedTree !== projection.tree_sha) return { ok: false, reason: 'GIT_TREE_MISMATCH', field: 'tree_sha' };
+  for (const blob of projection.blobs) {
+    if (!c8ValidRepositoryPath(blob.path)) return { ok: false, reason: 'GIT_PATH_INVALID', field: 'blob.path' };
+    const blobType = c8GitObjectType(blob.blob_sha);
+    if (!blobType) return { ok: false, reason: 'GIT_BLOB_INVALID', field: 'blob.blob_sha' };
+    if (blobType !== 'blob') return { ok: false, reason: 'GIT_BLOB_TYPE_INVALID', field: 'blob.blob_sha' };
+    let entries;
+    try {
+      entries = execFileSync('git', ['ls-tree', '-z', projection.tree_sha, '--', blob.path], { cwd: repoRoot, encoding: 'buffer', stdio: ['ignore', 'pipe', 'ignore'] }).toString('utf8').split('\0').filter(Boolean);
+    } catch {
+      entries = [];
+    }
+    if (entries.length === 0) return { ok: false, reason: 'GIT_PATH_MISSING', field: 'blob.path' };
+    const match = entries.map((entry) => entry.match(/^\d+ (\w+) ([0-9a-f]{40})\t([\s\S]*)$/)).find(Boolean);
+    if (!match) return { ok: false, reason: 'GIT_PATH_BINDING_MISMATCH', field: 'blob.path' };
+    if (match[1] !== 'blob' || match[3] !== blob.path || match[2] !== blob.blob_sha) return { ok: false, reason: 'GIT_PATH_BINDING_MISMATCH', field: 'blob.path' };
+  }
+  return { ok: true };
+}
 function c8CollectMachine(machine) {
-  if (!machine || !machine.github || !machine.local) throw new C8ContractError('PRE_DISPATCH_TOOLING_FAILURE', 'machine');
-  const fields = ['repository', 'child_issue', 'pull_request', 'design_lock', 'scope', 'role', 'capabilities', 'child_authority_revision', 'pr_authority_revision', 'relevant_parent_entry_revision', 'projection', 'base_sha', 'head_sha', 'tree_sha', 'blobs']; for (const side of [machine.github, machine.local]) { c8Keys(side, fields, 'machine'); c8Keys(side.repository, ['owner', 'name'], 'machine_repository'); c8Keys(side.child_issue, ['number', 'authority_revision'], 'machine_child_issue'); c8Keys(side.pull_request, ['number', 'authority_revision'], 'machine_pull_request'); c8Keys(side.scope, ['paths', 'outputs', 'writes', 'source_only'], 'machine_scope'); c8ShaCheck(side.base_sha, 'base_sha'); c8ShaCheck(side.head_sha, 'head_sha'); c8ShaCheck(side.tree_sha, 'tree_sha'); if (!Array.isArray(side.blobs)) throw new C8ContractError('BLOB_MOVED', 'blobs'); side.blobs.forEach((blob) => { c8Keys(blob, ['path', 'blob_sha'], 'machine_blob'); c8ShaCheck(blob.blob_sha, 'blob_sha'); }); }
-  for (const [field, reason] of [['repository', 'REPOSITORY_MOVED'], ['child_issue', 'CHILD_AUTHORITY_MOVED'], ['pull_request', 'PR_AUTHORITY_MOVED'], ['design_lock', 'DESIGN_LOCK_MISMATCH'], ['scope', 'SCOPE_MISMATCH'], ['role', 'ROLE_MISMATCH'], ['capabilities', 'SCOPE_MISMATCH'], ['child_authority_revision', 'CHILD_AUTHORITY_MOVED'], ['pr_authority_revision', 'PR_AUTHORITY_MOVED'], ['relevant_parent_entry_revision', 'PARENT_ENTRY_MOVED'], ['projection', 'PARENT_ENTRY_MOVED'], ['base_sha', 'BASE_MOVED'], ['head_sha', 'HEAD_MOVED'], ['tree_sha', 'TREE_MOVED'], ['blobs', 'BLOB_MOVED']]) if (c8Json(machine.github[field]) !== c8Json(machine.local[field])) return { decision: 'MACHINE_AUTHORITY_REJECTED', reason, receipt: c8Receipt('machine-collection', reason, field, 'byte-for-byte authority', 'mismatch') };
-  const input = c8NormalizeSnapshot(machine.snapshot_input || c8DefaultSnapshot());
-  for (const [key, value, reason] of [['canonical_base_sha', machine.github.base_sha, 'BASE_MOVED'], ['exact_remote_head_sha', machine.github.head_sha, 'HEAD_MOVED'], ['exact_tree_sha', machine.github.tree_sha, 'TREE_MOVED']]) if (input[key] !== value) return { decision: 'MACHINE_AUTHORITY_REJECTED', reason, receipt: c8Receipt('machine-collection', reason, key, 'machine authority', 'mismatch') };
-  if (c8Json(input.authorised_blobs) !== c8Json(machine.github.blobs)) return { decision: 'MACHINE_AUTHORITY_REJECTED', reason: 'BLOB_MOVED', receipt: c8Receipt('machine-collection', 'BLOB_MOVED', 'blobs', 'machine authority', 'mismatch') };
-  return { decision: 'MACHINE_AUTHORITY_COLLECTED', authority: { github: machine.github, local: machine.local }, snapshot_input: input, bytes: c8Json({ github: machine.github, local: machine.local }) };
+  const reject = (reason, field = 'machine', observed = 'mismatch') => ({
+    decision: 'MACHINE_AUTHORITY_REJECTED',
+    reason,
+    receipt: c8Receipt('machine-collection', reason, field, 'complete independent authority', observed)
+  });
+  try {
+    if (!machine || !machine.github || !machine.local) return reject('MALFORMED_MACHINE_AUTHORITY');
+    const github = c8MachineSideNormalize(machine.github, 'github-api');
+    const local = c8MachineSideNormalize(machine.local, 'local-git');
+    for (const [field, reason] of [
+      ['repository', 'REPOSITORY_MOVED'], ['child_issue', 'CHILD_AUTHORITY_MOVED'], ['pull_request', 'PR_AUTHORITY_MOVED'],
+      ['parent_entry', 'PARENT_ENTRY_MOVED'], ['design_lock', 'DESIGN_LOCK_MISMATCH'], ['run_identity', 'RUN_IDENTITY_MISMATCH'],
+      ['scope', 'SCOPE_MISMATCH'], ['role', 'ROLE_MISMATCH'], ['capabilities', 'CAPABILITY_MISMATCH'],
+      ['child_authority_revision', 'CHILD_AUTHORITY_MOVED'], ['pr_authority_revision', 'PR_AUTHORITY_MOVED'],
+      ['relevant_parent_entry_revision', 'PARENT_ENTRY_MOVED'], ['projection', 'PARENT_ENTRY_MOVED'],
+      ['base_sha', 'BASE_MOVED'], ['head_sha', 'HEAD_MOVED'], ['tree_sha', 'TREE_MOVED'], ['blobs', 'BLOB_MOVED']
+    ]) {
+      if (c8Json(github[field]) !== c8Json(local[field])) return reject(reason, field);
+    }
+    const gitResult = c8VerifyRealGitProjection(github);
+    if (!gitResult.ok) return reject(gitResult.reason, gitResult.field, 'unresolved');
+    const snapshotInput = {
+      schema: c8Schemas.snapshot,
+      repository: github.repository,
+      child_issue: github.child_issue,
+      pull_request: github.pull_request,
+      relevant_parent_entry: github.parent_entry,
+      design_lock: github.design_lock,
+      run_identity: github.run_identity,
+      canonical_base_sha: github.base_sha,
+      exact_remote_head_sha: github.head_sha,
+      exact_tree_sha: github.tree_sha,
+      authorised_blobs: github.blobs,
+      authorised_source_scope: github.scope,
+      role: github.role,
+      capabilities: github.capabilities,
+      child_authority_revision: github.child_authority_revision,
+      pr_authority_revision: github.pr_authority_revision,
+      relevant_parent_entry_revision: github.relevant_parent_entry_revision,
+      projection: github.projection
+    };
+    const snapshot = c8Snapshot(snapshotInput);
+    return {
+      decision: 'MACHINE_AUTHORITY_COLLECTED',
+      authority: { github: machine.github, local: machine.local },
+      snapshot,
+      snapshot_input: c8Material(snapshot),
+      bytes: c8Json({ github: machine.github, local: machine.local })
+    };
+  } catch (error) {
+    return reject(error.reason === 'MALFORMED_MACHINE_AUTHORITY' ? error.reason : 'MALFORMED_MACHINE_AUTHORITY', error.field || 'machine');
+  }
 }
 
 const c8ManifestStart = '<!-- toolkit-authority-manifest/v1 -->';
 const c8ManifestStop = '<!-- /toolkit-authority-manifest/v1 -->';
 function c8Manifest(snapshot, options = {}) {
   const source = c8Snapshot(snapshot);
-  return { schema: c8Schemas.manifest, snapshot_digest: source.snapshot_digest, snapshot: c8Material(source), run_identity: options.run_identity || '2026-08-03-toolkit-auto-code-assurance-enforcement-amendment-g3-043', role: options.role || source.role, capabilities: c8List(options.capabilities || source.capabilities, 'manifest.capabilities') };
+  return { schema: c8Schemas.manifest, snapshot_digest: source.snapshot_digest, snapshot: c8Material(source), run_identity: options.run_identity || source.run_identity, role: options.role || source.role, capabilities: c8List(options.capabilities || source.capabilities, 'manifest.capabilities') };
 }
 function c8StrictJson(text) {
   if (typeof text !== 'string') throw new C8ContractError('MALFORMED_MANIFEST', 'json');
@@ -3336,8 +3880,11 @@ function c8ManifestNormalize(manifest) {
   if (manifest.schema !== c8Schemas.manifest || typeof manifest.snapshot_digest !== 'string' || !c8Digest.test(manifest.snapshot_digest)) throw new C8ContractError('MALFORMED_MANIFEST', 'schema');
   const snapshot = c8Snapshot(manifest.snapshot);
   if (snapshot.snapshot_digest !== manifest.snapshot_digest) throw new C8ContractError('SNAPSHOT_DIGEST_MISMATCH', 'snapshot_digest');
-  if (manifest.role !== snapshot.role || c8Json(manifest.capabilities) !== c8Json(snapshot.capabilities)) throw new C8ContractError('MANIFEST_AUTHORITY_MISMATCH', 'role_or_capabilities');
-  return { schema: c8Schemas.manifest, snapshot_digest: manifest.snapshot_digest, snapshot: c8Material(snapshot), run_identity: c8Text(manifest.run_identity, 'run_identity'), role: c8Text(manifest.role, 'role'), capabilities: c8List(manifest.capabilities, 'manifest.capabilities') };
+  const runIdentity = c8Text(manifest.run_identity, 'run_identity');
+  const role = c8Text(manifest.role, 'role');
+  const capabilities = c8List(manifest.capabilities, 'manifest.capabilities');
+  if (runIdentity !== snapshot.run_identity || role !== snapshot.role || c8Json(capabilities) !== c8Json(snapshot.capabilities)) throw new C8ContractError('MANIFEST_AUTHORITY_MISMATCH', 'run_role_or_capabilities');
+  return { schema: c8Schemas.manifest, snapshot_digest: manifest.snapshot_digest, snapshot: c8Material(snapshot), run_identity: runIdentity, role, capabilities };
 }
 function c8ManifestRender(manifest, channel = 'block') {
   const canonical = c8Json(c8ManifestNormalize(manifest));
@@ -3363,59 +3910,175 @@ const c8LeaseTransitions = Object.freeze({ DRAFT: ['SEALED'], SEALED: ['DISPATCH
 function c8LeaseBody(lease) { const body = { ...lease }; delete body.lease_digest; return body; }
 function c8LeaseCreate(snapshot, options = {}) {
   const source = c8Snapshot(snapshot);
-  const lease = { schema: c8Schemas.lease, lease_id: options.lease_id || 'lease-043-1', snapshot_digest: source.snapshot_digest, run_identity: options.run_identity || '2026-08-03-toolkit-auto-code-assurance-enforcement-amendment-g3-043', role: options.role || source.role, capabilities: c8List(options.capabilities || source.capabilities, 'lease.capabilities'), issued_at: options.issued_at || '2026-08-04T00:00:00.000Z', expires_at: options.expires_at || '2026-08-04T01:00:00.000Z', lifecycle: 'DRAFT', consumed: false, use_count: 0 };
+  const lease = {
+    schema: c8Schemas.lease,
+    lease_id: options.lease_id || 'lease-043-1',
+    snapshot_digest: source.snapshot_digest,
+    repository: c8Clone(source.repository),
+    pull_request: c8Clone(source.pull_request),
+    exact_head: source.exact_remote_head_sha,
+    run_identity: options.run_identity || source.run_identity,
+    role: options.role || source.role,
+    capabilities: c8List(options.capabilities || source.capabilities, 'lease.capabilities'),
+    issued_at: options.issued_at || '2026-08-04T00:00:00.000Z',
+    expires_at: options.expires_at || '2026-08-04T01:00:00.000Z',
+    lifecycle: 'DRAFT',
+    consumed: false,
+    use_count: 0,
+    sealed_at: null,
+    dispatched_at: null,
+    admitted_at: null,
+    consumed_at: null
+  };
   c8Text(lease.lease_id, 'lease_id'); if (Date.parse(lease.expires_at) <= Date.parse(lease.issued_at)) throw new C8ContractError('LEASE_INVALID', 'expiry');
   lease.lease_digest = c8DigestBytes(c8Json(c8LeaseBody(lease))); return c8Freeze(lease);
 }
-function c8LeaseTransition(lease, next, at = lease.issued_at) {
+function c8LeaseTimestamp(value, field) {
+  const timestamp = typeof value === 'number' ? value : Date.parse(value);
+  if (!Number.isFinite(timestamp)) throw new C8ContractError('LEASE_TIME_INVALID', field);
+  return timestamp;
+}
+function c8LeaseAuthorityKey(lease) {
+  return c8Json({ repository: lease.repository, pull_request: lease.pull_request, exact_head: lease.exact_head, snapshot_digest: lease.snapshot_digest });
+}
+function c8LeaseBindingMatches(lease, binding) {
+  return !!binding && c8Json({
+    snapshot_digest: binding.snapshot_digest,
+    repository: binding.repository,
+    pull_request: binding.pull_request,
+    exact_head: binding.exact_head,
+    run_identity: binding.run_identity,
+    role: binding.role,
+    capabilities: binding.capabilities
+  }) === c8Json({
+    snapshot_digest: lease.snapshot_digest,
+    repository: lease.repository,
+    pull_request: lease.pull_request,
+    exact_head: lease.exact_head,
+    run_identity: lease.run_identity,
+    role: lease.role,
+    capabilities: lease.capabilities
+  });
+}
+function c8LeaseTransition(lease, next, at) {
   if (!lease || lease.schema !== c8Schemas.lease) throw new C8ContractError('LEASE_INVALID', 'schema');
   if (lease.lease_digest !== c8DigestBytes(c8Json(c8LeaseBody(lease)))) throw new C8ContractError('LEASE_DIGEST_MISMATCH', 'lease_digest');
   if (lease.consumed) throw new C8ContractError('LEASE_ALREADY_CONSUMED', 'consumed');
   if (!c8LeaseTransitions[lease.lifecycle] || !c8LeaseTransitions[lease.lifecycle].includes(next)) throw new C8ContractError('LEASE_INVALID', 'lifecycle');
-  if (Date.parse(at) >= Date.parse(lease.expires_at)) throw new C8ContractError('LEASE_EXPIRED', 'expires_at');
-  const out = { ...lease, lifecycle: next, consumed: next === 'COMPLETED', use_count: next === 'COMPLETED' ? lease.use_count + 1 : lease.use_count };
+  if (next === 'COMPLETED' && at === undefined) throw new C8ContractError('CONSUMPTION_TIME_REQUIRED', 'consumption_time');
+  const effectiveAt = at === undefined ? lease.issued_at : at;
+  const issuedAt = c8LeaseTimestamp(lease.issued_at, 'issued_at');
+  const expiresAt = c8LeaseTimestamp(lease.expires_at, 'expires_at');
+  const transitionAt = c8LeaseTimestamp(effectiveAt, next === 'COMPLETED' ? 'consumption_time' : 'transition_time');
+  if (expiresAt <= issuedAt || transitionAt < issuedAt) throw new C8ContractError('LEASE_TIME_ORDER_INVALID', 'timestamps');
+  if (transitionAt >= expiresAt) throw new C8ContractError('LEASE_EXPIRED', 'expires_at');
+  const previousAt = next === 'SEALED' ? lease.issued_at :
+    next === 'DISPATCHED' ? lease.sealed_at :
+      next === 'ADMITTED' ? lease.dispatched_at : lease.admitted_at;
+  if (previousAt !== null && previousAt !== undefined && transitionAt < c8LeaseTimestamp(previousAt, 'prior_transition')) {
+    throw new C8ContractError('LEASE_TIME_ORDER_INVALID', 'timestamps');
+  }
+  const out = {
+    ...lease,
+    lifecycle: next,
+    consumed: next === 'COMPLETED',
+    use_count: next === 'COMPLETED' ? lease.use_count + 1 : lease.use_count,
+    sealed_at: next === 'SEALED' ? effectiveAt : lease.sealed_at,
+    dispatched_at: next === 'DISPATCHED' ? effectiveAt : lease.dispatched_at,
+    admitted_at: next === 'ADMITTED' ? effectiveAt : lease.admitted_at,
+    consumed_at: next === 'COMPLETED' ? effectiveAt : lease.consumed_at
+  };
   out.lease_digest = c8DigestBytes(c8Json(c8LeaseBody(out))); return c8Freeze(out);
 }
 class C8LeaseRegistry {
-  constructor() { this.records = new Map(); }
+  constructor(storePath = null) { this.records = new Map(); this.storePath = storePath; }
   register(lease) {
+    if (!lease || !lease.lease_id) return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-registration', 'LEASE_INVALID', 'lease_id') };
+    if (lease.lease_digest !== c8DigestBytes(c8Json(c8LeaseBody(lease)))) {
+      this.records.set(lease.lease_id, lease);
+      return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-registration', 'LEASE_DIGEST_MISMATCH', 'lease_digest', 'canonical lease digest', 'mismatch', null, lease) };
+    }
     if (this.records.has(lease.lease_id)) return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-registration', 'DUPLICATE_DISPATCH', 'lease_id', 'new lease id', 'duplicate', null, lease) };
-    for (const current of this.records.values()) if (current.snapshot_digest === lease.snapshot_digest && !['COMPLETED', 'EXPIRED'].includes(current.lifecycle)) return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-registration', 'CONFLICTING_ACTIVE_LEASE', 'snapshot_digest', 'one active lease', 'conflict', null, lease) };
+    if (lease.lifecycle !== 'DRAFT' || lease.consumed !== false || lease.use_count !== 0) return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-registration', 'LEASE_INVALID', 'lifecycle', 'DRAFT lease', 'invalid', null, lease) };
+    for (const current of this.records.values()) if (c8LeaseAuthorityKey(current) === c8LeaseAuthorityKey(lease) && !['COMPLETED', 'EXPIRED'].includes(current.lifecycle)) return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-registration', 'CONFLICTING_ACTIVE_LEASE', 'snapshot_digest', 'one active lease', 'conflict', null, lease) };
     this.records.set(lease.lease_id, lease); return { decision: 'LEASE_REGISTERED', lease };
   }
   transition(id, next, at) {
     const current = this.records.get(id); if (!current) return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-transition', 'LEASE_INVALID', 'lease_id') };
-    try { const lease = c8LeaseTransition(current, next, at || current.issued_at); this.records.set(id, lease); return { decision: 'LEASE_' + next, lease }; }
+    try { const lease = c8LeaseTransition(current, next, at); this.records.set(id, lease); return { decision: 'LEASE_' + next, lease }; }
     catch (error) { return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-transition', error.reason || 'LEASE_INVALID', error.field || 'lease', 'valid lifecycle', 'rejected', null, current) }; }
   }
   expire(id, at) {
     const current = this.records.get(id); if (!current) return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-expiry', 'LEASE_INVALID', 'lease_id') };
     if (current.consumed) return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-expiry', 'LEASE_ALREADY_CONSUMED', 'consumed', 'unconsumed lease', 'consumed', null, current) };
-    if (Date.parse(at) < Date.parse(current.expires_at)) return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-expiry', 'LEASE_INVALID', 'expires_at', 'expiry reached', 'early', null, current) };
-    const lease = c8Freeze({ ...current, lifecycle: 'EXPIRED', lease_digest: c8DigestBytes(c8Json(c8LeaseBody({ ...current, lifecycle: 'EXPIRED' }))) });
+    const expiryCheck = c8LeaseTimestamp(at, 'expiry_time');
+    if (expiryCheck < c8LeaseTimestamp(current.expires_at, 'expires_at')) return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-expiry', 'LEASE_INVALID', 'expires_at', 'expiry reached', 'early', null, current) };
+    const expired = { ...current, lifecycle: 'EXPIRED', expired_at: at };
+    const lease = c8Freeze({ ...expired, lease_digest: c8DigestBytes(c8Json(c8LeaseBody(expired))) });
     this.records.set(id, lease); return { decision: 'LEASE_EXPIRED', lease };
   }
   consume(id, manifest, at) {
     const current = this.records.get(id); if (!current) return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-consume', 'LEASE_INVALID', 'lease_id') };
     if (current.consumed) return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-consume', 'LEASE_ALREADY_CONSUMED', 'consumed', 'unconsumed lease', 'consumed', null, current) };
-    if (!manifest || manifest.snapshot_digest !== current.snapshot_digest) return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-consume', 'SNAPSHOT_DIGEST_MISMATCH', 'snapshot_digest', 'matching snapshot', 'mismatch', null, current) };
-    return this.transition(id, 'COMPLETED', at || current.issued_at);
+    if (current.lease_digest !== c8DigestBytes(c8Json(c8LeaseBody(current)))) return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-consume', 'LEASE_DIGEST_MISMATCH', 'lease_digest', 'canonical lease digest', 'mismatch', null, current) };
+    if (at === undefined) return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-consume', 'CONSUMPTION_TIME_REQUIRED', 'consumption_time', 'trusted current operation time', 'missing', null, current) };
+    let consumptionTime;
+    try { consumptionTime = c8LeaseTimestamp(at, 'consumption_time'); } catch (error) { return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-consume', error.reason, error.field, 'finite current operation time', 'invalid', null, current) }; }
+    if (consumptionTime >= c8LeaseTimestamp(current.expires_at, 'expires_at')) return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-consume', 'LEASE_EXPIRED', 'expires_at', 'consumption before expiry', 'expired', null, current) };
+    if (current.lifecycle !== 'ADMITTED') return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-consume', 'LEASE_NOT_ADMITTED', 'lifecycle', 'ADMITTED lease', current.lifecycle, null, current) };
+    if (!c8LeaseBindingMatches(current, manifest)) return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-consume', 'LEASE_BINDING_MISMATCH', 'authority_binding', 'exact snapshot/manifest binding', 'mismatch', null, current) };
+    return this.transition(id, 'COMPLETED', at);
   }
 }
 function c8PreDispatch(input = {}) {
+  const reject = (reason, field = 'tooling', snapshot = null, lease = null) => ({
+    decision: 'PRE_DISPATCH_REJECTED',
+    reason,
+    evaluation_candidate_created: false,
+    lease_consumed: false,
+    mutation_performed: false,
+    receipt: c8Receipt('pre-dispatch', reason, field, 'canonical-authority', 'rejected', snapshot, lease)
+  });
   try {
-    if (input.toolingFailure === true) throw new C8ContractError('PRE_DISPATCH_TOOLING_FAILURE', 'tooling');
-    const collected = c8CollectMachine(input.machine); if (collected.decision !== 'MACHINE_AUTHORITY_COLLECTED') return { ...collected, evaluation_candidate_created: false, lease_consumed: false };
-    const snapshot = c8Snapshot(collected.snapshot_input);
+    if (input.toolingFailure === true) return reject('PRE_DISPATCH_TOOLING_FAILURE', 'tooling');
+    const collected = c8CollectMachine(input.machine);
+    if (collected.decision !== 'MACHINE_AUTHORITY_COLLECTED') return { ...collected, reason: collected.reason || collected.receipt?.reason || 'PRE_DISPATCH_TOOLING_FAILURE', evaluation_candidate_created: false, lease_consumed: false, mutation_performed: false };
+    const snapshot = c8Snapshot(collected.snapshot);
     if (!input.snapshot || input.snapshot.snapshot_digest !== snapshot.snapshot_digest) throw new C8ContractError('SNAPSHOT_DIGEST_MISMATCH', 'snapshot');
-    const extracted = c8ManifestExtract(input.renderedManifest); if (extracted.manifest.snapshot_digest !== snapshot.snapshot_digest) throw new C8ContractError('SNAPSHOT_DIGEST_MISMATCH', 'manifest.snapshot_digest');
-    if (!input.lease || input.lease.schema !== c8Schemas.lease || input.lease.consumed === true || input.lease.snapshot_digest !== snapshot.snapshot_digest) throw new C8ContractError('LEASE_INVALID', 'lease');
+    const extracted = c8ManifestExtract(input.renderedManifest);
+    if (extracted.manifest.snapshot_digest !== snapshot.snapshot_digest) throw new C8ContractError('SNAPSHOT_DIGEST_MISMATCH', 'manifest.snapshot_digest');
+    const manifest = extracted.manifest;
+    if (!input.lease) throw new C8ContractError('LEASE_REQUIRED', 'lease');
+    if (input.lease.schema !== c8Schemas.lease || input.lease.consumed === true || input.lease.snapshot_digest !== snapshot.snapshot_digest) throw new C8ContractError('LEASE_INVALID', 'lease');
+    if (!input.leaseRegistry || !(input.leaseRegistry.records instanceof Map)) throw new C8ContractError('LEASE_NOT_REGISTERED', 'lease_registry');
+    const registeredLease = input.leaseRegistry.records.get(input.lease.lease_id);
+    if (!registeredLease) throw new C8ContractError('LEASE_NOT_REGISTERED', 'lease_id');
+    if (input.current_operation_time === undefined) throw new C8ContractError('CONSUMPTION_TIME_REQUIRED', 'consumption_time');
+    const currentOperationTime = c8LeaseTimestamp(input.current_operation_time, 'consumption_time');
+    if (currentOperationTime >= c8LeaseTimestamp(registeredLease.expires_at, 'expires_at')) throw new C8ContractError('LEASE_EXPIRED', 'expires_at');
+    if (input.lease.lease_digest !== c8DigestBytes(c8Json(c8LeaseBody(input.lease)))) throw new C8ContractError('LEASE_DIGEST_MISMATCH', 'lease_digest');
+    if (registeredLease.lease_digest !== input.lease.lease_digest) throw new C8ContractError('LEASE_DIGEST_MISMATCH', 'lease_digest');
+    if (registeredLease.lifecycle !== 'ADMITTED') throw new C8ContractError('LEASE_NOT_ADMITTED', 'lifecycle');
+    const binding = {
+      snapshot_digest: snapshot.snapshot_digest,
+      repository: snapshot.repository,
+      pull_request: snapshot.pull_request,
+      exact_head: snapshot.exact_remote_head_sha,
+      run_identity: snapshot.run_identity,
+      role: manifest.role,
+      capabilities: manifest.capabilities
+    };
+    if (!c8LeaseBindingMatches(registeredLease, binding)) throw new C8ContractError('LEASE_BINDING_MISMATCH', 'authority_binding');
     if (!input.finalReread || typeof input.finalReread !== 'object' || !input.finalReread.machine) throw new C8ContractError('PRE_DISPATCH_TOOLING_FAILURE', 'final_reread');
-    const finalCollected = c8CollectMachine(input.finalReread.machine); if (finalCollected.decision !== 'MACHINE_AUTHORITY_COLLECTED') return { ...finalCollected, evaluation_candidate_created: false, lease_consumed: false };
-    const finalSnapshot = c8Snapshot(finalCollected.snapshot_input); if (finalSnapshot.snapshot_digest !== snapshot.snapshot_digest) throw new C8ContractError('AUTHORITY_MOVED', 'final_reread');
-    return { decision: 'EVALUATION_CANDIDATE_CREATED', evaluation_candidate_created: true, lease_consumed: false, mutation_performed: false, snapshot_identity: snapshot.snapshot_digest, lease_identity: input.lease.lease_id };
+    const finalCollected = c8CollectMachine(input.finalReread.machine);
+    if (finalCollected.decision !== 'MACHINE_AUTHORITY_COLLECTED') return { ...finalCollected, reason: finalCollected.reason || finalCollected.receipt?.reason || 'PRE_DISPATCH_TOOLING_FAILURE', evaluation_candidate_created: false, lease_consumed: false, mutation_performed: false };
+    const finalSnapshot = c8Snapshot(finalCollected.snapshot);
+    if (finalSnapshot.snapshot_digest !== snapshot.snapshot_digest) throw new C8ContractError('AUTHORITY_MOVED', 'final_reread');
+    const consumed = input.leaseRegistry.consume(input.lease.lease_id, binding, input.current_operation_time);
+    if (consumed.decision !== 'LEASE_COMPLETED') throw new C8ContractError(consumed.receipt?.reason || 'LEASE_INVALID', consumed.receipt?.field || 'lease');
+    return { decision: 'EVALUATION_CANDIDATE_CREATED', evaluation_candidate_created: true, lease_consumed: true, mutation_performed: false, snapshot_identity: snapshot.snapshot_digest, lease_identity: input.lease.lease_id, lease: consumed.lease };
   } catch (error) {
-    return { decision: 'PRE_DISPATCH_REJECTED', evaluation_candidate_created: false, lease_consumed: false, receipt: c8Receipt('pre-dispatch', error.reason || 'PRE_DISPATCH_TOOLING_FAILURE', error.field || 'tooling', 'canonical-authority', 'rejected') };
+    return reject(error.reason || 'PRE_DISPATCH_TOOLING_FAILURE', error.field || 'tooling', input.snapshot || null, input.lease || null);
   }
 }
 function c8WorkerAdmission(input = {}) { const result = c8PreDispatch(input); return result.evaluation_candidate_created ? { ...result, worker_re_admitted: true, role: 'implementation/amendment worker' } : { ...result, worker_re_admitted: false }; }
@@ -3428,6 +4091,25 @@ function c8ClassifyOutput(input = {}) {
   if (classification === 'possible') return { ...c8SensitivityReceipt({ classification }), classification, continue: false, pause: true, redacted: true, reason: 'SENSITIVITY_POSSIBLE', rotation_disposition: 'not_applicable', containment_disposition: 'not_applicable', invalidate_unrelated: false, affected_path: affectedPath };
   return { ...c8SensitivityReceipt({ classification }), classification, continue: false, pause: true, redacted: true, reason: 'SECRET_EXPOSURE_DETECTED', rotation_disposition: input.credential ? 'required' : 'not_applicable', containment_disposition: input.credential ? 'not_applicable' : 'required', invalidate_unrelated: input.sharedExposureRisk === true, affected_path: affectedPath };
 }
+
+function c8AdmittedLeaseFixture(snapshot, overrides = {}) {
+  const machine = c8MachineAuthority(c8Material(snapshot));
+  const lease = c8LeaseCreate(snapshot, { lease_id: overrides.lease_id || 'lease-test-' + Date.now() });
+  const registry = new C8LeaseRegistry(overrides.lease_store_path);
+  registry.register(lease);
+  registry.transition(lease.lease_id, 'SEALED', '2026-08-04T00:00:05.000Z');
+  registry.transition(lease.lease_id, 'DISPATCHED', '2026-08-04T00:00:10.000Z');
+  registry.transition(lease.lease_id, 'ADMITTED', '2026-08-04T00:00:15.000Z');
+  return {
+    machine,
+    snapshot,
+    renderedManifest: c8ManifestRender(c8Manifest(snapshot)),
+    lease: registry.records.get(lease.lease_id),
+    leaseRegistry: registry,
+    finalReread: { machine: c8MachineAuthority(c8Material(snapshot)) },
+    current_operation_time: overrides.current_operation_time || '2026-08-04T00:00:30.000Z'
+  };
+}
 const c8SourceProhibitions = ['install', 'activate', 'schedule', 'Auto Review', 'automatic next-task pickup', 'Fast', 'delegation', 'spawn'];
 
 test('C7 finality is conjunctive, Web-only, and does not require routine Temporary Chat assurance', () => {
@@ -3439,7 +4121,9 @@ test('C7 missing predicates, contradictions, and exceptional reviewer boundary a
   const amended = c7FinalityDecision(evidence); assert.equal(amended.decision, 'FINALITY_BLOCKED'); assert.ok(amended.missing.includes('freshExactHeadG4Pass')); assert.ok(amended.contradictions.includes('G4_NOT_PASS'));
   assert.ok(c7FinalityDecision({ ...evidence, g4Verdict: 'PASS', completeTerminalPacket: false }).missing.includes('completeTerminalPacket'));
   assert.ok(c7FinalityDecision({ ...Object.fromEntries(c7FinalityPredicates.map((key) => [key, true])), g4Verdict: 'PASS', g4ExactHead: true, authorityClaims: [{ surface: 'manager', claim: 'merge authorized' }] }).contradictions.includes('MANAGER_FINALITY_CLAIM'));
-  assert.equal(c7ExceptionalReviewerAdmission({ explicitPreauthorised: true, beforeDispatch: true, freshIsolated: true, readOnly: true, nonAuthoritative: true, exactHead: true, category: 'critical_security_boundary' }).replacesWebFinality, false);
+  const grant = c7ExceptionalGrant();
+  const grantRegistry = new C8DurableAuthorityRegistry(grant.authority_store_path, 'exceptional-review');
+  assert.equal(c7ExceptionalReviewerAdmission(grant, c7ExceptionalGrantContext(), grantRegistry).replacesWebFinality, false);
 });
 test('C8 snapshot is deterministic, relevant, and requires full 40-character Git object identifiers', () => {
   const input = c8DefaultSnapshot(); const first = c8Snapshot(input); const second = c8Snapshot({ ...input, capabilities: [...input.capabilities].reverse() }); assert.equal(first.snapshot_digest, second.snapshot_digest); assert.equal(first.canonical_bytes, second.canonical_bytes);
@@ -3460,14 +4144,15 @@ test('C8 manifest render/extract round-trip is byte-exact and rejects alteration
 });
 test('C8 immutable leases enforce lifecycle, expiry, duplicates, conflicts, and consumption', () => {
   const snapshot = c8Snapshot(c8DefaultSnapshot()); const lease = c8LeaseCreate(snapshot, { lease_id: 'lease-c8-1' }); assert.equal(Object.isFrozen(lease), true); assert.equal(Object.isFrozen(lease.capabilities), true); assert.throws(() => { lease.lifecycle = 'COMPLETED'; }, TypeError);
-  const sealed = c8LeaseTransition(lease, 'SEALED'); const dispatched = c8LeaseTransition(sealed, 'DISPATCHED'); const admitted = c8LeaseTransition(dispatched, 'ADMITTED'); const completed = c8LeaseTransition(admitted, 'COMPLETED'); assert.equal(completed.consumed, true); assert.equal(completed.use_count, 1);
+  const sealed = c8LeaseTransition(lease, 'SEALED', '2026-08-04T00:00:05.000Z'); const dispatched = c8LeaseTransition(sealed, 'DISPATCHED', '2026-08-04T00:00:10.000Z'); const admitted = c8LeaseTransition(dispatched, 'ADMITTED', '2026-08-04T00:00:15.000Z'); const completed = c8LeaseTransition(admitted, 'COMPLETED', '2026-08-04T00:00:30.000Z'); assert.equal(completed.consumed, true); assert.equal(completed.use_count, 1);
   const registry = new C8LeaseRegistry(); assert.equal(registry.register(lease).decision, 'LEASE_REGISTERED'); assert.equal(registry.register(lease).receipt.reason, 'DUPLICATE_DISPATCH'); assert.equal(registry.register(c8LeaseCreate(snapshot, { lease_id: 'lease-c8-2' })).receipt.reason, 'CONFLICTING_ACTIVE_LEASE');
   const expired = c8LeaseCreate(snapshot, { lease_id: 'lease-expired', expires_at: '2026-08-04T00:01:00.000Z' }); const er = new C8LeaseRegistry(); er.register(expired); assert.equal(er.expire(expired.lease_id, '2026-08-04T00:02:00.000Z').decision, 'LEASE_EXPIRED'); assert.equal(er.transition(expired.lease_id, 'SEALED', '2026-08-04T00:02:00.000Z').receipt.reason, 'LEASE_INVALID');
   const consumed = new C8LeaseRegistry(); consumed.register(lease); consumed.records.set(lease.lease_id, completed); assert.equal(consumed.consume(lease.lease_id, { snapshot_digest: snapshot.snapshot_digest }).receipt.reason, 'LEASE_ALREADY_CONSUMED');
 });
 test('C8 pre-dispatch tooling failure creates no candidate and worker re-admission succeeds', () => {
-  const snapshot = c8Snapshot(c8DefaultSnapshot()); const machine = c8MachineAuthority(); const renderedManifest = c8ManifestRender(c8Manifest(snapshot)); const failed = c8PreDispatch({ toolingFailure: true }); assert.equal(failed.evaluation_candidate_created, false); assert.equal(failed.lease_consumed, false); assert.equal(failed.receipt.mutation_performed, false);
-  const lease = c8LeaseCreate(snapshot, { lease_id: 'pre-dispatch-success' }); const reread = { machine: c8MachineAuthority() }; const admitted = c8PreDispatch({ machine, snapshot, renderedManifest, lease, finalReread: reread }); assert.equal(admitted.decision, 'EVALUATION_CANDIDATE_CREATED'); assert.equal(c8WorkerAdmission({ machine, snapshot, renderedManifest, lease: c8LeaseCreate(snapshot, { lease_id: 'worker-success' }), finalReread: reread }).worker_re_admitted, true);
+  const snapshot = c8Snapshot(c8DefaultSnapshot()); const failed = c8PreDispatch({ toolingFailure: true }); assert.equal(failed.evaluation_candidate_created, false); assert.equal(failed.lease_consumed, false); assert.equal(failed.receipt.mutation_performed, false);
+  const admittedFixture = c8AdmittedLeaseFixture(snapshot, { lease_id: 'pre-dispatch-success' }); const admitted = c8PreDispatch(admittedFixture); assert.equal(admitted.decision, 'EVALUATION_CANDIDATE_CREATED');
+  const workerFixture = c8AdmittedLeaseFixture(snapshot, { lease_id: 'worker-success' }); assert.equal(c8WorkerAdmission(workerFixture).worker_re_admitted, true);
 });
 test('C8 sensitivity classification separates none, possible, credential rotation, and non-credential containment', () => {
   assert.equal(c8ClassifyOutput({ affectedPath: 'public-template' }).continue, true); const possible = c8ClassifyOutput({ secretLike: true, affectedPath: 'redacted-path' }); assert.equal(possible.reason, 'SENSITIVITY_POSSIBLE'); assert.equal(possible.pause, true);
@@ -3551,11 +4236,30 @@ function c8Snapshot(input) {
 }
 function c8Manifest(snapshot, options = {}) {
   const source = c8Snapshot(snapshot);
-  return { schema: c8Schemas.manifest, snapshot_digest: source.snapshot_digest, snapshot: c8Material(source), run_identity: options.run_identity || '2026-08-03-toolkit-auto-code-assurance-enforcement-amendment-g3-043', role: options.role || source.role, capabilities: c8List(options.capabilities || source.capabilities, 'manifest.capabilities') };
+  return { schema: c8Schemas.manifest, snapshot_digest: source.snapshot_digest, snapshot: c8Material(source), run_identity: options.run_identity || source.run_identity, role: options.role || source.role, capabilities: c8List(options.capabilities || source.capabilities, 'manifest.capabilities') };
 }
 function c8LeaseCreate(snapshot, options = {}) {
   const source = c8Snapshot(snapshot);
-  const lease = { schema: c8Schemas.lease, lease_id: options.lease_id || 'lease-043-1', snapshot_digest: source.snapshot_digest, run_identity: options.run_identity || '2026-08-03-toolkit-auto-code-assurance-enforcement-amendment-g3-043', role: options.role || source.role, capabilities: c8List(options.capabilities || source.capabilities, 'lease.capabilities'), issued_at: options.issued_at || '2026-08-04T00:00:00.000Z', expires_at: options.expires_at || '2026-08-04T01:00:00.000Z', lifecycle: 'DRAFT', consumed: false, use_count: 0 };
+  const lease = {
+    schema: c8Schemas.lease,
+    lease_id: options.lease_id || 'lease-043-1',
+    snapshot_digest: source.snapshot_digest,
+    repository: c8Clone(source.repository),
+    pull_request: c8Clone(source.pull_request),
+    exact_head: source.exact_remote_head_sha,
+    run_identity: options.run_identity || source.run_identity,
+    role: options.role || source.role,
+    capabilities: c8List(options.capabilities || source.capabilities, 'lease.capabilities'),
+    issued_at: options.issued_at || '2026-08-04T00:00:00.000Z',
+    expires_at: options.expires_at || '2026-08-04T01:00:00.000Z',
+    lifecycle: 'DRAFT',
+    consumed: false,
+    use_count: 0,
+    sealed_at: null,
+    dispatched_at: null,
+    admitted_at: null,
+    consumed_at: null
+  };
   c8Text(lease.lease_id, 'lease_id'); if (Date.parse(lease.expires_at) <= Date.parse(lease.issued_at)) throw new C8ContractError('LEASE_INVALID', 'expiry');
   lease.lease_digest = c8DigestBytes(c8Json(c8LeaseBody(lease))); return c8Freeze(lease);
 }
@@ -3570,10 +4274,49 @@ test('PRRT_kwDOSTHjGM6WPZco binds finality to a verified Web execution identity'
   assert.equal(result.webExecutionIdentityVerified, false);
 });
 
-test('PRRT_kwDOSTHjGM6WPZcq collects non-Git authority independently on both sides', () => {
+test('PRRT_kwDOSTHjGM6WPZcq collects complete non-Git authority independently on both sides', () => {
   const machine = c8MachineAuthority();
-  assert.ok(machine.github.repository && machine.local.repository);
-  assert.equal(c8CollectMachine(machine).decision, 'MACHINE_AUTHORITY_COLLECTED');
+  const required = ['repository', 'child_issue', 'pull_request', 'parent_entry', 'design_lock', 'run_identity', 'scope', 'role', 'capabilities', 'base_sha', 'head_sha', 'tree_sha', 'blobs'];
+  for (const field of required) {
+    assert.notEqual(machine.github[field], undefined, 'github ' + field);
+    assert.notEqual(machine.local[field], undefined, 'local ' + field);
+  }
+  const collected = c8CollectMachine({
+    ...machine,
+    snapshot_input: { ...machine.snapshot_input, role: 'caller-fabricated-role', capabilities: ['caller-fabricated-capability'] }
+  });
+  assert.equal(collected.decision, 'MACHINE_AUTHORITY_COLLECTED');
+  assert.equal(collected.snapshot.role, machine.github.role);
+  assert.deepEqual(collected.snapshot.capabilities, machine.github.capabilities);
+  for (const [field, reason] of [
+    ['repository', 'REPOSITORY_MOVED'],
+    ['child_issue', 'CHILD_AUTHORITY_MOVED'],
+    ['pull_request', 'PR_AUTHORITY_MOVED'],
+    ['parent_entry', 'PARENT_ENTRY_MOVED'],
+    ['design_lock', 'DESIGN_LOCK_MISMATCH'],
+    ['run_identity', 'RUN_IDENTITY_MISMATCH'],
+    ['scope', 'SCOPE_MISMATCH'],
+    ['role', 'ROLE_MISMATCH'],
+    ['capabilities', 'CAPABILITY_MISMATCH']
+  ]) {
+    const mismatch = c8MachineAuthority();
+    mismatch.local[field] = JSON.parse(JSON.stringify(mismatch.local[field]));
+    if (field === 'capabilities') mismatch.local[field] = mismatch.local[field].concat('expanded');
+    else if (field === 'scope') mismatch.local[field].paths = mismatch.local[field].paths.concat('fabricated');
+    else if (field === 'repository') mismatch.local[field].name = 'fabricated-repository';
+    else if (field === 'child_issue') mismatch.local[field].authority_revision = 'child-fabricated';
+    else if (field === 'pull_request') mismatch.local[field].authority_revision = 'pr-fabricated';
+    else if (field === 'parent_entry') mismatch.local[field].authority_revision = 'parent-fabricated';
+    else mismatch.local[field] = 'fabricated-' + field;
+    const rejected = c8CollectMachine(mismatch);
+    assert.equal(rejected.decision, 'MACHINE_AUTHORITY_REJECTED', field);
+    assert.equal(rejected.reason, reason, field);
+    assert.equal(rejected.receipt.mutation_performed, false, field);
+    assert.equal(rejected.receipt.evaluation_candidate_created, false, field);
+  }
+  const empty = c8CollectMachine({ github: {}, local: {} });
+  assert.equal(empty.decision, 'MACHINE_AUTHORITY_REJECTED');
+  assert.equal(empty.reason, 'MALFORMED_MACHINE_AUTHORITY');
 });
 
 test('PRRT_kwDOSTHjGM6WPZdE uses locale-independent blob ordering', () => {
@@ -3588,8 +4331,30 @@ test('PRRT_kwDOSTHjGM6WPZdI rejects a parent entry nested inside a sibling marke
 
 test('PRRT_kwDOSTHjGM6WPZcv requires an admitted lease before creating a candidate', () => {
   const snapshot = c8Snapshot(c8DefaultSnapshot());
-  const input = { machine: c8MachineAuthority(), snapshot, renderedManifest: c8ManifestRender(c8Manifest(snapshot)), finalReread: true };
-  assert.equal(c8PreDispatch(input).evaluation_candidate_created, false);
+  const admitted = c8AdmittedLeaseFixture(snapshot, { lease_id: 'lease-pre-dispatch-positive' });
+  const noLease = c8PreDispatch({ ...admitted, lease: undefined });
+  assert.equal(noLease.reason, 'LEASE_REQUIRED');
+  assert.equal(noLease.evaluation_candidate_created, false);
+  const draftLease = c8LeaseCreate(snapshot, { lease_id: 'lease-draft-only' });
+  const draftRegistry = new C8LeaseRegistry();
+  draftRegistry.register(draftLease);
+  const draft = c8PreDispatch({ ...admitted, lease: draftLease, leaseRegistry: draftRegistry });
+  assert.equal(draft.reason, 'LEASE_NOT_ADMITTED');
+  assert.equal(draft.evaluation_candidate_created, false);
+  const unregistered = c8PreDispatch({ ...admitted, lease: c8LeaseCreate(snapshot, { lease_id: 'lease-unregistered' }) });
+  assert.equal(unregistered.reason, 'LEASE_NOT_REGISTERED');
+  assert.equal(unregistered.evaluation_candidate_created, false);
+  const tampered = c8PreDispatch({ ...admitted, lease: { ...admitted.lease, role: 'tampered-role' } });
+  assert.equal(tampered.reason, 'LEASE_DIGEST_MISMATCH');
+  assert.equal(tampered.evaluation_candidate_created, false);
+  const conflict = c8LeaseCreate(snapshot, { lease_id: 'lease-conflict' });
+  assert.equal(admitted.leaseRegistry.register(conflict).receipt.reason, 'CONFLICTING_ACTIVE_LEASE');
+  const accepted = c8AdmittedLeaseFixture(snapshot, { lease_id: 'lease-pre-dispatch-accepted' });
+  const result = c8PreDispatch(accepted);
+  assert.equal(result.decision, 'EVALUATION_CANDIDATE_CREATED');
+  assert.equal(result.evaluation_candidate_created, true);
+  assert.equal(accepted.leaseRegistry.records.get(accepted.lease.lease_id).lifecycle, 'COMPLETED');
+  assert.equal(accepted.leaseRegistry.records.get(accepted.lease.lease_id).consumed, true);
 });
 
 test('PRRT_kwDOSTHjGM6WPZcx evaluates lease expiry at consumption time', () => {
@@ -3597,13 +4362,35 @@ test('PRRT_kwDOSTHjGM6WPZcx evaluates lease expiry at consumption time', () => {
   const lease = c8LeaseCreate(snapshot, { lease_id: 'expiry-consume', issued_at: '2026-08-04T00:00:00.000Z', expires_at: '2026-08-04T00:01:00.000Z' });
   const registry = new C8LeaseRegistry(); registry.register(lease); registry.records.set(lease.lease_id, c8LeaseTransition(c8LeaseTransition(lease, 'SEALED'), 'DISPATCHED'));
   registry.records.set(lease.lease_id, c8LeaseTransition(registry.records.get(lease.lease_id), 'ADMITTED'));
-  assert.equal(registry.consume(lease.lease_id, { snapshot_digest: snapshot.snapshot_digest }, '2026-08-04T00:02:00.000Z').receipt.reason, 'LEASE_EXPIRED');
+  assert.equal(registry.consume(lease.lease_id, { snapshot_digest: snapshot.snapshot_digest }).receipt.reason, 'CONSUMPTION_TIME_REQUIRED');
+  const exactExpiry = c8AdmittedLeaseFixture(snapshot, { lease_id: 'expiry-exact' });
+  exactExpiry.leaseRegistry.records.set(exactExpiry.lease.lease_id, { ...exactExpiry.lease, expires_at: '2026-08-04T00:00:30.000Z', lease_digest: c8DigestBytes(c8Json({ ...c8LeaseBody(exactExpiry.lease), expires_at: '2026-08-04T00:00:30.000Z' })) });
+  assert.equal(exactExpiry.leaseRegistry.consume(exactExpiry.lease.lease_id, { snapshot_digest: snapshot.snapshot_digest }, '2026-08-04T00:00:30.000Z').receipt.reason, 'LEASE_EXPIRED');
+  const afterExpiry = c8AdmittedLeaseFixture(snapshot, { lease_id: 'expiry-current-operation' });
+  afterExpiry.leaseRegistry.records.set(afterExpiry.lease.lease_id, { ...afterExpiry.lease, expires_at: '2026-08-04T00:01:00.000Z', lease_digest: c8DigestBytes(c8Json({ ...c8LeaseBody(afterExpiry.lease), expires_at: '2026-08-04T00:01:00.000Z' })) });
+  const result = c8PreDispatch({ ...afterExpiry, current_operation_time: '2026-08-04T00:02:00.000Z', consumption_time: '2026-08-04T00:00:30.000Z' });
+  assert.equal(result.reason, 'LEASE_EXPIRED');
+  assert.equal(result.evaluation_candidate_created, false);
 });
 
 test('PRRT_kwDOSTHjGM6WPZdL binds manifest role and capabilities to snapshot and lease', () => {
   const snapshot = c8Snapshot(c8DefaultSnapshot());
-  const manifest = c8Manifest(snapshot, { role: 'authoritative technical G4', capabilities: ['reply'] });
-  assert.throws(() => c8ManifestNormalize(manifest), (error) => error.reason === 'MANIFEST_AUTHORITY_MISMATCH');
+  const valid = c8Manifest(snapshot);
+  assert.equal(c8ManifestNormalize(valid).run_identity, snapshot.run_identity);
+  for (const overrides of [
+    { run_identity: 'different-run' },
+    { role: 'authoritative technical G4' },
+    { capabilities: ['bounded_source_mutation', 'pre_dispatch_admission', 'read_authority', 'expanded'] },
+    { capabilities: ['read_authority'] }
+  ]) {
+    const manifest = c8Manifest(snapshot, overrides);
+    assert.throws(() => c8ManifestNormalize(manifest), (error) => error.reason === 'MANIFEST_AUTHORITY_MISMATCH');
+  }
+  const admitted = c8AdmittedLeaseFixture(snapshot, { lease_id: 'manifest-binding' });
+  const mismatchedManifest = c8Manifest(snapshot, { run_identity: 'other-run' });
+  const result = c8PreDispatch({ ...admitted, renderedManifest: c8ManifestStart + '\n' + c8Json(mismatchedManifest) + '\n' + c8ManifestStop });
+  assert.equal(result.reason, 'MANIFEST_AUTHORITY_MISMATCH');
+  assert.equal(result.evaluation_candidate_created, false);
 });
 
 test('PRRT_kwDOSTHjGM6WPZdP rejects tampered sealed lease bytes before transition', () => {
@@ -3626,27 +4413,92 @@ test('PRRT_kwDOSTHjGM6WPZdX preserves typed machine mismatch through pre-dispatc
 });
 
 test('PRRT_kwDOSTHjGM6WPZdh consumes assurance envelopes in durable state', () => {
+  const storePath = c8NewAuthorityStorePath('assurance-envelope');
+  const context = c6Context({ assurance_store_path: storePath, assuranceRegistry: new C8DurableAuthorityRegistry(storePath, 'assurance-envelope') });
   const envelope = c6LaunchEnvelope();
-  const first = c6DispatchAssurance(c6CanonicalTemplateText(), envelope);
+  const stale = JSON.parse(JSON.stringify(envelope));
+  const shallow = { ...envelope };
+  const first = c6DispatchAssurance(c6CanonicalTemplateText(), envelope, context);
   assert.equal(first.decision, 'ASSURANCE_DISPATCHED');
-  assert.notEqual(c6DispatchAssurance(c6CanonicalTemplateText(), envelope).decision, 'ASSURANCE_DISPATCHED');
+  for (const replay of [envelope, shallow, stale]) {
+    const result = c6DispatchAssurance(c6CanonicalTemplateText(), replay, context);
+    assert.equal(result.decision, 'ASSURANCE_ALREADY_CONSUMED');
+    assert.equal(result.temporaryChatCreated, false);
+  }
+  const reloaded = c6Context({ assurance_store_path: storePath, assuranceRegistry: new C8DurableAuthorityRegistry(storePath, 'assurance-envelope') });
+  const recreated = c6DispatchAssurance(c6CanonicalTemplateText(), JSON.parse(JSON.stringify(envelope)), reloaded);
+  assert.equal(recreated.decision, 'ASSURANCE_ALREADY_CONSUMED');
+  assert.equal(recreated.temporaryChatCreated, false);
 });
 
 test('PRRT_kwDOSTHjGM6WPZdn consumes admission grants outside returned copies', () => {
+  const storePath = c8NewAuthorityStorePath('admission-grant');
   const grant = structuredGrant();
+  grant.authority_store_path = storePath;
+  grant.canonical_digest = c5GrantDigest(grant);
   const context = admissionContext();
-  const first = admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1 }, context, grant, trustedPreToolUseHook);
-  const second = admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1 }, context, grant, trustedPreToolUseHook);
+  const registry = new C8DurableAuthorityRegistry(storePath, 'admission-grant');
+  const stale = JSON.parse(JSON.stringify(grant));
+  const shallow = { ...grant };
+  const first = admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1 }, context, grant, trustedPreToolUseHook, registry);
+  const second = admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1 }, context, grant, trustedPreToolUseHook, registry);
   assert.equal(first.allowed, true);
   assert.equal(second.allowed, false);
+  for (const replay of [shallow, stale]) {
+    assert.equal(admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1 }, context, replay, trustedPreToolUseHook, registry).allowed, false);
+  }
+  const recreated = admissionDecision({ operation: 'spawn_agent', requestedAgentCount: 1 }, context, JSON.parse(JSON.stringify(grant)), trustedPreToolUseHook, new C8DurableAuthorityRegistry(storePath, 'admission-grant'));
+  assert.equal(recreated.allowed, false);
 });
 
 test('PRRT_kwDOSTHjGM6WPZdu verifies assurance evidence digests cryptographically', () => {
-  assert.equal(c6ValidEvidenceDigest({ bytes: 'evidence', content_digest: 'sha256:' + '0'.repeat(64) }), false);
+  const validEnvelope = c6LaunchEnvelope();
+  assert.equal(c6LaunchAdmission(validEnvelope).decision, 'ASSURANCE_LAUNCH_ADMITTED');
+  const cases = [
+    ['fake label', (envelope) => { envelope.evidence['exact-authority-graph'].authoritative_locator.content_digest = 'sha256:authority-movement'; }],
+    ['malformed', (envelope) => { envelope.evidence['exact-authority-graph'].authoritative_locator.content_digest = 'not-a-digest'; }],
+    ['wrong digest', (envelope) => { envelope.evidence['exact-authority-graph'].authoritative_locator.content_digest = 'sha256:' + '0'.repeat(64); }],
+    ['different bytes', (envelope) => { envelope.evidence['exact-authority-graph'].authoritative_locator.resolved_bytes = 'different-evidence'; }],
+    ['altered evidence', (envelope) => { envelope.evidence['exact-authority-graph'].authoritative_locator.resolved_bytes += '-altered'; }],
+    ['different locator', (envelope) => { envelope.evidence['exact-authority-graph'].authoritative_locator.resolved_locator = 'raw://other-locator'; }]
+  ];
+  for (const [label, alter] of cases) {
+    const envelope = JSON.parse(JSON.stringify(validEnvelope));
+    alter(envelope);
+    const result = c6LaunchAdmission(envelope);
+    assert.equal(result.decision, 'ASSURANCE_EVIDENCE_DIGEST_INVALID', label);
+    assert.equal(result.temporaryChatCreated, false, label);
+  }
 });
 
 test('PRRT_kwDOSTHjGM6WPZd1 verifies Git object type and exact path binding', () => {
-  assert.equal(c8VerifyGitObjectBinding({ object_type: 'commit', expected_type: 'blob', path: 'x', tree_path: 'y' }), false);
+  const valid = c8CollectMachine(c8MachineAuthority());
+  assert.equal(valid.decision, 'MACHINE_AUTHORITY_COLLECTED');
+  const snapshot = c8Snapshot(c8DefaultSnapshot());
+  const head = snapshot.exact_remote_head_sha;
+  const alternateTree = git('rev-parse', git('rev-parse', 'HEAD^') + '^{tree}').trim();
+  const alternateBlob = git('rev-parse', 'HEAD:README.md').trim();
+  const cases = [
+    ['zero commit', (machine) => { machine.github.head_sha = '0'.repeat(40); machine.local.head_sha = '0'.repeat(40); }, 'GIT_COMMIT_INVALID'],
+    ['nonexistent object', (machine) => { machine.github.tree_sha = 'f'.repeat(40); machine.local.tree_sha = 'f'.repeat(40); }, 'GIT_TREE_INVALID'],
+    ['commit presented as blob', (machine) => { machine.github.blobs[0].blob_sha = head; machine.local.blobs[0].blob_sha = head; }, 'GIT_BLOB_TYPE_INVALID'],
+    ['blob presented as tree', (machine) => { machine.github.tree_sha = alternateBlob; machine.local.tree_sha = alternateBlob; }, 'GIT_TREE_TYPE_INVALID'],
+    ['wrong commit tree pairing', (machine) => { machine.github.tree_sha = alternateTree; machine.local.tree_sha = alternateTree; }, 'GIT_TREE_MISMATCH'],
+    ['missing path', (machine) => { machine.github.blobs[0].path = 'missing/path'; machine.local.blobs[0].path = 'missing/path'; }, 'GIT_PATH_MISSING'],
+    ['correct blob wrong path', (machine) => { machine.github.blobs[0].path = 'README.md'; machine.local.blobs[0].path = 'README.md'; }, 'GIT_PATH_BINDING_MISMATCH'],
+    ['blob from another tree', (machine) => { machine.github.blobs[0].blob_sha = alternateBlob; machine.local.blobs[0].blob_sha = alternateBlob; }, 'GIT_PATH_BINDING_MISMATCH'],
+    ['path traversal', (machine) => { machine.github.blobs[0].path = '../AGENTS.md'; machine.local.blobs[0].path = '../AGENTS.md'; }, 'GIT_PATH_INVALID'],
+    ['ambiguous path', (machine) => { machine.github.blobs[0].path = machine.github.blobs[0].path.replace('/', '//'); machine.local.blobs[0].path = machine.github.blobs[0].path; }, 'GIT_PATH_INVALID']
+  ];
+  for (const [label, mutate, reason] of cases) {
+    const machine = c8MachineAuthority();
+    mutate(machine);
+    const result = c8CollectMachine(machine);
+    assert.equal(result.decision, 'MACHINE_AUTHORITY_REJECTED', label);
+    assert.equal(result.reason, reason, label);
+    assert.equal(result.receipt.mutation_performed, false, label);
+    assert.equal(result.receipt.evaluation_candidate_created, false, label);
+  }
 });
 
 test('PRRT_kwDOSTHjGM6WPZdc keeps embedded API keys detectable', () => {
@@ -3671,12 +4523,37 @@ test('C10 generic writers reject obfuscated and encoded invocation forms', () =>
   }
 });
 
-test('PRRT_kwDOSTHjGM6WPZc9 admits only one exact-head G4 structured operation', () => {
-  const request = { role: 'implementation/amendment worker', repository: 'weijunswj/ai-agent-toolkit', pull_request: 333, head: 'h', tree: 't', grant: { one_run: true }, checks: { terminal_success: true }, target: 'issue-comment' };
-  assert.equal(c10ReviewRequestAdmission(request).decision, 'REVIEW_REQUEST_REJECTED');
-  const valid = { ...request, role: 'authoritative technical G4 closure', target: 'pr-conversation', prior_request: false, readback: true };
-  assert.equal(c10ReviewRequestAdmission(valid).decision, 'REVIEW_REQUEST_ADMITTED');
-  assert.equal(c10ReviewRequestAdmission(valid).decision, 'REVIEW_REQUEST_REJECTED');
+test('PRRT_kwDOSTHjGM6WPZc9 admits one exact Web-issued exceptional-review grant', () => {
+  const booleansOnly = c7ExceptionalReviewerAdmission({ explicitPreauthorised: true, beforeDispatch: true, freshIsolated: true, readOnly: true, nonAuthoritative: true, exactHead: true, category: 'critical_security_boundary' });
+  assert.equal(booleansOnly.allowed, false);
+  assert.equal(booleansOnly.mutation_performed, false);
+  assert.equal(booleansOnly.evaluation_candidate_created, false);
+  const grant = c7ExceptionalGrant();
+  const context = c7ExceptionalGrantContext();
+  const registry = new C8DurableAuthorityRegistry(grant.authority_store_path, 'exceptional-review');
+  const admitted = c7ExceptionalReviewerAdmission(grant, context, registry);
+  assert.equal(admitted.decision, 'SECOND_REVIEWER_ADMITTED');
+  assert.equal(admitted.allowed, true);
+  assert.equal(admitted.replacesWebFinality, false);
+  for (const [field, value] of [
+    ['issuer', { identity: 'executor', role: 'implementation worker', surface: 'executor-root' }],
+    ['repository', 'other/repository'],
+    ['pull_request', 334],
+    ['exact_head', '0'.repeat(40)],
+    ['review', { run_id: 'other-run', session_id: 'session-exceptional-synthetic', turn_id: 'turn-exceptional-synthetic' }],
+    ['governing_authority_revision', 'child-other'],
+    ['category', 'ordinary-review'],
+    ['expires_at', '2026-08-03T22:00:00.000Z']
+  ]) {
+    const candidate = c7ExceptionalGrant({ [field]: value });
+    const result = c7ExceptionalReviewerAdmission(candidate, context, new C8DurableAuthorityRegistry(candidate.authority_store_path, 'exceptional-review'));
+    assert.equal(result.allowed, false, field);
+    assert.equal(result.mutation_performed, false, field);
+    assert.equal(result.evaluation_candidate_created, false, field);
+  }
+  const replay = c7ExceptionalReviewerAdmission(JSON.parse(JSON.stringify(grant)), context, new C8DurableAuthorityRegistry(grant.authority_store_path, 'exceptional-review'));
+  assert.equal(replay.decision, 'EXCEPTIONAL_REVIEW_GRANT_REPLAYED');
+  assert.equal(replay.allowed, false);
 });
 
 test('C10 preserves G4 reply-without-resolution and Web-only finality', () => {
