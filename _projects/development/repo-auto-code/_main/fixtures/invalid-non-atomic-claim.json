@@ -1,0 +1,11 @@
+{
+  "id": "invalid-non-atomic-claim",
+  "accepted": false,
+  "mutationProhibited": true,
+  "scenario": "root-claim",
+  "evidence": {
+    "valid": false,
+    "violation": "non_atomic_claim",
+    "rawEvidence": true
+  }
+}

@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-implementation-worker-governance-mutation",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "worker-boundary",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "worker_hosted_governance_mutation"
+                 }
+}

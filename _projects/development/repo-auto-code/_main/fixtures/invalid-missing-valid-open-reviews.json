@@ -1,0 +1,11 @@
+{
+  "id": "invalid-missing-valid-open-reviews",
+  "accepted": false,
+  "mutationProhibited": true,
+  "scenario": "governance",
+  "evidence": {
+    "valid": false,
+    "violation": "missing_live_review_evidence",
+    "rawEvidence": true
+  }
+}

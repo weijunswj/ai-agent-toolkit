@@ -1,0 +1,6 @@
+{
+  "id": "invalid-missing-exact-head-evidence",
+  "scenario": "completion_finality",
+  "expected": { "accepted": false, "status": "COMPLETION_GATE_INCOMPLETE", "mutationProhibited": true },
+  "state": { "reviewSweep": { "complete": true, "validOpenReviews": 0 }, "checks": [ { "required": true, "completed": true, "conclusion": "PASS" } ], "protocolEvidence": { "independent": true, "ledgerOnly": false }, "exactHead": { "reviewedHead": "aaa", "currentHead": "bbb", "readBack": false } }
+}

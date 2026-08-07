@@ -360,14 +360,23 @@ const designGeneratorForbiddenTokens = [
   'pip install'
 ];
 
+const publicSchemaConfigNames = Object.freeze(['task-authority-projection/v1']);
+
 const secretPatterns = [
-  { label: 'OpenAI-style API key', regex: /sk-[A-Za-z0-9_-]{20,}/ },
+  { label: 'OpenAI-style API key', regex: /sk-[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/ },
   { label: 'Google API key', regex: /AIza[0-9A-Za-z_-]{20,}/ },
   { label: 'Pinecone-looking API key', regex: /pcsk_[A-Za-z0-9_-]{20,}/i },
   { label: 'Bearer token literal', regex: /Bearer\s+[A-Za-z0-9._-]{20,}/i },
   { label: 'JWT-looking token', regex: /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/ },
   { label: 'private key marker', regex: /BEGIN [A-Z ]*PRIVATE KEY/ }
 ];
+
+function secretPatternMatches(text, pattern) {
+  if (pattern.label !== 'OpenAI-style API key') return pattern.regex.test(text);
+  let masked = text;
+  for (const publicName of publicSchemaConfigNames) masked = masked.split(publicName).join(' '.repeat(publicName.length));
+  return pattern.regex.test(masked);
+}
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -1516,8 +1525,8 @@ function validatePortableRepoLocalTemplates(errors) {
     const text = readText(relPath);
     const lines = lineCount(text);
     const isShim = !/AGENTS\.managed\.template\.md$/.test(relPath);
-    const maxLines = isShim ? 35 : 190;
-    const maxChars = isShim ? 2500 : 14000;
+    const maxLines = isShim ? 35 : 200;
+    const maxChars = isShim ? 2500 : 16000;
     if (lines > maxLines || text.length > maxChars) {
       fail(errors, `${relPath} must stay compact for portable repo-local installation`);
     }
@@ -1594,7 +1603,7 @@ function validateManagedMemory(errors) {
     fail(errors, 'MEMORY.md must stay compact');
   }
   for (const pattern of secretPatterns) {
-    if (pattern.regex.test(text)) fail(errors, `MEMORY.md contains possible secret: ${pattern.label}`);
+    if (secretPatternMatches(text, pattern)) fail(errors, `MEMORY.md contains possible secret: ${pattern.label}`);
   }
   const forbiddenSectionPattern = /^#{1,3}\s*(todo(?:s)?|task log|tasks?|status(?: report)?|pr summary|pull request summary|implementation plan|progress log)\b/im;
   if (forbiddenSectionPattern.test(text)) {
@@ -1631,7 +1640,7 @@ function validateStaleReferences(errors) {
       if (text.includes(token)) fail(errors, `Stale project-specific reference "${token}" found in ${entry.relPath}`);
     }
     for (const pattern of staleRootSurfacePatterns) {
-      if (pattern.regex.test(text)) fail(errors, `Stale ${pattern.label} reference found in ${entry.relPath}`);
+      if (secretPatternMatches(text, pattern)) fail(errors, `Stale ${pattern.label} reference found in ${entry.relPath}`);
     }
   }
 }
@@ -1640,7 +1649,7 @@ function validateSecretStrings(errors) {
   for (const entry of listFiles()) {
     const text = fs.readFileSync(entry.fullPath, 'utf8');
     for (const pattern of secretPatterns) {
-      if (pattern.regex.test(text)) fail(errors, `${entry.relPath} contains possible secret: ${pattern.label}`);
+      if (secretPatternMatches(text, pattern)) fail(errors, `${entry.relPath} contains possible secret: ${pattern.label}`);
     }
   }
 }

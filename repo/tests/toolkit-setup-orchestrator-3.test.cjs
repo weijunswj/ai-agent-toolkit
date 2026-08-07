@@ -111,19 +111,31 @@ test('setup docs explain automatic resource admission and honest enforcement dis
   assert.match(bridge, /managed checkout is only its refresh source/i);
 });
 
-test('generated Codex and Claude instruction surfaces preserve productive root-first topology policy', () => {
+test('generated host instruction surfaces preserve C13 topology and C14 launch safeguards', () => {
   const agents = fs.readFileSync(path.join(repoRoot, 'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'), 'utf8');
   const claude = fs.readFileSync(path.join(repoRoot, 'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md'), 'utf8');
   for (const pattern of [
-    /Ordinary work begins root-first/,
-    /profile\/capacity is a ceiling, never launch permission/,
-    /Missing\/contradictory declarations refuse/,
-    /Never delegate all work/,
-    /productive root work/,
-    /Children default medium/,
-    /never use Fast or nest/,
-    /owns integration, conflicts, validation, and final judgment/,
+    /Three mutually exclusive modes/,
+    /### Default root-only mode/,
+    /### Explicit ordinary concurrent-helper mode/,
+    /### Explicit exclusive Auto-code manager\/worker mode/,
+    /DELEGATION_NOT_AUTHORISED/,
+    /MANAGER_SUSPENDED_ON_NATIVE_WORKER/,
+    /## Common Authorised-Launch Safeguards/,
+    /RAM after existing reservations is the hard admission gate/,
+    /Reserve capacity atomically before launch/,
+    /Fast mode is prohibited/,
+    /Nested or recursive delegation is prohibited unless separately and explicitly granted/,
+    /Use minimal explicit context/,
+    /fork_turns="none"/,
+    /These safeguards constrain authorised launches; they do not grant launch authority/,
   ]) assert.match(agents, pattern);
+  for (const pattern of [
+    /Workers require separable concurrent work and concrete critical-path\/wall-clock speedup\./,
+    /Never delegate all work, give a child the longer task while root keeps the easy task, or launch because a child is available\./,
+    /Root continues critical work, not waiting\/polling, and owns integration, conflicts, validation, and final judgment\./,
+  ]) assert.doesNotMatch(agents, pattern);
+  assert.match(agents, /root continues only separate work/);
   assert.match(claude, /@AGENTS\.md/);
   assert.match(claude, /Root `AGENTS\.md` is canonical/);
   assert.doesNotMatch(claude, /multi_agent_v2|max_concurrent_threads_per_session|agents\.max_threads/);

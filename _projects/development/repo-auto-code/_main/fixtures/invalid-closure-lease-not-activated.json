@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-closure-lease-not-activated",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "activation",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "missing_exact_grant"
+                 }
+}

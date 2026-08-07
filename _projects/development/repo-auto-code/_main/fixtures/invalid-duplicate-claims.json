@@ -1,0 +1,11 @@
+{
+  "id": "invalid-duplicate-claims",
+  "accepted": false,
+  "mutationProhibited": true,
+  "scenario": "root-claim",
+  "evidence": {
+    "valid": false,
+    "violation": "duplicate_exact_roots",
+    "rawEvidence": true
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "id": "invalid-wrong-current-turn",
+  "scenario": "wrong_current_turn",
+  "expected": {
+    "accepted": false,
+    "status": "PARENT_RECONCILIATION_INCOMPLETE",
+    "mutationProhibited": true
+  },
+  "state": {
+    "reconciliation": {
+      "projectionDefaults": { "status": "CURRENT", "lifecycleSection": "Current execution", "currentTurn": "CONTROLLER", "nextAction": "await-g4" },
+      "transitionBefore": { "status": "ACTIVE", "lifecycleSection": "Active queue", "currentTurn": "CONTROLLER", "nextAction": "start" },
+      "transitionAfter": { "status": "CURRENT", "lifecycleSection": "Current execution", "currentTurn": "CONTROLLER", "nextAction": "await-g4" },
+      "surfaces": { "child": { "currentTurn": "EXECUTOR" }, "pr": { "currentTurn": "CONTROLLER" }, "parentEntry": { "currentTurn": "CONTROLLER" }, "chronology": { "currentTurn": "CONTROLLER" } },
+      "binding": { "boundRevision": "parent-r42", "revisionBeforeWrite": "parent-r42", "revisionAfterWrite": "parent-r42", "readBackRevision": "parent-r42", "parentEntryCount": 1, "rowPositionBefore": 3, "rowPositionAfter": 3, "chronologyCommentsAdded": 1, "afterBodyDigest": "digest-after", "readBackBodyDigest": "digest-after", "concurrentBeforeWrite": false, "concurrentAfterWrite": false, "partialWrite": false },
+      "preservation": { "before": { "unrelatedParentEntries": ["a"], "queueOrder": ["#329"], "extensionSections": ["x"], "completedHistory": ["#328"], "ownerAuthoredContent": ["owner"], "unrelatedChildren": ["#330"], "unrelatedPr": ["#700"], "unrelatedChronology": ["c1"] }, "after": { "unrelatedParentEntries": ["a"], "queueOrder": ["#329"], "extensionSections": ["x"], "completedHistory": ["#328"], "ownerAuthoredContent": ["owner"], "unrelatedChildren": ["#330"], "unrelatedPr": ["#700"], "unrelatedChronology": ["c1"] } },
+      "materialTransition": true,
+      "parentBinding": true,
+      "compareAndPreserve": true,
+      "boundRevision": "parent-r42",
+      "revisionBeforeWrite": "parent-r42",
+      "parentEntryCount": 1,
+      "rowPositionBefore": 3,
+      "rowPositionAfter": 3,
+      "chronologyCommentsAdded": 1,
+      "unrelatedContentPreserved": true,
+      "surfacesAgree": false,
+      "readBackExact": false,
+      "turn": { "child": "EXECUTOR", "parent": "CONTROLLER" },
+      "concurrentAfterWrite": false,
+      "partialWrite": false
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "id": "invalid-baseline-section-order",
+  "scenario": "baseline_section_order",
+  "expected": {
+    "accepted": false,
+    "status": "PARENT_RECONCILIATION_INCOMPLETE",
+    "mutationProhibited": true
+  },
+  "state": {
+    "parent": {
+      "sectionOrder": ["Queue authority", "Active queue", "Current execution", "Completed or disposed", "Completion gate", "Governance ownership", "Mandatory parent reconciliation"],
+      "linesBySection": { "Current execution": ["- #329"], "Active queue": ["- #330"], "Completed or disposed": ["- [x] #328"] },
+      "materialChildren": ["#329", "#330", "#328"],
+      "lifecycleEntries": { "Current execution": ["#329"], "Active queue": ["#330"], "Completed or disposed": ["#328"] },
+      "expectedLifecycle": { "#329": "Current execution", "#330": "Active queue", "#328": "Completed or disposed" },
+      "parentEntryCount": 1,
+      "subqueues": []
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "id": "valid-final-audit-after-terminal-work",
+  "accepted": true,
+  "scenario": "final-audit",
+  "evidence": {
+    "valid": true,
+    "rawEvidence": true,
+    "lifecycleSections": ["planned", "current", "completed", "deferred", "superseded"],
+    "allSectionsTerminal": true,
+    "precedingWorkTerminal": true,
+    "materialChildOccurrences": 1,
+    "rawEvidence": true
+  }
+}

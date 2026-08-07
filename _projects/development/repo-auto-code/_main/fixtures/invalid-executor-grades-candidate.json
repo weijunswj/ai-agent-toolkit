@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-executor-grades-candidate",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "evaluation",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "executor_grades_candidate"
+                 }
+}

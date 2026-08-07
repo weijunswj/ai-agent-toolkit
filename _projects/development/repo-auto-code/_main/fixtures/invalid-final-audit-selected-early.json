@@ -1,0 +1,6 @@
+{
+  "id": "invalid-final-audit-selected-early",
+  "scenario": "final_audit_selected_early",
+  "expected": { "accepted": false, "status": "PARENT_RECONCILIATION_INCOMPLETE", "mutationProhibited": true },
+  "state": { "parent": { "activeQueue": [ { "child": "#329", "finalAudit": false, "terminal": false }, { "child": "#251", "finalAudit": true, "terminal": false } ] }, "selectedChild": "#251", "moved": false, "reordered": false, "bypassedBlocked": false }
+}

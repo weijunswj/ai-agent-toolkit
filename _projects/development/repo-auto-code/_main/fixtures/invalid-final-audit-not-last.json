@@ -1,0 +1,6 @@
+{
+  "id": "invalid-final-audit-not-last",
+  "scenario": "final_audit_not_last",
+  "expected": { "accepted": false, "status": "PARENT_RECONCILIATION_INCOMPLETE", "mutationProhibited": true },
+  "state": { "parent": { "activeQueue": [ { "child": "#329", "finalAudit": false, "terminal": true }, { "child": "#251", "finalAudit": true, "terminal": false }, { "child": "#330", "finalAudit": false, "terminal": true } ] }, "selectedChild": "#251", "moved": false, "reordered": false, "bypassedBlocked": false }
+}

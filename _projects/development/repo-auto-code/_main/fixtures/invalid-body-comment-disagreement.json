@@ -1,0 +1,11 @@
+{
+  "id": "invalid-body-comment-disagreement",
+  "accepted": false,
+  "mutationProhibited": true,
+  "scenario": "surface-disagreement",
+  "evidence": {
+    "valid": false,
+    "violation": "child_and_comment_disagree",
+    "rawEvidence": true
+  }
+}

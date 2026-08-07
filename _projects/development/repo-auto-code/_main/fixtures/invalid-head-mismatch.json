@@ -1,0 +1,34 @@
+{
+  "id": "invalid-head-mismatch",
+  "scenario": "head_mismatch",
+  "expected": {
+    "accepted": false,
+    "status": "PARENT_RECONCILIATION_INCOMPLETE",
+    "mutationProhibited": true
+  },
+  "state": {
+    "reconciliation": {
+      "projectionDefaults": { "status": "CURRENT", "lifecycleSection": "Current execution", "nextAction": "await-g4" },
+      "transitionBefore": { "status": "ACTIVE", "lifecycleSection": "Active queue", "nextAction": "start" },
+      "transitionAfter": { "status": "CURRENT", "lifecycleSection": "Current execution", "nextAction": "await-g4" },
+      "surfaces": { "child": { "head": "aaa" }, "pr": { "head": "bbb" }, "parentEntry": { "head": "aaa" }, "chronology": { "head": "aaa" } },
+      "binding": { "boundRevision": "parent-r42", "revisionBeforeWrite": "parent-r42", "revisionAfterWrite": "parent-r42", "readBackRevision": "parent-r42", "parentEntryCount": 1, "rowPositionBefore": 3, "rowPositionAfter": 3, "chronologyCommentsAdded": 1, "afterBodyDigest": "digest-after", "readBackBodyDigest": "digest-after", "concurrentBeforeWrite": false, "concurrentAfterWrite": false, "partialWrite": false },
+      "preservation": { "before": { "unrelatedParentEntries": ["a"], "queueOrder": ["#329"], "extensionSections": ["x"], "completedHistory": ["#328"], "ownerAuthoredContent": ["owner"], "unrelatedChildren": ["#330"], "unrelatedPr": ["#700"], "unrelatedChronology": ["c1"] }, "after": { "unrelatedParentEntries": ["a"], "queueOrder": ["#329"], "extensionSections": ["x"], "completedHistory": ["#328"], "ownerAuthoredContent": ["owner"], "unrelatedChildren": ["#330"], "unrelatedPr": ["#700"], "unrelatedChronology": ["c1"] } },
+      "materialTransition": true,
+      "parentBinding": true,
+      "compareAndPreserve": true,
+      "boundRevision": "parent-r42",
+      "revisionBeforeWrite": "parent-r42",
+      "parentEntryCount": 1,
+      "rowPositionBefore": 3,
+      "rowPositionAfter": 3,
+      "chronologyCommentsAdded": 1,
+      "unrelatedContentPreserved": true,
+      "surfacesAgree": false,
+      "readBackExact": false,
+      "heads": { "child": "aaa", "pr": "bbb", "parent": "aaa" },
+      "concurrentAfterWrite": false,
+      "partialWrite": false
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "id": "invalid-final-audit-bypassed-blocked",
+  "scenario": "final_audit_bypassed_blocked",
+  "expected": { "accepted": false, "status": "PARENT_RECONCILIATION_INCOMPLETE", "mutationProhibited": true },
+  "state": { "parent": { "activeQueue": [ { "child": "#329", "finalAudit": false, "terminal": false, "blocked": true }, { "child": "#251", "finalAudit": true, "terminal": false } ] }, "selectedChild": "#251", "moved": false, "reordered": false, "bypassedBlocked": true }
+}

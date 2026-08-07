@@ -1,0 +1,13 @@
+{
+  "id": "valid-active-to-current",
+  "accepted": true,
+  "scenario": "lifecycle-transition",
+  "evidence": {
+    "valid": true,
+    "rawEvidence": true,
+    "transition": { "before": "ACTIVE", "after": "CURRENT", "atomic": true },
+    "surfaces": { "child": "d1", "pr": "d1", "parentEntry": "d1", "chronology": "d1" },
+    "parentEntryCount": 1,
+    "chronologyCommentsAdded": 1
+  }
+}

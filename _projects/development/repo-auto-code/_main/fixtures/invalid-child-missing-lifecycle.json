@@ -1,0 +1,20 @@
+{
+  "id": "invalid-child-missing-lifecycle",
+  "scenario": "child_missing_lifecycle",
+  "expected": {
+    "accepted": false,
+    "status": "PARENT_RECONCILIATION_INCOMPLETE",
+    "mutationProhibited": true
+  },
+  "state": {
+    "parent": {
+      "sectionOrder": ["Queue authority", "Current execution", "Active queue", "Completed or disposed", "Completion gate", "Governance ownership", "Mandatory parent reconciliation"],
+      "linesBySection": { "Current execution": [], "Active queue": [], "Completed or disposed": [] },
+      "materialChildren": ["#329"],
+      "lifecycleEntries": { "Current execution": [], "Active queue": [], "Completed or disposed": [] },
+      "expectedLifecycle": { "#329": "Active queue" },
+      "parentEntryCount": 0,
+      "subqueues": []
+    }
+  }
+}

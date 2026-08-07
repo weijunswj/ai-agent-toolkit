@@ -1,0 +1,11 @@
+{
+  "id": "invalid-caller-supplied-lease-fields",
+  "accepted": false,
+  "mutationProhibited": true,
+  "scenario": "activation",
+  "evidence": {
+    "valid": false,
+    "violation": "caller_supplied_root_or_lease",
+    "rawEvidence": true
+  }
+}

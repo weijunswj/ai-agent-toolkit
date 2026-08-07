@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-scope-ambiguity-continuation",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "authority",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "scope_ambiguity"
+                 }
+}

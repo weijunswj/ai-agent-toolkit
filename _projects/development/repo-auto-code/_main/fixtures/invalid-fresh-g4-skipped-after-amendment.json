@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-fresh-g4-skipped-after-amendment",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "g4",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "fresh_g4_skipped"
+                 }
+}

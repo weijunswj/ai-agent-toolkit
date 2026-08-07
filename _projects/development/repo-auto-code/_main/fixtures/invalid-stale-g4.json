@@ -1,0 +1,11 @@
+{
+  "id": "invalid-stale-g4",
+  "accepted": false,
+  "mutationProhibited": true,
+  "scenario": "g4",
+  "evidence": {
+    "valid": false,
+    "violation": "g4_head_is_stale",
+    "rawEvidence": true
+  }
+}

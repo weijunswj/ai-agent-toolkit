@@ -1,0 +1,6 @@
+{
+  "id": "invalid-pending-child-uat-material-obligation",
+  "scenario": "completion_finality",
+  "expected": { "accepted": false, "status": "COMPLETION_GATE_INCOMPLETE", "mutationProhibited": true },
+  "state": { "reviewSweep": { "complete": true, "validOpenReviews": 0 }, "checks": [ { "required": true, "completed": true, "conclusion": "PASS" } ], "protocolEvidence": { "independent": true, "ledgerOnly": false }, "exactHead": { "reviewedHead": "aaa", "currentHead": "aaa", "readBack": true }, "controllerGate": "CONTROLLER_ACCEPTED", "prompt": { "live": false, "processed": true }, "pendingResult": false, "obligations": { "child": true, "user": false, "uat": true, "material": true } }
+}

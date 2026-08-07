@@ -1,0 +1,11 @@
+{
+  "id": "invalid-missing-provider-routing",
+  "accepted": false,
+  "mutationProhibited": true,
+  "scenario": "route",
+  "evidence": {
+    "valid": false,
+    "violation": "missing_runtime_provider",
+    "rawEvidence": true
+  }
+}

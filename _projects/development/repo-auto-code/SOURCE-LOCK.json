@@ -1,0 +1,11 @@
+{
+  "source_repo": "weijunswj/ai-agent-toolkit",
+  "source_ref": "main",
+  "source_commit": "931ebff00dd1473a5b28f104a6a566742547c594",
+  "source_lifecycle": "retired_after_migration",
+  "source_role": "migration_provenance_only",
+  "source_update_policy": "none",
+  "public_attribution_required": false,
+  "files": [],
+  "provenance_notes": "First-party design material authored in this repository for issue #329. The repository audit schema requires a repository/ref/commit lifecycle envelope, but this module has no copied, migrated, or third-party source files; the intentionally empty files array is the truthful statement of that fact. The self-repository/base anchor is not an upstream source path and is not a source-watch target."
+}

@@ -1,0 +1,11 @@
+{
+  "id": "invalid-missing-skill",
+  "accepted": false,
+  "mutationProhibited": true,
+  "scenario": "admission",
+  "evidence": {
+    "valid": false,
+    "violation": "missing_capability_contract",
+    "rawEvidence": true
+  }
+}

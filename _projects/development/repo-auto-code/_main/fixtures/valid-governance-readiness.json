@@ -1,0 +1,16 @@
+{
+  "id": "valid-governance-readiness",
+  "accepted": true,
+  "scenario": "governance-readiness",
+  "evidence": {
+    "valid": true,
+    "rawEvidence": true,
+    "rawEvidence": true,
+    "child": { "authority": "a1", "status": "CURRENT" },
+    "pr": { "authority": "a1", "status": "DRAFT" },
+    "parentEntry": { "authority": "a1", "status": "CURRENT" },
+    "chronology": { "authority": "a1", "status": "RECORDED" },
+    "readinessDerived": true,
+    "projectionUsed": false
+  }
+}

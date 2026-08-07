@@ -1,0 +1,11 @@
+{
+  "id": "invalid-progression-during-parent-reconciliation",
+  "accepted": false,
+  "mutationProhibited": true,
+  "scenario": "reconciliation",
+  "evidence": {
+    "valid": false,
+    "violation": "progression_while_incomplete",
+    "rawEvidence": true
+  }
+}

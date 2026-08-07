@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-expiry-takeover",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "root-claim",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "expiry_used_as_takeover"
+                 }
+}

@@ -1,0 +1,59 @@
+{
+  "id": "development.repo-auto-code",
+  "category": "development",
+  "name": "repo-auto-code",
+  "title": "Repo-Scoped Default-Off Closure-Lease Protocol",
+  "module_path": "_projects/development/repo-auto-code",
+  "main_path": "_projects/development/repo-auto-code/_main",
+  "version": "1.4.0",
+  "version_policy": "semver",
+  "version_notes": "Extends DL-329-AUTO-CODE-005-A6-C10 with the C11 corrected live-finding matrix, default-deny delegation, explicit exclusive Auto-code manager/worker lifecycle, grant-bound exceptional assurance, and repaired validator boundary; advances DL-329-AUTO-CODE-005-A6-C11 and retains DL-329-AUTO-CODE-005-A6-C6, DL-329-AUTO-CODE-005-A6-C7, DL-329-AUTO-CODE-005-A6-C8 and the source-only C7/C8/C10 invariants and fixture arithmetic.",
+  "outputs": [],
+  "writes": {
+    "allowed": [],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**",
+      "skills/**",
+      ".github/**",
+      "AGENTS.md",
+      "active-instruction-files/**",
+      ".agents/**",
+      "scheduled-tasks/**",
+      "claim-refs/**",
+      "activation/**",
+      "runtime/**",
+      "pilot/**",
+      "queue/**",
+      "user-home/**",
+      "system-paths/**",
+      "arbitrary-output-paths/**",
+      "ledger/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false,
+  "project": {
+    "name": "Repo-Scoped Default-Off Closure-Lease Protocol",
+    "category": "development",
+    "summary": "First-party source-only generic role-and-capability design for a future repository-scoped closure lease; this PR creates no installed, scheduled, active, or generated surface."
+  },
+  "surface": {
+    "publish_as": "source_only",
+    "skill": {
+      "status": "not_applicable"
+    },
+    "mcp": {
+      "status": "not_applicable"
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "id": "invalid-ordinary-executor-self-setup",
+  "accepted": false,
+  "mutationProhibited": true,
+  "scenario": "authority",
+  "evidence": {
+    "valid": false,
+    "violation": "worker_self_setup_or_activation",
+    "rawEvidence": true
+  }
+}

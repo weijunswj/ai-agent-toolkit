@@ -1,0 +1,11 @@
+{
+  "id": "invalid-malformed-agents-block",
+  "accepted": false,
+  "mutationProhibited": true,
+  "scenario": "managed-contract",
+  "evidence": {
+    "valid": false,
+    "violation": "malformed_managed_block",
+    "rawEvidence": true
+  }
+}

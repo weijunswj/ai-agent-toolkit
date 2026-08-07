@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-user-decision-required-continuation",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "authority",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "user_decision_required"
+                 }
+}

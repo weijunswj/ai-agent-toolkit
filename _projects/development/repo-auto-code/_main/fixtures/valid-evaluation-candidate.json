@@ -1,0 +1,17 @@
+{
+    "id":  "valid-evaluation-candidate",
+    "accepted":  true,
+    "mutationProhibited":  false,
+    "scenario":  "evaluation-staging",
+    "evidence":  {
+                     "valid":  true,
+                     "rawEvidence":  true,
+                     "proof":  {
+                                   "publicSafe":  true,
+                                   "sourceRevisionBound":  true,
+                                   "privateIdentifiers":  false,
+                                   "scores":  false,
+                                   "ledgerWrite":  false
+                               }
+                 }
+}

@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-web-assurance-concern-merge",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "assurance",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "concern_used_to_merge"
+                 }
+}

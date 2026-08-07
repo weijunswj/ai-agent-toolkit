@@ -1,0 +1,6 @@
+{
+  "id": "invalid-incomplete-review-sweep",
+  "scenario": "completion_finality",
+  "expected": { "accepted": false, "status": "COMPLETION_GATE_INCOMPLETE", "mutationProhibited": true },
+  "state": { "reviewSweep": { "complete": false, "validOpenReviews": 0 } }
+}

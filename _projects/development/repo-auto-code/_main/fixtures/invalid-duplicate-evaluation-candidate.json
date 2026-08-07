@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-duplicate-evaluation-candidate",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "evaluation",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "duplicate_candidate"
+                 }
+}

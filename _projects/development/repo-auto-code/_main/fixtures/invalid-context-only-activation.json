@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-context-only-activation",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "activation",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "context_attempts_activation"
+                 }
+}

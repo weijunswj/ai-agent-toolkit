@@ -1,0 +1,14 @@
+{
+  "id": "valid-current-to-completed",
+  "accepted": true,
+  "scenario": "lifecycle-transition",
+  "evidence": {
+    "valid": true,
+    "rawEvidence": true,
+    "transition": { "before": "CURRENT", "after": "COMPLETED", "atomic": true },
+    "surfaces": { "child": "d2", "pr": "d2", "parentEntry": "d2", "chronology": "d2" },
+    "parentEntryCount": 1,
+    "chronologyCommentsAdded": 1,
+    "nextTask": null
+  }
+}

@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-g4-not-isolated",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "g4",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "g4_context_not_newly_isolated"
+                 }
+}

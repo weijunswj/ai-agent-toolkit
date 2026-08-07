@@ -1,0 +1,14 @@
+{
+  "id": "valid-completion-finality",
+  "accepted": true,
+  "scenario": "completion-finality",
+  "evidence": {
+    "valid": true,
+    "rawEvidence": true,
+    "lifecycleSections": ["planned", "current", "completed", "deferred", "superseded"],
+    "allSectionsTerminal": true,
+    "precedingWorkTerminal": true,
+    "materialChildOccurrences": 1,
+    "nextTask": null
+  }
+}

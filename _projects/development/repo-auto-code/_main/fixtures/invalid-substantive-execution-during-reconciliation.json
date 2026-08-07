@@ -1,0 +1,11 @@
+{
+  "id": "invalid-substantive-execution-during-reconciliation",
+  "accepted": false,
+  "mutationProhibited": true,
+  "scenario": "reconciliation",
+  "evidence": {
+    "valid": false,
+    "violation": "substantive_work_during_incomplete_reconciliation",
+    "rawEvidence": true
+  }
+}

@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-authority-movement-continuation",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "authority",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "authority_moved"
+                 }
+}

@@ -1,0 +1,11 @@
+{
+    "id":  "invalid-evaluation-candidate-revision-mismatch",
+    "accepted":  false,
+    "mutationProhibited":  true,
+    "scenario":  "evaluation",
+    "evidence":  {
+                     "valid":  false,
+                     "rawEvidence":  true,
+                     "violation":  "candidate_revision_mismatch"
+                 }
+}

@@ -1,0 +1,17 @@
+{
+    "id":  "valid-explicit-closure-lease-activation",
+    "accepted":  true,
+    "mutationProhibited":  false,
+    "scenario":  "explicit-activation",
+    "evidence":  {
+                     "valid":  true,
+                     "rawEvidence":  true,
+                     "proof":  {
+                                   "grant":  "exact",
+                                   "repository":  "synthetic-repository",
+                                   "scope":  "one-exact-scope",
+                                   "rootClaim":  "one",
+                                   "webIssued":  true
+                               }
+                 }
+}

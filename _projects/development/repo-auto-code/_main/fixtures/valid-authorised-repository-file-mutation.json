@@ -1,0 +1,21 @@
+{
+    "id":  "valid-authorised-repository-file-mutation",
+    "accepted":  true,
+    "mutationProhibited":  false,
+    "scenario":  "bounded-mutation",
+    "evidence":  {
+                     "valid":  true,
+                     "rawEvidence":  true,
+                     "proof":  {
+                                   "exactAllowlist":  true,
+                                   "sourceLockUnchanged":  true,
+                                   "outputs":  [
+
+                                               ],
+                                   "allowedWrites":  [
+
+                                                     ],
+                                   "nonForceCommit":  true
+                               }
+                 }
+}

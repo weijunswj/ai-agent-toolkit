@@ -1,0 +1,19 @@
+{
+  "id": "valid-four-surface-reconciliation",
+  "accepted": true,
+  "scenario": "four-surface-reconciliation",
+  "evidence": {
+    "valid": true,
+    "rawEvidence": true,
+    "surfaces": {
+      "child": { "revision": "r1", "body": "d3" },
+      "pr": { "revision": "r1", "body": "d3" },
+      "parentEntry": { "revision": "r1", "body": "d3" },
+      "chronology": { "revision": "r1", "body": "d3" }
+    },
+    "parentEntryCount": 1,
+    "chronologyCommentsAdded": 1,
+    "unrelatedContentPreserved": true,
+    "compareAndPreserve": true
+  }
+}
