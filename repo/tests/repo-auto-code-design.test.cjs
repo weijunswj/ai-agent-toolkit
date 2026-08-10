@@ -17,6 +17,68 @@ const fixturePrefix = '_projects/development/repo-auto-code/_main/fixtures';
 const c8AuthorityTempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-authority-reference-'));
 process.once('exit', () => { try { fs.rmSync(c8AuthorityTempRoot, { recursive: true, force: true }); } catch {} });
 
+function c8FixtureGit(cwd, args, environment = {}) {
+  return execFileSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    env: { ...process.env, ...environment },
+    stdio: ['ignore', 'pipe', 'pipe']
+  }).trim();
+}
+
+function c8CreateGitAuthorityFixture(parentRoot) {
+  const fixtureRoot = fs.mkdtempSync(path.join(parentRoot, 'git-authority-'));
+  const targetPath = 'repo/tests/repo-auto-code-design.test.cjs';
+  const targetFile = path.join(fixtureRoot, ...targetPath.split('/'));
+  fs.mkdirSync(path.dirname(targetFile), { recursive: true });
+  fs.writeFileSync(path.join(fixtureRoot, 'README.md'), 'C22 isolated Git authority fixture\n', 'utf8');
+  fs.writeFileSync(targetFile, 'canonical base fixture\n', 'utf8');
+  c8FixtureGit(fixtureRoot, ['init', '--quiet', '-b', 'main']);
+  c8FixtureGit(fixtureRoot, ['config', 'user.name', 'Toolkit C22 Git Fixture']);
+  c8FixtureGit(fixtureRoot, ['config', 'user.email', 'toolkit-c22-fixture@example.invalid']);
+  const commit = (message, date) => {
+    const environment = {
+      GIT_AUTHOR_NAME: 'Toolkit C22 Git Fixture',
+      GIT_AUTHOR_EMAIL: 'toolkit-c22-fixture@example.invalid',
+      GIT_COMMITTER_NAME: 'Toolkit C22 Git Fixture',
+      GIT_COMMITTER_EMAIL: 'toolkit-c22-fixture@example.invalid',
+      GIT_AUTHOR_DATE: date,
+      GIT_COMMITTER_DATE: date
+    };
+    c8FixtureGit(fixtureRoot, ['add', '--all']);
+    c8FixtureGit(fixtureRoot, ['commit', '--quiet', '--no-verify', '--no-gpg-sign', '-m', message], environment);
+    return c8FixtureGit(fixtureRoot, ['rev-parse', 'HEAD']);
+  };
+  const canonicalBaseSha = commit('C22 canonical base', '2000-01-01T00:00:00+0000');
+  fs.writeFileSync(path.join(fixtureRoot, 'intermediate.txt'), 'intermediate parent fixture\n', 'utf8');
+  const immediateParentSha = commit('C22 intermediate parent', '2000-01-02T00:00:00+0000');
+  fs.writeFileSync(targetFile, 'candidate head fixture\n', 'utf8');
+  const exactRemoteHeadSha = commit('C22 candidate head', '2000-01-03T00:00:00+0000');
+  const exactTreeSha = c8FixtureGit(fixtureRoot, ['rev-parse', exactRemoteHeadSha + '^{tree}']);
+  const immediateParentTreeSha = c8FixtureGit(fixtureRoot, ['rev-parse', immediateParentSha + '^{tree}']);
+  const immediateParentBlobSha = c8FixtureGit(fixtureRoot, ['rev-parse', immediateParentSha + ':' + targetPath]);
+  const authorisedBlobSha = c8FixtureGit(fixtureRoot, ['rev-parse', exactRemoteHeadSha + ':' + targetPath]);
+  const alternateBlobSha = c8FixtureGit(fixtureRoot, ['rev-parse', exactRemoteHeadSha + ':README.md']);
+  return {
+    root: fixtureRoot,
+    canonical_base_sha: canonicalBaseSha,
+    immediate_parent_sha: immediateParentSha,
+    immediate_parent_tree_sha: immediateParentTreeSha,
+    immediate_parent_blob_sha: immediateParentBlobSha,
+    exact_remote_head_sha: exactRemoteHeadSha,
+    exact_tree_sha: exactTreeSha,
+    alternate_blob_sha: alternateBlobSha,
+    authority: {
+      canonical_base_sha: canonicalBaseSha,
+      exact_remote_head_sha: exactRemoteHeadSha,
+      exact_tree_sha: exactTreeSha,
+      authorised_blobs: [{ path: targetPath, blob_sha: authorisedBlobSha }]
+    }
+  };
+}
+
+const c8GitAuthorityFixture = c8CreateGitAuthorityFixture(c8AuthorityTempRoot);
+
 function c8NewAuthorityStorePath(label = 'authority') {
   return path.join(fs.mkdtempSync(path.join(c8AuthorityTempRoot, label + '-')), 'authority.json');
 }
@@ -3586,16 +3648,16 @@ function c8Keys(value, allowed, field) { if (!value || typeof value !== 'object'
 function c8ShaCheck(value, field) { if (typeof value !== 'string' || !c8Sha.test(value)) throw new C8ContractError('MALFORMED_SHA', field); return value; }
 function c8Text(value, field, reason = 'SCOPE_MISMATCH') { if (typeof value !== 'string' || !value) throw new C8ContractError(reason, field); return value; }
 function c8List(value, field) { if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) throw new C8ContractError('SCOPE_MISMATCH', field); const sorted = [...value].sort(); if (new Set(sorted).size !== sorted.length) throw new C8ContractError('SCOPE_MISMATCH', field); return sorted; }
-function c8RealGitAuthority() {
-  const head = git('rev-parse', 'HEAD');
-  const base = git('rev-parse', 'HEAD^');
-  const tree = git('rev-parse', head + '^{tree}');
-  const paths = ['repo/tests/repo-auto-code-design.test.cjs'];
+function c8RealGitAuthority(authority = c8GitAuthorityFixture.authority) {
+  c8Keys(authority, ['canonical_base_sha', 'exact_remote_head_sha', 'exact_tree_sha', 'authorised_blobs'], 'real_git_authority');
   return {
-    canonical_base_sha: base,
-    exact_remote_head_sha: head,
-    exact_tree_sha: tree,
-    authorised_blobs: paths.map((filePath) => ({ path: filePath, blob_sha: git('rev-parse', head + ':' + filePath) }))
+    canonical_base_sha: c8ShaCheck(authority.canonical_base_sha, 'canonical_base_sha'),
+    exact_remote_head_sha: c8ShaCheck(authority.exact_remote_head_sha, 'exact_remote_head_sha'),
+    exact_tree_sha: c8ShaCheck(authority.exact_tree_sha, 'exact_tree_sha'),
+    authorised_blobs: authority.authorised_blobs.map((blob) => {
+      c8Keys(blob, ['path', 'blob_sha'], 'real_git_blob');
+      return { path: c8Text(blob.path, 'real_git_blob.path'), blob_sha: c8ShaCheck(blob.blob_sha, 'real_git_blob.blob_sha') };
+    })
   };
 }
 function c8DefaultSnapshot(overrides = {}) {
@@ -3763,10 +3825,10 @@ function c8MachineAuthority(input = c8DefaultSnapshot()) {
     snapshot_input: c8Clone(snapshot)
   };
 }
-function c8GitObjectType(objectId) {
+function c8GitObjectType(objectId, gitRoot = c8GitAuthorityFixture.root) {
   try {
-    execFileSync('git', ['cat-file', '-e', objectId], { cwd: repoRoot, stdio: ['ignore', 'ignore', 'ignore'] });
-    return execFileSync('git', ['cat-file', '-t', objectId], { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    execFileSync('git', ['cat-file', '-e', objectId], { cwd: gitRoot, stdio: ['ignore', 'ignore', 'ignore'] });
+    return execFileSync('git', ['cat-file', '-t', objectId], { cwd: gitRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch {
     return null;
   }
@@ -3777,35 +3839,37 @@ function c8ValidRepositoryPath(value) {
     value.split('/').every((part) => part && part !== '.' && part !== '..') &&
     path.posix.normalize(value) === value;
 }
-function c8VerifyRealGitProjection(projection) {
-  if (c8GitObjectType(projection.base_sha) !== 'commit' || c8GitObjectType(projection.head_sha) !== 'commit') {
+function c8VerifyRealGitProjection(projection, options = {}) {
+  const gitRoot = options.gitRoot || c8GitAuthorityFixture.root;
+  const expected = options.expectedAuthority || c8GitAuthorityFixture.authority;
+  if (c8GitObjectType(projection.base_sha, gitRoot) !== 'commit' || c8GitObjectType(projection.head_sha, gitRoot) !== 'commit') {
     return { ok: false, reason: 'GIT_COMMIT_INVALID', field: 'head_sha' };
   }
-  const treeType = c8GitObjectType(projection.tree_sha);
+  if (projection.base_sha !== expected.canonical_base_sha) return { ok: false, reason: 'GIT_BASE_MISMATCH', field: 'base_sha' };
+  if (projection.head_sha !== expected.exact_remote_head_sha) return { ok: false, reason: 'GIT_HEAD_MISMATCH', field: 'head_sha' };
+  const treeType = c8GitObjectType(projection.tree_sha, gitRoot);
   if (!treeType) return { ok: false, reason: 'GIT_TREE_INVALID', field: 'tree_sha' };
   if (treeType !== 'tree') return { ok: false, reason: 'GIT_TREE_TYPE_INVALID', field: 'tree_sha' };
   let expectedTree;
-  try { expectedTree = git('rev-parse', projection.head_sha + '^{tree}'); } catch { return { ok: false, reason: 'GIT_TREE_MISMATCH', field: 'tree_sha' }; }
+  try { expectedTree = c8FixtureGit(gitRoot, ['rev-parse', projection.head_sha + '^{tree}']); } catch { return { ok: false, reason: 'GIT_TREE_MISMATCH', field: 'tree_sha' }; }
   if (expectedTree !== projection.tree_sha) return { ok: false, reason: 'GIT_TREE_MISMATCH', field: 'tree_sha' };
+  if (projection.tree_sha !== expected.exact_tree_sha) return { ok: false, reason: 'GIT_TREE_MISMATCH', field: 'tree_sha' };
   for (const blob of projection.blobs) {
     if (!c8ValidRepositoryPath(blob.path)) return { ok: false, reason: 'GIT_PATH_INVALID', field: 'blob.path' };
-    const blobType = c8GitObjectType(blob.blob_sha);
+    const blobType = c8GitObjectType(blob.blob_sha, gitRoot);
     if (!blobType) return { ok: false, reason: 'GIT_BLOB_INVALID', field: 'blob.blob_sha' };
     if (blobType !== 'blob') return { ok: false, reason: 'GIT_BLOB_TYPE_INVALID', field: 'blob.blob_sha' };
     let entries;
-    try {
-      entries = execFileSync('git', ['ls-tree', '-z', projection.tree_sha, '--', blob.path], { cwd: repoRoot, encoding: 'buffer', stdio: ['ignore', 'pipe', 'ignore'] }).toString('utf8').split('\0').filter(Boolean);
-    } catch {
-      entries = [];
-    }
+    try { entries = execFileSync('git', ['ls-tree', '-z', projection.tree_sha, '--', blob.path], { cwd: gitRoot, encoding: 'buffer', stdio: ['ignore', 'pipe', 'ignore'] }).toString('utf8').split('\0').filter(Boolean); } catch { entries = []; }
     if (entries.length === 0) return { ok: false, reason: 'GIT_PATH_MISSING', field: 'blob.path' };
     const match = entries.map((entry) => entry.match(/^\d+ (\w+) ([0-9a-f]{40})\t([\s\S]*)$/)).find(Boolean);
     if (!match) return { ok: false, reason: 'GIT_PATH_BINDING_MISMATCH', field: 'blob.path' };
     if (match[1] !== 'blob' || match[3] !== blob.path || match[2] !== blob.blob_sha) return { ok: false, reason: 'GIT_PATH_BINDING_MISMATCH', field: 'blob.path' };
   }
+  if (c8Json(projection.blobs) !== c8Json(expected.authorised_blobs)) return { ok: false, reason: 'GIT_BLOB_MOVED', field: 'blobs' };
   return { ok: true };
 }
-function c8CollectMachine(machine) {
+function c8CollectMachine(machine, options = {}) {
   const reject = (reason, field = 'machine', observed = 'mismatch') => ({
     decision: 'MACHINE_AUTHORITY_REJECTED',
     reason,
@@ -3825,7 +3889,7 @@ function c8CollectMachine(machine) {
     ]) {
       if (c8Json(github[field]) !== c8Json(local[field])) return reject(reason, field);
     }
-    const gitResult = c8VerifyRealGitProjection(github);
+    const gitResult = c8VerifyRealGitProjection(github, options);
     if (!gitResult.ok) return reject(gitResult.reason, gitResult.field, 'unresolved');
     const snapshotInput = {
       schema: c8Schemas.snapshot,
@@ -4133,6 +4197,23 @@ test('C8 snapshot is deterministic, relevant, and requires full 40-character Git
 test('C8 machine collection requires byte-for-byte GitHub/local agreement and typed receipts', () => {
   const machine = c8MachineAuthority(); const valid = c8CollectMachine(machine); assert.equal(valid.decision, 'MACHINE_AUTHORITY_COLLECTED'); assert.equal(valid.bytes, c8Json({ github: machine.github, local: machine.local }));
   for (const [field, reason] of [['base_sha', 'BASE_MOVED'], ['head_sha', 'HEAD_MOVED'], ['tree_sha', 'TREE_MOVED'], ['blobs', 'BLOB_MOVED']]) { const mismatch = c8MachineAuthority(); if (field === 'blobs') mismatch.local.blobs[0].blob_sha = c8Hash('changed-blob'); else mismatch.local[field] = c8Hash('changed-' + field); const result = c8CollectMachine(mismatch); assert.equal(result.reason, reason); assert.equal(result.receipt.schema, c8Schemas.receipt); assert.equal(result.receipt.mutation_performed, false); assert.equal(result.receipt.evaluation_candidate_created, false); }
+});
+test('PRRT_kwDOSTHjGM6WPZc22 uses independent real-Git authority without surrounding checkout history', () => {
+  const authority = c8RealGitAuthority();
+  assert.equal(authority.canonical_base_sha, c8GitAuthorityFixture.canonical_base_sha);
+  assert.equal(authority.exact_remote_head_sha, c8GitAuthorityFixture.exact_remote_head_sha);
+  assert.equal(authority.exact_tree_sha, c8GitAuthorityFixture.exact_tree_sha);
+  assert.notEqual(authority.canonical_base_sha, c8GitAuthorityFixture.immediate_parent_sha);
+  assert.equal(c8CollectMachine(c8MachineAuthority()).decision, 'MACHINE_AUTHORITY_COLLECTED');
+
+  const wrongBase = c8MachineAuthority();
+  wrongBase.github.base_sha = c8GitAuthorityFixture.immediate_parent_sha;
+  wrongBase.local.base_sha = c8GitAuthorityFixture.immediate_parent_sha;
+  const rejected = c8CollectMachine(wrongBase);
+  assert.equal(rejected.decision, 'MACHINE_AUTHORITY_REJECTED');
+  assert.equal(rejected.reason, 'GIT_BASE_MISMATCH');
+  assert.equal(rejected.receipt.mutation_performed, false);
+  assert.equal(rejected.receipt.evaluation_candidate_created, false);
 });
 test('C8 deterministic parent markers and relevant child-keyed projection ignore unrelated sibling movement', () => {
   const marker = c8ParentMarker('status: admitted\nhead: full-object'); const parsed = c8ParentParse(marker); assert.equal(parsed.decision, 'PARENT_ENTRY_ADMITTED'); assert.equal(parsed.child_key, '#329'); assert.equal(parsed.revision, c8DigestBytes('status: admitted\nhead: full-object'));
@@ -4476,8 +4557,8 @@ test('PRRT_kwDOSTHjGM6WPZd1 verifies Git object type and exact path binding', ()
   assert.equal(valid.decision, 'MACHINE_AUTHORITY_COLLECTED');
   const snapshot = c8Snapshot(c8DefaultSnapshot());
   const head = snapshot.exact_remote_head_sha;
-  const alternateTree = git('rev-parse', git('rev-parse', 'HEAD^') + '^{tree}').trim();
-  const alternateBlob = git('rev-parse', 'HEAD:README.md').trim();
+  const alternateTree = c8GitAuthorityFixture.immediate_parent_tree_sha;
+  const alternateBlob = c8GitAuthorityFixture.alternate_blob_sha;
   const cases = [
     ['zero commit', (machine) => { machine.github.head_sha = '0'.repeat(40); machine.local.head_sha = '0'.repeat(40); }, 'GIT_COMMIT_INVALID'],
     ['nonexistent object', (machine) => { machine.github.tree_sha = 'f'.repeat(40); machine.local.tree_sha = 'f'.repeat(40); }, 'GIT_TREE_INVALID'],
