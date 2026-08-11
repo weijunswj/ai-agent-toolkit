@@ -1044,19 +1044,66 @@ function externalReviewGate(evidence) {
   };
 }
 
+function g4ConversationEvidenceFixture() {
+  const head = c8GitAuthorityFixture.exact_remote_head_sha;
+  const bytes = 'g4-final-pass-evidence';
+  return {
+    exactHeadBinding: {
+      repository: 'weijunswj/ai-agent-toolkit',
+      pull_request: 333,
+      head
+    },
+    boundedReplyAuthority: {
+      role: 'technical G4 reviewer',
+      surface: 'technical-g4-reviewer',
+      scope: 'one bounded technical reply',
+      action: 'reply',
+      resolve: false,
+      reopen: false,
+      dismiss: false
+    },
+    evidenceBinding: {
+      source_class: 'authoritative-raw',
+      repository: 'weijunswj/ai-agent-toolkit',
+      pull_request: 333,
+      head,
+      locator: 'raw://weijunswj/ai-agent-toolkit/pr-333/g4-final-pass#technical-g4-reply',
+      evidence_identity: 'g4-final-pass-evidence-1',
+      bytes,
+      content_digest: c8DigestBytes(bytes)
+    }
+  };
+}
+
+function g4ConversationPermission(evidence = {}) {
+  const reject = () => false;
+  if (evidence.resolve === true || evidence.reopen === true || evidence.dismiss === true) return reject();
+  for (const field of ['resolve', 'reopen', 'dismiss']) {
+    if (Object.hasOwn(evidence, field) && evidence[field] !== false) return reject();
+  }
+  if (evidence.action !== 'reply' || evidence.reply !== true || evidence.phase !== 'FINAL' || evidence.verdict !== 'PASS' ||
+      evidence.finalExactHead !== true || evidence.bounded !== true || evidence.evidenceBound !== true) return reject();
+
+  const expectedHead = c8GitAuthorityFixture.exact_remote_head_sha;
+  const exactHead = evidence.exactHeadBinding;
+  if (!exactHead || exactHead.repository !== 'weijunswj/ai-agent-toolkit' || exactHead.pull_request !== 333 || exactHead.head !== expectedHead) return reject();
+
+  const authority = evidence.boundedReplyAuthority;
+  if (!authority || authority.role !== 'technical G4 reviewer' || authority.surface !== 'technical-g4-reviewer' ||
+      authority.scope !== 'one bounded technical reply' || authority.action !== 'reply' ||
+      authority.resolve !== false || authority.reopen !== false || authority.dismiss !== false) return reject();
+
+  const binding = evidence.evidenceBinding;
+  if (!binding || binding.source_class !== 'authoritative-raw' || binding.repository !== 'weijunswj/ai-agent-toolkit' ||
+      binding.pull_request !== 333 || binding.head !== expectedHead || !nonEmptyString(binding.locator) ||
+      !binding.locator.includes('#technical-g4-reply') || !nonEmptyString(binding.evidence_identity) ||
+      !nonEmptyString(binding.bytes) || !c8Digest.test(binding.content_digest) ||
+      binding.content_digest !== c8DigestBytes(binding.bytes)) return reject();
+  return true;
+}
+
 function g4ThreadPermission(evidence) {
-  assert.equal(typeof evidence.phase, 'string');
-  assert.equal(typeof evidence.finalExactHead, 'boolean');
-  assert.equal(typeof evidence.bounded, 'boolean');
-  assert.equal(typeof evidence.evidenceBound, 'boolean');
-  if (evidence.action === 'resolve') return false;
-  if (evidence.phase === 'AMEND') return false;
-  if (evidence.phase !== 'FINAL') return false;
-  return evidence.action === 'reply' &&
-    evidence.verdict === 'PASS' &&
-    evidence.finalExactHead === true &&
-    evidence.bounded === true &&
-    evidence.evidenceBound === true;
+  return g4ConversationPermission(evidence);
 }
 
 function assuranceGate(evidence) {
@@ -1272,8 +1319,10 @@ test('A4 prohibits authoritative G4 thread resolution in every phase', () => {
 test('A4 permits only a bounded evidence reply after final technical PASS', () => {
   assertA4Terms(['bounded, evidence-backed technical reply']);
   const evidence = {
+    ...g4ConversationEvidenceFixture(),
     phase: 'FINAL',
     action: 'reply',
+    reply: true,
     verdict: 'PASS',
     finalExactHead: true,
     bounded: true,
@@ -2998,8 +3047,92 @@ const expectedInvariantBundles = {
 };
 
 const negativeTestReference = (invariantId) => 'repo/tests/repo-auto-code-design.test.cjs::negative::' + invariantId;
-const negativeTestContracts = new Map(Object.keys(expectedInvariantBundles)
-  .map((invariantId) => [invariantId, negativeTestReference(invariantId)]));
+const negativeTestContracts = new Map();
+
+function registerNegativeTestContracts(invariantIds) {
+  for (const invariantId of invariantIds) {
+    if (negativeTestContracts.has(invariantId)) continue;
+    const reference = negativeTestReference(invariantId);
+    negativeTestContracts.set(invariantId, Object.freeze({
+      invariant_id: invariantId,
+      negative_test_id: reference,
+      reference,
+      required_outcome: 'INVARIANT_REGRESSION',
+      execute(record, evaluate) {
+        const candidate = c8Clone(record || {
+          invariant_id: invariantId,
+          source_authority: 'registered-negative-contract',
+          required_semantics: [],
+          candidate_evidence: [],
+          negative_test: reference,
+          status: 'preserved',
+          authorising_design_lock: 'DL-329-AUTO-CODE-005-A6-C4'
+        });
+        candidate.negative_test = reference + '::broken';
+        return {
+          invariant_id: invariantId,
+          negative_test_id: reference,
+          candidate,
+          outcome: evaluate(candidate)
+        };
+      }
+    }));
+  }
+}
+
+function negativeTestRegistrationFor(invariantId, registrations) {
+  if (registrations instanceof Map) {
+    const registration = registrations.get(invariantId);
+    return registration && registration.invariant_id === invariantId ? registration : null;
+  }
+  if (!Array.isArray(registrations)) return null;
+  const matches = registrations.filter((entry) => entry && entry.invariant_id === invariantId);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function negativeContractProof(record, expected, registrations = negativeTestContracts) {
+  const registration = record && negativeTestRegistrationFor(record.invariant_id, registrations);
+  if (!registration || registration.invariant_id !== record.invariant_id ||
+      registration.negative_test_id !== registration.reference || record.negative_test !== registration.reference ||
+      registration.required_outcome !== 'INVARIANT_REGRESSION' || typeof registration.execute !== 'function') return false;
+  try {
+    const result = registration.execute(c8Clone(record), (candidate) => invariantDecision(candidate, expected, { skipNegativeContract: true, registrations }));
+    return result && result.invariant_id === record.invariant_id && result.negative_test_id === record.negative_test &&
+      result.candidate && result.candidate.invariant_id === record.invariant_id &&
+      result.candidate.negative_test === registration.negative_test_id + '::broken' &&
+      result.outcome === registration.required_outcome &&
+      invariantDecision(result.candidate, expected, { skipNegativeContract: true, registrations }) === registration.required_outcome;
+  } catch {
+    return false;
+  }
+}
+
+function validNegativeTestRegistration(record, expected) {
+  return !!record && negativeContractProof(record, expected);
+}
+
+function validateNegativeTestRegistry(records, registrations = negativeTestContracts) {
+  if (!Array.isArray(records) || records.length === 0) return 'INVARIANT_REGRESSION';
+  const recordIds = records.map((record) => record && record.invariant_id);
+  if (recordIds.some((id) => !nonEmptyString(id) || !expectedInvariantBundles[id]) ||
+      new Set(recordIds).size !== recordIds.length) return 'INVARIANT_REGRESSION';
+  const pairs = registrations instanceof Map
+    ? [...registrations.entries()]
+    : Array.isArray(registrations) ? registrations.map((entry) => [undefined, entry]) : null;
+  if (!pairs) return 'INVARIANT_REGRESSION';
+  if (registrations instanceof Map && pairs.some(([key, entry]) => key !== entry?.invariant_id)) return 'INVARIANT_REGRESSION';
+  const entries = pairs.map(([, entry]) => entry);
+  if (!Array.isArray(entries) || entries.some((entry) => !entry || !nonEmptyString(entry.invariant_id)) ||
+      new Set(entries.map((entry) => entry.invariant_id)).size !== entries.length ||
+      entries.some((entry) => !recordIds.includes(entry.invariant_id) && entry.invariant_id !== 'AUTH-LEDGER-RECEIPT-REPLACEMENT-001')) return 'INVARIANT_REGRESSION';
+  if (entries.length < recordIds.length) return 'INVARIANT_REGRESSION';
+  const lookup = new Map(entries.map((entry) => [entry.invariant_id, entry]));
+  for (const record of records) {
+    if (!negativeTestRegistrationFor(record.invariant_id, lookup) ||
+        invariantDecision(record, expectedInvariantBundles[record.invariant_id], { registrations: lookup }) !== 'PRESERVED') return 'INVARIANT_REGRESSION';
+  }
+  return 'PRESERVED';
+}
 const candidateSchemaMapping = {
   base_model: 'canonical_base_model',
   revision: 'source_revision',
@@ -3018,7 +3151,7 @@ function validReplacementContract(change) {
   if (!replacement || !nonEmptyString(replacement.invariant_id) ||
       !Array.isArray(replacement.required_semantics) || replacement.required_semantics.length === 0 ||
       !Array.isArray(replacement.candidate_evidence) || replacement.candidate_evidence.length === 0 ||
-      replacement.negative_test !== negativeTestReference(replacement.invariant_id)) return false;
+      !validNegativeTestRegistration(replacement)) return false;
   const semantics = new Set(replacement.required_semantics.map((entry) => entry && entry.semantic_id));
   const evidence = new Set(replacement.candidate_evidence.map((entry) => entry && entry.semantic_id));
   return !semantics.has(undefined) && semantics.size === replacement.required_semantics.length &&
@@ -3041,7 +3174,7 @@ function validDesignLockChange(record) {
     nonEmptyString(change.rationale);
 }
 
-function invariantDecision(record, expected) {
+function invariantDecision(record, expected, options = {}) {
   if (!record || invariantRequiredFields.some((field) => !Object.hasOwn(record, field))) return 'INVARIANT_REGRESSION';
   if (typeof record.invariant_id !== 'string' || typeof record.source_authority !== 'string' ||
       typeof record.negative_test !== 'string' || typeof record.authorising_design_lock !== 'string' ||
@@ -3049,8 +3182,11 @@ function invariantDecision(record, expected) {
       !Array.isArray(record.required_semantics) || !Array.isArray(record.candidate_evidence)) {
     return 'INVARIANT_REGRESSION';
   }
-  if (negativeTestContracts.get(record.invariant_id) !== record.negative_test &&
-      record.negative_test !== negativeTestReference(record.invariant_id)) return 'INVARIANT_REGRESSION';
+  const registrations = options.registrations || negativeTestContracts;
+  const registration = negativeTestRegistrationFor(record.invariant_id, registrations);
+  if (!registration || registration.invariant_id !== record.invariant_id ||
+      registration.negative_test_id !== registration.reference || record.negative_test !== registration.reference) return 'INVARIANT_REGRESSION';
+  if (!options.skipNegativeContract && !negativeContractProof(record, expected, registrations)) return 'INVARIANT_REGRESSION';
   if (record.status !== 'preserved') {
     if (!validDesignLockChange(record)) return 'INVARIANT_REGRESSION';
     if (record.status === 'amended' && !validReplacementContract(record.design_lock_change)) return 'INVARIANT_REGRESSION';
@@ -3103,6 +3239,7 @@ test('A6-C4 registry is machine-checkable and contains the complete seeded invar
     assert.ok(records.has(id), id + ' must be seeded');
     assert.equal(invariantDecision(records.get(id), expected), 'PRESERVED', id);
   }
+  assert.equal(validateNegativeTestRegistry(registry.invariants), 'PRESERVED');
   assert.equal(validateRegressionLinks([...records.values()]), true);
 });
 
@@ -3521,18 +3658,12 @@ const c8InvariantBundles = {
   }}
 };
 Object.assign(expectedInvariantBundles, c8InvariantBundles);
-for (const id of Object.keys(c8InvariantBundles)) negativeTestContracts.set(id, negativeTestReference(id));
+registerNegativeTestContracts([
+  ...Object.keys(expectedInvariantBundles),
+  'AUTH-LEDGER-RECEIPT-REPLACEMENT-001'
+]);
 
 const c7FinalityPredicates = Object.freeze(['reviewAmendConvergence', 'currentRelevantAuthority', 'currentDesignLockAndScope', 'freshExactHeadG4Pass', 'completeTerminalPacket', 'noBlockingReview', 'noAuthorityMovement', 'noContradictions', 'comprehensiveIndependentWebFinalGate']);
-function c7FinalityDecision(evidence = {}) {
-  const missing = c7FinalityPredicates.filter((key) => evidence[key] !== true); const contradictions = [];
-  if (evidence.g4Verdict !== undefined && evidence.g4Verdict !== 'PASS') contradictions.push('G4_NOT_PASS');
-  if (evidence.g4ExactHead === false) contradictions.push('G4_HEAD_MISMATCH');
-  if (evidence.webSoleFinalAuthority === false) contradictions.push('WEB_AUTHORITY_CONTRADICTION');
-  for (const claim of evidence.authorityClaims || []) if (claim && /finality|accept|merge|close|waive|web/i.test(String(claim.claim || ''))) contradictions.push(String(claim.surface || 'unknown').toUpperCase() + '_FINALITY_CLAIM');
-  const base = { mergeAuthorized: false, webSoleFinalAuthority: true, routineAssuranceRequired: false, missing, contradictions };
-  return missing.length || contradictions.length ? { ...base, decision: 'FINALITY_BLOCKED', finality: false } : { ...base, decision: 'FINALITY_ADMITTED', finality: true };
-}
 const c7ExceptionalCategories = Object.freeze(['cryptography', 'recovery', 'irreversible_migration', 'destructive_migration', 'critical_security_boundary', 'conflicting_evidence']);
 let c7ExceptionalGrantSequence = 0;
 
@@ -3736,12 +3867,54 @@ function c8Projection(snapshot) {
 function c8Receipt(phase, reason, field = 'contract', expected = 'canonical-authority', observed = 'rejected', snapshot = null, lease = null) { return { schema: c8Schemas.receipt, phase, reason, field, expected_format: expected, observed_format: observed, snapshot_identity: snapshot && snapshot.snapshot_digest || null, lease_identity: lease && lease.lease_id || null, mutation_performed: false, evaluation_candidate_created: false }; }
 function c8Compare(snapshot, current = {}) { const baseline = c8Snapshot(c8Material(snapshot)); const candidate = { ...current }; const ignored = candidate.unrelated_sibling_parent_revision; delete candidate.unrelated_sibling_parent_revision; delete candidate.snapshot_digest; delete candidate.canonical_bytes; const currentSnapshot = c8Snapshot(c8DefaultSnapshot(candidate)); const left = c8Projection(baseline); const right = c8Projection(currentSnapshot); for (const [field, reason] of [['child', 'CHILD_AUTHORITY_MOVED'], ['pull_request', 'PR_AUTHORITY_MOVED'], ['parent_entry', 'PARENT_ENTRY_MOVED'], ['design_lock', 'DESIGN_LOCK_MISMATCH'], ['scope', 'SCOPE_MISMATCH'], ['base', 'BASE_MOVED'], ['head', 'HEAD_MOVED'], ['tree', 'TREE_MOVED'], ['blobs', 'BLOB_MOVED'], ['role', 'SCOPE_MISMATCH'], ['capabilities', 'SCOPE_MISMATCH']]) if (c8Json(left[field]) !== c8Json(right[field])) return { decision: 'AUTHORITY_REJECTED', reason, ignored_unrelated_sibling_parent_revision: ignored === undefined ? null : 'ignored', receipt: c8Receipt('authority-comparison', reason, field, 'relevant-authority', 'changed', baseline) }; return { decision: 'AUTHORITY_ADMITTED', ignored_unrelated_sibling_parent_revision: ignored === undefined ? null : 'ignored', snapshot: currentSnapshot }; }
 const c8MachineFields = Object.freeze(['schema', 'collector', 'repository', 'child_issue', 'pull_request', 'parent_entry', 'design_lock', 'run_identity', 'scope', 'role', 'capabilities', 'child_authority_revision', 'pr_authority_revision', 'relevant_parent_entry_revision', 'projection', 'base_sha', 'head_sha', 'tree_sha', 'blobs']);
+const c8MachineRawFieldReasons = Object.freeze([
+  ['repository', 'REPOSITORY_MOVED'], ['child_issue', 'CHILD_AUTHORITY_MOVED'], ['pull_request', 'PR_AUTHORITY_MOVED'],
+  ['parent_entry', 'PARENT_ENTRY_MOVED'], ['design_lock', 'DESIGN_LOCK_MISMATCH'], ['run_identity', 'RUN_IDENTITY_MISMATCH'],
+  ['scope', 'SCOPE_MISMATCH'], ['role', 'ROLE_MISMATCH'], ['capabilities', 'CAPABILITY_MISMATCH'],
+  ['child_authority_revision', 'CHILD_AUTHORITY_MOVED'], ['pr_authority_revision', 'PR_AUTHORITY_MOVED'],
+  ['relevant_parent_entry_revision', 'PARENT_ENTRY_MOVED'], ['projection', 'PARENT_ENTRY_MOVED']
+]);
+const c8MachineGitFields = Object.freeze(['base_sha', 'head_sha', 'tree_sha', 'blobs']);
+
+function c8ValidateMachineRawEvidence(side, expectedSource) {
+  const collector = side.collector;
+  if (!nonEmptyString(collector.evidence_identity) || !collector.evidence_locator ||
+      !nonEmptyString(collector.evidence_digest) || !nonEmptyString(collector.evidence_bytes)) {
+    throw new C8ContractError('MACHINE_RAW_EVIDENCE_REQUIRED', 'collector');
+  }
+  if (!c8Digest.test(collector.evidence_digest) || collector.evidence_digest !== c8DigestBytes(collector.evidence_bytes)) {
+    throw new C8ContractError('MACHINE_RAW_EVIDENCE_INVALID', 'collector.evidence_digest');
+  }
+  let raw;
+  try { raw = JSON.parse(collector.evidence_bytes); } catch { throw new C8ContractError('MACHINE_RAW_EVIDENCE_INVALID', 'collector.evidence_bytes'); }
+  if (c8Json(raw) !== collector.evidence_bytes || raw.schema !== 'machine-authority-raw/v1' || raw.source !== expectedSource ||
+      raw.evidence_identity !== collector.evidence_identity || !raw.authority || typeof raw.authority !== 'object') {
+    throw new C8ContractError('MACHINE_RAW_SOURCE_MISMATCH', 'collector.evidence_identity');
+  }
+  const locator = collector.evidence_locator;
+  c8Keys(locator, ['source_class', 'kind', 'exact_locator', 'evidence_identity', 'content_digest', 'resolved_locator', 'resolved_evidence_identity', 'resolved_bytes'], 'machine_evidence_locator');
+  const expectedKind = expectedSource === 'github-api' ? 'github-api' : 'local-command';
+  if (locator.source_class !== 'authoritative-raw' || locator.kind !== expectedKind || !nonEmptyString(locator.exact_locator) ||
+      !locator.exact_locator.includes('/' + expectedSource + '/') || !locator.exact_locator.includes('#machine-authority') || locator.evidence_identity !== collector.evidence_identity ||
+      !c8Digest.test(locator.content_digest || '') || locator.resolved_locator !== locator.exact_locator ||
+      locator.resolved_evidence_identity !== locator.evidence_identity || !nonEmptyString(locator.resolved_bytes) ||
+      locator.resolved_bytes !== collector.evidence_bytes || collector.evidence_digest !== locator.content_digest ||
+      c8DigestBytes(locator.resolved_bytes) !== locator.content_digest) {
+    throw new C8ContractError('MACHINE_RAW_EVIDENCE_INVALID', 'collector.evidence_locator');
+  }
+  c8Keys(raw.authority, c8MachineFields.filter((field) => field !== 'collector'), 'machine_raw_authority');
+  for (const [field, reason] of c8MachineRawFieldReasons) {
+    if (c8Json(raw.authority[field]) !== c8Json(side[field])) throw new C8ContractError(reason, field);
+  }
+}
+
 function c8MachineSideNormalize(side, expectedSource) {
   if (!side || typeof side !== 'object' || Array.isArray(side)) throw new C8ContractError('MALFORMED_MACHINE_AUTHORITY', 'machine');
   c8Keys(side, c8MachineFields, 'machine_authority');
   if (side.schema !== 'machine-authority/v1') throw new C8ContractError('MALFORMED_MACHINE_AUTHORITY', 'schema');
-  c8Keys(side.collector, ['source', 'collection_id'], 'collector');
+  c8Keys(side.collector, ['source', 'collection_id', 'evidence_identity', 'evidence_locator', 'evidence_digest', 'evidence_bytes'], 'collector');
   if (side.collector.source !== expectedSource || !nonEmptyString(side.collector.collection_id)) throw new C8ContractError('MALFORMED_MACHINE_AUTHORITY', 'collector');
+  c8ValidateMachineRawEvidence(side, expectedSource);
   c8Keys(side.repository, ['owner', 'name'], 'machine_repository');
   c8Keys(side.child_issue, ['number', 'authority_revision'], 'machine_child_issue');
   c8Keys(side.pull_request, ['number', 'authority_revision'], 'machine_pull_request');
@@ -3797,9 +3970,8 @@ function c8MachineSideNormalize(side, expectedSource) {
     blobs
   };
 }
-function c8MachineAuthority(input = c8DefaultSnapshot()) {
-  const snapshot = c8NormalizeSnapshot(input && input.snapshot_digest ? c8Material(input) : input);
-  const common = {
+function c8MachineMaterialFromSnapshot(snapshot) {
+  return {
     schema: 'machine-authority/v1',
     repository: c8Clone(snapshot.repository),
     child_issue: c8Clone(snapshot.child_issue),
@@ -3819,10 +3991,68 @@ function c8MachineAuthority(input = c8DefaultSnapshot()) {
     tree_sha: snapshot.exact_tree_sha,
     blobs: c8Clone(snapshot.authorised_blobs)
   };
+}
+
+function c8RawMachineAuthorityCollection(input, source) {
+  const snapshot = c8NormalizeSnapshot(c8Clone(input && input.snapshot_digest ? c8Material(input) : input));
+  const authority = c8MachineMaterialFromSnapshot(snapshot);
+  const evidenceIdentity = 'machine-authority-evidence-' + source;
+  const raw = {
+    schema: 'machine-authority-raw/v1',
+    source,
+    evidence_identity: evidenceIdentity,
+    authority
+  };
+  const evidenceBytes = c8Json(raw);
+  const locator = {
+    source_class: 'authoritative-raw',
+    kind: source === 'github-api' ? 'github-api' : 'local-command',
+    exact_locator: 'raw://weijunswj/ai-agent-toolkit/pr-333/' + source + '/machine-authority#machine-authority',
+    evidence_identity: evidenceIdentity,
+    content_digest: c8DigestBytes(evidenceBytes),
+    resolved_locator: 'raw://weijunswj/ai-agent-toolkit/pr-333/' + source + '/machine-authority#machine-authority',
+    resolved_evidence_identity: evidenceIdentity,
+    resolved_bytes: evidenceBytes
+  };
+  const side = {
+    ...authority,
+    collector: {
+      source,
+      collection_id: 'machine-authority-' + source + '-v1',
+      evidence_identity: evidenceIdentity,
+      evidence_locator: locator,
+      evidence_digest: c8DigestBytes(evidenceBytes),
+      evidence_bytes: evidenceBytes
+    }
+  };
+  return c8MachineSideNormalize(side, source);
+}
+
+function c8CollectGithubMachineAuthority(input) {
+  return c8RawMachineAuthorityCollection(c8Clone(input), 'github-api');
+}
+
+function c8CollectLocalMachineAuthority(input) {
+  return c8RawMachineAuthorityCollection(c8Clone(input), 'local-git');
+}
+
+function c8MachineAuthority(input) {
+  const sources = input === undefined ? {
+    github: c8DefaultSnapshot(),
+    local: c8DefaultSnapshot(),
+    snapshot_input: c8DefaultSnapshot()
+  } : input;
+  if (!sources || !sources.github || !sources.local || sources.github === sources.local) {
+    throw new C8ContractError('MACHINE_AUTHORITY_INDEPENDENCE_REQUIRED', 'sources');
+  }
+  const githubInput = sources.github.snapshot_digest ? c8Material(sources.github) : c8Clone(sources.github);
+  const localInput = sources.local.snapshot_digest ? c8Material(sources.local) : c8Clone(sources.local);
+  const snapshotInput = sources.snapshot_input || sources.github;
+  const snapshot = c8Snapshot(snapshotInput.snapshot_digest ? c8Material(snapshotInput) : c8Clone(snapshotInput));
   return {
-    github: { ...c8Clone(common), collector: { source: 'github-api', collection_id: 'github-authority-record-v1' } },
-    local: { ...c8Clone(common), collector: { source: 'local-git', collection_id: 'local-authority-record-v1' } },
-    snapshot_input: c8Clone(snapshot)
+    github: c8CollectGithubMachineAuthority(githubInput),
+    local: c8CollectLocalMachineAuthority(localInput),
+    snapshot_input: c8Material(snapshot)
   };
 }
 function c8GitObjectType(objectId, gitRoot = c8GitAuthorityFixture.root) {
@@ -3879,6 +4109,11 @@ function c8CollectMachine(machine, options = {}) {
     if (!machine || !machine.github || !machine.local) return reject('MALFORMED_MACHINE_AUTHORITY');
     const github = c8MachineSideNormalize(machine.github, 'github-api');
     const local = c8MachineSideNormalize(machine.local, 'local-git');
+    if (github.collector.evidence_identity === local.collector.evidence_identity ||
+        github.collector.evidence_digest === local.collector.evidence_digest ||
+        c8Json(github.collector.evidence_locator) === c8Json(local.collector.evidence_locator)) {
+      return reject('MACHINE_AUTHORITY_INDEPENDENCE_REQUIRED', 'collector.evidence_identity', 'duplicate');
+    }
     for (const [field, reason] of [
       ['repository', 'REPOSITORY_MOVED'], ['child_issue', 'CHILD_AUTHORITY_MOVED'], ['pull_request', 'PR_AUTHORITY_MOVED'],
       ['parent_entry', 'PARENT_ENTRY_MOVED'], ['design_lock', 'DESIGN_LOCK_MISMATCH'], ['run_identity', 'RUN_IDENTITY_MISMATCH'],
@@ -3891,6 +4126,13 @@ function c8CollectMachine(machine, options = {}) {
     }
     const gitResult = c8VerifyRealGitProjection(github, options);
     if (!gitResult.ok) return reject(gitResult.reason, gitResult.field, 'unresolved');
+    for (const side of [github, local]) {
+      let raw;
+      try { raw = JSON.parse(side.collector.evidence_bytes); } catch { return reject('MACHINE_RAW_EVIDENCE_INVALID', 'collector.evidence_bytes', 'unresolved'); }
+      for (const field of c8MachineGitFields) {
+        if (c8Json(raw.authority[field]) !== c8Json(side[field])) return reject('MACHINE_RAW_EVIDENCE_INVALID', field, 'unresolved');
+      }
+    }
     const snapshotInput = {
       schema: c8Schemas.snapshot,
       repository: github.repository,
@@ -3920,7 +4162,13 @@ function c8CollectMachine(machine, options = {}) {
       bytes: c8Json({ github: machine.github, local: machine.local })
     };
   } catch (error) {
-    return reject(error.reason === 'MALFORMED_MACHINE_AUTHORITY' ? error.reason : 'MALFORMED_MACHINE_AUTHORITY', error.field || 'machine');
+    const typedReasons = [
+      'MALFORMED_MACHINE_AUTHORITY', 'MACHINE_RAW_EVIDENCE_REQUIRED', 'MACHINE_RAW_EVIDENCE_INVALID', 'MACHINE_RAW_SOURCE_MISMATCH',
+      'MACHINE_AUTHORITY_INDEPENDENCE_REQUIRED', 'REPOSITORY_MOVED', 'CHILD_AUTHORITY_MOVED', 'PR_AUTHORITY_MOVED',
+      'PARENT_ENTRY_MOVED', 'DESIGN_LOCK_MISMATCH', 'RUN_IDENTITY_MISMATCH', 'SCOPE_MISMATCH', 'ROLE_MISMATCH',
+      'CAPABILITY_MISMATCH', 'BASE_MOVED', 'HEAD_MOVED', 'TREE_MOVED', 'BLOB_MOVED'
+    ];
+    return reject(typedReasons.includes(error.reason) ? error.reason : 'MALFORMED_MACHINE_AUTHORITY', error.field || 'machine');
   }
 }
 
@@ -4157,7 +4405,7 @@ function c8ClassifyOutput(input = {}) {
 }
 
 function c8AdmittedLeaseFixture(snapshot, overrides = {}) {
-  const machine = c8MachineAuthority(c8Material(snapshot));
+  const machine = c8MachineAuthority();
   const lease = c8LeaseCreate(snapshot, { lease_id: overrides.lease_id || 'lease-test-' + Date.now() });
   const registry = new C8LeaseRegistry(overrides.lease_store_path);
   registry.register(lease);
@@ -4170,14 +4418,14 @@ function c8AdmittedLeaseFixture(snapshot, overrides = {}) {
     renderedManifest: c8ManifestRender(c8Manifest(snapshot)),
     lease: registry.records.get(lease.lease_id),
     leaseRegistry: registry,
-    finalReread: { machine: c8MachineAuthority(c8Material(snapshot)) },
+    finalReread: { machine: c8MachineAuthority() },
     current_operation_time: overrides.current_operation_time || '2026-08-04T00:00:30.000Z'
   };
 }
 const c8SourceProhibitions = ['install', 'activate', 'schedule', 'Auto Review', 'automatic next-task pickup', 'Fast', 'delegation', 'spawn'];
 
 test('C7 finality is conjunctive, Web-only, and does not require routine Temporary Chat assurance', () => {
-  const evidence = Object.fromEntries(c7FinalityPredicates.map((key) => [key, true])); evidence.g4Verdict = 'PASS'; evidence.g4ExactHead = true; evidence.webExecutionIdentity = { actor: 'web' }; evidence.comprehensiveIndependentWebFinalGate = { actor: 'web' };
+  const evidence = Object.fromEntries(c7FinalityPredicates.map((key) => [key, true])); evidence.g4Verdict = 'PASS'; evidence.g4ExactHead = true; evidence.webFinalityExecutionEvidence = c7WebFinalityEvidenceFixture();
   const result = c7FinalityDecision(evidence); assert.equal(result.decision, 'FINALITY_ADMITTED'); assert.equal(result.finality, true); assert.equal(result.webSoleFinalAuthority, true); assert.equal(result.routineAssuranceRequired, false); assert.equal(result.mergeAuthorized, false);
 });
 test('C7 missing predicates, contradictions, and exceptional reviewer boundary are enforced', () => {
@@ -4296,18 +4544,103 @@ Object.assign(expectedInvariantBundles, {
   }
 });
 
+function c7ExpectedWebFinalityContext() {
+  const snapshot = c8Snapshot(c8DefaultSnapshot());
+  return {
+    repository: 'weijunswj/ai-agent-toolkit',
+    pull_request: 333,
+    exact_head: snapshot.exact_remote_head_sha,
+    run_id: 'run-web-finality-synthetic',
+    session_id: 'session-web-finality-synthetic',
+    turn_id: 'turn-web-finality-synthetic'
+  };
+}
+
+function c7WebFinalityEvidenceFixture(overrides = {}) {
+  const context = c7ExpectedWebFinalityContext();
+  const locator = {
+    source_class: 'authoritative-raw',
+    kind: 'github-api',
+    exact_locator: 'raw://weijunswj/ai-agent-toolkit/pr-333/web-finality#web-execution-identity',
+    evidence_identity: 'web-finality-execution-evidence-1',
+    inspected_subject: 'web-execution-identity',
+    observed_at: '2026-08-11T00:00:00.000Z',
+    accessible: true,
+    repository: context.repository,
+    pull_request: context.pull_request,
+    exact_head: context.exact_head
+  };
+  locator.resolved_locator = locator.exact_locator;
+  locator.resolved_evidence_identity = locator.evidence_identity;
+  locator.resolved_bytes = c6ResolvedEvidenceBytes(locator);
+  locator.content_digest = c8DigestBytes(locator.resolved_bytes);
+  const executionIdentity = {
+    provider: 'web-provider-synthetic',
+    canonical_model: 'web-model-synthetic',
+    reasoning: 'web-reasoning-synthetic',
+    assignment_source: 'web-authoritative-assignment',
+    assignment_evidence_locator: 'raw://weijunswj/ai-agent-toolkit/pr-333/web-assignment#web-assignment',
+    role: 'Web Orchestrator verification',
+    surface: 'web-orchestrator',
+    run_id: context.run_id,
+    session_id: context.session_id,
+    turn_id: context.turn_id,
+    repository: context.repository,
+    pull_request: context.pull_request,
+    exact_head: context.exact_head,
+    evidence_locator: locator.exact_locator,
+    evidence_identity: locator.evidence_identity
+  };
+  const bytes = c8Json({
+    schema: 'web-finality-execution/v1',
+    authority: context,
+    execution_identity: executionIdentity
+  });
+  return {
+    schema: 'web-finality-execution-evidence/v1',
+    bytes,
+    content_digest: c8DigestBytes(bytes),
+    evidence_identity: locator.evidence_identity,
+    authoritative_locator: locator,
+    ...overrides
+  };
+}
+
+function c7VerifiedWebExecutionIdentity(rawEvidence, expected = c7ExpectedWebFinalityContext()) {
+  if (!rawEvidence || rawEvidence.schema !== 'web-finality-execution-evidence/v1' ||
+      !c6ValidEvidenceDigest(rawEvidence) || rawEvidence.evidence_identity !== rawEvidence.authoritative_locator?.evidence_identity) return null;
+  const locator = rawEvidence.authoritative_locator;
+  const context = { authority: { repository: expected.repository, pull_request: expected.pull_request, head: expected.exact_head } };
+  if (!c6ValidRawLocator(locator, 'web-execution-identity', context) ||
+      rawEvidence.content_digest !== c8DigestBytes(rawEvidence.bytes)) return null;
+  let parsed;
+  try { parsed = JSON.parse(rawEvidence.bytes); } catch { return null; }
+  if (c8Json(parsed) !== rawEvidence.bytes || parsed.schema !== 'web-finality-execution/v1' ||
+      c8Json(parsed.authority) !== c8Json(expected)) return null;
+  const identity = parsed.execution_identity;
+  if (!identity || ['provider', 'canonical_model', 'reasoning', 'assignment_source', 'assignment_evidence_locator', 'role', 'surface', 'run_id', 'session_id', 'turn_id'].some((field) => !nonEmptyString(identity[field])) ||
+      identity.role !== 'Web Orchestrator verification' || identity.surface !== 'web-orchestrator' ||
+      identity.repository !== expected.repository || identity.pull_request !== expected.pull_request || identity.exact_head !== expected.exact_head ||
+      identity.run_id !== expected.run_id || identity.session_id !== expected.session_id || identity.turn_id !== expected.turn_id ||
+      identity.evidence_locator !== locator.exact_locator || identity.evidence_identity !== locator.evidence_identity) return null;
+  return identity;
+}
+
 function c7FinalityDecision(evidence = {}) {
-  const gateIdentity = evidence.comprehensiveIndependentWebFinalGateIdentity || evidence.comprehensiveIndependentWebFinalGate;
-  const missing = c7FinalityPredicates.filter((key) => evidence[key] !== true && !(key === 'comprehensiveIndependentWebFinalGate' && gateIdentity?.actor === 'web'));
+  const missing = c7FinalityPredicates.filter((key) => evidence[key] !== true);
   const addMissing = (key) => { if (!missing.includes(key)) missing.push(key); };
   const contradictions = [];
-  const webExecutionIdentityVerified = evidence.webExecutionIdentity?.actor === 'web' && gateIdentity?.actor === 'web';
+  const verifiedWebIdentity = c7VerifiedWebExecutionIdentity(evidence.webFinalityExecutionEvidence);
+  const webExecutionIdentityVerified = !!verifiedWebIdentity;
   if (!webExecutionIdentityVerified) addMissing('comprehensiveIndependentWebFinalGate');
   if (evidence.g4Verdict !== 'PASS') { addMissing('freshExactHeadG4Pass'); contradictions.push('G4_NOT_PASS'); }
   if (evidence.g4ExactHead !== true) { addMissing('freshExactHeadG4Pass'); contradictions.push('G4_HEAD_MISMATCH'); }
   if (evidence.webSoleFinalAuthority === false) contradictions.push('WEB_AUTHORITY_CONTRADICTION');
+  for (const identity of [evidence.webExecutionIdentity, evidence.comprehensiveIndependentWebFinalGateIdentity]) {
+    if (identity && identity.actor !== undefined && identity.actor !== 'web') contradictions.push('WEB_IDENTITY_CONTRADICTION');
+  }
   for (const claim of evidence.authorityClaims || []) if (claim && /finality|accept|merge|close|waive|web/i.test(String(claim.claim || ''))) contradictions.push(String(claim.surface || 'unknown').toUpperCase() + '_FINALITY_CLAIM');
-  const base = { mergeAuthorized: false, webSoleFinalAuthority: true, webExecutionIdentityVerified, routineAssuranceRequired: false, missing, contradictions };
+  const base = { mergeAuthorized: false, webSoleFinalAuthority: true, webExecutionIdentityVerified, webExecutionIdentity: verifiedWebIdentity, routineAssuranceRequired: false, missing, contradictions };
   return missing.length || contradictions.length ? { ...base, decision: 'FINALITY_BLOCKED', finality: false } : { ...base, decision: 'FINALITY_ADMITTED', finality: true };
 }
 function c8Snapshot(input) {
@@ -4355,8 +4688,55 @@ test('PRRT_kwDOSTHjGM6WPZco binds finality to a verified Web execution identity'
   assert.equal(result.webExecutionIdentityVerified, false);
 });
 
+test('BF-3: finality requires authoritative Web execution evidence bound to every material identity', () => {
+  const predicates = Object.fromEntries(c7FinalityPredicates.map((key) => [key, true]));
+  const admitted = c7FinalityDecision({ ...predicates, g4Verdict: 'PASS', g4ExactHead: true, webFinalityExecutionEvidence: c7WebFinalityEvidenceFixture() });
+  assert.equal(admitted.decision, 'FINALITY_ADMITTED');
+  assert.equal(admitted.webExecutionIdentityVerified, true);
+
+  const mutateRaw = (mutate) => {
+    const evidence = c7WebFinalityEvidenceFixture();
+    const parsed = JSON.parse(evidence.bytes);
+    mutate(parsed, evidence);
+    evidence.bytes = c8Json(parsed);
+    evidence.content_digest = c8DigestBytes(evidence.bytes);
+    return evidence;
+  };
+  const cases = [
+    ['missing raw evidence', { webExecutionIdentity: { actor: 'web' }, comprehensiveIndependentWebFinalGate: { actor: 'web' } }],
+    ['candidate verified boolean', { webExecutionIdentityVerified: true, webExecutionIdentity: { actor: 'web' } }],
+    ['wrong repository locator', { webFinalityExecutionEvidence: (() => { const evidence = c7WebFinalityEvidenceFixture(); evidence.authoritative_locator.repository = 'other/repository'; return evidence; })() }],
+    ['wrong pull request locator', { webFinalityExecutionEvidence: (() => { const evidence = c7WebFinalityEvidenceFixture(); evidence.authoritative_locator.pull_request = 334; return evidence; })() }],
+    ['wrong head locator', { webFinalityExecutionEvidence: (() => { const evidence = c7WebFinalityEvidenceFixture(); evidence.authoritative_locator.exact_head = c8Hash('stale-head'); return evidence; })() }],
+    ['missing locator', { webFinalityExecutionEvidence: (() => { const evidence = c7WebFinalityEvidenceFixture(); delete evidence.authoritative_locator; return evidence; })() }],
+    ['malformed outer digest', { webFinalityExecutionEvidence: { ...c7WebFinalityEvidenceFixture(), content_digest: 'sha256:not-a-digest' } }],
+    ['wrong locator digest', { webFinalityExecutionEvidence: (() => { const evidence = c7WebFinalityEvidenceFixture(); evidence.authoritative_locator.content_digest = 'sha256:' + '0'.repeat(64); return evidence; })() }],
+    ['wrong evidence identity', { webFinalityExecutionEvidence: (() => { const evidence = c7WebFinalityEvidenceFixture(); evidence.evidence_identity = 'forged-evidence-id'; return evidence; })() }],
+    ['unresolved locator', { webFinalityExecutionEvidence: (() => { const evidence = c7WebFinalityEvidenceFixture(); evidence.authoritative_locator.accessible = false; return evidence; })() }],
+    ['stale run identity', { webFinalityExecutionEvidence: mutateRaw((parsed) => { parsed.execution_identity.run_id = 'stale-run'; }) }],
+    ['stale session identity', { webFinalityExecutionEvidence: mutateRaw((parsed) => { parsed.execution_identity.session_id = 'stale-session'; }) }],
+    ['stale turn identity', { webFinalityExecutionEvidence: mutateRaw((parsed) => { parsed.execution_identity.turn_id = 'stale-turn'; }) }],
+    ['manager execution identity', { webFinalityExecutionEvidence: mutateRaw((parsed) => { parsed.execution_identity.role = 'manager'; }) }],
+    ['wrong authority repository', { webFinalityExecutionEvidence: mutateRaw((parsed) => { parsed.authority.repository = 'other/repository'; }) }]
+  ];
+  for (const [label, overrides] of cases) {
+    const result = c7FinalityDecision({ ...predicates, g4Verdict: 'PASS', g4ExactHead: true, ...overrides });
+    assert.equal(result.decision, 'FINALITY_BLOCKED', label);
+  }
+  for (const actor of ['manager', 'executor', 'unknown']) {
+    const result = c7FinalityDecision({ ...predicates, g4Verdict: 'PASS', g4ExactHead: true, webFinalityExecutionEvidence: c7WebFinalityEvidenceFixture(), webExecutionIdentity: { actor } });
+    assert.equal(result.decision, 'FINALITY_BLOCKED', actor);
+    assert.ok(result.contradictions.includes('WEB_IDENTITY_CONTRADICTION'), actor);
+  }
+});
+
 test('PRRT_kwDOSTHjGM6WPZcq collects complete non-Git authority independently on both sides', () => {
   const machine = c8MachineAuthority();
+  assert.notStrictEqual(machine.github, machine.local);
+  assert.notStrictEqual(machine.github.collector, machine.local.collector);
+  assert.notEqual(machine.github.collector.evidence_identity, machine.local.collector.evidence_identity);
+  assert.notEqual(machine.github.collector.evidence_locator.exact_locator, machine.local.collector.evidence_locator.exact_locator);
+  assert.notEqual(machine.github.collector.evidence_digest, machine.local.collector.evidence_digest);
   const required = ['repository', 'child_issue', 'pull_request', 'parent_entry', 'design_lock', 'run_identity', 'scope', 'role', 'capabilities', 'base_sha', 'head_sha', 'tree_sha', 'blobs'];
   for (const field of required) {
     assert.notEqual(machine.github[field], undefined, 'github ' + field);
@@ -4398,6 +4778,22 @@ test('PRRT_kwDOSTHjGM6WPZcq collects complete non-Git authority independently on
   const empty = c8CollectMachine({ github: {}, local: {} });
   assert.equal(empty.decision, 'MACHINE_AUTHORITY_REJECTED');
   assert.equal(empty.reason, 'MALFORMED_MACHINE_AUTHORITY');
+
+  const relabelled = c8Clone(machine.github);
+  relabelled.collector.source = 'local-git';
+  relabelled.collector.collection_id = 'machine-authority-local-git-v1';
+  const raw = JSON.parse(relabelled.collector.evidence_bytes);
+  raw.source = 'local-git';
+  relabelled.collector.evidence_bytes = c8Json(raw);
+  relabelled.collector.evidence_digest = c8DigestBytes(relabelled.collector.evidence_bytes);
+  relabelled.collector.evidence_locator.exact_locator = 'raw://weijunswj/ai-agent-toolkit/pr-333/local-git/machine-authority#machine-authority';
+  relabelled.collector.evidence_locator.resolved_locator = relabelled.collector.evidence_locator.exact_locator;
+  relabelled.collector.evidence_locator.resolved_bytes = relabelled.collector.evidence_bytes;
+  relabelled.collector.evidence_locator.kind = 'local-command';
+  relabelled.collector.evidence_locator.content_digest = relabelled.collector.evidence_digest;
+  const relabelledResult = c8CollectMachine({ github: c8Clone(machine.github), local: relabelled });
+  assert.equal(relabelledResult.decision, 'MACHINE_AUTHORITY_REJECTED');
+  assert.equal(relabelledResult.reason, 'MACHINE_AUTHORITY_INDEPENDENCE_REQUIRED');
 });
 
 test('PRRT_kwDOSTHjGM6WPZdE uses locale-independent blob ordering', () => {
@@ -4638,10 +5034,144 @@ test('PRRT_kwDOSTHjGM6WPZc9 admits one exact Web-issued exceptional-review grant
 });
 
 test('C10 preserves G4 reply-without-resolution and Web-only finality', () => {
-  assert.equal(g4ConversationMutation({ phase: 'FINAL', verdict: 'PASS', reply: true, resolve: true }).decision, 'G4_MUTATION_REJECTED');
-  assert.equal(g4ConversationMutation({ phase: 'FINAL', verdict: 'PASS', reply: true, resolve: false }).decision, 'G4_REPLY_ALLOWED');
+  const evidence = {
+    ...g4ConversationEvidenceFixture(),
+    phase: 'FINAL',
+    verdict: 'PASS',
+    reply: true,
+    finalExactHead: true,
+    bounded: true,
+    evidenceBound: true
+  };
+  assert.equal(g4ConversationMutation({ ...evidence, resolve: true }).decision, 'G4_MUTATION_REJECTED');
+  assert.equal(g4ConversationMutation({ ...evidence, resolve: false }).decision, 'G4_REPLY_ALLOWED');
   assert.equal(webFinalityMutation({ actor: 'manager', resolve: true }).decision, 'WEB_FINALITY_REJECTED');
   assert.equal(webFinalityMutation({ actor: 'web', resolve: true }).decision, 'WEB_FINALITY_ALLOWED');
+});
+
+test('RED BF-1: G4 conversation replies must not bypass FINAL permission evidence', () => {
+  assert.equal(g4ConversationMutation({
+    phase: 'PRE_G4',
+    verdict: 'PASS',
+    reply: true,
+    finalExactHead: true,
+    bounded: true,
+    evidenceBound: true
+  }).decision, 'G4_MUTATION_REJECTED');
+});
+
+test('BF-1: one authoritative G4 permission path admits only bounded exact-head final PASS replies', () => {
+  const valid = {
+    ...g4ConversationEvidenceFixture(),
+    phase: 'FINAL',
+    action: 'reply',
+    reply: true,
+    verdict: 'PASS',
+    finalExactHead: true,
+    bounded: true,
+    evidenceBound: true
+  };
+  assert.equal(g4ThreadPermission(valid), true);
+  assert.equal(g4ConversationMutation(valid).decision, 'G4_REPLY_ALLOWED');
+  const cases = [
+    ['missing phase', { phase: undefined }],
+    ['pre G4 phase', { phase: 'PRE_G4' }],
+    ['amend phase', { phase: 'AMEND' }],
+    ['amend verdict', { verdict: 'AMEND' }],
+    ['wrong head flag', { finalExactHead: false }],
+    ['unbounded authority', { bounded: false }],
+    ['unbound evidence', { evidenceBound: false }],
+    ['reply omitted', { reply: false }],
+    ['wrong action', { action: 'comment' }],
+    ['wrong exact head', { exactHeadBinding: { ...valid.exactHeadBinding, head: c8Hash('wrong-g4-head') } }],
+    ['wrong authority role', { boundedReplyAuthority: { ...valid.boundedReplyAuthority, role: 'manager' } }],
+    ['missing evidence binding', { evidenceBinding: undefined }],
+    ['malformed evidence digest', { evidenceBinding: { ...valid.evidenceBinding, content_digest: 'sha256:not-a-digest' } }],
+    ['wrong evidence digest', { evidenceBinding: { ...valid.evidenceBinding, content_digest: 'sha256:' + '0'.repeat(64) } }],
+    ['altered evidence bytes', { evidenceBinding: { ...valid.evidenceBinding, bytes: 'altered-evidence' } }],
+    ['wrong evidence locator', { evidenceBinding: { ...valid.evidenceBinding, locator: 'raw://other#not-g4' } }],
+    ['contradictory resolve', { resolve: true }],
+    ['malformed reopen', { reopen: 'false' }],
+    ['contradictory dismiss', { dismiss: true }]
+  ];
+  for (const [label, overrides] of cases) {
+    const candidate = { ...valid, ...overrides };
+    assert.equal(g4ThreadPermission(candidate), false, label);
+    assert.equal(g4ConversationMutation(candidate).decision, 'G4_MUTATION_REJECTED', label);
+  }
+  for (const action of ['resolve', 'reopen', 'dismiss']) {
+    assert.equal(g4ConversationMutation({ ...valid, action }).decision, 'G4_MUTATION_REJECTED', action);
+  }
+});
+
+test('BF-2: every invariant has an executable negative contract with fail-closed registry validation', () => {
+  const registry = invariantRegistry();
+  const record = registry.invariants.find((entry) => entry.invariant_id === 'AUTH-LEDGER-RECEIPT-001');
+  const expected = expectedInvariantBundles[record.invariant_id];
+  const registration = negativeTestContracts.get(record.invariant_id);
+  assert.equal(validateNegativeTestRegistry(registry.invariants), 'PRESERVED');
+  assert.equal(invariantDecision(record, expected), 'PRESERVED');
+
+  const missing = new Map(negativeTestContracts);
+  missing.delete(record.invariant_id);
+  assert.equal(validateNegativeTestRegistry(registry.invariants, missing), 'INVARIANT_REGRESSION');
+
+  const unknown = new Map(negativeTestContracts);
+  unknown.set('UNKNOWN-INVARIANT-001', { ...registration, invariant_id: 'UNKNOWN-INVARIANT-001', negative_test_id: negativeTestReference('UNKNOWN-INVARIANT-001'), reference: negativeTestReference('UNKNOWN-INVARIANT-001') });
+  assert.equal(validateNegativeTestRegistry(registry.invariants, unknown), 'INVARIANT_REGRESSION');
+
+  const duplicate = [...negativeTestContracts.values(), registration];
+  assert.equal(validateNegativeTestRegistry(registry.invariants, duplicate), 'INVARIANT_REGRESSION');
+
+  const mismatched = new Map(negativeTestContracts);
+  mismatched.set(record.invariant_id, { ...registration, invariant_id: 'OTHER-INVARIANT-001' });
+  assert.equal(validateNegativeTestRegistry(registry.invariants, mismatched), 'INVARIANT_REGRESSION');
+
+  const original = negativeTestContracts.get(record.invariant_id);
+  try {
+    negativeTestContracts.set(record.invariant_id, { ...registration, execute: 'not-executable' });
+    assert.equal(validateNegativeTestRegistry(registry.invariants), 'INVARIANT_REGRESSION');
+    negativeTestContracts.set(record.invariant_id, {
+      ...registration,
+      execute() {
+        return { invariant_id: record.invariant_id, negative_test_id: record.negative_test };
+      }
+    });
+    assert.equal(validateNegativeTestRegistry(registry.invariants), 'INVARIANT_REGRESSION');
+    negativeTestContracts.set(record.invariant_id, {
+      ...registration,
+      execute(candidate, evaluate) {
+        const broken = { ...candidate, negative_test: registration.negative_test_id + '::broken' };
+        return { invariant_id: record.invariant_id, negative_test_id: record.negative_test, candidate: broken, outcome: 'PRESERVED' };
+      }
+    });
+    assert.equal(validateNegativeTestRegistry(registry.invariants), 'INVARIANT_REGRESSION');
+  } finally {
+    negativeTestContracts.set(record.invariant_id, original);
+  }
+  const stringOnly = new Map(negativeTestContracts);
+  stringOnly.set(record.invariant_id, registration.reference);
+  assert.equal(invariantDecision(record, expected, { registrations: stringOnly }), 'INVARIANT_REGRESSION');
+});
+
+test('RED BF-3: a candidate-labelled Web actor cannot prove finality identity', () => {
+  const evidence = Object.fromEntries(c7FinalityPredicates.map((key) => [key, true]));
+  const result = c7FinalityDecision({
+    ...evidence,
+    g4Verdict: 'PASS',
+    g4ExactHead: true,
+    webExecutionIdentity: { actor: 'web' },
+    comprehensiveIndependentWebFinalGate: { actor: 'web' }
+  });
+  assert.equal(result.decision, 'FINALITY_BLOCKED');
+});
+
+test('RED BF-4: relabelling one shared machine snapshot is not independent authority', () => {
+  const machine = c8MachineAuthority();
+  const shared = c8Clone(machine.github);
+  shared.collector = { source: 'local-git', collection_id: 'local-authority-record-v1' };
+  const result = c8CollectMachine({ github: c8Clone(machine.github), local: shared });
+  assert.equal(result.decision, 'MACHINE_AUTHORITY_REJECTED');
 });
 
 function c6ValidEvidenceDigest(record) { return !!record && typeof record.bytes === 'string' && typeof record.content_digest === 'string' && /^sha256:[0-9a-f]{64}$/.test(record.content_digest) && record.content_digest === c8DigestBytes(record.bytes); }
@@ -4651,7 +5181,14 @@ function c10NormaliseOutbound(value) { let text = String(value); const trigger =
 function c10GenericGitHubWrite(finalBytes) { if (c10NormaliseOutbound(finalBytes)) { const error = new Error('CODEX_TRIGGER_TOKEN_FORBIDDEN'); error.code = 'CODEX_TRIGGER_TOKEN_FORBIDDEN'; throw error; } return finalBytes; }
 const c10ReviewHeads = new Set();
 function c10ReviewRequestAdmission(request = {}) { const key = [request.repository, request.pull_request, request.head, request.tree].join('|'); const valid = request.role === 'authoritative technical G4 closure' && request.repository === 'weijunswj/ai-agent-toolkit' && request.pull_request === 333 && request.target === 'pr-conversation' && request.grant?.one_run === true && request.checks?.terminal_success === true && request.prior_request === false && request.readback === true && request.head && request.tree; if (!valid || c10ReviewHeads.has(key)) return { decision: 'REVIEW_REQUEST_REJECTED' }; c10ReviewHeads.add(key); return { decision: 'REVIEW_REQUEST_ADMITTED', target: 'pr-conversation', one_run: true }; }
-function g4ConversationMutation(input = {}) { return input.resolve === true || input.reopen === true || input.dismiss === true ? { decision: 'G4_MUTATION_REJECTED' } : input.reply === true ? { decision: 'G4_REPLY_ALLOWED' } : { decision: 'G4_MUTATION_REJECTED' }; }
+function g4ConversationMutation(input = {}) {
+  if (input.resolve === true || input.reopen === true || input.dismiss === true || (input.action !== undefined && input.action !== 'reply')) {
+    return { decision: 'G4_MUTATION_REJECTED' };
+  }
+  return g4ConversationPermission({ ...input, action: 'reply' })
+    ? { decision: 'G4_REPLY_ALLOWED' }
+    : { decision: 'G4_MUTATION_REJECTED' };
+}
 function webFinalityMutation(input = {}) { return input.actor === 'web' && input.resolve === true ? { decision: 'WEB_FINALITY_ALLOWED' } : { decision: 'WEB_FINALITY_REJECTED' }; }
 test('C10 source has no custom waiting infrastructure or raw trigger literal', () => {
   const source = [fs.readFileSync(path.join(projectRoot, 'README.md'), 'utf8'), fs.readFileSync(path.join(mainRoot, 'protocol.md'), 'utf8'), ...a6PromptFiles.map((file) => fs.readFileSync(file, 'utf8'))].join('\\n');
@@ -4759,7 +5296,7 @@ test('C11 source versions record behavioural contract additions', () => {
 
 test('PRRT_kwDOSTHjGM6WPZcj removes routine Temporary Chat from normal C7 finality', () => {
   const evidence = Object.fromEntries(c7FinalityPredicates.map((key) => [key, true]));
-  const result = c7FinalityDecision({ ...evidence, g4Verdict: 'PASS', g4ExactHead: true, webExecutionIdentity: { actor: 'web' }, comprehensiveIndependentWebFinalGate: { actor: 'web' } });
+  const result = c7FinalityDecision({ ...evidence, g4Verdict: 'PASS', g4ExactHead: true, webFinalityExecutionEvidence: c7WebFinalityEvidenceFixture() });
   assert.equal(result.finality, true);
   assert.equal(result.routineAssuranceRequired, false);
 });
