@@ -5700,7 +5700,7 @@ test('C11 Windows command timeouts do not terminate native agent lifecycles', ()
 test('C11 source versions record behavioural contract additions', () => {
   const rules = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', 'toolkit.project.json'), 'utf8'));
   const autoCode = JSON.parse(fs.readFileSync(path.join(projectRoot, 'toolkit.project.json'), 'utf8'));
-  assert.equal(rules.version, '3.1.2');
+  assert.equal(rules.version, '3.1.3');
   assert.equal(autoCode.version, '1.9.0');
   assert.match(rules.version_notes, /C13 three-mode.*common.*safeguards/i);
   assert.match(rules.version_notes, /capacity.*non-Fast.*non-nesting.*context-minimisation/i);
