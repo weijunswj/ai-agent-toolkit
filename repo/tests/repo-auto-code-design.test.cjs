@@ -78,6 +78,11 @@ function c8CreateGitAuthorityFixture(parentRoot) {
 }
 
 const c8GitAuthorityFixture = c8CreateGitAuthorityFixture(c8AuthorityTempRoot);
+let c28TrustedAuthorityStore;
+
+function c28TrustedLookup(namespace, identity) {
+  return c28TrustedAuthorityStore ? c28TrustedAuthorityStore.resolve(namespace, identity) : null;
+}
 
 function c8NewAuthorityStorePath(label = 'authority') {
   return path.join(fs.mkdtempSync(path.join(c8AuthorityTempRoot, label + '-')), 'authority.json');
@@ -982,27 +987,34 @@ function exactReviewIdentity(identity) {
   return ['repository', 'pr', 'head', 'capability'].map((key) => identity[key]).join('|');
 }
 
+function c28HostedEvidenceIdentity(identity, state) {
+  return 'hosted-review-evidence-' + exactReviewIdentity(identity) + '|' + state;
+}
+
 function hostedReview(identity, state, overrides = {}) {
+  const trusted = c28TrustedLookup('hosted-review', c28HostedEvidenceIdentity(identity, state));
+  const hostedEvidence = trusted ? c8Clone(trusted) : {
+    evidence_identity: 'candidate-hosted-review-' + c28HostedEvidenceIdentity(identity, state),
+    source: 'github-hosted-review',
+    reviewType: 'codex-pull-request-review',
+    actor: 'chatgpt-codex-connector',
+    mechanism: 'github-codex-review',
+    supported: true,
+    identity: { ...identity },
+    state
+  };
   return {
     identity: { ...identity },
     state,
     rawEvidence: true,
-    hostedEvidence: {
-      source: 'github-hosted-review',
-      reviewType: 'codex-pull-request-review',
-      actor: 'chatgpt-codex-connector',
-      mechanism: 'github-codex-review',
-      supported: true,
-      identity: { ...identity },
-      state,
-      ...overrides
-    }
+    hostedEvidence: { ...hostedEvidence, ...overrides }
   };
 }
 
 function hasAuthoritativeHostedCapability(review) {
   const hosted = review && review.hostedEvidence;
-  return hosted && hosted.source === 'github-hosted-review' &&
+  const trusted = hosted && c28TrustedLookup('hosted-review', hosted.evidence_identity);
+  return !!trusted && c8Json(trusted) === c8Json(hosted) && hosted.source === 'github-hosted-review' &&
     hosted.reviewType === 'codex-pull-request-review' &&
     hosted.actor === 'chatgpt-codex-connector' &&
     hosted.mechanism === 'github-codex-review' && hosted.supported === true;
@@ -3048,6 +3060,47 @@ const expectedInvariantBundles = {
 
 const negativeTestReference = (invariantId) => 'repo/tests/repo-auto-code-design.test.cjs::negative::' + invariantId;
 const negativeTestContracts = new Map();
+const c4ReplacementInvariantBundle = Object.freeze({
+  semantics: { replacement_receipt: 'The replacement receipt contract is complete.' },
+  evidence: { replacement_receipt: ['replacement_receipt_contract'] }
+});
+
+function c4NegativeMutationContract(invariantId) {
+  const initialExpected = expectedInvariantBundles[invariantId] || (invariantId === 'AUTH-LEDGER-RECEIPT-REPLACEMENT-001' ? c4ReplacementInvariantBundle : null);
+  const initialSemanticId = initialExpected ? Object.keys(initialExpected.semantics)[0] : 'replacement_receipt';
+  return Object.freeze({
+    semantic_id: initialSemanticId,
+    field: 'required_semantics.' + initialSemanticId + '.requirement',
+    expected_requirement: initialExpected ? initialExpected.semantics[initialSemanticId] : 'The replacement receipt contract is complete.',
+    mutate(candidate) {
+      const broken = c8Clone(candidate);
+      if (broken.status === 'amended' && broken.design_lock_change && broken.design_lock_change.replacement &&
+          Array.isArray(broken.design_lock_change.replacement.required_semantics) &&
+          broken.design_lock_change.replacement.required_semantics.length > 0) {
+        const semantic = broken.design_lock_change.replacement.required_semantics[0];
+        const field = 'design_lock_change.replacement.required_semantics.0.requirement';
+        const expectedRequirement = semantic.requirement;
+        semantic.requirement = '__substantive-negative-contract__';
+        return { candidate: broken, behavioral_violation: { field, semantic_id: semantic.semantic_id, expected: expectedRequirement, observed: semantic.requirement } };
+      }
+      if (broken.status === 'removed' && broken.design_lock_change && broken.design_lock_change.disposal) {
+        const field = 'design_lock_change.disposal.reason';
+        const expectedReason = broken.design_lock_change.disposal.reason;
+        broken.design_lock_change.disposal.reason = '';
+        return { candidate: broken, behavioral_violation: { field, expected: expectedReason, observed: broken.design_lock_change.disposal.reason } };
+      }
+      const expected = expectedInvariantBundles[invariantId] || (invariantId === 'AUTH-LEDGER-RECEIPT-REPLACEMENT-001' ? c4ReplacementInvariantBundle : null);
+      const expectedSemanticIds = expected ? Object.keys(expected.semantics) : [initialSemanticId];
+      const semantic = Array.isArray(broken.required_semantics) && broken.required_semantics.find((entry) => entry && expectedSemanticIds.includes(entry.semantic_id));
+      if (!semantic) return { candidate: broken, behavioral_violation: false };
+      const semanticId = semantic.semantic_id;
+      const expectedRequirement = expected ? expected.semantics[semanticId] : 'The replacement receipt contract is complete.';
+      const field = 'required_semantics.' + semanticId + '.requirement';
+      semantic.requirement = '__substantive-negative-contract__';
+      return { candidate: broken, behavioral_violation: { field, semantic_id: semanticId, expected: expectedRequirement, observed: semantic.requirement } };
+    }
+  });
+}
 
 function registerNegativeTestContracts(invariantIds) {
   for (const invariantId of invariantIds) {
@@ -3058,6 +3111,7 @@ function registerNegativeTestContracts(invariantIds) {
       negative_test_id: reference,
       reference,
       required_outcome: 'INVARIANT_REGRESSION',
+      behavioral_contract: c4NegativeMutationContract(invariantId),
       execute(record, evaluate) {
         const candidate = c8Clone(record || {
           invariant_id: invariantId,
@@ -3068,12 +3122,13 @@ function registerNegativeTestContracts(invariantIds) {
           status: 'preserved',
           authorising_design_lock: 'DL-329-AUTO-CODE-005-A6-C4'
         });
-        candidate.negative_test = reference + '::broken';
+        const mutation = this.behavioral_contract.mutate(candidate);
         return {
           invariant_id: invariantId,
           negative_test_id: reference,
-          candidate,
-          outcome: evaluate(candidate)
+          candidate: mutation.candidate,
+          behavioral_violation: mutation.behavioral_violation,
+          outcome: evaluate(mutation.candidate)
         };
       }
     }));
@@ -3094,14 +3149,22 @@ function negativeContractProof(record, expected, registrations = negativeTestCon
   const registration = record && negativeTestRegistrationFor(record.invariant_id, registrations);
   if (!registration || registration.invariant_id !== record.invariant_id ||
       registration.negative_test_id !== registration.reference || record.negative_test !== registration.reference ||
-      registration.required_outcome !== 'INVARIANT_REGRESSION' || typeof registration.execute !== 'function') return false;
+      registration.required_outcome !== 'INVARIANT_REGRESSION' || !registration.behavioral_contract ||
+      typeof registration.behavioral_contract.mutate !== 'function' || typeof registration.execute !== 'function') return false;
   try {
-    const result = registration.execute(c8Clone(record), (candidate) => invariantDecision(candidate, expected, { skipNegativeContract: true, registrations }));
+    const proofExpected = expected || (record.invariant_id === 'AUTH-LEDGER-RECEIPT-REPLACEMENT-001' ? c4ReplacementInvariantBundle : null);
+    if (!proofExpected || invariantDecision(record, proofExpected, { skipNegativeContract: true, registrations }) !== 'PRESERVED') return false;
+    const independentMutation = registration.behavioral_contract.mutate(c8Clone(record));
+    if (!independentMutation || !independentMutation.behavioral_violation || !independentMutation.candidate ||
+        invariantDecision(independentMutation.candidate, proofExpected, { skipNegativeContract: true, registrations }) !== registration.required_outcome) return false;
+    const result = registration.execute(c8Clone(record), (candidate) => invariantDecision(candidate, proofExpected, { skipNegativeContract: true, registrations }));
     return result && result.invariant_id === record.invariant_id && result.negative_test_id === record.negative_test &&
       result.candidate && result.candidate.invariant_id === record.invariant_id &&
-      result.candidate.negative_test === registration.negative_test_id + '::broken' &&
+      result.candidate.negative_test === registration.negative_test_id &&
+      result.behavioral_violation &&
       result.outcome === registration.required_outcome &&
-      invariantDecision(result.candidate, expected, { skipNegativeContract: true, registrations }) === registration.required_outcome;
+      c8Json(result.candidate) === c8Json(independentMutation.candidate) &&
+      proofExpected && invariantDecision(result.candidate, proofExpected, { skipNegativeContract: true, registrations }) === registration.required_outcome;
   } catch {
     return false;
   }
@@ -3154,11 +3217,12 @@ function validReplacementContract(change) {
       !validNegativeTestRegistration(replacement)) return false;
   const semantics = new Set(replacement.required_semantics.map((entry) => entry && entry.semantic_id));
   const evidence = new Set(replacement.candidate_evidence.map((entry) => entry && entry.semantic_id));
-  return !semantics.has(undefined) && semantics.size === replacement.required_semantics.length &&
+  const valid = !semantics.has(undefined) && semantics.size === replacement.required_semantics.length &&
     !evidence.has(undefined) && evidence.size === replacement.candidate_evidence.length &&
     replacement.required_semantics.every((entry) => nonEmptyString(entry.requirement)) &&
     replacement.candidate_evidence.every((entry) => Array.isArray(entry.evidence_fields) && entry.evidence_fields.length > 0) &&
     [...semantics].every((semanticId) => evidence.has(semanticId));
+  return valid;
 }
 
 function validDisposalContract(change, invariantId) {
@@ -3266,6 +3330,9 @@ test('A6-C4 amendment and removal validate named replacement or disposal contrac
     design_lock: 'DL-329-AUTO-CODE-005-A6-C5',
     replacement: {
       invariant_id: 'AUTH-LEDGER-RECEIPT-REPLACEMENT-001',
+      source_authority: 'synthetic replacement contract',
+      status: 'preserved',
+      authorising_design_lock: 'DL-329-AUTO-CODE-005-A6-C5',
       required_semantics: [{ semantic_id: 'replacement_receipt', requirement: 'The replacement receipt contract is complete.' }],
       candidate_evidence: [{ semantic_id: 'replacement_receipt', evidence_fields: ['replacement_receipt_contract'] }],
       negative_test: negativeTestReference('AUTH-LEDGER-RECEIPT-REPLACEMENT-001')
@@ -3696,11 +3763,11 @@ function c7GrantDigest(grant) {
   return c8DigestBytes(c8Json(c7GrantBody(grant)));
 }
 
-function c7ExceptionalGrant(overrides = {}) {
+function c7BuildExceptionalGrantRecord(grantId = 'exceptional-grant-trusted-1') {
   const context = c7ExceptionalGrantContext();
   const grant = {
     schema: 'exceptional-review-grant/v1',
-    grant_id: 'exceptional-grant-synthetic-' + (++c7ExceptionalGrantSequence),
+    grant_id: grantId,
     issuer: {
       identity: 'web-orchestrator',
       role: 'Web Orchestrator',
@@ -3720,11 +3787,16 @@ function c7ExceptionalGrant(overrides = {}) {
       use_count: 0,
       consumed_at: null
     },
-    authority_store_path: c8NewAuthorityStorePath('exceptional-review'),
-    ...overrides
+    authority_store_path: c8NewAuthorityStorePath('exceptional-review')
   };
   grant.canonical_digest = c7GrantDigest(grant);
   return grant;
+}
+
+function c7ExceptionalGrant(overrides = {}) {
+  const grantId = 'exceptional-grant-trusted-' + (++c7ExceptionalGrantSequence);
+  const trusted = c28TrustedLookup('exceptional-review', grantId);
+  return { ...(trusted ? c8Clone(trusted) : c7BuildExceptionalGrantRecord()), ...overrides };
 }
 
 function c7ExceptionalReviewerAdmission(grant = {}, context = c7ExceptionalGrantContext(), authorityRegistry) {
@@ -3734,7 +3806,9 @@ function c7ExceptionalReviewerAdmission(grant = {}, context = c7ExceptionalGrant
     mutation_performed: false,
     evaluation_candidate_created: false
   });
-  if (!grant || grant.schema !== 'exceptional-review-grant/v1' ||
+  const trusted = grant && c28TrustedLookup('exceptional-review', grant.grant_id);
+  if (!trusted || c8Json(trusted) !== c8Json(grant)) return rejected('EXCEPTIONAL_REVIEW_GRANT_NOT_TRUSTED');
+  if (grant.schema !== 'exceptional-review-grant/v1' ||
       !nonEmptyString(grant.grant_id) || !c8Digest.test(grant.canonical_digest || '') ||
       grant.canonical_digest !== c7GrantDigest(grant) ||
       !grant.issuer || grant.issuer.identity !== 'web-orchestrator' ||
@@ -3750,10 +3824,10 @@ function c7ExceptionalReviewerAdmission(grant = {}, context = c7ExceptionalGrant
       !grant.lifecycle || grant.lifecycle.state !== 'issued' || grant.lifecycle.consumed !== false ||
       grant.lifecycle.use_count !== 0 || grant.lifecycle.consumed_at !== null) return rejected();
   const registry = authorityRegistry || new C8DurableAuthorityRegistry(grant.authority_store_path, 'exceptional-review');
-  const registered = registry.register(grant);
+  const registered = registry.register(trusted);
   if (registered.reason === 'AUTHORITY_ALREADY_CONSUMED') return rejected('EXCEPTIONAL_REVIEW_GRANT_REPLAYED');
   if (!['AUTHORITY_REGISTERED', 'AUTHORITY_ALREADY_REGISTERED'].includes(registered.decision)) return rejected('EXCEPTIONAL_REVIEW_GRANT_INVALID');
-  const consumed = registry.consume(grant, { expectedState: 'issued', consumed_at: context.now });
+  const consumed = registry.consume(trusted, { expectedState: 'issued', consumed_at: context.now });
   if (consumed.reason === 'AUTHORITY_ALREADY_CONSUMED') return rejected('EXCEPTIONAL_REVIEW_GRANT_REPLAYED');
   if (consumed.decision !== 'AUTHORITY_CONSUMED') return rejected('EXCEPTIONAL_REVIEW_GRANT_INVALID');
   return {
@@ -3778,7 +3852,8 @@ function c8Merge(base, extra = {}) { const out = { ...base }; for (const [key, v
 function c8Keys(value, allowed, field) { if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((key) => !allowed.includes(key))) throw new C8ContractError('MALFORMED_' + field.toUpperCase(), field); }
 function c8ShaCheck(value, field) { if (typeof value !== 'string' || !c8Sha.test(value)) throw new C8ContractError('MALFORMED_SHA', field); return value; }
 function c8Text(value, field, reason = 'SCOPE_MISMATCH') { if (typeof value !== 'string' || !value) throw new C8ContractError(reason, field); return value; }
-function c8List(value, field) { if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) throw new C8ContractError('SCOPE_MISMATCH', field); const sorted = [...value].sort(); if (new Set(sorted).size !== sorted.length) throw new C8ContractError('SCOPE_MISMATCH', field); return sorted; }
+function c8CanonicalPathCompare(left, right) { return left < right ? -1 : left > right ? 1 : 0; }
+function c8List(value, field) { if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) throw new C8ContractError('SCOPE_MISMATCH', field); const sorted = [...value].sort(c8CanonicalPathCompare); if (new Set(sorted).size !== sorted.length) throw new C8ContractError('SCOPE_MISMATCH', field); return sorted; }
 function c8RealGitAuthority(authority = c8GitAuthorityFixture.authority) {
   c8Keys(authority, ['canonical_base_sha', 'exact_remote_head_sha', 'exact_tree_sha', 'authorised_blobs'], 'real_git_authority');
   return {
@@ -3830,7 +3905,7 @@ function c8NormalizeSnapshot(input) {
   c8Text(input.repository.owner, 'repository.owner'); c8Text(input.repository.name, 'repository.name'); c8Text(input.child_issue.authority_revision, 'child_issue.authority_revision'); c8Text(input.pull_request.authority_revision, 'pull_request.authority_revision'); c8Text(input.relevant_parent_entry.key, 'parent_entry.key'); c8Text(input.relevant_parent_entry.authority_revision, 'parent_entry.authority_revision'); c8Text(input.design_lock, 'design_lock'); c8Text(input.run_identity, 'run_identity');
   c8ShaCheck(input.canonical_base_sha, 'canonical_base_sha'); c8ShaCheck(input.exact_remote_head_sha, 'exact_remote_head_sha'); c8ShaCheck(input.exact_tree_sha, 'exact_tree_sha');
   if (!Array.isArray(input.authorised_blobs)) throw new C8ContractError('SCOPE_MISMATCH', 'authorised_blobs');
-  const blobs = input.authorised_blobs.map((blob) => { c8Keys(blob, ['path', 'blob_sha'], 'blob'); return { path: c8Text(blob.path, 'blob.path', 'BLOB_MOVED'), blob_sha: c8ShaCheck(blob.blob_sha, 'blob.blob_sha') }; }).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  const blobs = input.authorised_blobs.map((blob) => { c8Keys(blob, ['path', 'blob_sha'], 'blob'); return { path: c8Text(blob.path, 'blob.path', 'BLOB_MOVED'), blob_sha: c8ShaCheck(blob.blob_sha, 'blob.blob_sha') }; }).sort((a, b) => c8CanonicalPathCompare(a.path, b.path));
   if (new Set(blobs.map((blob) => blob.path)).size !== blobs.length) throw new C8ContractError('SCOPE_MISMATCH', 'blob.path');
   c8Keys(input.authorised_source_scope, ['paths', 'outputs', 'writes', 'source_only'], 'scope'); if (input.authorised_source_scope.source_only !== true) throw new C8ContractError('SCOPE_MISMATCH', 'scope.source_only');
   const scope = { paths: c8List(input.authorised_source_scope.paths, 'scope.paths'), outputs: c8List(input.authorised_source_scope.outputs, 'scope.outputs'), writes: c8List(input.authorised_source_scope.writes, 'scope.writes'), source_only: true };
@@ -3946,7 +4021,7 @@ function c8MachineSideNormalize(side, expectedSource) {
   const blobs = side.blobs.map((blob) => {
     c8Keys(blob, ['path', 'blob_sha'], 'machine_blob');
     return { path: c8Text(blob.path, 'machine_blob.path'), blob_sha: c8ShaCheck(blob.blob_sha, 'machine_blob.blob_sha') };
-  }).sort((a, b) => a.path.localeCompare(b.path));
+  }).sort((a, b) => c8CanonicalPathCompare(a.path, b.path));
   if (new Set(blobs.map((blob) => blob.path)).size !== blobs.length) throw new C8ContractError('MALFORMED_MACHINE_AUTHORITY', 'blob.path');
   return {
     schema: side.schema,
@@ -3993,65 +4068,73 @@ function c8MachineMaterialFromSnapshot(snapshot) {
   };
 }
 
-function c8RawMachineAuthorityCollection(input, source) {
-  const snapshot = c8NormalizeSnapshot(c8Clone(input && input.snapshot_digest ? c8Material(input) : input));
-  const authority = c8MachineMaterialFromSnapshot(snapshot);
-  const evidenceIdentity = 'machine-authority-evidence-' + source;
-  const raw = {
-    schema: 'machine-authority-raw/v1',
-    source,
-    evidence_identity: evidenceIdentity,
-    authority
-  };
+const c28TrustedMachineEvidenceIds = Object.freeze({
+  github: 'machine-authority-github-api-trusted-v1',
+  local: 'machine-authority-local-git-trusted-v1'
+});
+
+function c28BuildTrustedMachineRecord(source) {
+  const evidenceIdentity = source === 'github-api'
+    ? c28TrustedMachineEvidenceIds.github
+    : source === 'local-git' ? c28TrustedMachineEvidenceIds.local : null;
+  if (!evidenceIdentity) throw new C8ContractError('MACHINE_AUTHORITY_PROVENANCE_REQUIRED', 'source');
+  const authority = c8MachineMaterialFromSnapshot(c8Snapshot(c8DefaultSnapshot()));
+  const raw = { schema: 'machine-authority-raw/v1', source, evidence_identity: evidenceIdentity, authority };
   const evidenceBytes = c8Json(raw);
+  const exactLocator = 'raw://weijunswj/ai-agent-toolkit/pr-333/' + source + '/machine-authority#machine-authority';
   const locator = {
     source_class: 'authoritative-raw',
     kind: source === 'github-api' ? 'github-api' : 'local-command',
-    exact_locator: 'raw://weijunswj/ai-agent-toolkit/pr-333/' + source + '/machine-authority#machine-authority',
+    exact_locator: exactLocator,
     evidence_identity: evidenceIdentity,
     content_digest: c8DigestBytes(evidenceBytes),
-    resolved_locator: 'raw://weijunswj/ai-agent-toolkit/pr-333/' + source + '/machine-authority#machine-authority',
+    resolved_locator: exactLocator,
     resolved_evidence_identity: evidenceIdentity,
     resolved_bytes: evidenceBytes
   };
-  const side = {
+  return c8MachineSideNormalize({
     ...authority,
-    collector: {
-      source,
-      collection_id: 'machine-authority-' + source + '-v1',
-      evidence_identity: evidenceIdentity,
-      evidence_locator: locator,
-      evidence_digest: c8DigestBytes(evidenceBytes),
-      evidence_bytes: evidenceBytes
-    }
-  };
-  return c8MachineSideNormalize(side, source);
+    collector: { source, collection_id: 'trusted-collector-' + source + '-v1', evidence_identity: evidenceIdentity, evidence_locator: locator, evidence_digest: c8DigestBytes(evidenceBytes), evidence_bytes: evidenceBytes }
+  }, source);
+}
+
+function c8RawMachineAuthorityCollection(input, source) {
+  const candidate = input && typeof input === 'object' ? input : null;
+  const evidenceIdentity = candidate && candidate.collector && candidate.collector.evidence_identity;
+  const expectedIdentity = source === 'github-api' ? c28TrustedMachineEvidenceIds.github : c28TrustedMachineEvidenceIds.local;
+  const trusted = c28TrustedLookup(source === 'github-api' ? 'machine-github-api' : 'machine-local-git', evidenceIdentity || expectedIdentity);
+  const referenceOnly = candidate && Object.keys(candidate).length === 1 && candidate.collector && Object.keys(candidate.collector).length === 1;
+  if (!trusted) throw new C8ContractError('MACHINE_AUTHORITY_PROVENANCE_REQUIRED', 'collector.evidence_identity');
+  const trustedNormalized = c8MachineSideNormalize(c8Clone(trusted), source);
+  if (referenceOnly) return trustedNormalized;
+  const candidateNormalized = c8MachineSideNormalize(c8Clone(candidate), source);
+  if (c8Json(candidateNormalized.collector) !== c8Json(trustedNormalized.collector)) {
+    throw new C8ContractError('MACHINE_AUTHORITY_PROVENANCE_REQUIRED', 'collector.evidence_identity');
+  }
+  return candidateNormalized;
 }
 
 function c8CollectGithubMachineAuthority(input) {
-  return c8RawMachineAuthorityCollection(c8Clone(input), 'github-api');
+  return c8RawMachineAuthorityCollection(input, 'github-api');
 }
 
 function c8CollectLocalMachineAuthority(input) {
-  return c8RawMachineAuthorityCollection(c8Clone(input), 'local-git');
+  return c8RawMachineAuthorityCollection(input, 'local-git');
 }
 
 function c8MachineAuthority(input) {
   const sources = input === undefined ? {
-    github: c8DefaultSnapshot(),
-    local: c8DefaultSnapshot(),
-    snapshot_input: c8DefaultSnapshot()
+    github: { collector: { evidence_identity: c28TrustedMachineEvidenceIds.github } },
+    local: { collector: { evidence_identity: c28TrustedMachineEvidenceIds.local } }
   } : input;
-  if (!sources || !sources.github || !sources.local || sources.github === sources.local) {
-    throw new C8ContractError('MACHINE_AUTHORITY_INDEPENDENCE_REQUIRED', 'sources');
-  }
-  const githubInput = sources.github.snapshot_digest ? c8Material(sources.github) : c8Clone(sources.github);
-  const localInput = sources.local.snapshot_digest ? c8Material(sources.local) : c8Clone(sources.local);
-  const snapshotInput = sources.snapshot_input || sources.github;
+  if (!sources || !sources.github || !sources.local || sources.github === sources.local) throw new C8ContractError('MACHINE_AUTHORITY_INDEPENDENCE_REQUIRED', 'sources');
+  const github = c8CollectGithubMachineAuthority(sources.github);
+  const local = c8CollectLocalMachineAuthority(sources.local);
+  const snapshotInput = sources.snapshot_input || c8DefaultSnapshot();
   const snapshot = c8Snapshot(snapshotInput.snapshot_digest ? c8Material(snapshotInput) : c8Clone(snapshotInput));
   return {
-    github: c8CollectGithubMachineAuthority(githubInput),
-    local: c8CollectLocalMachineAuthority(localInput),
+    github,
+    local,
     snapshot_input: c8Material(snapshot)
   };
 }
@@ -4107,8 +4190,13 @@ function c8CollectMachine(machine, options = {}) {
   });
   try {
     if (!machine || !machine.github || !machine.local) return reject('MALFORMED_MACHINE_AUTHORITY');
-    const github = c8MachineSideNormalize(machine.github, 'github-api');
-    const local = c8MachineSideNormalize(machine.local, 'local-git');
+    const githubIdentity = machine.github.collector && machine.github.collector.evidence_identity;
+    const localIdentity = machine.local.collector && machine.local.collector.evidence_identity;
+    if (githubIdentity && localIdentity && githubIdentity === localIdentity) {
+      return reject('MACHINE_AUTHORITY_INDEPENDENCE_REQUIRED', 'collector.evidence_identity', 'duplicate');
+    }
+    const github = c8RawMachineAuthorityCollection(machine.github, 'github-api');
+    const local = c8RawMachineAuthorityCollection(machine.local, 'local-git');
     if (github.collector.evidence_identity === local.collector.evidence_identity ||
         github.collector.evidence_digest === local.collector.evidence_digest ||
         c8Json(github.collector.evidence_locator) === c8Json(local.collector.evidence_locator)) {
@@ -4156,15 +4244,15 @@ function c8CollectMachine(machine, options = {}) {
     const snapshot = c8Snapshot(snapshotInput);
     return {
       decision: 'MACHINE_AUTHORITY_COLLECTED',
-      authority: { github: machine.github, local: machine.local },
+      authority: { github, local },
       snapshot,
       snapshot_input: c8Material(snapshot),
-      bytes: c8Json({ github: machine.github, local: machine.local })
+      bytes: c8Json({ github, local })
     };
   } catch (error) {
     const typedReasons = [
       'MALFORMED_MACHINE_AUTHORITY', 'MACHINE_RAW_EVIDENCE_REQUIRED', 'MACHINE_RAW_EVIDENCE_INVALID', 'MACHINE_RAW_SOURCE_MISMATCH',
-      'MACHINE_AUTHORITY_INDEPENDENCE_REQUIRED', 'REPOSITORY_MOVED', 'CHILD_AUTHORITY_MOVED', 'PR_AUTHORITY_MOVED',
+      'MACHINE_AUTHORITY_INDEPENDENCE_REQUIRED', 'MACHINE_AUTHORITY_PROVENANCE_REQUIRED', 'REPOSITORY_MOVED', 'CHILD_AUTHORITY_MOVED', 'PR_AUTHORITY_MOVED',
       'PARENT_ENTRY_MOVED', 'DESIGN_LOCK_MISMATCH', 'RUN_IDENTITY_MISMATCH', 'SCOPE_MISMATCH', 'ROLE_MISMATCH',
       'CAPABILITY_MISMATCH', 'BASE_MOVED', 'HEAD_MOVED', 'TREE_MOVED', 'BLOB_MOVED'
     ];
@@ -4556,13 +4644,13 @@ function c7ExpectedWebFinalityContext() {
   };
 }
 
-function c7WebFinalityEvidenceFixture(overrides = {}) {
+function c7BuildWebFinalityEvidenceRecord() {
   const context = c7ExpectedWebFinalityContext();
   const locator = {
     source_class: 'authoritative-raw',
     kind: 'github-api',
     exact_locator: 'raw://weijunswj/ai-agent-toolkit/pr-333/web-finality#web-execution-identity',
-    evidence_identity: 'web-finality-execution-evidence-1',
+    evidence_identity: 'web-finality-execution-evidence-trusted-v1',
     inspected_subject: 'web-execution-identity',
     observed_at: '2026-08-11T00:00:00.000Z',
     accessible: true,
@@ -4602,11 +4690,17 @@ function c7WebFinalityEvidenceFixture(overrides = {}) {
     content_digest: c8DigestBytes(bytes),
     evidence_identity: locator.evidence_identity,
     authoritative_locator: locator,
-    ...overrides
   };
 }
 
+function c7WebFinalityEvidenceFixture(overrides = {}) {
+  const trusted = c28TrustedLookup('web-finality', 'web-finality-execution-evidence-trusted-v1');
+  return { ...(trusted ? c8Clone(trusted) : c7BuildWebFinalityEvidenceRecord()), ...overrides };
+}
+
 function c7VerifiedWebExecutionIdentity(rawEvidence, expected = c7ExpectedWebFinalityContext()) {
+  const trusted = rawEvidence && c28TrustedLookup('web-finality', rawEvidence.evidence_identity);
+  if (!trusted || c8Json(trusted) !== c8Json(rawEvidence)) return null;
   if (!rawEvidence || rawEvidence.schema !== 'web-finality-execution-evidence/v1' ||
       !c6ValidEvidenceDigest(rawEvidence) || rawEvidence.evidence_identity !== rawEvidence.authoritative_locator?.evidence_identity) return null;
   const locator = rawEvidence.authoritative_locator;
@@ -4677,6 +4771,58 @@ function c8LeaseCreate(snapshot, options = {}) {
   c8Text(lease.lease_id, 'lease_id'); if (Date.parse(lease.expires_at) <= Date.parse(lease.issued_at)) throw new C8ContractError('LEASE_INVALID', 'expiry');
   lease.lease_digest = c8DigestBytes(c8Json(c8LeaseBody(lease))); return c8Freeze(lease);
 }
+
+function c28CreateTrustedAuthorityStore() {
+  const namespaces = {
+    'web-finality': {},
+    'hosted-review': {},
+    'machine-github-api': {},
+    'machine-local-git': {},
+    'exceptional-review': {}
+  };
+  const put = (namespace, identity, record) => { namespaces[namespace][identity] = c8Freeze(c8Clone(record)); };
+
+  const web = c7BuildWebFinalityEvidenceRecord();
+  put('web-finality', web.evidence_identity, web);
+
+  const hostedIdentities = [
+    { repository: 'opaque/repository', pr: 'pr-opaque', head: 'head-a', capability: 'external-review' },
+    { repository: 'opaque/repository', pr: 'pr-opaque', head: 'head-b', capability: 'external-review' }
+  ];
+  for (const identity of hostedIdentities) {
+    for (const state of ['pending', 'completed']) {
+      const evidenceIdentity = c28HostedEvidenceIdentity(identity, state);
+      put('hosted-review', evidenceIdentity, {
+        evidence_identity: evidenceIdentity,
+        source: 'github-hosted-review',
+        reviewType: 'codex-pull-request-review',
+        actor: 'chatgpt-codex-connector',
+        mechanism: 'github-codex-review',
+        supported: true,
+        identity: c8Clone(identity),
+        state
+      });
+    }
+  }
+
+  put('machine-github-api', c28TrustedMachineEvidenceIds.github, c28BuildTrustedMachineRecord('github-api'));
+  put('machine-local-git', c28TrustedMachineEvidenceIds.local, c28BuildTrustedMachineRecord('local-git'));
+  for (let index = 1; index <= 32; index += 1) {
+    const grant = c7BuildExceptionalGrantRecord('exceptional-grant-trusted-' + index);
+    put('exceptional-review', grant.grant_id, grant);
+  }
+
+  const frozenNamespaces = Object.fromEntries(Object.entries(namespaces).map(([namespace, records]) => [namespace, Object.freeze(records)]));
+  const frozen = Object.freeze(frozenNamespaces);
+  return Object.freeze({
+    resolve(namespace, identity) {
+      const record = frozen[namespace] && frozen[namespace][identity];
+      return record ? c8Clone(record) : null;
+    }
+  });
+}
+
+c28TrustedAuthorityStore = c28CreateTrustedAuthorityStore();
 
 const c10TriggerValue = () => [String.fromCharCode(64), 'co', 'dex', ' ', 're', 'view'].join('');
 const c10ZeroWidth = (value) => value.split('').join(String.fromCharCode(0x200b));
@@ -5046,7 +5192,40 @@ test('C10 preserves G4 reply-without-resolution and Web-only finality', () => {
   assert.equal(g4ConversationMutation({ ...evidence, resolve: true }).decision, 'G4_MUTATION_REJECTED');
   assert.equal(g4ConversationMutation({ ...evidence, resolve: false }).decision, 'G4_REPLY_ALLOWED');
   assert.equal(webFinalityMutation({ actor: 'manager', resolve: true }).decision, 'WEB_FINALITY_REJECTED');
-  assert.equal(webFinalityMutation({ actor: 'web', resolve: true }).decision, 'WEB_FINALITY_ALLOWED');
+  assert.equal(webFinalityMutation({
+    actor: 'web',
+    resolve: true,
+    action: 'resolve',
+    thread_id: 'PRRT_kwDOSTHjGM6YIMr_',
+    repository: 'weijunswj/ai-agent-toolkit',
+    pull_request: 333,
+    exact_head: c8GitAuthorityFixture.exact_remote_head_sha,
+    webFinalityExecutionEvidence: c7WebFinalityEvidenceFixture()
+  }).decision, 'WEB_FINALITY_ALLOWED');
+});
+
+test('BP-7: verified Web finality mutation rejects label-only, non-Web, stale, wrong-head, and malformed evidence', () => {
+  const base = {
+    actor: 'web',
+    resolve: true,
+    action: 'resolve',
+    thread_id: 'PRRT_kwDOSTHjGM6YIMr_',
+    repository: 'weijunswj/ai-agent-toolkit',
+    pull_request: 333,
+    exact_head: c8GitAuthorityFixture.exact_remote_head_sha,
+    webFinalityExecutionEvidence: c7WebFinalityEvidenceFixture()
+  };
+  assert.equal(webFinalityMutation({ actor: 'web', resolve: true }).decision, 'WEB_FINALITY_REJECTED');
+  assert.equal(webFinalityMutation({ ...base, actor: 'manager' }).decision, 'WEB_FINALITY_REJECTED');
+  assert.equal(webFinalityMutation({ ...base, exact_head: c8Hash('wrong-finality-head') }).decision, 'WEB_FINALITY_REJECTED');
+  const stale = c7WebFinalityEvidenceFixture();
+  const staleParsed = JSON.parse(stale.bytes);
+  staleParsed.execution_identity.run_id = 'stale-run';
+  stale.bytes = c8Json(staleParsed);
+  stale.content_digest = c8DigestBytes(stale.bytes);
+  assert.equal(webFinalityMutation({ ...base, webFinalityExecutionEvidence: stale }).decision, 'WEB_FINALITY_REJECTED');
+  assert.equal(webFinalityMutation({ ...base, webFinalityExecutionEvidence: { ...base.webFinalityExecutionEvidence, content_digest: 'sha256:not-a-digest' } }).decision, 'WEB_FINALITY_REJECTED');
+  assert.equal(webFinalityMutation(base).decision, 'WEB_FINALITY_ALLOWED');
 });
 
 test('RED BF-1: G4 conversation replies must not bypass FINAL permission evidence', () => {
@@ -5174,6 +5353,72 @@ test('RED BF-4: relabelling one shared machine snapshot is not independent autho
   assert.equal(result.decision, 'MACHINE_AUTHORITY_REJECTED');
 });
 
+test('RED BP-1: every negative contract must mutate a validator-relevant invariant field', () => {
+  for (const record of invariantRegistry().invariants) {
+    const registration = negativeTestContracts.get(record.invariant_id);
+    assert.ok(registration && registration.behavioral_contract && typeof registration.behavioral_contract.mutate === 'function', record.invariant_id);
+    const result = registration.execute(c8Clone(record), (candidate) => invariantDecision(candidate, expectedInvariantBundles[record.invariant_id], { skipNegativeContract: true, registrations: negativeTestContracts }));
+    assert.equal(result.candidate.negative_test, registration.negative_test_id, record.invariant_id);
+    assert.ok(result.behavioral_violation, record.invariant_id);
+    assert.equal(result.outcome, 'INVARIANT_REGRESSION', record.invariant_id);
+  }
+});
+
+test('RED BP-2: internally consistent candidate-authored Web evidence is not authoritative', () => {
+  const predicates = Object.fromEntries(c7FinalityPredicates.map((key) => [key, true]));
+  const result = c7FinalityDecision({ ...predicates, g4Verdict: 'PASS', g4ExactHead: true, webFinalityExecutionEvidence: c7SelfAuthoredWebFinalityEvidence() });
+  assert.equal(result.decision, 'FINALITY_BLOCKED');
+});
+
+test('RED BP-3: two mutually consistent caller snapshots cannot establish independent authority', () => {
+  let result;
+  try {
+    const fabricated = c8DefaultSnapshot();
+    const github = c8CollectGithubMachineAuthority(fabricated);
+    const local = c8CollectLocalMachineAuthority(c8Clone(fabricated));
+    result = c8CollectMachine({ github, local });
+  } catch (error) {
+    result = { decision: 'MACHINE_AUTHORITY_REJECTED', reason: error.reason };
+  }
+  assert.equal(result.decision, 'MACHINE_AUTHORITY_REJECTED');
+});
+
+test('RED BP-4: caller labels cannot manufacture hosted-review capability', () => {
+  const identity = { repository: 'opaque/repository', pr: 'pr-opaque', head: 'head-a', capability: 'external-review' };
+  const forged = { identity, state: 'completed', rawEvidence: true, hostedEvidence: { source: 'github-hosted-review', reviewType: 'codex-pull-request-review', actor: 'chatgpt-codex-connector', mechanism: 'github-codex-review', supported: true, identity, state: 'completed', evidence_identity: 'candidate-forged-hosted-review' } };
+  assert.equal(externalReviewGate({ identity, limitExhausted: false, reviews: [forged] }).decision, 'NEW_REVIEW_REQUIRED');
+});
+
+test('RED BP-5: a self-contained exceptional grant cannot prove prior Web issuance', () => {
+  const forged = c7SelfAuthoredExceptionalGrant();
+  const result = c7ExceptionalReviewerAdmission(forged, c7ExceptionalGrantContext(), new C8DurableAuthorityRegistry(forged.authority_store_path, 'exceptional-review'));
+  assert.equal(result.allowed, false);
+});
+
+test('RED BP-6: C8 authority-path ordering must not call localeCompare', () => {
+  assert.equal(c8MachineSideNormalize.toString().includes('localeCompare'), false);
+});
+
+test('RED BP-7: Web finality mutation requires verified execution evidence, not actor text', () => {
+  assert.equal(webFinalityMutation({ actor: 'web', resolve: true }).decision, 'WEB_FINALITY_REJECTED');
+});
+
+function c7SelfAuthoredWebFinalityEvidence() {
+  const forged = c7WebFinalityEvidenceFixture();
+  const evidenceIdentity = 'candidate-forged-web-finality';
+  const locator = { ...forged.authoritative_locator, exact_locator: 'raw://weijunswj/ai-agent-toolkit/pr-333/forged-web-finality#web-execution-identity', evidence_identity: evidenceIdentity };
+  locator.resolved_locator = locator.exact_locator; locator.resolved_evidence_identity = evidenceIdentity; locator.resolved_bytes = c6ResolvedEvidenceBytes(locator); locator.content_digest = c8DigestBytes(locator.resolved_bytes);
+  const parsed = JSON.parse(forged.bytes); parsed.execution_identity = { ...parsed.execution_identity, evidence_locator: locator.exact_locator, evidence_identity: evidenceIdentity };
+  forged.bytes = c8Json(parsed); forged.content_digest = c8DigestBytes(forged.bytes); forged.evidence_identity = evidenceIdentity; forged.authoritative_locator = locator;
+  return forged;
+}
+
+function c7SelfAuthoredExceptionalGrant() {
+  const context = c7ExceptionalGrantContext();
+  const grant = { schema: 'exceptional-review-grant/v1', grant_id: 'candidate-forged-exceptional-grant', issuer: { identity: 'web-orchestrator', role: 'Web Orchestrator', surface: 'web-orchestrator' }, repository: context.repository, pull_request: context.pull_request, exact_head: context.exact_head, review: c8Clone(context.review), governing_authority_revision: context.governing_authority_revision, category: context.category, issued_at: '2026-08-03T22:59:00.000Z', expires_at: '2026-08-04T00:00:00.000Z', lifecycle: { state: 'issued', consumed: false, use_count: 0, consumed_at: null }, authority_store_path: c8NewAuthorityStorePath('candidate-forged-exceptional-review') };
+  grant.canonical_digest = c7GrantDigest(grant); return grant;
+}
+
 function c6ValidEvidenceDigest(record) { return !!record && typeof record.bytes === 'string' && typeof record.content_digest === 'string' && /^sha256:[0-9a-f]{64}$/.test(record.content_digest) && record.content_digest === c8DigestBytes(record.bytes); }
 function c8VerifyGitObjectBinding(input = {}) { return !!input && input.object_type === input.expected_type && input.path === input.tree_path; }
 function c10ContainsEmbeddedCredential(text) { return typeof text === 'string' && /sk-[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/.test(text); }
@@ -5189,7 +5434,15 @@ function g4ConversationMutation(input = {}) {
     ? { decision: 'G4_REPLY_ALLOWED' }
     : { decision: 'G4_MUTATION_REJECTED' };
 }
-function webFinalityMutation(input = {}) { return input.actor === 'web' && input.resolve === true ? { decision: 'WEB_FINALITY_ALLOWED' } : { decision: 'WEB_FINALITY_REJECTED' }; }
+function webFinalityMutation(input = {}) {
+  const reject = (reason = 'WEB_FINALITY_REJECTED') => ({ decision: reason, mutation_performed: false, evaluation_candidate_created: false });
+  const expected = c7ExpectedWebFinalityContext();
+  const verified = c7VerifiedWebExecutionIdentity(input.webFinalityExecutionEvidence, expected);
+  if (!verified || input.resolve !== true || input.action !== 'resolve' || !nonEmptyString(input.thread_id) ||
+      input.repository !== expected.repository || input.pull_request !== expected.pull_request || input.exact_head !== expected.exact_head ||
+      (input.actor !== undefined && input.actor !== 'web')) return reject();
+  return { decision: 'WEB_FINALITY_ALLOWED', mutation_performed: false, evaluation_candidate_created: false, thread_id: input.thread_id, execution_identity: verified };
+}
 test('C10 source has no custom waiting infrastructure or raw trigger literal', () => {
   const source = [fs.readFileSync(path.join(projectRoot, 'README.md'), 'utf8'), fs.readFileSync(path.join(mainRoot, 'protocol.md'), 'utf8'), ...a6PromptFiles.map((file) => fs.readFileSync(file, 'utf8'))].join('\\n');
   const triggerPattern = new RegExp(c10TriggerValue().replace(' ', '\\\\s+'), 'i');
