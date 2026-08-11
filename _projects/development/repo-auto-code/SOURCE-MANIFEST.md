@@ -2,7 +2,11 @@
 
 ## Ownership
 
-This is first-party Toolkit source for the bounded G3 implementation/amendment lane of issue #329 through cumulative A6-C8. The module is source_only and publishes no skill entrypoint, native plugin metadata, MCP surface, installed instruction, or consumer-facing generated output.
+This is first-party Toolkit source for the bounded G3 implementation/amendment lane of issue #329 through the complete accepted cumulative Design Lock chain:
+
+`DL-329-AUTO-CODE-005` -> `DL-329-AUTO-CODE-005-A1` -> `DL-329-AUTO-CODE-005-A2` -> `DL-329-AUTO-CODE-005-A3` -> `DL-329-AUTO-CODE-005-A4` -> `DL-329-AUTO-CODE-005-A5` -> `DL-329-AUTO-CODE-005-A6` -> `DL-329-AUTO-CODE-005-A6-C2` -> `DL-329-AUTO-CODE-005-A6-C3` -> `DL-329-AUTO-CODE-005-A6-C4` -> `DL-329-AUTO-CODE-005-A6-C5` -> `DL-329-AUTO-CODE-005-A6-C6` -> `DL-329-AUTO-CODE-005-A6-C7` -> `DL-329-AUTO-CODE-005-A6-C8` -> `DL-329-AUTO-CODE-005-A6-C10` -> `DL-329-AUTO-CODE-005-A6-C11`.
+
+C9 is intentionally absent. The module is source_only and publishes no skill entrypoint, native plugin metadata, MCP surface, installed instruction, or consumer-facing generated output.
 
 ## Preserved source files
 

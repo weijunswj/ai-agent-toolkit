@@ -225,7 +225,11 @@ const designLockChain = [
   'DL-329-AUTO-CODE-005-A6-C3',
   'DL-329-AUTO-CODE-005-A6-C4',
   'DL-329-AUTO-CODE-005-A6-C5',
-  'DL-329-AUTO-CODE-005-A6-C6'
+  'DL-329-AUTO-CODE-005-A6-C6',
+  'DL-329-AUTO-CODE-005-A6-C7',
+  'DL-329-AUTO-CODE-005-A6-C8',
+  'DL-329-AUTO-CODE-005-A6-C10',
+  'DL-329-AUTO-CODE-005-A6-C11'
 ];
 
 // This inventory is trusted evidence from the base tree, not a projection of the candidate checkout.
@@ -900,17 +904,63 @@ test('A6 validates every runtime prompt contract, including managed and implemen
   }
 });
 
+function c31ExtractDesignLockTokens(text) {
+  const authorityLine = String(text).split('\n').find((line) => line.includes('DL-329-AUTO-CODE-005')) || '';
+  return authorityLine.split(/[^A-Za-z0-9-]+/).filter((token) => /^DL-329-AUTO-CODE-005(?:-A[1-6]|-A6-C\d+)?$/.test(token));
+}
+
+function c31AuthoritySurfaces() {
+  return {
+    readme: fs.readFileSync(path.join(projectRoot, 'README.md'), 'utf8'),
+    sourceManifest: fs.readFileSync(path.join(projectRoot, 'SOURCE-MANIFEST.md'), 'utf8'),
+    project: JSON.parse(fs.readFileSync(path.join(projectRoot, 'toolkit.project.json'), 'utf8'))
+  };
+}
+
+function c31CloneAuthoritySurfaces(surfaces) {
+  return { readme: surfaces.readme, sourceManifest: surfaces.sourceManifest, project: JSON.parse(JSON.stringify(surfaces.project)) };
+}
+
+function c31AssertDesignLockSurfaceConsistency(surfaces) {
+  const readmeChain = c31ExtractDesignLockTokens(surfaces.readme);
+  const manifestChain = c31ExtractDesignLockTokens(surfaces.sourceManifest);
+  const metadataTokens = c31ExtractDesignLockTokens(surfaces.project.version_notes);
+  assert.deepEqual(readmeChain, designLockChain, 'README Design Lock chain drifted');
+  assert.deepEqual(manifestChain, designLockChain, 'SOURCE-MANIFEST Design Lock chain drifted');
+  assert.equal(metadataTokens.includes('DL-329-AUTO-CODE-005-A6-C10'), true, 'project metadata lost C10');
+  assert.equal(metadataTokens.includes('DL-329-AUTO-CODE-005-A6-C11'), true, 'project metadata lost C11');
+  assert.equal(metadataTokens.includes('DL-329-AUTO-CODE-005-A6-C9'), false, 'project metadata invented C9');
+  assert.match(surfaces.project.version_notes, /Extends DL-329-AUTO-CODE-005-A6-C10/);
+  assert.match(surfaces.project.version_notes, /advances DL-329-AUTO-CODE-005-A6-C11/);
+  assert.equal(readmeChain.at(-1), 'DL-329-AUTO-CODE-005-A6-C11');
+  assert.equal(manifestChain.at(-1), 'DL-329-AUTO-CODE-005-A6-C11');
+}
+
 test('module README and metadata retain the complete cumulative Design Lock chain', () => {
-  const readme = fs.readFileSync(path.join(projectRoot, 'README.md'), 'utf8');
-  const manifest = JSON.parse(fs.readFileSync(path.join(projectRoot, 'toolkit.project.json'), 'utf8'));
-  let previousIndex = -1;
-  for (const lock of designLockChain) {
-    const index = readme.indexOf(lock);
-    assert.ok(index > previousIndex, 'README Design Lock chain drifted at ' + lock);
-    previousIndex = index;
+  const surfaces = c31AuthoritySurfaces();
+  c31AssertDesignLockSurfaceConsistency(surfaces);
+  assert.ok(a6ContractText().includes('DL-329-AUTO-CODE-005-A6-C8'));
+});
+
+test('C31 metadata anti-drift rejects terminal-chain omission, disagreement, duplication, and C9 insertion', () => {
+  const baseline = c31AuthoritySurfaces();
+  c31AssertDesignLockSurfaceConsistency(baseline);
+  const expectRejected = (label, mutate) => {
+    const candidate = c31CloneAuthoritySurfaces(baseline);
+    mutate(candidate);
+    assert.throws(() => c31AssertDesignLockSurfaceConsistency(candidate), undefined, label);
+  };
+  for (const lock of ['DL-329-AUTO-CODE-005-A6-C10', 'DL-329-AUTO-CODE-005-A6-C11']) {
+    expectRejected('README omission ' + lock, (candidate) => { candidate.readme = candidate.readme.replace(lock, ''); });
+    expectRejected('SOURCE-MANIFEST omission ' + lock, (candidate) => { candidate.sourceManifest = candidate.sourceManifest.replace(lock, ''); });
+    expectRejected('project metadata omission ' + lock, (candidate) => { candidate.project.version_notes = candidate.project.version_notes.replace(lock, ''); });
   }
-  assert.ok(manifest.version_notes.includes(designLockChain.at(-1)));
-  assert.ok(a6ContractText().includes(designLockChain.at(-1)));
+  expectRejected('project metadata terminal contradiction', (candidate) => { candidate.project.version_notes = candidate.project.version_notes.replace('advances DL-329-AUTO-CODE-005-A6-C11', 'advances DL-329-AUTO-CODE-005-A6-C10'); });
+  expectRejected('project metadata reversed terminal order', (candidate) => { candidate.project.version_notes = candidate.project.version_notes.replace('Extends DL-329-AUTO-CODE-005-A6-C10', 'Extends DL-329-AUTO-CODE-005-A6-C11').replace('advances DL-329-AUTO-CODE-005-A6-C11', 'advances DL-329-AUTO-CODE-005-A6-C10'); });
+  expectRejected('project metadata C9 insertion', (candidate) => { candidate.project.version_notes = candidate.project.version_notes.replace('Extends DL-329-AUTO-CODE-005-A6-C10', 'Extends DL-329-AUTO-CODE-005-A6-C9 -> DL-329-AUTO-CODE-005-A6-C10'); });
+  expectRejected('README C9 insertion', (candidate) => { candidate.readme = candidate.readme.replace('DL-329-AUTO-CODE-005-A6-C10', 'DL-329-AUTO-CODE-005-A6-C9 -> DL-329-AUTO-CODE-005-A6-C10'); });
+  expectRejected('reversed terminal order', (candidate) => { candidate.readme = candidate.readme.replace('DL-329-AUTO-CODE-005-A6-C10` -> `DL-329-AUTO-CODE-005-A6-C11', 'DL-329-AUTO-CODE-005-A6-C11` -> `DL-329-AUTO-CODE-005-A6-C10'); });
+  expectRejected('duplicate C11', (candidate) => { candidate.sourceManifest = candidate.sourceManifest.replace('DL-329-AUTO-CODE-005-A6-C11`', 'DL-329-AUTO-CODE-005-A6-C11` -> `DL-329-AUTO-CODE-005-A6-C11`'); });
 });
 
 test('architecture contains the role, authority, reconciliation, G4, assurance, and continuation gates', () => {
@@ -1156,13 +1206,25 @@ function concernDisposition(threads) {
   return { resolvedIds, openIds, returnToLoop: openIds, mergeAuthorized: false };
 }
 
+const c31WebGovernanceTarget = 'controller-governance';
+
+function c31VerifiedWebAction(input, action, target) {
+  const expected = c7ExpectedWebFinalityContext();
+  if (!input || typeof input !== 'object' || !nonEmptyString(action) || !nonEmptyString(target) ||
+      input.action !== action || input.target !== target ||
+      input.repository !== expected.repository || input.pull_request !== expected.pull_request || input.exact_head !== expected.exact_head ||
+      (input.actor !== undefined && input.actor !== 'web') ||
+      !expected.web_actions.some((allowed) => allowed.action === action && allowed.target === target)) return null;
+  return c7VerifiedWebExecutionIdentity(input.webFinalityExecutionEvidence, expected);
+}
+
 function resolvedThreadDisposition(thread) {
   assert.equal(thread.resolved, true);
   assert.equal(typeof thread.regressed, 'boolean');
   assert.equal(typeof thread.contraryEvidence, 'boolean');
   assert.equal(typeof thread.actor, 'string');
   if (thread.regressed === true || thread.contraryEvidence === true) {
-    return thread.actor === 'web' ? 'REOPEN_BY_WEB' : 'REOPEN_PROHIBITED';
+    return c31VerifiedWebAction(thread, 'reopen', thread.thread_id) ? 'REOPEN_BY_WEB' : 'REOPEN_PROHIBITED';
   }
   return 'RETAIN_RESOLVED';
 }
@@ -1413,7 +1475,9 @@ test('A4 preserves resolved threads unless regression or contrary evidence is pr
     resolved: true,
     regressed: true,
     contraryEvidence: false,
-    actor: 'web'
+    actor: 'web',
+    thread_id: 'PRRT_kwDOSTHjGM6YIMr_',
+    ...c31WebActionFixture('reopen', 'PRRT_kwDOSTHjGM6YIMr_')
   }), 'REOPEN_BY_WEB');
 });
 
@@ -1673,8 +1737,7 @@ function temporaryChatDecision(evidence) {
 }
 
 function controllerAuthorityFromIdentity(evidence) {
-  assert.equal(evidence.rawEvidence, true);
-  return evidence.explicitGrant === 'web-governance-grant' && evidence.surface === 'web-orchestrator';
+  return !!c31VerifiedWebAction(evidence, 'governance', c31WebGovernanceTarget);
 }
 
 test('A6 target topology requires separate acceptance, merge, installation, and activation grants', () => {
@@ -1966,6 +2029,20 @@ test('A6 model role and surface do not grant controller authority', () => {
     explicitGrant: 'none'
   }), false);
   assertA6Terms(['Model, role, reasoning, and surface identity never grant controller authority']);
+});
+
+test('C31 controller authority requires trusted bounded Web evidence rather than labels', () => {
+  const valid = c31WebActionFixture('governance', c31WebGovernanceTarget);
+  assert.equal(controllerAuthorityFromIdentity(valid), true);
+  assert.equal(controllerAuthorityFromIdentity({ rawEvidence: true, explicitGrant: 'web-governance-grant', surface: 'web-orchestrator', action: 'governance', target: c31WebGovernanceTarget, repository: valid.repository, pull_request: valid.pull_request, exact_head: valid.exact_head }), false);
+  for (const overrides of [
+    { action: 'resolve' },
+    { target: 'other-governance-target' },
+    { repository: 'other/repository' },
+    { pull_request: 334 },
+    { exact_head: c8Hash('stale-controller-head') },
+    { webFinalityExecutionEvidence: { ...valid.webFinalityExecutionEvidence, evidence_identity: 'unknown-web-evidence' } }
+  ]) assert.equal(controllerAuthorityFromIdentity({ ...valid, ...overrides }), false);
 });
 
 test('A6 every subordinate run kind is fresh and prompt-bounded', () => {
@@ -3684,7 +3761,6 @@ test('A6-C5 source contract keeps hook installation host-specific and source-onl
   assert.equal(JSON.parse(fs.readFileSync(path.join(projectRoot, 'toolkit.project.json'), 'utf8')).surface.publish_as, 'source_only');
 });
 
-designLockChain.push('DL-329-AUTO-CODE-005-A6-C7', 'DL-329-AUTO-CODE-005-A6-C8');
 const c8InvariantBundles = {
   'C7-FINALITY-WEB-GATE-001': { semantics: {
     conjunctive_finality: 'Review/amend convergence, one fresh exact-head G4 PASS, a complete terminal packet, and comprehensive independent Web verification are all required at the same exact head.',
@@ -4640,7 +4716,12 @@ function c7ExpectedWebFinalityContext() {
     exact_head: snapshot.exact_remote_head_sha,
     run_id: 'run-web-finality-synthetic',
     session_id: 'session-web-finality-synthetic',
-    turn_id: 'turn-web-finality-synthetic'
+    turn_id: 'turn-web-finality-synthetic',
+    web_actions: [
+      { action: 'resolve', target: 'PRRT_kwDOSTHjGM6YIMr_' },
+      { action: 'reopen', target: 'PRRT_kwDOSTHjGM6YIMr_' },
+      { action: 'governance', target: c31WebGovernanceTarget }
+    ]
   };
 }
 
@@ -4718,6 +4799,19 @@ function c7VerifiedWebExecutionIdentity(rawEvidence, expected = c7ExpectedWebFin
       identity.run_id !== expected.run_id || identity.session_id !== expected.session_id || identity.turn_id !== expected.turn_id ||
       identity.evidence_locator !== locator.exact_locator || identity.evidence_identity !== locator.evidence_identity) return null;
   return identity;
+}
+
+function c31WebActionFixture(action, target, overrides = {}) {
+  const expected = c7ExpectedWebFinalityContext();
+  return {
+    action,
+    target,
+    repository: expected.repository,
+    pull_request: expected.pull_request,
+    exact_head: expected.exact_head,
+    webFinalityExecutionEvidence: c7WebFinalityEvidenceFixture(),
+    ...overrides
+  };
 }
 
 function c7FinalityDecision(evidence = {}) {
@@ -4945,6 +5039,37 @@ test('PRRT_kwDOSTHjGM6WPZcq collects complete non-Git authority independently on
 test('PRRT_kwDOSTHjGM6WPZdE uses locale-independent blob ordering', () => {
   const snapshot = c8Snapshot(c8DefaultSnapshot({ authorised_blobs: [{ path: 'a', blob_sha: c8Hash('a') }, { path: 'Z', blob_sha: c8Hash('Z') }] }));
   assert.deepEqual(snapshot.authorised_blobs.map((blob) => blob.path), ['Z', 'a']);
+});
+
+function c31MachineRecordWithBlobs(record, blobs) {
+  const copy = c8Clone(record);
+  copy.blobs = c8Clone(blobs);
+  const raw = JSON.parse(copy.collector.evidence_bytes);
+  raw.authority.blobs = c8Clone(blobs);
+  const bytes = c8Json(raw);
+  const digest = c8DigestBytes(bytes);
+  copy.collector.evidence_bytes = bytes;
+  copy.collector.evidence_digest = digest;
+  copy.collector.evidence_locator = { ...copy.collector.evidence_locator, content_digest: digest, resolved_bytes: bytes };
+  return copy;
+}
+
+test('PRRT_kwDOSTHjGM6WPZdE proves mixed ASCII/non-ASCII ordering and cross-source canonical identity', () => {
+  const nonAsciiPath = 'src/' + String.fromCharCode(0x00e9) + '.txt';
+  const orderedPaths = ['src/Z.txt', 'src/a.txt', 'src/e.txt', nonAsciiPath];
+  const githubInput = orderedPaths.map((pathName) => ({ path: pathName, blob_sha: c8Hash(pathName) }));
+  const localInput = [...githubInput].reverse();
+  const trusted = c8MachineAuthority();
+  const github = c8MachineSideNormalize(c31MachineRecordWithBlobs(trusted.github, githubInput), 'github-api');
+  const local = c8MachineSideNormalize(c31MachineRecordWithBlobs(trusted.local, localInput), 'local-git');
+  assert.notEqual(github.collector.source, local.collector.source);
+  assert.notEqual(github.collector.evidence_identity, local.collector.evidence_identity);
+  assert.deepEqual(github.blobs, local.blobs);
+  const githubSnapshot = c8Snapshot(c8DefaultSnapshot({ authorised_blobs: github.blobs }));
+  const localSnapshot = c8Snapshot(c8DefaultSnapshot({ authorised_blobs: local.blobs }));
+  assert.deepEqual(github.blobs.map((blob) => blob.path), ['src/Z.txt', 'src/a.txt', 'src/e.txt', 'src/' + String.fromCharCode(0x00e9) + '.txt']);
+  assert.equal(githubSnapshot.canonical_bytes, localSnapshot.canonical_bytes);
+  assert.equal(githubSnapshot.snapshot_digest, localSnapshot.snapshot_digest);
 });
 
 test('PRRT_kwDOSTHjGM6WPZdI rejects a parent entry nested inside a sibling marker', () => {
@@ -5197,6 +5322,7 @@ test('C10 preserves G4 reply-without-resolution and Web-only finality', () => {
     resolve: true,
     action: 'resolve',
     thread_id: 'PRRT_kwDOSTHjGM6YIMr_',
+    target: 'PRRT_kwDOSTHjGM6YIMr_',
     repository: 'weijunswj/ai-agent-toolkit',
     pull_request: 333,
     exact_head: c8GitAuthorityFixture.exact_remote_head_sha,
@@ -5210,6 +5336,7 @@ test('BP-7: verified Web finality mutation rejects label-only, non-Web, stale, w
     resolve: true,
     action: 'resolve',
     thread_id: 'PRRT_kwDOSTHjGM6YIMr_',
+    target: 'PRRT_kwDOSTHjGM6YIMr_',
     repository: 'weijunswj/ai-agent-toolkit',
     pull_request: 333,
     exact_head: c8GitAuthorityFixture.exact_remote_head_sha,
@@ -5226,6 +5353,40 @@ test('BP-7: verified Web finality mutation rejects label-only, non-Web, stale, w
   assert.equal(webFinalityMutation({ ...base, webFinalityExecutionEvidence: stale }).decision, 'WEB_FINALITY_REJECTED');
   assert.equal(webFinalityMutation({ ...base, webFinalityExecutionEvidence: { ...base.webFinalityExecutionEvidence, content_digest: 'sha256:not-a-digest' } }).decision, 'WEB_FINALITY_REJECTED');
   assert.equal(webFinalityMutation(base).decision, 'WEB_FINALITY_ALLOWED');
+});
+
+test('C31 Web authority inventory has no label-only reopen/governance/finality path', () => {
+  const source = fs.readFileSync(__filename, 'utf8');
+  for (const [name, helper] of [
+    ['resolvedThreadDisposition', resolvedThreadDisposition],
+    ['controllerAuthorityFromIdentity', controllerAuthorityFromIdentity],
+    ['webFinalityMutation', webFinalityMutation]
+  ]) assert.ok(helper.toString().includes('c31VerifiedWebAction'), name + ' bypasses the trusted Web boundary');
+  assert.ok(c7FinalityDecision.toString().includes('c7VerifiedWebExecutionIdentity'));
+  assert.ok(c7ExceptionalReviewerAdmission.toString().includes('c28TrustedLookup'));
+  assert.ok(hasAuthoritativeHostedCapability.toString().includes('c28TrustedLookup'));
+  const weakAuthorityLines = source.split('\n').filter((line) =>
+    (line.includes('REOPEN_BY_WEB') || line.includes('WEB_FINALITY_ALLOWED') || line.includes('controller authority')) &&
+    (line.includes('actor ===') || line.includes('explicitGrant ===') || line.includes('surface ==='))
+  );
+  assert.deepEqual(weakAuthorityLines, []);
+});
+
+test('C31 resolved-thread reopen requires verified evidence, genuine regression, and exact target/action', () => {
+  const target = 'PRRT_kwDOSTHjGM6YIMr_';
+  const valid = { resolved: true, regressed: true, contraryEvidence: false, actor: 'web', thread_id: target, ...c31WebActionFixture('reopen', target) };
+  assert.equal(resolvedThreadDisposition(valid), 'REOPEN_BY_WEB');
+  assert.equal(resolvedThreadDisposition({ ...valid, regressed: false }), 'RETAIN_RESOLVED');
+  for (const overrides of [
+    { action: 'resolve' },
+    { target: 'other-thread' },
+    { thread_id: 'other-thread' },
+    { repository: 'other/repository' },
+    { exact_head: c8Hash('stale-reopen-head') },
+    { webFinalityExecutionEvidence: { ...valid.webFinalityExecutionEvidence, evidence_identity: 'unknown-reopen-evidence' } },
+    { webFinalityExecutionEvidence: { ...valid.webFinalityExecutionEvidence, content_digest: 'sha256:not-a-digest' } }
+  ]) assert.equal(resolvedThreadDisposition({ ...valid, ...overrides }), 'REOPEN_PROHIBITED');
+  assert.equal(resolvedThreadDisposition({ ...valid, actor: 'worker' }), 'REOPEN_PROHIBITED');
 });
 
 test('RED BF-1: G4 conversation replies must not bypass FINAL permission evidence', () => {
@@ -5437,9 +5598,8 @@ function g4ConversationMutation(input = {}) {
 function webFinalityMutation(input = {}) {
   const reject = (reason = 'WEB_FINALITY_REJECTED') => ({ decision: reason, mutation_performed: false, evaluation_candidate_created: false });
   const expected = c7ExpectedWebFinalityContext();
-  const verified = c7VerifiedWebExecutionIdentity(input.webFinalityExecutionEvidence, expected);
-  if (!verified || input.resolve !== true || input.action !== 'resolve' || !nonEmptyString(input.thread_id) ||
-      input.repository !== expected.repository || input.pull_request !== expected.pull_request || input.exact_head !== expected.exact_head ||
+  const verified = c31VerifiedWebAction(input, 'resolve', input.thread_id);
+  if (!verified || input.resolve !== true || !nonEmptyString(input.thread_id) ||
       (input.actor !== undefined && input.actor !== 'web')) return reject();
   return { decision: 'WEB_FINALITY_ALLOWED', mutation_performed: false, evaluation_candidate_created: false, thread_id: input.thread_id, execution_identity: verified };
 }
