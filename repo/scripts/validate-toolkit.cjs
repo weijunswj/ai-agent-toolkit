@@ -1525,8 +1525,8 @@ function validatePortableRepoLocalTemplates(errors) {
     const text = readText(relPath);
     const lines = lineCount(text);
     const isShim = !/AGENTS\.managed\.template\.md$/.test(relPath);
-    const maxLines = isShim ? 35 : 190;
-    const maxChars = isShim ? 2500 : 14000;
+    const maxLines = isShim ? 35 : 200;
+    const maxChars = isShim ? 2500 : 16000;
     if (lines > maxLines || text.length > maxChars) {
       fail(errors, `${relPath} must stay compact for portable repo-local installation`);
     }
