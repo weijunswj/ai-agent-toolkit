@@ -5,9 +5,9 @@
   "title": "AI Coding Agent Rules",
   "module_path": "_projects/development/ai-coding-agent-rules",
   "main_path": "_projects/development/ai-coding-agent-rules/_main",
-  "version": "3.1.2",
+  "version": "3.1.3",
   "version_policy": "semver",
-  "version_notes": "Preserves the C13 three-mode law while restoring common capacity, non-Fast, non-nesting and context-minimisation safeguards.",
+  "version_notes": "Preserves the C13 three-mode law while restoring common capacity, non-Fast, non-nesting and context-minimisation safeguards, and restores bounded validation budgets for the portable managed agent-rule template.",
   "outputs": [
     {
       "kind": "curated",

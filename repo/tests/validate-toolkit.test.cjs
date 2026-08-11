@@ -526,6 +526,61 @@ test('Toolkit plugin packaged version surfaces stay aligned', () => {
   assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.9\.12/i);
 });
 
+test('managed template bounds accept restored candidates and reject each limit independently', () => {
+  const managedTemplateRelativePaths = [
+    path.join('_projects', 'development', 'ai-coding-agent-rules', 'curated_output_for_ai', 'skills', 'ai-coding-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
+    path.join('skills', 'ai-coding-agent-rules', 'repo-local', 'AGENTS.managed.template.md')
+  ];
+  const lineCount = (text) => text.replace(/\r\n/g, '\n').split('\n').length;
+  const compactnessError = /must stay compact for portable repo-local installation/;
+  const managedTemplatePaths = (cwd) => managedTemplateRelativePaths.map((relativePath) => path.join(cwd, relativePath));
+  const readManagedTemplates = (cwd) => managedTemplatePaths(cwd).map((filePath) => fs.readFileSync(filePath, 'utf8'));
+
+  const candidateCwd = tempCopy();
+  const candidateTexts = readManagedTemplates(candidateCwd);
+  for (const [index, text] of candidateTexts.entries()) {
+    assert.equal(text.length, 15090, `restored managed template ${index + 1} has the expected character count`);
+    assert.equal(lineCount(text), 197, `restored managed template ${index + 1} has the expected validator-counted line count`);
+    assert.ok(text.length <= 16000, `restored managed template ${index + 1} fits the final character budget`);
+    assert.ok(lineCount(text) <= 200, `restored managed template ${index + 1} fits the final line budget`);
+  }
+
+  const candidateResult = runValidate(candidateCwd);
+  assert.equal(candidateResult.status, 0, `restored candidates should pass final compactness validation\n${candidateResult.stderr}`);
+
+  const characterCwd = tempCopy();
+  for (const [index, filePath] of managedTemplatePaths(characterCwd).entries()) {
+    const text = fs.readFileSync(filePath, 'utf8');
+    const overCharacterText = `${text}${'x'.repeat(16001 - text.length)}`;
+    fs.writeFileSync(filePath, overCharacterText, 'utf8');
+    const mutatedText = fs.readFileSync(filePath, 'utf8');
+    assert.ok(mutatedText.length > 16000, `character fixture ${index + 1} exceeds the final character budget`);
+    assert.ok(lineCount(mutatedText) <= 200, `character fixture ${index + 1} remains within the final line budget`);
+  }
+
+  const characterResult = runValidate(characterCwd);
+  assert.notEqual(characterResult.status, 0, 'over-character managed templates must be rejected');
+  assert.match(characterResult.stderr, compactnessError);
+  assert.equal((characterResult.stderr.match(/must stay compact for portable repo-local installation/g) || []).length, 2);
+
+  const lineCwd = tempCopy();
+  for (const [index, filePath] of managedTemplatePaths(lineCwd).entries()) {
+    const text = fs.readFileSync(filePath, 'utf8');
+    assert.equal(text.endsWith('\n'), true, `line fixture ${index + 1} starts from the expected trailing newline`);
+    const overLineText = `${text}${'\n'.repeat(4)}`;
+    fs.writeFileSync(filePath, overLineText, 'utf8');
+    const mutatedText = fs.readFileSync(filePath, 'utf8');
+    assert.equal(lineCount(mutatedText), 201, `line fixture ${index + 1} accounts for trailing-newline counting`);
+    assert.ok(lineCount(mutatedText) > 200, `line fixture ${index + 1} exceeds the final line budget`);
+    assert.ok(mutatedText.length <= 16000, `line fixture ${index + 1} remains within the final character budget`);
+  }
+
+  const lineResult = runValidate(lineCwd);
+  assert.notEqual(lineResult.status, 0, 'over-line managed templates must be rejected');
+  assert.match(lineResult.stderr, compactnessError);
+  assert.equal((lineResult.stderr.match(/must stay compact for portable repo-local installation/g) || []).length, 2);
+});
+
 test('skill discovery includes migrated skills', () => {
   const skills = validator.skillDirs();
   assert.ok(skills.includes('skills/context-preserving-ai-publisher'));
