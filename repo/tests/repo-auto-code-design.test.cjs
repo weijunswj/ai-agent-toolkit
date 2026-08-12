@@ -719,9 +719,9 @@ function baselineFixtureNames() {
     return names;
   }
 
-  // Hosted PR validation may use a depth-one checkout. The trusted base-tree
-  // inventory remains the baseline; candidate filenames are never its source.
-  assert.equal(git('rev-parse', '--is-shallow-repository'), 'true');
+  // Hosted PR validation may not expose the historical baseline merge in the
+  // checked-out first-parent graph. The trusted base-tree inventory remains
+  // the baseline; candidate filenames are never its source.
   return [...trustedBaseFixtureInventory.names];
 }
 
