@@ -67,14 +67,90 @@ function readBlobAt(repoRoot, ref, relativePath) {
   return result.status === 0 ? String(result.stdout || '') : null;
 }
 
-function readJsonAt(repoRoot, ref, relativePath) {
-  const text = readBlobAt(repoRoot, ref, relativePath);
+function readJsonAt(repoRoot, ref, relativePath, objectStore = null) {
+  const text = objectStore ? objectStore.read(ref, relativePath) : readBlobAt(repoRoot, ref, relativePath);
   if (text === null) return null;
   try {
     return JSON.parse(text);
   } catch (error) {
     return { __parseError: error.message };
   }
+}
+
+function treeEntriesAt(repoRoot, ref) {
+  const output = gitText(repoRoot, ['ls-tree', '-r', ref]);
+  return output ? output.split(/\r?\n/).map((line) => {
+    const separator = line.indexOf('\t');
+    if (separator < 0) return null;
+    const fields = line.slice(0, separator).split(/\s+/);
+    if (fields.length < 3) return null;
+    return {
+      type: fields[1],
+      objectId: fields[2],
+      path: normalizePath(line.slice(separator + 1))
+    };
+  }).filter(Boolean) : [];
+}
+
+function readBlobBatch(repoRoot, objectIds) {
+  const uniqueObjectIds = [...new Set(objectIds)];
+  if (!uniqueObjectIds.length) return new Map();
+  const result = spawnSync('git', ['cat-file', '--batch'], {
+    cwd: repoRoot,
+    input: `${uniqueObjectIds.join('\n')}\n`,
+    encoding: null,
+    windowsHide: true,
+    maxBuffer: 64 * 1024 * 1024
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`git cat-file --batch failed (${result.status}): ${String(result.stderr || '').trim()}`);
+  }
+  const output = Buffer.isBuffer(result.stdout) ? result.stdout : Buffer.from(result.stdout || '');
+  const contents = new Map();
+  let offset = 0;
+  for (const objectId of uniqueObjectIds) {
+    const headerEnd = output.indexOf(0x0a, offset);
+    if (headerEnd < 0) throw new Error(`VERSION_AUDIT_OBJECT_READ_FAILED: ${objectId}`);
+    const header = output.subarray(offset, headerEnd).toString('utf8').split(/\s+/);
+    offset = headerEnd + 1;
+    if (header[1] === 'missing') continue;
+    const size = Number(header[2]);
+    if (header[1] !== 'blob' || !Number.isSafeInteger(size) || size < 0 || offset + size > output.length) {
+      throw new Error(`VERSION_AUDIT_OBJECT_READ_FAILED: ${objectId}`);
+    }
+    contents.set(objectId, output.subarray(offset, offset + size).toString('utf8'));
+    offset += size;
+    if (output[offset] === 0x0a) offset += 1;
+  }
+  return contents;
+}
+
+function createHistoricalObjectStore(repoRoot, refs) {
+  const pathsByRef = new Map();
+  const contentsByRefPath = new Map();
+  for (const ref of refs) {
+    const entries = treeEntriesAt(repoRoot, ref);
+    const manifestEntries = entries.filter((entry) => entry.path.endsWith('/toolkit.project.json'));
+    pathsByRef.set(ref, manifestEntries.map((entry) => entry.path));
+    const wantedEntries = entries.filter((entry) => entry.type === 'blob' && (
+      entry.path.endsWith('/toolkit.project.json') || BRIDGE_COUPLED_PATHS.includes(entry.path)
+    ));
+    const blobs = readBlobBatch(repoRoot, wantedEntries.map((entry) => entry.objectId));
+    for (const entry of wantedEntries) {
+      contentsByRefPath.set(`${ref}:${entry.path}`, blobs.get(entry.objectId) ?? null);
+    }
+  }
+  return {
+    pathsAt(ref) {
+      return pathsByRef.get(ref) || [];
+    },
+    read(ref, relativePath) {
+      const key = `${ref}:${normalizePath(relativePath)}`;
+      if (contentsByRefPath.has(key)) return contentsByRefPath.get(key);
+      return readBlobAt(repoRoot, ref, relativePath);
+    }
+  };
 }
 
 function parseSemver(value) {
@@ -127,60 +203,115 @@ function extractVersion(relativePath, text) {
   return null;
 }
 
-function extractProjectManifests(repoRoot) {
-  const result = [];
-  const root = path.join(repoRoot, '_projects');
-  if (!fs.existsSync(root)) return result;
-  const visit = (directory) => {
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-      if (entry.name === '.git' || entry.name === 'node_modules') continue;
-      const absolute = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
-        visit(absolute);
-      } else if (entry.isFile() && entry.name === 'toolkit.project.json') {
-        const relativePath = normalizePath(path.relative(repoRoot, absolute));
-        const project = JSON.parse(fs.readFileSync(absolute, 'utf8'));
-        result.push({ relativePath, project });
-      }
-    }
-  };
-  visit(root);
-  return result;
+function projectManifestPathsAt(repoRoot, ref, objectStore = null) {
+  if (objectStore) return objectStore.pathsAt(ref);
+  const output = gitText(repoRoot, ['ls-tree', '-r', '--name-only', ref, '--', '_projects']);
+  return output
+    ? output.split(/\r?\n/).map(normalizePath).filter((value) => value.endsWith('/toolkit.project.json'))
+    : [];
 }
 
-function buildFamilies(repoRoot) {
-  return extractProjectManifests(repoRoot).map(({ relativePath, project }) => {
-    const modulePath = normalizePath(project.module_path || path.posix.dirname(relativePath));
-    const outputs = Array.isArray(project.outputs) ? project.outputs : [];
-    const triggerPaths = [];
-    if (outputs.length > 0) {
-      triggerPaths.push(`${modulePath}/_main`, `${modulePath}/curated_output_for_ai`);
-      for (const output of outputs) {
-        if (output && typeof output.output === 'string') triggerPaths.push(output.output);
-      }
+function extractProjectManifestsAt(repoRoot, ref, objectStore = null) {
+  return projectManifestPathsAt(repoRoot, ref, objectStore).map((relativePath) => {
+    const project = readJsonAt(repoRoot, ref, relativePath, objectStore);
+    if (!project || typeof project !== 'object' || project.__parseError) {
+      const detail = project && project.__parseError ? `: ${project.__parseError}` : '';
+      throw new Error(`VERSION_AUDIT_MANIFEST_INVALID: ${ref}:${relativePath}${detail}`);
     }
-    const family = {
-      id: String(project.id || modulePath),
-      manifestPath: relativePath,
-      modulePath,
-      triggerPaths,
-      coupledPaths: [relativePath]
-    };
-    if (family.id === 'development.ai-coding-agent-rules') {
-      family.triggerPaths.push(...AI_RULES_TRIGGER_PATHS);
-    }
-    if (family.id === 'development.toolkit-local-bridge') {
-      family.triggerPaths.push(...BRIDGE_TRIGGER_PATHS);
-      family.coupledPaths = [...BRIDGE_COUPLED_PATHS];
-    }
-    return family;
+    return { relativePath, project };
   });
 }
 
-function versionAt(repoRoot, ref, relativePath, cache) {
+function addUnique(values, value) {
+  const normalized = normalizePath(value);
+  if (normalized && !values.includes(normalized)) values.push(normalized);
+}
+
+function familyFromManifest(relativePath, project) {
+  const modulePath = normalizePath(project.module_path || path.posix.dirname(relativePath));
+  const mainPath = normalizePath(project.main_path || `${modulePath}/_main`);
+  const outputs = Array.isArray(project.outputs) ? project.outputs : [];
+  const triggerPaths = [];
+  if (outputs.length > 0) {
+    addUnique(triggerPaths, `${modulePath}/_main`);
+    addUnique(triggerPaths, mainPath);
+    addUnique(triggerPaths, `${modulePath}/curated_output_for_ai`);
+    for (const output of outputs) {
+      if (output && typeof output.output === 'string') addUnique(triggerPaths, output.output);
+    }
+  }
+  const family = {
+    id: String(project.id || modulePath),
+    manifestPath: normalizePath(relativePath),
+    modulePath,
+    mainPath,
+    version: typeof project.version === 'string' ? project.version : null,
+    triggerPaths,
+    coupledPaths: [normalizePath(relativePath)]
+  };
+  if (family.id === 'development.ai-coding-agent-rules') {
+    family.triggerPaths.push(...AI_RULES_TRIGGER_PATHS);
+  }
+  if (family.id === 'development.toolkit-local-bridge') {
+    family.triggerPaths.push(...BRIDGE_TRIGGER_PATHS);
+    family.coupledPaths = [...BRIDGE_COUPLED_PATHS];
+  }
+  family.triggerPaths = [...new Set(family.triggerPaths.map(normalizePath))];
+  family.coupledPaths = [...new Set(family.coupledPaths.map(normalizePath))];
+  return family;
+}
+
+function buildFamilies(repoRoot, ref = 'HEAD', objectStore = null) {
+  return extractProjectManifestsAt(repoRoot, ref, objectStore).map(({ relativePath, project }) =>
+    familyFromManifest(relativePath, project));
+}
+
+function indexFamilies(families, side, ref) {
+  const index = new Map();
+  for (const family of families) {
+    if (index.has(family.id)) {
+      throw new Error(`VERSION_AUDIT_DUPLICATE_FAMILY_ID: ${side}:${ref}:${family.id}`);
+    }
+    index.set(family.id, family);
+  }
+  return index;
+}
+
+function pairFamilies(parentFamilies, commitFamilies, parent, commit) {
+  const parentIndex = indexFamilies(parentFamilies, 'parent', parent);
+  const commitIndex = indexFamilies(commitFamilies, 'commit', commit);
+  const ids = [...new Set([...parentIndex.keys(), ...commitIndex.keys()])].sort();
+  return ids.map((id) => {
+    const parentFamily = parentIndex.get(id) || null;
+    const commitFamily = commitIndex.get(id) || null;
+    const manifestPaths = [];
+    const triggerPaths = [];
+    const coupledPaths = [];
+    for (const family of [parentFamily, commitFamily]) {
+      if (!family) continue;
+      addUnique(manifestPaths, family.manifestPath);
+      for (const triggerPath of family.triggerPaths) addUnique(triggerPaths, triggerPath);
+      for (const coupledPath of family.coupledPaths) addUnique(coupledPaths, coupledPath);
+    }
+    return {
+      id,
+      parent: parentFamily,
+      commit: commitFamily,
+      parentManifestPath: parentFamily ? parentFamily.manifestPath : null,
+      commitManifestPath: commitFamily ? commitFamily.manifestPath : null,
+      manifestPath: commitFamily ? commitFamily.manifestPath : parentFamily.manifestPath,
+      manifestPaths,
+      triggerPaths,
+      coupledPaths,
+      requiredSource: commitFamily ? commitFamily.manifestPath : parentFamily.manifestPath
+    };
+  });
+}
+
+function versionAt(repoRoot, ref, relativePath, cache, objectStore = null) {
   const key = `${ref}:${normalizePath(relativePath)}`;
   if (cache && cache.has(key)) return cache.get(key);
-  const value = extractVersion(relativePath, readBlobAt(repoRoot, ref, relativePath));
+  const value = extractVersion(relativePath, objectStore ? objectStore.read(ref, relativePath) : readBlobAt(repoRoot, ref, relativePath));
   if (cache) cache.set(key, value);
   return value;
 }
@@ -199,13 +330,13 @@ function commitParents(repoRoot, commit) {
   return values.slice(1);
 }
 
-function violation(record, family, reason, triggerPaths, before, after) {
+function violation(record, family, reason, triggerPaths, before, after, code = 'COMMIT_VERSION_MISMATCH') {
   return {
-    code: 'COMMIT_VERSION_MISMATCH',
+    code,
     commit: record.commit,
     trigger: triggerPaths,
     version_family: family.id,
-    required_source: family.manifestPath,
+    required_source: family.requiredSource || family.manifestPath,
     parent_version: before === null ? '<absent>' : before,
     commit_version: after === null ? '<missing>' : after,
     reason
@@ -224,16 +355,46 @@ function auditRange({ repoRoot, base, head }) {
     throw new Error(`VERSION_AUDIT_BASE_NOT_ANCESTOR: ${normalizedBase} -> ${normalizedHead}`);
   }
   const commits = gitText(repoRoot, ['rev-list', '--reverse', `${normalizedBase}..${normalizedHead}`]).split(/\r?\n/).filter(Boolean);
-  const families = buildFamilies(repoRoot);
+  const commitInfo = commits.map((commit) => {
+    const parents = commitParents(repoRoot, commit);
+    return { commit, parents, parent: parents[0] || normalizedBase };
+  });
+  const refs = new Set([normalizedBase, normalizedHead]);
+  for (const info of commitInfo) {
+    refs.add(info.commit);
+    refs.add(info.parent);
+  }
+  const objectStore = createHistoricalObjectStore(repoRoot, refs);
   const versionCache = new Map();
+  const familyCache = new Map();
   const records = [];
+  const familySummaries = new Map();
   let firstViolation = null;
   for (let index = 0; index < commits.length; index += 1) {
-    const commit = commits[index];
-    const parents = commitParents(repoRoot, commit);
-    const parent = parents[0] || normalizedBase;
+    const { commit, parents, parent } = commitInfo[index];
     const paths = changedPaths(repoRoot, parent, commit);
     const pathSet = new Set(paths);
+    const familiesAt = (ref) => {
+      if (!familyCache.has(ref)) familyCache.set(ref, buildFamilies(repoRoot, ref, objectStore));
+      return familyCache.get(ref);
+    };
+    const parentFamilies = familiesAt(parent);
+    const commitFamilies = familiesAt(commit);
+    const families = pairFamilies(parentFamilies, commitFamilies, parent, commit);
+    for (const family of families) {
+      const summary = familySummaries.get(family.id) || {
+        id: family.id,
+        manifestPath: family.manifestPath,
+        manifestPaths: [],
+        triggerPaths: [],
+        coupledPaths: []
+      };
+      summary.manifestPath = family.manifestPath;
+      for (const manifestPath of family.manifestPaths) addUnique(summary.manifestPaths, manifestPath);
+      for (const triggerPath of family.triggerPaths) addUnique(summary.triggerPaths, triggerPath);
+      for (const coupledPath of family.coupledPaths) addUnique(summary.coupledPaths, coupledPath);
+      familySummaries.set(family.id, summary);
+    }
     const record = {
       ordinal: index + 1,
       commit,
@@ -244,61 +405,114 @@ function auditRange({ repoRoot, base, head }) {
       families: [],
       compliance: 'NO_VERSION_TRIGGER'
     };
-    const candidateFamilies = families.filter((family) => paths.some((candidate) =>
-      family.triggerPaths.some((prefix) => pathMatches(candidate, prefix)) ||
-      candidate === normalizePath(family.manifestPath)
-    ));
-    for (const family of candidateFamilies) {
-      const before = versionAt(repoRoot, parent, family.manifestPath, versionCache);
-      const after = versionAt(repoRoot, commit, family.manifestPath, versionCache);
+    let recordViolation = null;
+    const noteViolation = (current) => {
+      if (!recordViolation) recordViolation = current;
+      if (!firstViolation) firstViolation = current;
+    };
+    for (const family of families) {
+      const familyChangedPaths = paths.filter((candidate) =>
+        family.manifestPaths.some((manifestPath) => candidate === manifestPath) ||
+        family.triggerPaths.some((prefix) => pathMatches(candidate, prefix))
+      );
+      if (!familyChangedPaths.length) continue;
+
+      const before = family.parent ? family.parent.version : null;
+      const after = family.commit ? family.commit.version : null;
+      const triggers = paths.filter((candidate) => family.triggerPaths.some((prefix) => pathMatches(candidate, prefix)));
+      if (!family.commit) {
+        const removalTriggers = [...new Set([
+          ...triggers,
+          ...family.manifestPaths.filter((manifestPath) => pathSet.has(manifestPath))
+        ])];
+        const familyRecord = {
+          id: family.id,
+          before,
+          after,
+          transition: 'removed',
+          triggered_paths: triggers,
+          manifest_paths: family.manifestPaths,
+          trigger_union: family.triggerPaths
+        };
+        record.families.push(familyRecord);
+        record.compliance = 'VERSION_FAMILY_REMOVAL_REQUIRES_POLICY';
+        noteViolation(violation(
+          record,
+          family,
+          'version family manifest disappeared without an explicit retirement policy',
+          removalTriggers,
+          before,
+          after,
+          'VERSION_FAMILY_REMOVAL_REQUIRES_POLICY'
+        ));
+        continue;
+      }
+
       const transition = transitionClass(before, after);
       if (after !== null && !parseSemver(after)) {
         const current = violation(record, family, 'invalid SemVer in version source', [], before, after);
-        if (!firstViolation) firstViolation = current;
+        noteViolation(current);
       }
       if (before !== null && after !== null && compareSemver(after, before) < 0) {
         const current = violation(record, family, 'version movement is non-monotonic', [], before, after);
-        if (!firstViolation) firstViolation = current;
+        noteViolation(current);
       }
-      const triggers = paths.filter((candidate) => family.triggerPaths.some((prefix) => pathMatches(candidate, prefix)));
-      const familyRecord = { id: family.id, before, after, transition, triggered_paths: triggers };
+      const familyRecord = {
+        id: family.id,
+        before,
+        after,
+        transition,
+        triggered_paths: triggers,
+        manifest_paths: family.manifestPaths,
+        trigger_union: family.triggerPaths
+      };
       record.families.push(familyRecord);
       if (!triggers.length) {
         if (before !== after && record.compliance === 'NO_VERSION_TRIGGER') record.compliance = 'NO_VERSION_TRIGGER_VERSION_TRANSITION_OBSERVED';
         continue;
       }
       record.compliance = 'COMPLIANT_VERSION_TRANSITION';
-      if (!pathSet.has(normalizePath(family.manifestPath))) {
+      const versionSourceChanged = family.manifestPaths.some((manifestPath) => pathSet.has(manifestPath));
+      if (!versionSourceChanged) {
         const current = violation(record, family, 'required same-commit version transition missing', triggers, before, after);
-        if (!firstViolation) firstViolation = current;
+        noteViolation(current);
       } else if (after === null || (before !== null && after === before)) {
         const current = violation(record, family, 'required same-commit version transition missing', triggers, before, after);
-        if (!firstViolation) firstViolation = current;
+        noteViolation(current);
       }
-      for (const coupledPath of family.coupledPaths.slice(1)) {
-        const coupledBefore = versionAt(repoRoot, parent, coupledPath, versionCache);
-        const coupledAfter = versionAt(repoRoot, commit, coupledPath, versionCache);
+      for (const coupledPath of family.coupledPaths.filter((candidate) => !family.manifestPaths.includes(candidate))) {
+        const coupledBefore = versionAt(repoRoot, parent, coupledPath, versionCache, objectStore);
+        const coupledAfter = versionAt(repoRoot, commit, coupledPath, versionCache, objectStore);
         const changed = pathSet.has(normalizePath(coupledPath));
         if (coupledAfter !== after) {
           const current = violation(record, family, `coupled version surface ${coupledPath} is not aligned`, triggers, before, after);
-          if (!firstViolation) firstViolation = current;
+          noteViolation(current);
         } else if (coupledBefore !== coupledAfter && !changed) {
           const current = violation(record, family, `coupled version surface ${coupledPath} moved outside the triggering commit`, triggers, before, after);
-          if (!firstViolation) firstViolation = current;
+          noteViolation(current);
         } else if (coupledBefore === coupledAfter && changed && before !== after) {
           const current = violation(record, family, `coupled version surface ${coupledPath} did not transition`, triggers, before, after);
-          if (!firstViolation) firstViolation = current;
+          noteViolation(current);
         } else if (coupledBefore === coupledAfter && before !== after) {
           const current = violation(record, family, `coupled version surface ${coupledPath} missing same-commit transition`, triggers, before, after);
-          if (!firstViolation) firstViolation = current;
+          noteViolation(current);
         }
       }
     }
-    if (firstViolation && !record.violation) record.violation = firstViolation.commit === record.commit ? firstViolation : null;
+    if (recordViolation) record.violation = recordViolation;
     records.push(record);
     if (firstViolation) break;
   }
-  return { base: normalizedBase, head: normalizedHead, commits, records, firstViolation, families: families.map((family) => ({ id: family.id, manifestPath: family.manifestPath, coupledPaths: family.coupledPaths })) };
+  const families = familySummaries.size
+    ? [...familySummaries.values()].sort((left, right) => left.id.localeCompare(right.id))
+    : buildFamilies(repoRoot, normalizedHead, objectStore).map((family) => ({
+      id: family.id,
+      manifestPath: family.manifestPath,
+      manifestPaths: [family.manifestPath],
+      triggerPaths: family.triggerPaths,
+      coupledPaths: family.coupledPaths
+    }));
+  return { base: normalizedBase, head: normalizedHead, commits, records, firstViolation, families };
 }
 
 function eventRange(environment = process.env) {
