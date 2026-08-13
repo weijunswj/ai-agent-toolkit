@@ -232,10 +232,10 @@ function familyFromManifest(relativePath, project) {
   const mainPath = normalizePath(project.main_path || `${modulePath}/_main`);
   const outputs = Array.isArray(project.outputs) ? project.outputs : [];
   const triggerPaths = [];
+  addUnique(triggerPaths, `${modulePath}/_main`);
+  addUnique(triggerPaths, mainPath);
+  addUnique(triggerPaths, `${modulePath}/curated_output_for_ai`);
   if (outputs.length > 0) {
-    addUnique(triggerPaths, `${modulePath}/_main`);
-    addUnique(triggerPaths, mainPath);
-    addUnique(triggerPaths, `${modulePath}/curated_output_for_ai`);
     for (const output of outputs) {
       if (output && typeof output.output === 'string') addUnique(triggerPaths, output.output);
     }
