@@ -6092,10 +6092,15 @@ function c11DelegationDecision(operation = {}, grant = {}) {
 
 function c11TerminalEvidence(kind) {
   const authority = c39C11Authority();
+  const source = kind === 'authority-movement' ? 'trusted-controller-authority' :
+    ['user-interruption', 'user-change'].includes(kind) ? 'trusted-current-turn' : 'trusted-native-harness';
+  const provenance = kind === 'authority-movement' ? 'controller-authority-reread' :
+    ['user-interruption', 'user-change'].includes(kind) ? 'current-turn-user-event' : 'native-worker-harness';
   const body = {
     schema: 'native-worker-terminal-evidence/v1',
     evidence_id: 'c39-native-terminal-' + kind,
-    source: 'trusted-native-harness',
+    source,
+    provenance,
     kind,
     terminal_state: kind === 'normal-terminal-return' ? 'TERMINATED_SUCCESSFULLY' : 'TERMINAL_EVENT_RECORDED',
     run_id: authority && authority.run_id,
@@ -6119,19 +6124,48 @@ function c11ReplacementGrant() {
 function c11AutoCodeLifecycle(event, evidence = null, replacementGrant = null) {
   const suspended = {
     manager_state: 'MANAGER_SUSPENDED_ON_NATIVE_WORKER',
+    manager_resume: 'suspended',
     progress_inspection: 'forbidden',
     overlapping_validation: 'forbidden',
     status_nudge: 'forbidden',
     interruption_for_progress: 'forbidden',
     ownership: 'exclusive-worker',
+    mutation_owner: 'exclusive-worker',
+    mutation_allowed: false,
     workspace: 'preserved',
     replacement: 'forbidden'
   };
   if (event === 'native-terminal-return' && c39TerminalEvidenceValid(evidence, ['normal-terminal-return'])) {
-    return { ...suspended, manager_state: 'MANAGER_READY_FOR_VALIDATION', ownership: 'manager-validation' };
+    return {
+      ...suspended,
+      manager_state: 'MANAGER_READY_FOR_VALIDATION',
+      manager_resume: 'validation',
+      ownership: 'manager-validation',
+      mutation_owner: 'manager-validation',
+      mutation_allowed: true
+    };
   }
-  if (event === 'user-interruption' && c39TerminalEvidenceValid(evidence, ['user-interruption'])) {
-    return { ...suspended, manager_state: 'USER_INTERRUPTED_PRESERVE', ownership: 'unchanged' };
+  if (event === 'harness-failure' && c39TerminalEvidenceValid(evidence, ['harness-failure'])) {
+    return { ...suspended, manager_state: 'MANAGER_RECOVERY_AFTER_HARNESS_FAILURE', manager_resume: 'recovery', ownership: 'recovery-only', mutation_owner: 'none' };
+  }
+  if (['result-loss', 'result-unavailability'].includes(event) &&
+      c39TerminalEvidenceValid(evidence, ['result-loss', 'result-unavailability'])) {
+    return { ...suspended, manager_state: 'MANAGER_RECOVERY_AFTER_RESULT_LOSS', manager_resume: 'recovery', ownership: 'recovery-only', mutation_owner: 'none' };
+  }
+  if (event === 'authority-movement' && c39TerminalEvidenceValid(evidence, ['authority-movement'])) {
+    return {
+      ...suspended,
+      manager_state: 'MANAGER_REQUIRES_RE_ADMISSION',
+      manager_resume: 're-admission',
+      ownership: 're-admission-required',
+      mutation_owner: 'none',
+      re_admission_required: true,
+      substantive_work: 'forbidden-until-re-admission'
+    };
+  }
+  if (['user-interruption', 'user-change'].includes(event) &&
+      c39TerminalEvidenceValid(evidence, ['user-interruption', 'user-change'])) {
+    return { ...suspended, manager_state: 'USER_INTERRUPTED_PRESERVE', manager_resume: 'user-handling', ownership: 'unchanged', mutation_owner: 'unchanged' };
   }
   if (event === 'replacement-after-loss-with-new-grant' &&
       c39TerminalEvidenceValid(evidence, ['result-loss', 'harness-failure']) &&
@@ -6224,4 +6258,160 @@ test('C39 corrected trusted grants, review admission, and evidence-bound lifecyc
   assert.equal(c10ReviewRequestAdmission(reviewRequest).decision, 'REVIEW_REQUEST_ADMITTED');
   assert.equal(c10ReviewRequestAdmission(reviewRequest).decision, 'REVIEW_REQUEST_REJECTED');
   assert.equal(c11AutoCodeLifecycle('replacement-after-loss-with-new-grant', c11TerminalEvidence('result-loss'), c11ReplacementGrant()).replacement, 'allowed');
+});
+
+test('F2 contained nested helper scope with disjoint root is admitted from a fresh grant', () => {
+  const grant = c11Grant({ mode: 'ordinary-helper', scope: ['src/a'] });
+  assert.equal(grant.one_use, true);
+  assert.equal(grant.lifecycle.state, 'issued');
+  assert.equal(grant.lifecycle.use_count, 0);
+  const result = c11DelegationDecision({ operation: 'helper', scope: ['src/a/subtree'], root_scope: ['src/root'] }, grant);
+  assert.equal(result.allowed, true);
+});
+
+test('F2 root/helper parent-child overlap is a dedicated denial from a fresh grant', () => {
+  const grant = c11Grant({ mode: 'ordinary-helper', scope: ['src/a'] });
+  assert.equal(grant.one_use, true);
+  assert.equal(grant.lifecycle.state, 'issued');
+  assert.equal(grant.lifecycle.use_count, 0);
+  const result = c11DelegationDecision({ operation: 'helper', scope: ['src/a/subtree'], root_scope: ['src/a'] }, grant);
+  assert.equal(result.reason, 'ROOT_HELPER_SCOPE_OVERLAP');
+});
+
+test('F2 wholly disjoint helper request exceeds its fresh grant', () => {
+  const grant = c11Grant({ mode: 'ordinary-helper', scope: ['src/a'] });
+  assert.equal(grant.one_use, true);
+  assert.equal(grant.lifecycle.state, 'issued');
+  assert.equal(grant.lifecycle.use_count, 0);
+  const result = c11DelegationDecision({ operation: 'helper', scope: ['src/c'], root_scope: ['src/root'] }, grant);
+  assert.equal(result.reason, 'SCOPE_EXCEEDS_GRANT');
+});
+
+test('F2 partially out-of-grant helper request fails closed from a fresh grant', () => {
+  const grant = c11Grant({ mode: 'ordinary-helper', scope: ['src/a'] });
+  assert.equal(grant.one_use, true);
+  assert.equal(grant.lifecycle.state, 'issued');
+  assert.equal(grant.lifecycle.use_count, 0);
+  const result = c11DelegationDecision({ operation: 'helper', scope: ['src/a/subtree', 'src/c'], root_scope: ['src/root'] }, grant);
+  assert.equal(result.reason, 'SCOPE_EXCEEDS_GRANT');
+});
+
+test('F9 normal terminal return requires trusted evidence and is the only manager-validation transfer', () => {
+  const evidence = c11TerminalEvidence('normal-terminal-return');
+  assert.equal(evidence.source, 'trusted-native-harness');
+  assert.equal(evidence.provenance, 'native-worker-harness');
+  const result = c11AutoCodeLifecycle('native-terminal-return', evidence);
+  assert.equal(result.manager_state, 'MANAGER_READY_FOR_VALIDATION');
+  assert.equal(result.manager_resume, 'validation');
+  assert.equal(result.ownership, 'manager-validation');
+  assert.equal(result.mutation_owner, 'manager-validation');
+  assert.equal(result.mutation_allowed, true);
+  assert.equal(result.replacement, 'forbidden');
+  assert.equal(c11AutoCodeLifecycle('native-terminal-return').manager_state, 'MANAGER_SUSPENDED_ON_NATIVE_WORKER');
+  assert.equal(c11AutoCodeLifecycle('native-terminal-return', c11TerminalEvidence('harness-failure')).manager_state, 'MANAGER_SUSPENDED_ON_NATIVE_WORKER');
+});
+
+test('F9 explicit harness failure resumes recovery without manager mutation ownership', () => {
+  const evidence = c11TerminalEvidence('harness-failure');
+  assert.equal(evidence.source, 'trusted-native-harness');
+  assert.equal(evidence.provenance, 'native-worker-harness');
+  const result = c11AutoCodeLifecycle('harness-failure', evidence);
+  assert.equal(result.manager_state, 'MANAGER_RECOVERY_AFTER_HARNESS_FAILURE');
+  assert.equal(result.manager_resume, 'recovery');
+  assert.equal(result.ownership, 'recovery-only');
+  assert.equal(result.mutation_owner, 'none');
+  assert.equal(result.mutation_allowed, false);
+  assert.equal(result.workspace, 'preserved');
+  assert.equal(result.replacement, 'forbidden');
+});
+
+test('F9 result loss or unavailability resumes recovery without manager mutation ownership', () => {
+  const evidence = c11TerminalEvidence('result-loss');
+  assert.equal(evidence.source, 'trusted-native-harness');
+  assert.equal(evidence.provenance, 'native-worker-harness');
+  const result = c11AutoCodeLifecycle('result-loss', evidence);
+  assert.equal(result.manager_state, 'MANAGER_RECOVERY_AFTER_RESULT_LOSS');
+  assert.equal(result.manager_resume, 'recovery');
+  assert.equal(result.ownership, 'recovery-only');
+  assert.equal(result.mutation_owner, 'none');
+  assert.equal(result.mutation_allowed, false);
+  assert.equal(result.workspace, 'preserved');
+  assert.equal(result.replacement, 'forbidden');
+  const unavailableEvidence = c11TerminalEvidence('result-unavailability');
+  assert.equal(unavailableEvidence.source, 'trusted-native-harness');
+  assert.equal(unavailableEvidence.provenance, 'native-worker-harness');
+  assert.equal(c11AutoCodeLifecycle('result-unavailability', unavailableEvidence).manager_state, 'MANAGER_RECOVERY_AFTER_RESULT_LOSS');
+});
+
+test('F9 authority movement requires trusted controller reread evidence and re-admission', () => {
+  const evidence = c11TerminalEvidence('authority-movement');
+  assert.equal(evidence.source, 'trusted-controller-authority');
+  assert.equal(evidence.provenance, 'controller-authority-reread');
+  const result = c11AutoCodeLifecycle('authority-movement', evidence);
+  assert.equal(result.manager_state, 'MANAGER_REQUIRES_RE_ADMISSION');
+  assert.equal(result.manager_resume, 're-admission');
+  assert.equal(result.re_admission_required, true);
+  assert.equal(result.substantive_work, 'forbidden-until-re-admission');
+  assert.equal(result.ownership, 're-admission-required');
+  assert.equal(result.mutation_owner, 'none');
+  assert.equal(result.mutation_allowed, false);
+  assert.equal(result.workspace, 'preserved');
+  assert.equal(result.replacement, 'forbidden');
+});
+
+test('F9 user interruption and user change preserve workspace and ownership', () => {
+  const interruptionEvidence = c11TerminalEvidence('user-interruption');
+  const changeEvidence = c11TerminalEvidence('user-change');
+  assert.equal(interruptionEvidence.source, 'trusted-current-turn');
+  assert.equal(interruptionEvidence.provenance, 'current-turn-user-event');
+  assert.equal(changeEvidence.source, 'trusted-current-turn');
+  assert.equal(changeEvidence.provenance, 'current-turn-user-event');
+  for (const [event, evidence] of [['user-interruption', interruptionEvidence], ['user-change', changeEvidence]]) {
+    const result = c11AutoCodeLifecycle(event, evidence);
+    assert.equal(result.manager_state, 'USER_INTERRUPTED_PRESERVE', event);
+    assert.equal(result.manager_resume, 'user-handling', event);
+    assert.equal(result.ownership, 'unchanged', event);
+    assert.equal(result.mutation_owner, 'unchanged', event);
+    assert.equal(result.mutation_allowed, false, event);
+    assert.equal(result.workspace, 'preserved', event);
+    assert.equal(result.replacement, 'forbidden', event);
+  }
+});
+
+test('F9 every resume family fails closed for bare labels, generic booleans, wrong evidence, and stale authority', () => {
+  const cases = [
+    { label: 'normal terminal return', event: 'native-terminal-return', kind: 'normal-terminal-return', wrongKind: 'harness-failure', booleanKey: 'terminal' },
+    { label: 'explicit harness failure', event: 'harness-failure', kind: 'harness-failure', wrongKind: 'result-loss', booleanKey: 'failure' },
+    { label: 'result loss', event: 'result-loss', kind: 'result-loss', wrongKind: 'authority-movement', booleanKey: 'result_lost' },
+    { label: 'authority movement', event: 'authority-movement', kind: 'authority-movement', wrongKind: 'user-interruption', booleanKey: 'moved' },
+    { label: 'user interruption', event: 'user-interruption', kind: 'user-interruption', wrongKind: 'harness-failure', booleanKey: 'interrupted' },
+    { label: 'user change', event: 'user-change', kind: 'user-change', wrongKind: 'harness-failure', booleanKey: 'changed' }
+  ];
+  for (const entry of cases) {
+    const suspended = 'MANAGER_SUSPENDED_ON_NATIVE_WORKER';
+    assert.equal(c11AutoCodeLifecycle(entry.event).manager_state, suspended, entry.label + ': bare event label');
+    assert.equal(c11AutoCodeLifecycle(entry.event, { [entry.booleanKey]: true }).manager_state, suspended, entry.label + ': generic boolean');
+    assert.equal(c11AutoCodeLifecycle(entry.event, c11TerminalEvidence(entry.wrongKind)).manager_state, suspended, entry.label + ': wrong evidence kind');
+    const forged = c11TerminalEvidence(entry.kind);
+    forged.run_id = 'forged-run';
+    assert.equal(c11AutoCodeLifecycle(entry.event, forged).manager_state, suspended, entry.label + ': forged run binding');
+    const stale = c11TerminalEvidence(entry.kind);
+    stale.exact_tree = 'stale-tree';
+    assert.equal(c11AutoCodeLifecycle(entry.event, stale).manager_state, suspended, entry.label + ': stale tree binding');
+    const staleHead = c11TerminalEvidence(entry.kind);
+    staleHead.exact_head = 'stale-head';
+    assert.equal(c11AutoCodeLifecycle(entry.event, staleHead).manager_state, suspended, entry.label + ': stale head binding');
+  }
+});
+
+test('F7 replacement remains separately gated by verified failure or loss evidence and a fresh one-use grant', () => {
+  const lossGrant = c11ReplacementGrant();
+  assert.equal(c11AutoCodeLifecycle('replacement-after-loss-with-new-grant', c11TerminalEvidence('result-loss'), lossGrant).replacement, 'allowed');
+  assert.equal(c11AutoCodeLifecycle('replacement-after-loss-with-new-grant', c11TerminalEvidence('result-loss'), lossGrant).replacement, 'forbidden');
+  assert.equal(c11AutoCodeLifecycle('replacement-after-loss-with-new-grant', c11TerminalEvidence('harness-failure'), c11ReplacementGrant()).replacement, 'allowed');
+  assert.equal(c11AutoCodeLifecycle('replacement-after-loss-with-new-grant', c11TerminalEvidence('result-loss')).replacement, 'forbidden');
+  assert.equal(c11AutoCodeLifecycle('replacement-after-loss-with-new-grant', c11TerminalEvidence('authority-movement'), c11ReplacementGrant()).replacement, 'forbidden');
+  assert.equal(c11AutoCodeLifecycle('authority-movement', c11TerminalEvidence('authority-movement'), c11ReplacementGrant()).replacement, 'forbidden');
+  assert.equal(c11AutoCodeLifecycle('user-interruption', c11TerminalEvidence('user-interruption'), c11ReplacementGrant()).replacement, 'forbidden');
+  assert.equal(c11AutoCodeLifecycle('native-terminal-return', c11TerminalEvidence('normal-terminal-return'), c11ReplacementGrant()).replacement, 'forbidden');
 });
