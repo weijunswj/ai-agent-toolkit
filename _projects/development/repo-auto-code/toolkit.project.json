@@ -5,7 +5,7 @@
   "title": "Repo-Scoped Default-Off Closure-Lease Protocol",
   "module_path": "_projects/development/repo-auto-code",
   "main_path": "_projects/development/repo-auto-code/_main",
-  "version": "1.9.0",
+  "version": "1.9.1",
   "version_policy": "semver",
   "version_notes": "Extends DL-329-AUTO-CODE-005-A6-C10 with the C11 corrected live-finding matrix, default-deny delegation, explicit exclusive Auto-code manager/worker lifecycle, grant-bound exceptional assurance, and repaired validator boundary; advances DL-329-AUTO-CODE-005-A6-C11 and retains DL-329-AUTO-CODE-005-A6-C6, DL-329-AUTO-CODE-005-A6-C7, DL-329-AUTO-CODE-005-A6-C8 and the source-only C7/C8/C10 invariants and fixture arithmetic.",
   "outputs": [],

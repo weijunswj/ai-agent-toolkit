@@ -153,9 +153,20 @@ function createHistoricalObjectStore(repoRoot, refs) {
   };
 }
 
+function normalizeSemverComponent(value) {
+  const normalized = String(value).replace(/^0+(?=\d)/, '');
+  return normalized || '0';
+}
+
+function compareNumericStrings(left, right) {
+  if (left.length !== right.length) return left.length > right.length ? 1 : -1;
+  if (left === right) return 0;
+  return left > right ? 1 : -1;
+}
+
 function parseSemver(value) {
   const match = SEMVER_PATTERN.exec(String(value || ''));
-  return match ? match.slice(1).map(Number) : null;
+  return match ? match.slice(1).map(normalizeSemverComponent) : null;
 }
 
 function compareSemver(left, right) {
@@ -163,7 +174,8 @@ function compareSemver(left, right) {
   const b = parseSemver(right);
   if (!a || !b) return null;
   for (let index = 0; index < 3; index += 1) {
-    if (a[index] !== b[index]) return a[index] > b[index] ? 1 : -1;
+    const comparison = compareNumericStrings(a[index], b[index]);
+    if (comparison !== 0) return comparison;
   }
   return 0;
 }
@@ -173,9 +185,9 @@ function transitionClass(before, after) {
   const previous = parseSemver(before);
   const next = parseSemver(after);
   if (!previous || !next) return 'invalid';
-  if (next[0] !== previous[0]) return 'major';
-  if (next[1] !== previous[1]) return 'minor';
-  if (next[2] !== previous[2]) return 'patch';
+  if (compareNumericStrings(next[0], previous[0]) !== 0) return 'major';
+  if (compareNumericStrings(next[1], previous[1]) !== 0) return 'minor';
+  if (compareNumericStrings(next[2], previous[2]) !== 0) return 'patch';
   return 'none';
 }
 

@@ -21,7 +21,7 @@ All route and authority values are injected at execution time:
 - Assignment evidence locator: {{assignment_evidence_locator}}
 - Fresh subordinate run ID: {{fresh_subordinate_run_id}}
 - Fresh workspace evidence locator: {{fresh_workspace_evidence_locator}}
-- Fast mode: {{fast_mode}}
+- Fast mode: prohibited for delegated/subordinate runs; root Fast authority never flows to this child.
 - Delegation: {{delegation_mode}}
 - Route substitution: prohibited
 

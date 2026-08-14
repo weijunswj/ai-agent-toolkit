@@ -7,7 +7,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { test } = require('node:test');
 
-const { auditRange } = require('../scripts/audit-commit-version-history.cjs');
+const { auditRange, compareSemver, parseSemver, transitionClass } = require('../scripts/audit-commit-version-history.cjs');
 
 function git(cwd, args) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true }).trim();
@@ -199,6 +199,32 @@ test('non-monotonic SemVer is rejected', (t) => {
   const base = commit(root, 'base');
   updateGeneric(root, '0.9.0', 'decreasing version');
   const bad = commit(root, 'decreasing version');
+  assertFailsAt(root, base, bad, /non-monotonic/);
+});
+
+test('SemVer comparison stays precise above Number.MAX_SAFE_INTEGER', (t) => {
+  const root = createRepo();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  createGenericModule(root);
+  const base = commit(root, 'base');
+  const smaller = '9007199254740992.0.0';
+  const larger = '9007199254740993.0.0';
+  assert.notDeepEqual(parseSemver(smaller), parseSemver(larger));
+  assert.equal(parseSemver(smaller)[0], '9007199254740992');
+  assert.equal(parseSemver(larger)[0], '9007199254740993');
+  assert.equal(compareSemver(smaller, larger), -1);
+  assert.equal(compareSemver(larger, smaller), 1);
+  assert.equal(compareSemver('1.2.3', '1.2.4'), -1);
+  assert.equal(transitionClass('1.2.3', '1.2.4'), 'patch');
+
+  updateGeneric(root, smaller, 'huge smaller');
+  commit(root, 'huge smaller');
+  updateGeneric(root, larger, 'huge larger');
+  const largerCommit = commit(root, 'huge larger');
+  assertPass(root, base);
+  updateGeneric(root, smaller, 'huge decrement');
+  const bad = commit(root, 'huge decrement');
+  assert.notEqual(bad, largerCommit);
   assertFailsAt(root, base, bad, /non-monotonic/);
 });
 

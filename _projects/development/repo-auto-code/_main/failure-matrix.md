@@ -114,6 +114,11 @@ The A6-C2 continuation is a narrow source-only bootstrap implementation exceptio
 
 | Condition | Required result | Continue? | Repair owner |
 | --- | --- | --- | --- |
+| Trusted current-execution validity is stale, expired, revoked, future/impossible, or moved, or `now` is only caller-selected parseable text | DELEGATION_NOT_AUTHORISED | No | Web |
+| Exclusive worker request omits or mismatches repository, role, current run/session/turn/head/tree, validity evidence, or workspace/checkout identity | DELEGATION_NOT_AUTHORISED | No; grant remains unconsumed | Web |
+| Requested exclusive-worker scope is absolute, drive-qualified, UNC, backslash, dot-segment, noncanonical, escaping, or exceeds the grant | SCOPE_MISMATCH or SCOPE_EXCEEDS_GRANT | No; grant remains unconsumed | Web |
+| Requested exclusive-worker capability is omitted, malformed, ungranted, admin, or governance | CAPABILITY_MISMATCH or CAPABILITY_EXCEEDS_GRANT | No; grant remains unconsumed | Web |
+| Delegated `spawn_agent` receives `allow_fast:true` or root Fast authority | AGENT_STANDARD with `fastAllowed:false` | Yes; Standard child only | Web |
 | Fast or Agent/spawn_agent is requested without an exact current-turn grant | ADMISSION_DENIED | No | Web |
 | Grant is absent because the prompt omitted an allowance, or only generic speed wording exists | ADMISSION_DENIED | No | Web |
 | Grant run, session, turn, operation, provider, canonical model, reasoning, or count does not match | ADMISSION_DENIED | No | Web |

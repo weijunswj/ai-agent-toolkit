@@ -81,6 +81,9 @@ const c8GitAuthorityFixture = c8CreateGitAuthorityFixture(c8AuthorityTempRoot);
 const c39TrustedEvidenceToken = Symbol('c39-trusted-evidence-token');
 let c28TrustedAuthorityStore;
 const c39SelectedC11GrantIds = new Set();
+const c39CurrentExecutionValidityNamespace = 'current-execution-validity';
+const c39CurrentExecutionValidityId = 'c39-current-execution-validity';
+const c39CurrentExecutionValiditySchema = 'current-execution-validity/v1';
 const c39ExecutionIdentityFields = Object.freeze(['role', 'provider', 'canonical_model', 'reasoning']);
 const c39ImplementationExecutionIdentity = Object.freeze({
   role: 'implementation/amendment worker',
@@ -1027,7 +1030,7 @@ test('generic role templates require runtime route values and exact failure sema
     'Assignment evidence locator: {{assignment_evidence_locator}}',
     'Fresh subordinate run ID: {{fresh_subordinate_run_id}}',
     'Fresh workspace evidence locator: {{fresh_workspace_evidence_locator}}',
-    'Fast mode: {{fast_mode}}',
+    a6DelegatedFastText,
     'Delegation: {{delegation_mode}}',
     'Route substitution: prohibited',
     'UNSUPPORTED_DELEGATION'
@@ -1047,7 +1050,7 @@ test('A6 validates every runtime prompt contract, including managed and implemen
     'Assignment evidence locator: {{assignment_evidence_locator}}',
     'Fresh subordinate run ID: {{fresh_subordinate_run_id}}',
     'Fresh workspace evidence locator: {{fresh_workspace_evidence_locator}}',
-    'Fast mode: {{fast_mode}}',
+    a6DelegatedFastText,
     'Delegation: {{delegation_mode}}'
   ];
   for (const file of a6PromptFiles) {
@@ -1696,6 +1699,7 @@ const a6PromptFiles = [
   path.join(templateRoot, 'authoritative-g4-reviewer.prompt.md'),
   path.join(templateRoot, 'independent-assurance-audit.prompt.md')
 ];
+const a6DelegatedFastText = 'Fast mode: prohibited for delegated/subordinate runs; root Fast authority never flows to this child.';
 
 function a6ContractText() {
   return a6ContractFiles.map((file) => fs.readFileSync(file, 'utf8')).join('\n');
@@ -3749,9 +3753,9 @@ function admissionDecision(request, context, grant, hook, authorityRegistry) {
   return {
     allowed: true,
     prevented: false,
-    mode: operation === 'fast' ? 'FAST' : grant.allow_fast === true ? 'AGENT_FAST' : 'AGENT_STANDARD',
+    mode: operation === 'fast' ? 'FAST' : 'AGENT_STANDARD',
     reason: 'ADMITTED',
-    fastAllowed: operation === 'fast' || grant.allow_fast === true,
+    fastAllowed: operation === 'fast',
     delegationAllowed: operation === 'spawn_agent',
     grant: { ...consumed.record, consumed: true }
   };
@@ -3759,7 +3763,7 @@ function admissionDecision(request, context, grant, hook, authorityRegistry) {
 
 function renderAdmissionTemplate(text, grant) {
   return text
-    .replaceAll('{{fast_mode}}', grant.allow_fast === true ? 'allowed' : 'prohibited')
+    .replaceAll('{{fast_mode}}', 'prohibited')
     .replaceAll('{{delegation_mode}}', grant.allow_agents === true ? 'allowed' : 'prohibited');
 }
 
@@ -3834,8 +3838,8 @@ test('A6-C5 separates Fast and delegation permissions across all four grant comb
     assert.equal(delegated.allowed, allowAgents, 'delegation combination ' + allowFast + '/' + allowAgents);
     if (allowFast) assert.equal(fast.mode, 'FAST');
     if (allowAgents) {
-      assert.equal(delegated.mode, allowFast ? 'AGENT_FAST' : 'AGENT_STANDARD');
-      assert.equal(delegated.fastAllowed, allowFast);
+      assert.equal(delegated.mode, 'AGENT_STANDARD');
+      assert.equal(delegated.fastAllowed, false);
     }
   }
 });
@@ -3845,9 +3849,9 @@ test('A6-C5 runtime templates render structured Fast and delegation admission va
     const grant = structuredGrant({ allow_fast: allowFast, allow_agents: allowAgents });
     for (const file of a6PromptFiles) {
       const text = renderAdmissionTemplate(fs.readFileSync(file, 'utf8'), grant);
-      assert.ok(text.includes('Fast mode: ' + (allowFast ? 'allowed' : 'prohibited')), path.basename(file));
+      assert.ok(text.includes(a6DelegatedFastText), path.basename(file));
       assert.ok(text.includes('Delegation: ' + (allowAgents ? 'allowed' : 'prohibited')), path.basename(file));
-      assert.equal(text.includes('Fast mode: prohibited') && allowFast, false, path.basename(file));
+      assert.equal(text.includes('Fast mode: allowed'), false, path.basename(file));
     }
   }
 });
@@ -4623,7 +4627,6 @@ class C8LeaseRegistry {
   register(lease) {
     if (!lease || !lease.lease_id) return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-registration', 'LEASE_INVALID', 'lease_id') };
     if (lease.lease_digest !== c8DigestBytes(c8Json(c8LeaseBody(lease)))) {
-      this.records.set(lease.lease_id, lease);
       return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-registration', 'LEASE_DIGEST_MISMATCH', 'lease_digest', 'canonical lease digest', 'mismatch', null, lease) };
     }
     if (this.records.has(lease.lease_id)) return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-registration', 'DUPLICATE_DISPATCH', 'lease_id', 'new lease id', 'duplicate', null, lease) };
@@ -5026,6 +5029,7 @@ function c28CreateTrustedAuthorityStore() {
     'machine-local-git': {},
     'exceptional-review': {},
     'current-execution-authority': {},
+    'current-execution-validity': {},
     'review-admission': {},
     'delegation-grant': {},
     'native-worker-harness': {},
@@ -5077,9 +5081,31 @@ function c28CreateTrustedAuthorityStore() {
     repository: reviewAuthority.repository,
     exact_head: reviewAuthority.exact_head,
     exact_tree: c8GitAuthorityFixture.exact_tree_sha,
+    validity_evidence_id: 'c39-current-execution-validity',
+    workspace_identity: {
+      workspace_id: 'c39-current-exact-workspace',
+      checkout_id: 'c39-current-exact-checkout',
+      exact_head: reviewAuthority.exact_head,
+      exact_tree: c8GitAuthorityFixture.exact_tree_sha
+    },
     ...c39ImplementationExecutionIdentity,
     now: '2026-08-13T00:00:00.000Z',
     root_work_scope: ['src/root']
+  });
+  put('current-execution-validity', 'c39-current-execution-validity', {
+    schema: 'current-execution-validity/v1',
+    evidence_identity: 'c39-current-execution-validity',
+    authority_id: 'c39-current-execution',
+    run_id: reviewAuthority.review.run_id,
+    session_id: reviewAuthority.review.session_id,
+    turn_id: reviewAuthority.review.turn_id,
+    repository: reviewAuthority.repository,
+    exact_head: reviewAuthority.exact_head,
+    exact_tree: c8GitAuthorityFixture.exact_tree_sha,
+    valid_from: '2026-08-12T00:00:00.000Z',
+    observed_at: '2026-08-13T00:00:00.000Z',
+    valid_until: '2026-08-14T00:00:00.000Z',
+    lifecycle: { state: 'active', revoked: false }
   });
   const reviewGrant = {
     schema: 'review-admission-grant/v1',
@@ -5109,6 +5135,10 @@ function c28CreateTrustedAuthorityStore() {
   const c39BuildC11Grant = (overrides = {}) => {
     const authority = { run_id: 'run-exceptional-synthetic', session_id: 'session-exceptional-synthetic', turn_id: 'turn-exceptional-synthetic', repository: 'weijunswj/ai-agent-toolkit', exact_head: c8Snapshot(c8DefaultSnapshot()).exact_remote_head_sha, exact_tree: c8GitAuthorityFixture.exact_tree_sha, role: 'implementation/amendment worker', provider: ['Open', 'AI'].join(''), canonical_model: ['GPT', '-5.6 Luna'].join(''), reasoning: ['M', 'ax'].join(''), now: '2026-08-13T00:00:00.000Z' };
     const grant = { schema: 'delegation-grant/v1', grant_id: overrides.grant_id || 'c11-seeded-grant', authority_store_path: c8NewAuthorityStorePath('trusted-delegation-grant'), issuer: 'web', user_request_proof: 'explicit-current-turn-request', run_id: authority.run_id, session_id: authority.session_id, turn_id: authority.turn_id, mode: 'exclusive-auto-code', count: 1, role: authority.role, provider: authority.provider, canonical_model: authority.canonical_model, reasoning: authority.reasoning, repository: authority.repository, scope: ['src/a'], capabilities: ['read', 'mutate', 'test'], expires_at: '2099-01-01T00:00:00.000Z', one_use: true, consumed: false, allow_further_delegation: false, lifecycle: { state: 'issued', consumed: false, use_count: 0, consumed_at: null }, ...overrides };
+    authority.validity_evidence_id = 'c39-current-execution-validity';
+    authority.workspace_identity = { workspace_id: 'c39-current-exact-workspace', checkout_id: 'c39-current-exact-checkout', exact_head: authority.exact_head, exact_tree: authority.exact_tree };
+    if (!Object.hasOwn(overrides, 'validity_evidence_id')) grant.validity_evidence_id = authority.validity_evidence_id;
+    if (!Object.hasOwn(overrides, 'workspace_identity')) grant.workspace_identity = c8Clone(authority.workspace_identity);
     grant.trusted_authority_binding = c39C11GrantBinding(grant, authority);
     grant.canonical_digest = c8DigestBytes(c8Json(c39C11GrantBody(grant)));
     return grant;
@@ -5389,8 +5419,11 @@ test('PRRT_kwDOSTHjGM6WPZdL binds manifest role and capabilities to snapshot and
 test('PRRT_kwDOSTHjGM6WPZdP rejects tampered sealed lease bytes before transition', () => {
   const snapshot = c8Snapshot(c8DefaultSnapshot());
   const lease = c8LeaseCreate(snapshot, { lease_id: 'tampered-lease' });
-  const registry = new C8LeaseRegistry(); registry.register({ ...lease, role: 'tampered' });
-  assert.equal(registry.transition(lease.lease_id, 'SEALED').receipt.reason, 'LEASE_DIGEST_MISMATCH');
+  const registry = new C8LeaseRegistry();
+  const registration = registry.register({ ...lease, role: 'tampered' });
+  assert.equal(registration.receipt.reason, 'LEASE_DIGEST_MISMATCH');
+  assert.equal(registration.receipt.mutation_performed, false);
+  assert.equal(registry.transition(lease.lease_id, 'SEALED').receipt.reason, 'LEASE_INVALID');
 });
 
 test('PRRT_kwDOSTHjGM6WPZdT requires evidence-derived final authority reread', () => {
@@ -5915,7 +5948,8 @@ test('C11 default-deny delegation rejects silence, generic speed, malformed gran
 test('C11 ordinary helper mode requires explicit non-overlapping scope and Auto-code admits one exclusive worker', () => {
   assert.equal(c11DelegationDecision({ operation: 'helper', scope: ['src/a'] }, c11Grant({ mode: 'ordinary-helper', scope: ['src/a', 'src/b'] })).allowed, true);
   assert.equal(c11DelegationDecision({ operation: 'helper', scope: ['src/c'] }, c11Grant({ mode: 'ordinary-helper', scope: ['src/a', 'src/b'] })).reason, 'SCOPE_EXCEEDS_GRANT');
-  assert.equal(c11DelegationDecision({ operation: 'spawn_agent' }, c11Grant({ mode: 'exclusive-auto-code', count: 1 })).allowed, true);
+  const exclusiveGrant = c11Grant({ mode: 'exclusive-auto-code', count: 1 });
+  assert.equal(c11DelegationDecision(c39WorkerLaunch(exclusiveGrant), exclusiveGrant).allowed, true);
   assert.equal(c11DelegationDecision({ operation: 'spawn_agent' }, c11Grant({ mode: 'exclusive-auto-code', count: 2 })).reason, 'DELEGATION_NOT_AUTHORISED');
 });
 
@@ -5946,7 +5980,7 @@ test('C11 source versions record behavioural contract additions', () => {
   const rules = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', 'toolkit.project.json'), 'utf8'));
   const autoCode = JSON.parse(fs.readFileSync(path.join(projectRoot, 'toolkit.project.json'), 'utf8'));
   assert.equal(rules.version, '3.1.3');
-  assert.equal(autoCode.version, '1.9.0');
+  assert.equal(autoCode.version, '1.9.1');
   assert.match(rules.version_notes, /C13 three-mode.*common.*safeguards/i);
   assert.match(rules.version_notes, /capacity.*non-Fast.*non-nesting.*context-minimisation/i);
   assert.match(autoCode.version_notes, /C11/i);
@@ -6013,8 +6047,9 @@ test('C39 F1-F9 red-first probes expose the nine accepted defects', () => {
   check('F2 exceeding helper scope', () => assert.equal(c11DelegationDecision({ operation: 'helper', scope: ['src/c'] }, c11Grant({ mode: 'ordinary-helper', scope: ['src/a', 'src/b'] })).reason, 'SCOPE_EXCEEDS_GRANT'));
 
   const replayGrant = c11Grant();
-  check('F3 first one-use admission', () => assert.equal(c11DelegationDecision({ operation: 'spawn_agent' }, replayGrant).allowed, true));
-  check('F3 replay rejection', () => assert.equal(c11DelegationDecision({ operation: 'spawn_agent' }, replayGrant).allowed, false));
+  const replayLaunch = c39WorkerLaunch(replayGrant);
+  check('F3 first one-use admission', () => assert.equal(c11DelegationDecision(replayLaunch, replayGrant).allowed, true));
+  check('F3 replay rejection', () => assert.equal(c11DelegationDecision(replayLaunch, replayGrant).allowed, false));
 
   const auditRoot = fs.mkdtempSync(path.join(c8AuthorityTempRoot, 'c39-version-audit-'));
   const auditWrite = (relativePath, value) => { const absolute = path.join(auditRoot, ...relativePath.split('/')); fs.mkdirSync(path.dirname(absolute), { recursive: true }); fs.writeFileSync(absolute, value, 'utf8'); };
@@ -6095,7 +6130,6 @@ C8LeaseRegistry.prototype.register = function registerLease(lease) {
   c39LeaseReload(this);
   if (!lease || !lease.lease_id) return c39LeaseReject('lease-registration', 'LEASE_INVALID', 'lease_id', lease);
   if (lease.lease_digest !== c8DigestBytes(c8Json(c8LeaseBody(lease)))) {
-    this.records.set(lease.lease_id, lease);
     return c39LeaseReject('lease-registration', 'LEASE_DIGEST_MISMATCH', 'lease_digest', lease);
   }
   if (this.records.has(lease.lease_id)) return c39LeaseReject('lease-registration', 'DUPLICATE_DISPATCH', 'lease_id', lease);
@@ -6164,17 +6198,67 @@ C8LeaseRegistry.prototype.consume = function consumeLease(id, manifest, at) {
   return this.transition(id, 'COMPLETED', at);
 };
 
+test('C39 digest-invalid lease rejection is true no-mutation and same-ID recovery remains valid', () => {
+  const snapshot = c8Snapshot(c8DefaultSnapshot());
+  const lease = c8LeaseCreate(snapshot, { lease_id: 'c39-digest-recovery-lease' });
+  const storePath = c8NewAuthorityStorePath('c39-digest-recovery');
+  const registry = new C8LeaseRegistry(storePath);
+  const invalid = { ...lease, lease_digest: 'sha256:' + '0'.repeat(64) };
+  const rejected = registry.register(invalid);
+  assert.equal(rejected.decision, 'LEASE_REJECTED');
+  assert.equal(rejected.receipt.reason, 'LEASE_DIGEST_MISMATCH');
+  assert.equal(rejected.receipt.mutation_performed, false);
+  assert.equal(registry.get(lease.lease_id), undefined);
+  assert.equal(new C8DurableAuthorityRegistry(storePath, 'lease-registry').entries().length, 0);
+  const valid = new C8LeaseRegistry(storePath);
+  assert.equal(valid.register(lease).decision, 'LEASE_REGISTERED');
+  assert.equal(valid.get(lease.lease_id).lease_digest, lease.lease_digest);
+});
+
 const c39CurrentExecutionShape = Object.freeze({
   schema: 'current-execution-authority/v1',
   version: 1,
   authority_id: 'c39-current-execution',
   evidence_identity: 'c39-current-execution',
-  provenance: 'trusted-current-execution-authority'
+  provenance: 'trusted-current-execution-authority',
+  validity_evidence_id: 'c39-current-execution-validity'
 });
+
+function c39TrustedCurrentExecutionValidity() {
+  const evidence = c28TrustedLookup(c39CurrentExecutionValidityNamespace, c39CurrentExecutionValidityId);
+  if (!evidence || evidence[c39TrustedEvidenceToken] !== c39TrustedEvidenceToken ||
+      evidence.schema !== c39CurrentExecutionValiditySchema ||
+      evidence.evidence_identity !== c39CurrentExecutionValidityId ||
+      evidence.authority_id !== 'c39-current-execution' ||
+      !evidence.lifecycle || evidence.lifecycle.state !== 'active' || evidence.lifecycle.revoked !== false) return null;
+  for (const field of ['run_id', 'session_id', 'turn_id', 'repository', 'exact_head', 'exact_tree', 'valid_from', 'observed_at', 'valid_until']) {
+    if (!nonEmptyString(evidence[field])) return null;
+  }
+  if (!c8Sha.test(evidence.exact_head) || !c8Sha.test(evidence.exact_tree)) return null;
+  const validFrom = Date.parse(evidence.valid_from);
+  const observedAt = Date.parse(evidence.observed_at);
+  const validUntil = Date.parse(evidence.valid_until);
+  if (![validFrom, observedAt, validUntil].every(Number.isFinite) || validFrom > observedAt || observedAt >= validUntil) return null;
+  return evidence;
+}
+
+function c39NormalizeWorkspaceIdentity(value, field = 'workspace_identity') {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new C8ContractError('WORKSPACE_MISMATCH', field);
+  const normalized = {
+    workspace_id: value.workspace_id,
+    checkout_id: value.checkout_id,
+    exact_head: value.exact_head,
+    exact_tree: value.exact_tree
+  };
+  if (!nonEmptyString(normalized.workspace_id) || !nonEmptyString(normalized.checkout_id) ||
+      !c8Sha.test(normalized.exact_head || '') || !c8Sha.test(normalized.exact_tree || '')) throw new C8ContractError('WORKSPACE_MISMATCH', field);
+  return normalized;
+}
 
 function c39ExpectedCurrentExecutionAuthority() {
   const trusted = c28TrustedLookup('exceptional-review', 'exceptional-grant-trusted-1');
-  if (!trusted || trusted[c39TrustedEvidenceToken] !== c39TrustedEvidenceToken || trusted.schema !== 'exceptional-review-grant/v1' || !trusted.review) return null;
+  const validity = c39TrustedCurrentExecutionValidity();
+  if (!trusted || !validity || trusted[c39TrustedEvidenceToken] !== c39TrustedEvidenceToken || trusted.schema !== 'exceptional-review-grant/v1' || !trusted.review) return null;
   const expected = {
     ...c39CurrentExecutionShape,
     run_id: trusted.review.run_id,
@@ -6182,25 +6266,40 @@ function c39ExpectedCurrentExecutionAuthority() {
     turn_id: trusted.review.turn_id,
     repository: trusted.repository,
     exact_head: trusted.exact_head,
-    exact_tree: c8GitAuthorityFixture.exact_tree_sha
+    exact_tree: c8GitAuthorityFixture.exact_tree_sha,
+    workspace_identity: {
+      workspace_id: 'c39-current-exact-workspace',
+      checkout_id: 'c39-current-exact-checkout',
+      exact_head: trusted.exact_head,
+      exact_tree: c8GitAuthorityFixture.exact_tree_sha
+    }
   };
   if (['run_id', 'session_id', 'turn_id', 'repository', 'exact_head'].some((field) => !nonEmptyString(expected[field])) ||
-      !c8Sha.test(expected.exact_head) || !c8Sha.test(expected.exact_tree)) return null;
+      !c8Sha.test(expected.exact_head) || !c8Sha.test(expected.exact_tree) ||
+      validity.evidence_identity !== expected.validity_evidence_id ||
+      ['run_id', 'session_id', 'turn_id', 'repository', 'exact_head', 'exact_tree'].some((field) => validity[field] !== expected[field])) return null;
+  try { expected.workspace_identity = c39NormalizeWorkspaceIdentity(expected.workspace_identity, 'expected.workspace_identity'); } catch { return null; }
   return expected;
 }
 
 function c39ResolveFreshCurrentExecution() {
   const current = c28TrustedLookup('current-execution-authority', 'c39-current-execution');
+  const validity = c39TrustedCurrentExecutionValidity();
   const expected = c39ExpectedCurrentExecutionAuthority();
-  if (!current || !expected || current[c39TrustedEvidenceToken] !== c39TrustedEvidenceToken) return null;
+  if (!current || !validity || !expected || current[c39TrustedEvidenceToken] !== c39TrustedEvidenceToken) return null;
   for (const field of Object.keys(c39CurrentExecutionShape)) if (current[field] !== c39CurrentExecutionShape[field]) return null;
-  for (const field of ['run_id', 'session_id', 'turn_id', 'repository', 'exact_head', 'exact_tree', 'now']) if (!nonEmptyString(current[field])) return null;
+  for (const field of ['run_id', 'session_id', 'turn_id', 'repository', 'exact_head', 'exact_tree', 'now', 'validity_evidence_id']) if (!nonEmptyString(current[field])) return null;
   if (!c8Sha.test(current.exact_head) || !c8Sha.test(current.exact_tree) || !Number.isFinite(Date.parse(current.now))) return null;
   if (!c39ExecutionIdentityFields.every((field) => nonEmptyString(current[field]))) return null;
   for (const field of ['run_id', 'session_id', 'turn_id', 'repository', 'exact_head', 'exact_tree']) if (current[field] !== expected[field]) return null;
+  if (current.validity_evidence_id !== validity.evidence_identity || current.now !== validity.observed_at) return null;
+  let workspaceIdentity;
+  try { workspaceIdentity = c39NormalizeWorkspaceIdentity(current.workspace_identity, 'current_execution.workspace_identity'); } catch { return null; }
+  if (c8Json(workspaceIdentity) !== c8Json(expected.workspace_identity) ||
+      c8Json(workspaceIdentity) !== c8Json({ workspace_id: workspaceIdentity.workspace_id, checkout_id: workspaceIdentity.checkout_id, exact_head: current.exact_head, exact_tree: current.exact_tree })) return null;
   let rootWorkScope;
   try { rootWorkScope = c39NormalizeScope(current.root_work_scope, 'current_execution.root_work_scope'); } catch { return null; }
-  return { ...current, root_work_scope: rootWorkScope };
+  return { ...current, workspace_identity: workspaceIdentity, root_work_scope: rootWorkScope };
 }
 
 function c39CurrentExecutionAuthority() {
@@ -6221,6 +6320,8 @@ function c39C11Authority(current = c39ResolveFreshCurrentExecution()) {
     repository: current.repository,
     exact_head: current.exact_head,
     exact_tree: current.exact_tree,
+    validity_evidence_id: current.validity_evidence_id,
+    workspace_identity: c8Clone(current.workspace_identity),
     role: current.role,
     provider: current.provider,
     canonical_model: current.canonical_model,
@@ -6240,7 +6341,7 @@ function c39CurrentRootScopeFailure() {
     return 'SCOPE_MISMATCH';
   }
 }
-function c39WithCurrentExecutionRecord(transform, callback) {
+function c39WithCurrentExecutionEvidence(currentTransform, validityTransform, callback) {
   const previousStore = c28TrustedAuthorityStore;
   const originalResolve = previousStore && previousStore.resolve;
   if (typeof originalResolve !== 'function') throw new Error('C39 trusted store resolver unavailable');
@@ -6248,11 +6349,16 @@ function c39WithCurrentExecutionRecord(transform, callback) {
     token: previousStore.token,
     resolve(namespace, identity) {
       const record = originalResolve.call(previousStore, namespace, identity);
-      if (namespace !== 'current-execution-authority' || identity !== 'c39-current-execution') return record;
-      return transform(record && c8Clone(record));
+      if (namespace === 'current-execution-authority' && identity === 'c39-current-execution') return currentTransform(record && c8Clone(record));
+      if (namespace === c39CurrentExecutionValidityNamespace && identity === c39CurrentExecutionValidityId) return validityTransform(record && c8Clone(record));
+      return record;
     }
   };
   try { return callback(); } finally { c28TrustedAuthorityStore = previousStore; }
+}
+
+function c39WithCurrentExecutionRecord(transform, callback) {
+  return c39WithCurrentExecutionEvidence(transform, (record) => record, callback);
 }
 
 function c39C11GrantBody(grant) {
@@ -6291,6 +6397,8 @@ function c39BuildC11Grant(overrides = {}) {
     canonical_model: authority && authority.canonical_model,
     reasoning: authority && authority.reasoning,
     repository: authority && authority.repository,
+    validity_evidence_id: authority && authority.validity_evidence_id,
+    workspace_identity: authority && c8Clone(authority.workspace_identity),
     scope: ['src/a'],
     capabilities: ['read', 'mutate', 'test'],
     expires_at: '2099-01-01T00:00:00.000Z',
@@ -6333,6 +6441,9 @@ function c39C11ValidateGrant(grant, authorityOverride) {
   if (!trusted || c8Json(trusted) !== c8Json(grant)) return { ok: false, reason: 'DELEGATION_NOT_AUTHORISED' };
   if (!c8Digest.test(grant.canonical_digest || '') || grant.canonical_digest !== c8DigestBytes(c8Json(c39C11GrantBody(grant)))) return { ok: false, reason: 'DELEGATION_NOT_AUTHORISED' };
   if (grant.trusted_authority_binding !== c39C11GrantBinding(grant, authority)) return { ok: false, reason: 'DELEGATION_NOT_AUTHORISED' };
+  let normalizedWorkspace;
+  try { normalizedWorkspace = c39NormalizeWorkspaceIdentity(grant.workspace_identity, 'grant.workspace_identity'); } catch { return { ok: false, reason: 'DELEGATION_NOT_AUTHORISED' }; }
+  if (grant.validity_evidence_id !== authority.validity_evidence_id || c8Json(normalizedWorkspace) !== c8Json(authority.workspace_identity)) return { ok: false, reason: 'DELEGATION_NOT_AUTHORISED' };
   for (const key of ['run_id', 'session_id', 'turn_id', 'repository', 'role', 'provider', 'canonical_model', 'reasoning']) {
     if (grant[key] !== authority[key]) return { ok: false, reason: 'DELEGATION_NOT_AUTHORISED' };
   }
@@ -6344,8 +6455,10 @@ function c39C11ValidateGrant(grant, authorityOverride) {
     return { ok: false, reason: 'DELEGATION_NOT_AUTHORISED' };
   }
   let normalizedScope;
+  let normalizedCapabilities;
   try { normalizedScope = c39NormalizeScope(grant.scope, 'grant.scope'); } catch { return { ok: false, reason: 'DELEGATION_NOT_AUTHORISED' }; }
-  return { ok: true, authority, normalizedScope };
+  try { normalizedCapabilities = c8List(grant.capabilities, 'grant.capabilities'); } catch { return { ok: false, reason: 'DELEGATION_NOT_AUTHORISED' }; }
+  return { ok: true, authority, normalizedScope, normalizedCapabilities, normalizedWorkspace };
 }
 
 function c39C11ConsumeGrant(grant, authority) {
@@ -6384,6 +6497,43 @@ function c39ScopeOverlaps(left, right) {
   return left.some((a) => right.some((b) => a === b || a.startsWith(b + '/') || b.startsWith(a + '/')));
 }
 
+function c39WorkerLaunch(grant, authority = c39C11Authority(), overrides = {}) {
+  return {
+    operation: 'spawn_agent',
+    requested_count: grant && grant.count,
+    repository: authority && authority.repository,
+    role: authority && authority.role,
+    run_id: authority && authority.run_id,
+    session_id: authority && authority.session_id,
+    turn_id: authority && authority.turn_id,
+    exact_head: authority && authority.exact_head,
+    exact_tree: authority && authority.exact_tree,
+    validity_evidence_id: authority && authority.validity_evidence_id,
+    workspace_identity: grant && c8Clone(grant.workspace_identity),
+    scope: grant && c8Clone(grant.scope),
+    capabilities: grant && c8Clone(grant.capabilities),
+    ...overrides
+  };
+}
+
+function c39ValidateExclusiveWorkerRequest(operation, grant, verified) {
+  if (!operation || operation.operation !== 'spawn_agent' || !grant || !verified || !verified.authority) return { ok: false, reason: 'DELEGATION_NOT_AUTHORISED' };
+  if (!Object.hasOwn(operation, 'requested_count') || operation.requested_count !== 1 || operation.requested_count !== grant.count) return { ok: false, reason: 'DELEGATION_NOT_AUTHORISED' };
+  for (const field of ['repository', 'role', 'run_id', 'session_id', 'turn_id', 'exact_head', 'exact_tree', 'validity_evidence_id']) {
+    if (!nonEmptyString(operation[field]) || operation[field] !== verified.authority[field]) return { ok: false, reason: 'DELEGATION_NOT_AUTHORISED' };
+  }
+  let normalizedWorkspace;
+  try { normalizedWorkspace = c39NormalizeWorkspaceIdentity(operation.workspace_identity, 'requested.workspace_identity'); } catch { return { ok: false, reason: 'WORKSPACE_MISMATCH' }; }
+  if (c8Json(normalizedWorkspace) !== c8Json(verified.normalizedWorkspace)) return { ok: false, reason: 'WORKSPACE_MISMATCH' };
+  let normalizedScope;
+  try { normalizedScope = c39NormalizeScope(operation.scope, 'requested.scope'); } catch { return { ok: false, reason: 'SCOPE_MISMATCH' }; }
+  if (!c39ScopeContains(verified.normalizedScope, normalizedScope)) return { ok: false, reason: 'SCOPE_EXCEEDS_GRANT' };
+  let normalizedCapabilities;
+  try { normalizedCapabilities = c8List(operation.capabilities, 'requested.capabilities'); } catch { return { ok: false, reason: 'CAPABILITY_MISMATCH' }; }
+  if (!normalizedCapabilities.every((capability) => verified.normalizedCapabilities.includes(capability))) return { ok: false, reason: 'CAPABILITY_EXCEEDS_GRANT' };
+  return { ok: true, normalizedWorkspace, normalizedScope, normalizedCapabilities };
+}
+
 function c39EvidenceCategory(kind) {
   if (kind === 'authority-movement') return 'controller-authority-reread';
   if (['user-interruption', 'user-change'].includes(kind)) return 'current-turn-user-event';
@@ -6419,9 +6569,11 @@ function c11DelegationDecision(operation = {}, grant = {}) {
     return { allowed: true, mode: grant.mode, grant: consumed.record };
   }
   if (operation.operation !== 'spawn_agent' || grant.mode !== 'exclusive-auto-code' || grant.role !== verified.authority.role) return denied();
+  const launch = c39ValidateExclusiveWorkerRequest(operation, grant, verified);
+  if (!launch.ok) return denied(launch.reason);
   const consumed = c39C11ConsumeGrant(grant, verified.authority);
   if (!consumed.ok) return denied(consumed.reason);
-  return { allowed: true, mode: grant.mode, mutation_owner: 'exclusive-worker', grant: consumed.record };
+  return { allowed: true, mode: grant.mode, fastAllowed: false, mutation_owner: 'exclusive-worker', workspace_identity: launch.normalizedWorkspace, scope: launch.normalizedScope, capabilities: launch.normalizedCapabilities, grant: consumed.record };
 }
 
 function c11TerminalEvidence(kind) {
@@ -6610,6 +6762,17 @@ test('C39 F6 current execution identity is complete and boundary-specific', () =
   }
   c10Rejects((record) => technicalRecord(record, { exact_head: c8Hash('moved-c10-head') }), 'moved head authority');
   c10Rejects((record) => technicalRecord(record, { exact_tree: c8Hash('moved-c10-tree') }), 'moved tree authority and retained grant');
+  c10Rejects((record) => technicalRecord(record, { now: '2000-01-01T00:00:00.000Z' }), 'parseable but stale caller-selected now');
+  c10Rejects((record) => technicalRecord(record, {
+    workspace_identity: { ...record.workspace_identity, checkout_id: 'moved-checkout' }
+  }), 'moved workspace identity');
+  const validityRejects = (transform, label) => {
+    const result = c39WithCurrentExecutionEvidence((record) => technicalRecord(record), transform, () => c10ReviewRequestAdmission(request));
+    assert.equal(result.decision, 'REVIEW_REQUEST_REJECTED', label);
+  };
+  validityRejects((evidence) => ({ ...evidence, valid_until: '2026-08-13T00:00:00.000Z' }), 'expired validity evidence');
+  validityRejects((evidence) => ({ ...evidence, valid_from: '2026-08-14T00:00:00.000Z' }), 'future validity evidence');
+  validityRejects((evidence) => ({ ...evidence, lifecycle: { state: 'revoked', revoked: true } }), 'revoked validity evidence');
 
   const wrongRequest = {
     ...request,
@@ -6678,8 +6841,9 @@ test('C39 RED A5 stale current-execution authority cannot admit retained grants 
 
 test('C39 corrected trusted grants, review admission, and evidence-bound lifecycle are positive and one-use', () => {
   const grant = c11Grant();
-  assert.equal(c11DelegationDecision({ operation: 'spawn_agent' }, grant).allowed, true);
-  assert.equal(c11DelegationDecision({ operation: 'spawn_agent' }, grant).reason, 'GRANT_ALREADY_CONSUMED');
+  const workerLaunch = c39WorkerLaunch(grant);
+  assert.equal(c11DelegationDecision(workerLaunch, grant).allowed, true);
+  assert.equal(c11DelegationDecision(workerLaunch, grant).reason, 'GRANT_ALREADY_CONSUMED');
   const reviewGrant = c10ReviewGrant();
   const reviewRequest = c39C10ReviewRequest(reviewGrant);
   const c10Admissions = c39WithCurrentExecutionRecord((record) => ({ ...record, ...c39TechnicalG4ExecutionIdentity }), () => [
@@ -6688,6 +6852,34 @@ test('C39 corrected trusted grants, review admission, and evidence-bound lifecyc
   ]);
   assert.deepEqual(c10Admissions, ['REVIEW_REQUEST_ADMITTED', 'REVIEW_REQUEST_REJECTED']);
   assert.equal(c11AutoCodeLifecycle('replacement-after-loss-with-new-grant', c11TerminalEvidence('result-loss'), c11ReplacementGrant()).replacement, 'allowed');
+});
+
+test('C39 exclusive worker attenuation rejects mismatched launch requests before consumption', () => {
+  const reject = (mutate, expectedReason) => {
+    const grant = c11Grant();
+    const operation = c39WorkerLaunch(grant);
+    mutate(operation);
+    const result = c11DelegationDecision(operation, grant);
+    assert.equal(result.allowed, false, expectedReason);
+    assert.equal(result.reason, expectedReason);
+    const durable = new C8DurableAuthorityRegistry(grant.authority_store_path, 'delegation-grant').read(grant.grant_id);
+    assert.equal(durable.state, 'issued', expectedReason + ' must not consume');
+    assert.equal(durable.record.lifecycle.state, 'issued', expectedReason + ' must preserve lifecycle');
+  };
+  reject((operation) => { delete operation.requested_count; }, 'DELEGATION_NOT_AUTHORISED');
+  reject((operation) => { operation.repository = 'other/repository'; }, 'DELEGATION_NOT_AUTHORISED');
+  reject((operation) => { operation.run_id = 'moved-run'; }, 'DELEGATION_NOT_AUTHORISED');
+  reject((operation) => { operation.exact_head = 'not-a-sha'; }, 'DELEGATION_NOT_AUTHORISED');
+  reject((operation) => { operation.workspace_identity.checkout_id = 'other-checkout'; }, 'WORKSPACE_MISMATCH');
+  reject((operation) => { operation.scope = ['src/b']; }, 'SCOPE_EXCEEDS_GRANT');
+  reject((operation) => { operation.scope = ['src/./a']; }, 'SCOPE_MISMATCH');
+  reject((operation) => { operation.capabilities = ['read', 'admin']; }, 'CAPABILITY_EXCEEDS_GRANT');
+  reject((operation) => { delete operation.capabilities; }, 'CAPABILITY_MISMATCH');
+  const validGrant = c11Grant();
+  const valid = c11DelegationDecision(c39WorkerLaunch(validGrant), validGrant);
+  assert.equal(valid.allowed, true);
+  assert.equal(valid.fastAllowed, false);
+  assert.equal(c11DelegationDecision(c39WorkerLaunch(validGrant), validGrant).reason, 'GRANT_ALREADY_CONSUMED');
 });
 
 test('C39 RED F2 caller omission ignores trusted current root work scope', () => {
