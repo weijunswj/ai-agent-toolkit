@@ -263,6 +263,40 @@ class C8DurableAuthorityRegistry {
     });
   }
 
+  registerLeaseAtomically(record) {
+    const key = c8DurableRecordKey(record);
+    const digest = c8DurableRecordDigest(record, this.kind);
+    if (!key || !c8Digest.test(digest || '') || digest !== (record.canonical_digest || record.lease_digest)) {
+      return { decision: 'AUTHORITY_REGISTRATION_REJECTED', reason: 'AUTHORITY_DIGEST_MISMATCH' };
+    }
+    const authorityKey = c8LeaseAuthorityKey(record);
+    return this._withLock((state) => {
+      const entryKey = this.kind + ':' + key;
+      const entry = state.entries[entryKey];
+      if (entry) {
+        if (entry.digest !== digest) return { value: { decision: 'AUTHORITY_REGISTRATION_REJECTED', reason: 'AUTHORITY_DIGEST_MISMATCH' } };
+        if (entry.state === 'consumed') return { value: { decision: 'AUTHORITY_REGISTRATION_REJECTED', reason: 'AUTHORITY_ALREADY_CONSUMED' } };
+        return { value: { decision: 'AUTHORITY_ALREADY_REGISTERED', record: c8Clone(entry.record) } };
+      }
+      this._injectFailure('before-lease-conflict-check');
+      for (const candidate of Object.values(state.entries)) {
+        if (candidate.kind !== this.kind || !candidate.record) continue;
+        if (c8LeaseAuthorityKey(candidate.record) === authorityKey &&
+            !['COMPLETED', 'EXPIRED'].includes(candidate.record.lifecycle)) {
+          return { value: { decision: 'AUTHORITY_REGISTRATION_REJECTED', reason: 'CONFLICTING_ACTIVE_LEASE' } };
+        }
+      }
+      state.entries[entryKey] = {
+        kind: this.kind,
+        key,
+        digest,
+        state: c8DurableRecordState(record) || 'issued',
+        record: c8Clone(record)
+      };
+      return { write: true, value: { decision: 'AUTHORITY_REGISTERED', record: c8Clone(record) } };
+    });
+  }
+
   consume(record, options = {}) {
     const key = c8DurableRecordKey(record);
     const digest = c8DurableRecordDigest(record, this.kind);
@@ -5027,6 +5061,11 @@ function c28CreateTrustedAuthorityStore() {
     repository: reviewAuthority.repository,
     exact_head: reviewAuthority.exact_head,
     exact_tree: c8GitAuthorityFixture.exact_tree_sha,
+    role: 'implementation/amendment worker',
+    provider: ['Open', 'AI'].join(''),
+    canonical_model: ['GPT', '-5.6 Luna'].join(''),
+    reasoning: ['M', 'ax'].join(''),
+    now: '2026-08-13T00:00:00.000Z',
     root_work_scope: ['src/root']
   });
   const reviewGrant = {
@@ -6049,12 +6088,7 @@ C8LeaseRegistry.prototype.register = function registerLease(lease) {
   if (lease.lifecycle !== 'DRAFT' || lease.consumed !== false || lease.use_count !== 0) {
     return c39LeaseReject('lease-registration', 'LEASE_INVALID', 'lifecycle', lease);
   }
-  for (const current of this.records.values()) {
-    if (current && c8LeaseAuthorityKey(current) === c8LeaseAuthorityKey(lease) && !['COMPLETED', 'EXPIRED'].includes(current.lifecycle)) {
-      return c39LeaseReject('lease-registration', 'CONFLICTING_ACTIVE_LEASE', 'snapshot_digest', lease);
-    }
-  }
-  const registered = c39LeaseAuthority(this).register(lease);
+  const registered = c39LeaseAuthority(this).registerLeaseAtomically(lease);
   if (registered.reason === 'AUTHORITY_ALREADY_CONSUMED') return c39LeaseReject('lease-registration', 'LEASE_ALREADY_CONSUMED', 'lease_id', lease);
   if (!['AUTHORITY_REGISTERED', 'AUTHORITY_ALREADY_REGISTERED'].includes(registered.decision)) {
     return c39LeaseReject('lease-registration', registered.reason || 'LEASE_INVALID', 'lease', lease);
@@ -6116,33 +6150,77 @@ C8LeaseRegistry.prototype.consume = function consumeLease(id, manifest, at) {
   return this.transition(id, 'COMPLETED', at);
 };
 
-function c39CurrentExecutionAuthority() {
-  const current = c28TrustedLookup('current-execution-authority', 'c39-current-execution');
-  if (!current || current[c39TrustedEvidenceToken] !== c39TrustedEvidenceToken || current.schema !== 'current-execution-authority/v1' || current.authority_id !== 'c39-current-execution') return null;
-  return current;
+const c39CurrentExecutionShape = Object.freeze({
+  schema: 'current-execution-authority/v1',
+  authority_id: 'c39-current-execution',
+  role: 'implementation/amendment worker',
+  provider: ['Open', 'AI'].join(''),
+  canonical_model: ['GPT', '-5.6 Luna'].join(''),
+  reasoning: ['M', 'ax'].join('')
+});
+
+function c39ExpectedCurrentExecutionAuthority() {
+  const trusted = c28TrustedLookup('exceptional-review', 'exceptional-grant-trusted-1');
+  if (!trusted || trusted[c39TrustedEvidenceToken] !== c39TrustedEvidenceToken || trusted.schema !== 'exceptional-review-grant/v1' || !trusted.review) return null;
+  const expected = {
+    ...c39CurrentExecutionShape,
+    run_id: trusted.review.run_id,
+    session_id: trusted.review.session_id,
+    turn_id: trusted.review.turn_id,
+    repository: trusted.repository,
+    exact_head: trusted.exact_head,
+    exact_tree: c8GitAuthorityFixture.exact_tree_sha
+  };
+  if (['run_id', 'session_id', 'turn_id', 'repository', 'exact_head'].some((field) => !nonEmptyString(expected[field])) ||
+      !c8Sha.test(expected.exact_head) || !c8Sha.test(expected.exact_tree)) return null;
+  return expected;
 }
 
-function c39C11Authority() {
-  const trusted = c28TrustedLookup('exceptional-review', 'exceptional-grant-trusted-1');
-  const current = c39CurrentExecutionAuthority();
-  const review = trusted && trusted.review || { run_id: 'run-exceptional-synthetic', session_id: 'session-exceptional-synthetic', turn_id: 'turn-exceptional-synthetic' };
-  const currentMatches = current && current.run_id === review.run_id && current.session_id === review.session_id && current.turn_id === review.turn_id && current.repository === (trusted && trusted.repository || 'weijunswj/ai-agent-toolkit') && current.exact_head === (trusted && trusted.exact_head || c8Snapshot(c8DefaultSnapshot()).exact_remote_head_sha) && current.exact_tree === c8GitAuthorityFixture.exact_tree_sha;
+function c39ResolveFreshCurrentExecution() {
+  const current = c28TrustedLookup('current-execution-authority', 'c39-current-execution');
+  const expected = c39ExpectedCurrentExecutionAuthority();
+  if (!current || !expected || current[c39TrustedEvidenceToken] !== c39TrustedEvidenceToken) return null;
+  for (const field of Object.keys(c39CurrentExecutionShape)) if (current[field] !== c39CurrentExecutionShape[field]) return null;
+  for (const field of ['run_id', 'session_id', 'turn_id', 'repository', 'exact_head', 'exact_tree', 'now']) if (!nonEmptyString(current[field])) return null;
+  if (!c8Sha.test(current.exact_head) || !c8Sha.test(current.exact_tree) || !Number.isFinite(Date.parse(current.now))) return null;
+  for (const field of ['run_id', 'session_id', 'turn_id', 'repository', 'exact_head', 'exact_tree']) if (current[field] !== expected[field]) return null;
+  let rootWorkScope;
+  try { rootWorkScope = c39NormalizeScope(current.root_work_scope, 'current_execution.root_work_scope'); } catch { return null; }
+  return { ...current, root_work_scope: rootWorkScope };
+}
+
+function c39CurrentExecutionAuthority() {
+  return c39ResolveFreshCurrentExecution();
+}
+
+function c39C11Authority(current = c39ResolveFreshCurrentExecution()) {
+  if (!current) return null;
   return {
-    run_id: review.run_id,
-    session_id: review.session_id,
-    turn_id: review.turn_id,
-    repository: trusted && trusted.repository || 'weijunswj/ai-agent-toolkit',
-    exact_head: trusted && trusted.exact_head || c8Snapshot(c8DefaultSnapshot()).exact_remote_head_sha,
-    exact_tree: c8GitAuthorityFixture.exact_tree_sha,
-    role: 'implementation/amendment worker',
-    provider: ['Open', 'AI'].join(''),
-    canonical_model: ['GPT', '-5.6 Luna'].join(''),
-    reasoning: ['M', 'ax'].join(''),
-    now: '2026-08-13T00:00:00.000Z',
-    root_work_scope: currentMatches ? current.root_work_scope : undefined
+    run_id: current.run_id,
+    session_id: current.session_id,
+    turn_id: current.turn_id,
+    repository: current.repository,
+    exact_head: current.exact_head,
+    exact_tree: current.exact_tree,
+    role: current.role,
+    provider: current.provider,
+    canonical_model: current.canonical_model,
+    reasoning: current.reasoning,
+    now: current.now,
+    root_work_scope: current.root_work_scope
   };
 }
 
+function c39CurrentRootScopeFailure() {
+  const current = c28TrustedLookup('current-execution-authority', 'c39-current-execution');
+  if (!current || current[c39TrustedEvidenceToken] !== c39TrustedEvidenceToken || current.schema !== 'current-execution-authority/v1' || current.authority_id !== 'c39-current-execution') return null;
+  try {
+    c39NormalizeScope(current.root_work_scope, 'current_execution.root_work_scope');
+    return null;
+  } catch {
+    return 'SCOPE_MISMATCH';
+  }
+}
 function c39WithCurrentExecutionRecord(transform, callback) {
   const previousStore = c28TrustedAuthorityStore;
   const originalResolve = previousStore && previousStore.resolve;
@@ -6166,6 +6244,7 @@ function c39C11GrantBody(grant) {
 }
 
 function c39C11GrantBinding(grant, authority) {
+  if (!authority || typeof authority !== 'object') return null;
   const boundAuthority = c8Clone(authority);
   delete boundAuthority.root_work_scope;
   return c8DigestBytes(c8Json({ authority: boundAuthority, grant: c39C11GrantBody(grant) }));
@@ -6173,6 +6252,7 @@ function c39C11GrantBinding(grant, authority) {
 
 function c39BuildC11Grant(overrides = {}) {
   const authority = c39C11Authority();
+  if (!authority) return null;
   const safeOverrides = c8Clone(overrides || {});
   delete safeOverrides.canonical_digest;
   delete safeOverrides.trusted_authority_binding;
@@ -6223,9 +6303,13 @@ function c11Grant(overrides = {}) {
   return c39BuildC11Grant(safeOverrides);
 }
 
-function c39C11ValidateGrant(grant) {
-  const authority = c39C11Authority();
-  if (!authority || !grant || grant.schema !== 'delegation-grant/v1' || grant[c39TrustedEvidenceToken] !== c39TrustedEvidenceToken) return { ok: false, reason: 'DELEGATION_NOT_AUTHORISED' };
+function c39C11ValidateGrant(grant, authorityOverride) {
+  const authority = authorityOverride === undefined ? c39C11Authority() : authorityOverride;
+  if (!authority) {
+    const rootScopeFailure = grant && grant.mode === 'ordinary-helper' ? c39CurrentRootScopeFailure() : null;
+    return { ok: false, reason: rootScopeFailure || 'DELEGATION_NOT_AUTHORISED' };
+  }
+  if (!grant || grant.schema !== 'delegation-grant/v1' || grant[c39TrustedEvidenceToken] !== c39TrustedEvidenceToken) return { ok: false, reason: 'DELEGATION_NOT_AUTHORISED' };
   const trusted = c28TrustedLookup('delegation-grant', grant.grant_id);
   if (!trusted || c8Json(trusted) !== c8Json(grant)) return { ok: false, reason: 'DELEGATION_NOT_AUTHORISED' };
   if (!c8Digest.test(grant.canonical_digest || '') || grant.canonical_digest !== c8DigestBytes(c8Json(c39C11GrantBody(grant)))) return { ok: false, reason: 'DELEGATION_NOT_AUTHORISED' };
@@ -6289,7 +6373,8 @@ function c39EvidenceCategory(kind) {
 
 function c11DelegationDecision(operation = {}, grant = {}) {
   const denied = (reason = 'DELEGATION_NOT_AUTHORISED') => ({ allowed: false, reason });
-  const verified = c39C11ValidateGrant(grant);
+  const authority = c39C11Authority();
+  const verified = c39C11ValidateGrant(grant, authority);
   if (!verified.ok) return denied(verified.reason);
   const requestedCount = Object.hasOwn(operation, 'requested_count') ? operation.requested_count : 1;
   if (requestedCount !== 1) return denied();
@@ -6324,10 +6409,11 @@ function c11TerminalEvidence(kind) {
   return c28TrustedLookup(c39EvidenceCategory(kind), 'c39-native-terminal-' + kind);
 }
 
-function c39TerminalEvidenceValid(evidence, acceptedKinds) {
-  if (!evidence || !acceptedKinds.includes(evidence.kind) || evidence[c39TrustedEvidenceToken] !== c39TrustedEvidenceToken) return false;
+function c39TerminalEvidenceValid(evidence, acceptedKinds, authority = c39C11Authority()) {
+  if (!authority || !evidence || !acceptedKinds.includes(evidence.kind) || evidence[c39TrustedEvidenceToken] !== c39TrustedEvidenceToken) return false;
   const trusted = c28TrustedLookup(c39EvidenceCategory(evidence.kind), evidence.evidence_id);
-  return !!trusted && c8Json(evidence) === c8Json(trusted);
+  return !!trusted && c8Json(evidence) === c8Json(trusted) &&
+    ['run_id', 'session_id', 'turn_id', 'repository', 'exact_head', 'exact_tree'].every((field) => evidence[field] === authority[field]);
 }
 
 function c11ReplacementGrant() {
@@ -6348,7 +6434,22 @@ function c11AutoCodeLifecycle(event, evidence = null, replacementGrant = null) {
     workspace: 'preserved',
     replacement: 'forbidden'
   };
-  if (event === 'native-terminal-return' && c39TerminalEvidenceValid(evidence, ['normal-terminal-return'])) {
+  const authority = c39C11Authority();
+  if (!authority) {
+    if (event === 'authority-movement') {
+      return {
+        ...suspended,
+        manager_state: 'MANAGER_REQUIRES_RE_ADMISSION',
+        manager_resume: 're-admission',
+        ownership: 're-admission-required',
+        mutation_owner: 'none',
+        re_admission_required: true,
+        substantive_work: 'forbidden-until-re-admission'
+      };
+    }
+    return { ...suspended, ownership: 're-admission-required', mutation_owner: 'none', re_admission_required: true, substantive_work: 'forbidden-until-re-admission' };
+  }
+  if (event === 'native-terminal-return' && c39TerminalEvidenceValid(evidence, ['normal-terminal-return'], authority)) {
     return {
       ...suspended,
       manager_state: 'MANAGER_READY_FOR_VALIDATION',
@@ -6358,14 +6459,14 @@ function c11AutoCodeLifecycle(event, evidence = null, replacementGrant = null) {
       mutation_allowed: true
     };
   }
-  if (event === 'harness-failure' && c39TerminalEvidenceValid(evidence, ['harness-failure'])) {
+  if (event === 'harness-failure' && c39TerminalEvidenceValid(evidence, ['harness-failure'], authority)) {
     return { ...suspended, manager_state: 'MANAGER_RECOVERY_AFTER_HARNESS_FAILURE', manager_resume: 'recovery', ownership: 'recovery-only', mutation_owner: 'none' };
   }
   if (['result-loss', 'result-unavailability'].includes(event) &&
-      c39TerminalEvidenceValid(evidence, ['result-loss', 'result-unavailability'])) {
+      c39TerminalEvidenceValid(evidence, ['result-loss', 'result-unavailability'], authority)) {
     return { ...suspended, manager_state: 'MANAGER_RECOVERY_AFTER_RESULT_LOSS', manager_resume: 'recovery', ownership: 'recovery-only', mutation_owner: 'none' };
   }
-  if (event === 'authority-movement' && c39TerminalEvidenceValid(evidence, ['authority-movement'])) {
+  if (event === 'authority-movement' && c39TerminalEvidenceValid(evidence, ['authority-movement'], authority)) {
     return {
       ...suspended,
       manager_state: 'MANAGER_REQUIRES_RE_ADMISSION',
@@ -6377,13 +6478,13 @@ function c11AutoCodeLifecycle(event, evidence = null, replacementGrant = null) {
     };
   }
   if (['user-interruption', 'user-change'].includes(event) &&
-      c39TerminalEvidenceValid(evidence, ['user-interruption', 'user-change'])) {
+      c39TerminalEvidenceValid(evidence, ['user-interruption', 'user-change'], authority)) {
     return { ...suspended, manager_state: 'USER_INTERRUPTED_PRESERVE', manager_resume: 'user-handling', ownership: 'unchanged', mutation_owner: 'unchanged' };
   }
   if (event === 'replacement-after-loss-with-new-grant' &&
-      c39TerminalEvidenceValid(evidence, ['result-loss', 'harness-failure']) &&
+      c39TerminalEvidenceValid(evidence, ['result-loss', 'harness-failure'], authority) &&
       replacementGrant && replacementGrant.replacement === true) {
-    const verified = c39C11ValidateGrant(replacementGrant);
+    const verified = c39C11ValidateGrant(replacementGrant, authority);
     if (verified.ok) {
       const consumed = c39C11ConsumeGrant(replacementGrant, verified.authority);
       if (consumed.ok) return { ...suspended, manager_state: 'REPLACEMENT_ADMITTED', replacement: 'allowed', grant: consumed.record };
@@ -6404,9 +6505,11 @@ function c10ReviewGrant() {
 }
 
 function c10ReviewRequestAdmission(request = {}) {
+  const authority = c39C11Authority();
   const trusted = c10ReviewGrant();
   const grant = request && request.grant;
-  const valid = !!trusted && !!grant && grant[c39TrustedEvidenceToken] === c39TrustedEvidenceToken && c8Json(grant) === c8Json(trusted) &&
+  const authorityCompatible = !!authority && ['run_id', 'session_id', 'turn_id'].every((field) => grant && grant[field] === authority[field]) && grant && grant.repository === authority.repository && grant.head === authority.exact_head && grant.tree === authority.exact_tree;
+  const valid = authorityCompatible && !!trusted && !!grant && grant[c39TrustedEvidenceToken] === c39TrustedEvidenceToken && c8Json(grant) === c8Json(trusted) &&
     request.role === trusted.role && request.repository === trusted.repository &&
     request.pull_request === trusted.pull_request && request.target === trusted.target &&
     request.head === trusted.head && request.tree === trusted.tree &&
@@ -6418,7 +6521,7 @@ function c10ReviewRequestAdmission(request = {}) {
     const registered = registry.read(trusted.grant_id);
     if (!registered || registered.digest !== trusted.canonical_digest || c8Json(registered.record) !== c8Json(trusted)) return { decision: 'REVIEW_REQUEST_REJECTED', reason: 'REVIEW_GRANT_NOT_PREISSUED' };
     if (registered.state === 'consumed') return { decision: 'REVIEW_REQUEST_REJECTED', reason: 'REVIEW_GRANT_ALREADY_CONSUMED' };
-    const consumed = registry.consume(trusted, { expectedState: 'issued', consumed_at: '2026-08-13T00:00:00.000Z' });
+    const consumed = registry.consume(trusted, { expectedState: 'issued', consumed_at: authority.now });
     if (consumed.decision !== 'AUTHORITY_CONSUMED') return { decision: 'REVIEW_REQUEST_REJECTED', reason: consumed.reason || 'REVIEW_GRANT_INVALID' };
     return { decision: 'REVIEW_REQUEST_ADMITTED', target: trusted.target, one_run: true, authority: { run_id: trusted.run_id, session_id: trusted.session_id, turn_id: trusted.turn_id } };
   } catch (error) {
@@ -6447,6 +6550,67 @@ test('C39 RED C10 must reread current trusted state instead of a cached copy', (
   } finally {
     c28TrustedAuthorityStore = priorStore;
   }
+});
+
+test('C39 RED A5 stale current-execution authority cannot admit retained grants or transfer ownership', () => {
+  const missingAuthorityGrant = c11Grant({ mode: 'exclusive-auto-code' });
+  const missingAuthority = c39WithCurrentExecutionRecord(() => null, () =>
+    c11DelegationDecision({ operation: 'spawn_agent' }, missingAuthorityGrant));
+  assert.equal(missingAuthority.allowed, false);
+
+  const movedHeadTreeGrant = c11Grant({ mode: 'exclusive-auto-code' });
+  const movedHeadTree = c39WithCurrentExecutionRecord((record) => ({
+    ...record,
+    exact_head: 'moved-current-head',
+    exact_tree: 'moved-current-tree'
+  }), () => c11DelegationDecision({ operation: 'spawn_agent' }, movedHeadTreeGrant));
+  assert.equal(movedHeadTree.allowed, false);
+
+  const reviewGrant = c10ReviewGrant();
+  const reviewRequest = {
+    role: reviewGrant.role,
+    repository: reviewGrant.repository,
+    pull_request: reviewGrant.pull_request,
+    target: reviewGrant.target,
+    grant: reviewGrant,
+    checks: reviewGrant.checks,
+    prior_request: false,
+    readback: true,
+    head: reviewGrant.head,
+    tree: reviewGrant.tree
+  };
+  const movedReview = c39WithCurrentExecutionRecord((record) => ({
+    ...record,
+    run_id: 'moved-review-run',
+    session_id: 'moved-review-session',
+    turn_id: 'moved-review-turn',
+    exact_head: 'moved-review-head',
+    exact_tree: 'moved-review-tree'
+  }), () => c10ReviewRequestAdmission(reviewRequest));
+  assert.equal(movedReview.decision, 'REVIEW_REQUEST_REJECTED');
+
+  const replacementGrant = c11ReplacementGrant();
+  const resultLossEvidence = c11TerminalEvidence('result-loss');
+  const movedReplacement = c39WithCurrentExecutionRecord((record) => ({
+    ...record,
+    run_id: 'moved-replacement-run',
+    session_id: 'moved-replacement-session',
+    turn_id: 'moved-replacement-turn',
+    exact_head: 'moved-replacement-head',
+    exact_tree: 'moved-replacement-tree'
+  }), () => c11AutoCodeLifecycle('replacement-after-loss-with-new-grant', resultLossEvidence, replacementGrant));
+  assert.equal(movedReplacement.replacement, 'forbidden');
+  assert.notEqual(movedReplacement.mutation_owner, 'exclusive-worker');
+
+  const normalReturnEvidence = c11TerminalEvidence('normal-terminal-return');
+  const movedManager = c39WithCurrentExecutionRecord((record) => ({
+    ...record,
+    exact_head: 'moved-manager-head',
+    exact_tree: 'moved-manager-tree'
+  }), () => c11AutoCodeLifecycle('native-terminal-return', normalReturnEvidence));
+  assert.equal(movedManager.manager_state, 'MANAGER_SUSPENDED_ON_NATIVE_WORKER');
+  assert.notEqual(movedManager.mutation_owner, 'manager-validation');
+  assert.equal(movedManager.mutation_allowed, false);
 });
 
 test('C39 corrected trusted grants, review admission, and evidence-bound lifecycle are positive and one-use', () => {
@@ -6835,4 +6999,34 @@ test('C39 F8 store ownership boundary recovers newest completed lease after inte
 test('C39 RED lifecycle resume rejects a deterministic clone without trusted evidence provenance', () => {
   const evidence = JSON.parse(JSON.stringify(c11TerminalEvidence('normal-terminal-return')));
   assert.equal(c11AutoCodeLifecycle('native-terminal-return', evidence).manager_state, 'MANAGER_SUSPENDED_ON_NATIVE_WORKER');
+});
+
+test('C39 F8 atomic cross-registry registration holds conflict check and insertion under one durable lock', () => {
+  const snapshot = c8Snapshot(c8DefaultSnapshot());
+  const leaseA = c8LeaseCreate(snapshot, { lease_id: 'c39-atomic-cross-registry-a' });
+  const leaseB = c8LeaseCreate(snapshot, { lease_id: 'c39-atomic-cross-registry-b' });
+  const storePath = c8NewAuthorityStorePath('c39-red-cross-registry');
+  const registryA = new C8LeaseRegistry(storePath);
+  const registryB = new C8LeaseRegistry(storePath);
+  const authorityA = c39LeaseAuthority(registryA);
+  let blockedAttempt;
+  authorityA.failureInjector = (stage) => {
+    if (stage !== 'before-lease-conflict-check') return;
+    try {
+      blockedAttempt = registryB.register(leaseB);
+    } catch (error) {
+      blockedAttempt = { decision: 'LEASE_REJECTED', receipt: { reason: error.reason } };
+    }
+  };
+
+  const resultA = registryA.register(leaseA);
+  assert.equal(resultA.decision, 'LEASE_REGISTERED');
+  assert.equal(blockedAttempt.receipt.reason, 'AUTHORITY_LOCK_UNAVAILABLE');
+  const resultB = registryB.register(leaseB);
+  assert.equal(resultB.decision, 'LEASE_REJECTED');
+  assert.equal(resultB.receipt.reason, 'CONFLICTING_ACTIVE_LEASE');
+  const reopened = new C8LeaseRegistry(storePath);
+  const active = c39LeaseAuthority(reopened).entries().filter((entry) => entry.record.lifecycle === 'DRAFT');
+  assert.equal(active.length, 1);
+  assert.equal(active[0].key, leaseA.lease_id);
 });
