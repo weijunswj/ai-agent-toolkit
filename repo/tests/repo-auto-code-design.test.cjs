@@ -9,6 +9,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
+const { auditRange } = require('../scripts/audit-commit-version-history.cjs');
 
 test('RUN091-F9 RED terminal evidence without an admitted worker launch must not transfer manager ownership', () => {
   const evidence = c11TerminalEvidence('normal-terminal-return');
@@ -1080,6 +1081,83 @@ test('source and output declarations stay source-only', () => {
   for (const denied of ['scheduled-tasks/**', 'activation/**', 'runtime/**', 'pilot/**', 'queue/**']) {
     assert.ok(manifest.writes.denied.includes(denied));
   }
+});
+test('RUN094-B2 failure-matrix outcomes stay bound to executable audit semantics', (t) => {
+  const matrix = fs.readFileSync(path.join(mainRoot, 'failure-matrix.md'), 'utf8');
+  const matrixOutcome = (condition) => {
+    const row = matrix.split(/\r?\n/).find((line) => line.startsWith('| ' + condition + ' |'));
+    assert.ok(row, 'missing failure-matrix row: ' + condition);
+    return row.split('|')[2].trim();
+  };
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'repo-auto-code-b2-audit-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const write = (relativePath, content) => {
+    const absolutePath = path.join(root, ...relativePath.split('/'));
+    fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+    fs.writeFileSync(absolutePath, content, 'utf8');
+  };
+  const runGit = (args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true }).trim();
+  const commit = (message) => {
+    runGit(['add', '-A']);
+    runGit(['commit', '--quiet', '-m', message]);
+    return runGit(['rev-parse', 'HEAD']);
+  };
+  runGit(['init', '--quiet']);
+  runGit(['branch', '-M', 'main']);
+  runGit(['config', 'user.name', 'Run 094 B2 fixture']);
+  runGit(['config', 'user.email', 'run094-b2@example.invalid']);
+  const manifestPath = '_projects/test/module/toolkit.project.json';
+  const manifest = {
+    id: 'test.module',
+    category: 'test',
+    name: 'module',
+    title: 'Run 094 B2 fixture',
+    module_path: '_projects/test/module',
+    main_path: '_projects/test/module/_main',
+    version: '1.0.0',
+    version_policy: 'semver',
+    version_notes: 'Run 094 B2 fixture.',
+    version_trigger_paths: ['README.md', 'SOURCE-MANIFEST.md'],
+    outputs: []
+  };
+  write(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+  write('_projects/test/module/README.md', 'base module README\n');
+  write('_projects/test/module/SOURCE-MANIFEST.md', 'base source manifest\n');
+  write('_projects/test/module/_main/source.md', 'base source\n');
+  const base = commit('base');
+
+  write('_projects/test/module/README.md', 'missing version transition\n');
+  const missing = commit('material trigger without version transition');
+  const missingResult = auditRange({ repoRoot: root, base, head: missing });
+
+  const remediedManifest = { ...manifest, version: '1.0.1' };
+  write(manifestPath, JSON.stringify(remediedManifest, null, 2) + '\n');
+  write('_projects/test/module/README.md', 'valid triggered version transition\n');
+  const remedy = commit('material trigger with version transition');
+  const remedyResult = auditRange({ repoRoot: root, base: missing, head: remedy });
+
+  const noTriggerManifest = { ...remediedManifest, version: '1.0.2' };
+  write(manifestPath, JSON.stringify(noTriggerManifest, null, 2) + '\n');
+  const noTrigger = commit('version transition without trigger');
+  const noTriggerResult = auditRange({ repoRoot: root, base: remedy, head: noTrigger });
+
+  assert.equal(missingResult.firstViolation.commit, missing);
+  assert.ok(missingResult.firstViolation.trigger.includes('_projects/test/module/README.md'));
+  assert.equal(remedyResult.firstViolation, null);
+  assert.ok(remedyResult.records[0].families.some((family) => family.triggered_paths.includes('_projects/test/module/README.md')));
+  assert.equal(noTriggerResult.firstViolation, null);
+  assert.equal(noTriggerResult.records[0].compliance, 'NO_VERSION_TRIGGER_VERSION_TRANSITION_OBSERVED');
+  assert.deepEqual(
+    {
+      missing: matrixOutcome('Material module contract change lacks a monotonic same-commit version transition'),
+      remedy: matrixOutcome('The version metadata transition is the same-commit remedy for a material module contract change')
+    },
+    {
+      missing: missingResult.firstViolation.code,
+      remedy: remedyResult.records[0].compliance
+    },
+    'B2 matrix labels must match the executable audit outcomes'
+  );
 });
 
 test('generic role templates require runtime route values and exact failure semantics', () => {
@@ -6067,7 +6145,7 @@ test('C11 source versions record behavioural contract additions', () => {
   const rules = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', 'toolkit.project.json'), 'utf8'));
   const autoCode = JSON.parse(fs.readFileSync(path.join(projectRoot, 'toolkit.project.json'), 'utf8'));
   assert.equal(rules.version, '3.1.3');
-  assert.equal(autoCode.version, '1.10.0');
+  assert.equal(autoCode.version, '1.10.1');
   assert.match(rules.version_notes, /C13 three-mode.*common.*safeguards/i);
   assert.match(rules.version_notes, /capacity.*non-Fast.*non-nesting.*context-minimisation/i);
   assert.match(autoCode.version_notes, /C11/i);

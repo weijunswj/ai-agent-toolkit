@@ -183,7 +183,7 @@ The C7 section supersedes earlier normal-path rows that require a Temporary Chat
 | --- | --- | --- | --- |
 | Terminal/resume evidence is static, missing, malformed, unadmitted, bound to the wrong grant/launch/worker/workspace/run/session/turn/head/tree, stale, or replayed | DELEGATION_NOT_AUTHORISED / MANAGER_SUSPENDED_ON_NATIVE_WORKER | No manager ownership transfer; preserve the active or terminal durable launch state | Web |
 | Exact admitted worker launch has a valid normal terminal, permitted harness failure/result loss, user interruption, or governed authority-movement event | MANAGER_READY_FOR_VALIDATION or governed replacement state | Transfer only the exact workspace mutation ownership proven by that launch; replacement requires a fresh exact grant | Web |
-| Material module contract change lacks a monotonic same-commit version transition | NO_VERSION_TRIGGER / VERSION_NOT_INCREASED | Reject the audit; the module version gate is not bypassed | CI/Web |
-| The version metadata transition is the same-commit remedy for a material module contract change | NO_VERSION_TRIGGER_VERSION_TRANSITION_OBSERVED | Accept the trigger without recursively requiring another version change | CI/Web |
+| Material module contract change lacks a monotonic same-commit version transition | COMMIT_VERSION_MISMATCH | Reject the audit; the module version gate is not bypassed | CI/Web |
+| The version metadata transition is the same-commit remedy for a material module contract change | COMPLIANT_VERSION_TRANSITION | Accept the trigger without recursively requiring another version change | CI/Web |
 
 No row permits installation, activation, scheduling, Auto Review, automatic next-task pickup, credential introduction, or governance mutation. All typed admission receipts carry `mutation_performed:false` and must not repeat sensitive observed values.
