@@ -5,9 +5,10 @@
   "title": "Repo-Scoped Default-Off Closure-Lease Protocol",
   "module_path": "_projects/development/repo-auto-code",
   "main_path": "_projects/development/repo-auto-code/_main",
-  "version": "1.9.1",
+  "version": "1.10.0",
   "version_policy": "semver",
-  "version_notes": "Extends DL-329-AUTO-CODE-005-A6-C10 with the C11 corrected live-finding matrix, default-deny delegation, explicit exclusive Auto-code manager/worker lifecycle, grant-bound exceptional assurance, and repaired validator boundary; advances DL-329-AUTO-CODE-005-A6-C11 and retains DL-329-AUTO-CODE-005-A6-C6, DL-329-AUTO-CODE-005-A6-C7, DL-329-AUTO-CODE-005-A6-C8 and the source-only C7/C8/C10 invariants and fixture arithmetic.",
+  "version_notes": "Extends DL-329-AUTO-CODE-005-A6-C10 and advances DL-329-AUTO-CODE-005-A6-C11 with exact admitted-worker terminal provenance, finite C6 assurance time ordering, sole-durable F8 lease authority, true PR merge-base version auditing, and contract-bearing module version triggers; retains the source-only C7/C8 invariants and fixture arithmetic.",
+  "version_trigger_paths": ["README.md", "SOURCE-MANIFEST.md"],
   "outputs": [],
   "writes": {
     "allowed": [],

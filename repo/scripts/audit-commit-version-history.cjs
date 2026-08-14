@@ -244,6 +244,15 @@ function familyFromManifest(relativePath, project) {
   const mainPath = normalizePath(project.main_path || `${modulePath}/_main`);
   const outputs = Array.isArray(project.outputs) ? project.outputs : [];
   const triggerPaths = [];
+  const contractPaths = [];
+  for (const rawPath of (Array.isArray(project.version_trigger_paths) ? project.version_trigger_paths : [])) {
+    if (typeof rawPath !== 'string' || !rawPath.trim()) throw new Error(`VERSION_AUDIT_CONTRACT_PATH_INVALID: ${relativePath}`);
+    const normalizedPath = normalizePath(rawPath);
+    if (!normalizedPath || normalizedPath.startsWith('/') || normalizedPath.includes(':') || normalizedPath === '.' || normalizedPath === '..' || normalizedPath.startsWith('../')) {
+      throw new Error(`VERSION_AUDIT_CONTRACT_PATH_INVALID: ${relativePath}:${rawPath}`);
+    }
+    addUnique(contractPaths, normalizedPath.startsWith(`${modulePath}/`) ? normalizedPath : `${modulePath}/${normalizedPath}`);
+  }
   addUnique(triggerPaths, `${modulePath}/_main`);
   addUnique(triggerPaths, mainPath);
   addUnique(triggerPaths, `${modulePath}/curated_output_for_ai`);
@@ -259,6 +268,7 @@ function familyFromManifest(relativePath, project) {
     mainPath,
     version: typeof project.version === 'string' ? project.version : null,
     triggerPaths,
+    contractPaths,
     coupledPaths: [normalizePath(relativePath)]
   };
   if (family.id === 'development.ai-coding-agent-rules') {
@@ -269,6 +279,7 @@ function familyFromManifest(relativePath, project) {
     family.coupledPaths = [...BRIDGE_COUPLED_PATHS];
   }
   family.triggerPaths = [...new Set(family.triggerPaths.map(normalizePath))];
+  family.contractPaths = [...new Set(family.contractPaths.map(normalizePath))];
   family.coupledPaths = [...new Set(family.coupledPaths.map(normalizePath))];
   return family;
 }
@@ -298,11 +309,13 @@ function pairFamilies(parentFamilies, commitFamilies, parent, commit) {
     const commitFamily = commitIndex.get(id) || null;
     const manifestPaths = [];
     const triggerPaths = [];
+    const contractPaths = [];
     const coupledPaths = [];
     for (const family of [parentFamily, commitFamily]) {
       if (!family) continue;
       addUnique(manifestPaths, family.manifestPath);
       for (const triggerPath of family.triggerPaths) addUnique(triggerPaths, triggerPath);
+      for (const contractPath of family.contractPaths) addUnique(contractPaths, contractPath);
       for (const coupledPath of family.coupledPaths) addUnique(coupledPaths, coupledPath);
     }
     return {
@@ -314,6 +327,7 @@ function pairFamilies(parentFamilies, commitFamilies, parent, commit) {
       manifestPath: commitFamily ? commitFamily.manifestPath : parentFamily.manifestPath,
       manifestPaths,
       triggerPaths,
+      contractPaths,
       coupledPaths,
       requiredSource: commitFamily ? commitFamily.manifestPath : parentFamily.manifestPath
     };
@@ -399,11 +413,13 @@ function auditRange({ repoRoot, base, head }) {
         manifestPath: family.manifestPath,
         manifestPaths: [],
         triggerPaths: [],
+        contractPaths: [],
         coupledPaths: []
       };
       summary.manifestPath = family.manifestPath;
       for (const manifestPath of family.manifestPaths) addUnique(summary.manifestPaths, manifestPath);
       for (const triggerPath of family.triggerPaths) addUnique(summary.triggerPaths, triggerPath);
+      for (const contractPath of (family.contractPaths || [])) addUnique(summary.contractPaths, contractPath);
       for (const coupledPath of family.coupledPaths) addUnique(summary.coupledPaths, coupledPath);
       familySummaries.set(family.id, summary);
     }
@@ -423,15 +439,21 @@ function auditRange({ repoRoot, base, head }) {
       if (!firstViolation) firstViolation = current;
     };
     for (const family of families) {
-      const familyChangedPaths = paths.filter((candidate) =>
-        family.manifestPaths.some((manifestPath) => candidate === manifestPath) ||
-        family.triggerPaths.some((prefix) => pathMatches(candidate, prefix))
-      );
+      const changedManifestPaths = family.manifestPaths.filter((manifestPath) => pathSet.has(manifestPath));
+      const materialManifestPaths = family.parent && family.commit
+        ? changedManifestPaths.filter((manifestPath) => manifestContractChanged(repoRoot, parent, commit, manifestPath, objectStore))
+        : [];
+      const contractChangedPaths = paths.filter((candidate) => (family.contractPaths || []).some((prefix) => pathMatches(candidate, prefix)));
+      const triggers = [...new Set([
+        ...paths.filter((candidate) => family.triggerPaths.some((prefix) => pathMatches(candidate, prefix))),
+        ...contractChangedPaths,
+        ...materialManifestPaths
+      ])];
+      const familyChangedPaths = [...new Set([...changedManifestPaths, ...triggers])];
       if (!familyChangedPaths.length) continue;
 
       const before = family.parent ? family.parent.version : null;
       const after = family.commit ? family.commit.version : null;
-      const triggers = paths.filter((candidate) => family.triggerPaths.some((prefix) => pathMatches(candidate, prefix)));
       if (!family.commit) {
         const removalTriggers = [...new Set([
           ...triggers,
@@ -442,9 +464,9 @@ function auditRange({ repoRoot, base, head }) {
           before,
           after,
           transition: 'removed',
-          triggered_paths: triggers,
+          triggered_paths: removalTriggers,
           manifest_paths: family.manifestPaths,
-          trigger_union: family.triggerPaths
+          trigger_union: [...new Set([...family.triggerPaths, ...(family.contractPaths || []), ...family.manifestPaths])]
         };
         record.families.push(familyRecord);
         record.compliance = 'VERSION_FAMILY_REMOVAL_REQUIRES_POLICY';
@@ -476,7 +498,7 @@ function auditRange({ repoRoot, base, head }) {
         transition,
         triggered_paths: triggers,
         manifest_paths: family.manifestPaths,
-        trigger_union: family.triggerPaths
+        trigger_union: [...new Set([...family.triggerPaths, ...(family.contractPaths || []), ...family.manifestPaths])]
       };
       record.families.push(familyRecord);
       if (!triggers.length) {
@@ -484,7 +506,7 @@ function auditRange({ repoRoot, base, head }) {
         continue;
       }
       record.compliance = 'COMPLIANT_VERSION_TRANSITION';
-      const versionSourceChanged = family.manifestPaths.some((manifestPath) => pathSet.has(manifestPath));
+      const versionSourceChanged = changedManifestPaths.length > 0;
       if (!versionSourceChanged) {
         const current = violation(record, family, 'required same-commit version transition missing', triggers, before, after);
         noteViolation(current);
@@ -522,6 +544,7 @@ function auditRange({ repoRoot, base, head }) {
       manifestPath: family.manifestPath,
       manifestPaths: [family.manifestPath],
       triggerPaths: family.triggerPaths,
+      contractPaths: family.contractPaths || [],
       coupledPaths: family.coupledPaths
     }));
   return { base: normalizedBase, head: normalizedHead, commits, records, firstViolation, families };
@@ -593,3 +616,24 @@ module.exports = {
   parseSemver,
   transitionClass
 };
+
+function canonicalContractValue(value) {
+  if (Array.isArray(value)) return value.map(canonicalContractValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalContractValue(value[key])]));
+  }
+  return value;
+}
+
+function manifestContractValue(project) {
+  if (!project || typeof project !== 'object' || project.__parseError) return null;
+  const value = { ...project };
+  delete value.version;
+  return canonicalContractValue(value);
+}
+
+function manifestContractChanged(repoRoot, parent, commit, manifestPath, objectStore = null) {
+  const before = readJsonAt(repoRoot, parent, manifestPath, objectStore);
+  const after = readJsonAt(repoRoot, commit, manifestPath, objectStore);
+  return JSON.stringify(manifestContractValue(before)) !== JSON.stringify(manifestContractValue(after));
+}

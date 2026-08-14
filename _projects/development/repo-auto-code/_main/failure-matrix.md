@@ -86,6 +86,7 @@ The A6-C2 continuation is a narrow source-only bootstrap implementation exceptio
 | Launch repository, PR, branch, merge state, base, head, tree, graph, or authority moved or mismatches the live readback | ASSURANCE_HEAD_MISMATCH | No; no Temporary Chat | Web |
 | Canonical assurance-template revision is missing, stale, or not used for rendering | ASSURANCE_TEMPLATE_REQUIRED | No; no Temporary Chat | Web |
 | Launch envelope is duplicated, replayed, expired, already consumed, or used more than once | ASSURANCE_LAUNCH_INVALID | No; no Temporary Chat | Web |
+| Any created_at, expires_at, or trusted current time is missing, non-finite, future-dated, expired, or fails created_at <= trusted_now < expires_at and created_at < expires_at | ASSURANCE_LAUNCH_INVALID | No; no Temporary Chat, no authority consumption or mutation | Web |
 | A mandatory item is proved only by a narrative, G4 packet, executor packet, copied hash/count, self-attestation, actor conclusion, memory, Custom Instructions, candidate label, generic link, or circular locator | ASSURANCE_EVIDENCE_INCOMPLETE | No; no Temporary Chat | Web |
 | Dispatch replaces the canonical repository-inspection assignment with a hand-written summary-consistency task | ASSURANCE_TEMPLATE_REQUIRED | No; no Temporary Chat | Web |
 | Assurance response is bare, has no schema, has an empty check list, or omits required receipt identity/separation/non-authority fields | ASSURANCE_CLEAR_UNSUPPORTED | No; operational result is CONCERN | Web |
@@ -169,10 +170,20 @@ The C7 section supersedes earlier normal-path rows that require a Temporary Chat
 | Prompt render/extract changes canonical manifest bytes | MANIFEST_ROUND_TRIP_MISMATCH | No dispatch or candidate | Web |
 | Lease is duplicated, replayed, already consumed, or conflicts with an active lease | DUPLICATE_DISPATCH / LEASE_ALREADY_CONSUMED / CONFLICTING_ACTIVE_LEASE | No second run | Web |
 | Lease has expired or transition is invalid | LEASE_EXPIRED / LEASE_INVALID | No admission or candidate | Web |
+| Durable locked lease state is newer than an in-memory projection | LEASE_ALREADY_CONSUMED / LEASE_EXPIRED / CONFLICTING_ACTIVE_LEASE as applicable | Reload and act on durable state; never resurrect or rewrite an older terminal or consumed state | Web |
 | Pre-dispatch tooling, collection, extraction, or final reread fails | PRE_DISPATCH_TOOLING_FAILURE | `evaluation_candidate_created:false`; no lease consumption | Web |
 | Visible output is possible-sensitive | SENSITIVITY_POSSIBLE | Redact/no-repeat; pause affected Web path only | Web |
 | Confirmed credential exposure lacks evidence-based rotation disposition | SECRET_EXPOSURE_DETECTED | Stop affected path; contain/rotate per evidence | Web |
 | Confirmed non-credential exposure lacks containment | SECRET_EXPOSURE_DETECTED | Stop affected path; contain per evidence | Web |
 | Shared exposure is not demonstrated | SENSITIVITY_LOCAL_ONLY | Do not invalidate unrelated work | Web |
+
+## C11 exact worker-launch terminal provenance failures
+
+| Condition | Return code | Mutation/evaluation effect | Owner |
+| --- | --- | --- | --- |
+| Terminal/resume evidence is static, missing, malformed, unadmitted, bound to the wrong grant/launch/worker/workspace/run/session/turn/head/tree, stale, or replayed | DELEGATION_NOT_AUTHORISED / MANAGER_SUSPENDED_ON_NATIVE_WORKER | No manager ownership transfer; preserve the active or terminal durable launch state | Web |
+| Exact admitted worker launch has a valid normal terminal, permitted harness failure/result loss, user interruption, or governed authority-movement event | MANAGER_READY_FOR_VALIDATION or governed replacement state | Transfer only the exact workspace mutation ownership proven by that launch; replacement requires a fresh exact grant | Web |
+| Material module contract change lacks a monotonic same-commit version transition | NO_VERSION_TRIGGER / VERSION_NOT_INCREASED | Reject the audit; the module version gate is not bypassed | CI/Web |
+| The version metadata transition is the same-commit remedy for a material module contract change | NO_VERSION_TRIGGER_VERSION_TRANSITION_OBSERVED | Accept the trigger without recursively requiring another version change | CI/Web |
 
 No row permits installation, activation, scheduling, Auto Review, automatic next-task pickup, credential introduction, or governance mutation. All typed admission receipts carry `mutation_performed:false` and must not repeat sensitive observed values.

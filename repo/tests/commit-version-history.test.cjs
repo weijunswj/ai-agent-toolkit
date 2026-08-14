@@ -13,6 +13,69 @@ function git(cwd, args) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true }).trim();
 }
 
+
+test('RUN091-F4 RED PR validation must resolve the true merge base after the target branch advances', (t) => {
+  const root = createRepo();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  createGenericModule(root);
+  const common = commit(root, 'common base');
+  git(root, ['checkout', '-b', 'feature']);
+  updateGeneric(root, '1.0.1', 'feature change');
+  const feature = commit(root, 'feature change');
+  git(root, ['checkout', 'main']);
+  writeFile(root, 'base-only.txt', 'target-only change\n');
+  const advancedBase = commit(root, 'target branch advanced independently');
+  assert.equal(git(root, ['merge-base', advancedBase, feature]), common);
+  assert.notEqual(advancedBase, common);
+  assert.throws(() => auditRange({ repoRoot: root, base: advancedBase, head: feature }), /VERSION_AUDIT_BASE_NOT_ANCESTOR/);
+  const workflow = fs.readFileSync(path.resolve(__dirname, '../../.github/workflows/validate.yml'), 'utf8');
+  assert.match(workflow, /git merge-base/);
+  const result = auditRange({ repoRoot: root, base: common, head: feature });
+  assert.equal(result.firstViolation, null);
+  assert.deepEqual(result.commits, [feature]);
+  assert.equal(result.records[0].changed_paths.includes('base-only.txt'), false);
+});
+
+test('RUN091-F4 RED material module manifest contract changes require a same-commit version transition', (t) => {
+  const root = createRepo();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  createGenericModule(root);
+  const base = commit(root, 'base');
+  const manifest = readManifest(root);
+  manifest.writes = { allowed: ['repo/tests'], denied: ['.env*'] };
+  writeManifest(root, '_projects/test/module', manifest);
+  const bad = commit(root, 'material manifest contract change without bump');
+  const result = assertFailsAt(root, base, bad, /same-commit version transition missing/);
+  assert.ok(result.firstViolation.trigger.includes('_projects/test/module/toolkit.project.json'));
+});
+
+test('RUN091-F4 module-root README and SOURCE-MANIFEST contract changes require a version transition', (t) => {
+  for (const contractFile of ['README.md', 'SOURCE-MANIFEST.md']) {
+    const root = createRepo();
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    createGenericModule(root);
+    const base = commit(root, 'base');
+    writeFile(root, `_projects/test/module/${contractFile}`, `material ${contractFile} contract change\n`);
+    const bad = commit(root, `${contractFile} contract change without bump`);
+    const result = assertFailsAt(root, base, bad, /same-commit version transition missing/);
+    assert.ok(result.firstViolation.trigger.includes(`_projects/test/module/${contractFile}`));
+  }
+});
+
+test('module contract change with the manifest version remedy is accepted without a recursive trigger', (t) => {
+  const root = createRepo();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  createGenericModule(root);
+  const base = commit(root, 'base');
+  const manifest = readManifest(root);
+  manifest.writes = { allowed: ['repo/tests'], denied: ['.env*'] };
+  manifest.version = '1.0.1';
+  writeManifest(root, '_projects/test/module', manifest);
+  const changed = commit(root, 'material manifest contract change with version remedy');
+  const result = assertPass(root, base);
+  assert.equal(result.records[0].commit, changed);
+  assert.equal(result.records[0].compliance, 'COMPLIANT_VERSION_TRANSITION');
+});
 function writeFile(root, relativePath, content) {
   const absolute = path.join(root, ...relativePath.split('/'));
   fs.mkdirSync(path.dirname(absolute), { recursive: true });
@@ -49,6 +112,7 @@ function createGenericModule(root, id = 'test.module', modulePath = '_projects/t
     version: '1.0.0',
     version_policy: 'semver',
     version_notes: 'Synthetic fixture.',
+    version_trigger_paths: ['README.md', 'SOURCE-MANIFEST.md'],
     outputs: [{ kind: 'copy', source: '_main/SKILL.md', output: outputPath }]
   });
   writeFile(root, `${modulePath}/_main/SKILL.md`, 'baseline\n');

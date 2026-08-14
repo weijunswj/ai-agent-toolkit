@@ -29,9 +29,23 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Resolve PR version-audit merge base
+        if: github.event_name == 'pull_request'
+        id: pr-merge-base
+        env:
+          VERSION_AUDIT_PR_BASE: ${{ github.event.pull_request.base.sha }}
+          VERSION_AUDIT_PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -eu
+          test -n "$VERSION_AUDIT_PR_BASE"
+          test -n "$VERSION_AUDIT_PR_HEAD"
+          VERSION_AUDIT_BASE="$(git merge-base "$VERSION_AUDIT_PR_BASE" "$VERSION_AUDIT_PR_HEAD")"
+          test -n "$VERSION_AUDIT_BASE"
+          echo "base=$VERSION_AUDIT_BASE" >> "$GITHUB_OUTPUT"
+
       - name: Audit per-commit module version history
         env:
-          VERSION_AUDIT_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          VERSION_AUDIT_BASE: ${{ steps.pr-merge-base.outputs.base || github.event.before }}
           VERSION_AUDIT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: node repo/scripts/audit-commit-version-history.cjs --base "$VERSION_AUDIT_BASE" --head "$VERSION_AUDIT_HEAD"
 

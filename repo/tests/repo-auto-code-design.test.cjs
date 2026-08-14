@@ -9,6 +9,47 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
+
+test('RUN091-F9 RED terminal evidence without an admitted worker launch must not transfer manager ownership', () => {
+  const evidence = c11TerminalEvidence('normal-terminal-return');
+  assert.equal(c11AutoCodeLifecycle('native-terminal-return', evidence).manager_state, 'MANAGER_SUSPENDED_ON_NATIVE_WORKER');
+});
+
+test('RUN091-F8 RED cross-instance reads must not retain a stale durable lease projection', () => {
+  const snapshot = c8Snapshot(c8DefaultSnapshot());
+  const lease = c8LeaseCreate(snapshot, { lease_id: 'run091-f8-stale-projection' });
+  const storePath = c8NewAuthorityStorePath('run091-f8-stale-projection');
+  const registryA = new C8LeaseRegistry(storePath);
+  const binding = {
+    snapshot_digest: snapshot.snapshot_digest,
+    repository: snapshot.repository,
+    pull_request: snapshot.pull_request,
+    exact_head: snapshot.exact_remote_head_sha,
+    run_identity: snapshot.run_identity,
+    role: snapshot.role,
+    capabilities: snapshot.capabilities
+  };
+  const registryB = new C8LeaseRegistry(storePath);
+  assert.equal(registryA.register(lease).decision, 'LEASE_REGISTERED');
+  assert.equal(registryB.get(lease.lease_id).lifecycle, 'DRAFT');
+  registryA.transition(lease.lease_id, 'SEALED', '2026-08-04T00:00:05.000Z');
+  registryA.transition(lease.lease_id, 'DISPATCHED', '2026-08-04T00:00:10.000Z');
+  registryA.transition(lease.lease_id, 'ADMITTED', '2026-08-04T00:00:15.000Z');
+  assert.equal(registryA.consume(lease.lease_id, binding, '2026-08-04T00:00:30.000Z').decision, 'LEASE_COMPLETED');
+  assert.equal(registryB.get(lease.lease_id).lifecycle, 'COMPLETED');
+  assert.equal(registryB.consume(lease.lease_id, binding, '2026-08-04T00:00:31.000Z').receipt.reason, 'LEASE_ALREADY_CONSUMED');
+});
+
+test('RUN091-C8 RED default snapshot must derive from canonical declared Design Lock', () => {
+  assert.equal(c8DefaultSnapshot().design_lock, designLockChain.at(-1));
+});
+
+test('RUN091-C6 RED invalid assurance timestamps must not reach launch admission', () => {
+  for (const overrides of [{ created_at: 'not-a-date' }, { expires_at: 'not-a-date' }]) {
+    assert.equal(c6LaunchAdmission(c6LaunchEnvelope(overrides)).decision, 'ASSURANCE_LAUNCH_INVALID');
+  }
+  assert.equal(c6LaunchAdmission(c6LaunchEnvelope(), c6Context({ now: 'not-a-date' })).decision, 'ASSURANCE_LAUNCH_INVALID');
+});
 const projectRoot = path.join(repoRoot, '_projects', 'development', 'repo-auto-code');
 const mainRoot = path.join(projectRoot, '_main');
 const fixtureRoot = path.join(mainRoot, 'fixtures');
@@ -121,7 +162,7 @@ function c8Clone(value) {
 }
 
 function c8DurableRecordKey(record) {
-  return record && (record.envelope_id || record.grant_id || record.lease_id);
+  return record && (record.envelope_id || record.launch_id || record.grant_id || record.lease_id);
 }
 
 function c8DurableRecordDigest(record, kind) {
@@ -132,6 +173,7 @@ function c8DurableRecordDigest(record, kind) {
 }
 
 function c8DurableRecordState(record) {
+
   const lifecycle = record && record.lifecycle;
   return lifecycle && typeof lifecycle === 'object' ? lifecycle.state : lifecycle;
 }
@@ -365,6 +407,43 @@ class C8DurableAuthorityRegistry {
     });
   }
 }
+
+C8DurableAuthorityRegistry.prototype.admitWorkerLaunchAtomically = function admitWorkerLaunchAtomically(grant, launch, options = {}) {
+  const grantKey = c8DurableRecordKey(grant);
+  const grantDigest = c8DurableRecordDigest(grant, 'delegation-grant');
+  const launchKey = c8DurableRecordKey(launch);
+  const launchDigest = c8DurableRecordDigest(launch, 'worker-launch');
+  if (!grantKey || !launchKey || !c8Digest.test(grantDigest || '') || grantDigest !== (grant.canonical_digest || grant.lease_digest) ||
+      !c8Digest.test(launchDigest || '') || launchDigest !== launch.canonical_digest) {
+    return { decision: 'WORKER_LAUNCH_REJECTED', reason: 'AUTHORITY_DIGEST_MISMATCH' };
+  }
+  return this._withLock((state) => {
+    const grantEntryKey = 'delegation-grant:' + grantKey;
+    const grantEntry = state.entries[grantEntryKey];
+    if (!grantEntry) return { value: { decision: 'WORKER_LAUNCH_REJECTED', reason: 'GRANT_NOT_PREISSUED' } };
+    if (grantEntry.digest !== grantDigest) return { value: { decision: 'WORKER_LAUNCH_REJECTED', reason: 'GRANT_NOT_PREISSUED' } };
+    if (grantEntry.state === 'consumed') return { value: { decision: 'WORKER_LAUNCH_REJECTED', reason: 'GRANT_ALREADY_CONSUMED' } };
+    if (c8Json(grantEntry.record) !== c8Json(grant)) return { value: { decision: 'WORKER_LAUNCH_REJECTED', reason: 'GRANT_NOT_PREISSUED' } };
+    if (grantEntry.state !== 'issued') return { value: { decision: 'WORKER_LAUNCH_REJECTED', reason: 'GRANT_STATE_MISMATCH' } };
+    const launchEntryKey = 'worker-launch:' + launchKey;
+    const priorLaunch = state.entries[launchEntryKey];
+    if (priorLaunch) {
+      if (priorLaunch.digest !== launchDigest) return { value: { decision: 'WORKER_LAUNCH_REJECTED', reason: 'WORKER_LAUNCH_DIGEST_MISMATCH' } };
+      return { value: { decision: 'WORKER_LAUNCH_REJECTED', reason: 'WORKER_LAUNCH_ALREADY_ADMITTED' } };
+    }
+    const consumedGrant = c8DurableConsumedRecord(grant, options.consumed_at);
+    grantEntry.state = 'consumed';
+    grantEntry.record = c8Clone(consumedGrant);
+    state.entries[launchEntryKey] = {
+      kind: 'worker-launch',
+      key: launchKey,
+      digest: launchDigest,
+      state: 'ADMITTED',
+      record: c8Clone(launch)
+    };
+    return { write: true, value: { decision: 'WORKER_LAUNCH_ADMITTED', grant: consumedGrant, launch: c8Clone(launch) } };
+  });
+};
 const mergeCommit = '6c266962dcc423996dcc618612321b2fdf5712c3';
 const mergeTree = 'c7aae93052b812ae067fc8143db9deb3f7ad0380';
 const sourceLockBlob = '6d79d0c7fd12f2212ae7925befc8955398a3bde8';
@@ -402,6 +481,7 @@ const trustedBaseFixtureInventory = Object.freeze({
     'invalid-child-duplicate-lifecycle.json',
     'invalid-child-missing-lifecycle.json',
     'invalid-competing-category-subqueues.json',
+
     'invalid-concurrent-edit-after-write.json',
     'invalid-concurrent-edit-before-write.json',
     'invalid-cross-repository-scheduler-receipt.json',
@@ -2790,11 +2870,15 @@ function c6ValidWebVerificationReceipt(receipt, envelope, context) {
 
 function c6LaunchAdmission(envelope, context = c6Context()) {
   const invalid = (reason) => ({ decision: reason, temporaryChatCreated: false });
+  const trustedNow = typeof context?.now === 'string' ? Date.parse(context.now) : NaN;
+  const createdAt = typeof envelope?.created_at === 'string' ? Date.parse(envelope.created_at) : NaN;
+  const expiresAt = typeof envelope?.expires_at === 'string' ? Date.parse(envelope.expires_at) : NaN;
   if (!envelope || envelope.schema !== 'assurance-launch/v1' || !nonEmptyString(envelope.envelope_id) ||
       !envelope.lifecycle || envelope.lifecycle.state !== 'issued' || envelope.lifecycle.consumed !== false ||
       envelope.lifecycle.use_count !== 0 || envelope.lifecycle.consumed_at !== null ||
       !nonEmptyString(envelope.created_at) || !nonEmptyString(envelope.expires_at) ||
-      Date.parse(envelope.created_at) > Date.parse(context.now) || Date.parse(envelope.expires_at) <= Date.parse(context.now)) {
+      !Number.isFinite(trustedNow) || !Number.isFinite(createdAt) || !Number.isFinite(expiresAt) ||
+      createdAt > trustedNow || !(trustedNow < expiresAt) || !(createdAt < expiresAt)) {
     return invalid('ASSURANCE_LAUNCH_INVALID');
   }
   if (!c6ValidWebVerificationReceipt(envelope.web_verification_receipt, envelope, context)) {
@@ -4106,7 +4190,7 @@ function c8DefaultSnapshot(overrides = {}) {
     child_issue: { number: 329, authority_revision: 'child-r1' },
     pull_request: { number: 333, authority_revision: 'pr-r1' },
     relevant_parent_entry: { key: '#329', authority_revision: 'parent-r1' },
-    design_lock: 'DL-329-AUTO-CODE-005-A6-C21',
+    design_lock: designLockChain.at(-1),
     run_identity: '2026-08-06-toolkit-c21-nine-g4-findings-amendment-g3-056',
     ...authority,
     authorised_source_scope: {
@@ -4681,8 +4765,8 @@ function c8PreDispatch(input = {}) {
     const manifest = extracted.manifest;
     if (!input.lease) throw new C8ContractError('LEASE_REQUIRED', 'lease');
     if (input.lease.schema !== c8Schemas.lease || input.lease.consumed === true || input.lease.snapshot_digest !== snapshot.snapshot_digest) throw new C8ContractError('LEASE_INVALID', 'lease');
-    if (!input.leaseRegistry || !(input.leaseRegistry.records instanceof Map)) throw new C8ContractError('LEASE_NOT_REGISTERED', 'lease_registry');
-    const registeredLease = typeof input.leaseRegistry.get === 'function' ? input.leaseRegistry.get(input.lease.lease_id) : input.leaseRegistry.records.get(input.lease.lease_id);
+    if (!input.leaseRegistry || typeof input.leaseRegistry.get !== 'function') throw new C8ContractError('LEASE_NOT_REGISTERED', 'lease_registry');
+    const registeredLease = input.leaseRegistry.get(input.lease.lease_id);
     if (!registeredLease) throw new C8ContractError('LEASE_NOT_REGISTERED', 'lease_id');
     if (input.current_operation_time === undefined) throw new C8ContractError('CONSUMPTION_TIME_REQUIRED', 'consumption_time');
     const currentOperationTime = c8LeaseTimestamp(input.current_operation_time, 'consumption_time');
@@ -4725,7 +4809,7 @@ function c8ClassifyOutput(input = {}) {
 
 function c8AdmittedLeaseFixture(snapshot, overrides = {}) {
   const machine = c8MachineAuthority();
-  const lease = c8LeaseCreate(snapshot, { lease_id: overrides.lease_id || 'lease-test-' + Date.now() });
+  const lease = c8LeaseCreate(snapshot, { lease_id: overrides.lease_id || 'lease-test-' + Date.now(), issued_at: overrides.issued_at, expires_at: overrides.expires_at });
   const registry = new C8LeaseRegistry(overrides.lease_store_path);
   registry.register(lease);
   registry.transition(lease.lease_id, 'SEALED', '2026-08-04T00:00:05.000Z');
@@ -4795,7 +4879,7 @@ test('C8 immutable leases enforce lifecycle, expiry, duplicates, conflicts, and 
   const sealed = c8LeaseTransition(lease, 'SEALED', '2026-08-04T00:00:05.000Z'); const dispatched = c8LeaseTransition(sealed, 'DISPATCHED', '2026-08-04T00:00:10.000Z'); const admitted = c8LeaseTransition(dispatched, 'ADMITTED', '2026-08-04T00:00:15.000Z'); const completed = c8LeaseTransition(admitted, 'COMPLETED', '2026-08-04T00:00:30.000Z'); assert.equal(completed.consumed, true); assert.equal(completed.use_count, 1);
   const registry = new C8LeaseRegistry(); assert.equal(registry.register(lease).decision, 'LEASE_REGISTERED'); assert.equal(registry.register(lease).receipt.reason, 'DUPLICATE_DISPATCH'); assert.equal(registry.register(c8LeaseCreate(snapshot, { lease_id: 'lease-c8-2' })).receipt.reason, 'CONFLICTING_ACTIVE_LEASE');
   const expired = c8LeaseCreate(snapshot, { lease_id: 'lease-expired', expires_at: '2026-08-04T00:01:00.000Z' }); const er = new C8LeaseRegistry(); er.register(expired); assert.equal(er.expire(expired.lease_id, '2026-08-04T00:02:00.000Z').decision, 'LEASE_EXPIRED'); assert.equal(er.transition(expired.lease_id, 'SEALED', '2026-08-04T00:02:00.000Z').receipt.reason, 'LEASE_INVALID');
-  const consumed = new C8LeaseRegistry(); consumed.register(lease); consumed.records.set(lease.lease_id, completed); assert.equal(consumed.consume(lease.lease_id, { snapshot_digest: snapshot.snapshot_digest }).receipt.reason, 'LEASE_ALREADY_CONSUMED');
+  const consumed = new C8LeaseRegistry(); consumed.register(lease); consumed.transition(lease.lease_id, 'SEALED', '2026-08-04T00:00:05.000Z'); consumed.transition(lease.lease_id, 'DISPATCHED', '2026-08-04T00:00:10.000Z'); consumed.transition(lease.lease_id, 'ADMITTED', '2026-08-04T00:00:15.000Z'); const binding = { snapshot_digest: snapshot.snapshot_digest, repository: snapshot.repository, pull_request: snapshot.pull_request, exact_head: snapshot.exact_remote_head_sha, run_identity: snapshot.run_identity, role: snapshot.role, capabilities: snapshot.capabilities }; assert.equal(consumed.consume(lease.lease_id, binding, '2026-08-04T00:00:30.000Z').decision, 'LEASE_COMPLETED'); assert.equal(consumed.consume(lease.lease_id, binding, '2026-08-04T00:00:31.000Z').receipt.reason, 'LEASE_ALREADY_CONSUMED');
 });
 test('C8 pre-dispatch tooling failure creates no candidate and worker re-admission succeeds', () => {
   const snapshot = c8Snapshot(c8DefaultSnapshot()); const failed = c8PreDispatch({ toolingFailure: true }); assert.equal(failed.evaluation_candidate_created, false); assert.equal(failed.lease_consumed, false); assert.equal(failed.receipt.mutation_performed, false);
@@ -5383,14 +5467,11 @@ test('PRRT_kwDOSTHjGM6WPZcv requires an admitted lease before creating a candida
 test('PRRT_kwDOSTHjGM6WPZcx evaluates lease expiry at consumption time', () => {
   const snapshot = c8Snapshot(c8DefaultSnapshot());
   const lease = c8LeaseCreate(snapshot, { lease_id: 'expiry-consume', issued_at: '2026-08-04T00:00:00.000Z', expires_at: '2026-08-04T00:01:00.000Z' });
-  const registry = new C8LeaseRegistry(); registry.register(lease); registry.records.set(lease.lease_id, c8LeaseTransition(c8LeaseTransition(lease, 'SEALED'), 'DISPATCHED'));
-  registry.records.set(lease.lease_id, c8LeaseTransition(registry.records.get(lease.lease_id), 'ADMITTED'));
+  const registry = new C8LeaseRegistry(); registry.register(lease); registry.transition(lease.lease_id, 'SEALED', '2026-08-04T00:00:05.000Z'); registry.transition(lease.lease_id, 'DISPATCHED', '2026-08-04T00:00:10.000Z'); registry.transition(lease.lease_id, 'ADMITTED', '2026-08-04T00:00:15.000Z');
   assert.equal(registry.consume(lease.lease_id, { snapshot_digest: snapshot.snapshot_digest }).receipt.reason, 'CONSUMPTION_TIME_REQUIRED');
-  const exactExpiry = c8AdmittedLeaseFixture(snapshot, { lease_id: 'expiry-exact' });
-  exactExpiry.leaseRegistry.records.set(exactExpiry.lease.lease_id, { ...exactExpiry.lease, expires_at: '2026-08-04T00:00:30.000Z', lease_digest: c8DigestBytes(c8Json({ ...c8LeaseBody(exactExpiry.lease), expires_at: '2026-08-04T00:00:30.000Z' })) });
+  const exactExpiry = c8AdmittedLeaseFixture(snapshot, { lease_id: 'expiry-exact', expires_at: '2026-08-04T00:00:30.000Z' });
   assert.equal(exactExpiry.leaseRegistry.consume(exactExpiry.lease.lease_id, { snapshot_digest: snapshot.snapshot_digest }, '2026-08-04T00:00:30.000Z').receipt.reason, 'LEASE_EXPIRED');
-  const afterExpiry = c8AdmittedLeaseFixture(snapshot, { lease_id: 'expiry-current-operation' });
-  afterExpiry.leaseRegistry.records.set(afterExpiry.lease.lease_id, { ...afterExpiry.lease, expires_at: '2026-08-04T00:01:00.000Z', lease_digest: c8DigestBytes(c8Json({ ...c8LeaseBody(afterExpiry.lease), expires_at: '2026-08-04T00:01:00.000Z' })) });
+  const afterExpiry = c8AdmittedLeaseFixture(snapshot, { lease_id: 'expiry-current-operation', expires_at: '2026-08-04T00:01:00.000Z' });
   const result = c8PreDispatch({ ...afterExpiry, current_operation_time: '2026-08-04T00:02:00.000Z', consumption_time: '2026-08-04T00:00:30.000Z' });
   assert.equal(result.reason, 'LEASE_EXPIRED');
   assert.equal(result.evaluation_candidate_created, false);
@@ -5953,20 +6034,26 @@ test('C11 ordinary helper mode requires explicit non-overlapping scope and Auto-
   assert.equal(c11DelegationDecision({ operation: 'spawn_agent' }, c11Grant({ mode: 'exclusive-auto-code', count: 2 })).reason, 'DELEGATION_NOT_AUTHORISED');
 });
 
+
+
+
+
+
+
 test('C11 Auto-code manager suspends until native terminal return and never infers failure from time or quiet output', () => {
   const active = c11AutoCodeLifecycle('worker-active');
   assert.equal(active.manager_state, 'MANAGER_SUSPENDED_ON_NATIVE_WORKER');
   assert.equal(active.progress_inspection, 'forbidden');
   assert.equal(c11AutoCodeLifecycle('bounded-wait-expired').manager_state, 'MANAGER_SUSPENDED_ON_NATIVE_WORKER');
   assert.equal(c11AutoCodeLifecycle('no-file-change').manager_state, 'MANAGER_SUSPENDED_ON_NATIVE_WORKER');
-  assert.equal(c11AutoCodeLifecycle('native-terminal-return', c11TerminalEvidence('normal-terminal-return')).manager_state, 'MANAGER_READY_FOR_VALIDATION');
+  assert.equal(c11AutoCodeLifecycle('native-terminal-return', c39AdmittedWorkerTerminalEvidence('normal-terminal-return').evidence).manager_state, 'MANAGER_READY_FOR_VALIDATION');
 });
 
 test('C11 user interruption preserves exclusive ownership and replacement requires terminal loss plus a new grant', () => {
-  assert.equal(c11AutoCodeLifecycle('user-interruption', c11TerminalEvidence('user-interruption')).workspace, 'preserved');
-  assert.equal(c11AutoCodeLifecycle('user-interruption', c11TerminalEvidence('user-interruption')).ownership, 'unchanged');
+  assert.equal(c11AutoCodeLifecycle('user-interruption', c39AdmittedWorkerTerminalEvidence('user-interruption').evidence).workspace, 'preserved');
+  assert.equal(c11AutoCodeLifecycle('user-interruption', c39AdmittedWorkerTerminalEvidence('user-interruption').evidence).ownership, 'unchanged');
   assert.equal(c11AutoCodeLifecycle('replacement-before-terminal').replacement, 'forbidden');
-  assert.equal(c11AutoCodeLifecycle('replacement-after-loss-with-new-grant', c11TerminalEvidence('result-loss'), c11ReplacementGrant()).replacement, 'allowed');
+  assert.equal(c11AutoCodeLifecycle('replacement-after-loss-with-new-grant', c39AdmittedWorkerTerminalEvidence('result-loss').evidence, c11ReplacementGrant()).replacement, 'allowed');
 });
 
 test('C11 Windows command timeouts do not terminate native agent lifecycles', () => {
@@ -5980,7 +6067,7 @@ test('C11 source versions record behavioural contract additions', () => {
   const rules = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', 'toolkit.project.json'), 'utf8'));
   const autoCode = JSON.parse(fs.readFileSync(path.join(projectRoot, 'toolkit.project.json'), 'utf8'));
   assert.equal(rules.version, '3.1.3');
-  assert.equal(autoCode.version, '1.9.1');
+  assert.equal(autoCode.version, '1.10.0');
   assert.match(rules.version_notes, /C13 three-mode.*common.*safeguards/i);
   assert.match(rules.version_notes, /capacity.*non-Fast.*non-nesting.*context-minimisation/i);
   assert.match(autoCode.version_notes, /C11/i);
@@ -6114,10 +6201,13 @@ function c39LeaseAuthority(registry) {
 function c39LeaseReload(registry) {
   const authority = c39LeaseAuthority(registry);
   const prefix = authority.kind + ':';
-  for (const entry of authority.entries()) {
+  const entries = authority.entries();
+  registry.records.clear();
+  for (const entry of entries) {
     const leaseId = String(entry.key).startsWith(prefix) ? String(entry.key).slice(prefix.length) : String(entry.key);
-    if (!registry.records.has(leaseId)) registry.records.set(leaseId, c8Clone(entry.record));
+    registry.records.set(leaseId, c8Clone(entry.record));
   }
+  registry._durableProjectionGeneration = c8DigestBytes(c8Json(entries.map((entry) => ({ key: entry.key, digest: entry.digest, state: entry.state }))));
   return registry;
 }
 
@@ -6498,8 +6588,18 @@ function c39ScopeOverlaps(left, right) {
 }
 
 function c39WorkerLaunch(grant, authority = c39C11Authority(), overrides = {}) {
+  const snapshot = c8DefaultSnapshot();
+  const grantId = grant && grant.grant_id;
   return {
     operation: 'spawn_agent',
+    launch_id: grantId ? 'c39-launch-' + grantId : null,
+    grant_id: grantId,
+    authority_store_path: grant && grant.authority_store_path,
+    launch_role: 'exclusive-auto-code-worker',
+    worker_identity: grantId ? { worker_id: 'c39-worker-' + grantId, execution_id: 'c39-worker-execution-' + grantId } : null,
+    pull_request: c8Clone(snapshot.pull_request),
+    child_issue: c8Clone(snapshot.child_issue),
+    design_lock: snapshot.design_lock,
     requested_count: grant && grant.count,
     repository: authority && authority.repository,
     role: authority && authority.role,
@@ -6519,6 +6619,15 @@ function c39WorkerLaunch(grant, authority = c39C11Authority(), overrides = {}) {
 function c39ValidateExclusiveWorkerRequest(operation, grant, verified) {
   if (!operation || operation.operation !== 'spawn_agent' || !grant || !verified || !verified.authority) return { ok: false, reason: 'DELEGATION_NOT_AUTHORISED' };
   if (!Object.hasOwn(operation, 'requested_count') || operation.requested_count !== 1 || operation.requested_count !== grant.count) return { ok: false, reason: 'DELEGATION_NOT_AUTHORISED' };
+  const snapshot = c8DefaultSnapshot();
+  const expectedWorkerIdentity = { worker_id: 'c39-worker-' + grant.grant_id, execution_id: 'c39-worker-execution-' + grant.grant_id };
+  if (!nonEmptyString(operation.launch_id) || operation.launch_id !== 'c39-launch-' + grant.grant_id ||
+      operation.grant_id !== grant.grant_id || operation.launch_role !== 'exclusive-auto-code-worker' ||
+      operation.authority_store_path !== grant.authority_store_path ||
+      c8Json(operation.worker_identity) !== c8Json(expectedWorkerIdentity) ||
+      c8Json(operation.pull_request) !== c8Json(snapshot.pull_request) ||
+      c8Json(operation.child_issue) !== c8Json(snapshot.child_issue) ||
+      operation.design_lock !== snapshot.design_lock) return { ok: false, reason: 'DELEGATION_NOT_AUTHORISED' };
   for (const field of ['repository', 'role', 'run_id', 'session_id', 'turn_id', 'exact_head', 'exact_tree', 'validity_evidence_id']) {
     if (!nonEmptyString(operation[field]) || operation[field] !== verified.authority[field]) return { ok: false, reason: 'DELEGATION_NOT_AUTHORISED' };
   }
@@ -6534,7 +6643,61 @@ function c39ValidateExclusiveWorkerRequest(operation, grant, verified) {
   return { ok: true, normalizedWorkspace, normalizedScope, normalizedCapabilities };
 }
 
-function c39EvidenceCategory(kind) {
+function c39WorkerLaunchBody(launch) {
+  const body = c8Clone(launch);
+  delete body.canonical_digest;
+  return body;
+}
+
+function c39BuildWorkerLaunchRecord(grant, operation, verified) {
+  const authority = verified.authority;
+  const launch = {
+    schema: 'exclusive-worker-launch/v1',
+    launch_id: operation.launch_id,
+    grant_id: grant.grant_id,
+    grant_digest: grant.canonical_digest,
+    authority_store_path: grant.authority_store_path,
+    repository: authority.repository,
+    pull_request: c8Clone(operation.pull_request),
+    child_issue: c8Clone(operation.child_issue),
+    design_lock: operation.design_lock,
+    run_id: authority.run_id,
+    session_id: authority.session_id,
+    turn_id: authority.turn_id,
+    exact_head: authority.exact_head,
+    exact_tree: authority.exact_tree,
+    validity_evidence_id: authority.validity_evidence_id,
+    role: authority.role,
+    provider: authority.provider,
+    canonical_model: authority.canonical_model,
+    reasoning: authority.reasoning,
+    worker_identity: c8Clone(operation.worker_identity),
+    workspace_identity: c8Clone(verified.normalizedWorkspace),
+    launch_role: operation.launch_role,
+    scope: c8Clone(verified.normalizedScope),
+    capabilities: c8Clone(verified.normalizedCapabilities),
+    grant_state: 'consumed',
+    grant_consumption_state: 'consumed',
+    grant_consumed_at: authority.now,
+    admission_state: 'ADMITTED',
+    lifecycle: { state: 'ADMITTED', active: true, admitted_at: authority.now, terminal_event_identity: null, terminal_kind: null, terminal_recorded_at: null },
+    terminal_event: null
+  };
+  launch.canonical_digest = c8DigestBytes(c8Json(c39WorkerLaunchBody(launch)));
+  return launch;
+}
+
+function c39AdmitWorkerLaunch(grant, operation, verified) {
+  const launch = c39BuildWorkerLaunchRecord(grant, operation, verified);
+  try {
+    const registry = new C8DurableAuthorityRegistry(grant.authority_store_path, 'delegation-grant');
+    const result = registry.admitWorkerLaunchAtomically(grant, launch, { consumed_at: verified.authority.now });
+    if (result.decision !== 'WORKER_LAUNCH_ADMITTED') return { ok: false, reason: result.reason || result.decision };
+    return { ok: true, grant: result.grant, launch: result.launch };
+  } catch (error) {
+    return { ok: false, reason: error.reason || 'DELEGATION_NOT_AUTHORISED' };
+  }
+}function c39EvidenceCategory(kind) {
   if (kind === 'authority-movement') return 'controller-authority-reread';
   if (['user-interruption', 'user-change'].includes(kind)) return 'current-turn-user-event';
   return 'native-worker-harness';
@@ -6571,23 +6734,111 @@ function c11DelegationDecision(operation = {}, grant = {}) {
   if (operation.operation !== 'spawn_agent' || grant.mode !== 'exclusive-auto-code' || grant.role !== verified.authority.role) return denied();
   const launch = c39ValidateExclusiveWorkerRequest(operation, grant, verified);
   if (!launch.ok) return denied(launch.reason);
-  const consumed = c39C11ConsumeGrant(grant, verified.authority);
-  if (!consumed.ok) return denied(consumed.reason);
-  return { allowed: true, mode: grant.mode, fastAllowed: false, mutation_owner: 'exclusive-worker', workspace_identity: launch.normalizedWorkspace, scope: launch.normalizedScope, capabilities: launch.normalizedCapabilities, grant: consumed.record };
+  const admitted = c39AdmitWorkerLaunch(grant, operation, { ...verified, normalizedWorkspace: launch.normalizedWorkspace, normalizedScope: launch.normalizedScope, normalizedCapabilities: launch.normalizedCapabilities });
+  if (!admitted.ok) return denied(admitted.reason);
+  return { allowed: true, mode: grant.mode, fastAllowed: false, mutation_owner: 'exclusive-worker', workspace_identity: launch.normalizedWorkspace, scope: launch.normalizedScope, capabilities: launch.normalizedCapabilities, grant: admitted.grant, launch: admitted.launch };
+}function c11TerminalEvidence(kind) {
+  return c28TrustedLookup(c39EvidenceCategory(kind), 'c39-native-terminal-' + kind);
 }
 
-function c11TerminalEvidence(kind) {
-  return c28TrustedLookup(c39EvidenceCategory(kind), 'c39-native-terminal-' + kind);
+function c39LaunchProvenance(launch, evidenceId) {
+  return {
+    schema: 'worker-launch-provenance/v1',
+    repository: launch.repository,
+    pull_request: c8Clone(launch.pull_request),
+    child_issue: c8Clone(launch.child_issue),
+    design_lock: launch.design_lock,
+    run_id: launch.run_id,
+    session_id: launch.session_id,
+    turn_id: launch.turn_id,
+    exact_head: launch.exact_head,
+    exact_tree: launch.exact_tree,
+    validity_evidence_id: launch.validity_evidence_id,
+    role: launch.role,
+    provider: launch.provider,
+    canonical_model: launch.canonical_model,
+    reasoning: launch.reasoning,
+    launch_id: launch.launch_id,
+    grant_id: launch.grant_id,
+    grant_digest: launch.grant_digest,
+    authority_store_path: launch.authority_store_path,
+    worker_identity: c8Clone(launch.worker_identity),
+    workspace_identity: c8Clone(launch.workspace_identity),
+    launch_role: launch.launch_role,
+    grant_state: launch.grant_state,
+    grant_consumption_state: launch.grant_consumption_state,
+    admission_state: launch.admission_state,
+    lifecycle_state: launch.lifecycle && launch.lifecycle.state,
+    terminal_event_identity: evidenceId
+  };
+}
+
+function c39TerminalEvidenceForLaunch(kind, launch) {
+  const trusted = c11TerminalEvidence(kind);
+  if (!trusted || !launch) return null;
+  const evidence = c8Clone(trusted);
+  evidence.launch_provenance = c39LaunchProvenance(launch, evidence.evidence_id);
+  evidence.launch_provenance_digest = c8DigestBytes(c8Json(evidence.launch_provenance));
+  if (c28TrustedAuthorityStore && c28TrustedAuthorityStore.token) Object.defineProperty(evidence, c39TrustedEvidenceToken, { value: c28TrustedAuthorityStore.token, enumerable: false });
+  return evidence;
 }
 
 function c39TerminalEvidenceValid(evidence, acceptedKinds, authority = c39C11Authority()) {
   if (!authority || !evidence || !acceptedKinds.includes(evidence.kind) || evidence[c39TrustedEvidenceToken] !== c39TrustedEvidenceToken) return false;
   const trusted = c28TrustedLookup(c39EvidenceCategory(evidence.kind), evidence.evidence_id);
-  return !!trusted && c8Json(evidence) === c8Json(trusted) &&
-    ['run_id', 'session_id', 'turn_id', 'repository', 'exact_head', 'exact_tree'].every((field) => evidence[field] === authority[field]);
+  if (!trusted || !evidence.launch_provenance || !c8Digest.test(evidence.launch_provenance_digest || '') ||
+      evidence.launch_provenance_digest !== c8DigestBytes(c8Json(evidence.launch_provenance))) return false;
+  const base = c8Clone(evidence);
+  const provenance = base.launch_provenance;
+  delete base.launch_provenance;
+  delete base.launch_provenance_digest;
+  if (c8Json(base) !== c8Json(trusted)) return false;
+  if (!provenance || c8Json(provenance).includes('undefined')) return false;
+  let launchRegistry;
+  let launchEntry;
+  try {
+    launchRegistry = new C8DurableAuthorityRegistry(provenance.authority_store_path, 'worker-launch');
+    launchEntry = launchRegistry.read(provenance.launch_id);
+  } catch {
+    return false;
+  }
+  if (!launchEntry || launchEntry.state !== 'ADMITTED' || launchEntry.digest !== launchEntry.record.canonical_digest || c8DurableRecordDigest(launchEntry.record, 'worker-launch') !== launchEntry.record.canonical_digest) return false;
+  const launch = launchEntry.record;
+  if (!launch.lifecycle || launch.lifecycle.state !== 'ADMITTED' || launch.lifecycle.active !== true || launch.lifecycle.terminal_event_identity !== null ||
+      launch.grant_state !== 'consumed' || launch.grant_consumption_state !== 'consumed' || launch.admission_state !== 'ADMITTED' ||
+      c8Json(provenance) !== c8Json(c39LaunchProvenance(launch, evidence.evidence_id))) return false;
+  const snapshot = c8DefaultSnapshot();
+  if (launch.repository !== authority.repository || c8Json(launch.pull_request) !== c8Json(snapshot.pull_request) ||
+      c8Json(launch.child_issue) !== c8Json(snapshot.child_issue) || launch.design_lock !== snapshot.design_lock ||
+      launch.role !== authority.role || launch.provider !== authority.provider || launch.canonical_model !== authority.canonical_model || launch.reasoning !== authority.reasoning ||
+      !['run_id', 'session_id', 'turn_id', 'exact_head', 'exact_tree', 'validity_evidence_id'].every((field) => launch[field] === authority[field])) return false;
+  let grantEntry;
+  try {
+    grantEntry = new C8DurableAuthorityRegistry(provenance.authority_store_path, 'delegation-grant').read(launch.grant_id);
+  } catch {
+    return false;
+  }
+  if (!grantEntry || grantEntry.state !== 'consumed' || grantEntry.digest !== launch.grant_digest || c8DurableRecordState(grantEntry.record) !== 'consumed' || grantEntry.record.lifecycle.consumed !== true) return false;
+  return true;
 }
 
-function c11ReplacementGrant() {
+function c39RecordTerminalEvent(evidence, authority) {
+  const provenance = evidence && evidence.launch_provenance;
+  if (!provenance) return false;
+  try {
+    const registry = new C8DurableAuthorityRegistry(provenance.authority_store_path, 'worker-launch');
+    const entry = registry.read(provenance.launch_id);
+    if (!entry || entry.state !== 'ADMITTED' || !entry.record.lifecycle || entry.record.lifecycle.state !== 'ADMITTED' || entry.record.lifecycle.active !== true) return false;
+    const launch = c8Clone(entry.record);
+    launch.lifecycle = { ...launch.lifecycle, state: 'TERMINAL', active: false, terminal_event_identity: evidence.evidence_id, terminal_kind: evidence.kind, terminal_recorded_at: authority.now };
+    launch.terminal_event = { schema: 'worker-terminal-event/v1', event_id: evidence.evidence_id, kind: evidence.kind, launch_id: launch.launch_id, recorded_at: authority.now, evidence_digest: evidence.evidence_digest };
+    launch.canonical_digest = c8DigestBytes(c8Json(c39WorkerLaunchBody(launch)));
+    const updated = registry.update(launch, { expectedDigest: entry.digest, expectedState: 'ADMITTED' });
+    return updated.decision === 'AUTHORITY_UPDATED';
+  } catch {
+    return false;
+  }
+}function c11ReplacementGrant() {
   return c11Grant({ replacement: true, replacement_reason: 'verified-terminal-loss', mode: 'exclusive-auto-code' });
 }
 
@@ -6608,63 +6859,45 @@ function c11AutoCodeLifecycle(event, evidence = null, replacementGrant = null) {
   const authority = c39C11Authority();
   if (!authority) {
     if (event === 'authority-movement') {
-      return {
-        ...suspended,
-        manager_state: 'MANAGER_REQUIRES_RE_ADMISSION',
-        manager_resume: 're-admission',
-        ownership: 're-admission-required',
-        mutation_owner: 'none',
-        re_admission_required: true,
-        substantive_work: 'forbidden-until-re-admission'
-      };
+      return { ...suspended, manager_state: 'MANAGER_REQUIRES_RE_ADMISSION', manager_resume: 're-admission', ownership: 're-admission-required', mutation_owner: 'none', re_admission_required: true, substantive_work: 'forbidden-until-re-admission' };
     }
     return { ...suspended, ownership: 're-admission-required', mutation_owner: 'none', re_admission_required: true, substantive_work: 'forbidden-until-re-admission' };
   }
-  if (event === 'native-terminal-return' && c39TerminalEvidenceValid(evidence, ['normal-terminal-return'], authority)) {
-    return {
-      ...suspended,
-      manager_state: 'MANAGER_READY_FOR_VALIDATION',
-      manager_resume: 'validation',
-      ownership: 'manager-validation',
-      mutation_owner: 'manager-validation',
-      mutation_allowed: true
-    };
+  const terminal = (kinds) => c39TerminalEvidenceValid(evidence, kinds, authority) && c39RecordTerminalEvent(evidence, authority);
+  if (event === 'native-terminal-return' && terminal(['normal-terminal-return'])) {
+    return { ...suspended, manager_state: 'MANAGER_READY_FOR_VALIDATION', manager_resume: 'validation', ownership: 'manager-validation', mutation_owner: 'manager-validation', mutation_allowed: true };
   }
-  if (event === 'harness-failure' && c39TerminalEvidenceValid(evidence, ['harness-failure'], authority)) {
+  if (event === 'harness-failure' && terminal(['harness-failure'])) {
     return { ...suspended, manager_state: 'MANAGER_RECOVERY_AFTER_HARNESS_FAILURE', manager_resume: 'recovery', ownership: 'recovery-only', mutation_owner: 'none' };
   }
-  if (['result-loss', 'result-unavailability'].includes(event) &&
-      c39TerminalEvidenceValid(evidence, ['result-loss', 'result-unavailability'], authority)) {
+  if (['result-loss', 'result-unavailability'].includes(event) && terminal(['result-loss', 'result-unavailability'])) {
     return { ...suspended, manager_state: 'MANAGER_RECOVERY_AFTER_RESULT_LOSS', manager_resume: 'recovery', ownership: 'recovery-only', mutation_owner: 'none' };
   }
-  if (event === 'authority-movement' && c39TerminalEvidenceValid(evidence, ['authority-movement'], authority)) {
-    return {
-      ...suspended,
-      manager_state: 'MANAGER_REQUIRES_RE_ADMISSION',
-      manager_resume: 're-admission',
-      ownership: 're-admission-required',
-      mutation_owner: 'none',
-      re_admission_required: true,
-      substantive_work: 'forbidden-until-re-admission'
-    };
+  if (event === 'authority-movement' && terminal(['authority-movement'])) {
+    return { ...suspended, manager_state: 'MANAGER_REQUIRES_RE_ADMISSION', manager_resume: 're-admission', ownership: 're-admission-required', mutation_owner: 'none', re_admission_required: true, substantive_work: 'forbidden-until-re-admission' };
   }
-  if (['user-interruption', 'user-change'].includes(event) &&
-      c39TerminalEvidenceValid(evidence, ['user-interruption', 'user-change'], authority)) {
+  if (['user-interruption', 'user-change'].includes(event) && terminal(['user-interruption', 'user-change'])) {
     return { ...suspended, manager_state: 'USER_INTERRUPTED_PRESERVE', manager_resume: 'user-handling', ownership: 'unchanged', mutation_owner: 'unchanged' };
   }
-  if (event === 'replacement-after-loss-with-new-grant' &&
-      c39TerminalEvidenceValid(evidence, ['result-loss', 'harness-failure'], authority) &&
-      replacementGrant && replacementGrant.replacement === true) {
-    const verified = c39C11ValidateGrant(replacementGrant, authority);
-    if (verified.ok) {
-      const consumed = c39C11ConsumeGrant(replacementGrant, verified.authority);
-      if (consumed.ok) return { ...suspended, manager_state: 'REPLACEMENT_ADMITTED', replacement: 'allowed', grant: consumed.record };
+  if (event === 'replacement-after-loss-with-new-grant' && evidence && replacementGrant && c39TerminalEvidenceValid(evidence, ['result-loss', 'harness-failure'], authority)) {
+    if (c39RecordTerminalEvent(evidence, authority)) {
+      const verified = c39C11ValidateGrant(replacementGrant, authority);
+      if (verified.ok) {
+        const consumed = c39C11ConsumeGrant(replacementGrant, verified.authority);
+        if (consumed.ok) return { ...suspended, manager_state: 'REPLACEMENT_ADMITTED', replacement: 'allowed', grant: consumed.record };
+      }
     }
   }
   return suspended;
 }
 
-let c39C10TrustedGrant;
+function c39AdmittedWorkerTerminalEvidence(kind) {
+  const grant = c11Grant({ mode: 'exclusive-auto-code', count: 1 });
+  const operation = c39WorkerLaunch(grant);
+  const decision = c11DelegationDecision(operation, grant);
+  if (!decision.allowed || !decision.launch) throw new Error('C39 worker launch fixture admission failed');
+  return { decision, evidence: c39TerminalEvidenceForLaunch(kind, decision.launch) };
+}let c39C10TrustedGrant;
 function c39C10GrantBody(grant) {
   const body = c8Clone(grant);
   delete body.canonical_digest;
@@ -6789,6 +7022,9 @@ test('C39 F6 current execution identity is complete and boundary-specific', () =
   assert.equal(g4C11.reason, 'DELEGATION_NOT_AUTHORISED');
 });
 
+
+
+
 test('C39 RED A5 stale current-execution authority cannot admit retained grants or transfer ownership', () => {
   const missingAuthorityGrant = c11Grant({ mode: 'exclusive-auto-code' });
   const missingAuthority = c39WithCurrentExecutionRecord(() => null, () =>
@@ -6816,7 +7052,7 @@ test('C39 RED A5 stale current-execution authority cannot admit retained grants 
   assert.equal(movedReview.decision, 'REVIEW_REQUEST_REJECTED');
 
   const replacementGrant = c11ReplacementGrant();
-  const resultLossEvidence = c11TerminalEvidence('result-loss');
+  const resultLossEvidence = c39AdmittedWorkerTerminalEvidence('result-loss').evidence;
   const movedReplacement = c39WithCurrentExecutionRecord((record) => ({
     ...record,
     run_id: 'moved-replacement-run',
@@ -6828,7 +7064,7 @@ test('C39 RED A5 stale current-execution authority cannot admit retained grants 
   assert.equal(movedReplacement.replacement, 'forbidden');
   assert.notEqual(movedReplacement.mutation_owner, 'exclusive-worker');
 
-  const normalReturnEvidence = c11TerminalEvidence('normal-terminal-return');
+  const normalReturnEvidence = c39AdmittedWorkerTerminalEvidence('normal-terminal-return').evidence;
   const movedManager = c39WithCurrentExecutionRecord((record) => ({
     ...record,
     exact_head: 'moved-manager-head',
@@ -6851,7 +7087,7 @@ test('C39 corrected trusted grants, review admission, and evidence-bound lifecyc
     c10ReviewRequestAdmission(reviewRequest).decision
   ]);
   assert.deepEqual(c10Admissions, ['REVIEW_REQUEST_ADMITTED', 'REVIEW_REQUEST_REJECTED']);
-  assert.equal(c11AutoCodeLifecycle('replacement-after-loss-with-new-grant', c11TerminalEvidence('result-loss'), c11ReplacementGrant()).replacement, 'allowed');
+  assert.equal(c11AutoCodeLifecycle('replacement-after-loss-with-new-grant', c39AdmittedWorkerTerminalEvidence('result-loss').evidence, c11ReplacementGrant()).replacement, 'allowed');
 });
 
 test('C39 exclusive worker attenuation rejects mismatched launch requests before consumption', () => {
@@ -6940,8 +7176,23 @@ test('F2 trusted current root work scope controls helper admission', () => {
   assert.equal(attempt({ operation: 'helper', scope: ['src/a'] }, (record) => ({ ...record, root_work_scope: ['src/a/subtree'] })).reason, 'ROOT_HELPER_SCOPE_OVERLAP');
   assert.equal(attempt({ operation: 'helper', scope: ['src/a/subtree'], root_scope: ['src/root'] }).allowed, true);
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 test('F9 normal terminal return requires trusted evidence and is the only manager-validation transfer', () => {
-  const evidence = c11TerminalEvidence('normal-terminal-return');
+  const evidence = c39AdmittedWorkerTerminalEvidence('normal-terminal-return').evidence;
   assert.equal(evidence.source, 'trusted-native-harness');
   assert.equal(evidence.provenance, 'native-worker-harness');
   const result = c11AutoCodeLifecycle('native-terminal-return', evidence);
@@ -6952,11 +7203,11 @@ test('F9 normal terminal return requires trusted evidence and is the only manage
   assert.equal(result.mutation_allowed, true);
   assert.equal(result.replacement, 'forbidden');
   assert.equal(c11AutoCodeLifecycle('native-terminal-return').manager_state, 'MANAGER_SUSPENDED_ON_NATIVE_WORKER');
-  assert.equal(c11AutoCodeLifecycle('native-terminal-return', c11TerminalEvidence('harness-failure')).manager_state, 'MANAGER_SUSPENDED_ON_NATIVE_WORKER');
+  assert.equal(c11AutoCodeLifecycle('native-terminal-return', c39AdmittedWorkerTerminalEvidence('harness-failure').evidence).manager_state, 'MANAGER_SUSPENDED_ON_NATIVE_WORKER');
 });
 
 test('F9 explicit harness failure resumes recovery without manager mutation ownership', () => {
-  const evidence = c11TerminalEvidence('harness-failure');
+  const evidence = c39AdmittedWorkerTerminalEvidence('harness-failure').evidence;
   assert.equal(evidence.source, 'trusted-native-harness');
   assert.equal(evidence.provenance, 'native-worker-harness');
   const result = c11AutoCodeLifecycle('harness-failure', evidence);
@@ -6970,7 +7221,7 @@ test('F9 explicit harness failure resumes recovery without manager mutation owne
 });
 
 test('F9 result loss or unavailability resumes recovery without manager mutation ownership', () => {
-  const evidence = c11TerminalEvidence('result-loss');
+  const evidence = c39AdmittedWorkerTerminalEvidence('result-loss').evidence;
   assert.equal(evidence.source, 'trusted-native-harness');
   assert.equal(evidence.provenance, 'native-worker-harness');
   const result = c11AutoCodeLifecycle('result-loss', evidence);
@@ -6981,14 +7232,14 @@ test('F9 result loss or unavailability resumes recovery without manager mutation
   assert.equal(result.mutation_allowed, false);
   assert.equal(result.workspace, 'preserved');
   assert.equal(result.replacement, 'forbidden');
-  const unavailableEvidence = c11TerminalEvidence('result-unavailability');
+  const unavailableEvidence = c39AdmittedWorkerTerminalEvidence('result-unavailability').evidence;
   assert.equal(unavailableEvidence.source, 'trusted-native-harness');
   assert.equal(unavailableEvidence.provenance, 'native-worker-harness');
   assert.equal(c11AutoCodeLifecycle('result-unavailability', unavailableEvidence).manager_state, 'MANAGER_RECOVERY_AFTER_RESULT_LOSS');
 });
 
 test('F9 authority movement requires trusted controller reread evidence and re-admission', () => {
-  const evidence = c11TerminalEvidence('authority-movement');
+  const evidence = c39AdmittedWorkerTerminalEvidence('authority-movement').evidence;
   assert.equal(evidence.source, 'trusted-controller-authority');
   assert.equal(evidence.provenance, 'controller-authority-reread');
   const result = c11AutoCodeLifecycle('authority-movement', evidence);
@@ -7004,8 +7255,8 @@ test('F9 authority movement requires trusted controller reread evidence and re-a
 });
 
 test('F9 user interruption and user change preserve workspace and ownership', () => {
-  const interruptionEvidence = c11TerminalEvidence('user-interruption');
-  const changeEvidence = c11TerminalEvidence('user-change');
+  const interruptionEvidence = c39AdmittedWorkerTerminalEvidence('user-interruption').evidence;
+  const changeEvidence = c39AdmittedWorkerTerminalEvidence('user-change').evidence;
   assert.equal(interruptionEvidence.source, 'trusted-current-turn');
   assert.equal(interruptionEvidence.provenance, 'current-turn-user-event');
   assert.equal(changeEvidence.source, 'trusted-current-turn');
@@ -7048,17 +7299,61 @@ test('F9 every resume family fails closed for bare labels, generic booleans, wro
   }
 });
 
+
+
+
+
+test('F9 exact launch provenance rejects unadmitted, wrong, stale, and malformed terminal evidence', () => {
+  const suspended = 'MANAGER_SUSPENDED_ON_NATIVE_WORKER';
+  assert.equal(c11AutoCodeLifecycle('native-terminal-return', c11TerminalEvidence('normal-terminal-return')).manager_state, suspended);
+
+  const unadmittedGrant = c11Grant({ mode: 'exclusive-auto-code' });
+  const unadmittedOperation = c39WorkerLaunch(unadmittedGrant);
+  const unadmittedVerified = c39C11ValidateGrant(unadmittedGrant, c39C11Authority());
+  const unadmittedLaunch = c39BuildWorkerLaunchRecord(unadmittedGrant, unadmittedOperation, unadmittedVerified);
+  const unadmittedEvidence = c39TerminalEvidenceForLaunch('normal-terminal-return', unadmittedLaunch);
+  assert.equal(new C8DurableAuthorityRegistry(unadmittedGrant.authority_store_path, 'delegation-grant').read(unadmittedGrant.grant_id).state, 'issued');
+  assert.equal(c11AutoCodeLifecycle('native-terminal-return', unadmittedEvidence).manager_state, suspended);
+
+  const tamper = (label, mutate) => {
+    const evidence = c39AdmittedWorkerTerminalEvidence('normal-terminal-return').evidence;
+    mutate(evidence.launch_provenance);
+    if (evidence.launch_provenance) evidence.launch_provenance_digest = c8DigestBytes(c8Json(evidence.launch_provenance));
+    assert.equal(c11AutoCodeLifecycle('native-terminal-return', evidence).manager_state, suspended, label);
+  };
+  tamper('wrong launch', (provenance) => { provenance.launch_id = 'wrong-launch'; });
+  tamper('wrong grant', (provenance) => { provenance.grant_id = 'wrong-grant'; });
+  tamper('wrong worker', (provenance) => { provenance.worker_identity = { worker_id: 'wrong-worker', execution_id: 'wrong-execution' }; });
+  tamper('wrong workspace', (provenance) => { provenance.workspace_identity = { workspace_id: 'wrong-workspace', checkout_id: 'wrong-checkout', exact_head: provenance.exact_head, exact_tree: provenance.exact_tree }; });
+  tamper('wrong run', (provenance) => { provenance.run_id = 'old-run'; });
+  tamper('wrong session', (provenance) => { provenance.session_id = 'old-session'; });
+  tamper('wrong turn', (provenance) => { provenance.turn_id = 'old-turn'; });
+  tamper('old head', (provenance) => { provenance.exact_head = 'old-head'; });
+  tamper('old tree', (provenance) => { provenance.exact_tree = 'old-tree'; });
+  tamper('different worker terminal evidence', (provenance) => { provenance.terminal_event_identity = 'different-terminal-event'; });
+  tamper('incomplete worker provenance', (provenance) => { delete provenance.worker_identity; });
+
+  const replay = c39AdmittedWorkerTerminalEvidence('normal-terminal-return').evidence;
+  assert.equal(c11AutoCodeLifecycle('native-terminal-return', replay).manager_state, 'MANAGER_READY_FOR_VALIDATION');
+  assert.equal(c11AutoCodeLifecycle('native-terminal-return', replay).manager_state, suspended);
+  const malformed = c39AdmittedWorkerTerminalEvidence('normal-terminal-return').evidence;
+  delete malformed.launch_provenance;
+  assert.equal(c11AutoCodeLifecycle('native-terminal-return', malformed).manager_state, suspended);
+});
+
+
 test('F7 replacement remains separately gated by verified failure or loss evidence and a fresh one-use grant', () => {
   const lossGrant = c11ReplacementGrant();
-  assert.equal(c11AutoCodeLifecycle('replacement-after-loss-with-new-grant', c11TerminalEvidence('result-loss'), lossGrant).replacement, 'allowed');
-  assert.equal(c11AutoCodeLifecycle('replacement-after-loss-with-new-grant', c11TerminalEvidence('result-loss'), lossGrant).replacement, 'forbidden');
-  assert.equal(c11AutoCodeLifecycle('replacement-after-loss-with-new-grant', c11TerminalEvidence('harness-failure'), c11ReplacementGrant()).replacement, 'allowed');
-  assert.equal(c11AutoCodeLifecycle('replacement-after-loss-with-new-grant', c11TerminalEvidence('result-loss')).replacement, 'forbidden');
-  assert.equal(c11AutoCodeLifecycle('replacement-after-loss-with-new-grant', c11TerminalEvidence('authority-movement'), c11ReplacementGrant()).replacement, 'forbidden');
-  assert.equal(c11AutoCodeLifecycle('authority-movement', c11TerminalEvidence('authority-movement'), c11ReplacementGrant()).replacement, 'forbidden');
-  assert.equal(c11AutoCodeLifecycle('user-interruption', c11TerminalEvidence('user-interruption'), c11ReplacementGrant()).replacement, 'forbidden');
-  assert.equal(c11AutoCodeLifecycle('native-terminal-return', c11TerminalEvidence('normal-terminal-return'), c11ReplacementGrant()).replacement, 'forbidden');
+  assert.equal(c11AutoCodeLifecycle('replacement-after-loss-with-new-grant', c39AdmittedWorkerTerminalEvidence('result-loss').evidence, lossGrant).replacement, 'allowed');
+  assert.equal(c11AutoCodeLifecycle('replacement-after-loss-with-new-grant', c39AdmittedWorkerTerminalEvidence('result-loss').evidence, lossGrant).replacement, 'forbidden');
+  assert.equal(c11AutoCodeLifecycle('replacement-after-loss-with-new-grant', c39AdmittedWorkerTerminalEvidence('harness-failure').evidence, c11ReplacementGrant()).replacement, 'allowed');
+  assert.equal(c11AutoCodeLifecycle('replacement-after-loss-with-new-grant', c39AdmittedWorkerTerminalEvidence('result-loss').evidence).replacement, 'forbidden');
+  assert.equal(c11AutoCodeLifecycle('replacement-after-loss-with-new-grant', c39AdmittedWorkerTerminalEvidence('authority-movement').evidence, c11ReplacementGrant()).replacement, 'forbidden');
+  assert.equal(c11AutoCodeLifecycle('authority-movement', c39AdmittedWorkerTerminalEvidence('authority-movement').evidence, c11ReplacementGrant()).replacement, 'forbidden');
+  assert.equal(c11AutoCodeLifecycle('user-interruption', c39AdmittedWorkerTerminalEvidence('user-interruption').evidence, c11ReplacementGrant()).replacement, 'forbidden');
+  assert.equal(c11AutoCodeLifecycle('native-terminal-return', c39AdmittedWorkerTerminalEvidence('normal-terminal-return').evidence, c11ReplacementGrant()).replacement, 'forbidden');
 });
+
 test('C39 RED C11 and replacement require a pre-issued controller record', () => {
   const forge = (grant, id) => {
     const forged = { ...grant, grant_id: id, authority_store_path: c8NewAuthorityStorePath('c39-unissued-grant') };
