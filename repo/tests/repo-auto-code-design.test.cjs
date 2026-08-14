@@ -126,6 +126,9 @@ const c39SelectedC11GrantIds = new Set();
 const c39CurrentExecutionValidityNamespace = 'current-execution-validity';
 const c39CurrentExecutionValidityId = 'c39-current-execution-validity';
 const c39CurrentExecutionValiditySchema = 'current-execution-validity/v1';
+const c39CurrentExecutionTimeNamespace = 'current-execution-time';
+const c39CurrentExecutionTimeId = 'c39-current-execution-time';
+const c39CurrentExecutionTimeSchema = 'current-execution-time/v1';
 const c39ExecutionIdentityFields = Object.freeze(['role', 'provider', 'canonical_model', 'reasoning']);
 const c39ImplementationExecutionIdentity = Object.freeze({
   role: 'implementation/amendment worker',
@@ -3143,9 +3146,14 @@ function c6ReceiptAdmission(receipt, launchEnvelope, context = c6Context()) {
       JSON.stringify(receipt.technical_g4_execution_identity) !== JSON.stringify(launchEnvelope.technical_g4_execution_identity)) return clearFailure();
 
   const separation = receipt.prohibited_context_separation;
+  const requiredContexts = [...c6ProhibitedContexts].sort();
+  const exactContextSet = (contexts) => Array.isArray(contexts) &&
+    contexts.length === requiredContexts.length &&
+    new Set(contexts).size === contexts.length &&
+    JSON.stringify([...contexts].sort()) === JSON.stringify(requiredContexts);
+  const recordContexts = separation && Array.isArray(separation.records) ? separation.records.map((record) => record && record.context) : null;
   if (!separation || separation.schema !== 'context-separation/v1' ||
-      JSON.stringify(separation.separate_from && [...separation.separate_from].sort()) !== JSON.stringify([...c6ProhibitedContexts].sort()) ||
-      !Array.isArray(separation.records) || separation.records.length !== c6ProhibitedContexts.length ||
+      !exactContextSet(separation.separate_from) || !exactContextSet(recordContexts) ||
       separation.records.some((record) => !record || !c6ProhibitedContexts.includes(record.context) ||
         !c6ValidRawLocator(record.separation_locator, 'authority-movement', context) ||
         record.evidence_identity !== record.separation_locator.evidence_identity)) return clearFailure();
@@ -4714,8 +4722,8 @@ function c8LeaseCreate(snapshot, options = {}) {
     run_identity: options.run_identity || source.run_identity,
     role: options.role || source.role,
     capabilities: c8List(options.capabilities || source.capabilities, 'lease.capabilities'),
-    issued_at: options.issued_at || '2026-08-04T00:00:00.000Z',
-    expires_at: options.expires_at || '2026-08-04T01:00:00.000Z',
+    issued_at: Object.hasOwn(options, 'issued_at') ? options.issued_at : '2026-08-04T00:00:00.000Z',
+    expires_at: Object.hasOwn(options, 'expires_at') ? options.expires_at : '2026-08-04T01:00:00.000Z',
     lifecycle: 'DRAFT',
     consumed: false,
     use_count: 0,
@@ -4724,13 +4732,19 @@ function c8LeaseCreate(snapshot, options = {}) {
     admitted_at: null,
     consumed_at: null
   };
-  c8Text(lease.lease_id, 'lease_id'); if (Date.parse(lease.expires_at) <= Date.parse(lease.issued_at)) throw new C8ContractError('LEASE_INVALID', 'expiry');
+  c8Text(lease.lease_id, 'lease_id'); c8LeaseWindow(lease);
   lease.lease_digest = c8DigestBytes(c8Json(c8LeaseBody(lease))); return c8Freeze(lease);
 }
 function c8LeaseTimestamp(value, field) {
   const timestamp = typeof value === 'number' ? value : Date.parse(value);
   if (!Number.isFinite(timestamp)) throw new C8ContractError('LEASE_TIME_INVALID', field);
   return timestamp;
+}
+function c8LeaseWindow(lease) {
+  const issuedAt = c8LeaseTimestamp(lease.issued_at, 'issued_at');
+  const expiresAt = c8LeaseTimestamp(lease.expires_at, 'expires_at');
+  if (expiresAt <= issuedAt) throw new C8ContractError('LEASE_INVALID', 'expiry');
+  return { issuedAt, expiresAt };
 }
 function c8LeaseAuthorityKey(lease) {
   return c8Json({ repository: lease.repository, pull_request: lease.pull_request, exact_head: lease.exact_head, snapshot_digest: lease.snapshot_digest });
@@ -4788,6 +4802,9 @@ class C8LeaseRegistry {
   constructor(storePath = null) { this.records = new Map(); this.storePath = storePath; this._durableAuthority = storePath ? new C8DurableAuthorityRegistry(storePath, 'lease-registry') : null; }
   register(lease) {
     if (!lease || !lease.lease_id) return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-registration', 'LEASE_INVALID', 'lease_id') };
+    try { c8LeaseWindow(lease); } catch (error) {
+      return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-registration', error.reason || 'LEASE_INVALID', error.field || 'timestamps', 'finite ordered lease timestamps', 'invalid', null, lease) };
+    }
     if (lease.lease_digest !== c8DigestBytes(c8Json(c8LeaseBody(lease)))) {
       return { decision: 'LEASE_REJECTED', receipt: c8Receipt('lease-registration', 'LEASE_DIGEST_MISMATCH', 'lease_digest', 'canonical lease digest', 'mismatch', null, lease) };
     }
@@ -4887,7 +4904,10 @@ function c8ClassifyOutput(input = {}) {
 
 function c8AdmittedLeaseFixture(snapshot, overrides = {}) {
   const machine = c8MachineAuthority();
-  const lease = c8LeaseCreate(snapshot, { lease_id: overrides.lease_id || 'lease-test-' + Date.now(), issued_at: overrides.issued_at, expires_at: overrides.expires_at });
+  const leaseOptions = { lease_id: overrides.lease_id || 'lease-test-' + Date.now() };
+  if (Object.hasOwn(overrides, 'issued_at')) leaseOptions.issued_at = overrides.issued_at;
+  if (Object.hasOwn(overrides, 'expires_at')) leaseOptions.expires_at = overrides.expires_at;
+  const lease = c8LeaseCreate(snapshot, leaseOptions);
   const registry = new C8LeaseRegistry(overrides.lease_store_path);
   registry.register(lease);
   registry.transition(lease.lease_id, 'SEALED', '2026-08-04T00:00:05.000Z');
@@ -5169,8 +5189,8 @@ function c8LeaseCreate(snapshot, options = {}) {
     run_identity: options.run_identity || source.run_identity,
     role: options.role || source.role,
     capabilities: c8List(options.capabilities || source.capabilities, 'lease.capabilities'),
-    issued_at: options.issued_at || '2026-08-04T00:00:00.000Z',
-    expires_at: options.expires_at || '2026-08-04T01:00:00.000Z',
+    issued_at: Object.hasOwn(options, 'issued_at') ? options.issued_at : '2026-08-04T00:00:00.000Z',
+    expires_at: Object.hasOwn(options, 'expires_at') ? options.expires_at : '2026-08-04T01:00:00.000Z',
     lifecycle: 'DRAFT',
     consumed: false,
     use_count: 0,
@@ -5179,7 +5199,7 @@ function c8LeaseCreate(snapshot, options = {}) {
     admitted_at: null,
     consumed_at: null
   };
-  c8Text(lease.lease_id, 'lease_id'); if (Date.parse(lease.expires_at) <= Date.parse(lease.issued_at)) throw new C8ContractError('LEASE_INVALID', 'expiry');
+  c8Text(lease.lease_id, 'lease_id'); c8LeaseWindow(lease);
   lease.lease_digest = c8DigestBytes(c8Json(c8LeaseBody(lease))); return c8Freeze(lease);
 }
 
@@ -5192,6 +5212,7 @@ function c28CreateTrustedAuthorityStore() {
     'exceptional-review': {},
     'current-execution-authority': {},
     'current-execution-validity': {},
+    'current-execution-time': {},
     'review-admission': {},
     'delegation-grant': {},
     'native-worker-harness': {},
@@ -5253,6 +5274,20 @@ function c28CreateTrustedAuthorityStore() {
     ...c39ImplementationExecutionIdentity,
     now: '2026-08-13T00:00:00.000Z',
     root_work_scope: ['src/root']
+  });
+  put('current-execution-time', 'c39-current-execution-time', {
+    schema: 'current-execution-time/v1',
+    evidence_identity: 'c39-current-execution-time',
+    authority_id: 'c39-current-execution',
+    provenance: 'trusted-current-time-resolver',
+    run_id: reviewAuthority.review.run_id,
+    session_id: reviewAuthority.review.session_id,
+    turn_id: reviewAuthority.review.turn_id,
+    repository: reviewAuthority.repository,
+    exact_head: reviewAuthority.exact_head,
+    exact_tree: c8GitAuthorityFixture.exact_tree_sha,
+    trusted_now: '2026-08-13T00:00:00.000Z',
+    lifecycle: { state: 'active', revoked: false }
   });
   put('current-execution-validity', 'c39-current-execution-validity', {
     schema: 'current-execution-validity/v1',
@@ -6020,7 +6055,47 @@ function c7SelfAuthoredExceptionalGrant() {
 function c6ValidEvidenceDigest(record) { return !!record && typeof record.bytes === 'string' && typeof record.content_digest === 'string' && /^sha256:[0-9a-f]{64}$/.test(record.content_digest) && record.content_digest === c8DigestBytes(record.bytes); }
 function c8VerifyGitObjectBinding(input = {}) { return !!input && input.object_type === input.expected_type && input.path === input.tree_path; }
 function c10ContainsEmbeddedCredential(text) { return typeof text === 'string' && /sk-[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/.test(text); }
-function c10NormaliseOutbound(value) { let text = String(value); const trigger = [String.fromCharCode(64), 'co', 'dex', ' ', 're', 'view'].join(''); for (let i = 0; i < 3; i++) { text = text.normalize('NFKC').replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/[\"']|`[a-z]*|`/gi, ''); if (text.toLowerCase().includes(trigger)) return true; const decoded = Buffer.from(text, 'base64').toString('utf8'); if (!decoded || decoded === text || /[\u0000-\u0008\u000E-\u001F]/.test(decoded)) break; text = decoded; } return false; }
+const c10MaxDecodeDepth = 3;
+const c10MaxEncodedTokenLength = 512;
+const c10Base64TokenPattern = /[A-Za-z0-9+/]{4,}(?:={1,2})?/g;
+function c10NormaliseText(value) {
+  return String(value).normalize('NFKC').replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/[\"']|`[a-z]*|`/gi, '');
+}
+function c10EncodedTokenCandidates(text) {
+  const matches = c10NormaliseText(text).match(c10Base64TokenPattern) || [];
+  return [...new Set(matches.filter((candidate) =>
+    candidate.length <= c10MaxEncodedTokenLength && candidate.length % 4 !== 1))];
+}
+function c10DecodeToken(candidate) {
+  if (!candidate || candidate.length % 4 === 1) return null;
+  const decoded = Buffer.from(candidate, 'base64').toString('utf8');
+  if (!decoded || /[\u0000-\u0008\u000E-\u001F]/.test(decoded)) return null;
+  const canonical = Buffer.from(decoded, 'utf8').toString('base64');
+  if (canonical.replace(/=+$/, '') !== candidate.replace(/=+$/, '')) return null;
+  return decoded;
+}
+function c10NormaliseOutbound(value) {
+  const trigger = [String.fromCharCode(64), 'co', 'dex', ' ', 're', 'view'].join('');
+  let frontier = [String(value)];
+  const seen = new Set();
+  for (let depth = 0; depth <= c10MaxDecodeDepth; depth += 1) {
+    const next = [];
+    for (const candidate of frontier) {
+      const text = c10NormaliseText(candidate);
+      if (text.toLowerCase().includes(trigger)) return true;
+      if (depth === c10MaxDecodeDepth) continue;
+      for (const encoded of c10EncodedTokenCandidates(text)) {
+        const decoded = c10DecodeToken(encoded);
+        if (decoded && !seen.has(decoded)) {
+          seen.add(decoded);
+          next.push(decoded);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return false;
+}
 function c10GenericGitHubWrite(finalBytes) { if (c10NormaliseOutbound(finalBytes)) { const error = new Error('CODEX_TRIGGER_TOKEN_FORBIDDEN'); error.code = 'CODEX_TRIGGER_TOKEN_FORBIDDEN'; throw error; } return finalBytes; }
 const c10ReviewHeads = new Set();
 function c10ReviewRequestAdmission(request = {}) { const key = [request.repository, request.pull_request, request.head, request.tree].join('|'); const valid = request.role === 'authoritative technical G4 closure' && request.repository === 'weijunswj/ai-agent-toolkit' && request.pull_request === 333 && request.target === 'pr-conversation' && request.grant?.one_run === true && request.checks?.terminal_success === true && request.prior_request === false && request.readback === true && request.head && request.tree; if (!valid || c10ReviewHeads.has(key)) return { decision: 'REVIEW_REQUEST_REJECTED' }; c10ReviewHeads.add(key); return { decision: 'REVIEW_REQUEST_ADMITTED', target: 'pr-conversation', one_run: true }; }
@@ -6295,8 +6370,11 @@ C8LeaseRegistry.prototype.get = function getLease(id) {
 };
 
 C8LeaseRegistry.prototype.register = function registerLease(lease) {
-  c39LeaseReload(this);
   if (!lease || !lease.lease_id) return c39LeaseReject('lease-registration', 'LEASE_INVALID', 'lease_id', lease);
+  try { c8LeaseWindow(lease); } catch (error) {
+    return c39LeaseReject('lease-registration', error.reason || 'LEASE_INVALID', error.field || 'timestamps', lease);
+  }
+  c39LeaseReload(this);
   if (lease.lease_digest !== c8DigestBytes(c8Json(c8LeaseBody(lease)))) {
     return c39LeaseReject('lease-registration', 'LEASE_DIGEST_MISMATCH', 'lease_digest', lease);
   }
@@ -6392,9 +6470,28 @@ const c39CurrentExecutionShape = Object.freeze({
   validity_evidence_id: 'c39-current-execution-validity'
 });
 
-function c39TrustedCurrentExecutionValidity() {
-  const evidence = c28TrustedLookup(c39CurrentExecutionValidityNamespace, c39CurrentExecutionValidityId);
+function c39TrustedCurrentTimeEvidence() {
+  const evidence = c28TrustedLookup(c39CurrentExecutionTimeNamespace, c39CurrentExecutionTimeId);
   if (!evidence || evidence[c39TrustedEvidenceToken] !== c39TrustedEvidenceToken ||
+      evidence.schema !== c39CurrentExecutionTimeSchema ||
+      evidence.evidence_identity !== c39CurrentExecutionTimeId ||
+      evidence.authority_id !== 'c39-current-execution' ||
+      evidence.provenance !== 'trusted-current-time-resolver' ||
+      !evidence.lifecycle || evidence.lifecycle.state !== 'active' || evidence.lifecycle.revoked !== false) return null;
+  for (const field of ['run_id', 'session_id', 'turn_id', 'repository', 'exact_head', 'exact_tree', 'trusted_now']) {
+    if (!nonEmptyString(evidence[field])) return null;
+  }
+  if (!c8Sha.test(evidence.exact_head) || !c8Sha.test(evidence.exact_tree)) return null;
+  const trustedNow = Date.parse(evidence.trusted_now);
+  if (!Number.isFinite(trustedNow)) return null;
+  return { evidence, trustedNow };
+}
+
+function c39TrustedCurrentExecutionValidity(freshTime = c39TrustedCurrentTimeEvidence()) {
+  const evidence = c28TrustedLookup(c39CurrentExecutionValidityNamespace, c39CurrentExecutionValidityId);
+  const timeEvidence = freshTime && freshTime.evidence;
+  if (!evidence || evidence[c39TrustedEvidenceToken] !== c39TrustedEvidenceToken ||
+      !timeEvidence || timeEvidence[c39TrustedEvidenceToken] !== c39TrustedEvidenceToken ||
       evidence.schema !== c39CurrentExecutionValiditySchema ||
       evidence.evidence_identity !== c39CurrentExecutionValidityId ||
       evidence.authority_id !== 'c39-current-execution' ||
@@ -6406,8 +6503,13 @@ function c39TrustedCurrentExecutionValidity() {
   const validFrom = Date.parse(evidence.valid_from);
   const observedAt = Date.parse(evidence.observed_at);
   const validUntil = Date.parse(evidence.valid_until);
-  if (![validFrom, observedAt, validUntil].every(Number.isFinite) || validFrom > observedAt || observedAt >= validUntil) return null;
-  return evidence;
+  const trustedNow = freshTime.trustedNow;
+  if (![validFrom, observedAt, validUntil, trustedNow].every(Number.isFinite) ||
+      validFrom > observedAt || observedAt > trustedNow || trustedNow >= validUntil) return null;
+  for (const field of ['run_id', 'session_id', 'turn_id', 'repository', 'exact_head', 'exact_tree']) {
+    if (evidence[field] !== timeEvidence[field]) return null;
+  }
+  return { ...evidence, trusted_now: timeEvidence.trusted_now, trusted_now_evidence_id: timeEvidence.evidence_identity };
 }
 
 function c39NormalizeWorkspaceIdentity(value, field = 'workspace_identity') {
@@ -6423,10 +6525,13 @@ function c39NormalizeWorkspaceIdentity(value, field = 'workspace_identity') {
   return normalized;
 }
 
-function c39ExpectedCurrentExecutionAuthority() {
+function c39ExpectedCurrentExecutionAuthority(validity = null, freshTime = null) {
   const trusted = c28TrustedLookup('exceptional-review', 'exceptional-grant-trusted-1');
-  const validity = c39TrustedCurrentExecutionValidity();
-  if (!trusted || !validity || trusted[c39TrustedEvidenceToken] !== c39TrustedEvidenceToken || trusted.schema !== 'exceptional-review-grant/v1' || !trusted.review) return null;
+  const resolvedFreshTime = freshTime || c39TrustedCurrentTimeEvidence();
+  const resolvedValidity = validity || c39TrustedCurrentExecutionValidity(resolvedFreshTime);
+  if (!trusted || !resolvedFreshTime || !resolvedValidity ||
+      trusted[c39TrustedEvidenceToken] !== c39TrustedEvidenceToken ||
+      trusted.schema !== 'exceptional-review-grant/v1' || !trusted.review) return null;
   const expected = {
     ...c39CurrentExecutionShape,
     run_id: trusted.review.run_id,
@@ -6444,30 +6549,35 @@ function c39ExpectedCurrentExecutionAuthority() {
   };
   if (['run_id', 'session_id', 'turn_id', 'repository', 'exact_head'].some((field) => !nonEmptyString(expected[field])) ||
       !c8Sha.test(expected.exact_head) || !c8Sha.test(expected.exact_tree) ||
-      validity.evidence_identity !== expected.validity_evidence_id ||
-      ['run_id', 'session_id', 'turn_id', 'repository', 'exact_head', 'exact_tree'].some((field) => validity[field] !== expected[field])) return null;
+      resolvedValidity.evidence_identity !== expected.validity_evidence_id ||
+      resolvedValidity.trusted_now_evidence_id !== resolvedFreshTime.evidence.evidence_identity ||
+      ['run_id', 'session_id', 'turn_id', 'repository', 'exact_head', 'exact_tree'].some((field) =>
+        resolvedValidity[field] !== expected[field] || resolvedFreshTime.evidence[field] !== expected[field])) return null;
   try { expected.workspace_identity = c39NormalizeWorkspaceIdentity(expected.workspace_identity, 'expected.workspace_identity'); } catch { return null; }
   return expected;
 }
 
 function c39ResolveFreshCurrentExecution() {
   const current = c28TrustedLookup('current-execution-authority', 'c39-current-execution');
-  const validity = c39TrustedCurrentExecutionValidity();
-  const expected = c39ExpectedCurrentExecutionAuthority();
-  if (!current || !validity || !expected || current[c39TrustedEvidenceToken] !== c39TrustedEvidenceToken) return null;
+  const freshTime = c39TrustedCurrentTimeEvidence();
+  const validity = c39TrustedCurrentExecutionValidity(freshTime);
+  const expected = c39ExpectedCurrentExecutionAuthority(validity, freshTime);
+  if (!current || !freshTime || !validity || !expected || current[c39TrustedEvidenceToken] !== c39TrustedEvidenceToken) return null;
   for (const field of Object.keys(c39CurrentExecutionShape)) if (current[field] !== c39CurrentExecutionShape[field]) return null;
   for (const field of ['run_id', 'session_id', 'turn_id', 'repository', 'exact_head', 'exact_tree', 'now', 'validity_evidence_id']) if (!nonEmptyString(current[field])) return null;
   if (!c8Sha.test(current.exact_head) || !c8Sha.test(current.exact_tree) || !Number.isFinite(Date.parse(current.now))) return null;
   if (!c39ExecutionIdentityFields.every((field) => nonEmptyString(current[field]))) return null;
   for (const field of ['run_id', 'session_id', 'turn_id', 'repository', 'exact_head', 'exact_tree']) if (current[field] !== expected[field]) return null;
-  if (current.validity_evidence_id !== validity.evidence_identity || current.now !== validity.observed_at) return null;
+  if (current.validity_evidence_id !== validity.evidence_identity ||
+      current.now !== freshTime.evidence.trusted_now ||
+      current.now !== validity.trusted_now) return null;
   let workspaceIdentity;
   try { workspaceIdentity = c39NormalizeWorkspaceIdentity(current.workspace_identity, 'current_execution.workspace_identity'); } catch { return null; }
   if (c8Json(workspaceIdentity) !== c8Json(expected.workspace_identity) ||
       c8Json(workspaceIdentity) !== c8Json({ workspace_id: workspaceIdentity.workspace_id, checkout_id: workspaceIdentity.checkout_id, exact_head: current.exact_head, exact_tree: current.exact_tree })) return null;
   let rootWorkScope;
   try { rootWorkScope = c39NormalizeScope(current.root_work_scope, 'current_execution.root_work_scope'); } catch { return null; }
-  return { ...current, workspace_identity: workspaceIdentity, root_work_scope: rootWorkScope };
+  return { ...current, now: freshTime.evidence.trusted_now, workspace_identity: workspaceIdentity, root_work_scope: rootWorkScope };
 }
 
 function c39CurrentExecutionAuthority() {
@@ -6527,6 +6637,23 @@ function c39WithCurrentExecutionEvidence(currentTransform, validityTransform, ca
 
 function c39WithCurrentExecutionRecord(transform, callback) {
   return c39WithCurrentExecutionEvidence(transform, (record) => record, callback);
+}
+
+function c39WithTrustedCurrentTime(transform, callback) {
+  const previousStore = c28TrustedAuthorityStore;
+  const originalResolve = previousStore && previousStore.resolve;
+  if (typeof originalResolve !== 'function') throw new Error('C39 trusted store resolver unavailable');
+  c28TrustedAuthorityStore = {
+    token: previousStore.token,
+    resolve(namespace, identity) {
+      const record = originalResolve.call(previousStore, namespace, identity);
+      if (namespace === c39CurrentExecutionTimeNamespace && identity === c39CurrentExecutionTimeId) {
+        return transform(record && c8Clone(record));
+      }
+      return record;
+    }
+  };
+  try { return callback(); } finally { c28TrustedAuthorityStore = previousStore; }
 }
 
 function c39C11GrantBody(grant) {
@@ -7649,4 +7776,105 @@ test('C39 F8 atomic cross-registry registration holds conflict check and inserti
   const active = c39LeaseAuthority(reopened).entries().filter((entry) => entry.record.lifecycle === 'DRAFT');
   assert.equal(active.length, 1);
   assert.equal(active[0].key, leaseA.lease_id);
+});
+
+test('RUN095 C39 fresh trusted current time is bound at the admission point', () => {
+  const evaluate = (timeTransform, validityTransform = (record) => record) =>
+    c39WithTrustedCurrentTime(timeTransform, () =>
+      c39WithCurrentExecutionEvidence((record) => record, validityTransform, () => c39CurrentExecutionAuthority()));
+  const cases = [
+    ['historical observed_at with current expiry passed', (record) => record, (record) => ({
+      ...record,
+      observed_at: '2026-08-12T23:00:00.000Z',
+      valid_until: '2026-08-13T00:00:00.000Z'
+    })],
+    ['trusted current time beyond valid_until', (record) => ({ ...record, trusted_now: '2026-08-14T00:00:00.000Z' })],
+    ['malformed trusted current time', (record) => ({ ...record, trusted_now: 'not-a-date' })],
+    ['wrong trusted-time run', (record) => ({ ...record, run_id: 'wrong-current-time-run' })],
+    ['wrong trusted-time session', (record) => ({ ...record, session_id: 'wrong-current-time-session' })],
+    ['wrong trusted-time turn', (record) => ({ ...record, turn_id: 'wrong-current-time-turn' })],
+    ['wrong trusted-time repository', (record) => ({ ...record, repository: 'other/repository' })],
+    ['wrong trusted-time head', (record) => ({ ...record, exact_head: c8Hash('wrong-current-time-head') })],
+    ['wrong trusted-time tree', (record) => ({ ...record, exact_tree: c8Hash('wrong-current-time-tree') })],
+    ['future or impossible ordering', (record) => ({ ...record, trusted_now: '2026-08-12T12:00:00.000Z' })]
+  ];
+  const rejected = cases.map(([label, timeTransform, validityTransform]) => ({
+    label,
+    result: evaluate(timeTransform, validityTransform)
+  }));
+  assert.deepEqual(
+    rejected.map((entry) => entry.result === null),
+    cases.map(() => true),
+    rejected.map((entry) => entry.label + ': ' + JSON.stringify(entry.result)).join('\\n')
+  );
+  const admitted = evaluate((record) => record);
+  assert.ok(admitted);
+  assert.equal(admitted.now, '2026-08-13T00:00:00.000Z');
+  assert.equal(admitted.exact_head, c8GitAuthorityFixture.exact_remote_head_sha);
+  assert.equal(admitted.exact_tree, c8GitAuthorityFixture.exact_tree_sha);
+});
+
+test('RUN095 C39 lease timestamps are finite and registration is no-mutation on failure', () => {
+  const snapshot = c8Snapshot(c8DefaultSnapshot());
+  for (const [field, value] of [
+    ['issued_at', 'not-a-date'],
+    ['expires_at', 'not-a-date'],
+    ['issued_at', NaN],
+    ['expires_at', NaN]
+  ]) {
+    assert.throws(
+      () => c8LeaseCreate(snapshot, { lease_id: 'run095-malformed-' + field, [field]: value }),
+      (error) => error.reason === 'LEASE_TIME_INVALID'
+    );
+  }
+  assert.throws(
+    () => c8LeaseCreate(snapshot, {
+      lease_id: 'run095-reversed',
+      issued_at: '2026-08-04T01:00:00.000Z',
+      expires_at: '2026-08-04T00:00:00.000Z'
+    }),
+    (error) => error.reason === 'LEASE_INVALID'
+  );
+  const storePath = c8NewAuthorityStorePath('run095-lease-time');
+  const valid = c8LeaseCreate(snapshot, { lease_id: 'run095-same-id' });
+  const malformed = { ...valid, issued_at: 'not-a-date' };
+  malformed.lease_digest = c8DigestBytes(c8Json(c8LeaseBody(malformed)));
+  const registry = new C8LeaseRegistry(storePath);
+  const rejected = registry.register(malformed);
+  assert.equal(rejected.decision, 'LEASE_REJECTED');
+  assert.equal(rejected.receipt.reason, 'LEASE_TIME_INVALID');
+  assert.equal(registry.get(valid.lease_id), undefined);
+  assert.equal(new C8DurableAuthorityRegistry(storePath, 'lease-registry').entries().length, 0);
+  assert.equal(registry.register(valid).decision, 'LEASE_REGISTERED');
+  assert.equal(registry.get(valid.lease_id).lease_digest, valid.lease_digest);
+});
+
+test('RUN095 C10 detects bounded encoded trigger tokens in surrounding text', () => {
+  const encode = (value) => Buffer.from(value, 'utf8').toString('base64');
+  const trigger = c10TriggerValue();
+  for (let depth = 1; depth <= 3; depth += 1) {
+    let encoded = trigger;
+    for (let index = 0; index < depth; index += 1) encoded = encode(encoded);
+    assert.throws(
+      () => c10GenericGitHubWrite('ordinary-prefix::' + encoded + '::ordinary-suffix'),
+      (error) => error.code === 'CODEX_TRIGGER_TOKEN_FORBIDDEN',
+      'encoded depth ' + depth
+    );
+  }
+  assert.doesNotThrow(() => c10GenericGitHubWrite('ordinary ' + encode('ordinary review text') + ' payload'));
+});
+
+test('RUN095 C6 requires the prohibited-context records to be an exact set', () => {
+  const launch = c6ConsumedLaunch();
+  const valid = c6AssuranceReceipt(launch);
+  assert.equal(c6ReceiptAdmission(valid, launch).decision, 'CLEAR');
+
+  const duplicate = c8Clone(valid);
+  duplicate.prohibited_context_separation.records.at(-1).context =
+    duplicate.prohibited_context_separation.records[0].context;
+  assert.equal(c6ReceiptAdmission(duplicate, launch).decision, 'ASSURANCE_CLEAR_UNSUPPORTED');
+
+  const extra = c8Clone(valid);
+  extra.prohibited_context_separation.records[0].context = 'extra-context';
+  assert.equal(c6ReceiptAdmission(extra, launch).decision, 'ASSURANCE_CLEAR_UNSUPPORTED');
 });

@@ -483,3 +483,33 @@ test('a new family introduction with initial version and packaged content is acc
   assert.equal(result.records[0].commit, introduced);
   assert.equal(result.records[0].families[0].transition, 'initial');
 });
+
+test('RUN095 strict SemVer rejects leading-zero core components and transitions', (t) => {
+  const invalid = ['01.0.0', '1.01.0', '1.0.01', '00.0.0'];
+  for (const value of invalid) assert.equal(parseSemver(value), null, value);
+  assert.equal(compareSemver('1.0.0', '01.0.0'), null);
+
+  const root = createRepo();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  createGenericModule(root);
+  const base = commit(root, 'base');
+  updateGeneric(root, '01.0.0', 'leading-zero version');
+  const bad = commit(root, 'leading-zero version');
+  assertFailsAt(root, base, bad, /invalid SemVer/);
+});
+
+test('RUN095 NUL-delimited changed paths preserve a non-ASCII module trigger', (t) => {
+  const root = createRepo();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  git(root, ['config', 'core.quotePath', 'true']);
+  const cafeModule = '_projects/test/caf' + String.fromCharCode(0xE9);
+  createGenericModule(root, 'cafe.module', cafeModule, 'skills/cafe/SKILL.md');
+  const base = commit(root, 'base');
+  writeFile(root, cafeModule + '/README.md', 'unversioned trigger\\n');
+  const bad = commit(root, 'non-ASCII module trigger without version bump');
+  const result = auditRange({ repoRoot: root, base, head: bad });
+  assert.deepEqual(result.records[0].changed_paths, [cafeModule + '/README.md']);
+  assert.equal(result.records[0].compliance, 'COMPLIANT_VERSION_TRANSITION');
+  assert.equal(result.firstViolation.commit, bad);
+  assert.notEqual(result.records[0].compliance, 'NO_VERSION_TRIGGER');
+});

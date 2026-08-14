@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const SEMVER_PATTERN = /^(\d+)\.(\d+)\.(\d+)$/;
+const SEMVER_PATTERN = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 const BRIDGE_COUPLED_PATHS = [
   '_projects/development/toolkit-local-bridge/toolkit.project.json',
   '_projects/development/toolkit-local-bridge/_main/codex-plugin/plugin.json',
@@ -62,6 +62,24 @@ function gitText(repoRoot, args, allowFailure = false) {
   return String(gitResult(repoRoot, args, allowFailure).stdout || '').trim();
 }
 
+function gitBytes(repoRoot, args, allowFailure = false) {
+  const result = spawnSync('git', args, {
+    cwd: repoRoot,
+    encoding: null,
+    windowsHide: true
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0 && !allowFailure) {
+    throw new Error(`git ${args.join(' ')} failed (${result.status}): ${String(result.stderr || '').trim()}`);
+  }
+  return Buffer.isBuffer(result.stdout) ? result.stdout : Buffer.from(result.stdout || '');
+}
+
+function gitNulPaths(repoRoot, args) {
+  const output = gitBytes(repoRoot, args).toString('utf8');
+  return output ? output.split('\0').filter(Boolean).map(normalizePath).filter(Boolean) : [];
+}
+
 function readBlobAt(repoRoot, ref, relativePath) {
   const result = gitResult(repoRoot, ['show', `${ref}:${normalizePath(relativePath)}`], true);
   return result.status === 0 ? String(result.stdout || '') : null;
@@ -78,8 +96,8 @@ function readJsonAt(repoRoot, ref, relativePath, objectStore = null) {
 }
 
 function treeEntriesAt(repoRoot, ref) {
-  const output = gitText(repoRoot, ['ls-tree', '-r', ref]);
-  return output ? output.split(/\r?\n/).map((line) => {
+  const output = gitBytes(repoRoot, ['ls-tree', '-r', '-z', ref]).toString('utf8');
+  return output ? output.split('\0').filter(Boolean).map((line) => {
     const separator = line.indexOf('\t');
     if (separator < 0) return null;
     const fields = line.slice(0, separator).split(/\s+/);
@@ -217,10 +235,8 @@ function extractVersion(relativePath, text) {
 
 function projectManifestPathsAt(repoRoot, ref, objectStore = null) {
   if (objectStore) return objectStore.pathsAt(ref);
-  const output = gitText(repoRoot, ['ls-tree', '-r', '--name-only', ref, '--', '_projects']);
-  return output
-    ? output.split(/\r?\n/).map(normalizePath).filter((value) => value.endsWith('/toolkit.project.json'))
-    : [];
+  return gitNulPaths(repoRoot, ['ls-tree', '-r', '-z', '--name-only', ref, '--', '_projects'])
+    .filter((value) => value.endsWith('/toolkit.project.json'));
 }
 
 function extractProjectManifestsAt(repoRoot, ref, objectStore = null) {
@@ -343,8 +359,7 @@ function versionAt(repoRoot, ref, relativePath, cache, objectStore = null) {
 }
 
 function changedPaths(repoRoot, parent, commit) {
-  const output = gitText(repoRoot, ['diff-tree', '--no-commit-id', '--name-only', '-r', parent, commit]);
-  return output ? output.split(/\r?\n/).map(normalizePath).filter(Boolean) : [];
+  return gitNulPaths(repoRoot, ['diff-tree', '--no-commit-id', '--name-only', '-r', '-z', parent, commit]);
 }
 
 function subjectAt(repoRoot, commit) {
