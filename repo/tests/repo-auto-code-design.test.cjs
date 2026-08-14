@@ -81,6 +81,19 @@ const c8GitAuthorityFixture = c8CreateGitAuthorityFixture(c8AuthorityTempRoot);
 const c39TrustedEvidenceToken = Symbol('c39-trusted-evidence-token');
 let c28TrustedAuthorityStore;
 const c39SelectedC11GrantIds = new Set();
+const c39ExecutionIdentityFields = Object.freeze(['role', 'provider', 'canonical_model', 'reasoning']);
+const c39ImplementationExecutionIdentity = Object.freeze({
+  role: 'implementation/amendment worker',
+  provider: ['Open', 'AI'].join(''),
+  canonical_model: ['GPT', '-5.6 Luna'].join(''),
+  reasoning: ['M', 'ax'].join('')
+});
+const c39TechnicalG4ExecutionIdentity = Object.freeze({
+  role: 'technical G4 reviewer',
+  provider: ['Open', 'AI'].join(''),
+  canonical_model: ['GPT', '-5.6 Sol'].join(''),
+  reasoning: ['H', 'igh'].join('')
+});
 
 function c28TrustedLookup(namespace, identity) {
   const record = c28TrustedAuthorityStore && typeof c28TrustedAuthorityStore.resolve === 'function'
@@ -5054,6 +5067,9 @@ function c28CreateTrustedAuthorityStore() {
   const reviewAuthority = namespaces['exceptional-review']['exceptional-grant-trusted-2'];
   put('current-execution-authority', 'c39-current-execution', {
     schema: 'current-execution-authority/v1',
+    version: 1,
+    evidence_identity: 'c39-current-execution',
+    provenance: 'trusted-current-execution-authority',
     authority_id: 'c39-current-execution',
     run_id: reviewAuthority.review.run_id,
     session_id: reviewAuthority.review.session_id,
@@ -5061,10 +5077,7 @@ function c28CreateTrustedAuthorityStore() {
     repository: reviewAuthority.repository,
     exact_head: reviewAuthority.exact_head,
     exact_tree: c8GitAuthorityFixture.exact_tree_sha,
-    role: 'implementation/amendment worker',
-    provider: ['Open', 'AI'].join(''),
-    canonical_model: ['GPT', '-5.6 Luna'].join(''),
-    reasoning: ['M', 'ax'].join(''),
+    ...c39ImplementationExecutionIdentity,
     now: '2026-08-13T00:00:00.000Z',
     root_work_scope: ['src/root']
   });
@@ -5076,6 +5089,7 @@ function c28CreateTrustedAuthorityStore() {
     role: 'authoritative technical G4 closure',
     repository: reviewAuthority.repository,
     pull_request: reviewAuthority.pull_request,
+    execution_identity: c8Clone(c39TechnicalG4ExecutionIdentity),
     target: 'pr-conversation',
     head: reviewAuthority.exact_head,
     tree: c8GitAuthorityFixture.exact_tree_sha,
@@ -6152,11 +6166,10 @@ C8LeaseRegistry.prototype.consume = function consumeLease(id, manifest, at) {
 
 const c39CurrentExecutionShape = Object.freeze({
   schema: 'current-execution-authority/v1',
+  version: 1,
   authority_id: 'c39-current-execution',
-  role: 'implementation/amendment worker',
-  provider: ['Open', 'AI'].join(''),
-  canonical_model: ['GPT', '-5.6 Luna'].join(''),
-  reasoning: ['M', 'ax'].join('')
+  evidence_identity: 'c39-current-execution',
+  provenance: 'trusted-current-execution-authority'
 });
 
 function c39ExpectedCurrentExecutionAuthority() {
@@ -6183,6 +6196,7 @@ function c39ResolveFreshCurrentExecution() {
   for (const field of Object.keys(c39CurrentExecutionShape)) if (current[field] !== c39CurrentExecutionShape[field]) return null;
   for (const field of ['run_id', 'session_id', 'turn_id', 'repository', 'exact_head', 'exact_tree', 'now']) if (!nonEmptyString(current[field])) return null;
   if (!c8Sha.test(current.exact_head) || !c8Sha.test(current.exact_tree) || !Number.isFinite(Date.parse(current.now))) return null;
+  if (!c39ExecutionIdentityFields.every((field) => nonEmptyString(current[field]))) return null;
   for (const field of ['run_id', 'session_id', 'turn_id', 'repository', 'exact_head', 'exact_tree']) if (current[field] !== expected[field]) return null;
   let rootWorkScope;
   try { rootWorkScope = c39NormalizeScope(current.root_work_scope, 'current_execution.root_work_scope'); } catch { return null; }
@@ -6193,8 +6207,13 @@ function c39CurrentExecutionAuthority() {
   return c39ResolveFreshCurrentExecution();
 }
 
+function c39ExecutionIdentityMatches(identity, expected) {
+  return !!identity && !!expected && c39ExecutionIdentityFields.every((field) => identity[field] === expected[field]);
+}
+
 function c39C11Authority(current = c39ResolveFreshCurrentExecution()) {
   if (!current) return null;
+  if (!c39ExecutionIdentityMatches(current, c39ImplementationExecutionIdentity)) return null;
   return {
     run_id: current.run_id,
     session_id: current.session_id,
@@ -6500,16 +6519,34 @@ function c39C10GrantBody(grant) {
   return body;
 }
 
-function c10ReviewGrant() {
-  return c28TrustedLookup('review-admission', 'c10-review-admission-trusted');
+function c10ReviewGrant(grantId = 'c10-review-admission-trusted') {
+  return c28TrustedLookup('review-admission', grantId);
+}
+function c39C10ReviewRequest(grant = c10ReviewGrant()) {
+  return {
+    role: grant.role,
+    repository: grant.repository,
+    pull_request: grant.pull_request,
+    target: grant.target,
+    grant,
+    execution_identity: c8Clone(grant.execution_identity),
+    checks: grant.checks,
+    prior_request: false,
+    readback: true,
+    head: grant.head,
+    tree: grant.tree
+  };
 }
 
 function c10ReviewRequestAdmission(request = {}) {
-  const authority = c39C11Authority();
-  const trusted = c10ReviewGrant();
+  const authority = c39CurrentExecutionAuthority();
   const grant = request && request.grant;
+  const trusted = c10ReviewGrant(grant && grant.grant_id);
   const authorityCompatible = !!authority && ['run_id', 'session_id', 'turn_id'].every((field) => grant && grant[field] === authority[field]) && grant && grant.repository === authority.repository && grant.head === authority.exact_head && grant.tree === authority.exact_tree;
-  const valid = authorityCompatible && !!trusted && !!grant && grant[c39TrustedEvidenceToken] === c39TrustedEvidenceToken && c8Json(grant) === c8Json(trusted) &&
+  const identityCompatible = c39ExecutionIdentityMatches(authority, c39TechnicalG4ExecutionIdentity) &&
+    c39ExecutionIdentityMatches(trusted && trusted.execution_identity, c39TechnicalG4ExecutionIdentity) &&
+    c39ExecutionIdentityMatches(request.execution_identity, c39TechnicalG4ExecutionIdentity);
+  const valid = identityCompatible && authorityCompatible && !!trusted && !!grant && grant[c39TrustedEvidenceToken] === c39TrustedEvidenceToken && c8Json(grant) === c8Json(trusted) &&
     request.role === trusted.role && request.repository === trusted.repository &&
     request.pull_request === trusted.pull_request && request.target === trusted.target &&
     request.head === trusted.head && request.tree === trusted.tree &&
@@ -6531,18 +6568,7 @@ function c10ReviewRequestAdmission(request = {}) {
 
 test('C39 RED C10 must reread current trusted state instead of a cached copy', () => {
   const reviewGrant = c10ReviewGrant();
-  const request = {
-    role: reviewGrant.role,
-    repository: reviewGrant.repository,
-    pull_request: reviewGrant.pull_request,
-    target: reviewGrant.target,
-    grant: reviewGrant,
-    checks: reviewGrant.checks,
-    prior_request: false,
-    readback: true,
-    head: reviewGrant.head,
-    tree: reviewGrant.tree
-  };
+  const request = c39C10ReviewRequest(reviewGrant);
   const priorStore = c28TrustedAuthorityStore;
   try {
     c28TrustedAuthorityStore = { resolve() { return null; } };
@@ -6550,6 +6576,54 @@ test('C39 RED C10 must reread current trusted state instead of a cached copy', (
   } finally {
     c28TrustedAuthorityStore = priorStore;
   }
+});
+test('C39 F6 current execution identity is complete and boundary-specific', () => {
+  const reviewGrant = c10ReviewGrant();
+  const request = c39C10ReviewRequest(reviewGrant);
+  const technicalRecord = (record, overrides = {}) => ({
+    ...record,
+    ...c39TechnicalG4ExecutionIdentity,
+    ...overrides
+  });
+  const c10Rejects = (transform, label) => {
+    const result = c39WithCurrentExecutionRecord(transform, () => c10ReviewRequestAdmission(request));
+    assert.equal(result.decision, 'REVIEW_REQUEST_REJECTED', label);
+  };
+
+  c10Rejects((record) => record, 'Luna implementation authority cannot admit C10');
+  for (const [label, overrides] of [
+    ['wrong role', { role: 'implementation/amendment worker' }],
+    ['wrong provider', { provider: 'other-provider' }],
+    ['wrong model', { canonical_model: ['GPT', '-5.6 Luna'].join('') }],
+    ['wrong reasoning', { reasoning: 'Max' }]
+  ]) c10Rejects((record) => technicalRecord(record, overrides), label);
+
+  c10Rejects(() => null, 'missing current-execution authority');
+  c10Rejects((record) => technicalRecord(record, { schema: 'current-execution-authority/v0' }), 'malformed schema');
+  c10Rejects((record) => {
+    const malformed = technicalRecord(record);
+    delete malformed.evidence_identity;
+    return malformed;
+  }, 'malformed trusted evidence identity');
+  for (const field of ['run_id', 'session_id', 'turn_id']) {
+    c10Rejects((record) => technicalRecord(record, { [field]: 'stale-' + field }), 'stale ' + field);
+  }
+  c10Rejects((record) => technicalRecord(record, { exact_head: c8Hash('moved-c10-head') }), 'moved head authority');
+  c10Rejects((record) => technicalRecord(record, { exact_tree: c8Hash('moved-c10-tree') }), 'moved tree authority and retained grant');
+
+  const wrongRequest = {
+    ...request,
+    execution_identity: { ...request.execution_identity, reasoning: 'Max' }
+  };
+  const wrongRequestResult = c39WithCurrentExecutionRecord((record) => technicalRecord(record), () =>
+    c10ReviewRequestAdmission(wrongRequest));
+  assert.equal(wrongRequestResult.decision, 'REVIEW_REQUEST_REJECTED', 'mismatched C10 request identity');
+
+  const implementationGrant = c11Grant({ mode: 'exclusive-auto-code' });
+  const g4C11 = c39WithCurrentExecutionRecord((record) => technicalRecord(record), () =>
+    c11DelegationDecision({ operation: 'spawn_agent' }, implementationGrant));
+  assert.equal(g4C11.allowed, false, 'technical-G4 authority cannot admit C11');
+  assert.equal(g4C11.reason, 'DELEGATION_NOT_AUTHORISED');
 });
 
 test('C39 RED A5 stale current-execution authority cannot admit retained grants or transfer ownership', () => {
@@ -6567,18 +6641,7 @@ test('C39 RED A5 stale current-execution authority cannot admit retained grants 
   assert.equal(movedHeadTree.allowed, false);
 
   const reviewGrant = c10ReviewGrant();
-  const reviewRequest = {
-    role: reviewGrant.role,
-    repository: reviewGrant.repository,
-    pull_request: reviewGrant.pull_request,
-    target: reviewGrant.target,
-    grant: reviewGrant,
-    checks: reviewGrant.checks,
-    prior_request: false,
-    readback: true,
-    head: reviewGrant.head,
-    tree: reviewGrant.tree
-  };
+  const reviewRequest = c39C10ReviewRequest(reviewGrant);
   const movedReview = c39WithCurrentExecutionRecord((record) => ({
     ...record,
     run_id: 'moved-review-run',
@@ -6618,20 +6681,12 @@ test('C39 corrected trusted grants, review admission, and evidence-bound lifecyc
   assert.equal(c11DelegationDecision({ operation: 'spawn_agent' }, grant).allowed, true);
   assert.equal(c11DelegationDecision({ operation: 'spawn_agent' }, grant).reason, 'GRANT_ALREADY_CONSUMED');
   const reviewGrant = c10ReviewGrant();
-  const reviewRequest = {
-    role: reviewGrant.role,
-    repository: reviewGrant.repository,
-    pull_request: reviewGrant.pull_request,
-    target: reviewGrant.target,
-    grant: reviewGrant,
-    checks: reviewGrant.checks,
-    prior_request: false,
-    readback: true,
-    head: reviewGrant.head,
-    tree: reviewGrant.tree
-  };
-  assert.equal(c10ReviewRequestAdmission(reviewRequest).decision, 'REVIEW_REQUEST_ADMITTED');
-  assert.equal(c10ReviewRequestAdmission(reviewRequest).decision, 'REVIEW_REQUEST_REJECTED');
+  const reviewRequest = c39C10ReviewRequest(reviewGrant);
+  const c10Admissions = c39WithCurrentExecutionRecord((record) => ({ ...record, ...c39TechnicalG4ExecutionIdentity }), () => [
+    c10ReviewRequestAdmission(reviewRequest).decision,
+    c10ReviewRequestAdmission(reviewRequest).decision
+  ]);
+  assert.deepEqual(c10Admissions, ['REVIEW_REQUEST_ADMITTED', 'REVIEW_REQUEST_REJECTED']);
   assert.equal(c11AutoCodeLifecycle('replacement-after-loss-with-new-grant', c11TerminalEvidence('result-loss'), c11ReplacementGrant()).replacement, 'allowed');
 });
 
