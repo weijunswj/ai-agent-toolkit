@@ -561,6 +561,7 @@ test('project manifests include the current project modules without repo-wide MC
     'development.local-ai-stack-safety',
     'development.managed-app-foundation-review',
     'development.project-completion-audit',
+    'development.repo-loop-core',
     'development.self-hosted-service-safety',
     'development.toolkit-guardrails',
     'development.toolkit-local-bridge',
