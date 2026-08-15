@@ -5,9 +5,9 @@
   "title": "Repository Loop Core",
   "module_path": "_projects/development/repo-loop-core",
   "main_path": "_projects/development/repo-loop-core/_main",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "version_policy": "semver",
-  "version_notes": "Initial first-party source-only A1 contract/default-off foundation for #318 under DL-318-LOOP-BOOTSTRAP-SLICE-A-001-A2; no published surface or activation authority is introduced.",
+  "version_notes": "A1 R1-R8 contract-hardening patch for #318 under DL-318-LOOP-BOOTSTRAP-SLICE-A-001-A2; preserves source-only/default-off status with no published surface or activation authority.",
   "outputs": [],
   "writes": {
     "allowed": [],

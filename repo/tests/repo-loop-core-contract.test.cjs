@@ -28,7 +28,8 @@ function candidate(overrides = {}) {
 }
 
 function authorityInput(overrides = {}) {
-  const identity = candidate(overrides.identity);
+  const { identity: identityOverride, ...additional } = overrides;
+  const identity = candidate(identityOverride);
   const local = { ...identity, ...(overrides.local || {}) };
   const remote = { available: true, ...identity, ...(overrides.remote || {}) };
   return {
@@ -37,7 +38,7 @@ function authorityInput(overrides = {}) {
     design_lock: { id: DESIGN_LOCK, scope_id: 'A1-contract-default-off' },
     risk_tier: 'T3',
     current_operation_time: { source: 'trusted-controller', observed_at: '2026-08-15T06:00:00.000Z', evidence_id: 'op-097' },
-    ...overrides,
+    ...additional,
   };
 }
 
@@ -196,4 +197,218 @@ test('contract schemas are versioned and do not define Web runtime authority', (
     const text = JSON.stringify(schema);
     assert.doesNotMatch(text, /web_model|web_reasoning|web_provider|controller_model/);
   }
+});
+test('verified authority, parsed packets, and verified packets are immutable normalized copies', () => {
+  const core = require(runtimePath);
+  const authorityInputValue = JSON.parse(JSON.stringify(admitted()));
+  const authorityResult = core.validateAuthoritySnapshot(authorityInputValue);
+  assert.equal(authorityResult.valid, true);
+  assert.notStrictEqual(authorityResult.value, authorityInputValue);
+  assert.equal(Object.isFrozen(authorityResult.value), true);
+  assert.equal(Object.isFrozen(authorityResult.value.candidate), true);
+  authorityInputValue.candidate.head = 'c'.repeat(40);
+  assert.equal(authorityResult.value.candidate.head, SHA);
+  assert.equal(Object.isFrozen(authorityInputValue), false);
+  assert.equal(Object.isFrozen(authorityInputValue.candidate), false);
+
+  const packet = core.buildTerminalPacket(terminalInput());
+  const callerPacket = JSON.parse(JSON.stringify(packet));
+  const verified = core.verifyTerminalPacket(callerPacket);
+  assert.equal(verified.valid, true);
+  assert.notStrictEqual(verified.value, callerPacket);
+  assert.equal(Object.isFrozen(verified.value), true);
+  assert.equal(Object.isFrozen(verified.value.validation.local), true);
+  callerPacket.blocker_state = 'blocked';
+  callerPacket.validation.local[0].status = 'fail';
+  assert.equal(verified.value.blocker_state, 'none');
+  assert.equal(verified.value.validation.local[0].status, 'pass');
+  assert.equal(Object.isFrozen(callerPacket), false);
+  assert.equal(Object.isFrozen(callerPacket.validation.local), false);
+
+  const callerPacketForParse = JSON.parse(JSON.stringify(packet));
+  const parsed = core.parseTerminalPacket(JSON.stringify(callerPacketForParse));
+  assert.equal(parsed.valid, true);
+  assert.equal(Object.isFrozen(parsed.value), true);
+  assert.equal(Object.isFrozen(parsed.value.authority_snapshot), true);
+  callerPacketForParse.findings.records.push({ id: 'caller-only' });
+  assert.equal(parsed.value.findings.records.length, 0);
+  assert.equal(Object.isFrozen(callerPacketForParse), false);
+  assert.throws(() => { parsed.value.blocker_state = 'blocked'; }, TypeError);
+});
+
+test('trusted operation time accepts only a real canonical UTC instant', () => {
+  const core = require(runtimePath);
+  for (const observed_at of [
+    '2026-13-15T06:00:00.000Z',
+    '2026-00-15T06:00:00.000Z',
+    '2026-02-29T06:00:00.000Z',
+    '2026-04-31T06:00:00.000Z',
+    '2026-08-15T24:00:00.000Z',
+    '2026-08-15T06:60:00.000Z',
+    '2026-08-15T06:00:60.000Z',
+  ]) {
+    assert.equal(core.validateCurrentOperationTime({ source: 'trusted-controller', observed_at, evidence_id: 'synthetic-time' }).valid, false, observed_at);
+  }
+  const valid = '2024-02-29T23:59:59.999Z';
+  const result = core.validateCurrentOperationTime({ source: 'trusted-controller', observed_at: valid, evidence_id: 'synthetic-time' });
+  assert.equal(result.valid, true);
+  assert.equal(result.value.observed_at, valid);
+  assert.equal(new Date(result.value.observed_at).toISOString(), valid);
+});
+
+test('optional assignment identifiers are strict nonblank strings and are copied only after validation', () => {
+  const core = require(runtimePath);
+  for (const field of ['assignment_id', 'evidence_ref']) {
+    for (const value of ['', '   ', '\t', 42, null]) {
+      const result = core.validateExecutionAssignment({ role: 'implementation-worker', [field]: value });
+      assert.equal(result.valid, false, field + '=' + String(value));
+    }
+  }
+  const assignment = {
+    role: 'implementation-worker',
+    provider: 'openai',
+    model: 'gpt-5.6',
+    reasoning: 'max',
+    assignment_id: 'assignment-100',
+    evidence_ref: 'evidence:run-100',
+  };
+  const result = core.validateExecutionAssignment(assignment);
+  assert.equal(result.valid, true);
+  assert.deepEqual({ ...result.value }, assignment);
+  assert.equal(Object.isFrozen(assignment), false);
+});
+
+test('DEFAULT OFF refusal clones structured operations before freezing the response', () => {
+  const core = require(runtimePath);
+  const operation = { name: 'review', nested: { enabled: true }, steps: [{ name: 'inspect' }] };
+  const refusal = core.execute(operation);
+  assert.equal(refusal.status, 'refused');
+  assert.notStrictEqual(refusal.operation, operation);
+  assert.deepEqual(refusal.operation, operation);
+  assert.equal(Object.isFrozen(refusal), true);
+  assert.equal(Object.isFrozen(refusal.operation), true);
+  assert.equal(Object.isFrozen(refusal.operation.nested), true);
+  assert.equal(Object.isFrozen(refusal.operation.steps[0]), true);
+  assert.equal(Object.isFrozen(operation), false);
+  assert.equal(Object.isFrozen(operation.nested), false);
+  assert.equal(Object.isFrozen(operation.steps[0]), false);
+  operation.nested.enabled = false;
+  operation.steps.push({ name: 'caller-mutation' });
+  assert.equal(refusal.operation.nested.enabled, true);
+  assert.equal(refusal.operation.steps.length, 1);
+});
+
+test('findings require identifying fields and state/cardinality consistency', () => {
+  const core = require(runtimePath);
+  const required = ['id', 'kind', 'disposition', 'evidence_ref', 'summary'];
+  assert.throws(() => core.buildTerminalPacket({
+    ...terminalInput(),
+    findings: { state: 'present', records: [{}] },
+  }), /FINDING_ENVELOPE_INVALID/);
+  for (const field of required) {
+    const record = { id: 'finding-1', kind: 'blocker', disposition: 'open', evidence_ref: 'evidence:finding-1', summary: 'synthetic finding' };
+    delete record[field];
+    assert.throws(() => core.buildTerminalPacket({
+      ...terminalInput(),
+      findings: { state: 'present', records: [record] },
+    }), /FINDING_ENVELOPE_INVALID/, 'missing ' + field);
+  }
+  const validRecord = { id: 'finding-1', kind: 'blocker', disposition: 'open', evidence_ref: 'evidence:finding-1', summary: 'synthetic finding' };
+  const validPacket = core.buildTerminalPacket({
+    ...terminalInput(),
+    findings: { state: 'present', records: [validRecord] },
+    blocker_state: 'blocked',
+  });
+  assert.deepEqual(validPacket.findings.records, [validRecord]);
+  for (const [state, records] of [
+    ['none', [validRecord]],
+    ['present', []],
+    ['deferred', []],
+    ['unavailable', [validRecord]],
+  ]) {
+    assert.throws(() => core.buildTerminalPacket({
+      ...terminalInput(),
+      findings: { state, records },
+      blocker_state: state === 'unavailable' ? 'unavailable' : 'none',
+    }), /FINDING_ENVELOPE_INVALID/, state + ' cardinality');
+  }
+});
+
+test('terminal state is fail-closed across validation, findings, reconciliation, and contradictions', () => {
+  const core = require(runtimePath);
+  for (const status of ['fail', 'pending']) {
+    const input = terminalInput();
+    input.validation.hosted[0].status = status;
+    assert.throws(() => core.buildTerminalPacket(input), /MISSING_UNDERLYING_EVIDENCE|UNAVAILABLE_EVIDENCE_UNBLOCKED/);
+  }
+  for (const state of ['incomplete', 'unavailable']) {
+    const input = terminalInput();
+    input.reconciliation.state = state;
+    assert.throws(() => core.buildTerminalPacket(input), /RECONCILIATION_EVIDENCE_UNAVAILABLE|UNAVAILABLE_EVIDENCE_UNBLOCKED/);
+  }
+  const unavailableFinding = terminalInput();
+  unavailableFinding.findings = { state: 'unavailable', records: [] };
+  unavailableFinding.blocker_state = 'none';
+  assert.throws(() => core.buildTerminalPacket(unavailableFinding), /FINDING_EVIDENCE_UNAVAILABLE|UNAVAILABLE_EVIDENCE_UNBLOCKED/);
+
+  const contradictions = terminalInput();
+  contradictions.contradictions = ['validation contradicts reconciliation'];
+  assert.throws(() => core.buildTerminalPacket(contradictions), /CONTRADICTION_UNBLOCKED|UNAVAILABLE_EVIDENCE_UNBLOCKED/);
+
+  const findingsMismatch = terminalInput();
+  findingsMismatch.findings = { state: 'present', records: [] };
+  assert.throws(() => core.buildTerminalPacket(findingsMismatch), /FINDING_ENVELOPE_INVALID/);
+
+  const blocked = terminalInput();
+  blocked.validation.hosted[0].status = 'pending';
+  blocked.reconciliation.state = 'incomplete';
+  blocked.findings = { state: 'unavailable', records: [] };
+  blocked.blocker_state = 'blocked';
+  blocked.unavailable_evidence = ['synthetic validation, finding, and reconciliation evidence unavailable'];
+  assert.doesNotThrow(() => core.buildTerminalPacket(blocked));
+  assert.doesNotThrow(() => core.buildTerminalPacket(terminalInput()));
+});
+
+test('authority input is closed-world before construction and digesting', () => {
+  const core = require(runtimePath);
+  for (const extra of [
+    { arbitrary_claim: 'ignored-must-fail' },
+    { web: { model: 'synthetic-web-model' } },
+    { controller: { reasoning: 'synthetic-controller-reasoning' } },
+  ]) {
+    assertCode(() => core.admitAuthority({ ...authorityInput(), ...extra }), 'UNEXPECTED_FIELD');
+  }
+  const input = authorityInput();
+  const authority = core.admitAuthority(input);
+  assert.equal(authority.candidate.repository_id, input.local.repository_id);
+  assert.equal(authority.remote_evidence.head, input.remote.head);
+  assert.equal(authority.current_operation_time.observed_at, input.current_operation_time.observed_at);
+});
+
+test('credential-bearing repository URLs are rejected before evidence copies and safe identities remain accepted', () => {
+  const core = require(runtimePath);
+  const credentialBearing = 'https://synthetic-user:synthetic-token-placeholder@example.invalid/weijunswj/ai-agent-toolkit.git';
+  assertCode(() => core.admitAuthority(authorityInput({ identity: { remote_url: credentialBearing } })), 'CREDENTIAL_BEARING_REMOTE_URL');
+
+  const safeAuthority = core.admitAuthority(authorityInput({ identity: { remote_url: 'https://example.invalid/weijunswj/ai-agent-toolkit.git' } }));
+  const packet = core.buildTerminalPacket(terminalInput(safeAuthority));
+  const evidenceText = [safeAuthority, packet, JSON.stringify(packet), core.canonicalJson(packet)].map((value) => JSON.stringify(value)).join('\n');
+  assert.doesNotMatch(evidenceText, /synthetic-token-placeholder/);
+  assert.match(safeAuthority.repository.remote_url, /^https:\/\/example\.invalid\//);
+});
+
+test('schemas express the tightened time, assignment, finding, and remote-identity contracts', () => {
+  const authoritySchema = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'development', 'repo-loop-core', '_main', 'authority-contract.schema.json'), 'utf8'));
+  const packetSchema = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'development', 'repo-loop-core', '_main', 'terminal-packet.schema.json'), 'utf8'));
+  for (const schema of [authoritySchema, packetSchema]) {
+    assert.equal(schema.$defs.time.properties.observed_at.format, 'date-time');
+    assert.doesNotMatch('https://synthetic-user:synthetic-token-placeholder@example.invalid/repo.git', new RegExp('^' + schema.$defs.identity.properties.remote_url.pattern + '$'));
+  }
+  const assignment = packetSchema.$defs.assignment;
+  for (const field of ['assignment_id', 'evidence_ref']) {
+    assert.equal(assignment.properties[field].minLength, 1);
+    assert.ok(assignment.properties[field].pattern);
+  }
+  assert.deepEqual(packetSchema.$defs.findingRecord.required, ['id', 'kind', 'disposition', 'evidence_ref', 'summary']);
+  assert.ok(packetSchema.$defs.findings.allOf);
 });
