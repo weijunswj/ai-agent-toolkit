@@ -1,0 +1,11 @@
+{
+  "source_repo": "weijunswj/ai-agent-toolkit",
+  "source_ref": "first-party-authored",
+  "source_commit": "1dc737afa90ead971a03ef271c70b911e30e2ba5",
+  "source_lifecycle": "retired_after_migration",
+  "source_role": "migration_provenance_only",
+  "source_update_policy": "none",
+  "public_attribution_required": false,
+  "notes": "First-party A1 source authored in the admitted canonical main lineage for #318. The locked commit is the canonical review anchor, not a third-party dependency; no external files are copied or adapted and no upstream update is expected.",
+  "files": []
+}
