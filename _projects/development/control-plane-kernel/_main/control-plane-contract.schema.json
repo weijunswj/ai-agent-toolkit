@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.control-plane.kernel.v1",
+  "title": "Toolkit A1 Control-Plane Kernel Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "decision", "reason_code", "operation_type", "operation_class", "target_class", "secret_classification", "operation_digest", "target_digest", "ticket_status", "privacy_safe", "structural_impact_required"],
+  "properties": {
+    "contract_version": { "const": "toolkit.control-plane.kernel.v1" },
+    "decision": { "enum": ["allow", "ask", "deny", "unsupported"] },
+    "reason_code": { "type": "string", "minLength": 1 },
+    "operation_type": { "type": ["string", "null"] },
+    "operation_class": { "type": ["string", "null"] },
+    "target_class": { "type": "string", "minLength": 1 },
+    "secret_classification": { "enum": ["none", "possible", "confirmed"] },
+    "operation_digest": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
+    "target_digest": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
+    "ticket_status": { "type": "string", "minLength": 1 },
+    "privacy_safe": { "const": true },
+    "structural_impact_required": { "type": "boolean" }
+  },
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "remoteIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "kind", "scheme", "host", "port", "path", "canonical"],
+      "properties": {
+        "contract_version": { "const": "toolkit.control-plane.remote-identity.v1" },
+        "kind": { "enum": ["url", "scp"] },
+        "scheme": { "enum": ["https", "ssh", "scp"] },
+        "host": { "type": "string", "minLength": 1 },
+        "port": { "type": ["integer", "null"], "minimum": 1, "maximum": 65535 },
+        "path": { "type": "string", "minLength": 1 },
+        "canonical": { "type": "string", "minLength": 1 },
+        "user": { "type": "string", "minLength": 1 }
+      }
+    },
+    "authorityTicket": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "ticket_id", "issuer_role", "issuer_identity_digest", "session_id", "turn_id", "call_id", "operation_type", "operation_digest", "target_digest", "scope", "issued_at", "expires_at", "max_uses", "consumed_count"],
+      "properties": {
+        "contract_version": { "const": "toolkit.control-plane.authority-ticket.v1" },
+        "ticket_id": { "$ref": "#/$defs/digest" },
+        "issuer_role": { "enum": ["executor", "controller"] },
+        "issuer_identity_digest": { "$ref": "#/$defs/digest" },
+        "session_id": { "type": "string", "minLength": 1 },
+        "turn_id": { "type": "string", "minLength": 1 },
+        "call_id": { "type": "string", "minLength": 1 },
+        "operation_type": { "type": "string", "minLength": 1 },
+        "operation_digest": { "$ref": "#/$defs/digest" },
+        "target_digest": { "$ref": "#/$defs/digest" },
+        "scope": { "type": ["string", "null"] },
+        "issued_at": { "type": "string", "minLength": 1 },
+        "expires_at": { "type": "string", "minLength": 1 },
+        "max_uses": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "consumed_count": { "type": "integer", "minimum": 0, "maximum": 8 }
+      }
+    }
+  }
+}

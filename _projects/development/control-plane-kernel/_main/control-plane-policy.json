@@ -1,0 +1,19 @@
+{
+  "schema_version": "toolkit.control-plane.policy.v1",
+  "policy_version": "1.0.0",
+  "design_lock": "DL-AGENT-NATIVE-LOOP-MVP-001-A1",
+  "default_off": true,
+  "decision_contract": ["allow", "ask", "deny", "unsupported"],
+  "operation_authority": "typed-operation-only",
+  "operation_types": ["filesystem.read", "filesystem.write", "filesystem.create", "filesystem.move", "filesystem.delete", "git.read", "git.branch", "git.push", "github.read", "github.mutation", "network.request", "external.mutation", "compound", "shell"],
+  "secret_classifications": ["none", "possible", "confirmed"],
+  "remote_identity_contract": "toolkit.control-plane.remote-identity.v1",
+  "authority_ticket": { "contract_version": "toolkit.control-plane.authority-ticket.v1", "max_uses": 8, "max_lifetime_ms": 300000, "atomic_consumption": true, "immutable_binding": true, "bounded_compaction": true },
+  "structural_impact": {
+    "contract_version": "toolkit.control-plane.structural-impact.v1",
+    "search_scope_for_structural_change": "targeted-repo-wide",
+    "consumer_categories": ["source-shape-tests", "fixtures-and-snapshots", "generated-surface-assertions", "docs-config-contracts", "imports-registrations", "scripts-manifests-adapters"],
+    "temporary_compatibility_rule": { "issue": 342, "status": "active-until-propagation-verification" }
+  },
+  "privacy": { "digest_algorithm": "sha256", "result_forbidden": ["raw_command", "raw_path", "remote_userinfo", "remote_query", "secret_value", "environment_value"] }
+}

@@ -84,7 +84,8 @@ Known baseline context:
 - `_projects/development/hostinger-coolify-production-guide`
 - `_projects/development/self-hosted-service-safety`
 - `_projects/development/toolkit-local-bridge`
-- `_projects/development/toolkit-guardrails`
+- `_projects/development/control-plane-kernel`
+- `_projects/development/toolkit-guardrails` (retired historical source and regression evidence; not current control-plane authority)
 - `_projects/development/windows-localhost-workflows`
 - `_projects/knowledge/knowledge-index-updater`
 - `_projects/n8n/local-setup`

@@ -1,0 +1,5 @@
+{
+  "contract_version": "toolkit.control-plane.kernel.v1",
+  "policy_version": "1.0.0",
+  "required_case_ids": ["default-off", "remote-identity-r8-001", "remote-identity-r8-002", "mutating-nominal-read", "overwrite-no-clobber", "attached-redirection", "broadened-push-target", "hidden-shell-expansion", "mutating-git-branch", "compound-component-role-limit", "replay-slot-reclamation", "controller-github-one-shot", "unknown-resolver-link-type", "unc-share-root", "secret-classification", "caller-finality", "structural-impact"]
+}

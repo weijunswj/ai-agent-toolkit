@@ -3,6 +3,7 @@
   "category": "development",
   "name": "toolkit-guardrails",
   "title": "Toolkit Guardrails",
+  "lifecycle": "retired",
   "module_path": "_projects/development/toolkit-guardrails",
   "main_path": "_projects/development/toolkit-guardrails/_main",
   "version": "1.0.5",
