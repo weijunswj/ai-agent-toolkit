@@ -12,6 +12,8 @@ const IDENTITY_KEYS = ['repository_id', 'remote_url', 'child', 'pull_request', '
 const FINALITY_KEY = /(?:eligible|green|passed|valid|certified|approved|finality|checks?)/i;
 const WEB_RUNTIME_KEY = /(?:web|controller).*(?:model|provider|reasoning|runtime)|(?:model|provider|reasoning|runtime).*(?:web|controller)/i;
 const AUTHORITY_INPUT_KEYS = ['local', 'remote', 'design_lock', 'risk_tier', 'current_operation_time'];
+const REMOTE_IDENTITY_PATTERN = /^(?:(?:[A-Za-z][A-Za-z0-9+.-]*:\/\/)(?![^/?#]*@)(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])(?::[0-9]+)?(?:\/[^\\\s?#]*)?|(?!(?:[A-Za-z][A-Za-z0-9+.-]*:\/\/))\S(?:[^?#]*\S)?)$/;
+const REMOTE_SCHEME_PATTERN = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
 
 class ContractError extends Error {
   constructor(code, message = code) { super(message); this.name = 'ContractError'; this.code = code; }
@@ -23,14 +25,22 @@ const text = (value) => typeof value === 'string' && value.length > 0 && value.t
 const nonBlankIdentifier = (value) => { if (!text(value)) fail('EXECUTION_ASSIGNMENT_IDENTIFIER_INVALID'); return value; };
 function credentialFreeRemoteUrl(value) {
   if (!text(value)) fail('IDENTITY_INVALID');
-  if (!/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(value)) return value;
   if (value.includes('?') || value.includes('#')) fail('CREDENTIAL_BEARING_REMOTE_URL');
+  const schemeStyle = REMOTE_SCHEME_PATTERN.test(value);
+  if (schemeStyle && /^[^/?#]*@/.test(value.slice(value.indexOf('://') + 3))) fail('CREDENTIAL_BEARING_REMOTE_URL');
+  if (!schemeStyle) {
+    if (!REMOTE_IDENTITY_PATTERN.test(value)) fail('IDENTITY_INVALID');
+    return value;
+  }
   try {
     const parsed = new URL(value);
+    if (!parsed.hostname) fail('IDENTITY_INVALID');
     if (parsed.username || parsed.password) fail('CREDENTIAL_BEARING_REMOTE_URL');
   } catch (error) {
     if (error instanceof ContractError) throw error;
+    fail('IDENTITY_INVALID');
   }
+  if (!REMOTE_IDENTITY_PATTERN.test(value)) fail('IDENTITY_INVALID');
   return value;
 }
 function keys(value, allowed, required = []) {

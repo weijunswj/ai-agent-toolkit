@@ -23,19 +23,19 @@
       "type": "object", "additionalProperties": false,
       "required": ["repository_id", "remote_url", "child", "pull_request", "branch", "base", "merge_base", "head", "tree"],
       "properties": {
-        "repository_id": { "type": "string", "pattern": "^\\S+/\\S+$" }, "remote_url": { "type": "string", "minLength": 1, "pattern": "^(?![A-Za-z][A-Za-z0-9+.-]*://[^/?#]*@)(?![A-Za-z][A-Za-z0-9+.-]*://[^?#]*[?#])[\\s\\S]+$" },
+        "repository_id": { "type": "string", "pattern": "^\\S+/\\S+$" }, "remote_url": { "type": "string", "minLength": 1, "pattern": "^(?:(?:[A-Za-z][A-Za-z0-9+.-]*:\\/\\/)(?![^/?#]*@)(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|\\[[0-9A-Fa-f:.]+\\])(?::[0-9]+)?(?:\\/[^\\\\\\s?#]*)?|(?!(?:[A-Za-z][A-Za-z0-9+.-]*:\\/\\/))\\S(?:[^?#]*\\S)?)$" },
         "child": { "type": "integer", "minimum": 1 }, "pull_request": { "type": "integer", "minimum": 1 }, "branch": { "type": "string", "minLength": 1 },
         "base": { "$ref": "#/$defs/sha" }, "merge_base": { "$ref": "#/$defs/sha" }, "head": { "$ref": "#/$defs/sha" }, "tree": { "$ref": "#/$defs/sha" }
       }
     },
     "repository": {
       "type": "object", "additionalProperties": false, "required": ["id", "remote_url"],
-      "properties": { "id": { "type": "string", "minLength": 1 }, "remote_url": { "type": "string", "minLength": 1, "pattern": "^(?![A-Za-z][A-Za-z0-9+.-]*://[^/?#]*@)(?![A-Za-z][A-Za-z0-9+.-]*://[^?#]*[?#])[\\s\\S]+$" } }
+      "properties": { "id": { "type": "string", "minLength": 1 }, "remote_url": { "type": "string", "minLength": 1, "pattern": "^(?:(?:[A-Za-z][A-Za-z0-9+.-]*:\\/\\/)(?![^/?#]*@)(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|\\[[0-9A-Fa-f:.]+\\])(?::[0-9]+)?(?:\\/[^\\\\\\s?#]*)?|(?!(?:[A-Za-z][A-Za-z0-9+.-]*:\\/\\/))\\S(?:[^?#]*\\S)?)$" } }
     },
     "evidence": {
       "type": "object", "additionalProperties": false, "required": ["available", "repository_id", "remote_url", "child", "pull_request", "branch", "base", "merge_base", "head", "tree"],
       "properties": {
-        "available": { "const": true }, "repository_id": { "type": "string", "pattern": "^\\S+/\\S+$" }, "remote_url": { "type": "string", "minLength": 1, "pattern": "^(?![A-Za-z][A-Za-z0-9+.-]*://[^/?#]*@)(?![A-Za-z][A-Za-z0-9+.-]*://[^?#]*[?#])[\\s\\S]+$" },
+        "available": { "const": true }, "repository_id": { "type": "string", "pattern": "^\\S+/\\S+$" }, "remote_url": { "type": "string", "minLength": 1, "pattern": "^(?:(?:[A-Za-z][A-Za-z0-9+.-]*:\\/\\/)(?![^/?#]*@)(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|\\[[0-9A-Fa-f:.]+\\])(?::[0-9]+)?(?:\\/[^\\\\\\s?#]*)?|(?!(?:[A-Za-z][A-Za-z0-9+.-]*:\\/\\/))\\S(?:[^?#]*\\S)?)$" },
         "child": { "type": "integer", "minimum": 1 }, "pull_request": { "type": "integer", "minimum": 1 }, "branch": { "type": "string", "minLength": 1 },
         "base": { "$ref": "#/$defs/sha" }, "merge_base": { "$ref": "#/$defs/sha" }, "head": { "$ref": "#/$defs/sha" }, "tree": { "$ref": "#/$defs/sha" }
       }

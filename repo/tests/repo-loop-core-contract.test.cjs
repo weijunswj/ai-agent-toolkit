@@ -459,6 +459,53 @@ test('remote URL identity fails closed on userinfo, every URL query, and every U
     assert.doesNotThrow(() => core.admitAuthority(authorityInput({ identity: { remote_url } })));
   }
 });
+test('malformed scheme-style remote identities fail closed across runtime and both schemas', () => {
+  const core = require(runtimePath);
+  const malformed = 'https://[synthetic-invalid-host';
+  assertCode(() => core.admitAuthority(authorityInput({ identity: { remote_url: malformed } })), 'IDENTITY_INVALID');
+
+  const authoritySchema = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'development', 'repo-loop-core', '_main', 'authority-contract.schema.json'), 'utf8'));
+  const packetSchema = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'development', 'repo-loop-core', '_main', 'terminal-packet.schema.json'), 'utf8'));
+  const remoteProperties = [
+    authoritySchema.$defs.identity.properties.remote_url,
+    authoritySchema.$defs.repository.properties.remote_url,
+    authoritySchema.$defs.evidence.properties.remote_url,
+    packetSchema.$defs.identity.properties.remote_url,
+    packetSchema.$defs.evidence.properties.remote_url,
+    packetSchema.$defs.authority.properties.repository.properties.remote_url,
+  ];
+  assert.equal(new Set(remoteProperties.map((property) => property.pattern)).size, 1);
+  const remotePattern = new RegExp('^' + remoteProperties[0].pattern + '$');
+  assert.doesNotMatch(malformed, remotePattern);
+
+  const valid = admitted();
+  const malformedSnapshot = { ...valid, candidate: { ...valid.candidate, remote_url: malformed } };
+  assert.equal(core.validateAuthoritySnapshot(malformedSnapshot).valid, false);
+  const validPacket = core.buildTerminalPacket(terminalInput());
+  const malformedPacket = { ...validPacket, identity: { ...validPacket.identity, remote_url: malformed } };
+  assert.equal(core.verifyTerminalPacket(malformedPacket).valid, false);
+
+  for (const remote_url of ['https://example.invalid/owner/repo.git', 'ssh://example.invalid/owner/repo.git', 'git@example.invalid:owner/repo.git']) {
+    assert.doesNotThrow(() => core.admitAuthority(authorityInput({ identity: { remote_url } })));
+    assert.match(remote_url, remotePattern);
+  }
+});
+
+test('terminal finding schema mirrors runtime strict nonblank identifying fields', () => {
+  const core = require(runtimePath);
+  const packetSchema = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'development', 'repo-loop-core', '_main', 'terminal-packet.schema.json'), 'utf8'));
+  const fields = ['id', 'kind', 'disposition', 'evidence_ref', 'summary'];
+  const schemaAcceptsString = (property, value) => property.type === 'string' && (!property.minLength || value.length >= property.minLength) && (!property.pattern || new RegExp('^' + property.pattern + '$').test(value));
+  for (const field of fields) {
+    const property = packetSchema.$defs.findingRecord.properties[field];
+    const invalidValue = '   ';
+    const record = { id: 'finding-1', kind: 'blocker', disposition: 'open', evidence_ref: 'evidence:finding-1', summary: 'synthetic finding' };
+    record[field] = invalidValue;
+    assertCode(() => core.buildTerminalPacket({ ...terminalInput(), findings: { state: 'present', records: [record] }, blocker_state: 'blocked' }), 'FINDING_ENVELOPE_INVALID');
+    assert.equal(schemaAcceptsString(property, invalidValue), false, field);
+    assert.equal(schemaAcceptsString(property, 'meaningful synthetic value'), true, field);
+  }
+});
 test('schemas express the tightened time, assignment, finding, and remote-identity contracts', () => {
   const authoritySchema = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'development', 'repo-loop-core', '_main', 'authority-contract.schema.json'), 'utf8'));
   const packetSchema = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'development', 'repo-loop-core', '_main', 'terminal-packet.schema.json'), 'utf8'));
