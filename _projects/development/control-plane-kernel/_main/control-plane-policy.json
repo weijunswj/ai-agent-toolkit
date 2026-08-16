@@ -8,7 +8,7 @@
   "operation_types": ["filesystem.read", "filesystem.write", "filesystem.create", "filesystem.move", "filesystem.delete", "git.read", "git.branch", "git.push", "github.read", "github.mutation", "network.request", "external.mutation", "compound", "shell"],
   "secret_classifications": ["none", "possible", "confirmed"],
   "remote_identity_contract": "toolkit.control-plane.remote-identity.v1",
-  "authority_ticket": { "contract_version": "toolkit.control-plane.authority-ticket.v1", "max_uses": 8, "max_lifetime_ms": 300000, "atomic_consumption": true, "immutable_binding": true, "bounded_compaction": true },
+  "authority_ticket": { "contract_version": "toolkit.control-plane.authority-ticket.v1", "max_uses": 8, "max_lifetime_ms": 300000, "atomic_consumption": true, "immutable_binding": true, "bounded_compaction": true, "trusted_issuer_binding": "authority-evidence-digest", "immutable_binding_fields": ["issuer_role", "issuer_identity_digest", "issuer_authority_digest", "session_id", "turn_id", "call_id", "operation_type", "operation_digest", "target_digest", "scope"] },
   "structural_impact": {
     "contract_version": "toolkit.control-plane.structural-impact.v1",
     "search_scope_for_structural_change": "targeted-repo-wide",

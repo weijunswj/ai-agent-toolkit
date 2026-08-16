@@ -27,6 +27,7 @@ function baseInput(operation, overrides = {}) {
     },
     authority: {
       role: 'executor',
+      identity: 'executor-fixture',
       provider: 'OpenAI',
       model: 'GPT-5.6 Luna / Max',
       assignment: 'run-110-a1-control-plane-kernel-g3-110',
@@ -57,7 +58,7 @@ function routineRead(relativePath = 'src\\file.txt') {
 
 function ticketRequest(operation, session = {}) {
   return {
-    issuer: { role: 'controller', identity: 'controller-fixture' },
+    issuer: { role: 'controller', identity: 'controller-fixture', provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', assignment: 'run-110-a1-control-plane-kernel-g3-110', finality_claim: false, allowed_operation_types: [operation.type] },
     session_id: session.session_id || 'session-1',
     turn_id: session.turn_id || 'turn-1',
     call_id: session.call_id || 'call-1',
@@ -236,11 +237,11 @@ test('one-shot tickets bind operation/session/turn/call and controller GitHub au
   const store = kernel.createTicketStore({ now: NOW });
   const operation = { type: 'github.mutation', repository: 'weijunswj/ai-agent-toolkit', action: 'draft-pull-request', target: { kind: 'github-repository', digest: 'b'.repeat(64) } };
   const ticket = store.issue(ticketRequest(operation));
-  const authority = { role: 'controller', provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', assignment: 'run-110-a1-control-plane-kernel-g3-110', finality_claim: false, allowed_operation_types: ['github.mutation'] };
-  const accepted = kernel.evaluate(baseInput(operation, { authority, ticket, session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' } }), { ticketStore: store });
+  const authority = { role: 'controller', identity: 'controller-fixture', provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', assignment: 'run-110-a1-control-plane-kernel-g3-110', finality_claim: false, allowed_operation_types: ['github.mutation'] };
+  const accepted = kernel.evaluate(baseInput(operation, { authority, ticket, session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' }, scope: 'repo:weijunswj/ai-agent-toolkit' }), { ticketStore: store });
   assert.equal(accepted.decision, 'allow');
   assert.equal(accepted.reason_code, 'TICKET_CONSUMED');
-  const replay = kernel.evaluate(baseInput(operation, { authority, ticket, session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' } }), { ticketStore: store });
+  const replay = kernel.evaluate(baseInput(operation, { authority, ticket, session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' }, scope: 'repo:weijunswj/ai-agent-toolkit' }), { ticketStore: store });
   assert.equal(replay.decision, 'deny');
   assert.equal(replay.reason_code, 'TICKET_REPLAY');
 });
@@ -250,7 +251,7 @@ test('ticket replay is bounded and expired/exhausted slots are reclaimed', () =>
   const store = kernel.createTicketStore({ now: () => now, maxEntries: 2, maxLifetimeMs: 60_000 });
   const operation = { type: 'filesystem.delete', target: target('src\\file.txt') };
   const ticket = store.issue({ ...ticketRequest(operation), max_uses: 2, expires_at: '2026-08-16T14:00:30.000Z' });
-  const request = { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1', operation_type: operation.type, operation_digest: kernel.operationDigest(operation), target_digest: kernel.targetDigest(operation) };
+  const request = { issuer_role: ticket.issuer_role, issuer_identity_digest: ticket.issuer_identity_digest, issuer_authority_digest: ticket.issuer_authority_digest, session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1', operation_type: operation.type, operation_digest: kernel.operationDigest(operation), target_digest: kernel.targetDigest(operation), scope: ticket.scope };
   assert.equal(store.consume(ticket, request).valid, true);
   assert.equal(store.consume(ticket, request).valid, true);
   assert.equal(store.consume(ticket, request).reason_code, 'TICKET_REPLAY');
@@ -286,4 +287,75 @@ test('typed operations reject unmodeled mutation fields and missing external tar
   }));
   assert.equal(missingTarget.decision, 'unsupported');
   assert.equal(missingTarget.reason_code, 'TYPED_OPERATION_REQUIRED');
+});
+test('catastrophic delete roots remain hard-denied through compound composition', () => {
+  const cases = [
+    ['repository-root', ROOT],
+    ['drive-root', 'C:\\'],
+    ['unc-share-root', '\\\\server\\share'],
+  ];
+  for (const [label, rootPath] of cases) {
+    const deleteTarget = { path: rootPath, resolution: { status: 'resolved', canonical_path: rootPath, link_type: 'none' } };
+    const direct = kernel.evaluate(baseInput({ type: 'filesystem.delete', target: deleteTarget }));
+    assert.equal(direct.decision, 'deny', `${label} direct decision`);
+    assert.equal(direct.reason_code, 'CATASTROPHIC_TARGET_DENIED', `${label} direct reason`);
+    const compound = kernel.evaluate(baseInput({
+      type: 'compound',
+      components: [routineRead(), { type: 'filesystem.delete', target: deleteTarget }],
+    }, { authority: { ...baseInput(routineRead()).authority, allowed_operation_types: ['filesystem.read', 'filesystem.delete'] } }));
+    assert.equal(compound.decision, 'deny', `${label} compound decision`);
+    assert.equal(compound.reason_code, 'CATASTROPHIC_TARGET_DENIED', `${label} compound reason`);
+  }
+});
+
+test('compound hard denies cannot be routed through aggregate ticket authority', () => {
+  const secretOperation = {
+    type: 'network.request',
+    source: target('.env.synthetic', { existence: 'existing' }),
+    destination: { kind: 'external-system', digest: 'a'.repeat(64) },
+  };
+  const secret = kernel.evaluate(baseInput({
+    type: 'compound',
+    components: [routineRead(), secretOperation],
+  }, { authority: { ...baseInput(routineRead()).authority, allowed_operation_types: ['filesystem.read', 'network.request'] } }));
+  assert.equal(secret.decision, 'deny');
+  assert.equal(secret.reason_code, 'SECRET_EXFILTRATION_DENIED');
+
+  const githubOperation = { type: 'github.mutation', repository: 'weijunswj/ai-agent-toolkit', action: 'draft-pull-request', target: { kind: 'github-repository', digest: 'b'.repeat(64) } };
+  const compoundOperation = { type: 'compound', components: [routineRead(), githubOperation] };
+  const store = kernel.createTicketStore({ now: NOW });
+  const ticket = store.issue(ticketRequest(compoundOperation));
+  const github = kernel.evaluate(baseInput(compoundOperation, {
+    authority: { ...baseInput(routineRead()).authority, allowed_operation_types: ['filesystem.read', 'github.mutation'] },
+    ticket,
+    session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' },
+    scope: 'repo:weijunswj/ai-agent-toolkit',
+  }), { ticketStore: store });
+  assert.equal(github.decision, 'deny');
+  assert.equal(github.reason_code, 'CONTROLLER_GITHUB_AUTHORITY_REQUIRED');
+});
+
+test('ticket issuer trust and retained scope are part of consumption binding', () => {
+  const operation = { type: 'github.mutation', repository: 'weijunswj/ai-agent-toolkit', action: 'draft-pull-request', target: { kind: 'github-repository', digest: 'c'.repeat(64) } };
+  const authority = { role: 'controller', identity: 'controller-fixture', provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', assignment: 'run-110-a1-control-plane-kernel-g3-110', finality_claim: false, allowed_operation_types: ['github.mutation'] };
+  const store = kernel.createTicketStore({ now: NOW });
+  const executorTicket = store.issue({ ...ticketRequest(operation), issuer: { role: 'executor', identity: 'executor-fixture', provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', assignment: 'run-110-a1-control-plane-kernel-g3-110', finality_claim: false, allowed_operation_types: ['github.mutation'] } });
+  const trustedScope = kernel.evaluate(baseInput(operation, {
+    authority,
+    ticket: executorTicket,
+    session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' },
+    scope: 'repo:weijunswj/ai-agent-toolkit',
+  }), { ticketStore: store });
+  assert.equal(trustedScope.decision, 'deny');
+  assert.equal(trustedScope.reason_code, 'TICKET_TRUST_MISMATCH');
+
+  const controllerTicket = store.issue({ ...ticketRequest(operation), call_id: 'call-2' });
+  const wrongScope = kernel.evaluate(baseInput(operation, {
+    authority,
+    ticket: controllerTicket,
+    session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-2' },
+    scope: 'repo:other/repository',
+  }), { ticketStore: store });
+  assert.equal(wrongScope.decision, 'deny');
+  assert.equal(wrongScope.reason_code, 'TICKET_BINDING_MISMATCH');
 });

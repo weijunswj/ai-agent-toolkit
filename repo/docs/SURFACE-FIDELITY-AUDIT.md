@@ -27,7 +27,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 
 | Metric | Current value |
 | --- | ---: |
-| projects | 17 |
+| projects | 18 |
 | publishedFiles | 241 |
 | declaredOutputFiles | 241 |
 | packInstalledFiles | 84 |

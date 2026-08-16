@@ -127,7 +127,7 @@ function normalizePath(value) {
     segments.push(segment);
   }
   if (unc) return `${prefix}${segments.join('\\')}`;
-  if (drive) return `${prefix}\\${segments.join('\\')}`.replace(/\\$/, '\\');
+  if (drive) return `${prefix}\\${segments.join('\\')}`;
   return segments.join('\\');
 }
 
@@ -156,6 +156,19 @@ function authorityIdentityError(authority) {
   if (authority.finality_claim === true) return 'CALLER_FINALITY_REJECTED';
   if (authority.finality_claim !== false || !Array.isArray(authority.allowed_operation_types) || authority.allowed_operation_types.some((value) => !nonBlank(value))) return 'AUTHORITY_IDENTITY_INVALID';
   return null;
+}
+
+function authorityEvidenceDigest(authority) {
+  if (!isRecord(authority) || authorityIdentityError(authority) || !nonBlank(authority.identity)) return null;
+  return digest({
+    identity: authority.identity,
+    role: authority.role,
+    provider: authority.provider,
+    model: authority.model,
+    assignment: authority.assignment,
+    finality_claim: authority.finality_claim,
+    allowed_operation_types: [...new Set(authority.allowed_operation_types)].sort(),
+  });
 }
 
 function normalizeRepository(repository) {
@@ -199,7 +212,8 @@ function classifyOperation(operation, repository) {
     const components = [];
     for (const component of operation.components) { const classified = classifyOperation(component, repository); if (!classified.valid) return classified; components.push(classified); }
     const targetClass = components.some((item) => item.target_class === 'external-system') ? 'external-system' : components.some((item) => item.target_class === 'outside-repository') ? 'outside-repository' : components.some((item) => item.target_class === 'unresolved-target') ? 'unresolved-target' : components[0].target_class;
-    return { valid: true, operation_type: 'compound', operation_class: 'compound', target_class: targetClass, secret_classification: deriveSecretClassification(components.flatMap((item) => item.secret_values)), secret_values: components.flatMap((item) => item.secret_values), requires_ticket: components.some((item) => item.requires_ticket), components };
+    const requiresTicket = components.some((item) => item.requires_ticket || (item.secret_classification === 'confirmed' && ['filesystem.read', 'filesystem.create', 'filesystem.write', 'filesystem.move'].includes(item.operation_type)));
+    return { valid: true, operation_type: 'compound', operation_class: 'compound', target_class: targetClass, secret_classification: deriveSecretClassification(components.flatMap((item) => item.secret_values)), secret_values: components.flatMap((item) => item.secret_values), requires_ticket: requiresTicket, components };
   }
   const normalizedTargets = [];
   for (const value of operationTargets(operation)) { const target = normalizeTarget(value, repository); if (!target.valid) return target; normalizedTargets.push(target); }
@@ -232,7 +246,21 @@ function classifyOperation(operation, repository) {
   return { valid: true, operation_type: operation.type, operation_class: operationClass, target_class: targetClass, targets: normalizedTargets, secret_classification: secretClassification, secret_values: paths, requires_ticket: requiresTicket, reason_code: reasonCode };
 }
 
-function ticketRequestFor(input, operation) { return { session_id: input.session?.session_id, turn_id: input.session?.turn_id, call_id: input.session?.call_id, operation_type: operation.type, operation_digest: operationDigest(operation), target_digest: targetDigest(operation) }; }
+function ticketRequestFor(input, operation) {
+  const authority = input.authority;
+  return {
+    issuer_role: authority?.role,
+    issuer_identity_digest: nonBlank(authority?.identity) ? digest(authority.identity) : null,
+    issuer_authority_digest: authorityEvidenceDigest(authority),
+    session_id: input.session?.session_id,
+    turn_id: input.session?.turn_id,
+    call_id: input.session?.call_id,
+    operation_type: operation.type,
+    operation_digest: operationDigest(operation),
+    target_digest: targetDigest(operation),
+    scope: input.scope === undefined ? null : input.scope,
+  };
+}
 
 function publicResult(fields) { return deepFreeze({ contract_version: CONTRACT_VERSION, decision: fields.decision, reason_code: fields.reason_code, operation_type: fields.operation_type || null, operation_class: fields.operation_class || null, target_class: fields.target_class || 'unknown-target', secret_classification: fields.secret_classification || 'none', operation_digest: fields.operation_digest || null, target_digest: fields.target_digest || null, ticket_status: fields.ticket_status || 'not-required', privacy_safe: true, structural_impact_required: fields.structural_impact_required === true }); }
 function baseFailure(reasonCode, input = {}) { return publicResult({ decision: 'unsupported', reason_code: reasonCode, operation_digest: input.operation ? operationDigest(input.operation) : null, target_digest: input.operation ? targetDigest(input.operation) : null, secret_classification: input.secret_classification || 'none' }); }
@@ -242,12 +270,15 @@ class TicketStore {
   _currentTime() { const value = nowFrom(this._now); if (!Number.isFinite(value)) throw new Error('TICKET_TIME_INVALID'); return value; }
   issue(input) {
     this.compact();
-    if (!isRecord(input) || !isRecord(input.issuer) || !ROLES.has(input.issuer.role) || !nonBlank(input.issuer.identity)) throw new Error('TICKET_ISSUER_INVALID');
+    const issuerAuthorityDigest = isRecord(input) ? authorityEvidenceDigest(input.issuer) : null;
+    if (!isRecord(input) || !isRecord(input.issuer) || !ROLES.has(input.issuer.role) || !nonBlank(input.issuer.identity) || !issuerAuthorityDigest) throw new Error('TICKET_ISSUER_INVALID');
     if (!nonBlank(input.session_id) || !nonBlank(input.turn_id) || !nonBlank(input.call_id) || !nonBlank(input.operation_type) || !validDigest(input.operation_digest) || !validDigest(input.target_digest)) throw new Error('TICKET_BINDING_INVALID');
+    const scope = input.scope === undefined || input.scope === null ? null : input.scope;
+    if (scope !== null && !nonBlank(scope)) throw new Error('TICKET_SCOPE_INVALID');
     const issuedAt = this._currentTime(); const expiresAt = parseUtc(input.expires_at); const maxUses = input.max_uses;
     if (!Number.isSafeInteger(maxUses) || maxUses < 1 || maxUses > MAX_TICKET_USES || !Number.isFinite(expiresAt) || expiresAt <= issuedAt || expiresAt - issuedAt > this._maxLifetimeMs) throw new Error('TICKET_EXPIRY_INVALID');
     if (this._records.size >= this._maxEntries) throw new Error('TICKET_STORE_FULL');
-    const payload = { contract_version: TICKET_CONTRACT_VERSION, issuer_role: input.issuer.role, issuer_identity_digest: digest(input.issuer.identity), session_id: input.session_id, turn_id: input.turn_id, call_id: input.call_id, operation_type: input.operation_type, operation_digest: input.operation_digest, target_digest: input.target_digest, scope: nonBlank(input.scope) ? input.scope : null, issued_at: new Date(issuedAt).toISOString(), expires_at: input.expires_at, max_uses: maxUses, consumed_count: 0 };
+    const payload = { contract_version: TICKET_CONTRACT_VERSION, issuer_role: input.issuer.role, issuer_identity_digest: digest(input.issuer.identity), issuer_authority_digest: issuerAuthorityDigest, session_id: input.session_id, turn_id: input.turn_id, call_id: input.call_id, operation_type: input.operation_type, operation_digest: input.operation_digest, target_digest: input.target_digest, scope, issued_at: new Date(issuedAt).toISOString(), expires_at: input.expires_at, max_uses: maxUses, consumed_count: 0 };
     const ticket = { ...payload, ticket_id: digest({ ...payload, sequence: this._sequence += 1 }) }; Object.defineProperty(ticket, TICKET_BRAND, { value: true, enumerable: false }); const frozen = deepFreeze(ticket); this._records.set(frozen.ticket_id, { ticket: frozen, uses: 0 }); return frozen;
   }
   consume(ticket, request) {
@@ -255,7 +286,7 @@ class TicketStore {
     if (!ticket || ticket[TICKET_BRAND] !== true || !isRecord(request)) return failure('TICKET_INVALID');
     const record = this._records.get(ticket.ticket_id); if (!record) return failure('TICKET_REPLAY');
     const current = this._currentTime(); if (current >= parseUtc(record.ticket.expires_at)) { this._records.delete(record.ticket.ticket_id); return failure('TICKET_EXPIRED'); }
-    const matches = ['session_id', 'turn_id', 'call_id', 'operation_type', 'operation_digest', 'target_digest'].every((key) => request[key] === record.ticket[key]); if (!matches) return failure('TICKET_BINDING_MISMATCH');
+    const matches = ['issuer_role', 'issuer_identity_digest', 'issuer_authority_digest', 'session_id', 'turn_id', 'call_id', 'operation_type', 'operation_digest', 'target_digest', 'scope'].every((key) => request[key] === record.ticket[key]); if (!matches) return failure('TICKET_BINDING_MISMATCH');
     if (record.uses >= record.ticket.max_uses) { this._records.delete(record.ticket.ticket_id); return failure('TICKET_REPLAY'); }
     record.uses += 1; record.ticket = deepFreeze({ ...record.ticket, consumed_count: record.uses }); const valid = deepFreeze({ valid: true, reason_code: 'TICKET_CONSUMED', consumed_count: record.uses, max_uses: ticket.max_uses }); if (record.uses >= record.ticket.max_uses) this._records.delete(record.ticket.ticket_id); return valid;
   }
@@ -265,12 +296,24 @@ class TicketStore {
 
 function createTicketStore(options = {}) { return new TicketStore(options); }
 
+function flattenClassifiedComponents(classification) {
+  if (classification?.operation_type !== 'compound') return [classification];
+  return classification.components.flatMap(flattenClassifiedComponents);
+}
+
 function ticketDecision(input, operation, classification, options) {
   if (!classification.requires_ticket) return null;
-  if (classification.operation_class === 'network.request' && classification.secret_classification !== 'none') return publicResult({ decision: 'deny', reason_code: 'SECRET_EXFILTRATION_DENIED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation), ticket_status: 'not-accepted' });
-  if (classification.target_class === 'outside-repository' || classification.target_class === 'unresolved-target') return publicResult({ decision: 'ask', reason_code: 'TARGET_AUTHORITY_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation) });
-  if (classification.operation_type === 'github.mutation' && input.authority.role !== 'controller') return publicResult({ decision: 'deny', reason_code: 'CONTROLLER_GITHUB_AUTHORITY_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, operation_digest: operationDigest(operation), target_digest: targetDigest(operation) });
-  if (!input.ticket) return publicResult({ decision: 'ask', reason_code: classification.secret_classification === 'confirmed' ? 'SECRET_ACCESS_REQUIRES_TICKET' : classification.reason_code || 'AUTHORITY_TICKET_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation), ticket_status: 'missing' });
+  const components = flattenClassifiedComponents(classification);
+  const requiresController = components.some((component) => component.operation_type === 'github.mutation');
+  if (requiresController && input.authority.role !== 'controller') return publicResult({ decision: 'deny', reason_code: 'CONTROLLER_GITHUB_AUTHORITY_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, operation_digest: operationDigest(operation), target_digest: targetDigest(operation) });
+  if (components.some((component) => component.operation_type === 'network.request' && component.secret_classification !== 'none')) return publicResult({ decision: 'deny', reason_code: 'SECRET_EXFILTRATION_DENIED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation), ticket_status: 'not-accepted' });
+  const authorityDigest = authorityEvidenceDigest(input.authority);
+  if (!authorityDigest) return publicResult({ decision: 'deny', reason_code: 'TICKET_TRUST_EVIDENCE_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation), ticket_status: 'not-accepted' });
+  if (!input.ticket) {
+    const sensitiveRead = components.some((component) => component.secret_classification === 'confirmed' && ['filesystem.read', 'filesystem.create', 'filesystem.write', 'filesystem.move'].includes(component.operation_type));
+    return publicResult({ decision: 'ask', reason_code: sensitiveRead ? 'SECRET_ACCESS_REQUIRES_TICKET' : classification.reason_code || 'AUTHORITY_TICKET_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation), ticket_status: 'missing' });
+  }
+  if (input.ticket.issuer_role !== input.authority.role || input.ticket.issuer_identity_digest !== digest(input.authority.identity) || input.ticket.issuer_authority_digest !== authorityDigest) return publicResult({ decision: 'deny', reason_code: 'TICKET_TRUST_MISMATCH', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation), ticket_status: 'rejected' });
   const store = options.ticketStore; if (!store || typeof store.consume !== 'function') return baseFailure('TICKET_STORE_UNAVAILABLE', input);
   const consumed = store.consume(input.ticket, ticketRequestFor(input, operation)); if (!consumed.valid) return publicResult({ decision: 'deny', reason_code: consumed.reason_code, operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation), ticket_status: 'rejected' });
   return publicResult({ decision: 'allow', reason_code: consumed.reason_code, operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation), ticket_status: 'consumed' });
@@ -283,14 +326,16 @@ function evaluate(input, options = {}) {
   if (parseUtc(input.now) === null) return baseFailure('AUTHORITY_TIME_INVALID', input);
   const repository = normalizeRepository(input.repository); if (!repository.valid) return baseFailure(repository.reason_code, input);
   const classification = classifyOperation(input.operation, repository); if (!classification.valid) return baseFailure(classification.reason_code, { ...input, secret_classification: classification.secret_classification });
-  if (classification.operation_type === 'compound') { const allowed = new Set(input.authority.allowed_operation_types); if (classification.components.some((component) => !allowed.has(component.operation_type))) return publicResult({ decision: 'deny', reason_code: 'COMPONENT_AUTHORITY_REQUIRED', operation_type: 'compound', operation_class: 'compound', target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) }); }
+  const components = flattenClassifiedComponents(classification);
+  if (components.some((component) => component.operation_type === 'network.request' && component.secret_classification !== 'none')) return publicResult({ decision: 'deny', reason_code: 'SECRET_EXFILTRATION_DENIED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation), ticket_status: 'not-accepted' });
+  if (components.some((component) => component.operation_type === 'filesystem.delete' && component.targets.some((item) => item.path && (isFilesystemRoot(item.path) || samePath(item.path, repository.root))))) return publicResult({ decision: 'deny', reason_code: 'CATASTROPHIC_TARGET_DENIED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: 'protected-target', secret_classification: classification.secret_classification, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
+  if (classification.operation_type === 'compound') { const allowed = new Set(input.authority.allowed_operation_types); if (components.some((component) => !allowed.has(component.operation_type))) return publicResult({ decision: 'deny', reason_code: 'COMPONENT_AUTHORITY_REQUIRED', operation_type: 'compound', operation_class: 'compound', target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) }); }
   else if (!input.authority.allowed_operation_types.includes(classification.operation_type)) return publicResult({ decision: 'deny', reason_code: 'OPERATION_AUTHORITY_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
-  if (classification.operation_type === 'network.request' && classification.secret_classification !== 'none') return ticketDecision(input, input.operation, classification, options);
-  if (classification.operation_type === 'filesystem.delete' && classification.targets.some((item) => item.path && (isFilesystemRoot(item.path) || samePath(item.path, repository.root)))) return publicResult({ decision: 'deny', reason_code: 'CATASTROPHIC_TARGET_DENIED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: 'protected-target', secret_classification: classification.secret_classification, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
-  const targetAuthorityRequired = classification.operation_type.startsWith('filesystem.') ? ['outside-repository', 'unresolved-target', 'unknown-target', 'external-system'].includes(classification.target_class) : classification.operation_type === 'compound' && classification.components.some((component) => component.operation_type.startsWith('filesystem.') && ['outside-repository', 'unresolved-target', 'unknown-target', 'external-system'].includes(component.target_class));
+  if (components.some((component) => component.operation_type === 'github.mutation') && input.authority.role !== 'controller') return publicResult({ decision: 'deny', reason_code: 'CONTROLLER_GITHUB_AUTHORITY_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
+  const targetAuthorityRequired = components.some((component) => component.operation_type.startsWith('filesystem.') && ['outside-repository', 'unresolved-target', 'unknown-target', 'external-system'].includes(component.target_class));
   if (targetAuthorityRequired) return publicResult({ decision: 'ask', reason_code: 'TARGET_AUTHORITY_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
-  if (classification.secret_classification === 'confirmed' && ['filesystem.read', 'filesystem.create', 'filesystem.write', 'filesystem.move'].includes(classification.operation_type)) return ticketDecision(input, input.operation, { ...classification, requires_ticket: true }, options);
-  if (classification.operation_type === 'compound' && classification.requires_ticket) return ticketDecision(input, input.operation, classification, options);
+  const sensitiveRead = components.some((component) => component.secret_classification === 'confirmed' && ['filesystem.read', 'filesystem.create', 'filesystem.write', 'filesystem.move'].includes(component.operation_type));
+  if (sensitiveRead) return ticketDecision(input, input.operation, { ...classification, requires_ticket: true }, options);
   if (classification.requires_ticket) return ticketDecision(input, input.operation, classification, options);
   return publicResult({ decision: 'allow', reason_code: 'TYPED_OPERATION_ALLOWED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
 }

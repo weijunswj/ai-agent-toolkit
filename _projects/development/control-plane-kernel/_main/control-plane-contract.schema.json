@@ -39,12 +39,13 @@
     "authorityTicket": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["contract_version", "ticket_id", "issuer_role", "issuer_identity_digest", "session_id", "turn_id", "call_id", "operation_type", "operation_digest", "target_digest", "scope", "issued_at", "expires_at", "max_uses", "consumed_count"],
+      "required": ["contract_version", "ticket_id", "issuer_role", "issuer_identity_digest", "issuer_authority_digest", "session_id", "turn_id", "call_id", "operation_type", "operation_digest", "target_digest", "scope", "issued_at", "expires_at", "max_uses", "consumed_count"],
       "properties": {
         "contract_version": { "const": "toolkit.control-plane.authority-ticket.v1" },
         "ticket_id": { "$ref": "#/$defs/digest" },
         "issuer_role": { "enum": ["executor", "controller"] },
         "issuer_identity_digest": { "$ref": "#/$defs/digest" },
+        "issuer_authority_digest": { "$ref": "#/$defs/digest" },
         "session_id": { "type": "string", "minLength": 1 },
         "turn_id": { "type": "string", "minLength": 1 },
         "call_id": { "type": "string", "minLength": 1 },
