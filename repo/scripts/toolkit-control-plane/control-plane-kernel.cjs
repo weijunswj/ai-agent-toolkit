@@ -51,13 +51,363 @@ function deepFreeze(value, seen = new Set()) {
   return Object.freeze(value);
 }
 
+const OPERATION_FIELD_UNION = Object.freeze([...new Set(Object.values(OPERATION_FIELDS).flat())]);
+const INPUT_FIELDS = Object.freeze(['enabled', 'activation', 'now', 'repository', 'authority', 'operation', 'ticket', 'session', 'scope']);
+const ACTIVATION_FIELDS = Object.freeze(['mode', 'consented']);
+const SESSION_FIELDS = Object.freeze(['session_id', 'turn_id', 'call_id']);
+const AUTHORITY_FIELDS = Object.freeze(['role', 'identity', 'provider', 'model', 'assignment', 'finality_claim', 'allowed_operation_types']);
+const REPOSITORY_FIELDS = Object.freeze(['root', 'worktree', 'remote', 'resolution']);
+const RESOLUTION_FIELDS = Object.freeze(['status', 'canonical_path', 'link_type', 'existence']);
+const TARGET_FIELDS = Object.freeze(['kind', 'digest', 'path', 'resolution', 'target_class', 'resolved_inside']);
+
+function mergeSecretClassification(left, right) {
+  if (left === 'confirmed' || right === 'confirmed') return 'confirmed';
+  if (left === 'possible' || right === 'possible') return 'possible';
+  return 'none';
+}
+
+function descriptorSecretClassification(value, seen = new Set()) {
+  if (typeof value === 'string') return deriveSecretClassification([value]);
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') return 'none';
+  if (typeof value === 'undefined' || typeof value === 'function' || typeof value === 'symbol' || typeof value === 'bigint') return 'possible';
+  if (!value || seen.has(value)) return 'possible';
+  seen.add(value);
+  let classification = 'none';
+  try {
+    const keys = Reflect.ownKeys(value);
+    for (const key of keys) {
+      if (Array.isArray(value) && key === 'length') continue;
+      if (typeof key !== 'string') {
+        classification = mergeSecretClassification(classification, 'possible');
+        continue;
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
+        classification = mergeSecretClassification(classification, 'possible');
+        continue;
+      }
+      classification = mergeSecretClassification(classification, descriptorSecretClassification(descriptor.value, seen));
+    }
+  } catch {
+    classification = 'possible';
+  }
+  seen.delete(value);
+  return classification;
+}
+
+function inspectOwnDataRecord(value, allowedFields, reasonCode) {
+  if (!isRecord(value)) return failure(reasonCode);
+  let keys;
+  try {
+    keys = Reflect.ownKeys(value);
+  } catch {
+    return failure(reasonCode, { secret_classification: 'possible' });
+  }
+  const allowed = new Set(allowedFields);
+  const projection = Object.create(null);
+  let firstFailure = null;
+  let secretClassification = 'none';
+  for (const key of keys) {
+    if (typeof key !== 'string') {
+      if (!firstFailure) firstFailure = reasonCode;
+      secretClassification = mergeSecretClassification(secretClassification, 'possible');
+      continue;
+    }
+    let descriptor;
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(value, key);
+    } catch {
+      if (!firstFailure) firstFailure = reasonCode;
+      secretClassification = mergeSecretClassification(secretClassification, 'possible');
+      continue;
+    }
+    if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
+      if (!firstFailure) firstFailure = reasonCode;
+      secretClassification = mergeSecretClassification(secretClassification, 'possible');
+      continue;
+    }
+    secretClassification = mergeSecretClassification(secretClassification, descriptorSecretClassification(descriptor.value));
+    if (!descriptor.enumerable || !allowed.has(key)) {
+      if (!firstFailure) firstFailure = reasonCode;
+      continue;
+    }
+    projection[key] = descriptor.value;
+  }
+  if (firstFailure) return failure(firstFailure, { secret_classification: secretClassification });
+  return { valid: true, value: projection, secret_classification: secretClassification };
+}
+
+function canonicalScalar(value, reasonCode) {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))) {
+    return { valid: true, value };
+  }
+  return failure(reasonCode);
+}
+
+function canonicalizeArray(value, itemNormalizer, reasonCode) {
+  if (!Array.isArray(value)) return failure(reasonCode);
+  let prototype;
+  let keys;
+  let lengthDescriptor;
+  try {
+    prototype = Object.getPrototypeOf(value);
+    keys = Reflect.ownKeys(value);
+    lengthDescriptor = Object.getOwnPropertyDescriptor(value, 'length');
+  } catch {
+    return failure(reasonCode, { secret_classification: 'possible' });
+  }
+  if (prototype !== Array.prototype || !lengthDescriptor || !Object.prototype.hasOwnProperty.call(lengthDescriptor, 'value') || !Number.isSafeInteger(lengthDescriptor.value) || lengthDescriptor.value < 0) {
+    return failure(reasonCode, { secret_classification: descriptorSecretClassification(value) });
+  }
+  const length = lengthDescriptor.value;
+  const expectedKeys = new Set();
+  for (let index = 0; index < length; index += 1) expectedKeys.add(String(index));
+  let firstFailure = null;
+  let secretClassification = 'none';
+  for (const key of keys) {
+    if (key === 'length') continue;
+    if (typeof key !== 'string' || !/^(0|[1-9]\d*)$/.test(key) || Number(key) >= length) {
+      if (!firstFailure) firstFailure = reasonCode;
+      secretClassification = mergeSecretClassification(secretClassification, 'possible');
+      continue;
+    }
+    expectedKeys.delete(key);
+    let descriptor;
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(value, key);
+    } catch {
+      if (!firstFailure) firstFailure = reasonCode;
+      secretClassification = mergeSecretClassification(secretClassification, 'possible');
+      continue;
+    }
+    if (!descriptor || !descriptor.enumerable || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
+      if (!firstFailure) firstFailure = reasonCode;
+      secretClassification = mergeSecretClassification(secretClassification, descriptorSecretClassification(value));
+      continue;
+    }
+    secretClassification = mergeSecretClassification(secretClassification, descriptorSecretClassification(descriptor.value));
+  }
+  if (expectedKeys.size > 0) firstFailure = firstFailure || reasonCode;
+  if (firstFailure) return failure(firstFailure, { secret_classification: secretClassification });
+  const projection = [];
+  for (let index = 0; index < length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    const normalized = itemNormalizer(descriptor.value);
+    if (!normalized.valid) return failure(normalized.reason_code || reasonCode, { secret_classification: mergeSecretClassification(secretClassification, normalized.secret_classification || 'none') });
+    projection.push(normalized.value);
+  }
+  return { valid: true, value: projection };
+}
+
+function canonicalizeStringArray(value, reasonCode) {
+  return canonicalizeArray(value, (item) => {
+    if (typeof item !== 'string') return failure(reasonCode);
+    return { valid: true, value: item };
+  }, reasonCode);
+}
+
+function canonicalizeSimpleRecord(value, fields, reasonCode, booleanFields = new Set()) {
+  const inspected = inspectOwnDataRecord(value, fields, reasonCode);
+  if (!inspected.valid) return inspected;
+  const projection = Object.create(null);
+  for (const key of Object.keys(inspected.value)) {
+    const item = inspected.value[key];
+    if (booleanFields.has(key)) {
+      if (typeof item !== 'boolean') return failure(reasonCode, { secret_classification: inspected.secret_classification || 'none' });
+      projection[key] = item;
+    } else if (typeof item !== 'string') {
+      return failure(reasonCode, { secret_classification: inspected.secret_classification || 'none' });
+    } else {
+      projection[key] = item;
+    }
+  }
+  return { valid: true, value: deepFreeze(projection) };
+}
+
+function canonicalizeResolution(value, reasonCode = 'TARGET_CONTEXT_CONFLICT') {
+  const inspected = inspectOwnDataRecord(value, RESOLUTION_FIELDS, reasonCode);
+  if (!inspected.valid) return inspected;
+  const projection = Object.create(null);
+  for (const key of Object.keys(inspected.value)) {
+    if (typeof inspected.value[key] !== 'string') return failure(reasonCode, { secret_classification: inspected.secret_classification || 'none' });
+    projection[key] = inspected.value[key];
+  }
+  return { valid: true, value: deepFreeze(projection) };
+}
+
+function canonicalizeTarget(value) {
+  const inspected = inspectOwnDataRecord(value, TARGET_FIELDS, 'TARGET_CONTEXT_CONFLICT');
+  if (!inspected.valid) return inspected;
+  const raw = inspected.value;
+  const hasOwn = (key) => Object.prototype.hasOwnProperty.call(raw, key);
+  for (const key of ['kind', 'digest', 'path', 'target_class']) {
+    if (hasOwn(key) && typeof raw[key] !== 'string') return failure('TARGET_CONTEXT_CONFLICT', { secret_classification: inspected.secret_classification || 'none' });
+  }
+  if (hasOwn('resolved_inside') && typeof raw.resolved_inside !== 'boolean') return failure('TARGET_CONTEXT_CONFLICT', { secret_classification: inspected.secret_classification || 'none' });
+  let resolution = null;
+  if (hasOwn('resolution')) {
+    const normalizedResolution = canonicalizeResolution(raw.resolution);
+    if (!normalizedResolution.valid) return failure(normalizedResolution.reason_code, { secret_classification: mergeSecretClassification(inspected.secret_classification || 'none', normalizedResolution.secret_classification || 'none') });
+    resolution = normalizedResolution.value;
+  }
+  const hasKind = hasOwn('kind');
+  const hasDigest = hasOwn('digest');
+  const hasPath = hasOwn('path');
+  const hasResolution = hasOwn('resolution');
+  const external = hasKind && ['github-repository', 'external-system'].includes(raw.kind);
+  if (hasKind && !external) return failure('TARGET_CONTEXT_CONFLICT', { secret_classification: inspected.secret_classification || 'none' });
+  if (external) {
+    if (!validDigest(raw.digest) || hasPath || hasResolution) return failure('TARGET_CONTEXT_CONFLICT', { secret_classification: hasPath || hasResolution ? mergeSecretClassification(inspected.secret_classification || 'none', 'possible') : inspected.secret_classification || 'none' });
+    const projection = Object.create(null);
+    projection.kind = raw.kind;
+    projection.digest = raw.digest;
+    for (const key of ['target_class', 'resolved_inside']) if (hasOwn(key)) projection[key] = raw[key];
+    return { valid: true, value: deepFreeze(projection) };
+  }
+  if (hasDigest || !hasPath || !hasResolution || !nonBlank(raw.path)) return failure('TARGET_CONTEXT_INVALID', { secret_classification: inspected.secret_classification || 'none' });
+  const projection = Object.create(null);
+  projection.path = raw.path;
+  projection.resolution = resolution;
+  for (const key of ['target_class', 'resolved_inside']) if (hasOwn(key)) projection[key] = raw[key];
+  return { valid: true, value: deepFreeze(projection) };
+}
+
+function canonicalizeOperation(value, seen = new Set()) {
+  if (seen.has(value)) return failure('TYPED_OPERATION_REQUIRED', { secret_classification: 'possible' });
+  const inspected = inspectOwnDataRecord(value, OPERATION_FIELD_UNION, 'TYPED_OPERATION_FIELDS_UNSUPPORTED');
+  if (!inspected.valid) return inspected;
+  const raw = inspected.value;
+  if (typeof raw.type !== 'string' || !nonBlank(raw.type)) return failure('TYPED_OPERATION_REQUIRED', { secret_classification: inspected.secret_classification || 'none' });
+  const allowedFields = OPERATION_FIELDS[raw.type];
+  const rawKeys = Object.keys(raw);
+  if ((allowedFields && rawKeys.some((key) => !allowedFields.includes(key))) || (!allowedFields && rawKeys.some((key) => key !== 'type'))) {
+    return failure('TYPED_OPERATION_FIELDS_UNSUPPORTED', { secret_classification: inspected.secret_classification || 'none' });
+  }
+  const projection = Object.create(null);
+  seen.add(value);
+  try {
+    for (const key of rawKeys) {
+      let normalized;
+      if (['target', 'source', 'destination'].includes(key)) normalized = canonicalizeTarget(raw[key]);
+      else if (key === 'components') normalized = canonicalizeArray(raw[key], (item) => canonicalizeOperation(item, seen), 'TYPED_OPERATION_REQUIRED');
+      else if (['refspecs', 'options'].includes(key)) normalized = canonicalizeStringArray(raw[key], key === 'options' ? 'BROADENED_PUSH_TARGET_UNSUPPORTED' : 'TYPED_OPERATION_REQUIRED');
+      else normalized = canonicalScalar(raw[key], 'TYPED_OPERATION_REQUIRED');
+      if (!normalized.valid) return failure(normalized.reason_code, { secret_classification: mergeSecretClassification(inspected.secret_classification || 'none', normalized.secret_classification || 'none') });
+      projection[key] = normalized.value;
+    }
+  } finally {
+    seen.delete(value);
+  }
+  return { valid: true, value: deepFreeze(projection) };
+}
+
+function canonicalizeAuthority(value) {
+  const inspected = inspectOwnDataRecord(value, AUTHORITY_FIELDS, 'AUTHORITY_IDENTITY_INVALID');
+  if (!inspected.valid) return inspected;
+  const projection = Object.create(null);
+  for (const key of Object.keys(inspected.value)) {
+    if (key === 'allowed_operation_types') {
+      const normalized = canonicalizeStringArray(inspected.value[key], 'AUTHORITY_IDENTITY_INVALID');
+      if (!normalized.valid) return failure('AUTHORITY_IDENTITY_INVALID', { secret_classification: mergeSecretClassification(inspected.secret_classification || 'none', normalized.secret_classification || 'none') });
+      projection[key] = normalized.value;
+    } else if (key === 'finality_claim') {
+      if (typeof inspected.value[key] !== 'boolean') return failure('AUTHORITY_IDENTITY_INVALID', { secret_classification: inspected.secret_classification || 'none' });
+      projection[key] = inspected.value[key];
+    } else if (typeof inspected.value[key] !== 'string') {
+      return failure('AUTHORITY_IDENTITY_INVALID', { secret_classification: inspected.secret_classification || 'none' });
+    } else {
+      projection[key] = inspected.value[key];
+    }
+  }
+  return { valid: true, value: deepFreeze(projection) };
+}
+
+function canonicalizeRepository(value) {
+  const inspected = inspectOwnDataRecord(value, REPOSITORY_FIELDS, 'REPOSITORY_CONTEXT_INVALID');
+  if (!inspected.valid) return inspected;
+  const projection = Object.create(null);
+  for (const key of Object.keys(inspected.value)) {
+    if (key === 'resolution') {
+      const normalized = canonicalizeResolution(inspected.value[key], 'REPOSITORY_CONTEXT_INVALID');
+      if (!normalized.valid) return failure(normalized.reason_code, { secret_classification: mergeSecretClassification(inspected.secret_classification || 'none', normalized.secret_classification || 'none') });
+      projection[key] = normalized.value;
+    } else if (typeof inspected.value[key] !== 'string') {
+      return failure('REPOSITORY_CONTEXT_INVALID', { secret_classification: inspected.secret_classification || 'none' });
+    } else {
+      projection[key] = inspected.value[key];
+    }
+  }
+  return { valid: true, value: deepFreeze(projection) };
+}
+
+function canonicalizeInput(value) {
+  const inspected = inspectOwnDataRecord(value, INPUT_FIELDS, 'CONTROL_PLANE_INPUT_INVALID');
+  if (!inspected.valid) return inspected;
+  const raw = inspected.value;
+  const projection = Object.create(null);
+  for (const key of Object.keys(raw)) {
+    let normalized;
+    if (key === 'activation') normalized = canonicalizeSimpleRecord(raw[key], ACTIVATION_FIELDS, 'CONTROL_PLANE_INPUT_INVALID', new Set(['consented']));
+    else if (key === 'session') normalized = canonicalizeSimpleRecord(raw[key], SESSION_FIELDS, 'CONTROL_PLANE_INPUT_INVALID');
+    else if (key === 'authority') normalized = canonicalizeAuthority(raw[key]);
+    else if (key === 'repository') normalized = canonicalizeRepository(raw[key]);
+    else if (key === 'operation') normalized = canonicalizeOperation(raw[key]);
+    else if (key === 'enabled') normalized = typeof raw[key] === 'boolean' ? { valid: true, value: raw[key] } : failure('CONTROL_PLANE_INPUT_INVALID');
+    else if (key === 'now') normalized = typeof raw[key] === 'string' ? { valid: true, value: raw[key] } : failure('CONTROL_PLANE_INPUT_INVALID');
+    else if (key === 'scope') normalized = raw[key] === null || typeof raw[key] === 'string' ? { valid: true, value: raw[key] } : failure('CONTROL_PLANE_INPUT_INVALID');
+    else normalized = { valid: true, value: raw[key] };
+    if (!normalized.valid) return failure(normalized.reason_code, { secret_classification: mergeSecretClassification(inspected.secret_classification || 'none', normalized.secret_classification || 'none') });
+    projection[key] = normalized.value;
+  }
+  return { valid: true, value: deepFreeze(projection) };
+}
+
+function trustedStateFromOptions(options) {
+  if (!isRecord(options)) return null;
+  let descriptor;
+  try {
+    descriptor = Object.getOwnPropertyDescriptor(options, 'trustedAuthorityContext');
+  } catch {
+    return null;
+  }
+  if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) return null;
+  return TRUSTED_CONTEXT_STATE.get(descriptor.value) || null;
+}
 function stableValue(value) {
-  if (Array.isArray(value)) return value.map(stableValue);
-  if (isRecord(value)) return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
+  if (Array.isArray(value)) {
+    const projection = [];
+    for (let index = 0; index < value.length; index += 1) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+      if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) throw new TypeError('POLICY_DATA_ACCESSOR_REJECTED');
+      projection.push(stableValue(descriptor.value));
+    }
+    return projection;
+  }
+  if (isRecord(value)) {
+    const projection = Object.create(null);
+    for (const key of Object.keys(value).sort()) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) throw new TypeError('POLICY_DATA_ACCESSOR_REJECTED');
+      projection[key] = stableValue(descriptor.value);
+    }
+    return projection;
+  }
   return value;
 }
 
-function stableStringify(value) { return JSON.stringify(stableValue(value)); }
+function stableSerialize(value) {
+  if (value === null) return 'null';
+  if (typeof value === 'string' || typeof value === 'boolean') return JSON.stringify(value);
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new TypeError('POLICY_DATA_NUMBER_INVALID');
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) return '[' + value.map(stableSerialize).join(',') + ']';
+  if (isRecord(value)) return '{' + Object.keys(value).sort().map((key) => JSON.stringify(key) + ':' + stableSerialize(value[key])).join(',') + '}';
+  throw new TypeError('POLICY_DATA_SERIALIZATION_UNSUPPORTED');
+}
+
+function stableStringify(value) { return stableSerialize(stableValue(value)); }
 function digest(value) { return crypto.createHash('sha256').update(typeof value === 'string' ? value : stableStringify(value)).digest('hex'); }
 function nonBlank(value) { return typeof value === 'string' && value.trim().length > 0 && value === value.trim(); }
 function validDigest(value) { return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value); }
@@ -150,8 +500,24 @@ function isSecretLike(value) {
 
 function isDynamicPath(value) { return typeof value !== 'string' || /[*?{}$()%`]/.test(value) || value.includes('\\\\?\\'); }
 function deriveSecretClassification(values) { const list = Array.isArray(values) ? values : [values]; if (list.some((value) => typeof value === 'string' && isSecretLike(value))) return 'confirmed'; if (list.some(isDynamicPath)) return 'possible'; return 'none'; }
-function operationDigest(operation) { return digest(operation); }
-function targetDigest(operation) { return digest({ targets: [operation?.target, operation?.source, operation?.destination, operation?.targets].filter((value) => value !== undefined) }); }
+function operationDigestFromProjection(operation) { return digest(operation); }
+function targetDigestFromProjection(operation) { return digest({ targets: [operation.target, operation.source, operation.destination, operation.targets].filter((value) => value !== undefined) }); }
+function operationDigest(operation) {
+  const normalized = canonicalizeOperation(operation);
+  if (!normalized.valid) throw new TypeError(normalized.reason_code || 'TYPED_OPERATION_REQUIRED');
+  return operationDigestFromProjection(normalized.value);
+}
+function targetDigest(operation) {
+  const normalized = canonicalizeOperation(operation);
+  if (!normalized.valid) throw new TypeError(normalized.reason_code || 'TYPED_OPERATION_REQUIRED');
+  return targetDigestFromProjection(normalized.value);
+}
+function safeOperationDigest(operation) {
+  try { return operationDigest(operation); } catch { return null; }
+}
+function safeTargetDigest(operation) {
+  try { return targetDigest(operation); } catch { return null; }
+}
 function normalizeLinkType(value) { return typeof value === 'string' && LINK_TYPES.has(value) ? value : null; }
 function targetEvidenceValues(value) {
   const resolution = isRecord(value?.resolution) ? value.resolution : null;
@@ -191,15 +557,17 @@ function authorityEvidenceDigest(authority) {
 }
 
 function normalizeTrustedAuthority(authority) {
-  if (!isRecord(authority) || authorityIdentityError(authority) || !nonBlank(authority.identity)) return null;
+  const normalized = canonicalizeAuthority(authority);
+  if (!normalized.valid || authorityIdentityError(normalized.value) || !nonBlank(normalized.value.identity)) return null;
+  const contract = normalized.value;
   return deepFreeze({
-    role: authority.role,
-    identity: authority.identity,
-    provider: authority.provider,
-    model: authority.model,
-    assignment: authority.assignment,
-    finality_claim: authority.finality_claim,
-    allowed_operation_types: [...new Set(authority.allowed_operation_types)],
+    role: contract.role,
+    identity: contract.identity,
+    provider: contract.provider,
+    model: contract.model,
+    assignment: contract.assignment,
+    finality_claim: contract.finality_claim,
+    allowed_operation_types: [...new Set(contract.allowed_operation_types)],
   });
 }
 
@@ -221,7 +589,7 @@ function normalizeTarget(value, repository) {
   const hasExternalKind = nonBlank(value.kind) && externalKinds.includes(value.kind);
   if (hasExternalKind) {
     const keys = Object.keys(value);
-    if (!validDigest(value.digest) || keys.some((key) => !['kind', 'digest'].includes(key))) return failure('TARGET_CONTEXT_CONFLICT', { secret_classification: conflictSecretClassification(value) });
+    if (!validDigest(value.digest) || keys.some((key) => !['kind', 'digest', 'target_class', 'resolved_inside'].includes(key))) return failure('TARGET_CONTEXT_CONFLICT', { secret_classification: conflictSecretClassification(value) });
     return { valid: true, target_class: 'external-system', status: 'resolved', path_digest: value.digest, path: null, link_type: 'none', secret_values: [] };
   }
   if (value.kind !== undefined || value.digest !== undefined) return failure('TARGET_CONTEXT_CONFLICT', { secret_classification: conflictSecretClassification(value) });
@@ -266,7 +634,7 @@ function hardDenyForClassifiedComponents(components, repository, operationType =
   const secretClassification = derivedSecretClassification !== 'none' ? derivedSecretClassification : flattened.some((item) => item.secret_classification === 'confirmed') ? 'confirmed' : flattened.some((item) => item.secret_classification === 'possible') ? 'possible' : 'none';
   const operationClass = operationType === 'compound' ? 'compound' : flattened[0]?.operation_class || operationType;
   if (flattened.some((item) => item.operation_type === 'network.request' && item.secret_classification !== 'none')) return { decision: 'deny', reason_code: 'SECRET_EXFILTRATION_DENIED', operation_type: operationType, operation_class: operationClass, target_class: targetClass, secret_classification: secretClassification, ticket_status: 'not-accepted' };
-  if (flattened.some((item) => item.operation_type === 'filesystem.delete' && item.targets.some((target) => target.path && (isFilesystemRoot(target.path) || samePath(target.path, repository.root))))) return { decision: 'deny', reason_code: 'CATASTROPHIC_TARGET_DENIED', operation_type: operationType, operation_class: operationClass, target_class: 'protected-target', secret_classification: secretClassification };
+  if (flattened.some((item) => ['filesystem.delete', 'filesystem.move'].includes(item.operation_type) && item.targets.some((target) => target.path && (isFilesystemRoot(target.path) || samePath(target.path, repository.root))))) return { decision: 'deny', reason_code: 'CATASTROPHIC_TARGET_DENIED', operation_type: operationType, operation_class: operationClass, target_class: 'protected-target', secret_classification: secretClassification, ticket_status: 'not-accepted' };
   return null;
 }
 
@@ -338,14 +706,14 @@ function ticketRequestFor(input, operation, authority) {
     turn_id: input.session?.turn_id,
     call_id: input.session?.call_id,
     operation_type: operation.type,
-    operation_digest: operationDigest(operation),
-    target_digest: targetDigest(operation),
+    operation_digest: operationDigestFromProjection(operation),
+    target_digest: targetDigestFromProjection(operation),
     scope: input.scope === undefined ? null : input.scope,
   };
 }
 
 function publicResult(fields) { return deepFreeze({ contract_version: CONTRACT_VERSION, decision: fields.decision, reason_code: fields.reason_code, operation_type: fields.operation_type || null, operation_class: fields.operation_class || null, target_class: fields.target_class || 'unknown-target', secret_classification: fields.secret_classification || 'none', operation_digest: fields.operation_digest || null, target_digest: fields.target_digest || null, ticket_status: fields.ticket_status || 'not-required', privacy_safe: true, structural_impact_required: fields.structural_impact_required === true }); }
-function baseFailure(reasonCode, input = {}) { return publicResult({ decision: 'unsupported', reason_code: reasonCode, operation_digest: input.operation ? operationDigest(input.operation) : null, target_digest: input.operation ? targetDigest(input.operation) : null, secret_classification: input.secret_classification || 'none' }); }
+function baseFailure(reasonCode, input = {}) { return publicResult({ decision: 'unsupported', reason_code: reasonCode, operation_digest: input.operation ? safeOperationDigest(input.operation) : null, target_digest: input.operation ? safeTargetDigest(input.operation) : null, secret_classification: input.secret_classification || 'none' }); }
 
 class TicketStore {
   constructor(context, options = {}) {
@@ -428,56 +796,55 @@ function flattenClassifiedComponents(classification) {
   return classification.components.flatMap(flattenClassifiedComponents);
 }
 
-function ticketDecision(input, operation, classification, options) {
+function ticketDecision(input, operation, classification, trustedState) {
   if (!classification.requires_ticket) return null;
   const components = flattenClassifiedComponents(classification);
   const requiresController = components.some((component) => component.operation_type === 'github.mutation');
-  const trustedState = options && typeof options === 'object' ? TRUSTED_CONTEXT_STATE.get(options.trustedAuthorityContext) : null;
-  if (requiresController && !trustedState) return publicResult({ decision: 'deny', reason_code: 'CONTROLLER_TRUST_SOURCE_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, operation_digest: operationDigest(operation), target_digest: targetDigest(operation) });
-  if (requiresController && trustedState.authority.role !== 'controller') return publicResult({ decision: 'deny', reason_code: 'CONTROLLER_GITHUB_AUTHORITY_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, operation_digest: operationDigest(operation), target_digest: targetDigest(operation) });
-  if (components.some((component) => component.operation_type === 'network.request' && component.secret_classification !== 'none')) return publicResult({ decision: 'deny', reason_code: 'SECRET_EXFILTRATION_DENIED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation), ticket_status: 'not-accepted' });
+  if (requiresController && !trustedState) return publicResult({ decision: 'deny', reason_code: 'CONTROLLER_TRUST_SOURCE_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, operation_digest: operationDigestFromProjection(operation), target_digest: targetDigestFromProjection(operation) });
+  if (requiresController && trustedState.authority.role !== 'controller') return publicResult({ decision: 'deny', reason_code: 'CONTROLLER_GITHUB_AUTHORITY_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, operation_digest: operationDigestFromProjection(operation), target_digest: targetDigestFromProjection(operation) });
+  if (components.some((component) => component.operation_type === 'network.request' && component.secret_classification !== 'none')) return publicResult({ decision: 'deny', reason_code: 'SECRET_EXFILTRATION_DENIED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigestFromProjection(operation), target_digest: targetDigestFromProjection(operation), ticket_status: 'not-accepted' });
   if (!input.ticket) {
     const sensitiveRead = components.some((component) => component.secret_classification === 'confirmed' && ['filesystem.read', 'filesystem.create', 'filesystem.write', 'filesystem.move'].includes(component.operation_type));
-    return publicResult({ decision: 'ask', reason_code: sensitiveRead ? 'SECRET_ACCESS_REQUIRES_TICKET' : classification.reason_code || 'AUTHORITY_TICKET_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation), ticket_status: 'missing' });
+    return publicResult({ decision: 'ask', reason_code: sensitiveRead ? 'SECRET_ACCESS_REQUIRES_TICKET' : classification.reason_code || 'AUTHORITY_TICKET_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigestFromProjection(operation), target_digest: targetDigestFromProjection(operation), ticket_status: 'missing' });
   }
-  if (!trustedState) return publicResult({ decision: 'deny', reason_code: 'TICKET_TRUST_SOURCE_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation), ticket_status: 'not-accepted' });
+  if (!trustedState) return publicResult({ decision: 'deny', reason_code: 'TICKET_TRUST_SOURCE_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigestFromProjection(operation), target_digest: targetDigestFromProjection(operation), ticket_status: 'not-accepted' });
   const provenance = TICKET_PROVENANCE.get(input.ticket);
-  if (!provenance) return publicResult({ decision: 'deny', reason_code: 'TICKET_INVALID', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation), ticket_status: 'rejected' });
-  if (provenance.context !== trustedState.context || provenance.store !== trustedState.store) return publicResult({ decision: 'deny', reason_code: 'TICKET_AUTHORITY_CONTEXT_MISMATCH', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation), ticket_status: 'rejected' });
-  const consumed = trustedState.store.consume(input.ticket, ticketRequestFor(input, operation, trustedState.authority)); if (!consumed.valid) return publicResult({ decision: 'deny', reason_code: consumed.reason_code, operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation), ticket_status: 'rejected' });
-  return publicResult({ decision: 'allow', reason_code: consumed.reason_code, operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation), ticket_status: 'consumed' });
+  if (!provenance) return publicResult({ decision: 'deny', reason_code: 'TICKET_INVALID', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigestFromProjection(operation), target_digest: targetDigestFromProjection(operation), ticket_status: 'rejected' });
+  if (provenance.context !== trustedState.context || provenance.store !== trustedState.store) return publicResult({ decision: 'deny', reason_code: 'TICKET_AUTHORITY_CONTEXT_MISMATCH', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigestFromProjection(operation), target_digest: targetDigestFromProjection(operation), ticket_status: 'rejected' });
+  const consumed = trustedState.store.consume(input.ticket, ticketRequestFor(input, operation, trustedState.authority)); if (!consumed.valid) return publicResult({ decision: 'deny', reason_code: consumed.reason_code, operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigestFromProjection(operation), target_digest: targetDigestFromProjection(operation), ticket_status: 'rejected' });
+  return publicResult({ decision: 'allow', reason_code: consumed.reason_code, operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigestFromProjection(operation), target_digest: targetDigestFromProjection(operation), ticket_status: 'consumed' });
 }
-
 function evaluate(input, options = {}) {
-  if (!isRecord(input)) return baseFailure('CONTROL_PLANE_INPUT_INVALID');
-  if (input.enabled !== true || !isRecord(input.activation) || input.activation.mode !== 'explicit-local' || input.activation.consented !== true) return baseFailure('CONTROL_PLANE_DEFAULT_OFF', input);
-  const optionRecord = isRecord(options) ? options : {};
-  const trustedState = TRUSTED_CONTEXT_STATE.get(optionRecord.trustedAuthorityContext);
-  const authorityError = authorityIdentityError(input.authority); if (authorityError) return publicResult({ decision: authorityError === 'CALLER_FINALITY_REJECTED' ? 'deny' : 'unsupported', reason_code: authorityError, operation_digest: input.operation ? operationDigest(input.operation) : null, target_digest: input.operation ? targetDigest(input.operation) : null });
-  if (parseUtc(input.now) === null) return baseFailure('AUTHORITY_TIME_INVALID', input);
-  const repository = normalizeRepository(input.repository); if (!repository.valid) return baseFailure(repository.reason_code, input);
-  const classification = classifyOperation(input.operation, repository);
+  const normalizedInput = canonicalizeInput(input);
+  if (!normalizedInput.valid) return baseFailure(normalizedInput.reason_code, { secret_classification: normalizedInput.secret_classification });
+  const policyInput = normalizedInput.value;
+  const operation = policyInput.operation;
+  if (policyInput.enabled !== true || !isRecord(policyInput.activation) || policyInput.activation.mode !== 'explicit-local' || policyInput.activation.consented !== true) return baseFailure('CONTROL_PLANE_DEFAULT_OFF', policyInput);
+  const trustedState = trustedStateFromOptions(options);
+  const authorityError = authorityIdentityError(policyInput.authority); if (authorityError) return publicResult({ decision: authorityError === 'CALLER_FINALITY_REJECTED' ? 'deny' : 'unsupported', reason_code: authorityError, operation_digest: operation ? operationDigestFromProjection(operation) : null, target_digest: operation ? targetDigestFromProjection(operation) : null });
+  if (parseUtc(policyInput.now) === null) return baseFailure('AUTHORITY_TIME_INVALID', policyInput);
+  const repository = normalizeRepository(policyInput.repository); if (!repository.valid) return baseFailure(repository.reason_code, policyInput);
+  const classification = classifyOperation(operation, repository);
   if (!classification.valid) {
-    if (classification.hard_deny) return publicResult({ ...classification.hard_deny, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
-    return baseFailure(classification.reason_code, { ...input, secret_classification: classification.secret_classification });
+    if (classification.hard_deny) return publicResult({ ...classification.hard_deny, operation_digest: operationDigestFromProjection(operation), target_digest: targetDigestFromProjection(operation) });
+    return baseFailure(classification.reason_code, { operation, secret_classification: classification.secret_classification });
   }
   const components = flattenClassifiedComponents(classification);
   const hardDeny = hardDenyForClassifiedComponents(components, repository, classification.operation_type);
-  if (hardDeny) return publicResult({ ...hardDeny, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
+  if (hardDeny) return publicResult({ ...hardDeny, operation_digest: operationDigestFromProjection(operation), target_digest: targetDigestFromProjection(operation) });
   const hasGithubMutation = components.some((component) => component.operation_type === 'github.mutation');
-  if (hasGithubMutation && !trustedState) return publicResult({ decision: 'deny', reason_code: 'CONTROLLER_TRUST_SOURCE_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
-  if (hasGithubMutation && trustedState.authority.role !== 'controller') return publicResult({ decision: 'deny', reason_code: 'CONTROLLER_GITHUB_AUTHORITY_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
-  const policyAuthority = trustedState ? trustedState.authority : input.authority;
-  if (classification.operation_type === 'compound') { const allowed = new Set(policyAuthority.allowed_operation_types); if (components.some((component) => !allowed.has(component.operation_type))) return publicResult({ decision: 'deny', reason_code: 'COMPONENT_AUTHORITY_REQUIRED', operation_type: 'compound', operation_class: 'compound', target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) }); }
-  else if (!policyAuthority.allowed_operation_types.includes(classification.operation_type)) return publicResult({ decision: 'deny', reason_code: 'OPERATION_AUTHORITY_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
+  if (hasGithubMutation && !trustedState) return publicResult({ decision: 'deny', reason_code: 'CONTROLLER_TRUST_SOURCE_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, operation_digest: operationDigestFromProjection(operation), target_digest: targetDigestFromProjection(operation) });
+  if (hasGithubMutation && trustedState.authority.role !== 'controller') return publicResult({ decision: 'deny', reason_code: 'CONTROLLER_GITHUB_AUTHORITY_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, operation_digest: operationDigestFromProjection(operation), target_digest: targetDigestFromProjection(operation) });
+  const policyAuthority = trustedState ? trustedState.authority : policyInput.authority;
+  if (classification.operation_type === 'compound') { const allowed = new Set(policyAuthority.allowed_operation_types); if (components.some((component) => !allowed.has(component.operation_type))) return publicResult({ decision: 'deny', reason_code: 'COMPONENT_AUTHORITY_REQUIRED', operation_type: 'compound', operation_class: 'compound', target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigestFromProjection(operation), target_digest: targetDigestFromProjection(operation) }); }
+  else if (!policyAuthority.allowed_operation_types.includes(classification.operation_type)) return publicResult({ decision: 'deny', reason_code: 'OPERATION_AUTHORITY_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigestFromProjection(operation), target_digest: targetDigestFromProjection(operation) });
   const targetAuthorityRequired = components.some((component) => component.operation_type.startsWith('filesystem.') && ['outside-repository', 'unresolved-target', 'unknown-target', 'external-system'].includes(component.target_class));
-  if (targetAuthorityRequired) return publicResult({ decision: 'ask', reason_code: 'TARGET_AUTHORITY_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
+  if (targetAuthorityRequired) return publicResult({ decision: 'ask', reason_code: 'TARGET_AUTHORITY_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigestFromProjection(operation), target_digest: targetDigestFromProjection(operation) });
   const sensitiveRead = components.some((component) => component.secret_classification === 'confirmed' && ['filesystem.read', 'filesystem.create', 'filesystem.write', 'filesystem.move'].includes(component.operation_type));
-  if (sensitiveRead) return ticketDecision(input, input.operation, { ...classification, requires_ticket: true }, optionRecord);
-  if (classification.requires_ticket) return ticketDecision(input, input.operation, classification, optionRecord);
-  return publicResult({ decision: 'allow', reason_code: 'TYPED_OPERATION_ALLOWED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
+  if (sensitiveRead) return ticketDecision(policyInput, operation, { ...classification, requires_ticket: true }, trustedState);
+  if (classification.requires_ticket) return ticketDecision(policyInput, operation, classification, trustedState);
+  return publicResult({ decision: 'allow', reason_code: 'TYPED_OPERATION_ALLOWED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigestFromProjection(operation), target_digest: targetDigestFromProjection(operation) });
 }
-
 function assessStructuralImpact(change) {
   const structuralKinds = new Set(['rename', 'remove', 'move', 'resignature', 're-signature', 'contract-shape', 'contract', 'public-contract', 'internal-contract', 'generated-surface', 'generated-shape', 'path', 'symbol', 'command', 'schema-field', 'repository-identity', 'identity', 'structural-replace', 'replace']);
   const localKinds = new Set(['value-change']);

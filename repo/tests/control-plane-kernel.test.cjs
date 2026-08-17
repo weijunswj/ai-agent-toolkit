@@ -322,7 +322,19 @@ test('mixed external and filesystem target representations fail closed', () => {
     ],
   };
   const trusted = createTrustedAuthority({ now: NOW, authority: { allowed_operation_types: ['git.read', 'network.request'] } });
-  const ticket = trusted.issue(ticketRequest(operation));
+  const ticketOperation = {
+    type: 'compound',
+    components: [
+      { type: 'git.read' },
+      {
+        type: 'network.request',
+        source: { kind: 'external-system', digest: 'a'.repeat(64) },
+        destination: { kind: 'external-system', digest: 'b'.repeat(64) },
+        method: 'POST',
+      },
+    ],
+  };
+  const ticket = trusted.issue(ticketRequest(ticketOperation));
   const transmitted = kernel.evaluate(baseInput(operation, {
     authority: TRUSTED_CONTROLLER,
     ticket,
@@ -945,6 +957,220 @@ test('filesystem.move validates source and destination cardinality and binding',
   assert.equal(changedDestination.reason_code, 'TICKET_BINDING_MISMATCH');
 });
 
+test('non-enumerable policy fields cannot escape canonical ticket binding', () => {
+  const visible = {
+    type: 'filesystem.move',
+    source: target('src\\source.txt', { existence: 'existing' }),
+    no_clobber: true,
+  };
+  const operation = { ...visible };
+  Object.defineProperty(operation, 'destination', {
+    value: target('src\\destination.txt', { existence: 'absent' }),
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
+  const trusted = createTrustedAuthority({ now: NOW, authority: { allowed_operation_types: ['filesystem.move'] } });
+  const ticket = trusted.issue(ticketRequest(visible));
+  operation.destination = target('src\\changed-after-issue.txt', { existence: 'absent' });
+  const result = kernel.evaluate(baseInput(operation, {
+    authority: { ...baseInput(operation).authority, allowed_operation_types: ['filesystem.move'] },
+    ticket,
+    session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' },
+    scope: ticket.scope,
+  }), { trustedAuthorityContext: trusted });
+  assert.equal(result.decision, 'unsupported');
+  assert.notEqual(result.ticket_status, 'consumed');
+});
+
+test('hidden external filesystem evidence cannot disappear from secret classification', () => {
+  const hiddenExternal = { kind: 'external-system', digest: 'a'.repeat(64) };
+  Object.defineProperty(hiddenExternal, 'path', {
+    value: ROOT + '\\.env.synthetic',
+    enumerable: false,
+    configurable: true,
+  });
+  Object.defineProperty(hiddenExternal, 'resolution', {
+    value: { status: 'resolved', canonical_path: ROOT + '\\src\\safe.txt', link_type: 'none' },
+    enumerable: false,
+    configurable: true,
+  });
+  const result = kernel.evaluate(baseInput({ type: 'filesystem.read', target: hiddenExternal }));
+  assert.equal(result.decision, 'unsupported');
+  assert.notEqual(result.secret_classification, 'none');
+});
+
+test('hidden git push binding fields cannot consume an old ticket', () => {
+  const visible = { type: 'git.push', options: ['--porcelain'] };
+  const operation = { type: 'git.push', options: ['--porcelain'] };
+  Object.defineProperties(operation, {
+    remote: { value: 'origin', enumerable: false, configurable: true, writable: true },
+    refspecs: { value: ['HEAD:refs/heads/topic'], enumerable: false, configurable: true, writable: true },
+    authorized_remote: { value: 'origin', enumerable: false, configurable: true, writable: true },
+    authorized_ref: { value: 'refs/heads/topic', enumerable: false, configurable: true, writable: true },
+  });
+  const trusted = createTrustedAuthority({ now: NOW, authority: { allowed_operation_types: ['git.push'] } });
+  const ticket = trusted.issue(ticketRequest(visible));
+  operation.remote = 'upstream';
+  operation.refspecs = ['HEAD:refs/heads/other'];
+  operation.authorized_remote = 'upstream';
+  operation.authorized_ref = 'refs/heads/other';
+  const result = kernel.evaluate(baseInput(operation, {
+    authority: { ...baseInput(operation).authority, allowed_operation_types: ['git.push'] },
+    ticket,
+    session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' },
+    scope: ticket.scope,
+  }), { trustedAuthorityContext: trusted });
+  assert.equal(result.decision, 'unsupported');
+  assert.notEqual(result.ticket_status, 'consumed');
+});
+
+test('accessor policy data is rejected without invoking the accessor', () => {
+  let getterCalls = 0;
+  const accessorTarget = {
+    resolution: { status: 'resolved', canonical_path: ROOT + '\\src\\safe.txt', link_type: 'none' },
+  };
+  Object.defineProperty(accessorTarget, 'path', {
+    enumerable: true,
+    configurable: true,
+    get() {
+      getterCalls += 1;
+      return ROOT + '\\src\\safe.txt';
+    },
+  });
+  const result = kernel.evaluate(baseInput({ type: 'filesystem.read', target: accessorTarget }));
+  assert.equal(result.decision, 'unsupported');
+  assert.equal(getterCalls, 0);
+});
+
+test('custom toJSON cannot alter the canonical operation digest', () => {
+  let serializationCalls = 0;
+  const operation = { type: 'filesystem.read', target: target('src\\safe.txt') };
+  Object.defineProperty(operation, 'toJSON', {
+    enumerable: true,
+    configurable: true,
+    value() {
+      serializationCalls += 1;
+      return { type: 'filesystem.delete', target: target(ROOT) };
+    },
+  });
+  let rejected = false;
+  try {
+    kernel.operationDigest(operation);
+  } catch {
+    rejected = true;
+  }
+  assert.equal(rejected, true);
+  assert.equal(serializationCalls, 0);
+});
+
+test('policy arrays reject hidden, sparse, and extra descriptors', () => {
+  const hiddenOptions = ['--porcelain'];
+  Object.defineProperty(hiddenOptions, 'hidden-option', { value: '--mirror', enumerable: false });
+  const hiddenOptionResult = kernel.evaluate(baseInput({
+    type: 'git.push',
+    remote: 'origin',
+    refspecs: ['HEAD:refs/heads/topic'],
+    options: hiddenOptions,
+    authorized_remote: 'origin',
+    authorized_ref: 'refs/heads/topic',
+  }));
+  assert.equal(hiddenOptionResult.decision, 'unsupported');
+
+  const sparseRefspecs = [];
+  sparseRefspecs.length = 1;
+  const sparseResult = kernel.evaluate(baseInput({
+    type: 'git.push',
+    remote: 'origin',
+    refspecs: sparseRefspecs,
+    options: ['--porcelain'],
+    authorized_remote: 'origin',
+    authorized_ref: 'refs/heads/topic',
+  }));
+  assert.equal(sparseResult.decision, 'unsupported');
+
+  const hiddenComponents = [routineRead()];
+  Object.defineProperty(hiddenComponents, 'hidden-component', { value: { type: 'git.branch', mode: 'move', branch: 'topic' }, enumerable: false });
+  const hiddenComponentResult = kernel.evaluate(baseInput({
+    type: 'compound',
+    components: hiddenComponents,
+  }));
+  assert.equal(hiddenComponentResult.decision, 'unsupported');
+});
+test('filesystem.move catastrophic endpoints deny before ticket consumption', () => {
+  const cases = [
+    ['repository-root-source', ROOT, ROOT + '\\src\\move-destination.txt'],
+    ['repository-root-destination', ROOT + '\\src\\move-source.txt', ROOT],
+    ['filesystem-root-source', 'C:\\', ROOT + '\\src\\move-destination.txt'],
+    ['filesystem-root-destination', ROOT + '\\src\\move-source.txt', 'C:\\'],
+    ['unc-share-root-source', '\\\\server\\share', ROOT + '\\src\\move-destination.txt'],
+    ['unc-share-root-destination', ROOT + '\\src\\move-source.txt', '\\\\server\\share'],
+  ];
+  const observations = [];
+  const absoluteTarget = (targetPath, existence) => ({
+    path: targetPath,
+    resolution: { status: 'resolved', canonical_path: targetPath, link_type: 'none', existence },
+  });
+  for (const [label, sourcePath, destinationPath] of cases) {
+    const operation = {
+      type: 'filesystem.move',
+      source: absoluteTarget(sourcePath, 'existing'),
+      destination: absoluteTarget(destinationPath, 'absent'),
+      no_clobber: true,
+    };
+    const withoutTicket = kernel.evaluate(baseInput(operation));
+    const trusted = createTrustedAuthority({ now: NOW, authority: { allowed_operation_types: ['filesystem.move'] } });
+    const ticket = trusted.issue(ticketRequest(operation));
+    const withTicket = kernel.evaluate(baseInput(operation, {
+      authority: { ...baseInput(operation).authority, allowed_operation_types: ['filesystem.move'] },
+      ticket,
+      session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' },
+      scope: ticket.scope,
+    }), { trustedAuthorityContext: trusted });
+    observations.push({
+      label,
+      withoutTicket: [withoutTicket.decision, withoutTicket.reason_code],
+      withTicket: [withTicket.decision, withTicket.reason_code, withTicket.ticket_status],
+      remaining: trusted.size(),
+    });
+  }
+  for (const observation of observations) {
+    assert.deepEqual(observation.withoutTicket, ['deny', 'CATASTROPHIC_TARGET_DENIED'], observation.label + ' without ticket');
+    assert.deepEqual(observation.withTicket, ['deny', 'CATASTROPHIC_TARGET_DENIED', 'not-accepted'], observation.label + ' with ticket');
+    assert.equal(observation.remaining, 1, observation.label + ' ticket remains unconsumed');
+  }
+});
+
+test('catastrophic move dominates unsupported components in both compound orders', () => {
+  const absoluteTarget = (targetPath, existence) => ({
+    path: targetPath,
+    resolution: { status: 'resolved', canonical_path: targetPath, link_type: 'none', existence },
+  });
+  const move = {
+    type: 'filesystem.move',
+    source: absoluteTarget(ROOT, 'existing'),
+    destination: absoluteTarget(ROOT + '\\src\\move-destination.txt', 'absent'),
+    no_clobber: true,
+  };
+  const opaque = { type: 'shell', shell: 'posix', command: 'opaque synthetic command' };
+  const observations = [];
+  for (const components of [[opaque, move], [move, opaque]]) {
+    const operation = { type: 'compound', components };
+    const trusted = createTrustedAuthority({ now: NOW, authority: { allowed_operation_types: ['shell', 'filesystem.move'] } });
+    const ticket = trusted.issue(ticketRequest(operation));
+    const result = kernel.evaluate(baseInput(operation, {
+      authority: { ...baseInput(operation).authority, allowed_operation_types: ['shell', 'filesystem.move'] },
+      ticket,
+      session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' },
+      scope: ticket.scope,
+    }), { trustedAuthorityContext: trusted });
+    observations.push({ result: [result.decision, result.reason_code, result.ticket_status], remaining: trusted.size() });
+  }
+  for (const observation of observations) {
+    assert.deepEqual(observation.result, ['deny', 'CATASTROPHIC_TARGET_DENIED', 'not-accepted']);
+    assert.equal(observation.remaining, 1);
+  }
+});
 test('fixture manifest required case IDs are executed exactly once', () => {
   const probeRegistry = [];
   assert.throws(() => registerFixtureCaseIds(['undeclared-fixture-case'], probeRegistry), /not declared by the manifest/);
