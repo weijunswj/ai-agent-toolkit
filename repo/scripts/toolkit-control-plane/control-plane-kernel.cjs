@@ -9,7 +9,11 @@ const LINK_TYPES = new Set(['none', 'symlink', 'junction', 'reparse-point']);
 const SECRET_CLASSIFICATIONS = new Set(['none', 'possible', 'confirmed']);
 const ROLES = new Set(['executor', 'controller']);
 const MAX_TICKET_USES = 8;
-const TICKET_BRAND = Symbol('toolkit.control-plane.authority-ticket');
+const TRUSTED_CONTEXT_STATE = new WeakMap();
+const TICKET_STORE_STATE = new WeakMap();
+const TICKET_PROVENANCE = new WeakMap();
+const TEST_RUNTIME = typeof process.env.NODE_TEST_CONTEXT === 'string' && /\.test\.[cm]?js$/i.test(process.argv[1] || '');
+const TICKET_AUTHORITY_INPUT_FIELDS = new Set(['issuer', 'issuer_role', 'issuer_identity_digest', 'issuer_authority_digest', 'role', 'identity', 'provider', 'model', 'assignment', 'finality_claim', 'allowed_operation_types']);
 const POLICY = Object.freeze(require('../../../_projects/development/control-plane-kernel/_main/control-plane-policy.json'));
 const OPERATION_FIELDS = Object.freeze({
   'filesystem.read': ['type', 'target'],
@@ -171,6 +175,19 @@ function authorityEvidenceDigest(authority) {
   });
 }
 
+function normalizeTrustedAuthority(authority) {
+  if (!isRecord(authority) || authorityIdentityError(authority) || !nonBlank(authority.identity)) return null;
+  return deepFreeze({
+    role: authority.role,
+    identity: authority.identity,
+    provider: authority.provider,
+    model: authority.model,
+    assignment: authority.assignment,
+    finality_claim: authority.finality_claim,
+    allowed_operation_types: [...new Set(authority.allowed_operation_types)],
+  });
+}
+
 function normalizeRepository(repository) {
   if (!isRecord(repository) || !nonBlank(repository.root) || !nonBlank(repository.worktree)) return failure('REPOSITORY_CONTEXT_INVALID');
   const root = normalizePath(repository.root); const worktree = normalizePath(repository.worktree);
@@ -246,8 +263,7 @@ function classifyOperation(operation, repository) {
   return { valid: true, operation_type: operation.type, operation_class: operationClass, target_class: targetClass, targets: normalizedTargets, secret_classification: secretClassification, secret_values: paths, requires_ticket: requiresTicket, reason_code: reasonCode };
 }
 
-function ticketRequestFor(input, operation) {
-  const authority = input.authority;
+function ticketRequestFor(input, operation, authority) {
   return {
     issuer_role: authority?.role,
     issuer_identity_digest: nonBlank(authority?.identity) ? digest(authority.identity) : null,
@@ -266,35 +282,87 @@ function publicResult(fields) { return deepFreeze({ contract_version: CONTRACT_V
 function baseFailure(reasonCode, input = {}) { return publicResult({ decision: 'unsupported', reason_code: reasonCode, operation_digest: input.operation ? operationDigest(input.operation) : null, target_digest: input.operation ? targetDigest(input.operation) : null, secret_classification: input.secret_classification || 'none' }); }
 
 class TicketStore {
-  constructor(options = {}) { this._now = options.now || (() => Date.now()); this._maxEntries = Number.isSafeInteger(options.maxEntries) ? options.maxEntries : 256; this._maxLifetimeMs = Number.isSafeInteger(options.maxLifetimeMs) ? options.maxLifetimeMs : 5 * 60 * 1000; this._records = new Map(); this._sequence = 0; if (this._maxEntries < 1 || this._maxLifetimeMs < 1) throw new Error('TICKET_STORE_BOUNDS_INVALID'); }
+  constructor(context, options = {}) {
+    if (!TRUSTED_CONTEXT_STATE.has(context)) throw new Error('TRUSTED_AUTHORITY_CONTEXT_INVALID');
+    this._context = context;
+    this._now = options.now || (() => Date.now());
+    this._maxEntries = Number.isSafeInteger(options.maxEntries) ? options.maxEntries : 256;
+    this._maxLifetimeMs = Number.isSafeInteger(options.maxLifetimeMs) ? options.maxLifetimeMs : 5 * 60 * 1000;
+    this._records = new Map();
+    this._sequence = 0;
+    if (this._maxEntries < 1 || this._maxLifetimeMs < 1) throw new Error('TICKET_STORE_BOUNDS_INVALID');
+    TICKET_STORE_STATE.set(this, { context });
+  }
+
   _currentTime() { const value = nowFrom(this._now); if (!Number.isFinite(value)) throw new Error('TICKET_TIME_INVALID'); return value; }
+
   issue(input) {
+    const storeState = TICKET_STORE_STATE.get(this);
+    const contextState = storeState ? TRUSTED_CONTEXT_STATE.get(storeState.context) : null;
+    if (!contextState) throw new Error('TRUSTED_AUTHORITY_CONTEXT_INVALID');
     this.compact();
-    const issuerAuthorityDigest = isRecord(input) ? authorityEvidenceDigest(input.issuer) : null;
-    if (!isRecord(input) || !isRecord(input.issuer) || !ROLES.has(input.issuer.role) || !nonBlank(input.issuer.identity) || !issuerAuthorityDigest) throw new Error('TICKET_ISSUER_INVALID');
+    if (!isRecord(input)) throw new Error('TICKET_BINDING_INVALID');
+    if (Object.keys(input).some((key) => TICKET_AUTHORITY_INPUT_FIELDS.has(key))) throw new Error('TICKET_ISSUER_INPUT_FORBIDDEN');
+    const issuerAuthorityDigest = authorityEvidenceDigest(contextState.authority);
+    if (!issuerAuthorityDigest) throw new Error('TICKET_ISSUER_INVALID');
     if (!nonBlank(input.session_id) || !nonBlank(input.turn_id) || !nonBlank(input.call_id) || !nonBlank(input.operation_type) || !validDigest(input.operation_digest) || !validDigest(input.target_digest)) throw new Error('TICKET_BINDING_INVALID');
     const scope = input.scope === undefined || input.scope === null ? null : input.scope;
     if (scope !== null && !nonBlank(scope)) throw new Error('TICKET_SCOPE_INVALID');
     const issuedAt = this._currentTime(); const expiresAt = parseUtc(input.expires_at); const maxUses = input.max_uses;
     if (!Number.isSafeInteger(maxUses) || maxUses < 1 || maxUses > MAX_TICKET_USES || !Number.isFinite(expiresAt) || expiresAt <= issuedAt || expiresAt - issuedAt > this._maxLifetimeMs) throw new Error('TICKET_EXPIRY_INVALID');
     if (this._records.size >= this._maxEntries) throw new Error('TICKET_STORE_FULL');
-    const payload = { contract_version: TICKET_CONTRACT_VERSION, issuer_role: input.issuer.role, issuer_identity_digest: digest(input.issuer.identity), issuer_authority_digest: issuerAuthorityDigest, session_id: input.session_id, turn_id: input.turn_id, call_id: input.call_id, operation_type: input.operation_type, operation_digest: input.operation_digest, target_digest: input.target_digest, scope, issued_at: new Date(issuedAt).toISOString(), expires_at: input.expires_at, max_uses: maxUses, consumed_count: 0 };
-    const ticket = { ...payload, ticket_id: digest({ ...payload, sequence: this._sequence += 1 }) }; Object.defineProperty(ticket, TICKET_BRAND, { value: true, enumerable: false }); const frozen = deepFreeze(ticket); this._records.set(frozen.ticket_id, { ticket: frozen, uses: 0 }); return frozen;
+    const payload = { contract_version: TICKET_CONTRACT_VERSION, issuer_role: contextState.authority.role, issuer_identity_digest: digest(contextState.authority.identity), issuer_authority_digest: issuerAuthorityDigest, session_id: input.session_id, turn_id: input.turn_id, call_id: input.call_id, operation_type: input.operation_type, operation_digest: input.operation_digest, target_digest: input.target_digest, scope, issued_at: new Date(issuedAt).toISOString(), expires_at: input.expires_at, max_uses: maxUses, consumed_count: 0 };
+    const frozen = deepFreeze({ ...payload, ticket_id: digest({ ...payload, sequence: this._sequence += 1 }) });
+    TICKET_PROVENANCE.set(frozen, { context: storeState.context, store: this, ticket_id: frozen.ticket_id });
+    this._records.set(frozen.ticket_id, { ticket: frozen, uses: 0 });
+    return frozen;
   }
+
   consume(ticket, request) {
+    const storeState = TICKET_STORE_STATE.get(this);
+    if (!storeState || !isRecord(request)) return failure('TICKET_INVALID');
+    const provenance = TICKET_PROVENANCE.get(ticket);
+    if (!provenance) return failure('TICKET_INVALID');
+    if (provenance.context !== storeState.context || provenance.store !== this) return failure('TICKET_AUTHORITY_CONTEXT_MISMATCH');
     this.compact();
-    if (!ticket || ticket[TICKET_BRAND] !== true || !isRecord(request)) return failure('TICKET_INVALID');
-    const record = this._records.get(ticket.ticket_id); if (!record) return failure('TICKET_REPLAY');
+    const record = this._records.get(provenance.ticket_id); if (!record) return failure('TICKET_REPLAY');
     const current = this._currentTime(); if (current >= parseUtc(record.ticket.expires_at)) { this._records.delete(record.ticket.ticket_id); return failure('TICKET_EXPIRED'); }
     const matches = ['issuer_role', 'issuer_identity_digest', 'issuer_authority_digest', 'session_id', 'turn_id', 'call_id', 'operation_type', 'operation_digest', 'target_digest', 'scope'].every((key) => request[key] === record.ticket[key]); if (!matches) return failure('TICKET_BINDING_MISMATCH');
     if (record.uses >= record.ticket.max_uses) { this._records.delete(record.ticket.ticket_id); return failure('TICKET_REPLAY'); }
-    record.uses += 1; record.ticket = deepFreeze({ ...record.ticket, consumed_count: record.uses }); const valid = deepFreeze({ valid: true, reason_code: 'TICKET_CONSUMED', consumed_count: record.uses, max_uses: ticket.max_uses }); if (record.uses >= record.ticket.max_uses) this._records.delete(record.ticket.ticket_id); return valid;
+    record.uses += 1;
+    record.ticket = deepFreeze({ ...record.ticket, consumed_count: record.uses });
+    TICKET_PROVENANCE.set(record.ticket, { context: storeState.context, store: this, ticket_id: record.ticket.ticket_id });
+    const valid = deepFreeze({ valid: true, reason_code: 'TICKET_CONSUMED', consumed_count: record.uses, max_uses: record.ticket.max_uses });
+    if (record.uses >= record.ticket.max_uses) this._records.delete(record.ticket.ticket_id);
+    return valid;
   }
+
   compact() { const current = this._currentTime(); let removed = 0; for (const [id, record] of this._records) { if (current >= parseUtc(record.ticket.expires_at) || record.uses >= record.ticket.max_uses) { this._records.delete(id); removed += 1; } } return removed; }
   size() { this.compact(); return this._records.size; }
 }
 
-function createTicketStore(options = {}) { return new TicketStore(options); }
+function createTrustedAuthorityContext(authority, options = {}) {
+  const contract = normalizeTrustedAuthority(authority);
+  if (!contract) throw new Error('TRUSTED_AUTHORITY_INVALID');
+  const context = {};
+  const state = { context, authority: contract, store: null };
+  TRUSTED_CONTEXT_STATE.set(context, state);
+  const store = new TicketStore(context, options);
+  state.store = store;
+  Object.defineProperties(context, {
+    issue: { enumerable: false, value: (input) => store.issue(input) },
+    compact: { enumerable: false, value: () => store.compact() },
+    size: { enumerable: false, value: () => store.size() },
+  });
+  return Object.freeze(context);
+}
+
+function createTestTrustedAuthorityFixture(options = {}) {
+  if (!TEST_RUNTIME) throw new Error('TEST_TRUSTED_AUTHORITY_FIXTURE_UNAVAILABLE');
+  if (!isRecord(options) || !isRecord(options.authority)) throw new Error('TEST_TRUSTED_AUTHORITY_INVALID');
+  const { authority, ...storeOptions } = options;
+  return createTrustedAuthorityContext(authority, storeOptions);
+}
 
 function flattenClassifiedComponents(classification) {
   if (classification?.operation_type !== 'compound') return [classification];
@@ -305,23 +373,27 @@ function ticketDecision(input, operation, classification, options) {
   if (!classification.requires_ticket) return null;
   const components = flattenClassifiedComponents(classification);
   const requiresController = components.some((component) => component.operation_type === 'github.mutation');
-  if (requiresController && input.authority.role !== 'controller') return publicResult({ decision: 'deny', reason_code: 'CONTROLLER_GITHUB_AUTHORITY_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, operation_digest: operationDigest(operation), target_digest: targetDigest(operation) });
+  const trustedState = options && typeof options === 'object' ? TRUSTED_CONTEXT_STATE.get(options.trustedAuthorityContext) : null;
+  if (requiresController && !trustedState) return publicResult({ decision: 'deny', reason_code: 'CONTROLLER_TRUST_SOURCE_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, operation_digest: operationDigest(operation), target_digest: targetDigest(operation) });
+  if (requiresController && trustedState.authority.role !== 'controller') return publicResult({ decision: 'deny', reason_code: 'CONTROLLER_GITHUB_AUTHORITY_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, operation_digest: operationDigest(operation), target_digest: targetDigest(operation) });
   if (components.some((component) => component.operation_type === 'network.request' && component.secret_classification !== 'none')) return publicResult({ decision: 'deny', reason_code: 'SECRET_EXFILTRATION_DENIED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation), ticket_status: 'not-accepted' });
-  const authorityDigest = authorityEvidenceDigest(input.authority);
-  if (!authorityDigest) return publicResult({ decision: 'deny', reason_code: 'TICKET_TRUST_EVIDENCE_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation), ticket_status: 'not-accepted' });
   if (!input.ticket) {
     const sensitiveRead = components.some((component) => component.secret_classification === 'confirmed' && ['filesystem.read', 'filesystem.create', 'filesystem.write', 'filesystem.move'].includes(component.operation_type));
     return publicResult({ decision: 'ask', reason_code: sensitiveRead ? 'SECRET_ACCESS_REQUIRES_TICKET' : classification.reason_code || 'AUTHORITY_TICKET_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation), ticket_status: 'missing' });
   }
-  if (input.ticket.issuer_role !== input.authority.role || input.ticket.issuer_identity_digest !== digest(input.authority.identity) || input.ticket.issuer_authority_digest !== authorityDigest) return publicResult({ decision: 'deny', reason_code: 'TICKET_TRUST_MISMATCH', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation), ticket_status: 'rejected' });
-  const store = options.ticketStore; if (!store || typeof store.consume !== 'function') return baseFailure('TICKET_STORE_UNAVAILABLE', input);
-  const consumed = store.consume(input.ticket, ticketRequestFor(input, operation)); if (!consumed.valid) return publicResult({ decision: 'deny', reason_code: consumed.reason_code, operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation), ticket_status: 'rejected' });
+  if (!trustedState) return publicResult({ decision: 'deny', reason_code: 'TICKET_TRUST_SOURCE_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation), ticket_status: 'not-accepted' });
+  const provenance = TICKET_PROVENANCE.get(input.ticket);
+  if (!provenance) return publicResult({ decision: 'deny', reason_code: 'TICKET_INVALID', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation), ticket_status: 'rejected' });
+  if (provenance.context !== trustedState.context || provenance.store !== trustedState.store) return publicResult({ decision: 'deny', reason_code: 'TICKET_AUTHORITY_CONTEXT_MISMATCH', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation), ticket_status: 'rejected' });
+  const consumed = trustedState.store.consume(input.ticket, ticketRequestFor(input, operation, trustedState.authority)); if (!consumed.valid) return publicResult({ decision: 'deny', reason_code: consumed.reason_code, operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation), ticket_status: 'rejected' });
   return publicResult({ decision: 'allow', reason_code: consumed.reason_code, operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(operation), target_digest: targetDigest(operation), ticket_status: 'consumed' });
 }
 
 function evaluate(input, options = {}) {
   if (!isRecord(input)) return baseFailure('CONTROL_PLANE_INPUT_INVALID');
   if (input.enabled !== true || !isRecord(input.activation) || input.activation.mode !== 'explicit-local' || input.activation.consented !== true) return baseFailure('CONTROL_PLANE_DEFAULT_OFF', input);
+  const optionRecord = isRecord(options) ? options : {};
+  const trustedState = TRUSTED_CONTEXT_STATE.get(optionRecord.trustedAuthorityContext);
   const authorityError = authorityIdentityError(input.authority); if (authorityError) return publicResult({ decision: authorityError === 'CALLER_FINALITY_REJECTED' ? 'deny' : 'unsupported', reason_code: authorityError, operation_digest: input.operation ? operationDigest(input.operation) : null, target_digest: input.operation ? targetDigest(input.operation) : null });
   if (parseUtc(input.now) === null) return baseFailure('AUTHORITY_TIME_INVALID', input);
   const repository = normalizeRepository(input.repository); if (!repository.valid) return baseFailure(repository.reason_code, input);
@@ -329,14 +401,17 @@ function evaluate(input, options = {}) {
   const components = flattenClassifiedComponents(classification);
   if (components.some((component) => component.operation_type === 'network.request' && component.secret_classification !== 'none')) return publicResult({ decision: 'deny', reason_code: 'SECRET_EXFILTRATION_DENIED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation), ticket_status: 'not-accepted' });
   if (components.some((component) => component.operation_type === 'filesystem.delete' && component.targets.some((item) => item.path && (isFilesystemRoot(item.path) || samePath(item.path, repository.root))))) return publicResult({ decision: 'deny', reason_code: 'CATASTROPHIC_TARGET_DENIED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: 'protected-target', secret_classification: classification.secret_classification, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
-  if (classification.operation_type === 'compound') { const allowed = new Set(input.authority.allowed_operation_types); if (components.some((component) => !allowed.has(component.operation_type))) return publicResult({ decision: 'deny', reason_code: 'COMPONENT_AUTHORITY_REQUIRED', operation_type: 'compound', operation_class: 'compound', target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) }); }
-  else if (!input.authority.allowed_operation_types.includes(classification.operation_type)) return publicResult({ decision: 'deny', reason_code: 'OPERATION_AUTHORITY_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
-  if (components.some((component) => component.operation_type === 'github.mutation') && input.authority.role !== 'controller') return publicResult({ decision: 'deny', reason_code: 'CONTROLLER_GITHUB_AUTHORITY_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
+  const hasGithubMutation = components.some((component) => component.operation_type === 'github.mutation');
+  if (hasGithubMutation && !trustedState) return publicResult({ decision: 'deny', reason_code: 'CONTROLLER_TRUST_SOURCE_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
+  if (hasGithubMutation && trustedState.authority.role !== 'controller') return publicResult({ decision: 'deny', reason_code: 'CONTROLLER_GITHUB_AUTHORITY_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
+  const policyAuthority = trustedState ? trustedState.authority : input.authority;
+  if (classification.operation_type === 'compound') { const allowed = new Set(policyAuthority.allowed_operation_types); if (components.some((component) => !allowed.has(component.operation_type))) return publicResult({ decision: 'deny', reason_code: 'COMPONENT_AUTHORITY_REQUIRED', operation_type: 'compound', operation_class: 'compound', target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) }); }
+  else if (!policyAuthority.allowed_operation_types.includes(classification.operation_type)) return publicResult({ decision: 'deny', reason_code: 'OPERATION_AUTHORITY_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
   const targetAuthorityRequired = components.some((component) => component.operation_type.startsWith('filesystem.') && ['outside-repository', 'unresolved-target', 'unknown-target', 'external-system'].includes(component.target_class));
   if (targetAuthorityRequired) return publicResult({ decision: 'ask', reason_code: 'TARGET_AUTHORITY_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
   const sensitiveRead = components.some((component) => component.secret_classification === 'confirmed' && ['filesystem.read', 'filesystem.create', 'filesystem.write', 'filesystem.move'].includes(component.operation_type));
-  if (sensitiveRead) return ticketDecision(input, input.operation, { ...classification, requires_ticket: true }, options);
-  if (classification.requires_ticket) return ticketDecision(input, input.operation, classification, options);
+  if (sensitiveRead) return ticketDecision(input, input.operation, { ...classification, requires_ticket: true }, optionRecord);
+  if (classification.requires_ticket) return ticketDecision(input, input.operation, classification, optionRecord);
   return publicResult({ decision: 'allow', reason_code: 'TYPED_OPERATION_ALLOWED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
 }
 
@@ -347,4 +422,6 @@ function assessStructuralImpact(change) {
   return deepFreeze({ valid: true, required, search_scope: required ? 'targeted-repo-wide' : 'local', existing_identity_digest: digest(change.identity), consumer_categories: required ? ['source-shape-tests', 'fixtures-and-snapshots', 'generated-surface-assertions', 'docs-config-contracts', 'imports-registrations', 'scripts-manifests-adapters'] : [], compatibility_rule: { issue: 342, status: 'active-until-propagation-verification', permanent_mechanism: 'deterministic-structural-impact-v1' } });
 }
 
-module.exports = { CONTRACT_VERSION, REMOTE_IDENTITY_CONTRACT_VERSION, TICKET_CONTRACT_VERSION, MAX_TICKET_USES, POLICY, validateRemoteIdentity, formatRemoteIdentity, operationDigest, targetDigest, createTicketStore, evaluate, assessStructuralImpact, isFilesystemRoot, isUncShareRoot };
+const publicApi = { CONTRACT_VERSION, REMOTE_IDENTITY_CONTRACT_VERSION, TICKET_CONTRACT_VERSION, MAX_TICKET_USES, POLICY, validateRemoteIdentity, formatRemoteIdentity, operationDigest, targetDigest, evaluate, assessStructuralImpact, isFilesystemRoot, isUncShareRoot };
+if (TEST_RUNTIME) publicApi.createTestTrustedAuthorityFixture = createTestTrustedAuthorityFixture;
+module.exports = publicApi;

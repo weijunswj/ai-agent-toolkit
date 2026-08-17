@@ -13,7 +13,7 @@ These files are first-party source authored for #346 A1. No external or third-pa
 - `repo/scripts/toolkit-control-plane/control-plane-kernel.cjs` is the dependency-free deterministic runtime. Authority tickets require identity-bearing authority evidence and bind issuer role/identity/evidence digest plus session, turn, call, operation, target, and scope at atomic consumption.
 - `repo/tests/control-plane-kernel.test.cjs` is the RED-first and GREEN focused contract suite.
 
-The runtime has no network, filesystem, shell, child-process, provider, GitHub, hook, or host-configuration behavior. Ticket replay state is process-local and bounded; it is not durable, distributed, or native-host enforcement.
+The runtime has no network, filesystem, shell, child-process, provider, GitHub, hook, or host-configuration behavior. Ticket issuance and consumption require a module-private provenance-bound trusted authority context; no public self-mint or duck-typed store path exists. Controller-only GitHub mutation fails closed until later host/controller binding. Ticket replay state is process-local and bounded; it is not durable, distributed, or native-host enforcement.
 
 ## Scope boundary
 
