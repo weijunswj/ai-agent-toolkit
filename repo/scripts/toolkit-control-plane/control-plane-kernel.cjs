@@ -33,9 +33,11 @@ const OPERATION_FIELDS = Object.freeze({
   'shell': ['type', 'shell', 'command'],
 });
 
+const hasOwnOperationType = (type) => Object.prototype.hasOwnProperty.call(OPERATION_FIELDS, type);
+
 function unsupportedOperationField(operation) {
-  const allowed = OPERATION_FIELDS[operation.type];
-  return allowed && Object.keys(operation).some((key) => !allowed.includes(key));
+  const allowed = hasOwnOperationType(operation.type) ? OPERATION_FIELDS[operation.type] : null;
+  return allowed !== null && Object.keys(operation).some((key) => !allowed.includes(key));
 }
 
 function isRecord(value) {
@@ -44,10 +46,10 @@ function isRecord(value) {
   return prototype === Object.prototype || prototype === null;
 }
 
-function deepFreeze(value, seen = new Set()) {
-  if (!value || typeof value !== 'object' || seen.has(value)) return value;
+function deepFreeze(value, seen = new Set(), opaqueValues = new Set()) {
+  if (!value || typeof value !== 'object' || seen.has(value) || opaqueValues.has(value)) return value;
   seen.add(value);
-  for (const child of Object.values(value)) deepFreeze(child, seen);
+  for (const child of Object.values(value)) deepFreeze(child, seen, opaqueValues);
   return Object.freeze(value);
 }
 
@@ -95,7 +97,7 @@ function descriptorSecretClassification(value, seen = new Set()) {
   return classification;
 }
 
-function inspectOwnDataRecord(value, allowedFields, reasonCode) {
+function inspectOwnDataRecord(value, allowedFields, reasonCode, opaqueFields = new Set()) {
   if (!isRecord(value)) return failure(reasonCode);
   let keys;
   try {
@@ -126,7 +128,7 @@ function inspectOwnDataRecord(value, allowedFields, reasonCode) {
       secretClassification = mergeSecretClassification(secretClassification, 'possible');
       continue;
     }
-    secretClassification = mergeSecretClassification(secretClassification, descriptorSecretClassification(descriptor.value));
+    if (!opaqueFields.has(key)) secretClassification = mergeSecretClassification(secretClassification, descriptorSecretClassification(descriptor.value));
     if (!descriptor.enumerable || !allowed.has(key)) {
       if (!firstFailure) firstFailure = reasonCode;
       continue;
@@ -144,7 +146,7 @@ function canonicalScalar(value, reasonCode) {
   return failure(reasonCode);
 }
 
-function canonicalizeArray(value, itemNormalizer, reasonCode) {
+function canonicalizeArray(value, itemNormalizer, reasonCode, options = {}) {
   if (!Array.isArray(value)) return failure(reasonCode);
   let prototype;
   let keys;
@@ -190,15 +192,21 @@ function canonicalizeArray(value, itemNormalizer, reasonCode) {
   if (expectedKeys.size > 0) firstFailure = firstFailure || reasonCode;
   if (firstFailure) return failure(firstFailure, { secret_classification: secretClassification });
   const projection = [];
+  const itemFailures = [];
   for (let index = 0; index < length; index += 1) {
     const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
     const normalized = itemNormalizer(descriptor.value);
-    if (!normalized.valid) return failure(normalized.reason_code || reasonCode, { secret_classification: mergeSecretClassification(secretClassification, normalized.secret_classification || 'none') });
+    if (!normalized.valid) {
+      if (options.collectFailures !== true) return failure(normalized.reason_code || reasonCode, { secret_classification: mergeSecretClassification(secretClassification, normalized.secret_classification || 'none') });
+      itemFailures.push({ index, reason_code: normalized.reason_code || reasonCode, secret_classification: normalized.secret_classification || 'none' });
+      secretClassification = mergeSecretClassification(secretClassification, normalized.secret_classification || 'none');
+      continue;
+    }
     projection.push(normalized.value);
   }
+  if (itemFailures.length > 0) return failure(itemFailures[0].reason_code || reasonCode, { secret_classification: secretClassification, component_failures: itemFailures, partial_value: projection });
   return { valid: true, value: projection };
 }
-
 function canonicalizeStringArray(value, reasonCode) {
   return canonicalizeArray(value, (item) => {
     if (typeof item !== 'string') return failure(reasonCode);
@@ -278,9 +286,10 @@ function canonicalizeOperation(value, seen = new Set()) {
   if (!inspected.valid) return inspected;
   const raw = inspected.value;
   if (typeof raw.type !== 'string' || !nonBlank(raw.type)) return failure('TYPED_OPERATION_REQUIRED', { secret_classification: inspected.secret_classification || 'none' });
-  const allowedFields = OPERATION_FIELDS[raw.type];
+  const hasRegisteredOperationType = hasOwnOperationType(raw.type);
+  const allowedFields = hasRegisteredOperationType ? OPERATION_FIELDS[raw.type] : null;
   const rawKeys = Object.keys(raw);
-  if ((allowedFields && rawKeys.some((key) => !allowedFields.includes(key))) || (!allowedFields && rawKeys.some((key) => key !== 'type'))) {
+  if ((hasRegisteredOperationType && rawKeys.some((key) => !allowedFields.includes(key))) || (!hasRegisteredOperationType && rawKeys.some((key) => key !== 'type'))) {
     return failure('TYPED_OPERATION_FIELDS_UNSUPPORTED', { secret_classification: inspected.secret_classification || 'none' });
   }
   const projection = Object.create(null);
@@ -289,10 +298,20 @@ function canonicalizeOperation(value, seen = new Set()) {
     for (const key of rawKeys) {
       let normalized;
       if (['target', 'source', 'destination'].includes(key)) normalized = canonicalizeTarget(raw[key]);
-      else if (key === 'components') normalized = canonicalizeArray(raw[key], (item) => canonicalizeOperation(item, seen), 'TYPED_OPERATION_REQUIRED');
+      else if (key === 'components') normalized = canonicalizeArray(raw[key], (item) => canonicalizeOperation(item, seen), 'TYPED_OPERATION_REQUIRED', { collectFailures: true });
       else if (['refspecs', 'options'].includes(key)) normalized = canonicalizeStringArray(raw[key], key === 'options' ? 'BROADENED_PUSH_TARGET_UNSUPPORTED' : 'TYPED_OPERATION_REQUIRED');
       else normalized = canonicalScalar(raw[key], 'TYPED_OPERATION_REQUIRED');
-      if (!normalized.valid) return failure(normalized.reason_code, { secret_classification: mergeSecretClassification(inspected.secret_classification || 'none', normalized.secret_classification || 'none') });
+      if (!normalized.valid) {
+        const extra = { secret_classification: mergeSecretClassification(inspected.secret_classification || 'none', normalized.secret_classification || 'none') };
+        if (key === 'components' && normalized.partial_value !== undefined) {
+          const canonicalValue = Object.create(null);
+          canonicalValue.type = raw.type;
+          canonicalValue.components = normalized.partial_value;
+          extra.canonical_value = deepFreeze(canonicalValue);
+          extra.component_failures = normalized.component_failures;
+        }
+        return failure(normalized.reason_code, extra);
+      }
       projection[key] = normalized.value;
     }
   } finally {
@@ -300,7 +319,6 @@ function canonicalizeOperation(value, seen = new Set()) {
   }
   return { valid: true, value: deepFreeze(projection) };
 }
-
 function canonicalizeAuthority(value) {
   const inspected = inspectOwnDataRecord(value, AUTHORITY_FIELDS, 'AUTHORITY_IDENTITY_INVALID');
   if (!inspected.valid) return inspected;
@@ -341,7 +359,7 @@ function canonicalizeRepository(value) {
 }
 
 function canonicalizeInput(value) {
-  const inspected = inspectOwnDataRecord(value, INPUT_FIELDS, 'CONTROL_PLANE_INPUT_INVALID');
+  const inspected = inspectOwnDataRecord(value, INPUT_FIELDS, 'CONTROL_PLANE_INPUT_INVALID', new Set(['ticket']));
   if (!inspected.valid) return inspected;
   const raw = inspected.value;
   const projection = Object.create(null);
@@ -356,12 +374,22 @@ function canonicalizeInput(value) {
     else if (key === 'now') normalized = typeof raw[key] === 'string' ? { valid: true, value: raw[key] } : failure('CONTROL_PLANE_INPUT_INVALID');
     else if (key === 'scope') normalized = raw[key] === null || typeof raw[key] === 'string' ? { valid: true, value: raw[key] } : failure('CONTROL_PLANE_INPUT_INVALID');
     else normalized = { valid: true, value: raw[key] };
-    if (!normalized.valid) return failure(normalized.reason_code, { secret_classification: mergeSecretClassification(inspected.secret_classification || 'none', normalized.secret_classification || 'none') });
+    if (!normalized.valid) {
+      const extra = { secret_classification: mergeSecretClassification(inspected.secret_classification || 'none', normalized.secret_classification || 'none') };
+      if (key === 'operation' && normalized.canonical_value !== undefined) {
+        const partial = Object.create(null);
+        for (const projectedKey of Object.keys(projection)) partial[projectedKey] = projection[projectedKey];
+        partial.operation = normalized.canonical_value;
+        extra.partial_value = partial;
+        extra.component_failures = normalized.component_failures;
+      }
+      return failure(normalized.reason_code, extra);
+    }
     projection[key] = normalized.value;
   }
-  return { valid: true, value: deepFreeze(projection) };
+  const opaqueValues = raw.ticket === undefined ? new Set() : new Set([raw.ticket]);
+  return { valid: true, value: deepFreeze(projection, new Set(), opaqueValues) };
 }
-
 function trustedStateFromOptions(options) {
   if (!isRecord(options)) return null;
   let descriptor;
@@ -626,6 +654,10 @@ function selectHardDeny(current, candidate) {
   return current;
 }
 
+function isProtectedTarget(target, repository) {
+  return [target.raw_path, target.path].some((value) => value && (isFilesystemRoot(value) || samePath(value, repository.root)));
+}
+
 function hardDenyForClassifiedComponents(components, repository, operationType = 'compound') {
   const flattened = components.flatMap(flattenClassifiedComponents);
   const targetClass = targetClassForComponents(flattened);
@@ -634,7 +666,7 @@ function hardDenyForClassifiedComponents(components, repository, operationType =
   const secretClassification = derivedSecretClassification !== 'none' ? derivedSecretClassification : flattened.some((item) => item.secret_classification === 'confirmed') ? 'confirmed' : flattened.some((item) => item.secret_classification === 'possible') ? 'possible' : 'none';
   const operationClass = operationType === 'compound' ? 'compound' : flattened[0]?.operation_class || operationType;
   if (flattened.some((item) => item.operation_type === 'network.request' && item.secret_classification !== 'none')) return { decision: 'deny', reason_code: 'SECRET_EXFILTRATION_DENIED', operation_type: operationType, operation_class: operationClass, target_class: targetClass, secret_classification: secretClassification, ticket_status: 'not-accepted' };
-  if (flattened.some((item) => ['filesystem.delete', 'filesystem.move'].includes(item.operation_type) && item.targets.some((target) => target.path && (isFilesystemRoot(target.path) || samePath(target.path, repository.root))))) return { decision: 'deny', reason_code: 'CATASTROPHIC_TARGET_DENIED', operation_type: operationType, operation_class: operationClass, target_class: 'protected-target', secret_classification: secretClassification, ticket_status: 'not-accepted' };
+  if (flattened.some((item) => ['filesystem.delete', 'filesystem.move'].includes(item.operation_type) && item.targets.some((target) => isProtectedTarget(target, repository)))) return { decision: 'deny', reason_code: 'CATASTROPHIC_TARGET_DENIED', operation_type: operationType, operation_class: operationClass, target_class: 'protected-target', secret_classification: secretClassification, ticket_status: 'not-accepted' };
   return null;
 }
 
@@ -814,9 +846,33 @@ function ticketDecision(input, operation, classification, trustedState) {
   const consumed = trustedState.store.consume(input.ticket, ticketRequestFor(input, operation, trustedState.authority)); if (!consumed.valid) return publicResult({ decision: 'deny', reason_code: consumed.reason_code, operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigestFromProjection(operation), target_digest: targetDigestFromProjection(operation), ticket_status: 'rejected' });
   return publicResult({ decision: 'allow', reason_code: consumed.reason_code, operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigestFromProjection(operation), target_digest: targetDigestFromProjection(operation), ticket_status: 'consumed' });
 }
+function hardDenyFromPartialCanonicalInput(partialInput) {
+  if (!isRecord(partialInput) || !isRecord(partialInput.operation) || !isRecord(partialInput.repository)) return null;
+  const repository = normalizeRepository(partialInput.repository);
+  if (!repository.valid) return null;
+  const classification = classifyOperation(partialInput.operation, repository);
+  if (classification.hard_deny) return classification.hard_deny;
+  if (!classification.valid) return null;
+  return hardDenyForClassifiedComponents(flattenClassifiedComponents(classification), repository, classification.operation_type);
+}
+
 function evaluate(input, options = {}) {
   const normalizedInput = canonicalizeInput(input);
-  if (!normalizedInput.valid) return baseFailure(normalizedInput.reason_code, { secret_classification: normalizedInput.secret_classification });
+  if (!normalizedInput.valid) {
+    const partialInput = normalizedInput.partial_value;
+    const defaultOn = partialInput?.enabled === true
+      && isRecord(partialInput.activation)
+      && partialInput.activation.mode === 'explicit-local'
+      && partialInput.activation.consented === true;
+    if (defaultOn) {
+      const hardDeny = hardDenyFromPartialCanonicalInput(partialInput);
+      if (hardDeny) {
+        const partialOperation = partialInput.operation;
+        return publicResult({ ...hardDeny, operation_digest: safeOperationDigest(partialOperation), target_digest: safeTargetDigest(partialOperation) });
+      }
+    }
+    return baseFailure(normalizedInput.reason_code, { secret_classification: normalizedInput.secret_classification });
+  }
   const policyInput = normalizedInput.value;
   const operation = policyInput.operation;
   if (policyInput.enabled !== true || !isRecord(policyInput.activation) || policyInput.activation.mode !== 'explicit-local' || policyInput.activation.consented !== true) return baseFailure('CONTROL_PLANE_DEFAULT_OFF', policyInput);
@@ -845,17 +901,45 @@ function evaluate(input, options = {}) {
   if (classification.requires_ticket) return ticketDecision(policyInput, operation, classification, trustedState);
   return publicResult({ decision: 'allow', reason_code: 'TYPED_OPERATION_ALLOWED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigestFromProjection(operation), target_digest: targetDigestFromProjection(operation) });
 }
+function canonicalizeStructuralImpactInput(change) {
+  if (!isRecord(change)) return failure('STRUCTURAL_IMPACT_INPUT_INVALID');
+  let keys;
+  try {
+    keys = Reflect.ownKeys(change);
+  } catch {
+    return failure('STRUCTURAL_IMPACT_INPUT_INVALID');
+  }
+  const allowedFields = new Set(['kind', 'identity']);
+  const projection = Object.create(null);
+  for (const key of keys) {
+    if (typeof key !== 'string') return failure('STRUCTURAL_IMPACT_INPUT_INVALID');
+    let descriptor;
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(change, key);
+    } catch {
+      return failure('STRUCTURAL_IMPACT_INPUT_INVALID');
+    }
+    if (!descriptor || !descriptor.enumerable || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) return failure('STRUCTURAL_IMPACT_INPUT_INVALID');
+    if (!allowedFields.has(key)) return failure('STRUCTURAL_IMPACT_FIELDS_UNSUPPORTED');
+    projection[key] = descriptor.value;
+  }
+  return { valid: true, value: deepFreeze(projection) };
+}
+
 function assessStructuralImpact(change) {
   const structuralKinds = new Set(['rename', 'remove', 'move', 'resignature', 're-signature', 'contract-shape', 'contract', 'public-contract', 'internal-contract', 'generated-surface', 'generated-shape', 'path', 'symbol', 'command', 'schema-field', 'repository-identity', 'identity', 'structural-replace', 'replace']);
   const localKinds = new Set(['value-change']);
   const consumerCategories = ['source-shape-tests', 'fixtures-and-snapshots', 'generated-surface-assertions', 'docs-config-contracts', 'imports-registrations', 'scripts-manifests-adapters'];
   const compatibilityRule = { issue: 342, status: 'active-until-propagation-verification', permanent_mechanism: 'deterministic-structural-impact-v1' };
-  if (!isRecord(change) || !nonBlank(change.kind) || !nonBlank(change.identity)) return deepFreeze({ valid: false, decision: 'unsupported', reason_code: 'STRUCTURAL_IMPACT_INPUT_INVALID', compatibility_rule: compatibilityRule });
-  if (Object.keys(change).some((key) => !['kind', 'identity'].includes(key))) return deepFreeze({ valid: false, decision: 'unsupported', reason_code: 'STRUCTURAL_IMPACT_FIELDS_UNSUPPORTED', existing_identity_digest: digest(change.identity), compatibility_rule: compatibilityRule });
-  if (!structuralKinds.has(change.kind) && !localKinds.has(change.kind)) return deepFreeze({ valid: false, decision: 'unsupported', reason_code: 'STRUCTURAL_IMPACT_KIND_UNSUPPORTED', existing_identity_digest: digest(change.identity), compatibility_rule: compatibilityRule });
-  const required = structuralKinds.has(change.kind);
-  return deepFreeze({ valid: true, required, search_scope: required ? 'targeted-repo-wide' : 'local', existing_identity_digest: digest(change.identity), consumer_categories: required ? consumerCategories : [], compatibility_rule: compatibilityRule });
+  const normalized = canonicalizeStructuralImpactInput(change);
+  if (!normalized.valid) return deepFreeze({ valid: false, decision: 'unsupported', reason_code: normalized.reason_code, compatibility_rule: compatibilityRule });
+  const canonical = normalized.value;
+  if (!nonBlank(canonical.kind) || !nonBlank(canonical.identity)) return deepFreeze({ valid: false, decision: 'unsupported', reason_code: 'STRUCTURAL_IMPACT_INPUT_INVALID', compatibility_rule: compatibilityRule });
+  const kind = canonical.kind;
+  const identity = canonical.identity;
+  if (!structuralKinds.has(kind) && !localKinds.has(kind)) return deepFreeze({ valid: false, decision: 'unsupported', reason_code: 'STRUCTURAL_IMPACT_KIND_UNSUPPORTED', existing_identity_digest: digest(identity), compatibility_rule: compatibilityRule });
+  const required = structuralKinds.has(kind);
+  return deepFreeze({ valid: true, required, search_scope: required ? 'targeted-repo-wide' : 'local', existing_identity_digest: digest(identity), consumer_categories: required ? consumerCategories : [], compatibility_rule: compatibilityRule });
 }
-
 const publicApi = { CONTRACT_VERSION, REMOTE_IDENTITY_CONTRACT_VERSION, TICKET_CONTRACT_VERSION, MAX_TICKET_USES, POLICY, validateRemoteIdentity, formatRemoteIdentity, operationDigest, targetDigest, evaluate, assessStructuralImpact, isFilesystemRoot, isUncShareRoot };
 module.exports = publicApi;

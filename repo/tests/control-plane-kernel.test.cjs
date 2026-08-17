@@ -606,6 +606,35 @@ test('compound hard denies dominate unsupported components in every order', () =
   }));
   assert.equal(benign.decision, 'allow');
 });
+test('compound canonicalization preserves sibling hard-deny evidence across malformed component orders', () => {
+  const protectedMove = {
+    type: 'filesystem.move',
+    source: { path: ROOT, resolution: { status: 'resolved', canonical_path: ROOT, link_type: 'none', existence: 'existing' } },
+    destination: target('src\\move-destination.txt', { existence: 'absent' }),
+    no_clobber: true,
+  };
+  const malformed = {
+    type: 'filesystem.read',
+    target: target('src\\safe.txt'),
+    malformed_field: 'synthetic',
+  };
+  const ticketOperation = { type: 'compound', components: [protectedMove, routineRead('src\\ticket-bound.txt')] };
+  for (const components of [[malformed, protectedMove], [protectedMove, malformed]]) {
+    const operation = { type: 'compound', components };
+    const trusted = createTrustedAuthority({ now: NOW, authority: { allowed_operation_types: ['filesystem.move', 'filesystem.read'] } });
+    const ticket = trusted.issue(ticketRequest(ticketOperation));
+    const result = kernel.evaluate(baseInput(operation, {
+      authority: TRUSTED_CONTROLLER,
+      ticket,
+      session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' },
+      scope: ticket.scope,
+    }), { trustedAuthorityContext: trusted });
+    assert.equal(result.decision, 'deny');
+    assert.equal(result.reason_code, 'CATASTROPHIC_TARGET_DENIED');
+    assert.equal(result.ticket_status, 'not-accepted');
+    assert.equal(trusted.size(), 1, 'hard deny must not consume a ticket');
+  }
+});
 
 test('caller finality claims and untruthful authority identity are rejected', () => {
   const finality = kernel.evaluate(baseInput(routineRead(), {
@@ -694,6 +723,101 @@ test('structural impact uses a closed deterministic kind contract', () => {
   assert.equal(local.search_scope, 'local');
 });
 
+test('structural impact canonicalizes exactly two own data fields and rejects unsupported descriptors', () => {
+  let getterCalls = 0;
+  const accessorInput = { identity: 'synthetic-identity' };
+  Object.defineProperty(accessorInput, 'kind', {
+    enumerable: true,
+    configurable: true,
+    get() {
+      getterCalls += 1;
+      return 'rename';
+    },
+  });
+  const accessorResult = kernel.assessStructuralImpact(accessorInput);
+  assert.equal(accessorResult.valid, false);
+  assert.equal(accessorResult.reason_code, 'STRUCTURAL_IMPACT_INPUT_INVALID');
+  assert.equal(getterCalls, 0, 'structural-impact accessors must not run');
+
+  const hiddenInput = {};
+  Object.defineProperties(hiddenInput, {
+    kind: { value: 'rename', enumerable: false, configurable: true },
+    identity: { value: 'synthetic-identity', enumerable: false, configurable: true },
+  });
+  const hiddenResult = kernel.assessStructuralImpact(hiddenInput);
+  assert.equal(hiddenResult.valid, false);
+  assert.equal(hiddenResult.reason_code, 'STRUCTURAL_IMPACT_INPUT_INVALID');
+
+  const symbolKind = Symbol('kind');
+  const symbolIdentity = Symbol('identity');
+  const symbolInput = {};
+  Object.defineProperties(symbolInput, {
+    [symbolKind]: { value: 'rename', enumerable: true, configurable: true },
+    [symbolIdentity]: { value: 'synthetic-identity', enumerable: true, configurable: true },
+  });
+  const symbolResult = kernel.assessStructuralImpact(symbolInput);
+  assert.equal(symbolResult.valid, false);
+  assert.equal(symbolResult.reason_code, 'STRUCTURAL_IMPACT_INPUT_INVALID');
+
+  const symbolExtraInput = { kind: 'rename', identity: 'synthetic-identity' };
+  Object.defineProperty(symbolExtraInput, Symbol('extra'), { value: 'synthetic', enumerable: true, configurable: true });
+  const symbolExtraResult = kernel.assessStructuralImpact(symbolExtraInput);
+  assert.equal(symbolExtraResult.valid, false);
+  assert.equal(symbolExtraResult.reason_code, 'STRUCTURAL_IMPACT_INPUT_INVALID');
+
+  const supported = kernel.assessStructuralImpact({ kind: 'rename', identity: 'synthetic-identity' });
+  assert.equal(supported.valid, true);
+  assert.equal(supported.search_scope, 'targeted-repo-wide');
+  const local = kernel.assessStructuralImpact({ kind: 'value-change', identity: 'synthetic-identity' });
+  assert.equal(local.valid, true);
+  assert.equal(local.search_scope, 'local');
+});
+
+test('tickets remain opaque capabilities across default-off and enabled evaluation', () => {
+  let accessorCalls = 0;
+  const ticketPayload = { nested: { marker: 'synthetic-ticket-data' } };
+  Object.defineProperty(ticketPayload, 'accessor', {
+    enumerable: true,
+    configurable: true,
+    get() {
+      accessorCalls += 1;
+      return 'synthetic';
+    },
+  });
+  const proxyTraps = [];
+  const trap = (name) => {
+    proxyTraps.push(name);
+    throw new Error('opaque ticket trap invoked: ' + name);
+  };
+  const ticketLike = new Proxy(ticketPayload, {
+    get: () => trap('get'),
+    getPrototypeOf: () => trap('getPrototypeOf'),
+    ownKeys: () => trap('ownKeys'),
+    getOwnPropertyDescriptor: () => trap('getOwnPropertyDescriptor'),
+    isExtensible: () => trap('isExtensible'),
+    preventExtensions: () => trap('preventExtensions'),
+    defineProperty: () => trap('defineProperty'),
+  });
+
+  const defaultOff = kernel.evaluate(baseInput(routineRead(), { enabled: false, ticket: ticketLike }));
+  assert.equal(defaultOff.decision, 'unsupported');
+  assert.equal(defaultOff.reason_code, 'CONTROL_PLANE_DEFAULT_OFF');
+
+  const operation = { type: 'filesystem.write', target: target('src\\safe.txt'), no_clobber: false };
+  const trusted = createTrustedAuthority({ now: NOW, authority: { allowed_operation_types: ['filesystem.write'] } });
+  const enabled = kernel.evaluate(baseInput(operation, {
+    authority: TRUSTED_CONTROLLER,
+    ticket: ticketLike,
+    session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' },
+    scope: 'repo:weijunswj/ai-agent-toolkit',
+  }), { trustedAuthorityContext: trusted });
+  assert.equal(enabled.decision, 'deny');
+  assert.equal(enabled.reason_code, 'TICKET_INVALID');
+  assert.deepEqual(proxyTraps, [], 'ticket internals must remain opaque');
+  assert.equal(accessorCalls, 0, 'ticket accessors must not run');
+  assert.equal(Object.isFrozen(ticketPayload), false);
+  assert.equal(Object.isFrozen(ticketPayload.nested), false);
+});
 test('typed operations reject unmodeled mutation fields and missing external targets', () => {
   const opaque = kernel.evaluate(baseInput({ type: 'git.read', command: 'git branch -f topic HEAD~2' }));
   assert.equal(opaque.decision, 'unsupported');
@@ -705,6 +829,37 @@ test('typed operations reject unmodeled mutation fields and missing external tar
   }));
   assert.equal(missingTarget.decision, 'unsupported');
   assert.equal(missingTarget.reason_code, 'TYPED_OPERATION_REQUIRED');
+});
+test('prototype-colliding operation types fail closed and preserve compound hard-deny priority', () => {
+  for (const operationType of ['toString', 'constructor', '__proto__']) {
+    const result = kernel.evaluate(baseInput({ type: operationType }));
+    assert.equal(result.decision, 'unsupported', operationType);
+    assert.equal(result.reason_code, 'UNSUPPORTED_OPERATION_TYPE', operationType);
+  }
+
+  const move = {
+    type: 'filesystem.move',
+    source: { path: ROOT, resolution: { status: 'resolved', canonical_path: ROOT, link_type: 'none', existence: 'existing' } },
+    destination: target('src\\move-destination.txt', { existence: 'absent' }),
+    no_clobber: true,
+  };
+  for (const operationType of ['toString', 'constructor', '__proto__']) {
+    for (const components of [[{ type: operationType }, move], [move, { type: operationType }]]) {
+      const operation = { type: 'compound', components };
+      const trusted = createTrustedAuthority({ now: NOW, authority: { allowed_operation_types: [operationType, 'filesystem.move'] } });
+      const ticket = trusted.issue(ticketRequest(operation));
+      const result = kernel.evaluate(baseInput(operation, {
+        authority: TRUSTED_CONTROLLER,
+        ticket,
+        session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' },
+        scope: ticket.scope,
+      }), { trustedAuthorityContext: trusted });
+      assert.equal(result.decision, 'deny', operationType);
+      assert.equal(result.reason_code, 'CATASTROPHIC_TARGET_DENIED', operationType);
+      assert.equal(result.ticket_status, 'not-accepted', operationType);
+      assert.equal(trusted.size(), 1, operationType + ' hard deny must not consume a ticket');
+    }
+  }
 });
 test('catastrophic delete roots remain hard-denied through compound composition', () => {
   const cases = [
@@ -1141,6 +1296,46 @@ test('filesystem.move catastrophic endpoints deny before ticket consumption', ()
   }
 });
 
+test('filesystem.move denies protected raw and canonical endpoints before ticket routing', () => {
+  const safePath = ROOT + '\\src\\raw-canonical-safe.txt';
+  const ordinaryEndpoint = (filePath, existence) => ({
+    path: filePath,
+    resolution: { status: 'resolved', canonical_path: filePath, link_type: 'none', existence },
+  });
+  const representedEndpoint = (rawPath, canonicalPath, existence) => ({
+    path: rawPath,
+    resolution: { status: 'resolved', canonical_path: canonicalPath, link_type: 'symlink', existence },
+  });
+  const cases = [];
+  for (const [label, protectedPath] of [
+    ['repository-root', ROOT],
+    ['filesystem-root', 'C:\\'],
+    ['unc-share-root', '\\\\server\\share'],
+  ]) {
+    cases.push(
+      [label + '-raw-source', representedEndpoint(protectedPath, safePath, 'existing'), ordinaryEndpoint(safePath, 'absent')],
+      [label + '-canonical-source', representedEndpoint(safePath, protectedPath, 'existing'), ordinaryEndpoint(safePath, 'absent')],
+      [label + '-raw-destination', ordinaryEndpoint(safePath, 'existing'), representedEndpoint(protectedPath, safePath, 'absent')],
+      [label + '-canonical-destination', ordinaryEndpoint(safePath, 'existing'), representedEndpoint(safePath, protectedPath, 'absent')],
+    );
+  }
+
+  for (const [label, source, destination] of cases) {
+    const operation = { type: 'filesystem.move', source, destination, no_clobber: true };
+    const trusted = createTrustedAuthority({ now: NOW, authority: { allowed_operation_types: ['filesystem.move'] } });
+    const ticket = trusted.issue(ticketRequest(operation));
+    const result = kernel.evaluate(baseInput(operation, {
+      authority: TRUSTED_CONTROLLER,
+      ticket,
+      session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' },
+      scope: ticket.scope,
+    }), { trustedAuthorityContext: trusted });
+    assert.equal(result.decision, 'deny', label);
+    assert.equal(result.reason_code, 'CATASTROPHIC_TARGET_DENIED', label);
+    assert.equal(result.ticket_status, 'not-accepted', label);
+    assert.equal(trusted.size(), 1, label + ' ticket remains unconsumed');
+  }
+});
 test('catastrophic move dominates unsupported components in both compound orders', () => {
   const absoluteTarget = (targetPath, existence) => ({
     path: targetPath,
