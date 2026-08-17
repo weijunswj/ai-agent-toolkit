@@ -97,6 +97,20 @@ function descriptorSecretClassification(value, seen = new Set()) {
   return classification;
 }
 
+function freezePartialProjection(projection) {
+  return Object.freeze(projection);
+}
+
+function hasOwnCanonicalField(record, key) {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+function canonicalFailure(reasonCode, projection, extra = {}) {
+  const details = { ...extra };
+  if (projection !== undefined) details.value = freezePartialProjection(projection);
+  return failure(reasonCode, details);
+}
+
 function inspectOwnDataRecord(value, allowedFields, reasonCode, opaqueFields = new Set()) {
   if (!isRecord(value)) return failure(reasonCode);
   let keys;
@@ -107,11 +121,16 @@ function inspectOwnDataRecord(value, allowedFields, reasonCode, opaqueFields = n
   }
   const allowed = new Set(allowedFields);
   const projection = Object.create(null);
+  const invalidFields = new Set();
   let firstFailure = null;
   let secretClassification = 'none';
+  const noteFailure = (code, field = '[record]') => {
+    if (!firstFailure) firstFailure = code;
+    invalidFields.add(field);
+  };
   for (const key of keys) {
     if (typeof key !== 'string') {
-      if (!firstFailure) firstFailure = reasonCode;
+      noteFailure(reasonCode, '[symbol]');
       secretClassification = mergeSecretClassification(secretClassification, 'possible');
       continue;
     }
@@ -119,24 +138,31 @@ function inspectOwnDataRecord(value, allowedFields, reasonCode, opaqueFields = n
     try {
       descriptor = Object.getOwnPropertyDescriptor(value, key);
     } catch {
-      if (!firstFailure) firstFailure = reasonCode;
+      noteFailure(reasonCode, key);
       secretClassification = mergeSecretClassification(secretClassification, 'possible');
       continue;
     }
     if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
-      if (!firstFailure) firstFailure = reasonCode;
+      noteFailure(reasonCode, key);
       secretClassification = mergeSecretClassification(secretClassification, 'possible');
       continue;
     }
     if (!opaqueFields.has(key)) secretClassification = mergeSecretClassification(secretClassification, descriptorSecretClassification(descriptor.value));
     if (!descriptor.enumerable || !allowed.has(key)) {
-      if (!firstFailure) firstFailure = reasonCode;
+      noteFailure(reasonCode, key);
       continue;
     }
     projection[key] = descriptor.value;
   }
-  if (firstFailure) return failure(firstFailure, { secret_classification: secretClassification });
-  return { valid: true, value: projection, secret_classification: secretClassification };
+  const safeValue = freezePartialProjection(projection);
+  if (firstFailure) {
+    return failure(firstFailure, {
+      value: safeValue,
+      invalid_fields: Object.freeze([...invalidFields].sort()),
+      secret_classification: secretClassification,
+    });
+  }
+  return { valid: true, value: safeValue, secret_classification: secretClassification };
 }
 
 function canonicalScalar(value, reasonCode) {
@@ -166,10 +192,16 @@ function canonicalizeArray(value, itemNormalizer, reasonCode, options = {}) {
   for (let index = 0; index < length; index += 1) expectedKeys.add(String(index));
   let firstFailure = null;
   let secretClassification = 'none';
+  const invalidFields = new Set();
+  const itemFailures = [];
+  const noteFailure = (candidate, field = '[array]') => {
+    if (!firstFailure) firstFailure = candidate;
+    invalidFields.add(field);
+  };
   for (const key of keys) {
     if (key === 'length') continue;
     if (typeof key !== 'string' || !/^(0|[1-9]\d*)$/.test(key) || Number(key) >= length) {
-      if (!firstFailure) firstFailure = reasonCode;
+      noteFailure(failure(reasonCode), typeof key === 'string' ? key : '[symbol]');
       secretClassification = mergeSecretClassification(secretClassification, 'possible');
       continue;
     }
@@ -178,37 +210,45 @@ function canonicalizeArray(value, itemNormalizer, reasonCode, options = {}) {
     try {
       descriptor = Object.getOwnPropertyDescriptor(value, key);
     } catch {
-      if (!firstFailure) firstFailure = reasonCode;
+      noteFailure(failure(reasonCode), key);
       secretClassification = mergeSecretClassification(secretClassification, 'possible');
       continue;
     }
     if (!descriptor || !descriptor.enumerable || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
-      if (!firstFailure) firstFailure = reasonCode;
+      noteFailure(failure(reasonCode), key);
       secretClassification = mergeSecretClassification(secretClassification, descriptorSecretClassification(value));
       continue;
     }
     secretClassification = mergeSecretClassification(secretClassification, descriptorSecretClassification(descriptor.value));
   }
-  if (expectedKeys.size > 0) firstFailure = firstFailure || reasonCode;
-  if (firstFailure) return failure(firstFailure, { secret_classification: secretClassification });
+  for (const missing of expectedKeys) noteFailure(failure(reasonCode), missing);
   const projection = [];
-  const itemFailures = [];
   for (let index = 0; index < length; index += 1) {
     const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    if (!descriptor || !descriptor.enumerable || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
+      noteFailure(failure(reasonCode), String(index));
+      continue;
+    }
     const normalized = itemNormalizer(descriptor.value);
     if (!normalized.valid) {
-      if (options.collectFailures !== true) return failure(normalized.reason_code || reasonCode, { secret_classification: mergeSecretClassification(secretClassification, normalized.secret_classification || 'none') });
-      const partialValue = normalized.partial_value !== undefined ? normalized.partial_value : normalized.canonical_value;
-      if (partialValue !== undefined) projection.push(partialValue);
+      noteFailure(normalized, String(index));
       itemFailures.push({ index, reason_code: normalized.reason_code || reasonCode, secret_classification: normalized.secret_classification || 'none' });
       secretClassification = mergeSecretClassification(secretClassification, normalized.secret_classification || 'none');
+      if (options.collectFailures === true && normalized.value !== undefined) projection.push(normalized.value);
       continue;
     }
     projection.push(normalized.value);
   }
-  if (itemFailures.length > 0) return failure(itemFailures[0].reason_code || reasonCode, { secret_classification: secretClassification, component_failures: itemFailures, partial_value: projection });
-  return { valid: true, value: projection };
+  if (firstFailure) {
+    return canonicalFailure(firstFailure.reason_code || reasonCode, deepFreeze(projection), {
+      secret_classification: secretClassification,
+      invalid_fields: Object.freeze([...invalidFields].sort()),
+      component_failures: itemFailures.length > 0 ? itemFailures : undefined,
+    });
+  }
+  return { valid: true, value: deepFreeze(projection) };
 }
+
 function canonicalizeStringArray(value, reasonCode) {
   return canonicalizeArray(value, (item) => {
     if (typeof item !== 'string') return failure(reasonCode);
@@ -218,158 +258,211 @@ function canonicalizeStringArray(value, reasonCode) {
 
 function canonicalizeSimpleRecord(value, fields, reasonCode, booleanFields = new Set()) {
   const inspected = inspectOwnDataRecord(value, fields, reasonCode);
-  if (!inspected.valid) return inspected;
+  const raw = isRecord(inspected.value) ? inspected.value : Object.create(null);
   const projection = Object.create(null);
-  for (const key of Object.keys(inspected.value)) {
-    const item = inspected.value[key];
+  let firstFailure = inspected.valid ? null : inspected;
+  let secretClassification = inspected.secret_classification || 'none';
+  for (const key of fields) {
+    if (!hasOwnCanonicalField(raw, key)) continue;
+    const item = raw[key];
     if (booleanFields.has(key)) {
-      if (typeof item !== 'boolean') return failure(reasonCode, { secret_classification: inspected.secret_classification || 'none' });
-      projection[key] = item;
+      if (typeof item !== 'boolean') {
+        if (!firstFailure) firstFailure = failure(reasonCode);
+        secretClassification = mergeSecretClassification(secretClassification, 'none');
+      } else projection[key] = item;
     } else if (typeof item !== 'string') {
-      return failure(reasonCode, { secret_classification: inspected.secret_classification || 'none' });
+      if (!firstFailure) firstFailure = failure(reasonCode);
+      secretClassification = mergeSecretClassification(secretClassification, 'none');
     } else {
       projection[key] = item;
     }
   }
+  if (firstFailure) return canonicalFailure(firstFailure.reason_code || reasonCode, deepFreeze(projection), { secret_classification: secretClassification });
   return { valid: true, value: deepFreeze(projection) };
 }
 
 function canonicalizeResolution(value, reasonCode = 'TARGET_CONTEXT_CONFLICT') {
   const inspected = inspectOwnDataRecord(value, RESOLUTION_FIELDS, reasonCode);
-  if (!inspected.valid) return inspected;
+  const raw = isRecord(inspected.value) ? inspected.value : Object.create(null);
   const projection = Object.create(null);
-  for (const key of Object.keys(inspected.value)) {
-    if (typeof inspected.value[key] !== 'string') return failure(reasonCode, { secret_classification: inspected.secret_classification || 'none' });
-    projection[key] = inspected.value[key];
+  let firstFailure = inspected.valid ? null : inspected;
+  let secretClassification = inspected.secret_classification || 'none';
+  for (const key of RESOLUTION_FIELDS) {
+    if (!hasOwnCanonicalField(raw, key)) continue;
+    if (typeof raw[key] !== 'string') {
+      if (!firstFailure) firstFailure = failure(reasonCode);
+      continue;
+    }
+    projection[key] = raw[key];
   }
+  if (firstFailure) return canonicalFailure(firstFailure.reason_code || reasonCode, deepFreeze(projection), { secret_classification: secretClassification });
   return { valid: true, value: deepFreeze(projection) };
 }
 
 function canonicalizeTarget(value) {
   const inspected = inspectOwnDataRecord(value, TARGET_FIELDS, 'TARGET_CONTEXT_CONFLICT');
-  if (!inspected.valid) return inspected;
-  const raw = inspected.value;
-  const hasOwn = (key) => Object.prototype.hasOwnProperty.call(raw, key);
-  for (const key of ['kind', 'digest', 'path', 'target_class']) {
-    if (hasOwn(key) && typeof raw[key] !== 'string') return failure('TARGET_CONTEXT_CONFLICT', { secret_classification: inspected.secret_classification || 'none' });
-  }
-  if (hasOwn('resolved_inside') && typeof raw.resolved_inside !== 'boolean') return failure('TARGET_CONTEXT_CONFLICT', { secret_classification: inspected.secret_classification || 'none' });
-  let resolution = null;
-  if (hasOwn('resolution')) {
-    const normalizedResolution = canonicalizeResolution(raw.resolution);
-    if (!normalizedResolution.valid) return failure(normalizedResolution.reason_code, { secret_classification: mergeSecretClassification(inspected.secret_classification || 'none', normalizedResolution.secret_classification || 'none') });
-    resolution = normalizedResolution.value;
-  }
-  const hasKind = hasOwn('kind');
-  const hasDigest = hasOwn('digest');
-  const hasPath = hasOwn('path');
-  const hasResolution = hasOwn('resolution');
-  const external = hasKind && ['github-repository', 'external-system'].includes(raw.kind);
-  if (hasKind && !external) return failure('TARGET_CONTEXT_CONFLICT', { secret_classification: inspected.secret_classification || 'none' });
-  if (external) {
-    if (!validDigest(raw.digest) || hasPath || hasResolution) return failure('TARGET_CONTEXT_CONFLICT', { secret_classification: hasPath || hasResolution ? mergeSecretClassification(inspected.secret_classification || 'none', 'possible') : inspected.secret_classification || 'none' });
-    const projection = Object.create(null);
-    projection.kind = raw.kind;
-    projection.digest = raw.digest;
-    for (const key of ['target_class', 'resolved_inside']) if (hasOwn(key)) projection[key] = raw[key];
-    return { valid: true, value: deepFreeze(projection) };
-  }
-  if (hasDigest || !hasPath || !hasResolution || !nonBlank(raw.path)) return failure('TARGET_CONTEXT_INVALID', { secret_classification: inspected.secret_classification || 'none' });
+  const raw = isRecord(inspected.value) ? inspected.value : Object.create(null);
   const projection = Object.create(null);
-  projection.path = raw.path;
-  projection.resolution = resolution;
-  for (const key of ['target_class', 'resolved_inside']) if (hasOwn(key)) projection[key] = raw[key];
-  return { valid: true, value: deepFreeze(projection) };
+  let firstFailure = inspected.valid ? null : inspected;
+  let secretClassification = inspected.secret_classification || 'none';
+  const noteFailure = (candidate) => {
+    if (!firstFailure) firstFailure = candidate;
+    secretClassification = mergeSecretClassification(secretClassification, candidate.secret_classification || 'none');
+  };
+  for (const key of ['kind', 'digest', 'path', 'target_class']) {
+    if (!hasOwnCanonicalField(raw, key)) continue;
+    if (typeof raw[key] !== 'string') noteFailure(failure('TARGET_CONTEXT_CONFLICT'));
+    else projection[key] = raw[key];
+  }
+  if (hasOwnCanonicalField(raw, 'resolved_inside')) {
+    if (typeof raw.resolved_inside !== 'boolean') noteFailure(failure('TARGET_CONTEXT_CONFLICT'));
+    else projection.resolved_inside = raw.resolved_inside;
+  }
+  if (hasOwnCanonicalField(raw, 'resolution')) {
+    const normalizedResolution = canonicalizeResolution(raw.resolution);
+    secretClassification = mergeSecretClassification(secretClassification, normalizedResolution.secret_classification || 'none');
+    if (normalizedResolution.valid) projection.resolution = normalizedResolution.value;
+    else {
+      noteFailure(normalizedResolution);
+      if (normalizedResolution.value !== undefined) projection.resolution = normalizedResolution.value;
+    }
+  }
+  const hasKind = hasOwnCanonicalField(projection, 'kind');
+  const hasDigest = hasOwnCanonicalField(projection, 'digest');
+  const hasPath = hasOwnCanonicalField(projection, 'path');
+  const hasResolution = hasOwnCanonicalField(projection, 'resolution');
+  const external = hasKind && ['github-repository', 'external-system'].includes(projection.kind);
+  if (hasKind && !external) noteFailure(failure('TARGET_CONTEXT_CONFLICT'));
+  if (external) {
+    if (!validDigest(projection.digest) || hasPath || hasResolution) noteFailure(failure('TARGET_CONTEXT_CONFLICT', { secret_classification: hasPath || hasResolution ? mergeSecretClassification(secretClassification, 'possible') : secretClassification }));
+    const externalProjection = Object.create(null);
+    externalProjection.kind = projection.kind;
+    if (validDigest(projection.digest)) externalProjection.digest = projection.digest;
+    for (const key of ['target_class', 'resolved_inside']) if (hasOwnCanonicalField(projection, key)) externalProjection[key] = projection[key];
+    if (firstFailure) return canonicalFailure(firstFailure.reason_code || 'TARGET_CONTEXT_CONFLICT', deepFreeze(externalProjection), { secret_classification: secretClassification });
+    return { valid: true, value: deepFreeze(externalProjection) };
+  }
+  if (hasDigest || !hasPath || !hasResolution || !nonBlank(projection.path)) noteFailure(failure('TARGET_CONTEXT_INVALID'));
+  const filesystemProjection = Object.create(null);
+  if (hasPath) filesystemProjection.path = projection.path;
+  if (hasResolution) filesystemProjection.resolution = projection.resolution;
+  for (const key of ['target_class', 'resolved_inside']) if (hasOwnCanonicalField(projection, key)) filesystemProjection[key] = projection[key];
+  if (firstFailure) return canonicalFailure(firstFailure.reason_code || 'TARGET_CONTEXT_INVALID', deepFreeze(filesystemProjection), { secret_classification: secretClassification });
+  return { valid: true, value: deepFreeze(filesystemProjection) };
 }
 
 function canonicalizeOperation(value, seen = new Set()) {
   if (seen.has(value)) return failure('TYPED_OPERATION_REQUIRED', { secret_classification: 'possible' });
   const inspected = inspectOwnDataRecord(value, OPERATION_FIELD_UNION, 'TYPED_OPERATION_FIELDS_UNSUPPORTED');
-  if (!inspected.valid) return inspected;
-  const raw = inspected.value;
-  if (typeof raw.type !== 'string' || !nonBlank(raw.type)) return failure('TYPED_OPERATION_REQUIRED', { secret_classification: inspected.secret_classification || 'none' });
+  const raw = isRecord(inspected.value) ? inspected.value : Object.create(null);
+  const projection = Object.create(null);
+  let firstFailure = inspected.valid ? null : inspected;
+  let secretClassification = inspected.secret_classification || 'none';
+  const noteFailure = (candidate) => {
+    if (!firstFailure) firstFailure = candidate;
+    secretClassification = mergeSecretClassification(secretClassification, candidate.secret_classification || 'none');
+  };
+  if (!hasOwnCanonicalField(raw, 'type') || typeof raw.type !== 'string' || !nonBlank(raw.type)) {
+    noteFailure(failure('TYPED_OPERATION_REQUIRED', { secret_classification: secretClassification }));
+    return canonicalFailure(firstFailure.reason_code, deepFreeze(projection), { secret_classification: secretClassification });
+  }
+  projection.type = raw.type;
   const hasRegisteredOperationType = hasOwnOperationType(raw.type);
   const allowedFields = hasRegisteredOperationType ? OPERATION_FIELDS[raw.type] : null;
   const rawKeys = Object.keys(raw);
-  if ((hasRegisteredOperationType && rawKeys.some((key) => !allowedFields.includes(key))) || (!hasRegisteredOperationType && rawKeys.some((key) => key !== 'type'))) {
-    return failure('TYPED_OPERATION_FIELDS_UNSUPPORTED', { secret_classification: inspected.secret_classification || 'none' });
+  if (!hasRegisteredOperationType) {
+    if (rawKeys.some((key) => key !== 'type')) noteFailure(failure('TYPED_OPERATION_FIELDS_UNSUPPORTED', { secret_classification: secretClassification }));
+    if (firstFailure) return canonicalFailure(firstFailure.reason_code, deepFreeze(projection), { secret_classification: secretClassification });
+    return { valid: true, value: deepFreeze(projection), secret_classification: secretClassification };
   }
-  const projection = Object.create(null);
+  for (const key of rawKeys) if (!allowedFields.includes(key)) noteFailure(failure('TYPED_OPERATION_FIELDS_UNSUPPORTED', { secret_classification: secretClassification }));
   seen.add(value);
+  const componentFailures = [];
   try {
-    for (const key of rawKeys) {
+    for (const key of allowedFields) {
+      if (!hasOwnCanonicalField(raw, key)) continue;
       let normalized;
       if (['target', 'source', 'destination'].includes(key)) normalized = canonicalizeTarget(raw[key]);
       else if (key === 'components') normalized = canonicalizeArray(raw[key], (item) => canonicalizeOperation(item, seen), 'TYPED_OPERATION_REQUIRED', { collectFailures: true });
       else if (['refspecs', 'options'].includes(key)) normalized = canonicalizeStringArray(raw[key], key === 'options' ? 'BROADENED_PUSH_TARGET_UNSUPPORTED' : 'TYPED_OPERATION_REQUIRED');
-      else normalized = canonicalScalar(raw[key], 'TYPED_OPERATION_REQUIRED');
+      else normalized = key === 'type' ? { valid: true, value: raw[key] } : canonicalScalar(raw[key], 'TYPED_OPERATION_REQUIRED');
       if (!normalized.valid) {
-        const extra = { secret_classification: mergeSecretClassification(inspected.secret_classification || 'none', normalized.secret_classification || 'none') };
-        if (key === 'components' && normalized.partial_value !== undefined) {
-          const canonicalValue = Object.create(null);
-          canonicalValue.type = raw.type;
-          canonicalValue.components = normalized.partial_value;
-          extra.canonical_value = deepFreeze(canonicalValue);
-          extra.component_failures = normalized.component_failures;
-        }
-        return failure(normalized.reason_code, extra);
+        noteFailure(normalized);
+        if (normalized.value !== undefined) projection[key] = normalized.value;
+        if (key === 'components' && Array.isArray(normalized.component_failures)) componentFailures.push(...normalized.component_failures);
+        continue;
       }
       projection[key] = normalized.value;
     }
   } finally {
     seen.delete(value);
   }
-  return { valid: true, value: deepFreeze(projection) };
+  if (firstFailure) return canonicalFailure(firstFailure.reason_code || 'TYPED_OPERATION_REQUIRED', deepFreeze(projection), {
+    secret_classification: secretClassification,
+    component_failures: componentFailures.length > 0 ? componentFailures : undefined,
+  });
+  return { valid: true, value: deepFreeze(projection), secret_classification: secretClassification };
 }
+
 function canonicalizeAuthority(value) {
   const inspected = inspectOwnDataRecord(value, AUTHORITY_FIELDS, 'AUTHORITY_IDENTITY_INVALID');
-  if (!inspected.valid) return inspected;
+  const raw = isRecord(inspected.value) ? inspected.value : Object.create(null);
   const projection = Object.create(null);
-  for (const key of Object.keys(inspected.value)) {
+  let firstFailure = inspected.valid ? null : inspected;
+  let secretClassification = inspected.secret_classification || 'none';
+  for (const key of AUTHORITY_FIELDS) {
+    if (!hasOwnCanonicalField(raw, key)) continue;
     if (key === 'allowed_operation_types') {
-      const normalized = canonicalizeStringArray(inspected.value[key], 'AUTHORITY_IDENTITY_INVALID');
-      if (!normalized.valid) return failure('AUTHORITY_IDENTITY_INVALID', { secret_classification: mergeSecretClassification(inspected.secret_classification || 'none', normalized.secret_classification || 'none') });
-      projection[key] = normalized.value;
+      const normalized = canonicalizeStringArray(raw[key], 'AUTHORITY_IDENTITY_INVALID');
+      secretClassification = mergeSecretClassification(secretClassification, normalized.secret_classification || 'none');
+      if (!normalized.valid) {
+        if (!firstFailure) firstFailure = normalized;
+        if (normalized.value !== undefined) projection[key] = normalized.value;
+      } else projection[key] = normalized.value;
     } else if (key === 'finality_claim') {
-      if (typeof inspected.value[key] !== 'boolean') return failure('AUTHORITY_IDENTITY_INVALID', { secret_classification: inspected.secret_classification || 'none' });
-      projection[key] = inspected.value[key];
-    } else if (typeof inspected.value[key] !== 'string') {
-      return failure('AUTHORITY_IDENTITY_INVALID', { secret_classification: inspected.secret_classification || 'none' });
-    } else {
-      projection[key] = inspected.value[key];
-    }
+      if (typeof raw[key] !== 'boolean') {
+        if (!firstFailure) firstFailure = failure('AUTHORITY_IDENTITY_INVALID');
+      } else projection[key] = raw[key];
+    } else if (typeof raw[key] !== 'string') {
+      if (!firstFailure) firstFailure = failure('AUTHORITY_IDENTITY_INVALID');
+    } else projection[key] = raw[key];
   }
+  if (firstFailure) return canonicalFailure(firstFailure.reason_code || 'AUTHORITY_IDENTITY_INVALID', deepFreeze(projection), { secret_classification: secretClassification });
   return { valid: true, value: deepFreeze(projection) };
 }
 
 function canonicalizeRepository(value) {
   const inspected = inspectOwnDataRecord(value, REPOSITORY_FIELDS, 'REPOSITORY_CONTEXT_INVALID');
-  if (!inspected.valid) return inspected;
+  const raw = isRecord(inspected.value) ? inspected.value : Object.create(null);
   const projection = Object.create(null);
-  for (const key of Object.keys(inspected.value)) {
+  let firstFailure = inspected.valid ? null : inspected;
+  let secretClassification = inspected.secret_classification || 'none';
+  for (const key of REPOSITORY_FIELDS) {
+    if (!hasOwnCanonicalField(raw, key)) continue;
     if (key === 'resolution') {
-      const normalized = canonicalizeResolution(inspected.value[key], 'REPOSITORY_CONTEXT_INVALID');
-      if (!normalized.valid) return failure(normalized.reason_code, { secret_classification: mergeSecretClassification(inspected.secret_classification || 'none', normalized.secret_classification || 'none') });
-      projection[key] = normalized.value;
-    } else if (typeof inspected.value[key] !== 'string') {
-      return failure('REPOSITORY_CONTEXT_INVALID', { secret_classification: inspected.secret_classification || 'none' });
-    } else {
-      projection[key] = inspected.value[key];
-    }
+      const normalized = canonicalizeResolution(raw[key], 'REPOSITORY_CONTEXT_INVALID');
+      secretClassification = mergeSecretClassification(secretClassification, normalized.secret_classification || 'none');
+      if (!normalized.valid) {
+        if (!firstFailure) firstFailure = normalized;
+        if (normalized.value !== undefined) projection[key] = normalized.value;
+      } else projection[key] = normalized.value;
+    } else if (typeof raw[key] !== 'string') {
+      if (!firstFailure) firstFailure = failure('REPOSITORY_CONTEXT_INVALID');
+    } else projection[key] = raw[key];
   }
+  if (firstFailure) return canonicalFailure(firstFailure.reason_code || 'REPOSITORY_CONTEXT_INVALID', deepFreeze(projection), { secret_classification: secretClassification });
   return { valid: true, value: deepFreeze(projection) };
 }
 
 function canonicalizeInput(value) {
   const inspected = inspectOwnDataRecord(value, INPUT_FIELDS, 'CONTROL_PLANE_INPUT_INVALID', new Set(['ticket']));
-  if (!inspected.valid) return inspected;
-  const raw = inspected.value;
+  const raw = isRecord(inspected.value) ? inspected.value : Object.create(null);
   const projection = Object.create(null);
-  let firstFailure = null;
+  let firstFailure = inspected.valid ? null : inspected;
   let operationComponentFailures;
   let secretClassification = inspected.secret_classification || 'none';
   for (const key of INPUT_FIELDS) {
-    if (!Object.prototype.hasOwnProperty.call(raw, key)) continue;
+    if (!hasOwnCanonicalField(raw, key)) continue;
     let normalized;
     if (key === 'activation') normalized = canonicalizeSimpleRecord(raw[key], ACTIVATION_FIELDS, 'CONTROL_PLANE_INPUT_INVALID', new Set(['consented']));
     else if (key === 'session') normalized = canonicalizeSimpleRecord(raw[key], SESSION_FIELDS, 'CONTROL_PLANE_INPUT_INVALID');
@@ -383,22 +476,16 @@ function canonicalizeInput(value) {
     if (!normalized.valid) {
       if (!firstFailure) firstFailure = normalized;
       secretClassification = mergeSecretClassification(secretClassification, normalized.secret_classification || 'none');
-      if (key === 'operation') {
-        const partialOperation = normalized.canonical_value !== undefined ? normalized.canonical_value : normalized.partial_value;
-        if (partialOperation !== undefined) projection.operation = partialOperation;
-        operationComponentFailures = normalized.component_failures;
-      }
+      if (normalized.value !== undefined) projection[key] = normalized.value;
+      if (key === 'operation' && Array.isArray(normalized.component_failures)) operationComponentFailures = normalized.component_failures;
       continue;
     }
     projection[key] = normalized.value;
   }
   if (firstFailure) {
     const extra = { secret_classification: secretClassification };
-    if (Object.prototype.hasOwnProperty.call(projection, 'operation')) {
-      extra.partial_value = projection;
-      if (operationComponentFailures !== undefined) extra.component_failures = operationComponentFailures;
-    }
-    return failure(firstFailure.reason_code, extra);
+    if (operationComponentFailures !== undefined) extra.component_failures = operationComponentFailures;
+    return failure(firstFailure.reason_code, { ...extra, value: freezePartialProjection(projection) });
   }
   const opaqueValues = raw.ticket === undefined ? new Set() : new Set([raw.ticket]);
   return { valid: true, value: deepFreeze(projection, new Set(), opaqueValues) };
@@ -465,7 +552,7 @@ function nowFrom(value) {
   return parseUtc(value);
 }
 
-function failure(reasonCode, extra = {}) { return { valid: false, reason_code: reasonCode, ...extra }; }
+function failure(reasonCode, extra = {}) { return { valid: false, reason_code: reasonCode, failure_metadata: Object.freeze({ reason_code: reasonCode }), ...extra }; }
 function remoteFailure(reasonCode) { return deepFreeze(failure(reasonCode)); }
 
 function canonicalHost(host) {
@@ -872,7 +959,7 @@ function hardDenyFromPartialCanonicalInput(partialInput) {
 function evaluate(input, options = {}) {
   const normalizedInput = canonicalizeInput(input);
   if (!normalizedInput.valid) {
-    const partialInput = normalizedInput.partial_value;
+    const partialInput = normalizedInput.value;
     const defaultOn = partialInput?.enabled === true
       && isRecord(partialInput.activation)
       && partialInput.activation.mode === 'explicit-local'
@@ -934,6 +1021,7 @@ function canonicalizeStructuralImpactInput(change) {
     }
     if (!descriptor || !descriptor.enumerable || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) return failure('STRUCTURAL_IMPACT_INPUT_INVALID');
     if (!allowedFields.has(key)) return failure('STRUCTURAL_IMPACT_FIELDS_UNSUPPORTED');
+    if (typeof descriptor.value !== 'string') return failure('STRUCTURAL_IMPACT_INPUT_INVALID');
     projection[key] = descriptor.value;
   }
   if (typeof projection.kind !== 'string' || typeof projection.identity !== 'string') return failure('STRUCTURAL_IMPACT_INPUT_INVALID');

@@ -1447,6 +1447,185 @@ test('nested compound partial canonical recovery retains deny descendants in bot
   }
 });
 
+test('canonical shape convergence preserves deny evidence through malformed nested wrappers', () => {
+  const safePath = ROOT + '\\src\\convergence-safe.txt';
+  const ordinaryEndpoint = (filePath, existence) => ({
+    path: filePath,
+    resolution: { status: 'resolved', canonical_path: filePath, link_type: 'none', existence },
+  });
+  const representedEndpoint = (rawPath, canonicalPath, existence) => ({
+    path: rawPath,
+    resolution: { status: 'resolved', canonical_path: canonicalPath, link_type: 'symlink', existence },
+  });
+  const leaves = [
+    {
+      label: 'protected-delete',
+      operation: {
+        type: 'filesystem.delete',
+        target: representedEndpoint(ROOT, safePath, 'existing'),
+      },
+      expectedReason: 'CATASTROPHIC_TARGET_DENIED',
+      allowedTypes: ['filesystem.delete', 'filesystem.read'],
+    },
+    {
+      label: 'protected-move-source',
+      operation: {
+        type: 'filesystem.move',
+        source: representedEndpoint(ROOT, safePath, 'existing'),
+        destination: ordinaryEndpoint(safePath, 'absent'),
+        no_clobber: true,
+      },
+      expectedReason: 'CATASTROPHIC_TARGET_DENIED',
+      allowedTypes: ['filesystem.move', 'filesystem.read'],
+    },
+    {
+      label: 'protected-move-destination',
+      operation: {
+        type: 'filesystem.move',
+        source: ordinaryEndpoint(safePath, 'existing'),
+        destination: representedEndpoint(safePath, ROOT, 'absent'),
+        no_clobber: true,
+      },
+      expectedReason: 'CATASTROPHIC_TARGET_DENIED',
+      allowedTypes: ['filesystem.move', 'filesystem.read'],
+    },
+    {
+      label: 'secret-exfiltration',
+      operation: {
+        type: 'network.request',
+        source: target('.env.synthetic', { existence: 'existing' }),
+        destination: { kind: 'external-system', digest: 'a'.repeat(64) },
+        method: 'POST',
+      },
+      expectedReason: 'SECRET_EXFILTRATION_DENIED',
+      allowedTypes: ['network.request', 'filesystem.read'],
+    },
+  ];
+  const malformedSibling = {
+    type: 'filesystem.read',
+    target: target('src\\malformed-sibling.txt'),
+    malformed_field: 'synthetic',
+  };
+  const compound = (components, malformedBeforeComponents) => malformedBeforeComponents
+    ? { type: 'compound', malformed_wrapper_field: 'synthetic', components }
+    : { type: 'compound', components, malformed_wrapper_field: 'synthetic' };
+  const nested = (leaf, depth, malformedBeforeComponents, malformedSiblingBeforeDeny) => {
+    let value = leaf;
+    for (let level = 0; level < depth; level += 1) {
+      const components = level === 0
+        ? (malformedSiblingBeforeDeny ? [malformedSibling, value] : [value, malformedSibling])
+        : [value];
+      value = compound(components, malformedBeforeComponents);
+    }
+    return value;
+  };
+  const topLevelOrders = [
+    ['enabled', 'activation', 'now', 'repository', 'authority', 'operation', 'ticket', 'session', 'scope'],
+    ['operation', 'enabled', 'activation', 'now', 'repository', 'authority', 'ticket', 'session', 'scope'],
+  ];
+
+  for (const leaf of leaves) {
+    for (const depth of [1, 2]) {
+      for (const malformedBeforeComponents of [true, false]) {
+        for (const malformedSiblingBeforeDeny of [true, false]) {
+          const operation = nested(leaf.operation, depth, malformedBeforeComponents, malformedSiblingBeforeDeny);
+          const trusted = createTrustedAuthority({ now: NOW, authority: { allowed_operation_types: leaf.allowedTypes } });
+          const ticket = trusted.issue(ticketRequest(leaf.operation));
+          const fields = {
+            enabled: true,
+            activation: { mode: 'explicit-local', consented: true },
+            now: NOW,
+            repository: {
+              root: ROOT,
+              worktree: WORKTREE,
+              remote: 'https://github.com/weijunswj/ai-agent-toolkit.git',
+              resolution: { status: 'resolved', link_type: 'none' },
+            },
+            authority: { ...TRUSTED_CONTROLLER, allowed_operation_types: leaf.allowedTypes },
+            operation,
+            ticket,
+            session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' },
+            scope: ticket.scope,
+          };
+          for (const order of topLevelOrders) {
+            const input = Object.fromEntries(order.map((key) => [key, fields[key]]));
+            const result = kernel.evaluate(input, { trustedAuthorityContext: trusted });
+            const label = [leaf.label, 'depth=' + depth, malformedBeforeComponents ? 'wrapper-before' : 'wrapper-after', malformedSiblingBeforeDeny ? 'sibling-before' : 'sibling-after', order.join(',')].join(' ');
+            assert.equal(result.decision, 'deny', label);
+            assert.equal(result.reason_code, leaf.expectedReason, label);
+            assert.equal(result.ticket_status, 'not-accepted', label);
+            assert.equal(trusted.size(), 1, label + ' ticket remains unconsumed');
+          }
+        }
+      }
+    }
+  }
+});
+
+test('canonical shape convergence keeps invalidity sticky when no hard deny exists', () => {
+  const safeOperation = { type: 'git.read' };
+  const malformedOperation = {
+    type: 'compound',
+    malformed_wrapper_field: 'synthetic',
+    components: [safeOperation],
+  };
+  const trusted = createTrustedAuthority({ now: NOW, authority: { allowed_operation_types: ['git.read'] } });
+  const ticket = trusted.issue(ticketRequest(safeOperation));
+  const result = kernel.evaluate(baseInput(malformedOperation, {
+    authority: { ...TRUSTED_CONTROLLER, allowed_operation_types: ['git.read'] },
+    ticket,
+    session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' },
+    scope: ticket.scope,
+  }), { trustedAuthorityContext: trusted });
+  assert.equal(result.decision, 'unsupported');
+  assert.equal(result.reason_code, 'TYPED_OPERATION_FIELDS_UNSUPPORTED');
+  assert.notEqual(result.decision, 'allow');
+  assert.equal(trusted.size(), 1, 'invalidity must not consume a ticket');
+});
+
+test('canonical shape convergence retains deny evidence through hidden, symbol, and accessor fields', () => {
+  const protectedDelete = {
+    type: 'filesystem.delete',
+    target: { path: ROOT, resolution: { status: 'resolved', canonical_path: ROOT, link_type: 'none', existence: 'existing' } },
+  };
+  const cases = [
+    ['hidden', (wrapper) => {
+      Object.defineProperty(wrapper, 'hidden_field', { configurable: true, enumerable: false, value: 'synthetic' });
+    }],
+    ['symbol', (wrapper) => {
+      wrapper[Symbol('synthetic-hidden-field')] = 'synthetic';
+    }],
+    ['accessor', (wrapper, state) => {
+      Object.defineProperty(wrapper, 'accessor_field', {
+        configurable: true,
+        enumerable: true,
+        get() {
+          state.calls += 1;
+          return 'synthetic';
+        },
+      });
+    }],
+  ];
+  for (const [label, addInvalidField] of cases) {
+    const state = { calls: 0 };
+    const operation = { type: 'compound', components: [protectedDelete] };
+    addInvalidField(operation, state);
+    const trusted = createTrustedAuthority({ now: NOW, authority: { allowed_operation_types: ['filesystem.delete'] } });
+    const ticket = trusted.issue(ticketRequest(protectedDelete));
+    const result = kernel.evaluate(baseInput(operation, {
+      authority: TRUSTED_CONTROLLER,
+      ticket,
+      session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' },
+      scope: ticket.scope,
+    }), { trustedAuthorityContext: trusted });
+    assert.equal(result.decision, 'deny', label);
+    assert.equal(result.reason_code, 'CATASTROPHIC_TARGET_DENIED', label);
+    assert.equal(result.ticket_status, 'not-accepted', label);
+    assert.equal(trusted.size(), 1, label + ' ticket remains unconsumed');
+    assert.equal(state.calls, 0, label + ' accessor must not run');
+    assert.equal(Object.isFrozen(operation), false, label + ' caller wrapper must not be frozen');
+  }
+});
 test('structural impact rejects non-string scalars before traversing or freezing caller-owned values', () => {
   for (const field of ['kind', 'identity']) {
     let getterCalls = 0;
