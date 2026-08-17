@@ -39,6 +39,11 @@ const fixtureCaseIdsByTestName = new Map([
   ['scope, session, turn, call, operation, and target changes fail binding', ['ticket-scope-binding']],
   ['resolver raw/canonical conflicts fail closed before target or ticket decisions', ['resolver-raw-canonical-conflict']],
   ['git push options use a narrow typed allowlist', ['git-push-typed-options']],
+  ['mixed external and filesystem target representations fail closed', ['external-digest-target-union']],
+  ['git push remote names are closed and option-like values cannot consume tickets', ['git-push-remote-typed']],
+  ['compound hard denies dominate unsupported components in every order', ['compound-hard-deny-precedence']],
+  ['structural impact uses a closed deterministic kind contract', ['structural-impact-closed-kinds']],
+  ['filesystem.move validates source and destination cardinality and binding', ['filesystem-move-cardinality']],
 ]);
 
 function registerFixtureCaseIds(caseIds, registry = executedFixtureCaseIds) {
@@ -289,6 +294,65 @@ test('resolver raw/canonical conflicts fail closed before target or ticket decis
   assert.equal(consistent.decision, 'allow');
 });
 
+test('mixed external and filesystem target representations fail closed', () => {
+  const safeCanonical = ROOT + '\\src\\safe.txt';
+  const mixedTarget = (rawPath) => ({
+    kind: 'external-system',
+    digest: 'a'.repeat(64),
+    path: rawPath,
+    resolution: { status: 'resolved', canonical_path: safeCanonical, link_type: 'none', existence: 'existing' },
+  });
+
+  for (const rawPath of [ROOT + '\\.env.synthetic', 'C:\\fixture\\workspace\\sibling\\outside.txt']) {
+    const direct = kernel.evaluate(baseInput({ type: 'filesystem.read', target: mixedTarget(rawPath) }));
+    assert.notEqual(direct.decision, 'allow', rawPath);
+    assert.notEqual(direct.secret_classification, 'none', rawPath);
+  }
+
+  const operation = {
+    type: 'compound',
+    components: [
+      { type: 'git.read' },
+      {
+        type: 'network.request',
+        source: mixedTarget(ROOT + '\\.env.synthetic'),
+        destination: { kind: 'external-system', digest: 'b'.repeat(64) },
+        method: 'POST',
+      },
+    ],
+  };
+  const trusted = createTrustedAuthority({ now: NOW, authority: { allowed_operation_types: ['git.read', 'network.request'] } });
+  const ticket = trusted.issue(ticketRequest(operation));
+  const transmitted = kernel.evaluate(baseInput(operation, {
+    authority: TRUSTED_CONTROLLER,
+    ticket,
+    session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' },
+    scope: ticket.scope,
+  }), { trustedAuthorityContext: trusted });
+  assert.notEqual(transmitted.decision, 'allow');
+  assert.notEqual(transmitted.reason_code, 'TICKET_CONSUMED');
+  assert.notEqual(transmitted.ticket_status, 'consumed');
+  assert.notEqual(transmitted.secret_classification, 'none');
+
+  const externalOperation = {
+    type: 'github.mutation',
+    repository: 'weijunswj/ai-agent-toolkit',
+    action: 'inspect',
+    target: { kind: 'github-repository', digest: 'c'.repeat(64) },
+  };
+  const externalTrusted = createTrustedAuthority({ now: NOW });
+  const externalTicket = externalTrusted.issue(ticketRequest(externalOperation));
+  const externalPositive = kernel.evaluate(baseInput(externalOperation, {
+    authority: TRUSTED_CONTROLLER,
+    ticket: externalTicket,
+    session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' },
+    scope: externalTicket.scope,
+  }), { trustedAuthorityContext: externalTrusted });
+  assert.equal(externalPositive.decision, 'allow');
+  const pathPositive = kernel.evaluate(baseInput({ type: 'filesystem.read', target: target('src\\safe.txt') }));
+  assert.equal(pathPositive.decision, 'allow');
+});
+
 test('typed operations refuse opaque shell syntax, including all eleven shell-adversarial forms', () => {
   const commands = [
     'find . -delete',
@@ -401,6 +465,57 @@ test('git push options use a narrow typed allowlist', () => {
   }
 });
 
+test('git push remote names are closed and option-like values cannot consume tickets', () => {
+  const unsafeRemotes = [
+    '--mirror',
+    '--all',
+    '--repo=ssh://git@attacker.example/repo.git',
+    '-d',
+    '--receive-pack=synthetic',
+    'ssh://attacker.example/repo.git',
+  ];
+  for (const remote of unsafeRemotes) {
+    const operation = {
+      type: 'git.push',
+      remote,
+      refspecs: ['HEAD:refs/heads/topic'],
+      options: ['--porcelain'],
+      authorized_remote: remote,
+      authorized_ref: 'refs/heads/topic',
+    };
+    const trusted = createTrustedAuthority({ now: NOW });
+    const ticket = trusted.issue(ticketRequest(operation));
+    const result = kernel.evaluate(baseInput(operation, {
+      authority: TRUSTED_CONTROLLER,
+      ticket,
+      session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' },
+      scope: ticket.scope,
+    }), { trustedAuthorityContext: trusted });
+    assert.notEqual(result.decision, 'allow', remote);
+    assert.notEqual(result.reason_code, 'TICKET_CONSUMED', remote);
+    assert.notEqual(result.ticket_status, 'consumed', remote);
+  }
+
+  const safeOperation = {
+    type: 'git.push',
+    remote: 'origin',
+    refspecs: ['HEAD:refs/heads/topic'],
+    options: ['--porcelain'],
+    authorized_remote: 'origin',
+    authorized_ref: 'refs/heads/topic',
+  };
+  const trusted = createTrustedAuthority({ now: NOW });
+  const ticket = trusted.issue(ticketRequest(safeOperation));
+  const result = kernel.evaluate(baseInput(safeOperation, {
+    authority: TRUSTED_CONTROLLER,
+    ticket,
+    session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' },
+    scope: ticket.scope,
+  }), { trustedAuthorityContext: trusted });
+  assert.equal(result.decision, 'allow');
+  assert.equal(result.reason_code, 'TICKET_CONSUMED');
+});
+
 test('secret classification is derived and sensitive boundaries fail closed', () => {
   const read = kernel.evaluate(baseInput({ type: 'filesystem.read', target: target('.env.synthetic', { existence: 'existing' }) }));
   assert.equal(read.secret_classification, 'confirmed');
@@ -441,6 +556,43 @@ test('compound authority validates every typed component, not only the winning d
   }));
   assert.notEqual(result.decision, 'allow');
   assert.equal(result.reason_code, 'COMPONENT_AUTHORITY_REQUIRED');
+});
+
+test('compound hard denies dominate unsupported components in every order', () => {
+  const opaque = { type: 'shell', shell: 'posix', command: 'opaque synthetic command' };
+  const secret = {
+    type: 'network.request',
+    source: target('.env.synthetic', { existence: 'existing' }),
+    destination: { kind: 'external-system', digest: 'd'.repeat(64) },
+    method: 'POST',
+  };
+  for (const components of [[opaque, secret], [secret, opaque]]) {
+    const result = kernel.evaluate(baseInput({ type: 'compound', components }, {
+      authority: { ...baseInput(routineRead()).authority, allowed_operation_types: ['shell', 'network.request'] },
+    }));
+    assert.equal(result.decision, 'deny');
+    assert.equal(result.reason_code, 'SECRET_EXFILTRATION_DENIED');
+  }
+
+  const catastrophic = {
+    type: 'filesystem.delete',
+    target: { path: ROOT, resolution: { status: 'resolved', canonical_path: ROOT, link_type: 'none' } },
+  };
+  for (const components of [[opaque, catastrophic], [catastrophic, opaque]]) {
+    const result = kernel.evaluate(baseInput({ type: 'compound', components }, {
+      authority: { ...baseInput(routineRead()).authority, allowed_operation_types: ['shell', 'filesystem.delete'] },
+    }));
+    assert.equal(result.decision, 'deny');
+    assert.equal(result.reason_code, 'CATASTROPHIC_TARGET_DENIED');
+  }
+
+  const benign = kernel.evaluate(baseInput({
+    type: 'compound',
+    components: [routineRead('src\\safe.txt'), { type: 'git.read' }],
+  }, {
+    authority: { ...baseInput(routineRead()).authority, allowed_operation_types: ['filesystem.read', 'git.read'] },
+  }));
+  assert.equal(benign.decision, 'allow');
 });
 
 test('caller finality claims and untruthful authority identity are rejected', () => {
@@ -500,6 +652,32 @@ test('structural impact is deterministic and keeps the temporary #342 rule activ
   assert.equal(structural.compatibility_rule.issue, 342);
   assert.equal(structural.compatibility_rule.status, 'active-until-propagation-verification');
   const local = kernel.assessStructuralImpact({ kind: 'value-change', identity: 'timeout-ms' });
+  assert.equal(local.required, false);
+  assert.equal(local.search_scope, 'local');
+});
+
+test('structural impact uses a closed deterministic kind contract', () => {
+  for (const kind of ['rename', 'remove', 'move', 'resignature', 're-signature', 'contract-shape', 'generated-surface', 'path', 'symbol', 'command', 'schema-field', 'public-contract', 'internal-contract', 'repository-identity', 'structural-replace']) {
+    const result = kernel.assessStructuralImpact({ kind, identity: 'operation.authority' });
+    assert.equal(result.valid, true, kind);
+    assert.equal(result.required, true, kind);
+    assert.equal(result.search_scope, 'targeted-repo-wide', kind);
+  }
+
+  for (const kind of ['unknown-kind', 'Rename']) {
+    const result = kernel.assessStructuralImpact({ kind, identity: 'operation.authority' });
+    assert.equal(result.valid, false, kind);
+    assert.equal(result.decision, 'unsupported', kind);
+    assert.equal(result.reason_code, 'STRUCTURAL_IMPACT_KIND_UNSUPPORTED', kind);
+    assert.equal(result.compatibility_rule.issue, 342, kind);
+    assert.equal(result.compatibility_rule.status, 'active-until-propagation-verification', kind);
+  }
+
+  const extraField = kernel.assessStructuralImpact({ kind: 'value-change', identity: 'timeout-ms', scope: 'synthetic' });
+  assert.equal(extraField.valid, false);
+  assert.equal(extraField.reason_code, 'STRUCTURAL_IMPACT_FIELDS_UNSUPPORTED');
+  const local = kernel.assessStructuralImpact({ kind: 'value-change', identity: 'timeout-ms' });
+  assert.equal(local.valid, true);
   assert.equal(local.required, false);
   assert.equal(local.search_scope, 'local');
 });
@@ -700,6 +878,71 @@ test('scope, session, turn, call, operation, and target changes fail binding', (
     assert.equal(result.decision, 'deny', label);
     assert.equal(result.reason_code, 'TICKET_BINDING_MISMATCH', label);
   }
+});
+
+test('filesystem.move validates source and destination cardinality and binding', () => {
+  const makeMove = (sourcePath = 'src\\source.txt', destinationPath = 'src\\destination.txt', destinationExistence = 'absent', noClobber = true) => ({
+    type: 'filesystem.move',
+    source: target(sourcePath, { existence: 'existing' }),
+    destination: target(destinationPath, { existence: destinationExistence }),
+    no_clobber: noClobber,
+  });
+  const accept = (operation) => {
+    const trusted = createTrustedAuthority({ now: NOW, authority: { allowed_operation_types: ['filesystem.move'] } });
+    const ticket = trusted.issue(ticketRequest(operation));
+    const result = kernel.evaluate(baseInput(operation, {
+      authority: TRUSTED_CONTROLLER,
+      ticket,
+      session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' },
+      scope: ticket.scope,
+    }), { trustedAuthorityContext: trusted });
+    assert.equal(result.decision, 'allow');
+    assert.equal(result.reason_code, 'TICKET_CONSUMED');
+  };
+
+  const bounded = makeMove();
+  accept(bounded);
+
+  const missingSource = kernel.evaluate(baseInput({
+    type: 'filesystem.move',
+    destination: target('src\\destination.txt', { existence: 'absent' }),
+    no_clobber: true,
+  }));
+  assert.equal(missingSource.decision, 'unsupported');
+  assert.equal(missingSource.reason_code, 'TYPED_OPERATION_REQUIRED');
+
+  const missingDestination = kernel.evaluate(baseInput({
+    type: 'filesystem.move',
+    source: target('src\\source.txt', { existence: 'existing' }),
+    no_clobber: true,
+  }));
+  assert.equal(missingDestination.decision, 'unsupported');
+  assert.equal(missingDestination.reason_code, 'TYPED_OPERATION_REQUIRED');
+
+  const extraTarget = kernel.evaluate(baseInput({ ...bounded, target: target('src\\extra.txt') }));
+  assert.equal(extraTarget.decision, 'unsupported');
+  assert.equal(extraTarget.reason_code, 'TYPED_OPERATION_FIELDS_UNSUPPORTED');
+
+  const overwriteOperation = makeMove('src\\source.txt', 'src\\existing-destination.txt', 'existing', false);
+  const overwrite = kernel.evaluate(baseInput(overwriteOperation));
+  assert.equal(overwrite.decision, 'ask');
+  assert.equal(overwrite.reason_code, 'OVERWRITE_APPROVAL_REQUIRED');
+  accept(overwriteOperation);
+
+  const bindingTrusted = createTrustedAuthority({ now: NOW, authority: { allowed_operation_types: ['filesystem.move'] } });
+  const bindingTicket = bindingTrusted.issue(ticketRequest(bounded));
+  const bindingInput = (operation) => kernel.evaluate(baseInput(operation, {
+    authority: TRUSTED_CONTROLLER,
+    ticket: bindingTicket,
+    session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' },
+    scope: bindingTicket.scope,
+  }), { trustedAuthorityContext: bindingTrusted });
+  const changedSource = bindingInput({ ...bounded, source: target('src\\other-source.txt', { existence: 'existing' }) });
+  assert.equal(changedSource.decision, 'deny');
+  assert.equal(changedSource.reason_code, 'TICKET_BINDING_MISMATCH');
+  const changedDestination = bindingInput({ ...bounded, destination: target('src\\other-destination.txt', { existence: 'absent' }) });
+  assert.equal(changedDestination.decision, 'deny');
+  assert.equal(changedDestination.reason_code, 'TICKET_BINDING_MISMATCH');
 });
 
 test('fixture manifest required case IDs are executed exactly once', () => {

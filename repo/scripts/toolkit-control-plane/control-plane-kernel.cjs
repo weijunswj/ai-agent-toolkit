@@ -10,6 +10,7 @@ const SECRET_CLASSIFICATIONS = new Set(['none', 'possible', 'confirmed']);
 const ROLES = new Set(['executor', 'controller']);
 const MAX_TICKET_USES = 8;
 const SAFE_GIT_PUSH_OPTIONS = Object.freeze(['--porcelain', '--dry-run']);
+const GIT_REMOTE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const TRUSTED_CONTEXT_STATE = new WeakMap();
 const TICKET_STORE_STATE = new WeakMap();
 const TICKET_PROVENANCE = new WeakMap();
@@ -19,7 +20,7 @@ const OPERATION_FIELDS = Object.freeze({
   'filesystem.read': ['type', 'target'],
   'filesystem.write': ['type', 'target', 'no_clobber'],
   'filesystem.create': ['type', 'target', 'no_clobber'],
-  'filesystem.move': ['type', 'source', 'target', 'no_clobber'],
+  'filesystem.move': ['type', 'source', 'destination', 'no_clobber'],
   'filesystem.delete': ['type', 'target'],
   'git.read': ['type'],
   'git.branch': ['type', 'mode', 'branch'],
@@ -152,6 +153,20 @@ function deriveSecretClassification(values) { const list = Array.isArray(values)
 function operationDigest(operation) { return digest(operation); }
 function targetDigest(operation) { return digest({ targets: [operation?.target, operation?.source, operation?.destination, operation?.targets].filter((value) => value !== undefined) }); }
 function normalizeLinkType(value) { return typeof value === 'string' && LINK_TYPES.has(value) ? value : null; }
+function targetEvidenceValues(value) {
+  const resolution = isRecord(value?.resolution) ? value.resolution : null;
+  return [value?.path, resolution?.canonical_path].filter((item) => item !== undefined && item !== null);
+}
+function conflictSecretClassification(value) {
+  const values = targetEvidenceValues(value);
+  const derived = deriveSecretClassification(values);
+  if (derived === 'confirmed') return 'confirmed';
+  if (values.length > 1) return 'possible';
+  return derived;
+}
+function validGitRemoteName(value) {
+  return nonBlank(value) && GIT_REMOTE_NAME_PATTERN.test(value) && !value.includes('..') && !value.endsWith('.') && !value.includes('@{');
+}
 
 function authorityIdentityError(authority) {
   if (!isRecord(authority)) return 'AUTHORITY_IDENTITY_INVALID';
@@ -202,19 +217,26 @@ function normalizeRepository(repository) {
 
 function normalizeTarget(value, repository) {
   if (!isRecord(value)) return failure('TARGET_CONTEXT_INVALID');
-  if (nonBlank(value.kind) && ['github-repository', 'external-system'].includes(value.kind) && validDigest(value.digest)) return { valid: true, target_class: 'external-system', status: 'resolved', path_digest: value.digest, path: null, link_type: 'none', secret_values: [] };
+  const externalKinds = ['github-repository', 'external-system'];
+  const hasExternalKind = nonBlank(value.kind) && externalKinds.includes(value.kind);
+  if (hasExternalKind) {
+    const keys = Object.keys(value);
+    if (!validDigest(value.digest) || keys.some((key) => !['kind', 'digest'].includes(key))) return failure('TARGET_CONTEXT_CONFLICT', { secret_classification: conflictSecretClassification(value) });
+    return { valid: true, target_class: 'external-system', status: 'resolved', path_digest: value.digest, path: null, link_type: 'none', secret_values: [] };
+  }
+  if (value.kind !== undefined || value.digest !== undefined) return failure('TARGET_CONTEXT_CONFLICT', { secret_classification: conflictSecretClassification(value) });
   if (!nonBlank(value.path)) return failure('TARGET_CONTEXT_INVALID');
   const rawPath = normalizePath(value.path);
   if (!rawPath) return failure('TARGET_CONTEXT_INVALID');
   const resolution = isRecord(value.resolution) ? value.resolution : null;
   if (!resolution || resolution.status !== 'resolved') return failure('TARGET_CONTEXT_INVALID');
   const linkType = normalizeLinkType(resolution.link_type);
-  if (!linkType) return failure('UNKNOWN_RESOLVER_LINK_TYPE', { secret_classification: deriveSecretClassification([rawPath, resolution.canonical_path]) });
+  if (!linkType) return failure('UNKNOWN_RESOLVER_LINK_TYPE', { secret_classification: deriveSecretClassification([rawPath, resolution.canonical_path].filter((item) => item !== undefined && item !== null)) });
   const canonicalInput = resolution.canonical_path === undefined ? value.path : resolution.canonical_path;
   const canonicalPath = normalizePath(canonicalInput);
   const secretValues = [rawPath, canonicalPath].filter(Boolean);
-  if (!canonicalPath) return failure('TARGET_CONTEXT_INVALID', { secret_classification: deriveSecretClassification([rawPath, canonicalInput]) });
-  if (linkType === 'none' && !samePath(rawPath, canonicalPath)) return failure('TARGET_CONTEXT_CONFLICT', { secret_classification: deriveSecretClassification(secretValues) });
+  if (!canonicalPath) return failure('TARGET_CONTEXT_INVALID', { secret_classification: deriveSecretClassification([rawPath, canonicalInput].filter((item) => item !== undefined && item !== null)) });
+  if (linkType === 'none' && !samePath(rawPath, canonicalPath)) return failure('TARGET_CONTEXT_CONFLICT', { secret_classification: conflictSecretClassification(value) });
   let targetClass = 'outside-repository';
   if (samePath(canonicalPath, repository.root)) targetClass = 'canonical-repository';
   else if (samePath(canonicalPath, repository.worktree)) targetClass = 'canonical-worktree';
@@ -225,6 +247,29 @@ function normalizeTarget(value, repository) {
 
 function operationTargets(operation) { return [operation.target, operation.source, operation.destination, ...(Array.isArray(operation.targets) ? operation.targets : [])].filter((value) => value !== undefined); }
 
+function targetClassForComponents(components) {
+  const flattened = components.flatMap(flattenClassifiedComponents);
+  return flattened.some((item) => item.target_class === 'external-system') ? 'external-system' : flattened.some((item) => item.target_class === 'outside-repository') ? 'outside-repository' : flattened.some((item) => item.target_class === 'unresolved-target') ? 'unresolved-target' : flattened[0]?.target_class || 'unknown-target';
+}
+
+function selectHardDeny(current, candidate) {
+  if (!candidate) return current;
+  if (!current || candidate.reason_code === 'SECRET_EXFILTRATION_DENIED' || current.reason_code !== 'SECRET_EXFILTRATION_DENIED') return candidate;
+  return current;
+}
+
+function hardDenyForClassifiedComponents(components, repository, operationType = 'compound') {
+  const flattened = components.flatMap(flattenClassifiedComponents);
+  const targetClass = targetClassForComponents(flattened);
+  const secretValues = flattened.flatMap((item) => Array.isArray(item.secret_values) ? item.secret_values : []);
+  const derivedSecretClassification = deriveSecretClassification(secretValues);
+  const secretClassification = derivedSecretClassification !== 'none' ? derivedSecretClassification : flattened.some((item) => item.secret_classification === 'confirmed') ? 'confirmed' : flattened.some((item) => item.secret_classification === 'possible') ? 'possible' : 'none';
+  const operationClass = operationType === 'compound' ? 'compound' : flattened[0]?.operation_class || operationType;
+  if (flattened.some((item) => item.operation_type === 'network.request' && item.secret_classification !== 'none')) return { decision: 'deny', reason_code: 'SECRET_EXFILTRATION_DENIED', operation_type: operationType, operation_class: operationClass, target_class: targetClass, secret_classification: secretClassification, ticket_status: 'not-accepted' };
+  if (flattened.some((item) => item.operation_type === 'filesystem.delete' && item.targets.some((target) => target.path && (isFilesystemRoot(target.path) || samePath(target.path, repository.root))))) return { decision: 'deny', reason_code: 'CATASTROPHIC_TARGET_DENIED', operation_type: operationType, operation_class: operationClass, target_class: 'protected-target', secret_classification: secretClassification };
+  return null;
+}
+
 function classifyOperation(operation, repository) {
   if (!isRecord(operation) || !nonBlank(operation.type)) return failure('TYPED_OPERATION_REQUIRED');
   if (operation.type === 'shell') return failure('OPAQUE_OPERATION_UNSUPPORTED');
@@ -232,8 +277,23 @@ function classifyOperation(operation, repository) {
   if (operation.type === 'compound') {
     if (!Array.isArray(operation.components) || operation.components.length < 1 || operation.components.length > 16) return failure('TYPED_OPERATION_REQUIRED');
     const components = [];
-    for (const component of operation.components) { const classified = classifyOperation(component, repository); if (!classified.valid) return classified; components.push(classified); }
-    const targetClass = components.some((item) => item.target_class === 'external-system') ? 'external-system' : components.some((item) => item.target_class === 'outside-repository') ? 'outside-repository' : components.some((item) => item.target_class === 'unresolved-target') ? 'unresolved-target' : components[0].target_class;
+    let firstInvalid = null;
+    let hardDeny = null;
+    for (const component of operation.components) {
+      const classified = classifyOperation(component, repository);
+      if (!classified.valid) {
+        if (!firstInvalid) firstInvalid = classified;
+        hardDeny = selectHardDeny(hardDeny, classified.hard_deny);
+        continue;
+      }
+      components.push(classified);
+      hardDeny = selectHardDeny(hardDeny, hardDenyForClassifiedComponents([classified], repository, 'compound'));
+    }
+    if (firstInvalid) {
+      if (hardDeny) return failure(firstInvalid.reason_code, { hard_deny: hardDeny });
+      return firstInvalid;
+    }
+    const targetClass = targetClassForComponents(components);
     const requiresTicket = components.some((item) => item.requires_ticket || (item.secret_classification === 'confirmed' && ['filesystem.read', 'filesystem.create', 'filesystem.write', 'filesystem.move'].includes(item.operation_type)));
     return { valid: true, operation_type: 'compound', operation_class: 'compound', target_class: targetClass, secret_classification: deriveSecretClassification(components.flatMap((item) => item.secret_values)), secret_values: components.flatMap((item) => item.secret_values), requires_ticket: requiresTicket, components };
   }
@@ -244,7 +304,9 @@ function classifyOperation(operation, repository) {
   if (secretClassification === 'possible') return failure('DYNAMIC_TARGET_UNSUPPORTED', { secret_classification: 'possible' });
   if (operation.secret_classification !== undefined && !SECRET_CLASSIFICATIONS.has(operation.secret_classification)) return failure('SECRET_CLASSIFICATION_INVALID');
   const targetClass = normalizedTargets.some((item) => item.target_class === 'external-system') ? 'external-system' : normalizedTargets.some((item) => item.target_class === 'outside-repository') ? 'outside-repository' : normalizedTargets.some((item) => item.target_class === 'unresolved-target') ? 'unresolved-target' : normalizedTargets[0]?.target_class || 'unknown-target';
-  if (['filesystem.read', 'filesystem.write', 'filesystem.create', 'filesystem.move', 'filesystem.delete'].includes(operation.type) && normalizedTargets.length !== 1) return failure('TYPED_OPERATION_REQUIRED');
+  if (operation.type === 'filesystem.move') {
+    if (normalizedTargets.length !== 2 || operation.source === undefined || operation.destination === undefined) return failure('TYPED_OPERATION_REQUIRED');
+  } else if (['filesystem.read', 'filesystem.write', 'filesystem.create', 'filesystem.delete'].includes(operation.type) && normalizedTargets.length !== 1) return failure('TYPED_OPERATION_REQUIRED');
   if (operation.type === 'network.request' && (!operation.source || !operation.destination)) return failure('TYPED_OPERATION_REQUIRED');
   if (['github.read', 'github.mutation', 'external.mutation'].includes(operation.type) && normalizedTargets.length !== 1) return failure('TYPED_OPERATION_REQUIRED');
 
@@ -257,7 +319,7 @@ function classifyOperation(operation, repository) {
   } else if (operation.type === 'git.branch') {
     if (!['list', 'show'].includes(operation.mode)) { operationClass = 'git.branch-mutation'; requiresTicket = true; reasonCode = 'MUTATING_GIT_OPERATION_REQUIRES_TICKET'; } else operationClass = 'git.branch-read';
   } else if (operation.type === 'git.push') {
-    if (!Array.isArray(operation.refspecs) || operation.refspecs.length !== 1 || !nonBlank(operation.remote) || !nonBlank(operation.authorized_remote) || !nonBlank(operation.authorized_ref)) return failure('GIT_PUSH_TARGET_EVIDENCE_REQUIRED');
+    if (!Array.isArray(operation.refspecs) || operation.refspecs.length !== 1 || !validGitRemoteName(operation.remote) || !validGitRemoteName(operation.authorized_remote) || !nonBlank(operation.authorized_ref)) return failure('GIT_PUSH_TARGET_EVIDENCE_REQUIRED');
     if (!Array.isArray(operation.options) || new Set(operation.options).size !== operation.options.length || operation.options.some((option) => !nonBlank(option) || !SAFE_GIT_PUSH_OPTIONS.includes(option))) return failure('BROADENED_PUSH_TARGET_UNSUPPORTED');
     if (operation.remote !== operation.authorized_remote || operation.refspecs[0] !== `HEAD:${operation.authorized_ref}`) return failure('GIT_PUSH_TARGET_MISMATCH');
     operationClass = 'git.push'; requiresTicket = true; reasonCode = 'GIT_PUSH_REQUIRES_TICKET';
@@ -394,10 +456,14 @@ function evaluate(input, options = {}) {
   const authorityError = authorityIdentityError(input.authority); if (authorityError) return publicResult({ decision: authorityError === 'CALLER_FINALITY_REJECTED' ? 'deny' : 'unsupported', reason_code: authorityError, operation_digest: input.operation ? operationDigest(input.operation) : null, target_digest: input.operation ? targetDigest(input.operation) : null });
   if (parseUtc(input.now) === null) return baseFailure('AUTHORITY_TIME_INVALID', input);
   const repository = normalizeRepository(input.repository); if (!repository.valid) return baseFailure(repository.reason_code, input);
-  const classification = classifyOperation(input.operation, repository); if (!classification.valid) return baseFailure(classification.reason_code, { ...input, secret_classification: classification.secret_classification });
+  const classification = classifyOperation(input.operation, repository);
+  if (!classification.valid) {
+    if (classification.hard_deny) return publicResult({ ...classification.hard_deny, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
+    return baseFailure(classification.reason_code, { ...input, secret_classification: classification.secret_classification });
+  }
   const components = flattenClassifiedComponents(classification);
-  if (components.some((component) => component.operation_type === 'network.request' && component.secret_classification !== 'none')) return publicResult({ decision: 'deny', reason_code: 'SECRET_EXFILTRATION_DENIED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation), ticket_status: 'not-accepted' });
-  if (components.some((component) => component.operation_type === 'filesystem.delete' && component.targets.some((item) => item.path && (isFilesystemRoot(item.path) || samePath(item.path, repository.root))))) return publicResult({ decision: 'deny', reason_code: 'CATASTROPHIC_TARGET_DENIED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: 'protected-target', secret_classification: classification.secret_classification, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
+  const hardDeny = hardDenyForClassifiedComponents(components, repository, classification.operation_type);
+  if (hardDeny) return publicResult({ ...hardDeny, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
   const hasGithubMutation = components.some((component) => component.operation_type === 'github.mutation');
   if (hasGithubMutation && !trustedState) return publicResult({ decision: 'deny', reason_code: 'CONTROLLER_TRUST_SOURCE_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
   if (hasGithubMutation && trustedState.authority.role !== 'controller') return publicResult({ decision: 'deny', reason_code: 'CONTROLLER_GITHUB_AUTHORITY_REQUIRED', operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, operation_digest: operationDigest(input.operation), target_digest: targetDigest(input.operation) });
@@ -413,10 +479,15 @@ function evaluate(input, options = {}) {
 }
 
 function assessStructuralImpact(change) {
-  const structuralKinds = new Set(['rename', 'remove', 'move', 'resignature', 'contract-shape', 'generated-surface', 'path']);
-  if (!isRecord(change) || !nonBlank(change.kind) || !nonBlank(change.identity)) return deepFreeze({ valid: false, decision: 'unsupported', reason_code: 'STRUCTURAL_IMPACT_INPUT_INVALID' });
+  const structuralKinds = new Set(['rename', 'remove', 'move', 'resignature', 're-signature', 'contract-shape', 'contract', 'public-contract', 'internal-contract', 'generated-surface', 'generated-shape', 'path', 'symbol', 'command', 'schema-field', 'repository-identity', 'identity', 'structural-replace']);
+  const localKinds = new Set(['value-change']);
+  const consumerCategories = ['source-shape-tests', 'fixtures-and-snapshots', 'generated-surface-assertions', 'docs-config-contracts', 'imports-registrations', 'scripts-manifests-adapters'];
+  const compatibilityRule = { issue: 342, status: 'active-until-propagation-verification', permanent_mechanism: 'deterministic-structural-impact-v1' };
+  if (!isRecord(change) || !nonBlank(change.kind) || !nonBlank(change.identity)) return deepFreeze({ valid: false, decision: 'unsupported', reason_code: 'STRUCTURAL_IMPACT_INPUT_INVALID', compatibility_rule: compatibilityRule });
+  if (Object.keys(change).some((key) => !['kind', 'identity'].includes(key))) return deepFreeze({ valid: false, decision: 'unsupported', reason_code: 'STRUCTURAL_IMPACT_FIELDS_UNSUPPORTED', existing_identity_digest: digest(change.identity), compatibility_rule: compatibilityRule });
+  if (!structuralKinds.has(change.kind) && !localKinds.has(change.kind)) return deepFreeze({ valid: false, decision: 'unsupported', reason_code: 'STRUCTURAL_IMPACT_KIND_UNSUPPORTED', existing_identity_digest: digest(change.identity), compatibility_rule: compatibilityRule });
   const required = structuralKinds.has(change.kind);
-  return deepFreeze({ valid: true, required, search_scope: required ? 'targeted-repo-wide' : 'local', existing_identity_digest: digest(change.identity), consumer_categories: required ? ['source-shape-tests', 'fixtures-and-snapshots', 'generated-surface-assertions', 'docs-config-contracts', 'imports-registrations', 'scripts-manifests-adapters'] : [], compatibility_rule: { issue: 342, status: 'active-until-propagation-verification', permanent_mechanism: 'deterministic-structural-impact-v1' } });
+  return deepFreeze({ valid: true, required, search_scope: required ? 'targeted-repo-wide' : 'local', existing_identity_digest: digest(change.identity), consumer_categories: required ? consumerCategories : [], compatibility_rule: compatibilityRule });
 }
 
 const publicApi = { CONTRACT_VERSION, REMOTE_IDENTITY_CONTRACT_VERSION, TICKET_CONTRACT_VERSION, MAX_TICKET_USES, POLICY, validateRemoteIdentity, formatRemoteIdentity, operationDigest, targetDigest, evaluate, assessStructuralImpact, isFilesystemRoot, isUncShareRoot };
