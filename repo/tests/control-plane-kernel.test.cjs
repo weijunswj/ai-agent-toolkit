@@ -1374,3 +1374,97 @@ test('fixture manifest required case IDs are executed exactly once', () => {
   assert.equal(new Set(requiredFixtureCaseIds).size, requiredFixtureCaseIds.length, 'fixture manifest case IDs must be unique');
   assert.deepEqual([...executedFixtureCaseIds].sort(), [...requiredFixtureCaseIds].sort(), 'fixture manifest and executed case inventory differ');
 });
+test('partial canonical recovery is invariant to top-level input key order', () => {
+  const protectedMove = {
+    type: 'filesystem.move',
+    source: { path: ROOT, resolution: { status: 'resolved', canonical_path: ROOT, link_type: 'none', existence: 'existing' } },
+    destination: target('src\\top-level-order-destination.txt', { existence: 'absent' }),
+    no_clobber: true,
+  };
+  const malformed = {
+    type: 'filesystem.read',
+    target: target('src\\top-level-order-safe.txt'),
+    malformed_field: 'synthetic',
+  };
+  const operation = { type: 'compound', components: [malformed, protectedMove] };
+  const trusted = createTrustedAuthority({ now: NOW, authority: { allowed_operation_types: ['filesystem.move', 'filesystem.read'] } });
+  const ticket = trusted.issue(ticketRequest({ type: 'filesystem.delete', target: target('src\\ticket-bound.txt') }));
+  const fields = {
+    enabled: true,
+    activation: { mode: 'explicit-local', consented: true },
+    now: NOW,
+    repository: {
+      root: ROOT,
+      worktree: WORKTREE,
+      remote: 'https://github.com/weijunswj/ai-agent-toolkit.git',
+      resolution: { status: 'resolved', link_type: 'none' },
+    },
+    authority: TRUSTED_CONTROLLER,
+    operation,
+    ticket,
+    session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' },
+    scope: ticket.scope,
+  };
+  const orders = [
+    ['enabled', 'activation', 'now', 'repository', 'authority', 'operation', 'ticket', 'session', 'scope'],
+    ['operation', 'enabled', 'activation', 'now', 'repository', 'authority', 'ticket', 'session', 'scope'],
+  ];
+  for (const order of orders) {
+    const input = Object.fromEntries(order.map((key) => [key, fields[key]]));
+    const result = kernel.evaluate(input, { trustedAuthorityContext: trusted });
+    assert.equal(result.decision, 'deny', order.join(','));
+    assert.equal(result.reason_code, 'CATASTROPHIC_TARGET_DENIED', order.join(','));
+    assert.equal(result.ticket_status, 'not-accepted', order.join(','));
+    assert.equal(trusted.size(), 1, 'deny must not consume the supplied ticket');
+  }
+});
+
+test('nested compound partial canonical recovery retains deny descendants in both sibling orders', () => {
+  const protectedDelete = {
+    type: 'filesystem.delete',
+    target: { path: ROOT, resolution: { status: 'resolved', canonical_path: ROOT, link_type: 'none', existence: 'existing' } },
+  };
+  const malformed = {
+    type: 'filesystem.read',
+    target: target('src\\nested-safe.txt'),
+    malformed_field: 'synthetic',
+  };
+  const ticket = { type: 'filesystem.delete', target: target('src\\ticket-bound.txt') };
+  for (const nestedComponents of [[malformed, protectedDelete], [protectedDelete, malformed]]) {
+    const operation = { type: 'compound', components: [{ type: 'compound', components: nestedComponents }] };
+    const trusted = createTrustedAuthority({ now: NOW, authority: { allowed_operation_types: ['filesystem.delete', 'filesystem.read'] } });
+    const suppliedTicket = trusted.issue(ticketRequest(ticket));
+    const result = kernel.evaluate(baseInput(operation, {
+      authority: TRUSTED_CONTROLLER,
+      ticket: suppliedTicket,
+      session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' },
+      scope: suppliedTicket.scope,
+    }), { trustedAuthorityContext: trusted });
+    assert.equal(result.decision, 'deny', nestedComponents[0].type);
+    assert.equal(result.reason_code, 'CATASTROPHIC_TARGET_DENIED', nestedComponents[0].type);
+    assert.equal(result.ticket_status, 'not-accepted');
+    assert.equal(trusted.size(), 1, 'nested hard deny must not consume the supplied ticket');
+  }
+});
+
+test('structural impact rejects non-string scalars before traversing or freezing caller-owned values', () => {
+  for (const field of ['kind', 'identity']) {
+    let getterCalls = 0;
+    const nested = { marker: 'synthetic' };
+    Object.defineProperty(nested, 'accessor', {
+      enumerable: true,
+      configurable: true,
+      get() {
+        getterCalls += 1;
+        return 'synthetic';
+      },
+    });
+    const input = { kind: 'rename', identity: 'synthetic-identity' };
+    input[field] = nested;
+    const result = kernel.assessStructuralImpact(input);
+    assert.equal(result.valid, false, field);
+    assert.equal(result.reason_code, 'STRUCTURAL_IMPACT_INPUT_INVALID', field);
+    assert.equal(getterCalls, 0, field + ' nested accessor must not run');
+    assert.equal(Object.isFrozen(nested), false, field + ' caller value must not be frozen');
+  }
+});

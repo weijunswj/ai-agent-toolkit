@@ -198,6 +198,8 @@ function canonicalizeArray(value, itemNormalizer, reasonCode, options = {}) {
     const normalized = itemNormalizer(descriptor.value);
     if (!normalized.valid) {
       if (options.collectFailures !== true) return failure(normalized.reason_code || reasonCode, { secret_classification: mergeSecretClassification(secretClassification, normalized.secret_classification || 'none') });
+      const partialValue = normalized.partial_value !== undefined ? normalized.partial_value : normalized.canonical_value;
+      if (partialValue !== undefined) projection.push(partialValue);
       itemFailures.push({ index, reason_code: normalized.reason_code || reasonCode, secret_classification: normalized.secret_classification || 'none' });
       secretClassification = mergeSecretClassification(secretClassification, normalized.secret_classification || 'none');
       continue;
@@ -363,7 +365,11 @@ function canonicalizeInput(value) {
   if (!inspected.valid) return inspected;
   const raw = inspected.value;
   const projection = Object.create(null);
-  for (const key of Object.keys(raw)) {
+  let firstFailure = null;
+  let operationComponentFailures;
+  let secretClassification = inspected.secret_classification || 'none';
+  for (const key of INPUT_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(raw, key)) continue;
     let normalized;
     if (key === 'activation') normalized = canonicalizeSimpleRecord(raw[key], ACTIVATION_FIELDS, 'CONTROL_PLANE_INPUT_INVALID', new Set(['consented']));
     else if (key === 'session') normalized = canonicalizeSimpleRecord(raw[key], SESSION_FIELDS, 'CONTROL_PLANE_INPUT_INVALID');
@@ -375,17 +381,24 @@ function canonicalizeInput(value) {
     else if (key === 'scope') normalized = raw[key] === null || typeof raw[key] === 'string' ? { valid: true, value: raw[key] } : failure('CONTROL_PLANE_INPUT_INVALID');
     else normalized = { valid: true, value: raw[key] };
     if (!normalized.valid) {
-      const extra = { secret_classification: mergeSecretClassification(inspected.secret_classification || 'none', normalized.secret_classification || 'none') };
-      if (key === 'operation' && normalized.canonical_value !== undefined) {
-        const partial = Object.create(null);
-        for (const projectedKey of Object.keys(projection)) partial[projectedKey] = projection[projectedKey];
-        partial.operation = normalized.canonical_value;
-        extra.partial_value = partial;
-        extra.component_failures = normalized.component_failures;
+      if (!firstFailure) firstFailure = normalized;
+      secretClassification = mergeSecretClassification(secretClassification, normalized.secret_classification || 'none');
+      if (key === 'operation') {
+        const partialOperation = normalized.canonical_value !== undefined ? normalized.canonical_value : normalized.partial_value;
+        if (partialOperation !== undefined) projection.operation = partialOperation;
+        operationComponentFailures = normalized.component_failures;
       }
-      return failure(normalized.reason_code, extra);
+      continue;
     }
     projection[key] = normalized.value;
+  }
+  if (firstFailure) {
+    const extra = { secret_classification: secretClassification };
+    if (Object.prototype.hasOwnProperty.call(projection, 'operation')) {
+      extra.partial_value = projection;
+      if (operationComponentFailures !== undefined) extra.component_failures = operationComponentFailures;
+    }
+    return failure(firstFailure.reason_code, extra);
   }
   const opaqueValues = raw.ticket === undefined ? new Set() : new Set([raw.ticket]);
   return { valid: true, value: deepFreeze(projection, new Set(), opaqueValues) };
@@ -923,6 +936,7 @@ function canonicalizeStructuralImpactInput(change) {
     if (!allowedFields.has(key)) return failure('STRUCTURAL_IMPACT_FIELDS_UNSUPPORTED');
     projection[key] = descriptor.value;
   }
+  if (typeof projection.kind !== 'string' || typeof projection.identity !== 'string') return failure('STRUCTURAL_IMPACT_INPUT_INVALID');
   return { valid: true, value: deepFreeze(projection) };
 }
 
