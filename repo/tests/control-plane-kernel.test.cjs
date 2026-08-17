@@ -6,12 +6,94 @@ const fs = require('node:fs');
 const moduleApi = require('node:module');
 const os = require('node:os');
 const path = require('node:path');
-const test = require('node:test');
+const nodeTest = require('node:test');
 const vm = require('node:vm');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const runtimePath = path.join(repoRoot, 'repo', 'scripts', 'toolkit-control-plane', 'control-plane-kernel.cjs');
 const schemaPath = path.join(repoRoot, '_projects', 'development', 'control-plane-kernel', '_main', 'control-plane-contract.schema.json');
+const fixtureManifestPath = path.join(repoRoot, '_projects', 'development', 'control-plane-kernel', '_main', 'fixtures', 'fixture-manifest.json');
+const fixtureManifest = JSON.parse(fs.readFileSync(fixtureManifestPath, 'utf8'));
+const requiredFixtureCaseIds = [...fixtureManifest.required_case_ids];
+const requiredFixtureCaseIdSet = new Set(requiredFixtureCaseIds);
+const executedFixtureCaseIds = [];
+const fixtureCaseIdsByTestName = new Map([
+  ['default-off refusal is side-effect free and privacy-minimized', ['default-off']],
+  ['remote identity runtime and schema share one credential-free contract', ['remote-identity-r8-001', 'remote-identity-r8-002']],
+  ['unknown resolver link types fail closed before normalization', ['unknown-resolver-link-type']],
+  ['typed operations refuse opaque shell syntax, including all eleven shell-adversarial forms', ['mutating-nominal-read', 'attached-redirection', 'hidden-shell-expansion']],
+  ['overwrite/no-clobber authority is typed and destination-bound', ['overwrite-no-clobber']],
+  ['mutating git branch modes and broadened push options cannot reach routine allow', ['broadened-push-target', 'mutating-git-branch']],
+  ['secret classification is derived and sensitive boundaries fail closed', ['secret-classification']],
+  ['catastrophic UNC share roots are denied even when a ticket is supplied', ['unc-share-root']],
+  ['compound authority validates every typed component, not only the winning decision', ['compound-component-role-limit']],
+  ['caller finality claims and untruthful authority identity are rejected', ['caller-finality']],
+  ['one-shot tickets bind operation/session/turn/call and controller GitHub authority is consumed once', ['controller-github-one-shot']],
+  ['ticket replay is bounded and expired/exhausted slots are reclaimed', ['replay-slot-reclamation']],
+  ['structural impact is deterministic and keeps the temporary #342 rule active', ['structural-impact']],
+  ['compound hard denies cannot be routed through aggregate ticket authority', ['compound-hard-deny-composition']],
+  ['ticket issuer trust and retained scope are part of consumption binding', ['trusted-issuer-authority']],
+  ['arbitrary ticket stores cannot claim controller GitHub consumption', ['fake-ticket-store-denied']],
+  ['copied or forged tickets cannot authorize through a bound context', ['copied-ticket-denied']],
+  ['cross-authority-context and cross-store tickets cannot authorize', ['cross-authority-context-denied', 'trusted-authority-provenance']],
+  ['scope, session, turn, call, operation, and target changes fail binding', ['ticket-scope-binding']],
+  ['resolver raw/canonical conflicts fail closed before target or ticket decisions', ['resolver-raw-canonical-conflict']],
+  ['git push options use a narrow typed allowlist', ['git-push-typed-options']],
+]);
+
+function registerFixtureCaseIds(caseIds, registry = executedFixtureCaseIds) {
+  for (const caseId of caseIds) {
+    assert.equal(requiredFixtureCaseIdSet.has(caseId), true, 'fixture case is not declared by the manifest: ' + caseId);
+    assert.equal(registry.includes(caseId), false, 'fixture case executed more than once: ' + caseId);
+    registry.push(caseId);
+  }
+}
+
+function registerFixtureCases(testName) {
+  registerFixtureCaseIds(fixtureCaseIdsByTestName.get(testName) || []);
+}
+
+const test = (name, fn) => nodeTest(name, async (...args) => {
+  const result = fn(...args);
+  if (result && typeof result.then === 'function') await result;
+  registerFixtureCases(name);
+  return result;
+});
+
+function schemaTypeMatches(value, type) {
+  if (type === 'object') return value !== null && typeof value === 'object' && !Array.isArray(value);
+  if (type === 'array') return Array.isArray(value);
+  if (type === 'integer') return Number.isInteger(value);
+  if (type === 'null') return value === null;
+  return typeof value === type;
+}
+
+function validateJsonSchemaObject(value, schema) {
+  const errors = [];
+  const hasOwn = (key) => Object.prototype.hasOwnProperty.call(value, key);
+  const types = (type) => Array.isArray(type) ? type : [type];
+  if (!schemaTypeMatches(value, schema.type)) errors.push('type');
+  for (const key of schema.required || []) if (!hasOwn(key)) errors.push('required:' + key);
+  if (schema.additionalProperties === false) {
+    for (const key of Object.keys(value)) if (!Object.prototype.hasOwnProperty.call(schema.properties || {}, key)) errors.push('additionalProperties:' + key);
+  }
+  for (const [key, rule] of Object.entries(schema.properties || {})) {
+    if (!hasOwn(key)) continue;
+    if (Object.prototype.hasOwnProperty.call(rule, 'const') && value[key] !== rule.const) errors.push('const:' + key);
+    if (rule.enum && !rule.enum.includes(value[key])) errors.push('enum:' + key);
+    if (rule.type && !types(rule.type).some((type) => schemaTypeMatches(value[key], type))) errors.push('type:' + key);
+    if (typeof value[key] === 'string') {
+      if (rule.minLength !== undefined && value[key].length < rule.minLength) errors.push('minLength:' + key);
+      if (rule.pattern && !new RegExp(rule.pattern).test(value[key])) errors.push('pattern:' + key);
+    }
+    if (Number.isInteger(value[key])) {
+      if (rule.minimum !== undefined && value[key] < rule.minimum) errors.push('minimum:' + key);
+      if (rule.maximum !== undefined && value[key] > rule.maximum) errors.push('maximum:' + key);
+    }
+  }
+  return errors;
+}
+
 const productionKernel = require(runtimePath);
 
 const TEST_ONLY_EXPORT = '__testCreateTrustedAuthorityContext';
@@ -124,11 +206,17 @@ test('remote identity runtime and schema share one credential-free contract', ()
   assert.equal(schema.$id, kernel.CONTRACT_VERSION);
   assert.equal(schema.$defs.remoteIdentity.properties.contract_version.const, kernel.REMOTE_IDENTITY_CONTRACT_VERSION);
   assert.equal(schema.$defs.remoteIdentity.additionalProperties, false);
+  const remoteIdentitySchema = schema.$defs.remoteIdentity;
   for (const value of [
     'https://github.com/weijunswj/ai-agent-toolkit.git',
     'ssh://git@github.com:22/weijunswj/ai-agent-toolkit.git',
     'git@github.com:weijunswj/ai-agent-toolkit.git',
-  ]) assert.equal(kernel.validateRemoteIdentity(value).valid, true, value);
+  ]) {
+    const result = kernel.validateRemoteIdentity(value);
+    assert.equal(result.valid, true, value);
+    const schemaErrors = validateJsonSchemaObject(result, remoteIdentitySchema);
+    assert.deepEqual(schemaErrors, [], value + ': ' + schemaErrors.join('; '));
+  }
   for (const value of [
     'https://user:secret@example.com/repo.git',
     'https://github.com/repo.git?token=synthetic',
@@ -153,6 +241,52 @@ test('unknown resolver link types fail closed before normalization', () => {
   }));
   assert.equal(result.decision, 'unsupported');
   assert.equal(result.reason_code, 'UNKNOWN_RESOLVER_LINK_TYPE');
+});
+
+test('resolver raw/canonical conflicts fail closed before target or ticket decisions', () => {
+  const outsideRaw = 'C:\\fixture\\workspace\\sibling\\outside.txt';
+  const safeCanonical = ROOT + '\\src\\safe.txt';
+  const conflictingTarget = (rawPath) => ({
+    path: rawPath,
+    resolution: { status: 'resolved', canonical_path: safeCanonical, link_type: 'none', existence: 'existing' },
+  });
+
+  const direct = kernel.evaluate(baseInput({ type: 'filesystem.read', target: conflictingTarget(outsideRaw) }));
+  assert.notEqual(direct.decision, 'allow');
+  assert.equal(direct.reason_code, 'TARGET_CONTEXT_CONFLICT');
+
+  const sensitive = kernel.evaluate(baseInput({ type: 'filesystem.read', target: conflictingTarget(ROOT + '\\.env.synthetic') }));
+  assert.notEqual(sensitive.decision, 'allow');
+  assert.equal(sensitive.reason_code, 'TARGET_CONTEXT_CONFLICT');
+  assert.equal(sensitive.secret_classification, 'confirmed');
+
+  const operation = {
+    type: 'compound',
+    components: [
+      { type: 'filesystem.read', target: conflictingTarget(ROOT + '\\.env.synthetic') },
+      {
+        type: 'network.request',
+        source: conflictingTarget(ROOT + '\\.env.synthetic'),
+        destination: { kind: 'external-system', digest: 'a'.repeat(64) },
+        method: 'POST',
+      },
+    ],
+  };
+  const trusted = createTrustedAuthority({ now: NOW });
+  const ticket = trusted.issue(ticketRequest(operation));
+  const transmitted = kernel.evaluate(baseInput(operation, {
+    authority: TRUSTED_CONTROLLER,
+    ticket,
+    session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' },
+    scope: ticket.scope,
+  }), { trustedAuthorityContext: trusted });
+  assert.notEqual(transmitted.decision, 'allow');
+  assert.notEqual(transmitted.reason_code, 'TICKET_CONSUMED');
+  assert.notEqual(transmitted.ticket_status, 'consumed');
+  assert.equal(transmitted.secret_classification, 'confirmed');
+
+  const consistent = kernel.evaluate(baseInput({ type: 'filesystem.read', target: target('src\\safe.txt') }));
+  assert.equal(consistent.decision, 'allow');
 });
 
 test('typed operations refuse opaque shell syntax, including all eleven shell-adversarial forms', () => {
@@ -207,6 +341,64 @@ test('mutating git branch modes and broadened push options cannot reach routine 
   }));
   assert.notEqual(push.decision, 'allow');
   assert.equal(push.reason_code, 'BROADENED_PUSH_TARGET_UNSUPPORTED');
+});
+
+test('git push options use a narrow typed allowlist', () => {
+  const unsafeOptions = [
+    '--repo',
+    '--repo=ssh://git@attacker.example/repo.git',
+    '--prune',
+    '-d',
+    '--delete',
+    '--tags',
+    '--all',
+    '--mirror',
+    '--follow-tags',
+    '--recurse-submodules',
+    '--recurse-submodules=on-demand',
+  ];
+  for (const option of unsafeOptions) {
+    const operation = {
+      type: 'git.push',
+      remote: 'origin',
+      refspecs: ['HEAD:refs/heads/topic'],
+      options: [option],
+      authorized_remote: 'origin',
+      authorized_ref: 'refs/heads/topic',
+    };
+    const trusted = createTrustedAuthority({ now: NOW });
+    const ticket = trusted.issue(ticketRequest(operation));
+    const result = kernel.evaluate(baseInput(operation, {
+      authority: TRUSTED_CONTROLLER,
+      ticket,
+      session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' },
+      scope: ticket.scope,
+    }), { trustedAuthorityContext: trusted });
+    assert.notEqual(result.decision, 'allow', option);
+    assert.notEqual(result.reason_code, 'TICKET_CONSUMED', option);
+    assert.notEqual(result.ticket_status, 'consumed', option);
+  }
+
+  for (const option of ['--porcelain', '--dry-run']) {
+    const operation = {
+      type: 'git.push',
+      remote: 'origin',
+      refspecs: ['HEAD:refs/heads/topic'],
+      options: [option],
+      authorized_remote: 'origin',
+      authorized_ref: 'refs/heads/topic',
+    };
+    const trusted = createTrustedAuthority({ now: NOW });
+    const ticket = trusted.issue(ticketRequest(operation));
+    const result = kernel.evaluate(baseInput(operation, {
+      authority: TRUSTED_CONTROLLER,
+      ticket,
+      session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' },
+      scope: ticket.scope,
+    }), { trustedAuthorityContext: trusted });
+    assert.equal(result.decision, 'allow', option);
+    assert.equal(result.reason_code, 'TICKET_CONSUMED', option);
+  }
 });
 
 test('secret classification is derived and sensitive boundaries fail closed', () => {
@@ -508,4 +700,13 @@ test('scope, session, turn, call, operation, and target changes fail binding', (
     assert.equal(result.decision, 'deny', label);
     assert.equal(result.reason_code, 'TICKET_BINDING_MISMATCH', label);
   }
+});
+
+test('fixture manifest required case IDs are executed exactly once', () => {
+  const probeRegistry = [];
+  assert.throws(() => registerFixtureCaseIds(['undeclared-fixture-case'], probeRegistry), /not declared by the manifest/);
+  registerFixtureCaseIds(['default-off'], probeRegistry);
+  assert.throws(() => registerFixtureCaseIds(['default-off'], probeRegistry), /executed more than once/);
+  assert.equal(new Set(requiredFixtureCaseIds).size, requiredFixtureCaseIds.length, 'fixture manifest case IDs must be unique');
+  assert.deepEqual([...executedFixtureCaseIds].sort(), [...requiredFixtureCaseIds].sort(), 'fixture manifest and executed case inventory differ');
 });

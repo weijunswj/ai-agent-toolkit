@@ -9,6 +9,7 @@ const LINK_TYPES = new Set(['none', 'symlink', 'junction', 'reparse-point']);
 const SECRET_CLASSIFICATIONS = new Set(['none', 'possible', 'confirmed']);
 const ROLES = new Set(['executor', 'controller']);
 const MAX_TICKET_USES = 8;
+const SAFE_GIT_PUSH_OPTIONS = Object.freeze(['--porcelain', '--dry-run']);
 const TRUSTED_CONTEXT_STATE = new WeakMap();
 const TICKET_STORE_STATE = new WeakMap();
 const TICKET_PROVENANCE = new WeakMap();
@@ -201,20 +202,25 @@ function normalizeRepository(repository) {
 
 function normalizeTarget(value, repository) {
   if (!isRecord(value)) return failure('TARGET_CONTEXT_INVALID');
-  if (nonBlank(value.kind) && ['github-repository', 'external-system'].includes(value.kind) && validDigest(value.digest)) return { valid: true, target_class: 'external-system', status: 'resolved', path_digest: value.digest, path: null, link_type: 'none' };
+  if (nonBlank(value.kind) && ['github-repository', 'external-system'].includes(value.kind) && validDigest(value.digest)) return { valid: true, target_class: 'external-system', status: 'resolved', path_digest: value.digest, path: null, link_type: 'none', secret_values: [] };
   if (!nonBlank(value.path)) return failure('TARGET_CONTEXT_INVALID');
+  const rawPath = normalizePath(value.path);
+  if (!rawPath) return failure('TARGET_CONTEXT_INVALID');
   const resolution = isRecord(value.resolution) ? value.resolution : null;
   if (!resolution || resolution.status !== 'resolved') return failure('TARGET_CONTEXT_INVALID');
   const linkType = normalizeLinkType(resolution.link_type);
-  if (!linkType) return failure('UNKNOWN_RESOLVER_LINK_TYPE');
-  const canonicalPath = normalizePath(resolution.canonical_path || value.path);
-  if (!canonicalPath) return failure('TARGET_CONTEXT_INVALID');
+  if (!linkType) return failure('UNKNOWN_RESOLVER_LINK_TYPE', { secret_classification: deriveSecretClassification([rawPath, resolution.canonical_path]) });
+  const canonicalInput = resolution.canonical_path === undefined ? value.path : resolution.canonical_path;
+  const canonicalPath = normalizePath(canonicalInput);
+  const secretValues = [rawPath, canonicalPath].filter(Boolean);
+  if (!canonicalPath) return failure('TARGET_CONTEXT_INVALID', { secret_classification: deriveSecretClassification([rawPath, canonicalInput]) });
+  if (linkType === 'none' && !samePath(rawPath, canonicalPath)) return failure('TARGET_CONTEXT_CONFLICT', { secret_classification: deriveSecretClassification(secretValues) });
   let targetClass = 'outside-repository';
   if (samePath(canonicalPath, repository.root)) targetClass = 'canonical-repository';
   else if (samePath(canonicalPath, repository.worktree)) targetClass = 'canonical-worktree';
   else if (isWithin(repository.root, canonicalPath)) targetClass = 'canonical-repository';
   if (linkType !== 'none') targetClass = 'unresolved-target';
-  return { valid: true, target_class: targetClass, status: 'resolved', path_digest: digest(canonicalPath), path: canonicalPath, link_type: linkType, existence: resolution.existence || 'unknown' };
+  return { valid: true, target_class: targetClass, status: 'resolved', path_digest: digest(canonicalPath), path: canonicalPath, raw_path: rawPath, secret_values: secretValues, link_type: linkType, existence: resolution.existence || 'unknown' };
 }
 
 function operationTargets(operation) { return [operation.target, operation.source, operation.destination, ...(Array.isArray(operation.targets) ? operation.targets : [])].filter((value) => value !== undefined); }
@@ -233,7 +239,7 @@ function classifyOperation(operation, repository) {
   }
   const normalizedTargets = [];
   for (const value of operationTargets(operation)) { const target = normalizeTarget(value, repository); if (!target.valid) return target; normalizedTargets.push(target); }
-  const paths = normalizedTargets.map((item) => item.path).filter(Boolean);
+  const paths = normalizedTargets.flatMap((item) => Array.isArray(item.secret_values) ? item.secret_values : [item.path]).filter(Boolean);
   const secretClassification = deriveSecretClassification(paths);
   if (secretClassification === 'possible') return failure('DYNAMIC_TARGET_UNSUPPORTED', { secret_classification: 'possible' });
   if (operation.secret_classification !== undefined && !SECRET_CLASSIFICATIONS.has(operation.secret_classification)) return failure('SECRET_CLASSIFICATION_INVALID');
@@ -252,8 +258,7 @@ function classifyOperation(operation, repository) {
     if (!['list', 'show'].includes(operation.mode)) { operationClass = 'git.branch-mutation'; requiresTicket = true; reasonCode = 'MUTATING_GIT_OPERATION_REQUIRES_TICKET'; } else operationClass = 'git.branch-read';
   } else if (operation.type === 'git.push') {
     if (!Array.isArray(operation.refspecs) || operation.refspecs.length !== 1 || !nonBlank(operation.remote) || !nonBlank(operation.authorized_remote) || !nonBlank(operation.authorized_ref)) return failure('GIT_PUSH_TARGET_EVIDENCE_REQUIRED');
-    const broadened = new Set(['--follow-tags', '--tags', '--all', '--mirror', '--recurse-submodules', '--recurse-submodules=on-demand']);
-    if (!Array.isArray(operation.options) || operation.options.some((option) => broadened.has(option) || !nonBlank(option))) return failure('BROADENED_PUSH_TARGET_UNSUPPORTED');
+    if (!Array.isArray(operation.options) || new Set(operation.options).size !== operation.options.length || operation.options.some((option) => !nonBlank(option) || !SAFE_GIT_PUSH_OPTIONS.includes(option))) return failure('BROADENED_PUSH_TARGET_UNSUPPORTED');
     if (operation.remote !== operation.authorized_remote || operation.refspecs[0] !== `HEAD:${operation.authorized_ref}`) return failure('GIT_PUSH_TARGET_MISMATCH');
     operationClass = 'git.push'; requiresTicket = true; reasonCode = 'GIT_PUSH_REQUIRES_TICKET';
   } else if (operation.type === 'github.mutation' || operation.type === 'external.mutation') { operationClass = operation.type; requiresTicket = true; reasonCode = 'EXTERNAL_MUTATION_REQUIRES_TICKET';

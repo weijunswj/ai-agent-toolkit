@@ -24,8 +24,9 @@
     "remoteIdentity": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["contract_version", "kind", "scheme", "host", "port", "path", "canonical"],
+      "required": ["valid", "contract_version", "kind", "scheme", "host", "port", "path", "canonical"],
       "properties": {
+        "valid": { "const": true },
         "contract_version": { "const": "toolkit.control-plane.remote-identity.v1" },
         "kind": { "enum": ["url", "scp"] },
         "scheme": { "enum": ["https", "ssh", "scp"] },
