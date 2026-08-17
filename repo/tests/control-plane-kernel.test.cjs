@@ -3,13 +3,33 @@
 const assert = require('node:assert/strict');
 const childProcess = require('node:child_process');
 const fs = require('node:fs');
+const moduleApi = require('node:module');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const runtimePath = path.join(repoRoot, 'repo', 'scripts', 'toolkit-control-plane', 'control-plane-kernel.cjs');
 const schemaPath = path.join(repoRoot, '_projects', 'development', 'control-plane-kernel', '_main', 'control-plane-contract.schema.json');
-const kernel = require(runtimePath);
+const productionKernel = require(runtimePath);
+
+const TEST_ONLY_EXPORT = '__testCreateTrustedAuthorityContext';
+
+function loadInstrumentedTestKernel() {
+  const source = fs.readFileSync(runtimePath, 'utf8');
+  const exportMarker = 'module.exports = publicApi;';
+  assert.equal(source.includes(exportMarker), true);
+  const instrumentedSource = source.replace(exportMarker, `publicApi.${TEST_ONLY_EXPORT} = createTrustedAuthorityContext;\n${exportMarker}`);
+  const testModule = { exports: {} };
+  const testRequire = moduleApi.createRequire(runtimePath);
+  const wrapper = vm.runInThisContext(`(function (exports, require, module, __filename, __dirname) {\n${instrumentedSource}\n})`, { filename: `${runtimePath} [test-harness]` });
+  wrapper(testModule.exports, testRequire, testModule, runtimePath, path.dirname(runtimePath));
+  assert.equal(typeof testModule.exports[TEST_ONLY_EXPORT], 'function');
+  return testModule.exports;
+}
+
+const kernel = loadInstrumentedTestKernel();
 
 const ROOT = 'C:\\fixture\\workspace\\repo';
 const WORKTREE = `${ROOT}\\worktree`;
@@ -26,7 +46,7 @@ const TRUSTED_CONTROLLER = {
 
 function createTrustedAuthority(options = {}) {
   const { authority: authorityOverrides = {}, ...storeOptions } = options;
-  return kernel.createTestTrustedAuthorityFixture({ authority: { ...TRUSTED_CONTROLLER, ...authorityOverrides }, ...storeOptions });
+  return kernel[TEST_ONLY_EXPORT]({ ...TRUSTED_CONTROLLER, ...authorityOverrides }, storeOptions);
 }
 
 function baseInput(operation, overrides = {}) {
@@ -390,12 +410,31 @@ test('arbitrary ticket stores cannot claim controller GitHub consumption', () =>
 });
 
 test('public kernel has no self-mint store or production trusted-fixture path', () => {
-  assert.equal(typeof kernel.createTicketStore, 'undefined');
-  assert.equal(typeof kernel.createTestTrustedAuthorityFixture, 'function');
+  assert.equal(typeof productionKernel.createTicketStore, 'undefined');
+  assert.equal(typeof productionKernel.createTestTrustedAuthorityFixture, 'undefined');
   const childEnv = { ...process.env };
   delete childEnv.NODE_TEST_CONTEXT;
   const child = childProcess.execFileSync(process.execPath, ['-e', `const k = require(${JSON.stringify(runtimePath)}); process.stdout.write(JSON.stringify({ store: typeof k.createTicketStore, fixture: typeof k.createTestTrustedAuthorityFixture }));`], { encoding: 'utf8', env: childEnv });
   assert.deepEqual(JSON.parse(child), { store: 'undefined', fixture: 'undefined' });
+});
+
+test('forged test markers cannot expose a trusted fixture from ordinary production loading', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'a1-kernel-forged-entry-'));
+  const entryPath = path.join(tempRoot, 'forged-entry.test.cjs');
+  const entrySource = [
+    "'use strict';",
+    `const k = require(${JSON.stringify(runtimePath)});`,
+    'const authoritySurfaceKeys = Reflect.ownKeys(k).filter((key) => /trusted|fixture|ticket.?store/i.test(String(key)));',
+    'process.stdout.write(JSON.stringify({ fixture: typeof k.createTestTrustedAuthorityFixture, constructor: typeof k.createTrustedAuthorityContext, store: typeof k.createTicketStore, authoritySurfaceKeys }));',
+  ].join('\n');
+  const childEnv = { ...process.env, NODE_TEST_CONTEXT: 'forged-by-caller' };
+  try {
+    fs.writeFileSync(entryPath, entrySource, 'utf8');
+    const child = childProcess.execFileSync(process.execPath, [entryPath], { encoding: 'utf8', env: childEnv });
+    assert.deepEqual(JSON.parse(child), { fixture: 'undefined', constructor: 'undefined', store: 'undefined', authoritySurfaceKeys: [] });
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
 });
 
 test('caller-declared controller identity cannot obtain GitHub authority without a trusted context', () => {

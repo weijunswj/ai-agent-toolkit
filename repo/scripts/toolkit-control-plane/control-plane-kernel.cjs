@@ -12,7 +12,6 @@ const MAX_TICKET_USES = 8;
 const TRUSTED_CONTEXT_STATE = new WeakMap();
 const TICKET_STORE_STATE = new WeakMap();
 const TICKET_PROVENANCE = new WeakMap();
-const TEST_RUNTIME = typeof process.env.NODE_TEST_CONTEXT === 'string' && /\.test\.[cm]?js$/i.test(process.argv[1] || '');
 const TICKET_AUTHORITY_INPUT_FIELDS = new Set(['issuer', 'issuer_role', 'issuer_identity_digest', 'issuer_authority_digest', 'role', 'identity', 'provider', 'model', 'assignment', 'finality_claim', 'allowed_operation_types']);
 const POLICY = Object.freeze(require('../../../_projects/development/control-plane-kernel/_main/control-plane-policy.json'));
 const OPERATION_FIELDS = Object.freeze({
@@ -357,13 +356,6 @@ function createTrustedAuthorityContext(authority, options = {}) {
   return Object.freeze(context);
 }
 
-function createTestTrustedAuthorityFixture(options = {}) {
-  if (!TEST_RUNTIME) throw new Error('TEST_TRUSTED_AUTHORITY_FIXTURE_UNAVAILABLE');
-  if (!isRecord(options) || !isRecord(options.authority)) throw new Error('TEST_TRUSTED_AUTHORITY_INVALID');
-  const { authority, ...storeOptions } = options;
-  return createTrustedAuthorityContext(authority, storeOptions);
-}
-
 function flattenClassifiedComponents(classification) {
   if (classification?.operation_type !== 'compound') return [classification];
   return classification.components.flatMap(flattenClassifiedComponents);
@@ -423,5 +415,4 @@ function assessStructuralImpact(change) {
 }
 
 const publicApi = { CONTRACT_VERSION, REMOTE_IDENTITY_CONTRACT_VERSION, TICKET_CONTRACT_VERSION, MAX_TICKET_USES, POLICY, validateRemoteIdentity, formatRemoteIdentity, operationDigest, targetDigest, evaluate, assessStructuralImpact, isFilesystemRoot, isUncShareRoot };
-if (TEST_RUNTIME) publicApi.createTestTrustedAuthorityFixture = createTestTrustedAuthorityFixture;
 module.exports = publicApi;
