@@ -657,7 +657,7 @@ test('structural impact is deterministic and keeps the temporary #342 rule activ
 });
 
 test('structural impact uses a closed deterministic kind contract', () => {
-  for (const kind of ['rename', 'remove', 'move', 'resignature', 're-signature', 'contract-shape', 'generated-surface', 'path', 'symbol', 'command', 'schema-field', 'public-contract', 'internal-contract', 'repository-identity', 'structural-replace']) {
+  for (const kind of ['rename', 'remove', 'move', 'resignature', 're-signature', 'contract-shape', 'generated-surface', 'path', 'symbol', 'command', 'schema-field', 'public-contract', 'internal-contract', 'repository-identity', 'structural-replace', 'replace']) {
     const result = kernel.assessStructuralImpact({ kind, identity: 'operation.authority' });
     assert.equal(result.valid, true, kind);
     assert.equal(result.required, true, kind);

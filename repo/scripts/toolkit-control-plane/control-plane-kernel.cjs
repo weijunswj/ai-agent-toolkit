@@ -479,7 +479,7 @@ function evaluate(input, options = {}) {
 }
 
 function assessStructuralImpact(change) {
-  const structuralKinds = new Set(['rename', 'remove', 'move', 'resignature', 're-signature', 'contract-shape', 'contract', 'public-contract', 'internal-contract', 'generated-surface', 'generated-shape', 'path', 'symbol', 'command', 'schema-field', 'repository-identity', 'identity', 'structural-replace']);
+  const structuralKinds = new Set(['rename', 'remove', 'move', 'resignature', 're-signature', 'contract-shape', 'contract', 'public-contract', 'internal-contract', 'generated-surface', 'generated-shape', 'path', 'symbol', 'command', 'schema-field', 'repository-identity', 'identity', 'structural-replace', 'replace']);
   const localKinds = new Set(['value-change']);
   const consumerCategories = ['source-shape-tests', 'fixtures-and-snapshots', 'generated-surface-assertions', 'docs-config-contracts', 'imports-registrations', 'scripts-manifests-adapters'];
   const compatibilityRule = { issue: 342, status: 'active-until-propagation-verification', permanent_mechanism: 'deterministic-structural-impact-v1' };
