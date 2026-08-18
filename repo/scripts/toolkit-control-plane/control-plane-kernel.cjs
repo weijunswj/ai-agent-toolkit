@@ -339,7 +339,22 @@ function observeRecord(value, spec, context, path, depth) {
     keys = knownFields(spec) || [];
     node.ownKeysComplete = false;
   } else {
-    keys = sortOwnKeys(keysResult.keys);
+    const enumeratedKeys = sortOwnKeys(keysResult.keys);
+    const known = knownFields(spec) || [];
+    const knownSet = new Set(known);
+    const knownKeys = [];
+    const extraKeys = [];
+    for (const key of enumeratedKeys) {
+      if (typeof key === 'string' && knownSet.has(key)) knownKeys.push(key);
+      else extraKeys.push(key);
+    }
+    keys = [];
+    for (const knownKey of known) {
+      for (const key of knownKeys) {
+        if (key === knownKey) keys.push(key);
+      }
+    }
+    keys.push(...extraKeys);
     node.ownKeysComplete = true;
   }
   if (keys.length > LIMITS.ownKeysPerNode) {

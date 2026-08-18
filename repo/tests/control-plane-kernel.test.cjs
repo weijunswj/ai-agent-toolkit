@@ -292,6 +292,69 @@ test('untrusted context cannot create protected-root hard-deny authority', () =>
   assert.equal(result.reason_code, 'TRUSTED_AUTHORITY_REQUIRED');
 });
 
+function overBudgetInput(operation, overrides = {}) {
+  const input = baseInput(operation, overrides);
+  for (let index = 0; index < 64; index += 1) input[`a-extra-${String(index).padStart(2, '0')}`] = index;
+  return input;
+}
+
+test('known operation survives lexical own-key starvation for secret exfiltration', () => {
+  const input = overBudgetInput(secretExfiltration());
+  const observation = kernel[TEST_ONLY_OBSERVE](input, 'input');
+  assert.equal(observation.issues.some((entry) => entry.code === 'OBSERVATION_OWN_KEY_LIMIT'), true);
+  assert.equal(observation.node.children.filter((entry) => entry.key === 'operation').length, 1);
+  const result = kernel.evaluate(input);
+  assert.equal(result.decision, 'deny');
+  assert.equal(result.reason_code, 'SECRET_EXFILTRATION_DENIED');
+  assert.equal(result.secret_classification, 'confirmed');
+});
+
+test('known finality evidence retains precedence under lexical own-key starvation', () => {
+  const input = overBudgetInput(secretExfiltration(), {
+    authority: { ...baseInput(secretExfiltration()).authority, finality_claim: true },
+  });
+  const result = kernel.evaluate(input);
+  assert.equal(result.decision, 'deny');
+  assert.equal(result.reason_code, 'CALLER_FINALITY_REJECTED');
+});
+
+test('known catastrophic target evidence survives lexical own-key starvation', () => {
+  const input = overBudgetInput(catastrophicDelete());
+  const result = kernel.evaluate(input);
+  assert.equal(result.decision, 'deny');
+  assert.equal(result.reason_code, 'CATASTROPHIC_TARGET_DENIED');
+});
+
+test('known-field admission consumes the exact key budget once', () => {
+  const exact = kernel[TEST_ONLY_OBSERVE](
+    objectWithKeys(Array.from({ length: 64 }, (_, index) => 'f' + String(index).padStart(2, '0'))),
+    null,
+  );
+  assert.equal(exact.node.valid, true);
+  assert.equal(exact.stats.capturedKeys, 64);
+  assert.equal(exact.issues.some((entry) => entry.code === 'OBSERVATION_OWN_KEY_LIMIT'), false);
+
+  const exceeded = kernel[TEST_ONLY_OBSERVE](
+    objectWithKeys(Array.from({ length: 65 }, (_, index) => 'g' + String(index).padStart(2, '0'))),
+    null,
+  );
+  assert.equal(exceeded.node.valid, false);
+  assert.equal(exceeded.node.keyTokens.size, 64);
+  assert.equal(exceeded.issues.some((entry) => entry.code === 'OBSERVATION_OWN_KEY_LIMIT'), true);
+
+  const overBudget = kernel[TEST_ONLY_OBSERVE](overBudgetInput(secretExfiltration()), 'input');
+  assert.equal(overBudget.issues.some((entry) => entry.code === 'OBSERVATION_OWN_KEY_LIMIT'), true);
+  assert.equal(overBudget.node.keyTokens.size, 64);
+  assert.equal(overBudget.node.children.filter((entry) => entry.key === 'operation').length, 1);
+
+  const duplicate = kernel[TEST_ONLY_OBSERVE]({ operation: { type: 'git.read' } }, 'input');
+  assert.equal(duplicate.node.children.filter((entry) => entry.key === 'operation').length, 1);
+  const operationNode = duplicate.node.children.find((entry) => entry.key === 'operation').node;
+  assert.equal(operationNode.children.filter((entry) => entry.key === 'type').length, 1);
+  assert.equal(duplicate.stats.capturedKeys, 2);
+  assert.equal(duplicate.stats.stringUnits, 21);
+});
+
 test('observed node accounting includes scalar, unknown, failure and opaque nodes at exact 512', () => {
   const scalar = kernel[TEST_ONLY_OBSERVE]('scalar', null);
   assert.equal(scalar.stats.observedNodes, 1);
