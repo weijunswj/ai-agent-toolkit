@@ -1036,3 +1036,85 @@ test('forged public entry points cannot expose trusted authority', () => {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 });
+test('repository resolution rejects malformed present canonical paths regardless of optionality', () => {
+  const repository = (resolution) => ({ root: ROOT, worktree: WORKTREE, remote: REMOTE, resolution });
+  const cases = [
+    ['non-string', 42],
+    ['empty', ''],
+    ['over-limit', `C:\\${'a'.repeat(4095)}`],
+  ];
+  for (const [label, canonicalPath] of cases) {
+    const result = kernel.evaluate(baseInput(readOperation(), {
+      repository: repository({ status: 'resolved', canonical_path: canonicalPath, link_type: 'none' }),
+    }));
+    assert.notEqual(result.decision, 'allow', label);
+    assert.equal(result.operation_digest, null, label);
+    assert.equal(result.target_digest, null, label);
+  }
+});
+
+test('present repository canonical paths must be absolute and bind to repository root', () => {
+  const repository = (canonicalPath) => ({
+    root: ROOT,
+    worktree: WORKTREE,
+    remote: REMOTE,
+    resolution: { status: 'resolved', canonical_path: canonicalPath, link_type: 'none' },
+  });
+  for (const [label, canonicalPath] of [
+    ['relative', 'relative/repository'],
+    ['conflicting', 'C:\\fixture\\workspace\\other'],
+  ]) {
+    const result = kernel.evaluate(baseInput(readOperation(), { repository: repository(canonicalPath) }));
+    assert.notEqual(result.decision, 'allow', label);
+    assert.equal(result.operation_digest, null, label);
+    assert.equal(result.target_digest, null, label);
+  }
+});
+
+test('absent, exact and canonically equivalent repository canonical paths remain valid', () => {
+  const repository = (resolution) => ({ root: ROOT, worktree: WORKTREE, remote: REMOTE, resolution });
+  const cases = [
+    ['absent', { status: 'resolved', link_type: 'none' }],
+    ['exact', { status: 'resolved', canonical_path: ROOT, link_type: 'none' }],
+    ['equivalent', { status: 'resolved', canonical_path: 'c:/fixture/workspace/repo///', link_type: 'none' }],
+  ];
+  for (const [label, resolution] of cases) {
+    const result = kernel.evaluate(baseInput(readOperation(), { repository: repository(resolution) }));
+    assert.equal(result.decision, 'allow', label);
+    assert.equal(result.reason_code, 'ROUTINE_READ_ALLOWED', label);
+    assert.notEqual(result.operation_digest, null, label);
+    assert.notEqual(result.target_digest, null, label);
+  }
+});
+
+test('invalid repository canonical evidence does not consume a ticket before a valid retry', () => {
+  const operation = { type: 'filesystem.delete', target: target('src\\resolver-ticket.txt') };
+  const trusted = createTrustedAuthority({ authority: { allowed_operation_types: ['filesystem.delete'] } });
+  const issued = withTicket(operation, trusted);
+  const invalidInput = { ...issued.input, repository: { ...issued.input.repository, resolution: { status: 'resolved', canonical_path: 42, link_type: 'none' } } };
+  const invalid = rawEvaluate(invalidInput, { trustedAuthorityContext: trusted });
+  assert.notEqual(invalid.decision, 'allow');
+  assert.notEqual(invalid.reason_code, 'TICKET_CONSUMED');
+  assert.equal(invalid.operation_digest, null);
+  assert.equal(invalid.target_digest, null);
+  assert.equal(invalid.ticket_status, 'not-consumed');
+  const retry = rawEvaluate(issued.input, { trustedAuthorityContext: trusted });
+  assert.equal(retry.decision, 'allow');
+  assert.equal(retry.reason_code, 'TICKET_CONSUMED');
+  const replay = rawEvaluate(issued.input, { trustedAuthorityContext: trusted });
+  assert.notEqual(replay.decision, 'allow');
+  assert.notEqual(replay.reason_code, 'TICKET_CONSUMED');
+});
+
+test('target raw and canonical path conflict remains before authoritative digests', () => {
+  const result = kernel.evaluate(baseInput({
+    type: 'filesystem.read',
+    target: {
+      path: `${ROOT}\\outside.txt`,
+      resolution: { status: 'resolved', canonical_path: `${ROOT}\\safe.txt`, link_type: 'none' },
+    },
+  }));
+  assert.equal(result.reason_code, 'TARGET_CONTEXT_CONFLICT');
+  assert.equal(result.operation_digest, null);
+  assert.equal(result.target_digest, null);
+});

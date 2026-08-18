@@ -634,7 +634,7 @@ function normalizeResolution(node, requireCanonical) {
   if (status !== 'resolved') return { valid: false, reason_code: 'RESOLUTION_INVALID' };
   const canonicalNode = child(node, 'canonical_path');
   const canonical = canonicalNode ? normalizeString(canonicalNode, 'RESOLUTION_INVALID') : { valid: true, value: null };
-  if (!canonical.valid && requireCanonical) return canonical;
+  if (!canonical.valid) return canonical;
   const existenceNode = child(node, 'existence');
   const existence = existenceNode ? normalizeString(existenceNode, 'RESOLUTION_INVALID') : { valid: true, value: null };
   if (!existence.valid || (existence.value !== null && !['existing', 'absent', 'unknown'].includes(existence.value))) return { valid: false, reason_code: 'RESOLUTION_INVALID' };
@@ -839,10 +839,15 @@ function normalizeRepository(node) {
   if (!root.valid || !worktree.valid || !remote.valid) return { valid: false, reason_code: 'REPOSITORY_INVALID' };
   const resolution = normalizeResolution(child(node, 'resolution'), false);
   if (!resolution.valid) return resolution;
+  const repositoryCanonicalPath = resolution.value.canonical_path;
+  if (repositoryCanonicalPath !== null && !isAbsolutePath(repositoryCanonicalPath)) return { valid: false, reason_code: 'REPOSITORY_INVALID' };
   const remoteIdentity = validateRemoteIdentity(remote.value);
   if (!remoteIdentity.valid) return { valid: false, reason_code: 'REPOSITORY_INVALID' };
   if (!isAbsolutePath(root.value) || !isAbsolutePath(worktree.value)) return { valid: false, reason_code: 'REPOSITORY_INVALID' };
   const rootKey = normalizePathForComparison(root.value);
+  if (repositoryCanonicalPath !== null && normalizePathForComparison(repositoryCanonicalPath) !== rootKey) {
+    return { valid: false, reason_code: 'REPOSITORY_INVALID' };
+  }
   const worktreeKey = normalizePathForComparison(worktree.value);
   if (worktreeKey !== rootKey && !worktreeKey.startsWith(rootKey + '\\')) return { valid: false, reason_code: 'REPOSITORY_INVALID' };
   const repositoryIdentity = digestCanonical({ root: rootKey, worktree: worktreeKey, remote: remoteIdentity.canonical });
