@@ -645,6 +645,13 @@ test('invalid shape without hard deny stays unsupported', () => {
   assert.equal(result.target_digest, null);
 });
 
+test('array length descriptor accepts a non-writable length', () => {
+  const input = baseInput(routineRead());
+  Object.defineProperty(input.authority.allowed_operation_types, 'length', { writable: false });
+  const result = kernel.evaluate(input);
+  assert.equal(result.decision, 'allow');
+});
+
 test('safe observation probes prototypes, accessors, symbols, cycles, and limits without raw rereads', () => {
   let getterCalls = 0;
   const accessorTarget = { resolution: { status: 'resolved', canonical_path: `${ROOT}\\src\\safe.txt`, link_type: 'none' } };

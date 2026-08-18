@@ -331,7 +331,7 @@ function observeArray(value, context, path, depth, forcedInvalid = false) {
   if (lengthResult.ok && descriptorHasValue(lengthResult.value)) {
     const descriptor = lengthResult.value;
     node.length = descriptor.value;
-    node.lengthValid = descriptor.enumerable === false && descriptor.configurable === false && descriptor.writable === true && Number.isSafeInteger(descriptor.value) && descriptor.value >= 0;
+    node.lengthValid = descriptor.enumerable === false && descriptor.configurable === false && typeof descriptor.writable === 'boolean' && Number.isSafeInteger(descriptor.value) && descriptor.value >= 0;
   }
   if (!node.lengthValid) {
     node.shapeInvalid = true;
@@ -1184,7 +1184,7 @@ function observeArray(value, context, path, depth, forcedInvalid = false, itemSp
   if (lengthResult.ok && descriptorHasValue(lengthResult.value)) {
     const descriptor = lengthResult.value;
     node.length = descriptor.value;
-    node.lengthValid = descriptor.enumerable === false && descriptor.configurable === false && descriptor.writable === true && Number.isSafeInteger(descriptor.value) && descriptor.value >= 0;
+    node.lengthValid = descriptor.enumerable === false && descriptor.configurable === false && typeof descriptor.writable === 'boolean' && Number.isSafeInteger(descriptor.value) && descriptor.value >= 0;
   }
   if (!node.lengthValid) {
     node.shapeInvalid = true;
