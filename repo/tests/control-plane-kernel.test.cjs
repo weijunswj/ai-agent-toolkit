@@ -98,6 +98,7 @@ function validateJsonSchemaObject(value, schema) {
 
 const productionKernel = require(runtimePath);
 const TEST_ONLY_EXPORT = '__testCreateTrustedAuthorityContext';
+const TEST_ONLY_OBSERVE_ROOT = '__testObserveRoot';
 
 function loadInstrumentedTestKernel() {
   const source = fs.readFileSync(runtimePath, 'utf8');
@@ -105,7 +106,9 @@ function loadInstrumentedTestKernel() {
   assert.equal(source.includes(exportMarker), true);
   const instrumentedSource = source.replace(
     exportMarker,
-    `publicApi.${TEST_ONLY_EXPORT} = createTrustedAuthorityContext;\n${exportMarker}`
+    `publicApi.${TEST_ONLY_EXPORT} = createTrustedAuthorityContext;
+publicApi.${TEST_ONLY_OBSERVE_ROOT} = observeRoot;
+${exportMarker}`
   );
   const testModule = { exports: {} };
   const testRequire = moduleApi.createRequire(runtimePath);
@@ -115,6 +118,7 @@ function loadInstrumentedTestKernel() {
   );
   wrapper(testModule.exports, testRequire, testModule, runtimePath, path.dirname(runtimePath));
   assert.equal(typeof testModule.exports[TEST_ONLY_EXPORT], 'function');
+  assert.equal(typeof testModule.exports[TEST_ONLY_OBSERVE_ROOT], 'function');
   return testModule.exports;
 }
 
@@ -228,6 +232,41 @@ function ticketRequest(operation, session = {}, overrides = {}) {
     expires_at: '2026-08-16T14:05:00.000Z',
     ...overrides,
   };
+}
+
+function mixedCapturedKeyGraph(extraScalarKeys) {
+  const root = {};
+  const mids = [];
+  for (let index = 0; index < 64; index += 1) {
+    const mid = {};
+    root['mid-' + index] = mid;
+    mids.push(mid);
+  }
+
+  let leafIndex = 0;
+  for (let midIndex = 0; midIndex < mids.length; midIndex += 1) {
+    const leafCount = midIndex < 62 ? 2 : 1;
+    for (let index = 0; index < leafCount; index += 1) {
+      const leaf = Array.from({ length: 61 }, (_, itemIndex) => itemIndex);
+      leaf['array-extra-' + leafIndex] = 'array-extra-' + leafIndex;
+      leaf[Symbol('array-symbol-' + leafIndex)] = 'array-symbol-' + leafIndex;
+      mids[midIndex]['leaf-' + leafIndex] = leaf;
+      leafIndex += 1;
+    }
+  }
+
+  let remaining = extraScalarKeys;
+  let extraIndex = 0;
+  for (const mid of mids) {
+    while (remaining > 0 && Reflect.ownKeys(mid).length < 64) {
+      const key = 'record-extra-' + extraIndex;
+      mid[key] = 'record-extra-value-' + extraIndex;
+      extraIndex += 1;
+      remaining -= 1;
+    }
+  }
+  assert.equal(remaining, 0);
+  return root;
 }
 
 function evaluateWithTicket(operation, trusted, overrides = {}) {
@@ -568,6 +607,32 @@ test('ticket replay compacts expired and exhausted slots', () => {
   assert.equal(trusted.size(), 0);
 });
 
+test('ticket issuance resolves the locked default use before range validation', () => {
+  const operation = { type: 'filesystem.delete', target: target('src\\default-use.txt') };
+  const trusted = createTrustedAuthority({ authority: { allowed_operation_types: ['filesystem.delete'] } });
+  const omitted = ticketRequest(operation, {}, { call_id: 'call-omitted-default' });
+  delete omitted.max_uses;
+  const defaultTicket = trusted.issue(omitted);
+  assert.equal(defaultTicket.max_uses, 1);
+
+  const input = () => kernel.evaluate(baseInput(operation, {
+    authority: TRUSTED_CONTROLLER,
+    ticket: defaultTicket,
+    session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-omitted-default' },
+    scope: defaultTicket.scope,
+  }), { trustedAuthorityContext: trusted });
+  assert.equal(input().decision, 'allow');
+  assert.equal(input().reason_code, 'TICKET_REPLAY');
+
+  for (const maxUses of [1, 8]) {
+    const explicit = trusted.issue(ticketRequest(operation, {}, { call_id: 'call-explicit-' + maxUses, max_uses: maxUses }));
+    assert.equal(explicit.max_uses, maxUses);
+  }
+  for (const maxUses of [0, 9, 1.5, '1', null, undefined, {}]) {
+    assert.throws(() => trusted.issue(ticketRequest(operation, {}, { call_id: 'call-invalid-' + String(maxUses), max_uses: maxUses })), /TICKET_EXPIRY_INVALID/);
+  }
+});
+
 test('structural impact remains deterministic while #342 is active', () => {
   const structural = kernel.assessStructuralImpact({ kind: 'rename', identity: 'operation.authority' });
   assert.equal(structural.valid, true);
@@ -828,6 +893,71 @@ test('partial hard-deny reduction has fixed precedence independent of traversal 
     assert.equal(result.decision, 'deny');
     assert.equal(result.reason_code, 'SECRET_EXFILTRATION_DENIED');
   }
+});
+
+test('partial hard-deny reduction covers all excess components and preserves ordinary limits', () => {
+  const secretExfiltration = {
+    type: 'network.request',
+    source: target('.env', { existence: 'existing' }),
+    destination: { kind: 'external-system', digest: 'f'.repeat(64) },
+    method: 'POST',
+  };
+  const catastrophicDeletion = { type: 'filesystem.delete', target: target('') };
+  const safeComponent = (index) => routineRead('src\\excess-' + index + '.txt');
+  const excessComponents = (catastrophicIndex, secretIndex) => Array.from({ length: 17 }, (_, index) => {
+    if (index === catastrophicIndex) return catastrophicDeletion;
+    if (index === secretIndex) return secretExfiltration;
+    return safeComponent(index);
+  });
+
+  const variants = [
+    excessComponents(0, 16),
+    excessComponents(8, 16),
+    excessComponents(16, 0),
+  ];
+  for (const components of variants) {
+    const result = kernel.evaluate(baseInput({ type: 'compound', components }));
+    assert.equal(result.decision, 'deny');
+    assert.equal(result.reason_code, 'SECRET_EXFILTRATION_DENIED');
+  }
+
+  const nested = {
+    type: 'compound',
+    components: [
+      catastrophicDeletion,
+      { type: 'compound', components: excessComponents(null, 16) },
+    ],
+  };
+  const nestedResult = kernel.evaluate(baseInput(nested));
+  assert.equal(nestedResult.decision, 'deny');
+  assert.equal(nestedResult.reason_code, 'SECRET_EXFILTRATION_DENIED');
+
+  const branched = {
+    type: 'compound',
+    components: [
+      { type: 'compound', components: excessComponents(0, null) },
+      { type: 'compound', components: excessComponents(null, 16) },
+    ],
+  };
+  const branchedResult = kernel.evaluate(baseInput(branched));
+  assert.equal(branchedResult.decision, 'deny');
+  assert.equal(branchedResult.reason_code, 'SECRET_EXFILTRATION_DENIED');
+
+  const ordinaryInvalid = kernel.evaluate(baseInput({ type: 'compound', components: Array.from({ length: 17 }, (_, index) => safeComponent(index)) }));
+  assert.equal(ordinaryInvalid.decision, 'unsupported');
+  assert.equal(ordinaryInvalid.reason_code, 'TYPED_OPERATION_REQUIRED');
+  assert.equal(ordinaryInvalid.operation_digest, null);
+  assert.equal(ordinaryInvalid.target_digest, null);
+});
+
+test('global captured-key accounting includes mixed record, array-extra, and symbol keys at the exact boundary', () => {
+  const permitted = kernel[TEST_ONLY_OBSERVE_ROOT](mixedCapturedKeyGraph(64), null);
+  assert.equal(permitted.issues.some((issue) => issue.code === 'OBSERVATION_ARRAY_EXTRA_KEY'), true);
+  assert.equal(permitted.issues.some((issue) => issue.code === 'OBSERVATION_SYMBOL_KEY'), true);
+  assert.equal(permitted.issues.some((issue) => issue.code === 'OBSERVATION_CAPTURED_KEY_LIMIT'), false);
+
+  const exceeded = kernel[TEST_ONLY_OBSERVE_ROOT](mixedCapturedKeyGraph(65), null);
+  assert.equal(exceeded.issues.some((issue) => issue.code === 'OBSERVATION_CAPTURED_KEY_LIMIT'), true);
 });
 
 test('safe observation probes prototypes, accessors, symbols, cycles, and limits without raw rereads', () => {

@@ -108,6 +108,17 @@ function addIssue(context, code, path = '', phase = 'shape') {
   context.issues.push({ code, path, phase });
 }
 
+function captureObservedKey(context, node, path) {
+  context.capturedKeys += 1;
+  if (context.capturedKeys > MAX_CAPTURED_KEYS) {
+    node.shapeInvalid = true;
+    node.secret = mergeSecretClassification(node.secret, 'possible');
+    addIssue(context, 'OBSERVATION_CAPTURED_KEY_LIMIT', path, 'resource');
+    return false;
+  }
+  return true;
+}
+
 function secretClassificationForString(value) {
   if (typeof value !== 'string') return 'possible';
   if (value.length > MAX_SCALAR_LENGTH) return 'possible';
@@ -268,6 +279,7 @@ function observeRecord(value, spec, context, path, depth, forcedInvalid = false)
   }
   const boundedKeys = keys.slice(0, MAX_OWN_KEYS);
   for (const key of boundedKeys) {
+    if (!captureObservedKey(context, node, path)) break;
     if (typeof key !== 'string') {
       node.shapeInvalid = true;
       node.secret = mergeSecretClassification(node.secret, 'possible');
@@ -276,13 +288,7 @@ function observeRecord(value, spec, context, path, depth, forcedInvalid = false)
       continue;
     }
     processed.add(key);
-    context.capturedKeys += 1;
-    if (context.capturedKeys > MAX_CAPTURED_KEYS) {
-      node.shapeInvalid = true;
-      node.secret = mergeSecretClassification(node.secret, 'possible');
-      addIssue(context, 'OBSERVATION_CAPTURED_KEY_LIMIT', path, 'resource');
-      break;
-    }
+
     const fieldSpec = fieldSpecFor(spec, key);
     observeDescriptor(value, key, fieldSpec, context, `${path}/${key}`, node, fieldNameSet.has(key));
   }
@@ -290,6 +296,7 @@ function observeRecord(value, spec, context, path, depth, forcedInvalid = false)
   // Schema-bound fields are always probed in schema order, including after ownKeys failure.
   for (const key of fieldNames) {
     if (processed.has(key)) continue;
+    if (!captureObservedKey(context, node, path)) break;
     if (keysResult.ok) node.shapeInvalid = true;
     const fieldSpec = fieldSpecFor(spec, key);
     observeDescriptor(value, key, fieldSpec, context, `${path}/${key}`, node, true);
@@ -361,6 +368,7 @@ function observeArray(value, context, path, depth, forcedInvalid = false) {
   }
   for (const key of keys.slice(0, MAX_OWN_KEYS)) {
     if (key === 'length') continue;
+    if (!captureObservedKey(context, node, path)) break;
     if (typeof key !== 'string') {
       node.shapeInvalid = true;
       node.secret = mergeSecretClassification(node.secret, 'possible');
@@ -377,13 +385,7 @@ function observeArray(value, context, path, depth, forcedInvalid = false) {
       continue;
     }
     seenIndices.add(index);
-    context.capturedKeys += 1;
-    if (context.capturedKeys > MAX_CAPTURED_KEYS) {
-      node.shapeInvalid = true;
-      node.secret = mergeSecretClassification(node.secret, 'possible');
-      addIssue(context, 'OBSERVATION_CAPTURED_KEY_LIMIT', path, 'resource');
-      break;
-    }
+
     const descriptorResult = safeGetOwnPropertyDescriptor(value, key);
     if (!descriptorResult.ok || !descriptorHasValue(descriptorResult.value)) {
       node.shapeInvalid = true;
@@ -405,6 +407,7 @@ function observeArray(value, context, path, depth, forcedInvalid = false) {
   if (!keysResult.ok && node.lengthValid) {
     for (let index = 0; index < boundedLength; index += 1) {
       if (node.indices[index]) continue;
+      if (!captureObservedKey(context, node, path)) break;
       const descriptorResult = safeGetOwnPropertyDescriptor(value, String(index));
       if (!descriptorResult.ok || !descriptorHasValue(descriptorResult.value)) {
         node.shapeInvalid = true;
@@ -758,8 +761,10 @@ function partialHardDeny(operationNode, repositoryNode, visited = new Set()) {
   if (type === 'compound') {
     const components = getChild(operationNode, 'components');
     if (components && components.kind === 'array') {
-      for (let index = 0; index < Math.min(components.length || 0, MAX_COMPOUND_COMPONENTS); index += 1) {
-        best = chooseHardDeny(best, partialHardDeny(components.indices[index]?.child, repositoryNode, visited));
+      const capturedComponents = Array.isArray(components.indices) ? components.indices : [];
+      const capturedComponentCount = Math.min(capturedComponents.length, MAX_ARRAY_LENGTH);
+      for (let index = 0; index < capturedComponentCount; index += 1) {
+        best = chooseHardDeny(best, partialHardDeny(capturedComponents[index]?.child, repositoryNode, visited));
       }
     }
   }
@@ -1035,7 +1040,9 @@ function createTrustedAuthorityContext(authority, options = {}) {
     const operationDigestValue = ticketRequestValue(observed, 'operation_digest');
     const targetDigestValue = ticketRequestValue(observed, 'target_digest');
     const scopeValue = ticketRequestValue(observed, 'scope');
-    const maxUses = ticketRequestValue(observed, 'max_uses');
+    const maxUsesPresent = nodeHasOwnField(observed, 'max_uses');
+    const requestedMaxUses = ticketRequestValue(observed, 'max_uses');
+    const maxUses = maxUsesPresent ? requestedMaxUses : POLICY.authority_ticket.default_uses;
     const expiresAtValue = ticketRequestValue(observed, 'expires_at');
     const issuedAt = clockNow(state.clock);
     const expiresAt = parseUtc(expiresAtValue);
@@ -1185,6 +1192,7 @@ function observeRecord(value, spec, context, path, depth, forcedInvalid = false)
     addIssue(context, 'OBSERVATION_OWN_KEY_LIMIT', path, 'resource');
   }
   for (const key of keys.slice(0, MAX_OWN_KEYS)) {
+    if (!captureObservedKey(context, node, path)) break;
     if (typeof key !== 'string') {
       node.shapeInvalid = true;
       node.secret = mergeSecretClassification(node.secret, 'possible');
@@ -1193,19 +1201,14 @@ function observeRecord(value, spec, context, path, depth, forcedInvalid = false)
       continue;
     }
     processed.add(key);
-    context.capturedKeys += 1;
-    if (context.capturedKeys > MAX_CAPTURED_KEYS) {
-      node.shapeInvalid = true;
-      node.secret = mergeSecretClassification(node.secret, 'possible');
-      addIssue(context, 'OBSERVATION_CAPTURED_KEY_LIMIT', path, 'resource');
-      break;
-    }
+
     const fieldSpec = fieldSpecFor(spec, key);
     observeDescriptorForRecord(value, key, fieldSpec, context, `${path}/${key}`, node, fieldNameSet.has(key));
   }
   // A failed ownKeys probe still probes only the bounded schema fields in schema order.
   for (const key of fieldNames) {
     if (processed.has(key)) continue;
+    if (!captureObservedKey(context, node, path)) break;
     const fieldSpec = fieldSpecFor(spec, key);
     observeDescriptorForRecord(value, key, fieldSpec, context, `${path}/${key}`, node, true);
   }
@@ -1272,6 +1275,7 @@ function observeArray(value, context, path, depth, forcedInvalid = false, itemSp
   };
   for (const key of keys.slice(0, MAX_OWN_KEYS)) {
     if (key === 'length') continue;
+    if (!captureObservedKey(context, node, path)) break;
     if (typeof key !== 'string') {
       node.shapeInvalid = true;
       node.secret = mergeSecretClassification(node.secret, 'possible');
@@ -1294,13 +1298,7 @@ function observeArray(value, context, path, depth, forcedInvalid = false, itemSp
       }
       continue;
     }
-    context.capturedKeys += 1;
-    if (context.capturedKeys > MAX_CAPTURED_KEYS) {
-      node.shapeInvalid = true;
-      node.secret = mergeSecretClassification(node.secret, 'possible');
-      addIssue(context, 'OBSERVATION_CAPTURED_KEY_LIMIT', path, 'resource');
-      break;
-    }
+
     const descriptorResult = safeGetOwnPropertyDescriptor(value, key);
     if (!descriptorResult.ok) {
       node.shapeInvalid = true;
@@ -1314,6 +1312,7 @@ function observeArray(value, context, path, depth, forcedInvalid = false, itemSp
   if (!keysResult.ok && node.lengthValid) {
     for (let index = 0; index < boundedLength; index += 1) {
       if (node.indices[index]) continue;
+      if (!captureObservedKey(context, node, path)) break;
       const descriptorResult = safeGetOwnPropertyDescriptor(value, String(index));
       if (!descriptorResult.ok || !descriptorHasValue(descriptorResult.value)) {
         node.shapeInvalid = true;
