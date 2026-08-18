@@ -1,0 +1,11 @@
+{
+  "source_repo": "weijunswj/ai-agent-toolkit",
+  "source_ref": "first-party-authored",
+  "source_commit": "1dc737afa90ead971a03ef271c70b911e30e2ba5",
+  "source_lifecycle": "retired_after_migration",
+  "source_role": "migration_provenance_only",
+  "source_update_policy": "none",
+  "public_attribution_required": false,
+  "notes": "First-party A1-SOIR R1 replacement source authored under #346. There is no external upstream dependency and no source-watch lane.",
+  "files": []
+}
