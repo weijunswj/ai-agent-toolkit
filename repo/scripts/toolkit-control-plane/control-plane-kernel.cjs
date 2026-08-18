@@ -556,7 +556,7 @@ function entryValueResult(node, key, normalizer) {
   return child ? normalizer(child) : resultInvalid('TYPED_OPERATION_REQUIRED', node, node?.secret || 'possible');
 }
 
-function normalizeOperation(node, compoundState = { depth: 0, total: 0 }) {
+function normalizeOperation(node, traversalState = { total: 0 }, depth = 0) {
   let secret = aggregateNodeSecret(node);
   if (!node || node.kind !== 'record') return resultInvalid('TYPED_OPERATION_REQUIRED', node, 'possible');
   const typeResult = normalizeString(getChild(node, 'type'), 'TYPED_OPERATION_REQUIRED', { nonBlank: true });
@@ -634,13 +634,13 @@ function normalizeOperation(node, compoundState = { depth: 0, total: 0 }) {
     if (!add('target', targetResult)) return resultInvalid('TARGET_INVALID', node, secret, { operation_type: type });
   }
   if (type === 'compound') {
-    if (compoundState.depth >= MAX_COMPOUND_DEPTH) return resultInvalid('COMPOUND_DEPTH_LIMIT', node, secret, { operation_type: type });
+    if (depth >= MAX_COMPOUND_DEPTH) return resultInvalid('COMPOUND_DEPTH_LIMIT', node, secret, { operation_type: type });
     const componentsNode = getChild(node, 'components');
     if (!componentsNode || componentsNode.kind !== 'array' || !componentsNode.ownKeysOk || !componentsNode.protoValid || componentsNode.shapeInvalid || !componentsNode.lengthValid || componentsNode.length < 1 || componentsNode.length > MAX_COMPOUND_COMPONENTS) return resultInvalid('TYPED_OPERATION_REQUIRED', node, secret, { operation_type: type });
-    if (compoundState.total + componentsNode.length > MAX_TOTAL_COMPOUND_COMPONENTS) return resultInvalid('COMPOUND_COMPONENT_LIMIT', node, secret, { operation_type: type });
-    compoundState.total += componentsNode.length;
+    if (traversalState.total + componentsNode.length > MAX_TOTAL_COMPOUND_COMPONENTS) return resultInvalid('COMPOUND_COMPONENT_LIMIT', node, secret, { operation_type: type });
+    traversalState.total += componentsNode.length;
     for (let index = 0; index < componentsNode.length; index += 1) {
-      const childResult = normalizeOperation(componentsNode.indices[index]?.child, { depth: compoundState.depth + 1, total: compoundState.total });
+      const childResult = normalizeOperation(componentsNode.indices[index]?.child, traversalState, depth + 1);
       secret = mergeSecretClassification(secret, childResult.secret_classification || 'none');
       children.push(childResult);
       if (!childResult.valid) return resultInvalid(childResult.reason_code || 'TYPED_OPERATION_REQUIRED', node, secret, { operation_type: type, children });
@@ -754,12 +754,12 @@ function partialHardDeny(operationNode, repositoryNode, visited = new Set()) {
   visited.add(operationNode);
   const type = scalarValue(getChild(operationNode, 'type'), 'string');
   const repositoryPaths = repositoryPathsFromEvidence(repositoryNode);
+  let best = null;
   if (type === 'compound') {
     const components = getChild(operationNode, 'components');
     if (components && components.kind === 'array') {
       for (let index = 0; index < Math.min(components.length || 0, MAX_COMPOUND_COMPONENTS); index += 1) {
-        const denial = partialHardDeny(components.indices[index]?.child, repositoryNode, visited);
-        if (denial) return denial;
+        best = chooseHardDeny(best, partialHardDeny(components.indices[index]?.child, repositoryNode, visited));
       }
     }
   }
@@ -767,21 +767,20 @@ function partialHardDeny(operationNode, repositoryNode, visited = new Set()) {
     const source = getChild(operationNode, 'source');
     const destination = getChild(operationNode, 'destination');
     const sourceSecret = (source?.secret || 'none') !== 'none' || targetPathsFromEvidence(source).some(isSecretPathEvidence);
-    if (sourceSecret && targetIsExternalEvidence(destination)) return { reason_code: 'SECRET_EXFILTRATION_DENIED', operation_type: type, operation_class: OPERATION_CLASS[type], target_class: 'external-target', secret_classification: mergeSecretClassification(operationNode.secret || 'none', 'confirmed') };
+    if (sourceSecret && targetIsExternalEvidence(destination)) best = chooseHardDeny(best, { reason_code: 'SECRET_EXFILTRATION_DENIED', operation_type: type, operation_class: OPERATION_CLASS[type], target_class: 'external-target', secret_classification: mergeSecretClassification(operationNode.secret || 'none', 'confirmed') });
   }
   if (type === 'filesystem.delete' || type === 'filesystem.move') {
     const targets = type === 'filesystem.move' ? [getChild(operationNode, 'source'), getChild(operationNode, 'destination')] : [getChild(operationNode, 'target')];
     for (const targetNode of targets) {
-      if (targetPathsFromEvidence(targetNode).some((pathValue) => protectedPath(pathValue, repositoryPaths))) return { reason_code: 'CATASTROPHIC_TARGET_DENIED', operation_type: type, operation_class: OPERATION_CLASS[type], target_class: 'protected-target', secret_classification: operationNode.secret || 'none' };
+      if (targetPathsFromEvidence(targetNode).some((pathValue) => protectedPath(pathValue, repositoryPaths))) best = chooseHardDeny(best, { reason_code: 'CATASTROPHIC_TARGET_DENIED', operation_type: type, operation_class: OPERATION_CLASS[type], target_class: 'protected-target', secret_classification: operationNode.secret || 'none' });
     }
   }
   for (const entry of operationNode.entries || []) {
     if (entry && entry.child && typeof entry.key === 'string' && !['type', 'target', 'source', 'destination', 'components'].includes(entry.key)) {
-      const nested = partialHardDeny(entry.child, repositoryNode, visited);
-      if (nested) return nested;
+      best = chooseHardDeny(best, partialHardDeny(entry.child, repositoryNode, visited));
     }
   }
-  return null;
+  return best;
 }
 
 function callerFinalityEvidence(authorityNode) {
@@ -913,11 +912,47 @@ function flattenClassifiedComponents(classification, output = []) {
   return output;
 }
 
+function trustedRepositoryIdentity(repository) {
+  return repository.root + '|' + repository.worktree + '|' + repository.remote;
+}
+
 function trustedContextRootBinding(options) {
   const rootContext = safeReadDataProperty(options, 'root_context');
   if (!rootContext || typeof rootContext !== 'object') return null;
-  const observed = observeRoot(rootContext);
-  return observed.root.kind === 'record' && !observed.root.shapeInvalid ? digest(observed.root.entries.map((entry) => [entry.key, entry.child?.value ?? null])) : null;
+  const observed = observeRoot(rootContext, { fieldNames: ['repository_identity', 'root', 'worktree', 'remote', 'authorized_remote', 'authorized_ref', 'live_server_ref_sha'], fields: {} });
+  const node = observed.root;
+  const shape = exactRecordShape(node, ['repository_identity', 'root', 'worktree', 'remote', 'authorized_remote', 'authorized_ref', 'live_server_ref_sha'], ['repository_identity', 'root', 'worktree', 'remote', 'authorized_remote', 'authorized_ref', 'live_server_ref_sha']);
+  if (!shape.ok) return null;
+  const identity = scalarValue(getChild(node, 'repository_identity'), 'string');
+  const root = normalizePath(scalarValue(getChild(node, 'root'), 'string'));
+  const worktree = normalizePath(scalarValue(getChild(node, 'worktree'), 'string'));
+  const remoteValue = scalarValue(getChild(node, 'remote'), 'string');
+  const authorizedRemote = scalarValue(getChild(node, 'authorized_remote'), 'string');
+  const authorizedRef = scalarValue(getChild(node, 'authorized_ref'), 'string');
+  const liveServerRefSha = scalarValue(getChild(node, 'live_server_ref_sha'), 'string');
+  const remote = validateRemoteIdentity(remoteValue);
+  if (!nonBlank(identity) || !root || !worktree || !/^(?:[A-Za-z]:\\|\\\\|\\|\/)/.test(root) || !/^(?:[A-Za-z]:\\|\\\\|\\|\/)/.test(worktree) || !isWithin(root, worktree) || !remote.valid || !nonBlank(authorizedRemote) || !GIT_REMOTE_NAME_PATTERN.test(authorizedRemote) || !nonBlank(authorizedRef) || !/^refs\/heads\/[A-Za-z0-9._\/-]+$/.test(authorizedRef) || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(liveServerRefSha)) return null;
+  const canonicalRemote = remote.canonical;
+  if (identity !== trustedRepositoryIdentity({ root, worktree, remote: canonicalRemote })) return null;
+  return Object.freeze({
+    repository_identity_digest: digest(identity),
+    root_digest: digest(root),
+    worktree_digest: digest(worktree),
+    remote: canonicalRemote,
+    authorized_remote: authorizedRemote,
+    authorized_ref: authorizedRef,
+    live_server_ref_sha: liveServerRefSha,
+  });
+}
+
+function trustedContextMatches(state, inputValue, operation) {
+  const binding = state?.rootBinding;
+  const repository = inputValue?.repository;
+  if (!binding || !repository) return false;
+  if (digest(trustedRepositoryIdentity(repository)) !== binding.repository_identity_digest) return false;
+  if (digest(repository.root) !== binding.root_digest || digest(repository.worktree) !== binding.worktree_digest || repository.remote !== binding.remote) return false;
+  if (operation?.type === 'git.push' && (operation.remote !== binding.authorized_remote || operation.authorized_remote !== binding.authorized_remote || operation.authorized_ref !== binding.authorized_ref)) return false;
+  return true;
 }
 
 function safeReadDataProperty(value, key) {
@@ -969,7 +1004,9 @@ function createTrustedAuthorityContext(authority, options = {}) {
   if (maxEntries < 1 || maxEntries > MAX_TICKET_ENTRIES || maxLifetimeMs < 1 || maxLifetimeMs > MAX_TICKET_LIFETIME_MS) throw new Error('TICKET_STORE_BOUNDS_INVALID');
   const context = {};
   const authorityContract = normalizedAuthority.value;
-  const state = { context, authority: authorityContract, authorityDigest: digest(authorityContract), identityDigest: digest(authorityContract.identity), clock: typeof clockCandidate === 'function' ? clockCandidate : Date.now, maxEntries, maxLifetimeMs, sequence: 0, records: new Map(), rootBinding: trustedContextRootBinding(options) };
+  const rootBinding = trustedContextRootBinding(options);
+  if (!rootBinding) throw new Error('TRUSTED_ROOT_CONTEXT_INVALID');
+  const state = { context, authority: authorityContract, authorityDigest: digest(authorityContract), identityDigest: digest(authorityContract.identity), clock: typeof clockCandidate === 'function' ? clockCandidate : Date.now, maxEntries, maxLifetimeMs, sequence: 0, records: new Map(), rootBinding };
   TRUSTED_CONTEXT_STATE.set(context, state);
 
   function compact() {
@@ -1008,8 +1045,9 @@ function createTrustedAuthorityContext(authority, options = {}) {
     if (state.records.size >= state.maxEntries) throw new Error('TICKET_STORE_FULL');
     const payload = { contract_version: TICKET_CONTRACT_VERSION, issuer_role: authorityContract.role, issuer_identity_digest: state.identityDigest, issuer_authority_digest: state.authorityDigest, session_id: sessionId, turn_id: turnId, call_id: callId, operation_type: operationType, operation_digest: operationDigestValue, target_digest: targetDigestValue, scope: scopeValue === undefined ? null : scopeValue, issued_at: new Date(issuedAt).toISOString(), expires_at: expiresAtValue, max_uses: maxUses, consumed_count: 0 };
     const ticketId = digest({ ...payload, sequence: state.sequence += 1 });
-    const ticket = { ...payload, ticket_id: ticketId };
-    const record = { ticket, ticketId, uses: 0, maxUses, expiresAt };
+    const binding = Object.freeze({ ...payload });
+    const ticket = Object.freeze({ ...payload, ticket_id: ticketId });
+    const record = { binding, ticketId, uses: 0, maxUses, expiresAt };
     state.records.set(ticketId, record);
     TICKET_PROVENANCE.set(ticket, { context, ticketId });
     return ticket;
@@ -1026,7 +1064,7 @@ function createTrustedAuthorityContext(authority, options = {}) {
     if (!Number.isFinite(now)) return { valid: false, reason_code: 'TICKET_TIME_INVALID' };
     if (now >= record.expiresAt) { state.records.delete(record.ticketId); return { valid: false, reason_code: 'TICKET_EXPIRED' }; }
     const fields = ['issuer_role', 'issuer_identity_digest', 'issuer_authority_digest', 'session_id', 'turn_id', 'call_id', 'operation_type', 'operation_digest', 'target_digest', 'scope'];
-    if (!fields.every((field) => binding[field] === record.ticket[field])) return { valid: false, reason_code: 'TICKET_BINDING_MISMATCH' };
+    if (!fields.every((field) => binding[field] === record.binding[field])) return { valid: false, reason_code: 'TICKET_BINDING_MISMATCH' };
     if (record.uses >= record.maxUses) { state.records.delete(record.ticketId); return { valid: false, reason_code: 'TICKET_REPLAY' }; }
     record.uses += 1;
     if (record.uses >= record.maxUses) state.records.delete(record.ticketId);
@@ -1051,15 +1089,20 @@ function targetDigestCanonical(operation) {
 }
 
 function operationDigest(operation) {
-  const normalized = normalizeOperation(observeRoot(operation, OBSERVATION_SCHEMAS.operation).root);
-  if (!normalized.valid) throw new Error(normalized.reason_code || 'OPERATION_INVALID');
-  return operationDigestCanonical(normalized.value);
+  try {
+    const normalized = normalizeOperation(observeRoot(operation, OBSERVATION_SCHEMAS.operation).root);
+    return normalized.valid ? operationDigestCanonical(normalized.value) : null;
+  } catch {
+    return null;
+  }
 }
-
 function targetDigest(operation) {
-  const normalized = normalizeOperation(observeRoot(operation, OBSERVATION_SCHEMAS.operation).root);
-  if (!normalized.valid) throw new Error(normalized.reason_code || 'OPERATION_INVALID');
-  return targetDigestCanonical(normalized.value);
+  try {
+    const normalized = normalizeOperation(observeRoot(operation, OBSERVATION_SCHEMAS.operation).root);
+    return normalized.valid ? targetDigestCanonical(normalized.value) : null;
+  } catch {
+    return null;
+  }
 }
 
 function safeOperationDigest(operation) {
@@ -1388,7 +1431,7 @@ function normalizeResolution(node, options = {}) {
   const linkResult = normalizeString(getChild(node, 'link_type'), 'UNKNOWN_RESOLVER_LINK_TYPE', { nonBlank: true });
   if (!statusResult.valid) return resultInvalid(statusResult.reason_code, node, node.secret || 'possible');
   if (!linkResult.valid || !LINK_TYPES.has(linkResult.value)) return resultInvalid('UNKNOWN_RESOLVER_LINK_TYPE', node, node.secret || 'possible');
-  if (!['resolved', 'unresolved', 'unknown'].includes(statusResult.value)) return resultInvalid('RESOLUTION_INVALID', node, node.secret || 'possible');
+  if (statusResult.value !== 'resolved') return resultInvalid('RESOLUTION_INVALID', node, node.secret || 'possible');
   let canonicalPath;
   if (nodeHasOwnField(node, 'canonical_path')) {
     const raw = scalarValue(getChild(node, 'canonical_path'), 'string');
@@ -1400,7 +1443,7 @@ function normalizeResolution(node, options = {}) {
     existence = scalarValue(getChild(node, 'existence'), 'string');
     if (!['existing', 'absent', 'unknown'].includes(existence)) return resultInvalid('RESOLUTION_INVALID', node, node.secret || 'possible');
   }
-  if (options.requireCanonical && statusResult.value === 'resolved' && !canonicalPath) return resultInvalid('RESOLUTION_CANONICAL_REQUIRED', node, node.secret || 'possible');
+  if (options.requireCanonical && !canonicalPath) return resultInvalid('RESOLUTION_CANONICAL_REQUIRED', node, node.secret || 'possible');
   return resultValid(Object.freeze({ status: statusResult.value, link_type: linkResult.value, ...(canonicalPath ? { canonical_path: canonicalPath } : {}), ...(existence ? { existence } : {}) }), mergeSecretClassification(node.secret || 'none', mergeSecretClassification(statusResult.secret_classification, linkResult.secret_classification)));
 }
 
@@ -1617,6 +1660,9 @@ function evaluate(input, options = {}) {
   if (!normalized.valid) return publicResult({ decision: 'unsupported', reason_code: normalized.reason_code, operation_type: normalized.operation_type || null, secret_classification: normalized.secret_classification, ticket_status: 'not-required' });
   const inputValue = normalized.value;
   const operation = inputValue.operation;
+  const state = trustedStateFromOptions(options);
+  if (!state) return publicResult({ decision: 'deny', reason_code: 'TICKET_TRUST_SOURCE_REQUIRED', operation_type: operation.type, secret_classification: normalized.secret_classification, ticket_status: 'not-accepted' });
+  if (!trustedContextMatches(state, inputValue, operation)) return publicResult({ decision: 'unsupported', reason_code: 'REPOSITORY_INVALID', operation_type: operation.type, secret_classification: normalized.secret_classification, ticket_status: 'not-required' });
   const classification = classifyOperation(operation, inputValue.repository);
   if (!classification.valid) return publicResult({ decision: 'unsupported', reason_code: classification.reason_code, operation_type: classification.operation_type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification });
   const hardDeny = classification.hard_deny;
@@ -1624,8 +1670,7 @@ function evaluate(input, options = {}) {
   const targetDigestValue = targetDigestCanonical(operation);
   if (hardDeny) return publicResult({ ...hardDeny, decision: 'deny', operation_digest: operationDigestValue, target_digest: targetDigestValue, ticket_status: 'not-accepted' });
   const leaves = flattenClassifiedComponents(classification);
-  if (leaves.some((item) => !inputValue.authority.allowed_operation_types.includes(item.operation_type))) return publicResult({ decision: 'unsupported', reason_code: 'COMPONENT_AUTHORITY_REQUIRED', operation_type: operation.type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigestValue, target_digest: targetDigestValue });
-  const state = trustedStateFromOptions(options);
+  if (leaves.some((item) => !state.authority.allowed_operation_types.includes(item.operation_type) || !inputValue.authority.allowed_operation_types.includes(item.operation_type))) return publicResult({ decision: 'unsupported', reason_code: 'COMPONENT_AUTHORITY_REQUIRED', operation_type: operation.type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigestValue, target_digest: targetDigestValue });
   const ticket = ticketDecision(inputValue, operation, classification, state);
   return publicResult({ ...ticket, operation_type: operation.type, operation_class: classification.operation_class, target_class: classification.target_class, secret_classification: classification.secret_classification, operation_digest: operationDigestValue, target_digest: targetDigestValue, structural_impact_required: false });
 }
@@ -1680,7 +1725,7 @@ function ticketRequestObservation(input) {
   }).root;
 }
 
-function normalizeOperation(node, compoundState = { depth: 0, total: 0 }) {
+function normalizeOperation(node, traversalState = { total: 0 }, depth = 0) {
   const secret = aggregateNodeSecret(node);
   if (!node || node.kind !== 'record') return resultInvalid('TYPED_OPERATION_REQUIRED', node, 'possible');
   const typeResult = normalizeString(getChild(node, 'type'), 'TYPED_OPERATION_REQUIRED', { nonBlank: true });
@@ -1769,13 +1814,14 @@ function normalizeOperation(node, compoundState = { depth: 0, total: 0 }) {
     normalized.target = targetResult.value;
   }
   if (type === 'compound') {
-    if (compoundState.depth >= MAX_COMPOUND_DEPTH) return resultInvalid('COMPOUND_DEPTH_LIMIT', node, secret, { operation_type: type });
+    if (depth >= MAX_COMPOUND_DEPTH) return resultInvalid('COMPOUND_DEPTH_LIMIT', node, secret, { operation_type: type });
     const componentsNode = getChild(node, 'components');
     if (!componentsNode || componentsNode.kind !== 'array' || !componentsNode.ownKeysOk || !componentsNode.protoValid || componentsNode.shapeInvalid || !componentsNode.lengthValid || componentsNode.length < 1 || componentsNode.length > MAX_COMPOUND_COMPONENTS) return resultInvalid('TYPED_OPERATION_REQUIRED', node, secret, { operation_type: type });
-    if (compoundState.total + componentsNode.length > MAX_TOTAL_COMPOUND_COMPONENTS) return resultInvalid('COMPOUND_COMPONENT_LIMIT', node, secret, { operation_type: type });
+    if (traversalState.total + componentsNode.length > MAX_TOTAL_COMPOUND_COMPONENTS) return resultInvalid('COMPOUND_COMPONENT_LIMIT', node, secret, { operation_type: type });
+    traversalState.total += componentsNode.length;
     const children = [];
     for (let index = 0; index < componentsNode.length; index += 1) {
-      const childResult = normalizeOperation(componentsNode.indices[index]?.child, { depth: compoundState.depth + 1, total: compoundState.total + componentsNode.length });
+      const childResult = normalizeOperation(componentsNode.indices[index]?.child, traversalState, depth + 1);
       if (!childResult.valid) return resultInvalid(childResult.reason_code || 'TYPED_OPERATION_REQUIRED', node, mergeSecretClassification(secret, childResult.secret_classification), { operation_type: type });
       children.push(childResult.value);
     }
@@ -1855,13 +1901,20 @@ function targetDigestCanonical(operation) {
 }
 
 function operationDigest(operation) {
-  const observed = observeRoot(operation, OBSERVATION_SCHEMAS.operation).root;
-  return digest(canonicalOperationFromObserved(observed));
+  try {
+    const normalized = normalizeOperation(observeRoot(operation, OBSERVATION_SCHEMAS.operation).root);
+    return normalized.valid ? operationDigestCanonical(normalized.value) : null;
+  } catch {
+    return null;
+  }
 }
-
 function targetDigest(operation) {
-  const observed = observeRoot(operation, OBSERVATION_SCHEMAS.operation).root;
-  return digest({ targets: targetsOfOperation(canonicalOperationFromObserved(observed), []) });
+  try {
+    const normalized = normalizeOperation(observeRoot(operation, OBSERVATION_SCHEMAS.operation).root);
+    return normalized.valid ? targetDigestCanonical(normalized.value) : null;
+  } catch {
+    return null;
+  }
 }
 
 

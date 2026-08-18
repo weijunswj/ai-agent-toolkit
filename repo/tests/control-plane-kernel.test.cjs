@@ -119,8 +119,11 @@ function loadInstrumentedTestKernel() {
 }
 
 const kernel = loadInstrumentedTestKernel();
+const rawEvaluate = kernel.evaluate;
 const ROOT = 'C:\\fixture\\workspace\\repo';
 const WORKTREE = `${ROOT}\\worktree`;
+const DEFAULT_REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit.git';
+const DEFAULT_AUTHORIZED_REF = 'refs/heads/topic';
 const NOW = '2026-08-16T14:00:00.000Z';
 const TRUSTED_CONTROLLER = {
   role: 'controller',
@@ -137,13 +140,34 @@ const TRUSTED_CONTROLLER = {
     'filesystem.move',
     'git.push',
     'git.branch',
+    'filesystem.read',
+    'git.read',
+    'github.read',
+    'external.mutation',
+    'compound',
+    'shell',
     'network.request',
   ],
 };
 
+function trustedRootContext(overrides = {}) {
+  const root = overrides.root || ROOT;
+  const worktree = overrides.worktree || root + '\\worktree';
+  const remote = overrides.remote || DEFAULT_REMOTE;
+  return {
+    repository_identity: root + '|' + worktree + '|' + remote,
+    root,
+    worktree,
+    remote,
+    authorized_remote: overrides.authorized_remote || 'origin',
+    authorized_ref: overrides.authorized_ref || DEFAULT_AUTHORIZED_REF,
+    live_server_ref_sha: overrides.live_server_ref_sha || 'a'.repeat(40),
+  };
+}
+
 function createTrustedAuthority(options = {}) {
-  const { authority: authorityOverrides = {}, ...storeOptions } = options;
-  return kernel[TEST_ONLY_EXPORT]({ ...TRUSTED_CONTROLLER, ...authorityOverrides }, { now: () => Date.parse(NOW), ...storeOptions });
+  const { authority: authorityOverrides = {}, root_context = trustedRootContext(), ...storeOptions } = options;
+  return kernel[TEST_ONLY_EXPORT]({ ...TRUSTED_CONTROLLER, ...authorityOverrides }, { now: () => Date.parse(NOW), root_context, ...storeOptions });
 }
 
 function baseInput(operation, overrides = {}) {
@@ -154,7 +178,7 @@ function baseInput(operation, overrides = {}) {
     repository: {
       root: ROOT,
       worktree: WORKTREE,
-      remote: 'https://github.com/weijunswj/ai-agent-toolkit.git',
+      remote: DEFAULT_REMOTE,
       resolution: { status: 'resolved', link_type: 'none' },
     },
     authority: {
@@ -170,6 +194,9 @@ function baseInput(operation, overrides = {}) {
     ...overrides,
   };
 }
+
+const defaultTrustedAuthority = createTrustedAuthority();
+kernel.evaluate = (input, options = {}) => rawEvaluate(input, { trustedAuthorityContext: defaultTrustedAuthority, ...options });
 
 function target(relativePath, overrides = {}) {
   const canonicalPath = `${ROOT}\\${relativePath}`;
@@ -204,6 +231,15 @@ function ticketRequest(operation, session = {}, overrides = {}) {
 }
 
 function evaluateWithTicket(operation, trusted, overrides = {}) {
+  if (kernel.operationDigest(operation) === null || kernel.targetDigest(operation) === null) {
+    return {
+      ticket: null,
+      result: kernel.evaluate(baseInput(operation, {
+        authority: TRUSTED_CONTROLLER,
+        ...(overrides.input || {}),
+      }), { trustedAuthorityContext: trusted }),
+    };
+  }
   const ticket = trusted.issue(ticketRequest(operation, overrides.session, overrides.ticket));
   return {
     ticket,
@@ -241,7 +277,7 @@ test('remote identity runtime and schema share one credential-free contract', ()
   assert.equal(schema.$defs.remoteIdentity.properties.contract_version.const, kernel.REMOTE_IDENTITY_CONTRACT_VERSION);
   assert.equal(schema.$defs.remoteIdentity.additionalProperties, false);
   for (const value of [
-    'https://github.com/weijunswj/ai-agent-toolkit.git',
+    DEFAULT_REMOTE,
     'ssh://git@github.com:22/weijunswj/ai-agent-toolkit.git',
     'git@github.com:weijunswj/ai-agent-toolkit.git',
   ]) {
@@ -268,7 +304,7 @@ test('safe observation rejects unknown resolver links before policy routing', ()
     repository: {
       root: ROOT,
       worktree: WORKTREE,
-      remote: 'https://github.com/weijunswj/ai-agent-toolkit.git',
+      remote: DEFAULT_REMOTE,
       resolution: { status: 'resolved', link_type: 'future-link-type' },
     },
   }));
@@ -573,9 +609,9 @@ test('ticket issuer authority is immutable and trusted', () => {
 
 test('arbitrary ticket stores cannot claim controller authority', () => {
   const operation = { type: 'github.mutation', repository: 'weijunswj/ai-agent-toolkit', action: 'draft-pull-request', target: { kind: 'github-repository', digest: 'd'.repeat(64) } };
-  const result = kernel.evaluate(baseInput(operation, { authority: TRUSTED_CONTROLLER, ticket: {} }), { ticketStore: { consume: () => ({ valid: true, reason_code: 'TICKET_CONSUMED' }) } });
+  const result = rawEvaluate(baseInput(operation, { authority: TRUSTED_CONTROLLER, ticket: {} }), { ticketStore: { consume: () => ({ valid: true, reason_code: 'TICKET_CONSUMED' }) } });
   assert.equal(result.decision, 'deny');
-  assert.equal(result.reason_code, 'CONTROLLER_TRUST_SOURCE_REQUIRED');
+  assert.equal(result.reason_code, 'TICKET_TRUST_SOURCE_REQUIRED');
 });
 
 test('copied and forged ticket identities cannot authorize', () => {
@@ -652,6 +688,148 @@ test('array length descriptor accepts a non-writable length', () => {
   assert.equal(result.decision, 'allow');
 });
 
+test('ticket bindings stay module-private when outward ticket fields are rebound', () => {
+  const original = { type: 'filesystem.delete', target: target('src\\original.txt') };
+  const replacement = { type: 'filesystem.delete', target: target('src\\replacement.txt') };
+  const trusted = createTrustedAuthority({ authority: { allowed_operation_types: ['filesystem.delete'] } });
+  const ticket = trusted.issue(ticketRequest(original));
+  assert.equal(Object.isFrozen(ticket), true);
+  const rebound = {
+    session_id: 'session-2',
+    turn_id: 'turn-2',
+    call_id: 'call-2',
+    operation_type: replacement.type,
+    operation_digest: kernel.operationDigest(replacement),
+    target_digest: kernel.targetDigest(replacement),
+    scope: 'repo:other/repository',
+  };
+  for (const [field, value] of Object.entries(rebound)) assert.equal(Reflect.set(ticket, field, value), false, field);
+  assert.equal(ticket.operation_digest, kernel.operationDigest(original));
+  const result = kernel.evaluate(baseInput(replacement, {
+    authority: TRUSTED_CONTROLLER,
+    ticket,
+    session: { session_id: 'session-2', turn_id: 'turn-2', call_id: 'call-2' },
+    scope: 'repo:other/repository',
+  }), { trustedAuthorityContext: trusted });
+  assert.equal(result.decision, 'deny');
+  assert.equal(result.reason_code, 'TICKET_BINDING_MISMATCH');
+});
+
+test('trusted repository binding and operation limits outrank caller metadata', () => {
+  const trusted = createTrustedAuthority({ authority: { allowed_operation_types: ['filesystem.read'] } });
+  const mismatches = [
+    { root: ROOT + '\\other', worktree: ROOT + '\\other\\worktree', remote: DEFAULT_REMOTE },
+    { root: ROOT, worktree: ROOT + '\\other-worktree', remote: DEFAULT_REMOTE },
+    { root: ROOT, worktree: WORKTREE, remote: 'https://github.com/weijunswj/other-repository.git' },
+  ];
+  for (const repository of mismatches) {
+    const result = kernel.evaluate(baseInput(routineRead(), {
+      repository: {
+        ...repository,
+        resolution: { status: 'resolved', link_type: 'none' },
+      },
+      authority: {
+        ...TRUSTED_CONTROLLER,
+        allowed_operation_types: ['filesystem.read', 'filesystem.delete', 'github.mutation'],
+      },
+    }), { trustedAuthorityContext: trusted });
+    assert.equal(result.decision, 'unsupported');
+    assert.equal(result.reason_code, 'REPOSITORY_INVALID');
+  }
+
+  const operation = { type: 'filesystem.delete', target: target('src\\trusted-limit.txt') };
+  const ticket = trusted.issue(ticketRequest(operation));
+  const broadenedCaller = {
+    ...TRUSTED_CONTROLLER,
+    allowed_operation_types: ['filesystem.delete'],
+  };
+  const result = kernel.evaluate(baseInput(operation, {
+    authority: broadenedCaller,
+    ticket,
+    session: { session_id: 'session-1', turn_id: 'turn-1', call_id: 'call-1' },
+    scope: ticket.scope,
+  }), { trustedAuthorityContext: trusted });
+  assert.equal(result.decision, 'unsupported');
+  assert.equal(result.reason_code, 'COMPONENT_AUTHORITY_REQUIRED');
+});
+
+test('unresolved and unknown repository or target resolution fail closed', () => {
+  for (const status of ['unresolved', 'unknown']) {
+    const targetOperation = routineRead();
+    targetOperation.target.resolution.status = status;
+    const targetResult = kernel.evaluate(baseInput(targetOperation));
+    assert.equal(targetResult.decision, 'unsupported');
+    assert.equal(targetResult.reason_code, 'RESOLUTION_INVALID');
+
+    const repositoryResult = kernel.evaluate(baseInput(routineRead(), {
+      repository: {
+        root: ROOT,
+        worktree: WORKTREE,
+        remote: DEFAULT_REMOTE,
+        resolution: { status, link_type: 'none' },
+      },
+    }));
+    assert.equal(repositoryResult.decision, 'unsupported');
+    assert.equal(repositoryResult.reason_code, 'RESOLUTION_INVALID');
+  }
+});
+
+test('public digests return no value for invalid, partial, unsupported, or shell operations', () => {
+  const invalidOperations = [
+    { type: 'shell', shell: 'powershell', command: 'Write-Host synthetic' },
+    { type: 'filesystem.read', target: { path: ROOT + '\\src\\unresolved.txt', resolution: { status: 'unresolved', canonical_path: ROOT + '\\src\\unresolved.txt', link_type: 'none' } } },
+    { type: 'filesystem.read', target: { path: ROOT + '\\src\\partial.txt' } },
+    { type: 'future.operation', payload: 'unsupported' },
+  ];
+  for (const operation of invalidOperations) {
+    assert.equal(kernel.operationDigest(operation), null);
+    assert.equal(kernel.targetDigest(operation), null);
+  }
+});
+
+test('compound traversal uses one global budget across nested layouts', () => {
+  const compound = (components) => ({ type: 'compound', components });
+  const reads = (count, prefix) => Array.from({ length: count }, (_, index) => routineRead('src\\' + prefix + '-' + index + '.txt'));
+  const branched128 = compound(Array.from({ length: 8 }, (_, index) => compound(reads(15, 'branch-' + index))));
+  const branched129 = compound(Array.from({ length: 8 }, (_, index) => compound(reads(index === 0 ? 16 : 15, 'branch-over-' + index))));
+  const nested128 = compound(Array.from({ length: 16 }, (_, index) => compound(reads(7, 'nested-' + index))));
+  const nested129 = compound(Array.from({ length: 16 }, (_, index) => compound(reads(index === 0 ? 8 : 7, 'nested-over-' + index))));
+
+  const compoundAuthority = {
+    ...baseInput(routineRead()).authority,
+    allowed_operation_types: ['filesystem.read'],
+  };
+  for (const operation of [branched128, nested128]) {
+    const result = kernel.evaluate(baseInput(operation, { authority: compoundAuthority }));
+    assert.equal(result.decision, 'allow');
+  }
+  for (const operation of [branched129, nested129]) {
+    const result = kernel.evaluate(baseInput(operation, { authority: compoundAuthority }));
+    assert.equal(result.decision, 'unsupported');
+    assert.equal(result.reason_code, 'COMPOUND_COMPONENT_LIMIT');
+  }
+});
+
+test('partial hard-deny reduction has fixed precedence independent of traversal order', () => {
+  const secretExfiltration = {
+    type: 'network.request',
+    source: target('.env'),
+    destination: { kind: 'external-system', digest: 'e'.repeat(64) },
+    method: 'POST',
+  };
+  const catastrophicDeletion = { type: 'filesystem.delete', target: target('') };
+  const partial = { type: 'filesystem.read' };
+  const orders = [
+    [secretExfiltration, partial, catastrophicDeletion],
+    [catastrophicDeletion, partial, secretExfiltration],
+  ];
+  for (const components of orders) {
+    const result = kernel.evaluate(baseInput({ type: 'compound', components }));
+    assert.equal(result.decision, 'deny');
+    assert.equal(result.reason_code, 'SECRET_EXFILTRATION_DENIED');
+  }
+});
+
 test('safe observation probes prototypes, accessors, symbols, cycles, and limits without raw rereads', () => {
   let getterCalls = 0;
   const accessorTarget = { resolution: { status: 'resolved', canonical_path: `${ROOT}\\src\\safe.txt`, link_type: 'none' } };
@@ -693,7 +871,7 @@ test('opaque tickets stay outside observation and production has no self-mint su
     ownKeys() { trapCalls += 1; throw new Error('ticket ownKeys invoked'); },
     getPrototypeOf() { trapCalls += 1; throw new Error('ticket prototype invoked'); },
   });
-  const result = kernel.evaluate(baseInput({ type: 'filesystem.write', target: target('src\\safe.txt'), no_clobber: true }, { ticket: ticketLike }));
+  const result = rawEvaluate(baseInput({ type: 'filesystem.write', target: target('src\\safe.txt'), no_clobber: true }, { ticket: ticketLike }));
   assert.equal(result.reason_code, 'TICKET_TRUST_SOURCE_REQUIRED');
   assert.equal(trapCalls, 0);
   assert.equal(Object.isFrozen(ticketPayload), false);
@@ -702,8 +880,12 @@ test('opaque tickets stay outside observation and production has no self-mint su
 test('canonical digests ignore caller insertion order and never invoke toJSON', () => {
   let serializationCalls = 0;
   const first = routineRead('src\\digest.txt');
-  const second = { target: first.target, type: 'filesystem.read' };
-  Object.defineProperty(second, 'toJSON', { enumerable: true, value() { serializationCalls += 1; return { type: 'filesystem.delete', target: target(ROOT) }; } });
+  const second = new Proxy({ target: first.target, type: 'filesystem.read' }, {
+    get(value, key, receiver) {
+      if (key === 'toJSON') serializationCalls += 1;
+      return Reflect.get(value, key, receiver);
+    },
+  });
   assert.equal(kernel.operationDigest(first), kernel.operationDigest(second));
   assert.equal(serializationCalls, 0);
   assert.match(kernel.operationDigest(first), /^[a-f0-9]{64}$/);
