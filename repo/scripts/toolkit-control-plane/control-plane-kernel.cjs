@@ -922,10 +922,12 @@ function partialHardDeny(rootNode) {
 function validateRemoteIdentity(value) {
   if (typeof value !== 'string' || value.length === 0 || value.length > LIMITS.scalarLength) return { valid: false, reason_code: 'REMOTE_IDENTITY_INVALID' };
   if (value.startsWith('git@')) {
-    const match = /^git@([A-Za-z0-9.-]+):([^/?#]+(?:\/[^?#]*)*)$/.exec(value);
-    if (!match || !match[2] || !/^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(match[1]) || match[1].includes('..')) return { valid: false, reason_code: 'REMOTE_IDENTITY_INVALID' };
-    const host = match[1].toLowerCase();
-    const pathValue = `/${match[2]}`;
+    const separator = value.indexOf(':', 4);
+    const hostValue = separator > 4 ? value.slice(4, separator) : '';
+    const scpPath = separator > 4 ? value.slice(separator + 1) : '';
+    if (!scpPath || scpPath.startsWith('/') || scpPath.includes('?') || scpPath.includes('#') || !/^[A-Za-z0-9.-]+$/.test(hostValue) || !/^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(hostValue) || hostValue.includes('..')) return { valid: false, reason_code: 'REMOTE_IDENTITY_INVALID' };
+    const host = hostValue.toLowerCase();
+    const pathValue = `/${scpPath}`;
     return { valid: true, contract_version: REMOTE_IDENTITY_CONTRACT_VERSION, kind: 'scp', scheme: 'scp', host, port: null, path: pathValue, user: 'git', canonical: `scp://git@${host}${pathValue}` };
   }
   if (!value.startsWith('https://') && !value.startsWith('ssh://')) return { valid: false, reason_code: 'REMOTE_IDENTITY_INVALID' };
