@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const childProcess = require('node:child_process');
 const fs = require('node:fs');
 const moduleApi = require('node:module');
@@ -59,18 +60,44 @@ const TRUSTED_CONTROLLER = {
   ],
 };
 
+function canonicalSerializeForTest(value) {
+  if (value === null) return 'null';
+  if (typeof value === 'string') return '"' + value.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('\n', '\\n').replaceAll('\r', '\\r') + '"';
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'null';
+  if (Array.isArray(value)) return '[' + value.map(canonicalSerializeForTest).join(',') + ']';
+  const keys = Object.keys(value).sort();
+  return '{' + keys.map((key) => canonicalSerializeForTest(key) + ':' + canonicalSerializeForTest(value[key])).join(',') + '}';
+}
+
+function normalizePathForTest(value) {
+  return value.replaceAll('/', '\\').replace(/[\\]+$/, '').toLowerCase();
+}
+
+function repositoryIdentityDigest(root, worktree, remote) {
+  const remoteIdentity = typeof remote === 'string' ? kernel.validateRemoteIdentity(remote) : { valid: false };
+  if (!remoteIdentity.valid || typeof root !== 'string' || typeof worktree !== 'string') return 'invalid';
+  return crypto.createHash('sha256').update(canonicalSerializeForTest({
+    root: normalizePathForTest(root),
+    worktree: normalizePathForTest(worktree),
+    remote: remoteIdentity.canonical,
+  }), 'utf8').digest('hex');
+}
+
 function trustedRootContext(overrides = {}) {
-  const root = overrides.root || ROOT;
-  const worktree = overrides.worktree || `${root}\\worktree`;
-  const remote = overrides.remote || REMOTE;
+  const has = (key) => Object.prototype.hasOwnProperty.call(overrides, key);
+  const root = has('root') ? overrides.root : ROOT;
+  const worktree = has('worktree') ? overrides.worktree : root + '\\worktree';
+  const remote = has('remote') ? overrides.remote : REMOTE;
+  const repositoryIdentity = has('repository_identity') ? overrides.repository_identity : repositoryIdentityDigest(root, worktree, remote);
   return {
-    repository_identity: `${root}|${worktree}|${remote}`,
+    repository_identity: repositoryIdentity,
     root,
     worktree,
     remote,
-    authorized_remote: overrides.authorized_remote || 'origin',
-    authorized_ref: overrides.authorized_ref || AUTHORIZED_REF,
-    live_server_ref_sha: overrides.live_server_ref_sha || 'a'.repeat(40),
+    authorized_remote: has('authorized_remote') ? overrides.authorized_remote : 'origin',
+    authorized_ref: has('authorized_ref') ? overrides.authorized_ref : AUTHORIZED_REF,
+    live_server_ref_sha: has('live_server_ref_sha') ? overrides.live_server_ref_sha : 'a'.repeat(40),
   };
 }
 
@@ -311,6 +338,47 @@ test('untrusted context cannot create protected-root hard-deny authority', () =>
   const result = rawEvaluate(input, { trustedAuthorityContext: fakeContext });
   assert.notEqual(result.reason_code, 'CATASTROPHIC_TARGET_DENIED');
   assert.equal(result.reason_code, 'TRUSTED_AUTHORITY_REQUIRED');
+});
+
+test('trusted root context rejects invalid canonical repository and Git bindings before issuance', () => {
+  const cases = [
+    ['mismatched repository identity', { repository_identity: '0'.repeat(64) }],
+    ['malformed trusted authorised remote', { authorized_remote: 'origin --mirror' }],
+    ['root/worktree inconsistency', { worktree: 'C:\\fixture\\other\\worktree' }],
+    ['invalid trusted repository remote identity', { remote: 'origin' }],
+    ['malformed authorised ref', { authorized_ref: 'refs/tags/topic' }],
+    ['malformed live-server-ref SHA', { live_server_ref_sha: 'a'.repeat(39) }],
+  ];
+  for (const [label, overrides] of cases) {
+    assert.throws(
+      () => createTrustedAuthority({ root_context: trustedRootContext(overrides) }),
+      /TRUSTED_ROOT_CONTEXT_INVALID/,
+      label,
+    );
+  }
+  const missingIdentity = trustedRootContext();
+  delete missingIdentity.repository_identity;
+  assert.throws(
+    () => createTrustedAuthority({ root_context: missingIdentity }),
+    /TRUSTED_ROOT_CONTEXT_INVALID/,
+    'missing repository identity',
+  );
+});
+
+test('canonical trusted repository binding accepts remote parity and detaches caller state', () => {
+  const remote = 'git@github.com:weijunswj/ai-agent-toolkit.git';
+  const rootContext = trustedRootContext({ remote });
+  const trusted = createTrustedAuthority({ root_context: rootContext });
+  rootContext.root = 'C:\\fixture\\other';
+  rootContext.worktree = 'C:\\fixture\\other\\worktree';
+  rootContext.remote = 'origin';
+  rootContext.authorized_remote = 'origin --mirror';
+  rootContext.authorized_ref = 'refs/tags/topic';
+  const result = rawEvaluate(baseInput(readOperation(), {
+    repository: { root: ROOT, worktree: WORKTREE, remote, resolution: { status: 'resolved', link_type: 'none' } },
+  }), { trustedAuthorityContext: trusted });
+  assert.equal(result.decision, 'allow');
+  assert.equal(result.reason_code, 'ROUTINE_READ_ALLOWED');
 });
 
 function overBudgetInput(operation, overrides = {}) {
@@ -910,6 +978,18 @@ test('valid typed git push consumes a matching opaque ticket', () => {
   const result = kernel.evaluate(issued.input, { trustedAuthorityContext: trusted });
   assert.equal(result.decision, 'allow');
   assert.equal(result.reason_code, 'TICKET_CONSUMED');
+});
+
+test('malformed typed git push cannot enter authoritative digest or ticket routing', () => {
+  const malformedRemote = { type: 'git.push', remote: 'origin --mirror', refspecs: ['HEAD:refs/heads/topic'], options: [], authorized_remote: 'origin --mirror', authorized_ref: AUTHORIZED_REF };
+  assert.equal(kernel.operationDigest(malformedRemote), null);
+  assert.equal(kernel.targetDigest(malformedRemote), null);
+  const result = kernel.evaluate(baseInput(malformedRemote));
+  assert.notEqual(result.decision, 'allow');
+  assert.equal(result.reason_code, 'BROADENED_PUSH_TARGET_UNSUPPORTED');
+  const malformedRef = { type: 'git.push', remote: 'origin', refspecs: ['HEAD:refs/tags/topic'], options: [], authorized_remote: 'origin', authorized_ref: 'refs/tags/topic' };
+  assert.equal(kernel.operationDigest(malformedRef), null);
+  assert.equal(kernel.targetDigest(malformedRef), null);
 });
 
 test('structural impact is closed and retains #342 targeted-repo-wide behavior', () => {

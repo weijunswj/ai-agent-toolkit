@@ -767,7 +767,7 @@ function normalizeOperation(node, traversalState = { total: 0 }, compoundDepth =
     const authorizedRemote = normalizeString(child(node, 'authorized_remote'));
     const authorizedRef = normalizeString(child(node, 'authorized_ref'));
     if (!remote.valid || !refspecs.valid || !options.valid || !authorizedRemote.valid || !authorizedRef.valid) return { valid: false, reason_code: 'TYPED_OPERATION_REQUIRED', operation_type: type };
-    if (!/^[A-Za-z0-9._-]+/.test(remote.value) || remote.value.startsWith('-') || remote.value !== authorizedRemote.value || refspecs.value.length !== 1 || refspecs.value[0] !== 'HEAD:' + authorizedRef.value || !authorizedRef.value.startsWith('refs/heads/') || authorizedRef.value.includes('..') || /[^A-Za-z0-9._\\/-]/.test(authorizedRef.value) || options.value.length > 2 || options.value.some((option) => !SAFE_PUSH_OPTIONS.has(option)) || new Set(options.value).size !== options.value.length) return { valid: false, reason_code: 'BROADENED_PUSH_TARGET_UNSUPPORTED', operation_type: type };
+    if (!isAuthorizedGitRemoteName(remote.value) || !isAuthorizedGitRemoteName(authorizedRemote.value) || remote.value !== authorizedRemote.value || refspecs.value.length !== 1 || refspecs.value[0] !== 'HEAD:' + authorizedRef.value || !isAuthorizedGitRef(authorizedRef.value) || options.value.length > 2 || options.value.some((option) => !SAFE_PUSH_OPTIONS.has(option)) || new Set(options.value).size !== options.value.length) return { valid: false, reason_code: 'BROADENED_PUSH_TARGET_UNSUPPORTED', operation_type: type };
     result.remote = remote.value; result.refspecs = refspecs.value; result.options = options.value; result.authorized_remote = authorizedRemote.value; result.authorized_ref = authorizedRef.value;
     operationClass = 'write';
   } else if (type === 'git.read') {
@@ -845,7 +845,8 @@ function normalizeRepository(node) {
   const rootKey = normalizePathForComparison(root.value);
   const worktreeKey = normalizePathForComparison(worktree.value);
   if (worktreeKey !== rootKey && !worktreeKey.startsWith(rootKey + '\\')) return { valid: false, reason_code: 'REPOSITORY_INVALID' };
-  return { valid: true, value: { root: root.value, worktree: worktree.value, remote: remoteIdentity.canonical, remoteInput: remote.value, resolution: resolution.value } };
+  const repositoryIdentity = digestCanonical({ root: rootKey, worktree: worktreeKey, remote: remoteIdentity.canonical });
+  return { valid: true, value: { root: root.value, worktree: worktree.value, remote: remoteIdentity.canonical, remoteInput: remote.value, resolution: resolution.value, root_identity_digest: digestCanonical(rootKey), worktree_identity_digest: digestCanonical(worktreeKey), repository_identity: repositoryIdentity } };
 }
 
 function normalizeAuthority(node) {
@@ -1056,6 +1057,38 @@ function validateRemoteIdentity(value) {
   return result;
 }
 
+function isAuthorizedGitRemoteName(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= LIMITS.scalarLength && /^[A-Za-z0-9._-]+$/.test(value) && !value.startsWith('-');
+}
+
+function isAuthorizedGitRef(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= LIMITS.scalarLength && /^refs\/heads\/[A-Za-z0-9._\/-]+$/.test(value) && !value.includes('..');
+}
+
+function canonicalTrustedRootContext(rootContext) {
+  const boundedString = (value) => typeof value === 'string' && value.length > 0 && value.length <= LIMITS.scalarLength;
+  if (!rootContext || typeof rootContext !== 'object' || !boundedString(rootContext.repository_identity) || !/^[a-f0-9]{64}$/.test(rootContext.repository_identity) || !boundedString(rootContext.root) || !boundedString(rootContext.worktree) || !boundedString(rootContext.remote) || !boundedString(rootContext.authorized_remote) || !boundedString(rootContext.authorized_ref) || !/^[a-f0-9]{40}$/.test(rootContext.live_server_ref_sha)) throw new Error('TRUSTED_ROOT_CONTEXT_INVALID');
+  if (!isAbsolutePath(rootContext.root) || !isAbsolutePath(rootContext.worktree)) throw new Error('TRUSTED_ROOT_CONTEXT_INVALID');
+  const rootKey = normalizePathForComparison(rootContext.root);
+  const worktreeKey = normalizePathForComparison(rootContext.worktree);
+  if (worktreeKey !== rootKey && !worktreeKey.startsWith(rootKey + '\\')) throw new Error('TRUSTED_ROOT_CONTEXT_INVALID');
+  const remoteIdentity = validateRemoteIdentity(rootContext.remote);
+  if (!remoteIdentity.valid || !isAuthorizedGitRemoteName(rootContext.authorized_remote) || !isAuthorizedGitRef(rootContext.authorized_ref)) throw new Error('TRUSTED_ROOT_CONTEXT_INVALID');
+  const repositoryIdentity = digestCanonical({ root: rootKey, worktree: worktreeKey, remote: remoteIdentity.canonical });
+  if (rootContext.repository_identity !== repositoryIdentity) throw new Error('TRUSTED_ROOT_CONTEXT_INVALID');
+  return Object.freeze({
+    repository_identity: repositoryIdentity,
+    root: rootKey,
+    worktree: worktreeKey,
+    root_identity_digest: digestCanonical(rootKey),
+    worktree_identity_digest: digestCanonical(worktreeKey),
+    remote: remoteIdentity.canonical,
+    authorized_remote: rootContext.authorized_remote,
+    authorized_ref: rootContext.authorized_ref,
+    live_server_ref_sha: rootContext.live_server_ref_sha,
+  });
+}
+
 function formatRemoteIdentity(value) {
   const result = validateRemoteIdentity(value);
   return result.valid ? result.canonical : null;
@@ -1153,11 +1186,11 @@ function authorityDigest(authority) {
 
 function trustedAuthorityState(authority, rootContext, nowFunction, maxEntries, maxLifetimeMs) {
   if (!authority || typeof authority !== 'object' || !['controller', 'executor'].includes(authority.role) || typeof authority.identity !== 'string' || authority.identity.length === 0 || !Array.isArray(authority.allowed_operation_types)) throw new Error('TRUSTED_AUTHORITY_INVALID');
-  if (!rootContext || typeof rootContext !== 'object' || typeof rootContext.root !== 'string' || typeof rootContext.worktree !== 'string' || typeof rootContext.remote !== 'string' || typeof rootContext.authorized_remote !== 'string' || typeof rootContext.authorized_ref !== 'string' || !/^[a-f0-9]{40}$/.test(rootContext.live_server_ref_sha)) throw new Error('TRUSTED_ROOT_CONTEXT_INVALID');
+  const trustedRoot = canonicalTrustedRootContext(rootContext);
   const allowed = new Set(authority.allowed_operation_types);
   for (const type of allowed) if (!OPERATION_TYPE_SET.has(type)) throw new Error('TRUSTED_OPERATION_LIMIT_INVALID');
   const clock = typeof nowFunction === 'function' ? nowFunction : () => Date.now();
-  const state = { authority: { role: authority.role, identity: authority.identity, provider: authority.provider, model: authority.model, assignment: authority.assignment, allowed_operation_types: [...allowed] }, authorityDigest: authorityDigest(authority), root: { root: rootContext.root, worktree: rootContext.worktree, remote: rootContext.remote, authorized_remote: rootContext.authorized_remote, authorized_ref: rootContext.authorized_ref, live_server_ref_sha: rootContext.live_server_ref_sha }, now: clock, maxEntries: Math.min(Number.isInteger(maxEntries) ? maxEntries : LIMITS.ticketEntries, LIMITS.ticketEntries), maxLifetimeMs: Math.min(Number.isInteger(maxLifetimeMs) ? maxLifetimeMs : LIMITS.ticketMaxLifetimeMs, LIMITS.ticketMaxLifetimeMs), records: new Map(), context: null };
+  const state = { authority: { role: authority.role, identity: authority.identity, provider: authority.provider, model: authority.model, assignment: authority.assignment, allowed_operation_types: [...allowed] }, authorityDigest: authorityDigest(authority), root: trustedRoot, now: clock, maxEntries: Math.min(Number.isInteger(maxEntries) ? maxEntries : LIMITS.ticketEntries, LIMITS.ticketEntries), maxLifetimeMs: Math.min(Number.isInteger(maxLifetimeMs) ? maxLifetimeMs : LIMITS.ticketMaxLifetimeMs, LIMITS.ticketMaxLifetimeMs), records: new Map(), context: null };
   return state;
 }
 
@@ -1282,7 +1315,7 @@ function trustedContextState(context) {
 const contextState = new WeakMap();
 
 function repositoryMatchesTrusted(repository, state) {
-  return repository.root === state.root.root && repository.worktree === state.root.worktree && repository.remote === validateRemoteIdentity(state.root.remote).canonical;
+  return Boolean(repository) && repository.root_identity_digest === state.root.root_identity_digest && repository.worktree_identity_digest === state.root.worktree_identity_digest && repository.repository_identity === state.root.repository_identity && repository.remote === state.root.remote;
 }
 
 function trustedOperationAllowed(operation, callerAuthority, state) {
