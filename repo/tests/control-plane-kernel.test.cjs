@@ -14,7 +14,7 @@ const runtimePath = path.join(repoRoot, 'repo', 'scripts', 'toolkit-control-plan
 const schemaPath = path.join(repoRoot, '_projects', 'development', 'control-plane-kernel', '_main', 'control-plane-contract.schema.json');
 const policyPath = path.join(repoRoot, '_projects', 'development', 'control-plane-kernel', '_main', 'control-plane-policy.json');
 const fixtureManifestPath = path.join(repoRoot, '_projects', 'development', 'control-plane-kernel', '_main', 'fixtures', 'fixture-manifest.json');
-const fixtureIds = new Set();
+const fixtureCounts = new Map();
 
 const TEST_ONLY_AUTHORITY = '__testCreateTrustedAuthorityContext';
 const TEST_ONLY_OBSERVE = '__testObserveRoot';
@@ -25,7 +25,7 @@ const NOW = '2026-08-16T14:00:00.000Z';
 const AUTHORIZED_REF = 'refs/heads/topic';
 
 function mark(...ids) {
-  for (const id of ids) fixtureIds.add(id);
+  for (const id of ids) fixtureCounts.set(id, (fixtureCounts.get(id) || 0) + 1);
 }
 
 function loadInstrumentedKernel() {
@@ -162,38 +162,191 @@ function catastrophicDelete() {
   return { type: 'filesystem.delete', target: target('') };
 }
 
-function makeCapturedKeyGraph(extraScalarKeys) {
+function makeCapturedKeyGraph(extraCapturedKeys) {
   const root = {};
-  const mids = [];
-  for (let index = 0; index < 64; index += 1) {
-    const mid = {};
-    root[`mid-${index}`] = mid;
-    mids.push(mid);
-  }
-  let leafIndex = 0;
-  for (let midIndex = 0; midIndex < mids.length; midIndex += 1) {
-    const leafCount = midIndex < 62 ? 2 : 1;
-    for (let index = 0; index < leafCount; index += 1) {
-      const leaf = Array.from({ length: 61 }, (_, itemIndex) => itemIndex);
-      leaf[`array-extra-${leafIndex}`] = `array-extra-${leafIndex}`;
-      leaf[Symbol(`array-symbol-${leafIndex}`)] = `array-symbol-${leafIndex}`;
-      mids[midIndex][`leaf-${leafIndex}`] = leaf;
-      leafIndex += 1;
+  const evidence = [];
+  const container = [[], []];
+  root.left = evidence;
+  root.right = container;
+  const addAccessor = (object, key) => Object.defineProperty(object, key, {
+    enumerable: true,
+    configurable: true,
+    get() { throw new Error('accessor probe'); },
+  });
+  const makeRecord = (arrayIndex, index, keyCount) => {
+    const keys = Array.from({ length: keyCount }, (_, keyIndex) => `r${arrayIndex}${index}_${keyIndex}`);
+    return new Proxy({}, {
+      ownKeys() { return keys; },
+      getOwnPropertyDescriptor() { return undefined; },
+    });
+  };
+  evidence[0] = 0;
+  addAccessor(evidence, 'array-evidence');
+  addAccessor(evidence, Symbol('array-symbol'));
+  const targetKeyCount = 59 + extraCapturedKeys;
+  assert.ok(targetKeyCount <= 64);
+  for (let arrayIndex = 0; arrayIndex < 2; arrayIndex += 1) {
+    const values = container[arrayIndex];
+    for (let index = 0; index < 63; index += 1) {
+      const keyCount = arrayIndex === 1 && index === 62 ? targetKeyCount : 64;
+      values[index] = makeRecord(arrayIndex, index, keyCount);
     }
   }
-  let remaining = extraScalarKeys;
-  let extraIndex = 0;
-  for (const mid of mids) {
-    while (remaining > 0 && Reflect.ownKeys(mid).length < 64) {
-      mid[`record-extra-${extraIndex}`] = `record-extra-value-${extraIndex}`;
-      extraIndex += 1;
-      remaining -= 1;
-    }
-  }
-  assert.equal(remaining, 0);
   return root;
 }
 
+function countDetachedNodes(root) {
+  const pending = [root];
+  const visited = new Set();
+  let count = 0;
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (!node || visited.has(node)) continue;
+    visited.add(node);
+    count += 1;
+    for (const entry of Array.isArray(node.children) ? node.children : []) pending.push(entry.node);
+  }
+  return count;
+}
+
+
+function makeObservedNodeGraph(extraScalarNodes = 0) {
+  const children = [];
+  for (let index = 0; index < 64; index += 1) {
+    const record = {};
+    const scalarCount = index < 62 ? 7 : 6 + (extraScalarNodes > 0 && index === 62 ? 1 : 0);
+    for (let scalarIndex = 0; scalarIndex < scalarCount; scalarIndex += 1) record[`value-${index}-${scalarIndex}`] = scalarIndex;
+    children.push(record);
+  }
+  return { children };
+}
+
+function makeDepthGraph(levels, key = 'hostile.path.key') {
+  let value = {};
+  for (let level = 0; level < levels; level += 1) value = { [key]: value };
+  return value;
+}
+
+function keyOfLength(index, length) {
+  const prefix = String(index).padStart(4, '0');
+  return prefix + 'k'.repeat(length - prefix.length);
+}
+
+function objectWithKeys(keys) {
+  const value = {};
+  for (const [index, key] of keys.entries()) Object.defineProperty(value, key, { value: index, enumerable: true, configurable: true, writable: true });
+  return value;
+}
+
+function makeIssueFlood() {
+  const root = {};
+  for (let index = 0; index < 17; index += 1) {
+    const child = {};
+    for (let keyIndex = 0; keyIndex < 64; keyIndex += 1) Object.defineProperty(child, `accessor-${keyIndex}`, { enumerable: true, configurable: true, get() { return keyIndex; } });
+    root[`child-${index}`] = child;
+  }
+  return root;
+}
+test('trusted protected roots remain hard-deny evidence when caller repository evidence is invalid', () => {
+  const trusted = createTrustedAuthority();
+  const conflictingRepository = {
+    root: `${ROOT}\\caller-root`,
+    worktree: `${ROOT}\\caller-root\\worktree`,
+    remote: REMOTE,
+    resolution: { status: 'resolved', link_type: 'none' },
+  };
+  const trustedRootDelete = rawEvaluate(baseInput({ type: 'filesystem.delete', target: { path: ROOT, resolution: { status: 'resolved', canonical_path: ROOT, link_type: 'none' } } }, { repository: conflictingRepository }), { trustedAuthorityContext: trusted });
+  assert.equal(trustedRootDelete.decision, 'deny');
+  assert.equal(trustedRootDelete.reason_code, 'CATASTROPHIC_TARGET_DENIED');
+
+  const malformedRepository = { root: ROOT, worktree: 42, remote: REMOTE, resolution: { status: 'resolved', link_type: 'none' } };
+  const trustedWorktreeDelete = rawEvaluate(baseInput({ type: 'filesystem.delete', target: { path: WORKTREE, resolution: { status: 'resolved', canonical_path: WORKTREE, link_type: 'none' } } }, { repository: malformedRepository }), { trustedAuthorityContext: trusted });
+  assert.equal(trustedWorktreeDelete.decision, 'deny');
+  assert.equal(trustedWorktreeDelete.reason_code, 'CATASTROPHIC_TARGET_DENIED');
+});
+
+test('trusted protected-root hard deny preserves finality and secret precedence', () => {
+  const trusted = createTrustedAuthority();
+  const conflictingRepository = {
+    root: `${ROOT}\\caller-root`,
+    worktree: `${ROOT}\\caller-root\\worktree`,
+    remote: REMOTE,
+    resolution: { status: 'resolved', link_type: 'none' },
+  };
+  const operation = { type: 'compound', components: [{ type: 'filesystem.delete', target: { path: ROOT, resolution: { status: 'resolved', canonical_path: ROOT, link_type: 'none' } } }, secretExfiltration()] };
+  const finality = rawEvaluate(baseInput(operation, { repository: conflictingRepository, authority: { ...baseInput(readOperation()).authority, finality_claim: true } }), { trustedAuthorityContext: trusted });
+  assert.equal(finality.decision, 'deny');
+  assert.equal(finality.reason_code, 'CALLER_FINALITY_REJECTED');
+  const secret = rawEvaluate(baseInput(operation, { repository: conflictingRepository }), { trustedAuthorityContext: trusted });
+  assert.equal(secret.decision, 'deny');
+  assert.equal(secret.reason_code, 'SECRET_EXFILTRATION_DENIED');
+});
+
+test('untrusted context cannot create protected-root hard-deny authority', () => {
+  const fakeContext = { root: ROOT, worktree: WORKTREE, authorized_remote: 'origin', authorized_ref: AUTHORIZED_REF, live_server_ref_sha: 'a'.repeat(40) };
+  const input = baseInput({ type: 'filesystem.delete', target: { path: ROOT, resolution: { status: 'resolved', canonical_path: ROOT, link_type: 'none' } } }, {
+    repository: { root: `${ROOT}\\caller-root`, worktree: `${ROOT}\\caller-root\\worktree`, remote: REMOTE, resolution: { status: 'resolved', link_type: 'none' } },
+  });
+  const result = rawEvaluate(input, { trustedAuthorityContext: fakeContext });
+  assert.notEqual(result.reason_code, 'CATASTROPHIC_TARGET_DENIED');
+  assert.equal(result.reason_code, 'TRUSTED_AUTHORITY_REQUIRED');
+});
+
+test('observed node accounting includes scalar, unknown, failure and opaque nodes at exact 512', () => {
+  const scalar = kernel[TEST_ONLY_OBSERVE]('scalar', null);
+  assert.equal(scalar.stats.observedNodes, 1);
+  const unknown = kernel[TEST_ONLY_OBSERVE](null, null);
+  assert.equal(unknown.stats.observedNodes, 1);
+  const opaque = kernel[TEST_ONLY_OBSERVE]({ ticket: {} }, 'input');
+  assert.equal(opaque.stats.observedNodes, 2);
+
+  const permitted = kernel[TEST_ONLY_OBSERVE](makeObservedNodeGraph(), null);
+  assert.equal(permitted.stats.observedNodes, 512);
+  assert.equal(permitted.issues.some((entry) => entry.code === 'OBSERVATION_NODE_LIMIT'), false);
+  assert.equal(countDetachedNodes(permitted.node), 512);
+
+  const exceeded = kernel[TEST_ONLY_OBSERVE](makeObservedNodeGraph(1), null);
+  assert.equal(exceeded.stats.observedNodes, 512);
+  assert.equal(exceeded.issues.some((entry) => entry.code === 'OBSERVATION_NODE_LIMIT'), true);
+  assert.equal(countDetachedNodes(exceeded.node), 512);
+});
+
+test('retained hostile string keys consume scalar and total string budgets exactly once', () => {
+  const scalarBoundary = kernel[TEST_ONLY_OBSERVE](objectWithKeys([keyOfLength(0, 4096)]), null);
+  assert.equal(scalarBoundary.stats.stringUnits, 4096);
+  assert.equal(scalarBoundary.issues.some((entry) => entry.code === 'OBSERVATION_SCALAR_LIMIT'), false);
+  const scalarExceeded = kernel[TEST_ONLY_OBSERVE](objectWithKeys([keyOfLength(0, 4097)]), null);
+  assert.equal(scalarExceeded.issues.some((entry) => entry.code === 'OBSERVATION_SCALAR_LIMIT'), true);
+
+  const totalBoundary = kernel[TEST_ONLY_OBSERVE](objectWithKeys(Array.from({ length: 32 }, (_, index) => keyOfLength(index, 4096))), null);
+  assert.equal(totalBoundary.stats.stringUnits, 131072);
+  assert.equal(totalBoundary.issues.some((entry) => entry.code === 'OBSERVATION_STRING_TOTAL_LIMIT'), false);
+  const totalExceeded = kernel[TEST_ONLY_OBSERVE](objectWithKeys([...Array.from({ length: 32 }, (_, index) => keyOfLength(index, 4096)), 'z']), null);
+  assert.equal(totalExceeded.stats.stringUnits, 131073);
+  assert.equal(totalExceeded.issues.some((entry) => entry.code === 'OBSERVATION_STRING_TOTAL_LIMIT'), true);
+});
+
+test('graph depth is numeric and hostile dotted keys do not inflate it', () => {
+  const maximum = kernel[TEST_ONLY_OBSERVE](makeDepthGraph(32), null);
+  assert.equal(maximum.issues.some((entry) => entry.code === 'OBSERVATION_GRAPH_DEPTH_LIMIT'), false);
+  const exceeded = kernel[TEST_ONLY_OBSERVE](makeDepthGraph(33), null);
+  assert.equal(exceeded.issues.some((entry) => entry.code === 'OBSERVATION_GRAPH_DEPTH_LIMIT'), true);
+});
+
+test('array structural length is excluded from the 64 non-structural key cap', () => {
+  const permitted = kernel[TEST_ONLY_OBSERVE](Array.from({ length: 64 }, (_, index) => index), null);
+  assert.equal(permitted.issues.some((entry) => entry.code === 'OBSERVATION_OWN_KEY_LIMIT'), false);
+  const exceededArray = Array.from({ length: 64 }, (_, index) => index);
+  exceededArray.extra = 0;
+  const exceeded = kernel[TEST_ONLY_OBSERVE](exceededArray, null);
+  assert.equal(exceeded.issues.some((entry) => entry.code === 'OBSERVATION_OWN_KEY_LIMIT'), true);
+});
+
+test('retained issue collection stays within 1024 entries with one overflow marker', () => {
+  const observation = kernel[TEST_ONLY_OBSERVE](makeIssueFlood(), null);
+  assert.equal(observation.issues.length, 1024);
+  assert.equal(observation.issues.filter((entry) => entry.code === 'OBSERVATION_ISSUE_LIMIT').length, 1);
+});
 test('default-off is side-effect-free and the public surface is private', () => {
   mark('default-off');
   const input = baseInput(readOperation());
@@ -284,31 +437,34 @@ test('hard-deny precedence is fixed across reversal, permutations, nesting, bran
 test('global compound components are counted at 128 and rejected at 129', () => {
   mark('compound-hard-deny-composition');
   const compound = (components) => ({ type: 'compound', components });
-  const reads = (count, prefix) => Array.from({ length: count }, (_, index) => readOperation(`src\\${prefix}-${index}.txt`));
+  const reads = (count) => Array.from({ length: count }, () => ({ type: 'git.read' }));
   const allowed = compound(Array.from({ length: 8 }, (_, index) => compound(reads(15, `branch-${index}`))));
   const rejected = compound(Array.from({ length: 8 }, (_, index) => compound(reads(index === 0 ? 16 : 15, `branch-over-${index}`))));
-  assert.equal(kernel.evaluate(baseInput(allowed, { authority: { ...baseInput(readOperation()).authority, allowed_operation_types: ['filesystem.read', 'compound'] } })).decision, 'allow');
+  assert.equal(kernel.evaluate(baseInput(allowed, { authority: { ...baseInput({ type: 'git.read' }).authority, allowed_operation_types: ['git.read', 'compound'] } })).decision, 'allow');
   assert.equal(kernel.evaluate(baseInput(rejected)).reason_code, 'COMPOUND_COMPONENT_LIMIT');
 });
 
 test('captured-key accounting includes mixed record, array-extra and symbol keys at 8192/8193', () => {
-  mark('compound-hard-deny-composition');
-  const permitted = kernel[TEST_ONLY_OBSERVE](makeCapturedKeyGraph(64), null);
+  const permitted = kernel[TEST_ONLY_OBSERVE](makeCapturedKeyGraph(0), null);
+  assert.equal(permitted.stats.capturedKeys, 8192);
   assert.equal(permitted.issues.some((issue) => issue.code === 'OBSERVATION_CAPTURED_KEY_LIMIT'), false);
   assert.equal(permitted.issues.some((issue) => issue.code === 'OBSERVATION_ARRAY_EXTRA_KEY'), true);
   assert.equal(permitted.issues.some((issue) => issue.code === 'OBSERVATION_SYMBOL_KEY'), true);
-  const exceeded = kernel[TEST_ONLY_OBSERVE](makeCapturedKeyGraph(65), null);
+  const exceeded = kernel[TEST_ONLY_OBSERVE](makeCapturedKeyGraph(1), null);
+  assert.equal(exceeded.stats.capturedKeys, 8193);
   assert.equal(exceeded.issues.some((issue) => issue.code === 'OBSERVATION_CAPTURED_KEY_LIMIT'), true);
 });
 
 test('ticket defaults, ranges, immutable private binding and replay are enforced', () => {
-  mark('controller-github-one-shot', 'replay-slot-reclamation', 'trusted-issuer-authority', 'trusted-authority-provenance', 'fake-ticket-store-denied', 'copied-ticket-denied', 'cross-authority-context-denied', 'ticket-scope-binding');
+  mark('trusted-issuer-authority', 'fake-ticket-store-denied', 'copied-ticket-denied');
   const operation = { type: 'filesystem.delete', target: target('src\\ticket.txt') };
   const trusted = createTrustedAuthority({ authority: { allowed_operation_types: ['filesystem.delete'] } });
   const omitted = ticketRequest(operation, { call_id: 'default-call' });
   delete omitted.max_uses;
   const ticket = trusted.issue(omitted);
   assert.equal(ticket.max_uses, 1);
+  assert.equal(ticket.issuer_role, 'controller');
+  assert.throws(() => trusted.issue({ ...ticketRequest(operation, { call_id: 'forged-issuer' }), issuer: 'caller' }), /TICKET_ISSUER_INPUT_FORBIDDEN/);
   assert.equal(Object.isFrozen(ticket), true);
   for (const maxUses of [1, 8]) assert.equal(trusted.issue(ticketRequest(operation, { call_id: `valid-${maxUses}`, max_uses: maxUses })).max_uses, maxUses);
   for (const maxUses of [0, 9, 1.5, '1', null, {}]) assert.throws(() => trusted.issue(ticketRequest(operation, { call_id: `invalid-${String(maxUses)}`, max_uses: maxUses })), /TICKET/);
@@ -322,8 +478,74 @@ test('ticket defaults, ranges, immutable private binding and replay are enforced
   assert.equal(fakeStoreResult.reason_code, 'TICKET_TRUST_SOURCE_REQUIRED');
 });
 
+test('trusted authority provenance is required for opaque ticket use', () => {
+  mark('trusted-authority-provenance');
+  const operation = { type: 'filesystem.delete', target: target('src\\provenance.txt') };
+  const trusted = createTrustedAuthority({ authority: { allowed_operation_types: ['filesystem.delete'] } });
+  const issued = withTicket(operation, trusted);
+  const result = rawEvaluate(issued.input);
+  assert.equal(result.reason_code, 'TICKET_TRUST_SOURCE_REQUIRED');
+});
+
+test('controller GitHub mutation ticket is one-shot', () => {
+  mark('controller-github-one-shot');
+  const operation = { type: 'github.mutation', repository: 'weijunswj/ai-agent-toolkit', action: 'comment', target: { kind: 'github-repository', digest: 'b'.repeat(64) } };
+  const trusted = createTrustedAuthority({ authority: { allowed_operation_types: ['github.mutation'] } });
+  const issued = withTicket(operation, trusted);
+  const first = rawEvaluate(issued.input, { trustedAuthorityContext: trusted });
+  assert.equal(first.decision, 'allow');
+  assert.equal(first.reason_code, 'TICKET_CONSUMED');
+  const replay = rawEvaluate(issued.input, { trustedAuthorityContext: trusted });
+  assert.equal(replay.decision, 'deny');
+  assert.equal(replay.reason_code, 'TICKET_REPLAY');
+});
+
+test('expired ticket slots are reclaimed before issuing a replacement', () => {
+  mark('replay-slot-reclamation');
+  let nowValue = Date.parse(NOW);
+  const operation = { type: 'filesystem.delete', target: target('src\\reclaim.txt') };
+  const trusted = createTrustedAuthority({ authority: { allowed_operation_types: ['filesystem.delete'] }, now: () => nowValue, maxEntries: 1 });
+  const first = trusted.issue(ticketRequest(operation, { call_id: 'reclaim-first', expires_at: '2026-08-16T14:05:00.000Z' }));
+  assert.equal(trusted.size(), 1);
+  nowValue = Date.parse('2026-08-16T14:06:00.000Z');
+  const second = trusted.issue(ticketRequest(operation, { call_id: 'reclaim-second', expires_at: '2026-08-16T14:10:00.000Z' }));
+  assert.notEqual(second, first);
+  assert.equal(trusted.size(), 1);
+});
+
+test('ticket provenance rejects a ticket across trusted authority contexts', () => {
+  mark('cross-authority-context-denied');
+  const operation = { type: 'filesystem.delete', target: target('src\\cross-context.txt') };
+  const issuer = createTrustedAuthority({ authority: { allowed_operation_types: ['filesystem.delete'] } });
+  const receiver = createTrustedAuthority({ authority: { allowed_operation_types: ['filesystem.delete'] } });
+  const issued = withTicket(operation, issuer);
+  const result = rawEvaluate(issued.input, { trustedAuthorityContext: receiver });
+  assert.equal(result.decision, 'deny');
+  assert.equal(result.reason_code, 'TICKET_AUTHORITY_CONTEXT_MISMATCH');
+});
+
+test('ticket scope is bound and cannot be widened by caller input', () => {
+  mark('ticket-scope-binding');
+  const operation = { type: 'filesystem.delete', target: target('src\\scope.txt') };
+  const trusted = createTrustedAuthority({ authority: { allowed_operation_types: ['filesystem.delete'] } });
+  const issued = withTicket(operation, trusted, { ticket: { scope: 'scope-a' }, input: { scope: 'scope-b' } });
+  const result = rawEvaluate(issued.input, { trustedAuthorityContext: trusted });
+  assert.equal(result.decision, 'deny');
+  assert.equal(result.reason_code, 'TICKET_BINDING_MISMATCH');
+});
+
+test('filesystem move requires exactly one source and one destination', () => {
+  mark('filesystem-move-cardinality');
+  const source = target('src\\move-source.txt');
+  const destination = target('src\\move-destination.txt');
+  const operation = { type: 'filesystem.move', source, destination, no_clobber: false };
+  assert.notEqual(kernel.operationDigest(operation), null);
+  assert.notEqual(kernel.targetDigest(operation), null);
+  assert.equal(kernel.operationDigest({ type: 'filesystem.move', source, no_clobber: false }), null);
+  assert.equal(kernel.operationDigest({ type: 'filesystem.move', destination, no_clobber: false }), null);
+});
 test('trusted root, resolver, role and digest gates cannot be broadened by caller metadata', () => {
-  mark('unknown-resolver-link-type', 'resolver-raw-canonical-conflict', 'external-digest-target-union', 'compound-component-role-limit', 'filesystem-move-cardinality');
+  mark('unknown-resolver-link-type', 'resolver-raw-canonical-conflict', 'external-digest-target-union', 'compound-component-role-limit');
   const unresolved = baseInput(readOperation(), { repository: { root: ROOT, worktree: WORKTREE, remote: REMOTE, resolution: { status: 'unknown', link_type: 'none' } } });
   assert.equal(kernel.evaluate(unresolved).reason_code, 'RESOLUTION_INVALID');
   const unknownLink = baseInput(readOperation(), { repository: { root: ROOT, worktree: WORKTREE, remote: REMOTE, resolution: { status: 'resolved', link_type: 'future-link' } } });
@@ -356,6 +578,9 @@ test('sensitive, catastrophic, finality, push and branch boundaries fail closed'
     const result = kernel.evaluate(baseInput({ type: 'git.push', remote: 'origin', refspecs: ['HEAD:refs/heads/topic'], options: [option], authorized_remote: 'origin', authorized_ref: AUTHORIZED_REF }));
     assert.notEqual(result.decision, 'allow', option);
   }
+  const remoteMismatch = kernel.evaluate(baseInput({ type: 'git.push', remote: 'upstream', refspecs: ['HEAD:refs/heads/topic'], options: [], authorized_remote: 'origin', authorized_ref: AUTHORIZED_REF }));
+  assert.equal(remoteMismatch.reason_code, 'BROADENED_PUSH_TARGET_UNSUPPORTED');
+
   for (const command of ['find . -delete', 'find . -exec rm -f {} +', 'sed -i synthetic file.txt', 'cat input>output', 'git push --follow-tags origin main', "cat $'.env'", 'git branch -f topic HEAD~2']) {
     const result = kernel.evaluate(baseInput({ type: 'shell', shell: 'posix', command }));
     assert.equal(result.reason_code, 'OPAQUE_OPERATION_UNSUPPORTED', command);
@@ -403,7 +628,13 @@ test('schema, policy and fixture manifest preserve the locked public contracts',
   assert.equal(fixtures.contract_version, kernel.CONTRACT_VERSION);
   assert.equal(fixtures.required_case_ids.length, 32);
   assert.equal(new Set(fixtures.required_case_ids).size, 32);
-  for (const id of fixtureIds) assert.ok(fixtures.required_case_ids.includes(id), id);
+  const manifestIds = fixtures.required_case_ids;
+  const executedIds = [...fixtureCounts.keys()];
+  assert.deepEqual([...executedIds].sort(), [...manifestIds].sort());
+  assert.equal(executedIds.some((id) => !manifestIds.includes(id)), false);
+  assert.equal(manifestIds.some((id) => !fixtureCounts.has(id)), false);
+  for (const id of manifestIds) assert.equal(fixtureCounts.get(id), 1, id);
+  assert.equal([...fixtureCounts.values()].reduce((total, count) => total + count, 0), manifestIds.length);
 });
 
 test('forged public entry points cannot expose trusted authority', () => {

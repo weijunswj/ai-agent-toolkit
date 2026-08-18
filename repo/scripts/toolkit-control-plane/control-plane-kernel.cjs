@@ -151,11 +151,15 @@ function sortOwnKeys(keys) {
 
 function issue(context, code, path, node) {
   if (node) node.invalid = true;
-  if (context.issues.length < LIMITS.retainedIssues) context.issues.push({ code, path });
-  else if (!context.issueLimitRecorded) {
-    context.issueLimitRecorded = true;
-    context.issues.push({ code: 'OBSERVATION_ISSUE_LIMIT', path: '$' });
+  if (context.issueLimitRecorded) return;
+  if (context.issues.length < LIMITS.retainedIssues - 1) {
+    context.issues.push({ code, path });
+    return;
   }
+  context.issueLimitRecorded = true;
+  const marker = { code: 'OBSERVATION_ISSUE_LIMIT', path: '$' };
+  if (context.issues.length < LIMITS.retainedIssues) context.issues.push(marker);
+  else context.issues[LIMITS.retainedIssues - 1] = marker;
 }
 
 function recordString(context, value, path, node) {
@@ -174,6 +178,7 @@ function registerKey(context, node, key, countForGlobal) {
   const token = keyToken(key);
   if (node.keyTokens.has(token)) return false;
   node.keyTokens.add(token);
+  if (typeof key === 'string') recordString(context, key, `${node.path}.${key}`, node);
   if (countForGlobal && key !== 'length') {
     context.capturedKeys += 1;
     if (context.capturedKeys > LIMITS.capturedKeys) issue(context, 'OBSERVATION_CAPTURED_KEY_LIMIT', node.path, node);
@@ -251,6 +256,13 @@ function addChild(node, key, child, descriptor) {
 }
 
 function observeValue(value, spec, context, path, depth) {
+  if (context.observedNodes >= LIMITS.observedNodes) return null;
+  context.observedNodes += 1;
+  if (depth > LIMITS.graphDepth) {
+    const node = makeNode('unknown', path);
+    issue(context, 'OBSERVATION_GRAPH_DEPTH_LIMIT', path, node);
+    return node;
+  }
   const type = safeType(value);
   if (spec === 'opaque-ticket') return opaqueTicketNode(value, path);
   if (type === 'string' || type === 'number' || type === 'boolean' || type === 'bigint' || type === 'undefined' || type === 'symbol') {
@@ -266,23 +278,12 @@ function observeValue(value, spec, context, path, depth) {
     issue(context, 'OBSERVATION_TYPE_INVALID', path, node);
     return node;
   }
-  if (depth > LIMITS.graphDepth) {
-    const node = makeNode('unknown', path);
-    issue(context, 'OBSERVATION_GRAPH_DEPTH_LIMIT', path, node);
-    return node;
-  }
-  if (context.observedNodes >= LIMITS.observedNodes) {
-    const node = makeNode('unknown', path);
-    issue(context, 'OBSERVATION_NODE_LIMIT', path, node);
-    return node;
-  }
   if (context.active.has(value)) {
     const node = makeNode('unknown', path);
     issue(context, 'OBSERVATION_CYCLE', path, node);
     return node;
   }
   context.active.add(value);
-  context.observedNodes += 1;
   let result;
   const arrayResult = safeArrayClassification(value);
   if (!arrayResult.ok) {
@@ -293,12 +294,11 @@ function observeValue(value, spec, context, path, depth) {
   } else {
     result = observeRecord(value, spec, context, path, depth);
   }
-  if (context.observedNodes > LIMITS.observedNodes) issue(context, 'OBSERVATION_NODE_LIMIT', path, result);
   context.active.delete(value);
   return result;
 }
 
-function probeRecordKey(value, node, key, spec, context, path) {
+function probeRecordKey(value, node, key, spec, context, path, depth) {
   registerKey(context, node, key, true);
   const descriptorResult = safeDescriptor(value, key);
   if (!descriptorResult.ok) {
@@ -318,15 +318,12 @@ function probeRecordKey(value, node, key, spec, context, path) {
   const metadata = { present: true, data: true, enumerable: descriptor.enumerable === true, configurable: descriptor.configurable === true, writable: descriptor.writable === true };
   node.metadata[key] = metadata;
   if (!metadata.enumerable) issue(context, 'OBSERVATION_HIDDEN_KEY', `${path}.${typeof key === 'string' ? key : '@symbol'}`, node);
-  const child = observeValue(descriptor.value, childSpec(spec, key), context, `${path}.${typeof key === 'string' ? key : '@symbol'}`, depthForChild(path));
-  addChild(node, key, child, metadata);
+  const childPath = `${path}.${typeof key === 'string' ? key : '@symbol'}`;
+  const child = observeValue(descriptor.value, childSpec(spec, key), context, childPath, depth + 1);
+  if (child) addChild(node, key, child, metadata);
+  else issue(context, 'OBSERVATION_NODE_LIMIT', childPath, node);
 }
 
-function depthForChild(path) {
-  let depth = 0;
-  for (let index = 0; index < path.length; index += 1) if (path[index] === '.') depth += 1;
-  return depth;
-}
 
 function observeRecord(value, spec, context, path, depth) {
   const node = makeNode('record', path);
@@ -357,13 +354,13 @@ function observeRecord(value, spec, context, path, depth) {
       continue;
     }
     seen.add(token);
-    probeRecordKey(value, node, key, spec, context, path);
+    probeRecordKey(value, node, key, spec, context, path, depth);
   }
   node.valid = node.prototypeValid && node.ownKeysComplete && !node.invalid;
   return node;
 }
 
-function probeArrayKey(value, node, key, spec, context, path) {
+function probeArrayKey(value, node, key, spec, context, path, depth) {
   registerKey(context, node, key, key !== 'length');
   const descriptorResult = safeDescriptor(value, key);
   if (!descriptorResult.ok) {
@@ -395,8 +392,10 @@ function probeArrayKey(value, node, key, spec, context, path) {
   const metadata = { present: true, data: true, enumerable: descriptor.enumerable === true, configurable: descriptor.configurable === true, writable: descriptor.writable === true };
   node.metadata[key] = metadata;
   if (!metadata.enumerable) issue(context, 'OBSERVATION_HIDDEN_KEY', `${path}.${typeof key === 'string' ? key : '@symbol'}`, node);
-  const child = observeValue(descriptor.value, spec === 'string-array' ? 'scalar' : childSpec(spec, key), context, `${path}.${typeof key === 'string' ? key : '@symbol'}`, depthForChild(path));
-  addChild(node, key, child, metadata);
+  const childPath = `${path}.${typeof key === 'string' ? key : '@symbol'}`;
+  const child = observeValue(descriptor.value, spec === 'string-array' ? 'scalar' : childSpec(spec, key), context, childPath, depth + 1);
+  if (child) addChild(node, key, child, metadata);
+  else issue(context, 'OBSERVATION_NODE_LIMIT', childPath, node);
 }
 
 function observeArray(value, spec, context, path, depth) {
@@ -410,15 +409,17 @@ function observeArray(value, spec, context, path, depth) {
   let keys = [];
   if (!keysResult.ok) issue(context, 'OBSERVATION_OWN_KEYS_FAILED', path, node);
   else keys = sortOwnKeys(keysResult.keys);
-  if (keys.length > LIMITS.ownKeysPerNode) {
-    issue(context, 'OBSERVATION_OWN_KEY_LIMIT', path, node);
-    keys = keys.slice(0, LIMITS.ownKeysPerNode);
-  }
   const hasLengthKey = keys.includes('length');
-  if (hasLengthKey || !keysResult.ok) probeArrayKey(value, node, 'length', spec, context, path);
+  let nonStructuralKeys = keys.filter((key) => key !== 'length');
+  if (nonStructuralKeys.length > LIMITS.ownKeysPerNode) {
+    issue(context, 'OBSERVATION_OWN_KEY_LIMIT', path, node);
+    nonStructuralKeys = nonStructuralKeys.slice(0, LIMITS.ownKeysPerNode);
+  }
+  keys = (hasLengthKey ? ['length'] : []).concat(nonStructuralKeys);
+  if (hasLengthKey || !keysResult.ok) probeArrayKey(value, node, 'length', spec, context, path, depth);
   else {
     issue(context, 'OBSERVATION_ARRAY_LENGTH_INVALID', path, node);
-    probeArrayKey(value, node, 'length', spec, context, path);
+    probeArrayKey(value, node, 'length', spec, context, path, depth);
   }
 
   const seen = new Set(['s:length']);
@@ -427,13 +428,13 @@ function observeArray(value, spec, context, path, depth) {
     const token = keyToken(key);
     if (seen.has(token)) continue;
     seen.add(token);
-    probeArrayKey(value, node, key, spec, context, path);
+    probeArrayKey(value, node, key, spec, context, path, depth);
   }
   if (node.lengthValid) {
     for (let index = 0; index < node.lengthValue; index += 1) {
       const key = String(index);
       if (node.keyTokens.has(keyToken(key))) continue;
-      probeArrayKey(value, node, key, spec, context, path);
+      probeArrayKey(value, node, key, spec, context, path, depth);
     }
   }
   node.ownKeysComplete = keysResult.ok;
@@ -882,10 +883,12 @@ function containsExternalEvidence(node) {
   return false;
 }
 
-function partialHardDeny(rootNode) {
+function partialHardDeny(rootNode, trustedState = null) {
   const state = { callerFinality: false, secretExfiltration: false, catastrophic: false, secretConfirmed: false, secretPossible: false, visited: new Set() };
   const repositoryEvidence = child(rootNode, 'repository');
-  const protectedRoots = [stringValue(child(repositoryEvidence, 'root')), stringValue(child(repositoryEvidence, 'worktree'))].filter((value) => typeof value === 'string');
+  const callerProtectedRoots = [stringValue(child(repositoryEvidence, 'root')), stringValue(child(repositoryEvidence, 'worktree'))];
+  const trustedProtectedRoots = trustedState && trustedState.root ? [trustedState.root.root, trustedState.root.worktree] : [];
+  const protectedRoots = trustedProtectedRoots.concat(callerProtectedRoots).filter((value) => typeof value === 'string');
   function walk(node) {
     if (!node || state.visited.has(node) || node.kind === 'opaque-ticket') return;
     state.visited.add(node);
@@ -1207,8 +1210,10 @@ function consumeForCanonicalOperation(inputValue, normalizedOperation, context, 
 }
 
 function evaluate(input, options = {}) {
+  const context = options.trustedAuthorityContext;
+  const state = trustedContextState(context);
   const observation = observeRoot(input, 'input');
-  const hardDeny = partialHardDeny(observation.node);
+  const hardDeny = partialHardDeny(observation.node, state);
   const secretClassification = hardDeny.secretClassification;
   if (hardDeny.reason) return buildResult({ decision: 'deny', reason_code: hardDeny.reason, secret_classification: hardDeny.reason === 'SECRET_EXFILTRATION_DENIED' ? 'confirmed' : secretClassification });
   const normalizedInput = normalizeInput(observation.node);
@@ -1225,8 +1230,6 @@ function evaluate(input, options = {}) {
   const combinedSecret = operationSecret === 'confirmed' || secretClassification === 'confirmed' ? 'confirmed' : operationSecret === 'possible' || secretClassification === 'possible' ? 'possible' : 'none';
   if (operationValue.type === 'shell') return buildResult({ reason_code: 'OPAQUE_OPERATION_UNSUPPORTED', operation_type: 'shell', secret_classification: combinedSecret });
 
-  const context = options.trustedAuthorityContext;
-  const state = trustedContextState(context);
   if (!state) return buildResult({ reason_code: inputValue.ticket ? 'TICKET_TRUST_SOURCE_REQUIRED' : 'TRUSTED_AUTHORITY_REQUIRED', operation_type: operationValue.type, operation_class: normalizedOperation.operationClass, target_class: normalizedOperation.targetClass, secret_classification: combinedSecret, operation_digest: null, target_digest: null });
   if (!repositoryMatchesTrusted(inputValue.repository, state)) return buildResult({ reason_code: 'REPOSITORY_INVALID', operation_type: operationValue.type, operation_class: normalizedOperation.operationClass, target_class: normalizedOperation.targetClass, secret_classification: combinedSecret });
   if (!['executor', 'controller'].includes(inputValue.authority.role)) return buildResult({ reason_code: 'AUTHORITY_IDENTITY_INVALID', operation_type: operationValue.type, operation_class: normalizedOperation.operationClass, target_class: normalizedOperation.targetClass, secret_classification: combinedSecret });
