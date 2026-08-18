@@ -355,6 +355,108 @@ test('known-field admission consumes the exact key budget once', () => {
   assert.equal(duplicate.stats.stringUnits, 21);
 });
 
+function proxyWithKnownField(value, key, options = {}) {
+  return new Proxy(value, {
+    ownKeys(target) {
+      if (options.failOwnKeys) throw new Error('ownKeys');
+      const keys = Object.prototype.hasOwnProperty.call(options, 'enumeratedKeys') ? options.enumeratedKeys : Reflect.ownKeys(target);
+      return options.omit ? keys.filter((candidate) => candidate !== key) : keys;
+    },
+    getOwnPropertyDescriptor(target, property) {
+      if (options.descriptorCalls && property === key) options.descriptorCalls.count += 1;
+      if (options.failDescriptor && property === key) throw new Error('descriptor');
+      return Reflect.getOwnPropertyDescriptor(target, property);
+    },
+  });
+}
+
+test('WEB137-001 retains known operation evidence when successful ownKeys omits it', () => {
+  const targetValue = baseInput(secretExfiltration());
+  assert.equal(Object.isExtensible(targetValue), true);
+  assert.equal(Object.getOwnPropertyDescriptor(targetValue, 'operation').configurable, true);
+  const input = proxyWithKnownField(targetValue, 'operation', { omit: true });
+  const observation = kernel[TEST_ONLY_OBSERVE](input, 'input');
+  assert.equal(observation.node.children.filter((entry) => entry.key === 'operation').length, 1);
+  assert.equal(observation.node.valid, false);
+  assert.equal(observation.issues.some((entry) => entry.code === 'OBSERVATION_KEY_ENUMERATION_MISMATCH'), true);
+  const result = kernel.evaluate(input);
+  assert.equal(result.decision, 'deny');
+  assert.equal(result.reason_code, 'SECRET_EXFILTRATION_DENIED');
+  assert.equal(result.secret_classification, 'confirmed');
+});
+
+test('known finality evidence survives successful ownKeys omission and keeps precedence', () => {
+  const operation = { type: 'compound', components: [catastrophicDelete(), secretExfiltration()] };
+  const input = baseInput(operation, {
+    authority: { ...baseInput(operation).authority, finality_claim: true },
+  });
+  const result = kernel.evaluate(proxyWithKnownField(input, 'authority', { omit: true }));
+  assert.equal(result.decision, 'deny');
+  assert.equal(result.reason_code, 'CALLER_FINALITY_REJECTED');
+});
+
+test('known catastrophic target evidence survives successful ownKeys omission', () => {
+  const input = proxyWithKnownField(baseInput(catastrophicDelete()), 'operation', { omit: true });
+  const result = kernel.evaluate(input);
+  assert.equal(result.decision, 'deny');
+  assert.equal(result.reason_code, 'CATASTROPHIC_TARGET_DENIED');
+});
+
+test('known operation remains hard-deny evidence when ownKeys fails', () => {
+  const input = proxyWithKnownField(baseInput(secretExfiltration()), 'operation', { failOwnKeys: true });
+  const observation = kernel[TEST_ONLY_OBSERVE](input, 'input');
+  assert.equal(observation.node.children.filter((entry) => entry.key === 'operation').length, 1);
+  assert.equal(observation.node.valid, false);
+  assert.equal(observation.issues.some((entry) => entry.code === 'OBSERVATION_OWN_KEYS_FAILED'), true);
+  const result = kernel.evaluate(input);
+  assert.equal(result.decision, 'deny');
+  assert.equal(result.reason_code, 'SECRET_EXFILTRATION_DENIED');
+  assert.equal(result.secret_classification, 'confirmed');
+});
+
+test('successful enumeration cannot invent an absent known field', () => {
+  const input = proxyWithKnownField({}, 'operation', { enumeratedKeys: ['operation'] });
+  const observation = kernel[TEST_ONLY_OBSERVE](input, 'input');
+  assert.equal(observation.node.children.length, 0);
+  assert.equal(observation.node.valid, false);
+  assert.equal(observation.stats.capturedKeys, 0);
+  assert.equal(observation.stats.stringUnits, 0);
+  assert.equal(observation.issues.some((entry) => entry.code === 'OBSERVATION_KEY_ENUMERATION_MISMATCH'), true);
+});
+
+test('absent known fields do not consume observation key or string budgets', () => {
+  const observation = kernel[TEST_ONLY_OBSERVE]({}, 'input');
+  assert.equal(observation.node.children.length, 0);
+  assert.equal(observation.stats.capturedKeys, 0);
+  assert.equal(observation.stats.stringUnits, 0);
+  assert.equal(observation.node.valid, true);
+});
+
+test('known descriptor failures remain invalid without invented evidence', () => {
+  for (const failOwnKeys of [false, true]) {
+    const input = proxyWithKnownField(baseInput(secretExfiltration()), 'operation', { failDescriptor: true, failOwnKeys });
+    assert.doesNotThrow(() => kernel[TEST_ONLY_OBSERVE](input, 'input'));
+    const observation = kernel[TEST_ONLY_OBSERVE](input, 'input');
+    assert.equal(observation.node.children.filter((entry) => entry.key === 'operation').length, 0);
+    assert.equal(observation.issues.some((entry) => entry.code === 'OBSERVATION_DESCRIPTOR_FAILED'), true);
+    const result = kernel.evaluate(input);
+    assert.notEqual(result.decision, 'allow');
+  }
+});
+
+test('known fields returned by ownKeys are observed once with one descriptor and key charge', () => {
+  const descriptorCalls = { count: 0 };
+  const input = proxyWithKnownField({ operation: { type: 'git.read' } }, 'operation', { descriptorCalls });
+  const observation = kernel[TEST_ONLY_OBSERVE](input, 'input');
+  assert.equal(descriptorCalls.count, 1);
+  assert.equal(observation.node.children.filter((entry) => entry.key === 'operation').length, 1);
+  assert.equal(observation.node.keyTokens.size, 1);
+  assert.equal(observation.stats.capturedKeys, 2);
+  assert.equal(observation.stats.stringUnits, 21);
+  const operationNode = observation.node.children.find((entry) => entry.key === 'operation').node;
+  assert.equal(operationNode.children.filter((entry) => entry.key === 'type').length, 1);
+});
+
 test('observed node accounting includes scalar, unknown, failure and opaque nodes at exact 512', () => {
   const scalar = kernel[TEST_ONLY_OBSERVE]('scalar', null);
   assert.equal(scalar.stats.observedNodes, 1);

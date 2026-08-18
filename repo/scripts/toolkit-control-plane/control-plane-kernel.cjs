@@ -325,6 +325,30 @@ function probeRecordKey(value, node, key, spec, context, path, depth) {
 }
 
 
+function probeKnownRecordKey(value, node, key, spec, context, path, depth) {
+  const fieldPath = path + '.' + key;
+  const descriptorResult = safeDescriptor(value, key);
+  if (!descriptorResult.ok) {
+    issue(context, 'OBSERVATION_DESCRIPTOR_FAILED', fieldPath, node);
+    return 'failed';
+  }
+  const descriptor = descriptorResult.descriptor;
+  if (!descriptor) return 'absent';
+  if (!registerKey(context, node, key, true)) return 'present';
+  if (!own(descriptor, 'value')) {
+    node.metadata[key] = { present: true, data: false, enumerable: Boolean(descriptor.enumerable) };
+    issue(context, 'OBSERVATION_ACCESSOR', fieldPath, node);
+    return 'present';
+  }
+  const metadata = { present: true, data: true, enumerable: descriptor.enumerable === true, configurable: descriptor.configurable === true, writable: descriptor.writable === true };
+  node.metadata[key] = metadata;
+  if (!metadata.enumerable) issue(context, 'OBSERVATION_HIDDEN_KEY', fieldPath, node);
+  const child = observeValue(descriptor.value, childSpec(spec, key), context, fieldPath, depth + 1);
+  if (child) addChild(node, key, child, metadata);
+  else issue(context, 'OBSERVATION_NODE_LIMIT', fieldPath, node);
+  return 'present';
+}
+
 function observeRecord(value, spec, context, path, depth) {
   const node = makeNode('record', path);
   const prototypeResult = safePrototype(value);
@@ -332,44 +356,51 @@ function observeRecord(value, spec, context, path, depth) {
   else if (prototypeResult.prototype !== Object.prototype && prototypeResult.prototype !== null) issue(context, 'OBSERVATION_PROTOTYPE_INVALID', path, node);
   else node.prototypeValid = true;
 
+  const known = knownFields(spec) || [];
+  const knownSet = new Set(known);
+  const knownStates = new Map();
+  let presentKnownCount = 0;
+  for (const key of known) {
+    const state = probeKnownRecordKey(value, node, key, spec, context, path, depth);
+    knownStates.set(key, state);
+    if (state === 'present') presentKnownCount += 1;
+  }
+
   const keysResult = safeOwnKeys(value);
-  let keys;
   if (!keysResult.ok) {
     issue(context, 'OBSERVATION_OWN_KEYS_FAILED', path, node);
-    keys = knownFields(spec) || [];
     node.ownKeysComplete = false;
   } else {
     const enumeratedKeys = sortOwnKeys(keysResult.keys);
-    const known = knownFields(spec) || [];
-    const knownSet = new Set(known);
-    const knownKeys = [];
+    const enumeratedKnown = new Set();
     const extraKeys = [];
     for (const key of enumeratedKeys) {
-      if (typeof key === 'string' && knownSet.has(key)) knownKeys.push(key);
+      if (typeof key === 'string' && knownSet.has(key)) enumeratedKnown.add(key);
       else extraKeys.push(key);
     }
-    keys = [];
-    for (const knownKey of known) {
-      for (const key of knownKeys) {
-        if (key === knownKey) keys.push(key);
+    for (const key of known) {
+      const state = knownStates.get(key);
+      const enumerated = enumeratedKnown.has(key);
+      if ((state === 'present' && !enumerated) || (state === 'absent' && enumerated)) {
+        issue(context, 'OBSERVATION_KEY_ENUMERATION_MISMATCH', path + '.' + key, node);
       }
     }
-    keys.push(...extraKeys);
-    node.ownKeysComplete = true;
-  }
-  if (keys.length > LIMITS.ownKeysPerNode) {
-    issue(context, 'OBSERVATION_OWN_KEY_LIMIT', path, node);
-    keys = keys.slice(0, LIMITS.ownKeysPerNode);
-  }
-  const seen = new Set();
-  for (const key of keys) {
-    const token = keyToken(key);
-    if (seen.has(token)) {
-      issue(context, 'OBSERVATION_DUPLICATE_KEY', path, node);
-      continue;
+    if (enumeratedKeys.length > LIMITS.ownKeysPerNode || presentKnownCount + extraKeys.length > LIMITS.ownKeysPerNode) {
+      issue(context, 'OBSERVATION_OWN_KEY_LIMIT', path, node);
     }
-    seen.add(token);
-    probeRecordKey(value, node, key, spec, context, path, depth);
+    const remaining = Math.max(0, LIMITS.ownKeysPerNode - presentKnownCount);
+    const keys = extraKeys.slice(0, remaining);
+    const seen = new Set();
+    for (const key of keys) {
+      const token = keyToken(key);
+      if (seen.has(token)) {
+        issue(context, 'OBSERVATION_DUPLICATE_KEY', path, node);
+        continue;
+      }
+      seen.add(token);
+      probeRecordKey(value, node, key, spec, context, path, depth);
+    }
+    node.ownKeysComplete = true;
   }
   node.valid = node.prototypeValid && node.ownKeysComplete && !node.invalid;
   return node;
