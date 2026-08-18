@@ -238,6 +238,27 @@ function objectWithKeys(keys) {
   return value;
 }
 
+function denseArrayWithExtras(extraCount, includeSymbol = false) {
+  const value = Array.from({ length: 64 }, (_, index) => index);
+  for (let index = 0; index < extraCount; index += 1) value[`!${String(index).padStart(3, '0')}`] = index;
+  if (includeSymbol) value[Symbol('array-extra')] = 'symbol-extra';
+  return value;
+}
+
+function nonStructuralArrayEntries(observation) {
+  return observation.node.children.filter((entry) => entry.key !== 'length');
+}
+
+function nonStructuralArrayKeyTokens(observation) {
+  return [...observation.node.keyTokens].filter((token) => token !== 's:length');
+}
+
+function overBudgetComponents(first, second) {
+  const value = Array.from({ length: 64 }, (_, index) => index === 0 ? first : index === 1 ? second : { type: 'filesystem.read' });
+  for (let index = 0; index < 64; index += 1) value[`!${String(index).padStart(3, '0')}`] = index;
+  return value;
+}
+
 function makeIssueFlood() {
   const root = {};
   for (let index = 0; index < 17; index += 1) {
@@ -507,6 +528,102 @@ test('array structural length is excluded from the 64 non-structural key cap', (
   assert.equal(exceeded.issues.some((entry) => entry.code === 'OBSERVATION_OWN_KEY_LIMIT'), true);
 });
 
+test('RUN139-G4-001 uses one shared array retention budget across dense indices and extras', () => {
+  const observation = kernel[TEST_ONLY_OBSERVE](denseArrayWithExtras(64), null);
+  const entries = nonStructuralArrayEntries(observation);
+  const keyTokens = nonStructuralArrayKeyTokens(observation);
+  assert.equal(observation.issues.some((entry) => entry.code === 'OBSERVATION_OWN_KEY_LIMIT'), true);
+  assert.equal(entries.length, 64);
+  assert.equal(keyTokens.length, 64);
+  assert.equal(new Set(entries.map((entry) => entry.key)).size, 64);
+  assert.equal(observation.stats.capturedKeys, 64);
+  assert.equal(observation.node.lengthValid, true);
+  assert.equal(observation.node.lengthValue, 64);
+});
+
+test('valid dense arrays admit canonical indices before extras at the exact boundary', () => {
+  const exact = kernel[TEST_ONLY_OBSERVE](denseArrayWithExtras(0), null);
+  assert.equal(exact.issues.some((entry) => entry.code === 'OBSERVATION_OWN_KEY_LIMIT'), false);
+  assert.equal(nonStructuralArrayEntries(exact).length, 64);
+  assert.equal(nonStructuralArrayKeyTokens(exact).length, 64);
+  assert.equal(exact.stats.capturedKeys, 64);
+
+  const over = kernel[TEST_ONLY_OBSERVE](denseArrayWithExtras(1), null);
+  assert.equal(over.issues.some((entry) => entry.code === 'OBSERVATION_OWN_KEY_LIMIT'), true);
+  assert.equal(nonStructuralArrayEntries(over).length, 64);
+  assert.equal(nonStructuralArrayKeyTokens(over).length, 64);
+  assert.equal(over.stats.capturedKeys, 64);
+  assert.equal(nonStructuralArrayEntries(over).some((entry) => entry.key === '!000'), false);
+});
+
+test('sparse valid-length arrays charge only present canonical indices and fill remaining slots with extras', () => {
+  const sparse = new Array(64);
+  sparse[0] = 0;
+  sparse[1] = 1;
+  for (let index = 0; index < 61; index += 1) sparse[`!${String(index).padStart(3, '0')}`] = index;
+  sparse[Symbol('array-extra')] = 'symbol-extra';
+  const observation = kernel[TEST_ONLY_OBSERVE](sparse, null);
+  const entries = nonStructuralArrayEntries(observation);
+  assert.equal(entries.length, 64);
+  assert.equal(nonStructuralArrayKeyTokens(observation).length, 64);
+  assert.equal(observation.stats.capturedKeys, 64);
+  assert.deepEqual(entries.filter((entry) => typeof entry.key === 'string' && /^[0-9]+$/.test(entry.key)).map((entry) => entry.key), ['0', '1']);
+  assert.equal(entries.some((entry) => typeof entry.key === 'symbol'), true);
+  assert.equal(entries.some((entry) => entry.key === '2'), false);
+});
+
+test('array ownKeys omission and invented numeric enumeration fail closed without erasing direct evidence', () => {
+  const secretArray = [secretExfiltration()];
+  const omitted = new Proxy(secretArray, {
+    ownKeys(targetValue) { return Reflect.ownKeys(targetValue).filter((key) => key !== '0'); },
+  });
+  const omittedObservation = kernel[TEST_ONLY_OBSERVE](omitted, 'operation-array');
+  assert.equal(omittedObservation.node.children.filter((entry) => entry.key === '0').length, 1);
+  assert.equal(omittedObservation.node.valid, false);
+  assert.equal(omittedObservation.issues.some((entry) => entry.code === 'OBSERVATION_KEY_ENUMERATION_MISMATCH'), true);
+  const result = kernel.evaluate(baseInput({ type: 'compound', components: omitted }));
+  assert.equal(result.decision, 'deny');
+  assert.equal(result.reason_code, 'SECRET_EXFILTRATION_DENIED');
+
+  const absent = new Proxy(new Array(1), {
+    ownKeys() { return ['0', 'length']; },
+  });
+  const absentObservation = kernel[TEST_ONLY_OBSERVE](absent, null);
+  assert.equal(absentObservation.node.children.filter((entry) => entry.key === '0').length, 0);
+  assert.equal(absentObservation.stats.capturedKeys, 0);
+  assert.equal(absentObservation.issues.some((entry) => entry.code === 'OBSERVATION_KEY_ENUMERATION_MISMATCH'), true);
+  assert.equal(absentObservation.node.valid, false);
+});
+
+test('valid-length canonical array evidence survives ownKeys failure', () => {
+  const components = new Proxy([secretExfiltration()], {
+    ownKeys() { throw new Error('ownKeys'); },
+  });
+  const observation = kernel[TEST_ONLY_OBSERVE](components, 'operation-array');
+  assert.equal(observation.node.children.filter((entry) => entry.key === '0').length, 1);
+  assert.equal(nonStructuralArrayKeyTokens(observation).length, 1);
+  assert.equal(observation.issues.some((entry) => entry.code === 'OBSERVATION_OWN_KEYS_FAILED'), true);
+  const result = kernel.evaluate(baseInput({ type: 'compound', components }));
+  assert.equal(result.decision, 'deny');
+  assert.equal(result.reason_code, 'SECRET_EXFILTRATION_DENIED');
+});
+
+test('array numeric admission does not duplicate descriptor, key, string or child accounting', () => {
+  const descriptorCalls = { count: 0 };
+  const input = new Proxy(Array.from({ length: 4 }, (_, index) => index), {
+    getOwnPropertyDescriptor(targetValue, key) {
+      if (key === '0') descriptorCalls.count += 1;
+      return Reflect.getOwnPropertyDescriptor(targetValue, key);
+    },
+  });
+  const observation = kernel[TEST_ONLY_OBSERVE](input, null);
+  assert.equal(descriptorCalls.count, 1);
+  assert.equal(observation.node.children.filter((entry) => entry.key === '0').length, 1);
+  assert.equal(nonStructuralArrayKeyTokens(observation).length, 4);
+  assert.equal(observation.stats.capturedKeys, 4);
+  assert.equal(observation.stats.stringUnits, 'length'.length + 4);
+});
+
 test('retained issue collection stays within 1024 entries with one overflow marker', () => {
   const observation = kernel[TEST_ONLY_OBSERVE](makeIssueFlood(), null);
   assert.equal(observation.issues.length, 1024);
@@ -576,6 +693,32 @@ test('Proxy-over-array length failure keeps numeric children reachable by hard d
   const result = kernel.evaluate(baseInput({ type: 'compound', components: proxiedComponents }));
   assert.equal(result.decision, 'deny');
   assert.equal(result.reason_code, 'SECRET_EXFILTRATION_DENIED');
+  const observation = kernel[TEST_ONLY_OBSERVE](proxiedComponents, 'operation-array');
+  assert.equal(nonStructuralArrayEntries(observation).length, 3);
+  assert.equal(nonStructuralArrayKeyTokens(observation).length, 3);
+  assert.equal(observation.issues.some((entry) => entry.code === 'OBSERVATION_OWN_KEYS_FAILED'), false);
+});
+
+test('hard-deny precedence remains reachable through an over-budget array envelope', () => {
+  const secretComponents = overBudgetComponents(secretExfiltration(), catastrophicDelete());
+  const secretObservation = kernel[TEST_ONLY_OBSERVE](secretComponents, 'operation-array');
+  assert.equal(nonStructuralArrayKeyTokens(secretObservation).length, 64);
+  assert.equal(nonStructuralArrayEntries(secretObservation).length, 64);
+  assert.equal(secretObservation.issues.some((entry) => entry.code === 'OBSERVATION_OWN_KEY_LIMIT'), true);
+  const secretResult = kernel.evaluate(baseInput({ type: 'compound', components: secretComponents }));
+  assert.equal(secretResult.decision, 'deny');
+  assert.equal(secretResult.reason_code, 'SECRET_EXFILTRATION_DENIED');
+
+  const finalityResult = kernel.evaluate(baseInput({ type: 'compound', components: secretComponents }, {
+    authority: { ...baseInput(readOperation()).authority, finality_claim: true },
+  }));
+  assert.equal(finalityResult.decision, 'deny');
+  assert.equal(finalityResult.reason_code, 'CALLER_FINALITY_REJECTED');
+
+  const catastrophicComponents = overBudgetComponents(catastrophicDelete(), { type: 'filesystem.read' });
+  const catastrophicResult = kernel.evaluate(baseInput({ type: 'compound', components: catastrophicComponents }));
+  assert.equal(catastrophicResult.decision, 'deny');
+  assert.equal(catastrophicResult.reason_code, 'CATASTROPHIC_TARGET_DENIED');
 });
 
 test('hard-deny precedence is fixed across reversal, permutations, nesting, branching and excess shape', () => {

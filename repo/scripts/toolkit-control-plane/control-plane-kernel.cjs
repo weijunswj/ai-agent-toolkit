@@ -444,6 +444,35 @@ function probeArrayKey(value, node, key, spec, context, path, depth) {
   else issue(context, 'OBSERVATION_NODE_LIMIT', childPath, node);
 }
 
+function probeCanonicalArrayIndex(value, node, key, spec, context, path, depth) {
+  const token = keyToken(key);
+  if (node.keyTokens.has(token)) return 'duplicate';
+  const childPath = `${path}.${key}`;
+  const descriptorResult = safeDescriptor(value, key);
+  if (!descriptorResult.ok) {
+    issue(context, 'OBSERVATION_DESCRIPTOR_FAILED', childPath, node);
+    return 'failed';
+  }
+  const descriptor = descriptorResult.descriptor;
+  if (!descriptor) {
+    node.metadata[key] = { present: false };
+    return 'absent';
+  }
+  registerKey(context, node, key, true);
+  if (!own(descriptor, 'value')) {
+    node.metadata[key] = { present: true, data: false, enumerable: Boolean(descriptor.enumerable) };
+    issue(context, 'OBSERVATION_ACCESSOR', childPath, node);
+    return 'present';
+  }
+  const metadata = { present: true, data: true, enumerable: descriptor.enumerable === true, configurable: descriptor.configurable === true, writable: descriptor.writable === true };
+  node.metadata[key] = metadata;
+  if (!metadata.enumerable) issue(context, 'OBSERVATION_HIDDEN_KEY', childPath, node);
+  const child = observeValue(descriptor.value, spec === 'string-array' ? 'scalar' : childSpec(spec, key), context, childPath, depth + 1);
+  if (child) addChild(node, key, child, metadata);
+  else issue(context, 'OBSERVATION_NODE_LIMIT', childPath, node);
+  return 'present';
+}
+
 function observeArray(value, spec, context, path, depth) {
   const node = makeNode('array', path);
   const prototypeResult = safePrototype(value);
@@ -456,30 +485,57 @@ function observeArray(value, spec, context, path, depth) {
   if (!keysResult.ok) issue(context, 'OBSERVATION_OWN_KEYS_FAILED', path, node);
   else keys = sortOwnKeys(keysResult.keys);
   const hasLengthKey = keys.includes('length');
-  let nonStructuralKeys = keys.filter((key) => key !== 'length');
+  const nonStructuralKeys = keys.filter((key) => key !== 'length');
   if (nonStructuralKeys.length > LIMITS.ownKeysPerNode) {
     issue(context, 'OBSERVATION_OWN_KEY_LIMIT', path, node);
-    nonStructuralKeys = nonStructuralKeys.slice(0, LIMITS.ownKeysPerNode);
   }
-  keys = (hasLengthKey ? ['length'] : []).concat(nonStructuralKeys);
   if (hasLengthKey || !keysResult.ok) probeArrayKey(value, node, 'length', spec, context, path, depth);
   else {
     issue(context, 'OBSERVATION_ARRAY_LENGTH_INVALID', path, node);
     probeArrayKey(value, node, 'length', spec, context, path, depth);
   }
 
-  const seen = new Set(['s:length']);
-  for (const key of keys) {
-    if (key === 'length') continue;
-    const token = keyToken(key);
-    if (seen.has(token)) continue;
-    seen.add(token);
-    probeArrayKey(value, node, key, spec, context, path, depth);
-  }
   if (node.lengthValid) {
+    const indexStates = new Map();
+    let presentCanonicalCount = 0;
     for (let index = 0; index < node.lengthValue; index += 1) {
       const key = String(index);
-      if (node.keyTokens.has(keyToken(key))) continue;
+      const state = probeCanonicalArrayIndex(value, node, key, spec, context, path, depth);
+      indexStates.set(key, state);
+      if (state === 'present') presentCanonicalCount += 1;
+    }
+    if (keysResult.ok) {
+      const enumeratedCanonical = new Set();
+      const extraKeys = [];
+      for (const key of keys) {
+        if (key === 'length') continue;
+        if (typeof key === 'string' && isCanonicalIndex(key) && Number(key) < node.lengthValue) enumeratedCanonical.add(key);
+        else extraKeys.push(key);
+      }
+      for (let index = 0; index < node.lengthValue; index += 1) {
+        const key = String(index);
+        const state = indexStates.get(key);
+        const enumerated = enumeratedCanonical.has(key);
+        if ((state === 'present' && !enumerated) || (state === 'absent' && enumerated) || (state === 'failed' && enumerated)) {
+          issue(context, 'OBSERVATION_KEY_ENUMERATION_MISMATCH', `${path}.${key}`, node);
+        }
+      }
+      if (presentCanonicalCount + extraKeys.length > LIMITS.ownKeysPerNode) issue(context, 'OBSERVATION_OWN_KEY_LIMIT', path, node);
+      const remaining = Math.max(0, LIMITS.ownKeysPerNode - presentCanonicalCount);
+      const seen = new Set(node.keyTokens);
+      for (const key of extraKeys.slice(0, remaining)) {
+        const token = keyToken(key);
+        if (seen.has(token)) continue;
+        seen.add(token);
+        probeArrayKey(value, node, key, spec, context, path, depth);
+      }
+    }
+  } else {
+    const seen = new Set(['s:length']);
+    for (const key of nonStructuralKeys.slice(0, LIMITS.ownKeysPerNode)) {
+      const token = keyToken(key);
+      if (seen.has(token)) continue;
+      seen.add(token);
       probeArrayKey(value, node, key, spec, context, path, depth);
     }
   }
