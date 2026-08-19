@@ -1,0 +1,52 @@
+{
+  "id": "development.repository-capability-registry",
+  "category": "development",
+  "name": "repository-capability-registry",
+  "title": "A2 Repository Capability Registry and Quiet Entry",
+  "module_path": "_projects/development/repository-capability-registry",
+  "main_path": "_projects/development/repository-capability-registry/_main",
+  "version": "1.0.0",
+  "version_policy": "semver",
+  "version_notes": "First source-only A2 repository capability registry, explicit owner decision contract, bounded atomic writer, and quiet-entry probe.",
+  "outputs": [],
+  "writes": {
+    "allowed": [],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "GEMINI.md",
+      ".agents/**",
+      ".codex-plugin/**",
+      ".claude-plugin/**",
+      "user-home/**",
+      "host-adapters/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false,
+  "project": {
+    "name": "A2 Repository Capability Registry and Quiet Entry",
+    "category": "development",
+    "summary": "Source-only closed repository capability decision registry with privacy-safe identity binding, fail-closed atomic persistence, and silent healthy repository entry."
+  },
+  "surface": {
+    "publish_as": "source_only",
+    "skill": {
+      "status": "not_applicable"
+    },
+    "mcp": {
+      "status": "not_applicable"
+    }
+  }
+}

@@ -1,0 +1,119 @@
+{
+  "schema": "toolkit.repository-capability-registry.v1",
+  "schema_version": 1,
+  "identity_contract": {
+    "id": "toolkit.repository-identity.v1",
+    "remote_contract": "toolkit.control-plane.remote-identity.v1",
+    "key": "sha256(canonicalSerialize(identity_contract, remote_contract, canonical_remote))",
+    "persisted_fields": [
+      "repository_id"
+    ],
+    "forbidden_identity_inputs": [
+      "local_path",
+      "worktree_path",
+      "raw_remote",
+      "remote_userinfo"
+    ]
+  },
+  "capability_contract": "toolkit.repository-capability.v1",
+  "capabilities": [
+    {
+      "id": "repository.governance",
+      "effect_id": "repository-governance-local-managed-materials-only",
+      "boundary_id": "no-github-provider-live-or-unrelated-capability-authority",
+      "question_id": "repository.governance.question",
+      "choice_semantic_ids": [
+        "repository.governance.decline",
+        "repository.governance.enable"
+      ],
+      "decision_semantic_ids": [
+        "repository.governance.decline",
+        "repository.governance.enable",
+        "repository.governance.disable",
+        "repository.governance.reopen"
+      ]
+    },
+    {
+      "id": "execution_loop",
+      "effect_id": "future-a3-supported-user-requested-loop-routing-only",
+      "boundary_id": "no-governance-github-provider-live-or-unrelated-capability-authority",
+      "question_id": "execution_loop.question",
+      "choice_semantic_ids": [
+        "execution_loop.decline",
+        "execution_loop.enable"
+      ],
+      "decision_semantic_ids": [
+        "execution_loop.decline",
+        "execution_loop.enable",
+        "execution_loop.disable",
+        "execution_loop.reopen"
+      ]
+    }
+  ],
+  "runtime_states": [
+    "unresolved",
+    "enabled",
+    "disabled"
+  ],
+  "durable_states": [
+    "enabled",
+    "disabled"
+  ],
+  "transitions": [
+    "unresolved->enable->enabled",
+    "unresolved->decline->disabled",
+    "disabled->enable->enabled",
+    "enabled->disable->disabled",
+    "disabled->disable->disabled",
+    "enabled->enable->enabled"
+  ],
+  "registry": {
+    "path": "~/.ai-agent-toolkit/user-state/repository-governance.v1.json",
+    "max_complete_bytes": 1048576,
+    "max_repositories": 128,
+    "max_capabilities_per_repository": 2,
+    "migration_state": "none",
+    "receipt_policy": "one_compact_current_receipt_per_capability",
+    "receipt_is_authority": false
+  },
+  "quiet_entry": {
+    "healthy_requirements": [
+      "exact_local_repository_identity",
+      "valid_current_registry_schema",
+      "current_authority_contract",
+      "both_a2_decisions_answered"
+    ],
+    "healthy_effects": {
+      "model_calls": 0,
+      "network_calls": 0,
+      "writes": 0,
+      "visible_output": 0,
+      "repeated_policy_prose": 0
+    },
+    "forbidden_healthy_calls": [
+      "bridge",
+      "native_host_hooks",
+      "github",
+      "provider",
+      "renderer"
+    ]
+  },
+  "codex_review": {
+    "owned_by": "N5",
+    "a2_consent_controlled": false,
+    "default_preference": "enabled_unless_explicitly_owner_disabled",
+    "absence_or_service_failure_persists_disabled": false
+  },
+  "forbidden_persistent_data": [
+    "credentials",
+    "secret_values",
+    "prompts",
+    "question_prose",
+    "repository_contents",
+    "unrestricted_tool_output",
+    "raw_private_paths",
+    "raw_remotes",
+    "remote_userinfo",
+    "environment_values"
+  ]
+}
