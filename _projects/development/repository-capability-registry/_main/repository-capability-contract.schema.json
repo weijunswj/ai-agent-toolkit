@@ -1,0 +1,230 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.repository-capability-registry.v1",
+  "title": "Toolkit Repository Capability Registry v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "identity_contract",
+    "capability_contract",
+    "contract_digest",
+    "registry_revision",
+    "migration",
+    "repositories"
+  ],
+  "properties": {
+    "schema": {
+      "const": "toolkit.repository-capability-registry.v1"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "identity_contract": {
+      "const": "toolkit.repository-identity.v1"
+    },
+    "capability_contract": {
+      "const": "toolkit.repository-capability.v1"
+    },
+    "contract_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "registry_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "migration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "none",
+            "in_progress",
+            "required"
+          ]
+        }
+      }
+    },
+    "repositories": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "repository_id",
+          "capabilities"
+        ],
+        "properties": {
+          "repository_id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "capabilities": {
+            "type": "array",
+            "maxItems": 2,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "capability_id",
+                "state",
+                "decision_kind",
+                "provenance",
+                "receipt"
+              ],
+              "properties": {
+                "capability_id": {
+                  "enum": [
+                    "repository.governance",
+                    "execution_loop"
+                  ]
+                },
+                "state": {
+                  "enum": [
+                    "enabled",
+                    "disabled"
+                  ]
+                },
+                "decision_kind": {
+                  "enum": [
+                    "enable",
+                    "decline",
+                    "disable"
+                  ]
+                },
+                "provenance": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "category",
+                    "channel",
+                    "scope_digest"
+                  ],
+                  "properties": {
+                    "category": {
+                      "const": "explicit-owner"
+                    },
+                    "channel": {
+                      "enum": [
+                        "capability-route",
+                        "combined-bank"
+                      ]
+                    },
+                    "scope_digest": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  }
+                },
+                "receipt": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "receipt_id",
+                    "repository_id",
+                    "capability_id",
+                    "prior_state",
+                    "resulting_state",
+                    "decision_kind",
+                    "provenance_category",
+                    "provenance_channel",
+                    "scope_digest",
+                    "registry_schema",
+                    "identity_contract",
+                    "capability_contract",
+                    "contract_digest",
+                    "registry_revision",
+                    "outcome",
+                    "decided_at"
+                  ],
+                  "properties": {
+                    "receipt_id": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "repository_id": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "capability_id": {
+                      "enum": [
+                        "repository.governance",
+                        "execution_loop"
+                      ]
+                    },
+                    "prior_state": {
+                      "enum": [
+                        "unresolved",
+                        "enabled",
+                        "disabled"
+                      ]
+                    },
+                    "resulting_state": {
+                      "enum": [
+                        "enabled",
+                        "disabled"
+                      ]
+                    },
+                    "decision_kind": {
+                      "enum": [
+                        "enable",
+                        "decline",
+                        "disable"
+                      ]
+                    },
+                    "provenance_category": {
+                      "const": "explicit-owner"
+                    },
+                    "provenance_channel": {
+                      "enum": [
+                        "capability-route",
+                        "combined-bank"
+                      ]
+                    },
+                    "scope_digest": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "registry_schema": {
+                      "const": "toolkit.repository-capability-registry.v1"
+                    },
+                    "identity_contract": {
+                      "const": "toolkit.repository-identity.v1"
+                    },
+                    "capability_contract": {
+                      "const": "toolkit.repository-capability.v1"
+                    },
+                    "contract_digest": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "registry_revision": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    },
+                    "outcome": {
+                      "const": "committed"
+                    },
+                    "decided_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
