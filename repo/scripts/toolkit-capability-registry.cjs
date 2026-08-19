@@ -1100,8 +1100,8 @@ function releaseLock(lock, options = {}) {
   }
 }
 
-function fsyncDirectory(directory, options = {}) {
-  injectTestFailure(options, 'post-rename-durability', 'REGISTRY_ATOMIC_REPLACE_FAILED');
+function fsyncDirectory(directory, options = {}, failurePoint = 'post-rename-durability') {
+  injectTestFailure(options, failurePoint, 'REGISTRY_ATOMIC_REPLACE_FAILED');
   if (process.platform === 'win32') return;
   let descriptor;
   try {
@@ -1135,8 +1135,9 @@ function atomicCommit(registryPath, registry, options, transaction) {
   }
   writeTransactionMarker(transaction);
   try {
+    fsyncDirectory(directory, options, 'pre-rename-marker-durability');
     fs.renameSync(tempPath, registryPath);
-    fsyncDirectory(directory, options);
+    fsyncDirectory(directory, options, 'post-rename-durability');
   } catch (_error) {
     fail('REGISTRY_ATOMIC_REPLACE_FAILED');
   }

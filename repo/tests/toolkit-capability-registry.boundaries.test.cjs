@@ -335,6 +335,47 @@ test('atomic replacement failure leaves the prior canonical bytes unchanged', (t
   for (const file of staged) fs.rmSync(path.join(path.dirname(ctx.registryPath), file), { force: true });
 });
 
+test('pre-rename marker-directory durability failure prevents canonical replacement', (t) => {
+  const ctx = sandbox();
+  t.after(() => cleanup(ctx));
+  runtime.writeCapabilityDecision({
+    ...options(ctx),
+    capabilityId: 'repository.governance',
+    operation: 'enable',
+    ownerAction: ownerAction(ctx, 'repository.governance'),
+    expectedRevision: 0,
+    expectedHash: null,
+  });
+  const before = fs.readFileSync(ctx.registryPath, 'utf8');
+  const current = runtime.getRepositoryStatus(options(ctx));
+  const originalRename = fs.renameSync;
+  let canonicalRenameCalls = 0;
+  fs.renameSync = (source, destination) => {
+    if (destination === ctx.registryPath) canonicalRenameCalls += 1;
+    return originalRename(source, destination);
+  };
+  try {
+    assert.equal(errorCode(() => runtime.writeCapabilityDecision({
+      ...options(ctx, { faultInjection: 'pre-rename-marker-durability' }),
+      capabilityId: 'execution_loop',
+      operation: 'enable',
+      ownerAction: ownerAction(ctx, 'execution_loop'),
+      expectedRevision: current.registry_revision,
+      expectedHash: current.snapshot_hash,
+    })), 'REGISTRY_ATOMIC_REPLACE_FAILED');
+  } finally {
+    fs.renameSync = originalRename;
+  }
+  assert.equal(canonicalRenameCalls, 0);
+  assert.equal(fs.readFileSync(ctx.registryPath, 'utf8'), before);
+  const raw = readRaw(ctx);
+  const record = raw.repositories.find((entry) => entry.repository_id === current.repository_id);
+  assert.equal(record.capabilities.find((entry) => entry.capability_id === 'repository.governance').state, 'enabled');
+  assert.equal(record.capabilities.some((entry) => entry.capability_id === 'execution_loop'), false);
+  assert.equal(transactionArtifacts(ctx).length, 1);
+  assertFailClosed(ctx);
+});
+
 test('post-rename durability failure leaves replacement consent fail-closed', (t) => {
   const ctx = sandbox();
   t.after(() => cleanup(ctx));
