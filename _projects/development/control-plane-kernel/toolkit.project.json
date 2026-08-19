@@ -1,0 +1,19 @@
+{
+  "id": "development.control-plane-kernel",
+  "category": "development",
+  "name": "control-plane-kernel",
+  "title": "A1-SOIR R1 Control-Plane Kernel",
+  "module_path": "_projects/development/control-plane-kernel",
+  "main_path": "_projects/development/control-plane-kernel/_main",
+  "version": "1.0.0",
+  "version_policy": "semver",
+  "version_notes": "First source-only A1-SOIR R1 replacement implementation with one canonical detached hostile-input observation traversal, hard-deny-only partial evidence, full validation, and canonical opaque ticket binding.",
+  "outputs": [],
+  "writes": { "allowed": [], "denied": [".env*", ".n8n-local/**", ".tmp/**", "**/*credential*", "**/*.key", "**/*.pem", "node_modules/**", "dist/**", "_dist/**", "AGENTS.md", "CLAUDE.md", "GEMINI.md", ".agents/**", ".codex-plugin/**", ".claude-plugin/**", "user-home/**", "host-adapters/**"] },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false,
+  "project": { "name": "A1-SOIR R1 Control-Plane Kernel", "category": "development", "summary": "Source-only, default-off, deterministic typed-operation control-plane kernel with one canonical detached safe observation traversal, hard-deny precedence, trusted opaque tickets, secret/finality fail-closed boundaries, and structural-impact assessment." },
+  "surface": { "publish_as": "source_only", "skill": { "status": "not_applicable" }, "mcp": { "status": "not_applicable" } }
+}
