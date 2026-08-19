@@ -17,7 +17,9 @@ const MAX_REPOSITORIES = 128;
 const MAX_CAPABILITIES_PER_REPOSITORY = 2;
 const MAX_LOCK_BYTES = 4096;
 const LOCK_SCHEMA = 'toolkit.repository-capability-registry.lock.v1';
+const TRANSACTION_SCHEMA = 'toolkit.repository-capability-registry.transaction.v1';
 const REGISTRY_BASENAME = 'repository-governance.v1.json';
+const MAX_TRANSACTION_BYTES = 4096;
 const CAPABILITIES = Object.freeze(['repository.governance', 'execution_loop']);
 const DURABLE_STATES = Object.freeze(['enabled', 'disabled']);
 const RUNTIME_STATES = Object.freeze(['unresolved', 'enabled', 'disabled']);
@@ -530,6 +532,10 @@ function lockPathForRegistry(registryPath) {
   return registryPath + '.lock';
 }
 
+function transactionPathForRegistry(registryPath, token) {
+  return registryPath + '.transaction-' + token.replaceAll('-', '');
+}
+
 function isRecognizedArtifact(name) {
   const prefix = REGISTRY_BASENAME + '.';
   if (!name.startsWith(prefix)) return false;
@@ -576,7 +582,7 @@ function ensureSafeDirectory(directory, create) {
   return true;
 }
 
-function inspectArtifacts(registryPath) {
+function inspectArtifacts(registryPath, ownedTransaction = null) {
   const directory = path.dirname(registryPath);
   if (!ensureSafeDirectory(directory, false)) return;
   let names;
@@ -585,7 +591,14 @@ function inspectArtifacts(registryPath) {
   } catch (_error) {
     fail('REGISTRY_STORAGE_UNAVAILABLE');
   }
-  if (names.some(isRecognizedArtifact)) fail('REGISTRY_INTERRUPTED_TRANSACTION');
+  const recognized = names.filter(isRecognizedArtifact);
+  if (recognized.length === 0) return;
+  if (!ownedTransaction
+    || recognized.length !== 1
+    || path.normalize(path.join(directory, recognized[0])) !== path.normalize(ownedTransaction.markerPath)) {
+    fail('REGISTRY_INTERRUPTED_TRANSACTION');
+  }
+  validateTransactionMarker(ownedTransaction);
 }
 
 function ensureSafeRegistryFile(registryPath) {
@@ -616,9 +629,9 @@ function snapshotHashForRegistry(registry) {
   return snapshotHashForBytes(Buffer.from(serializeRegistry(registry), 'utf8'));
 }
 
-function readSnapshot(options = {}) {
+function readSnapshot(options = {}, ownedTransaction = null) {
   const registryPath = registryPathForOptions(options);
-  inspectArtifacts(registryPath);
+  inspectArtifacts(registryPath, ownedTransaction);
   const directory = path.dirname(registryPath);
   if (!ensureSafeDirectory(directory, false)) {
     return {
@@ -1010,8 +1023,69 @@ function acquireLock(registryPath) {
   return { lockPath, token };
 }
 
-function releaseLock(lock) {
+function injectTestFailure(options, point, code) {
+  if (options && options.testOnly === true && options.faultInjection === point) fail(code);
+}
+
+function createTransaction(registryPath, lock, registry) {
+  const expectedHash = snapshotHashForRegistry(registry);
+  const markerPath = transactionPathForRegistry(registryPath, lock.token);
+  const marker = {
+    schema: TRANSACTION_SCHEMA,
+    token: lock.token,
+    expected_revision: registry.registry_revision,
+    expected_hash: expectedHash,
+  };
+  return {
+    markerPath,
+    token: lock.token,
+    expectedRevision: registry.registry_revision,
+    expectedHash,
+    markerBytes: Buffer.from(JSON.stringify(marker), 'utf8'),
+  };
+}
+
+function writeTransactionMarker(transaction) {
+  let descriptor = null;
+  try {
+    descriptor = fs.openSync(
+      transaction.markerPath,
+      fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY,
+      0o600,
+    );
+    fs.writeSync(descriptor, transaction.markerBytes, 0, transaction.markerBytes.length);
+    fs.fsyncSync(descriptor);
+    fs.closeSync(descriptor);
+    descriptor = null;
+  } catch (_error) {
+    if (descriptor !== null) {
+      try { fs.closeSync(descriptor); } catch (_ignored) {}
+    }
+    fail('REGISTRY_TRANSACTION_STAGE_FAILED');
+  }
+}
+
+function preserveTransactionMarker(transaction) {
+  try {
+    if (!fs.existsSync(transaction.markerPath)) writeTransactionMarker(transaction);
+  } catch (_error) {}
+}
+
+function finalizeTransaction(transaction, options) {
+  try {
+    validateTransactionMarker(transaction);
+    injectTestFailure(options, 'transaction-finalize', 'REGISTRY_TRANSACTION_FINALIZE_FAILED');
+    fs.unlinkSync(transaction.markerPath);
+    if (fs.existsSync(transaction.markerPath)) fail('REGISTRY_TRANSACTION_FINALIZE_FAILED');
+  } catch (_error) {
+    preserveTransactionMarker(transaction);
+    fail('REGISTRY_TRANSACTION_FINALIZE_FAILED');
+  }
+}
+
+function releaseLock(lock, options = {}) {
   if (!lock) return;
+  injectTestFailure(options, 'lock-release', 'REGISTRY_LOCK_RELEASE_FAILED');
   let parsed;
   try {
     parsed = JSON.parse(fs.readFileSync(lock.lockPath, 'utf8'));
@@ -1026,7 +1100,8 @@ function releaseLock(lock) {
   }
 }
 
-function fsyncDirectory(directory) {
+function fsyncDirectory(directory, options = {}) {
+  injectTestFailure(options, 'post-rename-durability', 'REGISTRY_ATOMIC_REPLACE_FAILED');
   if (process.platform === 'win32') return;
   let descriptor;
   try {
@@ -1041,7 +1116,7 @@ function fsyncDirectory(directory) {
   }
 }
 
-function atomicCommit(registryPath, registry) {
+function atomicCommit(registryPath, registry, options, transaction) {
   const directory = path.dirname(registryPath);
   const tempPath = registryPath + '.tmp-' + crypto.randomUUID().replaceAll('-', '');
   const bytes = Buffer.from(serializeRegistry(registry), 'utf8');
@@ -1058,19 +1133,39 @@ function atomicCommit(registryPath, registry) {
     }
     fail('REGISTRY_STAGE_FAILED');
   }
+  writeTransactionMarker(transaction);
   try {
     fs.renameSync(tempPath, registryPath);
-    fsyncDirectory(directory);
+    fsyncDirectory(directory, options);
   } catch (_error) {
     fail('REGISTRY_ATOMIC_REPLACE_FAILED');
   }
-  const committed = readSnapshot({ registryPath, testOnly: true });
+  const committed = readSnapshot({ registryPath, testOnly: true }, transaction);
+  injectTestFailure(options, 'post-rename-readback', 'REGISTRY_COMMIT_VERIFY_FAILED');
   if (!committed.present
     || committed.registry_revision !== registry.registry_revision
     || committed.snapshot_hash !== snapshotHashForRegistry(registry)) {
     fail('REGISTRY_COMMIT_VERIFY_FAILED');
   }
   return committed;
+}
+
+function commitRegistryWithFinality(registryPath, registry, options, lock) {
+  let transaction = null;
+  let lockReleased = false;
+  try {
+    transaction = createTransaction(registryPath, lock, registry);
+    const committed = atomicCommit(registryPath, registry, options, transaction);
+    releaseLock(lock, options);
+    lockReleased = true;
+    finalizeTransaction(transaction, options);
+    return committed;
+  } catch (error) {
+    if (!lockReleased) {
+      try { releaseLock(lock, options); } catch (_ignored) {}
+    }
+    throw error;
+  }
 }
 
 function currentSnapshotForMutation(options) {
@@ -1095,6 +1190,7 @@ function writeCapabilityDecision(options = {}) {
   if (before.registry_revision !== options.expectedRevision || before.snapshot_hash !== options.expectedHash) fail('REGISTRY_CAS_MISMATCH');
   ensureStateDirectoryForWrite(registryPath);
   const lock = acquireLock(registryPath);
+  let finalityHandled = false;
   try {
     const current = currentSnapshotForMutation(options);
     const registry = current.present ? clone(current.registry) : emptyRegistry();
@@ -1107,7 +1203,8 @@ function writeCapabilityDecision(options = {}) {
     }, nextRevision, options.decisionTimestamp);
     registry.registry_revision = nextRevision;
     validateRegistry(registry);
-    const committed = atomicCommit(registryPath, registry);
+    const committed = commitRegistryWithFinality(registryPath, registry, options, lock);
+    finalityHandled = true;
     const record = committed.registry.repositories.find((entry) => entry.repository_id === identity.repository_id);
     const entry = record.capabilities.find((candidate) => candidate.capability_id === capabilityId);
     return {
@@ -1119,7 +1216,9 @@ function writeCapabilityDecision(options = {}) {
       receipt_id: entry.receipt.receipt_id,
     };
   } finally {
-    releaseLock(lock);
+    if (!finalityHandled) {
+      try { releaseLock(lock, options); } catch (_ignored) {}
+    }
   }
 }
 
@@ -1199,6 +1298,7 @@ function writeCombinedDecisions(options = {}) {
   const registryPath = registryPathForOptions(options);
   ensureStateDirectoryForWrite(registryPath);
   const lock = acquireLock(registryPath);
+  let finalityHandled = false;
   try {
     const current = currentSnapshotForMutation(options);
     const currentStates = readCapabilityMap(current.registry, identity.repository_id);
@@ -1216,7 +1316,8 @@ function writeCombinedDecisions(options = {}) {
     }
     registry.registry_revision = nextRevision;
     validateRegistry(registry);
-    const committed = atomicCommit(registryPath, registry);
+    const committed = commitRegistryWithFinality(registryPath, registry, options, lock);
+    finalityHandled = true;
     return {
       status: 'committed',
       repository_id: identity.repository_id,
@@ -1224,7 +1325,9 @@ function writeCombinedDecisions(options = {}) {
       capabilities: readCapabilityMap(committed.registry, identity.repository_id),
     };
   } finally {
-    releaseLock(lock);
+    if (!finalityHandled) {
+      try { releaseLock(lock, options); } catch (_ignored) {}
+    }
   }
 }
 
@@ -1304,3 +1407,32 @@ module.exports = {
   writeCapabilityDecision,
   writeCombinedDecisions,
 };
+function validateTransactionMarker(transaction) {
+  let stat;
+  try {
+    stat = fs.lstatSync(transaction.markerPath);
+  } catch (_error) {
+    fail('REGISTRY_INTERRUPTED_TRANSACTION');
+  }
+  if (!stat.isFile() || stat.isSymbolicLink()) fail('REGISTRY_INTERRUPTED_TRANSACTION');
+  let bytes;
+  try {
+    bytes = fs.readFileSync(transaction.markerPath);
+  } catch (_error) {
+    fail('REGISTRY_INTERRUPTED_TRANSACTION');
+  }
+  if (bytes.length > MAX_TRANSACTION_BYTES) fail('REGISTRY_INTERRUPTED_TRANSACTION');
+  let marker;
+  try {
+    marker = JSON.parse(bytes.toString('utf8'));
+  } catch (_error) {
+    fail('REGISTRY_INTERRUPTED_TRANSACTION');
+  }
+  if (!exactKeys(marker, ['schema', 'token', 'expected_revision', 'expected_hash'])
+    || marker.schema !== TRANSACTION_SCHEMA
+    || marker.token !== transaction.token
+    || marker.expected_revision !== transaction.expectedRevision
+    || marker.expected_hash !== transaction.expectedHash) {
+    fail('REGISTRY_INTERRUPTED_TRANSACTION');
+  }
+}

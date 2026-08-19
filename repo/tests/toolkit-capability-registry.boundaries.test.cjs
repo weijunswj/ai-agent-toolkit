@@ -90,6 +90,19 @@ function writeRaw(ctx, value) {
   fs.writeFileSync(ctx.registryPath, JSON.stringify(value), 'utf8');
 }
 
+function transactionArtifacts(ctx) {
+  return fs.readdirSync(path.dirname(ctx.registryPath))
+    .filter((name) => name.startsWith(path.basename(ctx.registryPath) + '.transaction-'));
+}
+
+function assertFailClosed(ctx) {
+  const statusResult = runtime.getRepositoryStatus(options(ctx));
+  assert.equal(statusResult.status, 'actionable');
+  assert.equal(statusResult.reason_code, 'REGISTRY_INTERRUPTED_TRANSACTION');
+  const probeResult = runtime.probeRepository(options(ctx));
+  assert.equal(probeResult.reason_code, 'REGISTRY_INTERRUPTED_TRANSACTION');
+}
+
 test('registry bytes over 1 MiB are rejected before JSON.parse', (t) => {
   const ctx = sandbox();
   t.after(() => cleanup(ctx));
@@ -320,6 +333,120 @@ test('atomic replacement failure leaves the prior canonical bytes unchanged', (t
   const staged = fs.readdirSync(path.dirname(ctx.registryPath)).filter((name) => name.startsWith('repository-governance.v1.json.tmp-'));
   assert.equal(staged.length, 1);
   for (const file of staged) fs.rmSync(path.join(path.dirname(ctx.registryPath), file), { force: true });
+});
+
+test('post-rename durability failure leaves replacement consent fail-closed', (t) => {
+  const ctx = sandbox();
+  t.after(() => cleanup(ctx));
+  const initial = runtime.getRepositoryStatus(options(ctx));
+  assert.equal(errorCode(() => runtime.writeCapabilityDecision({
+    ...options(ctx, { faultInjection: 'post-rename-durability' }),
+    capabilityId: 'repository.governance',
+    operation: 'enable',
+    ownerAction: ownerAction(ctx, 'repository.governance'),
+    expectedRevision: initial.registry_revision,
+    expectedHash: initial.snapshot_hash,
+  })), 'REGISTRY_ATOMIC_REPLACE_FAILED');
+  assertFailClosed(ctx);
+  const raw = readRaw(ctx);
+  assert.equal(raw.registry_revision, 1);
+  assert.equal(raw.repositories[0].capabilities[0].state, 'enabled');
+  const markerFiles = transactionArtifacts(ctx);
+  assert.equal(markerFiles.length, 1);
+  const markerPath = path.join(path.dirname(ctx.registryPath), markerFiles[0]);
+  const markerText = fs.readFileSync(markerPath, 'utf8');
+  assert.equal(markerText.includes(ctx.root), false);
+  assert.equal(markerText.includes(REMOTE), false);
+  assert.equal(markerText.includes('codex_review'), false);
+  assert.ok(Buffer.byteLength(markerText, 'utf8') <= 4096);
+  const marker = JSON.parse(markerText);
+  assert.deepEqual(Object.keys(marker).sort(), ['expected_hash', 'expected_revision', 'schema', 'token']);
+  assert.equal(marker.expected_revision, 1);
+  assert.match(marker.expected_hash, /^[a-f0-9]{64}$/);
+});
+
+test('post-rename canonical readback failure leaves replacement consent fail-closed', (t) => {
+  const ctx = sandbox();
+  t.after(() => cleanup(ctx));
+  const initial = runtime.getRepositoryStatus(options(ctx));
+  assert.equal(errorCode(() => runtime.writeCapabilityDecision({
+    ...options(ctx, { faultInjection: 'post-rename-readback' }),
+    capabilityId: 'repository.governance',
+    operation: 'enable',
+    ownerAction: ownerAction(ctx, 'repository.governance'),
+    expectedRevision: initial.registry_revision,
+    expectedHash: initial.snapshot_hash,
+  })), 'REGISTRY_COMMIT_VERIFY_FAILED');
+  assertFailClosed(ctx);
+  assert.equal(readRaw(ctx).repositories[0].capabilities[0].state, 'enabled');
+  assert.equal(transactionArtifacts(ctx).length, 1);
+});
+
+test('lock-release failure leaves replacement consent fail-closed', (t) => {
+  const ctx = sandbox();
+  t.after(() => cleanup(ctx));
+  const initial = runtime.getRepositoryStatus(options(ctx));
+  assert.equal(errorCode(() => runtime.writeCapabilityDecision({
+    ...options(ctx, { faultInjection: 'lock-release' }),
+    capabilityId: 'repository.governance',
+    operation: 'enable',
+    ownerAction: ownerAction(ctx, 'repository.governance'),
+    expectedRevision: initial.registry_revision,
+    expectedHash: initial.snapshot_hash,
+  })), 'REGISTRY_LOCK_RELEASE_FAILED');
+  assertFailClosed(ctx);
+  assert.equal(readRaw(ctx).repositories[0].capabilities[0].state, 'enabled');
+  assert.equal(transactionArtifacts(ctx).length, 1);
+  assert.equal(fs.existsSync(runtime.lockPathForTest(ctx.registryPath)), true);
+});
+
+test('transaction finalisation failure leaves replacement consent fail-closed', (t) => {
+  const ctx = sandbox();
+  t.after(() => cleanup(ctx));
+  const initial = runtime.getRepositoryStatus(options(ctx));
+  assert.equal(errorCode(() => runtime.writeCapabilityDecision({
+    ...options(ctx, { faultInjection: 'transaction-finalize' }),
+    capabilityId: 'repository.governance',
+    operation: 'enable',
+    ownerAction: ownerAction(ctx, 'repository.governance'),
+    expectedRevision: initial.registry_revision,
+    expectedHash: initial.snapshot_hash,
+  })), 'REGISTRY_TRANSACTION_FINALIZE_FAILED');
+  assertFailClosed(ctx);
+  assert.equal(readRaw(ctx).repositories[0].capabilities[0].state, 'enabled');
+  assert.equal(transactionArtifacts(ctx).length, 1);
+  assert.equal(fs.existsSync(runtime.lockPathForTest(ctx.registryPath)), false);
+});
+
+test('successful replacement finalises transaction evidence after complete success', (t) => {
+  const ctx = sandbox();
+  t.after(() => cleanup(ctx));
+  const initial = runtime.getRepositoryStatus(options(ctx));
+  const committed = runtime.writeCapabilityDecision({
+    ...options(ctx),
+    capabilityId: 'repository.governance',
+    operation: 'enable',
+    ownerAction: ownerAction(ctx, 'repository.governance'),
+    expectedRevision: initial.registry_revision,
+    expectedHash: initial.snapshot_hash,
+  });
+  assert.equal(committed.status, 'committed');
+  assert.equal(committed.repository_id, initial.repository_id);
+  assert.equal(committed.capability_id, 'repository.governance');
+  assert.equal(committed.state, 'enabled');
+  assert.equal(committed.registry_revision, 1);
+  assert.match(committed.receipt_id, /^[a-f0-9]{64}$/);
+  assert.deepEqual(transactionArtifacts(ctx), []);
+  assert.equal(fs.existsSync(runtime.lockPathForTest(ctx.registryPath)), false);
+  const status = runtime.getRepositoryStatus(options(ctx));
+  assert.equal(status.status, 'unresolved');
+  assert.equal(status.registry_revision, 1);
+  assert.equal(status.capabilities['repository.governance'].state, 'enabled');
+  assert.equal(status.capabilities['repository.governance'].receipt_id, committed.receipt_id);
+  const repeat = runtime.getRepositoryStatus(options(ctx));
+  assert.equal(repeat.registry_revision, status.registry_revision);
+  assert.equal(repeat.capabilities['repository.governance'].receipt_id, committed.receipt_id);
+  assert.deepEqual(transactionArtifacts(ctx), []);
 });
 
 test('scope-bound owner provenance rejects cross-capability and wrong-channel answers', (t) => {
