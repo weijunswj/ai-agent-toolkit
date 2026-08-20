@@ -55,7 +55,7 @@ const TRUSTED_CONTROLLER = {
   finality_claim: false,
   allowed_operation_types: [
     'filesystem.read', 'filesystem.write', 'filesystem.create', 'filesystem.move', 'filesystem.delete',
-    'git.read', 'git.branch', 'git.push', 'github.read', 'github.mutation', 'network.request',
+    'git.read', 'git.branch', 'git.commit', 'git.push', 'github.read', 'github.mutation', 'network.request',
     'external.mutation', 'compound', 'shell',
   ],
 };
@@ -118,6 +118,34 @@ function target(relativePath, overrides = {}) {
 
 function readOperation(relativePath = 'src\\file.txt') {
   return { type: 'filesystem.read', target: target(relativePath) };
+}
+
+function digestForTest(value) {
+  return crypto.createHash('sha256').update(canonicalSerializeForTest(value), 'utf8').digest('hex');
+}
+
+function gitCommitOperation(overrides = {}) {
+  const authorizedPaths = overrides.authorized_paths || ['src/file.txt'];
+  const commitMessage = overrides.commit_message || 'bounded commit';
+  return {
+    type: 'git.commit',
+    expected_head: 'a'.repeat(40),
+    expected_tree: 'b'.repeat(40),
+    authorized_paths: authorizedPaths,
+    authorized_paths_digest: overrides.authorized_paths_digest || digestForTest([...authorizedPaths].sort()),
+    expected_index_digest: 'c'.repeat(64),
+    intended_tree: 'd'.repeat(40),
+    intended_change_digest: 'e'.repeat(64),
+    commit_message: commitMessage,
+    commit_message_digest: overrides.commit_message_digest || digestForTest(commitMessage),
+    amend: false,
+    allow_empty: false,
+    author_mutation: false,
+    committer_mutation: false,
+    config_mutation: false,
+    options: [],
+    ...overrides,
+  };
 }
 
 function baseInput(operation, overrides = {}) {
@@ -971,6 +999,28 @@ test('array length descriptor accepts either writable boolean value', () => {
   assert.equal(kernel.evaluate(input).decision, 'allow');
 });
 
+test('valid typed git commit consumes a matching opaque ticket and preserves exact bindings', () => {
+  mark('git-commit-typed');
+  const operation = gitCommitOperation();
+  const trusted = createTrustedAuthority({ authority: { allowed_operation_types: ['git.commit'] } });
+  const issued = withTicket(operation, trusted);
+  const result = kernel.evaluate(issued.input, { trustedAuthorityContext: trusted });
+  assert.equal(result.decision, 'allow');
+  assert.equal(result.reason_code, 'TICKET_CONSUMED');
+  assert.match(result.operation_digest, /^[a-f0-9]{64}$/);
+  assert.match(result.target_digest, /^[a-f0-9]{64}$/);
+
+  const wrongPathDigest = kernel.evaluate(baseInput(gitCommitOperation({ authorized_paths: ['src/other.txt'], authorized_paths_digest: 'f'.repeat(64) }), { authority: { ...TRUSTED_CONTROLLER, allowed_operation_types: ['git.commit'] } }), { trustedAuthorityContext: trusted });
+  assert.notEqual(wrongPathDigest.decision, 'allow');
+  assert.equal(wrongPathDigest.reason_code, 'GIT_COMMIT_PATH_SET_DIGEST_MISMATCH');
+  const options = gitCommitOperation({ options: ['--no-verify'] });
+  assert.equal(kernel.operationDigest(options), null);
+  assert.equal(kernel.evaluate(baseInput(options, { authority: { ...TRUSTED_CONTROLLER, allowed_operation_types: ['git.commit'] } })).reason_code, 'GIT_COMMIT_OPTIONS_UNSUPPORTED');
+  const amend = gitCommitOperation({ amend: true });
+  assert.equal(kernel.operationDigest(amend), null);
+  assert.equal(kernel.evaluate(baseInput(amend, { authority: { ...TRUSTED_CONTROLLER, allowed_operation_types: ['git.commit'] } })).reason_code, 'GIT_COMMIT_MUTATION_FLAG_UNSUPPORTED');
+});
+
 test('valid typed git push consumes a matching opaque ticket', () => {
   const operation = { type: 'git.push', remote: 'origin', refspecs: ['HEAD:refs/heads/topic'], options: ['--porcelain'], authorized_remote: 'origin', authorized_ref: AUTHORIZED_REF };
   const trusted = createTrustedAuthority({ authority: { allowed_operation_types: ['git.push'] } });
@@ -1014,8 +1064,8 @@ test('schema, policy and fixture manifest preserve the locked public contracts',
   assert.equal(policy.observation.captured_keys, 8192);
   assert.equal(policy.authority_ticket.default_uses, 1);
   assert.equal(fixtures.contract_version, kernel.CONTRACT_VERSION);
-  assert.equal(fixtures.required_case_ids.length, 32);
-  assert.equal(new Set(fixtures.required_case_ids).size, 32);
+  assert.equal(fixtures.required_case_ids.length, 33);
+  assert.equal(new Set(fixtures.required_case_ids).size, 33);
   const manifestIds = fixtures.required_case_ids;
   const executedIds = [...fixtureCounts.keys()];
   assert.deepEqual([...executedIds].sort(), [...manifestIds].sort());

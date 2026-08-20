@@ -27,7 +27,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 
 | Metric | Current value |
 | --- | ---: |
-| projects | 18 |
+| projects | 19 |
 | publishedFiles | 241 |
 | declaredOutputFiles | 241 |
 | packInstalledFiles | 84 |
@@ -78,6 +78,7 @@ Known baseline context:
 - `_projects/design/google-design-md`
 - `_projects/design/ui-ux-pro-max`
 - `_projects/development/ai-coding-agent-rules`
+- `_projects/development/bounded-local-execution-loop`
 - `_projects/development/control-plane-kernel`
 - `_projects/development/repository-capability-registry`
 - `_projects/development/local-ai-stack-safety`

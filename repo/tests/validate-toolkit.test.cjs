@@ -557,6 +557,7 @@ test('project manifests include the current project modules without repo-wide MC
     'design.google-design-md',
     'design.ui-ux-pro-max',
     'development.ai-coding-agent-rules',
+    'development.bounded-local-execution-loop',
     'development.control-plane-kernel',
     'development.hostinger-coolify-production-guide',
     'development.local-ai-stack-safety',

@@ -9,7 +9,7 @@
     "contract_version": { "const": "toolkit.control-plane.kernel.v1" },
     "decision": { "enum": ["allow", "ask", "deny", "unsupported"] },
     "reason_code": { "type": "string", "minLength": 1 },
-    "operation_type": { "type": ["string", "null"] },
+    "operation_type": { "anyOf": [{ "$ref": "#/$defs/operationType" }, { "type": "null" }] },
     "operation_class": { "type": ["string", "null"] },
     "target_class": { "type": "string", "minLength": 1 },
     "secret_classification": { "enum": ["none", "possible", "confirmed"] },
@@ -20,6 +20,9 @@
     "structural_impact_required": { "type": "boolean" }
   },
   "$defs": {
+    "operationType": {
+      "enum": ["filesystem.read", "filesystem.write", "filesystem.create", "filesystem.move", "filesystem.delete", "git.read", "git.branch", "git.commit", "git.push", "github.read", "github.mutation", "network.request", "external.mutation", "compound", "shell"]
+    },
     "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "remoteIdentity": {
       "type": "object",
@@ -50,7 +53,7 @@
         "session_id": { "type": "string", "minLength": 1 },
         "turn_id": { "type": "string", "minLength": 1 },
         "call_id": { "type": "string", "minLength": 1 },
-        "operation_type": { "type": "string", "minLength": 1 },
+        "operation_type": { "$ref": "#/$defs/operationType" },
         "operation_digest": { "$ref": "#/$defs/digest" },
         "target_digest": { "$ref": "#/$defs/digest" },
         "scope": { "type": ["string", "null"] },

@@ -1,0 +1,48 @@
+{
+  "id": "development.bounded-local-execution-loop",
+  "category": "development",
+  "name": "bounded-local-execution-loop",
+  "title": "A3 Bounded Local Execution-Loop",
+  "module_path": "_projects/development/bounded-local-execution-loop",
+  "main_path": "_projects/development/bounded-local-execution-loop/_main",
+  "version": "1.0.5",
+  "version_policy": "semver",
+  "version_notes": "Patch amendment removing the separate lifecycle durable structure and internalizing release-grade durable writes behind the existing five-contract governed progression, while retaining Run-162 snapshot, consent, durable artifact, and source-only boundaries.",
+  "outputs": [],
+  "writes": {
+    "allowed": [],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "GEMINI.md",
+      ".agents/**",
+      ".codex-plugin/**",
+      ".claude-plugin/**",
+      "user-home/**",
+      "host-adapters/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false,
+  "project": {
+    "name": "A3 Bounded Local Execution-Loop",
+    "category": "development",
+    "summary": "Bounded consent-gated root-only or fully routed local execution-loop contracts with privacy-safe state and A1-only mutation authority."
+  },
+  "surface": {
+    "publish_as": "source_only",
+    "skill": { "status": "not_applicable" },
+    "mcp": { "status": "not_applicable" }
+  }
+}
