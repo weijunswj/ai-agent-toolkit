@@ -142,25 +142,29 @@ function artifactPath(stateRoot, repositoryId, authorizedRefDigest, runId, artif
 }
 
 function persistRunOnly(stateRoot, fixture, run = fixture.terminal) {
-  if (['planned', 'admitted'].includes(run.execution_state)) {
-    runtime.writeDurableRun({ state_root: stateRoot, run });
-  } else {
-    expectCode(() => runtime.writeDurableRun({ state_root: stateRoot, run }), 'DURABLE_PREDECESSOR_REQUIRED');
-  }
+  fs.mkdirSync(stateRoot, { recursive: true });
+  const key = runtime.stateKey(fixture.terminal.repository_id, fixture.terminal.authorized_ref_digest, fixture.terminal.run_id);
+  fs.writeFileSync(path.join(stateRoot, key + '.json'), JSON.stringify(run), 'utf8');
 }
 
 function persistWorkspace(stateRoot, fixture, receipt = fixture.workspace.workspace_receipt) {
-  runtime.writeDurableWorkspaceReceipt({ state_root: stateRoot, workspace_receipt: receipt });
-}
-
-function persistTerminal(stateRoot, fixture, packet = fixture.terminal_packet) {
-  runtime.writeDurableTerminalPacket({
+  runtime.readDurableWorkspaceReceipt({
     state_root: stateRoot,
     repository_id: fixture.terminal.repository_id,
     authorized_ref_digest: fixture.terminal.authorized_ref_digest,
     run_id: fixture.terminal.run_id,
-    terminal_packet: packet,
   });
+  fs.writeFileSync(artifactPath(stateRoot, fixture.terminal.repository_id, fixture.terminal.authorized_ref_digest, fixture.terminal.run_id, 'workspace-receipt'), JSON.stringify(receipt), 'utf8');
+}
+
+function persistTerminal(stateRoot, fixture, packet = fixture.terminal_packet) {
+  runtime.readDurableTerminalPacket({
+    state_root: stateRoot,
+    repository_id: fixture.terminal.repository_id,
+    authorized_ref_digest: fixture.terminal.authorized_ref_digest,
+    run_id: fixture.terminal.run_id,
+  });
+  fs.writeFileSync(artifactPath(stateRoot, fixture.terminal.repository_id, fixture.terminal.authorized_ref_digest, fixture.terminal.run_id, 'terminal-packet'), JSON.stringify(packet), 'utf8');
 }
 
 function releaseOptions(stateRoot, fixture, lease, overrides = {}) {
@@ -286,7 +290,9 @@ test('RUN162 RED: durable release rejects terminal outcome, workspace dispositio
 
   const malformedFixture = durableFixture('run-red-malformed-artifact');
   const malformedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run162-red-malformed-'));
-  expectCode(() => runtime.writeDurableWorkspaceReceipt({ state_root: malformedRoot, workspace_receipt: { ...malformedFixture.workspace.workspace_receipt, verified: false } }), 'WORKSPACE_RECEIPT_INVALID');
+  fs.writeFileSync(artifactPath(malformedRoot, malformedFixture.terminal.repository_id, malformedFixture.terminal.authorized_ref_digest, malformedFixture.terminal.run_id, 'workspace-receipt'), JSON.stringify({ ...malformedFixture.workspace.workspace_receipt, verified: false }), 'utf8');
+  const malformedLease = runtime.acquireMutationLease({ state_root: malformedRoot, repository_id: malformedFixture.terminal.repository_id, authorized_ref_digest: malformedFixture.terminal.authorized_ref_digest, run_id: malformedFixture.terminal.run_id });
+  expectCode(() => runtime.releaseMutationLease(releaseOptions(malformedRoot, malformedFixture, malformedLease)), 'LEASE_RELEASE_UNSAFE');
 
   const interruptedFixture = durableFixture('run-red-interrupted-artifact');
   const interruptedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run162-red-interrupted-'));

@@ -131,25 +131,10 @@
       "key_binding": ["repository_id", "authorized_ref_digest", "run_id", "artifact_type"],
       "same_directory_atomic_write": true,
       "readback_verify": true,
-      "missing_malformed_or_interrupted": "fail_closed"
-    },
-    "lifecycle_provenance": {
-      "internal_only": true,
-      "not_a_contract_or_authority": true,
-      "workspace_requires": [
-        "successful_admitWorkspace",
-        "observed_and_synchronously_verified_snapshot",
-        "durable_admitted_predecessor",
-        "durable_workspace_ready_successor"
-      ],
-      "terminal_requires": [
-        "allowed_durable_preterminal",
-        "governed_completeRun",
-        "exact_terminal_packet"
-      ],
-      "public_persistence_cannot_mint": true,
-      "monotonic_durable_progression": true,
-      "missing_or_out_of_order": "fail_closed"
+      "missing_malformed_or_interrupted": "fail_closed",
+      "governed_persistence": true,
+      "monotonic_predecessor_required": true,
+      "public_release_grade_writers": false
     },
     "exclusive_exact_token_lease": true,
     "one_active_mutator_per_repository_and_ref": true,

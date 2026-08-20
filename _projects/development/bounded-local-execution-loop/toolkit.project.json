@@ -5,9 +5,9 @@
   "title": "A3 Bounded Local Execution-Loop",
   "module_path": "_projects/development/bounded-local-execution-loop",
   "main_path": "_projects/development/bounded-local-execution-loop/_main",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "version_policy": "semver",
-  "version_notes": "Patch amendment requiring private non-contract lifecycle provenance for release-grade workspace and terminal persistence, monotonic durable progression, governed completion from exact durable predecessors, and fail-closed rejection of caller-authored release triplets while retaining Run-162 snapshot, consent, and five-contract source-only boundaries.",
+  "version_notes": "Patch amendment removing the separate lifecycle durable structure and internalizing release-grade durable writes behind the existing five-contract governed progression, while retaining Run-162 snapshot, consent, durable artifact, and source-only boundaries.",
   "outputs": [],
   "writes": {
     "allowed": [],

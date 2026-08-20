@@ -91,22 +91,10 @@ function callerAuthoredFixture(runId) {
   return { admitted, workspaceRun, running, validating, workspace_receipt, terminal_packet, terminal };
 }
 
-function persistPublicSequence(root, fixture) {
-  runtime.writeDurableRun({ state_root: root, run: fixture.admitted.run });
-  runtime.writeDurableRun({
-    state_root: root,
-    run: fixture.workspaceRun,
-    expected_digest: runtime.digestValue(fixture.admitted.run),
-    workspace_receipt: fixture.workspace_receipt,
-  });
-  runtime.writeDurableRun({ state_root: root, run: fixture.running, expected_digest: runtime.digestValue(fixture.workspaceRun) });
-  runtime.writeDurableRun({ state_root: root, run: fixture.validating, expected_digest: runtime.digestValue(fixture.running) });
-  runtime.writeDurableRun({
-    state_root: root,
-    run: fixture.terminal,
-    expected_digest: runtime.digestValue(fixture.validating),
-    terminal_packet: fixture.terminal_packet,
-  });
+function persistStandaloneArtifacts(root, fixture) {
+  fs.mkdirSync(root, { recursive: true });
+  fs.writeFileSync(path.join(root, runtime.artifactKey(fixture.terminal.repository_id, fixture.terminal.authorized_ref_digest, fixture.terminal.run_id, 'workspace-receipt') + '.json'), JSON.stringify(fixture.workspace.workspace_receipt), 'utf8');
+  fs.writeFileSync(path.join(root, runtime.artifactKey(fixture.terminal.repository_id, fixture.terminal.authorized_ref_digest, fixture.terminal.run_id, 'terminal-packet') + '.json'), JSON.stringify(fixture.terminal_packet), 'utf8');
 }
 
 function acquire(root, run) {
@@ -118,46 +106,39 @@ function acquire(root, run) {
   });
 }
 
-test('RUN163 RED: a fully matching caller-authored public triplet cannot release', () => {
+test('RUN164 RED: removed public durable writers cannot create release authority', () => {
   assert.equal(runtime.CONTRACTS.length, 5);
-  assert.equal(Object.prototype.hasOwnProperty.call(runtime, 'readDurableLifecycleProvenance'), false);
+  for (const name of ['writeDurableRun', 'writeDurableWorkspaceReceipt', 'writeDurableTerminalPacket']) {
+    assert.equal(Object.prototype.hasOwnProperty.call(runtime, name), false);
+  }
   const fixture = callerAuthoredFixture('run-red-public-triplet');
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'run163-red-public-triplet-'));
-  persistPublicSequence(root, fixture);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'run164-red-public-triplet-'));
   const lease = acquire(root, fixture.terminal);
   expectCode(() => runtime.releaseMutationLease(releaseOptions(root, fixture.terminal, lease, { publication_state: 'verified' })), 'LEASE_RELEASE_UNSAFE');
 });
 
-test('RUN163 RED: public persistence rejects an admitted-to-terminal leap and release remains unsafe', () => {
+test('RUN164 RED: admitted-to-terminal leap cannot create release authority', () => {
   const fixture = governedFixture('run-red-terminal-leap', undefined, 'verified');
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'run163-red-terminal-leap-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'run164-red-terminal-leap-'));
   const lease = acquire(root, fixture.terminal);
-  expectCode(() => runtime.writeDurableRun({
+  expectCode(() => runtime.completeRun({
     state_root: root,
-    run: fixture.terminal,
-    workspace_receipt: fixture.workspace.workspace_receipt,
+    run: fixture.admitted.run,
     terminal_packet: fixture.terminal_packet,
-  }), 'DURABLE_PREDECESSOR_REQUIRED');
+  }), 'INVALID_STATE_TRANSITION');
   expectCode(() => runtime.releaseMutationLease(releaseOptions(root, fixture.terminal, lease, { publication_state: 'verified' })), 'LEASE_RELEASE_UNSAFE');
 });
 
-test('RUN163 RED: standalone public workspace and terminal artifacts cannot create release provenance', () => {
+test('RUN164 RED: standalone workspace and terminal contracts cannot create release authority', () => {
   const fixture = governedFixture('run-red-standalone-artifacts', undefined, 'verified');
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'run163-red-standalone-artifacts-'));
-  runtime.writeDurableWorkspaceReceipt({ state_root: root, workspace_receipt: fixture.workspace.workspace_receipt });
-  runtime.writeDurableTerminalPacket({
-    state_root: root,
-    repository_id: fixture.terminal.repository_id,
-    authorized_ref_digest: fixture.terminal.authorized_ref_digest,
-    run_id: fixture.terminal.run_id,
-    terminal_packet: fixture.terminal_packet,
-  });
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'run164-red-standalone-artifacts-'));
+  persistStandaloneArtifacts(root, fixture);
   const lease = acquire(root, fixture.terminal);
   expectCode(() => runtime.releaseMutationLease(releaseOptions(root, fixture.terminal, lease, { publication_state: 'verified' })), 'LEASE_RELEASE_UNSAFE');
 });
 
-test('RUN163 RED: missing and out-of-order durable predecessors fail closed', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'run163-red-predecessor-'));
+test('RUN164 RED: missing and out-of-order durable predecessors fail closed', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'run164-red-predecessor-'));
   const admitted = runtime.admitRun({ ...common, run_id: 'run-red-predecessor' });
   const workspace = runtime.admitWorkspace({
     state_root: root,
@@ -169,22 +150,19 @@ test('RUN163 RED: missing and out-of-order durable predecessors fail closed', ()
       verifySnapshot: () => true,
     },
   });
-  const running = runtime.transitionRun(workspace.run, 'running');
+  const running = runtime.transitionRun(workspace.run, 'running', { state_root: root });
+  expectCode(() => runtime.transitionRun(workspace.run, 'validating', { state_root: root }), 'INVALID_STATE_TRANSITION');
   const validating = runtime.transitionRun(running, 'validating');
-  expectCode(() => runtime.writeDurableRun({
-    state_root: root,
-    run: validating,
-    expected_digest: runtime.digestValue(workspace.run),
-  }), 'DURABLE_STATE_TRANSITION_INVALID');
   const packet = runtime.createTerminalPacket({
     run_id: validating.run_id,
     outcome: 'success',
-    reason_code: 'RUN163_MISSING_PREDECESSOR',
+    reason_code: 'RUN164_MISSING_PREDECESSOR',
     evidence_digest: 'a'.repeat(64),
     publication_state: 'verified',
     workspace_disposition: 'cleaned',
   });
-  expectCode(() => runtime.completeRun({ state_root: root, run: validating, terminal_packet: packet }), 'DURABLE_PREDECESSOR_MISMATCH');
+  const missingRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run164-red-missing-'));
+  expectCode(() => runtime.completeRun({ state_root: missingRoot, run: validating, terminal_packet: packet }), 'DURABLE_PREDECESSOR_MISMATCH');
 });
 
 test('RUN163 GREEN: genuine verified workspace lifecycle and governed completion release safely', () => {

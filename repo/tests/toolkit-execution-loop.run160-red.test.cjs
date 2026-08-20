@@ -202,12 +202,14 @@ test('RUN160 RED: publication-pending interruption preserves uncertain publicati
   assert.equal(terminal.workspace_disposition, 'preserved');
 });
 
-test('RUN160 RED: fabricated safe release labels cannot release a durable admitted run', () => {
+test('RUN160 RED: removed public durable writers leave fabricated safe release labels unable to release', () => {
   const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run160-red-release-'));
   const rootOnly = runtime.admitRun({ ...common, run_id: 'run-red-release', authority: { delegated: false, lanes: [] } });
   const run = rootOnly.run;
+  for (const name of ['writeDurableRun', 'writeDurableWorkspaceReceipt', 'writeDurableTerminalPacket']) {
+    assert.equal(Object.prototype.hasOwnProperty.call(runtime, name), false);
+  }
   const lease = runtime.acquireMutationLease({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id });
-  runtime.writeDurableRun({ state_root: stateRoot, run });
   expectCode(() => runtime.releaseMutationLease({
     state_root: stateRoot,
     repository_id: run.repository_id,
@@ -367,11 +369,7 @@ test('RUN160 RED: durable release rejects every non-safe state and missing or co
       const key = runtime.stateKey(run.repository_id, run.authorized_ref_digest, run.run_id);
       fs.writeFileSync(path.join(stateRoot, key + '.json'), JSON.stringify(rawOverride), 'utf8');
     } else {
-      if (['planned', 'admitted'].includes(run.execution_state)) {
-        runtime.writeDurableRun({ state_root: stateRoot, run });
-      } else {
-        expectCode(() => runtime.writeDurableRun({ state_root: stateRoot, run }), 'DURABLE_PREDECESSOR_REQUIRED');
-      }
+      assert.equal(Object.prototype.hasOwnProperty.call(runtime, 'writeDurableRun'), false);
     }
     expectCode(() => runtime.releaseMutationLease({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id, lease_id: lease.lease_id, terminal_state: 'terminal-success', workspace_disposition: 'cleaned', publication_state: 'verified' }), 'LEASE_RELEASE_UNSAFE');
     assert.equal(fs.existsSync(path.join(stateRoot, run.repository_id + '.' + run.authorized_ref_digest + '.lease.json')), true);

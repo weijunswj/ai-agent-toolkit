@@ -298,9 +298,17 @@ test('typed commit rejects pre-staged, baseline, path, options, and broker bound
 test('durable state is bounded, atomic, privacy-safe, and lease-conflicted', () => {
   const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run157-state-'));
   const run = createRun('run-state');
-  const first = runtime.writeDurableRun({ state_root: stateRoot, run });
+  const live = { ref: 'refs/heads/main', sha: 'a'.repeat(40), tree: 'b'.repeat(40) };
+  const firstWorkspace = runtime.admitWorkspace({
+    state_root: stateRoot,
+    run,
+    expected_live: live,
+    liveRefProvider: { read: () => live },
+    workspaceAdapter: { prepare: () => ({ workspace_id: 'workspace-state', workspace_handle: 'handle-state', commit_sha: live.sha, tree_sha: live.tree }), verifySnapshot: () => true },
+  });
+  const first = firstWorkspace.run;
   assert.equal(first.run_id, run.run_id);
-  assert.deepEqual(runtime.readDurableRun({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id }), run);
+  assert.deepEqual(runtime.readDurableRun({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id }), first);
   const key = runtime.stateKey(run.repository_id, run.authorized_ref_digest, run.run_id);
   fs.writeFileSync(path.join(stateRoot, key + '.interrupted.tmp'), 'partial', 'utf8');
   expectCode(() => runtime.readDurableRun({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id }), 'INTERRUPTED_STATE');
@@ -308,9 +316,7 @@ test('durable state is bounded, atomic, privacy-safe, and lease-conflicted', () 
   const lease = runtime.acquireMutationLease({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id });
   expectCode(() => runtime.acquireMutationLease({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: 'run-other', now: Date.now() + 900000 }), 'CONFLICTING_RUN');
   expectCode(() => runtime.releaseMutationLease({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id, lease_id: 'lease-forged', terminal_state: 'terminal-success', workspace_disposition: 'cleaned', publication_state: 'verified' }), 'LEASE_TOKEN_MISMATCH');
-  const live = { ref: 'refs/heads/main', sha: 'a'.repeat(40), tree: 'b'.repeat(40) };
-  const workspace = runtime.admitWorkspace({ state_root: stateRoot, run, expected_live: live, liveRefProvider: { read: () => live }, workspaceAdapter: { prepare: () => ({ workspace_id: 'workspace-state', workspace_handle: 'handle-state', commit_sha: live.sha, tree_sha: live.tree }), verifySnapshot: () => true } });
-  const running = runtime.transitionRun(workspace.run, 'running', { state_root: stateRoot });
+  const running = runtime.transitionRun(firstWorkspace.run, 'running', { state_root: stateRoot });
   completeSafeEvidence(running, stateRoot);
   assert.deepEqual(runtime.releaseMutationLease({
     state_root: stateRoot,
