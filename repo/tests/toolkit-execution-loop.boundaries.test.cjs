@@ -80,12 +80,16 @@ test('A3 exposes exactly five contract identities and no second authority surfac
   assert.equal(runtime.POLICY.a1.public_issuer, false);
   assert.equal(runtime.POLICY.a1.a3_ticket_format, false);
   assert.equal(runtime.POLICY.a1.git_stage_operation, false);
+  assert.equal(runtime.POLICY.launch.atomic_batch_commit, true);
+  assert.equal(runtime.POLICY.mutation_lease.required_before_stage, true);
 });
 
 test('typed A1 commit seam stages exactly the authorized paths and verifies the result', () => {
+  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run158-lease-success-'));
+  const lease = runtime.acquireMutationLease({ state_root: stateRoot, repository_id: common.repository_id, authorized_ref_digest: common.authorized_ref_digest, run_id: 'run-commit' });
   const calls = [];
   const result = runtime.executeTypedGitCommit({
-    ...commitOptions(),
+    ...commitOptions({ state_root: stateRoot, mutation_lease: lease }),
     git: gitFixture(),
     broker: { authorize(input) { calls.push(input); return { decision: 'allow' }; } },
     liveRefProvider: { read: () => ({ ref: 'refs/heads/main', sha: 'a'.repeat(40), tree: 'b'.repeat(40) }) },
@@ -95,17 +99,168 @@ test('typed A1 commit seam stages exactly the authorized paths and verifies the 
   assert.equal(calls[0].operation_type, 'git.commit');
   assert.match(calls[0].operation_digest, /^[a-f0-9]{64}$/);
   assert.deepEqual(calls[0].operation.authorized_paths, ['src/file.txt']);
+  assert.deepEqual(runtime.releaseMutationLease({
+    state_root: stateRoot,
+    repository_id: common.repository_id,
+    authorized_ref_digest: common.authorized_ref_digest,
+    run_id: 'run-commit',
+    lease_id: lease.lease_id,
+    terminal_state: 'terminal-success',
+    workspace_disposition: 'cleaned',
+    publication_state: 'verified',
+  }), { released: true });
+});
+
+test('typed A1 commit without an owned lease performs zero stage or commit mutation', () => {
+  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run158-lease-required-'));
+  const fixture = gitFixture();
+  let stageCalls = 0;
+  let commitCalls = 0;
+  const originalStage = fixture.stageExact;
+  const originalCommit = fixture.commit;
+  fixture.stageExact = (input) => {
+    stageCalls += 1;
+    return originalStage.call(fixture, input);
+  };
+  fixture.commit = (input) => {
+    commitCalls += 1;
+    return originalCommit.call(fixture, input);
+  };
+  expectCode(() => runtime.executeTypedGitCommit({
+    ...commitOptions({ state_root: stateRoot }),
+    git: fixture,
+    broker: { authorize: () => ({ decision: 'allow' }) },
+  }), 'LEASE_REQUIRED');
+  assert.equal(stageCalls, 0);
+  assert.equal(commitCalls, 0);
+});
+
+test('typed A1 commit requires an exact current lease owner before mutation', () => {
+  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run158-lease-binding-'));
+  const lease = runtime.acquireMutationLease({ state_root: stateRoot, repository_id: common.repository_id, authorized_ref_digest: common.authorized_ref_digest, run_id: 'run-commit' });
+  const cases = [
+    ['forged token', { mutation_lease: { ...lease, lease_id: 'lease-forged' } }, 'LEASE_TOKEN_MISMATCH'],
+    ['wrong run', { run_id: 'run-other', mutation_lease: lease }, 'LEASE_BINDING_MISMATCH'],
+    ['wrong repository', { repository_id: 'f'.repeat(64), mutation_lease: lease }, 'LEASE_BINDING_MISMATCH'],
+    ['wrong ref', { authorized_ref_digest: 'e'.repeat(64), mutation_lease: lease }, 'LEASE_BINDING_MISMATCH'],
+  ];
+  for (const [label, overrides, reasonCode] of cases) {
+    const fixture = gitFixture();
+    let stageCalls = 0;
+    let commitCalls = 0;
+    const originalStage = fixture.stageExact;
+    const originalCommit = fixture.commit;
+    fixture.stageExact = (input) => {
+      stageCalls += 1;
+      return originalStage.call(fixture, input);
+    };
+    fixture.commit = (input) => {
+      commitCalls += 1;
+      return originalCommit.call(fixture, input);
+    };
+    expectCode(() => runtime.executeTypedGitCommit({
+      ...commitOptions({ state_root: stateRoot, ...overrides }),
+      git: fixture,
+      broker: { authorize: () => ({ decision: 'allow' }) },
+    }), reasonCode);
+    assert.equal(stageCalls, 0, label);
+    assert.equal(commitCalls, 0, label);
+  }
+});
+
+test('expired leases cannot mutate or be silently taken over', () => {
+  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run158-lease-expired-'));
+  const lease = runtime.acquireMutationLease({ state_root: stateRoot, repository_id: common.repository_id, authorized_ref_digest: common.authorized_ref_digest, run_id: 'run-commit', now: 1000 });
+  const fixture = gitFixture();
+  let stageCalls = 0;
+  let commitCalls = 0;
+  const originalStage = fixture.stageExact;
+  const originalCommit = fixture.commit;
+  fixture.stageExact = (input) => {
+    stageCalls += 1;
+    return originalStage.call(fixture, input);
+  };
+  fixture.commit = (input) => {
+    commitCalls += 1;
+    return originalCommit.call(fixture, input);
+  };
+  expectCode(() => runtime.executeTypedGitCommit({
+    ...commitOptions({ state_root: stateRoot, mutation_lease: lease, now: Date.parse(lease.expires_at) + 1 }),
+    git: fixture,
+    broker: { authorize: () => ({ decision: 'allow' }) },
+  }), 'LEASE_EXPIRED');
+  assert.equal(stageCalls, 0);
+  assert.equal(commitCalls, 0);
+  expectCode(() => runtime.acquireMutationLease({ state_root: stateRoot, repository_id: common.repository_id, authorized_ref_digest: common.authorized_ref_digest, run_id: 'run-other', now: Date.parse(lease.expires_at) + 1 }), 'CONFLICTING_RUN');
+});
+
+test('lease loss after staging blocks commit and preserves the staged evidence boundary', () => {
+  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run158-lease-revalidate-'));
+  const lease = runtime.acquireMutationLease({ state_root: stateRoot, repository_id: common.repository_id, authorized_ref_digest: common.authorized_ref_digest, run_id: 'run-commit' });
+  const fixture = gitFixture();
+  let stageCalls = 0;
+  let commitCalls = 0;
+  const originalStage = fixture.stageExact;
+  const originalCommit = fixture.commit;
+  fixture.stageExact = (input) => {
+    stageCalls += 1;
+    const result = originalStage.call(fixture, input);
+    fs.unlinkSync(path.join(stateRoot, common.repository_id + '.' + common.authorized_ref_digest + '.lease.json'));
+    return result;
+  };
+  fixture.commit = (input) => {
+    commitCalls += 1;
+    return originalCommit.call(fixture, input);
+  };
+  expectCode(() => runtime.executeTypedGitCommit({
+    ...commitOptions({ state_root: stateRoot, mutation_lease: lease }),
+    git: fixture,
+    broker: { authorize: () => ({ decision: 'allow' }) },
+  }), 'LEASE_REQUIRED');
+  assert.equal(stageCalls, 1);
+  assert.equal(commitCalls, 0);
+});
+
+test('uncertain or interrupted publication preserves lease evidence until safe terminal release', () => {
+  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run158-lease-release-'));
+  const lease = runtime.acquireMutationLease({ state_root: stateRoot, repository_id: common.repository_id, authorized_ref_digest: common.authorized_ref_digest, run_id: 'run-commit' });
+  expectCode(() => runtime.releaseMutationLease({
+    state_root: stateRoot,
+    repository_id: common.repository_id,
+    authorized_ref_digest: common.authorized_ref_digest,
+    run_id: 'run-commit',
+    lease_id: lease.lease_id,
+    terminal_state: 'interrupted',
+    workspace_disposition: 'quarantined',
+    publication_state: 'uncertain',
+  }), 'LEASE_RELEASE_UNSAFE');
+  assert.equal(fs.existsSync(path.join(stateRoot, common.repository_id + '.' + common.authorized_ref_digest + '.lease.json')), true);
+  assert.deepEqual(runtime.releaseMutationLease({
+    state_root: stateRoot,
+    repository_id: common.repository_id,
+    authorized_ref_digest: common.authorized_ref_digest,
+    run_id: 'run-commit',
+    lease_id: lease.lease_id,
+    terminal_state: 'terminal-blocked',
+    workspace_disposition: 'cleaned',
+    publication_state: 'verified',
+  }), { released: true });
+  const later = runtime.acquireMutationLease({ state_root: stateRoot, repository_id: common.repository_id, authorized_ref_digest: common.authorized_ref_digest, run_id: 'run-later' });
+  assert.equal(later.run_id, 'run-later');
 });
 
 test('typed commit rejects pre-staged, baseline, path, options, and broker boundary violations', () => {
+  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run158-lease-retained-'));
+  const lease = runtime.acquireMutationLease({ state_root: stateRoot, repository_id: common.repository_id, authorized_ref_digest: common.authorized_ref_digest, run_id: 'run-commit' });
+  const withLease = (overrides = {}) => commitOptions({ state_root: stateRoot, mutation_lease: lease, ...overrides });
   const preStaged = gitFixture({ status: () => ({ repository_id: common.repository_id, head: 'a'.repeat(40), tree: 'b'.repeat(40), index_digest: 'c'.repeat(64), staged_paths: ['other.txt'] }) });
-  expectCode(() => runtime.executeTypedGitCommit({ ...commitOptions(), git: preStaged, broker: { authorize: () => ({ decision: 'allow' }) } }), 'GIT_COMMIT_PREEXISTING_STAGE');
-  expectCode(() => runtime.executeTypedGitCommit({ ...commitOptions({ expected_index_digest: 'f'.repeat(64) }), git: gitFixture(), broker: { authorize: () => ({ decision: 'allow' }) } }), 'GIT_COMMIT_INDEX_BASELINE_MISMATCH');
-  expectCode(() => runtime.executeTypedGitCommit({ ...commitOptions({ authorized_paths: ['--bad'] }), git: gitFixture(), broker: { authorize: () => ({ decision: 'allow' }) } }), 'GIT_COMMIT_PATH_INVALID');
-  expectCode(() => runtime.executeTypedGitCommit({ ...commitOptions({ commit_message: 'bad\nmessage' }), git: gitFixture(), broker: { authorize: () => ({ decision: 'allow' }) } }), 'GIT_COMMIT_MESSAGE_INVALID');
+  expectCode(() => runtime.executeTypedGitCommit({ ...withLease(), git: preStaged, broker: { authorize: () => ({ decision: 'allow' }) } }), 'GIT_COMMIT_PREEXISTING_STAGE');
+  expectCode(() => runtime.executeTypedGitCommit({ ...withLease({ expected_index_digest: 'f'.repeat(64) }), git: gitFixture(), broker: { authorize: () => ({ decision: 'allow' }) } }), 'GIT_COMMIT_INDEX_BASELINE_MISMATCH');
+  expectCode(() => runtime.executeTypedGitCommit({ ...withLease({ authorized_paths: ['--bad'] }), git: gitFixture(), broker: { authorize: () => ({ decision: 'allow' }) } }), 'GIT_COMMIT_PATH_INVALID');
+  expectCode(() => runtime.executeTypedGitCommit({ ...withLease({ commit_message: 'bad\nmessage' }), git: gitFixture(), broker: { authorize: () => ({ decision: 'allow' }) } }), 'GIT_COMMIT_MESSAGE_INVALID');
   expectCode(() => runtime.authorizeA1Operation({ ...common, run_id: 'run-stage', operation: { type: 'git.stage' }, broker: { authorize: () => ({ decision: 'allow' }) } }), 'A3_OPERATION_UNSUPPORTED');
-  expectCode(() => runtime.executeTypedGitCommit({ ...commitOptions(), git: gitFixture(), broker: { authorize: () => ({ decision: 'deny' }) } }), 'A1_AUTHORITY_DENIED');
-  expectCode(() => runtime.executeTypedGitCommit({ ...commitOptions(), git: gitFixture(), broker: { authorize: () => ({ decision: 'allow', issuer: 'forbidden' }) } }), 'A1_BROKER_BOUNDARY_VIOLATION');
+  expectCode(() => runtime.executeTypedGitCommit({ ...withLease(), git: gitFixture(), broker: { authorize: () => ({ decision: 'deny' }) } }), 'A1_AUTHORITY_DENIED');
+  expectCode(() => runtime.executeTypedGitCommit({ ...withLease(), git: gitFixture(), broker: { authorize: () => ({ decision: 'allow', issuer: 'forbidden' }) } }), 'A1_BROKER_BOUNDARY_VIOLATION');
 });
 
 test('durable state is bounded, atomic, privacy-safe, and lease-conflicted', () => {
@@ -120,8 +275,17 @@ test('durable state is bounded, atomic, privacy-safe, and lease-conflicted', () 
   fs.unlinkSync(path.join(stateRoot, key + '.interrupted.tmp'));
   const lease = runtime.acquireMutationLease({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id });
   expectCode(() => runtime.acquireMutationLease({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: 'run-other', now: Date.now() + 900000 }), 'CONFLICTING_RUN');
-  expectCode(() => runtime.releaseMutationLease({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, lease_id: 'lease-forged' }), 'LEASE_TOKEN_MISMATCH');
-  assert.deepEqual(runtime.releaseMutationLease({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, lease_id: lease.lease_id }), { released: true });
+  expectCode(() => runtime.releaseMutationLease({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id, lease_id: 'lease-forged', terminal_state: 'terminal-success', workspace_disposition: 'cleaned', publication_state: 'verified' }), 'LEASE_TOKEN_MISMATCH');
+  assert.deepEqual(runtime.releaseMutationLease({
+    state_root: stateRoot,
+    repository_id: run.repository_id,
+    authorized_ref_digest: run.authorized_ref_digest,
+    run_id: run.run_id,
+    lease_id: lease.lease_id,
+    terminal_state: 'terminal-success',
+    workspace_disposition: 'cleaned',
+    publication_state: 'verified',
+  }), { released: true });
 });
 
 test('uncertain and dirty workspace evidence is preserved or quarantined and cannot be cleaned', () => {

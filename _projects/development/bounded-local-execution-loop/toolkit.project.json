@@ -5,9 +5,9 @@
   "title": "A3 Bounded Local Execution-Loop",
   "module_path": "_projects/development/bounded-local-execution-loop",
   "main_path": "_projects/development/bounded-local-execution-loop/_main",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "version_policy": "semver",
-  "version_notes": "First source-only A3 bounded local execution-loop contracts, lifecycle, privacy-safe external state, and injected A1 broker seam.",
+  "version_notes": "Patch amendment enforcing atomic delegated launch commitment and exact owned mutation leases without changing the five-contract source-only surface.",
   "outputs": [],
   "writes": {
     "allowed": [],

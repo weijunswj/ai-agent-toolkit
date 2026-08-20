@@ -26,6 +26,8 @@ const POLICY = Object.freeze({
   a2_capability: 'execution_loop',
   a1_operation: 'git.commit',
   a1: Object.freeze({ sole_operation_authority: true, public_issuer: false, a3_ticket_format: false, git_stage_operation: false }),
+  launch: Object.freeze({ prepare_inert: true, atomic_batch_commit: true, per_lane_start: false, rollback_is_not_zero_launch: true }),
+  mutation_lease: Object.freeze({ required_before_stage: true, revalidate_before_commit: true, exact_owner: true, stale_takeover: false, uncertain_preserves: true, safe_terminal_release: true }),
   durable_state_root: '~/.ai-agent-toolkit/user-state/execution-loop/',
   durable_forbidden: ['raw_remote', 'raw_absolute_path', 'prompt', 'model_output', 'repository_contents', 'credentials', 'secret_values', 'environment_values', 'a1_ticket'],
   publication: Object.freeze({ optional: true, branch_operation: 'git.branch', commit_operation: 'git.commit', push_operation: 'git.push', direct_main_push: false, force: false, merge: false, ready: false, review_mutation: false, web_finality: false }),
@@ -391,6 +393,45 @@ function admitRoute(options = {}) {
   return { status: 'admitted', request, route_plan: routePlan, launches: [], consent };
 }
 
+function invokeAtomicLaunch(fn, receiver, argument, failureCode) {
+  let result;
+  try {
+    result = fn.call(receiver, argument);
+  } catch (_error) {
+    fail(failureCode);
+  }
+  if (result && typeof result.then === 'function') fail('ASYNC_LAUNCH_UNSUPPORTED');
+  return result;
+}
+
+function exactIdSet(actual, expected) {
+  return Array.isArray(actual)
+    && actual.length === expected.length
+    && actual.every((item) => isSafeId(item))
+    && new Set(actual).size === actual.length
+    && [...actual].sort().every((item, index) => item === [...expected].sort()[index]);
+}
+
+function executeAtomicLaunch(routePlan, options) {
+  if (typeof options.prepareLaunch !== 'function' || typeof options.commitLaunchBatch !== 'function') fail('LAUNCH_ATOMICITY_UNAVAILABLE');
+  const reservations = [];
+  for (const lane of routePlan.lanes) {
+    const reservation = invokeAtomicLaunch(options.prepareLaunch, options, lane, 'LAUNCH_PREPARATION_FAILED');
+    if (!isRecord(reservation) || !exactKeys(reservation, ['lane_id', 'reservation_handle', 'inert'])
+      || reservation.lane_id !== lane.lane_id || !isSafeHandle(reservation.reservation_handle) || reservation.inert !== true) {
+      fail('LAUNCH_RESERVATION_INVALID');
+    }
+    reservations.push(deepFreeze({ lane_id: reservation.lane_id, reservation_handle: reservation.reservation_handle, inert: true }));
+  }
+  const committed = invokeAtomicLaunch(options.commitLaunchBatch, options, {
+    route_plan: routePlan,
+    reservations: deepFreeze(reservations.slice()),
+  }, 'LAUNCH_BATCH_FAILED');
+  const expected = routePlan.lanes.map((lane) => lane.lane_id);
+  if (!isRecord(committed) || committed.atomic !== true || !exactIdSet(committed.started_lane_ids, expected)) fail('LAUNCH_BATCH_INVALID');
+  return { launches: expected };
+}
+
 function createRunReceipt(options = {}) {
   const request = options.request && options.request.contract_version === CONTRACTS[0] ? validateRequest(options.request) : normalizeRequest(options);
   const routePlan = options.route_plan || options.routePlan;
@@ -629,6 +670,7 @@ function executeTypedGitCommit(options = {}) {
   const consent = readExecutionLoopConsent(options);
   if (!consent.enabled) fail(consent.state === 'disabled' ? 'CONSENT_DISABLED' : consent.state === 'interrupted' ? 'CONSENT_INTERRUPTED' : 'CONSENT_UNRESOLVED');
   if (!isSafeId(options.run_id) || !isDigest(options.repository_id) || !isDigest(options.authorized_ref_digest) || !isDigest(options.current_authority_digest)) fail('GIT_COMMIT_BINDING_INVALID');
+  verifyOwnedMutationLease(options);
   const git = options.git;
   if (!git || typeof git.status !== 'function' || typeof git.stageExact !== 'function' || typeof git.commit !== 'function') fail('GIT_ADAPTER_UNAVAILABLE');
   const initial = normalizeGitStatus(invokeSync(git.status, git, {}, 'GIT_STATUS_UNAVAILABLE'), options.repository_id);
@@ -642,6 +684,7 @@ function executeTypedGitCommit(options = {}) {
     if (live.sha !== operation.expected_head || live.tree !== operation.expected_tree) fail('LIVE_REF_MOVED', { observed_commit_digest: digestValue(live.sha), observed_tree_digest: digestValue(live.tree) });
   }
   const authority = authorizeA1Operation({ ...options, operation });
+  verifyOwnedMutationLease(options);
   const staged = invokeSync(git.stageExact, git, { paths: operation.authorized_paths }, 'GIT_STAGE_FAILED');
   const afterStage = normalizeGitStatus(isRecord(staged) ? staged : invokeSync(git.status, git, {}, 'GIT_STATUS_UNAVAILABLE'), options.repository_id);
   if (!exactPathSet(afterStage.staged_paths, operation.authorized_paths)) fail('GIT_COMMIT_STAGED_SET_MISMATCH');
@@ -649,6 +692,7 @@ function executeTypedGitCommit(options = {}) {
     const liveBeforeCommit = readLiveRef(options.liveRefProvider);
     if (liveBeforeCommit.sha !== operation.expected_head || liveBeforeCommit.tree !== operation.expected_tree) fail('LIVE_REF_MOVED', { observed_commit_digest: digestValue(liveBeforeCommit.sha), observed_tree_digest: digestValue(liveBeforeCommit.tree) });
   }
+  verifyOwnedMutationLease(options);
   const committed = invokeSync(git.commit, git, { message: operation.commit_message, amend: false, allow_empty: false, options: [], paths: operation.authorized_paths }, 'GIT_COMMIT_EXECUTION_FAILED');
   const finalStatus = normalizeGitStatus(committed && isRecord(committed.status) ? committed.status : invokeSync(git.status, git, {}, 'GIT_STATUS_UNAVAILABLE'), options.repository_id);
   const resultingTree = committed && committed.tree ? committed.tree : finalStatus.tree;
@@ -809,11 +853,55 @@ function writeDurableRun(options = {}) {
   }
 }
 
+function mutationLeasePath(stateRoot, repositoryId, authorizedRefDigest) {
+  return path.join(durableStateRoot(stateRoot), repositoryId + '.' + authorizedRefDigest + '.lease.json');
+}
+
+function validateMutationLeaseRecord(record) {
+  if (!isRecord(record) || !exactKeys(record, ['kind', 'lease_id', 'repository_id', 'authorized_ref_digest', 'run_id', 'acquired_at', 'expires_at'])
+    || record.kind !== 'mutation-lease' || !isSafeId(record.lease_id) || !isDigest(record.repository_id)
+    || !isDigest(record.authorized_ref_digest) || !isSafeId(record.run_id)
+    || typeof record.acquired_at !== 'string' || typeof record.expires_at !== 'string') fail('LEASE_RECORD_INVALID');
+  const acquiredAt = Date.parse(record.acquired_at);
+  const expiresAt = Date.parse(record.expires_at);
+  if (!Number.isFinite(acquiredAt) || !Number.isFinite(expiresAt) || expiresAt <= acquiredAt) fail('LEASE_RECORD_INVALID');
+  assertPrivacySafe(record);
+  return deepFreeze(clone(record));
+}
+
+function readMutationLease(options = {}) {
+  if (!isDigest(options.repository_id) || !isDigest(options.authorized_ref_digest)) fail('LEASE_BINDING_INVALID');
+  const root = durableStateRoot(options.state_root);
+  ensureStateRoot(root);
+  let record;
+  try {
+    record = JSON.parse(fs.readFileSync(mutationLeasePath(root, options.repository_id, options.authorized_ref_digest), 'utf8'));
+  } catch (_error) {
+    fail('LEASE_REQUIRED');
+  }
+  return validateMutationLeaseRecord(record);
+}
+
+function verifyOwnedMutationLease(options = {}) {
+  if (!isDigest(options.repository_id) || !isDigest(options.authorized_ref_digest) || !isSafeId(options.run_id)) fail('LEASE_BINDING_INVALID');
+  const supplied = options.mutation_lease;
+  if (!isRecord(supplied)) fail('LEASE_REQUIRED');
+  if (!exactKeys(supplied, ['kind', 'lease_id', 'repository_id', 'authorized_ref_digest', 'run_id', 'acquired_at', 'expires_at'])
+    || supplied.kind !== 'mutation-lease' || !isSafeId(supplied.lease_id) || !isDigest(supplied.repository_id)
+    || !isDigest(supplied.authorized_ref_digest) || !isSafeId(supplied.run_id)) fail('LEASE_TOKEN_INVALID');
+  if (supplied.repository_id !== options.repository_id || supplied.authorized_ref_digest !== options.authorized_ref_digest || supplied.run_id !== options.run_id) fail('LEASE_BINDING_MISMATCH');
+  const current = readMutationLease(options);
+  if (digestValue(current) !== digestValue(supplied)) fail('LEASE_TOKEN_MISMATCH');
+  const now = Number.isFinite(options.now) ? options.now : Date.now();
+  if (now >= Date.parse(current.expires_at)) fail('LEASE_EXPIRED');
+  return current;
+}
+
 function acquireMutationLease(options = {}) {
   if (!isDigest(options.repository_id) || !isDigest(options.authorized_ref_digest) || !isSafeId(options.run_id)) fail('LEASE_BINDING_INVALID');
   const root = durableStateRoot(options.state_root);
   ensureStateRoot(root);
-  const leasePath = path.join(root, options.repository_id + '.' + options.authorized_ref_digest + '.lease.json');
+  const leasePath = mutationLeasePath(root, options.repository_id, options.authorized_ref_digest);
   const lease = {
     kind: 'mutation-lease',
     lease_id: 'lease-' + crypto.randomBytes(16).toString('hex'),
@@ -840,15 +928,12 @@ function acquireMutationLease(options = {}) {
 }
 
 function releaseMutationLease(options = {}) {
-  if (!isDigest(options.repository_id) || !isDigest(options.authorized_ref_digest) || !isSafeId(options.lease_id)) fail('LEASE_BINDING_INVALID');
-  const leasePath = path.join(durableStateRoot(options.state_root), options.repository_id + '.' + options.authorized_ref_digest + '.lease.json');
-  let lease;
-  try {
-    lease = JSON.parse(fs.readFileSync(leasePath, 'utf8'));
-  } catch (_error) {
-    fail('LEASE_MISSING');
-  }
-  if (!isRecord(lease) || lease.lease_id !== options.lease_id || lease.repository_id !== options.repository_id || lease.authorized_ref_digest !== options.authorized_ref_digest) fail('LEASE_TOKEN_MISMATCH');
+  if (!isDigest(options.repository_id) || !isDigest(options.authorized_ref_digest) || !isSafeId(options.run_id) || !isSafeId(options.lease_id)) fail('LEASE_BINDING_INVALID');
+  if (!['terminal-success', 'terminal-failure', 'terminal-blocked'].includes(options.terminal_state)
+    || options.workspace_disposition !== 'cleaned' || !['none', 'verified'].includes(options.publication_state)) fail('LEASE_RELEASE_UNSAFE');
+  const leasePath = mutationLeasePath(options.state_root, options.repository_id, options.authorized_ref_digest);
+  const lease = readMutationLease(options);
+  if (lease.lease_id !== options.lease_id || lease.run_id !== options.run_id) fail('LEASE_TOKEN_MISMATCH');
   try {
     fs.unlinkSync(leasePath);
   } catch (_error) {
@@ -882,15 +967,16 @@ function admitRun(options = {}) {
   if (route.status !== 'admitted') return { ...route, launches: [] };
   const planned = createRunReceipt({ request: route.request, route_plan: route.route_plan, run_id: options.run_id, now: options.now });
   const run = transitionRun(planned, 'admitted', { now: options.now });
-  const launches = [];
-  if (route.route_plan.delegated && typeof options.launch === 'function') {
-    for (const lane of route.route_plan.lanes) {
-      const result = options.launch(lane);
-      if (result && typeof result.then === 'function') return { status: 'blocked', reason_code: 'ASYNC_LAUNCH_UNSUPPORTED', request: route.request, route_plan: route.route_plan, run, launches };
-      launches.push(lane.lane_id);
+  if (route.route_plan.delegated) {
+    try {
+      const launch = executeAtomicLaunch(route.route_plan, options);
+      return { status: 'admitted', request: route.request, route_plan: route.route_plan, run, launches: launch.launches, consent: route.consent };
+    } catch (error) {
+      if (error instanceof ExecutionLoopError) return { status: 'blocked', reason_code: error.code, request: route.request, route_plan: route.route_plan, run, launches: [] };
+      throw error;
     }
   }
-  return { status: 'admitted', request: route.request, route_plan: route.route_plan, run, launches, consent: route.consent };
+  return { status: 'admitted', request: route.request, route_plan: route.route_plan, run, launches: [], consent: route.consent };
 }
 
 module.exports = {
@@ -931,6 +1017,7 @@ module.exports = {
   readDurableRun,
   writeDurableRun,
   acquireMutationLease,
+  verifyOwnedMutationLease,
   releaseMutationLease,
   prepareRetry,
 };

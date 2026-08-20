@@ -21,6 +21,14 @@
     "delegation_requires_current_authority": true,
     "complete_route_required_before_launch": true,
     "partial_launch": false,
+    "launch_atomicity": {
+      "prepare_phase": "inert_reservations_only",
+      "commit_phase": "one_atomic_batch",
+      "complete_lane_set_required": true,
+      "per_lane_substantive_start": false,
+      "unsupported_async": "block",
+      "rollback_is_not_zero_launch": true
+    },
     "missing_route": "WORKER_ROUTE_UNAVAILABLE",
     "model_mismatch": "WORKER_MODEL_MISMATCH",
     "metadata_unverified": "MODEL_METADATA_UNVERIFIED",
@@ -102,6 +110,19 @@
     "readback_verify": true,
     "exclusive_exact_token_lease": true,
     "one_active_mutator_per_repository_and_ref": true,
+    "mutation_lease": {
+      "required_before_first_mutation": true,
+      "revalidate_before_typed_commit": true,
+      "exact_repository_ref_run_token": true,
+      "competing_run": "CONFLICTING_RUN",
+      "expired_owner": "no_takeover",
+      "uncertain_or_interrupted": "preserve",
+      "safe_release_requires": {
+        "terminal_states": ["terminal-success", "terminal-failure", "terminal-blocked"],
+        "workspace_disposition": "cleaned",
+        "publication_states": ["none", "verified"]
+      }
+    },
     "raw_remote_or_path": false,
     "prompts_or_model_output": false,
     "credentials_secrets_or_env": false,

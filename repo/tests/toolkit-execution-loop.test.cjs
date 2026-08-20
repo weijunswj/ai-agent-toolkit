@@ -79,6 +79,87 @@ test('A3 route admission is all-or-none before any lane launch', () => {
   assert.deepEqual(launches, []);
 });
 
+function delegatedLaunchOptions(overrides = {}) {
+  return {
+    ...common,
+    run_id: 'run-launch',
+    authority: { delegated: true, lanes: ['worker-a', 'worker-b'] },
+    adapters: {
+      'worker-a': { available: true, provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', reasoning: 'high', role: 'worker', host_classification: 'guidance-only' },
+      'worker-b': { available: true, provider: 'OpenAI', model: 'GPT-5.6 Luna / Max', reasoning: 'high', role: 'worker', host_classification: 'guidance-only' },
+    },
+    ...overrides,
+  };
+}
+
+test('A3 launch preparation failure creates no substantive starts', () => {
+  const prepared = [];
+  let substantiveStarts = 0;
+  const result = runtime.admitRun(delegatedLaunchOptions({
+    prepareLaunch(lane) {
+      prepared.push(lane.lane_id);
+      if (lane.lane_id === 'worker-b') throw new Error('lane refused preparation');
+      return { lane_id: lane.lane_id, reservation_handle: 'reservation-' + lane.lane_id, inert: true };
+    },
+    commitLaunchBatch() {
+      substantiveStarts += 1;
+      return { atomic: true, started_lane_ids: ['worker-a', 'worker-b'] };
+    },
+  }));
+  assert.equal(result.status, 'blocked');
+  assert.equal(result.reason_code, 'LAUNCH_PREPARATION_FAILED');
+  assert.deepEqual(prepared, ['worker-a', 'worker-b']);
+  assert.equal(substantiveStarts, 0);
+  assert.deepEqual(result.launches, []);
+});
+
+test('A3 atomic batch refusal after later-lane validation creates no substantive starts', () => {
+  const result = runtime.admitRun(delegatedLaunchOptions({
+    prepareLaunch(lane) {
+      return { lane_id: lane.lane_id, reservation_handle: 'reservation-' + lane.lane_id, inert: true };
+    },
+    commitLaunchBatch({ reservations }) {
+      assert.deepEqual(reservations.map((item) => item.lane_id), ['worker-a', 'worker-b']);
+      throw new Error('worker-b refused at atomic start boundary');
+    },
+  }));
+  assert.equal(result.status, 'blocked');
+  assert.equal(result.reason_code, 'LAUNCH_BATCH_FAILED');
+  assert.deepEqual(result.launches, []);
+});
+
+test('A3 unsupported async launch shape creates no substantive starts', () => {
+  const result = runtime.admitRun(delegatedLaunchOptions({
+    prepareLaunch(lane) {
+      return { lane_id: lane.lane_id, reservation_handle: 'reservation-' + lane.lane_id, inert: true };
+    },
+    commitLaunchBatch() {
+      return Promise.resolve({ atomic: true, started_lane_ids: ['worker-a', 'worker-b'] });
+    },
+  }));
+  assert.equal(result.status, 'blocked');
+  assert.equal(result.reason_code, 'ASYNC_LAUNCH_UNSUPPORTED');
+  assert.deepEqual(result.launches, []);
+});
+
+test('A3 complete atomic launch starts exactly the admitted lane set', () => {
+  const batches = [];
+  const result = runtime.admitRun(delegatedLaunchOptions({
+    prepareLaunch(lane) {
+      return { lane_id: lane.lane_id, reservation_handle: 'reservation-' + lane.lane_id, inert: true };
+    },
+    commitLaunchBatch({ route_plan, reservations }) {
+      batches.push({ route_digest: route_plan.route_digest, lanes: reservations.map((item) => item.lane_id) });
+      return { atomic: true, started_lane_ids: reservations.map((item) => item.lane_id) };
+    },
+  }));
+  assert.equal(result.status, 'admitted');
+  assert.deepEqual(result.launches, ['worker-a', 'worker-b']);
+  assert.equal(batches.length, 1);
+  assert.deepEqual(batches[0].lanes, ['worker-a', 'worker-b']);
+  assert.equal(Object.isFrozen(result.route_plan), true);
+});
+
 function expectCode(fn, code) {
   assert.throws(fn, (error) => error && error.code === code);
 }
