@@ -26,8 +26,11 @@ const POLICY = Object.freeze({
   a2_capability: 'execution_loop',
   a1_operation: 'git.commit',
   a1: Object.freeze({ sole_operation_authority: true, public_issuer: false, a3_ticket_format: false, git_stage_operation: false }),
+  routing: Object.freeze({ workspace_receipt_required_before_substantive_start: true, substantive_start_state: 'workspace-ready', exact_start_binding: Object.freeze(['run_id', 'repository_id', 'authorized_ref_digest', 'current_authority_digest', 'route_plan', 'workspace_receipt', 'snapshot_commit', 'snapshot_tree']) }),
+  live_authority: Object.freeze({ mandatory_provider_for_typed_commit: true, revalidate_before_workspace_start: true, revalidate_before_typed_commit: true }),
+  worktree: Object.freeze({ canonical_status_fields: Object.freeze(['staged_paths', 'unstaged_paths', 'untracked_paths']), out_of_scope_changes: 'fail_closed' }),
   launch: Object.freeze({ prepare_inert: true, atomic_batch_commit: true, per_lane_start: false, rollback_is_not_zero_launch: true }),
-  mutation_lease: Object.freeze({ required_before_stage: true, revalidate_before_commit: true, exact_owner: true, stale_takeover: false, uncertain_preserves: true, safe_terminal_release: true }),
+  mutation_lease: Object.freeze({ required_before_stage: true, revalidate_before_commit: true, exact_owner: true, stale_takeover: false, uncertain_preserves: true, safe_terminal_release: true, durable_evidence_required_for_release: true, caller_labels_authoritative: false }),
   durable_state_root: '~/.ai-agent-toolkit/user-state/execution-loop/',
   durable_forbidden: ['raw_remote', 'raw_absolute_path', 'prompt', 'model_output', 'repository_contents', 'credentials', 'secret_values', 'environment_values', 'a1_ticket'],
   publication: Object.freeze({ optional: true, branch_operation: 'git.branch', commit_operation: 'git.commit', push_operation: 'git.push', direct_main_push: false, force: false, merge: false, ready: false, review_mutation: false, web_finality: false }),
@@ -38,7 +41,7 @@ const TRANSITIONS = Object.freeze({
   'workspace-ready': ['running'],
   running: ['validating', 'interrupted'],
   validating: ['publication-pending', 'terminal-success', 'terminal-failure', 'terminal-blocked', 'interrupted'],
-  'publication-pending': ['terminal-success', 'terminal-failure', 'terminal-blocked'],
+  'publication-pending': ['terminal-success', 'terminal-failure', 'terminal-blocked', 'interrupted'],
   'terminal-success': [],
   'terminal-failure': [],
   'terminal-blocked': [],
@@ -426,6 +429,11 @@ function executeAtomicLaunch(routePlan, options) {
   const committed = invokeAtomicLaunch(options.commitLaunchBatch, options, {
     route_plan: routePlan,
     reservations: deepFreeze(reservations.slice()),
+    run_id: options.run && options.run.run_id,
+    repository_id: options.run && options.run.repository_id,
+    authorized_ref_digest: options.run && options.run.authorized_ref_digest,
+    current_authority_digest: options.run && options.run.current_authority_digest,
+    workspace_receipt: options.workspace_receipt,
   }, 'LAUNCH_BATCH_FAILED');
   const expected = routePlan.lanes.map((lane) => lane.lane_id);
   if (!isRecord(committed) || committed.atomic !== true || !exactIdSet(committed.started_lane_ids, expected)) fail('LAUNCH_BATCH_INVALID');
@@ -510,6 +518,7 @@ function transitionRun(run, nextState, options = {}) {
     next.current_lanes = [...map.values()];
   }
   if (nextState === 'terminal-success' && next.publication_state === 'uncertain') fail('PUBLICATION_UNCERTAIN');
+  if (nextState === 'interrupted' && (next.publication_state !== 'uncertain' || !['preserved', 'quarantined'].includes(next.workspace_disposition))) fail('INTERRUPTION_EVIDENCE_REQUIRED');
   return validateRunReceipt(next);
 }
 
@@ -547,6 +556,25 @@ function validateWorkspaceReceipt(record) {
   return deepFreeze(clone(record));
 }
 
+function validateRunEvidence(options = {}, expectedState, prefix) {
+  if (!isRecord(options.run) || !isRecord(options.route_plan) || !isRecord(options.workspace_receipt)) fail(prefix + '_RUN_EVIDENCE_REQUIRED');
+  const run = validateRunReceipt(options.run);
+  if (run.execution_state !== expectedState) fail(prefix + '_LIFECYCLE_INVALID');
+  if (!isSafeId(options.run_id) || !isDigest(options.repository_id) || !isDigest(options.authorized_ref_digest) || !isDigest(options.current_authority_digest)) fail(prefix + '_BINDING_INVALID');
+  if (options.run_id !== run.run_id || options.repository_id !== run.repository_id || options.authorized_ref_digest !== run.authorized_ref_digest || options.current_authority_digest !== run.current_authority_digest) fail(prefix + '_RUN_BINDING_MISMATCH');
+  const routePlan = validateRoutePlan(options.route_plan);
+  if (routePlan.route_digest !== run.route_digest || routePlan.repository_id !== run.repository_id || routePlan.authorized_ref_digest !== run.authorized_ref_digest) fail(prefix + '_ROUTE_BINDING_MISMATCH');
+  const expectedAuthorityBinding = digestValue({ run_id: run.run_id, request_id: routePlan.request_id, current_authority_digest: run.current_authority_digest, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, route_digest: run.route_digest });
+  if (run.authority_binding_digest !== expectedAuthorityBinding) fail(prefix + '_RUN_BINDING_MISMATCH');
+  const workspaceReceipt = validateWorkspaceReceipt(options.workspace_receipt);
+  if (workspaceReceipt.run_id !== run.run_id || workspaceReceipt.repository_id !== run.repository_id || workspaceReceipt.authorized_ref_digest !== run.authorized_ref_digest || run.workspace_receipt_digest !== digestValue(workspaceReceipt)) fail(prefix + '_WORKSPACE_BINDING_MISMATCH');
+  return { run, routePlan, workspaceReceipt };
+}
+function verifyLiveWorkspaceReceipt(provider, workspaceReceipt) {
+  const live = readLiveRef(provider);
+  if (digestValue(live.ref) !== workspaceReceipt.live_ref_digest || digestValue(live.sha) !== workspaceReceipt.snapshot_commit_digest || digestValue(live.tree) !== workspaceReceipt.snapshot_tree_digest) fail('LIVE_REF_MOVED', { observed_ref_digest: digestValue(live.ref), observed_commit_digest: digestValue(live.sha), observed_tree_digest: digestValue(live.tree) });
+  return live;
+}
 function readLiveRef(provider) {
   if (!provider || typeof provider.read !== 'function') fail('LIVE_REF_UNAVAILABLE');
   return normalizeLiveRef(invokeSync(provider.read, provider, {}, 'LIVE_REF_UNAVAILABLE'));
@@ -623,12 +651,17 @@ function authorizeA1Operation(options = {}) {
 
 function normalizeGitStatus(status, repositoryId) {
   if (!isRecord(status) || !isDigest(status.repository_id) || status.repository_id !== repositoryId
-    || !isSha1(status.head) || !isSha1(status.tree) || !isDigest(status.index_digest)
-    || !Array.isArray(status.staged_paths) || status.staged_paths.length > 64
-    || status.staged_paths.some((item) => !isSafeRelativePath(item))) fail('GIT_STATUS_INVALID');
-  const stagedPaths = [...status.staged_paths].sort();
-  if (new Set(stagedPaths).size !== stagedPaths.length) fail('GIT_STATUS_INVALID');
-  return { ...status, staged_paths: stagedPaths };
+    || !isSha1(status.head) || !isSha1(status.tree) || !isDigest(status.index_digest)) fail('GIT_STATUS_INVALID');
+  const raw = isRecord(status.worktree_paths) ? status.worktree_paths : { staged_paths: status.staged_paths, unstaged_paths: hasOwn(status, 'unstaged_paths') ? status.unstaged_paths : status.dirty_paths, untracked_paths: status.untracked_paths };
+  if (!isRecord(raw) || !exactKeys(raw, ['staged_paths', 'unstaged_paths', 'untracked_paths'])) fail('GIT_STATUS_INVALID');
+  const normalizePaths = (value) => {
+    if (!Array.isArray(value) || value.length > 64 || value.some((item) => !isSafeRelativePath(item))) fail('GIT_STATUS_INVALID');
+    const paths = [...value].sort();
+    if (new Set(paths).size !== paths.length) fail('GIT_STATUS_INVALID');
+    return paths;
+  };
+  const worktreePaths = { staged_paths: normalizePaths(raw.staged_paths), unstaged_paths: normalizePaths(raw.unstaged_paths), untracked_paths: normalizePaths(raw.untracked_paths) };
+  return { ...status, worktree_paths: worktreePaths, staged_paths: worktreePaths.staged_paths };
 }
 
 function buildGitCommitOperation(options, status) {
@@ -666,38 +699,44 @@ function exactPathSet(actual, expected) {
   return Array.isArray(actual) && actual.length === expected.length && [...actual].sort().every((item, index) => item === expected[index]);
 }
 
+function assertWorktreeScope(status, authorizedPaths, failureCode = 'GIT_COMMIT_WORKTREE_BROADENED') {
+  const allowed = new Set(authorizedPaths);
+  for (const field of ['unstaged_paths', 'untracked_paths']) {
+    if (status.worktree_paths[field].some((item) => !allowed.has(item))) fail(failureCode);
+  }
+}
 function executeTypedGitCommit(options = {}) {
   const consent = readExecutionLoopConsent(options);
   if (!consent.enabled) fail(consent.state === 'disabled' ? 'CONSENT_DISABLED' : consent.state === 'interrupted' ? 'CONSENT_INTERRUPTED' : 'CONSENT_UNRESOLVED');
   if (!isSafeId(options.run_id) || !isDigest(options.repository_id) || !isDigest(options.authorized_ref_digest) || !isDigest(options.current_authority_digest)) fail('GIT_COMMIT_BINDING_INVALID');
+  const evidence = validateRunEvidence(options, 'running', 'GIT_COMMIT');
+  if (!options.liveRefProvider) fail('LIVE_REF_REQUIRED');
   verifyOwnedMutationLease(options);
   const git = options.git;
   if (!git || typeof git.status !== 'function' || typeof git.stageExact !== 'function' || typeof git.commit !== 'function') fail('GIT_ADAPTER_UNAVAILABLE');
+  const operation = buildGitCommitOperation(options, null);
+  if (digestValue(operation.expected_head) !== evidence.workspaceReceipt.snapshot_commit_digest || digestValue(operation.expected_tree) !== evidence.workspaceReceipt.snapshot_tree_digest) fail('GIT_COMMIT_WORKSPACE_SNAPSHOT_MISMATCH');
   const initial = normalizeGitStatus(invokeSync(git.status, git, {}, 'GIT_STATUS_UNAVAILABLE'), options.repository_id);
-  const operation = buildGitCommitOperation(options, initial);
   if (initial.head !== operation.expected_head) fail('GIT_COMMIT_HEAD_MISMATCH');
   if (initial.tree !== operation.expected_tree) fail('GIT_COMMIT_TREE_MISMATCH');
   if (initial.index_digest !== operation.expected_index_digest) fail('GIT_COMMIT_INDEX_BASELINE_MISMATCH');
   if (initial.staged_paths.length !== 0) fail('GIT_COMMIT_PREEXISTING_STAGE');
-  if (options.liveRefProvider) {
-    const live = readLiveRef(options.liveRefProvider);
-    if (live.sha !== operation.expected_head || live.tree !== operation.expected_tree) fail('LIVE_REF_MOVED', { observed_commit_digest: digestValue(live.sha), observed_tree_digest: digestValue(live.tree) });
-  }
+  assertWorktreeScope(initial, operation.authorized_paths);
+  verifyLiveWorkspaceReceipt(options.liveRefProvider, evidence.workspaceReceipt);
   const authority = authorizeA1Operation({ ...options, operation });
   verifyOwnedMutationLease(options);
   const staged = invokeSync(git.stageExact, git, { paths: operation.authorized_paths }, 'GIT_STAGE_FAILED');
   const afterStage = normalizeGitStatus(isRecord(staged) ? staged : invokeSync(git.status, git, {}, 'GIT_STATUS_UNAVAILABLE'), options.repository_id);
   if (!exactPathSet(afterStage.staged_paths, operation.authorized_paths)) fail('GIT_COMMIT_STAGED_SET_MISMATCH');
-  if (options.liveRefProvider) {
-    const liveBeforeCommit = readLiveRef(options.liveRefProvider);
-    if (liveBeforeCommit.sha !== operation.expected_head || liveBeforeCommit.tree !== operation.expected_tree) fail('LIVE_REF_MOVED', { observed_commit_digest: digestValue(liveBeforeCommit.sha), observed_tree_digest: digestValue(liveBeforeCommit.tree) });
-  }
+  assertWorktreeScope(afterStage, operation.authorized_paths);
+  verifyLiveWorkspaceReceipt(options.liveRefProvider, evidence.workspaceReceipt);
   verifyOwnedMutationLease(options);
   const committed = invokeSync(git.commit, git, { message: operation.commit_message, amend: false, allow_empty: false, options: [], paths: operation.authorized_paths }, 'GIT_COMMIT_EXECUTION_FAILED');
   const finalStatus = normalizeGitStatus(committed && isRecord(committed.status) ? committed.status : invokeSync(git.status, git, {}, 'GIT_STATUS_UNAVAILABLE'), options.repository_id);
   const resultingTree = committed && committed.tree ? committed.tree : finalStatus.tree;
   const resultingChangeDigest = committed && committed.change_digest ? committed.change_digest : finalStatus.change_digest;
   if (finalStatus.staged_paths.length !== 0) fail('GIT_COMMIT_HOOK_BROADENED');
+  assertWorktreeScope(finalStatus, operation.authorized_paths, 'GIT_COMMIT_HOOK_BROADENED');
   if (resultingTree !== operation.intended_tree) fail('GIT_COMMIT_RESULT_TREE_MISMATCH');
   if (!isDigest(resultingChangeDigest) || resultingChangeDigest !== operation.intended_change_digest) fail('GIT_COMMIT_RESULT_CHANGE_MISMATCH');
   if (committed && (committed.amend === true || committed.allow_empty === true || committed.author_mutation === true || committed.committer_mutation === true || committed.config_mutation === true)) fail('GIT_COMMIT_MUTATION_FLAG_UNSUPPORTED');
@@ -714,6 +753,7 @@ function createTerminalPacket(options = {}) {
   if (!WORKSPACE_DISPOSITIONS.includes(workspaceDisposition)) fail('WORKSPACE_DISPOSITION_INVALID');
   if (!['none', 'verified', 'uncertain'].includes(publicationState)) fail('PUBLICATION_STATE_INVALID');
   if (outcome === 'success' && publicationState === 'uncertain') fail('PUBLICATION_UNCERTAIN');
+  if (outcome === 'interrupted' && (publicationState !== 'uncertain' || !['preserved', 'quarantined'].includes(workspaceDisposition))) fail('INTERRUPTION_EVIDENCE_REQUIRED');
   return validateTerminalPacket(contractRecord(CONTRACTS[4], {
     run_id: options.run_id,
     outcome,
@@ -746,7 +786,9 @@ function completeRun(options = {}) {
   if (packet.run_id !== run.run_id) fail('TERMINAL_RUN_MISMATCH');
   const state = TERMINAL_OUTCOMES[packet.outcome];
   if (state === 'interrupted') {
-    if (!['running', 'validating'].includes(run.execution_state)) fail('INVALID_STATE_TRANSITION');
+    if (!['running', 'validating', 'publication-pending'].includes(run.execution_state)) fail('INVALID_STATE_TRANSITION');
+  } else if (run.execution_state === 'publication-pending' && (run.publication_state === 'uncertain' || packet.publication_state === 'uncertain')) {
+    fail('PUBLICATION_INTERRUPTION_REQUIRED');
   } else if (!['validating', 'publication-pending'].includes(run.execution_state)) {
     fail('INVALID_STATE_TRANSITION');
   }
@@ -804,6 +846,14 @@ function ensureStateRoot(root) {
 function validateDurableRun(record) {
   const run = validateRunReceipt(record);
   assertPrivacySafe(run);
+  const terminalStates = ['terminal-success', 'terminal-failure', 'terminal-blocked'];
+  const workspaceStates = ['workspace-ready', 'running', 'validating', 'publication-pending'];
+  const hasWorkspaceEvidence = isDigest(run.workspace_receipt_digest);
+  const hasTerminalEvidence = isDigest(run.terminal_packet_digest);
+  if (['planned', 'admitted'].includes(run.execution_state) && (hasWorkspaceEvidence || hasTerminalEvidence || run.workspace_disposition !== null || run.publication_state !== 'none')) fail('DURABLE_STATE_CONTRADICTORY');
+  if (workspaceStates.includes(run.execution_state) && (!hasWorkspaceEvidence || hasTerminalEvidence || run.workspace_disposition !== null)) fail('DURABLE_STATE_CONTRADICTORY');
+  if (terminalStates.includes(run.execution_state) && (!hasWorkspaceEvidence || !hasTerminalEvidence || run.workspace_disposition === null || run.publication_state === 'uncertain')) fail('DURABLE_TERMINAL_EVIDENCE_REQUIRED');
+  if (run.execution_state === 'interrupted' && (!hasWorkspaceEvidence || !hasTerminalEvidence || !['preserved', 'quarantined'].includes(run.workspace_disposition) || run.publication_state !== 'uncertain')) fail('DURABLE_INTERRUPTION_EVIDENCE_REQUIRED');
   return run;
 }
 
@@ -929,11 +979,17 @@ function acquireMutationLease(options = {}) {
 
 function releaseMutationLease(options = {}) {
   if (!isDigest(options.repository_id) || !isDigest(options.authorized_ref_digest) || !isSafeId(options.run_id) || !isSafeId(options.lease_id)) fail('LEASE_BINDING_INVALID');
-  if (!['terminal-success', 'terminal-failure', 'terminal-blocked'].includes(options.terminal_state)
-    || options.workspace_disposition !== 'cleaned' || !['none', 'verified'].includes(options.publication_state)) fail('LEASE_RELEASE_UNSAFE');
   const leasePath = mutationLeasePath(options.state_root, options.repository_id, options.authorized_ref_digest);
   const lease = readMutationLease(options);
   if (lease.lease_id !== options.lease_id || lease.run_id !== options.run_id) fail('LEASE_TOKEN_MISMATCH');
+  let durableRun;
+  try {
+    durableRun = readDurableRun({ state_root: options.state_root, repository_id: options.repository_id, authorized_ref_digest: options.authorized_ref_digest, run_id: options.run_id });
+  } catch (_error) {
+    fail('LEASE_RELEASE_UNSAFE');
+  }
+  if (!durableRun || !['terminal-success', 'terminal-failure', 'terminal-blocked'].includes(durableRun.execution_state) || !isDigest(durableRun.workspace_receipt_digest) || !isDigest(durableRun.terminal_packet_digest) || durableRun.workspace_disposition !== 'cleaned' || !['none', 'verified'].includes(durableRun.publication_state)) fail('LEASE_RELEASE_UNSAFE');
+  if ((hasOwn(options, 'terminal_state') && options.terminal_state !== durableRun.execution_state) || (hasOwn(options, 'workspace_disposition') && options.workspace_disposition !== durableRun.workspace_disposition) || (hasOwn(options, 'publication_state') && options.publication_state !== durableRun.publication_state)) fail('LEASE_RELEASE_UNSAFE');
   try {
     fs.unlinkSync(leasePath);
   } catch (_error) {
@@ -967,18 +1023,22 @@ function admitRun(options = {}) {
   if (route.status !== 'admitted') return { ...route, launches: [] };
   const planned = createRunReceipt({ request: route.request, route_plan: route.route_plan, run_id: options.run_id, now: options.now });
   const run = transitionRun(planned, 'admitted', { now: options.now });
-  if (route.route_plan.delegated) {
-    try {
-      const launch = executeAtomicLaunch(route.route_plan, options);
-      return { status: 'admitted', request: route.request, route_plan: route.route_plan, run, launches: launch.launches, consent: route.consent };
-    } catch (error) {
-      if (error instanceof ExecutionLoopError) return { status: 'blocked', reason_code: error.code, request: route.request, route_plan: route.route_plan, run, launches: [] };
-      throw error;
-    }
-  }
   return { status: 'admitted', request: route.request, route_plan: route.route_plan, run, launches: [], consent: route.consent };
 }
 
+function startDelegatedRun(options = {}) {
+  const evidence = validateRunEvidence(options, 'workspace-ready', 'START');
+  if (!evidence.routePlan.delegated) fail('DELEGATED_ROUTE_REQUIRED');
+  verifyLiveWorkspaceReceipt(options.liveRefProvider, evidence.workspaceReceipt);
+  const running = transitionRun(evidence.run, 'running', { now: options.now });
+  try {
+    const launch = executeAtomicLaunch(evidence.routePlan, { ...options, run: running, workspace_receipt: evidence.workspaceReceipt });
+    return { status: 'running', route_plan: evidence.routePlan, run: running, workspace_receipt: evidence.workspaceReceipt, launches: launch.launches, consent: readExecutionLoopConsent(options) };
+  } catch (error) {
+    if (error instanceof ExecutionLoopError) return { status: 'blocked', reason_code: error.code, route_plan: evidence.routePlan, run: running, workspace_receipt: evidence.workspaceReceipt, launches: [] };
+    throw error;
+  }
+}
 module.exports = {
   CONTRACTS,
   EXECUTION_STATES,
@@ -1000,6 +1060,7 @@ module.exports = {
   validateRunReceipt,
   transitionRun,
   normalizeLiveRef,
+  startDelegatedRun,
   admitWorkspace,
   createWorkspaceReceipt,
   validateWorkspaceReceipt,

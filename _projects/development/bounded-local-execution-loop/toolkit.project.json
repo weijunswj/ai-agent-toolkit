@@ -5,9 +5,9 @@
   "title": "A3 Bounded Local Execution-Loop",
   "module_path": "_projects/development/bounded-local-execution-loop",
   "main_path": "_projects/development/bounded-local-execution-loop/_main",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "version_policy": "semver",
-  "version_notes": "Patch amendment enforcing atomic delegated launch commitment and exact owned mutation leases without changing the five-contract source-only surface.",
+  "version_notes": "Patch amendment binding substantive delegated starts and typed git.commit to verified workspace evidence, deriving lease release from safe durable state, and rejecting hook/worktree broadening without changing the five-contract source-only surface.",
   "outputs": [],
   "writes": {
     "allowed": [],

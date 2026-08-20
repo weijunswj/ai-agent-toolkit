@@ -92,10 +92,38 @@ function delegatedLaunchOptions(overrides = {}) {
   };
 }
 
+function delegatedReady(options) {
+  const admitted = runtime.admitRun(options);
+  const live = { ref: 'refs/heads/main', sha: 'a'.repeat(40), tree: 'b'.repeat(40) };
+  const workspace = runtime.admitWorkspace({
+    run: admitted.run,
+    expected_live: live,
+    liveRefProvider: { read: () => live },
+    workspaceAdapter: { prepare: () => ({ workspace_id: 'workspace-' + options.run_id, workspace_handle: 'handle-' + options.run_id, commit_sha: live.sha, tree_sha: live.tree }) },
+  });
+  return { admitted, live, workspace };
+}
+
+function startDelegated(options) {
+  const ready = delegatedReady(options);
+  const started = runtime.startDelegatedRun({
+    ...options,
+    run_id: ready.workspace.run.run_id,
+    repository_id: ready.workspace.run.repository_id,
+    authorized_ref_digest: ready.workspace.run.authorized_ref_digest,
+    current_authority_digest: ready.workspace.run.current_authority_digest,
+    route_plan: ready.admitted.route_plan,
+    run: ready.workspace.run,
+    workspace_receipt: ready.workspace.workspace_receipt,
+    liveRefProvider: { read: () => ready.live },
+  });
+  return { ...ready, started };
+}
+
 test('A3 launch preparation failure creates no substantive starts', () => {
   const prepared = [];
   let substantiveStarts = 0;
-  const result = runtime.admitRun(delegatedLaunchOptions({
+  const result = startDelegated(delegatedLaunchOptions({
     prepareLaunch(lane) {
       prepared.push(lane.lane_id);
       if (lane.lane_id === 'worker-b') throw new Error('lane refused preparation');
@@ -106,15 +134,17 @@ test('A3 launch preparation failure creates no substantive starts', () => {
       return { atomic: true, started_lane_ids: ['worker-a', 'worker-b'] };
     },
   }));
-  assert.equal(result.status, 'blocked');
-  assert.equal(result.reason_code, 'LAUNCH_PREPARATION_FAILED');
+  assert.equal(result.admitted.status, 'admitted');
+  assert.equal(result.workspace.run.execution_state, 'workspace-ready');
+  assert.equal(result.started.status, 'blocked');
+  assert.equal(result.started.reason_code, 'LAUNCH_PREPARATION_FAILED');
   assert.deepEqual(prepared, ['worker-a', 'worker-b']);
   assert.equal(substantiveStarts, 0);
-  assert.deepEqual(result.launches, []);
+  assert.deepEqual(result.started.launches, []);
 });
 
 test('A3 atomic batch refusal after later-lane validation creates no substantive starts', () => {
-  const result = runtime.admitRun(delegatedLaunchOptions({
+  const result = startDelegated(delegatedLaunchOptions({
     prepareLaunch(lane) {
       return { lane_id: lane.lane_id, reservation_handle: 'reservation-' + lane.lane_id, inert: true };
     },
@@ -123,13 +153,13 @@ test('A3 atomic batch refusal after later-lane validation creates no substantive
       throw new Error('worker-b refused at atomic start boundary');
     },
   }));
-  assert.equal(result.status, 'blocked');
-  assert.equal(result.reason_code, 'LAUNCH_BATCH_FAILED');
-  assert.deepEqual(result.launches, []);
+  assert.equal(result.started.status, 'blocked');
+  assert.equal(result.started.reason_code, 'LAUNCH_BATCH_FAILED');
+  assert.deepEqual(result.started.launches, []);
 });
 
 test('A3 unsupported async launch shape creates no substantive starts', () => {
-  const result = runtime.admitRun(delegatedLaunchOptions({
+  const result = startDelegated(delegatedLaunchOptions({
     prepareLaunch(lane) {
       return { lane_id: lane.lane_id, reservation_handle: 'reservation-' + lane.lane_id, inert: true };
     },
@@ -137,14 +167,14 @@ test('A3 unsupported async launch shape creates no substantive starts', () => {
       return Promise.resolve({ atomic: true, started_lane_ids: ['worker-a', 'worker-b'] });
     },
   }));
-  assert.equal(result.status, 'blocked');
-  assert.equal(result.reason_code, 'ASYNC_LAUNCH_UNSUPPORTED');
-  assert.deepEqual(result.launches, []);
+  assert.equal(result.started.status, 'blocked');
+  assert.equal(result.started.reason_code, 'ASYNC_LAUNCH_UNSUPPORTED');
+  assert.deepEqual(result.started.launches, []);
 });
 
 test('A3 complete atomic launch starts exactly the admitted lane set', () => {
   const batches = [];
-  const result = runtime.admitRun(delegatedLaunchOptions({
+  const result = startDelegated(delegatedLaunchOptions({
     prepareLaunch(lane) {
       return { lane_id: lane.lane_id, reservation_handle: 'reservation-' + lane.lane_id, inert: true };
     },
@@ -153,11 +183,14 @@ test('A3 complete atomic launch starts exactly the admitted lane set', () => {
       return { atomic: true, started_lane_ids: reservations.map((item) => item.lane_id) };
     },
   }));
-  assert.equal(result.status, 'admitted');
-  assert.deepEqual(result.launches, ['worker-a', 'worker-b']);
+  assert.equal(result.admitted.status, 'admitted');
+  assert.equal(result.workspace.run.execution_state, 'workspace-ready');
+  assert.equal(result.started.status, 'running');
+  assert.equal(result.started.run.execution_state, 'running');
+  assert.deepEqual(result.started.launches, ['worker-a', 'worker-b']);
   assert.equal(batches.length, 1);
   assert.deepEqual(batches[0].lanes, ['worker-a', 'worker-b']);
-  assert.equal(Object.isFrozen(result.route_plan), true);
+  assert.equal(Object.isFrozen(result.started.route_plan), true);
 });
 
 function expectCode(fn, code) {

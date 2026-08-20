@@ -15,16 +15,21 @@ canonical A1/A2 main. No third-party source is copied or adapted.
 ## Runtime and focused validation
 
 - repo/scripts/toolkit-execution-loop.cjs is a dependency-free runtime. It
-  reads A2 status, admits root-only or fully verified delegated routes, uses
-  inert reservations plus one atomic delegated batch commitment, binds fresh
-  live-ref workspaces, uses an injected A1 broker, requires an exact owned
-  mutation lease before staging and before commit, executes only the typed
-  stage-plus-commit seam, and keeps bounded external state.
+  reads A2 status, admits root-only or fully verified delegated routes, keeps
+  delegated substantive start at admitted until an exact live-ref-verified
+  workspace receipt advances the run to workspace-ready, uses inert
+  reservations plus one atomic delegated batch commitment, uses an injected
+  A1 broker, requires exact run/workspace evidence, a mandatory live-ref
+  provider, and an exact owned mutation lease before typed git.commit staging
+  and commit, derives lease release from safe durable terminal evidence, and
+  rejects out-of-scope staged/unstaged/untracked worktree changes including
+  hook broadening.
 - repo/tests/toolkit-execution-loop.test.cjs covers the green contract,
-  routing, lifecycle, A1 broker, typed commit, persistence, and finality
-  paths.
+  routing, workspace-bound lifecycle, atomic delegated start, A1 broker,
+  typed commit, persistence, and finality paths.
 - repo/tests/toolkit-execution-loop.boundaries.test.cjs covers malformed,
-  future, privacy, concurrency, recovery, and cleanup boundaries.
+  future, privacy, concurrency, durable-release, worktree, recovery, and
+  cleanup boundaries.
 
 ## Scope boundary
 

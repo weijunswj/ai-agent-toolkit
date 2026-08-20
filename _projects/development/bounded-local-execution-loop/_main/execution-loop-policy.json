@@ -20,6 +20,9 @@
   "routing": {
     "delegation_requires_current_authority": true,
     "complete_route_required_before_launch": true,
+    "workspace_receipt_required_before_substantive_start": true,
+    "substantive_start_state": "workspace-ready",
+    "exact_start_binding": ["run_id", "repository_id", "authorized_ref_digest", "current_authority_digest", "route_plan", "workspace_receipt", "snapshot_commit", "snapshot_tree"],
     "partial_launch": false,
     "launch_atomicity": {
       "prepare_phase": "inert_reservations_only",
@@ -59,6 +62,7 @@
     "publication_uncertainty_terminal": true,
     "worker_loss_preserves": true,
     "stale_lease_no_takeover": true,
+    "substantive_start_requires_workspace_ready": true,
     "retry_requires_fresh_run_and_admission": true
   },
   "live_authority": {
@@ -67,6 +71,8 @@
     "exact_commit_and_tree_required": true,
     "workspace_setup_operations": ["fetch", "safe-directory-check", "checkout-detached", "verify-snapshot"],
     "setup_is_not_mutation_authority": true,
+    "mandatory_live_ref_provider_for_typed_commit": true,
+    "revalidate_before_substantive_start": true,
     "revalidate_before_commit_and_push": true
   },
   "a1": {
@@ -92,6 +98,11 @@
       "config_mutation": false,
       "arbitrary_options": false,
       "shell_fallback": false,
+      "mandatory_live_ref_provider": true,
+      "worktree_status": {
+        "canonical_fields": ["staged_paths", "unstaged_paths", "untracked_paths"],
+        "out_of_scope_changes": "fail_closed"
+      },
       "force": false,
       "hook_broadening": "fail_closed_preserve_evidence"
     },
@@ -120,7 +131,9 @@
       "safe_release_requires": {
         "terminal_states": ["terminal-success", "terminal-failure", "terminal-blocked"],
         "workspace_disposition": "cleaned",
-        "publication_states": ["none", "verified"]
+        "publication_states": ["none", "verified"],
+        "durable_run_evidence": ["workspace_receipt_digest", "terminal_packet_digest"],
+        "caller_labels_authoritative": false
       }
     },
     "raw_remote_or_path": false,
