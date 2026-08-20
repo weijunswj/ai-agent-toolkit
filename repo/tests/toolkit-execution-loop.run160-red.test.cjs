@@ -86,7 +86,7 @@ function runningEvidence(runId = 'run-commit', liveOverride = {}) {
     run: admitted.run,
     expected_live: live,
     liveRefProvider: { read: () => live },
-    workspaceAdapter: { prepare: () => ({ workspace_id: 'workspace-' + runId, workspace_handle: 'handle-' + runId, commit_sha: live.sha, tree_sha: live.tree }) },
+    workspaceAdapter: { prepare: () => ({ workspace_id: 'workspace-' + runId, workspace_handle: 'handle-' + runId, commit_sha: live.sha, tree_sha: live.tree }), verifySnapshot: () => true },
   });
   return { run_id: runId, repository_id: admitted.run.repository_id, authorized_ref_digest: admitted.run.authorized_ref_digest, current_authority_digest: admitted.run.current_authority_digest, route_plan: admitted.route_plan, run: runtime.transitionRun(workspace.run, 'running'), workspace_receipt: workspace.workspace_receipt, live, liveRefProvider: { read: () => live } };
 }
@@ -231,7 +231,7 @@ test('RUN160 RED: hook-created out-of-scope worktree evidence cannot escape type
     run: admitted.run,
     expected_live: live,
     liveRefProvider: { read: () => live },
-    workspaceAdapter: { prepare: () => ({ workspace_id: 'workspace-hook', workspace_handle: 'handle-hook', commit_sha: live.sha, tree_sha: live.tree }) },
+    workspaceAdapter: { prepare: () => ({ workspace_id: 'workspace-hook', workspace_handle: 'handle-hook', commit_sha: live.sha, tree_sha: live.tree }), verifySnapshot: () => true },
   });
   const running = runtime.transitionRun(workspace.run, 'running');
   const originalCommit = fixture.commit;
@@ -257,7 +257,7 @@ test('RUN160 RED: delegated start rejects wrong or missing run, route, repositor
     run: admitted.run,
     expected_live: live,
     liveRefProvider: { read: () => live },
-    workspaceAdapter: { prepare: () => ({ workspace_id: 'workspace-bindings', workspace_handle: 'handle-bindings', commit_sha: live.sha, tree_sha: live.tree }) },
+    workspaceAdapter: { prepare: () => ({ workspace_id: 'workspace-bindings', workspace_handle: 'handle-bindings', commit_sha: live.sha, tree_sha: live.tree }), verifySnapshot: () => true },
   });
   const base = {
     ...common,

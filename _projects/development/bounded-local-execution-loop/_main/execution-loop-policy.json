@@ -15,7 +15,10 @@
     "declined": "block",
     "unresolved": "block",
     "malformed_or_interrupted": "block",
-    "consent_is_not_authority": true
+    "consent_is_not_authority": true,
+    "revalidate_before_workspace_ready_to_running": true,
+    "revalidate_immediately_before_atomic_batch": true,
+    "disabled_unresolved_malformed_or_interrupted_at_start": "remain_workspace_ready"
   },
   "routing": {
     "delegation_requires_current_authority": true,
@@ -71,6 +74,9 @@
     "exact_commit_and_tree_required": true,
     "workspace_setup_operations": ["fetch", "safe-directory-check", "checkout-detached", "verify-snapshot"],
     "setup_is_not_mutation_authority": true,
+    "workspace_snapshot_observation_required": true,
+    "workspace_snapshot_verification": "mandatory_synchronous_positive",
+    "expected_snapshot_substitution": false,
     "mandatory_live_ref_provider_for_typed_commit": true,
     "revalidate_before_substantive_start": true,
     "revalidate_before_commit_and_push": true
@@ -119,6 +125,14 @@
     "key": "repository_id_plus_authorized_ref_digest",
     "atomic_same_directory_write": true,
     "readback_verify": true,
+    "durable_artifacts": {
+      "required_before_safe_release": ["workspace-receipt", "terminal-packet"],
+      "contract_ids": ["toolkit.execution-loop.workspace-receipt.v1", "toolkit.execution-loop.terminal-packet.v1"],
+      "key_binding": ["repository_id", "authorized_ref_digest", "run_id", "artifact_type"],
+      "same_directory_atomic_write": true,
+      "readback_verify": true,
+      "missing_malformed_or_interrupted": "fail_closed"
+    },
     "exclusive_exact_token_lease": true,
     "one_active_mutator_per_repository_and_ref": true,
     "mutation_lease": {
@@ -133,6 +147,10 @@
         "workspace_disposition": "cleaned",
         "publication_states": ["none", "verified"],
         "durable_run_evidence": ["workspace_receipt_digest", "terminal_packet_digest"],
+        "exact_artifacts": true,
+        "artifact_digest_match": true,
+        "terminal_outcome_matches_execution_state": true,
+        "publication_and_workspace_disposition_match": true,
         "caller_labels_authoritative": false
       }
     },

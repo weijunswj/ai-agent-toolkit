@@ -24,13 +24,15 @@ const POLICY = Object.freeze({
   contract_ids: CONTRACTS,
   default_mode: 'root-only',
   a2_capability: 'execution_loop',
+  a2_consent: Object.freeze({ enabled_required: true, revalidate_before_running: true, revalidate_before_atomic_batch: true, blocked_run_state: 'workspace-ready', fail_closed_states: Object.freeze(['disabled', 'unresolved', 'malformed', 'interrupted']) }),
   a1_operation: 'git.commit',
   a1: Object.freeze({ sole_operation_authority: true, public_issuer: false, a3_ticket_format: false, git_stage_operation: false }),
   routing: Object.freeze({ workspace_receipt_required_before_substantive_start: true, substantive_start_state: 'workspace-ready', exact_start_binding: Object.freeze(['run_id', 'repository_id', 'authorized_ref_digest', 'current_authority_digest', 'route_plan', 'workspace_receipt', 'snapshot_commit', 'snapshot_tree']) }),
-  live_authority: Object.freeze({ mandatory_provider_for_typed_commit: true, revalidate_before_workspace_start: true, revalidate_before_typed_commit: true }),
+  live_authority: Object.freeze({ mandatory_provider_for_typed_commit: true, revalidate_before_workspace_start: true, revalidate_before_typed_commit: true, workspace_snapshot_observation_required: true, workspace_snapshot_verification: 'mandatory_synchronous_positive', expected_snapshot_substitution: false }),
   worktree: Object.freeze({ canonical_status_fields: Object.freeze(['staged_paths', 'unstaged_paths', 'untracked_paths']), out_of_scope_changes: 'fail_closed' }),
   launch: Object.freeze({ prepare_inert: true, atomic_batch_commit: true, per_lane_start: false, rollback_is_not_zero_launch: true }),
-  mutation_lease: Object.freeze({ required_before_stage: true, revalidate_before_commit: true, exact_owner: true, stale_takeover: false, uncertain_preserves: true, safe_terminal_release: true, durable_evidence_required_for_release: true, caller_labels_authoritative: false }),
+  mutation_lease: Object.freeze({ required_before_stage: true, revalidate_before_commit: true, exact_owner: true, stale_takeover: false, uncertain_preserves: true, safe_terminal_release: true, durable_evidence_required_for_release: true, terminal_artifacts_required_for_release: true, caller_labels_authoritative: false }),
+  durable_artifacts: Object.freeze({ required_for_release: Object.freeze(['workspace-receipt', 'terminal-packet']), key_binding: Object.freeze(['repository_id', 'authorized_ref_digest', 'run_id', 'artifact_type']), atomic_same_directory_write: true, readback_verify: true, exact_cross_artifact_match_before_release: true }),
   durable_state_root: '~/.ai-agent-toolkit/user-state/execution-loop/',
   durable_forbidden: ['raw_remote', 'raw_absolute_path', 'prompt', 'model_output', 'repository_contents', 'credentials', 'secret_values', 'environment_values', 'a1_ticket'],
   publication: Object.freeze({ optional: true, branch_operation: 'git.branch', commit_operation: 'git.commit', push_operation: 'git.push', direct_main_push: false, force: false, merge: false, ready: false, review_mutation: false, web_finality: false }),
@@ -49,6 +51,7 @@ const TRANSITIONS = Object.freeze({
 });
 const TERMINAL_OUTCOMES = Object.freeze({ success: 'terminal-success', failure: 'terminal-failure', blocked: 'terminal-blocked', interrupted: 'interrupted' });
 const SAFE_SETUP_OPERATIONS = Object.freeze(['fetch', 'safe-directory-check', 'checkout-detached', 'verify-snapshot']);
+const DURABLE_ARTIFACT_TYPES = Object.freeze(['workspace-receipt', 'terminal-packet']);
 const FORBIDDEN_DURABLE_KEYS = /^(raw|absolute|private|secret|credential|password|prompt|model_output|tool_output|repository_contents|environment|env|a1_ticket|ticket|issuer|token|remote_url|remote_userinfo|path)$/i;
 
 class ExecutionLoopError extends Error {
@@ -426,6 +429,16 @@ function executeAtomicLaunch(routePlan, options) {
     }
     reservations.push(deepFreeze({ lane_id: reservation.lane_id, reservation_handle: reservation.reservation_handle, inert: true }));
   }
+  if (typeof options.beforeCommitLaunchBatch === 'function') {
+    let result;
+    try {
+      result = options.beforeCommitLaunchBatch({ route_plan: routePlan, reservations: deepFreeze(reservations.slice()), run: options.run, workspace_receipt: options.workspace_receipt });
+    } catch (error) {
+      if (error instanceof ExecutionLoopError) throw error;
+      fail('LAUNCH_BATCH_FAILED');
+    }
+    if (result && typeof result.then === 'function') fail('ASYNC_LAUNCH_UNSUPPORTED');
+  }
   const committed = invokeAtomicLaunch(options.commitLaunchBatch, options, {
     route_plan: routePlan,
     reservations: deepFreeze(reservations.slice()),
@@ -594,13 +607,13 @@ function admitWorkspace(options = {}) {
   if (!isRecord(prepared) || !isSafeHandle(prepared.workspace_id) || prepared.workspace_id.includes('/') || !isSafeHandle(prepared.workspace_handle)) fail('WORKSPACE_SETUP_FAILED');
   const setupOperations = Array.isArray(prepared.setup_operations) ? prepared.setup_operations : [];
   if (setupOperations.length > 8 || setupOperations.some((item) => !SAFE_SETUP_OPERATIONS.includes(item))) fail('WORKSPACE_SETUP_OPERATION_UNSUPPORTED');
-  if (typeof adapter.verifySnapshot === 'function') {
-    const verified = invokeSync(adapter.verifySnapshot, adapter, { workspace_handle: prepared.workspace_handle, commit_sha: expected.sha, tree_sha: expected.tree }, 'WORKSPACE_SNAPSHOT_MISMATCH');
-    if (verified !== true && !(isRecord(verified) && verified.verified === true)) fail('WORKSPACE_SNAPSHOT_MISMATCH');
-  }
-  const observedCommit = prepared.commit_sha || prepared.commit || expected.sha;
-  const observedTree = prepared.tree_sha || prepared.tree || expected.tree;
+  const observedCommit = hasOwn(prepared, 'commit_sha') ? prepared.commit_sha : hasOwn(prepared, 'commit') ? prepared.commit : undefined;
+  const observedTree = hasOwn(prepared, 'tree_sha') ? prepared.tree_sha : hasOwn(prepared, 'tree') ? prepared.tree : undefined;
+  if (!isSha1(observedCommit) || !isSha1(observedTree)) fail('WORKSPACE_SNAPSHOT_OBSERVATION_REQUIRED');
   if (observedCommit !== expected.sha || observedTree !== expected.tree) fail('WORKSPACE_SNAPSHOT_MISMATCH');
+  if (typeof adapter.verifySnapshot !== 'function') fail('WORKSPACE_SNAPSHOT_VERIFICATION_REQUIRED');
+  const verified = invokeSync(adapter.verifySnapshot, adapter, { workspace_handle: prepared.workspace_handle, commit_sha: expected.sha, tree_sha: expected.tree }, 'WORKSPACE_SNAPSHOT_MISMATCH');
+  if (verified !== true && !(isRecord(verified) && exactKeys(verified, ['verified']) && verified.verified === true)) fail('WORKSPACE_SNAPSHOT_MISMATCH');
   const receipt = createWorkspaceReceipt({
     run_id: run.run_id,
     repository_id: run.repository_id,
@@ -826,10 +839,24 @@ function stateKey(repositoryId, authorizedRefDigest, runId) {
   return digestValue({ repository_id: repositoryId, authorized_ref_digest: authorizedRefDigest, run_id: runId });
 }
 
+function artifactKey(repositoryId, authorizedRefDigest, runId, artifactType) {
+  if (!isDigest(repositoryId) || !isDigest(authorizedRefDigest) || !isSafeId(runId) || !DURABLE_ARTIFACT_TYPES.includes(artifactType)) fail('STATE_KEY_INVALID');
+  return digestValue({ repository_id: repositoryId, authorized_ref_digest: authorizedRefDigest, run_id: runId, artifact_type: artifactType });
+}
 function stateLocations(options) {
   const root = durableStateRoot(options.state_root);
   const key = stateKey(options.repository_id, options.authorized_ref_digest, options.run_id);
-  return { root, key, state: path.join(root, key + '.json'), tempPrefix: key + '.', lease: path.join(root, options.repository_id + '.' + options.authorized_ref_digest + '.lease.json') };
+  const workspaceKey = artifactKey(options.repository_id, options.authorized_ref_digest, options.run_id, 'workspace-receipt');
+  const terminalKey = artifactKey(options.repository_id, options.authorized_ref_digest, options.run_id, 'terminal-packet');
+  return {
+    root,
+    key,
+    state: path.join(root, key + '.json'),
+    workspace_artifact: path.join(root, workspaceKey + '.json'),
+    terminal_artifact: path.join(root, terminalKey + '.json'),
+    tempPrefixes: [key + '.', workspaceKey + '.', terminalKey + '.'],
+    lease: path.join(root, options.repository_id + '.' + options.authorized_ref_digest + '.lease.json'),
+  };
 }
 
 function ensureStateRoot(root) {
@@ -843,6 +870,15 @@ function ensureStateRoot(root) {
   }
 }
 
+function assertNoInterruptedState(root, tempPrefixes) {
+  let names;
+  try {
+    names = fs.readdirSync(root);
+  } catch (_error) {
+    fail('STATE_STORAGE_UNAVAILABLE');
+  }
+  if (names.some((name) => tempPrefixes.some((prefix) => name.startsWith(prefix) && name.endsWith('.tmp')))) fail('INTERRUPTED_STATE');
+}
 function validateDurableRun(record) {
   const run = validateRunReceipt(record);
   assertPrivacySafe(run);
@@ -860,13 +896,7 @@ function validateDurableRun(record) {
 function readDurableRun(options = {}) {
   const locations = stateLocations(options);
   ensureStateRoot(locations.root);
-  let names;
-  try {
-    names = fs.readdirSync(locations.root);
-  } catch (_error) {
-    fail('STATE_STORAGE_UNAVAILABLE');
-  }
-  if (names.some((name) => name.startsWith(locations.tempPrefix) && name.endsWith('.tmp'))) fail('INTERRUPTED_STATE');
+  assertNoInterruptedState(locations.root, locations.tempPrefixes);
   if (!fs.existsSync(locations.state)) return null;
   let record;
   try {
@@ -882,8 +912,129 @@ function readDurableRun(options = {}) {
   return run;
 }
 
+function readDurableJsonArtifact(filePath) {
+  let stat;
+  try {
+    stat = fs.lstatSync(filePath);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return null;
+    fail('STATE_STORAGE_UNAVAILABLE');
+  }
+  if (!stat.isFile() || stat.isSymbolicLink()) fail('STATE_MALFORMED');
+  let bytes;
+  try {
+    bytes = fs.readFileSync(filePath);
+  } catch (_error) {
+    fail('STATE_MALFORMED');
+  }
+  if (bytes.length > LIMITS.stateBytes) fail('STATE_OVERSIZED');
+  try {
+    return JSON.parse(bytes.toString('utf8'));
+  } catch (_error) {
+    fail('STATE_MALFORMED');
+  }
+}
+
+function validateDurableWorkspaceReceipt(record, options) {
+  const receipt = validateWorkspaceReceipt(record);
+  assertPrivacySafe(receipt);
+  if (receipt.run_id !== options.run_id || receipt.repository_id !== options.repository_id || receipt.authorized_ref_digest !== options.authorized_ref_digest) fail('DURABLE_ARTIFACT_BINDING_MISMATCH');
+  return receipt;
+}
+
+function validateDurableTerminalPacket(record, options) {
+  const packet = validateTerminalPacket(record);
+  assertPrivacySafe(packet);
+  if (packet.run_id !== options.run_id) fail('DURABLE_ARTIFACT_BINDING_MISMATCH');
+  return packet;
+}
+
+function readDurableWorkspaceReceipt(options = {}) {
+  const locations = stateLocations(options);
+  ensureStateRoot(locations.root);
+  assertNoInterruptedState(locations.root, locations.tempPrefixes);
+  const record = readDurableJsonArtifact(locations.workspace_artifact);
+  return record === null ? null : validateDurableWorkspaceReceipt(record, options);
+}
+
+function readDurableTerminalPacket(options = {}) {
+  const locations = stateLocations(options);
+  ensureStateRoot(locations.root);
+  assertNoInterruptedState(locations.root, locations.tempPrefixes);
+  const record = readDurableJsonArtifact(locations.terminal_artifact);
+  return record === null ? null : validateDurableTerminalPacket(record, options);
+}
+
+function assertArtifactBinding(options, artifact) {
+  if (hasOwn(options, 'repository_id') && options.repository_id !== artifact.repository_id) fail('DURABLE_ARTIFACT_BINDING_MISMATCH');
+  if (hasOwn(options, 'authorized_ref_digest') && options.authorized_ref_digest !== artifact.authorized_ref_digest) fail('DURABLE_ARTIFACT_BINDING_MISMATCH');
+  if (hasOwn(options, 'run_id') && options.run_id !== artifact.run_id) fail('DURABLE_ARTIFACT_BINDING_MISMATCH');
+}
+
+function writeDurableArtifact(options, artifactType, artifact) {
+  const locations = stateLocations(options);
+  ensureStateRoot(locations.root);
+  assertNoInterruptedState(locations.root, locations.tempPrefixes);
+  const target = artifactType === 'workspace-receipt' ? locations.workspace_artifact : locations.terminal_artifact;
+  const existing = artifactType === 'workspace-receipt'
+    ? readDurableWorkspaceReceipt(options)
+    : readDurableTerminalPacket(options);
+  if (existing && (!isDigest(options.expected_digest) || digestValue(existing) !== options.expected_digest)) fail('STATE_CONFLICT');
+  const bytes = Buffer.from(JSON.stringify(artifact), 'utf8');
+  if (bytes.length > LIMITS.stateBytes) fail('STATE_OVERSIZED');
+  const artifactBase = path.basename(target, '.json');
+  const temp = path.join(locations.root, artifactBase + '.' + crypto.randomBytes(8).toString('hex') + '.tmp');
+  try {
+    fs.writeFileSync(temp, bytes, { flag: 'wx', mode: 0o600 });
+    fs.renameSync(temp, target);
+    const readback = artifactType === 'workspace-receipt'
+      ? readDurableWorkspaceReceipt(options)
+      : readDurableTerminalPacket(options);
+    if (!readback || digestValue(readback) !== digestValue(artifact)) fail('STATE_READBACK_MISMATCH');
+    return readback;
+  } catch (error) {
+    if (error instanceof ExecutionLoopError) throw error;
+    fail('STATE_WRITE_INTERRUPTED');
+  }
+}
+
+function writeDurableWorkspaceReceipt(options = {}) {
+  const receipt = validateWorkspaceReceipt(options.workspace_receipt);
+  assertPrivacySafe(receipt);
+  assertArtifactBinding(options, receipt);
+  return writeDurableArtifact({
+    ...options,
+    repository_id: receipt.repository_id,
+    authorized_ref_digest: receipt.authorized_ref_digest,
+    run_id: receipt.run_id,
+  }, 'workspace-receipt', receipt);
+}
+
+function writeDurableTerminalPacket(options = {}) {
+  const packet = validateTerminalPacket(options.terminal_packet);
+  assertPrivacySafe(packet);
+  if (!isDigest(options.repository_id) || !isDigest(options.authorized_ref_digest)) fail('DURABLE_ARTIFACT_BINDING_INVALID');
+  if (hasOwn(options, 'run_id') && options.run_id !== packet.run_id) fail('DURABLE_ARTIFACT_BINDING_MISMATCH');
+  return writeDurableArtifact({
+    ...options,
+    run_id: packet.run_id,
+  }, 'terminal-packet', packet);
+}
 function writeDurableRun(options = {}) {
   const run = validateDurableRun(options.run);
+  let workspaceReceipt;
+  let terminalPacket;
+  if (hasOwn(options, 'workspace_receipt')) {
+    workspaceReceipt = validateWorkspaceReceipt(options.workspace_receipt);
+    assertPrivacySafe(workspaceReceipt);
+    assertArtifactBinding({ repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id }, workspaceReceipt);
+    if (run.workspace_receipt_digest !== digestValue(workspaceReceipt)) fail('WORKSPACE_RECEIPT_DIGEST_MISMATCH');
+  }
+  if (hasOwn(options, 'terminal_packet')) {
+    terminalPacket = validateTerminalPacket(options.terminal_packet);
+    assertPrivacySafe(terminalPacket);
+    if (terminalPacket.run_id !== run.run_id || run.terminal_packet_digest !== digestValue(terminalPacket)) fail('TERMINAL_PACKET_DIGEST_MISMATCH');
+  }
   const locations = stateLocations({ state_root: options.state_root, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id });
   ensureStateRoot(locations.root);
   const existing = readDurableRun({ state_root: options.state_root, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id });
@@ -896,6 +1047,8 @@ function writeDurableRun(options = {}) {
     fs.renameSync(temp, locations.state);
     const readback = readDurableRun({ state_root: options.state_root, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id });
     if (digestValue(readback) !== digestValue(run)) fail('STATE_READBACK_MISMATCH');
+    if (workspaceReceipt) writeDurableWorkspaceReceipt({ state_root: options.state_root, workspace_receipt: workspaceReceipt, expected_digest: options.expected_workspace_receipt_digest });
+    if (terminalPacket) writeDurableTerminalPacket({ state_root: options.state_root, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id, terminal_packet: terminalPacket, expected_digest: options.expected_terminal_packet_digest });
     return readback;
   } catch (error) {
     if (error instanceof ExecutionLoopError) throw error;
@@ -983,12 +1136,21 @@ function releaseMutationLease(options = {}) {
   const lease = readMutationLease(options);
   if (lease.lease_id !== options.lease_id || lease.run_id !== options.run_id) fail('LEASE_TOKEN_MISMATCH');
   let durableRun;
+  let workspaceReceipt;
+  let terminalPacket;
   try {
     durableRun = readDurableRun({ state_root: options.state_root, repository_id: options.repository_id, authorized_ref_digest: options.authorized_ref_digest, run_id: options.run_id });
+    workspaceReceipt = readDurableWorkspaceReceipt({ state_root: options.state_root, repository_id: options.repository_id, authorized_ref_digest: options.authorized_ref_digest, run_id: options.run_id });
+    terminalPacket = readDurableTerminalPacket({ state_root: options.state_root, repository_id: options.repository_id, authorized_ref_digest: options.authorized_ref_digest, run_id: options.run_id });
   } catch (_error) {
     fail('LEASE_RELEASE_UNSAFE');
   }
   if (!durableRun || !['terminal-success', 'terminal-failure', 'terminal-blocked'].includes(durableRun.execution_state) || !isDigest(durableRun.workspace_receipt_digest) || !isDigest(durableRun.terminal_packet_digest) || durableRun.workspace_disposition !== 'cleaned' || !['none', 'verified'].includes(durableRun.publication_state)) fail('LEASE_RELEASE_UNSAFE');
+  if (!workspaceReceipt || !terminalPacket) fail('LEASE_RELEASE_UNSAFE');
+  if (workspaceReceipt.run_id !== durableRun.run_id || workspaceReceipt.repository_id !== durableRun.repository_id || workspaceReceipt.authorized_ref_digest !== durableRun.authorized_ref_digest || terminalPacket.run_id !== durableRun.run_id) fail('LEASE_RELEASE_UNSAFE');
+  if (digestValue(workspaceReceipt) !== durableRun.workspace_receipt_digest || digestValue(terminalPacket) !== durableRun.terminal_packet_digest) fail('LEASE_RELEASE_UNSAFE');
+  const expectedOutcome = { 'terminal-success': 'success', 'terminal-failure': 'failure', 'terminal-blocked': 'blocked' }[durableRun.execution_state];
+  if (terminalPacket.outcome !== expectedOutcome || terminalPacket.publication_state !== durableRun.publication_state || terminalPacket.workspace_disposition !== durableRun.workspace_disposition) fail('LEASE_RELEASE_UNSAFE');
   if ((hasOwn(options, 'terminal_state') && options.terminal_state !== durableRun.execution_state) || (hasOwn(options, 'workspace_disposition') && options.workspace_disposition !== durableRun.workspace_disposition) || (hasOwn(options, 'publication_state') && options.publication_state !== durableRun.publication_state)) fail('LEASE_RELEASE_UNSAFE');
   try {
     fs.unlinkSync(leasePath);
@@ -1030,12 +1192,27 @@ function startDelegatedRun(options = {}) {
   const evidence = validateRunEvidence(options, 'workspace-ready', 'START');
   if (!evidence.routePlan.delegated) fail('DELEGATED_ROUTE_REQUIRED');
   verifyLiveWorkspaceReceipt(options.liveRefProvider, evidence.workspaceReceipt);
+  const consentBeforeRunning = readExecutionLoopConsent(options);
+  if (!consentBeforeRunning.enabled) return { ...consentBlock(consentBeforeRunning), route_plan: evidence.routePlan, run: evidence.run, workspace_receipt: evidence.workspaceReceipt, consent: consentBeforeRunning };
   const running = transitionRun(evidence.run, 'running', { now: options.now });
+  let launchConsent = consentBeforeRunning;
   try {
-    const launch = executeAtomicLaunch(evidence.routePlan, { ...options, run: running, workspace_receipt: evidence.workspaceReceipt });
-    return { status: 'running', route_plan: evidence.routePlan, run: running, workspace_receipt: evidence.workspaceReceipt, launches: launch.launches, consent: readExecutionLoopConsent(options) };
+    const launch = executeAtomicLaunch(evidence.routePlan, {
+      ...options,
+      run: running,
+      workspace_receipt: evidence.workspaceReceipt,
+      beforeCommitLaunchBatch: () => {
+        launchConsent = readExecutionLoopConsent(options);
+        if (!launchConsent.enabled) fail(consentBlock(launchConsent).reason_code);
+        return launchConsent;
+      },
+    });
+    return { status: 'running', route_plan: evidence.routePlan, run: running, workspace_receipt: evidence.workspaceReceipt, launches: launch.launches, consent: launchConsent };
   } catch (error) {
-    if (error instanceof ExecutionLoopError) return { status: 'blocked', reason_code: error.code, route_plan: evidence.routePlan, run: running, workspace_receipt: evidence.workspaceReceipt, launches: [] };
+    if (error instanceof ExecutionLoopError) {
+      const consentFailure = ['CONSENT_DISABLED', 'CONSENT_UNRESOLVED', 'CONSENT_MALFORMED', 'CONSENT_INTERRUPTED'].includes(error.code);
+      return { status: 'blocked', reason_code: error.code, route_plan: evidence.routePlan, run: consentFailure ? evidence.run : running, workspace_receipt: evidence.workspaceReceipt, launches: [], consent: launchConsent };
+    }
     throw error;
   }
 }
@@ -1075,8 +1252,13 @@ module.exports = {
   cleanupWorkspace,
   durableStateRoot,
   stateKey,
+  artifactKey,
   readDurableRun,
+  readDurableWorkspaceReceipt,
+  readDurableTerminalPacket,
   writeDurableRun,
+  writeDurableWorkspaceReceipt,
+  writeDurableTerminalPacket,
   acquireMutationLease,
   verifyOwnedMutationLease,
   releaseMutationLease,

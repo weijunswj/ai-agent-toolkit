@@ -99,7 +99,7 @@ function delegatedReady(options) {
     run: admitted.run,
     expected_live: live,
     liveRefProvider: { read: () => live },
-    workspaceAdapter: { prepare: () => ({ workspace_id: 'workspace-' + options.run_id, workspace_handle: 'handle-' + options.run_id, commit_sha: live.sha, tree_sha: live.tree }) },
+    workspaceAdapter: { prepare: () => ({ workspace_id: 'workspace-' + options.run_id, workspace_handle: 'handle-' + options.run_id, commit_sha: live.sha, tree_sha: live.tree }), verifySnapshot: () => true },
   });
   return { admitted, live, workspace };
 }
@@ -277,12 +277,12 @@ test('live ref movement and wrong workspace snapshot fail closed', () => {
     run,
     expected_live: { ref: 'refs/heads/main', sha: 'a'.repeat(40), tree: 'b'.repeat(40) },
     liveRefProvider: { read: () => ({ ref: 'refs/heads/main', sha: 'c'.repeat(40), tree: 'b'.repeat(40) }) },
-    workspaceAdapter: { prepare: () => ({ workspace_id: 'workspace-2', workspace_handle: 'handle-2' }) },
+    workspaceAdapter: { prepare: () => ({ workspace_id: 'workspace-2', workspace_handle: 'handle-2' }), verifySnapshot: () => true },
   }), 'LIVE_REF_MOVED');
   expectCode(() => runtime.admitWorkspace({
     run,
     expected_live: { ref: 'refs/heads/main', sha: 'a'.repeat(40), tree: 'b'.repeat(40) },
     liveRefProvider: { read: () => ({ ref: 'refs/heads/main', sha: 'a'.repeat(40), tree: 'b'.repeat(40) }) },
-    workspaceAdapter: { prepare: () => ({ workspace_id: 'workspace-3', workspace_handle: 'handle-3', commit_sha: 'a'.repeat(40), tree_sha: 'c'.repeat(40) }) },
+    workspaceAdapter: { prepare: () => ({ workspace_id: 'workspace-3', workspace_handle: 'handle-3', commit_sha: 'a'.repeat(40), tree_sha: 'c'.repeat(40) }), verifySnapshot: () => true },
   }), 'WORKSPACE_SNAPSHOT_MISMATCH');
 });
