@@ -27,7 +27,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 
 | Metric | Current value |
 | --- | ---: |
-| projects | 19 |
+| projects | 20 |
 | publishedFiles | 241 |
 | declaredOutputFiles | 241 |
 | packInstalledFiles | 84 |
@@ -85,6 +85,7 @@ Known baseline context:
 - `_projects/development/managed-app-foundation-review`
 - `_projects/development/project-completion-audit`
 - `_projects/development/hostinger-coolify-production-guide`
+- `_projects/development/independent-assurance-web-finality`
 - `_projects/development/self-hosted-service-safety`
 - `_projects/development/toolkit-local-bridge`
 - `_projects/development/windows-localhost-workflows`
