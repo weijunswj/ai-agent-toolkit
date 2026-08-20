@@ -1,0 +1,155 @@
+{
+  "schema_version": 1,
+  "design_lock_id": "DL-AGENT-NATIVE-LOOP-MVP-001-A4-INDEPENDENT-ASSURANCE-WEB-FINALITY-R1",
+  "purpose": "Minimum host-neutral independent assurance and Web-finality handoff over accepted A1+A2+A3.",
+  "authority_boundaries": {
+    "a1": "sole mutation and opaque authority-ticket authority",
+    "a2": "consent and state only",
+    "a3": "execution, workspace, run, and terminal evidence only",
+    "g4": "fresh independent read-only complete-candidate assurance only",
+    "g4a": "conditional bounded read-only routing and judgement assistance only",
+    "web": "sole acceptance and finality authority",
+    "new_authority_token": false,
+    "new_finality_token": false,
+    "new_release_authority": false,
+    "a3_contract_count_added": 0
+  },
+  "required_evidence": {
+    "predicate": ["present", "current", "complete", "internally_consistent", "server_authoritative", "verifiable"],
+    "fail_closed_code": "FAIL_CLOSED_REQUIRED_EVIDENCE",
+    "required_bindings": [
+      "candidate_head_tree_base",
+      "pr_topology",
+      "accepted_lock",
+      "authorised_scope",
+      "complete_candidate_g4",
+      "current_review_inventory",
+      "actual_required_check_inventory_and_state",
+      "duplicate_checked_ledger_142",
+      "ready_and_expected_head_merge_binding",
+      "canonical_post_merge_readback",
+      "accepted_tree",
+      "expected_sole_parent",
+      "verified_valid_signature",
+      "post_verified_cleanup"
+    ],
+    "unresolved_label_does_not_create_evidence": true
+  },
+  "material_blocker": {
+    "all_required_predicates": [
+      "applies_to_current_candidate",
+      "identifies_accepted_requirement",
+      "concrete_current_failure",
+      "evidence_reproducible",
+      "material_impact",
+      "in_scope_current"
+    ],
+    "excluded_when_any_true": [
+      "stale",
+      "duplicate_root",
+      "optional",
+      "speculative",
+      "hypothetical_future",
+      "cleaner_architecture_only",
+      "outside_scope"
+    ],
+    "required_evidence_pass_without_material_blocker": "PASS_AND_STOP",
+    "material_blocker_disposition": "FAIL_MATERIAL_CURRENT_LOCK_BLOCKER"
+  },
+  "g4_admission": {
+    "provider": "OpenAI",
+    "model_class": "GPT-5.6 Sol High",
+    "reasoning": "high",
+    "mode": "standard",
+    "fresh": true,
+    "isolated": true,
+    "read_only": true,
+    "complete_candidate": true,
+    "exact_binding": ["candidate_head", "candidate_tree", "candidate_base", "lock_id", "scope_digest"],
+    "root_only": true,
+    "mutation_authority": false,
+    "ready_authority": false,
+    "merge_authority": false,
+    "cleanup_authority": false,
+    "finality_authority": false
+  },
+  "invalidation_matrix": [
+    { "event": "CANDIDATE_MOVEMENT", "result": "G4_INVALIDATED_CANDIDATE_MOVEMENT", "fresh_complete_candidate_g4": true },
+    { "event": "CANDIDATE_TREE_MOVEMENT", "result": "G4_INVALIDATED_CANDIDATE_MOVEMENT", "fresh_complete_candidate_g4": true },
+    { "event": "LOCK_MOVEMENT", "result": "G4_INVALIDATED_LOCK_MOVEMENT", "fresh_authority_admission": true },
+    { "event": "SCOPE_MOVEMENT", "result": "G4_INVALIDATED_SCOPE_MOVEMENT", "fresh_scope_admission": true },
+    { "event": "BASE_MOVEMENT_MATERIAL", "result": "G4_INVALIDATED_BASE_MOVEMENT", "fresh_base_admission": true, "fresh_complete_candidate_g4": true },
+    { "event": "BASE_MOVEMENT_NEUTRAL", "result": "BASE_REVALIDATION_NEUTRAL", "fresh_web_readback": true, "fresh_g4": false },
+    { "event": "BASE_MOVEMENT_UNKNOWN", "result": "FAIL_CLOSED_REQUIRED_EVIDENCE", "fresh_g4": true },
+    { "event": "NEW_MATERIAL_REVIEW_FINDING", "result": "FINALITY_STOP_MATERIAL_REVIEW_FINDING", "web_adjudication": true },
+    { "event": "REQUIRED_CHECK_COMPLETED_SUCCESS", "result": "REQUIRED_CHECK_REFRESH_ONLY", "fresh_g4": false },
+    { "event": "REQUIRED_CHECK_FAILURE_OR_AMBIGUITY", "result": "FAIL_CLOSED_REQUIRED_EVIDENCE", "fresh_g4": false },
+    { "event": "BENIGN_REVIEW_METADATA_MOVEMENT", "result": "REVIEW_REFRESH_ONLY", "fresh_g4": false },
+    { "event": "READY_AT_SAME_CANDIDATE", "result": "READY_REFRESH_ONLY", "fresh_g4": false },
+    { "event": "SUCCESSFUL_EXPECTED_HEAD_MERGE", "result": "CANONICAL_READBACK_REQUIRED", "fresh_g4": false },
+    { "event": "UNCERTAIN_MERGE_RESULT", "result": "CANONICAL_READBACK_REQUIRED", "blind_retry": false, "fresh_g4": false },
+    { "event": "CANONICAL_RESULT_UNBOUND", "result": "FAIL_CLOSED_CANONICAL_BINDING", "controller_reconciliation": true, "fresh_g4": false }
+  ],
+  "same_lock_repair": {
+    "material_blocker": "Web records and root-deduplicates the finding",
+    "repair": "smallest sufficient same-Lock repair",
+    "successor_head": "invalidates all prior head-bound G4 evidence",
+    "next_assurance": "fresh exact-head admission followed by fresh complete-candidate Sol High G4",
+    "pass_condition": "Lock and required evidence pass with no concrete current material blocker",
+    "loop_bound": "PASS_AND_STOP; no open-ended assurance loop"
+  },
+  "g4a": {
+    "only_when": [
+      "ordinary A4 assurance otherwise complete",
+      "exact-head Sol High G4 has run",
+      "required evidence is current",
+      "one genuine bounded routing or judgement question remains",
+      "deterministic evidence cannot settle the question",
+      "Web records the exact question"
+    ],
+    "model_class": "GPT-5.6 Sol Max",
+    "fresh": true,
+    "isolated": true,
+    "read_only": true,
+    "helpers": false,
+    "forbidden_purposes": ["confidence", "routine_duplicate", "second_opinion", "missing_evidence"],
+    "unresolved": "CONTROLLER_REQUIRED",
+    "loop_bound": "no open-ended G4/G4A loop"
+  },
+  "ledger": {
+    "ledger_id": 142,
+    "intake_version": "v2",
+    "per_terminal_substantive_run": "exactly one duplicate-checked public-safe intake",
+    "queued_satisfies_toolkit_duty": true,
+    "exact_existing_duplicate_satisfies": true,
+    "conflicting_duplicate": "FAIL_CLOSED_REQUIRED_EVIDENCE",
+    "poll_ledger_id_143": false
+  },
+  "web_finality": {
+    "acceptance_requires": ["current_required_evidence", "current_review_inventory", "actual_required_checks", "ledger_142_queued"],
+    "ready": "Web-owned final merge-state transition only after final acceptance",
+    "merge": "expected-head squash merge default, exact PR/head/base binding",
+    "uncertain_merge": "canonical readback, no blind retry, no G4 rerun",
+    "canonical_proof": ["intended_merge_binding", "accepted_tree_equality", "expected_sole_parent", "signature_verified_true_reason_valid", "merged_closed_pr", "cleanup_observed_after_verified_merge"]
+  },
+  "privacy": {
+    "allowed": ["safe_semantic_ids", "shas", "digests", "bounded_status_codes", "timestamps", "canonical_model_class", "counts", "public_review_refs", "public_check_refs", "bounded_relative_scope_ids"],
+    "forbidden": ["raw_prompts", "model_output", "provider_payloads", "a1_tickets", "secrets", "credentials", "environment_values", "cookies", "auth_headers", "private_absolute_paths", "customer_data", "raw_diagnostic_payloads"],
+    "human_companion": ["verdict", "material_blocker_or_verified_result", "mutation_attempted_and_performed", "unchanged_scope", "exactly_one_next_action"]
+  },
+  "exclusions": [
+    "a1_redesign",
+    "a2_redesign",
+    "a3_redesign",
+    "sixth_a3_contract_or_schema",
+    "new_authority_or_finality_token_or_system",
+    "n5_n14",
+    "342_propagation",
+    "348_mutation",
+    "provider_or_live_work",
+    "host_adapter_mechanics",
+    "workflow_edits",
+    "full_242",
+    "broad_252_observability_retention_telemetry"
+  ]
+}
