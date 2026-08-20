@@ -8,6 +8,9 @@ It is default-off and has no published skill, MCP, provider, filesystem,
 network, shell, GitHub, or host-adapter surface. Ticket issuance is available
 only through the runtime's module-private trusted authority context used by
 the focused test harness; production exports cannot self-mint authority.
+The typed `git.commit` operation is a stage-plus-commit composite with exact
+path-set, index, tree, message, and mutation-flag bindings; A3 may inject a
+host-owned broker but cannot mint or replace A1 authority.
 
 The runtime is dependency-free and performs no live actions. Invalid or
 partial observation evidence can influence only fixed-precedence hard-deny

@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Toolkit A3 Bounded Local Execution-Loop Contracts",
+  "oneOf": [
+    { "$ref": "#/$defs/request" },
+    { "$ref": "#/$defs/routePlan" },
+    { "$ref": "#/$defs/runReceipt" },
+    { "$ref": "#/$defs/workspaceReceipt" },
+    { "$ref": "#/$defs/terminalPacket" }
+  ],
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,128}$" },
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sha1": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "request_id", "task_id", "task_digest", "repository_id", "authorized_ref_digest", "current_authority_digest", "delegated", "requested_lanes", "scope_digest"],
+      "properties": {
+        "contract_version": { "const": "toolkit.execution-loop.request.v1" },
+        "request_id": { "$ref": "#/$defs/id" },
+        "task_id": { "$ref": "#/$defs/id" },
+        "task_digest": { "$ref": "#/$defs/digest" },
+        "repository_id": { "$ref": "#/$defs/digest" },
+        "authorized_ref_digest": { "$ref": "#/$defs/digest" },
+        "current_authority_digest": { "$ref": "#/$defs/digest" },
+        "delegated": { "type": "boolean" },
+        "requested_lanes": { "type": "array", "maxItems": 16, "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+        "scope_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "routeLane": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lane_id", "provider", "model", "reasoning", "role", "host_classification", "adapter_handle", "capability_digest"],
+      "properties": {
+        "lane_id": { "$ref": "#/$defs/id" },
+        "provider": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "model": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "reasoning": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "role": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "host_classification": { "enum": ["hard-runtime-enforcement", "configuration-backstop", "guidance-only", "unsupported"] },
+        "adapter_handle": { "$ref": "#/$defs/id" },
+        "capability_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "routePlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "route_id", "request_id", "task_digest", "repository_id", "authorized_ref_digest", "delegated", "root_only", "lanes", "route_digest"],
+      "properties": {
+        "contract_version": { "const": "toolkit.execution-loop.route-plan.v1" },
+        "route_id": { "$ref": "#/$defs/id" },
+        "request_id": { "$ref": "#/$defs/id" },
+        "task_digest": { "$ref": "#/$defs/digest" },
+        "repository_id": { "$ref": "#/$defs/digest" },
+        "authorized_ref_digest": { "$ref": "#/$defs/digest" },
+        "delegated": { "type": "boolean" },
+        "root_only": { "type": "boolean" },
+        "lanes": { "type": "array", "maxItems": 16, "uniqueItems": true, "items": { "$ref": "#/$defs/routeLane" } },
+        "route_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "runLane": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lane_id", "state"],
+      "properties": {
+        "lane_id": { "$ref": "#/$defs/id" },
+        "state": { "enum": ["planned", "admitted", "running", "validating", "terminal"] }
+      }
+    },
+    "runReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "run_id", "request_digest", "repository_id", "authorized_ref_digest", "route_digest", "authority_binding_digest", "current_authority_digest", "execution_state", "current_lanes", "workspace_receipt_digest", "terminal_packet_digest", "publication_state", "workspace_disposition", "created_at", "updated_at"],
+      "properties": {
+        "contract_version": { "const": "toolkit.execution-loop.run-receipt.v1" },
+        "run_id": { "$ref": "#/$defs/id" },
+        "request_digest": { "$ref": "#/$defs/digest" },
+        "repository_id": { "$ref": "#/$defs/digest" },
+        "authorized_ref_digest": { "$ref": "#/$defs/digest" },
+        "route_digest": { "$ref": "#/$defs/digest" },
+        "authority_binding_digest": { "$ref": "#/$defs/digest" },
+        "current_authority_digest": { "$ref": "#/$defs/digest" },
+        "execution_state": { "enum": ["planned", "admitted", "workspace-ready", "running", "validating", "publication-pending", "terminal-success", "terminal-failure", "terminal-blocked", "interrupted"] },
+        "current_lanes": { "type": "array", "maxItems": 16, "items": { "$ref": "#/$defs/runLane" } },
+        "workspace_receipt_digest": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
+        "terminal_packet_digest": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
+        "publication_state": { "enum": ["none", "verified", "uncertain"] },
+        "workspace_disposition": { "anyOf": [{ "enum": ["cleaned", "preserved", "quarantined"] }, { "type": "null" }] },
+        "created_at": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "updated_at": { "type": "string", "minLength": 1, "maxLength": 32 }
+      }
+    },
+    "workspaceReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "run_id", "repository_id", "authorized_ref_digest", "live_ref_digest", "snapshot_commit_digest", "snapshot_tree_digest", "workspace_id", "workspace_handle", "setup_digest", "verified"],
+      "properties": {
+        "contract_version": { "const": "toolkit.execution-loop.workspace-receipt.v1" },
+        "run_id": { "$ref": "#/$defs/id" },
+        "repository_id": { "$ref": "#/$defs/digest" },
+        "authorized_ref_digest": { "$ref": "#/$defs/digest" },
+        "live_ref_digest": { "$ref": "#/$defs/digest" },
+        "snapshot_commit_digest": { "$ref": "#/$defs/digest" },
+        "snapshot_tree_digest": { "$ref": "#/$defs/digest" },
+        "workspace_id": { "$ref": "#/$defs/id" },
+        "workspace_handle": { "$ref": "#/$defs/id" },
+        "setup_digest": { "$ref": "#/$defs/digest" },
+        "verified": { "const": true }
+      }
+    },
+    "terminalPacket": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "run_id", "outcome", "reason_code", "evidence_digest", "workspace_disposition", "publication_state", "web_handoff"],
+      "properties": {
+        "contract_version": { "const": "toolkit.execution-loop.terminal-packet.v1" },
+        "run_id": { "$ref": "#/$defs/id" },
+        "outcome": { "enum": ["success", "failure", "blocked", "interrupted"] },
+        "reason_code": { "$ref": "#/$defs/id" },
+        "evidence_digest": { "$ref": "#/$defs/digest" },
+        "workspace_disposition": { "enum": ["cleaned", "preserved", "quarantined"] },
+        "publication_state": { "enum": ["none", "verified", "uncertain"] },
+        "web_handoff": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "finality", "next_action", "evidence_digest"],
+          "properties": {
+            "kind": { "const": "bounded-web-handoff" },
+            "finality": { "const": "unresolved" },
+            "next_action": { "const": "web-exact-head-revalidation" },
+            "evidence_digest": { "$ref": "#/$defs/digest" }
+          }
+        }
+      }
+    }
+  }
+}

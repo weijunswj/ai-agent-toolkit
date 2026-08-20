@@ -1,0 +1,155 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const test = require('node:test');
+
+const runtime = require('../scripts/toolkit-execution-loop.cjs');
+
+const common = {
+  task: { id: 'task-boundary', digest: 'a'.repeat(64) },
+  repository_id: 'b'.repeat(64),
+  authorized_ref_digest: 'c'.repeat(64),
+  current_authority_digest: 'd'.repeat(64),
+  consentProvider: () => ({ status: 'healthy', capabilities: { execution_loop: { state: 'enabled' } } }),
+};
+
+function expectCode(fn, code) {
+  assert.throws(fn, (error) => error && error.code === code);
+}
+
+function createRun(runId = 'run-boundary') {
+  const admitted = runtime.admitRun({ ...common, run_id: runId, authority: { delegated: false, lanes: [] } });
+  return admitted.run;
+}
+
+function commitOptions(overrides = {}) {
+  return {
+    ...common,
+    run_id: 'run-commit',
+    authorized_paths: ['src/file.txt'],
+    expected_head: 'a'.repeat(40),
+    expected_tree: 'b'.repeat(40),
+    expected_index_digest: 'c'.repeat(64),
+    commit_message: 'bounded commit',
+    intended_tree: 'd'.repeat(40),
+    intended_change_digest: 'e'.repeat(64),
+    ...overrides,
+  };
+}
+
+function gitFixture(overrides = {}) {
+  let staged = [];
+  let committed = false;
+  const repositoryId = common.repository_id;
+  const status = () => ({
+    repository_id: repositoryId,
+    head: 'a'.repeat(40),
+    tree: committed ? 'd'.repeat(40) : 'b'.repeat(40),
+    index_digest: committed ? 'f'.repeat(64) : 'c'.repeat(64),
+    staged_paths: staged,
+    change_digest: 'e'.repeat(64),
+  });
+  const git = {
+    status,
+    stageExact({ paths }) {
+      staged = [...paths];
+      return status();
+    },
+    commit({ message, amend, allow_empty, options, paths }) {
+      assert.equal(message, 'bounded commit');
+      assert.equal(amend, false);
+      assert.equal(allow_empty, false);
+      assert.deepEqual(options, []);
+      assert.deepEqual(paths, ['src/file.txt']);
+      committed = true;
+      staged = [];
+      return { status: { ...status(), head: 'f'.repeat(40), staged_paths: [] }, tree: 'd'.repeat(40), change_digest: 'e'.repeat(64) };
+    },
+  };
+  return { ...git, ...overrides };
+}
+
+test('A3 exposes exactly five contract identities and no second authority surface', () => {
+  assert.equal(runtime.CONTRACTS.length, 5);
+  assert.equal(new Set(runtime.CONTRACTS).size, 5);
+  assert.equal(Object.keys(runtime).includes('createTrustedAuthorityContext'), false);
+  assert.equal(Object.keys(runtime).includes('createTicketStore'), false);
+  assert.equal(runtime.POLICY.a1.public_issuer, false);
+  assert.equal(runtime.POLICY.a1.a3_ticket_format, false);
+  assert.equal(runtime.POLICY.a1.git_stage_operation, false);
+});
+
+test('typed A1 commit seam stages exactly the authorized paths and verifies the result', () => {
+  const calls = [];
+  const result = runtime.executeTypedGitCommit({
+    ...commitOptions(),
+    git: gitFixture(),
+    broker: { authorize(input) { calls.push(input); return { decision: 'allow' }; } },
+    liveRefProvider: { read: () => ({ ref: 'refs/heads/main', sha: 'a'.repeat(40), tree: 'b'.repeat(40) }) },
+  });
+  assert.equal(result.status, 'committed');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].operation_type, 'git.commit');
+  assert.match(calls[0].operation_digest, /^[a-f0-9]{64}$/);
+  assert.deepEqual(calls[0].operation.authorized_paths, ['src/file.txt']);
+});
+
+test('typed commit rejects pre-staged, baseline, path, options, and broker boundary violations', () => {
+  const preStaged = gitFixture({ status: () => ({ repository_id: common.repository_id, head: 'a'.repeat(40), tree: 'b'.repeat(40), index_digest: 'c'.repeat(64), staged_paths: ['other.txt'] }) });
+  expectCode(() => runtime.executeTypedGitCommit({ ...commitOptions(), git: preStaged, broker: { authorize: () => ({ decision: 'allow' }) } }), 'GIT_COMMIT_PREEXISTING_STAGE');
+  expectCode(() => runtime.executeTypedGitCommit({ ...commitOptions({ expected_index_digest: 'f'.repeat(64) }), git: gitFixture(), broker: { authorize: () => ({ decision: 'allow' }) } }), 'GIT_COMMIT_INDEX_BASELINE_MISMATCH');
+  expectCode(() => runtime.executeTypedGitCommit({ ...commitOptions({ authorized_paths: ['--bad'] }), git: gitFixture(), broker: { authorize: () => ({ decision: 'allow' }) } }), 'GIT_COMMIT_PATH_INVALID');
+  expectCode(() => runtime.executeTypedGitCommit({ ...commitOptions({ commit_message: 'bad\nmessage' }), git: gitFixture(), broker: { authorize: () => ({ decision: 'allow' }) } }), 'GIT_COMMIT_MESSAGE_INVALID');
+  expectCode(() => runtime.authorizeA1Operation({ ...common, run_id: 'run-stage', operation: { type: 'git.stage' }, broker: { authorize: () => ({ decision: 'allow' }) } }), 'A3_OPERATION_UNSUPPORTED');
+  expectCode(() => runtime.executeTypedGitCommit({ ...commitOptions(), git: gitFixture(), broker: { authorize: () => ({ decision: 'deny' }) } }), 'A1_AUTHORITY_DENIED');
+  expectCode(() => runtime.executeTypedGitCommit({ ...commitOptions(), git: gitFixture(), broker: { authorize: () => ({ decision: 'allow', issuer: 'forbidden' }) } }), 'A1_BROKER_BOUNDARY_VIOLATION');
+});
+
+test('durable state is bounded, atomic, privacy-safe, and lease-conflicted', () => {
+  const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run157-state-'));
+  const run = createRun('run-state');
+  const first = runtime.writeDurableRun({ state_root: stateRoot, run });
+  assert.equal(first.run_id, run.run_id);
+  assert.deepEqual(runtime.readDurableRun({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id }), run);
+  const key = runtime.stateKey(run.repository_id, run.authorized_ref_digest, run.run_id);
+  fs.writeFileSync(path.join(stateRoot, key + '.interrupted.tmp'), 'partial', 'utf8');
+  expectCode(() => runtime.readDurableRun({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id }), 'INTERRUPTED_STATE');
+  fs.unlinkSync(path.join(stateRoot, key + '.interrupted.tmp'));
+  const lease = runtime.acquireMutationLease({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id });
+  expectCode(() => runtime.acquireMutationLease({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: 'run-other', now: Date.now() + 900000 }), 'CONFLICTING_RUN');
+  expectCode(() => runtime.releaseMutationLease({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, lease_id: 'lease-forged' }), 'LEASE_TOKEN_MISMATCH');
+  assert.deepEqual(runtime.releaseMutationLease({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, lease_id: lease.lease_id }), { released: true });
+});
+
+test('uncertain and dirty workspace evidence is preserved or quarantined and cannot be cleaned', () => {
+  assert.equal(runtime.finalizeWorkspace({ facts: { terminal_evidence_durable: true, publication_verified: true, proven_disposable: true } }).disposition, 'cleaned');
+  assert.equal(runtime.finalizeWorkspace({ facts: { terminal_evidence_durable: true, publication_verified: true, proven_disposable: true, dirty: true } }).disposition, 'preserved');
+  assert.equal(runtime.finalizeWorkspace({ facts: { terminal_evidence_durable: true, publication_verified: true, proven_disposable: true, uncertain: true } }).disposition, 'quarantined');
+  assert.equal(runtime.cleanupWorkspace({ facts: { terminal_evidence_durable: true, publication_verified: false, proven_disposable: true } }).removable, false);
+  expectCode(() => runtime.createTerminalPacket({ run_id: 'run-finality', outcome: 'success', reason_code: 'accepted', evidence_digest: 'a'.repeat(64) }), 'TERMINAL_FINALITY_FORBIDDEN');
+});
+
+test('retry requires fresh authority and live workspace admission', () => {
+  const previous = createRun('run-previous');
+  const uncertain = runtime.transitionRun(previous, 'workspace-ready', { publication_state: 'uncertain' });
+  assert.equal(runtime.prepareRetry({ ...common, previous_run: uncertain, run_id: 'run-new', current_authority_digest: 'e'.repeat(64), authority: { delegated: false, lanes: [] } }).reason_code, 'PUBLICATION_UNCERTAIN');
+  assert.equal(runtime.prepareRetry({ ...common, previous_run: previous, run_id: 'run-new', current_authority_digest: 'd'.repeat(64), authority: { delegated: false, lanes: [] } }).reason_code, 'FRESH_AUTHORITY_REQUIRED');
+  assert.equal(runtime.prepareRetry({ ...common, previous_run: previous, run_id: 'run-new', current_authority_digest: 'e'.repeat(64), authority: { delegated: false, lanes: [] } }).reason_code, 'FRESH_LIVE_ADMISSION_REQUIRED');
+  const sha = 'a'.repeat(40);
+  const tree = 'b'.repeat(40);
+  const ready = runtime.prepareRetry({
+    ...common,
+    previous_run: previous,
+    run_id: 'run-new',
+    current_authority_digest: 'e'.repeat(64),
+    authority: { delegated: false, lanes: [] },
+    expected_live: { ref: 'refs/heads/main', sha, tree },
+    liveRefProvider: { read: () => ({ ref: 'refs/heads/main', sha, tree }) },
+    workspaceAdapter: { prepare: () => ({ workspace_id: 'workspace-retry', workspace_handle: 'handle-retry', commit_sha: sha, tree_sha: tree }) },
+  });
+  assert.equal(ready.status, 'ready');
+  assert.equal(ready.run.execution_state, 'workspace-ready');
+});

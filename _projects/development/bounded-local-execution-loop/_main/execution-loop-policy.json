@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "contract_ids": [
+    "toolkit.execution-loop.request.v1",
+    "toolkit.execution-loop.route-plan.v1",
+    "toolkit.execution-loop.run-receipt.v1",
+    "toolkit.execution-loop.workspace-receipt.v1",
+    "toolkit.execution-loop.terminal-packet.v1"
+  ],
+  "default_mode": "root-only",
+  "a2": {
+    "capability": "execution_loop",
+    "enabled_required": true,
+    "disabled": "block",
+    "declined": "block",
+    "unresolved": "block",
+    "malformed_or_interrupted": "block",
+    "consent_is_not_authority": true
+  },
+  "routing": {
+    "delegation_requires_current_authority": true,
+    "complete_route_required_before_launch": true,
+    "partial_launch": false,
+    "missing_route": "WORKER_ROUTE_UNAVAILABLE",
+    "model_mismatch": "WORKER_MODEL_MISMATCH",
+    "metadata_unverified": "MODEL_METADATA_UNVERIFIED",
+    "root_only_default": true,
+    "host_classifications": [
+      "hard-runtime-enforcement",
+      "configuration-backstop",
+      "guidance-only",
+      "unsupported"
+    ]
+  },
+  "state_machine": {
+    "execution_states": [
+      "planned",
+      "admitted",
+      "workspace-ready",
+      "running",
+      "validating",
+      "publication-pending",
+      "terminal-success",
+      "terminal-failure",
+      "terminal-blocked",
+      "interrupted"
+    ],
+    "workspace_dispositions": ["cleaned", "preserved", "quarantined"],
+    "terminal_cannot_return_to_running": true,
+    "missing_terminal_never_success": true,
+    "publication_uncertainty_terminal": true,
+    "worker_loss_preserves": true,
+    "stale_lease_no_takeover": true,
+    "retry_requires_fresh_run_and_admission": true
+  },
+  "live_authority": {
+    "server_ref_authoritative": true,
+    "tracking_ref_cache_only": true,
+    "exact_commit_and_tree_required": true,
+    "workspace_setup_operations": ["fetch", "safe-directory-check", "checkout-detached", "verify-snapshot"],
+    "setup_is_not_mutation_authority": true,
+    "revalidate_before_commit_and_push": true
+  },
+  "a1": {
+    "sole_operation_authority": true,
+    "broker_injected": true,
+    "public_issuer": false,
+    "a3_ticket_format": false,
+    "a3_durable_ticket": false,
+    "git_commit": {
+      "operation": "git.commit",
+      "stage_and_commit_composite": true,
+      "git_stage_operation": false,
+      "exact_path_set": true,
+      "expected_head": true,
+      "expected_tree": true,
+      "expected_index_baseline": true,
+      "intended_tree_evidence": true,
+      "intended_change_digest": true,
+      "amend": false,
+      "allow_empty": false,
+      "author_mutation": false,
+      "committer_mutation": false,
+      "config_mutation": false,
+      "arbitrary_options": false,
+      "shell_fallback": false,
+      "force": false,
+      "hook_broadening": "fail_closed_preserve_evidence"
+    },
+    "publication": ["git.branch", "git.commit", "git.push"],
+    "direct_main_push": false,
+    "merge": false,
+    "ready": false,
+    "review_mutation": false,
+    "web_finality": false
+  },
+  "persistence": {
+    "logical_root": "~/.ai-agent-toolkit/user-state/execution-loop/",
+    "a2_state_separate": true,
+    "key": "repository_id_plus_authorized_ref_digest",
+    "atomic_same_directory_write": true,
+    "readback_verify": true,
+    "exclusive_exact_token_lease": true,
+    "one_active_mutator_per_repository_and_ref": true,
+    "raw_remote_or_path": false,
+    "prompts_or_model_output": false,
+    "credentials_secrets_or_env": false,
+    "repository_contents": false
+  },
+  "terminal": {
+    "packet_is_evidence_only": true,
+    "web_handoff": "bounded unresolved handoff",
+    "cleanup_requires_proven_disposable_state": true,
+    "uncertain_state_preserved_or_quarantined": true
+  }
+}

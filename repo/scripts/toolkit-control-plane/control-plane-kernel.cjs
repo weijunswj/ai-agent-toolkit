@@ -23,11 +23,12 @@ const LIMITS = Object.freeze({
   ticketMaxUses: 8,
   ticketDefaultUses: 1,
   ticketMaxLifetimeMs: 300000,
+  commitMessageLength: 512,
 });
 
 const OPERATION_TYPES = Object.freeze([
   'filesystem.read', 'filesystem.write', 'filesystem.create', 'filesystem.move', 'filesystem.delete',
-  'git.read', 'git.branch', 'git.push', 'github.read', 'github.mutation', 'network.request',
+  'git.read', 'git.branch', 'git.commit', 'git.push', 'github.read', 'github.mutation', 'network.request',
   'external.mutation', 'compound', 'shell',
 ]);
 const OPERATION_TYPE_SET = new Set(OPERATION_TYPES);
@@ -73,6 +74,16 @@ const POLICY = Object.freeze({
     atomic_consumption: true,
     public_self_mint: false,
     duck_typed_store: false,
+  }),
+  git_commit: Object.freeze({
+    max_message_length: LIMITS.commitMessageLength,
+    amend: false,
+    allow_empty: false,
+    author_mutation: false,
+    committer_mutation: false,
+    config_mutation: false,
+    shell_fallback: false,
+    arbitrary_options: false,
   }),
   hard_deny_precedence: HARD_DENY_PRECEDENCE,
 });
@@ -209,7 +220,7 @@ function opaqueTicketNode(value, path) {
 }
 
 function knownFields(spec) {
-  const commonOperation = ['type', 'target', 'source', 'destination', 'repository', 'action', 'method', 'remote', 'refspecs', 'options', 'authorized_remote', 'authorized_ref', 'mode', 'branch', 'shell', 'command', 'no_clobber', 'components'];
+  const commonOperation = ['type', 'target', 'source', 'destination', 'repository', 'action', 'method', 'remote', 'refspecs', 'options', 'authorized_remote', 'authorized_ref', 'mode', 'branch', 'shell', 'command', 'no_clobber', 'components', 'expected_head', 'expected_tree', 'authorized_paths', 'authorized_paths_digest', 'expected_index_digest', 'intended_tree', 'intended_change_digest', 'commit_message', 'commit_message_digest', 'amend', 'allow_empty', 'author_mutation', 'committer_mutation', 'config_mutation'];
   const fields = {
     input: ['enabled', 'activation', 'now', 'repository', 'authority', 'operation', 'ticket', 'session', 'scope'],
     activation: ['mode', 'consented'],
@@ -239,7 +250,7 @@ function childSpec(parentSpec, key) {
   if (parentSpec === 'operation') {
     if (key === 'target' || key === 'source' || key === 'destination') return 'target';
     if (key === 'components') return 'operation-array';
-    if (key === 'refspecs' || key === 'options') return 'string-array';
+    if (key === 'refspecs' || key === 'options' || key === 'authorized_paths') return 'string-array';
   }
   if (parentSpec === 'operation-array') return 'operation';
   if (parentSpec === 'authority' && key === 'allowed_operation_types') return 'string-array';
@@ -678,7 +689,7 @@ function operationAllowedFields(type) {
     'filesystem.delete': ['type', 'target'],
     'git.read': ['type'],
     'git.branch': ['type', 'mode', 'branch'],
-    'git.push': ['type', 'remote', 'refspecs', 'options', 'authorized_remote', 'authorized_ref'],
+    'git.commit': ['type', 'expected_head', 'expected_tree', 'authorized_paths', 'authorized_paths_digest', 'expected_index_digest', 'intended_tree', 'intended_change_digest', 'commit_message', 'commit_message_digest', 'amend', 'allow_empty', 'author_mutation', 'committer_mutation', 'config_mutation', 'options'], 'git.push': ['type', 'remote', 'refspecs', 'options', 'authorized_remote', 'authorized_ref'],
     'github.read': ['type', 'repository', 'action', 'target'],
     'github.mutation': ['type', 'repository', 'action', 'target'],
     'network.request': ['type', 'source', 'destination', 'method'],
@@ -693,12 +704,83 @@ function operationRequiredFields(type) {
   const map = {
     'filesystem.read': ['type', 'target'], 'filesystem.write': ['type', 'target', 'no_clobber'], 'filesystem.create': ['type', 'target', 'no_clobber'],
     'filesystem.move': ['type', 'source', 'destination', 'no_clobber'], 'filesystem.delete': ['type', 'target'], 'git.read': ['type'],
-    'git.branch': ['type', 'mode', 'branch'], 'git.push': ['type', 'remote', 'refspecs', 'options', 'authorized_remote', 'authorized_ref'],
+    'git.branch': ['type', 'mode', 'branch'], 'git.commit': ['type', 'expected_head', 'expected_tree', 'authorized_paths', 'authorized_paths_digest', 'expected_index_digest', 'intended_tree', 'intended_change_digest', 'commit_message', 'commit_message_digest', 'amend', 'allow_empty', 'author_mutation', 'committer_mutation', 'config_mutation', 'options'], 'git.push': ['type', 'remote', 'refspecs', 'options', 'authorized_remote', 'authorized_ref'],
     'github.read': ['type', 'repository', 'action', 'target'], 'github.mutation': ['type', 'repository', 'action', 'target'],
     'network.request': ['type', 'source', 'destination', 'method'], 'external.mutation': ['type', 'target', 'action'],
     compound: ['type', 'components'], shell: ['type', 'shell', 'command'],
   };
   return map[type] || [];
+}
+
+function isSha1(value) {
+  return typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);
+}
+
+function isDigest(value) {
+  return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+}
+
+function isSafeRelativeGitPath(value) {
+  if (typeof value !== 'string' || value.length === 0 || value.length > LIMITS.scalarLength) return false;
+  if (value.startsWith('/') || value.startsWith('\\') || /^[A-Za-z]:/.test(value) || value.startsWith(':') || value.startsWith('-')) return false;
+  if (value.includes('\\') || value.includes('\0') || /[\r\n\t]/.test(value) || value.includes('//')) return false;
+  const parts = value.split('/');
+  return parts.length > 0 && parts.every((part) => part.length > 0 && part !== '.' && part !== '..' && !part.startsWith('-'));
+}
+
+function normalizeGitCommit(node) {
+  const fields = {
+    expectedHead: normalizeString(child(node, 'expected_head'), 'GIT_COMMIT_BINDING_REQUIRED'),
+    expectedTree: normalizeString(child(node, 'expected_tree'), 'GIT_COMMIT_BINDING_REQUIRED'),
+    authorizedPaths: normalizeStringArray(child(node, 'authorized_paths'), 'GIT_COMMIT_PATHS_REQUIRED'),
+    authorizedPathsDigest: normalizeString(child(node, 'authorized_paths_digest'), 'GIT_COMMIT_BINDING_REQUIRED'),
+    expectedIndexDigest: normalizeString(child(node, 'expected_index_digest'), 'GIT_COMMIT_BINDING_REQUIRED'),
+    intendedTree: normalizeString(child(node, 'intended_tree'), 'GIT_COMMIT_BINDING_REQUIRED'),
+    intendedChangeDigest: normalizeString(child(node, 'intended_change_digest'), 'GIT_COMMIT_BINDING_REQUIRED'),
+    commitMessage: normalizeString(child(node, 'commit_message'), 'GIT_COMMIT_MESSAGE_INVALID'),
+    commitMessageDigest: normalizeString(child(node, 'commit_message_digest'), 'GIT_COMMIT_MESSAGE_INVALID'),
+    amend: normalizeBoolean(child(node, 'amend'), 'GIT_COMMIT_MUTATION_FLAG_INVALID'),
+    allowEmpty: normalizeBoolean(child(node, 'allow_empty'), 'GIT_COMMIT_MUTATION_FLAG_INVALID'),
+    authorMutation: normalizeBoolean(child(node, 'author_mutation'), 'GIT_COMMIT_MUTATION_FLAG_INVALID'),
+    committerMutation: normalizeBoolean(child(node, 'committer_mutation'), 'GIT_COMMIT_MUTATION_FLAG_INVALID'),
+    configMutation: normalizeBoolean(child(node, 'config_mutation'), 'GIT_COMMIT_MUTATION_FLAG_INVALID'),
+    options: normalizeStringArray(child(node, 'options'), 'GIT_COMMIT_OPTIONS_INVALID'),
+  };
+  if (Object.values(fields).some((field) => !field.valid)) return { valid: false, reason_code: Object.values(fields).find((field) => !field.valid).reason_code, operation_type: 'git.commit' };
+  if (!isSha1(fields.expectedHead.value) || !isSha1(fields.expectedTree.value) || !isSha1(fields.intendedTree.value) || !isDigest(fields.authorizedPathsDigest.value) || !isDigest(fields.expectedIndexDigest.value) || !isDigest(fields.intendedChangeDigest.value) || !isDigest(fields.commitMessageDigest.value)) return { valid: false, reason_code: 'GIT_COMMIT_BINDING_INVALID', operation_type: 'git.commit' };
+  if (fields.authorizedPaths.value.length === 0 || fields.authorizedPaths.value.length > 64) return { valid: false, reason_code: 'GIT_COMMIT_PATHS_REQUIRED', operation_type: 'git.commit' };
+  const paths = [...fields.authorizedPaths.value].sort();
+  if (new Set(paths).size !== paths.length || paths.some((value) => !isSafeRelativeGitPath(value))) return { valid: false, reason_code: 'GIT_COMMIT_PATH_INVALID', operation_type: 'git.commit' };
+  if (fields.authorizedPathsDigest.value !== digestCanonical(paths)) return { valid: false, reason_code: 'GIT_COMMIT_PATH_SET_DIGEST_MISMATCH', operation_type: 'git.commit' };
+  if (fields.commitMessage.value.length > LIMITS.commitMessageLength || fields.commitMessage.value.includes('\0') || /[\r\n]/.test(fields.commitMessage.value) || fields.commitMessageDigest.value !== digestCanonical(fields.commitMessage.value)) return { valid: false, reason_code: 'GIT_COMMIT_MESSAGE_INVALID', operation_type: 'git.commit' };
+  if (fields.options.value.length !== 0) return { valid: false, reason_code: 'GIT_COMMIT_OPTIONS_UNSUPPORTED', operation_type: 'git.commit' };
+  if (fields.amend.value !== false || fields.allowEmpty.value !== false || fields.authorMutation.value !== false || fields.committerMutation.value !== false || fields.configMutation.value !== false) return { valid: false, reason_code: 'GIT_COMMIT_MUTATION_FLAG_UNSUPPORTED', operation_type: 'git.commit' };
+  return {
+    valid: true,
+    value: {
+      type: 'git.commit',
+      expected_head: fields.expectedHead.value,
+      expected_tree: fields.expectedTree.value,
+      authorized_paths: paths,
+      authorized_paths_digest: fields.authorizedPathsDigest.value,
+      expected_index_digest: fields.expectedIndexDigest.value,
+      intended_tree: fields.intendedTree.value,
+      intended_change_digest: fields.intendedChangeDigest.value,
+      commit_message: fields.commitMessage.value,
+      commit_message_digest: fields.commitMessageDigest.value,
+      amend: false,
+      allow_empty: false,
+      author_mutation: false,
+      committer_mutation: false,
+      config_mutation: false,
+      options: [],
+    },
+    operationClass: 'write',
+    targetClass: 'none',
+    secret: 'none',
+    targetValues: [],
+    operation_type: 'git.commit',
+  };
 }
 
 function normalizeOperation(node, traversalState = { total: 0 }, compoundDepth = 0) {
@@ -760,6 +842,10 @@ function normalizeOperation(node, traversalState = { total: 0 }, compoundDepth =
     if (!mode.valid || !branch.valid) return { valid: false, reason_code: 'TYPED_OPERATION_REQUIRED', operation_type: type };
     result.mode = mode.value; result.branch = branch.value;
     operationClass = ['read', 'list', 'show'].includes(mode.value) ? 'read' : 'write';
+  } else if (type === 'git.commit') {
+    const commit = normalizeGitCommit(node);
+    if (!commit.valid) return commit;
+    return commit;
   } else if (type === 'git.push') {
     const remote = normalizeString(child(node, 'remote'));
     const refspecs = normalizeStringArray(child(node, 'refspecs'));
@@ -1124,7 +1210,7 @@ function canonicalOperation(operation) {
   if (operation.type === 'compound') return { type: 'compound', components: operation.components.map(canonicalOperation) };
   const result = { type: operation.type };
   for (const key of ['target', 'source', 'destination']) if (operation[key]) result[key] = canonicalTarget(operation[key]);
-  for (const key of ['repository', 'action', 'method', 'remote', 'authorized_remote', 'authorized_ref', 'mode', 'branch', 'no_clobber', 'refspecs', 'options']) if (own(operation, key)) result[key] = operation[key];
+  for (const key of ['repository', 'action', 'method', 'remote', 'authorized_remote', 'authorized_ref', 'mode', 'branch', 'no_clobber', 'refspecs', 'options', 'expected_head', 'expected_tree', 'authorized_paths', 'authorized_paths_digest', 'expected_index_digest', 'intended_tree', 'intended_change_digest', 'commit_message', 'commit_message_digest', 'amend', 'allow_empty', 'author_mutation', 'committer_mutation', 'config_mutation']) if (own(operation, key)) result[key] = operation[key];
   return result;
 }
 
