@@ -560,6 +560,7 @@ test('project manifests include the current project modules without repo-wide MC
     'development.bounded-local-execution-loop',
     'development.control-plane-kernel',
     'development.hostinger-coolify-production-guide',
+    'development.independent-assurance-web-finality',
     'development.local-ai-stack-safety',
     'development.managed-app-foundation-review',
     'development.project-completion-audit',
