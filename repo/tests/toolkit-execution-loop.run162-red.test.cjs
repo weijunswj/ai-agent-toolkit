@@ -106,7 +106,7 @@ test('RUN162 RED: workspace admission rejects observed snapshot mismatches and p
   assert.equal(result.workspace_receipt.verified, true);
 });
 
-function durableFixture(runId = 'run-red-durable') {
+function durableFixture(runId = 'run-red-durable', stateRoot) {
   const admitted = runtime.admitRun({
     ...common,
     run_id: runId,
@@ -114,6 +114,7 @@ function durableFixture(runId = 'run-red-durable') {
     authority: { delegated: false, lanes: [] },
   });
   const workspace = runtime.admitWorkspace({
+    state_root: stateRoot,
     run: admitted.run,
     expected_live: live,
     liveRefProvider: { read: () => live },
@@ -122,8 +123,8 @@ function durableFixture(runId = 'run-red-durable') {
       verifySnapshot: () => true,
     },
   });
-  const running = runtime.transitionRun(workspace.run, 'running');
-  const validating = runtime.transitionRun(running, 'validating');
+  const running = runtime.transitionRun(workspace.run, 'running', { state_root: stateRoot });
+  const validating = runtime.transitionRun(running, 'validating', { state_root: stateRoot });
   const terminal_packet = runtime.createTerminalPacket({
     run_id: runId,
     outcome: 'success',
@@ -132,7 +133,7 @@ function durableFixture(runId = 'run-red-durable') {
     publication_state: 'verified',
     workspace_disposition: 'cleaned',
   });
-  const terminal = runtime.completeRun({ run: validating, terminal_packet });
+  const terminal = runtime.completeRun({ state_root: stateRoot, run: validating, terminal_packet });
   return { admitted, workspace, running, validating, terminal_packet, terminal };
 }
 
@@ -141,7 +142,11 @@ function artifactPath(stateRoot, repositoryId, authorizedRefDigest, runId, artif
 }
 
 function persistRunOnly(stateRoot, fixture, run = fixture.terminal) {
-  runtime.writeDurableRun({ state_root: stateRoot, run });
+  if (['planned', 'admitted'].includes(run.execution_state)) {
+    runtime.writeDurableRun({ state_root: stateRoot, run });
+  } else {
+    expectCode(() => runtime.writeDurableRun({ state_root: stateRoot, run }), 'DURABLE_PREDECESSOR_REQUIRED');
+  }
 }
 
 function persistWorkspace(stateRoot, fixture, receipt = fixture.workspace.workspace_receipt) {
@@ -291,12 +296,9 @@ test('RUN162 RED: durable release rejects terminal outcome, workspace dispositio
 });
 
 test('RUN162 RED: exact durable evidence releases the lease and permits only a later run to acquire it', () => {
-  const fixture = durableFixture('run-red-durable-exact');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'run162-red-exact-'));
+  const fixture = durableFixture('run-red-durable-exact', root);
   const lease = runtime.acquireMutationLease({ state_root: root, repository_id: fixture.terminal.repository_id, authorized_ref_digest: fixture.terminal.authorized_ref_digest, run_id: fixture.terminal.run_id });
-  persistRunOnly(root, fixture);
-  persistWorkspace(root, fixture);
-  persistTerminal(root, fixture);
   assert.deepEqual(runtime.releaseMutationLease(releaseOptions(root, fixture, lease)), { released: true });
   const later = runtime.acquireMutationLease({ state_root: root, repository_id: fixture.terminal.repository_id, authorized_ref_digest: fixture.terminal.authorized_ref_digest, run_id: 'run-red-later' });
   assert.equal(later.run_id, 'run-red-later');

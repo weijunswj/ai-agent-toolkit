@@ -24,15 +24,21 @@ canonical A1/A2 main. No third-party source is copied or adapted.
   provider, and an exact owned mutation lease before typed git.commit staging
   and commit, persists both exact durable artifacts, derives lease release only
   from their exact cross-validated durable state, and rejects out-of-scope
-  staged/unstaged/untracked worktree changes including
-  hook broadening, and re-reads A2 consent before workspace-ready to running
-  and immediately before the atomic substantive batch.
+  staged/unstaged/untracked worktree changes including hook broadening, and
+  re-reads A2 consent before workspace-ready to running and immediately before
+  the atomic substantive batch. Private non-contract lifecycle provenance is
+  derived only from verified workspace admission and governed completion;
+  durable progression is monotonic and caller-authored release triplets cannot
+  release.
 - repo/tests/toolkit-execution-loop.test.cjs covers the green contract,
   routing, workspace-bound lifecycle, atomic delegated start, A1 broker,
   typed commit, persistence, and finality paths.
 - repo/tests/toolkit-execution-loop.boundaries.test.cjs covers malformed,
   future, privacy, concurrency, durable-release, worktree, recovery, and
   cleanup boundaries.
+- repo/tests/toolkit-execution-loop.run163-red.test.cjs covers public
+  persistence provenance forgery, predecessor ordering, governed completion,
+  safe release, and fresh-run lease recovery.
 
 ## Scope boundary
 

@@ -33,6 +33,15 @@ const POLICY = Object.freeze({
   launch: Object.freeze({ prepare_inert: true, atomic_batch_commit: true, per_lane_start: false, rollback_is_not_zero_launch: true }),
   mutation_lease: Object.freeze({ required_before_stage: true, revalidate_before_commit: true, exact_owner: true, stale_takeover: false, uncertain_preserves: true, safe_terminal_release: true, durable_evidence_required_for_release: true, terminal_artifacts_required_for_release: true, caller_labels_authoritative: false }),
   durable_artifacts: Object.freeze({ required_for_release: Object.freeze(['workspace-receipt', 'terminal-packet']), key_binding: Object.freeze(['repository_id', 'authorized_ref_digest', 'run_id', 'artifact_type']), atomic_same_directory_write: true, readback_verify: true, exact_cross_artifact_match_before_release: true }),
+  lifecycle_provenance: Object.freeze({
+    internal_only: true,
+    not_a_contract_or_authority: true,
+    workspace_requires: Object.freeze(['successful_admitWorkspace', 'observed_and_synchronously_verified_snapshot', 'durable_admitted_predecessor', 'durable_workspace_ready_successor']),
+    terminal_requires: Object.freeze(['allowed_durable_preterminal', 'governed_completeRun', 'exact_terminal_packet']),
+    public_persistence_cannot_mint: true,
+    monotonic_durable_progression: true,
+    missing_or_out_of_order: 'fail_closed',
+  }),
   durable_state_root: '~/.ai-agent-toolkit/user-state/execution-loop/',
   durable_forbidden: ['raw_remote', 'raw_absolute_path', 'prompt', 'model_output', 'repository_contents', 'credentials', 'secret_values', 'environment_values', 'a1_ticket'],
   publication: Object.freeze({ optional: true, branch_operation: 'git.branch', commit_operation: 'git.commit', push_operation: 'git.push', direct_main_push: false, force: false, merge: false, ready: false, review_mutation: false, web_finality: false }),
@@ -53,6 +62,11 @@ const TERMINAL_OUTCOMES = Object.freeze({ success: 'terminal-success', failure: 
 const SAFE_SETUP_OPERATIONS = Object.freeze(['fetch', 'safe-directory-check', 'checkout-detached', 'verify-snapshot']);
 const DURABLE_ARTIFACT_TYPES = Object.freeze(['workspace-receipt', 'terminal-packet']);
 const FORBIDDEN_DURABLE_KEYS = /^(raw|absolute|private|secret|credential|password|prompt|model_output|tool_output|repository_contents|environment|env|a1_ticket|ticket|issuer|token|remote_url|remote_userinfo|path)$/i;
+
+const LIFECYCLE_PROVENANCE_KIND = 'execution-loop-lifecycle-provenance.v1';
+const LIFECYCLE_TERMINAL_STATES = Object.freeze(['terminal-success', 'terminal-failure', 'terminal-blocked', 'interrupted']);
+const LIFECYCLE_RUNS = new WeakSet();
+const LIFECYCLE_WORKSPACE_RECEIPTS = new WeakSet();
 
 class ExecutionLoopError extends Error {
   constructor(code, evidence = {}) {
@@ -93,6 +107,24 @@ function deepFreeze(value) {
   return value;
 }
 
+
+function markLifecycleRun(value) {
+  if (isRecord(value)) LIFECYCLE_RUNS.add(value);
+  return value;
+}
+
+function hasLifecycleRun(value) {
+  return isRecord(value) && LIFECYCLE_RUNS.has(value);
+}
+
+function markLifecycleWorkspaceReceipt(value) {
+  if (isRecord(value)) LIFECYCLE_WORKSPACE_RECEIPTS.add(value);
+  return value;
+}
+
+function hasLifecycleWorkspaceReceipt(value) {
+  return isRecord(value) && LIFECYCLE_WORKSPACE_RECEIPTS.has(value);
+}
 function canonicalSerialize(value) {
   if (value === null) return 'null';
   if (typeof value === 'string') return JSON.stringify(value);
@@ -461,7 +493,7 @@ function createRunReceipt(options = {}) {
   const runId = options.run_id || 'run-' + digestValue({ request_id: request.request_id, route_digest: routePlan.route_digest, authority: request.current_authority_digest }).slice(0, 24);
   if (!isSafeId(runId)) fail('RUN_ID_INVALID');
   const now = isoNow(options.now);
-  return validateRunReceipt(contractRecord(CONTRACTS[2], {
+  return markLifecycleRun(validateRunReceipt(contractRecord(CONTRACTS[2], {
     run_id: runId,
     request_digest: digestValue(request),
     repository_id: request.repository_id,
@@ -477,7 +509,7 @@ function createRunReceipt(options = {}) {
     workspace_disposition: null,
     created_at: now,
     updated_at: now,
-  }));
+  })));
 }
 
 function validateRunReceipt(record) {
@@ -502,6 +534,7 @@ function validateRunReceipt(record) {
 
 function transitionRun(run, nextState, options = {}) {
   const current = validateRunReceipt(run);
+  const sourceIsLifecycle = hasLifecycleRun(run);
   if (!EXECUTION_STATES.includes(nextState) || !TRANSITIONS[current.execution_state].includes(nextState)) fail('INVALID_STATE_TRANSITION', { from: current.execution_state, to: nextState });
   const next = clone(current);
   next.execution_state = nextState;
@@ -532,7 +565,13 @@ function transitionRun(run, nextState, options = {}) {
   }
   if (nextState === 'terminal-success' && next.publication_state === 'uncertain') fail('PUBLICATION_UNCERTAIN');
   if (nextState === 'interrupted' && (next.publication_state !== 'uncertain' || !['preserved', 'quarantined'].includes(next.workspace_disposition))) fail('INTERRUPTION_EVIDENCE_REQUIRED');
-  return validateRunReceipt(next);
+  const result = validateRunReceipt(next);
+  if (options.state_root !== undefined) {
+    if (LIFECYCLE_TERMINAL_STATES.includes(nextState)) fail('GOVERNED_COMPLETION_REQUIRED');
+    if (!['running', 'validating', 'publication-pending'].includes(nextState)) fail('LIFECYCLE_STATE_INVALID');
+    persistGovernedTransition({ state_root: options.state_root, previous_run: current, next_run: result });
+  }
+  return sourceIsLifecycle ? markLifecycleRun(result) : result;
 }
 
 function normalizeLiveRef(value) {
@@ -571,7 +610,9 @@ function validateWorkspaceReceipt(record) {
 
 function validateRunEvidence(options = {}, expectedState, prefix) {
   if (!isRecord(options.run) || !isRecord(options.route_plan) || !isRecord(options.workspace_receipt)) fail(prefix + '_RUN_EVIDENCE_REQUIRED');
+  const sourceIsLifecycle = hasLifecycleRun(options.run);
   const run = validateRunReceipt(options.run);
+  if (sourceIsLifecycle) markLifecycleRun(run);
   if (run.execution_state !== expectedState) fail(prefix + '_LIFECYCLE_INVALID');
   if (!isSafeId(options.run_id) || !isDigest(options.repository_id) || !isDigest(options.authorized_ref_digest) || !isDigest(options.current_authority_digest)) fail(prefix + '_BINDING_INVALID');
   if (options.run_id !== run.run_id || options.repository_id !== run.repository_id || options.authorized_ref_digest !== run.authorized_ref_digest || options.current_authority_digest !== run.current_authority_digest) fail(prefix + '_RUN_BINDING_MISMATCH');
@@ -626,7 +667,11 @@ function admitWorkspace(options = {}) {
     setup_digest: digestValue({ operations: setupOperations, commit: expected.sha, tree: expected.tree }),
     verified: true,
   });
-  return { status: 'workspace-ready', run: transitionRun(run, 'workspace-ready', { workspace_receipt_digest: digestValue(receipt) }), workspace_receipt: receipt };
+  const workspaceRun = transitionRun(run, 'workspace-ready', { workspace_receipt_digest: digestValue(receipt) });
+  markLifecycleRun(workspaceRun);
+  markLifecycleWorkspaceReceipt(receipt);
+  if (options.state_root !== undefined) persistGovernedWorkspace({ state_root: options.state_root, admitted_run: run, workspace_run: workspaceRun, workspace_receipt: receipt });
+  return { status: 'workspace-ready', run: workspaceRun, workspace_receipt: receipt };
 }
 
 function authorizeA1Operation(options = {}) {
@@ -793,8 +838,10 @@ function validateTerminalPacket(packet) {
 }
 
 function completeRun(options = {}) {
+  const sourceIsLifecycle = hasLifecycleRun(options.run);
   const run = validateRunReceipt(options.run);
   if (!options.terminal_packet) fail('TERMINAL_PACKET_REQUIRED');
+  if (sourceIsLifecycle) markLifecycleRun(run);
   const packet = validateTerminalPacket(options.terminal_packet);
   if (packet.run_id !== run.run_id) fail('TERMINAL_RUN_MISMATCH');
   const state = TERMINAL_OUTCOMES[packet.outcome];
@@ -805,7 +852,12 @@ function completeRun(options = {}) {
   } else if (!['validating', 'publication-pending'].includes(run.execution_state)) {
     fail('INVALID_STATE_TRANSITION');
   }
-  return transitionRun(run, state, { now: options.now, terminal_packet_digest: digestValue(packet), publication_state: packet.publication_state, workspace_disposition: packet.workspace_disposition });
+  const terminalRun = transitionRun(run, state, { now: options.now, terminal_packet_digest: digestValue(packet), publication_state: packet.publication_state, workspace_disposition: packet.workspace_disposition });
+  if (options.state_root !== undefined) {
+    const persisted = persistGovernedCompletion({ state_root: options.state_root, previous_run: run, terminal_run: terminalRun, terminal_packet: packet });
+    return markLifecycleRun(persisted);
+  }
+  return terminalRun;
 }
 
 function finalizeWorkspace(options = {}) {
@@ -854,6 +906,7 @@ function stateLocations(options) {
     state: path.join(root, key + '.json'),
     workspace_artifact: path.join(root, workspaceKey + '.json'),
     terminal_artifact: path.join(root, terminalKey + '.json'),
+    lifecycle_provenance: path.join(root, key + '.lifecycle.json'),
     tempPrefixes: [key + '.', workspaceKey + '.', terminalKey + '.'],
     lease: path.join(root, options.repository_id + '.' + options.authorized_ref_digest + '.lease.json'),
   };
@@ -891,6 +944,82 @@ function validateDurableRun(record) {
   if (terminalStates.includes(run.execution_state) && (!hasWorkspaceEvidence || !hasTerminalEvidence || run.workspace_disposition === null || run.publication_state === 'uncertain')) fail('DURABLE_TERMINAL_EVIDENCE_REQUIRED');
   if (run.execution_state === 'interrupted' && (!hasWorkspaceEvidence || !hasTerminalEvidence || !['preserved', 'quarantined'].includes(run.workspace_disposition) || run.publication_state !== 'uncertain')) fail('DURABLE_INTERRUPTION_EVIDENCE_REQUIRED');
   return run;
+}
+
+
+
+function validateDurableLifecycleProvenance(record, options = {}) {
+  const keys = [
+    'kind',
+    'repository_id',
+    'authorized_ref_digest',
+    'run_id',
+    'admitted_run_digest',
+    'workspace_ready_run_digest',
+    'workspace_receipt_digest',
+    'running_run_digest',
+    'validating_run_digest',
+    'publication_pending_run_digest',
+    'terminal_run_digest',
+    'terminal_packet_digest',
+    'terminal_state',
+    'updated_at',
+  ];
+  if (!exactKeys(record, keys)
+    || record.kind !== LIFECYCLE_PROVENANCE_KIND
+    || !isDigest(record.repository_id)
+    || !isDigest(record.authorized_ref_digest)
+    || !isSafeId(record.run_id)
+    || !isDigest(record.admitted_run_digest)
+    || !isDigest(record.workspace_ready_run_digest)
+    || !isDigest(record.workspace_receipt_digest)
+    || !(record.running_run_digest === null || isDigest(record.running_run_digest))
+    || !(record.validating_run_digest === null || isDigest(record.validating_run_digest))
+    || !(record.publication_pending_run_digest === null || isDigest(record.publication_pending_run_digest))
+    || !(record.terminal_run_digest === null || isDigest(record.terminal_run_digest))
+    || !(record.terminal_packet_digest === null || isDigest(record.terminal_packet_digest))
+    || !(record.terminal_state === null || LIFECYCLE_TERMINAL_STATES.includes(record.terminal_state))
+    || typeof record.updated_at !== 'string') fail('LIFECYCLE_PROVENANCE_INVALID');
+  assertPrivacySafe(record);
+  if (hasOwn(options, 'repository_id') && options.repository_id !== record.repository_id) fail('LIFECYCLE_PROVENANCE_BINDING_MISMATCH');
+  if (hasOwn(options, 'authorized_ref_digest') && options.authorized_ref_digest !== record.authorized_ref_digest) fail('LIFECYCLE_PROVENANCE_BINDING_MISMATCH');
+  if (hasOwn(options, 'run_id') && options.run_id !== record.run_id) fail('LIFECYCLE_PROVENANCE_BINDING_MISMATCH');
+  if (record.running_run_digest === null && (record.validating_run_digest !== null || record.publication_pending_run_digest !== null || record.terminal_state !== null)) fail('LIFECYCLE_PROVENANCE_ORDER_INVALID');
+  if (record.validating_run_digest === null && (record.publication_pending_run_digest !== null || (record.terminal_state !== null && record.terminal_state !== 'interrupted'))) fail('LIFECYCLE_PROVENANCE_ORDER_INVALID');
+  if (record.publication_pending_run_digest !== null && record.validating_run_digest === null) fail('LIFECYCLE_PROVENANCE_ORDER_INVALID');
+  if (record.terminal_state === null && (record.terminal_run_digest !== null || record.terminal_packet_digest !== null)) fail('LIFECYCLE_PROVENANCE_INVALID');
+  if (record.terminal_state !== null && (!isDigest(record.terminal_run_digest) || !isDigest(record.terminal_packet_digest))) fail('LIFECYCLE_PROVENANCE_INVALID');
+  return deepFreeze(clone(record));
+}
+
+function readDurableLifecycleProvenance(options = {}) {
+  const locations = stateLocations(options);
+  ensureStateRoot(locations.root);
+  assertNoInterruptedState(locations.root, locations.tempPrefixes);
+  const record = readDurableJsonArtifact(locations.lifecycle_provenance);
+  return record === null ? null : validateDurableLifecycleProvenance(record, options);
+}
+
+function writeDurableLifecycleProvenance(options = {}) {
+  const record = validateDurableLifecycleProvenance(options.provenance, options);
+  const locations = stateLocations(options);
+  ensureStateRoot(locations.root);
+  assertNoInterruptedState(locations.root, locations.tempPrefixes);
+  const existing = readDurableLifecycleProvenance(options);
+  if (existing && (!isDigest(options.expected_digest) || digestValue(existing) !== options.expected_digest)) fail('STATE_CONFLICT');
+  const bytes = Buffer.from(JSON.stringify(record), 'utf8');
+  if (bytes.length > LIMITS.stateBytes) fail('STATE_OVERSIZED');
+  const temp = path.join(locations.root, locations.key + '.lifecycle.' + crypto.randomBytes(8).toString('hex') + '.tmp');
+  try {
+    fs.writeFileSync(temp, bytes, { flag: 'wx', mode: 0o600 });
+    fs.renameSync(temp, locations.lifecycle_provenance);
+    const readback = readDurableLifecycleProvenance(options);
+    if (!readback || digestValue(readback) !== digestValue(record)) fail('STATE_READBACK_MISMATCH');
+    return readback;
+  } catch (error) {
+    if (error instanceof ExecutionLoopError) throw error;
+    fail('STATE_WRITE_INTERRUPTED');
+  }
 }
 
 function readDurableRun(options = {}) {
@@ -1020,6 +1149,63 @@ function writeDurableTerminalPacket(options = {}) {
     run_id: packet.run_id,
   }, 'terminal-packet', packet);
 }
+function assertDurableRunBindingContinuity(previous, next) {
+  for (const key of ['contract_version', 'run_id', 'request_digest', 'repository_id', 'authorized_ref_digest', 'route_digest', 'authority_binding_digest', 'current_authority_digest', 'created_at']) {
+    if (previous[key] !== next[key]) fail('DURABLE_STATE_BINDING_MISMATCH');
+  }
+  if (previous.workspace_receipt_digest !== null && next.workspace_receipt_digest !== previous.workspace_receipt_digest) fail('DURABLE_STATE_BINDING_MISMATCH');
+  if (previous.terminal_packet_digest !== null && next.terminal_packet_digest !== previous.terminal_packet_digest) fail('DURABLE_STATE_BINDING_MISMATCH');
+}
+
+function assertPublicDurableRunProgression(existing, run, options = {}) {
+  if (!existing) {
+    if (!['planned', 'admitted'].includes(run.execution_state)) fail('DURABLE_PREDECESSOR_REQUIRED');
+    return;
+  }
+  if (!isDigest(options.expected_digest) || digestValue(existing) !== options.expected_digest) fail('STATE_CONFLICT');
+  if (digestValue(existing) === digestValue(run)) return;
+  assertDurableRunBindingContinuity(existing, run);
+  if (!TRANSITIONS[existing.execution_state].includes(run.execution_state)) fail('DURABLE_STATE_TRANSITION_INVALID');
+}
+
+function writeDurableRunRecord(options = {}) {
+  const run = validateDurableRun(options.run);
+  const locations = stateLocations({ state_root: options.state_root, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id });
+  ensureStateRoot(locations.root);
+  assertNoInterruptedState(locations.root, locations.tempPrefixes);
+  const existing = readDurableRun({ state_root: options.state_root, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id });
+  if (existing && (!isDigest(options.expected_digest) || digestValue(existing) !== options.expected_digest)) fail('STATE_CONFLICT');
+  if (existing && digestValue(existing) === digestValue(run)) return existing;
+  if (!existing && isDigest(options.expected_digest)) fail('STATE_CONFLICT');
+  const bytes = Buffer.from(JSON.stringify(run), 'utf8');
+  if (bytes.length > LIMITS.stateBytes) fail('STATE_OVERSIZED');
+  const temp = path.join(locations.root, locations.key + '.' + crypto.randomBytes(8).toString('hex') + '.tmp');
+  try {
+    fs.writeFileSync(temp, bytes, { flag: 'wx', mode: 0o600 });
+    fs.renameSync(temp, locations.state);
+    const readback = readDurableRun({ state_root: options.state_root, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id });
+    if (digestValue(readback) !== digestValue(run)) fail('STATE_READBACK_MISMATCH');
+    return readback;
+  } catch (error) {
+    if (error instanceof ExecutionLoopError) throw error;
+    fail('STATE_WRITE_INTERRUPTED');
+  }
+}
+
+function writeOrAssertDurableArtifact(options, artifactType, artifact) {
+  const locations = stateLocations(options);
+  ensureStateRoot(locations.root);
+  assertNoInterruptedState(locations.root, locations.tempPrefixes);
+  const existing = artifactType === 'workspace-receipt'
+    ? readDurableWorkspaceReceipt(options)
+    : readDurableTerminalPacket(options);
+  if (existing) {
+    if (digestValue(existing) !== digestValue(artifact)) fail('STATE_CONFLICT');
+    return existing;
+  }
+  return writeDurableArtifact(options, artifactType, artifact);
+}
+
 function writeDurableRun(options = {}) {
   const run = validateDurableRun(options.run);
   let workspaceReceipt;
@@ -1038,22 +1224,149 @@ function writeDurableRun(options = {}) {
   const locations = stateLocations({ state_root: options.state_root, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id });
   ensureStateRoot(locations.root);
   const existing = readDurableRun({ state_root: options.state_root, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id });
-  if (existing && (!isDigest(options.expected_digest) || digestValue(existing) !== options.expected_digest)) fail('STATE_CONFLICT');
-  const bytes = Buffer.from(JSON.stringify(run), 'utf8');
-  if (bytes.length > LIMITS.stateBytes) fail('STATE_OVERSIZED');
-  const temp = path.join(locations.root, locations.key + '.' + crypto.randomBytes(8).toString('hex') + '.tmp');
-  try {
-    fs.writeFileSync(temp, bytes, { flag: 'wx', mode: 0o600 });
-    fs.renameSync(temp, locations.state);
-    const readback = readDurableRun({ state_root: options.state_root, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id });
-    if (digestValue(readback) !== digestValue(run)) fail('STATE_READBACK_MISMATCH');
-    if (workspaceReceipt) writeDurableWorkspaceReceipt({ state_root: options.state_root, workspace_receipt: workspaceReceipt, expected_digest: options.expected_workspace_receipt_digest });
-    if (terminalPacket) writeDurableTerminalPacket({ state_root: options.state_root, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id, terminal_packet: terminalPacket, expected_digest: options.expected_terminal_packet_digest });
-    return readback;
-  } catch (error) {
-    if (error instanceof ExecutionLoopError) throw error;
-    fail('STATE_WRITE_INTERRUPTED');
+  assertPublicDurableRunProgression(existing, run, options);
+  const readback = writeDurableRunRecord({ ...options, run, expected_digest: existing ? options.expected_digest : undefined });
+  if (workspaceReceipt) writeDurableWorkspaceReceipt({ state_root: options.state_root, workspace_receipt: workspaceReceipt, expected_digest: options.expected_workspace_receipt_digest });
+  if (terminalPacket) writeDurableTerminalPacket({ state_root: options.state_root, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id, terminal_packet: terminalPacket, expected_digest: options.expected_terminal_packet_digest });
+  return readback;
+}
+
+
+
+function lifecycleRunField(executionState) {
+  return {
+    'workspace-ready': 'workspace_ready_run_digest',
+    running: 'running_run_digest',
+    validating: 'validating_run_digest',
+    'publication-pending': 'publication_pending_run_digest',
+  }[executionState] || null;
+}
+
+function assertLifecyclePredecessor(provenance, run) {
+  const field = lifecycleRunField(run.execution_state);
+  if (!field || provenance[field] !== digestValue(run)) fail('LIFECYCLE_PREDECESSOR_MISMATCH');
+}
+
+function durableRunOptions(stateRoot, run) {
+  return {
+    state_root: stateRoot,
+    repository_id: run.repository_id,
+    authorized_ref_digest: run.authorized_ref_digest,
+    run_id: run.run_id,
+  };
+}
+
+function persistGovernedWorkspace(options = {}) {
+  const admittedRun = validateRunReceipt(options.admitted_run);
+  const workspaceRun = validateRunReceipt(options.workspace_run);
+  const workspaceReceipt = validateWorkspaceReceipt(options.workspace_receipt);
+  if (!hasLifecycleWorkspaceReceipt(options.workspace_receipt)) fail('LIFECYCLE_PROVENANCE_REQUIRED');
+  if (admittedRun.execution_state !== 'admitted' || workspaceRun.execution_state !== 'workspace-ready') fail('LIFECYCLE_STATE_INVALID');
+  if (workspaceRun.workspace_receipt_digest !== digestValue(workspaceReceipt)) fail('WORKSPACE_RECEIPT_DIGEST_MISMATCH');
+  const base = durableRunOptions(options.state_root, admittedRun);
+  const existingProvenance = readDurableLifecycleProvenance(base);
+  if (existingProvenance) {
+    const durableRun = readDurableRun(base);
+    const durableReceipt = readDurableWorkspaceReceipt(base);
+    if (!durableRun || durableRun.execution_state !== 'workspace-ready'
+      || digestValue(durableRun) !== digestValue(workspaceRun)
+      || !durableReceipt || digestValue(durableReceipt) !== digestValue(workspaceReceipt)
+      || existingProvenance.workspace_ready_run_digest !== digestValue(workspaceRun)
+      || existingProvenance.workspace_receipt_digest !== digestValue(workspaceReceipt)) fail('LIFECYCLE_STATE_CONFLICT');
+    return durableRun;
   }
+  const existingRun = readDurableRun(base);
+  if (!existingRun) {
+    writeDurableRunRecord({ ...base, run: admittedRun });
+  } else if (existingRun.execution_state === 'admitted' && digestValue(existingRun) === digestValue(admittedRun)) {
+    // The exact admitted predecessor is already durable.
+  } else if (existingRun.execution_state === 'workspace-ready' && digestValue(existingRun) === digestValue(workspaceRun)) {
+    // A prior atomic write reached the workspace-ready state; repair only missing provenance.
+  } else {
+    fail('DURABLE_PREDECESSOR_MISMATCH');
+  }
+  const receiptOptions = { ...base, repository_id: workspaceReceipt.repository_id, authorized_ref_digest: workspaceReceipt.authorized_ref_digest, run_id: workspaceReceipt.run_id };
+  writeOrAssertDurableArtifact(receiptOptions, 'workspace-receipt', workspaceReceipt);
+  const current = readDurableRun(base);
+  if (!current || current.execution_state === 'admitted') {
+    writeDurableRunRecord({ ...base, run: workspaceRun, expected_digest: current ? digestValue(current) : digestValue(admittedRun) });
+  } else if (digestValue(current) !== digestValue(workspaceRun)) {
+    fail('DURABLE_STATE_CONFLICT');
+  }
+  const provenance = validateDurableLifecycleProvenance({
+    kind: LIFECYCLE_PROVENANCE_KIND,
+    repository_id: workspaceRun.repository_id,
+    authorized_ref_digest: workspaceRun.authorized_ref_digest,
+    run_id: workspaceRun.run_id,
+    admitted_run_digest: digestValue(admittedRun),
+    workspace_ready_run_digest: digestValue(workspaceRun),
+    workspace_receipt_digest: digestValue(workspaceReceipt),
+    running_run_digest: null,
+    validating_run_digest: null,
+    publication_pending_run_digest: null,
+    terminal_run_digest: null,
+    terminal_packet_digest: null,
+    terminal_state: null,
+    updated_at: workspaceRun.updated_at,
+  }, base);
+  writeDurableLifecycleProvenance({ ...base, provenance });
+  return readDurableRun(base);
+}
+
+function persistGovernedTransition(options = {}) {
+  const previousRun = validateRunReceipt(options.previous_run);
+  const nextRun = validateRunReceipt(options.next_run);
+  if (!['running', 'validating', 'publication-pending'].includes(nextRun.execution_state)
+    || !TRANSITIONS[previousRun.execution_state].includes(nextRun.execution_state)) fail('LIFECYCLE_STATE_INVALID');
+  assertDurableRunBindingContinuity(previousRun, nextRun);
+  const base = durableRunOptions(options.state_root, previousRun);
+  const provenance = readDurableLifecycleProvenance(base);
+  if (!provenance) fail('LIFECYCLE_PREDECESSOR_REQUIRED');
+  const durableRun = readDurableRun(base);
+  if (!durableRun || digestValue(durableRun) !== digestValue(previousRun)) fail('DURABLE_PREDECESSOR_MISMATCH');
+  assertLifecyclePredecessor(provenance, previousRun);
+  const field = lifecycleRunField(nextRun.execution_state);
+  if (provenance[field] !== null && provenance[field] !== digestValue(nextRun)) fail('LIFECYCLE_STATE_CONFLICT');
+  const readback = writeDurableRunRecord({ ...base, run: nextRun, expected_digest: digestValue(previousRun) });
+  const nextProvenance = {
+    ...provenance,
+    [field]: digestValue(nextRun),
+    updated_at: nextRun.updated_at,
+  };
+  writeDurableLifecycleProvenance({ ...base, provenance: nextProvenance, expected_digest: digestValue(provenance) });
+  return readback;
+}
+
+function persistGovernedCompletion(options = {}) {
+  const previousRun = validateRunReceipt(options.previous_run);
+  const terminalRun = validateRunReceipt(options.terminal_run);
+  const packet = validateTerminalPacket(options.terminal_packet);
+  if (!LIFECYCLE_TERMINAL_STATES.includes(terminalRun.execution_state)
+    || packet.run_id !== terminalRun.run_id) fail('LIFECYCLE_STATE_INVALID');
+  assertDurableRunBindingContinuity(previousRun, terminalRun);
+  const base = durableRunOptions(options.state_root, previousRun);
+  const provenance = readDurableLifecycleProvenance(base);
+  if (!provenance) fail('LIFECYCLE_PREDECESSOR_REQUIRED');
+  const durableRun = readDurableRun(base);
+  if (!durableRun || digestValue(durableRun) !== digestValue(previousRun)) fail('DURABLE_PREDECESSOR_MISMATCH');
+  assertLifecyclePredecessor(provenance, previousRun);
+  const isInterrupted = terminalRun.execution_state === 'interrupted';
+  const allowedPreterminal = isInterrupted ? ['running', 'validating', 'publication-pending'] : ['validating', 'publication-pending'];
+  if (!allowedPreterminal.includes(previousRun.execution_state)) fail('LIFECYCLE_PREDECESSOR_INVALID');
+  const workspaceReceipt = readDurableWorkspaceReceipt(base);
+  if (!workspaceReceipt || digestValue(workspaceReceipt) !== provenance.workspace_receipt_digest || digestValue(workspaceReceipt) !== previousRun.workspace_receipt_digest) fail('LIFECYCLE_WORKSPACE_EVIDENCE_REQUIRED');
+  const terminalPacketOptions = { ...base, run_id: packet.run_id };
+  writeOrAssertDurableArtifact(terminalPacketOptions, 'terminal-packet', packet);
+  const readback = writeDurableRunRecord({ ...base, run: terminalRun, expected_digest: digestValue(previousRun) });
+  const nextProvenance = {
+    ...provenance,
+    terminal_run_digest: digestValue(terminalRun),
+    terminal_packet_digest: digestValue(packet),
+    terminal_state: terminalRun.execution_state,
+    updated_at: terminalRun.updated_at,
+  };
+  writeDurableLifecycleProvenance({ ...base, provenance: nextProvenance, expected_digest: digestValue(provenance) });
+  return readback;
 }
 
 function mutationLeasePath(stateRoot, repositoryId, authorizedRefDigest) {
@@ -1136,16 +1449,24 @@ function releaseMutationLease(options = {}) {
   const lease = readMutationLease(options);
   if (lease.lease_id !== options.lease_id || lease.run_id !== options.run_id) fail('LEASE_TOKEN_MISMATCH');
   let durableRun;
+  let lifecycleProvenance;
   let workspaceReceipt;
   let terminalPacket;
   try {
     durableRun = readDurableRun({ state_root: options.state_root, repository_id: options.repository_id, authorized_ref_digest: options.authorized_ref_digest, run_id: options.run_id });
     workspaceReceipt = readDurableWorkspaceReceipt({ state_root: options.state_root, repository_id: options.repository_id, authorized_ref_digest: options.authorized_ref_digest, run_id: options.run_id });
     terminalPacket = readDurableTerminalPacket({ state_root: options.state_root, repository_id: options.repository_id, authorized_ref_digest: options.authorized_ref_digest, run_id: options.run_id });
+    lifecycleProvenance = readDurableLifecycleProvenance({ state_root: options.state_root, repository_id: options.repository_id, authorized_ref_digest: options.authorized_ref_digest, run_id: options.run_id });
   } catch (_error) {
     fail('LEASE_RELEASE_UNSAFE');
   }
   if (!durableRun || !['terminal-success', 'terminal-failure', 'terminal-blocked'].includes(durableRun.execution_state) || !isDigest(durableRun.workspace_receipt_digest) || !isDigest(durableRun.terminal_packet_digest) || durableRun.workspace_disposition !== 'cleaned' || !['none', 'verified'].includes(durableRun.publication_state)) fail('LEASE_RELEASE_UNSAFE');
+  if (!lifecycleProvenance
+    || lifecycleProvenance.terminal_state !== durableRun.execution_state
+    || lifecycleProvenance.terminal_run_digest !== digestValue(durableRun)
+    || lifecycleProvenance.workspace_receipt_digest !== durableRun.workspace_receipt_digest
+    || lifecycleProvenance.terminal_packet_digest !== durableRun.terminal_packet_digest
+    || lifecycleProvenance.validating_run_digest === null) fail('LEASE_RELEASE_UNSAFE');
   if (!workspaceReceipt || !terminalPacket) fail('LEASE_RELEASE_UNSAFE');
   if (workspaceReceipt.run_id !== durableRun.run_id || workspaceReceipt.repository_id !== durableRun.repository_id || workspaceReceipt.authorized_ref_digest !== durableRun.authorized_ref_digest || terminalPacket.run_id !== durableRun.run_id) fail('LEASE_RELEASE_UNSAFE');
   if (digestValue(workspaceReceipt) !== durableRun.workspace_receipt_digest || digestValue(terminalPacket) !== durableRun.terminal_packet_digest) fail('LEASE_RELEASE_UNSAFE');
@@ -1194,7 +1515,7 @@ function startDelegatedRun(options = {}) {
   verifyLiveWorkspaceReceipt(options.liveRefProvider, evidence.workspaceReceipt);
   const consentBeforeRunning = readExecutionLoopConsent(options);
   if (!consentBeforeRunning.enabled) return { ...consentBlock(consentBeforeRunning), route_plan: evidence.routePlan, run: evidence.run, workspace_receipt: evidence.workspaceReceipt, consent: consentBeforeRunning };
-  const running = transitionRun(evidence.run, 'running', { now: options.now });
+  const running = transitionRun(evidence.run, 'running', { now: options.now, state_root: options.state_root });
   let launchConsent = consentBeforeRunning;
   try {
     const launch = executeAtomicLaunch(evidence.routePlan, {

@@ -367,7 +367,11 @@ test('RUN160 RED: durable release rejects every non-safe state and missing or co
       const key = runtime.stateKey(run.repository_id, run.authorized_ref_digest, run.run_id);
       fs.writeFileSync(path.join(stateRoot, key + '.json'), JSON.stringify(rawOverride), 'utf8');
     } else {
-      runtime.writeDurableRun({ state_root: stateRoot, run });
+      if (['planned', 'admitted'].includes(run.execution_state)) {
+        runtime.writeDurableRun({ state_root: stateRoot, run });
+      } else {
+        expectCode(() => runtime.writeDurableRun({ state_root: stateRoot, run }), 'DURABLE_PREDECESSOR_REQUIRED');
+      }
     }
     expectCode(() => runtime.releaseMutationLease({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id, lease_id: lease.lease_id, terminal_state: 'terminal-success', workspace_disposition: 'cleaned', publication_state: 'verified' }), 'LEASE_RELEASE_UNSAFE');
     assert.equal(fs.existsSync(path.join(stateRoot, run.repository_id + '.' + run.authorized_ref_digest + '.lease.json')), true);

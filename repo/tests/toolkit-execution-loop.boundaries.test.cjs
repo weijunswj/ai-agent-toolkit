@@ -25,23 +25,24 @@ function createRun(runId = 'run-boundary') {
   return admitted.run;
 }
 
-function commitEvidence(runId = 'run-commit', bindings = {}) {
+function commitEvidence(runId = 'run-commit', bindings = {}, stateRoot) {
   const admitted = runtime.admitRun({ ...common, ...bindings, run_id: runId, authority: { delegated: false, lanes: [] } });
   const live = { ref: 'refs/heads/main', sha: 'a'.repeat(40), tree: 'b'.repeat(40) };
   const workspace = runtime.admitWorkspace({
+    state_root: stateRoot,
     run: admitted.run,
     expected_live: live,
     liveRefProvider: { read: () => live },
     workspaceAdapter: { prepare: () => ({ workspace_id: 'workspace-' + runId, workspace_handle: 'handle-' + runId, commit_sha: live.sha, tree_sha: live.tree }), verifySnapshot: () => true },
   });
-  const running = runtime.transitionRun(workspace.run, 'running');
+  const running = runtime.transitionRun(workspace.run, 'running', { state_root: stateRoot });
   return { ...common, ...bindings, run_id: runId, repository_id: running.repository_id, authorized_ref_digest: running.authorized_ref_digest, current_authority_digest: running.current_authority_digest, route_plan: admitted.route_plan, run: running, workspace_receipt: workspace.workspace_receipt, liveRefProvider: { read: () => live } };
 }
 
-function completeSafeEvidence(running) {
-  const validating = runtime.transitionRun(running, 'validating');
+function completeSafeEvidence(running, stateRoot) {
+  const validating = runtime.transitionRun(running, 'validating', { state_root: stateRoot });
   const terminal_packet = runtime.createTerminalPacket({ run_id: validating.run_id, outcome: 'success', reason_code: 'COMMITTED', evidence_digest: 'f'.repeat(64), publication_state: 'verified', workspace_disposition: 'cleaned' });
-  const terminal = runtime.completeRun({ run: validating, terminal_packet });
+  const terminal = runtime.completeRun({ state_root: stateRoot, run: validating, terminal_packet });
   return { terminal, terminal_packet };
 }
 
@@ -114,7 +115,7 @@ test('A3 exposes exactly five contract identities and no second authority surfac
 test('typed A1 commit seam stages exactly the authorized paths and verifies the result', () => {
   const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run158-lease-success-'));
   const lease = runtime.acquireMutationLease({ state_root: stateRoot, repository_id: common.repository_id, authorized_ref_digest: common.authorized_ref_digest, run_id: 'run-commit' });
-  const evidence = commitEvidence();
+  const evidence = commitEvidence('run-commit', {}, stateRoot);
   const calls = [];
   const result = runtime.executeTypedGitCommit({
     ...commitOptions({ state_root: stateRoot, mutation_lease: lease, evidence }),
@@ -126,8 +127,7 @@ test('typed A1 commit seam stages exactly the authorized paths and verifies the 
   assert.equal(calls[0].operation_type, 'git.commit');
   assert.match(calls[0].operation_digest, /^[a-f0-9]{64}$/);
   assert.deepEqual(calls[0].operation.authorized_paths, ['src/file.txt']);
-  const terminalEvidence = completeSafeEvidence(evidence.run);
-  runtime.writeDurableRun({ state_root: stateRoot, run: terminalEvidence.terminal, workspace_receipt: evidence.workspace_receipt, terminal_packet: terminalEvidence.terminal_packet });
+  const terminalEvidence = completeSafeEvidence(evidence.run, stateRoot);
   assert.deepEqual(runtime.releaseMutationLease({
     state_root: stateRoot,
     repository_id: common.repository_id,
@@ -254,7 +254,7 @@ test('lease loss after staging blocks commit and preserves the staged evidence b
 test('uncertain or interrupted publication preserves lease evidence until safe terminal release', () => {
   const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run158-lease-release-'));
   const lease = runtime.acquireMutationLease({ state_root: stateRoot, repository_id: common.repository_id, authorized_ref_digest: common.authorized_ref_digest, run_id: 'run-commit' });
-  const evidence = commitEvidence();
+  const evidence = commitEvidence('run-commit', {}, stateRoot);
   expectCode(() => runtime.releaseMutationLease({
     state_root: stateRoot,
     repository_id: common.repository_id,
@@ -266,8 +266,7 @@ test('uncertain or interrupted publication preserves lease evidence until safe t
     publication_state: 'uncertain',
   }), 'LEASE_RELEASE_UNSAFE');
   assert.equal(fs.existsSync(path.join(stateRoot, common.repository_id + '.' + common.authorized_ref_digest + '.lease.json')), true);
-  const terminalEvidence = completeSafeEvidence(evidence.run);
-  runtime.writeDurableRun({ state_root: stateRoot, run: terminalEvidence.terminal, workspace_receipt: evidence.workspace_receipt, terminal_packet: terminalEvidence.terminal_packet });
+  const terminalEvidence = completeSafeEvidence(evidence.run, stateRoot);
   assert.deepEqual(runtime.releaseMutationLease({
     state_root: stateRoot,
     repository_id: common.repository_id,
@@ -299,7 +298,6 @@ test('typed commit rejects pre-staged, baseline, path, options, and broker bound
 test('durable state is bounded, atomic, privacy-safe, and lease-conflicted', () => {
   const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run157-state-'));
   const run = createRun('run-state');
-  const initialDigest = runtime.digestValue(run);
   const first = runtime.writeDurableRun({ state_root: stateRoot, run });
   assert.equal(first.run_id, run.run_id);
   assert.deepEqual(runtime.readDurableRun({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id }), run);
@@ -311,10 +309,9 @@ test('durable state is bounded, atomic, privacy-safe, and lease-conflicted', () 
   expectCode(() => runtime.acquireMutationLease({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: 'run-other', now: Date.now() + 900000 }), 'CONFLICTING_RUN');
   expectCode(() => runtime.releaseMutationLease({ state_root: stateRoot, repository_id: run.repository_id, authorized_ref_digest: run.authorized_ref_digest, run_id: run.run_id, lease_id: 'lease-forged', terminal_state: 'terminal-success', workspace_disposition: 'cleaned', publication_state: 'verified' }), 'LEASE_TOKEN_MISMATCH');
   const live = { ref: 'refs/heads/main', sha: 'a'.repeat(40), tree: 'b'.repeat(40) };
-  const workspace = runtime.admitWorkspace({ run, expected_live: live, liveRefProvider: { read: () => live }, workspaceAdapter: { prepare: () => ({ workspace_id: 'workspace-state', workspace_handle: 'handle-state', commit_sha: live.sha, tree_sha: live.tree }), verifySnapshot: () => true } });
-  const running = runtime.transitionRun(workspace.run, 'running');
-  const terminalEvidence = completeSafeEvidence(running);
-  runtime.writeDurableRun({ state_root: stateRoot, run: terminalEvidence.terminal, expected_digest: initialDigest, workspace_receipt: workspace.workspace_receipt, terminal_packet: terminalEvidence.terminal_packet });
+  const workspace = runtime.admitWorkspace({ state_root: stateRoot, run, expected_live: live, liveRefProvider: { read: () => live }, workspaceAdapter: { prepare: () => ({ workspace_id: 'workspace-state', workspace_handle: 'handle-state', commit_sha: live.sha, tree_sha: live.tree }), verifySnapshot: () => true } });
+  const running = runtime.transitionRun(workspace.run, 'running', { state_root: stateRoot });
+  completeSafeEvidence(running, stateRoot);
   assert.deepEqual(runtime.releaseMutationLease({
     state_root: stateRoot,
     repository_id: run.repository_id,
