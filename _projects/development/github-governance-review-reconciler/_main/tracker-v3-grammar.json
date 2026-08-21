@@ -1,0 +1,16 @@
+{
+  "grammar_version": "toolkit.n5.tracker-grammar.v3",
+  "accepted_tracker_version": "v3",
+  "legacy_versions": { "v1": "reject", "v2": "reject", "unversioned": "reject" },
+  "managed_markers": {
+    "parent": { "begin": "<!-- AI-AGENT-TOOLKIT:N5-PARENT:BEGIN v3 -->", "end": "<!-- AI-AGENT-TOOLKIT:N5-PARENT:END -->" },
+    "child": { "begin": "<!-- AI-AGENT-TOOLKIT:N5-CHILD:BEGIN v3 -->", "end": "<!-- AI-AGENT-TOOLKIT:N5-CHILD:END -->" },
+    "pr": { "begin": "<!-- AI-AGENT-TOOLKIT:N5-PR:BEGIN v3 -->", "end": "<!-- AI-AGENT-TOOLKIT:N5-PR:END -->" },
+    "state": { "begin": "<!-- AI-AGENT-TOOLKIT:N5-STATE:BEGIN v1 -->", "end": "<!-- AI-AGENT-TOOLKIT:N5-STATE:END -->" }
+  },
+  "parent_sections": ["Metadata", "Current work", "Pending work", "Other open PRs", "Terminal and repository detail", "Deferred Findings", "Tracker format contract"],
+  "child_sections": ["Metadata", "Progress checklist", "Objective", "Scope and Design Lock", "Current blockers and next gate", "Technical and repository detail", "Tracker format contract"],
+  "pr_sections": ["Metadata", "Current disposition", "Scope", "Changes, evidence, validation and exact identity", "Repository-specific detail", "Tracker format contract"],
+  "lifecycle": ["pending", "current", "terminal"],
+  "rules": { "one_canonical_parent": true, "direct_siblings_only": true, "current_max": 1, "flat_pending_queue": true, "queue_order_contiguous": true, "no_competing_subqueues": true, "deferred_findings_not_queue_items": true, "current_state_projection_not_event_log": true, "exact_repository_identity": true }
+}
