@@ -6,6 +6,7 @@ const n5 = require('../scripts/toolkit-github-governance-review-reconciler.cjs')
 const a1 = require('../scripts/toolkit-control-plane/control-plane-kernel.cjs');
 
 const repository = 'weijunswj/ai-agent-toolkit';
+const repositoryId = '1'.repeat(64);
 const ownerKey = `${repository}+240`;
 
 function parentState(overrides = {}) {
@@ -23,7 +24,7 @@ function body(state = parentState(), prefix = 'unmanaged-prefix\n', suffix = 'un
 }
 
 function enabledA2() {
-  return { status: () => ({ capabilities: { 'repository.governance': { state: 'enabled' } } }) };
+  return { status: () => ({ repository_id: repositoryId, capabilities: { 'repository.governance': { state: 'enabled' } } }) };
 }
 
 function authorisedA1() {
@@ -66,8 +67,14 @@ function adapter(initialBody, options = {}) {
   return github;
 }
 
+function targetForBody(sourceBody) {
+  const parsed = n5.parseManagedBlock(sourceBody, 'parent', { complete: true });
+  return { kind: n5.MUTATION_TARGET_KINDS.managed_parent_block, body_digest: parsed.body_digest, managed_digest: parsed.managed_digest };
+}
+
 function removeInput(overrides = {}) {
-  return { repository, parent_issue: 240, target: { child_id: 'child-1' }, update: {}, accepted_preview: true, ...overrides };
+  const { target: overrideTarget, sourceBody, ...rest } = overrides;
+  return { repository, parent_issue: 240, target: overrideTarget || targetForBody(sourceBody || body()), update: {}, accepted_preview: true, ...rest };
 }
 
 function runtime(initialBody, options = {}) {
@@ -119,7 +126,7 @@ test('RED: successful remove preserves unmanaged bytes and removes exactly one m
   const parsed = n5.parseManagedBlock(original, 'parent', { complete: true });
   const expected = parsed.prefix + parsed.suffix;
   const github = adapter(original);
-  const result = runtime(original, { github }).remove(removeInput());
+  const result = runtime(original, { github }).remove(removeInput({ target: targetForBody(original) }));
   assert.equal(result.code, 'N5_REMOVED');
   assert.equal(github.values.current, expected);
   assert.equal(github.values.current.includes(n5.MANAGED_MARKERS.parent.begin), false);
@@ -214,7 +221,7 @@ test('A1 n5.remove operation binding remains canonical and exact', () => {
   assert.equal(result.code, 'N5_REMOVED');
   assert.equal(received.operation.type, 'github.mutation');
   assert.equal(received.operation.action, 'n5.remove');
-  assert.deepEqual(received.operation.target, { kind: 'github-repository', digest: n5.sha256({ repository, parent_issue: 240, intent: 'remove', target: { child_id: 'child-1' }, update: {} }) });
+  assert.deepEqual(received.operation.target, { kind: 'github-repository', digest: n5.sha256({ repository, repository_id: repositoryId, parent_issue: 240, intent: 'remove', target: targetForBody(original), update: {} }) });
   assert.equal(received.operation_digest, a1.operationDigest(received.operation));
   assert.equal(received.target_digest, a1.targetDigest(received.operation));
 });

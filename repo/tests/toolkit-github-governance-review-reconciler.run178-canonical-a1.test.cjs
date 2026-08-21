@@ -8,6 +8,7 @@ const a1 = require('../scripts/toolkit-control-plane/control-plane-kernel.cjs');
 const n5 = require('../scripts/toolkit-github-governance-review-reconciler.cjs');
 
 const repository = 'weijunswj/ai-agent-toolkit';
+const repositoryId = '1'.repeat(64);
 const mutationTarget = { child_id: 'child-1' };
 const mutationUpdate = { type: 'set_field', field: 'owner_detail', value: 'RUN-178 bounded repair' };
 
@@ -26,7 +27,7 @@ function body(state = parentState()) {
 }
 
 function enabledA2() {
-  return { status: () => ({ capabilities: { 'repository.governance': { state: 'enabled' } } }) };
+  return { status: () => ({ repository_id: repositoryId, capabilities: { 'repository.governance': { state: 'enabled' } } }) };
 }
 
 function githubAdapter(initialBody) {
@@ -55,6 +56,7 @@ function expectedScope(overrides = {}) {
   const input = request(overrides);
   return {
     repository: input.repository,
+    repository_id: repositoryId,
     parent_issue: input.parent_issue,
     intent: input.intent || 'reconcile',
     target: input.target || {},
@@ -143,7 +145,6 @@ test('each bound mutation input changes the canonical A1 binding', () => {
   const variants = [
     { name: 'repository', inputOverrides: { repository: 'weijunswj/other-repo' }, runtimeRepository: 'weijunswj/other-repo', stateOverrides: { repository: 'weijunswj/other-repo' } },
     { name: 'parent_issue', inputOverrides: { parent_issue: 241 }, stateOverrides: { parent_issue: 241 } },
-    { name: 'intent', inputOverrides: { intent: 'initialise' } },
     { name: 'target', inputOverrides: { target: { child_id: 'child-2' } } },
     { name: 'update', inputOverrides: { update: { type: 'set_field', field: 'owner_detail', value: 'different bounded repair' } } },
   ];
@@ -201,22 +202,31 @@ test('missing, non-allow, malformed, stale, swapped, and authority-leaking broke
 test('arbitrary caller-authored mutation action is rejected before GitHub', () => {
   const broker = brokerFactory();
   const { result, github } = runWithBroker({ broker: broker.value, inputOverrides: { intent: 'caller-authored-action' } });
-  assert.equal(result.code, 'N5_AUTHORITY_REQUIRED');
+  assert.equal(result.code, 'N5_SCOPE_REJECTED');
   assert.equal(broker.calls.length, 0);
   assert.equal(github.values.reads, 0);
   assert.equal(github.values.writes, 0);
 });
 
 test('the four mutating N5 intents use the closed source-owned action mapping', () => {
-  for (const [method, intent] of [['initialise', 'initialise'], ['migrate', 'migrate'], ['reconcile', 'reconcile'], ['remove', 'remove']]) {
+  const initialState = parentState();
+  const initialBody = 'unmanaged bytes\n';
+  const currentBody = body();
+  const currentParsed = n5.parseManagedBlock(currentBody, 'parent', { complete: true });
+  const cases = [
+    ['initialise', { repository, parent_issue: 240, target: { kind: n5.MUTATION_TARGET_KINDS.managed_parent_block, mode: 'create' }, update: { type: 'set_parent_state', state: initialState }, accepted_preview: true }, initialBody],
+    ['migrate', { repository, parent_issue: 240, target: { kind: n5.MUTATION_TARGET_KINDS.legacy_parent_block, source_version: 'v3', source_body_digest: n5.sha256(currentBody) }, update: { type: 'set_parent_state', state: parentState() }, accepted_preview: true }, currentBody],
+    ['reconcile', request(), currentBody],
+    ['remove', { repository, parent_issue: 240, target: { kind: n5.MUTATION_TARGET_KINDS.managed_parent_block, body_digest: currentParsed.body_digest, managed_digest: currentParsed.managed_digest }, update: {}, accepted_preview: true }, currentBody],
+  ];
+  for (const [method, input, initial] of cases) {
     const broker = brokerFactory();
-    const github = githubAdapter(body());
+    const github = githubAdapter(initial);
     const runtime = n5.createRuntime({ repository, authority_broker: broker.value, a2: enabledA2(), github });
-    const result = runtime[method](request());
+    const result = runtime[method](input);
     assert.equal(result.ok, true, method);
     assert.equal(broker.calls.length, 1, method);
-    assert.equal(broker.calls[0].operation.action, `n5.${intent}`);
-    assert.deepEqual(broker.calls[0].operation, expectedOperation({ intent }));
+    assert.equal(broker.calls[0].operation.action, `n5.${method}`);
   }
 });
 

@@ -7,8 +7,9 @@
   Findings records.
 - `_main/github-governance-review-reconciler-policy.json` records the accepted
   A1-A4 boundary, v3 tracker rules, transaction failures, review authority,
-  Deferred Findings policy, optional Codex capability, Auto-code boundary, and
-  historical PR #310 disposition.
+  Deferred Findings policy, optional Codex capability, Auto-code boundary,
+  historical PR #310 disposition, and the Run-181 B1-B6 contract-integrity
+  roots.
 - `_main/tracker-v3-grammar.json` and `_main/templates/` are the deterministic
   managed-block grammar and templates. They do not permit model-authored
   parent Markdown reconstruction.
@@ -16,6 +17,8 @@
   shared runtime for local parsing, bounded projection, preview, injected
   adapter reconciliation, inventory, finding classification, and DF handling.
 - `repo/tests/` contains RED-first and boundary acceptance tests.
+  Run-181 acceptance covers exact A2 repository identity, global lifecycle/PR
+  uniqueness, explicit review evidence, shared transaction ownership,
 
 ## Published surface
 

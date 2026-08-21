@@ -61,6 +61,27 @@ preview, and A1 authorization. Read-only inspection and preview do not mutate.
 `remove` is bounded and requires the same authority; it is not a cleanup or
 finality action.
 
+## Run-181 contract integrity
+
+The six-root contract is closed:
+
+- B1 binds the exact A2 `repository_id` before A1 or GitHub access; callers
+  cannot supply a per-call repository override.
+- B2 keeps one flat queue, renumbers pending entries after lifecycle changes,
+  rejects represented PR duplicates across every parent section, and requires
+  explicit terminal `completed` or `disposed` status. Failed or non-delivery
+  PR states never imply completion.
+- B3 requires explicit current and expected candidate identity, exact
+  represented PR head/tree/base facts, explicit merged and inline-conversation
+  booleans, and recomputed finding/Deferred Finding digests.
+- B4 uses one module/process owner registry for `repository+parent`; injected
+  maps cannot bypass it and every terminal path releases ownership.
+- B5 permits terminal compaction only with complete server-authoritative,
+  public-safe durable evidence and a deterministic retained digest.
+- B6 initialises only unmanaged bodies and migrates only exact v3 or
+  `pre-n5-seven-section-v0` bodies with whole-body binding, one write, and
+  immediate readback.
+
 ## Large-parent transaction
 
 For one bounded update, the transaction is:

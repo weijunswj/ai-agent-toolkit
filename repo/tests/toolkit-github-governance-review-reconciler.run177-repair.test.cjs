@@ -6,6 +6,7 @@ const n5 = require('../scripts/toolkit-github-governance-review-reconciler.cjs')
 const a1 = require('../scripts/toolkit-control-plane/control-plane-kernel.cjs');
 
 const repository = 'weijunswj/ai-agent-toolkit';
+const repositoryId = '1'.repeat(64);
 const candidate = { pr_number: 355, head: 'a'.repeat(40), tree: 'b'.repeat(40), base: 'c'.repeat(40) };
 
 function parentState() {
@@ -22,7 +23,7 @@ function body() {
 }
 
 function enabledA2() {
-  return { status: () => ({ capabilities: { 'repository.governance': { state: 'enabled' } } }) };
+  return { status: () => ({ repository_id: repositoryId, capabilities: { 'repository.governance': { state: 'enabled' } } }) };
 }
 
 function githubAdapter(initialBody) {
@@ -51,7 +52,7 @@ function reviewInput(overrides = {}) {
     server_authoritative: true,
     verifiable: true,
     pagination: { pull_requests: true, submitted_reviews: true, inline_conversations: true },
-    pull_requests: [{ number: candidate.pr_number, state: 'open', head: candidate.head, tree: candidate.tree, base: candidate.base, base_ref: 'main', public_source_ref: 'pr/355' }],
+    pull_requests: [{ number: candidate.pr_number, state: 'open', merged: false, head: candidate.head, tree: candidate.tree, base: candidate.base, base_ref: 'main', public_source_ref: 'pr/355' }],
     submitted_reviews: [{ id: 'review-1', pr_number: candidate.pr_number, state: 'commented', public_source_ref: 'pr/355/review-1' }],
     inline_conversations: [{ id: 'thread-1', pr_number: candidate.pr_number, resolved: false, outdated: false, closing_reply: false, path: 'repo/scripts/example.cjs', line: 10, public_source_ref: 'pr/355#thread-1' }],
     current_candidate: candidate,
@@ -71,7 +72,6 @@ function findingInput() {
     path: 'repo/scripts/example.cjs',
     line: 10,
     text: 'Public-safe current candidate review evidence.',
-    evidence_digest: 'd'.repeat(64),
     predicates: Object.fromEntries(n5.A4_MATERIAL_PREDICATES.map((key) => [key, true])),
     exclusions: [],
   };
@@ -180,8 +180,8 @@ test('Deferred Findings use typed dispositions and separate linked child evidenc
     'DEFERRED_REVALIDATE', 'SATISFIED', 'SUPERSEDED', 'OBSOLETE', 'DISPOSED_NONMATERIAL',
     'PROMOTED_TO_EXISTING_CHILD', 'PROMOTED_TO_CHILD',
   ]);
-  const finding = n5.classifyFinding(findingInput()).finding;
-  const registered = n5.registerDeferredFinding({ finding: { ...finding, materiality: 'nonblocking' }, parent: parentState(), triggers: n5.DF_TRIGGERS });
+  const finding = n5.classifyFinding({ ...findingInput(), predicates: {} }).finding;
+  const registered = n5.registerDeferredFinding({ finding, parent: parentState(), triggers: n5.DF_TRIGGERS });
   assert.equal(registered.code, 'N5_DF_REGISTERED');
   assert.equal(registered.record.disposition, 'DEFERRED_REVALIDATE');
   assert.equal(registered.record.linked_child, null);

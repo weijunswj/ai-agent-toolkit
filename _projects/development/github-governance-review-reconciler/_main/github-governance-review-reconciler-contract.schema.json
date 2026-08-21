@@ -4,7 +4,7 @@
   "title": "Current-main N5 GitHub governance and truthful review reconciler contracts",
   "type": "object",
   "additionalProperties": false,
-  "required": ["contract_version", "tracker", "parent", "child", "pr", "review_inventory", "finding", "deferred_finding", "result", "authority", "transaction"],
+  "required": ["contract_version", "tracker", "parent", "child", "pr", "review_inventory", "finding", "deferred_finding", "result", "authority", "transaction", "six_root_contract_integrity"],
   "properties": {
     "contract_version": { "const": "toolkit.n5.github-governance-review-reconciler.v3" },
     "tracker": {
@@ -19,7 +19,8 @@
     "deferred_finding": { "$ref": "#/$defs/deferredFinding" },
     "result": { "$ref": "#/$defs/result" },
     "authority": { "$ref": "#/$defs/authority" },
-    "transaction": { "$ref": "#/$defs/transaction" }
+    "transaction": { "$ref": "#/$defs/transaction" },
+    "six_root_contract_integrity": { "$ref": "#/$defs/sixRootContract" }
   },
   "$defs": {
     "safeId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
@@ -158,16 +159,17 @@
       }
     },
     "parent": { "type": "object", "additionalProperties": true, "required": ["kind", "tracker_version", "repository", "parent_issue", "current_work", "pending_work", "other_open_prs", "terminal", "deferred_findings", "owner_detail"], "properties": { "kind": { "const": "parent" }, "tracker_version": { "const": "v3" }, "repository": { "$ref": "#/$defs/repository" }, "parent_issue": { "$ref": "#/$defs/issue" }, "current_work": { "type": "array", "maxItems": 1, "items": { "$ref": "#/$defs/queueEntry" } }, "pending_work": { "type": "array", "items": { "$ref": "#/$defs/queueEntry" } }, "other_open_prs": { "type": "array" }, "terminal": { "type": "array", "items": { "$ref": "#/$defs/queueEntry" } }, "deferred_findings": { "type": "array", "items": { "$ref": "#/$defs/deferredFinding" } }, "owner_detail": { "type": "string", "maxLength": 4096 } } },
-    "queueEntry": { "type": "object", "required": ["child_id", "issue_number", "lifecycle"], "properties": { "child_id": { "$ref": "#/$defs/safeId" }, "issue_number": { "$ref": "#/$defs/issue" }, "lifecycle": { "enum": ["pending", "current", "terminal"] } } },
+    "queueEntry": { "type": "object", "required": ["child_id", "issue_number", "lifecycle"], "properties": { "child_id": { "$ref": "#/$defs/safeId" }, "issue_number": { "$ref": "#/$defs/issue" }, "lifecycle": { "enum": ["pending", "current", "terminal"] }, "queue_order": { "type": "integer", "minimum": 1 }, "objective_status": { "enum": ["completed", "disposed"] }, "durable_evidence_digest": { "$ref": "#/$defs/digest" } } },
     "child": { "type": "object", "additionalProperties": true, "required": ["kind", "tracker_version", "repository", "issue_number", "lifecycle", "objective"], "properties": { "kind": { "const": "child" }, "tracker_version": { "const": "v3" }, "repository": { "$ref": "#/$defs/repository" }, "issue_number": { "$ref": "#/$defs/issue" }, "lifecycle": { "enum": ["pending", "current", "terminal"] }, "objective": { "type": "string", "maxLength": 4096 } } },
     "pr": { "type": "object", "additionalProperties": true, "required": ["kind", "tracker_version", "repository", "pr_number", "child_issue", "state", "current_disposition", "exact_identity"], "properties": { "kind": { "const": "pr" }, "tracker_version": { "const": "v3" }, "repository": { "$ref": "#/$defs/repository" }, "pr_number": { "$ref": "#/$defs/issue" }, "child_issue": { "$ref": "#/$defs/issue" }, "state": { "enum": ["draft", "open", "closed", "merged", "superseded"] }, "current_disposition": { "type": "string" }, "exact_identity": { "type": "object", "required": ["base", "head", "tree"], "properties": { "base": { "type": "string", "pattern": "^[a-f0-9]{40}$" }, "head": { "type": "string", "pattern": "^[a-f0-9]{40}$" }, "tree": { "type": "string", "pattern": "^[a-f0-9]{40}$" } } } } },
     "reviewInventory": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["version", "candidate", "complete", "server_authoritative", "verifiable", "pagination", "inventory_digest", "pull_requests", "submitted_reviews", "inline_conversations", "finding_evidence"],
+      "required": ["version", "candidate", "expected_candidate", "complete", "server_authoritative", "verifiable", "pagination", "inventory_digest", "pull_requests", "submitted_reviews", "inline_conversations", "finding_evidence"],
       "properties": {
         "version": { "const": "toolkit.n5.review-inventory.v1" },
         "candidate": { "anyOf": [{ "$ref": "#/$defs/candidateEvidence" }, { "type": "null" }] },
+        "expected_candidate": { "anyOf": [{ "$ref": "#/$defs/candidateEvidence" }, { "type": "null" }] },
         "complete": { "type": "boolean" },
         "server_authoritative": { "type": "boolean" },
         "verifiable": { "type": "boolean" },
@@ -231,6 +233,7 @@
       }
     },
     "authority": { "type": "object", "additionalProperties": false, "required": ["a1", "a2", "a3", "a4", "n5"], "properties": { "a1": { "type": "object" }, "a2": { "type": "object" }, "a3": { "type": "object" }, "a4": { "type": "object" }, "n5": { "type": "object" } } },
-    "transaction": { "type": "object", "additionalProperties": false, "required": ["fetch_complete_body", "bind_revision", "bounded_projection", "pre_write_rebind", "immediate_readback", "readback_required"], "properties": { "fetch_complete_body": { "const": true }, "bind_revision": { "const": true }, "bounded_projection": { "const": true }, "pre_write_rebind": { "const": true }, "immediate_readback": { "const": true }, "readback_required": { "const": true } } }
+    "sixRootContract": { "type": "object", "additionalProperties": false, "required": ["b1_repository_identity", "b2_lifecycle_and_pr_uniqueness", "b3_review_inventory_evidence", "b4_shared_transaction_registry", "b5_proof_gated_compaction", "b6_initialise_and_migrate"], "properties": { "b1_repository_identity": { "const": true }, "b2_lifecycle_and_pr_uniqueness": { "const": true }, "b3_review_inventory_evidence": { "const": true }, "b4_shared_transaction_registry": { "const": true }, "b5_proof_gated_compaction": { "const": true }, "b6_initialise_and_migrate": { "const": true } } },
+    "transaction": { "type": "object", "additionalProperties": false, "required": ["fetch_complete_body", "bind_revision", "bounded_projection", "pre_write_rebind", "immediate_readback", "readback_required", "shared_owner_registry", "proof_gated_terminal_compaction", "legacy_migration_exact"], "properties": { "fetch_complete_body": { "const": true }, "bind_revision": { "const": true }, "bounded_projection": { "const": true }, "pre_write_rebind": { "const": true }, "immediate_readback": { "const": true }, "readback_required": { "const": true }, "shared_owner_registry": { "const": "module-process" }, "proof_gated_terminal_compaction": { "const": true }, "legacy_migration_exact": { "const": true } } }
   }
 }
