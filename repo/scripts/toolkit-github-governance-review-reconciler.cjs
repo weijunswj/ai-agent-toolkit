@@ -907,15 +907,35 @@ function createRuntime(options = {}) {
   function remove(input = {}) {
     const auth = authorizeMutation({ ...input, intent: 'remove' }, state);
     if (!auth.ok) return auth;
-    const fetched = fetchParent(state.github, input);
-    if (!fetched.ok) return fetched;
-    const parsed = parseManagedBlock(fetched.fetched.body, 'parent', { complete: fetched.fetched.complete !== false });
-    if (!parsed.ok) return parsed;
-    const nextBody = parsed.prefix + parsed.suffix;
-    try { state.github.updateParent({ repository: input.repository, parent_issue: input.parent_issue, body: nextBody, revision: fetched.fetched.revision || null }); } catch (_error) { return failure('PARENT_RECONCILIATION_INCOMPLETE'); }
-    const readback = fetchParent(state.github, input);
-    if (!readback.ok || readback.fetched.body !== nextBody) return failure('PARENT_RECONCILIATION_INCOMPLETE');
-    return success('N5_REMOVED', { outside_bytes_preserved: true });
+    const key = `${input.repository}+${input.parent_issue}`;
+    if (state.owners.get(key)) return failure('PARENT_CONCURRENCY_CONFLICT');
+    state.owners.set(key, true);
+    try {
+      const first = fetchParent(state.github, input);
+      if (!first.ok) return first;
+      const parsed = parseManagedBlock(first.fetched.body, 'parent', { complete: first.fetched.complete !== false });
+      if (!parsed.ok) return parsed;
+      if (parsed.state.repository !== input.repository || parsed.state.parent_issue !== input.parent_issue) return failure('N5_REPOSITORY_IDENTITY_MISMATCH');
+      const sourceBinding = first.binding;
+      const expectedOutside = parsed.prefix + parsed.suffix;
+      const nextBody = expectedOutside;
+      const preWrite = fetchParent(state.github, input);
+      if (!preWrite.ok) return preWrite;
+      if (moved(sourceBinding, preWrite.binding)) return failure('PARENT_CONCURRENCY_CONFLICT');
+      if (typeof state.github?.updateParent !== 'function') return failure('PARENT_RECONCILIATION_INCOMPLETE');
+      try { state.github.updateParent({ repository: input.repository, parent_issue: input.parent_issue, body: nextBody, revision: preWrite.fetched.revision || null }); } catch (_error) { return failure('PARENT_RECONCILIATION_INCOMPLETE'); }
+      const readback = fetchParent(state.github, input);
+      if (!readback.ok || readback.fetched.body !== nextBody || readback.fetched.body !== expectedOutside) return failure('PARENT_RECONCILIATION_INCOMPLETE');
+      const relatedCapability = state.github?.reconcileRelated;
+      if (relatedCapability !== undefined && relatedCapability !== null) {
+        if (typeof relatedCapability !== 'function') return failure('PARENT_RECONCILIATION_INCOMPLETE');
+        let related;
+        try { related = state.github.reconcileRelated({ repository: input.repository, parent_issue: input.parent_issue, transition_id: sha256({ before: sourceBinding.body_digest, after: readback.binding.body_digest }) }); } catch (_error) { return failure('PARENT_RECONCILIATION_INCOMPLETE'); }
+        if (!related || related.ok !== true) return failure('PARENT_RECONCILIATION_INCOMPLETE');
+      }
+      const transitionId = sha256({ repository: input.repository, parent_issue: input.parent_issue, before: sourceBinding.body_digest, after: readback.binding.body_digest });
+      return success('N5_REMOVED', { outside_bytes_preserved: true, transition_id: transitionId, readback: { body_digest: readback.binding.body_digest, outside_bytes_preserved: true, managed_block_removed: true } });
+    } finally { state.owners.delete(key); }
   }
   function initialise(input = {}) { return reconcile({ ...input, intent: 'initialise' }); }
   function migrate(input = {}) { return reconcile({ ...input, intent: 'migrate' }); }
