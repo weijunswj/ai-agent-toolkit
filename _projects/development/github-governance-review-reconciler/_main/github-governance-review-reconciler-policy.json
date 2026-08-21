@@ -2,7 +2,7 @@
   "policy_version": "toolkit.n5.github-governance-review-reconciler.policy.v1",
   "design_lock": "DL-N5-GITHUB-GOVERNANCE-REVIEW-RECONCILER-001-G2-R1",
   "authority": {
-    "a1": { "sole_mutation_authority": true, "sole_opaque_ticket_authority": true, "operation_type": "github.mutation" },
+    "a1": { "sole_mutation_authority": true, "sole_opaque_ticket_authority": true, "operation_type": "github.mutation", "operation_shape": "canonical-typed", "broker": "authority_broker", "target_kind": "github-repository", "canonical_digest_source": ["operationDigest", "targetDigest"], "mutation_actions": { "initialise": "n5.initialise", "migrate": "n5.migrate", "reconcile": "n5.reconcile", "remove": "n5.remove" } },
     "a2": { "consent_only": true, "capability": "repository.governance", "widens_task": false, "grants_review_mutation": false, "grants_finality": false },
     "a3": { "durable_contract_count": 5, "finality_authority": false },
     "a4": { "independent_assurance": true, "web_finality_handoff": true, "review_thread_mutation": false, "material_predicates": ["applies_to_current_candidate", "identifies_accepted_requirement", "concrete_current_failure", "evidence_reproducible", "material_impact", "in_scope_current"] },

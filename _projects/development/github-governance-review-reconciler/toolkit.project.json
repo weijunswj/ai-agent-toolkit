@@ -82,7 +82,7 @@
       "node repo/scripts/sync-toolkit-projects.cjs --write",
       "node repo/scripts/sync-toolkit-projects.cjs --check",
       "node repo/scripts/audit-published-surfaces.cjs --check",
-      "node --test repo/tests/toolkit-github-governance-review-reconciler.test.cjs repo/tests/toolkit-github-governance-review-reconciler.boundaries.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run175-red.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run177-repair.test.cjs",
+      "node --test repo/tests/toolkit-github-governance-review-reconciler.test.cjs repo/tests/toolkit-github-governance-review-reconciler.boundaries.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run175-red.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run177-repair.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run178-canonical-a1.test.cjs",
       "node repo/scripts/validate-toolkit.cjs"
     ]
   },

@@ -1,12 +1,19 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const a1 = require('./toolkit-control-plane/control-plane-kernel.cjs');
 
 const CONTRACT_VERSION = 'toolkit.n5.github-governance-review-reconciler.v3';
 const REVIEW_INVENTORY_VERSION = 'toolkit.n5.review-inventory.v1';
 const TRACKER_VERSION = 'v3';
 const DESIGN_LOCK = 'DL-N5-GITHUB-GOVERNANCE-REVIEW-RECONCILER-001-G2-R1';
 const INTENTS = Object.freeze(['inspect', 'preview', 'initialise', 'migrate', 'validate', 'reconcile', 'show', 'remove']);
+const MUTATION_ACTIONS = Object.freeze({
+  initialise: 'n5.initialise',
+  migrate: 'n5.migrate',
+  reconcile: 'n5.reconcile',
+  remove: 'n5.remove',
+});
 const RESOURCE_KINDS = Object.freeze(['parent', 'child', 'pr']);
 const LIFECYCLES = Object.freeze(['pending', 'current', 'terminal']);
 const A4_MATERIAL_PREDICATES = Object.freeze([
@@ -72,7 +79,7 @@ function isPublicSafeEvidence(value = {}) { return isRecord(value) && Object.val
 
 function authorityBoundary() {
   return {
-    a1: { sole_mutation_authority: true, sole_opaque_ticket_authority: true, public_ticket_mint: false, typed_operation: 'github.mutation' },
+    a1: { sole_mutation_authority: true, sole_opaque_ticket_authority: true, public_ticket_mint: false, typed_operation: 'github.mutation', broker: 'authority_broker', canonical_digests: true, mutation_actions: { ...MUTATION_ACTIONS } },
     a2: { consent_only: true, capability: 'repository.governance', widens_task_or_delegation: false, grants_review_mutation: false, grants_finality: false },
     a3: { durable_contract_count: 5, finality_authority: false, additional_contract: false },
     a4: { review_projection: 'nested-only', material_predicates: [...A4_MATERIAL_PREDICATES], web_finality_handoff: true, review_thread_mutation: false },
@@ -282,18 +289,80 @@ function a2Enabled(a2) {
     return state?.capabilities?.['repository.governance']?.state === 'enabled';
   } catch (_error) { return false; }
 }
+function exactMutationKeys(value, expected) {
+  const keys = Object.keys(value);
+  return keys.length === expected.length && expected.every((key) => keys.includes(key));
+}
+function normalizeMutationTarget(value) {
+  const target = value === undefined || value === null ? {} : value;
+  if (!isRecord(target)) return null;
+  const keys = Object.keys(target);
+  if (keys.length === 0) return {};
+  if (keys.length !== 1) return null;
+  if (keys[0] === 'child_id' && isSafeId(target.child_id)) return { child_id: target.child_id };
+  if (keys[0] === 'issue_number' && isIssue(target.issue_number)) return { issue_number: target.issue_number };
+  return null;
+}
+function normalizeMutationUpdate(value, intent, target) {
+  const update = value === undefined || value === null ? {} : value;
+  if (!isRecord(update)) return null;
+  if (Object.keys(update).length === 0) return intent === 'remove' ? {} : null;
+  if (update.type === 'set_field') {
+    if (!exactMutationKeys(update, ['type', 'field', 'value']) || !['owner_detail', 'next_gate', 'technical_detail', 'repository_detail'].includes(update.field) || !publicSafeText(update.value)) return null;
+    if (update.field !== 'owner_detail' && Object.keys(target).length === 0) return null;
+    return { type: 'set_field', field: update.field, value: update.value };
+  }
+  if (update.type === 'set_lifecycle') {
+    if (!exactMutationKeys(update, ['type', 'lifecycle']) || !LIFECYCLES.includes(update.lifecycle) || Object.keys(target).length === 0) return null;
+    return { type: 'set_lifecycle', lifecycle: update.lifecycle };
+  }
+  return null;
+}
+function mutationScope(input, options) {
+  const intent = typeof input.intent === 'string' && input.intent.length > 0 ? input.intent : 'reconcile';
+  if (!Object.prototype.hasOwnProperty.call(MUTATION_ACTIONS, intent) || !isIssue(input.parent_issue)) return null;
+  const target = normalizeMutationTarget(input.target);
+  if (target === null) return null;
+  const update = normalizeMutationUpdate(input.update, intent, target);
+  if (update === null) return null;
+  return {
+    repository: options.repository,
+    parent_issue: input.parent_issue,
+    intent,
+    target,
+    update,
+  };
+}
 function authorizeMutation(input, options) {
-  if (input.repository !== options.repository) return failure('N5_REPOSITORY_IDENTITY_MISMATCH');
+  if (!isRecord(input) || input.repository !== options.repository) return failure('N5_REPOSITORY_IDENTITY_MISMATCH');
   if (!a2Enabled(options.a2)) return failure('N5_CONSENT_REQUIRED');
   if (input.accepted_preview !== true) return failure('N5_AUTHORITY_REQUIRED');
-  if (typeof options.a1?.authorize !== 'function') return failure('N5_AUTHORITY_REQUIRED');
-  const operation = { operation_type: 'github.mutation', repository: options.repository, parent_issue: input.parent_issue, intent: input.intent || 'reconcile', target: input.target || null, update: input.update || null };
-  const expected_operation_digest = sha256(operation);
-  const expected_target_digest = sha256(operation.target || {});
+  const scope = mutationScope(input, options);
+  if (!scope) return failure('N5_AUTHORITY_REQUIRED');
+  const mutation_scope_digest = sha256(scope);
+  if (!isDigest(mutation_scope_digest)) return failure('N5_AUTHORITY_REQUIRED');
+  const operation = Object.freeze({
+    type: 'github.mutation',
+    repository: scope.repository,
+    action: MUTATION_ACTIONS[scope.intent],
+    target: Object.freeze({ kind: 'github-repository', digest: mutation_scope_digest }),
+  });
+  let expected_operation_digest;
+  let expected_target_digest;
+  try {
+    expected_operation_digest = a1.operationDigest(operation);
+    expected_target_digest = a1.targetDigest(operation);
+  } catch (_error) {
+    return failure('N5_AUTHORITY_REQUIRED');
+  }
+  if (!isDigest(expected_operation_digest) || !isDigest(expected_target_digest)) return failure('N5_AUTHORITY_REQUIRED');
+  const broker = options.authority_broker;
+  const method = typeof broker?.authorize === 'function' ? 'authorize' : typeof broker?.evaluate === 'function' ? 'evaluate' : null;
+  if (!method) return failure('N5_AUTHORITY_REQUIRED');
   let decision;
   try {
-    decision = options.a1.authorize({
-      operation_type: operation.operation_type,
+    decision = broker[method]({
+      operation_type: operation.type,
       operation_digest: expected_operation_digest,
       target_digest: expected_target_digest,
       operation,
@@ -301,14 +370,29 @@ function authorizeMutation(input, options) {
   } catch (_error) {
     return failure('N5_AUTHORITY_REQUIRED');
   }
-  if (!decision
+  if (!isRecord(decision)
     || decision.decision !== 'allow'
-    || decision.operation_type !== operation.operation_type
+    || decision.operation_type !== operation.type
     || decision.operation_digest !== expected_operation_digest
-    || decision.target_digest !== expected_target_digest) {
+    || decision.target_digest !== expected_target_digest
+    || hasOwn(decision, 'issuer')
+    || hasOwn(decision, 'self_mint')
+    || hasOwn(decision, 'createIssuer')) {
     return failure('N5_AUTHORITY_REQUIRED');
   }
-  return success('N5_VALID', { decision, expected_operation_digest, expected_target_digest });
+  return success('N5_VALID', {
+    mutation_scope: scope,
+    mutation_scope_digest,
+    operation,
+    expected_operation_digest,
+    expected_target_digest,
+    authority: {
+      decision: 'allow',
+      operation_type: operation.type,
+      operation_digest: expected_operation_digest,
+      target_digest: expected_target_digest,
+    },
+  });
 }
 function fetchParent(github, input) {
   if (typeof github?.getParent !== 'function') return failure('PARENT_BODY_INCOMPLETE');
@@ -741,7 +825,7 @@ function rejectHistoricalRevival(symbol) { return failure('N5_SCOPE_REJECTED', {
 function nextAction(code) { return { next_action: code === 'N5_RECONCILED' ? 'READY_FOR_WEB_EXACT_HEAD_VALIDATION' : 'CONTROLLER_REQUIRED' }; }
 
 function createRuntime(options = {}) {
-  const state = { repository: options.repository, a1: options.a1, a2: options.a2, github: options.github, owners: options.transaction_owner instanceof Map ? options.transaction_owner : new Map() };
+  const state = { repository: options.repository, authority_broker: options.authority_broker, a2: options.a2, github: options.github, owners: options.transaction_owner instanceof Map ? options.transaction_owner : new Map() };
   function inspect(input = {}) {
     const parsed = parseManagedBlock(input.body, input.kind || 'parent', { complete: input.complete !== false });
     return parsed.ok ? success('N5_INSPECTION_READY', { projection: boundedProjection(parsed.state, parsed) }) : parsed;
@@ -770,7 +854,7 @@ function createRuntime(options = {}) {
       const parsed = parseManagedBlock(first.fetched.body, 'parent', { complete: first.fetched.complete !== false });
       if (!parsed.ok) return parsed;
       if (parsed.state.repository !== input.repository || parsed.state.parent_issue !== input.parent_issue) return failure('N5_REPOSITORY_IDENTITY_MISMATCH');
-      const applied = applyBoundedUpdate(parsed.state, input.target || {}, input.update || {});
+      const applied = applyBoundedUpdate(parsed.state, auth.mutation_scope.target, auth.mutation_scope.update);
       if (!applied.ok) return applied;
       if (!applied.changed) return success('N5_NOOP', { projection: boundedProjection(parsed.state, parsed), transition_id: sha256({ repository: input.repository, parent_issue: input.parent_issue, before: parsed.body_digest }) });
       let sourceBody = first.fetched.body;
@@ -788,7 +872,7 @@ function createRuntime(options = {}) {
         if (moved(sourceBinding, fresh.binding)) return failure('PARENT_CONCURRENCY_CONFLICT');
         const freshParsed = parseManagedBlock(fresh.fetched.body, 'parent', { complete: fresh.fetched.complete !== false });
         if (!freshParsed.ok) return freshParsed;
-        const freshApplied = applyBoundedUpdate(freshParsed.state, input.target || {}, input.update || {});
+        const freshApplied = applyBoundedUpdate(freshParsed.state, auth.mutation_scope.target, auth.mutation_scope.update);
         if (!freshApplied.ok) return freshApplied;
         const compacted = compactTerminal(freshApplied.state);
         if (!compacted.ok) return compacted;
@@ -833,7 +917,9 @@ function createRuntime(options = {}) {
     if (!readback.ok || readback.fetched.body !== nextBody) return failure('PARENT_RECONCILIATION_INCOMPLETE');
     return success('N5_REMOVED', { outside_bytes_preserved: true });
   }
-  return Object.freeze({ inspect, preview, initialise: reconcile, migrate: reconcile, validate, reconcile, show, remove, reviewInventory: buildReviewInventory, classifyFinding, registerDeferredFinding, governanceReadiness: autoCodeReadiness });
+  function initialise(input = {}) { return reconcile({ ...input, intent: 'initialise' }); }
+  function migrate(input = {}) { return reconcile({ ...input, intent: 'migrate' }); }
+  return Object.freeze({ inspect, preview, initialise, migrate, validate, reconcile, show, remove, reviewInventory: buildReviewInventory, classifyFinding, registerDeferredFinding, governanceReadiness: autoCodeReadiness });
 }
 
 module.exports = Object.freeze({

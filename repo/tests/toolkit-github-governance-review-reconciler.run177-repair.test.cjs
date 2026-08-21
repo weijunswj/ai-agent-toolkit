@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const n5 = require('../scripts/toolkit-github-governance-review-reconciler.cjs');
+const a1 = require('../scripts/toolkit-control-plane/control-plane-kernel.cjs');
 
 const repository = 'weijunswj/ai-agent-toolkit';
 const candidate = { pr_number: 355, head: 'a'.repeat(40), tree: 'b'.repeat(40), base: 'c'.repeat(40) };
@@ -87,7 +88,7 @@ test('A1 rejects every non-exact returned digest binding without reading or writ
     const result = n5.createRuntime({
       repository,
       a2: enabledA2(),
-      a1: { authorize: (payload) => ({ decision: 'allow', operation_type: payload.operation_type, ...mutate(payload) }) },
+      authority_broker: { authorize: (payload) => ({ decision: 'allow', operation_type: payload.operation_type, ...mutate(payload) }) },
       github,
     }).reconcile(reconcileInput());
     assert.equal(result.code, 'N5_AUTHORITY_REQUIRED');
@@ -102,7 +103,7 @@ test('A1 exact operation and target bindings are sent once and accepted', () => 
   const result = n5.createRuntime({
     repository,
     a2: enabledA2(),
-    a1: { authorize: (payload) => { authorization = payload; return { decision: 'allow', ...payload }; } },
+    authority_broker: { authorize: (payload) => { authorization = payload; return { decision: 'allow', operation_type: payload.operation_type, operation_digest: a1.operationDigest(payload.operation), target_digest: a1.targetDigest(payload.operation) }; } },
     github,
   }).reconcile(reconcileInput());
   assert.equal(result.code, 'N5_RECONCILED');
