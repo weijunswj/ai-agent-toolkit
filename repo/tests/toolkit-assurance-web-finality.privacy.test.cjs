@@ -8,6 +8,8 @@ const runtime = require('../scripts/toolkit-assurance-web-finality.cjs');
 function report(overrides = {}) {
   return {
     verdict: 'PASS_AND_STOP',
+    material_blocker: false,
+    verified_result: 'required-evidence-and-g4-pass',
     mutation_state: { attempted: false, performed: false },
     unchanged_scope: ['A1', 'A2', 'A3'],
     next_action: 'WEB_PROCEED_TO_FINALITY_REVALIDATION',

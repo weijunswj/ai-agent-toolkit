@@ -21,6 +21,9 @@ canonical A1+A2+A3 result. No third-party source is copied or adapted.
   RED-first contract suite covering the required evidence predicate,
   material blocker conjunction, invalidation matrix, repair loop, G4A,
   Ledger, Ready/merge/readback, and privacy cases.
+- repo/tests/toolkit-assurance-web-finality.run172-red.test.cjs - focused
+  hostile regression proofs for exact evidence version, canonical findings,
+  Ledger #142, finality tuple binding, and truthful handoff reports.
 - repo/tests/toolkit-assurance-web-finality.contract.test.cjs - source-shape
   and boundary checks for the single A4 project and its non-expansion
   contract.

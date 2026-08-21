@@ -25,6 +25,12 @@ test('A4 source contract freezes the accepted Lock and authority boundaries', ()
   const policy = JSON.parse(fs.readFileSync(path.join(projectRoot, '_main', 'assurance-web-finality-policy.json'), 'utf8'));
   assert.equal(schema.$id, runtime.CONTRACT_VERSION);
   assert.equal(policy.design_lock_id, runtime.DESIGN_LOCK_ID);
+  assert.equal(schema.$defs.ledger.properties.issue_number.const, 142);
+  assert.equal(schema.$defs.evidence.properties.findings, undefined);
+  assert.equal(schema.$defs.report.properties.unchanged_scope.minItems, 1);
+  assert.equal(schema.$defs.report.allOf.length, 2);
+  assert.equal(policy.ledger.issue_binding, 'integer issue_number exactly equals 142');
+  assert.deepEqual(policy.web_finality.accepted_candidate_tuple, ['pr_number', 'head', 'tree', 'base']);
   assert.equal(policy.authority_boundaries.a1, 'sole mutation and opaque authority-ticket authority');
   assert.equal(policy.authority_boundaries.a2, 'consent and state only');
   assert.equal(policy.authority_boundaries.a3, 'execution, workspace, run, and terminal evidence only');
@@ -46,6 +52,7 @@ test('A4 source shape does not absorb the A3 five-contract set or live execution
 test('privacy-safe report contains the required human companion and one action', () => {
   const result = runtime.createReport({
     verdict: 'PASS_AND_STOP',
+    material_blocker: false,
     verified_result: 'required-evidence-and-g4-pass',
     mutation_state: { attempted: false, performed: false },
     unchanged_scope: ['A1', 'A2', 'A3'],
@@ -65,6 +72,12 @@ test('privacy-safe report contains the required human companion and one action',
 
 test('successful finality proof accepts expected squash result without rerunning G4', () => {
   const result = runtime.evaluateFinality({
+    accepted_candidate: {
+      pr_number: 353,
+      head: sha('a'),
+      tree: sha('b'),
+      base: sha('c'),
+    },
     web_acceptance: {
       status: 'accepted',
       current_required_evidence: true,
@@ -83,16 +96,22 @@ test('successful finality proof accepts expected squash result without rerunning
       review_triggered: false,
     },
     merge: {
+      intended_pr_number: 353,
+      observed_pr_number: 353,
       result: 'merged',
+      merge_result_sha: sha('d'),
       mode: 'squash',
       expected_head: sha('a'),
       observed_head: sha('a'),
+      expected_base: sha('c'),
+      observed_base: sha('c'),
       bound_to_pr: true,
       server_authoritative: true,
       verifiable: true,
     },
     canonical: {
       bound_to_intended_merge: true,
+      main_head: sha('d'),
       tree: sha('b'),
       expected_tree: sha('b'),
       sole_parent: sha('c'),

@@ -19,13 +19,15 @@
     "fail_closed_code": "FAIL_CLOSED_REQUIRED_EVIDENCE",
     "required_bindings": [
       "candidate_head_tree_base",
+      "exact_evidence_contract_version",
+      "canonical_review_findings_inventory",
       "pr_topology",
       "accepted_lock",
       "authorised_scope",
       "complete_candidate_g4",
       "current_review_inventory",
       "actual_required_check_inventory_and_state",
-      "duplicate_checked_ledger_142",
+      "duplicate_checked_ledger_142_issue_bound",
       "ready_and_expected_head_merge_binding",
       "canonical_post_merge_readback",
       "accepted_tree",
@@ -118,6 +120,7 @@
   },
   "ledger": {
     "ledger_id": 142,
+    "issue_binding": "integer issue_number exactly equals 142",
     "intake_version": "v2",
     "per_terminal_substantive_run": "exactly one duplicate-checked public-safe intake",
     "queued_satisfies_toolkit_duty": true,
@@ -129,12 +132,15 @@
     "acceptance_requires": ["current_required_evidence", "current_review_inventory", "actual_required_checks", "ledger_142_queued"],
     "ready": "Web-owned final merge-state transition only after final acceptance",
     "merge": "expected-head squash merge default, exact PR/head/base binding",
+    "accepted_candidate_tuple": ["pr_number", "head", "tree", "base"],
+    "merge_evidence": ["intended_pr_number", "observed_pr_number", "expected_head", "observed_head", "expected_base", "observed_base", "squash", "merged", "merge_result_sha", "server_authoritative", "verifiable"],
     "uncertain_merge": "canonical readback, no blind retry, no G4 rerun",
-    "canonical_proof": ["intended_merge_binding", "accepted_tree_equality", "expected_sole_parent", "signature_verified_true_reason_valid", "merged_closed_pr", "cleanup_observed_after_verified_merge"]
+    "canonical_proof": ["intended_merge_binding", "main_sha_equals_merge_result_sha", "accepted_tree_equality", "accepted_base_sole_parent", "signature_verified_true_reason_valid", "merged_closed_pr", "cleanup_observed_after_verified_merge"]
   },
   "privacy": {
     "allowed": ["safe_semantic_ids", "shas", "digests", "bounded_status_codes", "timestamps", "canonical_model_class", "counts", "public_review_refs", "public_check_refs", "bounded_relative_scope_ids"],
     "forbidden": ["raw_prompts", "model_output", "provider_payloads", "a1_tickets", "secrets", "credentials", "environment_values", "cookies", "auth_headers", "private_absolute_paths", "customer_data", "raw_diagnostic_payloads"],
+    "report_truthfulness": ["material_blocker_explicit_boolean", "verified_result_required_when_no_blocker", "non_empty_unchanged_scope"],
     "human_companion": ["verdict", "material_blocker_or_verified_result", "mutation_attempted_and_performed", "unchanged_scope", "exactly_one_next_action"]
   },
   "exclusions": [

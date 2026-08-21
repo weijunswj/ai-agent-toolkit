@@ -5,9 +5,9 @@
   "title": "A4 Independent Assurance + Web-Finality",
   "module_path": "_projects/development/independent-assurance-web-finality",
   "main_path": "_projects/development/independent-assurance-web-finality/_main",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "version_policy": "semver",
-  "version_notes": "Initial source-only A4 evidence and Web-finality handoff decision surface for the accepted R1 Design Lock.",
+  "version_notes": "Bounded same-Lock repair of exact evidence, Ledger-142, finality-tuple, and truthful-report bindings under the accepted R1 Design Lock.",
   "outputs": [],
   "writes": {
     "allowed": [],

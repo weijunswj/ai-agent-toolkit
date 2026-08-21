@@ -174,8 +174,9 @@
     "ledger": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["current", "complete", "server_authoritative", "verifiable", "duplicate_checked", "state", "intake_count", "identity"],
+      "required": ["issue_number", "current", "complete", "server_authoritative", "verifiable", "duplicate_checked", "state", "intake_count", "identity"],
       "properties": {
+        "issue_number": { "type": "integer", "const": 142 },
         "current": { "const": true },
         "complete": { "const": true },
         "server_authoritative": { "const": true },
@@ -199,8 +200,7 @@
         "g4": { "$ref": "#/$defs/g4" },
         "review": { "$ref": "#/$defs/review" },
         "required_checks": { "$ref": "#/$defs/requiredChecks" },
-        "ledger": { "$ref": "#/$defs/ledger" },
-        "findings": { "type": "array" }
+        "ledger": { "$ref": "#/$defs/ledger" }
       }
     },
     "report": {
@@ -211,7 +211,7 @@
         "contract_version": { "const": "toolkit.assurance-web-finality.evidence.v1" },
         "verdict": { "$ref": "#/$defs/id" },
         "material_blocker": { "type": "boolean" },
-        "verified_result": { "type": ["string", "null"], "maxLength": 128 },
+        "verified_result": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
         "mutation_state": {
           "type": "object",
           "additionalProperties": false,
@@ -221,7 +221,7 @@
             "performed": { "type": "boolean" }
           }
         },
-        "unchanged_scope": { "type": "array", "items": { "$ref": "#/$defs/id" } },
+        "unchanged_scope": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/id" } },
         "next_action": { "$ref": "#/$defs/id" },
         "safe_ids": {
           "oneOf": [
@@ -248,7 +248,20 @@
         "public_review_refs": { "type": "array", "items": { "$ref": "#/$defs/publicRef" } },
         "public_check_refs": { "type": "array", "items": { "$ref": "#/$defs/publicRef" } },
         "relative_scope_ids": { "type": "array", "items": { "$ref": "#/$defs/relativeScopeId" } }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "material_blocker": { "const": false } } },
+          "then": {
+            "required": ["verified_result"],
+            "properties": { "verified_result": { "type": "string", "minLength": 1, "maxLength": 128 } }
+          }
+        },
+        {
+          "if": { "properties": { "material_blocker": { "const": true } } },
+          "then": { "properties": { "verified_result": { "type": ["null"], "maxLength": 128 } } }
+        }
+      ]
     }
   }
 }

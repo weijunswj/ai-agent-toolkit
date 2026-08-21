@@ -60,6 +60,7 @@ function g4Evidence(overrides = {}) {
 
 function evidence(overrides = {}) {
   const base = {
+    contract_version: CONTRACT_VERSION,
     candidate,
     pr: {
       number: 353,
@@ -102,6 +103,7 @@ function evidence(overrides = {}) {
       items: [{ id: 'required-ci', required: true, status: 'success', server_authoritative: true, verifiable: true }],
     },
     ledger: {
+      issue_number: 142,
       current: true,
       complete: true,
       server_authoritative: true,
@@ -111,7 +113,6 @@ function evidence(overrides = {}) {
       intake_count: 1,
       identity: 'run-169',
     },
-    findings: [],
   };
   const result = { ...base, ...overrides };
   for (const key of ['candidate', 'pr', 'lock', 'scope', 'g4', 'review', 'required_checks', 'ledger']) {
@@ -128,7 +129,13 @@ function expectRequiredEvidenceFailure(input) {
 }
 
 function finalityEvidence(overrides = {}) {
-  return {
+  const base = {
+    accepted_candidate: {
+      pr_number: 353,
+      head: candidate.head,
+      tree: candidate.tree,
+      base: candidate.base,
+    },
     web_acceptance: {
       status: 'accepted',
       current_required_evidence: true,
@@ -147,18 +154,22 @@ function finalityEvidence(overrides = {}) {
       review_triggered: false,
     },
     merge: {
+      intended_pr_number: 353,
+      observed_pr_number: 353,
       result: 'merged',
+      merge_result_sha: sha('d'),
       mode: 'squash',
       expected_head: candidate.head,
       observed_head: candidate.head,
       expected_base: candidate.base,
+      observed_base: candidate.base,
       bound_to_pr: true,
       server_authoritative: true,
       verifiable: true,
     },
     canonical: {
       bound_to_intended_merge: true,
-      main_head: sha('g'),
+      main_head: sha('d'),
       tree: candidate.tree,
       expected_tree: candidate.tree,
       sole_parent: candidate.base,
@@ -171,8 +182,12 @@ function finalityEvidence(overrides = {}) {
       server_authoritative: true,
       verifiable: true,
     },
-    ...overrides,
   };
+  const result = { ...base, ...overrides };
+  for (const key of ['accepted_candidate', 'web_acceptance', 'ready', 'merge', 'canonical']) {
+    if (overrides[key]) result[key] = { ...base[key], ...overrides[key] };
+  }
+  return result;
 }
 
 test('A4 RED-first required-evidence truth table fails closed', () => {
@@ -199,7 +214,7 @@ test('all six material-blocker predicates are necessary', () => {
   ];
   const finding = Object.fromEntries(names.map((name) => [name, true]));
   for (const missing of names) {
-    const result = evaluateAssurance(evidence({ findings: [{ ...finding, [missing]: false }] }));
+    const result = evaluateAssurance(evidence({ review: { findings: [{ ...finding, [missing]: false }] } }));
     assert.notEqual(result.code, 'FAIL_MATERIAL_CURRENT_LOCK_BLOCKER', missing);
   }
 });
@@ -272,7 +287,7 @@ test('authorised scope movement invalidates G4', () => {
 
 test('speculative finding cannot block', () => {
   const result = evaluateAssurance(evidence({
-    findings: [{ applies_to_current_candidate: true, identifies_accepted_requirement: true, concrete_current_failure: false, evidence_reproducible: false, material_impact: false, in_scope_current: true, speculative: true }],
+    review: { findings: [{ applies_to_current_candidate: true, identifies_accepted_requirement: true, concrete_current_failure: false, evidence_reproducible: false, material_impact: false, in_scope_current: true, speculative: true }] },
   }));
   assert.equal(result.code, 'PASS_AND_STOP');
   assert.equal(result.non_blocking_findings, 1);
@@ -280,14 +295,14 @@ test('speculative finding cannot block', () => {
 
 test('optional finding cannot block', () => {
   const result = evaluateAssurance(evidence({
-    findings: [{ applies_to_current_candidate: true, identifies_accepted_requirement: true, concrete_current_failure: true, evidence_reproducible: true, material_impact: true, in_scope_current: true, optional: true }],
+    review: { findings: [{ applies_to_current_candidate: true, identifies_accepted_requirement: true, concrete_current_failure: true, evidence_reproducible: true, material_impact: true, in_scope_current: true, optional: true }] },
   }));
   assert.equal(result.code, 'PASS_AND_STOP');
 });
 
 test('duplicate-root finding does not create assurance noise', () => {
   const result = evaluateAssurance(evidence({
-    findings: [{ applies_to_current_candidate: true, identifies_accepted_requirement: true, concrete_current_failure: true, evidence_reproducible: true, material_impact: true, in_scope_current: true, duplicate_root: true }],
+    review: { findings: [{ applies_to_current_candidate: true, identifies_accepted_requirement: true, concrete_current_failure: true, evidence_reproducible: true, material_impact: true, in_scope_current: true, duplicate_root: true }] },
   }));
   assert.equal(result.code, 'PASS_AND_STOP');
   assert.equal(result.non_blocking_findings, 1);
@@ -295,7 +310,7 @@ test('duplicate-root finding does not create assurance noise', () => {
 
 test('concrete current material finding blocks with bounded same-Lock repair', () => {
   const result = evaluateAssurance(evidence({
-    findings: [{ applies_to_current_candidate: true, identifies_accepted_requirement: true, concrete_current_failure: true, evidence_reproducible: true, material_impact: true, in_scope_current: true }],
+    review: { findings: [{ applies_to_current_candidate: true, identifies_accepted_requirement: true, concrete_current_failure: true, evidence_reproducible: true, material_impact: true, in_scope_current: true }] },
   }));
   assert.equal(result.code, 'FAIL_MATERIAL_CURRENT_LOCK_BLOCKER');
   assert.equal(result.next_action, 'WEB_ROUTE_SAME_LOCK_REPAIR');
@@ -376,11 +391,11 @@ test('G4A is rejected when required evidence is missing', () => {
 test('exact duplicate or QUEUED Ledger #142 evidence is accepted', () => {
   const queued = evaluateLedgerEvidence({
     run_id: 'run-169',
-    intake: { version: 'v2', public_safe: true, duplicate_checked: true, state: 'QUEUED', identity: 'run-169' },
+    intake: { issue_number: 142, version: 'v2', public_safe: true, duplicate_checked: true, state: 'QUEUED', identity: 'run-169' },
   });
   const duplicate = evaluateLedgerEvidence({
     run_id: 'run-169',
-    exact_existing_duplicate: { version: 'v2', public_safe: true, duplicate_checked: true, state: 'QUEUED', identity: 'run-169' },
+    exact_existing_duplicate: { issue_number: 142, version: 'v2', public_safe: true, duplicate_checked: true, state: 'QUEUED', identity: 'run-169' },
   });
   assert.equal(queued.accepted, true);
   assert.equal(duplicate.accepted, true);
@@ -389,7 +404,7 @@ test('exact duplicate or QUEUED Ledger #142 evidence is accepted', () => {
 test('conflicting Ledger identity fails closed and never polls #143', () => {
   const result = evaluateLedgerEvidence({
     run_id: 'run-169',
-    intake: { version: 'v2', public_safe: true, duplicate_checked: true, state: 'QUEUED', identity: 'other-run' },
+    intake: { issue_number: 142, version: 'v2', public_safe: true, duplicate_checked: true, state: 'QUEUED', identity: 'other-run' },
     polls: ['#143'],
   });
   assert.equal(result.code, 'FAIL_CLOSED_REQUIRED_EVIDENCE');
@@ -405,7 +420,7 @@ test('Ready cannot precede final Web acceptance', () => {
 
 test('unexpected merge head is rejected', () => {
   const result = evaluateFinality(finalityEvidence({
-    merge: { result: 'rejected', expected_head: candidate.head, observed_head: sha('k') },
+    merge: { result: 'rejected', expected_head: candidate.head, observed_head: sha('e') },
   }));
   assert.equal(result.code, 'UNEXPECTED_HEAD_REJECTED');
 });
@@ -418,12 +433,12 @@ test('uncertain merge result routes to canonical readback and not retry', () => 
 });
 
 test('canonical tree mismatch fails finality', () => {
-  const result = evaluateFinality(finalityEvidence({ canonical: { tree: sha('l') } }));
+  const result = evaluateFinality(finalityEvidence({ canonical: { tree: sha('e') } }));
   assert.equal(result.code, 'CANONICAL_TREE_MISMATCH');
 });
 
 test('sole-parent mismatch fails finality', () => {
-  const result = evaluateFinality(finalityEvidence({ canonical: { sole_parent: sha('m') } }));
+  const result = evaluateFinality(finalityEvidence({ canonical: { sole_parent: sha('e') } }));
   assert.equal(result.code, 'CANONICAL_PARENT_MISMATCH');
 });
 

@@ -100,6 +100,8 @@ function valid(code, fields = {}) {
 function requiredEvidenceFailures(input) {
   const failures = [];
   if (!isRecord(input)) return ['evidence-record-missing'];
+  if (input.contract_version !== CONTRACT_VERSION) failures.push('evidence-contract-version-invalid');
+  if (Object.prototype.hasOwnProperty.call(input, 'findings')) failures.push('review-findings-shadow-source');
 
   const { candidate, pr, lock, scope, g4, review, required_checks: checks, ledger } = input;
   if (!isRecord(candidate)) failures.push('candidate-identity-missing');
@@ -178,6 +180,7 @@ function requiredEvidenceFailures(input) {
 
   if (!isRecord(ledger)) failures.push('ledger-evidence-missing');
   else {
+    if (ledger.issue_number !== 142) failures.push('ledger-issue-number-invalid');
     for (const key of ['current', 'complete', 'server_authoritative', 'verifiable', 'duplicate_checked']) {
       if (!hasTrue(ledger, key)) failures.push('ledger-' + key + '-failed');
     }
@@ -259,7 +262,7 @@ function evaluateAssurance(input) {
     if (label) result.label = label;
     return result;
   }
-  const findings = Array.isArray(input.findings) ? input.findings : input.review.findings;
+  const findings = input.review.findings;
   const blocker = findings.find(isMaterialBlocker);
   if (blocker) {
     return {
@@ -506,6 +509,7 @@ function evaluateG4A(input = {}) {
 
 function validLedgerRecord(record, runId) {
   return isRecord(record)
+    && record.issue_number === 142
     && record.version === 'v2'
     && record.public_safe === true
     && record.duplicate_checked === true
@@ -519,6 +523,7 @@ function evaluateLedgerEvidence(input = {}) {
     return fail('FAIL_CLOSED_REQUIRED_EVIDENCE', { accepted: false });
   }
   if (input.conflicting_duplicate === true) return fail('FAIL_CLOSED_REQUIRED_EVIDENCE', { accepted: false });
+  if (input.intake !== undefined && input.intake !== null && input.exact_existing_duplicate !== undefined && input.exact_existing_duplicate !== null) return fail('FAIL_CLOSED_REQUIRED_EVIDENCE', { accepted: false });
   if (validLedgerRecord(input.intake, runId)) {
     return valid('LEDGER_142_QUEUED_ACCEPTED', { accepted: true, duplicate_checked: true, state: 'QUEUED' });
   }
@@ -533,6 +538,7 @@ function evaluateFinality(input = {}) {
   const ready = isRecord(input.ready) ? input.ready : {};
   const merge = isRecord(input.merge) ? input.merge : {};
   const canonical = isRecord(input.canonical) ? input.canonical : {};
+  const accepted = isRecord(input.accepted_candidate) ? input.accepted_candidate : {};
 
   if (ready.set === true && (web.status !== 'accepted' || ready.after_web_acceptance !== true)) {
     return fail('READY_BEFORE_WEB_ACCEPTANCE', { finality_blocked: true });
@@ -567,9 +573,14 @@ function evaluateFinality(input = {}) {
       controller_reconciliation_if_unbound: true,
     };
   }
-  if (merge.observed_head && merge.expected_head && merge.observed_head !== merge.expected_head) {
-    return fail('UNEXPECTED_HEAD_REJECTED', { finality_blocked: true });
-  }
+  if (!Number.isSafeInteger(accepted.pr_number) || accepted.pr_number < 1 || !isSha(accepted.head) || !isSha(accepted.tree) || !isSha(accepted.base)) return fail('FAIL_CLOSED_REQUIRED_EVIDENCE', { finality_blocked: true });
+  if (!Number.isSafeInteger(merge.intended_pr_number) || !Number.isSafeInteger(merge.observed_pr_number)) return fail('FAIL_CLOSED_REQUIRED_EVIDENCE', { finality_blocked: true });
+  if (merge.intended_pr_number !== accepted.pr_number || merge.observed_pr_number !== accepted.pr_number) return fail('UNEXPECTED_PR_REJECTED', { finality_blocked: true });
+  if (!isSha(merge.expected_head) || !isSha(merge.observed_head)) return fail('FAIL_CLOSED_REQUIRED_EVIDENCE', { finality_blocked: true });
+  if (merge.expected_head !== accepted.head || merge.observed_head !== accepted.head) return fail('UNEXPECTED_HEAD_REJECTED', { finality_blocked: true });
+  if (!isSha(merge.expected_base) || !isSha(merge.observed_base)) return fail('FAIL_CLOSED_REQUIRED_EVIDENCE', { finality_blocked: true });
+  if (merge.expected_base !== accepted.base || merge.observed_base !== accepted.base) return fail('UNEXPECTED_BASE_REJECTED', { finality_blocked: true });
+  if (!isSha(merge.merge_result_sha)) return fail('FAIL_CLOSED_REQUIRED_EVIDENCE', { finality_blocked: true });
   if (merge.result !== 'merged'
     || merge.mode !== 'squash'
     || merge.bound_to_pr !== true
@@ -577,26 +588,14 @@ function evaluateFinality(input = {}) {
     || merge.verifiable !== true) {
     return fail('FAIL_CLOSED_REQUIRED_EVIDENCE', { finality_blocked: true });
   }
-  if (Object.prototype.hasOwnProperty.call(canonical, 'tree')
-    && (canonical.expected_tree === undefined || canonical.tree !== canonical.expected_tree)) {
-    return fail('CANONICAL_TREE_MISMATCH', { finality_blocked: true });
-  }
-  if (Object.prototype.hasOwnProperty.call(canonical, 'sole_parent')
-    && (canonical.expected_parent === undefined || canonical.sole_parent !== canonical.expected_parent)) {
-    return fail('CANONICAL_PARENT_MISMATCH', { finality_blocked: true });
-  }
-  if (Object.prototype.hasOwnProperty.call(canonical, 'signature')
-    && (!isRecord(canonical.signature) || canonical.signature.verified !== true || canonical.signature.reason !== 'valid')) {
-    return fail('CANONICAL_SIGNATURE_INVALID', { finality_blocked: true });
-  }
-  if (canonical.bound_to_intended_merge !== true) {
-    return fail('FAIL_CLOSED_CANONICAL_BINDING', { finality_blocked: true, controller_reconciliation_required: true, g4_rerun: false });
-  }
-  if (canonical.tree !== canonical.expected_tree) return fail('CANONICAL_TREE_MISMATCH', { finality_blocked: true });
-  if (canonical.sole_parent !== canonical.expected_parent) return fail('CANONICAL_PARENT_MISMATCH', { finality_blocked: true });
-  if (!isRecord(canonical.signature) || canonical.signature.verified !== true || canonical.signature.reason !== 'valid') {
-    return fail('CANONICAL_SIGNATURE_INVALID', { finality_blocked: true });
-  }
+  if (canonical.bound_to_intended_merge !== true) return fail('FAIL_CLOSED_CANONICAL_BINDING', { finality_blocked: true, controller_reconciliation_required: true, g4_rerun: false });
+  if (!isSha(canonical.main_head)) return fail('FAIL_CLOSED_REQUIRED_EVIDENCE', { finality_blocked: true });
+  if (canonical.main_head !== merge.merge_result_sha) return fail('CANONICAL_MAIN_MERGE_MISMATCH', { finality_blocked: true });
+  if (!isSha(canonical.tree) || canonical.tree !== accepted.tree) return fail('CANONICAL_TREE_MISMATCH', { finality_blocked: true });
+  if (!isSha(canonical.sole_parent) || canonical.sole_parent !== accepted.base) return fail('CANONICAL_PARENT_MISMATCH', { finality_blocked: true });
+  if (canonical.expected_tree !== undefined && (!isSha(canonical.expected_tree) || canonical.expected_tree !== accepted.tree)) return fail('CANONICAL_TREE_MISMATCH', { finality_blocked: true });
+  if (canonical.expected_parent !== undefined && (!isSha(canonical.expected_parent) || canonical.expected_parent !== accepted.base)) return fail('CANONICAL_PARENT_MISMATCH', { finality_blocked: true });
+  if (!isRecord(canonical.signature) || canonical.signature.verified !== true || canonical.signature.reason !== 'valid') return fail('CANONICAL_SIGNATURE_INVALID', { finality_blocked: true });
   if (canonical.pr_merged !== true || canonical.pr_closed !== true || canonical.branch_cleanup_observed !== true || canonical.cleanup_after_verified_merge !== true) {
     return fail('FAIL_CLOSED_REQUIRED_EVIDENCE', { finality_blocked: true });
   }
@@ -693,21 +692,25 @@ function createReport(input = {}) {
   ]);
   const unknown = Object.keys(input).find((key) => !allowed.has(key));
   if (unknown) return fail('PRIVACY_LEAK_REJECTED', { accepted: false, location: 'report.' + unknown });
+  if (!Object.prototype.hasOwnProperty.call(input, 'material_blocker') || typeof input.material_blocker !== 'boolean') return fail('REPORT_CONTRACT_INVALID', { accepted: false });
   if (typeof input.verdict !== 'string' || !isSafeId(input.verdict)
-    || (input.verified_result !== undefined && !isSafeLabel(input.verified_result))
+    || (input.verified_result !== undefined && input.verified_result !== null && !isSafeLabel(input.verified_result))
     || !isRecord(input.mutation_state)
     || typeof input.mutation_state.attempted !== 'boolean'
     || typeof input.mutation_state.performed !== 'boolean'
     || !Array.isArray(input.unchanged_scope)
+    || input.unchanged_scope.length === 0
     || input.unchanged_scope.some((value) => !isSafeId(value))
     || typeof input.next_action !== 'string'
     || !isSafeId(input.next_action)) {
     return fail('REPORT_CONTRACT_INVALID', { accepted: false });
   }
+  if (input.material_blocker === false && !isSafeLabel(input.verified_result)) return fail('REPORT_CONTRACT_INVALID', { accepted: false });
+  if (input.material_blocker === true && input.verified_result !== undefined && input.verified_result !== null) return fail('REPORT_CONTRACT_INVALID', { accepted: false });
   const report = {
     contract_version: CONTRACT_VERSION,
     verdict: input.verdict,
-    material_blocker: input.material_blocker === true,
+    material_blocker: input.material_blocker,
     verified_result: typeof input.verified_result === 'string' ? input.verified_result : null,
     mutation_state: {
       attempted: input.mutation_state.attempted,
