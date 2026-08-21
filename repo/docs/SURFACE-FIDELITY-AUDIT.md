@@ -1,7 +1,7 @@
 # Surface Fidelity Audit
 
-Date: 2026-05-18
-Latest update: 2026-07-09 (adds the portable docs-governance playbook to the generated ai-coding-agent-rules repo-local playbook set)
+Date: 2026-08-21
+Latest update: 2026-08-21 (adds the current-main N5 GitHub governance and truthful PR-review reconciler project and explicit-only skill)
 
 ## Current state
 
@@ -27,9 +27,9 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 
 | Metric | Current value |
 | --- | ---: |
-| projects | 20 |
-| publishedFiles | 241 |
-| declaredOutputFiles | 241 |
+| projects | 21 |
+| publishedFiles | 244 |
+| declaredOutputFiles | 244 |
 | packInstalledFiles | 84 |
 | undeclaredPublishedFiles | 0 |
 | packInstalledUndeclared | 0 |
@@ -38,7 +38,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 | sharedSurfaceMetadataFindings | 0 |
 | suspiciousPublishedSurfaces | 0 |
 | duplicateProjectContentGroups | 0 |
-| boundaryRecipeOutputs | 241 |
+| boundaryRecipeOutputs | 244 |
 | boundaryRecipeFindings | 0 |
 | curatedDirectoryFindings | 1 |
 
@@ -46,7 +46,7 @@ Current published-file classifications:
 
 | Classification | Count |
 | --- | ---: |
-| declared_generated | 157 |
+| declared_generated | 160 |
 | pack_installed_declared | 84 |
 
 Current boundary recipe classifications:
@@ -64,13 +64,13 @@ Current boundary recipe classifications:
 | curated_template | 2 |
 | curated_template_index | 7 |
 | generated_cross_skill_reference | 3 |
-| main_full_fidelity | 179 |
+| main_full_fidelity | 182 |
 
 Known baseline context:
 
 - There are no current curated output boundary findings.
 - Current curated directory boundary finding: `_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md` is a reviewed large Markdown platform reference retained in the audit baseline.
-- The four shared-surface outputs are intentional generated references: three n8n-agent-rules references used by dependent n8n skills, plus one Google DESIGN.md reference published into the UI/UX skill from its provenance-owned design module. The count movement from the previous snapshot is explained by adding the Google DESIGN.md shared reference while keeping only narrow router skills implicit.
+- The four shared-surface outputs are intentional generated references: three n8n-agent-rules references used by dependent n8n skills, plus one Google DESIGN.md reference published into the UI/UX skill from its provenance-owned design module. The current count movement also includes the three-file current-main N5 explicit-only skill output; the Google DESIGN.md reference remains provenance-owned and only narrow router skills are implicit.
 
 ## Current project modules
 
@@ -80,6 +80,7 @@ Known baseline context:
 - `_projects/development/ai-coding-agent-rules`
 - `_projects/development/bounded-local-execution-loop`
 - `_projects/development/control-plane-kernel`
+- `_projects/development/github-governance-review-reconciler`
 - `_projects/development/repository-capability-registry`
 - `_projects/development/local-ai-stack-safety`
 - `_projects/development/managed-app-foundation-review`
@@ -104,6 +105,7 @@ Known baseline context:
 - `skills/knowledge-index-updater/`
 - `skills/local-ai-stack-safety/`
 - `skills/managed-app-foundation-review/`
+- `skills/github-governance-review-reconciler/`
 - `skills/project-completion-audit/`
 - `skills/n8n-agent-rules/`
 - `skills/n8n-local-setup/`

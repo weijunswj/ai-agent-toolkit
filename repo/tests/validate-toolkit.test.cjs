@@ -559,6 +559,7 @@ test('project manifests include the current project modules without repo-wide MC
     'development.ai-coding-agent-rules',
     'development.bounded-local-execution-loop',
     'development.control-plane-kernel',
+    'development.github-governance-review-reconciler',
     'development.hostinger-coolify-production-guide',
     'development.independent-assurance-web-finality',
     'development.local-ai-stack-safety',
