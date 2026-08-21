@@ -70,7 +70,7 @@
     "decision_reason": "The work combines a distinct deterministic GitHub governance state contract with truthful PR-review and Deferred Findings evidence, while preserving separate A1-A4 authority boundaries. No existing skill owns this exact boundary.",
     "unique_value": "Provides one current-main v3 source contract and bounded transaction runtime that prevents Markdown improvisation, queue duplication, review-inventory emptiness, executor review mutation, and silent Deferred Findings promotion.",
     "runtime_footprint": "One local runtime, compact JSON policy/schema/grammar, three templates, focused tests, and a concise explicit-only skill. No provider client, workflow, MCP, credential, or live-system dependency.",
-    "local_assets": "Only first-party contracts, templates, metadata, runtime, and tests are required; no third-party text or code is copied.",
+    "local_assets": "Only first-party contracts, templates, metadata, runtime, and tests are required; no third-party text or code is copied or adapted.",
     "output_contract": "Return inspect/preview/validate/reconcile/show/remove evidence with exact repository binding, lifecycle/queue uniqueness, revision and byte-preservation proof, truthful review inventory, finding materiality/disposition status, DF provenance and revalidation status, authority boundary, failures, and exactly one next action: Web exact-head validation when successful.",
     "anti_bloat_review": "Reject generic web-controller stages, timer/polling history, automatic issue creation for every finding, multiple parent queues, historical PR #310 cache machinery, model reconstruction of large parent bodies, review-thread mutation by executors, and any A1-A4 redesign.",
     "safety_boundary": "Explicit inspection and preview are read-only. Any repository/GitHub mutation requires current repository identity, A2 repository.governance consent, accepted preview, and A1 github.mutation authority. Review-thread replies, resolution/reopen/dismissal, final disposition, Ready, merge, cleanup, and Web finality remain controller-owned and are not performed by this skill.",
@@ -82,7 +82,7 @@
       "node repo/scripts/sync-toolkit-projects.cjs --write",
       "node repo/scripts/sync-toolkit-projects.cjs --check",
       "node repo/scripts/audit-published-surfaces.cjs --check",
-      "node --test repo/tests/toolkit-github-governance-review-reconciler.test.cjs repo/tests/toolkit-github-governance-review-reconciler.boundaries.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run175-red.test.cjs",
+      "node --test repo/tests/toolkit-github-governance-review-reconciler.test.cjs repo/tests/toolkit-github-governance-review-reconciler.boundaries.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run175-red.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run177-repair.test.cjs",
       "node repo/scripts/validate-toolkit.cjs"
     ]
   },

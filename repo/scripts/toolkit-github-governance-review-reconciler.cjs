@@ -16,7 +16,7 @@ const A4_MATERIAL_PREDICATES = Object.freeze([
 const A4_EXCLUSIONS = Object.freeze(['stale', 'duplicate_root', 'optional', 'speculative', 'hypothetical_future', 'cleaner_architecture_only', 'outside_scope']);
 const REVIEW_DISPOSITIONS = Object.freeze(['fixed', 'already satisfied', 'incorrect assumption', 'intended design', 'superseded', 'duplicate', 'valid follow-up completed', 'valid and still unresolved', 'unable to verify']);
 const DF_TRIGGERS = Object.freeze(['BEFORE_COMPONENT_WORK', 'BEFORE_PR_FINALITY', 'BEFORE_RELEVANT_OPERATIONAL_BOUNDARY', 'FINAL_PROGRAMME_AUDIT']);
-const DF_DISPOSITIONS = Object.freeze(['DEFERRED_REVALIDATE', 'SATISFIED', 'SUPERSEDED', 'OBSOLETE', 'DISPOSED_NONMATERIAL']);
+const DF_DISPOSITIONS = Object.freeze(['DEFERRED_REVALIDATE', 'SATISFIED', 'SUPERSEDED', 'OBSOLETE', 'DISPOSED_NONMATERIAL', 'PROMOTED_TO_EXISTING_CHILD', 'PROMOTED_TO_CHILD']);
 const MANAGED_MARKERS = Object.freeze({
   parent: Object.freeze({ begin: '<!-- AI-AGENT-TOOLKIT:N5-PARENT:BEGIN v3 -->', end: '<!-- AI-AGENT-TOOLKIT:N5-PARENT:END -->' }),
   child: Object.freeze({ begin: '<!-- AI-AGENT-TOOLKIT:N5-CHILD:BEGIN v3 -->', end: '<!-- AI-AGENT-TOOLKIT:N5-CHILD:END -->' }),
@@ -45,6 +45,7 @@ const RED_FIRST_CASES = Object.freeze([
   'open PR inventory', 'merged/closed PR inventory', 'merged PR inventory', 'pagination', 'material predicates',
   'DF not task', 'DF ambiguity', 'frozen promotion', 'executor mutation', 'Codex silence', 'auto-code readiness',
   'PR310', 'generated direct edit', 'secret/private evidence', 'idempotent no-op',
+  'A1 exact digest binding', 'explicit review authority proof', 'canonical A4 review projection', 'source-bound finding provenance', 'typed DF promotion',
 ]);
 
 function success(code, extra = {}) { return { ok: true, code, ...extra }; }
@@ -124,7 +125,10 @@ function validateParent(state) {
   if (orders.some((item, index) => !Number.isSafeInteger(item) || item !== index + 1)) return failure('N5_GOVERNANCE_UNREADY');
   const prIds = [...state.current_work, ...state.other_open_prs].map((item) => item.pr_number || item.implementation_pr?.number).filter(Boolean);
   if (new Set(prIds).size !== prIds.length) return failure('N5_GOVERNANCE_UNREADY');
-  for (const finding of state.deferred_findings) if (!isSafeId(finding.df_id) || state.pending_work.some((item) => item.df_id === finding.df_id)) return failure('N5_GOVERNANCE_UNREADY');
+  for (const finding of state.deferred_findings) {
+    const validFinding = validateDeferredFindingRecord(finding);
+    if (!validFinding.ok || state.pending_work.some((item) => item.df_id === finding.df_id)) return failure('N5_GOVERNANCE_UNREADY');
+  }
   if (typeof state.owner_detail !== 'string' || !publicSafeText(state.owner_detail)) return failure('N5_SECRET_OR_PRIVATE_DATA_REJECTED');
   return success('N5_VALID', { state });
 }
@@ -251,7 +255,7 @@ function boundedProjection(state, metadata = {}) {
     pending_work: (state.pending_work || []).map((item) => ({ child_id: item.child_id, issue_number: item.issue_number, queue_order: item.queue_order, lifecycle: item.lifecycle })),
     other_open_prs: (state.other_open_prs || []).map((item) => ({ pr_number: item.pr_number || item.implementation_pr?.number || null, disposition: item.disposition || null })),
     terminal: (state.terminal || []).map((item) => ({ child_id: item.child_id, issue_number: item.issue_number, lifecycle: item.lifecycle, outcome: item.outcome || null })),
-    deferred_findings: (state.deferred_findings || []).map((item) => ({ df_id: item.df_id, component: item.component, disposition: item.disposition })),
+    deferred_findings: (state.deferred_findings || []).map((item) => ({ df_id: item.df_id, component: item.component, disposition: item.disposition, linked_child: item.linked_child ?? null })),
     owner_detail_digest: sha256(state.owner_detail || ''),
   };
 }
@@ -284,10 +288,27 @@ function authorizeMutation(input, options) {
   if (input.accepted_preview !== true) return failure('N5_AUTHORITY_REQUIRED');
   if (typeof options.a1?.authorize !== 'function') return failure('N5_AUTHORITY_REQUIRED');
   const operation = { operation_type: 'github.mutation', repository: options.repository, parent_issue: input.parent_issue, intent: input.intent || 'reconcile', target: input.target || null, update: input.update || null };
+  const expected_operation_digest = sha256(operation);
+  const expected_target_digest = sha256(operation.target || {});
   let decision;
-  try { decision = options.a1.authorize({ operation_type: 'github.mutation', operation_digest: sha256(operation), target_digest: sha256(operation.target || {}), operation }); } catch (_error) { return failure('N5_AUTHORITY_REQUIRED'); }
-  if (!decision || decision.decision !== 'allow' || decision.operation_type !== 'github.mutation' || typeof decision.operation_digest !== 'string' || typeof decision.target_digest !== 'string') return failure('N5_AUTHORITY_REQUIRED');
-  return success('N5_VALID', { decision });
+  try {
+    decision = options.a1.authorize({
+      operation_type: operation.operation_type,
+      operation_digest: expected_operation_digest,
+      target_digest: expected_target_digest,
+      operation,
+    });
+  } catch (_error) {
+    return failure('N5_AUTHORITY_REQUIRED');
+  }
+  if (!decision
+    || decision.decision !== 'allow'
+    || decision.operation_type !== operation.operation_type
+    || decision.operation_digest !== expected_operation_digest
+    || decision.target_digest !== expected_target_digest) {
+    return failure('N5_AUTHORITY_REQUIRED');
+  }
+  return success('N5_VALID', { decision, expected_operation_digest, expected_target_digest });
 }
 function fetchParent(github, input) {
   if (typeof github?.getParent !== 'function') return failure('PARENT_BODY_INCOMPLETE');
@@ -300,20 +321,250 @@ function moved(before, after) {
   return before.body_digest !== after.body_digest || (before.revision_authoritative && after.revision_authoritative && before.revision !== after.revision) || (before.etag && after.etag && before.etag !== after.etag) || (before.last_modified && after.last_modified && before.last_modified !== after.last_modified);
 }
 
-function buildReviewInventory(input = {}) {
-  const pullRequests = Array.isArray(input.pull_requests) ? input.pull_requests : [];
-  const submitted = Array.isArray(input.submitted_reviews) ? input.submitted_reviews : [];
-  const inline = Array.isArray(input.inline_conversations) ? input.inline_conversations : [];
-  const pages = input.pagination || {};
-  const complete = input.server_authoritative !== false && ['pull_requests', 'submitted_reviews', 'inline_conversations'].every((key) => pages[key] === true);
-  const review = {
-    current: input.current_candidate || null, complete, server_authoritative: input.server_authoritative !== false, verifiable: complete,
-    inventory_digest: sha256({ pull_requests: pullRequests, submitted_reviews: submitted, inline_conversations: inline }), findings: [],
-    pull_requests: pullRequests.map((item) => ({ number: item.number, state: item.state, merged: item.merged === true })),
-    submitted_reviews: submitted.map((item) => ({ id: item.id, pr_number: item.pr_number, state: item.state })),
-    inline_conversations: inline.map((item) => ({ id: item.id, pr_number: item.pr_number, resolved: item.resolved === true, outdated: item.outdated === true, closing_reply: item.closing_reply === true })),
+function hasOwn(value, key) { return isRecord(value) && Object.prototype.hasOwnProperty.call(value, key); }
+function isSafePublicRef(value) { return typeof value === 'string' && value.length > 0 && value.length <= 256 && !forbiddenEvidence(value); }
+function isSafeReviewPath(value) {
+  return typeof value === 'string'
+    && value.length > 0
+    && value.length <= 512
+    && !forbiddenEvidence(value)
+    && !/^(?:[A-Za-z]:|[\\/])/.test(value)
+    && !/(^|[\\/])\.\.(?:[\\/]|$)/.test(value);
+}
+function copyOptionalSha(sourceValue, target, key) {
+  if (!hasOwn(sourceValue, key)) return true;
+  if (!isSha(sourceValue[key])) return false;
+  target[key] = sourceValue[key];
+  return true;
+}
+function copyOptionalPublicRef(sourceValue, target, key) {
+  if (!hasOwn(sourceValue, key)) return true;
+  if (!isSafePublicRef(sourceValue[key])) return false;
+  target[key] = sourceValue[key];
+  return true;
+}
+function copyOptionalSafeId(sourceValue, target, key) {
+  if (!hasOwn(sourceValue, key)) return true;
+  if (!isSafeId(sourceValue[key])) return false;
+  target[key] = sourceValue[key];
+  return true;
+}
+function copyOptionalIssue(sourceValue, target, key) {
+  if (!hasOwn(sourceValue, key)) return true;
+  if (!isIssue(sourceValue[key])) return false;
+  target[key] = sourceValue[key];
+  return true;
+}
+function copyOptionalBoolean(sourceValue, target, key) {
+  if (!hasOwn(sourceValue, key)) return true;
+  if (typeof sourceValue[key] !== 'boolean') return false;
+  target[key] = sourceValue[key];
+  return true;
+}
+function copyOptionalPathLine(sourceValue, target) {
+  if (hasOwn(sourceValue, 'path')) {
+    if (sourceValue.path !== null && !isSafeReviewPath(sourceValue.path)) return false;
+    target.path = sourceValue.path;
+  }
+  if (hasOwn(sourceValue, 'line')) {
+    if (sourceValue.line !== null && (!Number.isSafeInteger(sourceValue.line) || sourceValue.line < 1)) return false;
+    target.line = sourceValue.line;
+  }
+  return true;
+}
+function copyOptionalSafeIdArray(sourceValue, target, key) {
+  if (!hasOwn(sourceValue, key)) return true;
+  if (!Array.isArray(sourceValue[key]) || !sourceValue[key].every(isSafeId)) return false;
+  target[key] = [...sourceValue[key]];
+  return true;
+}
+function normalizeCandidate(value) {
+  if (!isRecord(value)) return null;
+  const pr_number = hasOwn(value, 'pr_number') ? value.pr_number : value.number;
+  if (!isIssue(pr_number) || !isSha(value.head) || !isSha(value.tree) || !isSha(value.base)) return null;
+  const candidate = { pr_number, head: value.head, tree: value.tree, base: value.base };
+  if (hasOwn(value, 'base_ref')) {
+    if (!isSafeLabel(value.base_ref)) return null;
+    candidate.base_ref = value.base_ref;
+  }
+  if (!copyOptionalPublicRef(value, candidate, 'public_source_ref')) return null;
+  return candidate;
+}
+function normalizePullRequest(item) {
+  if (!isRecord(item) || !isIssue(item.number) || !isSafeLabel(item.state || '')) return null;
+  const result = { number: item.number, state: item.state, merged: item.merged === true };
+  for (const key of ['head', 'tree', 'base']) if (!copyOptionalSha(item, result, key)) return null;
+  if (hasOwn(item, 'base_ref') && !isSafeLabel(item.base_ref)) return null;
+  if (hasOwn(item, 'base_ref')) result.base_ref = item.base_ref;
+  if (!copyOptionalSafeId(item, result, 'identity')) return null;
+  if (!copyOptionalPublicRef(item, result, 'public_source_ref')) return null;
+  if (!copyOptionalIssue(item, result, 'linked_child')) return null;
+  if (!copyOptionalSafeIdArray(item, result, 'linked_deferred_findings')) return null;
+  return result;
+}
+function normalizeSubmittedReview(item) {
+  if (!isRecord(item) || !isSafeId(item.id) || !isIssue(item.pr_number) || !isSafeLabel(item.state || '')) return null;
+  const result = { id: item.id, pr_number: item.pr_number, state: item.state };
+  if (!copyOptionalSafeId(item, result, 'identity')) return null;
+  if (!copyOptionalPublicRef(item, result, 'public_source_ref')) return null;
+  if (!copyOptionalPathLine(item, result)) return null;
+  for (const key of ['resolved', 'outdated', 'closing_reply']) if (!copyOptionalBoolean(item, result, key)) return null;
+  if (!copyOptionalSafeIdArray(item, result, 'linked_deferred_findings')) return null;
+  return result;
+}
+function normalizeInlineConversation(item) {
+  if (!isRecord(item) || !isSafeId(item.id) || !isIssue(item.pr_number)) return null;
+  const result = {
+    id: item.id,
+    pr_number: item.pr_number,
+    resolved: item.resolved === true,
+    outdated: item.outdated === true,
+    closing_reply: item.closing_reply === true,
   };
-  return complete ? success('N5_INSPECTION_READY', { review }) : failure('N5_REVIEW_INVENTORY_INCOMPLETE', { review });
+  for (const key of ['resolved', 'outdated', 'closing_reply']) if (!copyOptionalBoolean(item, result, key)) return null;
+  if (!copyOptionalPublicRef(item, result, 'public_source_ref')) return null;
+  if (!copyOptionalPathLine(item, result)) return null;
+  if (!copyOptionalIssue(item, result, 'linked_child')) return null;
+  if (!copyOptionalSafeIdArray(item, result, 'linked_deferred_findings')) return null;
+  return result;
+}
+function normalizeFindingEvidence(input = {}) {
+  if (!isRecord(input) || !isSafeId(input.id) || !isSafeLabel(input.component || '') || !publicSafeText(input.text || '') || !isDigest(input.evidence_digest)) return null;
+  const provenance = input.provenance;
+  if (!isRecord(provenance) || !isIssue(provenance.source_pr) || !isSafeId(provenance.source_thread)) return null;
+  const source_candidate = normalizeCandidate(provenance.source_candidate);
+  if (!source_candidate || source_candidate.pr_number !== provenance.source_pr) return null;
+  const path = provenance.path === undefined ? null : provenance.path;
+  const line = provenance.line === undefined ? null : provenance.line;
+  if (path !== null && !isSafeReviewPath(path)) return null;
+  if (line !== null && (!Number.isSafeInteger(line) || line < 1)) return null;
+  if (provenance.public_source_ref !== undefined && !isSafePublicRef(provenance.public_source_ref)) return null;
+  const predicates = isRecord(input.predicates)
+    ? Object.fromEntries(A4_MATERIAL_PREDICATES.map((key) => [key, input.predicates[key] === true]))
+    : null;
+  const exclusions = Array.isArray(input.exclusions) && input.exclusions.every((item) => A4_EXCLUSIONS.includes(item))
+    ? [...new Set(input.exclusions)]
+    : null;
+  if (!predicates || !exclusions || !['material', 'nonblocking'].includes(input.materiality)) return null;
+  const result = {
+    id: input.id,
+    provenance: {
+      source_pr: provenance.source_pr,
+      source_thread: provenance.source_thread,
+      source_candidate,
+      path,
+      line,
+      evidence_digest: input.evidence_digest,
+      ...(provenance.public_source_ref === undefined ? {} : { public_source_ref: provenance.public_source_ref }),
+    },
+    component: input.component,
+    text: input.text,
+    evidence_digest: input.evidence_digest,
+    predicates,
+    exclusions,
+    materiality: input.materiality,
+  };
+  if (input.recommended_disposition !== undefined) {
+    if (!isSafeLabel(input.recommended_disposition)) return null;
+    result.recommended_disposition = input.recommended_disposition;
+  }
+  return result;
+}
+function projectA4Review(inventory) {
+  if (!isRecord(inventory)
+    || inventory.complete !== true
+    || inventory.server_authoritative !== true
+    || inventory.verifiable !== true
+    || !isDigest(inventory.inventory_digest)
+    || !Array.isArray(inventory.finding_evidence)
+    || !Array.isArray(inventory.pull_requests)
+    || !Array.isArray(inventory.submitted_reviews)
+    || !Array.isArray(inventory.inline_conversations)) {
+    return failure('N5_REVIEW_INVENTORY_INCOMPLETE');
+  }
+  const findings = inventory.finding_evidence.map((finding) => ({
+    id: finding.id,
+    ...finding.predicates,
+    ...Object.fromEntries(A4_EXCLUSIONS.map((key) => [key, finding.exclusions.includes(key)])),
+  }));
+  return {
+    current: true,
+    complete: true,
+    server_authoritative: true,
+    verifiable: true,
+    inventory_digest: inventory.inventory_digest,
+    findings,
+  };
+}
+function buildReviewInventory(input = {}) {
+  const rawArrays = ['pull_requests', 'submitted_reviews', 'inline_conversations'].map((key) => Array.isArray(input[key]) ? input[key] : null);
+  const normalizedPullRequests = rawArrays[0] ? rawArrays[0].map(normalizePullRequest) : [];
+  const normalizedSubmitted = rawArrays[1] ? rawArrays[1].map(normalizeSubmittedReview) : [];
+  const normalizedInline = rawArrays[2] ? rawArrays[2].map(normalizeInlineConversation) : [];
+  const arraysValid = rawArrays.every((value) => Array.isArray(value))
+    && normalizedPullRequests.every((value) => value !== null)
+    && normalizedSubmitted.every((value) => value !== null)
+    && normalizedInline.every((value) => value !== null);
+  const pullRequests = normalizedPullRequests.filter((value) => value !== null);
+  const submitted = normalizedSubmitted.filter((value) => value !== null);
+  const inline = normalizedInline.filter((value) => value !== null);
+  const pages = isRecord(input.pagination) ? input.pagination : {};
+  const pagination = {
+    pull_requests: pages.pull_requests === true,
+    submitted_reviews: pages.submitted_reviews === true,
+    inline_conversations: pages.inline_conversations === true,
+  };
+  const paginationComplete = Object.values(pagination).every((value) => value === true);
+  const server_authoritative = input.server_authoritative === true;
+  const evidence_verifiable = input.verifiable === true;
+  const staleOrUnavailable = input.stale === true
+    || input.unavailable === true
+    || input.evidence_status === 'stale'
+    || input.evidence_status === 'unavailable';
+  const candidatePresent = hasOwn(input, 'current_candidate');
+  const candidate = candidatePresent && input.current_candidate !== null ? normalizeCandidate(input.current_candidate) : null;
+  const candidateRequired = input.require_current_candidate === true || hasOwn(input, 'expected_candidate');
+  const expectedCandidate = hasOwn(input, 'expected_candidate') ? normalizeCandidate(input.expected_candidate) : null;
+  const candidateValid = !candidateRequired
+    ? true
+    : candidate !== null && expectedCandidate !== null && canonicalJson(candidate) === canonicalJson(expectedCandidate);
+  const rawFindings = input.findings === undefined ? [] : input.findings;
+  const normalizedFindingEvidence = Array.isArray(rawFindings) ? rawFindings.map(normalizeFindingEvidence) : [];
+  const findingsValid = Array.isArray(rawFindings) && normalizedFindingEvidence.every((value) => value !== null);
+  const findingEvidence = normalizedFindingEvidence.filter((value) => value !== null);
+  const inventoryBase = {
+    version: REVIEW_INVENTORY_VERSION,
+    candidate,
+    pagination,
+    pull_requests: pullRequests,
+    submitted_reviews: submitted,
+    inline_conversations: inline,
+    finding_evidence: findingEvidence,
+    server_authoritative,
+    verifiable: evidence_verifiable && !staleOrUnavailable,
+  };
+  const complete = arraysValid
+    && findingsValid
+    && server_authoritative
+    && evidence_verifiable
+    && !staleOrUnavailable
+    && paginationComplete
+    && candidateValid;
+  const inventory_digest = sha256(inventoryBase);
+  const inventory = { ...inventoryBase, complete, inventory_digest };
+  const review = complete
+    ? projectA4Review(inventory)
+    : {
+      current: false,
+      complete: false,
+      server_authoritative,
+      verifiable: false,
+      inventory_digest,
+      findings: [],
+    };
+  return complete
+    ? success('N5_INSPECTION_READY', { inventory, review })
+    : failure('N5_REVIEW_INVENTORY_INCOMPLETE', { inventory, review });
 }
 function evaluateMateriality(input = {}) {
   const predicates = isRecord(input.predicates) ? input.predicates : {};
@@ -322,36 +573,159 @@ function evaluateMateriality(input = {}) {
   return { material, material_blocker: material, predicates: Object.fromEntries(A4_MATERIAL_PREDICATES.map((key) => [key, predicates[key] === true])), exclusions, executor_recommendation: input.executor_recommendation || null, final_disposition: null };
 }
 function classifyFinding(input = {}) {
-  if (!isPublicSafeEvidence({ text: input.text, path: input.path, component: input.component }) || !publicSafeText(input.text || '')) return failure('N5_SECRET_OR_PRIVATE_DATA_REJECTED');
-  if (!isSafeId(input.id) || !['G1', 'G2'].includes(input.provenance) || !isIssue(input.pr_number) || !isSafeId(input.thread_id) || !isSafeLabel(input.component) || typeof input.path !== 'string' || !isDigest(input.evidence_digest)) return failure('N5_GOVERNANCE_UNREADY');
+  const source_pr = hasOwn(input, 'source_pr') ? input.source_pr : input.pr_number;
+  const source_thread = hasOwn(input, 'source_thread') ? input.source_thread : input.thread_id;
+  const source_candidate = hasOwn(input, 'source_candidate')
+    ? input.source_candidate
+    : (hasOwn(input, 'candidate') ? input.candidate : input.current_candidate);
+  const path = input.path === undefined ? null : input.path;
+  const line = input.line === undefined ? null : input.line;
+  if (!isPublicSafeEvidence({ text: input.text, path, component: input.component, public_source_ref: input.public_source_ref }) || !publicSafeText(input.text || '')) return failure('N5_SECRET_OR_PRIVATE_DATA_REJECTED');
+  if (!isSafeId(input.id)
+    || !isIssue(source_pr)
+    || !isSafeId(source_thread)
+    || !normalizeCandidate(source_candidate)
+    || !isSafeLabel(input.component)
+    || (path !== null && !isSafeReviewPath(path))
+    || (line !== null && (!Number.isSafeInteger(line) || line < 1))
+    || (input.public_source_ref !== undefined && !isSafePublicRef(input.public_source_ref))
+    || !isDigest(input.evidence_digest)) {
+    return failure('N5_GOVERNANCE_UNREADY');
+  }
+  const candidate = normalizeCandidate(source_candidate);
+  if (candidate.pr_number !== source_pr) return failure('N5_GOVERNANCE_UNREADY');
   const materiality = evaluateMateriality(input);
-  return success('N5_INSPECTION_READY', { finding: { id: input.id, provenance: input.provenance, pr_number: input.pr_number, thread_id: input.thread_id, component: input.component, path: input.path, line: Number.isSafeInteger(input.line) ? input.line : null, text: input.text, evidence_digest: input.evidence_digest, predicates: materiality.predicates, exclusions: materiality.exclusions, materiality: materiality.material ? 'material' : 'nonblocking', recommended_disposition: materiality.material ? 'valid and still unresolved' : 'deferred' } });
+  const finding = {
+    id: input.id,
+    provenance: {
+      source_pr,
+      source_thread,
+      source_candidate: candidate,
+      path,
+      line,
+      evidence_digest: input.evidence_digest,
+      ...(input.public_source_ref === undefined ? {} : { public_source_ref: input.public_source_ref }),
+    },
+    component: input.component,
+    text: input.text,
+    evidence_digest: input.evidence_digest,
+    predicates: materiality.predicates,
+    exclusions: materiality.exclusions,
+    materiality: materiality.material ? 'material' : 'nonblocking',
+    recommended_disposition: materiality.material ? 'valid and still unresolved' : 'deferred',
+  };
+  const normalized = normalizeFindingEvidence(finding);
+  return normalized ? success('N5_INSPECTION_READY', { finding: normalized }) : failure('N5_GOVERNANCE_UNREADY');
 }
 function authorizeReviewMutation(input = {}) { return failure('N5_REVIEW_MUTATION_DENIED', { actor: input.actor || 'unknown', action: input.action || 'unknown' }); }
 function resolveFinding(input = {}) {
   if (!REVIEW_DISPOSITIONS.includes(input.controller_disposition) || input.closing_reply_factual !== true || input.evidence_backed_completion !== true || input.exact_head !== true || input.canonical !== true || input.validation !== true || input.readback !== true || !isSafeId(input.controlling_reference) || input.resolved !== true) return failure('N5_REVIEW_DISPOSITION_INCOMPLETE');
   return success('N5_REVIEW_DISPOSITION_COMPLETE', { disposition: input.controller_disposition, controller_only: true });
 }
+function validateDeferredFindingRecord(record) {
+  const allowed = new Set([
+    'df_id', 'finding_id', 'source_pr', 'source_thread', 'source_head', 'source_candidate',
+    'text', 'path', 'line', 'supplied_severity', 'component', 'root_digest', 'evidence_digest',
+    'reason_nonblocking', 'triggers', 'disposition', 'linked_child',
+  ]);
+  if (!isRecord(record) || Object.keys(record).some((key) => !allowed.has(key))
+    || !isSafeId(record.df_id)
+    || !isSafeLabel(record.component || '')
+    || !isDigest(record.root_digest)
+    || !DF_DISPOSITIONS.includes(record.disposition)
+    || !Array.isArray(record.triggers)
+    || new Set(record.triggers).size !== record.triggers.length
+    || !DF_TRIGGERS.every((trigger) => record.triggers.includes(trigger))
+    || !(record.linked_child === null || isIssue(record.linked_child))) {
+    return failure('N5_DF_AMBIGUOUS');
+  }
+  if (record.finding_id !== undefined && record.finding_id !== null && !isSafeId(record.finding_id)) return failure('N5_DF_AMBIGUOUS');
+  if (record.source_pr !== undefined && record.source_pr !== null && !isIssue(record.source_pr)) return failure('N5_DF_AMBIGUOUS');
+  if (record.source_thread !== undefined && record.source_thread !== null && !isSafeId(record.source_thread)) return failure('N5_DF_AMBIGUOUS');
+  if (record.source_head !== undefined && record.source_head !== null && !isSha(record.source_head)) return failure('N5_DF_AMBIGUOUS');
+  if (record.source_candidate !== undefined && record.source_candidate !== null) {
+    const candidate = normalizeCandidate(record.source_candidate);
+    if (!candidate || (record.source_pr !== undefined && record.source_pr !== null && candidate.pr_number !== record.source_pr)) return failure('N5_DF_AMBIGUOUS');
+  }
+  if (record.text !== undefined && !publicSafeText(record.text)) return failure('N5_SECRET_OR_PRIVATE_DATA_REJECTED');
+  if (record.path !== undefined && record.path !== null && !isSafeReviewPath(record.path)) return failure('N5_SECRET_OR_PRIVATE_DATA_REJECTED');
+  if (record.line !== undefined && record.line !== null && (!Number.isSafeInteger(record.line) || record.line < 1)) return failure('N5_DF_AMBIGUOUS');
+  if (record.supplied_severity !== undefined && record.supplied_severity !== null && !isSafeLabel(record.supplied_severity)) return failure('N5_DF_AMBIGUOUS');
+  if (record.reason_nonblocking !== undefined && !publicSafeText(record.reason_nonblocking)) return failure('N5_SECRET_OR_PRIVATE_DATA_REJECTED');
+  if (record.evidence_digest !== undefined && record.evidence_digest !== null && !isDigest(record.evidence_digest)) return failure('N5_DF_AMBIGUOUS');
+  return success('N5_VALID', { record });
+}
 function registerDeferredFinding(input = {}) {
   const finding = input.finding || {};
   const parent = clone(input.parent || {});
+  const provenance = finding.provenance || {};
   if (!isSafeLabel(finding.component || '') || !publicSafeText(finding.text || '') || finding.materiality === 'material') return failure('N5_DF_AMBIGUOUS');
+  if (!isRecord(provenance) || !isIssue(provenance.source_pr) || !isSafeId(provenance.source_thread) || !normalizeCandidate(provenance.source_candidate)) return failure('N5_DF_AMBIGUOUS');
   const triggers = Array.isArray(input.triggers) ? input.triggers : [];
-  if (!DF_TRIGGERS.every((trigger) => triggers.includes(trigger))) return failure('N5_DF_AMBIGUOUS');
+  if (triggers.length !== DF_TRIGGERS.length || !DF_TRIGGERS.every((trigger) => triggers.includes(trigger))) return failure('N5_DF_AMBIGUOUS');
   if (!Array.isArray(parent.deferred_findings)) parent.deferred_findings = [];
-  const dfId = isSafeId(finding.df_id) ? finding.df_id : `df-${sha256({ id: finding.id, component: finding.component }).slice(0, 12)}`;
+  const dfId = isSafeId(finding.df_id) ? finding.df_id : 'df-' + sha256({ id: finding.id, component: finding.component }).slice(0, 12);
   if (!isSafeId(dfId) || parent.deferred_findings.some((item) => item.df_id === dfId)) return failure('N5_DF_AMBIGUOUS');
-  const record = { df_id: dfId, finding_id: finding.id || null, source_pr: finding.pr_number || null, source_thread: finding.thread_id || null, source_head: finding.source_head || null, text: finding.text, path: finding.path || null, line: finding.line || null, supplied_severity: finding.supplied_severity || null, component: finding.component, root_digest: finding.root_digest || sha256({ component: finding.component, path: finding.path || null }), evidence_digest: finding.evidence_digest || null, reason_nonblocking: finding.reason_nonblocking || 'A4 materiality predicates are not all satisfied.', triggers: [...triggers], disposition: 'DEFERRED_REVALIDATE', promoted_child: null };
+  const sourceCandidate = normalizeCandidate(provenance.source_candidate);
+  const rootDigest = finding.root_digest || sha256({ component: finding.component, path: provenance.path || null, source_candidate: sourceCandidate });
+  const record = {
+    df_id: dfId,
+    finding_id: finding.id || null,
+    source_pr: provenance.source_pr,
+    source_thread: provenance.source_thread,
+    source_head: sourceCandidate.head,
+    source_candidate: sourceCandidate,
+    text: finding.text,
+    path: provenance.path === undefined ? null : provenance.path,
+    line: provenance.line === undefined ? null : provenance.line,
+    supplied_severity: finding.supplied_severity || null,
+    component: finding.component,
+    root_digest: rootDigest,
+    evidence_digest: finding.evidence_digest || null,
+    reason_nonblocking: finding.reason_nonblocking || 'A4 materiality predicates are not all satisfied.',
+    triggers: [...triggers],
+    disposition: 'DEFERRED_REVALIDATE',
+    linked_child: null,
+  };
+  const valid = validateDeferredFindingRecord(record);
+  if (!valid.ok) return valid;
   parent.deferred_findings.push(record);
   return success('N5_DF_REGISTERED', { parent, record });
 }
 function revalidateDeferredFinding(input = {}) {
-  const record = clone(input.record || {});
-  if (!isSafeId(record.df_id) || !isSafeLabel(record.component || '')) return failure('N5_DF_AMBIGUOUS');
-  if (input.material !== true) { record.disposition = input.disposition || 'DISPOSED_NONMATERIAL'; return success('N5_VALID', { record }); }
+  const record = { linked_child: null, ...clone(input.record || {}) };
+  if (!isSafeId(record.df_id) || !isSafeLabel(record.component || '') || !DF_DISPOSITIONS.includes(record.disposition)) return failure('N5_DF_AMBIGUOUS');
+  record.linked_child = null;
+  if (input.material !== true) {
+    const disposition = input.disposition || 'DISPOSED_NONMATERIAL';
+    if (!['SATISFIED', 'SUPERSEDED', 'OBSOLETE', 'DISPOSED_NONMATERIAL'].includes(disposition)) return failure('N5_DF_AMBIGUOUS');
+    record.disposition = disposition;
+    const valid = validateDeferredFindingRecord(record);
+    return valid.ok ? success('N5_VALID', { record }) : valid;
+  }
   const child = input.compatible_child;
-  if (child && child.frozen !== true && child.lifecycle !== 'current') { record.disposition = `PROMOTED_TO_EXISTING_CHILD:${child.issue_number}`; record.promoted_child = child.issue_number; return success('N5_VALID', { record }); }
-  return failure('N5_AUTHORITY_REQUIRED', { record, promotion: child ? 'scope_decision_required' : 'controller_authorised_direct_sibling_required' });
+  if (child !== undefined && child !== null) {
+    if (!isRecord(child) || !isIssue(child.issue_number)) return failure('N5_DF_AMBIGUOUS');
+    if (child.direct !== true || child.compatible !== true || child.frozen === true || child.lifecycle === 'current') {
+      return failure('N5_AUTHORITY_REQUIRED', { record, promotion: 'scope_decision_required' });
+    }
+    record.disposition = 'PROMOTED_TO_EXISTING_CHILD';
+    record.linked_child = child.issue_number;
+    const valid = validateDeferredFindingRecord(record);
+    return valid.ok ? success('N5_VALID', { record }) : valid;
+  }
+  const sibling = input.authorised_new_sibling;
+  if (!isRecord(sibling)
+    || sibling.controller_authorised !== true
+    || sibling.direct !== true
+    || sibling.compatible !== true
+    || !isIssue(sibling.issue_number)) {
+    return failure('N5_AUTHORITY_REQUIRED', { record, promotion: 'controller_authorised_direct_sibling_required' });
+  }
+  record.disposition = 'PROMOTED_TO_CHILD';
+  record.linked_child = sibling.issue_number;
+  const valid = validateDeferredFindingRecord(record);
+  return valid.ok ? success('N5_VALID', { record }) : valid;
 }
 function codexReviewState(input = {}) { return { state: input.owner_disabled === true ? 'disabled' : 'enabled', owner_disabled: input.owner_disabled === true, probe: input.probe || null, silence_is_not_disabled: true }; }
 function autoCodeReadiness(input = {}) {
@@ -469,6 +843,6 @@ module.exports = Object.freeze({
   isPublicSafeEvidence, authorityBoundary, transactionContract, renderManagedBlock, parseManagedBlock,
   replaceManagedBlock, validateTracker, boundedProjection, classifyBodyLimit, compactTerminal, applyBoundedUpdate,
   buildReviewInventory, evaluateMateriality, classifyFinding, authorizeReviewMutation, resolveFinding,
-  registerDeferredFinding, revalidateDeferredFinding, codexReviewState, autoCodeReadiness, adjudicateHistoricalPr310,
+  registerDeferredFinding, validateDeferredFindingRecord, revalidateDeferredFinding, projectA4Review, codexReviewState, autoCodeReadiness, adjudicateHistoricalPr310,
   rejectHistoricalRevival, nextAction, createRuntime,
 });
