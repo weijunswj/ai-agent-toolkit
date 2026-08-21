@@ -1,0 +1,267 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.assurance-web-finality.evidence.v1",
+  "title": "Toolkit A4 Independent Assurance and Web-Finality Evidence",
+  "description": "A source-owned evidence shape. It grants no mutation, Ready, merge, or finality authority.",
+  "oneOf": [
+    { "$ref": "#/$defs/evidence" },
+    { "$ref": "#/$defs/report" }
+  ],
+  "$defs": {
+    "sha": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^(?!/)(?!\\\\)(?![A-Za-z]:[\\\\/])(?!.*\\.\\.)[A-Za-z0-9._:/-]{1,128}$"
+    },
+    "publicRef": {
+      "type": "string",
+      "pattern": "^(?!.*\\.\\.)(?!.*://)[A-Za-z0-9._:/#-]{1,128}$"
+    },
+    "relativeScopeId": {
+      "type": "string",
+      "pattern": "^(?!/)(?!\\\\)(?![A-Za-z]:[\\\\/])(?!.*\\.\\.)(?!.*//)[A-Za-z0-9._:/-]{1,256}$"
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["head", "tree", "base", "current"],
+      "properties": {
+        "head": { "$ref": "#/$defs/sha" },
+        "tree": { "$ref": "#/$defs/sha" },
+        "base": { "$ref": "#/$defs/sha" },
+        "current": { "const": true }
+      }
+    },
+    "pr": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["number", "head", "tree", "base", "base_ref", "open", "server_authoritative", "verifiable"],
+      "properties": {
+        "number": { "type": "integer", "minimum": 1 },
+        "head": { "$ref": "#/$defs/sha" },
+        "tree": { "$ref": "#/$defs/sha" },
+        "base": { "$ref": "#/$defs/sha" },
+        "base_ref": { "const": "main" },
+        "open": { "const": true },
+        "server_authoritative": { "const": true },
+        "verifiable": { "const": true }
+      }
+    },
+    "lock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "current", "server_authoritative", "verifiable"],
+      "properties": {
+        "id": { "const": "DL-AGENT-NATIVE-LOOP-MVP-001-A4-INDEPENDENT-ASSURANCE-WEB-FINALITY-R1" },
+        "current": { "const": true },
+        "server_authoritative": { "const": true },
+        "verifiable": { "const": true }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["digest", "current", "authorised", "server_authoritative", "verifiable"],
+      "properties": {
+        "digest": { "$ref": "#/$defs/digest" },
+        "current": { "const": true },
+        "authorised": { "const": true },
+        "server_authoritative": { "const": true },
+        "verifiable": { "const": true }
+      }
+    },
+    "g4": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "provider",
+        "model_class",
+        "reasoning",
+        "mode",
+        "fresh",
+        "isolated",
+        "read_only",
+        "complete_candidate",
+        "candidate_head",
+        "candidate_tree",
+        "candidate_base",
+        "lock_id",
+        "scope_digest",
+        "root_only",
+        "mutation_authority",
+        "ready_authority",
+        "merge_authority",
+        "cleanup_authority",
+        "finality_authority",
+        "current",
+        "complete",
+        "server_authoritative",
+        "verifiable"
+      ],
+      "properties": {
+        "status": { "const": "PASS" },
+        "provider": { "const": "OpenAI" },
+        "model_class": { "const": "GPT-5.6 Sol High" },
+        "reasoning": { "const": "high" },
+        "mode": { "const": "standard" },
+        "fresh": { "const": true },
+        "isolated": { "const": true },
+        "read_only": { "const": true },
+        "complete_candidate": { "const": true },
+        "candidate_head": { "$ref": "#/$defs/sha" },
+        "candidate_tree": { "$ref": "#/$defs/sha" },
+        "candidate_base": { "$ref": "#/$defs/sha" },
+        "lock_id": { "const": "DL-AGENT-NATIVE-LOOP-MVP-001-A4-INDEPENDENT-ASSURANCE-WEB-FINALITY-R1" },
+        "scope_digest": { "$ref": "#/$defs/digest" },
+        "root_only": { "const": true },
+        "mutation_authority": { "const": false },
+        "ready_authority": { "const": false },
+        "merge_authority": { "const": false },
+        "cleanup_authority": { "const": false },
+        "finality_authority": { "const": false },
+        "current": { "const": true },
+        "complete": { "const": true },
+        "server_authoritative": { "const": true },
+        "verifiable": { "const": true }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["current", "complete", "server_authoritative", "verifiable", "inventory_digest", "findings"],
+      "properties": {
+        "current": { "const": true },
+        "complete": { "const": true },
+        "server_authoritative": { "const": true },
+        "verifiable": { "const": true },
+        "inventory_digest": { "$ref": "#/$defs/digest" },
+        "findings": { "type": "array" }
+      }
+    },
+    "requiredCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "required", "status", "server_authoritative", "verifiable"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "required": { "type": "boolean" },
+        "status": { "enum": ["success", "pending", "failed", "cancelled", "missing", "stale", "ambiguous"] },
+        "server_authoritative": { "const": true },
+        "verifiable": { "const": true }
+      }
+    },
+    "requiredChecks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["current", "complete", "server_authoritative", "verifiable", "inventory_digest", "items"],
+      "properties": {
+        "current": { "const": true },
+        "complete": { "const": true },
+        "server_authoritative": { "const": true },
+        "verifiable": { "const": true },
+        "inventory_digest": { "$ref": "#/$defs/digest" },
+        "items": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/requiredCheck" } }
+      }
+    },
+    "ledger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue_number", "current", "complete", "server_authoritative", "verifiable", "duplicate_checked", "state", "intake_count", "identity"],
+      "properties": {
+        "issue_number": { "type": "integer", "const": 142 },
+        "current": { "const": true },
+        "complete": { "const": true },
+        "server_authoritative": { "const": true },
+        "verifiable": { "const": true },
+        "duplicate_checked": { "const": true },
+        "state": { "const": "QUEUED" },
+        "intake_count": { "const": 1 },
+        "identity": { "$ref": "#/$defs/id" }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "candidate", "pr", "lock", "scope", "g4", "review", "required_checks", "ledger"],
+      "properties": {
+        "contract_version": { "const": "toolkit.assurance-web-finality.evidence.v1" },
+        "candidate": { "$ref": "#/$defs/candidate" },
+        "pr": { "$ref": "#/$defs/pr" },
+        "lock": { "$ref": "#/$defs/lock" },
+        "scope": { "$ref": "#/$defs/scope" },
+        "g4": { "$ref": "#/$defs/g4" },
+        "review": { "$ref": "#/$defs/review" },
+        "required_checks": { "$ref": "#/$defs/requiredChecks" },
+        "ledger": { "$ref": "#/$defs/ledger" }
+      }
+    },
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "verdict", "material_blocker", "mutation_state", "unchanged_scope", "next_action"],
+      "properties": {
+        "contract_version": { "const": "toolkit.assurance-web-finality.evidence.v1" },
+        "verdict": { "$ref": "#/$defs/id" },
+        "material_blocker": { "type": "boolean" },
+        "verified_result": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+        "mutation_state": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["attempted", "performed"],
+          "properties": {
+            "attempted": { "type": "boolean" },
+            "performed": { "type": "boolean" }
+          }
+        },
+        "unchanged_scope": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/id" } },
+        "next_action": { "$ref": "#/$defs/id" },
+        "safe_ids": {
+          "oneOf": [
+            { "type": "array", "items": { "$ref": "#/$defs/id" } },
+            { "type": "object", "additionalProperties": { "$ref": "#/$defs/id" } }
+          ]
+        },
+        "shas": { "type": "object", "additionalProperties": { "$ref": "#/$defs/sha" } },
+        "digests": { "type": "object", "additionalProperties": { "$ref": "#/$defs/digest" } },
+        "status_codes": {
+          "oneOf": [
+            { "type": "array", "items": { "$ref": "#/$defs/id" } },
+            { "type": "object", "additionalProperties": { "$ref": "#/$defs/id" } }
+          ]
+        },
+        "timestamps": {
+          "oneOf": [
+            { "type": "array", "items": { "type": "string", "maxLength": 64 } },
+            { "type": "object", "additionalProperties": { "type": "string", "maxLength": 64 } }
+          ]
+        },
+        "model_class": { "type": "string", "maxLength": 128 },
+        "counts": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+        "public_review_refs": { "type": "array", "items": { "$ref": "#/$defs/publicRef" } },
+        "public_check_refs": { "type": "array", "items": { "$ref": "#/$defs/publicRef" } },
+        "relative_scope_ids": { "type": "array", "items": { "$ref": "#/$defs/relativeScopeId" } }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "material_blocker": { "const": false } } },
+          "then": {
+            "required": ["verified_result"],
+            "properties": { "verified_result": { "type": "string", "minLength": 1, "maxLength": 128 } }
+          }
+        },
+        {
+          "if": { "properties": { "material_blocker": { "const": true } } },
+          "then": { "properties": { "verified_result": { "type": ["null"], "maxLength": 128 } } }
+        }
+      ]
+    }
+  }
+}

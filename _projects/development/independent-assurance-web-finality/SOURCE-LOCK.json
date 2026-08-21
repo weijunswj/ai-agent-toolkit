@@ -1,0 +1,11 @@
+{
+  "source_repo": "weijunswj/ai-agent-toolkit",
+  "source_ref": "first-party-authored",
+  "source_commit": "327f1d87b25c3e6876e2833bf8268169a17eb444",
+  "source_lifecycle": "retired_after_migration",
+  "source_role": "migration_provenance_only",
+  "source_update_policy": "none",
+  "public_attribution_required": false,
+  "notes": "First-party A4 source authored under RUN-169 from the admitted canonical A1+A2+A3 result. No external upstream dependency and no source-watch lane.",
+  "files": []
+}

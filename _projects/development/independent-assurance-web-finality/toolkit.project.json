@@ -1,0 +1,52 @@
+{
+  "id": "development.independent-assurance-web-finality",
+  "category": "development",
+  "name": "independent-assurance-web-finality",
+  "title": "A4 Independent Assurance + Web-Finality",
+  "module_path": "_projects/development/independent-assurance-web-finality",
+  "main_path": "_projects/development/independent-assurance-web-finality/_main",
+  "version": "1.1.0",
+  "version_policy": "semver",
+  "version_notes": "Bounded same-Lock repair of exact evidence, Ledger-142, finality-tuple, and truthful-report bindings under the accepted R1 Design Lock.",
+  "outputs": [],
+  "writes": {
+    "allowed": [],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "GEMINI.md",
+      ".agents/**",
+      ".codex-plugin/**",
+      ".claude-plugin/**",
+      "user-home/**",
+      "host-adapters/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false,
+  "project": {
+    "name": "A4 Independent Assurance + Web-Finality",
+    "category": "development",
+    "summary": "Source-only, host-neutral required-evidence, independent G4, bounded invalidation, and Web-finality handoff decision semantics."
+  },
+  "surface": {
+    "publish_as": "source_only",
+    "skill": {
+      "status": "not_applicable"
+    },
+    "mcp": {
+      "status": "not_applicable"
+    }
+  }
+}
