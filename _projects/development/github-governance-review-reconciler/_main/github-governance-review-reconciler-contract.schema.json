@@ -159,7 +159,57 @@
       }
     },
     "parent": { "type": "object", "additionalProperties": true, "required": ["kind", "tracker_version", "repository", "parent_issue", "current_work", "pending_work", "other_open_prs", "terminal", "deferred_findings", "owner_detail"], "properties": { "kind": { "const": "parent" }, "tracker_version": { "const": "v3" }, "repository": { "$ref": "#/$defs/repository" }, "parent_issue": { "$ref": "#/$defs/issue" }, "current_work": { "type": "array", "maxItems": 1, "items": { "$ref": "#/$defs/queueEntry" } }, "pending_work": { "type": "array", "items": { "$ref": "#/$defs/queueEntry" } }, "other_open_prs": { "type": "array" }, "terminal": { "type": "array", "items": { "$ref": "#/$defs/queueEntry" } }, "deferred_findings": { "type": "array", "items": { "$ref": "#/$defs/deferredFinding" } }, "owner_detail": { "type": "string", "maxLength": 4096 } } },
-    "queueEntry": { "type": "object", "required": ["child_id", "issue_number", "lifecycle"], "properties": { "child_id": { "$ref": "#/$defs/safeId" }, "issue_number": { "$ref": "#/$defs/issue" }, "lifecycle": { "enum": ["pending", "current", "terminal"] }, "queue_order": { "type": "integer", "minimum": 1 }, "objective_status": { "enum": ["completed", "disposed"] }, "durable_evidence_digest": { "$ref": "#/$defs/digest" } } },
+    "terminalEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "server_authoritative", "verifiable", "complete", "child_id", "child_issue", "disposition", "outcome", "parent_chronology_ref", "pr", "accepted_commit", "evidence_digest"],
+      "properties": {
+        "version": { "const": "toolkit.n5.terminal-evidence.v1" },
+        "server_authoritative": { "const": true },
+        "verifiable": { "const": true },
+        "complete": { "const": true },
+        "child_id": { "$ref": "#/$defs/safeId" },
+        "child_issue": { "$ref": "#/$defs/issue" },
+        "disposition": { "enum": ["accepted", "disposed"] },
+        "outcome": { "type": "string", "maxLength": 4096 },
+        "parent_chronology_ref": { "$ref": "#/$defs/publicRef" },
+        "pr": {
+          "anyOf": [
+            { "type": "object", "additionalProperties": false, "required": ["number", "public_source_ref"], "properties": { "number": { "$ref": "#/$defs/issue" }, "public_source_ref": { "$ref": "#/$defs/publicRef" } } },
+            { "type": "null" }
+          ]
+        },
+        "accepted_commit": {
+          "anyOf": [
+            { "type": "object", "additionalProperties": false, "required": ["sha", "public_source_ref"], "properties": { "sha": { "$ref": "#/$defs/sha" }, "public_source_ref": { "$ref": "#/$defs/publicRef" } } },
+            { "type": "null" }
+          ]
+        },
+        "evidence_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "queueEntry": {
+      "type": "object",
+      "required": ["child_id", "issue_number", "lifecycle"],
+      "properties": {
+        "child_id": { "$ref": "#/$defs/safeId" },
+        "issue_number": { "$ref": "#/$defs/issue" },
+        "lifecycle": { "enum": ["pending", "current", "terminal"] },
+        "queue_order": { "type": "integer", "minimum": 1 },
+        "objective_status": { "enum": ["completed", "disposed"] },
+        "durable_evidence": { "$ref": "#/$defs/terminalEvidence" },
+        "durable_evidence_digest": { "$ref": "#/$defs/digest" }
+      },
+      "allOf": [
+        {
+          "if": { "required": ["lifecycle", "objective_status"], "properties": { "lifecycle": { "const": "terminal" }, "objective_status": { "const": "completed" } } },
+          "then": {
+            "required": ["durable_evidence", "durable_evidence_digest"],
+            "properties": { "durable_evidence": { "properties": { "disposition": { "const": "accepted" }, "accepted_commit": { "type": "object" } } } }
+          }
+        }
+      ]
+    },
     "child": { "type": "object", "additionalProperties": true, "required": ["kind", "tracker_version", "repository", "issue_number", "lifecycle", "objective"], "properties": { "kind": { "const": "child" }, "tracker_version": { "const": "v3" }, "repository": { "$ref": "#/$defs/repository" }, "issue_number": { "$ref": "#/$defs/issue" }, "lifecycle": { "enum": ["pending", "current", "terminal"] }, "objective": { "type": "string", "maxLength": 4096 } } },
     "pr": { "type": "object", "additionalProperties": true, "required": ["kind", "tracker_version", "repository", "pr_number", "child_issue", "state", "current_disposition", "exact_identity"], "properties": { "kind": { "const": "pr" }, "tracker_version": { "const": "v3" }, "repository": { "$ref": "#/$defs/repository" }, "pr_number": { "$ref": "#/$defs/issue" }, "child_issue": { "$ref": "#/$defs/issue" }, "state": { "enum": ["draft", "open", "closed", "merged", "superseded"] }, "current_disposition": { "type": "string" }, "exact_identity": { "type": "object", "required": ["base", "head", "tree"], "properties": { "base": { "type": "string", "pattern": "^[a-f0-9]{40}$" }, "head": { "type": "string", "pattern": "^[a-f0-9]{40}$" }, "tree": { "type": "string", "pattern": "^[a-f0-9]{40}$" } } } } },
     "reviewInventory": {

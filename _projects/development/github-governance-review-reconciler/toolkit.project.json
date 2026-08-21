@@ -5,9 +5,9 @@
   "title": "N5 GitHub Governance and Truthful PR-Review Reconciler",
   "module_path": "_projects/development/github-governance-review-reconciler",
   "main_path": "_projects/development/github-governance-review-reconciler/_main",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "version_policy": "semver",
-  "version_notes": "Adds the Run-181 six-root contract-integrity boundary for exact A2 repository identity, lifecycle/PR uniqueness, review evidence, shared ownership, proof-gated compaction, and strict initialise/migrate.",
+  "version_notes": "Closes the Run-183 four-root adversarial contract gaps for canonical A2 repository identity, accepted terminal child evidence, A4-derived materiality at ingress, and unmanaged-only initialise.",
   "outputs": [
     {
       "kind": "copy",
@@ -83,6 +83,7 @@
       "node repo/scripts/sync-toolkit-projects.cjs --check",
       "node repo/scripts/audit-published-surfaces.cjs --check",
       "node --test repo/tests/toolkit-github-governance-review-reconciler.test.cjs repo/tests/toolkit-github-governance-review-reconciler.boundaries.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run175-red.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run177-repair.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run178-canonical-a1.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run179-remove-transaction.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run181-six-root.test.cjs",
+      "node --test repo/tests/toolkit-github-governance-review-reconciler.run183-adversarial.test.cjs",
       "node repo/scripts/validate-toolkit.cjs"
     ]
   },

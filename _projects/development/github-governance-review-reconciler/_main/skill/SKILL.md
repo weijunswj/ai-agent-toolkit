@@ -39,8 +39,10 @@ drift, unverified body limits, and incomplete reconciliation fail closed.
 - A1 remains the sole mutation authority and sole opaque authority-ticket
   authority. N5 requests only typed `github.mutation` authority; it does not
   mint, expose, or create another ticket or finality token.
-- A2 remains repository/capability consent and state only. Require exact
-  repository identity and enabled `repository.governance` consent; A2 does not
+- A2 remains repository/capability consent and state only. Require the exact
+  canonical repository identity derived from the worktree, one local origin,
+  A1 remote validation, and `toolkit.repository-identity.v1`; callers cannot
+  override it. Require enabled `repository.governance` consent; A2 does not
   widen task scope, delegation, GitHub authority, provider/live access, Web
   authority, review mutation, Ready, or merge.
 - A3 remains execution/workspace/run/terminal evidence with exactly five
@@ -55,24 +57,32 @@ preview, and A1 authorization. Read-only inspection and preview do not mutate.
 `remove` is bounded and requires the same authority; it is not a cleanup or
 finality action.
 
-## Run-181 contract integrity
+## Run-183 contract integrity
 
 The six-root contract is closed:
 
-- B1 binds the exact A2 `repository_id` before A1 or GitHub access; callers
-  cannot supply a per-call repository override.
+- B1 binds the exact canonical A2 `repository_id` before A1 or GitHub access;
+  it is derived from the worktree, one local origin, A1 remote validation, and
+  `toolkit.repository-identity.v1`. Callers cannot supply a per-call
+  repository override or identity substitution.
 - B2 keeps one flat queue, renumbers pending entries after lifecycle changes,
   rejects represented PR duplicates across every parent section, and requires
-  explicit terminal `completed` or `disposed` status. Failed or non-delivery
-  PR states never imply completion.
+  explicit terminal `completed` or `disposed` status. Completed additionally
+  requires stable accepted child completion evidence and its deterministic
+  digest; a merged implementation PR alone is insufficient. Failed or
+  non-delivery PR states never imply completion.
 - B3 requires explicit current and expected candidate identity, exact
   represented PR head/tree/base facts, explicit merged and inline-conversation
-  booleans, and recomputed finding/Deferred Finding digests.
+  booleans, recomputed finding/Deferred Finding digests, and A4-derived
+  materiality at every finding/Deferred Finding ingress. Any caller
+  materiality label is only an equality assertion.
 - B4 uses one module/process owner registry for `repository+parent`; injected
   maps cannot bypass it and every terminal path releases ownership.
 - B5 permits terminal compaction only with complete server-authoritative,
   public-safe durable evidence and a deterministic retained digest.
-- B6 initialises only unmanaged bodies and migrates only exact v3 or
+- B6 initialises only genuinely unmanaged bodies; exact recognised legacy
+  bodies require the existing migrate intent, and unknown or ambiguous
+  authority-like residue fails closed. Migrate remains limited to exact v3 or
   `pre-n5-seven-section-v0` bodies with whole-body binding, one write, and
   immediate readback.
 

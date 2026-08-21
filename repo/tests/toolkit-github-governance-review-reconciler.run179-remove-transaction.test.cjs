@@ -23,8 +23,11 @@ function body(state = parentState(), prefix = 'unmanaged-prefix\n', suffix = 'un
   return prefix + n5.renderManagedBlock('parent', state) + suffix;
 }
 
-function enabledA2() {
-  return { status: () => ({ repository_id: repositoryId, capabilities: { 'repository.governance': { state: 'enabled' } } }) };
+function enabledA2(canonical_remote = 'https://github.com/weijunswj/ai-agent-toolkit.git') {
+  return {
+    resolveRepositoryIdentity: () => ({ valid: true, repository_id: repositoryId, canonical_remote }),
+    getRepositoryStatus: () => ({ status: 'healthy', actionable: false, repository_id: repositoryId, canonical_remote, capabilities: { 'repository.governance': { state: 'enabled' } } }),
+  };
 }
 
 function authorisedA1() {

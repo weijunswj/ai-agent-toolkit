@@ -8,8 +8,9 @@
 - `_main/github-governance-review-reconciler-policy.json` records the accepted
   A1-A4 boundary, v3 tracker rules, transaction failures, review authority,
   Deferred Findings policy, optional Codex capability, Auto-code boundary,
-  historical PR #310 disposition, and the Run-181 B1-B6 contract-integrity
-  roots.
+  historical PR #310 disposition, the Run-181 B1-B6 contract-integrity roots,
+  and the Run-183 four-root closure for canonical A2 identity, accepted child
+  completion evidence, A4-derived materiality, and unmanaged-only initialise.
 - `_main/tracker-v3-grammar.json` and `_main/templates/` are the deterministic
   managed-block grammar and templates. They do not permit model-authored
   parent Markdown reconstruction.
@@ -44,5 +45,6 @@ handoff only.
 
 Deferred Findings are an index/provenance/revalidation register, not a second
 queue or an automatic backlog issue creator. Ordinary executors inspect and
-recommend; only the current programme Web/user controller may mutate review
+recommend; Run-183 derives materiality at every finding ingress, and only the
+current programme Web/user controller may mutate review
 threads or make final dispositions.

@@ -2,6 +2,7 @@
 
 const crypto = require('node:crypto');
 const a1 = require('./toolkit-control-plane/control-plane-kernel.cjs');
+const canonicalA2 = require('./toolkit-capability-registry.cjs');
 
 const CONTRACT_VERSION = 'toolkit.n5.github-governance-review-reconciler.v3';
 const REVIEW_INVENTORY_VERSION = 'toolkit.n5.review-inventory.v1';
@@ -149,7 +150,13 @@ function representedPrNumber(item) {
 function terminalObjectiveValid(entry) {
   if (!isRecord(entry) || !OBJECTIVE_STATUSES.includes(entry.objective_status)) return false;
   const prState = entry.implementation_pr && entry.implementation_pr.state;
-  return entry.objective_status !== 'completed' || !NON_DELIVERY_PR_STATES.has(prState);
+  if (entry.objective_status === 'disposed') return true;
+  if (NON_DELIVERY_PR_STATES.has(prState)) return false;
+  if (!isRecord(entry.durable_evidence) || !isDigest(entry.durable_evidence_digest)) return false;
+  const verified = normalizeDurableEvidence(entry, entry.durable_evidence);
+  return verified.ok
+    && entry.durable_evidence.disposition === 'accepted'
+    && verified.evidence.evidence_digest === entry.durable_evidence_digest;
 }
 function targetRef(state, target = {}) {
   const matches = [];
@@ -345,21 +352,42 @@ function compactTerminal(state, options = {}) {
   return valid.ok ? success('N5_VALID', { state: next, compacted: true }) : valid;
 }
 
+function repositoryFromCanonicalRemote(value) {
+  let remote = a1.validateRemoteIdentity(value);
+  if (!remote.valid && typeof value === 'string' && value.startsWith('scp://git@')) {
+    const separator = value.indexOf('/', 'scp://git@'.length);
+    if (separator > 'scp://git@'.length) {
+      const host = value.slice('scp://git@'.length, separator);
+      const scpPath = value.slice(separator + 1);
+      remote = a1.validateRemoteIdentity('git@' + host + ':' + scpPath);
+    }
+  }
+  if (!remote.valid || remote.host !== 'github.com') return null;
+  const path = remote.path.replace(/^\/+/, '').replace(/\.git$/, '');
+  const parts = path.split('/');
+  if (parts.length !== 2 || !parts.every((part) => /^[A-Za-z0-9._-]+$/.test(part))) return null;
+  return parts.join('/');
+}
 function a2RepositoryBinding(a2, options) {
+  const configuredIdProvided = hasOwn(options, 'repository_id') || (isRecord(options.repository_identity) && hasOwn(options.repository_identity, 'repository_id'));
+  const configuredId = hasOwn(options, 'repository_id') ? options.repository_id : options.repository_identity?.repository_id;
+  if (configuredIdProvided) return failure(isDigest(configuredId) ? 'N5_REPOSITORY_IDENTITY_MISMATCH' : 'N5_CONSENT_REQUIRED');
+  if (typeof a2?.resolveRepositoryIdentity !== 'function' || typeof a2?.getRepositoryStatus !== 'function') return failure('N5_CONSENT_REQUIRED');
+  let identity;
   let status;
   try {
-    status = typeof a2?.status === 'function' ? a2.status() : a2?.status;
+    identity = a2.resolveRepositoryIdentity({ cwd: options.cwd });
+    status = a2.getRepositoryStatus({ cwd: options.cwd });
   } catch (_error) {
     return failure('N5_CONSENT_REQUIRED');
   }
-  if (!isRecord(status) || !isDigest(status.repository_id)) return failure('N5_CONSENT_REQUIRED');
-  const configuredIdProvided = hasOwn(options, 'repository_id') || (isRecord(options.repository_identity) && hasOwn(options.repository_identity, 'repository_id'));
-  const configuredId = hasOwn(options, 'repository_id') ? options.repository_id : options.repository_identity?.repository_id;
-  if (configuredIdProvided && !isDigest(configuredId)) return failure('N5_CONSENT_REQUIRED');
-  if (configuredIdProvided && configuredId !== status.repository_id) return failure('N5_REPOSITORY_IDENTITY_MISMATCH');
-  if (hasOwn(status, 'repository') && status.repository !== options.repository) return failure('N5_REPOSITORY_IDENTITY_MISMATCH');
+  if (!isRecord(identity) || identity.valid !== true || !isDigest(identity.repository_id)
+    || !isRecord(status) || !isDigest(status.repository_id)
+    || identity.repository_id !== status.repository_id) return failure('N5_CONSENT_REQUIRED');
   if (status.capabilities?.['repository.governance']?.state !== 'enabled') return failure('N5_CONSENT_REQUIRED');
-  return success('N5_VALID', { repository_id: status.repository_id, a2_status: status });
+  const canonicalRepository = repositoryFromCanonicalRemote(identity.canonical_remote || status.canonical_remote);
+  if (!canonicalRepository || canonicalRepository !== options.repository) return failure('N5_REPOSITORY_IDENTITY_MISMATCH');
+  return success('N5_VALID', { repository_id: identity.repository_id, a2_status: status, a2_identity: identity });
 }
 function exactMutationKeys(value, expected) {
   const keys = Object.keys(value);
@@ -629,7 +657,9 @@ function normalizeFindingEvidence(input = {}) {
   const exclusions = Array.isArray(input.exclusions) && input.exclusions.every((item) => A4_EXCLUSIONS.includes(item))
     ? [...new Set(input.exclusions)]
     : null;
-  if (!predicates || !exclusions || !['material', 'nonblocking'].includes(input.materiality)) return null;
+  if (!predicates || !exclusions) return null;
+  const derivedMateriality = evaluateMateriality({ predicates, exclusions }).material ? 'material' : 'nonblocking';
+  if (hasOwn(input, 'materiality') && input.materiality !== derivedMateriality) return null;
   const result = {
     id: input.id,
     provenance: {
@@ -646,7 +676,7 @@ function normalizeFindingEvidence(input = {}) {
     evidence_digest: null,
     predicates,
     exclusions,
-    materiality: input.materiality,
+    materiality: derivedMateriality,
   };
   const computedDigest = findingEvidenceDigest(result);
   if ((hasOwn(input, 'evidence_digest') && input.evidence_digest !== null && input.evidence_digest !== computedDigest)
@@ -970,7 +1000,7 @@ function nextAction(code) { return { next_action: code === 'N5_RECONCILED' ? 'RE
 
 function createRuntime(options = {}) {
   const injectedOwners = options.transaction_owner instanceof Map ? options.transaction_owner : null;
-  const state = { repository: options.repository, authority_broker: options.authority_broker, a2: options.a2, github: options.github, owners: sharedTransactionOwners, injectedOwners, ...(hasOwn(options, 'repository_id') ? { repository_id: options.repository_id } : {}), ...(hasOwn(options, 'repository_identity') ? { repository_identity: options.repository_identity } : {}) };
+  const state = { repository: options.repository, cwd: options.cwd || process.cwd(), authority_broker: options.authority_broker, a2: options.a2 || canonicalA2, github: options.github, owners: sharedTransactionOwners, injectedOwners, ...(hasOwn(options, 'repository_id') ? { repository_id: options.repository_id } : {}), ...(hasOwn(options, 'repository_identity') ? { repository_identity: options.repository_identity } : {}) };
   function acquireOwner(key) {
     if (state.owners.has(key) || state.injectedOwners?.has(key)) return null;
     const token = Symbol(key);
@@ -1147,6 +1177,9 @@ function createRuntime(options = {}) {
         if (canonicalJson(existing.state) === canonicalJson(auth.mutation_scope.update.state)) return success('N5_NOOP', { projection: boundedProjection(existing.state, existing), transition_id: sha256({ repository: request.repository, parent_issue: request.parent_issue, before: existing.body_digest }) });
         return failure('N5_SCOPE_REJECTED');
       }
+      const legacy = parseLegacyParent(first.fetched.body, { complete: first.fetched.complete !== false });
+      if (legacy.ok || legacy.legacy === true) return failure('N5_SCOPE_REJECTED', { migration_required: true, source_version: legacy.source_version || LEGACY_V0_VERSION, source_body_digest: legacy.body_digest || sha256(first.fetched.body) });
+      if (legacyAuthorityResidue(first.fetched.body)) return failure('PARENT_PARSE_UNCERTAIN');
       const rendered = renderManagedBlock('parent', auth.mutation_scope.update.state);
       const separator = first.fetched.body.length === 0 || first.fetched.body.endsWith('\n') ? '' : '\n';
       const nextBody = first.fetched.body + separator + rendered;
@@ -1221,7 +1254,7 @@ module.exports = Object.freeze({
   SECTION_ORDER, FAILURE_CODES, SUCCESS_CODES, RED_FIRST_CASES, canonicalJson, sha256, isDigest, isSha,
   isPublicSafeEvidence, authorityBoundary, transactionContract, renderManagedBlock, parseManagedBlock,
   replaceManagedBlock, validateTracker, boundedProjection, classifyBodyLimit, compactTerminal, applyBoundedUpdate,
-  buildReviewInventory, evaluateMateriality, classifyFinding, authorizeReviewMutation, resolveFinding,
+  buildReviewInventory, evaluateMateriality, classifyFinding, normalizeFindingEvidence, authorizeReviewMutation, resolveFinding,
   registerDeferredFinding, validateDeferredFindingRecord, revalidateDeferredFinding, projectA4Review, codexReviewState, autoCodeReadiness, adjudicateHistoricalPr310,
   findingEvidenceDigest, deferredRootDigest, durableEvidenceDigest, normalizeDurableEvidence, parseLegacyParent, rejectHistoricalRevival, nextAction, createRuntime,
 });
@@ -1311,6 +1344,7 @@ function normalizeDurableEvidence(item, proof) {
     || !isSafeLabel(proof.disposition || '')
     || !isSafeLabel(proof.outcome || '')) return failure('PARENT_BODY_LIMIT');
   if (item.outcome !== undefined && item.outcome !== null && proof.outcome !== item.outcome) return failure('PARENT_BODY_LIMIT');
+  if (item.objective_status === 'completed' && proof.disposition !== 'accepted') return failure('PARENT_BODY_LIMIT');
   const represented = representedPrNumber(item);
   if (represented.invalid) return failure('PARENT_BODY_LIMIT');
   let pr = null;
@@ -1351,6 +1385,12 @@ const LEGACY_SECTION_ORDER = Object.freeze([
   'Governance ownership',
   'Mandatory parent reconciliation',
 ]);
+function legacyAuthorityResidue(body) {
+  if (typeof body !== 'string') return false;
+  const headings = [...body.matchAll(/^## (.+)$/gm)].map((match) => match[1].trim());
+  return headings.some((heading) => LEGACY_SECTION_ORDER.includes(heading))
+    || /(?:^|\n)- (?:Legacy tracker version|Tracker version|Format version):\s*pre-n5-/.test(body);
+}
 function legacySectionBody(body, names, name) {
   const index = names.findIndex((entry) => entry.name === name);
   const next = index + 1 < names.length ? names[index + 1] : body.length;
@@ -1432,7 +1472,7 @@ function parseLegacyParent(body, options = {}) {
   };
   renumberPending(state);
   const valid = validateTracker(state);
-  if (!valid.ok) return valid;
+  if (!valid.ok) return { ...valid, legacy: true, source_version, body_digest: sha256(body) };
   const start = starts[0].start;
   return success('N5_VALID', {
     state,

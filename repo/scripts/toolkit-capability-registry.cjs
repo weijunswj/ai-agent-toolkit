@@ -720,6 +720,7 @@ function resolveRepositoryIdentity(options = {}) {
   return {
     valid: true,
     repository_id: repositoryId,
+    canonical_remote: remote.canonical,
     identity_contract: IDENTITY_CONTRACT,
     remote_contract: a1.REMOTE_IDENTITY_CONTRACT_VERSION,
     persisted_fields: ['repository_id'],
@@ -786,6 +787,7 @@ function getRepositoryStatus(options = {}) {
       status: Object.values(capabilities).every((entry) => entry.state !== 'unresolved') ? 'healthy' : 'unresolved',
       actionable: false,
       repository_id: identity.repository_id,
+      canonical_remote: identity.canonical_remote,
       registry_revision: snapshot.registry_revision,
       snapshot_hash: snapshot.snapshot_hash,
       capabilities,

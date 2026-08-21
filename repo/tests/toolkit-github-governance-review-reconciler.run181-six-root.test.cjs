@@ -26,7 +26,11 @@ function body(state = parentState(), prefix = 'outside-prefix\n', suffix = '\nou
 }
 
 function enabledA2(repository_id = repositoryId, extra = {}) {
-  return { status: () => ({ repository_id, capabilities: { 'repository.governance': { state: 'enabled' } }, ...extra }) };
+  const canonical_remote = extra.canonical_remote || 'https://github.com/weijunswj/ai-agent-toolkit.git';
+  return {
+    resolveRepositoryIdentity: () => ({ valid: true, repository_id, canonical_remote }),
+    getRepositoryStatus: () => ({ status: 'healthy', actionable: false, repository_id, canonical_remote, capabilities: { 'repository.governance': { state: 'enabled' } }, ...extra }),
+  };
 }
 
 function authority() {
@@ -82,7 +86,7 @@ function managedTarget(sourceBody) {
 }
 
 function legacyBody(version = n5.LEGACY_V0_VERSION, extra = '') {
-  return `legacy-prefix\n## Queue authority\n- Repository: ${repository}\n- Parent issue: #240\n- Legacy tracker version: ${version}\n## Current execution\n- Child: child-1 | Issue: #299 | Objective: N5 governance | PR: none\n## Active queue\n- Child: child-2 | Issue: #320 | Objective: Truthful review inventory | PR: none\n## Completed or disposed\n- Child: child-3 | Issue: #321 | Objective: Completed repair | PR: #350 | PR state: merged | Objective status: completed | Outcome: Delivered safely\n## Completion gate\n- Gate: strict\n## Governance ownership\n- Owner: controller\n## Mandatory parent reconciliation\n- Required: yes\n${extra}`;
+  return `legacy-prefix\n## Queue authority\n- Repository: ${repository}\n- Parent issue: #240\n- Legacy tracker version: ${version}\n## Current execution\n- Child: child-1 | Issue: #299 | Objective: N5 governance | PR: none\n## Active queue\n- Child: child-2 | Issue: #320 | Objective: Truthful review inventory | PR: none\n## Completed or disposed\n- Child: child-3 | Issue: #321 | Objective: Completed repair | PR: #350 | PR state: merged | Objective status: disposed | Outcome: Disposed without delivery\n## Completion gate\n- Gate: strict\n## Governance ownership\n- Owner: controller\n## Mandatory parent reconciliation\n- Required: yes\n${extra}`;
 }
 
 function reviewInput(overrides = {}) {
@@ -103,7 +107,7 @@ test('B1 binds A2 repository_id before A1 or GitHub and rejects overrides', () =
   for (const [a2, code] of [
     [{ status: () => ({ capabilities: { 'repository.governance': { state: 'enabled' } } }) }, 'N5_CONSENT_REQUIRED'],
     [enabledA2('malformed'), 'N5_CONSENT_REQUIRED'],
-    [enabledA2(repositoryId, { repository: 'other/repo' }), 'N5_REPOSITORY_IDENTITY_MISMATCH'],
+    [enabledA2(repositoryId, { canonical_remote: 'https://github.com/other/repo.git' }), 'N5_REPOSITORY_IDENTITY_MISMATCH'],
   ]) {
     let brokerCalls = 0;
     const github = adapter(body());
@@ -170,7 +174,7 @@ test('B5 refuses terminal truncation without proof and retains identity, refs, d
   const terminal = { child_id: 'done', issue_number: 321, lifecycle: 'terminal', implementation_pr: { number: 355, state: 'merged' }, objective_status: 'completed', outcome: 'delivered', detail: 'x'.repeat(500) };
   const state = parentState({ terminal: [terminal] });
   assert.equal(n5.compactTerminal(state).code, 'PARENT_BODY_LIMIT');
-  const proof = { server_authoritative: true, verifiable: true, complete: true, child_issue: 321, disposition: 'completed', outcome: 'delivered', parent_chronology_ref: 'issue/240#run-181', pr: { number: 355, public_source_ref: 'pull/355' }, accepted_commit: { sha: '6ae424689d4af042737c403f3a1dc030fbeb0cc3', public_source_ref: 'commit/6ae4246' }, evidence_digest: null };
+  const proof = { server_authoritative: true, verifiable: true, complete: true, child_issue: 321, disposition: 'accepted', outcome: 'delivered', parent_chronology_ref: 'issue/240#run-181', pr: { number: 355, public_source_ref: 'pull/355' }, accepted_commit: { sha: '6ae424689d4af042737c403f3a1dc030fbeb0cc3', public_source_ref: 'commit/6ae4246' }, evidence_digest: null };
   proof.evidence_digest = n5.durableEvidenceDigest(terminal, proof);
   const compacted = n5.compactTerminal(state, { durable_evidence: proof });
   assert.equal(compacted.ok, true);

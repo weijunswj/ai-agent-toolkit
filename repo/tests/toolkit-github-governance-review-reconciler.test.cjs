@@ -19,7 +19,12 @@ function childState(overrides = {}) {
     scope: { design_lock: 'DL-N5-GITHUB-GOVERNANCE-REVIEW-RECONCILER-001-G2-R1', frozen: true, summary: 'N5 only' }, blockers: [], next_gate: 'Fresh exact-head Web validation', implementation_pr: { number: 0, state: 'not_opened' }, technical_detail: 'Current-state detail only.', ...overrides };
 }
 function body(kind, state, prefix = 'owner-before\n', suffix = '\nowner-after\n') { return prefix + n5.renderManagedBlock(kind, state) + suffix; }
-function enabledA2() { return { status: () => ({ repository_id: repositoryId, capabilities: { 'repository.governance': { state: 'enabled' } } }) }; }
+function enabledA2(canonical_remote = 'https://github.com/weijunswj/ai-agent-toolkit.git') {
+  return {
+    resolveRepositoryIdentity: () => ({ valid: true, repository_id: repositoryId, canonical_remote }),
+    getRepositoryStatus: () => ({ status: 'healthy', actionable: false, repository_id: repositoryId, canonical_remote, capabilities: { 'repository.governance': { state: 'enabled' } } }),
+  };
+}
 function authorisedA1() { return { authorize: ({ operation }) => ({ decision: 'allow', operation_type: operation.type, operation_digest: a1.operationDigest(operation), target_digest: a1.targetDigest(operation) }) }; }
 function adapter(initialBody, options = {}) { let current = initialBody; let reads = 0; let writes = 0; const sequence = options.sequence || []; return {
   getParent() { const value = sequence[reads] || { body: current, complete: true, revision: `r${reads}` }; reads += 1; return value; },

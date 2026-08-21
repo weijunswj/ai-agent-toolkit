@@ -26,8 +26,11 @@ function body(state = parentState()) {
   return `owner-before\n${n5.renderManagedBlock('parent', state)}owner-after\n`;
 }
 
-function enabledA2() {
-  return { status: () => ({ repository_id: repositoryId, capabilities: { 'repository.governance': { state: 'enabled' } } }) };
+function enabledA2(canonical_remote = 'https://github.com/weijunswj/ai-agent-toolkit.git') {
+  return {
+    resolveRepositoryIdentity: () => ({ valid: true, repository_id: repositoryId, canonical_remote }),
+    getRepositoryStatus: () => ({ status: 'healthy', actionable: false, repository_id: repositoryId, canonical_remote, capabilities: { 'repository.governance': { state: 'enabled' } } }),
+  };
 }
 
 function githubAdapter(initialBody) {
@@ -101,7 +104,7 @@ function runWithBroker({ broker, inputOverrides = {}, runtimeRepository = reposi
   const result = n5.createRuntime({
     repository: runtimeRepository,
     authority_broker: broker,
-    a2: enabledA2(),
+    a2: enabledA2('https://github.com/' + runtimeRepository + '.git'),
     github,
   }).reconcile(request(inputOverrides));
   return { result, github };
