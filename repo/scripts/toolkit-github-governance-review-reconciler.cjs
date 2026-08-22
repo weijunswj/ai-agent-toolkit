@@ -1436,6 +1436,7 @@ function createRuntime(options = {}) {
       if (residue) {
         const existing = parseManagedBlock(first.fetched.body, 'parent', { complete: first.fetched.complete !== false });
         if (!existing.ok) return existing;
+        if (n5MarkerFamilyResidue(existing.prefix) || n5MarkerFamilyResidue(existing.suffix)) return failure('PARENT_PARSE_UNCERTAIN');
         if (canonicalJson(existing.state) === canonicalJson(auth.mutation_scope.update.state)) return success('N5_NOOP', { projection: boundedProjection(existing.state, existing), transition_id: sha256({ repository: request.repository, parent_issue: request.parent_issue, before: existing.body_digest }) });
         return failure('N5_SCOPE_REJECTED');
       }
