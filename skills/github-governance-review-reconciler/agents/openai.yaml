@@ -1,0 +1,12 @@
+interface:
+  display_name: N5 GitHub Governance and Truthful PR-Review Reconciler
+  short_description: Govern parent state and truthful review evidence explicitly.
+  primary_color: '#1D4ED8'
+  default_prompt: Use $github-governance-review-reconciler only for explicit current-main N5 parent/direct-child governance, bounded reconciliation, truthful PR-review inventory, or Deferred Findings work; preserve A1-A4 and Web finality boundaries.
+policy:
+  products:
+    - chatgpt
+    - codex
+    - api
+    - atlas
+  allow_implicit_invocation: false

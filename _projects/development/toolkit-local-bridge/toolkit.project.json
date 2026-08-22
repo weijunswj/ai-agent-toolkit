@@ -5,9 +5,9 @@
   "title": "Toolkit Local Bridge",
   "module_path": "_projects/development/toolkit-local-bridge",
   "main_path": "_projects/development/toolkit-local-bridge/_main",
-  "version": "2.9.12",
+  "version": "2.10.0",
   "version_policy": "semver",
-  "version_notes": "Publishes dedicated local n8n export identity resolution and deterministic transaction-race coverage across Toolkit helper surfaces.",
+  "version_notes": "Adds the explicit-only N5 GitHub governance and truthful PR-review reconciler skill while retaining deterministic Toolkit helper-surface transaction coverage.",
   "outputs": [
     {
       "kind": "curated",

@@ -1,0 +1,17 @@
+{
+  "grammar_version": "toolkit.n5.tracker-grammar.v3",
+  "accepted_tracker_version": "v3",
+  "legacy_versions": { "v1": "reject", "v2": "reject", "unversioned": "recognise-as-pre-n5-seven-section-v0", "pre-n5-seven-section-v0": "migrate", "v3": "accepted" },
+  "legacy_migration": { "recognised_versions": ["v3", "pre-n5-seven-section-v0"], "section_order": ["Queue authority", "Current execution", "Active queue", "Completed or disposed", "Completion gate", "Governance ownership", "Mandatory parent reconciliation"], "exact_heading_count": 7, "whole_body_digest_target": true, "preserve_prefix_and_suffix": true, "single_write_readback": true },
+  "managed_markers": {
+    "parent": { "begin": "<!-- AI-AGENT-TOOLKIT:N5-PARENT:BEGIN v3 -->", "end": "<!-- AI-AGENT-TOOLKIT:N5-PARENT:END -->" },
+    "child": { "begin": "<!-- AI-AGENT-TOOLKIT:N5-CHILD:BEGIN v3 -->", "end": "<!-- AI-AGENT-TOOLKIT:N5-CHILD:END -->" },
+    "pr": { "begin": "<!-- AI-AGENT-TOOLKIT:N5-PR:BEGIN v3 -->", "end": "<!-- AI-AGENT-TOOLKIT:N5-PR:END -->" },
+    "state": { "begin": "<!-- AI-AGENT-TOOLKIT:N5-STATE:BEGIN v1 -->", "end": "<!-- AI-AGENT-TOOLKIT:N5-STATE:END -->" }
+  },
+  "parent_sections": ["Metadata", "Current work", "Pending work", "Other open PRs", "Terminal and repository detail", "Deferred Findings", "Tracker format contract"],
+  "child_sections": ["Metadata", "Progress checklist", "Objective", "Scope and Design Lock", "Current blockers and next gate", "Technical and repository detail", "Tracker format contract"],
+  "pr_sections": ["Metadata", "Current disposition", "Scope", "Changes, evidence, validation and exact identity", "Repository-specific detail", "Tracker format contract"],
+  "lifecycle": ["pending", "current", "terminal"],
+  "rules": { "one_canonical_parent": true, "direct_siblings_only": true, "current_max": 1, "flat_pending_queue": true, "queue_order_contiguous": true, "no_competing_subqueues": true, "deferred_findings_not_queue_items": true, "current_state_projection_not_event_log": true, "exact_repository_identity": true, "global_pr_uniqueness": true, "terminal_objective_status_required": true, "terminal_completion_requires_delivery": true, "terminal_completed_requires_accepted_evidence": true, "initialise_unmanaged_only": true, "legacy_initialise_requires_migrate": true, "ambiguous_authority_residue_reject": true }
+}

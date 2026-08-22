@@ -517,13 +517,13 @@ test('Toolkit plugin packaged version surfaces stay aligned', () => {
   const bridgePath = path.join(cwd, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
   fs.writeFileSync(
     bridgePath,
-    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.9.12';", "const BRIDGE_VERSION = '2.2.1';"),
+    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.10.0';", "const BRIDGE_VERSION = '2.2.1';"),
     'utf8'
   );
 
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.9\.12/i);
+  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.10\.0/i);
 });
 
 test('skill discovery includes migrated skills', () => {
@@ -559,6 +559,7 @@ test('project manifests include the current project modules without repo-wide MC
     'development.ai-coding-agent-rules',
     'development.bounded-local-execution-loop',
     'development.control-plane-kernel',
+    'development.github-governance-review-reconciler',
     'development.hostinger-coolify-production-guide',
     'development.independent-assurance-web-finality',
     'development.local-ai-stack-safety',
