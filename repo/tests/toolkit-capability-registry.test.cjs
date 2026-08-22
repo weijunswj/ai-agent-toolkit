@@ -97,17 +97,19 @@ test('A2 source/runtime contracts are closed and reuse the accepted A1 remote co
   const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
 
   assert.equal(runtime.REMOTE_IDENTITY_CONTRACT_VERSION, a1.REMOTE_IDENTITY_CONTRACT_VERSION);
-  assert.deepEqual(runtime.CAPABILITIES, ['repository.governance', 'execution_loop']);
+  assert.deepEqual(runtime.CAPABILITIES, ['repository.governance', 'execution_loop', 'repository.protection']);
   assert.deepEqual(policy.capabilities.map((entry) => entry.id), runtime.CAPABILITIES);
   for (const policyCapability of policy.capabilities) {
     const runtimeCapability = runtime.CONTRACT_SEMANTICS.capabilities[policyCapability.id];
-    assert.deepEqual(runtimeCapability, {
+    const expected = {
       effect_id: policyCapability.effect_id,
       boundary_id: policyCapability.boundary_id,
       question_id: policyCapability.question_id,
       choice_semantic_ids: policyCapability.choice_semantic_ids,
       decision_semantic_ids: policyCapability.decision_semantic_ids,
-    });
+    };
+    if (policyCapability.scopes) expected.scopes = policyCapability.scopes;
+    assert.deepEqual(runtimeCapability, expected);
   }
   assert.deepEqual([...policy.transitions].sort(), [...runtime.CONTRACT_SEMANTICS.transitions].sort());
   assert.deepEqual(schema.properties.repositories.maxItems, runtime.MAX_REPOSITORIES);
@@ -127,8 +129,9 @@ test('global installation and detection never grant either capability', (t) => {
   }));
 
   assert.equal(result.status, 'unresolved');
-  assert.deepEqual(result.question_bank.questions.map((question) => question.capability_id), runtime.CAPABILITIES);
-  assert.equal(result.question_bank.questions.some((question) => question.capability_id === 'codex_review'), false);
+  assert.deepEqual(result.question_bank.questions.map((question) => question.capability_id), ['repository.governance', 'execution_loop']);
+  assert.equal(result.capabilities['repository.protection'].state, 'unresolved');
+  assert.equal(result.question_bank.questions.some((question) => question.capability_id === 'repository.protection'), false);
   assert.equal(fs.existsSync(ctx.registryPath), false);
 });
 

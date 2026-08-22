@@ -1,0 +1,52 @@
+{
+  "id": "cicd.trusted-ci-repository-protection",
+  "category": "cicd",
+  "name": "trusted-ci-repository-protection",
+  "title": "N6 Trusted CI Repository Protection",
+  "module_path": "_projects/cicd/trusted-ci-repository-protection",
+  "main_path": "_projects/cicd/trusted-ci-repository-protection/_main",
+  "version": "1.0.0",
+  "version_policy": "semver",
+  "version_notes": "First-party source-only N6 trusted CI Gate, evidence, least-privilege publisher, workflow, and protection projection contract.",
+  "outputs": [],
+  "writes": {
+    "allowed": [],
+    "denied": [
+      ".env*",
+      ".n8n-local/**",
+      ".tmp/**",
+      "**/*credential*",
+      "**/*.key",
+      "**/*.pem",
+      "node_modules/**",
+      "dist/**",
+      "_dist/**",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "GEMINI.md",
+      ".agents/**",
+      ".codex-plugin/**",
+      ".claude-plugin/**",
+      "user-home/**",
+      "host-adapters/**"
+    ]
+  },
+  "requires_approval": true,
+  "run_commands_by_default": false,
+  "live_actions": "explicit_confirmation_only",
+  "ci_live_actions": false,
+  "project": {
+    "name": "N6 Trusted CI Repository Protection",
+    "category": "cicd",
+    "summary": "Source-only protected CI Gate evidence and preview-only repository-protection reconciliation without provider mutation or fake hosted evidence."
+  },
+  "surface": {
+    "publish_as": "source_only",
+    "skill": {
+      "status": "not_applicable"
+    },
+    "mcp": {
+      "status": "not_applicable"
+    }
+  }
+}

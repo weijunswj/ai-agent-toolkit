@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.n6.trusted-ci-repository-protection.v1",
+  "title": "N6 Trusted CI Repository Protection",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "modes", "evidence", "publisher", "gate", "composition", "protection", "safety"],
+  "properties": {
+    "contract_version": { "const": "toolkit.n6.trusted-ci-repository-protection.v1" },
+    "modes": {
+      "type": "array",
+      "const": ["secure-minimal-app", "secure-native", "advisory-only-unsupported"]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "identity", "producer", "components", "archive", "digest"],
+      "properties": {
+        "schema": { "const": "toolkit.n6.ci-evidence.v1" },
+        "identity": {
+          "type": "array",
+          "const": ["repository_id", "pr", "head_sha", "base_sha", "merge_sha", "workflow_identity", "workflow_source_sha", "run_id", "attempt", "generation", "contract_digest"]
+        },
+        "producer": { "const": "protected-ci-gate" },
+        "components": { "type": "array", "minItems": 1, "uniqueItems": true },
+        "archive": { "type": "object", "additionalProperties": false, "required": ["relative_paths_only", "no_symlinks", "max_bytes"], "properties": { "relative_paths_only": { "const": true }, "no_symlinks": { "const": true }, "max_bytes": { "type": "integer", "minimum": 1 } } },
+        "digest": { "const": "sha256-over-canonical-evidence-without-evidence_digest" }
+      }
+    },
+    "publisher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol_version", "context", "kind", "permissions", "commit_status", "idempotency"],
+      "properties": {
+        "protocol_version": { "const": "toolkit.n6.app-publisher.v1" },
+        "context": { "const": "CI Gate" },
+        "kind": { "const": "github-app" },
+        "permissions": { "const": { "checks": "write", "statuses": "none", "metadata": "read", "contents": "read", "pull_requests": "read", "actions": "read", "administration": "none", "deployments": "none", "secrets": "none", "issues": "none", "reviews": "none", "members": "none", "packages": "none", "webhooks": "none" } },
+        "commit_status": { "const": false },
+        "idempotency": { "const": "external_id-bound-readback" }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["context", "external_id_prefix", "states", "duplicate_policy"],
+      "properties": {
+        "context": { "const": "CI Gate" },
+        "external_id_prefix": { "const": "n6-ci-gate-v1:" },
+        "states": { "type": "array", "minItems": 1, "uniqueItems": true },
+        "duplicate_policy": { "const": "ambiguous-until-readback" }
+      }
+    },
+    "composition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "path_ownership", "candidate_declared_coverage", "non_ci_evidence"],
+      "properties": {
+        "schema": { "const": "toolkit.n6.ci-composition.v1" },
+        "path_ownership": { "const": "protected-base-path-class-evaluation" },
+        "candidate_declared_coverage": { "const": false },
+        "non_ci_evidence": { "type": "array", "uniqueItems": true }
+      }
+    },
+    "protection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["desired_schema", "effective_schema", "default_branch", "ownership", "mutation", "consent"],
+      "properties": {
+        "desired_schema": { "const": "toolkit.n6.desired-protection.v1" },
+        "effective_schema": { "const": "toolkit.n6.effective-protection.v1" },
+        "default_branch": { "const": "main" },
+        "ownership": { "const": ["N6-owned", "organisation-managed", "owner-managed", "overlapping-compatible", "unknown", "overlapping-conflicting"] },
+        "mutation": { "const": "preview-only-local-binding" },
+        "consent": { "const": "repository.protection" }
+      }
+    },
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["live_provider_calls", "app_installation", "provider_uat", "finality"],
+      "properties": {
+        "live_provider_calls": { "const": false },
+        "app_installation": { "const": false },
+        "provider_uat": { "const": false },
+        "finality": { "const": false }
+      }
+    }
+  }
+}

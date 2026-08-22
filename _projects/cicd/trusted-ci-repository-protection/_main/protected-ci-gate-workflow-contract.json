@@ -1,0 +1,27 @@
+{
+  "contract_version": "toolkit.n6.protected-ci-gate-workflow.v1",
+  "workflow_id": "n6-protected-ci-gate",
+  "workflow_name": "CI Gate",
+  "base_ref": "refs/heads/main",
+  "allowed_triggers": ["pull_request_target", "merge_group"],
+  "forbidden_triggers": ["pull_request", "push", "workflow_dispatch", "workflow_run", "workflow_call", "schedule", "issue_comment", "repository_dispatch"],
+  "candidate_code_execution": false,
+  "permissions": {
+    "contents": "read",
+    "actions": "read",
+    "checks": "read"
+  },
+  "publisher": {
+    "protocol_version": "toolkit.n6.app-publisher.v1",
+    "context": "CI Gate"
+  },
+  "actions": ["actions/checkout@v4"],
+  "checkout": {
+    "ref": "github.event.repository.default_branch",
+    "persist_credentials": false,
+    "candidate_head_checkout": false
+  },
+  "required_steps": ["validate-protected-workflow", "git-diff-check", "validate-trusted-ci-composition"],
+  "secrets": false,
+  "statuses": false
+}

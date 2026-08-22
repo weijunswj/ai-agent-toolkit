@@ -1,0 +1,27 @@
+name: CI Gate
+run-name: CI Gate ${{ github.event.pull_request.number || github.run_id }}
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+  merge_group:
+permissions:
+  contents: read
+  actions: read
+  checks: read
+jobs:
+  ci-gate:
+    name: CI Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout protected base
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Validate protected workflow contract
+        run: node repo/scripts/toolkit-trusted-ci-repository-protection-workflow.cjs --validate-source
+      - name: Check repository diff hygiene
+        run: git diff --check
+      - name: Validate trusted CI composition
+        run: node repo/scripts/toolkit-trusted-ci-repository-protection-workflow.cjs --validate-composition

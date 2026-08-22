@@ -1,0 +1,86 @@
+{
+  "contract_version": "toolkit.n6.trusted-ci-repository-protection.v1",
+  "modes": ["secure-minimal-app", "secure-native", "advisory-only-unsupported"],
+  "active_baseline_mode": "secure-minimal-app",
+  "secure_native": {
+    "requires": ["complete", "policy_semantics", "readback", "entitlement", "publisher"],
+    "all_must_be_true": true
+  },
+  "advisory_only_unsupported": {
+    "authoritative_result": "blocked",
+    "reason": "unsupported mode cannot become a required check or protection authority"
+  },
+  "gate": {
+    "context": "CI Gate",
+    "external_id_prefix": "n6-ci-gate-v1:",
+    "identity": ["repository_id", "pr", "head_sha", "base_sha", "merge_sha", "protected_workflow_identity", "protected_workflow_source_sha", "contract_digest", "attempt", "generation"],
+    "duplicate_result": "ambiguous-until-readback",
+    "head_movement": "stale",
+    "base_movement": "stale",
+    "merge_movement": "stale"
+  },
+  "evidence": {
+    "schema": "toolkit.n6.ci-evidence.v1",
+    "producer": "protected-ci-gate",
+    "candidate_declared_components": false,
+    "digest": "sha256-over-canonical-evidence-without-evidence_digest",
+    "archive": {
+      "relative_paths_only": true,
+      "no_symlinks": true,
+      "duplicate_paths": "block",
+      "max_entries": 256,
+      "max_bytes": 4194304
+    }
+  },
+  "composition": {
+    "schema": "toolkit.n6.ci-composition.v1",
+    "required_owner": "protected-ci-gate",
+    "path_ownership": "protected-base-path-class-evaluation",
+    "unknown_relevant_path": "block",
+    "candidate_declared_not_applicable": "block",
+    "dependency_setup_missing": "block",
+    "non_ci_evidence": ["provider-live-uat", "production-deployment", "github-app-installation", "owner-consent", "native-host-uat"]
+  },
+  "publisher": {
+    "protocol_version": "toolkit.n6.app-publisher.v1",
+    "kind": "github-app",
+    "context": "CI Gate",
+    "permissions": {
+      "checks": "write",
+      "statuses": "none",
+      "metadata": "read",
+      "contents": "read",
+      "pull_requests": "read",
+      "actions": "read",
+      "administration": "none",
+      "deployments": "none",
+      "secrets": "none",
+      "issues": "none",
+      "reviews": "none",
+      "members": "none",
+      "packages": "none",
+      "webhooks": "none"
+    },
+    "commit_status": false,
+    "idempotency": "external_id-bound-readback"
+  },
+  "protection": {
+    "desired_schema": "toolkit.n6.desired-protection.v1",
+    "effective_schema": "toolkit.n6.effective-protection.v1",
+    "default_branch": "main",
+    "ownership_classes": ["N6-owned", "organisation-managed", "owner-managed", "overlapping-compatible", "unknown", "overlapping-conflicting"],
+    "unknown_or_conflicting": "block",
+    "mutation": "preview-only-local-binding",
+    "consent_capability": "repository.protection",
+    "consent_is_not_provider_authority": true
+  },
+  "forbidden": {
+    "live_provider_calls": true,
+    "app_installation": true,
+    "required_check_activation": true,
+    "ruleset_mutation": true,
+    "commit_status_publication": true,
+    "provider_uat": true,
+    "finality": true
+  }
+}

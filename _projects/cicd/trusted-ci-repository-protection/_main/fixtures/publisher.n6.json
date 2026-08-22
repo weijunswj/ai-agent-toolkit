@@ -1,0 +1,22 @@
+{
+  "kind": "github-app",
+  "integration_id": "trusted-ci-app",
+  "installation_id": "fixture-installation",
+  "permissions": {
+    "checks": "write",
+    "statuses": "none",
+    "metadata": "read",
+    "contents": "read",
+    "pull_requests": "read",
+    "actions": "read",
+    "administration": "none",
+    "deployments": "none",
+    "secrets": "none",
+    "issues": "none",
+    "reviews": "none",
+    "members": "none",
+    "packages": "none",
+    "webhooks": "none"
+  },
+  "source": "trusted-protected-workflow"
+}

@@ -8,19 +8,35 @@ const path = require('node:path');
 
 const a1 = require('./toolkit-control-plane/control-plane-kernel.cjs');
 
-const REGISTRY_SCHEMA = 'toolkit.repository-capability-registry.v1';
+const REGISTRY_SCHEMA = 'toolkit.repository-capability-registry.v2';
 const IDENTITY_CONTRACT = 'toolkit.repository-identity.v1';
-const CAPABILITY_CONTRACT = 'toolkit.repository-capability.v1';
-const SCHEMA_VERSION = 1;
+const CAPABILITY_CONTRACT = 'toolkit.repository-capability.v2';
+const SCHEMA_VERSION = 2;
+const LEGACY_REGISTRY_SCHEMA = 'toolkit.repository-capability-registry.v1';
+const LEGACY_CAPABILITY_CONTRACT = 'toolkit.repository-capability.v1';
+const LEGACY_SCHEMA_VERSION = 1;
+const LEGACY_CONTRACT_DIGEST = '79f3b6fa812ffa6775d603ed66b2937e242745488f281d02c914f867fb491602';
+const MIGRATION_SCHEMA = 'toolkit.repository-capability-registry.migration.v1';
+const MIGRATION_ALGORITHM = 'v1-to-v2-local-atomic';
 const MAX_REGISTRY_BYTES = 1024 * 1024;
 const MAX_REPOSITORIES = 128;
-const MAX_CAPABILITIES_PER_REPOSITORY = 2;
+const MAX_CAPABILITIES_PER_REPOSITORY = 3;
 const MAX_LOCK_BYTES = 4096;
 const LOCK_SCHEMA = 'toolkit.repository-capability-registry.lock.v1';
 const TRANSACTION_SCHEMA = 'toolkit.repository-capability-registry.transaction.v1';
 const REGISTRY_BASENAME = 'repository-governance.v1.json';
 const MAX_TRANSACTION_BYTES = 4096;
-const CAPABILITIES = Object.freeze(['repository.governance', 'execution_loop']);
+const CAPABILITIES = Object.freeze(['repository.governance', 'execution_loop', 'repository.protection']);
+const ENTRY_CAPABILITIES = Object.freeze(['repository.governance', 'execution_loop']);
+const PROTECTION_SCOPES = Object.freeze([
+  'inspect',
+  'ci-enrolment',
+  'publisher-enrolment',
+  'required-check-activation',
+  'protection-mutation',
+  'drift-repair',
+  'rollback',
+]);
 const DURABLE_STATES = Object.freeze(['enabled', 'disabled']);
 const RUNTIME_STATES = Object.freeze(['unresolved', 'enabled', 'disabled']);
 const DECISION_OPERATIONS = Object.freeze(['enable', 'decline', 'disable']);
@@ -54,12 +70,26 @@ const CAPABILITY_DEFINITIONS = Object.freeze({
       'execution_loop.reopen',
     ]),
   }),
+  'repository.protection': Object.freeze({
+    id: 'repository.protection',
+    effect_id: 'n6-repository-protection-reconciliation-consent-only',
+    boundary_id: 'no-ci-gate-finality-or-live-provider-authority',
+    question_id: 'repository.protection.question',
+    choices: Object.freeze(['decline', 'enable']),
+    decision_semantic_ids: Object.freeze([
+      'repository.protection.decline',
+      'repository.protection.enable',
+      'repository.protection.disable',
+      'repository.protection.reopen',
+    ]),
+    scopes: PROTECTION_SCOPES,
+  }),
 });
 
 const CONTRACT_SEMANTICS = Object.freeze({
   registry_schema: { id: REGISTRY_SCHEMA, version: SCHEMA_VERSION },
   identity_contract: { id: IDENTITY_CONTRACT, version: 1 },
-  capability_contract: { id: CAPABILITY_CONTRACT, version: 1 },
+  capability_contract: { id: CAPABILITY_CONTRACT, version: 2 },
   states: ['disabled', 'enabled', 'unresolved'],
   transitions: [
     'disabled->enable->enabled',
@@ -89,6 +119,70 @@ const CONTRACT_SEMANTICS = Object.freeze({
         'execution_loop.enable',
       ],
       decision_semantic_ids: [...CAPABILITY_DEFINITIONS.execution_loop.decision_semantic_ids],
+    },
+    'repository.protection': {
+      effect_id: CAPABILITY_DEFINITIONS['repository.protection'].effect_id,
+      boundary_id: CAPABILITY_DEFINITIONS['repository.protection'].boundary_id,
+      question_id: CAPABILITY_DEFINITIONS['repository.protection'].question_id,
+      choice_semantic_ids: [
+        'repository.protection.decline',
+        'repository.protection.enable',
+      ],
+      decision_semantic_ids: [...CAPABILITY_DEFINITIONS['repository.protection'].decision_semantic_ids],
+      scopes: [...PROTECTION_SCOPES],
+    },
+  },
+  receipt: {
+    outcome_id: 'explicit-owner-decision-committed',
+    authority_rule_id: 'receipt-is-evidence-not-authority',
+  },
+});
+
+// This tuple is intentionally independent from the active v2 contract. It is
+// the only legacy authority definition accepted by the migration dispatcher.
+const LEGACY_V1_CONTRACT_SEMANTICS = Object.freeze({
+  registry_schema: { id: LEGACY_REGISTRY_SCHEMA, version: LEGACY_SCHEMA_VERSION },
+  identity_contract: { id: IDENTITY_CONTRACT, version: 1 },
+  capability_contract: { id: LEGACY_CAPABILITY_CONTRACT, version: 1 },
+  states: ['disabled', 'enabled', 'unresolved'],
+  transitions: [
+    'disabled->enable->enabled',
+    'enabled->disable->disabled',
+    'enabled->enable->enabled',
+    'disabled->disable->disabled',
+    'unresolved->decline->disabled',
+    'unresolved->enable->enabled',
+  ],
+  capabilities: {
+    'repository.governance': {
+      effect_id: 'repository-governance-local-managed-materials-only',
+      boundary_id: 'no-github-provider-live-or-unrelated-capability-authority',
+      question_id: 'repository.governance.question',
+      choice_semantic_ids: [
+        'repository.governance.decline',
+        'repository.governance.enable',
+      ],
+      decision_semantic_ids: [
+        'repository.governance.decline',
+        'repository.governance.enable',
+        'repository.governance.disable',
+        'repository.governance.reopen',
+      ],
+    },
+    execution_loop: {
+      effect_id: 'future-a3-supported-user-requested-loop-routing-only',
+      boundary_id: 'no-governance-github-provider-live-or-unrelated-capability-authority',
+      question_id: 'execution_loop.question',
+      choice_semantic_ids: [
+        'execution_loop.decline',
+        'execution_loop.enable',
+      ],
+      decision_semantic_ids: [
+        'execution_loop.decline',
+        'execution_loop.enable',
+        'execution_loop.disable',
+        'execution_loop.reopen',
+      ],
     },
   },
   receipt: {
@@ -276,26 +370,110 @@ function receiptPayload(receipt) {
   };
 }
 
-function validateReceipt(receipt, repositoryId, capabilityId, state, decisionKind, provenance, registryRevision) {
-  const receiptKeys = [
-    'receipt_id',
-    'repository_id',
-    'capability_id',
-    'prior_state',
-    'resulting_state',
-    'decision_kind',
-    'provenance_category',
-    'provenance_channel',
-    'scope_digest',
-    'registry_schema',
-    'identity_contract',
-    'capability_contract',
-    'contract_digest',
-    'registry_revision',
-    'outcome',
-    'decided_at',
-  ];
-  if (!exactKeys(receipt, receiptKeys)) fail('REGISTRY_RECEIPT_INVALID');
+const RECEIPT_KEYS = Object.freeze([
+  'receipt_id',
+  'repository_id',
+  'capability_id',
+  'prior_state',
+  'resulting_state',
+  'decision_kind',
+  'provenance_category',
+  'provenance_channel',
+  'scope_digest',
+  'registry_schema',
+  'identity_contract',
+  'capability_contract',
+  'contract_digest',
+  'registry_revision',
+  'outcome',
+  'decided_at',
+]);
+
+function legacyAuthorityProjection() {
+  const source = LEGACY_V1_CONTRACT_SEMANTICS;
+  const capabilities = {};
+  for (const capabilityId of ENTRY_CAPABILITIES) {
+    const definition = source.capabilities[capabilityId];
+    capabilities[capabilityId] = {
+      effect_id: definition.effect_id,
+      boundary_id: definition.boundary_id,
+      question_id: definition.question_id,
+      choice_semantic_ids: [...definition.choice_semantic_ids].sort(),
+      decision_semantic_ids: [...definition.decision_semantic_ids].sort(),
+    };
+  }
+  return {
+    registry_schema: source.registry_schema,
+    identity_contract: source.identity_contract,
+    capability_contract: source.capability_contract,
+    states: [...source.states].sort(),
+    transitions: [...source.transitions].sort(),
+    capabilities,
+    receipt: source.receipt,
+  };
+}
+
+function legacyDecisionSemanticId(capabilityId, operation) {
+  if (!ENTRY_CAPABILITIES.includes(capabilityId)
+    || !['enable', 'decline', 'disable', 'reopen'].includes(operation)) {
+    fail('LEGACY_RECEIPT_INVALID');
+  }
+  const semanticId = capabilityId + '.' + operation;
+  if (!LEGACY_V1_CONTRACT_SEMANTICS.capabilities[capabilityId].decision_semantic_ids.includes(semanticId)) {
+    fail('LEGACY_RECEIPT_INVALID');
+  }
+  return semanticId;
+}
+
+function legacyScopeDigest(repositoryId, capabilityId, operation, channel) {
+  if (!isDigest(repositoryId)
+    || !ENTRY_CAPABILITIES.includes(capabilityId)
+    || !['enable', 'decline', 'disable'].includes(operation)
+    || !['capability-route', 'combined-bank'].includes(channel)) {
+    fail('LEGACY_RECEIPT_INVALID');
+  }
+  return digestValue({
+    identity_contract: IDENTITY_CONTRACT,
+    repository_id: repositoryId,
+    capability_id: capabilityId,
+    operation,
+    choice_semantic_id: legacyDecisionSemanticId(capabilityId, operation),
+    provenance_channel: channel,
+    contract_digest: LEGACY_CONTRACT_DIGEST,
+  });
+}
+
+function validateLegacyReceipt(receipt, repositoryId, capabilityId, state, decisionKind, provenance, registryRevision) {
+  if (!exactKeys(receipt, RECEIPT_KEYS)
+    || !ENTRY_CAPABILITIES.includes(capabilityId)
+    || receipt.repository_id !== repositoryId
+    || receipt.capability_id !== capabilityId
+    || !RUNTIME_STATES.includes(receipt.prior_state)
+    || receipt.resulting_state !== state
+    || receipt.decision_kind !== decisionKind
+    || receipt.provenance_category !== provenance.category
+    || receipt.provenance_channel !== provenance.channel
+    || receipt.scope_digest !== provenance.scope_digest
+    || receipt.scope_digest !== legacyScopeDigest(repositoryId, capabilityId, decisionKind, provenance.channel)
+    || receipt.registry_schema !== LEGACY_REGISTRY_SCHEMA
+    || receipt.identity_contract !== IDENTITY_CONTRACT
+    || receipt.capability_contract !== LEGACY_CAPABILITY_CONTRACT
+    || receipt.contract_digest !== LEGACY_CONTRACT_DIGEST
+    || !isSafeRevision(receipt.registry_revision)
+    || receipt.registry_revision === 0
+    || receipt.registry_revision > registryRevision
+    || receipt.outcome !== 'committed'
+    || !isIsoTimestamp(receipt.decided_at)
+    || !isDigest(receipt.receipt_id)
+    || receipt.receipt_id !== digestValue(receiptPayload(receipt))) {
+    fail('LEGACY_RECEIPT_INVALID');
+  }
+  if (decisionKind === 'decline' && receipt.prior_state !== 'unresolved') fail('LEGACY_RECEIPT_INVALID');
+  if (decisionKind === 'disable' && receipt.prior_state === 'unresolved') fail('LEGACY_RECEIPT_INVALID');
+}
+
+function validateCurrentReceipt(receipt, repositoryId, capabilityId, state, decisionKind, provenance, registryRevision) {
+  if (!exactKeys(receipt, RECEIPT_KEYS)) fail('REGISTRY_RECEIPT_INVALID');
   if (receipt.repository_id !== repositoryId || receipt.capability_id !== capabilityId) fail('REGISTRY_RECEIPT_INVALID');
   if (!RUNTIME_STATES.includes(receipt.prior_state)) fail('REGISTRY_RECEIPT_INVALID');
   if (receipt.resulting_state !== state || receipt.decision_kind !== decisionKind) fail('REGISTRY_RECEIPT_INVALID');
@@ -307,13 +485,158 @@ function validateReceipt(receipt, repositoryId, capabilityId, state, decisionKin
   if (receipt.receipt_id !== digestValue(receiptPayload(receipt))) fail('REGISTRY_RECEIPT_INVALID');
 }
 
+function validateCapabilityEntry(capability, repositoryId, registryRevision, legacyOnly, allowLegacyReceipt = legacyOnly) {
+  const capabilityKeys = ['capability_id', 'state', 'decision_kind', 'provenance', 'receipt'];
+  if (!exactKeys(capability, capabilityKeys)) fail('REGISTRY_MALFORMED');
+  if (!CAPABILITIES.includes(capability.capability_id)) fail('REGISTRY_UNKNOWN_CAPABILITY');
+  if (capability.capability_id === 'repository.protection' && legacyOnly) fail('LEGACY_SCHEMA_INVALID');
+  if (capability.capability_id !== 'repository.protection' && !ENTRY_CAPABILITIES.includes(capability.capability_id)) {
+    fail('REGISTRY_UNKNOWN_CAPABILITY');
+  }
+  if (!DURABLE_STATES.includes(capability.state)) fail('REGISTRY_STATE_INVALID');
+  if (!DECISION_OPERATIONS.includes(capability.decision_kind)) fail('REGISTRY_DECISION_INVALID');
+  if (capability.decision_kind === 'enable' && capability.state !== 'enabled') fail('REGISTRY_DECISION_INVALID');
+  if (capability.decision_kind !== 'enable' && capability.state !== 'disabled') fail('REGISTRY_DECISION_INVALID');
+  const provenance = capability.provenance;
+  if (!exactKeys(provenance, ['category', 'channel', 'scope_digest'])
+    || provenance.category !== 'explicit-owner'
+    || !['combined-bank', 'capability-route'].includes(provenance.channel)
+    || !isDigest(provenance.scope_digest)) fail(legacyOnly ? 'LEGACY_SCHEMA_INVALID' : 'REGISTRY_PROVENANCE_INVALID');
+
+  const isLegacyReceipt = capability.receipt && capability.receipt.registry_schema === LEGACY_REGISTRY_SCHEMA;
+  if (isLegacyReceipt) {
+    if (!allowLegacyReceipt || !ENTRY_CAPABILITIES.includes(capability.capability_id)) fail('LEGACY_RECEIPT_INVALID');
+    if (provenance.scope_digest !== legacyScopeDigest(repositoryId, capability.capability_id, capability.decision_kind, provenance.channel)) {
+      fail('LEGACY_RECEIPT_INVALID');
+    }
+    validateLegacyReceipt(
+      capability.receipt,
+      repositoryId,
+      capability.capability_id,
+      capability.state,
+      capability.decision_kind,
+      provenance,
+      registryRevision,
+    );
+  } else {
+    if (provenance.scope_digest !== scopeDigest(repositoryId, capability.capability_id, capability.decision_kind, provenance.channel)) {
+      fail('REGISTRY_PROVENANCE_INVALID');
+    }
+    validateCurrentReceipt(
+      capability.receipt,
+      repositoryId,
+      capability.capability_id,
+      capability.state,
+      capability.decision_kind,
+      provenance,
+      registryRevision,
+    );
+  }
+  if (capability.decision_kind === 'decline' && capability.receipt.prior_state !== 'unresolved') fail('REGISTRY_DECISION_INVALID');
+  if (capability.decision_kind === 'disable' && capability.receipt.prior_state === 'unresolved') fail('REGISTRY_DECISION_INVALID');
+}
+
+function validateMigrationMetadata(migration) {
+  if (!isRecord(migration)) fail('REGISTRY_MALFORMED');
+  if (exactKeys(migration, ['state']) && migration.state === 'none') return;
+  if (isRecord(migration) && migration.state === 'in_progress') fail('REGISTRY_INTERRUPTED_MIGRATION');
+  const keys = [
+    'schema',
+    'state',
+    'algorithm',
+    'source_registry_schema',
+    'source_schema_version',
+    'source_identity_contract',
+    'source_capability_contract',
+    'source_contract_digest',
+    'source_registry_revision',
+    'source_snapshot_hash',
+    'target_registry_schema',
+    'target_schema_version',
+    'target_identity_contract',
+    'target_capability_contract',
+    'target_contract_digest',
+    'legacy_receipt_ids',
+    'legacy_receipt_digests',
+  ];
+  if (!exactKeys(migration, keys)
+    || migration.schema !== MIGRATION_SCHEMA
+    || migration.state !== 'completed'
+    || migration.algorithm !== MIGRATION_ALGORITHM
+    || migration.source_registry_schema !== LEGACY_REGISTRY_SCHEMA
+    || migration.source_schema_version !== LEGACY_SCHEMA_VERSION
+    || migration.source_identity_contract !== IDENTITY_CONTRACT
+    || migration.source_capability_contract !== LEGACY_CAPABILITY_CONTRACT
+    || migration.source_contract_digest !== LEGACY_CONTRACT_DIGEST
+    || !isSafeRevision(migration.source_registry_revision)
+    || !isDigest(migration.source_snapshot_hash)
+    || migration.target_registry_schema !== REGISTRY_SCHEMA
+    || migration.target_schema_version !== SCHEMA_VERSION
+    || migration.target_identity_contract !== IDENTITY_CONTRACT
+    || migration.target_capability_contract !== CAPABILITY_CONTRACT
+    || migration.target_contract_digest !== CONTRACT_DIGEST
+    || !Array.isArray(migration.legacy_receipt_ids)
+    || !Array.isArray(migration.legacy_receipt_digests)
+    || migration.legacy_receipt_ids.length !== migration.legacy_receipt_digests.length
+    || migration.legacy_receipt_ids.length > MAX_CAPABILITIES_PER_REPOSITORY
+    || migration.legacy_receipt_ids.some((value) => !isDigest(value))
+    || migration.legacy_receipt_digests.some((value) => !isDigest(value))
+    || new Set(migration.legacy_receipt_ids).size !== migration.legacy_receipt_ids.length
+    || new Set(migration.legacy_receipt_digests).size !== migration.legacy_receipt_digests.length
+    || [...migration.legacy_receipt_ids].sort().join(',') !== migration.legacy_receipt_ids.join(',')
+    || [...migration.legacy_receipt_digests].sort().join(',') !== migration.legacy_receipt_digests.join(',')) {
+    fail('REGISTRY_MIGRATION_INVALID');
+  }
+}
+
+function validateLegacyRegistry(registry) {
+  if (!isRecord(registry)) fail('LEGACY_SCHEMA_INVALID');
+  if (registry.schema === LEGACY_REGISTRY_SCHEMA && isSafeRevision(registry.schema_version)
+    && registry.schema_version > LEGACY_SCHEMA_VERSION) fail('REGISTRY_FUTURE_SCHEMA');
+  const rootKeys = [
+    'schema',
+    'schema_version',
+    'identity_contract',
+    'capability_contract',
+    'contract_digest',
+    'registry_revision',
+    'migration',
+    'repositories',
+  ];
+  if (!exactKeys(registry, rootKeys)
+    || registry.schema !== LEGACY_REGISTRY_SCHEMA
+    || registry.schema_version !== LEGACY_SCHEMA_VERSION
+    || registry.identity_contract !== IDENTITY_CONTRACT
+    || registry.capability_contract !== LEGACY_CAPABILITY_CONTRACT) fail('LEGACY_SCHEMA_INVALID');
+  if (digestValue(legacyAuthorityProjection()) !== LEGACY_CONTRACT_DIGEST
+    || registry.contract_digest !== LEGACY_CONTRACT_DIGEST) fail('LEGACY_CONTRACT_INVALID');
+  if (!isSafeRevision(registry.registry_revision)) fail('LEGACY_SCHEMA_INVALID');
+  if (!exactKeys(registry.migration, ['state']) || registry.migration.state !== 'none') fail('REGISTRY_INTERRUPTED_MIGRATION');
+  if (!Array.isArray(registry.repositories) || registry.repositories.length > MAX_REPOSITORIES) fail('LEGACY_SCHEMA_INVALID');
+  const repositoryIds = new Set();
+  for (const repository of registry.repositories) {
+    if (!exactKeys(repository, ['repository_id', 'capabilities'])
+      || !isDigest(repository.repository_id)
+      || repositoryIds.has(repository.repository_id)
+      || !Array.isArray(repository.capabilities)
+      || repository.capabilities.length > ENTRY_CAPABILITIES.length) fail('LEGACY_SCHEMA_INVALID');
+    repositoryIds.add(repository.repository_id);
+    const capabilityIds = new Set();
+    for (const capability of repository.capabilities) {
+      if (!ENTRY_CAPABILITIES.includes(capability?.capability_id) || capabilityIds.has(capability.capability_id)) {
+        fail(capability?.capability_id === 'repository.protection' ? 'LEGACY_SCHEMA_INVALID' : 'REGISTRY_DUPLICATE_CAPABILITY');
+      }
+      capabilityIds.add(capability.capability_id);
+      validateCapabilityEntry(capability, repository.repository_id, registry.registry_revision, true, true);
+    }
+  }
+  return registry;
+}
+
 function validateRegistry(registry) {
   if (!isRecord(registry)) fail('REGISTRY_MALFORMED');
   if (registry.schema === REGISTRY_SCHEMA && isSafeRevision(registry.schema_version) && registry.schema_version > SCHEMA_VERSION) {
     fail('REGISTRY_FUTURE_SCHEMA');
-  }
-  if (isRecord(registry.migration) && registry.migration.state && registry.migration.state !== 'none') {
-    fail('REGISTRY_INTERRUPTED_MIGRATION');
   }
   const rootKeys = [
     'schema',
@@ -330,7 +653,7 @@ function validateRegistry(registry) {
   if (registry.identity_contract !== IDENTITY_CONTRACT || registry.capability_contract !== CAPABILITY_CONTRACT) fail('REGISTRY_INCOMPATIBLE');
   if (registry.contract_digest !== CONTRACT_DIGEST) fail('REGISTRY_STALE_CONTRACT');
   if (!isSafeRevision(registry.registry_revision)) fail('REGISTRY_REVISION_INVALID');
-  if (!exactKeys(registry.migration, ['state']) || registry.migration.state !== 'none') fail('REGISTRY_INTERRUPTED_MIGRATION');
+  validateMigrationMetadata(registry.migration);
   if (!Array.isArray(registry.repositories) || registry.repositories.length > MAX_REPOSITORIES) fail('REGISTRY_MALFORMED');
 
   const repositoryIds = new Set();
@@ -349,25 +672,14 @@ function validateRegistry(registry) {
       if (!CAPABILITIES.includes(capability.capability_id)) fail('REGISTRY_UNKNOWN_CAPABILITY');
       if (capabilityIds.has(capability.capability_id)) fail('REGISTRY_DUPLICATE_CAPABILITY');
       capabilityIds.add(capability.capability_id);
-      if (!DURABLE_STATES.includes(capability.state)) fail('REGISTRY_STATE_INVALID');
-      if (!DECISION_OPERATIONS.includes(capability.decision_kind)) fail('REGISTRY_DECISION_INVALID');
-      if (capability.decision_kind === 'enable' && capability.state !== 'enabled') fail('REGISTRY_DECISION_INVALID');
-      if (capability.decision_kind !== 'enable' && capability.state !== 'disabled') fail('REGISTRY_DECISION_INVALID');
-      const provenance = capability.provenance;
-      if (!exactKeys(provenance, ['category', 'channel', 'scope_digest'])) fail('REGISTRY_PROVENANCE_INVALID');
-      if (provenance.category !== 'explicit-owner' || !['combined-bank', 'capability-route'].includes(provenance.channel)) fail('REGISTRY_PROVENANCE_INVALID');
-      if (!isDigest(provenance.scope_digest) || provenance.scope_digest !== scopeDigest(repository.repository_id, capability.capability_id, capability.decision_kind, provenance.channel)) fail('REGISTRY_PROVENANCE_INVALID');
-      validateReceipt(
-        capability.receipt,
-        repository.repository_id,
-        capability.capability_id,
-        capability.state,
-        capability.decision_kind,
-        provenance,
-        registry.registry_revision,
-      );
-      if (capability.decision_kind === 'decline' && capability.receipt.prior_state !== 'unresolved') fail('REGISTRY_DECISION_INVALID');
-      if (capability.decision_kind === 'disable' && capability.receipt.prior_state === 'unresolved') fail('REGISTRY_DECISION_INVALID');
+      validateCapabilityEntry(capability, repository.repository_id, registry.registry_revision, false, true);
+      if (capability.receipt.registry_schema === LEGACY_REGISTRY_SCHEMA) {
+        if (registry.migration.state !== 'completed'
+          || !registry.migration.legacy_receipt_ids.includes(capability.receipt.receipt_id)
+          || !registry.migration.legacy_receipt_digests.includes(digestValue(capability.receipt))) {
+          fail('LEGACY_RECEIPT_INVALID');
+        }
+      }
     }
   }
   return registry;
@@ -501,7 +813,12 @@ function parseRegistryBytes(bytes) {
     text = bytes.toString('utf8');
     scanJsonKeys(text);
     const parsed = JSON.parse(text);
-    return validateRegistry(parsed);
+    if (parsed && parsed.schema === LEGACY_REGISTRY_SCHEMA) return validateLegacyRegistry(parsed);
+    if (parsed && parsed.schema === REGISTRY_SCHEMA) return validateRegistry(parsed);
+    if (parsed && typeof parsed.schema_version === 'number' && parsed.schema_version > SCHEMA_VERSION) {
+      fail('FUTURE_REGISTRY_SCHEMA');
+    }
+    fail('REGISTRY_INCOMPATIBLE');
   } catch (error) {
     if (error instanceof RegistryError) throw error;
     fail('REGISTRY_MALFORMED');
@@ -640,6 +957,7 @@ function readSnapshot(options = {}, ownedTransaction = null) {
       registry_revision: 0,
       snapshot_hash: null,
       registry_path: registryPath,
+      legacy: false,
     };
   }
   ensureSafeRegistryFile(registryPath);
@@ -650,6 +968,7 @@ function readSnapshot(options = {}, ownedTransaction = null) {
       registry_revision: 0,
       snapshot_hash: null,
       registry_path: registryPath,
+      legacy: false,
     };
   }
   let bytes;
@@ -665,6 +984,7 @@ function readSnapshot(options = {}, ownedTransaction = null) {
     registry_revision: registry.registry_revision,
     snapshot_hash: snapshotHashForBytes(bytes),
     registry_path: registryPath,
+    legacy: registry.schema === LEGACY_REGISTRY_SCHEMA,
   };
 }
 
@@ -781,10 +1101,11 @@ function getRepositoryStatus(options = {}) {
   let identity;
   try {
     identity = resolveRepositoryIdentity(options);
-    const snapshot = readSnapshot(options);
+    let snapshot = readSnapshot(options);
+    if (snapshot.legacy === true) snapshot = migrateLegacyRegistry(options, identity, snapshot);
     const capabilities = readCapabilityMap(snapshot.registry, identity.repository_id);
     return {
-      status: Object.values(capabilities).every((entry) => entry.state !== 'unresolved') ? 'healthy' : 'unresolved',
+      status: ENTRY_CAPABILITIES.every((capabilityId) => capabilities[capabilityId].state !== 'unresolved') ? 'healthy' : 'unresolved',
       actionable: false,
       repository_id: identity.repository_id,
       canonical_remote: identity.canonical_remote,
@@ -833,7 +1154,11 @@ function buildQuestionBank(repositoryId, capabilityIds, currentStates = {}) {
 function probeRepository(options = {}) {
   const result = getRepositoryStatus(options);
   if (result.status === 'actionable') return result;
-  if (result.status === 'healthy') {
+  const requestedCapabilities = options.includeProtection === true
+    ? [...CAPABILITIES]
+    : [...ENTRY_CAPABILITIES];
+  const unresolved = requestedCapabilities.filter((capabilityId) => result.capabilities[capabilityId].state === 'unresolved');
+  if (unresolved.length === 0) {
     return {
       ...result,
       question_bank: null,
@@ -841,7 +1166,6 @@ function probeRepository(options = {}) {
       policy_prose: false,
     };
   }
-  const unresolved = CAPABILITIES.filter((capabilityId) => result.capabilities[capabilityId].state === 'unresolved');
   const bank = buildQuestionBank(result.repository_id, unresolved);
   const sessionMemo = options.sessionMemo;
   const suppressionKey = result.repository_id + ':' + unresolved.join(',');
@@ -1029,8 +1353,8 @@ function injectTestFailure(options, point, code) {
   if (options && options.testOnly === true && options.faultInjection === point) fail(code);
 }
 
-function createTransaction(registryPath, lock, registry) {
-  const expectedHash = snapshotHashForRegistry(registry);
+function createTransaction(registryPath, lock, registry, expectedHashOverride = null) {
+  const expectedHash = expectedHashOverride || snapshotHashForRegistry(registry);
   const markerPath = transactionPathForRegistry(registryPath, lock.token);
   const marker = {
     schema: TRANSACTION_SCHEMA,
@@ -1144,20 +1468,23 @@ function atomicCommit(registryPath, registry, options, transaction) {
     fail('REGISTRY_ATOMIC_REPLACE_FAILED');
   }
   const committed = readSnapshot({ registryPath, testOnly: true }, transaction);
-  injectTestFailure(options, 'post-rename-readback', 'REGISTRY_COMMIT_VERIFY_FAILED');
+  const readbackFailure = options && options.migrationMode
+    ? 'MIGRATION_READBACK_MISMATCH'
+    : 'REGISTRY_COMMIT_VERIFY_FAILED';
+  injectTestFailure(options, 'post-rename-readback', readbackFailure);
   if (!committed.present
     || committed.registry_revision !== registry.registry_revision
     || committed.snapshot_hash !== snapshotHashForRegistry(registry)) {
-    fail('REGISTRY_COMMIT_VERIFY_FAILED');
+    fail(readbackFailure);
   }
   return committed;
 }
 
-function commitRegistryWithFinality(registryPath, registry, options, lock) {
+function commitRegistryWithFinality(registryPath, registry, options, lock, expectedHashOverride = null) {
   let transaction = null;
   let lockReleased = false;
   try {
-    transaction = createTransaction(registryPath, lock, registry);
+    transaction = createTransaction(registryPath, lock, registry, expectedHashOverride);
     const committed = atomicCommit(registryPath, registry, options, transaction);
     releaseLock(lock, options);
     lockReleased = true;
@@ -1171,8 +1498,199 @@ function commitRegistryWithFinality(registryPath, registry, options, lock) {
   }
 }
 
+function migrationMetadata(source, sourceSnapshotHash, legacyReceipts) {
+  const receiptIds = legacyReceipts.map((receipt) => receipt.receipt_id).sort();
+  const receiptDigests = legacyReceipts.map((receipt) => digestValue(receipt)).sort();
+  return {
+    schema: MIGRATION_SCHEMA,
+    state: 'completed',
+    algorithm: MIGRATION_ALGORITHM,
+    source_registry_schema: LEGACY_REGISTRY_SCHEMA,
+    source_schema_version: LEGACY_SCHEMA_VERSION,
+    source_identity_contract: IDENTITY_CONTRACT,
+    source_capability_contract: LEGACY_CAPABILITY_CONTRACT,
+    source_contract_digest: LEGACY_CONTRACT_DIGEST,
+    source_registry_revision: source.registry_revision,
+    source_snapshot_hash: sourceSnapshotHash,
+    target_registry_schema: REGISTRY_SCHEMA,
+    target_schema_version: SCHEMA_VERSION,
+    target_identity_contract: IDENTITY_CONTRACT,
+    target_capability_contract: CAPABILITY_CONTRACT,
+    target_contract_digest: CONTRACT_DIGEST,
+    legacy_receipt_ids: receiptIds,
+    legacy_receipt_digests: receiptDigests,
+  };
+}
+
+function migratedRegistry(source, sourceSnapshotHash) {
+  const legacyReceipts = [];
+  for (const repository of source.repositories) {
+    for (const capability of repository.capabilities) legacyReceipts.push(capability.receipt);
+  }
+  const target = emptyRegistry();
+  target.registry_revision = source.registry_revision;
+  target.repositories = clone(source.repositories);
+  target.migration = migrationMetadata(source, sourceSnapshotHash, legacyReceipts);
+  validateRegistry(target);
+  return target;
+}
+
+function migrationLockConflict(registryPath) {
+  if (!fs.existsSync(lockPathForRegistry(registryPath))) return;
+  try {
+    readForeignLock(lockPathForRegistry(registryPath));
+  } catch (_error) {
+    fail('MIGRATION_LOCK_CONFLICT');
+  }
+  fail('MIGRATION_LOCK_CONFLICT');
+}
+
+function migrateLegacyRegistry(options = {}, identity = null, sourceSnapshot = null) {
+  const currentIdentity = identity || resolveRepositoryIdentity(options);
+  const initial = sourceSnapshot || readSnapshot(options);
+  if (!initial.present || initial.legacy !== true) return initial;
+  const registryPath = registryPathForOptions(options);
+  migrationLockConflict(registryPath);
+  let lock;
+  try {
+    lock = acquireLock(registryPath);
+  } catch (error) {
+    if (error.code === 'REGISTRY_LOCK_BUSY' || error.code === 'REGISTRY_LOCK_INDETERMINATE') fail('MIGRATION_LOCK_CONFLICT');
+    throw error;
+  }
+  let finalityHandled = false;
+  try {
+    const current = readSnapshot(options);
+    if (!current.present || current.legacy !== true
+      || current.registry_revision !== initial.registry_revision
+      || current.snapshot_hash !== initial.snapshot_hash) {
+      fail('MIGRATION_SOURCE_CHANGED');
+    }
+    const record = current.registry.repositories.find((entry) => entry.repository_id === currentIdentity.repository_id);
+    if (record && record.capabilities.some((capability) => capability.capability_id === 'repository.protection')) {
+      fail('LEGACY_SCHEMA_INVALID');
+    }
+    injectTestFailure(options, 'migration-before-target', 'MIGRATION_INTERRUPTED');
+    const target = migratedRegistry(current.registry, current.snapshot_hash);
+    injectTestFailure(options, 'migration-before-replace', 'MIGRATION_INTERRUPTED');
+    const committed = commitRegistryWithFinality(
+      registryPath,
+      target,
+      { ...options, migrationMode: true },
+      lock,
+      current.snapshot_hash,
+    );
+    finalityHandled = true;
+    return committed;
+  } catch (error) {
+    if (error.code === 'REGISTRY_COMMIT_VERIFY_FAILED') error.code = 'MIGRATION_READBACK_MISMATCH';
+    if (error.code === 'REGISTRY_TRANSACTION_FINALIZE_FAILED') error.code = 'MIGRATION_INTERRUPTED';
+    throw error;
+  } finally {
+    if (!finalityHandled) {
+      try { releaseLock(lock, options); } catch (_ignored) {}
+    }
+  }
+}
+
+function assertRollbackProof(current, beforeBytes, repositoryId) {
+  if (!Buffer.isBuffer(beforeBytes) || beforeBytes.length > MAX_REGISTRY_BYTES) fail('ROLLBACK_UNSAFE');
+  const before = parseRegistryBytes(beforeBytes);
+  if (!before || before.schema !== LEGACY_REGISTRY_SCHEMA) fail('ROLLBACK_UNSAFE');
+  const migration = current.registry.migration;
+  if (!isRecord(migration) || migration.state !== 'completed'
+    || snapshotHashForBytes(beforeBytes) !== migration.source_snapshot_hash
+    || before.registry_revision !== migration.source_registry_revision
+    || current.registry_revision !== migration.source_registry_revision) fail('ROLLBACK_UNSAFE');
+  if (canonicalSerialize(before.repositories) !== canonicalSerialize(current.registry.repositories)) fail('ROLLBACK_UNSAFE');
+  if (!before.repositories.some((entry) => entry.repository_id === repositoryId)
+    && current.registry.repositories.some((entry) => entry.repository_id === repositoryId)) fail('ROLLBACK_UNSAFE');
+  return before;
+}
+
+function atomicCommitBytes(registryPath, bytes, options, transaction) {
+  const directory = path.dirname(registryPath);
+  const tempPath = registryPath + '.tmp-' + crypto.randomUUID().replaceAll('-', '');
+  let descriptor = null;
+  try {
+    descriptor = fs.openSync(tempPath, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY, 0o600);
+    fs.writeSync(descriptor, bytes, 0, bytes.length);
+    fs.fsyncSync(descriptor);
+    fs.closeSync(descriptor);
+    descriptor = null;
+  } catch (_error) {
+    if (descriptor !== null) {
+      try { fs.closeSync(descriptor); } catch (_ignored) {}
+    }
+    fail('REGISTRY_STAGE_FAILED');
+  }
+  writeTransactionMarker(transaction);
+  try {
+    fsyncDirectory(directory, options, 'pre-rename-marker-durability');
+    fs.renameSync(tempPath, registryPath);
+    fsyncDirectory(directory, options, 'post-rename-durability');
+  } catch (_error) {
+    fail('REGISTRY_ATOMIC_REPLACE_FAILED');
+  }
+  const committed = readSnapshot({ registryPath, testOnly: true }, transaction);
+  injectTestFailure(options, 'rollback-readback', 'ROLLBACK_UNSAFE');
+  if (!committed.present || committed.snapshot_hash !== snapshotHashForBytes(bytes)) fail('ROLLBACK_UNSAFE');
+  return committed;
+}
+
+function rollbackMigration(options = {}) {
+  assertNoCallerIdentityOverride(options);
+  const identity = resolveRepositoryIdentity(options);
+  const beforeBytes = options.beforeBytes;
+  const initial = readSnapshot(options);
+  if (!initial.present || initial.legacy === true) fail('ROLLBACK_UNSAFE');
+  assertRollbackProof(initial, beforeBytes, identity.repository_id);
+  const registryPath = registryPathForOptions(options);
+  migrationLockConflict(registryPath);
+  let lock;
+  try {
+    lock = acquireLock(registryPath);
+  } catch (error) {
+    if (error.code === 'REGISTRY_LOCK_BUSY' || error.code === 'REGISTRY_LOCK_INDETERMINATE') fail('ROLLBACK_UNSAFE');
+    throw error;
+  }
+  let lockReleased = false;
+  try {
+    const current = readSnapshot(options);
+    assertRollbackProof(current, beforeBytes, identity.repository_id);
+    injectTestFailure(options, 'rollback-before-replace', 'ROLLBACK_UNSAFE');
+    const transaction = createTransaction(registryPath, lock, current.registry, current.snapshot_hash);
+    const committed = atomicCommitBytes(registryPath, beforeBytes, options, transaction);
+    releaseLock(lock, options);
+    lockReleased = true;
+    finalizeTransaction(transaction, options);
+    return {
+      status: 'rolled_back',
+      repository_id: identity.repository_id,
+      registry_revision: committed.registry_revision,
+      snapshot_hash: committed.snapshot_hash,
+    };
+  } finally {
+    if (!lockReleased) {
+      try { releaseLock(lock, options); } catch (_ignored) {}
+    }
+  }
+}
+
+function previewMigrationRollback(options = {}) {
+  try {
+    const identity = resolveRepositoryIdentity(options);
+    const current = readSnapshot(options);
+    assertRollbackProof(current, options.beforeBytes, identity.repository_id);
+    return { status: 'safe', repository_id: identity.repository_id, reason_code: null };
+  } catch (error) {
+    return { status: 'blocked', repository_id: null, reason_code: error.code || 'ROLLBACK_UNSAFE' };
+  }
+}
+
 function currentSnapshotForMutation(options) {
   const snapshot = readSnapshot(options);
+  if (snapshot.legacy === true) fail('MIGRATION_REQUIRED');
   assertExpected(options.expectedRevision, options.expectedHash);
   if (snapshot.registry_revision !== options.expectedRevision || snapshot.snapshot_hash !== options.expectedHash) {
     fail('REGISTRY_CAS_MISMATCH');
@@ -1280,7 +1798,12 @@ function writeCombinedDecisions(options = {}) {
   const before = readSnapshot(options);
   if (before.registry_revision !== options.expectedRevision || before.snapshot_hash !== options.expectedHash) fail('REGISTRY_CAS_MISMATCH');
   const states = readCapabilityMap(before.registry, identity.repository_id);
-  const unresolved = CAPABILITIES.filter((capabilityId) => states[capabilityId].state === 'unresolved');
+  const requestedIds = options.bank && Array.isArray(options.bank.questions)
+    ? options.bank.questions.map((question) => question && question.capability_id)
+    : [...ENTRY_CAPABILITIES];
+  if (requestedIds.length === 0 || requestedIds.some((capabilityId) => !CAPABILITIES.includes(capabilityId))
+    || new Set(requestedIds).size !== requestedIds.length) fail('COMBINED_ANSWER_INVALID');
+  const unresolved = requestedIds.filter((capabilityId) => states[capabilityId].state === 'unresolved');
   const validatedQuestions = validateQuestionBank(options.bank, identity.repository_id, unresolved);
   if (options.answers.length !== unresolved.length) fail('COMBINED_ANSWER_PARTIAL');
   const answerIds = new Set();
@@ -1305,7 +1828,7 @@ function writeCombinedDecisions(options = {}) {
   try {
     const current = currentSnapshotForMutation(options);
     const currentStates = readCapabilityMap(current.registry, identity.repository_id);
-    const currentUnresolved = CAPABILITIES.filter((capabilityId) => currentStates[capabilityId].state === 'unresolved');
+    const currentUnresolved = requestedIds.filter((capabilityId) => currentStates[capabilityId].state === 'unresolved');
     if (currentUnresolved.join(',') !== unresolved.join(',')) fail('COMBINED_ANSWER_STALE');
     const registry = current.present ? clone(current.registry) : emptyRegistry();
     const nextRevision = current.registry_revision + 1;
@@ -1377,6 +1900,10 @@ function reopenCapability(options = {}) {
 
 module.exports = {
   REGISTRY_SCHEMA,
+  LEGACY_REGISTRY_SCHEMA,
+  LEGACY_CAPABILITY_CONTRACT,
+  LEGACY_CONTRACT_DIGEST,
+  MIGRATION_SCHEMA,
   REMOTE_IDENTITY_CONTRACT_VERSION: a1.REMOTE_IDENTITY_CONTRACT_VERSION,
   IDENTITY_CONTRACT,
   CAPABILITY_CONTRACT,
@@ -1387,6 +1914,8 @@ module.exports = {
   LOCK_SCHEMA,
   REGISTRY_BASENAME,
   CAPABILITIES,
+  ENTRY_CAPABILITIES,
+  PROTECTION_SCOPES,
   BINDING_OPERATIONS,
   DURABLE_STATES,
   RUNTIME_STATES,
@@ -1400,6 +1929,9 @@ module.exports = {
   snapshotHashForTest: snapshotHashForRegistry,
   lockPathForTest: lockPathForRegistry,
   emptyRegistry,
+  parseRegistryBytes,
+  validateRegistry,
+  validateLegacyRegistry,
   repositoryIdForCanonicalRemote,
   resolveRepositoryIdentity,
   getRepositoryStatus,
@@ -1409,6 +1941,9 @@ module.exports = {
   reopenCapability,
   writeCapabilityDecision,
   writeCombinedDecisions,
+  migrateLegacyRegistry,
+  rollbackMigration,
+  previewMigrationRollback,
 };
 function validateTransactionMarker(transaction) {
   let stat;

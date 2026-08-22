@@ -80,7 +80,8 @@ test('both unresolved capabilities fan into one bounded bank, with no policy pro
   assert.equal(result.policy_prose, false);
   assert.equal(result.question_bank.kind, 'repository-capability-question-bank');
   assert.equal(result.question_bank.questions.length, 2);
-  assert.deepEqual(result.question_bank.questions.map((question) => question.capability_id), runtime.CAPABILITIES);
+  assert.deepEqual(result.question_bank.questions.map((question) => question.capability_id), ['repository.governance', 'execution_loop']);
+  assert.equal(result.capabilities['repository.protection'].state, 'unresolved');
   for (const question of result.question_bank.questions) {
     assert.equal(typeof question.question_id, 'string');
     assert.equal(typeof question.effect_id, 'string');
