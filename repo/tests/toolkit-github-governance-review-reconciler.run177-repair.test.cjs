@@ -51,17 +51,41 @@ function reconcileInput() {
 }
 
 function reviewInput(overrides = {}) {
-  return {
+  const { findings, ...evidenceOverrides } = overrides;
+  const evidence = {
+    repository,
+    pr_number: candidate.pr_number,
     server_authoritative: true,
     verifiable: true,
+    complete: true,
+    stale: false,
+    unavailable: false,
     pagination: { pull_requests: true, submitted_reviews: true, inline_conversations: true },
     pull_requests: [{ number: candidate.pr_number, state: 'open', merged: false, head: candidate.head, tree: candidate.tree, base: candidate.base, base_ref: 'main', public_source_ref: 'pr/355' }],
     submitted_reviews: [{ id: 'review-1', pr_number: candidate.pr_number, state: 'commented', public_source_ref: 'pr/355/review-1' }],
     inline_conversations: [{ id: 'thread-1', pr_number: candidate.pr_number, resolved: false, outdated: false, closing_reply: false, path: 'repo/scripts/example.cjs', line: 10, public_source_ref: 'pr/355#thread-1' }],
+    finding_evidence: findings || [],
     current_candidate: candidate,
-    require_current_candidate: true,
     expected_candidate: candidate,
-    ...overrides,
+    ...evidenceOverrides,
+  };
+  const counts = {
+    pull_requests: Array.isArray(evidence.pull_requests) ? evidence.pull_requests.length : 0,
+    submitted_reviews: Array.isArray(evidence.submitted_reviews) ? evidence.submitted_reviews.length : 0,
+    inline_conversations: Array.isArray(evidence.inline_conversations) ? evidence.inline_conversations.length : 0,
+  };
+  if (!Object.prototype.hasOwnProperty.call(evidenceOverrides, 'authoritative_counts')) evidence.authoritative_counts = counts;
+  if (!Object.prototype.hasOwnProperty.call(evidenceOverrides, 'pagination_evidence')) {
+    evidence.pagination_evidence = Object.fromEntries(Object.keys(evidence.pagination || {}).map((key) => [
+      key,
+      { complete: evidence.pagination[key], pages: 1, cursor: null, count: counts[key] },
+    ]));
+  }
+  if (!Object.prototype.hasOwnProperty.call(evidenceOverrides, 'evidence_digest')) evidence.evidence_digest = n5.reviewEvidenceDigest(evidence);
+  return {
+    ...evidence,
+    ...(findings === undefined ? {} : { findings }),
+    evidence_adapter: { getReviewEvidence: () => evidence },
   };
 }
 
@@ -191,24 +215,27 @@ test('Deferred Findings use typed dispositions and separate linked child evidenc
   assert.equal(n5.validateDeferredFindingRecord(registered.record).ok, true);
 
   const base = { ...registered.record };
-  const disposed = n5.revalidateDeferredFinding({ record: base, material: false, disposition: 'DISPOSED_NONMATERIAL' });
+  const freshNonmaterial = n5.classifyFinding({ ...findingInput(), predicates: {} }).finding;
+  const freshMaterial = n5.classifyFinding({ ...findingInput(), predicates: Object.fromEntries(n5.A4_MATERIAL_PREDICATES.map((key) => [key, true])) }).finding;
+  const disposed = n5.revalidateDeferredFinding({ record: base, fresh_finding: freshNonmaterial, material: false, disposition: 'DISPOSED_NONMATERIAL' });
   assert.equal(disposed.record.disposition, 'DISPOSED_NONMATERIAL');
   assert.equal(disposed.record.linked_child, null);
   assert.equal(n5.validateDeferredFindingRecord(disposed.record).ok, true);
 
-  const existing = n5.revalidateDeferredFinding({ record: base, material: true, compatible_child: { issue_number: 77, direct: true, compatible: true, frozen: false, lifecycle: 'pending' } });
+  const existing = n5.revalidateDeferredFinding({ record: base, fresh_finding: freshMaterial, material: true, compatible_child: { issue_number: 77, direct: true, compatible: true, frozen: false, lifecycle: 'pending' } });
   assert.equal(existing.record.disposition, 'PROMOTED_TO_EXISTING_CHILD');
   assert.equal(existing.record.linked_child, 77);
   assert.doesNotMatch(existing.record.disposition, /:/);
   assert.equal(n5.validateDeferredFindingRecord(existing.record).ok, true);
 
-  const frozen = n5.revalidateDeferredFinding({ record: base, material: true, compatible_child: { issue_number: 77, direct: true, compatible: true, frozen: true, lifecycle: 'current' } });
+  const frozen = n5.revalidateDeferredFinding({ record: base, fresh_finding: freshMaterial, material: true, compatible_child: { issue_number: 77, direct: true, compatible: true, frozen: true, lifecycle: 'current' } });
   assert.equal(frozen.code, 'N5_AUTHORITY_REQUIRED');
 
-  const unowned = n5.revalidateDeferredFinding({ record: base, material: true });
+  const unowned = n5.revalidateDeferredFinding({ record: base, fresh_finding: freshMaterial, material: true });
   assert.equal(unowned.code, 'N5_AUTHORITY_REQUIRED');
 
-  const newChild = n5.revalidateDeferredFinding({ record: base, material: true, authorised_new_sibling: { controller_authorised: true, issue_number: 88, direct: true, compatible: true } });
+
+  const newChild = n5.revalidateDeferredFinding({ record: base, fresh_finding: freshMaterial, material: true, authorised_new_sibling: { controller_authorised: true, issue_number: 88, direct: true, compatible: true } });
   assert.equal(newChild.record.disposition, 'PROMOTED_TO_CHILD');
   assert.equal(newChild.record.linked_child, 88);
   assert.equal(n5.validateDeferredFindingRecord(newChild.record).ok, true);

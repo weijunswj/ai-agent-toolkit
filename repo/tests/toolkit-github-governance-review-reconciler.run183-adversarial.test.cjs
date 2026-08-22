@@ -133,11 +133,12 @@ function acceptedEvidence(item, overrides = {}) {
     server_authoritative: true,
     verifiable: true,
     complete: true,
+    child_id: item.child_id,
     child_issue: item.issue_number,
     disposition: 'accepted',
     outcome: item.outcome,
     parent_chronology_ref: 'issue/240#run-183',
-    pr: { number: 355, public_source_ref: 'pull/355' },
+    pr: { number: 355, state: item.implementation_pr?.state, public_source_ref: 'pull/355' },
     accepted_commit: { sha: 'd'.repeat(40), public_source_ref: 'commit/dddddddd' },
     ...overrides,
   };

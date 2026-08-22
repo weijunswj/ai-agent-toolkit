@@ -31,6 +31,7 @@ const NON_DELIVERY_PR_STATES = new Set(['closed', 'closed_unmerged', 'failed', '
 const MUTATION_TARGET_KINDS = Object.freeze({ managed_parent_block: 'n5-managed-parent-block', legacy_parent_block: 'n5-legacy-parent-block' });
 const sharedTransactionOwners = new Map();
 const FINDING_EVIDENCE_VERSION = 'toolkit.n5.finding-evidence.v1';
+const REVIEW_EVIDENCE_VERSION = 'toolkit.n5.review-evidence.v1';
 const TERMINAL_EVIDENCE_VERSION = 'toolkit.n5.terminal-evidence.v1';
 const MANAGED_MARKERS = Object.freeze({
   parent: Object.freeze({ begin: '<!-- AI-AGENT-TOOLKIT:N5-PARENT:BEGIN v3 -->', end: '<!-- AI-AGENT-TOOLKIT:N5-PARENT:END -->' }),
@@ -113,6 +114,8 @@ function transactionContract() {
     release_owner_in_finally: true,
     proof_gated_terminal_compaction: true,
     durable_terminal_evidence_digest_required: true,
+    terminal_evidence_adapter: 'first-party-getTerminalEvidence',
+    caller_durable_evidence: 'equality-assertion-only',
     legacy_migration_versions: [LEGACY_V0_VERSION, TRACKER_VERSION], legacy_migration_exact: true,
     legacy_whole_body_digest_target: true,
   };
@@ -340,6 +343,13 @@ function compactTerminal(state, options = {}) {
     const proof = terminalProofFor(item, options);
     const verified = normalizeDurableEvidence(item, proof);
     if (!verified.ok) return failure('PARENT_BODY_LIMIT', { compacted: false, proof_required: true, affected_child: item.child_id });
+    if (options.durable_evidence !== undefined) {
+      const assertion = terminalEvidenceAssertionFor(item, options.durable_evidence);
+      const asserted = normalizeDurableEvidence(item, assertion);
+      if (!asserted.ok || canonicalJson(asserted.evidence) !== canonicalJson(verified.evidence)) {
+        return failure('PARENT_BODY_LIMIT', { compacted: false, proof_required: true, affected_child: item.child_id });
+      }
+    }
     compacted.push({
       ...item,
       detail: 'Terminal detail compacted; durable child, PR and chronology evidence is retained by digest.',
@@ -695,6 +705,7 @@ function projectA4Review(inventory) {
     || inventory.server_authoritative !== true
     || inventory.verifiable !== true
     || !isDigest(inventory.inventory_digest)
+    || !isDigest(inventory.evidence_binding_digest)
     || !Array.isArray(inventory.finding_evidence)
     || !Array.isArray(inventory.pull_requests)
     || !Array.isArray(inventory.submitted_reviews)
@@ -715,81 +726,280 @@ function projectA4Review(inventory) {
     findings,
   };
 }
-function buildReviewInventory(input = {}) {
-  const rawArrays = ['pull_requests', 'submitted_reviews', 'inline_conversations'].map((key) => Array.isArray(input[key]) ? input[key] : null);
-  const normalizedPullRequests = rawArrays[0] ? rawArrays[0].map(normalizePullRequest) : [];
-  const normalizedSubmitted = rawArrays[1] ? rawArrays[1].map(normalizeSubmittedReview) : [];
-  const normalizedInline = rawArrays[2] ? rawArrays[2].map(normalizeInlineConversation) : [];
-  const arraysValid = rawArrays.every((value) => Array.isArray(value))
-    && normalizedPullRequests.every((value) => value !== null)
-    && normalizedSubmitted.every((value) => value !== null)
-    && normalizedInline.every((value) => value !== null);
-  const pullRequests = normalizedPullRequests.filter((value) => value !== null);
-  const submitted = normalizedSubmitted.filter((value) => value !== null);
-  const inline = normalizedInline.filter((value) => value !== null);
-  const pages = isRecord(input.pagination) ? input.pagination : {};
-  const pagination = {
-    pull_requests: pages.pull_requests === true,
-    submitted_reviews: pages.submitted_reviews === true,
-    inline_conversations: pages.inline_conversations === true,
-  };
-  const paginationComplete = Object.values(pagination).every((value) => value === true);
-  const server_authoritative = input.server_authoritative === true;
-  const evidence_verifiable = input.verifiable === true;
-  const staleOrUnavailable = input.stale === true
-    || input.unavailable === true
-    || input.evidence_status === 'stale'
-    || input.evidence_status === 'unavailable';
-  const candidatePresent = hasOwn(input, 'current_candidate');
-  const expectedPresent = hasOwn(input, 'expected_candidate');
-  const candidate = candidatePresent ? normalizeCandidate(input.current_candidate) : null;
-  const expectedCandidate = expectedPresent ? normalizeCandidate(input.expected_candidate) : null;
-  const representedPr = candidate === null ? null : pullRequests.find((item) => item.number === candidate.pr_number) || null;
-  const representedExact = representedPr !== null && ['head', 'tree', 'base'].every((key) => isSha(representedPr[key]) && representedPr[key] === candidate[key]);
-  const candidateValid = candidatePresent
-    && expectedPresent
-    && candidate !== null
-    && expectedCandidate !== null
-    && canonicalJson(candidate) === canonicalJson(expectedCandidate)
-    && representedExact;
-  const rawFindings = input.findings === undefined ? [] : input.findings;
-  const normalizedFindingEvidence = Array.isArray(rawFindings) ? rawFindings.map(normalizeFindingEvidence) : [];
-  const findingsValid = Array.isArray(rawFindings) && normalizedFindingEvidence.every((value) => value !== null);
-  const findingEvidence = normalizedFindingEvidence.filter((value) => value !== null);
-  const inventoryBase = {
-    version: REVIEW_INVENTORY_VERSION,
-    candidate,
-    expected_candidate: expectedCandidate,
-    pagination,
-    pull_requests: pullRequests,
-    submitted_reviews: submitted,
-    inline_conversations: inline,
-    finding_evidence: findingEvidence,
-    server_authoritative,
-    verifiable: evidence_verifiable && !staleOrUnavailable,
-  };
-  const complete = arraysValid
-    && findingsValid
-    && server_authoritative
-    && evidence_verifiable
-    && !staleOrUnavailable
-    && paginationComplete
-    && candidateValid;
-  const inventory_digest = sha256(inventoryBase);
-  const inventory = { ...inventoryBase, complete, inventory_digest };
-  const review = complete
-    ? projectA4Review(inventory)
-    : {
+function incompleteReviewInventory(reason = 'trusted-evidence-required') {
+  const inventory_digest = sha256({ version: REVIEW_INVENTORY_VERSION, status: 'incomplete', reason });
+  return failure('N5_REVIEW_INVENTORY_INCOMPLETE', {
+    review: {
       current: false,
       complete: false,
-      server_authoritative,
+      server_authoritative: false,
       verifiable: false,
       inventory_digest,
       findings: [],
-    };
-  return complete
-    ? success('N5_INSPECTION_READY', { inventory, review })
-    : failure('N5_REVIEW_INVENTORY_INCOMPLETE', { inventory, review });
+    },
+  });
+}
+function normalizePaginationEvidence(value, arrays) {
+  if (!isRecord(value)) return null;
+  const pagination = {};
+  const evidence = {};
+  for (const key of ['pull_requests', 'submitted_reviews', 'inline_conversations']) {
+    const source = value[key];
+    if (typeof source === 'boolean') {
+      pagination[key] = source;
+      evidence[key] = { complete: source, pages: null, cursor: null, count: null };
+      continue;
+    }
+    if (!isRecord(source) || typeof source.complete !== 'boolean') return null;
+    const pages = source.pages === undefined ? null : source.pages;
+    const cursor = source.cursor === undefined ? null : source.cursor;
+    const count = source.count === undefined ? null : source.count;
+    if (pages !== null && (!Number.isSafeInteger(pages) || pages < 1)
+      || cursor !== null && !isSafeLabel(cursor)
+      || count !== null && (!Number.isSafeInteger(count) || count < 0)) return null;
+    pagination[key] = source.complete;
+    evidence[key] = { complete: source.complete, pages, cursor, count };
+  }
+  if (!Object.keys(pagination).every((key) => Array.isArray(arrays[key]))) return null;
+  return { pagination, evidence };
+}
+function normalizeAuthoritativeCounts(value, arrays, paginationEvidence) {
+  const source = isRecord(value) ? value : null;
+  const counts = {};
+  for (const key of ['pull_requests', 'submitted_reviews', 'inline_conversations']) {
+    const candidate = source && hasOwn(source, key) ? source[key] : paginationEvidence[key].count;
+    const pageCount = paginationEvidence[key]?.count ?? null;
+    if (!Number.isSafeInteger(candidate) || candidate < 0 || candidate !== arrays[key].length || pageCount !== null && pageCount !== candidate) return null;
+    counts[key] = candidate;
+  }
+  return counts;
+}
+function normalizedReviewEvidenceForDigest(value = {}) {
+  const arrays = {
+    pull_requests: Array.isArray(value.pull_requests) ? value.pull_requests.map(normalizePullRequest) : [],
+    submitted_reviews: Array.isArray(value.submitted_reviews) ? value.submitted_reviews.map(normalizeSubmittedReview) : [],
+    inline_conversations: Array.isArray(value.inline_conversations) ? value.inline_conversations.map(normalizeInlineConversation) : [],
+  };
+  const paginationSource = value.pagination_evidence || value.pagination || {};
+  const pagination = normalizePaginationEvidence(paginationSource, arrays);
+  const paginationEvidence = pagination?.evidence || {
+    pull_requests: null,
+    submitted_reviews: null,
+    inline_conversations: null,
+  };
+  const paginationFlags = pagination?.pagination || {
+    pull_requests: false,
+    submitted_reviews: false,
+    inline_conversations: false,
+  };
+  const rawFindings = value.finding_evidence || value.findings;
+  const findings = Array.isArray(rawFindings) ? rawFindings.map(normalizeFindingEvidence) : [];
+  return {
+    version: REVIEW_EVIDENCE_VERSION,
+    repository: value.repository ?? null,
+    pr_number: value.pr_number ?? value.current_candidate?.pr_number ?? value.current_candidate?.number ?? null,
+    current_candidate: normalizeCandidate(value.current_candidate || value.candidate) || null,
+    expected_candidate: normalizeCandidate(value.expected_candidate) || null,
+    pagination: paginationFlags,
+    pagination_evidence: paginationEvidence,
+    authoritative_counts: value.authoritative_counts || value.counts || null,
+    pull_requests: arrays.pull_requests,
+    submitted_reviews: arrays.submitted_reviews,
+    inline_conversations: arrays.inline_conversations,
+    finding_evidence: findings,
+    stale: value.stale === true,
+    unavailable: value.unavailable === true,
+    complete: value.complete === true,
+    server_authoritative: value.server_authoritative === true,
+    verifiable: value.verifiable === true,
+  };
+}
+function reviewEvidenceDigest(value = {}) {
+  return sha256(normalizedReviewEvidenceForDigest(value));
+}
+function normalizeTrustedReviewEvidence(value) {
+  if (!isRecord(value)
+    || !isSafeLabel(value.repository)
+    || !isIssue(value.pr_number)
+    || !hasOwn(value, 'current_candidate')
+    || !hasOwn(value, 'expected_candidate')
+    || !Array.isArray(value.pull_requests)
+    || !Array.isArray(value.submitted_reviews)
+    || !Array.isArray(value.inline_conversations)
+    || !(Array.isArray(value.finding_evidence) || Array.isArray(value.findings))
+    || !isRecord(value.pagination)
+    || !isRecord(value.pagination_evidence)
+    || !(isRecord(value.authoritative_counts) || isRecord(value.counts))
+    || typeof value.stale !== 'boolean'
+    || typeof value.unavailable !== 'boolean'
+    || typeof value.server_authoritative !== 'boolean'
+    || typeof value.verifiable !== 'boolean'
+    || typeof value.complete !== 'boolean') return null;
+  const current_candidate = normalizeCandidate(value.current_candidate);
+  const expected_candidate = normalizeCandidate(value.expected_candidate);
+  if (!current_candidate || !expected_candidate || current_candidate.pr_number !== value.pr_number
+    || canonicalJson(current_candidate) !== canonicalJson(expected_candidate)) return null;
+  const arrays = {
+    pull_requests: value.pull_requests.map(normalizePullRequest),
+    submitted_reviews: value.submitted_reviews.map(normalizeSubmittedReview),
+    inline_conversations: value.inline_conversations.map(normalizeInlineConversation),
+  };
+  if (Object.values(arrays).some((items) => items.some((item) => item === null))) return null;
+  const pagination = normalizePaginationEvidence(value.pagination_evidence, arrays);
+  if (!pagination) return null;
+  const callerPagination = normalizeCallerPaginationAssertion(value.pagination);
+  if (!callerPagination || canonicalJson(callerPagination) !== canonicalJson(pagination.pagination)) return null;
+  if (hasOwn(value, 'authoritative_counts') && hasOwn(value, 'counts')
+    && (!isRecord(value.authoritative_counts) || !isRecord(value.counts)
+      || canonicalJson(value.authoritative_counts) !== canonicalJson(value.counts))) return null;
+  const countSource = hasOwn(value, 'authoritative_counts') ? value.authoritative_counts : value.counts;
+  const authoritative_counts = normalizeAuthoritativeCounts(countSource, arrays, pagination.evidence);
+  if (!authoritative_counts) return null;
+  const rawFindings = hasOwn(value, 'finding_evidence') ? value.finding_evidence : value.findings;
+  if (!Array.isArray(rawFindings)) return null;
+  const finding_evidence = rawFindings.map(normalizeFindingEvidence);
+  if (finding_evidence.some((item) => item === null)) return null;
+  if (hasOwn(value, 'finding_evidence') && hasOwn(value, 'findings')) {
+    if (!Array.isArray(value.findings)) return null;
+    const aliasFindings = value.findings.map(normalizeFindingEvidence);
+    if (aliasFindings.some((item) => item === null) || canonicalJson(aliasFindings) !== canonicalJson(finding_evidence)) return null;
+  }
+  const normalized = {
+    repository: value.repository,
+    pr_number: value.pr_number,
+    current_candidate,
+    expected_candidate,
+    pagination: pagination.pagination,
+    pagination_evidence: pagination.evidence,
+    authoritative_counts,
+    pull_requests: arrays.pull_requests,
+    submitted_reviews: arrays.submitted_reviews,
+    inline_conversations: arrays.inline_conversations,
+    finding_evidence,
+    stale: value.stale,
+    unavailable: value.unavailable,
+    complete: value.complete,
+    server_authoritative: value.server_authoritative,
+    verifiable: value.verifiable,
+  };
+  const representedPr = arrays.pull_requests.find((item) => item.number === current_candidate.pr_number) || null;
+  if (!representedPr || !['head', 'tree', 'base'].every((key) => isSha(representedPr[key]) && representedPr[key] === current_candidate[key])) return null;
+  const computed = reviewEvidenceDigest(normalized);
+  const supplied = ['evidence_digest', 'evidence_binding_digest', 'inventory_digest']
+    .filter((key) => hasOwn(value, key))
+    .map((key) => value[key]);
+  if (supplied.length === 0 || supplied.some((digest) => !isDigest(digest) || digest !== computed)) return null;
+  return { ...normalized, evidence_digest: computed };
+}
+function normalizeCallerPaginationAssertion(value) {
+  if (!isRecord(value)) return null;
+  const result = {};
+  for (const key of ['pull_requests', 'submitted_reviews', 'inline_conversations']) {
+    const item = value[key];
+    result[key] = item === true || (isRecord(item) && item.complete === true);
+    if (item !== true && item !== false && (!isRecord(item) || typeof item.complete !== 'boolean')) return null;
+  }
+  return result;
+}
+function callerReviewEvidenceMatches(input, trusted) {
+  const compareArray = (key, normalizer, trustedKey = key) => {
+    if (!hasOwn(input, key)) return true;
+    if (!Array.isArray(input[key])) return false;
+    const normalized = input[key].map(normalizer);
+    return normalized.every((item) => item !== null) && canonicalJson(normalized) === canonicalJson(trusted[trustedKey]);
+  };
+  for (const [key, normalizer] of [['pull_requests', normalizePullRequest], ['submitted_reviews', normalizeSubmittedReview], ['inline_conversations', normalizeInlineConversation]]) {
+    if (!compareArray(key, normalizer)) return false;
+  }
+  for (const key of ['repository', 'pr_number', 'stale', 'unavailable', 'complete', 'server_authoritative', 'verifiable']) {
+    if (hasOwn(input, key) && input[key] !== trusted[key]) return false;
+  }
+  for (const [key, trustedKey] of [['current_candidate', 'current_candidate'], ['expected_candidate', 'expected_candidate'], ['candidate', 'current_candidate']]) {
+    if (hasOwn(input, key)) {
+      const candidate = normalizeCandidate(input[key]);
+      if (!candidate || canonicalJson(candidate) !== canonicalJson(trusted[trustedKey])) return false;
+    }
+  }
+  if (hasOwn(input, 'pagination')) {
+    const pagination = normalizeCallerPaginationAssertion(input.pagination);
+    if (!pagination || canonicalJson(pagination) !== canonicalJson(trusted.pagination)) return false;
+  }
+  if (hasOwn(input, 'authoritative_counts') || hasOwn(input, 'counts')) {
+    if (hasOwn(input, 'authoritative_counts') && hasOwn(input, 'counts')
+      && (!isRecord(input.authoritative_counts) || !isRecord(input.counts)
+        || canonicalJson(input.authoritative_counts) !== canonicalJson(input.counts))) return false;
+    const counts = hasOwn(input, 'authoritative_counts') ? input.authoritative_counts : input.counts;
+    if (!isRecord(counts) || canonicalJson(counts) !== canonicalJson(trusted.authoritative_counts)) return false;
+  }
+  for (const key of ['findings', 'finding_evidence']) {
+    if (hasOwn(input, key)) {
+      if (!Array.isArray(input[key])) return false;
+      const findings = input[key].map(normalizeFindingEvidence);
+      if (findings.some((item) => item === null) || canonicalJson(findings) !== canonicalJson(trusted.finding_evidence)) return false;
+    }
+  }
+  if (hasOwn(input, 'pagination_evidence')) {
+    const pagination = normalizePaginationEvidence(input.pagination_evidence, trusted);
+    if (!pagination || canonicalJson(pagination.evidence) !== canonicalJson(trusted.pagination_evidence)) return false;
+  }
+  if (hasOwn(input, 'evidence_digest') && input.evidence_digest !== trusted.evidence_digest) return false;
+  if (hasOwn(input, 'evidence_binding_digest') && input.evidence_binding_digest !== trusted.evidence_digest) return false;
+  if (hasOwn(input, 'inventory_digest') && input.inventory_digest !== trusted.evidence_digest) return false;
+  if (hasOwn(input, 'evidence_status')) {
+    const expected = trusted.stale ? 'stale' : trusted.unavailable ? 'unavailable' : 'current';
+    if (input.evidence_status !== expected) return false;
+  }
+  return true;
+}
+function buildReviewInventory(input = {}) {
+  const adapter = input.evidence_adapter;
+  if (!isRecord(adapter) || typeof adapter.getReviewEvidence !== 'function') return incompleteReviewInventory();
+  let result;
+  try {
+    result = adapter.getReviewEvidence({
+      repository: input.repository,
+      pr_number: input.pr_number || input.current_candidate?.pr_number || null,
+      current_candidate: clone(input.current_candidate),
+      expected_candidate: clone(input.expected_candidate),
+    });
+  } catch (_error) {
+    return incompleteReviewInventory('adapter-read-failed');
+  }
+  if (!isRecord(result) || result.ok === false) return incompleteReviewInventory('adapter-result-invalid');
+  const evidence = result.ok === true ? result.evidence : result;
+  if (!isRecord(evidence)) return incompleteReviewInventory('adapter-evidence-missing');
+  const trusted = normalizeTrustedReviewEvidence({
+    ...evidence,
+    ...(hasOwn(result, 'evidence_digest') && !hasOwn(evidence, 'evidence_digest') ? { evidence_digest: result.evidence_digest } : {}),
+  });
+  if (!trusted || trusted.stale || trusted.unavailable || trusted.complete !== true || trusted.server_authoritative !== true || trusted.verifiable !== true
+    || !Object.values(trusted.pagination).every((value) => value === true)) return incompleteReviewInventory('trusted-evidence-incomplete');
+  if (!callerReviewEvidenceMatches(input, trusted)) return incompleteReviewInventory('caller-evidence-mismatch');
+  const inventoryBase = {
+    version: REVIEW_INVENTORY_VERSION,
+    repository: trusted.repository,
+    pr_number: trusted.pr_number,
+    candidate: trusted.current_candidate,
+    expected_candidate: trusted.expected_candidate,
+    pagination: trusted.pagination,
+    pagination_evidence: trusted.pagination_evidence,
+    authoritative_counts: trusted.authoritative_counts,
+    pull_requests: trusted.pull_requests,
+    submitted_reviews: trusted.submitted_reviews,
+    inline_conversations: trusted.inline_conversations,
+    finding_evidence: trusted.finding_evidence,
+    stale: trusted.stale,
+    unavailable: trusted.unavailable,
+    complete: true,
+    server_authoritative: true,
+    verifiable: true,
+    evidence_binding_digest: trusted.evidence_digest,
+  };
+  const inventory = { ...inventoryBase, inventory_digest: trusted.evidence_digest };
+  const review = projectA4Review(inventory);
+  return review.ok === false
+    ? review
+    : success('N5_INSPECTION_READY', { inventory, review });
 }
 function evaluateMateriality(input = {}) {
   const predicates = isRecord(input.predicates) ? input.predicates : {};
@@ -872,7 +1082,8 @@ function validateDeferredFindingRecord(record) {
     || !hasOwn(record, 'public_source_ref')
     || !hasOwn(record, 'predicates')
     || !hasOwn(record, 'exclusions')
-    || record.materiality !== 'nonblocking'
+    || !['nonblocking', 'material'].includes(record.materiality)
+    || record.materiality === 'material' && !['PROMOTED_TO_EXISTING_CHILD', 'PROMOTED_TO_CHILD'].includes(record.disposition)
     || !publicSafeText(record.text)) {
     return failure('N5_DF_AMBIGUOUS');
   }
@@ -949,12 +1160,59 @@ function registerDeferredFinding(input = {}) {
   parent.deferred_findings.push(record);
   return success('N5_DF_REGISTERED', { parent, record });
 }
+function normalizeFreshRevalidationFinding(source) {
+  if (!isRecord(source)) return null;
+  const predicates = source.predicates;
+  const exclusions = source.exclusions;
+  if (!isRecord(predicates)
+    || !A4_MATERIAL_PREDICATES.every((key) => hasOwn(predicates, key) && typeof predicates[key] === 'boolean')
+    || !Array.isArray(exclusions)
+    || !exclusions.every((item) => A4_EXCLUSIONS.includes(item))) return null;
+  const normalized = isRecord(source.provenance)
+    ? normalizeFindingEvidence(source)
+    : classifyFinding(source).finding;
+  return normalized || null;
+}
+function freshFindingMatchesRecord(source, finding, record) {
+  const provenance = finding.provenance;
+  if (finding.id !== record.finding_id
+    || provenance.source_pr !== record.source_pr
+    || provenance.source_thread !== record.source_thread
+    || canonicalJson(provenance.source_candidate) !== canonicalJson(record.source_candidate)
+    || provenance.source_candidate.head !== record.source_head
+    || (provenance.public_source_ref ?? null) !== record.public_source_ref) return false;
+  const freshRoot = deferredRootDigest(finding);
+  if (freshRoot !== record.root_digest) return false;
+  if (hasOwn(source, 'evidence_digest') && source.evidence_digest !== finding.evidence_digest) return false;
+  if (hasOwn(source, 'root_digest') && source.root_digest !== freshRoot) return false;
+  return true;
+}
 function revalidateDeferredFinding(input = {}) {
   const initial = validateDeferredFindingRecord(clone(input.record || {}));
   if (!initial.ok) return initial;
-  const record = clone(initial.record);
-  record.linked_child = null;
-  if (input.material !== true) {
+  const source = input.fresh_finding || input.finding || input.fresh_evidence;
+  const finding = normalizeFreshRevalidationFinding(source);
+  if (!finding || !freshFindingMatchesRecord(source, finding, initial.record)) return failure('N5_DF_AMBIGUOUS');
+  const material = finding.materiality === 'material';
+  if (hasOwn(input, 'material') && input.material !== material) return failure('N5_DF_AMBIGUOUS');
+  if (hasOwn(input, 'evidence_digest') && input.evidence_digest !== finding.evidence_digest) return failure('N5_DF_AMBIGUOUS');
+  const freshRoot = deferredRootDigest(finding);
+  const record = {
+    ...clone(initial.record),
+    text: finding.text,
+    path: finding.provenance.path ?? null,
+    line: finding.provenance.line ?? null,
+    public_source_ref: finding.provenance.public_source_ref ?? null,
+    component: finding.component,
+    predicates: finding.predicates,
+    exclusions: finding.exclusions,
+    materiality: finding.materiality,
+    evidence_digest: finding.evidence_digest,
+    root_digest: freshRoot,
+    linked_child: null,
+  };
+  if (!material) {
+    if (hasOwn(input, 'disposition') && ['PROMOTED_TO_EXISTING_CHILD', 'PROMOTED_TO_CHILD'].includes(input.disposition)) return failure('N5_DF_AMBIGUOUS');
     const disposition = input.disposition || 'DISPOSED_NONMATERIAL';
     if (!['SATISFIED', 'SUPERSEDED', 'OBSOLETE', 'DISPOSED_NONMATERIAL'].includes(disposition)) return failure('N5_DF_AMBIGUOUS');
     record.disposition = disposition;
@@ -965,7 +1223,7 @@ function revalidateDeferredFinding(input = {}) {
   if (child !== undefined && child !== null) {
     if (!isRecord(child) || !isIssue(child.issue_number)) return failure('N5_DF_AMBIGUOUS');
     if (child.direct !== true || child.compatible !== true || child.frozen === true || child.lifecycle === 'current') {
-      return failure('N5_AUTHORITY_REQUIRED', { record, promotion: 'scope_decision_required' });
+      return failure('N5_AUTHORITY_REQUIRED', { record: initial.record, promotion: 'scope_decision_required' });
     }
     record.disposition = 'PROMOTED_TO_EXISTING_CHILD';
     record.linked_child = child.issue_number;
@@ -978,7 +1236,7 @@ function revalidateDeferredFinding(input = {}) {
     || sibling.direct !== true
     || sibling.compatible !== true
     || !isIssue(sibling.issue_number)) {
-    return failure('N5_AUTHORITY_REQUIRED', { record, promotion: 'controller_authorised_direct_sibling_required' });
+    return failure('N5_AUTHORITY_REQUIRED', { record: initial.record, promotion: 'controller_authorised_direct_sibling_required' });
   }
   record.disposition = 'PROMOTED_TO_CHILD';
   record.linked_child = sibling.issue_number;
@@ -1248,7 +1506,7 @@ function createRuntime(options = {}) {
 }
 
 module.exports = Object.freeze({
-  CONTRACT_VERSION, REVIEW_INVENTORY_VERSION, TRACKER_VERSION, LEGACY_V0_VERSION, DESIGN_LOCK, INTENTS, RESOURCE_KINDS, LIFECYCLES,
+  CONTRACT_VERSION, REVIEW_INVENTORY_VERSION, REVIEW_EVIDENCE_VERSION, TRACKER_VERSION, LEGACY_V0_VERSION, DESIGN_LOCK, INTENTS, RESOURCE_KINDS, LIFECYCLES,
   OBJECTIVE_STATUSES, MUTATION_TARGET_KINDS,
   A4_MATERIAL_PREDICATES, A4_EXCLUSIONS, DF_TRIGGERS, DF_DISPOSITIONS, REVIEW_DISPOSITIONS, MANAGED_MARKERS,
   SECTION_ORDER, FAILURE_CODES, SUCCESS_CODES, RED_FIRST_CASES, canonicalJson, sha256, isDigest, isSha,
@@ -1256,7 +1514,7 @@ module.exports = Object.freeze({
   replaceManagedBlock, validateTracker, boundedProjection, classifyBodyLimit, compactTerminal, applyBoundedUpdate,
   buildReviewInventory, evaluateMateriality, classifyFinding, normalizeFindingEvidence, authorizeReviewMutation, resolveFinding,
   registerDeferredFinding, validateDeferredFindingRecord, revalidateDeferredFinding, projectA4Review, codexReviewState, autoCodeReadiness, adjudicateHistoricalPr310,
-  findingEvidenceDigest, deferredRootDigest, durableEvidenceDigest, normalizeDurableEvidence, parseLegacyParent, rejectHistoricalRevival, nextAction, createRuntime,
+  findingEvidenceDigest, deferredRootDigest, reviewEvidenceDigest, durableEvidenceDigest, normalizeDurableEvidence, parseLegacyParent, rejectHistoricalRevival, nextAction, createRuntime,
 });
 function representedPrNumbers(state) {
   const values = [];
@@ -1312,7 +1570,7 @@ function durableEvidencePayload(item, proof) {
     disposition: proof.disposition,
     outcome: proof.outcome,
     parent_chronology_ref: proof.parent_chronology_ref,
-    pr: pr === null ? null : { number: pr.number, public_source_ref: pr.public_source_ref },
+    pr: pr === null ? null : { number: pr.number, state: pr.state || null, public_source_ref: pr.public_source_ref },
     accepted_commit: accepted === null ? null : { sha: accepted.sha, public_source_ref: accepted.public_source_ref },
   };
 }
@@ -1320,28 +1578,32 @@ function durableEvidenceDigest(item, proof) {
   return sha256(durableEvidencePayload(item, proof));
 }
 function terminalProofFor(item, options = {}) {
-  let proof = null;
-  const adapter = options.evidence_adapter || options.github || null;
-  if (typeof adapter?.getTerminalEvidence === 'function') {
-    try { proof = adapter.getTerminalEvidence({ item: clone(item), child_issue: item.issue_number }); } catch (_error) { proof = null; }
-  }
-  if (proof && proof.ok === true && isRecord(proof.evidence)) proof = proof.evidence;
-  if (proof === null && options.durable_evidence !== undefined) {
-    const source = options.durable_evidence;
-    if (Array.isArray(source)) proof = source.find((entry) => isRecord(entry) && (entry.child_issue === item.issue_number || entry.child_id === item.child_id)) || null;
-    else if (isRecord(source) && (source.child_issue === item.issue_number || source.child_id === item.child_id)) proof = source;
-    else if (isRecord(source)) proof = source[item.child_id] || source[String(item.issue_number)] || null;
-  }
-  return proof;
+  const adapter = options.evidence_adapter || null;
+  if (typeof adapter?.getTerminalEvidence !== 'function') return null;
+  let result;
+  try { result = adapter.getTerminalEvidence({ item: clone(item), child_issue: item.issue_number }); } catch (_error) { return null; }
+  if (!isRecord(result) || result.ok === false) return null;
+  const proof = result.ok === true ? result.evidence : result;
+  if (!isRecord(proof)) return null;
+  return hasOwn(result, 'evidence_digest') && !hasOwn(proof, 'evidence_digest')
+    ? { ...proof, evidence_digest: result.evidence_digest }
+    : proof;
+}
+function terminalEvidenceAssertionFor(item, source) {
+  if (Array.isArray(source)) return source.find((entry) => isRecord(entry) && (entry.child_issue === item.issue_number || entry.child_id === item.child_id)) || null;
+  if (isRecord(source) && (source.child_issue === item.issue_number || source.child_id === item.child_id)) return source;
+  if (isRecord(source)) return source[item.child_id] || source[String(item.issue_number)] || null;
+  return null;
 }
 function normalizeDurableEvidence(item, proof) {
   if (!isRecord(item) || !isRecord(proof)
     || proof.server_authoritative !== true
     || proof.verifiable !== true
     || proof.complete !== true
+    || proof.child_id !== item.child_id
     || proof.child_issue !== item.issue_number
     || !isSafePublicRef(proof.parent_chronology_ref)
-    || !isSafeLabel(proof.disposition || '')
+    || !['accepted', 'disposed'].includes(proof.disposition)
     || !isSafeLabel(proof.outcome || '')) return failure('PARENT_BODY_LIMIT');
   if (item.outcome !== undefined && item.outcome !== null && proof.outcome !== item.outcome) return failure('PARENT_BODY_LIMIT');
   if (item.objective_status === 'completed' && proof.disposition !== 'accepted') return failure('PARENT_BODY_LIMIT');
@@ -1350,7 +1612,12 @@ function normalizeDurableEvidence(item, proof) {
   let pr = null;
   if (represented.number !== null) {
     if (!isRecord(proof.pr) || proof.pr.number !== represented.number || !isSafePublicRef(proof.pr.public_source_ref)) return failure('PARENT_BODY_LIMIT');
-    pr = { number: proof.pr.number, public_source_ref: proof.pr.public_source_ref };
+    if (item.implementation_pr?.state !== undefined && proof.pr.state !== item.implementation_pr.state) return failure('PARENT_BODY_LIMIT');
+    pr = {
+      number: proof.pr.number,
+      ...(proof.pr.state === undefined ? {} : { state: proof.pr.state }),
+      public_source_ref: proof.pr.public_source_ref,
+    };
   }
   const needsCommit = item.objective_status === 'completed' || item.implementation_pr?.state === 'merged' || proof.code_delivery === true;
   let accepted_commit = null;
@@ -1385,11 +1652,22 @@ const LEGACY_SECTION_ORDER = Object.freeze([
   'Governance ownership',
   'Mandatory parent reconciliation',
 ]);
+function normalizeLegacyResidueText(value) {
+  return String(value)
+    .trim()
+    .replace(/[ \t\u00a0]+/g, ' ')
+    .replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+}
 function legacyAuthorityResidue(body) {
   if (typeof body !== 'string') return false;
-  const headings = [...body.matchAll(/^## (.+)$/gm)].map((match) => match[1].trim());
-  return headings.some((heading) => LEGACY_SECTION_ORDER.includes(heading))
-    || /(?:^|\n)- (?:Legacy tracker version|Tracker version|Format version):\s*pre-n5-/.test(body);
+  const headings = [...body.matchAll(/^## (.+)$/gm)].map((match) => normalizeLegacyResidueText(match[1]));
+  const knownHeadings = new Set(LEGACY_SECTION_ORDER.map(normalizeLegacyResidueText));
+  const knownHeadingCount = headings.filter((heading) => knownHeadings.has(heading)).length;
+  const versionMarker = body.split(/\r?\n/).some((line) => /^-\s*(?:legacy tracker version|tracker version|format version)\s*:\s*pre-n5-/.test(normalizeLegacyResidueText(line)));
+  const ambiguousSevenSectionBody = headings.length === LEGACY_SECTION_ORDER.length
+    && headings.some((heading) => /authority|reconciliation/.test(heading))
+    && headings.some((heading) => /execution|queue|completion/.test(heading));
+  return knownHeadingCount > 0 || versionMarker || ambiguousSevenSectionBody;
 }
 function legacySectionBody(body, names, name) {
   const index = names.findIndex((entry) => entry.name === name);

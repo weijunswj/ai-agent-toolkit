@@ -90,16 +90,41 @@ function legacyBody(version = n5.LEGACY_V0_VERSION, extra = '') {
 }
 
 function reviewInput(overrides = {}) {
-  return {
+  const { findings, ...evidenceOverrides } = overrides;
+  const evidence = {
+    repository,
+    pr_number: candidate.pr_number,
     server_authoritative: true,
     verifiable: true,
+    complete: true,
+    stale: false,
+    unavailable: false,
     pagination: { pull_requests: true, submitted_reviews: true, inline_conversations: true },
     pull_requests: [{ number: candidate.pr_number, state: 'open', merged: false, head: candidate.head, tree: candidate.tree, base: candidate.base, public_source_ref: 'pr/355' }],
     submitted_reviews: [{ id: 'review-1', pr_number: candidate.pr_number, state: 'commented' }],
     inline_conversations: [{ id: 'thread-1', pr_number: candidate.pr_number, resolved: false, outdated: false, closing_reply: false }],
     current_candidate: candidate,
     expected_candidate: candidate,
-    ...overrides,
+    finding_evidence: findings || [],
+    ...evidenceOverrides,
+  };
+  const counts = {
+    pull_requests: Array.isArray(evidence.pull_requests) ? evidence.pull_requests.length : 0,
+    submitted_reviews: Array.isArray(evidence.submitted_reviews) ? evidence.submitted_reviews.length : 0,
+    inline_conversations: Array.isArray(evidence.inline_conversations) ? evidence.inline_conversations.length : 0,
+  };
+  if (!Object.prototype.hasOwnProperty.call(evidenceOverrides, 'authoritative_counts')) evidence.authoritative_counts = counts;
+  if (!Object.prototype.hasOwnProperty.call(evidenceOverrides, 'pagination_evidence')) {
+    evidence.pagination_evidence = Object.fromEntries(Object.keys(evidence.pagination || {}).map((key) => [
+      key,
+      { complete: evidence.pagination[key], pages: 1, cursor: null, count: counts[key] },
+    ]));
+  }
+  if (!Object.prototype.hasOwnProperty.call(evidenceOverrides, 'evidence_digest')) evidence.evidence_digest = n5.reviewEvidenceDigest(evidence);
+  return {
+    ...evidence,
+    ...(findings === undefined ? {} : { findings }),
+    evidence_adapter: { getReviewEvidence: () => evidence },
   };
 }
 
@@ -174,9 +199,9 @@ test('B5 refuses terminal truncation without proof and retains identity, refs, d
   const terminal = { child_id: 'done', issue_number: 321, lifecycle: 'terminal', implementation_pr: { number: 355, state: 'merged' }, objective_status: 'completed', outcome: 'delivered', detail: 'x'.repeat(500) };
   const state = parentState({ terminal: [terminal] });
   assert.equal(n5.compactTerminal(state).code, 'PARENT_BODY_LIMIT');
-  const proof = { server_authoritative: true, verifiable: true, complete: true, child_issue: 321, disposition: 'accepted', outcome: 'delivered', parent_chronology_ref: 'issue/240#run-181', pr: { number: 355, public_source_ref: 'pull/355' }, accepted_commit: { sha: '6ae424689d4af042737c403f3a1dc030fbeb0cc3', public_source_ref: 'commit/6ae4246' }, evidence_digest: null };
+  const proof = { server_authoritative: true, verifiable: true, complete: true, child_id: 'done', child_issue: 321, disposition: 'accepted', outcome: 'delivered', parent_chronology_ref: 'issue/240#run-181', pr: { number: 355, state: 'merged', public_source_ref: 'pull/355' }, accepted_commit: { sha: '6ae424689d4af042737c403f3a1dc030fbeb0cc3', public_source_ref: 'commit/6ae4246' }, evidence_digest: null };
   proof.evidence_digest = n5.durableEvidenceDigest(terminal, proof);
-  const compacted = n5.compactTerminal(state, { durable_evidence: proof });
+  const compacted = n5.compactTerminal(state, { evidence_adapter: { getTerminalEvidence: () => proof }, durable_evidence: proof });
   assert.equal(compacted.ok, true);
   const compactedItem = compacted.state.terminal[0];
   assert.equal(compactedItem.child_id, terminal.child_id);
@@ -184,7 +209,7 @@ test('B5 refuses terminal truncation without proof and retains identity, refs, d
   assert.deepEqual(compactedItem.implementation_pr, terminal.implementation_pr);
   assert.equal(compactedItem.durable_evidence_digest, proof.evidence_digest);
   assert.equal(compacted.state.owner_detail, state.owner_detail);
-  assert.equal(n5.compactTerminal(state, { durable_evidence: { ...proof, evidence_digest: '0'.repeat(64) } }).code, 'PARENT_BODY_LIMIT');
+  assert.equal(n5.compactTerminal(state, { evidence_adapter: { getTerminalEvidence: () => proof }, durable_evidence: { ...proof, evidence_digest: '0'.repeat(64) } }).code, 'PARENT_BODY_LIMIT');
 });
 
 test('B6 initialise creates only from unmanaged bytes and migrate accepts only exact recognised legacy/v3 targets', () => {
@@ -219,6 +244,7 @@ test('B6 initialise creates only from unmanaged bytes and migrate accepts only e
   assert.equal(residueResult.code, 'PARENT_PARSE_UNCERTAIN');
   assert.equal(residueGithub.values.writes, 0);
 });
+
 
 test('Run-181 source contracts declare all six roots and recognised migration versions', () => {
   const project = path.resolve(__dirname, '../../_projects/development/github-governance-review-reconciler');

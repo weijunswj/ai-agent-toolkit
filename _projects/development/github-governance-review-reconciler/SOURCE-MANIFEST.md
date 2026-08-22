@@ -11,6 +11,7 @@
   historical PR #310 disposition, the Run-181 B1-B6 contract-integrity roots,
   and the Run-183 four-root closure for canonical A2 identity, accepted child
   completion evidence, A4-derived materiality, and unmanaged-only initialise.
+  Run-185 closes trusted first-party review/terminal evidence adapters, fresh A4 Deferred-Finding revalidation, and conservative legacy residue detection.
 - `_main/tracker-v3-grammar.json` and `_main/templates/` are the deterministic
   managed-block grammar and templates. They do not permit model-authored
   parent Markdown reconstruction.
@@ -20,6 +21,8 @@
 - `repo/tests/` contains RED-first and boundary acceptance tests.
   Run-181 acceptance covers exact A2 repository identity, global lifecycle/PR
   uniqueness, explicit review evidence, shared transaction ownership,
+  Run-185 adversarial tests cover trusted adapter boundaries, fresh DF
+  revalidation, and legacy residue variants.
 
 ## Published surface
 

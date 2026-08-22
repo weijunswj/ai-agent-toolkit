@@ -34,7 +34,12 @@ node repo/scripts/toolkit-github-governance-review-reconciler.cjs
 ```
 
 The runtime is a local contract/parser/transaction library. A real adapter is
-not included and must not be invented here. Any adapter supplied by a caller
+not included and must not be invented here. Integration adapters must bind
+first-party evidence boundaries for review inventory and terminal proof.
+Review inventory authority comes only from getReviewEvidence and terminal
+compaction authority comes only from getTerminalEvidence. Caller arrays, counts,
+pagination facts, flags, digests, and durable evidence are equality assertions
+only; there is no fallback to caller durable evidence.
 must return a complete server-authoritative body, revision/ETag metadata when
 available, and a complete readback. Incomplete retrieval, missing/duplicate or
 ambiguous entries, parse uncertainty, concurrent movement, unrelated-byte
@@ -63,7 +68,7 @@ preview, and A1 authorization. Read-only inspection and preview do not mutate.
 `remove` is bounded and requires the same authority; it is not a cleanup or
 finality action.
 
-## Run-183 contract integrity
+## Run-185 three-root closure
 
 The six-root contract is closed:
 
@@ -79,18 +84,25 @@ The six-root contract is closed:
   non-delivery PR states never imply completion.
 - B3 requires explicit current and expected candidate identity, exact
   represented PR head/tree/base facts, explicit merged and inline-conversation
-  booleans, recomputed finding/Deferred Finding digests, and A4-derived
-  materiality at every finding/Deferred Finding ingress. Any caller
-  materiality label is only an equality assertion.
+  booleans, complete server-authoritative review pages/cursors/counts, and
+  recomputed finding/Deferred Finding digests. The first-party review evidence
+  adapter supplies the arrays, pagination facts, authoritative counts, flags,
+  and binding digest; caller values are equality assertions only. Fresh
+  Deferred-Finding evidence is canonically normalized through A4 and derives
+  materiality and evidence/root digests at every revalidation ingress.
 - B4 uses one module/process owner registry for `repository+parent`; injected
   maps cannot bypass it and every terminal path releases ownership.
 - B5 permits terminal compaction only with complete server-authoritative,
-  public-safe durable evidence and a deterministic retained digest.
+  public-safe durable evidence from the first-party terminal evidence adapter
+  and a deterministic retained digest; caller proof is assertion-only.
 - B6 initialises only genuinely unmanaged bodies; exact recognised legacy
   bodies require the existing migrate intent, and unknown or ambiguous
   authority-like residue fails closed. Migrate remains limited to exact v3 or
   `pre-n5-seven-section-v0` bodies with whole-body binding, one write, and
   immediate readback.
+  Legacy residue detection is conservative and normalizes case and horizontal
+  spacing only; the strict migration parser remains exact and unrelated prose
+  is not residue.
 
 ## Large-parent transaction
 
@@ -116,10 +128,11 @@ across multiple parents because a body is large.
 ## Review truth model
 
 Inventory pull requests, submitted reviews, and inline conversations before
-classifying findings. Require complete server-authoritative pagination; an
-empty or incomplete inventory is not green. Keep review inventory, finding
-evidence, materiality, disposition, and thread/review mutation as separate
-records.
+classifying findings. Require a complete first-party server-authoritative
+review evidence adapter result with pages, cursors, authoritative counts,
+flags, and a binding digest; an empty, stale, unavailable, or incomplete
+inventory is not green. Keep review inventory, finding evidence, materiality,
+disposition, and thread/review mutation as separate records.
 
 Executors may inspect and recommend. They must not reply to threads, resolve or
 reopen conversations, dismiss reviews, manufacture final dispositions, mark
@@ -137,9 +150,12 @@ controller-owned reference.
 An initial nonblocking finding goes in the parent-managed Deferred Findings
 register. It is an index/provenance/revalidation record, not a second queue,
 task checkbox, or automatic backlog issue. Keep public-safe evidence sufficient
-to revalidate the same component/boundary and preserve the root digest,
-source PR/thread/head when available, reason, materiality inputs, and
-disposition.
+to revalidate the same component/boundary. Every revalidation requires fresh
+finding evidence, canonical A4 normalization, and recomputed materiality,
+evidence, and root digests. Caller materiality and digest values are equality
+assertions only; material findings cannot be disposed as nonmaterial and retain
+promotion authority. Preserve the root digest, source PR/thread/head when
+available, reason, materiality inputs, and disposition.
 
 Revalidate at least:
 
