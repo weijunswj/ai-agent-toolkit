@@ -27,7 +27,7 @@ Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
 
 | Metric | Current value |
 | --- | ---: |
-| projects | 21 |
+| projects | 22 |
 | publishedFiles | 244 |
 | declaredOutputFiles | 244 |
 | packInstalledFiles | 84 |
@@ -75,6 +75,7 @@ Known baseline context:
 ## Current project modules
 
 - `_projects/cicd/secure-installer`
+- `_projects/cicd/trusted-ci-repository-protection`
 - `_projects/design/google-design-md`
 - `_projects/design/ui-ux-pro-max`
 - `_projects/development/ai-coding-agent-rules`
