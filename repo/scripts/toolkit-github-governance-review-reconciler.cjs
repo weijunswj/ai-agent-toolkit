@@ -122,6 +122,10 @@ function transactionContract() {
 }
 
 function markerCount(text, marker) { return String(text).split(marker).length - 1; }
+function n5MarkerFamilyResidue(body) {
+  if (typeof body !== 'string') return false;
+  return /<!--[ \t\u00a0]*AI-AGENT-TOOLKIT[ \t\u00a0]*:[ \t\u00a0]*N5[ \t\u00a0]*-[ \t\u00a0]*(?:PARENT|CHILD|PR|STATE)(?![A-Z0-9_-])/i.test(body);
+}
 function headers(text) { return [...String(text).matchAll(/^## (.+)$/gm)].map((match) => match[1].trim()); }
 function parentEntries(state) {
   return [['current_work', state.current_work], ['pending_work', state.pending_work], ['terminal', state.terminal]]
@@ -1437,6 +1441,7 @@ function createRuntime(options = {}) {
       }
       const legacy = parseLegacyParent(first.fetched.body, { complete: first.fetched.complete !== false });
       if (legacy.ok || legacy.legacy === true) return failure('N5_SCOPE_REJECTED', { migration_required: true, source_version: legacy.source_version || LEGACY_V0_VERSION, source_body_digest: legacy.body_digest || sha256(first.fetched.body) });
+      if (n5MarkerFamilyResidue(first.fetched.body)) return failure('PARENT_PARSE_UNCERTAIN');
       if (legacyAuthorityResidue(first.fetched.body)) return failure('PARENT_PARSE_UNCERTAIN');
       const rendered = renderManagedBlock('parent', auth.mutation_scope.update.state);
       const separator = first.fetched.body.length === 0 || first.fetched.body.endsWith('\n') ? '' : '\n';
