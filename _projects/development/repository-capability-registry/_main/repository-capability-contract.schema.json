@@ -73,12 +73,12 @@
             "target_contract_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
             "legacy_receipt_ids": {
               "type": "array",
-              "maxItems": 3,
+              "maxItems": 256,
               "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
             },
             "legacy_receipt_digests": {
               "type": "array",
-              "maxItems": 3,
+              "maxItems": 256,
               "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
             }
           }

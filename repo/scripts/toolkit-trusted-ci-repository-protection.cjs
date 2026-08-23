@@ -2,6 +2,8 @@
 
 const crypto = require('node:crypto');
 
+const capabilityRegistry = require('./toolkit-capability-registry.cjs');
+
 const CONTRACT_VERSION = 'toolkit.n6.trusted-ci-repository-protection.v1';
 const EVIDENCE_SCHEMA = 'toolkit.n6.ci-evidence.v1';
 const PUBLISHER_PROTOCOL_VERSION = 'toolkit.n6.app-publisher.v1';
@@ -799,15 +801,21 @@ function classifyProtectionOwnership(effective, desired = null) {
   const classes = [];
   let n6 = null;
   let conflict = false;
+  const seenRuleIds = new Set();
   for (const rule of [...rulesets, ...organisationRulesets]) {
     const owner = String(rule.owner_class || rule.owner || rule.source || '').toLowerCase();
-    const isN6 = rule.id === desiredId || owner === 'n6-owned' || owner === 'n6';
+    if (seenRuleIds.has(rule.id)) conflict = true;
+    seenRuleIds.add(rule.id);
+    const isN6 = rule.owner_class === 'N6-owned' && rule.id === desiredId;
     if (isN6) {
       if (n6) conflict = true;
       n6 = rule;
       classes.push('N6-owned');
       const context = (rule.required_contexts || []).find((item) => item.context === GATE_CONTEXT);
       if (context && desiredIntegration && context.integration_id !== desiredIntegration) conflict = true;
+    } else if (rule.owner_class === 'N6-owned') {
+      conflict = true;
+      classes.push('N6-owned');
     } else if (organisationRulesets.includes(rule) || owner === 'organisation-managed' || owner === 'organization-managed') {
       classes.push('organisation-managed');
     } else if (owner === 'unknown' || owner === '') {
@@ -815,12 +823,15 @@ function classifyProtectionOwnership(effective, desired = null) {
       if (rule.name === 'protect-main' || (rule.required_contexts || []).some((item) => item.context === GATE_CONTEXT)) conflict = true;
     } else if (owner === 'owner-managed') {
       classes.push('owner-managed');
+      if (rule.id === desiredId) conflict = true;
+    } else if (['foreign', 'foreign-managed', 'external', 'external-managed', 'third-party', 'third-party-managed'].includes(owner)) {
+      return failure('ownership_ambiguous', { ownership_class: 'overlapping-conflicting' });
     } else {
       classes.push('overlapping-compatible');
     }
   }
   if (conflict) return failure('ownership_ambiguous', { ownership_class: 'overlapping-conflicting', n6_rule: n6 });
-  const ownershipClass = n6 ? 'N6-owned' : classes.includes('organisation-managed') ? 'organisation-managed' : classes.includes('owner-managed') ? 'overlapping-compatible' : classes.includes('unknown') ? 'unknown' : classes.includes('overlapping-compatible') ? 'overlapping-compatible' : 'none';
+  const ownershipClass = n6 ? 'N6-owned' : classes.includes('organisation-managed') ? 'organisation-managed' : classes.includes('owner-managed') ? 'owner-managed' : classes.includes('unknown') ? 'unknown' : classes.includes('overlapping-compatible') ? 'overlapping-compatible' : 'none';
   return success({ ownership_class: ownershipClass, ownership_classes: [...new Set(classes)], n6_rule: n6 });
 }
 
@@ -853,30 +864,34 @@ function buildMutationBinding(input) {
   return success({ binding: { ...binding, operation_digest: digestValue(binding) } });
 }
 
-function validateProtectionConsent(consent, repositoryId) {
+function validateProtectionConsent(consent, repositoryId, registryRevision = null) {
   if (!isRecord(consent) || consent.capability_id !== 'repository.protection') return failure('consent_missing');
-  if (!['unresolved', 'enabled', 'disabled'].includes(consent.state)) return failure('consent_missing');
-  if (consent.state === 'unresolved') return failure('consent_missing');
-  if (consent.state !== 'enabled') return failure('capability_denied');
-  if (consent.repository_id !== undefined && consent.repository_id !== repositoryId) return failure('identity_mismatch');
-  if (consent.receipt_id !== undefined && !isDigest(consent.receipt_id)) return failure('consent_missing');
-  if (consent.decision_kind !== undefined && consent.decision_kind !== 'enable') return failure('capability_denied');
-  return success({ consent: clone(consent) });
+  if (consent.state !== 'enabled' || consent.decision_kind !== 'enable') {
+    return consent.state === 'disabled' ? failure('capability_denied') : failure('consent_missing');
+  }
+  if (!isRecord(consent.receipt) || consent.receipt.repository_id !== repositoryId) return failure('identity_mismatch');
+  const currentRevision = registryRevision === null ? consent.receipt.registry_revision : registryRevision;
+  const result = capabilityRegistry.validateProtectionCapability(consent, repositoryId, currentRevision);
+  if (!result.ok) return failure('consent_missing');
+  return success({ consent: clone(consent), registry_revision: result.registry_revision });
 }
 
 function readProtectionConsent(status, repositoryId) {
   if (!isRecord(status) || !isRecord(status.capabilities)) return failure('consent_missing');
+  if (status.repository_id !== undefined && status.repository_id !== repositoryId) return failure('identity_mismatch');
   const capability = status.capabilities['repository.protection'];
   if (!isRecord(capability)) return failure('consent_missing');
-  return validateProtectionConsent({ ...capability, repository_id: repositoryId }, repositoryId);
+  return validateProtectionConsent(capability, repositoryId, status.registry_revision);
 }
 
 function reconcileProtection(input = {}) {
   const phase = input.phase || 'preview';
   if (!['inspect', 'canonicalize', 'fingerprint', 'compare', 'classify', 'preview', 'apply-plan', 'readback-verify', 'rollback-preview', 'rollback-plan'].includes(phase)) return failure('identity_mismatch');
-  const consent = input.consent || readProtectionConsent(input.capability_status, input.repository_id).consent;
-  const consentResult = validateProtectionConsent(consent, input.repository_id);
+  const consentResult = input.consent
+    ? validateProtectionConsent(input.consent, input.repository_id)
+    : readProtectionConsent(input.capability_status, input.repository_id);
   if (!consentResult.ok) return consentResult;
+  const consent = consentResult.consent;
   const publisherResult = activePublisher(input.publishers || (input.publisher ? [input.publisher] : []), { integration_id: input.expected_integration_id });
   if (!publisherResult.ok) return publisherResult;
   const desiredResult = input.desired?.projection ? validateDesiredProtectionProjection(input.desired.projection, input.native_proof) : desiredProtectionProjection({
@@ -895,7 +910,8 @@ function reconcileProtection(input = {}) {
   if (effectiveResult.effective.entitlement.status === 'unreadable') return failure('protection_unreadable');
   const ownership = classifyProtectionOwnership(effectiveResult.effective, desiredResult.projection);
   if (!ownership.ok) return ownership;
-  if (ownership.ownership_class === 'unknown' || ownership.ownership_class === 'overlapping-conflicting') return failure('ownership_ambiguous');
+  if (ownership.ownership_class === 'unknown' || ownership.ownership_class === 'owner-managed' || ownership.ownership_class === 'overlapping-conflicting'
+    || ownership.ownership_classes?.includes('owner-managed')) return failure('ownership_ambiguous');
   if (phase === 'inspect' || phase === 'canonicalize' || phase === 'fingerprint' || phase === 'classify') return success({ phase, desired: desiredResult.projection, effective: effectiveResult.effective, ownership: ownership.ownership_class, fingerprint: effectiveResult.fingerprint });
   if (phase === 'rollback-preview' || phase === 'rollback-plan') {
     if (!ownership.n6_rule || ownership.ownership_class !== 'N6-owned' || input.owner_changed === true || input.organisation_changed === true) return failure('rollback_unsafe');

@@ -28,6 +28,7 @@ const REGISTRY_BASENAME = 'repository-governance.v1.json';
 const MAX_TRANSACTION_BYTES = 4096;
 const CAPABILITIES = Object.freeze(['repository.governance', 'execution_loop', 'repository.protection']);
 const ENTRY_CAPABILITIES = Object.freeze(['repository.governance', 'execution_loop']);
+const MAX_LEGACY_RECEIPTS = MAX_REPOSITORIES * ENTRY_CAPABILITIES.length;
 const PROTECTION_SCOPES = Object.freeze([
   'inspect',
   'ci-enrolment',
@@ -536,6 +537,23 @@ function validateCapabilityEntry(capability, repositoryId, registryRevision, leg
   if (capability.decision_kind === 'disable' && capability.receipt.prior_state === 'unresolved') fail('REGISTRY_DECISION_INVALID');
 }
 
+function validateProtectionCapability(capability, repositoryId, registryRevision) {
+  try {
+    if (!isRecord(capability)
+      || capability.capability_id !== 'repository.protection'
+      || capability.state !== 'enabled'
+      || capability.decision_kind !== 'enable'
+      || !isSafeRevision(registryRevision)
+      || registryRevision === 0) {
+      fail('REGISTRY_PROTECTION_INVALID');
+    }
+    validateCapabilityEntry(capability, repositoryId, registryRevision, false, false);
+    return { ok: true, capability: clone(capability), registry_revision: registryRevision };
+  } catch (error) {
+    return { ok: false, code: error.code || 'REGISTRY_PROTECTION_INVALID' };
+  }
+}
+
 function validateMigrationMetadata(migration) {
   if (!isRecord(migration)) fail('REGISTRY_MALFORMED');
   if (exactKeys(migration, ['state']) && migration.state === 'none') return;
@@ -578,7 +596,7 @@ function validateMigrationMetadata(migration) {
     || !Array.isArray(migration.legacy_receipt_ids)
     || !Array.isArray(migration.legacy_receipt_digests)
     || migration.legacy_receipt_ids.length !== migration.legacy_receipt_digests.length
-    || migration.legacy_receipt_ids.length > MAX_CAPABILITIES_PER_REPOSITORY
+    || migration.legacy_receipt_ids.length > MAX_LEGACY_RECEIPTS
     || migration.legacy_receipt_ids.some((value) => !isDigest(value))
     || migration.legacy_receipt_digests.some((value) => !isDigest(value))
     || new Set(migration.legacy_receipt_ids).size !== migration.legacy_receipt_ids.length
@@ -1911,6 +1929,7 @@ module.exports = {
   MAX_REGISTRY_BYTES,
   MAX_REPOSITORIES,
   MAX_CAPABILITIES_PER_REPOSITORY,
+  MAX_LEGACY_RECEIPTS,
   LOCK_SCHEMA,
   REGISTRY_BASENAME,
   CAPABILITIES,
@@ -1932,6 +1951,7 @@ module.exports = {
   parseRegistryBytes,
   validateRegistry,
   validateLegacyRegistry,
+  validateProtectionCapability,
   repositoryIdForCanonicalRemote,
   resolveRepositoryIdentity,
   getRepositoryStatus,

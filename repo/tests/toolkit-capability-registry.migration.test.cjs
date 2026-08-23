@@ -10,6 +10,7 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const runtime = require(path.join(repoRoot, 'repo', 'scripts', 'toolkit-capability-registry.cjs'));
+const contractSchema = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'development', 'repository-capability-registry', '_main', 'repository-capability-contract.schema.json'), 'utf8'));
 
 const REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit.git';
 const V1_SCHEMA = 'toolkit.repository-capability-registry.v1';
@@ -82,8 +83,29 @@ function receipt(repositoryId, capabilityId, priorState, resultingState, decisio
   return value;
 }
 
-function legacyRegistry(ctx) {
-  const repositoryId = runtime.repositoryIdForCanonicalRemote(REMOTE);
+function legacyRepository(repositoryId, decidedAt) {
+  return {
+    repository_id: repositoryId,
+    capabilities: [
+      {
+        capability_id: 'repository.governance',
+        state: 'enabled',
+        decision_kind: 'enable',
+        provenance: { category: 'explicit-owner', channel: 'combined-bank', scope_digest: scope(repositoryId, 'repository.governance', 'enable', 'combined-bank') },
+        receipt: receipt(repositoryId, 'repository.governance', 'unresolved', 'enabled', 'enable', 'combined-bank', 7, decidedAt),
+      },
+      {
+        capability_id: 'execution_loop',
+        state: 'disabled',
+        decision_kind: 'decline',
+        provenance: { category: 'explicit-owner', channel: 'combined-bank', scope_digest: scope(repositoryId, 'execution_loop', 'decline', 'combined-bank') },
+        receipt: receipt(repositoryId, 'execution_loop', 'unresolved', 'disabled', 'decline', 'combined-bank', 7, decidedAt),
+      },
+    ],
+  };
+}
+
+function legacyRegistry(ctx, repositoryIds = [runtime.repositoryIdForCanonicalRemote(REMOTE)]) {
   const decidedAt = '2026-08-22T00:00:00.000Z';
   return {
     schema: V1_SCHEMA,
@@ -93,26 +115,15 @@ function legacyRegistry(ctx) {
     contract_digest: V1_CONTRACT_DIGEST,
     registry_revision: 7,
     migration: { state: 'none' },
-    repositories: [{
-      repository_id: repositoryId,
-      capabilities: [
-        {
-          capability_id: 'repository.governance',
-          state: 'enabled',
-          decision_kind: 'enable',
-          provenance: { category: 'explicit-owner', channel: 'combined-bank', scope_digest: scope(repositoryId, 'repository.governance', 'enable', 'combined-bank') },
-          receipt: receipt(repositoryId, 'repository.governance', 'unresolved', 'enabled', 'enable', 'combined-bank', 7, decidedAt),
-        },
-        {
-          capability_id: 'execution_loop',
-          state: 'disabled',
-          decision_kind: 'decline',
-          provenance: { category: 'explicit-owner', channel: 'combined-bank', scope_digest: scope(repositoryId, 'execution_loop', 'decline', 'combined-bank') },
-          receipt: receipt(repositoryId, 'execution_loop', 'unresolved', 'disabled', 'decline', 'combined-bank', 7, decidedAt),
-        },
-      ],
-    }],
+    repositories: repositoryIds.map((repositoryId) => legacyRepository(repositoryId, decidedAt)),
   };
+}
+
+function migratedSource(ctx, repositoryIds) {
+  const source = legacyRegistry(ctx, repositoryIds);
+  fs.mkdirSync(path.dirname(ctx.registryPath), { recursive: true });
+  fs.writeFileSync(ctx.registryPath, JSON.stringify(source), 'utf8');
+  return source;
 }
 
 test('valid v1 decisions migrate without rewriting owner evidence or granting protection', (t) => {
@@ -133,6 +144,43 @@ test('valid v1 decisions migrate without rewriting owner evidence or granting pr
   assert.deepEqual(after.repositories[0].capabilities, before.repositories[0].capabilities);
   assert.equal(after.migration.source_snapshot_hash.length, 64);
   assert.equal(Object.prototype.hasOwnProperty.call(after.migration, 'receipt_payload'), false);
+});
+
+test('migration preserves every legacy receipt across repositories within the registry-wide bound', (t) => {
+  const ctx = sandbox();
+  t.after(() => cleanup(ctx));
+  const repositoryIds = [runtime.repositoryIdForCanonicalRemote(REMOTE), 'a'.repeat(64)];
+  const source = migratedSource(ctx, repositoryIds);
+
+  const status = runtime.getRepositoryStatus({ cwd: ctx.repo, registryPath: ctx.registryPath, testOnly: true });
+  const after = JSON.parse(fs.readFileSync(ctx.registryPath, 'utf8'));
+  const receipts = source.repositories.flatMap((repository) => repository.capabilities.map((capability) => capability.receipt));
+
+  assert.equal(status.status, 'healthy');
+  assert.equal(runtime.MAX_CAPABILITIES_PER_REPOSITORY, 3);
+  assert.equal(runtime.MAX_LEGACY_RECEIPTS, 256);
+  assert.equal(contractSchema.properties.migration.oneOf[1].properties.legacy_receipt_ids.maxItems, runtime.MAX_LEGACY_RECEIPTS);
+  assert.equal(contractSchema.properties.migration.oneOf[1].properties.legacy_receipt_digests.maxItems, runtime.MAX_LEGACY_RECEIPTS);
+  assert.equal(after.migration.legacy_receipt_ids.length, receipts.length);
+  assert.deepEqual(after.migration.legacy_receipt_ids, receipts.map((receipt) => receipt.receipt_id).sort());
+  assert.deepEqual(after.migration.legacy_receipt_digests, receipts.map((receipt) => digest(receipt)).sort());
+  assert.deepEqual(after.repositories, source.repositories);
+  assert.equal(after.repositories.every((repository) => repository.capabilities.length <= runtime.MAX_CAPABILITIES_PER_REPOSITORY), true);
+});
+
+test('migration metadata rejects more than the registry-wide legacy receipt bound', (t) => {
+  const ctx = sandbox();
+  t.after(() => cleanup(ctx));
+  const source = migratedSource(ctx, [runtime.repositoryIdForCanonicalRemote(REMOTE)]);
+  runtime.getRepositoryStatus({ cwd: ctx.repo, registryPath: ctx.registryPath, testOnly: true });
+  const migrated = JSON.parse(fs.readFileSync(ctx.registryPath, 'utf8'));
+  const ids = Array.from({ length: runtime.MAX_LEGACY_RECEIPTS + 1 }, (_, index) => index.toString(16).padStart(64, '0'));
+  const tampered = JSON.parse(JSON.stringify(migrated));
+  tampered.migration.legacy_receipt_ids = ids;
+  tampered.migration.legacy_receipt_digests = [...ids];
+
+  assert.throws(() => runtime.validateRegistry(tampered), (error) => error.code === 'REGISTRY_MIGRATION_INVALID');
+  assert.equal(source.repositories.length, 1);
 });
 
 test('migration interruption before replacement preserves the legacy bytes and consent state', (t) => {

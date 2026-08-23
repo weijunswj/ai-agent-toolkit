@@ -1,15 +1,17 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const runtime = require(path.join(repoRoot, 'repo', 'scripts', 'toolkit-trusted-ci-repository-protection.cjs'));
+const capabilityRegistry = require(path.join(repoRoot, 'repo', 'scripts', 'toolkit-capability-registry.cjs'));
 const workflow = require(path.join(repoRoot, 'repo', 'scripts', 'toolkit-trusted-ci-repository-protection-workflow.cjs'));
 const publisher = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'fixtures', 'publisher.n6.json'), 'utf8'));
-const effective = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'fixtures', 'effective-protection.n6.json'), 'utf8'));
+const effectiveFixture = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'fixtures', 'effective-protection.n6.json'), 'utf8'));
 const contractSchema = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'trusted-ci-repository-protection-contract.schema.json'), 'utf8'));
 const policy = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'trusted-ci-repository-protection-policy.json'), 'utf8'));
 const publisherProtocol = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'app-publisher-protocol.json'), 'utf8'));
@@ -22,20 +24,45 @@ const SHAS = {
   merge: 'c'.repeat(40),
   workflow: 'd'.repeat(40),
 };
-const REPOSITORY_ID = 'github.com/example/trusted-ci-fixture';
+const REPOSITORY_ID = 'a'.repeat(64);
+const effective = { ...effectiveFixture, repository_id: REPOSITORY_ID };
 const CHANGED_PATHS = [
   '_projects/cicd/trusted-ci-repository-protection/_main/trusted-ci-repository-protection-policy.json',
   'repo/scripts/toolkit-trusted-ci-repository-protection.cjs',
   'repo/tests/toolkit-trusted-ci-repository-protection.test.cjs',
 ];
 
-function consent(extra = {}) {
+function digest(value) {
+  return crypto.createHash('sha256').update(capabilityRegistry.canonicalSerialize(value), 'utf8').digest('hex');
+}
+
+function consent({ repositoryId = REPOSITORY_ID, state = 'enabled', decisionKind = 'enable' } = {}) {
+  const scopeDigest = capabilityRegistry.capabilityScopeDigest(repositoryId, 'repository.protection', 'enable', 'capability-route');
+  const receipt = {
+    receipt_id: '',
+    repository_id: repositoryId,
+    capability_id: 'repository.protection',
+    prior_state: 'unresolved',
+    resulting_state: 'enabled',
+    decision_kind: 'enable',
+    provenance_category: 'explicit-owner',
+    provenance_channel: 'capability-route',
+    scope_digest: scopeDigest,
+    registry_schema: capabilityRegistry.REGISTRY_SCHEMA,
+    identity_contract: capabilityRegistry.IDENTITY_CONTRACT,
+    capability_contract: capabilityRegistry.CAPABILITY_CONTRACT,
+    contract_digest: capabilityRegistry.CONTRACT_DIGEST,
+    registry_revision: 1,
+    outcome: 'committed',
+    decided_at: '2026-08-23T00:00:00.000Z',
+  };
+  receipt.receipt_id = digest(Object.fromEntries(Object.entries(receipt).filter(([key]) => key !== 'receipt_id')));
   return {
     capability_id: 'repository.protection',
-    state: 'enabled',
-    decision_kind: 'enable',
-    receipt_id: 'e'.repeat(64),
-    ...extra,
+    state,
+    decision_kind: decisionKind,
+    provenance: { category: 'explicit-owner', channel: 'capability-route', scope_digest: scopeDigest },
+    receipt,
   };
 }
 
@@ -243,8 +270,11 @@ test('protection consent, ownership, projections, and preview-only plans remain 
   assert.equal(runtime.validateDesiredProtectionProjection(desired.projection).ok, true);
   assert.equal(runtime.validateDesiredProtectionProjection({ ...desired.projection, fingerprint: '0'.repeat(64) }).code, 'IDENTITY_MISMATCH');
   assert.equal(runtime.validateProtectionConsent({ capability_id: 'repository.protection', state: 'unresolved' }, REPOSITORY_ID).code, 'CONSENT_MISSING');
-  assert.equal(runtime.validateProtectionConsent(consent({ repository_id: 'other/repo' }), REPOSITORY_ID).code, 'IDENTITY_MISMATCH');
-  assert.equal(runtime.readProtectionConsent({ capabilities: { 'repository.protection': consent() } }, REPOSITORY_ID).ok, true);
+  assert.equal(runtime.validateProtectionConsent(consent({ repositoryId: 'b'.repeat(64) }), REPOSITORY_ID).code, 'IDENTITY_MISMATCH');
+  assert.equal(runtime.readProtectionConsent({ repository_id: REPOSITORY_ID, registry_revision: 1, capabilities: { 'repository.protection': consent() } }, REPOSITORY_ID).ok, true);
+  const tamperedConsent = consent();
+  tamperedConsent.receipt.receipt_id = '0'.repeat(64);
+  assert.equal(runtime.validateProtectionConsent(tamperedConsent, REPOSITORY_ID).code, 'CONSENT_MISSING');
 
   const noop = runtime.reconcileProtection({
     repository_id: REPOSITORY_ID,
@@ -279,6 +309,20 @@ test('protection consent, ownership, projections, and preview-only plans remain 
       rulesets: [{ ...effective.rulesets[0], id: 'owner-rule', name: 'Owner Rule', owner_class: 'unknown', required_contexts: [] }],
     },
   }).code, 'OWNERSHIP_AMBIGUOUS');
+  assert.equal(runtime.reconcileProtection({
+    repository_id: REPOSITORY_ID,
+    consent: consent(),
+    publisher,
+    effective: {
+      ...effective,
+      rulesets: [{ ...effective.rulesets[0], owner_class: 'owner-managed' }],
+    },
+  }).code, 'OWNERSHIP_AMBIGUOUS');
+  const ownerManaged = runtime.classifyProtectionOwnership({ rulesets: [{ ...effective.rulesets[0], owner_class: 'owner-managed' }] }, desired.projection);
+  assert.equal(ownerManaged.code, 'OWNERSHIP_AMBIGUOUS');
+  assert.equal(runtime.classifyProtectionOwnership({ rulesets: [{ ...effective.rulesets[0], owner_class: 'foreign-managed' }] }, desired.projection).code, 'OWNERSHIP_AMBIGUOUS');
+  assert.equal(runtime.classifyProtectionOwnership({ rulesets: [effective.rulesets[0], { ...effective.rulesets[0], name: 'duplicate' }] }, desired.projection).code, 'OWNERSHIP_AMBIGUOUS');
+  assert.equal(runtime.validateProtectionConsent({ capability_id: 'repository.protection', state: 'enabled' }, REPOSITORY_ID).code, 'CONSENT_MISSING');
   assert.equal(runtime.classifyProtectionOwnership({ rulesets: [{ name: 'protect-main', source: 'unknown' }] }).code, 'OWNERSHIP_AMBIGUOUS');
 });
 
