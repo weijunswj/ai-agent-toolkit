@@ -14,17 +14,17 @@
     "evidence": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema", "identity", "producer", "components", "archive", "digest"],
+      "required": ["schema", "identity", "producer", "components", "candidate_artifacts", "digest"],
       "properties": {
-        "schema": { "const": "toolkit.n6.ci-evidence.v1" },
+        "schema": { "const": "toolkit.n6.ci-server-evidence.v1" },
         "identity": {
           "type": "array",
-          "const": ["repository_id", "pr", "head_sha", "base_sha", "merge_sha", "workflow_identity", "workflow_source_sha", "run_id", "attempt", "generation", "contract_digest"]
+          "const": ["repository_id", "pr", "head_sha", "base_sha", "merge_sha", "workflow_id", "workflow_path", "approved_source_blob_sha", "run_id", "run_attempt", "job_id", "job_name", "step_number", "step_name", "producer_map_digest", "changed_paths_digest", "contract_digest", "generation"]
         },
-        "producer": { "const": "protected-ci-gate" },
+        "producer": { "const": "github-actions-server" },
         "components": { "type": "array", "minItems": 1, "uniqueItems": true },
-        "archive": { "type": "object", "additionalProperties": false, "required": ["relative_paths_only", "no_symlinks", "max_bytes"], "properties": { "relative_paths_only": { "const": true }, "no_symlinks": { "const": true }, "max_bytes": { "type": "integer", "minimum": 1 } } },
-        "digest": { "const": "sha256-over-canonical-evidence-without-evidence_digest" }
+        "candidate_artifacts": { "const": "forbidden" },
+        "digest": { "const": "sha256-over-canonical-server-evidence-without-evidence_digest" }
       }
     },
     "publisher": {
@@ -55,11 +55,12 @@
     "composition": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema", "path_ownership", "candidate_declared_coverage", "non_ci_evidence"],
+      "required": ["schema", "path_ownership", "candidate_declared_coverage", "non_authoritative_components", "non_ci_evidence"],
       "properties": {
         "schema": { "const": "toolkit.n6.ci-composition.v1" },
-        "path_ownership": { "const": "protected-base-path-class-evaluation" },
+        "path_ownership": { "const": "github-pull-request-files-server-evaluation" },
         "candidate_declared_coverage": { "const": false },
+        "non_authoritative_components": { "const": ["git-diff-check"] },
         "non_ci_evidence": { "type": "array", "uniqueItems": true }
       }
     },

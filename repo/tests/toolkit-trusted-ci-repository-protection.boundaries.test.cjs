@@ -14,6 +14,7 @@ const capabilityRegistry = require(path.join(repoRoot, 'repo', 'scripts', 'toolk
 const workflow = require(path.join(repoRoot, 'repo', 'scripts', 'toolkit-trusted-ci-repository-protection-workflow.cjs'));
 const publisher = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'fixtures', 'publisher.n6.json'), 'utf8'));
 const effectiveFixture = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'fixtures', 'effective-protection.n6.json'), 'utf8'));
+const serverEvidenceFixtureFile = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'fixtures', 'server-evidence.n6.json'), 'utf8'));
 const REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit.git';
 const effective = { ...effectiveFixture, repository_id: capabilityRegistry.repositoryIdForCanonicalRemote(REMOTE) };
 
@@ -83,16 +84,16 @@ function protectionConsent() {
 }
 
 test('closed evidence and publisher shapes reject extra fields and counterfeit permissions', () => {
-  assert.equal(runtime.validateEvidence({ schema: runtime.EVIDENCE_SCHEMA, extra: true }).code, 'UNKNOWN_FIELD');
+  assert.equal(runtime.validateEvidence({ schema: runtime.EVIDENCE_SCHEMA, extra: true }).code, 'WORKFLOW_NON_AUTHORITATIVE');
   assert.equal(runtime.validatePublisher({ ...publisher, extra: true }).code, 'PRODUCER_MISMATCH');
   assert.equal(runtime.validatePublisher({ ...publisher, permissions: { ...publisher.permissions, administration: 'read' } }).code, 'PUBLISHER_FORBIDDEN_PERMISSION');
 });
 
 test('archive boundaries reject absolute, duplicate, oversized, and non-file entries', () => {
-  assert.equal(runtime.validateEvidenceArchive([{ path: 'C:/outside.txt', kind: 'file', bytes: 'x' }]).code, 'ARCHIVE_INVALID');
-  assert.equal(runtime.validateEvidenceArchive([{ path: 'evidence.txt', kind: 'file', bytes: 'x' }], { expectedPaths: ['other.txt'] }).code, 'ARCHIVE_INVALID');
-  assert.equal(runtime.validateEvidenceArchive([{ path: 'evidence.txt', kind: 'file', bytes: 'x'.repeat(8) }], { maxBytes: 4 }).code, 'ARCHIVE_INVALID');
-  assert.equal(runtime.validateEvidenceArchive([{ path: 'evidence.txt', kind: 'directory', bytes: '' }]).code, 'ARCHIVE_INVALID');
+  assert.equal(runtime.validateEvidenceArchive([{ path: 'C:/outside.txt', kind: 'file', bytes: 'x' }]).code, 'CANDIDATE_ARTIFACT_FORBIDDEN');
+  assert.equal(runtime.validateEvidenceArchive([{ path: 'evidence.txt', kind: 'file', bytes: 'x' }], { expectedPaths: ['other.txt'] }).code, 'CANDIDATE_ARTIFACT_FORBIDDEN');
+  assert.equal(runtime.validateEvidenceArchive([{ path: 'evidence.txt', kind: 'file', bytes: 'x'.repeat(8) }], { maxBytes: 4 }).code, 'CANDIDATE_ARTIFACT_FORBIDDEN');
+  assert.equal(runtime.validateEvidenceArchive([{ path: 'evidence.txt', kind: 'directory', bytes: '' }]).code, 'CANDIDATE_ARTIFACT_FORBIDDEN');
 });
 
 test('workflow boundary rejects third-party actions and write-capable shell mutations', () => {
@@ -156,4 +157,268 @@ test('unsupported modes cannot become authoritative gate or protection plans', (
   assert.equal(runtime.validateMode('advisory-only-unsupported').code, 'MODE_UNSUPPORTED');
   assert.equal(runtime.validateMode('secure-native', { complete: true, policy_semantics: true, readback: true, entitlement: true, publisher: true, extra: true }).code, 'MODE_UNSUPPORTED');
   assert.equal(runtime.validateMode('secure-native', { complete: true, policy_semantics: true, readback: true, entitlement: true, publisher: true }).ok, true);
+});
+
+const SERVER_PR = {
+  repository_id: '1228006168',
+  repository_full_name: 'weijunswj/ai-agent-toolkit',
+  number: 357,
+  head_repository_id: '1228006168',
+  base_repository_id: '1228006168',
+  head_sha: '0389ddc83535769a7907f360390b7077599b90ec',
+  base_sha: '659722a48fc110ce531da7161a480e15fe2a6bf1',
+  base_ref: 'main',
+  merge_sha: 'f9cd4df07b4e714aaf9c95622b813350eaa67b33',
+  changed_files: 4,
+};
+
+function serverPathPages() {
+  return [{
+    items: [
+      { filename: '_projects/cicd/trusted-ci-repository-protection/SOURCE-LOCK.json', status: 'added', previous_filename: null },
+      { filename: '_projects/cicd/trusted-ci-repository-protection/_main/trusted-ci-repository-protection-policy.json', status: 'added', previous_filename: null },
+      { filename: 'repo/scripts/toolkit-trusted-ci-repository-protection.cjs', status: 'added', previous_filename: null },
+      { filename: 'repo/tests/toolkit-trusted-ci-repository-protection.test.cjs', status: 'added', previous_filename: null },
+    ],
+    has_next: false,
+  }];
+}
+
+function serverSourceBinding(overrides = {}) {
+  const blob = '68af6b048e5d660002987d0bdbd7b04b72b7b522';
+  return {
+    repository_id: SERVER_PR.repository_id,
+    pr: SERVER_PR.number,
+    head_sha: SERVER_PR.head_sha,
+    base_sha: SERVER_PR.base_sha,
+    base_ref: SERVER_PR.base_ref,
+    merge_sha: SERVER_PR.merge_sha,
+    workflow_id: runtime.PRODUCER_MAP.workflow.id,
+    workflow_path: runtime.PRODUCER_MAP.workflow.path,
+    event: 'pull_request',
+    source: {
+      approved: { ref: 'refs/heads/main', path: runtime.PRODUCER_MAP.workflow.path, blob_sha: blob },
+      base: { revision_sha: SERVER_PR.base_sha, path: runtime.PRODUCER_MAP.workflow.path, blob_sha: blob },
+      head: { revision_sha: SERVER_PR.head_sha, path: runtime.PRODUCER_MAP.workflow.path, blob_sha: blob },
+      merge: { revision_sha: SERVER_PR.merge_sha, path: runtime.PRODUCER_MAP.workflow.path, blob_sha: blob },
+    },
+    ...overrides,
+  };
+}
+
+function serverRunEvidence(overrides = {}) {
+  return {
+    id: '32634652935',
+    workflow_id: runtime.PRODUCER_MAP.workflow.id,
+    path: runtime.PRODUCER_MAP.workflow.path,
+    event: 'pull_request',
+    repository_id: SERVER_PR.repository_id,
+    head_sha: SERVER_PR.head_sha,
+    run_attempt: 1,
+    status: 'completed',
+    conclusion: 'success',
+    pull_requests: [{
+      number: SERVER_PR.number,
+      repository_id: SERVER_PR.repository_id,
+      head_repository_id: SERVER_PR.head_repository_id,
+      base_repository_id: SERVER_PR.base_repository_id,
+      head_sha: SERVER_PR.head_sha,
+      base_sha: SERVER_PR.base_sha,
+      base_ref: SERVER_PR.base_ref,
+    }],
+    ...overrides,
+  };
+}
+
+function serverJobEvidence(overrides = {}) {
+  return {
+    id: '97182471868',
+    name: 'validate',
+    run_id: '32634652935',
+    run_attempt: 1,
+    head_sha: SERVER_PR.head_sha,
+    status: 'completed',
+    conclusion: 'success',
+    steps: [{ number: 5, name: 'Run validation', status: 'completed', conclusion: 'success' }],
+    ...overrides,
+  };
+}
+
+function serverEvidenceFixture(overrides = {}) {
+  const pages = serverPathPages();
+  const paths = runtime.validateChangedPathCollection({ pull_request: SERVER_PR, pages });
+  assert.equal(paths.ok, true, paths.code);
+  const admission = runtime.validateWorkflowRunAdmission({
+    pull_request: SERVER_PR,
+    run: serverRunEvidence(),
+    jobs: [serverJobEvidence()],
+  });
+  assert.equal(admission.ok, true, admission.code);
+  const built = runtime.buildServerEvidence({
+    pull_request: SERVER_PR,
+    changed_paths: paths.changed_paths,
+    source_binding: serverSourceBinding(),
+    admission,
+    generation: 1,
+    ...overrides,
+  });
+  assert.equal(built.ok, true, built.code);
+  return built.evidence;
+}
+
+test('server evidence binds base, head, merge source blobs and excludes local diff hygiene', () => {
+  const paths = runtime.validateChangedPathCollection({ pull_request: SERVER_PR, pages: serverPathPages() });
+  assert.equal(paths.ok, true, paths.code);
+  const manifest = runtime.compositionManifest(paths.changed_paths.records.map((entry) => entry.path));
+  assert.equal(manifest.ok, true, manifest.code);
+  assert.deepEqual(manifest.required_components, ['project-sync', 'source-lock-audit', 'fallback-risk-audit', 'toolkit-validator', 'repository-tests']);
+  assert.equal(manifest.required_components.includes('git-diff-check'), false);
+
+  const evidence = serverEvidenceFixture();
+  assert.equal(runtime.validateServerEvidence(evidence).ok, true);
+  assert.equal(runtime.serverCheckRunIdentity(evidence).ok, true);
+  assert.deepEqual(Object.keys(runtime.serverCheckRunIdentity(evidence).identity), [
+    'repository_id', 'pr', 'head_sha', 'base_sha', 'merge_sha', 'workflow_id', 'workflow_path',
+    'approved_source_blob_sha', 'run_id', 'run_attempt', 'job_id', 'job_name', 'step_number',
+    'step_name', 'producer_map_digest', 'changed_paths_digest', 'contract_digest', 'generation',
+  ]);
+  assert.equal(runtime.serverPublicationRequest({
+    evidence,
+    publisher,
+    conclusion: 'success',
+    summary: 'Server-certified CI Gate.',
+    details_url: null,
+  }).ok, true);
+});
+
+test('checked-in server evidence fixture is closed, current, and digest-valid', () => {
+  const result = runtime.validateServerEvidence(serverEvidenceFixtureFile, {
+    repository_id: SERVER_PR.repository_id,
+    pr: SERVER_PR.number,
+    head_sha: SERVER_PR.head_sha,
+    base_sha: SERVER_PR.base_sha,
+    merge_sha: SERVER_PR.merge_sha,
+  });
+  assert.equal(result.ok, true, result.code);
+  assert.equal(result.required_component_ids.includes('git-diff-check'), false);
+});
+
+test('server source binding fails candidate policy changes and merge-source drift', () => {
+  const candidateChanged = serverSourceBinding();
+  candidateChanged.source.head.blob_sha = 'a'.repeat(40);
+  assert.equal(runtime.validateWorkflowSourceBinding(candidateChanged).code, 'CI_POLICY_CHANGE_REQUIRED');
+
+  const mergeChanged = serverSourceBinding();
+  mergeChanged.source.merge.blob_sha = 'b'.repeat(40);
+  assert.equal(runtime.validateWorkflowSourceBinding(mergeChanged).code, 'WORKFLOW_SOURCE_MISMATCH');
+});
+
+test('server changed-path collection fails truncation, count drift, duplicates, and malformed paths', () => {
+  const incomplete = serverPathPages();
+  incomplete[0].has_next = true;
+  assert.equal(runtime.validateChangedPathCollection({ pull_request: SERVER_PR, pages: incomplete }).code, 'CHANGED_PATHS_INCOMPLETE');
+
+  const countDrift = { ...SERVER_PR, changed_files: SERVER_PR.changed_files + 1 };
+  assert.equal(runtime.validateChangedPathCollection({ pull_request: countDrift, pages: serverPathPages() }).code, 'CHANGED_FILES_COUNT_MISMATCH');
+
+  const duplicate = serverPathPages();
+  duplicate[0].items[1] = { ...duplicate[0].items[0] };
+  assert.equal(runtime.validateChangedPathCollection({ pull_request: SERVER_PR, pages: duplicate }).code, 'PATH_DUPLICATE');
+
+  const malformed = serverPathPages();
+  malformed[0].items[0].filename = '../outside';
+  assert.equal(runtime.validateChangedPathCollection({ pull_request: SERVER_PR, pages: malformed }).code, 'PATH_INVALID');
+
+  const backslash = serverPathPages();
+  backslash[0].items[0].filename = 'repo\\scripts\\runtime.cjs';
+  assert.equal(runtime.validateChangedPathCollection({ pull_request: SERVER_PR, pages: backslash }).code, 'PATH_INVALID');
+});
+
+test('server run admission selects the current attempt and rejects duplicate or non-success evidence', () => {
+  const failedLatest = runtime.selectAdmissibleWorkflowRun([
+    serverRunEvidence(),
+    serverRunEvidence({ run_attempt: 2, conclusion: 'failure' }),
+  ], {
+    repository_id: SERVER_PR.repository_id,
+    pr: SERVER_PR.number,
+    head_repository_id: SERVER_PR.head_repository_id,
+    base_repository_id: SERVER_PR.base_repository_id,
+    head_sha: SERVER_PR.head_sha,
+    base_sha: SERVER_PR.base_sha,
+    base_ref: SERVER_PR.base_ref,
+  });
+  assert.equal(failedLatest.code, 'RUN_CONCLUSION_NOT_SUCCESS');
+
+  const duplicate = runtime.selectAdmissibleWorkflowRun([
+    serverRunEvidence(),
+    serverRunEvidence({ id: '32634652936' }),
+  ], {
+    repository_id: SERVER_PR.repository_id,
+    pr: SERVER_PR.number,
+    head_repository_id: SERVER_PR.head_repository_id,
+    base_repository_id: SERVER_PR.base_repository_id,
+    head_sha: SERVER_PR.head_sha,
+    base_sha: SERVER_PR.base_sha,
+    base_ref: SERVER_PR.base_ref,
+  });
+  assert.equal(duplicate.code, 'RUN_AMBIGUOUS');
+
+  const skippedJob = runtime.validateWorkflowRunAdmission({
+    pull_request: SERVER_PR,
+    run: serverRunEvidence(),
+    jobs: [serverJobEvidence({ conclusion: 'cancelled' })],
+  });
+  assert.equal(skippedJob.code, 'JOB_CONCLUSION_NOT_SUCCESS');
+
+  const missingStep = runtime.validateWorkflowRunAdmission({
+    pull_request: SERVER_PR,
+    run: serverRunEvidence(),
+    jobs: [serverJobEvidence({ steps: [] })],
+  });
+  assert.equal(missingStep.code, 'STEP_NOT_FOUND');
+
+  const mergeGroup = runtime.selectAdmissibleWorkflowRun([
+    serverRunEvidence({ event: 'merge_group' }),
+  ], {
+    repository_id: SERVER_PR.repository_id,
+    pr: SERVER_PR.number,
+    head_repository_id: SERVER_PR.head_repository_id,
+    base_repository_id: SERVER_PR.base_repository_id,
+    head_sha: SERVER_PR.head_sha,
+    base_sha: SERVER_PR.base_sha,
+    base_ref: SERVER_PR.base_ref,
+  });
+  assert.equal(mergeGroup.code, 'MERGE_GROUP_UNSUPPORTED');
+  assert.equal(runtime.validateWorkflowSourceBinding({ ...serverSourceBinding(), event: 'merge_group' }).code, 'MERGE_GROUP_UNSUPPORTED');
+});
+
+test('server evidence rejects candidate-shaped inputs, digest drift, and wrong identity', () => {
+  const evidence = serverEvidenceFixture();
+  assert.equal(runtime.buildServerEvidence({
+    pull_request: SERVER_PR,
+    changed_paths: evidence.changed_paths,
+    source_binding: serverSourceBinding(),
+    admission: { ok: true, run: {}, job: {}, step: {} },
+    generation: 1,
+    component_results: [],
+  }).code, 'CANDIDATE_ARTIFACT_FORBIDDEN');
+
+  const digestDrift = { ...evidence, evidence_digest: '0'.repeat(64) };
+  assert.equal(runtime.validateServerEvidence(digestDrift).code, 'EVIDENCE_DIGEST_MISMATCH');
+  assert.equal(runtime.validateServerEvidence(evidence, { head_sha: 'a'.repeat(40) }).code, 'HEAD_MOVED');
+});
+
+test('local diff hygiene remains mandatory but is never server component authority', () => {
+  assert.equal(runtime.validateLocalDiffHygiene({
+    command: 'git diff --check',
+    status: 'success',
+    conclusion: 'success',
+    producer: runtime.LOCAL_HYGIENE_COMPONENT_PRODUCER,
+  }).authoritative_for_server_components, false);
+  assert.equal(runtime.validateLocalDiffHygiene({
+    command: 'git diff --check',
+    status: 'success',
+    conclusion: 'success',
+    producer: runtime.SERVER_COMPONENT_PRODUCER,
+  }).code, 'PRODUCER_MISMATCH');
 });

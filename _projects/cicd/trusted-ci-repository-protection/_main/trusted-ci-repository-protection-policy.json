@@ -13,29 +13,24 @@
   "gate": {
     "context": "CI Gate",
     "external_id_prefix": "n6-ci-gate-v1:",
-    "identity": ["repository_id", "pr", "head_sha", "base_sha", "merge_sha", "protected_workflow_identity", "protected_workflow_source_sha", "contract_digest", "attempt", "generation"],
+    "identity": ["repository_id", "pr", "head_sha", "base_sha", "merge_sha", "workflow_id", "workflow_path", "approved_source_blob_sha", "run_id", "run_attempt", "job_id", "job_name", "step_number", "step_name", "producer_map_digest", "changed_paths_digest", "contract_digest", "generation"],
     "duplicate_result": "ambiguous-until-readback",
     "head_movement": "stale",
     "base_movement": "stale",
     "merge_movement": "stale"
   },
   "evidence": {
-    "schema": "toolkit.n6.ci-evidence.v1",
-    "producer": "protected-ci-gate",
+    "schema": "toolkit.n6.ci-server-evidence.v1",
+    "producer": "github-actions-server",
     "candidate_declared_components": false,
-    "digest": "sha256-over-canonical-evidence-without-evidence_digest",
-    "archive": {
-      "relative_paths_only": true,
-      "no_symlinks": true,
-      "duplicate_paths": "block",
-      "max_entries": 256,
-      "max_bytes": 4194304
-    }
+    "candidate_artifacts": "forbidden",
+    "digest": "sha256-over-canonical-server-evidence-without-evidence_digest"
   },
   "composition": {
     "schema": "toolkit.n6.ci-composition.v1",
-    "required_owner": "protected-ci-gate",
-    "path_ownership": "protected-base-path-class-evaluation",
+    "required_owner": "github-actions-server",
+    "path_ownership": "github-pull-request-files-server-evaluation",
+    "non_authoritative_components": ["git-diff-check"],
     "unknown_relevant_path": "block",
     "candidate_declared_not_applicable": "block",
     "dependency_setup_missing": "block",

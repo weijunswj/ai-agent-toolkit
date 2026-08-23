@@ -20,8 +20,7 @@
     "source-lock-audit",
     "fallback-risk-audit",
     "toolkit-validator",
-    "repository-tests",
-    "git-diff-check"
+    "repository-tests"
   ],
   "candidate_declared_coverage": false
 }

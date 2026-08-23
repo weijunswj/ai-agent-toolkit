@@ -5,9 +5,9 @@
   "title": "N6 Trusted CI Repository Protection",
   "module_path": "_projects/cicd/trusted-ci-repository-protection",
   "main_path": "_projects/cicd/trusted-ci-repository-protection/_main",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "version_policy": "semver",
-  "version_notes": "First-party source-only N6 trusted CI Gate, evidence, least-privilege publisher, workflow, and protection projection contract.",
+  "version_notes": "First-party source-only N6 server-evidence certification, least-privilege publisher, diagnostic workflow, and protection projection contract.",
   "outputs": [],
   "writes": {
     "allowed": [],

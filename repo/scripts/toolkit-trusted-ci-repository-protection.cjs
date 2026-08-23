@@ -1,11 +1,14 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const capabilityRegistry = require('./toolkit-capability-registry.cjs');
 
 const CONTRACT_VERSION = 'toolkit.n6.trusted-ci-repository-protection.v1';
 const EVIDENCE_SCHEMA = 'toolkit.n6.ci-evidence.v1';
+const SERVER_EVIDENCE_SCHEMA = 'toolkit.n6.ci-server-evidence.v1';
 const EVIDENCE_CONTRACT_DIGEST = crypto.createHash('sha256')
   .update(JSON.stringify({ contract_version: CONTRACT_VERSION, schema: EVIDENCE_SCHEMA }), 'utf8')
   .digest('hex');
@@ -18,6 +21,24 @@ const DEFAULT_BRANCH = 'main';
 const DEFAULT_RULESET_ID = 'n6-ci-gate-v1';
 const OWNERSHIP_PROOF_SCHEMA = 'toolkit.n6.protection-ownership-proof.v1';
 const OWNERSHIP_PROOF_AUTHORITY = capabilityRegistry.PROTECTION_CONSENT_AUTHORITY;
+const PRODUCER_MAP_PATH = path.resolve(__dirname, '..', '..', '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'candidate-producer-map.n6.json');
+const SERVER_COMPONENT_PRODUCER = 'github-actions-server';
+const LOCAL_HYGIENE_COMPONENT_PRODUCER = 'local-executor-only';
+const MAX_CHANGED_FILES = 3000;
+const MAX_CHANGED_PATH_PAGES = 30;
+const MAX_CHANGED_PATH_PAGE_SIZE = 100;
+const MAX_CHANGED_PATH_RESPONSE_BYTES = 32 * 1024 * 1024;
+const CHANGED_PATH_SOURCE = 'github-pull-request-files';
+const SERVER_COMPONENT_PROOF = 'server-workflow-step';
+const WORKFLOW_RUN_PULL_REQUEST_KEYS = Object.freeze([
+  'number',
+  'repository_id',
+  'head_repository_id',
+  'base_repository_id',
+  'head_sha',
+  'base_sha',
+  'base_ref',
+]);
 
 const MODES = Object.freeze(['secure-minimal-app', 'secure-native', 'advisory-only-unsupported']);
 const ACTIVE_BASELINE_MODE = 'secure-minimal-app';
@@ -69,6 +90,38 @@ const ERROR_CODES = Object.freeze([
   'live_mutation_forbidden',
   'gate_transition_invalid',
   'evidence_duplicate',
+  'workflow_non_authoritative',
+  'workflow_not_found',
+  'workflow_path_mismatch',
+  'workflow_source_mismatch',
+  'ci_policy_change_required',
+  'run_not_found',
+  'run_not_completed',
+  'run_conclusion_not_success',
+  'run_attempt_stale',
+  'run_duplicate',
+  'run_ambiguous',
+  'job_not_found',
+  'job_not_completed',
+  'job_conclusion_not_success',
+  'job_duplicate',
+  'step_not_found',
+  'step_not_completed',
+  'step_conclusion_not_success',
+  'step_duplicate',
+  'required_command_not_proven',
+  'candidate_artifact_forbidden',
+  'local_synthetic_evidence_forbidden',
+  'evidence_schema_invalid',
+  'evidence_identity_mismatch',
+  'evidence_digest_mismatch',
+  'merge_group_unsupported',
+  'changed_paths_ambiguous',
+  'changed_files_count_mismatch',
+  'pagination_limit_exceeded',
+  'path_invalid',
+  'path_duplicate',
+  'read_race',
 ].map((code) => code.toUpperCase()));
 
 const COMPONENT_DEFINITIONS = Object.freeze([
@@ -76,11 +129,11 @@ const COMPONENT_DEFINITIONS = Object.freeze([
     id: 'repo-doc-contract',
     owned_path_classes: ['repo-docs'],
     applicability: 'changed path matches repo-docs',
-    command: 'node repo/scripts/validate-toolkit.cjs --docs',
+    command: 'node repo/scripts/sync-repo-doc-contract.cjs --check',
     toolchain: 'node',
     dependency_setup: 'repository-node-toolchain',
     result_type: 'deterministic-check',
-    artifact_producer: 'protected-ci-gate',
+    artifact_producer: SERVER_COMPONENT_PRODUCER,
     mandatory_status: 'required-when-applicable',
     not_applicable_predicate: 'protected-base-path-class-evaluation',
   },
@@ -92,7 +145,7 @@ const COMPONENT_DEFINITIONS = Object.freeze([
     toolchain: 'node',
     dependency_setup: 'repository-node-toolchain',
     result_type: 'deterministic-check',
-    artifact_producer: 'protected-ci-gate',
+    artifact_producer: SERVER_COMPONENT_PRODUCER,
     mandatory_status: 'required-when-applicable',
     not_applicable_predicate: 'protected-base-path-class-evaluation',
   },
@@ -104,7 +157,7 @@ const COMPONENT_DEFINITIONS = Object.freeze([
     toolchain: 'node',
     dependency_setup: 'repository-node-toolchain',
     result_type: 'deterministic-check',
-    artifact_producer: 'protected-ci-gate',
+    artifact_producer: SERVER_COMPONENT_PRODUCER,
     mandatory_status: 'required-when-applicable',
     not_applicable_predicate: 'protected-base-path-class-evaluation',
   },
@@ -116,7 +169,7 @@ const COMPONENT_DEFINITIONS = Object.freeze([
     toolchain: 'node',
     dependency_setup: 'repository-node-toolchain',
     result_type: 'deterministic-check',
-    artifact_producer: 'protected-ci-gate',
+    artifact_producer: SERVER_COMPONENT_PRODUCER,
     mandatory_status: 'required-when-applicable',
     not_applicable_predicate: 'protected-base-path-class-evaluation',
   },
@@ -128,7 +181,7 @@ const COMPONENT_DEFINITIONS = Object.freeze([
     toolchain: 'node',
     dependency_setup: 'repository-node-toolchain',
     result_type: 'deterministic-check',
-    artifact_producer: 'protected-ci-gate',
+    artifact_producer: SERVER_COMPONENT_PRODUCER,
     mandatory_status: 'required-when-applicable',
     not_applicable_predicate: 'protected-base-path-class-evaluation',
   },
@@ -140,7 +193,7 @@ const COMPONENT_DEFINITIONS = Object.freeze([
     toolchain: 'node',
     dependency_setup: 'repository-node-toolchain',
     result_type: 'deterministic-check',
-    artifact_producer: 'protected-ci-gate',
+    artifact_producer: SERVER_COMPONENT_PRODUCER,
     mandatory_status: 'required-when-applicable',
     not_applicable_predicate: 'protected-base-path-class-evaluation',
   },
@@ -152,7 +205,7 @@ const COMPONENT_DEFINITIONS = Object.freeze([
     toolchain: 'node',
     dependency_setup: 'repository-node-toolchain',
     result_type: 'deterministic-test',
-    artifact_producer: 'protected-ci-gate',
+    artifact_producer: SERVER_COMPONENT_PRODUCER,
     mandatory_status: 'required-when-applicable',
     not_applicable_predicate: 'protected-base-path-class-evaluation',
   },
@@ -164,7 +217,7 @@ const COMPONENT_DEFINITIONS = Object.freeze([
     toolchain: 'node',
     dependency_setup: 'repository-node-toolchain',
     result_type: 'deterministic-check',
-    artifact_producer: 'protected-ci-gate',
+    artifact_producer: SERVER_COMPONENT_PRODUCER,
     mandatory_status: 'required-when-applicable',
     not_applicable_predicate: 'protected-base-path-class-evaluation',
   },
@@ -176,7 +229,7 @@ const COMPONENT_DEFINITIONS = Object.freeze([
     toolchain: 'node',
     dependency_setup: 'repository-node-toolchain',
     result_type: 'deterministic-check',
-    artifact_producer: 'protected-ci-gate',
+    artifact_producer: SERVER_COMPONENT_PRODUCER,
     mandatory_status: 'required-when-applicable',
     not_applicable_predicate: 'protected-base-path-class-evaluation',
   },
@@ -188,7 +241,7 @@ const COMPONENT_DEFINITIONS = Object.freeze([
     toolchain: 'node',
     dependency_setup: 'repository-node-toolchain',
     result_type: 'deterministic-check',
-    artifact_producer: 'protected-ci-gate',
+    artifact_producer: SERVER_COMPONENT_PRODUCER,
     mandatory_status: 'required-when-applicable',
     not_applicable_predicate: 'protected-base-path-class-evaluation',
   },
@@ -200,7 +253,7 @@ const COMPONENT_DEFINITIONS = Object.freeze([
     toolchain: 'node',
     dependency_setup: 'repository-node-toolchain',
     result_type: 'deterministic-test',
-    artifact_producer: 'protected-ci-gate',
+    artifact_producer: SERVER_COMPONENT_PRODUCER,
     mandatory_status: 'required-when-applicable',
     not_applicable_predicate: 'protected-base-path-class-evaluation',
   },
@@ -212,13 +265,20 @@ const COMPONENT_DEFINITIONS = Object.freeze([
     toolchain: 'git',
     dependency_setup: 'protected-git-toolchain',
     result_type: 'deterministic-check',
-    artifact_producer: 'protected-ci-gate',
+    artifact_producer: LOCAL_HYGIENE_COMPONENT_PRODUCER,
     mandatory_status: 'required',
     not_applicable_predicate: 'never-for-protected-candidate',
   },
 ]);
 
 const COMPONENT_IDS = Object.freeze(COMPONENT_DEFINITIONS.map((component) => component.id));
+const PRODUCER_MAP = loadProducerMap();
+const PRODUCER_MAP_DIGEST = digestValue(PRODUCER_MAP);
+const SERVER_COMPONENT_IDS = Object.freeze([...PRODUCER_MAP.server_authoritative_components]);
+const NON_AUTHORITATIVE_COMPONENT_IDS = Object.freeze([...PRODUCER_MAP.non_authoritative_components]);
+const SERVER_EVIDENCE_CONTRACT_DIGEST = crypto.createHash('sha256')
+  .update(JSON.stringify({ contract_version: CONTRACT_VERSION, schema: SERVER_EVIDENCE_SCHEMA, producer_map_digest: PRODUCER_MAP_DIGEST }), 'utf8')
+  .digest('hex');
 const NON_CI_EVIDENCE = Object.freeze([
   'provider-live-uat',
   'production-deployment',
@@ -317,10 +377,75 @@ function success(data = {}) {
   return { ok: true, status: 'valid', ...data };
 }
 
+function deepFreeze(value) {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+function loadProducerMap() {
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(PRODUCER_MAP_PATH, 'utf8'));
+  } catch (error) {
+    throw new Error(`N6 producer map unavailable: ${error.message}`);
+  }
+  const result = validateProducerMap(parsed);
+  if (!result.ok) throw new Error(`N6 producer map invalid: ${result.code}`);
+  return deepFreeze(clone(parsed));
+}
+
+function validateProducerMap(map) {
+  const keys = ['schema', 'version', 'workflow', 'limits', 'commands', 'server_authoritative_components', 'non_authoritative_components'];
+  const workflowKeys = ['id', 'path', 'event', 'approved_ref', 'approved_source_blob_sha', 'job', 'aggregate_step', 'source_revisions'];
+  const limitKeys = ['files_per_page', 'max_files', 'max_pages', 'max_response_bytes'];
+  const commandKeys = ['id', 'command', 'path_classes'];
+  if (!exactKeys(map, keys) || map.schema !== 'toolkit.n6.candidate-producer-map.v1' || map.version !== 1
+    || !exactKeys(map.workflow, workflowKeys) || !exactKeys(map.workflow.job, ['name'])
+    || !exactKeys(map.workflow.aggregate_step, ['number', 'name', 'fail_fast'])
+    || !exactKeys(map.limits, limitKeys) || !Array.isArray(map.commands)
+    || !Array.isArray(map.server_authoritative_components) || !Array.isArray(map.non_authoritative_components)) {
+    return failure('evidence_schema_invalid');
+  }
+  if (!Number.isSafeInteger(map.workflow.id) || map.workflow.id < 1
+    || !isSafeText(map.workflow.path, 512) || map.workflow.event !== 'pull_request'
+    || map.workflow.approved_ref !== 'refs/heads/main' || !isSha(map.workflow.approved_source_blob_sha)
+    || map.workflow.job.name !== 'validate' || map.workflow.aggregate_step.number !== 5
+    || map.workflow.aggregate_step.name !== 'Run validation'
+    || map.workflow.aggregate_step.fail_fast !== 'github-actions-default-bash'
+    || canonicalSerialize(map.workflow.source_revisions) !== canonicalSerialize(['base', 'head', 'merge'])) {
+    return failure('producer_mismatch');
+  }
+  if (map.limits.files_per_page !== MAX_CHANGED_PATH_PAGE_SIZE || map.limits.max_files !== MAX_CHANGED_FILES
+    || map.limits.max_pages !== MAX_CHANGED_PATH_PAGES || map.limits.max_response_bytes !== MAX_CHANGED_PATH_RESPONSE_BYTES) {
+    return failure('pagination_limit_exceeded');
+  }
+  const commandIds = new Set();
+  for (const command of map.commands) {
+    if (!exactKeys(command, commandKeys) || !isSafeText(command.id, 128) || commandIds.has(command.id)
+      || !isSafeText(command.command, 512) || !Array.isArray(command.path_classes) || command.path_classes.length === 0
+      || command.path_classes.some((pathClass) => !isSafeText(pathClass, 128))) return failure('producer_mismatch');
+    const definition = COMPONENT_DEFINITIONS.find((component) => component.id === command.id);
+    if (!definition || definition.command !== command.command
+      || canonicalSerialize(command.path_classes) !== canonicalSerialize(definition.owned_path_classes)) return failure('producer_mismatch', { component_id: command.id });
+    commandIds.add(command.id);
+  }
+  const authoritative = map.server_authoritative_components;
+  const nonAuthoritative = map.non_authoritative_components;
+  if (new Set(authoritative).size !== authoritative.length || new Set(nonAuthoritative).size !== nonAuthoritative.length
+    || authoritative.some((id) => !commandIds.has(id)) || [...commandIds].some((id) => !authoritative.includes(id))
+    || nonAuthoritative.some((id) => !COMPONENT_IDS.includes(id)) || authoritative.some((id) => nonAuthoritative.includes(id))
+    || canonicalSerialize(nonAuthoritative) !== canonicalSerialize(['git-diff-check'])) return failure('producer_mismatch');
+  return success({ producer_map: clone(map), digest: digestValue(map) });
+}
+
 function normalizeRelativePath(value) {
-  if (!isSafeText(value, 512)) return null;
-  const normalized = value.replace(/\\/g, '/');
-  if (normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized) || normalized.split('/').includes('..') || normalized.includes('//')) return null;
+  if (!isSafeText(value, 512) || value.includes('\\')) return null;
+  const normalized = value;
+  const segments = normalized.split('/');
+  if (normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized) || segments.some((segment) => segment === '' || segment === '.' || segment === '..') || normalized.includes('//')) return null;
   return normalized;
 }
 
@@ -332,6 +457,533 @@ function stripDigest(value) {
 
 function evidenceDigest(evidence) {
   return digestValue(stripDigest(evidence));
+}
+
+function serverEvidenceDigest(evidence) {
+  return digestValue(stripDigest(evidence));
+}
+
+function providerId(value) {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1) return String(value);
+  if (typeof value === 'string' && /^[0-9]+$/.test(value) && value.length <= 32) return value.replace(/^0+(?=\d)/, '');
+  return null;
+}
+
+function validateProducerMapForUse(map = PRODUCER_MAP) {
+  return validateProducerMap(map);
+}
+
+function validatePullRequestIdentity(pullRequest, expected = {}) {
+  const keys = ['repository_id', 'repository_full_name', 'number', 'head_repository_id', 'base_repository_id', 'head_sha', 'base_sha', 'base_ref', 'merge_sha', 'changed_files'];
+  const repositoryId = providerId(pullRequest?.repository_id);
+  const headRepositoryId = providerId(pullRequest?.head_repository_id);
+  const baseRepositoryId = providerId(pullRequest?.base_repository_id);
+  if (!exactKeys(pullRequest, keys)
+    || !repositoryId
+    || !isSafeText(pullRequest.repository_full_name, 256)
+    || !Number.isSafeInteger(pullRequest.number) || pullRequest.number < 1
+    || !headRepositoryId
+    || !baseRepositoryId
+    || repositoryId !== baseRepositoryId
+    || !isSha(pullRequest.head_sha) || !isSha(pullRequest.base_sha)
+    || pullRequest.base_ref !== DEFAULT_BRANCH || !isSha(pullRequest.merge_sha)
+    || !Number.isSafeInteger(pullRequest.changed_files) || pullRequest.changed_files < 0) return failure('PR_IDENTITY_MISMATCH');
+  const normalized = {
+    ...clone(pullRequest),
+    repository_id: repositoryId,
+    head_repository_id: headRepositoryId,
+    base_repository_id: baseRepositoryId,
+  };
+  if (expected.repository_id !== undefined && repositoryId !== providerId(expected.repository_id)) return failure('PR_IDENTITY_MISMATCH');
+  if (expected.repository_full_name !== undefined && pullRequest.repository_full_name !== expected.repository_full_name) return failure('PR_IDENTITY_MISMATCH');
+  if (expected.pr !== undefined && pullRequest.number !== expected.pr) return failure('PR_IDENTITY_MISMATCH');
+  if (expected.number !== undefined && pullRequest.number !== expected.number) return failure('PR_IDENTITY_MISMATCH');
+  if (expected.head_repository_id !== undefined && headRepositoryId !== providerId(expected.head_repository_id)) return failure('PR_IDENTITY_MISMATCH');
+  if (expected.base_repository_id !== undefined && baseRepositoryId !== providerId(expected.base_repository_id)) return failure('PR_IDENTITY_MISMATCH');
+  if (expected.head_sha !== undefined && pullRequest.head_sha !== expected.head_sha) return failure('HEAD_MOVED');
+  if (expected.base_sha !== undefined && pullRequest.base_sha !== expected.base_sha) return failure('BASE_MOVED');
+  if (expected.base_ref !== undefined && pullRequest.base_ref !== expected.base_ref) return failure('BASE_MOVED');
+  if (expected.merge_sha !== undefined && pullRequest.merge_sha !== expected.merge_sha) return failure('MERGE_MOVED');
+  return success({ pull_request: normalized });
+}
+
+function comparePullRequestIdentity(before, after) {
+  const first = validatePullRequestIdentity(before);
+  const second = validatePullRequestIdentity(after);
+  if (!first.ok) return first;
+  if (!second.ok) return second;
+  const left = first.pull_request;
+  const right = second.pull_request;
+  if (left.repository_id !== right.repository_id || left.repository_full_name !== right.repository_full_name
+    || left.number !== right.number || left.head_repository_id !== right.head_repository_id
+    || left.base_repository_id !== right.base_repository_id || left.base_ref !== right.base_ref) return failure('PR_IDENTITY_MISMATCH');
+  if (left.head_sha !== right.head_sha) return failure('HEAD_MOVED');
+  if (left.base_sha !== right.base_sha) return failure('BASE_MOVED');
+  if (left.merge_sha !== right.merge_sha) return failure('MERGE_MOVED');
+  if (left.changed_files !== right.changed_files) return failure('CHANGED_FILES_COUNT_MISMATCH');
+  return success({ pull_request: right });
+}
+
+const CHANGED_FILE_STATUSES = Object.freeze(['added', 'modified', 'deleted', 'renamed', 'copied', 'changed']);
+
+function validateChangedFileRecord(record) {
+  if (!exactKeys(record, ['filename', 'status', 'previous_filename']) || !CHANGED_FILE_STATUSES.includes(record.status)) return failure('PATH_INVALID');
+  const filename = normalizeRelativePath(record.filename);
+  const previousFilename = record.previous_filename === null ? null : normalizeRelativePath(record.previous_filename);
+  if (!filename || (record.previous_filename !== null && !previousFilename)) return failure('PATH_INVALID');
+  if (record.status === 'renamed' && !previousFilename) return failure('CHANGED_PATHS_AMBIGUOUS');
+  if (record.status !== 'renamed' && record.previous_filename !== null) return failure('CHANGED_PATHS_AMBIGUOUS');
+  return success({ record: { path: filename, status: record.status, previous_path: previousFilename } });
+}
+
+function validateCanonicalChangedPathRecords(records, expectedCount = null) {
+  if (!Array.isArray(records) || records.length > MAX_CHANGED_FILES) return failure('CHANGED_PATHS_INCOMPLETE');
+  const seenPaths = new Set();
+  const seenRenames = new Set();
+  const normalized = [];
+  for (const record of records) {
+    if (!exactKeys(record, ['path', 'status', 'previous_path']) || !CHANGED_FILE_STATUSES.includes(record.status)) return failure('PATH_INVALID');
+    const pathValue = normalizeRelativePath(record.path);
+    const previousPath = record.previous_path === null ? null : normalizeRelativePath(record.previous_path);
+    if (!pathValue || (record.previous_path !== null && !previousPath)) return failure('PATH_INVALID');
+    if (record.status === 'renamed' && !previousPath) return failure('CHANGED_PATHS_AMBIGUOUS');
+    if (record.status !== 'renamed' && record.previous_path !== null) return failure('CHANGED_PATHS_AMBIGUOUS');
+    if (seenPaths.has(pathValue)) return failure('PATH_DUPLICATE', { path: pathValue });
+    seenPaths.add(pathValue);
+    if (previousPath) {
+      const rename = `${previousPath}\u0000${pathValue}`;
+      if (seenRenames.has(rename)) return failure('PATH_DUPLICATE', { path: previousPath });
+      seenRenames.add(rename);
+    }
+    normalized.push({ path: pathValue, status: record.status, previous_path: previousPath });
+  }
+  if (expectedCount !== null && records.length !== expectedCount) return failure('CHANGED_FILES_COUNT_MISMATCH');
+  normalized.sort((left, right) => canonicalSerialize(left).localeCompare(canonicalSerialize(right)));
+  return success({ records: normalized, digest: digestValue(normalized) });
+}
+
+function validateChangedPathCollection(input, options = {}) {
+  const limits = {
+    files_per_page: Math.min(options.files_per_page || MAX_CHANGED_PATH_PAGE_SIZE, MAX_CHANGED_PATH_PAGE_SIZE),
+    max_files: Math.min(options.max_files || MAX_CHANGED_FILES, MAX_CHANGED_FILES),
+    max_pages: Math.min(options.max_pages || MAX_CHANGED_PATH_PAGES, MAX_CHANGED_PATH_PAGES),
+    max_response_bytes: Math.min(options.max_response_bytes || MAX_CHANGED_PATH_RESPONSE_BYTES, MAX_CHANGED_PATH_RESPONSE_BYTES),
+  };
+  if (!isRecord(input) || !exactKeys(input, ['pull_request', 'pages']) || !Array.isArray(input.pages)) return failure('CHANGED_PATHS_INCOMPLETE');
+  const pullRequest = validatePullRequestIdentity(input.pull_request);
+  if (!pullRequest.ok) return pullRequest;
+  if (input.pages.length === 0 || input.pages.length > limits.max_pages) return failure('PAGINATION_LIMIT_EXCEEDED');
+  const responseBytes = Buffer.byteLength(canonicalSerialize(input.pages), 'utf8');
+  if (responseBytes > limits.max_response_bytes) return failure('PAGINATION_LIMIT_EXCEEDED');
+  const records = [];
+  for (let index = 0; index < input.pages.length; index += 1) {
+    const page = input.pages[index];
+    if (!exactKeys(page, ['items', 'has_next']) || !Array.isArray(page.items) || typeof page.has_next !== 'boolean'
+      || page.items.length > limits.files_per_page || (index < input.pages.length - 1 && page.has_next !== true)
+      || (index === input.pages.length - 1 && page.has_next !== false)) return failure('CHANGED_PATHS_INCOMPLETE');
+    if (page.has_next && page.items.length === 0) return failure('CHANGED_PATHS_INCOMPLETE');
+    for (const rawRecord of page.items) {
+      const result = validateChangedFileRecord(rawRecord);
+      if (!result.ok) return result;
+      records.push(result.record);
+      if (records.length > limits.max_files) return failure('PAGINATION_LIMIT_EXCEEDED');
+    }
+  }
+  const canonical = validateCanonicalChangedPathRecords(records, pullRequest.pull_request.changed_files);
+  if (!canonical.ok) return canonical;
+  return success({
+    source: CHANGED_PATH_SOURCE,
+    pages: input.pages.length,
+    response_bytes: responseBytes,
+    changed_paths: {
+      source: CHANGED_PATH_SOURCE,
+      count: canonical.records.length,
+      digest: canonical.digest,
+      records: canonical.records,
+    },
+  });
+}
+
+function validateWorkflowSourceBinding(input, expected = PRODUCER_MAP.workflow) {
+  if (input?.event === 'merge_group') return failure('MERGE_GROUP_UNSUPPORTED');
+  const keys = ['repository_id', 'pr', 'head_sha', 'base_sha', 'base_ref', 'merge_sha', 'workflow_id', 'workflow_path', 'event', 'source'];
+  const repositoryId = providerId(input?.repository_id);
+  const sourceKeys = ['approved', 'base', 'head', 'merge'];
+  const revisionKeys = ['revision_sha', 'path', 'blob_sha'];
+  if (!isRecord(input) || !exactKeys(input, keys) || !providerId(input.repository_id)
+    || !repositoryId
+    || !Number.isSafeInteger(input.pr) || input.pr < 1 || !isSha(input.head_sha) || !isSha(input.base_sha)
+    || input.base_ref !== DEFAULT_BRANCH
+    || !isSha(input.merge_sha) || input.workflow_id !== expected.id || input.workflow_path !== expected.path
+    || input.event !== expected.event || !isRecord(input.source) || !exactKeys(input.source, sourceKeys)
+    || !exactKeys(input.source.approved, ['ref', 'path', 'blob_sha'])
+    || input.source.approved.ref !== expected.approved_ref || input.source.approved.path !== expected.path
+    || input.source.approved.blob_sha !== expected.approved_source_blob_sha) return failure('WORKFLOW_SOURCE_MISMATCH');
+  for (const revision of ['base', 'head', 'merge']) {
+    const value = input.source[revision];
+    if (!exactKeys(value, revisionKeys) || !isSha(value.revision_sha) || !isSafeText(value.path, 512) || !isSha(value.blob_sha)
+      || value.path !== expected.path || value.revision_sha !== input[`${revision}_sha`]) return failure('WORKFLOW_SOURCE_MISMATCH');
+    if (value.blob_sha !== expected.approved_source_blob_sha) {
+      return revision === 'head' ? failure('CI_POLICY_CHANGE_REQUIRED', { revision }) : failure('WORKFLOW_SOURCE_MISMATCH', { revision });
+    }
+  }
+  return success({ source_binding: { ...clone(input), repository_id: repositoryId }, producer_map_digest: PRODUCER_MAP_DIGEST });
+}
+
+function validateWorkflowRunPullRequestAssociation(entry, expected = {}) {
+  const repositoryId = providerId(entry?.repository_id);
+  const headRepositoryId = providerId(entry?.head_repository_id);
+  const baseRepositoryId = providerId(entry?.base_repository_id);
+  if (!exactKeys(entry, WORKFLOW_RUN_PULL_REQUEST_KEYS)
+    || !Number.isSafeInteger(entry.number) || entry.number < 1
+    || !repositoryId || !headRepositoryId || !baseRepositoryId || repositoryId !== baseRepositoryId
+    || !isSha(entry.head_sha) || !isSha(entry.base_sha) || entry.base_ref !== DEFAULT_BRANCH) return failure('RUN_NOT_FOUND');
+  const normalized = {
+    ...clone(entry),
+    repository_id: repositoryId,
+    head_repository_id: headRepositoryId,
+    base_repository_id: baseRepositoryId,
+  };
+  if (expected.repository_id !== undefined && repositoryId !== providerId(expected.repository_id)) return failure('PR_IDENTITY_MISMATCH');
+  if (expected.pr !== undefined && entry.number !== expected.pr) return failure('PR_IDENTITY_MISMATCH');
+  if (expected.head_repository_id !== undefined && headRepositoryId !== providerId(expected.head_repository_id)) return failure('PR_IDENTITY_MISMATCH');
+  if (expected.base_repository_id !== undefined && baseRepositoryId !== providerId(expected.base_repository_id)) return failure('PR_IDENTITY_MISMATCH');
+  if (expected.head_sha !== undefined && entry.head_sha !== expected.head_sha) return failure('HEAD_MOVED');
+  if (expected.base_sha !== undefined && entry.base_sha !== expected.base_sha) return failure('BASE_MOVED');
+  if (expected.base_ref !== undefined && entry.base_ref !== expected.base_ref) return failure('BASE_MOVED');
+  return success({ pull_request: normalized });
+}
+
+function runHasExpectedPullRequest(run, expected = {}) {
+  return Array.isArray(run?.pull_requests)
+    && run.pull_requests.some((entry) => validateWorkflowRunPullRequestAssociation(entry, expected).ok);
+}
+
+function validateWorkflowRunRecord(run, expected = {}) {
+  if (run?.event === 'merge_group') return failure('MERGE_GROUP_UNSUPPORTED');
+  const keys = ['id', 'workflow_id', 'path', 'event', 'repository_id', 'head_sha', 'run_attempt', 'status', 'conclusion', 'pull_requests'];
+  if (!isRecord(run) || !exactKeys(run, keys) || !providerId(run.id) || run.workflow_id !== PRODUCER_MAP.workflow.id
+    || run.path !== PRODUCER_MAP.workflow.path || run.event !== 'pull_request' || !providerId(run.repository_id)
+    || !isSha(run.head_sha) || !Number.isSafeInteger(run.run_attempt) || run.run_attempt < 1
+    || !isSafeText(run.status, 64) || !isSafeText(run.conclusion, 64) || !Array.isArray(run.pull_requests) || run.pull_requests.length === 0) return failure('RUN_NOT_FOUND');
+  const associations = run.pull_requests.map((entry) => validateWorkflowRunPullRequestAssociation(entry));
+  if (associations.some((result) => !result.ok)) return failure('RUN_NOT_FOUND');
+  const normalizedRepositoryId = providerId(run.repository_id);
+  const normalizedAssociations = associations.map((result) => result.pull_request);
+  if (expected.repository_id !== undefined && normalizedRepositoryId !== providerId(expected.repository_id)) return failure('PR_IDENTITY_MISMATCH');
+  if (expected.head_sha !== undefined && run.head_sha !== expected.head_sha) return failure('HEAD_MOVED');
+  if (!runHasExpectedPullRequest({ pull_requests: normalizedAssociations }, expected)) return failure('PR_IDENTITY_MISMATCH');
+  if (run.status !== 'completed') return failure('RUN_NOT_COMPLETED');
+  if (run.conclusion !== 'success') return failure('RUN_CONCLUSION_NOT_SUCCESS');
+  return success({ run: { ...clone(run), id: providerId(run.id), repository_id: normalizedRepositoryId, pull_requests: normalizedAssociations } });
+}
+
+function selectAdmissibleWorkflowRun(runs, expected = {}) {
+  if (!Array.isArray(runs) || runs.length === 0) return failure('RUN_NOT_FOUND');
+  const matching = runs.filter((run) => run?.workflow_id === PRODUCER_MAP.workflow.id
+    && run?.path === PRODUCER_MAP.workflow.path && run?.event === 'pull_request'
+    && run?.head_sha === expected.head_sha
+    && runHasExpectedPullRequest(run, expected));
+  if (matching.length === 0) {
+    if (runs.some((run) => run?.event === 'merge_group')) return failure('MERGE_GROUP_UNSUPPORTED');
+    return failure('PRODUCER_MISMATCH');
+  }
+  const runIds = new Set(matching.map((run) => providerId(run.id)));
+  if (runIds.size !== 1) return failure('RUN_AMBIGUOUS');
+  const selected = [...matching].sort((left, right) => right.run_attempt - left.run_attempt)[0];
+  const highestAttempt = Math.max(...matching.map((run) => run.run_attempt));
+  if (selected.run_attempt !== highestAttempt) return failure('RUN_ATTEMPT_STALE');
+  return validateWorkflowRunRecord(selected, expected);
+}
+
+function validateWorkflowJobEvidence(job, expected = {}) {
+  const keys = ['id', 'name', 'run_id', 'run_attempt', 'head_sha', 'status', 'conclusion', 'steps'];
+  if (!isRecord(job) || !exactKeys(job, keys) || !providerId(job.id) || !providerId(job.run_id)
+    || !Number.isSafeInteger(job.run_attempt) || job.run_attempt < 1 || !isSha(job.head_sha)
+    || !isSafeText(job.name, 256) || !isSafeText(job.status, 64) || !isSafeText(job.conclusion, 64) || !Array.isArray(job.steps)) return failure('JOB_NOT_FOUND');
+  if (job.name !== PRODUCER_MAP.workflow.job.name) return failure('JOB_NOT_FOUND');
+  if (expected.run_id !== undefined && providerId(job.run_id) !== providerId(expected.run_id)) return failure('PRODUCER_MISMATCH');
+  if (expected.run_attempt !== undefined && job.run_attempt !== expected.run_attempt) return failure('RUN_ATTEMPT_STALE');
+  if (expected.head_sha !== undefined && job.head_sha !== expected.head_sha) return failure('HEAD_MOVED');
+  if (job.status !== 'completed') return failure('JOB_NOT_COMPLETED');
+  if (job.conclusion !== 'success') return failure('JOB_CONCLUSION_NOT_SUCCESS');
+  return success({ job: { ...clone(job), id: providerId(job.id), run_id: providerId(job.run_id) } });
+}
+
+function validateWorkflowStepEvidence(job, expected = {}) {
+  const matching = job.steps.filter((step) => isRecord(step) && step.name === PRODUCER_MAP.workflow.aggregate_step.name);
+  if (matching.length === 0) return failure('STEP_NOT_FOUND');
+  if (matching.length !== 1) return failure('STEP_DUPLICATE');
+  const step = matching[0];
+  const keys = ['number', 'name', 'status', 'conclusion'];
+  if (!exactKeys(step, keys) || step.number !== PRODUCER_MAP.workflow.aggregate_step.number) return failure('STEP_NOT_FOUND');
+  if (step.status !== 'completed') return failure('STEP_NOT_COMPLETED');
+  if (step.conclusion !== 'success') return failure('STEP_CONCLUSION_NOT_SUCCESS');
+  return success({ step: clone(step) });
+}
+
+function validateWorkflowRunAdmission(input = {}) {
+  if (!isRecord(input) || !isRecord(input.pull_request) || !Array.isArray(input.jobs)) return failure('RUN_NOT_FOUND');
+  const pullRequest = validatePullRequestIdentity(input.pull_request);
+  if (!pullRequest.ok) return pullRequest;
+  const expected = {
+    repository_id: pullRequest.pull_request.repository_id,
+    pr: pullRequest.pull_request.number,
+    head_repository_id: pullRequest.pull_request.head_repository_id,
+    base_repository_id: pullRequest.pull_request.base_repository_id,
+    head_sha: pullRequest.pull_request.head_sha,
+    base_sha: pullRequest.pull_request.base_sha,
+    base_ref: pullRequest.pull_request.base_ref,
+  };
+  const runResult = input.runs ? selectAdmissibleWorkflowRun(input.runs, expected) : validateWorkflowRunRecord(input.run, expected);
+  if (!runResult.ok) return runResult;
+  const run = runResult.run;
+  const jobs = input.jobs.filter((job) => job?.run_id !== undefined && providerId(job.run_id) === providerId(run.id));
+  const expectedJobs = jobs.filter((job) => job?.name === PRODUCER_MAP.workflow.job.name);
+  if (expectedJobs.length === 0) return failure('JOB_NOT_FOUND');
+  if (expectedJobs.length !== 1) return failure('JOB_DUPLICATE');
+  const jobResult = validateWorkflowJobEvidence(expectedJobs[0], { run_id: run.id, run_attempt: run.run_attempt, head_sha: run.head_sha });
+  if (!jobResult.ok) return jobResult;
+  const stepResult = validateWorkflowStepEvidence(jobResult.job);
+  if (!stepResult.ok) return stepResult;
+  return success({ run, job: jobResult.job, step: stepResult.step, pull_request: pullRequest.pull_request });
+}
+
+function serverEvidenceIdentityFields(evidence) {
+  return {
+    repository_id: evidence.repository.id,
+    pr: evidence.pr.number,
+    head_sha: evidence.pr.head_sha,
+    base_sha: evidence.pr.base_sha,
+    merge_sha: evidence.pr.merge_sha,
+    workflow_id: evidence.producer.workflow_id,
+    workflow_path: evidence.producer.workflow_path,
+    approved_source_blob_sha: evidence.producer.approved_source_blob_sha,
+    run_id: evidence.producer.run_id,
+    run_attempt: evidence.producer.run_attempt,
+    job_id: evidence.producer.job_id,
+    job_name: evidence.producer.job_name,
+    step_number: evidence.producer.step_number,
+    step_name: evidence.producer.step_name,
+    producer_map_digest: evidence.producer.producer_map_digest,
+    changed_paths_digest: evidence.changed_paths.digest,
+    contract_digest: evidence.contract_digest,
+    generation: evidence.generation,
+  };
+}
+
+function serverCheckRunIdentity(evidence) {
+  const result = validateServerEvidence(evidence);
+  if (!result.ok) return result;
+  const identity = serverEvidenceIdentityFields(result.evidence);
+  return success({ context: GATE_CONTEXT, identity, external_id: EXTERNAL_ID_PREFIX + digestValue(identity) });
+}
+
+function buildServerEvidence(input = {}) {
+  const keys = ['pull_request', 'changed_paths', 'source_binding', 'admission', 'generation'];
+  if (!isRecord(input) || Object.keys(input).some((key) => !keys.includes(key)) || Array.isArray(input.changed_paths)
+    || Object.prototype.hasOwnProperty.call(input, 'component_results') || Object.prototype.hasOwnProperty.call(input, 'evidence_archive')) {
+    return failure('CANDIDATE_ARTIFACT_FORBIDDEN');
+  }
+  const pullRequestResult = validatePullRequestIdentity(input.pull_request);
+  if (!pullRequestResult.ok) return pullRequestResult;
+  const pullRequest = pullRequestResult.pull_request;
+  const pathRecords = input.changed_paths;
+  if (!isRecord(pathRecords) || !exactKeys(pathRecords, ['source', 'count', 'digest', 'records']) || pathRecords.source !== CHANGED_PATH_SOURCE) return failure('CHANGED_PATHS_INCOMPLETE');
+  const canonicalPaths = validateCanonicalChangedPathRecords(pathRecords.records, pullRequest.changed_files);
+  if (!canonicalPaths.ok || pathRecords.count !== canonicalPaths.records.length || pathRecords.digest !== canonicalPaths.digest) return failure(canonicalPaths.ok ? 'CHANGED_PATHS_INCOMPLETE' : canonicalPaths.code);
+  const composition = compositionManifest(canonicalPaths.records.map((record) => record.path));
+  if (!composition.ok) return failure(composition.code, { path: composition.path });
+  const sourceResult = validateWorkflowSourceBinding(input.source_binding, PRODUCER_MAP.workflow);
+  if (!sourceResult.ok) return sourceResult;
+  if (providerId(input.source_binding.repository_id) !== providerId(pullRequest.repository_id) || input.source_binding.pr !== pullRequest.number
+    || input.source_binding.base_ref !== pullRequest.base_ref
+    || input.source_binding.head_sha !== pullRequest.head_sha || input.source_binding.base_sha !== pullRequest.base_sha
+    || input.source_binding.merge_sha !== pullRequest.merge_sha) return failure('EVIDENCE_IDENTITY_MISMATCH');
+  if (!isRecord(input.admission) || input.admission.ok !== true || !isRecord(input.admission.run)
+    || !isRecord(input.admission.job) || !isRecord(input.admission.step)) return failure('RUN_NOT_FOUND');
+  const admission = input.admission;
+  if (admission.run.head_sha !== pullRequest.head_sha || admission.run.workflow_id !== PRODUCER_MAP.workflow.id
+    || admission.run.path !== PRODUCER_MAP.workflow.path || admission.run.event !== PRODUCER_MAP.workflow.event
+    || admission.job.head_sha !== pullRequest.head_sha || admission.step.name !== PRODUCER_MAP.workflow.aggregate_step.name) return failure('PRODUCER_MISMATCH');
+  if (!Number.isSafeInteger(input.generation) || input.generation < 1) return failure('EVIDENCE_SCHEMA_INVALID');
+  const commands = new Map(PRODUCER_MAP.commands.map((command) => [command.id, command]));
+  const components = composition.required_components.map((id) => {
+    const command = commands.get(id);
+    return {
+      id,
+      command: command.command,
+      workflow_id: PRODUCER_MAP.workflow.id,
+      workflow_path: PRODUCER_MAP.workflow.path,
+      run_id: providerId(admission.run.id),
+      run_attempt: admission.run.run_attempt,
+      job_id: providerId(admission.job.id),
+      job_name: admission.job.name,
+      step_number: admission.step.number,
+      step_name: admission.step.name,
+      status: 'success',
+      conclusion: 'success',
+      proof: SERVER_COMPONENT_PROOF,
+    };
+  });
+  const evidence = {
+    schema: SERVER_EVIDENCE_SCHEMA,
+    contract_version: CONTRACT_VERSION,
+    repository: {
+      id: pullRequest.repository_id,
+      full_name: pullRequest.repository_full_name,
+    },
+    pr: {
+      number: pullRequest.number,
+      head_repository_id: pullRequest.head_repository_id,
+      base_repository_id: pullRequest.base_repository_id,
+      head_sha: pullRequest.head_sha,
+      base_sha: pullRequest.base_sha,
+      base_ref: pullRequest.base_ref,
+      merge_sha: pullRequest.merge_sha,
+    },
+    changed_paths: {
+      source: CHANGED_PATH_SOURCE,
+      count: canonicalPaths.records.length,
+      digest: canonicalPaths.digest,
+      records: canonicalPaths.records,
+    },
+    producer: {
+      producer_map_version: PRODUCER_MAP.version,
+      producer_map_digest: PRODUCER_MAP_DIGEST,
+      workflow_id: PRODUCER_MAP.workflow.id,
+      workflow_path: PRODUCER_MAP.workflow.path,
+      event: PRODUCER_MAP.workflow.event,
+      approved_ref: PRODUCER_MAP.workflow.approved_ref,
+      approved_source_blob_sha: PRODUCER_MAP.workflow.approved_source_blob_sha,
+      base_source_blob_sha: input.source_binding.source.base.blob_sha,
+      head_source_blob_sha: input.source_binding.source.head.blob_sha,
+      merge_source_blob_sha: input.source_binding.source.merge.blob_sha,
+      run_id: providerId(admission.run.id),
+      run_attempt: admission.run.run_attempt,
+      run_status: admission.run.status,
+      run_conclusion: admission.run.conclusion,
+      job_id: providerId(admission.job.id),
+      job_name: admission.job.name,
+      job_status: admission.job.status,
+      job_conclusion: admission.job.conclusion,
+      step_number: admission.step.number,
+      step_name: admission.step.name,
+      step_status: admission.step.status,
+      step_conclusion: admission.step.conclusion,
+    },
+    components,
+    generation: input.generation,
+    conclusion: 'success',
+    contract_digest: SERVER_EVIDENCE_CONTRACT_DIGEST,
+    evidence_digest: '',
+  };
+  evidence.evidence_digest = serverEvidenceDigest(evidence);
+  return success({ evidence, required_component_ids: composition.required_components });
+}
+
+function validateServerEvidence(evidence, expected = {}) {
+  const keys = ['schema', 'contract_version', 'repository', 'pr', 'changed_paths', 'producer', 'components', 'generation', 'conclusion', 'contract_digest', 'evidence_digest'];
+  const repositoryKeys = ['id', 'full_name'];
+  const prKeys = ['number', 'head_repository_id', 'base_repository_id', 'head_sha', 'base_sha', 'base_ref', 'merge_sha'];
+  const pathKeys = ['source', 'count', 'digest', 'records'];
+  const producerKeys = ['producer_map_version', 'producer_map_digest', 'workflow_id', 'workflow_path', 'event', 'approved_ref', 'approved_source_blob_sha', 'base_source_blob_sha', 'head_source_blob_sha', 'merge_source_blob_sha', 'run_id', 'run_attempt', 'run_status', 'run_conclusion', 'job_id', 'job_name', 'job_status', 'job_conclusion', 'step_number', 'step_name', 'step_status', 'step_conclusion'];
+  const componentKeys = ['id', 'command', 'workflow_id', 'workflow_path', 'run_id', 'run_attempt', 'job_id', 'job_name', 'step_number', 'step_name', 'status', 'conclusion', 'proof'];
+  if (!isRecord(evidence) || !exactKeys(evidence, keys) || evidence.schema !== SERVER_EVIDENCE_SCHEMA
+    || evidence.contract_version !== CONTRACT_VERSION || !exactKeys(evidence.repository, repositoryKeys)
+    || !providerId(evidence.repository.id) || !isSafeText(evidence.repository.full_name, 256)
+    || !exactKeys(evidence.pr, prKeys) || !Number.isSafeInteger(evidence.pr.number) || evidence.pr.number < 1
+    || !providerId(evidence.pr.head_repository_id) || !providerId(evidence.pr.base_repository_id)
+    || providerId(evidence.pr.base_repository_id) !== providerId(evidence.repository.id) || evidence.pr.base_ref !== DEFAULT_BRANCH
+    || !isSha(evidence.pr.head_sha) || !isSha(evidence.pr.base_sha) || !isSha(evidence.pr.merge_sha)
+    || !exactKeys(evidence.changed_paths, pathKeys) || evidence.changed_paths.source !== CHANGED_PATH_SOURCE
+    || !Number.isSafeInteger(evidence.changed_paths.count) || evidence.changed_paths.count < 0
+    || !isDigest(evidence.changed_paths.digest) || !Array.isArray(evidence.changed_paths.records)
+    || !exactKeys(evidence.producer, producerKeys) || !Number.isSafeInteger(evidence.producer.workflow_id)
+    || !isSafeText(evidence.producer.workflow_path, 512) || evidence.producer.event !== 'pull_request'
+    || !isDigest(evidence.producer.producer_map_digest) || evidence.producer.producer_map_version !== PRODUCER_MAP.version
+    || !isSha(evidence.producer.approved_source_blob_sha) || !isSha(evidence.producer.base_source_blob_sha)
+    || !isSha(evidence.producer.head_source_blob_sha) || !isSha(evidence.producer.merge_source_blob_sha)
+    || !providerId(evidence.producer.run_id) || !Number.isSafeInteger(evidence.producer.run_attempt) || evidence.producer.run_attempt < 1
+    || !isSafeText(evidence.producer.run_status, 64) || !isSafeText(evidence.producer.run_conclusion, 64)
+    || !providerId(evidence.producer.job_id) || !isSafeText(evidence.producer.job_name, 256)
+    || !isSafeText(evidence.producer.job_status, 64) || !isSafeText(evidence.producer.job_conclusion, 64)
+    || !Number.isSafeInteger(evidence.producer.step_number) || evidence.producer.step_number < 1
+    || !isSafeText(evidence.producer.step_name, 256) || !isSafeText(evidence.producer.step_status, 64)
+    || !isSafeText(evidence.producer.step_conclusion, 64) || !Array.isArray(evidence.components)
+    || !Number.isSafeInteger(evidence.generation) || evidence.generation < 1
+    || evidence.conclusion !== 'success' || evidence.contract_digest !== SERVER_EVIDENCE_CONTRACT_DIGEST
+    || !isDigest(evidence.evidence_digest)) return failure('EVIDENCE_SCHEMA_INVALID');
+  if (evidence.producer.workflow_id !== PRODUCER_MAP.workflow.id || evidence.producer.workflow_path !== PRODUCER_MAP.workflow.path
+    || evidence.producer.event !== PRODUCER_MAP.workflow.event || evidence.producer.approved_ref !== PRODUCER_MAP.workflow.approved_ref
+    || evidence.producer.approved_source_blob_sha !== PRODUCER_MAP.workflow.approved_source_blob_sha
+    || evidence.producer.base_source_blob_sha !== PRODUCER_MAP.workflow.approved_source_blob_sha
+    || evidence.producer.head_source_blob_sha !== PRODUCER_MAP.workflow.approved_source_blob_sha
+    || evidence.producer.merge_source_blob_sha !== PRODUCER_MAP.workflow.approved_source_blob_sha
+    || evidence.producer.run_status !== 'completed' || evidence.producer.run_conclusion !== 'success'
+    || evidence.producer.job_name !== PRODUCER_MAP.workflow.job.name || evidence.producer.job_status !== 'completed'
+    || evidence.producer.job_conclusion !== 'success' || evidence.producer.step_number !== PRODUCER_MAP.workflow.aggregate_step.number
+    || evidence.producer.step_name !== PRODUCER_MAP.workflow.aggregate_step.name || evidence.producer.step_status !== 'completed'
+    || evidence.producer.step_conclusion !== 'success' || evidence.producer.producer_map_digest !== PRODUCER_MAP_DIGEST) return failure('PRODUCER_MISMATCH');
+  const canonicalPaths = validateCanonicalChangedPathRecords(evidence.changed_paths.records, evidence.changed_paths.count);
+  if (!canonicalPaths.ok) return canonicalPaths;
+  if (canonicalPaths.digest !== evidence.changed_paths.digest) return failure('EVIDENCE_DIGEST_MISMATCH');
+  const composition = compositionManifest(canonicalPaths.records.map((record) => record.path));
+  if (!composition.ok) return failure(composition.code);
+  if (evidence.components.length !== composition.required_components.length) return failure('COMPONENT_MISSING');
+  const expectedIds = composition.required_components;
+  const commandMap = new Map(PRODUCER_MAP.commands.map((command) => [command.id, command]));
+  const seen = new Set();
+  for (const component of evidence.components) {
+    if (!exactKeys(component, componentKeys) || seen.has(component.id) || !SERVER_COMPONENT_IDS.includes(component.id)) return failure(seen.has(component.id) ? 'COMPONENT_DUPLICATE' : 'COMPONENT_MISSING');
+    seen.add(component.id);
+    const command = commandMap.get(component.id);
+    if (!command || component.command !== command.command || component.workflow_id !== PRODUCER_MAP.workflow.id
+      || component.workflow_path !== PRODUCER_MAP.workflow.path || providerId(component.run_id) !== providerId(evidence.producer.run_id)
+      || component.run_attempt !== evidence.producer.run_attempt || providerId(component.job_id) !== providerId(evidence.producer.job_id)
+      || component.job_name !== evidence.producer.job_name || component.step_number !== evidence.producer.step_number
+      || component.step_name !== evidence.producer.step_name || component.status !== 'success'
+      || component.conclusion !== 'success' || component.proof !== SERVER_COMPONENT_PROOF) return failure('PRODUCER_MISMATCH', { component_id: component.id });
+  }
+  if (expectedIds.some((id) => !seen.has(id)) || seen.size !== expectedIds.length) return failure('COMPONENT_MISSING');
+  if (expected.repository_id !== undefined && providerId(evidence.repository.id) !== providerId(expected.repository_id)) return failure('EVIDENCE_IDENTITY_MISMATCH');
+  if (expected.pr !== undefined && evidence.pr.number !== expected.pr) return failure('EVIDENCE_IDENTITY_MISMATCH');
+  if (expected.head_sha !== undefined && evidence.pr.head_sha !== expected.head_sha) return failure('HEAD_MOVED');
+  if (expected.base_sha !== undefined && evidence.pr.base_sha !== expected.base_sha) return failure('BASE_MOVED');
+  if (expected.merge_sha !== undefined && evidence.pr.merge_sha !== expected.merge_sha) return failure('MERGE_MOVED');
+  if (Array.isArray(expected.required_component_ids)
+    && canonicalSerialize(expected.required_component_ids) !== canonicalSerialize(expectedIds)) return failure('COMPONENT_MISSING');
+  if (evidence.evidence_digest !== serverEvidenceDigest(evidence)) return failure('EVIDENCE_DIGEST_MISMATCH');
+  return success({ evidence: clone(evidence), required_component_ids: expectedIds, evidence_digest: evidence.evidence_digest });
+}
+
+function serverPublicationRequest(input = {}) {
+  const keys = ['evidence', 'publisher', 'conclusion', 'summary', 'details_url'];
+  if (!isRecord(input) || !exactKeys(input, keys) || !['success', 'failure', 'cancelled', 'timed-out', 'neutral'].includes(input.conclusion)
+    || !isSafeText(input.summary, 1024) || (input.details_url !== null && !isSafeText(input.details_url, 512))) return failure('EVIDENCE_SCHEMA_INVALID');
+  const evidence = validateServerEvidence(input.evidence);
+  if (!evidence.ok) return evidence;
+  const identity = serverCheckRunIdentity(evidence.evidence);
+  if (!identity.ok) return identity;
+  const publisher = validatePublisher(input.publisher);
+  if (!publisher.ok) return publisher;
+  return success({
+    context: GATE_CONTEXT,
+    external_id: identity.external_id,
+    object: 'check_run',
+    status: 'completed',
+    conclusion: input.conclusion,
+    summary: input.summary,
+    details_url: input.details_url,
+    publisher: publisher.publisher,
+  });
+}
+
+function validateLocalDiffHygiene(input) {
+  if (!isRecord(input) || !exactKeys(input, ['command', 'status', 'conclusion', 'producer'])
+    || input.command !== 'git diff --check' || input.producer !== LOCAL_HYGIENE_COMPONENT_PRODUCER) return failure('PRODUCER_MISMATCH');
+  if (input.status !== 'success' || input.conclusion !== 'success') return failure('COMPONENT_CONCLUSION_NOT_SUCCESS');
+  return success({ local_hygiene: true, authoritative_for_server_components: false });
 }
 
 function validateTimestamp(value) {
@@ -397,6 +1049,8 @@ function evidenceBindingFailure(expected, evidence) {
 }
 
 function validateEvidence(evidence, expected = {}) {
+  return failure('WORKFLOW_NON_AUTHORITATIVE', { reason: 'legacy protected-runner evidence is not server authority' });
+  /* c8 ignore start - legacy evidence shape retained only as inert historical code. */
   if (!isRecord(evidence) || !exactKeys(evidence, expectedEvidenceKeys())) return failure('unknown_field');
   if (evidence.schema !== EVIDENCE_SCHEMA || !isSafeText(evidence.repository_id, 256) || !Number.isSafeInteger(evidence.pr) || evidence.pr < 1
     || !isSha(evidence.head_sha) || !isSha(evidence.base_sha) || !isSha(evidence.merge_sha)
@@ -453,9 +1107,12 @@ function validateEvidence(evidence, expected = {}) {
   if (bindingError) return failure(bindingError);
   if (evidence.evidence_digest !== evidenceDigest(evidence)) return failure('evidence_stale');
   return success({ evidence: clone(evidence), evidence_digest: evidence.evidence_digest });
+  /* c8 ignore stop */
 }
 
 function validateEvidenceArchive(entries, options = {}) {
+  return failure('CANDIDATE_ARTIFACT_FORBIDDEN');
+  /* c8 ignore next - legacy archive validation is intentionally unreachable for G2-R2 authority. */
   if (!Array.isArray(entries) || entries.length > 256) return failure('archive_invalid');
   const seen = new Set();
   const maxBytes = options.maxBytes || 4 * 1024 * 1024;
@@ -533,6 +1190,8 @@ function checkRunIdentity(input) {
 function publicationRequest(input) {
   const keys = ['identity', 'publisher', 'object', 'status', 'conclusion', 'summary', 'details_url'];
   if (isRecord(input) && input.object === 'commit_status') return failure('commit_status_forbidden');
+  return failure('WORKFLOW_NON_AUTHORITATIVE', { reason: 'legacy protected-runner publication request is not server authority' });
+  /* c8 ignore start - legacy publication shape retained only as inert historical code. */
   if (!exactKeys(input, keys) || !isRecord(input.identity) || input.status !== 'completed'
     || input.object !== 'check_run'
     || !['success', 'failure', 'cancelled', 'timed-out', 'neutral'].includes(input.conclusion)
@@ -550,6 +1209,7 @@ function publicationRequest(input) {
     details_url: input.details_url,
     publisher: publisher.publisher,
   });
+  /* c8 ignore stop */
 }
 
 function createFakePublisher(config = {}) {
@@ -639,9 +1299,9 @@ function pathClasses(changedPath) {
 function componentOwnersForPath(changedPath) {
   const classes = pathClasses(changedPath);
   if (!classes) return null;
-  const owners = new Set(['git-diff-check']);
+  const owners = new Set();
   for (const component of COMPONENT_DEFINITIONS) {
-    if (component.owned_path_classes.some((pathClass) => classes.includes(pathClass))) owners.add(component.id);
+    if (SERVER_COMPONENT_IDS.includes(component.id) && component.owned_path_classes.some((pathClass) => classes.includes(pathClass))) owners.add(component.id);
   }
   return { path: normalizeRelativePath(changedPath), classes, owners: [...owners].sort() };
 }
@@ -649,10 +1309,10 @@ function componentOwnersForPath(changedPath) {
 function compositionManifest(changedPaths) {
   if (!Array.isArray(changedPaths) || changedPaths.length === 0) return failure('unknown_relevant_path');
   const coverage = [];
-  const required = new Set(['git-diff-check']);
+  const required = new Set();
   for (const changedPath of changedPaths) {
     const owner = componentOwnersForPath(changedPath);
-    if (!owner || owner.owners.length === 1) return failure('unknown_relevant_path', { path: changedPath });
+    if (!owner || owner.owners.length === 0) return failure('unknown_relevant_path', { path: changedPath });
     coverage.push(owner);
     for (const componentId of owner.owners) required.add(componentId);
   }
@@ -671,6 +1331,8 @@ function compositionManifest(changedPaths) {
 }
 
 function validateOwningCICoverage(input = {}) {
+  return failure('WORKFLOW_NON_AUTHORITATIVE', { reason: 'caller component results are not server authority' });
+  /* c8 ignore start - legacy caller-result coverage retained only as inert historical code. */
   const changedPaths = Array.isArray(input.changed_paths) ? input.changed_paths : [];
   const manifestResult = input.manifest ? success({ manifest: input.manifest }) : compositionManifest(changedPaths);
   if (!manifestResult.ok) return manifestResult;
@@ -698,8 +1360,9 @@ function validateOwningCICoverage(input = {}) {
     if (byId.has(item)) return failure('producer_mismatch', { component_id: item });
   }
   if (changedPaths.some((path) => normalizeRelativePath(path)?.startsWith('_projects/')) && !required.includes('project-sync')) return failure('component_missing');
-  if (changedPaths.some((path) => normalizeRelativePath(path)?.startsWith('.github/')) && (!required.includes('toolkit-validator') || !required.includes('git-diff-check'))) return failure('component_missing');
+  if (changedPaths.some((path) => normalizeRelativePath(path)?.startsWith('.github/')) && !required.includes('toolkit-validator')) return failure('component_missing');
   return success({ manifest, coverage: manifest.path_coverage || [] });
+  /* c8 ignore stop */
 }
 
 function validateMode(mode, nativeProof = null) {
@@ -1148,6 +1811,22 @@ module.exports = {
   OWNERSHIP_PROOF_SCHEMA,
   OWNERSHIP_PROOF_AUTHORITY,
   EVIDENCE_CONTRACT_DIGEST,
+  SERVER_EVIDENCE_SCHEMA,
+  SERVER_EVIDENCE_CONTRACT_DIGEST,
+  PRODUCER_MAP_PATH,
+  PRODUCER_MAP,
+  PRODUCER_MAP_DIGEST,
+  SERVER_COMPONENT_PRODUCER,
+  LOCAL_HYGIENE_COMPONENT_PRODUCER,
+  SERVER_COMPONENT_IDS,
+  NON_AUTHORITATIVE_COMPONENT_IDS,
+  MAX_CHANGED_FILES,
+  MAX_CHANGED_PATH_PAGES,
+  MAX_CHANGED_PATH_PAGE_SIZE,
+  MAX_CHANGED_PATH_RESPONSE_BYTES,
+  CHANGED_PATH_SOURCE,
+  SERVER_COMPONENT_PROOF,
+  WORKFLOW_RUN_PULL_REQUEST_KEYS,
   GATE_STATES,
   ERROR_CODES,
   COMPONENT_DEFINITIONS,
@@ -1158,6 +1837,27 @@ module.exports = {
   canonicalSerialize,
   digestValue,
   evidenceDigest,
+  serverEvidenceDigest,
+  validateProducerMap,
+  validateProducerMapForUse,
+  validatePullRequestIdentity,
+  comparePullRequestIdentity,
+  validateChangedFileRecord,
+  validateCanonicalChangedPathRecords,
+  validateChangedPathCollection,
+  validateWorkflowSourceBinding,
+  validateWorkflowRunPullRequestAssociation,
+  validateWorkflowRunRecord,
+  selectAdmissibleWorkflowRun,
+  validateWorkflowJobEvidence,
+  validateWorkflowStepEvidence,
+  validateWorkflowRunAdmission,
+  buildServerEvidence,
+  validateServerEvidence,
+  serverEvidenceIdentityFields,
+  serverCheckRunIdentity,
+  serverPublicationRequest,
+  validateLocalDiffHygiene,
   validateEvidence,
   validateEvidenceArchive,
   validatePublisher,

@@ -7,6 +7,8 @@
 - `trusted-ci-repository-protection-policy.json` - modes, state transitions,
   ownership, least-privilege, consent, and live-action boundaries.
 - `app-publisher-protocol.json` - narrow Check Run publisher contract.
+- `candidate-producer-map.n6.json` - protected workflow, source-blob, aggregate
+  command, and server-authoritative component bindings.
 - `protected-ci-gate-workflow-contract.json` - protected base-owned workflow
   identity and trigger contract.
 - `templates/protected-ci-gate.workflow.yml` - inactive credential-free
@@ -16,11 +18,11 @@
 ## Runtime and Focused Validation
 
 - `repo/scripts/toolkit-trusted-ci-repository-protection.cjs` is the
-  dependency-free pure runtime for evidence, composition, state, publisher,
-  projection, ownership, and preview planning.
+  dependency-free pure runtime for server evidence, source/path/run admission,
+  state, publisher, projection, ownership, and preview planning.
 - `repo/scripts/toolkit-trusted-ci-repository-protection-workflow.cjs` validates
-  the protected workflow source and invokes the pure composition/evidence
-  validators without executing candidate code or making network calls.
+  the diagnostic-only protected workflow source. It does not execute protected
+  component commands, consume candidate evidence, or make network calls.
 - Focused tests live under `repo/tests/` and cover adversarial identity,
   evidence, archive, publisher, workflow, ownership, consent, and compatibility
   boundaries.

@@ -1,0 +1,149 @@
+{
+  "schema": "toolkit.n6.ci-server-evidence.v1",
+  "contract_version": "toolkit.n6.trusted-ci-repository-protection.v1",
+  "repository": {
+    "id": "1228006168",
+    "full_name": "weijunswj/ai-agent-toolkit"
+  },
+  "pr": {
+    "number": 357,
+    "head_repository_id": "1228006168",
+    "base_repository_id": "1228006168",
+    "head_sha": "0389ddc83535769a7907f360390b7077599b90ec",
+    "base_sha": "659722a48fc110ce531da7161a480e15fe2a6bf1",
+    "base_ref": "main",
+    "merge_sha": "f9cd4df07b4e714aaf9c95622b813350eaa67b33"
+  },
+  "changed_paths": {
+    "source": "github-pull-request-files",
+    "count": 4,
+    "digest": "ff91524c0f7fa51653c06e9508ab9495b3c1e3767023477158523059ff1fcf79",
+    "records": [
+      {
+        "path": "_projects/cicd/trusted-ci-repository-protection/_main/trusted-ci-repository-protection-policy.json",
+        "status": "added",
+        "previous_path": null
+      },
+      {
+        "path": "_projects/cicd/trusted-ci-repository-protection/SOURCE-LOCK.json",
+        "status": "added",
+        "previous_path": null
+      },
+      {
+        "path": "repo/scripts/toolkit-trusted-ci-repository-protection.cjs",
+        "status": "added",
+        "previous_path": null
+      },
+      {
+        "path": "repo/tests/toolkit-trusted-ci-repository-protection.test.cjs",
+        "status": "added",
+        "previous_path": null
+      }
+    ]
+  },
+  "producer": {
+    "producer_map_version": 1,
+    "producer_map_digest": "7c79c22e758cefd8e144cc78b8ae789fd2b05fb0eb6b9ab7713c1eb042873efd",
+    "workflow_id": 278109777,
+    "workflow_path": ".github/workflows/validate.yml",
+    "event": "pull_request",
+    "approved_ref": "refs/heads/main",
+    "approved_source_blob_sha": "68af6b048e5d660002987d0bdbd7b04b72b7b522",
+    "base_source_blob_sha": "68af6b048e5d660002987d0bdbd7b04b72b7b522",
+    "head_source_blob_sha": "68af6b048e5d660002987d0bdbd7b04b72b7b522",
+    "merge_source_blob_sha": "68af6b048e5d660002987d0bdbd7b04b72b7b522",
+    "run_id": "32634652935",
+    "run_attempt": 1,
+    "run_status": "completed",
+    "run_conclusion": "success",
+    "job_id": "97182471868",
+    "job_name": "validate",
+    "job_status": "completed",
+    "job_conclusion": "success",
+    "step_number": 5,
+    "step_name": "Run validation",
+    "step_status": "completed",
+    "step_conclusion": "success"
+  },
+  "components": [
+    {
+      "id": "project-sync",
+      "command": "node repo/scripts/sync-toolkit-projects.cjs --check",
+      "workflow_id": 278109777,
+      "workflow_path": ".github/workflows/validate.yml",
+      "run_id": "32634652935",
+      "run_attempt": 1,
+      "job_id": "97182471868",
+      "job_name": "validate",
+      "step_number": 5,
+      "step_name": "Run validation",
+      "status": "success",
+      "conclusion": "success",
+      "proof": "server-workflow-step"
+    },
+    {
+      "id": "source-lock-audit",
+      "command": "node repo/scripts/audit-project-source-locks.cjs",
+      "workflow_id": 278109777,
+      "workflow_path": ".github/workflows/validate.yml",
+      "run_id": "32634652935",
+      "run_attempt": 1,
+      "job_id": "97182471868",
+      "job_name": "validate",
+      "step_number": 5,
+      "step_name": "Run validation",
+      "status": "success",
+      "conclusion": "success",
+      "proof": "server-workflow-step"
+    },
+    {
+      "id": "fallback-risk-audit",
+      "command": "node repo/scripts/audit-fallback-risk.cjs",
+      "workflow_id": 278109777,
+      "workflow_path": ".github/workflows/validate.yml",
+      "run_id": "32634652935",
+      "run_attempt": 1,
+      "job_id": "97182471868",
+      "job_name": "validate",
+      "step_number": 5,
+      "step_name": "Run validation",
+      "status": "success",
+      "conclusion": "success",
+      "proof": "server-workflow-step"
+    },
+    {
+      "id": "toolkit-validator",
+      "command": "node repo/scripts/validate-toolkit.cjs",
+      "workflow_id": 278109777,
+      "workflow_path": ".github/workflows/validate.yml",
+      "run_id": "32634652935",
+      "run_attempt": 1,
+      "job_id": "97182471868",
+      "job_name": "validate",
+      "step_number": 5,
+      "step_name": "Run validation",
+      "status": "success",
+      "conclusion": "success",
+      "proof": "server-workflow-step"
+    },
+    {
+      "id": "repository-tests",
+      "command": "node --test repo/tests/*.test.cjs",
+      "workflow_id": 278109777,
+      "workflow_path": ".github/workflows/validate.yml",
+      "run_id": "32634652935",
+      "run_attempt": 1,
+      "job_id": "97182471868",
+      "job_name": "validate",
+      "step_number": 5,
+      "step_name": "Run validation",
+      "status": "success",
+      "conclusion": "success",
+      "proof": "server-workflow-step"
+    }
+  ],
+  "generation": 1,
+  "conclusion": "success",
+  "contract_digest": "67a8dee820e26dbcc5c9e3ec5e3b97853cc4a78689000aa656579d92304856bf",
+  "evidence_digest": "ef6fad4b3160a785592882528502a7b4c7cda14395fd4a5e76c5cee3c4e2a085"
+}

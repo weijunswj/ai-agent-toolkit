@@ -267,9 +267,10 @@ function runWorkflowCli(argument, input) {
 
 test('N6 source contracts remain aligned with the dependency-free runtimes', () => {
   assert.equal(contractSchema.$id, runtime.CONTRACT_VERSION);
-  assert.equal(contractSchema.properties.evidence.properties.schema.const, runtime.EVIDENCE_SCHEMA);
+  assert.equal(contractSchema.properties.evidence.properties.schema.const, runtime.SERVER_EVIDENCE_SCHEMA);
   assert.equal(policy.contract_version, runtime.CONTRACT_VERSION);
   assert.deepEqual(policy.modes, runtime.MODES);
+  assert.equal(policy.evidence.schema, runtime.SERVER_EVIDENCE_SCHEMA);
   assert.deepEqual(policy.publisher.permissions, publisher.permissions);
   assert.deepEqual(policy.publisher.operations, publisher.operations);
   assert.equal(publisherProtocol.protocol_version, runtime.PUBLISHER_PROTOCOL_VERSION);
@@ -308,11 +309,12 @@ test('protected workflow rejects candidate checkout, forbidden triggers, and wri
 test('composition is derived from protected path classes and rejects candidate coverage claims', () => {
   const manifest = runtime.compositionManifest(CHANGED_PATHS);
   assert.equal(manifest.ok, true);
-  assert.deepEqual(manifest.required_components, ['project-sync', 'fallback-risk-audit', 'toolkit-validator', 'repository-tests', 'git-diff-check']);
-  assert.equal(manifest.components.some((component) => component.applicability === 'required' && component.id === 'git-diff-check'), true);
+  assert.deepEqual(manifest.required_components, ['project-sync', 'fallback-risk-audit', 'toolkit-validator', 'repository-tests']);
+  assert.equal(manifest.components.some((component) => component.applicability === 'required' && component.id === 'git-diff-check'), false);
+  assert.equal(runtime.NON_AUTHORITATIVE_COMPONENT_IDS.includes('git-diff-check'), true);
   assert.equal(runtime.compositionManifest(['unknown/path.bin']).code, 'UNKNOWN_RELEVANT_PATH');
   const results = componentResults(manifest, { 'project-sync': { producer: 'candidate' } });
-  assert.equal(runtime.validateOwningCICoverage({ changed_paths: CHANGED_PATHS, manifest, component_results: results }).code, 'PRODUCER_MISMATCH');
+  assert.equal(runtime.validateOwningCICoverage({ changed_paths: CHANGED_PATHS, manifest, component_results: results }).code, 'WORKFLOW_NON_AUTHORITATIVE');
 });
 
 test('complete N6 project metadata and future project files are representable while out-of-contract paths fail closed', () => {
@@ -327,38 +329,16 @@ test('complete N6 project metadata and future project files are representable wh
   assert.equal(runtime.compositionManifest(['repo/future-relevant-but-unknown.bin']).code, 'UNKNOWN_RELEVANT_PATH');
 });
 
-test('evidence binds every identity dimension and requires protected component success', () => {
+test('legacy protected-runner evidence cannot certify server authority', () => {
   const manifest = runtime.compositionManifest(CHANGED_PATHS);
   const evidence = evidenceFor(manifest);
-  const expected = {
-    repository_id: REPOSITORY_ID,
-    pr: 194,
-    head_sha: SHAS.head,
-    base_sha: SHAS.base,
-    merge_sha: SHAS.merge,
-    protected_workflow_identity: workflow.WORKFLOW_ID,
-    protected_workflow_source_sha: PROTECTED_WORKFLOW_SOURCE_SHA,
-    component_ids: manifest.required_components,
-    required_component_ids: manifest.required_components,
-    producer: {
-      workflow_identity: workflow.WORKFLOW_ID,
-      workflow_source_sha: PROTECTED_WORKFLOW_SOURCE_SHA,
-      run_id: 'run-194',
-      attempt: 1,
-      generation: 1,
-    },
-  };
-  assert.equal(runtime.validateEvidence(evidence, expected).ok, true);
-  assert.equal(runtime.validateEvidence({ ...evidence, head_sha: '9'.repeat(40) }, expected).code, 'HEAD_MOVED');
-  const incomplete = { ...evidence, component_results: evidence.component_results.map((item, index) => index === 0 ? { ...item, status: 'skipped', conclusion: 'not-applicable' } : item) };
-  incomplete.evidence_digest = runtime.evidenceDigest(incomplete);
-  assert.equal(runtime.validateEvidence(incomplete, expected).code, 'COMPONENT_FAILED');
+  assert.equal(runtime.validateEvidence(evidence).code, 'WORKFLOW_NON_AUTHORITATIVE');
 });
 
 test('archive, publisher, and gate identity boundaries fail closed', () => {
-  assert.equal(runtime.validateEvidenceArchive([{ path: '../secret.txt', kind: 'file', bytes: 'x' }]).code, 'ARCHIVE_INVALID');
-  assert.equal(runtime.validateEvidenceArchive([{ path: 'a.txt', kind: 'file', bytes: 'x' }, { path: 'a.txt', kind: 'file', bytes: 'y' }]).code, 'ARCHIVE_INVALID');
-  assert.equal(runtime.validateEvidenceArchive([{ path: 'a.txt', kind: 'symlink', bytes: 'x' }]).code, 'ARCHIVE_INVALID');
+  assert.equal(runtime.validateEvidenceArchive([{ path: '../secret.txt', kind: 'file', bytes: 'x' }]).code, 'CANDIDATE_ARTIFACT_FORBIDDEN');
+  assert.equal(runtime.validateEvidenceArchive([{ path: 'a.txt', kind: 'file', bytes: 'x' }, { path: 'a.txt', kind: 'file', bytes: 'y' }]).code, 'CANDIDATE_ARTIFACT_FORBIDDEN');
+  assert.equal(runtime.validateEvidenceArchive([{ path: 'a.txt', kind: 'symlink', bytes: 'x' }]).code, 'CANDIDATE_ARTIFACT_FORBIDDEN');
   assert.equal(runtime.validatePublisher(publisher).ok, true);
   assert.equal(runtime.validatePublisher({ ...publisher, permissions: { ...publisher.permissions, statuses: 'none' } }).code, 'PUBLISHER_FORBIDDEN_PERMISSION');
   assert.equal(runtime.validatePublisher({ ...publisher, operations: { ...publisher.operations, commit_status_publication: true } }).code, 'COMMIT_STATUS_FORBIDDEN');
@@ -531,176 +511,22 @@ test('protection consent, ownership, projections, and preview-only plans remain 
   assert.equal(runtime.classifyProtectionOwnership({ rulesets: [{ name: 'protect-main', source: 'unknown' }] }).code, 'OWNERSHIP_AMBIGUOUS');
 });
 
-test('workflow gate validation composes protected workflow, coverage, and evidence without execution', (t) => {
-  const result = workflow.validateGateInvocation(validGateInput(t));
-  assert.equal(result.ok, true);
-  assert.equal(result.workflow.identity, workflow.WORKFLOW_ID);
-  assert.equal(result.composition.schema, 'toolkit.n6.ci-composition.v1');
-  assert.equal(result.evidence.run.id, 'run-194');
-  const blocked = workflow.validateGateInvocation(validGateInput(t, { non_ci_evidence: ['unlisted-provider-uat'] }));
-  assert.equal(blocked.code, 'WORKFLOW_COVERAGE_INVALID');
-  const staleArchive = validGateInput(t);
-  staleArchive.evidence_archive[0].bytes = JSON.stringify({ ...staleArchive.evidence, head_sha: '9'.repeat(40) });
-  assert.equal(workflow.validateGateInvocation(staleArchive).code, 'WORKFLOW_EVIDENCE_INVALID');
+test('protected workflow is diagnostic-only and cannot certify composition', () => {
+  assert.equal(workflow.validateGateInvocation({}).code, 'WORKFLOW_NON_AUTHORITATIVE');
+  assert.equal(workflow.produceCompositionForCli().code, 'WORKFLOW_NON_AUTHORITATIVE');
+  assert.equal(workflow.validateCompositionForCli().code, 'WORKFLOW_NON_AUTHORITATIVE');
+  assert.equal(workflow.readProtectedEventContext().code, 'WORKFLOW_NON_AUTHORITATIVE');
 });
 
-test('trusted composition rejects arbitrary identity even when caller evidence is self-consistent', (t) => {
-  const input = validGateInput(t);
-  input.repository_id = 'e'.repeat(64);
-  input.pr = 999;
-  input.head_sha = '9'.repeat(40);
-  input.base_sha = '8'.repeat(40);
-  input.merge_sha = '7'.repeat(40);
-  input.evidence = {
-    ...input.evidence,
-    repository_id: input.repository_id,
-    pr: input.pr,
-    head_sha: input.head_sha,
-    base_sha: input.base_sha,
-    merge_sha: input.merge_sha,
-  };
-  input.evidence.evidence_digest = runtime.evidenceDigest(input.evidence);
-  input.evidence_archive[0].bytes = JSON.stringify(input.evidence);
-  const result = workflow.validateGateInvocation(input);
-  assert.equal(result.ok, false);
-  assert.equal(result.code, 'WORKFLOW_IDENTITY_MISMATCH');
-});
-
-test('composition input without protected event authority cannot certify itself', (t) => {
-  const input = validGateInput(t);
-  delete input.trusted_context;
-  const result = workflow.validateGateInvocation(input);
-  assert.equal(result.ok, false);
-  assert.equal(result.code, 'WORKFLOW_TRUSTED_CONTEXT_MISSING');
-});
-
-test('generic caller-supplied changed paths are not trusted event authority', () => {
-  const event = writeTrustedEvent({ changed_paths: [...CHANGED_PATHS] });
-  try {
-    const result = workflow.readProtectedEventContext({
-      GITHUB_EVENT_PATH: event.eventPath,
-      GITHUB_EVENT_NAME: 'pull_request_target',
-      GITHUB_REPOSITORY: 'weijunswj/ai-agent-toolkit',
-      GITHUB_SHA: SHAS.merge,
-      GITHUB_RUN_ID: 'run-194',
-      GITHUB_RUN_ATTEMPT: '1',
-    });
-    assert.equal(result.ok, false);
-    assert.equal(result.code, 'WORKFLOW_TRUSTED_CONTEXT_MISSING');
-  } finally {
-    fs.rmSync(event.root, { recursive: true, force: true });
-  }
-});
-
-test('trusted composition rejects failed mandatory components', (t) => {
-  const input = validGateInput(t);
-  input.component_results[0] = { ...input.component_results[0], status: 'failure', conclusion: 'failure' };
-  input.evidence.component_results[0] = { ...input.evidence.component_results[0], status: 'failure', conclusion: 'failure' };
-  input.evidence.conclusion = 'failure';
-  input.evidence.evidence_digest = runtime.evidenceDigest(input.evidence);
-  input.evidence_archive[0].bytes = JSON.stringify(input.evidence);
-  const result = workflow.validateGateInvocation(input);
-  assert.equal(result.ok, false);
-  assert.equal(result.code, 'WORKFLOW_COVERAGE_INVALID');
-  assert.equal(result.cause, 'COMPONENT_FAILED');
-});
-
-test('trusted composition rejects reversed, stale, and self-declared producer evidence', (t) => {
-  const reversed = validGateInput(t);
-  reversed.evidence.timestamps = {
-    started_at: '2026-08-23T00:02:00.000Z',
-    completed_at: '2026-08-23T00:01:00.000Z',
-  };
-  reversed.evidence.evidence_digest = runtime.evidenceDigest(reversed.evidence);
-  reversed.evidence_archive[0].bytes = JSON.stringify(reversed.evidence);
-  assert.equal(workflow.validateGateInvocation(reversed).code, 'WORKFLOW_EVIDENCE_INVALID');
-
-  const stale = validGateInput(t);
-  stale.evidence.timestamps = {
-    started_at: '2020-01-01T00:00:00.000Z',
-    completed_at: '2020-01-01T00:01:00.000Z',
-  };
-  stale.evidence.evidence_digest = runtime.evidenceDigest(stale.evidence);
-  stale.evidence_archive[0].bytes = JSON.stringify(stale.evidence);
-  assert.equal(workflow.validateGateInvocation(stale).code, 'WORKFLOW_EVIDENCE_INVALID');
-
-  const producer = validGateInput(t);
-  producer.evidence.component_results[0].producer.workflow_identity = 'caller-declared-producer';
-  producer.evidence.evidence_digest = runtime.evidenceDigest(producer.evidence);
-  producer.evidence_archive[0].bytes = JSON.stringify(producer.evidence);
-  assert.equal(workflow.validateGateInvocation(producer).code, 'WORKFLOW_EVIDENCE_INVALID');
-});
-
-test('protected producer builds the exact composition input from event-bound protected context', () => {
-  const event = writeTrustedEvent();
-  try {
-    const produced = workflow.produceCompositionForCli({
-      GITHUB_EVENT_PATH: event.eventPath,
-      GITHUB_EVENT_NAME: 'pull_request_target',
-      GITHUB_REPOSITORY: 'weijunswj/ai-agent-toolkit',
-      GITHUB_SHA: SHAS.merge,
-      GITHUB_RUN_ID: 'run-194',
-      GITHUB_RUN_ATTEMPT: '1',
-    }, repoRoot);
-    assert.equal(produced.ok, true, produced.code);
-    assert.deepEqual(Object.keys(produced.input).sort(), [...workflow.COMPOSITION_INPUT_KEYS].sort());
-    assert.equal(produced.producer_ok, true);
-    assert.equal(produced.input.evidence.protected_workflow.identity, workflow.WORKFLOW_ID);
-    assert.equal(produced.input.evidence.component_results.every((component) => component.producer.workflow_identity === workflow.WORKFLOW_ID), true);
-    assert.equal(produced.input.component_results.every((component) => component.artifact_digest !== 'f'.repeat(64)), true);
-  } finally {
-    fs.rmSync(event.root, { recursive: true, force: true });
-  }
-});
-
-test('composition CLI consumes complete bounded input and fails closed on absent or stale evidence', () => {
+test('diagnostic workflow CLI validates source but never consumes composition input', () => {
   const source = runWorkflowCli('--validate-source');
   assert.equal(source.status, 0, source.stderr || source.stdout);
-  const absent = runWorkflowCli('--validate-composition');
-  assert.notEqual(absent.status, 0);
-  assert.equal(JSON.parse(absent.stdout).code, 'WORKFLOW_INVALID');
-  const malformed = runWorkflowCli('--validate-composition', '{');
-  assert.notEqual(malformed.status, 0);
-  assert.equal(JSON.parse(malformed.stdout).code, 'WORKFLOW_INVALID');
-  const oversized = runWorkflowCli('--validate-composition', ' '.repeat(workflow.MAX_COMPOSITION_INPUT_BYTES + 1));
-  assert.notEqual(oversized.status, 0);
-  assert.equal(JSON.parse(oversized.stdout).code, 'WORKFLOW_INVALID');
-
+  const composition = runWorkflowCli('--validate-composition', JSON.stringify({ changed_paths: ['candidate'] }));
+  assert.notEqual(composition.status, 0);
+  assert.equal(JSON.parse(composition.stdout).code, 'WORKFLOW_NON_AUTHORITATIVE');
   const produced = runWorkflowCli('--produce-composition');
-  assert.equal(produced.status, 0, produced.stderr || produced.stdout);
-  const producedInput = JSON.parse(produced.stdout);
-  const copy = () => JSON.parse(JSON.stringify(producedInput));
-  const valid = copy();
-  const accepted = runWorkflowCli('--validate-composition', JSON.stringify(valid));
-  assert.equal(accepted.status, 0, accepted.stderr || accepted.stdout);
-  assert.equal(JSON.parse(accepted.stdout).ok, true);
-
-  const stale = copy();
-  stale.head_sha = '9'.repeat(40);
-  const staleResult = runWorkflowCli('--validate-composition', JSON.stringify(stale));
-  assert.notEqual(staleResult.status, 0);
-  assert.equal(JSON.parse(staleResult.stdout).code, 'WORKFLOW_IDENTITY_MISMATCH');
-
-  const mismatched = copy();
-  mismatched.evidence.repository_id = 'b'.repeat(64);
-  mismatched.evidence.evidence_digest = runtime.evidenceDigest(mismatched.evidence);
-  mismatched.evidence_archive[0].bytes = JSON.stringify(mismatched.evidence);
-  const mismatchResult = runWorkflowCli('--validate-composition', JSON.stringify(mismatched));
-  assert.notEqual(mismatchResult.status, 0);
-  assert.equal(JSON.parse(mismatchResult.stdout).code, 'WORKFLOW_EVIDENCE_INVALID');
-
-  const evidenceMissing = copy();
-  evidenceMissing.evidence = null;
-  evidenceMissing.evidence_archive = [];
-  const evidenceMissingResult = runWorkflowCli('--validate-composition', JSON.stringify(evidenceMissing));
-  assert.notEqual(evidenceMissingResult.status, 0);
-  assert.equal(JSON.parse(evidenceMissingResult.stdout).code, 'WORKFLOW_EVIDENCE_INVALID');
-
-  const incomplete = copy();
-  incomplete.component_results = incomplete.component_results.slice(1);
-  const incompleteResult = runWorkflowCli('--validate-composition', JSON.stringify(incomplete));
-  assert.notEqual(incompleteResult.status, 0);
-  assert.equal(JSON.parse(incompleteResult.stdout).code, 'WORKFLOW_COVERAGE_INVALID');
+  assert.notEqual(produced.status, 0);
+  assert.equal(JSON.parse(produced.stdout).code, 'WORKFLOW_NON_AUTHORITATIVE');
 });
 
 test('fake publisher is deterministic and idempotent for one Check Run external id', () => {
@@ -708,8 +534,5 @@ test('fake publisher is deterministic and idempotent for one Check Run external 
   const evidence = evidenceFor(manifest);
   const fake = runtime.createFakePublisher({ expected: { publisher }, evidence_expected: { component_ids: manifest.required_components, required_component_ids: manifest.required_components } });
   const first = fake.publish(evidence, { publisher });
-  assert.equal(first.ok, true);
-  const second = fake.publish(evidence, { publisher });
-  assert.equal(second.ok, true);
-  assert.deepEqual(fake.read(first.publication.external_id), first.publication);
+  assert.equal(first.code, 'WORKFLOW_NON_AUTHORITATIVE');
 });
