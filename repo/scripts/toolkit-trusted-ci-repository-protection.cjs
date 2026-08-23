@@ -524,7 +524,7 @@ function comparePullRequestIdentity(before, after) {
   return success({ pull_request: right });
 }
 
-const CHANGED_FILE_STATUSES = Object.freeze(['added', 'modified', 'deleted', 'renamed', 'copied', 'changed']);
+const CHANGED_FILE_STATUSES = Object.freeze(['added', 'modified', 'removed', 'renamed', 'copied', 'changed']);
 
 function validateChangedFileRecord(record) {
   if (!exactKeys(record, ['filename', 'status', 'previous_filename']) || !CHANGED_FILE_STATUSES.includes(record.status)) return failure('PATH_INVALID');

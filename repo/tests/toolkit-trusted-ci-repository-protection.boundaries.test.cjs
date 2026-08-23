@@ -196,6 +196,18 @@ function serverPathPages() {
   }];
 }
 
+function serverRemovedPathPages() {
+  return [{
+    items: [
+      { filename: '_projects/cicd/trusted-ci-repository-protection/SOURCE-LOCK.json', status: 'removed', previous_filename: null },
+      { filename: '_projects/cicd/trusted-ci-repository-protection/_main/trusted-ci-repository-protection-policy.json', status: 'added', previous_filename: null },
+      { filename: 'repo/scripts/toolkit-trusted-ci-repository-protection.cjs', status: 'added', previous_filename: null },
+      { filename: 'repo/tests/toolkit-trusted-ci-repository-protection.test.cjs', status: 'added', previous_filename: null },
+    ],
+    has_next: false,
+  }];
+}
+
 function serverSourceBinding(overrides = {}) {
   const blob = '68af6b048e5d660002987d0bdbd7b04b72b7b522';
   return {
@@ -256,8 +268,7 @@ function serverJobEvidence(overrides = {}) {
   };
 }
 
-function serverEvidenceFixture(overrides = {}) {
-  const pages = serverPathPages();
+function serverEvidenceFixture(overrides = {}, pages = serverPathPages()) {
   const paths = runtime.validateChangedPathCollection({ pull_request: SERVER_PR, pages });
   assert.equal(paths.ok, true, paths.code);
   const admission = runtime.validateWorkflowRunAdmission({
@@ -301,6 +312,38 @@ test('server evidence binds base, head, merge source blobs and excludes local di
     summary: 'Server-certified CI Gate.',
     details_url: null,
   }).ok, true);
+});
+
+test('GitHub removed status flows from changed-path collection into canonical server evidence', () => {
+  const pages = serverRemovedPathPages();
+  const paths = runtime.validateChangedPathCollection({ pull_request: SERVER_PR, pages });
+  assert.equal(paths.ok, true, paths.code);
+  assert.deepEqual(paths.changed_paths.records.find((record) => record.path.endsWith('/SOURCE-LOCK.json')), {
+    path: '_projects/cicd/trusted-ci-repository-protection/SOURCE-LOCK.json',
+    status: 'removed',
+    previous_path: null,
+  });
+  assert.equal(paths.changed_paths.count, SERVER_PR.changed_files);
+  assert.match(paths.changed_paths.digest, /^[a-f0-9]{64}$/);
+
+  const evidence = serverEvidenceFixture({}, pages);
+  const validated = runtime.validateServerEvidence(evidence, {
+    repository_id: SERVER_PR.repository_id,
+    pr: SERVER_PR.number,
+    head_sha: SERVER_PR.head_sha,
+    base_sha: SERVER_PR.base_sha,
+    merge_sha: SERVER_PR.merge_sha,
+  });
+  assert.equal(validated.ok, true, validated.code);
+  assert.equal(validated.evidence.changed_paths.count, SERVER_PR.changed_files);
+  assert.equal(validated.evidence.changed_paths.digest, paths.changed_paths.digest);
+  assert.equal(validated.evidence.changed_paths.records.find((record) => record.status === 'removed').previous_path, null);
+});
+
+test('unsupported deleted provider status fails closed as PATH_INVALID', () => {
+  const pages = serverRemovedPathPages();
+  pages[0].items[0] = { ...pages[0].items[0], status: 'deleted' };
+  assert.equal(runtime.validateChangedPathCollection({ pull_request: SERVER_PR, pages }).code, 'PATH_INVALID');
 });
 
 test('checked-in server evidence fixture is closed, current, and digest-valid', () => {
