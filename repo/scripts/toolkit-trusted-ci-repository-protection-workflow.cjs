@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const fs = require('node:fs');
 const protection = require('./toolkit-trusted-ci-repository-protection.cjs');
 
 const CONTRACT_VERSION = 'toolkit.n6.protected-ci-gate-workflow.v1';
@@ -10,6 +11,20 @@ const BASE_REF = 'refs/heads/main';
 const ALLOWED_TRIGGERS = Object.freeze(['pull_request_target', 'merge_group']);
 const REQUIRED_PERMISSIONS = Object.freeze({ contents: 'read', actions: 'read', checks: 'read' });
 const ALLOWED_ACTIONS = Object.freeze(['actions/checkout@v4']);
+const MAX_COMPOSITION_INPUT_BYTES = 4 * 1024 * 1024;
+const COMPOSITION_INPUT_PATH = '$RUNNER_TEMP/n6-protected-ci-input.json';
+const COMPOSITION_INPUT_KEYS = Object.freeze([
+  'repository_id',
+  'pr',
+  'head_sha',
+  'base_sha',
+  'merge_sha',
+  'changed_paths',
+  'component_results',
+  'evidence',
+  'evidence_archive',
+  'non_ci_evidence',
+]);
 const FORBIDDEN_TRIGGERS = Object.freeze([
   'pull_request',
   'push',
@@ -129,11 +144,12 @@ function validateWorkflowSource(source) {
   if (!/^\s{4}steps:\s*$/m.test(normalized)) return failure('WORKFLOW_INVALID');
   if (!/git diff --check/.test(normalized)) return failure('WORKFLOW_INVALID');
   if (!/toolkit-trusted-ci-repository-protection-workflow\.cjs/.test(normalized)) return failure('WORKFLOW_INVALID');
+  if (!/--validate-composition < "\$RUNNER_TEMP\/n6-protected-ci-input\.json"/.test(normalized)) return failure('WORKFLOW_INVALID');
   return success({ source: normalized, triggers, actions });
 }
 
 function validateWorkflowContract(contract) {
-  const keys = ['contract_version', 'workflow_id', 'workflow_name', 'base_ref', 'allowed_triggers', 'forbidden_triggers', 'candidate_code_execution', 'permissions', 'publisher', 'actions', 'checkout', 'required_steps', 'secrets', 'statuses'];
+  const keys = ['contract_version', 'workflow_id', 'workflow_name', 'base_ref', 'allowed_triggers', 'forbidden_triggers', 'candidate_code_execution', 'permissions', 'publisher', 'actions', 'checkout', 'composition_input', 'required_steps', 'secrets', 'statuses'];
   if (!exactKeys(contract, keys)
     || contract.contract_version !== CONTRACT_VERSION
     || contract.workflow_id !== WORKFLOW_ID
@@ -150,6 +166,13 @@ function validateWorkflowContract(contract) {
     || !Array.isArray(contract.actions) || contract.actions.length !== 1 || contract.actions[0] !== ALLOWED_ACTIONS[0]
     || !exactKeys(contract.checkout, ['ref', 'persist_credentials', 'candidate_head_checkout'])
     || contract.checkout.ref !== 'github.event.repository.default_branch' || contract.checkout.persist_credentials !== false || contract.checkout.candidate_head_checkout !== false
+    || !exactKeys(contract.composition_input, ['transport', 'source', 'path', 'candidate_owned', 'max_bytes', 'required_fields'])
+    || contract.composition_input.transport !== 'json-stdin' || contract.composition_input.source !== 'protected-runner-temp'
+    || contract.composition_input.path !== COMPOSITION_INPUT_PATH || contract.composition_input.candidate_owned !== false
+    || contract.composition_input.max_bytes !== MAX_COMPOSITION_INPUT_BYTES
+    || !Array.isArray(contract.composition_input.required_fields)
+    || contract.composition_input.required_fields.length !== COMPOSITION_INPUT_KEYS.length
+    || contract.composition_input.required_fields.some((field, index) => field !== COMPOSITION_INPUT_KEYS[index])
     || !Array.isArray(contract.required_steps) || contract.required_steps.length === 0
     || contract.secrets !== false || contract.statuses !== false) return failure('WORKFLOW_INVALID');
   if (contract.allowed_triggers.some((trigger) => !ALLOWED_TRIGGERS.includes(trigger))
@@ -206,7 +229,7 @@ function buildProtectedWorkflowTemplate() {
     '      - name: Check repository diff hygiene',
     '        run: git diff --check',
     '      - name: Validate trusted CI composition',
-    '        run: node repo/scripts/toolkit-trusted-ci-repository-protection-workflow.cjs --validate-composition',
+    '        run: node repo/scripts/toolkit-trusted-ci-repository-protection-workflow.cjs --validate-composition < "$RUNNER_TEMP/n6-protected-ci-input.json"',
     '',
   ].join('\n');
 }
@@ -248,16 +271,70 @@ function validateGateInvocation(input = {}) {
   if (input.evidence) {
     const evidence = protection.validateEvidence(input.evidence, expected);
     if (!evidence.ok) return failure('WORKFLOW_EVIDENCE_INVALID', { cause: evidence.code });
+    for (const component of input.component_results || []) {
+      const archived = input.evidence.component_results.find((entry) => entry.id === component.id);
+      if (!archived || ['status', 'conclusion', 'mandatory', 'artifact_digest'].some((key) => archived[key] !== component[key])) {
+        return failure('WORKFLOW_EVIDENCE_INVALID', { cause: 'EVIDENCE_STALE' });
+      }
+    }
   }
   if (input.evidence_archive) {
-    const archive = protection.validateEvidenceArchive(input.evidence_archive, { exactPaths: true });
+    const archive = protection.validateEvidenceArchive(input.evidence_archive, { expectedPaths: ['ci/evidence.json'] });
     if (!archive.ok) return failure('WORKFLOW_EVIDENCE_INVALID', { cause: archive.code });
+    let archivedEvidence;
+    try {
+      archivedEvidence = JSON.parse(input.evidence_archive[0].bytes);
+    } catch (_error) {
+      return failure('WORKFLOW_EVIDENCE_INVALID', { cause: 'ARCHIVE_INVALID' });
+    }
+    if (protection.canonicalSerialize(archivedEvidence) !== protection.canonicalSerialize(input.evidence)) {
+      return failure('WORKFLOW_EVIDENCE_INVALID', { cause: 'EVIDENCE_STALE' });
+    }
   }
   return success({ workflow: workflowIdentity(input.workflow), composition: composition, coverage, evidence: input.evidence ? clone(input.evidence) : null });
 }
 
 function validateSourceForCli(source = buildProtectedWorkflowTemplate()) {
   return validateProtectedWorkflow(source);
+}
+
+function validateCompositionForCli(input) {
+  if (!exactKeys(input, COMPOSITION_INPUT_KEYS)) return failure('WORKFLOW_INVALID');
+  if (!isRecord(input.evidence) || !Array.isArray(input.evidence_archive)) {
+    return failure('WORKFLOW_EVIDENCE_INVALID', { cause: 'EVIDENCE_INCOMPLETE' });
+  }
+  const source = buildProtectedWorkflowTemplate();
+  const protectedIdentity = workflowIdentity(source);
+  if (!protectedIdentity.ok) return protectedIdentity;
+  return validateGateInvocation({
+    ...input,
+    workflow: {
+      source,
+      source_sha: protectedIdentity.source_sha,
+      base_ref: BASE_REF,
+      candidate_owned: false,
+      workflow_identity: WORKFLOW_ID,
+    },
+  });
+}
+
+function readCompositionInputForCli(fd = 0) {
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, MAX_COMPOSITION_INPUT_BYTES + 1 - total));
+    const bytesRead = fs.readSync(fd, chunk, 0, chunk.length, null);
+    if (bytesRead === 0) break;
+    total += bytesRead;
+    if (total > MAX_COMPOSITION_INPUT_BYTES) return failure('WORKFLOW_INVALID');
+    chunks.push(chunk.subarray(0, bytesRead));
+  }
+  if (total === 0) return failure('WORKFLOW_INVALID');
+  try {
+    return success({ input: JSON.parse(Buffer.concat(chunks, total).toString('utf8')) });
+  } catch (_error) {
+    return failure('WORKFLOW_INVALID');
+  }
 }
 
 module.exports = Object.freeze({
@@ -268,6 +345,9 @@ module.exports = Object.freeze({
   ALLOWED_TRIGGERS,
   REQUIRED_PERMISSIONS,
   ALLOWED_ACTIONS,
+  MAX_COMPOSITION_INPUT_BYTES,
+  COMPOSITION_INPUT_PATH,
+  COMPOSITION_INPUT_KEYS,
   FORBIDDEN_TRIGGERS,
   FAILURE_CODES,
   validateWorkflowSource,
@@ -280,13 +360,21 @@ module.exports = Object.freeze({
   validateGateInvocation,
   validateProtectedGate: validateGateInvocation,
   validateSourceForCli,
+  validateCompositionForCli,
+  readCompositionInputForCli,
 });
 
 if (require.main === module) {
   const argument = process.argv[2];
-  const result = argument === '--validate-source' || argument === '--validate-composition'
-    ? validateSourceForCli()
-    : failure('WORKFLOW_INVALID');
+  let result;
+  if (argument === '--validate-source') {
+    result = validateSourceForCli();
+  } else if (argument === '--validate-composition') {
+    const parsed = readCompositionInputForCli();
+    result = parsed.ok ? validateCompositionForCli(parsed.input) : parsed;
+  } else {
+    result = failure('WORKFLOW_INVALID');
+  }
   process.stdout.write(JSON.stringify(result) + '\n');
   process.exitCode = result.ok ? 0 : 1;
 }

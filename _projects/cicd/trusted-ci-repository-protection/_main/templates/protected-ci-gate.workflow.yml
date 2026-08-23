@@ -24,4 +24,4 @@ jobs:
       - name: Check repository diff hygiene
         run: git diff --check
       - name: Validate trusted CI composition
-        run: node repo/scripts/toolkit-trusted-ci-repository-protection-workflow.cjs --validate-composition
+        run: node repo/scripts/toolkit-trusted-ci-repository-protection-workflow.cjs --validate-composition < "$RUNNER_TEMP/n6-protected-ci-input.json"

@@ -24,6 +24,7 @@ const MAX_CAPABILITIES_PER_REPOSITORY = 3;
 const MAX_LOCK_BYTES = 4096;
 const LOCK_SCHEMA = 'toolkit.repository-capability-registry.lock.v1';
 const TRANSACTION_SCHEMA = 'toolkit.repository-capability-registry.transaction.v1';
+const PROTECTION_CONSENT_AUTHORITY = 'toolkit.repository-protection-consent-authority.v1';
 const REGISTRY_BASENAME = 'repository-governance.v1.json';
 const MAX_TRANSACTION_BYTES = 4096;
 const CAPABILITIES = Object.freeze(['repository.governance', 'execution_loop', 'repository.protection']);
@@ -1140,6 +1141,40 @@ function getRepositoryStatus(options = {}) {
   }
 }
 
+function getRepositoryProtectionConsent(options = {}) {
+  assertNoCallerIdentityOverride(options);
+  try {
+    const identity = resolveRepositoryIdentity(options);
+    let snapshot = readSnapshot(options);
+    if (snapshot.legacy === true) snapshot = migrateLegacyRegistry(options, identity, snapshot);
+    const record = snapshot.registry?.repositories.find((entry) => entry.repository_id === identity.repository_id);
+    const capability = record?.capabilities.find((entry) => entry.capability_id === 'repository.protection') || null;
+    if (capability) validateCapabilityEntry(capability, identity.repository_id, snapshot.registry_revision, false, false);
+    return {
+      authority: PROTECTION_CONSENT_AUTHORITY,
+      status: capability ? capability.state : 'unresolved',
+      repository_id: identity.repository_id,
+      canonical_remote: identity.canonical_remote,
+      registry_revision: snapshot.registry_revision,
+      snapshot_hash: snapshot.snapshot_hash,
+      capability: capability ? clone(capability) : null,
+      reason_code: null,
+    };
+  } catch (error) {
+    if (error.code === 'REPOSITORY_ID_SPOOF_ATTEMPT') throw error;
+    return {
+      authority: PROTECTION_CONSENT_AUTHORITY,
+      status: 'actionable',
+      repository_id: null,
+      canonical_remote: null,
+      registry_revision: 0,
+      snapshot_hash: null,
+      capability: null,
+      reason_code: error.code || 'REGISTRY_UNAVAILABLE',
+    };
+  }
+}
+
 function questionForCapability(capabilityId, currentState = 'unresolved') {
   const definition = CAPABILITY_DEFINITIONS[capabilityId];
   return {
@@ -1931,6 +1966,7 @@ module.exports = {
   MAX_CAPABILITIES_PER_REPOSITORY,
   MAX_LEGACY_RECEIPTS,
   LOCK_SCHEMA,
+  PROTECTION_CONSENT_AUTHORITY,
   REGISTRY_BASENAME,
   CAPABILITIES,
   ENTRY_CAPABILITIES,
@@ -1955,6 +1991,7 @@ module.exports = {
   repositoryIdForCanonicalRemote,
   resolveRepositoryIdentity,
   getRepositoryStatus,
+  getRepositoryProtectionConsent,
   status: getRepositoryStatus,
   probeRepository,
   setupCapability,

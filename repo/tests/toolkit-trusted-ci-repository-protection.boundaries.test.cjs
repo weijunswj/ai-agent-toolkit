@@ -1,8 +1,10 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const childProcess = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
@@ -12,7 +14,43 @@ const capabilityRegistry = require(path.join(repoRoot, 'repo', 'scripts', 'toolk
 const workflow = require(path.join(repoRoot, 'repo', 'scripts', 'toolkit-trusted-ci-repository-protection-workflow.cjs'));
 const publisher = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'fixtures', 'publisher.n6.json'), 'utf8'));
 const effectiveFixture = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'fixtures', 'effective-protection.n6.json'), 'utf8'));
-const effective = { ...effectiveFixture, repository_id: 'a'.repeat(64) };
+const REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit.git';
+const effective = { ...effectiveFixture, repository_id: capabilityRegistry.repositoryIdForCanonicalRemote(REMOTE) };
+
+function git(repo, args) {
+  return childProcess.execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', windowsHide: true }).trim();
+}
+
+function registryOptions(t, operation = null) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-n6-protection-boundary-'));
+  const repo = path.join(root, 'repo');
+  const registryPath = path.join(root, 'state', 'repository-governance.v1.json');
+  fs.mkdirSync(repo, { recursive: true });
+  git(root, ['init', '--quiet', repo]);
+  git(repo, ['remote', 'add', 'origin', REMOTE]);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const options = { cwd: repo, registryPath, testOnly: true };
+  if (operation) {
+    const current = capabilityRegistry.getRepositoryStatus(options);
+    capabilityRegistry.writeCapabilityDecision({
+      ...options,
+      capabilityId: 'repository.protection',
+      operation,
+      ownerAction: {
+        confirmed: true,
+        category: 'explicit-owner',
+        channel: 'capability-route',
+        operation,
+        choice_semantic_id: capabilityRegistry.capabilityDecisionSemanticId('repository.protection', operation),
+        contract_digest: capabilityRegistry.CONTRACT_DIGEST,
+        scope_digest: capabilityRegistry.capabilityScopeDigest(effective.repository_id, 'repository.protection', operation, 'capability-route'),
+      },
+      expectedRevision: current.registry_revision,
+      expectedHash: current.snapshot_hash,
+    });
+  }
+  return options;
+}
 
 function protectionConsent() {
   const scopeDigest = capabilityRegistry.capabilityScopeDigest(effective.repository_id, 'repository.protection', 'enable', 'capability-route');
@@ -63,15 +101,46 @@ test('workflow boundary rejects third-party actions and write-capable shell muta
   assert.equal(workflow.validateWorkflowSource(source.replace('git diff --check', 'git push origin main')).code, 'WORKFLOW_CANDIDATE_CODE');
 });
 
-test('protection boundary requires explicit consent and blocks unreadable entitlement', () => {
-  const publisherResult = runtime.reconcileProtection({ repository_id: effective.repository_id, publisher, effective });
+test('protection boundary requires canonical A2 consent and blocks unreadable entitlement', (t) => {
+  const unresolved = registryOptions(t);
+  const enabled = registryOptions(t, 'enable');
+  const disabled = registryOptions(t, 'decline');
+  const publisherResult = runtime.reconcileProtection({ repository_id: effective.repository_id, capability_registry_options: unresolved, publisher, effective });
   assert.equal(publisherResult.code, 'CONSENT_MISSING');
+  assert.equal(runtime.reconcileProtection({ repository_id: effective.repository_id, capability_registry_options: disabled, publisher, effective }).code, 'CAPABILITY_DENIED');
+  assert.equal(runtime.reconcileProtection({ repository_id: effective.repository_id, capability_registry_options: enabled, consent: protectionConsent(), publisher, effective }).code, 'CONSENT_MISSING');
   assert.equal(runtime.reconcileProtection({
     repository_id: effective.repository_id,
-    consent: protectionConsent(),
+    capability_registry_options: enabled,
     publisher,
     effective: { ...effective, entitlement: { status: 'unreadable' } },
   }).code, 'PROTECTION_UNREADABLE');
+});
+
+test('malformed canonical A2 protection receipts and provenance fail closed in N6', (t) => {
+  const receiptMismatch = registryOptions(t, 'enable');
+  const receiptRegistry = JSON.parse(fs.readFileSync(receiptMismatch.registryPath, 'utf8'));
+  const receiptCapability = receiptRegistry.repositories[0].capabilities.find((entry) => entry.capability_id === 'repository.protection');
+  receiptCapability.receipt.receipt_id = '0'.repeat(64);
+  fs.writeFileSync(receiptMismatch.registryPath, JSON.stringify(receiptRegistry), 'utf8');
+  assert.equal(runtime.reconcileProtection({
+    repository_id: effective.repository_id,
+    capability_registry_options: receiptMismatch,
+    publisher,
+    effective,
+  }).code, 'CONSENT_MISSING');
+
+  const provenanceMismatch = registryOptions(t, 'enable');
+  const provenanceRegistry = JSON.parse(fs.readFileSync(provenanceMismatch.registryPath, 'utf8'));
+  const provenanceCapability = provenanceRegistry.repositories[0].capabilities.find((entry) => entry.capability_id === 'repository.protection');
+  provenanceCapability.provenance.scope_digest = '0'.repeat(64);
+  fs.writeFileSync(provenanceMismatch.registryPath, JSON.stringify(provenanceRegistry), 'utf8');
+  assert.equal(runtime.reconcileProtection({
+    repository_id: effective.repository_id,
+    capability_registry_options: provenanceMismatch,
+    publisher,
+    effective,
+  }).code, 'CONSENT_MISSING');
 });
 
 test('unsupported modes cannot become authoritative gate or protection plans', () => {

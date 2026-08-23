@@ -47,7 +47,7 @@
     "context": "CI Gate",
     "permissions": {
       "checks": "write",
-      "statuses": "none",
+      "statuses": "write",
       "metadata": "read",
       "contents": "read",
       "pull_requests": "read",
@@ -60,6 +60,11 @@
       "members": "none",
       "packages": "none",
       "webhooks": "none"
+    },
+    "operations": {
+      "check_run_publication": true,
+      "expected_source_enrolment": true,
+      "commit_status_publication": false
     },
     "commit_status": false,
     "idempotency": "external_id-bound-readback"

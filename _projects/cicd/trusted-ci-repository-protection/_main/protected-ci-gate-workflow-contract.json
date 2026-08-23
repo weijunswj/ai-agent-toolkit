@@ -21,6 +21,14 @@
     "persist_credentials": false,
     "candidate_head_checkout": false
   },
+  "composition_input": {
+    "transport": "json-stdin",
+    "source": "protected-runner-temp",
+    "path": "$RUNNER_TEMP/n6-protected-ci-input.json",
+    "candidate_owned": false,
+    "max_bytes": 4194304,
+    "required_fields": ["repository_id", "pr", "head_sha", "base_sha", "merge_sha", "changed_paths", "component_results", "evidence", "evidence_archive", "non_ci_evidence"]
+  },
   "required_steps": ["validate-protected-workflow", "git-diff-check", "validate-trusted-ci-composition"],
   "secrets": false,
   "statuses": false

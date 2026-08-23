@@ -5,7 +5,7 @@
   "source": "trusted-protected-workflow",
   "permissions": {
     "checks": "write",
-    "statuses": "none",
+    "statuses": "write",
     "metadata": "read",
     "contents": "read",
     "pull_requests": "read",
@@ -19,6 +19,11 @@
     "packages": "none",
     "webhooks": "none"
   },
+  "operations": {
+    "check_run_publication": true,
+    "expected_source_enrolment": true,
+    "commit_status_publication": false
+  },
   "publication": {
     "object": "check_run",
     "status": "completed",
@@ -28,5 +33,5 @@
     "commit_status": false,
     "idempotency": "same-external-id-must-read-back-identically"
   },
-  "forbidden": ["counterfeit_publisher", "statuses_write", "administration", "deployments", "secrets", "review_mutation", "ruleset_mutation"]
+  "forbidden": ["counterfeit_publisher", "commit_status_publication", "administration", "deployments", "secrets", "review_mutation", "ruleset_mutation"]
 }

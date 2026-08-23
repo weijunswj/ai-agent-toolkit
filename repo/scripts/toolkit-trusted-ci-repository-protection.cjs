@@ -462,7 +462,7 @@ function validateEvidenceArchive(entries, options = {}) {
 }
 
 function validatePublisher(publisher, expected = {}) {
-  const keys = ['kind', 'integration_id', 'installation_id', 'permissions', 'source'];
+  const keys = ['kind', 'integration_id', 'installation_id', 'permissions', 'operations', 'source'];
   if (!exactKeys(publisher, keys) || publisher.kind !== 'github-app' || publisher.source !== 'trusted-protected-workflow'
     || !isSafeText(publisher.integration_id, 128) || !isSafeText(publisher.installation_id, 256)
     || ['actions', 'github-actions', 'github-actions-app'].includes(publisher.integration_id.toLowerCase())
@@ -472,7 +472,7 @@ function validatePublisher(publisher, expected = {}) {
   if (!exactKeys(publisher.permissions, permissionKeys)) return failure('publisher_forbidden_permission');
   const expectedPermissions = {
     checks: 'write',
-    statuses: 'none',
+    statuses: 'write',
     metadata: 'read',
     contents: 'read',
     pull_requests: 'read',
@@ -486,12 +486,14 @@ function validatePublisher(publisher, expected = {}) {
     packages: 'none',
     webhooks: 'none',
   };
+  if (!exactKeys(publisher.operations, ['check_run_publication', 'expected_source_enrolment', 'commit_status_publication'])
+    || publisher.operations.check_run_publication !== true
+    || publisher.operations.expected_source_enrolment !== true) return failure('publisher_forbidden_permission');
+  if (publisher.operations.commit_status_publication !== false) return failure('commit_status_forbidden');
   for (const key of permissionKeys) {
     if (!['none', 'read', 'write'].includes(publisher.permissions[key])) return failure('publisher_forbidden_permission');
-    if (key === 'checks' && publisher.permissions[key] !== 'write') return failure('publisher_forbidden_permission');
-    if (key !== 'checks' && key !== 'statuses' && publisher.permissions[key] !== expectedPermissions[key]) return failure('publisher_forbidden_permission');
+    if (publisher.permissions[key] !== expectedPermissions[key]) return failure('publisher_forbidden_permission');
     if (['administration', 'deployments', 'secrets', 'issues', 'reviews', 'members', 'packages', 'webhooks'].includes(key) && publisher.permissions[key] !== 'none') return failure('publisher_forbidden_permission');
-    if (key === 'statuses' && publisher.permissions[key] !== 'none') return failure('commit_status_forbidden');
   }
   return success({ publisher: clone(publisher) });
 }
@@ -512,8 +514,10 @@ function checkRunIdentity(input) {
 }
 
 function publicationRequest(input) {
-  const keys = ['identity', 'publisher', 'status', 'conclusion', 'summary', 'details_url'];
+  const keys = ['identity', 'publisher', 'object', 'status', 'conclusion', 'summary', 'details_url'];
+  if (isRecord(input) && input.object === 'commit_status') return failure('commit_status_forbidden');
   if (!exactKeys(input, keys) || !isRecord(input.identity) || input.status !== 'completed'
+    || input.object !== 'check_run'
     || !['success', 'failure', 'cancelled', 'timed-out', 'neutral'].includes(input.conclusion)
     || !isSafeText(input.summary, 1024) || (input.details_url !== null && !isSafeText(input.details_url, 512))) return failure('evidence_incomplete');
   const identity = checkRunIdentity(input.identity);
@@ -554,6 +558,7 @@ function createFakePublisher(config = {}) {
           generation: evidence.generation,
         },
         publisher: request?.publisher || expected.publisher,
+        object: 'check_run',
         status: 'completed',
         conclusion: request?.conclusion || (evidence.conclusion === 'success' ? 'success' : 'failure'),
         summary: request?.summary || 'Bounded protected CI Gate result.',
@@ -802,11 +807,16 @@ function classifyProtectionOwnership(effective, desired = null) {
   let n6 = null;
   let conflict = false;
   const seenRuleIds = new Set();
-  for (const rule of [...rulesets, ...organisationRulesets]) {
+  const scopedRules = [
+    ...rulesets.map((rule) => ({ rule, scope: 'repository' })),
+    ...organisationRulesets.map((rule) => ({ rule, scope: 'organisation' })),
+  ];
+  for (const { rule, scope } of scopedRules) {
     const owner = String(rule.owner_class || rule.owner || rule.source || '').toLowerCase();
     if (seenRuleIds.has(rule.id)) conflict = true;
     seenRuleIds.add(rule.id);
-    const isN6 = rule.owner_class === 'N6-owned' && rule.id === desiredId;
+    if (rule.id === desiredId && (scope !== 'repository' || rule.owner_class !== 'N6-owned')) conflict = true;
+    const isN6 = scope === 'repository' && rule.owner_class === 'N6-owned' && rule.id === desiredId;
     if (isN6) {
       if (n6) conflict = true;
       n6 = rule;
@@ -816,7 +826,7 @@ function classifyProtectionOwnership(effective, desired = null) {
     } else if (rule.owner_class === 'N6-owned') {
       conflict = true;
       classes.push('N6-owned');
-    } else if (organisationRulesets.includes(rule) || owner === 'organisation-managed' || owner === 'organization-managed') {
+    } else if (scope === 'organisation' || owner === 'organisation-managed' || owner === 'organization-managed') {
       classes.push('organisation-managed');
     } else if (owner === 'unknown' || owner === '') {
       classes.push('unknown');
@@ -847,7 +857,8 @@ function buildMutationBinding(input) {
   const keys = ['repository_id', 'operation', 'target', 'desired_projection', 'consent', 'mode', 'publisher_integration_id', 'mutation_class', 'pre_read_fingerprint', 'expected_owned_delta'];
   if (!exactKeys(input, keys) || !isSafeText(input.repository_id, 256) || !isSafeText(input.operation, 128)
     || !isRecord(input.target) || !isRecord(input.desired_projection) || !isRecord(input.consent)
-    || input.consent.state !== 'enabled' || !isSafeText(input.mode, 128) || !isSafeText(input.publisher_integration_id, 128)
+    || input.consent.status !== 'enabled' || input.consent.authority !== capabilityRegistry.PROTECTION_CONSENT_AUTHORITY
+    || !isSafeText(input.mode, 128) || !isSafeText(input.publisher_integration_id, 128)
     || !isSafeText(input.mutation_class, 128) || !isDigest(input.pre_read_fingerprint) || !isRecord(input.expected_owned_delta)) return failure('identity_mismatch');
   const binding = {
     repository_id: input.repository_id,
@@ -876,20 +887,35 @@ function validateProtectionConsent(consent, repositoryId, registryRevision = nul
   return success({ consent: clone(consent), registry_revision: result.registry_revision });
 }
 
-function readProtectionConsent(status, repositoryId) {
-  if (!isRecord(status) || !isRecord(status.capabilities)) return failure('consent_missing');
-  if (status.repository_id !== undefined && status.repository_id !== repositoryId) return failure('identity_mismatch');
-  const capability = status.capabilities['repository.protection'];
-  if (!isRecord(capability)) return failure('consent_missing');
-  return validateProtectionConsent(capability, repositoryId, status.registry_revision);
+function readProtectionConsent(registryOptions, repositoryId) {
+  if (!isSafeText(repositoryId, 256)) return failure('identity_mismatch');
+  const options = isRecord(registryOptions) ? registryOptions : { cwd: process.cwd() };
+  let authority;
+  try {
+    authority = capabilityRegistry.getRepositoryProtectionConsent(options);
+  } catch (_error) {
+    return failure('consent_missing');
+  }
+  const authorityKeys = ['authority', 'status', 'repository_id', 'canonical_remote', 'registry_revision', 'snapshot_hash', 'capability', 'reason_code'];
+  if (!exactKeys(authority, authorityKeys)
+    || authority.authority !== capabilityRegistry.PROTECTION_CONSENT_AUTHORITY) return failure('consent_missing');
+  if (authority.status === 'actionable') return failure('consent_missing');
+  if (authority.repository_id !== repositoryId) return failure('identity_mismatch');
+  if (authority.status === 'disabled') return failure('capability_denied');
+  if (authority.status !== 'enabled' || !isDigest(authority.snapshot_hash)
+    || !Number.isSafeInteger(authority.registry_revision) || authority.registry_revision < 1
+    || !isRecord(authority.capability)) return failure('consent_missing');
+  const validated = validateProtectionConsent(authority.capability, repositoryId, authority.registry_revision);
+  if (!validated.ok) return validated;
+  return success({ consent: clone(authority), registry_revision: authority.registry_revision });
 }
 
 function reconcileProtection(input = {}) {
   const phase = input.phase || 'preview';
   if (!['inspect', 'canonicalize', 'fingerprint', 'compare', 'classify', 'preview', 'apply-plan', 'readback-verify', 'rollback-preview', 'rollback-plan'].includes(phase)) return failure('identity_mismatch');
-  const consentResult = input.consent
-    ? validateProtectionConsent(input.consent, input.repository_id)
-    : readProtectionConsent(input.capability_status, input.repository_id);
+  if (Object.prototype.hasOwnProperty.call(input, 'consent')
+    || Object.prototype.hasOwnProperty.call(input, 'capability_status')) return failure('consent_missing');
+  const consentResult = readProtectionConsent(input.capability_registry_options, input.repository_id);
   if (!consentResult.ok) return consentResult;
   const consent = consentResult.consent;
   const publisherResult = activePublisher(input.publishers || (input.publisher ? [input.publisher] : []), { integration_id: input.expected_integration_id });

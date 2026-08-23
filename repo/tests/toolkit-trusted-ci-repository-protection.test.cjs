@@ -1,8 +1,10 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const childProcess = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
@@ -24,7 +26,8 @@ const SHAS = {
   merge: 'c'.repeat(40),
   workflow: 'd'.repeat(40),
 };
-const REPOSITORY_ID = 'a'.repeat(64);
+const REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit.git';
+const REPOSITORY_ID = capabilityRegistry.repositoryIdForCanonicalRemote(REMOTE);
 const effective = { ...effectiveFixture, repository_id: REPOSITORY_ID };
 const CHANGED_PATHS = [
   '_projects/cicd/trusted-ci-repository-protection/_main/trusted-ci-repository-protection-policy.json',
@@ -34,6 +37,39 @@ const CHANGED_PATHS = [
 
 function digest(value) {
   return crypto.createHash('sha256').update(capabilityRegistry.canonicalSerialize(value), 'utf8').digest('hex');
+}
+
+function git(repo, args) {
+  return childProcess.execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', windowsHide: true }).trim();
+}
+
+function protectionRegistry(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-n6-protection-'));
+  const repo = path.join(root, 'repo');
+  const registryPath = path.join(root, 'state', 'repository-governance.v1.json');
+  fs.mkdirSync(repo, { recursive: true });
+  git(root, ['init', '--quiet', repo]);
+  git(repo, ['remote', 'add', 'origin', REMOTE]);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const options = { cwd: repo, registryPath, testOnly: true };
+  const current = capabilityRegistry.getRepositoryStatus(options);
+  capabilityRegistry.writeCapabilityDecision({
+    ...options,
+    capabilityId: 'repository.protection',
+    operation: 'enable',
+    ownerAction: {
+      confirmed: true,
+      category: 'explicit-owner',
+      channel: 'capability-route',
+      operation: 'enable',
+      choice_semantic_id: capabilityRegistry.capabilityDecisionSemanticId('repository.protection', 'enable'),
+      contract_digest: capabilityRegistry.CONTRACT_DIGEST,
+      scope_digest: capabilityRegistry.capabilityScopeDigest(REPOSITORY_ID, 'repository.protection', 'enable', 'capability-route'),
+    },
+    expectedRevision: current.registry_revision,
+    expectedHash: current.snapshot_hash,
+  });
+  return options;
 }
 
 function consent({ repositoryId = REPOSITORY_ID, state = 'enabled', decisionKind = 'enable' } = {}) {
@@ -137,10 +173,43 @@ function validGateInput(overrides = {}) {
     changed_paths: CHANGED_PATHS,
     component_results: componentResults(manifest),
     evidence,
-    evidence_archive: [{ path: 'ci/evidence.json', kind: 'file', bytes: '{}' }],
+    evidence_archive: [{ path: 'ci/evidence.json', kind: 'file', bytes: JSON.stringify(evidence) }],
     non_ci_evidence: [],
     ...overrides,
   };
+}
+
+function validCliInput(overrides = {}) {
+  const gate = validGateInput();
+  const protectedSourceSha = workflow.workflowIdentity(workflow.buildProtectedWorkflowTemplate()).source_sha;
+  gate.evidence.protected_workflow.source_sha = protectedSourceSha;
+  gate.evidence.component_results = gate.evidence.component_results.map((component) => ({
+    ...component,
+    producer: { ...component.producer, workflow_source_sha: protectedSourceSha },
+  }));
+  gate.evidence.evidence_digest = runtime.evidenceDigest(gate.evidence);
+  return {
+    repository_id: gate.repository_id,
+    pr: gate.pr,
+    head_sha: gate.head_sha,
+    base_sha: gate.base_sha,
+    merge_sha: gate.merge_sha,
+    changed_paths: gate.changed_paths,
+    component_results: gate.component_results,
+    evidence: gate.evidence,
+    evidence_archive: [{ path: 'ci/evidence.json', kind: 'file', bytes: JSON.stringify(gate.evidence) }],
+    non_ci_evidence: gate.non_ci_evidence,
+    ...overrides,
+  };
+}
+
+function runWorkflowCli(argument, input) {
+  return childProcess.spawnSync(process.execPath, [path.join(repoRoot, 'repo', 'scripts', 'toolkit-trusted-ci-repository-protection-workflow.cjs'), argument], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    input,
+    windowsHide: true,
+  });
 }
 
 test('N6 source contracts remain aligned with the dependency-free runtimes', () => {
@@ -149,7 +218,14 @@ test('N6 source contracts remain aligned with the dependency-free runtimes', () 
   assert.equal(policy.contract_version, runtime.CONTRACT_VERSION);
   assert.deepEqual(policy.modes, runtime.MODES);
   assert.deepEqual(policy.publisher.permissions, publisher.permissions);
+  assert.deepEqual(policy.publisher.operations, publisher.operations);
   assert.equal(publisherProtocol.protocol_version, runtime.PUBLISHER_PROTOCOL_VERSION);
+  assert.deepEqual(publisherProtocol.permissions, publisher.permissions);
+  assert.deepEqual(publisherProtocol.operations, publisher.operations);
+  assert.equal(publisherProtocol.publication.commit_status, false);
+  assert.equal(publisherProtocol.forbidden.includes('commit_status_publication'), true);
+  assert.equal(contractSchema.properties.publisher.properties.permissions.const.statuses, 'write');
+  assert.equal(contractSchema.properties.publisher.properties.operations.const.commit_status_publication, false);
   assert.equal(workflow.validateWorkflowContract(workflowContract).ok, true);
 });
 
@@ -219,7 +295,8 @@ test('archive, publisher, and gate identity boundaries fail closed', () => {
   assert.equal(runtime.validateEvidenceArchive([{ path: 'a.txt', kind: 'file', bytes: 'x' }, { path: 'a.txt', kind: 'file', bytes: 'y' }]).code, 'ARCHIVE_INVALID');
   assert.equal(runtime.validateEvidenceArchive([{ path: 'a.txt', kind: 'symlink', bytes: 'x' }]).code, 'ARCHIVE_INVALID');
   assert.equal(runtime.validatePublisher(publisher).ok, true);
-  assert.equal(runtime.validatePublisher({ ...publisher, permissions: { ...publisher.permissions, statuses: 'write' } }).code, 'COMMIT_STATUS_FORBIDDEN');
+  assert.equal(runtime.validatePublisher({ ...publisher, permissions: { ...publisher.permissions, statuses: 'none' } }).code, 'PUBLISHER_FORBIDDEN_PERMISSION');
+  assert.equal(runtime.validatePublisher({ ...publisher, operations: { ...publisher.operations, commit_status_publication: true } }).code, 'COMMIT_STATUS_FORBIDDEN');
   assert.equal(runtime.validatePublisher({ ...publisher, integration_id: 'github-actions' }).code, 'PRODUCER_MISMATCH');
   const identity = runtime.checkRunIdentity({
     repository_id: REPOSITORY_ID,
@@ -235,6 +312,15 @@ test('archive, publisher, and gate identity boundaries fail closed', () => {
   });
   assert.equal(identity.context, 'CI Gate');
   assert.match(identity.external_id, /^n6-ci-gate-v1:[a-f0-9]{64}$/);
+  assert.equal(runtime.publicationRequest({
+    identity: identity.identity,
+    publisher,
+    object: 'commit_status',
+    status: 'completed',
+    conclusion: 'success',
+    summary: 'forbidden',
+    details_url: null,
+  }).code, 'COMMIT_STATUS_FORBIDDEN');
 });
 
 test('gate state transitions distinguish duplicate, stale, superseded, and uncertain publication', () => {
@@ -262,7 +348,8 @@ test('gate state transitions distinguish duplicate, stale, superseded, and uncer
   assert.equal(runtime.transitionGateState(verifying, 'publish', { identity: { ...identity, head_sha: '9'.repeat(40) }, movement: 'head' }).code, 'HEAD_MOVED');
 });
 
-test('protection consent, ownership, projections, and preview-only plans remain bounded', () => {
+test('protection consent, ownership, projections, and preview-only plans remain bounded', (t) => {
+  const capabilityRegistryOptions = protectionRegistry(t);
   const publisherResult = runtime.validatePublisher(publisher);
   assert.equal(publisherResult.ok, true);
   const desired = runtime.desiredProtectionProjection({ repository_id: REPOSITORY_ID, default_branch: 'main', integration_id: publisher.integration_id });
@@ -271,7 +358,8 @@ test('protection consent, ownership, projections, and preview-only plans remain 
   assert.equal(runtime.validateDesiredProtectionProjection({ ...desired.projection, fingerprint: '0'.repeat(64) }).code, 'IDENTITY_MISMATCH');
   assert.equal(runtime.validateProtectionConsent({ capability_id: 'repository.protection', state: 'unresolved' }, REPOSITORY_ID).code, 'CONSENT_MISSING');
   assert.equal(runtime.validateProtectionConsent(consent({ repositoryId: 'b'.repeat(64) }), REPOSITORY_ID).code, 'IDENTITY_MISMATCH');
-  assert.equal(runtime.readProtectionConsent({ repository_id: REPOSITORY_ID, registry_revision: 1, capabilities: { 'repository.protection': consent() } }, REPOSITORY_ID).ok, true);
+  assert.equal(runtime.readProtectionConsent(capabilityRegistryOptions, REPOSITORY_ID).ok, true);
+  assert.equal(runtime.readProtectionConsent(capabilityRegistryOptions, 'b'.repeat(64)).code, 'IDENTITY_MISMATCH');
   const tamperedConsent = consent();
   tamperedConsent.receipt.receipt_id = '0'.repeat(64);
   assert.equal(runtime.validateProtectionConsent(tamperedConsent, REPOSITORY_ID).code, 'CONSENT_MISSING');
@@ -279,15 +367,29 @@ test('protection consent, ownership, projections, and preview-only plans remain 
   const noop = runtime.reconcileProtection({
     repository_id: REPOSITORY_ID,
     default_branch: 'main',
-    consent: consent(),
+    capability_registry_options: capabilityRegistryOptions,
     publisher,
     effective,
   });
   assert.equal(noop.ok, true);
   assert.equal(noop.code, 'NOOP');
+  assert.equal(runtime.reconcileProtection({
+    repository_id: REPOSITORY_ID,
+    capability_registry_options: capabilityRegistryOptions,
+    consent: consent(),
+    publisher,
+    effective,
+  }).code, 'CONSENT_MISSING');
+  assert.equal(runtime.reconcileProtection({
+    repository_id: REPOSITORY_ID,
+    capability_registry_options: capabilityRegistryOptions,
+    capability_status: { capabilities: { 'repository.protection': consent() } },
+    publisher,
+    effective,
+  }).code, 'CONSENT_MISSING');
   const absent = runtime.reconcileProtection({
     repository_id: REPOSITORY_ID,
-    consent: consent(),
+    capability_registry_options: capabilityRegistryOptions,
     publisher,
     effective: { ...effective, rulesets: [] },
   });
@@ -295,14 +397,14 @@ test('protection consent, ownership, projections, and preview-only plans remain 
   assert.equal(absent.action, 'create-ruleset');
   assert.equal(runtime.reconcileProtection({
     repository_id: REPOSITORY_ID,
-    consent: consent(),
+    capability_registry_options: capabilityRegistryOptions,
     publisher,
     effective: { ...effective, rulesets: [] },
     phase: 'apply-plan',
   }).code, 'LIVE_MUTATION_FORBIDDEN');
   assert.equal(runtime.reconcileProtection({
     repository_id: REPOSITORY_ID,
-    consent: consent(),
+    capability_registry_options: capabilityRegistryOptions,
     publisher,
     effective: {
       ...effective,
@@ -311,7 +413,7 @@ test('protection consent, ownership, projections, and preview-only plans remain 
   }).code, 'OWNERSHIP_AMBIGUOUS');
   assert.equal(runtime.reconcileProtection({
     repository_id: REPOSITORY_ID,
-    consent: consent(),
+    capability_registry_options: capabilityRegistryOptions,
     publisher,
     effective: {
       ...effective,
@@ -322,6 +424,21 @@ test('protection consent, ownership, projections, and preview-only plans remain 
   assert.equal(ownerManaged.code, 'OWNERSHIP_AMBIGUOUS');
   assert.equal(runtime.classifyProtectionOwnership({ rulesets: [{ ...effective.rulesets[0], owner_class: 'foreign-managed' }] }, desired.projection).code, 'OWNERSHIP_AMBIGUOUS');
   assert.equal(runtime.classifyProtectionOwnership({ rulesets: [effective.rulesets[0], { ...effective.rulesets[0], name: 'duplicate' }] }, desired.projection).code, 'OWNERSHIP_AMBIGUOUS');
+  for (const ownerClass of ['N6-owned', 'organisation-managed', 'owner-managed', 'foreign-managed', 'unknown', 'overlapping-compatible']) {
+    assert.equal(runtime.classifyProtectionOwnership({
+      rulesets: [],
+      organisation_rulesets: [{ ...effective.rulesets[0], owner_class: ownerClass }],
+    }, desired.projection).code, 'OWNERSHIP_AMBIGUOUS');
+  }
+  assert.equal(runtime.classifyProtectionOwnership({
+    rulesets: [effective.rulesets[0]],
+    organisation_rulesets: [{ ...effective.rulesets[0], owner_class: 'organisation-managed' }],
+  }, desired.projection).code, 'OWNERSHIP_AMBIGUOUS');
+  const unrelatedOrganisation = { ...effective.rulesets[0], id: 'organisation-baseline', name: 'Organisation Baseline', owner_class: 'organisation-managed', required_contexts: [] };
+  assert.equal(runtime.classifyProtectionOwnership({
+    rulesets: [effective.rulesets[0]],
+    organisation_rulesets: [unrelatedOrganisation],
+  }, desired.projection).ok, true);
   assert.equal(runtime.validateProtectionConsent({ capability_id: 'repository.protection', state: 'enabled' }, REPOSITORY_ID).code, 'CONSENT_MISSING');
   assert.equal(runtime.classifyProtectionOwnership({ rulesets: [{ name: 'protect-main', source: 'unknown' }] }).code, 'OWNERSHIP_AMBIGUOUS');
 });
@@ -334,6 +451,53 @@ test('workflow gate validation composes protected workflow, coverage, and eviden
   assert.equal(result.evidence.run.id, 'run-194');
   const blocked = workflow.validateGateInvocation(validGateInput({ non_ci_evidence: ['unlisted-provider-uat'] }));
   assert.equal(blocked.code, 'WORKFLOW_COVERAGE_INVALID');
+  const staleArchive = validGateInput();
+  staleArchive.evidence_archive[0].bytes = JSON.stringify({ ...staleArchive.evidence, head_sha: '9'.repeat(40) });
+  assert.equal(workflow.validateGateInvocation(staleArchive).code, 'WORKFLOW_EVIDENCE_INVALID');
+});
+
+test('composition CLI consumes complete bounded input and fails closed on absent or stale evidence', () => {
+  const source = runWorkflowCli('--validate-source');
+  assert.equal(source.status, 0, source.stderr || source.stdout);
+  const absent = runWorkflowCli('--validate-composition');
+  assert.notEqual(absent.status, 0);
+  assert.equal(JSON.parse(absent.stdout).code, 'WORKFLOW_INVALID');
+  const malformed = runWorkflowCli('--validate-composition', '{');
+  assert.notEqual(malformed.status, 0);
+  assert.equal(JSON.parse(malformed.stdout).code, 'WORKFLOW_INVALID');
+  const oversized = runWorkflowCli('--validate-composition', ' '.repeat(workflow.MAX_COMPOSITION_INPUT_BYTES + 1));
+  assert.notEqual(oversized.status, 0);
+  assert.equal(JSON.parse(oversized.stdout).code, 'WORKFLOW_INVALID');
+
+  const valid = validCliInput();
+  const accepted = runWorkflowCli('--validate-composition', JSON.stringify(valid));
+  assert.equal(accepted.status, 0, accepted.stderr || accepted.stdout);
+  assert.equal(JSON.parse(accepted.stdout).ok, true);
+
+  const stale = validCliInput();
+  stale.head_sha = '9'.repeat(40);
+  const staleResult = runWorkflowCli('--validate-composition', JSON.stringify(stale));
+  assert.notEqual(staleResult.status, 0);
+  assert.equal(JSON.parse(staleResult.stdout).code, 'WORKFLOW_EVIDENCE_INVALID');
+
+  const mismatched = validCliInput();
+  mismatched.evidence.repository_id = 'b'.repeat(64);
+  mismatched.evidence.evidence_digest = runtime.evidenceDigest(mismatched.evidence);
+  mismatched.evidence_archive[0].bytes = JSON.stringify(mismatched.evidence);
+  const mismatchResult = runWorkflowCli('--validate-composition', JSON.stringify(mismatched));
+  assert.notEqual(mismatchResult.status, 0);
+  assert.equal(JSON.parse(mismatchResult.stdout).code, 'WORKFLOW_EVIDENCE_INVALID');
+
+  const evidenceMissing = validCliInput({ evidence: null, evidence_archive: [] });
+  const evidenceMissingResult = runWorkflowCli('--validate-composition', JSON.stringify(evidenceMissing));
+  assert.notEqual(evidenceMissingResult.status, 0);
+  assert.equal(JSON.parse(evidenceMissingResult.stdout).code, 'WORKFLOW_EVIDENCE_INVALID');
+
+  const incomplete = validCliInput();
+  incomplete.component_results = incomplete.component_results.slice(1);
+  const incompleteResult = runWorkflowCli('--validate-composition', JSON.stringify(incomplete));
+  assert.notEqual(incompleteResult.status, 0);
+  assert.equal(JSON.parse(incompleteResult.stdout).code, 'WORKFLOW_COVERAGE_INVALID');
 });
 
 test('fake publisher is deterministic and idempotent for one Check Run external id', () => {

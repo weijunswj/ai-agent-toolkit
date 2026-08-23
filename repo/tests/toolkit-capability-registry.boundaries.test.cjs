@@ -132,6 +132,10 @@ test('malformed and truncated registries fail closed without creating consent', 
   const result = runtime.getRepositoryStatus(options(ctx));
   assert.equal(result.status, 'actionable');
   assert.equal(result.reason_code, 'REGISTRY_MALFORMED');
+  const protection = runtime.getRepositoryProtectionConsent(options(ctx));
+  assert.equal(protection.status, 'actionable');
+  assert.equal(protection.reason_code, 'REGISTRY_MALFORMED');
+  assert.equal(protection.capability, null);
   assert.equal(errorCode(() => runtime.writeCapabilityDecision({
     ...options(ctx),
     capabilityId: 'execution_loop',
