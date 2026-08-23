@@ -105,16 +105,27 @@ test('protection boundary requires canonical A2 consent and blocks unreadable en
   const unresolved = registryOptions(t);
   const enabled = registryOptions(t, 'enable');
   const disabled = registryOptions(t, 'decline');
-  const publisherResult = runtime.reconcileProtection({ repository_id: effective.repository_id, capability_registry_options: unresolved, publisher, effective });
+  const publisherResult = runtime.reconcileProtectionForTest({ repository_id: effective.repository_id, publisher, effective }, unresolved);
   assert.equal(publisherResult.code, 'CONSENT_MISSING');
-  assert.equal(runtime.reconcileProtection({ repository_id: effective.repository_id, capability_registry_options: disabled, publisher, effective }).code, 'CAPABILITY_DENIED');
-  assert.equal(runtime.reconcileProtection({ repository_id: effective.repository_id, capability_registry_options: enabled, consent: protectionConsent(), publisher, effective }).code, 'CONSENT_MISSING');
-  assert.equal(runtime.reconcileProtection({
+  assert.equal(runtime.reconcileProtectionForTest({ repository_id: effective.repository_id, publisher, effective }, disabled).code, 'CAPABILITY_DENIED');
+  assert.equal(runtime.reconcileProtectionForTest({ repository_id: effective.repository_id, consent: protectionConsent(), publisher, effective }, enabled).code, 'CONSENT_MISSING');
+  assert.equal(runtime.reconcileProtectionForTest({
     repository_id: effective.repository_id,
-    capability_registry_options: enabled,
     publisher,
     effective: { ...effective, entitlement: { status: 'unreadable' } },
-  }).code, 'PROTECTION_UNREADABLE');
+  }, enabled).code, 'PROTECTION_UNREADABLE');
+});
+
+test('production N6 rejects caller-selected test registry authority', (t) => {
+  const selected = registryOptions(t, 'enable');
+  const result = runtime.reconcileProtection({
+    repository_id: effective.repository_id,
+    capability_registry_options: selected,
+    publisher,
+    effective,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'CONSENT_MISSING');
 });
 
 test('malformed canonical A2 protection receipts and provenance fail closed in N6', (t) => {
@@ -123,24 +134,22 @@ test('malformed canonical A2 protection receipts and provenance fail closed in N
   const receiptCapability = receiptRegistry.repositories[0].capabilities.find((entry) => entry.capability_id === 'repository.protection');
   receiptCapability.receipt.receipt_id = '0'.repeat(64);
   fs.writeFileSync(receiptMismatch.registryPath, JSON.stringify(receiptRegistry), 'utf8');
-  assert.equal(runtime.reconcileProtection({
+  assert.equal(runtime.reconcileProtectionForTest({
     repository_id: effective.repository_id,
-    capability_registry_options: receiptMismatch,
     publisher,
     effective,
-  }).code, 'CONSENT_MISSING');
+  }, receiptMismatch).code, 'CONSENT_MISSING');
 
   const provenanceMismatch = registryOptions(t, 'enable');
   const provenanceRegistry = JSON.parse(fs.readFileSync(provenanceMismatch.registryPath, 'utf8'));
   const provenanceCapability = provenanceRegistry.repositories[0].capabilities.find((entry) => entry.capability_id === 'repository.protection');
   provenanceCapability.provenance.scope_digest = '0'.repeat(64);
   fs.writeFileSync(provenanceMismatch.registryPath, JSON.stringify(provenanceRegistry), 'utf8');
-  assert.equal(runtime.reconcileProtection({
+  assert.equal(runtime.reconcileProtectionForTest({
     repository_id: effective.repository_id,
-    capability_registry_options: provenanceMismatch,
     publisher,
     effective,
-  }).code, 'CONSENT_MISSING');
+  }, provenanceMismatch).code, 'CONSENT_MISSING');
 });
 
 test('unsupported modes cannot become authoritative gate or protection plans', () => {

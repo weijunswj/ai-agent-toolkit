@@ -6,6 +6,9 @@ const capabilityRegistry = require('./toolkit-capability-registry.cjs');
 
 const CONTRACT_VERSION = 'toolkit.n6.trusted-ci-repository-protection.v1';
 const EVIDENCE_SCHEMA = 'toolkit.n6.ci-evidence.v1';
+const EVIDENCE_CONTRACT_DIGEST = crypto.createHash('sha256')
+  .update(JSON.stringify({ contract_version: CONTRACT_VERSION, schema: EVIDENCE_SCHEMA }), 'utf8')
+  .digest('hex');
 const PUBLISHER_PROTOCOL_VERSION = 'toolkit.n6.app-publisher.v1';
 const DESIRED_PROTECTION_SCHEMA = 'toolkit.n6.desired-protection.v1';
 const EFFECTIVE_PROTECTION_SCHEMA = 'toolkit.n6.effective-protection.v1';
@@ -13,6 +16,8 @@ const GATE_CONTEXT = 'CI Gate';
 const EXTERNAL_ID_PREFIX = 'n6-ci-gate-v1:';
 const DEFAULT_BRANCH = 'main';
 const DEFAULT_RULESET_ID = 'n6-ci-gate-v1';
+const OWNERSHIP_PROOF_SCHEMA = 'toolkit.n6.protection-ownership-proof.v1';
+const OWNERSHIP_PROOF_AUTHORITY = capabilityRegistry.PROTECTION_CONSENT_AUTHORITY;
 
 const MODES = Object.freeze(['secure-minimal-app', 'secure-native', 'advisory-only-unsupported']);
 const ACTIVE_BASELINE_MODE = 'secure-minimal-app';
@@ -43,6 +48,7 @@ const ERROR_CODES = Object.freeze([
   'merge_moved',
   'component_missing',
   'component_skipped',
+  'component_failed',
   'component_duplicate',
   'producer_mismatch',
   'superseded',
@@ -234,8 +240,8 @@ const FORBIDDEN_AUTHORITATIVE_TRIGGERS = Object.freeze([
 
 const PATH_CLASS_RULES = Object.freeze([
   { name: 'repo-docs', match: (path) => path === 'README.md' || path.startsWith('repo/docs/') },
-  { name: 'project-manifest', match: (path) => path.startsWith('_projects/') && path.endsWith('/toolkit.project.json') },
-  { name: 'project-source', match: (path) => path.startsWith('_projects/') && path.includes('/_main/') },
+  { name: 'project-manifest', match: (path) => /^_projects\/[^/]+\/[^/]+\/(?:toolkit\.project\.json|README\.md|SOURCE-MANIFEST\.md)$/.test(path) },
+  { name: 'project-source', match: (path) => /^_projects\/[^/]+\/[^/]+\/.+/.test(path) },
   { name: 'source-lock', match: (path) => path.startsWith('_projects/') && path.endsWith('/SOURCE-LOCK.json') },
   { name: 'published-surface', match: (path) => path.startsWith('skills/') || path.startsWith('.codex-plugin/') || path.startsWith('.claude-plugin/') },
   { name: 'pack-surface', match: (path) => path.startsWith('skills/') && path.includes('/packs/') },
@@ -334,6 +340,11 @@ function validateTimestamp(value) {
   return Number.isFinite(parsed) && value.endsWith('Z');
 }
 
+function timestampValue(value) {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function expectedEvidenceKeys() {
   return [
     'schema',
@@ -394,12 +405,17 @@ function validateEvidence(evidence, expected = {}) {
     || !exactKeys(evidence.run, ['id', 'attempt']) || !isSafeText(evidence.run.id, 128)
     || !Number.isSafeInteger(evidence.run.attempt) || evidence.run.attempt < 1
     || !Number.isSafeInteger(evidence.generation) || evidence.generation < 1
-    || evidence.contract_version !== CONTRACT_VERSION || !isDigest(evidence.contract_digest)
+    || evidence.contract_version !== CONTRACT_VERSION || evidence.contract_digest !== EVIDENCE_CONTRACT_DIGEST
     || !Array.isArray(evidence.component_results) || evidence.component_results.length > COMPONENT_IDS.length
     || !['success', 'failure', 'cancelled', 'timed-out', 'in-progress', 'not-applicable'].includes(evidence.conclusion)
     || !exactKeys(evidence.timestamps, ['started_at', 'completed_at'])
     || !validateTimestamp(evidence.timestamps.started_at) || !validateTimestamp(evidence.timestamps.completed_at)
     || !isDigest(evidence.evidence_digest)) return failure('evidence_incomplete');
+
+  const startedAt = timestampValue(evidence.timestamps.started_at);
+  const completedAt = timestampValue(evidence.timestamps.completed_at);
+  if (completedAt < startedAt || (expected.minimum_timestamp !== undefined
+    && (!Number.isFinite(expected.minimum_timestamp) || startedAt < expected.minimum_timestamp))) return failure('evidence_stale');
 
   const seen = new Set();
   for (const component of evidence.component_results) {
@@ -423,6 +439,7 @@ function validateEvidence(evidence, expected = {}) {
       || component.producer.attempt !== expectedProducer.attempt
       || component.producer.generation !== expectedProducer.generation)) return failure('producer_mismatch');
     if (requiredComponentIds.includes(component.id) && component.mandatory !== true) return failure('component_skipped');
+    if (component.mandatory && (component.status !== 'success' || component.conclusion !== 'success')) return failure('component_failed');
     if (component.mandatory && ['cancelled', 'skipped', 'in-progress'].includes(component.status)) return failure('component_skipped');
   }
   if (evidence.conclusion === 'success') {
@@ -503,7 +520,7 @@ function checkRunIdentity(input) {
   if (!exactKeys(input, keys) || !isSafeText(input.repository_id, 256) || !Number.isSafeInteger(input.pr) || input.pr < 1
     || !isSha(input.head_sha) || !isSha(input.base_sha) || !isSha(input.merge_sha)
     || !isSafeText(input.protected_workflow_identity, 256) || !isSha(input.protected_workflow_source_sha)
-    || !isDigest(input.contract_digest) || !Number.isSafeInteger(input.attempt) || input.attempt < 1
+    || input.contract_digest !== EVIDENCE_CONTRACT_DIGEST || !Number.isSafeInteger(input.attempt) || input.attempt < 1
     || !Number.isSafeInteger(input.generation) || input.generation < 1) return failure('identity_mismatch');
   const identity = clone(input);
   return success({
@@ -670,8 +687,10 @@ function validateOwningCICoverage(input = {}) {
     const component = byId.get(componentId);
     if (!component) return failure('component_missing', { component_id: componentId });
     if (component.producer === 'candidate' || component.candidate_declared_not_applicable === true) return failure('producer_mismatch', { component_id: componentId });
+    if (input.trusted_component_producer !== undefined && component.producer !== input.trusted_component_producer) return failure('producer_mismatch', { component_id: componentId });
     if (component.dependency_setup === false || component.dependency_setup === undefined && input.dependency_setup === false) return failure('dependency_setup_missing', { component_id: componentId });
     if (component.status === 'skipped' || component.status === 'cancelled' || component.conclusion === 'not-applicable') return failure('component_skipped', { component_id: componentId });
+    if (component.status !== 'success' || component.conclusion !== 'success') return failure('component_failed', { component_id: componentId });
   }
   const nonCi = Array.isArray(input.non_ci_evidence) ? input.non_ci_evidence : [];
   if (nonCi.some((item) => !NON_CI_EVIDENCE.includes(item))) return failure('unknown_field');
@@ -797,7 +816,90 @@ function canonicalizeEffectiveProtection(effective) {
   return success({ effective: normalized, fingerprint: digestValue(normalized) });
 }
 
-function classifyProtectionOwnership(effective, desired = null) {
+function ownershipProofRule(effective, rulesetId) {
+  const rules = Array.isArray(effective?.rulesets) ? effective.rulesets : [];
+  return rules.find((rule) => rule.id === rulesetId && rule.owner_class === 'N6-owned') || null;
+}
+
+function buildOwnershipProof(effective, desired, consent, preMutationEffective = null) {
+  const effectiveResult = canonicalizeEffectiveProtection(effective);
+  if (!effectiveResult.ok || !isRecord(desired) || !isSafeText(desired.repository_id, 256)
+    || !isRecord(desired.ruleset) || !isSafeText(desired.ruleset.id, 128)) return failure('ownership_ambiguous');
+  const rule = ownershipProofRule(effectiveResult.effective, desired.ruleset.id);
+  if (!rule || effectiveResult.effective.repository_id !== desired.repository_id) return failure('ownership_ambiguous');
+  const consentResult = validateProtectionConsentAuthority(consent, desired.repository_id);
+  if (!consentResult.ok) return failure('ownership_ambiguous');
+  const canonicalConsent = consentResult.consent;
+  let preMutation = null;
+  if (preMutationEffective !== null) {
+    const preMutationResult = canonicalizeEffectiveProtection(preMutationEffective);
+    if (!preMutationResult.ok) return failure('ownership_ambiguous');
+    const preMutationRule = ownershipProofRule(preMutationResult.effective, desired.ruleset.id);
+    if (!preMutationRule || preMutationResult.effective.repository_id !== desired.repository_id) return failure('ownership_ambiguous');
+    preMutation = {
+      effective_fingerprint: preMutationResult.fingerprint,
+      rule: clone(preMutationRule),
+      rule_digest: digestValue(preMutationRule),
+      scope: 'repository',
+      owner_class: 'N6-owned',
+      state: 'present',
+    };
+  }
+  return success({
+    ownership_proof: {
+      schema: OWNERSHIP_PROOF_SCHEMA,
+      authority: OWNERSHIP_PROOF_AUTHORITY,
+      repository_id: desired.repository_id,
+      ruleset_id: rule.id,
+      scope: 'repository',
+      owner_class: 'N6-owned',
+      state: 'present',
+      rule_digest: digestValue(rule),
+      effective_fingerprint: effectiveResult.fingerprint,
+      registry_revision: canonicalConsent.registry_revision,
+      snapshot_hash: canonicalConsent.snapshot_hash,
+      capability: clone(canonicalConsent.capability),
+      consent: clone(canonicalConsent),
+      pre_mutation: preMutation,
+    },
+  });
+}
+
+function validateOwnershipProof(proof, effective, desired, consent = null, requirePrestate = false) {
+  const keys = ['schema', 'authority', 'repository_id', 'ruleset_id', 'scope', 'owner_class', 'state', 'rule_digest', 'effective_fingerprint', 'registry_revision', 'snapshot_hash', 'capability', 'consent', 'pre_mutation'];
+  if (!exactKeys(proof, keys) || proof.schema !== OWNERSHIP_PROOF_SCHEMA || proof.authority !== OWNERSHIP_PROOF_AUTHORITY
+    || proof.scope !== 'repository' || proof.owner_class !== 'N6-owned' || proof.state !== 'present' || !isSafeText(proof.repository_id, 256)
+    || !isSafeText(proof.ruleset_id, 128) || !isDigest(proof.rule_digest) || !isDigest(proof.effective_fingerprint)
+    || !Number.isSafeInteger(proof.registry_revision) || proof.registry_revision < 1 || !isDigest(proof.snapshot_hash)
+    || !isRecord(proof.capability) || !isRecord(proof.consent)
+    || (proof.pre_mutation !== null && !isRecord(proof.pre_mutation))) return failure('ownership_ambiguous');
+  if (!isRecord(desired) || desired.repository_id !== proof.repository_id || desired.ruleset?.id !== proof.ruleset_id) return failure('ownership_ambiguous');
+  const effectiveResult = canonicalizeEffectiveProtection(effective);
+  if (!effectiveResult.ok || effectiveResult.effective.repository_id !== proof.repository_id
+    || effectiveResult.fingerprint !== proof.effective_fingerprint) return failure('ownership_ambiguous');
+  const rule = ownershipProofRule(effectiveResult.effective, proof.ruleset_id);
+  if (!rule || digestValue(rule) !== proof.rule_digest) return failure('ownership_ambiguous');
+  const consentResult = validateProtectionConsentAuthority(proof.consent, proof.repository_id);
+  if (!consentResult.ok) return failure('ownership_ambiguous');
+  const canonicalConsent = consentResult.consent;
+  if (canonicalConsent.registry_revision !== proof.registry_revision
+    || canonicalConsent.snapshot_hash !== proof.snapshot_hash
+    || canonicalSerialize(canonicalConsent.capability) !== canonicalSerialize(proof.capability)) return failure('ownership_ambiguous');
+  if (consent && canonicalSerialize(canonicalConsent) !== canonicalSerialize(consent)) return failure('ownership_ambiguous');
+  if (requirePrestate && proof.pre_mutation === null) return failure('rollback_unsafe');
+  if (proof.pre_mutation !== null) {
+    if (!exactKeys(proof.pre_mutation, ['effective_fingerprint', 'rule', 'rule_digest', 'scope', 'owner_class', 'state'])
+      || !isDigest(proof.pre_mutation.effective_fingerprint) || proof.pre_mutation.scope !== 'repository'
+      || proof.pre_mutation.owner_class !== 'N6-owned' || proof.pre_mutation.state !== 'present'
+      || !isDigest(proof.pre_mutation.rule_digest)) return failure('ownership_ambiguous');
+    const preRule = normalizeEffectiveRule(proof.pre_mutation.rule);
+    if (!preRule || preRule.id !== proof.ruleset_id || preRule.owner_class !== 'N6-owned'
+      || digestValue(preRule) !== proof.pre_mutation.rule_digest) return failure('ownership_ambiguous');
+  }
+  return success({ ownership_proof: clone(proof) });
+}
+
+function classifyProtectionOwnership(effective, desired = null, ownershipProof = null, consent = null, requirePrestate = false) {
   if (!isRecord(effective)) return failure('ownership_ambiguous');
   const rulesets = Array.isArray(effective.rulesets) ? effective.rulesets : [];
   const organisationRulesets = Array.isArray(effective.organisation_rulesets) ? effective.organisation_rulesets : [];
@@ -806,6 +908,7 @@ function classifyProtectionOwnership(effective, desired = null) {
   const classes = [];
   let n6 = null;
   let conflict = false;
+  let validatedOwnershipProof = null;
   const seenRuleIds = new Set();
   const scopedRules = [
     ...rulesets.map((rule) => ({ rule, scope: 'repository' })),
@@ -841,14 +944,26 @@ function classifyProtectionOwnership(effective, desired = null) {
     }
   }
   if (conflict) return failure('ownership_ambiguous', { ownership_class: 'overlapping-conflicting', n6_rule: n6 });
+  if (n6) {
+    validatedOwnershipProof = validateOwnershipProof(ownershipProof, effective, desired, consent, requirePrestate);
+    if (!validatedOwnershipProof.ok) return validatedOwnershipProof;
+  }
   const ownershipClass = n6 ? 'N6-owned' : classes.includes('organisation-managed') ? 'organisation-managed' : classes.includes('owner-managed') ? 'owner-managed' : classes.includes('unknown') ? 'unknown' : classes.includes('overlapping-compatible') ? 'overlapping-compatible' : 'none';
-  return success({ ownership_class: ownershipClass, ownership_classes: [...new Set(classes)], n6_rule: n6 });
+  return success({ ownership_class: ownershipClass, ownership_classes: [...new Set(classes)], n6_rule: n6, ownership_proof: n6 ? clone(validatedOwnershipProof.ownership_proof) : null });
 }
 
 function protectionDelta(desired, current) {
   const delta = {};
   for (const key of ['target', 'branch', 'enforcement', 'required_contexts']) {
     if (canonicalSerialize(desired.ruleset[key]) !== canonicalSerialize(current[key])) delta[key] = clone(desired.ruleset[key]);
+  }
+  return delta;
+}
+
+function rollbackDelta(current, preMutation) {
+  const delta = {};
+  for (const key of ['target', 'branch', 'enforcement', 'required_contexts']) {
+    if (canonicalSerialize(current[key]) !== canonicalSerialize(preMutation[key])) delta[key] = clone(preMutation[key]);
   }
   return delta;
 }
@@ -887,6 +1002,18 @@ function validateProtectionConsent(consent, repositoryId, registryRevision = nul
   return success({ consent: clone(consent), registry_revision: result.registry_revision });
 }
 
+function validateProtectionConsentAuthority(authority, repositoryId) {
+  const keys = ['authority', 'status', 'repository_id', 'canonical_remote', 'registry_revision', 'snapshot_hash', 'capability', 'reason_code'];
+  if (!exactKeys(authority, keys) || authority.authority !== capabilityRegistry.PROTECTION_CONSENT_AUTHORITY
+    || authority.status !== 'enabled' || authority.repository_id !== repositoryId
+    || !isSafeText(authority.canonical_remote, 512) || !Number.isSafeInteger(authority.registry_revision)
+    || authority.registry_revision < 1 || !isDigest(authority.snapshot_hash) || authority.reason_code !== null
+    || !isRecord(authority.capability)) return failure('consent_missing');
+  const validated = validateProtectionConsent(authority.capability, repositoryId, authority.registry_revision);
+  if (!validated.ok) return validated;
+  return success({ consent: clone(authority), registry_revision: authority.registry_revision });
+}
+
 function readProtectionConsent(registryOptions, repositoryId) {
   if (!isSafeText(repositoryId, 256)) return failure('identity_mismatch');
   const options = isRecord(registryOptions) ? registryOptions : { cwd: process.cwd() };
@@ -905,17 +1032,21 @@ function readProtectionConsent(registryOptions, repositoryId) {
   if (authority.status !== 'enabled' || !isDigest(authority.snapshot_hash)
     || !Number.isSafeInteger(authority.registry_revision) || authority.registry_revision < 1
     || !isRecord(authority.capability)) return failure('consent_missing');
-  const validated = validateProtectionConsent(authority.capability, repositoryId, authority.registry_revision);
-  if (!validated.ok) return validated;
-  return success({ consent: clone(authority), registry_revision: authority.registry_revision });
+  return validateProtectionConsentAuthority(authority, repositoryId);
 }
 
-function reconcileProtection(input = {}) {
+function readCanonicalProtectionConsent(repositoryId) {
+  return readProtectionConsent({ cwd: process.cwd() }, repositoryId);
+}
+
+function reconcileProtectionInternal(input = {}, registryOptions = null) {
   const phase = input.phase || 'preview';
   if (!['inspect', 'canonicalize', 'fingerprint', 'compare', 'classify', 'preview', 'apply-plan', 'readback-verify', 'rollback-preview', 'rollback-plan'].includes(phase)) return failure('identity_mismatch');
   if (Object.prototype.hasOwnProperty.call(input, 'consent')
     || Object.prototype.hasOwnProperty.call(input, 'capability_status')) return failure('consent_missing');
-  const consentResult = readProtectionConsent(input.capability_registry_options, input.repository_id);
+  const consentResult = registryOptions === null
+    ? readCanonicalProtectionConsent(input.repository_id)
+    : readProtectionConsent(registryOptions, input.repository_id);
   if (!consentResult.ok) return consentResult;
   const consent = consentResult.consent;
   const publisherResult = activePublisher(input.publishers || (input.publisher ? [input.publisher] : []), { integration_id: input.expected_integration_id });
@@ -934,14 +1065,28 @@ function reconcileProtection(input = {}) {
   if (effectiveResult.effective.repository_id !== desiredResult.projection.repository_id) return failure('identity_mismatch');
   if (effectiveResult.effective.entitlement.status === 'unsupported') return failure('entitlement_unsupported');
   if (effectiveResult.effective.entitlement.status === 'unreadable') return failure('protection_unreadable');
-  const ownership = classifyProtectionOwnership(effectiveResult.effective, desiredResult.projection);
+  const ownership = classifyProtectionOwnership(
+    effectiveResult.effective,
+    desiredResult.projection,
+    input.ownership_proof,
+    consent,
+    phase === 'rollback-preview' || phase === 'rollback-plan',
+  );
   if (!ownership.ok) return ownership;
   if (ownership.ownership_class === 'unknown' || ownership.ownership_class === 'owner-managed' || ownership.ownership_class === 'overlapping-conflicting'
     || ownership.ownership_classes?.includes('owner-managed')) return failure('ownership_ambiguous');
   if (phase === 'inspect' || phase === 'canonicalize' || phase === 'fingerprint' || phase === 'classify') return success({ phase, desired: desiredResult.projection, effective: effectiveResult.effective, ownership: ownership.ownership_class, fingerprint: effectiveResult.fingerprint });
   if (phase === 'rollback-preview' || phase === 'rollback-plan') {
     if (!ownership.n6_rule || ownership.ownership_class !== 'N6-owned' || input.owner_changed === true || input.organisation_changed === true) return failure('rollback_unsafe');
-    return success({ phase, action: 'rollback-n6-owned-delta-only', status: 'PLAN', delta: clone(input.rollback_delta || {}) });
+    const preMutation = ownership.ownership_proof?.pre_mutation;
+    if (!preMutation) return failure('rollback_unsafe');
+    return success({
+      phase,
+      action: 'rollback-n6-owned-delta-only',
+      status: 'PLAN',
+      delta: rollbackDelta(ownership.n6_rule, preMutation.rule),
+      prestate_fingerprint: preMutation.effective_fingerprint,
+    });
   }
   const n6Rule = ownership.n6_rule;
   if (n6Rule && ownership.ownership_class === 'N6-owned') {
@@ -978,6 +1123,18 @@ function reconcileProtection(input = {}) {
   return phase === 'apply-plan' ? failure('live_mutation_forbidden') : success({ phase, status: 'PLAN', action: 'create-ruleset', delta: desiredResult.projection.ruleset, binding: binding.binding, ownership: ownership.ownership_class });
 }
 
+function reconcileProtection(input = {}) {
+  if (Object.prototype.hasOwnProperty.call(input, 'capability_registry_options')) return failure('consent_missing');
+  return reconcileProtectionInternal(input, null);
+}
+
+function reconcileProtectionForTest(input = {}, registryOptions = null) {
+  if (!isRecord(registryOptions) || registryOptions.testOnly !== true) return failure('consent_missing');
+  const testInput = { ...input };
+  delete testInput.capability_registry_options;
+  return reconcileProtectionInternal(testInput, registryOptions);
+}
+
 module.exports = {
   CONTRACT_VERSION,
   EVIDENCE_SCHEMA,
@@ -988,6 +1145,9 @@ module.exports = {
   EXTERNAL_ID_PREFIX,
   MODES,
   ACTIVE_BASELINE_MODE,
+  OWNERSHIP_PROOF_SCHEMA,
+  OWNERSHIP_PROOF_AUTHORITY,
+  EVIDENCE_CONTRACT_DIGEST,
   GATE_STATES,
   ERROR_CODES,
   COMPONENT_DEFINITIONS,
@@ -1016,9 +1176,14 @@ module.exports = {
   desiredProtectionProjection,
   validateDesiredProtectionProjection,
   validateProtectionConsent,
+  validateProtectionConsentAuthority,
   readProtectionConsent,
+  readCanonicalProtectionConsent,
   canonicalizeEffectiveProtection,
   classifyProtectionOwnership,
+  buildOwnershipProof,
+  validateOwnershipProof,
   buildMutationBinding,
   reconcileProtection,
+  reconcileProtectionForTest,
 };
