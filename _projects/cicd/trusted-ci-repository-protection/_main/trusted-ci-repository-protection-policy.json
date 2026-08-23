@@ -19,6 +19,18 @@
     "base_movement": "stale",
     "merge_movement": "stale"
   },
+  "diagnostic_workflow": {
+    "workflow_name": "N6 CI diagnostics",
+    "job_id": "n6-ci-diagnostics",
+    "job_name": "N6 CI diagnostics",
+    "reserved_publisher_context": "CI Gate",
+    "diagnostic_only": true,
+    "candidate_code_execution": false,
+    "candidate_evidence_authority": false,
+    "required_finality": false,
+    "check_run_publication": false,
+    "commit_status_publication": false
+  },
   "evidence": {
     "schema": "toolkit.n6.ci-server-evidence.v1",
     "producer": "github-actions-server",

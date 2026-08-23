@@ -102,6 +102,18 @@ test('workflow boundary rejects third-party actions and write-capable shell muta
   assert.equal(workflow.validateWorkflowSource(source.replace('git diff --check', 'git push origin main')).code, 'WORKFLOW_CANDIDATE_CODE');
 });
 
+test('diagnostic workflow cannot claim the reserved CI Gate name or finality surface', () => {
+  const source = workflow.buildProtectedWorkflowTemplate();
+  assert.equal(workflow.validateWorkflowSource(source).ok, true);
+  assert.equal(workflow.validateWorkflowSource(source.replace('name: N6 CI diagnostics', 'name: CI Gate')).code, 'WORKFLOW_RESERVED_CONTEXT');
+  assert.equal(workflow.validateWorkflowSource(source.replace('    name: N6 CI diagnostics', '    name: CI Gate')).code, 'WORKFLOW_RESERVED_CONTEXT');
+  assert.equal(workflow.validateGateInvocation({}).code, 'WORKFLOW_NON_AUTHORITATIVE');
+  assert.equal(workflow.validateWorkflowContract({
+    ...JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'protected-ci-gate-workflow-contract.json'), 'utf8')),
+    check_run_publication: true,
+  }).ok, false);
+});
+
 test('protection boundary requires canonical A2 consent and blocks unreadable entitlement', (t) => {
   const unresolved = registryOptions(t);
   const enabled = registryOptions(t, 'enable');

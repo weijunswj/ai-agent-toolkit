@@ -5,7 +5,10 @@ const protection = require('./toolkit-trusted-ci-repository-protection.cjs');
 
 const CONTRACT_VERSION = 'toolkit.n6.protected-ci-gate-workflow.v1';
 const WORKFLOW_ID = 'n6-protected-ci-gate';
-const WORKFLOW_NAME = 'CI Gate';
+const WORKFLOW_NAME = 'N6 CI diagnostics';
+const DIAGNOSTIC_JOB_ID = 'n6-ci-diagnostics';
+const DIAGNOSTIC_JOB_NAME = 'N6 CI diagnostics';
+const RESERVED_PUBLISHER_CONTEXT = protection.GATE_CONTEXT;
 const BASE_REF = 'refs/heads/main';
 const ALLOWED_TRIGGERS = Object.freeze(['pull_request_target', 'merge_group']);
 const REQUIRED_PERMISSIONS = Object.freeze({ contents: 'read', actions: 'read', checks: 'read' });
@@ -45,6 +48,7 @@ const FAILURE_CODES = Object.freeze([
   'WORKFLOW_ACTION_FORBIDDEN',
   'WORKFLOW_IDENTITY_MISMATCH',
   'WORKFLOW_BASE_MISMATCH',
+  'WORKFLOW_RESERVED_CONTEXT',
   'WORKFLOW_NON_AUTHORITATIVE',
   'WORKFLOW_EVIDENCE_INVALID',
   'WORKFLOW_COVERAGE_INVALID',
@@ -110,11 +114,13 @@ function triggerKeys(source) {
 function validateWorkflowSource(source) {
   if (!isSafeSourceText(source)) return failure('WORKFLOW_INVALID');
   const normalized = source.replace(/\r\n/g, '\n');
-  if (!/^name:\s*CI Gate\s*$/m.test(normalized)
+  if (/^\s*(?:name|run-name):\s*CI Gate\s*$/m.test(normalized)
+    || /^\s{4}name:\s*CI Gate\s*$/m.test(normalized)) return failure('WORKFLOW_RESERVED_CONTEXT', { context: RESERVED_PUBLISHER_CONTEXT });
+  if (!/^name:\s*N6 CI diagnostics\s*$/m.test(normalized)
     || !/^on:\s*$/m.test(normalized)
     || !/^permissions:\s*$/m.test(normalized)
     || !/^jobs:\s*$/m.test(normalized)
-    || !/^\s{2}ci-gate:\s*$/m.test(normalized)) return failure('WORKFLOW_INVALID');
+    || !/^\s{2}n6-ci-diagnostics:\s*$/m.test(normalized)) return failure('WORKFLOW_INVALID');
 
   const triggers = triggerKeys(normalized);
   if (triggers.length === 0 || triggers.some((trigger) => !ALLOWED_TRIGGERS.includes(trigger))) return failure('WORKFLOW_TRIGGER_FORBIDDEN', { triggers });
@@ -138,32 +144,51 @@ function validateWorkflowSource(source) {
   if (actions.length !== ALLOWED_ACTIONS.length || actions[0] !== ALLOWED_ACTIONS[0]) return failure('WORKFLOW_ACTION_FORBIDDEN', { actions });
   if (!/^\s{10}persist-credentials:\s*false\s*$/m.test(normalized)) return failure('WORKFLOW_CANDIDATE_CODE');
   if (!/^\s{10}ref:\s*\$\{\{\s*github\.event\.repository\.default_branch\s*\}\}\s*$/m.test(normalized)) return failure('WORKFLOW_BASE_MISMATCH');
-  if (!/^\s{2}ci-gate:\s*\n(?:.*\n)*?\s{4}name:\s*CI Gate\s*$/m.test(normalized)
+  if (!/^\s{2}n6-ci-diagnostics:\s*\n(?:.*\n)*?\s{4}name:\s*N6 CI diagnostics\s*$/m.test(normalized)
     || !/^\s{4}runs-on:\s*[A-Za-z0-9_.-]+\s*$/m.test(normalized)
     || !/^\s{4}steps:\s*$/m.test(normalized)) return failure('WORKFLOW_INVALID');
   if (!/^\s{6}- name:\s*Validate protected workflow contract\s*$/m.test(normalized)
     || !/^\s{6}- name:\s*Check repository diff hygiene\s*$/m.test(normalized)
     || !/git diff --check/.test(normalized)
     || !/toolkit-trusted-ci-repository-protection-workflow\.cjs --validate-source/.test(normalized)) return failure('WORKFLOW_INVALID');
-  return success({ source: normalized, triggers, actions, diagnostic_only: true });
+  return success({
+    source: normalized,
+    triggers,
+    actions,
+    diagnostic_only: true,
+    candidate_evidence_authority: false,
+    required_finality: false,
+    check_run_publication: false,
+    commit_status_publication: false,
+  });
 }
 
 function validateWorkflowContract(contract) {
-  const keys = ['contract_version', 'workflow_id', 'workflow_name', 'base_ref', 'allowed_triggers', 'forbidden_triggers', 'candidate_code_execution', 'permissions', 'publisher', 'actions', 'checkout', 'required_steps', 'diagnostic_only', 'secrets', 'statuses'];
+  const keys = ['contract_version', 'workflow_id', 'workflow_name', 'job_id', 'job_name', 'base_ref', 'allowed_triggers', 'forbidden_triggers', 'candidate_code_execution', 'permissions', 'publisher', 'actions', 'checkout', 'required_steps', 'diagnostic_only', 'candidate_evidence_authority', 'required_finality', 'check_run_publication', 'commit_status_publication', 'secrets', 'statuses'];
   if (!exactKeys(contract, keys)
     || contract.contract_version !== CONTRACT_VERSION
     || contract.workflow_id !== WORKFLOW_ID
     || contract.workflow_name !== WORKFLOW_NAME
+    || contract.job_id !== DIAGNOSTIC_JOB_ID
+    || contract.job_name !== DIAGNOSTIC_JOB_NAME
     || contract.base_ref !== BASE_REF
     || !Array.isArray(contract.allowed_triggers)
     || !Array.isArray(contract.forbidden_triggers)
     || contract.candidate_code_execution !== false
     || contract.diagnostic_only !== true
+    || contract.candidate_evidence_authority !== false
+    || contract.required_finality !== false
+    || contract.check_run_publication !== false
+    || contract.commit_status_publication !== false
     || !isRecord(contract.permissions)
     || !exactKeys(contract.permissions, Object.keys(REQUIRED_PERMISSIONS))
     || !isRecord(contract.publisher)
     || contract.publisher.protocol_version !== protection.PUBLISHER_PROTOCOL_VERSION
-    || contract.publisher.context !== protection.GATE_CONTEXT
+    || !exactKeys(contract.publisher, ['protocol_version', 'context', 'reference_only', 'check_run_publication', 'commit_status_publication'])
+    || contract.publisher.context !== RESERVED_PUBLISHER_CONTEXT
+    || contract.publisher.reference_only !== true
+    || contract.publisher.check_run_publication !== false
+    || contract.publisher.commit_status_publication !== false
     || !Array.isArray(contract.actions) || contract.actions.length !== 1 || contract.actions[0] !== ALLOWED_ACTIONS[0]
     || !exactKeys(contract.checkout, ['ref', 'persist_credentials', 'candidate_head_checkout'])
     || contract.checkout.ref !== 'github.event.repository.default_branch' || contract.checkout.persist_credentials !== false || contract.checkout.candidate_head_checkout !== false
@@ -173,7 +198,14 @@ function validateWorkflowContract(contract) {
   if (contract.allowed_triggers.some((trigger) => !ALLOWED_TRIGGERS.includes(trigger))
     || contract.forbidden_triggers.some((trigger) => !FORBIDDEN_TRIGGERS.includes(trigger))) return failure('WORKFLOW_TRIGGER_FORBIDDEN');
   for (const [permission, level] of Object.entries(REQUIRED_PERMISSIONS)) if (contract.permissions[permission] !== level) return failure('WORKFLOW_PERMISSION_FORBIDDEN');
-  return success({ contract: clone(contract), diagnostic_only: true });
+  return success({
+    contract: clone(contract),
+    diagnostic_only: true,
+    candidate_evidence_authority: false,
+    required_finality: false,
+    check_run_publication: false,
+    commit_status_publication: false,
+  });
 }
 
 function workflowIdentity(input) {
@@ -183,7 +215,18 @@ function workflowIdentity(input) {
   if (!validated.ok) return validated;
   const sourceSha = sha1(validated.source);
   if (typeof input === 'object' && input.source_sha !== undefined && input.source_sha !== sourceSha) return failure('WORKFLOW_SOURCE_UNTRUSTED');
-  return success({ identity: WORKFLOW_ID, source_sha: sourceSha, base_ref: BASE_REF, candidate_owned: false, triggers: validated.triggers, diagnostic_only: true });
+  return success({
+    identity: WORKFLOW_ID,
+    source_sha: sourceSha,
+    base_ref: BASE_REF,
+    candidate_owned: false,
+    triggers: validated.triggers,
+    diagnostic_only: true,
+    candidate_evidence_authority: false,
+    required_finality: false,
+    check_run_publication: false,
+    commit_status_publication: false,
+  });
 }
 
 function validateProtectedWorkflow(input) {
@@ -198,8 +241,8 @@ function validateProtectedWorkflow(input) {
 
 function buildProtectedWorkflowTemplate() {
   return [
-    'name: CI Gate',
-    'run-name: CI Gate ${{ github.event.pull_request.number || github.run_id }}',
+    'name: N6 CI diagnostics',
+    'run-name: N6 CI diagnostics ${{ github.event.pull_request.number || github.run_id }}',
     'on:',
     '  pull_request_target:',
     '    types: [opened, synchronize, reopened]',
@@ -209,8 +252,8 @@ function buildProtectedWorkflowTemplate() {
     '  actions: read',
     '  checks: read',
     'jobs:',
-    '  ci-gate:',
-    '    name: CI Gate',
+    '  n6-ci-diagnostics:',
+    '    name: N6 CI diagnostics',
     '    runs-on: ubuntu-latest',
     '    steps:',
     '      - name: Checkout protected base',
@@ -263,6 +306,9 @@ module.exports = Object.freeze({
   CONTRACT_VERSION,
   WORKFLOW_ID,
   WORKFLOW_NAME,
+  DIAGNOSTIC_JOB_ID,
+  DIAGNOSTIC_JOB_NAME,
+  RESERVED_PUBLISHER_CONTEXT,
   BASE_REF,
   ALLOWED_TRIGGERS,
   REQUIRED_PERMISSIONS,

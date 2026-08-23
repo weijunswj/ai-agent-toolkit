@@ -270,6 +270,18 @@ test('N6 source contracts remain aligned with the dependency-free runtimes', () 
   assert.equal(contractSchema.properties.evidence.properties.schema.const, runtime.SERVER_EVIDENCE_SCHEMA);
   assert.equal(policy.contract_version, runtime.CONTRACT_VERSION);
   assert.deepEqual(policy.modes, runtime.MODES);
+  assert.deepEqual(policy.diagnostic_workflow, {
+    workflow_name: workflow.WORKFLOW_NAME,
+    job_id: workflow.DIAGNOSTIC_JOB_ID,
+    job_name: workflow.DIAGNOSTIC_JOB_NAME,
+    reserved_publisher_context: workflow.RESERVED_PUBLISHER_CONTEXT,
+    diagnostic_only: true,
+    candidate_code_execution: false,
+    candidate_evidence_authority: false,
+    required_finality: false,
+    check_run_publication: false,
+    commit_status_publication: false,
+  });
   assert.equal(policy.evidence.schema, runtime.SERVER_EVIDENCE_SCHEMA);
   assert.deepEqual(policy.publisher.permissions, publisher.permissions);
   assert.deepEqual(policy.publisher.operations, publisher.operations);
@@ -281,6 +293,30 @@ test('N6 source contracts remain aligned with the dependency-free runtimes', () 
   assert.equal(contractSchema.properties.publisher.properties.permissions.const.statuses, 'write');
   assert.equal(contractSchema.properties.publisher.properties.operations.const.commit_status_publication, false);
   assert.equal(workflow.validateWorkflowContract(workflowContract).ok, true);
+});
+
+test('diagnostic workflow and job names isolate the reserved CI Gate publisher context', () => {
+  const source = workflow.buildProtectedWorkflowTemplate();
+  assert.equal(workflow.WORKFLOW_NAME, 'N6 CI diagnostics');
+  assert.equal(workflow.DIAGNOSTIC_JOB_NAME, 'N6 CI diagnostics');
+  assert.equal(workflow.validateWorkflowSource(source).ok, true);
+  assert.equal(workflow.validateWorkflowContract(workflowContract).ok, true);
+  assert.equal(runtime.GATE_CONTEXT, 'CI Gate');
+  assert.equal(publisherProtocol.context, 'CI Gate');
+  assert.equal(runtime.validatePublisher(publisher).ok, true);
+  assert.equal(workflowContract.publisher.reference_only, true);
+  assert.equal(workflowContract.publisher.check_run_publication, false);
+  assert.equal(workflowContract.publisher.commit_status_publication, false);
+  assert.equal(workflowContract.required_finality, false);
+  assert.equal(workflowContract.check_run_publication, false);
+  assert.equal(workflowContract.commit_status_publication, false);
+
+  const workflowNameCollision = source.replace('name: N6 CI diagnostics', 'name: CI Gate');
+  assert.equal(workflow.validateWorkflowSource(workflowNameCollision).code, 'WORKFLOW_RESERVED_CONTEXT');
+  const jobNameCollision = source.replace('    name: N6 CI diagnostics', '    name: CI Gate');
+  assert.equal(workflow.validateWorkflowSource(jobNameCollision).code, 'WORKFLOW_RESERVED_CONTEXT');
+  assert.equal(workflow.validateWorkflowContract({ ...workflowContract, workflow_name: 'CI Gate' }).ok, false);
+  assert.equal(workflow.validateWorkflowContract({ ...workflowContract, job_name: 'CI Gate' }).ok, false);
 });
 
 test('protected workflow source is exact, base-owned, and source-only', () => {

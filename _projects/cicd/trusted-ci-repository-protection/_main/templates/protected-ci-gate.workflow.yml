@@ -1,5 +1,5 @@
-name: CI Gate
-run-name: CI Gate ${{ github.event.pull_request.number || github.run_id }}
+name: N6 CI diagnostics
+run-name: N6 CI diagnostics ${{ github.event.pull_request.number || github.run_id }}
 on:
   pull_request_target:
     types: [opened, synchronize, reopened]
@@ -9,8 +9,8 @@ permissions:
   actions: read
   checks: read
 jobs:
-  ci-gate:
-    name: CI Gate
+  n6-ci-diagnostics:
+    name: N6 CI diagnostics
     runs-on: ubuntu-latest
     steps:
       - name: Checkout protected base
