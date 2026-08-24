@@ -1,0 +1,41 @@
+{
+  "protocol_version": "toolkit.n6.app-publisher.v1",
+  "context": "CI Gate",
+  "kind": "github-app",
+  "app_id": 123456,
+  "source": "trusted-protected-workflow",
+  "permissions": {
+    "checks": "write",
+    "statuses": "write",
+    "metadata": "read",
+    "contents": "read",
+    "pull_requests": "read",
+    "actions": "read",
+    "administration": "none",
+    "deployments": "none",
+    "secrets": "none",
+    "issues": "none",
+    "reviews": "none",
+    "members": "none",
+    "packages": "none",
+    "webhooks": "none"
+  },
+  "operations": {
+    "check_run_publication": true,
+    "expected_source_enrolment": true,
+    "commit_status_publication": false,
+    "status_endpoint_publication": false
+  },
+  "publication": {
+    "object": "check_run",
+    "status": "completed",
+    "conclusions": ["success", "failure", "cancelled", "timed-out", "neutral"],
+    "context": "CI Gate",
+    "external_id": "n6-ci-gate-v1:<canonical-identity-digest>",
+    "commit_status": false,
+    "status_endpoint": false,
+    "check_run_readback_app_field": "app.id",
+    "idempotency": "same-external-id-must-read-back-identically"
+  },
+  "forbidden": ["counterfeit_publisher", "commit_status_publication", "status_endpoint_publication", "administration", "deployments", "secrets", "review_mutation", "ruleset_mutation"]
+}

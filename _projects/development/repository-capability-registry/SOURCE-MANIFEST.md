@@ -2,10 +2,12 @@
 
 ## Preserved in _main/
 
-- repository-capability-contract.schema.json - closed bounded external
-  registry shape, privacy-safe receipt shape, and two-capability limit.
+- repository-capability-contract.schema.json - closed bounded v2 registry
+  shape, version-dispatched receipt union, migration metadata, and three-
+  capability limit.
 - repository-capability-policy.json - authority-relevant capability effects,
-  transitions, quiet-entry invariants, and storage limits.
+  protection subscopes, transitions, migration invariants, quiet-entry
+  invariants, and storage limits.
 
 These are first-party source files authored for the accepted A2 Lock
 DL-AGENT-NATIVE-LOOP-MVP-001-A2-CAPREG-QE-R1. No third-party source is copied
@@ -16,8 +18,9 @@ or adapted.
 - repo/scripts/toolkit-capability-registry.cjs reuses A1's exported
   validateRemoteIdentity() and remote contract version. It performs bounded
   local Git reads only, persists only an opaque repository digest, validates
-  the closed registry before use, and provides an exclusive token-owned
-  atomic writer.
+  the closed v2 registry before use, dispatches the frozen v1 validator,
+  performs deterministic local migration, and provides an exclusive
+  token-owned atomic writer.
 - repo/tests/toolkit-capability-registry.test.cjs covers capability
   independence, explicit owner transitions, identity/reclone binding,
   privacy, and source/runtime contract alignment.
@@ -27,6 +30,9 @@ or adapted.
 - repo/tests/toolkit-capability-registry.quiet-entry.test.cjs covers
   combined question fan-in, scoped setup/reopen, silent healthy entry, and
   zero-call instrumentation.
+- repo/tests/toolkit-capability-registry.migration.test.cjs covers legacy
+  receipt preservation, revision/snapshot migration semantics, protection
+  unresolved state, interruption, concurrency, and rollback guards.
 
 ## Scope boundary
 

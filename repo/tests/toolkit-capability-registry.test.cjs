@@ -97,23 +97,55 @@ test('A2 source/runtime contracts are closed and reuse the accepted A1 remote co
   const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
 
   assert.equal(runtime.REMOTE_IDENTITY_CONTRACT_VERSION, a1.REMOTE_IDENTITY_CONTRACT_VERSION);
-  assert.deepEqual(runtime.CAPABILITIES, ['repository.governance', 'execution_loop']);
+  assert.deepEqual(runtime.CAPABILITIES, ['repository.governance', 'execution_loop', 'repository.protection']);
   assert.deepEqual(policy.capabilities.map((entry) => entry.id), runtime.CAPABILITIES);
   for (const policyCapability of policy.capabilities) {
     const runtimeCapability = runtime.CONTRACT_SEMANTICS.capabilities[policyCapability.id];
-    assert.deepEqual(runtimeCapability, {
+    const expected = {
       effect_id: policyCapability.effect_id,
       boundary_id: policyCapability.boundary_id,
       question_id: policyCapability.question_id,
       choice_semantic_ids: policyCapability.choice_semantic_ids,
       decision_semantic_ids: policyCapability.decision_semantic_ids,
-    });
+    };
+    if (policyCapability.scopes) expected.scopes = policyCapability.scopes;
+    assert.deepEqual(runtimeCapability, expected);
   }
   assert.deepEqual([...policy.transitions].sort(), [...runtime.CONTRACT_SEMANTICS.transitions].sort());
   assert.deepEqual(schema.properties.repositories.maxItems, runtime.MAX_REPOSITORIES);
   assert.equal(runtime.CAPABILITIES.includes('codex_review'), false);
   assert.equal(runtime.contractDigest(), runtime.CONTRACT_DIGEST);
   assert.equal(typeof ctx.registryPath, 'string');
+});
+
+test('A2 protection consent authority reads the complete current canonical entry and snapshot', (t) => {
+  const ctx = sandbox();
+  t.after(() => cleanup(ctx));
+
+  const unresolved = runtime.getRepositoryProtectionConsent(callOptions(ctx));
+  assert.equal(unresolved.authority, runtime.PROTECTION_CONSENT_AUTHORITY);
+  assert.equal(unresolved.status, 'unresolved');
+  assert.equal(unresolved.capability, null);
+  assert.equal(unresolved.repository_id, runtime.resolveRepositoryIdentity(callOptions(ctx)).repository_id);
+
+  decision(ctx, 'repository.protection', 'enable');
+  const enabled = runtime.getRepositoryProtectionConsent(callOptions(ctx));
+  const current = status(ctx);
+  const registry = JSON.parse(fs.readFileSync(ctx.registryPath, 'utf8'));
+  const stored = registry.repositories[0].capabilities.find((entry) => entry.capability_id === 'repository.protection');
+  assert.equal(enabled.status, 'enabled');
+  assert.equal(enabled.registry_revision, current.registry_revision);
+  assert.equal(enabled.snapshot_hash, current.snapshot_hash);
+  assert.deepEqual(enabled.capability, stored);
+  assert.equal(runtime.validateProtectionCapability(enabled.capability, enabled.repository_id, enabled.registry_revision).ok, true);
+
+  decision(ctx, 'repository.protection', 'disable');
+  const disabled = runtime.getRepositoryProtectionConsent(callOptions(ctx));
+  assert.equal(disabled.status, 'disabled');
+  assert.notEqual(disabled.snapshot_hash, enabled.snapshot_hash);
+  assert.equal(disabled.registry_revision, enabled.registry_revision + 1);
+  assert.equal(disabled.capability.decision_kind, 'disable');
+  assert.equal(disabled.capability.receipt.registry_revision, disabled.registry_revision);
 });
 
 test('global installation and detection never grant either capability', (t) => {
@@ -127,8 +159,9 @@ test('global installation and detection never grant either capability', (t) => {
   }));
 
   assert.equal(result.status, 'unresolved');
-  assert.deepEqual(result.question_bank.questions.map((question) => question.capability_id), runtime.CAPABILITIES);
-  assert.equal(result.question_bank.questions.some((question) => question.capability_id === 'codex_review'), false);
+  assert.deepEqual(result.question_bank.questions.map((question) => question.capability_id), ['repository.governance', 'execution_loop']);
+  assert.equal(result.capabilities['repository.protection'].state, 'unresolved');
+  assert.equal(result.question_bank.questions.some((question) => question.capability_id === 'repository.protection'), false);
   assert.equal(fs.existsSync(ctx.registryPath), false);
 });
 

@@ -1,0 +1,37 @@
+{
+  "schema": "toolkit.n6.effective-protection.v1",
+  "repository_id": "github.com/example/trusted-ci-fixture",
+  "default_branch": "main",
+  "rulesets": [
+    {
+      "id": 654321,
+      "name": "N6 CI Gate",
+      "target": "branch",
+      "branch": "main",
+      "enforcement": "active",
+      "required_contexts": [
+        { "context": "CI Gate", "integration_id": 123456 }
+      ],
+      "bypass_actors": []
+    }
+  ],
+  "organisation_rulesets": [],
+  "classic_branch_protection": null,
+  "actions_settings": {
+    "workflow_permissions": "read",
+    "fork_pr_approval": "required"
+  },
+  "workflows": [
+    {
+      "identity": "n6-protected-ci-gate",
+      "source_sha": "0000000000000000000000000000000000000000"
+    }
+  ],
+  "app": {
+    "app_id": 123456,
+    "status": "readable"
+  },
+  "entitlement": {
+    "status": "supported"
+  }
+}

@@ -1,0 +1,40 @@
+# Source Manifest: N6 Trusted CI Repository Protection
+
+## Preserved In `_main/`
+
+- `trusted-ci-repository-protection-contract.schema.json` - closed N6
+  evidence, publisher, gate, composition, and protection contract shape.
+- `trusted-ci-repository-protection-policy.json` - modes, state transitions,
+  ownership, least-privilege, consent, and live-action boundaries.
+- `app-publisher-protocol.json` - narrow Check Run publisher contract.
+- `candidate-producer-map.n6.json` - protected workflow, source-blob, aggregate
+  command, and server-authoritative component bindings.
+- `protected-ci-gate-workflow-contract.json` - protected base-owned workflow
+  identity and trigger contract.
+- `templates/protected-ci-gate.workflow.yml` - inactive credential-free
+  protected workflow template.
+- `fixtures/**` - non-live deterministic contract fixtures.
+
+## Runtime and Focused Validation
+
+- `repo/scripts/toolkit-trusted-ci-repository-protection.cjs` is a dependency-free
+  runtime for server evidence, source/path/run admission, state, publisher,
+  projection, ownership, and preview planning. It performs one bounded,
+  fixed-path read of canonical ownership evidence and never writes that store.
+- `repo/scripts/toolkit-trusted-ci-repository-protection-workflow.cjs` validates
+  the diagnostic-only protected workflow source. It does not execute protected
+  component commands, consume candidate evidence, or make network calls.
+- Focused tests live under `repo/tests/` and cover adversarial identity,
+  evidence, archive, publisher, workflow, ownership, consent, and compatibility
+  boundaries.
+
+## Scope Boundary
+
+This module owns the N6 trusted-CI contract and local preview logic only. It
+does not install or authenticate a GitHub App, publish Check Runs, write commit
+statuses, mutate rulesets, activate required checks, perform provider/UAT
+validation, write ownership state, perform provider/live actions, deploy, merge,
+mark Ready, or provide Web finality.
+
+This source is first-party and does not copy or adapt third-party workflow,
+provider, credential, or hosted evidence material.

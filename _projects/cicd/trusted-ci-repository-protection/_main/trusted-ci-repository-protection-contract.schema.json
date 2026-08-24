@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.n6.trusted-ci-repository-protection.v1",
+  "title": "N6 Trusted CI Repository Protection",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "modes", "evidence", "publisher", "gate", "composition", "protection", "safety"],
+  "properties": {
+    "contract_version": { "const": "toolkit.n6.trusted-ci-repository-protection.v1" },
+    "modes": {
+      "type": "array",
+      "const": ["secure-minimal-app", "secure-native", "advisory-only-unsupported"]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "identity", "producer", "components", "candidate_artifacts", "digest"],
+      "properties": {
+        "schema": { "const": "toolkit.n6.ci-server-evidence.v1" },
+        "identity": {
+          "type": "array",
+          "const": ["repository_id", "pr", "head_sha", "base_sha", "merge_sha", "workflow_id", "workflow_path", "approved_source_blob_sha", "run_id", "run_attempt", "job_id", "job_name", "step_number", "step_name", "producer_map_digest", "changed_paths_digest", "contract_digest", "generation"]
+        },
+        "producer": { "const": "github-actions-server" },
+        "components": { "type": "array", "minItems": 1, "uniqueItems": true },
+        "candidate_artifacts": { "const": "forbidden" },
+        "digest": { "const": "sha256-over-canonical-server-evidence-without-evidence_digest" }
+      }
+    },
+    "publisher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol_version", "context", "kind", "app_id", "permissions", "operations", "commit_status", "idempotency"],
+      "properties": {
+        "protocol_version": { "const": "toolkit.n6.app-publisher.v1" },
+        "context": { "const": "CI Gate" },
+        "kind": { "const": "github-app" },
+        "app_id": { "type": "integer", "minimum": 1 },
+        "permissions": { "const": { "checks": "write", "statuses": "write", "metadata": "read", "contents": "read", "pull_requests": "read", "actions": "read", "administration": "none", "deployments": "none", "secrets": "none", "issues": "none", "reviews": "none", "members": "none", "packages": "none", "webhooks": "none" } },
+        "operations": { "const": { "check_run_publication": true, "expected_source_enrolment": true, "commit_status_publication": false, "status_endpoint_publication": false } },
+        "commit_status": { "const": false },
+        "idempotency": { "const": "external_id-bound-readback" }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["context", "external_id_prefix", "states", "duplicate_policy"],
+      "properties": {
+        "context": { "const": "CI Gate" },
+        "external_id_prefix": { "const": "n6-ci-gate-v1:" },
+        "states": { "type": "array", "minItems": 1, "uniqueItems": true },
+        "duplicate_policy": { "const": "ambiguous-until-readback" }
+      }
+    },
+    "composition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "path_ownership", "candidate_declared_coverage", "non_authoritative_components", "non_ci_evidence"],
+      "properties": {
+        "schema": { "const": "toolkit.n6.ci-composition.v1" },
+        "path_ownership": { "const": "github-pull-request-files-server-evaluation" },
+        "candidate_declared_coverage": { "const": false },
+        "non_authoritative_components": { "const": ["git-diff-check"] },
+        "non_ci_evidence": { "type": "array", "uniqueItems": true }
+      }
+    },
+    "protection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["desired_schema", "effective_schema", "default_branch", "ownership", "mutation", "consent", "identity"],
+      "properties": {
+        "desired_schema": { "const": "toolkit.n6.desired-protection.v1" },
+        "effective_schema": { "const": "toolkit.n6.effective-protection.v1" },
+        "default_branch": { "const": "main" },
+        "ownership": { "const": ["N6-owned", "organisation-managed", "owner-managed", "overlapping-compatible", "unknown", "overlapping-conflicting"] },
+        "mutation": { "const": "preview-only-local-binding" },
+        "consent": { "const": "repository.protection" },
+        "identity": { "const": { "managed_key": "n6-ci-gate-v1", "provider_ruleset_id": "positive-safe-integer", "app_id": "positive-safe-integer", "check_run_app_field": "app.id" } }
+      }
+    },
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["live_provider_calls", "app_installation", "provider_uat", "finality"],
+      "properties": {
+        "live_provider_calls": { "const": false },
+        "app_installation": { "const": false },
+        "provider_uat": { "const": false },
+        "finality": { "const": false }
+      }
+    }
+  }
+}

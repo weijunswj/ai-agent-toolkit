@@ -1,0 +1,27 @@
+{
+  "kind": "github-app",
+  "app_id": 123456,
+  "permissions": {
+    "checks": "write",
+    "statuses": "write",
+    "metadata": "read",
+    "contents": "read",
+    "pull_requests": "read",
+    "actions": "read",
+    "administration": "none",
+    "deployments": "none",
+    "secrets": "none",
+    "issues": "none",
+    "reviews": "none",
+    "members": "none",
+    "packages": "none",
+    "webhooks": "none"
+  },
+  "operations": {
+    "check_run_publication": true,
+    "expected_source_enrolment": true,
+    "commit_status_publication": false,
+    "status_endpoint_publication": false
+  },
+  "source": "trusted-protected-workflow"
+}

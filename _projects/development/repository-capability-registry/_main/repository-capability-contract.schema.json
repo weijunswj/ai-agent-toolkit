@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "toolkit.repository-capability-registry.v1",
-  "title": "Toolkit Repository Capability Registry v1",
+  "$id": "toolkit.repository-capability-registry.v2",
+  "title": "Toolkit Repository Capability Registry v2",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -15,42 +15,75 @@
     "repositories"
   ],
   "properties": {
-    "schema": {
-      "const": "toolkit.repository-capability-registry.v1"
-    },
-    "schema_version": {
-      "const": 1
-    },
-    "identity_contract": {
-      "const": "toolkit.repository-identity.v1"
-    },
-    "capability_contract": {
-      "const": "toolkit.repository-capability.v1"
-    },
-    "contract_digest": {
-      "type": "string",
-      "pattern": "^[a-f0-9]{64}$"
-    },
+    "schema": { "const": "toolkit.repository-capability-registry.v2" },
+    "schema_version": { "const": 2 },
+    "identity_contract": { "const": "toolkit.repository-identity.v1" },
+    "capability_contract": { "const": "toolkit.repository-capability.v2" },
+    "contract_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "registry_revision": {
       "type": "integer",
       "minimum": 0,
       "maximum": 9007199254740991
     },
     "migration": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "state"
-      ],
-      "properties": {
-        "state": {
-          "enum": [
-            "none",
-            "in_progress",
-            "required"
-          ]
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": { "state": { "const": "none" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schema",
+            "state",
+            "algorithm",
+            "source_registry_schema",
+            "source_schema_version",
+            "source_identity_contract",
+            "source_capability_contract",
+            "source_contract_digest",
+            "source_registry_revision",
+            "source_snapshot_hash",
+            "target_registry_schema",
+            "target_schema_version",
+            "target_identity_contract",
+            "target_capability_contract",
+            "target_contract_digest",
+            "legacy_receipt_ids",
+            "legacy_receipt_digests"
+          ],
+          "properties": {
+            "schema": { "const": "toolkit.repository-capability-registry.migration.v1" },
+            "state": { "const": "completed" },
+            "algorithm": { "const": "v1-to-v2-local-atomic" },
+            "source_registry_schema": { "const": "toolkit.repository-capability-registry.v1" },
+            "source_schema_version": { "const": 1 },
+            "source_identity_contract": { "const": "toolkit.repository-identity.v1" },
+            "source_capability_contract": { "const": "toolkit.repository-capability.v1" },
+            "source_contract_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+            "source_registry_revision": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+            "source_snapshot_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+            "target_registry_schema": { "const": "toolkit.repository-capability-registry.v2" },
+            "target_schema_version": { "const": 2 },
+            "target_identity_contract": { "const": "toolkit.repository-identity.v1" },
+            "target_capability_contract": { "const": "toolkit.repository-capability.v2" },
+            "target_contract_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+            "legacy_receipt_ids": {
+              "type": "array",
+              "maxItems": 256,
+              "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+            },
+            "legacy_receipt_digests": {
+              "type": "array",
+              "maxItems": 256,
+              "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+            }
+          }
         }
-      }
+      ]
     },
     "repositories": {
       "type": "array",
@@ -58,173 +91,108 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "repository_id",
-          "capabilities"
-        ],
+        "required": ["repository_id", "capabilities"],
         "properties": {
-          "repository_id": {
-            "type": "string",
-            "pattern": "^[a-f0-9]{64}$"
-          },
+          "repository_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
           "capabilities": {
             "type": "array",
-            "maxItems": 2,
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "capability_id",
-                "state",
-                "decision_kind",
-                "provenance",
-                "receipt"
-              ],
-              "properties": {
-                "capability_id": {
-                  "enum": [
-                    "repository.governance",
-                    "execution_loop"
-                  ]
-                },
-                "state": {
-                  "enum": [
-                    "enabled",
-                    "disabled"
-                  ]
-                },
-                "decision_kind": {
-                  "enum": [
-                    "enable",
-                    "decline",
-                    "disable"
-                  ]
-                },
-                "provenance": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "category",
-                    "channel",
-                    "scope_digest"
-                  ],
-                  "properties": {
-                    "category": {
-                      "const": "explicit-owner"
-                    },
-                    "channel": {
-                      "enum": [
-                        "capability-route",
-                        "combined-bank"
-                      ]
-                    },
-                    "scope_digest": {
-                      "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
-                    }
-                  }
-                },
-                "receipt": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "receipt_id",
-                    "repository_id",
-                    "capability_id",
-                    "prior_state",
-                    "resulting_state",
-                    "decision_kind",
-                    "provenance_category",
-                    "provenance_channel",
-                    "scope_digest",
-                    "registry_schema",
-                    "identity_contract",
-                    "capability_contract",
-                    "contract_digest",
-                    "registry_revision",
-                    "outcome",
-                    "decided_at"
-                  ],
-                  "properties": {
-                    "receipt_id": {
-                      "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
-                    },
-                    "repository_id": {
-                      "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
-                    },
-                    "capability_id": {
-                      "enum": [
-                        "repository.governance",
-                        "execution_loop"
-                      ]
-                    },
-                    "prior_state": {
-                      "enum": [
-                        "unresolved",
-                        "enabled",
-                        "disabled"
-                      ]
-                    },
-                    "resulting_state": {
-                      "enum": [
-                        "enabled",
-                        "disabled"
-                      ]
-                    },
-                    "decision_kind": {
-                      "enum": [
-                        "enable",
-                        "decline",
-                        "disable"
-                      ]
-                    },
-                    "provenance_category": {
-                      "const": "explicit-owner"
-                    },
-                    "provenance_channel": {
-                      "enum": [
-                        "capability-route",
-                        "combined-bank"
-                      ]
-                    },
-                    "scope_digest": {
-                      "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
-                    },
-                    "registry_schema": {
-                      "const": "toolkit.repository-capability-registry.v1"
-                    },
-                    "identity_contract": {
-                      "const": "toolkit.repository-identity.v1"
-                    },
-                    "capability_contract": {
-                      "const": "toolkit.repository-capability.v1"
-                    },
-                    "contract_digest": {
-                      "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
-                    },
-                    "registry_revision": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 9007199254740991
-                    },
-                    "outcome": {
-                      "const": "committed"
-                    },
-                    "decided_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    }
-                  }
-                }
-              }
-            }
+            "maxItems": 3,
+            "items": { "$ref": "#/$defs/capability" }
           }
         }
       }
+    }
+  },
+  "$defs": {
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capability_id", "state", "decision_kind", "provenance", "receipt"],
+      "properties": {
+        "capability_id": {
+          "enum": ["repository.governance", "execution_loop", "repository.protection"]
+        },
+        "state": { "enum": ["enabled", "disabled"] },
+        "decision_kind": { "enum": ["enable", "decline", "disable"] },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["category", "channel", "scope_digest"],
+          "properties": {
+            "category": { "const": "explicit-owner" },
+            "channel": { "enum": ["capability-route", "combined-bank"] },
+            "scope_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+          }
+        },
+        "receipt": {
+          "oneOf": [
+            { "$ref": "#/$defs/legacyReceipt" },
+            { "$ref": "#/$defs/currentReceipt" }
+          ]
+        }
+      }
+    },
+    "receiptBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receipt_id",
+        "repository_id",
+        "capability_id",
+        "prior_state",
+        "resulting_state",
+        "decision_kind",
+        "provenance_category",
+        "provenance_channel",
+        "scope_digest",
+        "registry_schema",
+        "identity_contract",
+        "capability_contract",
+        "contract_digest",
+        "registry_revision",
+        "outcome",
+        "decided_at"
+      ],
+      "properties": {
+        "receipt_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "repository_id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "capability_id": { "type": "string" },
+        "prior_state": { "enum": ["unresolved", "enabled", "disabled"] },
+        "resulting_state": { "enum": ["enabled", "disabled"] },
+        "decision_kind": { "enum": ["enable", "decline", "disable"] },
+        "provenance_category": { "const": "explicit-owner" },
+        "provenance_channel": { "enum": ["capability-route", "combined-bank"] },
+        "scope_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "registry_schema": { "type": "string" },
+        "identity_contract": { "const": "toolkit.repository-identity.v1" },
+        "capability_contract": { "type": "string" },
+        "contract_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "registry_revision": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "outcome": { "const": "committed" },
+        "decided_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "legacyReceipt": {
+      "allOf": [
+        { "$ref": "#/$defs/receiptBase" },
+        {
+          "properties": {
+            "registry_schema": { "const": "toolkit.repository-capability-registry.v1" },
+            "capability_contract": { "const": "toolkit.repository-capability.v1" }
+          }
+        }
+      ]
+    },
+    "currentReceipt": {
+      "allOf": [
+        { "$ref": "#/$defs/receiptBase" },
+        {
+          "properties": {
+            "registry_schema": { "const": "toolkit.repository-capability-registry.v2" },
+            "capability_contract": { "const": "toolkit.repository-capability.v2" }
+          }
+        }
+      ]
     }
   }
 }
