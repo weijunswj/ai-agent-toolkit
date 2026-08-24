@@ -152,6 +152,46 @@ function consent({ repositoryId = REPOSITORY_ID, state = 'enabled', decisionKind
   };
 }
 
+function ownershipReceipt({
+  repositoryId = REPOSITORY_ID,
+  managedKey = runtime.DEFAULT_MANAGED_KEY,
+  rulesetId = effectiveFixture.rulesets[0].id,
+  appId = publisher.app_id,
+  context = runtime.GATE_CONTEXT,
+  operation = 'create-managed-ruleset',
+  a2ConsentReceiptId,
+  prestateRule = effectiveFixture.rulesets[0],
+  previousReceiptDigest = null,
+  receiptRevision = 1,
+} = {}) {
+  const rollbackPrestate = prestateRule === null ? null : {
+    effective_fingerprint: digest(effective),
+    rule: { ...prestateRule },
+    rule_digest: digest(prestateRule),
+  };
+  const receipt = {
+    schema: runtime.OWNERSHIP_RECEIPT_SCHEMA,
+    repository_id: repositoryId,
+    managed_key: managedKey,
+    ruleset_id: rulesetId,
+    app_id: appId,
+    context,
+    operation,
+    a2_consent_receipt_id: a2ConsentReceiptId || 'a'.repeat(64),
+    pre_read_fingerprint: digest(effective),
+    post_read_fingerprint: digest(effective),
+    post_rule_digest: digest(effectiveFixture.rulesets[0]),
+    rollback_prestate: rollbackPrestate,
+    rollback_prestate_digest: digest(rollbackPrestate),
+    receipt_revision: receiptRevision,
+    previous_receipt_digest: previousReceiptDigest,
+    recorded_at: '2026-08-24T00:00:00.000Z',
+    receipt_digest: '',
+  };
+  receipt.receipt_digest = digest(Object.fromEntries(Object.entries(receipt).filter(([key]) => key !== 'receipt_digest')));
+  return receipt;
+}
+
 function componentResults(manifest, overrides = {}) {
   return manifest.required_components.map((id) => ({
     id,
@@ -288,10 +328,23 @@ test('N6 source contracts remain aligned with the dependency-free runtimes', () 
   assert.equal(publisherProtocol.protocol_version, runtime.PUBLISHER_PROTOCOL_VERSION);
   assert.deepEqual(publisherProtocol.permissions, publisher.permissions);
   assert.deepEqual(publisherProtocol.operations, publisher.operations);
+  assert.equal(policy.publisher.identity.field, 'app_id');
+  assert.equal(policy.publisher.identity.coercion, false);
+  assert.equal(publisherProtocol.app_id, publisher.app_id);
   assert.equal(publisherProtocol.publication.commit_status, false);
+  assert.equal(publisherProtocol.publication.status_endpoint, false);
+  assert.equal(publisherProtocol.publication.check_run_readback_app_field, 'app.id');
   assert.equal(publisherProtocol.forbidden.includes('commit_status_publication'), true);
+  assert.equal(publisherProtocol.forbidden.includes('status_endpoint_publication'), true);
   assert.equal(contractSchema.properties.publisher.properties.permissions.const.statuses, 'write');
   assert.equal(contractSchema.properties.publisher.properties.operations.const.commit_status_publication, false);
+  assert.equal(contractSchema.properties.publisher.properties.operations.const.status_endpoint_publication, false);
+  assert.deepEqual(contractSchema.properties.protection.properties.identity.const, {
+    managed_key: runtime.DEFAULT_MANAGED_KEY,
+    provider_ruleset_id: 'positive-safe-integer',
+    app_id: 'positive-safe-integer',
+    check_run_app_field: 'app.id',
+  });
   assert.equal(workflow.validateWorkflowContract(workflowContract).ok, true);
 });
 
@@ -429,122 +482,83 @@ test('gate state transitions distinguish duplicate, stale, superseded, and uncer
   assert.equal(runtime.transitionGateState(verifying, 'publish', { identity: { ...identity, head_sha: '9'.repeat(40) }, movement: 'head' }).code, 'HEAD_MOVED');
 });
 
-test('protection consent, ownership, projections, and preview-only plans remain bounded', (t) => {
+test('provider identity, ownership receipts, and preview-only protection plans remain bounded', (t) => {
   const capabilityRegistryOptions = protectionRegistry(t);
   const publisherResult = runtime.validatePublisher(publisher);
   assert.equal(publisherResult.ok, true);
-  const desired = runtime.desiredProtectionProjection({ repository_id: REPOSITORY_ID, default_branch: 'main', integration_id: publisher.integration_id });
+  for (const appId of ['123456', 'trusted-ci-app', 0, -1, null, undefined]) {
+    const candidate = { ...publisher, app_id: appId };
+    if (appId === undefined) delete candidate.app_id;
+    assert.equal(runtime.validatePublisher(candidate).ok, false, String(appId));
+  }
+  assert.equal(runtime.validatePublisher({ ...publisher, integration_id: publisher.app_id }).ok, false);
+  assert.equal(runtime.validatePublisher({ ...publisher, app_id: publisher.app_id + 1 }).ok, true);
+  assert.equal(runtime.validateBranchProtectionRequiredCheck({ context: 'CI Gate', app_id: publisher.app_id }, { app_id: publisher.app_id }).ok, true);
+  assert.equal(runtime.validateBranchProtectionRequiredCheck({ context: 'CI Gate', app_id: String(publisher.app_id) }).ok, false);
+  assert.equal(runtime.validateRulesetRequiredCheck({ context: 'CI Gate', integration_id: publisher.app_id }, { app_id: publisher.app_id }).ok, true);
+  assert.equal(runtime.validateRulesetRequiredCheck({ context: 'CI Gate', integration_id: publisher.app_id + 1 }, { app_id: publisher.app_id }).ok, false);
+  assert.equal(runtime.validateCheckRunReadback({ name: 'CI Gate', app: { id: publisher.app_id } }, { app_id: publisher.app_id }).ok, true);
+  assert.equal(runtime.validateCheckRunReadback({ name: 'CI Gate', app: { id: String(publisher.app_id) } }, { app_id: publisher.app_id }).ok, false);
+
+  const desired = runtime.desiredProtectionProjection({ repository_id: REPOSITORY_ID, default_branch: 'main', app_id: publisher.app_id });
   assert.equal(desired.ok, true);
   assert.equal(runtime.validateDesiredProtectionProjection(desired.projection).ok, true);
+  assert.equal(desired.projection.managed_key, runtime.DEFAULT_MANAGED_KEY);
+  assert.equal(desired.projection.ruleset.name, 'N6 CI Gate');
+  assert.deepEqual(desired.projection.ruleset.required_contexts, [{ context: 'CI Gate', app_id: publisher.app_id }]);
+  assert.equal(runtime.desiredProtectionProjection({ repository_id: REPOSITORY_ID, default_branch: 'main', app_id: publisher.app_id, ruleset_id: 'n6-ci-gate-v1' }).ok, false);
   assert.equal(runtime.validateDesiredProtectionProjection({ ...desired.projection, fingerprint: '0'.repeat(64) }).code, 'IDENTITY_MISMATCH');
+  assert.equal(runtime.canonicalizeEffectiveProtection({ ...effective, rulesets: [{ ...effective.rulesets[0], id: '654321' }] }).code, 'PROTECTION_UNREADABLE');
+
   assert.equal(runtime.validateProtectionConsent({ capability_id: 'repository.protection', state: 'unresolved' }, REPOSITORY_ID).code, 'CONSENT_MISSING');
   assert.equal(runtime.validateProtectionConsent(consent({ repositoryId: 'b'.repeat(64) }), REPOSITORY_ID).code, 'IDENTITY_MISMATCH');
   assert.equal(runtime.readProtectionConsent(capabilityRegistryOptions, REPOSITORY_ID).ok, true);
   assert.equal(runtime.readProtectionConsent(capabilityRegistryOptions, 'b'.repeat(64)).code, 'IDENTITY_MISMATCH');
   const canonicalConsent = runtime.readProtectionConsent(capabilityRegistryOptions, REPOSITORY_ID).consent;
-  assert.equal(runtime.buildOwnershipProof(effective, desired.projection, canonicalConsent.capability).code, 'OWNERSHIP_AMBIGUOUS');
-  const ownershipProof = runtime.buildOwnershipProof(effective, desired.projection, canonicalConsent).ownership_proof;
+  const receipt = ownershipReceipt({ a2ConsentReceiptId: canonicalConsent.capability.receipt.receipt_id });
+  assert.equal(runtime.validateOwnershipReceipt(receipt, { repository_id: REPOSITORY_ID, app_id: publisher.app_id, ruleset_id: effective.rulesets[0].id }).ok, true);
   assert.equal(runtime.classifyProtectionOwnership(effective, desired.projection).code, 'OWNERSHIP_AMBIGUOUS');
-  assert.equal(runtime.classifyProtectionOwnership(effective, desired.projection, { ...ownershipProof, authority: 'caller' }, canonicalConsent).code, 'OWNERSHIP_AMBIGUOUS');
-  assert.equal(runtime.classifyProtectionOwnership(effective, desired.projection, { ...ownershipProof, rule_digest: '0'.repeat(64) }, canonicalConsent).code, 'OWNERSHIP_AMBIGUOUS');
-  assert.equal(runtime.reconcileProtectionForTest({
-    repository_id: REPOSITORY_ID,
-    publisher,
-    effective,
-    phase: 'rollback-plan',
-    rollback_delta: { enforcement: 'caller-controlled' },
-  }, capabilityRegistryOptions).ok, false);
-  const tamperedConsent = consent();
-  tamperedConsent.receipt.receipt_id = '0'.repeat(64);
-  assert.equal(runtime.validateProtectionConsent(tamperedConsent, REPOSITORY_ID).code, 'CONSENT_MISSING');
+  assert.equal(runtime.classifyProtectionOwnership(effective, desired.projection, receipt, { consent: canonicalConsent }).ownership_class, 'N6-owned');
+  assert.equal(runtime.validateOwnershipReceipt({ ...receipt, repository_id: 'b'.repeat(64) }).code, 'OWNERSHIP_RECEIPT_INVALID');
+  assert.equal(runtime.validateOwnershipReceipt({ ...receipt, managed_key: 'other-key' }).code, 'OWNERSHIP_RECEIPT_INVALID');
+  assert.equal(runtime.validateOwnershipReceipt({ ...receipt, ruleset_id: receipt.ruleset_id + 1 }).code, 'OWNERSHIP_RECEIPT_INVALID');
+  assert.equal(runtime.validateOwnershipReceipt({ ...receipt, app_id: receipt.app_id + 1 }).code, 'OWNERSHIP_RECEIPT_INVALID');
+  assert.equal(runtime.validateOwnershipReceipt({ ...receipt, context: 'Other Gate' }).code, 'OWNERSHIP_RECEIPT_INVALID');
+  assert.equal(runtime.validateOwnershipReceipt({ ...receipt, receipt_digest: '0'.repeat(64) }).code, 'OWNERSHIP_RECEIPT_INVALID');
 
-  const noop = runtime.reconcileProtectionForTest({
-    repository_id: REPOSITORY_ID,
-    default_branch: 'main',
-    publisher,
-    effective,
-    ownership_proof: ownershipProof,
-  }, capabilityRegistryOptions);
+  const withReceipt = { ...capabilityRegistryOptions, ownership_state: { receipt } };
+  const noop = runtime.reconcileProtectionForTest({ repository_id: REPOSITORY_ID, default_branch: 'main', publisher, effective }, withReceipt);
   assert.equal(noop.ok, true);
   assert.equal(noop.code, 'NOOP');
-  const preMutation = {
-    ...effective,
-    rulesets: [{ ...effective.rulesets[0], enforcement: 'inactive' }],
-  };
-  const rollbackProof = runtime.buildOwnershipProof(effective, desired.projection, canonicalConsent, preMutation).ownership_proof;
-  const rollback = runtime.reconcileProtectionForTest({
-    repository_id: REPOSITORY_ID,
-    publisher,
-    effective,
-    phase: 'rollback-plan',
-    ownership_proof: rollbackProof,
-    rollback_delta: { enforcement: 'caller-controlled' },
-  }, capabilityRegistryOptions);
+  assert.equal(runtime.reconcileProtectionForTest({ repository_id: REPOSITORY_ID, publisher, effective, ownership_proof: receipt }, withReceipt).code, 'OWNERSHIP_AMBIGUOUS');
+  assert.equal(runtime.reconcileProtectionForTest({ repository_id: REPOSITORY_ID, publisher, effective, ownership_receipt: receipt }, withReceipt).code, 'OWNERSHIP_AMBIGUOUS');
+
+  const preMutationRule = { ...effective.rulesets[0], enforcement: 'inactive' };
+  const rollbackReceipt = ownershipReceipt({
+    a2ConsentReceiptId: canonicalConsent.capability.receipt.receipt_id,
+    operation: 'update-managed-ruleset',
+    previousReceiptDigest: receipt.receipt_digest,
+    receiptRevision: 2,
+    prestateRule: preMutationRule,
+  });
+  const rollback = runtime.reconcileProtectionForTest({ repository_id: REPOSITORY_ID, publisher, effective, phase: 'rollback-plan', rollback_delta: { enforcement: 'caller-controlled' } }, { ...capabilityRegistryOptions, ownership_state: { receipt: rollbackReceipt } });
   assert.equal(rollback.ok, true);
   assert.deepEqual(rollback.delta, { enforcement: 'inactive' });
-  assert.equal(runtime.reconcileProtectionForTest({
-    repository_id: REPOSITORY_ID,
-    consent: consent(),
-    publisher,
-    effective,
-  }, capabilityRegistryOptions).code, 'CONSENT_MISSING');
-  assert.equal(runtime.reconcileProtectionForTest({
-    repository_id: REPOSITORY_ID,
-    capability_status: { capabilities: { 'repository.protection': consent() } },
-    publisher,
-    effective,
-  }, capabilityRegistryOptions).code, 'CONSENT_MISSING');
-  const absent = runtime.reconcileProtectionForTest({
-    repository_id: REPOSITORY_ID,
-    publisher,
-    effective: { ...effective, rulesets: [] },
-  }, capabilityRegistryOptions);
+  const drift = runtime.reconcileProtectionForTest({ repository_id: REPOSITORY_ID, publisher, effective: { ...effective, rulesets: [{ ...effective.rulesets[0], enforcement: 'inactive' }] } }, withReceipt);
+  assert.equal(drift.status, 'PLAN');
+  assert.equal(drift.action, 'update-ruleset');
+  assert.equal(drift.binding.target_digest, runtime.digestValue({ ruleset_id: effective.rulesets[0].id }));
+
+  const absent = runtime.reconcileProtectionForTest({ repository_id: REPOSITORY_ID, publisher, effective: { ...effective, rulesets: [] } }, { ...capabilityRegistryOptions, ownership_state: { receipt: null } });
   assert.equal(absent.status, 'PLAN');
   assert.equal(absent.action, 'create-ruleset');
-  assert.equal(runtime.reconcileProtectionForTest({
-    repository_id: REPOSITORY_ID,
-    publisher,
-    effective: { ...effective, rulesets: [] },
-    phase: 'apply-plan',
-  }, capabilityRegistryOptions).code, 'LIVE_MUTATION_FORBIDDEN');
-  assert.equal(runtime.reconcileProtectionForTest({
-    repository_id: REPOSITORY_ID,
-    publisher,
-    effective: {
-      ...effective,
-      rulesets: [{ ...effective.rulesets[0], id: 'owner-rule', name: 'Owner Rule', owner_class: 'unknown', required_contexts: [] }],
-    },
-  }, capabilityRegistryOptions).code, 'OWNERSHIP_AMBIGUOUS');
-  assert.equal(runtime.reconcileProtectionForTest({
-    repository_id: REPOSITORY_ID,
-    publisher,
-    effective: {
-      ...effective,
-      rulesets: [{ ...effective.rulesets[0], owner_class: 'owner-managed' }],
-    },
-  }, capabilityRegistryOptions).code, 'OWNERSHIP_AMBIGUOUS');
-  const ownerManaged = runtime.classifyProtectionOwnership({ rulesets: [{ ...effective.rulesets[0], owner_class: 'owner-managed' }] }, desired.projection);
-  assert.equal(ownerManaged.code, 'OWNERSHIP_AMBIGUOUS');
-  assert.equal(runtime.classifyProtectionOwnership({ rulesets: [{ ...effective.rulesets[0], owner_class: 'foreign-managed' }] }, desired.projection).code, 'OWNERSHIP_AMBIGUOUS');
-  assert.equal(runtime.classifyProtectionOwnership({ rulesets: [effective.rulesets[0], { ...effective.rulesets[0], name: 'duplicate' }] }, desired.projection).code, 'OWNERSHIP_AMBIGUOUS');
-  for (const ownerClass of ['N6-owned', 'organisation-managed', 'owner-managed', 'foreign-managed', 'unknown', 'overlapping-compatible']) {
-    assert.equal(runtime.classifyProtectionOwnership({
-      rulesets: [],
-      organisation_rulesets: [{ ...effective.rulesets[0], owner_class: ownerClass }],
-    }, desired.projection).code, 'OWNERSHIP_AMBIGUOUS');
-  }
-  assert.equal(runtime.classifyProtectionOwnership({
-    rulesets: [effective.rulesets[0]],
-    organisation_rulesets: [{ ...effective.rulesets[0], owner_class: 'organisation-managed' }],
-  }, desired.projection).code, 'OWNERSHIP_AMBIGUOUS');
-  const unrelatedOrganisation = { ...effective.rulesets[0], id: 'organisation-baseline', name: 'Organisation Baseline', owner_class: 'organisation-managed', required_contexts: [] };
-  const effectiveWithOrganisation = { ...effective, organisation_rulesets: [unrelatedOrganisation] };
-  const organisationProof = runtime.buildOwnershipProof(effectiveWithOrganisation, desired.projection, canonicalConsent).ownership_proof;
-  assert.equal(runtime.classifyProtectionOwnership({
-    ...effectiveWithOrganisation,
-  }, desired.projection, organisationProof, canonicalConsent).ok, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(absent.binding, 'ruleset_id'), false);
+  assert.equal(absent.binding.target_digest, runtime.digestValue({ managed_key: runtime.DEFAULT_MANAGED_KEY, name: 'N6 CI Gate' }));
+  assert.equal(runtime.reconcileProtectionForTest({ repository_id: REPOSITORY_ID, publisher, effective: { ...effective, rulesets: [] }, phase: 'apply-plan' }, { ...capabilityRegistryOptions, ownership_state: { receipt: null } }).code, 'LIVE_MUTATION_FORBIDDEN');
+  const replacement = { ...effective, rulesets: [{ ...effective.rulesets[0], id: effective.rulesets[0].id + 1 }] };
+  assert.equal(runtime.reconcileProtectionForTest({ repository_id: REPOSITORY_ID, publisher, effective: replacement }, withReceipt).code, 'OWNERSHIP_AMBIGUOUS');
+  assert.equal(runtime.reconcileProtectionForTest({ repository_id: REPOSITORY_ID, publisher, effective }, { ...capabilityRegistryOptions, ownership_state: { receipt: null } }).code, 'OWNERSHIP_AMBIGUOUS');
   assert.equal(runtime.validateProtectionConsent({ capability_id: 'repository.protection', state: 'enabled' }, REPOSITORY_ID).code, 'CONSENT_MISSING');
-  assert.equal(runtime.classifyProtectionOwnership({ rulesets: [{ name: 'protect-main', source: 'unknown' }] }).code, 'OWNERSHIP_AMBIGUOUS');
 });
 
 test('protected workflow is diagnostic-only and cannot certify composition', () => {

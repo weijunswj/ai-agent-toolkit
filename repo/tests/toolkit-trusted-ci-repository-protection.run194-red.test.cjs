@@ -21,5 +21,7 @@ test('N6 deterministic runtime and protected workflow validator exist', () => {
 test('N6 rejects counterfeit publisher and ambiguous protection ownership', () => {
   const runtime = require(runtimePath);
   assert.equal(runtime.validatePublisher({ integration_id: 'actions', publisher: 'GitHub Actions' }).ok, false);
+  assert.equal(runtime.validatePublisher({ kind: 'github-app', app_id: '123456' }).ok, false);
+  assert.equal(runtime.validatePublisher({ kind: 'github-app', app_id: 0 }).ok, false);
   assert.equal(runtime.classifyProtectionOwnership({ rulesets: [{ name: 'protect-main', source: 'unknown' }] }).code, 'OWNERSHIP_AMBIGUOUS');
 });

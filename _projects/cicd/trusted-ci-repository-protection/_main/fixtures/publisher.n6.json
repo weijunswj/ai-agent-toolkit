@@ -1,7 +1,6 @@
 {
   "kind": "github-app",
-  "integration_id": "trusted-ci-app",
-  "installation_id": "fixture-installation",
+  "app_id": 123456,
   "permissions": {
     "checks": "write",
     "statuses": "write",
@@ -21,7 +20,8 @@
   "operations": {
     "check_run_publication": true,
     "expected_source_enrolment": true,
-    "commit_status_publication": false
+    "commit_status_publication": false,
+    "status_endpoint_publication": false
   },
   "source": "trusted-protected-workflow"
 }

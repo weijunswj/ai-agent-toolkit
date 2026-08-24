@@ -30,13 +30,14 @@
     "publisher": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["protocol_version", "context", "kind", "permissions", "operations", "commit_status", "idempotency"],
+      "required": ["protocol_version", "context", "kind", "app_id", "permissions", "operations", "commit_status", "idempotency"],
       "properties": {
         "protocol_version": { "const": "toolkit.n6.app-publisher.v1" },
         "context": { "const": "CI Gate" },
         "kind": { "const": "github-app" },
+        "app_id": { "type": "integer", "minimum": 1 },
         "permissions": { "const": { "checks": "write", "statuses": "write", "metadata": "read", "contents": "read", "pull_requests": "read", "actions": "read", "administration": "none", "deployments": "none", "secrets": "none", "issues": "none", "reviews": "none", "members": "none", "packages": "none", "webhooks": "none" } },
-        "operations": { "const": { "check_run_publication": true, "expected_source_enrolment": true, "commit_status_publication": false } },
+        "operations": { "const": { "check_run_publication": true, "expected_source_enrolment": true, "commit_status_publication": false, "status_endpoint_publication": false } },
         "commit_status": { "const": false },
         "idempotency": { "const": "external_id-bound-readback" }
       }
@@ -67,14 +68,15 @@
     "protection": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["desired_schema", "effective_schema", "default_branch", "ownership", "mutation", "consent"],
+      "required": ["desired_schema", "effective_schema", "default_branch", "ownership", "mutation", "consent", "identity"],
       "properties": {
         "desired_schema": { "const": "toolkit.n6.desired-protection.v1" },
         "effective_schema": { "const": "toolkit.n6.effective-protection.v1" },
         "default_branch": { "const": "main" },
         "ownership": { "const": ["N6-owned", "organisation-managed", "owner-managed", "overlapping-compatible", "unknown", "overlapping-conflicting"] },
         "mutation": { "const": "preview-only-local-binding" },
-        "consent": { "const": "repository.protection" }
+        "consent": { "const": "repository.protection" },
+        "identity": { "const": { "managed_key": "n6-ci-gate-v1", "provider_ruleset_id": "positive-safe-integer", "app_id": "positive-safe-integer", "check_run_app_field": "app.id" } }
       }
     },
     "safety": {

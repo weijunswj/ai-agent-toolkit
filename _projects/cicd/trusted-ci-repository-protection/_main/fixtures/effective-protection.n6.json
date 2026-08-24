@@ -4,14 +4,13 @@
   "default_branch": "main",
   "rulesets": [
     {
-      "id": "n6-ci-gate-v1",
+      "id": 654321,
       "name": "N6 CI Gate",
-      "owner_class": "N6-owned",
       "target": "branch",
       "branch": "main",
       "enforcement": "active",
       "required_contexts": [
-        { "context": "CI Gate", "integration_id": "trusted-ci-app" }
+        { "context": "CI Gate", "integration_id": 123456 }
       ],
       "bypass_actors": []
     }
@@ -29,7 +28,7 @@
     }
   ],
   "app": {
-    "integration_id": "trusted-ci-app",
+    "app_id": 123456,
     "status": "readable"
   },
   "entitlement": {

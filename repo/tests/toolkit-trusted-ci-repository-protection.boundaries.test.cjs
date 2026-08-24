@@ -141,6 +141,42 @@ test('production N6 rejects caller-selected test registry authority', (t) => {
   assert.equal(result.code, 'CONSENT_MISSING');
 });
 
+test('ownership evidence uses a fixed hashed path and never creates production state', () => {
+  const repositoryId = 'f'.repeat(64);
+  const before = runtime.ownershipStorePath(repositoryId);
+  assert.equal(path.basename(before.receipt_path), runtime.OWNERSHIP_RECEIPT_BASENAME);
+  assert.match(path.basename(before.repository_directory), /^[a-f0-9]{64}$/);
+  assert.equal(before.receipt_path.includes(repositoryId), false);
+  const result = runtime.readOwnershipReceipt(repositoryId);
+  assert.equal(result.ok, true, result.code);
+  assert.equal(result.ownership_status, 'missing');
+  assert.equal(fs.existsSync(before.root), false);
+  assert.equal(runtime.readOwnershipReceipt(repositoryId, { receipt: null }).code, 'OWNERSHIP_STORE_INVALID');
+  assert.equal(runtime.reconcileProtection({ repository_id: repositoryId, ownership_path: before.receipt_path }).code, 'CONSENT_MISSING');
+});
+
+test('ownership reader rejects a symlinked fixed state root without writing through it', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-n6-ownership-root-'));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-n6-ownership-outside-'));
+  const managedRoot = path.join(root, '.ai-agent-toolkit');
+  try {
+    fs.symlinkSync(outside, managedRoot, 'junction');
+    const probe = childProcess.spawnSync(process.execPath, ['-e', [
+      "const os = require('node:os');",
+      "os.homedir = () => process.argv[1];",
+      "const runtime = require(process.argv[2]);",
+      "process.stdout.write(JSON.stringify(runtime.readOwnershipReceipt(process.argv[3])));",
+    ].join(''), root, path.join(repoRoot, 'repo', 'scripts', 'toolkit-trusted-ci-repository-protection.cjs'), 'f'.repeat(64)], { encoding: 'utf8', windowsHide: true });
+    assert.equal(probe.status, 0, probe.stderr);
+    const result = JSON.parse(probe.stdout);
+    assert.equal(result.code, 'OWNERSHIP_STORE_INVALID', probe.stdout);
+    assert.equal(fs.readdirSync(outside).length, 0);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
 test('malformed canonical A2 protection receipts and provenance fail closed in N6', (t) => {
   const receiptMismatch = registryOptions(t, 'enable');
   const receiptRegistry = JSON.parse(fs.readFileSync(receiptMismatch.registryPath, 'utf8'));
@@ -338,6 +374,51 @@ test('GitHub removed status flows from changed-path collection into canonical se
   assert.equal(validated.evidence.changed_paths.count, SERVER_PR.changed_files);
   assert.equal(validated.evidence.changed_paths.digest, paths.changed_paths.digest);
   assert.equal(validated.evidence.changed_paths.records.find((record) => record.status === 'removed').previous_path, null);
+});
+
+test('GitHub unchanged status is accepted and the complete status/rename contract is enforced', () => {
+  const unchanged = serverPathPages();
+  unchanged[0].items[0] = { ...unchanged[0].items[0], status: 'unchanged' };
+  assert.equal(runtime.validateChangedPathCollection({ pull_request: SERVER_PR, pages: unchanged }).ok, true);
+  assert.deepEqual(runtime.CHANGED_FILE_STATUSES, ['added', 'removed', 'modified', 'renamed', 'copied', 'changed', 'unchanged']);
+
+  const renamed = serverPathPages();
+  renamed[0].items[0] = {
+    filename: 'README.md',
+    status: 'renamed',
+    previous_filename: '_projects/cicd/trusted-ci-repository-protection/SOURCE-LOCK.json',
+  };
+  assert.equal(runtime.validateChangedPathCollection({ pull_request: SERVER_PR, pages: renamed }).ok, true);
+  const missingPrevious = serverPathPages();
+  missingPrevious[0].items[0] = { ...missingPrevious[0].items[0], status: 'renamed', previous_filename: null };
+  assert.equal(runtime.validateChangedPathCollection({ pull_request: SERVER_PR, pages: missingPrevious }).code, 'CHANGED_PATHS_AMBIGUOUS');
+  const extraPrevious = serverPathPages();
+  extraPrevious[0].items[0] = { ...extraPrevious[0].items[0], previous_filename: 'old.txt' };
+  assert.equal(runtime.validateChangedPathCollection({ pull_request: SERVER_PR, pages: extraPrevious }).code, 'CHANGED_PATHS_AMBIGUOUS');
+  const unknown = serverPathPages();
+  unknown[0].items[0] = { ...unknown[0].items[0], status: 'unknown' };
+  assert.equal(runtime.validateChangedPathCollection({ pull_request: SERVER_PR, pages: unknown }).code, 'PATH_INVALID');
+});
+
+test('renamed PR files compose source and destination path requirements as a set union', () => {
+  const manifest = runtime.compositionManifest([{
+    path: 'README.md',
+    status: 'renamed',
+    previous_path: '_projects/cicd/trusted-ci-repository-protection/SOURCE-LOCK.json',
+  }]);
+  assert.equal(manifest.ok, true, manifest.code);
+  assert.equal(manifest.required_components.includes('source-lock-audit'), true);
+  assert.equal(manifest.required_components.includes('project-sync'), true);
+  assert.equal(manifest.required_components.includes('repo-doc-contract'), true);
+  assert.equal(manifest.required_components.includes('fallback-risk-audit'), true);
+  assert.equal(new Set(manifest.required_components).size, manifest.required_components.length);
+  assert.deepEqual(manifest.path_coverage[0], {
+    path: 'README.md',
+    status: 'renamed',
+    previous_path: '_projects/cicd/trusted-ci-repository-protection/SOURCE-LOCK.json',
+    classes: ['project-source', 'repo-docs', 'source-lock'],
+    owners: ['fallback-risk-audit', 'project-sync', 'repo-doc-contract', 'source-lock-audit'],
+  });
 });
 
 test('unsupported deleted provider status fails closed as PATH_INVALID', () => {

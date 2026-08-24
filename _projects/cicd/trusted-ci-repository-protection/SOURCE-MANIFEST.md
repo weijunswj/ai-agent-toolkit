@@ -17,9 +17,10 @@
 
 ## Runtime and Focused Validation
 
-- `repo/scripts/toolkit-trusted-ci-repository-protection.cjs` is the
-  dependency-free pure runtime for server evidence, source/path/run admission,
-  state, publisher, projection, ownership, and preview planning.
+- `repo/scripts/toolkit-trusted-ci-repository-protection.cjs` is a dependency-free
+  runtime for server evidence, source/path/run admission, state, publisher,
+  projection, ownership, and preview planning. It performs one bounded,
+  fixed-path read of canonical ownership evidence and never writes that store.
 - `repo/scripts/toolkit-trusted-ci-repository-protection-workflow.cjs` validates
   the diagnostic-only protected workflow source. It does not execute protected
   component commands, consume candidate evidence, or make network calls.
@@ -32,7 +33,8 @@
 This module owns the N6 trusted-CI contract and local preview logic only. It
 does not install or authenticate a GitHub App, publish Check Runs, write commit
 statuses, mutate rulesets, activate required checks, perform provider/UAT
-validation, deploy, merge, mark Ready, or provide Web finality.
+validation, write ownership state, perform provider/live actions, deploy, merge,
+mark Ready, or provide Web finality.
 
 This source is first-party and does not copy or adapt third-party workflow,
 provider, credential, or hosted evidence material.

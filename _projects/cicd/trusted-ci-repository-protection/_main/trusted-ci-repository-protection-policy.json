@@ -52,6 +52,14 @@
     "protocol_version": "toolkit.n6.app-publisher.v1",
     "kind": "github-app",
     "context": "CI Gate",
+    "identity": {
+      "field": "app_id",
+      "type": "positive-safe-integer",
+      "branch_protection_field": "app_id",
+      "ruleset_field": "integration_id",
+      "check_run_field": "app.id",
+      "coercion": false
+    },
     "permissions": {
       "checks": "write",
       "statuses": "write",
@@ -71,7 +79,8 @@
     "operations": {
       "check_run_publication": true,
       "expected_source_enrolment": true,
-      "commit_status_publication": false
+      "commit_status_publication": false,
+      "status_endpoint_publication": false
     },
     "commit_status": false,
     "idempotency": "external_id-bound-readback"
@@ -80,6 +89,8 @@
     "desired_schema": "toolkit.n6.desired-protection.v1",
     "effective_schema": "toolkit.n6.effective-protection.v1",
     "default_branch": "main",
+    "managed_key": "n6-ci-gate-v1",
+    "provider_ruleset_id": "positive-safe-integer",
     "ownership_classes": ["N6-owned", "organisation-managed", "owner-managed", "overlapping-compatible", "unknown", "overlapping-conflicting"],
     "unknown_or_conflicting": "block",
     "mutation": "preview-only-local-binding",
@@ -92,6 +103,7 @@
     "required_check_activation": true,
     "ruleset_mutation": true,
     "commit_status_publication": true,
+    "status_endpoint_publication": true,
     "provider_uat": true,
     "finality": true
   }
