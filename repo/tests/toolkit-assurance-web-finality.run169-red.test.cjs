@@ -13,7 +13,6 @@ const {
   evaluateInvalidation,
   evaluateNoByteReviewDisposition,
   evaluateG4A,
-  evaluateLedgerEvidence,
   evaluateFinality,
   createReport,
 } = runtime;
@@ -102,20 +101,9 @@ function evidence(overrides = {}) {
       inventory_digest: digest('f'),
       items: [{ id: 'required-ci', required: true, status: 'success', server_authoritative: true, verifiable: true }],
     },
-    ledger: {
-      issue_number: 142,
-      current: true,
-      complete: true,
-      server_authoritative: true,
-      verifiable: true,
-      duplicate_checked: true,
-      state: 'QUEUED',
-      intake_count: 1,
-      identity: 'run-169',
-    },
   };
   const result = { ...base, ...overrides };
-  for (const key of ['candidate', 'pr', 'lock', 'scope', 'g4', 'review', 'required_checks', 'ledger']) {
+  for (const key of ['candidate', 'pr', 'lock', 'scope', 'g4', 'review', 'required_checks']) {
     if (overrides[key]) result[key] = { ...base[key], ...overrides[key] };
   }
   return result;
@@ -141,7 +129,6 @@ function finalityEvidence(overrides = {}) {
       current_required_evidence: true,
       current_review_inventory: true,
       current_required_checks: true,
-      current_ledger: true,
       server_authoritative: true,
       verifiable: true,
     },
@@ -196,7 +183,6 @@ test('A4 RED-first required-evidence truth table fails closed', () => {
     ['stale lock', { lock: { current: false } }],
     ['incomplete review inventory', { review: { complete: false } }],
     ['conflicting required check', { required_checks: { items: [{ id: 'required-ci', required: true, status: 'success' }, { id: 'required-ci', required: true, status: 'failed' }] } }],
-    ['ambiguous Ledger identity', { ledger: { identity: '' } }],
   ];
   for (const [label, override] of cases) {
     assert.equal(expectRequiredEvidenceFailure(evidence(override)).label, label, label);
@@ -226,11 +212,27 @@ test('required evidence pass plus no material blocker is PASS AND STOP', () => {
   assert.equal(result.g4_status, 'PASS');
 });
 
+test('v2 required evidence passes without retired external evidence', () => {
+  const result = evaluateAssurance(evidence());
+  assert.equal(result.code, 'PASS_AND_STOP');
+});
+
 test('G4 admission enforces the exact independent complete-candidate contract', () => {
   const result = admitG4(evidence());
   assert.equal(result.admitted, true);
   assert.equal(result.contract_version, CONTRACT_VERSION);
   assert.equal(result.authority, 'read-only-assurance');
+});
+
+test('G4 model, reasoning, and mode remain exact', () => {
+  for (const overrides of [
+    { model_class: 'GPT-5.6 Sol Max' },
+    { reasoning: 'max' },
+    { mode: 'nonstandard' },
+  ]) {
+    const result = admitG4(evidence({ g4: g4Evidence(overrides) }));
+    assert.equal(result.admitted, false, JSON.stringify(overrides));
+  }
 });
 
 test('stale candidate H invalidates G4', () => {
@@ -385,28 +387,6 @@ test('G4A is rejected for routine second opinion', () => {
 
 test('G4A is rejected when required evidence is missing', () => {
   const result = evaluateG4A({ ordinary_complete: true, exact_head_g4_passed: true, required_evidence_current: false, question: 'bounded', purpose: 'routing', web_recorded_question: true });
-  assert.equal(result.code, 'FAIL_CLOSED_REQUIRED_EVIDENCE');
-});
-
-test('exact duplicate or QUEUED Ledger #142 evidence is accepted', () => {
-  const queued = evaluateLedgerEvidence({
-    run_id: 'run-169',
-    intake: { issue_number: 142, version: 'v2', public_safe: true, duplicate_checked: true, state: 'QUEUED', identity: 'run-169' },
-  });
-  const duplicate = evaluateLedgerEvidence({
-    run_id: 'run-169',
-    exact_existing_duplicate: { issue_number: 142, version: 'v2', public_safe: true, duplicate_checked: true, state: 'QUEUED', identity: 'run-169' },
-  });
-  assert.equal(queued.accepted, true);
-  assert.equal(duplicate.accepted, true);
-});
-
-test('conflicting Ledger identity fails closed and never polls #143', () => {
-  const result = evaluateLedgerEvidence({
-    run_id: 'run-169',
-    intake: { issue_number: 142, version: 'v2', public_safe: true, duplicate_checked: true, state: 'QUEUED', identity: 'other-run' },
-    polls: ['#143'],
-  });
   assert.equal(result.code, 'FAIL_CLOSED_REQUIRED_EVIDENCE');
 });
 

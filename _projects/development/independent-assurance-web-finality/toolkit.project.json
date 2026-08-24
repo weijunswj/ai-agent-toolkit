@@ -5,9 +5,9 @@
   "title": "A4 Independent Assurance + Web-Finality",
   "module_path": "_projects/development/independent-assurance-web-finality",
   "main_path": "_projects/development/independent-assurance-web-finality/_main",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "version_policy": "semver",
-  "version_notes": "Bounded same-Lock repair of exact evidence, Ledger-142, finality-tuple, and truthful-report bindings under the accepted R1 Design Lock.",
+  "version_notes": "Breaking v2 evidence-contract removal of the retired external finality dependency while preserving exact candidate, authority, review, check, G4, merge, readback, and Web-finality bindings under the accepted S1 Design Lock.",
   "outputs": [],
   "writes": {
     "allowed": [],

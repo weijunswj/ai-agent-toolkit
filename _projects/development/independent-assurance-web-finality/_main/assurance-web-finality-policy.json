@@ -1,7 +1,7 @@
 {
-  "schema_version": 1,
-  "design_lock_id": "DL-AGENT-NATIVE-LOOP-MVP-001-A4-INDEPENDENT-ASSURANCE-WEB-FINALITY-R1",
-  "purpose": "Minimum host-neutral independent assurance and Web-finality handoff over accepted A1+A2+A3.",
+  "schema_version": 2,
+  "design_lock_id": "DL-S1-EXTERNAL-LEDGER-FINALITY-DECOUPLING-001-G2",
+  "purpose": "Minimum host-neutral independent assurance and Web-finality handoff over accepted A1+A2+A3 without an external finality dependency.",
   "authority_boundaries": {
     "a1": "sole mutation and opaque authority-ticket authority",
     "a2": "consent and state only",
@@ -27,7 +27,6 @@
       "complete_candidate_g4",
       "current_review_inventory",
       "actual_required_check_inventory_and_state",
-      "duplicate_checked_ledger_142_issue_bound",
       "ready_and_expected_head_merge_binding",
       "canonical_post_merge_readback",
       "accepted_tree",
@@ -118,18 +117,8 @@
     "unresolved": "CONTROLLER_REQUIRED",
     "loop_bound": "no open-ended G4/G4A loop"
   },
-  "ledger": {
-    "ledger_id": 142,
-    "issue_binding": "integer issue_number exactly equals 142",
-    "intake_version": "v2",
-    "per_terminal_substantive_run": "exactly one duplicate-checked public-safe intake",
-    "queued_satisfies_toolkit_duty": true,
-    "exact_existing_duplicate_satisfies": true,
-    "conflicting_duplicate": "FAIL_CLOSED_REQUIRED_EVIDENCE",
-    "poll_ledger_id_143": false
-  },
   "web_finality": {
-    "acceptance_requires": ["current_required_evidence", "current_review_inventory", "actual_required_checks", "ledger_142_queued"],
+    "acceptance_requires": ["current_required_evidence", "current_review_inventory", "actual_required_checks"],
     "ready": "Web-owned final merge-state transition only after final acceptance",
     "merge": "expected-head squash merge default, exact PR/head/base binding",
     "accepted_candidate_tuple": ["pr_number", "head", "tree", "base"],

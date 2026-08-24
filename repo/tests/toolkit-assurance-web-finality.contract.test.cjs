@@ -15,6 +15,7 @@ test('A4 project is source-only and declares no generated or published surface',
   const manifest = JSON.parse(fs.readFileSync(path.join(projectRoot, 'toolkit.project.json'), 'utf8'));
   const lock = JSON.parse(fs.readFileSync(path.join(projectRoot, 'SOURCE-LOCK.json'), 'utf8'));
   assert.equal(manifest.id, 'development.independent-assurance-web-finality');
+  assert.equal(manifest.version, '2.0.0');
   assert.deepEqual(manifest.outputs, []);
   assert.equal(manifest.surface.publish_as, 'source_only');
   assert.deepEqual(lock.files, []);
@@ -25,11 +26,14 @@ test('A4 source contract freezes the accepted Lock and authority boundaries', ()
   const policy = JSON.parse(fs.readFileSync(path.join(projectRoot, '_main', 'assurance-web-finality-policy.json'), 'utf8'));
   assert.equal(schema.$id, runtime.CONTRACT_VERSION);
   assert.equal(policy.design_lock_id, runtime.DESIGN_LOCK_ID);
-  assert.equal(schema.$defs.ledger.properties.issue_number.const, 142);
+  assert.equal(policy.schema_version, 2);
+  assert.deepEqual(schema.$defs.evidence.required, ['contract_version', 'candidate', 'pr', 'lock', 'scope', 'g4', 'review', 'required_checks']);
+  assert.equal(schema.$defs.evidence.additionalProperties, false);
+  assert.equal(schema.$defs.report.additionalProperties, false);
   assert.equal(schema.$defs.evidence.properties.findings, undefined);
   assert.equal(schema.$defs.report.properties.unchanged_scope.minItems, 1);
   assert.equal(schema.$defs.report.allOf.length, 2);
-  assert.equal(policy.ledger.issue_binding, 'integer issue_number exactly equals 142');
+  assert.deepEqual(policy.web_finality.acceptance_requires, ['current_required_evidence', 'current_review_inventory', 'actual_required_checks']);
   assert.deepEqual(policy.web_finality.accepted_candidate_tuple, ['pr_number', 'head', 'tree', 'base']);
   assert.equal(policy.authority_boundaries.a1, 'sole mutation and opaque authority-ticket authority');
   assert.equal(policy.authority_boundaries.a2, 'consent and state only');
@@ -83,7 +87,6 @@ test('successful finality proof accepts expected squash result without rerunning
       current_required_evidence: true,
       current_review_inventory: true,
       current_required_checks: true,
-      current_ledger: true,
       server_authoritative: true,
       verifiable: true,
     },
