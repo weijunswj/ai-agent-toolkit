@@ -30,6 +30,7 @@ const SHAS = {
 };
 const REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit.git';
 const REPOSITORY_ID = capabilityRegistry.repositoryIdForCanonicalRemote(REMOTE);
+const SERVER_REPOSITORY_ID = '1228006168';
 const effective = { ...effectiveFixture, repository_id: REPOSITORY_ID };
 const CHANGED_PATHS = [
   '_projects/cicd/trusted-ci-repository-protection/_main/trusted-ci-repository-protection-policy.json',
@@ -87,6 +88,30 @@ function trustedContext(t, overrides = {}) {
 
 function digest(value) {
   return crypto.createHash('sha256').update(capabilityRegistry.canonicalSerialize(value), 'utf8').digest('hex');
+}
+
+function canonicalServerIdentity(overrides = {}) {
+  return {
+    repository_id: SERVER_REPOSITORY_ID,
+    pr: 194,
+    head_sha: SHAS.head,
+    base_sha: SHAS.base,
+    merge_sha: SHAS.merge,
+    workflow_id: runtime.PRODUCER_MAP.workflow.id,
+    workflow_path: runtime.PRODUCER_MAP.workflow.path,
+    approved_source_blob_sha: runtime.PRODUCER_MAP.workflow.approved_source_blob_sha,
+    run_id: '32634652935',
+    run_attempt: 1,
+    job_id: '97182471868',
+    job_name: runtime.PRODUCER_MAP.workflow.job.name,
+    step_number: runtime.PRODUCER_MAP.workflow.aggregate_step.number,
+    step_name: runtime.PRODUCER_MAP.workflow.aggregate_step.name,
+    producer_map_digest: runtime.PRODUCER_MAP_DIGEST,
+    changed_paths_digest: 'f'.repeat(64),
+    contract_digest: runtime.SERVER_EVIDENCE_CONTRACT_DIGEST,
+    generation: 1,
+    ...overrides,
+  };
 }
 
 function git(repo, args) {
@@ -432,18 +457,7 @@ test('archive, publisher, and gate identity boundaries fail closed', () => {
   assert.equal(runtime.validatePublisher({ ...publisher, permissions: { ...publisher.permissions, statuses: 'none' } }).code, 'PUBLISHER_FORBIDDEN_PERMISSION');
   assert.equal(runtime.validatePublisher({ ...publisher, operations: { ...publisher.operations, commit_status_publication: true } }).code, 'COMMIT_STATUS_FORBIDDEN');
   assert.equal(runtime.validatePublisher({ ...publisher, integration_id: 'github-actions' }).code, 'PRODUCER_MISMATCH');
-  const identity = runtime.checkRunIdentity({
-    repository_id: REPOSITORY_ID,
-    pr: 194,
-    head_sha: SHAS.head,
-    base_sha: SHAS.base,
-    merge_sha: SHAS.merge,
-    protected_workflow_identity: workflow.WORKFLOW_ID,
-    protected_workflow_source_sha: PROTECTED_WORKFLOW_SOURCE_SHA,
-    contract_digest: runtime.EVIDENCE_CONTRACT_DIGEST,
-    attempt: 1,
-    generation: 1,
-  });
+  const identity = runtime.checkRunIdentity(canonicalServerIdentity());
   assert.equal(identity.context, 'CI Gate');
   assert.match(identity.external_id, /^n6-ci-gate-v1:[a-f0-9]{64}$/);
   assert.equal(runtime.publicationRequest({
@@ -470,6 +484,7 @@ test('gate state transitions distinguish duplicate, stale, superseded, and uncer
     attempt: 1,
     generation: 1,
   };
+  assert.equal(runtime.checkRunIdentity(identity).ok, false, 'legacy gate-state identity is not Check Run authority');
   const initial = runtime.initialGateState(identity);
   assert.equal(initial.state, 'queued');
   const collecting = runtime.transitionGateState(initial, 'collect');
@@ -483,18 +498,7 @@ test('gate state transitions distinguish duplicate, stale, superseded, and uncer
 });
 
 test('check-run readback binds canonical name, App, head, and certification identity', () => {
-  const identity = runtime.checkRunIdentity({
-    repository_id: REPOSITORY_ID,
-    pr: 194,
-    head_sha: SHAS.head,
-    base_sha: SHAS.base,
-    merge_sha: SHAS.merge,
-    protected_workflow_identity: workflow.WORKFLOW_ID,
-    protected_workflow_source_sha: PROTECTED_WORKFLOW_SOURCE_SHA,
-    contract_digest: runtime.EVIDENCE_CONTRACT_DIGEST,
-    attempt: 1,
-    generation: 1,
-  });
+  const identity = runtime.checkRunIdentity(canonicalServerIdentity());
   assert.equal(identity.ok, true, identity.code);
 
   const expected = {
@@ -537,10 +541,24 @@ test('check-run readback binds canonical name, App, head, and certification iden
   delete missingExternalId.external_id;
   assert.equal(runtime.validateCheckRunReadback(missingExternalId, expected).ok, false, 'missing external_id');
   assert.equal(runtime.validateCheckRunReadback({ ...checkRun, external_id: `${runtime.EXTERNAL_ID_PREFIX}${'0'.repeat(64)}` }, expected).ok, false, 'wrong external_id');
-  const staleAttemptIdentity = runtime.checkRunIdentity({ ...identity.identity, attempt: 2 });
+  const staleAttemptIdentity = runtime.checkRunIdentity({ ...identity.identity, run_attempt: 2 });
   assert.equal(staleAttemptIdentity.ok, true, staleAttemptIdentity.code);
   assert.equal(runtime.validateCheckRunReadback({ ...checkRun, external_id: staleAttemptIdentity.external_id }, expected).ok, false, 'different canonical identity');
   assert.equal(runtime.validateCheckRunReadback({ ...checkRun, external_id: staleHeadIdentity.external_id }, expected).ok, false, 'different canonical head identity');
+  const staleGenerationIdentity = runtime.checkRunIdentity({ ...identity.identity, generation: 2 });
+  assert.equal(staleGenerationIdentity.ok, true, staleGenerationIdentity.code);
+  assert.equal(runtime.validateCheckRunReadback({ ...checkRun, external_id: staleGenerationIdentity.external_id }, expected).ok, false, 'different generation');
+  const foreignRunIdentity = runtime.checkRunIdentity({ ...identity.identity, run_id: '32634652936' });
+  assert.equal(foreignRunIdentity.ok, true, foreignRunIdentity.code);
+  assert.equal(runtime.validateCheckRunReadback({ ...checkRun, external_id: foreignRunIdentity.external_id }, expected).ok, false, 'different run identity');
+  const foreignJobIdentity = runtime.checkRunIdentity({ ...identity.identity, job_id: '97182471869' });
+  assert.equal(foreignJobIdentity.ok, true, foreignJobIdentity.code);
+  assert.equal(runtime.validateCheckRunReadback({ ...checkRun, external_id: foreignJobIdentity.external_id }, expected).ok, false, 'different job identity');
+  const foreignPathsIdentity = runtime.checkRunIdentity({ ...identity.identity, changed_paths_digest: '0'.repeat(64) });
+  assert.equal(foreignPathsIdentity.ok, true, foreignPathsIdentity.code);
+  assert.equal(runtime.validateCheckRunReadback({ ...checkRun, external_id: foreignPathsIdentity.external_id }, expected).ok, false, 'different changed-path digest');
+  assert.equal(runtime.checkRunIdentity({ ...identity.identity, producer_map_digest: '0'.repeat(64) }).ok, false, 'different producer-map digest');
+  assert.equal(runtime.checkRunIdentity({ ...identity.identity, contract_digest: '0'.repeat(64) }).ok, false, 'different contract digest');
   assert.equal(runtime.validateCheckRunReadback(checkRun, { ...expected, external_id: `${runtime.EXTERNAL_ID_PREFIX}${'1'.repeat(64)}` }).ok, false, 'arbitrary expected external_id');
   assert.equal(runtime.validateCheckRunReadback({ ...checkRun, external_id: `${runtime.EXTERNAL_ID_PREFIX}${'1'.repeat(64)}` }, expected).ok, false, 'arbitrary check-run external_id');
   assert.equal(runtime.validateCheckRunReadback(checkRun, { ...expected, head_sha: 'b'.repeat(40) }).ok, false, 'identity/head inconsistency');

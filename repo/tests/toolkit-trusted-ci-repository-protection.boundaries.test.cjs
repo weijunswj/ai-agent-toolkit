@@ -350,6 +350,108 @@ test('server evidence binds base, head, merge source blobs and excludes local di
   }).ok, true);
 });
 
+test('authoritative server publication external id passes provider-shaped Check Run readback', () => {
+  const evidence = serverEvidenceFixture();
+  const validated = runtime.validateServerEvidence(evidence);
+  assert.equal(validated.ok, true, validated.code);
+  const publication = runtime.serverPublicationRequest({
+    evidence,
+    publisher,
+    conclusion: 'success',
+    summary: 'Server-certified CI Gate.',
+    details_url: 'https://github.com/weijunswj/ai-agent-toolkit/actions/runs/32634652935',
+  });
+  assert.equal(publication.ok, true, publication.code);
+  const canonical = runtime.serverCheckRunIdentity(validated.evidence);
+  assert.equal(canonical.ok, true, canonical.code);
+  assert.equal(publication.external_id, canonical.external_id);
+
+  const checkRun = {
+    id: 32634652935,
+    node_id: 'CR_kwDOtrusted-ci',
+    name: 'CI Gate',
+    context: 'CI Gate',
+    app: { id: publisher.app_id, slug: 'trusted-ci' },
+    head_sha: evidence.pr.head_sha,
+    external_id: publication.external_id,
+    status: 'completed',
+    conclusion: 'success',
+    html_url: 'https://github.com/weijunswj/ai-agent-toolkit/runs/32634652935',
+    started_at: '2026-08-23T00:00:00Z',
+    completed_at: '2026-08-23T00:01:00Z',
+  };
+  const readback = runtime.validateCheckRunReadback(checkRun, {
+    app_id: publisher.app_id,
+    head_sha: evidence.pr.head_sha,
+    identity: canonical.identity,
+    external_id: canonical.external_id,
+  });
+  assert.equal(readback.ok, true, readback.code);
+});
+
+test('every canonical server certification identity field is bound by Check Run readback', () => {
+  const evidence = serverEvidenceFixture();
+  const publication = runtime.serverPublicationRequest({
+    evidence,
+    publisher,
+    conclusion: 'success',
+    summary: 'Server-certified CI Gate.',
+    details_url: null,
+  });
+  assert.equal(publication.ok, true, publication.code);
+  const canonical = runtime.serverCheckRunIdentity(evidence);
+  assert.equal(canonical.ok, true, canonical.code);
+  const missingField = { ...canonical.identity };
+  delete missingField.job_id;
+  assert.equal(runtime.checkRunIdentity(missingField).ok, false, 'missing canonical field');
+  assert.equal(runtime.checkRunIdentity({ ...canonical.identity, extra: true }).ok, false, 'extra canonical field');
+  assert.equal(runtime.checkRunIdentity({ ...canonical.identity, repository_id: '0' }).ok, false, 'invalid repository id');
+  assert.equal(runtime.checkRunIdentity({ ...canonical.identity, run_id: 'not-a-provider-id' }).ok, false, 'invalid run id');
+  const checkRun = {
+    id: 32634652935,
+    node_id: 'CR_kwDOtrusted-ci',
+    name: 'CI Gate',
+    context: 'CI Gate',
+    app: { id: publisher.app_id, slug: 'trusted-ci' },
+    head_sha: evidence.pr.head_sha,
+    external_id: publication.external_id,
+    status: 'completed',
+    conclusion: 'success',
+    html_url: 'https://github.com/weijunswj/ai-agent-toolkit/runs/32634652935',
+  };
+  const differentDigest = (value) => value === '0'.repeat(64) ? '1'.repeat(64) : '0'.repeat(64);
+  const mutations = {
+    repository_id: '1228006169',
+    pr: evidence.pr.number + 1,
+    head_sha: 'a'.repeat(40),
+    base_sha: 'b'.repeat(40),
+    merge_sha: 'c'.repeat(40),
+    workflow_id: runtime.PRODUCER_MAP.workflow.id + 1,
+    workflow_path: `${runtime.PRODUCER_MAP.workflow.path}.foreign`,
+    approved_source_blob_sha: 'd'.repeat(40),
+    run_id: '32634652936',
+    run_attempt: evidence.producer.run_attempt + 1,
+    job_id: '97182471869',
+    job_name: 'foreign validate',
+    step_number: runtime.PRODUCER_MAP.workflow.aggregate_step.number + 1,
+    step_name: 'foreign step',
+    producer_map_digest: differentDigest(canonical.identity.producer_map_digest),
+    changed_paths_digest: differentDigest(canonical.identity.changed_paths_digest),
+    contract_digest: differentDigest(canonical.identity.contract_digest),
+    generation: evidence.generation + 1,
+  };
+  for (const [field, value] of Object.entries(mutations)) {
+    const mutated = runtime.checkRunIdentity({ ...canonical.identity, [field]: value });
+    const expected = {
+      app_id: publisher.app_id,
+      head_sha: evidence.pr.head_sha,
+      identity: { ...canonical.identity, [field]: value },
+    };
+    if (mutated.ok) expected.external_id = mutated.external_id;
+    assert.equal(runtime.validateCheckRunReadback(checkRun, expected).ok, false, field);
+  }
+});
+
 test('GitHub removed status flows from changed-path collection into canonical server evidence', () => {
   const pages = serverRemovedPathPages();
   const paths = runtime.validateChangedPathCollection({ pull_request: SERVER_PR, pages });

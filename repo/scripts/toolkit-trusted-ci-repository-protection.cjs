@@ -18,6 +18,26 @@ const DESIRED_PROTECTION_SCHEMA = 'toolkit.n6.desired-protection.v1';
 const EFFECTIVE_PROTECTION_SCHEMA = 'toolkit.n6.effective-protection.v1';
 const GATE_CONTEXT = 'CI Gate';
 const EXTERNAL_ID_PREFIX = 'n6-ci-gate-v1:';
+const SERVER_CERTIFICATION_IDENTITY_KEYS = Object.freeze([
+  'repository_id',
+  'pr',
+  'head_sha',
+  'base_sha',
+  'merge_sha',
+  'workflow_id',
+  'workflow_path',
+  'approved_source_blob_sha',
+  'run_id',
+  'run_attempt',
+  'job_id',
+  'job_name',
+  'step_number',
+  'step_name',
+  'producer_map_digest',
+  'changed_paths_digest',
+  'contract_digest',
+  'generation',
+]);
 const DEFAULT_BRANCH = 'main';
 const DEFAULT_MANAGED_KEY = 'n6-ci-gate-v1';
 const DEFAULT_RULESET_NAME = 'N6 CI Gate';
@@ -477,6 +497,11 @@ function providerId(value) {
   return null;
 }
 
+function canonicalProviderId(value) {
+  const normalized = providerId(value);
+  return normalized && /^[1-9][0-9]*$/.test(normalized) ? normalized : null;
+}
+
 function providerAppId(value) {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 ? value : null;
 }
@@ -787,8 +812,9 @@ function serverEvidenceIdentityFields(evidence) {
 function serverCheckRunIdentity(evidence) {
   const result = validateServerEvidence(evidence);
   if (!result.ok) return result;
-  const identity = serverEvidenceIdentityFields(result.evidence);
-  return success({ context: GATE_CONTEXT, identity, external_id: EXTERNAL_ID_PREFIX + digestValue(identity) });
+  const identity = checkRunIdentity(serverEvidenceIdentityFields(result.evidence));
+  if (!identity.ok) return identity;
+  return success({ context: GATE_CONTEXT, identity: identity.identity, external_id: identity.external_id });
 }
 
 function buildServerEvidence(input = {}) {
@@ -1219,6 +1245,35 @@ function validateCheckRunReadback(checkRun, expected = {}) {
 }
 
 function checkRunIdentity(input) {
+  const repositoryId = canonicalProviderId(input?.repository_id);
+  const runId = canonicalProviderId(input?.run_id);
+  const jobId = canonicalProviderId(input?.job_id);
+  if (!exactKeys(input, SERVER_CERTIFICATION_IDENTITY_KEYS) || !repositoryId || !Number.isSafeInteger(input.pr) || input.pr < 1
+    || !isSha(input.head_sha) || !isSha(input.base_sha) || !isSha(input.merge_sha)
+    || input.workflow_id !== PRODUCER_MAP.workflow.id || input.workflow_path !== PRODUCER_MAP.workflow.path
+    || input.approved_source_blob_sha !== PRODUCER_MAP.workflow.approved_source_blob_sha
+    || !runId || !Number.isSafeInteger(input.run_attempt) || input.run_attempt < 1
+    || !jobId || input.job_name !== PRODUCER_MAP.workflow.job.name
+    || input.step_number !== PRODUCER_MAP.workflow.aggregate_step.number
+    || input.step_name !== PRODUCER_MAP.workflow.aggregate_step.name
+    || input.producer_map_digest !== PRODUCER_MAP_DIGEST || !isDigest(input.changed_paths_digest)
+    || input.contract_digest !== SERVER_EVIDENCE_CONTRACT_DIGEST
+    || !Number.isSafeInteger(input.generation) || input.generation < 1) return failure('identity_mismatch');
+  const identity = {
+    ...clone(input),
+    repository_id: repositoryId,
+    run_id: runId,
+    job_id: jobId,
+  };
+  return success({
+    context: GATE_CONTEXT,
+    identity,
+    external_id: EXTERNAL_ID_PREFIX + digestValue(identity),
+  });
+}
+
+// Gate-state lifecycle identity is private state tracking, not Check Run certification authority.
+function gateStateIdentity(input) {
   const keys = ['repository_id', 'pr', 'head_sha', 'base_sha', 'merge_sha', 'protected_workflow_identity', 'protected_workflow_source_sha', 'contract_digest', 'attempt', 'generation'];
   if (!exactKeys(input, keys) || !isSafeText(input.repository_id, 256) || !Number.isSafeInteger(input.pr) || input.pr < 1
     || !isSha(input.head_sha) || !isSha(input.base_sha) || !isSha(input.merge_sha)
@@ -1309,7 +1364,7 @@ function createFakePublisher(config = {}) {
 }
 
 function initialGateState(identity) {
-  const checked = checkRunIdentity(identity);
+  const checked = gateStateIdentity(identity);
   if (!checked.ok) return checked;
   return { ok: true, state: 'queued', previous_state: 'absent', event: 'initial', identity: checked.identity, external_id: checked.external_id };
 }
@@ -1321,7 +1376,7 @@ function transitionGateState(current, event, options = {}) {
   const next = STATE_TRANSITIONS[currentState]?.[event];
   if (!next) return failure('gate_transition_invalid');
   if (options.identity) {
-    const checked = checkRunIdentity(options.identity);
+    const checked = gateStateIdentity(options.identity);
     if (!checked.ok) return checked;
     const currentIdentity = current?.identity;
     if (currentIdentity && canonicalSerialize(currentIdentity) !== canonicalSerialize(checked.identity)) {
@@ -2004,6 +2059,7 @@ module.exports = {
   EVIDENCE_CONTRACT_DIGEST,
   SERVER_EVIDENCE_SCHEMA,
   SERVER_EVIDENCE_CONTRACT_DIGEST,
+  SERVER_CERTIFICATION_IDENTITY_KEYS,
   PRODUCER_MAP_PATH,
   PRODUCER_MAP,
   PRODUCER_MAP_DIGEST,
