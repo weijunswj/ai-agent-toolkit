@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "toolkit.assurance-web-finality.evidence.v1",
+  "$id": "toolkit.assurance-web-finality.evidence.v2",
   "title": "Toolkit A4 Independent Assurance and Web-Finality Evidence",
   "description": "A source-owned evidence shape. It grants no mutation, Ready, merge, or finality authority.",
   "oneOf": [
@@ -59,7 +59,7 @@
       "additionalProperties": false,
       "required": ["id", "current", "server_authoritative", "verifiable"],
       "properties": {
-        "id": { "const": "DL-AGENT-NATIVE-LOOP-MVP-001-A4-INDEPENDENT-ASSURANCE-WEB-FINALITY-R1" },
+        "id": { "const": "DL-S1-EXTERNAL-LEDGER-FINALITY-DECOUPLING-001-G2" },
         "current": { "const": true },
         "server_authoritative": { "const": true },
         "verifiable": { "const": true }
@@ -119,7 +119,7 @@
         "candidate_head": { "$ref": "#/$defs/sha" },
         "candidate_tree": { "$ref": "#/$defs/sha" },
         "candidate_base": { "$ref": "#/$defs/sha" },
-        "lock_id": { "const": "DL-AGENT-NATIVE-LOOP-MVP-001-A4-INDEPENDENT-ASSURANCE-WEB-FINALITY-R1" },
+        "lock_id": { "const": "DL-S1-EXTERNAL-LEDGER-FINALITY-DECOUPLING-001-G2" },
         "scope_digest": { "$ref": "#/$defs/digest" },
         "root_only": { "const": true },
         "mutation_authority": { "const": false },
@@ -171,36 +171,19 @@
         "items": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/requiredCheck" } }
       }
     },
-    "ledger": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["issue_number", "current", "complete", "server_authoritative", "verifiable", "duplicate_checked", "state", "intake_count", "identity"],
-      "properties": {
-        "issue_number": { "type": "integer", "const": 142 },
-        "current": { "const": true },
-        "complete": { "const": true },
-        "server_authoritative": { "const": true },
-        "verifiable": { "const": true },
-        "duplicate_checked": { "const": true },
-        "state": { "const": "QUEUED" },
-        "intake_count": { "const": 1 },
-        "identity": { "$ref": "#/$defs/id" }
-      }
-    },
     "evidence": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["contract_version", "candidate", "pr", "lock", "scope", "g4", "review", "required_checks", "ledger"],
+      "required": ["contract_version", "candidate", "pr", "lock", "scope", "g4", "review", "required_checks"],
       "properties": {
-        "contract_version": { "const": "toolkit.assurance-web-finality.evidence.v1" },
+        "contract_version": { "const": "toolkit.assurance-web-finality.evidence.v2" },
         "candidate": { "$ref": "#/$defs/candidate" },
         "pr": { "$ref": "#/$defs/pr" },
         "lock": { "$ref": "#/$defs/lock" },
         "scope": { "$ref": "#/$defs/scope" },
         "g4": { "$ref": "#/$defs/g4" },
         "review": { "$ref": "#/$defs/review" },
-        "required_checks": { "$ref": "#/$defs/requiredChecks" },
-        "ledger": { "$ref": "#/$defs/ledger" }
+        "required_checks": { "$ref": "#/$defs/requiredChecks" }
       }
     },
     "report": {
@@ -208,7 +191,7 @@
       "additionalProperties": false,
       "required": ["contract_version", "verdict", "material_blocker", "mutation_state", "unchanged_scope", "next_action"],
       "properties": {
-        "contract_version": { "const": "toolkit.assurance-web-finality.evidence.v1" },
+        "contract_version": { "const": "toolkit.assurance-web-finality.evidence.v2" },
         "verdict": { "$ref": "#/$defs/id" },
         "material_blocker": { "type": "boolean" },
         "verified_result": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },

@@ -1,7 +1,7 @@
 'use strict';
 
-const DESIGN_LOCK_ID = 'DL-AGENT-NATIVE-LOOP-MVP-001-A4-INDEPENDENT-ASSURANCE-WEB-FINALITY-R1';
-const CONTRACT_VERSION = 'toolkit.assurance-web-finality.evidence.v1';
+const DESIGN_LOCK_ID = 'DL-S1-EXTERNAL-LEDGER-FINALITY-DECOUPLING-001-G2';
+const CONTRACT_VERSION = 'toolkit.assurance-web-finality.evidence.v2';
 const G4_AUTHORITY = 'read-only-assurance';
 const G4_MODEL = 'GPT-5.6 Sol High';
 const G4A_MODEL = 'GPT-5.6 Sol Max';
@@ -103,7 +103,7 @@ function requiredEvidenceFailures(input) {
   if (input.contract_version !== CONTRACT_VERSION) failures.push('evidence-contract-version-invalid');
   if (Object.prototype.hasOwnProperty.call(input, 'findings')) failures.push('review-findings-shadow-source');
 
-  const { candidate, pr, lock, scope, g4, review, required_checks: checks, ledger } = input;
+  const { candidate, pr, lock, scope, g4, review, required_checks: checks } = input;
   if (!isRecord(candidate)) failures.push('candidate-identity-missing');
   else {
     for (const key of ['head', 'tree', 'base']) {
@@ -178,17 +178,6 @@ function requiredEvidenceFailures(input) {
     }
   }
 
-  if (!isRecord(ledger)) failures.push('ledger-evidence-missing');
-  else {
-    if (ledger.issue_number !== 142) failures.push('ledger-issue-number-invalid');
-    for (const key of ['current', 'complete', 'server_authoritative', 'verifiable', 'duplicate_checked']) {
-      if (!hasTrue(ledger, key)) failures.push('ledger-' + key + '-failed');
-    }
-    if (ledger.state !== 'QUEUED') failures.push('ledger-state-not-queued');
-    if (ledger.intake_count !== 1) failures.push('ledger-intake-count-invalid');
-    if (!isSafeId(ledger.identity)) failures.push('ledger-identity-invalid');
-  }
-
   return [...new Set(failures)];
 }
 
@@ -218,7 +207,6 @@ function failureLabel(failures) {
     ['accepted-lock-stale', 'stale lock'],
     ['review-complete-failed', 'incomplete review inventory'],
     ['required-check-identity-conflict', 'conflicting required check'],
-    ['ledger-identity-invalid', 'ambiguous Ledger identity'],
   ];
   const match = labels.find(([reason]) => failures.includes(reason));
   return match ? match[1] : undefined;
@@ -507,32 +495,6 @@ function evaluateG4A(input = {}) {
   });
 }
 
-function validLedgerRecord(record, runId) {
-  return isRecord(record)
-    && record.issue_number === 142
-    && record.version === 'v2'
-    && record.public_safe === true
-    && record.duplicate_checked === true
-    && record.state === 'QUEUED'
-    && record.identity === runId;
-}
-
-function evaluateLedgerEvidence(input = {}) {
-  const runId = input.run_id;
-  if (!isSafeId(runId) || (Array.isArray(input.polls) && input.polls.some((value) => String(value) === '#143'))) {
-    return fail('FAIL_CLOSED_REQUIRED_EVIDENCE', { accepted: false });
-  }
-  if (input.conflicting_duplicate === true) return fail('FAIL_CLOSED_REQUIRED_EVIDENCE', { accepted: false });
-  if (input.intake !== undefined && input.intake !== null && input.exact_existing_duplicate !== undefined && input.exact_existing_duplicate !== null) return fail('FAIL_CLOSED_REQUIRED_EVIDENCE', { accepted: false });
-  if (validLedgerRecord(input.intake, runId)) {
-    return valid('LEDGER_142_QUEUED_ACCEPTED', { accepted: true, duplicate_checked: true, state: 'QUEUED' });
-  }
-  if (validLedgerRecord(input.exact_existing_duplicate, runId)) {
-    return valid('LEDGER_142_EXACT_DUPLICATE_ACCEPTED', { accepted: true, duplicate_checked: true, state: 'QUEUED' });
-  }
-  return fail('FAIL_CLOSED_REQUIRED_EVIDENCE', { accepted: false });
-}
-
 function evaluateFinality(input = {}) {
   const web = isRecord(input.web_acceptance) ? input.web_acceptance : {};
   const ready = isRecord(input.ready) ? input.ready : {};
@@ -547,7 +509,6 @@ function evaluateFinality(input = {}) {
     || web.current_required_evidence !== true
     || web.current_review_inventory !== true
     || web.current_required_checks !== true
-    || web.current_ledger !== true
     || web.server_authoritative !== true
     || web.verifiable !== true) {
     return fail('FAIL_CLOSED_REQUIRED_EVIDENCE', { finality_blocked: true });
@@ -751,7 +712,6 @@ module.exports = Object.freeze({
   evaluateInvalidation,
   evaluateNoByteReviewDisposition,
   evaluateG4A,
-  evaluateLedgerEvidence,
   evaluateFinality,
   createReport,
 });

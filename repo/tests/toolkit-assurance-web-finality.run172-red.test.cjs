@@ -10,7 +10,6 @@ const {
   DESIGN_LOCK_ID,
   evaluateAssurance,
   evaluateFinality,
-  evaluateLedgerEvidence,
   createReport,
 } = runtime;
 
@@ -102,20 +101,9 @@ function evidence(overrides = {}) {
       inventory_digest: digest('f'),
       items: [{ id: 'required-ci', required: true, status: 'success', server_authoritative: true, verifiable: true }],
     },
-    ledger: {
-      issue_number: 142,
-      current: true,
-      complete: true,
-      server_authoritative: true,
-      verifiable: true,
-      duplicate_checked: true,
-      state: 'QUEUED',
-      intake_count: 1,
-      identity: 'run-172',
-    },
   };
   const result = { ...base, ...overrides };
-  for (const key of ['candidate', 'pr', 'lock', 'scope', 'g4', 'review', 'required_checks', 'ledger']) {
+  for (const key of ['candidate', 'pr', 'lock', 'scope', 'g4', 'review', 'required_checks']) {
     if (overrides[key]) result[key] = { ...base[key], ...overrides[key] };
   }
   return result;
@@ -136,7 +124,6 @@ function finalityEvidence(overrides = {}) {
       current_required_evidence: true,
       current_review_inventory: true,
       current_required_checks: true,
-      current_ledger: true,
       server_authoritative: true,
       verifiable: true,
     },
@@ -186,7 +173,7 @@ function finalityEvidence(overrides = {}) {
 }
 
 test('Run-172 RED A: wrong or missing evidence contract version fails closed', () => {
-  for (const version of ['toolkit.assurance-web-finality.evidence.v0', undefined]) {
+  for (const version of ['toolkit.assurance-web-finality.evidence.v1', undefined]) {
     const input = evidence();
     if (version === undefined) delete input.contract_version;
     else input.contract_version = version;
@@ -208,30 +195,75 @@ test('Run-172 RED A: canonical review findings still drive the material blocker 
   assert.equal(result.code, 'FAIL_MATERIAL_CURRENT_LOCK_BLOCKER');
 });
 
-test('Run-172 RED B: Ledger evidence is bound to issue 142', () => {
-  const result = evaluateAssurance(evidence({ ledger: { issue_number: 999 } }));
-  assert.equal(result.code, 'FAIL_CLOSED_REQUIRED_EVIDENCE');
+test('missing or conflicting candidate identity fails closed', () => {
+  const missing = evidence({ candidate: undefined });
+  assert.equal(evaluateAssurance(missing).code, 'FAIL_CLOSED_REQUIRED_EVIDENCE');
+
+  const conflicting = evidence({ candidate: { head: sha('z') } });
+  assert.equal(evaluateAssurance(conflicting).code, 'FAIL_CLOSED_REQUIRED_EVIDENCE');
 });
 
-test('Run-172 RED B: two simultaneously valid Ledger records are ambiguous', () => {
-  const record = { issue_number: 142, version: 'v2', public_safe: true, duplicate_checked: true, state: 'QUEUED', identity: 'run-172' };
-  const result = evaluateLedgerEvidence({
-    run_id: 'run-172',
-    intake: record,
-    exact_existing_duplicate: { ...record },
-  });
-  assert.equal(result.code, 'FAIL_CLOSED_REQUIRED_EVIDENCE');
+test('missing or conflicting Lock evidence fails closed', () => {
+  const missing = evidence({ lock: undefined });
+  assert.equal(evaluateAssurance(missing).code, 'FAIL_CLOSED_REQUIRED_EVIDENCE');
+
+  const conflicting = evidence({ lock: { id: 'wrong-lock' } });
+  assert.equal(evaluateAssurance(conflicting).code, 'FAIL_CLOSED_REQUIRED_EVIDENCE');
 });
 
-test('Run-172 RED B: exact issue-142 intake and exact existing duplicate remain representable', () => {
-  const record = { issue_number: 142, version: 'v2', public_safe: true, duplicate_checked: true, state: 'QUEUED', identity: 'run-172' };
-  assert.equal(evaluateLedgerEvidence({ run_id: 'run-172', intake: record }).accepted, true);
-  assert.equal(evaluateLedgerEvidence({ run_id: 'run-172', exact_existing_duplicate: record }).accepted, true);
+test('missing, invalid, or unauthorised scope fails closed', () => {
+  const cases = [
+    { scope: undefined },
+    { scope: { digest: 'invalid' } },
+    { scope: { authorised: false } },
+  ];
+  for (const override of cases) {
+    assert.equal(evaluateAssurance(evidence(override)).code, 'FAIL_CLOSED_REQUIRED_EVIDENCE');
+  }
+});
+
+test('missing or invalid G4 evidence fails closed', () => {
+  const missing = evidence({ g4: undefined });
+  assert.equal(evaluateAssurance(missing).code, 'FAIL_CLOSED_REQUIRED_EVIDENCE');
+
+  const conflicting = evidence({ g4: { candidate_head: sha('z') } });
+  assert.equal(evaluateAssurance(conflicting).code, 'FAIL_CLOSED_REQUIRED_EVIDENCE');
+
+  const stale = evidence({ g4: { fresh: false } });
+  assert.equal(evaluateAssurance(stale).code, 'FAIL_CLOSED_REQUIRED_EVIDENCE');
+});
+
+test('missing or unsuccessful required checks fail closed', () => {
+  const missing = evidence({ required_checks: undefined });
+  assert.equal(evaluateAssurance(missing).code, 'FAIL_CLOSED_REQUIRED_EVIDENCE');
+
+  const unsuccessful = evidence({ required_checks: { items: [{ id: 'required-ci', required: true, status: 'failed', server_authoritative: true, verifiable: true }] } });
+  assert.equal(evaluateAssurance(unsuccessful).code, 'FAIL_CLOSED_REQUIRED_EVIDENCE');
+});
+
+test('missing or incomplete review inventory fails closed', () => {
+  const missing = evidence({ review: undefined });
+  assert.equal(evaluateAssurance(missing).code, 'FAIL_CLOSED_REQUIRED_EVIDENCE');
+
+  const incomplete = evidence({ review: { complete: false } });
+  assert.equal(evaluateAssurance(incomplete).code, 'FAIL_CLOSED_REQUIRED_EVIDENCE');
+});
+
+test('an unknown extra property cannot replace missing required evidence', () => {
+  const input = evidence({ candidate: undefined, extra_evidence: { head: candidate.head, tree: candidate.tree, base: candidate.base } });
+  assert.equal(evaluateAssurance(input).code, 'FAIL_CLOSED_REQUIRED_EVIDENCE');
 });
 
 test('Run-172 RED C: valid exact accepted candidate tuple remains verifiable', () => {
   const result = evaluateFinality(finalityEvidence());
   assert.equal(result.code, 'FINALITY_VERIFIED');
+});
+
+test('Run-172 RED C: unexpected PR binding is rejected', () => {
+  const result = evaluateFinality(finalityEvidence({
+    merge: { intended_pr_number: 355, observed_pr_number: 355 },
+  }));
+  assert.equal(result.code, 'UNEXPECTED_PR_REJECTED');
 });
 
 test('Run-172 RED C: missing expected or observed head fails closed', () => {
@@ -287,6 +319,12 @@ test('Run-172 RED C: canonical parent must bind to the accepted base', () => {
 test('Run-172 RED C: canonical main must bind to the merge-result SHA', () => {
   const result = evaluateFinality(finalityEvidence({ canonical: { main_head: sha('h') } }));
   assert.equal(result.finality_blocked, true);
+});
+
+test('Run-172 RED C: unbound canonical result fails closed without rerunning G4', () => {
+  const result = evaluateFinality(finalityEvidence({ canonical: { bound_to_intended_merge: false } }));
+  assert.equal(result.code, 'FAIL_CLOSED_CANONICAL_BINDING');
+  assert.equal(result.g4_rerun, false);
 });
 
 test('Run-172 RED D: a PASS handoff cannot infer no blocker from missing truth', () => {
