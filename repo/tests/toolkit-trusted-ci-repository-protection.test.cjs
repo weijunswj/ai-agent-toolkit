@@ -482,6 +482,77 @@ test('gate state transitions distinguish duplicate, stale, superseded, and uncer
   assert.equal(runtime.transitionGateState(verifying, 'publish', { identity: { ...identity, head_sha: '9'.repeat(40) }, movement: 'head' }).code, 'HEAD_MOVED');
 });
 
+test('check-run readback binds canonical name, App, head, and certification identity', () => {
+  const identity = runtime.checkRunIdentity({
+    repository_id: REPOSITORY_ID,
+    pr: 194,
+    head_sha: SHAS.head,
+    base_sha: SHAS.base,
+    merge_sha: SHAS.merge,
+    protected_workflow_identity: workflow.WORKFLOW_ID,
+    protected_workflow_source_sha: PROTECTED_WORKFLOW_SOURCE_SHA,
+    contract_digest: runtime.EVIDENCE_CONTRACT_DIGEST,
+    attempt: 1,
+    generation: 1,
+  });
+  assert.equal(identity.ok, true, identity.code);
+
+  const expected = {
+    app_id: publisher.app_id,
+    head_sha: identity.identity.head_sha,
+    identity: identity.identity,
+    external_id: identity.external_id,
+  };
+  const checkRun = {
+    id: 42,
+    node_id: 'check-run-node',
+    name: 'CI Gate',
+    context: 'CI Gate',
+    app: { id: publisher.app_id, slug: 'trusted-ci' },
+    head_sha: SHAS.head,
+    external_id: identity.external_id,
+    status: 'completed',
+    conclusion: 'success',
+    html_url: 'https://github.com/weijunswj/ai-agent-toolkit/runs/42',
+  };
+  assert.equal(runtime.validateCheckRunReadback(checkRun, expected).ok, true);
+
+  const missingName = { ...checkRun };
+  delete missingName.name;
+  assert.equal(runtime.validateCheckRunReadback(missingName, expected).ok, false, 'missing name');
+  assert.equal(runtime.validateCheckRunReadback({ ...checkRun, name: 'CI Gate (legacy)' }, expected).ok, false, 'wrong name');
+  assert.equal(runtime.validateCheckRunReadback({ ...checkRun, app: {} }, expected).ok, false, 'missing app.id');
+  assert.equal(runtime.validateCheckRunReadback({ ...checkRun, app: { id: publisher.app_id + 1 } }, expected).ok, false, 'wrong app.id');
+  assert.equal(runtime.validateCheckRunReadback({ ...checkRun, app: { id: String(publisher.app_id) } }, expected).ok, false, 'coerced app.id');
+
+  const missingHead = { ...checkRun };
+  delete missingHead.head_sha;
+  assert.equal(runtime.validateCheckRunReadback(missingHead, expected).ok, false, 'missing head_sha');
+  const staleHeadIdentity = runtime.checkRunIdentity({ ...identity.identity, head_sha: 'b'.repeat(40) });
+  assert.equal(staleHeadIdentity.ok, true, staleHeadIdentity.code);
+  assert.equal(runtime.validateCheckRunReadback({ ...checkRun, head_sha: 'b'.repeat(40), external_id: staleHeadIdentity.external_id }, expected).ok, false, 'stale head_sha');
+  assert.equal(runtime.validateCheckRunReadback({ ...checkRun, head_sha: 'b'.repeat(40) }, expected).ok, false, 'wrong head_sha');
+
+  const missingExternalId = { ...checkRun };
+  delete missingExternalId.external_id;
+  assert.equal(runtime.validateCheckRunReadback(missingExternalId, expected).ok, false, 'missing external_id');
+  assert.equal(runtime.validateCheckRunReadback({ ...checkRun, external_id: `${runtime.EXTERNAL_ID_PREFIX}${'0'.repeat(64)}` }, expected).ok, false, 'wrong external_id');
+  const staleAttemptIdentity = runtime.checkRunIdentity({ ...identity.identity, attempt: 2 });
+  assert.equal(staleAttemptIdentity.ok, true, staleAttemptIdentity.code);
+  assert.equal(runtime.validateCheckRunReadback({ ...checkRun, external_id: staleAttemptIdentity.external_id }, expected).ok, false, 'different canonical identity');
+  assert.equal(runtime.validateCheckRunReadback({ ...checkRun, external_id: staleHeadIdentity.external_id }, expected).ok, false, 'different canonical head identity');
+  assert.equal(runtime.validateCheckRunReadback(checkRun, { ...expected, external_id: `${runtime.EXTERNAL_ID_PREFIX}${'1'.repeat(64)}` }).ok, false, 'arbitrary expected external_id');
+  assert.equal(runtime.validateCheckRunReadback({ ...checkRun, external_id: `${runtime.EXTERNAL_ID_PREFIX}${'1'.repeat(64)}` }, expected).ok, false, 'arbitrary check-run external_id');
+  assert.equal(runtime.validateCheckRunReadback(checkRun, { ...expected, head_sha: 'b'.repeat(40) }).ok, false, 'identity/head inconsistency');
+  assert.equal(runtime.validateCheckRunReadback(checkRun, { app_id: publisher.app_id, head_sha: SHAS.head, identity: identity.identity }).ok, true, 'derived external_id path');
+
+  const noContext = { ...checkRun };
+  delete noContext.context;
+  assert.equal(runtime.validateCheckRunReadback(noContext, expected).ok, true, 'context remains compatibility-only');
+  assert.equal(runtime.validateCheckRunReadback({ ...checkRun, context: 'CI Gate alias' }, expected).ok, false, 'wrong compatibility context');
+  assert.equal(runtime.validateCheckRunReadback(checkRun, { app_id: publisher.app_id, head_sha: SHAS.head }).ok, false, 'missing canonical identity');
+});
+
 test('provider identity, ownership receipts, and preview-only protection plans remain bounded', (t) => {
   const capabilityRegistryOptions = protectionRegistry(t);
   const publisherResult = runtime.validatePublisher(publisher);
@@ -497,8 +568,6 @@ test('provider identity, ownership receipts, and preview-only protection plans r
   assert.equal(runtime.validateBranchProtectionRequiredCheck({ context: 'CI Gate', app_id: String(publisher.app_id) }).ok, false);
   assert.equal(runtime.validateRulesetRequiredCheck({ context: 'CI Gate', integration_id: publisher.app_id }, { app_id: publisher.app_id }).ok, true);
   assert.equal(runtime.validateRulesetRequiredCheck({ context: 'CI Gate', integration_id: publisher.app_id + 1 }, { app_id: publisher.app_id }).ok, false);
-  assert.equal(runtime.validateCheckRunReadback({ name: 'CI Gate', app: { id: publisher.app_id } }, { app_id: publisher.app_id }).ok, true);
-  assert.equal(runtime.validateCheckRunReadback({ name: 'CI Gate', app: { id: String(publisher.app_id) } }, { app_id: publisher.app_id }).ok, false);
 
   const desired = runtime.desiredProtectionProjection({ repository_id: REPOSITORY_ID, default_branch: 'main', app_id: publisher.app_id });
   assert.equal(desired.ok, true);

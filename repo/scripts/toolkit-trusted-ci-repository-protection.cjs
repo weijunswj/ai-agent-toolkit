@@ -1197,11 +1197,25 @@ function validateRulesetRequiredCheck(input, expected = {}) {
 }
 
 function validateCheckRunReadback(checkRun, expected = {}) {
-  if (!isRecord(checkRun) || !isRecord(checkRun.app) || providerAppId(checkRun.app.id) === null
-    || (expected.app_id !== undefined && checkRun.app.id !== expected.app_id)) return failure('producer_mismatch');
-  if (checkRun.name !== undefined && checkRun.name !== GATE_CONTEXT) return failure('producer_mismatch');
-  if (checkRun.context !== undefined && checkRun.context !== GATE_CONTEXT) return failure('producer_mismatch');
-  return success({ check_run: clone(checkRun), app_id: checkRun.app.id });
+  const expectedKeys = ['app_id', 'head_sha', 'identity', 'external_id'];
+  if (!isRecord(checkRun) || !isRecord(expected) || Object.keys(expected).some((key) => !expectedKeys.includes(key))
+    || !isRecord(checkRun.app) || providerAppId(checkRun.app.id) === null || providerAppId(expected.app_id) === null
+    || checkRun.app.id !== expected.app_id || checkRun.name !== GATE_CONTEXT
+    || (checkRun.context !== undefined && checkRun.context !== GATE_CONTEXT)
+    || !isSha(checkRun.head_sha) || !isSha(expected.head_sha) || checkRun.head_sha !== expected.head_sha) {
+    return failure('producer_mismatch');
+  }
+  const identity = checkRunIdentity(expected.identity);
+  if (!identity.ok || identity.identity.head_sha !== expected.head_sha
+    || (expected.external_id !== undefined && expected.external_id !== identity.external_id)
+    || checkRun.external_id !== identity.external_id) return failure('identity_mismatch');
+  return success({
+    check_run: clone(checkRun),
+    app_id: checkRun.app.id,
+    head_sha: checkRun.head_sha,
+    external_id: identity.external_id,
+    identity: identity.identity,
+  });
 }
 
 function checkRunIdentity(input) {
