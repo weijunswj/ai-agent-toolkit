@@ -39,15 +39,25 @@ function legacyReferenceAllowed(rel) {
 const activePolicyRootPaths = ['AGENTS.md', 'README.md'];
 const historicalPolicyPathPrefixes = ['repo/docs/audits/'];
 const historicalPolicyPaths = new Set(['repo/docs/RETIRED-SOURCE-PROVENANCE.md']);
+const activeSkillInstructionPattern = /^skills\/.+\/(?:SKILL|README|INSTALL)\.md$/i;
+const standalonePublisherInstructionPaths = new Set([
+  'skills/context-preserving-ai-publisher/SKILL.md',
+  'skills/context-preserving-ai-publisher/README.md'
+]);
 const activeTopologyPatterns = [
   { pattern: /\b_projects(?:\b|[\\/])/i, message: 'uses retired _projects source ownership' },
   { pattern: /\b_main(?:\b|[\\/])/i, message: 'uses standalone retired _main source ownership' },
-  { pattern: /\bproject\s+module\b[\s\S]{0,120}\bpublished\s+skill\b/i, message: 'instructs Toolkit project-module plus published-skill creation' },
-  { pattern: /\bproject[- ]to[- ]skill\b[\s\S]{0,100}\b(?:publish|publishing|published|generate|generated|copy|writeback|sync)\b/i, message: 'instructs retired project-to-skill publishing' },
-  { pattern: /\bsource[- ]to[- ]surface\b[\s\S]{0,120}\b(?:workflow|publish|publishing|published|publisher|generate|generated|copy|writeback|sync)\b/i, message: 'instructs Toolkit source-to-surface publishing' },
-  { pattern: /\b(?:workflow|publish|publishing|published|(?<!-)publisher|generate|generated|copy|writeback|sync)\b[\s\S]{0,120}\bsource[- ]to[- ]surface\b/i, message: 'instructs Toolkit source-to-surface publishing' },
+  { pattern: /\bcurated[_ -]output[_ -]for[_ -]ai\b/i, message: 'uses retired curated-output source ownership' },
+  { pattern: /\bproject[- ]module\b[\s\S]{0,140}\b(?:published|generated)\s+skill\b/i, message: 'instructs retired Toolkit project-module plus published-skill operation' },
+  { pattern: /\b(?:published|generated)\s+skill\b[\s\S]{0,140}\bproject[- ]module\b/i, message: 'instructs retired Toolkit project-module plus published-skill operation' },
+  { pattern: /\bproject[- ]to[- ]skill\b/i, message: 'instructs retired project-to-skill publishing' },
+  { pattern: /\b(?:project[- ]manifest|toolkit\.project\.json|source[- ]manifest)\b[\s\S]{0,140}\b(?:publish|publishing|published|generate|generated|copy|writeback|sync|skill|surface)\b/i, message: 'instructs retired project-manifest publishing' },
+  { pattern: /\bsource[- ]to[- ](?:generated[- ]?)?surface\b[\s\S]{0,140}\b(?:workflow|publish|publishing|published|publisher|generate|generated|copy|writeback|sync|conversion|handoff)\b/i, message: 'instructs Toolkit source-to-surface publishing' },
+  { pattern: /\b(?:workflow|publish|publishing|published|(?<!-)publisher|generate|generated|copy|writeback|sync|conversion|handoff)\b[\s\S]{0,140}\bsource[- ]to[- ](?:generated[- ]?)?surface\b/i, message: 'instructs Toolkit source-to-surface publishing' },
   { pattern: /\b(?:generated|deterministic)\s+(?:skill\s+)?(?:copies?|publication|publishing|writeback)\b/i, message: 'instructs retired generated skill copies or writeback' },
   { pattern: /\b(?:skill\s+)?(?:copies?|publication|publishing|writeback)\s+(?:through|from|via)\s+(?:generated|deterministic)\b/i, message: 'instructs retired generated skill copies or writeback' },
+  { pattern: /\b(?:publisher\s+(?:skill|workflow)|source[- ]to[- ](?:generated[- ]?)?surface\s+(?:workflow|conversion|handoff))\b/i, message: 'routes Toolkit conversion through a retired publisher workflow' },
+  { pattern: /\b(?:use|pair|route|require|follow|name)\b[\s\S]{0,100}\bcontext-preserving-ai-publisher\b/i, message: 'routes Toolkit conversion through the standalone publisher' },
   { pattern: /\b(?:node\s+)?repo\/scripts\/(?:sync-toolkit-projects|package-skills|package-packs)\.cjs\b/i, message: 'instructs a retired publishing or sync command' }
 ];
 
@@ -56,26 +66,103 @@ function activePolicyFiles() {
     .filter((rel) => rel.endsWith('.md'))
     .filter((rel) => !historicalPolicyPaths.has(rel))
     .filter((rel) => !historicalPolicyPathPrefixes.some((prefix) => rel.startsWith(prefix)));
-  return [...new Set([...activePolicyRootPaths, ...docs])].filter(exists).sort();
+  const skillInstructions = walk('skills').filter((rel) => activeSkillInstructionPattern.test(rel));
+  return [...new Set([...activePolicyRootPaths, ...docs, ...skillInstructions])].filter(exists).sort();
 }
 
-function nonOperationalContext(text) {
-  return /\b(?:historical|earlier|previous|superseded|legacy|audit|finding|evidence)\b/i.test(text)
-    || /\b(?:no|not|never|without|absent|forbidden|removed|avoid|outside|cannot|can't)\b/i.test(text)
-    || /\b(?:do|does|did|must)\s+not\b/i.test(text);
-}
-
-function activeTopologyFinding(text) {
+function markdownBlocks(text) {
   const lines = String(text).replace(/\r\n/g, '\n').split('\n');
-  let sectionHeading = '';
+  const blocks = [];
+  let current = [];
+  let startLine = 1;
+
+  function flush() {
+    if (current.length) blocks.push({ lines: current, lineNumber: startLine });
+    current = [];
+  }
+
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    if (/^\s*#{1,6}\s+/.test(line)) sectionHeading = line;
-    const context = `${sectionHeading}\n${line}`;
-    if (nonOperationalContext(context)) continue;
-    const window = line;
-    for (const { pattern, message } of activeTopologyPatterns) {
-      if (pattern.test(window)) return { lineNumber: index + 1, line: line.trim(), message };
+    if (!line.trim() || /^\s*#{1,6}\s+/.test(line)) {
+      flush();
+      continue;
+    }
+    if (/^\s*\|/.test(line)) {
+      flush();
+      blocks.push({ lines: [line], lineNumber: index + 1 });
+      continue;
+    }
+    if (!current.length) startLine = index + 1;
+    if (current.length && /^\s*(?:[-*+]\s+|\d+[.)]\s+)/.test(line)) flush();
+    if (!current.length) startLine = index + 1;
+    current.push(line.trim());
+  }
+  flush();
+  return blocks;
+}
+
+function normaliseTopologyText(lines) {
+  const joined = lines.join(' ').replace(/\s+/g, ' ').trim();
+  const compact = joined.replace(/\s*([\\/-])\s*/g, '$1');
+  return [joined, compact];
+}
+
+function sentenceForMatch(text, index) {
+  let start = 0;
+  for (let cursor = 0; cursor < index; cursor += 1) {
+    if (/[.!?]/.test(text[cursor]) && /\s/.test(text[cursor + 1] || '')) start = cursor + 1;
+  }
+  let end = text.length;
+  for (let cursor = index; cursor < text.length; cursor += 1) {
+    if (/[.!?]/.test(text[cursor]) && /\s/.test(text[cursor + 1] || '')) {
+      end = cursor + 1;
+      break;
+    }
+  }
+  return text.slice(start, end).trim();
+}
+
+function hasUnnegatedDirective(text) {
+  const cleaned = text
+    .replace(/\bauto-sync\b/gi, '')
+    .replace(/\b(?:sync|writeback)\s+(?:command|lane|step|workflow|machinery)\b/gi, '');
+  const directivePattern = /\b(?:use|uses|run|runs|create|creates|add|adds|maintain|maintains|edit|edits|update|updates|follow|follows|publish|publishes|generate|generates|write|writes|sync|syncs|convert|converts|store|stores|keep|keeps|build|builds|pair|pairs|name|names|require|requires)\b/gi;
+  let match;
+  while ((match = directivePattern.exec(cleaned))) {
+    const prefix = cleaned.slice(Math.max(0, match.index - 45), match.index);
+    if (/\b(?:no|not|never|without|avoid|forbidden|removed|retired|cannot|can't|doesn't|does not|don't|do not|must not|should not|no longer)\b[\s\S]{0,40}$/i.test(prefix)) continue;
+    return true;
+  }
+  return false;
+}
+
+function retiredTopologyExempt(clause) {
+  const negative = /\b(?:no|not|never|without|absent|forbidden|removed|retired|avoid|outside|cannot|can't|doesn't|does not|don't|do not|must not|should not|no longer|not current|not used|not required|not maintained)\b/i.test(clause);
+  const historical = /\b(?:historical|earlier|previous|formerly|superseded|legacy|used to|once|was|were)\b/i.test(clause);
+  const current = /\b(?:current|currently|now|today|still)\b/i.test(clause);
+  if (hasUnnegatedDirective(clause)) return false;
+  if (negative) return true;
+  return historical && !current;
+}
+
+function standalonePublisherContext(clause) {
+  return /\b(?:separate|standalone|generic)\b[\s\S]{0,120}\bcontext-preserving-ai-publisher\b/i.test(clause)
+    && /\b(?:not|outside|independent(?:ly)?\s+of|belongs\s+to|own)\b[\s\S]{0,100}\b(?:Toolkit|this\s+repo|current)\b/i.test(clause);
+}
+
+function activeTopologyFinding(text, rel = '') {
+  const normalisedRel = slash(rel);
+  for (const block of markdownBlocks(text)) {
+    for (const candidate of normaliseTopologyText(block.lines)) {
+      for (const { pattern, message } of activeTopologyPatterns) {
+        const match = candidate.match(pattern);
+        if (!match) continue;
+        const clause = sentenceForMatch(candidate, match.index);
+        const publisherProduct = standalonePublisherInstructionPaths.has(normalisedRel)
+          && /\b(?:this\s+skill|publisher|generic)\b/i.test(clause);
+        if (publisherProduct || standalonePublisherContext(clause) || retiredTopologyExempt(clause)) continue;
+        return { lineNumber: block.lineNumber, line: block.lines[0].trim(), message };
+      }
     }
   }
   return null;
@@ -227,7 +314,7 @@ function validate(snapshotValue) {
     }
   }
   for (const rel of activePolicyFiles()) {
-    const finding = activeTopologyFinding(readText(rel));
+    const finding = activeTopologyFinding(readText(rel), rel);
     if (finding) {
       errors.push(`${rel}:${finding.lineNumber} ${finding.message}: ${finding.line}`);
     }

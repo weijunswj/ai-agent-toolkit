@@ -15,7 +15,7 @@ Use this skill to turn "strip the unsafe stuff out" into a repeatable decision:
 
 The skill is intentionally passive. It does not install, run, import, clone, activate, deploy, publish, or execute third-party skill material by itself.
 
-For approved conversions in this toolkit, pair the audit result with `context-preserving-ai-publisher`. This skill decides whether and what to convert; the publisher workflow handles the source-to-surface repo mechanics.
+For approved conversions, follow the target repository's documented canonical ownership and validation workflow. In this Toolkit, approved material is maintained directly under `skills/**` and `repo/**`; this audit decides whether and what to convert without requiring a separate project or publisher handoff.
 
 ## Typical Inputs
 
@@ -34,6 +34,6 @@ The audit should produce a concise verdict with:
 - Safe reusable material.
 - Usefulness and token-bloat decision.
 - Required conversion edits.
-- Conversion handoff for the source-preserving publisher workflow.
-- Proposed canonical `skills/**` placement and any required `repo/contracts/**` or provenance updates.
+- Canonical target-repository handoff and placement.
+- Proposed `skills/**` placement and any required `repo/**` contract or provenance updates.
 - Validation and remaining risks.

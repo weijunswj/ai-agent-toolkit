@@ -44,6 +44,20 @@ function runAudit(cwd, args = []) {
   return spawnSync(process.execPath, [auditScript, '--workspace', cwd, ...args], { cwd: os.tmpdir(), encoding: 'utf8' });
 }
 
+function assertFixtureFails(relPath, fixture, messagePattern = /retired|publishing|source ownership|command|conversion/i) {
+  const cwd = copyRepo();
+  try {
+    const target = path.join(cwd, relPath);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.appendFileSync(target, `\n${fixture}\n`, 'utf8');
+    const result = runAudit(cwd, ['--json']);
+    assert.notEqual(result.status, 0, fixture);
+    assert.match(result.stdout, messagePattern, fixture);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+}
+
 test('canonical surface snapshot has no packs, retired skills, or project tree', () => {
   const audit = require(auditScript);
   const snapshot = audit.snapshot();
@@ -123,6 +137,8 @@ test('active topology audit rejects each known positive retired operation', () =
     `Current Toolkit source ownership is \`${legacyProjectToken}/development/example/README.md\`.`,
     'Create the standalone `_main/` source and maintain it as the active Toolkit input.',
     'Create a Toolkit project module plus published skill for every new skill.',
+    'Maintain a published skill from a Toolkit project module for every new skill.',
+    'Use toolkit.project.json to generate a published skill for every new skill.',
     'Use the Toolkit project-to-skill source-to-surface publishing workflow for new skills.',
     'Regenerate generated skill copies through deterministic writeback before review.',
     'Run `node repo/scripts/sync-toolkit-projects.cjs --write` after every edit.'
@@ -154,6 +170,112 @@ test('active topology audit accepts direct-canonical guidance, retirement statem
   const cwd = copyRepo();
   try {
     fs.writeFileSync(path.join(cwd, 'repo', 'docs', 'active-topology-fixture.md'), `${directCanonical}\n${negativeRetirement}\n${historicalEvidence}\n`, 'utf8');
+    const result = runAudit(cwd, ['--check']);
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('active topology audit covers current skill instruction entrypoints and the repository is clean', () => {
+  const audit = require(auditScript);
+  const activeFiles = audit.activePolicyFiles();
+  assert.ok(activeFiles.includes('skills/agent-skill-supply-chain-audit/SKILL.md'));
+  assert.ok(activeFiles.includes('skills/agent-skill-supply-chain-audit/README.md'));
+  assert.ok(activeFiles.includes('skills/ui-ux-secure-frontend-design/INSTALL.md'));
+  for (const relPath of activeFiles) assert.equal(audit.activeTopologyFinding(readText(relPath), relPath), null, relPath);
+  assert.equal(audit.validate(audit.snapshot()).length, 0);
+});
+
+test('heading vocabulary cannot exempt a following active retired-topology instruction', () => {
+  assertFixtureFails(
+    'repo/docs/active-topology-heading-fixture.md',
+    '## Historical audit evidence\n\nCreate a Toolkit project module plus published skill for current conversions.'
+  );
+});
+
+test('unrelated negation cannot exempt a separate active retired-topology instruction', () => {
+  assertFixtureFails(
+    'repo/docs/active-topology-negation-fixture.md',
+    'This unrelated setting is not relevant. Create a Toolkit project module plus published skill for current conversions.'
+  );
+});
+
+test('multiline retired-topology instructions fail closed', () => {
+  assertFixtureFails(
+    'repo/docs/active-topology-multiline-fixture.md',
+    'Create a Toolkit project module plus\npublished skill for current conversions.'
+  );
+});
+
+test('split command and path wording cannot evade the retired-command check', () => {
+  assertFixtureFails(
+    'repo/docs/active-topology-split-command-fixture.md',
+    'Run `node repo/scripts/\nsync-toolkit-projects.cjs --write` after conversion.'
+  );
+});
+
+test('current instructions remain forbidden when they also call a route legacy', () => {
+  assertFixtureFails(
+    'repo/docs/active-topology-current-plus-legacy-fixture.md',
+    'The route is legacy, but agents must use the project-to-skill publishing route for current conversions.'
+  );
+});
+
+test('active non-publisher skill instructions are included in the permanent gate', () => {
+  assertFixtureFails(
+    'skills/n8n-agent-rules/SKILL.md',
+    'Create a Toolkit project module plus published skill for current conversions.'
+  );
+});
+
+test('nested skill instruction entrypoints are included in the permanent gate', () => {
+  assertFixtureFails(
+    'skills/n8n-agent-rules/references/active-fixture/SKILL.md',
+    'Create a Toolkit project module plus published skill for current conversions.'
+  );
+});
+
+test('representative supply-chain publisher routing residue fails closed', () => {
+  assertFixtureFails(
+    'skills/agent-skill-supply-chain-audit/SKILL.md',
+    'For approved Toolkit conversions, use context-preserving-ai-publisher as the publisher workflow for the source-to-surface conversion.'
+  );
+});
+
+test('explicit retirement wording remains valid', () => {
+  const cwd = copyRepo();
+  try {
+    fs.writeFileSync(
+      path.join(cwd, 'repo', 'docs', 'active-topology-retirement-fixture.md'),
+      `## Audit history\nEarlier Toolkit operation used \`${legacyProjectToken}/example/_main\`, but that route is not current.\n\nThe Toolkit does not maintain project-to-skill publishing or a generic sync command.\n`,
+      'utf8'
+    );
+    const result = runAudit(cwd, ['--check']);
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('standalone publisher product material remains valid without broadening legacy references', () => {
+  const audit = require(auditScript);
+  const publisherSkill = 'skills/context-preserving-ai-publisher/SKILL.md';
+  const publisherReadme = 'skills/context-preserving-ai-publisher/README.md';
+  assert.notEqual(
+    audit.activeTopologyFinding('Create a Toolkit project module plus published skill.', publisherSkill),
+    null
+  );
+  assert.equal(audit.activeTopologyFinding(readText(publisherSkill), publisherSkill), null);
+  assert.equal(audit.activeTopologyFinding(readText(publisherReadme), publisherReadme), null);
+
+  const cwd = copyRepo();
+  try {
+    fs.appendFileSync(
+      path.join(cwd, publisherSkill),
+      '\nUse a project module to maintain generated skill outputs for the standalone publisher product.\n',
+      'utf8'
+    );
     const result = runAudit(cwd, ['--check']);
     assert.equal(result.status, 0, result.stderr);
   } finally {
