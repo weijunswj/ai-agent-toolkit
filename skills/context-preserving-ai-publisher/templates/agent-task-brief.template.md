@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: repo-methodology.context-preserving-ai-publisher
-Source: _projects/repo-methodology/context-preserving-ai-publisher/_main/templates/agent-task-brief.template.md
-Update the project source and run sync.
--->
 # Agent Task Brief
 
 ## Goal

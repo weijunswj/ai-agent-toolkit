@@ -8,7 +8,7 @@ Source-watch is review-notification-only. It may open or refresh a stable PR wit
 
 | Lane | Input | Review trigger | Output |
 | --- | --- | --- | --- |
-| Active third-party source updates | `_projects/**/SOURCE-LOCK.json` plus `review-state.json` | Latest GitHub commit differs from the identity-matching reviewed-through cursor, or from the adopted `source_commit` when no cursor exists. | `repo/source-watch/reviews/active-third-party-updates.md` notification PR. |
+| Active third-party source updates | `repo/source-watch/provenance/**/SOURCE-LOCK.json` plus `review-state.json` | Latest GitHub commit differs from the identity-matching reviewed-through cursor, or from the adopted `source_commit` when no cursor exists. | `repo/source-watch/reviews/active-third-party-updates.md` notification PR. |
 | Advisory targets | `repo/source-watch/advisory-targets.json` plus `review-state.json` | GitHub advisory target differs from its reviewed-through cursor, falls back to a compatibility baseline, has no baseline, or is explicitly pending. | Same notification PR; advisory document and review-state changes happen separately. |
 | Host Harness Capability Drift Review | `repo/source-watch/advisory-targets.json` target `host-harness-capability-drift-review` plus [template](templates/host-harness-capability-drift-review.md). | `review_cadence_days` has elapsed or no `last_reviewed_at` is recorded. | Same notification PR; any shrink/move/delete work must be a separate evidence-backed PR. |
 

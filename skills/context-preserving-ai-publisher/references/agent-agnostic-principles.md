@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: repo-methodology.context-preserving-ai-publisher
-Source: _projects/repo-methodology/context-preserving-ai-publisher/_main/agent-agnostic-principles.md
-Update the project source and run sync.
--->
 # Agent-Agnostic Principles
 
 This method is for any AI coding agent that edits or maintains repo documentation, templates, skills, MCP notes, or other AI-facing surfaces. It does not assume one agent product, prompt format, or tooling stack.

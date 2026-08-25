@@ -47,7 +47,7 @@ const OWNERSHIP_STATE_DIRECTORY = path.join('.ai-agent-toolkit', 'user-state', '
 const OWNERSHIP_RECEIPT_BASENAME = 'ownership.v1.json';
 const MAX_OWNERSHIP_RECEIPT_BYTES = 64 * 1024;
 const OWNERSHIP_RECEIPT_OPERATIONS = Object.freeze(['create-managed-ruleset', 'update-managed-ruleset']);
-const PRODUCER_MAP_PATH = path.resolve(__dirname, '..', '..', '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'candidate-producer-map.n6.json');
+const PRODUCER_MAP_PATH = path.resolve(__dirname, '..', 'contracts', 'trusted-ci-repository-protection', 'candidate-producer-map.n6.json');
 const SERVER_COMPONENT_PRODUCER = 'github-actions-server';
 const LOCAL_HYGIENE_COMPONENT_PRODUCER = 'local-executor-only';
 const MAX_CHANGED_FILES = 3000;
@@ -166,21 +166,9 @@ const COMPONENT_DEFINITIONS = Object.freeze([
     not_applicable_predicate: 'protected-base-path-class-evaluation',
   },
   {
-    id: 'project-sync',
-    owned_path_classes: ['project-source', 'project-manifest', 'source-lock'],
-    applicability: 'changed path matches project-source or project-manifest',
-    command: 'node repo/scripts/sync-toolkit-projects.cjs --check',
-    toolchain: 'node',
-    dependency_setup: 'repository-node-toolchain',
-    result_type: 'deterministic-check',
-    artifact_producer: SERVER_COMPONENT_PRODUCER,
-    mandatory_status: 'required-when-applicable',
-    not_applicable_predicate: 'protected-base-path-class-evaluation',
-  },
-  {
     id: 'source-lock-audit',
-    owned_path_classes: ['source-lock'],
-    applicability: 'changed path matches source-lock',
+    owned_path_classes: ['source-watch'],
+    applicability: 'changed path matches source-watch',
     command: 'node repo/scripts/audit-project-source-locks.cjs',
     toolchain: 'node',
     dependency_setup: 'repository-node-toolchain',
@@ -203,7 +191,7 @@ const COMPONENT_DEFINITIONS = Object.freeze([
   },
   {
     id: 'fallback-risk-audit',
-    owned_path_classes: ['runtime-source', 'project-source', 'repo-docs'],
+    owned_path_classes: ['runtime-source', 'contract-source', 'repo-docs'],
     applicability: 'changed path can affect fallback behavior',
     command: 'node repo/scripts/audit-fallback-risk.cjs',
     toolchain: 'node',
@@ -215,7 +203,7 @@ const COMPONENT_DEFINITIONS = Object.freeze([
   },
   {
     id: 'toolkit-validator',
-    owned_path_classes: ['runtime-source', 'workflow-contract', 'package-manifest'],
+    owned_path_classes: ['runtime-source', 'contract-source', 'workflow-contract', 'package-manifest'],
     applicability: 'changed runtime, workflow, or package contract',
     command: 'node repo/scripts/validate-toolkit.cjs',
     toolchain: 'node',
@@ -238,34 +226,10 @@ const COMPONENT_DEFINITIONS = Object.freeze([
     not_applicable_predicate: 'protected-base-path-class-evaluation',
   },
   {
-    id: 'skill-package-check',
-    owned_path_classes: ['published-surface'],
-    applicability: 'changed skill surface',
-    command: 'node repo/scripts/package-skills.cjs --check',
-    toolchain: 'node',
-    dependency_setup: 'repository-node-toolchain',
-    result_type: 'deterministic-check',
-    artifact_producer: SERVER_COMPONENT_PRODUCER,
-    mandatory_status: 'required-when-applicable',
-    not_applicable_predicate: 'protected-base-path-class-evaluation',
-  },
-  {
     id: 'skill-portability',
     owned_path_classes: ['published-surface'],
     applicability: 'changed skill surface',
     command: 'node repo/scripts/audit-skill-portability.cjs',
-    toolchain: 'node',
-    dependency_setup: 'repository-node-toolchain',
-    result_type: 'deterministic-check',
-    artifact_producer: SERVER_COMPONENT_PRODUCER,
-    mandatory_status: 'required-when-applicable',
-    not_applicable_predicate: 'protected-base-path-class-evaluation',
-  },
-  {
-    id: 'pack-package-check',
-    owned_path_classes: ['pack-surface'],
-    applicability: 'changed pack surface',
-    command: 'node repo/scripts/package-packs.cjs --check',
     toolchain: 'node',
     dependency_setup: 'repository-node-toolchain',
     result_type: 'deterministic-check',
@@ -328,14 +292,13 @@ const FORBIDDEN_AUTHORITATIVE_TRIGGERS = Object.freeze([
 
 const PATH_CLASS_RULES = Object.freeze([
   { name: 'repo-docs', match: (path) => path === 'README.md' || path.startsWith('repo/docs/') },
-  { name: 'project-manifest', match: (path) => /^_projects\/[^/]+\/[^/]+\/(?:toolkit\.project\.json|README\.md|SOURCE-MANIFEST\.md)$/.test(path) },
-  { name: 'project-source', match: (path) => /^_projects\/[^/]+\/[^/]+\/.+/.test(path) },
-  { name: 'source-lock', match: (path) => path.startsWith('_projects/') && path.endsWith('/SOURCE-LOCK.json') },
+  { name: 'contract-source', match: (path) => path.startsWith('repo/contracts/') },
+  { name: 'source-watch', match: (path) => path.startsWith('repo/source-watch/') },
+  { name: 'source-lock', match: (path) => path.startsWith('repo/source-watch/provenance/') && path.endsWith('/SOURCE-LOCK.json') },
   { name: 'published-surface', match: (path) => path.startsWith('skills/') || path.startsWith('.codex-plugin/') || path.startsWith('.claude-plugin/') },
-  { name: 'pack-surface', match: (path) => path.startsWith('skills/') && path.includes('/packs/') },
   { name: 'runtime-source', match: (path) => path.startsWith('repo/scripts/') },
   { name: 'repository-tests', match: (path) => path.startsWith('repo/tests/') },
-  { name: 'design-source', match: (path) => path.startsWith('_projects/design/') || path.startsWith('skills/ui-ux-') },
+  { name: 'design-source', match: (path) => path.startsWith('skills/ui-ux-') },
   { name: 'workflow-contract', match: (path) => path.startsWith('.github/') || path.endsWith('.workflow.yml') },
   { name: 'package-manifest', match: (path) => path === 'package.json' || path === 'package-lock.json' },
 ]);
@@ -1480,7 +1443,7 @@ function validateOwningCICoverage(input = {}) {
   for (const item of nonCi) {
     if (byId.has(item)) return failure('producer_mismatch', { component_id: item });
   }
-  if (changedPaths.some((path) => normalizeRelativePath(path)?.startsWith('_projects/')) && !required.includes('project-sync')) return failure('component_missing');
+  if (changedPaths.some((path) => normalizeRelativePath(path)?.startsWith('repo/contracts/')) && !required.includes('toolkit-validator')) return failure('component_missing');
   if (changedPaths.some((path) => normalizeRelativePath(path)?.startsWith('.github/')) && !required.includes('toolkit-validator')) return failure('component_missing');
   return success({ manifest, coverage: manifest.path_coverage || [] });
   /* c8 ignore stop */

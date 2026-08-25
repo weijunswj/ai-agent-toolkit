@@ -1,0 +1,20 @@
+{
+  "changed_paths": [
+    "repo/contracts/trusted-ci-repository-protection/app-publisher-protocol.json",
+    "repo/contracts/trusted-ci-repository-protection/fixtures/composition-paths.n6.json",
+    "repo/contracts/trusted-ci-repository-protection/fixtures/effective-protection.n6.json",
+    "repo/contracts/trusted-ci-repository-protection/fixtures/publisher.n6.json",
+    "repo/contracts/trusted-ci-repository-protection/protected-ci-gate-workflow-contract.json",
+    "repo/contracts/trusted-ci-repository-protection/templates/protected-ci-gate.workflow.yml",
+    "repo/contracts/trusted-ci-repository-protection/trusted-ci-repository-protection-contract.schema.json",
+    "repo/contracts/trusted-ci-repository-protection/trusted-ci-repository-protection-policy.json",
+    "repo/scripts/toolkit-trusted-ci-repository-protection.cjs",
+    "repo/tests/toolkit-trusted-ci-repository-protection.test.cjs"
+  ],
+  "required_components": [
+    "fallback-risk-audit",
+    "toolkit-validator",
+    "repository-tests"
+  ],
+  "candidate_declared_coverage": false
+}

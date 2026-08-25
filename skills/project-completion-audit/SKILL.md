@@ -3,12 +3,6 @@ name: project-completion-audit
 description: Use when running a guarded final audit, completion audit, production-readiness audit, release-candidate audit, launch-readiness audit, QA pass, "make sure everything works", "is this production ready", "/goal" readiness remediation, security-readiness check, or final readiness check. Performs preflight only until explicit confirmation authorizes scope.
 ---
 
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: development.project-completion-audit
-Source: _projects/development/project-completion-audit/_main/skill/SKILL.md
-Update the project source and run sync.
--->
 # Project Completion Audit
 
 ## Invocation Policy

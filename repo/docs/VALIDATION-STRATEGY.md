@@ -21,9 +21,8 @@ Do not run `--write` commands in the required validation workflow.
 Use narrow checks while actively editing so failures are easy to localise:
 
 ```bash
-node repo/scripts/sync-toolkit-projects.cjs --write
-node repo/scripts/sync-toolkit-projects.cjs --check
 node repo/scripts/sync-repo-doc-contract.cjs --check
+node repo/scripts/sync-agent-instruction-shims.cjs --check
 node repo/scripts/audit-project-source-locks.cjs
 npm run audit:surfaces
 npm run audit:surfaces:check
@@ -39,20 +38,20 @@ Before pushing, run the smallest relevant targeted checks that cover the edited 
 
 Run surface and audit checks after changing:
 
-- `_projects/**/toolkit.project.json`
-- `_projects/**/curated_output_for_ai/**`
 - `skills/**`
+- `repo/contracts/**`
+- `repo/source-watch/provenance/**`
 - audit scripts
 - audit baselines
 - generated registries
 
-For generated surfaces, run sync first, then check freshness and audit movement.
+For managed root contracts or instruction shims, run the retained synchronizer first, then check freshness and audit movement.
 
 ## Auto-Sync Is Convenience Only
 
 Generated-surface auto-sync is optional convenience writeback for narrow deterministic generated-output updates. It is not the merge gate and must not replace `npm run validate:all`.
 
-Auto-sync should skip cleanly when a PR includes `_projects/**/_main/**` source or provenance changes. In that case, the author or Codex must commit any needed generated outputs, source-lock or provenance updates, and audit baseline updates before the PR passes validation.
+There is no privileged generated-surface auto-sync lane. Canonical skill, contract, provenance, and audit-baseline changes are reviewed directly in the PR.
 
 CI should catch missed `_main` follow-up work by failing read-only validation, not by silently mutating source/provenance PRs.
 

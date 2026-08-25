@@ -9,7 +9,7 @@ const crypto = require('node:crypto');
 const processLaunch = require('./claude-process-launch.cjs');
 
 const SCHEMA = 1;
-const CONTROL_VERSION = '2.10.0';
+const CONTROL_VERSION = '2.10.1';
 const RESULTS = Object.freeze({ START: 'start', QUEUE: 'queue', REFUSE: 'refuse-root-only' });
 const CHECKER_RESULTS = Object.freeze({ PASS: 'PASS', FINDINGS: 'FINDINGS', ADMISSION_DENIED: 'ADMISSION_DENIED', SKIPPED_TRIVIAL: 'SKIPPED_TRIVIAL' });
 const HOSTS = Object.freeze({ CODEX: 'codex', CLAUDE: 'claude-code', OPENCODE: 'opencode' });
@@ -461,7 +461,7 @@ function inspectResourceCapability(options = {}) {
 const TRIVIAL_CHANGE_KINDS = new Set(['typo-only-docs', 'mechanical-comment-only', 'generated-only-authoritative-validated']);
 const GENERATED_ONLY_PREFIXES = ['skills/', '.codex-plugin/', '.claude-plugin/'];
 const PACKAGED_OR_RUNTIME_PREFIXES = [
-  'repo/scripts/', 'repo/tests/', '_projects/', 'skills/', '.codex-plugin/', '.claude-plugin/',
+  'repo/scripts/', 'repo/tests/', 'repo/contracts/', 'repo/source-watch/', 'skills/', '.codex-plugin/', '.claude-plugin/',
   '.agents/', 'AGENTS.md', 'CLAUDE.md', 'GEMINI.md', 'package.json', 'package-lock.json',
 ];
 const CHECKER_CONTEXT_LIMITS = Object.freeze({ task: 64 * 1024, files: 64 * 1024, diff: 512 * 1024, validation: 64 * 1024, surrounding: 128 * 1024 });

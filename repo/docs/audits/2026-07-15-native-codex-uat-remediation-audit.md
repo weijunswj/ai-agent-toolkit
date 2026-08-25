@@ -84,14 +84,13 @@ Security coverage is limited to this declared scope. Native host behavior remain
 Passed source, generated-output, and contract checks:
 
 - `node repo/scripts/sync-agent-instruction-shims.cjs --check`
-- `node repo/scripts/sync-toolkit-projects.cjs --check`
+- `node repo/scripts/validate-toolkit.cjs`
 - `node repo/scripts/sync-repo-doc-contract.cjs --check`
 - `node repo/scripts/audit-project-source-locks.cjs`
 - `node repo/scripts/audit-published-surfaces.cjs --check`
 - `node repo/scripts/audit-fallback-risk.cjs`
 - `node repo/scripts/audit-skill-portability.cjs`
-- `node repo/scripts/package-skills.cjs --check`
-- `node repo/scripts/package-packs.cjs --check`
+- `node repo/scripts/audit-skill-portability.cjs`
 - `node repo/scripts/validate-toolkit.cjs`
 - `git diff --check`
 

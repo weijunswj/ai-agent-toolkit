@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: n8n.local-setup
-Source: _projects/n8n/local-setup/_main/Page 3 - Production Self-Hosting With Cloudflare Tunnel.md
-Update the project source and run sync.
--->
 # Page 3 - Production Self-Hosting With Cloudflare Tunnel
 
 Use this page when you want to host n8n publicly from a local machine, home lab, office PC, mini PC, or other local/CGNAT machine through Cloudflare Tunnel.

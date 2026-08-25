@@ -1,24 +1,22 @@
-# Generated Output And Publishing Playbook
+# Canonical Surface Maintenance Playbook
 
-Use this for `_projects/**`, `skills/**`, manifests, source locks, generated outputs, sync scripts, source-watch, audit baselines, or source-of-truth changes.
+Use this for `skills/**`, `repo/contracts/**`, source locks, retained synchronizers, source-watch, audit baselines, or source-of-truth changes.
 
 ## Source Ownership
 
-- `_projects/**/_main/` preserves source material.
-- `_projects/**/curated_output_for_ai/` stores reviewed AI-facing source.
-- `skills/**` is generated or published output unless declared `linked`.
-- `toolkit.project.json` declares project version, outputs, and write boundaries.
-- `SOURCE-LOCK.json` records provenance and source-watch metadata.
+- `skills/**` contains complete copyable skill material.
+- `repo/contracts/**` contains machine contracts, fixtures, templates, and reviewed inputs.
+- `repo/source-watch/provenance/**/SOURCE-LOCK.json` records provenance and source-watch metadata.
 
-Edit source or curated files first. Do not edit generated `skills/**` directly unless the manifest explicitly declares a linked exception.
+Edit the direct canonical surface. Do not create a second source or publishing tree.
 
 ## Sync And Freshness
 
-Use the narrow sync/check path that matches the touched surface. For project outputs, run:
+Use the narrow sync/check path that matches the touched surface. For managed root blocks and shims, run:
 
 ```powershell
-node repo/scripts/sync-toolkit-projects.cjs --write
-node repo/scripts/sync-toolkit-projects.cjs --check
+node repo/scripts/sync-repo-doc-contract.cjs --check
+node repo/scripts/sync-agent-instruction-shims.cjs --check
 ```
 
 For managed root/shim instruction outputs, run:

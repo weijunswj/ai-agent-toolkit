@@ -28,7 +28,7 @@ Do not commit files from those folders. They are allowed only as local staging/o
 
 ## Durable Provenance
 
-Keep historical source provenance in [Retired Source Provenance](RETIRED-SOURCE-PROVENANCE.md) and `_projects/**/SOURCE-LOCK.json`. Do not recreate temporary migration checklists as active repo policy.
+Keep historical source provenance in [Retired Source Provenance](RETIRED-SOURCE-PROVENANCE.md) and active third-party locks under `repo/source-watch/provenance/**/SOURCE-LOCK.json`. Do not recreate temporary migration checklists as active repo policy.
 
 ## Documentation Closure
 
@@ -45,15 +45,6 @@ For broad docs, audit, planning, migration, readiness, cleanup, architecture, se
 
 Old root skill folders are removed only after their skill contents are moved under `skills/` and validation confirms the new paths.
 
-## Old Project Sources
+## Retired Project Tree
 
-Do not delete project source material during toolkit migration.
-
-Recommended retirement flow for old external project homes after their module exists here:
-
-1. Confirm the replacement project module exists under `_projects/<category>/<project>/_main/`.
-2. Confirm AI-facing consumer surfaces link to that module.
-3. Add README redirects in the old project home.
-4. Archive the old project home first.
-5. Wait 30-60 days.
-6. Delete only if no tools, links, agents, workflows, or humans depend on it and backups exist.
+The former project tree is not a supported runtime or source location. Before deleting a legacy path, confirm its contract, skill, provenance, or documentation content has a direct canonical replacement under `skills/**`, `repo/contracts/**`, `repo/source-watch/**`, or `repo/docs/**`, then run the targeted validation for that surface.

@@ -1,14 +1,3 @@
-<!--
-Generated from toolkit curated output for AI. Do not edit directly.
-Project: cicd.secure-installer
-Source: _projects/cicd/secure-installer/curated_output_for_ai/overviews/secure-cicd-installer.md
-Update the curated output and run sync.
--->
-<!--
-Curated AI-facing source.
-Project: cicd.secure-installer
-Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
--->
 
 # Secure CI/CD Installer Overview
 
@@ -41,4 +30,3 @@ Run security checks before lint, tests, build, package, or deploy. Deployment sh
 - [Secure CI/CD prompt](../templates/cicd/secure-cicd-prompt.md)
 - [Current CI/CD status template](../templates/cicd/CURRENT_CICD_STATUS.template.md)
 - [Safe source update policy](../templates/cicd/safe-source-update-policy.md)
-- [Secure CI/CD pack](../packs/secure-cicd/pack.json)

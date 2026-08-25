@@ -12,9 +12,10 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 const runtime = require(path.join(repoRoot, 'repo', 'scripts', 'toolkit-trusted-ci-repository-protection.cjs'));
 const capabilityRegistry = require(path.join(repoRoot, 'repo', 'scripts', 'toolkit-capability-registry.cjs'));
 const workflow = require(path.join(repoRoot, 'repo', 'scripts', 'toolkit-trusted-ci-repository-protection-workflow.cjs'));
-const publisher = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'fixtures', 'publisher.n6.json'), 'utf8'));
-const effectiveFixture = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'fixtures', 'effective-protection.n6.json'), 'utf8'));
-const serverEvidenceFixtureFile = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'fixtures', 'server-evidence.n6.json'), 'utf8'));
+const contractRoot = path.join(repoRoot, 'repo', 'contracts', 'trusted-ci-repository-protection');
+const publisher = JSON.parse(fs.readFileSync(path.join(contractRoot, 'fixtures', 'publisher.n6.json'), 'utf8'));
+const effectiveFixture = JSON.parse(fs.readFileSync(path.join(contractRoot, 'fixtures', 'effective-protection.n6.json'), 'utf8'));
+const serverEvidenceFixtureFile = JSON.parse(fs.readFileSync(path.join(contractRoot, 'fixtures', 'server-evidence.n6.json'), 'utf8'));
 const REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit.git';
 const effective = { ...effectiveFixture, repository_id: capabilityRegistry.repositoryIdForCanonicalRemote(REMOTE) };
 
@@ -109,7 +110,7 @@ test('diagnostic workflow cannot claim the reserved CI Gate name or finality sur
   assert.equal(workflow.validateWorkflowSource(source.replace('    name: N6 CI diagnostics', '    name: CI Gate')).code, 'WORKFLOW_RESERVED_CONTEXT');
   assert.equal(workflow.validateGateInvocation({}).code, 'WORKFLOW_NON_AUTHORITATIVE');
   assert.equal(workflow.validateWorkflowContract({
-    ...JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'protected-ci-gate-workflow-contract.json'), 'utf8')),
+    ...JSON.parse(fs.readFileSync(path.join(contractRoot, 'protected-ci-gate-workflow-contract.json'), 'utf8')),
     check_run_publication: true,
   }).ok, false);
 });
@@ -223,8 +224,8 @@ const SERVER_PR = {
 function serverPathPages() {
   return [{
     items: [
-      { filename: '_projects/cicd/trusted-ci-repository-protection/SOURCE-LOCK.json', status: 'added', previous_filename: null },
-      { filename: '_projects/cicd/trusted-ci-repository-protection/_main/trusted-ci-repository-protection-policy.json', status: 'added', previous_filename: null },
+      { filename: 'repo/source-watch/provenance/google-design-md/SOURCE-LOCK.json', status: 'added', previous_filename: null },
+      { filename: 'repo/contracts/trusted-ci-repository-protection/trusted-ci-repository-protection-policy.json', status: 'added', previous_filename: null },
       { filename: 'repo/scripts/toolkit-trusted-ci-repository-protection.cjs', status: 'added', previous_filename: null },
       { filename: 'repo/tests/toolkit-trusted-ci-repository-protection.test.cjs', status: 'added', previous_filename: null },
     ],
@@ -235,8 +236,8 @@ function serverPathPages() {
 function serverRemovedPathPages() {
   return [{
     items: [
-      { filename: '_projects/cicd/trusted-ci-repository-protection/SOURCE-LOCK.json', status: 'removed', previous_filename: null },
-      { filename: '_projects/cicd/trusted-ci-repository-protection/_main/trusted-ci-repository-protection-policy.json', status: 'added', previous_filename: null },
+      { filename: 'repo/source-watch/provenance/google-design-md/SOURCE-LOCK.json', status: 'removed', previous_filename: null },
+      { filename: 'repo/contracts/trusted-ci-repository-protection/trusted-ci-repository-protection-policy.json', status: 'added', previous_filename: null },
       { filename: 'repo/scripts/toolkit-trusted-ci-repository-protection.cjs', status: 'added', previous_filename: null },
       { filename: 'repo/tests/toolkit-trusted-ci-repository-protection.test.cjs', status: 'added', previous_filename: null },
     ],
@@ -330,7 +331,7 @@ test('server evidence binds base, head, merge source blobs and excludes local di
   assert.equal(paths.ok, true, paths.code);
   const manifest = runtime.compositionManifest(paths.changed_paths.records.map((entry) => entry.path));
   assert.equal(manifest.ok, true, manifest.code);
-  assert.deepEqual(manifest.required_components, ['project-sync', 'source-lock-audit', 'fallback-risk-audit', 'toolkit-validator', 'repository-tests']);
+   assert.deepEqual(manifest.required_components, ['source-lock-audit', 'fallback-risk-audit', 'toolkit-validator', 'repository-tests']);
   assert.equal(manifest.required_components.includes('git-diff-check'), false);
 
   const evidence = serverEvidenceFixture();
@@ -457,7 +458,7 @@ test('GitHub removed status flows from changed-path collection into canonical se
   const paths = runtime.validateChangedPathCollection({ pull_request: SERVER_PR, pages });
   assert.equal(paths.ok, true, paths.code);
   assert.deepEqual(paths.changed_paths.records.find((record) => record.path.endsWith('/SOURCE-LOCK.json')), {
-    path: '_projects/cicd/trusted-ci-repository-protection/SOURCE-LOCK.json',
+    path: 'repo/source-watch/provenance/google-design-md/SOURCE-LOCK.json',
     status: 'removed',
     previous_path: null,
   });
@@ -488,7 +489,7 @@ test('GitHub unchanged status is accepted and the complete status/rename contrac
   renamed[0].items[0] = {
     filename: 'README.md',
     status: 'renamed',
-    previous_filename: '_projects/cicd/trusted-ci-repository-protection/SOURCE-LOCK.json',
+    previous_filename: 'repo/source-watch/provenance/google-design-md/SOURCE-LOCK.json',
   };
   assert.equal(runtime.validateChangedPathCollection({ pull_request: SERVER_PR, pages: renamed }).ok, true);
   const missingPrevious = serverPathPages();
@@ -506,20 +507,20 @@ test('renamed PR files compose source and destination path requirements as a set
   const manifest = runtime.compositionManifest([{
     path: 'README.md',
     status: 'renamed',
-    previous_path: '_projects/cicd/trusted-ci-repository-protection/SOURCE-LOCK.json',
+    previous_path: 'repo/source-watch/provenance/google-design-md/SOURCE-LOCK.json',
   }]);
   assert.equal(manifest.ok, true, manifest.code);
   assert.equal(manifest.required_components.includes('source-lock-audit'), true);
-  assert.equal(manifest.required_components.includes('project-sync'), true);
+   assert.equal(manifest.required_components.includes('project-sync'), false);
   assert.equal(manifest.required_components.includes('repo-doc-contract'), true);
   assert.equal(manifest.required_components.includes('fallback-risk-audit'), true);
   assert.equal(new Set(manifest.required_components).size, manifest.required_components.length);
   assert.deepEqual(manifest.path_coverage[0], {
     path: 'README.md',
     status: 'renamed',
-    previous_path: '_projects/cicd/trusted-ci-repository-protection/SOURCE-LOCK.json',
-    classes: ['project-source', 'repo-docs', 'source-lock'],
-    owners: ['fallback-risk-audit', 'project-sync', 'repo-doc-contract', 'source-lock-audit'],
+    previous_path: 'repo/source-watch/provenance/google-design-md/SOURCE-LOCK.json',
+     classes: ['repo-docs', 'source-lock', 'source-watch'],
+     owners: ['fallback-risk-audit', 'repo-doc-contract', 'source-lock-audit'],
   });
 });
 

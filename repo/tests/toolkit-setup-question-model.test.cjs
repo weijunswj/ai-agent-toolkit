@@ -177,7 +177,7 @@ test('legacy migration stays advanced while ordinary setup and authoritative gui
   const rendered = `${core.renderSetupQuestionBank(rows)}\n${core.renderSetupQuestionBankTerminal(rows)}`;
   assert.doesNotMatch(rendered, /\bmigrate\b|PR #237|helper-agent quantit/i);
 
-  const skill = fs.readFileSync(path.join(repoRoot, '_projects/development/toolkit-local-bridge/curated_output_for_ai/skills/toolkit-setup/SKILL.md'), 'utf8');
+  const skill = fs.readFileSync(path.join(repoRoot, 'skills/toolkit-setup/SKILL.md'), 'utf8');
   assert.doesNotMatch(skill, /exception is a visible `migrate` choice/i);
   assert.match(skill, /advanced compatibility\/repair operation/i);
   assert.match(skill, /ordinary setup preserves that state without adding a helper-capacity row/i);

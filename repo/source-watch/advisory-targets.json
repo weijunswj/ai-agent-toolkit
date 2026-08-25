@@ -6,22 +6,6 @@
   },
   "targets": [
     {
-      "id": "okf-spec",
-      "name": "Open Knowledge Format draft spec",
-      "kind": "github_path",
-      "enabled": true,
-      "state": "watching",
-      "repo": "GoogleCloudPlatform/knowledge-catalog",
-      "ref": "main",
-      "path": "okf/SPEC.md",
-      "baseline_sha": null,
-      "baseline_policy": "human_advanced_only",
-      "recommendation": "Review draft spec changes only; do not copy spec text or change toolkit docs from the daily source-watch PR.",
-      "action_taken": "No toolkit implementation has been accepted yet.",
-      "remaining_work": "Decide whether any reviewed concept should become first-party toolkit documentation. If accepted, open a separate implementation PR and then either move future upstream tracking into SOURCE-LOCK or remove this advisory target.",
-      "removal_condition": "Remove after accepted OKF-derived toolkit work is implemented and any ongoing upstream dependency is represented by SOURCE-LOCK daily source-watch, or after deciding no action is needed."
-    },
-    {
       "id": "n8n-skills-hook-compatibility",
       "name": "Official n8n Skills Windows hook compatibility",
       "kind": "github_repo",

@@ -3,12 +3,6 @@ name: self-hosted-service-safety
 description: Use when reviewing or planning non-n8n self-hosted service setup, Docker Compose services, VPS deployment notes, reverse proxies, public ports, DNS/TLS, tunnels, admin panels, backups, or first-run hardening. Do not use for ordinary app coding, local-only dev servers, or n8n work.
 ---
 
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: development.self-hosted-service-safety
-Source: _projects/development/self-hosted-service-safety/_main/skill/SKILL.md
-Update the project source and run sync.
--->
 # Self-Hosted Service Safety
 
 ## Overview

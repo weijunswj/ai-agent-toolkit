@@ -4,7 +4,7 @@
 
 The external `google-labs-code/design.md` project is used only as an active upstream-tracked design-contract reference for the UI/UX skill.
 
-The toolkit project `version` in `_projects/design/google-design-md/toolkit.project.json` is the toolkit adaptation version, not an upstream package version. Upstream repo, ref, commit, file pins, attribution requirement, allowlist, and manual-review update policy are tracked in `_projects/design/google-design-md/SOURCE-LOCK.json`.
+The active lock at `repo/source-watch/provenance/google-design-md/SOURCE-LOCK.json` records the upstream repo, ref, commit, file pins, attribution requirement, allowlist, and manual-review update policy.
 
 Reviewed source:
 
@@ -33,9 +33,9 @@ License: Apache-2.0. Public attribution is required.
 
 ## UI/UX Pro Max
 
-The external `nextlevelbuilder/ui-ux-pro-max-skill` project is used only for the safe local-search subset documented in [_projects/design/ui-ux-pro-max/](../../_projects/design/ui-ux-pro-max/).
+The external `nextlevelbuilder/ui-ux-pro-max-skill` project is used only for the safe local-search subset documented in `skills/ui-ux-secure-frontend-design/tools/design-system-generator/`.
 
-The toolkit project `version` in `_projects/design/ui-ux-pro-max/toolkit.project.json` is the toolkit adaptation version, not the upstream third-party version. Upstream repo, ref, commit, file pins, attribution requirement, allowlist, and manual-review update policy are tracked in `_projects/design/ui-ux-pro-max/SOURCE-LOCK.json`.
+The active lock at `repo/source-watch/provenance/ui-ux-pro-max/SOURCE-LOCK.json` records the upstream repo, ref, commit, file pins, attribution requirement, allowlist, and manual-review update policy.
 
 Reviewed source:
 
@@ -66,4 +66,4 @@ This toolkit does not vendor external:
 - Package metadata.
 - Install commands.
 
-Project-owned scripts preserved under `_projects/**/_main/` are source material, not automatically trusted runtime code.
+Third-party-derived scripts preserved under `skills/ui-ux-secure-frontend-design/tools/` remain local-only reviewed runtime code, not automatically trusted external code.

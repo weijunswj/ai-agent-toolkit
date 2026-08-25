@@ -1,257 +1,49 @@
-# Project Module Standard
+# Canonical Surface Standard
 
-Project modules are the source-of-truth layer for reusable toolkit inputs.
+This repository uses direct canonical surfaces. It no longer maintains project manifests, curated-output trees, generated previews, or project-to-skill publishing.
 
-```text
-_projects/<category>/<project>/
-  README.md
-  toolkit.project.json
-  SOURCE-MANIFEST.md
-  SOURCE-LOCK.json
-  _main/
-    ...actual project files...
-  curated_output_for_ai/
-    ...optional reviewed AI/toolkit-facing transformations...
-  _generated/
-    ...optional generated previews...
-```
+## Surface Roles
 
-## Folder Roles
+- `skills/<skill-name>/` is a complete copyable skill folder containing `SKILL.md` and any required README, references, templates, agents, tools, or tests.
+- `repo/contracts/` contains machine-readable contracts and reviewed source inputs that are not themselves portable skills.
+- `repo/scripts/` contains deterministic runtime and maintenance helpers.
+- `repo/tests/` contains focused contract, parser, safety, and runtime tests.
+- `repo/source-watch/provenance/` contains active third-party attribution locks.
+- `repo/docs/` contains policy, safety, architecture, and validation guidance.
+- `.codex-plugin/` and `.claude-plugin/` contain native plugin package metadata; their source manifests are under `repo/contracts/toolkit-local-bridge/`.
 
-- `_projects/` keeps reusable source projects visible near the top of the repo.
-- `_main/` preserves actual project/source files with original names and structure where practical.
-- `curated_output_for_ai/` is optional reviewed source for AI-facing published material such as skills, short overviews or safety wrappers, template docs, and pack manifests.
-- `_generated/` is optional preview output only and is not source of truth.
+## Skill Creation And Routing
 
-Do not use `original/` or `derived/` as standard folder names. Do not create empty curated folders just to satisfy a schema. Do not add curated copies unless a declared sync recipe consumes them.
+Before adding a skill, inspect existing `skills/**`, README skill tables, the Skill Safety Matrix, and `repo/contracts/agent-rules/toolkit-skill-routing.md`. Prefer extending an existing skill when the trigger, safety boundary, local assets, and validation path fit without making it ambiguous or bloated.
 
-## Top-Level Categories
+Every concrete `skills/<skill-name>/SKILL.md` must have:
 
-Current `_projects/` categories are:
+- A matching folder name and frontmatter name.
+- A concise, accurate description with the exact trigger and non-trigger boundary.
+- Local runtime context for required instructions; external links may support provenance but must not be required for normal use.
+- A README or install/use note.
+- A routing entry or an intentional omission with a concrete reason.
+- A row in `repo/docs/SKILL-SAFETY-MATRIX.md`.
 
-- `cicd/` for CI/CD and GitHub Actions safety material.
-- `design/` for UI/UX and frontend design material.
-- `development/` for general development workflow helpers.
-- `knowledge/` for knowledge-base and index-maintenance skills.
-- `n8n/` for n8n setup, workflow helper scripts, and workflow templates.
-- `repo-methodology/` for source-preserving repo publishing, generated-surface discipline, audit strategy, and anti-drift methodology.
+If a skill uses third-party material, run `agent-skill-supply-chain-audit` before copying, importing, executing, or adapting it. Preserve attribution and keep the active source lock under `repo/source-watch/provenance/`.
 
-Keep specialised domains such as `cicd/` and `n8n/` first-class when that improves navigation.
+## Agent Rules
 
-## Curated Output Boundaries
+The source inputs for managed instruction blocks and portable repo-local templates live under `repo/contracts/agent-rules/`. Keep `AI-AGENT-TOOLKIT` markers intact and use `repo/scripts/sync-agent-instruction-shims.cjs` for the root shims and manual templates. Portable templates must not depend on Toolkit-only paths.
 
-Use `_projects/**/_main/**` directly when publishing full working instructions, prompts, templates, setup guides, troubleshooting notes, examples, or other runtime-critical material.
+## Validation
 
-Use `curated_output_for_ai/` for reviewed adapter material such as:
-
-- `SKILL.md` routers.
-- Skill README files.
-- Indexes and navigation tables.
-- Pack manifests.
-- Compatibility shims.
-- Safety wrappers or reviewed AI-facing packaging.
-
-Do not use `curated_output_for_ai/` as a lossy replacement for required runtime instructions.
-
-If losing detail would break usefulness, publish from `_main` with an exact `copy`, `extract`, or `concat` recipe.
-
-## Playbook Boundary
-
-Do not use `playbooks/` as a default home for full working instructions.
-
-A playbook may exist only when it is a short reviewed operating overview, routing guide, or safety wrapper. It must not replace required runtime instructions.
-
-If a document contains full setup steps, command sequences, troubleshooting, copyable prompts, templates, import/export flows, or other runtime-critical instructions, publish it from `_projects/**/_main/**` using exact `copy`, `extract`, or `concat`.
-
-Prefer these homes instead:
-
-- Full runtime docs: `skills/<skill>/references/`
-- Copyable prompts/templates: `skills/<skill>/templates/`
-- Skill routers: `skills/<skill>/SKILL.md`
-- Skill install/use docs: `skills/<skill>/README.md`
-- Pack metadata: `skills/<skill>/packs/`
-- Compatibility shims: `curated_output_for_ai/reference-link-shims/`
-
-Existing `curated_output_for_ai/playbooks/` files must be classified as overview/safety-wrapper, migrated to a clearer location, or replaced by exact `_main` recipes.
-
-## Published Surfaces
-
-Only these root surfaces are intended as first-class consumer entrypoints:
-
-- [skills/](../../skills/) for copyable AI-agent skill folders.
-- [.codex-plugin/](../../.codex-plugin/) and [.claude-plugin/](../../.claude-plugin/) for generated native plugin metadata.
-- [repo/docs/](./) for policy, standards, safety, and architecture docs.
-
-Skill-specific templates, references, helper scripts, and pack manifests should live inside the related skill folder. Published surfaces should be generated by declared recipes whenever practical. Use curated output for reviewed AI-facing source material, direct `_main/` recipes for preserved source copies, and `linked` only for rare root surfaces that are toolkit-local or otherwise cannot reasonably be generated.
-
-Human-facing navigational paths and URLs must be clickable Markdown links. Do not leave important links only inside code fences or inline code. Code blocks are for commands, payloads, literal examples, and copy/paste prompts.
-
-## Skill Creation And Routing Decisions
-
-When a project module creates or materially changes a skill, decide and document:
-
-- Does this publish an agent-usable skill folder with `SKILL.md` plus any needed local support files?
-- Should the skill be listed in `_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md` for supported agent routing?
-- Does the `SKILL.md` description clearly support implicit invocation where supported?
-- Does the skill need examples, references, templates, tools, assets, or pack manifests inside the skill folder?
-- Do README skill tables and toolkit skill-routing need updates?
-- What validation proves the source and generated outputs stayed aligned?
-
-If a new skill should not be auto-routed, document the omission and reason in the toolkit skill-routing source partial. Do not let that routing table drift from current `skills/*/SKILL.md`, and do not list the same skill as both routed and intentionally omitted.
-
-The Skill Creation Center baseline tracks both existing skill-publishing project modules and existing concrete skill IDs. New `skills/<skill-name>/SKILL.md` entrypoints that are not listed in [skill-creation-center-baseline.json](skill-creation-center-baseline.json) `existing_skill_ids` must include `skill_creation_review` evidence in the owning `toolkit.project.json`, even when they are added by an existing baseline project module:
-
-- `existing_skill_review`: which existing `skills/**`, `_projects/**` modules, README skill tables, and routing sources were inspected; this must mention the new skill ID being reviewed.
-- `trigger`: the exact user task that should invoke the skill, including when not to invoke it.
-- `decision`: `extend_existing_skill` or `new_project_skill`.
-- `decision_reason`: why the chosen path is safer and more useful than the alternative.
-- `unique_value`: the safety gate, local asset, deterministic workflow, validation, or domain constraint that a strong agent would still often miss without this material.
-- `runtime_footprint`: why the `SKILL.md` stays concise and how optional detail is kept out of default context.
-- `local_assets`: required templates, references, examples, fixtures, tools, or `none` with a reason.
-- `output_contract`: the concrete output an agent produces when the skill is used.
-- `anti_bloat_review`: why the proposal is not generic advice, model-common knowledge, or a token-heavy duplicate of an existing skill.
-- `safety_boundary`: repo safety, device safety, live-action, credential, and destructive-action limits.
-- `source_provenance`: `first_party`, `third_party_audited`, `adapted_external`, or `inspiration_only`.
-- `third_party_audit`: `not_applicable_first_party` for first-party work, or the `agent-skill-supply-chain-audit` verdict/evidence for third-party or adapted external material.
-- `publisher_workflow`: the `context-preserving-ai-publisher` source-to-surface workflow used for approved conversions.
-- `routing`: routing-table or omission decision; this must mention the new skill ID and state whether it is routed or intentionally omitted.
-- `validation`: the targeted local checks that prove source and generated outputs stayed aligned.
-
-## Cross-Project And Cross-Skill Dependencies
-
-Projects link to projects. Skills link to skills.
-
-When a skill depends on another skill, declare that dependency in:
-
-- `SKILL.md`.
-- The skill README or install/use docs.
-- Any pack or adapter docs that install or route the dependent skill.
-
-If copy-paste portability requires a copied cross-skill reference, generate it from the canonical source with a declared recipe. The generated file must clearly state that it is generated cross-skill content, name the canonical source project and source file, name the owning skill/project, name the generated destination, say not to edit it directly, and tell maintainers to update source and run sync.
-
-Cross-generated references must not be manually edited. Validation should catch undeclared or stale cross-skill references where practical.
-
-## Shared-Surface Outputs
-
-A project should normally publish only into its own skill surface.
-
-If source provenance and published-surface ownership legitimately differ, the output must be explicitly declared as a shared-surface output in `toolkit.project.json`.
-
-Shared-surface outputs must include:
-
-- The target owning project or surface.
-- A clear reason why the source project owns the source material.
-- A clear reason why the output belongs in another project's published surface.
-- Exact or reviewed fidelity metadata.
-
-Use this only for rare provenance/ownership splits. Do not use shared-surface metadata to hide arbitrary cross-project writes.
-
-## Full-Fidelity Copies And Link Compatibility Shims
-
-When publishing full or near-full source docs into a copyable skill folder, prefer exact `copy` or `extract` recipes from `_projects/**/_main/**`.
-
-Do not rewrite the copied guide body just to make moved relative links cleaner. Rewriting full source docs can create drift from the preserved source.
-
-If exact copied docs contain source-relative links that would break in the skill folder, add small local reference-link shims under `curated_output_for_ai/reference-link-shims/` and publish them into the skill folder with a declared recipe.
-
-Use shims only when all of these are true:
-
-- The published guide is intended to preserve full source content.
-- The guide body contains relative links from its original source location.
-- Those links would break after publishing into the skill folder.
-- Rewriting the full copied guide would reduce traceability or create avoidable drift.
-
-Do not add shims by default.
-
-If links already work, or if the copied file is a curated overview rather than a full-fidelity source copy, no shim is needed.
-
-When a project uses shims, document the reason in that project's `SOURCE-MANIFEST.md` and ensure the shim files are declared in `toolkit.project.json`.
-
-## Recipes
-
-`toolkit.project.json` declares how project source relates to AI-facing outputs:
-
-- `copy`: output is copied from `_main/` or optional curated output. Markdown copies get a generated notice by default.
-- `concat`: output is built from multiple declared source files.
-- `curated`: output is generated from `curated_output_for_ai/`. Markdown gets a generated notice that points back to the curated source.
-- `json`: JSON is parsed and pretty-printed deterministically without semantic mutation.
-- `linked`: output is directly maintained. Each linked output should include a clear note explaining why it remains linked.
-
-The sync script never uses AI, never summarises, never executes project scripts, never installs packages, never uses network, and never runs live n8n import/export.
-
-## Project Versioning
-
-Every `toolkit.project.json` declares the toolkit project module version:
-
-- `version`: the toolkit project module version, formatted as `MAJOR.MINOR.PATCH`.
-- `version_policy`: currently only `semver` is supported.
-- `version_notes`: a short explanation of what the version represents.
-
-The project version belongs to the toolkit adaptation and routing contract. For third-party projects, it is not the upstream third-party version. Do not duplicate upstream repo, ref, commit, file pins, or attribution metadata into `toolkit.project.json`; keep that data in `SOURCE-LOCK.json`.
-
-Do not use Git tags, package tags, or GitHub release tags as substitutes for project module versions. Do not add per-file versions. Do not bump the project version for regenerated outputs when source content and the project contract did not change.
-
-Version bump guidance:
-
-- Patch: typo, wording, docs-only cleanup, bugfix, or validation hardening with no output contract change.
-- Minor: new templates, new generated outputs, new references, additive manifest/schema fields, or an upstream refresh with meaningful content changes but the same output shape.
-- Major: breaking folder shape, output paths, manifest schema, public contract, or removed/renamed published surfaces.
-
-## Source Locks
-
-Each project module has a `SOURCE-LOCK.json` file. Exact-copy entries pin the expected Git blob SHA for preserved files. Adapted or excluded entries must say so explicitly with notes. AI-facing helper/tool surfaces may also be listed with `root_surface_path` when they intentionally mirror or adapt upstream material.
-
-`source_path` must point to a real path in the pinned upstream source. For retired same-repo migrations from former root published surfaces, `skills/**` or `mcp/**` may be the real pinned source path. Do not invent placeholder source paths for newly authored provenance notes; document those notes in `SOURCE-MANIFEST.md` instead.
-
-Each lock also declares source lifecycle metadata:
-
-- `source_lifecycle`: `active` or `retired_after_migration`.
-- `source_role`: `migration_provenance_only` or `third_party_attribution_source`.
-- `source_update_policy`: `none` or `manual_review_required`.
-- `public_attribution_required`: boolean.
-
-Retired internal sources keep exact-byte provenance but are not watched as active upstreams. Active third-party attribution sources require manual review and public attribution.
-
-Active third-party `SOURCE-LOCK.json` files must include:
-
-- `source_repo`
-- `source_ref`
-- `source_commit`
-- `source_lifecycle: "active"`
-- `source_role: "third_party_attribution_source"`
-- `source_update_policy: "manual_review_required"`
-- `public_attribution_required: true`
-- `files`
-
-For active third-party projects, `source_commit` must be a full 40-character commit SHA. Exact and adapted copied files must include `source_blob_sha`. Adapted copied files must include non-empty `notes`. Excluded files may omit `project_path`, but they should include notes explaining why they are excluded.
-
-Scheduled source-watch tasks must read active third-party tracking from `SOURCE-LOCK.json`, not `toolkit.project.json`. The lock identifies the upstream repo, source ref, locked commit, `source_update_policy`, attribution requirement, allowlisted files, and exact blob pins. Active third-party checks are notification/manual-review only: they may compare the locked commit to the latest GitHub commit and open or update a stable review PR, but they must not copy upstream files, update `SOURCE-LOCK.json`, auto-merge, push to main, run live n8n actions, or execute upstream code. Non-source advisory lanes, including host-harness capability drift review, live under [repo/source-watch/](../source-watch/) and may only recommend separate evidence-backed PRs.
-
-Third-party updates require manual review, attribution check, allowlist check, local-only script checks, and full repo validation. Retired internal source locks remain historical provenance only and are not scheduled-watch targets.
-
-Run the local audit without network access:
+Use targeted checks while editing:
 
 ```powershell
-node repo/scripts/audit-project-source-locks.cjs
-```
-
-## Updating A Project
-
-1. Update preserved source files under `_projects/**/_main/` when provenance source changes.
-2. Update `curated_output_for_ai/` when reviewed AI-facing source material changes.
-3. Update `toolkit.project.json` recipes and `writes.allowed` when adding or moving generated outputs.
-4. When adding, removing, renaming, or materially changing a skill or a skill-publishing module, update the toolkit skill-routing source partial and any applicable README/registry source docs.
-5. Update `SOURCE-LOCK.json` with exact, adapted, or excluded entries when preserved or source-locked files change.
-6. Update rare linked surfaces manually only when their manifest note justifies direct maintenance.
-7. Run:
-
-```powershell
-node repo/scripts/sync-repo-doc-contract.cjs --write
+node repo/scripts/sync-agent-instruction-shims.cjs --check
 node repo/scripts/sync-repo-doc-contract.cjs --check
-node repo/scripts/sync-toolkit-projects.cjs --write
-node repo/scripts/sync-toolkit-projects.cjs --check
 node repo/scripts/audit-project-source-locks.cjs
+node repo/scripts/audit-published-surfaces.cjs --check
+node repo/scripts/audit-skill-portability.cjs
 node repo/scripts/validate-toolkit.cjs
+node --test repo/tests/<focused-test>.test.cjs
+git diff --check
 ```
 
-AI may help draft or review AI-facing skills, MCP docs, and curated output, but deterministic scripts publish and check declared outputs.
+The read-only CI workflow owns the full validation gate. Do not run project scripts, live n8n actions, network downloads, or package installation as part of surface validation.

@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: development.self-hosted-service-safety
-Source: _projects/development/self-hosted-service-safety/_main/skill/README.md
-Update the project source and run sync.
--->
 # Self-Hosted Service Safety
 
 Small safety-review skill for non-n8n self-hosted service setup, Docker/VPS plans, reverse proxies, tunnels, public ports, credentials, backups, and first-run hardening.

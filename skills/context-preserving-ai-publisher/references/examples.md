@@ -1,8 +1,6 @@
 <!--
-Generated from toolkit project source. Do not edit directly.
-Project: repo-methodology.context-preserving-ai-publisher
-Source: _projects/repo-methodology/context-preserving-ai-publisher/_main/examples.md
-Update the project source and run sync.
+Canonical Toolkit reference. Edit this file directly.
+Source: skills/context-preserving-ai-publisher/references/examples.md
 -->
 # Examples
 
@@ -12,22 +10,22 @@ These examples map the generic model to one reference implementation. They are n
 
 | Generic concept | Reference implementation example |
 | --- | --- |
-| Source layer | `_projects/**/_main/` |
-| Reviewed adapter layer | `_projects/**/curated_output_for_ai/` |
-| Manifest/routing contract | `_projects/**/toolkit.project.json` |
-| Portable generated surfaces | `skills/**` |
+| Source layer | `skills/**`, `repo/contracts/**`, and `repo/source-watch/provenance/**` |
+| Reviewed adapter layer | `repo/contracts/**` and owning skill support files |
+| Routing contract | `repo/contracts/agent-rules/toolkit-skill-routing.md` |
+| Portable surfaces | `skills/**` |
 | Local law/docs | `repo/docs/**` and `AGENTS.md` |
-| Deterministic publishing | `repo/scripts/sync-toolkit-projects.cjs` |
-| Source locks | `_projects/**/SOURCE-LOCK.json` |
+| Deterministic maintenance | retained managed-block synchronizers and validators |
+| Source locks | `repo/source-watch/provenance/**/SOURCE-LOCK.json` |
 | Audit baseline | `repo/docs/published-surface-audit-baseline.json` |
 
 ## Example: Full Reference Doc
 
-A full guide belongs in the source layer and publishes into a skill reference with an exact recipe. The skill entrypoint should route to the copied reference instead of summarising the guide.
+A full guide belongs in its canonical skill or contract surface. The skill entrypoint should route to the local reference instead of summarising the guide.
 
 ## Example: Curated Skill Entrypoint
 
-A `SKILL.md` file can be curated because it is a short operational router. It should explain when to use the skill, what to inspect, and which local references or templates to load.
+A `SKILL.md` file can be a short operational router. It should explain when to use the skill, what to inspect, and which local references or templates to load.
 
 ## Example: Compatibility Shim
 
@@ -35,4 +33,4 @@ If an exact-copied source guide links to `../README.md` but the published skill 
 
 ## Example: Maintenance Mode
 
-In a repo that already has project standards and audit scripts, an agent should read those local rules first. This generic skill helps reason about source, adapters, manifests, and generated outputs, but it does not replace the repo's own commands.
+In a repo that already has canonical surface standards and audit scripts, an agent should read those local rules first. This generic skill helps reason about source, adapters, provenance, and audits, but it does not replace the repo's own commands.

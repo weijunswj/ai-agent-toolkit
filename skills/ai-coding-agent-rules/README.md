@@ -1,13 +1,6 @@
 <!--
-Generated from toolkit curated output for AI. Do not edit directly.
-Project: development.ai-coding-agent-rules
-Source: _projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/README.md
-Update the curated output and run sync.
--->
-<!--
-Curated AI-facing source.
-Project: development.ai-coding-agent-rules
-Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
+Canonical Toolkit skill surface. Edit this skill folder directly.
+Source: skills/ai-coding-agent-rules/README.md
 -->
 
 # AI Coding Agent Rules Skill
@@ -38,7 +31,7 @@ Copy or merge a template into the matching active instruction filename only afte
 
 After installing or refreshing portable playbook docs, inspect target `docs/agent-playbooks/INDEX.md` and verify every linked `*.md` file exists beside it before reporting completion.
 
-Manual global setup templates live in `_projects/development/ai-coding-agent-rules/_main/`. The published skill folder is copyable and self-contained for repo-local bootstrap use.
+Manual global setup templates live in `repo/contracts/agent-rules/`. The skill folder is copyable and self-contained for repo-local bootstrap use.
 
 ## Platform Entry Points
 
@@ -71,8 +64,8 @@ Use a minimal `plugin.json` beside `skills/` only when the installed Antigravity
 
 For n8n-specific workflow and MCP safety rules, install or load [n8n-agent-rules](../n8n-agent-rules/). Do not copy the full n8n rules into global always-on generic instructions unless you intentionally accept the context cost.
 
-The `SKILL.md` file is an AI-facing published surface generated from [_projects/development/ai-coding-agent-rules/curated_output_for_ai/](../../_projects/development/ai-coding-agent-rules/curated_output_for_ai/). Update the curated source, then run:
+The `SKILL.md` file is a canonical AI-facing surface in this folder. Update the skill directly, then run the retained managed-block checks:
 
 ```powershell
-node repo/scripts/sync-toolkit-projects.cjs --write
+node repo/scripts/sync-agent-instruction-shims.cjs --check
 ```

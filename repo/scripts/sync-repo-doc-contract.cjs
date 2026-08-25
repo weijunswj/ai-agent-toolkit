@@ -15,7 +15,7 @@ function workspaceRootFromArgs(args = process.argv.slice(2)) {
 
 const workspaceRoot = workspaceRootFromArgs();
 const root = path.resolve(workspaceRoot || process.env.TOOLKIT_WORKSPACE_ROOT || process.cwd());
-const partialPath = '_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md';
+const partialPath = 'repo/contracts/source-of-truth-contract.md';
 const targets = ['README.md', 'AGENTS.md'];
 const projectId = 'repo-methodology.context-preserving-ai-publisher';
 const beginMarker = `<!-- AI-AGENT-TOOLKIT:${partialPath}:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->`;

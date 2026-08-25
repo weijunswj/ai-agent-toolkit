@@ -12,14 +12,14 @@ const dockerWindowsInstallUrl = 'https://docs.docker.com/desktop/setup/install/w
 const launcherCases = [
   {
     id: 'local',
-    wrapper: '_projects/n8n/local-setup/_main/templates/.n8n-local/_n8n-local.cmd',
-    menu: '_projects/n8n/local-setup/_main/templates/.n8n-local/scripts/n8n-local-menu.ps1',
+    wrapper: 'skills/n8n-local-setup/templates/.n8n-local/_n8n-local.cmd',
+    menu: 'skills/n8n-local-setup/templates/.n8n-local/scripts/n8n-local-menu.ps1',
     menuName: 'n8n-local-menu.ps1'
   },
   {
     id: 'production-cloudflare',
-    wrapper: '_projects/n8n/local-setup/_main/templates/.n8n-production-cloudflare/_n8n-production-cloudflare.cmd',
-    menu: '_projects/n8n/local-setup/_main/templates/.n8n-production-cloudflare/scripts/n8n-production-cloudflare-menu.ps1',
+    wrapper: 'skills/n8n-local-setup/templates/.n8n-production-cloudflare/_n8n-production-cloudflare.cmd',
+    menu: 'skills/n8n-local-setup/templates/.n8n-production-cloudflare/scripts/n8n-production-cloudflare-menu.ps1',
     menuName: 'n8n-production-cloudflare-menu.ps1'
   }
 ];

@@ -1,14 +1,3 @@
-<!--
-Generated from toolkit curated output for AI. Do not edit directly.
-Project: development.toolkit-local-bridge
-Source: _projects/development/toolkit-local-bridge/curated_output_for_ai/skills/toolkit-setup/README.md
-Update the curated output and run sync.
--->
-<!--
-Curated AI-facing source.
-Project: development.toolkit-local-bridge
-Review rule: Keep this README as a short install/identity note for the compact setup router.
--->
 
 # Toolkit Setup Skill
 

@@ -4,8 +4,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const beginMarker = '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->';
-const endMarker = '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:END N8N-AGENT-RULES-ADAPTER -->';
+const beginMarker = '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-agent-rules-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->';
+const endMarker = '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-agent-rules-adapter.md:END N8N-AGENT-RULES-ADAPTER -->';
 const standaloneBeginMarker = '<!-- BEGIN N8N-AGENT-RULES-ADAPTER -->';
 const standaloneEndMarker = '<!-- END N8N-AGENT-RULES-ADAPTER -->';
 

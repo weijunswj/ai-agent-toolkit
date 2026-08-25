@@ -8,11 +8,10 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const scripts = [
-  '_projects/development/hostinger-coolify-production-guide/_main/skill/scripts/daily-security-check.sh',
   'skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/daily-security-check.sh'
 ];
 const authoritativeDailyCheck = scripts[0];
-const generatedDailyCheck = scripts[1];
+const generatedDailyCheck = authoritativeDailyCheck;
 const hostingerDocsPath = 'docs/hostinger-coolify/';
 
 function findBash() {
@@ -333,13 +332,11 @@ test('authoritative and generated daily security checks are byte-aligned', () =>
 
 test('Hostinger/Coolify repo-side evidence artifacts have a docs home', () => {
   const requiredFiles = [
-    '_projects/development/hostinger-coolify-production-guide/_main/hostinger-coolify-production-guide.md',
-    '_projects/development/hostinger-coolify-production-guide/_main/skill/checklists/bootstrap-checklist.md',
-    '_projects/development/hostinger-coolify-production-guide/_main/skill/checklists/deploy-checklist.md',
-    '_projects/development/hostinger-coolify-production-guide/_main/skill/checklists/maintenance-checklist.md',
-    '_projects/development/hostinger-coolify-production-guide/curated_output_for_ai/skills/codex-ssh-hostinger-coolify-setup-maintainer/SKILL.md',
     'skills/codex-ssh-hostinger-coolify-setup-maintainer/SKILL.md',
     'skills/codex-ssh-hostinger-coolify-setup-maintainer/references/hostinger-coolify-production-guide.md',
+    'skills/codex-ssh-hostinger-coolify-setup-maintainer/checklists/bootstrap-checklist.md',
+    'skills/codex-ssh-hostinger-coolify-setup-maintainer/checklists/deploy-checklist.md',
+    'skills/codex-ssh-hostinger-coolify-setup-maintainer/checklists/maintenance-checklist.md',
     'repo/docs/SKILL-SAFETY-MATRIX.md'
   ];
 

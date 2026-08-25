@@ -1,0 +1,5 @@
+{
+  "version": "2.10.1",
+  "version_policy": "semver",
+  "version_notes": "Toolkit Local Bridge and native plugin package contract version."
+}

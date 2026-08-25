@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: development.managed-app-foundation-review
-Source: _projects/development/managed-app-foundation-review/_main/skill/README.md
-Update the project source and run sync.
--->
 # Managed App Foundation Review
 
 Small planning skill for deciding whether to use low-cost, free, managed, or owner-hosted foundations for auth, user accounts, backend APIs, databases, workflows/automation, CRM, forms, email, storage, analytics, usage-limit alerts, ops, and admin workflows instead of building those surfaces from scratch.

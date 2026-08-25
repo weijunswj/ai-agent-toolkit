@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: development.hostinger-coolify-production-guide
-Source: _projects/development/hostinger-coolify-production-guide/_main/skill/templates/daily-security-report.template.md
-Update the project source and run sync.
--->
 # Daily Security Report
 
 Date/time UTC: `<YYYY-MM-DD HH:MM>`

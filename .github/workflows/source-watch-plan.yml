@@ -20,5 +20,5 @@ jobs:
       - name: Validate source locks
         run: node repo/scripts/audit-project-source-locks.cjs
 
-      - name: Check project sync
-        run: node repo/scripts/sync-toolkit-projects.cjs --check
+      - name: Validate canonical toolkit surfaces
+        run: node repo/scripts/validate-toolkit.cjs

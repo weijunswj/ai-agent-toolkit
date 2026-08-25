@@ -2,62 +2,46 @@
 
 This toolkit allows writes only when they are required, scoped, declared, reviewed, and safe.
 
-## Required Project Policy
+## Canonical Write Surfaces
 
-Every `_projects/**/toolkit.project.json` must include:
+The maintained repository surfaces are:
 
-- `version`
-- `version_policy`
-- `version_notes`
-- `writes.allowed`
-- `writes.denied`
-- `requires_approval`
-- `run_commands_by_default`
-- `live_actions`
-- `ci_live_actions`
+- `skills/**` for copyable skill content.
+- `repo/contracts/**` for schemas, policies, fixtures, templates, provenance contracts, and agent-rule inputs.
+- `repo/scripts/**` for deterministic maintenance and runtime helpers.
+- `repo/tests/**` for focused validation.
 
-Expected defaults:
+The only retained repository synchronizers are `sync-repo-doc-contract.cjs` and `sync-agent-instruction-shims.cjs`. They update managed blocks and instruction shims only; they do not publish project outputs.
 
-- `version_policy`: `semver`
-- `requires_approval`: `true`
-- `run_commands_by_default`: `false`
-- `live_actions`: `explicit_confirmation_only`
-- `ci_live_actions`: `false`
-
-`version` is the toolkit project module version, not an upstream source version. `version_notes` explains what that toolkit version represents.
+The Toolkit Local Bridge package version is declared in `repo/contracts/toolkit-local-bridge/version.json` and must remain aligned with both native plugin source manifests, generated native plugin manifests, `BRIDGE_VERSION`, the Codex setup expected version, and AG2 adapter metadata.
 
 ## Allowed Writes
 
 Allowed writes must be declared and deterministic, such as:
 
-- Generated AI-facing toolkit outputs declared in `toolkit.project.json`.
+- Updating canonical skills, contracts, docs, scripts, and tests during Toolkit maintenance.
+- Updating the managed source-of-truth block or repo-local instruction shims through their synchronizers.
 - A reviewed n8n sync helper writing `n8n-workflows/*.json` in a consumer repo.
-- Ignored consumer-repo staging writes like `.tmp/**` or `.n8n-local/**` when the helper explicitly declares them.
-- Optional design generator output under `skills/ui-ux-secure-frontend-design/tools/design-system-generator/output/` when explicitly requested.
+- Ignored consumer-repo staging writes such as `.tmp/**` or `.n8n-local/**` when a helper explicitly declares them.
+- Optional design-generator output when explicitly requested.
 
 ## Denied Writes
 
 Denied writes include:
 
-- `.env*`
-- credentials and credential bindings
-- private keys
-- live n8n exports/imports committed to repo
-- arbitrary output paths
-- user home or system paths
-- destructive deletes
-- generated package artifacts
-- package install side effects
-- network downloads
+- `.env*`.
+- Credentials and credential bindings.
+- Private keys.
+- Live n8n exports/imports committed to the repository.
+- Arbitrary output paths.
+- User-home or system paths without an explicit safe operation.
+- Destructive deletes outside the approved local migration scope.
+- Generated package artifacts.
+- Package-install side effects.
+- Network downloads.
 
 ## CI Rules
 
-CI must not run live actions, import/export n8n workflows, activate/deactivate workflows, mutate credentials, install packages from project modules, or execute scripts merely because they exist under `_projects/**/_main/`.
+CI must not run live actions, import/export n8n workflows, activate/deactivate workflows, mutate credentials, install packages, or execute arbitrary external source. Source-watch remains notification-only and must not copy upstream files or update source pins.
 
-Privileged generated-surface writeback may run only trusted deterministic maintenance scripts from the protected base revision against the PR checkout. The narrow agent-rule exception may regenerate declared source-side agent-rule templates from declared partials and publish generated skill copies.
-
-Privileged auto-sync must not stage, commit, or push active root AI instruction files: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`. If source changes require those files to change, the PR author or Codex must commit them manually on the PR branch and rely on normal read-only CI validation.
-
-## Sync Enforcement
-
-[repo/scripts/sync-toolkit-projects.cjs](../scripts/sync-toolkit-projects.cjs) validates project shape, export declarations, root-output paths, write policy fields, forbidden files, and stale generated outputs.
+CI validation is read-only. Native plugin metadata is checked in place, and no privileged generated-surface writeback workflow is maintained.

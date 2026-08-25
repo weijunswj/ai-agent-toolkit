@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: repo-methodology.context-preserving-ai-publisher
-Source: _projects/repo-methodology/context-preserving-ai-publisher/_main/templates/repo-docs/agent-routing.template.md
-Update the project source and run sync.
--->
 # Agent Routing
 
 AI agents working in this repo should use local source-of-truth docs before generic guidance.

@@ -1,15 +1,15 @@
 # AI Agent Toolkit
 
-A practical skills-first toolkit of reusable AI-agent skills and preserved source projects.
+A practical skills-first toolkit of reusable AI-agent skills, machine contracts, provenance records, and safe maintenance scripts.
 
 ## What this repo is
 
-This repo keeps reusable AI-agent material in a source-first layout:
+This repo keeps reusable AI-agent material in a direct canonical layout:
 
-- [_projects/](_projects/) preserves project source, provenance, and reviewed AI-facing source.
-- [skills/](skills/) contains copyable AI-agent skill folders.
-- [repo/](repo/) contains repo maintenance docs, scripts, tests, and validation policy.
-- [.codex-plugin/](.codex-plugin/) and [.claude-plugin/](.claude-plugin/) contain generated native plugin metadata.
+- [skills/](skills/) contains complete copyable AI-agent skill folders.
+- [repo/contracts/](repo/contracts/) contains machine contracts, fixtures, templates, agent-rule inputs, and plugin source contracts.
+- [repo/](repo/) contains maintenance docs, scripts, tests, provenance, and validation policy.
+- [.codex-plugin/](.codex-plugin/) and [.claude-plugin/](.claude-plugin/) contain platform-specific native plugin metadata.
 
 Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised as a supported surface for now. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references remain inside [skills/n8n-local-setup/](skills/n8n-local-setup/) as secondary n8n setup material.
 
@@ -17,7 +17,7 @@ Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised
 
 | What you want | Start here |
 |---|---|
-| Full guide or source context | Open a project under [_projects/](_projects/), then its `_main/` folder. |
+| Full guide or source context | Open the relevant `skills/<skill-name>/` folder or `repo/contracts/` entry. |
 | Set up Toolkit itself | Use [Toolkit Setup](#toolkit-setup), then ask Codex or Claude Code: `setup toolkit` or `refresh toolkit`. |
 | Install a skill | Copy the whole skill folder using [Install Skills By Platform](#install-skills-by-platform). |
 | Review skill safety | Use the [Skill Safety Matrix](repo/docs/SKILL-SAFETY-MATRIX.md) before creating, extending, or importing skills. |
@@ -29,7 +29,7 @@ For normal human setup, keep the journey short:
 
 1. Pull or update this Toolkit repo from `weijunswj/ai-agent-toolkit`.
 2. In Codex or Claude Code, open the repo and say `setup toolkit`, `refresh toolkit`, or plain `refresh` while the conversation is clearly about Toolkit setup/update state.
-3. The agent must run the managed checkout setup script when it exists, not just `node repo/scripts/sync-toolkit-projects.cjs --write`: Windows Codex uses `node "%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\setup-toolkit.cjs" --execute --profile auto-main`; POSIX Codex uses `node "$HOME/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main`; Claude Code appends `--host claude-code`.
+3. The agent must run the managed checkout setup script when it exists: Windows Codex uses `node "%USERPROFILE%\.ai-agent-toolkit\source\ai-agent-toolkit\repo\scripts\setup-toolkit.cjs" --execute --profile auto-main`; POSIX Codex uses `node "$HOME/.ai-agent-toolkit/source/ai-agent-toolkit/repo/scripts/setup-toolkit.cjs" --execute --profile auto-main`; Claude Code appends `--host claude-code`.
 4. Use `node repo/scripts/setup-toolkit.cjs --execute --profile auto-main` from the active repo only as bootstrap/fallback when the managed checkout script is missing, then hand off to the managed checkout script after it exists.
 5. If setup exits with code `23`, the complete compact bank must be visible in the same response as any recommended-default shortcut. Missing output is retried and never treated as approval; `--yes-recommended` is allowed only after you accept the displayed recommendations.
 6. Keep routine setup on the root agent; it must not spawn subagents for instruction, docs, state, choice, or validation inspection. Codex recommends root-only under the strict contract and exposes one helper only as a manual conservative memory backstop; runtime mechanics stay in a technical proposal. Capacity is not launch permission: unsupported admission, effort, or child non-fast enforcement stays root-only. Unsafe current capacity is labelled, user-owned conflicts require one exact `apply` confirmation in the same flow, and other hosts receive no invented enforcement profile.
@@ -44,45 +44,21 @@ More setup context lives in [How To Use](repo/docs/HOW-TO-USE.md#install-toolkit
 
 | Term | What it means |
 |---|---|
-| Project | The source/provenance area where the real material is maintained. |
 | Skill | A copyable AI-agent folder with instructions, references, templates, metadata, and helper files. |
 | MCP | Not a repo-wide shipped/generated surface in this repo right now. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references live inside the n8n local setup skill as secondary material. |
-| Generated surface | A published file under [skills/](skills/) that is rebuilt from project source by a deterministic sync script. |
-| Native plugin metadata | Generated `.codex-plugin/**` or `.claude-plugin/**` metadata that lets Codex and Claude Code update Toolkit through their own plugin systems. |
+| Contract | A schema, policy, fixture, template, or reviewed source input under [repo/contracts/](repo/contracts/). |
+| Native plugin metadata | Platform-specific `.codex-plugin/**` or `.claude-plugin/**` metadata that lets Codex and Claude Code update Toolkit through their own plugin systems. |
 
-## Project Categories
+## Canonical Map
 
-| Category | What it contains |
+| Path | Purpose |
 |---|---|
-| [`cicd/`](_projects/cicd/) | CI/CD and GitHub Actions safety material. |
-| [`design/`](_projects/design/) | UI/UX and frontend design material. |
-| [`development/`](_projects/development/) | General development workflow helpers. |
-| [`knowledge/`](_projects/knowledge/) | Knowledge-base and index-maintenance skills. |
-| [`n8n/`](_projects/n8n/) | n8n setup, workflow helper scripts, and workflow templates. |
-| [`repo-methodology/`](_projects/repo-methodology/) | How this toolkit preserves source truth, generates published surfaces, and prevents context drift. |
-
-## Projects
-
-Open a project when you need maintained source, provenance, or the owner behind a generated surface.
-
-| Project | Purpose | Source |
-|---|---|---|
-| [Local n8n Setup](_projects/n8n/local-setup/) | Local n8n dev setup, production Cloudflare Tunnel self-hosting for local/CGNAT machines, Hostinger Coolify VPS guidance for hosted n8n, launcher/menu cleanup, stack templates, skills-first agent routing, and [official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references. | [_main/](_projects/n8n/local-setup/_main/) |
-| [n8n Workflow Toolkit](_projects/n8n/workflow-toolkit/) | n8n helper-script sources and inactive workflow templates. | [_main/](_projects/n8n/workflow-toolkit/_main/) |
-| [Secure CI/CD Installer](_projects/cicd/secure-installer/) | CI/CD planning prompt, status templates, and safety policy source. | [_main/](_projects/cicd/secure-installer/_main/) |
-| [UI/UX Pro Max Design](_projects/design/ui-ux-pro-max/) | Frontend design guidance, local generator source, and attribution notes. | [_main/](_projects/design/ui-ux-pro-max/_main/) |
-| [Context-Preserving AI Publisher](_projects/repo-methodology/context-preserving-ai-publisher/) | Source-to-surface publishing method and starter templates. | [_main/](_projects/repo-methodology/context-preserving-ai-publisher/_main/) |
-| [Agent Skill Supply-Chain Audit](_projects/repo-methodology/agent-skill-supply-chain-audit/) | Third-party skill provenance, safety, license, and conversion audit source. | [_main/](_projects/repo-methodology/agent-skill-supply-chain-audit/_main/) |
-| [AI Coding Agent Rules](_projects/development/ai-coding-agent-rules/) | Generic agent-rule templates, skill routing source, and n8n rules source. | [_main/](_projects/development/ai-coding-agent-rules/_main/) |
-| [Local AI Stack Safety](_projects/development/local-ai-stack-safety/) | Lightweight local AI runtime, model download, local AI web UI, and endpoint exposure safety-review skill source. | [_main/](_projects/development/local-ai-stack-safety/_main/) |
-| [Managed App Foundation Review](_projects/development/managed-app-foundation-review/) | Build-vs-buy planning for low-cost managed or owner-hosted auth, backend, database, workflow automation, CRM, forms, email, storage, analytics, ops, and account-security foundations. | [_main/](_projects/development/managed-app-foundation-review/_main/) |
-| [N5 GitHub Governance and Truthful PR-Review Reconciler](_projects/development/github-governance-review-reconciler/) | Current-main explicit-only deterministic parent/direct-child governance, bounded large-parent reconciliation, truthful PR-review inventory and disposition evidence, and parent-managed Deferred Findings. | [_main/](_projects/development/github-governance-review-reconciler/_main/) |
-| [Project Completion Audit](_projects/development/project-completion-audit/) | Guarded final completion, production-readiness, release-candidate, QA, security-readiness, and remediation audit workflow. | [_main/](_projects/development/project-completion-audit/_main/) |
-| [Toolkit Local Bridge](_projects/development/toolkit-local-bridge/) | Native Codex and Claude Code plugin metadata, Windows-safe Codex plugin hook repair, one compact setup discoverability skill, opt-in repo-backed auto-update, and local bridge infrastructure for OpenCode and Antigravity 2 adapter targets. | [_main/](_projects/development/toolkit-local-bridge/_main/) |
-| [Codex SSH Hostinger Coolify Setup Maintainer](_projects/development/hostinger-coolify-production-guide/) | Codex SSH Hostinger VPS plus Coolify setup, deployment, daily security checks, intrusion-signal review, optional maintenance alerts, and incident response workflow. | [_main/](_projects/development/hostinger-coolify-production-guide/_main/) |
-| [Self-Hosted Service Safety](_projects/development/self-hosted-service-safety/) | Lightweight non-n8n Docker/VPS, public exposure, credential, backup, SSH, traffic-log, and first-run safety-review skill source. | [_main/](_projects/development/self-hosted-service-safety/_main/) |
-| [Windows Localhost Workflows](_projects/development/windows-localhost-workflows/) | Windows localhost dev-server verification skill source. | [_main/](_projects/development/windows-localhost-workflows/_main/) |
-| [Knowledge Index Updater](_projects/knowledge/knowledge-index-updater/) | Notion/GitHub knowledge-index skill source. | [_main/](_projects/knowledge/knowledge-index-updater/_main/) |
+| [skills/](skills/) | Complete copyable skill folders. |
+| [repo/contracts/](repo/contracts/) | Machine contracts, fixtures, templates, agent-rule inputs, and plugin source contracts. |
+| [repo/source-watch/](repo/source-watch/) | Notification-only source-watch state and active third-party provenance. |
+| [repo/scripts/](repo/scripts/) | Deterministic runtime and maintenance helpers. |
+| [repo/tests/](repo/tests/) | Focused contract, safety, parser, and runtime tests. |
+| [repo/docs/](repo/docs/) | Policy, safety, architecture, and validation guidance. |
 
 ## Skills
 
@@ -97,7 +73,7 @@ Skills are copyable folder packages. The portable package unit is `skills/<skill
 | [n8n Workflow Helper Scripts](skills/n8n-workflow-helper-scripts/) | Sanitise, validate, export, import, compare, prepare, or sync n8n workflow JSON safely. |
 | [n8n Workflow Templates](skills/n8n-workflow-templates/) | Review reusable public inactive n8n workflow JSON templates. |
 | [Secure CI/CD Installer](skills/secure-cicd-installer/) | Plan CI/CD setup with approval gates, GitHub Actions notes, and status templates. |
-| [Context-Preserving AI Publisher](skills/context-preserving-ai-publisher/) | Maintain source-traceable skills, templates, manifests, and audits. |
+| [Context-Preserving AI Publisher](skills/context-preserving-ai-publisher/) | Maintain source-traceable skills, contracts, provenance, templates, and audits. |
 | [Agent Skill Supply-Chain Audit](skills/agent-skill-supply-chain-audit/) | Audit third-party agent skills for provenance, license, safety, conversion fit, and token-bloat risk. |
 | [Local AI Stack Safety](skills/local-ai-stack-safety/) | Review local AI runtimes, model downloads, local AI web UIs, and endpoint exposure before setup. |
 | [Managed App Foundation Review](skills/managed-app-foundation-review/) | Compare low-cost managed or owner-hosted foundations before custom-building auth, backend, database, workflow automation, CRM, forms, email, analytics, ops, and account-security surfaces. |
@@ -107,7 +83,6 @@ Skills are copyable folder packages. The portable package unit is `skills/<skill
 | [Self-Hosted Service Safety](skills/self-hosted-service-safety/) | Review non-n8n Docker/VPS, tunnel, public-port, credential, backup, SSH, traffic-log, and first-run safety. |
 | [Secure UI/UX Frontend Design](skills/ui-ux-secure-frontend-design/) | Design or review frontend work with accessibility, responsive, privacy, and security guardrails. |
 | [Windows Localhost Workflows](skills/windows-localhost-workflows/) | Start and verify Windows localhost dev services. |
-| [Knowledge Index Updater](skills/knowledge-index-updater/) | Maintain a Notion/GitHub knowledge index with stable source keys and no duplicate rows. |
 
 ## Install Skills By Platform
 
@@ -116,7 +91,7 @@ This section is only for manually copying Toolkit-owned skill folders under [ski
 > [!IMPORTANT]
 > Repo-local agent instruction installs require a selected/open target repo or an explicit target path. Standalone chats without a workspace cannot safely infer where to install `AGENTS.md`, `GEMINI.md`, `CLAUDE.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`.
 
-Copy the whole `skills/<skill-name>/` folder into **ANY ONE** supported location for the target platform. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
+Copy the whole `skills/<skill-name>/` folder into **ANY ONE** supported location for the target platform. Keep `README.md`, `references/`, `templates/`, `agents/`, and other supporting files beside `SKILL.md` when present.
 
 `AGENTS.md` is the shared managed instruction file inside the target repo. For portable installs, create or merge it from [repo-local/AGENTS.managed.template.md](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md), not from this toolkit repo's root [AGENTS.md](AGENTS.md). Claude Code and Antigravity 2 use tiny shims that point back to the target repo's `AGENTS.md`; do not install a shim by itself. Antigravity 2 also uses `.agents/rules/00-agent-toolkit-bootstrap.md` as a tiny bootstrap, but the target repo's `AGENTS.md` remains canonical.
 
@@ -127,13 +102,13 @@ Copy the whole `skills/<skill-name>/` folder into **ANY ONE** supported location
 | OpenCode | `<repo>/.opencode/skills/<skill-name>/`<br>`$HOME/.config/opencode/skills/<skill-name>/`<br>`<repo>/.claude/skills/<skill-name>/`<br>`$HOME/.claude/skills/<skill-name>/`<br>`<repo>/.agents/skills/<skill-name>/`<br>`$HOME/.agents/skills/<skill-name>/` | `AGENTS.md` | [OpenCode](repo/docs/HOW-TO-USE.md#opencode). |
 | Antigravity 2 | `C:\Users\<user>\.gemini\config\plugins\<plugin-name>\skills\<skill-name>\` | `AGENTS.md`, `GEMINI.md`, Antigravity 2 bootstrap | [Antigravity 2](repo/docs/HOW-TO-USE.md#antigravity-2). |
 
-Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync.
+Humans and agents use the same canonical `skills/**` and `repo/**` surfaces. No project-to-skill publishing step is required.
 
 ## MCP Status
 
 Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised as a supported surface for now.
 
-The supported path is skills-first: humans use `_projects/**`; agents use `skills/**`.
+The supported path is direct and skills-first: humans and agents use `skills/**` and `repo/**`.
 
 [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references remain under [skills/n8n-local-setup/](skills/n8n-local-setup/) as secondary n8n setup material. They are not a repo-wide MCP surface.
 
@@ -141,8 +116,8 @@ The supported path is skills-first: humans use `_projects/**`; agents use `skill
 
 | Path | Use it when |
 |---|---|
-| [_projects/](_projects/) | You want full preserved project guides/source material. |
 | [skills/](skills/) | You want copyable agent skills. |
+| [repo/contracts/](repo/contracts/) | You want machine contracts, templates, agent-rule inputs, or plugin source contracts. |
 | [.codex-plugin/](.codex-plugin/) | You want generated Codex native plugin metadata. |
 | [.claude-plugin/](.claude-plugin/) | You want generated Claude Code native plugin metadata. |
 | [repo/](repo/) | You are maintaining this toolkit. |
@@ -150,16 +125,16 @@ The supported path is skills-first: humans use `_projects/**`; agents use `skill
 
 ## For Maintainers
 
-Edit source first, then publish:
+Edit the canonical surface directly:
 
-1. Update `_projects/**/_main/` only when preserved source must change.
-2. Update `_projects/**/curated_output_for_ai/` for reviewed AI-facing source.
-3. Update `_projects/**/toolkit.project.json` when routing or surface metadata changes.
-4. Run [`repo/scripts/sync-toolkit-projects.cjs`](repo/scripts/sync-toolkit-projects.cjs) with `--write`.
+1. Update `skills/<skill-name>/` for skill content.
+2. Update `repo/contracts/` for schemas, policies, fixtures, templates, or agent-rule inputs.
+3. Update `repo/source-watch/provenance/` only for reviewed active third-party provenance changes.
+4. Run the two retained synchronizer checks when managed blocks or instruction shims changed.
 
-Do not edit generated [skills/](skills/) outputs directly unless the output is explicitly declared as `linked`.
+There is no project-generated skill output to rebuild. Keep every retained skill complete and locally usable.
 
-For project module rules, follow [repo/docs/PROJECT-MODULE-STANDARD.md](repo/docs/PROJECT-MODULE-STANDARD.md).
+For canonical surface rules, follow [repo/docs/PROJECT-MODULE-STANDARD.md](repo/docs/PROJECT-MODULE-STANDARD.md).
 
 ## Validation
 
@@ -167,51 +142,29 @@ Use targeted local checks before pushing. CI runs the full `npm run validate:all
 
 ```powershell
 node repo/scripts/sync-repo-doc-contract.cjs --check
-node repo/scripts/sync-toolkit-projects.cjs --check
+node repo/scripts/sync-agent-instruction-shims.cjs --check
 node repo/scripts/audit-project-source-locks.cjs
 node repo/scripts/validate-toolkit.cjs
 node --test repo/tests/*.test.cjs
-node repo/scripts/package-skills.cjs --check
 node repo/scripts/audit-skill-portability.cjs
+node repo/scripts/audit-published-surfaces.cjs --check
 git diff --check
 ```
 
 ## Appendix: Source-of-Truth Contract
 
-<!-- AI-AGENT-TOOLKIT:_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->
 ## Source-of-Truth Contract
 
-This repo has a source layer and a published layer.
-
-- `_projects/**/_main/` preserves full source material and original docs. Do not casually rewrite preserved source.
-- `_projects/**/curated_output_for_ai/` stores reviewed AI-facing source material. Curated files may be AI-assisted, but they are source files and must be reviewed before publishing.
-- `_projects/**/toolkit.project.json` is the routing and toolkit project-version contract. It declares which `_main/` or `curated_output_for_ai/` files publish to `skills/` outputs.
-- Toolkit project `version` is the toolkit adaptation/module version, uses `version_policy: "semver"`, and must not be replaced by Git tags, package tags, GitHub release tags, upstream versions, or per-file versions.
-- `_projects/**/SOURCE-LOCK.json` records upstream/source provenance, exact source pins, blob pins, lifecycle, role, attribution requirement, and update policy.
-- For third-party projects, `toolkit.project.json` version is the toolkit adaptation version only; scheduled source-watch tracking must read upstream repo, ref, locked commit, `source_update_policy`, attribution, allowlist, and blob pins from `SOURCE-LOCK.json`. Temporary actionable advisory targets may live in `repo/source-watch/advisory-targets.json` until implemented, rejected, or moved into SOURCE-LOCK tracking.
-- Scheduled source-watch is PR-notification-only. It may compare active SOURCE-LOCK pins and actionable advisory targets with upstream GitHub commits, then open or refresh a stable review PR. It must not copy upstream files, change SOURCE-LOCK/advisory records, execute upstream code, auto-merge, push to main, run live n8n actions, or treat notification as approval. Real updates require a separate human-approved PR.
-- `skills/` contains copyable AI-agent skill folders. The whole skill folder is the install unit.
-- `.codex-plugin/` and `.claude-plugin/` contain generated native plugin metadata for the current Toolkit package. They are not source of truth and must not be used to cross-update the other native platform.
-- Toolkit skill-routing source lives in `_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md`; keep it aligned with current `skills/*/SKILL.md` when skills or skill-publishing project modules change, and document any intentionally omitted skill.
-- This repo intentionally does not ship or maintain a repo-wide MCP generated surface for now. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references remain under `skills/n8n-local-setup/` as secondary n8n setup material.
-- Generated published surfaces under `skills/`, `.codex-plugin/`, and `.claude-plugin/` must not be edited directly unless that output is explicitly declared as `linked`. Update the matching `_projects` source or curated file, then run sync.
-- `linked` outputs are rare exceptions and must be explicitly declared with a reason in `toolkit.project.json`.
-- Publish declared outputs with:
-  `node repo/scripts/sync-toolkit-projects.cjs --write`
-- Check generated freshness with:
-  `node repo/scripts/sync-toolkit-projects.cjs --check`
-- CI checks generated freshness and may auto-sync deterministic generated outputs from the base/default branch workflow definition only on guarded same-repo PR branches targeting `main`; fork PRs and `main` are never writeback targets.
-- Auto-sync only republishes approved passive generated/synced outputs in `README.md`, `skills/**`, and the declared source-side agent-rule templates generated from `_projects/**/_main/_partials/**`. It must not write active root AI instruction files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`), update other source files, run live n8n, touch product repos, generate curated content from `_main`, or summarise/truncate source docs. If source changes require active root instruction outputs to change, the PR author must commit those files manually on the PR branch.
-- Because auto-sync writeback is privileged, it must not run generated test suites or PR-controlled generated executable code; full validation remains covered by normal read-only CI.
-- Auto-sync must not run full repo validation against raw PR heads; this avoids blocking otherwise valid behind-main PR branches.
-- Auto-sync static checks are limited to generated-surface freshness checks and git diff checks before committing generated output.
-- Auto-sync may run only deterministic generation, sync, check, or validator scripts from the protected base revision, with the PR checkout treated as data and passed through an explicit workspace target.
-- Auto-sync must stage and snapshot generated output after sync and recheck the index/workspace before commit so validation cannot add files to the writeback diff.
-- Auto-sync must pin the PR checkout to the event head SHA, refuse stale queued runs if the PR head changed, and refuse non-force pushes if the PR branch moved after checkout.
-- Auto-sync is optional convenience writeback, not the merge gate. `npm run validate:all` is the required read-only CI and `main` validation gate.
-- If a PR includes `_projects/**/_main/**` source/provenance changes other than declared agent-rule partial inputs and generated source-side agent-rule templates, auto-sync must skip successfully without checkout, writeback, commit, or push. The author or AI Coding Agent (i.e. Codex, Claude Code, Antigravity, OpenCode, etc.) must commit required generated outputs, source-lock/provenance updates, and audit baseline updates, then rely on the normal read-only validation gate.
-- If a writeback-eligible PR mixes eligible source/routing/contract edits with workflow, maintenance-script, test, docs, package, lockfile, or other source/maintenance paths, auto-sync must skip successfully instead of pushing. The author or AI Coding Agent (i.e. Codex, Claude Code, Antigravity, OpenCode, etc.) must commit generated outputs manually and rely on normal read-only validation.
-- Curated output must not weaken credential, `.env`, `.tmp`, `.n8n-local`, live n8n action, approval, attribution, or local-only safety constraints from the preserved source.
-- A generated/public surface must not replace a full working document with a lossy summary. Summaries are allowed only for catalogues, descriptions, navigation tables, or clearly marked overview files.
-- Required runtime context for a skill surface must be local, complete enough to use, and traceable to the project source. External links may support provenance or further reading, but must not be required for normal execution.
-<!-- AI-AGENT-TOOLKIT:_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md:END SOURCE-OF-TRUTH-CONTRACT -->
+`skills/**` is the canonical copyable AI-agent product surface. The whole skill folder is the install unit, and retained skills are edited directly.
+- `repo/contracts/**` is the canonical machine contract surface for schemas, policies, fixtures, templates, and agent-rule inputs.
+- `repo/scripts/**` is the canonical runtime and maintenance implementation surface; `repo/tests/**` owns focused contract and runtime tests.
+- `repo/contracts/agent-rules/toolkit-skill-routing.md` is the routing source for the current `skills/*/SKILL.md` set and records intentionally omitted skills.
+- `repo/source-watch/provenance/**/SOURCE-LOCK.json` contains only active third-party attribution pins. Each lock records the upstream repo, ref, commit, update policy, attribution requirement, allowlist, and exact blob pins for retained copied or adapted files.
+- Scheduled source-watch is PR-notification-only. It may compare active source-lock pins and advisory targets with upstream GitHub commits, then open or refresh a stable review PR. It must not copy upstream files, change source-lock/advisory records, execute upstream code, auto-merge, push to main, run live n8n actions, or treat notification as approval. Real updates require a separate human-approved PR.
+- The toolkit does not maintain project manifests, source manifests, project-output publishing, pack packaging, or privileged generated-surface writeback. Direct canonical skills and runtime contracts are validated in place.
+- The two retained deterministic synchronizers maintain only the managed source-of-truth block and repo-local instruction shims: `repo/scripts/sync-repo-doc-contract.cjs` and `repo/scripts/sync-agent-instruction-shims.cjs`.
+- `.codex-plugin/` and `.claude-plugin/` contain native plugin metadata for the current Toolkit package. They remain platform-separated and must not be used to cross-update the other native platform.
+- This repo intentionally does not ship or maintain a repo-wide MCP generated surface. Official n8n Skills plus instance-level MCP references remain inside `skills/n8n-local-setup/` as secondary n8n setup material.
+- All retained skill/runtime context must remain local, complete enough to use, and traceable through direct repository paths or the two retained third-party provenance records. External links may support provenance but must not be required for normal execution.
+<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:END SOURCE-OF-TRUTH-CONTRACT -->

@@ -7,15 +7,13 @@ This document defines the plugin/update architecture for `weijunswj/ai-agent-too
 Current inspected chain:
 
 1. Root `AGENTS.md` routes repo work and includes the managed source-of-truth contract.
-2. `_projects/**/_main/` stores full source material.
-3. `_projects/**/curated_output_for_ai/` stores reviewed AI-facing adapters, routers, and metadata.
-4. `_projects/**/toolkit.project.json` declares generated outputs and write boundaries.
-5. `_projects/**/SOURCE-LOCK.json` records first-party or third-party provenance.
-6. `repo/scripts/sync-toolkit-projects.cjs` publishes declared generated outputs.
-7. `skills/**` is the generated copyable skill surface.
-8. `repo/scripts/validate-toolkit.cjs`, `repo/tests/*.test.cjs`, package checks, source-lock audit, and published-surface audit enforce drift and safety rules.
-9. `.codex-plugin/**` and `.claude-plugin/**` are native plugin package metadata generated from the Toolkit project module. They are not source of truth.
-10. The Toolkit Local Bridge Hub under the user profile stores generated OpenCode and Antigravity 2 adapter state. It is not source of truth.
+2. `skills/**` stores complete copyable skill surfaces.
+3. `repo/contracts/**` stores machine contracts, fixtures, templates, agent-rule inputs, and plugin source contracts.
+4. `repo/source-watch/provenance/**` stores active third-party source locks and attribution records.
+5. `repo/scripts/sync-repo-doc-contract.cjs` and `repo/scripts/sync-agent-instruction-shims.cjs` maintain only managed root blocks and shims.
+6. `repo/scripts/validate-toolkit.cjs`, `repo/tests/*.test.cjs`, source-lock audit, and canonical-surface audit enforce drift and safety rules.
+7. `.codex-plugin/**` and `.claude-plugin/**` are platform-specific native plugin metadata. They are not cross-platform source of truth.
+8. The Toolkit Local Bridge Hub under the user profile stores OpenCode and Antigravity 2 adapter state. It is not repo source of truth.
 
 ## Architecture
 

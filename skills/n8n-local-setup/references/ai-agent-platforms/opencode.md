@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: n8n.local-setup
-Source: _projects/n8n/local-setup/_main/mcp setup - opencode.md
-Update the project source and run sync.
--->
 # OpenCode [Official n8n Skills](https://github.com/n8n-io/skills) And MCP Setup
 
 The primary local setup guide is [Page 1 - Local Setup](../n8n/local-setup.md).
@@ -91,7 +85,7 @@ This section is for this toolkit's own safety skills, not the upstream [official
 | Compatible fallback | `.agents/skills/` or `.claude/skills/`, if that is how the target OpenCode runtime is configured |
 
 - Do not copy only `SKILL.md`.
-- Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
+- Keep `README.md`, `references/`, `templates/`, `agents/`, and other supporting files beside `SKILL.md` when present.
 
 ## 5. Agent Rules
 

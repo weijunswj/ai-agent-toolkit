@@ -74,8 +74,8 @@ function readJson(filePath) {
 }
 
 function discoverSourceLocks(workspace) {
-  const projectsDir = path.join(workspace, '_projects');
-  return walk(projectsDir)
+  const provenanceDir = path.join(workspace, 'repo', 'source-watch', 'provenance');
+  return walk(provenanceDir)
     .filter((entry) => entry.dirent.isFile() && entry.fullPath.endsWith(`${path.sep}SOURCE-LOCK.json`))
     .map((entry) => ({
       relPath: slash(path.relative(workspace, entry.fullPath)),
@@ -155,7 +155,7 @@ async function latestCommitForLock(lock, env = process.env) {
   return response.sha;
 }
 
-function projectPathFromLock(lockFile) {
+function sourceLockPathFromLock(lockFile) {
   return lockFile.relPath.replace(/\/SOURCE-LOCK\.json$/, '');
 }
 
@@ -179,7 +179,7 @@ function renderSourceUpdatesSection(updates) {
     '## Active Third-Party Updates',
     '',
     ...updates.flatMap((update) => [
-      `### ${update.project_path}`,
+       `### ${update.source_lock_path}`,
       '',
       `- Source repo: \`${update.source_repo}\``,
       `- Source ref: \`${update.source_ref}\``,
@@ -278,7 +278,7 @@ async function checkProjectSourceUpdates({
     const comparisonCommit = reviewRecord ? reviewRecord.reviewed_through_sha : lock.source_commit;
     if (latestCommit.toLowerCase() === String(comparisonCommit || '').toLowerCase()) continue;
     updates.push({
-      project_path: projectPathFromLock(lockFile),
+       source_lock_path: sourceLockPathFromLock(lockFile),
       source_repo: lock.source_repo,
       source_ref: lock.source_ref,
       adopted_commit: lock.source_commit,

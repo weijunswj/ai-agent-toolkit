@@ -1,14 +1,8 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: design.google-design-md
-Source: _projects/design/google-design-md/_main/design-md-contract.md
-Update the project source and run sync.
--->
 # DESIGN.md Contract Reference
 
 Use this reference with the Secure UI/UX Frontend Design skill when a target app already has, or would benefit from, a `DESIGN.md` or `design.md` file.
 
-This Toolkit reference is adapted from Google Labs `design.md`, tracked in `_projects/design/google-design-md/SOURCE-LOCK.json`. It is documentation/reference support only. It does not add the upstream CLI or any package tooling.
+This Toolkit reference is adapted from Google Labs `design.md`, tracked in `repo/source-watch/provenance/google-design-md/SOURCE-LOCK.json`. It is documentation/reference support only. It does not add the upstream CLI or any package tooling.
 
 ## What DESIGN.md Is
 

@@ -2,13 +2,11 @@
   "name": "ai-agent-toolkit",
   "version": "0.1.0",
   "private": true,
-  "description": "Reusable AI-agent skills and preserved project guides.",
+  "description": "Reusable AI-agent skills, machine contracts, provenance, and safe maintenance scripts.",
   "type": "commonjs",
   "scripts": {
     "validate": "node repo/scripts/validate-toolkit.cjs",
     "test": "node --test repo/tests/*.test.cjs",
-    "sync:projects:check": "node repo/scripts/sync-toolkit-projects.cjs --check",
-    "sync:projects:write": "node repo/scripts/sync-toolkit-projects.cjs --write",
     "audit:source-locks": "node repo/scripts/audit-project-source-locks.cjs",
     "audit:surfaces": "node repo/scripts/audit-published-surfaces.cjs",
     "audit:surfaces:check": "node repo/scripts/audit-published-surfaces.cjs --check",
@@ -18,9 +16,7 @@
     "check:source-updates": "node repo/scripts/check-project-source-updates.cjs",
     "test:design": "node repo/scripts/run-design-tests.cjs",
     "test:bridge": "node --test repo/tests/toolkit-local-bridge.test.cjs",
-    "validate:all": "node repo/scripts/sync-repo-doc-contract.cjs --check && node repo/scripts/sync-toolkit-projects.cjs --check && node repo/scripts/audit-project-source-locks.cjs && node repo/scripts/audit-published-surfaces.cjs --check && node repo/scripts/audit-fallback-risk.cjs && node repo/scripts/validate-toolkit.cjs && node --test repo/tests/*.test.cjs && node repo/scripts/package-skills.cjs --check && node repo/scripts/audit-skill-portability.cjs && node repo/scripts/package-packs.cjs --check && node repo/scripts/run-design-tests.cjs && git diff --check",
-    "package:skills:check": "node repo/scripts/package-skills.cjs --check",
-    "package:packs:check": "node repo/scripts/package-packs.cjs --check",
+    "validate:all": "node repo/scripts/sync-agent-instruction-shims.cjs --check && node repo/scripts/sync-repo-doc-contract.cjs --check && node repo/scripts/audit-project-source-locks.cjs && node repo/scripts/audit-published-surfaces.cjs --check && node repo/scripts/audit-fallback-risk.cjs && node repo/scripts/validate-toolkit.cjs && node --test repo/tests/*.test.cjs && node repo/scripts/audit-skill-portability.cjs && node repo/scripts/run-design-tests.cjs && git diff --check",
     "safe-source-update": "node repo/scripts/safe-source-update.cjs"
   },
   "license": "UNLICENSED"

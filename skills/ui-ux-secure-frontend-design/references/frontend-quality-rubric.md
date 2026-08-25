@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: design.ui-ux-pro-max
-Source: _projects/design/ui-ux-pro-max/_main/skill/references/frontend-quality-rubric.md
-Update the project source and run sync.
--->
 # Frontend Quality Rubric
 
 Score each category from 1 to 5. Use the score to guide fixes, not to produce ceremony.

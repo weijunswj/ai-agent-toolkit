@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: repo-methodology.context-preserving-ai-publisher
-Source: _projects/repo-methodology/context-preserving-ai-publisher/_main/deletion-policy.md
-Update the project source and run sync.
--->
 # Deletion Policy
 
 Deletion is a source-of-truth change. Treat it as higher risk than adding a generated output.

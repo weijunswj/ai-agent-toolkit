@@ -1,17 +1,14 @@
 ---
 name: context-preserving-ai-publisher
-description: Use when creating or maintaining source-traceable AI-facing repo surfaces, generated skills, MCP notes, templates, pack metadata, manifests, source locks, audit baselines, or anti-drift documentation.
+description: Use when creating or maintaining source-traceable AI-facing repo surfaces, contracts, provenance, templates, source locks, audit baselines, or anti-drift documentation.
 ---
 
 <!--
-Generated from toolkit curated output for AI. Do not edit directly.
-Project: repo-methodology.context-preserving-ai-publisher
-Source: _projects/repo-methodology/context-preserving-ai-publisher/curated_output_for_ai/skills/context-preserving-ai-publisher/SKILL.md
-Update the curated output and run sync.
+Canonical Toolkit skill surface. Edit this skill folder directly.
+Source: skills/context-preserving-ai-publisher/SKILL.md
 -->
 <!--
-Curated AI-facing source.
-Project: repo-methodology.context-preserving-ai-publisher
+Canonical AI-facing source.
 Review rule: Keep this skill agent-agnostic. Do not copy this toolkit repo's local law into the generic workflow.
 
 Published-surface source note: This file is authored as a published-surface source; relative links are intended to resolve after sync at skills/context-preserving-ai-publisher/SKILL.md.
@@ -23,31 +20,31 @@ Use this skill to create or maintain AI-facing repo surfaces without losing sour
 
 ## First Decision
 
-- Bootstrap mode: the repo does not yet have source layers, manifests, generated-surface checks, or local agent rules. Read `references/bootstrap-mode.md`.
-- Maintenance mode: the repo already has local docs, manifests, generated outputs, audits, or validation. Read the local repo docs first, then read `references/maintenance-mode.md`.
+- Bootstrap mode: the repo does not yet have direct canonical skills, contracts, provenance, or local agent rules. Read `references/bootstrap-mode.md`.
+- Maintenance mode: the repo already has local docs, canonical surfaces, audits, or validation. Read the local repo docs first, then read `references/maintenance-mode.md`.
 
 When local repo law conflicts with this generic skill, local law wins.
 
 ## Core Workflow
 
-1. Identify the requested published surface and the owning repo/module.
-2. Read local source-of-truth docs, agent instructions, manifests, and validation docs.
-3. Classify the material as source, reviewed adapter, generated output, linked exception, excluded, or obsolete.
+1. Identify the requested canonical surface and its owning repo area.
+2. Read local source-of-truth docs, agent instructions, provenance records, and validation docs.
+3. Classify the material as canonical source, reviewed adapter, excluded, or obsolete.
 4. Use `references/source-to-surface-decision-tree.md` to choose source location and recipe.
-5. Edit the source of truth, not generated outputs, unless the local manifest explicitly marks an output as linked.
-6. Run the repo's deterministic sync/check commands.
+5. Edit the canonical source surface directly.
+6. Run any retained deterministic synchronizer/check commands.
 7. Run the smallest relevant audits and tests; use `references/validation-strategy.md` for validation cadence.
 8. Update audit baselines only after reviewing exact count movement.
-9. Report changed files, copied source outputs, curated adapters, baseline movement, validation, and remaining risks.
+9. Report changed files, direct canonical surfaces, provenance/baseline movement, validation, and remaining risks.
 
 ## Source Model
 
-- Source layer: full original material and provenance.
-- Reviewed adapter layer: short routers, indexes, wrappers, metadata, manifests, and shims.
-- Manifest/routing contract: declared mapping from source to published output.
-- Portable generated surfaces: skills, MCP docs, templates, packs, references, or equivalent repo-local surfaces.
+- Source layer: complete `skills/**`, `repo/contracts/**`, and `repo/source-watch/provenance/**` material.
+- Reviewed adapter layer: short routers, indexes, wrappers, metadata, and shims under the owning canonical surface.
+- Routing contract: `repo/contracts/agent-rules/toolkit-skill-routing.md` and the relevant repo docs.
+- Portable surfaces: complete skills, templates, references, and contracts that remain locally usable.
 - Local law/docs: repo-specific rules, commands, validation, and safety policy.
-- Deterministic publishing: copy, extract, concat, JSON formatting, or registry generation without AI summarisation.
+- Deterministic maintenance: managed-block synchronization, JSON formatting, and validation without AI summarisation.
 - Audits: checks for undeclared outputs, lossy surfaces, ownership confusion, unsafe deletions, and baseline drift.
 
 ## References
@@ -60,7 +57,7 @@ When local repo law conflicts with this generic skill, local law wins.
 - `references/validation-strategy.md`: targeted local checks plus CI or documented full-gate validation.
 - `references/audit-and-baseline-workflow.md`: audit and baseline handling.
 - `references/deletion-policy.md`: deletion and retirement checks.
-- `references/enforcement-model.md`: docs, manifests, sync, audit, and CI.
+- `references/enforcement-model.md`: docs, canonical surfaces, audit, and CI.
 - `references/examples.md`: generic concepts mapped to this repo as one implementation.
 
 ## Templates
@@ -70,15 +67,14 @@ When local repo law conflicts with this generic skill, local law wins.
 - `templates/source-to-surface-decision.template.md`
 - `templates/pr-summary.template.md`
 - `templates/repo-docs/`
-- `templates/project-module/`
 - `templates/ci/`
 
 ## Rules
 
 - Do not overwrite existing local repo law with generic templates.
-- Do not make generated outputs the source of truth.
+- Do not make audit output or derived copies the source of truth.
 - Do not summarise full runtime docs into thin published surfaces.
-- Do not edit generated files directly when a manifest declares their source.
+- Do not create duplicate source or publishing trees.
 - Do not add root-level surface folders if the target repo has a different topology.
 - Before adding live-system, credential, deployment, or destructive automation, pause, explain the risk, name the exact target/action, and ask for explicit local approval.
 - Do not update an audit baseline until the movement is inspected and intentional.

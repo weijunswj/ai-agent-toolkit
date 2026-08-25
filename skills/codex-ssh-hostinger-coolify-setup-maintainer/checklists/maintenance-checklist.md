@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: development.hostinger-coolify-production-guide
-Source: _projects/development/hostinger-coolify-production-guide/_main/skill/checklists/maintenance-checklist.md
-Update the project source and run sync.
--->
 # Maintenance Checklist
 
 - [ ] Pending - Run pre-maintenance health check and capture evidence.

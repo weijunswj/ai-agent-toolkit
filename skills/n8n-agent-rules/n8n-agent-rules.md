@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: development.ai-coding-agent-rules
-Source: _projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules.md
-Update the project source and run sync.
--->
 # n8n workflow MCP and Skills rules
 
 ## Scope

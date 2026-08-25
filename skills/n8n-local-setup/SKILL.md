@@ -3,17 +3,6 @@ name: n8n-local-setup
 description: Use when setting up safe n8n environments: localhost/ngrok dev stack, production Cloudflare Tunnel self-hosting for local/CGNAT machines, hosted n8n on Hostinger Coolify VPS, production backup templates, launcher/menu use, official n8n Skills setup, or instance-level MCP references. For workflow, helper-script, or live n8n tasks, first apply n8n-agent-rules.
 ---
 
-<!--
-Generated from toolkit curated output for AI. Do not edit directly.
-Project: n8n.local-setup
-Source: _projects/n8n/local-setup/curated_output_for_ai/skills/n8n-local-setup/SKILL.md
-Update the curated output and run sync.
--->
-<!--
-Curated AI-facing source.
-Project: n8n.local-setup
-Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
--->
 
 # n8n Local Setup
 
@@ -26,7 +15,7 @@ For any n8n workflow, helper-script, [official n8n Skills](https://github.com/n8
 ## Source And Runtime Material
 
 - Runtime references live inside this copied skill folder under [references/n8n/](references/n8n/), with skills-first agent guidance under [references/ai-agent-platforms/](references/ai-agent-platforms/).
-- Project provenance lives under [_projects/n8n/local-setup/](../../_projects/n8n/local-setup/) in the toolkit repo, but normal use of a copied skill folder must not require `_projects/`.
+- Toolkit provenance and contracts live under `repo/source-watch/provenance/` and `repo/contracts/`; normal use of a copied skill folder must not require the Toolkit repository.
 
 ## Core Rules
 
@@ -78,7 +67,6 @@ For any n8n workflow, helper-script, [official n8n Skills](https://github.com/n8
 - Local setup reference: [references/n8n/local-setup.md](references/n8n/local-setup.md)
 - Hostinger Coolify VPS n8n reference: [references/n8n/hostinger-vps.md](references/n8n/hostinger-vps.md)
 - Production self-hosting Cloudflare Tunnel reference: [references/n8n/production-cloudflare-tunnel.md](references/n8n/production-cloudflare-tunnel.md)
-- Pack checklist: [packs/codex-n8n-local/pack.json](packs/codex-n8n-local/pack.json)
 
 ## Workflow
 

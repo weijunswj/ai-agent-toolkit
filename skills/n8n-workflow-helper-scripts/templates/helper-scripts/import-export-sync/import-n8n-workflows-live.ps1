@@ -98,8 +98,8 @@ function Test-N8nRepoRootCandidate($Path) {
   $hasGit = Test-Path -LiteralPath (Join-Path $Path ".git")
   $hasWorkflowDir = Test-Path -LiteralPath (Join-Path $Path "n8n-workflows") -PathType Container
   $hasToolkitMarkers = (
-    (Test-Path -LiteralPath (Join-Path $Path "repo/scripts/sync-toolkit-projects.cjs") -PathType Leaf) -and
-    (Test-Path -LiteralPath (Join-Path $Path "_projects/n8n/workflow-toolkit/toolkit.project.json") -PathType Leaf)
+    (Test-Path -LiteralPath (Join-Path $Path "repo/scripts/validate-toolkit.cjs") -PathType Leaf) -and
+    (Test-Path -LiteralPath (Join-Path $Path "repo/contracts") -PathType Container)
   )
 
   return ($hasGit -and $hasWorkflowDir) -or ($hasGit -and $hasToolkitMarkers)

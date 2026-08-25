@@ -1,14 +1,11 @@
 <!--
-Generated from toolkit curated output for AI. Do not edit directly.
-Project: repo-methodology.context-preserving-ai-publisher
-Source: _projects/repo-methodology/context-preserving-ai-publisher/curated_output_for_ai/skills/context-preserving-ai-publisher/README.md
-Update the curated output and run sync.
+Canonical Toolkit skill surface. Edit this skill folder directly.
+Source: skills/context-preserving-ai-publisher/README.md
 -->
 # Context-Preserving AI Publisher Skill
 
 <!--
-Curated AI-facing source.
-Project: repo-methodology.context-preserving-ai-publisher
+Canonical AI-facing source.
 
 Published-surface source note: This file is authored as a published-surface source; relative links are intended to resolve after sync at skills/context-preserving-ai-publisher/README.md.
 -->
@@ -17,8 +14,8 @@ Copy the whole [context-preserving-ai-publisher](./) skill folder into an agent 
 
 Use it for:
 
-- Bootstrapping source, adapter, manifest, sync, and audit conventions in a repo.
-- Maintaining existing generated skills, MCP notes, templates, packs, references, or indexes.
+- Bootstrapping direct canonical skills, contracts, provenance, and audit conventions in a repo.
+- Maintaining existing canonical skills, templates, references, or indexes.
 - Reviewing audit baseline movement and generated-output ownership.
 - Avoiding lossy AI-facing surfaces and context drift.
 

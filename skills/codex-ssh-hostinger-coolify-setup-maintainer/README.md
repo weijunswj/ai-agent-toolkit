@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit curated output for AI. Do not edit directly.
-Project: development.hostinger-coolify-production-guide
-Source: _projects/development/hostinger-coolify-production-guide/curated_output_for_ai/skills/codex-ssh-hostinger-coolify-setup-maintainer/README.md
-Update the curated output and run sync.
--->
 # Codex SSH Hostinger Coolify Setup Maintainer
 
 Production-minded skill for Hostinger VPS plus Coolify setup, deployment, daily security checks, optional Telegram/email daily notifications, upgrade advisory, intrusion-signal review, maintenance, and incident response. Use it when Codex should help set up Hostinger for deployment or maintain a Coolify host. Copy the whole skill folder, not just `SKILL.md`, so checklists, templates, scripts, and references stay available.

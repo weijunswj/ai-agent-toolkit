@@ -10,8 +10,8 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const runtimePath = path.join(repoRoot, 'repo', 'scripts', 'toolkit-capability-registry.cjs');
-const policyPath = path.join(repoRoot, '_projects', 'development', 'repository-capability-registry', '_main', 'repository-capability-policy.json');
-const schemaPath = path.join(repoRoot, '_projects', 'development', 'repository-capability-registry', '_main', 'repository-capability-contract.schema.json');
+const policyPath = path.join(repoRoot, 'repo', 'contracts', 'repository-capability-registry', 'repository-capability-policy.json');
+const schemaPath = path.join(repoRoot, 'repo', 'contracts', 'repository-capability-registry', 'repository-capability-contract.schema.json');
 const runtime = require(runtimePath);
 const a1 = require(path.join(repoRoot, 'repo', 'scripts', 'toolkit-control-plane', 'control-plane-kernel.cjs'));
 

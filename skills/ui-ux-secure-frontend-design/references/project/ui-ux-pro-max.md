@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: design.ui-ux-pro-max
-Source: _projects/design/ui-ux-pro-max/_main/skill/references/project/ui-ux-pro-max.md
-Update the project source and run sync.
--->
 # UI/UX Pro Max Design Module
 
 The UI/UX Pro Max design module keeps design intelligence in two separate surfaces:
@@ -11,13 +5,13 @@ The UI/UX Pro Max design module keeps design intelligence in two separate surfac
 - Instruction-first design guidance in [skills/ui-ux-secure-frontend-design/](../../).
 - Local-only CSV search/generation tooling in [skills/ui-ux-secure-frontend-design/tools/design-system-generator/](../../tools/design-system-generator/).
 
-The source-of-truth project module is [_projects/design/ui-ux-pro-max/](../../../../_projects/design/ui-ux-pro-max/). Its [_main/](../../../../_projects/design/ui-ux-pro-max/_main/) folder preserves the safe local-search subset. AI-facing surfaces are declared in the project manifest as linked or copy recipes.
+The canonical design surface is [skills/ui-ux-secure-frontend-design/](../../). Its local-only generator and CSV data preserve the safe local-search subset. Active upstream provenance is tracked in `repo/source-watch/provenance/ui-ux-pro-max/SOURCE-LOCK.json`.
 
 ## Safety Boundaries
 
 - The skill remains instruction-first.
 - The generator is part of the normal design-creation workflow when CSV-backed recommendations would improve the result; the user does not need to ask for it by name.
-- Pack installers and sync workflows must not run the generator during installation or publishing.
+- Installers and synchronizers must not run the generator during installation or maintenance.
 - The generator reads bundled CSV files only.
 - No network downloads, dependency installation, browser automation, or default writes are allowed.
 - Do not expand shell usage beyond the documented local Python command resolved from the trusted installed skill directory.

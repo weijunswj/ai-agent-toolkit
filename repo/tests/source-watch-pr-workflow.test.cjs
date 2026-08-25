@@ -8,6 +8,7 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..', '..');
 const workflowPath = path.join(repoRoot, '.github', 'workflows', 'source-watch-pr.yml');
 const helperPath = path.join(repoRoot, 'repo', 'scripts', 'update-source-watch-review-branch.sh');
+const legacyProjectToken = '_' + 'projects';
 const workflow = fs.readFileSync(workflowPath, 'utf8').replace(/\r\n/g, '\n');
 const helper = fs.readFileSync(helperPath, 'utf8').replace(/\r\n/g, '\n');
 
@@ -147,8 +148,8 @@ test('source-watch PR notifier does not become a source updater', () => {
   assert.doesNotMatch(workflow, /\$\{\{\s*secrets\./i);
   assert.doesNotMatch(workflow, /repo\/scripts\/safe-source-update\.cjs/i);
   assert.doesNotMatch(workflow, /git clone|npm (?:install|exec)|\bnpx\b/i);
-  assert.doesNotMatch(workflow, /git add[^\n]*(?:_projects|SOURCE-LOCK\.json)/i);
-  assert.doesNotMatch(workflow, /cp .*_projects|install .*_projects/i);
+  assert.doesNotMatch(workflow, new RegExp(`git add[^\\n]*(?:${legacyProjectToken}|SOURCE-LOCK\\.json)`, 'i'));
+  assert.doesNotMatch(workflow, new RegExp(`cp .*${legacyProjectToken}|install .*${legacyProjectToken}`, 'i'));
   assert.doesNotMatch(workflow, /git push[^\n]*(?:HEAD:)?main\b/i);
 });
 

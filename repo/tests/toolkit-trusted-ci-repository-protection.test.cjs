@@ -12,14 +12,15 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 const runtime = require(path.join(repoRoot, 'repo', 'scripts', 'toolkit-trusted-ci-repository-protection.cjs'));
 const capabilityRegistry = require(path.join(repoRoot, 'repo', 'scripts', 'toolkit-capability-registry.cjs'));
 const workflow = require(path.join(repoRoot, 'repo', 'scripts', 'toolkit-trusted-ci-repository-protection-workflow.cjs'));
-const publisher = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'fixtures', 'publisher.n6.json'), 'utf8'));
-const effectiveFixture = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'fixtures', 'effective-protection.n6.json'), 'utf8'));
-const contractSchema = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'trusted-ci-repository-protection-contract.schema.json'), 'utf8'));
-const policy = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'trusted-ci-repository-protection-policy.json'), 'utf8'));
-const publisherProtocol = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'app-publisher-protocol.json'), 'utf8'));
-const workflowContract = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'protected-ci-gate-workflow-contract.json'), 'utf8'));
-const workflowTemplatePath = path.join(repoRoot, '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'templates', 'protected-ci-gate.workflow.yml');
-const compositionFixture = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'cicd', 'trusted-ci-repository-protection', '_main', 'fixtures', 'composition-paths.n6.json'), 'utf8'));
+const contractRoot = path.join(repoRoot, 'repo', 'contracts', 'trusted-ci-repository-protection');
+const publisher = JSON.parse(fs.readFileSync(path.join(contractRoot, 'fixtures', 'publisher.n6.json'), 'utf8'));
+const effectiveFixture = JSON.parse(fs.readFileSync(path.join(contractRoot, 'fixtures', 'effective-protection.n6.json'), 'utf8'));
+const contractSchema = JSON.parse(fs.readFileSync(path.join(contractRoot, 'trusted-ci-repository-protection-contract.schema.json'), 'utf8'));
+const policy = JSON.parse(fs.readFileSync(path.join(contractRoot, 'trusted-ci-repository-protection-policy.json'), 'utf8'));
+const publisherProtocol = JSON.parse(fs.readFileSync(path.join(contractRoot, 'app-publisher-protocol.json'), 'utf8'));
+const workflowContract = JSON.parse(fs.readFileSync(path.join(contractRoot, 'protected-ci-gate-workflow-contract.json'), 'utf8'));
+const workflowTemplatePath = path.join(contractRoot, 'templates', 'protected-ci-gate.workflow.yml');
+const compositionFixture = JSON.parse(fs.readFileSync(path.join(contractRoot, 'fixtures', 'composition-paths.n6.json'), 'utf8'));
 const PROTECTED_WORKFLOW_SOURCE_SHA = workflow.workflowIdentity(workflow.buildProtectedWorkflowTemplate()).source_sha;
 
 const SHAS = {
@@ -33,7 +34,7 @@ const REPOSITORY_ID = capabilityRegistry.repositoryIdForCanonicalRemote(REMOTE);
 const SERVER_REPOSITORY_ID = '1228006168';
 const effective = { ...effectiveFixture, repository_id: REPOSITORY_ID };
 const CHANGED_PATHS = [
-  '_projects/cicd/trusted-ci-repository-protection/_main/trusted-ci-repository-protection-policy.json',
+  'repo/contracts/trusted-ci-repository-protection/trusted-ci-repository-protection-policy.json',
   'repo/scripts/toolkit-trusted-ci-repository-protection.cjs',
   'repo/tests/toolkit-trusted-ci-repository-protection.test.cjs',
 ];
@@ -423,7 +424,7 @@ test('protected workflow rejects candidate checkout, forbidden triggers, and wri
 test('composition is derived from protected path classes and rejects candidate coverage claims', () => {
   const manifest = runtime.compositionManifest(CHANGED_PATHS);
   assert.equal(manifest.ok, true);
-  assert.deepEqual(manifest.required_components, ['project-sync', 'fallback-risk-audit', 'toolkit-validator', 'repository-tests']);
+   assert.deepEqual(manifest.required_components, ['fallback-risk-audit', 'toolkit-validator', 'repository-tests']);
   assert.equal(manifest.components.some((component) => component.applicability === 'required' && component.id === 'git-diff-check'), false);
   assert.equal(runtime.NON_AUTHORITATIVE_COMPONENT_IDS.includes('git-diff-check'), true);
   assert.equal(runtime.compositionManifest(['unknown/path.bin']).code, 'UNKNOWN_RELEVANT_PATH');
@@ -436,9 +437,9 @@ test('complete N6 project metadata and future project files are representable wh
   assert.equal(complete.ok, true);
   assert.deepEqual(complete.required_components, compositionFixture.required_components);
   for (const pathValue of [
-    '_projects/cicd/trusted-ci-repository-protection/README.md',
-    '_projects/cicd/trusted-ci-repository-protection/SOURCE-MANIFEST.md',
-    '_projects/cicd/trusted-ci-repository-protection/_main/future-contract.json',
+    'repo/contracts/trusted-ci-repository-protection/README.md',
+    'repo/contracts/trusted-ci-repository-protection/SOURCE-MANIFEST.md',
+    'repo/contracts/trusted-ci-repository-protection/future-contract.json',
   ]) assert.equal(runtime.compositionManifest([pathValue]).ok, true, pathValue);
   assert.equal(runtime.compositionManifest(['repo/future-relevant-but-unknown.bin']).code, 'UNKNOWN_RELEVANT_PATH');
 });

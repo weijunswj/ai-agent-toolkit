@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: repo-methodology.context-preserving-ai-publisher
-Source: _projects/repo-methodology/context-preserving-ai-publisher/_main/validation-strategy.md
-Update the project source and run sync.
--->
 # Validation Strategy
 
 Use targeted validation while maintaining source-traceable AI-facing surfaces, then rely on the target repo's CI or documented full gate for PR-ready completion.
@@ -32,7 +26,7 @@ If full validation fails, inspect the failing section, run the smallest relevant
 
 Auto-sync is optional convenience writeback for narrow deterministic generated-surface updates. It is not a substitute for the target repo's full validation gate.
 
-For `_projects/**/_main/**` source or provenance changes, auto-sync should skip instead of blessing the PR. The author or Codex must update the source, source-lock/provenance metadata when needed, generated outputs, and audit baselines when needed, then rely on the target repo's full validation gate.
+For canonical skill, contract, or provenance changes, review the direct source and any required provenance or audit-baseline movement in the PR, then rely on the target repo's read-only validation gate.
 
 Read-only CI should catch missed steps by failing validation. Privileged writeback should not silently mutate source/provenance PRs.
 

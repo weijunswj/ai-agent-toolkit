@@ -1,33 +1,22 @@
 # How To Use
 
-This repo is a reusable toolkit for AI-agent work. It gives humans and agents a stable place to find preserved project modules, copyable skills, and maintenance scripts.
+This repo is a reusable toolkit for AI-agent work. It gives humans and agents a stable place to find canonical skills, machine contracts, provenance records, and maintenance scripts.
 
-## Use Project Modules
+## Find Canonical Material
 
-Use [_projects/](../../_projects/) when you need the preserved source context behind an AI-facing surface.
+- `skills/<skill-name>/` is the complete copyable skill unit.
+- `repo/contracts/` contains schemas, policies, fixtures, templates, agent-rule inputs, and the Toolkit Local Bridge package contract.
+- `repo/scripts/` contains deterministic maintenance and runtime helpers.
+- `repo/tests/` contains focused contract and runtime tests.
+- `repo/source-watch/provenance/` contains the two active third-party source locks.
 
-- `_main/` keeps preserved project files, full docs, and provenance source.
-- `curated_output_for_ai/` keeps reviewed AI-facing source material that sync recipes publish into `skills/`.
-- `_generated/` is preview-only and not source of truth.
-- `toolkit.project.json` owns the toolkit module version, routing contract, generated outputs, and write policy.
-- `SOURCE-LOCK.json` owns upstream/source provenance, source pins, blob pins, lifecycle, attribution requirements, and source-watch update policy.
-
-For third-party projects, the project `version` is the toolkit adaptation version, not the upstream version. Source-watch tasks must use `SOURCE-LOCK.json` for upstream repo, source ref, locked commit, update policy, attribution requirement, allowlisted files, and exact blob pins.
-
-Start with:
-
-- [Local n8n Setup](../../_projects/n8n/local-setup/)
-- [n8n Workflow Toolkit](../../_projects/n8n/workflow-toolkit/)
-- [Secure CI/CD Installer](../../_projects/cicd/secure-installer/)
-- [UI/UX Pro Max Design](../../_projects/design/ui-ux-pro-max/)
-
-To sync generated AI-facing surfaces:
+To refresh the two retained managed instruction surfaces:
 
 ```powershell
+node repo/scripts/sync-agent-instruction-shims.cjs --write
+node repo/scripts/sync-agent-instruction-shims.cjs --check
 node repo/scripts/sync-repo-doc-contract.cjs --write
 node repo/scripts/sync-repo-doc-contract.cjs --check
-node repo/scripts/sync-toolkit-projects.cjs --write
-node repo/scripts/sync-toolkit-projects.cjs --check
 ```
 
 To inspect source update status:
@@ -80,7 +69,7 @@ Manual installation means copying a Toolkit-owned `skills/<skill-name>/` folder 
 
 1. Use the whole `skills/<skill-name>/` folder as the install unit.
 2. Copy whole skill folders, not just `SKILL.md`.
-3. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
+3. Keep `README.md`, `references/`, `templates/`, `agents/`, and other supporting files beside `SKILL.md` when present.
 4. Choose **ANY ONE** supported install location per platform.
 5. Do not paste secrets, tokens, `.env` values, or credentials into repo files.
 
@@ -95,7 +84,7 @@ Manual installation means copying a Toolkit-owned `skills/<skill-name>/` folder 
 
 This repo does not commit package archives. Keep `_dist/`, `.zip`, and `.tgz` artifacts out of commits.
 
-Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync.
+Humans and agents use the same canonical `skills/**` and `repo/**` surfaces. No project-to-skill publishing step is required.
 
 ### Codex
 
@@ -183,7 +172,7 @@ Use `ai-agent-toolkit` as `<plugin-name>` for this repo unless you intentionally
 
 Use `GEMINI.md` or the configured context file for always-on Antigravity 2 instructions.
 
-`skills/**/SKILL.md` files are published toolkit surfaces. If a generated notice is present, update the source path named in that notice and run `node repo/scripts/sync-toolkit-projects.cjs --write`. Directly maintained `linked` skills should be rare and justified in the related project manifest.
+`skills/**/SKILL.md` files are complete canonical toolkit surfaces. Edit the relevant skill folder directly and run the targeted skill portability and surface audits.
 
 ## Documentation Links
 
@@ -265,7 +254,7 @@ Policy layering stays portable:
 
 ## Use Skill-Local Templates Manually
 
-Templates are published material. Review them before copying into a consumer repo, and follow generated notices back to `_main/` or `curated_output_for_ai/` when editing toolkit-owned sources.
+Templates are canonical material. Review them before copying into a consumer repo and update the owning `skills/**` or `repo/contracts/**` surface directly.
 
 - [Generic agent rule templates](../../skills/ai-coding-agent-rules/) contain generated inert slim baseline templates only. They intentionally do not include the full n8n ruleset or full skill-routing table.
 - [n8n agent rules](../../skills/n8n-agent-rules/) contain the full n8n operating ruleset plus optional brief adapters under `adapters/`.
@@ -280,23 +269,11 @@ Templates are published material. Review them before copying into a consumer rep
 - [n8n workflow templates](../../skills/n8n-workflow-templates/templates/) contain public generic inactive workflow JSON templates.
 - [CI/CD templates](../../skills/secure-cicd-installer/templates/cicd/) contain CI/CD installer prompts and status templates.
 
-Generated template outputs are intentional. `node repo/scripts/sync-agent-instruction-shims.cjs --write` regenerates project-pure source-side baseline templates and root instruction shims from `_projects/development/ai-coding-agent-rules/_main/`; `node repo/scripts/sync-toolkit-projects.cjs --write` publishes inert skill copies and the generated `n8n-agent-rules` skill.
+Managed template outputs are intentional. `node repo/scripts/sync-agent-instruction-shims.cjs --write` updates canonical agent-rule templates and root instruction shims from `repo/contracts/agent-rules/`. Other skill templates are maintained directly in their skill folders.
 
 For n8n work, install or load `skills/n8n-agent-rules`. The optional adapter installer can detect n8n repositories and preview patches to active instruction files, but it must be run with `--dry-run` first. Before running it with `--write`, pause, name the current target file and operation, explain the write, and ask for explicit current-turn approval. Do not copy the full n8n rules into global always-on instructions unless you intentionally accept the context cost.
 
 n8n helper templates may write scoped local outputs after they are copied into a reviewed consumer repo: `n8n-workflows/*.json`, ignored `.tmp/**`, ignored `.n8n-local/**`, and sanitizer staging folders. Keep those local folders ignored.
-
-## Use Skill-Local Packs
-
-Packs are manifest-defined bundles stored inside the related skill folder under `skills/<skill-name>/packs/`. They are review checklists, not a root user-facing surface.
-
-Until the installer MCP exists, use packs as review checklists:
-
-1. Open the pack README inside the skill folder.
-2. Inspect `pack.json`.
-3. Review every path in `installs`.
-4. Before copying files, name the exact source and target paths and ask for explicit current-turn approval.
-5. Copy only the files the user intentionally approves.
 
 ## Codex Setup
 
@@ -310,7 +287,7 @@ Use:
 - [Local stack templates](../../skills/n8n-local-setup/templates/.n8n-local/)
 - [Production Cloudflare Tunnel reference](../../skills/n8n-local-setup/references/n8n/production-cloudflare-tunnel.md)
 - [Production Cloudflare stack templates](../../skills/n8n-local-setup/templates/.n8n-production-cloudflare/)
-- [Local n8n setup source module](../../_projects/n8n/local-setup/)
+- [Local n8n setup skill](../../skills/n8n-local-setup/)
 
 Keep live n8n tokens in user environment variables, not repo files. Codex [official n8n Skills](https://github.com/n8n-io/skills) plus MCP setup is secondary and not part of the beginner local setup path.
 
@@ -372,7 +349,7 @@ Do not automate ChatGPT web or Claude web with cookies, sessions, browser automa
 
 Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised as a supported surface for now.
 
-The supported path is skills-first: humans use `_projects/**`, and agents use `skills/**`.
+The supported path is direct and skills-first: humans and agents use `skills/**` and `repo/**`.
 
 [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references are packaged under [skills/n8n-local-setup/](../../skills/n8n-local-setup/) as secondary setup material. They are not a repo-wide MCP surface.
 
@@ -389,4 +366,4 @@ Use [skills/ui-ux-secure-frontend-design/tools/design-system-generator/](../../s
 - Do not run live import/export helpers from this toolkit repo.
 - Do not run live n8n import/export helpers in CI.
 - Do not auto-merge or auto-apply upstream updates. Treat upstream changes as review prompts, then use a separate human-approved PR for any source update.
-- Do not edit generated AI-facing project outputs directly; update `_main/` or `curated_output_for_ai/` and run sync/check.
+- Edit the direct canonical AI-facing skill or contract surface; run retained synchronizer checks only for managed root blocks and shims.

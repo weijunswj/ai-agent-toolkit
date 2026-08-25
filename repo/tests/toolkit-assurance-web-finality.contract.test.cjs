@@ -6,24 +6,19 @@ const path = require('node:path');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
-const projectRoot = path.join(repoRoot, '_projects', 'development', 'independent-assurance-web-finality');
+const contractRoot = path.join(repoRoot, 'repo', 'contracts', 'independent-assurance-web-finality');
 const runtime = require(path.join(repoRoot, 'repo', 'scripts', 'toolkit-assurance-web-finality.cjs'));
 
 const sha = (letter) => letter.repeat(40);
 
-test('A4 project is source-only and declares no generated or published surface', () => {
-  const manifest = JSON.parse(fs.readFileSync(path.join(projectRoot, 'toolkit.project.json'), 'utf8'));
-  const lock = JSON.parse(fs.readFileSync(path.join(projectRoot, 'SOURCE-LOCK.json'), 'utf8'));
-  assert.equal(manifest.id, 'development.independent-assurance-web-finality');
-  assert.equal(manifest.version, '2.0.0');
-  assert.deepEqual(manifest.outputs, []);
-  assert.equal(manifest.surface.publish_as, 'source_only');
-  assert.deepEqual(lock.files, []);
+test('A4 contract is direct and has no generated or published surface', () => {
+  assert.equal(fs.existsSync(contractRoot), true);
+  assert.equal(fs.existsSync(path.join(repoRoot, 'skills', 'independent-assurance-web-finality')), false);
 });
 
 test('A4 source contract freezes the accepted Lock and authority boundaries', () => {
-  const schema = JSON.parse(fs.readFileSync(path.join(projectRoot, '_main', 'assurance-web-finality-contract.schema.json'), 'utf8'));
-  const policy = JSON.parse(fs.readFileSync(path.join(projectRoot, '_main', 'assurance-web-finality-policy.json'), 'utf8'));
+  const schema = JSON.parse(fs.readFileSync(path.join(contractRoot, 'assurance-web-finality-contract.schema.json'), 'utf8'));
+  const policy = JSON.parse(fs.readFileSync(path.join(contractRoot, 'assurance-web-finality-policy.json'), 'utf8'));
   assert.equal(schema.$id, runtime.CONTRACT_VERSION);
   assert.equal(policy.design_lock_id, runtime.DESIGN_LOCK_ID);
   assert.equal(policy.schema_version, 2);
@@ -44,7 +39,7 @@ test('A4 source contract freezes the accepted Lock and authority boundaries', ()
 });
 
 test('A4 source shape does not absorb the A3 five-contract set or live execution mechanics', () => {
-  const policy = JSON.parse(fs.readFileSync(path.join(projectRoot, '_main', 'assurance-web-finality-policy.json'), 'utf8'));
+  const policy = JSON.parse(fs.readFileSync(path.join(contractRoot, 'assurance-web-finality-policy.json'), 'utf8'));
   assert.equal(policy.exclusions.includes('host_adapter_mechanics'), true);
   assert.equal(policy.exclusions.includes('provider_or_live_work'), true);
   assert.equal(policy.exclusions.includes('workflow_edits'), true);

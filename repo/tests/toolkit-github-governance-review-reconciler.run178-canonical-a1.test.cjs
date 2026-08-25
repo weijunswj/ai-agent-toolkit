@@ -234,7 +234,7 @@ test('the four mutating N5 intents use the closed source-owned action mapping', 
 });
 
 test('source policy declares the canonical A1 broker and closed action mapping', () => {
-  const policyPath = path.resolve(__dirname, '../../_projects/development/github-governance-review-reconciler/_main/github-governance-review-reconciler-policy.json');
+  const policyPath = path.resolve(__dirname, '../../repo/contracts/github-governance-review-reconciler/github-governance-review-reconciler-policy.json');
   const policy = JSON.parse(fs.readFileSync(policyPath, 'utf8'));
   assert.equal(policy.authority.a1.broker, 'authority_broker');
   assert.equal(policy.authority.a1.operation_shape, 'canonical-typed');

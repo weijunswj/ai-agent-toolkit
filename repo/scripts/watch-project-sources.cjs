@@ -4,12 +4,11 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const {
-  isActiveThirdPartyAttributionLock,
-  isRetiredMigrationLock
+  isActiveThirdPartyAttributionLock
 } = require('./audit-project-source-locks.cjs');
 
 const root = process.cwd();
-const projectRoot = '_projects';
+const provenanceRoot = 'repo/source-watch/provenance';
 
 const allowlists = {
   'google-labs-code/design.md': [
@@ -52,7 +51,7 @@ function readJson(relPath) {
 }
 
 function discoverLocks() {
-  return walk(resolveRel(projectRoot))
+  return walk(resolveRel(provenanceRoot))
     .filter((entry) => entry.dirent.isFile() && entry.relPath.endsWith('/SOURCE-LOCK.json'))
     .map((entry) => ({ relPath: entry.relPath, lock: readJson(entry.relPath) }))
     .sort((a, b) => a.relPath.localeCompare(b.relPath));
@@ -68,12 +67,8 @@ function parseArgs(argv) {
   return result;
 }
 
-function isRetiredProvenanceSource(lock) {
-  return isRetiredMigrationLock(lock);
-}
-
 function assertSupportedLifecycle(lockFile) {
-  if (isRetiredMigrationLock(lockFile.lock) || isActiveThirdPartyAttributionLock(lockFile.lock)) return;
+  if (isActiveThirdPartyAttributionLock(lockFile.lock)) return;
   throw new Error(`Unsupported SOURCE-LOCK lifecycle metadata: ${lockFile.relPath}`);
 }
 
@@ -85,11 +80,10 @@ function riskForActiveSource(lock) {
 }
 
 function planEntry(lockFile) {
-  const projectPath = lockFile.relPath.replace(/\/SOURCE-LOCK\.json$/, '');
   const lock = lockFile.lock;
   const risk = riskForActiveSource(lock);
   return {
-    project_path: projectPath,
+    source_lock_path: lockFile.relPath,
     source_repo: lock.source_repo,
     source_ref: lock.source_ref,
     locked_commit: lock.source_commit,
@@ -107,7 +101,6 @@ function planEntry(lockFile) {
       source_blob_sha: file.source_blob_sha || null
     })),
     required_local_checks: [
-      'node repo/scripts/sync-toolkit-projects.cjs --write',
       'node repo/scripts/audit-project-source-locks.cjs',
       'npm run validate:all'
     ],
@@ -117,51 +110,29 @@ function planEntry(lockFile) {
   };
 }
 
-function retiredProvenanceEntry(lockFile) {
-  const projectPath = lockFile.relPath.replace(/\/SOURCE-LOCK\.json$/, '');
-  const lock = lockFile.lock;
-  return {
-    project_path: projectPath,
-    source_repo: lock.source_repo,
-    source_ref: lock.source_ref,
-    locked_commit: lock.source_commit,
-    source_lifecycle: lock.source_lifecycle,
-    source_role: lock.source_role,
-    update_policy: lock.source_update_policy,
-    public_attribution_required: lock.public_attribution_required,
-    notes: 'Historical provenance only. Do not fetch, watch, or update this retired source repo.'
-  };
-}
-
 function buildPlan(lockFiles = discoverLocks()) {
   const active = [];
-  const retired = [];
   for (const lockFile of lockFiles) {
     assertSupportedLifecycle(lockFile);
-    if (isRetiredProvenanceSource(lockFile.lock)) retired.push(retiredProvenanceEntry(lockFile));
-    else active.push(planEntry(lockFile));
+    active.push(planEntry(lockFile));
   }
   return {
-    active_update_candidates: active,
-    retired_provenance_sources: retired
+    active_update_candidates: active
   };
 }
 
 function renderMarkdown(plan) {
   const active = Array.isArray(plan) ? plan : plan.active_update_candidates;
-  const retired = Array.isArray(plan) ? [] : plan.retired_provenance_sources;
   return [
-    '# Project Source Watch Plan',
+    '# Active Source Watch Plan',
     '',
     'This deterministic plan is advisory. It does not fetch upstream commits, copy files, update SOURCE-LOCK.json, create branches, or create PRs.',
     'A future PR updater may use this plan as input, but normal local validation does not use network, execute upstream code, install packages, or run live n8n actions.',
     '',
-    'Retired internal sources are provenance-only and are not active update candidates.',
-    '',
     '## Active Update Candidates',
     '',
     ...(active.length ? active.flatMap((entry) => [
-      `### ${entry.project_path}`,
+      `### ${entry.source_lock_path}`,
       '',
       `- Source repo: ${entry.source_repo}`,
       `- Source ref: ${entry.source_ref}`,
@@ -183,22 +154,7 @@ function renderMarkdown(plan) {
       '',
       entry.notes,
       ''
-    ]) : ['No active update candidates.', '']),
-    '## Retired Internal Provenance Sources',
-    '',
-    ...(retired.length ? retired.flatMap((entry) => [
-      `### ${entry.project_path}`,
-      '',
-      `- Source repo: ${entry.source_repo}`,
-      `- Source ref: ${entry.source_ref}`,
-      `- Locked commit: ${entry.locked_commit}`,
-      `- Lifecycle: ${entry.source_lifecycle}`,
-      `- Update policy: ${entry.update_policy}`,
-      `- Public attribution required: ${entry.public_attribution_required}`,
-      '',
-      entry.notes,
-      ''
-    ]) : ['None.', ''])
+    ]) : ['No active update candidates.', ''])
   ].join('\n');
 }
 
@@ -225,8 +181,6 @@ module.exports = {
   allowlists,
   buildPlan,
   discoverLocks,
-  isRetiredProvenanceSource,
   planEntry,
-  retiredProvenanceEntry,
   renderMarkdown
 };

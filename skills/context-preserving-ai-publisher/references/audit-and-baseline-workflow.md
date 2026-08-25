@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: repo-methodology.context-preserving-ai-publisher
-Source: _projects/repo-methodology/context-preserving-ai-publisher/_main/audit-and-baseline-workflow.md
-Update the project source and run sync.
--->
 # Audit And Baseline Workflow
 
 Audits make source-to-surface drift visible. Baselines make known findings explicit while follow-up cleanup is still in progress.
@@ -48,7 +42,7 @@ Update a baseline only when all of these are true:
 - No new undeclared, cross-owned, suspicious, or boundary findings were introduced accidentally.
 - The PR summary records the exact movement.
 
-For `_projects/**/_main/**` source or provenance PRs, do not rely on privileged auto-sync to bless or repair the change. The author or Codex must update source-lock or provenance metadata when needed, regenerate declared outputs, and update inspected audit baselines when needed. Read-only CI should fail when those steps are missed.
+For canonical skill, contract, or provenance PRs, do not rely on privileged writeback to bless or repair the change. The author or Codex must update the owning canonical surface, provenance metadata, and inspected audit baselines when needed. Read-only CI should fail when those steps are missed.
 
 ## PR Reporting
 

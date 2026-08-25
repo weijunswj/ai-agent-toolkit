@@ -25,12 +25,9 @@ const knownRetiredInternalSourceRepos = new Set([
   'weijunswj/codex-n8n-local-setup',
   'weijunswj/n8n-workflow-templates'
 ]);
-// These prefixes are reserved toolkit-local source/maintenance namespaces.
-// SOURCE-LOCK source_path values must usually describe upstream repo paths,
-// not toolkit-local layout paths. A narrow exception exists for retired
-// same-repo migrations from former root published surfaces, where skills/
-// is the real pinned upstream path.
-const toolkitLocalSourcePathPrefixes = ['_projects/', 'repo/'];
+// SOURCE-LOCK source_path values must describe upstream repo paths, not the
+// Toolkit's local source-watch or published-surface layout.
+const toolkitLocalSourcePathPrefixes = ['repo/'];
 const sameRepoRootSurfaceSourcePathPrefixes = ['skills/'];
 const rootSurfacePathPrefixes = ['skills/'];
 
@@ -67,7 +64,7 @@ function hashFile(relPath) {
 }
 
 function discoverLockFiles() {
-  return walk(resolveRel('_projects'))
+  return walk(resolveRel('repo/source-watch/provenance'))
     .filter((entry) => entry.dirent.isFile() && entry.relPath.endsWith('/SOURCE-LOCK.json'))
     .map((entry) => entry.relPath)
     .sort();
@@ -214,13 +211,6 @@ function normalizeRepoRelativePath(value, fieldName, relPath, label, errors) {
 }
 
 function validateLocalPathTopology(file, relPath, label, errors) {
-  if (Object.prototype.hasOwnProperty.call(file, 'project_path')) {
-    const normalized = normalizeRepoRelativePath(file.project_path, 'project_path', relPath, label, errors);
-    if (normalized && !normalized.startsWith('_projects/')) {
-      errors.push(`${relPath} project_path must point under _projects/: ${label} uses ${file.project_path}`);
-    }
-  }
-
   if (Object.prototype.hasOwnProperty.call(file, 'root_surface_path')) {
     const normalized = normalizeRepoRelativePath(file.root_surface_path, 'root_surface_path', relPath, label, errors);
     if (normalized && !rootSurfacePathPrefixes.some((prefix) => normalized.startsWith(prefix))) {
@@ -242,15 +232,15 @@ function validateLock(lock, relPath, errors) {
   const isActiveThirdParty = lock.source_lifecycle === 'active' && lock.source_role === 'third_party_attribution_source';
   for (const file of lock.files) {
     const mode = file.mode || 'exact';
-    const localPath = file.project_path || file.root_surface_path;
+    const localPath = file.root_surface_path;
     const label = localPath || file.source_path || '<unknown>';
     if (!file.source_path) errors.push(`${relPath} entry missing source_path: ${label}`);
     validateSourcePathProvenance(lock, file, relPath, label, errors);
     validateLocalPathTopology(file, relPath, label, errors);
-    if (file.project_path && file.root_surface_path) errors.push(`${relPath} entry must not set both project_path and root_surface_path: ${label}`);
+    if (file.project_path) errors.push(`${relPath} entry must use root_surface_path for local Toolkit files: ${label}`);
 
     if (mode === 'exact') {
-      if (!localPath) errors.push(`${relPath} exact entry missing project_path or root_surface_path: ${label}`);
+      if (!localPath) errors.push(`${relPath} exact entry missing root_surface_path: ${label}`);
       if (!file.source_blob_sha) errors.push(`${relPath} exact entry missing source_blob_sha: ${label}`);
       if (localPath && !fs.existsSync(resolveRel(localPath))) {
         errors.push(`${relPath} exact entry missing local file: ${localPath}`);
@@ -265,7 +255,7 @@ function validateLock(lock, relPath, errors) {
     } else if (mode === 'adapted') {
       if (!file.notes) errors.push(`${relPath} adapted entry needs notes: ${label}`);
       if (isActiveThirdParty && !file.source_blob_sha) errors.push(`${relPath} adapted entry missing source_blob_sha: ${label}`);
-      if (!localPath) errors.push(`${relPath} adapted entry missing project_path or root_surface_path: ${label}`);
+       if (!localPath) errors.push(`${relPath} adapted entry missing root_surface_path: ${label}`);
       if (localPath && !fs.existsSync(resolveRel(localPath))) {
         errors.push(`${relPath} adapted entry missing local file: ${localPath}`);
       }
@@ -282,7 +272,7 @@ function validateLock(lock, relPath, errors) {
 function auditSourceLocks() {
   const errors = [];
   const locks = discoverLockFiles();
-  if (!locks.length) errors.push('No SOURCE-LOCK.json files found under _projects/');
+  if (!locks.length) errors.push('No active SOURCE-LOCK.json files found under repo/source-watch/provenance/');
   for (const relPath of locks) {
     try {
       validateLock(readJson(relPath), relPath, errors);
@@ -300,7 +290,7 @@ if (require.main === module) {
     console.error(`\nSummary: ${errors.length} source lock error(s).`);
     process.exit(1);
   }
-  console.log(`Project source-lock audit passed for ${locks.length} lock file(s).`);
+   console.log(`Active source-lock audit passed for ${locks.length} lock file(s).`);
 }
 
 module.exports = {
