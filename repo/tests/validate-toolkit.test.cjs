@@ -18,6 +18,19 @@ const publisherReferencePaths = [
   'skills/context-preserving-ai-publisher/templates/project-module/toolkit.project.template.json',
   'skills/context-preserving-ai-publisher/templates/repo-docs/project-module-standard.template.md'
 ];
+const immutableGrandfatheredSkillIds = [
+  'agent-skill-supply-chain-audit',
+  'ai-coding-agent-rules',
+  'context-preserving-ai-publisher',
+  'knowledge-index-updater',
+  'n8n-agent-rules',
+  'n8n-local-setup',
+  'n8n-workflow-helper-scripts',
+  'n8n-workflow-templates',
+  'secure-cicd-installer',
+  'ui-ux-secure-frontend-design',
+  'windows-localhost-workflows'
+];
 
 function readText(relPath, root = repoRoot) {
   return fs.readFileSync(path.join(root, relPath), 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
@@ -46,6 +59,42 @@ function runValidate(cwd) {
   return spawnSync(process.execPath, [validateScript], { cwd, encoding: 'utf8' });
 }
 
+function addCurrentSkill(cwd, skillName) {
+  const skillDir = path.join(cwd, 'skills', skillName);
+  fs.mkdirSync(skillDir, { recursive: true });
+  fs.writeFileSync(path.join(skillDir, 'SKILL.md'), `---\nname: ${skillName}\ndescription: Fixture current skill for gate testing.\n---\n\n# Fixture\n`, 'utf8');
+  fs.writeFileSync(path.join(skillDir, 'README.md'), `# ${skillName}\n`, 'utf8');
+}
+
+function insertBefore(filePath, marker, content) {
+  const text = fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(text.includes(marker), `${filePath} must contain ${marker}`);
+  fs.writeFileSync(filePath, text.replace(marker, `${content}${marker}`), 'utf8');
+}
+
+function addSkillToCatalogs(cwd, skillName) {
+  insertBefore(
+    path.join(cwd, 'repo', 'contracts', 'agent-rules', 'toolkit-skill-routing.md'),
+    '\n## Routing Maintenance',
+    `| \`${skillName}\` | Fixture route used to prove current-skill gate enforcement. |\n`
+  );
+
+  insertBefore(
+    path.join(cwd, 'README.md'),
+    '\n## Install Skills By Platform',
+    `| [${skillName}](skills/${skillName}/) | Fixture catalog entry used to prove current-skill gate enforcement. |\n`
+  );
+
+  const matrixPath = path.join(cwd, 'repo', 'docs', 'SKILL-SAFETY-MATRIX.md');
+  const matrix = fs.readFileSync(matrixPath, 'utf8').replace(/\r\n/g, '\n');
+  const sourceRow = matrix.split('\n').find((line) => line.startsWith('| [managed-app-foundation-review]'));
+  assert.ok(sourceRow, 'skill safety matrix fixture source row');
+  const fixtureRow = sourceRow
+    .replace('[managed-app-foundation-review](../../skills/managed-app-foundation-review/)', `[${skillName}](../../skills/${skillName}/)`)
+    .replace('managed-app-foundation-review', skillName);
+  insertBefore(matrixPath, '\n## Description Review Notes', `${fixtureRow}\n`);
+}
+
 test('direct canonical topology validates without retired project or MCP surfaces', () => {
   const validator = require(validateScript);
   assert.equal(fs.existsSync(path.join(repoRoot, legacyProjectToken)), false);
@@ -71,6 +120,8 @@ test('Skill Creation Center preserves grandfathered IDs and keyed post-gate evid
   const reviewed = new Set(Object.keys(baseline.skill_creation_review));
 
   assert.equal(baseline.schema_version, 2);
+  assert.deepEqual(baseline.grandfathered_skill_ids, immutableGrandfatheredSkillIds);
+  assert.deepEqual(validator.IMMUTABLE_GRANDFATHERED_SKILL_IDS, immutableGrandfatheredSkillIds);
   assert.equal(grandfathered.has('knowledge-index-updater'), true);
   assert.equal(reviewed.has('knowledge-index-updater'), false);
   assert.deepEqual(current.filter((skill) => !grandfathered.has(skill)).sort(), [...reviewed].sort());
@@ -153,6 +204,97 @@ test('validator rejects a current skill without direct-canonical review evidence
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /missing skill_creation_review evidence for current skill managed-app-foundation-review/);
+});
+
+test('validator rejects a new current skill without review evidence', () => {
+  const cwd = copyRepo();
+  try {
+    addCurrentSkill(cwd, 'fixture-current-skill');
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /missing skill_creation_review evidence for current skill fixture-current-skill/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('validator still rejects a catalogued current skill without review evidence', () => {
+  const cwd = copyRepo();
+  try {
+    addCurrentSkill(cwd, 'fixture-catalogued-skill');
+    addSkillToCatalogs(cwd, 'fixture-catalogued-skill');
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /missing skill_creation_review evidence for current skill fixture-catalogued-skill/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('validator rejects a new skill added to the mutable grandfathered list', () => {
+  const cwd = copyRepo();
+  try {
+    addCurrentSkill(cwd, 'zz-future-current-skill');
+    const baselinePath = path.join(cwd, 'repo', 'docs', 'skill-creation-center-baseline.json');
+    const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
+    baseline.grandfathered_skill_ids.push('zz-future-current-skill');
+    fs.writeFileSync(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`, 'utf8');
+
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /grandfathered_skill_ids must equal the immutable pre-gate legacy set/);
+    assert.doesNotMatch(result.stderr, /missing skill_creation_review evidence for current skill zz-future-current-skill/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('validator rejects an arbitrary grandfathered ID even without a matching skill', () => {
+  const cwd = copyRepo();
+  try {
+    const baselinePath = path.join(cwd, 'repo', 'docs', 'skill-creation-center-baseline.json');
+    const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
+    baseline.grandfathered_skill_ids.push('zz-arbitrary-grandfathered-id');
+    fs.writeFileSync(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`, 'utf8');
+
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /grandfathered_skill_ids must equal the immutable pre-gate legacy set/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('validator rejects removal of a legitimate historical grandfathered ID', () => {
+  const cwd = copyRepo();
+  try {
+    const baselinePath = path.join(cwd, 'repo', 'docs', 'skill-creation-center-baseline.json');
+    const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
+    baseline.grandfathered_skill_ids = baseline.grandfathered_skill_ids.filter((id) => id !== 'windows-localhost-workflows');
+    fs.writeFileSync(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`, 'utf8');
+
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /grandfathered_skill_ids must equal the immutable pre-gate legacy set/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('validator rejects incomplete keyed review evidence', () => {
+  const cwd = copyRepo();
+  try {
+    const baselinePath = path.join(cwd, 'repo', 'docs', 'skill-creation-center-baseline.json');
+    const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
+    baseline.skill_creation_review['managed-app-foundation-review'].trigger = ' ';
+    fs.writeFileSync(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`, 'utf8');
+
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /skill_creation_review\.managed-app-foundation-review\.trigger must be a non-empty evidence string/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
 test('validator rejects a special root MEMORY.md surface', () => {

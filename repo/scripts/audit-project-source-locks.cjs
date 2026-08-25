@@ -167,9 +167,12 @@ function isSameRepoRetiredRootSurfaceSource(lock, normalizedSourcePath) {
     sameRepoRootSurfaceSourcePathPrefixes.some((prefix) => normalizedSourcePath.startsWith(prefix));
 }
 
-function validateSourcePathProvenance(lock, file, relPath, label, errors) {
+function validateSourcePathProvenance(lock, file, relPath, label, errors, normalizedSourcePath) {
   if (!file.source_path) return;
-  const normalized = String(file.source_path).replace(/\\/g, '/');
+  const normalized = normalizedSourcePath === undefined
+    ? normalizeRepoRelativePath(file.source_path, 'source_path', relPath, label, errors)
+    : normalizedSourcePath;
+  if (!normalized) return;
   if (sameRepoRootSurfaceSourcePathPrefixes.some((prefix) => normalized === prefix.slice(0, -1) || normalized.startsWith(prefix))) {
     if (isSameRepoRetiredRootSurfaceSource(lock, normalized)) return;
     errors.push(`${relPath} root-surface source_path is allowed only for retired same-repo migrations: ${label} uses ${file.source_path}`);
@@ -184,9 +187,13 @@ function validateSourcePathProvenance(lock, file, relPath, label, errors) {
 }
 
 function normalizeRepoRelativePath(value, fieldName, relPath, label, errors) {
-  const raw = String(value).replace(/\\/g, '/');
-  if (!raw) {
-    errors.push(`${relPath} ${fieldName} must not be empty: ${label}`);
+  if (typeof value !== 'string' || !value) {
+    errors.push(`${relPath} ${fieldName} must be a non-empty string: ${label}`);
+    return null;
+  }
+  const raw = value;
+  if (raw.includes('\\')) {
+    errors.push(`${relPath} ${fieldName} must use canonical POSIX separators, not backslashes: ${label} uses ${value}`);
     return null;
   }
   if (/^[A-Za-z]:/.test(raw)) {
@@ -201,31 +208,53 @@ function normalizeRepoRelativePath(value, fieldName, relPath, label, errors) {
     errors.push(`${relPath} ${fieldName} must not contain .. path segments: ${label} uses ${value}`);
     return null;
   }
+  if (raw.split('/').includes('.')) {
+    errors.push(`${relPath} ${fieldName} must not contain . path segments: ${label} uses ${value}`);
+    return null;
+  }
+  if (raw.includes('//') || raw.endsWith('/')) {
+    errors.push(`${relPath} ${fieldName} must use its canonical normalised representation: ${label} uses ${value}`);
+    return null;
+  }
 
   const normalized = path.posix.normalize(raw);
   if (!normalized || normalized === '.') {
     errors.push(`${relPath} ${fieldName} must not be empty: ${label}`);
     return null;
   }
+  if (normalized !== raw) {
+    errors.push(`${relPath} ${fieldName} must use its canonical normalised representation: ${label} uses ${value}`);
+    return null;
+  }
   return normalized;
 }
 
-function validateLocalPathTopology(file, relPath, label, errors) {
+function validateLocalPathTopology(file, relPath, label, errors, normalizedRootSurfacePath) {
   if (Object.prototype.hasOwnProperty.call(file, 'root_surface_path')) {
-    const normalized = normalizeRepoRelativePath(file.root_surface_path, 'root_surface_path', relPath, label, errors);
+    const normalized = normalizedRootSurfacePath === undefined
+      ? normalizeRepoRelativePath(file.root_surface_path, 'root_surface_path', relPath, label, errors)
+      : normalizedRootSurfacePath;
     if (normalized && !rootSurfacePathPrefixes.some((prefix) => normalized.startsWith(prefix))) {
       errors.push(`${relPath} root_surface_path must point under skills/: ${label} uses ${file.root_surface_path}`);
     }
   }
 }
 
-function activeSourceMappingIdentity(file) {
+function activeSourceMappingIdentity(file, canonicalPaths = null) {
   const mode = file.mode || 'exact';
   if (!['exact', 'adapted'].includes(mode) || !file.source_path || !file.root_surface_path || !file.source_blob_sha) return null;
+  let sourcePath = canonicalPaths?.sourcePath;
+  let rootSurfacePath = canonicalPaths?.rootSurfacePath;
+  if (!canonicalPaths) {
+    const ignoredErrors = [];
+    sourcePath = normalizeRepoRelativePath(file.source_path, 'source_path', '<identity>', '<identity>', ignoredErrors);
+    rootSurfacePath = normalizeRepoRelativePath(file.root_surface_path, 'root_surface_path', '<identity>', '<identity>', ignoredErrors);
+  }
+  if (!sourcePath || !rootSurfacePath || sourcePath !== file.source_path || rootSurfacePath !== file.root_surface_path) return null;
   return JSON.stringify([
     mode,
-    String(file.source_path).replace(/\\/g, '/'),
-    String(file.root_surface_path).replace(/\\/g, '/'),
+    sourcePath,
+    rootSurfacePath,
     String(file.source_blob_sha)
   ]);
 }
@@ -246,8 +275,14 @@ function validateLock(lock, relPath, errors) {
     const localPath = file.root_surface_path;
     const label = localPath || file.source_path || '<unknown>';
     if (!file.source_path) errors.push(`${relPath} entry missing source_path: ${label}`);
-    validateSourcePathProvenance(lock, file, relPath, label, errors);
-    validateLocalPathTopology(file, relPath, label, errors);
+    const normalizedSourcePath = file.source_path
+      ? normalizeRepoRelativePath(file.source_path, 'source_path', relPath, label, errors)
+      : null;
+    const normalizedRootSurfacePath = Object.prototype.hasOwnProperty.call(file, 'root_surface_path')
+      ? normalizeRepoRelativePath(file.root_surface_path, 'root_surface_path', relPath, label, errors)
+      : null;
+    validateSourcePathProvenance(lock, file, relPath, label, errors, normalizedSourcePath);
+    validateLocalPathTopology(file, relPath, label, errors, normalizedRootSurfacePath);
     if (file.project_path) errors.push(`${relPath} entry must use root_surface_path for local Toolkit files: ${label}`);
 
     if (mode === 'exact') {

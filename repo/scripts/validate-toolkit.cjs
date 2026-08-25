@@ -22,6 +22,19 @@ function workspaceRootFromArgs(args = process.argv.slice(2)) {
 const root = path.resolve(workspaceRootFromArgs() || process.env.TOOLKIT_WORKSPACE_ROOT || process.cwd());
 const legacyProjectToken = '_' + 'projects';
 const legacyPublisherToken = 'curated_' + 'output_for_ai';
+const IMMUTABLE_GRANDFATHERED_SKILL_IDS = Object.freeze([
+  'agent-skill-supply-chain-audit',
+  'ai-coding-agent-rules',
+  'context-preserving-ai-publisher',
+  'knowledge-index-updater',
+  'n8n-agent-rules',
+  'n8n-local-setup',
+  'n8n-workflow-helper-scripts',
+  'n8n-workflow-templates',
+  'secure-cicd-installer',
+  'ui-ux-secure-frontend-design',
+  'windows-localhost-workflows'
+]);
 const ignoredDirs = new Set(['.git', 'node_modules', '_dist', 'dist', 'coverage', '.tmp', '.n8n-local', '.n8n-production-cloudflare', '.to-sanitise', '.sanitised', '.n8n-workflow-backups', '.claude']);
 const allowedRootEntries = new Set([
   '.git', '.github', '.gitattributes', '.gitignore', '.codex-plugin', '.claude-plugin', '.claude', '.agents',
@@ -208,6 +221,10 @@ function validateSkillCreationGate(errors) {
       fail(errors, `${baselinePath} ${label} must be sorted`);
     }
     if (new Set(values).size !== values.length) fail(errors, `${baselinePath} ${label} must not contain duplicates`);
+  }
+
+  if (JSON.stringify(grandfathered) !== JSON.stringify(IMMUTABLE_GRANDFATHERED_SKILL_IDS)) {
+    fail(errors, `${baselinePath} grandfathered_skill_ids must equal the immutable pre-gate legacy set`);
   }
 
   const grandfatheredSet = new Set(grandfathered);
@@ -496,5 +513,6 @@ module.exports = {
   parseSkillRouting,
   skillDirs,
   validateSkillCreationGate,
+  IMMUTABLE_GRANDFATHERED_SKILL_IDS,
   validate
 };
