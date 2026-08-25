@@ -71,13 +71,13 @@ This repo is the canonical skill creation and conversion center.
 
 Before adding a new skill, adapter, template, or contract, inspect the existing `skills/**` surfaces, README skill tables, Skill Safety Matrix, and toolkit skill-routing source. Prefer extending an existing skill when the use case fits its trigger, safety boundary, local assets, and validation path without making that skill bloated or ambiguous.
 
-Create a new skill or contract surface only when the work has a distinct trigger, domain, safety boundary, source/provenance requirement, local assets, or validation path.
+Create a new Toolkit skill directly under `skills/<skill-name>/` after Skill Creation Center review, or create its coupled contracts, runtime, tests, and docs directly under canonical `repo/**` paths, only when the work has a distinct trigger, domain, safety boundary, source/provenance requirement, local assets, or validation path. No Toolkit project module, standalone `_main` source, project-to-skill publication, generated skill copy, generated-surface writeback, or generic Toolkit sync command is required.
 
 Use [Skill Safety Matrix](SKILL-SAFETY-MATRIX.md) as the maintained catalog of current skill triggers, risk classes, companion skills, provenance, and approval boundaries before creating, extending, or importing skills.
 
 Validation treats each concrete `skills/<skill-name>/SKILL.md` entrypoint as the Skill Creation Center review boundary. Pre-gate entrypoints are listed as `grandfathered_skill_ids` in `repo/docs/skill-creation-center-baseline.json`; current post-gate skills must have keyed `skill_creation_review` evidence in that direct-canonical contract. The evidence must name the skill, document whether it is routed or intentionally omitted, and include the trigger, decision, decision reason, unique value, runtime footprint, local assets, output contract, anti-bloat review, safety boundary, source provenance, and validation.
 
-For any third-party skill, `SKILL.md` folder, skill pack, GitHub skill repo, or adapted external agent material, use `agent-skill-supply-chain-audit` first. Do not copy, import, install, execute, or convert third-party material until the audit verdict allows it. Approved conversions must go through `context-preserving-ai-publisher` and this repo's source-to-surface workflow.
+For any third-party skill, `SKILL.md` folder, skill pack, GitHub skill repo, or adapted external agent material, use `agent-skill-supply-chain-audit` first. Do not copy, import, install, execute, or convert third-party material until the audit verdict allows it. Approved Toolkit conversions are authored directly at canonical `skills/**` and `repo/**` paths. The separate generic `context-preserving-ai-publisher` product retains its own source-to-surface guidance; do not treat that product's project/publishing model as Toolkit operation.
 
 Prioritize repo safety, device safety, provenance, attribution, validation, and practical usefulness over adding more surface area.
 
@@ -111,7 +111,7 @@ Never commit or install:
 
 Scoped writes are allowed only when the relevant template or helper is being run intentionally:
 
-- `node repo/scripts/sync-agent-instruction-shims.cjs --write` updates the canonical generic instruction templates and root shims from `repo/contracts/agent-rules/`. Skills are maintained directly under `skills/**`; there is no project publishing step.
+- `node repo/scripts/sync-agent-instruction-shims.cjs --write` updates the retained instruction templates/root shims and the exact four portable n8n safety derivatives from `repo/contracts/agent-rules/`. Skills are maintained directly under `skills/**`; there is no project publishing step or generic Toolkit sync command.
 - `n8n-agent-rules` owns the full n8n operating ruleset. Other n8n skills depend on it; optional adapters are brief pointers and are not automatically appended to generic always-on templates.
 - n8n sanitizer templates may write ignored `.to-sanitise/**` and `.sanitised/**` staging folders.
 - n8n sync helper templates may write `n8n-workflows/*.json`, ignored `.tmp/**`, and ignored `.n8n-local/**` in a consumer repo after review.

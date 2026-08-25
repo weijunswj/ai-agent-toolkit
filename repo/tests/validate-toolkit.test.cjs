@@ -158,13 +158,71 @@ test('all seven current post-gate reviews use direct-canonical evidence and exis
     assert.doesNotMatch(JSON.stringify({ publisher_workflow: review.publisher_workflow, validation: review.validation }), new RegExp(`sync-toolkit-projects\\.cjs|_projects[\\/]|${legacyCuratedToken}|_main|source[- ]to[- ]surface|(?:generated|deterministic)[\\s\\S]*(?:copy|publication|writeback)`, 'i'));
     assert.ok(review.validation.some((command) => /^node\s+repo\/scripts\/validate-toolkit\.cjs(?:\s|$)/.test(command)));
     for (const command of review.validation) {
-      for (const match of command.matchAll(/\b(repo\/(?:scripts|tests)\/[^\s"'`]+)/g)) {
-        const target = match[1].replace(/[),.;]+$/g, '');
+      for (const target of validator.validationCommandTargets(command)) {
         assert.equal(fs.statSync(path.join(repoRoot, target)).isFile(), true, `${skill}: ${target}`);
       }
     }
   }
   assert.deepEqual(validator.validate(), []);
+});
+
+test('validation command parser accepts quoted canonical targets and ordinary options', () => {
+  const validator = require(validateScript);
+  const command = 'node --test "repo/tests/skill-routing.test.cjs" --test-name-pattern "direct canonical" --workspace repo/scripts/validate-toolkit.cjs';
+  assert.deepEqual(validator.validationCommandTargets(command), [
+    'repo/tests/skill-routing.test.cjs',
+    'repo/scripts/validate-toolkit.cjs'
+  ]);
+  assert.equal(validator.validationCommandTargetFinding(command), null);
+});
+
+test('validator rejects noncanonical or missing validation targets in copied workspaces', () => {
+  const cases = [
+    ['missing canonical target', 'node --test repo/tests/does-not-exist.test.cjs', /missing current target/],
+    ['Windows backslash target', String.raw`node --test repo\tests\skill-routing.test.cjs`, /noncanonical repository target spelling/],
+    ['dot-prefixed target', 'node --test ./repo/tests/skill-routing.test.cjs', /noncanonical repository target spelling/],
+    ['repeated separator target', 'node --test repo//tests/skill-routing.test.cjs', /noncanonical repository target spelling/],
+    ['traversal target', 'node --test repo/tests/../tests/skill-routing.test.cjs', /noncanonical repository target spelling/],
+    ['absolute POSIX target', 'node --test /repo/tests/skill-routing.test.cjs', /noncanonical repository target spelling/],
+    ['Windows drive target', String.raw`node --test C:\repo\tests\skill-routing.test.cjs`, /noncanonical repository target spelling/]
+  ];
+
+  for (const [label, command, expected] of cases) {
+    const cwd = copyRepo();
+    try {
+      updateBaseline(cwd, (baseline) => {
+        baseline.skill_creation_review['github-governance-review-reconciler'].validation.push(command);
+      });
+      const result = runValidate(cwd);
+      assert.notEqual(result.status, 0, label);
+      assert.match(result.stderr, expected, label);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+});
+
+test('validator rejects retired current operation in every required operational review field', () => {
+  const cases = [
+    ['existing_skill_review', `Current Toolkit operation uses \`${legacyProjectToken}/example/README.md\`.`],
+    ['local_assets', 'Current operation requires generated skill copies from deterministic writeback.'],
+    ['output_contract', 'Current operation runs `node repo/scripts/sync-toolkit-projects.cjs --check`.'],
+    ['routing', 'Current routing uses a source-to-surface publisher writeback workflow.']
+  ];
+
+  for (const [field, injection] of cases) {
+    const cwd = copyRepo();
+    try {
+      updateBaseline(cwd, (baseline) => {
+        baseline.skill_creation_review['github-governance-review-reconciler'][field] += ` ${injection}`;
+      });
+      const result = runValidate(cwd);
+      assert.notEqual(result.status, 0, field);
+      assert.match(result.stderr, new RegExp(`skill_creation_review\\.github-governance-review-reconciler\\.${field}`), field);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  }
 });
 
 test('validator shares the exact five-file publisher reference allowlist', () => {

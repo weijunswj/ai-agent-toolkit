@@ -49,11 +49,11 @@ For managed root contracts or instruction shims, run the retained synchronizer f
 
 ## Auto-Sync Is Convenience Only
 
-Generated-surface auto-sync is optional convenience writeback for narrow deterministic generated-output updates. It is not the merge gate and must not replace `npm run validate:all`.
+There is no generic generated-surface auto-sync or writeback lane. The retained synchronizers are narrow: `sync-repo-doc-contract.cjs` maintains the managed source-of-truth block, and `sync-agent-instruction-shims.cjs` maintains root instruction shims plus exactly four portable n8n safety derivatives. Neither publishes Toolkit skills or project outputs, and neither is a substitute for `npm run validate:all`.
 
-There is no privileged generated-surface auto-sync lane. Canonical skill, contract, provenance, and audit-baseline changes are reviewed directly in the PR.
+Canonical skill, contract, provenance, and audit-baseline changes are reviewed directly at their canonical paths in the PR. No generic Toolkit sync command exists.
 
-CI should catch missed `_main` follow-up work by failing read-only validation, not by silently mutating source/provenance PRs.
+CI should catch missed direct-canonical updates with read-only validation, not by silently mutating source or provenance.
 
 ## Local Full Validation
 
@@ -64,7 +64,7 @@ npm run validate:all
 git diff --check
 ```
 
-For narrow docs, template, or generated-surface follow-ups, targeted local checks plus the read-only CI full gate are the expected workflow.
+For narrow docs, template, or retained n8n-safety-derivative follow-ups, targeted local checks plus the read-only CI full gate are the expected workflow.
 
 ## Failure Loop Rule
 

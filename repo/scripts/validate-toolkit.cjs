@@ -44,9 +44,29 @@ const retiredSkillCreationReviewEvidencePatterns = [
     message: 'claims retired source-to-surface publishing'
   },
   {
-    pattern: /\b(?:generated|deterministic)\b[\s\S]{0,80}\b(?:skill\s+)?(?:copies?|outputs?|publication|publishing|writeback)\b/i,
+    pattern: /\b(?:generated|deterministic)\s+(?:skill\s+)?(?:copies?|publication|publishing|writeback)\b/i,
     message: 'claims retired generated or deterministic publication'
+  },
+  {
+    pattern: /\b(?:create|creating|add|adding|maintain|use|publish|publishing)\b[\s\S]{0,100}\bproject\s+module\b[\s\S]{0,100}\bpublished\s+skill\b/i,
+    message: 'claims retired Toolkit project-module plus published-skill publishing'
   }
+];
+const skillCreationOperationalEvidenceFields = [
+  'existing_skill_review',
+  'trigger',
+  'decision',
+  'decision_reason',
+  'unique_value',
+  'runtime_footprint',
+  'local_assets',
+  'output_contract',
+  'anti_bloat_review',
+  'safety_boundary',
+  'source_provenance',
+  'third_party_audit',
+  'publisher_workflow',
+  'routing'
 ];
 const IMMUTABLE_GRANDFATHERED_SKILL_IDS = Object.freeze([
   'agent-skill-supply-chain-audit',
@@ -215,9 +235,46 @@ function validateSkills(errors) {
   }
 }
 
+function trimValidationTarget(value) {
+  return String(value).replace(/[),.;:!?\]}]+$/g, '');
+}
+
+function validationCommandTargetCandidates(command) {
+  const source = String(command);
+  const candidates = [];
+  const pattern = /(?:^|[^A-Za-z0-9_-])((?:(?:[A-Za-z]:[\\/])|(?:\.{1,2}[\\/])|[\\/])?repo(?:[\\/]+[A-Za-z0-9._-]+)*[\\/]+(?:scripts|tests)(?:[\\/]+[^\s"'`),;:!?]+)*)/gi;
+  for (const match of source.matchAll(pattern)) {
+    const raw = trimValidationTarget(match[1]);
+    if (!raw) continue;
+    const start = match.index + match[0].length - match[1].length;
+    candidates.push({ raw, preceding: start > 0 ? source[start - 1] : '' });
+  }
+  return candidates;
+}
+
+function isCanonicalValidationTarget(candidate) {
+  const target = candidate.raw;
+  if (candidate.preceding === '/' || candidate.preceding === '\\' || candidate.preceding === '.') return false;
+  if (path.posix.isAbsolute(target) || path.win32.isAbsolute(target)) return false;
+  if (!/^repo\/(?:scripts|tests)\//.test(target)) return false;
+  const parts = target.split('/');
+  if (parts.some((part) => !part || part === '.' || part === '..' || part.includes('\\'))) return false;
+  return path.posix.normalize(target) === target;
+}
+
+function validationCommandTargetFinding(command) {
+  for (const candidate of validationCommandTargetCandidates(command)) {
+    if (!isCanonicalValidationTarget(candidate)) {
+      return { target: candidate.raw, message: 'contains a noncanonical repository target spelling' };
+    }
+  }
+  return null;
+}
+
 function validationCommandTargets(command) {
-  return [...String(command).matchAll(/\b(repo\/(?:scripts|tests)\/[^\s"'`]+)/g)]
-    .map((match) => match[1].replace(/[),.;]+$/g, ''));
+  return validationCommandTargetCandidates(command)
+    .filter(isCanonicalValidationTarget)
+    .map((candidate) => candidate.raw);
 }
 
 function retiredSkillCreationReviewFinding(value) {
@@ -236,9 +293,11 @@ function validateSkillCreationReviewEvidence(errors, baselinePath, skill, review
     fail(errors, `${baselinePath} skill_creation_review.${skill}.publisher_workflow must name canonical repo/** maintenance paths`);
   }
 
-  const publisherFinding = retiredSkillCreationReviewFinding(publisherWorkflow);
-  if (publisherFinding) {
-    fail(errors, `${baselinePath} skill_creation_review.${skill}.publisher_workflow ${publisherFinding.message}`);
+  for (const field of skillCreationOperationalEvidenceFields) {
+    const finding = retiredSkillCreationReviewFinding(review[field]);
+    if (finding) {
+      fail(errors, `${baselinePath} skill_creation_review.${skill}.${field} ${finding.message}`);
+    }
   }
 
   const validation = Array.isArray(review.validation) ? review.validation : [];
@@ -249,6 +308,10 @@ function validateSkillCreationReviewEvidence(errors, baselinePath, skill, review
     const finding = retiredSkillCreationReviewFinding(commandText);
     if (finding) {
       fail(errors, `${baselinePath} skill_creation_review.${skill}.validation command ${finding.message}`);
+    }
+    const targetFinding = validationCommandTargetFinding(commandText);
+    if (targetFinding) {
+      fail(errors, `${baselinePath} skill_creation_review.${skill}.validation command ${targetFinding.message}: ${targetFinding.target}`);
     }
     if (/^node\s+repo\/scripts\/validate-toolkit\.cjs(?:\s|$)/.test(commandText.trim())) {
       hasRepositoryValidator = true;
@@ -595,6 +658,8 @@ module.exports = {
   parseFrontMatter,
   parseSkillRouting,
   skillDirs,
+  validationCommandTargetFinding,
+  validationCommandTargets,
   validateSkillCreationGate,
   IMMUTABLE_GRANDFATHERED_SKILL_IDS,
   validate

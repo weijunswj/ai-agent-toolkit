@@ -229,8 +229,13 @@ The managed Source-of-Truth Contract below is the detailed active contract. Sour
 - `repo/contracts/agent-rules/toolkit-skill-routing.md` is the routing source for the current `skills/*/SKILL.md` set and records intentionally omitted skills.
 - `repo/source-watch/provenance/**/SOURCE-LOCK.json` contains only active third-party attribution pins. Each lock records the upstream repo, ref, commit, update policy, attribution requirement, allowlist, and exact blob pins for retained copied or adapted files.
 - Scheduled source-watch is PR-notification-only. It may compare active source-lock pins and advisory targets with upstream GitHub commits, then open or refresh a stable review PR. It must not copy upstream files, change source-lock/advisory records, execute upstream code, auto-merge, push to main, run live n8n actions, or treat notification as approval. Real updates require a separate human-approved PR.
-- The toolkit does not maintain project manifests, source manifests, project-output publishing, pack packaging, or privileged generated-surface writeback. Direct canonical skills and runtime contracts are validated in place.
-- The two retained deterministic synchronizers maintain only the managed source-of-truth block and repo-local instruction shims: `repo/scripts/sync-repo-doc-contract.cjs` and `repo/scripts/sync-agent-instruction-shims.cjs`.
+- The toolkit does not maintain project manifests, standalone `_main` source ownership, project-to-skill publishing, pack packaging, generated skill copies, privileged generated-surface writeback, or a generic Toolkit sync command. New Toolkit skills are created directly at canonical `skills/**` paths after Skill Creation Center review; contracts, runtime, tests, and docs are created directly at canonical `repo/**` paths.
+- The retained deterministic synchronizers remain narrow: `repo/scripts/sync-repo-doc-contract.cjs` maintains only the managed source-of-truth block, while `repo/scripts/sync-agent-instruction-shims.cjs` maintains root/repo-local instruction shims and exactly four portable n8n safety derivatives sourced from `repo/contracts/agent-rules/n8n-agent-rules.md`:
+  - `skills/n8n-agent-rules/n8n-agent-rules.md`
+  - `skills/n8n-local-setup/references/n8n-agent-rules.md`
+  - `skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md`
+  - `skills/n8n-workflow-templates/references/n8n-agent-rules.md`
+- This n8n derivative set is a bounded portable/local safety-context exception, not project-to-skill publishing or general generated-surface writeback. Use the exact retained synchronizer command for repair; no unspecified generic `run sync` command exists.
 - `.codex-plugin/` and `.claude-plugin/` contain native plugin metadata for the current Toolkit package. They remain platform-separated and must not be used to cross-update the other native platform.
 - This repo intentionally does not ship or maintain a repo-wide MCP generated surface. Official n8n Skills plus instance-level MCP references remain inside `skills/n8n-local-setup/` as secondary n8n setup material.
 - All retained skill/runtime context must remain local, complete enough to use, and traceable through direct repository paths or the two retained third-party provenance records. External links may support provenance but must not be required for normal execution.
@@ -275,7 +280,7 @@ Create a new skill or contract surface only when the work has a distinct trigger
 
 Use [`repo/docs/SKILL-SAFETY-MATRIX.md`](repo/docs/SKILL-SAFETY-MATRIX.md) as the maintained catalog of current skill triggers, risk classes, companion skills, provenance, and approval boundaries before creating, extending, or importing skills.
 
-For any third-party skill, `SKILL.md` folder, skill pack, GitHub skill repo, or adapted external agent material, use `agent-skill-supply-chain-audit` first. Do not copy, import, install, execute, or convert third-party material until the audit verdict allows it. Approved conversions must go through `context-preserving-ai-publisher` and this repo's source-to-surface workflow.
+For any third-party skill, `SKILL.md` folder, skill pack, GitHub skill repo, or adapted external agent material, use `agent-skill-supply-chain-audit` first. Do not copy, import, install, execute, or convert third-party material until the audit verdict allows it. Approved Toolkit conversions are authored directly at canonical `skills/**` and `repo/**` paths. The separate generic `context-preserving-ai-publisher` product retains its own source-to-surface guidance; do not treat that product's project/publishing model as Toolkit operation.
 
 Prioritize repo safety, device safety, provenance, attribution, validation, and practical usefulness over adding more surface area.
 

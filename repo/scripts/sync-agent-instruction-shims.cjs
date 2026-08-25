@@ -22,6 +22,13 @@ const sourceId = 'repo.agent-rules';
 const fixCommand = 'node repo/scripts/sync-agent-instruction-shims.cjs --write';
 const executionPromptPath = 'repo/contracts/agent-rules/ai-coding-agent-execution.md';
 const n8nAdapterPath = 'repo/contracts/agent-rules/n8n-agent-rules-adapter.md';
+const n8nRulesPath = 'repo/contracts/agent-rules/n8n-agent-rules.md';
+const n8nDerivativePaths = Object.freeze([
+  'skills/n8n-agent-rules/n8n-agent-rules.md',
+  'skills/n8n-local-setup/references/n8n-agent-rules.md',
+  'skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md',
+  'skills/n8n-workflow-templates/references/n8n-agent-rules.md'
+]);
 const manualTemplatePaths = {
   agents: 'repo/contracts/agent-rules/AGENTS.template.md',
   claude: 'repo/contracts/agent-rules/CLAUDE.template.md',
@@ -223,6 +230,31 @@ function managedPayload(executionPrompt, n8nAdapter) {
     n8nAdapter.trimEnd(),
     n8nEnd
   ].join('\n');
+}
+
+function n8nCrossSkillHeader() {
+  return [
+    '# n8n Agent Rules Cross-Skill Reference',
+    '',
+    'Narrow managed n8n safety derivative for portable/local n8n safety context in the containing copied skill.',
+    '',
+    `- Direct canonical source: \`${n8nRulesPath}\``,
+    `- Repair command: \`${fixCommand}\``,
+    '- This file is a narrow managed n8n safety derivative. Do not edit it directly.',
+    '',
+    '---',
+    ''
+  ].join('\n');
+}
+
+function expectedN8nDerivatives(n8nRules) {
+  const body = `${n8nRules.trimEnd()}\n`;
+  return {
+    [n8nDerivativePaths[0]]: body,
+    [n8nDerivativePaths[1]]: `${n8nCrossSkillHeader()}${body}`,
+    [n8nDerivativePaths[2]]: `${n8nCrossSkillHeader()}${body}`,
+    [n8nDerivativePaths[3]]: `${n8nCrossSkillHeader()}${body}`
+  };
 }
 
 function expectedSourceTemplates(executionPrompt) {
@@ -484,7 +516,12 @@ function validateAndSync(options = {}) {
   const errors = [];
   const executionPrompt = readRequired(executionPromptPath, errors);
   const n8nAdapter = readRequired(n8nAdapterPath, errors);
-  if (executionPrompt === null || n8nAdapter === null) return { errors };
+  const n8nRules = readRequired(n8nRulesPath, errors);
+  if (executionPrompt === null || n8nAdapter === null || n8nRules === null) return { errors };
+
+  for (const [relPath, expected] of Object.entries(expectedN8nDerivatives(n8nRules))) {
+    writeOrCheck(relPath, expected, errors, runMode, 'n8n safety derivative');
+  }
 
   const sourceTemplates = expectedSourceTemplates(executionPrompt);
   for (const [relPath, expected] of Object.entries(sourceTemplates)) {

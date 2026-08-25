@@ -8,9 +8,9 @@ It does not grant permission to run risky actions. Repo rules, skill instruction
 
 - Before adding a new skill, adapter, template, or contract, compare the proposed use case against the existing rows.
 - Prefer extending an existing skill when the trigger, safety boundary, source model, and validation path fit cleanly.
-- Create a new project module plus published skill only when the use case has a distinct trigger, domain, risk boundary, provenance requirement, references/templates/assets, or validation path.
+- Create a new Toolkit skill directly under `skills/<skill-name>/` after Skill Creation Center review, with coupled contracts, runtime, tests, and docs directly under canonical `repo/**` paths, only when the use case has a distinct trigger, domain, risk boundary, provenance requirement, local assets, or validation path. No Toolkit project module, standalone `_main` source, project-to-skill publication, generated skill copy, generated-surface writeback, or generic Toolkit sync command is required.
 - For third-party skills, skill packs, GitHub skill repos, or adapted external agent material, run `agent-skill-supply-chain-audit` before copying, installing, executing, or converting anything.
-- Use `context-preserving-ai-publisher` for approved source-to-surface work.
+- The separate generic `context-preserving-ai-publisher` product retains its source-to-surface and anti-drift semantics; it is not Toolkit project publishing.
 
 ## Legend
 
@@ -52,7 +52,7 @@ Watch these trigger boundaries when editing descriptions:
 - `n8n-local-setup` should stay focused on environment setup, the localhost/ngrok dev path, the separate production Cloudflare Tunnel path for local/CGNAT machines, hosted n8n Hostinger Coolify VPS notes, [official n8n Skills](https://github.com/n8n-io/skills) setup, and official instance-level MCP references.
 - `n8n-workflow-helper-scripts` should stay focused on helper templates and repo/live hygiene.
 - `n8n-workflow-templates` should stay focused on public inactive reusable workflow JSON.
-- `context-preserving-ai-publisher` should stay about source-to-surface publishing and anti-drift discipline, not general coding work.
+- `context-preserving-ai-publisher` should stay about its separate generic source-to-surface publishing and anti-drift product, not general coding work or Toolkit topology.
 - `codex-ssh-hostinger-coolify-setup-maintainer` should stay focused on Hostinger VPS plus Coolify deployment setup, security checks, intrusion-signal review, maintenance alerts, evidence-based maintenance, and incident response, not generic DevOps or n8n app deployment inside Coolify after the platform exists.
 - `project-completion-audit` should stay a guarded final readiness audit and remediation loop, not ordinary implementation, narrow code review, deployment execution, or an implicit full-repo scan.
 - `local-ai-stack-safety` and `self-hosted-service-safety` should stay small, review-only, and scoped to setup/exposure risk.

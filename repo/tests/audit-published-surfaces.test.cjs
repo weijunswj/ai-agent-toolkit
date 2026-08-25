@@ -117,3 +117,46 @@ test('audit rejects a present legacy project tree', () => {
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, new RegExp(`Legacy ${legacyProjectToken}/ tree is present`));
 });
+
+test('active topology audit rejects each known positive retired operation', () => {
+  const fixtures = [
+    `Current Toolkit source ownership is \`${legacyProjectToken}/development/example/README.md\`.`,
+    'Create the standalone `_main/` source and maintain it as the active Toolkit input.',
+    'Create a Toolkit project module plus published skill for every new skill.',
+    'Use the Toolkit project-to-skill source-to-surface publishing workflow for new skills.',
+    'Regenerate generated skill copies through deterministic writeback before review.',
+    'Run `node repo/scripts/sync-toolkit-projects.cjs --write` after every edit.'
+  ];
+
+  for (const fixture of fixtures) {
+    const cwd = copyRepo();
+    try {
+      fs.writeFileSync(path.join(cwd, 'repo', 'docs', 'active-topology-fixture.md'), `${fixture}\n`, 'utf8');
+      const result = runAudit(cwd, ['--json']);
+      assert.notEqual(result.status, 0, fixture);
+      assert.match(result.stdout, /retired|publishing|source ownership|command|creation/i, fixture);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+});
+
+test('active topology audit accepts direct-canonical guidance, retirement statements, and historical evidence', () => {
+  const audit = require(auditScript);
+  const directCanonical = 'Create new skills directly under `skills/**` and maintain contracts, runtime, tests, and docs directly under `repo/**`.';
+  const negativeRetirement = 'The Toolkit does not maintain project publishing or a generic sync command.';
+  const historicalEvidence = `## Historical audit evidence\nEarlier Toolkit operation used \`${legacyProjectToken}/example/_main\`, but that is not current operation.`;
+
+  assert.equal(audit.activeTopologyFinding(directCanonical), null);
+  assert.equal(audit.activeTopologyFinding(negativeRetirement), null);
+  assert.equal(audit.activeTopologyFinding(historicalEvidence), null);
+
+  const cwd = copyRepo();
+  try {
+    fs.writeFileSync(path.join(cwd, 'repo', 'docs', 'active-topology-fixture.md'), `${directCanonical}\n${negativeRetirement}\n${historicalEvidence}\n`, 'utf8');
+    const result = runAudit(cwd, ['--check']);
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});

@@ -36,6 +36,51 @@ function legacyReferenceAllowed(rel) {
   return legacyReferenceAllowedPaths.has(slash(rel));
 }
 
+const activePolicyRootPaths = ['AGENTS.md', 'README.md'];
+const historicalPolicyPathPrefixes = ['repo/docs/audits/'];
+const historicalPolicyPaths = new Set(['repo/docs/RETIRED-SOURCE-PROVENANCE.md']);
+const activeTopologyPatterns = [
+  { pattern: /\b_projects(?:\b|[\\/])/i, message: 'uses retired _projects source ownership' },
+  { pattern: /\b_main(?:\b|[\\/])/i, message: 'uses standalone retired _main source ownership' },
+  { pattern: /\bproject\s+module\b[\s\S]{0,120}\bpublished\s+skill\b/i, message: 'instructs Toolkit project-module plus published-skill creation' },
+  { pattern: /\bproject[- ]to[- ]skill\b[\s\S]{0,100}\b(?:publish|publishing|published|generate|generated|copy|writeback|sync)\b/i, message: 'instructs retired project-to-skill publishing' },
+  { pattern: /\bsource[- ]to[- ]surface\b[\s\S]{0,120}\b(?:workflow|publish|publishing|published|publisher|generate|generated|copy|writeback|sync)\b/i, message: 'instructs Toolkit source-to-surface publishing' },
+  { pattern: /\b(?:workflow|publish|publishing|published|(?<!-)publisher|generate|generated|copy|writeback|sync)\b[\s\S]{0,120}\bsource[- ]to[- ]surface\b/i, message: 'instructs Toolkit source-to-surface publishing' },
+  { pattern: /\b(?:generated|deterministic)\s+(?:skill\s+)?(?:copies?|publication|publishing|writeback)\b/i, message: 'instructs retired generated skill copies or writeback' },
+  { pattern: /\b(?:skill\s+)?(?:copies?|publication|publishing|writeback)\s+(?:through|from|via)\s+(?:generated|deterministic)\b/i, message: 'instructs retired generated skill copies or writeback' },
+  { pattern: /\b(?:node\s+)?repo\/scripts\/(?:sync-toolkit-projects|package-skills|package-packs)\.cjs\b/i, message: 'instructs a retired publishing or sync command' }
+];
+
+function activePolicyFiles() {
+  const docs = walk('repo/docs')
+    .filter((rel) => rel.endsWith('.md'))
+    .filter((rel) => !historicalPolicyPaths.has(rel))
+    .filter((rel) => !historicalPolicyPathPrefixes.some((prefix) => rel.startsWith(prefix)));
+  return [...new Set([...activePolicyRootPaths, ...docs])].filter(exists).sort();
+}
+
+function nonOperationalContext(text) {
+  return /\b(?:historical|earlier|previous|superseded|legacy|audit|finding|evidence)\b/i.test(text)
+    || /\b(?:no|not|never|without|absent|forbidden|removed|avoid|outside|cannot|can't)\b/i.test(text)
+    || /\b(?:do|does|did|must)\s+not\b/i.test(text);
+}
+
+function activeTopologyFinding(text) {
+  const lines = String(text).replace(/\r\n/g, '\n').split('\n');
+  let sectionHeading = '';
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (/^\s*#{1,6}\s+/.test(line)) sectionHeading = line;
+    const context = `${sectionHeading}\n${line}`;
+    if (nonOperationalContext(context)) continue;
+    const window = line;
+    for (const { pattern, message } of activeTopologyPatterns) {
+      if (pattern.test(window)) return { lineNumber: index + 1, line: line.trim(), message };
+    }
+  }
+  return null;
+}
+
 function relPath(value) {
   return slash(path.relative(root, value));
 }
@@ -181,6 +226,12 @@ function validate(snapshotValue) {
       errors.push(`${rel} references the retired project/publisher topology`);
     }
   }
+  for (const rel of activePolicyFiles()) {
+    const finding = activeTopologyFinding(readText(rel));
+    if (finding) {
+      errors.push(`${rel}:${finding.lineNumber} ${finding.message}: ${finding.line}`);
+    }
+  }
   return errors;
 }
 
@@ -223,4 +274,12 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { legacyReferenceAllowed, parseFrontMatter, skillDirs, snapshot, validate };
+module.exports = {
+  activePolicyFiles,
+  activeTopologyFinding,
+  legacyReferenceAllowed,
+  parseFrontMatter,
+  skillDirs,
+  snapshot,
+  validate
+};
