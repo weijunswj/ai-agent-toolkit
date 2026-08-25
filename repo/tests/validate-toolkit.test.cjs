@@ -11,6 +11,13 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 const validateScript = path.join(repoRoot, 'repo', 'scripts', 'validate-toolkit.cjs');
 const legacyProjectToken = '_' + 'projects';
 const legacyCuratedToken = 'curated_' + 'output_for_ai';
+const publisherReferencePaths = [
+  'skills/context-preserving-ai-publisher/references/audit-and-baseline-workflow.md',
+  'skills/context-preserving-ai-publisher/references/validation-strategy.md',
+  'skills/context-preserving-ai-publisher/templates/project-module/SOURCE-LOCK.template.json',
+  'skills/context-preserving-ai-publisher/templates/project-module/toolkit.project.template.json',
+  'skills/context-preserving-ai-publisher/templates/repo-docs/project-module-standard.template.md'
+];
 
 function readText(relPath, root = repoRoot) {
   return fs.readFileSync(path.join(root, relPath), 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
@@ -56,6 +63,14 @@ test('skill routing and safety coverage match the direct skill surface', () => {
   assert.equal(new Set(skills).size, skills.length);
 });
 
+test('validator shares the exact five-file publisher reference allowlist', () => {
+  const validator = require(validateScript);
+  const audit = require(path.join(repoRoot, 'repo', 'scripts', 'audit-published-surfaces.cjs'));
+  assert.deepEqual(publisherReferencePaths.filter(audit.legacyReferenceAllowed), publisherReferencePaths);
+  assert.equal(audit.legacyReferenceAllowed('skills/context-preserving-ai-publisher/README.md'), false);
+  assert.deepEqual(validator.validate(), []);
+});
+
 test('source locks are discovered only from canonical source-watch provenance', () => {
   const audit = require(path.join(repoRoot, 'repo', 'scripts', 'audit-project-source-locks.cjs'));
   const result = audit.auditSourceLocks();
@@ -96,6 +111,24 @@ test('validator rejects legacy publisher references in canonical files', () => {
   assert.match(result.stderr, /references the retired project\/publisher topology/);
 });
 
+test('validator rejects legacy publisher references in ordinary canonical skills', () => {
+  const cwd = copyRepo();
+  const target = path.join(cwd, 'skills', 'n8n-local-setup', 'references', 'legacy-reference-fixture.md');
+  fs.writeFileSync(target, `${legacyProjectToken}/fixture/${legacyCuratedToken}/file.md\n`, 'utf8');
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /references the retired project\/publisher topology/);
+});
+
+test('validator rejects legacy references in a non-allowlisted publisher file', () => {
+  const cwd = copyRepo();
+  const target = path.join(cwd, 'skills', 'context-preserving-ai-publisher', 'references', 'legacy-fixture.md');
+  fs.writeFileSync(target, `${legacyProjectToken}/fixture/${legacyCuratedToken}/file.md\n`, 'utf8');
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /references the retired project\/publisher topology/);
+});
+
 test('validator detects stale plugin package versions', () => {
   const cwd = copyRepo();
   const manifestPath = path.join(cwd, '.codex-plugin', 'plugin.json');
@@ -116,6 +149,14 @@ test('validation workflow contains only retained read-only checks', () => {
   assert.match(workflow, /node repo\/scripts\/validate-toolkit\.cjs/);
   assert.match(workflow, /node --test repo\/tests\/\*\.test\.cjs/);
   assert.doesNotMatch(workflow, /sync-toolkit-projects\.cjs|package-skills\.cjs|package-packs\.cjs/);
+});
+
+test('retired publisher and writeback machinery remains absent', () => {
+  for (const relPath of [
+    'repo/scripts/sync-toolkit-projects.cjs',
+    'repo/scripts/package-skills.cjs',
+    'repo/scripts/package-packs.cjs'
+  ]) assert.equal(fs.existsSync(path.join(repoRoot, relPath)), false, relPath);
 });
 
 test('managed source-of-truth and instruction checks pass from an explicit workspace', () => {

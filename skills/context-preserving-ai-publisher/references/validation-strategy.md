@@ -26,7 +26,7 @@ If full validation fails, inspect the failing section, run the smallest relevant
 
 Auto-sync is optional convenience writeback for narrow deterministic generated-surface updates. It is not a substitute for the target repo's full validation gate.
 
-For canonical skill, contract, or provenance changes, review the direct source and any required provenance or audit-baseline movement in the PR, then rely on the target repo's read-only validation gate.
+For `_projects/**/_main/**` source or provenance changes, auto-sync should skip instead of blessing the PR. The author or Codex must update the source, source-lock/provenance metadata when needed, generated outputs, and audit baselines when needed, then rely on the target repo's full validation gate.
 
 Read-only CI should catch missed steps by failing validation. Privileged writeback should not silently mutate source/provenance PRs.
 

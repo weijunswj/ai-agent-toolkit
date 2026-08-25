@@ -11,6 +11,13 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 const auditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-published-surfaces.cjs');
 const legacyProjectToken = '_' + 'projects';
 const legacyCuratedToken = 'curated_' + 'output_for_ai';
+const publisherReferencePaths = [
+  'skills/context-preserving-ai-publisher/references/audit-and-baseline-workflow.md',
+  'skills/context-preserving-ai-publisher/references/validation-strategy.md',
+  'skills/context-preserving-ai-publisher/templates/project-module/SOURCE-LOCK.template.json',
+  'skills/context-preserving-ai-publisher/templates/project-module/toolkit.project.template.json',
+  'skills/context-preserving-ai-publisher/templates/repo-docs/project-module-standard.template.md'
+];
 
 function readText(relPath, root = repoRoot) {
   return fs.readFileSync(path.join(root, relPath), 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
@@ -52,6 +59,18 @@ test('published surface baseline matches the canonical snapshot', () => {
   assert.equal(result.status, 0, result.stderr);
 });
 
+test('audit allows legacy references only in the five preserved publisher files', () => {
+  const audit = require(auditScript);
+  assert.deepEqual(publisherReferencePaths.filter(audit.legacyReferenceAllowed), publisherReferencePaths);
+  for (const relPath of publisherReferencePaths) {
+    const text = readText(relPath);
+    assert.ok(text.includes(`${legacyProjectToken}/`) || text.includes(`${legacyCuratedToken}/`), relPath);
+  }
+  assert.equal(audit.legacyReferenceAllowed('skills/context-preserving-ai-publisher/README.md'), false);
+  assert.equal(audit.legacyReferenceAllowed('skills/context-preserving-ai-publisher/references/examples.md'), false);
+  assert.equal(audit.validate(audit.snapshot()).length, 0);
+});
+
 test('audit rejects a newly introduced legacy reference under a canonical surface', () => {
   const cwd = copyRepo();
   fs.writeFileSync(
@@ -62,6 +81,18 @@ test('audit rejects a newly introduced legacy reference under a canonical surfac
   const result = runAudit(cwd, ['--json']);
   assert.notEqual(result.status, 0);
   assert.match(result.stdout, /references the retired project\/publisher topology/);
+});
+
+test('audit rejects a legacy reference in a non-allowlisted publisher file', () => {
+  const cwd = copyRepo();
+  fs.writeFileSync(
+    path.join(cwd, 'skills', 'context-preserving-ai-publisher', 'references', 'legacy-fixture.md'),
+    `${legacyProjectToken}/fixture/${legacyCuratedToken}/file.md\n`,
+    'utf8'
+  );
+  const result = runAudit(cwd, ['--json']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout, /skills\/context-preserving-ai-publisher\/references\/legacy-fixture\.md references the retired project\/publisher topology/);
 });
 
 test('audit rejects new pack manifests and the retired skill surface', () => {

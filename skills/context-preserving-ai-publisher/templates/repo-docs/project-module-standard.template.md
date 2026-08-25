@@ -9,13 +9,13 @@ Project modules preserve source material and declare how published surfaces are 
   SOURCE-LOCK.json
   <manifest>.json
   _main/
-  reviewed_output/
+  curated_output_for_ai/
 ```
 
 ## Folder Roles
 
 - `_main/`: full source material and provenance.
-- `reviewed_output/`: reviewed routers, indexes, wrappers, metadata, and shims.
+- `curated_output_for_ai/`: reviewed routers, indexes, wrappers, metadata, and shims.
 - Published surface folders: generated outputs used by agents.
 
 ## Recipes

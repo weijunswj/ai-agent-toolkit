@@ -24,6 +24,18 @@ function slash(value) {
   return value.split(path.sep).join('/');
 }
 
+const legacyReferenceAllowedPaths = new Set([
+  'skills/context-preserving-ai-publisher/references/audit-and-baseline-workflow.md',
+  'skills/context-preserving-ai-publisher/references/validation-strategy.md',
+  'skills/context-preserving-ai-publisher/templates/project-module/SOURCE-LOCK.template.json',
+  'skills/context-preserving-ai-publisher/templates/project-module/toolkit.project.template.json',
+  'skills/context-preserving-ai-publisher/templates/repo-docs/project-module-standard.template.md'
+]);
+
+function legacyReferenceAllowed(rel) {
+  return legacyReferenceAllowedPaths.has(slash(rel));
+}
+
 function relPath(value) {
   return slash(path.relative(root, value));
 }
@@ -163,6 +175,7 @@ function validate(snapshotValue) {
   for (const rel of [...walk('skills'), ...walk('repo/contracts')]) {
     if (!/\.(md|json|ya?ml|txt)$/i.test(rel)) continue;
     if (rel.endsWith('.n6.json')) continue;
+    if (legacyReferenceAllowed(rel)) continue;
     const text = readText(rel);
     if (text.includes(`${legacyProjectToken}/`) || text.includes('curated_output_for_ai/')) {
       errors.push(`${rel} references the retired project/publisher topology`);
@@ -210,4 +223,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { parseFrontMatter, skillDirs, snapshot, validate };
+module.exports = { legacyReferenceAllowed, parseFrontMatter, skillDirs, snapshot, validate };

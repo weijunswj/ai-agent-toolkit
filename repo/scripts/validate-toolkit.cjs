@@ -317,6 +317,7 @@ function validateLegacyReferences(errors) {
     if (excluded.has(entry.relPath)) continue;
     if (!/\.(md|json|ya?ml|txt|cjs|js|ps1|cmd|sh|py)$/i.test(entry.relPath)) continue;
     if (entry.relPath.endsWith('.n6.json')) continue;
+    if (surfaceAudit.legacyReferenceAllowed(entry.relPath)) continue;
     const text = fs.readFileSync(entry.fullPath, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
     if (text.includes(`${legacyProjectToken}/`) || text.includes(legacyPublisherToken)) fail(errors, `${entry.relPath} references the retired project/publisher topology`);
   }

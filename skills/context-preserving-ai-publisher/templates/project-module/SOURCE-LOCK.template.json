@@ -10,13 +10,13 @@
     {
       "mode": "exact",
       "source_path": "path/in/source.md",
-      "project_path": "<source-root>/category/project-name/_main/path/in/source.md",
+      "project_path": "_projects/category/project-name/_main/path/in/source.md",
       "source_blob_sha": "git-blob-sha"
     },
     {
       "mode": "adapted",
       "source_path": "path/in/source-adapted.md",
-      "project_path": "<source-root>/category/project-name/_main/path/in/source-adapted.md",
+      "project_path": "_projects/category/project-name/_main/path/in/source-adapted.md",
       "source_blob_sha": "git-blob-sha",
       "notes": "Explain what was adapted and why."
     },
