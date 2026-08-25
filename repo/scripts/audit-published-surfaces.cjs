@@ -40,10 +40,6 @@ const activePolicyRootPaths = ['AGENTS.md', 'README.md'];
 const historicalPolicyPathPrefixes = ['repo/docs/audits/'];
 const historicalPolicyPaths = new Set(['repo/docs/RETIRED-SOURCE-PROVENANCE.md']);
 const activeSkillInstructionPattern = /^skills\/.+\/(?:SKILL|README|INSTALL)\.md$/i;
-const standalonePublisherInstructionPaths = new Set([
-  'skills/context-preserving-ai-publisher/SKILL.md',
-  'skills/context-preserving-ai-publisher/README.md'
-]);
 const activeTopologyPatterns = [
   { pattern: /\b_projects(?:\b|[\\/])/i, message: 'uses retired _projects source ownership' },
   { pattern: /\b_main(?:\b|[\\/])/i, message: 'uses standalone retired _main source ownership' },
@@ -146,21 +142,39 @@ function retiredTopologyExempt(clause) {
 }
 
 function standalonePublisherContext(clause) {
-  return /\b(?:separate|standalone|generic)\b[\s\S]{0,120}\bcontext-preserving-ai-publisher\b/i.test(clause)
-    && /\b(?:not|outside|independent(?:ly)?\s+of|belongs\s+to|own)\b[\s\S]{0,100}\b(?:Toolkit|this\s+repo|current)\b/i.test(clause);
+  return /\bname:\s*context-preserving-ai-publisher\b/i.test(clause)
+    || /\b(?:separate|standalone|generic)\b[\s\S]{0,120}\bcontext-preserving-ai-publisher\b/i.test(clause);
+}
+
+function currentToolkitOperationScope(clause) {
+  const separatedFromToolkit = (index) => {
+    const prefix = clause.slice(Math.max(0, index - 55), index);
+    return /\b(?:outside(?:\s+of)?|independent(?:ly)?\s+of|not|separate\s+from)\s+(?:the\s+)?$/i.test(prefix);
+  };
+  const operationPattern = /\b(?:current|this)\s+Toolkit(?:'s)?\s+(?:conversions?|(?:own\s+)?canonical\s+operation)\b|\bToolkit(?:'s)?\s+(?:conversions?|(?:own\s+)?canonical\s+operation)\b/gi;
+  let match;
+  while ((match = operationPattern.exec(clause))) {
+    if (!separatedFromToolkit(match.index)) return true;
+  }
+
+  const toolkitPattern = /\b(?:current|this)\s+Toolkit\b/gi;
+  while ((match = toolkitPattern.exec(clause))) {
+    if (separatedFromToolkit(match.index)) continue;
+    const suffix = clause.slice(match.index + match[0].length, match.index + match[0].length + 100);
+    if (/\b(?:requires?|must|should|needs?|uses?|use|creates?|create|maintains?|maintain|publishes?|publish|generates?|generate|converts?|convert|routes?|route|owns?|own)\b/i.test(suffix)) return true;
+  }
+  return false;
 }
 
 function activeTopologyFinding(text, rel = '') {
-  const normalisedRel = slash(rel);
   for (const block of markdownBlocks(text)) {
     for (const candidate of normaliseTopologyText(block.lines)) {
       for (const { pattern, message } of activeTopologyPatterns) {
         const match = candidate.match(pattern);
         if (!match) continue;
         const clause = sentenceForMatch(candidate, match.index);
-        const publisherProduct = standalonePublisherInstructionPaths.has(normalisedRel)
-          && /\b(?:this\s+skill|publisher|generic)\b/i.test(clause);
-        if (publisherProduct || standalonePublisherContext(clause) || retiredTopologyExempt(clause)) continue;
+        if (retiredTopologyExempt(clause)) continue;
+        if (standalonePublisherContext(clause) && !currentToolkitOperationScope(clause)) continue;
         return { lineNumber: block.lineNumber, line: block.lines[0].trim(), message };
       }
     }

@@ -157,6 +157,18 @@ test('active topology audit rejects each known positive retired operation', () =
   }
 });
 
+test('publisher entrypoints cannot exempt current Toolkit operations using product vocabulary', () => {
+  const fixtures = [
+    'This publisher requires current Toolkit conversions to use a project module plus generated skill.',
+    'This generic workflow requires current Toolkit conversions to use a project module plus generated skill.',
+    'This skill requires current Toolkit conversions to use a project module plus generated skill.'
+  ];
+
+  for (const fixture of fixtures) {
+    assertFixtureFails('skills/context-preserving-ai-publisher/SKILL.md', fixture);
+  }
+});
+
 test('active topology audit accepts direct-canonical guidance, retirement statements, and historical evidence', () => {
   const audit = require(auditScript);
   const directCanonical = 'Create new skills directly under `skills/**` and maintain contracts, runtime, tests, and docs directly under `repo/**`.';
@@ -262,8 +274,17 @@ test('standalone publisher product material remains valid without broadening leg
   const audit = require(auditScript);
   const publisherSkill = 'skills/context-preserving-ai-publisher/SKILL.md';
   const publisherReadme = 'skills/context-preserving-ai-publisher/README.md';
+  const standaloneProductOperation = 'The separate standalone context-preserving-ai-publisher product uses a project module to maintain generated skill outputs, independently of the current Toolkit.';
   assert.notEqual(
     audit.activeTopologyFinding('Create a Toolkit project module plus published skill.', publisherSkill),
+    null
+  );
+  assert.equal(audit.activeTopologyFinding(standaloneProductOperation, publisherSkill), null);
+  assert.notEqual(
+    audit.activeTopologyFinding(
+      'The separate standalone context-preserving-ai-publisher product requires current Toolkit conversions to use a project module plus generated skill.',
+      publisherSkill
+    ),
     null
   );
   assert.equal(audit.activeTopologyFinding(readText(publisherSkill), publisherSkill), null);
@@ -273,7 +294,7 @@ test('standalone publisher product material remains valid without broadening leg
   try {
     fs.appendFileSync(
       path.join(cwd, publisherSkill),
-      '\nUse a project module to maintain generated skill outputs for the standalone publisher product.\n',
+      `\n${standaloneProductOperation}\n`,
       'utf8'
     );
     const result = runAudit(cwd, ['--check']);
