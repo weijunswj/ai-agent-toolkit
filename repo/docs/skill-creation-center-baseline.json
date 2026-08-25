@@ -36,15 +36,12 @@
       "safety_boundary": "Explicit inspection and preview are read-only. Any repository/GitHub mutation requires current repository identity, A2 repository.governance consent, accepted preview, and A1 github.mutation authority. Review-thread replies, resolution/reopen/dismissal, final disposition, Ready, merge, cleanup, and Web finality remain controller-owned and are not performed by this skill.",
       "source_provenance": "first_party",
       "third_party_audit": "not_applicable_first_party; no third-party text, provider docs, workflow JSON, MCP, or code copied or adapted.",
-      "publisher_workflow": "context-preserving-ai-publisher source-to-surface workflow with first-party _main source, deterministic copy outputs, routing/safety-matrix/README consumer updates, sync, and validation.",
+      "publisher_workflow": "Direct-canonical ownership and maintenance: skills/github-governance-review-reconciler/** is the canonical skill surface, while relevant contracts, documentation, scripts, and tests are maintained directly at canonical repo/** paths. No project-source tree, reviewed-output publication, copy/writeback, or project sync step is used.",
       "routing": "The routing decision is explicit-only: github-governance-review-reconciler is routed only for the named N5 governance/review-reconciler contract. Ordinary GitHub inspection belongs to the GitHub skill; source publication belongs to context-preserving-ai-publisher; current finality remains Web/controller work.",
       "validation": [
-        "node repo/scripts/sync-toolkit-projects.cjs --write",
-        "node repo/scripts/sync-toolkit-projects.cjs --check",
+        "node repo/scripts/validate-toolkit.cjs",
         "node repo/scripts/audit-published-surfaces.cjs --check",
-        "node --test repo/tests/toolkit-github-governance-review-reconciler.test.cjs repo/tests/toolkit-github-governance-review-reconciler.boundaries.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run175-red.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run177-repair.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run178-canonical-a1.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run179-remove-transaction.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run181-six-root.test.cjs",
-        "node --test repo/tests/toolkit-github-governance-review-reconciler.run183-adversarial.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run185-adversarial.test.cjs",
-        "node repo/scripts/validate-toolkit.cjs"
+        "node --test repo/tests/toolkit-github-governance-review-reconciler.test.cjs repo/tests/toolkit-github-governance-review-reconciler.boundaries.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run175-red.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run177-repair.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run178-canonical-a1.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run179-remove-transaction.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run181-six-root.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run183-adversarial.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run185-adversarial.test.cjs"
       ]
     },
     "codex-ssh-hostinger-coolify-setup-maintainer": {
@@ -60,14 +57,12 @@
       "safety_boundary": "Agent-safe by default for read-only inspection, evidence reports, placeholder-only documentation, upgrade advisory, and the bundled read-only daily security report. Hostinger, Coolify, GitHub connection, DNS/TLS, real secrets, production deployments, migrations, backups, restore tests, cutover, rollback, VPS changes, server resizing, paid upgrades, billing, customer data, firewall restrictions, reboots, and destructive actions are human-owned and approval-gated.",
       "source_provenance": "first_party",
       "third_party_audit": "not_applicable_first_party; no third-party text or code copied or adapted. Vendor docs were consulted only as factual context.",
-      "publisher_workflow": "context-preserving-ai-publisher source-to-surface workflow with first-party _main source, deterministic copy outputs, curated reference index, routing updates, safety matrix updates, sync, and validation.",
+      "publisher_workflow": "Direct-canonical ownership and maintenance: skills/codex-ssh-hostinger-coolify-setup-maintainer/** is the canonical skill surface, while relevant contracts, documentation, scripts, and tests are maintained directly at canonical repo/** paths. No project-source tree, reviewed-output publication, copy/writeback, or project sync step is used.",
       "routing": "codex-ssh-hostinger-coolify-setup-maintainer is routed for Hostinger VPS plus Coolify setup, deployment, security checks, upgrade timing review, maintenance, incident response, and prompts such as helping set up Hostinger for deployment. n8n-local-setup keeps its local n8n and n8n-specific Hostinger Coolify VPS deployment reference material for use after Coolify exists. If the target app is n8n or the task touches live n8n operations, n8n-agent-rules remains the companion safety router.",
       "validation": [
-        "node repo/scripts/sync-toolkit-projects.cjs --write",
-        "node repo/scripts/sync-toolkit-projects.cjs --check",
+        "node repo/scripts/validate-toolkit.cjs",
         "node repo/scripts/audit-published-surfaces.cjs --check",
-        "node --test repo/tests/skill-routing.test.cjs",
-        "node repo/scripts/validate-toolkit.cjs"
+        "node --test repo/tests/skill-routing.test.cjs"
       ]
     },
     "local-ai-stack-safety": {
@@ -83,12 +78,12 @@
       "safety_boundary": "Review-only by default. Installation, model pulls, Docker, public tunnels, driver/runtime changes, shell profile edits, credentials, or non-local network exposure require explicit current-turn approval.",
       "source_provenance": "first_party",
       "third_party_audit": "not_applicable_first_party; no third-party text or code copied or adapted.",
-      "publisher_workflow": "context-preserving-ai-publisher source-to-surface workflow with first-party _main source, deterministic copy outputs, routing updates, safety matrix updates, sync, and validation.",
+      "publisher_workflow": "Direct-canonical ownership and maintenance: skills/local-ai-stack-safety/** is the canonical skill surface, while relevant contracts, documentation, scripts, and tests are maintained directly at canonical repo/** paths. No project-source tree, reviewed-output publication, copy/writeback, or project sync step is used.",
       "routing": "local-ai-stack-safety is routed only for local-ai-stack-safety review/planning tasks involving local AI runtimes, model servers, model downloads, GPU/runtime setup, local AI web UIs, or endpoint exposure.",
       "validation": [
-        "node repo/scripts/sync-toolkit-projects.cjs --check",
-        "node --test repo/tests/skill-routing.test.cjs",
-        "node repo/scripts/validate-toolkit.cjs"
+        "node repo/scripts/validate-toolkit.cjs",
+        "node repo/scripts/audit-published-surfaces.cjs --check",
+        "node --test repo/tests/skill-routing.test.cjs"
       ]
     },
     "managed-app-foundation-review": {
@@ -104,14 +99,12 @@
       "safety_boundary": "Review-only by default. External account creation, provider configuration, DNS changes, production data migration, credentials, billing setup, paid-plan upgrades, deployment, or live-service mutation require explicit current-turn approval.",
       "source_provenance": "first_party",
       "third_party_audit": "not_applicable_first_party; no third-party text, provider docs, pricing tables, or code copied or adapted.",
-      "publisher_workflow": "context-preserving-ai-publisher source-to-surface workflow with first-party _main source, deterministic copy outputs, routing updates, safety matrix updates, sync, and validation.",
+      "publisher_workflow": "Direct-canonical ownership and maintenance: skills/managed-app-foundation-review/** is the canonical skill surface, while relevant contracts, documentation, scripts, and tests are maintained directly at canonical repo/** paths. No project-source tree, reviewed-output publication, copy/writeback, or project sync step is used.",
       "routing": "managed-app-foundation-review is routed for early implementation-plan reviews or material foundation changes involving managed or owner-hosted foundation selection, low-cost/free provider comparison, build-vs-buy scope cuts, usage-limit and upgrade-watch planning, auth/accounts/backend APIs/databases/workflow automation/CRM/forms/email/storage/analytics/ops foundations, and security work reduction. Do not route small follow-up implementation tasks after the foundation decision is recorded. If self-hosted n8n workflow work begins, n8n-agent-rules owns the workflow safety boundary.",
       "validation": [
-        "node repo/scripts/sync-toolkit-projects.cjs --write",
-        "node repo/scripts/sync-toolkit-projects.cjs --check",
+        "node repo/scripts/validate-toolkit.cjs",
         "node repo/scripts/audit-published-surfaces.cjs --check",
-        "node --test repo/tests/skill-routing.test.cjs",
-        "node repo/scripts/validate-toolkit.cjs"
+        "node --test repo/tests/skill-routing.test.cjs"
       ]
     },
     "project-completion-audit": {
@@ -127,14 +120,12 @@
       "safety_boundary": "Preflight-only until explicit confirmation. Full audit still cannot run live-system, production, deployment, external-service, destructive, credential, import/export, sync, payment, customer-data, private-data, or irreversible actions without separate explicit current-turn approval naming the target and action. Deep security scan and browser click-through verification require approval in the confirmation step.",
       "source_provenance": "first_party",
       "third_party_audit": "not_applicable_first_party; no third-party text, scanner output, browser artifacts, code, or vendor docs copied or adapted.",
-      "publisher_workflow": "context-preserving-ai-publisher source-to-surface workflow with first-party _main source, deterministic copy outputs, portable repo-local playbook routing update, toolkit skill routing update, README table update, safety matrix update, sync, and validation.",
+      "publisher_workflow": "Direct-canonical ownership and maintenance: skills/project-completion-audit/** is the canonical skill surface, while relevant contracts, documentation, scripts, and tests are maintained directly at canonical repo/** paths. No project-source tree, reviewed-output publication, copy/writeback, or project sync step is used.",
       "routing": "project-completion-audit is routed for final audit, completion audit, production-readiness audit, release-candidate audit, launch-readiness audit, QA pass, make sure everything works, is this production ready, use /goal to finish readiness remediation, audit against original docs, security-readiness check, and final readiness check. It is intentionally not routed for ordinary feature implementation or narrow code review.",
       "validation": [
-        "node repo/scripts/sync-toolkit-projects.cjs --write",
-        "node repo/scripts/sync-toolkit-projects.cjs --check",
+        "node repo/scripts/validate-toolkit.cjs",
         "node repo/scripts/audit-published-surfaces.cjs --check",
-        "node --test repo/tests/skill-routing.test.cjs",
-        "node repo/scripts/validate-toolkit.cjs"
+        "node --test repo/tests/skill-routing.test.cjs"
       ]
     },
     "self-hosted-service-safety": {
@@ -150,12 +141,12 @@
       "safety_boundary": "Review-only by default. Docker, DNS/TLS, tunnels, firewall/public ports, VPS/cloud changes, credentials, production data, or deployment commands require explicit current-turn approval.",
       "source_provenance": "first_party",
       "third_party_audit": "not_applicable_first_party; no third-party text or code copied or adapted.",
-      "publisher_workflow": "context-preserving-ai-publisher source-to-surface workflow with first-party _main source, deterministic copy outputs, routing updates, safety matrix updates, sync, and validation.",
+      "publisher_workflow": "Direct-canonical ownership and maintenance: skills/self-hosted-service-safety/** is the canonical skill surface, while relevant contracts, documentation, scripts, and tests are maintained directly at canonical repo/** paths. No project-source tree, reviewed-output publication, copy/writeback, or project sync step is used.",
       "routing": "self-hosted-service-safety is routed only for self-hosted-service-safety review/planning tasks involving non-n8n self-hosted services, Docker/VPS setup, public exposure, reverse proxies, tunnels, credentials, or backups.",
       "validation": [
-        "node repo/scripts/sync-toolkit-projects.cjs --check",
-        "node --test repo/tests/skill-routing.test.cjs",
-        "node repo/scripts/validate-toolkit.cjs"
+        "node repo/scripts/validate-toolkit.cjs",
+        "node repo/scripts/audit-published-surfaces.cjs --check",
+        "node --test repo/tests/skill-routing.test.cjs"
       ]
     },
     "toolkit-setup": {
@@ -171,14 +162,13 @@
       "safety_boundary": "User-level hub writes, configured Toolkit repo fast-forward updates, OpenCode global skill writes, Antigravity 2 adapter writes, auto-sync enablement, target enablement, repo auto-update enablement, downgrade forcing, package installation, arbitrary project-repo mutation, live-system actions, credentials, and destructive operations require explicit current-turn approval when applicable. Hooks remain optional policy-light automation.",
       "source_provenance": "first_party",
       "third_party_audit": "not_applicable_first_party; no third-party plugin source, private plugin cache material, marketplace package, executable dependency, or vendor docs are copied or adapted.",
-      "publisher_workflow": "context-preserving-ai-publisher maintenance workflow: create reviewed curated output for the compact toolkit-setup router, declare exact generated skill and native plugin metadata outputs, run deterministic sync, update routing/docs/safety matrix/audit baseline, and validate source-to-surface freshness.",
+      "publisher_workflow": "Direct-canonical ownership and maintenance: skills/toolkit-setup/** is the canonical skill surface, while relevant contracts, documentation, scripts, and tests are maintained directly at canonical repo/** paths. No project-source tree, reviewed-output publication, copy/writeback, or project sync step is used.",
       "routing": "toolkit-setup is routed in the Toolkit skill-routing table as the single discoverability skill for Toolkit plugin and bridge setup requests. The command-specific bridge skills are omitted and removed: setup-local-toolkit-bridge, setup-opencode-bridge, setup-ag2-bridge, setup-all-non-native-bridges, sync-enabled-bridges, audit-local-toolkit-bridge, and disable-local-toolkit-bridge.",
       "validation": [
-        "node repo/scripts/sync-toolkit-projects.cjs --write",
-        "node repo/scripts/sync-toolkit-projects.cjs --check",
-        "node --test repo/tests/toolkit-local-bridge.test.cjs",
-        "node --test repo/tests/skill-routing.test.cjs",
-        "node repo/scripts/validate-toolkit.cjs"
+        "node repo/scripts/validate-toolkit.cjs",
+        "node repo/scripts/audit-published-surfaces.cjs --check",
+        "node --test repo/tests/toolkit-local-bridge.test.cjs repo/tests/toolkit-local-bridge-hook-light.test.cjs",
+        "node --test repo/tests/skill-routing.test.cjs"
       ]
     }
   },

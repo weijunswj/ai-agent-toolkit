@@ -22,6 +22,32 @@ function workspaceRootFromArgs(args = process.argv.slice(2)) {
 const root = path.resolve(workspaceRootFromArgs() || process.env.TOOLKIT_WORKSPACE_ROOT || process.cwd());
 const legacyProjectToken = '_' + 'projects';
 const legacyPublisherToken = 'curated_' + 'output_for_ai';
+const retiredSkillCreationReviewEvidencePatterns = [
+  { pattern: /sync-toolkit-projects\.cjs/i, message: 'references retired sync-toolkit-projects.cjs' },
+  { pattern: /_projects[\\/]/i, message: 'references a retired _projects path' },
+  { pattern: /curated_output_for_ai|curated[- ]output/i, message: 'references retired curated-output publishing' },
+  { pattern: /(?:^|[\s"'`])_main(?:[\\/]|[\s"'`]|$)/i, message: 'references a retired _main source path' },
+  {
+    pattern: /\bsource[- ]to[- ]surface\b[\s\S]{0,120}\b(?:publisher|publish(?:er|ing|ed)?|copy|writeback)\b/i,
+    message: 'claims retired source-to-surface publishing'
+  },
+  {
+    pattern: /\b(?:publisher|publish(?:er|ing|ed)?|copy|writeback)\b[\s\S]{0,120}\bsource[- ]to[- ]surface\b/i,
+    message: 'claims retired source-to-surface publishing'
+  },
+  {
+    pattern: /\b(?:generated|deterministic)\b[\s\S]{0,80}\bsource[- ]to[- ]surface\b/i,
+    message: 'claims retired source-to-surface publishing'
+  },
+  {
+    pattern: /\bsource[- ]to[- ]surface\b[\s\S]{0,80}\b(?:generated|deterministic)\b/i,
+    message: 'claims retired source-to-surface publishing'
+  },
+  {
+    pattern: /\b(?:generated|deterministic)\b[\s\S]{0,80}\b(?:skill\s+)?(?:copies?|outputs?|publication|publishing|writeback)\b/i,
+    message: 'claims retired generated or deterministic publication'
+  }
+];
 const IMMUTABLE_GRANDFATHERED_SKILL_IDS = Object.freeze([
   'agent-skill-supply-chain-audit',
   'ai-coding-agent-rules',
@@ -189,6 +215,65 @@ function validateSkills(errors) {
   }
 }
 
+function validationCommandTargets(command) {
+  return [...String(command).matchAll(/\b(repo\/(?:scripts|tests)\/[^\s"'`]+)/g)]
+    .map((match) => match[1].replace(/[),.;]+$/g, ''));
+}
+
+function retiredSkillCreationReviewFinding(value) {
+  return retiredSkillCreationReviewEvidencePatterns.find(({ pattern }) => pattern.test(String(value))) || null;
+}
+
+function validateSkillCreationReviewEvidence(errors, baselinePath, skill, review) {
+  const publisherWorkflow = String(review.publisher_workflow || '');
+  if (!/\bdirect[- ]canonical\b/i.test(publisherWorkflow)) {
+    fail(errors, `${baselinePath} skill_creation_review.${skill}.publisher_workflow must state direct-canonical maintenance`);
+  }
+  if (!publisherWorkflow.includes(`skills/${skill}/`)) {
+    fail(errors, `${baselinePath} skill_creation_review.${skill}.publisher_workflow must name skills/${skill}/ as the canonical skill surface`);
+  }
+  if (!/\brepo\/\*\*/i.test(publisherWorkflow)) {
+    fail(errors, `${baselinePath} skill_creation_review.${skill}.publisher_workflow must name canonical repo/** maintenance paths`);
+  }
+
+  const publisherFinding = retiredSkillCreationReviewFinding(publisherWorkflow);
+  if (publisherFinding) {
+    fail(errors, `${baselinePath} skill_creation_review.${skill}.publisher_workflow ${publisherFinding.message}`);
+  }
+
+  const validation = Array.isArray(review.validation) ? review.validation : [];
+  let hasRepositoryValidator = false;
+  let hasFocusedValidation = false;
+  for (const command of validation) {
+    const commandText = String(command);
+    const finding = retiredSkillCreationReviewFinding(commandText);
+    if (finding) {
+      fail(errors, `${baselinePath} skill_creation_review.${skill}.validation command ${finding.message}`);
+    }
+    if (/^node\s+repo\/scripts\/validate-toolkit\.cjs(?:\s|$)/.test(commandText.trim())) {
+      hasRepositoryValidator = true;
+    }
+    for (const target of validationCommandTargets(commandText)) {
+      if (!existsRel(target) || !fs.statSync(resolveRel(target)).isFile()) {
+        fail(errors, `${baselinePath} skill_creation_review.${skill}.validation references missing current target ${target}`);
+      }
+      if (target === 'repo/scripts/validate-toolkit.cjs') hasRepositoryValidator = true;
+      if (target === 'repo/tests/skill-routing.test.cjs'
+        || target.includes(`repo/tests/${skill}`)
+        || target.includes(`repo/tests/toolkit-${skill}`)
+        || (skill === 'toolkit-setup' && target.startsWith('repo/tests/toolkit-local-bridge'))) {
+        hasFocusedValidation = true;
+      }
+    }
+  }
+  if (!hasRepositoryValidator) {
+    fail(errors, `${baselinePath} skill_creation_review.${skill}.validation must include node repo/scripts/validate-toolkit.cjs`);
+  }
+  if (!hasFocusedValidation) {
+    fail(errors, `${baselinePath} skill_creation_review.${skill}.validation must include a current focused routing or skill check`);
+  }
+}
+
 function validateSkillCreationGate(errors) {
   const baselinePath = 'repo/docs/skill-creation-center-baseline.json';
   let baseline;
@@ -278,9 +363,6 @@ function validateSkillCreationGate(errors) {
     if (!['first_party', 'third_party_audited', 'adapted_external', 'inspiration_only'].includes(review.source_provenance)) {
       fail(errors, `${baselinePath} skill_creation_review.${skill}.source_provenance is invalid`);
     }
-    if (!/context-preserving-ai-publisher/.test(review.publisher_workflow || '')) {
-      fail(errors, `${baselinePath} skill_creation_review.${skill}.publisher_workflow must name context-preserving-ai-publisher`);
-    }
     if (['third_party_audited', 'adapted_external'].includes(review.source_provenance) && !/agent-skill-supply-chain-audit/i.test(review.third_party_audit || '')) {
       fail(errors, `${baselinePath} skill_creation_review.${skill}.third_party_audit must name agent-skill-supply-chain-audit`);
     }
@@ -293,6 +375,7 @@ function validateSkillCreationGate(errors) {
     if (!String(review.routing || '').toLowerCase().includes(skill.toLowerCase()) || !/\b(?:route|routed|routes|routing|omit|omits|omitted|omission)\b/i.test(review.routing || '')) {
       fail(errors, `${baselinePath} skill_creation_review.${skill}.routing must document whether ${skill} is routed or intentionally omitted`);
     }
+    validateSkillCreationReviewEvidence(errors, baselinePath, skill, review);
   }
 }
 

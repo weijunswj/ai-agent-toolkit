@@ -31,6 +31,15 @@ const immutableGrandfatheredSkillIds = [
   'ui-ux-secure-frontend-design',
   'windows-localhost-workflows'
 ];
+const currentPostGateSkillIds = [
+  'codex-ssh-hostinger-coolify-setup-maintainer',
+  'github-governance-review-reconciler',
+  'local-ai-stack-safety',
+  'managed-app-foundation-review',
+  'project-completion-audit',
+  'self-hosted-service-safety',
+  'toolkit-setup'
+];
 
 function readText(relPath, root = repoRoot) {
   return fs.readFileSync(path.join(root, relPath), 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
@@ -95,6 +104,13 @@ function addSkillToCatalogs(cwd, skillName) {
   insertBefore(matrixPath, '\n## Description Review Notes', `${fixtureRow}\n`);
 }
 
+function updateBaseline(cwd, mutate) {
+  const baselinePath = path.join(cwd, 'repo', 'docs', 'skill-creation-center-baseline.json');
+  const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
+  mutate(baseline);
+  fs.writeFileSync(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`, 'utf8');
+}
+
 test('direct canonical topology validates without retired project or MCP surfaces', () => {
   const validator = require(validateScript);
   assert.equal(fs.existsSync(path.join(repoRoot, legacyProjectToken)), false);
@@ -125,6 +141,29 @@ test('Skill Creation Center preserves grandfathered IDs and keyed post-gate evid
   assert.equal(grandfathered.has('knowledge-index-updater'), true);
   assert.equal(reviewed.has('knowledge-index-updater'), false);
   assert.deepEqual(current.filter((skill) => !grandfathered.has(skill)).sort(), [...reviewed].sort());
+  assert.deepEqual(validator.validate(), []);
+});
+
+test('all seven current post-gate reviews use direct-canonical evidence and existing checks', () => {
+  const baseline = JSON.parse(readText('repo/docs/skill-creation-center-baseline.json'));
+  const validator = require(validateScript);
+  assert.deepEqual(baseline.reviewed_skill_ids, currentPostGateSkillIds);
+  assert.deepEqual(Object.keys(baseline.skill_creation_review).sort(), [...currentPostGateSkillIds].sort());
+
+  for (const skill of currentPostGateSkillIds) {
+    const review = baseline.skill_creation_review[skill];
+    assert.match(review.publisher_workflow, /direct-canonical/i);
+    assert.match(review.publisher_workflow, new RegExp(`skills/${skill}/`));
+    assert.match(review.publisher_workflow, /repo\/\*\*/);
+    assert.doesNotMatch(JSON.stringify({ publisher_workflow: review.publisher_workflow, validation: review.validation }), new RegExp(`sync-toolkit-projects\\.cjs|_projects[\\/]|${legacyCuratedToken}|_main|source[- ]to[- ]surface|(?:generated|deterministic)[\\s\\S]*(?:copy|publication|writeback)`, 'i'));
+    assert.ok(review.validation.some((command) => /^node\s+repo\/scripts\/validate-toolkit\.cjs(?:\s|$)/.test(command)));
+    for (const command of review.validation) {
+      for (const match of command.matchAll(/\b(repo\/(?:scripts|tests)\/[^\s"'`]+)/g)) {
+        const target = match[1].replace(/[),.;]+$/g, '');
+        assert.equal(fs.statSync(path.join(repoRoot, target)).isFile(), true, `${skill}: ${target}`);
+      }
+    }
+  }
   assert.deepEqual(validator.validate(), []);
 });
 
@@ -192,6 +231,63 @@ test('validator rejects legacy references in a non-allowlisted publisher file', 
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /references the retired project\/publisher topology/);
+});
+
+test('validator rejects a deleted sync command in current review validation evidence', () => {
+  const cwd = copyRepo();
+  try {
+    updateBaseline(cwd, (baseline) => {
+      baseline.skill_creation_review['github-governance-review-reconciler'].validation.push('node repo/scripts/sync-toolkit-projects.cjs --check');
+    });
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /retired sync-toolkit-projects\.cjs/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('validator rejects a current review publisher workflow using a project _main source', () => {
+  const cwd = copyRepo();
+  try {
+    updateBaseline(cwd, (baseline) => {
+      baseline.skill_creation_review['local-ai-stack-safety'].publisher_workflow += ` Active source: ${legacyProjectToken}/local/_main/SKILL.md.`;
+    });
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /retired _projects path/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('validator rejects curated deterministic publication claims in current review evidence', () => {
+  const cwd = copyRepo();
+  try {
+    updateBaseline(cwd, (baseline) => {
+      baseline.skill_creation_review['managed-app-foundation-review'].publisher_workflow += ` Current workflow publishes ${legacyCuratedToken} through generated deterministic publication.`;
+    });
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /retired curated-output publishing/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('validator rejects a retired source-to-surface publisher claim without direct-canonical evidence', () => {
+  const cwd = copyRepo();
+  try {
+    updateBaseline(cwd, (baseline) => {
+      baseline.skill_creation_review['toolkit-setup'].publisher_workflow = 'context-preserving-ai-publisher source-to-surface publisher workflow for the current skill.';
+    });
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /must state direct-canonical maintenance/);
+    assert.match(result.stderr, /retired source-to-surface publishing/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
 test('validator rejects a current skill without direct-canonical review evidence', () => {
