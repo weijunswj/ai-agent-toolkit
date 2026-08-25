@@ -25,7 +25,7 @@ const legacyPublisherToken = 'curated_' + 'output_for_ai';
 const ignoredDirs = new Set(['.git', 'node_modules', '_dist', 'dist', 'coverage', '.tmp', '.n8n-local', '.n8n-production-cloudflare', '.to-sanitise', '.sanitised', '.n8n-workflow-backups', '.claude']);
 const allowedRootEntries = new Set([
   '.git', '.github', '.gitattributes', '.gitignore', '.codex-plugin', '.claude-plugin', '.claude', '.agents',
-  'AGENTS.md', 'CLAUDE.md', 'GEMINI.md', 'MEMORY.md', 'README.md', 'package.json', 'repo', 'skills'
+  'AGENTS.md', 'CLAUDE.md', 'GEMINI.md', 'README.md', 'package.json', 'repo', 'skills'
 ]);
 const secretPatterns = [
   /sk-[A-Za-z0-9_-]{20,}/,
@@ -173,6 +173,109 @@ function validateSkills(errors) {
     const frontMatter = parseFrontMatter(readText(skillPath));
     if (!frontMatter?.name || !frontMatter.description) fail(errors, `${skillPath} missing frontmatter name or description`);
     if (frontMatter?.name !== path.posix.basename(skillDir)) fail(errors, `${skillPath} frontmatter name does not match its folder`);
+  }
+}
+
+function validateSkillCreationGate(errors) {
+  const baselinePath = 'repo/docs/skill-creation-center-baseline.json';
+  let baseline;
+  try {
+    baseline = readJson(baselinePath);
+  } catch (error) {
+    fail(errors, `${baselinePath} is not valid JSON: ${error.message}`);
+    return;
+  }
+
+  if (baseline.schema_version !== 2) fail(errors, `${baselinePath} schema_version must be 2`);
+  const grandfathered = baseline.grandfathered_skill_ids;
+  const reviewedIds = baseline.reviewed_skill_ids;
+  const reviewMap = baseline.skill_creation_review;
+  if (!Array.isArray(grandfathered) || grandfathered.some((id) => typeof id !== 'string' || !id.trim())) {
+    fail(errors, `${baselinePath} grandfathered_skill_ids must be an array of non-empty strings`);
+    return;
+  }
+  if (!Array.isArray(reviewedIds) || reviewedIds.some((id) => typeof id !== 'string' || !id.trim())) {
+    fail(errors, `${baselinePath} reviewed_skill_ids must be an array of non-empty strings`);
+    return;
+  }
+  if (!reviewMap || typeof reviewMap !== 'object' || Array.isArray(reviewMap)) {
+    fail(errors, `${baselinePath} skill_creation_review must be a keyed object`);
+    return;
+  }
+
+  for (const [label, values] of [['grandfathered_skill_ids', grandfathered], ['reviewed_skill_ids', reviewedIds]]) {
+    if (JSON.stringify(values) !== JSON.stringify([...values].sort((left, right) => left.localeCompare(right)))) {
+      fail(errors, `${baselinePath} ${label} must be sorted`);
+    }
+    if (new Set(values).size !== values.length) fail(errors, `${baselinePath} ${label} must not contain duplicates`);
+  }
+
+  const grandfatheredSet = new Set(grandfathered);
+  const currentSkills = skillDirs().map((relPath) => path.basename(relPath));
+  const currentSet = new Set(currentSkills);
+  const mapIds = Object.keys(reviewMap).sort((left, right) => left.localeCompare(right));
+  if (JSON.stringify([...reviewedIds].sort((left, right) => left.localeCompare(right))) !== JSON.stringify(mapIds)) {
+    fail(errors, `${baselinePath} reviewed_skill_ids must match skill_creation_review keys`);
+  }
+
+  for (const skill of currentSkills) {
+    const isGrandfathered = grandfatheredSet.has(skill);
+    const hasReview = Object.prototype.hasOwnProperty.call(reviewMap, skill);
+    if (isGrandfathered && hasReview) fail(errors, `${baselinePath} must not review grandfathered skill ${skill} in the post-gate map`);
+    if (!isGrandfathered && !hasReview) fail(errors, `${baselinePath} missing skill_creation_review evidence for current skill ${skill}`);
+  }
+
+  const requiredStrings = [
+    'existing_skill_review',
+    'trigger',
+    'decision',
+    'decision_reason',
+    'unique_value',
+    'runtime_footprint',
+    'local_assets',
+    'output_contract',
+    'anti_bloat_review',
+    'safety_boundary',
+    'third_party_audit',
+    'publisher_workflow',
+    'routing'
+  ];
+  for (const [skill, review] of Object.entries(reviewMap)) {
+    if (!currentSet.has(skill)) {
+      fail(errors, `${baselinePath} contains stale skill_creation_review evidence for ${skill}`);
+      continue;
+    }
+    if (grandfatheredSet.has(skill)) fail(errors, `${baselinePath} post-gate review must not include grandfathered skill ${skill}`);
+    if (!review || typeof review !== 'object' || Array.isArray(review)) {
+      fail(errors, `${baselinePath} skill_creation_review.${skill} must be an object`);
+      continue;
+    }
+    for (const key of requiredStrings) {
+      if (typeof review[key] !== 'string' || review[key].trim().length < 12) {
+        fail(errors, `${baselinePath} skill_creation_review.${skill}.${key} must be a non-empty evidence string`);
+      }
+    }
+    if (!['extend_existing_skill', 'new_project_skill'].includes(review.decision)) {
+      fail(errors, `${baselinePath} skill_creation_review.${skill}.decision must be extend_existing_skill or new_project_skill`);
+    }
+    if (!['first_party', 'third_party_audited', 'adapted_external', 'inspiration_only'].includes(review.source_provenance)) {
+      fail(errors, `${baselinePath} skill_creation_review.${skill}.source_provenance is invalid`);
+    }
+    if (!/context-preserving-ai-publisher/.test(review.publisher_workflow || '')) {
+      fail(errors, `${baselinePath} skill_creation_review.${skill}.publisher_workflow must name context-preserving-ai-publisher`);
+    }
+    if (['third_party_audited', 'adapted_external'].includes(review.source_provenance) && !/agent-skill-supply-chain-audit/i.test(review.third_party_audit || '')) {
+      fail(errors, `${baselinePath} skill_creation_review.${skill}.third_party_audit must name agent-skill-supply-chain-audit`);
+    }
+    if (!Array.isArray(review.validation) || review.validation.length === 0 || review.validation.some((item) => typeof item !== 'string' || !item.trim())) {
+      fail(errors, `${baselinePath} skill_creation_review.${skill}.validation must list at least one validation command`);
+    }
+    if (!String(review.existing_skill_review || '').toLowerCase().includes(skill.toLowerCase())) {
+      fail(errors, `${baselinePath} skill_creation_review.${skill}.existing_skill_review must mention ${skill}`);
+    }
+    if (!String(review.routing || '').toLowerCase().includes(skill.toLowerCase()) || !/\b(?:route|routed|routes|routing|omit|omits|omitted|omission)\b/i.test(review.routing || '')) {
+      fail(errors, `${baselinePath} skill_creation_review.${skill}.routing must document whether ${skill} is routed or intentionally omitted`);
+    }
   }
 }
 
@@ -359,6 +462,7 @@ function validate() {
   validateRootTopology(errors);
   validateForbiddenFiles(errors);
   validateSkills(errors);
+  validateSkillCreationGate(errors);
   validateSkillRouting(errors);
   validateSkillSafetyMatrix(errors);
   validateReadmeSkillTable(errors);
@@ -391,5 +495,6 @@ module.exports = {
   parseFrontMatter,
   parseSkillRouting,
   skillDirs,
+  validateSkillCreationGate,
   validate
 };

@@ -42,7 +42,7 @@ Run two phases:
 1. Production-readiness audit.
 2. Security-readiness audit.
 
-Read root `AGENTS.md`, repo playbook/index if present, root `MEMORY.md` if present, relevant product/architecture/requirements docs, and test/readiness/runbook docs. Compare intended behavior against actual implementation before fixes.
+Read root `AGENTS.md`, repo playbook/index if present, relevant product/architecture/requirements docs, and test/readiness/runbook docs. Compare intended behavior against actual implementation before fixes.
 
 For UI projects, use approved browser/click-through verification where available, preferably Playwright/screenshots. For backend/data/tooling, use targeted tests, fixtures, CLI dry-runs, schemas, output checks, and error-path checks.
 

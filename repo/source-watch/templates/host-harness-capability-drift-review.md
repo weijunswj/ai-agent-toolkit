@@ -14,7 +14,7 @@ Host/version reviewed:
 
 - Codex / OpenAI Codex docs or changelog.
 - Claude Code docs or changelog.
-- Existing toolkit `skills/**`, root instructions, hooks/plugin metadata, repo-map guidance, `MEMORY.md` guidance, and documentation-cleanup guidance.
+- Existing toolkit `skills/**`, root instructions, hooks/plugin metadata, repo-map guidance, and documentation-cleanup guidance.
 
 ## Decision Rules
 

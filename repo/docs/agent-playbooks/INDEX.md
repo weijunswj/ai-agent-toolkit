@@ -8,13 +8,10 @@ Classify toolkit repo tasks before planning or editing. Read only the playbooks 
 
 1. Follow root `AGENTS.md`.
 2. Read this index.
-3. If root `MEMORY.md` exists, read it as non-authoritative context.
-4. Classify the task using the matches below.
-5. Read every matching playbook, but do not load every playbook by default.
-6. If no special match applies, proceed baseline-only with `AGENTS.md` and this index.
-7. If a required playbook is missing, inaccessible, or conflicts with `AGENTS.md`, stop and report the issue.
-
-Final reports must list `Instruction sources used`, including `MEMORY.md` when it was present and read.
+3. Classify the task using the matches below.
+4. Read every matching playbook, but do not load every playbook by default.
+5. If no special match applies, proceed baseline-only with `AGENTS.md` and this index.
+6. If a required playbook is missing, inaccessible, or conflicts with `AGENTS.md`, stop and report the issue.
 
 ## Always-Active Baseline
 

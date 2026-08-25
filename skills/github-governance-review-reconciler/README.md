@@ -7,5 +7,4 @@ Findings. It preserves A1-A4 and #295 authority boundaries and never owns
 review-thread mutation, Ready, merge, Web finality, providers, workflows, or
 MCP.
 
-The skill is generated from the first-party project source. Use the project
-runtime and focused tests; do not edit this generated surface directly.
+This skill is directly canonical. Use the local runtime and focused tests when validating it.

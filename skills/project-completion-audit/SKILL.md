@@ -19,7 +19,7 @@ Inspect only enough context to prepare a safe confirmation prompt:
 - Current branch/ref when available.
 - App type: frontend, backend, full-stack, data/tooling, or mixed.
 - Likely audit scope and whether a full-repo or scoped-folder audit is appropriate.
-- Relevant local docs/instructions available, such as `AGENTS.md`, playbook index, `MEMORY.md`, README, product specs, architecture notes, runbooks, test docs, or validation docs.
+- Relevant local docs/instructions available, such as `AGENTS.md`, playbook index, README, product specs, architecture notes, runbooks, test docs, or validation docs.
 - Whether UI, backend, data, deployment, auth, admin, upload, API, logging, privacy, payment, billing, entitlement, external integration, webhook, or other security-sensitive surfaces appear to exist.
 - Whether Codex Security skills or plugin capabilities appear installed/available, if detectable from the current environment.
 - Whether Playwright, browser, screenshot, or click-through verification appears available, when the app has UI surfaces.
@@ -58,7 +58,6 @@ Inspect intent, docs, and current implementation before making fixes. Read:
 
 - Root `AGENTS.md`.
 - Repo playbook/index if present.
-- Root `MEMORY.md` if present.
 - Relevant product, architecture, requirements, source-of-truth, generated-output, setup, runbook, test, readiness, or validation docs.
 
 Compare intended behavior against actual implementation. Do not assume undocumented behavior is production-ready.

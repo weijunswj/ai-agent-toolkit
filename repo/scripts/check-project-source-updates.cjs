@@ -206,7 +206,7 @@ function renderReviewReport({ updates, advisoryUpdates, advisoryDocPath }) {
     'No review-state cursors were changed.',
     'No SOURCE-LOCK pins or advisory baselines were changed.',
     'No SOURCE-LOCK pins were changed.',
-    'No toolkit rules, skills, hooks, memory guidance, repo-map guidance, or cleanup guidance were modified or deleted.',
+    'No toolkit rules, skills, hooks, repo-map guidance, or cleanup guidance were modified or deleted.',
     'No upstream code was executed.',
     'No auto-merge is allowed.',
     'A human must review upstream changes, attribution/licence impact, allowlist scope, advisory recommendations, and host-harness drift evidence, then ask an AI agent to inspect before any real edits happen.'

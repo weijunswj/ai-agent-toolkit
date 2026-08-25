@@ -11,6 +11,7 @@ skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/*
 
 # Generated CI workflow templates are compared byte-for-byte by sync checks.
 skills/context-preserving-ai-publisher/templates/ci/*.yml text eol=lf
+repo/contracts/trusted-ci-repository-protection/templates/protected-ci-gate.workflow.yml text eol=lf
 
 # Canonical byte-for-byte text copies must stay platform-stable across checkouts.
 /README.md text eol=lf

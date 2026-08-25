@@ -63,6 +63,20 @@ test('skill routing and safety coverage match the direct skill surface', () => {
   assert.equal(new Set(skills).size, skills.length);
 });
 
+test('Skill Creation Center preserves grandfathered IDs and keyed post-gate evidence', () => {
+  const baseline = JSON.parse(readText('repo/docs/skill-creation-center-baseline.json'));
+  const validator = require(validateScript);
+  const current = validator.skillDirs().map((relPath) => path.basename(relPath)).sort();
+  const grandfathered = new Set(baseline.grandfathered_skill_ids);
+  const reviewed = new Set(Object.keys(baseline.skill_creation_review));
+
+  assert.equal(baseline.schema_version, 2);
+  assert.equal(grandfathered.has('knowledge-index-updater'), true);
+  assert.equal(reviewed.has('knowledge-index-updater'), false);
+  assert.deepEqual(current.filter((skill) => !grandfathered.has(skill)).sort(), [...reviewed].sort());
+  assert.deepEqual(validator.validate(), []);
+});
+
 test('validator shares the exact five-file publisher reference allowlist', () => {
   const validator = require(validateScript);
   const audit = require(path.join(repoRoot, 'repo', 'scripts', 'audit-published-surfaces.cjs'));
@@ -127,6 +141,26 @@ test('validator rejects legacy references in a non-allowlisted publisher file', 
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /references the retired project\/publisher topology/);
+});
+
+test('validator rejects a current skill without direct-canonical review evidence', () => {
+  const cwd = copyRepo();
+  const baselinePath = path.join(cwd, 'repo', 'docs', 'skill-creation-center-baseline.json');
+  const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
+  delete baseline.skill_creation_review['managed-app-foundation-review'];
+  baseline.reviewed_skill_ids = baseline.reviewed_skill_ids.filter((id) => id !== 'managed-app-foundation-review');
+  fs.writeFileSync(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`, 'utf8');
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /missing skill_creation_review evidence for current skill managed-app-foundation-review/);
+});
+
+test('validator rejects a special root MEMORY.md surface', () => {
+  const cwd = copyRepo();
+  fs.writeFileSync(path.join(cwd, 'MEMORY.md'), '# fixture\n', 'utf8');
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Unexpected root entry: MEMORY\.md/);
 });
 
 test('validator detects stale plugin package versions', () => {

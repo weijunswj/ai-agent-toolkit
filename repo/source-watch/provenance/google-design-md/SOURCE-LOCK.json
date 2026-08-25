@@ -15,13 +15,6 @@
       "notes": "Adapted into a concise, Toolkit-local DESIGN.md contract reference for the UI/UX skill. The Toolkit does not vendor or execute upstream package tooling."
     },
     {
-      "mode": "adapted",
-      "source_path": "docs/spec.md",
-      "root_surface_path": "skills/ui-ux-secure-frontend-design/references/design-md-contract.md",
-      "source_blob_sha": "5995e5482fc338a9f9923d5912551241a82e6e8a",
-      "notes": "AI-facing shared-surface reference generated from the Toolkit-local adapted source document."
-    },
-    {
       "mode": "excluded",
       "source_path": "LICENSE",
       "notes": "Apache-2.0 license is summarized in the co-located Toolkit third-party notes; the full upstream license text is not vendored here."

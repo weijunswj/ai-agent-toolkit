@@ -219,6 +219,17 @@ function validateLocalPathTopology(file, relPath, label, errors) {
   }
 }
 
+function activeSourceMappingIdentity(file) {
+  const mode = file.mode || 'exact';
+  if (!['exact', 'adapted'].includes(mode) || !file.source_path || !file.root_surface_path || !file.source_blob_sha) return null;
+  return JSON.stringify([
+    mode,
+    String(file.source_path).replace(/\\/g, '/'),
+    String(file.root_surface_path).replace(/\\/g, '/'),
+    String(file.source_blob_sha)
+  ]);
+}
+
 function validateLock(lock, relPath, errors) {
   for (const key of ['source_repo', 'source_ref', 'source_commit', 'files']) {
     if (!(key in lock)) errors.push(`${relPath} missing ${key}`);
@@ -272,10 +283,24 @@ function validateLock(lock, relPath, errors) {
 function auditSourceLocks() {
   const errors = [];
   const locks = discoverLockFiles();
+  const activeMappings = new Map();
   if (!locks.length) errors.push('No active SOURCE-LOCK.json files found under repo/source-watch/provenance/');
   for (const relPath of locks) {
     try {
-      validateLock(readJson(relPath), relPath, errors);
+      const lock = readJson(relPath);
+      validateLock(lock, relPath, errors);
+      if (lock.source_lifecycle === 'active' && Array.isArray(lock.files)) {
+        for (const file of lock.files) {
+          const identity = activeSourceMappingIdentity(file);
+          if (!identity) continue;
+          const previous = activeMappings.get(identity);
+          if (previous) {
+            errors.push(`${relPath} duplicate active source/root/blob mapping with ${previous}: ${identity}`);
+          } else {
+            activeMappings.set(identity, relPath);
+          }
+        }
+      }
     } catch (error) {
       errors.push(`${relPath} is not valid JSON: ${error.message}`);
     }
@@ -301,6 +326,7 @@ module.exports = {
   isActiveThirdPartyAttributionLock,
   isRetiredMigrationLock,
   knownRetiredInternalSourceRepos,
+  activeSourceMappingIdentity,
   normalizeRepoRelativePath,
   validateLifecycleMetadata,
   validateLocalPathTopology,

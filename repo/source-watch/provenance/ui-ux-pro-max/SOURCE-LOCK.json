@@ -195,20 +195,6 @@
       "notes": "Adapted for toolkit local-only safety boundaries and AI-facing tool data layout."
     },
     {
-      "mode": "adapted",
-      "source_path": "src/ui-ux-pro-max/scripts/core.py",
-      "root_surface_path": "skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/core.py",
-      "source_blob_sha": "2480a8bc8a98665dc39da3022db843320ba86201",
-      "notes": "AI-facing tool uses the toolkit-adapted local-only script from _main."
-    },
-    {
-      "mode": "adapted",
-      "source_path": "src/ui-ux-pro-max/scripts/design_system.py",
-      "root_surface_path": "skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/design_system.py",
-      "source_blob_sha": "512a808c4ed44d2ddc5f583b40bba3e78e3afb46",
-      "notes": "AI-facing tool uses the toolkit-adapted local-only script from _main."
-    },
-    {
       "mode": "excluded",
       "source_path": "pyproject.toml",
       "notes": "Excluded from the toolkit local-only subset."

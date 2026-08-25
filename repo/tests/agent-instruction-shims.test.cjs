@@ -86,7 +86,6 @@ const requiredPortablePlaybookFiles = [
   'generated-files.md',
   'git-completion.md',
   'local-docs.md',
-  'managed-memory.md',
   'safety-gates.md',
   'windows-command-hygiene.md'
 ];
@@ -251,14 +250,12 @@ test('execution prompt requires full-bold user-action questions and generated su
     /Treat repo-local documentation as active task context, not optional background\./,
     /\[Portable playbook index\]\(docs\/agent-playbooks\/INDEX\.md\) \(`docs\/agent-playbooks\/INDEX\.md`\)/,
     /If the portable playbook index is missing, continue safely using `AGENTS\.md` and local repo docs\./,
-    /## Managed Memory/,
-    /Treat `MEMORY\.md` as managed, non-authoritative project memory\./,
+    /minimum-sufficient change order: no change -> reuse -> smallest root-cause correction -> bounded simplification with an explicit upgrade trigger -> new abstraction only if needed\./,
     /## Documentation Closure/,
     /Use context-preserving compression, not blind deletion\./,
     /Keep repo maps pointer-based and current;/,
     /Words like `continue`, `next`, `apply`, or `do it` only apply to the already-scoped safe task/,
-    /Instruction sources used/,
-    /MEMORY\.md changed: Yes\/No/
+    /Instruction sources used/
   ];
 
   assert.match(readText(executionPromptPath), /## User Action Questions/);
@@ -461,7 +458,7 @@ test('root AGENTS is directly maintained while repo-local block comes from execu
   assert.match(rootAgents, /## Toolkit Root Optimization Mandate/);
   assert.match(rootAgents, /low token burn, efficient agent orientation, predictable setup\/update behavior, quiet validation, and no performance drift/);
   assert.match(rootAgents, /\[Toolkit playbook index\]\(repo\/docs\/agent-playbooks\/INDEX\.md\) \(`repo\/docs\/agent-playbooks\/INDEX\.md`\)/i);
-  assert.match(rootAgents, /MEMORY\.md changed: Yes\/No/i);
+  assert.doesNotMatch(rootAgents, /MEMORY\.md|Managed Memory/i);
   assert.match(rootAgents, /Source-watch is PR-notification-only/i);
   assert.equal(sourceToolkit, prompt);
 });

@@ -21,4 +21,4 @@ Use this only when the task is broad, ambiguous, high-blast-radius, explicitly a
 
 ## Final Report
 
-Report files changed, what changed, validation results, generated-output status when applicable, remaining risks, `Instruction sources used`, and `MEMORY.md changed: Yes/No`.
+Report files changed, what changed, validation results, generated-output status when applicable, remaining risks, and `Instruction sources used`.

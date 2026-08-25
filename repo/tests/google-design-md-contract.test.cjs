@@ -39,11 +39,9 @@ test('Google DESIGN reference preserves omitted declaration semantics and review
   assert.equal(sourceLock.source_ref, 'main');
   assert.equal(sourceLock.source_commit, '9bf8eae67128b6cc55ad9bf86665767deb4c11cd');
   assert.deepEqual(contractEntries.map((entry) => entry.source_blob_sha), [
-    '5995e5482fc338a9f9923d5912551241a82e6e8a',
     '5995e5482fc338a9f9923d5912551241a82e6e8a'
   ]);
   assert.deepEqual(contractEntries.map((entry) => entry.root_surface_path), [
-    'skills/ui-ux-secure-frontend-design/references/design-md-contract.md',
     'skills/ui-ux-secure-frontend-design/references/design-md-contract.md'
   ]);
 });

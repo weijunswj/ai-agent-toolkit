@@ -413,6 +413,21 @@ test('protected workflow source is exact, base-owned, and source-only', () => {
   assert.deepEqual(result.triggers, ['pull_request_target', 'merge_group']);
 });
 
+test('protected workflow template has an explicit LF checkout contract', () => {
+  const relativeWorkflowPath = 'repo/contracts/trusted-ci-repository-protection/templates/protected-ci-gate.workflow.yml';
+  const attributes = fs.readFileSync(path.join(repoRoot, '.gitattributes'), 'utf8');
+  assert.match(attributes, new RegExp(`^${relativeWorkflowPath.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')} text eol=lf$`, 'm'));
+
+  const attributeResult = childProcess.spawnSync('git', ['check-attr', 'eol', '--', relativeWorkflowPath], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    windowsHide: true
+  });
+  assert.equal(attributeResult.status, 0, attributeResult.stderr);
+  assert.match(attributeResult.stdout, /eol: lf/);
+  assert.equal(fs.readFileSync(workflowTemplatePath, 'utf8').includes('\r\n'), false);
+});
+
 test('protected workflow rejects candidate checkout, forbidden triggers, and write permissions', () => {
   const source = workflow.buildProtectedWorkflowTemplate();
   assert.equal(workflow.validateWorkflowSource(source.replace('pull_request_target:', 'pull_request:')).code, 'WORKFLOW_TRIGGER_FORBIDDEN');

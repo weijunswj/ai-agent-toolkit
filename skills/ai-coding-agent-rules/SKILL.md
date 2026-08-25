@@ -68,7 +68,6 @@ Treat `repo-local/docs/agent-playbooks/` as a folder-level install unit, not as 
 - `generated-files.md`
 - `git-completion.md`
 - `local-docs.md`
-- `managed-memory.md`
 - `safety-gates.md`
 - `windows-command-hygiene.md`
 
