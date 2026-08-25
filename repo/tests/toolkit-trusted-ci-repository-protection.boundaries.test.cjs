@@ -17,6 +17,7 @@ const publisher = JSON.parse(fs.readFileSync(path.join(contractRoot, 'fixtures',
 const effectiveFixture = JSON.parse(fs.readFileSync(path.join(contractRoot, 'fixtures', 'effective-protection.n6.json'), 'utf8'));
 const serverEvidenceFixtureFile = JSON.parse(fs.readFileSync(path.join(contractRoot, 'fixtures', 'server-evidence.n6.json'), 'utf8'));
 const REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit.git';
+const STALE_WORKFLOW_BLOB = '68af6b048e5d660002987d0bdbd7b04b72b7b522';
 const effective = { ...effectiveFixture, repository_id: capabilityRegistry.repositoryIdForCanonicalRemote(REMOTE) };
 
 function git(repo, args) {
@@ -246,7 +247,13 @@ function serverRemovedPathPages() {
 }
 
 function serverSourceBinding(overrides = {}) {
-  const blob = '68af6b048e5d660002987d0bdbd7b04b72b7b522';
+  const {
+    approved_source_blob_sha: approvedBlob = runtime.PRODUCER_MAP.workflow.approved_source_blob_sha,
+    base_source_blob_sha: baseBlob = approvedBlob,
+    head_source_blob_sha: headBlob = approvedBlob,
+    merge_source_blob_sha: mergeBlob = approvedBlob,
+    ...inputOverrides
+  } = overrides;
   return {
     repository_id: SERVER_PR.repository_id,
     pr: SERVER_PR.number,
@@ -258,12 +265,12 @@ function serverSourceBinding(overrides = {}) {
     workflow_path: runtime.PRODUCER_MAP.workflow.path,
     event: 'pull_request',
     source: {
-      approved: { ref: 'refs/heads/main', path: runtime.PRODUCER_MAP.workflow.path, blob_sha: blob },
-      base: { revision_sha: SERVER_PR.base_sha, path: runtime.PRODUCER_MAP.workflow.path, blob_sha: blob },
-      head: { revision_sha: SERVER_PR.head_sha, path: runtime.PRODUCER_MAP.workflow.path, blob_sha: blob },
-      merge: { revision_sha: SERVER_PR.merge_sha, path: runtime.PRODUCER_MAP.workflow.path, blob_sha: blob },
+      approved: { ref: 'refs/heads/main', path: runtime.PRODUCER_MAP.workflow.path, blob_sha: approvedBlob },
+      base: { revision_sha: SERVER_PR.base_sha, path: runtime.PRODUCER_MAP.workflow.path, blob_sha: baseBlob },
+      head: { revision_sha: SERVER_PR.head_sha, path: runtime.PRODUCER_MAP.workflow.path, blob_sha: headBlob },
+      merge: { revision_sha: SERVER_PR.merge_sha, path: runtime.PRODUCER_MAP.workflow.path, blob_sha: mergeBlob },
     },
-    ...overrides,
+    ...inputOverrides,
   };
 }
 
@@ -542,14 +549,53 @@ test('checked-in server evidence fixture is closed, current, and digest-valid', 
   assert.equal(result.required_component_ids.includes('git-diff-check'), false);
 });
 
-test('server source binding fails candidate policy changes and merge-source drift', () => {
+test('stable post-transition source binding accepts the canonical workflow at every source revision', () => {
+  const input = serverSourceBinding();
+  const result = runtime.validateWorkflowSourceBinding(input);
+  assert.equal(result.ok, true, result.code);
+  assert.equal(result.producer_map_digest, runtime.PRODUCER_MAP_DIGEST);
+  for (const revision of ['approved', 'base', 'head', 'merge']) {
+    assert.equal(input.source[revision].blob_sha, runtime.PRODUCER_MAP.workflow.approved_source_blob_sha);
+  }
+});
+
+test('current workflow-policy transition remains fail-closed after producer pin advancement', () => {
+  const transition = serverSourceBinding({
+    base_source_blob_sha: STALE_WORKFLOW_BLOB,
+  });
+  const result = runtime.validateWorkflowSourceBinding(transition);
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'WORKFLOW_SOURCE_MISMATCH');
+  assert.equal(result.revision, 'base');
+});
+
+test('candidate-head-only workflow policy change remains CI_POLICY_CHANGE_REQUIRED', () => {
   const candidateChanged = serverSourceBinding();
   candidateChanged.source.head.blob_sha = 'a'.repeat(40);
-  assert.equal(runtime.validateWorkflowSourceBinding(candidateChanged).code, 'CI_POLICY_CHANGE_REQUIRED');
+  const candidateResult = runtime.validateWorkflowSourceBinding(candidateChanged);
+  assert.equal(candidateResult.code, 'CI_POLICY_CHANGE_REQUIRED');
+  assert.equal(candidateResult.revision, 'head');
 
   const mergeChanged = serverSourceBinding();
   mergeChanged.source.merge.blob_sha = 'b'.repeat(40);
   assert.equal(runtime.validateWorkflowSourceBinding(mergeChanged).code, 'WORKFLOW_SOURCE_MISMATCH');
+});
+
+test('stale producer pin fails against the canonical workflow source', () => {
+  const staleExpectation = {
+    ...runtime.PRODUCER_MAP.workflow,
+    approved_source_blob_sha: STALE_WORKFLOW_BLOB,
+  };
+  const input = serverSourceBinding({
+    approved_source_blob_sha: STALE_WORKFLOW_BLOB,
+  });
+  input.source.base.blob_sha = runtime.PRODUCER_MAP.workflow.approved_source_blob_sha;
+  input.source.head.blob_sha = runtime.PRODUCER_MAP.workflow.approved_source_blob_sha;
+  input.source.merge.blob_sha = runtime.PRODUCER_MAP.workflow.approved_source_blob_sha;
+  const result = runtime.validateWorkflowSourceBinding(input, staleExpectation);
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'WORKFLOW_SOURCE_MISMATCH');
+  assert.equal(result.revision, 'base');
 });
 
 test('server changed-path collection fails truncation, count drift, duplicates, and malformed paths', () => {

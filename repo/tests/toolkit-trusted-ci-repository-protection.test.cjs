@@ -374,6 +374,16 @@ test('N6 source contracts remain aligned with the dependency-free runtimes', () 
   assert.equal(workflow.validateWorkflowContract(workflowContract).ok, true);
 });
 
+test('producer map digest and approved pin bind to checked-in canonical validation workflow', () => {
+  const checkedInMap = JSON.parse(fs.readFileSync(runtime.PRODUCER_MAP_PATH, 'utf8'));
+  assert.equal(runtime.PRODUCER_MAP_DIGEST, runtime.digestValue(checkedInMap));
+
+  const workflowBlob = git(repoRoot, ['rev-parse', `HEAD:${checkedInMap.workflow.path}`]);
+  assert.equal(git(repoRoot, ['cat-file', '-t', workflowBlob]), 'blob');
+  assert.equal(checkedInMap.workflow.approved_source_blob_sha, workflowBlob);
+  assert.equal(runtime.PRODUCER_MAP.workflow.approved_source_blob_sha, workflowBlob);
+});
+
 test('diagnostic workflow and job names isolate the reserved CI Gate publisher context', () => {
   const source = workflow.buildProtectedWorkflowTemplate();
   assert.equal(workflow.WORKFLOW_NAME, 'N6 CI diagnostics');

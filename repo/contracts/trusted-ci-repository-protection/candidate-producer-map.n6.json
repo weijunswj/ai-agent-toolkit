@@ -6,7 +6,7 @@
     "path": ".github/workflows/validate.yml",
     "event": "pull_request",
     "approved_ref": "refs/heads/main",
-    "approved_source_blob_sha": "68af6b048e5d660002987d0bdbd7b04b72b7b522",
+    "approved_source_blob_sha": "5278755a5a59e7d4e9ba102224ba22547a452334",
     "job": {
       "name": "validate"
     },

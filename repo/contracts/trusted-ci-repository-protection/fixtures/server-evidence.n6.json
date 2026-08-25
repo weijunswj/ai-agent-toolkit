@@ -43,15 +43,15 @@
   },
   "producer": {
     "producer_map_version": 1,
-    "producer_map_digest": "fe8d465223955224bd882a9fbd939507a0fe9945ba1ae92e3f4b5c98cd621ab6",
+    "producer_map_digest": "1911803c407b11f7ff4891121cad184eefd3f33a46279da0e23ac97a397bd8ef",
     "workflow_id": 278109777,
     "workflow_path": ".github/workflows/validate.yml",
     "event": "pull_request",
     "approved_ref": "refs/heads/main",
-    "approved_source_blob_sha": "68af6b048e5d660002987d0bdbd7b04b72b7b522",
-    "base_source_blob_sha": "68af6b048e5d660002987d0bdbd7b04b72b7b522",
-    "head_source_blob_sha": "68af6b048e5d660002987d0bdbd7b04b72b7b522",
-    "merge_source_blob_sha": "68af6b048e5d660002987d0bdbd7b04b72b7b522",
+    "approved_source_blob_sha": "5278755a5a59e7d4e9ba102224ba22547a452334",
+    "base_source_blob_sha": "5278755a5a59e7d4e9ba102224ba22547a452334",
+    "head_source_blob_sha": "5278755a5a59e7d4e9ba102224ba22547a452334",
+    "merge_source_blob_sha": "5278755a5a59e7d4e9ba102224ba22547a452334",
     "run_id": "32634652935",
     "run_attempt": 1,
     "run_status": "completed",
@@ -129,6 +129,6 @@
   ],
   "generation": 1,
   "conclusion": "success",
-  "contract_digest": "3d72a3e0188e850829a4b7d4fa3ebaa205a2c3adc74affc7dc611e8f8a2232dd",
-  "evidence_digest": "ae2060b47cf44849f4360b4bf6abd8c718b2c2bfb7ab7e91c46827d0148872f6"
+  "contract_digest": "750a5664cea75661f3c5a7c576b3e067f4f002239a8fc5a3859c6d9275c3d635",
+  "evidence_digest": "25c0b1ab8e7068581db1752079ca82e7f8a324c44694507387249a43ffaf30f8"
 }
