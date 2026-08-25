@@ -14,8 +14,8 @@ Copy the whole [context-preserving-ai-publisher](./) skill folder into an agent 
 
 Use it for:
 
-- Bootstrapping direct canonical skills, contracts, provenance, and audit conventions in a repo.
-- Maintaining existing canonical skills, templates, references, or indexes.
+- Bootstrapping source, adapter, manifest, sync, and audit conventions in a repo.
+- Maintaining existing generated skills, MCP notes, templates, packs, references, or indexes.
 - Reviewing audit baseline movement and generated-output ownership.
 - Avoiding lossy AI-facing surfaces and context drift.
 
