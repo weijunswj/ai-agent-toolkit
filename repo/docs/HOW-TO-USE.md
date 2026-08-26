@@ -84,7 +84,7 @@ Manual installation means copying a Toolkit-owned `skills/<skill-name>/` folder 
 
 This repo does not commit package archives. Keep `_dist/`, `.zip`, and `.tgz` artifacts out of commits.
 
-Humans and agents use the same canonical `skills/**` and `repo/**` surfaces. No project-to-skill publishing step is required.
+Humans and agents use the same canonical `skills/**` and `repo/**` surfaces. No intermediate publication step is required.
 
 ### Codex
 

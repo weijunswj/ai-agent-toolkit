@@ -1,6 +1,6 @@
 # Canonical Surface Standard
 
-This repository uses direct canonical surfaces. It no longer maintains project manifests, curated-output trees, generated previews, or project-to-skill publishing.
+This repository uses direct canonical surfaces with no secondary ownership or publication tree.
 
 ## Surface Roles
 
@@ -10,7 +10,7 @@ This repository uses direct canonical surfaces. It no longer maintains project m
 - `repo/tests/` contains focused contract, parser, safety, and runtime tests.
 - `repo/source-watch/provenance/` contains active third-party attribution locks.
 - `repo/docs/` contains policy, safety, architecture, and validation guidance.
-- `.codex-plugin/` and `.claude-plugin/` contain native plugin package metadata; their source manifests are under `repo/contracts/toolkit-local-bridge/`.
+- `.codex-plugin/` and `.claude-plugin/` contain native plugin package metadata; their authoritative inputs are under `repo/contracts/toolkit-local-bridge/`.
 
 ## Skill Creation And Routing
 

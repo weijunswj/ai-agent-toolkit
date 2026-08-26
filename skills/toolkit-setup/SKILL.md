@@ -139,7 +139,7 @@ Route `repair n8n plugin`, `fix n8n skill hooks`, `repair the n8n Skills plugin`
 
 1. Installed Codex `n8n-skills@n8n-io` cache: inspect the exact identity/version/layout and use the existing Windows hook reconciliation. The enabled Codex plugin-maintenance preference is standing permission only for the exact known-compatible transform.
 2. Claude Code plugin: inspect and report through Claude Code's native plugin flow; Codex must not mutate Claude Code cache.
-3. Toolkit source or generated skill: follow repository source ownership and regeneration rules, not installed-cache repair.
+3. Toolkit source or canonical skill: follow repository ownership and regeneration rules, not installed-cache repair.
 4. Consumer-repo `n8n-workflows/scripts/` helpers: route to the workspace helper ownership path; do not touch plugin caches.
 5. Live n8n workflows, community nodes, Docker, or server operations: load the n8n safety/setup route and require its live-action approvals; do not trigger plugin-cache repair.
 

@@ -9,6 +9,7 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const auditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-published-surfaces.cjs');
+const audit = require(auditScript);
 const legacyProjectToken = '_' + 'projects';
 const legacyCuratedToken = 'curated_' + 'output_for_ai';
 const publisherReferencePaths = [
@@ -20,15 +21,39 @@ const publisherReferencePaths = [
 ];
 const standalonePublisherPaths = [
   'skills/context-preserving-ai-publisher/SKILL.md',
-  'skills/context-preserving-ai-publisher/README.md'
+  'skills/context-preserving-ai-publisher/README.md',
+  'skills/context-preserving-ai-publisher/references/README.md'
 ];
 const historicalEvidencePaths = [
   'repo/docs/RETIRED-SOURCE-PROVENANCE.md',
   'repo/docs/audits/2026-07-15-native-codex-uat-remediation-audit.md'
 ];
+const primitiveIds = [
+  'retired-projects-source-root',
+  'retired-main-source-root',
+  'retired-curated-output-root',
+  'retired-project-module',
+  'retired-project-to-skill',
+  'retired-source-to-surface',
+  'retired-project-manifest',
+  'retired-source-manifest',
+  'retired-toolkit-project-manifest',
+  'retired-generated-skill',
+  'retired-generated-copy',
+  'retired-generated-publication',
+  'retired-deterministic-publication',
+  'retired-generated-surface-writeback',
+  'retired-project-output-publication',
+  'retired-generated-pack-manifest',
+  'retired-pack-packaging',
+  'retired-publisher-infrastructure',
+  'retired-sync-toolkit-projects-command',
+  'retired-package-skills-command',
+  'retired-package-packs-command'
+];
 
 function readText(relPath, root = repoRoot) {
-  return fs.readFileSync(path.join(root, relPath), 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+  return fs.readFileSync(path.join(root, relPath), 'utf8').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
 }
 
 function copyRepo() {
@@ -49,7 +74,10 @@ function copyRepo() {
 }
 
 function runAudit(cwd, args = []) {
-  return spawnSync(process.execPath, [auditScript, '--workspace', cwd, ...args], { cwd: os.tmpdir(), encoding: 'utf8' });
+  return spawnSync(process.execPath, [auditScript, '--workspace', cwd, ...args], {
+    cwd: os.tmpdir(),
+    encoding: 'utf8'
+  });
 }
 
 function readPolicy(root = repoRoot) {
@@ -66,7 +94,7 @@ function writePolicy(root, mutate) {
   );
 }
 
-function assertPolicyRejects(label, mutate, expected = /topology scope policy|canonical|missing|unsupported|duplicat|schema_version|default_scope|valid JSON/i) {
+function assertPolicyRejects(label, mutate, expected) {
   const cwd = copyRepo();
   try {
     mutate(cwd);
@@ -78,309 +106,29 @@ function assertPolicyRejects(label, mutate, expected = /topology scope policy|ca
   }
 }
 
-function assertFixtureFails(relPath, fixture, messagePattern = /retired|publishing|source ownership|command|conversion/i) {
-  const cwd = copyRepo();
-  try {
-    const target = path.join(cwd, relPath);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.appendFileSync(target, `\n${fixture}\n`, 'utf8');
-    const result = runAudit(cwd, ['--json']);
-    assert.notEqual(result.status, 0, fixture);
-    assert.match(result.stdout, messagePattern, fixture);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-}
-
-test('canonical surface snapshot has no packs, retired skills, or project tree', () => {
-  const audit = require(auditScript);
+test('canonical surface snapshot and checked baseline are clean', () => {
   const snapshot = audit.snapshot();
   assert.equal(snapshot.schema_version, 2);
   assert.equal(snapshot.project_tree_present, false);
   assert.deepEqual(snapshot.pack_manifests, []);
   assert.equal(snapshot.skills.includes('skills/knowledge-index-updater'), false);
-  assert.equal(audit.validate(snapshot).length, 0);
-});
-
-test('published surface baseline matches the canonical snapshot', () => {
+  assert.deepEqual(audit.validate(snapshot), []);
   const result = runAudit(repoRoot, ['--check']);
   assert.equal(result.status, 0, result.stderr);
 });
 
-test('audit allows legacy references only in the five preserved publisher files', () => {
-  const audit = require(auditScript);
-  assert.deepEqual(publisherReferencePaths.filter(audit.legacyReferenceAllowed), publisherReferencePaths);
-  for (const relPath of publisherReferencePaths) {
-    const text = readText(relPath);
-    assert.ok(text.includes(`${legacyProjectToken}/`) || text.includes(`${legacyCuratedToken}/`), relPath);
-  }
-  assert.equal(audit.legacyReferenceAllowed('skills/context-preserving-ai-publisher/README.md'), false);
-  assert.equal(audit.legacyReferenceAllowed('skills/context-preserving-ai-publisher/references/examples.md'), false);
-  assert.equal(audit.validate(audit.snapshot()).length, 0);
-});
-
-test('audit rejects a newly introduced legacy reference under a canonical surface', () => {
-  const cwd = copyRepo();
-  fs.writeFileSync(
-    path.join(cwd, 'skills', 'n8n-local-setup', 'references', 'legacy-fixture.md'),
-    `${legacyProjectToken}/n8n/${legacyCuratedToken}/reference.md\n`,
-    'utf8'
-  );
-  const result = runAudit(cwd, ['--json']);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stdout, /references the retired project\/publisher topology/);
-});
-
-test('audit rejects a legacy reference in a non-allowlisted publisher file', () => {
-  const cwd = copyRepo();
-  fs.writeFileSync(
-    path.join(cwd, 'skills', 'context-preserving-ai-publisher', 'references', 'legacy-fixture.md'),
-    `${legacyProjectToken}/fixture/${legacyCuratedToken}/file.md\n`,
-    'utf8'
-  );
-  const result = runAudit(cwd, ['--json']);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stdout, /skills\/context-preserving-ai-publisher\/references\/legacy-fixture\.md references the retired project\/publisher topology/);
-});
-
-test('audit rejects new pack manifests and the retired skill surface', () => {
-  const cwd = copyRepo();
-  const packDir = path.join(cwd, 'skills', 'fixture', 'packs', 'retired');
-  fs.mkdirSync(packDir, { recursive: true });
-  fs.writeFileSync(path.join(packDir, 'pack.json'), '{}\n', 'utf8');
-  const retiredSkill = path.join(cwd, 'skills', 'knowledge-index-updater');
-  fs.mkdirSync(retiredSkill, { recursive: true });
-  fs.writeFileSync(path.join(retiredSkill, 'SKILL.md'), '---\nname: knowledge-index-updater\ndescription: retired fixture\n---\n', 'utf8');
-  fs.writeFileSync(path.join(retiredSkill, 'README.md'), '# retired\n', 'utf8');
-  const result = runAudit(cwd, ['--json']);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stdout, /Pack manifests are not supported/);
-  assert.match(result.stdout, /Retired skill surface is present/);
-});
-
-test('audit rejects a present legacy project tree', () => {
-  const cwd = copyRepo();
-  fs.mkdirSync(path.join(cwd, legacyProjectToken), { recursive: true });
-  const result = runAudit(cwd, ['--check']);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, new RegExp(`Legacy ${legacyProjectToken}/ tree is present`));
-});
-
-test('active topology audit rejects each known positive retired operation', () => {
-  const fixtures = [
-    `Current Toolkit source ownership is \`${legacyProjectToken}/development/example/README.md\`.`,
-    'Create the standalone `_main/` source and maintain it as the active Toolkit input.',
-    'Create a Toolkit project module plus published skill for every new skill.',
-    'Maintain a published skill from a Toolkit project module for every new skill.',
-    'Use toolkit.project.json to generate a published skill for every new skill.',
-    'Use the Toolkit project-to-skill source-to-surface publishing workflow for new skills.',
-    'Regenerate generated skill copies through deterministic writeback before review.',
-    'Run `node repo/scripts/sync-toolkit-projects.cjs --write` after every edit.'
-  ];
-
-  for (const fixture of fixtures) {
-    const cwd = copyRepo();
-    try {
-      fs.writeFileSync(path.join(cwd, 'repo', 'docs', 'active-topology-fixture.md'), `${fixture}\n`, 'utf8');
-      const result = runAudit(cwd, ['--json']);
-      assert.notEqual(result.status, 0, fixture);
-      assert.match(result.stdout, /retired|publishing|source ownership|command|creation/i, fixture);
-    } finally {
-      fs.rmSync(cwd, { recursive: true, force: true });
-    }
-  }
-});
-
-test('shared retired-topology atom detector covers singular, plural, generated, published, and reverse-order skill operations', () => {
-  const audit = require(auditScript);
-  const fixtures = [
-    'Current Toolkit conversions use a project module and a published skill.',
-    'Current Toolkit conversions use project modules and published skills.',
-    'Current Toolkit conversions use a project module and a generated skill.',
-    'Current Toolkit conversions use project modules and generated skills.',
-    'Published skills for current Toolkit conversions are maintained from project modules.',
-    'Generated skills for this Toolkit are maintained through project modules.'
-  ];
-
-  for (const fixture of fixtures) {
-    assert.ok(audit.detectRetiredTopologyAtoms(fixture).length > 0, fixture);
-  }
-});
-
-test('publisher entrypoints cannot exempt current Toolkit operations using product vocabulary', () => {
-  const fixtures = [
-    'This publisher requires current Toolkit conversions to use a project module plus generated skill.',
-    'This generic workflow requires current Toolkit conversions to use a project module plus generated skill.',
-    'This skill requires current Toolkit conversions to use a project module plus generated skill.',
-    'The standalone context-preserving-ai-publisher routes conversions for this Toolkit through a project module plus generated skill.',
-    'The standalone context-preserving-ai-publisher requires our Toolkit to use a project module plus generated skill.',
-    'The standalone context-preserving-ai-publisher uses project modules and published skills independently of current Toolkit.',
-    'The standalone context-preserving-ai-publisher uses project modules and generated skills outside this repository.'
-  ];
-
-  for (const fixture of fixtures) {
-    assertFixtureFails('skills/context-preserving-ai-publisher/SKILL.md', fixture);
-  }
-});
-
-test('publisher scope fails closed for reverse order, possessive, and self-repository forms', () => {
-  const fixtures = [
-    'Our Toolkit uses project modules and generated skills through the standalone context-preserving-ai-publisher.',
-    'Published skills for current Toolkit conversions are maintained from project modules.',
-    'Generated skills for this Toolkit are maintained through project modules.',
-    'For this repository, the standalone context-preserving-ai-publisher maintains project modules and published skills.',
-    "The standalone context-preserving-ai-publisher product uses project modules for Toolkit's generated skills."
-  ];
-
-  for (const fixture of fixtures) {
-    assertFixtureFails('skills/context-preserving-ai-publisher/SKILL.md', fixture);
-  }
-});
-
-test('active topology audit accepts direct-canonical guidance and explicit negative statements only', () => {
-  const audit = require(auditScript);
-  const directCanonical = 'Create new skills directly under `skills/**` and maintain contracts, runtime, tests, and docs directly under `repo/**`.';
-  const negativeRetirement = 'The Toolkit does not maintain project publishing or a generic sync command.';
-  const historicalEvidence = `## Historical audit evidence\nEarlier Toolkit operation used \`${legacyProjectToken}/example/_main\`, but that is not current operation.`;
-
-  assert.equal(audit.activeTopologyFinding(directCanonical), null);
-  assert.equal(audit.activeTopologyFinding(negativeRetirement), null);
-  assert.notEqual(audit.activeTopologyFinding(historicalEvidence), null);
-
-  const cwd = copyRepo();
-  try {
-    fs.writeFileSync(path.join(cwd, 'repo', 'docs', 'active-topology-fixture.md'), `${directCanonical}\n${negativeRetirement}\n`, 'utf8');
-    const result = runAudit(cwd, ['--check']);
-    assert.equal(result.status, 0, result.stderr);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('active topology audit covers current skill instruction entrypoints and the repository is clean', () => {
-  const audit = require(auditScript);
-  const activeFiles = audit.activePolicyFiles();
-  assert.ok(activeFiles.includes('skills/agent-skill-supply-chain-audit/SKILL.md'));
-  assert.ok(activeFiles.includes('skills/agent-skill-supply-chain-audit/README.md'));
-  assert.ok(activeFiles.includes('skills/ui-ux-secure-frontend-design/INSTALL.md'));
-  for (const relPath of activeFiles) assert.equal(audit.activeTopologyFinding(readText(relPath), relPath), null, relPath);
-  assert.equal(audit.validate(audit.snapshot()).length, 0);
-});
-
-test('heading vocabulary cannot exempt a following active retired-topology instruction', () => {
-  assertFixtureFails(
-    'repo/docs/active-topology-heading-fixture.md',
-    '## Historical audit evidence\n\nCreate a Toolkit project module plus published skill for current conversions.'
-  );
-});
-
-test('unrelated negation cannot exempt a separate active retired-topology instruction', () => {
-  assertFixtureFails(
-    'repo/docs/active-topology-negation-fixture.md',
-    'This unrelated setting is not relevant. Create a Toolkit project module plus published skill for current conversions.'
-  );
-});
-
-test('multiline retired-topology instructions fail closed', () => {
-  assertFixtureFails(
-    'repo/docs/active-topology-multiline-fixture.md',
-    'Create a Toolkit project module plus\npublished skill for current conversions.'
-  );
-});
-
-test('split command and path wording cannot evade the retired-command check', () => {
-  assertFixtureFails(
-    'repo/docs/active-topology-split-command-fixture.md',
-    'Run `node repo/scripts/\nsync-toolkit-projects.cjs --write` after conversion.'
-  );
-});
-
-test('current instructions remain forbidden when they also call a route legacy', () => {
-  assertFixtureFails(
-    'repo/docs/active-topology-current-plus-legacy-fixture.md',
-    'The route is legacy, but agents must use the project-to-skill publishing route for current conversions.'
-  );
-});
-
-test('active non-publisher skill instructions are included in the permanent gate', () => {
-  assertFixtureFails(
-    'skills/n8n-agent-rules/SKILL.md',
-    'Create a Toolkit project module plus published skill for current conversions.'
-  );
-});
-
-test('nested skill instruction entrypoints are included in the permanent gate', () => {
-  assertFixtureFails(
-    'skills/n8n-agent-rules/references/active-fixture/SKILL.md',
-    'Create a Toolkit project module plus published skill for current conversions.'
-  );
-});
-
-test('representative supply-chain publisher routing residue fails closed', () => {
-  assertFixtureFails(
-    'skills/agent-skill-supply-chain-audit/SKILL.md',
-    'For approved Toolkit conversions, use context-preserving-ai-publisher as the publisher workflow for the source-to-surface conversion.'
-  );
-});
-
-test('historical wording does not exempt an active document', () => {
-  const cwd = copyRepo();
-  try {
-    fs.writeFileSync(
-      path.join(cwd, 'repo', 'docs', 'active-topology-retirement-fixture.md'),
-      `## Audit history\nEarlier Toolkit operation used \`${legacyProjectToken}/example/_main\`, but that route is not current.\n\nThe Toolkit does not maintain project-to-skill publishing or a generic sync command.\n`,
-      'utf8'
-    );
-    const result = runAudit(cwd, ['--check']);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /retired _projects path/);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('standalone publisher product material remains valid without broadening legacy references', () => {
-  const audit = require(auditScript);
-  const publisherSkill = 'skills/context-preserving-ai-publisher/SKILL.md';
-  const publisherReadme = 'skills/context-preserving-ai-publisher/README.md';
-  const standaloneProductOperation = 'The separate standalone context-preserving-ai-publisher product uses a project module to maintain generated skill outputs for target repositories.';
-  assert.notEqual(
-    audit.activeTopologyFinding('Create a Toolkit project module plus published skill.', publisherSkill),
-    null
-  );
-  assert.equal(audit.activeTopologyFinding(standaloneProductOperation, publisherSkill), null);
-  assert.notEqual(
-    audit.activeTopologyFinding(
-      'The separate standalone context-preserving-ai-publisher product requires current Toolkit conversions to use a project module plus generated skill.',
-      publisherSkill
-    ),
-    null
-  );
-  assert.equal(audit.activeTopologyFinding(readText(publisherSkill), publisherSkill), null);
-  assert.equal(audit.activeTopologyFinding(readText(publisherReadme), publisherReadme), null);
-
-  const cwd = copyRepo();
-  try {
-    fs.appendFileSync(
-      path.join(cwd, publisherSkill),
-      `\n${standaloneProductOperation}\n`,
-      'utf8'
-    );
-    const result = runAudit(cwd, ['--check']);
-    assert.equal(result.status, 0, result.stderr);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-});
-
-test('topology scope policy is valid, exact, ordered, and the sole compatibility authority', () => {
-  const audit = require(auditScript);
+test('policy v2 owns the closed primitive, identity, and exact scope contracts', () => {
   const policy = readPolicy();
-  assert.equal(audit.validateTopologyScopePolicy().length, 0);
-  assert.equal(policy.schema_version, 1);
+  assert.deepEqual(audit.validateTopologyScopePolicy(), []);
+  assert.equal(policy.schema_version, 2);
   assert.equal(policy.default_scope, 'active-toolkit');
-  assert.ok(Array.isArray(policy.entries));
-  assert.equal(policy.entries.length, 9);
+  assert.equal(policy.normalization, 'nfkc-lower-separator-v1');
+  assert.deepEqual(policy.primitive_definitions.map((definition) => definition.id), primitiveIds);
+  assert.deepEqual(policy.standalone_identity_definitions.map((definition) => definition.id), [
+    'current-toolkit-identity',
+    'current-toolkit-repository-identity',
+    'current-repository-deictic-identity'
+  ]);
   assert.deepEqual(
     policy.entries.filter((entry) => entry.scope === 'standalone-publisher').map((entry) => entry.path),
     standalonePublisherPaths
@@ -393,148 +141,152 @@ test('topology scope policy is valid, exact, ordered, and the sole compatibility
     policy.entries.filter((entry) => entry.scope === 'non-operative-example').map((entry) => entry.path),
     publisherReferencePaths
   );
-  assert.equal(audit.policyScopeForPath('repo/docs/audits/new-audit.md'), 'active-toolkit');
-  assert.deepEqual(publisherReferencePaths.filter(audit.legacyReferenceAllowed), publisherReferencePaths);
-  assert.equal(audit.legacyReferenceAllowed('skills/context-preserving-ai-publisher/SKILL.md'), false);
-  assert.equal(audit.legacyReferenceAllowed('skills/context-preserving-ai-publisher/README.md'), false);
-  assert.equal(audit.legacyReferenceAllowed('skills/context-preserving-ai-publisher/references/validation-strategy-copy.md'), false);
+  assert.equal(audit.policyScopeForPath('repo/docs/audits/unlisted.md'), 'active-toolkit');
 });
 
-test('topology scope policy fails closed for malformed and broad entries', () => {
+test('legacy compatibility is derived from only the five exact non-operative paths', () => {
+  assert.deepEqual(publisherReferencePaths.filter(audit.legacyReferenceAllowed), publisherReferencePaths);
+  for (const relPath of publisherReferencePaths) {
+    const text = readText(relPath);
+    assert.ok(text.includes(`${legacyProjectToken}/`) || text.includes(`${legacyCuratedToken}/`), relPath);
+  }
+  assert.equal(audit.legacyReferenceAllowed('skills/context-preserving-ai-publisher/README.md'), false);
+  assert.equal(audit.legacyReferenceAllowed('skills/context-preserving-ai-publisher/references/examples.md'), false);
+});
+
+test('primitive matching is policy-derived, normalized, and reports every occurrence with stable spans', () => {
+  const fixtures = new Map([
+    ['retired-projects-source-root', '_projects'],
+    ['retired-main-source-root', '_main'],
+    ['retired-curated-output-root', 'CURATED-output_for_AI'],
+    ['retired-project-module', 'project_modules'],
+    ['retired-project-to-skill', 'project to skills'],
+    ['retired-source-to-surface', 'source_to_surfaces'],
+    ['retired-project-manifest', 'project manifests'],
+    ['retired-source-manifest', 'source_manifest'],
+    ['retired-toolkit-project-manifest', 'toolkit.project.json'],
+    ['retired-generated-skill', 'generated-skills'],
+    ['retired-generated-copy', 'generated copies'],
+    ['retired-generated-publication', 'generated_writeback'],
+    ['retired-deterministic-publication', 'deterministic-publishing'],
+    ['retired-generated-surface-writeback', 'generated_surface-writeback'],
+    ['retired-project-output-publication', 'project_output publishing'],
+    ['retired-generated-pack-manifest', 'generated_pack_manifests'],
+    ['retired-pack-packaging', 'pack_packaging'],
+    ['retired-publisher-infrastructure', 'context_preserving_ai_publisher-infrastructure'],
+    ['retired-sync-toolkit-projects-command', 'sync-toolkit-projects.cjs'],
+    ['retired-package-skills-command', 'package-skills.cjs'],
+    ['retired-package-packs-command', 'package-packs.cjs']
+  ]);
+  for (const [id, fixture] of fixtures) {
+    assert.ok(audit.detectRetiredTopologyAtoms(fixture).some((atom) => atom.id === id), `${id}: ${fixture}`);
+  }
+
+  const source = 'project module\nordinary\nPROJECT_MODULE';
+  const matches = audit.detectRetiredTopologyAtoms(source).filter((atom) => atom.id === 'retired-project-module');
+  assert.equal(matches.length, 2);
+  assert.deepEqual(matches.map((match) => match.lineNumber), [1, 3]);
+  assert.deepEqual(matches.map((match) => source.slice(match.sourceSpan.start, match.sourceSpan.end)), ['project module', 'PROJECT_MODULE']);
+  assert.ok(matches.every((match) => match.message.includes(match.id)));
+});
+
+test('active scope rejects primitive occurrences without heading, prose, order, or negation exemptions', () => {
+  const fixtures = [
+    'No project module is maintained.',
+    '## Historical evidence\nEarlier operation used project modules.',
+    '<!-- project module -->',
+    '```text\nproject module\n```',
+    'A generated skill appears before a project module.',
+    'project\nmodule'
+  ];
+  for (const fixture of fixtures) {
+    assert.notEqual(audit.activeTopologyFinding(fixture, 'repo/docs/fixture.md'), null, fixture);
+  }
+  assert.equal(audit.activeTopologyFinding('Maintain skills directly under `skills/**`.', 'repo/docs/fixture.md'), null);
+});
+
+test('standalone publisher P1 uses document-level identity and closed dispositions', () => {
+  const rel = standalonePublisherPaths[0];
+  const generic = 'A project module can maintain portable outputs for a target repository.';
+  assert.equal(audit.activeTopologyFinding(generic, rel), null);
+
+  const conflict = audit.activeTopologyFinding(`${generic}\nThis repository has separate instructions.`, rel);
+  assert.ok(conflict);
+  assert.equal(conflict.conflict, true);
+  assert.equal(conflict.id, 'retired-project-module');
+  assert.ok(conflict.identities.some((identity) => identity.id === 'current-repository-deictic-identity'));
+
+  assert.notEqual(audit.activeTopologyFinding('Use _main for a target repository.', rel), null);
+  assert.notEqual(audit.activeTopologyFinding('Run sync-toolkit-projects.cjs.', rel), null);
+  assert.equal(audit.activeTopologyFinding('A project module is described here.', historicalEvidencePaths[0]), null);
+  assert.equal(audit.activeTopologyFinding('A project module is described here.', publisherReferencePaths[0]), null);
+  assert.equal(audit.activeTopologyFinding('Use toolkit.project.json with a project module.', rel), null);
+});
+
+test('active scan membership is rule-derived and includes roots, docs, contracts, and nested skill entrypoints', () => {
+  const activeFiles = audit.activePolicyFiles();
+  for (const relPath of [
+    'AGENTS.md',
+    'CLAUDE.md',
+    'GEMINI.md',
+    'README.md',
+    'repo/contracts/source-of-truth-contract.md',
+    'repo/docs/FOR_AI_AGENTS.md',
+    'skills/agent-skill-supply-chain-audit/SKILL.md',
+    'skills/agent-skill-supply-chain-audit/README.md',
+    'skills/ui-ux-secure-frontend-design/INSTALL.md'
+  ]) assert.ok(activeFiles.includes(relPath), relPath);
+  assert.equal(activeFiles.includes('repo/contracts/topology-scope-policy.json'), false);
+  for (const relPath of activeFiles) {
+    assert.deepEqual(audit.activeTopologyFindings(readText(relPath), relPath), [], relPath);
+  }
+});
+
+test('retired structural and negation APIs are absent', () => {
+  assert.equal(audit.structuralEvidenceUnits, undefined);
+  assert.equal(audit.selfRepositoryIdentityMatches, undefined);
+  assert.equal(audit.findAlias, undefined);
+  assert.equal(audit.findAliasPairSameClause, undefined);
+  assert.equal(audit.topologyAtomIds, undefined);
+});
+
+test('policy validation fails closed for malformed definitions and broad scopes', () => {
+  const policyPath = path.join('repo', 'contracts', 'topology-scope-policy.json');
   const cases = [
-    ['missing policy', (cwd) => fs.rmSync(path.join(cwd, 'repo', 'contracts', 'topology-scope-policy.json')), /Missing topology scope policy/],
-    ['malformed JSON', (cwd) => fs.writeFileSync(path.join(cwd, 'repo', 'contracts', 'topology-scope-policy.json'), '{\n', 'utf8'), /not valid JSON/],
-    ['unknown top-level key', (cwd) => writePolicy(cwd, (policy) => { policy.unexpected = true; }), /only schema_version, default_scope, and entries/],
-    ['wrong schema version', (cwd) => writePolicy(cwd, (policy) => { policy.schema_version = 2; }), /schema_version/],
-    ['wrong default scope', (cwd) => writePolicy(cwd, (policy) => { policy.default_scope = 'historical-evidence'; }), /default_scope/],
-    ['null entry', (cwd) => writePolicy(cwd, (policy) => { policy.entries[0] = null; }), /must be an object/],
-    ['unknown entry key', (cwd) => writePolicy(cwd, (policy) => { policy.entries[0].unexpected = true; }), /only path and scope/],
+    ['missing policy', (cwd) => fs.rmSync(path.join(cwd, policyPath)), /Missing topology scope policy/],
+    ['malformed JSON', (cwd) => fs.writeFileSync(path.join(cwd, policyPath), '{\n', 'utf8'), /not valid JSON/],
+    ['unknown top-level key', (cwd) => writePolicy(cwd, (policy) => { policy.unexpected = true; }), /unsupported or missing top-level keys/],
+    ['wrong schema', (cwd) => writePolicy(cwd, (policy) => { policy.schema_version = 1; }), /schema_version/],
+    ['definition removed', (cwd) => writePolicy(cwd, (policy) => { policy.primitive_definitions.pop(); }), /exactly 21 definitions/],
+    ['empty aliases', (cwd) => writePolicy(cwd, (policy) => { policy.primitive_definitions[0].aliases = []; }), /non-empty array/],
+    ['separator-only alias', (cwd) => writePolicy(cwd, (policy) => { policy.primitive_definitions[3].aliases[0] = '---'; }), /matchable characters/],
+    ['duplicate normalized alias', (cwd) => writePolicy(cwd, (policy) => { policy.primitive_definitions[3].aliases[1] = 'project_module'; }), /duplicates normalized alias/],
+    ['unsupported matcher', (cwd) => writePolicy(cwd, (policy) => { policy.primitive_definitions[0].matcher_kind = 'regex'; }), /matcher_kind is unsupported/],
+    ['unsupported disposition', (cwd) => writePolicy(cwd, (policy) => { policy.primitive_definitions[0].standalone_disposition = 'allowed'; }), /standalone_disposition is unsupported/],
+    ['identity removed', (cwd) => writePolicy(cwd, (policy) => { policy.standalone_identity_definitions.pop(); }), /exactly 3 definitions/],
     ['duplicate path', (cwd) => writePolicy(cwd, (policy) => { policy.entries.push({ ...policy.entries[0] }); }), /duplicated/],
     ['unsupported scope', (cwd) => writePolicy(cwd, (policy) => { policy.entries[0].scope = 'active-toolkit'; }), /unsupported/],
-    ['noncanonical path', (cwd) => writePolicy(cwd, (policy) => { policy.entries[0].path = './skills/context-preserving-ai-publisher/SKILL.md'; }), /canonical/],
-    ['backslash path', (cwd) => writePolicy(cwd, (policy) => { policy.entries[0].path = 'skills\\context-preserving-ai-publisher\\SKILL.md'; }), /canonical/],
-    ['dot-prefix path', (cwd) => writePolicy(cwd, (policy) => { policy.entries[0].path = '../skills/context-preserving-ai-publisher/SKILL.md'; }), /canonical/],
-    ['traversal path', (cwd) => writePolicy(cwd, (policy) => { policy.entries[0].path = 'skills/context-preserving-ai-publisher/../context-preserving-ai-publisher/SKILL.md'; }), /canonical/],
-    ['absolute path', (cwd) => writePolicy(cwd, (policy) => { policy.entries[0].path = '/repo/docs/RETIRED-SOURCE-PROVENANCE.md'; }), /canonical/],
-    ['Windows drive path', (cwd) => writePolicy(cwd, (policy) => { policy.entries[0].path = 'C:/repo/docs/RETIRED-SOURCE-PROVENANCE.md'; }), /canonical/],
-    ['explicit target missing', (cwd) => writePolicy(cwd, (policy) => { policy.entries[0].path = 'repo/docs/audits/new-audit.md'; }), /missing/],
-    ['wildcard entry', (cwd) => writePolicy(cwd, (policy) => { policy.entries[0].path = 'repo/docs/audits/**'; }), /canonical|missing/],
-    ['prefix entry', (cwd) => writePolicy(cwd, (policy) => { policy.entries[0].path = 'repo/docs/audits/'; }), /canonical/]
+    ['wildcard path', (cwd) => writePolicy(cwd, (policy) => { policy.entries[0].path = 'repo\/docs\/**'; }), /canonical|missing/],
+    ['directory prefix', (cwd) => writePolicy(cwd, (policy) => { policy.entries[0].path = 'repo/docs/'; }), /canonical/],
+    ['missing target', (cwd) => writePolicy(cwd, (policy) => { policy.entries[0].path = 'repo/docs/missing.md'; }), /target is missing/]
   ];
   for (const [label, mutate, expected] of cases) assertPolicyRejects(label, mutate, expected);
 });
 
-test('an unlisted copied-workspace audit file defaults to active-toolkit', () => {
+test('copied workspaces reject new active primitive and legacy path residue', () => {
   const cwd = copyRepo();
   try {
-    const target = path.join(cwd, 'repo', 'docs', 'audits', 'new-audit.md');
-    fs.writeFileSync(target, 'Current Toolkit source manifests publish generated skill outputs.\n', 'utf8');
+    fs.writeFileSync(path.join(cwd, 'repo', 'docs', 'active-fixture.md'), 'No project module is used.\n', 'utf8');
+    fs.writeFileSync(
+      path.join(cwd, 'skills', 'n8n-local-setup', 'references', 'legacy-fixture.md'),
+      `${legacyProjectToken}/fixture/${legacyCuratedToken}/file.md\n`,
+      'utf8'
+    );
     const result = runAudit(cwd, ['--json']);
     assert.notEqual(result.status, 0);
-    assert.match(result.stdout, /repo\/docs\/audits\/new-audit\.md/);
-    assert.match(result.stdout, /retired project\/source-manifest output pairing/);
+    assert.match(result.stdout, /retired-project-module/);
+    assert.match(result.stdout, /references the retired project\/publisher topology/);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }
-});
-
-test('structural evidence preserves heading, lead-in, list ancestry, comments, and code fences', () => {
-  const audit = require(auditScript);
-  const fixture = [
-    '## Current Toolkit conversion rules',
-    '',
-    'Current Toolkit conversion rules:',
-    '- The standalone context-preserving-ai-publisher routes conversions through',
-    '  project modules and generated skills.',
-    '',
-    '- parent context',
-    '  - project modules',
-    '    - generated skills',
-    '',
-    '- project modules',
-    '- generated skills',
-    '',
-    '<!-- This repo uses project modules and generated skills. -->',
-    '',
-    'Visible text follows the comment.',
-    '',
-    '```text',
-    'This repo uses project modules and generated skills.',
-    '```'
-  ].join('\n');
-  const units = audit.structuralEvidenceUnits(fixture);
-  const leadInUnit = units.find((unit) => unit.kind === 'list-item' && unit.leafText.includes('standalone context-preserving'));
-  assert.ok(leadInUnit);
-  assert.deepEqual(leadInUnit.headingStack, ['Current Toolkit conversion rules']);
-  assert.equal(leadInUnit.leadIn, 'Current Toolkit conversion rules:');
-  assert.match(leadInUnit.effectiveText, /project modules and generated skills/);
-
-  const nestedUnit = units.find((unit) => unit.kind === 'list-item' && unit.leafText === 'generated skills');
-  assert.ok(nestedUnit);
-  assert.deepEqual(nestedUnit.parentListItems, ['parent context', 'project modules']);
-  assert.notEqual(audit.activeTopologyFinding(fixture), null);
-
-  const siblingOnly = audit.activeTopologyFinding('- project modules\n- generated skills');
-  assert.equal(siblingOnly, null);
-
-  const commentUnit = units.find((unit) => unit.kind === 'html-comment');
-  const visibleUnit = units.find((unit) => unit.kind === 'paragraph' && unit.leafText.startsWith('Visible text'));
-  const codeUnit = units.find((unit) => unit.kind === 'code-fence');
-  assert.ok(commentUnit);
-  assert.ok(visibleUnit);
-  assert.ok(codeUnit);
-  assert.doesNotMatch(visibleUnit.effectiveText, /This repo uses project modules/);
-  assert.equal(codeUnit.headingStack[0], 'Current Toolkit conversion rules');
-  assert.notEqual(audit.activeTopologyFinding('```text\nThis repo uses project modules and generated skills.\n```'), null);
-});
-
-test('G4 topology probes fail with stable shared atom IDs', () => {
-  const audit = require(auditScript);
-  const probes = [
-    `Current Toolkit source ownership is ${legacyProjectToken}/development/example/README.md.`,
-    'Create the standalone _main source and maintain it as the active Toolkit input.',
-    'Create a Toolkit project module plus published skill for every new skill.',
-    'Maintain a published skill from a Toolkit project module for every new skill.',
-    'Use toolkit.project.json to generate a published skill for every new skill.',
-    'Use the Toolkit project-to-skill source-to-surface publishing workflow for new skills.',
-    'Regenerate generated skill copies through deterministic writeback before review.',
-    'The standalone context-preserving-ai-publisher routes conversions through project modules.',
-    'Current Toolkit source manifests publish generated skill outputs.',
-    'Current Toolkit project manifests publish skills.',
-    'Future Toolkit project manifests will publish skills.',
-    'Published skills for current Toolkit conversions are maintained from project modules.',
-    'Generated skills for this Toolkit are maintained through project modules.'
-  ];
-  const ids = new Set();
-  for (const probe of probes) {
-    const finding = audit.activeTopologyFinding(probe);
-    assert.notEqual(finding, null, probe);
-    assert.match(finding.id, /^retired-/);
-    ids.add(finding.id);
-  }
-  assert.ok(ids.has('retired-project-manifest-output-pair'));
-  assert.ok(ids.has('retired-project-module-skill-pair'));
-  assert.ok(ids.has('retired-publisher-infrastructure'));
-});
-
-test('policy scopes distinguish generic publisher controls, self-repository conflicts, history, and compatibility', () => {
-  const audit = require(auditScript);
-  const generic = 'The standalone context-preserving-ai-publisher product uses project modules to maintain generated skill outputs for target repositories.';
-  assert.equal(audit.activeTopologyFinding(generic, standalonePublisherPaths[0]), null);
-  assert.equal(audit.activeTopologyFinding(generic, standalonePublisherPaths[1]), null);
-  const conflict = audit.activeTopologyFinding(
-    'Toolkit conversions are routed through project modules by the standalone context-preserving-ai-publisher.',
-    standalonePublisherPaths[0]
-  );
-  assert.ok(conflict);
-  assert.equal(conflict.conflict, true);
-  assert.equal(audit.activeTopologyFinding('Current Toolkit source manifests publish generated skill outputs.', historicalEvidencePaths[0]), null);
-  assert.equal(audit.activeTopologyFinding('Current Toolkit source manifests publish generated skill outputs.', publisherReferencePaths[0]), null);
-  assert.equal(audit.activeTopologyFinding('toolkit.project.json publish skills.', standalonePublisherPaths[0]), null);
-});
-
-test('topology path atoms normalize Windows separators', () => {
-  const audit = require(auditScript);
-  const atoms = audit.detectRetiredTopologyAtoms('Current curated\\output\\for\\ai source ownership is retired.');
-  assert.ok(atoms.some((atom) => atom.id === 'retired-curated-output-for-ai'));
 });

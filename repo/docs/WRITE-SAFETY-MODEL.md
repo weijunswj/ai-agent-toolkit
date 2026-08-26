@@ -13,7 +13,7 @@ The maintained repository surfaces are:
 
 The only retained repository synchronizers are `sync-repo-doc-contract.cjs` and `sync-agent-instruction-shims.cjs`. They update managed blocks and instruction shims only; they do not publish project outputs.
 
-The Toolkit Local Bridge package version is declared in `repo/contracts/toolkit-local-bridge/version.json` and must remain aligned with both native plugin source manifests, generated native plugin manifests, `BRIDGE_VERSION`, the Codex setup expected version, and AG2 adapter metadata.
+The Toolkit Local Bridge package version is declared in `repo/contracts/toolkit-local-bridge/version.json` and must remain aligned with authoritative native plugin inputs, checked-in native plugin metadata, `BRIDGE_VERSION`, the Codex setup expected version, and AG2 adapter metadata.
 
 ## Allowed Writes
 
@@ -44,4 +44,4 @@ Denied writes include:
 
 CI must not run live actions, import/export n8n workflows, activate/deactivate workflows, mutate credentials, install packages, or execute arbitrary external source. Source-watch remains notification-only and must not copy upstream files or update source pins.
 
-CI validation is read-only. Native plugin metadata is checked in place, and no privileged generated-surface writeback workflow is maintained.
+CI validation is read-only. Native plugin metadata is checked in place, and no privileged publication workflow is maintained.

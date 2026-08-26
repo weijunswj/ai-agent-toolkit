@@ -1,6 +1,152 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "default_scope": "active-toolkit",
+  "normalization": "nfkc-lower-separator-v1",
+  "primitive_definitions": [
+    {
+      "id": "retired-projects-source-root",
+      "matcher_kind": "identifier-token",
+      "aliases": ["_projects"],
+      "standalone_disposition": "always-forbidden"
+    },
+    {
+      "id": "retired-main-source-root",
+      "matcher_kind": "identifier-token",
+      "aliases": ["_main"],
+      "standalone_disposition": "always-forbidden"
+    },
+    {
+      "id": "retired-curated-output-root",
+      "matcher_kind": "normalized-phrase",
+      "aliases": ["curated output for ai"],
+      "standalone_disposition": "always-forbidden"
+    },
+    {
+      "id": "retired-project-module",
+      "matcher_kind": "normalized-phrase",
+      "aliases": ["project module", "project modules"],
+      "standalone_disposition": "generic-permitted"
+    },
+    {
+      "id": "retired-project-to-skill",
+      "matcher_kind": "normalized-phrase",
+      "aliases": ["project-to-skill", "project-to-skills"],
+      "standalone_disposition": "generic-permitted"
+    },
+    {
+      "id": "retired-source-to-surface",
+      "matcher_kind": "normalized-phrase",
+      "aliases": ["source-to-surface", "source-to-surfaces"],
+      "standalone_disposition": "generic-permitted"
+    },
+    {
+      "id": "retired-project-manifest",
+      "matcher_kind": "normalized-phrase",
+      "aliases": ["project manifest", "project manifests"],
+      "standalone_disposition": "generic-permitted"
+    },
+    {
+      "id": "retired-source-manifest",
+      "matcher_kind": "normalized-phrase",
+      "aliases": ["source manifest", "source manifests"],
+      "standalone_disposition": "generic-permitted"
+    },
+    {
+      "id": "retired-toolkit-project-manifest",
+      "matcher_kind": "exact-filename",
+      "aliases": ["toolkit.project.json"],
+      "standalone_disposition": "generic-permitted"
+    },
+    {
+      "id": "retired-generated-skill",
+      "matcher_kind": "normalized-phrase",
+      "aliases": ["generated skill", "generated skills"],
+      "standalone_disposition": "generic-permitted"
+    },
+    {
+      "id": "retired-generated-copy",
+      "matcher_kind": "normalized-phrase",
+      "aliases": ["generated copy", "generated copies"],
+      "standalone_disposition": "generic-permitted"
+    },
+    {
+      "id": "retired-generated-publication",
+      "matcher_kind": "normalized-phrase",
+      "aliases": ["generated publication", "generated publishing", "generated writeback"],
+      "standalone_disposition": "generic-permitted"
+    },
+    {
+      "id": "retired-deterministic-publication",
+      "matcher_kind": "normalized-phrase",
+      "aliases": ["deterministic copy", "deterministic copies", "deterministic publication", "deterministic publishing", "deterministic writeback"],
+      "standalone_disposition": "generic-permitted"
+    },
+    {
+      "id": "retired-generated-surface-writeback",
+      "matcher_kind": "normalized-phrase",
+      "aliases": ["generated-surface writeback"],
+      "standalone_disposition": "generic-permitted"
+    },
+    {
+      "id": "retired-project-output-publication",
+      "matcher_kind": "normalized-phrase",
+      "aliases": ["project-output publication", "project-output publishing", "project-output writeback"],
+      "standalone_disposition": "generic-permitted"
+    },
+    {
+      "id": "retired-generated-pack-manifest",
+      "matcher_kind": "normalized-phrase",
+      "aliases": ["generated pack manifest", "generated pack manifests"],
+      "standalone_disposition": "generic-permitted"
+    },
+    {
+      "id": "retired-pack-packaging",
+      "matcher_kind": "normalized-phrase",
+      "aliases": ["pack packaging"],
+      "standalone_disposition": "generic-permitted"
+    },
+    {
+      "id": "retired-publisher-infrastructure",
+      "matcher_kind": "normalized-phrase",
+      "aliases": ["context-preserving-ai-publisher infrastructure"],
+      "standalone_disposition": "generic-permitted"
+    },
+    {
+      "id": "retired-sync-toolkit-projects-command",
+      "matcher_kind": "exact-filename",
+      "aliases": ["sync-toolkit-projects.cjs"],
+      "standalone_disposition": "always-forbidden"
+    },
+    {
+      "id": "retired-package-skills-command",
+      "matcher_kind": "exact-filename",
+      "aliases": ["package-skills.cjs"],
+      "standalone_disposition": "always-forbidden"
+    },
+    {
+      "id": "retired-package-packs-command",
+      "matcher_kind": "exact-filename",
+      "aliases": ["package-packs.cjs"],
+      "standalone_disposition": "always-forbidden"
+    }
+  ],
+  "standalone_identity_definitions": [
+    {
+      "id": "current-toolkit-identity",
+      "matcher_kind": "identifier-token",
+      "aliases": ["Toolkit", "Toolkit's"]
+    },
+    {
+      "id": "current-toolkit-repository-identity",
+      "matcher_kind": "exact-filename",
+      "aliases": ["ai-agent-toolkit", "weijunswj/ai-agent-toolkit"]
+    },
+    {
+      "id": "current-repository-deictic-identity",
+      "matcher_kind": "normalized-phrase",
+      "aliases": ["this repo", "this repository", "our repo", "our repository", "current repo", "current repository"]
+    }
+  ],
   "entries": [
     {
       "path": "skills/context-preserving-ai-publisher/SKILL.md",
@@ -8,6 +154,10 @@
     },
     {
       "path": "skills/context-preserving-ai-publisher/README.md",
+      "scope": "standalone-publisher"
+    },
+    {
+      "path": "skills/context-preserving-ai-publisher/references/README.md",
       "scope": "standalone-publisher"
     },
     {

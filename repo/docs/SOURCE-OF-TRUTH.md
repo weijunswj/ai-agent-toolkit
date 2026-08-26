@@ -25,7 +25,7 @@ The two retained deterministic synchronizers are:
 - `repo/scripts/sync-agent-instruction-shims.cjs` for the managed root instruction blocks, manual portable templates, and exactly four portable n8n safety derivatives sourced from `repo/contracts/agent-rules/n8n-agent-rules.md`: `skills/n8n-agent-rules/n8n-agent-rules.md`, `skills/n8n-local-setup/references/n8n-agent-rules.md`, `skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md`, and `skills/n8n-workflow-templates/references/n8n-agent-rules.md`.
 - `repo/scripts/sync-repo-doc-contract.cjs` for the managed source-of-truth block in `README.md` and `AGENTS.md`.
 
-They do not publish skills, create packs, read project manifests, write privileged PR branches, or provide a generic Toolkit sync command. The four n8n outputs are a narrow managed safety derivative set for portable/local context in the containing copied skills; all other maintained skill and contract files are edited at their canonical paths.
+They do not publish skills, create packs, consume secondary routing metadata, write privileged PR branches, or provide a generic Toolkit sync command. The four n8n outputs are a narrow managed safety derivative set for portable/local context in the containing copied skills; all other maintained skill and contract files are edited at their canonical paths.
 
 Native plugin metadata remains platform-separated:
 

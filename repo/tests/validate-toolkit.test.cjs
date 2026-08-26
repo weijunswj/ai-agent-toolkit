@@ -404,7 +404,7 @@ test('validator rejects a deleted sync command in current review validation evid
     });
     const result = runValidate(cwd);
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /retired sync-toolkit-projects\.cjs/);
+    assert.match(result.stderr, /retired-sync-toolkit-projects-command/);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }
@@ -418,7 +418,7 @@ test('validator rejects a current review publisher workflow using a project _mai
     });
     const result = runValidate(cwd);
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /retired _projects path/);
+    assert.match(result.stderr, /retired-projects-source-root/);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }
@@ -432,7 +432,7 @@ test('validator rejects curated deterministic publication claims in current revi
     });
     const result = runValidate(cwd);
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /retired curated-output publishing/);
+    assert.match(result.stderr, /retired-curated-output-root/);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }
@@ -447,7 +447,7 @@ test('validator rejects a retired source-to-surface publisher claim without dire
     const result = runValidate(cwd);
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /must state direct-canonical maintenance/);
-    assert.match(result.stderr, /retired source-to-surface/);
+    assert.match(result.stderr, /retired-source-to-surface/);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }

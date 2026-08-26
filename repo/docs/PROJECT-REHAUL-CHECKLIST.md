@@ -7,7 +7,7 @@ Use this checklist when reviewing the direct canonical Toolkit architecture.
 - [ ] Complete AI-facing skills live under `skills/<skill-name>/`.
 - [ ] Machine contracts, fixtures, templates, and agent-rule inputs live under `repo/contracts/`.
 - [ ] Active third-party provenance lives under `repo/source-watch/provenance/`.
-- [ ] No legacy project tree, project manifests, generated pack manifests, or duplicate publishing tree is introduced.
+- [ ] No legacy project tree, duplicate package metadata, or secondary publication tree is introduced.
 
 ## AI-Facing Surfaces
 

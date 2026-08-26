@@ -1,6 +1,6 @@
 ---
 name: context-preserving-ai-publisher
-description: Use when creating or maintaining source-traceable AI-facing repo surfaces, generated skills, MCP notes, templates, pack metadata, manifests, source locks, audit baselines, or anti-drift documentation.
+description: Use when creating or maintaining source-traceable AI-facing repo surfaces, portable skills, MCP notes, templates, pack metadata, manifests, source locks, audit baselines, or anti-drift documentation.
 ---
 
 <!--
@@ -44,7 +44,7 @@ When local repo law conflicts with this generic skill, local law wins.
 - Manifest/routing contract: declared mapping from source to published output.
 - Portable generated surfaces: skills, MCP docs, templates, packs, references, or equivalent repo-local surfaces.
 - Local law/docs: repo-specific rules, commands, validation, and safety policy.
-- Deterministic publishing: copy, extract, concat, JSON formatting, or registry generation without AI summarisation.
+- Repeatable publication mechanics: copy, extract, concat, JSON formatting, or registry generation without AI summarisation.
 - Audits: checks for undeclared outputs, lossy surfaces, ownership confusion, unsafe deletions, and baseline drift.
 
 ## References
