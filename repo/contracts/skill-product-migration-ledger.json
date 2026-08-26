@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "lifecycle": "transitional_until_s2_closure_review",
+  "transitions": [
+    {
+      "sequence": 1,
+      "transition_id": "knowledge-index-updater-removal",
+      "predecessor_ids": [
+        "knowledge-index-updater"
+      ],
+      "successor_ids": [],
+      "disposition": "remove",
+      "content_disposition": "deleted",
+      "authority": "Owner retirement decision #328; canonical removal is present in signed main commit e86a2d74fd771f6500aa02fe0892940933bf7647 through PR #365.",
+      "reason": "The repository-side Notion index product was retired with no replacement and is absent from the current canonical skills surface."
+    }
+  ],
+  "notes": "This append-only ledger records completed historical product identity transitions and is never current-product authority, an alias source, a routing fallback, or an exemption. E2 may append accepted transitions without rewriting earlier meaning. Review this transitional artefact before S2 closure and remove it during final cleanup if no durable current consumer remains."
+}

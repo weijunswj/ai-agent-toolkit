@@ -24,30 +24,54 @@ const legacyProjectToken = '_' + 'projects';
 const legacyPublisherToken = 'curated_' + 'output_for_ai';
 const skillCreationOperationalEvidenceFields = [
   'existing_skill_review',
+  'native_capability_review',
   'trigger',
+  'invocation_mode_reason',
   'decision_reason',
   'unique_value',
   'runtime_footprint',
   'local_assets',
   'output_contract',
   'anti_bloat_review',
+  'overlap_boundary',
   'safety_boundary',
   'third_party_audit',
-  'publisher_workflow',
-  'routing'
+  'canonical_ownership'
 ];
-const IMMUTABLE_GRANDFATHERED_SKILL_IDS = Object.freeze([
-  'agent-skill-supply-chain-audit',
-  'ai-coding-agent-rules',
-  'context-preserving-ai-publisher',
-  'knowledge-index-updater',
-  'n8n-agent-rules',
-  'n8n-local-setup',
-  'n8n-workflow-helper-scripts',
-  'n8n-workflow-templates',
-  'secure-cicd-installer',
-  'ui-ux-secure-frontend-design',
-  'windows-localhost-workflows'
+const skillCreationRoutingEvidenceFields = ['positive_routing_examples', 'negative_routing_examples'];
+const skillCreationRecordKeys = Object.freeze([
+  'anti_bloat_review',
+  'canonical_ownership',
+  'decision',
+  'decision_reason',
+  'existing_skill_review',
+  'invocation_mode',
+  'invocation_mode_reason',
+  'local_assets',
+  'native_capability_review',
+  'negative_routing_examples',
+  'output_contract',
+  'overlap_boundary',
+  'positive_routing_examples',
+  'public_id',
+  'public_name',
+  'runtime_footprint',
+  'safety_boundary',
+  'source_provenance',
+  'third_party_audit',
+  'trigger',
+  'unique_value',
+  'validation'
+]);
+const skillProductMigrationEntryKeys = Object.freeze([
+  'authority',
+  'content_disposition',
+  'disposition',
+  'predecessor_ids',
+  'reason',
+  'sequence',
+  'successor_ids',
+  'transition_id'
 ]);
 const ignoredDirs = new Set(['.git', 'node_modules', '_dist', 'dist', 'coverage', '.tmp', '.n8n-local', '.n8n-production-cloudflare', '.to-sanitise', '.sanitised', '.n8n-workflow-backups', '.claude']);
 const allowedRootEntries = new Set([
@@ -250,22 +274,51 @@ function retiredSkillCreationReviewFinding(value) {
   return atom ? { message: atom.message, family: atom.family, atomId: atom.id } : null;
 }
 
+function exactObjectKeys(value, expected) {
+  return JSON.stringify(Object.keys(value).sort((left, right) => left.localeCompare(right))) === JSON.stringify([...expected].sort((left, right) => left.localeCompare(right)));
+}
+
+function skillPublicName(skill) {
+  const text = readText(`skills/${skill}/SKILL.md`);
+  return text.match(/^#\s+(.+?)\s*$/m)?.[1] || '';
+}
+
+function skillInvocationMode(errors, baselinePath, skill) {
+  const metadataPath = `skills/${skill}/agents/openai.yaml`;
+  if (!existsRel(metadataPath)) {
+    fail(errors, `${baselinePath} cannot verify current invocation mode because ${metadataPath} is missing`);
+    return null;
+  }
+  const match = readText(metadataPath).match(/^\s*allow_implicit_invocation:\s*(true|false)\s*$/m);
+  if (!match) {
+    fail(errors, `${baselinePath} cannot verify current invocation mode because ${metadataPath} lacks allow_implicit_invocation`);
+    return null;
+  }
+  return match[1] === 'true' ? 'implicit' : 'explicit';
+}
+
 function validateSkillCreationReviewEvidence(errors, baselinePath, skill, review) {
-  const publisherWorkflow = String(review.publisher_workflow || '');
-  if (!/\bdirect[- ]canonical\b/i.test(publisherWorkflow)) {
-    fail(errors, `${baselinePath} skill_creation_review.${skill}.publisher_workflow must state direct-canonical maintenance`);
+  const canonicalOwnership = String(review.canonical_ownership || '');
+  if (!/\bdirect[- ]canonical\b/i.test(canonicalOwnership)) {
+    fail(errors, `${baselinePath} skill_creation_review.${skill}.canonical_ownership must state direct-canonical maintenance`);
   }
-  if (!publisherWorkflow.includes(`skills/${skill}/`)) {
-    fail(errors, `${baselinePath} skill_creation_review.${skill}.publisher_workflow must name skills/${skill}/ as the canonical skill surface`);
+  if (!canonicalOwnership.includes(`skills/${skill}/`)) {
+    fail(errors, `${baselinePath} skill_creation_review.${skill}.canonical_ownership must name skills/${skill}/ as the canonical skill surface`);
   }
-  if (!/\brepo\/\*\*/i.test(publisherWorkflow)) {
-    fail(errors, `${baselinePath} skill_creation_review.${skill}.publisher_workflow must name canonical repo/** maintenance paths`);
+  if (!/\brepo\/\*\*/i.test(canonicalOwnership)) {
+    fail(errors, `${baselinePath} skill_creation_review.${skill}.canonical_ownership must name canonical repo/** maintenance paths`);
   }
 
   for (const field of skillCreationOperationalEvidenceFields) {
     const finding = retiredSkillCreationReviewFinding(review[field]);
     if (finding) {
       fail(errors, `${baselinePath} skill_creation_review.${skill}.${field} ${finding.message}`);
+    }
+  }
+  for (const field of skillCreationRoutingEvidenceFields) {
+    for (const example of review[field] || []) {
+      const finding = retiredSkillCreationReviewFinding(example);
+      if (finding) fail(errors, `${baselinePath} skill_creation_review.${skill}.${field} ${finding.message}`);
     }
   }
 
@@ -290,12 +343,7 @@ function validateSkillCreationReviewEvidence(errors, baselinePath, skill, review
         fail(errors, `${baselinePath} skill_creation_review.${skill}.validation references missing current target ${target}`);
       }
       if (target === 'repo/scripts/validate-toolkit.cjs') hasRepositoryValidator = true;
-      if (target === 'repo/tests/skill-routing.test.cjs'
-        || target.includes(`repo/tests/${skill}`)
-        || target.includes(`repo/tests/toolkit-${skill}`)
-        || (skill === 'toolkit-setup' && target.startsWith('repo/tests/toolkit-local-bridge'))) {
-        hasFocusedValidation = true;
-      }
+      if (target.startsWith('repo/tests/')) hasFocusedValidation = true;
     }
   }
   if (!hasRepositoryValidator) {
@@ -316,81 +364,77 @@ function validateSkillCreationGate(errors) {
     return;
   }
 
-  if (baseline.schema_version !== 2) fail(errors, `${baselinePath} schema_version must be 2`);
-  const grandfathered = baseline.grandfathered_skill_ids;
-  const reviewedIds = baseline.reviewed_skill_ids;
+  if (!baseline || typeof baseline !== 'object' || Array.isArray(baseline)) {
+    fail(errors, `${baselinePath} must be an object`);
+    return;
+  }
+  if (baseline.schema_version !== 3) fail(errors, `${baselinePath} schema_version must be 3`);
+  for (const obsoleteField of ['grandfathered_skill_ids', 'reviewed_skill_ids']) {
+    if (Object.prototype.hasOwnProperty.call(baseline, obsoleteField)) {
+      fail(errors, `${baselinePath} must not contain obsolete or exemption authority field ${obsoleteField}`);
+    }
+  }
+  if (!exactObjectKeys(baseline, ['schema_version', 'skill_creation_review', 'notes'])) {
+    fail(errors, `${baselinePath} must contain only schema_version, skill_creation_review, and notes; duplicate or exemption authority is not allowed`);
+  }
+  if (typeof baseline.notes !== 'string' || baseline.notes.trim().length < 12) {
+    fail(errors, `${baselinePath} notes must be a non-empty evidence string`);
+  }
   const reviewMap = baseline.skill_creation_review;
-  if (!Array.isArray(grandfathered) || grandfathered.some((id) => typeof id !== 'string' || !id.trim())) {
-    fail(errors, `${baselinePath} grandfathered_skill_ids must be an array of non-empty strings`);
-    return;
-  }
-  if (!Array.isArray(reviewedIds) || reviewedIds.some((id) => typeof id !== 'string' || !id.trim())) {
-    fail(errors, `${baselinePath} reviewed_skill_ids must be an array of non-empty strings`);
-    return;
-  }
   if (!reviewMap || typeof reviewMap !== 'object' || Array.isArray(reviewMap)) {
     fail(errors, `${baselinePath} skill_creation_review must be a keyed object`);
     return;
   }
 
-  for (const [label, values] of [['grandfathered_skill_ids', grandfathered], ['reviewed_skill_ids', reviewedIds]]) {
-    if (JSON.stringify(values) !== JSON.stringify([...values].sort((left, right) => left.localeCompare(right)))) {
-      fail(errors, `${baselinePath} ${label} must be sorted`);
-    }
-    if (new Set(values).size !== values.length) fail(errors, `${baselinePath} ${label} must not contain duplicates`);
-  }
-
-  if (JSON.stringify(grandfathered) !== JSON.stringify(IMMUTABLE_GRANDFATHERED_SKILL_IDS)) {
-    fail(errors, `${baselinePath} grandfathered_skill_ids must equal the immutable pre-gate legacy set`);
-  }
-
-  const grandfatheredSet = new Set(grandfathered);
-  const currentSkills = skillDirs().map((relPath) => path.basename(relPath));
+  const currentSkills = skillDirs().map((relPath) => path.basename(relPath)).sort((left, right) => left.localeCompare(right));
   const currentSet = new Set(currentSkills);
   const mapIds = Object.keys(reviewMap).sort((left, right) => left.localeCompare(right));
-  if (JSON.stringify([...reviewedIds].sort((left, right) => left.localeCompare(right))) !== JSON.stringify(mapIds)) {
-    fail(errors, `${baselinePath} reviewed_skill_ids must match skill_creation_review keys`);
-  }
-
   for (const skill of currentSkills) {
-    const isGrandfathered = grandfatheredSet.has(skill);
-    const hasReview = Object.prototype.hasOwnProperty.call(reviewMap, skill);
-    if (isGrandfathered && hasReview) fail(errors, `${baselinePath} must not review grandfathered skill ${skill} in the post-gate map`);
-    if (!isGrandfathered && !hasReview) fail(errors, `${baselinePath} missing skill_creation_review evidence for current skill ${skill}`);
+    if (!Object.prototype.hasOwnProperty.call(reviewMap, skill)) fail(errors, `${baselinePath} missing skill_creation_review evidence for current skill ${skill}`);
+  }
+  for (const skill of mapIds) {
+    if (!currentSet.has(skill)) fail(errors, `${baselinePath} contains stale skill_creation_review evidence for non-current skill ${skill}`);
+  }
+  if (JSON.stringify(currentSkills) !== JSON.stringify(mapIds)) {
+    fail(errors, `${baselinePath} skill_creation_review keys must exactly equal current skills/*/SKILL.md product IDs`);
   }
 
-  const requiredStrings = [
-    'existing_skill_review',
-    'trigger',
-    'decision',
-    'decision_reason',
-    'unique_value',
-    'runtime_footprint',
-    'local_assets',
-    'output_contract',
-    'anti_bloat_review',
-    'safety_boundary',
-    'third_party_audit',
-    'publisher_workflow',
-    'routing'
-  ];
   for (const [skill, review] of Object.entries(reviewMap)) {
-    if (!currentSet.has(skill)) {
-      fail(errors, `${baselinePath} contains stale skill_creation_review evidence for ${skill}`);
-      continue;
-    }
-    if (grandfatheredSet.has(skill)) fail(errors, `${baselinePath} post-gate review must not include grandfathered skill ${skill}`);
+    if (!currentSet.has(skill)) continue;
     if (!review || typeof review !== 'object' || Array.isArray(review)) {
       fail(errors, `${baselinePath} skill_creation_review.${skill} must be an object`);
       continue;
     }
-    for (const key of requiredStrings) {
+    if (!exactObjectKeys(review, skillCreationRecordKeys)) {
+      fail(errors, `${baselinePath} skill_creation_review.${skill} must contain the complete exact schema-v3 evidence fields`);
+    }
+    for (const key of skillCreationOperationalEvidenceFields) {
       if (typeof review[key] !== 'string' || review[key].trim().length < 12) {
         fail(errors, `${baselinePath} skill_creation_review.${skill}.${key} must be a non-empty evidence string`);
       }
     }
-    if (!['extend_existing_skill', 'new_project_skill'].includes(review.decision)) {
-      fail(errors, `${baselinePath} skill_creation_review.${skill}.decision must be extend_existing_skill or new_project_skill`);
+    if (review.public_id !== skill) {
+      fail(errors, `${baselinePath} skill_creation_review.${skill}.public_id must equal its keyed product ID`);
+    }
+    const currentPublicName = skillPublicName(skill);
+    if (!currentPublicName || review.public_name !== currentPublicName) {
+      fail(errors, `${baselinePath} skill_creation_review.${skill}.public_name must equal the current SKILL.md H1 title`);
+    }
+    for (const field of skillCreationRoutingEvidenceFields) {
+      const examples = review[field];
+      if (!Array.isArray(examples) || examples.length < 2 || examples.some((item) => typeof item !== 'string' || item.trim().length < 12)) {
+        fail(errors, `${baselinePath} skill_creation_review.${skill}.${field} must contain at least two non-empty routing examples`);
+      }
+    }
+    if (!['implicit', 'explicit'].includes(review.invocation_mode)) {
+      fail(errors, `${baselinePath} skill_creation_review.${skill}.invocation_mode must be implicit or explicit`);
+    }
+    const currentInvocationMode = skillInvocationMode(errors, baselinePath, skill);
+    if (currentInvocationMode && review.invocation_mode !== currentInvocationMode) {
+      fail(errors, `${baselinePath} skill_creation_review.${skill}.invocation_mode must match current agents/openai.yaml truth ${currentInvocationMode}`);
+    }
+    if (!['retain_current_product', 'new_product'].includes(review.decision)) {
+      fail(errors, `${baselinePath} skill_creation_review.${skill}.decision must be retain_current_product or new_product`);
     }
     if (!['first_party', 'third_party_audited', 'adapted_external', 'inspiration_only'].includes(review.source_provenance)) {
       fail(errors, `${baselinePath} skill_creation_review.${skill}.source_provenance is invalid`);
@@ -404,10 +448,103 @@ function validateSkillCreationGate(errors) {
     if (!String(review.existing_skill_review || '').toLowerCase().includes(skill.toLowerCase())) {
       fail(errors, `${baselinePath} skill_creation_review.${skill}.existing_skill_review must mention ${skill}`);
     }
-    if (!String(review.routing || '').toLowerCase().includes(skill.toLowerCase()) || !/\b(?:route|routed|routes|routing|omit|omits|omitted|omission)\b/i.test(review.routing || '')) {
-      fail(errors, `${baselinePath} skill_creation_review.${skill}.routing must document whether ${skill} is routed or intentionally omitted`);
-    }
     validateSkillCreationReviewEvidence(errors, baselinePath, skill, review);
+  }
+}
+
+function validateSkillProductMigrationLedger(errors) {
+  const ledgerPath = 'repo/contracts/skill-product-migration-ledger.json';
+  let ledger;
+  try {
+    ledger = readJson(ledgerPath);
+  } catch (error) {
+    fail(errors, `${ledgerPath} is not valid JSON: ${error.message}`);
+    return;
+  }
+  if (!ledger || typeof ledger !== 'object' || Array.isArray(ledger)) {
+    fail(errors, `${ledgerPath} must be an object`);
+    return;
+  }
+  if (!exactObjectKeys(ledger, ['schema_version', 'lifecycle', 'transitions', 'notes'])) {
+    fail(errors, `${ledgerPath} must contain only schema_version, lifecycle, transitions, and notes`);
+  }
+  if (ledger.schema_version !== 1) fail(errors, `${ledgerPath} schema_version must be 1`);
+  if (ledger.lifecycle !== 'transitional_until_s2_closure_review') {
+    fail(errors, `${ledgerPath} lifecycle must identify the S2 closure review`);
+  }
+  if (typeof ledger.notes !== 'string' || ledger.notes.trim().length < 12) {
+    fail(errors, `${ledgerPath} notes must be a non-empty contract string`);
+  }
+  if (!Array.isArray(ledger.transitions)) {
+    fail(errors, `${ledgerPath} transitions must be an array`);
+    return;
+  }
+
+  const currentSkills = new Set(skillDirs().map((relPath) => path.basename(relPath)));
+  const transitionIds = new Set();
+  const predecessorOwners = new Map();
+  for (let index = 0; index < ledger.transitions.length; index += 1) {
+    const entry = ledger.transitions[index];
+    const label = `${ledgerPath} transitions[${index}]`;
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      fail(errors, `${label} must be an object`);
+      continue;
+    }
+    if (!exactObjectKeys(entry, skillProductMigrationEntryKeys)) {
+      fail(errors, `${label} must contain the complete exact migration-entry fields`);
+    }
+    if (!Number.isInteger(entry.sequence) || entry.sequence !== index + 1) {
+      fail(errors, `${label}.sequence must be the append-only one-based sequence ${index + 1}`);
+    }
+    if (typeof entry.transition_id !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(entry.transition_id)) {
+      fail(errors, `${label}.transition_id must be a lowercase hyphenated identifier`);
+    } else if (transitionIds.has(entry.transition_id)) {
+      fail(errors, `${ledgerPath} transition_id ${entry.transition_id} is duplicated`);
+    } else {
+      transitionIds.add(entry.transition_id);
+    }
+    for (const field of ['predecessor_ids', 'successor_ids']) {
+      const ids = entry[field];
+      if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id))) {
+        fail(errors, `${label}.${field} must be an array of lowercase hyphenated product IDs`);
+        continue;
+      }
+      if (new Set(ids).size !== ids.length) fail(errors, `${label}.${field} must not contain duplicates`);
+      if (JSON.stringify(ids) !== JSON.stringify([...ids].sort((left, right) => left.localeCompare(right)))) {
+        fail(errors, `${label}.${field} must be sorted`);
+      }
+    }
+    const predecessors = Array.isArray(entry.predecessor_ids) ? entry.predecessor_ids : [];
+    const successors = Array.isArray(entry.successor_ids) ? entry.successor_ids : [];
+    if (predecessors.length === 0) fail(errors, `${label}.predecessor_ids must contain at least one historical product ID`);
+    if (successors.length > 1) fail(errors, `${label}.successor_ids supports at most one successor`);
+    for (const predecessor of predecessors) {
+      if (currentSkills.has(predecessor)) fail(errors, `${label} historical predecessor ${predecessor} is still a current product`);
+      const owner = predecessorOwners.get(predecessor);
+      if (owner) fail(errors, `${ledgerPath} predecessor ${predecessor} is ambiguously claimed by ${owner} and ${entry.transition_id}`);
+      else predecessorOwners.set(predecessor, entry.transition_id);
+      if (successors.includes(predecessor)) fail(errors, `${label} must not use ${predecessor} as both predecessor and successor`);
+    }
+    if (!['rename', 'merge', 'remove'].includes(entry.disposition)) {
+      fail(errors, `${label}.disposition must be rename, merge, or remove`);
+    }
+    if (!['migrated', 'deleted', 'fixture-only'].includes(entry.content_disposition)) {
+      fail(errors, `${label}.content_disposition must be migrated, deleted, or fixture-only`);
+    }
+    if (entry.disposition === 'rename' && (predecessors.length !== 1 || successors.length !== 1 || entry.content_disposition !== 'migrated')) {
+      fail(errors, `${label} rename requires one predecessor, one successor, and migrated content`);
+    }
+    if (entry.disposition === 'merge' && (predecessors.length < 2 || successors.length !== 1 || entry.content_disposition !== 'migrated')) {
+      fail(errors, `${label} merge requires at least two predecessors, one successor, and migrated content`);
+    }
+    if (entry.disposition === 'remove' && (successors.length !== 0 || !['deleted', 'fixture-only'].includes(entry.content_disposition))) {
+      fail(errors, `${label} remove requires no successor and deleted or fixture-only content`);
+    }
+    for (const field of ['authority', 'reason']) {
+      if (typeof entry[field] !== 'string' || entry[field].trim().length < 12) {
+        fail(errors, `${label}.${field} must be a non-empty evidence string`);
+      }
+    }
   }
 }
 
@@ -595,6 +732,7 @@ function validate() {
   validateForbiddenFiles(errors);
   validateSkills(errors);
   validateSkillCreationGate(errors);
+  validateSkillProductMigrationLedger(errors);
   validateSkillRouting(errors);
   validateSkillSafetyMatrix(errors);
   validateReadmeSkillTable(errors);
@@ -630,6 +768,6 @@ module.exports = {
   validationCommandTargetFinding,
   validationCommandTargets,
   validateSkillCreationGate,
-  IMMUTABLE_GRANDFATHERED_SKILL_IDS,
+  validateSkillProductMigrationLedger,
   validate
 };
