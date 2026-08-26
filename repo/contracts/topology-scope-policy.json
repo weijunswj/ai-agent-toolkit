@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "default_scope": "active-toolkit",
+  "entries": [
+    {
+      "path": "skills/context-preserving-ai-publisher/SKILL.md",
+      "scope": "standalone-publisher"
+    },
+    {
+      "path": "skills/context-preserving-ai-publisher/README.md",
+      "scope": "standalone-publisher"
+    },
+    {
+      "path": "repo/docs/RETIRED-SOURCE-PROVENANCE.md",
+      "scope": "historical-evidence"
+    },
+    {
+      "path": "repo/docs/audits/2026-07-15-native-codex-uat-remediation-audit.md",
+      "scope": "historical-evidence"
+    },
+    {
+      "path": "skills/context-preserving-ai-publisher/references/audit-and-baseline-workflow.md",
+      "scope": "non-operative-example"
+    },
+    {
+      "path": "skills/context-preserving-ai-publisher/references/validation-strategy.md",
+      "scope": "non-operative-example"
+    },
+    {
+      "path": "skills/context-preserving-ai-publisher/templates/project-module/SOURCE-LOCK.template.json",
+      "scope": "non-operative-example"
+    },
+    {
+      "path": "skills/context-preserving-ai-publisher/templates/project-module/toolkit.project.template.json",
+      "scope": "non-operative-example"
+    },
+    {
+      "path": "skills/context-preserving-ai-publisher/templates/repo-docs/project-module-standard.template.md",
+      "scope": "non-operative-example"
+    }
+  ]
+}

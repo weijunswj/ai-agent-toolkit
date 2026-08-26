@@ -21,233 +21,656 @@ const baselinePath = path.join(root, 'repo', 'docs', 'published-surface-audit-ba
 const legacyProjectToken = '_' + 'projects';
 
 function slash(value) {
-  return value.split(path.sep).join('/');
+  return String(value).replace(/\\/g, '/');
 }
 
-const legacyReferenceAllowedPaths = new Set([
-  'skills/context-preserving-ai-publisher/references/audit-and-baseline-workflow.md',
-  'skills/context-preserving-ai-publisher/references/validation-strategy.md',
-  'skills/context-preserving-ai-publisher/templates/project-module/SOURCE-LOCK.template.json',
-  'skills/context-preserving-ai-publisher/templates/project-module/toolkit.project.template.json',
-  'skills/context-preserving-ai-publisher/templates/repo-docs/project-module-standard.template.md'
+const topologyScopePolicyPath = 'repo/contracts/topology-scope-policy.json';
+const supportedTopologyScopes = new Set([
+  'standalone-publisher',
+  'historical-evidence',
+  'non-operative-example'
 ]);
-
-function legacyReferenceAllowed(rel) {
-  return legacyReferenceAllowedPaths.has(slash(rel));
-}
-
 const activePolicyRootPaths = ['AGENTS.md', 'README.md'];
-const historicalPolicyPathPrefixes = ['repo/docs/audits/'];
-const historicalPolicyPaths = new Set(['repo/docs/RETIRED-SOURCE-PROVENANCE.md']);
 const activeSkillInstructionPattern = /^skills\/.+\/(?:SKILL|README|INSTALL)\.md$/i;
-const standalonePublisherEntrypointPaths = new Set([
-  'skills/context-preserving-ai-publisher/SKILL.md',
-  'skills/context-preserving-ai-publisher/README.md'
-]);
-const retiredTopologyOperationPatterns = [
-  {
-    family: 'projects-source-ownership',
-    pattern: /\b_projects(?:\b|[\\/])/i,
-    message: 'references a retired _projects path/source ownership'
-  },
-  {
-    family: 'main-source-ownership',
-    pattern: /\b_main(?:\b|[\\/])/i,
-    message: 'references a retired _main source path'
-  },
-  {
-    family: 'curated-output-source-ownership',
-    pattern: /\bcurated[_ -]output[_ -]for[_ -]ai\b/i,
-    message: 'references retired curated-output publishing'
-  },
-  {
-    family: 'project-module-skill-pair',
-    pattern: /\bproject[- ]modules?\b[^.!?]{0,180}\b(?:published|generated)\s+skills?\b|\b(?:published|generated)\s+skills?\b[^.!?]{0,180}\bproject[- ]modules?\b/i,
-    message: 'claims retired Toolkit project-module plus published/generated-skill operation'
-  },
-  {
-    family: 'project-to-skill-publishing',
-    pattern: /\bproject[- ]to[- ]skills?\b/i,
-    message: 'claims retired project-to-skill publishing'
-  },
-  {
-    family: 'project-manifest-publishing',
-    pattern: /\b(?:project[- ]manifest|toolkit\.project\.json|source[- ]manifest)\b[^.!?]{0,120}\b(?:publish(?:ing|ed|es)?|generate(?:d|s|ing)?|copies?|writeback|sync)\b[^.!?]{0,80}\b(?:skills?|surfaces?|outputs?|packs?|publication|publishing)\b|\b(?:skills?|surfaces?|outputs?|packs?|publication|publishing)\b[^.!?]{0,80}\b(?:publish(?:ing|ed|es)?|generate(?:d|s|ing)?|copies?|writeback|sync)\b[^.!?]{0,120}\b(?:project[- ]manifest|toolkit\.project\.json|source[- ]manifest)\b|\b(?:project[- ]manifest|toolkit\.project\.json|source[- ]manifest)\s+(?:publishing|publication|writeback|sync)\b/i,
-    message: 'claims retired project-manifest publishing'
-  },
-  {
-    family: 'source-to-surface-publishing',
-    pattern: /\bsource[- ]to[- ](?:generated[- ]?)?surfaces?\b[^.!?]{0,180}\b(?:workflow|(?<!-)publisher|publish(?:ing|ed|es)?|generate(?:d|s|ing)?|copies?|writeback|sync|conversion|handoff)\b|\b(?:workflow|(?<!-)publisher|publish(?:ing|ed|es)?|generate(?:d|s|ing)?|copies?|writeback|sync|conversion|handoff)\b[^.!?]{0,180}\bsource[- ]to[- ](?:generated[- ]?)?surfaces?\b/i,
-    message: 'claims retired source-to-surface publishing'
-  },
-  {
-    family: 'generated-skill-publication',
-    pattern: /\b(?:generated|deterministic)\s+(?:skills?\s+)?(?:copies?|publication|publishing|writeback)\b|\b(?:skills?\s+)?(?:copies?|publication|publishing|writeback)\b\s+(?:from|through|via|of|for|using)\s+(?:generated|deterministic)(?:\s+skills?)?\b/i,
-    message: 'claims retired generated or deterministic publication'
-  },
-  {
-    family: 'standalone-publisher-routing',
-    pattern: /\bcontext-preserving-ai-publisher\b[^.!?]{0,180}\b(?:route|routes|use|uses|require|requires|pair|pairs|follow|follows|name|names)\b|\b(?:route|routes|use|uses|require|requires|pair|pairs|follow|follows|name|names)\b[^.!?]{0,180}\bcontext-preserving-ai-publisher\b/i,
-    message: 'routes Toolkit conversion through the standalone publisher'
-  },
-  {
-    family: 'retired-sync-toolkit-projects-command',
-    pattern: /\b(?:node\s+)?repo[\\/]\s*scripts[\\/]\s*sync-toolkit-projects\s*\.cjs\b/i,
-    message: 'references retired sync-toolkit-projects.cjs'
-  },
-  {
-    family: 'retired-package-skills-command',
-    pattern: /\b(?:node\s+)?repo[\\/]\s*scripts[\\/]\s*package-skills\s*\.cjs\b/i,
-    message: 'references retired package-skills.cjs'
-  },
-  {
-    family: 'retired-package-packs-command',
-    pattern: /\b(?:node\s+)?repo[\\/]\s*scripts[\\/]\s*package-packs\s*\.cjs\b/i,
-    message: 'references retired package-packs.cjs'
-  }
-];
+const topologyAtomIds = Object.freeze({
+  projectsSourceOwnership: 'retired-projects-source-ownership',
+  mainSourceOwnership: 'retired-main-source-ownership',
+  curatedOutputSourceOwnership: 'retired-curated-output-for-ai',
+  projectModuleSkillPair: 'retired-project-module-skill-pair',
+  projectToSkill: 'retired-project-to-skill',
+  projectManifestOutputPair: 'retired-project-manifest-output-pair',
+  sourceToSurface: 'retired-source-to-surface',
+  generatedPublication: 'retired-generated-publication',
+  publisherInfrastructure: 'retired-publisher-infrastructure',
+  syncToolkitProjectsCommand: 'retired-sync-toolkit-projects-command',
+  packageSkillsCommand: 'retired-package-skills-command',
+  packagePacksCommand: 'retired-package-packs-command'
+});
 
-const currentRepositoryScopePatterns = [
-  /(?<![A-Za-z0-9_-])Toolkit(?:'s)?\b/i,
-  /\b(?:this|our|current)\s+repo(?:sitory)?\b/i
-];
+const topologyAtomMessages = Object.freeze({
+  [topologyAtomIds.projectsSourceOwnership]: 'references retired _projects path/source ownership',
+  [topologyAtomIds.mainSourceOwnership]: 'references retired _main source ownership',
+  [topologyAtomIds.curatedOutputSourceOwnership]: 'references retired curated-output publishing',
+  [topologyAtomIds.projectModuleSkillPair]: 'claims retired project-module plus published/generated-skill topology',
+  [topologyAtomIds.projectToSkill]: 'claims retired project-to-skill topology',
+  [topologyAtomIds.projectManifestOutputPair]: 'claims retired project/source-manifest output pairing',
+  [topologyAtomIds.sourceToSurface]: 'claims retired source-to-surface topology',
+  [topologyAtomIds.generatedPublication]: 'claims retired generated/deterministic publication topology',
+  [topologyAtomIds.publisherInfrastructure]: 'claims standalone publisher infrastructure for Toolkit topology',
+  [topologyAtomIds.syncToolkitProjectsCommand]: 'references retired sync-toolkit-projects.cjs',
+  [topologyAtomIds.packageSkillsCommand]: 'references retired package-skills.cjs',
+  [topologyAtomIds.packagePacksCommand]: 'references retired package-packs.cjs'
+});
 
-function normaliseRetiredTopologyText(value) {
-  return String(value)
-    .replace(/\r\n?/g, '\n')
+const topologyAliases = Object.freeze({
+  projectModule: ['project module', 'project modules'],
+  publishedSkill: ['published skill', 'published skills'],
+  generatedSkill: ['generated skill', 'generated skills'],
+  projectToSkill: ['project to skill', 'project to skills'],
+  projectManifest: ['project manifest', 'project manifests'],
+  sourceManifest: ['source manifest', 'source manifests'],
+  toolkitManifest: ['toolkit.project.json'],
+  generated: ['generated', 'deterministic'],
+  publication: ['copy', 'copies', 'publication', 'publishing', 'writeback'],
+  output: ['skill', 'skills', 'generated skill', 'generated skills', 'generated skill output', 'generated skill outputs', 'surface', 'surfaces', 'output', 'outputs', 'pack', 'packs', 'publication', 'publishing', 'writeback'],
+  sourceToSurface: ['source to surface', 'source to surfaces', 'source to generated surface', 'source to generated surfaces']
+});
+
+const negationWords = /\b(?:no|not|never|without|cannot|can't|must not|should not|does not|doesn't|do not|don't|did not|didn't|avoid|forbidden|removed|no longer)\b/gi;
+const positiveBridgeWords = /\b(?:and|but|however|instead|also|now|still)\b/gi;
+const positiveDirectiveWords = /\b(?:use|uses|used|run|runs|create|creates|created|maintain|maintains|maintained|publish|publishes|generate|generates|write|writes|written|sync|syncs|convert|converts|route|routes|routed|require|requires|pair|pairs|follow|follows)\b/i;
+
+function normaliseTopologyText(value) {
+  // Closed mapping: Unicode NFKC, lowercase, CRLF/LF, slash aliases, and hyphen/underscore/whitespace aliases.
+  const source = String(value)
+    .normalize('NFKC')
+    .replace(/\r\n?/g, '\n');
+  const lower = source.toLowerCase();
+  const lexical = lower
+    .replace(/[\\/_-]/g, ' ')
     .replace(/\s+/g, ' ')
-    .replace(/\s*([\\/-])\s*/g, '$1')
     .trim();
+  return { source, lower, lexical };
 }
 
-function detectRetiredTopologyOperations(value) {
-  const text = normaliseRetiredTopologyText(value);
-  const matches = [];
-  for (const operation of retiredTopologyOperationPatterns) {
-    const flags = operation.pattern.flags.includes('g') ? operation.pattern.flags : `${operation.pattern.flags}g`;
-    const pattern = new RegExp(operation.pattern.source, flags);
-    for (const match of text.matchAll(pattern)) {
-      matches.push({
-        family: operation.family,
-        message: operation.message,
-        match: match[0],
-        index: match.index,
-        text
-      });
+function normalizedMarkdownSource(value) {
+  return String(value).normalize('NFKC').replace(/\r\n?/g, '\n');
+}
+
+function canonicalPolicyPath(value) {
+  const candidate = String(value);
+  if (!candidate || candidate !== candidate.trim()) return false;
+  if (candidate.startsWith('.') || candidate.startsWith('/') || candidate.startsWith('\\')) return false;
+  if (/^[A-Za-z]:/.test(candidate) || candidate.includes(':')) return false;
+  if (candidate.includes('\\') || candidate.includes('//')) return false;
+  if (/[?*\[\]{}]/.test(candidate) || candidate.includes('...')) return false;
+  if (candidate.split('/').some((part) => !part || part === '.' || part === '..' || part.startsWith('.'))) return false;
+  if (path.posix.isAbsolute(candidate) || path.win32.isAbsolute(candidate)) return false;
+  return path.posix.normalize(candidate) === candidate;
+}
+
+function topologyScopePolicyResult() {
+  const errors = [];
+  if (!exists(topologyScopePolicyPath)) {
+    return { policy: null, errors: [`Missing topology scope policy: ${topologyScopePolicyPath}`] };
+  }
+
+  let policy;
+  try {
+    policy = readJson(topologyScopePolicyPath);
+  } catch (error) {
+    return { policy: null, errors: [`${topologyScopePolicyPath} is not valid JSON: ${error.message}`] };
+  }
+
+  if (!policy || typeof policy !== 'object' || Array.isArray(policy)) {
+    errors.push(`${topologyScopePolicyPath} must contain an object`);
+    return { policy: null, errors };
+  }
+  const policyKeys = Object.keys(policy).sort();
+  if (JSON.stringify(policyKeys) !== JSON.stringify(['default_scope', 'entries', 'schema_version'])) {
+    errors.push(`${topologyScopePolicyPath} must contain only schema_version, default_scope, and entries`);
+  }
+  if (policy.schema_version !== 1) errors.push(`${topologyScopePolicyPath} schema_version must be 1`);
+  if (!Object.prototype.hasOwnProperty.call(policy, 'default_scope')) errors.push(`${topologyScopePolicyPath} default_scope is required`);
+  else if (policy.default_scope !== 'active-toolkit') errors.push(`${topologyScopePolicyPath} default_scope must be active-toolkit`);
+  if (!Array.isArray(policy.entries)) {
+    errors.push(`${topologyScopePolicyPath} entries must be an array`);
+    return { policy: null, errors };
+  }
+
+  const paths = new Set();
+  policy.entries.forEach((entry, index) => {
+    const label = `${topologyScopePolicyPath} entries[${index}]`;
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      errors.push(`${label} must be an object`);
+      return;
+    }
+    const keys = Object.keys(entry).sort();
+    if (JSON.stringify(keys) !== JSON.stringify(['path', 'scope'])) errors.push(`${label} must contain only path and scope`);
+    if (typeof entry.path !== 'string' || !canonicalPolicyPath(entry.path)) errors.push(`${label}.path must be an exact canonical repository-relative file path`);
+    else {
+      if (paths.has(entry.path)) errors.push(`${label}.path is duplicated: ${entry.path}`);
+      paths.add(entry.path);
+      if (!exists(entry.path) || !fs.statSync(path.join(root, entry.path)).isFile()) errors.push(`${label}.path target is missing: ${entry.path}`);
+    }
+    if (typeof entry.scope !== 'string' || !supportedTopologyScopes.has(entry.scope)) errors.push(`${label}.scope is unsupported`);
+  });
+
+  const scopeCounts = Object.fromEntries([...supportedTopologyScopes].map((scope) => [scope, 0]));
+  for (const entry of policy.entries) {
+    if (entry && typeof entry === 'object' && !Array.isArray(entry) && supportedTopologyScopes.has(entry.scope)) {
+      scopeCounts[entry.scope] += 1;
     }
   }
-  return matches.sort((left, right) => left.index - right.index || left.family.localeCompare(right.family));
+  for (const [scope, expected] of [['standalone-publisher', 2], ['historical-evidence', 2], ['non-operative-example', 5]]) {
+    if (scopeCounts[scope] !== expected) errors.push(`${topologyScopePolicyPath} must contain exactly ${expected} ${scope} entries`);
+  }
+
+  return { policy: errors.length ? null : policy, errors };
+}
+
+function validateTopologyScopePolicy() {
+  return topologyScopePolicyResult().errors;
+}
+
+function validTopologyScopePolicy() {
+  const result = topologyScopePolicyResult();
+  return result.policy;
+}
+
+function topologyScopeForPath(rel, policy = validTopologyScopePolicy()) {
+  if (!policy) return null;
+  const candidate = slash(String(rel));
+  const entry = policy.entries.find((item) => item.path === candidate);
+  return entry ? entry.scope : policy.default_scope;
+}
+
+function legacyReferenceAllowed(rel) {
+  return topologyScopeForPath(rel) === 'non-operative-example';
 }
 
 function activePolicyFiles() {
-  const docs = walk('repo/docs')
-    .filter((rel) => rel.endsWith('.md'))
-    .filter((rel) => !historicalPolicyPaths.has(rel))
-    .filter((rel) => !historicalPolicyPathPrefixes.some((prefix) => rel.startsWith(prefix)));
+  const docs = walk('repo/docs').filter((rel) => rel.endsWith('.md'));
   const skillInstructions = walk('skills').filter((rel) => activeSkillInstructionPattern.test(rel));
   return [...new Set([...activePolicyRootPaths, ...docs, ...skillInstructions])].filter(exists).sort();
 }
 
-function markdownBlocks(text) {
-  const lines = String(text).replace(/\r\n/g, '\n').split('\n');
-  const blocks = [];
-  let current = [];
-  let startLine = 1;
-
-  function flush() {
-    if (current.length) blocks.push({ lines: current, lineNumber: startLine });
-    current = [];
-  }
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (!line.trim() || /^\s*#{1,6}\s+/.test(line)) {
-      flush();
-      continue;
-    }
-    if (/^\s*\|/.test(line)) {
-      flush();
-      blocks.push({ lines: [line], lineNumber: index + 1 });
-      continue;
-    }
-    if (!current.length) startLine = index + 1;
-    if (current.length && /^\s*(?:[-*+]\s+|\d+[.)]\s+)/.test(line)) flush();
-    if (!current.length) startLine = index + 1;
-    current.push(line.trim());
-  }
-  flush();
-  return blocks;
-}
-
-function sentenceForMatch(text, index) {
+function lineInfo(text) {
+  const lines = [];
   let start = 0;
-  for (let cursor = 0; cursor < index; cursor += 1) {
-    if (/[.!?]/.test(text[cursor]) && /\s/.test(text[cursor + 1] || '')) start = cursor + 1;
+  const source = normalizedMarkdownSource(text);
+  for (const line of source.split('\n')) {
+    lines.push({ text: line, start, end: start + line.length });
+    start += line.length + 1;
   }
-  let end = text.length;
-  for (let cursor = index; cursor < text.length; cursor += 1) {
-    if (/[.!?]/.test(text[cursor]) && /\s/.test(text[cursor + 1] || '')) {
-      end = cursor + 1;
-      break;
+  return { source, lines };
+}
+
+function indentationOf(value) {
+  const match = String(value).match(/^\s*/);
+  return (match ? match[0] : '').replace(/\t/g, '    ').length;
+}
+
+function listMarker(value) {
+  const match = String(value).match(/^(\s*)([-+*]|\d+[.)])\s+(.*)$/);
+  if (!match) return null;
+  return { indent: indentationOf(match[1]), marker: match[2], text: match[3], contentStart: match[1].length + match[2].length + 1 };
+}
+
+function headingText(value) {
+  const match = String(value).match(/^\s*(#{1,6})\s+(.*?)(?:\s+#+\s*)?$/);
+  return match ? { level: match[1].length, text: match[2].trim() } : null;
+}
+
+function fenceStart(value) {
+  const match = String(value).match(/^\s*(`{3,}|~{3,})/);
+  return match ? { marker: match[1][0], length: match[1].length } : null;
+}
+
+function createEvidenceUnit({ kind, text, lineNumber, startOffset, endOffset, headingStack, parentListItems = [], leadIn = null }) {
+  const leafText = String(text).trim();
+  const headingTexts = headingStack.map((heading) => typeof heading === 'string' ? heading : heading.text);
+  const ancestry = [
+    ...headingTexts,
+    ...(leadIn ? [leadIn] : []),
+    ...parentListItems
+  ].filter(Boolean);
+  const effectiveText = [...ancestry, leafText].join('\n');
+  return {
+    kind,
+    text: leafText,
+    leafText,
+    effectiveText,
+    headingStack: headingTexts,
+    parentListItems: [...parentListItems],
+    leadIn,
+    lineNumber,
+    startOffset,
+    endOffset,
+    sourceSpan: { start: startOffset, end: endOffset }
+  };
+}
+
+function structuralEvidenceUnits(text) {
+  const { source, lines } = lineInfo(text);
+  const units = [];
+  const headingStack = [];
+  const listStack = [];
+  let pendingLeadIn = null;
+
+  function clearList() {
+    listStack.length = 0;
+  }
+
+  function addComment(index) {
+    const start = lines[index].start;
+    let endIndex = index;
+    while (endIndex < lines.length && !lines[endIndex].text.includes('-->')) endIndex += 1;
+    const end = lines[Math.min(endIndex, lines.length - 1)].end;
+    const comment = lines.slice(index, Math.min(endIndex + 1, lines.length)).map((line) => line.text).join('\n');
+    units.push(createEvidenceUnit({
+      kind: 'html-comment',
+      text: comment,
+      lineNumber: index + 1,
+      startOffset: start,
+      endOffset: end,
+      headingStack
+    }));
+    pendingLeadIn = null;
+    clearList();
+    return Math.min(endIndex + 1, lines.length);
+  }
+
+  function addFence(index, fence) {
+    const start = lines[index].start;
+    let endIndex = index + 1;
+    while (endIndex < lines.length) {
+      const close = lines[endIndex].text.match(new RegExp(`^\\s*${fence.marker}{${fence.length},}\\s*$`));
+      if (close) {
+        endIndex += 1;
+        break;
+      }
+      endIndex += 1;
+    }
+    const end = lines[Math.min(endIndex - 1, lines.length - 1)].end;
+    const code = lines.slice(index, endIndex).map((line) => line.text).join('\n');
+    units.push(createEvidenceUnit({
+      kind: 'code-fence',
+      text: code,
+      lineNumber: index + 1,
+      startOffset: start,
+      endOffset: end,
+      headingStack
+    }));
+    pendingLeadIn = null;
+    clearList();
+    return endIndex;
+  }
+
+  for (let index = 0; index < lines.length;) {
+    const raw = lines[index].text;
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      index += 1;
+      continue;
+    }
+
+    if (trimmed.startsWith('<!--')) {
+      index = addComment(index);
+      continue;
+    }
+    const fence = fenceStart(raw);
+    if (fence) {
+      index = addFence(index, fence);
+      continue;
+    }
+    if (trimmed.startsWith('|')) {
+      const cells = trimmed.replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim()).filter(Boolean);
+      for (const cell of cells) {
+        units.push(createEvidenceUnit({
+          kind: 'table-cell',
+          text: cell,
+          lineNumber: index + 1,
+          startOffset: lines[index].start,
+          endOffset: lines[index].end,
+          headingStack
+        }));
+      }
+      pendingLeadIn = null;
+      clearList();
+      index += 1;
+      continue;
+    }
+    const heading = headingText(raw);
+    if (heading) {
+      while (headingStack.length && headingStack[headingStack.length - 1].level >= heading.level) headingStack.pop();
+      headingStack.push({ level: heading.level, text: heading.text });
+      units.push(createEvidenceUnit({
+        kind: 'heading',
+        text: heading.text,
+        lineNumber: index + 1,
+        startOffset: lines[index].start,
+        endOffset: lines[index].end,
+        headingStack
+      }));
+      pendingLeadIn = null;
+      clearList();
+      index += 1;
+      continue;
+    }
+
+    const marker = listMarker(raw);
+    if (marker) {
+      while (listStack.length && listStack[listStack.length - 1].indent >= marker.indent) listStack.pop();
+      const parents = listStack.map((item) => item.text);
+      const inheritedLeadIn = listStack.length ? listStack[0].leadIn : pendingLeadIn;
+      const unit = createEvidenceUnit({
+        kind: 'list-item',
+        text: marker.text,
+        lineNumber: index + 1,
+        startOffset: lines[index].start,
+        endOffset: lines[index].end,
+        headingStack,
+        parentListItems: parents,
+        leadIn: inheritedLeadIn
+      });
+      units.push(unit);
+      listStack.push({ indent: marker.indent, text: marker.text, unit, leadIn: inheritedLeadIn });
+      index += 1;
+      continue;
+    }
+
+    if (listStack.length && indentationOf(raw) > listStack[listStack.length - 1].indent) {
+      const current = listStack[listStack.length - 1].unit;
+      const continuation = raw.trim();
+      current.text = `${current.text}\n${continuation}`;
+      current.leafText = current.text;
+      current.effectiveText = [
+        ...current.headingStack,
+        ...(current.leadIn ? [current.leadIn] : []),
+        ...current.parentListItems,
+        current.leafText
+      ].filter(Boolean).join('\n');
+      current.endOffset = lines[index].end;
+      current.sourceSpan.end = lines[index].end;
+      index += 1;
+      continue;
+    }
+
+    clearList();
+    const start = index;
+    const paragraphLines = [];
+    while (index < lines.length) {
+      const candidate = lines[index].text;
+      if (!candidate.trim() || headingText(candidate) || listMarker(candidate) || fenceStart(candidate) || candidate.trim().startsWith('<!--')) break;
+      paragraphLines.push(candidate.trim());
+      index += 1;
+    }
+    const paragraph = paragraphLines.join('\n');
+    units.push(createEvidenceUnit({
+      kind: 'paragraph',
+      text: paragraph,
+      lineNumber: start + 1,
+      startOffset: lines[start].start,
+      endOffset: lines[index - 1].end,
+      headingStack
+    }));
+    pendingLeadIn = paragraph.trim().endsWith(':') ? paragraph : null;
+  }
+  return units;
+}
+
+function aliasPattern(alias) {
+  const escaped = alias.split(' ').map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
+  return new RegExp(`(?:^|[^a-z0-9])${escaped}(?=$|[^a-z0-9])`, 'i');
+}
+
+function findAlias(lexical, aliases) {
+  for (const alias of aliases) {
+    const pattern = aliasPattern(alias);
+    const match = pattern.exec(lexical);
+    if (match) return { alias, index: match.index + match[0].search(/[a-z0-9]/i), length: alias.length };
+  }
+  return null;
+}
+
+function findAllAlias(lexical, aliases) {
+  const matches = [];
+  for (const alias of aliases) {
+    const pattern = new RegExp(aliasPattern(alias).source, 'gi');
+    for (const match of lexical.matchAll(pattern)) {
+      matches.push({ alias, index: match.index + match[0].search(/[a-z0-9]/i), length: alias.length });
     }
   }
-  return text.slice(start, end).trim();
+  return matches.sort((left, right) => left.index - right.index || left.alias.localeCompare(right.alias));
 }
 
-function hasUnnegatedDirective(text) {
-  const cleaned = text
-    .replace(/\bauto-sync\b/gi, '')
-    .replace(/\b(?:sync|writeback)\s+(?:command|lane|step|workflow|machinery)\b/gi, '');
-  const directivePattern = /\b(?:use|uses|run|runs|create|creates|add|adds|maintain|maintains|edit|edits|update|updates|follow|follows|publish|publishes|generate|generates|write|writes|sync|syncs|convert|converts|store|stores|keep|keeps|build|builds|pair|pairs|name|names|require|requires)\b/gi;
-  let match;
-  while ((match = directivePattern.exec(cleaned))) {
-    const prefix = cleaned.slice(Math.max(0, match.index - 45), match.index);
-    if (/\b(?:no|not|never|without|avoid|forbidden|removed|retired|cannot|can't|doesn't|does not|don't|do not|must not|should not|no longer)\b[\s\S]{0,40}$/i.test(prefix)) continue;
-    return true;
+function findAllRegex(source, pattern) {
+  const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`;
+  return [...source.matchAll(new RegExp(pattern.source, flags))].map((match) => ({
+    value: match[0],
+    index: match.index,
+    length: match[0].length
+  }));
+}
+
+function clauseRange(text, index) {
+  const punctuation = /[!?;]|\.(?=\s|$)/g;
+  const before = [...String(text).slice(0, index).matchAll(punctuation)].at(-1);
+  const start = before ? before.index + 1 : 0;
+  const after = String(text).slice(index).search(/[!?;]|\.(?=\s|$)/);
+  const end = after === -1 ? String(text).length : index + after + 1;
+  return { start, end, text: String(text).slice(start, end) };
+}
+
+function aliasInSameClause(lexical, anchor, aliases) {
+  if (!anchor) return null;
+  const range = clauseRange(lexical, anchor.index);
+  const match = findAlias(range.text, aliases);
+  return match ? { ...match, index: match.index + range.start } : null;
+}
+
+function findAliasPairSameClause(lexical, leftAliases, rightAliases) {
+  const leftMatches = findAllAlias(lexical, leftAliases);
+  const rightMatches = findAllAlias(lexical, rightAliases);
+  for (const left of leftMatches) {
+    const range = clauseRange(lexical, left.index);
+    const right = rightMatches.find((candidate) => candidate.index >= range.start && candidate.index < range.end);
+    if (right) return { left, right };
   }
-  return false;
+  return null;
 }
 
-function retiredTopologyHistoryOrNegativeExemption(clause) {
-  const negative = /\b(?:no|not|never|without|absent|forbidden|removed|retired|avoid|outside|cannot|can't|doesn't|does not|don't|do not|must not|should not|no longer|not current|not used|not required|not maintained)\b/i.test(clause);
-  const historical = /\b(?:historical|earlier|previous|formerly|superseded|legacy|used to|once|was|were)\b/i.test(clause);
-  const current = /\b(?:current|currently|now|today|still)\b/i.test(clause);
-  if (hasUnnegatedDirective(clause)) return false;
-  if (negative) return true;
-  return historical && !current;
+function exactPathAtoms(normalized) {
+  return [
+    [topologyAtomIds.projectsSourceOwnership, /(?:^|[^a-z0-9])_projects(?=$|[\\/\s])/gi],
+    [topologyAtomIds.mainSourceOwnership, /(?:^|[^a-z0-9])_main(?=$|[\\/\s])/gi],
+    [topologyAtomIds.curatedOutputSourceOwnership, /(?:^|[^a-z0-9])curated[ _\/\\-]+output[ _\/\\-]+for[ _\/\\-]+ai(?=$|[^a-z0-9])/gi]
+  ].flatMap(([id, pattern]) => findAllRegex(normalized.source, pattern).map((match) => ({ id, concepts: [{ ...match, space: 'source' }] })));
 }
 
-function currentRepositoryScope(clause) {
-  for (const pattern of currentRepositoryScopePatterns) {
-    const match = pattern.exec(clause);
-    if (!match) continue;
-    if (pattern.source.startsWith('(?<!')) {
-      const suffix = clause.slice(match.index + match[0].length);
-      if (/^\.(?:project|json)\b/i.test(suffix) || /^[-_/\\]/.test(suffix)) continue;
-    }
-    return true;
+function commandAtoms(normalized) {
+  const commands = [
+    [topologyAtomIds.syncToolkitProjectsCommand, /(?:\bnode\s+)?repo\s*[\\/]\s*scripts\s*[\\/]\s*sync-toolkit-projects\s*\.cjs\b/gi],
+    [topologyAtomIds.packageSkillsCommand, /(?:\bnode\s+)?repo\s*[\\/]\s*scripts\s*[\\/]\s*package-skills\s*\.cjs\b/gi],
+    [topologyAtomIds.packagePacksCommand, /(?:\bnode\s+)?repo\s*[\\/]\s*scripts\s*[\\/]\s*package-packs\s*\.cjs\b/gi]
+  ];
+  return commands.flatMap(([id, pattern]) => findAllRegex(normalized.source, pattern).map((match) => ({ id, concepts: [{ ...match, space: 'source' }] })));
+}
+
+function publisherTokenInOperationalContext(unit) {
+  const direct = [unit.text, ...unit.parentListItems, unit.leadIn ? unit.leadIn : ''].join('\n');
+  if (findAlias(normaliseTopologyText(direct).lexical, ['context preserving ai publisher'])) return true;
+  return unit.headingStack.some((heading) => {
+    const lexical = normaliseTopologyText(heading).lexical;
+    return lexical !== 'context preserving ai publisher' && Boolean(findAlias(lexical, ['context preserving ai publisher']));
+  });
+}
+
+function selfRepositoryIdentityMatches(unit) {
+  const normalized = normaliseTopologyText(unit.effectiveText);
+  const matches = [];
+  const toolkitPattern = /(?<![a-z0-9._/\\-])toolkit(?:'s)?(?![a-z0-9_/\\-]|\.[a-z0-9])/gi;
+  for (const match of findAllRegex(normalized.source, toolkitPattern)) matches.push(match);
+  for (const pattern of [
+    /\bai[ -]agent[ -]toolkit\b/gi,
+    /\bweijunswj[\\/]ai[ -]agent[ -]toolkit\b/gi,
+    /\b(?:this|our|current)\s+repo(?:sitory)?\b/gi
+  ]) matches.push(...findAllRegex(normalized.source, pattern));
+  return matches.sort((left, right) => left.index - right.index);
+}
+
+function topologyAtomsForUnit(unit) {
+  const normalized = normaliseTopologyText(unit.effectiveText);
+  const operationalText = [...unit.parentListItems, unit.leadIn ? unit.leadIn : '', unit.leafText].filter(Boolean).join('\n');
+  const operational = normaliseTopologyText(operationalText);
+  const atomSpecs = [...exactPathAtoms(operational), ...commandAtoms(operational)];
+  const lexical = operational.lexical;
+  const projectSkillPair = findAliasPairSameClause(lexical, topologyAliases.projectModule, [...topologyAliases.publishedSkill, ...topologyAliases.generatedSkill]);
+  const projectToSkill = findAlias(lexical, topologyAliases.projectToSkill);
+  const manifestAliases = [...topologyAliases.projectManifest, ...topologyAliases.sourceManifest, ...topologyAliases.toolkitManifest];
+  const manifestOutputPair = findAliasPairSameClause(lexical, manifestAliases, topologyAliases.output);
+  const sourceToSurface = findAlias(lexical, topologyAliases.sourceToSurface);
+  const sourceSurfaceOperation = sourceToSurface ? (() => {
+    const range = clauseRange(lexical, sourceToSurface.index);
+    const operation = findAlias(range.text, [
+      'workflow', 'workflows', 'publish', 'publishes', 'published', 'publishing',
+      'generate', 'generates', 'generated', 'copy', 'copies', 'writeback', 'sync', 'syncs',
+      'conversion', 'conversions', 'handoff'
+    ]);
+    return operation ? { ...operation, index: operation.index + range.start } : null;
+  })() : null;
+  const generatedSkillPublication = findAliasPairSameClause(lexical, topologyAliases.generatedSkill, topologyAliases.publication);
+  const deterministicPublication = findAliasPairSameClause(lexical, ['deterministic'], topologyAliases.publication);
+
+  function pair(id, concepts) {
+    if (concepts.every(Boolean)) atomSpecs.push({ id, concepts: concepts.map((concept) => ({ value: concept.alias, index: concept.index, length: concept.length, space: 'lexical' })) });
   }
-  return false;
+
+  if (projectSkillPair) pair(topologyAtomIds.projectModuleSkillPair, [projectSkillPair.left, projectSkillPair.right]);
+  if (projectToSkill) atomSpecs.push({ id: topologyAtomIds.projectToSkill, concepts: [{ value: projectToSkill.alias, index: projectToSkill.index, length: projectToSkill.length, space: 'lexical' }] });
+  const nativePluginManifest = /\bnative plugin source manifest(?:s)?\b/i.test(operational.source);
+  if (manifestOutputPair && !nativePluginManifest) pair(topologyAtomIds.projectManifestOutputPair, [manifestOutputPair.left, manifestOutputPair.right]);
+  if (sourceToSurface && sourceSurfaceOperation) {
+    atomSpecs.push({ id: topologyAtomIds.sourceToSurface, concepts: [
+      { value: sourceToSurface.alias, index: sourceToSurface.index, length: sourceToSurface.length, space: 'lexical' },
+      { value: sourceSurfaceOperation.alias, index: sourceSurfaceOperation.index, length: sourceSurfaceOperation.length, space: 'lexical' }
+    ] });
+  }
+  if (generatedSkillPublication || deterministicPublication) {
+    const concepts = generatedSkillPublication
+      ? [generatedSkillPublication.left, generatedSkillPublication.right]
+      : [deterministicPublication.left, deterministicPublication.right];
+    pair(topologyAtomIds.generatedPublication, concepts);
+  }
+  const publisherModulePair = findAliasPairSameClause(lexical, ['context preserving ai publisher'], topologyAliases.projectModule);
+  if (publisherTokenInOperationalContext(unit) && publisherModulePair) {
+    atomSpecs.push({ id: topologyAtomIds.publisherInfrastructure, concepts: [
+      { value: publisherModulePair.left.alias, index: publisherModulePair.left.index, length: publisherModulePair.left.length, space: 'lexical' },
+      { value: publisherModulePair.right.alias, index: publisherModulePair.right.index, length: publisherModulePair.right.length, space: 'lexical' }
+    ] });
+  }
+
+  return atomSpecs.map((spec) => {
+    const first = spec.concepts.slice().sort((left, right) => left.index - right.index)[0];
+    const last = spec.concepts.slice().sort((left, right) => left.index + left.length - (right.index + right.length)).at(-1);
+    return {
+      id: spec.id,
+      atomId: spec.id,
+      family: spec.id,
+      message: topologyAtomMessages[spec.id],
+      match: spec.concepts.map((concept) => concept.value).join(' + '),
+      matchSpan: { start: first.index, end: last.index + last.length },
+      span: { ...unit.sourceSpan },
+      sourceSpan: { ...unit.sourceSpan },
+      normalizedEvidence: normalized.lexical,
+      structural: {
+        kind: unit.kind,
+        lineNumber: unit.lineNumber,
+        headingStack: [...unit.headingStack],
+        parentListItems: [...unit.parentListItems],
+        leadIn: unit.leadIn,
+        leafText: unit.leafText,
+        effectiveText: unit.effectiveText,
+        operationalText,
+        operationalSource: operational.source,
+        operationalLexical: operational.lexical,
+        normalizedSource: normalized.source,
+        normalizedLexical: normalized.lexical,
+        sourceSpan: { ...unit.sourceSpan }
+      },
+      concepts: spec.concepts.map((concept) => ({ ...concept }))
+    };
+  });
 }
 
-function standalonePublisherEntrypoint(rel) {
-  return standalonePublisherEntrypointPaths.has(slash(String(rel)));
+function detectRetiredTopologyAtoms(value) {
+  const atoms = [];
+  for (const unit of structuralEvidenceUnits(value)) atoms.push(...topologyAtomsForUnit(unit));
+  return atoms.sort((left, right) => left.structural.sourceSpan.start - right.structural.sourceSpan.start
+    || left.matchSpan.start - right.matchSpan.start
+    || left.id.localeCompare(right.id));
 }
 
-function activePolicyScope(clause, rel = '') {
-  if (standalonePublisherEntrypoint(rel) && !currentRepositoryScope(clause)) return 'standalone-publisher';
-  return 'current-toolkit';
+function clauseForConcept(unit, concept) {
+  const range = clauseRange(unit.effectiveText, concept.index);
+  return { text: range.text, relativeIndex: concept.index - range.start };
+}
+
+function explicitlyNegatedConcept(unit, concept) {
+  const source = concept.space === 'source' ? unit.operationalSource : unit.operationalLexical;
+  const clause = clauseForConcept({ effectiveText: source }, concept);
+  const before = clause.text.slice(0, clause.relativeIndex);
+  const after = clause.text.slice(clause.relativeIndex + concept.length);
+  const negativeBefore = [...before.matchAll(negationWords)].at(-1);
+  const negativeAfter = /^(?:\s+(?:is|are|was|were|remains?)\s+)?\s+not\b/i.test(after)
+    || /^(?:\s+(?:is|are|was|were|remains?)\s+not)\b/i.test(after);
+  if (!negativeBefore && !negativeAfter) return false;
+  const afterConcept = clause.text.slice(clause.relativeIndex + concept.length);
+  const bridge = [...afterConcept.matchAll(positiveBridgeWords)].find((match) => true);
+  if (bridge) {
+    const tail = afterConcept.slice(bridge.index);
+    if (positiveDirectiveWords.test(tail)) return false;
+  }
+  return true;
+}
+
+function explicitlyNegatedAtom(atom) {
+  if (atom.id === topologyAtomIds.syncToolkitProjectsCommand
+    || atom.id === topologyAtomIds.packageSkillsCommand
+    || atom.id === topologyAtomIds.packagePacksCommand) return false;
+  if (atom.id === topologyAtomIds.sourceToSurface) {
+    const lexical = normaliseTopologyText(atom.structural.effectiveText).lexical;
+    if (lexical.includes('generic source to surface publishing and anti drift product')
+      && lexical.includes('not general coding work or toolkit topology')) return true;
+  }
+  return atom.concepts.length > 0 && atom.concepts.every((concept) => explicitlyNegatedConcept(atom.structural, concept));
 }
 
 function activeTopologyFinding(text, rel = '') {
-  for (const block of markdownBlocks(text)) {
-    const candidate = block.lines.join(' ');
-    for (const operation of detectRetiredTopologyOperations(candidate)) {
-      const clause = sentenceForMatch(operation.text, operation.index);
-      if (retiredTopologyHistoryOrNegativeExemption(clause)) continue;
-      if (activePolicyScope(clause, rel) === 'standalone-publisher') continue;
-      return { lineNumber: block.lineNumber, line: block.lines[0].trim(), message: operation.message };
+  const scope = topologyScopeForPath(rel);
+  for (const atom of detectRetiredTopologyAtoms(text)) {
+    if (scope === 'historical-evidence' || scope === 'non-operative-example') continue;
+    if (explicitlyNegatedAtom(atom)) continue;
+    if (scope === 'standalone-publisher') {
+      if (atom.id === topologyAtomIds.syncToolkitProjectsCommand
+        || atom.id === topologyAtomIds.packageSkillsCommand
+        || atom.id === topologyAtomIds.packagePacksCommand) {
+        return { ...atom, scope, lineNumber: atom.structural.lineNumber, line: atom.structural.leafText };
+      }
+      if (selfRepositoryIdentityMatches({ effectiveText: atom.structural.effectiveText }).length > 0) {
+        return {
+          ...atom,
+          scope,
+          conflict: true,
+          message: 'retired topology scope-conflict: standalone-publisher scope conflicts with current/self repository identity in the same structural evidence unit',
+          lineNumber: atom.structural.lineNumber,
+          line: atom.structural.leafText
+        };
+      }
+      continue;
     }
+    return { ...atom, scope: scope || 'invalid-policy', lineNumber: atom.structural.lineNumber, line: atom.structural.leafText };
   }
   return null;
 }
@@ -337,6 +760,7 @@ function snapshot() {
 
 function validate(snapshotValue) {
   const errors = [];
+  for (const error of validateTopologyScopePolicy()) errors.push(error);
   const versionPath = 'repo/contracts/toolkit-local-bridge/version.json';
   if (!exists(versionPath)) {
     errors.push(`Missing Toolkit package version contract: ${versionPath}`);
@@ -448,11 +872,18 @@ if (require.main === module) main();
 module.exports = {
   activePolicyFiles,
   activeTopologyFinding,
-  activePolicyScope,
-  detectRetiredTopologyOperations,
+  detectRetiredTopologyAtoms,
+  findAlias,
+  findAliasPairSameClause,
   legacyReferenceAllowed,
+  normaliseTopologyText,
   parseFrontMatter,
+  policyScopeForPath: topologyScopeForPath,
+  selfRepositoryIdentityMatches,
   skillDirs,
+  structuralEvidenceUnits,
   snapshot,
+  topologyAtomIds,
+  validateTopologyScopePolicy,
   validate
 };

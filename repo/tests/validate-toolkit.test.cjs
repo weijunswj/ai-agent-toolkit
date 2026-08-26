@@ -224,10 +224,10 @@ test('validator rejects noncanonical or missing validation targets in copied wor
   }
 });
 
-test('Skill Creation and published-surface consumers share the retired-operation detector', () => {
+test('Skill Creation and published-surface consumers share the retired topology atom detector', () => {
   const audit = require(path.join(repoRoot, 'repo', 'scripts', 'audit-published-surfaces.cjs'));
   for (const variant of sharedRetiredOperationVariants) {
-    assert.ok(audit.detectRetiredTopologyOperations(variant).length > 0, variant);
+    assert.ok(audit.detectRetiredTopologyAtoms(variant).length > 0, variant);
   }
 
   for (const variant of sharedRetiredOperationVariants) {
@@ -260,6 +260,24 @@ test('validator rejects the shared retired operation in every applicable operati
       fs.rmSync(cwd, { recursive: true, force: true });
     }
   }
+});
+
+test('Skill Creation retains exactly the twelve operational free-text fields', () => {
+  assert.deepEqual(skillCreationOperationalFreeTextFields, [
+    'existing_skill_review',
+    'trigger',
+    'decision_reason',
+    'unique_value',
+    'runtime_footprint',
+    'local_assets',
+    'output_contract',
+    'anti_bloat_review',
+    'safety_boundary',
+    'third_party_audit',
+    'publisher_workflow',
+    'routing'
+  ]);
+  assert.equal(skillCreationOperationalFreeTextFields.length, 12);
 });
 
 test('validator rejects shared retired-operation variants in validation commands', () => {
@@ -429,7 +447,7 @@ test('validator rejects a retired source-to-surface publisher claim without dire
     const result = runValidate(cwd);
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /must state direct-canonical maintenance/);
-    assert.match(result.stderr, /retired source-to-surface publishing/);
+    assert.match(result.stderr, /retired source-to-surface/);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }

@@ -246,8 +246,8 @@ function validationCommandTargets(command) {
 }
 
 function retiredSkillCreationReviewFinding(value) {
-  const [operation] = surfaceAudit.detectRetiredTopologyOperations(value);
-  return operation ? { message: operation.message, family: operation.family } : null;
+  const [atom] = surfaceAudit.detectRetiredTopologyAtoms(value);
+  return atom ? { message: atom.message, family: atom.family, atomId: atom.id } : null;
 }
 
 function validateSkillCreationReviewEvidence(errors, baselinePath, skill, review) {
