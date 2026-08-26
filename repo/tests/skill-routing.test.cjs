@@ -248,7 +248,7 @@ test('narrow n8n plugin repair intents route without capturing workspace or live
   assert.match(source, /fix n8n skill hooks/);
   assert.match(source, /repair the n8n Skills plugin/);
   assert.match(source, /Claude Code plugin/);
-  assert.match(source, /Toolkit source or generated skill/);
+  assert.match(source, /Toolkit source or canonical skill/);
   assert.match(source, /smallest numbered choice/);
   assert.match(source, /Do not load every n8n or MCP skill/);
 });

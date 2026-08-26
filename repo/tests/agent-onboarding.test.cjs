@@ -39,7 +39,7 @@ test('agent onboarding path keeps source-of-truth and validation anchors visible
 
   assert.match(agents, /`repo\/contracts\/\*\*` is the canonical machine contract surface for schemas, policies, fixtures, templates, and agent-rule inputs\./);
   assert.match(agents, /`repo\/source-watch\/provenance\/\*\*\/SOURCE-LOCK\.json` contains only active third-party attribution pins\./);
-  assert.match(agents, /The toolkit does not maintain project manifests, source manifests, project-output publishing, pack packaging/);
+  assert.match(agents, /The toolkit maintains one direct canonical tree\. New Toolkit skills are created at `skills\/\*\*` paths after Skill Creation Center review; contracts, runtime, tests, and docs are created at canonical `repo\/\*\*` paths\./);
   assert.match(agents, /`skills\/\*\*` is the canonical copyable AI-agent product surface\./);
 
   assert.match(sourceOfTruth, /Direct canonical content lives in `skills\/\*\*` and `repo\/\*\*`; there is no second project or publisher tree\./);
@@ -63,6 +63,6 @@ test('agent onboarding path does not advertise repo-wide MCP as a current surfac
 
   assert.match(readme, /Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised as a supported surface for now\./);
   assert.match(surfaceAudit, /No repo-wide `mcp\/\*\*` surface is shipped or maintained\./);
-  assert.match(surfaceAudit, /No project manifests, generated pack manifests, pack packaging workflow/);
+  assert.match(surfaceAudit, /No secondary routing metadata, duplicate package-build path, or privileged publication workflow is part of the maintained topology\./);
   assert.match(surfaceAudit, /that no required local surface points back to the deleted project\/publisher tree\./);
 });
