@@ -22,40 +22,9 @@ function workspaceRootFromArgs(args = process.argv.slice(2)) {
 const root = path.resolve(workspaceRootFromArgs() || process.env.TOOLKIT_WORKSPACE_ROOT || process.cwd());
 const legacyProjectToken = '_' + 'projects';
 const legacyPublisherToken = 'curated_' + 'output_for_ai';
-const retiredSkillCreationReviewEvidencePatterns = [
-  { pattern: /sync-toolkit-projects\.cjs/i, message: 'references retired sync-toolkit-projects.cjs' },
-  { pattern: /_projects[\\/]/i, message: 'references a retired _projects path' },
-  { pattern: /curated_output_for_ai|curated[- ]output/i, message: 'references retired curated-output publishing' },
-  { pattern: /(?:^|[\s"'`])_main(?:[\\/]|[\s"'`]|$)/i, message: 'references a retired _main source path' },
-  {
-    pattern: /\bsource[- ]to[- ]surface\b[\s\S]{0,120}\b(?:publisher|publish(?:er|ing|ed)?|copy|writeback)\b/i,
-    message: 'claims retired source-to-surface publishing'
-  },
-  {
-    pattern: /\b(?:publisher|publish(?:er|ing|ed)?|copy|writeback)\b[\s\S]{0,120}\bsource[- ]to[- ]surface\b/i,
-    message: 'claims retired source-to-surface publishing'
-  },
-  {
-    pattern: /\b(?:generated|deterministic)\b[\s\S]{0,80}\bsource[- ]to[- ]surface\b/i,
-    message: 'claims retired source-to-surface publishing'
-  },
-  {
-    pattern: /\bsource[- ]to[- ]surface\b[\s\S]{0,80}\b(?:generated|deterministic)\b/i,
-    message: 'claims retired source-to-surface publishing'
-  },
-  {
-    pattern: /\b(?:generated|deterministic)\s+(?:skill\s+)?(?:copies?|publication|publishing|writeback)\b/i,
-    message: 'claims retired generated or deterministic publication'
-  },
-  {
-    pattern: /\b(?:create|creating|add|adding|maintain|use|publish|publishing)\b[\s\S]{0,100}\bproject\s+module\b[\s\S]{0,100}\bpublished\s+skill\b/i,
-    message: 'claims retired Toolkit project-module plus published-skill publishing'
-  }
-];
 const skillCreationOperationalEvidenceFields = [
   'existing_skill_review',
   'trigger',
-  'decision',
   'decision_reason',
   'unique_value',
   'runtime_footprint',
@@ -63,7 +32,6 @@ const skillCreationOperationalEvidenceFields = [
   'output_contract',
   'anti_bloat_review',
   'safety_boundary',
-  'source_provenance',
   'third_party_audit',
   'publisher_workflow',
   'routing'
@@ -278,7 +246,8 @@ function validationCommandTargets(command) {
 }
 
 function retiredSkillCreationReviewFinding(value) {
-  return retiredSkillCreationReviewEvidencePatterns.find(({ pattern }) => pattern.test(String(value))) || null;
+  const [operation] = surfaceAudit.detectRetiredTopologyOperations(value);
+  return operation ? { message: operation.message, family: operation.family } : null;
 }
 
 function validateSkillCreationReviewEvidence(errors, baselinePath, skill, review) {

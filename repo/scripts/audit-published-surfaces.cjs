@@ -40,22 +40,104 @@ const activePolicyRootPaths = ['AGENTS.md', 'README.md'];
 const historicalPolicyPathPrefixes = ['repo/docs/audits/'];
 const historicalPolicyPaths = new Set(['repo/docs/RETIRED-SOURCE-PROVENANCE.md']);
 const activeSkillInstructionPattern = /^skills\/.+\/(?:SKILL|README|INSTALL)\.md$/i;
-const activeTopologyPatterns = [
-  { pattern: /\b_projects(?:\b|[\\/])/i, message: 'uses retired _projects source ownership' },
-  { pattern: /\b_main(?:\b|[\\/])/i, message: 'uses standalone retired _main source ownership' },
-  { pattern: /\bcurated[_ -]output[_ -]for[_ -]ai\b/i, message: 'uses retired curated-output source ownership' },
-  { pattern: /\bproject[- ]module\b[\s\S]{0,140}\b(?:published|generated)\s+skill\b/i, message: 'instructs retired Toolkit project-module plus published-skill operation' },
-  { pattern: /\b(?:published|generated)\s+skill\b[\s\S]{0,140}\bproject[- ]module\b/i, message: 'instructs retired Toolkit project-module plus published-skill operation' },
-  { pattern: /\bproject[- ]to[- ]skill\b/i, message: 'instructs retired project-to-skill publishing' },
-  { pattern: /\b(?:project[- ]manifest|toolkit\.project\.json|source[- ]manifest)\b[\s\S]{0,140}\b(?:publish|publishing|published|generate|generated|copy|writeback|sync|skill|surface)\b/i, message: 'instructs retired project-manifest publishing' },
-  { pattern: /\bsource[- ]to[- ](?:generated[- ]?)?surface\b[\s\S]{0,140}\b(?:workflow|publish|publishing|published|publisher|generate|generated|copy|writeback|sync|conversion|handoff)\b/i, message: 'instructs Toolkit source-to-surface publishing' },
-  { pattern: /\b(?:workflow|publish|publishing|published|(?<!-)publisher|generate|generated|copy|writeback|sync|conversion|handoff)\b[\s\S]{0,140}\bsource[- ]to[- ](?:generated[- ]?)?surface\b/i, message: 'instructs Toolkit source-to-surface publishing' },
-  { pattern: /\b(?:generated|deterministic)\s+(?:skill\s+)?(?:copies?|publication|publishing|writeback)\b/i, message: 'instructs retired generated skill copies or writeback' },
-  { pattern: /\b(?:skill\s+)?(?:copies?|publication|publishing|writeback)\s+(?:through|from|via)\s+(?:generated|deterministic)\b/i, message: 'instructs retired generated skill copies or writeback' },
-  { pattern: /\b(?:publisher\s+(?:skill|workflow)|source[- ]to[- ](?:generated[- ]?)?surface\s+(?:workflow|conversion|handoff))\b/i, message: 'routes Toolkit conversion through a retired publisher workflow' },
-  { pattern: /\b(?:use|pair|route|require|follow|name)\b[\s\S]{0,100}\bcontext-preserving-ai-publisher\b/i, message: 'routes Toolkit conversion through the standalone publisher' },
-  { pattern: /\b(?:node\s+)?repo\/scripts\/(?:sync-toolkit-projects|package-skills|package-packs)\.cjs\b/i, message: 'instructs a retired publishing or sync command' }
+const standalonePublisherEntrypointPaths = new Set([
+  'skills/context-preserving-ai-publisher/SKILL.md',
+  'skills/context-preserving-ai-publisher/README.md'
+]);
+const retiredTopologyOperationPatterns = [
+  {
+    family: 'projects-source-ownership',
+    pattern: /\b_projects(?:\b|[\\/])/i,
+    message: 'references a retired _projects path/source ownership'
+  },
+  {
+    family: 'main-source-ownership',
+    pattern: /\b_main(?:\b|[\\/])/i,
+    message: 'references a retired _main source path'
+  },
+  {
+    family: 'curated-output-source-ownership',
+    pattern: /\bcurated[_ -]output[_ -]for[_ -]ai\b/i,
+    message: 'references retired curated-output publishing'
+  },
+  {
+    family: 'project-module-skill-pair',
+    pattern: /\bproject[- ]modules?\b[^.!?]{0,180}\b(?:published|generated)\s+skills?\b|\b(?:published|generated)\s+skills?\b[^.!?]{0,180}\bproject[- ]modules?\b/i,
+    message: 'claims retired Toolkit project-module plus published/generated-skill operation'
+  },
+  {
+    family: 'project-to-skill-publishing',
+    pattern: /\bproject[- ]to[- ]skills?\b/i,
+    message: 'claims retired project-to-skill publishing'
+  },
+  {
+    family: 'project-manifest-publishing',
+    pattern: /\b(?:project[- ]manifest|toolkit\.project\.json|source[- ]manifest)\b[^.!?]{0,120}\b(?:publish(?:ing|ed|es)?|generate(?:d|s|ing)?|copies?|writeback|sync)\b[^.!?]{0,80}\b(?:skills?|surfaces?|outputs?|packs?|publication|publishing)\b|\b(?:skills?|surfaces?|outputs?|packs?|publication|publishing)\b[^.!?]{0,80}\b(?:publish(?:ing|ed|es)?|generate(?:d|s|ing)?|copies?|writeback|sync)\b[^.!?]{0,120}\b(?:project[- ]manifest|toolkit\.project\.json|source[- ]manifest)\b|\b(?:project[- ]manifest|toolkit\.project\.json|source[- ]manifest)\s+(?:publishing|publication|writeback|sync)\b/i,
+    message: 'claims retired project-manifest publishing'
+  },
+  {
+    family: 'source-to-surface-publishing',
+    pattern: /\bsource[- ]to[- ](?:generated[- ]?)?surfaces?\b[^.!?]{0,180}\b(?:workflow|(?<!-)publisher|publish(?:ing|ed|es)?|generate(?:d|s|ing)?|copies?|writeback|sync|conversion|handoff)\b|\b(?:workflow|(?<!-)publisher|publish(?:ing|ed|es)?|generate(?:d|s|ing)?|copies?|writeback|sync|conversion|handoff)\b[^.!?]{0,180}\bsource[- ]to[- ](?:generated[- ]?)?surfaces?\b/i,
+    message: 'claims retired source-to-surface publishing'
+  },
+  {
+    family: 'generated-skill-publication',
+    pattern: /\b(?:generated|deterministic)\s+(?:skills?\s+)?(?:copies?|publication|publishing|writeback)\b|\b(?:skills?\s+)?(?:copies?|publication|publishing|writeback)\b\s+(?:from|through|via|of|for|using)\s+(?:generated|deterministic)(?:\s+skills?)?\b/i,
+    message: 'claims retired generated or deterministic publication'
+  },
+  {
+    family: 'standalone-publisher-routing',
+    pattern: /\bcontext-preserving-ai-publisher\b[^.!?]{0,180}\b(?:route|routes|use|uses|require|requires|pair|pairs|follow|follows|name|names)\b|\b(?:route|routes|use|uses|require|requires|pair|pairs|follow|follows|name|names)\b[^.!?]{0,180}\bcontext-preserving-ai-publisher\b/i,
+    message: 'routes Toolkit conversion through the standalone publisher'
+  },
+  {
+    family: 'retired-sync-toolkit-projects-command',
+    pattern: /\b(?:node\s+)?repo[\\/]\s*scripts[\\/]\s*sync-toolkit-projects\s*\.cjs\b/i,
+    message: 'references retired sync-toolkit-projects.cjs'
+  },
+  {
+    family: 'retired-package-skills-command',
+    pattern: /\b(?:node\s+)?repo[\\/]\s*scripts[\\/]\s*package-skills\s*\.cjs\b/i,
+    message: 'references retired package-skills.cjs'
+  },
+  {
+    family: 'retired-package-packs-command',
+    pattern: /\b(?:node\s+)?repo[\\/]\s*scripts[\\/]\s*package-packs\s*\.cjs\b/i,
+    message: 'references retired package-packs.cjs'
+  }
 ];
+
+const currentRepositoryScopePatterns = [
+  /(?<![A-Za-z0-9_-])Toolkit(?:'s)?\b/i,
+  /\b(?:this|our|current)\s+repo(?:sitory)?\b/i
+];
+
+function normaliseRetiredTopologyText(value) {
+  return String(value)
+    .replace(/\r\n?/g, '\n')
+    .replace(/\s+/g, ' ')
+    .replace(/\s*([\\/-])\s*/g, '$1')
+    .trim();
+}
+
+function detectRetiredTopologyOperations(value) {
+  const text = normaliseRetiredTopologyText(value);
+  const matches = [];
+  for (const operation of retiredTopologyOperationPatterns) {
+    const flags = operation.pattern.flags.includes('g') ? operation.pattern.flags : `${operation.pattern.flags}g`;
+    const pattern = new RegExp(operation.pattern.source, flags);
+    for (const match of text.matchAll(pattern)) {
+      matches.push({
+        family: operation.family,
+        message: operation.message,
+        match: match[0],
+        index: match.index,
+        text
+      });
+    }
+  }
+  return matches.sort((left, right) => left.index - right.index || left.family.localeCompare(right.family));
+}
 
 function activePolicyFiles() {
   const docs = walk('repo/docs')
@@ -97,12 +179,6 @@ function markdownBlocks(text) {
   return blocks;
 }
 
-function normaliseTopologyText(lines) {
-  const joined = lines.join(' ').replace(/\s+/g, ' ').trim();
-  const compact = joined.replace(/\s*([\\/-])\s*/g, '$1');
-  return [joined, compact];
-}
-
 function sentenceForMatch(text, index) {
   let start = 0;
   for (let cursor = 0; cursor < index; cursor += 1) {
@@ -132,7 +208,7 @@ function hasUnnegatedDirective(text) {
   return false;
 }
 
-function retiredTopologyExempt(clause) {
+function retiredTopologyHistoryOrNegativeExemption(clause) {
   const negative = /\b(?:no|not|never|without|absent|forbidden|removed|retired|avoid|outside|cannot|can't|doesn't|does not|don't|do not|must not|should not|no longer|not current|not used|not required|not maintained)\b/i.test(clause);
   const historical = /\b(?:historical|earlier|previous|formerly|superseded|legacy|used to|once|was|were)\b/i.test(clause);
   const current = /\b(?:current|currently|now|today|still)\b/i.test(clause);
@@ -141,42 +217,36 @@ function retiredTopologyExempt(clause) {
   return historical && !current;
 }
 
-function standalonePublisherContext(clause) {
-  return /\bname:\s*context-preserving-ai-publisher\b/i.test(clause)
-    || /\b(?:separate|standalone|generic)\b[\s\S]{0,120}\bcontext-preserving-ai-publisher\b/i.test(clause);
-}
-
-function currentToolkitOperationScope(clause) {
-  const separatedFromToolkit = (index) => {
-    const prefix = clause.slice(Math.max(0, index - 55), index);
-    return /\b(?:outside(?:\s+of)?|independent(?:ly)?\s+of|not|separate\s+from)\s+(?:the\s+)?$/i.test(prefix);
-  };
-  const operationPattern = /\b(?:current|this)\s+Toolkit(?:'s)?\s+(?:conversions?|(?:own\s+)?canonical\s+operation)\b|\bToolkit(?:'s)?\s+(?:conversions?|(?:own\s+)?canonical\s+operation)\b/gi;
-  let match;
-  while ((match = operationPattern.exec(clause))) {
-    if (!separatedFromToolkit(match.index)) return true;
-  }
-
-  const toolkitPattern = /\b(?:current|this)\s+Toolkit\b/gi;
-  while ((match = toolkitPattern.exec(clause))) {
-    if (separatedFromToolkit(match.index)) continue;
-    const suffix = clause.slice(match.index + match[0].length, match.index + match[0].length + 100);
-    if (/\b(?:requires?|must|should|needs?|uses?|use|creates?|create|maintains?|maintain|publishes?|publish|generates?|generate|converts?|convert|routes?|route|owns?|own)\b/i.test(suffix)) return true;
+function currentRepositoryScope(clause) {
+  for (const pattern of currentRepositoryScopePatterns) {
+    const match = pattern.exec(clause);
+    if (!match) continue;
+    if (pattern.source.startsWith('(?<!')) {
+      const suffix = clause.slice(match.index + match[0].length);
+      if (/^\.(?:project|json)\b/i.test(suffix) || /^[-_/\\]/.test(suffix)) continue;
+    }
+    return true;
   }
   return false;
 }
 
+function standalonePublisherEntrypoint(rel) {
+  return standalonePublisherEntrypointPaths.has(slash(String(rel)));
+}
+
+function activePolicyScope(clause, rel = '') {
+  if (standalonePublisherEntrypoint(rel) && !currentRepositoryScope(clause)) return 'standalone-publisher';
+  return 'current-toolkit';
+}
+
 function activeTopologyFinding(text, rel = '') {
   for (const block of markdownBlocks(text)) {
-    for (const candidate of normaliseTopologyText(block.lines)) {
-      for (const { pattern, message } of activeTopologyPatterns) {
-        const match = candidate.match(pattern);
-        if (!match) continue;
-        const clause = sentenceForMatch(candidate, match.index);
-        if (retiredTopologyExempt(clause)) continue;
-        if (standalonePublisherContext(clause) && !currentToolkitOperationScope(clause)) continue;
-        return { lineNumber: block.lineNumber, line: block.lines[0].trim(), message };
-      }
+    const candidate = block.lines.join(' ');
+    for (const operation of detectRetiredTopologyOperations(candidate)) {
+      const clause = sentenceForMatch(operation.text, operation.index);
+      if (retiredTopologyHistoryOrNegativeExemption(clause)) continue;
+      if (activePolicyScope(clause, rel) === 'standalone-publisher') continue;
+      return { lineNumber: block.lineNumber, line: block.lines[0].trim(), message: operation.message };
     }
   }
   return null;
@@ -378,6 +448,8 @@ if (require.main === module) main();
 module.exports = {
   activePolicyFiles,
   activeTopologyFinding,
+  activePolicyScope,
+  detectRetiredTopologyOperations,
   legacyReferenceAllowed,
   parseFrontMatter,
   skillDirs,

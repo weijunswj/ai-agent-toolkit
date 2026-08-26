@@ -157,11 +157,45 @@ test('active topology audit rejects each known positive retired operation', () =
   }
 });
 
+test('shared retired-operation detector covers singular, plural, generated, published, and reverse-order skill operations', () => {
+  const audit = require(auditScript);
+  const fixtures = [
+    'Current Toolkit conversions use a project module and a published skill.',
+    'Current Toolkit conversions use project modules and published skills.',
+    'Current Toolkit conversions use a project module and a generated skill.',
+    'Current Toolkit conversions use project modules and generated skills.',
+    'Published skills for current Toolkit conversions are maintained from project modules.',
+    'Generated skills for this Toolkit are maintained through project modules.'
+  ];
+
+  for (const fixture of fixtures) {
+    assert.ok(audit.detectRetiredTopologyOperations(fixture).length > 0, fixture);
+  }
+});
+
 test('publisher entrypoints cannot exempt current Toolkit operations using product vocabulary', () => {
   const fixtures = [
     'This publisher requires current Toolkit conversions to use a project module plus generated skill.',
     'This generic workflow requires current Toolkit conversions to use a project module plus generated skill.',
-    'This skill requires current Toolkit conversions to use a project module plus generated skill.'
+    'This skill requires current Toolkit conversions to use a project module plus generated skill.',
+    'The standalone context-preserving-ai-publisher routes conversions for this Toolkit through a project module plus generated skill.',
+    'The standalone context-preserving-ai-publisher requires our Toolkit to use a project module plus generated skill.',
+    'The standalone context-preserving-ai-publisher uses project modules and published skills independently of current Toolkit.',
+    'The standalone context-preserving-ai-publisher uses project modules and generated skills outside this repository.'
+  ];
+
+  for (const fixture of fixtures) {
+    assertFixtureFails('skills/context-preserving-ai-publisher/SKILL.md', fixture);
+  }
+});
+
+test('publisher scope fails closed for reverse order, possessive, and self-repository forms', () => {
+  const fixtures = [
+    'Our Toolkit uses project modules and generated skills through the standalone context-preserving-ai-publisher.',
+    'Published skills for current Toolkit conversions are maintained from project modules.',
+    'Generated skills for this Toolkit are maintained through project modules.',
+    'For this repository, the standalone context-preserving-ai-publisher maintains project modules and published skills.',
+    "The standalone context-preserving-ai-publisher product uses project modules for Toolkit's generated skills."
   ];
 
   for (const fixture of fixtures) {
@@ -274,7 +308,7 @@ test('standalone publisher product material remains valid without broadening leg
   const audit = require(auditScript);
   const publisherSkill = 'skills/context-preserving-ai-publisher/SKILL.md';
   const publisherReadme = 'skills/context-preserving-ai-publisher/README.md';
-  const standaloneProductOperation = 'The separate standalone context-preserving-ai-publisher product uses a project module to maintain generated skill outputs, independently of the current Toolkit.';
+  const standaloneProductOperation = 'The separate standalone context-preserving-ai-publisher product uses a project module to maintain generated skill outputs for target repositories.';
   assert.notEqual(
     audit.activeTopologyFinding('Create a Toolkit project module plus published skill.', publisherSkill),
     null

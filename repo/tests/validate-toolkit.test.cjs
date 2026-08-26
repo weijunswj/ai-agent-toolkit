@@ -40,6 +40,28 @@ const currentPostGateSkillIds = [
   'self-hosted-service-safety',
   'toolkit-setup'
 ];
+const skillCreationOperationalFreeTextFields = [
+  'existing_skill_review',
+  'trigger',
+  'decision_reason',
+  'unique_value',
+  'runtime_footprint',
+  'local_assets',
+  'output_contract',
+  'anti_bloat_review',
+  'safety_boundary',
+  'third_party_audit',
+  'publisher_workflow',
+  'routing'
+];
+const sharedRetiredOperationVariants = [
+  'Current Toolkit conversions use project modules and published skills.',
+  'Current Toolkit conversions use project modules and generated skills.',
+  'Current Toolkit conversions use a project module and published skills.',
+  'Current Toolkit conversions use project modules and a published skill.',
+  'Published skills for current Toolkit conversions are maintained from project modules.',
+  'Generated skills for this Toolkit are maintained through project modules.'
+];
 
 function readText(relPath, root = repoRoot) {
   return fs.readFileSync(path.join(root, relPath), 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
@@ -202,15 +224,30 @@ test('validator rejects noncanonical or missing validation targets in copied wor
   }
 });
 
-test('validator rejects retired current operation in every required operational review field', () => {
-  const cases = [
-    ['existing_skill_review', `Current Toolkit operation uses \`${legacyProjectToken}/example/README.md\`.`],
-    ['local_assets', 'Current operation requires generated skill copies from deterministic writeback.'],
-    ['output_contract', 'Current operation runs `node repo/scripts/sync-toolkit-projects.cjs --check`.'],
-    ['routing', 'Current routing uses a source-to-surface publisher writeback workflow.']
-  ];
+test('Skill Creation and published-surface consumers share the retired-operation detector', () => {
+  const audit = require(path.join(repoRoot, 'repo', 'scripts', 'audit-published-surfaces.cjs'));
+  for (const variant of sharedRetiredOperationVariants) {
+    assert.ok(audit.detectRetiredTopologyOperations(variant).length > 0, variant);
+  }
 
-  for (const [field, injection] of cases) {
+  for (const variant of sharedRetiredOperationVariants) {
+    const cwd = copyRepo();
+    try {
+      updateBaseline(cwd, (baseline) => {
+        baseline.skill_creation_review['github-governance-review-reconciler'].existing_skill_review += ` ${variant}`;
+      });
+      const result = runValidate(cwd);
+      assert.notEqual(result.status, 0, variant);
+      assert.match(result.stderr, /skill_creation_review\.github-governance-review-reconciler\.existing_skill_review/, variant);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+});
+
+test('validator rejects the shared retired operation in every applicable operational free-text field', () => {
+  const injection = 'Current Toolkit conversions use project modules and published skills.';
+  for (const field of skillCreationOperationalFreeTextFields) {
     const cwd = copyRepo();
     try {
       updateBaseline(cwd, (baseline) => {
@@ -219,6 +256,56 @@ test('validator rejects retired current operation in every required operational 
       const result = runValidate(cwd);
       assert.notEqual(result.status, 0, field);
       assert.match(result.stderr, new RegExp(`skill_creation_review\\.github-governance-review-reconciler\\.${field}`), field);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+});
+
+test('validator rejects shared retired-operation variants in validation commands', () => {
+  for (const variant of sharedRetiredOperationVariants) {
+    const cwd = copyRepo();
+    try {
+      updateBaseline(cwd, (baseline) => {
+        baseline.skill_creation_review['github-governance-review-reconciler'].validation.push(`node --test repo/tests/skill-routing.test.cjs ${variant}`);
+      });
+      const result = runValidate(cwd);
+      assert.notEqual(result.status, 0, variant);
+      assert.match(result.stderr, /skill_creation_review\.github-governance-review-reconciler\.validation command/, variant);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+});
+
+test('Skill Creation operational evidence does not exempt historical retired-operation wording', () => {
+  const cwd = copyRepo();
+  try {
+    updateBaseline(cwd, (baseline) => {
+      baseline.skill_creation_review['github-governance-review-reconciler'].routing += ' Earlier Toolkit operation used project modules and published skills, but that route is not current.';
+    });
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /skill_creation_review\.github-governance-review-reconciler\.routing/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('closed Skill Creation enum fields remain enum-validated', () => {
+  for (const [field, expected] of [
+    ['decision', /decision must be extend_existing_skill or new_project_skill/],
+    ['source_provenance', /source_provenance is invalid/]
+  ]) {
+    const cwd = copyRepo();
+    try {
+      updateBaseline(cwd, (baseline) => {
+        baseline.skill_creation_review['github-governance-review-reconciler'][field] = sharedRetiredOperationVariants[0];
+      });
+      const result = runValidate(cwd);
+      assert.notEqual(result.status, 0, field);
+      assert.match(result.stderr, expected, field);
+      assert.doesNotMatch(result.stderr, new RegExp(`skill_creation_review\\.github-governance-review-reconciler\\.${field} .*retired`, 'i'), field);
     } finally {
       fs.rmSync(cwd, { recursive: true, force: true });
     }
