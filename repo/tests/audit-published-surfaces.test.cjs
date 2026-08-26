@@ -261,6 +261,11 @@ test('policy validation fails closed for malformed definitions and broad scopes'
     ['empty aliases', (cwd) => writePolicy(cwd, (policy) => { policy.primitive_definitions[0].aliases = []; }), /non-empty array/],
     ['separator-only alias', (cwd) => writePolicy(cwd, (policy) => { policy.primitive_definitions[3].aliases[0] = '---'; }), /matchable characters/],
     ['duplicate normalized alias', (cwd) => writePolicy(cwd, (policy) => { policy.primitive_definitions[3].aliases[1] = 'project_module'; }), /duplicates normalized alias/],
+    ['duplicate identity alias', (cwd) => writePolicy(cwd, (policy) => { policy.standalone_identity_definitions[0].aliases[1] = 'toolkit'; }), /duplicates normalized alias/],
+    ['cross-class exact alias', (cwd) => writePolicy(cwd, (policy) => { policy.standalone_identity_definitions[2].aliases[0] = 'project module'; }), /duplicates normalized alias from primitive_definitions\.retired-project-module/],
+    ['cross-class normalized alias', (cwd) => writePolicy(cwd, (policy) => { policy.standalone_identity_definitions[2].aliases[0] = 'project_module'; }), /duplicates normalized alias from primitive_definitions\.retired-project-module/],
+    ['duplicate identity ID', (cwd) => writePolicy(cwd, (policy) => { policy.standalone_identity_definitions[1].id = policy.standalone_identity_definitions[0].id; }), /id is duplicated/],
+    ['cross-class duplicate ID', (cwd) => writePolicy(cwd, (policy) => { policy.standalone_identity_definitions[0].id = policy.primitive_definitions[0].id; }), /id is duplicated/],
     ['unsupported matcher', (cwd) => writePolicy(cwd, (policy) => { policy.primitive_definitions[0].matcher_kind = 'regex'; }), /matcher_kind is unsupported/],
     ['unsupported disposition', (cwd) => writePolicy(cwd, (policy) => { policy.primitive_definitions[0].standalone_disposition = 'allowed'; }), /standalone_disposition is unsupported/],
     ['identity removed', (cwd) => writePolicy(cwd, (policy) => { policy.standalone_identity_definitions.pop(); }), /exactly 3 definitions/],
@@ -271,6 +276,20 @@ test('policy validation fails closed for malformed definitions and broad scopes'
     ['missing target', (cwd) => writePolicy(cwd, (policy) => { policy.entries[0].path = 'repo/docs/missing.md'; }), /target is missing/]
   ];
   for (const [label, mutate, expected] of cases) assertPolicyRejects(label, mutate, expected);
+});
+
+test('audit check rejects a cross-class policy alias collision', () => {
+  const cwd = copyRepo();
+  try {
+    writePolicy(cwd, (policy) => {
+      policy.standalone_identity_definitions[0].aliases.push('project module');
+    });
+    const result = runAudit(cwd, ['--check']);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /duplicates normalized alias from primitive_definitions\.retired-project-module/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
 test('copied workspaces reject new active primitive and legacy path residue', () => {

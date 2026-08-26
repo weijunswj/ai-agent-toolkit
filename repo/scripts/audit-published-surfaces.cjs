@@ -81,7 +81,7 @@ function normalizedAlias(value, matcherKind) {
   return source;
 }
 
-function validateDefinitions(errors, definitions, identity = false) {
+function validateDefinitions(errors, definitions, identity, ids, aliases) {
   const label = identity ? 'standalone_identity_definitions' : 'primitive_definitions';
   if (!Array.isArray(definitions)) {
     errors.push(`${topologyScopePolicyPath} ${label} must be an array`);
@@ -91,8 +91,6 @@ function validateDefinitions(errors, definitions, identity = false) {
   if (definitions.length !== expectedCount) {
     errors.push(`${topologyScopePolicyPath} ${label} must contain exactly ${expectedCount} definitions`);
   }
-  const ids = new Set();
-  const aliases = new Map();
   definitions.forEach((definition, index) => {
     const itemLabel = `${topologyScopePolicyPath} ${label}[${index}]`;
     if (!definition || typeof definition !== 'object' || Array.isArray(definition)) {
@@ -169,8 +167,10 @@ function topologyScopePolicyResult() {
   if (policy.schema_version !== 2) errors.push(`${topologyScopePolicyPath} schema_version must be 2`);
   if (policy.default_scope !== 'active-toolkit') errors.push(`${topologyScopePolicyPath} default_scope must be active-toolkit`);
   if (policy.normalization !== 'nfkc-lower-separator-v1') errors.push(`${topologyScopePolicyPath} normalization is unsupported`);
-  validateDefinitions(errors, policy.primitive_definitions, false);
-  validateDefinitions(errors, policy.standalone_identity_definitions, true);
+  const definitionIds = new Set();
+  const definitionAliases = new Map();
+  validateDefinitions(errors, policy.primitive_definitions, false, definitionIds, definitionAliases);
+  validateDefinitions(errors, policy.standalone_identity_definitions, true, definitionIds, definitionAliases);
   if (!Array.isArray(policy.entries)) {
     errors.push(`${topologyScopePolicyPath} entries must be an array`);
     return { policy: null, errors };

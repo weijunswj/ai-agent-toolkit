@@ -133,6 +133,13 @@ function updateBaseline(cwd, mutate) {
   fs.writeFileSync(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`, 'utf8');
 }
 
+function updateTopologyPolicy(cwd, mutate) {
+  const policyPath = path.join(cwd, 'repo', 'contracts', 'topology-scope-policy.json');
+  const policy = JSON.parse(fs.readFileSync(policyPath, 'utf8'));
+  mutate(policy);
+  fs.writeFileSync(policyPath, `${JSON.stringify(policy, null, 2)}\n`, 'utf8');
+}
+
 test('direct canonical topology validates without retired project or MCP surfaces', () => {
   const validator = require(validateScript);
   assert.equal(fs.existsSync(path.join(repoRoot, legacyProjectToken)), false);
@@ -221,6 +228,20 @@ test('validator rejects noncanonical or missing validation targets in copied wor
     } finally {
       fs.rmSync(cwd, { recursive: true, force: true });
     }
+  }
+});
+
+test('validator rejects a cross-class normalized policy alias collision', () => {
+  const cwd = copyRepo();
+  try {
+    updateTopologyPolicy(cwd, (policy) => {
+      policy.standalone_identity_definitions[2].aliases.push('project_module');
+    });
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /duplicates normalized alias from primitive_definitions\.retired-project-module/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
   }
 });
 
