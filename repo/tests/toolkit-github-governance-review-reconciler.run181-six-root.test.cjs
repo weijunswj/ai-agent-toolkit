@@ -247,10 +247,10 @@ test('B6 initialise creates only from unmanaged bytes and migrate accepts only e
 
 
 test('Run-181 source contracts declare all six roots and recognised migration versions', () => {
-  const project = path.resolve(__dirname, '../../_projects/development/github-governance-review-reconciler');
-  const schema = JSON.parse(fs.readFileSync(path.join(project, '_main', 'github-governance-review-reconciler-contract.schema.json'), 'utf8'));
-  const policy = JSON.parse(fs.readFileSync(path.join(project, '_main', 'github-governance-review-reconciler-policy.json'), 'utf8'));
-  const grammar = JSON.parse(fs.readFileSync(path.join(project, '_main', 'tracker-v3-grammar.json'), 'utf8'));
+  const project = path.resolve(__dirname, '../contracts/github-governance-review-reconciler');
+  const schema = JSON.parse(fs.readFileSync(path.join(project, 'github-governance-review-reconciler-contract.schema.json'), 'utf8'));
+  const policy = JSON.parse(fs.readFileSync(path.join(project, 'github-governance-review-reconciler-policy.json'), 'utf8'));
+  const grammar = JSON.parse(fs.readFileSync(path.join(project, 'tracker-v3-grammar.json'), 'utf8'));
   assert.deepEqual(Object.keys(n5.authorityBoundary().six_root_contract_integrity), ['b1_repository_identity', 'b2_lifecycle_and_pr_uniqueness', 'b3_review_inventory_evidence', 'b4_shared_transaction_registry', 'b5_proof_gated_compaction', 'b6_initialise_and_migrate']);
   assert.equal(schema.required.includes('six_root_contract_integrity'), true);
   assert.deepEqual(policy.six_root_contract_integrity, { b1_repository_identity: true, b2_lifecycle_and_pr_uniqueness: true, b3_review_inventory_evidence: true, b4_shared_transaction_registry: true, b5_proof_gated_compaction: true, b6_initialise_and_migrate: true });

@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: repo-methodology.context-preserving-ai-publisher
-Source: _projects/repo-methodology/context-preserving-ai-publisher/_main/bootstrap-mode.md
-Update the project source and run sync.
--->
 # Bootstrap Mode
 
 Use bootstrap mode when a repo does not yet have a source-to-surface publishing architecture.

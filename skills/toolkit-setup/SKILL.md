@@ -3,17 +3,6 @@ name: toolkit-setup
 description: Use when the user says "setup toolkit" or "refresh toolkit", asks to repair the installed n8n Skills plugin or fix n8n .sh hooks opening in an editor on Windows, or when the task is clearly about AI Agent Toolkit plugin setup/update state, Toolkit Local Bridge setup or troubleshooting, repo-backed auto-update, bridge audit/sync/disable, OpenCode or Antigravity 2 opt-in bridge support, native Codex or Claude Code plugin behavior, Windows hook repair, or bridge setup safety. Route only installed-plugin repair intents to the bounded Toolkit setup subsystem and repo/scripts/toolkit-local-bridge.cjs; do not use for ordinary project coding, repo-local n8n helper scripts, live n8n operations, or generic n8n/MCP work.
 ---
 
-<!--
-Generated from toolkit curated output for AI. Do not edit directly.
-Project: development.toolkit-local-bridge
-Source: _projects/development/toolkit-local-bridge/curated_output_for_ai/skills/toolkit-setup/SKILL.md
-Update the curated output and run sync.
--->
-<!--
-Curated AI-facing source.
-Project: development.toolkit-local-bridge
-Review rule: Keep this skill as a compact setup router. Do not duplicate the bridge implementation, command-per-target procedures, or hook policy here.
--->
 
 # Toolkit Setup
 
@@ -150,7 +139,7 @@ Route `repair n8n plugin`, `fix n8n skill hooks`, `repair the n8n Skills plugin`
 
 1. Installed Codex `n8n-skills@n8n-io` cache: inspect the exact identity/version/layout and use the existing Windows hook reconciliation. The enabled Codex plugin-maintenance preference is standing permission only for the exact known-compatible transform.
 2. Claude Code plugin: inspect and report through Claude Code's native plugin flow; Codex must not mutate Claude Code cache.
-3. Toolkit source or generated skill: follow repository source ownership and regeneration rules, not installed-cache repair.
+3. Toolkit source or canonical skill: follow repository ownership and regeneration rules, not installed-cache repair.
 4. Consumer-repo `n8n-workflows/scripts/` helpers: route to the workspace helper ownership path; do not touch plugin caches.
 5. Live n8n workflows, community nodes, Docker, or server operations: load the n8n safety/setup route and require its live-action approvals; do not trigger plugin-cache repair.
 
@@ -163,7 +152,7 @@ Plain skill installs for OpenCode, AG2/Antigravity, or other folder-based target
 For bridge or setup-surface changes, prefer targeted checks first:
 
 ```powershell
-node repo/scripts/sync-toolkit-projects.cjs --check
+node repo/scripts/validate-toolkit.cjs
 node --test repo/tests/toolkit-local-bridge-hook-light.test.cjs
 node repo/scripts/validate-toolkit.cjs
 ```

@@ -7,7 +7,7 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const runtimePath = path.join(repoRoot, 'repo', 'scripts', 'toolkit-execution-loop.cjs');
-const contractPath = path.join(repoRoot, '_projects', 'development', 'bounded-local-execution-loop', '_main', 'execution-loop-contract.schema.json');
+const contractPath = path.join(repoRoot, 'repo', 'contracts', 'bounded-local-execution-loop', 'execution-loop-contract.schema.json');
 const a1RuntimePath = path.join(repoRoot, 'repo', 'scripts', 'toolkit-control-plane', 'control-plane-kernel.cjs');
 const runtime = require(runtimePath);
 const a1 = require(a1RuntimePath);

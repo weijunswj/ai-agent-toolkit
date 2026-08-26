@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: n8n.local-setup
-Source: _projects/n8n/local-setup/_main/mcp setup - claude code.md
-Update the project source and run sync.
--->
 # Claude Code [Official n8n Skills](https://github.com/n8n-io/skills) And MCP Setup
 
 The primary local setup guide is [Page 1 - Local Setup](../n8n/local-setup.md).
@@ -111,7 +105,7 @@ Copy the whole toolkit `skills/<skill-name>/` folder when installing toolkit-own
 | User-level | `$HOME/.claude/skills/<skill-name>/SKILL.md` |
 
 - Do not copy only `SKILL.md`.
-- Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
+- Keep `README.md`, `references/`, `templates/`, `agents/`, and other supporting files beside `SKILL.md` when present.
 
 ## 5. Agent Rules
 

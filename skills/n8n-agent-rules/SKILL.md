@@ -4,15 +4,8 @@ description: Use when working on any n8n task, including [official n8n Skills](h
 ---
 
 <!--
-Generated from toolkit curated output for AI. Do not edit directly.
-Project: development.ai-coding-agent-rules
-Source: _projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/n8n-agent-rules/SKILL.md
-Update the curated output and run sync.
--->
-<!--
-Curated AI-facing source.
-Project: development.ai-coding-agent-rules
-Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
+Canonical Toolkit skill surface. Edit this skill folder directly.
+Source: skills/n8n-agent-rules/SKILL.md
 -->
 
 # n8n Agent Rules
@@ -33,7 +26,7 @@ Root `AGENTS.md` is the only repo-local target for the n8n adapter. `CLAUDE.md`,
 
 If `AGENTS.md` exists and the adapter is missing or stale, run [scripts/install-n8n-agent-adapter.cjs](scripts/install-n8n-agent-adapter.cjs) in `--dry-run` mode with `--target auto` or `--target agents`. Show the dry-run result to the user. Ask for explicit current-turn approval naming `AGENTS.md` before running `--write`. If approved, run the installer with `--write`.
 
-The installer writes the canonical managed n8n adapter block sourced from `_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md`. It must not write a separate Claude, Gemini, or platform-specific n8n adapter variant.
+The installer writes the canonical managed n8n adapter block sourced from `repo/contracts/agent-rules/n8n-agent-rules-adapter.md`. It must not write a separate Claude, Gemini, or platform-specific n8n adapter variant.
 
 Do not silently auto-install adapters. If declined, continue the current n8n task using the already-loaded `n8n-agent-rules`, but tell the user that future sessions/tools may not auto-load the rules unless `AGENTS.md` or the skill is available.
 

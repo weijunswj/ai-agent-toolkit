@@ -10,11 +10,9 @@ const validator = require('../scripts/validate-toolkit.cjs');
 const repoRoot = path.resolve(__dirname, '..', '..');
 const routingPartial = path.join(
   repoRoot,
-  '_projects',
-  'development',
-  'ai-coding-agent-rules',
-  '_main',
-  '_partials',
+  'repo',
+  'contracts',
+  'agent-rules',
   'toolkit-skill-routing.md'
 );
 
@@ -238,16 +236,7 @@ test('toolkit skill routing stays routing-only', () => {
 
 test('narrow n8n plugin repair intents route without capturing workspace or live n8n work', () => {
   const routing = readText(routingPartial);
-  const source = readText(path.join(
-    repoRoot,
-    '_projects',
-    'development',
-    'toolkit-local-bridge',
-    'curated_output_for_ai',
-    'skills',
-    'toolkit-setup',
-    'SKILL.md'
-  ));
+  const source = readText(path.join(repoRoot, 'skills', 'toolkit-setup', 'SKILL.md'));
 
   for (const text of [routing, source]) {
     assert.match(text, /n8n-skills@n8n-io/);
@@ -259,13 +248,13 @@ test('narrow n8n plugin repair intents route without capturing workspace or live
   assert.match(source, /fix n8n skill hooks/);
   assert.match(source, /repair the n8n Skills plugin/);
   assert.match(source, /Claude Code plugin/);
-  assert.match(source, /Toolkit source or generated skill/);
+  assert.match(source, /Toolkit source or canonical skill/);
   assert.match(source, /smallest numbered choice/);
   assert.match(source, /Do not load every n8n or MCP skill/);
 });
 
 test('markdown docs use markdown numbered steps instead of HTML or compressed step lists', () => {
-  const files = markdownFilesIn(['README.md', 'repo', '_projects', 'skills']);
+  const files = markdownFilesIn(['README.md', 'repo', 'skills']);
 
   for (const file of files) {
     const relPath = path.relative(repoRoot, file).replace(/\\/g, '/');
@@ -298,16 +287,7 @@ test('markdown file walker skips symlinks and stays inside the selected root', (
 });
 
 test('context publisher documents published-surface readability rules', () => {
-  const source = readText(path.join(
-    repoRoot,
-    '_projects',
-    'repo-methodology',
-    'context-preserving-ai-publisher',
-    'curated_output_for_ai',
-    'skills',
-    'context-preserving-ai-publisher',
-    'SKILL.md'
-  ));
+  const source = readText(path.join(repoRoot, 'skills', 'context-preserving-ai-publisher', 'SKILL.md'));
   const generated = readText(path.join(repoRoot, 'skills', 'context-preserving-ai-publisher', 'SKILL.md'));
 
   for (const text of [source, generated]) {
@@ -368,7 +348,7 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.doesNotMatch(howToUseInstallSection, /codex plugin marketplace add n8n-io\/skills/);
   assert.doesNotMatch(howToUseInstallSection, /node repo\/scripts\/repair-codex-plugin-windows-hooks\.cjs --plugin-root/);
   assert.match(howToUse, /Copy whole skill folders, not just `SKILL\.md`/);
-  assert.match(howToUse, /Keep `README\.md`, `references\/`, `templates\/`, `agents\/`, `packs\/`, and other supporting files beside `SKILL\.md` when present/);
+  assert.match(howToUse, /Keep `README\.md`, `references\/`, `templates\/`, `agents\/`, and other supporting files beside `SKILL\.md` when present/);
   assert.match(howToUse, /Do not paste secrets, tokens, `.env` values, or credentials into repo files/);
   assert.match(howToUse, /### Manual Skill Folder Locations/);
   assert.match(howToUse, /Codex \| `<repo>\/\.agents\/skills\/<skill-name>\/`/);
@@ -515,9 +495,7 @@ test('n8n-local-setup plugin flow stays Windows-safe before hook approval', () =
   }
 
   const paths = [
-    '_projects/n8n/local-setup/_main/mcp setup - codex.md',
     'skills/n8n-local-setup/references/ai-agent-platforms/codex.md',
-    '_projects/n8n/local-setup/_main/templates/mcp-configs/codex-mcp-config.md',
     'skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md'
   ];
 

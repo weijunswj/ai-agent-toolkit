@@ -1,13 +1,6 @@
 <!--
-Generated from toolkit curated output for AI. Do not edit directly.
-Project: development.ai-coding-agent-rules
-Source: _projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/README.md
-Update the curated output and run sync.
--->
-<!--
-Curated AI-facing source.
-Project: development.ai-coding-agent-rules
-Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
+Canonical Toolkit skill surface. Edit this skill folder directly.
+Source: skills/ai-coding-agent-rules/README.md
 -->
 
 # AI Coding Agent Rules Skill
@@ -20,7 +13,7 @@ The copied skill folder includes bare repo-local bootstrap payload templates. Th
 - [repo-local/CLAUDE.shim.template.md](repo-local/CLAUDE.shim.template.md) is copied to target repo `CLAUDE.md` only when Claude Code support is requested or the target platform is Claude Code.
 - [repo-local/GEMINI.shim.template.md](repo-local/GEMINI.shim.template.md) is copied to target repo `GEMINI.md` for Antigravity.
 - [repo-local/antigravity-bootstrap.template.md](repo-local/antigravity-bootstrap.template.md) is copied to target repo `.agents/rules/00-agent-toolkit-bootstrap.md` for Antigravity.
-- [repo-local/docs/agent-playbooks/](repo-local/docs/agent-playbooks/) is copied as a complete folder to target repo `docs/agent-playbooks/` so the portable `AGENTS.md` links are live. Copy every Markdown file: `INDEX.md`, `baseline-workflow.md`, `docs-governance.md`, `generated-files.md`, `git-completion.md`, `local-docs.md`, `managed-memory.md`, `safety-gates.md`, and `windows-command-hygiene.md`.
+- [repo-local/docs/agent-playbooks/](repo-local/docs/agent-playbooks/) is copied as a complete folder to target repo `docs/agent-playbooks/` so the portable `AGENTS.md` links are live. Copy every Markdown file: `INDEX.md`, `baseline-workflow.md`, `docs-governance.md`, `generated-files.md`, `git-completion.md`, `local-docs.md`, `safety-gates.md`, and `windows-command-hygiene.md`.
 
 Install only the current target platform shim unless the user explicitly requests all platform shims. Repo-local installs require a selected/open target repo or an explicit target path; standalone/no-workspace chats cannot safely infer where to install repo-local files.
 
@@ -38,7 +31,7 @@ Copy or merge a template into the matching active instruction filename only afte
 
 After installing or refreshing portable playbook docs, inspect target `docs/agent-playbooks/INDEX.md` and verify every linked `*.md` file exists beside it before reporting completion.
 
-Manual global setup templates live in `_projects/development/ai-coding-agent-rules/_main/`. The published skill folder is copyable and self-contained for repo-local bootstrap use.
+Manual global setup templates live in `repo/contracts/agent-rules/`. The skill folder is copyable and self-contained for repo-local bootstrap use.
 
 ## Platform Entry Points
 
@@ -71,8 +64,8 @@ Use a minimal `plugin.json` beside `skills/` only when the installed Antigravity
 
 For n8n-specific workflow and MCP safety rules, install or load [n8n-agent-rules](../n8n-agent-rules/). Do not copy the full n8n rules into global always-on generic instructions unless you intentionally accept the context cost.
 
-The `SKILL.md` file is an AI-facing published surface generated from [_projects/development/ai-coding-agent-rules/curated_output_for_ai/](../../_projects/development/ai-coding-agent-rules/curated_output_for_ai/). Update the curated source, then run:
+The `SKILL.md` file is a canonical AI-facing surface in this folder. Update the skill directly, then run the retained managed-block checks:
 
 ```powershell
-node repo/scripts/sync-toolkit-projects.cjs --write
+node repo/scripts/sync-agent-instruction-shims.cjs --check
 ```

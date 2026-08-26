@@ -4,15 +4,8 @@ description: Use when asked to install, check, repair, refresh, or bootstrap rep
 ---
 
 <!--
-Generated from toolkit curated output for AI. Do not edit directly.
-Project: development.ai-coding-agent-rules
-Source: _projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/SKILL.md
-Update the curated output and run sync.
--->
-<!--
-Curated AI-facing source.
-Project: development.ai-coding-agent-rules
-Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
+Canonical Toolkit skill surface. Edit this skill folder directly.
+Source: skills/ai-coding-agent-rules/SKILL.md
 -->
 
 # AI Coding Agent Rules
@@ -75,7 +68,6 @@ Treat `repo-local/docs/agent-playbooks/` as a folder-level install unit, not as 
 - `generated-files.md`
 - `git-completion.md`
 - `local-docs.md`
-- `managed-memory.md`
 - `safety-gates.md`
 - `windows-command-hygiene.md`
 
@@ -135,4 +127,4 @@ This bootstrap is for local repo/folder instruction files only. It must not push
 
 Do not install heavy global `AGENTS.md` or global `GEMINI.md` rules. After setup, repo-local files are the source of truth.
 
-Manual global setup templates live in `_projects/development/ai-coding-agent-rules/_main/`; do not treat those source docs as the published skill runtime path.
+Manual global setup templates live in `repo/contracts/agent-rules/`; use the bundled skill files as the portable runtime surface.

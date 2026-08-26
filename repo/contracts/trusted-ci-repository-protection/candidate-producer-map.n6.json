@@ -1,0 +1,79 @@
+{
+  "schema": "toolkit.n6.candidate-producer-map.v1",
+  "version": 1,
+  "workflow": {
+    "id": 278109777,
+    "path": ".github/workflows/validate.yml",
+    "event": "pull_request",
+    "approved_ref": "refs/heads/main",
+    "approved_source_blob_sha": "5278755a5a59e7d4e9ba102224ba22547a452334",
+    "job": {
+      "name": "validate"
+    },
+    "aggregate_step": {
+      "number": 5,
+      "name": "Run validation",
+      "fail_fast": "github-actions-default-bash"
+    },
+    "source_revisions": ["base", "head", "merge"]
+  },
+  "limits": {
+    "files_per_page": 100,
+    "max_files": 3000,
+    "max_pages": 30,
+    "max_response_bytes": 33554432
+  },
+  "commands": [
+    {
+      "id": "repo-doc-contract",
+      "command": "node repo/scripts/sync-repo-doc-contract.cjs --check",
+      "path_classes": ["repo-docs"]
+    },
+    {
+      "id": "source-lock-audit",
+      "command": "node repo/scripts/audit-project-source-locks.cjs",
+      "path_classes": ["source-watch"]
+    },
+    {
+      "id": "published-surface-audit",
+      "command": "node repo/scripts/audit-published-surfaces.cjs --check",
+      "path_classes": ["published-surface"]
+    },
+    {
+      "id": "fallback-risk-audit",
+      "command": "node repo/scripts/audit-fallback-risk.cjs",
+      "path_classes": ["runtime-source", "contract-source", "repo-docs"]
+    },
+    {
+      "id": "toolkit-validator",
+      "command": "node repo/scripts/validate-toolkit.cjs",
+      "path_classes": ["runtime-source", "contract-source", "workflow-contract", "package-manifest"]
+    },
+    {
+      "id": "repository-tests",
+      "command": "node --test repo/tests/*.test.cjs",
+      "path_classes": ["repository-tests"]
+    },
+    {
+      "id": "skill-portability",
+      "command": "node repo/scripts/audit-skill-portability.cjs",
+      "path_classes": ["published-surface"]
+    },
+    {
+      "id": "design-tests",
+      "command": "node repo/scripts/run-design-tests.cjs",
+      "path_classes": ["design-source"]
+    }
+  ],
+  "server_authoritative_components": [
+    "repo-doc-contract",
+    "source-lock-audit",
+    "published-surface-audit",
+    "fallback-risk-audit",
+    "toolkit-validator",
+    "repository-tests",
+    "skill-portability",
+    "design-tests"
+  ],
+  "non_authoritative_components": ["git-diff-check"]
+}

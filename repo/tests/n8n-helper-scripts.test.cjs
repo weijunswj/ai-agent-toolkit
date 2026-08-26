@@ -11,16 +11,16 @@ const { comparableWorkflow } = require(path.join(repoRoot, 'skills', 'n8n-workfl
 const { selectBindingsWithMeta, restoreLiveWebhookIds } = require(path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts', 'import-export-sync', 'prepare-n8n-live-import.cjs'));
 
 const scriptDir = path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts', 'import-export-sync');
-const sourceScriptDir = path.join(repoRoot, '_projects', 'n8n', 'workflow-toolkit', '_main', 'helper-scripts', 'import-export-sync');
+const sourceScriptDir = scriptDir;
 const {
   parseArgs,
   resolveN8nDockerTarget,
 } = require(path.join(sourceScriptDir, 'resolve-n8n-docker-target.cjs'));
 const sanitizerDir = path.join(repoRoot, 'skills', 'n8n-workflow-helper-scripts', 'templates', 'helper-scripts', 'sanitizer');
-const sourceSanitizerDir = path.join(repoRoot, '_projects', 'n8n', 'workflow-toolkit', '_main', 'helper-scripts', 'sanitizer');
-const sourceRagTemplateDir = path.join(repoRoot, '_projects', 'n8n', 'workflow-toolkit', '_main', 'workflow-templates', 'chatbot-with-RAG');
+const sourceSanitizerDir = sanitizerDir;
 const publishedRagTemplateDir = path.join(repoRoot, 'skills', 'n8n-workflow-templates', 'templates', 'chatbot-with-RAG');
-const secureCicdN8nTemplateDir = path.join(repoRoot, '_projects', 'cicd', 'secure-installer', '_main', 'templates', 'n8n');
+const sourceRagTemplateDir = publishedRagTemplateDir;
+const secureCicdN8nTemplateDir = scriptDir;
 const validateScript = path.join(scriptDir, 'validate-n8n-workflows.cjs');
 const syncScript = path.join(scriptDir, 'sync-n8n-live-exports.cjs');
 const prepareScript = path.join(scriptDir, 'prepare-n8n-live-import.cjs');

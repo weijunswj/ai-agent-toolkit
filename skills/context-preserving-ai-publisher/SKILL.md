@@ -1,17 +1,14 @@
 ---
 name: context-preserving-ai-publisher
-description: Use when creating or maintaining source-traceable AI-facing repo surfaces, generated skills, MCP notes, templates, pack metadata, manifests, source locks, audit baselines, or anti-drift documentation.
+description: Use when creating or maintaining source-traceable AI-facing repo surfaces, portable skills, MCP notes, templates, pack metadata, manifests, source locks, audit baselines, or anti-drift documentation.
 ---
 
 <!--
-Generated from toolkit curated output for AI. Do not edit directly.
-Project: repo-methodology.context-preserving-ai-publisher
-Source: _projects/repo-methodology/context-preserving-ai-publisher/curated_output_for_ai/skills/context-preserving-ai-publisher/SKILL.md
-Update the curated output and run sync.
+Canonical Toolkit skill surface. Edit this skill folder directly.
+Source: skills/context-preserving-ai-publisher/SKILL.md
 -->
 <!--
-Curated AI-facing source.
-Project: repo-methodology.context-preserving-ai-publisher
+Canonical AI-facing source.
 Review rule: Keep this skill agent-agnostic. Do not copy this toolkit repo's local law into the generic workflow.
 
 Published-surface source note: This file is authored as a published-surface source; relative links are intended to resolve after sync at skills/context-preserving-ai-publisher/SKILL.md.
@@ -47,7 +44,7 @@ When local repo law conflicts with this generic skill, local law wins.
 - Manifest/routing contract: declared mapping from source to published output.
 - Portable generated surfaces: skills, MCP docs, templates, packs, references, or equivalent repo-local surfaces.
 - Local law/docs: repo-specific rules, commands, validation, and safety policy.
-- Deterministic publishing: copy, extract, concat, JSON formatting, or registry generation without AI summarisation.
+- Repeatable publication mechanics: copy, extract, concat, JSON formatting, or registry generation without AI summarisation.
 - Audits: checks for undeclared outputs, lossy surfaces, ownership confusion, unsafe deletions, and baseline drift.
 
 ## References

@@ -8,7 +8,6 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..', '..');
 const intendedImplicitSkills = [
   'agent-skill-supply-chain-audit',
-  'knowledge-index-updater',
   'n8n-agent-rules',
   'toolkit-setup'
 ];
@@ -64,26 +63,5 @@ test('native plugin default prompts stay within Plugin Eval starter budget', () 
     assert.ok(prompts.some((prompt) => /setup toolkit/i.test(prompt)), relPath + ' includes setup toolkit starter');
     assert.ok(prompts.some((prompt) => /refresh toolkit/i.test(prompt)), relPath + ' includes refresh toolkit starter');
     assert.ok(prompts.some((prompt) => /audit the local toolkit bridge state/i.test(prompt)), relPath + ' includes bridge audit starter');
-  }
-});
-
-test('knowledge-index-updater keeps verbose edge guidance behind references', () => {
-  const sourceSkill = readText('_projects/knowledge/knowledge-index-updater/_main/skill/SKILL.md');
-  const generatedSkill = readText('skills/knowledge-index-updater/SKILL.md');
-  for (const [label, text] of [['source', sourceSkill], ['generated', generatedSkill]]) {
-    assert.ok(text.split('\n').length < 420, label + ' knowledge-index-updater SKILL.md should stay progressively disclosed');
-    assert.doesNotMatch(text, /^#### Recommended Codex automation prompt$/m);
-    assert.doesNotMatch(text, /^#### Static fallback prompt for external schedulers that cannot load skills$/m);
-    assert.match(text, /references\/update-confirmation\.md/);
-    assert.match(text, /references\/scheduled-updater-prompts\.md/);
-  }
-
-  for (const relPath of [
-    '_projects/knowledge/knowledge-index-updater/_main/skill/references/update-confirmation.md',
-    '_projects/knowledge/knowledge-index-updater/_main/skill/references/scheduled-updater-prompts.md',
-    'skills/knowledge-index-updater/references/update-confirmation.md',
-    'skills/knowledge-index-updater/references/scheduled-updater-prompts.md'
-  ]) {
-    assert.ok(fs.existsSync(path.join(repoRoot, relPath)), relPath + ' must be packaged');
   }
 });

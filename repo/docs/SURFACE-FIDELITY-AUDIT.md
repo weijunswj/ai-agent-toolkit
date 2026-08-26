@@ -1,203 +1,32 @@
 # Surface Fidelity Audit
 
-Date: 2026-08-21
-Latest update: 2026-08-21 (adds the current-main N5 GitHub governance and truthful PR-review reconciler project and explicit-only skill)
+This audit verifies the direct canonical Toolkit surfaces. It does not rebuild, publish, or compare a second project tree.
 
-## Current state
+## Current Surface
 
-This audit is now a skills-first published-surface audit. The current generated/published root surface is `skills/**` plus generated native plugin metadata under `.codex-plugin/**` and `.claude-plugin/**`.
+- `skills/**` contains the portable skill folders.
+- `.codex-plugin/**` and `.claude-plugin/**` contain native plugin package metadata.
+- `repo/contracts/**` contains machine contracts, templates, agent-rule inputs, and the Toolkit Local Bridge package source.
+- `repo/source-watch/provenance/**` contains only active third-party attribution locks.
+- No repo-wide `mcp/**` surface is shipped or maintained. Official n8n Skills and instance-level MCP references remain inside `skills/n8n-local-setup/`.
+- No secondary routing metadata, duplicate package-build path, or privileged publication workflow is part of the maintained topology.
 
-Repo-wide MCP generated/published output is intentionally absent for now:
+## Deterministic Audit
 
-- `mcp/**` is not shipped.
-- `_projects/repo-methodology/mcp-ready-registry/**` is not shipped.
-- Project manifests must not declare repo-wide `mcp/**` outputs or `publish_as: "mcp"` / `publish_as: "both"`.
-- Future PRs that change published skill or native plugin metadata surfaces should run the published-surface audit and keep new `skills/**`, `.codex-plugin/**`, and `.claude-plugin/**` outputs source-owned.
-
-The n8n local setup [official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references are preserved as secondary AI-coding-agent setup material, not as repo-wide MCP support:
-
-- `_projects/n8n/local-setup/_main/mcp setup - *.md`
-- `_projects/n8n/local-setup/_main/templates/mcp-configs/**`
-- `skills/n8n-local-setup/references/ai-agent-platforms/*.md`
-- `skills/n8n-local-setup/templates/mcp-configs/**`
-
-## Current audit snapshot
-
-Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:
-
-| Metric | Current value |
-| --- | ---: |
-| projects | 22 |
-| publishedFiles | 244 |
-| declaredOutputFiles | 244 |
-| packInstalledFiles | 84 |
-| undeclaredPublishedFiles | 0 |
-| packInstalledUndeclared | 0 |
-| crossOwnedOutputs | 0 |
-| sharedSurfaceOutputs | 4 |
-| sharedSurfaceMetadataFindings | 0 |
-| suspiciousPublishedSurfaces | 0 |
-| duplicateProjectContentGroups | 0 |
-| boundaryRecipeOutputs | 244 |
-| boundaryRecipeFindings | 0 |
-| curatedDirectoryFindings | 1 |
-
-Current published-file classifications:
-
-| Classification | Count |
-| --- | ---: |
-| declared_generated | 160 |
-| pack_installed_declared | 84 |
-
-Current boundary recipe classifications:
-
-| Classification | Count |
-| --- | ---: |
-| curated_adapter | 3 |
-| curated_agent_metadata | 9 |
-| curated_index | 12 |
-| curated_metadata | 3 |
-| curated_pack_readme | 3 |
-| curated_reference | 7 |
-| curated_repo_local_agent_template | 4 |
-| curated_router | 9 |
-| curated_template | 2 |
-| curated_template_index | 7 |
-| generated_cross_skill_reference | 3 |
-| main_full_fidelity | 182 |
-
-Known baseline context:
-
-- There are no current curated output boundary findings.
-- Current curated directory boundary finding: `_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md` is a reviewed large Markdown platform reference retained in the audit baseline.
-- The four shared-surface outputs are intentional generated references: three n8n-agent-rules references used by dependent n8n skills, plus one Google DESIGN.md reference published into the UI/UX skill from its provenance-owned design module. The current count movement also includes the three-file current-main N5 explicit-only skill output; the Google DESIGN.md reference remains provenance-owned and only narrow router skills are implicit.
-
-## Current project modules
-
-- `_projects/cicd/secure-installer`
-- `_projects/cicd/trusted-ci-repository-protection`
-- `_projects/design/google-design-md`
-- `_projects/design/ui-ux-pro-max`
-- `_projects/development/ai-coding-agent-rules`
-- `_projects/development/bounded-local-execution-loop`
-- `_projects/development/control-plane-kernel`
-- `_projects/development/github-governance-review-reconciler`
-- `_projects/development/repository-capability-registry`
-- `_projects/development/local-ai-stack-safety`
-- `_projects/development/managed-app-foundation-review`
-- `_projects/development/project-completion-audit`
-- `_projects/development/hostinger-coolify-production-guide`
-- `_projects/development/independent-assurance-web-finality`
-- `_projects/development/self-hosted-service-safety`
-- `_projects/development/toolkit-local-bridge`
-- `_projects/development/windows-localhost-workflows`
-- `_projects/knowledge/knowledge-index-updater`
-- `_projects/n8n/local-setup`
-- `_projects/n8n/workflow-toolkit`
-- `_projects/repo-methodology/agent-skill-supply-chain-audit`
-- `_projects/repo-methodology/context-preserving-ai-publisher`
-
-## Current skill folders
-
-- `skills/agent-skill-supply-chain-audit/`
-- `skills/ai-coding-agent-rules/`
-- `skills/context-preserving-ai-publisher/`
-- `skills/codex-ssh-hostinger-coolify-setup-maintainer/`
-- `skills/knowledge-index-updater/`
-- `skills/local-ai-stack-safety/`
-- `skills/managed-app-foundation-review/`
-- `skills/github-governance-review-reconciler/`
-- `skills/project-completion-audit/`
-- `skills/n8n-agent-rules/`
-- `skills/n8n-local-setup/`
-- `skills/n8n-workflow-helper-scripts/`
-- `skills/n8n-workflow-templates/`
-- `skills/self-hosted-service-safety/`
-- `skills/secure-cicd-installer/`
-- `skills/toolkit-setup/`
-- `skills/ui-ux-secure-frontend-design/`
-- `skills/windows-localhost-workflows/`
-
-## Current native plugin metadata
-
-- `.codex-plugin/plugin.json`
-- `.codex-plugin/assets/composer-icon.png`
-- `.codex-plugin/assets/logo.png`
-- `.codex-plugin/hooks/hooks.json`
-- `.claude-plugin/plugin.json`
-- `.claude-plugin/hooks/hooks.json`
-
-## Deterministic audit command
-
-This audit is backed by `repo/scripts/audit-published-surfaces.cjs`.
-
-Use:
+The direct-surface audit is backed by `repo/scripts/audit-published-surfaces.cjs`:
 
 ```powershell
 node repo/scripts/audit-published-surfaces.cjs
 node repo/scripts/audit-published-surfaces.cjs --check
 ```
 
-The command inspects local Git-tracked `skills/**`, `.codex-plugin/**`, and `.claude-plugin/**` files, `_projects/**/toolkit.project.json`, and `skills/**/packs/**/pack.json`. It does not call the network, run project scripts, install packages, summarize with AI, or touch live n8n.
+The audit checks that every skill has a usable entrypoint and README/install note, that skill names match their folders, that native plugin metadata is present and internally consistent, that no retired `skills/knowledge-index-updater/` surface or pack manifest remains, and that no required local surface points back to the deleted project/publisher tree.
 
-`--check` compares the current findings with `repo/docs/published-surface-audit-baseline.json`. If a PR intentionally resolves or reclassifies a known issue, update the baseline in the same PR after reviewing the exact count movement.
+It does not call the network, execute external source, install packages, write generated outputs, or touch live n8n.
 
-## Curated output boundary policy
+## Related Checks
 
-Full working instructions should publish from `_projects/**/_main/**` directly or from deterministic source-side generated templates. Short reviewed adapters may publish from `_projects/**/curated_output_for_ai/**` when they do not replace full runtime instructions.
-
-Allowed current curated-output categories:
-
-- `SKILL.md` routers.
-- Skill README and local README/index files.
-- Pack manifests and generated metadata.
-- Pack READMEs when they are short skill-local pack indexes.
-- Agent metadata such as `agents/openai.yaml`.
-- Reference-link compatibility shims.
-- Short reviewed skill-local references that do not replace full runtime helper guides.
-- Small reviewed template snippets and template indexes that do not replace full runtime instructions.
-- Small reviewed template examples for local-only policy inputs.
-- Small reviewed overview, safety wrapper, packaging, and adapter text that is not a lossy substitute for required runtime instructions.
-
-Not allowed as current curated-output categories:
-
-- Repo-wide MCP project/spec summaries.
-- Repo-wide MCP registry metadata.
-- Full runtime guides summarized into short curated files.
-
-## Source-first rebuild assessment
-
-The current repo can rebuild published skill surfaces from source-owned project recipes:
-
-- `skills/**` outputs are declared in `_projects/**/toolkit.project.json`.
-- Full runtime guides and helper assets publish from `_main/**` where full fidelity matters.
-- Reviewed adapters, routers, indexes, and pack metadata publish from `curated_output_for_ai/**` only when they remain short AI-facing source.
-- No tracked root `mcp/**` file is part of the current generated/published surface.
-
-A clean wipe/rebuild is not recommended. Keep using staged source-first PRs: update source or curated files, run sync, run audit, then update the baseline only when intentional movement is understood.
-
-## Historical and superseded audit notes
-
-Earlier audit passes are retained here only as historical context. They do not describe the current published surface when they mention repo-wide MCP output.
-
-Completed historical passes:
-
-- Secure CI/CD prompt exact-extract pass: fixed a real truncation by generating `skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md` from the preserved `_main/README.md` prompt section.
-- n8n local setup fidelity pass: restored full-fidelity local setup references inside `skills/n8n-local-setup/references/**` and kept n8n AI-coding-agent setup references as secondary setup material.
-- Secure CI/CD template declaration pass: declared remaining short status, policy, GitHub Actions, and pack README outputs as curated generated outputs.
-- n8n workflow toolkit reshape: rehomed sanitizer/import/export helpers and reusable workflow templates under `n8n.workflow-toolkit`, removing the old workflow-sync skill surface.
-- Standalone skill declaration pass: made `knowledge-index-updater` and `windows-localhost-workflows` project-owned generated skill surfaces.
-- Category cleanup pass: renamed project categories to the current `_projects/development/**` and `_projects/repo-methodology/**` topology.
-- UI/UX skill ownership pass: promoted UI/UX skill-local surfaces into project-owned source and deterministic skill outputs.
-
-Superseded MCP-ready registry pass:
-
-- A previous pass declared repo-wide MCP registry/design/spec files under `mcp/**` and `_projects/repo-methodology/mcp-ready-registry/**`.
-- PR #113 supersedes that state by removing the repo-wide MCP generated/published surface and the dedicated MCP-ready registry module.
-- Treat old MCP-ready registry ownership material as historical only. It must not be used as evidence that repo-wide MCP is currently shipped, maintained, or supported.
-
-## Current recommended follow-up
-
-- Keep future changes focused on `skills/**` and source-owned project recipes unless a separate approved PR deliberately reintroduces a repo-wide MCP strategy.
-- Keep [official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references in the n8n local setup skill, not in a repo-wide MCP surface.
-- Continue clarifying UI/UX skill attribution and source ownership in separate narrow PRs when needed.
+- `node repo/scripts/audit-skill-portability.cjs` checks local skill references and required support files.
+- `node repo/scripts/audit-project-source-locks.cjs` checks the active third-party provenance records.
+- `node repo/scripts/validate-toolkit.cjs` checks the repository contract, routing, safety matrix, plugin version alignment, and forbidden files.
+- `node --test repo/tests/skill-routing.test.cjs` checks routing and skill-table coverage.

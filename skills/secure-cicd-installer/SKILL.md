@@ -3,17 +3,6 @@ name: secure-cicd-installer
 description: Use when planning security-first CI/CD setup, GitHub Actions workflows, pipelines, pipeline hardening, required checks, security checks, deployment automation, build/test automation, automated validation, secret scanning, branch protection, release automation, installer prompt/status templates, or safe rollout planning.
 ---
 
-<!--
-Generated from toolkit curated output for AI. Do not edit directly.
-Project: cicd.secure-installer
-Source: _projects/cicd/secure-installer/curated_output_for_ai/skills/secure-cicd-installer/SKILL.md
-Update the curated output and run sync.
--->
-<!--
-Curated AI-facing source.
-Project: cicd.secure-installer
-Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
--->
 
 # Secure CI/CD Installer
 
@@ -54,8 +43,8 @@ Before committing, pushing, creating a pull request, merging, or deploying, paus
 
 ## Source Module
 
-- Project module: [_projects/cicd/secure-installer/](../../_projects/cicd/secure-installer/)
-- Preserved source: [_projects/cicd/secure-installer/_main/](../../_projects/cicd/secure-installer/_main/)
+- Canonical skill surface: [skills/secure-cicd-installer/](./)
+- Related contracts and policy: [repo/contracts/](../../repo/contracts/)
 
 ## Core Rules
 
@@ -77,4 +66,3 @@ Before committing, pushing, creating a pull request, merging, or deploying, paus
 
 - Reference: [references/secure-cicd-installer.md](references/secure-cicd-installer.md)
 - Templates: [templates/cicd/](templates/cicd/)
-- Pack checklist: [packs/secure-cicd/pack.json](packs/secure-cicd/pack.json)

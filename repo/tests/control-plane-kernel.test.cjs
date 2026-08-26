@@ -12,9 +12,9 @@ const vm = require('node:vm');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const runtimePath = path.join(repoRoot, 'repo', 'scripts', 'toolkit-control-plane', 'control-plane-kernel.cjs');
-const schemaPath = path.join(repoRoot, '_projects', 'development', 'control-plane-kernel', '_main', 'control-plane-contract.schema.json');
-const policyPath = path.join(repoRoot, '_projects', 'development', 'control-plane-kernel', '_main', 'control-plane-policy.json');
-const fixtureManifestPath = path.join(repoRoot, '_projects', 'development', 'control-plane-kernel', '_main', 'fixtures', 'fixture-manifest.json');
+const schemaPath = path.join(repoRoot, 'repo', 'contracts', 'control-plane-kernel', 'control-plane-contract.schema.json');
+const policyPath = path.join(repoRoot, 'repo', 'contracts', 'control-plane-kernel', 'control-plane-policy.json');
+const fixtureManifestPath = path.join(repoRoot, 'repo', 'contracts', 'control-plane-kernel', 'fixture-manifest.json');
 const fixtureCounts = new Map();
 
 const TEST_ONLY_AUTHORITY = '__testCreateTrustedAuthorityContext';

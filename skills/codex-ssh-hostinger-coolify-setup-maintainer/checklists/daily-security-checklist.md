@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: development.hostinger-coolify-production-guide
-Source: _projects/development/hostinger-coolify-production-guide/_main/skill/checklists/daily-security-checklist.md
-Update the project source and run sync.
--->
 # Daily Security Checklist
 
 - [ ] Pending - Review `/data/maintenance/reports/latest-security-check.md`.

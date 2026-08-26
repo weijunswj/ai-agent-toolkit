@@ -11,8 +11,8 @@ const DOCKER_WINDOWS_INSTALL_URL = 'https://docs.docker.com/desktop/setup/instal
 const configs = [
   {
     id: 'local',
-    script: '_projects/n8n/local-setup/_main/templates/.n8n-local/scripts/n8n-local-menu.ps1',
-    wrapper: '_projects/n8n/local-setup/_main/templates/.n8n-local/_n8n-local.cmd',
+    script: 'skills/n8n-local-setup/templates/.n8n-local/scripts/n8n-local-menu.ps1',
+    wrapper: 'skills/n8n-local-setup/templates/.n8n-local/_n8n-local.cmd',
     failureLabel: 'n8n local',
     header: 'n8n Local Stack',
     entrypoint: '_n8n-local.cmd',
@@ -71,8 +71,8 @@ const configs = [
   },
   {
     id: 'production-cloudflare',
-    script: '_projects/n8n/local-setup/_main/templates/.n8n-production-cloudflare/scripts/n8n-production-cloudflare-menu.ps1',
-    wrapper: '_projects/n8n/local-setup/_main/templates/.n8n-production-cloudflare/_n8n-production-cloudflare.cmd',
+    script: 'skills/n8n-local-setup/templates/.n8n-production-cloudflare/scripts/n8n-production-cloudflare-menu.ps1',
+    wrapper: 'skills/n8n-local-setup/templates/.n8n-production-cloudflare/_n8n-production-cloudflare.cmd',
     failureLabel: 'n8n production Cloudflare',
     header: 'n8n Production Cloudflare Tunnel Stack',
     entrypoint: '_n8n-production-cloudflare.cmd',

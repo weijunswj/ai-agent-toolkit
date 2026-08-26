@@ -8,8 +8,23 @@ const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
-const beginMarker = '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->';
-const endMarker = '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:END N8N-AGENT-RULES-ADAPTER -->';
+const syncScriptPath = path.join(repoRoot, 'repo', 'scripts', 'sync-agent-instruction-shims.cjs');
+const beginMarker = '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-agent-rules-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->';
+const endMarker = '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-agent-rules-adapter.md:END N8N-AGENT-RULES-ADAPTER -->';
+const n8nDerivativePaths = [
+  'skills/n8n-agent-rules/n8n-agent-rules.md',
+  'skills/n8n-local-setup/references/n8n-agent-rules.md',
+  'skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md',
+  'skills/n8n-workflow-templates/references/n8n-agent-rules.md'
+];
+const retiredTopologyPattern = new RegExp([
+  'development\\.ai-coding-agent-rules',
+  '_' + 'projects',
+  'curated_' + 'output_for_ai',
+  'source-to-surface',
+  'generic publisher',
+  '\\brun sync\\b'
+].join('|'), 'i');
 
 function readText(relPath) {
   return fs.readFileSync(path.join(repoRoot, relPath), 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
@@ -63,7 +78,7 @@ function installerScriptPath() {
 }
 
 function canonicalManagedN8nAdapter() {
-  return `${beginMarker}\n${readText('_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md').trimEnd()}\n${endMarker}`;
+  return `${beginMarker}\n${readText('repo/contracts/agent-rules/n8n-agent-rules-adapter.md').trimEnd()}\n${endMarker}`;
 }
 
 function runInstaller(workspace, args = []) {
@@ -80,6 +95,30 @@ function makeN8nWorkspace(prefix = 'n8n-agent-adapter-') {
   return workspace;
 }
 
+function copyToolkitWorkspace(prefix = 'n8n-shim-sync-') {
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  fs.cpSync(repoRoot, target, {
+    recursive: true,
+    filter(source) {
+      const rel = path.relative(repoRoot, source).replace(/\\/g, '/');
+      return !(
+        rel === '.git' || rel.startsWith('.git/') ||
+        rel === 'node_modules' || rel.startsWith('node_modules/') ||
+        rel === '.tmp' || rel.startsWith('.tmp/') ||
+        rel === '_dist' || rel.startsWith('_dist/')
+      );
+    }
+  });
+  return target;
+}
+
+function runShimSync(workspace, args = []) {
+  return spawnSync(process.execPath, [syncScriptPath, '--workspace', workspace, ...args], {
+    cwd: repoRoot,
+    encoding: 'utf8'
+  });
+}
+
 function createSymlinkOrSkip(t, target, linkPath, type) {
   try {
     fs.rmSync(linkPath, { recursive: true, force: true });
@@ -94,8 +133,8 @@ function createSymlinkOrSkip(t, target, linkPath, type) {
   return true;
 }
 
-test('n8n-agent-rules skill publishes the canonical full rules from development source', () => {
-  const canonicalPath = '_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules.md';
+test('n8n-agent-rules skill keeps the canonical full rules contract locally', () => {
+  const canonicalPath = 'repo/contracts/agent-rules/n8n-agent-rules.md';
   const skillPath = 'skills/n8n-agent-rules/SKILL.md';
   const publishedPath = 'skills/n8n-agent-rules/n8n-agent-rules.md';
 
@@ -156,7 +195,6 @@ test('n8n-agent-rules skill publishes the canonical full rules from development 
 
 test('n8n-agent-rules skill documents the adapter auto-check approval protocol', () => {
   for (const relPath of [
-    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/n8n-agent-rules/SKILL.md',
     'skills/n8n-agent-rules/SKILL.md'
   ]) {
     const text = readText(relPath);
@@ -169,7 +207,7 @@ test('n8n-agent-rules skill documents the adapter auto-check approval protocol',
     assert.match(text, /Show the dry-run result to the user/i, relPath);
     assert.match(text, /explicit current-turn approval naming `AGENTS\.md` before running `--write`/i, relPath);
     assert.match(text, /If approved, run the installer with `--write`/i, relPath);
-    assert.match(text, /canonical managed n8n adapter block sourced from `_projects\/development\/ai-coding-agent-rules\/_main\/_partials\/n8n-agent-rules-adapter\.md`/i, relPath);
+    assert.match(text, /canonical managed n8n adapter block sourced from `repo\/contracts\/agent-rules\/n8n-agent-rules-adapter\.md`/i, relPath);
     assert.match(text, /must not write a separate Claude, Gemini, or platform-specific n8n adapter variant/i, relPath);
     assert.match(text, /If declined, continue the current n8n task/i, relPath);
     assert.match(text, /future sessions\/tools may not auto-load the rules/i, relPath);
@@ -193,7 +231,6 @@ test('n8n-agent-rules skill documents the adapter auto-check approval protocol',
 });
 test('n8n-agent-rules README tells agents to dry-run then ask before write', () => {
   for (const relPath of [
-    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/n8n-agent-rules/README.md',
     'skills/n8n-agent-rules/README.md'
   ]) {
     const text = readText(relPath);
@@ -202,7 +239,7 @@ test('n8n-agent-rules README tells agents to dry-run then ask before write', () 
     assert.match(text, /dry-run/i, relPath);
     assert.match(text, /show the preview/i, relPath);
     assert.match(text, /ask for explicit current-turn approval naming `AGENTS\.md`/i, relPath);
-    assert.match(text, /canonical managed block sourced from `_projects\/development\/ai-coding-agent-rules\/_main\/_partials\/n8n-agent-rules-adapter\.md`/i, relPath);
+    assert.match(text, /canonical managed block sourced from `repo\/contracts\/agent-rules\/n8n-agent-rules-adapter\.md`/i, relPath);
     assert.match(text, /must not append separate n8n adapter variants to `CLAUDE\.md` or `GEMINI\.md`/i, relPath);
     assert.match(text, /If no `AGENTS\.md` exists/i, relPath);
     assert.match(text, /install or repair repo-local `AGENTS\.md` with `ai-coding-agent-rules`/i, relPath);
@@ -242,7 +279,7 @@ test('generic AI coding agent templates stay slim and obsolete heavy templates a
     'skills/n8n-local-setup/agent-rules/CLAUDE.n8n-full.template.md',
     'skills/n8n-local-setup/agent-rules/GEMINI.n8n-full.template.md',
     'skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md',
-    '_projects/n8n/local-setup/_main/agent-rules/n8n-mcp-rules.template.md'
+    'skills/n8n-local-setup/agent-rules/n8n-mcp-rules.template.md'
   ]) {
     assert.equal(exists(relPath), false, relPath);
   }
@@ -250,16 +287,10 @@ test('generic AI coding agent templates stay slim and obsolete heavy templates a
 
 test('existing n8n skills declare n8n-agent-rules dependency in entrypoints', () => {
   for (const relPath of [
-    '_projects/n8n/local-setup/curated_output_for_ai/skills/n8n-local-setup/SKILL.md',
-    '_projects/n8n/local-setup/curated_output_for_ai/skills/n8n-local-setup/README.md',
     'skills/n8n-local-setup/SKILL.md',
     'skills/n8n-local-setup/README.md',
-    '_projects/n8n/workflow-toolkit/curated_output_for_ai/skills/n8n-workflow-helper-scripts/SKILL.md',
-    '_projects/n8n/workflow-toolkit/curated_output_for_ai/skills/n8n-workflow-helper-scripts/README.md',
     'skills/n8n-workflow-helper-scripts/SKILL.md',
     'skills/n8n-workflow-helper-scripts/README.md',
-    '_projects/n8n/workflow-toolkit/curated_output_for_ai/skills/n8n-workflow-templates/SKILL.md',
-    '_projects/n8n/workflow-toolkit/curated_output_for_ai/skills/n8n-workflow-templates/README.md',
     'skills/n8n-workflow-templates/SKILL.md',
     'skills/n8n-workflow-templates/README.md'
   ]) {
@@ -268,8 +299,8 @@ test('existing n8n skills declare n8n-agent-rules dependency in entrypoints', ()
   }
 });
 
-test('generated cross-skill n8n-agent-rules references are labelled and source-backed', () => {
-  const canonicalPath = '_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules.md';
+test('cross-skill n8n-agent-rules references identify the narrow direct-canonical derivative', () => {
+  const canonicalPath = 'repo/contracts/agent-rules/n8n-agent-rules.md';
   const canonical = readText(canonicalPath).trimEnd();
   for (const relPath of [
     'skills/n8n-local-setup/references/n8n-agent-rules.md',
@@ -277,14 +308,46 @@ test('generated cross-skill n8n-agent-rules references are labelled and source-b
     'skills/n8n-workflow-templates/references/n8n-agent-rules.md'
   ]) {
     const text = readText(relPath);
-    assert.match(text, /Generated cross-skill reference\./, relPath);
-    assert.match(text, /Canonical source project: `development\.ai-coding-agent-rules`/, relPath);
-    assert.match(text, new RegExp(`Canonical source file: \`${canonicalPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\``), relPath);
-    assert.match(text, /Owning skill\/project: `n8n-agent-rules` \/ `development\.ai-coding-agent-rules`/, relPath);
-    assert.match(text, new RegExp(`Generated destination: \`${relPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\``), relPath);
-    assert.match(text, /Do not edit this file directly\./, relPath);
-    assert.match(text, /Update the canonical source and run sync\./, relPath);
-    assert.match(text, new RegExp(canonical.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), relPath);
+    assert.match(text, /Direct canonical source: `repo\/contracts\/agent-rules\/n8n-agent-rules\.md`/, relPath);
+    assert.match(text, /portable\/local n8n safety context in the containing copied skill/i, relPath);
+    assert.match(text, /Repair command: `node repo\/scripts\/sync-agent-instruction-shims\.cjs --write`/, relPath);
+    assert.match(text, /narrow managed n8n safety derivative/i, relPath);
+    assert.doesNotMatch(text, retiredTopologyPattern, relPath);
+    const separator = '\n---\n';
+    const body = text.slice(text.indexOf(separator) + separator.length).trimEnd();
+    assert.equal(body, canonical, relPath);
+  }
+});
+
+test('retained synchronizer checks and repairs exactly four n8n safety derivatives', () => {
+  const workspace = copyToolkitWorkspace();
+  try {
+    const fresh = runShimSync(workspace, ['--check']);
+    assert.equal(fresh.status, 0, fresh.stderr);
+
+    const corruptPath = path.join(workspace, n8nDerivativePaths[1]);
+    fs.appendFileSync(corruptPath, '\ncorrupt derivative fixture\n', 'utf8');
+    const stale = runShimSync(workspace, ['--check']);
+    assert.notEqual(stale.status, 0);
+    assert.match(stale.stderr, /n8n safety derivative/i);
+
+    const write = runShimSync(workspace, ['--write']);
+    assert.equal(write.status, 0, write.stderr);
+    const repeat = runShimSync(workspace, ['--check']);
+    assert.equal(repeat.status, 0, repeat.stderr);
+
+    const canonical = fs.readFileSync(path.join(workspace, 'repo', 'contracts', 'agent-rules', 'n8n-agent-rules.md'), 'utf8').replace(/\r\n/g, '\n').trimEnd();
+    for (const relPath of n8nDerivativePaths) {
+      const text = fs.readFileSync(path.join(workspace, relPath), 'utf8').replace(/\r\n/g, '\n').trimEnd();
+      const body = relPath === n8nDerivativePaths[0]
+        ? text
+        : text.slice(text.indexOf('\n---\n') + '\n---\n'.length);
+      assert.equal(body, canonical, relPath);
+      assert.match(body, /Do not modify credentials unless the user explicitly asks/i, relPath);
+      assert.match(body, /Keep workflows inactive or unpublished by default/i, relPath);
+    }
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
   }
 });
 
@@ -312,7 +375,6 @@ test('platform n8n adapters remain optional snippets and are not installer targe
 });
 test('adapter installer source has no standalone marker migration path', () => {
   for (const relPath of [
-    '_projects/development/ai-coding-agent-rules/_main/scripts/install-n8n-agent-adapter.cjs',
     'skills/n8n-agent-rules/scripts/install-n8n-agent-adapter.cjs'
   ]) {
     const text = readText(relPath);

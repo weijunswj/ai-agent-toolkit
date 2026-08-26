@@ -15,11 +15,11 @@ test('agent onboarding path exposes repo purpose and major navigation roots', ()
   const readme = readText('README.md');
   const agents = readText('AGENTS.md');
 
-  assert.match(readme, /A practical skills-first toolkit of reusable AI-agent skills and preserved source projects\./);
-  assert.match(readme, /\[_projects\/\]\(_projects\/\) preserves project source, provenance, and reviewed AI-facing source\./);
-  assert.match(readme, /\[skills\/\]\(skills\/\) contains copyable AI-agent skill folders\./);
-  assert.match(readme, /\[repo\/\]\(repo\/\) contains repo maintenance docs, scripts, tests, and validation policy\./);
-  assert.match(readme, /\| Full guide or source context \| Open a project under \[_projects\/\]\(_projects\/\), then its `_main\/` folder\. \|/);
+  assert.match(readme, /A practical skills-first toolkit of reusable AI-agent skills, machine contracts, provenance records, and safe maintenance scripts\./);
+  assert.match(readme, /This repo keeps reusable AI-agent material in a direct canonical layout/);
+  assert.match(readme, /\[skills\/\]\(skills\/\) contains complete copyable AI-agent skill folders\./);
+  assert.match(readme, /\[repo\/\]\(repo\/\) contains maintenance docs, scripts, tests, provenance, and validation policy\./);
+  assert.match(readme, /\| Full guide or source context \| Open the relevant `skills\/<skill-name>\/` folder or `repo\/contracts\/` entry\. \|/);
   assert.match(readme, /\| Install a skill \| Copy the whole skill folder using \[Install Skills By Platform\]/);
   assert.match(readme, /\| Review skill safety \| Use the \[Skill Safety Matrix\]/);
   assert.match(readme, /\| Maintenance work \| Start with \[repo\/docs\/\]/);
@@ -37,13 +37,13 @@ test('agent onboarding path keeps source-of-truth and validation anchors visible
   const sourceOfTruth = readText('repo/docs/SOURCE-OF-TRUTH.md');
   const validation = readText('repo/docs/VALIDATION-STRATEGY.md');
 
-  assert.match(agents, /`_projects\/\*\*\/_main\/` preserves full source material and original docs\./);
-  assert.match(agents, /`_projects\/\*\*\/curated_output_for_ai\/` stores reviewed AI-facing source material\./);
-  assert.match(agents, /`_projects\/\*\*\/toolkit\.project\.json` is the routing and toolkit project-version contract\./);
-  assert.match(agents, /`skills\/` contains copyable AI-agent skill folders\./);
+  assert.match(agents, /`repo\/contracts\/\*\*` is the canonical machine contract surface for schemas, policies, fixtures, templates, and agent-rule inputs\./);
+  assert.match(agents, /`repo\/source-watch\/provenance\/\*\*\/SOURCE-LOCK\.json` contains only active third-party attribution pins\./);
+  assert.match(agents, /The toolkit maintains one direct canonical tree\. New Toolkit skills are created at `skills\/\*\*` paths after Skill Creation Center review; contracts, runtime, tests, and docs are created at canonical `repo\/\*\*` paths\./);
+  assert.match(agents, /`skills\/\*\*` is the canonical copyable AI-agent product surface\./);
 
-  assert.match(sourceOfTruth, /The repo-wide generated surface is skills-first plus native plugin metadata\./);
-  assert.match(sourceOfTruth, /Humans use `_projects\/\*\*` for source review and maintenance, agents use generated `skills\/\*\*` folders after sync, and native plugin installers read generated `\.codex-plugin\/\*\*` or `\.claude-plugin\/\*\*` metadata\./);
+  assert.match(sourceOfTruth, /Direct canonical content lives in `skills\/\*\*` and `repo\/\*\*`; there is no second project or publisher tree\./);
+  assert.match(sourceOfTruth, /Active third-party provenance under `repo\/source-watch\/provenance\/\*\*`\./);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /Persistent status, report, implementation plan, handoff, operations, setup, CI\/CD, deployment, safety, and troubleshooting notes belong under an existing `docs\/` path/);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /read the relevant docs and treat them as active context/i);
   assert.match(readText('repo/docs/FOR_AI_AGENTS.md'), /run the host-aware orchestrator from the managed checkout when that checkout exists/);
@@ -62,7 +62,7 @@ test('agent onboarding path does not advertise repo-wide MCP as a current surfac
   const surfaceAudit = readText('repo/docs/SURFACE-FIDELITY-AUDIT.md');
 
   assert.match(readme, /Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised as a supported surface for now\./);
-  assert.match(surfaceAudit, /`mcp\/\*\*` is not shipped\./);
-  assert.match(surfaceAudit, /Project manifests must not declare repo-wide `mcp\/\*\*` outputs or `publish_as: "mcp"` \/ `publish_as: "both"`\./);
-  assert.match(surfaceAudit, /No tracked root `mcp\/\*\*` file is part of the current generated\/published surface\./);
+  assert.match(surfaceAudit, /No repo-wide `mcp\/\*\*` surface is shipped or maintained\./);
+  assert.match(surfaceAudit, /No secondary routing metadata, duplicate package-build path, or privileged publication workflow is part of the maintained topology\./);
+  assert.match(surfaceAudit, /that no required local surface points back to the deleted project\/publisher tree\./);
 });

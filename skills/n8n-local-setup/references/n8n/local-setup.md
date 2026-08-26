@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: n8n.local-setup
-Source: _projects/n8n/local-setup/_main/Page 1 - Local Setup.md
-Update the project source and run sync.
--->
 # Page 1 - Local Setup
 
 This is the beginner path for running n8n locally on Windows with Docker Desktop, Postgres, the guided `_n8n-local.cmd` menu, and optional ngrok public access.
@@ -14,7 +8,7 @@ Use [Page 3 - Production Self-Hosting With Cloudflare Tunnel](production-cloudfl
 * Start local n8n first.
 * Add ngrok only when something outside your computer must reach n8n.
 * Keep production Cloudflare Tunnel hosting in the separate Page 3 production stack.
-* Keep this toolkit skills-first: humans use `_projects/**`; agents use `skills/**`.
+* Keep this toolkit skills-first: humans and agents use `skills/**` and `repo/**`.
 * [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references are secondary. Do not start there.
 * Do not paste real tokens, credentials, `.env` values, backups, or live exports into repo files.
 
@@ -140,7 +134,7 @@ PowerShell fallback from the toolkit repo root:
 ```powershell
 $DesktopPath = [Environment]::GetFolderPath('Desktop')
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.n8n-local"
-Copy-Item -Path "_projects\n8n\local-setup\_main\templates\local-stack\*" -Destination "$env:USERPROFILE\.n8n-local" -Recurse -Force
+Copy-Item -Path "skills\n8n-local-setup\templates\.n8n-local\*" -Destination "$env:USERPROFILE\.n8n-local" -Recurse -Force
 Copy-Item -LiteralPath "$env:USERPROFILE\.n8n-local\n8n-local-desktop-shortcut.cmd" -Destination (Join-Path $DesktopPath 'n8n-local-desktop-shortcut.cmd') -Force
 ```
 
@@ -752,7 +746,7 @@ Advanced target `.env`:
 
 This toolkit is skills-first.
 
-* Humans use `_projects/**` for source review and maintenance.
+* Humans and agents use the direct `skills/**` and `repo/**` surfaces.
 * Agents use `skills/**` after generated outputs are synced.
 * [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references are available as secondary material, not as the beginner setup path.
 * Use [n8n Agent Rules](../../../n8n-agent-rules/) before workflow, helper-script, import/export, credential, execution, repo/live sync, or live-instance work.

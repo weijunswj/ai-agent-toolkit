@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: development.windows-localhost-workflows
-Source: _projects/development/windows-localhost-workflows/_main/skill/README.md
-Update the project source and run sync.
--->
 # Windows Localhost Workflows
 
 This skill helps an AI coding agent start, relaunch, verify, and troubleshoot localhost development apps on Windows.

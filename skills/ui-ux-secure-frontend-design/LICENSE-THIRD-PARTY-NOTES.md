@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: design.ui-ux-pro-max
-Source: _projects/design/ui-ux-pro-max/_main/skill/LICENSE-THIRD-PARTY-NOTES.md
-Update the project source and run sync.
--->
 # License and Third-Party Notes
 
 This skill was inspired by the public UI/UX Pro Max workflow idea:
@@ -25,7 +19,7 @@ This skill also includes a Toolkit-local reference for the Google Labs `DESIGN.m
 
 - https://github.com/google-labs-code/design.md
 - License: Apache-2.0
-- Toolkit source module: `_projects/design/google-design-md/`
+- Toolkit source lock: `repo/source-watch/provenance/google-design-md/SOURCE-LOCK.json`
 
 The Toolkit adapts the upstream `docs/spec.md` concept into `references/design-md-contract.md` as documentation/reference support for reading and proposing design contracts. It does not vendor or execute the upstream CLI, package tooling, examples, workflows, lockfiles, generated assets, remote validators, package install paths, or `npx @google/design.md` commands.
 

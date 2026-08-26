@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: n8n.local-setup
-Source: _projects/n8n/local-setup/_main/mcp setup - antigravity.md
-Update the project source and run sync.
--->
 # Antigravity [Official n8n Skills](https://github.com/n8n-io/skills) And MCP Setup
 
 The primary local setup guide is [Page 1 - Local Setup](../n8n/local-setup.md).
@@ -134,7 +128,7 @@ This section is for this toolkit's own safety skills, not the upstream [official
 2. Use `ai-agent-toolkit` as `<plugin-name>` for this repo unless you intentionally create a differently named local plugin folder.
 3. Use a minimal `plugin.json` only when the installed Antigravity runtime or docs require plugin metadata.
 4. Do not copy only `SKILL.md`.
-5. Keep `README.md`, `references/`, `templates/`, `agents/`, `packs/`, and other supporting files beside `SKILL.md` when present.
+5. Keep `README.md`, `references/`, `templates/`, `agents/`, and other supporting files beside `SKILL.md` when present.
 
 ## 5. Agent Rules
 

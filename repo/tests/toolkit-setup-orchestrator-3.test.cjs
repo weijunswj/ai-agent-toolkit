@@ -89,7 +89,6 @@ test('target keep, skip, enable-sync, and disable remain distinct', () => {
 
 test('setup docs explain automatic resource admission and honest enforcement disclosure', () => {
   const docs = [
-    '_projects/development/toolkit-local-bridge/curated_output_for_ai/skills/toolkit-setup/SKILL.md',
     'skills/toolkit-setup/SKILL.md',
     'repo/docs/FOR_AI_AGENTS.md',
     'repo/docs/HOW-TO-USE.md'

@@ -8,13 +8,10 @@ Classify toolkit repo tasks before planning or editing. Read only the playbooks 
 
 1. Follow root `AGENTS.md`.
 2. Read this index.
-3. If root `MEMORY.md` exists, read it as non-authoritative context.
-4. Classify the task using the matches below.
-5. Read every matching playbook, but do not load every playbook by default.
-6. If no special match applies, proceed baseline-only with `AGENTS.md` and this index.
-7. If a required playbook is missing, inaccessible, or conflicts with `AGENTS.md`, stop and report the issue.
-
-Final reports must list `Instruction sources used`, including `MEMORY.md` when it was present and read.
+3. Classify the task using the matches below.
+4. Read every matching playbook, but do not load every playbook by default.
+5. If no special match applies, proceed baseline-only with `AGENTS.md` and this index.
+6. If a required playbook is missing, inaccessible, or conflicts with `AGENTS.md`, stop and report the issue.
 
 ## Always-Active Baseline
 
@@ -50,7 +47,7 @@ Stop if the source/output ownership is unclear or a generated instruction file w
 
 ## Match: Generated Output Or Publishing Work
 
-Triggers: `skills/**`, `_projects/**`, `curated_output_for_ai`, `_main`, `toolkit.project.json`, `SOURCE-LOCK.json`, generated outputs, sync scripts, source-of-truth contract, source-watch, audit baselines, package outputs, or published-surface validation.
+Triggers: `skills/**`, `repo/contracts/**`, `SOURCE-LOCK.json`, canonical surfaces, retained synchronizers, source-of-truth contract, source-watch, audit baselines, or published-surface validation.
 
 Read: `repo/docs/agent-playbooks/generated-output-and-publishing.md`.
 
@@ -86,7 +83,7 @@ Do not claim CI passed unless checked. Do not do reviews from metadata alone.
 
 Triggers: final audit, completion audit, production-readiness audit, release-candidate audit, launch-readiness audit, QA pass, "make sure everything works", "is this production ready?", `/goal` readiness remediation, audit against original docs, security-readiness check, or final readiness check.
 
-Read: `skills/project-completion-audit/SKILL.md` when generated/published outputs are present; when editing the source in this toolkit repo, read `_projects/development/project-completion-audit/_main/skill/SKILL.md`.
+Read: `skills/project-completion-audit/SKILL.md` when final readiness work is present.
 
 Only lightweight preflight is allowed before explicit confirmation. Stop before broad validation, full builds, browser sweeps, security scans, deployment checks, external-service checks, or remediation until the user confirms the target and scope.
 

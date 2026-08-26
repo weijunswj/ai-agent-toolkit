@@ -3,12 +3,6 @@ name: managed-app-foundation-review
 description: Use when reviewing an implementation plan to compare low-cost managed or owner-hosted foundations before custom-building auth, accounts, databases, backend APIs, workflow automation, CRM/contact pipelines, forms, email, storage, analytics, ops, traffic/security monitoring, or account-security foundations.
 ---
 
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: development.managed-app-foundation-review
-Source: _projects/development/managed-app-foundation-review/_main/skill/SKILL.md
-Update the project source and run sync.
--->
 # Managed App Foundation Review
 
 ## Overview

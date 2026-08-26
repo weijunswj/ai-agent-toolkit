@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: design.ui-ux-pro-max
-Source: _projects/design/ui-ux-pro-max/_main/skill/references/design-system-workflow.md
-Update the project source and run sync.
--->
 # Design System Workflow
 
 Use this template when creating or inferring a design system before page or component work.

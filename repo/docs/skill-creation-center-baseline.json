@@ -1,16 +1,6 @@
 {
-  "existing_skill_project_ids": [
-    "cicd.secure-installer",
-    "design.ui-ux-pro-max",
-    "development.ai-coding-agent-rules",
-    "development.windows-localhost-workflows",
-    "knowledge.knowledge-index-updater",
-    "n8n.local-setup",
-    "n8n.workflow-toolkit",
-    "repo-methodology.agent-skill-supply-chain-audit",
-    "repo-methodology.context-preserving-ai-publisher"
-  ],
-  "existing_skill_ids": [
+  "schema_version": 2,
+  "grandfathered_skill_ids": [
     "agent-skill-supply-chain-audit",
     "ai-coding-agent-rules",
     "context-preserving-ai-publisher",
@@ -23,5 +13,164 @@
     "ui-ux-secure-frontend-design",
     "windows-localhost-workflows"
   ],
-  "notes": "Baseline of skill-publishing project modules and concrete skill entrypoints that existed before the Skill Creation Center gate. New skills outside existing_skill_ids must include skill_creation_review evidence in toolkit.project.json, even when they are added by an existing project module."
+  "reviewed_skill_ids": [
+    "codex-ssh-hostinger-coolify-setup-maintainer",
+    "github-governance-review-reconciler",
+    "local-ai-stack-safety",
+    "managed-app-foundation-review",
+    "project-completion-audit",
+    "self-hosted-service-safety",
+    "toolkit-setup"
+  ],
+  "skill_creation_review": {
+    "github-governance-review-reconciler": {
+      "existing_skill_review": "Reviewed current A1-A4 source modules, current skills and modules, toolkit skill routing, README skill tables, and repo/docs/SKILL-SAFETY-MATRIX.md. The existing github-governance-review-reconciler skill was absent; existing governance, capability, execution-loop, assurance, GitHub, review, and publisher surfaces do not own this combined current-main N5 parent-state and truthful-review reconciler contract without duplicating or bloating an existing skill.",
+      "trigger": "Use github-governance-review-reconciler only when the user explicitly requests N5 governed GitHub parent/direct-child inspection, preview, initialise/migrate, validation, reconciliation, show/remove, truthful PR-review inventory, finding disposition evidence, conversation-closure evidence, or Deferred Findings handling for a repository-scoped current-main task. Do not invoke it implicitly for ordinary coding, ordinary GitHub inspection, CI, G4, Ready, merge, review mutation, providers, workflows, or MCP.",
+      "decision": "new_project_skill",
+      "decision_reason": "The work combines a distinct deterministic GitHub governance state contract with truthful PR-review and Deferred Findings evidence, while preserving separate A1-A4 authority boundaries. No existing skill owns this exact boundary.",
+      "unique_value": "Provides one current-main v3 source contract and bounded transaction runtime that prevents Markdown improvisation, queue duplication, review-inventory emptiness, executor review mutation, and silent Deferred Findings promotion.",
+      "runtime_footprint": "One local runtime, compact JSON policy/schema/grammar, three templates, focused tests, and a concise explicit-only skill. No provider client, workflow, MCP, credential, or live-system dependency.",
+      "local_assets": "Only first-party contracts, templates, metadata, runtime, and tests are required; no third-party text or code is copied or adapted.",
+      "output_contract": "Return inspect/preview/validate/reconcile/show/remove evidence with exact repository binding, lifecycle/queue uniqueness, revision and byte-preservation proof, truthful review inventory, finding materiality/disposition status, DF provenance and revalidation status, authority boundary, failures, and exactly one next action: Web exact-head validation when successful.",
+      "anti_bloat_review": "Reject generic web-controller stages, timer/polling history, automatic issue creation for every finding, multiple parent queues, historical PR #310 cache machinery, model reconstruction of large parent bodies, review-thread mutation by executors, and any A1-A4 redesign.",
+      "safety_boundary": "Explicit inspection and preview are read-only. Any repository/GitHub mutation requires current repository identity, A2 repository.governance consent, accepted preview, and A1 github.mutation authority. Review-thread replies, resolution/reopen/dismissal, final disposition, Ready, merge, cleanup, and Web finality remain controller-owned and are not performed by this skill.",
+      "source_provenance": "first_party",
+      "third_party_audit": "not_applicable_first_party; no third-party text, provider docs, workflow JSON, MCP, or code copied or adapted.",
+      "publisher_workflow": "Direct-canonical ownership and maintenance: skills/github-governance-review-reconciler/** is the canonical skill surface, while relevant contracts, documentation, scripts, and tests are maintained directly at canonical repo/** paths. No project-source tree, reviewed-output publication, copy/writeback, or project sync step is used.",
+      "routing": "The routing decision is explicit-only: github-governance-review-reconciler is routed only for the named N5 governance/review-reconciler contract. Ordinary GitHub inspection belongs to the GitHub skill; source publication belongs to context-preserving-ai-publisher; current finality remains Web/controller work.",
+      "validation": [
+        "node repo/scripts/validate-toolkit.cjs",
+        "node repo/scripts/audit-published-surfaces.cjs --check",
+        "node --test repo/tests/toolkit-github-governance-review-reconciler.test.cjs repo/tests/toolkit-github-governance-review-reconciler.boundaries.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run175-red.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run177-repair.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run178-canonical-a1.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run179-remove-transaction.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run181-six-root.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run183-adversarial.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run185-adversarial.test.cjs"
+      ]
+    },
+    "codex-ssh-hostinger-coolify-setup-maintainer": {
+      "existing_skill_review": "Reviewed current skills before adding codex-ssh-hostinger-coolify-setup-maintainer: n8n-local-setup for local and hosted n8n guide ownership, self-hosted-service-safety for non-n8n self-hosting safety boundaries, secure-cicd-installer for deployment-adjacent approval gates, ai-coding-agent-rules routing, README skill tables, and the skill safety matrix. The new codex-ssh-hostinger-coolify-setup-maintainer skill is distinct because it pairs a production-sensitive Hostinger/Coolify maintainer workflow with source-owned checklists, templates, scripts, agent metadata, and owner approval gates while leaving n8n-local-setup's n8n-specific Hostinger Coolify VPS deployment reference intact.",
+      "trigger": "Use codex-ssh-hostinger-coolify-setup-maintainer when a user asks Codex to help set up Hostinger for deployment, prepare a Hostinger VPS, inspect a Hostinger server over SSH, bootstrap or maintain Coolify, deploy apps through Coolify, run daily security checks, review upgrade timing from usage pressure, or respond to incidents on a Hostinger VPS running Coolify. Do not invoke it for generic local n8n setup, n8n app deployment inside an already-running Coolify platform, or generic app coding with no Hostinger/Coolify work.",
+      "decision": "new_project_skill",
+      "decision_reason": "The previous Hostinger/Coolify material is now a dedicated production-sensitive maintainer workflow rather than secondary n8n-local setup guidance or a repo-preparation-only guide.",
+      "unique_value": "Combines Codex SSH read-only preflight, owner approval gates, setup/deploy/maintenance/incident checklists, evidence templates, upgrade advisory, and a daily security report script for Hostinger VPS plus Coolify owners.",
+      "runtime_footprint": "SKILL.md stays concise and routes to a local reference only when full runbook detail matters. The long runtime guide is published as a reference file, not duplicated in the default entrypoint.",
+      "local_assets": "Full local reference guide, concise skill README, SKILL.md, agents/openai.yaml metadata, checklists, evidence templates, rollback/approval templates, read-only daily security report script, and systemd timer installer script. The scripts perform reporting/installation only and do not perform auto-remediation.",
+      "output_contract": "Return an evidence-based PASS/WARN/FAIL setup, deploy, security check, upgrade advisory, maintenance, or incident report with owner approvals, blockers, manual follow-up, and confirmation that no secrets were printed and no unapproved live production actions were performed.",
+      "anti_bloat_review": "The skill is not generic DevOps advice: it triggers only for Hostinger VPS plus Coolify setup, deployment, security checks, maintenance, and incident response. It routes longer instructions to local references/checklists and excludes unapproved live production operations.",
+      "safety_boundary": "Agent-safe by default for read-only inspection, evidence reports, placeholder-only documentation, upgrade advisory, and the bundled read-only daily security report. Hostinger, Coolify, GitHub connection, DNS/TLS, real secrets, production deployments, migrations, backups, restore tests, cutover, rollback, VPS changes, server resizing, paid upgrades, billing, customer data, firewall restrictions, reboots, and destructive actions are human-owned and approval-gated.",
+      "source_provenance": "first_party",
+      "third_party_audit": "not_applicable_first_party; no third-party text or code copied or adapted. Vendor docs were consulted only as factual context.",
+      "publisher_workflow": "Direct-canonical ownership and maintenance: skills/codex-ssh-hostinger-coolify-setup-maintainer/** is the canonical skill surface, while relevant contracts, documentation, scripts, and tests are maintained directly at canonical repo/** paths. No project-source tree, reviewed-output publication, copy/writeback, or project sync step is used.",
+      "routing": "codex-ssh-hostinger-coolify-setup-maintainer is routed for Hostinger VPS plus Coolify setup, deployment, security checks, upgrade timing review, maintenance, incident response, and prompts such as helping set up Hostinger for deployment. n8n-local-setup keeps its local n8n and n8n-specific Hostinger Coolify VPS deployment reference material for use after Coolify exists. If the target app is n8n or the task touches live n8n operations, n8n-agent-rules remains the companion safety router.",
+      "validation": [
+        "node repo/scripts/validate-toolkit.cjs",
+        "node repo/scripts/audit-published-surfaces.cjs --check",
+        "node --test repo/tests/skill-routing.test.cjs"
+      ]
+    },
+    "local-ai-stack-safety": {
+      "existing_skill_review": "Reviewed current skills before adding local-ai-stack-safety: n8n-agent-rules, n8n-local-setup, windows-localhost-workflows, secure-cicd-installer, ai-coding-agent-rules, and context-preserving-ai-publisher. No existing skill covers this exact non-n8n safety-review trigger without either being too narrow or too broad.",
+      "trigger": "Use only when reviewing or planning local AI stack setup such as local LLM runners, model servers, Stable Diffusion or ComfyUI-style web UIs, vector databases, model downloads, GPU/runtime changes, or exposing local AI endpoints. Do not use for ordinary AI API coding, model prompting, or general application work.",
+      "decision": "new_project_skill",
+      "decision_reason": "Local AI Stack Safety has a distinct safety boundary and invocation trigger, so folding it into ai-coding-agent-rules would make the always-adjacent coding rules heavier while hiding the setup/exposure review boundary.",
+      "unique_value": "Forces a short risk review before high-impact local setup or service exposure work that agents might otherwise treat as ordinary setup commands.",
+      "runtime_footprint": "SKILL.md is intentionally short, review-only, and has no required long references or bundled tools; optional detail is not loaded by default.",
+      "local_assets": "No local assets beyond README, SKILL.md, and small platform metadata because the useful behavior is a compact safety review, not an installer or tutorial.",
+      "output_contract": "Return a compact Local AI Stack Safety Review with risk level, blocked actions, approval-gated actions, safer first-run plan, files/settings to inspect, and validation checks such as localhost-only health checks or port binding review.",
+      "anti_bloat_review": "The skill is rejected for ordinary coding and model-general advice; it triggers only on setup/exposure/credential/live-system risk and produces a compact review instead of a tutorial.",
+      "safety_boundary": "Review-only by default. Installation, model pulls, Docker, public tunnels, driver/runtime changes, shell profile edits, credentials, or non-local network exposure require explicit current-turn approval.",
+      "source_provenance": "first_party",
+      "third_party_audit": "not_applicable_first_party; no third-party text or code copied or adapted.",
+      "publisher_workflow": "Direct-canonical ownership and maintenance: skills/local-ai-stack-safety/** is the canonical skill surface, while relevant contracts, documentation, scripts, and tests are maintained directly at canonical repo/** paths. No project-source tree, reviewed-output publication, copy/writeback, or project sync step is used.",
+      "routing": "local-ai-stack-safety is routed only for local-ai-stack-safety review/planning tasks involving local AI runtimes, model servers, model downloads, GPU/runtime setup, local AI web UIs, or endpoint exposure.",
+      "validation": [
+        "node repo/scripts/validate-toolkit.cjs",
+        "node repo/scripts/audit-published-surfaces.cjs --check",
+        "node --test repo/tests/skill-routing.test.cjs"
+      ]
+    },
+    "managed-app-foundation-review": {
+      "existing_skill_review": "Reviewed current skills and modules before adding managed-app-foundation-review: ui-ux-secure-frontend-design for frontend security and form review, self-hosted-service-safety for deployment exposure review, secure-cicd-installer for CI/CD setup, local-ai-stack-safety for local runtime exposure, codex-ssh-hostinger-coolify-setup-maintainer for Hostinger/Coolify server operations, n8n-agent-rules for n8n workflow safety, ai-coding-agent-rules routing, README skill tables, and the skill safety matrix. No existing skill owns the early product-architecture build-vs-buy decision for low-cost managed or owner-hosted auth, backend, database, automation, CRM, form, email, analytics, ops, and account foundations without becoming too broad.",
+      "trigger": "Use managed-app-foundation-review when a task introduces or materially changes a product, backend, data, automation, account, admin, ops, or security foundation primitive, or when a user wants to revisit an implementation plan, cut custom build scope, compare build-vs-buy, choose low-cost/free managed or owner-hosted foundations, ask whether to browse current provider options, define usage-limit or upgrade-watch triggers, or decide whether to use existing CRM, auth, backend APIs, workflow automation, database, forms, email, storage, analytics, traffic/security monitoring, ops, or account-security services instead of building from scratch. Do not use for ordinary implementation after the foundation decision is already recorded.",
+      "decision": "new_project_skill",
+      "decision_reason": "The trigger is an early planning and security-risk-reduction decision, not frontend UI review, deployment safety, CI/CD setup, or localhost operations. A dedicated small skill prevents recurring custom auth/database/CRM rebuilds without bloating always-on coding rules.",
+      "unique_value": "Forces a build/buy/skip/hybrid review before high-risk product, backend, data, automation, ops, and account primitives are custom-built, with explicit low-cost constraints, current-pricing verification from official docs when concrete recommendations are needed, owner-hosted n8n routing when suitable, upgrade-watch signals for later Codex review, and remaining security responsibilities.",
+      "runtime_footprint": "SKILL.md is concise and instruction-only with no required long references, scripts, copied provider docs, or pricing tables; provider-specific details are checked live from official docs only when needed.",
+      "local_assets": "No local assets beyond README, SKILL.md, and small platform metadata because provider pricing and limits change and must not be frozen into the toolkit.",
+      "output_contract": "Return a compact Managed App Foundation Review with a build/buy/skip/hybrid table, low-cost or owner-hosted foundation candidates, security work avoided, remaining configuration, cost caveats, upgrade-watch thresholds, privacy-safe deployment/AI observability baseline, cut list, keep/build list, verify-before-commit list, security-still-required list, n8n safety note when self-hosted n8n is a candidate, and a note when current official pricing/docs were or still need to be checked.",
+      "anti_bloat_review": "The skill is rejected for generic product brainstorming, ordinary implementation, or small follow-up tasks after a foundation decision is recorded; it triggers only when foundation services, backend/automation/ops primitives, low-cost provider selection, scope cutting, upgrade-watch planning, or security work reduction are materially in scope.",
+      "safety_boundary": "Review-only by default. External account creation, provider configuration, DNS changes, production data migration, credentials, billing setup, paid-plan upgrades, deployment, or live-service mutation require explicit current-turn approval.",
+      "source_provenance": "first_party",
+      "third_party_audit": "not_applicable_first_party; no third-party text, provider docs, pricing tables, or code copied or adapted.",
+      "publisher_workflow": "Direct-canonical ownership and maintenance: skills/managed-app-foundation-review/** is the canonical skill surface, while relevant contracts, documentation, scripts, and tests are maintained directly at canonical repo/** paths. No project-source tree, reviewed-output publication, copy/writeback, or project sync step is used.",
+      "routing": "managed-app-foundation-review is routed for early implementation-plan reviews or material foundation changes involving managed or owner-hosted foundation selection, low-cost/free provider comparison, build-vs-buy scope cuts, usage-limit and upgrade-watch planning, auth/accounts/backend APIs/databases/workflow automation/CRM/forms/email/storage/analytics/ops foundations, and security work reduction. Do not route small follow-up implementation tasks after the foundation decision is recorded. If self-hosted n8n workflow work begins, n8n-agent-rules owns the workflow safety boundary.",
+      "validation": [
+        "node repo/scripts/validate-toolkit.cjs",
+        "node repo/scripts/audit-published-surfaces.cjs --check",
+        "node --test repo/tests/skill-routing.test.cjs"
+      ]
+    },
+    "project-completion-audit": {
+      "existing_skill_review": "Reviewed current skills and modules before adding project-completion-audit: ai-coding-agent-rules for baseline repo execution and portable playbooks, context-preserving-ai-publisher for generated-surface discipline, secure-cicd-installer for CI/CD setup, ui-ux-secure-frontend-design for frontend implementation review, managed-app-foundation-review for build-vs-buy foundation decisions, self-hosted-service-safety and codex-ssh-hostinger-coolify-setup-maintainer for hosting/deployment exposure, windows-localhost-workflows for local dev server verification, local-ai-stack-safety for local AI setup risk, n8n-agent-rules for n8n work, README skill tables, toolkit skill routing source, and the skill safety matrix. No existing skill owns a guarded final project completion or production-readiness audit and remediation loop across frontend, backend, full-stack, data/tooling, and mixed products without becoming too broad.",
+      "trigger": "Use project-completion-audit when the user asks for a final audit, completion audit, production-readiness audit, release-candidate audit, launch-readiness audit, QA pass, security-readiness check, final readiness check, make sure everything works, asks whether the repo/app is production ready, asks to use /goal to finish readiness remediation, or asks to audit against original docs. Do not use it for ordinary implementation or narrow code review unless the user is explicitly asking for readiness/completion status.",
+      "decision": "new_project_skill",
+      "decision_reason": "The trigger is a high-blast-radius final readiness gate with mandatory preflight confirmation, report creation, security scan coordination, browser verification, remediation batching, and production-ready claim limits. Folding it into always-on agent rules or a domain-specific skill would either bloat root instructions or hide the heavy audit approval boundary.",
+      "unique_value": "Forces lightweight preflight before broad validation or remediation, requires an explicit target/scope confirmation phrase, integrates standard-vs-deep Codex Security approval, records skipped/unavailable checks, prevents overclaiming production readiness, and structures remediation after a repo-local audit report exists.",
+      "runtime_footprint": "SKILL.md stays instruction-only and compact enough to load when explicitly requested. Optional heavy evidence remains in the target repo audit report, not in the skill. The platform metadata disables implicit invocation where supported; if implicit routing occurs, the body limits it to preflight only.",
+      "local_assets": "No scripts or assets beyond README, SKILL.md, and small platform metadata because the workflow must adapt to each target repo's docs, tests, browser tooling, and security-scan availability.",
+      "output_contract": "First return a lightweight preflight summary and explicit confirmation prompt. After confirmation, create or update a repo-local production-readiness audit report with scope, instructions/docs reviewed, branch/ref, app type, validation results, UI/browser checks, security scan status, findings, release gates, remediation batches, manual checks, and unverified/skipped/deferred areas; then remediate P0/P1/P2 findings in small validated batches while keeping the report current.",
+      "anti_bloat_review": "The skill is rejected for normal feature work, setup-only decisions, deployment execution, or narrow code review. Its trigger is final readiness/completion language and its first action is preflight, so it avoids root AGENTS.md bloat and accidental full-repo audits.",
+      "safety_boundary": "Preflight-only until explicit confirmation. Full audit still cannot run live-system, production, deployment, external-service, destructive, credential, import/export, sync, payment, customer-data, private-data, or irreversible actions without separate explicit current-turn approval naming the target and action. Deep security scan and browser click-through verification require approval in the confirmation step.",
+      "source_provenance": "first_party",
+      "third_party_audit": "not_applicable_first_party; no third-party text, scanner output, browser artifacts, code, or vendor docs copied or adapted.",
+      "publisher_workflow": "Direct-canonical ownership and maintenance: skills/project-completion-audit/** is the canonical skill surface, while relevant contracts, documentation, scripts, and tests are maintained directly at canonical repo/** paths. No project-source tree, reviewed-output publication, copy/writeback, or project sync step is used.",
+      "routing": "project-completion-audit is routed for final audit, completion audit, production-readiness audit, release-candidate audit, launch-readiness audit, QA pass, make sure everything works, is this production ready, use /goal to finish readiness remediation, audit against original docs, security-readiness check, and final readiness check. It is intentionally not routed for ordinary feature implementation or narrow code review.",
+      "validation": [
+        "node repo/scripts/validate-toolkit.cjs",
+        "node repo/scripts/audit-published-surfaces.cjs --check",
+        "node --test repo/tests/skill-routing.test.cjs"
+      ]
+    },
+    "self-hosted-service-safety": {
+      "existing_skill_review": "Reviewed current skills before adding self-hosted-service-safety: n8n-agent-rules, n8n-local-setup, windows-localhost-workflows, secure-cicd-installer, ai-coding-agent-rules, and context-preserving-ai-publisher. No existing skill covers this exact non-n8n safety-review trigger without either being too narrow or too broad.",
+      "trigger": "Use only when reviewing or planning non-n8n self-hosted service setup, Docker Compose services, VPS deployment notes, reverse proxies, public ports, DNS/TLS, tunnels, admin panels, backups, public admin/backup paths, honeypot/canary paths, traffic logs, SSH access, firewall exposure, or first-run hardening. Do not use for ordinary app coding, local-only dev servers, or n8n work.",
+      "decision": "new_project_skill",
+      "decision_reason": "Self-Hosted Service Safety has a distinct safety boundary and invocation trigger, so folding it into ai-coding-agent-rules would make the always-adjacent coding rules heavier while hiding the setup/exposure review boundary.",
+      "unique_value": "Forces a short risk review before high-impact local setup or service exposure work that agents might otherwise treat as ordinary setup commands.",
+      "runtime_footprint": "SKILL.md is intentionally short, review-only, and has no required long references or bundled tools; optional detail is not loaded by default.",
+      "local_assets": "No local assets beyond README, SKILL.md, and small platform metadata because the useful behavior is a compact safety review, not an installer or tutorial.",
+      "output_contract": "Return a compact Self-Hosted Service Safety Review with risk level, blocked actions, approval-gated actions, safe first-run plan, required config changes, backup/restore notes, privacy-safe deployment/AI observability baseline, and verification checks before public exposure.",
+      "anti_bloat_review": "The skill is rejected for ordinary coding and model-general advice; it triggers only on setup/exposure/credential/live-system risk and produces a compact review instead of a tutorial.",
+      "safety_boundary": "Review-only by default. Docker, DNS/TLS, tunnels, firewall/public ports, VPS/cloud changes, credentials, production data, or deployment commands require explicit current-turn approval.",
+      "source_provenance": "first_party",
+      "third_party_audit": "not_applicable_first_party; no third-party text or code copied or adapted.",
+      "publisher_workflow": "Direct-canonical ownership and maintenance: skills/self-hosted-service-safety/** is the canonical skill surface, while relevant contracts, documentation, scripts, and tests are maintained directly at canonical repo/** paths. No project-source tree, reviewed-output publication, copy/writeback, or project sync step is used.",
+      "routing": "self-hosted-service-safety is routed only for self-hosted-service-safety review/planning tasks involving non-n8n self-hosted services, Docker/VPS setup, public exposure, reverse proxies, tunnels, credentials, or backups.",
+      "validation": [
+        "node repo/scripts/validate-toolkit.cjs",
+        "node repo/scripts/audit-published-surfaces.cjs --check",
+        "node --test repo/tests/skill-routing.test.cjs"
+      ]
+    },
+    "toolkit-setup": {
+      "existing_skill_review": "Reviewed current skills, README skill table, Skill Safety Matrix, toolkit skill-routing source, context-preserving-ai-publisher, ai-coding-agent-rules, n8n-local-setup, windows-localhost-workflows, and the removed bridge command skills before adding toolkit-setup. Existing skills cover repo rules, source publishing, n8n setup, localhost startup, and safety reviews, but no existing single skill routes Toolkit native plugin setup, Windows hook repair, repo-backed Toolkit auto-update, plus OpenCode and Antigravity 2 local bridge troubleshooting without becoming a command-per-bridge family.",
+      "trigger": "Use toolkit-setup when the user asks about AI Agent Toolkit plugin setup, Toolkit Local Bridge setup or troubleshooting, repo-backed Toolkit auto-update, OpenCode bridge support, Antigravity 2 adapter support, bridge audit, enabled-target sync, disable, stale bridge state, native Codex or Claude Code plugin update behavior, Windows hook repair, or bridge setup safety. Do not invoke it for ordinary project coding, unrelated n8n setup, or as permission to run write commands without explicit approval.",
+      "decision": "new_project_skill",
+      "decision_reason": "A single compact toolkit-setup router skill is safer than a command-per-bridge skill family because it lets agents recognise setup requests while keeping implementation, command details, hooks, and policy in the shared updater, docs, validators, and tests.",
+      "unique_value": "The skill preserves the bridge and plugin-hook safety model in the trigger path: dry-run first, repo auto-update opt-in only, OpenCode and Antigravity 2 opt-in only, detection without autosetup, sync only enabled targets, post-install Windows hook repair before trusting Codex plugin hooks, opt-in startup repair of unsafe installed third-party Codex hook caches, no npm or pip installs, no arbitrary project repo mutation by default, no Codex-to-Claude or Claude-to-Codex cross-update, and downgrade refusal unless explicitly forced.",
+      "runtime_footprint": "SKILL.md stays a short router and safety checklist. It does not embed updater or repair implementation details or repeat command-per-target procedures; detailed behavior stays in repo/docs/TOOLKIT-LOCAL-BRIDGE.md, repo/docs/HOW-TO-USE.md, repo/scripts/toolkit-local-bridge.cjs, repo/scripts/repair-codex-plugin-windows-hooks.cjs, and tests.",
+      "local_assets": "Only the toolkit-setup README, SKILL.md, and OpenAI metadata are published. No scripts, references, templates, package archives, third-party code, or generated bridge hub outputs are bundled in the skill.",
+      "output_contract": "When used, the agent routes to the Toolkit setup subsystem, starts with audit or dry-run behavior, uses repo/scripts/toolkit-local-bridge.cjs for any requested operation, preserves explicit approval gates for writes, validates configured repo auto-updates before enabled-target sync, and runs relevant validators or tests before final reporting.",
+      "anti_bloat_review": "The skill intentionally replaces a command-per-bridge skill family with one small discoverability surface. It is not generic setup advice, and it does not duplicate existing source-publishing, n8n, localhost, or safety-review skills.",
+      "safety_boundary": "User-level hub writes, configured Toolkit repo fast-forward updates, OpenCode global skill writes, Antigravity 2 adapter writes, auto-sync enablement, target enablement, repo auto-update enablement, downgrade forcing, package installation, arbitrary project-repo mutation, live-system actions, credentials, and destructive operations require explicit current-turn approval when applicable. Hooks remain optional policy-light automation.",
+      "source_provenance": "first_party",
+      "third_party_audit": "not_applicable_first_party; no third-party plugin source, private plugin cache material, marketplace package, executable dependency, or vendor docs are copied or adapted.",
+      "publisher_workflow": "Direct-canonical ownership and maintenance: skills/toolkit-setup/** is the canonical skill surface, while relevant contracts, documentation, scripts, and tests are maintained directly at canonical repo/** paths. No project-source tree, reviewed-output publication, copy/writeback, or project sync step is used.",
+      "routing": "toolkit-setup is routed in the Toolkit skill-routing table as the single discoverability skill for Toolkit plugin and bridge setup requests. The command-specific bridge skills are omitted and removed: setup-local-toolkit-bridge, setup-opencode-bridge, setup-ag2-bridge, setup-all-non-native-bridges, sync-enabled-bridges, audit-local-toolkit-bridge, and disable-local-toolkit-bridge.",
+      "validation": [
+        "node repo/scripts/validate-toolkit.cjs",
+        "node repo/scripts/audit-published-surfaces.cjs --check",
+        "node --test repo/tests/toolkit-local-bridge.test.cjs repo/tests/toolkit-local-bridge-hook-light.test.cjs",
+        "node --test repo/tests/skill-routing.test.cjs"
+      ]
+    }
+  },
+  "notes": "Grandfathered skill IDs are the pre-gate entrypoints only, including the historically retired knowledge-index-updater ID. Current post-gate skills are represented by keyed direct-canonical skill_creation_review evidence. New skill IDs must not be added to the grandfathered list to bypass review evidence."
 }

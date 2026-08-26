@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: development.project-completion-audit
-Source: _projects/development/project-completion-audit/_main/skill/README.md
-Update the project source and run sync.
--->
 # Project Completion Audit
 
 Guarded workflow for final project completion, release-candidate, launch-readiness, QA, and production-readiness audits across frontend apps, backend apps, full-stack apps, data/tooling repos, and mixed products.

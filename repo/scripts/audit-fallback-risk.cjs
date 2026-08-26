@@ -35,7 +35,7 @@ const defaultScanTargets = [
   'CLAUDE.md',
   'GEMINI.md',
   '.agents/rules/00-agent-toolkit-bootstrap.md',
-  '_projects/development/ai-coding-agent-rules',
+  'repo/contracts/agent-rules',
   'repo/docs/agent-playbooks',
   'skills'
 ];

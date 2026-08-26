@@ -1,38 +1,67 @@
 {
-  "version": 1,
-  "description": "Known published-surface audit findings allowed until follow-up PRs classify or generate them.",
-  "summary": {
-    "projects": 21,
-    "publishedFiles": 244,
-    "declaredOutputFiles": 244,
-    "packInstalledFiles": 84,
-    "undeclaredPublishedFiles": 0,
-    "packInstalledUndeclared": 0,
-    "crossOwnedOutputs": 0,
-    "sharedSurfaceOutputs": 4,
-    "sharedSurfaceMetadataFindings": 0,
-    "suspiciousPublishedSurfaces": 0,
-    "duplicateProjectContentGroups": 0,
-    "boundaryRecipeOutputs": 244,
-    "boundaryRecipeFindings": 0,
-    "curatedDirectoryFindings": 1
-  },
-  "issueKeys": {
-    "undeclaredPublishedFiles": [],
-    "packInstalledUndeclared": [],
-    "crossOwnedOutputs": [],
-    "sharedSurfaceOutputs": [
-      "design.google-design-md -> design.ui-ux-pro-max: skills/ui-ux-secure-frontend-design/references/design-md-contract.md [The Google DESIGN.md source/provenance belongs to design.google-design-md, while the runtime reference belongs inside the UI/UX skill that consumes design contracts.]",
-      "development.ai-coding-agent-rules -> n8n.local-setup: skills/n8n-local-setup/references/n8n-agent-rules.md [n8n-local-setup depends on the n8n-agent-rules skill; this generated reference preserves copy-paste portability without duplicating canonical ownership.]",
-      "development.ai-coding-agent-rules -> n8n.workflow-toolkit: skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md [n8n-workflow-helper-scripts depends on the n8n-agent-rules skill; this generated reference preserves copy-paste portability without duplicating canonical ownership.]",
-      "development.ai-coding-agent-rules -> n8n.workflow-toolkit: skills/n8n-workflow-templates/references/n8n-agent-rules.md [n8n-workflow-templates depends on the n8n-agent-rules skill; this generated reference preserves copy-paste portability without duplicating canonical ownership.]"
-    ],
-    "sharedSurfaceMetadataFindings": [],
-    "suspiciousPublishedSurfaces": [],
-    "duplicateProjectContentGroups": [],
-    "boundaryRecipeFindings": [],
-    "curatedDirectoryFindings": [
-      "_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md: large Markdown file; path looks like guide, setup, workflow, prompt, template, reference, or playbook"
-    ]
+  "schema_version": 2,
+  "skills": [
+    "skills/agent-skill-supply-chain-audit",
+    "skills/ai-coding-agent-rules",
+    "skills/codex-ssh-hostinger-coolify-setup-maintainer",
+    "skills/context-preserving-ai-publisher",
+    "skills/github-governance-review-reconciler",
+    "skills/local-ai-stack-safety",
+    "skills/managed-app-foundation-review",
+    "skills/n8n-agent-rules",
+    "skills/n8n-local-setup",
+    "skills/n8n-workflow-helper-scripts",
+    "skills/n8n-workflow-templates",
+    "skills/project-completion-audit",
+    "skills/secure-cicd-installer",
+    "skills/self-hosted-service-safety",
+    "skills/toolkit-setup",
+    "skills/ui-ux-secure-frontend-design",
+    "skills/windows-localhost-workflows"
+  ],
+  "skill_count": 17,
+  "pack_manifests": [],
+  "project_tree_present": false,
+  "native_plugins": {
+    "codex": {
+      "name": "ai-agent-toolkit",
+      "version": "2.10.3",
+      "required_files": [
+        {
+          "path": ".codex-plugin/plugin.json",
+          "present": true
+        },
+        {
+          "path": ".codex-plugin/hooks/hooks.json",
+          "present": true
+        },
+        {
+          "path": ".codex-plugin/assets/composer-icon.png",
+          "present": true
+        },
+        {
+          "path": ".codex-plugin/assets/logo.png",
+          "present": true
+        }
+      ]
+    },
+    "claude": {
+      "name": "ai-agent-toolkit",
+      "version": "2.10.3",
+      "required_files": [
+        {
+          "path": ".claude-plugin/plugin.json",
+          "present": true
+        },
+        {
+          "path": ".claude-plugin/hooks/hooks.json",
+          "present": true
+        },
+        {
+          "path": ".claude-plugin/marketplace.json",
+          "present": true
+        }
+      ]
+    }
   }
 }

@@ -10,7 +10,7 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const runtime = require(path.join(repoRoot, 'repo', 'scripts', 'toolkit-capability-registry.cjs'));
-const contractSchema = JSON.parse(fs.readFileSync(path.join(repoRoot, '_projects', 'development', 'repository-capability-registry', '_main', 'repository-capability-contract.schema.json'), 'utf8'));
+const contractSchema = JSON.parse(fs.readFileSync(path.join(repoRoot, 'repo', 'contracts', 'repository-capability-registry', 'repository-capability-contract.schema.json'), 'utf8'));
 
 const REMOTE = 'https://github.com/weijunswj/ai-agent-toolkit.git';
 const V1_SCHEMA = 'toolkit.repository-capability-registry.v1';

@@ -1,6 +1,6 @@
 # AI Agent Toolkit Repo Rules
 
-<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->
 # AI Coding Agent Rules
 
 You are an execution-first coding agent. Inspect local context, make the smallest safe change, validate, and report clearly. Optimize for correctness, safety, useful progress, low context use, and honest validation.
@@ -47,19 +47,11 @@ Treat repo-local documentation as active task context, not optional background.
 
 Default portable playbook index: [Portable playbook index](docs/agent-playbooks/INDEX.md) (`docs/agent-playbooks/INDEX.md`).
 
-Before planning or editing, read root `AGENTS.md`, then the portable index when present, and root `MEMORY.md` when present as non-authoritative context. Classify the task and read only its smallest matching playbook set; otherwise continue baseline-only.
+Before planning or editing, read root `AGENTS.md`, then the portable index when present. Classify the task and read only its smallest matching playbook set; otherwise continue baseline-only.
 
 Do not recursively read playbooks. If the portable playbook index is missing, continue safely using `AGENTS.md` and local repo docs. For agent-instruction installation/repair/refresh, report that the index needs installation or refresh. Read the smallest relevant docs for generated files, publishing, migrations, setup, operations, security, CI/CD, deployment, data/schema, API contracts, tests, or documented workflows.
 
 Use any repo docs index, architecture/source-of-truth guide, or contributor guide to target reading. For navigation-heavy tasks, consult an existing repo map first. Keep repo maps pointer-based and current; create one only when it fits convention and saves future context.
-
-## Managed Memory
-
-Treat `MEMORY.md` as managed, non-authoritative project memory. Read it before planning/editing when present; use it only for compact durable repo-specific context.
-
-Authoritative sources override it. Do not create `MEMORY.md` merely because it is absent. Prefer canonical docs/source/validation/maps/ADRs, and never use memory for history, status, plans, handoffs, logs, or task tracking.
-
-Never store secrets, credentials, tokens, keys, `.env` values, private/customer data, live state, or sensitive operations. New memory needs a managed non-authoritative header and stays small.
 
 ## Safety Gates
 
@@ -95,6 +87,8 @@ When asking the user to choose, approve, confirm, provide a target path, decide 
 Before editing, inspect target files and identify the smallest validation. Avoid broad scans unless targeted evidence is insufficient. Read relevant docs before changing a documented workflow, setup, policy, plan, status note, or operations area.
 
 Keep the diff narrow, maintainable, and in style. Avoid unrelated refactors and never weaken validation, schemas, guardrails, approvals, safety, or error handling just to pass.
+
+Use this minimum-sufficient change order: no change -> reuse -> smallest root-cause correction -> bounded simplification with an explicit upgrade trigger -> new abstraction only if needed.
 
 Put persistent status/reports/plans/handoffs and operations/setup/CI/deployment/safety/troubleshooting notes under an existing documented path. Do not create root `STATUS.md`, `REPORT.md`, or `PLAN.md` unless required.
 
@@ -166,22 +160,20 @@ If validation is skipped, state why.
 
 For long tasks, update briefly at meaningful checkpoints; do not narrate commands.
 
-Report files/changes, exact validation results, generated-output status, remaining risks/manual checks, PR link, and checked CI status or why inaccessible.
+Report files/changes, Instruction sources used, exact validation results, generated-output status, remaining risks/manual checks, PR link, and checked CI status or why inaccessible.
+<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/ai-coding-agent-execution.md:END GLOBAL-AGENTS.MD-TEMPLATE -->
 
-Final repo reports include `Instruction sources used` and `MEMORY.md changed: Yes/No`. Normally use `MEMORY.md changed: No; no memory file needed`. If changed, explain its durable value and why canonical docs were unsuitable.
-<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:END GLOBAL-AGENTS.MD-TEMPLATE -->
-
-<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-agent-rules-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->
 ## n8n Agent Rules Adapter
 
 If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, stop and load `skills/n8n-agent-rules` before planning or editing.
 If that skill or its full rules are unavailable, stop and report the limitation instead of continuing.
 Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, credential, deployment, or production actions without explicit current-turn approval naming the target and allowed operation.
-<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:END N8N-AGENT-RULES-ADAPTER -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-agent-rules-adapter.md:END N8N-AGENT-RULES-ADAPTER -->
 
 This root `AGENTS.md` is toolkit-repo-specific. Portable repo installs must use [`skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md`](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md).
 
-Toolkit-specific root rules live directly after the managed execution blocks and are maintained directly in this file. Do not move root-only toolkit context into `_projects/development/ai-coding-agent-rules/`; that project owns portable templates and shims only.
+Toolkit-specific root rules live directly after the managed execution blocks and are maintained directly in this file. Keep portable templates and shims under `skills/ai-coding-agent-rules/` and their canonical contract inputs under `repo/contracts/agent-rules/`.
 
 This repo is the canonical reusable AI Agent Toolkit.
 
@@ -199,14 +191,13 @@ Use this order:
 
 1. Follow the current user request and this file.
 2. Read `repo/docs/agent-playbooks/INDEX.md`.
-3. If root `MEMORY.md` exists, read it as non-authoritative project context.
-4. Classify the task using the index.
-5. Read only the smallest matching playbook set.
-6. If no special playbook matches, continue baseline-only.
+3. Classify the task using the index.
+4. Read only the smallest matching playbook set.
+5. If no special playbook matches, continue baseline-only.
 
 Do not load every playbook by default. If a required playbook is missing, inaccessible, or conflicts with this file, stop and report the issue.
 
-Final reports must include `Instruction sources used` and `MEMORY.md changed: Yes/No`.
+Final reports must include `Instruction sources used`.
 
 ## Hard Safety Gates
 
@@ -219,61 +210,43 @@ Final reports must include `Instruction sources used` and `MEMORY.md changed: Ye
 
 ## Source Of Truth
 
-The managed Source-of-Truth Contract below is the detailed active contract. Source-watch is PR-notification-only. It is maintained from `_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md`; keep its markers intact and edit the source when that managed block needs changes.
+The managed Source-of-Truth Contract below is the detailed active contract. Source-watch is PR-notification-only. It is maintained from `repo/contracts/source-of-truth-contract.md`; keep its markers intact and edit the source when that managed block needs changes.
 
 ## Toolkit Plugin And Bridge
 
 - Native plugin updates are host-local: Codex uses `.codex-plugin/`, Claude Code uses `.claude-plugin/`.
 - Bridge writes only approved enabled OpenCode/AG2 targets; detection is dry-run only.
-- Every commit that changes plugin-packaged content, setup behavior, bridge behavior, skills, adapters, or native plugin metadata must include the matching Toolkit plugin/module version bump in the same commit. Keep `_projects/development/toolkit-local-bridge/toolkit.project.json`, native plugin manifest sources, generated plugin manifests, `BRIDGE_VERSION`, the Codex setup expected version, and AG2 adapter/plugin version output aligned.
+- Every commit that changes plugin-packaged content, setup behavior, bridge behavior, skills, adapters, or native plugin metadata must include the matching Toolkit package version bump in the same commit. Keep `repo/contracts/toolkit-local-bridge/version.json`, authoritative native plugin inputs, checked-in plugin metadata, `BRIDGE_VERSION`, the Codex setup expected version, and AG2 adapter/plugin version output aligned.
 - Hooks are optional; policy stays in docs, validators, and [Bridge](repo/docs/TOOLKIT-LOCAL-BRIDGE.md).
 - Setup/refresh: use [For AI Agents](repo/docs/FOR_AI_AGENTS.md); run the managed checkout setup script when it exists, with active `repo/scripts/setup-toolkit.cjs --execute --profile auto-main` only as bootstrap/fallback.
 
-<!-- AI-AGENT-TOOLKIT:_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->
 ## Source-of-Truth Contract
 
-This repo has a source layer and a published layer.
-
-- `_projects/**/_main/` preserves full source material and original docs. Do not casually rewrite preserved source.
-- `_projects/**/curated_output_for_ai/` stores reviewed AI-facing source material. Curated files may be AI-assisted, but they are source files and must be reviewed before publishing.
-- `_projects/**/toolkit.project.json` is the routing and toolkit project-version contract. It declares which `_main/` or `curated_output_for_ai/` files publish to `skills/` outputs.
-- Toolkit project `version` is the toolkit adaptation/module version, uses `version_policy: "semver"`, and must not be replaced by Git tags, package tags, GitHub release tags, upstream versions, or per-file versions.
-- `_projects/**/SOURCE-LOCK.json` records upstream/source provenance, exact source pins, blob pins, lifecycle, role, attribution requirement, and update policy.
-- For third-party projects, `toolkit.project.json` version is the toolkit adaptation version only; scheduled source-watch tracking must read upstream repo, ref, locked commit, `source_update_policy`, attribution, allowlist, and blob pins from `SOURCE-LOCK.json`. Temporary actionable advisory targets may live in `repo/source-watch/advisory-targets.json` until implemented, rejected, or moved into SOURCE-LOCK tracking.
-- Scheduled source-watch is PR-notification-only. It may compare active SOURCE-LOCK pins and actionable advisory targets with upstream GitHub commits, then open or refresh a stable review PR. It must not copy upstream files, change SOURCE-LOCK/advisory records, execute upstream code, auto-merge, push to main, run live n8n actions, or treat notification as approval. Real updates require a separate human-approved PR.
-- `skills/` contains copyable AI-agent skill folders. The whole skill folder is the install unit.
-- `.codex-plugin/` and `.claude-plugin/` contain generated native plugin metadata for the current Toolkit package. They are not source of truth and must not be used to cross-update the other native platform.
-- Toolkit skill-routing source lives in `_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md`; keep it aligned with current `skills/*/SKILL.md` when skills or skill-publishing project modules change, and document any intentionally omitted skill.
-- This repo intentionally does not ship or maintain a repo-wide MCP generated surface for now. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references remain under `skills/n8n-local-setup/` as secondary n8n setup material.
-- Generated published surfaces under `skills/`, `.codex-plugin/`, and `.claude-plugin/` must not be edited directly unless that output is explicitly declared as `linked`. Update the matching `_projects` source or curated file, then run sync.
-- `linked` outputs are rare exceptions and must be explicitly declared with a reason in `toolkit.project.json`.
-- Publish declared outputs with:
-  `node repo/scripts/sync-toolkit-projects.cjs --write`
-- Check generated freshness with:
-  `node repo/scripts/sync-toolkit-projects.cjs --check`
-- CI checks generated freshness and may auto-sync deterministic generated outputs from the base/default branch workflow definition only on guarded same-repo PR branches targeting `main`; fork PRs and `main` are never writeback targets.
-- Auto-sync only republishes approved passive generated/synced outputs in `README.md`, `skills/**`, and the declared source-side agent-rule templates generated from `_projects/**/_main/_partials/**`. It must not write active root AI instruction files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`), update other source files, run live n8n, touch product repos, generate curated content from `_main`, or summarise/truncate source docs. If source changes require active root instruction outputs to change, the PR author must commit those files manually on the PR branch.
-- Because auto-sync writeback is privileged, it must not run generated test suites or PR-controlled generated executable code; full validation remains covered by normal read-only CI.
-- Auto-sync must not run full repo validation against raw PR heads; this avoids blocking otherwise valid behind-main PR branches.
-- Auto-sync static checks are limited to generated-surface freshness checks and git diff checks before committing generated output.
-- Auto-sync may run only deterministic generation, sync, check, or validator scripts from the protected base revision, with the PR checkout treated as data and passed through an explicit workspace target.
-- Auto-sync must stage and snapshot generated output after sync and recheck the index/workspace before commit so validation cannot add files to the writeback diff.
-- Auto-sync must pin the PR checkout to the event head SHA, refuse stale queued runs if the PR head changed, and refuse non-force pushes if the PR branch moved after checkout.
-- Auto-sync is optional convenience writeback, not the merge gate. `npm run validate:all` is the required read-only CI and `main` validation gate.
-- If a PR includes `_projects/**/_main/**` source/provenance changes other than declared agent-rule partial inputs and generated source-side agent-rule templates, auto-sync must skip successfully without checkout, writeback, commit, or push. The author or AI Coding Agent (i.e. Codex, Claude Code, Antigravity, OpenCode, etc.) must commit required generated outputs, source-lock/provenance updates, and audit baseline updates, then rely on the normal read-only validation gate.
-- If a writeback-eligible PR mixes eligible source/routing/contract edits with workflow, maintenance-script, test, docs, package, lockfile, or other source/maintenance paths, auto-sync must skip successfully instead of pushing. The author or AI Coding Agent (i.e. Codex, Claude Code, Antigravity, OpenCode, etc.) must commit generated outputs manually and rely on normal read-only validation.
-- Curated output must not weaken credential, `.env`, `.tmp`, `.n8n-local`, live n8n action, approval, attribution, or local-only safety constraints from the preserved source.
-- A generated/public surface must not replace a full working document with a lossy summary. Summaries are allowed only for catalogues, descriptions, navigation tables, or clearly marked overview files.
-- Required runtime context for a skill surface must be local, complete enough to use, and traceable to the project source. External links may support provenance or further reading, but must not be required for normal execution.
-<!-- AI-AGENT-TOOLKIT:_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md:END SOURCE-OF-TRUTH-CONTRACT -->
+`skills/**` is the canonical copyable AI-agent product surface. The whole skill folder is the install unit, and retained skills are edited directly.
+- `repo/contracts/**` is the canonical machine contract surface for schemas, policies, fixtures, templates, and agent-rule inputs.
+- `repo/scripts/**` is the canonical runtime and maintenance implementation surface; `repo/tests/**` owns focused contract and runtime tests.
+- `repo/contracts/agent-rules/toolkit-skill-routing.md` is the routing source for the current `skills/*/SKILL.md` set and records intentionally omitted skills.
+- `repo/source-watch/provenance/**/SOURCE-LOCK.json` contains only active third-party attribution pins. Each lock records the upstream repo, ref, commit, update policy, attribution requirement, allowlist, and exact blob pins for retained copied or adapted files.
+- Scheduled source-watch is PR-notification-only. It may compare active source-lock pins and advisory targets with upstream GitHub commits, then open or refresh a stable review PR. It must not copy upstream files, change source-lock/advisory records, execute upstream code, auto-merge, push to main, run live n8n actions, or treat notification as approval. Real updates require a separate human-approved PR.
+- The toolkit maintains one direct canonical tree. New Toolkit skills are created at `skills/**` paths after Skill Creation Center review; contracts, runtime, tests, and docs are created at canonical `repo/**` paths. Do not introduce secondary ownership, publication, packaging, or generic synchronization layers.
+- The retained deterministic synchronizers remain narrow: `repo/scripts/sync-repo-doc-contract.cjs` maintains only the managed source-of-truth block, while `repo/scripts/sync-agent-instruction-shims.cjs` maintains root/repo-local instruction shims and exactly four portable n8n safety derivatives sourced from `repo/contracts/agent-rules/n8n-agent-rules.md`:
+  - `skills/n8n-agent-rules/n8n-agent-rules.md`
+  - `skills/n8n-local-setup/references/n8n-agent-rules.md`
+  - `skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md`
+  - `skills/n8n-workflow-templates/references/n8n-agent-rules.md`
+- This n8n derivative set is a bounded portable/local safety-context exception. Use the exact retained synchronizer command for repair; no unspecified generic `run sync` command exists.
+- `.codex-plugin/` and `.claude-plugin/` contain native plugin metadata for the current Toolkit package. They remain platform-separated and must not be used to cross-update the other native platform.
+- This repo intentionally does not ship or maintain a repo-wide MCP generated surface. Official n8n Skills plus instance-level MCP references remain inside `skills/n8n-local-setup/` as secondary n8n setup material.
+- All retained skill/runtime context must remain local, complete enough to use, and traceable through direct repository paths or the two retained third-party provenance records. External links may support provenance but must not be required for normal execution.
+<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:END SOURCE-OF-TRUTH-CONTRACT -->
 
 ## Repo-Local Router
 
 - Use this root file as the router for this toolkit repo only; use [`skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md`](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md) for portable installs.
 - Keep managed marker blocks intact. If a marked block needs content changes, edit the source path named in the marker and run the matching sync/check command.
 - For AI-agent instruction changes, read [repo/docs/FOR_AI_AGENTS.md](repo/docs/FOR_AI_AGENTS.md) and [repo/docs/SOURCE-OF-TRUTH.md](repo/docs/SOURCE-OF-TRUTH.md).
-- For project modules or published skills/MCP surfaces, also read [repo/docs/PROJECT-MODULE-STANDARD.md](repo/docs/PROJECT-MODULE-STANDARD.md) and [repo/docs/SURFACE-FIDELITY-AUDIT.md](repo/docs/SURFACE-FIDELITY-AUDIT.md).
-- For new or changed project modules, `repo/docs/PROJECT-MODULE-STANDARD.md` is the detailed rulebook.
+- For canonical skills, contracts, or native plugin surfaces, also read [repo/docs/PROJECT-MODULE-STANDARD.md](repo/docs/PROJECT-MODULE-STANDARD.md) and [repo/docs/SURFACE-FIDELITY-AUDIT.md](repo/docs/SURFACE-FIDELITY-AUDIT.md).
 - For provenance and third-party source work, read [repo/docs/RETIRED-SOURCE-PROVENANCE.md](repo/docs/RETIRED-SOURCE-PROVENANCE.md), [repo/docs/THIRD-PARTY-SOURCE-NOTES.md](repo/docs/THIRD-PARTY-SOURCE-NOTES.md), and the project standard.
 - For generated-output writeback or privileged workflow changes, read [repo/docs/WRITE-SAFETY-MODEL.md](repo/docs/WRITE-SAFETY-MODEL.md) and [repo/docs/SAFE-UPDATES.md](repo/docs/SAFE-UPDATES.md).
 - For cleanup, deletion, retirement, or human usage/docs/navigation changes, read [repo/docs/CLEANUP-POLICY.md](repo/docs/CLEANUP-POLICY.md), retired-source provenance when applicable, [repo/docs/HOW-TO-USE.md](repo/docs/HOW-TO-USE.md), and [README.md](README.md).
@@ -289,9 +262,9 @@ Change managed sections from the source file or generator, then run sync/check.
 
 ## Repo-Local Safety
 
-- Respect the source-of-truth contract above: update `_projects/**/_main/`, `_projects/**/curated_output_for_ai/`, manifests, or rare declared linked outputs before generated `skills/` or `mcp/` surfaces.
-- Do not edit generated `skills/` or `mcp/` outputs directly unless that output is declared as `linked`; update the source and run sync instead.
-- Do not generate curated files automatically from `_main`; curated content is reviewed source.
+- Respect the source-of-truth contract above: update canonical `skills/**`, `repo/contracts/**`, `repo/scripts/**`, or `repo/docs/**` surfaces directly.
+- Do not create a second project/publisher tree or treat generated output as a separate source of truth.
+- Keep reviewed third-party provenance under `repo/source-watch/provenance/**` and do not update it through source-watch notification jobs.
 - Do not copy this toolkit root `AGENTS.md` into other repos.
 - Do not introduce credentials, credential exports, private keys, `.env`, `.n8n-local/`, `.tmp/`, package artifacts, product code, customer data, or business workflow JSON.
 - Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, credential, deployment, production, destructive, or privileged external actions without explicit current-turn approval naming the target and allowed operation.
@@ -301,13 +274,13 @@ Change managed sections from the source file or generator, then run sync/check.
 
 This repo is the canonical skill creation and conversion center.
 
-Before adding a new skill, skill pack, adapter, template, or project module, inspect the existing `skills/**` surfaces, related `_projects/**` modules, README skill tables, and toolkit skill-routing source. Prefer extending an existing skill when the use case fits its trigger, safety boundary, source model, and validation path without making that skill bloated or ambiguous.
+Before adding a new skill, adapter, template, or contract, inspect the existing `skills/**` surfaces, README skill tables, Skill Safety Matrix, and toolkit skill-routing source. Prefer extending an existing skill when the use case fits its trigger, safety boundary, local assets, and validation path without making that skill bloated or ambiguous.
 
-Create a new project module plus published skill only when the work has a distinct trigger, domain, safety boundary, source/provenance requirement, references/templates/assets, or validation path.
+Create a new skill or contract surface only when the work has a distinct trigger, domain, safety boundary, source/provenance requirement, local assets, or validation path.
 
 Use [`repo/docs/SKILL-SAFETY-MATRIX.md`](repo/docs/SKILL-SAFETY-MATRIX.md) as the maintained catalog of current skill triggers, risk classes, companion skills, provenance, and approval boundaries before creating, extending, or importing skills.
 
-For any third-party skill, `SKILL.md` folder, skill pack, GitHub skill repo, or adapted external agent material, use `agent-skill-supply-chain-audit` first. Do not copy, import, install, execute, or convert third-party material until the audit verdict allows it. Approved conversions must go through `context-preserving-ai-publisher` and this repo's source-to-surface workflow.
+For any third-party skill, `SKILL.md` folder, skill pack, GitHub skill repo, or adapted external agent material, use `agent-skill-supply-chain-audit` first. Do not copy, import, install, execute, or convert third-party material until the audit verdict allows it. Approved Toolkit conversions are authored directly at canonical `skills/**` and `repo/**` paths. The separate generic `context-preserving-ai-publisher` product retains its own publication and anti-drift guidance; do not treat that product's architecture as Toolkit operation.
 
 Prioritize repo safety, device safety, provenance, attribution, validation, and practical usefulness over adding more surface area.
 

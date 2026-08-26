@@ -74,8 +74,8 @@ function readJson(filePath) {
 }
 
 function discoverSourceLocks(workspace) {
-  const projectsDir = path.join(workspace, '_projects');
-  return walk(projectsDir)
+  const provenanceDir = path.join(workspace, 'repo', 'source-watch', 'provenance');
+  return walk(provenanceDir)
     .filter((entry) => entry.dirent.isFile() && entry.fullPath.endsWith(`${path.sep}SOURCE-LOCK.json`))
     .map((entry) => ({
       relPath: slash(path.relative(workspace, entry.fullPath)),
@@ -155,7 +155,7 @@ async function latestCommitForLock(lock, env = process.env) {
   return response.sha;
 }
 
-function projectPathFromLock(lockFile) {
+function sourceLockPathFromLock(lockFile) {
   return lockFile.relPath.replace(/\/SOURCE-LOCK\.json$/, '');
 }
 
@@ -179,7 +179,7 @@ function renderSourceUpdatesSection(updates) {
     '## Active Third-Party Updates',
     '',
     ...updates.flatMap((update) => [
-      `### ${update.project_path}`,
+       `### ${update.source_lock_path}`,
       '',
       `- Source repo: \`${update.source_repo}\``,
       `- Source ref: \`${update.source_ref}\``,
@@ -206,7 +206,7 @@ function renderReviewReport({ updates, advisoryUpdates, advisoryDocPath }) {
     'No review-state cursors were changed.',
     'No SOURCE-LOCK pins or advisory baselines were changed.',
     'No SOURCE-LOCK pins were changed.',
-    'No toolkit rules, skills, hooks, memory guidance, repo-map guidance, or cleanup guidance were modified or deleted.',
+    'No toolkit rules, skills, hooks, repo-map guidance, or cleanup guidance were modified or deleted.',
     'No upstream code was executed.',
     'No auto-merge is allowed.',
     'A human must review upstream changes, attribution/licence impact, allowlist scope, advisory recommendations, and host-harness drift evidence, then ask an AI agent to inspect before any real edits happen.'
@@ -278,7 +278,7 @@ async function checkProjectSourceUpdates({
     const comparisonCommit = reviewRecord ? reviewRecord.reviewed_through_sha : lock.source_commit;
     if (latestCommit.toLowerCase() === String(comparisonCommit || '').toLowerCase()) continue;
     updates.push({
-      project_path: projectPathFromLock(lockFile),
+       source_lock_path: sourceLockPathFromLock(lockFile),
       source_repo: lock.source_repo,
       source_ref: lock.source_ref,
       adopted_commit: lock.source_commit,

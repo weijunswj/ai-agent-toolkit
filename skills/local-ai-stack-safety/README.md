@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: development.local-ai-stack-safety
-Source: _projects/development/local-ai-stack-safety/_main/skill/README.md
-Update the project source and run sync.
--->
 # Local AI Stack Safety
 
 Small safety-review skill for local AI runtimes, model servers, model downloads, GPU/runtime setup, local AI web UIs, and endpoint exposure.

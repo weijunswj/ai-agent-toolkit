@@ -1,8 +1,6 @@
 <!--
-Generated from toolkit project source. Do not edit directly.
-Project: repo-methodology.context-preserving-ai-publisher
-Source: _projects/repo-methodology/context-preserving-ai-publisher/_main/examples.md
-Update the project source and run sync.
+Canonical Toolkit reference. Edit this file directly.
+Source: skills/context-preserving-ai-publisher/references/examples.md
 -->
 # Examples
 
@@ -12,13 +10,13 @@ These examples map the generic model to one reference implementation. They are n
 
 | Generic concept | Reference implementation example |
 | --- | --- |
-| Source layer | `_projects/**/_main/` |
-| Reviewed adapter layer | `_projects/**/curated_output_for_ai/` |
-| Manifest/routing contract | `_projects/**/toolkit.project.json` |
-| Portable generated surfaces | `skills/**` |
+| Source layer | `skills/**`, `repo/contracts/**`, and `repo/source-watch/provenance/**` |
+| Reviewed adapter layer | owning skill support files and reviewed contract inputs |
+| Manifest/routing contract | target-repo manifest or routing contract; Toolkit routing lives at `repo/contracts/agent-rules/toolkit-skill-routing.md` |
+| Portable generated surfaces | `skills/**` and other declared local outputs |
 | Local law/docs | `repo/docs/**` and `AGENTS.md` |
-| Deterministic publishing | `repo/scripts/sync-toolkit-projects.cjs` |
-| Source locks | `_projects/**/SOURCE-LOCK.json` |
+| Deterministic publishing | target-repo sync/check tooling; Toolkit retains managed-block synchronizers and validators |
+| Source locks | `repo/source-watch/provenance/**/SOURCE-LOCK.json` or the target repo's declared source-lock path |
 | Audit baseline | `repo/docs/published-surface-audit-baseline.json` |
 
 ## Example: Full Reference Doc

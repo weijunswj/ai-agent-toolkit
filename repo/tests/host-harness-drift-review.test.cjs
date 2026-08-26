@@ -27,17 +27,16 @@ test('host harness drift advisory target declares evidence, scope, cadence, and 
   assert.equal(target.review_template, 'repo/source-watch/templates/host-harness-capability-drift-review.md');
   assert.ok(target.evidence_sources.some((item) => /OpenAI Codex changelog/.test(item)));
   assert.ok(target.evidence_sources.some((item) => /OpenAI Codex AGENTS\.md docs/.test(item)));
-  assert.ok(target.evidence_sources.some((item) => /OpenAI Codex memories docs/.test(item)));
   assert.ok(target.evidence_sources.some((item) => /OpenAI Codex hooks docs/.test(item)));
   assert.ok(target.evidence_sources.some((item) => /Claude Code overview docs/.test(item)));
-  assert.ok(target.evidence_sources.some((item) => /Claude Code memory and rules docs/.test(item)));
   assert.ok(target.evidence_sources.some((item) => /Claude Code hooks docs/.test(item)));
   assert.ok(target.evidence_sources.some((item) => /Claude Code changelog/.test(item)));
   assert.ok(target.toolkit_scope.some((item) => /skills/.test(item)));
   assert.ok(target.toolkit_scope.some((item) => /AGENTS\.md/.test(item)));
   assert.ok(target.toolkit_scope.some((item) => /hook guidance/.test(item)));
   assert.ok(target.toolkit_scope.some((item) => /repo-map/.test(item)));
-  assert.ok(target.toolkit_scope.some((item) => /MEMORY\.md/.test(item)));
+  assert.equal(target.evidence_sources.some((item) => /memory/i.test(item)), false);
+  assert.equal(target.toolkit_scope.some((item) => /memory/i.test(item)), false);
   assert.ok(target.toolkit_scope.some((item) => /documentation cleanup/.test(item)));
   assert.deepEqual(target.classification_options, [
     'Keep',

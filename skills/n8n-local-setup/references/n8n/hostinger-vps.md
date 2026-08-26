@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: n8n.local-setup
-Source: _projects/n8n/local-setup/_main/Page 2 - Hostinger VPS.md
-Update the project source and run sync.
--->
 # Page 2 - Hostinger Coolify VPS n8n
 
 Use this page when you want an always-on public n8n server on a Hostinger VPS that is managed through Coolify.

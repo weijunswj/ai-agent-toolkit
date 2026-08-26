@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: repo-methodology.context-preserving-ai-publisher
-Source: _projects/repo-methodology/context-preserving-ai-publisher/_main/validation-strategy.md
-Update the project source and run sync.
--->
 # Validation Strategy
 
 Use targeted validation while maintaining source-traceable AI-facing surfaces, then rely on the target repo's CI or documented full gate for PR-ready completion.

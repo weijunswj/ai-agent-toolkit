@@ -71,9 +71,7 @@ function assertProductDataHandlingLegalScope(text, relPath) {
 
 test('Secure CI/CD surfaces require privacy-safe deployment and AI observability', () => {
   for (const relPath of [
-    '_projects/cicd/secure-installer/_main/README.md',
     'skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md',
-    '_projects/cicd/secure-installer/curated_output_for_ai/templates/cicd/CURRENT_CICD_STATUS.template.md',
     'skills/secure-cicd-installer/templates/cicd/CURRENT_CICD_STATUS.template.md',
     'skills/secure-cicd-installer/SKILL.md'
   ]) {
@@ -91,9 +89,7 @@ test('Secure CI/CD surfaces require privacy-safe deployment and AI observability
 
 test('self-hosted and managed app skills include metadata-only AI observability baseline', () => {
   for (const relPath of [
-    '_projects/development/self-hosted-service-safety/_main/skill/SKILL.md',
     'skills/self-hosted-service-safety/SKILL.md',
-    '_projects/development/managed-app-foundation-review/_main/skill/SKILL.md',
     'skills/managed-app-foundation-review/SKILL.md'
   ]) {
     const text = readText(relPath);
@@ -110,9 +106,7 @@ test('self-hosted and managed app skills include metadata-only AI observability 
 
 test('frontend skill requires privacy-safe user-facing error references and legal pages', () => {
   for (const relPath of [
-    '_projects/design/ui-ux-pro-max/_main/skill/SKILL.md',
     'skills/ui-ux-secure-frontend-design/SKILL.md',
-    '_projects/design/ui-ux-pro-max/_main/skill/references/privacy-security-safety.md',
     'skills/ui-ux-secure-frontend-design/references/privacy-security-safety.md'
   ]) {
     const text = readText(relPath);
@@ -130,9 +124,7 @@ test('frontend skill requires privacy-safe user-facing error references and lega
 
 test('backend and app-foundation skills require traceable generic error handling', () => {
   for (const relPath of [
-    '_projects/development/self-hosted-service-safety/_main/skill/SKILL.md',
     'skills/self-hosted-service-safety/SKILL.md',
-    '_projects/development/managed-app-foundation-review/_main/skill/SKILL.md',
     'skills/managed-app-foundation-review/SKILL.md'
   ]) {
     const text = readText(relPath);
@@ -150,10 +142,10 @@ test('backend and app-foundation skills require traceable generic error handling
 
 test('repo-local agent rules keep application error defaults compact', () => {
   for (const relPath of [
-    '_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md',
-    '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
+    'repo/contracts/agent-rules/ai-coding-agent-execution.md',
+    'repo/contracts/agent-rules/AGENTS.template.md',
+    'repo/contracts/agent-rules/CLAUDE.template.md',
+    'repo/contracts/agent-rules/GEMINI.template.md',
     'AGENTS.md',
     'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'
   ]) {

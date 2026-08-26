@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: design.ui-ux-pro-max
-Source: _projects/design/ui-ux-pro-max/_main/skill/examples/prompts.md
-Update the project source and run sync.
--->
 # Example Prompts
 
 Use these prompts to trigger the skill in realistic frontend work.

@@ -1,8 +1,6 @@
 <!--
-Generated from toolkit project source. Do not edit directly.
-Project: repo-methodology.agent-skill-supply-chain-audit
-Source: _projects/repo-methodology/agent-skill-supply-chain-audit/_main/skill/README.md
-Update the project source and run sync.
+Canonical Toolkit skill surface. Edit this skill folder directly.
+Source: skills/agent-skill-supply-chain-audit/README.md
 -->
 # Agent Skill Supply-Chain Audit
 
@@ -17,14 +15,14 @@ Use this skill to turn "strip the unsafe stuff out" into a repeatable decision:
 
 The skill is intentionally passive. It does not install, run, import, clone, activate, deploy, publish, or execute third-party skill material by itself.
 
-For approved conversions in this toolkit, pair the audit result with `context-preserving-ai-publisher`. This skill decides whether and what to convert; the publisher workflow handles the source-to-surface repo mechanics.
+For approved conversions, follow the target repository's documented canonical ownership and validation workflow. In this Toolkit, approved material is maintained directly under `skills/**` and `repo/**`; this audit decides whether and what to convert without requiring a separate project or publisher handoff.
 
 ## Typical Inputs
 
 - A GitHub repository or folder that contains `SKILL.md` files.
 - A local skill folder, archive, or pasted `SKILL.md`.
 - A candidate skill from Claude Code, Codex, Copilot, OpenClaw, Antigravity, Cursor, Gemini, or similar agent ecosystems.
-- A request to convert a third-party skill into a toolkit project under `_projects/**` and generated `skills/**`.
+- A request to convert a third-party skill into a Toolkit skill under `skills/**`, with provenance recorded under `repo/source-watch/provenance/**` when required.
 
 ## Expected Output
 
@@ -36,6 +34,6 @@ The audit should produce a concise verdict with:
 - Safe reusable material.
 - Usefulness and token-bloat decision.
 - Required conversion edits.
-- Conversion handoff for the source-preserving publisher workflow.
-- Proposed `_projects/**` source placement and generated `skills/**` outputs.
+- Canonical target-repository handoff and placement.
+- Proposed `skills/**` placement and any required `repo/**` contract or provenance updates.
 - Validation and remaining risks.

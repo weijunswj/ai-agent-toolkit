@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: repo-methodology.context-preserving-ai-publisher
-Source: _projects/repo-methodology/context-preserving-ai-publisher/_main/templates/repo-docs/project-module-standard.template.md
-Update the project source and run sync.
--->
 # Project Module Standard
 
 Project modules preserve source material and declare how published surfaces are generated.

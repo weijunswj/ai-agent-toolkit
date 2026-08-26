@@ -18,21 +18,31 @@ const root = path.resolve(workspaceRoot || process.env.TOOLKIT_WORKSPACE_ROOT ||
 const rootReal = fs.realpathSync.native(root);
 const mode = process.argv.includes('--write') ? 'write' : 'check';
 
-const projectId = 'development.ai-coding-agent-rules';
+const sourceId = 'repo.agent-rules';
 const fixCommand = 'node repo/scripts/sync-agent-instruction-shims.cjs --write';
-const executionPromptPath = '_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md';
-const n8nAdapterPath = '_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md';
+const executionPromptPath = 'repo/contracts/agent-rules/ai-coding-agent-execution.md';
+const n8nAdapterPath = 'repo/contracts/agent-rules/n8n-agent-rules-adapter.md';
+const n8nRulesPath = 'repo/contracts/agent-rules/n8n-agent-rules.md';
+const n8nDerivativePaths = Object.freeze([
+  'skills/n8n-agent-rules/n8n-agent-rules.md',
+  'skills/n8n-local-setup/references/n8n-agent-rules.md',
+  'skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md',
+  'skills/n8n-workflow-templates/references/n8n-agent-rules.md'
+]);
 const manualTemplatePaths = {
-  agents: '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
-  claude: '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
-  gemini: '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md'
+  agents: 'repo/contracts/agent-rules/AGENTS.template.md',
+  claude: 'repo/contracts/agent-rules/CLAUDE.template.md',
+  gemini: 'repo/contracts/agent-rules/GEMINI.template.md'
 };
 const repoLocalTemplatePaths = {
-  managedAgents: '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
-  claude: '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
-  gemini: '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
-  antigravity: '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md'
+  managedAgents: 'repo/contracts/agent-rules/repo-local/AGENTS.managed.template.md',
+  claude: 'repo/contracts/agent-rules/repo-local/CLAUDE.shim.template.md',
+  gemini: 'repo/contracts/agent-rules/repo-local/GEMINI.shim.template.md',
+  antigravity: 'repo/contracts/agent-rules/repo-local/antigravity-bootstrap.template.md'
 };
+const legacyProjectToken = '_' + 'projects';
+const legacyCuratedToken = 'curated_' + 'output_for_ai';
+const legacyRepoLocalSourceRoot = `${legacyProjectToken}/development/ai-coding-agent-rules/${legacyCuratedToken}/skills/ai-coding-agent-rules/repo-local`;
 
 const toolkitBegin = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->`;
 const toolkitEnd = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:END GLOBAL-AGENTS.MD-TEMPLATE -->`;
@@ -41,8 +51,8 @@ const n8nEnd = `<!-- AI-AGENT-TOOLKIT:${n8nAdapterPath}:END N8N-AGENT-RULES-ADAP
 const toolkitMarkerPairs = [
   { begin: toolkitBegin, end: toolkitEnd },
   {
-    begin: `<!-- ai-agent-toolkit:${projectId}:BEGIN ai-coding-agent-execution v1 -->`,
-    end: `<!-- ai-agent-toolkit:${projectId}:END ai-coding-agent-execution -->`
+    begin: `<!-- ai-agent-toolkit:${sourceId}:BEGIN ai-coding-agent-execution v1 -->`,
+    end: `<!-- ai-agent-toolkit:${sourceId}:END ai-coding-agent-execution -->`
   },
   {
     begin: '<!-- AI-AGENT-TOOLKIT:BEGIN toolkit v1 -->',
@@ -52,8 +62,8 @@ const toolkitMarkerPairs = [
 const n8nMarkerPairs = [
   { begin: n8nBegin, end: n8nEnd },
   {
-    begin: `<!-- ai-agent-toolkit:${projectId}:BEGIN n8n-adapter v1 -->`,
-    end: `<!-- ai-agent-toolkit:${projectId}:END n8n-adapter -->`
+    begin: `<!-- ai-agent-toolkit:${sourceId}:BEGIN n8n-adapter v1 -->`,
+    end: `<!-- ai-agent-toolkit:${sourceId}:END n8n-adapter -->`
   },
   {
     begin: '<!-- AI-AGENT-TOOLKIT:BEGIN n8n-adapter v1 -->',
@@ -64,6 +74,19 @@ const n8nMarkerPairs = [
     end: '<!-- AI-AGENT-TOOLKIT:END n8n-adapter -->'
   }
 ];
+
+function repoLocalMarkerPairs(fileName, blockName) {
+  const sourcePath = repoLocalTemplatePaths[fileName];
+  const paths = [sourcePath, `${legacyRepoLocalSourceRoot}/${path.posix.basename(sourcePath)}`];
+  return paths.map((sourcePath) => ({
+    begin: `<!-- AI-AGENT-TOOLKIT:${sourcePath}:BEGIN ${blockName} v1 -->`,
+    end: `<!-- AI-AGENT-TOOLKIT:${sourcePath}:END ${blockName} -->`
+  }));
+}
+
+const claudeShimMarkerPairs = repoLocalMarkerPairs('claude', 'CLAUDE.SHIM');
+const geminiShimMarkerPairs = repoLocalMarkerPairs('gemini', 'GEMINI.SHIM');
+const antigravityBootstrapMarkerPairs = repoLocalMarkerPairs('antigravity', 'ANTIGRAVITY.BOOTSTRAP');
 
 function slash(value) {
   return value.split(path.sep).join('/');
@@ -148,10 +171,10 @@ function readOptional(relPath) {
 function generatedNotice(sourcePaths) {
   return [
     '<!--',
-    'Generated from toolkit project source. Do not edit directly.',
-    `Project: ${projectId}`,
+    'Generated from the canonical agent-rule contract. Do not edit directly.',
+    `Source set: ${sourceId}`,
     ...sourcePaths.map((sourcePath) => `Source: ${sourcePath}`),
-    'Update the project source and run sync.',
+    'Update the canonical contract and run this synchronizer.',
     '-->',
     ''
   ].join('\n');
@@ -207,6 +230,31 @@ function managedPayload(executionPrompt, n8nAdapter) {
     n8nAdapter.trimEnd(),
     n8nEnd
   ].join('\n');
+}
+
+function n8nCrossSkillHeader() {
+  return [
+    '# n8n Agent Rules Cross-Skill Reference',
+    '',
+    'Narrow managed n8n safety derivative for portable/local n8n safety context in the containing copied skill.',
+    '',
+    `- Direct canonical source: \`${n8nRulesPath}\``,
+    `- Repair command: \`${fixCommand}\``,
+    '- This file is a narrow managed n8n safety derivative. Do not edit it directly.',
+    '',
+    '---',
+    ''
+  ].join('\n');
+}
+
+function expectedN8nDerivatives(n8nRules) {
+  const body = `${n8nRules.trimEnd()}\n`;
+  return {
+    [n8nDerivativePaths[0]]: body,
+    [n8nDerivativePaths[1]]: `${n8nCrossSkillHeader()}${body}`,
+    [n8nDerivativePaths[2]]: `${n8nCrossSkillHeader()}${body}`,
+    [n8nDerivativePaths[3]]: `${n8nCrossSkillHeader()}${body}`
+  };
 }
 
 function expectedSourceTemplates(executionPrompt) {
@@ -275,7 +323,7 @@ function markerCount(text, marker) {
 const repoLocalSafetyComment = [
   '<!--',
   'Curated AI-facing source.',
-  'Project: development.ai-coding-agent-rules',
+  'Source: repo/contracts/agent-rules/repo-local',
   'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.',
   '-->'
 ].join('\n');
@@ -353,14 +401,18 @@ function stripManagedBlockAny(relPath, text, markerPairs, errors) {
     .filter((pair) => pair.beginCount > 0 || pair.endCount > 0);
   if (matches.length === 0) return text;
 
-  const completeMatches = matches.filter((pair) =>
-    pair.beginCount === 1 && pair.endCount === 1 && text.indexOf(pair.begin) < text.indexOf(pair.end)
+  const malformedMatches = matches.filter((pair) =>
+    pair.beginCount !== 1 || pair.endCount !== 1 || text.indexOf(pair.begin) >= text.indexOf(pair.end)
   );
-  if (completeMatches.length !== 1) {
+  if (malformedMatches.length > 0) {
     errors.push(`Malformed managed agent instruction markers in ${relPath}. Run ${fixCommand}.`);
     return null;
   }
-  return stripManagedBlock(relPath, text, completeMatches[0].begin, completeMatches[0].end, errors);
+
+  return matches.reduce(
+    (current, pair) => stripManagedBlock(relPath, current, pair.begin, pair.end, errors),
+    text
+  );
 }
 
 function stripN8nManagedBlock(relPath, text, errors) {
@@ -433,7 +485,7 @@ function shimBody(sourceText, options) {
 }
 
 function shimExpected(relPath, current, sourceText, options, errors) {
-  let body = stripManagedBlockAny(relPath, current, toolkitMarkerPairs, errors);
+  let body = stripManagedBlockAny(relPath, current, options.markerPairs || toolkitMarkerPairs, errors);
   if (body === null) return null;
   if (options.importLine) body = removeExactLine(body, options.importLine);
   if (options.heading) body = removeLeadingHeading(body, options.heading);
@@ -464,7 +516,12 @@ function validateAndSync(options = {}) {
   const errors = [];
   const executionPrompt = readRequired(executionPromptPath, errors);
   const n8nAdapter = readRequired(n8nAdapterPath, errors);
-  if (executionPrompt === null || n8nAdapter === null) return { errors };
+  const n8nRules = readRequired(n8nRulesPath, errors);
+  if (executionPrompt === null || n8nAdapter === null || n8nRules === null) return { errors };
+
+  for (const [relPath, expected] of Object.entries(expectedN8nDerivatives(n8nRules))) {
+    writeOrCheck(relPath, expected, errors, runMode, 'n8n safety derivative');
+  }
 
   const sourceTemplates = expectedSourceTemplates(executionPrompt);
   for (const [relPath, expected] of Object.entries(sourceTemplates)) {
@@ -494,17 +551,19 @@ function validateAndSync(options = {}) {
   writeOrCheck('AGENTS.md', rootAgentsExpected(readOptional('AGENTS.md'), source, errors), errors, runMode);
   writeOrCheck('CLAUDE.md', shimExpected('CLAUDE.md', readOptional('CLAUDE.md'), source.claude, {
     heading: '# Claude Code Instructions',
-    importLine: '@AGENTS.md'
+    importLine: '@AGENTS.md',
+    markerPairs: claudeShimMarkerPairs
   }, errors), errors, runMode);
   writeOrCheck('GEMINI.md', shimExpected('GEMINI.md', readOptional('GEMINI.md'), source.gemini, {
     heading: '# Gemini Instructions',
-    importLine: '@./AGENTS.md'
+    importLine: '@./AGENTS.md',
+    markerPairs: geminiShimMarkerPairs
   }, errors), errors, runMode);
   writeOrCheck('.agents/rules/00-agent-toolkit-bootstrap.md', shimExpected(
     '.agents/rules/00-agent-toolkit-bootstrap.md',
     readOptional('.agents/rules/00-agent-toolkit-bootstrap.md'),
     source.antigravity,
-    { heading: '# Agent Toolkit Antigravity Bootstrap' },
+    { heading: '# Agent Toolkit Antigravity Bootstrap', markerPairs: antigravityBootstrapMarkerPairs },
     errors
   ), errors, runMode);
 

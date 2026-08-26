@@ -10,7 +10,7 @@ This policy does not block intentional, scoped generator/helper writes. It block
 
 Current scheduled notification flow:
 
-1. Read `_projects/**/SOURCE-LOCK.json`.
+1. Read `repo/source-watch/provenance/**/SOURCE-LOCK.json`.
 2. Separate active update candidates from retired provenance sources.
 3. Use active third-party source locks to identify upstream repo, source ref, locked commit, update policy, attribution requirement, allowlisted files, and exact blob pins.
 4. Read identity-bound reviewed-through cursors from `repo/source-watch/review-state.json`; these are human-advanced only and are never written by the scheduled workflow.
@@ -42,7 +42,7 @@ Retired internal provenance sources use `source_update_policy: "none"` and are n
 - `weijunswj/ai-cicd-installer`
 - `weijunswj/n8n-workflow-templates`
 
-Their copied `_projects/**/_main/` files are canonical. SOURCE-LOCK hashes remain local provenance and exact-byte drift checks. See [Retired Source Provenance](RETIRED-SOURCE-PROVENANCE.md).
+Their migrated canonical skill/contract files are local material. SOURCE-LOCK hashes remain local provenance and exact-byte drift checks. See [Retired Source Provenance](RETIRED-SOURCE-PROVENANCE.md).
 
 ## Classifications
 
@@ -55,7 +55,7 @@ Their copied `_projects/**/_main/` files are canonical. SOURCE-LOCK hashes remai
 Allowed scoped writes:
 
 - Local agent-rule generation may write generated source-side templates, root repo-local instruction shims, and published repo-local agent-rule template outputs.
-- Privileged auto-sync may stage and push only passive generated/published outputs. It must not stage or push active root AI instruction files; `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md` must be committed manually on the PR branch when source changes require them.
+- No privileged generated-output writeback is part of the canonical topology. Review direct skill, contract, provenance, and root-instruction changes in the PR.
 - n8n sanitizer helpers may write ignored staging folders.
 - n8n sync helpers may write reviewed consumer repo workflow JSON plus ignored local `.tmp/**` and `.n8n-local/**`.
 

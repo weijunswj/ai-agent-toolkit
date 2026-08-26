@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: development.hostinger-coolify-production-guide
-Source: _projects/development/hostinger-coolify-production-guide/_main/skill/checklists/bootstrap-checklist.md
-Update the project source and run sync.
--->
 # Bootstrap Checklist
 
 - [ ] Pending - Confirm target host, OS, domain, intended apps, and owner goals.

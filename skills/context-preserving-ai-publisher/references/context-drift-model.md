@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: repo-methodology.context-preserving-ai-publisher
-Source: _projects/repo-methodology/context-preserving-ai-publisher/_main/context-drift-model.md
-Update the project source and run sync.
--->
 # Context Drift Model
 
 Context drift happens when an AI-facing surface no longer carries the source context needed to use it safely and correctly.

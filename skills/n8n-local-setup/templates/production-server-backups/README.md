@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: n8n.local-setup
-Source: _projects/n8n/local-setup/_main/templates/production-server-backups/README.md
-Update the project source and run sync.
--->
 # Production n8n Server Backups
 
 Use this template for Linux server deployments such as Hostinger VPS plus Coolify, or another company server running n8n with Docker Compose.

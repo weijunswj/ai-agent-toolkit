@@ -8,7 +8,6 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..', '..');
 
 const skillPaths = [
-  '_projects/development/windows-localhost-workflows/_main/skill/SKILL.md',
   'skills/windows-localhost-workflows/SKILL.md'
 ];
 

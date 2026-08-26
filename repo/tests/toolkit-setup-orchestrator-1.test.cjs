@@ -142,7 +142,6 @@ test('agent-facing setup docs match the report question rows', () => {
     'repo/docs/FOR_AI_AGENTS.md',
     'repo/docs/HOW-TO-USE.md',
     'repo/docs/TOOLKIT-LOCAL-BRIDGE.md',
-    '_projects/development/toolkit-local-bridge/curated_output_for_ai/skills/toolkit-setup/SKILL.md',
     'skills/toolkit-setup/SKILL.md',
   ];
   for (const relPath of docs) {

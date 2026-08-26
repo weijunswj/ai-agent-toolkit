@@ -6,22 +6,6 @@
   },
   "targets": [
     {
-      "id": "okf-spec",
-      "name": "Open Knowledge Format draft spec",
-      "kind": "github_path",
-      "enabled": true,
-      "state": "watching",
-      "repo": "GoogleCloudPlatform/knowledge-catalog",
-      "ref": "main",
-      "path": "okf/SPEC.md",
-      "baseline_sha": null,
-      "baseline_policy": "human_advanced_only",
-      "recommendation": "Review draft spec changes only; do not copy spec text or change toolkit docs from the daily source-watch PR.",
-      "action_taken": "No toolkit implementation has been accepted yet.",
-      "remaining_work": "Decide whether any reviewed concept should become first-party toolkit documentation. If accepted, open a separate implementation PR and then either move future upstream tracking into SOURCE-LOCK or remove this advisory target.",
-      "removal_condition": "Remove after accepted OKF-derived toolkit work is implemented and any ongoing upstream dependency is represented by SOURCE-LOCK daily source-watch, or after deciding no action is needed."
-    },
-    {
       "id": "n8n-skills-hook-compatibility",
       "name": "Official n8n Skills Windows hook compatibility",
       "kind": "github_repo",
@@ -48,11 +32,9 @@
       "evidence_sources": [
         "OpenAI Codex changelog: https://developers.openai.com/codex/changelog",
         "OpenAI Codex AGENTS.md docs: https://developers.openai.com/codex/guides/agents-md",
-        "OpenAI Codex memories docs: https://developers.openai.com/codex/memories",
         "OpenAI Codex hooks docs: https://developers.openai.com/codex/hooks",
         "OpenAI Codex rules docs: https://developers.openai.com/codex/rules",
         "Claude Code overview docs: https://code.claude.com/docs/en/overview",
-        "Claude Code memory and rules docs: https://code.claude.com/docs/en/memory",
         "Claude Code hooks docs: https://code.claude.com/docs/en/hooks",
         "Claude Code changelog: https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md"
       ],
@@ -61,7 +43,6 @@
         "AGENTS.md, CLAUDE.md, GEMINI.md, and .agents/rules/**",
         ".codex-plugin/**, .claude-plugin/**, and hook guidance",
         "repo-map and docs-index guidance",
-        "MEMORY.md guidance",
         "documentation cleanup and token-saving/collapse guidance"
       ],
       "classification_options": [

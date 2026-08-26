@@ -7,7 +7,7 @@ const path = require('node:path');
 
 const helperRoot = path.join(
   process.cwd(),
-  '_projects/n8n/workflow-toolkit/_main/helper-scripts/import-export-sync'
+  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync'
 );
 const portable = require(path.join(helperRoot, 'n8n-portable-workflow.cjs'));
 const metadata = require(path.join(helperRoot, 'n8n-credential-metadata.cjs'));

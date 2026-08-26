@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: repo-methodology.context-preserving-ai-publisher
-Source: _projects/repo-methodology/context-preserving-ai-publisher/_main/templates/repo-docs/deletion-policy.template.md
-Update the project source and run sync.
--->
 # Deletion Policy
 
 Deletion must preserve source ownership and generated-surface integrity.

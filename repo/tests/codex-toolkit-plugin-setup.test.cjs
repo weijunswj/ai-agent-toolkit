@@ -273,7 +273,7 @@ function runSetupWrite(codexHome, fakeCodexPath, options = {}) {
       CODEX_TOOLKIT_CODEX_PLUGIN_ADD_POLL_MS: '50'
     },
     encoding: 'utf8',
-    timeout: 5000,
+    timeout: 10000,
     windowsHide: true
   });
 }

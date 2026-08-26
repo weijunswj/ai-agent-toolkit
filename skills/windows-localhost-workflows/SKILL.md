@@ -3,12 +3,6 @@ name: windows-localhost-workflows
 description: Use when starting, relaunching, verifying, or debugging Windows localhost web apps, API servers, or dev services, especially long-running dev servers, bounded readiness polling, interrupted command cleanup, PowerShell startup, execution policy, Corepack/package-manager, Python runtime, spawn EPERM, duplicate Path/PATH, port conflict, detached launch, sandbox persistence, or empty-log failures.
 ---
 
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: development.windows-localhost-workflows
-Source: _projects/development/windows-localhost-workflows/_main/skill/SKILL.md
-Update the project source and run sync.
--->
 # Windows Localhost Workflows
 
 ## Overview

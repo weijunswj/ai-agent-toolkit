@@ -3,12 +3,6 @@ name: github-governance-review-reconciler
 description: Explicit-only current-main N5 GitHub parent/direct-child governance and truthful PR-review/Deferred Findings reconciliation.
 ---
 
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: development.github-governance-review-reconciler
-Source: _projects/development/github-governance-review-reconciler/_main/skill/SKILL.md
-Update the project source and run sync.
--->
 # N5 GitHub Governance and Truthful PR-Review Reconciler
 
 This skill is explicit-only. Its OpenAI metadata sets `allow_implicit_invocation: false`.

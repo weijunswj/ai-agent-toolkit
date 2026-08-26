@@ -1,25 +1,23 @@
-# Project Rehaul Checklist
+# Canonical Surface Checklist
 
-Use this checklist when reviewing the project-module architecture.
+Use this checklist when reviewing the direct canonical Toolkit architecture.
 
-## Module Shape
+## Canonical Shape
 
-- [ ] Each project has `README.md`, `SOURCE-MANIFEST.md`, `SOURCE-LOCK.json`, `toolkit.project.json`, and `_main/`.
-- [ ] `_main/` preserves actual source files without truncating full guides.
-- [ ] `curated_output_for_ai/` exists only when reviewed AI-facing source material is needed.
-- [ ] No `source-repos/`, generic `original/`, or generic `derived/` pattern is introduced.
+- [ ] Complete AI-facing skills live under `skills/<skill-name>/`.
+- [ ] Machine contracts, fixtures, templates, and agent-rule inputs live under `repo/contracts/`.
+- [ ] Active third-party provenance lives under `repo/source-watch/provenance/`.
+- [ ] No legacy project tree, duplicate package metadata, or secondary publication tree is introduced.
 
 ## AI-Facing Surfaces
 
 - [ ] [skills/](../../skills/) remains obvious as the published AI-facing root surface.
-- [ ] Skills are generated from declared recipes where practical, with rare linked root surfaces justified in manifests.
-- [ ] Generated Markdown outputs include a generated-source notice.
-- [ ] Portable agent-rule templates and root managed execution blocks are generated from declared `_main` and curated sources; toolkit-specific root rules are appended directly in root `AGENTS.md`.
-- [ ] `SOURCE-LOCK.json` files pass the source-lock audit.
+- [ ] Skills are complete and locally usable without a source or publishing tree.
+- [ ] Managed root instruction blocks and templates use the retained canonical synchronizers.
+- [ ] Active `SOURCE-LOCK.json` files pass the source-lock audit.
 
 ## Safety
 
-- [ ] `toolkit.project.json` declares allowed writes and denied writes.
 - [ ] Live actions are explicit-confirmation only.
 - [ ] CI live actions are disabled.
 - [ ] Forbidden files and private/generated artifacts are absent.
@@ -37,12 +35,11 @@ Use this checklist when reviewing the project-module architecture.
 Run:
 
 ```powershell
-node repo/scripts/sync-toolkit-projects.cjs --check
+node repo/scripts/sync-repo-doc-contract.cjs --check
+node repo/scripts/sync-agent-instruction-shims.cjs --check
 node repo/scripts/audit-project-source-locks.cjs
 node repo/scripts/validate-toolkit.cjs
 node --test repo/tests/*.test.cjs
-node repo/scripts/package-skills.cjs --check
-node repo/scripts/package-packs.cjs --check
 node repo/scripts/run-design-tests.cjs
 git diff --check
 ```

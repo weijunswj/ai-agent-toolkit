@@ -6,8 +6,14 @@ const path = require('node:path');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
-const executionPromptPath = '_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md';
-const n8nAdapterPath = '_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md';
+const executionPromptPath = 'repo/contracts/agent-rules/ai-coding-agent-execution.md';
+const n8nAdapterPath = 'repo/contracts/agent-rules/n8n-agent-rules-adapter.md';
+const repoLocalSourceRoot = 'repo/contracts/agent-rules/repo-local';
+const repoLocalPublishedRoot = 'skills/ai-coding-agent-rules/repo-local';
+const legacyProjectToken = '_' + 'projects';
+const legacyCuratedToken = 'curated_' + 'output_for_ai';
+const legacyAgentRulesMainRoot = `${legacyProjectToken}/development/ai-coding-agent-rules/_main`;
+const legacyAgentRulesCuratedRoot = `${legacyProjectToken}/development/ai-coding-agent-rules/${legacyCuratedToken}/skills/ai-coding-agent-rules`;
 const toolkitBegin = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->`;
 const toolkitEnd = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:END GLOBAL-AGENTS.MD-TEMPLATE -->`;
 const n8nBegin = `<!-- AI-AGENT-TOOLKIT:${n8nAdapterPath}:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->`;
@@ -15,33 +21,33 @@ const n8nEnd = `<!-- AI-AGENT-TOOLKIT:${n8nAdapterPath}:END N8N-AGENT-RULES-ADAP
 const repoLocalShimTemplates = [
   {
     label: 'Claude Code shim',
-    sourcePath: '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
-    publishedPath: 'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
+    sourcePath: `${repoLocalSourceRoot}/CLAUDE.shim.template.md`,
+    publishedPath: `${repoLocalPublishedRoot}/CLAUDE.shim.template.md`,
     activePath: 'CLAUDE.md',
-    sourceIdentity: '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
+    sourceIdentity: `${repoLocalSourceRoot}/CLAUDE.shim.template.md`,
     blockName: 'CLAUDE.SHIM',
-    begin: '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md:BEGIN CLAUDE.SHIM v1 -->',
-    end: '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md:END CLAUDE.SHIM -->'
+    begin: `<!-- AI-AGENT-TOOLKIT:${repoLocalSourceRoot}/CLAUDE.shim.template.md:BEGIN CLAUDE.SHIM v1 -->`,
+    end: `<!-- AI-AGENT-TOOLKIT:${repoLocalSourceRoot}/CLAUDE.shim.template.md:END CLAUDE.SHIM -->`
   },
   {
     label: 'Antigravity Gemini shim',
-    sourcePath: '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
-    publishedPath: 'skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
+    sourcePath: `${repoLocalSourceRoot}/GEMINI.shim.template.md`,
+    publishedPath: `${repoLocalPublishedRoot}/GEMINI.shim.template.md`,
     activePath: 'GEMINI.md',
-    sourceIdentity: '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
+    sourceIdentity: `${repoLocalSourceRoot}/GEMINI.shim.template.md`,
     blockName: 'GEMINI.SHIM',
-    begin: '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md:BEGIN GEMINI.SHIM v1 -->',
-    end: '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md:END GEMINI.SHIM -->'
+    begin: `<!-- AI-AGENT-TOOLKIT:${repoLocalSourceRoot}/GEMINI.shim.template.md:BEGIN GEMINI.SHIM v1 -->`,
+    end: `<!-- AI-AGENT-TOOLKIT:${repoLocalSourceRoot}/GEMINI.shim.template.md:END GEMINI.SHIM -->`
   },
   {
     label: 'Antigravity bootstrap',
-    sourcePath: '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
-    publishedPath: 'skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
+    sourcePath: `${repoLocalSourceRoot}/antigravity-bootstrap.template.md`,
+    publishedPath: `${repoLocalPublishedRoot}/antigravity-bootstrap.template.md`,
     activePath: '.agents/rules/00-agent-toolkit-bootstrap.md',
-    sourceIdentity: '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
+    sourceIdentity: `${repoLocalSourceRoot}/antigravity-bootstrap.template.md`,
     blockName: 'ANTIGRAVITY.BOOTSTRAP',
-    begin: '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md:BEGIN ANTIGRAVITY.BOOTSTRAP v1 -->',
-    end: '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md:END ANTIGRAVITY.BOOTSTRAP -->'
+    begin: `<!-- AI-AGENT-TOOLKIT:${repoLocalSourceRoot}/antigravity-bootstrap.template.md:BEGIN ANTIGRAVITY.BOOTSTRAP v1 -->`,
+    end: `<!-- AI-AGENT-TOOLKIT:${repoLocalSourceRoot}/antigravity-bootstrap.template.md:END ANTIGRAVITY.BOOTSTRAP -->`
   }
 ];
 const expectedN8nBlock = `${n8nBegin}
@@ -55,7 +61,7 @@ ${n8nEnd}`;
 const curatedRepoLocalSafetyComment = [
   '<!--',
   'Curated AI-facing source.',
-  'Project: development.ai-coding-agent-rules',
+  'Source: repo/contracts/agent-rules/repo-local',
   'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.',
   '-->',
 ].join('\n');
@@ -80,7 +86,6 @@ const requiredPortablePlaybookFiles = [
   'generated-files.md',
   'git-completion.md',
   'local-docs.md',
-  'managed-memory.md',
   'safety-gates.md',
   'windows-command-hygiene.md'
 ];
@@ -137,7 +142,7 @@ function assertBareRepoLocalTemplate(text, label) {
   assert.doesNotMatch(payload, /Curated AI-facing source/, `${label} contains the curated-source comment only once at the top`);
 }
 function generatedNoticeCount(text) {
-  return (text.match(/Generated from toolkit (?:project source|curated output for AI)\. Do not edit directly\./g) || []).length;
+  return (text.match(/Generated from (?:toolkit (?:project source|curated output for AI)|the canonical agent-rule contract)\. Do not edit directly\./g) || []).length;
 }
 
 function assertNoForbiddenDefaultPromptPhrases(text, label) {
@@ -198,23 +203,23 @@ test('source structure keeps reusable prompt and adapter partials with no tiny s
   const kept = [
     executionPromptPath,
     n8nAdapterPath,
-    '_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules.md',
-    '_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-skill-routing.md'
+    'repo/contracts/agent-rules/n8n-agent-rules.md',
+    'repo/contracts/agent-rules/toolkit-skill-routing.md'
   ];
   for (const relPath of kept) assert.equal(exists(relPath), true, relPath);
 
   for (const relPath of [
-    '_projects/development/ai-coding-agent-rules/_main/_partials/agent-toolkit-managed-block.md',
-    '_projects/development/ai-coding-agent-rules/_main/_partials/agent-toolkit-n8n-adapter-block.md',
-    '_projects/development/ai-coding-agent-rules/_main/_partials/claude-shim.md',
-    '_projects/development/ai-coding-agent-rules/_main/_partials/gemini-shim.md',
-    '_projects/development/ai-coding-agent-rules/_main/_partials/antigravity-bootstrap.md',
-    '_projects/development/ai-coding-agent-rules/_main/_partials/toolkit-root-agent-rules.md'
+    `${legacyAgentRulesMainRoot}/_partials/agent-toolkit-managed-block.md`,
+    `${legacyAgentRulesMainRoot}/_partials/agent-toolkit-n8n-adapter-block.md`,
+    `${legacyAgentRulesMainRoot}/_partials/claude-shim.md`,
+    `${legacyAgentRulesMainRoot}/_partials/gemini-shim.md`,
+    `${legacyAgentRulesMainRoot}/_partials/antigravity-bootstrap.md`,
+    `${legacyAgentRulesMainRoot}/_partials/toolkit-root-agent-rules.md`
   ]) {
     assert.equal(exists(relPath), false, relPath);
   }
-  assert.equal(exists('_projects/development/ai-coding-agent-rules/_main/repo-local/docs/agent-playbooks/INDEX.md'), true);
-  assert.equal(exists('_projects/development/ai-coding-agent-rules/_main/repo-local/AGENTS.managed.template.md'), false);
+  assert.equal(exists(`${repoLocalPublishedRoot}/docs/agent-playbooks/INDEX.md`), true);
+  assert.equal(exists(`${legacyAgentRulesMainRoot}/repo-local/AGENTS.managed.template.md`), false);
 });
 
 test('manual global source templates exist and are generated from execution prompt partial', () => {
@@ -226,9 +231,9 @@ test('manual global source templates exist and are generated from execution prom
   assert.doesNotMatch(prompt, /## Pull Request Description/);
   assert.match(prompt, /opening or updating a pull request/i);
   for (const relPath of [
-    '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md'
+    'repo/contracts/agent-rules/AGENTS.template.md',
+    'repo/contracts/agent-rules/CLAUDE.template.md',
+    'repo/contracts/agent-rules/GEMINI.template.md'
   ]) {
     const text = readText(relPath);
     assert.equal(generatedNoticeCount(text), 1, relPath);
@@ -245,23 +250,21 @@ test('execution prompt requires full-bold user-action questions and generated su
     /Treat repo-local documentation as active task context, not optional background\./,
     /\[Portable playbook index\]\(docs\/agent-playbooks\/INDEX\.md\) \(`docs\/agent-playbooks\/INDEX\.md`\)/,
     /If the portable playbook index is missing, continue safely using `AGENTS\.md` and local repo docs\./,
-    /## Managed Memory/,
-    /Treat `MEMORY\.md` as managed, non-authoritative project memory\./,
+    /minimum-sufficient change order: no change -> reuse -> smallest root-cause correction -> bounded simplification with an explicit upgrade trigger -> new abstraction only if needed\./,
     /## Documentation Closure/,
     /Use context-preserving compression, not blind deletion\./,
     /Keep repo maps pointer-based and current;/,
     /Words like `continue`, `next`, `apply`, or `do it` only apply to the already-scoped safe task/,
-    /Instruction sources used/,
-    /MEMORY\.md changed: Yes\/No/
+    /Instruction sources used/
   ];
 
   assert.match(readText(executionPromptPath), /## User Action Questions/);
   for (const relPath of [
     executionPromptPath,
-    '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
-    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+    'repo/contracts/agent-rules/AGENTS.template.md',
+    'repo/contracts/agent-rules/CLAUDE.template.md',
+    'repo/contracts/agent-rules/GEMINI.template.md',
+    `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
     'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'
   ]) {
     const text = readText(relPath);
@@ -301,10 +304,10 @@ test('portable rules require host-profile-aware topology and a complete delegati
 
   for (const relPath of [
     executionPromptPath,
-    '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
-    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+    'repo/contracts/agent-rules/AGENTS.template.md',
+    'repo/contracts/agent-rules/CLAUDE.template.md',
+    'repo/contracts/agent-rules/GEMINI.template.md',
+    `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
     'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
     'AGENTS.md'
   ]) {
@@ -322,9 +325,9 @@ test('speed-only C2 wording remains root-only without blocking qualified special
   assert.match(failedSpeedOnlyC2Prompt, /^Use helpers to finish faster\./);
   const surfaces = [
     executionPromptPath,
-    '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
-    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+    'repo/contracts/agent-rules/AGENTS.template.md',
+    'repo/contracts/agent-rules/CLAUDE.template.md',
+    `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
     'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
     'AGENTS.md',
   ];
@@ -359,10 +362,10 @@ test('portable rules activate GitHub issue tracking only for the applicable work
   ];
   for (const relPath of [
     executionPromptPath,
-    '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
-    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+    'repo/contracts/agent-rules/AGENTS.template.md',
+    'repo/contracts/agent-rules/CLAUDE.template.md',
+    'repo/contracts/agent-rules/GEMINI.template.md',
+    `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
     'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
     'AGENTS.md',
   ]) {
@@ -374,19 +377,19 @@ test('portable rules activate GitHub issue tracking only for the applicable work
 test('repo-local source and published skill templates are local bootstrap templates', () => {
   const sourceToPublished = [
     [
-      '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+      `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
       'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
     ],
     [
-      '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
+      `${repoLocalSourceRoot}/CLAUDE.shim.template.md`,
       'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
     ],
     [
-      '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
+      `${repoLocalSourceRoot}/GEMINI.shim.template.md`,
       'skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
     ],
     [
-      '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
+      `${repoLocalSourceRoot}/antigravity-bootstrap.template.md`,
       'skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
     ],
   ];
@@ -442,7 +445,7 @@ test('root AGENTS is directly maintained while repo-local block comes from execu
     .replace(n8nBegin, '')
     .replace(n8nEnd, '')
     .trim();
-  const managedPayload = repoLocalPayload(readText('_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'), 'repo-local AGENTS managed template');
+  const managedPayload = repoLocalPayload(readText(`${repoLocalSourceRoot}/AGENTS.managed.template.md`), 'repo-local AGENTS managed template');
   const sourceToolkit = block(managedPayload, toolkitBegin, toolkitEnd, 'repo-local managed toolkit block')
     .replace(toolkitBegin, '')
     .replace(toolkitEnd, '')
@@ -455,14 +458,14 @@ test('root AGENTS is directly maintained while repo-local block comes from execu
   assert.match(rootAgents, /## Toolkit Root Optimization Mandate/);
   assert.match(rootAgents, /low token burn, efficient agent orientation, predictable setup\/update behavior, quiet validation, and no performance drift/);
   assert.match(rootAgents, /\[Toolkit playbook index\]\(repo\/docs\/agent-playbooks\/INDEX\.md\) \(`repo\/docs\/agent-playbooks\/INDEX\.md`\)/i);
-  assert.match(rootAgents, /MEMORY\.md changed: Yes\/No/i);
+  assert.doesNotMatch(rootAgents, /MEMORY\.md|Managed Memory/i);
   assert.match(rootAgents, /Source-watch is PR-notification-only/i);
   assert.equal(sourceToolkit, prompt);
 });
 
 test('n8n adapter is compact and fail-closed', () => {
   for (const [label, text] of [
-    ['repo-local AGENTS managed template', repoLocalPayload(readText('_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'), 'repo-local AGENTS managed template')],
+    ['repo-local AGENTS managed template', repoLocalPayload(readText(`${repoLocalSourceRoot}/AGENTS.managed.template.md`), 'repo-local AGENTS managed template')],
     ['published repo-local AGENTS managed template', repoLocalPayload(readText('skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'), 'published repo-local AGENTS managed template')]
   ]) {
     const n8nBlock = block(text, n8nBegin, n8nEnd, label);
@@ -526,13 +529,13 @@ test('active and generated default instruction surfaces exclude PR/VCS workflow 
     '.agents/rules/00-agent-toolkit-bootstrap.md',
     executionPromptPath,
     n8nAdapterPath,
-    '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
-    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
-    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
-    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
-    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
+    'repo/contracts/agent-rules/AGENTS.template.md',
+    'repo/contracts/agent-rules/CLAUDE.template.md',
+    'repo/contracts/agent-rules/GEMINI.template.md',
+    `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
+    `${repoLocalSourceRoot}/CLAUDE.shim.template.md`,
+    `${repoLocalSourceRoot}/GEMINI.shim.template.md`,
+    `${repoLocalSourceRoot}/antigravity-bootstrap.template.md`,
     'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
     'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
     'skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
@@ -561,7 +564,7 @@ test('current managed outputs use source-aware markers only', () => {
   for (const relPath of [
     'AGENTS.md',
     'README.md',
-    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+    `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
     'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'
   ]) {
     const text = readText(relPath);
@@ -571,14 +574,14 @@ test('current managed outputs use source-aware markers only', () => {
 
 test('published skill docs focus on repo-local automatic setup', () => {
   for (const relPath of [
-    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/README.md',
-    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/SKILL.md',
+    'skills/ai-coding-agent-rules/README.md',
+    'skills/ai-coding-agent-rules/SKILL.md',
     'skills/ai-coding-agent-rules/README.md',
     'skills/ai-coding-agent-rules/SKILL.md'
   ]) {
     const text = readText(relPath);
     assert.match(text, /repo\/folder-local|repo-local/i, relPath);
-    assert.match(text, /_projects\/development\/ai-coding-agent-rules\/_main\//, relPath);
+    assert.match(text, /repo\/contracts\/agent-rules\//, relPath);
     assert.doesNotMatch(text, /C:\\Users\\<your-user>\\\.(?:claude|gemini)|\$HOME\\\.(?:claude|gemini)|Claude Code global rules example|Antigravity global rules example|Gemini\s+CLI and Antigravity global rules example/, relPath);
   }
 });
@@ -612,7 +615,7 @@ test('root README platform guidance requires AGENTS before platform shims', () =
 
 test('skill README documents required file sets and shim dependency', () => {
   for (const relPath of [
-    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/README.md',
+    'skills/ai-coding-agent-rules/README.md',
     'skills/ai-coding-agent-rules/README.md'
   ]) {
     const text = readText(relPath);
@@ -642,7 +645,7 @@ test('skill README documents required file sets and shim dependency', () => {
 
 test('n8n local setup README describes automatic repo-local instruction checks', () => {
   for (const relPath of [
-    '_projects/n8n/local-setup/curated_output_for_ai/skills/n8n-local-setup/README.md',
+    'skills/n8n-local-setup/README.md',
     'skills/n8n-local-setup/README.md'
   ]) {
     const text = readText(relPath);
@@ -655,7 +658,7 @@ test('n8n local setup README describes automatic repo-local instruction checks',
 
 test('skill instructions add only target platform shims by default', () => {
   for (const relPath of [
-    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/SKILL.md',
+    'skills/ai-coding-agent-rules/SKILL.md',
     'skills/ai-coding-agent-rules/SKILL.md'
   ]) {
     const text = readText(relPath);

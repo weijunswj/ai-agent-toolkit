@@ -120,7 +120,7 @@ test('RUN164 GREEN: exactly five contracts remain and no sixth durable structure
     assert.equal(Object.prototype.hasOwnProperty.call(runtime, name), false);
   }
   const runtimeSource = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'toolkit-execution-loop.cjs'), 'utf8');
-  const policySource = fs.readFileSync(path.join(__dirname, '..', '..', '_projects', 'development', 'bounded-local-execution-loop', '_main', 'execution-loop-policy.json'), 'utf8');
+  const policySource = fs.readFileSync(path.join(__dirname, '..', 'contracts', 'bounded-local-execution-loop', 'execution-loop-policy.json'), 'utf8');
   for (const source of [runtimeSource, policySource]) {
     assert.doesNotMatch(source, /execution-loop-lifecycle-provenance\.v1|\.lifecycle\.json|lifecycle_provenance|validateDurableLifecycleProvenance|readDurableLifecycleProvenance|writeDurableLifecycleProvenance/);
   }

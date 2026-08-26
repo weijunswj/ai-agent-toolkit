@@ -9,790 +9,303 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const auditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-published-surfaces.cjs');
-const syncScript = path.join(repoRoot, 'repo', 'scripts', 'sync-toolkit-projects.cjs');
+const audit = require(auditScript);
+const legacyProjectToken = '_' + 'projects';
+const legacyCuratedToken = 'curated_' + 'output_for_ai';
+const publisherReferencePaths = [
+  'skills/context-preserving-ai-publisher/references/audit-and-baseline-workflow.md',
+  'skills/context-preserving-ai-publisher/references/validation-strategy.md',
+  'skills/context-preserving-ai-publisher/templates/project-module/SOURCE-LOCK.template.json',
+  'skills/context-preserving-ai-publisher/templates/project-module/toolkit.project.template.json',
+  'skills/context-preserving-ai-publisher/templates/repo-docs/project-module-standard.template.md'
+];
+const standalonePublisherPaths = [
+  'skills/context-preserving-ai-publisher/SKILL.md',
+  'skills/context-preserving-ai-publisher/README.md',
+  'skills/context-preserving-ai-publisher/references/README.md'
+];
+const historicalEvidencePaths = [
+  'repo/docs/RETIRED-SOURCE-PROVENANCE.md',
+  'repo/docs/audits/2026-07-15-native-codex-uat-remediation-audit.md'
+];
+const primitiveIds = [
+  'retired-projects-source-root',
+  'retired-main-source-root',
+  'retired-curated-output-root',
+  'retired-project-module',
+  'retired-project-to-skill',
+  'retired-source-to-surface',
+  'retired-project-manifest',
+  'retired-source-manifest',
+  'retired-toolkit-project-manifest',
+  'retired-generated-skill',
+  'retired-generated-copy',
+  'retired-generated-publication',
+  'retired-deterministic-publication',
+  'retired-generated-surface-writeback',
+  'retired-project-output-publication',
+  'retired-generated-pack-manifest',
+  'retired-pack-packaging',
+  'retired-publisher-infrastructure',
+  'retired-sync-toolkit-projects-command',
+  'retired-package-skills-command',
+  'retired-package-packs-command'
+];
 
-function tempCopy() {
-  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-surface-audit-'));
+function readText(relPath, root = repoRoot) {
+  return fs.readFileSync(path.join(root, relPath), 'utf8').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+}
+
+function copyRepo() {
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'surface-audit-'));
   fs.cpSync(repoRoot, target, {
     recursive: true,
     filter(source) {
       const rel = path.relative(repoRoot, source).replace(/\\/g, '/');
-      return !rel.startsWith('.git') && !rel.startsWith('_dist') && !rel.startsWith('node_modules');
+      return !(
+        rel === '.git' || rel.startsWith('.git/') ||
+        rel === 'node_modules' || rel.startsWith('node_modules/') ||
+        rel === '.tmp' || rel.startsWith('.tmp/') ||
+        rel === '_dist' || rel.startsWith('_dist/')
+      );
     }
   });
   return target;
 }
 
-function runAudit(args = [], cwd = repoRoot) {
-  return spawnSync(process.execPath, [auditScript, ...args], { cwd, encoding: 'utf8' });
-}
-
-function runAuditJson(cwd = repoRoot) {
-  const result = runAudit(['--json'], cwd);
-  assert.equal(result.status, 0, result.stderr);
-  return JSON.parse(result.stdout);
-}
-
-function parseMarkdownTable(sectionText) {
-  const rows = [];
-  for (const line of sectionText.split('\n')) {
-    if (!line.startsWith('|')) continue;
-    const cells = line.split('|').slice(1, -1).map((cell) => cell.trim());
-    if (cells.length !== 2) continue;
-    if (cells[0] === '---' || cells[0] === 'Metric' || cells[0] === 'Classification') continue;
-    rows.push(cells);
-  }
-  return Object.fromEntries(rows.map(([key, value]) => [key, Number(value)]));
-}
-
-function markdownSection(text, heading, nextHeading = null) {
-  const normalizedText = text.replace(/\r\n/g, '\n');
-  const startToken = `${heading}\n`;
-  const start = normalizedText.indexOf(startToken);
-  assert.notEqual(start, -1, `${heading} section is missing`);
-  const bodyStart = start + startToken.length;
-  const rest = normalizedText.slice(bodyStart);
-  if (!nextHeading) return rest;
-  const end = rest.indexOf(`${nextHeading}\n`);
-  assert.notEqual(end, -1, `${nextHeading} section is missing`);
-  return rest.slice(0, end);
-}
-
-function tableInSection(text, heading, nextHeading) {
-  return parseMarkdownTable(markdownSection(text, heading, nextHeading));
-}
-
-function addCrossOwnedOutputFixture(cwd, metadata = {}) {
-  const projectDir = path.join(cwd, '_projects', 'cicd', 'secure-installer');
-  const sourceRel = 'curated_output_for_ai/templates/n8n/sync-helpers/new-cross-owned-helper.md';
-  const outputRel = 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/new-cross-owned-helper.md';
-  const sourcePath = path.join(projectDir, sourceRel);
-  const outputPath = path.join(cwd, outputRel);
-  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
-  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  fs.writeFileSync(sourcePath, '# New cross-owned helper fixture\n\nReview-required n8n template fixture.\n', 'utf8');
-  fs.writeFileSync(outputPath, '# New cross-owned helper fixture\n\nReview-required n8n template fixture.\n', 'utf8');
-
-  const manifestPath = path.join(projectDir, 'toolkit.project.json');
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-  manifest.outputs.push({
-    kind: 'curated',
-    source: sourceRel,
-    output: outputRel,
-    notes: 'AI-facing reviewed template fixture.',
-    fidelity: 'reviewed_entrypoint',
-    ...metadata
+function runAudit(cwd, args = []) {
+  return spawnSync(process.execPath, [auditScript, '--workspace', cwd, ...args], {
+    cwd: os.tmpdir(),
+    encoding: 'utf8'
   });
-  manifest.writes.allowed.push(outputRel);
-  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
-  return outputRel;
 }
 
-function addDeclaredOutputFixture(cwd, projectParts, options) {
-  const projectDir = path.join(cwd, '_projects', ...projectParts);
-  const sourcePath = path.join(projectDir, options.sourceRel);
-  const outputPath = path.join(cwd, options.outputRel);
-  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
-  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  fs.writeFileSync(sourcePath, options.sourceText, 'utf8');
-  fs.writeFileSync(outputPath, options.outputText || options.sourceText, 'utf8');
-
-  const manifestPath = path.join(projectDir, 'toolkit.project.json');
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-  manifest.outputs.push({
-    kind: options.kind || 'curated',
-    source: options.sourceRel,
-    output: options.outputRel,
-    ...(options.metadata || {})
-  });
-  manifest.writes.allowed.push(options.outputRel);
-  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
-  return options.outputRel;
+function readPolicy(root = repoRoot) {
+  return JSON.parse(readText('repo/contracts/topology-scope-policy.json', root));
 }
 
-test('audit-published-surfaces runs successfully on the current repo', () => {
-  const result = runAudit();
+function writePolicy(root, mutate) {
+  const policy = readPolicy(root);
+  mutate(policy);
+  fs.writeFileSync(
+    path.join(root, 'repo', 'contracts', 'topology-scope-policy.json'),
+    `${JSON.stringify(policy, null, 2)}\n`,
+    'utf8'
+  );
+}
+
+function assertPolicyRejects(label, mutate, expected) {
+  const cwd = copyRepo();
+  try {
+    mutate(cwd);
+    const result = runAudit(cwd, ['--json']);
+    assert.notEqual(result.status, 0, label);
+    assert.match(result.stdout, expected, label);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+}
+
+test('canonical surface snapshot and checked baseline are clean', () => {
+  const snapshot = audit.snapshot();
+  assert.equal(snapshot.schema_version, 2);
+  assert.equal(snapshot.project_tree_present, false);
+  assert.deepEqual(snapshot.pack_manifests, []);
+  assert.equal(snapshot.skills.includes('skills/knowledge-index-updater'), false);
+  assert.deepEqual(audit.validate(snapshot), []);
+  const result = runAudit(repoRoot, ['--check']);
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Published surface audit/);
 });
 
-test('surface fidelity audit doc snapshot matches current audit report', () => {
-  const report = runAuditJson();
-  const doc = fs.readFileSync(path.join(repoRoot, 'repo', 'docs', 'SURFACE-FIDELITY-AUDIT.md'), 'utf8');
+test('policy v2 owns the closed primitive, identity, and exact scope contracts', () => {
+  const policy = readPolicy();
+  assert.deepEqual(audit.validateTopologyScopePolicy(), []);
+  assert.equal(policy.schema_version, 2);
+  assert.equal(policy.default_scope, 'active-toolkit');
+  assert.equal(policy.normalization, 'nfkc-lower-separator-v1');
+  assert.deepEqual(policy.primitive_definitions.map((definition) => definition.id), primitiveIds);
+  assert.deepEqual(policy.standalone_identity_definitions.map((definition) => definition.id), [
+    'current-toolkit-identity',
+    'current-toolkit-repository-identity',
+    'current-repository-deictic-identity'
+  ]);
+  assert.deepEqual(
+    policy.entries.filter((entry) => entry.scope === 'standalone-publisher').map((entry) => entry.path),
+    standalonePublisherPaths
+  );
+  assert.deepEqual(
+    policy.entries.filter((entry) => entry.scope === 'historical-evidence').map((entry) => entry.path),
+    historicalEvidencePaths
+  );
+  assert.deepEqual(
+    policy.entries.filter((entry) => entry.scope === 'non-operative-example').map((entry) => entry.path),
+    publisherReferencePaths
+  );
+  assert.equal(audit.policyScopeForPath('repo/docs/audits/unlisted.md'), 'active-toolkit');
+});
 
-  assert.deepEqual(
-    tableInSection(doc, 'Current output from `node repo/scripts/audit-published-surfaces.cjs --check`:', 'Current published-file classifications:'),
-    report.summary
-  );
-  assert.deepEqual(
-    tableInSection(doc, 'Current published-file classifications:', 'Current boundary recipe classifications:'),
-    report.classifications
-  );
-  assert.deepEqual(
-    tableInSection(doc, 'Current boundary recipe classifications:', 'Known baseline context:'),
-    report.boundaryClassifications
-  );
-
-  if (report.issues.boundaryRecipeFindings.length === 0) {
-    assert.match(doc, /There are no current curated output boundary findings\./);
+test('legacy compatibility is derived from only the five exact non-operative paths', () => {
+  assert.deepEqual(publisherReferencePaths.filter(audit.legacyReferenceAllowed), publisherReferencePaths);
+  for (const relPath of publisherReferencePaths) {
+    const text = readText(relPath);
+    assert.ok(text.includes(`${legacyProjectToken}/`) || text.includes(`${legacyCuratedToken}/`), relPath);
   }
-  if (report.issues.curatedDirectoryFindings.length === 0) {
-    assert.match(doc, /There are no current curated directory boundary findings\./);
+  assert.equal(audit.legacyReferenceAllowed('skills/context-preserving-ai-publisher/README.md'), false);
+  assert.equal(audit.legacyReferenceAllowed('skills/context-preserving-ai-publisher/references/examples.md'), false);
+});
+
+test('primitive matching is policy-derived, normalized, and reports every occurrence with stable spans', () => {
+  const fixtures = new Map([
+    ['retired-projects-source-root', '_projects'],
+    ['retired-main-source-root', '_main'],
+    ['retired-curated-output-root', 'CURATED-output_for_AI'],
+    ['retired-project-module', 'project_modules'],
+    ['retired-project-to-skill', 'project to skills'],
+    ['retired-source-to-surface', 'source_to_surfaces'],
+    ['retired-project-manifest', 'project manifests'],
+    ['retired-source-manifest', 'source_manifest'],
+    ['retired-toolkit-project-manifest', 'toolkit.project.json'],
+    ['retired-generated-skill', 'generated-skills'],
+    ['retired-generated-copy', 'generated copies'],
+    ['retired-generated-publication', 'generated_writeback'],
+    ['retired-deterministic-publication', 'deterministic-publishing'],
+    ['retired-generated-surface-writeback', 'generated_surface-writeback'],
+    ['retired-project-output-publication', 'project_output publishing'],
+    ['retired-generated-pack-manifest', 'generated_pack_manifests'],
+    ['retired-pack-packaging', 'pack_packaging'],
+    ['retired-publisher-infrastructure', 'context_preserving_ai_publisher-infrastructure'],
+    ['retired-sync-toolkit-projects-command', 'sync-toolkit-projects.cjs'],
+    ['retired-package-skills-command', 'package-skills.cjs'],
+    ['retired-package-packs-command', 'package-packs.cjs']
+  ]);
+  for (const [id, fixture] of fixtures) {
+    assert.ok(audit.detectRetiredTopologyAtoms(fixture).some((atom) => atom.id === id), `${id}: ${fixture}`);
   }
+
+  const source = 'project module\nordinary\nPROJECT_MODULE';
+  const matches = audit.detectRetiredTopologyAtoms(source).filter((atom) => atom.id === 'retired-project-module');
+  assert.equal(matches.length, 2);
+  assert.deepEqual(matches.map((match) => match.lineNumber), [1, 3]);
+  assert.deepEqual(matches.map((match) => source.slice(match.sourceSpan.start, match.sourceSpan.end)), ['project module', 'PROJECT_MODULE']);
+  assert.ok(matches.every((match) => match.message.includes(match.id)));
 });
 
-test('audit-published-surfaces detects pack-installed undeclared files', () => {
-  const cwd = tempCopy();
-  const fixturePath = path.join(cwd, 'skills', 'ui-ux-secure-frontend-design', 'references', 'new-pack-undeclared-fixture.md');
-  fs.writeFileSync(fixturePath, '# New pack undeclared fixture\n\nThis file is installed by the skill pack but not declared by the project manifest.\n', 'utf8');
-
-  const report = runAuditJson(cwd);
-  const paths = report.issues.packInstalledUndeclared.map((entry) => entry.path);
-  assert.ok(paths.includes('skills/ui-ux-secure-frontend-design/references/new-pack-undeclared-fixture.md'));
-});
-
-test('audit-published-surfaces records declared shared-surface references', () => {
-  const report = runAuditJson();
-
-  assert.equal(report.summary.crossOwnedOutputs, 0);
-  assert.equal(report.summary.sharedSurfaceOutputs, 4);
-  assert.equal(report.summary.sharedSurfaceMetadataFindings, 0);
-  assert.deepEqual(report.issues.crossOwnedOutputs, []);
-  assert.deepEqual(
-    report.issues.sharedSurfaceOutputs.map((entry) => entry.output).sort(),
-    [
-      'skills/n8n-local-setup/references/n8n-agent-rules.md',
-      'skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md',
-      'skills/n8n-workflow-templates/references/n8n-agent-rules.md',
-      'skills/ui-ux-secure-frontend-design/references/design-md-contract.md'
-    ]
-  );
-});
-
-test('audit-published-surfaces preserves legitimate curated references without MCP specs', () => {
-  const report = runAuditJson();
-  const findings = report.issues.boundaryRecipeFindings.map((entry) => entry.path);
-  const reviewedReference = report.boundaryRecipes.find((entry) =>
-    entry.path === 'skills/n8n-workflow-helper-scripts/references/workflow-sync.md'
-  );
-  const importExportSafetyReference = report.boundaryRecipes.find((entry) =>
-    entry.path === 'skills/n8n-workflow-helper-scripts/references/import-export-flow.md'
-  );
-  assert.equal(reviewedReference?.classification, 'curated_reference');
-  assert.equal(importExportSafetyReference?.classification, 'curated_reference');
-  assert.equal(findings.includes('skills/n8n-workflow-helper-scripts/references/workflow-sync.md'), false);
-  assert.equal(findings.includes('skills/n8n-workflow-helper-scripts/references/import-export-flow.md'), false);
-  assert.equal(report.files.some((entry) => entry.path.startsWith('mcp/')), false);
-});
-
-test('audit-published-surfaces classifies curated boundary recipes', () => {
-  const report = runAuditJson();
-  assert.ok(report.summary.boundaryRecipeOutputs > 0);
-  for (const classification of [
-    'main_full_fidelity',
-    'curated_router',
-    'curated_index',
-    'curated_reference',
-    'curated_metadata',
-    'curated_adapter',
-    'generated_cross_skill_reference',
-    'curated_pack_readme',
-    'curated_repo_local_agent_template',
-    'curated_template',
-    'curated_template_index'
-  ]) {
-    assert.ok(report.boundaryClassifications[classification] > 0, classification);
-  }
-  const reviewedPackReadmes = [
-    'skills/n8n-local-setup/packs/claude-code-n8n-local/README.md',
-    'skills/n8n-local-setup/packs/codex-n8n-local/README.md'
+test('active scope rejects primitive occurrences without heading, prose, order, or negation exemptions', () => {
+  const fixtures = [
+    'No project module is maintained.',
+    '## Historical evidence\nEarlier operation used project modules.',
+    '<!-- project module -->',
+    '```text\nproject module\n```',
+    'A generated skill appears before a project module.',
+    'project\nmodule'
   ];
-  assert.equal(report.boundaryClassifications.suspicious_curated_runtime || 0, 0);
-  for (const outputPath of reviewedPackReadmes) {
-    const entry = report.boundaryRecipes.find((item) => item.path === outputPath);
-    assert.equal(entry?.classification, 'curated_pack_readme', outputPath);
+  for (const fixture of fixtures) {
+    assert.notEqual(audit.activeTopologyFinding(fixture, 'repo/docs/fixture.md'), null, fixture);
   }
-  for (const outputPath of [
-    'skills/knowledge-index-updater/README.md',
-    'skills/knowledge-index-updater/SKILL.md',
-    'skills/windows-localhost-workflows/README.md',
-    'skills/windows-localhost-workflows/SKILL.md'
-  ]) {
-    const entry = report.boundaryRecipes.find((item) => item.path === outputPath);
-    assert.equal(entry?.classification, 'main_full_fidelity', outputPath);
-  }
-  assert.deepEqual(
-    report.issues.boundaryRecipeFindings.map((entry) => entry.path).sort(),
-    []
-  );
+  assert.equal(audit.activeTopologyFinding('Maintain skills directly under `skills/**`.', 'repo/docs/fixture.md'), null);
 });
 
-test('audit-published-surfaces classifies reference-link shims when present', () => {
-  const cwd = tempCopy();
-  const outputRel = addDeclaredOutputFixture(cwd, ['n8n', 'local-setup'], {
-    sourceRel: 'curated_output_for_ai/reference-link-shims/n8n/shim-fixture.md',
-    outputRel: 'skills/n8n-local-setup/references/n8n/shim-fixture.md',
-    sourceText: '# Shim Fixture\n\nCompatibility forwarding note.\n',
-    metadata: {
-      notes: 'Compatibility shim fixture.',
-      fidelity: 'reviewed_entrypoint'
-    }
-  });
+test('standalone publisher P1 uses document-level identity and closed dispositions', () => {
+  const rel = standalonePublisherPaths[0];
+  const generic = 'A project module can maintain portable outputs for a target repository.';
+  assert.equal(audit.activeTopologyFinding(generic, rel), null);
 
-  const report = runAuditJson(cwd);
-  const entry = report.boundaryRecipes.find((item) => item.path === outputRel);
-  assert.equal(entry?.classification, 'curated_shim');
+  const conflict = audit.activeTopologyFinding(`${generic}\nThis repository has separate instructions.`, rel);
+  assert.ok(conflict);
+  assert.equal(conflict.conflict, true);
+  assert.equal(conflict.id, 'retired-project-module');
+  assert.ok(conflict.identities.some((identity) => identity.id === 'current-repository-deictic-identity'));
+
+  assert.notEqual(audit.activeTopologyFinding('Use _main for a target repository.', rel), null);
+  assert.notEqual(audit.activeTopologyFinding('Run sync-toolkit-projects.cjs.', rel), null);
+  assert.equal(audit.activeTopologyFinding('A project module is described here.', historicalEvidencePaths[0]), null);
+  assert.equal(audit.activeTopologyFinding('A project module is described here.', publisherReferencePaths[0]), null);
+  assert.equal(audit.activeTopologyFinding('Use toolkit.project.json with a project module.', rel), null);
 });
 
-test('audit-published-surfaces does not baseline helper README import/export context', () => {
-  const report = runAuditJson();
-  const helperReadme = 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/README.md';
-  const baseline = JSON.parse(fs.readFileSync(path.join(repoRoot, 'repo', 'docs', 'published-surface-audit-baseline.json'), 'utf8'));
-
-  assert.equal(report.issues.boundaryRecipeFindings.some((entry) => entry.path === helperReadme), false);
-  assert.equal((baseline.issueKeys?.boundaryRecipeFindings || []).some((entry) => entry.includes(helperReadme)), false);
-});
-
-test('audit-published-surfaces inspects curated directory contents', () => {
-  const report = runAuditJson();
-  const findings = report.issues.curatedDirectoryFindings.map((entry) => entry.path);
-  assert.equal(findings.some((entry) => entry.includes('/curated_output_for_ai/playbooks/')), false);
-  for (const platformOverview of [
-    '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/chatgpt-web.md',
-    '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/claude-web.md'
-  ]) {
-    assert.equal(findings.includes(platformOverview), false, platformOverview);
-  }
-  const codexOverview = '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md';
-  assert.equal(findings.includes(codexOverview), true, codexOverview);
-});
-
-test('n8n local setup platform overviews declare their curated boundary', () => {
+test('active scan membership is rule-derived and includes roots, docs, contracts, and nested skill entrypoints', () => {
+  const activeFiles = audit.activePolicyFiles();
   for (const relPath of [
-    '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/chatgpt-web.md',
-    '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/claude-web.md',
-    '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/codex.md'
-  ]) {
-    const text = fs.readFileSync(path.join(repoRoot, relPath), 'utf8').replace(/\r\n/g, '\n');
-    assert.match(text, /^# .*(Platform Overview|Platform Router)/m, relPath);
-    assert.match(text, /^## Boundary$/m, relPath);
-    assert.match(text, /not the full runtime setup guide/i, relPath);
-    assert.match(text, /full-fidelity references and templates/i, relPath);
+    'AGENTS.md',
+    'CLAUDE.md',
+    'GEMINI.md',
+    'README.md',
+    'repo/contracts/source-of-truth-contract.md',
+    'repo/docs/FOR_AI_AGENTS.md',
+    'skills/agent-skill-supply-chain-audit/SKILL.md',
+    'skills/agent-skill-supply-chain-audit/README.md',
+    'skills/ui-ux-secure-frontend-design/INSTALL.md'
+  ]) assert.ok(activeFiles.includes(relPath), relPath);
+  assert.equal(activeFiles.includes('repo/contracts/topology-scope-policy.json'), false);
+  for (const relPath of activeFiles) {
+    assert.deepEqual(audit.activeTopologyFindings(readText(relPath), relPath), [], relPath);
   }
 });
 
-test('n8n workflow toolkit curated references declare their boundary', () => {
-  for (const relPath of [
-    '_projects/n8n/workflow-toolkit/curated_output_for_ai/references/credential-safety.md',
-    '_projects/n8n/workflow-toolkit/curated_output_for_ai/references/import-export-flow.md',
-    '_projects/n8n/workflow-toolkit/curated_output_for_ai/references/workflow-sync.md'
-  ]) {
-    const text = fs.readFileSync(path.join(repoRoot, relPath), 'utf8').replace(/\r\n/g, '\n');
-    assert.match(text, /^## Boundary$/m, relPath);
-    assert.match(text, /short .*?(overview|reference|safety wrapper|safety checklist)/i, relPath);
-    assert.match(text, /not the full runtime (guide|helper guide)/i, relPath);
+test('retired structural and negation APIs are absent', () => {
+  assert.equal(audit.structuralEvidenceUnits, undefined);
+  assert.equal(audit.selfRepositoryIdentityMatches, undefined);
+  assert.equal(audit.findAlias, undefined);
+  assert.equal(audit.findAliasPairSameClause, undefined);
+  assert.equal(audit.topologyAtomIds, undefined);
+});
+
+test('policy validation fails closed for malformed definitions and broad scopes', () => {
+  const policyPath = path.join('repo', 'contracts', 'topology-scope-policy.json');
+  const cases = [
+    ['missing policy', (cwd) => fs.rmSync(path.join(cwd, policyPath)), /Missing topology scope policy/],
+    ['malformed JSON', (cwd) => fs.writeFileSync(path.join(cwd, policyPath), '{\n', 'utf8'), /not valid JSON/],
+    ['unknown top-level key', (cwd) => writePolicy(cwd, (policy) => { policy.unexpected = true; }), /unsupported or missing top-level keys/],
+    ['wrong schema', (cwd) => writePolicy(cwd, (policy) => { policy.schema_version = 1; }), /schema_version/],
+    ['definition removed', (cwd) => writePolicy(cwd, (policy) => { policy.primitive_definitions.pop(); }), /exactly 21 definitions/],
+    ['empty aliases', (cwd) => writePolicy(cwd, (policy) => { policy.primitive_definitions[0].aliases = []; }), /non-empty array/],
+    ['separator-only alias', (cwd) => writePolicy(cwd, (policy) => { policy.primitive_definitions[3].aliases[0] = '---'; }), /matchable characters/],
+    ['duplicate normalized alias', (cwd) => writePolicy(cwd, (policy) => { policy.primitive_definitions[3].aliases[1] = 'project_module'; }), /duplicates normalized alias/],
+    ['duplicate identity alias', (cwd) => writePolicy(cwd, (policy) => { policy.standalone_identity_definitions[0].aliases[1] = 'toolkit'; }), /duplicates normalized alias/],
+    ['cross-class exact alias', (cwd) => writePolicy(cwd, (policy) => { policy.standalone_identity_definitions[2].aliases[0] = 'project module'; }), /duplicates normalized alias from primitive_definitions\.retired-project-module/],
+    ['cross-class normalized alias', (cwd) => writePolicy(cwd, (policy) => { policy.standalone_identity_definitions[2].aliases[0] = 'project_module'; }), /duplicates normalized alias from primitive_definitions\.retired-project-module/],
+    ['duplicate identity ID', (cwd) => writePolicy(cwd, (policy) => { policy.standalone_identity_definitions[1].id = policy.standalone_identity_definitions[0].id; }), /id is duplicated/],
+    ['cross-class duplicate ID', (cwd) => writePolicy(cwd, (policy) => { policy.standalone_identity_definitions[0].id = policy.primitive_definitions[0].id; }), /id is duplicated/],
+    ['unsupported matcher', (cwd) => writePolicy(cwd, (policy) => { policy.primitive_definitions[0].matcher_kind = 'regex'; }), /matcher_kind is unsupported/],
+    ['unsupported disposition', (cwd) => writePolicy(cwd, (policy) => { policy.primitive_definitions[0].standalone_disposition = 'allowed'; }), /standalone_disposition is unsupported/],
+    ['identity removed', (cwd) => writePolicy(cwd, (policy) => { policy.standalone_identity_definitions.pop(); }), /exactly 3 definitions/],
+    ['duplicate path', (cwd) => writePolicy(cwd, (policy) => { policy.entries.push({ ...policy.entries[0] }); }), /duplicated/],
+    ['unsupported scope', (cwd) => writePolicy(cwd, (policy) => { policy.entries[0].scope = 'active-toolkit'; }), /unsupported/],
+    ['wildcard path', (cwd) => writePolicy(cwd, (policy) => { policy.entries[0].path = 'repo\/docs\/**'; }), /canonical|missing/],
+    ['directory prefix', (cwd) => writePolicy(cwd, (policy) => { policy.entries[0].path = 'repo/docs/'; }), /canonical/],
+    ['missing target', (cwd) => writePolicy(cwd, (policy) => { policy.entries[0].path = 'repo/docs/missing.md'; }), /target is missing/]
+  ];
+  for (const [label, mutate, expected] of cases) assertPolicyRejects(label, mutate, expected);
+});
+
+test('audit check rejects a cross-class policy alias collision', () => {
+  const cwd = copyRepo();
+  try {
+    writePolicy(cwd, (policy) => {
+      policy.standalone_identity_definitions[0].aliases.push('project module');
+    });
+    const result = runAudit(cwd, ['--check']);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /duplicates normalized alias from primitive_definitions\.retired-project-module/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
   }
 });
 
-test('audit-published-surfaces detects new undeclared published files in a temp copy', () => {
-  const cwd = tempCopy();
-  const newFile = path.join(cwd, 'skills', 'n8n-local-setup', 'references', 'n8n', 'new-audit-fixture.md');
-  fs.writeFileSync(newFile, '# New audit fixture\n\nThis published file is intentionally undeclared.\n', 'utf8');
-
-  const report = runAuditJson(cwd);
-  const entry = report.issues.undeclaredPublishedFiles.find((item) => item.path === 'skills/n8n-local-setup/references/n8n/new-audit-fixture.md');
-  assert.ok(entry);
-  assert.equal(entry.classification, 'manual_skill_surface');
-});
-
-test('audit-published-surfaces --check fails when a new undeclared published file is introduced', () => {
-  const cwd = tempCopy();
-  const newFile = path.join(cwd, 'skills', 'n8n-local-setup', 'references', 'n8n', 'new-audit-fixture-check.md');
-  fs.writeFileSync(newFile, '# New audit fixture\n', 'utf8');
-
-  const result = runAudit(['--check'], cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /new undeclared published surface: skills\/n8n-local-setup\/references\/n8n\/new-audit-fixture-check\.md/);
-});
-
-test('audit-published-surfaces --check fails when a new cross-owned output lacks shared metadata', () => {
-  const cwd = tempCopy();
-  const outputRel = addCrossOwnedOutputFixture(cwd);
-
-  const result = runAudit(['--check'], cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, new RegExp(`new cross-owned output: cicd\\.secure-installer -> n8n\\.workflow-toolkit: ${outputRel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
-});
-
-test('audit-published-surfaces rejects shared-surface metadata without a reason', () => {
-  const cwd = tempCopy();
-  const outputRel = addCrossOwnedOutputFixture(cwd, {
-    shared_surface: true,
-    surface_owner_project: 'n8n.workflow-toolkit'
-  });
-
-  const report = runAuditJson(cwd);
-  assert.ok(report.issues.crossOwnedOutputs.some((entry) => entry.output === outputRel));
-  assert.equal(report.issues.sharedSurfaceOutputs.some((entry) => entry.output === outputRel), false);
-  const finding = report.issues.sharedSurfaceMetadataFindings.find((entry) => entry.output === outputRel);
-  assert.ok(finding);
-  assert.deepEqual(finding.reasons, ['shared_surface_reason is required']);
-
-  const result = runAudit(['--check'], cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /new shared-surface metadata finding:/);
-  assert.match(result.stderr, /shared_surface_reason is required/);
-});
-
-test('audit-published-surfaces rejects runtime-heavy reviewed references', () => {
-  const cwd = tempCopy();
-  const outputRel = addDeclaredOutputFixture(cwd, ['n8n', 'workflow-toolkit'], {
-    sourceRel: 'curated_output_for_ai/references/new-reviewed-runtime-reference.md',
-    outputRel: 'skills/n8n-workflow-helper-scripts/references/new-reviewed-runtime-reference.md',
-    sourceText: [
-      '# New Reviewed Runtime Reference',
-      '',
-      '## Setup',
-      '',
-      '1. Install the local dependency.',
-      '2. Start the helper server.',
-      '3. Import the workflow.',
-      ''
-    ].join('\n'),
-    metadata: {
-      notes: 'Short helper-script reviewed reference generated from project-owned curated AI output.',
-      fidelity: 'reviewed_entrypoint'
-    }
-  });
-
-  const report = runAuditJson(cwd);
-  const finding = report.issues.boundaryRecipeFindings.find((entry) => entry.path === outputRel);
-  assert.ok(finding);
-  assert.equal(finding.classification, 'suspicious_curated_runtime');
-  assert.ok(finding.reasons.some((reason) => /runtime markers: .*Setup/.test(reason)));
-});
-
-test('audit-published-surfaces rejects reviewed templates with one import command', () => {
-  const cwd = tempCopy();
-  const outputRel = addDeclaredOutputFixture(cwd, ['n8n', 'local-setup'], {
-    sourceRel: 'curated_output_for_ai/templates/new-import-template.md',
-    outputRel: 'skills/n8n-local-setup/templates/new-import-template.md',
-    sourceText: [
-      '# New Import Template',
-      '',
-      '## Import',
-      '',
-      '```bash',
-      'n8n import:workflow --input workflow.json',
-      '```',
-      ''
-    ].join('\n'),
-    metadata: {
-      notes: 'AI-facing reviewed template fixture.',
-      fidelity: 'reviewed_entrypoint'
-    }
-  });
-
-  const report = runAuditJson(cwd);
-  const finding = report.issues.boundaryRecipeFindings.find((entry) => entry.path === outputRel);
-  assert.ok(finding);
-  assert.equal(finding.classification, 'suspicious_curated_runtime');
-  assert.ok(finding.reasons.some((reason) => /runtime markers: .*Import/.test(reason)));
-});
-
-test('audit-published-surfaces rejects reviewed import templates with fenced shell comments', () => {
-  const cwd = tempCopy();
-  const outputRel = addDeclaredOutputFixture(cwd, ['n8n', 'local-setup'], {
-    sourceRel: 'curated_output_for_ai/templates/new-commented-import-template.md',
-    outputRel: 'skills/n8n-local-setup/templates/new-commented-import-template.md',
-    sourceText: [
-      '# New Commented Import Template',
-      '',
-      '## Import',
-      '',
-      '```bash',
-      '# run import',
-      'n8n import:workflow --input workflow.json',
-      '```',
-      ''
-    ].join('\n'),
-    metadata: {
-      notes: 'AI-facing reviewed template fixture.',
-      fidelity: 'reviewed_entrypoint'
-    }
-  });
-
-  const report = runAuditJson(cwd);
-  const finding = report.issues.boundaryRecipeFindings.find((entry) => entry.path === outputRel);
-  assert.ok(finding);
-  assert.equal(finding.classification, 'suspicious_curated_runtime');
-  assert.ok(finding.reasons.some((reason) => /runtime markers: .*Import/.test(reason)));
-});
-
-test('audit-published-surfaces rejects reviewed templates with one export command', () => {
-  const cwd = tempCopy();
-  const outputRel = addDeclaredOutputFixture(cwd, ['n8n', 'local-setup'], {
-    sourceRel: 'curated_output_for_ai/templates/new-export-template.md',
-    outputRel: 'skills/n8n-local-setup/templates/new-export-template.md',
-    sourceText: [
-      '# New Export Template',
-      '',
-      '## Export',
-      '',
-      '```bash',
-      'n8n export:workflow --id abc123 --output workflow.json',
-      '```',
-      ''
-    ].join('\n'),
-    metadata: {
-      notes: 'AI-facing reviewed template fixture.',
-      fidelity: 'reviewed_entrypoint'
-    }
-  });
-
-  const report = runAuditJson(cwd);
-  const finding = report.issues.boundaryRecipeFindings.find((entry) => entry.path === outputRel);
-  assert.ok(finding);
-  assert.equal(finding.classification, 'suspicious_curated_runtime');
-  assert.ok(finding.reasons.some((reason) => /runtime markers: .*Export/.test(reason)));
-});
-
-test('audit-published-surfaces rejects reviewed export templates with fenced shell comments', () => {
-  const cwd = tempCopy();
-  const outputRel = addDeclaredOutputFixture(cwd, ['n8n', 'local-setup'], {
-    sourceRel: 'curated_output_for_ai/templates/new-commented-export-template.md',
-    outputRel: 'skills/n8n-local-setup/templates/new-commented-export-template.md',
-    sourceText: [
-      '# New Commented Export Template',
-      '',
-      '## Export',
-      '',
-      '```bash',
-      '# run export',
-      'n8n export:workflow --id abc123 --output workflow.json',
-      '```',
-      ''
-    ].join('\n'),
-    metadata: {
-      notes: 'AI-facing reviewed template fixture.',
-      fidelity: 'reviewed_entrypoint'
-    }
-  });
-
-  const report = runAuditJson(cwd);
-  const finding = report.issues.boundaryRecipeFindings.find((entry) => entry.path === outputRel);
-  assert.ok(finding);
-  assert.equal(finding.classification, 'suspicious_curated_runtime');
-  assert.ok(finding.reasons.some((reason) => /runtime markers: .*Export/.test(reason)));
-});
-
-test('audit-published-surfaces allows short reviewed template indexes without runtime commands', () => {
-  const cwd = tempCopy();
-  const outputRel = addDeclaredOutputFixture(cwd, ['n8n', 'local-setup'], {
-    sourceRel: 'curated_output_for_ai/templates/short-index/README.md',
-    outputRel: 'skills/n8n-local-setup/templates/short-index/README.md',
-    sourceText: [
-      '# Short Template Index',
-      '',
-      '## Import',
-      '',
-      'Use this short index to find reviewed template material.',
-      ''
-    ].join('\n'),
-    metadata: {
-      notes: 'AI-facing reviewed template index fixture.',
-      fidelity: 'reviewed_entrypoint'
-    }
-  });
-
-  const report = runAuditJson(cwd);
-  const entry = report.boundaryRecipes.find((item) => item.path === outputRel);
-  assert.equal(entry?.classification, 'curated_template_index');
-  assert.equal(report.issues.boundaryRecipeFindings.some((item) => item.path === outputRel), false);
-});
-
-test('audit-published-surfaces rejects runtime-heavy pack README exceptions', () => {
-  const cwd = tempCopy();
-  const sourceRel = 'curated_output_for_ai/packs/runtime-heavy-pack/README.md';
-  const outputRel = addDeclaredOutputFixture(cwd, ['n8n', 'local-setup'], {
-    sourceRel,
-    outputRel: 'skills/n8n-local-setup/packs/runtime-heavy-pack/README.md',
-    sourceText: [
-      '# Runtime Heavy Pack',
-      '',
-      '## Setup',
-      '',
-      '1. Install dependencies.',
-      '2. Start the local server.',
-      '3. Import the workflow.',
-      '4. Export the workflow.',
-      ''
-    ].join('\n'),
-    metadata: {
-      notes: 'Skill-local pack README generated from project-owned curated AI output.',
-      fidelity: 'reviewed_entrypoint'
-    }
-  });
-
-  const report = runAuditJson(cwd);
-  const boundaryFinding = report.issues.boundaryRecipeFindings.find((entry) => entry.path === outputRel);
-  const curatedFinding = report.issues.curatedDirectoryFindings.find((entry) =>
-    entry.path === `_projects/n8n/local-setup/${sourceRel}`
-  );
-  assert.ok(boundaryFinding);
-  assert.equal(boundaryFinding.classification, 'suspicious_curated_runtime');
-  assert.ok(curatedFinding);
-  assert.ok(curatedFinding.reasons.some((reason) => /numbered setup steps/.test(reason)));
-});
-
-test('audit-published-surfaces rejects platform overviews with numbered runtime setup steps', () => {
-  const cwd = tempCopy();
-  const sourceRel = '_projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/runtime-numbered-platform.md';
-  const sourcePath = path.join(cwd, sourceRel);
-  fs.writeFileSync(sourcePath, [
-    '# Runtime Numbered Platform Overview',
-    '',
-    '## Boundary',
-    '',
-    'This is a short platform overview and routing note. It is not the full runtime setup guide.',
-    '',
-    'For full setup detail, use the local full-fidelity references and templates in this copied skill folder.',
-    '',
-    '## Setup',
-    '',
-    '1. Install dependencies.',
-    '2. Start the local server.',
-    '3. Import the workflow.',
-    '4. Export the workflow.',
-    ''
-  ].join('\n'), 'utf8');
-
-  const report = runAuditJson(cwd);
-  const finding = report.issues.curatedDirectoryFindings.find((entry) => entry.path === sourceRel);
-  assert.ok(finding);
-  assert.ok(finding.reasons.some((reason) => /numbered setup steps/.test(reason)));
-});
-
-test('audit-published-surfaces rejects overview metadata on runtime recipes', () => {
-  const cwd = tempCopy();
-  const outputRel = addDeclaredOutputFixture(cwd, ['n8n', 'local-setup'], {
-    sourceRel: 'curated_output_for_ai/references/n8n/runtime-recipe-overview.md',
-    outputRel: 'skills/n8n-local-setup/references/n8n/runtime-recipe-overview.md',
-    sourceText: [
-      '# Runtime Recipe',
-      '',
-      '## Setup',
-      '',
-      '1. Install dependencies.',
-      '2. Start the local server.',
-      '3. Import the workflow.',
-      ''
-    ].join('\n'),
-    metadata: {
-      notes: 'Runtime recipe overview generated from project-owned curated AI output.',
-      fidelity: 'reviewed_entrypoint'
-    }
-  });
-
-  const report = runAuditJson(cwd);
-  const finding = report.issues.boundaryRecipeFindings.find((entry) => entry.path === outputRel);
-  assert.ok(finding);
-  assert.equal(finding.classification, 'suspicious_curated_runtime');
-});
-
-test('audit-published-surfaces reports no repo-wide MCP published files', () => {
-  const report = runAuditJson();
-  assert.equal(report.files.some((entry) => entry.path.startsWith('mcp/')), false);
-  assert.equal(report.inputs.projectManifests.some((entry) => entry.includes('mcp-ready-registry')), false);
-});
-
-test('audit-published-surfaces --check fails when a new curated runtime recipe is introduced', () => {
-  const cwd = tempCopy();
-  const projectDir = path.join(cwd, '_projects', 'n8n', 'local-setup');
-  const sourcePath = path.join(projectDir, 'curated_output_for_ai', 'references', 'n8n', 'new-runtime-guide.md');
-  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
-  fs.writeFileSync(sourcePath, [
-    '<!--',
-    'Curated AI-facing source.',
-    'Project: n8n.local-setup',
-    'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.',
-    '-->',
-    '',
-    '# New Runtime Guide',
-    '',
-    '## Setup',
-    '',
-    '1. Install the local dependency.',
-    '2. Import the workflow.',
-    ''
-  ].join('\n'), 'utf8');
-
-  const manifestPath = path.join(projectDir, 'toolkit.project.json');
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-  manifest.outputs.push({
-    kind: 'curated',
-    source: 'curated_output_for_ai/references/n8n/new-runtime-guide.md',
-    output: 'skills/n8n-local-setup/references/n8n/new-runtime-guide.md',
-    fidelity: 'reviewed_entrypoint'
-  });
-  manifest.writes.allowed.push('skills/n8n-local-setup/references/n8n/new-runtime-guide.md');
-  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
-
-  const result = runAudit(['--check'], cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /new boundary recipe finding: skills\/n8n-local-setup\/references\/n8n\/new-runtime-guide\.md/);
-  assert.match(result.stderr, /new curated directory boundary finding: _projects\/n8n\/local-setup\/curated_output_for_ai\/references\/n8n\/new-runtime-guide\.md/);
-});
-
-test('audit-published-surfaces keeps reviewed templates under runtime-heft checks', () => {
-  const cwd = tempCopy();
-  const projectDir = path.join(cwd, '_projects', 'n8n', 'local-setup');
-  const sourceRel = 'curated_output_for_ai/agent-rules/new-runtime-template.md';
-  const outputRel = 'skills/n8n-local-setup/agent-rules/new-runtime-template.md';
-  const sourcePath = path.join(projectDir, sourceRel);
-  const outputPath = path.join(cwd, outputRel);
-  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
-  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  fs.writeFileSync(sourcePath, [
-    '<!--',
-    'Curated AI-facing source.',
-    'Project: n8n.local-setup',
-    'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.',
-    '-->',
-    '',
-    '# New Runtime Template',
-    '',
-    '## Setup',
-    '',
-    '1. Install local dependencies.',
-    '2. Import the workflow.',
-    ''
-  ].join('\n'), 'utf8');
-  fs.writeFileSync(outputPath, '# New Runtime Template\n\n## Setup\n\n1. Install local dependencies.\n', 'utf8');
-
-  const manifestPath = path.join(projectDir, 'toolkit.project.json');
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-  manifest.outputs.push({
-    kind: 'curated',
-    source: sourceRel,
-    output: outputRel,
-    notes: 'AI-facing reviewed template fixture.',
-    fidelity: 'reviewed_entrypoint'
-  });
-  manifest.writes.allowed.push(outputRel);
-  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
-
-  const report = runAuditJson(cwd);
-  const finding = report.issues.boundaryRecipeFindings.find((entry) => entry.path === outputRel);
-  assert.ok(finding);
-  assert.equal(finding.classification, 'suspicious_curated_runtime');
-  assert.ok(finding.reasons.some((reason) => /runtime markers: .*Setup/.test(reason)));
-
-  const result = runAudit(['--check'], cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /new boundary recipe finding: skills\/n8n-local-setup\/agent-rules\/new-runtime-template\.md/);
-});
-
-test('audit-published-surfaces still detects project duplicate content outside the n8n provenance exception', () => {
-  const cwd = tempCopy();
-  const source = path.join(cwd, '_projects', 'n8n', 'workflow-toolkit', '_main', 'helper-scripts', 'import-export-sync', 'validate-n8n-workflows.cjs');
-  const target = path.join(cwd, '_projects', 'n8n', 'local-setup', '_main', 'duplicate-validate-n8n-workflows.cjs');
-  fs.copyFileSync(source, target);
-
-  const report = runAuditJson(cwd);
-  assert.ok(report.issues.duplicateProjectContentGroups.some((group) =>
-    group.files.some((file) => file.path === '_projects/n8n/local-setup/_main/duplicate-validate-n8n-workflows.cjs')
-  ));
-});
-
-test('audit-published-surfaces still flags runtime-heavy n8n workflow toolkit reference fixtures', () => {
-  const cwd = tempCopy();
-  const projectDir = path.join(cwd, '_projects', 'n8n', 'workflow-toolkit');
-  const sourcePath = path.join(projectDir, 'curated_output_for_ai', 'references', 'new-runtime-reference.md');
-  fs.writeFileSync(sourcePath, [
-    '<!--',
-    'Curated AI-facing source.',
-    'Project: n8n.workflow-toolkit',
-    'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.',
-    '-->',
-    '',
-    '# New Runtime Reference',
-    '',
-    '## Boundary',
-    '',
-    'This is a short workflow sync safety wrapper. It is not the full runtime guide.',
-    '',
-    '## Setup',
-    '',
-    '```powershell',
-    'npm install',
-    '```',
-    '',
-    '```powershell',
-    'npm run build',
-    '```',
-    '',
-    '```powershell',
-    'npm run validate',
-    '```',
-    '',
-    '```powershell',
-    'npm run deploy',
-    '```',
-    ''
-  ].join('\n'), 'utf8');
-
-  const result = runAudit(['--check'], cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /new curated directory boundary finding: _projects\/n8n\/workflow-toolkit\/curated_output_for_ai\/references\/new-runtime-reference\.md/);
-});
-
-test('audit-published-surfaces still flags runtime-heavy platform overview fixtures', () => {
-  const cwd = tempCopy();
-  const projectDir = path.join(cwd, '_projects', 'n8n', 'local-setup');
-  const sourcePath = path.join(projectDir, 'curated_output_for_ai', 'references', 'ai-agent-platforms', 'new-runtime-platform.md');
-  fs.writeFileSync(sourcePath, [
-    '<!--',
-    'Curated AI-facing source.',
-    'Project: n8n.local-setup',
-    'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.',
-    '-->',
-    '',
-    '# New Runtime Platform Overview',
-    '',
-    '## Boundary',
-    '',
-    'This is a short platform overview and routing note. It is not the full runtime setup guide.',
-    '',
-    'For full setup detail, use the local full-fidelity references and templates in this copied skill folder.',
-    '',
-    '## Setup',
-    '',
-    '```powershell',
-    'npm install',
-    '```',
-    '',
-    '```powershell',
-    'npm run build',
-    '```',
-    '',
-    '```powershell',
-    'npm run validate',
-    '```',
-    '',
-    '```powershell',
-    'npm run deploy',
-    '```',
-    ''
-  ].join('\n'), 'utf8');
-
-  const result = runAudit(['--check'], cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /new curated directory boundary finding: _projects\/n8n\/local-setup\/curated_output_for_ai\/references\/ai-agent-platforms\/new-runtime-platform\.md/);
-});
-
-test('sync-toolkit-projects remains unaffected by the published surface audit', () => {
-  const cwd = tempCopy();
-  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
-  assert.equal(result.status, 0, result.stderr);
+test('copied workspaces reject new active primitive and legacy path residue', () => {
+  const cwd = copyRepo();
+  try {
+    fs.writeFileSync(path.join(cwd, 'repo', 'docs', 'active-fixture.md'), 'No project module is used.\n', 'utf8');
+    fs.writeFileSync(
+      path.join(cwd, 'skills', 'n8n-local-setup', 'references', 'legacy-fixture.md'),
+      `${legacyProjectToken}/fixture/${legacyCuratedToken}/file.md\n`,
+      'utf8'
+    );
+    const result = runAudit(cwd, ['--json']);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stdout, /retired-project-module/);
+    assert.match(result.stdout, /references the retired project\/publisher topology/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
 });

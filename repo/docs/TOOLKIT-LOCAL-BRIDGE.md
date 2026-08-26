@@ -7,15 +7,13 @@ This document defines the plugin/update architecture for `weijunswj/ai-agent-too
 Current inspected chain:
 
 1. Root `AGENTS.md` routes repo work and includes the managed source-of-truth contract.
-2. `_projects/**/_main/` stores full source material.
-3. `_projects/**/curated_output_for_ai/` stores reviewed AI-facing adapters, routers, and metadata.
-4. `_projects/**/toolkit.project.json` declares generated outputs and write boundaries.
-5. `_projects/**/SOURCE-LOCK.json` records first-party or third-party provenance.
-6. `repo/scripts/sync-toolkit-projects.cjs` publishes declared generated outputs.
-7. `skills/**` is the generated copyable skill surface.
-8. `repo/scripts/validate-toolkit.cjs`, `repo/tests/*.test.cjs`, package checks, source-lock audit, and published-surface audit enforce drift and safety rules.
-9. `.codex-plugin/**` and `.claude-plugin/**` are native plugin package metadata generated from the Toolkit project module. They are not source of truth.
-10. The Toolkit Local Bridge Hub under the user profile stores generated OpenCode and Antigravity 2 adapter state. It is not source of truth.
+2. `skills/**` stores complete copyable skill surfaces.
+3. `repo/contracts/**` stores machine contracts, fixtures, templates, agent-rule inputs, and plugin source contracts.
+4. `repo/source-watch/provenance/**` stores active third-party source locks and attribution records.
+5. `repo/scripts/sync-repo-doc-contract.cjs` and `repo/scripts/sync-agent-instruction-shims.cjs` maintain only managed root blocks and shims.
+6. `repo/scripts/validate-toolkit.cjs`, `repo/tests/*.test.cjs`, source-lock audit, and canonical-surface audit enforce drift and safety rules.
+7. `.codex-plugin/**` and `.claude-plugin/**` are platform-specific native plugin metadata. They are not cross-platform source of truth.
+8. The Toolkit Local Bridge Hub under the user profile stores OpenCode and Antigravity 2 adapter state. It is not repo source of truth.
 
 ## Architecture
 
@@ -352,7 +350,7 @@ The setup helper checks `codex plugin list --available --json` after `codex plug
 
 If an installed same-version cache is stale, the helper removes `ai-agent-toolkit@ai-agent-toolkit-local` before reinstalling from the local marketplace. If plugin add is needed, the helper starts `codex plugin add ai-agent-toolkit@ai-agent-toolkit-local --json` and polls `codex plugin list --available --json` plus the expected cache until verification passes. Treat setup as successful only when the verifier confirms the enabled current Toolkit manifest version, `authPolicy` `ON_USE` when available from the CLI list, the cached `SessionStart` hook, and package-critical cache files matching this repo; terminate or ignore a lingering add process and emit a warning when `codex plugin add` did not exit cleanly. If CLI and fallback verification never pass before the add deadline, report setup failure.
 
-The portable Codex source manifest calls `toolkit-codex-session-start.cjs` instead of calling the bridge directly. During supported Windows setup, the helper atomically publishes and verifies cache-local `.codex-plugin/session-start-runtime.json` before replacing the portable installed-cache command with the exact PowerShell launcher. Interruption therefore leaves the previous source hook active, or valid runtime metadata plus that previous hook, until the final atomic hook switch. The PowerShell command uses the verified Windows PowerShell executable, `$env:PLUGIN_ROOT`, and `toolkit-codex-session-start.ps1`; it does not search interactive-shell `PATH`, use WSL, or depend on shell-style `${PLUGIN_ROOT}` expansion. Spaces and supported shell metacharacters remain data through `Join-Path` and PowerShell's call operator. The launcher inherits hook stdin/stdout/stderr. A missing runtime, unavailable Node executable, launcher exception, or returned non-zero hook outcome emits one concise repair warning and exits zero because this maintenance is optional. Direct manual bridge commands retain non-zero failures. Setup verifies the actual installed command, runtime metadata, and launcher bytes, and rejects the old direct bridge shape.
+The portable Codex plugin input calls `toolkit-codex-session-start.cjs` instead of calling the bridge directly. During supported Windows setup, the helper atomically publishes and verifies cache-local `.codex-plugin/session-start-runtime.json` before replacing the portable installed-cache command with the exact PowerShell launcher. Interruption therefore leaves the previous source hook active, or valid runtime metadata plus that previous hook, until the final atomic hook switch. The PowerShell command uses the verified Windows PowerShell executable, `$env:PLUGIN_ROOT`, and `toolkit-codex-session-start.ps1`; it does not search interactive-shell `PATH`, use WSL, or depend on shell-style `${PLUGIN_ROOT}` expansion. Spaces and supported shell metacharacters remain data through `Join-Path` and PowerShell's call operator. The launcher inherits hook stdin/stdout/stderr. A missing runtime, unavailable Node executable, launcher exception, or returned non-zero hook outcome emits one concise repair warning and exits zero because this maintenance is optional. Direct manual bridge commands retain non-zero failures. Setup verifies the actual installed command, runtime metadata, and launcher bytes, and rejects the old direct bridge shape.
 
 The executing `SessionStart` bridge in that installed cache is the runtime hook source; the managed checkout is only its refresh source.
 

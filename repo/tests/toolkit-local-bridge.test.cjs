@@ -44,7 +44,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.10.0';
+const expectedBridgeVersion = '2.10.3';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 
 function tmpBaseDir() {
@@ -3663,7 +3663,7 @@ test('Codex SessionStart hook puts stale and malformed repair decisions on stdou
     },
     {
       name: 'malformed managed block',
-      agents: '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->\n# broken\n',
+      agents: '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->\n# broken\n',
       finding: /BEGIN marker without matching END/
     }
   ];
@@ -3702,7 +3702,7 @@ test('Codex SessionStart hook puts stale and malformed repair decisions on stdou
 test('agent-rules preflight keeps broken managed-block warnings as stop-and-ask only', () => {
   const root = tmpRoot();
   writeFile(path.join(root, 'AGENTS.md'), [
-    '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->',
+    '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->',
     '# broken managed block',
     ''
   ].join('\n'));
@@ -5288,8 +5288,7 @@ test('native plugin manifests and hooks are valid and policy-light', () => {
 
 test('toolkit setup skill documents the end-to-end English setup journey', () => {
   const paths = [
-    'skills/toolkit-setup/SKILL.md',
-    '_projects/development/toolkit-local-bridge/curated_output_for_ai/skills/toolkit-setup/SKILL.md'
+    'skills/toolkit-setup/SKILL.md'
   ];
 
   for (const relPath of paths) {
@@ -5434,11 +5433,6 @@ test('bridge surfaces avoid private plugin caches, package installs, and command
   assert.equal(skillNames.includes('toolkit-setup'), true, 'one compact Toolkit setup discoverability skill should be published');
   for (const skill of removedBridgeSkills) {
     assert.equal(skillNames.includes(skill), false, `${skill} should be setup infrastructure, not a published skill`);
-    assert.equal(
-      fs.existsSync(path.join(repoRoot, '_projects', 'development', 'toolkit-local-bridge', 'curated_output_for_ai', 'skills', skill)),
-      false,
-      `${skill} should not have curated bridge skill source`
-    );
   }
 
   const bridgeSkillNames = skillNames.filter((skill) => {
@@ -5449,75 +5443,14 @@ test('bridge surfaces avoid private plugin caches, package installs, and command
   });
   assert.deepEqual(bridgeSkillNames, ['toolkit-setup'], 'exactly one Toolkit setup/bridge discoverability skill should exist');
 
-  const curatedSkillsDir = path.join(repoRoot, '_projects', 'development', 'toolkit-local-bridge', 'curated_output_for_ai', 'skills');
-  const curatedSkillNames = fs.readdirSync(curatedSkillsDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort();
-  const curatedBridgeSkillNames = curatedSkillNames.filter((skill) => {
-    const skillPath = path.join(curatedSkillsDir, skill, 'SKILL.md');
-    if (!fs.existsSync(skillPath)) return false;
-    const skillText = fs.readFileSync(skillPath, 'utf8');
-    return /toolkit-local-bridge\.cjs|Toolkit Local Bridge|OpenCode bridge support|Antigravity 2 adapter support|stale bridge state/i.test(skillText);
-  });
-  assert.deepEqual(curatedBridgeSkillNames, ['toolkit-setup'], 'curated output should contain exactly one Toolkit setup/bridge discoverability skill');
   for (const rel of [
     'skills/toolkit-setup/README.md',
     'skills/toolkit-setup/SKILL.md',
     'skills/toolkit-setup/agents/openai.yaml'
   ]) {
-    assert.equal(fs.existsSync(path.join(repoRoot, rel)), true, `${rel} should be generated`);
+    assert.equal(fs.existsSync(path.join(repoRoot, rel)), true, `${rel} should be present`);
   }
-  assert.match(fs.readFileSync(path.join(repoRoot, 'skills', 'toolkit-setup', 'SKILL.md'), 'utf8'), /Generated from toolkit curated output for AI/);
-
-  const manifest = readJson(path.join(repoRoot, '_projects', 'development', 'toolkit-local-bridge', 'toolkit.project.json'));
-  assert.equal(manifest.surface.publish_as, 'skill');
-  assert.equal(manifest.surface.skill.status, 'published');
-  assert.equal(manifest.surface.skill.path, 'skills/toolkit-setup');
-  assert.deepEqual(
-    (manifest.outputs || [])
-      .map((output) => String(output.output || ''))
-      .filter((output) => output.startsWith('skills/'))
-      .sort(),
-    [
-      'skills/toolkit-setup/README.md',
-      'skills/toolkit-setup/SKILL.md',
-      'skills/toolkit-setup/agents/openai.yaml'
-    ].sort()
-  );
-  assert.deepEqual(
-    (manifest.outputs || [])
-      .map((output) => String(output.output || ''))
-      .filter((output) => output.startsWith('.codex-plugin/'))
-      .sort(),
-    [
-      '.codex-plugin/assets/composer-icon.png',
-      '.codex-plugin/assets/logo.png',
-      '.codex-plugin/hooks/hooks.json',
-      '.codex-plugin/plugin.json'
-    ].sort()
-  );
-  assert.deepEqual(
-    (manifest.writes.allowed || [])
-      .filter((output) => String(output || '').startsWith('skills/'))
-      .sort(),
-    [
-      'skills/toolkit-setup/README.md',
-      'skills/toolkit-setup/SKILL.md',
-      'skills/toolkit-setup/agents/openai.yaml'
-    ].sort()
-  );
-  assert.deepEqual(
-    (manifest.writes.allowed || [])
-      .filter((output) => String(output || '').startsWith('.codex-plugin/'))
-      .sort(),
-    [
-      '.codex-plugin/assets/composer-icon.png',
-      '.codex-plugin/assets/logo.png',
-      '.codex-plugin/hooks/hooks.json',
-      '.codex-plugin/plugin.json'
-    ].sort()
-  );
+  assert.doesNotMatch(fs.readFileSync(path.join(repoRoot, 'skills', 'toolkit-setup', 'SKILL.md'), 'utf8'), /Generated from toolkit (?:project source|curated output for AI)/);
 });
 
 test('Windows n8n plugin hook repair removes bare shell hooks and verifies hook JSON output', {

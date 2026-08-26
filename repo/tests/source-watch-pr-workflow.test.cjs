@@ -8,6 +8,7 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..', '..');
 const workflowPath = path.join(repoRoot, '.github', 'workflows', 'source-watch-pr.yml');
 const helperPath = path.join(repoRoot, 'repo', 'scripts', 'update-source-watch-review-branch.sh');
+const legacyProjectToken = '_' + 'projects';
 const workflow = fs.readFileSync(workflowPath, 'utf8').replace(/\r\n/g, '\n');
 const helper = fs.readFileSync(helperPath, 'utf8').replace(/\r\n/g, '\n');
 
@@ -147,8 +148,8 @@ test('source-watch PR notifier does not become a source updater', () => {
   assert.doesNotMatch(workflow, /\$\{\{\s*secrets\./i);
   assert.doesNotMatch(workflow, /repo\/scripts\/safe-source-update\.cjs/i);
   assert.doesNotMatch(workflow, /git clone|npm (?:install|exec)|\bnpx\b/i);
-  assert.doesNotMatch(workflow, /git add[^\n]*(?:_projects|SOURCE-LOCK\.json)/i);
-  assert.doesNotMatch(workflow, /cp .*_projects|install .*_projects/i);
+  assert.doesNotMatch(workflow, new RegExp(`git add[^\\n]*(?:${legacyProjectToken}|SOURCE-LOCK\\.json)`, 'i'));
+  assert.doesNotMatch(workflow, new RegExp(`cp .*${legacyProjectToken}|install .*${legacyProjectToken}`, 'i'));
   assert.doesNotMatch(workflow, /git push[^\n]*(?:HEAD:)?main\b/i);
 });
 
@@ -248,7 +249,7 @@ test('source-watch PR notifier documents advisory actions as report-only', () =>
   assert.match(workflow, /Advisory actions, when present, are read from `repo\/source-watch\/advisory-targets\.json`\./);
   assert.match(workflow, /No advisory tracking document was changed by this workflow\./);
   assert.match(workflow, /If advisory action is taken, update the advisory document in a separate human-reviewed PR\./);
-  assert.match(workflow, /No toolkit rules, skills, hooks, memory guidance, repo-map guidance, or cleanup guidance were modified or deleted\./);
+  assert.match(workflow, /No toolkit rules, skills, hooks, repo-map guidance, or cleanup guidance were modified or deleted\./);
   assert.match(workflow, /For Host Harness Capability Drift Review, classify affected toolkit components using the linked template before proposing changes\./);
   assert.match(workflow, /separate evidence-backed PR/);
 });

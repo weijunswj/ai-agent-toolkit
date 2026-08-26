@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: repo-methodology.context-preserving-ai-publisher
-Source: _projects/repo-methodology/context-preserving-ai-publisher/_main/maintenance-mode.md
-Update the project source and run sync.
--->
 # Maintenance Mode
 
 Use maintenance mode when a repo already has local source-of-truth docs, manifests, generated outputs, validation, or audit policy.

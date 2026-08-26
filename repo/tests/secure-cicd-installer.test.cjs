@@ -8,7 +8,6 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..', '..');
 
 const skillPaths = [
-  '_projects/cicd/secure-installer/curated_output_for_ai/skills/secure-cicd-installer/SKILL.md',
   'skills/secure-cicd-installer/SKILL.md'
 ];
 

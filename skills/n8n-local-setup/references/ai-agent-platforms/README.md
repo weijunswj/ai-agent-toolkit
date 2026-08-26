@@ -1,14 +1,3 @@
-<!--
-Generated from toolkit curated output for AI. Do not edit directly.
-Project: n8n.local-setup
-Source: _projects/n8n/local-setup/curated_output_for_ai/references/ai-agent-platforms/README.md
-Update the curated output and run sync.
--->
-<!--
-Curated AI-facing source.
-Project: n8n.local-setup
-Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.
--->
 
 # AI Agent Platforms
 
@@ -16,7 +5,7 @@ These platform references route each AI platform to this toolkit. Generic rules 
 
 For local setup, start with [local setup](../n8n/local-setup.md). The platform pages below are secondary AI-coding-agent references.
 
-Humans use `_projects/**` for source review and maintenance. Agents use generated `skills/**` surfaces after sync. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references are available for users intentionally enabling n8n workflow work through an AI coding agent, but they are not the beginner local setup path.
+Humans and agents use the direct `skills/**` and `repo/**` surfaces. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references are available for users intentionally enabling n8n workflow work through an AI coding agent, but they are not the beginner local setup path.
 
 Copy the whole `skills/<skill-name>/` folder. Do not copy only `SKILL.md`. Open the platform page for exact location details.
 

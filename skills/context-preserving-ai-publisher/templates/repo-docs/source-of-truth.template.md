@@ -1,9 +1,3 @@
-<!--
-Generated from toolkit project source. Do not edit directly.
-Project: repo-methodology.context-preserving-ai-publisher
-Source: _projects/repo-methodology/context-preserving-ai-publisher/_main/templates/repo-docs/source-of-truth.template.md
-Update the project source and run sync.
--->
 # Source Of Truth
 
 This repo owns reusable AI-facing source material and generated surfaces.

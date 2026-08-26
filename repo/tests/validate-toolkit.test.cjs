@@ -1,7 +1,6 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -10,46 +9,77 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const validateScript = path.join(repoRoot, 'repo', 'scripts', 'validate-toolkit.cjs');
-const syncScript = path.join(repoRoot, 'repo', 'scripts', 'sync-toolkit-projects.cjs');
-const agentInstructionScript = path.join(repoRoot, 'repo', 'scripts', 'sync-agent-instruction-shims.cjs');
-const contractScript = path.join(repoRoot, 'repo', 'scripts', 'sync-repo-doc-contract.cjs');
-const auditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-project-source-locks.cjs');
-const validator = require(validateScript);
-const projectSync = require(syncScript);
-const safeSourceUpdate = require(path.join(repoRoot, 'repo', 'scripts', 'safe-source-update.cjs'));
-const sourceWatcher = require(path.join(repoRoot, 'repo', 'scripts', 'watch-project-sources.cjs'));
+const legacyProjectToken = '_' + 'projects';
+const legacyCuratedToken = 'curated_' + 'output_for_ai';
+const publisherReferencePaths = [
+  'skills/context-preserving-ai-publisher/references/audit-and-baseline-workflow.md',
+  'skills/context-preserving-ai-publisher/references/validation-strategy.md',
+  'skills/context-preserving-ai-publisher/templates/project-module/SOURCE-LOCK.template.json',
+  'skills/context-preserving-ai-publisher/templates/project-module/toolkit.project.template.json',
+  'skills/context-preserving-ai-publisher/templates/repo-docs/project-module-standard.template.md'
+];
+const immutableGrandfatheredSkillIds = [
+  'agent-skill-supply-chain-audit',
+  'ai-coding-agent-rules',
+  'context-preserving-ai-publisher',
+  'knowledge-index-updater',
+  'n8n-agent-rules',
+  'n8n-local-setup',
+  'n8n-workflow-helper-scripts',
+  'n8n-workflow-templates',
+  'secure-cicd-installer',
+  'ui-ux-secure-frontend-design',
+  'windows-localhost-workflows'
+];
+const currentPostGateSkillIds = [
+  'codex-ssh-hostinger-coolify-setup-maintainer',
+  'github-governance-review-reconciler',
+  'local-ai-stack-safety',
+  'managed-app-foundation-review',
+  'project-completion-audit',
+  'self-hosted-service-safety',
+  'toolkit-setup'
+];
+const skillCreationOperationalFreeTextFields = [
+  'existing_skill_review',
+  'trigger',
+  'decision_reason',
+  'unique_value',
+  'runtime_footprint',
+  'local_assets',
+  'output_contract',
+  'anti_bloat_review',
+  'safety_boundary',
+  'third_party_audit',
+  'publisher_workflow',
+  'routing'
+];
+const sharedRetiredOperationVariants = [
+  'Current Toolkit conversions use project modules and published skills.',
+  'Current Toolkit conversions use project modules and generated skills.',
+  'Current Toolkit conversions use a project module and published skills.',
+  'Current Toolkit conversions use project modules and a published skill.',
+  'Published skills for current Toolkit conversions are maintained from project modules.',
+  'Generated skills for this Toolkit are maintained through project modules.'
+];
 
-const contractPartialPath = '_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/source-of-truth-contract.md';
-const contractBegin = `<!-- AI-AGENT-TOOLKIT:${contractPartialPath}:BEGIN SOURCE-OF-TRUTH-CONTRACT v1 -->`;
-const contractEnd = `<!-- AI-AGENT-TOOLKIT:${contractPartialPath}:END SOURCE-OF-TRUTH-CONTRACT -->`;
-const sourceWatchPrNotificationRule = 'Scheduled source-watch is PR-notification-only. It may compare active SOURCE-LOCK pins and actionable advisory targets with upstream GitHub commits, then open or refresh a stable review PR. It must not copy upstream files, change SOURCE-LOCK/advisory records, execute upstream code, auto-merge, push to main, run live n8n actions, or treat notification as approval. Real updates require a separate human-approved PR.';
+function readText(relPath, root = repoRoot) {
+  return fs.readFileSync(path.join(root, relPath), 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+}
 
-function tempCopy() {
+function copyRepo() {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-validate-'));
   fs.cpSync(repoRoot, target, {
     recursive: true,
     filter(source) {
       const rel = path.relative(repoRoot, source).replace(/\\/g, '/');
-      if (!rel) return true;
       return !(
-        rel === '.git' ||
-        rel.startsWith('.git/') ||
-        rel === '.n8n-local' ||
-        rel.startsWith('.n8n-local/') ||
-        rel === '.tmp' ||
-        rel.startsWith('.tmp/') ||
-        rel === 'n8n-workflows' ||
-        rel.startsWith('n8n-workflows/') ||
-        rel === '.to-sanitise' ||
-        rel.startsWith('.to-sanitise/') ||
-        rel === '.sanitised' ||
-        rel.startsWith('.sanitised/') ||
-        rel === '.n8n-workflow-backups' ||
-        rel.startsWith('.n8n-workflow-backups/') ||
-        rel === 'node_modules' ||
-        rel.startsWith('node_modules/') ||
-        rel === '_dist' ||
-        rel.startsWith('_dist/')
+        rel === '.git' || rel.startsWith('.git/') ||
+        rel === 'node_modules' || rel.startsWith('node_modules/') ||
+        rel === '.tmp' || rel.startsWith('.tmp/') ||
+        rel === '.n8n-local' || rel.startsWith('.n8n-local/') ||
+        rel === '.n8n-workflow-backups' || rel.startsWith('.n8n-workflow-backups/') ||
+        rel === '_dist' || rel.startsWith('_dist/')
       );
     }
   });
@@ -60,3094 +90,542 @@ function runValidate(cwd) {
   return spawnSync(process.execPath, [validateScript], { cwd, encoding: 'utf8' });
 }
 
-function readJsonFile(filePath) {
-  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+function addCurrentSkill(cwd, skillName) {
+  const skillDir = path.join(cwd, 'skills', skillName);
+  fs.mkdirSync(skillDir, { recursive: true });
+  fs.writeFileSync(path.join(skillDir, 'SKILL.md'), `---\nname: ${skillName}\ndescription: Fixture current skill for gate testing.\n---\n\n# Fixture\n`, 'utf8');
+  fs.writeFileSync(path.join(skillDir, 'README.md'), `# ${skillName}\n`, 'utf8');
 }
 
-function writeJsonFile(filePath, value) {
-  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
+function insertBefore(filePath, marker, content) {
+  const text = fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(text.includes(marker), `${filePath} must contain ${marker}`);
+  fs.writeFileSync(filePath, text.replace(marker, `${content}${marker}`), 'utf8');
 }
 
-function readTextFile(filePath) {
-  return fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
-}
-
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function generatedPayload(text) {
-  const normalized = text.replace(/\r\n/g, '\n');
-  const match = normalized.match(/\n````````md\n([\s\S]*?)\n````````\n$/);
-  assert.ok(match, 'generated template has one trailing 8-backtick Markdown payload fence');
-  assert.equal((normalized.match(/^````````md$/gm) || []).length, 1, 'single opening 8-backtick payload fence');
-  assert.equal((normalized.match(/^````````$/gm) || []).length, 1, 'single closing 8-backtick payload fence');
-  return match[1];
-}
-
-function generatedNoticeCount(text) {
-  return (text.match(/Generated from toolkit (?:project source|curated output for AI)\. Do not edit directly\./g) || []).length;
-}
-
-const curatedRepoLocalSafetyComment = [
-  '<!--',
-  'Curated AI-facing source.',
-  'Project: development.ai-coding-agent-rules',
-  'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.',
-  '-->'
-].join('\n');
-
-function managedRepoLocalPayload(executionPrompt, n8nAdapter) {
-  return [
-    '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->',
-    executionPrompt.trimEnd(),
-    '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md:END GLOBAL-AGENTS.MD-TEMPLATE -->',
-    '',
-    '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->',
-    n8nAdapter.trimEnd(),
-    '<!-- AI-AGENT-TOOLKIT:_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules-adapter.md:END N8N-AGENT-RULES-ADAPTER -->',
-    ''
-  ].join('\n');
-}
-
-function assertBareRepoLocalTemplate(rel, text) {
-  const safetyPrefix = `${curatedRepoLocalSafetyComment}\n\n`;
-  assert.ok(text.startsWith(safetyPrefix), `${rel} starts with the exact curated-source safety comment`);
-  const body = text.slice(safetyPrefix.length);
-  const forbiddenPatterns = [
-    [/Generated from toolkit/i, 'generated toolkit notice'],
-    [/This file is inert/i, 'inert template prose'],
-    [/copy or merge the fenced payload/i, 'fenced-payload install prose'],
-    [/^````````md$/m, 'opening 8-backtick payload fence'],
-    [/^````````$/m, 'closing 8-backtick payload fence'],
-    [/^## Repo-local /m, 'README-style repo-local install heading'],
-    [/<repo>\\/i, 'README-style destination example'],
-    [/Or create it with PowerShell/i, 'README-style PowerShell install prose']
-  ];
-
-  for (const [pattern, label] of forbiddenPatterns) {
-    assert.doesNotMatch(body, pattern, `${rel} must be a bare payload without ${label}`);
-  }
-  assert.doesNotMatch(body, /Curated AI-facing source|Review rule:/i, `${rel} must not duplicate curated-source comments in the payload body`);
-}
-
-function sourceWatchPrBodyText(workflow) {
-  const normalized = workflow.replace(/\r\n/g, '\n');
-  const marker = 'cat > "$PR_BODY" <<\'EOF\'';
-  const markerMatch = normalized.match(new RegExp(`^([ \\t]*)${escapeRegExp(marker)}[ \\t]*$`, 'm'));
-  assert.ok(markerMatch, 'source-watch PR body heredoc marker is present');
-  const bodyMatch = normalized.match(new RegExp(`${escapeRegExp(marker)}\\n([\\s\\S]*?)\\n[ \\t]*EOF`, 'm'));
-  assert.ok(bodyMatch, 'source-watch PR body heredoc is present');
-  const yamlBlockIndent = markerMatch[1];
-  return bodyMatch[1]
-    .split('\n')
-    .map((line) => line.startsWith(yamlBlockIndent) ? line.slice(yamlBlockIndent.length) : line)
-    .join('\n');
-}
-
-function secureCicdPromptFromReadme(rootDir = repoRoot) {
-  const readme = readTextFile(path.join(rootDir, '_projects', 'cicd', 'secure-installer', '_main', 'README.md'));
-  const start = '# Copy this prompt into your AI coding agent';
-  const end = '\n---\n\n## What the AI agent should generate';
-  const startIndex = readme.indexOf(start);
-  assert.notEqual(startIndex, -1, 'Secure CI/CD prompt start marker');
-  const endIndex = readme.indexOf(end, startIndex + start.length);
-  assert.notEqual(endIndex, -1, 'Secure CI/CD prompt end marker');
-  return `${readme.slice(startIndex, endIndex).trimEnd()}\n`;
-}
-
-function replaceLast(text, search, replacement) {
-  const index = text.lastIndexOf(search);
-  assert.notEqual(index, -1, `missing text to replace: ${search}`);
-  return `${text.slice(0, index)}${replacement}${text.slice(index + search.length)}`;
-}
-
-function createSymlinkOrSkip(t, target, linkPath, type) {
-  try {
-    fs.rmSync(linkPath, { recursive: true, force: true });
-    fs.symlinkSync(target, linkPath, type);
-  } catch (error) {
-    if (['EPERM', 'EINVAL', 'ENOTSUP', 'EACCES'].includes(error.code)) {
-      t.skip(`symlink creation is not available in this environment: ${error.message}`);
-      return false;
-    }
-    throw error;
-  }
-  return true;
-}
-
-function moveWorkflowStepAfter(text, sourceName, targetName) {
-  const sourceMarker = `      - name: ${sourceName}`;
-  const targetMarker = `      - name: ${targetName}`;
-  const sourceStart = text.indexOf(sourceMarker);
-  assert.notEqual(sourceStart, -1, `missing source step: ${sourceName}`);
-  const sourceEnd = text.indexOf('\n      - name:', sourceStart + sourceMarker.length);
-  assert.notEqual(sourceEnd, -1, `missing source step end: ${sourceName}`);
-  const sourceBlock = text.slice(sourceStart, sourceEnd);
-  const withoutSource = `${text.slice(0, sourceStart)}${text.slice(sourceEnd + 1)}`;
-  const targetStart = withoutSource.indexOf(targetMarker);
-  assert.notEqual(targetStart, -1, `missing target step: ${targetName}`);
-  const targetEnd = withoutSource.indexOf('\n      - name:', targetStart + targetMarker.length);
-  assert.notEqual(targetEnd, -1, `missing target step end: ${targetName}`);
-  return `${withoutSource.slice(0, targetEnd)}\n${sourceBlock}${withoutSource.slice(targetEnd)}`;
-}
-
-function replaceWorkflowStepText(text, stepName, search, replacement) {
-  const stepMarker = `      - name: ${stepName}`;
-  const stepStart = text.indexOf(stepMarker);
-  assert.notEqual(stepStart, -1, `missing step: ${stepName}`);
-  const nextStepStart = text.indexOf('\n      - name:', stepStart + stepMarker.length);
-  const stepEnd = nextStepStart === -1 ? text.length : nextStepStart;
-  const stepBlock = text.slice(stepStart, stepEnd);
-  assert.match(stepBlock, search, `missing step text in ${stepName}`);
-  return `${text.slice(0, stepStart)}${stepBlock.replace(search, replacement)}${text.slice(stepEnd)}`;
-}
-
-function insertWorkflowStepBefore(text, stepName, stepText) {
-  const stepMarker = `      - name: ${stepName}`;
-  const stepStart = text.indexOf(stepMarker);
-  assert.notEqual(stepStart, -1, `missing step: ${stepName}`);
-  return `${text.slice(0, stepStart)}${stepText}\n${text.slice(stepStart)}`;
-}
-
-function createNewSkillProjectFixture(cwd, options = {}) {
-  const projectDir = path.join(cwd, '_projects', 'development', 'new-safe-skill');
-  const sourceDir = path.join(projectDir, '_main', 'skill');
-  const outputDir = path.join(cwd, 'skills', 'new-safe-skill');
-  fs.mkdirSync(path.join(sourceDir, 'agents'), { recursive: true });
-  fs.mkdirSync(path.join(outputDir, 'agents'), { recursive: true });
-
-  const readme = '# New Safe Skill\n\nTiny fixture skill.\n';
-  const skill = [
-    '---',
-    'name: new-safe-skill',
-    'description: Use when testing the skill creation center validation fixture.',
-    '---',
-    '',
-    '# New Safe Skill',
-    '',
-    'Use this fixture when validating the skill creation center gate in tests.',
-    '',
-    'Keep the workflow local-only, instruction-only, and free of third-party material.',
-    '',
-    'Do not run installers, network commands, live systems, credential actions, or destructive commands from this fixture.',
-    '',
-    'Before making any change, inspect the relevant local project files, choose the smallest safe edit, and run a targeted validation command. Report exactly what changed, which files were inspected, which checks passed, and which risks remain. If a task would require external services, credentials, package installation, or deletion, stop and ask for explicit current-turn approval instead of continuing.',
-    ''
-  ].join('\n');
-  const openai = [
-    'interface:',
-    '  display_name: New Safe Skill',
-    '  short_description: Fixture skill for validation.',
-    'policy:',
-    '  allow_implicit_invocation: true',
-    ''
-  ].join('\n');
-
-  fs.writeFileSync(path.join(sourceDir, 'README.md'), readme, 'utf8');
-  fs.writeFileSync(path.join(sourceDir, 'SKILL.md'), skill, 'utf8');
-  fs.writeFileSync(path.join(sourceDir, 'agents', 'openai.yaml'), openai, 'utf8');
-  fs.writeFileSync(path.join(outputDir, 'README.md'), readme, 'utf8');
-  fs.writeFileSync(path.join(outputDir, 'SKILL.md'), skill, 'utf8');
-  fs.writeFileSync(path.join(outputDir, 'agents', 'openai.yaml'), openai, 'utf8');
-
-  fs.writeFileSync(
-    path.join(projectDir, 'README.md'),
-    '# New Safe Skill\n\nProject module for [New Safe Skill](../../../skills/new-safe-skill/).\n\nSee [`_main/`](_main/) for source.\n',
-    'utf8'
-  );
-  fs.writeFileSync(
-    path.join(projectDir, 'SOURCE-MANIFEST.md'),
-    '# Source Manifest: New Safe Skill\n\n## Preserved In `_main/`\n\n- `skill/README.md`\n- `skill/SKILL.md`\n- `skill/agents/openai.yaml`\n\n## Provenance\n\nFirst-party test fixture. No third-party material is copied.\n',
-    'utf8'
-  );
-  writeJsonFile(path.join(projectDir, 'SOURCE-LOCK.json'), {
-    source_repo: 'weijunswj/ai-agent-toolkit',
-    source_ref: 'first-party-authored',
-    source_commit: '0000000000000000000000000000000000000000',
-    source_lifecycle: 'retired_after_migration',
-    source_role: 'migration_provenance_only',
-    source_update_policy: 'none',
-    public_attribution_required: false,
-    notes: 'First-party validation fixture with no third-party source material.',
-    files: []
-  });
-
-  const manifest = {
-    id: 'development.new-safe-skill',
-    category: 'development',
-    name: 'new-safe-skill',
-    title: 'New Safe Skill',
-    module_path: '_projects/development/new-safe-skill',
-    main_path: '_projects/development/new-safe-skill/_main',
-    version: '1.0.0',
-    version_policy: 'semver',
-    version_notes: 'Initial first-party validation fixture version.',
-    outputs: [
-      {
-        kind: 'copy',
-        source: '_main/skill/README.md',
-        output: 'skills/new-safe-skill/README.md',
-        notes: 'Fixture skill README copied from first-party source.',
-        fidelity: 'exact',
-        notice: false
-      },
-      {
-        kind: 'copy',
-        source: '_main/skill/SKILL.md',
-        output: 'skills/new-safe-skill/SKILL.md',
-        notes: 'Fixture skill entrypoint copied from first-party source.',
-        fidelity: 'exact',
-        notice: false
-      },
-      {
-        kind: 'copy',
-        source: '_main/skill/agents/openai.yaml',
-        output: 'skills/new-safe-skill/agents/openai.yaml',
-        notes: 'Fixture OpenAI metadata copied from first-party source.',
-        fidelity: 'exact'
-      }
-    ],
-    writes: {
-      allowed: [
-        'skills/new-safe-skill/README.md',
-        'skills/new-safe-skill/SKILL.md',
-        'skills/new-safe-skill/agents/openai.yaml'
-      ],
-      denied: [
-        '.env*',
-        '.n8n-local/**',
-        '.tmp/**',
-        '**/*credential*',
-        '**/*.key',
-        '**/*.pem',
-        '**/*.live-export.json',
-        '**/*.live-import.json',
-        'node_modules/**',
-        'dist/**',
-        '_dist/**'
-      ]
-    },
-    requires_approval: true,
-    run_commands_by_default: false,
-    live_actions: 'explicit_confirmation_only',
-    ci_live_actions: false,
-    project: {
-      name: 'New Safe Skill',
-      category: 'development',
-      summary: 'Fixture skill used to validate skill creation center enforcement.'
-    },
-    surface: {
-      publish_as: 'skill',
-      skill: {
-        status: 'published',
-        path: 'skills/new-safe-skill',
-        summary: 'Fixture skill for validation.'
-      },
-      mcp: {
-        status: 'not_applicable'
-      }
-    }
-  };
-  if (options.skill_creation_review) {
-    manifest.skill_creation_review = options.skill_creation_review;
-  }
-  writeJsonFile(path.join(projectDir, 'toolkit.project.json'), manifest);
-}
-
-function addNewSafeSkillSafetyMatrixRow(cwd, skillName = 'new-safe-skill') {
-  const matrixPath = path.join(cwd, 'repo', 'docs', 'SKILL-SAFETY-MATRIX.md');
-  const matrix = readTextFile(matrixPath);
-  const row = [
-    `| [${skillName}](../../skills/${skillName}/)`,
-    'Fixture trigger for validation-only skill creation center tests.',
-    'Low',
-    'Fixture local files only.',
-    'None bundled.',
-    'None.',
-    'Normal local fixture writes only.',
-    'None required.',
-    'First-party test fixture.',
-    'Used only to prove new skill-publishing modules update the safety catalog. |'
-  ].join(' | ');
-  fs.writeFileSync(
-    matrixPath,
-    matrix.replace('\n\n## Description Review Notes\n', `\n${row}\n\n## Description Review Notes\n`),
-    'utf8'
-  );
-}
-
-function addSkillRoutingDecision(cwd, skillName = 'new-safe-skill') {
-  const routingPath = path.join(
-    cwd,
-    '_projects',
-    'development',
-    'ai-coding-agent-rules',
-    '_main',
-    '_partials',
-    'toolkit-skill-routing.md'
-  );
-  const routing = readTextFile(routingPath);
-  const row = `| \`${skillName}\` | Fixture trigger for validation-only skill routing checks. |`;
-  fs.writeFileSync(
-    routingPath,
-    routing.replace('\n\n## Intentionally Omitted Skills\n', `\n${row}\n\n## Intentionally Omitted Skills\n`),
-    'utf8'
-  );
-}
-
-function addOmittedSkillRoutingDecision(cwd, skillName) {
-  const routingPath = path.join(
-    cwd,
-    '_projects',
-    'development',
-    'ai-coding-agent-rules',
-    '_main',
-    '_partials',
-    'toolkit-skill-routing.md'
-  );
-  const routing = readTextFile(routingPath);
-  const omission = `- \`${skillName}\`: Fixture omission reason long enough to prove conflicting routing decisions are rejected.`;
-  fs.writeFileSync(
-    routingPath,
-    routing.replace('\n## Routing Maintenance\n', `\n${omission}\n\n## Routing Maintenance\n`),
-    'utf8'
-  );
-}
-
-function addSkillOutputToAiCodingAgentRules(cwd, skillName = 'existing-project-new-skill') {
-  const sourceDir = path.join(
-    cwd,
-    '_projects',
-    'development',
-    'ai-coding-agent-rules',
-    'curated_output_for_ai',
-    'skills',
-    skillName
-  );
-  const outputDir = path.join(cwd, 'skills', skillName);
-  fs.mkdirSync(sourceDir, { recursive: true });
-  fs.mkdirSync(outputDir, { recursive: true });
-
-  const readme = `# ${skillName}\n\nFixture skill from an existing baseline project.\n`;
-  const skill = [
-    '---',
-    `name: ${skillName}`,
-    'description: Use when testing per-skill creation center baselines.',
-    '---',
-    '',
-    `# ${skillName}`,
-    '',
-    'Fixture skill used to ensure baseline exemptions attach to skill entrypoints, not project IDs.',
-    '',
-    'Use this fixture when validating that an existing project module cannot add a new published skill entrypoint without fresh creation-center evidence. The fixture is intentionally local-only and instruction-only so it exercises repository validation without introducing package installation, network access, credentials, live systems, destructive actions, or third-party material. Agents should inspect the relevant files, make the smallest safe local edit, run targeted validation, and report the exact validation result.',
-    ''
-  ].join('\n');
-  fs.writeFileSync(path.join(sourceDir, 'README.md'), readme, 'utf8');
-  fs.writeFileSync(path.join(sourceDir, 'SKILL.md'), skill, 'utf8');
-  fs.writeFileSync(path.join(outputDir, 'README.md'), readme, 'utf8');
-  fs.writeFileSync(path.join(outputDir, 'SKILL.md'), skill, 'utf8');
-
-  const manifestPath = path.join(cwd, '_projects', 'development', 'ai-coding-agent-rules', 'toolkit.project.json');
-  const manifest = readJsonFile(manifestPath);
-  manifest.outputs.push(
-    {
-      kind: 'copy',
-      source: `curated_output_for_ai/skills/${skillName}/README.md`,
-      output: `skills/${skillName}/README.md`,
-      notes: 'Fixture README for per-skill baseline validation.',
-      fidelity: 'exact',
-      notice: false
-    },
-    {
-      kind: 'copy',
-      source: `curated_output_for_ai/skills/${skillName}/SKILL.md`,
-      output: `skills/${skillName}/SKILL.md`,
-      notes: 'Fixture skill entrypoint for per-skill baseline validation.',
-      fidelity: 'exact',
-      notice: false
-    }
-  );
-  manifest.writes.allowed.push(`skills/${skillName}/README.md`, `skills/${skillName}/SKILL.md`);
-  writeJsonFile(manifestPath, manifest);
-}
-
-function manifestsById() {
-  return new Map(validator.projectManifests().map((manifest) => [manifest.id, manifest]));
-}
-
-function manifestOutput(manifest, outputPath) {
-  return (manifest.outputs || []).find((output) => output.output === outputPath);
-}
-
-function contractBlock(text) {
-  const begin = contractBegin;
-  const end = contractEnd;
-  const beginMatches = text.match(new RegExp(begin, 'g')) || [];
-  const endMatches = text.match(new RegExp(end, 'g')) || [];
-  assert.equal(beginMatches.length, 1, 'begin marker count');
-  assert.equal(endMatches.length, 1, 'end marker count');
-  const start = text.indexOf(begin);
-  const finish = text.indexOf(end);
-  assert.ok(start < finish, 'contract markers are ordered');
-  return text.slice(start + begin.length, finish).trim();
-}
-
-test('repo-wide MCP generated surface is absent', () => {
-  assert.equal(fs.existsSync(path.join(repoRoot, 'mcp')), false);
-  assert.equal(fs.existsSync(path.join(repoRoot, '_projects', 'repo-methodology', 'mcp-ready-registry')), false);
-});
-
-test('native Codex and Claude plugin manifests are generated package metadata', () => {
-  for (const relPath of [
-    '.codex-plugin/plugin.json',
-    '.codex-plugin/assets/composer-icon.png',
-    '.codex-plugin/assets/logo.png',
-    '.codex-plugin/hooks/hooks.json',
-    '.claude-plugin/plugin.json',
-    '.claude-plugin/hooks/hooks.json',
-    '.claude-plugin/marketplace.json'
-  ]) {
-    assert.equal(fs.existsSync(path.join(repoRoot, relPath)), true, relPath);
-  }
-});
-
-test('Toolkit plugin packaged version surfaces stay aligned', () => {
-  const cwd = tempCopy();
-  const bridgePath = path.join(cwd, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-  fs.writeFileSync(
-    bridgePath,
-    readTextFile(bridgePath).replace("const BRIDGE_VERSION = '2.10.0';", "const BRIDGE_VERSION = '2.2.1';"),
-    'utf8'
+function addSkillToCatalogs(cwd, skillName) {
+  insertBefore(
+    path.join(cwd, 'repo', 'contracts', 'agent-rules', 'toolkit-skill-routing.md'),
+    '\n## Routing Maintenance',
+    `| \`${skillName}\` | Fixture route used to prove current-skill gate enforcement. |\n`
   );
 
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /BRIDGE_VERSION must match Toolkit Local Bridge project version 2\.10\.0/i);
-});
-
-test('skill discovery includes migrated skills', () => {
-  const skills = validator.skillDirs();
-  assert.ok(skills.includes('skills/context-preserving-ai-publisher'));
-  assert.ok(skills.includes('skills/ai-coding-agent-rules'));
-  assert.ok(skills.includes('skills/ui-ux-secure-frontend-design'));
-  assert.ok(skills.includes('skills/windows-localhost-workflows'));
-  assert.ok(skills.includes('skills/n8n-workflow-helper-scripts'));
-  assert.ok(skills.includes('skills/n8n-workflow-templates'));
-  assert.ok(skills.includes('skills/n8n-local-setup'));
-  assert.ok(skills.includes('skills/secure-cicd-installer'));
-  assert.ok(skills.includes('skills/knowledge-index-updater'));
-  assert.ok(skills.includes('skills/local-ai-stack-safety'));
-  assert.ok(skills.includes('skills/codex-ssh-hostinger-coolify-setup-maintainer'));
-  assert.ok(skills.includes('skills/self-hosted-service-safety'));
-  assert.ok(skills.includes('skills/managed-app-foundation-review'));
-  assert.ok(skills.includes('skills/project-completion-audit'));
-});
-
-test('repo-local agent rules bootstrap skill metadata stays in the skill surface', () => {
-  const skill = readTextFile(path.join(repoRoot, 'skills', 'ai-coding-agent-rules', 'SKILL.md'));
-  assert.match(skill, /Bootstrap or repair repo-local AI coding agent instruction files/i);
-  assert.match(skill, /AI-AGENT-TOOLKIT managed[- ]marker/i);
-});
-
-test('project manifests include the current project modules without repo-wide MCP publishing', () => {
-  const ids = validator.projectManifests().map((entry) => entry.id).sort();
-  assert.deepEqual(ids, [
-    'cicd.secure-installer',
-    'cicd.trusted-ci-repository-protection',
-    'design.google-design-md',
-    'design.ui-ux-pro-max',
-    'development.ai-coding-agent-rules',
-    'development.bounded-local-execution-loop',
-    'development.control-plane-kernel',
-    'development.github-governance-review-reconciler',
-    'development.hostinger-coolify-production-guide',
-    'development.independent-assurance-web-finality',
-    'development.local-ai-stack-safety',
-    'development.managed-app-foundation-review',
-    'development.project-completion-audit',
-    'development.repository-capability-registry',
-    'development.self-hosted-service-safety',
-    'development.toolkit-local-bridge',
-    'development.windows-localhost-workflows',
-    'knowledge.knowledge-index-updater',
-    'n8n.local-setup',
-    'n8n.workflow-toolkit',
-    'repo-methodology.agent-skill-supply-chain-audit',
-    'repo-methodology.context-preserving-ai-publisher'
-  ]);
-  for (const entry of validator.projectManifests()) {
-    assert.ok(['skill', 'source_only'].includes(entry.surface?.publish_as), entry.id);
-    assert.equal(entry.surface?.mcp?.status, 'not_applicable', entry.id);
-  }
-});
-
-test('project manifests require toolkit project version metadata', () => {
-  for (const manifest of validator.projectManifests()) {
-    assert.match(manifest.version, /^\d+\.\d+\.\d+$/, manifest.id);
-    assert.equal(manifest.version_policy, 'semver', manifest.id);
-    assert.equal(typeof manifest.version_notes, 'string', manifest.id);
-    assert.notEqual(manifest.version_notes.trim(), '', manifest.id);
-  }
-});
-
-test('project manifest validation rejects missing version', () => {
-  const cwd = tempCopy();
-  const manifestPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'toolkit.project.json');
-  const manifest = readJsonFile(manifestPath);
-  delete manifest.version;
-  writeJsonFile(manifestPath, manifest);
-
-  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /missing version/);
-});
-
-test('project manifest validation rejects invalid semver version', () => {
-  const cwd = tempCopy();
-  const manifestPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'toolkit.project.json');
-  const manifest = readJsonFile(manifestPath);
-  manifest.version = '1.0';
-  writeJsonFile(manifestPath, manifest);
-
-  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /version must be MAJOR\.MINOR\.PATCH/);
-});
-
-test('project manifest validation rejects invalid version policy', () => {
-  const cwd = tempCopy();
-  const manifestPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'toolkit.project.json');
-  const manifest = readJsonFile(manifestPath);
-  manifest.version_policy = 'calendar';
-  writeJsonFile(manifestPath, manifest);
-
-  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /version_policy must be semver/);
-});
-
-test('project manifest validation rejects empty version notes', () => {
-  const cwd = tempCopy();
-  const manifestPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'toolkit.project.json');
-  const manifest = readJsonFile(manifestPath);
-  manifest.version_notes = '   ';
-  writeJsonFile(manifestPath, manifest);
-
-  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /version_notes must be a non-empty string/);
-});
-
-test('project metadata supports all declared publish_as values', () => {
-  for (const publishAs of ['skill', 'source_only']) {
-    const cwd = tempCopy();
-    const manifestPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'toolkit.project.json');
-    const manifest = readJsonFile(manifestPath);
-    manifest.surface.publish_as = publishAs;
-    if (publishAs === 'source_only') {
-      manifest.outputs = manifest.outputs.filter((output) => output.output !== 'skills/n8n-local-setup/SKILL.md');
-      manifest.writes.allowed = manifest.writes.allowed.filter((output) => output !== 'skills/n8n-local-setup/SKILL.md');
-      manifest.surface.skill = { status: 'not_applicable' };
-      manifest.surface.mcp = { status: 'not_applicable' };
-    }
-    writeJsonFile(manifestPath, manifest);
-    const result = spawnSync(process.execPath, [syncScript, '--write'], { cwd, encoding: 'utf8' });
-    assert.equal(result.status, 0, `${publishAs}\n${result.stderr}`);
-  }
-});
-
-test('sync output declarations target approved generated surfaces', () => {
-  const approvedOutputRoot = /^(?:skills|\.codex-plugin|\.claude-plugin)\//;
-  for (const manifest of validator.projectManifests()) {
-    for (const output of manifest.outputs || []) {
-      assert.match(output.output, approvedOutputRoot, `${manifest.id}: ${output.output}`);
-      if (/^\.(?:codex|claude)-plugin\//.test(output.output)) {
-        assert.equal(manifest.id, 'development.toolkit-local-bridge', `${manifest.id}: ${output.output}`);
-      }
-      assert.doesNotMatch(output.output, /(^|[^A-Za-z0-9_])for_ai\//);
-    }
-    for (const allowed of manifest.writes.allowed || []) {
-      if (allowed.endsWith('/output/**')) continue;
-      assert.match(allowed, approvedOutputRoot, `${manifest.id}: ${allowed}`);
-      if (/^\.(?:codex|claude)-plugin\//.test(allowed)) {
-        assert.equal(manifest.id, 'development.toolkit-local-bridge', `${manifest.id}: ${allowed}`);
-      }
-    }
-  }
-});
-
-test('validator expects durable retired source provenance doc instead of migration checklist', () => {
-  assert.equal(fs.existsSync(path.join(repoRoot, 'repo', 'docs', 'MIGRATION_CHECKLIST.md')), false);
-  assert.equal(fs.existsSync(path.join(repoRoot, 'repo', 'docs', 'RETIRED-SOURCE-PROVENANCE.md')), true);
-
-  const cwd = tempCopy();
-  fs.unlinkSync(path.join(cwd, 'repo', 'docs', 'RETIRED-SOURCE-PROVENANCE.md'));
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Missing expected file: repo\/docs\/RETIRED-SOURCE-PROVENANCE\.md/);
-});
-
-test('source-of-truth contract is synced into main entry points', () => {
-  const partial = readTextFile(path.join(repoRoot, contractPartialPath)).trim();
-  for (const rel of ['README.md', 'AGENTS.md']) {
-    const text = readTextFile(path.join(repoRoot, rel));
-    assert.equal(contractBlock(text), partial, rel);
-  }
-});
-
-test('source-of-truth contract sync script passes and catches drift', () => {
-  let result = spawnSync(process.execPath, [contractScript, '--check'], { cwd: repoRoot, encoding: 'utf8' });
-  assert.equal(result.status, 0, result.stderr);
-
-  const cwd = tempCopy();
-  fs.writeFileSync(
+  insertBefore(
     path.join(cwd, 'README.md'),
-    readTextFile(path.join(cwd, 'README.md')).replace('This repo has a source layer and a published layer.', 'This repo has a source layer and a changed published layer.')
-  );
-  result = spawnSync(process.execPath, [contractScript, '--check'], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Stale source-of-truth contract block: README\.md/);
-});
-
-test('README is a user-facing map with the contract in the appendix', () => {
-  const text = readTextFile(path.join(repoRoot, 'README.md'));
-  const sections = [
-    '## What this repo is',
-    '## Quick Start',
-    '## Projects',
-    '## Skills',
-    '## MCP Status',
-    '## Folder Map',
-    '## For Maintainers',
-    '## Validation',
-    '## Appendix: Source-of-Truth Contract'
-  ];
-  let previous = -1;
-  for (const section of sections) {
-    const index = text.indexOf(section);
-    assert.notEqual(index, -1, section);
-    assert.ok(index > previous, section);
-    previous = index;
-  }
-  assert.ok(text.indexOf(contractBegin) > text.indexOf('## Appendix: Source-of-Truth Contract'));
-  assert.match(text, /`skills\/<skill-name>\/`/);
-  assert.doesNotMatch(text, /\[mcp\/\]\(/);
-  assert.match(text, /repo-wide MCP is intentionally not shipped/i);
-  assert.doesNotMatch(text, /(^|[^A-Za-z0-9_])for_ai\//);
-  for (const surface of ['packs', 'playbooks', 'templates', 'registries', 'registry', 'tools']) {
-    assert.doesNotMatch(text, new RegExp(`\\|\\s+\`?${surface}/?\`?\\s+\\|`, 'i'));
-  }
-});
-
-test('trusted maintenance scripts support an explicit workspace root', () => {
-  const cwd = tempCopy();
-  for (const script of [agentInstructionScript, contractScript, syncScript, validateScript]) {
-    const args = [script, '--workspace', cwd];
-    if (script !== validateScript) args.push('--check');
-    const result = spawnSync(process.execPath, args, { cwd: os.tmpdir(), encoding: 'utf8' });
-    assert.equal(result.status, 0, `${path.basename(script)}\n${result.stderr}`);
-  }
-});
-
-test('AGENTS.md gives future agents unambiguous source routing rules', () => {
-  const text = readTextFile(path.join(repoRoot, 'AGENTS.md'));
-  const mandatoryDocs = [
-    'repo/docs/FOR_AI_AGENTS.md',
-    'repo/docs/SOURCE-OF-TRUTH.md',
-    'repo/docs/PROJECT-MODULE-STANDARD.md',
-    'repo/docs/SURFACE-FIDELITY-AUDIT.md',
-    'repo/docs/RETIRED-SOURCE-PROVENANCE.md',
-    'repo/docs/THIRD-PARTY-SOURCE-NOTES.md',
-    'repo/docs/WRITE-SAFETY-MODEL.md',
-    'repo/docs/SAFE-UPDATES.md',
-    'repo/docs/CLEANUP-POLICY.md',
-    'repo/docs/HOW-TO-USE.md'
-  ];
-
-  assert.match(text, /curated_output_for_ai/);
-  assert.match(text, /toolkit\.project\.json/);
-  assert.match(text, /Do not edit generated `skills\/` or `mcp\/` outputs directly/);
-  assert.match(text, /Do not generate curated files automatically from `_main`/);
-  assert.match(text, /AI-AGENT-TOOLKIT:_projects\/development\/ai-coding-agent-rules\/_main\/_partials\/ai-coding-agent-execution\.md:BEGIN GLOBAL-AGENTS\.MD-TEMPLATE v1/);
-  assert.match(text, /AI-AGENT-TOOLKIT:_projects\/development\/ai-coding-agent-rules\/_main\/_partials\/n8n-agent-rules-adapter\.md:BEGIN N8N-AGENT-RULES-ADAPTER v1/);
-  assert.doesNotMatch(text, /toolkit-root-agent-rules\.md/);
-  assert.match(text, /Toolkit-specific root rules live directly after the managed execution blocks and are maintained directly in this file/);
-  assert.match(text, /## Toolkit Root Optimization Mandate/);
-  assert.match(text, /low token burn, efficient agent orientation, predictable setup\/update behavior, quiet validation, and no performance drift/);
-  assert.match(text, /Before planning or editing, read \[Toolkit playbook index\]\(repo\/docs\/agent-playbooks\/INDEX\.md\) \(`repo\/docs\/agent-playbooks\/INDEX\.md`\)/);
-  assert.match(text, /If root `MEMORY\.md` exists, read it as non-authoritative project context/);
-  assert.match(text, /Final reports must include `Instruction sources used` and `MEMORY\.md changed: Yes\/No`/);
-  assert.match(text, /## Hard Safety Gates/);
-  assert.match(text, /## Source Of Truth/);
-  assert.match(text, /Source-watch is PR-notification-only/);
-  assert.match(text, /## Managed Marker Rules/);
-  assert.match(text, /AI-AGENT-TOOLKIT:<source-path>:BEGIN <BLOCK-NAME> v1/);
-  assert.match(text, /Do not run live-system, Docker, n8n runtime, import\/export, sync, activation, credential, deployment, production, destructive, or external-service actions without explicit current-turn approval naming the target and allowed operation/);
-  assert.doesNotMatch(text, /GitHub PR Completion Rules/);
-  assert.doesNotMatch(text, /GITHUB APPROVAL NEEDED/);
-  assert.doesNotMatch(text, /VERSION CONTROL APPROVAL NEEDED/);
-  assert.doesNotMatch(text, /REMOTE APPROVAL NEEDED/);
-  assert.doesNotMatch(text, /LOCAL CHANGE APPROVAL NEEDED/);
-  assert.doesNotMatch(text, /PR: none yet/);
-  assert.doesNotMatch(text, /If no PR exists yet, state `PR: none yet`/);
-  assert.doesNotMatch(text, /PR lane/);
-  assert.doesNotMatch(text, /remote source-of-truth/);
-  assert.doesNotMatch(text, /Should I push this branch/);
-  for (const doc of mandatoryDocs) {
-    assert.ok(text.includes(`](${doc})`), `AGENTS.md links ${doc}`);
-  }
-  assert.match(
-    text,
-    /For new or changed project modules, `repo\/docs\/PROJECT-MODULE-STANDARD\.md` is the detailed rulebook\./
+    '\n## Install Skills By Platform',
+    `| [${skillName}](skills/${skillName}/) | Fixture catalog entry used to prove current-skill gate enforcement. |\n`
   );
 
-  const index = readTextFile(path.join(repoRoot, 'repo', 'docs', 'agent-playbooks', 'INDEX.md'));
-  assert.match(index, /repo\/docs\/agent-playbooks\/n8n-safety-and-workflows\.md/);
-  assert.match(index, /repo\/docs\/agent-playbooks\/generated-output-and-publishing\.md/);
-  assert.match(index, /repo\/docs\/agent-playbooks\/pr-review-and-ci\.md/);
-  assert.match(index, /repo\/docs\/agent-playbooks\/docs-governance\.md/);
-  assert.match(index, /continues a multi-PR programme/);
-  const baselinePlaybook = readTextFile(path.join(repoRoot, 'repo', 'docs', 'agent-playbooks', 'baseline-workflow.md'));
-  assert.match(baselinePlaybook, /Default to one fresh Codex chat per focused PR/);
-  assert.match(baselinePlaybook, /many files \(roughly more than 15\)/);
-  assert.match(baselinePlaybook, /Keep compact continuation state in the PR body and final response/);
-  assert.match(baselinePlaybook, /the current next PR, operating constraints, and acceptance criteria/);
-  const n8nPlaybook = readTextFile(path.join(repoRoot, 'repo', 'docs', 'agent-playbooks', 'n8n-safety-and-workflows.md'));
-  assert.match(n8nPlaybook, /Stop before live n8n, Docker, import\/export, sync, activation, execution, publish\/unpublish, credential, deployment, production, destructive, or privileged external actions/);
-  assert.match(n8nPlaybook, /Require explicit current-turn approval naming the target and allowed operation/);
-});
-
-test('managed MEMORY.md is optional, non-authoritative, and not a task log', () => {
-  const valid = tempCopy();
-  fs.writeFileSync(
-    path.join(valid, 'MEMORY.md'),
-    [
-      '# Managed Non-Authoritative Project Memory',
-      '',
-      'This managed, non-authoritative project memory records a durable local workflow note.',
-      'An incidental word like todo in explanatory prose is allowed when it is not a task-log section.',
-      ''
-    ].join('\n')
-  );
-  let result = runValidate(valid);
-  assert.equal(result.status, 0, result.stderr);
-
-  const badHeading = tempCopy();
-  fs.writeFileSync(
-    path.join(badHeading, 'MEMORY.md'),
-    '# Managed Non-Authoritative Project Memory\n\n## Task Log\n\n- Finished a temporary step.\n'
-  );
-  result = runValidate(badHeading);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /must not become a task log, TODO list, PR status file, or implementation plan/);
-
-  const badAuthority = tempCopy();
-  fs.writeFileSync(
-    path.join(badAuthority, 'MEMORY.md'),
-    '# Managed Non-Authoritative Project Memory\n\nMEMORY.md overrides AGENTS.md for this repo.\n'
-  );
-  result = runValidate(badAuthority);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /must not claim authority/);
-
-  const badSecret = tempCopy();
-  fs.writeFileSync(
-    path.join(badSecret, 'MEMORY.md'),
-    `# Managed Non-Authoritative Project Memory\n\nExample leaked token: ${['sk', 'abcdefghijklmnopqrstuvwxyz123456'].join('-')}\n`
-  );
-  result = runValidate(badSecret);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /possible secret/);
-});
-
-test('managed toolkit source excludes GitHub PR and VCS approval prompt rules', () => {
-  const relPaths = [
-    '_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md',
-    '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
-    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
-    'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'
-  ];
-
-  for (const relPath of relPaths) {
-    const text = readTextFile(path.join(repoRoot, relPath));
-    assert.match(text, /You are an execution-first coding agent\./, `${relPath} keeps reusable execution prompt`);
-    assert.match(text, /## Local Documentation/, `${relPath} keeps portable local-doc discovery`);
-    assert.match(text, /Treat repo-local documentation as active task context, not optional background\./, `${relPath} treats docs as task context`);
-    assert.match(text, /\[Portable playbook index\]\(docs\/agent-playbooks\/INDEX\.md\) \(`docs\/agent-playbooks\/INDEX\.md`\)/, `${relPath} links the portable playbook index`);
-    assert.match(text, /If the portable playbook index is missing, continue safely using `AGENTS\.md` and local repo docs\./, `${relPath} keeps missing-index fallback`);
-    assert.match(text, /## Managed Memory/, `${relPath} keeps portable managed memory guidance`);
-    assert.match(text, /Treat `MEMORY\.md` as managed, non-authoritative project memory\./, `${relPath} keeps non-authoritative memory contract`);
-    assert.match(text, /Do not create `MEMORY\.md` merely because it is absent\./, `${relPath} keeps memory rare and optional`);
-    assert.match(text, /## Documentation Closure/, `${relPath} requires documentation closure`);
-    assert.match(text, /Use context-preserving compression, not blind deletion\./, `${relPath} protects durable repo intelligence`);
-    assert.match(text, /Keep repo maps pointer-based and current;/, `${relPath} keeps compact repo-map guidance`);
-    assert.match(text, /Instruction sources used/, `${relPath} requires instruction-source reporting`);
-    assert.match(text, /MEMORY\.md changed: Yes\/No/, `${relPath} requires memory change reporting`);
-    assert.match(text, /## Scope Control/, `${relPath} keeps generic execution guidance`);
-    assert.match(text, /run the smallest relevant local validation/i, `${relPath} keeps targeted local validation guidance`);
-    assert.match(text, /Do not run local `npm run validate:all` by default when CI already runs the full gate/, `${relPath} avoids default local full validation`);
-    assert.match(text, /failed targeted validation/, `${relPath} blocks failed targeted validation before push`);
-    assert.doesNotMatch(text, /run relevant validation/, `${relPath} removes broad validation wording`);
-    assert.doesNotMatch(text, /failed validation, or safety-blocked changes/, `${relPath} uses targeted validation wording`);
-    assert.doesNotMatch(text, /GitHub PR Completion Rules/, `${relPath} removes GitHub PR completion rules`);
-    assert.doesNotMatch(text, /GITHUB APPROVAL NEEDED/, `${relPath} removes GitHub approval prompts`);
-    assert.doesNotMatch(text, /VERSION CONTROL APPROVAL NEEDED/, `${relPath} removes VCS approval prompts`);
-    assert.doesNotMatch(text, /REMOTE APPROVAL NEEDED/, `${relPath} removes remote approval prompts`);
-    assert.doesNotMatch(text, /LOCAL CHANGE APPROVAL NEEDED/, `${relPath} removes local-change approval prompts`);
-    assert.doesNotMatch(text, /PR: none yet/, `${relPath} removes stale no-PR completion guidance`);
-    assert.doesNotMatch(text, /PR lane/, `${relPath} removes PR lane management`);
-    assert.doesNotMatch(text, /remote source-of-truth/, `${relPath} removes PR URL source-of-truth rules`);
-    assert.doesNotMatch(text, /create a pull request|update a pull request|merge request/i, `${relPath} removes remote review workflow rules`);
-  }
-
-  for (const relPath of [
-    'skills/ai-coding-agent-rules/AGENTS.template.md',
-    'skills/ai-coding-agent-rules/CLAUDE.template.md',
-    'skills/ai-coding-agent-rules/GEMINI.template.md',
-    'skills/ai-coding-agent-rules/antigravity-bootstrap.template.md'
-  ]) {
-    assert.equal(fs.existsSync(path.join(repoRoot, relPath)), false, relPath);
-  }
-});
-
-test('Git Completion includes pull-request description synchronization guidance', () => {
-  const relPaths = [
-    '_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md',
-    '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
-    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
-    'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'
-  ];
-
-  for (const relPath of relPaths) {
-    const text = readTextFile(path.join(repoRoot, relPath));
-    assert.match(text, /## Git Completion/, relPath);
-    assert.doesNotMatch(text, /## Pull Request Description/, relPath);
-    assert.match(text, /Git Completion is the scoped exception for version-control publication after requested edits/i, relPath);
-    assert.match(text, /Before pushing:\n\n- Run the smallest relevant local validation/i, relPath);
-    assert.match(text, /Do not run local `npm run validate:all` by default when CI already runs the full gate/i, relPath);
-    assert.match(text, /run local full validation only for broad\/risky, workflow, sync, generator, package, security-sensitive, known CI-failure, or insufficiently covered changes/i, relPath);
-    assert.match(text, /When opening or updating a pull request:\n\n- Align the PR body with the full base-to-head diff/i, relPath);
-    assert.match(text, /check PR CI\/status before reporting completion/i, relPath);
-    assert.match(text, /After pushing:\n\n- Check PR CI\/status before reporting completion/i, relPath);
-    assert.match(text, /if pending, say it is unverified/i, relPath);
-    assert.match(text, /If failed, inspect accessible logs/i, relPath);
-    assert.match(text, /after two failed fix attempts, stop and report the blocker/i, relPath);
-    assert.match(text, /Never:\n\n- Push to `main`, secrets, credentials, live\/runtime files, failed targeted validation, or safety-blocked changes/i, relPath);
-    assert.match(text, /- Claim CI passed unless checked/i, relPath);
-    assert.match(text, /- Hide failing, pending, or inaccessible CI/i, relPath);
-    assert.match(text, /full base-to-head diff/i, relPath);
-    assert.match(text, /Align the PR body with the full base-to-head diff/i, relPath);
-    assert.match(text, /If you cannot update it directly, provide exact replacement PR body text/i, relPath);
-  }
-});
-
-test('Project Module Standard documents the playbook boundary', () => {
-  const text = readTextFile(path.join(repoRoot, 'repo', 'docs', 'PROJECT-MODULE-STANDARD.md'));
-  assert.match(text, /## Playbook Boundary/);
-  assert.match(text, /Do not use `playbooks\/` as a default home for full working instructions\./);
-  assert.match(text, /A playbook may exist only when it is a short reviewed operating overview, routing guide, or safety wrapper\./);
-  assert.match(text, /publish it from `_projects\/\*\*\/_main\/\*\*` using exact `copy`, `extract`, or `concat`/);
-});
-
-test('curated playbook recipes are not full runtime skill references', () => {
-  const offenders = [];
-  for (const manifest of manifestsById().values()) {
-    for (const output of manifest.outputs || []) {
-      const sources = output.sources || [output.source].filter(Boolean);
-      const usesPlaybookSource = sources.some((source) => source.includes('curated_output_for_ai/playbooks/'));
-      const publishesRuntimeSkillSurface = /^skills\/[^/]+\/(references|templates)\//.test(output.output || '');
-      if (!usesPlaybookSource || !publishesRuntimeSkillSurface) continue;
-
-      const label = `${output.notes || ''} ${output.fidelity || ''}`;
-      const explicitlyAllowed = /\b(overview|safety wrapper|routing guide)\b/i.test(label) && output.fidelity !== 'exact';
-      if (!explicitlyAllowed) offenders.push(`${manifest.id}: ${output.output}`);
-    }
-  }
-  assert.deepEqual(offenders, []);
-});
-
-test('validation workflow runs canonical full validation read-only', () => {
-  const workflow = readTextFile(path.join(repoRoot, '.github', 'workflows', 'validate.yml'));
-  const expectedCommands = [
-    'node repo/scripts/sync-repo-doc-contract.cjs --check',
-    'node repo/scripts/sync-toolkit-projects.cjs --check',
-    'node repo/scripts/audit-project-source-locks.cjs',
-    'node repo/scripts/audit-published-surfaces.cjs --check',
-    'node repo/scripts/audit-fallback-risk.cjs',
-    'node repo/scripts/validate-toolkit.cjs',
-    'node --test repo/tests/*.test.cjs',
-    'node repo/scripts/package-skills.cjs --check',
-    'node repo/scripts/audit-skill-portability.cjs',
-    'node repo/scripts/package-packs.cjs --check',
-    'node repo/scripts/run-design-tests.cjs',
-    'git diff --check'
-  ];
-  assert.doesNotMatch(workflow, /^\s*run:\s+npm run validate:all\s*$/m);
-  assert.doesNotMatch(workflow, /\bnpm\s+run\s+validate:all\b/);
-  assert.match(workflow, /^\s*run:\s*\|\s*$/m);
-  for (const command of expectedCommands) {
-    assert.match(workflow, new RegExp(`^\\s*${escapeRegExp(command)}\\s*$`, 'm'), command);
-  }
-  assert.doesNotMatch(workflow, /sync-repo-doc-contract\.cjs --write/);
-  assert.match(workflow, /^permissions:\n  contents: read$/m);
-});
-
-test('validator rejects validation workflow that relies on npm validate script', () => {
-  const cwd = tempCopy();
-  const workflowPath = path.join(cwd, '.github', 'workflows', 'validate.yml');
-  const workflow = readTextFile(workflowPath);
-  fs.writeFileSync(
-    workflowPath,
-    workflow.replace(/run:\s*\|[\s\S]*$/m, 'run: npm run validate:all\n')
-  );
-
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /validate\.yml must use explicit validation commands instead of npm run validate:all/);
-});
-
-test('source-watch PR notifier uses the stable review-notification PR contract', () => {
-  const workflow = readTextFile(path.join(repoRoot, '.github', 'workflows', 'source-watch-pr.yml'));
-  assert.match(workflow, /^name:\s*Source Watch PR Notifier\s*$/m);
-  for (const cron of ['17 3 * * *', '43 9 * * *', '29 15 * * *']) {
-    assert.ok(workflow.includes(`cron: "${cron}"`), cron);
-  }
-  assert.match(workflow, /^  contents: write$/m);
-  assert.match(workflow, /^  pull-requests: write$/m);
-  assert.doesNotMatch(workflow, /^  issues: write$/m);
-  assert.match(workflow, /repo\/scripts\/check-project-source-updates\.cjs/);
-  assert.match(workflow, /source-watch\/review-active-third-party-updates/);
-  assert.match(workflow, /\[source-watch\] Review active source-watch updates/);
-  assert.match(workflow, /This PR is a review notification only\./);
-  assert.match(workflow, /No auto-merge is allowed\./);
-  assert.equal(sourceWatchPrBodyText(workflow), [
-    'This PR is a review notification only.',
-    'No source files or advisory tracking documents were updated.',
-    'No review-state cursors were changed.',
-    'No SOURCE-LOCK pins or advisory baselines were changed.',
-    'No SOURCE-LOCK pins were changed.',
-    'No toolkit rules, skills, hooks, memory guidance, repo-map guidance, or cleanup guidance were modified or deleted.',
-    'No upstream code was executed.',
-    'No auto-merge is allowed.',
-    'A human must review upstream changes, attribution/licence impact, allowlist scope, advisory recommendations, and host-harness drift evidence, then ask an AI agent to inspect before any real edits happen.',
-    'Advisory actions, when present, are read from `repo/source-watch/advisory-targets.json`.',
-    'No advisory tracking document was changed by this workflow.',
-    'If advisory action is taken, update the advisory document in a separate human-reviewed PR.',
-    'If meaningful host-harness drift is found, open a separate PR with evidence, rationale, exact proposed modifications, and validation.',
-    '',
-    '- [ ] Review upstream diff manually.',
-    '- [ ] Confirm changed files are within allowlist.',
-    '- [ ] Confirm attribution/licence notes still apply.',
-    '- [ ] Confirm no upstream code was executed.',
-    '- [ ] Decide whether a separate update PR should copy/adapt files.',
-    '- [ ] For Host Harness Capability Drift Review, classify affected toolkit components using the linked template before proposing changes.',
-    '- [ ] Confirm any shrink, move, host-native, or delete recommendation is implemented only in a separate evidence-backed PR.',
-    '- [ ] If advisory action is taken, update the advisory document in a separate human-reviewed PR.',
-    '- [ ] Run npm run validate:all before any real source update merge.'
-  ].join('\n'));
-  assert.match(workflow, /persist-credentials:\s*false/);
-  assert.match(workflow, /GH_TOKEN: \$\{\{ github\.token \}\}/);
-  assert.match(workflow, /bash repo\/scripts\/update-source-watch-review-branch\.sh/);
-  const helper = readTextFile(path.join(repoRoot, 'repo', 'scripts', 'update-source-watch-review-branch.sh'));
-  assert.match(helper, /git remote set-url origin "https:\/\/x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/);
-  assert.match(helper, /git push --force-with-lease="refs\/heads\/\$BRANCH:\$remote_sha" origin "HEAD:\$BRANCH"/);
-  assert.match(helper, /git push --force-with-lease="refs\/heads\/\$BRANCH:" origin "HEAD:\$BRANCH"/);
-  assert.doesNotMatch(helper, /git push origin "HEAD:\$BRANCH"/);
-  assert.doesNotMatch(workflow, /git push origin (?:HEAD:)?main\b/i);
-  assert.doesNotMatch(workflow, /git\s+push[^\n]*(?:--force(?!-with-lease)|-f\b)/i);
-  assert.doesNotMatch(workflow, /git\s+add[^\n]*(?:_projects|SOURCE-LOCK\.json)/i);
-  assert.doesNotMatch(workflow, /gh issue create|safe-source-update\.cjs|gh pr merge|--auto/i);
-});
-
-test('validator rejects source-watch PR notifier issue permission', () => {
-  const cwd = tempCopy();
-  const workflowPath = path.join(cwd, '.github', 'workflows', 'source-watch-pr.yml');
-  const workflow = readTextFile(workflowPath);
-  fs.writeFileSync(workflowPath, workflow.replace('  pull-requests: write\n', '  pull-requests: write\n  issues: write\n'));
-
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /source-watch-pr\.yml must grant only contents: write and pull-requests: write/);
-});
-
-test('validator rejects source-watch PR notifier issue permission with inline comment', () => {
-  const cwd = tempCopy();
-  const workflowPath = path.join(cwd, '.github', 'workflows', 'source-watch-pr.yml');
-  const workflow = readTextFile(workflowPath);
-  fs.writeFileSync(workflowPath, workflow.replace('  pull-requests: write\n', '  pull-requests: write\n  issues: write # not actually harmless\n'));
-
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /source-watch-pr\.yml must grant only contents: write and pull-requests: write/);
-});
-
-test('validator accepts expected workflow permissions with inline comments', () => {
-  const cwd = tempCopy();
-  const workflowPath = path.join(cwd, '.github', 'workflows', 'source-watch-pr.yml');
-  const workflow = readTextFile(workflowPath)
-    .replace('  contents: write\n', '  contents: write # needed to update the stable notification branch\n')
-    .replace('  pull-requests: write\n', '  pull-requests: write # needed to create or update the stable notification PR\n');
-  fs.writeFileSync(workflowPath, workflow);
-
-  const result = runValidate(cwd);
-  assert.equal(result.status, 0, result.stderr);
-});
-
-test('source-watch advisory plan is manual-only', () => {
-  const workflow = readTextFile(path.join(repoRoot, '.github', 'workflows', 'source-watch-plan.yml'));
-  assert.match(workflow, /^name:\s*Source Watch Advisory Plan\s*$/m);
-  assert.match(workflow, /^\s{2}workflow_dispatch:\s*$/m);
-  assert.doesNotMatch(workflow, /^\s{2}schedule:\s*$/m);
-});
-
-test('source-watch PR-notification-only rule is durable and synced', () => {
-  for (const relPath of [
-    contractPartialPath,
-    'AGENTS.md',
-    'README.md',
-    '_projects/repo-methodology/context-preserving-ai-publisher/_main/templates/repo-docs/project-module-standard.template.md',
-    'skills/context-preserving-ai-publisher/templates/repo-docs/project-module-standard.template.md'
-  ]) {
-    const text = readTextFile(path.join(repoRoot, relPath));
-    assert.ok(text.includes(sourceWatchPrNotificationRule), relPath);
-  }
-});
-
-test('source-watch PR notifier is the only scheduled source-watch workflow', () => {
-  const workflowDir = path.join(repoRoot, '.github', 'workflows');
-  const workflowFiles = fs.readdirSync(workflowDir)
-    .filter((name) => /\.ya?ml$/i.test(name))
-    .map((name) => `.github/workflows/${name}`);
-  const scheduledSourceWatch = workflowFiles.filter((relPath) => {
-    const text = readTextFile(path.join(repoRoot, relPath));
-    return /source[- ]watch/i.test(`${relPath}\n${text}`) &&
-      /^\s{2}schedule:\s*$/m.test(text);
-  });
-
-  assert.deepEqual(scheduledSourceWatch, ['.github/workflows/source-watch-pr.yml']);
-  assert.equal(fs.existsSync(path.join(repoRoot, '.github', 'workflows', 'safe-source-update.yml')), false);
-});
-
-test('weekly ecosystem radar codebase is fully removed', () => {
-  for (const relPath of [
-    '.github/workflows/weekly-ecosystem-radar.yml',
-    'repo/scripts/check-ecosystem-updates.cjs',
-    'repo/ecosystem-radar.json',
-    'repo/tests/check-ecosystem-updates.test.cjs',
-    'repo/tests/weekly-ecosystem-radar-workflow.test.cjs'
-  ]) {
-    assert.equal(fs.existsSync(path.join(repoRoot, relPath)), false, `${relPath} should be removed`);
-  }
-});
-
-test('validator rejects weekly ecosystem radar resurrection', () => {
-  const cwd = tempCopy();
-  const workflowPath = path.join(cwd, '.github', 'workflows', 'weekly-ecosystem-radar.yml');
-  fs.writeFileSync(workflowPath, [
-    'name: Weekly Ecosystem Radar',
-    'on:',
-    '  schedule:',
-    '    - cron: "37 6 * * 2"',
-    'permissions:',
-    '  contents: write'
-  ].join('\n'));
-
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /weekly ecosystem radar has been removed/);
-});
-
-test('validator accepts the daily source-watch advisory document', () => {
-  const errors = validator.runValidation();
-  assert.equal(errors.filter((error) => /advisory-targets\.json/.test(error)).length, 0, errors.join('\n'));
-});
-
-test('validator accepts the source-watch review-state document and its seeded identities', () => {
-  const errors = validator.runValidation();
-  assert.equal(errors.filter((error) => /review-state\.json/.test(error)).length, 0, errors.join('\n'));
-});
-
-test('validator rejects malformed or identity-mismatched source-watch review cursors', () => {
-  const cases = [
-    {
-      label: 'abbreviated SHA',
-      mutate(record) { record.reviewed_through_sha = '1234'; },
-      expected: /reviewed_through_sha must be a 40-character SHA/
-    },
-    {
-      label: 'invalid date',
-      mutate(record) { record.reviewed_at = '2026-02-30'; },
-      expected: /reviewed_at must be a valid calendar date/
-    },
-    {
-      label: 'unsupported disposition',
-      mutate(record) { record.disposition = 'MAYBE'; },
-      expected: /disposition is unsupported/
-    },
-    {
-      label: 'identity mismatch',
-      mutate(record) { record.repository = 'different-owner/different-repo'; },
-      expected: /review-state\.json identity mismatch/
-    },
-    {
-      label: 'unsupported top-level key',
-      mutate(_record, state) { state.unsupported = true; },
-      expected: /review-state\.json contains unsupported top-level field unsupported/
-    },
-    {
-      label: 'unsupported policy key',
-      mutate(_record, state) { state.policy.unsupported = true; },
-      expected: /review-state\.json policy contains unsupported field unsupported/
-    },
-    {
-      label: 'unsupported record key',
-      mutate(record) { record.unsupported = true; },
-      expected: /contains unsupported field unsupported/
-    },
-    {
-      label: 'invalid description type',
-      mutate(_record, state) { state.policy.description = 42; },
-      expected: /policy\.description must be a non-empty string/
-    },
-    {
-      label: 'empty description',
-      mutate(_record, state) { state.policy.description = '   '; },
-      expected: /policy\.description must be a non-empty string/
-    }
-  ];
-
-  for (const testCase of cases) {
-    const cwd = tempCopy();
-    const statePath = path.join(cwd, 'repo', 'source-watch', 'review-state.json');
-    const state = readJsonFile(statePath);
-    testCase.mutate(state.records[0], state);
-    writeJsonFile(statePath, state);
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0, testCase.label);
-    assert.match(result.stderr, testCase.expected, testCase.label);
-  }
-
-  const duplicateCwd = tempCopy();
-  const duplicatePath = path.join(duplicateCwd, 'repo', 'source-watch', 'review-state.json');
-  const duplicateState = readJsonFile(duplicatePath);
-  duplicateState.records.push({ ...duplicateState.records[0] });
-  writeJsonFile(duplicatePath, duplicateState);
-  const duplicateResult = runValidate(duplicateCwd);
-  assert.notEqual(duplicateResult.status, 0);
-  assert.match(duplicateResult.stderr, /review-state\.json has duplicate target key/);
-});
-
-test('auto-sync workflow owns agent instruction shim freshness', () => {
-  assert.equal(fs.existsSync(path.join(repoRoot, '.github', 'workflows', 'build-agent-rule-templates.yml')), false);
-  assert.equal(fs.existsSync(path.join(repoRoot, 'repo', 'scripts', 'agent-rule-template-specs.json')), false);
-  assert.equal(fs.existsSync(path.join(repoRoot, 'repo', 'scripts', 'build-agent-rule-templates.ps1')), false);
-  assert.equal(fs.existsSync(path.join(repoRoot, 'repo', 'scripts', '_build-agent-rule-templates.cmd')), false);
-
-  const workflow = readTextFile(path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'));
-  for (const rel of [
-    '_projects/development/ai-coding-agent-rules/_main/_partials/**'
-  ]) {
-    assert.match(workflow, new RegExp(`- "${escapeRegExp(rel)}"`), rel);
-  }
-  for (const command of [
-    'node "$TRUSTED_ROOT/repo/scripts/sync-agent-instruction-shims.cjs" --workspace "$PR_ROOT" --write',
-    'node "$TRUSTED_ROOT/repo/scripts/sync-agent-instruction-shims.cjs" --workspace "$PR_ROOT" --check',
-    'node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write',
-    'node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --check'
-  ]) {
-    assert.match(workflow, new RegExp(escapeRegExp(command)), command);
-  }
-  assert.doesNotMatch(workflow, /agent-rule-template-specs|build-agent-rule-templates/);
-});
-
-test('auto-sync generated surfaces workflow is accepted by validation', () => {
-  const errors = validator.runValidation();
-  assert.equal(errors.filter((error) => /auto-sync-generated-surfaces\.yml/.test(error)).length, 0, errors.join('\n'));
-});
-
-test('validator rejects contents write outside the auto-sync generated surfaces workflow', () => {
-  const cwd = tempCopy();
-  fs.writeFileSync(
-    path.join(cwd, '.github', 'workflows', 'unsafe-write.yml'),
-    [
-      'name: Unsafe write',
-      'on:',
-      '  pull_request:',
-      'permissions:',
-      '  contents: write',
-      'jobs:',
-      '  unsafe:',
-      '    runs-on: ubuntu-latest',
-      '    steps:',
-      '      - run: echo unsafe'
-    ].join('\n')
-  );
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /unsafe-write\.yml uses contents: write/);
-});
-
-test('validator rejects git push outside the auto-sync generated surfaces workflow', () => {
-  const cwd = tempCopy();
-  fs.writeFileSync(
-    path.join(cwd, '.github', 'workflows', 'unsafe-push.yml'),
-    [
-      'name: Unsafe push',
-      'on:',
-      '  pull_request:',
-      'permissions:',
-      '  contents: read',
-      'jobs:',
-      '  unsafe:',
-      '    runs-on: ubuntu-latest',
-      '    steps:',
-      '      - run: git push origin HEAD:branch'
-    ].join('\n')
-  );
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /unsafe-push\.yml contains forbidden commit\/push behavior/);
-});
-
-test('auto-sync generated surfaces workflow rejects forbidden events and missing guards', () => {
-  const generatedScopePrefix = 'README.md|skills/*|';
-  const cases = [
-    ['pull_request is forbidden', (text) => text.replace('pull_request_target:', 'pull_request:'), /must use pull_request_target/],
-    ['push is forbidden', (text) => text.replace('pull_request_target:', 'push:\n  pull_request_target:'), /must not trigger on push/],
-    ['schedule is forbidden', (text) => text.replace('pull_request_target:', 'schedule:\n  pull_request_target:'), /must not trigger on schedule/],
-    ['workflow_run is forbidden', (text) => text.replace('pull_request_target:', 'workflow_run:\n  pull_request_target:'), /must not trigger on workflow_run/],
-    ['extra permissions are forbidden', (text) => text.replace('  pull-requests: read', '  pull-requests: read\n  issues: write'), /must grant only contents: write and pull-requests: read/],
-    ['same-repo guard is required', (text) => text.replaceAll('github.event.pull_request.head.repo.full_name == github.repository', 'true'), /missing same-repo PR guard/],
-    ['head main guard is required', (text) => text.replaceAll("github.event.pull_request.head.ref != 'main'", 'true'), /missing head\.ref != main guard/],
-    ['oversized PR file-list guard is required', (text) => text.replace('if (( changed_file_count > 3000 )); then', 'if false; then'), /preflight must reject PRs with more than 3000 changed files/],
-    ['post-sync changed-path validation is required', (text) => text.replaceAll('Forbidden post-sync change outside generated output scope', 'Removed post-sync guard'), /missing post-sync changed-path validation/],
-    ['_projects wildcard output scope stays rejected', (text) => text.replaceAll(generatedScopePrefix, `${generatedScopePrefix}_projects/*|`), /must not allow broad generated output paths/],
-    ['repo output scope stays rejected', (text) => text.replaceAll(generatedScopePrefix, `${generatedScopePrefix}repo/*|`), /must not allow broad generated output paths/],
-    ['.github output scope stays rejected', (text) => text.replaceAll(generatedScopePrefix, `${generatedScopePrefix}.github/*|`), /must not allow broad generated output paths/]
-  ];
-
-  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
-  const original = readTextFile(workflowPath);
-  for (const [name, mutate, expected] of cases) {
-    const cwd = tempCopy();
-    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0, name);
-    assert.match(result.stderr, expected, name);
-  }
-});
-
-test('auto-sync generated surfaces workflow rejects forbidden commands and broad commit scopes', () => {
-  const cases = [
-    ['workflow_dispatch is forbidden', (text) => text.replace('pull_request_target:', 'workflow_dispatch:\n  pull_request_target:'), /must not trigger on workflow_dispatch/],
-    ['source-watch script is forbidden', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write', 'node "$TRUSTED_ROOT/repo/scripts/watch-project-sources.cjs" --workspace "$PR_ROOT"'), new RegExp('must not run source-watch or source-update ' + 'scripts')],
-    ['live n8n export is forbidden', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write', 'scr' + 'ipts/export-n8n-workflows-live.ps1'), /must not run live n8n import\/export/],
-    ['git add scope is fixed', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" add README.md skills', '/usr/bin/git -C "$PR_ROOT" add README.md skills repo'), /must commit only approved generated output paths/],
-    ['git add must not stage AGENTS.md', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" add README.md skills', '/usr/bin/git -C "$PR_ROOT" add README.md AGENTS.md skills mcp'), /must commit only approved generated output paths|must not stage active root AI instruction files/],
-    ['git add must not stage Claude shim', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" add README.md skills', '/usr/bin/git -C "$PR_ROOT" add README.md CLAUDE.md skills mcp'), /must commit only approved generated output paths|must not stage active root AI instruction files/],
-    ['commit bypasses hooks', (text) => text.replace('commit --no-verify -m', 'commit -m'), /must use git commit --no-verify/],
-    ['final push resets remote', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" remote set-url origin', 'echo remote'), /must set push remote with the GitHub token only in the final push step/]
-  ];
-
-  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
-  const original = readTextFile(workflowPath);
-  for (const [name, mutate, expected] of cases) {
-    const cwd = tempCopy();
-    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0, name);
-    assert.match(result.stderr, expected, name);
-  }
-});
-
-test('auto-sync generated surfaces workflow runs trusted scripts against the PR workspace', () => {
-  const cases = [
-    ['direct default-workspace script execution is forbidden', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --write', 'node repo/scripts/sync-repo-doc-contract.cjs --workspace "$PR_ROOT" --write'), /must not execute maintenance scripts from the default or PR workspace/],
-    ['PR workspace script execution is forbidden', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --write', 'node "$PR_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --write'), /must not execute maintenance scripts from the PR workspace/],
-    ['trusted checkout is required', (text) => text.replace('      - name: Checkout trusted base revision', '      - name: Removed trusted checkout'), /must check out trusted base and PR workspaces only after preflight/],
-    ['trusted checkout must use base SHA', (text) => text.replace('ref: ${{ github.event.pull_request.base.sha }}', 'ref: ${{ github.event.pull_request.base.ref }}'), /must check out the trusted base SHA to trusted\//],
-    ['PR checkout path is required', (text) => text.replace('path: pr', 'path: pull-request'), /must check out the guarded PR head SHA to pr\//],
-    ['sync scripts require explicit PR workspace', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --write', 'node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --write'), /must run trusted maintenance scripts with --workspace "\$PR_ROOT"/],
-    ['static checks require explicit PR workspace', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --check', 'node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --check'), /must run trusted maintenance scripts with --workspace "\$PR_ROOT"/],
-    ['git commands must target PR checkout', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" diff --name-only', 'git diff --name-only'), /git commands must explicitly target the PR workspace/]
-  ];
-
-  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
-  const original = readTextFile(workflowPath);
-  for (const [name, mutate, expected] of cases) {
-    const cwd = tempCopy();
-    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0, name);
-    assert.match(result.stderr, expected, name);
-  }
-});
-
-test('auto-sync generated surfaces workflow pins and rechecks the guarded PR head SHA', () => {
-  const cases = [
-    ['missing HEAD_SHA env is rejected', (text) => text.replace('      HEAD_SHA: ${{ github.event.pull_request.head.sha }}\n', ''), /missing guarded PR head SHA environment variable/],
-    ['PR checkout using head.ref is rejected', (text) => text.replace('ref: ${{ github.event.pull_request.head.sha }}', 'ref: ${{ github.event.pull_request.head.ref }}'), /must not check out the PR branch by mutable head\.ref/],
-    ['PR checkout using head.sha is required', (text) => text.replace('ref: ${{ github.event.pull_request.head.sha }}', 'ref: ${{ github.event.pull_request.head.repo.full_name }}'), /must check out the guarded PR head SHA to pr\//],
-    ['preflight current-head SHA query is required', (text) => text.replace('gh api "repos/${REPOSITORY_FULL_NAME}/pulls/${PR_NUMBER}" --jq \'.head.sha\'', 'echo "$HEAD_SHA"'), /preflight must verify the current PR head SHA from PR metadata/],
-    ['preflight stale-run rejection is required', (text) => text.replace('if [[ "$current_head_sha" != "$HEAD_SHA" ]]; then', 'if false; then'), /preflight must reject stale runs when the PR head SHA changed/],
-    ['preflight stale-run rejection must happen before optional skip', (text) => {
-      const start = text.indexOf('          current_head_sha="$(');
-      const end = text.indexOf('          for path in "${changed_files[@]}"; do', start);
-      assert.notEqual(start, -1);
-      assert.notEqual(end, -1);
-      const currentHeadBlock = text.slice(start, end);
-      return `${text.slice(0, start)}${text.slice(end).replace('          eligible=false', `${currentHeadBlock}          eligible=false`)}`;
-    }, /preflight must reject stale PR heads before optional auto-sync skips/],
-    ['post-checkout rev-parse verification is required', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" rev-parse HEAD', 'echo "$HEAD_SHA"'), /must verify the checked-out PR commit matches HEAD_SHA/],
-    ['post-checkout verification must run before sync', (text) => moveWorkflowStepAfter(text, 'Verify checked-out PR commit', 'Sync deterministic generated surfaces'), /must verify the checked-out PR commit before running sync/],
-    ['final remote branch SHA check is required before push', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" ls-remote origin "refs/heads/${HEAD_REF}"', 'echo "$HEAD_SHA"'), /final push must verify the PR branch still points to HEAD_SHA before pushing/],
-    ['force push is rejected', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" push origin "HEAD:${HEAD_REF}"', '/usr/bin/git -C "$PR_ROOT" push --force origin "HEAD:${HEAD_REF}"'), /must not force push generated output/]
-  ];
-
-  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
-  const original = readTextFile(workflowPath);
-  for (const [name, mutate, expected] of cases) {
-    const cwd = tempCopy();
-    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0, name);
-    assert.match(result.stderr, expected, name);
-  }
-});
-
-test('auto-sync generated surfaces workflow keeps static checks narrow', () => {
-  const cases = [
-    ['full validator against PR workspace is forbidden', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" diff --cached --check', 'node "$TRUSTED_ROOT/repo/scripts/validate-toolkit.cjs" --workspace "$PR_ROOT"\n          /usr/bin/git -C "$PR_ROOT" diff --cached --check'), /must not run full validation against the PR workspace/],
-    ['validate-toolkit workspace invocation is forbidden', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" diff --cached --check', 'node "$TRUSTED_ROOT/repo/scripts/validate-toolkit.cjs" --workspace "$PR_ROOT"\n          /usr/bin/git -C "$PR_ROOT" diff --cached --check'), /must not run full validation against the PR workspace/],
-    ['extra static command is forbidden', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" diff --check', '/usr/bin/git -C "$PR_ROOT" diff --check\n          echo extra'), /static generated surface checks must be limited to sync freshness and git diff checks/],
-    ['missing sync contract check is forbidden', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-repo-doc-contract.cjs" --workspace "$PR_ROOT" --check\n', ''), /static generated surface checks must be limited to sync freshness and git diff checks/]
-  ];
-
-  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
-  const original = readTextFile(workflowPath);
-  for (const [name, mutate, expected] of cases) {
-    const cwd = tempCopy();
-    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0, name);
-    assert.match(result.stderr, expected, name);
-  }
-});
-
-test('auto-sync generated surfaces workflow rejects PR-controlled test execution', () => {
-  const staticCheckAnchor = '/usr/bin/git -C "$PR_ROOT" diff --cached --check';
-  const preflightAnchor = '          if [[ "$HEAD_REPO_FULL_NAME" != "$REPOSITORY_FULL_NAME" ]]; then';
-  const cases = [
-    ['validate:all is forbidden', (text) => text.replace(staticCheckAnchor, `npm run validate:all\n          ${staticCheckAnchor}`), /must not run npm run validate:all/],
-    ['env-prefixed validate:all is forbidden', (text) => text.replace(preflightAnchor, `          GH_TOKEN=placeholder npm run validate:all\n${preflightAnchor}`), /must not run npm run validate:all/],
-    ['path-prefixed validate:all is forbidden', (text) => text.replace(preflightAnchor, `          /usr/bin/npm run validate:all\n${preflightAnchor}`), /must not run npm run validate:all/],
-    ['npm command is forbidden', (text) => text.replace(staticCheckAnchor, `npm ci\n          ${staticCheckAnchor}`), /must not run npm, pnpm, or yarn/],
-    ['env-prefixed npm command is forbidden', (text) => text.replace(preflightAnchor, `          NODE_ENV=test npm ci\n${preflightAnchor}`), /must not run npm, pnpm, or yarn/],
-    ['path-prefixed npm command is forbidden', (text) => text.replace(preflightAnchor, `          /usr/bin/npm ci\n${preflightAnchor}`), /must not run npm, pnpm, or yarn/],
-    ['pnpm command is forbidden', (text) => text.replace(staticCheckAnchor, `pnpm test\n          ${staticCheckAnchor}`), /must not run npm, pnpm, or yarn/],
-    ['yarn command is forbidden', (text) => text.replace(staticCheckAnchor, `yarn test\n          ${staticCheckAnchor}`), /must not run npm, pnpm, or yarn/],
-    ['node test command is forbidden', (text) => text.replace(staticCheckAnchor, `node --test repo/tests/*.test.cjs\n          ${staticCheckAnchor}`), /must not run generated Node test suites/],
-    ['python unit tests are forbidden', (text) => text.replace(staticCheckAnchor, 'python -m unittest discover -s skills/ui-ux-secure-frontend-design/tools/design-system-generator/' + 'tes' + `ts\n          ${staticCheckAnchor}`), new RegExp('must not run Python unit ' + 'tests')],
-    ['generated tool tests are forbidden', (text) => text.replace(staticCheckAnchor, 'node skills/ui-ux-secure-frontend-design/tools/design-system-generator/' + 'tes' + `ts/run.js\n          ${staticCheckAnchor}`), new RegExp('must not run generated tool ' + 'tests')]
-  ];
-
-  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
-  const original = readTextFile(workflowPath);
-  for (const [name, mutate, expected] of cases) {
-    const cwd = tempCopy();
-    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0, name);
-    assert.match(result.stderr, expected, name);
-  }
-});
-
-test('auto-sync generated surfaces workflow keeps privileged preflight before checkout', () => {
-  const cases = [
-    ['checkout before preflight is forbidden', (text) => text.replace('      - name: Preflight guard', '      - name: Checkout PR head branch'), /must run preflight before any checkout/],
-    ['persisted checkout credentials are forbidden', (text) => text.replace('persist-credentials: false', 'persist-credentials: true'), /must not use persisted checkout credentials/],
-    ['base-sha git diff changed-file detection is forbidden', (text) => text.replace("gh api --paginate \\", 'git diff --name-only "$BASE_SHA" HEAD\n          gh api --paginate \\'), /must not compute PR changed files with git diff against the PR branch/],
-    ['PR files API is required', (text) => text.replace('gh api --paginate \\', 'echo no api \\'), /must query PR changed files before checkout/],
-    ['github token is not exposed to sync or validation', (text) => text.replace('node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write', 'GH_TOKEN="${{ github.token }}" node "$TRUSTED_ROOT/repo/scripts/sync-toolkit-projects.cjs" --workspace "$PR_ROOT" --write'), /must expose github.token only to preflight and final push steps/],
-    ['should_sync gates checkout and writeback', (text) => text.replace("        if: steps.preflight.outputs.should_sync == 'true'\n        uses: actions/checkout@v7", '        uses: actions/checkout@v7'), /must skip checkout and writeback steps when preflight should_sync is false/]
-  ];
-
-  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
-  const original = readTextFile(workflowPath);
-  for (const [name, mutate, expected] of cases) {
-    const cwd = tempCopy();
-    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0, name);
-    assert.match(result.stderr, expected, name);
-  }
-});
-
-test('auto-sync generated surfaces workflow requires exact privileged action references', () => {
-  const cases = [
-    [
-      'trusted checkout v1 downgrade is rejected',
-      (text) => replaceWorkflowStepText(text, 'Checkout trusted base revision', /uses: actions\/checkout@v7/, 'uses: actions/checkout@v1'),
-      /Checkout trusted base revision must use actions\/checkout@v7/
-    ],
-    [
-      'PR checkout v1 downgrade is rejected',
-      (text) => replaceWorkflowStepText(text, 'Checkout PR head commit', /uses: actions\/checkout@v7/, 'uses: actions/checkout@v1'),
-      /Checkout PR head commit must use actions\/checkout@v7/
-    ],
-    [
-      'setup-node v1 downgrade is rejected',
-      (text) => replaceWorkflowStepText(text, 'Set up Node.js', /uses: actions\/setup-node@v7/, 'uses: actions/setup-node@v1'),
-      /Set up Node\.js must use actions\/setup-node@v7/
-    ]
-  ];
-
-  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
-  const original = readTextFile(workflowPath);
-  for (const [name, mutate, expected] of cases) {
-    const cwd = tempCopy();
-    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0, name);
-    assert.match(result.stderr, expected, name);
-  }
-});
-
-test('auto-sync generated surfaces workflow rejects unexpected uses action steps', () => {
-  const cases = [
-    [
-      'extra checkout v1 action after preflight is rejected',
-      `      - name: Extra unsafe checkout
-        if: steps.preflight.outputs.should_sync == 'true'
-        uses: actions/checkout@v1`,
-      /must allow only the reviewed uses action steps/
-    ],
-    [
-      'extra checkout v7 action after preflight is rejected',
-      `      - name: Extra duplicate checkout
-        if: steps.preflight.outputs.should_sync == 'true'
-        uses: actions/checkout@v7`,
-      /must allow only the reviewed uses action steps/
-    ],
-    [
-      'extra setup-node v1 action is rejected',
-      `      - name: Extra setup node
-        if: steps.preflight.outputs.should_sync == 'true'
-        uses: actions/setup-node@v1`,
-      /must allow only the reviewed uses action steps/
-    ],
-    [
-      'unrelated uses action is rejected',
-      `      - name: Extra unrelated action
-        if: steps.preflight.outputs.should_sync == 'true'
-        uses: actions/cache@v4`,
-      /must allow only the reviewed uses action steps/
-    ]
-  ];
-
-  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
-  const original = readTextFile(workflowPath);
-  for (const [name, stepText, expected] of cases) {
-    const cwd = tempCopy();
-    fs.writeFileSync(
-      path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'),
-      `${insertWorkflowStepBefore(original, 'Checkout trusted base revision', stepText)}\n`
-    );
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0, name);
-    assert.match(result.stderr, expected, name);
-  }
-});
-
-test('auto-sync generated surfaces workflow snapshots and rechecks staged output before commit', () => {
-  const cases = [
-    ['final recheck is required after validation', (text) => text.replace('      - name: Final pre-commit workspace recheck', '      - name: Removed pre-commit workspace recheck'), /must recheck the workspace and staged index after validation and before commit/],
-    ['post-sync staged index snapshot is required', (text) => text.replace('expected_index_tree="$(/usr/bin/git -C "$PR_ROOT" write-tree)"', 'expected_index_tree="$(/usr/bin/git -C "$PR_ROOT" rev-parse HEAD)"'), /must snapshot the staged index after the post-sync guard/],
-    ['staged index tree comparison is required', (text) => text.replace('if [[ "$current_index_tree" != "${EXPECTED_INDEX_TREE}" ]]; then', 'if false; then'), /final recheck must compare the staged index tree snapshot/],
-    ['commit step must not stage files', (text) => text.replace('/usr/bin/git -C "$PR_ROOT" config user.name', '/usr/bin/git -C "$PR_ROOT" add README.md skills\n          /usr/bin/git -C "$PR_ROOT" config user.name'), /commit step must not run git add/],
-    ['final recheck rejects untracked files', (text) => text.replace('untracked_files="$(/usr/bin/git -C "$PR_ROOT" ls-files --others --exclude-standard)"', 'untracked_files=""'), /final recheck must reject untracked files before commit/],
-    ['final recheck rejects unstaged tracked changes', (text) => text.replace('if ! /usr/bin/git -C "$PR_ROOT" diff --quiet; then', 'if false; then'), /final recheck must reject unstaged tracked changes before commit/],
-    ['final recheck rejects staged paths outside generated outputs', (text) => replaceLast(text, '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md', '_projects/development/ai-coding-agent-rules/_main/AGENTS.md'), /final recheck must reject staged paths outside generated output scope/],
-    ['commit step resets dangerous git environment', (text) => text.replace('unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY GIT_SSH_COMMAND', 'echo no reset'), /commit step must reset dangerous git environment state/],
-    ['push step resets dangerous git environment', (text) => replaceLast(text, 'unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY GIT_SSH_COMMAND', 'echo no reset'), /push step must reset dangerous git environment state/]
-  ];
-
-  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
-  const original = readTextFile(workflowPath);
-  for (const [name, mutate, expected] of cases) {
-    const cwd = tempCopy();
-    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0, name);
-    assert.match(result.stderr, expected, name);
-  }
-});
-
-test('auto-sync generated surfaces workflow skips unsafe mixed preflight paths before writeback', () => {
-  const cases = [
-    ['repo docs skip is required', (text) => text.replace('repo/docs/*|', ''), /missing unsafe preflight fail handling for repo\/docs/],
-    ['_main skip is required', (text) => text.replace('_projects/*/_main/*|', ''), /missing unsafe preflight fail handling for _projects\/\*\*\/_main/],
-    ['.github skip is required', (text) => text.replace('.github/*|', ''), /missing unsafe preflight fail handling for \.github/],
-    ['repo scripts skip is required', (text) => text.replace('repo/scripts/*|', ''), new RegExp('missing unsafe preflight fail handling for repo/' + 'scripts')],
-    ['repo tests skip is required', (text) => text.replace('repo/tests/*|', ''), /missing unsafe preflight fail handling for repo\/tests/],
-    ['lockfile skip is required', (text) => text.replace('package.json|package-lock.json|pnpm-lock.yaml|yarn.lock|', ''), /missing unsafe preflight fail handling for package\/lockfile changes/],
-    ['source-of-truth contract partial carve-out is required', (text) => text.replaceAll(contractPartialPath, '_projects/repo-methodology/context-preserving-ai-publisher/_main/_partials/other-contract.md'), /must allow source-of-truth contract partial changes as auto-sync eligible inputs/],
-    ['agent-rule partial carve-out is required', (text) => text.replaceAll('_projects/development/ai-coding-agent-rules/_main/_partials/*', '_projects/blocked/_main/_partials/*'), /must allow agent-rule partial changes as auto-sync eligible inputs/],
-    ['source-side agent-rule output carve-out is required', (text) => text.replaceAll('_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md', '_projects/development/ai-coding-agent-rules/_main/AGENTS.md'), /must allow generated source-side agent-rule templates in the guarded PR file set|missing generated source-side agent-rule template allowlist entry/],
-    ['clear skip notice is required', (text) => text.replace('Auto-sync skipped: this PR touches source/maintenance paths that require manual generated-output commits. Normal Validate checks remain the merge gate.', 'Auto-sync did something else'), /preflight must skip unsafe mixed maintenance\/source PRs without writeback/],
-    ['manual generated-output guidance is required', (text) => text.replace('Normal Validate checks remain the merge gate.', 'Generated outputs will be checked here.'), /preflight must skip unsafe mixed maintenance\/source PRs without writeback/],
-    ['unsafe path branch must set should_sync false', (text) => text.replace('echo "should_sync=false" >> "$GITHUB_OUTPUT"', 'echo "should_sync=true" >> "$GITHUB_OUTPUT"'), /preflight must skip unsafe mixed maintenance\/source PRs without writeback/],
-    ['unsafe path branch must exit successfully', (text) => text.replace('echo "should_sync=false" >> "$GITHUB_OUTPUT"\n                exit 0', 'echo "should_sync=false" >> "$GITHUB_OUTPUT"\n                exit 1'), /preflight must skip unsafe mixed maintenance\/source PRs without writeback/],
-    ['unsafe path branch must not red-fail', (text) => text.replace('Auto-sync skipped: this PR touches source/maintenance paths that require manual generated-output commits', 'Auto-sync refused: this PR mixes generated-sync-eligible changes'), /preflight must skip unsafe mixed maintenance\/source PRs without writeback/]
-  ];
-
-  const workflowPath = path.join(repoRoot, '.github', 'workflows', 'auto-sync-generated-surfaces.yml');
-  const original = readTextFile(workflowPath);
-  for (const [name, mutate, expected] of cases) {
-    const cwd = tempCopy();
-    fs.writeFileSync(path.join(cwd, '.github', 'workflows', 'auto-sync-generated-surfaces.yml'), `${mutate(original)}\n`);
-    const result = runValidate(cwd);
-    assert.notEqual(result.status, 0, name);
-    assert.match(result.stderr, expected, name);
-  }
-});
-
-test('auto-sync generated output path scope is explicit', () => {
-  for (const rel of [
-    'README.md',
-    '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md',
-    'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/README.md'
-  ]) {
-    assert.equal(validator.isAutoSyncGeneratedOutputPath(rel), true, rel);
-  }
-
-  for (const rel of [
-    '_projects/foo/toolkit.project.json',
-    '_projects/foo/curated_output_for_ai/file.md',
-    '_projects/foo/_main/file.md',
-    '_projects/development/ai-coding-agent-rules/_main/_partials/ai-coding-agent-execution.md',
-    '_projects/development/ai-coding-agent-rules/_main/_partials/n8n-agent-rules.md',
-    '_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
-    'AGENTS.md',
-    'CLAUDE.md',
-    'GEMINI.md',
-    '.agents/rules/00-agent-toolkit-bootstrap.md',
-    '_projects/development/ai-coding-agent-rules/_main/AGENTS.with-toolkit-skills.template.md',
-    'mcp/registry/projects.registry.json',
-    'repo/' + 'scr' + 'ipts/anything.cjs',
-    '.github/workflows/anything.yml',
-    'package.json',
-    'package-lock.json',
-    'pnpm-lock.yaml',
-    'yarn.lock',
-    '.gitignore',
-    '.gitattributes'
-  ]) {
-    assert.equal(validator.isAutoSyncGeneratedOutputPath(rel), false, rel);
-  }
-});
-
-test('project modules use _projects/_main with no mandatory exports tree', () => {
-  assert.equal(fs.existsSync(path.join(repoRoot, '_projects')), true);
-  assert.equal(fs.existsSync(path.join(repoRoot, 'projects')), false);
-
-  for (const rel of [
-    '_projects/n8n/local-setup',
-    '_projects/n8n/workflow-toolkit',
-    '_projects/cicd/secure-installer',
-    '_projects/design/ui-ux-pro-max'
-  ]) {
-    const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, rel, 'toolkit.project.json'), 'utf8'));
-    assert.equal(manifest.module_path, rel);
-    assert.equal(manifest.main_path, `${rel}/_main`);
-    assert.equal(fs.existsSync(path.join(repoRoot, rel, '_main')), true);
-    assert.equal(fs.existsSync(path.join(repoRoot, rel, 'main')), false);
-    assert.equal(fs.existsSync(path.join(repoRoot, rel, 'exports')), false);
-  }
-});
-
-test('.gitattributes preserves _projects _main bytes for source locks', () => {
-  const attrs = fs.readFileSync(path.join(repoRoot, '.gitattributes'), 'utf8');
-  assert.match(attrs, /^_projects\/\*\*\/_main\/\*\* -text$/m);
-  assert.match(
-    attrs,
-    /^_projects\/development\/ai-coding-agent-rules\/curated_output_for_ai\/skills\/ai-coding-agent-rules\/\*\*\/\*\.md text eol=lf$/m
-  );
-  assert.match(attrs, /^skills\/ai-coding-agent-rules\/\*\*\/\*\.md text eol=lf$/m);
-  assert.match(attrs, /^skills\/\*\*\/\*\.yaml text eol=lf$/m);
-  assert.match(attrs, /^skills\/\*\*\/\*\.yml text eol=lf$/m);
-  assert.match(attrs, /^skills\/\*\*\/\*\.sh text eol=lf$/m);
-  assert.match(attrs, /^skills\/\*\*\/\*\.env\.example text eol=lf$/m);
-  assert.doesNotMatch(attrs, /^projects\/\*\*\/main\/\*\* -text$/m);
-});
-
-test('validator rejects missing LF checkout rules for generated text outputs', () => {
-  const cwd = tempCopy();
-  const attrsPath = path.join(cwd, '.gitattributes');
-  const attrs = readTextFile(attrsPath);
-  fs.writeFileSync(
-    attrsPath,
-    attrs
-      .replace(/^skills\/\*\*\/\*\.ya\?ml text eol=lf\n/m, '')
-      .replace(/^skills\/\*\*\/\*\.yaml text eol=lf\n/m, '')
-      .replace(/^skills\/\*\*\/\*\.yml text eol=lf\n/m, '')
-      .replace(/^skills\/\*\*\/\*\.sh text eol=lf\n/m, '')
-      .replace(/^skills\/\*\*\/\*\.env\.example text eol=lf\n/m, ''),
-    'utf8'
-  );
-
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Missing generated-output LF checkout rule/);
-});
-
-test('design skill front matter and OpenAI metadata are approved', () => {
-  const errors = validator.runValidation();
-  assert.equal(errors.filter((error) => /Design skill/.test(error)).length, 0, errors.join('\n'));
-});
-
-test('design skill keeps generator tooling inside the skill folder', () => {
-  const files = [];
-  function walk(dir) {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else files.push(full);
-    }
-  }
-  walk(path.join(repoRoot, 'skills', 'ui-ux-secure-frontend-design'));
-  assert.equal(files.some((file) => file.endsWith(path.join('tools', 'design-system-generator', 'scripts', 'design_system.py'))), true);
-  assert.equal(files.some((file) => file.includes(`${path.sep}for_ai${path.sep}`)), false);
-});
-
-test('validator allows local-only Python design generator tooling under skill tools', () => {
-  const cwd = tempCopy();
-  const testFile = path.join(cwd, 'skills', 'ui-ux-secure-frontend-design', 'tools', 'design-system-generator', 'tests', 'extra_allowed.py');
-  fs.writeFileSync(testFile, 'VALUE = 1\n');
-  const result = runValidate(cwd);
-  assert.equal(result.status, 0, result.stderr);
-});
-
-test('validator rejects network, shell, and package-install strings in design generator scripts', () => {
-  const cwd = tempCopy();
-  const scriptDir = path.join(cwd, 'skills', 'ui-ux-secure-frontend-design', 'tools', 'design-system-generator', 'scripts');
-  fs.mkdirSync(scriptDir, { recursive: true });
-  fs.writeFileSync(path.join(scriptDir, 'core.py'), 'import requests\n');
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Design generator script contains forbidden local-only token/);
-});
-
-test('validator flags workspace-relative design generator commands in published docs', () => {
-  const errors = [];
-  validator.validateDesignGeneratorCommandDocs(
-    errors,
-    [
-      '```powershell',
-      'python .\\skills\\ui-ux-secure-frontend-design\\tools\\design-system-generator\\scripts\\design_system.py "SaaS dashboard"',
-      '```'
-    ].join('\n'),
-    'skills/ui-ux-secure-frontend-design/tools/design-system-generator/README.md'
-  );
-  assert.match(errors.join('\n'), /workspace-relative design generator command/);
-});
-
-test('generated agent-rule templates keep manual global and repo-local lanes separate', () => {
-  const executionPrompt = readTextFile(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', '_partials', 'ai-coding-agent-execution.md')).trimEnd();
-  const n8nAdapter = readTextFile(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', '_partials', 'n8n-agent-rules-adapter.md')).trimEnd();
-
-  for (const rel of [
-    '_projects/development/ai-coding-agent-rules/_main/AGENTS.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/CLAUDE.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/GEMINI.template.md'
-  ]) {
-    const text = readTextFile(path.join(repoRoot, rel));
-    assert.equal(generatedNoticeCount(text), 1, rel);
-    assert.equal(generatedPayload(text).trimEnd(), executionPrompt, rel);
-    assert.match(text, /global rules example/i, rel);
-    assert.match(text, /_partials\/ai-coding-agent-execution\.md/, rel);
-    assert.doesNotMatch(text, /GitHub PR Completion Rules|GITHUB APPROVAL NEEDED|VERSION CONTROL APPROVAL NEEDED|REMOTE APPROVAL NEEDED|LOCAL CHANGE APPROVAL NEEDED|PR: none yet/i, rel);
-  }
-
-  const withSafetyComment = (payload) => `${curatedRepoLocalSafetyComment}\n\n${payload}`;
-  const expectedPayloads = new Map([
-    ['AGENTS.managed.template.md', withSafetyComment(managedRepoLocalPayload(executionPrompt, n8nAdapter))],
-    ['CLAUDE.shim.template.md', withSafetyComment(readTextFile(path.join(repoRoot, 'CLAUDE.md')))],
-    ['GEMINI.shim.template.md', withSafetyComment(readTextFile(path.join(repoRoot, 'GEMINI.md')))],
-    ['antigravity-bootstrap.template.md', withSafetyComment(readTextFile(path.join(repoRoot, '.agents', 'rules', '00-agent-toolkit-bootstrap.md')))]
-  ]);
-  const manifest = readJsonFile(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', 'toolkit.project.json'));
-
-  for (const [fileName, expected] of expectedPayloads) {
-    const sourceRel = `_projects/development/ai-coding-agent-rules/curated_output_for_ai/skills/ai-coding-agent-rules/repo-local/${fileName}`;
-    const outputRel = `skills/ai-coding-agent-rules/repo-local/${fileName}`;
-    for (const rel of [sourceRel, outputRel]) {
-      const text = readTextFile(path.join(repoRoot, rel));
-      assert.equal(text, expected, `${rel} is exactly the copy-ready destination payload`);
-      assertBareRepoLocalTemplate(rel, text);
-      assert.doesNotMatch(text, /Claude Code global rules example|Antigravity global rules example|Gemini\s+CLI and Antigravity global rules example|C:\\Users\\<your-user>\\\.(?:claude|gemini)|\$HOME\\\.(?:claude|gemini)/, rel);
-      assert.doesNotMatch(text, /GitHub PR Completion Rules|GITHUB APPROVAL NEEDED|VERSION CONTROL APPROVAL NEEDED|REMOTE APPROVAL NEEDED|LOCAL CHANGE APPROVAL NEEDED|PR: none yet/i, rel);
-    }
-
-    const output = manifest.outputs.find((entry) => entry.output === outputRel);
-    assert.equal(output?.notice, false, `${outputRel} suppresses generated notices because it is copied wholesale`);
-  }
-
-  const rootAgents = readTextFile(path.join(repoRoot, 'AGENTS.md'));
-  const portableAgents = readTextFile(path.join(repoRoot, 'skills', 'ai-coding-agent-rules', 'repo-local', 'AGENTS.managed.template.md'));
-  assert.notEqual(rootAgents, portableAgents, 'root AGENTS.md is not the portable repo-local install source');
-  assert.match(rootAgents, /This root `AGENTS\.md` is toolkit-repo-specific/, 'root AGENTS.md stays toolkit-specific');
-  assert.match(rootAgents, /## Repo-Local Router/, 'root AGENTS.md keeps toolkit repo router');
-  assert.match(portableAgents, /^# AI Coding Agent Rules$/m, 'portable AGENTS template has a top-level document title');
-  assert.match(portableAgents, /## Local Documentation/, 'portable AGENTS template carries local-doc discovery');
-  assert.match(portableAgents, /\[Portable playbook index\]\(docs\/agent-playbooks\/INDEX\.md\) \(`docs\/agent-playbooks\/INDEX\.md`\)/, 'portable AGENTS template links portable docs');
-  assert.match(portableAgents, /## Managed Memory/, 'portable AGENTS template carries optional managed memory guidance');
-  assert.match(portableAgents, /## Documentation Closure/, 'portable AGENTS template carries documentation closure guidance');
-  assert.match(portableAgents, /Use context-preserving compression, not blind deletion\./, 'portable AGENTS template preserves repo intelligence during cleanup');
-  assert.match(portableAgents, /Keep repo maps pointer-based and current;/, 'portable AGENTS template carries compact repo-map guidance');
-  assert.match(portableAgents, /Instruction sources used/, 'portable AGENTS template requires instruction-source reporting');
-  assert.match(portableAgents, /MEMORY\.md changed: Yes\/No/, 'portable AGENTS template requires memory change reporting');
-  assert.doesNotMatch(portableAgents, /This root `AGENTS\.md` is toolkit-repo-specific|## Repo-Local Router/, 'portable AGENTS template has no toolkit repo wrapper');
-
-  const portableIndex = readTextFile(path.join(repoRoot, 'skills', 'ai-coding-agent-rules', 'repo-local', 'docs', 'agent-playbooks', 'INDEX.md'));
-  assert.match(portableIndex, /\[Generated files\]\(generated-files\.md\) \(`docs\/agent-playbooks\/generated-files\.md`\)/);
-  assert.match(portableIndex, /\[Docs governance\]\(docs-governance\.md\) \(`docs\/agent-playbooks\/docs-governance\.md`\)/);
-  assert.match(portableIndex, /\[Safety gates\]\(safety-gates\.md\) \(`docs\/agent-playbooks\/safety-gates\.md`\)/);
-  assert.match(portableIndex, /\[Windows command hygiene\]\(windows-command-hygiene\.md\) \(`docs\/agent-playbooks\/windows-command-hygiene\.md`\)/);
-  const portableDocsOutput = manifest.outputs.find((entry) => entry.output === 'skills/ai-coding-agent-rules/repo-local/docs/agent-playbooks');
-  assert.equal(portableDocsOutput?.kind, 'copy');
-  assert.equal(manifest.writes.allowed.includes('skills/ai-coding-agent-rules/repo-local/docs/agent-playbooks'), true);
-
-  for (const rel of [
-    'skills/ai-coding-agent-rules/AGENTS.template.md',
-    'skills/ai-coding-agent-rules/CLAUDE.template.md',
-    'skills/ai-coding-agent-rules/GEMINI.template.md',
-    'skills/ai-coding-agent-rules/antigravity-bootstrap.template.md'
-  ]) {
-    assert.equal(fs.existsSync(path.join(repoRoot, rel)), false, rel);
-  }
-
-  for (const rel of [
-    '_projects/development/ai-coding-agent-rules/_main/TOOLKIT-SKILL-ROUTING.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/AGENTS.with-toolkit-skills.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/CLAUDE.with-toolkit-skills.template.md',
-    '_projects/development/ai-coding-agent-rules/_main/GEMINI.with-toolkit-skills.template.md',
-    'skills/ai-coding-agent-rules/TOOLKIT-SKILL-ROUTING.template.md',
-    'skills/ai-coding-agent-rules/AGENTS.with-toolkit-skills.template.md',
-    'skills/ai-coding-agent-rules/CLAUDE.with-toolkit-skills.template.md',
-    'skills/ai-coding-agent-rules/GEMINI.with-toolkit-skills.template.md'
-  ]) {
-    assert.equal(fs.existsSync(path.join(repoRoot, rel)), false, rel);
-  }
-});
-
-test('generic agent-rule partials live in project _partials folders, not skill folders', () => {
-  const skillPartialFiles = [];
-  for (const skillDir of ['skills/ai-coding-agent-rules', 'skills/n8n-local-setup']) {
-    const partialsDir = path.join(repoRoot, skillDir, '_partials');
-    if (!fs.existsSync(partialsDir)) continue;
-    for (const entry of fs.readdirSync(partialsDir, { recursive: true })) {
-      if (fs.statSync(path.join(partialsDir, entry)).isFile()) skillPartialFiles.push(path.join(skillDir, '_partials', entry).replace(/\\/g, '/'));
-    }
-  }
-  assert.deepEqual(skillPartialFiles, []);
-  assert.equal(
-    fs.existsSync(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', '_partials', 'ai-coding-agent-execution.md')),
-    true
-  );
-  assert.equal(
-    fs.existsSync(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', '_partials', 'n8n-agent-rules-adapter.md')),
-    true
-  );
-  for (const removedPartial of [
-    'agent-toolkit-managed-block.md',
-    'agent-toolkit-n8n-adapter-block.md',
-    'claude-shim.md',
-    'gemini-shim.md',
-    'antigravity-bootstrap.md'
-  ]) {
-    assert.equal(fs.existsSync(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', '_partials', removedPartial)), false, removedPartial);
-  }
-  assert.equal(
-    fs.existsSync(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', '_partials', 'toolkit-skill-routing.md')),
-    true
-  );
-  assert.equal(fs.existsSync(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', 'templates', 'partials')), false);
-  assert.equal(fs.existsSync(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', 'repo-local', 'docs', 'agent-playbooks', 'INDEX.md')), true);
-  assert.equal(fs.existsSync(path.join(repoRoot, '_projects', 'development', 'ai-coding-agent-rules', '_main', 'repo-local', 'AGENTS.managed.template.md')), false);
-  assert.equal(fs.existsSync(path.join(repoRoot, '_projects', 'n8n', 'local-setup', '_main', 'templates', 'partials')), false);
-});
-
-test('validator rejects active agent instruction filenames inside skill folders', () => {
-  const cwd = tempCopy();
-  const activePath = path.join(cwd, 'skills', 'n8n-agent-rules', 'AGENTS.md');
-  fs.writeFileSync(activePath, '# Active nested rules fixture\n');
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Skill folder must use inert agent-rule template filenames: skills\/n8n-agent-rules\/AGENTS\.md/);
-});
-
-test('validator rejects unexpected Antigravity rule files', () => {
-  const cwd = tempCopy();
-  const extraRulePath = path.join(cwd, '.agents', 'rules', '99-evil.md');
-  fs.writeFileSync(extraRulePath, '# Unexpected rule\n');
-
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Unexpected \.agents\/rules entry: \.agents\/rules\/99-evil\.md/);
-});
-
-test('validator rejects broken relative links in non-_main Markdown files', () => {
-  const cwd = tempCopy();
-  fs.appendFileSync(path.join(cwd, 'skills', 'n8n-local-setup', 'README.md'), '\n[Missing local target](DOES-NOT-EXIST.md)\n');
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /skills\/n8n-local-setup\/README\.md links to missing path: skills\/n8n-local-setup\/DOES-NOT-EXIST\.md/);
-});
-
-test('Markdown link validation ignores _projects source files', () => {
-  const cwd = tempCopy();
-  const ignoredDir = path.join(cwd, '_projects', 'n8n', 'local-setup', '_main');
-  fs.mkdirSync(ignoredDir, { recursive: true });
-  fs.writeFileSync(path.join(ignoredDir, 'IGNORED.md'), '[Ignored missing target](missing.md)\n');
-  const curatedDir = path.join(cwd, '_projects', 'n8n', 'local-setup', 'curated_output_for_ai');
-  fs.mkdirSync(curatedDir, { recursive: true });
-  fs.writeFileSync(path.join(curatedDir, 'OUTPUT_RELATIVE.md'), '[Output-relative target](missing-output.md)\n');
-  const result = runValidate(cwd);
-  assert.equal(result.status, 0, result.stderr);
-});
-
-test('validator rejects README links to absent optional folders', () => {
-  const cwd = tempCopy();
-  fs.appendFileSync(path.join(cwd, '_projects', 'n8n', 'local-setup', 'README.md'), '\n[Generated preview](_generated/)\n');
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /links to missing path: _projects\/n8n\/local-setup\/_generated/);
-});
-
-test('trusted agent instruction sync loads source templates from explicit workspace', () => {
-  const cwd = tempCopy();
-  const promptPath = path.join(cwd, '_projects', 'development', 'ai-coding-agent-rules', '_main', '_partials', 'ai-coding-agent-execution.md');
-  fs.appendFileSync(promptPath, '\n\nWorkspace-specific fixture.\n');
-
-  const result = spawnSync(process.execPath, [agentInstructionScript, '--workspace', cwd, '--check'], { cwd: os.tmpdir(), encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Stale agent instruction source template: _projects\/development\/ai-coding-agent-rules\/_main\/AGENTS\.template\.md/);
-  assert.doesNotMatch(result.stderr, /Stale generated output/);
-});
-
-test('trusted agent instruction sync rejects symlinked source templates before writing output', (t) => {
-  const cwd = tempCopy();
-  const promptPath = path.join(cwd, '_projects', 'development', 'ai-coding-agent-rules', '_main', '_partials', 'ai-coding-agent-execution.md');
-  const outputPath = path.join(cwd, '_projects', 'development', 'ai-coding-agent-rules', '_main', 'AGENTS.template.md');
-  const originalOutput = fs.readFileSync(outputPath, 'utf8');
-  const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-sync-outside-'));
-  const outsideFile = path.join(outsideDir, 'outside-agent-prompt.md');
-  fs.writeFileSync(outsideFile, 'Outside prompt should not publish.\n');
-
-  if (!createSymlinkOrSkip(t, outsideFile, promptPath, 'file')) return;
-
-  const result = spawnSync(process.execPath, [agentInstructionScript, '--workspace', cwd, '--write'], { cwd: os.tmpdir(), encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Unsafe symlink/);
-  assert.equal(fs.readFileSync(outputPath, 'utf8'), originalOutput);
-});
-
-test('changing assembled _main agent-rule templates makes source-side templates stale', () => {
-  const cwd = tempCopy();
-  const template = path.join(cwd, '_projects', 'development', 'ai-coding-agent-rules', '_main', 'AGENTS.template.md');
-  fs.writeFileSync(
-    template,
-    readTextFile(template).replace(
-      'AGENTS.template.md AI coding agent rules',
-      'AGENTS.template.md drifted AI coding agent rules'
-    )
-  );
-  const result = spawnSync(process.execPath, [agentInstructionScript, '--check'], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Stale agent instruction source template: _projects\/development\/ai-coding-agent-rules\/_main\/AGENTS\.template\.md/);
-});
-
-test('changing published agent-rule template copies makes skill copies stale', () => {
-  const cwd = tempCopy();
-  const template = path.join(cwd, 'skills', 'ai-coding-agent-rules', 'repo-local', 'AGENTS.managed.template.md');
-  fs.appendFileSync(template, '\n\n<!-- drift test -->\n');
-  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Stale generated output: skills\/ai-coding-agent-rules\/repo-local\/AGENTS\.managed\.template\.md/);
-});
-
-test('sync check treats generated YAML outputs as normalized text', () => {
-  const cwd = tempCopy();
-  createNewSkillProjectFixture(cwd);
-  const outputPath = path.join(cwd, 'skills', 'new-safe-skill', 'agents', 'openai.yaml');
-  const lfSource = readTextFile(outputPath);
-  fs.writeFileSync(outputPath, lfSource.replace(/\n/g, '\r\n'), 'utf8');
-
-  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
-
-  assert.equal(result.status, 0, result.stderr);
-});
-
-test('changing declared agent-rule source partials makes source-side templates stale', () => {
-  const cases = [
-    path.join('_projects', 'development', 'ai-coding-agent-rules', '_main', '_partials', 'ai-coding-agent-execution.md')
-  ];
-
-  for (const partialRel of cases) {
-    const cwd = tempCopy();
-    fs.appendFileSync(path.join(cwd, partialRel), '\n\n<!-- drift test -->\n');
-    const result = spawnSync(process.execPath, [agentInstructionScript, '--check'], { cwd, encoding: 'utf8' });
-    assert.notEqual(result.status, 0, partialRel);
-    assert.match(result.stderr, /Stale agent instruction source template: _projects\/development\/ai-coding-agent-rules\/_main\/AGENTS\.template\.md/, partialRel);
-  }
-});
-
-test('changing repo-local curated safety comment makes agent instruction templates stale', () => {
-  const cwd = tempCopy();
-  const template = path.join(
-    cwd,
-    '_projects',
-    'development',
-    'ai-coding-agent-rules',
-    'curated_output_for_ai',
-    'skills',
-    'ai-coding-agent-rules',
-    'repo-local',
-    'GEMINI.shim.template.md'
-  );
-  fs.writeFileSync(
-    template,
-    readTextFile(template).replace(
-      'Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.',
-      'Avoid weakening credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.'
-    )
-  );
-
-  const result = spawnSync(process.execPath, [agentInstructionScript, '--check'], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /must start with the exact curated-source safety comment/);
-});
-
-test('agent-rule source-template freshness check is scoped to declared modules', () => {
-  const cwd = tempCopy();
-  fs.rmSync(path.join(cwd, '_projects', 'n8n', 'local-setup'), { recursive: true, force: true });
-
-  const result = spawnSync(process.execPath, [syncScript, '--write'], { cwd, encoding: 'utf8' });
-  assert.equal(result.status, 0, result.stderr);
-});
-
-test('agent instruction source-template freshness check does not depend on published outputs', () => {
-  const cwd = tempCopy();
-  const manifestPath = path.join(cwd, '_projects', 'development', 'ai-coding-agent-rules', 'toolkit.project.json');
-  const manifest = readJsonFile(manifestPath);
-  const agentRuleOutputs = new Set([
-    'skills/ai-coding-agent-rules/AGENTS.template.md',
-    'skills/ai-coding-agent-rules/CLAUDE.template.md',
-    'skills/ai-coding-agent-rules/GEMINI.template.md',
-    'skills/ai-coding-agent-rules/antigravity-bootstrap.template.md',
-    'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
-    'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
-    'skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
-    'skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md'
-  ]);
-
-  manifest.outputs = manifest.outputs.filter((output) => !agentRuleOutputs.has(output.output));
-  manifest.writes.allowed = manifest.writes.allowed.filter((output) => !agentRuleOutputs.has(output));
-  writeJsonFile(manifestPath, manifest);
-
-  fs.appendFileSync(
-    path.join(cwd, '_projects', 'development', 'ai-coding-agent-rules', '_main', 'AGENTS.template.md'),
-    '\n\n<!-- drift test -->\n'
-  );
-  const result = spawnSync(process.execPath, [agentInstructionScript, '--check'], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Stale agent instruction source template: _projects\/development\/ai-coding-agent-rules\/_main\/AGENTS\.template\.md/);
-});
-
-test('changing canonical n8n agent rules source makes generated skill copies stale', () => {
-  const cwd = tempCopy();
-  fs.appendFileSync(path.join(cwd, '_projects', 'development', 'ai-coding-agent-rules', '_main', '_partials', 'n8n-agent-rules.md'), '\n\n<!-- drift test -->\n');
-  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Stale generated output: skills\/n8n-agent-rules\/n8n-agent-rules\.md/);
-  assert.match(result.stderr, /Stale generated output: skills\/n8n-local-setup\/references\/n8n-agent-rules\.md/);
-});
-
-test('changing declared n8n local setup source makes generated local setup stale', () => {
-  const cwd = tempCopy();
-  const source = path.join(cwd, '_projects', 'n8n', 'local-setup', '_main', 'Page 1 - Local Setup.md');
-  fs.appendFileSync(source, '\n\n<!-- drift test -->\n');
-  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Stale generated output: skills\/n8n-local-setup\/references\/n8n\/local-setup\.md/);
-});
-
-test('sync applies text_rewrites to extract outputs', () => {
-  const cwd = tempCopy();
-  const manifestPath = path.join(cwd, '_projects', 'cicd', 'secure-installer', 'toolkit.project.json');
-  const manifest = readJsonFile(manifestPath);
-  const outputPath = 'skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md';
-  const output = manifest.outputs.find((entry) => entry.output === outputPath);
-  assert.equal(output?.kind, 'extract');
-
-  output.text_rewrites = [{ from: 'Manual step needed', to: 'Manual step required' }];
-  writeJsonFile(manifestPath, manifest);
-
-  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Stale generated output: skills\/secure-cicd-installer\/templates\/cicd\/secure-cicd-prompt\.md/);
-});
-
-test('sync applies text_rewrites to concat outputs', () => {
-  const cwd = tempCopy();
-  const manifestPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'toolkit.project.json');
-  const manifest = readJsonFile(manifestPath);
-  const outputPath = 'skills/n8n-local-setup/references/n8n/local-setup.md';
-  const output = manifest.outputs.find((entry) => entry.output === outputPath);
-  assert.equal(output?.kind, 'copy');
-  assert.equal(output?.source, '_main/Page 1 - Local Setup.md');
-
-  output.kind = 'concat';
-  output.sources = [output.source];
-  delete output.source;
-  output.text_rewrites = [{ from: '# Page 1 - Local Setup', to: '# Page 1 - Local Setup Rewrite Fixture' }];
-  writeJsonFile(manifestPath, manifest);
-
-  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Stale generated output: skills\/n8n-local-setup\/references\/n8n\/local-setup\.md/);
-});
-
-test('sync rejects text_rewrites on JSON outputs before checking generated bytes', () => {
-  const cwd = tempCopy();
-  const projectDir = path.join(cwd, '_projects', 'n8n', 'local-setup');
-  const manifestPath = path.join(projectDir, 'toolkit.project.json');
-  const manifest = readJsonFile(manifestPath);
-  fs.writeFileSync(path.join(projectDir, '_main', 'json-rewrite-regression.json'), '{ "active": false }\n');
-
-  manifest.outputs.push({
-    kind: 'json',
-    source: '_main/json-rewrite-regression.json',
-    output: 'skills/n8n-local-setup/references/json-rewrite-regression.json',
-    notes: 'Regression fixture for JSON text rewrite hardening.',
-    fidelity: 'generated_metadata',
-    text_rewrites: [{ from: '"active": false', to: '"active": true' }]
-  });
-  manifest.writes.allowed.push('skills/n8n-local-setup/references/json-rewrite-regression.json');
-  writeJsonFile(manifestPath, manifest);
-
-  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /JSON outputs must not set text_rewrites/);
-});
-
-test('sync --write does not rewrite unchanged generated outputs', () => {
-  const cwd = tempCopy();
-  const outputPath = path.join(cwd, 'skills', 'agent-skill-supply-chain-audit', 'agents', 'openai.yaml');
-  const oldTime = new Date('2020-01-02T03:04:05.000Z');
-  fs.utimesSync(outputPath, oldTime, oldTime);
-
-  const result = spawnSync(process.execPath, [syncScript, '--write'], { cwd, encoding: 'utf8' });
-
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(fs.statSync(outputPath).mtimeMs, oldTime.getTime());
-});
-
-test('validator requires creation-center evidence for new skill-publishing modules', () => {
-  const cwd = tempCopy();
-  createNewSkillProjectFixture(cwd);
-
-  const result = runValidate(cwd);
-
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /development\.new-safe-skill must include skill_creation_review/);
-});
-
-test('validator detects new skill-publishing modules from skill outputs', () => {
-  const cwd = tempCopy();
-  createNewSkillProjectFixture(cwd);
-  addNewSafeSkillSafetyMatrixRow(cwd);
-  addSkillRoutingDecision(cwd);
-  const manifestPath = path.join(cwd, '_projects', 'development', 'new-safe-skill', 'toolkit.project.json');
-  const manifest = readJsonFile(manifestPath);
-  manifest.surface.publish_as = 'source_only';
-  writeJsonFile(manifestPath, manifest);
-
-  const result = runValidate(cwd);
-
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /development\.new-safe-skill must include skill_creation_review/);
-});
-
-test('validator requires creation-center evidence for new skill outputs from baselined projects', () => {
-  const cwd = tempCopy();
-  addSkillOutputToAiCodingAgentRules(cwd);
-  addNewSafeSkillSafetyMatrixRow(cwd, 'existing-project-new-skill');
-  addSkillRoutingDecision(cwd, 'existing-project-new-skill');
-
-  const result = runValidate(cwd);
-
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /development\.ai-coding-agent-rules must include skill_creation_review for new skill-publishing modules/);
-});
-
-test('validator reports review, safety matrix, and routing gaps for new skill outputs', () => {
-  const cwd = tempCopy();
-  createNewSkillProjectFixture(cwd);
-
-  const result = runValidate(cwd);
-
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /development\.new-safe-skill must include skill_creation_review/);
-  assert.match(result.stderr, /repo\/docs\/SKILL-SAFETY-MATRIX\.md is missing skills\/new-safe-skill\//);
-  assert.match(result.stderr, /toolkit-skill-routing\.md is missing routing or omission for skills\/new-safe-skill\//);
-});
-
-test('validator rejects skill routing entries that are also intentionally omitted', () => {
-  const cwd = tempCopy();
-  addOmittedSkillRoutingDecision(cwd, 'ai-coding-agent-rules');
-
-  const result = runValidate(cwd);
-
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /toolkit-skill-routing\.md must not both route and omit ai-coding-agent-rules/);
-});
-
-test('validator accepts new skill-publishing modules with creation-center evidence', () => {
-  const cwd = tempCopy();
-  createNewSkillProjectFixture(cwd, {
-    skill_creation_review: {
-      existing_skill_review: 'Reviewed current skills before adding new-safe-skill and confirmed no existing skill has this fixture trigger or validation role.',
-      trigger: 'Use new-safe-skill only for this validation fixture trigger and not for general coding work.',
-      decision: 'new_project_skill',
-      decision_reason: 'This fixture represents a distinct project module and published skill surface for validation.',
-      unique_value: 'Validates that new skill proposals document value beyond generic model-common advice.',
-      runtime_footprint: 'Tiny SKILL.md fixture with no optional references loaded by default.',
-      local_assets: 'No local assets beyond the fixture README, SKILL.md, and metadata.',
-      output_contract: 'Produces a deterministic validation fixture result for the creation-center gate.',
-      anti_bloat_review: 'This fixture exists only to exercise the anti-bloat validation gate and is not generic advice.',
-      safety_boundary: 'Instruction-only, local-only, no credentials, no live systems, no installers, and no destructive commands.',
-      source_provenance: 'first_party',
-      third_party_audit: 'not_applicable_first_party',
-      publisher_workflow: 'context-preserving-ai-publisher source-to-surface workflow',
-      routing: 'new-safe-skill would be routed in toolkit skill routing if this fixture were a real user-facing skill.',
-      validation: [
-        'node repo/scripts/sync-toolkit-projects.cjs --check',
-        'node repo/scripts/validate-toolkit.cjs'
-      ]
-    }
-  });
-  addNewSafeSkillSafetyMatrixRow(cwd);
-  addSkillRoutingDecision(cwd);
-
-  const result = runValidate(cwd);
-
-  assert.equal(result.status, 0, result.stderr);
-});
-
-test('validator requires creation-center evidence to name the new skill and routing decision', () => {
-  const cwd = tempCopy();
-  createNewSkillProjectFixture(cwd, {
-    skill_creation_review: {
-      existing_skill_review: 'Reviewed current skills and confirmed no existing skill has this fixture trigger or validation role.',
-      trigger: 'Use new-safe-skill only for this validation fixture trigger and not for general coding work.',
-      decision: 'new_project_skill',
-      decision_reason: 'This fixture represents a distinct project module and published skill surface for validation.',
-      unique_value: 'Validates that new skill proposals document value beyond generic model-common advice.',
-      runtime_footprint: 'Tiny SKILL.md fixture with no optional references loaded by default.',
-      local_assets: 'No local assets beyond the fixture README, SKILL.md, and metadata.',
-      output_contract: 'Produces a deterministic validation fixture result for the creation-center gate.',
-      anti_bloat_review: 'This fixture exists only to exercise the anti-bloat validation gate and is not generic advice.',
-      safety_boundary: 'Instruction-only, local-only, no credentials, no live systems, no installers, and no destructive commands.',
-      source_provenance: 'first_party',
-      third_party_audit: 'not_applicable_first_party',
-      publisher_workflow: 'context-preserving-ai-publisher source-to-surface workflow',
-      routing: 'This fixture will be documented in project review notes before publication.',
-      validation: [
-        'node repo/scripts/sync-toolkit-projects.cjs --check',
-        'node repo/scripts/validate-toolkit.cjs'
-      ]
-    }
-  });
-  addNewSafeSkillSafetyMatrixRow(cwd);
-  addSkillRoutingDecision(cwd);
-
-  const result = runValidate(cwd);
-
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /development\.new-safe-skill skill_creation_review\.existing_skill_review must mention new skill new-safe-skill/);
-  assert.match(result.stderr, /development\.new-safe-skill skill_creation_review\.routing must document whether new-safe-skill is routed or intentionally omitted/);
-});
-
-test('sync rejects source_only manifests that publish skill entrypoints', () => {
-  const cwd = tempCopy();
-  createNewSkillProjectFixture(cwd);
-  const manifestPath = path.join(cwd, '_projects', 'development', 'new-safe-skill', 'toolkit.project.json');
-  const manifest = readJsonFile(manifestPath);
-  manifest.surface.publish_as = 'source_only';
-  manifest.surface.skill = { status: 'not_applicable' };
-  writeJsonFile(manifestPath, manifest);
-
-  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
-
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /development\.new-safe-skill source_only projects must not publish skill entrypoints/);
-});
-
-test('sync rejects skill surface paths without matching skill entrypoint outputs', () => {
-  const cwd = tempCopy();
-  const manifestPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'toolkit.project.json');
-  const manifest = readJsonFile(manifestPath);
-  manifest.surface.skill.path = 'skills/does-not-match-entrypoint';
-  writeJsonFile(manifestPath, manifest);
-
-  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
-
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /n8n\.local-setup surface\.skill\.path must match a declared skill entrypoint output/);
-});
-
-test('validator requires skill safety matrix coverage for every current skill', () => {
-  const cwd = tempCopy();
   const matrixPath = path.join(cwd, 'repo', 'docs', 'SKILL-SAFETY-MATRIX.md');
-  const matrix = readTextFile(matrixPath);
-  const withoutWindowsLocalhost = matrix.replace(
-    /^\| \[windows-localhost-workflows\]\([^)]+\)[^\n]*\n/m,
-    ''
-  );
-  fs.writeFileSync(matrixPath, withoutWindowsLocalhost, 'utf8');
+  const matrix = fs.readFileSync(matrixPath, 'utf8').replace(/\r\n/g, '\n');
+  const sourceRow = matrix.split('\n').find((line) => line.startsWith('| [managed-app-foundation-review]'));
+  assert.ok(sourceRow, 'skill safety matrix fixture source row');
+  const fixtureRow = sourceRow
+    .replace('[managed-app-foundation-review](../../skills/managed-app-foundation-review/)', `[${skillName}](../../skills/${skillName}/)`)
+    .replace('managed-app-foundation-review', skillName);
+  insertBefore(matrixPath, '\n## Description Review Notes', `${fixtureRow}\n`);
+}
 
-  const result = runValidate(cwd);
+function updateBaseline(cwd, mutate) {
+  const baselinePath = path.join(cwd, 'repo', 'docs', 'skill-creation-center-baseline.json');
+  const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
+  mutate(baseline);
+  fs.writeFileSync(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`, 'utf8');
+}
 
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /repo\/docs\/SKILL-SAFETY-MATRIX\.md is missing skills\/windows-localhost-workflows\//);
+function updateTopologyPolicy(cwd, mutate) {
+  const policyPath = path.join(cwd, 'repo', 'contracts', 'topology-scope-policy.json');
+  const policy = JSON.parse(fs.readFileSync(policyPath, 'utf8'));
+  mutate(policy);
+  fs.writeFileSync(policyPath, `${JSON.stringify(policy, null, 2)}\n`, 'utf8');
+}
+
+test('direct canonical topology validates without retired project or MCP surfaces', () => {
+  const validator = require(validateScript);
+  assert.equal(fs.existsSync(path.join(repoRoot, legacyProjectToken)), false);
+  assert.equal(fs.existsSync(path.join(repoRoot, 'mcp')), false);
+  assert.equal(validator.skillDirs().includes('skills/knowledge-index-updater'), false);
+  assert.deepEqual(validator.validate(), []);
 });
 
-test('Secure CI/CD prompt preserves the full source prompt', () => {
-  const manifests = manifestsById();
-  const outputPath = 'skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md';
-  const output = manifestOutput(manifests.get('cicd.secure-installer'), outputPath);
-  assert.equal(output?.kind, 'extract', outputPath);
-  assert.equal(output?.source, '_main/README.md', outputPath);
-  assert.equal(output?.notice, false, outputPath);
-
-  const prompt = readTextFile(path.join(repoRoot, outputPath));
-  assert.equal(prompt, secureCicdPromptFromReadme());
-  assert.match(prompt, /Manual step needed: \[Short title\]/);
-  assert.match(prompt, /Phase 9: Commit, branch, pull request, and push policy\./);
-  assert.match(
-    prompt,
-    /For commit, push, pull request creation, merge, or deploy actions, pause first, name the exact target\/action, explain the risk, and ask for my approval\./
-  );
+test('skill routing and safety coverage match the direct skill surface', () => {
+  const validator = require(validateScript);
+  const skills = validator.skillDirs().map((relPath) => path.basename(relPath)).sort();
+  const routing = validator.parseSkillRouting(readText('repo/contracts/agent-rules/toolkit-skill-routing.md'));
+  assert.deepEqual([...routing.routed, ...routing.omitted.map((entry) => entry.name)].sort(), skills);
+  assert.equal(routing.omitted.some((entry) => entry.name === 'knowledge-index-updater'), false);
+  assert.equal(new Set(skills).size, skills.length);
 });
 
-test('Secure CI/CD prompt does not fetch n8n helpers from retired external main paths', () => {
-  const prompt = readTextFile(path.join(repoRoot, 'skills', 'secure-cicd-installer', 'templates', 'cicd', 'secure-cicd-prompt.md'));
-  assert.doesNotMatch(prompt, /ai-cicd-installer/i);
-  assert.doesNotMatch(prompt, /raw\.githubusercontent\.com\/weijunswj\/ai-cicd-installer/i);
-  assert.match(prompt, /route that procedure to `n8n-workflow-helper-scripts`/);
-  assert.match(prompt, /route that procedure to `n8n-workflow-templates`/);
-  assert.doesNotMatch(prompt, /install only the reusable n8n runtime helper scripts/);
+test('Skill Creation Center preserves grandfathered IDs and keyed post-gate evidence', () => {
+  const baseline = JSON.parse(readText('repo/docs/skill-creation-center-baseline.json'));
+  const validator = require(validateScript);
+  const current = validator.skillDirs().map((relPath) => path.basename(relPath)).sort();
+  const grandfathered = new Set(baseline.grandfathered_skill_ids);
+  const reviewed = new Set(Object.keys(baseline.skill_creation_review));
+
+  assert.equal(baseline.schema_version, 2);
+  assert.deepEqual(baseline.grandfathered_skill_ids, immutableGrandfatheredSkillIds);
+  assert.deepEqual(validator.IMMUTABLE_GRANDFATHERED_SKILL_IDS, immutableGrandfatheredSkillIds);
+  assert.equal(grandfathered.has('knowledge-index-updater'), true);
+  assert.equal(reviewed.has('knowledge-index-updater'), false);
+  assert.deepEqual(current.filter((skill) => !grandfathered.has(skill)).sort(), [...reviewed].sort());
+  assert.deepEqual(validator.validate(), []);
 });
 
-test('changing Secure CI/CD prompt source makes generated prompt stale', () => {
-  const cwd = tempCopy();
-  const source = path.join(cwd, '_projects', 'cicd', 'secure-installer', '_main', 'README.md');
-  const text = readTextFile(source);
-  fs.writeFileSync(source, text.replace('Phase 10: Final output.', 'Phase 10: Final output drift test.'), 'utf8');
-  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Stale generated output: skills\/secure-cicd-installer\/templates\/cicd\/secure-cicd-prompt\.md/);
-});
+test('all seven current post-gate reviews use direct-canonical evidence and existing checks', () => {
+  const baseline = JSON.parse(readText('repo/docs/skill-creation-center-baseline.json'));
+  const validator = require(validateScript);
+  assert.deepEqual(baseline.reviewed_skill_ids, currentPostGateSkillIds);
+  assert.deepEqual(Object.keys(baseline.skill_creation_review).sort(), [...currentPostGateSkillIds].sort());
 
-test('internal AI-facing surfaces are generated from declared project output', () => {
-  const manifests = manifestsById();
-  const expectedMarkdown = [
-    ['n8n.local-setup', 'skills/n8n-local-setup/SKILL.md', 'curated_output_for_ai/skills/n8n-local-setup/SKILL.md'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/README.md', 'curated_output_for_ai/skills/n8n-local-setup/README.md'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/templates/mcp-configs/README.md', 'curated_output_for_ai/templates/mcp-configs/README.md'],
-    ['n8n.workflow-toolkit', 'skills/n8n-workflow-helper-scripts/SKILL.md', 'curated_output_for_ai/skills/n8n-workflow-helper-scripts/SKILL.md'],
-    ['n8n.workflow-toolkit', 'skills/n8n-workflow-helper-scripts/README.md', 'curated_output_for_ai/skills/n8n-workflow-helper-scripts/README.md'],
-    ['n8n.workflow-toolkit', 'skills/n8n-workflow-templates/SKILL.md', 'curated_output_for_ai/skills/n8n-workflow-templates/SKILL.md'],
-    ['n8n.workflow-toolkit', 'skills/n8n-workflow-templates/README.md', 'curated_output_for_ai/skills/n8n-workflow-templates/README.md'],
-    ['n8n.workflow-toolkit', 'skills/n8n-workflow-helper-scripts/references/workflow-sync.md', 'curated_output_for_ai/references/workflow-sync.md'],
-    ['n8n.workflow-toolkit', 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/README.md', 'curated_output_for_ai/templates/helper-scripts/sanitizer/README.md'],
-    ['n8n.workflow-toolkit', 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/README.md', 'curated_output_for_ai/templates/helper-scripts/import-export-sync/README.md'],
-    ['cicd.secure-installer', 'skills/secure-cicd-installer/SKILL.md', 'curated_output_for_ai/skills/secure-cicd-installer/SKILL.md'],
-    ['cicd.secure-installer', 'skills/secure-cicd-installer/README.md', 'curated_output_for_ai/skills/secure-cicd-installer/README.md'],
-    ['cicd.secure-installer', 'skills/secure-cicd-installer/references/secure-cicd-installer.md', 'curated_output_for_ai/overviews/secure-cicd-installer.md'],
-    ['cicd.secure-installer', 'skills/secure-cicd-installer/templates/cicd/README.md', 'curated_output_for_ai/templates/cicd/README.md'],
-  ];
-  const expectedExactCopies = [
-    ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/local-setup.md', '_main/Page 1 - Local Setup.md'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/hostinger-vps.md', '_main/Page 2 - Hostinger VPS.md'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/references/n8n/production-cloudflare-tunnel.md', '_main/Page 3 - Production Self-Hosting With Cloudflare Tunnel.md'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/codex.md', '_main/mcp setup - codex.md'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/claude-code.md', '_main/mcp setup - claude code.md'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/opencode.md', '_main/mcp setup - opencode.md'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/references/ai-agent-platforms/antigravity.md', '_main/mcp setup - antigravity.md'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/templates/.n8n-local/_n8n-local.cmd', '_main/templates/.n8n-local/_n8n-local.cmd'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/templates/.n8n-local/n8n-local-desktop-shortcut.cmd', '_main/templates/.n8n-local/n8n-local-desktop-shortcut.cmd'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/templates/.n8n-production-cloudflare/.gitignore', '_main/templates/.n8n-production-cloudflare/.gitignore'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/templates/production-server-backups/README.md', '_main/templates/production-server-backups/README.md'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/templates/production-server-backups/n8n-production-backup.sh.template', '_main/templates/production-server-backups/n8n-production-backup.sh.template'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/templates/mcp-configs/antigravity-mcp-config.md', '_main/templates/mcp-configs/antigravity-mcp-config.md'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/templates/mcp-configs/claude-mcp-config.md', '_main/templates/mcp-configs/claude-mcp-config.md'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md', '_main/templates/mcp-configs/codex-mcp-config.md'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/templates/mcp-configs/opencode-mcp-config.md', '_main/templates/mcp-configs/opencode-mcp-config.md'],
-    ['knowledge.knowledge-index-updater', 'skills/knowledge-index-updater/README.md', '_main/skill/README.md'],
-    ['knowledge.knowledge-index-updater', 'skills/knowledge-index-updater/SKILL.md', '_main/skill/SKILL.md'],
-    ['knowledge.knowledge-index-updater', 'skills/knowledge-index-updater/agents/claude.md', '_main/skill/agents/claude.md'],
-    ['knowledge.knowledge-index-updater', 'skills/knowledge-index-updater/agents/openai.yaml', '_main/skill/agents/openai.yaml'],
-    ['development.windows-localhost-workflows', 'skills/windows-localhost-workflows/README.md', '_main/skill/README.md'],
-    ['development.windows-localhost-workflows', 'skills/windows-localhost-workflows/SKILL.md', '_main/skill/SKILL.md'],
-    ['development.windows-localhost-workflows', 'skills/windows-localhost-workflows/agents/openai.yaml', '_main/skill/agents/openai.yaml'],
-    ['repo-methodology.context-preserving-ai-publisher', 'skills/context-preserving-ai-publisher/references/validation-strategy.md', '_main/validation-strategy.md']
-  ];
-  const expectedJson = [
-    ['n8n.local-setup', 'skills/n8n-local-setup/packs/codex-n8n-local/pack.json', 'curated_output_for_ai/packs/codex-n8n-local/pack.json'],
-    ['n8n.local-setup', 'skills/n8n-local-setup/packs/claude-code-n8n-local/pack.json', 'curated_output_for_ai/packs/claude-code-n8n-local/pack.json'],
-    ['cicd.secure-installer', 'skills/secure-cicd-installer/packs/secure-cicd/pack.json', 'curated_output_for_ai/packs/secure-cicd/pack.json']
-  ];
-
-  for (const [projectId, outputPath, source] of expectedMarkdown) {
-    const output = manifestOutput(manifests.get(projectId), outputPath);
-    assert.equal(output?.kind, 'curated', outputPath);
-    assert.equal(output?.source, source, outputPath);
+  for (const skill of currentPostGateSkillIds) {
+    const review = baseline.skill_creation_review[skill];
+    assert.match(review.publisher_workflow, /direct-canonical/i);
+    assert.match(review.publisher_workflow, new RegExp(`skills/${skill}/`));
+    assert.match(review.publisher_workflow, /repo\/\*\*/);
+    assert.doesNotMatch(JSON.stringify({ publisher_workflow: review.publisher_workflow, validation: review.validation }), new RegExp(`sync-toolkit-projects\\.cjs|_projects[\\/]|${legacyCuratedToken}|_main|source[- ]to[- ]surface|(?:generated|deterministic)[\\s\\S]*(?:copy|publication|writeback)`, 'i'));
+    assert.ok(review.validation.some((command) => /^node\s+repo\/scripts\/validate-toolkit\.cjs(?:\s|$)/.test(command)));
+    for (const command of review.validation) {
+      for (const target of validator.validationCommandTargets(command)) {
+        assert.equal(fs.statSync(path.join(repoRoot, target)).isFile(), true, `${skill}: ${target}`);
+      }
+    }
   }
-  for (const [projectId, outputPath, source] of expectedExactCopies) {
-    const output = manifestOutput(manifests.get(projectId), outputPath);
-    assert.equal(output?.kind, 'copy', outputPath);
-    assert.equal(output?.source, source, outputPath);
-  }
-  for (const [projectId, outputPath, source] of expectedJson) {
-    const output = manifestOutput(manifests.get(projectId), outputPath);
-    assert.equal(output?.kind, 'json', outputPath);
-    assert.equal(output?.source, source, outputPath);
-  }
+  assert.deepEqual(validator.validate(), []);
+});
 
-  for (const projectId of ['n8n.local-setup', 'n8n.workflow-toolkit', 'cicd.secure-installer']) {
-    for (const output of manifests.get(projectId).outputs || []) {
-      if (output.kind !== 'linked') continue;
-      assert.match(output.notes || '', /(source-locked|Toolkit-only)/, output.output);
+test('validation command parser accepts quoted canonical targets and ordinary options', () => {
+  const validator = require(validateScript);
+  const command = 'node --test "repo/tests/skill-routing.test.cjs" --test-name-pattern "direct canonical" --workspace repo/scripts/validate-toolkit.cjs';
+  assert.deepEqual(validator.validationCommandTargets(command), [
+    'repo/tests/skill-routing.test.cjs',
+    'repo/scripts/validate-toolkit.cjs'
+  ]);
+  assert.equal(validator.validationCommandTargetFinding(command), null);
+});
+
+test('validator rejects noncanonical or missing validation targets in copied workspaces', () => {
+  const cases = [
+    ['missing canonical target', 'node --test repo/tests/does-not-exist.test.cjs', /missing current target/],
+    ['Windows backslash target', String.raw`node --test repo\tests\skill-routing.test.cjs`, /noncanonical repository target spelling/],
+    ['dot-prefixed target', 'node --test ./repo/tests/skill-routing.test.cjs', /noncanonical repository target spelling/],
+    ['repeated separator target', 'node --test repo//tests/skill-routing.test.cjs', /noncanonical repository target spelling/],
+    ['traversal target', 'node --test repo/tests/../tests/skill-routing.test.cjs', /noncanonical repository target spelling/],
+    ['absolute POSIX target', 'node --test /repo/tests/skill-routing.test.cjs', /noncanonical repository target spelling/],
+    ['Windows drive target', String.raw`node --test C:\repo\tests\skill-routing.test.cjs`, /noncanonical repository target spelling/]
+  ];
+
+  for (const [label, command, expected] of cases) {
+    const cwd = copyRepo();
+    try {
+      updateBaseline(cwd, (baseline) => {
+        baseline.skill_creation_review['github-governance-review-reconciler'].validation.push(command);
+      });
+      const result = runValidate(cwd);
+      assert.notEqual(result.status, 0, label);
+      assert.match(result.stderr, expected, label);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
     }
   }
 });
 
-test('curated Markdown outputs carry curated-source notices', () => {
-  for (const [outputPath, sourcePath] of [
-    [
-      'skills/n8n-local-setup/SKILL.md',
-      '_projects/n8n/local-setup/curated_output_for_ai/skills/n8n-local-setup/SKILL.md'
-    ],
-    [
-      'skills/n8n-local-setup/README.md',
-      '_projects/n8n/local-setup/curated_output_for_ai/skills/n8n-local-setup/README.md'
-    ],
-    [
-      'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/README.md',
-      '_projects/n8n/workflow-toolkit/curated_output_for_ai/templates/helper-scripts/import-export-sync/README.md'
-    ]
-  ]) {
-    const text = fs.readFileSync(path.join(repoRoot, outputPath), 'utf8').replace(/\r\n/g, '\n');
-    assert.match(text, /Generated from toolkit curated output for AI\. Do not edit directly\./, outputPath);
-    assert.match(text, new RegExp(`Source: ${sourcePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), outputPath);
-    assert.match(text, /Update the curated output and run sync\./, outputPath);
+test('validator rejects a cross-class normalized policy alias collision', () => {
+  const cwd = copyRepo();
+  try {
+    updateTopologyPolicy(cwd, (policy) => {
+      policy.standalone_identity_definitions[2].aliases.push('project_module');
+    });
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /duplicates normalized alias from primitive_definitions\.retired-project-module/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
   }
 });
 
-test('changing curated skill README source makes generated skill README stale', () => {
-  const cwd = tempCopy();
-  const source = path.join(
-    cwd,
-    '_projects',
-    'n8n',
-    'local-setup',
-    'curated_output_for_ai',
-    'skills',
-    'n8n-local-setup',
-    'README.md'
-  );
-  fs.appendFileSync(source, '\n\n<!-- drift test -->\n');
-  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Stale generated output: skills\/n8n-local-setup\/README\.md/);
-});
-
-test('curated JSON pack outputs match deterministic source formatting', () => {
-  for (const [sourcePath, outputPath] of [
-    [
-      '_projects/n8n/local-setup/curated_output_for_ai/packs/codex-n8n-local/pack.json',
-      'skills/n8n-local-setup/packs/codex-n8n-local/pack.json'
-    ],
-    [
-      '_projects/cicd/secure-installer/curated_output_for_ai/packs/secure-cicd/pack.json',
-      'skills/secure-cicd-installer/packs/secure-cicd/pack.json'
-    ]
-  ]) {
-    const expected = `${JSON.stringify(readJsonFile(path.join(repoRoot, sourcePath)), null, 2)}\n`;
-    assert.equal(fs.readFileSync(path.join(repoRoot, outputPath), 'utf8'), expected, outputPath);
-  }
-});
-
-test('third-party UI UX project owns skill surfaces without repo-wide MCP linked output', () => {
-  const manifests = manifestsById();
-  assert.equal(fs.existsSync(path.join(repoRoot, '_projects', 'design', 'ui-ux-pro-max', 'curated_output_for_ai')), false);
-  assert.equal(manifestOutput(manifests.get('design.ui-ux-pro-max'), 'mcp/projects/ui-ux-pro-max.md'), undefined);
-  for (const [outputPath, sourcePath] of [
-    ['skills/ui-ux-secure-frontend-design/SKILL.md', '_main/skill/SKILL.md'],
-    ['skills/ui-ux-secure-frontend-design/README.md', '_main/skill/README.md'],
-    ['skills/ui-ux-secure-frontend-design/agents/openai.yaml', '_main/skill/agents/openai.yaml'],
-    ['skills/ui-ux-secure-frontend-design/references/project/ui-ux-pro-max.md', '_main/skill/references/project/ui-ux-pro-max.md'],
-    ['skills/ui-ux-secure-frontend-design/tools/design-system-generator/README.md', '_main/skill/tools/design-system-generator/README.md'],
-    ['skills/ui-ux-secure-frontend-design/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md', '_main/skill/tools/design-system-generator/LICENSE-THIRD-PARTY-NOTES.md'],
-    ['skills/ui-ux-secure-frontend-design/packs/design-system-generator/pack.json', '_main/skill/packs/design-system-generator/pack.json'],
-    ['skills/ui-ux-secure-frontend-design/packs/frontend-design-skill/pack.json', '_main/skill/packs/frontend-design-skill/pack.json']
-  ]) {
-    const output = manifestOutput(manifests.get('design.ui-ux-pro-max'), outputPath);
-    assert.equal(output?.kind, 'copy', outputPath);
-    assert.equal(output?.source, sourcePath, outputPath);
-  }
-});
-
-test('project modules require README, manifest, lock, toolkit metadata, and _main only', () => {
-  const cwd = tempCopy();
-  fs.unlinkSync(path.join(cwd, '_projects', 'n8n', 'local-setup', 'toolkit.project.json'));
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /missing required project module file: _projects\/n8n\/local-setup\/toolkit\.project\.json/);
-});
-
-test('project module validation treats curated and generated folders as optional', () => {
-  const errors = validator.runValidation();
-  assert.equal(errors.filter((error) => /missing (curated_output_for_ai|_generated)/.test(error)).length, 0, errors.join('\n'));
-});
-
-test('source-lock audit passes and catches exact-copy drift for retired sources', () => {
-  let result = spawnSync(process.execPath, [auditScript], { cwd: repoRoot, encoding: 'utf8' });
-  assert.equal(result.status, 0, result.stderr);
-
-  const cwd = tempCopy();
-  const lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-toolkit', 'SOURCE-LOCK.json');
-  const lock = readJsonFile(lockPath);
-  assert.equal(lock.source_lifecycle, 'retired_after_migration');
-  assert.equal(lock.source_update_policy, 'none');
-  assert.equal(lock.public_attribution_required, false);
-  const copiedFile = path.join(cwd, '_projects', 'n8n', 'workflow-toolkit', '_main', 'helper-scripts', 'import-export-sync', 'should-import-n8n-workflow.cjs');
-  const copiedBuffer = fs.readFileSync(copiedFile);
-  const copiedHeader = Buffer.from(`blob ${copiedBuffer.length}\0`, 'utf8');
-  const copiedEntry = lock.files.find((entry) => entry.project_path.endsWith('/should-import-n8n-workflow.cjs'));
-  assert.ok(copiedEntry);
-  copiedEntry.mode = 'exact';
-  copiedEntry.source_blob_sha = crypto.createHash('sha1').update(copiedHeader).update(copiedBuffer).digest('hex');
-  delete copiedEntry.notes;
-  writeJsonFile(lockPath, lock);
-  result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
-  assert.equal(result.status, 0, result.stderr);
-  fs.appendFileSync(copiedFile, '\nDrift test\n');
-  result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /exact-copy drift/);
-});
-
-test('source-lock audit rejects toolkit-local source_path provenance rewrites', () => {
-  for (const sourcePath of ['repo/scripts/example.cjs', '_projects/n8n/local-setup/_main/README.md']) {
-    const cwd = tempCopy();
-    const lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-toolkit', 'SOURCE-LOCK.json');
-    const lock = readJsonFile(lockPath);
-    lock.files[0].source_path = sourcePath;
-    writeJsonFile(lockPath, lock);
-
-    const result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
-    assert.notEqual(result.status, 0, sourcePath);
-    assert.match(result.stderr, /source_path must stay upstream-provenance, not toolkit-local/);
+test('Skill Creation and published-surface consumers share the retired topology atom detector', () => {
+  const audit = require(path.join(repoRoot, 'repo', 'scripts', 'audit-published-surfaces.cjs'));
+  for (const variant of sharedRetiredOperationVariants) {
+    assert.ok(audit.detectRetiredTopologyAtoms(variant).length > 0, variant);
   }
 
-  const cwd = tempCopy();
-  const lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-toolkit', 'SOURCE-LOCK.json');
-  const lock = readJsonFile(lockPath);
-  lock.files[0].source_path = 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/README.md';
-  writeJsonFile(lockPath, lock);
-
-  const result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /root-surface source_path is allowed only for retired same-repo migrations/);
-});
-
-test('source-lock audit requires local paths to stay in their topology namespaces', () => {
-  let cwd = tempCopy();
-  let lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-toolkit', 'SOURCE-LOCK.json');
-  let lock = readJsonFile(lockPath);
-  lock.files[0].mode = 'adapted';
-  lock.files[0].notes = 'Topology namespace regression test.';
-  lock.files[0].project_path = 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/README.md';
-  delete lock.files[0].source_blob_sha;
-  writeJsonFile(lockPath, lock);
-  let result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /project_path must point under _projects\//);
-
-  cwd = tempCopy();
-  lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-toolkit', 'SOURCE-LOCK.json');
-  lock = readJsonFile(lockPath);
-  let rootSurfaceEntry = lock.files[0];
-  rootSurfaceEntry.mode = 'adapted';
-  rootSurfaceEntry.notes = 'Topology namespace regression test.';
-  delete rootSurfaceEntry.project_path;
-  rootSurfaceEntry.root_surface_path = 'repo/scripts/validate-toolkit.cjs';
-  delete rootSurfaceEntry.source_blob_sha;
-  writeJsonFile(lockPath, lock);
-  result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /root_surface_path must point under skills\//);
-
-  cwd = tempCopy();
-  lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-toolkit', 'SOURCE-LOCK.json');
-  lock = readJsonFile(lockPath);
-  lock.files[0].mode = 'adapted';
-  lock.files[0].notes = 'Topology traversal regression test.';
-  lock.files[0].project_path = '_projects/../README.md';
-  delete lock.files[0].source_blob_sha;
-  writeJsonFile(lockPath, lock);
-  result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /project_path must not contain \.\. path segments/);
-
-  cwd = tempCopy();
-  lockPath = path.join(cwd, '_projects', 'n8n', 'workflow-toolkit', 'SOURCE-LOCK.json');
-  lock = readJsonFile(lockPath);
-  rootSurfaceEntry = lock.files[0];
-  rootSurfaceEntry.mode = 'adapted';
-  rootSurfaceEntry.notes = 'Topology traversal regression test.';
-  delete rootSurfaceEntry.project_path;
-  rootSurfaceEntry.root_surface_path = 'skills/../repo/scripts/validate-toolkit.cjs';
-  delete rootSurfaceEntry.source_blob_sha;
-  writeJsonFile(lockPath, lock);
-  result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /root_surface_path must not contain \.\. path segments/);
-});
-
-test('source-lock audit rejects missing or unknown lifecycle metadata', () => {
-  let cwd = tempCopy();
-  let lockPath = path.join(cwd, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json');
-  let lock = readJsonFile(lockPath);
-  delete lock.source_lifecycle;
-  writeJsonFile(lockPath, lock);
-  let result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /missing source_lifecycle/);
-
-  cwd = tempCopy();
-  lockPath = path.join(cwd, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json');
-  lock = readJsonFile(lockPath);
-  lock.source_lifecycle = 'unknown';
-  lock.source_update_policy = 'maybe';
-  writeJsonFile(lockPath, lock);
-  result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /unknown source_lifecycle/);
-  assert.match(result.stderr, /unknown source_update_policy/);
-});
-
-test('source-lock lifecycle metadata accepts retired internal and active third-party sources', () => {
-  const retired = readJsonFile(path.join(repoRoot, '_projects', 'n8n', 'local-setup', 'SOURCE-LOCK.json'));
-  assert.equal(retired.source_lifecycle, 'retired_after_migration');
-  assert.equal(retired.source_role, 'migration_provenance_only');
-  assert.equal(retired.source_update_policy, 'none');
-  assert.equal(retired.public_attribution_required, false);
-
-  const thirdParty = readJsonFile(path.join(repoRoot, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json'));
-  assert.equal(thirdParty.source_lifecycle, 'active');
-  assert.equal(thirdParty.source_role, 'third_party_attribution_source');
-  assert.equal(thirdParty.source_update_policy, 'manual_review_required');
-  assert.equal(thirdParty.public_attribution_required, true);
-});
-
-test('source-lock audit rejects inconsistent lifecycle role policy combinations', () => {
-  let cwd = tempCopy();
-  let lockPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'SOURCE-LOCK.json');
-  let lock = readJsonFile(lockPath);
-  lock.source_lifecycle = 'active';
-  writeJsonFile(lockPath, lock);
-  let result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /active source must use source_role third_party_attribution_source/);
-
-  cwd = tempCopy();
-  lockPath = path.join(cwd, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json');
-  lock = readJsonFile(lockPath);
-  lock.source_update_policy = 'none';
-  writeJsonFile(lockPath, lock);
-  result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /active source must use source_update_policy manual_review_required/);
-
-  cwd = tempCopy();
-  lockPath = path.join(cwd, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json');
-  lock = readJsonFile(lockPath);
-  lock.source_lifecycle = 'retired_after_migration';
-  writeJsonFile(lockPath, lock);
-  result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /retired migration source must use source_update_policy none/);
-});
-
-test('active third-party source lock keeps upstream pins in SOURCE-LOCK', () => {
-  const thirdParty = readJsonFile(path.join(repoRoot, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json'));
-  assert.equal(thirdParty.source_repo, 'nextlevelbuilder/ui-ux-pro-max-skill');
-  assert.equal(thirdParty.source_ref, 'main');
-  assert.match(thirdParty.source_commit, /^[0-9a-f]{40}$/);
-  assert.equal(thirdParty.source_update_policy, 'manual_review_required');
-  assert.equal(thirdParty.public_attribution_required, true);
-  assert.ok(thirdParty.files.some((file) => file.mode === 'exact' && file.source_blob_sha));
-  assert.ok(thirdParty.files.some((file) => file.mode === 'adapted' && file.source_blob_sha && file.notes));
-
-  const manifest = readJsonFile(path.join(repoRoot, '_projects', 'design', 'ui-ux-pro-max', 'toolkit.project.json'));
-  assert.equal(manifest.version, '1.0.0');
-  assert.equal(manifest.version_policy, 'semver');
-  assert.doesNotMatch(JSON.stringify(manifest), /source_commit|source_blob_sha/);
-});
-
-test('active third-party source lock rejects missing or non-SHA source commit', () => {
-  let cwd = tempCopy();
-  let lockPath = path.join(cwd, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json');
-  let lock = readJsonFile(lockPath);
-  delete lock.source_commit;
-  writeJsonFile(lockPath, lock);
-  let result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /missing source_commit/);
-
-  cwd = tempCopy();
-  lockPath = path.join(cwd, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json');
-  lock = readJsonFile(lockPath);
-  lock.source_commit = 'main';
-  writeJsonFile(lockPath, lock);
-  result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /active third-party source_commit must be a 40-character SHA/);
-});
-
-test('active third-party source lock rejects disabled public attribution', () => {
-  const cwd = tempCopy();
-  const lockPath = path.join(cwd, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json');
-  const lock = readJsonFile(lockPath);
-  lock.public_attribution_required = false;
-  writeJsonFile(lockPath, lock);
-  const result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /third-party attribution source must set public_attribution_required true/);
-});
-
-test('active third-party exact and adapted copied files require source blob pins', () => {
-  let cwd = tempCopy();
-  let lockPath = path.join(cwd, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json');
-  let lock = readJsonFile(lockPath);
-  const exactEntry = lock.files.find((file) => file.mode === 'exact');
-  delete exactEntry.source_blob_sha;
-  writeJsonFile(lockPath, lock);
-  let result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /exact entry missing source_blob_sha/);
-
-  cwd = tempCopy();
-  lockPath = path.join(cwd, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json');
-  lock = readJsonFile(lockPath);
-  const adaptedEntry = lock.files.find((file) => file.mode === 'adapted');
-  delete adaptedEntry.source_blob_sha;
-  writeJsonFile(lockPath, lock);
-  result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /adapted entry missing source_blob_sha/);
-});
-
-test('active third-party adapted copied files require notes', () => {
-  const cwd = tempCopy();
-  const lockPath = path.join(cwd, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json');
-  const lock = readJsonFile(lockPath);
-  const adaptedEntry = lock.files.find((file) => file.mode === 'adapted');
-  adaptedEntry.notes = '';
-  writeJsonFile(lockPath, lock);
-  const result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /adapted entry needs notes/);
-});
-
-test('retired internal source locks remain historical provenance without active third-party rules', () => {
-  const cwd = tempCopy();
-  const lockPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'SOURCE-LOCK.json');
-  const lock = readJsonFile(lockPath);
-  lock.source_commit = 'retired-source-marker';
-  writeJsonFile(lockPath, lock);
-  const result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
-  assert.equal(result.status, 0, result.stderr);
-});
-
-test('source watch separates retired provenance sources from active update candidates', () => {
-  const plan = sourceWatcher.buildPlan(sourceWatcher.discoverLocks());
-  const activeRepos = plan.active_update_candidates.map((entry) => entry.source_repo);
-  const retiredRepos = plan.retired_provenance_sources.map((entry) => entry.source_repo);
-
-  assert.deepEqual(activeRepos.filter((repo) => repo.startsWith('weijunswj/')), []);
-  assert.ok(retiredRepos.includes('weijunswj/codex-n8n-local-setup'));
-  assert.ok(retiredRepos.includes('weijunswj/ai-cicd-installer'));
-  assert.ok(retiredRepos.includes('weijunswj/n8n-workflow-templates'));
-
-  const thirdParty = plan.active_update_candidates.find((entry) => entry.source_repo === 'nextlevelbuilder/ui-ux-pro-max-skill');
-  assert.ok(thirdParty);
-  assert.equal(thirdParty.risk, 'third-party');
-  assert.equal(thirdParty.update_policy, 'manual_review_required');
-  assert.equal(thirdParty.public_attribution_required, true);
-  assert.match(thirdParty.notes, /read-only advisory/i);
-  assert.doesNotMatch(thirdParty.notes, /draft PR|open PR|create PR/i);
-});
-
-test('source watch rendered output is advisory and does not claim PR creation today', () => {
-  const markdown = sourceWatcher.renderMarkdown(sourceWatcher.buildPlan(sourceWatcher.discoverLocks()));
-  assert.match(markdown, /advisory/i);
-  assert.match(markdown, /Retired internal sources are provenance-only/);
-  assert.match(markdown, /does not fetch upstream commits, copy files, update SOURCE-LOCK\.json, create branches, or create PRs/);
-  assert.doesNotMatch(markdown, /Draft PR only|opens PRs today|creates PRs today|pushes commits/i);
-});
-
-test('source-watch plan excludes retired internal provenance sources without MCP registry metadata', () => {
-  const plan = sourceWatcher.buildPlan(sourceWatcher.discoverLocks());
-  const sources = plan.active_update_candidates.map((entry) => entry.source_repo);
-  assert.ok(sources.includes('nextlevelbuilder/ui-ux-pro-max-skill'));
-  assert.equal(sources.includes('weijunswj/codex-n8n-local-setup'), false);
-  assert.equal(sources.includes('weijunswj/ai-cicd-installer'), false);
-  assert.equal(sources.includes('weijunswj/n8n-workflow-templates'), false);
-});
-
-test('validator rejects repo-wide MCP output declarations in project manifests', () => {
-  const cwd = tempCopy();
-  const manifestPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'toolkit.project.json');
-  const manifest = readJsonFile(manifestPath);
-  manifest.outputs.push({ kind: 'copy', source: '_main/README.md', output: 'mcp/projects/n8n-local-setup.md' });
-  manifest.writes.allowed.push('mcp/projects/n8n-local-setup.md');
-  writeJsonFile(manifestPath, manifest);
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /must not declare repo-wide MCP output/);
-});
-
-test('validator rejects repo-wide MCP publish_as metadata in project manifests', () => {
-  const cwd = tempCopy();
-  const manifestPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'toolkit.project.json');
-  const manifest = readJsonFile(manifestPath);
-  manifest.surface.publish_as = 'both';
-  manifest.surface.mcp = { status: 'published', path: 'mcp/projects/n8n-local-setup.md', summary: 'bad' };
-  writeJsonFile(manifestPath, manifest);
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /must not publish repo-wide MCP surfaces|surface.publish_as must be one of skill, source_only/);
-});
-
-test('source watch rejects inconsistent active no-update metadata', () => {
-  const lock = readJsonFile(path.join(repoRoot, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json'));
-  lock.source_update_policy = 'none';
-
-  assert.throws(
-    () => sourceWatcher.buildPlan([{ relPath: '_projects/design/ui-ux-pro-max/SOURCE-LOCK.json', lock }]),
-    /Unsupported SOURCE-LOCK lifecycle metadata/
-  );
-});
-
-test('validator reports malformed source locks without aborting other diagnostics', () => {
-  const cwd = tempCopy();
-  fs.writeFileSync(path.join(cwd, '_projects', 'n8n', 'local-setup', 'SOURCE-LOCK.json'), '{ invalid json\n');
-  fs.writeFileSync(path.join(cwd, 'repo', 'docs', 'bad-export-source.md'), `Source: ${'projects/design/ui-ux-pro-max/' + 'exports/tools/readme.md'}\n`);
-
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /FAIL: _projects\/n8n\/local-setup\/SOURCE-LOCK\.json is not valid JSON:/);
-  assert.match(result.stderr, /Stale project exports path reference/);
-  assert.doesNotMatch(result.stderr, /SyntaxError/);
-});
-
-test('source-lock audit rejects active third-party sources without manual review metadata', () => {
-  const cwd = tempCopy();
-  const lockPath = path.join(cwd, '_projects', 'design', 'ui-ux-pro-max', 'SOURCE-LOCK.json');
-  const lock = readJsonFile(lockPath);
-  lock.source_update_policy = 'none';
-  lock.public_attribution_required = false;
-  writeJsonFile(lockPath, lock);
-  const result = spawnSync(process.execPath, [auditScript], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /third-party attribution source must use source_update_policy manual_review_required/);
-  assert.match(result.stderr, /third-party attribution source must set public_attribution_required true/);
-});
-
-test('curated recipes must source from curated_output_for_ai', () => {
-  const cwd = tempCopy();
-  const projectDir = path.join(cwd, '_projects', 'n8n', 'local-setup');
-  const manifestPath = path.join(projectDir, 'toolkit.project.json');
-  const manifest = readJsonFile(manifestPath);
-  fs.writeFileSync(path.join(projectDir, '_main', 'bad-curated.md'), 'Bad curated source\n');
-  manifest.outputs.push({
-    kind: 'curated',
-    source: '_main/bad-curated.md',
-    output: 'skills/n8n-local-setup/references/n8n/bad-curated.md'
-  });
-  manifest.writes.allowed.push('skills/n8n-local-setup/references/n8n/bad-curated.md');
-  writeJsonFile(manifestPath, manifest);
-
-  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /curated output source must start with curated_output_for_ai\//);
-});
-
-test('sync rejects symlinked curated source files outside the workspace', (t) => {
-  const cwd = tempCopy();
-  const sourcePath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'curated_output_for_ai', 'skills', 'n8n-local-setup', 'README.md');
-  const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-sync-outside-'));
-  const outsideFile = path.join(outsideDir, 'outside-curated.md');
-  fs.writeFileSync(outsideFile, '# Outside curated source\n');
-
-  if (!createSymlinkOrSkip(t, outsideFile, sourcePath, 'file')) return;
-
-  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Unsafe symlink/);
-});
-
-test('sync rejects symlinked source directories outside the workspace', (t) => {
-  const cwd = tempCopy();
-  const sourceDir = path.join(cwd, '_projects', 'n8n', 'local-setup', 'curated_output_for_ai', 'symlink-dir-fixture');
-  const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-sync-outside-'));
-  fs.writeFileSync(path.join(outsideDir, 'README.md'), '# Outside directory source\n');
-
-  if (!createSymlinkOrSkip(t, outsideDir, sourceDir, process.platform === 'win32' ? 'junction' : 'dir')) return;
-
-  const manifestPath = path.join(cwd, '_projects', 'n8n', 'local-setup', 'toolkit.project.json');
-  const manifest = readJsonFile(manifestPath);
-  manifest.outputs.push({
-    kind: 'copy',
-    source: 'curated_output_for_ai/symlink-dir-fixture',
-    output: 'skills/n8n-local-setup/references/symlink-dir-fixture',
-    fidelity: 'reviewed_entrypoint'
-  });
-  manifest.writes.allowed.push('skills/n8n-local-setup/references/symlink-dir-fixture');
-  writeJsonFile(manifestPath, manifest);
-
-  const result = spawnSync(process.execPath, [syncScript, '--check'], { cwd, encoding: 'utf8' });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Unsafe symlink/);
-});
-
-test('internal curated Markdown files carry the curated review note', () => {
-  const required = [
-    'Curated AI-facing source.',
-    'Review rule: Preserve safety constraints from preserved source. Do not weaken credential, .env, .tmp, .n8n-local, live n8n action, approval, attribution, or local-only rules.'
-  ];
-  for (const projectDir of [
-    '_projects/n8n/local-setup/curated_output_for_ai',
-    '_projects/n8n/workflow-toolkit/curated_output_for_ai',
-    '_projects/cicd/secure-installer/curated_output_for_ai'
-  ]) {
-    const files = fs.readdirSync(path.join(repoRoot, projectDir), { recursive: true })
-      .map((entry) => String(entry).replace(/\\/g, '/'))
-      .filter((entry) => entry.endsWith('.md'));
-    assert.ok(files.length > 0, projectDir);
-    for (const file of files) {
-      const text = readTextFile(path.join(repoRoot, projectDir, file));
-      for (const needle of required) assert.ok(text.includes(needle), `${projectDir}/${file}`);
+  for (const variant of sharedRetiredOperationVariants) {
+    const cwd = copyRepo();
+    try {
+      updateBaseline(cwd, (baseline) => {
+        baseline.skill_creation_review['github-governance-review-reconciler'].existing_skill_review += ` ${variant}`;
+      });
+      const result = runValidate(cwd);
+      assert.notEqual(result.status, 0, variant);
+      assert.match(result.stderr, /skill_creation_review\.github-governance-review-reconciler\.existing_skill_review/, variant);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
     }
   }
 });
 
-test('validator rejects stale mandatory exports architecture wording in permanent docs', () => {
-  const cwd = tempCopy();
-  fs.writeFileSync(path.join(cwd, 'repo', 'docs', 'bad-exports.md'), 'Every project module must include an `exports' + '/` folder.\n');
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Stale mandatory exports architecture wording/);
-});
-
-test('validator rejects stale registry YAML references in temp docs', () => {
-  const cwd = tempCopy();
-  fs.writeFileSync(path.join(cwd, 'repo', 'docs', 'bad.md'), `Use ${'mcp/registry/*.' + 'yaml'} here.\n`);
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Stale registry YAML reference/);
-});
-
-test('validator rejects stale project exports path references in active docs', () => {
-  const cwd = tempCopy();
-  fs.writeFileSync(path.join(cwd, 'repo', 'docs', 'bad-export-source.md'), `Source: ${'projects/design/ui-ux-pro-max/' + 'exports/tools/readme.md'}\n`);
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Stale project exports path reference/);
-});
-
-test('validator rejects project landing cards that stop pointing to _main', () => {
-  const cwd = tempCopy();
-  fs.writeFileSync(
-    path.join(cwd, '_projects', 'n8n', 'local-setup', 'README.md'),
-    '# Local n8n Setup\n\nUse playbooks/ as canonical human documentation.\n'
-  );
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /project README must link to _main\//);
-  assert.match(result.stderr, /must not claim playbooks are canonical human documentation/);
-});
-
-test('validator rejects oversized project landing cards', () => {
-  const cwd = tempCopy();
-  const longBody = Array.from({ length: 45 }, (_, index) => `Line ${index + 1}`).join('\n');
-  fs.writeFileSync(
-    path.join(cwd, '_projects', 'n8n', 'local-setup', 'README.md'),
-    `# Local n8n Setup\n\nCanonical docs live in [_main/](_main/).\n\n${longBody}\n`
-  );
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /project README must stay a tiny landing card/);
-});
-
-test('validator rejects source-watch wording that promises live update actions', () => {
-  const cwd = tempCopy();
-  fs.writeFileSync(
-    path.join(cwd, 'repo', 'docs', 'bad-source-watch.md'),
-    'Source-watch fetches upstream repos, copies allowlisted files, opens draft PRs, runs live n8n, and mutates credentials.\n'
-  );
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /source-watch wording must stay notification-only and source-safe/);
-});
-
-test('validator rejects source-watch source-write claims even with advisory wording', () => {
-  const cwd = tempCopy();
-  fs.writeFileSync(
-    path.join(cwd, 'repo', 'docs', 'bad-source-watch-advisory.md'),
-    'Source-watch is advisory but copies upstream files into review PRs.\n'
-  );
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /source-watch wording must stay notification-only and source-safe/);
-});
-
-test('validator allows source-watch notification PR wording and negated source-write phrases', () => {
-  const cwd = tempCopy();
-  fs.writeFileSync(
-    path.join(cwd, 'repo', 'docs', 'ok-source-watch-negated.md'),
-    [
-      'source-watch opens or updates a review notification PR.',
-      'source-watch will not create branches.',
-      'source-watch never mutates credentials.',
-      'source-watch does not copy upstream source files.'
-    ].join('\n')
-  );
-  const result = runValidate(cwd);
-  assert.equal(result.status, 0, result.stderr);
-});
-
-test('validator rejects pack YAML files in temp dirs', () => {
-  const cwd = tempCopy();
-  const badDir = path.join(cwd, 'skills', 'n8n-local-setup', 'packs', 'bad');
-  fs.mkdirSync(badDir, { recursive: true });
-  fs.writeFileSync(path.join(badDir, 'pack.' + 'yaml'), 'id: bad\n');
-  const result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /not allowed/);
-});
-
-test('validator allows only approved runtime-named n8n template paths to be tracked', () => {
-  const cwd = tempCopy();
-  const init = spawnSync('git', ['init', '--quiet'], { cwd, encoding: 'utf8' });
-  assert.equal(init.status, 0, init.stderr);
-
-  const approved = [
-    '_projects/n8n/local-setup/_main/templates/.n8n-local/.env.example',
-    '_projects/n8n/local-setup/_main/templates/.n8n-production-cloudflare/.env.example',
-    'skills/n8n-local-setup/templates/.n8n-local/.env.example',
-    'skills/n8n-local-setup/templates/.n8n-production-cloudflare/.env.example'
-  ];
-  const addApproved = spawnSync('git', ['add', '--force', '--', ...approved], { cwd, encoding: 'utf8' });
-  assert.equal(addApproved.status, 0, addApproved.stderr);
-
-  const approvedResult = runValidate(cwd);
-  assert.equal(approvedResult.status, 0, approvedResult.stderr);
-
-  const roguePaths = [
-    'repo/fixtures/.n8n-local/state.txt',
-    'repo/fixtures/.n8n-production-cloudflare/state.txt'
-  ];
-  for (const rogue of roguePaths) {
-    const absolute = path.join(cwd, ...rogue.split('/'));
-    fs.mkdirSync(path.dirname(absolute), { recursive: true });
-    fs.writeFileSync(absolute, 'runtime state must not be tracked\n');
+test('validator rejects the shared retired operation in every applicable operational free-text field', () => {
+  const injection = 'Current Toolkit conversions use project modules and published skills.';
+  for (const field of skillCreationOperationalFreeTextFields) {
+    const cwd = copyRepo();
+    try {
+      updateBaseline(cwd, (baseline) => {
+        baseline.skill_creation_review['github-governance-review-reconciler'][field] += ` ${injection}`;
+      });
+      const result = runValidate(cwd);
+      assert.notEqual(result.status, 0, field);
+      assert.match(result.stderr, new RegExp(`skill_creation_review\\.github-governance-review-reconciler\\.${field}`), field);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
   }
-  const addRogue = spawnSync('git', ['add', '--force', '--', ...roguePaths], { cwd, encoding: 'utf8' });
-  assert.equal(addRogue.status, 0, addRogue.stderr);
-
-  const rogueResult = runValidate(cwd);
-  assert.notEqual(rogueResult.status, 0);
-  assert.match(rogueResult.stderr, /Tracked local runtime file is not allowed: repo\/fixtures\/\.n8n-local\/state\.txt/);
-  assert.match(rogueResult.stderr, /Tracked local runtime file is not allowed: repo\/fixtures\/\.n8n-production-cloudflare\/state\.txt/);
 });
-test('validator rejects forbidden files but tolerates ignored local runtime folders', () => {
-  const cwd = tempCopy();
-  fs.writeFileSync(path.join(cwd, '.env'), 'EXAMPLE=unsafe\n');
-  fs.mkdirSync(path.join(cwd, '.n8n-local'), { recursive: true });
-  fs.mkdirSync(path.join(cwd, '.claude'), { recursive: true });
-  fs.writeFileSync(path.join(cwd, '.n8n-local', '.env.n8n-archived-workflow-cleanup'), 'N8N_API_KEY="local-secret"\n');
-  fs.mkdirSync(path.join(cwd, 'n8n-workflows'), { recursive: true });
-  fs.writeFileSync(path.join(cwd, 'n8n-workflows', 'local.live-export.json'), '{}\n');
-  fs.writeFileSync(path.join(cwd, 'sample.live-export.json'), '{}\n');
+
+test('Skill Creation retains exactly the twelve operational free-text fields', () => {
+  assert.deepEqual(skillCreationOperationalFreeTextFields, [
+    'existing_skill_review',
+    'trigger',
+    'decision_reason',
+    'unique_value',
+    'runtime_footprint',
+    'local_assets',
+    'output_contract',
+    'anti_bloat_review',
+    'safety_boundary',
+    'third_party_audit',
+    'publisher_workflow',
+    'routing'
+  ]);
+  assert.equal(skillCreationOperationalFreeTextFields.length, 12);
+});
+
+test('validator rejects shared retired-operation variants in validation commands', () => {
+  for (const variant of sharedRetiredOperationVariants) {
+    const cwd = copyRepo();
+    try {
+      updateBaseline(cwd, (baseline) => {
+        baseline.skill_creation_review['github-governance-review-reconciler'].validation.push(`node --test repo/tests/skill-routing.test.cjs ${variant}`);
+      });
+      const result = runValidate(cwd);
+      assert.notEqual(result.status, 0, variant);
+      assert.match(result.stderr, /skill_creation_review\.github-governance-review-reconciler\.validation command/, variant);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+});
+
+test('Skill Creation operational evidence does not exempt historical retired-operation wording', () => {
+  const cwd = copyRepo();
+  try {
+    updateBaseline(cwd, (baseline) => {
+      baseline.skill_creation_review['github-governance-review-reconciler'].routing += ' Earlier Toolkit operation used project modules and published skills, but that route is not current.';
+    });
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /skill_creation_review\.github-governance-review-reconciler\.routing/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('closed Skill Creation enum fields remain enum-validated', () => {
+  for (const [field, expected] of [
+    ['decision', /decision must be extend_existing_skill or new_project_skill/],
+    ['source_provenance', /source_provenance is invalid/]
+  ]) {
+    const cwd = copyRepo();
+    try {
+      updateBaseline(cwd, (baseline) => {
+        baseline.skill_creation_review['github-governance-review-reconciler'][field] = sharedRetiredOperationVariants[0];
+      });
+      const result = runValidate(cwd);
+      assert.notEqual(result.status, 0, field);
+      assert.match(result.stderr, expected, field);
+      assert.doesNotMatch(result.stderr, new RegExp(`skill_creation_review\\.github-governance-review-reconciler\\.${field} .*retired`, 'i'), field);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+});
+
+test('validator shares the exact five-file publisher reference allowlist', () => {
+  const validator = require(validateScript);
+  const audit = require(path.join(repoRoot, 'repo', 'scripts', 'audit-published-surfaces.cjs'));
+  assert.deepEqual(publisherReferencePaths.filter(audit.legacyReferenceAllowed), publisherReferencePaths);
+  assert.equal(audit.legacyReferenceAllowed('skills/context-preserving-ai-publisher/README.md'), false);
+  assert.deepEqual(validator.validate(), []);
+});
+
+test('source locks are discovered only from canonical source-watch provenance', () => {
+  const audit = require(path.join(repoRoot, 'repo', 'scripts', 'audit-project-source-locks.cjs'));
+  const result = audit.auditSourceLocks();
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.locks.length, 2);
+  assert.ok(result.locks.every((relPath) => relPath.startsWith('repo/source-watch/provenance/')));
+});
+
+test('validator rejects a legacy project tree in a copied workspace', () => {
+  const cwd = copyRepo();
+  fs.mkdirSync(path.join(cwd, legacyProjectToken), { recursive: true });
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Forbidden env file/);
-  assert.doesNotMatch(result.stderr, /Forbidden directory present: \.n8n-local/);
-  assert.doesNotMatch(result.stderr, /Unexpected root entry: \.n8n-local/);
-  assert.doesNotMatch(result.stderr, /Unexpected root entry: \.claude/);
-  assert.doesNotMatch(result.stderr, /Unexpected root entry: n8n-workflows/);
-  assert.doesNotMatch(result.stderr, /n8n-workflows\/local\.live-export\.json/);
-  assert.match(result.stderr, /Live n8n import\/export file/);
+  assert.match(result.stderr, new RegExp(`Legacy ${legacyProjectToken}/ tree must not exist`));
 });
 
-test('validator narrows credential example JSON allowance to intended fixtures', () => {
-  const gitignore = readTextFile(path.join(repoRoot, '.gitignore'));
-  assert.doesNotMatch(gitignore, /^!\*\.example\.json$/m);
-  assert.match(gitignore, /^!_projects\/cicd\/secure-installer\/_main\/docs\/n8n\/n8n-credential-migration-map\.example\.json$/m);
-
-  const errors = validator.runValidation();
-  assert.deepEqual(
-    errors.filter((error) => error.includes('n8n-credential-migration-map.example.json')),
-    []
-  );
-
-  let cwd = tempCopy();
-  fs.writeFileSync(path.join(cwd, 'repo', 'docs', 'credential-map.example.json'), '{}\n');
-  let result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Credential-looking JSON file present: repo\/docs\/credential-map\.example\.json/);
-
-  cwd = tempCopy();
-  fs.writeFileSync(path.join(cwd, 'repo', 'docs', 'service.credentials.json'), '{}\n');
-  result = runValidate(cwd);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Credential file present: repo\/docs\/service\.credentials\.json/);
-});
-
-test('validator rejects obvious secret-looking strings', () => {
-  const cwd = tempCopy();
-  fs.writeFileSync(path.join(cwd, 'repo', 'docs', 'secret.md'), `key=${'sk-' + 'A'.repeat(25)}\n`);
+test('validator rejects retired skills and pack manifests', () => {
+  const cwd = copyRepo();
+  const retiredSkill = path.join(cwd, 'skills', 'knowledge-index-updater');
+  fs.mkdirSync(retiredSkill, { recursive: true });
+  fs.writeFileSync(path.join(retiredSkill, 'SKILL.md'), '---\nname: knowledge-index-updater\ndescription: retired fixture\n---\n', 'utf8');
+  fs.writeFileSync(path.join(retiredSkill, 'README.md'), '# retired\n', 'utf8');
+  const packDir = path.join(cwd, 'skills', 'fixture', 'packs', 'old');
+  fs.mkdirSync(packDir, { recursive: true });
+  fs.writeFileSync(path.join(packDir, 'pack.json'), '{}\n', 'utf8');
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /possible secret/);
+  assert.match(result.stderr, /Retired skill surface is present/);
+  assert.match(result.stderr, /Pack manifests are not supported/);
 });
 
-test('safe-source-update classifies n8n helper templates as manual and workflow JSON as blocked', () => {
-  assert.equal(safeSourceUpdate.classify('skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/compare-n8n-workflow-credentials.cjs'), 'manual');
-  assert.equal(safeSourceUpdate.classify('skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/sanitise-n8n-template.ps1'), 'manual');
-  assert.equal(safeSourceUpdate.classify('n8n-workflows/customer-workflow.json'), 'blocked');
+test('validator rejects legacy publisher references in canonical files', () => {
+  const cwd = copyRepo();
+  const target = path.join(cwd, 'repo', 'contracts', 'legacy-reference-fixture.md');
+  fs.writeFileSync(target, `${legacyProjectToken}/fixture/${legacyCuratedToken}/file.md\n`, 'utf8');
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /references the retired project\/publisher topology/);
+});
+
+test('validator rejects legacy publisher references in ordinary canonical skills', () => {
+  const cwd = copyRepo();
+  const target = path.join(cwd, 'skills', 'n8n-local-setup', 'references', 'legacy-reference-fixture.md');
+  fs.writeFileSync(target, `${legacyProjectToken}/fixture/${legacyCuratedToken}/file.md\n`, 'utf8');
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /references the retired project\/publisher topology/);
+});
+
+test('validator rejects legacy references in a non-allowlisted publisher file', () => {
+  const cwd = copyRepo();
+  const target = path.join(cwd, 'skills', 'context-preserving-ai-publisher', 'references', 'legacy-fixture.md');
+  fs.writeFileSync(target, `${legacyProjectToken}/fixture/${legacyCuratedToken}/file.md\n`, 'utf8');
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /references the retired project\/publisher topology/);
+});
+
+test('validator rejects a deleted sync command in current review validation evidence', () => {
+  const cwd = copyRepo();
+  try {
+    updateBaseline(cwd, (baseline) => {
+      baseline.skill_creation_review['github-governance-review-reconciler'].validation.push('node repo/scripts/sync-toolkit-projects.cjs --check');
+    });
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /retired-sync-toolkit-projects-command/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('validator rejects a current review publisher workflow using a project _main source', () => {
+  const cwd = copyRepo();
+  try {
+    updateBaseline(cwd, (baseline) => {
+      baseline.skill_creation_review['local-ai-stack-safety'].publisher_workflow += ` Active source: ${legacyProjectToken}/local/_main/SKILL.md.`;
+    });
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /retired-projects-source-root/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('validator rejects curated deterministic publication claims in current review evidence', () => {
+  const cwd = copyRepo();
+  try {
+    updateBaseline(cwd, (baseline) => {
+      baseline.skill_creation_review['managed-app-foundation-review'].publisher_workflow += ` Current workflow publishes ${legacyCuratedToken} through generated deterministic publication.`;
+    });
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /retired-curated-output-root/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('validator rejects a retired source-to-surface publisher claim without direct-canonical evidence', () => {
+  const cwd = copyRepo();
+  try {
+    updateBaseline(cwd, (baseline) => {
+      baseline.skill_creation_review['toolkit-setup'].publisher_workflow = 'context-preserving-ai-publisher source-to-surface publisher workflow for the current skill.';
+    });
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /must state direct-canonical maintenance/);
+    assert.match(result.stderr, /retired-source-to-surface/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('validator rejects a current skill without direct-canonical review evidence', () => {
+  const cwd = copyRepo();
+  const baselinePath = path.join(cwd, 'repo', 'docs', 'skill-creation-center-baseline.json');
+  const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
+  delete baseline.skill_creation_review['managed-app-foundation-review'];
+  baseline.reviewed_skill_ids = baseline.reviewed_skill_ids.filter((id) => id !== 'managed-app-foundation-review');
+  fs.writeFileSync(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`, 'utf8');
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /missing skill_creation_review evidence for current skill managed-app-foundation-review/);
+});
+
+test('validator rejects a new current skill without review evidence', () => {
+  const cwd = copyRepo();
+  try {
+    addCurrentSkill(cwd, 'fixture-current-skill');
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /missing skill_creation_review evidence for current skill fixture-current-skill/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('validator still rejects a catalogued current skill without review evidence', () => {
+  const cwd = copyRepo();
+  try {
+    addCurrentSkill(cwd, 'fixture-catalogued-skill');
+    addSkillToCatalogs(cwd, 'fixture-catalogued-skill');
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /missing skill_creation_review evidence for current skill fixture-catalogued-skill/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('validator rejects a new skill added to the mutable grandfathered list', () => {
+  const cwd = copyRepo();
+  try {
+    addCurrentSkill(cwd, 'zz-future-current-skill');
+    const baselinePath = path.join(cwd, 'repo', 'docs', 'skill-creation-center-baseline.json');
+    const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
+    baseline.grandfathered_skill_ids.push('zz-future-current-skill');
+    fs.writeFileSync(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`, 'utf8');
+
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /grandfathered_skill_ids must equal the immutable pre-gate legacy set/);
+    assert.doesNotMatch(result.stderr, /missing skill_creation_review evidence for current skill zz-future-current-skill/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('validator rejects an arbitrary grandfathered ID even without a matching skill', () => {
+  const cwd = copyRepo();
+  try {
+    const baselinePath = path.join(cwd, 'repo', 'docs', 'skill-creation-center-baseline.json');
+    const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
+    baseline.grandfathered_skill_ids.push('zz-arbitrary-grandfathered-id');
+    fs.writeFileSync(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`, 'utf8');
+
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /grandfathered_skill_ids must equal the immutable pre-gate legacy set/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('validator rejects removal of a legitimate historical grandfathered ID', () => {
+  const cwd = copyRepo();
+  try {
+    const baselinePath = path.join(cwd, 'repo', 'docs', 'skill-creation-center-baseline.json');
+    const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
+    baseline.grandfathered_skill_ids = baseline.grandfathered_skill_ids.filter((id) => id !== 'windows-localhost-workflows');
+    fs.writeFileSync(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`, 'utf8');
+
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /grandfathered_skill_ids must equal the immutable pre-gate legacy set/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('validator rejects incomplete keyed review evidence', () => {
+  const cwd = copyRepo();
+  try {
+    const baselinePath = path.join(cwd, 'repo', 'docs', 'skill-creation-center-baseline.json');
+    const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
+    baseline.skill_creation_review['managed-app-foundation-review'].trigger = ' ';
+    fs.writeFileSync(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`, 'utf8');
+
+    const result = runValidate(cwd);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /skill_creation_review\.managed-app-foundation-review\.trigger must be a non-empty evidence string/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('validator rejects a special root MEMORY.md surface', () => {
+  const cwd = copyRepo();
+  fs.writeFileSync(path.join(cwd, 'MEMORY.md'), '# fixture\n', 'utf8');
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Unexpected root entry: MEMORY\.md/);
+});
+
+test('validator detects stale plugin package versions', () => {
+  const cwd = copyRepo();
+  const manifestPath = path.join(cwd, '.codex-plugin', 'plugin.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  manifest.version = '0.0.0';
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  const result = runValidate(cwd);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /version does not match/);
+});
+
+test('validation workflow contains only retained read-only checks', () => {
+  const workflow = readText('.github/workflows/validate.yml');
+  assert.match(workflow, /node repo\/scripts\/sync-agent-instruction-shims\.cjs --check/);
+  assert.match(workflow, /node repo\/scripts\/sync-repo-doc-contract\.cjs --check/);
+  assert.match(workflow, /node repo\/scripts\/audit-project-source-locks\.cjs/);
+  assert.match(workflow, /node repo\/scripts\/audit-published-surfaces\.cjs --check/);
+  assert.match(workflow, /node repo\/scripts\/validate-toolkit\.cjs/);
+  assert.match(workflow, /node --test repo\/tests\/\*\.test\.cjs/);
+  assert.doesNotMatch(workflow, /sync-toolkit-projects\.cjs|package-skills\.cjs|package-packs\.cjs/);
+});
+
+test('retired publisher and writeback machinery remains absent', () => {
+  for (const relPath of [
+    'repo/scripts/sync-toolkit-projects.cjs',
+    'repo/scripts/package-skills.cjs',
+    'repo/scripts/package-packs.cjs'
+  ]) assert.equal(fs.existsSync(path.join(repoRoot, relPath)), false, relPath);
+});
+
+test('managed source-of-truth and instruction checks pass from an explicit workspace', () => {
+  for (const script of [
+    'repo/scripts/sync-agent-instruction-shims.cjs',
+    'repo/scripts/sync-repo-doc-contract.cjs',
+    'repo/scripts/validate-toolkit.cjs'
+  ]) {
+    const cwd = copyRepo();
+    const result = spawnSync(process.execPath, [path.join(repoRoot, script), '--workspace', cwd, ...(script.includes('validate-toolkit') ? [] : ['--check'])], {
+      cwd: os.tmpdir(),
+      encoding: 'utf8'
+    });
+    assert.equal(result.status, 0, `${script}\n${result.stderr}`);
+  }
 });
