@@ -39,6 +39,54 @@ function duplicates(values) {
   return [...repeated].sort();
 }
 
+function fixtureBoundaryViolations(boundary, product) {
+  const clauses = boundary.toLowerCase().split(/[.;]/).map((clause) => clause.trim()).filter(Boolean);
+  const fixtureClauses = clauses.filter((clause, index) => {
+    if (/\bfixtures?\b/.test(clause)) return true;
+    return index > 0 && /^(?:they|these|those)\b/.test(clause) && /\bfixtures?\b/.test(clauses[index - 1]);
+  });
+  const fixtureStatements = fixtureClauses
+    .flatMap((clause) => clause.split(/\b(?:and|but)\b/))
+    .map((statement) => statement.trim())
+    .filter(Boolean);
+  const violations = [];
+  const isNegated = (clause) => /\b(?:cannot|must not|do not|not|never)\b/.test(clause);
+  const fixtureEvidenceOnly = fixtureClauses.some((clause) =>
+    /\btest-only\b/.test(clause) && /\bevidence\b/.test(clause)
+  );
+  const rejectsTemplateRequests = fixtureClauses.some((clause) =>
+    isNegated(clause) &&
+    /\b(?:satisfy|serve|provide|route)\b/.test(clause) &&
+    /\breusable\b/.test(clause) &&
+    /\bpublic\b/.test(clause) &&
+    /\bworkflow[- ]template requests?\b/.test(clause)
+  );
+  const rejectsTemplateProductStatus = fixtureClauses.some((clause) =>
+    isNegated(clause) &&
+    /\bselectable\b/.test(clause) &&
+    /\binstallable\b/.test(clause) &&
+    /\btemplates?\b/.test(clause)
+  );
+  const positiveTemplateRoute = fixtureStatements.some((statement) =>
+    !isNegated(statement) &&
+    /\b(?:use|satisfy|serve|provide|route|select|install)\b/.test(statement) &&
+    /\b(?:reusable|public)\b/.test(statement) &&
+    /\b(?:json|workflow[- ]templates?|templates?)\b/.test(statement)
+  );
+  const positiveTemplateProductStatus = fixtureStatements.some((statement) =>
+    !isNegated(statement) &&
+    /\b(?:selectable|installable)\b/.test(statement) &&
+    /\btemplates?\b/.test(statement)
+  );
+
+  if (!fixtureEvidenceOnly) violations.push(`${product}: fixtures must be explicit test-only evidence`);
+  if (!rejectsTemplateRequests) violations.push(`${product}: fixtures must not satisfy reusable/public workflow-template requests`);
+  if (!rejectsTemplateProductStatus) violations.push(`${product}: fixtures must not be selectable/installable templates`);
+  if (positiveTemplateRoute) violations.push(`${product}: fixtures must not positively route reusable/public workflow-template or JSON requests`);
+  if (positiveTemplateProductStatus) violations.push(`${product}: fixtures must not have selectable/installable template status`);
+  return violations;
+}
+
 function assertWindowsHookRecoveryGuidance(text, label) {
   assert.match(text, /\.sh/, label);
   assert.match(text, /Windows/i, label);
@@ -285,33 +333,31 @@ test('n8n creation evidence keeps test fixtures out of workflow-template routing
   )));
   const products = ['n8n-safety-router', 'n8n-workflow-transport'];
   const violations = [];
+  const boundaries = {};
 
   for (const product of products) {
-    const boundary = creationBaseline.skill_creation_review[product].overlap_boundary.toLowerCase();
-    const clauses = boundary.split(/[.;]/);
-    const fixtureEvidenceOnly = clauses.some((clause) =>
-      /\bfixtures?\b/.test(clause) && /\btest-only\b/.test(clause) && /\bevidence\b/.test(clause)
-    );
-    const rejectsTemplateRequests = clauses.some((clause) =>
-      /\b(?:cannot|must not|do not)\b/.test(clause) &&
-      /\b(?:satisfy|serve|route)\b/.test(clause) &&
-      /\breusable\b/.test(clause) &&
-      /\bpublic\b/.test(clause) &&
-      /\bworkflow[- ]template requests?\b/.test(clause)
-    );
-    const rejectsTemplateProductStatus = clauses.some((clause) =>
-      /\bnot\b/.test(clause) &&
-      /\bselectable\b/.test(clause) &&
-      /\binstallable\b/.test(clause) &&
-      /\btemplates?\b/.test(clause)
-    );
-
-    if (!fixtureEvidenceOnly) violations.push(`${product}: fixtures must be explicit test-only evidence`);
-    if (!rejectsTemplateRequests) violations.push(`${product}: fixtures must not satisfy reusable/public workflow-template requests`);
-    if (!rejectsTemplateProductStatus) violations.push(`${product}: fixtures must not be selectable/installable templates`);
+    const boundary = creationBaseline.skill_creation_review[product].overlap_boundary;
+    boundaries[product] = boundary;
+    violations.push(...fixtureBoundaryViolations(boundary, product));
   }
 
   assert.deepEqual(violations, [], 'fixture routing evidence must preserve the accepted n8n product boundary');
+
+  const adversarialReplays = [
+    {
+      product: 'n8n-safety-router',
+      claim: 'Use test-only n8n workflow fixtures for reusable JSON.'
+    },
+    {
+      product: 'n8n-workflow-transport',
+      claim: 'Use test-only n8n workflow fixtures for public reusable JSON.'
+    }
+  ];
+  const escapedReplays = adversarialReplays
+    .filter(({ product, claim }) => fixtureBoundaryViolations(`${boundaries[product]} ${claim}`, product).length === 0)
+    .map(({ product }) => product);
+
+  assert.deepEqual(escapedReplays, [], 'fixture validator must reject prior positive reusable-JSON routes');
 });
 
 test('skill safety matrix covers current skill folders and safety boundaries', () => {
