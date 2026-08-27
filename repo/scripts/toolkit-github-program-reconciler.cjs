@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const a1 = require('./toolkit-control-plane/control-plane-kernel.cjs');
 const canonicalA2 = require('./toolkit-capability-registry.cjs');
+const PROGRAMME_SURFACE_CONTRACT = require('../contracts/github-program-reconciler/programme-surface-contract.json');
 
 const CONTRACT_VERSION = 'toolkit.github-program-reconciler.v1';
 const REVIEW_INVENTORY_VERSION = 'toolkit.n5.review-inventory.v1';
@@ -215,7 +216,13 @@ const MANAGED_EVENT_TYPES = Object.freeze([
   'blocker', 'dependency', 'owner_decision', 'reconciliation_receipt',
 ]);
 const CONFORMANCE_CLASSES = Object.freeze(['UNMANAGED', 'LEGACY_MANAGED', 'CURRENT_MANAGED', 'DRIFTED_MANAGED']);
-const PROGRAMME_MANAGED_LABELS = Object.freeze(['current', 'queued', 'blocked']);
+const PROGRAMME_MANAGED_LABELS = Object.freeze(['completed', 'current', 'queued', 'blocked']);
+const PROGRAMME_LABEL_DEFINITIONS = Object.freeze({
+  completed: Object.freeze({ color: '1f883d', description: 'Programme child is complete or retired.' }),
+  current: Object.freeze({ color: '0969da', description: 'Programme child is the sole current delivery item.' }),
+  queued: Object.freeze({ color: 'bf8700', description: 'Programme child is queued for future delivery.' }),
+  blocked: Object.freeze({ color: 'cf222e', description: 'Programme child has current authoritative blocker evidence.' }),
+});
 const PR_REGISTRY_STATUSES = Object.freeze(['ACTIVE', 'ACCEPTED', 'RETIRED']);
 const GITHUB_RELATIONSHIP_API_VERSION = '2026-03-10';
 const PROGRAMME_MARKERS = Object.freeze({
@@ -227,12 +234,37 @@ const PROGRAMME_EVENT_PREFIX = '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-EVENT v1 ';
 const PROGRAMME_EVENT_SUFFIX = ' -->';
 const PROGRAMME_STATE_PREFIX = '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-STATE v1 ';
 const PROGRAMME_STATE_SUFFIX = ' -->';
+const trustedRelationshipInspections = new WeakSet();
 
 function programmeFailure(reason, extra = {}) {
   return failure('PARENT_RECONCILIATION_INCOMPLETE', { reason, ...extra });
 }
 function safeLines(values) {
   return Array.isArray(values) && values.length ? values.map((value) => '- ' + String(value)).join('\n') : '- None';
+}
+function isOneLineOutcome(value) {
+  return typeof value === 'string' && value.trim().length > 0 && value.length <= 240 && !/[\r\n]/.test(value);
+}
+function validExtensions(value) {
+  if (value === undefined) return true;
+  if (!isRecord(value) || Object.keys(value).length > 20) return false;
+  const encoded = canonicalJson(value);
+  return encoded.length <= 4096 && !forbiddenEvidence(encoded);
+}
+function safeTextArray(value) {
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string' && publicSafeText(entry));
+}
+function markdownCell(value) { return String(value).replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' '); }
+function table(headers, rows) {
+  return [
+    '| ' + headers.map(markdownCell).join(' | ') + ' |',
+    '| ' + headers.map(() => '---').join(' | ') + ' |',
+    ...rows.map((row) => '| ' + row.map(markdownCell).join(' | ') + ' |'),
+  ].join('\n');
+}
+function renderExtensions(extensions) {
+  if (!isRecord(extensions) || Object.keys(extensions).length === 0) return '- None';
+  return table(['Extension', 'Value'], Object.entries(extensions).map(([key, value]) => [key, typeof value === 'string' ? value : canonicalJson(value)]));
 }
 function encodeManagedState(value) {
   return Buffer.from(canonicalJson(value), 'utf8').toString('base64url');
@@ -256,10 +288,18 @@ function validatePrRegistry(registry) {
   }
   return success('PROGRAMME_VALID', { registry: clone(registry) });
 }
+function hasPortableFields(kind, value) {
+  const required = PROGRAMME_SURFACE_CONTRACT.portable_minimum[kind];
+  return isRecord(value) && Array.isArray(required) && required.every((key) => Object.prototype.hasOwnProperty.call(value, key));
+}
 function validateProgrammeModel(model) {
   if (!isRecord(model) || !isSafeLabel(model.repository || '') || !isRecord(model.parent)
+    || !hasPortableFields('parent', model.parent) || !isOneLineOutcome(model.parent.outcome)
     || !isIssue(model.parent.issue) || !Array.isArray(model.parent.child_graph)
-    || !Array.isArray(model.parent.major_holds) || !isRecord(model.parent.predecessor_gateway)
+    || !isSafeLabel(model.parent.status || '') || !publicSafeText(model.parent.next_action || '')
+    || !safeTextArray(model.parent.major_holds) || !isRecord(model.parent.predecessor_gateway)
+    || model.parent.predecessor_gateway.issues !== 45 || model.parent.predecessor_gateway.criteria !== 84
+    || model.parent.predecessor_gateway.unmapped !== 0 || !validExtensions(model.parent.extensions)
     || !Array.isArray(model.children) || !Array.isArray(model.prs)) return programmeFailure('programme-model-shape');
   const current = model.children.filter((child) => child?.status === 'CURRENT');
   if (current.length > 1) return programmeFailure('multiple-current-children');
@@ -267,10 +307,17 @@ function validateProgrammeModel(model) {
   const childIssues = new Set();
   const representedPrs = new Set();
   for (const child of model.children) {
-    if (!isRecord(child) || !isIssue(child.issue) || childIssues.has(child.issue)
+    if (!hasPortableFields('child', child) || !isOneLineOutcome(child.outcome)
+      || !isIssue(child.issue) || childIssues.has(child.issue)
       || child.parent_issue !== model.parent.issue || !['CURRENT', 'QUEUED', 'BLOCKED', 'COMPLETED', 'RETIRED'].includes(child.status)
       || !Array.isArray(child.dependencies) || !Array.isArray(child.epochs) || !isSafeLabel(child.lock || '')
-      || !Array.isArray(child.predecessor_issues) || !Array.isArray(child.boundaries)) return programmeFailure('child-model-invalid');
+      || child.dependencies.some((issue) => !isIssue(issue)) || new Set(child.dependencies).size !== child.dependencies.length
+      || child.epochs.length === 0 || child.epochs.some((entry) => !isRecord(entry) || !isSafeLabel(entry.name || '')
+        || entry.lock !== child.lock || !isSafeLabel(entry.state || ''))
+      || canonicalJson(child.predecessor_issues) !== canonicalJson(PREDECESSOR_ISSUE_ROSTER)
+      || !safeTextArray(child.boundaries) || !publicSafeText(child.current_obligation || '')
+      || !publicSafeText(child.next_action || '') || child.eli5 !== undefined && !publicSafeText(child.eli5)
+      || !validExtensions(child.extensions)) return programmeFailure('child-model-invalid');
     const registry = validatePrRegistry(child.pr_registry);
     if (!registry.ok) return registry;
     for (const entry of child.pr_registry) {
@@ -281,10 +328,53 @@ function validateProgrammeModel(model) {
   }
   const prNumbers = new Set();
   for (const pr of model.prs) {
-    if (!isRecord(pr) || !isIssue(pr.number) || prNumbers.has(pr.number) || !childIssues.has(pr.child_issue)
+    if (!hasPortableFields('pr', pr) || !isOneLineOutcome(pr.outcome)
+      || !isIssue(pr.number) || prNumbers.has(pr.number) || pr.parent_issue !== model.parent.issue || !childIssues.has(pr.child_issue)
       || !isSha(pr.base) || !isSha(pr.head) || !isSha(pr.tree) || !Array.isArray(pr.changed_surfaces)
-      || !Array.isArray(pr.validation) || !Array.isArray(pr.holds)) return programmeFailure('pr-model-invalid');
+      || !Array.isArray(pr.validation) || !Array.isArray(pr.holds)
+      || !['INTERMEDIATE', 'TERMINAL'].includes(pr.role) || typeof pr.completes_child !== 'boolean'
+      || pr.role === 'INTERMEDIATE' && pr.completes_child
+      || !isSafeLabel(pr.branch || '') || !isSafeLabel(pr.epoch || '') || !isSafeLabel(pr.lock || '')
+      || !isSafeLabel(pr.state || '') || !isSafeLabel(pr.finality || '')
+      || !safeTextArray(pr.changed_surfaces) || !safeTextArray(pr.validation) || !safeTextArray(pr.holds)
+      || !validExtensions(pr.extensions)) return programmeFailure('pr-model-invalid');
     prNumbers.add(pr.number);
+  }
+  const graph = new Map();
+  for (const entry of model.parent.child_graph) {
+    if (!isRecord(entry) || !isIssue(entry.issue) || graph.has(entry.issue)
+      || !['CURRENT', 'QUEUED', 'BLOCKED', 'COMPLETED', 'RETIRED'].includes(entry.status)) return programmeFailure('parent-child-graph-invalid');
+    graph.set(entry.issue, entry.status);
+  }
+  if (graph.size !== model.children.length
+    || model.children.some((child) => graph.get(child.issue) !== child.status)) return programmeFailure('parent-child-graph-drift');
+  if (representedPrs.size !== model.prs.length || model.prs.some((pr) => !representedPrs.has(pr.number))) return programmeFailure('pr-registry-model-drift');
+  for (const child of model.children) {
+    const epochs = new Set(child.epochs.map((entry) => entry?.name));
+    const candidate = child.candidate;
+    if (candidate !== null && (!isRecord(candidate) || candidate.repository !== model.repository
+      || candidate.parent_issue !== model.parent.issue || candidate.child_issue !== child.issue
+      || !isIssue(candidate.pr) || !isSafeLabel(candidate.branch || '')
+      || !isSha(candidate.base) || !isSha(candidate.head) || !isSha(candidate.tree)
+      || !isSafeLabel(candidate.epoch || '') || candidate.lock !== child.lock
+      || !['INTERMEDIATE', 'TERMINAL'].includes(candidate.role) || typeof candidate.completes_child !== 'boolean'
+      || candidate.lifecycle !== child.status)) {
+      return programmeFailure('candidate-binding-invalid');
+    }
+    for (const entry of child.pr_registry) {
+      const pr = model.prs.find((candidatePr) => candidatePr.number === entry.pr);
+      if (!pr || pr.child_issue !== child.issue || pr.lock !== child.lock || !epochs.has(pr.epoch)
+        || pr.role !== entry.role || pr.completes_child !== entry.completes_child) return programmeFailure('candidate-registry-pr-binding');
+    }
+    if (candidate) {
+      const pr = model.prs.find((candidatePr) => candidatePr.number === candidate.pr);
+      const registry = child.pr_registry.find((entry) => entry.pr === candidate.pr && entry.status === 'ACTIVE');
+      if (!pr || !registry || candidate.branch !== pr.branch || candidate.base !== pr.base || candidate.head !== pr.head
+        || candidate.tree !== pr.tree || candidate.epoch !== pr.epoch || candidate.role !== pr.role
+        || candidate.completes_child !== pr.completes_child) {
+        return programmeFailure('candidate-registry-pr-binding');
+      }
+    }
   }
   return success('PROGRAMME_VALID', { model });
 }
@@ -295,24 +385,26 @@ function renderParentView(repository, parent) {
     '# GitHub programme dashboard',
     '',
     '## Programme status',
-    parent.status,
+    '- Status: ' + parent.status,
+    '- Outcome: ' + parent.outcome,
     '',
     '## Current child',
     parent.current_child ? '#' + parent.current_child : 'None',
     '',
     '## Child graph',
-    safeLines(parent.child_graph.map((child) => '#' + child.issue + ' - ' + child.status)),
+    table(['Child', 'Lifecycle'], parent.child_graph.map((child) => ['#' + child.issue, child.status])),
     '',
     '## Major holds',
     safeLines(parent.major_holds),
     '',
     '## Predecessor lineage gateway',
-    '- Issues: ' + parent.predecessor_gateway.issues,
-    '- Criteria: ' + parent.predecessor_gateway.criteria,
-    '- Unmapped: ' + parent.predecessor_gateway.unmapped,
+    table(['Issues', 'Criteria', 'Unmapped'], [[parent.predecessor_gateway.issues, parent.predecessor_gateway.criteria, parent.predecessor_gateway.unmapped]]),
     '',
     '## Next action',
     parent.next_action,
+    '',
+    '## Repository extensions',
+    renderExtensions(parent.extensions),
     '',
     managedStateLine(state),
     PROGRAMME_MARKERS.parent.end,
@@ -320,8 +412,6 @@ function renderParentView(repository, parent) {
 }
 function renderChildView(repository, child) {
   const state = { kind: 'child', repository, data: child };
-  const epochs = child.epochs.map((entry) => entry.name + ' | ' + entry.lock + ' | ' + entry.state);
-  const registry = child.pr_registry.map((entry) => '#' + entry.pr + ' | ' + entry.status + ' | ' + entry.role + ' | completes child: ' + entry.completes_child);
   return [
     PROGRAMME_MARKERS.child.begin,
     '# Programme child #' + child.issue,
@@ -332,16 +422,17 @@ function renderChildView(repository, child) {
     '',
     '## Status and current obligation',
     '- Status: ' + child.status,
+    '- Outcome: ' + child.outcome,
     '- Current obligation: ' + child.current_obligation,
     '',
     '## Epochs and Locks',
-    safeLines(epochs),
+    table(['Epoch', 'Lock', 'State'], child.epochs.map((entry) => [entry.name, entry.lock, entry.state])),
     '',
     '## Predecessor mapping',
     '- Issues: ' + child.predecessor_issues.join(', '),
     '',
     '## ACTIVE / ACCEPTED / RETIRED PR registry',
-    safeLines(registry),
+    table(['PR', 'Registry status', 'Role', 'Completes child'], child.pr_registry.map((entry) => ['#' + entry.pr, entry.status, entry.role, entry.completes_child])),
     '',
     '## Exact current candidate',
     child.candidate ? '- PR #' + child.candidate.pr + ' | base ' + child.candidate.base + ' | head ' + child.candidate.head + ' | tree ' + child.candidate.tree : '- None',
@@ -352,6 +443,9 @@ function renderChildView(repository, child) {
     '## Next action',
     child.next_action,
     ...(child.eli5 ? ['', '## ELI5', child.eli5] : []),
+    '',
+    '## Repository extensions',
+    renderExtensions(child.extensions),
     '',
     managedStateLine(state),
     PROGRAMME_MARKERS.child.end,
@@ -364,15 +458,17 @@ function renderPrView(repository, pr) {
     '# Programme PR #' + pr.number,
     '',
     '## Parent, child, epoch and Lock',
+    '- Parent: #' + pr.parent_issue,
     '- Child: #' + pr.child_issue,
     '- Epoch: ' + pr.epoch,
     '- Lock: ' + pr.lock,
+    '- Outcome: ' + pr.outcome,
     '',
     '## Branch, base and head',
-    '- Branch: ' + pr.branch,
-    '- Base: ' + pr.base,
-    '- Head: ' + pr.head,
-    '- Tree: ' + pr.tree,
+    table(['Branch', 'Base', 'Head', 'Tree'], [[pr.branch, pr.base, pr.head, pr.tree]]),
+    '',
+    '## Registry role',
+    table(['Role', 'Completes child'], [[pr.role, pr.completes_child]]),
     '',
     '## Changed surfaces',
     safeLines(pr.changed_surfaces),
@@ -383,6 +479,9 @@ function renderPrView(repository, pr) {
     '## Holds and finality',
     safeLines(pr.holds),
     '- Finality: ' + pr.finality,
+    '',
+    '## Repository extensions',
+    renderExtensions(pr.extensions),
     '',
     managedStateLine(state),
     PROGRAMME_MARKERS.pr.end,
@@ -430,24 +529,38 @@ function unmanagedProjectionMigrationFor(migrations, group, key) {
   if (!isRecord(migrations[group])) return null;
   return migrations[group][key] || null;
 }
-function migrateUnmanagedProjection(currentBody, rendered, migration) {
+function migrateUnmanagedProjection(currentBody, rendered, migration, context = {}) {
+  const span = migration?.stale_span;
+  const authority = migration?.authority;
+  const entity = migration?.entity;
   if (!isRecord(migration)
+    || migration.schema !== 'toolkit.github-program.stale-projection-migration.v1'
     || migration.classification !== 'STALE_PROGRAMME_PROJECTION'
+    || migration.grammar !== 'toolkit.github-program.stale-projection.v1'
+    || migration.repository !== context.repository
+    || migration.programme_parent_issue !== context.parent_issue
+    || !isRecord(entity) || entity.kind !== context.entity?.kind || entity.number !== context.entity?.number
     || !isDigest(migration.body_digest)
-    || typeof migration.preserved_prefix !== 'string'
-    || typeof migration.preserved_suffix !== 'string'
+    || !isRecord(span) || !Number.isSafeInteger(span.start) || !Number.isSafeInteger(span.end)
+    || span.start < 0 || span.end <= span.start || span.end > currentBody.length || !isDigest(span.digest)
+    || !isRecord(authority) || authority.kind !== 'WEB_ADJUDICATION'
+    || !/^github:issue-comment:\d+:\d+$/.test(authority.reference || '')
+    || authority.decision !== 'SUPERSEDED_PROJECTION_REPLACE'
     || sha256(currentBody) !== migration.body_digest
-    || !currentBody.startsWith(migration.preserved_prefix)
-    || !currentBody.endsWith(migration.preserved_suffix)
-    || migration.preserved_prefix.length + migration.preserved_suffix.length >= currentBody.length) {
+    || sha256(currentBody.slice(span.start, span.end)) !== span.digest) {
     return programmeFailure('stale-projection-migration-binding');
   }
-  const staleEnd = currentBody.length - migration.preserved_suffix.length;
-  const staleProjection = currentBody.slice(migration.preserved_prefix.length, staleEnd);
-  if (!staleProjection.trim()) return programmeFailure('stale-projection-migration-empty');
+  const staleProjection = currentBody.slice(span.start, span.end);
+  const structuralSignals = [
+    /^#{1,3}\s+/m.test(staleProjection),
+    /programme|candidate|parent|child|pull request|\bPR\b/i.test(staleProjection),
+    /current|queued|blocked|completed|validation|design lock|\bE\d+\b/i.test(staleProjection),
+  ].filter(Boolean).length;
+  if (!staleProjection.trim() || structuralSignals < 2) return programmeFailure('stale-projection-migration-grammar');
   return success('PROGRAMME_STALE_PROJECTION_MIGRATION_READY', {
-    body: migration.preserved_prefix + rendered + migration.preserved_suffix,
+    body: currentBody.slice(0, span.start) + rendered + currentBody.slice(span.end),
     stale_projection_digest: sha256(staleProjection),
+    adjudication_reference: authority.reference,
   });
 }
 function rerenderProgrammeState(state) {
@@ -514,15 +627,31 @@ function parseManagedEvent(comment) {
   if (!normalized.ok || normalized.event.event_id !== suppliedId) return programmeFailure('managed-event-digest');
   return success('PROGRAMME_EVENT_VALID', { event });
 }
+function validateManagedEventInventory(events, repository) {
+  if (!Array.isArray(events)) return programmeFailure('managed-event-inventory-missing');
+  const normalized = [];
+  const ids = new Set();
+  for (const supplied of events) {
+    const result = normalizeManagedEvent(supplied);
+    if (!result.ok || result.event.repository !== repository || supplied.event_id !== result.event.event_id || ids.has(result.event.event_id)) {
+      return programmeFailure('managed-event-inventory-invalid');
+    }
+    ids.add(result.event.event_id);
+    normalized.push(result.event);
+  }
+  return success('PROGRAMME_EVENT_INVENTORY_VALID', { events: normalized, ids });
+}
 function deriveManagedLabels(input = {}) {
   const unrelated = Array.isArray(input.labels) ? input.labels.filter((label) => !PROGRAMME_MANAGED_LABELS.includes(label)) : [];
-  const labels = [...unrelated];
-  if (input.native_state !== 'closed') {
-    if (input.lifecycle === 'CURRENT') labels.push('current');
-    else if (input.lifecycle === 'QUEUED') labels.push('queued');
-    const blocked = Array.isArray(input.blocker_evidence) && input.blocker_evidence.some((entry) => isRecord(entry) && entry.current === true && isSafeLabel(entry.authority_ref || ''));
-    if (blocked) labels.push('blocked');
-  }
+  const blocked = Array.isArray(input.blocker_evidence) && input.blocker_evidence.some((entry) => isRecord(entry) && entry.current === true && isSafeLabel(entry.authority_ref || ''));
+  const lifecycle = input.native_state === 'closed' || ['COMPLETED', 'RETIRED'].includes(input.lifecycle)
+    ? 'completed'
+    : blocked || input.lifecycle === 'BLOCKED'
+      ? 'blocked'
+      : input.lifecycle === 'CURRENT'
+        ? 'current'
+        : 'queued';
+  const labels = [...unrelated, lifecycle];
   return success('PROGRAMME_LABELS_READY', { labels: [...new Set(labels)], native_state_authoritative: true, managed_labels_derived: true });
 }
 function planPrAssociations(registry) {
@@ -542,16 +671,61 @@ function planPrAssociations(registry) {
 function endpoint(method, route, payload) {
   return { method, route, api_version: GITHUB_RELATIONSHIP_API_VERSION, payload };
 }
+function trustedRelationshipInspection(adapter, context) {
+  if (typeof adapter?.inspectRelationships !== 'function') return programmeFailure('native-relationship-inspector-missing');
+  let supplied;
+  try { supplied = adapter.inspectRelationships(clone(context)); } catch (_error) { return programmeFailure('native-relationship-inspection-failed'); }
+  if (!isRecord(supplied) || supplied.source !== 'adapter.inspectRelationships'
+    || supplied.repository !== context.repository || supplied.parent_issue !== context.parent_issue
+    || !Array.isArray(supplied.issues) || !isRecord(supplied.capabilities)) return programmeFailure('native-relationship-inspection-invalid');
+  const issueIds = new Set();
+  const issueNumbers = new Set();
+  for (const issue of supplied.issues) {
+    if (!isRecord(issue) || issue.repository !== context.repository || !isIssue(issue.issue_number)
+      || !Number.isSafeInteger(issue.issue_id) || issue.issue_id < 1 || issueIds.has(issue.issue_id) || issueNumbers.has(issue.issue_number)) {
+      return programmeFailure('native-relationship-inventory-invalid');
+    }
+    issueIds.add(issue.issue_id);
+    issueNumbers.add(issue.issue_number);
+  }
+  const inspection = clone(supplied);
+  trustedRelationshipInspections.add(inspection);
+  return success('PROGRAMME_RELATIONSHIP_INSPECTION_VALID', { inspection });
+}
 function planNativeRelationships(input = {}) {
-  if (!isIssue(input.parent_issue) || !isRecord(input.current) || !isRecord(input.desired) || !isRecord(input.capabilities)
+  const inspection = input.inspection;
+  if (!isIssue(input.parent_issue) || !isRecord(input.current) || !isRecord(input.desired)
+    || !isRecord(inspection) || !trustedRelationshipInspections.has(inspection)
+    || inspection.parent_issue !== input.parent_issue
     || !Array.isArray(input.current.sub_issues) || !Array.isArray(input.desired.sub_issues)
     || !isRecord(input.current.blocked_by) || !isRecord(input.desired.blocked_by)) return programmeFailure('native-relationship-input');
+  const capabilities = inspection.capabilities;
+  const knownById = new Map(inspection.issues.map((entry) => [entry.issue_id, entry]));
+  const knownByNumber = new Map(inspection.issues.map((entry) => [entry.issue_number, entry]));
+  for (const current of input.current.sub_issues) {
+    const known = knownById.get(current?.issue_id);
+    if (!known || known.issue_number !== current.issue_number || current.repository !== inspection.repository
+      || current.parent_issue !== input.parent_issue) return programmeFailure('native-relationship-current-inventory-invalid');
+  }
+  for (const [issueNumber, issueIds] of Object.entries(input.current.blocked_by)) {
+    if (!knownByNumber.has(Number(issueNumber)) || !Array.isArray(issueIds)
+      || issueIds.some((id) => !knownById.has(id))) return programmeFailure('native-relationship-current-inventory-invalid');
+  }
+  for (const desired of input.desired.sub_issues) {
+    const known = knownById.get(desired?.issue_id);
+    if (!known || known.issue_number !== desired.issue_number || desired.repository !== inspection.repository
+      || desired.parent_issue !== input.parent_issue || desired.issue_number === input.parent_issue) return programmeFailure('native-relationship-identity-out-of-scope');
+  }
+  for (const [issueNumber, issueIds] of Object.entries(input.desired.blocked_by)) {
+    if (!knownByNumber.has(Number(issueNumber)) || !Array.isArray(issueIds)
+      || issueIds.some((id) => !knownById.has(id))) return programmeFailure('native-relationship-identity-out-of-scope');
+  }
   const operations = [];
   const currentById = new Map(input.current.sub_issues.map((entry) => [entry.issue_id, entry]));
   const desiredById = new Map(input.desired.sub_issues.map((entry) => [entry.issue_id, entry]));
-  const removed = [...currentById.keys()].filter((id) => !desiredById.has(id));
+  const removed = [...currentById.keys()].filter((id) => currentById.get(id)?.managed === true && !desiredById.has(id));
   const added = [...desiredById.keys()].filter((id) => !currentById.has(id));
-  if ((removed.length || added.length) && input.capabilities.sub_issues !== true) return programmeFailure('sub-issue-capability-unavailable');
+  if ((removed.length || added.length) && capabilities.sub_issues !== true) return programmeFailure('sub-issue-capability-unavailable');
   for (const issueId of removed) operations.push({
     type: 'sub_issue.remove', issue_id: issueId,
     endpoint: endpoint('DELETE', '/repos/{owner}/{repo}/issues/' + input.parent_issue + '/sub_issue', { sub_issue_id: issueId }),
@@ -559,7 +733,7 @@ function planNativeRelationships(input = {}) {
   for (const issueId of added) {
     const desired = desiredById.get(issueId);
     const replacing = isIssue(desired.previous_parent_issue) && desired.previous_parent_issue !== input.parent_issue;
-    if (replacing && input.capabilities.reparent !== true) return programmeFailure('sub-issue-reparent-unavailable');
+    if (replacing && capabilities.reparent !== true) return programmeFailure('sub-issue-reparent-unavailable');
     operations.push({
       type: 'sub_issue.add', issue_id: issueId,
       payload: { sub_issue_id: issueId, ...(replacing ? { replace_parent: true } : {}) },
@@ -570,7 +744,7 @@ function planNativeRelationships(input = {}) {
   const desiredRetained = input.desired.sub_issues.filter((entry) => currentById.has(entry.issue_id)).map((entry) => entry.issue_id);
   const desiredOrder = input.desired.sub_issues.map((entry) => entry.issue_id);
   if (canonicalJson(currentRetained) !== canonicalJson(desiredRetained) || added.length) {
-    if (input.capabilities.reprioritize !== true) return programmeFailure('sub-issue-reprioritize-unavailable');
+    if (capabilities.reprioritize !== true) return programmeFailure('sub-issue-reprioritize-unavailable');
     for (let index = 1; index < desiredOrder.length; index += 1) operations.push({
       type: 'sub_issue.reprioritize', issue_id: desiredOrder[index],
       endpoint: endpoint('PATCH', '/repos/{owner}/{repo}/issues/' + input.parent_issue + '/sub_issues/priority', { sub_issue_id: desiredOrder[index], after_id: desiredOrder[index - 1] }),
@@ -582,18 +756,35 @@ function planNativeRelationships(input = {}) {
     const after = new Set(input.desired.blocked_by[issueNumber] || []);
     const adds = [...after].filter((id) => !before.has(id));
     const removes = [...before].filter((id) => !after.has(id));
-    if ((adds.length || removes.length) && input.capabilities.dependencies !== true) return programmeFailure('issue-dependency-capability-unavailable');
+    const managedBefore = new Set(input.current.managed_blocked_by?.[issueNumber] || []);
+    const managedRemoves = removes.filter((id) => managedBefore.has(id));
+    if ((adds.length || managedRemoves.length) && capabilities.dependencies !== true) return programmeFailure('issue-dependency-capability-unavailable');
     for (const issueId of adds) operations.push({
       type: 'issue_dependency.add_blocked_by', issue_number: Number(issueNumber), issue_id: issueId,
       endpoint: endpoint('POST', '/repos/{owner}/{repo}/issues/' + issueNumber + '/dependencies/blocked_by', { issue_id: issueId }),
     });
-    for (const issueId of removes) operations.push({
+    for (const issueId of managedRemoves) operations.push({
       type: 'issue_dependency.remove_blocked_by', issue_number: Number(issueNumber), issue_id: issueId,
       endpoint: endpoint('DELETE', '/repos/{owner}/{repo}/issues/' + issueNumber + '/dependencies/blocked_by/' + issueId, null),
     });
   }
+  const unmanagedSubIssues = input.current.sub_issues.filter((entry) => entry.managed !== true && !desiredById.has(entry.issue_id));
+  const expectedBlockedBy = clone(input.current.blocked_by);
+  for (const [issueNumber, desiredIds] of Object.entries(input.desired.blocked_by)) {
+    const managedBefore = new Set(input.current.managed_blocked_by?.[issueNumber] || []);
+    const unrelated = (input.current.blocked_by[issueNumber] || []).filter((id) => !managedBefore.has(id));
+    expectedBlockedBy[issueNumber] = [...new Set([...unrelated, ...desiredIds])];
+  }
+  const expectedNative = {
+    ...clone(input.current),
+    sub_issues: [...unmanagedSubIssues, ...clone(input.desired.sub_issues).map((entry) => ({ ...entry, managed: true }))],
+    blocked_by: expectedBlockedBy,
+    managed_blocked_by: clone(input.desired.blocked_by),
+  };
   return success('PROGRAMME_RELATIONSHIPS_READY', {
     operations, markdown_links_canonical: false, blocked_label_is_derived_only: true,
+    expected_native: expectedNative,
+    unrelated_relationships_preserved: true,
     supported_semantics: ['sub_issue.inspect', 'sub_issue.add', 'sub_issue.remove', 'sub_issue.reparent', 'sub_issue.reprioritize', 'issue_dependency.blocked_by'],
   });
 }
@@ -655,14 +846,26 @@ function buildProgrammePreview(input = {}) {
   const snapshot = input.snapshot;
   if (!isRecord(snapshot) || snapshot.complete !== true || !isSafeLabel(snapshot.repository || '')
     || !isSafeLabel(snapshot.revision || '') || !isRecord(snapshot.model) || !isRecord(snapshot.bodies)
-    || !isRecord(snapshot.labels) || !isRecord(snapshot.native)) return programmeFailure('snapshot-incomplete');
+    || !isRecord(snapshot.labels) || !isRecord(snapshot.label_definitions) || !Array.isArray(snapshot.managed_events)
+    || !isRecord(snapshot.native)) return programmeFailure('snapshot-incomplete');
   if (!isRecord(input.desired) || input.desired.repository !== snapshot.repository) return programmeFailure('desired-repository-mismatch');
   const coverage = validatePredecessorCoverage(input.predecessor_contract);
   if (!coverage.ok) return coverage;
   const currentValid = validateProgrammeModel(snapshot.model);
   const desiredValid = validateProgrammeModel(input.desired);
   if (!currentValid.ok || !desiredValid.ok) return programmeFailure('programme-model-invalid');
-  const events = Array.isArray(input.events) ? input.events : [];
+  const currentEvents = validateManagedEventInventory(snapshot.managed_events, snapshot.repository);
+  if (!currentEvents.ok) return currentEvents;
+  const events = [];
+  const requestedEventIds = new Set();
+  for (const supplied of Array.isArray(input.events) ? input.events : []) {
+    const normalized = normalizeManagedEvent(supplied);
+    if (!normalized.ok || normalized.event.repository !== snapshot.repository || requestedEventIds.has(normalized.event.event_id)) {
+      return programmeFailure('managed-event-request-invalid');
+    }
+    requestedEventIds.add(normalized.event.event_id);
+    events.push(normalized.event);
+  }
   const fresh = validateBodyFreshness({ model: input.desired, events });
   if (!fresh.ok) return fresh;
   const rendered = renderProgrammeViews(input.desired);
@@ -678,7 +881,11 @@ function buildProgrammePreview(input = {}) {
     if (migration) {
       const conformance = classifyProgrammeConformance({ body: currentBody });
       if (conformance.classification === 'UNMANAGED') {
-        migrated = migrateUnmanagedProjection(currentBody, entry.body, migration);
+        migrated = migrateUnmanagedProjection(currentBody, entry.body, migration, {
+          repository: input.desired.repository,
+          parent_issue: input.desired.parent.issue,
+          entity: entityFromBodyKey(entry.group, entry.key),
+        });
         if (!migrated.ok) return migrated;
         desiredBody = migrated.body;
       } else if (conformance.classification === 'CURRENT_MANAGED') {
@@ -697,61 +904,101 @@ function buildProgrammePreview(input = {}) {
       ...(migrated ? {
         stale_projection_migration: true,
         stale_projection_digest: migrated.stale_projection_digest,
+        adjudication_reference: migrated.adjudication_reference,
         unrelated_prefix_preserved: true,
         unrelated_suffix_preserved: true,
       } : {}),
     });
   }
   const expectedLabels = clone(snapshot.labels);
+  const expectedLabelDefinitions = clone(snapshot.label_definitions);
+  for (const [name, definition] of Object.entries(PROGRAMME_LABEL_DEFINITIONS)) {
+    expectedLabelDefinitions[name] = clone(definition);
+    if (canonicalJson(snapshot.label_definitions[name]) !== canonicalJson(definition)) {
+      operations.push({ type: 'label_definition.ensure', name, definition: clone(definition) });
+    }
+  }
   for (const child of input.desired.children) {
     const key = String(child.issue);
     const next = deriveManagedLabels({ native_state: child.status === 'COMPLETED' ? 'closed' : 'open', lifecycle: child.status, labels: snapshot.labels[key] || [], blocker_evidence: child.blocker_evidence || [] }).labels;
     expectedLabels[key] = next;
     if (canonicalJson(snapshot.labels[key] || []) !== canonicalJson(next)) operations.push({ type: 'labels.set', entity: { kind: 'child', number: child.issue }, labels: next, preserve_unrelated: true });
   }
+  let expectedNative = clone(snapshot.native);
+  let relationshipPlan = null;
   if (input.desired_native) {
-    const relationship = planNativeRelationships({ parent_issue: input.desired.parent.issue, current: snapshot.native, desired: input.desired_native, capabilities: input.capabilities || {} });
+    const relationship = planNativeRelationships({
+      parent_issue: input.desired.parent.issue,
+      current: snapshot.native,
+      desired: input.desired_native,
+      inspection: input._relationship_inspection,
+    });
     if (!relationship.ok) return relationship;
     operations.push(...relationship.operations);
+    expectedNative = relationship.expected_native;
+    relationshipPlan = {
+      markdown_links_canonical: relationship.markdown_links_canonical,
+      blocked_label_is_derived_only: relationship.blocked_label_is_derived_only,
+      unrelated_relationships_preserved: relationship.unrelated_relationships_preserved,
+      supported_semantics: relationship.supported_semantics,
+    };
   }
-  for (const event of events) operations.push({ type: 'comment.append_managed_event', entity: event.entity, event, authority_only_if_typed: true });
+  const expectedManagedEvents = [...currentEvents.events];
+  for (const event of events) {
+    if (currentEvents.ids.has(event.event_id)) continue;
+    expectedManagedEvents.push(event);
+    operations.push({ type: 'comment.append_managed_event', entity: event.entity, event, authority_only_if_typed: true });
+  }
   const expectedSnapshot = {
     ...clone(snapshot),
     model: clone(input.desired),
     bodies: expectedBodies,
     labels: expectedLabels,
-    native: input.desired_native ? clone(input.desired_native) : clone(snapshot.native),
+    label_definitions: expectedLabelDefinitions,
+    managed_events: expectedManagedEvents,
+    native: expectedNative,
   };
+  const boundOperations = operations.map((operation, sequence) => ({
+    ...operation,
+    operation_id: sha256({ repository: snapshot.repository, parent_issue: input.desired.parent.issue, sequence, operation }),
+  }));
   const snapshotDigest = sha256(snapshot);
-  const previewId = sha256({ repository: snapshot.repository, revision: snapshot.revision, snapshot_digest: snapshotDigest, desired: input.desired, operations });
-  return success(operations.length ? 'PROGRAMME_PREVIEW_READY' : 'PROGRAMME_ZERO_DELTA', {
+  const operationsDigest = sha256(boundOperations);
+  const previewId = sha256({ repository: snapshot.repository, revision: snapshot.revision, snapshot_digest: snapshotDigest, desired: input.desired, operations: boundOperations });
+  return success(boundOperations.length ? 'PROGRAMME_PREVIEW_READY' : 'PROGRAMME_ZERO_DELTA', {
     preview_id: previewId,
     repository: snapshot.repository,
     parent_issue: input.desired.parent.issue,
     current_revision: snapshot.revision,
     current_snapshot_digest: snapshotDigest,
     desired_digest: sha256(input.desired),
-    operations,
+    operations_digest: operationsDigest,
+    operations: boundOperations,
     expected_snapshot: expectedSnapshot,
     mutation_authority: false,
     body_freshness_same_transaction: true,
     unrelated_digest: snapshot.unrelated_digest,
     predecessor_coverage: coverage,
+    relationship_plan: relationshipPlan,
   });
 }
 function verifyProgrammeReadback(readback, preview) {
   if (!isRecord(readback) || readback.complete !== true || readback.repository !== preview.repository
     || readback.unrelated_digest !== preview.unrelated_digest) return programmeFailure('readback-incomplete-or-unrelated-drift');
   const expected = preview.expected_snapshot;
-  for (const key of ['model', 'bodies', 'labels', 'native']) {
+  for (const key of ['model', 'bodies', 'labels', 'label_definitions', 'managed_events', 'native']) {
     if (canonicalJson(readback[key]) !== canonicalJson(expected[key])) return programmeFailure('partial-transaction-readback', { field: key });
   }
   const zero = buildProgrammePreview({ snapshot: readback, desired: expected.model, predecessor_contract: preview.predecessor_contract || preview._predecessor_contract || null });
-  return success('PROGRAMME_READBACK_VERIFIED', { readback_verified: true, unrelated_state_preserved: true, zero_delta_expected: true, zero_delta_probe: zero.ok ? zero.operations.length === 0 : null });
+  if (!zero.ok || zero.operations.length !== 0 || zero.code !== 'PROGRAMME_ZERO_DELTA') {
+    return programmeFailure('immediate-rerun-not-zero-delta');
+  }
+  return success('PROGRAMME_READBACK_VERIFIED', { readback_verified: true, unrelated_state_preserved: true, zero_delta_expected: true, zero_delta_probe: true });
 }
 function createProgrammeRuntime(options = {}) {
   const adapter = options.adapter;
   const predecessorContract = options.predecessor_contract;
+  const authorityVerifier = options.authority_verifier;
   const acceptedPreviews = new Map();
   function inspect() {
     if (typeof adapter?.inspectProgramme !== 'function') return programmeFailure('programme-adapter-missing');
@@ -761,9 +1008,18 @@ function createProgrammeRuntime(options = {}) {
     const inspected = inspect();
     if (!isRecord(inspected) || inspected.ok === false) return inspected?.ok === false ? inspected : programmeFailure('programme-inspection-failed');
     if (inspected.repository !== input.repository) return programmeFailure('repository-identity-mismatch');
+    let relationshipInspection;
+    if (input.desired_native) {
+      const trusted = trustedRelationshipInspection(adapter, {
+        repository: input.repository,
+        parent_issue: input.desired?.parent?.issue,
+      });
+      if (!trusted.ok) return trusted;
+      relationshipInspection = trusted.inspection;
+    }
     const result = buildProgrammePreview({
       snapshot: inspected, desired: input.desired, predecessor_contract: predecessorContract,
-      events: input.events, desired_native: input.desired_native, capabilities: input.capabilities,
+      events: input.events, desired_native: input.desired_native, _relationship_inspection: relationshipInspection,
       unmanaged_projection_migrations: input.unmanaged_projection_migrations,
     });
     if (result.ok) {
@@ -775,12 +1031,34 @@ function createProgrammeRuntime(options = {}) {
   }
   function apply(input = {}) {
     const previewResult = input.preview;
-    const authority = input.authority;
-    if (!isRecord(previewResult) || !previewResult.ok || !isRecord(authority)
-      || authority.granted !== true || authority.preview_id !== previewResult.preview_id
-      || authority.expected_revision !== previewResult.current_revision || !isSafeLabel(authority.reference || '')
+    const assertion = input.authority;
+    if (!isRecord(previewResult) || !previewResult.ok || !isRecord(assertion)
       || acceptedPreviews.get(previewResult.preview_id) !== sha256(previewResult)) return programmeFailure('explicit-preview-bound-authority-required');
     if (previewResult.operations.length === 0) return success('PROGRAMME_ZERO_DELTA', { mutation_count: 0, readback_verified: true });
+    if (typeof authorityVerifier !== 'function') return programmeFailure('trusted-authority-verifier-required');
+    let verifiedAuthority;
+    const binding = {
+      repository: previewResult.repository,
+      parent_issue: previewResult.parent_issue,
+      preview_id: previewResult.preview_id,
+      expected_revision: previewResult.current_revision,
+      current_snapshot_digest: previewResult.current_snapshot_digest,
+      desired_digest: previewResult.desired_digest,
+      operations_digest: previewResult.operations_digest,
+      operation_ids: previewResult.operations.map((operation) => operation.operation_id),
+    };
+    try { verifiedAuthority = authorityVerifier({ assertion: clone(assertion), binding: clone(binding) }); }
+    catch (_error) { return programmeFailure('trusted-authority-verification-failed'); }
+    const grant = verifiedAuthority?.grant;
+    if (verifiedAuthority?.ok !== true || !isRecord(grant) || !isSafeLabel(grant.reference || '')
+      || grant.reference !== assertion.reference
+      || grant.repository !== binding.repository || grant.parent_issue !== binding.parent_issue
+      || grant.preview_id !== binding.preview_id || grant.expected_revision !== binding.expected_revision
+      || grant.current_snapshot_digest !== binding.current_snapshot_digest
+      || grant.desired_digest !== binding.desired_digest || grant.operations_digest !== binding.operations_digest
+      || canonicalJson(grant.operation_ids) !== canonicalJson(binding.operation_ids)) {
+      return programmeFailure('explicit-preview-bound-authority-required');
+    }
     const current = inspect();
     if (!isRecord(current) || current.ok === false || current.revision !== previewResult.current_revision
       || sha256(current) !== previewResult.current_snapshot_digest) return programmeFailure('stale-preview');
@@ -792,7 +1070,7 @@ function createProgrammeRuntime(options = {}) {
         parent_issue: previewResult.parent_issue,
         revision: previewResult.current_revision,
         preview_id: previewResult.preview_id,
-        authority_ref: authority.reference,
+        authority_ref: grant.reference,
         operations: clone(previewResult.operations),
         expected_snapshot: clone(previewResult.expected_snapshot),
       });

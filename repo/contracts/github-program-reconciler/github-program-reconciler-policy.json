@@ -49,13 +49,24 @@
         "blocked_by.remove"
       ],
       "markdown_links_canonical": false,
-      "blocked_label_derived_only": true
+      "blocked_label_derived_only": true,
+      "trusted_adapter_capability_inspection": true,
+      "caller_capability_booleans": false,
+      "existing_same_repository_issue_inventory_required": true,
+      "issue_creation": false,
+      "unrelated_relationships_preserved": true,
+      "removal_scope": "programme-managed-only"
     },
     "materialised_views": [
       "parent",
       "child",
       "pr"
     ],
+    "surface_contract": "repo/contracts/github-program-reconciler/programme-surface-contract.json",
+    "portable_minimum_required": true,
+    "repository_extensions": "additive-only",
+    "one_line_outcomes": true,
+    "markdown_tables": true,
     "managed_events": [
       "lifecycle_transition",
       "lock_accepted",
@@ -68,10 +79,13 @@
       "reconciliation_receipt"
     ],
     "managed_labels": [
+      "completed",
       "current",
       "queued",
       "blocked"
     ],
+    "managed_label_exclusive_count": 1,
+    "managed_label_definitions_reconciled": true,
     "pr_registry_statuses": [
       "ACTIVE",
       "ACCEPTED",
@@ -92,6 +106,31 @@
       "finality": false
     },
     "body_freshness_same_transaction": true,
+    "stale_projection_migration": {
+      "exact_repository_entity_body_and_span_binding": true,
+      "web_adjudication_required": true,
+      "arbitrary_prefix_suffix_selection": false
+    },
+    "managed_event_inventory": {
+      "stable_event_ids": true,
+      "duplicates_rejected": true,
+      "readback_required": true,
+      "event_bearing_rerun_zero_delta": true
+    },
+    "apply_authority": {
+      "trusted_host_verifier_required": true,
+      "caller_granted_flag": false,
+      "binding": [
+        "repository",
+        "parent_issue",
+        "preview_id",
+        "expected_revision",
+        "current_snapshot_digest",
+        "desired_digest",
+        "operations_digest",
+        "operation_ids"
+      ]
+    },
     "immediate_rerun": "ZERO_DELTA_ZERO_MUTATION",
     "incomplete_code": "PARENT_RECONCILIATION_INCOMPLETE"
   }

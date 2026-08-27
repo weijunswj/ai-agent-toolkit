@@ -1,0 +1,67 @@
+{
+  "$schema": "toolkit.github-program.surface.v2",
+  "portable_minimum": {
+    "parent": [
+      "issue",
+      "status",
+      "outcome",
+      "current_child",
+      "child_graph",
+      "major_holds",
+      "predecessor_gateway",
+      "next_action"
+    ],
+    "child": [
+      "issue",
+      "parent_issue",
+      "status",
+      "outcome",
+      "current_obligation",
+      "dependencies",
+      "epochs",
+      "lock",
+      "predecessor_issues",
+      "pr_registry",
+      "candidate",
+      "boundaries",
+      "next_action"
+    ],
+    "pr": [
+      "number",
+      "parent_issue",
+      "child_issue",
+      "state",
+      "outcome",
+      "epoch",
+      "lock",
+      "branch",
+      "base",
+      "head",
+      "tree",
+      "role",
+      "completes_child",
+      "changed_surfaces",
+      "validation",
+      "holds",
+      "finality"
+    ]
+  },
+  "repository_extensions": {
+    "field": "extensions",
+    "semantics": "additive-only",
+    "portable_fields_may_not_be_overridden": true
+  },
+  "lifecycle_labels": {
+    "exclusive": true,
+    "values": [
+      "completed",
+      "current",
+      "queued",
+      "blocked"
+    ]
+  },
+  "rendering": {
+    "one_line_outcome_required": true,
+    "markdown_tables_required_for_repeated_structures": true
+  }
+}

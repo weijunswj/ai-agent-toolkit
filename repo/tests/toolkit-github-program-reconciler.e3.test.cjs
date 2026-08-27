@@ -11,6 +11,17 @@ const predecessorContract = JSON.parse(fs.readFileSync(path.resolve(__dirname, '
 const HEAD = 'a'.repeat(40);
 const TREE = 'b'.repeat(40);
 const BASE = 'c'.repeat(40);
+const LABEL_DEFINITIONS = {
+  completed: { color: '1f883d', description: 'Programme child is complete or retired.' },
+  current: { color: '0969da', description: 'Programme child is the sole current delivery item.' },
+  queued: { color: 'bf8700', description: 'Programme child is queued for future delivery.' },
+  blocked: { color: 'cf222e', description: 'Programme child has current authoritative blocker evidence.' },
+};
+
+function authorityVerifier({ assertion, binding }) {
+  if (!assertion.reference?.startsWith('user:current-turn:')) return { ok: false };
+  return { ok: true, grant: { ...binding, reference: assertion.reference } };
+}
 
 function programmeModel(childStatus = 'QUEUED') {
   return {
@@ -18,6 +29,7 @@ function programmeModel(childStatus = 'QUEUED') {
     parent: {
       issue: 240,
       status: childStatus === 'CURRENT' ? 'S2 E3 CURRENT' : 'S2 E3 QUEUED',
+      outcome: childStatus === 'CURRENT' ? 'E3 is the current bounded delivery.' : 'E3 remains queued.',
       current_child: childStatus === 'CURRENT' ? 359 : null,
       child_graph: [{ issue: 359, status: childStatus }],
       major_holds: [],
@@ -29,18 +41,25 @@ function programmeModel(childStatus = 'QUEUED') {
       parent_issue: 240,
       dependencies: [],
       status: childStatus,
+      outcome: childStatus === 'CURRENT' ? 'E3 implementation is active.' : 'E3 is waiting for selection.',
       current_obligation: childStatus === 'CURRENT' ? 'Implement E3.' : 'Wait for current selection.',
       epochs: [{ name: 'E3', lock: 'DL-S2-GITHUB-PROGRAM-001', state: childStatus }],
       lock: 'DL-S2-GITHUB-PROGRAM-001',
       predecessor_issues: predecessorContract.predecessors.map((entry) => entry.issue),
       pr_registry: [{ pr: 366, status: 'ACTIVE', role: 'TERMINAL', completes_child: true }],
-      candidate: { pr: 366, base: BASE, head: HEAD, tree: TREE },
+      candidate: {
+        repository: 'weijunswj/ai-agent-toolkit', parent_issue: 240, child_issue: 359, pr: 366,
+        branch: 'sol/s2-productisation-g3', base: BASE, head: HEAD, tree: TREE,
+        epoch: 'E3', lock: 'DL-S2-GITHUB-PROGRAM-001', role: 'TERMINAL', completes_child: true,
+        lifecycle: childStatus,
+      },
       boundaries: ['Web owns Ready, merge and finality.'],
       next_action: 'Return candidate to Web.',
       eli5: 'The repository can preview, apply and prove the smallest authorised change.',
     }],
     prs: [{
       number: 366,
+      parent_issue: 240,
       child_issue: 359,
       epoch: 'E3',
       lock: 'DL-S2-GITHUB-PROGRAM-001',
@@ -49,6 +68,9 @@ function programmeModel(childStatus = 'QUEUED') {
       head: HEAD,
       tree: TREE,
       state: 'DRAFT',
+      outcome: 'The exact E3 candidate awaits Web reconciliation.',
+      role: 'TERMINAL',
+      completes_child: true,
       changed_surfaces: ['repo/scripts/toolkit-github-program-reconciler.cjs'],
       validation: ['focused tests pass'],
       holds: ['Web exact-head reconciliation'],
@@ -66,7 +88,13 @@ function snapshot(model = programmeModel()) {
     model,
     bodies: views.bodies,
     labels: { '359': ['triage', model.children[0].status === 'CURRENT' ? 'current' : 'queued'] },
-    native: { sub_issues: [{ issue_id: 100, issue_number: 359, parent_issue: 240 }], blocked_by: {} },
+    label_definitions: JSON.parse(JSON.stringify(LABEL_DEFINITIONS)),
+    managed_events: [],
+    native: {
+      sub_issues: [{ issue_id: 100, issue_number: 359, parent_issue: 240, repository: model.repository, managed: true }],
+      blocked_by: {},
+      managed_blocked_by: {},
+    },
     unrelated_digest: 'unrelated-1',
   };
 }
@@ -104,7 +132,7 @@ test('managed labels preserve unrelated labels and derive blocked only from curr
     native_state: 'open', lifecycle: 'CURRENT', labels: ['bug', 'queued', 'blocked'],
     blocker_evidence: [{ id: 'hold-1', current: true, authority_ref: 'github:issue:359' }],
   });
-  assert.deepEqual(result.labels, ['bug', 'current', 'blocked']);
+  assert.deepEqual(result.labels, ['bug', 'blocked']);
   assert.equal(reconciler.deriveManagedLabels({ native_state: 'closed', lifecycle: 'CURRENT', labels: ['bug', 'current'] }).labels.includes('current'), false);
 });
 
@@ -117,41 +145,72 @@ test('multiple current children fail closed', () => {
 });
 
 test('native relationship plan uses real sub-issue and blocked-by endpoint semantics', () => {
-  const result = reconciler.planNativeRelationships({
-    parent_issue: 240,
-    current: {
+  const state = snapshot(programmeModel('CURRENT'));
+  state.native = {
       sub_issues: [
-        { issue_id: 100, issue_number: 359, parent_issue: 240 },
-        { issue_id: 102, issue_number: 361, parent_issue: 240 },
+        { issue_id: 100, issue_number: 359, parent_issue: 240, repository: state.repository, managed: true },
+        { issue_id: 102, issue_number: 361, parent_issue: 240, repository: state.repository, managed: true },
       ],
       blocked_by: { '359': [200] },
+      managed_blocked_by: { '359': [200] },
+  };
+  const runtime = reconciler.createProgrammeRuntime({
+    predecessor_contract: predecessorContract,
+    authority_verifier: authorityVerifier,
+    adapter: {
+      inspectProgramme() { return JSON.parse(JSON.stringify(state)); },
+      inspectRelationships() {
+        return {
+          source: 'adapter.inspectRelationships', repository: state.repository, parent_issue: 240,
+          issues: [
+            { issue_id: 100, issue_number: 359, repository: state.repository },
+            { issue_id: 101, issue_number: 360, repository: state.repository },
+            { issue_id: 102, issue_number: 361, repository: state.repository },
+            { issue_id: 200, issue_number: 362, repository: state.repository },
+            { issue_id: 201, issue_number: 363, repository: state.repository },
+          ],
+          capabilities: { sub_issues: true, reparent: true, reprioritize: true, dependencies: true },
+        };
+      },
     },
-    desired: {
+  });
+  const result = runtime.preview({ repository: state.repository, desired: programmeModel('CURRENT'), desired_native: {
       sub_issues: [
-        { issue_id: 101, issue_number: 360, parent_issue: 240, previous_parent_issue: 999 },
-        { issue_id: 100, issue_number: 359, parent_issue: 240 },
+        { issue_id: 101, issue_number: 360, parent_issue: 240, previous_parent_issue: 999, repository: state.repository },
+        { issue_id: 100, issue_number: 359, parent_issue: 240, repository: state.repository },
       ],
       blocked_by: { '359': [201] },
-    },
-    capabilities: { sub_issues: true, reparent: true, reprioritize: true, dependencies: true },
-  });
+  } });
   assert.equal(result.ok, true);
   assert.ok(result.operations.some((entry) => entry.type === 'sub_issue.add' && entry.payload.replace_parent === true));
   assert.ok(result.operations.some((entry) => entry.type === 'sub_issue.remove'));
   assert.ok(result.operations.some((entry) => entry.type === 'sub_issue.reprioritize'));
   assert.ok(result.operations.some((entry) => entry.type === 'issue_dependency.add_blocked_by'));
   assert.ok(result.operations.some((entry) => entry.type === 'issue_dependency.remove_blocked_by'));
-  assert.equal(result.markdown_links_canonical, false);
-  assert.equal(result.blocked_label_is_derived_only, true);
+  assert.equal(result.relationship_plan.markdown_links_canonical, false);
+  assert.equal(result.relationship_plan.blocked_label_is_derived_only, true);
 });
 
 test('unsupported dependency mutation fails instead of inventing a pseudo-native endpoint', () => {
-  const result = reconciler.planNativeRelationships({
-    parent_issue: 240,
-    current: { sub_issues: [], blocked_by: {} },
-    desired: { sub_issues: [], blocked_by: { '359': [201] } },
-    capabilities: { sub_issues: true, reparent: true, reprioritize: true, dependencies: false },
+  const state = snapshot(programmeModel('CURRENT'));
+  state.native = { sub_issues: [], blocked_by: {}, managed_blocked_by: {} };
+  const runtime = reconciler.createProgrammeRuntime({
+    predecessor_contract: predecessorContract,
+    adapter: {
+      inspectProgramme() { return JSON.parse(JSON.stringify(state)); },
+      inspectRelationships() {
+        return {
+          source: 'adapter.inspectRelationships', repository: state.repository, parent_issue: 240,
+          issues: [
+            { issue_id: 100, issue_number: 359, repository: state.repository },
+            { issue_id: 201, issue_number: 360, repository: state.repository },
+          ],
+          capabilities: { sub_issues: true, reparent: true, reprioritize: true, dependencies: false },
+        };
+      },
+    },
   });
+  const result = runtime.preview({ repository: state.repository, desired: programmeModel('CURRENT'), desired_native: { sub_issues: [], blocked_by: { '359': [201] } } });
   assert.equal(result.ok, false);
   assert.equal(result.code, 'PARENT_RECONCILIATION_INCOMPLETE');
 });
@@ -222,7 +281,7 @@ test('explicit apply binds preview and revision, reads back, and immediate rerun
       return { ok: true, applied_count: input.operations.length };
     },
   };
-  const runtime = reconciler.createProgrammeRuntime({ adapter, predecessor_contract: predecessorContract });
+  const runtime = reconciler.createProgrammeRuntime({ adapter, predecessor_contract: predecessorContract, authority_verifier: authorityVerifier });
   const preview = runtime.preview({ repository: state.repository, desired: programmeModel('CURRENT') });
   assert.equal(preview.ok, true);
   const applied = runtime.apply({
@@ -246,7 +305,7 @@ test('stale preview refuses mutation', () => {
     inspectProgramme() { return JSON.parse(JSON.stringify(state)); },
     applyOperations() { mutationCalls += 1; return { ok: true }; },
   };
-  const runtime = reconciler.createProgrammeRuntime({ adapter, predecessor_contract: predecessorContract });
+  const runtime = reconciler.createProgrammeRuntime({ adapter, predecessor_contract: predecessorContract, authority_verifier: authorityVerifier });
   const preview = runtime.preview({ repository: state.repository, desired: programmeModel('CURRENT') });
   state.revision = 'moved';
   const result = runtime.apply({ preview, authority: { granted: true, preview_id: preview.preview_id, expected_revision: 'revision-1', reference: 'user:current-turn:e3' } });
@@ -258,7 +317,7 @@ test('stale preview refuses mutation', () => {
 test('partial readback fails closed', () => {
   const state = snapshot(programmeModel('QUEUED'));
   const adapter = { inspectProgramme() { return JSON.parse(JSON.stringify(state)); }, applyOperations() { return { ok: true, applied_count: 1 }; } };
-  const runtime = reconciler.createProgrammeRuntime({ adapter, predecessor_contract: predecessorContract });
+  const runtime = reconciler.createProgrammeRuntime({ adapter, predecessor_contract: predecessorContract, authority_verifier: authorityVerifier });
   const preview = runtime.preview({ repository: state.repository, desired: programmeModel('CURRENT') });
   const result = runtime.apply({ preview, authority: { granted: true, preview_id: preview.preview_id, expected_revision: preview.current_revision, reference: 'user:current-turn:e3' } });
   assert.equal(result.ok, false);
@@ -332,16 +391,26 @@ test('explicit stale-projection migration removes obsolete current state and pre
   current.bodies.parent = prefix + stale + suffix;
   const migrations = {
     parent: {
+      schema: 'toolkit.github-program.stale-projection-migration.v1',
       classification: 'STALE_PROGRAMME_PROJECTION',
+      grammar: 'toolkit.github-program.stale-projection.v1',
+      repository: desired.repository,
+      programme_parent_issue: 240,
+      entity: { kind: 'parent', number: 240 },
       body_digest: reconciler.sha256(current.bodies.parent),
-      preserved_prefix: prefix,
-      preserved_suffix: suffix,
+      stale_span: { start: prefix.length, end: prefix.length + stale.length, digest: reconciler.sha256(stale) },
+      authority: {
+        kind: 'WEB_ADJUDICATION',
+        reference: 'github:issue-comment:359:5441042397',
+        decision: 'SUPERSEDED_PROJECTION_REPLACE',
+      },
     },
   };
 
   let live = current;
   const runtime = reconciler.createProgrammeRuntime({
     predecessor_contract: predecessorContract,
+    authority_verifier: authorityVerifier,
     adapter: {
       inspectProgramme() { return JSON.parse(JSON.stringify(live)); },
       applyOperations(input) {
@@ -394,10 +463,19 @@ test('stale-projection migration fails closed when the exact body binding is alt
     unmanaged_projection_migrations: {
       children: {
         '359': {
+          schema: 'toolkit.github-program.stale-projection-migration.v1',
           classification: 'STALE_PROGRAMME_PROJECTION',
+          grammar: 'toolkit.github-program.stale-projection.v1',
+          repository: desired.repository,
+          programme_parent_issue: 240,
+          entity: { kind: 'child', number: 359 },
           body_digest: '0'.repeat(64),
-          preserved_prefix: '',
-          preserved_suffix: '',
+          stale_span: { start: 0, end: current.bodies.children['359'].length, digest: reconciler.sha256(current.bodies.children['359']) },
+          authority: {
+            kind: 'WEB_ADJUDICATION',
+            reference: 'github:issue-comment:359:5441042397',
+            decision: 'SUPERSEDED_PROJECTION_REPLACE',
+          },
         },
       },
     },
