@@ -296,7 +296,8 @@ function validateProgrammeModel(model) {
   if (!isRecord(model) || !isSafeLabel(model.repository || '') || !isRecord(model.parent)
     || !hasPortableFields('parent', model.parent) || !isOneLineOutcome(model.parent.outcome)
     || !isIssue(model.parent.issue) || !Array.isArray(model.parent.child_graph)
-    || !isSafeLabel(model.parent.status || '') || !publicSafeText(model.parent.next_action || '')
+    || !isSafeLabel(model.parent.status || '') || !publicSafeText(model.parent.goal || '')
+    || !safeTextArray(model.parent.progress) || !publicSafeText(model.parent.next_action || '')
     || !safeTextArray(model.parent.major_holds) || !isRecord(model.parent.predecessor_gateway)
     || model.parent.predecessor_gateway.issues !== 45 || model.parent.predecessor_gateway.criteria !== 84
     || model.parent.predecessor_gateway.unmapped !== 0 || !validExtensions(model.parent.extensions)
@@ -313,10 +314,17 @@ function validateProgrammeModel(model) {
       || !Array.isArray(child.dependencies) || !Array.isArray(child.epochs) || !isSafeLabel(child.lock || '')
       || child.dependencies.some((issue) => !isIssue(issue)) || new Set(child.dependencies).size !== child.dependencies.length
       || child.epochs.length === 0 || child.epochs.some((entry) => !isRecord(entry) || !isSafeLabel(entry.name || '')
-        || entry.lock !== child.lock || !isSafeLabel(entry.state || ''))
+        || !isSafeLabel(entry.lock || '') || !isSafeLabel(entry.purpose || '') || !isSafeLabel(entry.state || ''))
       || canonicalJson(child.predecessor_issues) !== canonicalJson(PREDECESSOR_ISSUE_ROSTER)
-      || !safeTextArray(child.boundaries) || !publicSafeText(child.current_obligation || '')
-      || !publicSafeText(child.next_action || '') || child.eli5 !== undefined && !publicSafeText(child.eli5)
+      || !isRecord(child.predecessor_gateway) || child.predecessor_gateway.issues !== 45
+      || child.predecessor_gateway.criteria !== 84 || child.predecessor_gateway.unmapped !== 0
+      || !publicSafeText(child.predecessor_gateway.optional_future || '')
+      || !publicSafeText(child.predecessor_gateway.parked_backlog || '')
+      || !safeTextArray(child.scope) || !safeTextArray(child.out_of_scope) || !safeTextArray(child.downstream_owned)
+      || !safeTextArray(child.achieved) || !safeTextArray(child.remaining) || !safeTextArray(child.holds)
+      || !safeTextArray(child.boundaries) || !publicSafeText(child.goal || '') || !publicSafeText(child.progress || '')
+      || !isSafeLabel(child.current_gate || '') || !isSafeLabel(child.current_phase || '') || !isSafeLabel(child.next_gate || '')
+      || !publicSafeText(child.current_obligation || '') || !publicSafeText(child.next_action || '') || !publicSafeText(child.eli5 || '')
       || !validExtensions(child.extensions)) return programmeFailure('child-model-invalid');
     const registry = validatePrRegistry(child.pr_registry);
     if (!registry.ok) return registry;
@@ -335,15 +343,21 @@ function validateProgrammeModel(model) {
       || !['INTERMEDIATE', 'TERMINAL'].includes(pr.role) || typeof pr.completes_child !== 'boolean'
       || pr.role === 'INTERMEDIATE' && pr.completes_child
       || !isSafeLabel(pr.branch || '') || !isSafeLabel(pr.epoch || '') || !isSafeLabel(pr.lock || '')
-      || !isSafeLabel(pr.state || '') || !isSafeLabel(pr.finality || '')
+      || !isSafeLabel(pr.state || '') || !isSafeLabel(pr.finality || '') || !isSafeLabel(pr.version || '')
       || !safeTextArray(pr.changed_surfaces) || !safeTextArray(pr.validation) || !safeTextArray(pr.holds)
+      || !publicSafeText(pr.purpose || '') || !safeTextArray(pr.scope) || !safeTextArray(pr.out_of_scope)
+      || !publicSafeText(pr.progress || '') || !safeTextArray(pr.achieved) || !safeTextArray(pr.remaining)
+      || !safeTextArray(pr.safety_constraints) || !publicSafeText(pr.next_action || '') || !publicSafeText(pr.eli5 || '')
+      || !Array.isArray(pr.validation_status) || pr.validation_status.some((entry) => !isRecord(entry)
+        || !isSafeLabel(entry.check || '') || !isSafeLabel(entry.state || ''))
       || !validExtensions(pr.extensions)) return programmeFailure('pr-model-invalid');
     prNumbers.add(pr.number);
   }
   const graph = new Map();
   for (const entry of model.parent.child_graph) {
     if (!isRecord(entry) || !isIssue(entry.issue) || graph.has(entry.issue)
-      || !['CURRENT', 'QUEUED', 'BLOCKED', 'COMPLETED', 'RETIRED'].includes(entry.status)) return programmeFailure('parent-child-graph-invalid');
+      || !['CURRENT', 'QUEUED', 'BLOCKED', 'COMPLETED', 'RETIRED'].includes(entry.status)
+      || !isSafeLabel(entry.short_title || '') || !isOneLineOutcome(entry.outcome)) return programmeFailure('parent-child-graph-invalid');
     graph.set(entry.issue, entry.status);
   }
   if (graph.size !== model.children.length
@@ -356,6 +370,7 @@ function validateProgrammeModel(model) {
       || candidate.parent_issue !== model.parent.issue || candidate.child_issue !== child.issue
       || !isIssue(candidate.pr) || !isSafeLabel(candidate.branch || '')
       || !isSha(candidate.base) || !isSha(candidate.head) || !isSha(candidate.tree)
+      || !isSafeLabel(candidate.version || '')
       || !isSafeLabel(candidate.epoch || '') || candidate.lock !== child.lock
       || !['INTERMEDIATE', 'TERMINAL'].includes(candidate.role) || typeof candidate.completes_child !== 'boolean'
       || candidate.lifecycle !== child.status)) {
@@ -382,25 +397,35 @@ function renderParentView(repository, parent) {
   const state = { kind: 'parent', repository, data: parent };
   return [
     PROGRAMME_MARKERS.parent.begin,
-    '# GitHub programme dashboard',
+    '# Programme dashboard',
     '',
-    '## Programme status',
-    '- Status: ' + parent.status,
-    '- Outcome: ' + parent.outcome,
+    '## Programme goal',
+    parent.goal,
     '',
-    '## Current child',
-    parent.current_child ? '#' + parent.current_child : 'None',
+    '## Current status',
+    table(['Item', 'Status'], [
+      ['Programme', parent.status],
+      ['Current Child', parent.current_child ? '#' + parent.current_child : 'None'],
+      ['Current outcome', parent.outcome],
+    ]),
     '',
-    '## Child graph',
-    table(['Child', 'Lifecycle'], parent.child_graph.map((child) => ['#' + child.issue, child.status])),
+    '## Programme children',
+    table(['State', 'Child', 'What it achieves'], parent.child_graph.map((child) => [
+      child.status[0] + child.status.slice(1).toLowerCase(),
+      '#' + child.issue + ' - ' + child.short_title,
+      child.outcome,
+    ])),
     '',
-    '## Major holds',
+    '## Overall progress / milestones',
+    safeLines(parent.progress),
+    '',
+    '## Major blockers / holds',
     safeLines(parent.major_holds),
     '',
-    '## Predecessor lineage gateway',
+    '## Dependency / predecessor gateway',
     table(['Issues', 'Criteria', 'Unmapped'], [[parent.predecessor_gateway.issues, parent.predecessor_gateway.criteria, parent.predecessor_gateway.unmapped]]),
     '',
-    '## Next action',
+    '## Next programme action',
     parent.next_action,
     '',
     '## Repository extensions',
@@ -416,33 +441,73 @@ function renderChildView(repository, child) {
     PROGRAMME_MARKERS.child.begin,
     '# Programme child #' + child.issue,
     '',
-    '## Parent and dependencies',
+    '## Goal / outcome',
+    child.goal,
+    '',
+    '- Outcome: ' + child.outcome,
+    '',
+    '## Scope / boundaries',
+    '### In scope',
+    safeLines(child.scope),
+    '',
+    '### Out of scope',
+    safeLines(child.out_of_scope),
+    '',
+    '### Downstream-owned',
+    safeLines(child.downstream_owned),
+    '',
+    '## Current status',
+    table(['Item', 'Status'], [
+      ['Overall', child.status],
+      ['Current gate', child.current_gate],
+      ['Current epoch / phase', child.current_phase],
+      ['Active PR', child.candidate ? '#' + child.candidate.pr : 'None'],
+      ['Current candidate', child.candidate ? child.candidate.head : 'None'],
+      ['Next gate', child.next_gate],
+      ['Finality', child.boundaries.join(' ')],
+    ]),
+    '',
+    '## Current progress',
+    child.progress,
+    '',
+    '- Current obligation: ' + child.current_obligation,
+    '',
+    '## Achieved / completed',
+    safeLines(child.achieved),
+    '',
+    '## Still to achieve',
+    safeLines(child.remaining),
+    '',
+    '## Current blockers / holds',
+    safeLines(child.holds),
+    '',
+    '## Execution map / phases / epochs',
+    table(['Epoch / phase', 'Lock', 'Purpose', 'State'], child.epochs.map((entry) => [entry.name, entry.lock, entry.purpose, entry.state])),
+    '',
+    '## Dependencies / predecessor coverage',
     '- Parent: #' + child.parent_issue,
     safeLines(child.dependencies.map((value) => 'Blocked by #' + value)),
     '',
-    '## Status and current obligation',
-    '- Status: ' + child.status,
-    '- Outcome: ' + child.outcome,
-    '- Current obligation: ' + child.current_obligation,
+    table(['Predecessor issues', 'Criteria', 'Unmapped'], [[child.predecessor_gateway.issues, child.predecessor_gateway.criteria, child.predecessor_gateway.unmapped]]),
     '',
-    '## Epochs and Locks',
-    table(['Epoch', 'Lock', 'State'], child.epochs.map((entry) => [entry.name, entry.lock, entry.state])),
+    '- Optional future: ' + child.predecessor_gateway.optional_future,
+    '- Parked backlog: ' + child.predecessor_gateway.parked_backlog,
     '',
-    '## Predecessor mapping',
-    '- Issues: ' + child.predecessor_issues.join(', '),
-    '',
-    '## ACTIVE / ACCEPTED / RETIRED PR registry',
-    table(['PR', 'Registry status', 'Role', 'Completes child'], child.pr_registry.map((entry) => ['#' + entry.pr, entry.status, entry.role, entry.completes_child])),
+    '## PR registry',
+    table(['PR', 'Role', 'State', 'Completes Child'], child.pr_registry.map((entry) => ['#' + entry.pr, entry.role, entry.status, entry.completes_child ? 'Yes' : 'No'])),
     '',
     '## Exact current candidate',
-    child.candidate ? '- PR #' + child.candidate.pr + ' | base ' + child.candidate.base + ' | head ' + child.candidate.head + ' | tree ' + child.candidate.tree : '- None',
+    child.candidate ? table(['PR', 'Branch', 'Base', 'Head'], [[child.candidate.pr, child.candidate.branch, child.candidate.base, child.candidate.head]])
+      + '\n\n' + table(['Tree', 'Version'], [[child.candidate.tree, child.candidate.version]]) : '- None',
     '',
-    '## Boundaries and finality flow',
+    '## Finality flow',
     safeLines(child.boundaries),
     '',
     '## Next action',
     child.next_action,
-    ...(child.eli5 ? ['', '## ELI5', child.eli5] : []),
+    '',
+    '## ELI5',
+    child.eli5,
     '',
     '## Repository extensions',
     renderExtensions(child.extensions),
@@ -457,28 +522,67 @@ function renderPrView(repository, pr) {
     PROGRAMME_MARKERS.pr.begin,
     '# Programme PR #' + pr.number,
     '',
-    '## Parent, child, epoch and Lock',
-    '- Parent: #' + pr.parent_issue,
-    '- Child: #' + pr.child_issue,
-    '- Epoch: ' + pr.epoch,
-    '- Lock: ' + pr.lock,
+    '## Purpose / goal',
+    pr.purpose,
+    '',
     '- Outcome: ' + pr.outcome,
     '',
-    '## Branch, base and head',
+    '## Programme position',
+    table(['Item', 'Value'], [
+      ['Parent', '#' + pr.parent_issue],
+      ['Child', '#' + pr.child_issue],
+      ['Epoch', pr.epoch],
+      ['Lock', pr.lock],
+      ['Role', pr.role],
+      ['Completes Child', pr.completes_child ? 'Yes' : 'No'],
+    ]),
+    '',
+    '## Scope',
+    safeLines(pr.scope),
+    '',
+    '## Out of scope',
+    safeLines(pr.out_of_scope),
+    '',
+    '## Current progress',
+    pr.progress,
+    '',
+    '## Implemented / achieved',
+    safeLines(pr.achieved),
+    '',
+    '## Still to achieve',
+    safeLines(pr.remaining),
+    '',
+    '## Current blockers / holds',
+    safeLines(pr.holds),
+    '',
+    '## Key design / safety constraints',
+    safeLines(pr.safety_constraints),
+    '',
+    '## Exact candidate',
     table(['Branch', 'Base', 'Head', 'Tree'], [[pr.branch, pr.base, pr.head, pr.tree]]),
     '',
-    '## Registry role',
-    table(['Role', 'Completes child'], [[pr.role, pr.completes_child]]),
+    table(['Package / plugin version', 'PR state'], [[pr.version, pr.state]]),
+    '',
+    '## Validation / review status',
+    table(['Check / review', 'State'], pr.validation_status.map((entry) => [entry.check, entry.state])),
+    '',
+    '## Relationship / finality semantics',
+    '- Role: ' + pr.role,
+    '- Completes Child: ' + (pr.completes_child ? 'Yes' : 'No'),
+    '- Merge closes Child: ' + (pr.completes_child ? 'Eligible only after terminal authority.' : 'No'),
+    '- Ready, merge and finality: ' + pr.finality,
     '',
     '## Changed surfaces',
     safeLines(pr.changed_surfaces),
     '',
-    '## Validation',
+    '## Validation evidence',
     safeLines(pr.validation),
     '',
-    '## Holds and finality',
-    safeLines(pr.holds),
-    '- Finality: ' + pr.finality,
+    '## Next action',
+    pr.next_action,
+    '',
+    '## ELI5',
+    pr.eli5,
     '',
     '## Repository extensions',
     renderExtensions(pr.extensions),
@@ -689,6 +793,8 @@ function trustedRelationshipInspection(adapter, context) {
     issueNumbers.add(issue.issue_number);
   }
   const inspection = clone(supplied);
+  inspection.programme_children = [...context.programme_children];
+  inspection.programme_entities = [...new Set([context.parent_issue, ...context.programme_children])];
   trustedRelationshipInspections.add(inspection);
   return success('PROGRAMME_RELATIONSHIP_INSPECTION_VALID', { inspection });
 }
@@ -702,23 +808,34 @@ function planNativeRelationships(input = {}) {
   const capabilities = inspection.capabilities;
   const knownById = new Map(inspection.issues.map((entry) => [entry.issue_id, entry]));
   const knownByNumber = new Map(inspection.issues.map((entry) => [entry.issue_number, entry]));
+  const currentIds = input.current.sub_issues.map((entry) => entry?.issue_id);
+  const desiredIds = input.desired.sub_issues.map((entry) => entry?.issue_id);
+  if (new Set(currentIds).size !== currentIds.length || new Set(desiredIds).size !== desiredIds.length) {
+    return programmeFailure('native-relationship-duplicate-edge');
+  }
   for (const current of input.current.sub_issues) {
     const known = knownById.get(current?.issue_id);
     if (!known || known.issue_number !== current.issue_number || current.repository !== inspection.repository
-      || current.parent_issue !== input.parent_issue) return programmeFailure('native-relationship-current-inventory-invalid');
+      || current.parent_issue !== input.parent_issue
+      || current.managed === true && !inspection.programme_children.includes(current.issue_number)) {
+      return programmeFailure('native-relationship-current-inventory-invalid');
+    }
   }
   for (const [issueNumber, issueIds] of Object.entries(input.current.blocked_by)) {
     if (!knownByNumber.has(Number(issueNumber)) || !Array.isArray(issueIds)
-      || issueIds.some((id) => !knownById.has(id))) return programmeFailure('native-relationship-current-inventory-invalid');
+      || issueIds.some((id) => !knownById.has(id)) || new Set(issueIds).size !== issueIds.length) return programmeFailure('native-relationship-current-inventory-invalid');
   }
   for (const desired of input.desired.sub_issues) {
     const known = knownById.get(desired?.issue_id);
     if (!known || known.issue_number !== desired.issue_number || desired.repository !== inspection.repository
-      || desired.parent_issue !== input.parent_issue || desired.issue_number === input.parent_issue) return programmeFailure('native-relationship-identity-out-of-scope');
+      || desired.parent_issue !== input.parent_issue || !inspection.programme_children.includes(desired.issue_number)) {
+      return programmeFailure('native-relationship-identity-out-of-scope');
+    }
   }
   for (const [issueNumber, issueIds] of Object.entries(input.desired.blocked_by)) {
-    if (!knownByNumber.has(Number(issueNumber)) || !Array.isArray(issueIds)
-      || issueIds.some((id) => !knownById.has(id))) return programmeFailure('native-relationship-identity-out-of-scope');
+    if (!knownByNumber.has(Number(issueNumber)) || !inspection.programme_children.includes(Number(issueNumber)) || !Array.isArray(issueIds)
+      || issueIds.some((id) => !knownById.has(id) || !inspection.programme_entities.includes(knownById.get(id).issue_number))
+      || new Set(issueIds).size !== issueIds.length) return programmeFailure('native-relationship-identity-out-of-scope');
   }
   const operations = [];
   const currentById = new Map(input.current.sub_issues.map((entry) => [entry.issue_id, entry]));
@@ -1013,6 +1130,7 @@ function createProgrammeRuntime(options = {}) {
       const trusted = trustedRelationshipInspection(adapter, {
         repository: input.repository,
         parent_issue: input.desired?.parent?.issue,
+        programme_children: input.desired?.children?.map((child) => child.issue) || [],
       });
       if (!trusted.ok) return trusted;
       relationshipInspection = trusted.inspection;

@@ -30,8 +30,10 @@ function model() {
       issue: 240,
       status: 'S2 E3 G3 REPAIR CURRENT',
       outcome: 'The bounded G3 repair is current.',
+      goal: 'Complete the bounded E3 repair without claiming Web finality.',
       current_child: 359,
-      child_graph: [{ issue: 359, status: 'CURRENT' }],
+      child_graph: [{ issue: 359, status: 'CURRENT', short_title: 'S2', outcome: 'Repair the E3 programme product.' }],
+      progress: ['E1 and E2 accepted.', 'E3 bounded repair current.'],
       major_holds: [],
       predecessor_gateway: { issues: 45, criteria: 84, unmapped: 0 },
       next_action: 'Run the bounded E3 repair.',
@@ -42,14 +44,31 @@ function model() {
       dependencies: [],
       status: 'CURRENT',
       outcome: 'The E3 product repair is in progress.',
+      goal: 'Repair the six bounded E3 product roots.',
+      scope: ['Runtime, contracts, programme views and tests.'],
+      out_of_scope: ['G4 launch, Ready, merge and finality.'],
+      downstream_owned: ['E4 and S3-S6.'],
+      current_gate: 'G3 repair',
+      current_phase: 'E3',
+      next_gate: 'Fresh G4',
+      progress: 'The repaired candidate is being validated.',
+      achieved: ['ACCEPTED: E1 and E2.', 'IMPLEMENTED: the original E3 candidate.'],
+      remaining: ['Validate the repair and return to Web.'],
+      holds: ['Fresh G4 has not started.'],
       current_obligation: 'Repair the E3 candidate.',
-      epochs: [{ name: 'E3', lock: 'DL-S2-GITHUB-PROGRAM-001', state: 'CURRENT' }],
+      epochs: [{ name: 'E3', lock: 'DL-S2-GITHUB-PROGRAM-001', purpose: 'GitHub programme product', state: 'CURRENT' }],
       lock: 'DL-S2-GITHUB-PROGRAM-001',
       predecessor_issues: predecessorContract.predecessors.map((entry) => entry.issue),
+      predecessor_gateway: {
+        issues: 45, criteria: 84, unmapped: 0,
+        optional_future: '#246 remains optional unless reactivated.',
+        parked_backlog: '#250 remains parked and discoverable unless reactivated.',
+      },
       pr_registry: [{ pr: 366, status: 'ACTIVE', role: 'INTERMEDIATE', completes_child: false }],
       candidate: {
         repository: 'weijunswj/ai-agent-toolkit', parent_issue: 240, child_issue: 359, pr: 366,
         branch: 'sol/s2-productisation-g3', base: BASE, head: HEAD, tree: TREE,
+        version: '2.10.9',
         epoch: 'E3', lock: 'DL-S2-GITHUB-PROGRAM-001', role: 'INTERMEDIATE', completes_child: false,
         lifecycle: 'CURRENT',
       },
@@ -69,12 +88,23 @@ function model() {
       tree: TREE,
       state: 'DRAFT',
       outcome: 'The intermediate candidate awaits Web reconciliation.',
+      purpose: 'Implement the bounded E3 programme product repair.',
+      scope: ['Six repair roots and the canonical programme surface.'],
+      out_of_scope: ['Fresh G4, Ready, merge, finality and downstream slices.'],
+      progress: 'The bounded repair is implemented and under validation.',
+      achieved: ['ACCEPTED: E1 and E2.', 'IMPLEMENTED: bounded E3 repair.'],
+      remaining: ['Hosted validation and fresh G4.'],
+      safety_constraints: ['INTERMEDIATE and completes_child=false.'],
+      validation_status: [{ check: 'Focused repair', state: 'PASS' }, { check: 'G4', state: 'AWAITING FRESH RUN' }],
+      version: '2.10.9',
       role: 'INTERMEDIATE',
       completes_child: false,
       changed_surfaces: ['repo/scripts/toolkit-github-program-reconciler.cjs'],
       validation: ['focused tests pending'],
       holds: ['Web exact-head reconciliation'],
       finality: 'WEB_OWNED',
+      next_action: 'Return the repaired exact candidate to Web.',
+      eli5: 'The repair is coded, but Web still decides review and acceptance.',
     }],
   };
 }
@@ -206,4 +236,48 @@ test('RED: structurally incomplete programme surfaces fail closed', () => {
 test('RED: completed is an explicit exclusive managed lifecycle label', () => {
   const result = reconciler.deriveManagedLabels({ native_state: 'closed', lifecycle: 'COMPLETED', labels: ['current', 'human-label'] });
   assert.deepEqual(result.labels, ['human-label', 'completed']);
+});
+
+test('portable surface contract requires the full Parent Child and active PR minimum', () => {
+  const contract = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../contracts/github-program-reconciler/programme-surface-contract.json'), 'utf8'));
+  assert.equal(contract.$schema, 'toolkit.github-program.surface.v2');
+  for (const field of ['goal', 'progress', 'child_graph']) assert.ok(contract.portable_minimum.parent.includes(field), field);
+  for (const field of ['scope', 'achieved', 'remaining', 'holds', 'eli5']) assert.ok(contract.portable_minimum.child.includes(field), field);
+  for (const field of ['purpose', 'out_of_scope', 'safety_constraints', 'validation_status', 'eli5']) assert.ok(contract.portable_minimum.pr.includes(field), field);
+});
+
+test('portable sections fail closed while additive repository extensions survive rendering', () => {
+  const missingChild = model();
+  delete missingChild.children[0].remaining;
+  assert.equal(reconciler.renderProgrammeViews(missingChild).ok, false);
+  const missingPr = model();
+  delete missingPr.prs[0].validation_status;
+  assert.equal(reconciler.renderProgrammeViews(missingPr).ok, false);
+  const extended = model();
+  extended.children[0].extensions = { owner_note: 'Repository-specific context remains additive.' };
+  const rendered = reconciler.renderProgrammeViews(extended);
+  assert.equal(rendered.ok, true);
+  assert.match(rendered.bodies.children['359'], /Repository-specific context remains additive/);
+});
+
+test('duplicate or altered managed event inventory fails closed', () => {
+  const current = snapshot(model());
+  const event = reconciler.renderManagedEvent({
+    event_type: 'g4_or_finality', repository: current.repository,
+    entity: { kind: 'pr', number: 366 }, child_issue: 359, pr_number: 366,
+    exact_revision: HEAD, resulting_state: 'WEB_OWNED', authority_ref: 'github:issue-comment:359:5440752892', epoch: 'E3',
+  }).event;
+  current.managed_events = [event, event];
+  assert.equal(reconciler.buildProgrammePreview({ snapshot: current, desired: model(), predecessor_contract: predecessorContract }).ok, false);
+  current.managed_events = [{ ...event, resulting_state: 'ALTERED' }];
+  assert.equal(reconciler.buildProgrammePreview({ snapshot: current, desired: model(), predecessor_contract: predecessorContract }).ok, false);
+});
+
+test('missing lifecycle label definitions are planned once and included in readback state', () => {
+  const current = snapshot(model());
+  delete current.label_definitions.completed;
+  const preview = reconciler.buildProgrammePreview({ snapshot: current, desired: model(), predecessor_contract: predecessorContract });
+  assert.equal(preview.ok, true);
+  assert.ok(preview.operations.some((operation) => operation.type === 'label_definition.ensure' && operation.name === 'completed'));
+  assert.deepEqual(preview.expected_snapshot.label_definitions.completed, LABEL_DEFINITIONS.completed);
 });

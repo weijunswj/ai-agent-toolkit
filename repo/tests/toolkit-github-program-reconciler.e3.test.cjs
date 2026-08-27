@@ -30,8 +30,10 @@ function programmeModel(childStatus = 'QUEUED') {
       issue: 240,
       status: childStatus === 'CURRENT' ? 'S2 E3 CURRENT' : 'S2 E3 QUEUED',
       outcome: childStatus === 'CURRENT' ? 'E3 is the current bounded delivery.' : 'E3 remains queued.',
+      goal: 'Deliver the governed programme through compact, truthful materialised views.',
       current_child: childStatus === 'CURRENT' ? 359 : null,
-      child_graph: [{ issue: 359, status: childStatus }],
+      child_graph: [{ issue: 359, status: childStatus, short_title: 'S2', outcome: 'Productise the retained Toolkit skills.' }],
+      progress: ['S1 accepted.', 'S2 E3 is represented by the exact candidate.'],
       major_holds: [],
       predecessor_gateway: { issues: 45, criteria: 84, unmapped: 0 },
       next_action: 'Run Web exact-head reconciliation.',
@@ -42,14 +44,31 @@ function programmeModel(childStatus = 'QUEUED') {
       dependencies: [],
       status: childStatus,
       outcome: childStatus === 'CURRENT' ? 'E3 implementation is active.' : 'E3 is waiting for selection.',
+      goal: 'Productise the retained skills and programme reconciliation surface.',
+      scope: ['Deterministic programme reconciliation.'],
+      out_of_scope: ['Ready, merge and finality.'],
+      downstream_owned: ['Native adapter completion.'],
+      current_gate: childStatus === 'CURRENT' ? 'G3' : 'Queue selection',
+      current_phase: 'E3',
+      next_gate: 'Fresh G4',
+      progress: 'The candidate is implemented and awaiting Web reconciliation.',
+      achieved: ['ACCEPTED: E1 and E2.', 'IMPLEMENTED: E3 candidate.'],
+      remaining: ['Fresh G4 and Web acceptance.', 'E4 native adapters.'],
+      holds: ['Web exact-head reconciliation.'],
       current_obligation: childStatus === 'CURRENT' ? 'Implement E3.' : 'Wait for current selection.',
-      epochs: [{ name: 'E3', lock: 'DL-S2-GITHUB-PROGRAM-001', state: childStatus }],
+      epochs: [{ name: 'E3', lock: 'DL-S2-GITHUB-PROGRAM-001', purpose: 'GitHub programme product', state: childStatus }],
       lock: 'DL-S2-GITHUB-PROGRAM-001',
       predecessor_issues: predecessorContract.predecessors.map((entry) => entry.issue),
+      predecessor_gateway: {
+        issues: 45, criteria: 84, unmapped: 0,
+        optional_future: '#246 remains outside the active graph unless reactivated.',
+        parked_backlog: '#250 remains discoverable and non-blocking unless reactivated.',
+      },
       pr_registry: [{ pr: 366, status: 'ACTIVE', role: 'TERMINAL', completes_child: true }],
       candidate: {
         repository: 'weijunswj/ai-agent-toolkit', parent_issue: 240, child_issue: 359, pr: 366,
         branch: 'sol/s2-productisation-g3', base: BASE, head: HEAD, tree: TREE,
+        version: '2.10.9',
         epoch: 'E3', lock: 'DL-S2-GITHUB-PROGRAM-001', role: 'TERMINAL', completes_child: true,
         lifecycle: childStatus,
       },
@@ -69,12 +88,23 @@ function programmeModel(childStatus = 'QUEUED') {
       tree: TREE,
       state: 'DRAFT',
       outcome: 'The exact E3 candidate awaits Web reconciliation.',
+      purpose: 'Implement and prove the E3 programme reconciler candidate.',
+      scope: ['Programme reconciler runtime, contracts, views and tests.'],
+      out_of_scope: ['Ready, merge, finality and E4.'],
+      progress: 'E1 and E2 are accepted; the E3 candidate awaits fresh G4.',
+      achieved: ['ACCEPTED: E1 and E2.', 'IMPLEMENTED: E3 candidate.'],
+      remaining: ['Fresh G4 and Web exact-head disposition.'],
+      safety_constraints: ['INTERMEDIATE and completes_child=false.'],
+      validation_status: [{ check: 'Focused tests', state: 'PASS' }, { check: 'G4', state: 'AWAITING FRESH RUN' }],
+      version: '2.10.9',
       role: 'TERMINAL',
       completes_child: true,
       changed_surfaces: ['repo/scripts/toolkit-github-program-reconciler.cjs'],
       validation: ['focused tests pass'],
       holds: ['Web exact-head reconciliation'],
       finality: 'WEB_OWNED',
+      next_action: 'Return the exact candidate to Web.',
+      eli5: 'The implementation exists, but Web still owns review and acceptance.',
     }],
   };
 }
@@ -103,10 +133,14 @@ test('materialised parent child and PR views expose the required bounded fields'
   const result = reconciler.renderProgrammeViews(programmeModel('CURRENT'));
   assert.equal(result.ok, true);
   assert.match(result.bodies.parent, /GITHUB-PROGRAM-PARENT:BEGIN v1/);
-  assert.match(result.bodies.parent, /Current child/);
-  assert.match(result.bodies.children['359'], /Epochs and Locks/);
-  assert.match(result.bodies.children['359'], /ACTIVE \/ ACCEPTED \/ RETIRED PR registry/);
-  assert.match(result.bodies.prs['366'], /Branch, base and head/);
+  assert.match(result.bodies.parent, /Programme children/);
+  assert.match(result.bodies.parent, /What it achieves/);
+  assert.match(result.bodies.children['359'], /Execution map \/ phases \/ epochs/);
+  assert.match(result.bodies.children['359'], /Still to achieve/);
+  assert.match(result.bodies.children['359'], /PR registry/);
+  assert.match(result.bodies.prs['366'], /Programme position/);
+  assert.match(result.bodies.prs['366'], /Validation \/ review status/);
+  assert.match(result.bodies.prs['366'], /Relationship \/ finality semantics/);
 });
 
 test('typed managed events round-trip and arbitrary prose is not authority', () => {
@@ -148,11 +182,10 @@ test('native relationship plan uses real sub-issue and blocked-by endpoint seman
   const state = snapshot(programmeModel('CURRENT'));
   state.native = {
       sub_issues: [
-        { issue_id: 100, issue_number: 359, parent_issue: 240, repository: state.repository, managed: true },
-        { issue_id: 102, issue_number: 361, parent_issue: 240, repository: state.repository, managed: true },
+        { issue_id: 102, issue_number: 361, parent_issue: 240, repository: state.repository, managed: false },
       ],
-      blocked_by: { '359': [200] },
-      managed_blocked_by: { '359': [200] },
+      blocked_by: {},
+      managed_blocked_by: {},
   };
   const runtime = reconciler.createProgrammeRuntime({
     predecessor_contract: predecessorContract,
@@ -163,11 +196,9 @@ test('native relationship plan uses real sub-issue and blocked-by endpoint seman
         return {
           source: 'adapter.inspectRelationships', repository: state.repository, parent_issue: 240,
           issues: [
+            { issue_id: 99, issue_number: 240, repository: state.repository },
             { issue_id: 100, issue_number: 359, repository: state.repository },
-            { issue_id: 101, issue_number: 360, repository: state.repository },
             { issue_id: 102, issue_number: 361, repository: state.repository },
-            { issue_id: 200, issue_number: 362, repository: state.repository },
-            { issue_id: 201, issue_number: 363, repository: state.repository },
           ],
           capabilities: { sub_issues: true, reparent: true, reprioritize: true, dependencies: true },
         };
@@ -176,17 +207,15 @@ test('native relationship plan uses real sub-issue and blocked-by endpoint seman
   });
   const result = runtime.preview({ repository: state.repository, desired: programmeModel('CURRENT'), desired_native: {
       sub_issues: [
-        { issue_id: 101, issue_number: 360, parent_issue: 240, previous_parent_issue: 999, repository: state.repository },
         { issue_id: 100, issue_number: 359, parent_issue: 240, repository: state.repository },
       ],
-      blocked_by: { '359': [201] },
+      blocked_by: { '359': [99] },
   } });
   assert.equal(result.ok, true);
-  assert.ok(result.operations.some((entry) => entry.type === 'sub_issue.add' && entry.payload.replace_parent === true));
-  assert.ok(result.operations.some((entry) => entry.type === 'sub_issue.remove'));
-  assert.ok(result.operations.some((entry) => entry.type === 'sub_issue.reprioritize'));
+  assert.ok(result.operations.some((entry) => entry.type === 'sub_issue.add'));
   assert.ok(result.operations.some((entry) => entry.type === 'issue_dependency.add_blocked_by'));
-  assert.ok(result.operations.some((entry) => entry.type === 'issue_dependency.remove_blocked_by'));
+  assert.equal(result.operations.some((entry) => entry.type === 'sub_issue.remove' && entry.issue_id === 102), false);
+  assert.ok(result.expected_snapshot.native.sub_issues.some((entry) => entry.issue_id === 102));
   assert.equal(result.relationship_plan.markdown_links_canonical, false);
   assert.equal(result.relationship_plan.blocked_label_is_derived_only, true);
 });
@@ -202,15 +231,15 @@ test('unsupported dependency mutation fails instead of inventing a pseudo-native
         return {
           source: 'adapter.inspectRelationships', repository: state.repository, parent_issue: 240,
           issues: [
+            { issue_id: 99, issue_number: 240, repository: state.repository },
             { issue_id: 100, issue_number: 359, repository: state.repository },
-            { issue_id: 201, issue_number: 360, repository: state.repository },
           ],
           capabilities: { sub_issues: true, reparent: true, reprioritize: true, dependencies: false },
         };
       },
     },
   });
-  const result = runtime.preview({ repository: state.repository, desired: programmeModel('CURRENT'), desired_native: { sub_issues: [], blocked_by: { '359': [201] } } });
+  const result = runtime.preview({ repository: state.repository, desired: programmeModel('CURRENT'), desired_native: { sub_issues: [], blocked_by: { '359': [99] } } });
   assert.equal(result.ok, false);
   assert.equal(result.code, 'PARENT_RECONCILIATION_INCOMPLETE');
 });
