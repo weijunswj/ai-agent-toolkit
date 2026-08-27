@@ -318,3 +318,90 @@ test('unmanaged and legacy bodies migrate by preview while preserving unrelated 
   assert.doesNotMatch(legacyPreview.expected_snapshot.bodies.parent, /AI-AGENT-TOOLKIT:N5-PARENT:BEGIN/);
   assert.match(legacyPreview.expected_snapshot.bodies.parent, /GITHUB-PROGRAM-PARENT:BEGIN v1/);
 });
+
+test('explicit stale-projection migration removes obsolete current state and preserves unrelated bytes', () => {
+  const desired = programmeModel('CURRENT');
+  const current = snapshot(desired);
+  const prefix = 'owner note before managed projection\n';
+  const stale = [
+    '# Old programme projection',
+    'E3 has no repository delta.',
+    'Resume from cfb528ee4b5f7432f71e94f742d3e8eba41f7b42.',
+  ].join('\n');
+  const suffix = '\nowner note after managed projection';
+  current.bodies.parent = prefix + stale + suffix;
+  const migrations = {
+    parent: {
+      classification: 'STALE_PROGRAMME_PROJECTION',
+      body_digest: reconciler.sha256(current.bodies.parent),
+      preserved_prefix: prefix,
+      preserved_suffix: suffix,
+    },
+  };
+
+  let live = current;
+  const runtime = reconciler.createProgrammeRuntime({
+    predecessor_contract: predecessorContract,
+    adapter: {
+      inspectProgramme() { return JSON.parse(JSON.stringify(live)); },
+      applyOperations(input) {
+        live = { ...JSON.parse(JSON.stringify(input.expected_snapshot)), revision: 'revision-2' };
+        return { ok: true, applied_count: input.operations.length };
+      },
+    },
+  });
+  const preview = runtime.preview({
+    repository: desired.repository,
+    desired,
+    unmanaged_projection_migrations: migrations,
+  });
+  assert.equal(preview.ok, true);
+  assert.match(preview.expected_snapshot.bodies.parent, /^owner note before managed projection/);
+  assert.match(preview.expected_snapshot.bodies.parent, /owner note after managed projection$/);
+  assert.doesNotMatch(preview.expected_snapshot.bodies.parent, /cfb528ee|no repository delta/);
+  assert.ok(preview.operations.some((entry) => entry.type === 'body.update'
+    && entry.entity.kind === 'parent' && entry.stale_projection_migration === true));
+
+  const applied = runtime.apply({
+    preview,
+    authority: {
+      granted: true,
+      preview_id: preview.preview_id,
+      expected_revision: preview.current_revision,
+      reference: 'user:current-turn:stale-projection-repair',
+    },
+  });
+  assert.equal(applied.ok, true);
+  assert.equal(applied.code, 'PROGRAMME_RECONCILED');
+  const rerun = runtime.preview({
+    repository: desired.repository,
+    desired,
+    unmanaged_projection_migrations: migrations,
+  });
+  assert.equal(rerun.ok, true);
+  assert.equal(rerun.code, 'PROGRAMME_ZERO_DELTA');
+  assert.equal(rerun.operations.length, 0);
+});
+
+test('stale-projection migration fails closed when the exact body binding is altered', () => {
+  const desired = programmeModel('CURRENT');
+  const current = snapshot(desired);
+  current.bodies.children['359'] = 'obsolete child projection';
+  const preview = reconciler.buildProgrammePreview({
+    snapshot: current,
+    desired,
+    predecessor_contract: predecessorContract,
+    unmanaged_projection_migrations: {
+      children: {
+        '359': {
+          classification: 'STALE_PROGRAMME_PROJECTION',
+          body_digest: '0'.repeat(64),
+          preserved_prefix: '',
+          preserved_suffix: '',
+        },
+      },
+    },
+  });
+  assert.equal(preview.ok, false);
+  assert.equal(preview.code, 'PARENT_RECONCILIATION_INCOMPLETE');
+});

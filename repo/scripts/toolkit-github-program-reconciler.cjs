@@ -424,6 +424,32 @@ function mergeProgrammeBody(existing, rendered, kind) {
   if (legacy) return legacy.prefix + rendered + legacy.suffix;
   return existing + (existing.endsWith('\n') ? '' : '\n') + rendered;
 }
+function unmanagedProjectionMigrationFor(migrations, group, key) {
+  if (!isRecord(migrations)) return null;
+  if (group === 'parent') return migrations.parent || null;
+  if (!isRecord(migrations[group])) return null;
+  return migrations[group][key] || null;
+}
+function migrateUnmanagedProjection(currentBody, rendered, migration) {
+  if (!isRecord(migration)
+    || migration.classification !== 'STALE_PROGRAMME_PROJECTION'
+    || !isDigest(migration.body_digest)
+    || typeof migration.preserved_prefix !== 'string'
+    || typeof migration.preserved_suffix !== 'string'
+    || sha256(currentBody) !== migration.body_digest
+    || !currentBody.startsWith(migration.preserved_prefix)
+    || !currentBody.endsWith(migration.preserved_suffix)
+    || migration.preserved_prefix.length + migration.preserved_suffix.length >= currentBody.length) {
+    return programmeFailure('stale-projection-migration-binding');
+  }
+  const staleEnd = currentBody.length - migration.preserved_suffix.length;
+  const staleProjection = currentBody.slice(migration.preserved_prefix.length, staleEnd);
+  if (!staleProjection.trim()) return programmeFailure('stale-projection-migration-empty');
+  return success('PROGRAMME_STALE_PROJECTION_MIGRATION_READY', {
+    body: migration.preserved_prefix + rendered + migration.preserved_suffix,
+    stale_projection_digest: sha256(staleProjection),
+  });
+}
 function rerenderProgrammeState(state) {
   if (state.kind === 'parent') return renderParentView(state.repository, state.data);
   if (state.kind === 'child') return renderChildView(state.repository, state.data);
@@ -645,10 +671,36 @@ function buildProgrammePreview(input = {}) {
   const expectedBodies = { parent: snapshot.bodies.parent, children: { ...(snapshot.bodies.children || {}) }, prs: { ...(snapshot.bodies.prs || {}) } };
   for (const entry of bodyEntries(rendered.bodies, input.desired.parent.issue)) {
     const currentBody = entry.group === 'parent' ? snapshot.bodies.parent : snapshot.bodies[entry.group]?.[entry.key];
-    const desiredBody = mergeProgrammeBody(currentBody, entry.body, entry.group === 'children' ? 'child' : entry.group === 'prs' ? 'pr' : 'parent');
+    const kind = entry.group === 'children' ? 'child' : entry.group === 'prs' ? 'pr' : 'parent';
+    const migration = unmanagedProjectionMigrationFor(input.unmanaged_projection_migrations, entry.group, entry.key);
+    let desiredBody;
+    let migrated = null;
+    if (migration) {
+      const conformance = classifyProgrammeConformance({ body: currentBody });
+      if (conformance.classification === 'UNMANAGED') {
+        migrated = migrateUnmanagedProjection(currentBody, entry.body, migration);
+        if (!migrated.ok) return migrated;
+        desiredBody = migrated.body;
+      } else if (conformance.classification === 'CURRENT_MANAGED') {
+        desiredBody = mergeProgrammeBody(currentBody, entry.body, kind);
+      } else {
+        return programmeFailure('stale-projection-migration-conformance');
+      }
+    } else {
+      desiredBody = mergeProgrammeBody(currentBody, entry.body, kind);
+    }
     if (entry.group === 'parent') expectedBodies.parent = desiredBody;
     else expectedBodies[entry.group][entry.key] = desiredBody;
-    if (currentBody !== desiredBody) operations.push({ type: 'body.update', entity: entityFromBodyKey(entry.group, entry.key), body: desiredBody, body_freshness_bound: true });
+    if (currentBody !== desiredBody) operations.push({
+      type: 'body.update', entity: entityFromBodyKey(entry.group, entry.key), body: desiredBody,
+      body_freshness_bound: true,
+      ...(migrated ? {
+        stale_projection_migration: true,
+        stale_projection_digest: migrated.stale_projection_digest,
+        unrelated_prefix_preserved: true,
+        unrelated_suffix_preserved: true,
+      } : {}),
+    });
   }
   const expectedLabels = clone(snapshot.labels);
   for (const child of input.desired.children) {
@@ -709,7 +761,11 @@ function createProgrammeRuntime(options = {}) {
     const inspected = inspect();
     if (!isRecord(inspected) || inspected.ok === false) return inspected?.ok === false ? inspected : programmeFailure('programme-inspection-failed');
     if (inspected.repository !== input.repository) return programmeFailure('repository-identity-mismatch');
-    const result = buildProgrammePreview({ snapshot: inspected, desired: input.desired, predecessor_contract: predecessorContract, events: input.events, desired_native: input.desired_native, capabilities: input.capabilities });
+    const result = buildProgrammePreview({
+      snapshot: inspected, desired: input.desired, predecessor_contract: predecessorContract,
+      events: input.events, desired_native: input.desired_native, capabilities: input.capabilities,
+      unmanaged_projection_migrations: input.unmanaged_projection_migrations,
+    });
     if (result.ok) {
       const bound = { ...result, _predecessor_contract: predecessorContract };
       acceptedPreviews.set(result.preview_id, sha256(bound));
