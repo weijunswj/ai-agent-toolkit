@@ -276,6 +276,44 @@ test('canonical behavioural routing corpus admits implicit discovery without pre
   }
 });
 
+test('n8n creation evidence keeps test fixtures out of workflow-template routing', () => {
+  const creationBaseline = JSON.parse(readText(path.join(
+    repoRoot,
+    'repo',
+    'docs',
+    'skill-creation-center-baseline.json'
+  )));
+  const products = ['n8n-safety-router', 'n8n-workflow-transport'];
+  const violations = [];
+
+  for (const product of products) {
+    const boundary = creationBaseline.skill_creation_review[product].overlap_boundary.toLowerCase();
+    const clauses = boundary.split(/[.;]/);
+    const fixtureEvidenceOnly = clauses.some((clause) =>
+      /\bfixtures?\b/.test(clause) && /\btest-only\b/.test(clause) && /\bevidence\b/.test(clause)
+    );
+    const rejectsTemplateRequests = clauses.some((clause) =>
+      /\b(?:cannot|must not|do not)\b/.test(clause) &&
+      /\b(?:satisfy|serve|route)\b/.test(clause) &&
+      /\breusable\b/.test(clause) &&
+      /\bpublic\b/.test(clause) &&
+      /\bworkflow[- ]template requests?\b/.test(clause)
+    );
+    const rejectsTemplateProductStatus = clauses.some((clause) =>
+      /\bnot\b/.test(clause) &&
+      /\bselectable\b/.test(clause) &&
+      /\binstallable\b/.test(clause) &&
+      /\btemplates?\b/.test(clause)
+    );
+
+    if (!fixtureEvidenceOnly) violations.push(`${product}: fixtures must be explicit test-only evidence`);
+    if (!rejectsTemplateRequests) violations.push(`${product}: fixtures must not satisfy reusable/public workflow-template requests`);
+    if (!rejectsTemplateProductStatus) violations.push(`${product}: fixtures must not be selectable/installable templates`);
+  }
+
+  assert.deepEqual(violations, [], 'fixture routing evidence must preserve the accepted n8n product boundary');
+});
+
 test('skill safety matrix covers current skill folders and safety boundaries', () => {
   const matrix = readText(path.join(repoRoot, 'repo', 'docs', 'SKILL-SAFETY-MATRIX.md'));
   const headerLine = matrix.split('\n').find((line) => line.startsWith('| Skill |'));

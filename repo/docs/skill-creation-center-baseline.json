@@ -227,7 +227,7 @@
         "Set up a generic non-n8n self-hosted service that does not interact with n8n.",
         "Review a generic JSON fixture that has no n8n nodes, workflow semantics, helper, MCP, or live-instance scope."
       ],
-      "overlap_boundary": "Load n8n-safety-router first, then use n8n-environment-setup for environments, n8n-workflow-transport for transport helpers, or test-only n8n workflow fixtures for reusable JSON when those narrower products apply.",
+      "overlap_boundary": "Load n8n-safety-router first, then route environment work to n8n-environment-setup and transport or helper work to n8n-workflow-transport. Test-only workflow fixtures may only be inspected as test or validation evidence; fixtures cannot satisfy reusable or public workflow-template requests and are not selectable or installable templates.",
       "invocation_mode": "implicit",
       "invocation_mode_reason": "Packaged metadata permits implicit discovery after the behavioural routing corpus proves positive, negative, and adversarial discrimination; discovery never grants mutation authority.",
       "decision": "retain_current_product",
@@ -262,7 +262,7 @@
         "Execute a live n8n import directly without a separately approved target instance and workflow set.",
         "Set up the local n8n Docker and Postgres environment without copying or changing workflow transport helpers."
       ],
-      "overlap_boundary": "Apply n8n-safety-router first; use test-only n8n workflow fixtures for public reusable JSON and n8n-environment-setup for environment setup, while this product owns helper transport and hygiene.",
+      "overlap_boundary": "Apply n8n-safety-router first and route environment setup to n8n-environment-setup; this product owns helper transport and hygiene. Workflow fixtures remain test-only evidence; they cannot satisfy reusable or public workflow-template requests and are not selectable or installable templates.",
       "invocation_mode": "implicit",
       "invocation_mode_reason": "Packaged metadata permits implicit discovery after the behavioural routing corpus proves positive, negative, and adversarial discrimination; discovery never grants mutation authority.",
       "decision": "retain_current_product",
