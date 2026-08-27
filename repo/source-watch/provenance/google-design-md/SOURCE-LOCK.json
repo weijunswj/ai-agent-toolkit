@@ -10,7 +10,7 @@
     {
       "mode": "adapted",
       "source_path": "docs/spec.md",
-      "root_surface_path": "skills/ui-ux-secure-frontend-design/references/design-md-contract.md",
+      "root_surface_path": "skills/frontend-art-direction/references/design-md-contract.md",
       "source_blob_sha": "5995e5482fc338a9f9923d5912551241a82e6e8a",
       "notes": "Adapted into a concise, Toolkit-local DESIGN.md contract reference for the UI/UX skill. The Toolkit does not vendor or execute upstream package tooling."
     },

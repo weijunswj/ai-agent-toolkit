@@ -13,7 +13,7 @@ Small safety-review skill for non-n8n self-hosted service setup, Docker/VPS plan
 ## Not For
 
 - Do not use for ordinary feature work or local dev servers without self-hosting/deployment exposure.
-- Do not use for n8n tasks; apply n8n-agent-rules and n8n-local-setup for n8n.
+- Do not use for n8n tasks; apply n8n-safety-router and n8n-environment-setup for n8n.
 - Do not deploy, run Docker, open firewall ports, create DNS records, configure tunnels, edit credentials, or mutate a VPS/cloud service without explicit current-turn approval naming the target operation.
 
 ## Expected Output

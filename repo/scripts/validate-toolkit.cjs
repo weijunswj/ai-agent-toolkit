@@ -87,18 +87,18 @@ const secretPatterns = [
 ];
 const executablePrefixes = [
   'repo/scripts/', 'repo/tests/', '.github/workflows/',
-  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/scripts/',
-  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/tests/',
-  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/',
-  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/',
-  'skills/n8n-agent-rules/scripts/', 'skills/n8n-local-setup/templates/.n8n-local/',
-  'skills/n8n-local-setup/templates/.n8n-production-cloudflare/',
+  'skills/frontend-art-direction/tools/design-system-generator/scripts/',
+  'skills/frontend-art-direction/tools/design-system-generator/tests/',
+  'skills/n8n-workflow-transport/templates/helper-scripts/import-export-sync/',
+  'skills/n8n-workflow-transport/templates/helper-scripts/sanitizer/',
+  'skills/n8n-safety-router/scripts/', 'skills/n8n-environment-setup/templates/.n8n-local/',
+  'skills/n8n-environment-setup/templates/.n8n-production-cloudflare/',
   'skills/codex-ssh-hostinger-coolify-setup-maintainer/scripts/'
 ];
 const executableExtensions = new Set(['.ps1', '.cmd', '.bat', '.cjs', '.mjs', '.js', '.ts', '.tsx', '.py', '.sh']);
 const allowedTrackedTemplatePrefixes = [
-  'skills/n8n-local-setup/templates/.n8n-local/',
-  'skills/n8n-local-setup/templates/.n8n-production-cloudflare/'
+  'skills/n8n-environment-setup/templates/.n8n-local/',
+  'skills/n8n-environment-setup/templates/.n8n-production-cloudflare/'
 ];
 
 function slash(value) {
@@ -422,8 +422,8 @@ function validateSkillCreationGate(errors) {
     }
     for (const field of skillCreationRoutingEvidenceFields) {
       const examples = review[field];
-      if (!Array.isArray(examples) || examples.length < 2 || examples.some((item) => typeof item !== 'string' || item.trim().length < 12)) {
-        fail(errors, `${baselinePath} skill_creation_review.${skill}.${field} must contain at least two non-empty routing examples`);
+      if (!Array.isArray(examples) || examples.length < 3 || examples.some((item) => typeof item !== 'string' || item.trim().length < 12)) {
+        fail(errors, `${baselinePath} skill_creation_review.${skill}.${field} must contain at least three non-empty routing examples`);
       }
     }
     if (!['implicit', 'explicit'].includes(review.invocation_mode)) {
@@ -439,8 +439,8 @@ function validateSkillCreationGate(errors) {
     if (!['first_party', 'third_party_audited', 'adapted_external', 'inspiration_only'].includes(review.source_provenance)) {
       fail(errors, `${baselinePath} skill_creation_review.${skill}.source_provenance is invalid`);
     }
-    if (['third_party_audited', 'adapted_external'].includes(review.source_provenance) && !/agent-skill-supply-chain-audit/i.test(review.third_party_audit || '')) {
-      fail(errors, `${baselinePath} skill_creation_review.${skill}.third_party_audit must name agent-skill-supply-chain-audit`);
+    if (['third_party_audited', 'adapted_external'].includes(review.source_provenance) && !/skill-product-review/i.test(review.third_party_audit || '')) {
+      fail(errors, `${baselinePath} skill_creation_review.${skill}.third_party_audit must name skill-product-review`);
     }
     if (!Array.isArray(review.validation) || review.validation.length === 0 || review.validation.some((item) => typeof item !== 'string' || !item.trim())) {
       fail(errors, `${baselinePath} skill_creation_review.${skill}.validation must list at least one validation command`);
@@ -699,7 +699,7 @@ function validateExecutables(errors) {
   for (const entry of listFiles()) {
     const ext = path.extname(entry.relPath).toLowerCase();
     if (!executableExtensions.has(ext)) continue;
-    if (ext === '.py' && !entry.relPath.startsWith('skills/ui-ux-secure-frontend-design/tools/design-system-generator/') && !entry.relPath.startsWith('repo/tests/')) {
+    if (ext === '.py' && !entry.relPath.startsWith('skills/frontend-art-direction/tools/design-system-generator/') && !entry.relPath.startsWith('repo/tests/')) {
       fail(errors, `Python file outside approved local-only locations: ${entry.relPath}`);
     }
     if (!executablePrefixes.some((prefix) => entry.relPath.startsWith(prefix))) fail(errors, `Executable file outside approved locations: ${entry.relPath}`);

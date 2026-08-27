@@ -1,0 +1,136 @@
+---
+name: repository-agent-rules
+description: Install, check, repair, refresh, or bootstrap repo-local agent rules such as AGENTS.md and supported host shims. Do not route for ordinary coding when repository instructions are already current. Use once for an unchecked target, then stop unless instruction state may have changed.
+---
+
+<!--
+Canonical Toolkit skill surface. Edit this skill folder directly.
+Source: skills/repository-agent-rules/SKILL.md
+-->
+
+# Repository Agent Rules
+
+Tiny repo-instruction bootstrap/checker for local project instruction files.
+
+## Shipping Law
+
+The installed canonical execution contract carries the durable rule `COMPLETE THE BASICS -> SHIP -> OBSERVE -> IMPROVE`. Perfection is not completion. After the relevant minimum shippable floor is complete, classify newly discovered work as `SHIP_BLOCKER` or `POST_SHIP`; do not indefinitely expand current scope for optional polish, speculative refactors, hypothetical scale, optional abstractions, or nice-to-have cleanup.
+
+Apply only floor categories relevant to the task. Broken critical workflows, material correctness or data-loss risks, auth or authorisation bypass, cross-tenant access, secrets/privacy failures, required validation failures, and unverifiable required deployment are blockers. Irrelevant production categories do not block a local non-deployable task. This rule never bypasses authority, safety gates, secret handling, material security, correctness, required validation, deployment approval, or controller finality.
+
+This skill installs and repairs the always-on repository ruleset, but the skill itself is not an always-on routing action. Keep the steady-state path cheap. Use it only when instructions are missing, unchecked, suspected stale, structurally broken, changed since the last check, or explicitly requested.
+
+Native Toolkit plugin startup hooks may run a passive repo-local instruction preflight before ordinary work. That hook may compare only the expected `AI-AGENT-TOOLKIT` managed blocks in the required platform files against the bundled repo-local templates, then print a concise warning for missing, broken, or stale managed content. It must not back up, rewrite, repair, create files, read unrelated repo docs, or inspect unmarked user-authored content. If the hook reports a problem, pause and ask whether to run this skill with an explicit check, repair, refresh, or bootstrap request now, or proceed with the current task despite the warning.
+
+All questions that require user action or confirmation must be fully bolded. This includes target-path questions, approval questions, and same-session continuation questions.
+
+## Cheap State Check
+
+This works for GitHub, GitLab, Bitbucket, local git repos, and plain folders. Git metadata is helpful but never required.
+
+1. Locate the selected/open target repo or project folder, or use the explicit target path. If neither exists, stop and ask for a target path.
+2. Identify the current or requested platform. Only these platform scopes exist for this skill:
+   - Codex or unspecified: `AGENTS.md`.
+   - Claude Code: `AGENTS.md` and `CLAUDE.md`.
+   - Antigravity: `AGENTS.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md`.
+3. Check only the required files for the selected platform.
+4. For each required file, check existence and AI-AGENT-TOOLKIT managed-marker structure.
+5. If every required file is structurally current enough and the user did not explicitly ask to install, check, repair, refresh, or bootstrap repo-local instructions, do not read templates, do not inspect or compare managed body content beyond marker structure, do not rewrite files, and continue the original user task. The only exception is the native Toolkit plugin startup preflight described above, which may compare expected managed blocks against bundled templates but still must not write files.
+
+A required file is structurally current enough only when:
+
+- The file exists.
+- The file contains at least one complete `AI-AGENT-TOOLKIT` managed marker pair.
+- Every `AI-AGENT-TOOLKIT` managed marker is part of a complete, balanced pair.
+- No `BEGIN` or `END` marker is missing, duplicated, unmatched, nested incorrectly, or out of order.
+
+A managed marker pair is valid only when:
+
+- A `BEGIN` marker has exactly one matching `END` marker.
+- The matching `END` marker uses the same `AI-AGENT-TOOLKIT` source identity and block label.
+- `BEGIN` appears before `END`.
+
+Do not treat bare `AI-AGENT-TOOLKIT` text, a missing managed block, or balanced zero-block state as current. This cheap path is a structural managed-marker check, not a full template diff.
+
+For ordinary follow-up coding tasks, stop after the cheap structural managed-marker check when all required files are structurally current.
+
+For explicit install, check, repair, refresh, or bootstrap requests, do not stop at the cheap structural check. Read the current repo-local templates and compare toolkit-owned managed block content against the current template content. If managed block content differs from the current template, treat it as edited or stale toolkit-owned content, back up the affected file under `_agent-toolkit-backups/`, replace the managed block from the current template, preserve unmarked user-authored content outside managed markers, then stop with the session reset prompt.
+
+## Install Or Repair
+
+Use repo-local templates only when install or repair is needed:
+
+- `repo-local/AGENTS.managed.template.md` -> target repo `AGENTS.md`.
+- `repo-local/CLAUDE.shim.template.md` -> target repo `CLAUDE.md` only for Claude Code.
+- `repo-local/GEMINI.shim.template.md` -> target repo `GEMINI.md` only for Antigravity.
+- `repo-local/antigravity-bootstrap.template.md` -> target repo `.agents/rules/00-agent-toolkit-bootstrap.md` only for Antigravity.
+- `repo-local/docs/agent-playbooks/` -> target repo `docs/agent-playbooks/` for the portable playbook docs referenced by `AGENTS.md`.
+
+Treat `repo-local/docs/agent-playbooks/` as a folder-level install unit, not as only `INDEX.md`. Copy or refresh every Markdown file in that folder into target repo `docs/agent-playbooks/`. The required portable playbook set is currently:
+
+- `INDEX.md`
+- `baseline-workflow.md`
+- `docs-governance.md`
+- `generated-files.md`
+- `git-completion.md`
+- `local-docs.md`
+- `safety-gates.md`
+- `windows-command-hygiene.md`
+
+Before modifying repo-local instruction files, record enough state to preserve user work: target path, whether git metadata exists, branch/HEAD and dirty state when available, existing required files, and whether affected instruction files were already dirty or manually edited. For plain folders without git metadata, treat existing instruction files as user-authored unless complete managed markers identify toolkit-owned content.
+
+The installed template content for every required repo-local instruction file must include complete `AI-AGENT-TOOLKIT` managed marker pairs so future sessions can verify structural currency without reading templates.
+
+For explicit install, check, repair, refresh, or bootstrap requests, also install or refresh the complete portable playbook doc set under `docs/agent-playbooks/` when missing, incomplete, or stale. After copying, inspect target `docs/agent-playbooks/INDEX.md` and verify every linked `*.md` file exists beside it. If any linked playbook is missing, copy the missing file before reporting completion or showing the session-reset prompt. Preserve unrelated user-authored docs outside that folder.
+
+### Missing Or Unmanaged Files
+
+When a required target file is missing, create it from the matching repo-local template.
+
+When a target file exists but has no valid managed block, keep all existing file content and insert the required managed template content at the top of the file before unmarked user-authored content. Do not append the managed block below custom rules unless the user explicitly asks for that layout.
+
+### Broken Or Edited Managed Blocks
+
+Content inside `AI-AGENT-TOOLKIT` managed marker pairs is toolkit-owned. During repair, back up the file, replace edited or stale managed blocks from the current template, and preserve unmarked user-authored content outside the markers.
+
+When a target file has broken, duplicate, unmatched, nested, or out-of-order managed markers, automatically repair the affected repo-local instruction file instead of continuing unrelated repository edits.
+
+Before repairing, use the Toolkit repo-local backup contract to create one operation generation under `_agent-toolkit-backups/` in the target repository. Capture every affected instruction file, including originally missing files, with the operation identity, exact original bytes, line-ending/final-newline state, checksums, expected replacement checksums, and `full-file` or `managed-region` scope in `restore.json`. Use the shared `repo/scripts/repo-local-backup.cjs` API or the equivalent installed Toolkit-bundle path; do not invent a flat backup name or another restore format.
+
+Before proposing any ignore-file mutation, inspect both `.gitignore` and Git's resolved `.git/info/exclude`, plus canonical and legacy folder presence. Show the exact target and missing narrow rules, explain tracked versus local-only consequences, and require approval bound to that exact preview. Supported decisions are tracked `.gitignore`, local-only `.git/info/exclude`, decline, or proceed with an explicit hygiene warning when repair remains safe. An explicit repair request is not approval to change an ignore file. Passive hooks, checks, previews, and status paths never write ignore files or create backups.
+
+New backups always use `_agent-toolkit-backups/`. Continue recognizing `.agent-toolkit-backups/` as legacy compatibility material, report its presence, and never select it for a new backup merely because it exists. Never move, merge, rename, rewrite, or delete canonical or legacy backup content. Never add a broad backup ignore pattern.
+
+After backup creation, apply the repair transactionally and verify the intended result. On partial failure, use the supported exact restore route and return every affected path to its prior state. Restore must validate schema, repository identity, repository-relative paths, expected replacement state, and payload checksums; it must reject traversal, outside-repository paths, unknown schemas, and checksum drift. Keep the completed backup after restore.
+
+Backup generations are local repair artifacts. Report repository-relative inspection and restore commands clearly, but do not commit, stage, delete, migrate, or move backup files unless the user explicitly asks for a separately scoped action.
+
+After backing up, repair the required instruction file using the current repo-local template content. If unmarked user-authored content can be safely separated from the broken managed block, preserve it below the repaired managed block. If it cannot be safely separated, keep the repaired instruction file clean and tell the user the previous file was backed up.
+
+If a managed block appears manually edited, treat it as toolkit-owned content that needs repair during explicit install, check, repair, refresh, or bootstrap requests. Back up the existing file, replace the managed block with the current repo-local template content, preserve safe unmarked content below it, and report the backup path.
+
+Do not delete duplicate, conflicting, or obsolete unmarked content automatically; preserve it when safe or keep it in the dirty backup and report it.
+
+Do not create shims for platforms that are not in scope.
+
+If this skill creates, modifies, repairs, or backs up `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.agents/rules/00-agent-toolkit-bootstrap.md`, stop immediately and end with this exact format:
+
+**SESSION RESET RECOMMENDED:**
+
+**I created/updated repo-local agent instructions. Start a new agent session in this folder so the agent loads `AGENTS.md` as startup instructions before continuing implementation.**
+
+**If I repaired or backed up an instruction file, the exact previous state and restore metadata were saved under `_agent-toolkit-backups/` in this project folder. Legacy `.agent-toolkit-backups/` content, if present, was not changed.**
+
+**Should I continue in this same session best-effort after reading the updated instructions, or will you start a new agent session?**
+
+Keep the full reset message and question bolded exactly as shown. Do not continue implementation work until the user answers.
+
+If the user explicitly chooses to continue in the same session, read the updated repo-local instruction files first, state that same-session continuation is best-effort and not equivalent to a fresh startup instruction load, then continue only if the task remains safe and clearly scoped.
+
+## Boundaries
+
+This bootstrap is for local repo/folder instruction files only. It must not push, create or update a PR, touch live n8n, Docker, credentials, `.env`, `.tmp`, `.n8n-local`, deployments, product repos, workflow JSON, imports, exports, or runtime actions.
+
+Do not install heavy global `AGENTS.md` or global `GEMINI.md` rules. After setup, repo-local files are the source of truth.
+
+Manual global setup templates live in `repo/contracts/agent-rules/`; use the bundled skill files as the portable runtime surface.

@@ -78,6 +78,16 @@ When touching app behavior, use generic user-facing errors with a support-safe t
 
 Do not add broad fallbacks, silent compatibility paths, synthetic/sample data fallbacks, fake success states, or catch-and-continue behaviour by default; prefer fixing the real failure path. Allow only for correctness, data safety, migration safety, or explicitly approved compatibility. Approved fallbacks must be narrow, visible via logs/diagnostics/user-safe status as appropriate, tested on primary/fallback paths, reason-documented, with temporary removal/review condition. Never hide data loss, auth, permission, payment, persistence, audit, security, missing config, broken integrations, or failed validation; never use fake business data or silently downgrade production behaviour.
 
+## Shipping Law
+
+Default to the shortest safe path to a usable, verifiable, shippable outcome: `COMPLETE THE BASICS -> SHIP -> OBSERVE -> IMPROVE`. Perfection is not completion.
+
+Before shipping, complete the applicable minimum floor: core intended functionality and critical workflows; consequential correctness; authentication, authorisation, and tenant/workspace isolation; security boundaries; data integrity, persistence, migration, and destructive-operation safety; privacy and secrets handling; required validation and truthful readiness evidence; deployment, health, and rollback prerequisites when release is in scope; and every explicit acceptance criterion.
+
+Classify remaining work as `SHIP_BLOCKER` or `POST_SHIP`. Known material defects in the minimum floor are blockers. Cosmetic polish, speculative refactors, future-proofing, optional abstraction, non-critical cleanup, and low-confidence theoretical risks are `POST_SHIP` unless concrete evidence makes them blockers. Do not misclassify defects to ship early or promote non-blocking improvements without evidence.
+
+Shipping bias never bypasses mutation or deployment authority, safety gates, privacy or secret boundaries, required validation, or controller finality. After a truthful safe shipment, use observed user, runtime, and operational evidence to prioritise improvements.
+
 ## User Action Questions
 
 When asking the user to choose, approve, confirm, provide a target path, decide whether to continue, or answer any other action-blocking question, make the full question sentence bold.
@@ -163,17 +173,17 @@ For long tasks, update briefly at meaningful checkpoints; do not narrate command
 Report files/changes, Instruction sources used, exact validation results, generated-output status, remaining risks/manual checks, PR link, and checked CI status or why inaccessible.
 <!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/ai-coding-agent-execution.md:END GLOBAL-AGENTS.MD-TEMPLATE -->
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-agent-rules-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->
-## n8n Agent Rules Adapter
+<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-safety-router-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->
+## n8n Safety Router Adapter
 
-If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, stop and load `skills/n8n-agent-rules` before planning or editing.
+If the task involves n8n workflows, workflow fixtures, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, stop and load `skills/n8n-safety-router` before planning or editing.
 If that skill or its full rules are unavailable, stop and report the limitation instead of continuing.
 Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, credential, deployment, or production actions without explicit current-turn approval naming the target and allowed operation.
-<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-agent-rules-adapter.md:END N8N-AGENT-RULES-ADAPTER -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-safety-router-adapter.md:END N8N-AGENT-RULES-ADAPTER -->
 
-This root `AGENTS.md` is toolkit-repo-specific. Portable repo installs must use [`skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md`](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md).
+This root `AGENTS.md` is toolkit-repo-specific. Portable repo installs must use [`skills/repository-agent-rules/repo-local/AGENTS.managed.template.md`](skills/repository-agent-rules/repo-local/AGENTS.managed.template.md).
 
-Toolkit-specific root rules live directly after the managed execution blocks and are maintained directly in this file. Keep portable templates and shims under `skills/ai-coding-agent-rules/` and their canonical contract inputs under `repo/contracts/agent-rules/`.
+Toolkit-specific root rules live directly after the managed execution blocks and are maintained directly in this file. Keep portable templates and shims under `skills/repository-agent-rules/` and their canonical contract inputs under `repo/contracts/agent-rules/`.
 
 This repo is the canonical reusable AI Agent Toolkit.
 
@@ -230,20 +240,19 @@ The managed Source-of-Truth Contract below is the detailed active contract. Sour
 - `repo/source-watch/provenance/**/SOURCE-LOCK.json` contains only active third-party attribution pins. Each lock records the upstream repo, ref, commit, update policy, attribution requirement, allowlist, and exact blob pins for retained copied or adapted files.
 - Scheduled source-watch is PR-notification-only. It may compare active source-lock pins and advisory targets with upstream GitHub commits, then open or refresh a stable review PR. It must not copy upstream files, change source-lock/advisory records, execute upstream code, auto-merge, push to main, run live n8n actions, or treat notification as approval. Real updates require a separate human-approved PR.
 - The toolkit maintains one direct canonical tree. New Toolkit skills are created at `skills/**` paths after Skill Creation Center review; contracts, runtime, tests, and docs are created at canonical `repo/**` paths. Do not introduce secondary ownership, publication, packaging, or generic synchronization layers.
-- The retained deterministic synchronizers remain narrow: `repo/scripts/sync-repo-doc-contract.cjs` maintains only the managed source-of-truth block, while `repo/scripts/sync-agent-instruction-shims.cjs` maintains root/repo-local instruction shims and exactly four portable n8n safety derivatives sourced from `repo/contracts/agent-rules/n8n-agent-rules.md`:
-  - `skills/n8n-agent-rules/n8n-agent-rules.md`
-  - `skills/n8n-local-setup/references/n8n-agent-rules.md`
-  - `skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md`
-  - `skills/n8n-workflow-templates/references/n8n-agent-rules.md`
+- The retained deterministic synchronizers remain narrow: `repo/scripts/sync-repo-doc-contract.cjs` maintains only the managed source-of-truth block, while `repo/scripts/sync-agent-instruction-shims.cjs` maintains root/repo-local instruction shims and exactly three portable n8n safety derivatives sourced from `repo/contracts/agent-rules/n8n-safety-rules.md`:
+  - `skills/n8n-safety-router/n8n-safety-rules.md`
+  - `skills/n8n-environment-setup/references/n8n-safety-rules.md`
+  - `skills/n8n-workflow-transport/references/n8n-safety-rules.md`
 - This n8n derivative set is a bounded portable/local safety-context exception. Use the exact retained synchronizer command for repair; no unspecified generic `run sync` command exists.
 - `.codex-plugin/` and `.claude-plugin/` contain native plugin metadata for the current Toolkit package. They remain platform-separated and must not be used to cross-update the other native platform.
-- This repo intentionally does not ship or maintain a repo-wide MCP generated surface. Official n8n Skills plus instance-level MCP references remain inside `skills/n8n-local-setup/` as secondary n8n setup material.
+- This repo intentionally does not ship or maintain a repo-wide MCP generated surface. Official n8n Skills plus instance-level MCP references remain inside `skills/n8n-environment-setup/` as secondary n8n setup material.
 - All retained skill/runtime context must remain local, complete enough to use, and traceable through direct repository paths or the two retained third-party provenance records. External links may support provenance but must not be required for normal execution.
 <!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:END SOURCE-OF-TRUTH-CONTRACT -->
 
 ## Repo-Local Router
 
-- Use this root file as the router for this toolkit repo only; use [`skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md`](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md) for portable installs.
+- Use this root file as the router for this toolkit repo only; use [`skills/repository-agent-rules/repo-local/AGENTS.managed.template.md`](skills/repository-agent-rules/repo-local/AGENTS.managed.template.md) for portable installs.
 - Keep managed marker blocks intact. If a marked block needs content changes, edit the source path named in the marker and run the matching sync/check command.
 - For AI-agent instruction changes, read [repo/docs/FOR_AI_AGENTS.md](repo/docs/FOR_AI_AGENTS.md) and [repo/docs/SOURCE-OF-TRUTH.md](repo/docs/SOURCE-OF-TRUTH.md).
 - For canonical skills, contracts, or native plugin surfaces, also read [repo/docs/PROJECT-MODULE-STANDARD.md](repo/docs/PROJECT-MODULE-STANDARD.md) and [repo/docs/SURFACE-FIDELITY-AUDIT.md](repo/docs/SURFACE-FIDELITY-AUDIT.md).
@@ -280,7 +289,7 @@ Create a new skill or contract surface only when the work has a distinct trigger
 
 Use [`repo/docs/SKILL-SAFETY-MATRIX.md`](repo/docs/SKILL-SAFETY-MATRIX.md) as the maintained catalog of current skill triggers, risk classes, companion skills, provenance, and approval boundaries before creating, extending, or importing skills.
 
-For any third-party skill, `SKILL.md` folder, skill pack, GitHub skill repo, or adapted external agent material, use `agent-skill-supply-chain-audit` first. Do not copy, import, install, execute, or convert third-party material until the audit verdict allows it. Approved Toolkit conversions are authored directly at canonical `skills/**` and `repo/**` paths. The separate generic `context-preserving-ai-publisher` product retains its own publication and anti-drift guidance; do not treat that product's architecture as Toolkit operation.
+For any third-party skill, `SKILL.md` folder, skill pack, GitHub skill repo, or adapted external agent material, use `skill-product-review` first. Do not copy, import, install, execute, or adapt third-party material until its `allow` or `constrain` verdict permits the named scope. Approved Toolkit adaptations are authored directly at canonical `skills/**` and `repo/**` paths with licence, attribution, provenance, source-lock, and validation requirements preserved.
 
 Prioritize repo safety, device safety, provenance, attribution, validation, and practical usefulness over adding more surface area.
 

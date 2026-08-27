@@ -75,6 +75,16 @@ When touching app behavior, use generic user-facing errors with a support-safe t
 
 Do not add broad fallbacks, silent compatibility paths, synthetic/sample data fallbacks, fake success states, or catch-and-continue behaviour by default; prefer fixing the real failure path. Allow only for correctness, data safety, migration safety, or explicitly approved compatibility. Approved fallbacks must be narrow, visible via logs/diagnostics/user-safe status as appropriate, tested on primary/fallback paths, reason-documented, with temporary removal/review condition. Never hide data loss, auth, permission, payment, persistence, audit, security, missing config, broken integrations, or failed validation; never use fake business data or silently downgrade production behaviour.
 
+## Shipping Law
+
+Default to the shortest safe path to a usable, verifiable, shippable outcome: `COMPLETE THE BASICS -> SHIP -> OBSERVE -> IMPROVE`. Perfection is not completion.
+
+Before shipping, complete the applicable minimum floor: core intended functionality and critical workflows; consequential correctness; authentication, authorisation, and tenant/workspace isolation; security boundaries; data integrity, persistence, migration, and destructive-operation safety; privacy and secrets handling; required validation and truthful readiness evidence; deployment, health, and rollback prerequisites when release is in scope; and every explicit acceptance criterion.
+
+Classify remaining work as `SHIP_BLOCKER` or `POST_SHIP`. Known material defects in the minimum floor are blockers. Cosmetic polish, speculative refactors, future-proofing, optional abstraction, non-critical cleanup, and low-confidence theoretical risks are `POST_SHIP` unless concrete evidence makes them blockers. Do not misclassify defects to ship early or promote non-blocking improvements without evidence.
+
+Shipping bias never bypasses mutation or deployment authority, safety gates, privacy or secret boundaries, required validation, or controller finality. After a truthful safe shipment, use observed user, runtime, and operational evidence to prioritise improvements.
+
 ## User Action Questions
 
 When asking the user to choose, approve, confirm, provide a target path, decide whether to continue, or answer any other action-blocking question, make the full question sentence bold.

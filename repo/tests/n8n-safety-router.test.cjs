@@ -1,0 +1,570 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+const test = require('node:test');
+
+const repoRoot = path.resolve(__dirname, '..', '..');
+const syncScriptPath = path.join(repoRoot, 'repo', 'scripts', 'sync-agent-instruction-shims.cjs');
+const beginMarker = '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-safety-router-adapter.md:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->';
+const endMarker = '<!-- AI-AGENT-TOOLKIT:repo/contracts/agent-rules/n8n-safety-router-adapter.md:END N8N-AGENT-RULES-ADAPTER -->';
+const n8nDerivativePaths = [
+  'skills/n8n-safety-router/n8n-safety-rules.md',
+  'skills/n8n-environment-setup/references/n8n-safety-rules.md',
+  'skills/n8n-workflow-transport/references/n8n-safety-rules.md',
+];
+const retiredTopologyPattern = new RegExp([
+  'development\\.ai-coding-agent-rules',
+  '_' + 'projects',
+  'curated_' + 'output_for_ai',
+  'source-to-surface',
+  'generic publisher',
+  '\\brun sync\\b'
+].join('|'), 'i');
+
+function readText(relPath) {
+  return fs.readFileSync(path.join(repoRoot, relPath), 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+}
+
+function exists(relPath) {
+  return fs.existsSync(path.join(repoRoot, relPath));
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+const overstatedOfficialMcpCapabilityPattern = new RegExp([
+  'official n8n MCP ' + 'validation' + '/build tools',
+  'official n8n MCP ' + 'validation',
+  'official n8n MCP ' + 'build',
+  'MCP ' + 'validation' + '/build'
+].map(escapeRegExp).join('|'), 'i');
+const officialN8nSkillsLink = '[official n8n Skills](https://github.com/n8n-io/skills)';
+
+function stripGeneratedNotices(text) {
+  let remaining = text.trimStart();
+  while (remaining.startsWith('<!--') && !remaining.startsWith(beginMarker)) {
+    const end = remaining.indexOf('-->');
+    assert.notEqual(end, -1, 'generated notice close marker');
+    remaining = remaining.slice(end + '-->'.length).trimStart();
+  }
+  return remaining.trimEnd() + '\n';
+}
+
+function parseFrontMatter(text) {
+  const normalized = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+  assert.ok(normalized.startsWith('---\n'), 'front matter opens');
+  const end = normalized.indexOf('\n---', 4);
+  assert.notEqual(end, -1, 'front matter closes');
+  const result = {};
+  for (const line of normalized.slice(4, end).trim().split('\n')) {
+    const match = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+    if (match) result[match[1]] = match[2].trim();
+  }
+  return result;
+}
+
+function markerCount(text, marker) {
+  return text.split(marker).length - 1;
+}
+
+function installerScriptPath() {
+  return path.join(repoRoot, 'skills', 'n8n-safety-router', 'scripts', 'install-n8n-agent-adapter.cjs');
+}
+
+function canonicalManagedN8nAdapter() {
+  return `${beginMarker}\n${readText('repo/contracts/agent-rules/n8n-safety-router-adapter.md').trimEnd()}\n${endMarker}`;
+}
+
+function runInstaller(workspace, args = []) {
+  return spawnSync(process.execPath, [installerScriptPath(), '--workspace', workspace, ...args], {
+    cwd: repoRoot,
+    encoding: 'utf8'
+  });
+}
+
+function makeN8nWorkspace(prefix = 'n8n-agent-adapter-') {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  fs.mkdirSync(path.join(workspace, 'n8n-workflows'), { recursive: true });
+  fs.writeFileSync(path.join(workspace, 'n8n-workflows', 'sample.workflow.json'), JSON.stringify({ nodes: [], connections: {} }, null, 2));
+  return workspace;
+}
+
+function copyToolkitWorkspace(prefix = 'n8n-shim-sync-') {
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  fs.cpSync(repoRoot, target, {
+    recursive: true,
+    filter(source) {
+      const rel = path.relative(repoRoot, source).replace(/\\/g, '/');
+      return !(
+        rel === '.git' || rel.startsWith('.git/') ||
+        rel === 'node_modules' || rel.startsWith('node_modules/') ||
+        rel === '.tmp' || rel.startsWith('.tmp/') ||
+        rel === '_dist' || rel.startsWith('_dist/')
+      );
+    }
+  });
+  return target;
+}
+
+function runShimSync(workspace, args = []) {
+  return spawnSync(process.execPath, [syncScriptPath, '--workspace', workspace, ...args], {
+    cwd: repoRoot,
+    encoding: 'utf8'
+  });
+}
+
+function createSymlinkOrSkip(t, target, linkPath, type) {
+  try {
+    fs.rmSync(linkPath, { recursive: true, force: true });
+    fs.symlinkSync(target, linkPath, type);
+  } catch (error) {
+    if (['EPERM', 'EINVAL', 'ENOTSUP', 'EACCES'].includes(error.code)) {
+      t.skip(`symlink creation is not available in this environment: ${error.message}`);
+      return false;
+    }
+    throw error;
+  }
+  return true;
+}
+
+test('n8n-safety-router skill keeps the canonical full rules contract locally', () => {
+  const canonicalPath = 'repo/contracts/agent-rules/n8n-safety-rules.md';
+  const skillPath = 'skills/n8n-safety-router/SKILL.md';
+  const publishedPath = 'skills/n8n-safety-router/n8n-safety-rules.md';
+
+  assert.equal(exists(canonicalPath), true, canonicalPath);
+  assert.equal(exists(skillPath), true, skillPath);
+  assert.equal(exists(publishedPath), true, publishedPath);
+
+  const frontMatter = parseFrontMatter(readText(skillPath));
+  assert.equal(frontMatter.name, 'n8n-safety-router');
+  for (const phrase of [
+    officialN8nSkillsLink,
+    'using-n8n-skills',
+    'n8n workflow JSON',
+    'official n8n MCP',
+    'n8n_live',
+    'workflow creation',
+    'workflow updates',
+    'helper scripts',
+    'import/export',
+    'validation',
+    'credentials',
+    'webhook IDs',
+    'workflow activation',
+    'execution',
+    'repo/live sync',
+    'n8n safety'
+  ]) {
+    assert.match(frontMatter.description, new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), phrase);
+  }
+
+  const canonical = readText(canonicalPath);
+  const published = stripGeneratedNotices(readText(publishedPath));
+  assert.equal(published, canonical);
+
+  for (const safetyPhrase of [
+    `Use ${officialN8nSkillsLink} first, then use the official n8n MCP tools that are actually available in the connected instance`,
+    `Start by loading the ${officialN8nSkillsLink} entry-point meta-skill, currently \`using-n8n-skills\`, when ${officialN8nSkillsLink} are available`,
+    `If the ${officialN8nSkillsLink} entry-point meta-skill is unavailable, report that ${officialN8nSkillsLink} are not installed or not available in the session`,
+    'Do not invent a fallback route or pretend the current entry-point skill exists',
+    'Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities',
+    'When validation or build tools are available, use them before proposing or performing live-instance changes',
+    'If a needed MCP capability is unavailable, report the gap and do not invent fallback behaviour',
+    'Use live n8n instance tools only when the user clearly asks',
+    'Do not create or update a workflow from unvalidated workflow code when a validation tool is available',
+    'Do not modify credentials unless the user explicitly asks',
+    'Keep workflows inactive or unpublished by default',
+    'Webhook',
+    'Static data',
+    'Sticky notes must stay concise',
+    'Prompt-injection and untrusted input'
+  ]) {
+    assert.match(canonical, new RegExp(escapeRegExp(safetyPhrase)), safetyPhrase);
+  }
+
+  assert.doesNotMatch(canonical, overstatedOfficialMcpCapabilityPattern);
+  assert.doesNotMatch(readText(skillPath), overstatedOfficialMcpCapabilityPattern);
+});
+
+test('n8n-safety-router skill documents the adapter auto-check approval protocol', () => {
+  for (const relPath of [
+    'skills/n8n-safety-router/SKILL.md'
+  ]) {
+    const text = readText(relPath);
+    assert.match(text, /^## Adapter Auto-Check Protocol$/m, relPath);
+    assert.match(text, /canonical active instruction file/i, relPath);
+    assert.match(text, /`AGENTS\.md`/, relPath);
+    assert.match(text, /Root `AGENTS\.md` is the only repo-local target for the n8n adapter/i, relPath);
+    assert.match(text, /do not append the n8n adapter to those shim files/i, relPath);
+    assert.match(text, /--dry-run/, relPath);
+    assert.match(text, /Show the dry-run result to the user/i, relPath);
+    assert.match(text, /explicit current-turn approval naming `AGENTS\.md` before running `--write`/i, relPath);
+    assert.match(text, /If approved, run the installer with `--write`/i, relPath);
+    assert.match(text, /canonical managed n8n adapter block sourced from `repo\/contracts\/agent-rules\/n8n-safety-router-adapter\.md`/i, relPath);
+    assert.match(text, /must not write a separate Claude, Gemini, or platform-specific n8n adapter variant/i, relPath);
+    assert.match(text, /If declined, continue the current n8n task/i, relPath);
+    assert.match(text, /future sessions\/tools may not auto-load the rules/i, relPath);
+    assert.match(text, /`--target auto` is discovery only/i, relPath);
+    assert.match(text, /previews or patches existing `AGENTS\.md`/i, relPath);
+    assert.match(text, /must not patch platform shim files/i, relPath);
+    assert.match(text, /If `AGENTS\.md` does not exist/i, relPath);
+    assert.match(text, /unless the user already answered that target question in the current turn/i, relPath);
+    assert.match(text, /read-only or no-modify tasks/i, relPath);
+    assert.match(text, /Read-only\/no-modify blocks file writes and `--write`/i, relPath);
+    assert.match(text, /does not block the adapter-target question/i, relPath);
+    assert.match(text, /Install or repair repo-local `AGENTS\.md` with `repository-agent-rules`/i, relPath);
+    assert.match(text, /Create or update only `AGENTS\.md` with the n8n adapter/i, relPath);
+    assert.match(text, /`none`/i, relPath);
+    assert.match(text, /The answer `none` is allowed and must be respected/i, relPath);
+    assert.match(text, /use `repository-agent-rules` to install or repair those shims/i, relPath);
+    assert.doesNotMatch(text, /`CLAUDE\.md` for Claude Code/i, relPath);
+    assert.doesNotMatch(text, /`GEMINI\.md` for Antigravity/i, relPath);
+    assert.doesNotMatch(text, /\ball\b/i, relPath);
+  }
+});
+test('n8n-safety-router README tells agents to dry-run then ask before write', () => {
+  for (const relPath of [
+    'skills/n8n-safety-router/README.md'
+  ]) {
+    const text = readText(relPath);
+    assert.match(text, /canonical adapter target is root `AGENTS\.md`/i, relPath);
+    assert.match(text, /agents should automatically check/i, relPath);
+    assert.match(text, /dry-run/i, relPath);
+    assert.match(text, /show the preview/i, relPath);
+    assert.match(text, /ask for explicit current-turn approval naming `AGENTS\.md`/i, relPath);
+    assert.match(text, /canonical managed block sourced from `repo\/contracts\/agent-rules\/n8n-safety-router-adapter\.md`/i, relPath);
+    assert.match(text, /must not append separate n8n adapter variants to `CLAUDE\.md` or `GEMINI\.md`/i, relPath);
+    assert.match(text, /If no `AGENTS\.md` exists/i, relPath);
+    assert.match(text, /install or repair repo-local `AGENTS\.md` with `repository-agent-rules`/i, relPath);
+    assert.match(text, /create or update only `AGENTS\.md` with this adapter/i, relPath);
+    assert.match(text, /read-only or no-modify tasks/i, relPath);
+    assert.match(text, /does not block the adapter-target question/i, relPath);
+    assert.match(text, /`none` is allowed/i, relPath);
+    assert.match(text, /Do not silently auto-install adapters/i, relPath);
+    assert.match(text, /--target agents/, relPath);
+    assert.doesNotMatch(text, /--target all/, relPath);
+  }
+});
+test('generic AI coding agent templates stay slim and obsolete heavy templates are absent', () => {
+  for (const relPath of [
+    'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md',
+    'skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md',
+    'skills/repository-agent-rules/repo-local/GEMINI.shim.template.md',
+    'skills/repository-agent-rules/repo-local/antigravity-bootstrap.template.md'
+  ]) {
+    const text = readText(relPath);
+    assert.doesNotMatch(text, /\n# n8n MCP workflow rules\n/, relPath);
+    assert.doesNotMatch(text, /\bn8n_live\b/, relPath);
+    assert.doesNotMatch(text, /\n# Skill Routing Rules\n/, relPath);
+    assert.doesNotMatch(text, /Current Toolkit Skill Routing/, relPath);
+  }
+
+  for (const relPath of [
+    'skills/repository-agent-rules/TOOLKIT-SKILL-ROUTING.template.md',
+    'skills/repository-agent-rules/AGENTS.with-toolkit-skills.template.md',
+    'skills/repository-agent-rules/CLAUDE.with-toolkit-skills.template.md',
+    'skills/repository-agent-rules/GEMINI.with-toolkit-skills.template.md',
+    'skills/repository-agent-rules/AGENTS.template.md',
+    'skills/repository-agent-rules/CLAUDE.template.md',
+    'skills/repository-agent-rules/GEMINI.template.md',
+    'skills/repository-agent-rules/antigravity-bootstrap.template.md',
+    'skills/n8n-environment-setup/agent-rules/AGENTS.n8n-full.template.md',
+    'skills/n8n-environment-setup/agent-rules/CLAUDE.n8n-full.template.md',
+    'skills/n8n-environment-setup/agent-rules/GEMINI.n8n-full.template.md',
+    'skills/n8n-environment-setup/agent-rules/n8n-mcp-rules.template.md',
+    'skills/n8n-environment-setup/agent-rules/n8n-mcp-rules.template.md'
+  ]) {
+    assert.equal(exists(relPath), false, relPath);
+  }
+});
+
+test('existing n8n skills declare n8n-safety-router dependency in entrypoints', () => {
+  for (const relPath of [
+    'skills/n8n-environment-setup/SKILL.md',
+    'skills/n8n-environment-setup/README.md',
+    'skills/n8n-workflow-transport/SKILL.md',
+    'skills/n8n-workflow-transport/README.md',
+  ]) {
+    const text = readText(relPath);
+    assert.match(text, /\bn8n-safety-router\b/, relPath);
+  }
+});
+
+test('cross-skill n8n-safety-router references identify the narrow direct-canonical derivative', () => {
+  const canonicalPath = 'repo/contracts/agent-rules/n8n-safety-rules.md';
+  const canonical = readText(canonicalPath).trimEnd();
+  for (const relPath of [
+    'skills/n8n-environment-setup/references/n8n-safety-rules.md',
+    'skills/n8n-workflow-transport/references/n8n-safety-rules.md',
+  ]) {
+    const text = readText(relPath);
+    assert.match(text, /Direct canonical source: `repo\/contracts\/agent-rules\/n8n-safety-rules\.md`/, relPath);
+    assert.match(text, /portable\/local n8n safety context in the containing copied skill/i, relPath);
+    assert.match(text, /Repair command: `node repo\/scripts\/sync-agent-instruction-shims\.cjs --write`/, relPath);
+    assert.match(text, /narrow managed n8n safety derivative/i, relPath);
+    assert.doesNotMatch(text, retiredTopologyPattern, relPath);
+    const separator = '\n---\n';
+    const body = text.slice(text.indexOf(separator) + separator.length).trimEnd();
+    assert.equal(body, canonical, relPath);
+  }
+});
+
+test('retained synchronizer checks and repairs exactly three n8n safety derivatives', () => {
+  const workspace = copyToolkitWorkspace();
+  try {
+    const fresh = runShimSync(workspace, ['--check']);
+    assert.equal(fresh.status, 0, fresh.stderr);
+
+    const corruptPath = path.join(workspace, n8nDerivativePaths[1]);
+    fs.appendFileSync(corruptPath, '\ncorrupt derivative fixture\n', 'utf8');
+    const stale = runShimSync(workspace, ['--check']);
+    assert.notEqual(stale.status, 0);
+    assert.match(stale.stderr, /n8n safety derivative/i);
+
+    const write = runShimSync(workspace, ['--write']);
+    assert.equal(write.status, 0, write.stderr);
+    const repeat = runShimSync(workspace, ['--check']);
+    assert.equal(repeat.status, 0, repeat.stderr);
+
+    const canonical = fs.readFileSync(path.join(workspace, 'repo', 'contracts', 'agent-rules', 'n8n-safety-rules.md'), 'utf8').replace(/\r\n/g, '\n').trimEnd();
+    for (const relPath of n8nDerivativePaths) {
+      const text = fs.readFileSync(path.join(workspace, relPath), 'utf8').replace(/\r\n/g, '\n').trimEnd();
+      const body = relPath === n8nDerivativePaths[0]
+        ? text
+        : text.slice(text.indexOf('\n---\n') + '\n---\n'.length);
+      assert.equal(body, canonical, relPath);
+      assert.match(body, /Do not modify credentials unless the user explicitly asks/i, relPath);
+      assert.match(body, /Keep workflows inactive or unpublished by default/i, relPath);
+    }
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('AGENTS n8n adapter publishes the canonical managed partial', () => {
+  const text = stripGeneratedNotices(readText('skills/n8n-safety-router/adapters/AGENTS.n8n-brief.template.md')).trimEnd();
+  assert.equal(text, canonicalManagedN8nAdapter());
+});
+
+test('platform n8n adapters remain optional snippets and are not installer targets', () => {
+  for (const relPath of [
+    'skills/n8n-safety-router/adapters/CLAUDE.n8n-brief.template.md',
+    'skills/n8n-safety-router/adapters/GEMINI.n8n-brief.template.md'
+  ]) {
+    const text = stripGeneratedNotices(readText(relPath));
+    assert.ok(text.length <= 2200, `${relPath} should stay brief`);
+    assert.match(text, /\bn8n-safety-router\b/, relPath);
+    assert.match(text, /stop and ask the user to install or provide it/i, relPath);
+    assert.match(text, /Do not run live n8n, Docker, import\/export, sync, activation, execution, publish\/unpublish, archive\/delete, or credential actions without explicit current-turn approval/i, relPath);
+    for (const approvalField of ['Target repo', 'Target n8n instance/environment', 'Allowed operation', 'Workflow names/set', 'Forbidden operations']) {
+      assert.match(text, new RegExp(approvalField.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), relPath);
+    }
+    assert.doesNotMatch(text, /\n# n8n MCP workflow rules\n/, relPath);
+    assert.doesNotMatch(text, /Workflow builder order[\s\S]{0,200}Workflow build preferences/, relPath);
+  }
+});
+test('adapter installer source has no standalone marker migration path', () => {
+  for (const relPath of [
+    'skills/n8n-safety-router/scripts/install-n8n-agent-adapter.cjs'
+  ]) {
+    const text = readText(relPath);
+    const removedCompatibilityTerm = 'leg' + 'acy';
+    assert.doesNotMatch(text, new RegExp('(^|[^A-Za-z])' + removedCompatibilityTerm + '([^A-Za-z]|$)', 'i'), relPath);
+    assert.doesNotMatch(text, /hasLegacy|activeEndMarker/, relPath);
+  }
+});
+test('adapter installer dry-run reports changes and write mode is idempotent', () => {
+  const workspace = makeN8nWorkspace();
+  fs.writeFileSync(path.join(workspace, 'AGENTS.md'), '# Existing AGENTS\n\n');
+
+  const dryRun = runInstaller(workspace, ['--target', 'auto', '--dry-run']);
+  assert.equal(dryRun.status, 0, dryRun.stderr);
+  assert.match(dryRun.stdout, /Detected n8n involvement/i);
+  assert.match(dryRun.stdout, /Would update AGENTS\.md/i);
+  assert.doesNotMatch(fs.readFileSync(path.join(workspace, 'AGENTS.md'), 'utf8'), /AI-AGENT-TOOLKIT:[^\n]*N8N-AGENT-RULES-ADAPTER/);
+
+  for (let i = 0; i < 2; i += 1) {
+    const write = runInstaller(workspace, ['--target', 'auto', '--write']);
+    assert.equal(write.status, 0, write.stderr);
+  }
+
+  const installed = fs.readFileSync(path.join(workspace, 'AGENTS.md'), 'utf8');
+  assert.equal(markerCount(installed, beginMarker), 1);
+  assert.equal(markerCount(installed, endMarker), 1);
+  assert.match(installed, /\bn8n-safety-router\b/);
+});
+
+test('adapter installer auto uses AGENTS.md as canonical and ignores platform shims', () => {
+  const workspace = makeN8nWorkspace('n8n-agent-adapter-auto-canonical-agents-');
+  const canonicalAgents = `# Existing AGENTS\n\n${canonicalManagedN8nAdapter()}\n`;
+  fs.writeFileSync(path.join(workspace, 'AGENTS.md'), canonicalAgents);
+  fs.writeFileSync(path.join(workspace, 'CLAUDE.md'), '# Claude shim\n\n@AGENTS.md\n');
+  fs.writeFileSync(path.join(workspace, 'GEMINI.md'), '# Gemini shim\n\n@./AGENTS.md\n');
+
+  const result = runInstaller(workspace, ['--target', 'auto', '--dry-run']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Would leave unchanged AGENTS\.md/);
+  assert.doesNotMatch(result.stdout, /CLAUDE\.md/);
+  assert.doesNotMatch(result.stdout, /GEMINI\.md/);
+
+  assert.equal(fs.readFileSync(path.join(workspace, 'AGENTS.md'), 'utf8'), canonicalAgents);
+  assert.doesNotMatch(fs.readFileSync(path.join(workspace, 'CLAUDE.md'), 'utf8'), /N8N-AGENT-RULES-ADAPTER/);
+  assert.doesNotMatch(fs.readFileSync(path.join(workspace, 'GEMINI.md'), 'utf8'), /N8N-AGENT-RULES-ADAPTER/);
+});
+test('adapter installer auto dry-run with no AGENTS.md asks for required target choice', () => {
+  const workspace = makeN8nWorkspace('n8n-agent-adapter-auto-no-active-');
+
+  const result = runInstaller(workspace, ['--target', 'auto', '--dry-run']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Detected n8n involvement/i);
+  assert.match(result.stdout, /No AGENTS\.md found for --target auto/i);
+  assert.match(result.stdout, /No files would be created automatically/i);
+  assert.match(result.stdout, /Required next step/i);
+  assert.match(result.stdout, /install or repair repo-local AGENTS\.md/i);
+  assert.match(result.stdout, /create\/update only AGENTS\.md/i);
+  assert.match(result.stdout, /choose none/i);
+  assert.match(result.stdout, /read-only or no-modify tasks/i);
+  assert.match(result.stdout, /Do not run --write without explicit current-turn approval naming AGENTS\.md/i);
+
+  for (const activeFile of ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']) {
+    assert.equal(fs.existsSync(path.join(workspace, activeFile)), false, activeFile);
+  }
+});
+test('adapter installer rejects platform and all targets without writing', () => {
+  for (const target of ['all', 'claude', 'gemini']) {
+    const workspace = makeN8nWorkspace(`n8n-agent-adapter-reject-${target}-`);
+    fs.writeFileSync(path.join(workspace, 'CLAUDE.md'), '# Existing CLAUDE\n');
+    fs.writeFileSync(path.join(workspace, 'GEMINI.md'), '# Existing GEMINI\n');
+
+    const result = runInstaller(workspace, ['--target', target, '--write']);
+    assert.notEqual(result.status, 0, target);
+    assert.match(result.stderr, /n8n adapters are installed only in AGENTS\.md/i, target);
+    assert.doesNotMatch(fs.readFileSync(path.join(workspace, 'CLAUDE.md'), 'utf8'), /N8N-AGENT-RULES-ADAPTER/, target);
+    assert.doesNotMatch(fs.readFileSync(path.join(workspace, 'GEMINI.md'), 'utf8'), /N8N-AGENT-RULES-ADAPTER/, target);
+    assert.equal(fs.existsSync(path.join(workspace, 'AGENTS.md')), false, target);
+  }
+});
+test('adapter installer target auto only patches existing active instruction files', () => {
+  const workspace = makeN8nWorkspace('n8n-agent-adapter-auto-existing-only-');
+  fs.writeFileSync(path.join(workspace, 'AGENTS.md'), '# Existing AGENTS\n');
+
+  const result = runInstaller(workspace, ['--target', 'auto', '--write']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Updated AGENTS\.md/);
+  assert.doesNotMatch(result.stdout, /CLAUDE\.md/);
+  assert.doesNotMatch(result.stdout, /GEMINI\.md/);
+
+  assert.equal(fs.existsSync(path.join(workspace, 'CLAUDE.md')), false);
+  assert.equal(fs.existsSync(path.join(workspace, 'GEMINI.md')), false);
+  const agents = fs.readFileSync(path.join(workspace, 'AGENTS.md'), 'utf8');
+  assert.equal(markerCount(agents, beginMarker), 1);
+  assert.equal(markerCount(agents, endMarker), 1);
+});
+
+test('adapter installer refuses symlinked active instruction files without modifying the target', (t) => {
+  const workspace = makeN8nWorkspace('n8n-agent-adapter-symlink-');
+  const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'n8n-agent-adapter-outside-'));
+  const outsideTarget = path.join(outsideDir, 'outside-AGENTS.md');
+  const originalOutside = '# Outside target\n';
+  fs.writeFileSync(outsideTarget, originalOutside);
+
+  const activePath = path.join(workspace, 'AGENTS.md');
+  if (!createSymlinkOrSkip(t, outsideTarget, activePath, 'file')) return;
+
+  const result = runInstaller(workspace, ['--target', 'agents', '--write']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Refusing symlinked active instruction file: AGENTS\.md/);
+  assert.equal(fs.readFileSync(outsideTarget, 'utf8'), originalOutside);
+});
+
+test('adapter installer updates normal non-symlink active instruction files', () => {
+  const workspace = makeN8nWorkspace('n8n-agent-adapter-normal-');
+  const activePath = path.join(workspace, 'AGENTS.md');
+  fs.writeFileSync(activePath, '# Existing AGENTS\n');
+
+  const result = runInstaller(workspace, ['--target', 'agents', '--write']);
+  assert.equal(result.status, 0, result.stderr);
+
+  const installed = fs.readFileSync(activePath, 'utf8');
+  assert.match(installed, /# Existing AGENTS/);
+  assert.equal(markerCount(installed, beginMarker), 1);
+  assert.equal(markerCount(installed, endMarker), 1);
+});
+
+test('adapter installer replaces a single managed adapter block', () => {
+  const workspace = makeN8nWorkspace('n8n-agent-adapter-replace-');
+  const activePath = path.join(workspace, 'AGENTS.md');
+  fs.writeFileSync(activePath, `# Existing AGENTS\n\n${beginMarker}\nold adapter block\n${endMarker}\n`);
+
+  const result = runInstaller(workspace, ['--target', 'agents', '--write']);
+  assert.equal(result.status, 0, result.stderr);
+
+  const installed = fs.readFileSync(activePath, 'utf8');
+  assert.match(installed, /# Existing AGENTS/);
+  assert.doesNotMatch(installed, /old adapter block/);
+  assert.equal(markerCount(installed, beginMarker), 1);
+  assert.equal(markerCount(installed, endMarker), 1);
+});
+
+test('adapter installer appends managed adapter block when no markers exist', () => {
+  const workspace = makeN8nWorkspace('n8n-agent-adapter-append-');
+  const activePath = path.join(workspace, 'AGENTS.md');
+  fs.writeFileSync(activePath, '# Existing AGENTS\n\nKeep this local rule.\n');
+
+  const result = runInstaller(workspace, ['--target', 'agents', '--write']);
+  assert.equal(result.status, 0, result.stderr);
+
+  const installed = fs.readFileSync(activePath, 'utf8');
+  assert.match(installed, /# Existing AGENTS/);
+  assert.match(installed, /Keep this local rule\./);
+  assert.equal(markerCount(installed, beginMarker), 1);
+  assert.equal(markerCount(installed, endMarker), 1);
+});
+
+test('adapter installer rejects standalone non-managed adapter markers without modifying the file', () => {
+  const workspace = makeN8nWorkspace('n8n-agent-adapter-standalone-markers-');
+  const activePath = path.join(workspace, 'AGENTS.md');
+  const existing = '# Existing AGENTS\n\n<!-- BEGIN N8N-AGENT-RULES-ADAPTER -->\nold adapter block\n<!-- END N8N-AGENT-RULES-ADAPTER -->\n';
+  fs.writeFileSync(activePath, existing);
+
+  const result = runInstaller(workspace, ['--target', 'agents', '--write']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Unsupported standalone n8n adapter markers in AGENTS\.md/);
+  assert.equal(fs.readFileSync(activePath, 'utf8'), existing);
+});
+test('adapter installer rejects duplicate complete managed adapter blocks without modifying the file', () => {
+  const workspace = makeN8nWorkspace('n8n-agent-adapter-duplicate-');
+  const activePath = path.join(workspace, 'AGENTS.md');
+  const existing = `# Existing AGENTS\n\n${beginMarker}\nold adapter block 1\n${endMarker}\n\n${beginMarker}\nold adapter block 2\n${endMarker}\n`;
+  fs.writeFileSync(activePath, existing);
+
+  const result = runInstaller(workspace, ['--target', 'agents', '--write']);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Malformed managed adapter markers in AGENTS\.md/);
+  assert.equal(fs.readFileSync(activePath, 'utf8'), existing);
+});
+
+test('adapter installer rejects malformed managed markers', () => {
+  const malformedCases = [
+    ['begin only', `# Existing AGENTS\n\n${beginMarker}\nold block\n`],
+    ['end only', `# Existing AGENTS\n\n${endMarker}\nold block\n`],
+    ['end before begin', `# Existing AGENTS\n\n${endMarker}\nold block\n${beginMarker}\n`]
+  ];
+
+  for (const [label, existing] of malformedCases) {
+    const workspace = makeN8nWorkspace(`n8n-agent-adapter-malformed-${label.replaceAll(' ', '-')}-`);
+    const activePath = path.join(workspace, 'AGENTS.md');
+    fs.writeFileSync(activePath, existing);
+
+    const result = runInstaller(workspace, ['--target', 'agents', '--write']);
+    assert.notEqual(result.status, 0, label);
+    assert.match(result.stderr, /Malformed managed adapter markers in AGENTS\.md/, label);
+    assert.equal(fs.readFileSync(activePath, 'utf8'), existing, label);
+  }
+});

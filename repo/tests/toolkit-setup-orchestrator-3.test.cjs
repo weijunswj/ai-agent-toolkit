@@ -111,8 +111,8 @@ test('setup docs explain automatic resource admission and honest enforcement dis
 });
 
 test('generated Codex and Claude instruction surfaces preserve productive root-first topology policy', () => {
-  const agents = fs.readFileSync(path.join(repoRoot, 'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'), 'utf8');
-  const claude = fs.readFileSync(path.join(repoRoot, 'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md'), 'utf8');
+  const agents = fs.readFileSync(path.join(repoRoot, 'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md'), 'utf8');
+  const claude = fs.readFileSync(path.join(repoRoot, 'skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md'), 'utf8');
   for (const pattern of [
     /Ordinary work begins root-first/,
     /profile\/capacity is a ceiling, never launch permission/,

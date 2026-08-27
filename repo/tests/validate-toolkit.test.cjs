@@ -11,31 +11,23 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 const validateScript = path.join(repoRoot, 'repo', 'scripts', 'validate-toolkit.cjs');
 const legacyProjectToken = '_' + 'projects';
 const legacyCuratedToken = 'curated_' + 'output_for_ai';
-const publisherReferencePaths = [
-  'skills/context-preserving-ai-publisher/references/audit-and-baseline-workflow.md',
-  'skills/context-preserving-ai-publisher/references/validation-strategy.md',
-  'skills/context-preserving-ai-publisher/templates/project-module/SOURCE-LOCK.template.json',
-  'skills/context-preserving-ai-publisher/templates/project-module/toolkit.project.template.json',
-  'skills/context-preserving-ai-publisher/templates/repo-docs/project-module-standard.template.md'
-];
+const publisherReferencePaths = [];
 const currentSkillIds = [
-  'agent-skill-supply-chain-audit',
-  'ai-coding-agent-rules',
   'codex-ssh-hostinger-coolify-setup-maintainer',
-  'context-preserving-ai-publisher',
-  'github-governance-review-reconciler',
-  'local-ai-stack-safety',
+  'frontend-art-direction',
+  'github-program-reconciler',
+  'local-ai-safety',
   'managed-app-foundation-review',
-  'n8n-agent-rules',
-  'n8n-local-setup',
-  'n8n-workflow-helper-scripts',
-  'n8n-workflow-templates',
-  'project-completion-audit',
-  'secure-cicd-installer',
+  'n8n-environment-setup',
+  'n8n-safety-router',
+  'n8n-workflow-transport',
+  'release-readiness-audit',
+  'repository-agent-rules',
+  'secure-ci-cd',
   'self-hosted-service-safety',
+  'skill-product-review',
   'toolkit-setup',
-  'ui-ux-secure-frontend-design',
-  'windows-localhost-workflows'
+  'windows-local-dev-services'
 ];
 const skillCreationOperationalFreeTextFields = [
   'existing_skill_review',
@@ -188,8 +180,8 @@ test('all current product reviews use direct-canonical evidence and existing che
     assert.match(review.canonical_ownership, /direct-canonical/i);
     assert.match(review.canonical_ownership, new RegExp(`skills/${skill}/`));
     assert.match(review.canonical_ownership, /repo\/\*\*/);
-    assert.equal(review.positive_routing_examples.length >= 2, true);
-    assert.equal(review.negative_routing_examples.length >= 2, true);
+    assert.equal(review.positive_routing_examples.length >= 3, true);
+    assert.equal(review.negative_routing_examples.length >= 3, true);
     assert.equal(review.overlap_boundary.trim().length >= 12, true);
     assert.doesNotMatch(JSON.stringify({ canonical_ownership: review.canonical_ownership, validation: review.validation }), new RegExp(`sync-toolkit-projects\\.cjs|_projects[\\/]|${legacyCuratedToken}|_main|source[- ]to[- ]surface|(?:generated|deterministic)[\\s\\S]*(?:copy|publication|writeback)`, 'i'));
     assert.ok(review.validation.some((command) => /^node\s+repo\/scripts\/validate-toolkit\.cjs(?:\s|$)/.test(command)));
@@ -227,7 +219,7 @@ test('validator rejects noncanonical or missing validation targets in copied wor
     const cwd = copyRepo();
     try {
       updateBaseline(cwd, (baseline) => {
-        baseline.skill_creation_review['github-governance-review-reconciler'].validation.push(command);
+        baseline.skill_creation_review['github-program-reconciler'].validation.push(command);
       });
       const result = runValidate(cwd);
       assert.notEqual(result.status, 0, label);
@@ -262,11 +254,11 @@ test('Skill Creation and published-surface consumers share the retired topology 
     const cwd = copyRepo();
     try {
       updateBaseline(cwd, (baseline) => {
-        baseline.skill_creation_review['github-governance-review-reconciler'].existing_skill_review += ` ${variant}`;
+        baseline.skill_creation_review['github-program-reconciler'].existing_skill_review += ` ${variant}`;
       });
       const result = runValidate(cwd);
       assert.notEqual(result.status, 0, variant);
-      assert.match(result.stderr, /skill_creation_review\.github-governance-review-reconciler\.existing_skill_review/, variant);
+      assert.match(result.stderr, /skill_creation_review\.github-program-reconciler\.existing_skill_review/, variant);
     } finally {
       fs.rmSync(cwd, { recursive: true, force: true });
     }
@@ -279,11 +271,11 @@ test('validator rejects the shared retired operation in every applicable operati
     const cwd = copyRepo();
     try {
       updateBaseline(cwd, (baseline) => {
-        baseline.skill_creation_review['github-governance-review-reconciler'][field] += ` ${injection}`;
+        baseline.skill_creation_review['github-program-reconciler'][field] += ` ${injection}`;
       });
       const result = runValidate(cwd);
       assert.notEqual(result.status, 0, field);
-      assert.match(result.stderr, new RegExp(`skill_creation_review\\.github-governance-review-reconciler\\.${field}`), field);
+      assert.match(result.stderr, new RegExp(`skill_creation_review\\.github-program-reconciler\\.${field}`), field);
     } finally {
       fs.rmSync(cwd, { recursive: true, force: true });
     }
@@ -315,11 +307,11 @@ test('validator rejects shared retired-operation variants in validation commands
     const cwd = copyRepo();
     try {
       updateBaseline(cwd, (baseline) => {
-        baseline.skill_creation_review['github-governance-review-reconciler'].validation.push(`node --test repo/tests/skill-routing.test.cjs ${variant}`);
+        baseline.skill_creation_review['github-program-reconciler'].validation.push(`node --test repo/tests/skill-routing.test.cjs ${variant}`);
       });
       const result = runValidate(cwd);
       assert.notEqual(result.status, 0, variant);
-      assert.match(result.stderr, /skill_creation_review\.github-governance-review-reconciler\.validation command/, variant);
+      assert.match(result.stderr, /skill_creation_review\.github-program-reconciler\.validation command/, variant);
     } finally {
       fs.rmSync(cwd, { recursive: true, force: true });
     }
@@ -330,11 +322,11 @@ test('Skill Creation operational evidence does not exempt historical retired-ope
   const cwd = copyRepo();
   try {
     updateBaseline(cwd, (baseline) => {
-      baseline.skill_creation_review['github-governance-review-reconciler'].overlap_boundary += ' Earlier Toolkit operation used project modules and published skills, but that route is not current.';
+      baseline.skill_creation_review['github-program-reconciler'].overlap_boundary += ' Earlier Toolkit operation used project modules and published skills, but that route is not current.';
     });
     const result = runValidate(cwd);
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /skill_creation_review\.github-governance-review-reconciler\.overlap_boundary/);
+    assert.match(result.stderr, /skill_creation_review\.github-program-reconciler\.overlap_boundary/);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }
@@ -348,23 +340,23 @@ test('closed Skill Creation enum fields remain enum-validated', () => {
     const cwd = copyRepo();
     try {
       updateBaseline(cwd, (baseline) => {
-        baseline.skill_creation_review['github-governance-review-reconciler'][field] = sharedRetiredOperationVariants[0];
+        baseline.skill_creation_review['github-program-reconciler'][field] = sharedRetiredOperationVariants[0];
       });
       const result = runValidate(cwd);
       assert.notEqual(result.status, 0, field);
       assert.match(result.stderr, expected, field);
-      assert.doesNotMatch(result.stderr, new RegExp(`skill_creation_review\\.github-governance-review-reconciler\\.${field} .*retired`, 'i'), field);
+      assert.doesNotMatch(result.stderr, new RegExp(`skill_creation_review\\.github-program-reconciler\\.${field} .*retired`, 'i'), field);
     } finally {
       fs.rmSync(cwd, { recursive: true, force: true });
     }
   }
 });
 
-test('validator shares the exact five-file publisher reference allowlist', () => {
+test('validator and surface audit keep the publisher reference allowlist empty', () => {
   const validator = require(validateScript);
   const audit = require(path.join(repoRoot, 'repo', 'scripts', 'audit-published-surfaces.cjs'));
-  assert.deepEqual(publisherReferencePaths.filter(audit.legacyReferenceAllowed), publisherReferencePaths);
-  assert.equal(audit.legacyReferenceAllowed('skills/context-preserving-ai-publisher/README.md'), false);
+  assert.deepEqual(publisherReferencePaths.filter(audit.legacyReferenceAllowed), []);
+  assert.equal(audit.legacyReferenceAllowed('skills/skill-product-review/README.md'), false);
   assert.deepEqual(validator.validate(), []);
 });
 
@@ -410,7 +402,7 @@ test('validator rejects legacy publisher references in canonical files', () => {
 
 test('validator rejects legacy publisher references in ordinary canonical skills', () => {
   const cwd = copyRepo();
-  const target = path.join(cwd, 'skills', 'n8n-local-setup', 'references', 'legacy-reference-fixture.md');
+  const target = path.join(cwd, 'skills', 'n8n-environment-setup', 'references', 'legacy-reference-fixture.md');
   fs.writeFileSync(target, `${legacyProjectToken}/fixture/${legacyCuratedToken}/file.md\n`, 'utf8');
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
@@ -419,7 +411,7 @@ test('validator rejects legacy publisher references in ordinary canonical skills
 
 test('validator rejects legacy references in a non-allowlisted publisher file', () => {
   const cwd = copyRepo();
-  const target = path.join(cwd, 'skills', 'context-preserving-ai-publisher', 'references', 'legacy-fixture.md');
+  const target = path.join(cwd, 'skills', 'skill-product-review', 'references', 'legacy-fixture.md');
   fs.writeFileSync(target, `${legacyProjectToken}/fixture/${legacyCuratedToken}/file.md\n`, 'utf8');
   const result = runValidate(cwd);
   assert.notEqual(result.status, 0);
@@ -430,7 +422,7 @@ test('validator rejects a deleted sync command in current review validation evid
   const cwd = copyRepo();
   try {
     updateBaseline(cwd, (baseline) => {
-      baseline.skill_creation_review['github-governance-review-reconciler'].validation.push('node repo/scripts/sync-toolkit-projects.cjs --check');
+      baseline.skill_creation_review['github-program-reconciler'].validation.push('node repo/scripts/sync-toolkit-projects.cjs --check');
     });
     const result = runValidate(cwd);
     assert.notEqual(result.status, 0);
@@ -444,7 +436,7 @@ test('validator rejects current canonical ownership using a project _main source
   const cwd = copyRepo();
   try {
     updateBaseline(cwd, (baseline) => {
-      baseline.skill_creation_review['local-ai-stack-safety'].canonical_ownership += ` Active source: ${legacyProjectToken}/local/_main/SKILL.md.`;
+      baseline.skill_creation_review['local-ai-safety'].canonical_ownership += ` Active source: ${legacyProjectToken}/local/_main/SKILL.md.`;
     });
     const result = runValidate(cwd);
     assert.notEqual(result.status, 0);
@@ -584,25 +576,25 @@ test('validator rejects empty required keyed evidence', () => {
   }
 });
 
-test('validator requires two positive routing examples', () => {
+test('validator requires three positive routing examples', () => {
   const cwd = copyRepo();
   try {
-    updateBaseline(cwd, (baseline) => { baseline.skill_creation_review['managed-app-foundation-review'].positive_routing_examples.length = 1; });
+    updateBaseline(cwd, (baseline) => { baseline.skill_creation_review['managed-app-foundation-review'].positive_routing_examples.length = 2; });
     const result = runValidate(cwd);
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /positive_routing_examples must contain at least two non-empty routing examples/);
+    assert.match(result.stderr, /positive_routing_examples must contain at least three non-empty routing examples/);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }
 });
 
-test('validator requires two near-neighbour negative routing examples', () => {
+test('validator requires three near-neighbour negative routing examples', () => {
   const cwd = copyRepo();
   try {
-    updateBaseline(cwd, (baseline) => { baseline.skill_creation_review['managed-app-foundation-review'].negative_routing_examples.length = 1; });
+    updateBaseline(cwd, (baseline) => { baseline.skill_creation_review['managed-app-foundation-review'].negative_routing_examples.length = 2; });
     const result = runValidate(cwd);
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /negative_routing_examples must contain at least two non-empty routing examples/);
+    assert.match(result.stderr, /negative_routing_examples must contain at least three non-empty routing examples/);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }
@@ -632,11 +624,25 @@ test('validator rejects keyed and durable public ID mismatch', () => {
   }
 });
 
-test('valid already-terminal historical removal ledger passes', () => {
+test('valid append-only portfolio migration ledger passes', () => {
   const validator = require(validateScript);
   const ledger = JSON.parse(readText('repo/contracts/skill-product-migration-ledger.json'));
   assert.equal(ledger.lifecycle, 'transitional_until_s2_closure_review');
-  assert.deepEqual(ledger.transitions.map((entry) => entry.transition_id), ['knowledge-index-updater-removal']);
+  assert.deepEqual(ledger.transitions.map((entry) => entry.transition_id), [
+    'knowledge-index-updater-removal',
+    'skill-product-review-merge',
+    'repository-agent-rules-rename',
+    'github-program-reconciler-rename',
+    'local-ai-safety-rename',
+    'n8n-safety-router-rename',
+    'n8n-environment-setup-rename',
+    'n8n-workflow-transport-rename',
+    'release-readiness-audit-rename',
+    'secure-ci-cd-rename',
+    'frontend-art-direction-rename',
+    'windows-local-dev-services-rename',
+    'n8n-workflow-templates-removal'
+  ]);
   assert.deepEqual(validator.validate(), []);
 });
 

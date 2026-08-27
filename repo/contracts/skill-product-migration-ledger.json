@@ -13,6 +13,173 @@
       "content_disposition": "deleted",
       "authority": "Owner retirement decision #328; canonical removal is present in signed main commit e86a2d74fd771f6500aa02fe0892940933bf7647 through PR #365.",
       "reason": "The repository-side Notion index product was retired with no replacement and is absent from the current canonical skills surface."
+    },
+    {
+      "sequence": 2,
+      "transition_id": "skill-product-review-merge",
+      "predecessor_ids": [
+        "agent-skill-supply-chain-audit",
+        "context-preserving-ai-publisher"
+      ],
+      "successor_ids": [
+        "skill-product-review"
+      ],
+      "disposition": "merge",
+      "content_disposition": "migrated",
+      "authority": "Owner-approved S2 decisions D1-D9 and Web-accepted DL-S2-PRODUCT-PORTFOLIO-015 on issue #359 and Draft PR #366.",
+      "reason": "Trust review and source-traceable publication now form one product contract without an unnecessary handoff or duplicate routing surface."
+    },
+    {
+      "sequence": 3,
+      "transition_id": "repository-agent-rules-rename",
+      "predecessor_ids": [
+        "ai-coding-agent-rules"
+      ],
+      "successor_ids": [
+        "repository-agent-rules"
+      ],
+      "disposition": "rename",
+      "content_disposition": "migrated",
+      "authority": "Owner-approved S2 decisions D1-D9 and Web-accepted DL-S2-PRODUCT-PORTFOLIO-015 on issue #359 and Draft PR #366.",
+      "reason": "The current name states the product boundary directly: repository-local agent instructions rather than generic AI coding rules."
+    },
+    {
+      "sequence": 4,
+      "transition_id": "github-program-reconciler-rename",
+      "predecessor_ids": [
+        "github-governance-review-reconciler"
+      ],
+      "successor_ids": [
+        "github-program-reconciler"
+      ],
+      "disposition": "rename",
+      "content_disposition": "migrated",
+      "authority": "Owner-approved S2 decisions D1-D9 and Web-accepted DL-S2-PRODUCT-PORTFOLIO-015 on issue #359 and Draft PR #366.",
+      "reason": "The public product name is shortened while E3 remains responsible for any GitHub runtime or relationship-semantic redesign."
+    },
+    {
+      "sequence": 5,
+      "transition_id": "local-ai-safety-rename",
+      "predecessor_ids": [
+        "local-ai-stack-safety"
+      ],
+      "successor_ids": [
+        "local-ai-safety"
+      ],
+      "disposition": "rename",
+      "content_disposition": "migrated",
+      "authority": "Owner-approved S2 decisions D1-D9 and Web-accepted DL-S2-PRODUCT-PORTFOLIO-015 on issue #359 and Draft PR #366.",
+      "reason": "The concise identity retains the local model, runtime, GPU, download, interface, and endpoint safety boundary."
+    },
+    {
+      "sequence": 6,
+      "transition_id": "n8n-safety-router-rename",
+      "predecessor_ids": [
+        "n8n-agent-rules"
+      ],
+      "successor_ids": [
+        "n8n-safety-router"
+      ],
+      "disposition": "rename",
+      "content_disposition": "migrated",
+      "authority": "Owner-approved S2 decisions D1-D9 and Web-accepted DL-S2-PRODUCT-PORTFOLIO-015 on issue #359 and Draft PR #366.",
+      "reason": "The new identity makes the mandatory cross-cutting n8n safety and companion-product routing role explicit."
+    },
+    {
+      "sequence": 7,
+      "transition_id": "n8n-environment-setup-rename",
+      "predecessor_ids": [
+        "n8n-local-setup"
+      ],
+      "successor_ids": [
+        "n8n-environment-setup"
+      ],
+      "disposition": "rename",
+      "content_disposition": "migrated",
+      "authority": "Owner-approved S2 decisions D1-D9 and Web-accepted DL-S2-PRODUCT-PORTFOLIO-015 on issue #359 and Draft PR #366.",
+      "reason": "The product covers local, tunnelled production, and hosted environments, so environment setup is the truthful boundary."
+    },
+    {
+      "sequence": 8,
+      "transition_id": "n8n-workflow-transport-rename",
+      "predecessor_ids": [
+        "n8n-workflow-helper-scripts"
+      ],
+      "successor_ids": [
+        "n8n-workflow-transport"
+      ],
+      "disposition": "rename",
+      "content_disposition": "migrated",
+      "authority": "Owner-approved S2 decisions D1-D9 and Web-accepted DL-S2-PRODUCT-PORTFOLIO-015 on issue #359 and Draft PR #366.",
+      "reason": "The new identity captures offline sanitation, validation, comparison, export, and import preparation without granting live authority."
+    },
+    {
+      "sequence": 9,
+      "transition_id": "release-readiness-audit-rename",
+      "predecessor_ids": [
+        "project-completion-audit"
+      ],
+      "successor_ids": [
+        "release-readiness-audit"
+      ],
+      "disposition": "rename",
+      "content_disposition": "migrated",
+      "authority": "Owner-approved S2 decisions D1-D9 and Web-accepted DL-S2-PRODUCT-PORTFOLIO-015 on issue #359 and Draft PR #366.",
+      "reason": "The new identity states the guarded final readiness gate without implying perfect or permanently complete software."
+    },
+    {
+      "sequence": 10,
+      "transition_id": "secure-ci-cd-rename",
+      "predecessor_ids": [
+        "secure-cicd-installer"
+      ],
+      "successor_ids": [
+        "secure-ci-cd"
+      ],
+      "disposition": "rename",
+      "content_disposition": "migrated",
+      "authority": "Owner-approved S2 decisions D1-D9 and Web-accepted DL-S2-PRODUCT-PORTFOLIO-015 on issue #359 and Draft PR #366.",
+      "reason": "The product includes review, planning, governance, and guarded installation, so the shorter identity avoids installer-only framing."
+    },
+    {
+      "sequence": 11,
+      "transition_id": "frontend-art-direction-rename",
+      "predecessor_ids": [
+        "ui-ux-secure-frontend-design"
+      ],
+      "successor_ids": [
+        "frontend-art-direction"
+      ],
+      "disposition": "rename",
+      "content_disposition": "migrated",
+      "authority": "Owner-approved S2 decisions D1-D9 and Web-accepted DL-S2-PRODUCT-PORTFOLIO-015 on issue #359 and Draft PR #366.",
+      "reason": "The new identity centres distinctive art direction while retaining implementation, accessibility, privacy, security, and approved-design boundaries."
+    },
+    {
+      "sequence": 12,
+      "transition_id": "windows-local-dev-services-rename",
+      "predecessor_ids": [
+        "windows-localhost-workflows"
+      ],
+      "successor_ids": [
+        "windows-local-dev-services"
+      ],
+      "disposition": "rename",
+      "content_disposition": "migrated",
+      "authority": "Owner-approved S2 decisions D1-D9 and Web-accepted DL-S2-PRODUCT-PORTFOLIO-015 on issue #359 and Draft PR #366.",
+      "reason": "The product owns Windows process, port, shell, runtime, detached-launch, readiness, and cleanup guidance for local development services."
+    },
+    {
+      "sequence": 13,
+      "transition_id": "n8n-workflow-templates-removal",
+      "predecessor_ids": [
+        "n8n-workflow-templates"
+      ],
+      "successor_ids": [],
+      "disposition": "remove",
+      "content_disposition": "fixture-only",
+      "authority": "Owner-approved S2 decisions D1-D9 and Web-accepted DL-S2-PRODUCT-PORTFOLIO-015 on issue #359 and Draft PR #366.",
+      "reason": "The public template catalogue is removed; three credential-free inactive examples remain only as discriminating test fixtures with no public routing or install surface."
     }
   ],
   "notes": "This append-only ledger records completed historical product identity transitions and is never current-product authority, an alias source, a routing fallback, or an exemption. E2 may append accepted transitions without rewriting earlier meaning. Review this transitional artefact before S2 closure and remove it during final cleanup if no durable current consumer remains."

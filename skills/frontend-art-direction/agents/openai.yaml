@@ -1,0 +1,12 @@
+interface:
+  display_name: "Frontend Art Direction"
+  short_description: "Create distinctive, buildable frontend visual worlds."
+  brand_color: "#7C3AED"
+
+policy:
+  products:
+    - chatgpt
+    - codex
+    - api
+    - atlas
+  allow_implicit_invocation: true

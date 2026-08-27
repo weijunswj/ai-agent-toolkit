@@ -12,17 +12,11 @@ const auditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-published-surf
 const audit = require(auditScript);
 const legacyProjectToken = '_' + 'projects';
 const legacyCuratedToken = 'curated_' + 'output_for_ai';
-const publisherReferencePaths = [
-  'skills/context-preserving-ai-publisher/references/audit-and-baseline-workflow.md',
-  'skills/context-preserving-ai-publisher/references/validation-strategy.md',
-  'skills/context-preserving-ai-publisher/templates/project-module/SOURCE-LOCK.template.json',
-  'skills/context-preserving-ai-publisher/templates/project-module/toolkit.project.template.json',
-  'skills/context-preserving-ai-publisher/templates/repo-docs/project-module-standard.template.md'
-];
+const publisherReferencePaths = [];
 const standalonePublisherPaths = [
-  'skills/context-preserving-ai-publisher/SKILL.md',
-  'skills/context-preserving-ai-publisher/README.md',
-  'skills/context-preserving-ai-publisher/references/README.md'
+  'skills/skill-product-review/SKILL.md',
+  'skills/skill-product-review/README.md',
+  'skills/skill-product-review/references/README.md'
 ];
 const historicalEvidencePaths = [
   'repo/docs/RETIRED-SOURCE-PROVENANCE.md',
@@ -144,14 +138,10 @@ test('policy v2 owns the closed primitive, identity, and exact scope contracts',
   assert.equal(audit.policyScopeForPath('repo/docs/audits/unlisted.md'), 'active-toolkit');
 });
 
-test('legacy compatibility is derived from only the five exact non-operative paths', () => {
-  assert.deepEqual(publisherReferencePaths.filter(audit.legacyReferenceAllowed), publisherReferencePaths);
-  for (const relPath of publisherReferencePaths) {
-    const text = readText(relPath);
-    assert.ok(text.includes(`${legacyProjectToken}/`) || text.includes(`${legacyCuratedToken}/`), relPath);
-  }
-  assert.equal(audit.legacyReferenceAllowed('skills/context-preserving-ai-publisher/README.md'), false);
-  assert.equal(audit.legacyReferenceAllowed('skills/context-preserving-ai-publisher/references/examples.md'), false);
+test('retired publisher references have no non-operative compatibility exemptions', () => {
+  assert.deepEqual(publisherReferencePaths.filter(audit.legacyReferenceAllowed), []);
+  assert.equal(audit.legacyReferenceAllowed('skills/skill-product-review/README.md'), false);
+  assert.equal(audit.legacyReferenceAllowed('skills/skill-product-review/references/examples.md'), false);
 });
 
 test('primitive matching is policy-derived, normalized, and reports every occurrence with stable spans', () => {
@@ -219,7 +209,7 @@ test('standalone publisher P1 uses document-level identity and closed dispositio
   assert.notEqual(audit.activeTopologyFinding('Use _main for a target repository.', rel), null);
   assert.notEqual(audit.activeTopologyFinding('Run sync-toolkit-projects.cjs.', rel), null);
   assert.equal(audit.activeTopologyFinding('A project module is described here.', historicalEvidencePaths[0]), null);
-  assert.equal(audit.activeTopologyFinding('A project module is described here.', publisherReferencePaths[0]), null);
+  assert.notEqual(audit.activeTopologyFinding('This repository uses a project module.', 'skills/skill-product-review/references/examples.md'), null);
   assert.equal(audit.activeTopologyFinding('Use toolkit.project.json with a project module.', rel), null);
 });
 
@@ -232,9 +222,9 @@ test('active scan membership is rule-derived and includes roots, docs, contracts
     'README.md',
     'repo/contracts/source-of-truth-contract.md',
     'repo/docs/FOR_AI_AGENTS.md',
-    'skills/agent-skill-supply-chain-audit/SKILL.md',
-    'skills/agent-skill-supply-chain-audit/README.md',
-    'skills/ui-ux-secure-frontend-design/INSTALL.md'
+    'skills/skill-product-review/SKILL.md',
+    'skills/skill-product-review/README.md',
+    'skills/frontend-art-direction/INSTALL.md'
   ]) assert.ok(activeFiles.includes(relPath), relPath);
   assert.equal(activeFiles.includes('repo/contracts/topology-scope-policy.json'), false);
   for (const relPath of activeFiles) {
@@ -297,7 +287,7 @@ test('copied workspaces reject new active primitive and legacy path residue', ()
   try {
     fs.writeFileSync(path.join(cwd, 'repo', 'docs', 'active-fixture.md'), 'No project module is used.\n', 'utf8');
     fs.writeFileSync(
-      path.join(cwd, 'skills', 'n8n-local-setup', 'references', 'legacy-fixture.md'),
+      path.join(cwd, 'skills', 'n8n-environment-setup', 'references', 'legacy-fixture.md'),
       `${legacyProjectToken}/fixture/${legacyCuratedToken}/file.md\n`,
       'utf8'
     );

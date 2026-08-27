@@ -9,7 +9,7 @@ This repo is organized for AI-agent reuse. Prefer the direct canonical `skills/*
 | Skill | Portable instruction folder under `skills/`. |
 | Guide | Setup or workflow documentation under a skill `references/` folder or `repo/docs/`. |
 | Template | Copy-safe source material inside the relevant skill folder or a reviewed contract under `repo/contracts/`. |
-| MCP | Repo-wide MCP is intentionally not shipped or maintained as a generated surface for now. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references remain inside `skills/n8n-local-setup/`. |
+| MCP | Repo-wide MCP is intentionally not shipped or maintained as a generated surface for now. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references remain inside `skills/n8n-environment-setup/`. |
 | Toolkit package version | `repo/contracts/toolkit-local-bridge/version.json`; it versions the native Toolkit plugin and bridge package, not upstream source. |
 | Source lock | `repo/source-watch/provenance/**/SOURCE-LOCK.json`; it records active third-party provenance, source pins, blob pins, attribution, and source-watch policy. |
 
@@ -39,22 +39,21 @@ Use installed skills only when they clearly match the task and improve correctne
 
 | Skill | Use when the task involves |
 | --- | --- |
-| `ai-coding-agent-rules` | Generic execution-first `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` rule templates. |
+| `repository-agent-rules` | Generic execution-first `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` rule templates. |
 | `toolkit-setup` | AI Agent Toolkit plugin setup or refresh, Toolkit Local Bridge setup or troubleshooting, repo-backed Toolkit auto-update, OpenCode bridge support, AG2 adapter support, bridge audit, enabled-target sync, disable, stale bridge state, native Codex or Claude Code plugin update behavior, Windows hook repair, or bridge setup safety. |
-| `n8n-agent-rules` | Any n8n task, including [official n8n Skills](https://github.com/n8n-io/skills), their entry-point meta-skill currently named `using-n8n-skills`, workflow JSON, official n8n MCP, `n8n_live`, workflow creation or updates, helper scripts, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, or n8n safety. |
-| `n8n-local-setup` | Safe n8n environment setup with the localhost/ngrok dev stack, the separate production Cloudflare Tunnel self-hosting stack for local/CGNAT machines, hosted n8n Hostinger Coolify VPS notes, stack templates, [official n8n Skills](https://github.com/n8n-io/skills) setup, official instance-level MCP config selection, or platform-specific n8n agent-rule setup. |
-| `n8n-workflow-helper-scripts` | Safe n8n workflow import/export hygiene, template sanitation, credential safety, validation, comparison, and repo/live sync planning. |
-| `n8n-workflow-templates` | Public generic inactive n8n workflow JSON templates. |
-| `secure-cicd-installer` | Secure CI/CD installer planning, GitHub Actions setup, CI security gates, approval-gated writes, or safe status tracking. |
-| `context-preserving-ai-publisher` | Source-traceable AI-facing skills, contracts, provenance, audits, or anti-drift docs. |
-| `agent-skill-supply-chain-audit` | Reviewing third-party agent skills, `SKILL.md` folders, skill packs, or GitHub skill repositories for provenance, license, safety, toolkit conversion fit, and usefulness/token-bloat risk before import. |
-| `local-ai-stack-safety` | Reviewing local AI runtime, model download, GPU/runtime, local AI web UI, or local AI endpoint exposure risk before setup. |
+| `n8n-safety-router` | Any n8n task, including [official n8n Skills](https://github.com/n8n-io/skills), their entry-point meta-skill currently named `using-n8n-skills`, workflow JSON, official n8n MCP, `n8n_live`, workflow creation or updates, helper scripts, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, or n8n safety. |
+| `n8n-environment-setup` | Safe n8n environment setup with the localhost/ngrok dev stack, the separate production Cloudflare Tunnel self-hosting stack for local/CGNAT machines, hosted n8n Hostinger Coolify VPS notes, stack templates, [official n8n Skills](https://github.com/n8n-io/skills) setup, official instance-level MCP config selection, or platform-specific n8n agent-rule setup. |
+| `n8n-workflow-transport` | Safe n8n workflow import/export hygiene, template sanitation, credential safety, validation, comparison, and repo/live sync planning. |
+| `secure-ci-cd` | Secure CI/CD installer planning, GitHub Actions setup, CI security gates, approval-gated writes, or safe status tracking. |
+| `skill-product-review` | Reviewing third-party agent skills, `SKILL.md` folders, skill packs, or GitHub skill repositories for provenance, license, safety, toolkit conversion fit, and usefulness/token-bloat risk before import. |
+| `local-ai-safety` | Reviewing local AI runtime, model download, GPU/runtime, local AI web UI, or local AI endpoint exposure risk before setup. |
 | `managed-app-foundation-review` | Revisiting implementation plans to compare low-cost, free, managed, or owner-hosted foundations before custom-building auth, backend APIs, user accounts, databases, workflow automation, CRM/contact pipelines, forms, email, storage, analytics, ops, traffic/security monitoring, or account-security foundations. |
-| `project-completion-audit` | Guarded final audit, completion audit, production-readiness audit, release-candidate audit, launch-readiness audit, QA pass, "make sure everything works", "is this production ready", `/goal` readiness remediation, audit against original docs, security-readiness check, or final readiness check. Performs preflight only before explicit confirmation. |
+| `github-program-reconciler` | Explicit-only current-main GitHub programme parent/direct-child governance, deterministic reconciliation, truthful exact-head review evidence, and Deferred Findings handling without review mutation or Web finality. |
+| `release-readiness-audit` | Guarded final audit, completion audit, production-readiness audit, release-candidate audit, launch-readiness audit, QA pass, "make sure everything works", "is this production ready", `/goal` readiness remediation, audit against original docs, security-readiness check, or final readiness check. Performs preflight only before explicit confirmation. |
 | `codex-ssh-hostinger-coolify-setup-maintainer` | Codex SSH Hostinger VPS plus Coolify deployment setup, SSH preflight, daily security checks, intrusion-signal review, optional Telegram/email maintenance alerts, evidence-based maintenance, and incident response with owner approval gates. Use when the user asks Codex to help set up Hostinger for deployment, configure daily maintenance alerts, or review Hostinger/Coolify security signals. |
 | `self-hosted-service-safety` | Reviewing non-n8n self-hosted service setup, Docker/VPS, public ports, tunnels, credentials, backups, public admin/backup paths, honeypot/canary paths, traffic logs, SSH access, firewall exposure, or first-run hardening. |
-| `windows-localhost-workflows` | Starting, relaunching, verifying, or debugging local Windows dev servers. |
-| `ui-ux-secure-frontend-design` | Frontend design systems, landing pages, dashboards, forms, accessibility, responsive polish, privacy-safe UX, and implementation review. |
+| `windows-local-dev-services` | Starting, relaunching, verifying, or debugging local Windows dev servers. |
+| `frontend-art-direction` | Frontend design systems, landing pages, dashboards, forms, accessibility, responsive polish, privacy-safe UX, and implementation review. |
 
 ## Skill Routing Maintenance
 
@@ -63,7 +62,7 @@ Use installed skills only when they clearly match the task and improve correctne
 - When a new skill should not be auto-routed, document why it is intentionally omitted from routing.
 - Do not let the routing table become stale relative to current `skills/*/SKILL.md`.
 - `knowledge-index-updater` is intentionally omitted because that repository-side Notion index skill was retired under #328.
-- For OpenAI/Codex packaged metadata, keep implicit invocation sparse. The intentional implicit skills are `toolkit-setup`, `n8n-agent-rules`, and `agent-skill-supply-chain-audit`; broad, heavy, production-sensitive, or companion skills should be explicit-only unless a future safety-router review documents otherwise. Native plugin `interface.defaultPrompt` should stay at three or fewer strong starter prompts.
+- Behavioural routing admission permits implicit discovery for 12 products. `codex-ssh-hostinger-coolify-setup-maintainer`, `github-program-reconciler`, and `release-readiness-audit` remain explicit-only. Implicit discovery never grants repository, live-system, provider, GitHub, deployment, or broad-audit mutation authority. Native plugin `interface.defaultPrompt` should stay at three or fewer strong starter prompts.
 
 ## Skill Creation Center
 
@@ -77,7 +76,7 @@ Use [Skill Safety Matrix](SKILL-SAFETY-MATRIX.md) as the maintained catalog of c
 
 Validation treats each concrete `skills/<skill-name>/SKILL.md` entrypoint as the Skill Creation Center review boundary. Every current canonical product must have complete keyed `skill_creation_review` evidence in `repo/docs/skill-creation-center-baseline.json`, and those keys must exactly match the current canonical products. Historical identities belong only to the non-authoritative migration ledger or Git history. Native creator output is subject to the same complete evidence gate and receives no exemption.
 
-For any third-party skill, `SKILL.md` folder, skill pack, GitHub skill repo, or adapted external agent material, use `agent-skill-supply-chain-audit` first. Do not copy, import, install, execute, or convert third-party material until the audit verdict allows it. Approved Toolkit conversions are authored directly at canonical `skills/**` and `repo/**` paths. The separate generic `context-preserving-ai-publisher` product retains its own publication and anti-drift guidance; do not treat that product's architecture as Toolkit operation.
+For any third-party skill, `SKILL.md` folder, skill pack, GitHub skill repo, or adapted external agent material, use `skill-product-review` first. Do not copy, import, install, execute, or adapt third-party material until its `allow` or `constrain` verdict permits the named scope. Approved Toolkit adaptations are authored directly at canonical `skills/**` and `repo/**` paths with licence, attribution, provenance, source-lock, and validation requirements preserved.
 
 Prioritize repo safety, device safety, provenance, attribution, validation, and practical usefulness over adding more surface area.
 
@@ -111,8 +110,8 @@ Never commit or install:
 
 Scoped writes are allowed only when the relevant template or helper is being run intentionally:
 
-- `node repo/scripts/sync-agent-instruction-shims.cjs --write` updates the retained instruction templates/root shims and the exact four portable n8n safety derivatives from `repo/contracts/agent-rules/`. Skills are maintained directly under `skills/**`; there is no project publishing step or generic Toolkit sync command.
-- `n8n-agent-rules` owns the full n8n operating ruleset. Other n8n skills depend on it; optional adapters are brief pointers and are not automatically appended to generic always-on templates.
+- `node repo/scripts/sync-agent-instruction-shims.cjs --write` updates the retained instruction templates/root shims and the exact three portable n8n safety derivatives from `repo/contracts/agent-rules/`. Skills are maintained directly under `skills/**`; there is no project publishing step or generic Toolkit sync command.
+- `n8n-safety-router` owns the full n8n operating ruleset. Other n8n skills depend on it; optional adapters are brief pointers and are not automatically appended to generic always-on templates.
 - n8n sanitizer templates may write ignored `.to-sanitise/**` and `.sanitised/**` staging folders.
 - n8n sync helper templates may write `n8n-workflows/*.json`, ignored `.tmp/**`, and ignored `.n8n-local/**` in a consumer repo after review.
 

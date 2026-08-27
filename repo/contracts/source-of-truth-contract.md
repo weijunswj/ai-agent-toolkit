@@ -7,12 +7,11 @@
 - `repo/source-watch/provenance/**/SOURCE-LOCK.json` contains only active third-party attribution pins. Each lock records the upstream repo, ref, commit, update policy, attribution requirement, allowlist, and exact blob pins for retained copied or adapted files.
 - Scheduled source-watch is PR-notification-only. It may compare active source-lock pins and advisory targets with upstream GitHub commits, then open or refresh a stable review PR. It must not copy upstream files, change source-lock/advisory records, execute upstream code, auto-merge, push to main, run live n8n actions, or treat notification as approval. Real updates require a separate human-approved PR.
 - The toolkit maintains one direct canonical tree. New Toolkit skills are created at `skills/**` paths after Skill Creation Center review; contracts, runtime, tests, and docs are created at canonical `repo/**` paths. Do not introduce secondary ownership, publication, packaging, or generic synchronization layers.
-- The retained deterministic synchronizers remain narrow: `repo/scripts/sync-repo-doc-contract.cjs` maintains only the managed source-of-truth block, while `repo/scripts/sync-agent-instruction-shims.cjs` maintains root/repo-local instruction shims and exactly four portable n8n safety derivatives sourced from `repo/contracts/agent-rules/n8n-agent-rules.md`:
-  - `skills/n8n-agent-rules/n8n-agent-rules.md`
-  - `skills/n8n-local-setup/references/n8n-agent-rules.md`
-  - `skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md`
-  - `skills/n8n-workflow-templates/references/n8n-agent-rules.md`
+- The retained deterministic synchronizers remain narrow: `repo/scripts/sync-repo-doc-contract.cjs` maintains only the managed source-of-truth block, while `repo/scripts/sync-agent-instruction-shims.cjs` maintains root/repo-local instruction shims and exactly three portable n8n safety derivatives sourced from `repo/contracts/agent-rules/n8n-safety-rules.md`:
+  - `skills/n8n-safety-router/n8n-safety-rules.md`
+  - `skills/n8n-environment-setup/references/n8n-safety-rules.md`
+  - `skills/n8n-workflow-transport/references/n8n-safety-rules.md`
 - This n8n derivative set is a bounded portable/local safety-context exception. Use the exact retained synchronizer command for repair; no unspecified generic `run sync` command exists.
 - `.codex-plugin/` and `.claude-plugin/` contain native plugin metadata for the current Toolkit package. They remain platform-separated and must not be used to cross-update the other native platform.
-- This repo intentionally does not ship or maintain a repo-wide MCP generated surface. Official n8n Skills plus instance-level MCP references remain inside `skills/n8n-local-setup/` as secondary n8n setup material.
+- This repo intentionally does not ship or maintain a repo-wide MCP generated surface. Official n8n Skills plus instance-level MCP references remain inside `skills/n8n-environment-setup/` as secondary n8n setup material.
 - All retained skill/runtime context must remain local, complete enough to use, and traceable through direct repository paths or the two retained third-party provenance records. External links may support provenance but must not be required for normal execution.

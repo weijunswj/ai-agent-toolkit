@@ -25,7 +25,7 @@ Every concrete `skills/<skill-name>/SKILL.md` must have:
 - A routing entry or an intentional omission with a concrete reason.
 - A row in `repo/docs/SKILL-SAFETY-MATRIX.md`.
 
-If a skill uses third-party material, run `agent-skill-supply-chain-audit` before copying, importing, executing, or adapting it. Preserve attribution and keep the active source lock under `repo/source-watch/provenance/`.
+If a skill uses third-party material, run `skill-product-review` before copying, importing, executing, or adapting it. Preserve attribution and keep the active source lock under `repo/source-watch/provenance/`.
 
 ## Agent Rules
 

@@ -42,9 +42,9 @@ test('skill portability audit passes the published skill folders', () => {
 
 test('skill portability audit catches missing README and local references', () => {
   const cwd = tempCopy();
-  fs.unlinkSync(path.join(cwd, 'skills', 'windows-localhost-workflows', 'README.md'));
+  fs.unlinkSync(path.join(cwd, 'skills', 'windows-local-dev-services', 'README.md'));
   fs.appendFileSync(
-    path.join(cwd, 'skills', 'windows-localhost-workflows', 'SKILL.md'),
+    path.join(cwd, 'skills', 'windows-local-dev-services', 'SKILL.md'),
     '\n\nSee `references/missing.md` before using this skill.\n'
   );
   const result = runAudit(cwd);
