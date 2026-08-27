@@ -1,6 +1,6 @@
 {
-  "policy_version": "toolkit.n5.github-governance-review-reconciler.policy.v1",
-  "design_lock": "DL-N5-GITHUB-GOVERNANCE-REVIEW-RECONCILER-001-G2-R1",
+  "policy_version": "toolkit.n5.github-program-reconciler.policy.v1",
+  "design_lock": "DL-S2-GITHUB-PROGRAM-001",
   "six_root_contract_integrity": { "b1_repository_identity": true, "b2_lifecycle_and_pr_uniqueness": true, "b3_review_inventory_evidence": true, "b4_shared_transaction_registry": true, "b5_proof_gated_compaction": true, "b6_initialise_and_migrate": true },
   "authority": {
     "a1": { "sole_mutation_authority": true, "sole_opaque_ticket_authority": true, "operation_type": "github.mutation", "operation_shape": "canonical-typed", "broker": "authority_broker", "target_kind": "github-repository", "canonical_digest_source": ["operationDigest", "targetDigest"], "mutation_actions": { "initialise": "n5.initialise", "migrate": "n5.migrate", "reconcile": "n5.reconcile", "remove": "n5.remove" } },
@@ -22,5 +22,77 @@
   "auto_code": { "mutation": false, "install": false, "schedule": false, "worker_claim": false, "finality": false, "readiness": "inspection-only" },
   "historical": { "pr310": "NO_LONGER_APPLICABLE", "pr310_code": "do-not-revive", "318": "SUPERSEDE", "337": "NO_LONGER_APPLICABLE" },
   "privacy": { "raw_secrets": false, "private_paths": false, "raw_code_blobs": false, "public_safe_evidence_only": true },
-  "mcp": { "status": "not_applicable", "custom_n8n_mcp": false }
+  "mcp": { "status": "not_applicable", "custom_n8n_mcp": false },
+  "programme_v1": {
+    "product": "github-program-reconciler",
+    "design_lock": "DL-S2-GITHUB-PROGRAM-001",
+    "principle": "WEB_DECIDES_RECONCILER_EXECUTES_AND_PROVES",
+    "transaction": [
+      "PREVIEW",
+      "APPLY",
+      "READBACK_VERIFY"
+    ],
+    "predecessor_contract": "repo/contracts/github-program-predecessor-coverage.json",
+    "predecessor_authority": "github:issue-comment:359:5437827030",
+    "native_relationships": {
+      "api_version": "2026-03-10",
+      "sub_issues": [
+        "inspect",
+        "add",
+        "remove",
+        "replace_parent",
+        "reprioritize"
+      ],
+      "dependencies": [
+        "blocked_by.inspect",
+        "blocked_by.add",
+        "blocked_by.remove"
+      ],
+      "markdown_links_canonical": false,
+      "blocked_label_derived_only": true
+    },
+    "materialised_views": [
+      "parent",
+      "child",
+      "pr"
+    ],
+    "managed_events": [
+      "lifecycle_transition",
+      "lock_accepted",
+      "candidate_bound",
+      "validation",
+      "g4_or_finality",
+      "blocker",
+      "dependency",
+      "owner_decision",
+      "reconciliation_receipt"
+    ],
+    "managed_labels": [
+      "current",
+      "queued",
+      "blocked"
+    ],
+    "pr_registry_statuses": [
+      "ACTIVE",
+      "ACCEPTED",
+      "RETIRED"
+    ],
+    "conformance": [
+      "UNMANAGED",
+      "LEGACY_MANAGED",
+      "CURRENT_MANAGED",
+      "DRIFTED_MANAGED"
+    ],
+    "implicit_discovery": {
+      "inspection": true,
+      "preflight": true,
+      "mutation_authority": false,
+      "ready": false,
+      "merge": false,
+      "finality": false
+    },
+    "body_freshness_same_transaction": true,
+    "immediate_rerun": "ZERO_DELTA_ZERO_MUTATION",
+    "incomplete_code": "PARENT_RECONCILIATION_INCOMPLETE"
+  }
 }

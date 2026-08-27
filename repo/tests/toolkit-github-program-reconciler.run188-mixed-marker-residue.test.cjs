@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const n5 = require('../scripts/toolkit-github-governance-review-reconciler.cjs');
+const n5 = require('../scripts/toolkit-github-program-reconciler.cjs');
 const a1 = require('../scripts/toolkit-control-plane/control-plane-kernel.cjs');
 
 const repository = 'weijunswj/ai-agent-toolkit';
@@ -106,11 +106,25 @@ function initialise(body, state = parentState()) {
   return { github, result };
 }
 
-function assertUncertainNoWrite(body, label) {
-  const { github, result } = initialise(body);
+function assertUncertainNoWrite(body, label, state = parentState()) {
+  const { github, result } = initialise(body, state);
   assert.equal(result.code, 'PARENT_PARSE_UNCERTAIN', label);
   assert.equal(github.values.writes, 0, label);
   assert.equal(github.values.current, body, label);
+}
+
+function residue(kind, shape = 'begin') {
+  const name = kind.toUpperCase();
+  if (shape === 'end') return `<!-- AI-AGENT-TOOLKIT:N5-${name}:END -->`;
+  if (shape === 'partial') return `<!-- AI-AGENT-TOOLKIT:N5-${name}:BEGIN`;
+  return `<!-- AI-AGENT-TOOLKIT:N5-${name}:BEGIN v2 -->`;
+}
+
+function exactWithOutside(outside, position = 'after') {
+  const exact = n5.renderManagedBlock('parent', parentState());
+  return position === 'before'
+    ? `${outside}\nordinary prefix\n${exact}ordinary suffix\n`
+    : `ordinary prefix\n${exact}ordinary suffix\n${outside}\n`;
 }
 
 function legacyBody(version = n5.LEGACY_V0_VERSION) {
@@ -133,35 +147,59 @@ function legacyBody(version = n5.LEGACY_V0_VERSION) {
     + `- Required: yes\n`;
 }
 
-test('RUN-187 unsupported and partial N5 marker-family residue is initialise-uncertain with zero writes', () => {
-  const cases = [
-    ['lone unsupported parent begin', '<!-- AI-AGENT-TOOLKIT:N5-PARENT:BEGIN v2 -->'],
-    ['unsupported parent version plus opaque text', '<!-- AI-AGENT-TOOLKIT:N5-PARENT:BEGIN v7 -->\nopaque owner text\n'],
-    ['lone parent end residue', '<!-- AI-AGENT-TOOLKIT:N5-PARENT:END -->'],
-    ['partial parent begin', '<!-- AI-AGENT-TOOLKIT:N5-PARENT:BEGIN'],
-    ['unsupported child residue', `owner\n<!-- AI-AGENT-TOOLKIT:N5-CHILD:BEGIN v2 -->\nopaque\n`],
-    ['unsupported PR residue', `owner\n<!-- AI-AGENT-TOOLKIT:N5-PR:BEGIN v4 -->\nopaque\n`],
-    ['unsupported state residue', `owner\n<!-- AI-AGENT-TOOLKIT:N5-STATE:BEGIN v2 -->\nopaque\n`],
-    ['mixed current and unsupported marker residue', '<!-- AI-AGENT-TOOLKIT:N5-STATE:BEGIN v1 -->\n<!-- AI-AGENT-TOOLKIT:N5-PR:BEGIN v9 -->'],
-    ['case and spacing variant residue', '<!-- ai-agent-toolkit: n5 - parent : begin v2 -->'],
-  ];
-  for (const [label, body] of cases) assertUncertainNoWrite(body, label);
+test('RUN-188 unsupported parent, child, PR and state residue before or after v3 is uncertain with zero writes', () => {
+  for (const kind of ['parent', 'child', 'pr', 'state']) {
+    for (const position of ['before', 'after']) {
+      assertUncertainNoWrite(exactWithOutside(residue(kind), position), `${kind} ${position}`);
+    }
+  }
 });
 
-test('RUN-187 exact current v3 controls preserve truthful NOOP and scope rejection', () => {
+test('RUN-188 outside case-spacing and partial marker-family residue is uncertain with zero writes', () => {
+  assertUncertainNoWrite(
+    exactWithOutside('<!-- ai-agent-toolkit: n5 - child : begin v2 -->', 'after'),
+    'case and spacing variant',
+  );
+  assertUncertainNoWrite(exactWithOutside(residue('pr', 'partial'), 'before'), 'partial PR begin');
+  assertUncertainNoWrite(exactWithOutside(residue('parent', 'end'), 'after'), 'lone parent end');
+});
+
+test('RUN-188 ambiguity wins over same-state NOOP and conflicting-state scope rejection', () => {
+  const body = exactWithOutside(residue('child'), 'after');
+  const same = initialise(body, parentState());
+  assert.equal(same.result.code, 'PARENT_PARSE_UNCERTAIN');
+  assert.notEqual(same.result.code, 'N5_NOOP');
+  assert.equal(same.github.values.writes, 0);
+
+  const conflicting = initialise(body, parentState({ owner_detail: 'conflicting desired state' }));
+  assert.equal(conflicting.result.code, 'PARENT_PARSE_UNCERTAIN');
+  assert.notEqual(conflicting.result.code, 'N5_SCOPE_REJECTED');
+  assert.equal(conflicting.github.values.writes, 0);
+});
+
+test('RUN-188 exact v3 alone and ordinary outside prose preserve existing behavior', () => {
   const exact = n5.renderManagedBlock('parent', parentState());
   const same = initialise(exact, parentState());
   assert.equal(same.result.code, 'N5_NOOP');
   assert.equal(same.github.values.writes, 0);
-  assert.equal(same.github.values.current, exact);
 
   const conflicting = initialise(exact, parentState({ owner_detail: 'conflicting desired state' }));
   assert.equal(conflicting.result.code, 'N5_SCOPE_REJECTED');
   assert.equal(conflicting.github.values.writes, 0);
-  assert.equal(conflicting.github.values.current, exact);
+
+  const prose = 'Owner notes discuss N5 parent governance, queue migration and review policy.\n';
+  const body = `${prose}${exact}Owner notes after the managed block mention governance and migration.\n`;
+  const withProse = initialise(body, parentState());
+  assert.equal(withProse.result.code, 'N5_NOOP');
+  assert.equal(withProse.github.values.writes, 0);
+  assert.equal(withProse.github.values.current, body);
 });
 
-test('RUN-187 exact legacy remains initialise migrate-only and valid migrate remains strict', () => {
+test('RUN-188 Run-187 unmanaged residue and exact legacy migration controls remain intact', () => {
+  assertUncertainNoWrite('<!-- AI-AGENT-TOOLKIT:N5-PARENT:BEGIN v2 -->');
+  assertUncertainNoWrite('<!-- AI-AGENT-TOOLKIT:N5-PARENT:END -->');
+  assertUncertainNoWrite('<!-- AI-AGENT-TOOLKIT:N5-STATE:BEGIN v2 -->\nopaque');
+
   const legacy = legacyBody();
   const initialised = initialise(legacy);
   assert.equal(initialised.result.code, 'N5_SCOPE_REJECTED');
@@ -187,19 +225,4 @@ test('RUN-187 exact legacy remains initialise migrate-only and valid migrate rem
   assert.equal(migrated.code, 'N5_RECONCILED');
   assert.equal(github.values.writes, 1);
   assert.match(github.values.current, /AI-AGENT-TOOLKIT:N5-PARENT:BEGIN v3/);
-});
-
-test('RUN-187 unrelated owner prose and generic N5 prose remain eligible and preserve bytes', () => {
-  const ownerProse = 'Owner notes discuss queue governance before the N5 parent migration.\nSecond owner line.\n';
-  const first = initialise(ownerProse);
-  assert.equal(first.result.code, 'N5_RECONCILED');
-  assert.equal(first.github.values.writes, 1);
-  assert.equal(first.github.values.current.slice(0, ownerProse.length), ownerProse);
-  assert.equal(first.github.values.current.indexOf('Second owner line.'), ownerProse.indexOf('Second owner line.'));
-
-  const generic = 'N5 parent governance discusses queue ownership and migration, but contains no managed-comment marker namespace.\n';
-  const second = initialise(generic);
-  assert.equal(second.result.code, 'N5_RECONCILED');
-  assert.equal(second.github.values.writes, 1);
-  assert.equal(second.github.values.current.slice(0, generic.length), generic);
 });

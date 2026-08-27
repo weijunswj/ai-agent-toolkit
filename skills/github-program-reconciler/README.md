@@ -1,10 +1,7 @@
-# N5 GitHub Governance and Truthful PR-Review Reconciler
+# GitHub Program Reconciler
 
-Explicit-only skill for the current-main Toolkit N5 contract: deterministic
-parent/direct-child governance, bounded large-parent mutation, truthful PR
-review inventory and finding disposition evidence, and parent-managed Deferred
-Findings. It preserves A1-A4 and #295 authority boundaries and never owns
-review-thread mutation, Ready, merge, Web finality, providers, workflows, or
-MCP.
+Deterministic managed GitHub programme reconciliation with native sub-issue and dependency semantics, materialised Parent/Child/PR views, typed chronology, predecessor coverage, safe PR closing associations, and `PREVIEW -> APPLY -> READBACK_VERIFY`.
 
-This skill is directly canonical. Use the local runtime and focused tests when validating it.
+Implicit discovery performs inspection and mandatory lifecycle preflight only. Mutation requires explicit preview-bound authority; review mutation, Ready, merge, autonomous finality, providers, workflows, and live adapters are not included.
+
+Current runtime: `repo/scripts/toolkit-github-program-reconciler.cjs`.

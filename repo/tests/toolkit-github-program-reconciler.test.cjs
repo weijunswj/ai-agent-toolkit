@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const n5 = require('../scripts/toolkit-github-governance-review-reconciler.cjs');
+const n5 = require('../scripts/toolkit-github-program-reconciler.cjs');
 const a1 = require('../scripts/toolkit-control-plane/control-plane-kernel.cjs');
 
 const repository = 'weijunswj/ai-agent-toolkit';
@@ -16,7 +16,7 @@ function parentState(overrides = {}) {
 function childState(overrides = {}) {
   return { kind: 'child', tracker_version: 'v3', repository, issue_number: 299, lifecycle: 'current', objective: 'Govern the canonical parent and direct child topology.',
     progress_checklist: [{ id: 'contract', checked: true, text: 'Accepted contract is preserved.' }],
-    scope: { design_lock: 'DL-N5-GITHUB-GOVERNANCE-REVIEW-RECONCILER-001-G2-R1', frozen: true, summary: 'N5 only' }, blockers: [], next_gate: 'Fresh exact-head Web validation', implementation_pr: { number: 0, state: 'not_opened' }, technical_detail: 'Current-state detail only.', ...overrides };
+    scope: { design_lock: 'DL-S2-GITHUB-PROGRAM-001', frozen: true, summary: 'N5 only' }, blockers: [], next_gate: 'Fresh exact-head Web validation', implementation_pr: { number: 0, state: 'not_opened' }, technical_detail: 'Current-state detail only.', ...overrides };
 }
 function body(kind, state, prefix = 'owner-before\n', suffix = '\nowner-after\n') { return prefix + n5.renderManagedBlock(kind, state) + suffix; }
 function enabledA2(canonical_remote = 'https://github.com/weijunswj/ai-agent-toolkit.git') {
@@ -73,7 +73,7 @@ function reviewEvidenceInput(overrides = {}) {
 
 
 
-test('locked constants and result vocabulary', () => { assert.equal(n5.CONTRACT_VERSION, 'toolkit.n5.github-governance-review-reconciler.v3'); assert.equal(n5.REVIEW_INVENTORY_VERSION, 'toolkit.n5.review-inventory.v1'); assert.deepEqual(n5.INTENTS, ['inspect', 'preview', 'initialise', 'migrate', 'validate', 'reconcile', 'show', 'remove']); assert.equal(n5.MANAGED_MARKERS.parent.begin, '<!-- AI-AGENT-TOOLKIT:N5-PARENT:BEGIN v3 -->'); assert.ok(n5.FAILURE_CODES.includes('PARENT_CONCURRENCY_CONFLICT')); assert.ok(n5.SUCCESS_CODES.includes('N5_RECONCILED')); });
+test('locked constants and result vocabulary', () => { assert.equal(n5.CONTRACT_VERSION, 'toolkit.github-program-reconciler.v1'); assert.equal(n5.REVIEW_INVENTORY_VERSION, 'toolkit.n5.review-inventory.v1'); assert.deepEqual(n5.INTENTS, ['inspect', 'preview', 'initialise', 'migrate', 'validate', 'reconcile', 'show', 'remove']); assert.equal(n5.MANAGED_MARKERS.parent.begin, '<!-- AI-AGENT-TOOLKIT:N5-PARENT:BEGIN v3 -->'); assert.ok(n5.FAILURE_CODES.includes('PARENT_CONCURRENCY_CONFLICT')); assert.ok(n5.SUCCESS_CODES.includes('N5_RECONCILED')); });
 test('render and parse deterministic v3 sections', () => { const state = parentState(); const rendered = n5.renderManagedBlock('parent', state); const parsed = n5.parseManagedBlock(rendered, 'parent', { complete: true }); assert.equal(parsed.ok, true); assert.deepEqual(parsed.state, state); assert.deepEqual(parsed.sections, n5.SECTION_ORDER.parent); assert.match(rendered, /## Current work/); assert.match(rendered, /## Tracker format contract/); });
 test('managed replacement preserves unrelated bytes', () => { const original = body('parent', parentState(), 'prefix\n\n', '\n\nsuffix\n'); const result = n5.replaceManagedBlock(original, 'parent', { ...parentState(), owner_detail: 'changed bounded detail' }); assert.equal(result.ok, true); assert.equal(result.prefix, 'prefix\n\n'); assert.equal(result.suffix, '\n\n\nsuffix\n'); assert.equal(result.outside_bytes_preserved, true); assert.match(result.body, /changed bounded detail/); });
 test('missing duplicate mismatched and partial managed input fail closed', () => { assert.equal(n5.parseManagedBlock('plain body', 'parent', { complete: true }).code, 'PARENT_PARSE_UNCERTAIN'); const duplicate = body('parent', parentState()) + n5.renderManagedBlock('parent', parentState()); assert.equal(n5.parseManagedBlock(duplicate, 'parent', { complete: true }).code, 'PARENT_PARSE_UNCERTAIN'); assert.equal(n5.parseManagedBlock(n5.renderManagedBlock('child', childState()), 'parent', { complete: true }).code, 'PARENT_PARSE_UNCERTAIN'); assert.equal(n5.parseManagedBlock('', 'parent', { complete: false }).code, 'PARENT_BODY_INCOMPLETE'); });

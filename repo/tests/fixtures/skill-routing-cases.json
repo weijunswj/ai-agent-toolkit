@@ -21,7 +21,7 @@
   "invocation_modes": {
     "codex-ssh-hostinger-coolify-setup-maintainer": "explicit",
     "frontend-art-direction": "implicit",
-    "github-program-reconciler": "explicit",
+    "github-program-reconciler": "implicit",
     "local-ai-safety": "implicit",
     "managed-app-foundation-review": "implicit",
     "n8n-environment-setup": "implicit",

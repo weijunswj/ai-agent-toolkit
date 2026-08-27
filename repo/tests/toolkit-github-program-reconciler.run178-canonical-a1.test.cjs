@@ -5,7 +5,7 @@ const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const a1 = require('../scripts/toolkit-control-plane/control-plane-kernel.cjs');
-const n5 = require('../scripts/toolkit-github-governance-review-reconciler.cjs');
+const n5 = require('../scripts/toolkit-github-program-reconciler.cjs');
 
 const repository = 'weijunswj/ai-agent-toolkit';
 const repositoryId = '1'.repeat(64);
@@ -166,7 +166,7 @@ test('each bound mutation input changes the canonical A1 binding', () => {
 });
 
 test('source no longer contains the custom N5 authorize or authority-digest seam', () => {
-  const source = fs.readFileSync(path.resolve(__dirname, '../scripts/toolkit-github-governance-review-reconciler.cjs'), 'utf8');
+  const source = fs.readFileSync(path.resolve(__dirname, '../scripts/toolkit-github-program-reconciler.cjs'), 'utf8');
   assert.doesNotMatch(source, /options\.a1\.authorize/);
   assert.doesNotMatch(source, /expected_operation_digest\s*=\s*sha256\(operation\)/);
   assert.match(source, /a1\.operationDigest\(operation\)/);
@@ -234,7 +234,7 @@ test('the four mutating N5 intents use the closed source-owned action mapping', 
 });
 
 test('source policy declares the canonical A1 broker and closed action mapping', () => {
-  const policyPath = path.resolve(__dirname, '../../repo/contracts/github-governance-review-reconciler/github-governance-review-reconciler-policy.json');
+  const policyPath = path.resolve(__dirname, '../../repo/contracts/github-program-reconciler/github-program-reconciler-policy.json');
   const policy = JSON.parse(fs.readFileSync(policyPath, 'utf8'));
   assert.equal(policy.authority.a1.broker, 'authority_broker');
   assert.equal(policy.authority.a1.operation_shape, 'canonical-typed');

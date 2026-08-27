@@ -1,12 +1,12 @@
 interface:
   display_name: GitHub Program Reconciler
-  short_description: Govern parent state and truthful review evidence explicitly.
+  short_description: Preflight and prove managed GitHub programme reconciliation.
   primary_color: '#1D4ED8'
-  default_prompt: Use $github-program-reconciler only for explicit current-main N5 parent/direct-child governance, bounded reconciliation, truthful PR-review inventory, or Deferred Findings work; preserve A1-A4 and Web finality boundaries.
+  default_prompt: Use $github-program-reconciler for managed programme lifecycle inspection and mandatory preflight. Never infer mutation, Ready, merge, review-thread, owner-decision, or finality authority.
 policy:
   products:
     - chatgpt
     - codex
     - api
     - atlas
-  allow_implicit_invocation: false
+  allow_implicit_invocation: true

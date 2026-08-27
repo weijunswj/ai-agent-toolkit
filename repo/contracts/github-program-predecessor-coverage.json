@@ -1,0 +1,383 @@
+{
+  "$schema": "toolkit.github-program.predecessor-coverage.v1",
+  "repository": "weijunswj/ai-agent-toolkit",
+  "programme_parent_issue": 240,
+  "programme_child_issue": 359,
+  "design_lock": "DL-S2-GITHUB-PROGRAM-001",
+  "authority": {
+    "kind": "WEB_ADJUDICATION",
+    "issue": 359,
+    "comment_id": 5437827030,
+    "reference": "github:issue-comment:359:5437827030",
+    "marker": "PREDECESSOR_COVERAGE_WEB_ADJUDICATED / 45_OF_45_ISSUES_MAPPED / UNMAPPED_PREDECESSOR_OBLIGATIONS=0"
+  },
+  "expected_issue_count": 45,
+  "expected_criterion_count": 84,
+  "accepted_dispositions": [
+    "SATISFIED",
+    "SUPERSEDED_BY_STRONGER_IMPLEMENTATION",
+    "NO_LONGER_APPLICABLE",
+    "TRANSFERRED"
+  ],
+  "unmapped_disposition_allowed": false,
+  "s6_final_assurance": {
+    "owner": "S6#363",
+    "must_mechanically_prove_zero_unresolved_active_transfers": true
+  },
+  "predecessors": [
+    {
+      "issue": 241,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "241-execution-control-plane", "scope": "Remaining execution, delegation and control-plane criteria", "disposition": "TRANSFERRED", "current_owner": "S3#360", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 242,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "242-historical-backup-restore", "scope": "Historical backup, restore and ignore implementation plus native Batch-D evidence", "disposition": "SATISFIED", "owner": "HISTORICAL_ACCEPTED", "programme_blocking": false, "evidence_refs": ["github:issue:242", "github:issue-comment:359:5437827030"] },
+        { "id": "242-repository-local-lifecycle", "scope": "Reopened local info/exclude, worktree, scratch and repository-local operational-lifecycle contract", "disposition": "TRANSFERRED", "current_owner": "S2_E4#359", "programme_blocking": true },
+        { "id": "242-native-windows-proof", "scope": "Final native Windows proof", "disposition": "TRANSFERRED", "current_owner": "S6#363", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 243,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "243-generated-topology", "scope": "Generated and copy-managed topology assumptions", "disposition": "SUPERSEDED_BY_STRONGER_IMPLEMENTATION", "owner": "S1#358", "programme_blocking": false, "evidence_refs": ["github:issue:358", "github:issue-comment:359:5437827030"] },
+        { "id": "243-repository-consent", "scope": "Durable repository consent and decline authority", "disposition": "TRANSFERRED", "current_owner": "S3#360", "programme_blocking": true },
+        { "id": "243-native-repository-lifecycle", "scope": "Truthful native repository-local install, update and reconciliation behaviour", "disposition": "TRANSFERRED", "current_owner": "S2_E4#359", "programme_blocking": true },
+        { "id": "243-native-proof", "scope": "Native proof", "disposition": "TRANSFERRED", "current_owner": "S6#363", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 245,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "245-official-n8n-integration", "scope": "Official n8n Skills and runtime integration obligations", "disposition": "TRANSFERRED", "current_owner": "S4#361", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 246,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "246-optional-queue-mode", "scope": "Optional Redis, worker, webhook and runner queue-mode architecture", "disposition": "TRANSFERRED", "current_owner": "OWNER_CONTROLLED_OPTIONAL_BACKLOG", "programme_blocking": false, "active_completion_graph": false, "backlog_state": "DESIRED_OPTIONAL_FUTURE_WORK", "discoverable": true, "reactivation_required": true, "reactivation_authority": "OWNER_OR_WEB", "reactivation_owner": "S5#362" }
+      ]
+    },
+    {
+      "issue": 247,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "247-native-host-uat", "scope": "Native host and UAT obligations", "disposition": "TRANSFERRED", "current_owner": "S6#363", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 248,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "248-old-generated-source-watch-topology", "scope": "Old generated and source-watch topology", "disposition": "SUPERSEDED_BY_STRONGER_IMPLEMENTATION", "owner": "S1#358", "programme_blocking": false, "evidence_refs": ["github:issue:358", "github:issue-comment:359:5437827030"] },
+        { "id": "248-host-adapter-drift", "scope": "Host-adapter drift and reconciliation", "disposition": "TRANSFERRED", "current_owner": "S2_E4#359", "programme_blocking": true },
+        { "id": "248-repository-manager-drift", "scope": "Repository-manager and conformance drift", "disposition": "TRANSFERRED", "current_owner": "S3#360", "programme_blocking": true },
+        { "id": "248-official-n8n-drift", "scope": "Official n8n source and runtime drift", "disposition": "TRANSFERRED", "current_owner": "S4#361", "programme_blocking": true },
+        { "id": "248-provider-hosted-drift", "scope": "External-provider and hosted drift and holds", "disposition": "TRANSFERRED", "current_owner": "S5#362", "programme_blocking": true },
+        { "id": "248-final-native-proof", "scope": "Final native proof", "disposition": "TRANSFERRED", "current_owner": "S6#363", "programme_blocking": true, "recurring_ai_review_loop_restored": false }
+      ]
+    },
+    {
+      "issue": 249,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "249-frontend-art-direction", "scope": "Public-site routing, deliberate art direction, visual-world exploration, first-viewport, responsive, accessibility and buildability contract", "disposition": "SATISFIED", "owner": "S2_E2#359", "programme_blocking": false, "evidence_refs": ["github:issue:359", "github:pull:366", "github:issue-comment:359:5437827030"] },
+        { "id": "249-native-routing-uat", "scope": "Representative real-task and native routing UAT", "disposition": "TRANSFERRED", "current_owner": "S6#363", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 250,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "250-three-parked-investigations", "scope": "All three parked investigations", "group_cardinality": 3, "disposition": "TRANSFERRED", "current_owner": "OWNER_CONTROLLED_PARKED_BACKLOG", "programme_blocking": false, "active_completion_graph": false, "backlog_state": "OWNER_CONTROLLED_PARKED", "discoverable": true, "silently_cancelled": false, "reactivation_required": true, "reactivation_authority": "OWNER_OR_WEB", "superpowers_dependency_created": false }
+      ]
+    },
+    {
+      "issue": 251,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "251-whole-toolkit-assurance", "scope": "Fresh final whole-Toolkit assurance", "disposition": "TRANSFERRED", "current_owner": "S6#363", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 252,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "252-control-plane-handoff", "scope": "Control-plane authority, evidence, event and diagnostic-handoff criteria", "disposition": "TRANSFERRED", "current_owner": "S3#360", "programme_blocking": true },
+        { "id": "252-hosted-observability", "scope": "Hosted observability, privacy, retention and operational evidence criteria", "disposition": "TRANSFERRED", "current_owner": "S5#362", "programme_blocking": true },
+        { "id": "252-native-live-completeness", "scope": "Native and live completeness proof", "disposition": "TRANSFERRED", "current_owner": "S6#363", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 253,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "253-n8n-api-transport", "scope": "n8n API and transport obligations", "disposition": "TRANSFERRED", "current_owner": "S4#361", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 254,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "254-validator-harness", "scope": "Bounded, deterministic, local-data-safe and Windows-observable validator harness", "disposition": "TRANSFERRED", "current_owner": "S6#363", "programme_blocking": true, "current_reproduction_required": true, "stale_machinery_reimplementation_required": false }
+      ]
+    },
+    {
+      "issue": 257,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "257-managed-source-topology", "scope": "Dedicated managed-source, generated-copy and self-replacing topology", "disposition": "SUPERSEDED_BY_STRONGER_IMPLEMENTATION", "owner": "S1#358", "programme_blocking": false, "evidence_refs": ["github:issue:358", "github:issue-comment:359:5437827030"] },
+        { "id": "257-native-install-update", "scope": "Current native install and update identity, staging, rollback and preservation semantics", "disposition": "TRANSFERRED", "current_owner": "S2_E4#359", "programme_blocking": true },
+        { "id": "257-native-proof", "scope": "Native proof", "disposition": "TRANSFERRED", "current_owner": "S6#363", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 264,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "264-n8n-skills-transport", "scope": "n8n Skills and API transport criteria", "disposition": "TRANSFERRED", "current_owner": "S4#361", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 265,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "265-n8n-operational-handoff", "scope": "n8n workflow operational and diagnostic handoff criteria", "disposition": "TRANSFERRED", "current_owner": "S4#361", "programme_blocking": true, "downstream_evidence_law_owner": "S5#362" }
+      ]
+    },
+    {
+      "issue": 268,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "268-claude-question-bank", "scope": "Repository remediation for complete Claude setup question-bank behaviour", "disposition": "SATISFIED", "owner": "HISTORICAL_ACCEPTED", "programme_blocking": false, "evidence_refs": ["github:issue:268", "github:issue-comment:359:5437827030"] },
+        { "id": "268-native-claude-continuation", "scope": "Externally gated native Claude continuation", "disposition": "TRANSFERRED", "current_owner": "S6#363", "programme_blocking": true, "account_authentication_bypass_allowed": false }
+      ]
+    },
+    {
+      "issue": 270,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "270-hosted-production-operations", "scope": "Hosted and production operations criteria", "disposition": "TRANSFERRED", "current_owner": "S5#362", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 271,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "271-hosted-backup-recovery", "scope": "Hosted backup, recovery and operations criteria", "disposition": "TRANSFERRED", "current_owner": "S5#362", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 272,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "272-hosted-deployment-health", "scope": "Hosted deployment, health and operational criteria", "disposition": "TRANSFERRED", "current_owner": "S5#362", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 284,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "284-trusted-ci-integration", "scope": "Accepted trusted-CI, repository-protection safety, correctness and authority semantics for real operational integration", "disposition": "TRANSFERRED", "current_owner": "S3#360", "programme_blocking": true, "historical_closed_unmerged_lineage_restored": false },
+        { "id": "284-native-live-proof", "scope": "Final authorised native and live proof", "disposition": "TRANSFERRED", "current_owner": "S6#363", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 286,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "286-operation-admission", "scope": "Typed and control-plane authority and operation admission", "disposition": "TRANSFERRED", "current_owner": "S3#360", "programme_blocking": true },
+        { "id": "286-host-native-integration", "scope": "Host-native integration concerns", "disposition": "TRANSFERRED", "current_owner": "S2_E4#359", "programme_blocking": true },
+        { "id": "286-n8n-api-exception", "scope": "n8n API-only transport exception", "disposition": "TRANSFERRED", "current_owner": "S4#361", "programme_blocking": true },
+        { "id": "286-provider-capability-routing", "scope": "Generic provider capability routing, credential and secret authority, and hosted external operations", "disposition": "TRANSFERRED", "current_owner": "S5#362", "programme_blocking": true, "historical_closed_unmerged_lineage_restored": false }
+      ]
+    },
+    {
+      "issue": 287,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "287-capability-delegation-admission", "scope": "Host capability and delegation-policy truthfulness and fail-closed route admission", "disposition": "TRANSFERRED", "current_owner": "S3#360", "programme_blocking": true, "second_authority_model_allowed": false }
+      ]
+    },
+    {
+      "issue": 291,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "291-external-secrets-provider", "scope": "External, secrets and provider operations criteria", "disposition": "TRANSFERRED", "current_owner": "S5#362", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 294,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "294-parallel-instruction-registry", "scope": "Standalone parallel instruction-governance registry and recurring-model-benchmark programme", "disposition": "SUPERSEDED_BY_STRONGER_IMPLEMENTATION", "owner": "S1_E1_E2", "programme_blocking": false, "evidence_refs": ["github:issue:358", "github:issue:359", "github:issue-comment:359:5437827030"] },
+        { "id": "294-host-adapter-drift", "scope": "Host-specific adapter-drift truthfulness", "disposition": "TRANSFERRED", "current_owner": "S2_E4#359", "programme_blocking": true },
+        { "id": "294-repository-consistency", "scope": "Event-driven repository consistency and drift duties", "disposition": "TRANSFERRED", "current_owner": "S3#360", "programme_blocking": true, "self_modifying_policy_engine_allowed": false }
+      ]
+    },
+    {
+      "issue": 295,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "295-repository-consent-governance", "scope": "Durable per-repository consent and governance authority", "disposition": "TRANSFERRED", "current_owner": "S3#360", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 296,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "296-global-native-instructions", "scope": "User-global host and native instruction adapter behaviour", "disposition": "TRANSFERRED", "current_owner": "S2_E4#359", "programme_blocking": true },
+        { "id": "296-consent-governance-separation", "scope": "Repository consent and governance separation", "disposition": "TRANSFERRED", "current_owner": "S3#360", "programme_blocking": true },
+        { "id": "296-native-host-proof", "scope": "Final native host proof", "disposition": "TRANSFERRED", "current_owner": "S6#363", "programme_blocking": true, "generated_global_copy_assumptions_required": false }
+      ]
+    },
+    {
+      "issue": 297,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "297-gemini-cli-retirement", "scope": "Gemini CLI product retirement", "disposition": "SATISFIED", "owner": "S1_S2_ACCEPTED", "programme_blocking": false, "evidence_refs": ["github:issue:358", "github:issue:359", "github:issue-comment:359:5437827030"], "gemini_cli_product_may_return": false },
+        { "id": "297-antigravity-native-surface", "scope": "Truthful Antigravity native global instruction surface and only-where-required bounded repository compatibility adapter", "disposition": "TRANSFERRED", "current_owner": "S2_E4#359", "programme_blocking": true },
+        { "id": "297-native-proof", "scope": "Native proof", "disposition": "TRANSFERRED", "current_owner": "S6#363", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 298,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "298-four-host-adapters", "scope": "Four-host native and self-verifying plugin-adapter product obligations", "disposition": "TRANSFERRED", "current_owner": "S2_E4#359", "programme_blocking": true },
+        { "id": "298-shared-authority-law", "scope": "Shared authority and delegation law integration", "disposition": "TRANSFERRED", "current_owner": "S3#360", "programme_blocking": true, "competing_controller_allowed": false },
+        { "id": "298-installed-host-proof", "scope": "Installed-host proof", "disposition": "TRANSFERRED", "current_owner": "S6#363", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 299,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "299-historical-n5-implementation", "scope": "N5 then-current GitHub governance implementation", "disposition": "SATISFIED", "owner": "HISTORICAL_N5", "programme_blocking": false, "evidence_refs": ["github:issue:299", "github:issue-comment:359:5437827030"] },
+        { "id": "299-surviving-programme-semantics", "scope": "Surviving programme-state, parent, child, current-queue, exact-candidate and deterministic reconciliation semantics", "disposition": "SUPERSEDED_BY_STRONGER_IMPLEMENTATION", "owner": "S2_E3#359", "programme_blocking": false, "evidence_refs": ["github:issue:359", "github:issue-comment:359:5437827030"], "retired_workflow_stages_restored": false }
+      ]
+    },
+    {
+      "issue": 300,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "300-plugin-lifecycle", "scope": "Bounded local plugin-generation retention, exact attributable cleanup and recovery-preserving lifecycle", "disposition": "TRANSFERRED", "current_owner": "S2_E4#359", "programme_blocking": true },
+        { "id": "300-installed-host-cleanup", "scope": "Real installed-host cleanup, UAT and final zero-residue proof", "disposition": "TRANSFERRED", "current_owner": "S6#363", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 312,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "312-external-authority-secrets", "scope": "External authority, secrets and hosted operations criteria", "disposition": "TRANSFERRED", "current_owner": "S5#362", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 314,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "314-external-environment-authority", "scope": "External environment, authority and secret-operation criteria", "disposition": "TRANSFERRED", "current_owner": "S5#362", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 320,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "320-historical-review-evidence", "scope": "N5 truthful server-authoritative review evidence, material finding and deferred-finding handling, and controller-only disposition contract", "disposition": "SATISFIED", "owner": "HISTORICAL_N5", "programme_blocking": false, "evidence_refs": ["github:issue:320", "github:issue-comment:359:5437827030"] },
+        { "id": "320-surviving-review-semantics", "scope": "Surviving review and evidence inventory semantics under typed chronology and readback", "disposition": "SUPERSEDED_BY_STRONGER_IMPLEMENTATION", "owner": "S2_E3#359", "programme_blocking": false, "evidence_refs": ["github:issue:359", "github:issue-comment:359:5437827030"] }
+      ]
+    },
+    {
+      "issue": 323,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "323-stale-ui-ux-delta-gate", "scope": "Old read-only UI/UX Pro Max delta inventory as the stale upstream-delta execution gate", "disposition": "NO_LONGER_APPLICABLE", "owner": "WEB", "programme_blocking": false, "evidence_refs": ["github:issue:323", "github:issue:335", "github:issue-comment:359:5437827030"], "future_source_change_requires_fresh_product_review": true }
+      ]
+    },
+    {
+      "issue": 324,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "324-ponytail-disposition", "scope": "Completed Ponytail disposition", "disposition": "SATISFIED", "owner": "S1#358", "programme_blocking": false, "evidence_refs": ["github:issue:358", "github:issue-comment:359:5437827030"] },
+        { "id": "324-okf-removal", "scope": "OKF-removal ownership through accepted topology and removal work", "disposition": "SUPERSEDED_BY_STRONGER_IMPLEMENTATION", "owner": "S1#358", "programme_blocking": false, "evidence_refs": ["github:issue:358", "github:issue-comment:359:5437827030"] },
+        { "id": "324-host-harness-capability", "scope": "Still-unproven host-harness capability-disposition criterion", "disposition": "TRANSFERRED", "current_owner": "S2_E4#359", "programme_blocking": true },
+        { "id": "324-final-native-confirmation", "scope": "Final native confirmation", "disposition": "TRANSFERRED", "current_owner": "S6#363", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 328,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "328-notion-retirement", "scope": "Notion and knowledge-index-updater retirement", "disposition": "SATISFIED", "owner": "S1#358", "programme_blocking": false, "evidence_refs": ["github:issue:328", "github:issue:358", "github:issue-comment:359:5437827030"] }
+      ]
+    },
+    {
+      "issue": 335,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "335-theme-mode-proposal", "scope": "Theme-mode-before-palette proposal", "disposition": "NO_LONGER_APPLICABLE", "owner": "WEB", "programme_blocking": false, "evidence_refs": ["github:issue:335", "github:issue-comment:359:5437827030"], "explicit_owner_reintroduction_required": true }
+      ]
+    },
+    {
+      "issue": 336,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "336-okf-advisory-removal", "scope": "OKF advisory and watch removal", "disposition": "SATISFIED", "owner": "S1#358", "programme_blocking": false, "evidence_refs": ["github:issue:336", "github:issue:358", "github:issue-comment:359:5437827030"] }
+      ]
+    },
+    {
+      "issue": 338,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "338-accepted-a1-guardrails", "scope": "Late legacy guardrail findings fulfilled by the accepted A1 replacement", "disposition": "SATISFIED", "owner": "HISTORICAL_A1", "programme_blocking": false, "evidence_refs": ["github:issue:338", "github:issue:346", "github:issue-comment:359:5437827030"] },
+        { "id": "338-retired-legacy-guardrails", "scope": "Late legacy guardrail findings tied to the canonically retired vulnerable legacy implementation", "disposition": "SUPERSEDED_BY_STRONGER_IMPLEMENTATION", "owner": "S1#358", "programme_blocking": false, "evidence_refs": ["github:issue:338", "github:issue:358", "github:issue-comment:359:5437827030"], "old_runtime_restored": false }
+      ]
+    },
+    {
+      "issue": 340,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "340-provider-hosted-operations", "scope": "External, provider and hosted-operations criteria", "disposition": "TRANSFERRED", "current_owner": "S5#362", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 341,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "341-provider-model-routing", "scope": "Mixed-provider and model routing plus exact provider and model identity requirements", "disposition": "TRANSFERRED", "current_owner": "S3#360", "programme_blocking": true, "then_current_capability_required": true },
+        { "id": "341-installed-native-proof", "scope": "Installed and native proof", "disposition": "TRANSFERRED", "current_owner": "S6#363", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 342,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "342-structural-impact-propagation", "scope": "Structural-impact and managed-instruction propagation obligation", "disposition": "TRANSFERRED", "current_owner": "S3#360", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 346,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "346-historical-a1-a4", "scope": "A1/N1 through A4/N4 at their accepted canonical architecture", "disposition": "SATISFIED", "owner": "HISTORICAL_A1_A4", "programme_blocking": false, "evidence_refs": ["github:issue:346", "github:issue-comment:359:5437827030"] },
+        { "id": "346-retired-a1-a4-runtime", "scope": "Old A1-A4 runtime family as an implementation lineage", "disposition": "SUPERSEDED_BY_STRONGER_IMPLEMENTATION", "owner": "S3#360", "programme_blocking": false, "evidence_refs": ["github:issue:346", "github:issue:360", "github:issue-comment:359:5437827030"], "compatibility_runtime_restored": false },
+        { "id": "346-durable-control-semantics", "scope": "Surviving durable authority, capability, execution and assurance semantics", "disposition": "TRANSFERRED", "current_owner": "S3#360", "programme_blocking": true, "web_finality_external": true },
+        { "id": "346-final-native-assurance", "scope": "Final native assurance", "disposition": "TRANSFERRED", "current_owner": "S6#363", "programme_blocking": true }
+      ]
+    },
+    {
+      "issue": 348,
+      "authority_ref": "github:issue-comment:359:5437827030",
+      "criteria": [
+        { "id": "348-memory-governance-retirement", "scope": "Toolkit MEMORY.md governance and reporting retirement", "disposition": "SATISFIED", "owner": "S1#358", "programme_blocking": false, "evidence_refs": ["github:issue:348", "github:issue:358", "github:issue-comment:359:5437827030"] }
+      ]
+    }
+  ]
+}

@@ -75,7 +75,7 @@ test('active public routing and install surfaces contain no predecessor resoluti
   }
 
   for (const relPath of surfaces) {
-    const text = read(relPath).replaceAll('toolkit-github-governance-review-reconciler.cjs', 'E3_INTERNAL_RUNTIME');
+    const text = read(relPath).replaceAll('toolkit-github-program-reconciler.cjs', 'E3_INTERNAL_RUNTIME');
     for (const predecessor of predecessorIds) {
       assert.equal(text.includes(predecessor), false, `${relPath} resolves retired product ${predecessor}`);
     }

@@ -1,196 +1,68 @@
 ---
 name: github-program-reconciler
-description: Explicit-only GitHub programme parent/direct-child governance and truthful PR-review and Deferred Findings reconciliation. E2 renames the product only; current N5 runtime semantics remain unchanged until their separately authorised redesign.
+description: Use for managed GitHub programme lifecycle intent, parent-child governance, deterministic preview/apply/readback reconciliation, exact-head review evidence, or Deferred Findings. Implicit invocation performs inspection and preflight only and never grants mutation, Ready, merge, or finality authority.
 ---
 
 # GitHub Program Reconciler
 
-This skill is explicit-only. Its OpenAI metadata sets `allow_implicit_invocation: false`.
-Use it only when the user explicitly asks for the current-main N5 governance and
-truthful PR-review reconciler contract for a repository-scoped task. Ordinary
-GitHub inspection belongs to the GitHub skill, ordinary coding belongs to the
-coding agent, and final Web/controller work remains outside this skill.
+Use this product whenever a request intends to inspect or change a managed GitHub programme lifecycle: parent/current-child state, child queue or dependencies, epoch/Lock, active candidate, programme labels, or finality handoff. Implicit discovery is mandatory preflight for those intents, but it grants only read-only inspection and preview.
 
-## Scope
+Ordinary ungoverned GitHub metadata reads remain ordinary GitHub work. Ready, merge, review-thread mutation, owner decisions, Web finality, provider mutation, deployment, credentials, and live-system work remain outside this product.
 
-The supported intents are `inspect`, `preview`, `initialise`, `migrate`,
-`validate`, `reconcile`, `show`, and `remove` for one canonical parent and its
-direct sibling children. The v3 tracker has exactly one flat pending queue,
-at most one Current child, deterministic queue order, unique lifecycle
-membership, and a current-state projection rather than an ever-growing event
-log. Parent Markdown is a managed deterministic block; do not improvise or
-reconstruct a large parent body in model context.
+## Runtime and authority
 
-Use the one shared runtime:
+Use the one current runtime:
 
 ```text
-node repo/scripts/toolkit-github-governance-review-reconciler.cjs
+node repo/scripts/toolkit-github-program-reconciler.cjs
 ```
 
-The runtime is a local contract/parser/transaction library. A real adapter is
-not included and must not be invented here. Integration adapters must bind
-first-party evidence boundaries for review inventory and terminal proof.
-Review inventory authority comes only from getReviewEvidence and terminal
-compaction authority comes only from getTerminalEvidence. Caller arrays, counts,
-pagination facts, flags, digests, and durable evidence are equality assertions
-only; there is no fallback to caller durable evidence.
-must return a complete server-authoritative body, revision/ETag metadata when
-available, and a complete readback. Incomplete retrieval, missing/duplicate or
-ambiguous entries, parse uncertainty, concurrent movement, unrelated-byte
-drift, unverified body limits, and incomplete reconciliation fail closed.
+The runtime is a deterministic local contract and transaction library. It ships no live GitHub provider client. Fixtures and host adapters inject authoritative current state and exact mutations.
 
-## Authority and consent
+Inspection and PREVIEW never mutate. APPLY requires explicit current mutation authority bound to the accepted preview ID, exact repository, current revision, and smallest delta. READBACK_VERIFY rereads every affected projection and proves unrelated state was preserved. Stale, conflicting, partial, or unverifiable work fails with `PARENT_RECONCILIATION_INCOMPLETE`.
 
-- A1 remains the sole mutation authority and sole opaque authority-ticket
-  authority. N5 requests only typed `github.mutation` authority; it does not
-  mint, expose, or create another ticket or finality token.
-- A2 remains repository/capability consent and state only. Require the exact
-  canonical repository identity derived from the worktree, one local origin,
-  A1 remote validation, and `toolkit.repository-identity.v1`; callers cannot
-  override it. Require enabled `repository.governance` consent; A2 does not
-  widen task scope, delegation, GitHub authority, provider/live access, Web
-  authority, review mutation, Ready, or merge.
-- A3 remains execution/workspace/run/terminal evidence with exactly five
-  durable contracts and no finality authority.
-- A4 remains independent assurance and Web-finality handoff. Reuse its six
-  materiality predicates and exclusion rules; do not add an A4 contract.
-- Preserve #295's user-authority model. Do not create a generic independent
-  web-controller authority class.
+The successful immediate rerun must be `ZERO DELTA / ZERO MUTATION`.
 
-Mutation requires exact repository identity, A2 consent, an accepted read-only
-preview, and A1 authorization. Read-only inspection and preview do not mutate.
-`remove` is bounded and requires the same authority; it is not a cleanup or
-finality action.
+## Predecessor coverage
 
-## Run-185 three-root closure
+Before architecture or queue reset, load `repo/contracts/github-program-predecessor-coverage.json`. It is bound to #359 comment `5437827030`, exactly 45 predecessor issues and 84 criterion groups. `UNMAPPED` is invalid; every transferred active criterion has a current owner. #246 optional work and #250 parked work remain discoverable outside the active completion graph unless Owner/Web reactivates them.
 
-The six-root contract is closed:
+S6 must mechanically prove that no active transferred predecessor criterion remains unresolved before final whole-Toolkit assurance.
 
-- B1 binds the exact canonical A2 `repository_id` before A1 or GitHub access;
-  it is derived from the worktree, one local origin, A1 remote validation, and
-  `toolkit.repository-identity.v1`. Callers cannot supply a per-call
-  repository override or identity substitution.
-- B2 keeps one flat queue, renumbers pending entries after lifecycle changes,
-  rejects represented PR duplicates across every parent section, and requires
-  explicit terminal `completed` or `disposed` status. Completed additionally
-  requires stable accepted child completion evidence and its deterministic
-  digest; a merged implementation PR alone is insufficient. Failed or
-  non-delivery PR states never imply completion.
-- B3 requires explicit current and expected candidate identity, exact
-  represented PR head/tree/base facts, explicit merged and inline-conversation
-  booleans, complete server-authoritative review pages/cursors/counts, and
-  recomputed finding/Deferred Finding digests. The first-party review evidence
-  adapter supplies the arrays, pagination facts, authoritative counts, flags,
-  and binding digest; caller values are equality assertions only. Fresh
-  Deferred-Finding evidence is canonically normalized through A4 and derives
-  materiality and evidence/root digests at every revalidation ingress.
-- B4 uses one module/process owner registry for `repository+parent`; injected
-  maps cannot bypass it and every terminal path releases ownership.
-- B5 permits terminal compaction only with complete server-authoritative,
-  public-safe durable evidence from the first-party terminal evidence adapter
-  and a deterministic retained digest; caller proof is assertion-only.
-- B6 initialises only genuinely unmanaged bodies; exact recognised legacy
-  bodies require the existing migrate intent, and unknown or ambiguous
-  authority-like residue fails closed. Migrate remains limited to exact v3 or
-  `pre-n5-seven-section-v0` bodies with whole-body binding, one write, and
-  immediate readback.
-  Legacy residue detection is conservative and normalizes case and horizontal
-  spacing only; the strict migration parser remains exact and unrelated prose
-  is not residue.
+## Native relationships
 
-## Large-parent transaction
+Use current first-party GitHub semantics only:
 
-For one bounded update, the transaction is:
+- Parent-child truth comes from native sub-issues: inspect, add/adopt, remove, replace parent, and reprioritize where the adapter proves support.
+- Dependency truth comes from native issue `blocked_by` inspection, add, and remove operations.
+- Markdown links are supplemental context, not canonical native relationship truth.
+- The managed `blocked` label is derived evidence only.
+- Unsupported capabilities fail closed; never invent a pseudo-native endpoint.
 
-1. Fetch the complete raw server body into code/tool state and reject partial
-   retrieval.
-2. Bind the body digest and any authoritative revision metadata.
-3. Parse exactly one v3 managed block and resolve exactly one canonical target.
-4. Expose only a bounded projection plus digest/revision metadata to reasoning.
-5. Apply the bounded field/lifecycle update mechanically in code.
-6. Rebind immediately before the single write and reject concurrent movement.
-7. Reconstruct the complete body in code/tool state, write once, and reread.
-8. Parse the readback and prove target state plus unrelated prefix/suffix bytes
-   and order are preserved.
+## PR association safety
 
-Body-size thresholds are meaningful only with verified transport provenance. If
-the verified limit is exceeded, fail closed unless explicitly authorised safe
-terminal compaction can retain Current, Pending, owner detail, and Deferred
-Findings while reducing terminal detail. Never split one authoritative queue
-across multiple parents because a body is large.
+Maintain one deterministic `ACTIVE / ACCEPTED / RETIRED` registry. A Development or closing-keyword association can close an issue when its PR merges into the default branch, so only a terminal PR that genuinely completes the child may receive a closing association. Intermediate PRs use safe cross-reference or timeline evidence.
 
-## Review truth model
+## Materialised views
 
-Inventory pull requests, submitted reviews, and inline conversations before
-classifying findings. Require a complete first-party server-authoritative
-review evidence adapter result with pages, cursors, authoritative counts,
-flags, and a binding digest; an empty, stale, unavailable, or incomplete
-inventory is not green. Keep review inventory, finding evidence, materiality,
-disposition, and thread/review mutation as separate records.
+- Parent body: compact programme dashboard, current child, child graph, major holds, predecessor gateway, and next action.
+- Child body: durable operating contract, parent/dependencies, status/current obligation, epochs and Locks, predecessor mapping, PR registry, exact candidate, boundaries/finality, and next action.
+- PR body: concise lane with parent/child, epoch/Lock, branch/base/head, changed surfaces, validation, holds, and finality.
 
-Executors may inspect and recommend. They must not reply to threads, resolve or
-reopen conversations, dismiss reviews, manufacture final dispositions, mark
-Ready, merge, or claim Web finality. The current programme Web/user controller
-owns factual closure, review-thread mutation, final disposition, Web
-acceptance, Ready, merge, canonical verification, cleanup, and queue finality.
+Any authorised transition that changes a represented current field must update the body projection in the same transaction. Comment-only current-state changes are incomplete.
 
-Materiality uses A4 predicates. A finding is not final merely because an
-executor calls it blocking. A truthful disposition needs factual closing
-evidence, exact-head/canonical identity, validation, readback, and a
-controller-owned reference.
+## Managed chronology
 
-## Deferred Findings
+Only typed managed events are machine authority: `lifecycle_transition`, `lock_accepted`, `candidate_bound`, `validation`, `g4_or_finality`, `blocker`, `dependency`, `owner_decision`, and `reconciliation_receipt`. Each event binds repository/entity identity, exact revision, resulting state, authority reference, and prior event or epoch where applicable. Similar-looking arbitrary prose is not authority.
 
-An initial nonblocking finding goes in the parent-managed Deferred Findings
-register. It is an index/provenance/revalidation record, not a second queue,
-task checkbox, or automatic backlog issue. Keep public-safe evidence sufficient
-to revalidate the same component/boundary. Every revalidation requires fresh
-finding evidence, canonical A4 normalization, and recomputed materiality,
-evidence, and root digests. Caller materiality and digest values are equality
-assertions only; material findings cannot be disposed as nonmaterial and retain
-promotion authority. Preserve the root digest, source PR/thread/head when
-available, reason, materiality inputs, and disposition.
+## Labels and conformance
 
-Revalidate at least:
+The managed labels `current`, `queued`, and evidence-backed `blocked` are derived projections. Preserve unrelated labels, remove stale mutually exclusive managed labels, fail closed on multiple current children, and prefer native closure.
 
-- before work touching the same component or boundary;
-- before finality for a PR touching it;
-- before a relevant operational/live boundary;
-- during the final programme audit sweep.
+Classify repositories as `UNMANAGED`, `LEGACY_MANAGED`, `CURRENT_MANAGED`, or `DRIFTED_MANAGED`. Initialisation or migration is inspect -> preview -> explicit authority -> write -> readback -> zero-delta rerun. Preserve unrelated content. Recognised legacy parsing exists only for bounded migration; it is not a second truth or permanent compatibility runtime.
 
-If no longer material, dispose truthfully. If material, prefer an existing
-compatible direct child that is not frozen. Create or promote a direct sibling
-execution issue only when material and no suitable child owns it. Never widen a
-frozen/current child silently; converge same-root findings rather than creating
-review-churn micro-issues.
+## Review truth and finality
 
-## Optional capabilities and historical evidence
+Preserve the accepted server-authoritative review inventory, finding evidence, Deferred Findings, A1-A4, and repository-consent boundaries. Empty, stale, partial, caller-invented, or unverifiable review evidence is not green. Executors may inspect and recommend but must not reply to or resolve review threads, dismiss reviews, mark Ready, merge, manufacture finality, or choose the next current child autonomously.
 
-Codex review is an optional repository-scoped capability, separate from CI, G4,
-and Web finality. Its default is enabled; owner-disabled is explicit. Absence,
-timeout, or unavailability never becomes green and timers/probe history are not
-durable governance by default.
-
-Auto-code readiness is inspection-only. It does not install, schedule, claim a
-worker, mutate governance, or grant finality.
-
-PR #310 is closed and unmerged historical evidence. The old caller-token/cache
-concern is `NO_LONGER_APPLICABLE` to this current-main N5 runtime only when the
-exact evidence says current-main search is complete, the workflow-inventory
-surface and caller-token/cache surface are absent, and no historical symbols
-are in scope. Do not copy or revive PR #310 or #318 implementation machinery.
-
-## Safety and output
-
-Do not access providers or live systems, create workflows or MCP tools, mutate
-review state, publish, mark Ready, merge, change A1-A4, propagate #342, touch
-#348, or perform N6-N14 work from this skill. Reject raw secrets, private paths,
-private connector data, raw code blobs, credentials, and unredacted runtime
-evidence. Secret values must never appear in output.
-
-Return a compact evidence packet with the exact repository binding, intent,
-managed-block parse/projection, lifecycle/queue result, transaction/revision
-result, review inventory status, finding/DF status, authority boundary,
-failures, and exactly one supported next action. A successful N5 result points
-only to `READY_FOR_WEB_EXACT_HEAD_VALIDATION`; it does not authorise that next
-stage.
+Return a compact packet with repository/parent identity, conformance, predecessor coverage, preview/current bindings, exact delta, authority boundary, apply/readback result, zero-delta rerun result, failures, and exactly one controller-owned next action.

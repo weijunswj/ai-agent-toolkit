@@ -5,7 +5,7 @@ const test = require('node:test');
 
 const a2 = require('../scripts/toolkit-capability-registry.cjs');
 const a1 = require('../scripts/toolkit-control-plane/control-plane-kernel.cjs');
-const n5 = require('../scripts/toolkit-github-governance-review-reconciler.cjs');
+const n5 = require('../scripts/toolkit-github-program-reconciler.cjs');
 
 const repository = 'weijunswj/ai-agent-toolkit';
 const repositoryId = '1'.repeat(64);

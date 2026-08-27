@@ -74,28 +74,28 @@
     "github-program-reconciler": {
       "public_id": "github-program-reconciler",
       "public_name": "GitHub Program Reconciler",
-      "existing_skill_review": "Reviewed github-program-reconciler against current governance, capability, execution-loop, assurance, GitHub, review, and publication surfaces; no other current product owns the combined current-main N5 parent-state and truthful PR-review reconciliation contract.",
-      "native_capability_review": "GitHub APIs and CLI expose issues, relationships, reviews, and comments but do not enforce the Toolkit's repository binding, deterministic queue, byte-preservation, exact-head evidence, or controller-owned disposition rules.",
-      "trigger": "Use only when the user explicitly requests governed GitHub parent/direct-child inspection, preview, validation, reconciliation, review inventory, finding disposition evidence, or Deferred Findings handling for a repository-scoped current-main task.",
+      "existing_skill_review": "Reviewed the current github-program-reconciler against programme lifecycle, native GitHub relationships, authority, exact-head review, predecessor coverage, body freshness, typed chronology, routing, and finality boundaries; no other product owns this combined deterministic contract.",
+      "native_capability_review": "Current GitHub REST supports sub-issue inspect/add/remove/replace-parent/reprioritize and issue blocked_by inspect/add/remove. The runtime plans only these real semantics and injects adapters; it does not bundle a provider client or invent pseudo-native endpoints.",
+      "trigger": "Use implicitly for inspection and mandatory preflight when a request expresses managed GitHub programme lifecycle intent. Explicit invocation also supports bounded preview, validation, reconciliation evidence, exact-head review inventory, and Deferred Findings.",
       "positive_routing_examples": [
-        "Inspect and preview reconciliation of this repository's N5 programme parent and direct children.",
-        "Validate the exact-head PR review inventory and Deferred Findings evidence without mutating GitHub.",
-        "Reconcile current-main programme state against its governed parent, direct children, and exact-head review evidence."
+        "Advance the managed programme current child after inspecting the parent, native relationships, and exact body projection.",
+        "Preview the smallest body, label, dependency, and candidate delta without mutating GitHub.",
+        "Validate exact-head review inventory and Deferred Findings evidence for a governed child."
       ],
       "negative_routing_examples": [
         "Perform an ordinary code review of a local diff with no N5 programme reconciliation request.",
         "Mark a pull request Ready, resolve review threads, or merge it as part of ordinary implementation.",
         "Read one pull request's checks and comments without any governed parent-child programme or Deferred Findings scope."
       ],
-      "overlap_boundary": "Use ordinary GitHub inspection tools for ungoverned metadata reads and Web/controller authority for finality; this product owns only the explicit N5 governance and truthful-review contract.",
-      "invocation_mode": "explicit",
-      "invocation_mode_reason": "Packaged metadata keeps this product explicit-only because its broad or externally sensitive work requires deliberate routing and separate action authority.",
+      "overlap_boundary": "Use ordinary GitHub tools for ungoverned metadata reads. This product becomes mandatory preflight only for managed programme lifecycle intent; implicit discovery never authorises mutation, Ready, merge, review-thread changes, owner decisions, or finality.",
+      "invocation_mode": "implicit",
+      "invocation_mode_reason": "Schema-v3 behavioural evidence admits mandatory managed-lifecycle inspection/preflight. Positive, near-neighbour negative, and adversarial cases prove discrimination, while the runtime and corpus explicitly deny mutation authority from implicit discovery.",
       "decision": "new_product",
       "decision_reason": "The deterministic current-main programme and review-evidence boundary is distinct from generic GitHub inspection or executor implementation.",
-      "unique_value": "Prevents Markdown improvisation, duplicate queues, empty review inventories, executor-owned review mutation, and silent Deferred Findings promotion.",
-      "runtime_footprint": "One local deterministic runtime, compact policy/schema/grammar, three templates, focused tests, and no provider client, workflow, credential, or live-service dependency.",
+      "unique_value": "Materialises Parent/Child/PR state, predecessor coverage, native relationships, typed chronology, safe PR closing associations, managed labels, conformance, body freshness, and preview-bound readback proof in one deterministic product.",
+      "runtime_footprint": "One current-name local runtime, canonical predecessor contract, policy/schema/legacy migration grammar, materialised templates, and focused tests; no alias executable, provider client, workflow, credential, or live-service dependency.",
       "local_assets": "Canonical skill plus first-party contracts, templates, policy, grammar, local runtime, and focused boundary and regression tests.",
-      "output_contract": "Return inspect, preview, validate, reconcile, show, or remove evidence with repository binding, lifecycle uniqueness, byte preservation, exact identity, truthful review inventory, finding status, failures, and one next action.",
+      "output_contract": "Return repository/parent binding, conformance, predecessor coverage, PREVIEW delta, explicit authority status, APPLY result, complete READBACK_VERIFY proof, zero-delta rerun state, exact-head review evidence, failures, and one controller-owned next action.",
       "anti_bloat_review": "Rejects generic Web-controller stages, timer history, automatic issue creation, competing queues, model reconstruction of bodies, review-thread mutation by executors, and unrelated authority redesign.",
       "safety_boundary": "Inspection and preview are read-only. GitHub mutation requires repository identity, governance consent, accepted preview, and mutation authority; review-thread disposition, Ready, merge, cleanup, and finality remain controller-owned.",
       "canonical_ownership": "Direct-canonical maintenance: skills/github-program-reconciler/ owns the portable product; coupled contracts, policy, provenance, validation, and tests are maintained under canonical repo/** paths.",
@@ -103,7 +103,7 @@
       "third_party_audit": "Not applicable first-party material; no provider documentation, workflow JSON, MCP instruction, third-party skill text, or code is copied.",
       "validation": [
         "node repo/scripts/validate-toolkit.cjs",
-        "node --test repo/tests/toolkit-github-governance-review-reconciler.test.cjs repo/tests/toolkit-github-governance-review-reconciler.boundaries.test.cjs repo/tests/skill-routing.test.cjs"
+        "node --test repo/tests/toolkit-github-program-reconciler.predecessor-coverage.test.cjs repo/tests/toolkit-github-program-reconciler.e3.test.cjs repo/tests/toolkit-github-program-reconciler.test.cjs repo/tests/toolkit-github-program-reconciler.boundaries.test.cjs repo/tests/skill-routing.test.cjs"
       ]
     },
     "local-ai-safety": {

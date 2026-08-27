@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const n5 = require('../scripts/toolkit-github-governance-review-reconciler.cjs');
+const n5 = require('../scripts/toolkit-github-program-reconciler.cjs');
 const root = path.resolve(__dirname, '..', '..');
 
 test('A1 is sole mutation and ticket authority', () => { const b = n5.authorityBoundary(); assert.equal(b.a1.sole_mutation_authority, true); assert.equal(b.a1.sole_opaque_ticket_authority, true); assert.equal(b.a1.public_ticket_mint, false); assert.equal(b.n5.authority_or_finality_token, false); });
@@ -20,5 +20,5 @@ test('frozen/current DF promotion needs controller decision', () => { const pare
 test('body limit never fabricates threshold', () => { assert.equal(n5.classifyBodyLimit('x', { value: '65536', unit: 'bytes', provenance: 'unknown' }).known, false); assert.equal(n5.classifyBodyLimit('x', { value: 65536, unit: 'bytes', provenance: 'verified-github-transport' }).known, true); assert.equal(n5.classifyBodyLimit('x'.repeat(10), { value: 5, unit: 'bytes', provenance: 'verified-github-transport' }).code, 'PARENT_BODY_LIMIT'); });
 test('transaction contract is serialized and not arbitrary-editor CAS', () => { const c = n5.transactionContract(); assert.equal(c.endpoint_cas_claim, false); assert.equal(c.serial_toolkit_owner, true); assert.equal(c.blind_retry, false); assert.equal(c.readback_required, true); assert.equal(c.key, 'repository+parent'); });
 test('Auto-code readiness performs no install schedule claim or launch', () => { const r = n5.autoCodeReadiness({ governance: 'enabled', tracker_valid: true, review_inventory_complete: true }); assert.equal(r.install_attempted, false); assert.equal(r.schedule_attempted, false); assert.equal(r.worker_claimed, false); });
-test('historical caller-cache symbols are absent from N5 runtime', () => { const source = fs.readFileSync(path.join(root, 'repo', 'scripts', 'toolkit-github-governance-review-reconciler.cjs'), 'utf8'); assert.doesNotMatch(source, /getPairedRecords|evaluateWrapper|callerTokenCache/); });
+test('historical caller-cache symbols are absent from N5 runtime', () => { const source = fs.readFileSync(path.join(root, 'repo', 'scripts', 'toolkit-github-program-reconciler.cjs'), 'utf8'); assert.doesNotMatch(source, /getPairedRecords|evaluateWrapper|callerTokenCache/); });
 test('one next action has no generic authority class', () => { assert.deepEqual(n5.nextAction('N5_RECONCILED'), { next_action: 'READY_FOR_WEB_EXACT_HEAD_VALIDATION' }); assert.doesNotMatch(JSON.stringify(n5.authorityBoundary()), /web_controller/); });

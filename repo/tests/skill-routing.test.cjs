@@ -220,7 +220,6 @@ test('canonical behavioural routing corpus admits implicit discovery without pre
   const caseIds = corpus.cases.map((entry) => entry.id);
   const explicitProducts = [
     'codex-ssh-hostinger-coolify-setup-maintainer',
-    'github-program-reconciler',
     'release-readiness-audit'
   ];
 

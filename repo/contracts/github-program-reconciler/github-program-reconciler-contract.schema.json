@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "toolkit.n5.github-governance-review-reconciler.v3",
+  "$id": "toolkit.github-program-reconciler.v1",
   "title": "Current-main N5 GitHub governance and truthful review reconciler contracts",
   "type": "object",
   "additionalProperties": false,
   "required": ["contract_version", "tracker", "parent", "child", "pr", "review_inventory", "finding", "deferred_finding", "result", "authority", "transaction", "six_root_contract_integrity"],
   "properties": {
-    "contract_version": { "const": "toolkit.n5.github-governance-review-reconciler.v3" },
+    "contract_version": { "const": "toolkit.github-program-reconciler.v1" },
     "tracker": {
       "type": "object", "additionalProperties": false, "required": ["version", "lifecycle", "flat_queue", "single_current"],
       "properties": { "version": { "const": "v3" }, "lifecycle": { "enum": ["pending", "current", "terminal"] }, "flat_queue": { "const": true }, "single_current": { "const": true } }
