@@ -68,7 +68,7 @@ function model() {
       candidate: {
         repository: 'weijunswj/ai-agent-toolkit', parent_issue: 240, child_issue: 359, pr: 366,
         branch: 'sol/s2-productisation-g3', base: BASE, head: HEAD, tree: TREE,
-        version: '2.10.9',
+        version: '2.10.10',
         epoch: 'E3', lock: 'DL-S2-GITHUB-PROGRAM-001', role: 'INTERMEDIATE', completes_child: false,
         lifecycle: 'CURRENT',
       },
@@ -96,7 +96,7 @@ function model() {
       remaining: ['Hosted validation and fresh G4.'],
       safety_constraints: ['INTERMEDIATE and completes_child=false.'],
       validation_status: [{ check: 'Focused repair', state: 'PASS' }, { check: 'G4', state: 'AWAITING FRESH RUN' }],
-      version: '2.10.9',
+      version: '2.10.10',
       role: 'INTERMEDIATE',
       completes_child: false,
       changed_surfaces: ['repo/scripts/toolkit-github-program-reconciler.cjs'],
@@ -254,10 +254,10 @@ test('portable sections fail closed while additive repository extensions survive
   delete missingPr.prs[0].validation_status;
   assert.equal(reconciler.renderProgrammeViews(missingPr).ok, false);
   const extended = model();
-  extended.children[0].extensions = { owner_note: 'Repository-specific context remains additive.' };
+  extended.children[0].extensions = { owner_note: 'Repository-specific \\ context | remains additive.' };
   const rendered = reconciler.renderProgrammeViews(extended);
   assert.equal(rendered.ok, true);
-  assert.match(rendered.bodies.children['359'], /Repository-specific context remains additive/);
+  assert.match(rendered.bodies.children['359'], /Repository-specific \\\\ context \\| remains additive/);
 });
 
 test('duplicate or altered managed event inventory fails closed', () => {

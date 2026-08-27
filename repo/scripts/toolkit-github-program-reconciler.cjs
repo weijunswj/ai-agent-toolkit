@@ -254,7 +254,7 @@ function validExtensions(value) {
 function safeTextArray(value) {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string' && publicSafeText(entry));
 }
-function markdownCell(value) { return String(value).replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' '); }
+function markdownCell(value) { return String(value).replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' '); }
 function table(headers, rows) {
   return [
     '| ' + headers.map(markdownCell).join(' | ') + ' |',
