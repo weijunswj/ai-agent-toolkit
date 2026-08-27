@@ -8,6 +8,7 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..', '..');
 const intendedImplicitSkills = [
   'frontend-art-direction',
+  'github-program-reconciler',
   'local-ai-safety',
   'managed-app-foundation-review',
   'n8n-environment-setup',
@@ -56,12 +57,11 @@ test('OpenAI skill metadata declares Codex product surface for plugin grouping',
   }
 });
 
-test('OpenAI invocation policy matches the behaviourally admitted 12-product implicit set', () => {
+test('OpenAI invocation policy matches the behaviourally admitted 13-product implicit set', () => {
   const actualImplicit = skillNames().filter((name) => allowImplicit(name));
   assert.deepEqual(actualImplicit, intendedImplicitSkills);
   for (const skillName of [
     'codex-ssh-hostinger-coolify-setup-maintainer',
-    'github-program-reconciler',
     'release-readiness-audit'
   ]) {
     assert.equal(allowImplicit(skillName), false, `${skillName} must remain explicit-only`);
