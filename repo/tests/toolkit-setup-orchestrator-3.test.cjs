@@ -110,19 +110,20 @@ test('setup docs explain automatic resource admission and honest enforcement dis
   assert.match(bridge, /managed checkout is only its refresh source/i);
 });
 
-test('generated Codex and Claude instruction surfaces preserve productive root-first topology policy', () => {
+test('generated Codex and Claude instruction surfaces preserve the compact host-neutral topology policy', () => {
   const agents = fs.readFileSync(path.join(repoRoot, 'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md'), 'utf8');
   const claude = fs.readFileSync(path.join(repoRoot, 'skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md'), 'utf8');
   for (const pattern of [
-    /Ordinary work begins root-first/,
-    /profile\/capacity is a ceiling, never launch permission/,
-    /Missing\/contradictory declarations refuse/,
-    /Never delegate all work/,
-    /productive root work/,
-    /Children default medium/,
-    /never use Fast or nest/,
-    /owns integration, conflicts, validation, and final judgment/,
+    /root or parent executor owns integration, validation, conflict resolution, and final judgment/i,
+    /Optional depth-1 subagents may be used only when work is genuinely separable/,
+    /materially accelerates the critical path/,
+    /true isolated context and a minimal self-contained task packet/,
+    /must not spawn or delegate to other subagents/,
+    /Mutating sibling subagents require disjoint mutation ownership and scope/,
+    /Read-only siblings may investigate genuinely separable questions in parallel/,
+    /Model, reasoning, service tier, and route are launch\/controller metadata/,
   ]) assert.match(agents, pattern);
+  assert.doesNotMatch(agents.match(/## Agent Topology And Delegation\n([\s\S]*?)(?=\n## )/)?.[0] || '', /RAM|reservation|CPU|Children default|never use Fast|medium non-fast|special-worker|host-parity|profile\/capacity|ADMISSION_DENIED|worker-speedup|fork_turns/);
   assert.match(claude, /@AGENTS\.md/);
   assert.match(claude, /Root `AGENTS\.md` is canonical/);
   assert.doesNotMatch(claude, /multi_agent_v2|max_concurrent_threads_per_session|agents\.max_threads/);

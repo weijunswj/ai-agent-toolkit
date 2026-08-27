@@ -27,19 +27,27 @@ If instructions conflict, follow the higher-priority source and report material 
 
 ## Agent Topology And Delegation
 
-Ordinary work begins root-first. Root owns setup, orientation, narrow changes, checks, versioning, reviews, summaries, and root-capable verification; `setup toolkit` uses no subagents.
+The root or parent executor owns integration, validation, conflict resolution, and final judgment.
 
-A host profile/capacity is a ceiling, never launch permission. Unverifiable topology, admission, effort, or non-fast enforcement means root-only. Never project controls across hosts or call policy hard enforcement. Generic helper/speed requests, child availability, UAT, or future tests cannot qualify launch.
+Optional depth-1 subagents may be used only when work is genuinely separable and their use materially accelerates the critical path. Give each subagent true isolated context and a minimal self-contained task packet.
 
-Workers require separable concurrent work and concrete critical-path/wall-clock speedup. Declare ownership, speedup, root's critical task, shorter/easier child tasks, productive root work, integration/validation, and medium non-fast admission. Missing/contradictory declarations refuse; Toolkit validates allocation, not duration.
+Subagents must not spawn or delegate to other subagents. Mutating sibling subagents require disjoint mutation ownership and scope. Read-only siblings may investigate genuinely separable questions in parallel.
 
-Never delegate all work, give a child the longer task while root keeps the easy task, or launch because a child is available. Root continues critical work, not waiting/polling, and owns integration, conflicts, validation, and final judgment.
+The root or parent remains responsible for integrating and validating every returned result. Model, reasoning, service tier, and route are launch/controller metadata; do not embed them in portable task prompts as product policy unless a runtime explicitly requires them.
 
-The sole verification exception is one fresh direct read-only pre-PR checker after meaningful root changes, focused validation, and a ready diff. Bounded context/identity/admission applies; worker-speedup fields do not. It cannot mutate, publish, spawn, or use Fast; root owns fixes. Denial is `ADMISSION_DENIED`; root self-review is not independent.
+## Deployment Branch Naming
 
-Every child uses atomic Toolkit admission: RAM after reservations is the hard gate; CPU is secondary. Reserve/release around launch and reclaim stale state identity-safely. Children default medium, never use Fast or nest; higher effort needs narrow escalation. Built-in, Security, plugin, multi-worker, third-party, and nested paths get no exception.
+A branch whose primary purpose is deployment or release-state preparation for a named environment uses `deployment/<environment>`.
 
-Use `fork_turns="none"` with required context. Full inheritance needs justification; do not claim unsupported controls.
+Examples:
+
+- `deployment/alpha`
+- `deployment/staging`
+- `deployment/production`
+
+Use a stable lowercase environment slug. Ordinary feature, fix, or refactor branches that are not deployment branches retain their ordinary branch semantics.
+
+Do not invent `deploy/`, `release-deploy/`, bare `prod/`, bare `staging/`, or equivalent ad hoc deployment branch alternatives. Branch naming never itself grants deployment, promotion, provider mutation, merge, credential, or live-system authority.
 
 ## Local Documentation
 

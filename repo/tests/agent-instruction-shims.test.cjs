@@ -89,7 +89,6 @@ const requiredPortablePlaybookFiles = [
   'safety-gates.md',
   'windows-command-hygiene.md'
 ];
-const failedSpeedOnlyC2Prompt = 'Use helpers to finish faster. Small task: count the top-level keys in package.json and report the count. Do not edit files. State whether any helper was spawned.';
 
 function readText(relPath) {
   return fs.readFileSync(path.join(repoRoot, relPath), 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
@@ -275,32 +274,21 @@ test('execution prompt requires full-bold user-action questions and generated su
   }
 });
 
-test('portable rules require host-profile-aware topology and a complete delegation gate', () => {
+test('portable rules require the compact host-neutral depth-1 topology contract', () => {
   const requiredRules = [
     /## Agent Topology And Delegation/,
-    /Ordinary work begins root-first/,
-    /root-capable verification/,
-    /`setup toolkit` uses no subagents/,
-    /profile\/capacity is a ceiling, never launch permission/,
-    /Unverifiable topology, admission, effort, or non-fast enforcement means root-only/,
-    /Never project controls across hosts or call policy hard enforcement/,
-    /Generic helper\/speed requests, child availability, UAT, or future tests cannot qualify launch/,
-    /Workers require separable concurrent work and concrete critical-path\/wall-clock speedup/,
-    /root's critical task, shorter\/easier child tasks, productive root work/,
-    /Missing\/contradictory declarations refuse/,
-    /Never delegate all work, give a child the longer task while root keeps the easy task/,
-    /Root continues critical work, not waiting\/polling/,
-    /owns integration, conflicts, validation, and final judgment/,
-    /sole verification exception is one fresh direct read-only pre-PR checker/,
-    /worker-speedup fields do not/,
-    /cannot mutate, publish, spawn, or use Fast/,
-    /ADMISSION_DENIED/,
-    /RAM after reservations is the hard gate; CPU is secondary/,
-    /Children default medium, never use Fast or nest/,
-    /Built-in, Security, plugin, multi-worker, third-party, and nested paths get no exception/,
-    /Use `fork_turns="none"` with required context/,
-    /do not claim unsupported controls/
+    /root or parent executor owns integration, validation, conflict resolution, and final judgment/i,
+    /Optional depth-1 subagents may be used only when work is genuinely separable/,
+    /materially accelerates the critical path/,
+    /true isolated context and a minimal self-contained task packet/,
+    /must not spawn or delegate to other subagents/,
+    /Mutating sibling subagents require disjoint mutation ownership and scope/,
+    /Read-only siblings may investigate genuinely separable questions in parallel/,
+    /root or parent remains responsible for integrating and validating every returned result/i,
+    /Model, reasoning, service tier, and route are launch\/controller metadata/,
+    /do not embed them in portable task prompts as product policy unless a runtime explicitly requires them/
   ];
+  const staleRules = /RAM|reservation|CPU|Children default|never use Fast|medium non-fast|special-worker|host-parity|host profile|profile\/capacity|ADMISSION_DENIED|worker-speedup|fork_turns/;
 
   for (const relPath of [
     executionPromptPath,
@@ -312,7 +300,10 @@ test('portable rules require host-profile-aware topology and a complete delegati
     'AGENTS.md'
   ]) {
     const text = readText(relPath);
-    for (const rule of requiredRules) assert.match(text, rule, `${relPath}: ${rule}`);
+    const section = text.match(/## Agent Topology And Delegation\n([\s\S]*?)(?=\n## )/)?.[0] || '';
+    assert.ok(section, `${relPath}: agent topology policy section exists`);
+    for (const rule of requiredRules) assert.match(section, rule, `${relPath}: ${rule}`);
+    assert.doesNotMatch(section, staleRules, `${relPath}: stale scheduler or model-route product policy`);
   }
 
   const prompt = readText(executionPromptPath);
@@ -321,23 +312,31 @@ test('portable rules require host-profile-aware topology and a complete delegati
   assert.ok(Buffer.byteLength(section, 'utf8') < 7000, 'agent topology policy stays compact instead of becoming a giant orchestration manual');
 });
 
-test('speed-only C2 wording remains root-only without blocking qualified specialist workflows', () => {
-  assert.match(failedSpeedOnlyC2Prompt, /^Use helpers to finish faster\./);
-  const surfaces = [
+test('portable rules define the deployment branch convention without granting live authority', () => {
+  const requiredRules = [
+    /## Deployment Branch Naming/,
+    /primary purpose is deployment or release-state preparation for a named environment uses `deployment\/<environment>`/,
+    /`deployment\/alpha`/,
+    /`deployment\/staging`/,
+    /`deployment\/production`/,
+    /stable lowercase environment slug/,
+    /Ordinary feature, fix, or refactor branches that are not deployment branches retain their ordinary branch semantics/,
+    /Do not invent `deploy\/`, `release-deploy\/`, bare `prod\/`, bare `staging\/`, or equivalent ad hoc deployment branch alternatives/,
+    /Branch naming never itself grants deployment, promotion, provider mutation, merge, credential, or live-system authority/
+  ];
+  for (const relPath of [
     executionPromptPath,
     'repo/contracts/agent-rules/AGENTS.template.md',
     'repo/contracts/agent-rules/CLAUDE.template.md',
+    'repo/contracts/agent-rules/GEMINI.template.md',
     `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
     'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md',
-    'AGENTS.md',
-  ];
-  for (const relPath of surfaces) {
+    'AGENTS.md'
+  ]) {
     const text = readText(relPath);
-    assert.match(text, /Generic helper\/speed requests/, relPath);
-    assert.match(text, /child availability, UAT, or future tests cannot qualify launch/, relPath);
-    assert.match(text, /Missing\/contradictory declarations refuse/, relPath);
-    assert.match(text, /Never delegate all work/, relPath);
-    assert.match(text, /never use Fast or nest/, relPath);
+    const section = text.match(/## Deployment Branch Naming\n([\s\S]*?)(?=\n## )/)?.[0] || '';
+    assert.ok(section, `${relPath}: deployment branch policy section exists`);
+    for (const rule of requiredRules) assert.match(section, rule, `${relPath}: ${rule}`);
   }
 });
 
