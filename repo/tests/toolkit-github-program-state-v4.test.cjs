@@ -627,6 +627,12 @@ test('valid historical v1 events are retained without replay operations', () => 
   const preview = v4.buildConvergencePreview({ snapshot, desired: state, scope_grant: scope.grant, broker: harness.broker });
   assert.equal(preview.ok, true);
   assert.deepEqual(preview.expected_snapshot.managed_events[0], historical);
+
+  const initialHarness = trustHarness(state);
+  const initialScope = initialHarness.issueScope();
+  const initial = v4.buildConvergencePreview({ snapshot: emptySnapshot(state), desired: state, scope_grant: initialScope.grant, broker: initialHarness.broker });
+  assert.equal(initial.ok, true);
+  assert.equal(v4.validateManagedEventInventoryV4([initial.expected_snapshot.managed_events[0], historical], state.repository).reason, 'managed-event-inventory-invalid');
 });
 
 test('apply rejects trusted PR retarget after preview before mutation', () => {
