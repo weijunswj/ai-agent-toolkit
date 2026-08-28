@@ -712,10 +712,17 @@ function currentAuthorityRef(state) {
 
 function normalizeLegacyManagedEvent(input) {
   const types = ['lifecycle_transition', 'lock_accepted', 'candidate_bound', 'validation', 'g4_or_finality', 'blocker', 'dependency', 'owner_decision', 'reconciliation_receipt'];
-  if (!isRecord(input) || input.schema !== 'toolkit.github-program.managed-event.v1' || !types.includes(input.event_type)
+  const required = ['schema', 'event_type', 'repository', 'entity', 'exact_revision', 'resulting_state', 'authority_ref', 'event_id'];
+  const optional = ['child_issue', 'pr_number', 'prior_event', 'epoch'];
+  if (!exactKeys(input, required, optional) || input.schema !== 'toolkit.github-program.managed-event.v1' || !types.includes(input.event_type)
     || !safeLine(input.repository, 200) || !exactKeys(input.entity, ['kind', 'number'])
     || !['parent', 'child', 'pr'].includes(input.entity.kind) || !issue(input.entity.number)
-    || !sha(input.exact_revision) || !safeLine(input.resulting_state, 512) || !safeLine(input.authority_ref, 256)) return fail('managed-event-inventory-invalid');
+    || !sha(input.exact_revision) || !safeLine(input.resulting_state, 512) || !safeLine(input.authority_ref, 256)
+    || !sha256(input.event_id)
+    || hasOwn(input, 'child_issue') && !issue(input.child_issue)
+    || hasOwn(input, 'pr_number') && !issue(input.pr_number)
+    || hasOwn(input, 'prior_event') && !safeLine(input.prior_event, 256)
+    || hasOwn(input, 'epoch') && !safeLine(input.epoch, 128)) return fail('managed-event-inventory-invalid');
   const event = {
     schema: input.schema,
     event_type: input.event_type,

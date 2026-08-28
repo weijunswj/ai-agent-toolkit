@@ -628,6 +628,9 @@ test('valid historical v1 events are retained without replay operations', () => 
   assert.equal(preview.ok, true);
   assert.deepEqual(preview.expected_snapshot.managed_events[0], historical);
 
+  const altered = { ...historical, unexpected_mutation: 'altered' };
+  assert.equal(v4.validateManagedEventInventoryV4([altered], state.repository).reason, 'managed-event-inventory-invalid');
+
   const initialHarness = trustHarness(state);
   const initialScope = initialHarness.issueScope();
   const initial = v4.buildConvergencePreview({ snapshot: emptySnapshot(state), desired: state, scope_grant: initialScope.grant, broker: initialHarness.broker });
