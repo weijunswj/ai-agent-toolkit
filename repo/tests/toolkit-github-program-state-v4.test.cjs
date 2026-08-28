@@ -596,6 +596,13 @@ test('managed events are authoritative snapshot state for readback and zero delt
   assert.equal(event.source_state_schema, v4.STATE_SCHEMA);
   assert.equal(event.from_state_digest, v4.digest(state));
   assert.equal(event.prior_event_id, replay.managed_events.at(-1).event_id);
+
+  const missingPredecessor = structuredClone(transition.expected_snapshot);
+  missingPredecessor.revision = 'revision-3';
+  missingPredecessor.managed_events.shift();
+  const predecessorHarness = trustHarness(changed);
+  const predecessorScope = predecessorHarness.issueScope();
+  assert.equal(v4.buildConvergencePreview({ snapshot: missingPredecessor, desired: changed, scope_grant: predecessorScope.grant, broker: predecessorHarness.broker }).reason, 'managed-event-inventory-invalid');
 });
 
 test('valid historical v1 events are retained without replay operations', () => {

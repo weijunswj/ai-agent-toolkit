@@ -760,6 +760,8 @@ function validateManagedEventInventoryV4(events, repository) {
   for (const supplied of events) {
     const result = supplied?.schema === MANAGED_EVENT_SCHEMA ? normalizeManagedEventV2(supplied) : normalizeLegacyManagedEvent(supplied);
     if (!result.ok || result.event.repository !== repository || ids.has(result.event.event_id)) return fail('managed-event-inventory-invalid');
+    const priorEventId = normalized.at(-1)?.event_id || null;
+    if (result.event.schema === MANAGED_EVENT_SCHEMA && result.event.prior_event_id !== priorEventId) return fail('managed-event-inventory-invalid');
     ids.add(result.event.event_id);
     normalized.push(result.event);
   }
