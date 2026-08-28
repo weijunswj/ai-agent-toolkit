@@ -10,6 +10,7 @@ const v4 = require('../scripts/toolkit-github-program-state-v4.cjs');
 const HEAD = 'a'.repeat(40);
 const TREE = 'b'.repeat(40);
 const BASE = 'c'.repeat(40);
+const BASE_REF = 'main';
 const EVIDENCE_DIGEST = 'd'.repeat(64);
 
 function stateFixture() {
@@ -63,7 +64,7 @@ function stateFixture() {
       eli5: 'This PR makes all views use one plan.',
     }],
     cursor: { child_issue: 2, epoch_id: 'E3', gate: 'G3', status: 'ACTIVE', result: null },
-    candidate: { pr: 3, child_issue: 2, branch: 'feature/convergence', base: BASE, head: HEAD, tree: TREE, version: '3.0.0' },
+    candidate: { pr: 3, branch: 'feature/convergence', base_ref: BASE_REF, base_sha: BASE, head: HEAD, tree: TREE, version: '3.0.0', epoch_id: 'E3' },
     predecessor_contract_digest: EVIDENCE_DIGEST,
     evidence_refs: [
       { id: 'web-g3', kind: 'WEB', reference: 'github:issue-comment:2:100', summary: 'G3 convergence authority.' },
@@ -125,17 +126,19 @@ function trustHarness(state = stateFixture(), options = {}) {
     inspect_prs(input) {
       prCalls += 1;
       const facts = state.prs.map((pr) => {
-        const candidate = state.candidate?.pr === pr.number ? state.candidate : { branch: 'retained/pr', base: BASE, head: HEAD, tree: TREE, version: '3.0.0' };
+        const candidate = state.candidate?.pr === pr.number ? state.candidate : { branch: 'retained/pr', base_ref: BASE_REF, base_sha: BASE, head: HEAD, tree: TREE, version: '3.0.0' };
+        const option = (name, fallback) => typeof options[name] === 'function' ? options[name]() : options[name] ?? fallback;
         return {
           number: pr.number,
-          parent_issue: options.pr_parent || state.parent.issue,
-          child_issue: options.pr_child || pr.child_issue,
+          parent_issue: option('pr_parent', state.parent.issue),
+          child_issue: option('pr_child', pr.child_issue),
           branch: candidate.branch,
-          base: candidate.base,
+          base_ref: option('base_ref', candidate.base_ref),
+          base_sha: option('base_sha', candidate.base_sha),
           head: candidate.head,
           tree: candidate.tree,
-          version: options.version || candidate.version,
-          lifecycle: options.lifecycle || 'OPEN_DRAFT',
+          version: option('version', candidate.version),
+          lifecycle: option('lifecycle', 'OPEN_DRAFT'),
           version_source_digests: [EVIDENCE_DIGEST],
         };
       });
@@ -146,7 +149,7 @@ function trustHarness(state = stateFixture(), options = {}) {
 }
 
 function emptySnapshot(state) {
-  return { repository: state.repository, revision: 'revision-1', complete: true, canonical_state: null, bodies: { parent: null, children: {}, prs: {} }, labels: {}, native: {} };
+  return { repository: state.repository, revision: 'revision-1', complete: true, canonical_state: null, bodies: { parent: null, children: {}, prs: {} }, labels: {}, managed_events: [], native: {} };
 }
 
 function legacyBody(kind, repository, data, prefix = '', suffix = '') {
@@ -158,6 +161,27 @@ function legacyBody(kind, repository, data, prefix = '', suffix = '') {
 function completeLegacyData(kind, overrides) {
   const contract = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../contracts/github-program-reconciler/programme-surface-contract.json'), 'utf8'));
   return { ...Object.fromEntries(contract.legacy_v1_portable_minimum[kind].map((key) => [key, null])), ...overrides };
+}
+
+function legacySnapshotFixture(state = stateFixture(), overrides = {}) {
+  return {
+    repository: state.repository,
+    revision: 'legacy-revision-1',
+    complete: true,
+    canonical_state: null,
+    bodies: {
+      parent: legacyBody('parent', state.repository, completeLegacyData('parent', { issue: 1, current_child: 2, status: 'G3 CURRENT', extensions: {} }), 'owner-prefix\n', '\nowner-suffix'),
+      children: {
+        '2': legacyBody('child', state.repository, completeLegacyData('child', { issue: 2, parent_issue: 1, status: 'CURRENT', current_gate: 'G3', epochs: [{ state: 'CURRENT' }], candidate: { pr: 3, branch: 'feature/convergence', base: BASE, head: HEAD, tree: TREE, version: '3.0.0' } }), 'child-prefix\n', '\nchild-suffix'),
+        '4': legacyBody('child', state.repository, completeLegacyData('child', { issue: 4, parent_issue: 1, status: 'QUEUED', current_gate: 'QUEUED', epochs: [{ state: 'PENDING' }], candidate: null })),
+      },
+      prs: { '3': legacyBody('pr', state.repository, completeLegacyData('pr', { number: 3, parent_issue: 1, child_issue: 2, branch: 'feature/convergence', base: BASE, head: HEAD, tree: TREE, version: '3.0.0', outcome: 'G3 is current.' }), 'pr-prefix\n', '\npr-suffix') },
+    },
+    labels: { '2': ['current'], '4': ['queued'] },
+    managed_events: [],
+    native: { children: [2, 4], dependencies: { '2': [], '4': [2] }, associated_prs: [3], pr_associations: { '3': { parent_issue: 1, child_issue: 2, kind: 'CROSS_REFERENCE' } }, api_version: '2026-03-10' },
+    ...overrides,
+  };
 }
 
 test('canonical state derives every semantic projection from one source', () => {
@@ -195,6 +219,39 @@ test('candidate version mismatch and ACTIVE merged lifecycle fail closed', () =>
     const scope = harness.issueScope();
     const preview = v4.buildConvergencePreview({ snapshot: emptySnapshot(state), desired: state, scope_grant: scope.grant, broker: harness.broker });
     assert.equal(preview.ok, false);
+  }
+});
+
+test('candidate binds base ref and base SHA as separate trusted facts', () => {
+  const state = stateFixture();
+  for (const options of [{ base_ref: 'release' }, { base_sha: 'e'.repeat(40) }]) {
+    const harness = trustHarness(state, options);
+    const scope = harness.issueScope();
+    const preview = v4.buildConvergencePreview({ snapshot: emptySnapshot(state), desired: state, scope_grant: scope.grant, broker: harness.broker });
+    assert.equal(preview.ok, false);
+    assert.equal(preview.reason, 'trusted-candidate-binding-mismatch');
+  }
+  const harness = trustHarness(state, { base_ref: BASE_REF, base_sha: BASE });
+  const scope = harness.issueScope();
+  assert.equal(v4.buildConvergencePreview({ snapshot: emptySnapshot(state), desired: state, scope_grant: scope.grant, broker: harness.broker }).ok, true);
+});
+
+test('candidate epoch and derived Child association must match the unique ACTIVE registry entry', () => {
+  const wrongEpoch = stateFixture();
+  wrongEpoch.candidate.epoch_id = 'E1';
+  assert.equal(v4.validateCanonicalStateV4(wrongEpoch).reason, 'canonical-candidate-shape');
+
+  const state = stateFixture();
+  const harness = trustHarness(state, { pr_child: 4 });
+  const scope = harness.issueScope();
+  assert.equal(v4.buildConvergencePreview({ snapshot: emptySnapshot(state), desired: state, scope_grant: scope.grant, broker: harness.broker }).reason, 'trusted-pr-association-mismatch');
+});
+
+test('candidate schema rejects independently authored Lock, role, completes-child, and Child identity', () => {
+  for (const duplicate of [{ lock: 'LOCK-E3' }, { role: 'INTERMEDIATE' }, { completes_child: false }, { child_issue: 2 }]) {
+    const state = stateFixture();
+    Object.assign(state.candidate, duplicate);
+    assert.equal(v4.validateCanonicalStateV4(state).reason, 'canonical-candidate-shape');
   }
 });
 
@@ -392,7 +449,7 @@ test('convergence apply requires exact preview-bound authority and verifies read
   acceptedPreview = runtime.preview({ desired: state, scope_grant: scope.grant });
   assert.equal(acceptedPreview.ok, true);
   const applied = runtime.apply({ preview: acceptedPreview, authority: { reference: 'owner:approved-preview' } });
-  assert.equal(applied.ok, true);
+  assert.equal(applied.ok, true, JSON.stringify(applied));
   assert.equal(applied.readback_verified, true);
   assert.equal(applied.immediate_rerun, 'ZERO_DELTA');
 });
@@ -400,6 +457,7 @@ test('convergence apply requires exact preview-bound authority and verifies read
 test('zero-delta apply reinspects and rejects drift instead of reporting fake readback', () => {
   const state = stateFixture();
   const rendered = v4.renderProgrammeV4(state);
+  const events = v4.expectedManagedEventsV4(state, v4.validateManagedEventInventoryV4([], state.repository), v4.digest(state));
   const harness = trustHarness(state);
   const scope = harness.issueScope();
   let snapshot = {
@@ -409,6 +467,7 @@ test('zero-delta apply reinspects and rejects drift instead of reporting fake re
     canonical_state: structuredClone(state),
     bodies: structuredClone(rendered.bodies),
     labels: { '2': ['current'], '4': ['queued'] },
+    managed_events: events.events,
     native: { children: [2, 4], dependencies: { '2': [], '4': [2] }, associated_prs: [3], pr_associations: { '3': { parent_issue: 1, child_issue: 2, kind: 'CROSS_REFERENCE' } }, api_version: '2026-03-10' },
   };
   const runtime = v4.createConvergenceRuntime({ broker: harness.broker, inspect_snapshot() { return structuredClone(snapshot); } });
@@ -467,17 +526,225 @@ test('migration preview replaces only exact v1 managed spans and preserves unrel
       },
       prs: { '3': legacyBody('pr', state.repository, completeLegacyData('pr', { number: 3, parent_issue: 1, child_issue: 2, branch: 'feature/convergence', base: BASE, head: HEAD, tree: TREE, version: '3.0.0', outcome: 'G3 is current.' }), 'pr-prefix\n', '\npr-suffix') },
     },
+    labels: { '2': ['current'], '4': ['queued'] },
+    managed_events: [],
+    native: { children: [2, 4], dependencies: { '2': [], '4': [2] }, associated_prs: [3], pr_associations: { '3': { parent_issue: 1, child_issue: 2, kind: 'CROSS_REFERENCE' } }, api_version: '2026-03-10' },
   };
   const harness = trustHarness(state);
   const scope = harness.issueScope();
   const preview = v4.buildMigrationPreviewV1({ legacy_snapshot: legacy, desired: state, scope_grant: scope.grant, broker: harness.broker, authority_ref: 'github:issue-comment:2:100' });
   assert.equal(preview.ok, true);
+  const migrationSchema = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../contracts/github-program-reconciler/programme-migration-v1.schema.json'), 'utf8'));
+  assert.deepEqual(Object.keys(preview).sort(), migrationSchema.required.slice().sort());
   assert.equal(preview.semantic_mapping.correction_authority_ref, 'github:issue-comment:2:100');
   assert.equal(preview.mutation_authority, 'NOT_GRANTED');
-  assert.match(preview.expected_bodies.parent, /^owner-prefix\n/);
-  assert.match(preview.expected_bodies.parent, /\nowner-suffix$/);
-  assert.match(preview.expected_bodies.children['2'], /^child-prefix\n/);
-  assert.match(preview.expected_bodies.prs['3'], /\npr-suffix$/);
+  assert.match(preview.expected_snapshot.bodies.parent, /^owner-prefix\n/);
+  assert.match(preview.expected_snapshot.bodies.parent, /\nowner-suffix$/);
+  assert.match(preview.expected_snapshot.bodies.children['2'], /^child-prefix\n/);
+  assert.match(preview.expected_snapshot.bodies.prs['3'], /\npr-suffix$/);
+});
+
+test('managed events are authoritative snapshot state for readback and zero delta', () => {
+  const state = stateFixture();
+  const harness = trustHarness(state);
+  const scope = harness.issueScope();
+  const first = v4.buildConvergencePreview({ snapshot: emptySnapshot(state), desired: state, scope_grant: scope.grant, broker: harness.broker });
+  assert.equal(first.ok, true);
+  assert.equal(first.operations.filter((operation) => operation.kind === 'managed-event').length, 1);
+  assert.equal(first.expected_snapshot.managed_events.length, 1);
+  assert.equal(first.expected_snapshot.managed_events[0].event_type, 'canonical_initialisation');
+  assert.equal(first.expected_snapshot.managed_events[0].source_state_schema, null);
+  assert.equal(first.expected_snapshot.managed_events[0].from_state_digest, v4.digest(null));
+
+  const missing = structuredClone(first.expected_snapshot);
+  missing.revision = 'revision-2';
+  missing.managed_events = [];
+  assert.equal(v4.verifyConvergenceReadback(missing, first).reason, 'readback-drift');
+  const missingHarness = trustHarness(state);
+  const missingScope = missingHarness.issueScope();
+  assert.equal(v4.buildConvergencePreview({ snapshot: missing, desired: state, scope_grant: missingScope.grant, broker: missingHarness.broker }).reason, 'expected-managed-event-missing');
+
+  const duplicate = structuredClone(first.expected_snapshot);
+  duplicate.revision = 'revision-2';
+  duplicate.managed_events.push(structuredClone(duplicate.managed_events[0]));
+  const duplicateHarness = trustHarness(state);
+  const duplicateScope = duplicateHarness.issueScope();
+  assert.equal(v4.buildConvergencePreview({ snapshot: duplicate, desired: state, scope_grant: duplicateScope.grant, broker: duplicateHarness.broker }).reason, 'managed-event-inventory-invalid');
+
+  const mutated = structuredClone(first.expected_snapshot);
+  mutated.revision = 'revision-2';
+  mutated.managed_events[0].authority_ref = 'github:issue-comment:2:999';
+  const mutatedHarness = trustHarness(state);
+  const mutatedScope = mutatedHarness.issueScope();
+  assert.equal(v4.buildConvergencePreview({ snapshot: mutated, desired: state, scope_grant: mutatedScope.grant, broker: mutatedHarness.broker }).reason, 'managed-event-inventory-invalid');
+
+  const replay = structuredClone(first.expected_snapshot);
+  replay.revision = 'revision-2';
+  const replayHarness = trustHarness(state);
+  const replayScope = replayHarness.issueScope();
+  const zero = v4.buildConvergencePreview({ snapshot: replay, desired: state, scope_grant: replayScope.grant, broker: replayHarness.broker });
+  assert.equal(zero.code, 'PROGRAMME_ZERO_DELTA');
+  assert.equal(zero.operations.filter((operation) => operation.kind === 'managed-event').length, 0);
+
+  const changed = stateFixture();
+  changed.cursor.gate = 'G4';
+  const transitionHarness = trustHarness(changed);
+  const transitionScope = transitionHarness.issueScope();
+  const transition = v4.buildConvergencePreview({ snapshot: replay, desired: changed, scope_grant: transitionScope.grant, broker: transitionHarness.broker });
+  const event = transition.expected_snapshot.managed_events.at(-1);
+  assert.equal(event.event_type, 'canonical_transition');
+  assert.equal(event.source_state_schema, v4.STATE_SCHEMA);
+  assert.equal(event.from_state_digest, v4.digest(state));
+  assert.equal(event.prior_event_id, replay.managed_events.at(-1).event_id);
+});
+
+test('valid historical v1 events are retained without replay operations', () => {
+  const state = stateFixture();
+  const legacyPayload = {
+    schema: 'toolkit.github-program.managed-event.v1',
+    event_type: 'validation',
+    repository: state.repository,
+    entity: { kind: 'pr', number: 3 },
+    child_issue: 2,
+    pr_number: 3,
+    exact_revision: HEAD,
+    resulting_state: 'Focused tests passed.',
+    authority_ref: 'github:issue-comment:2:90',
+    epoch: 'E3',
+  };
+  const historical = { ...legacyPayload, event_id: v4.digest(legacyPayload) };
+  const snapshot = emptySnapshot(state);
+  snapshot.managed_events = [historical];
+  const harness = trustHarness(state);
+  const scope = harness.issueScope();
+  const preview = v4.buildConvergencePreview({ snapshot, desired: state, scope_grant: scope.grant, broker: harness.broker });
+  assert.equal(preview.ok, true);
+  assert.deepEqual(preview.expected_snapshot.managed_events[0], historical);
+});
+
+test('apply rejects trusted PR retarget after preview before mutation', () => {
+  const state = stateFixture();
+  let baseRef = BASE_REF;
+  let applyCalls = 0;
+  const harness = trustHarness(state, { base_ref: () => baseRef });
+  const scope = harness.issueScope();
+  const runtime = v4.createConvergenceRuntime({
+    broker: harness.broker,
+    inspect_snapshot() { return emptySnapshot(state); },
+    verify_authority({ binding }) { return { ok: true, grant: { reference: 'owner:exact-preview', binding } }; },
+    apply_operations() { applyCalls += 1; return { ok: true }; },
+  });
+  const preview = runtime.preview({ desired: state, scope_grant: scope.grant });
+  baseRef = 'release';
+  assert.equal(runtime.apply({ preview, authority: { reference: 'owner:exact-preview' } }).reason, 'stale-trusted-pr-inspection');
+  assert.equal(applyCalls, 0);
+});
+
+test('migration apply accepts only its runtime-enrolled exact preview and exact authority', () => {
+  const state = stateFixture();
+  const legacy = legacySnapshotFixture(state);
+  const harness = trustHarness(state);
+  const scope = harness.issueScope();
+  const standalone = v4.buildMigrationPreviewV1({ legacy_snapshot: legacy, desired: state, scope_grant: scope.grant, broker: harness.broker, authority_ref: 'github:issue-comment:2:100' });
+  const unregisteredRuntime = v4.createConvergenceRuntime({ broker: harness.broker, inspect_snapshot() { return structuredClone(legacy); } });
+  assert.equal(unregisteredRuntime.apply({ preview: standalone }).reason, 'accepted-preview-required');
+
+  let snapshot = structuredClone(legacy);
+  let registered;
+  let authorityBinding;
+  const runtime = v4.createConvergenceRuntime({
+    broker: harness.broker,
+    inspect_snapshot() { return structuredClone(snapshot); },
+    verify_authority({ binding }) { authorityBinding = binding; return { ok: true, grant: { reference: 'owner:migration-preview', binding } }; },
+    apply_operations({ operations }) {
+      snapshot = { ...structuredClone(registered.expected_snapshot), revision: 'revision-2' };
+      return { ok: true, applied_count: operations.length };
+    },
+  });
+  registered = runtime.migrationPreview({ desired: state, scope_grant: scope.grant, authority_ref: 'github:issue-comment:2:100' });
+  assert.equal(registered.ok, true);
+  assert.equal(registered.operations.filter((operation) => operation.kind === 'managed-event').length, 1);
+  const applied = runtime.apply({ preview: registered, authority: { reference: 'owner:migration-preview' } });
+  assert.equal(applied.ok, true, JSON.stringify(applied));
+  assert.equal(applied.immediate_rerun, 'ZERO_DELTA');
+  assert.equal(authorityBinding.preview_kind, 'MIGRATION');
+  assert.equal(authorityBinding.expected_event_inventory_digest, registered.expected_event_inventory_digest);
+  assert.deepEqual(authorityBinding.operation_ids, registered.operations.map((operation) => operation.operation_id));
+});
+
+test('migration apply rejects every tampered material preview binding', () => {
+  const mutators = [
+    (preview) => { preview.source_body_digests.parent = 'f'.repeat(64); },
+    (preview) => { preview.operations_digest = 'f'.repeat(64); },
+    (preview) => { preview.operations[0].operation_id = 'f'.repeat(64); },
+    (preview) => { preview.source_state_digests.parent = 'f'.repeat(64); },
+    (preview) => { preview.target_canonical_digest = 'f'.repeat(64); },
+    (preview) => { preview.expected_revision = 'wrong-revision'; },
+  ];
+  for (const mutate of mutators) {
+    const state = stateFixture();
+    const legacy = legacySnapshotFixture(state);
+    const harness = trustHarness(state);
+    const scope = harness.issueScope();
+    const runtime = v4.createConvergenceRuntime({ broker: harness.broker, inspect_snapshot() { return structuredClone(legacy); } });
+    const preview = runtime.migrationPreview({ desired: state, scope_grant: scope.grant, authority_ref: 'github:issue-comment:2:100' });
+    const tampered = structuredClone(preview);
+    mutate(tampered);
+    assert.equal(runtime.apply({ preview: tampered }).reason, 'accepted-preview-required');
+  }
+});
+
+test('migration apply rejects source body or event drift as stale', () => {
+  for (const drift of [
+    (snapshot) => { snapshot.bodies.parent += '\nchanged'; },
+    (snapshot) => { snapshot.managed_events.push({ invalid: true }); },
+  ]) {
+    const state = stateFixture();
+    let snapshot = legacySnapshotFixture(state);
+    const harness = trustHarness(state);
+    const scope = harness.issueScope();
+    const runtime = v4.createConvergenceRuntime({
+      broker: harness.broker,
+      inspect_snapshot() { return structuredClone(snapshot); },
+      verify_authority({ binding }) { return { ok: true, grant: { reference: 'owner:migration-preview', binding } }; },
+      apply_operations() { assert.fail('stale migration must not apply'); },
+    });
+    const preview = runtime.migrationPreview({ desired: state, scope_grant: scope.grant, authority_ref: 'github:issue-comment:2:100' });
+    drift(snapshot);
+    assert.equal(runtime.apply({ preview, authority: { reference: 'owner:migration-preview' } }).reason, 'stale-preview');
+  }
+});
+
+test('migration apply rejects authority for another preview and post-apply event mismatch', () => {
+  const state = stateFixture();
+  let snapshot = legacySnapshotFixture(state);
+  const harness = trustHarness(state);
+  const scope = harness.issueScope();
+  let preview;
+  let applyCalls = 0;
+  const wrongAuthorityRuntime = v4.createConvergenceRuntime({
+    broker: harness.broker,
+    inspect_snapshot() { return structuredClone(snapshot); },
+    verify_authority({ binding }) { return { ok: true, grant: { reference: 'owner:wrong-preview', binding: { ...binding, preview_id: 'f'.repeat(64) } } }; },
+    apply_operations() { applyCalls += 1; return { ok: true }; },
+  });
+  preview = wrongAuthorityRuntime.migrationPreview({ desired: state, scope_grant: scope.grant, authority_ref: 'github:issue-comment:2:100' });
+  assert.equal(wrongAuthorityRuntime.apply({ preview, authority: { reference: 'owner:wrong-preview' } }).reason, 'preview-bound-authority-required');
+  assert.equal(applyCalls, 0);
+
+  snapshot = legacySnapshotFixture(state);
+  const mismatchRuntime = v4.createConvergenceRuntime({
+    broker: harness.broker,
+    inspect_snapshot() { return structuredClone(snapshot); },
+    verify_authority({ binding }) { return { ok: true, grant: { reference: 'owner:exact-preview', binding } }; },
+    apply_operations() {
+      snapshot = { ...structuredClone(preview.expected_snapshot), revision: 'revision-2' };
+      snapshot.managed_events = [];
+      return { ok: true };
+    },
+  });
+  preview = mismatchRuntime.migrationPreview({ desired: state, scope_grant: scope.grant, authority_ref: 'github:issue-comment:2:100' });
+  assert.equal(mismatchRuntime.apply({ preview, authority: { reference: 'owner:exact-preview' } }).reason, 'readback-drift');
 });
 
 test('migration rejects partial v1 envelopes before trusted relationship inspection', () => {
@@ -491,11 +758,24 @@ test('migration rejects partial v1 envelopes before trusted relationship inspect
       children: { '2': legacyBody('child', state.repository, { issue: 2, parent_issue: 1, status: 'CURRENT' }), '4': legacyBody('child', state.repository, { issue: 4, parent_issue: 1, status: 'QUEUED' }) },
       prs: { '3': legacyBody('pr', state.repository, { number: 3, parent_issue: 1, child_issue: 2 }) },
     },
+    labels: { '2': ['current'], '4': ['queued'] },
+    managed_events: [],
+    native: { children: [2, 4], dependencies: { '2': [], '4': [2] }, associated_prs: [3], pr_associations: { '3': { parent_issue: 1, child_issue: 2, kind: 'CROSS_REFERENCE' } }, api_version: '2026-03-10' },
   };
   const harness = trustHarness(state);
   const scope = harness.issueScope();
   const preview = v4.buildMigrationPreviewV1({ legacy_snapshot: legacy, desired: state, scope_grant: scope.grant, broker: harness.broker, authority_ref: 'github:issue-comment:2:100' });
   assert.equal(preview.reason, 'legacy-portable-state-incomplete');
+  assert.equal(harness.calls().relationshipCalls, 0);
+});
+
+test('migration rejects a top-level source repository mismatch before trust inspection', () => {
+  const state = stateFixture();
+  const legacy = legacySnapshotFixture(state, { repository: 'other/programme' });
+  const harness = trustHarness(state);
+  const scope = harness.issueScope();
+  const preview = v4.buildMigrationPreviewV1({ legacy_snapshot: legacy, desired: state, scope_grant: scope.grant, broker: harness.broker, authority_ref: 'github:issue-comment:2:100' });
+  assert.equal(preview.reason, 'migration-repository-mismatch');
   assert.equal(harness.calls().relationshipCalls, 0);
 });
 
@@ -507,6 +787,7 @@ test('published v4 schemas are strict, parseable, and identity-aligned', () => {
     ['programme-scope-grant-v1.schema.json', v4.SCOPE_SCHEMA],
     ['trusted-pr-inspection-v1.schema.json', v4.PR_INSPECTION_SCHEMA],
     ['trusted-relationship-inspection-v1.schema.json', v4.RELATIONSHIP_INSPECTION_SCHEMA],
+    ['managed-event-v2.schema.json', v4.MANAGED_EVENT_SCHEMA],
     ['programme-migration-v1.schema.json', v4.MIGRATION_SCHEMA],
   ];
   for (const [file, identity] of schemas) {
@@ -514,4 +795,6 @@ test('published v4 schemas are strict, parseable, and identity-aligned', () => {
     assert.equal(schema.$id, identity);
     assert.equal(schema.additionalProperties === false || schema.$defs?.extension?.additionalProperties === false, true);
   }
+  const eventSchema = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../contracts/github-program-reconciler/managed-event-v2.schema.json'), 'utf8'));
+  assert.equal(eventSchema.allOf.length, 3);
 });

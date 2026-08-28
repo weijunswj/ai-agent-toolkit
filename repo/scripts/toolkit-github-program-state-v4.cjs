@@ -10,6 +10,7 @@ const SCOPE_SCHEMA = 'toolkit.github-program.scope-grant.v1';
 const PR_INSPECTION_SCHEMA = 'toolkit.github-program.trusted-pr-inspection.v1';
 const RELATIONSHIP_INSPECTION_SCHEMA = 'toolkit.github-program.trusted-relationship-inspection.v1';
 const MIGRATION_SCHEMA = 'toolkit.github-program.migration.v1';
+const MANAGED_EVENT_SCHEMA = 'toolkit.github-program.managed-event.v2';
 const DESIGN_LOCK = 'DL-S2-GITHUB-PROGRAM-CONVERGENCE-002';
 const BODY_BUDGET_BYTES = 56 * 1024;
 const CANONICAL_STATE_BUDGET_BYTES = 32 * 1024;
@@ -22,6 +23,7 @@ const RESERVED_EXTENSION_KEYS = new Set([
   'status', 'lifecycle', 'current', 'current_status', 'current_gate', 'current_epoch', 'cursor', 'gate', 'epoch',
   'candidate', 'candidate_lock', 'lock', 'role', 'completes_child', 'finality', 'holds', 'blocked', 'next_action',
   'progress', 'outcome', 'remaining', 'achieved', 'pr_status', 'pr_state', 'version', 'head', 'tree', 'base',
+  'base_ref', 'base_sha', 'epoch_id',
 ]);
 const MARKERS = Object.freeze({
   parent: Object.freeze({ begin: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PARENT:BEGIN v2 -->', end: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PARENT:END -->' }),
@@ -227,11 +229,15 @@ function validateCanonicalStateV4(state) {
   if (activeRegistryPrs.size > 1) return fail('multiple-active-candidates');
   if (state.candidate === null) {
     if (activeRegistryPrs.size !== 0) return fail('active-candidate-missing');
-  } else if (!exactKeys(state.candidate, ['pr', 'child_issue', 'branch', 'base', 'head', 'tree', 'version'])
+  } else if (!exactKeys(state.candidate, ['pr', 'branch', 'base_ref', 'base_sha', 'head', 'tree', 'version', 'epoch_id'])
     || !issue(state.candidate.pr) || !safeLine(state.candidate.branch, 256)
-    || !sha(state.candidate.base) || !sha(state.candidate.head) || !sha(state.candidate.tree) || !safeLine(state.candidate.version, 80)
-    || !childIssues.has(state.candidate.child_issue) || !activeRegistryPrs.has(state.candidate.pr)
-    || !state.prs.some((pr) => pr.number === state.candidate.pr && pr.child_issue === state.candidate.child_issue)) return fail('canonical-candidate-shape');
+    || !safeLine(state.candidate.base_ref, 256) || !sha(state.candidate.base_sha) || !sha(state.candidate.head)
+    || !sha(state.candidate.tree) || !safeLine(state.candidate.version, 80) || !safeId(state.candidate.epoch_id)
+    || !activeRegistryPrs.has(state.candidate.pr)) return fail('canonical-candidate-shape');
+  else {
+    const candidateBinding = registry.find((entry) => entry.pr === state.candidate.pr && entry.status === 'ACTIVE');
+    if (!candidateBinding || candidateBinding.epoch_id !== state.candidate.epoch_id) return fail('canonical-candidate-shape');
+  }
   if (current.length > 1) return fail('multiple-current-children');
   if (state.cursor === null) {
     if (current.length !== 0 && !current.every((child) => child.epochs.every((epoch) => epoch.terminal_disposition !== null))) return fail('current-cursor-required');
@@ -443,7 +449,7 @@ function renderProgrammeV4(state) {
     bodies.prs[String(pr.number)] = wrap('pr', [
       `# Programme lane for PR #${pr.number}`, '', pr.outcome, '', '## Binding',
       table(['Field', 'Value'], [['Parent', `#${pr.parent_issue}`], ['Child', `#${pr.child_issue}`], ['Registry', pr.registry_status], ['Role', pr.role], ['Completes Child', pr.completes_child ? 'Yes' : 'No'], ['Epoch / Lock', `${pr.epoch} / ${pr.lock}`], ['Finality', pr.finality]]),
-      '', '## Exact candidate', pr.candidate ? table(['Branch', 'Base', 'Head', 'Tree', 'Version'], [[pr.candidate.branch, pr.candidate.base, pr.candidate.head, pr.candidate.tree, pr.candidate.version]]) : '- Not active',
+      '', '## Exact candidate', pr.candidate ? table(['Branch', 'Base ref', 'Base SHA', 'Head', 'Tree', 'Version'], [[pr.candidate.branch, pr.candidate.base_ref, pr.candidate.base_sha, pr.candidate.head, pr.candidate.tree, pr.candidate.version]]) : '- Not active',
       '', '## Purpose', pr.purpose, '', '## Scope', list(pr.scope), '', '## Out of scope', list(pr.out_of_scope),
       '', '## Progress', list(pr.progress), '', '## Achieved', list(pr.achieved), '', '## Remaining', list(pr.remaining),
       '', '## Design constraints', list(pr.design_constraints), '', '## Changed surfaces', list(pr.changed_surfaces),
@@ -586,9 +592,9 @@ function createProgrammeTrustBroker(adapters = {}) {
     if (!exactKeys(raw, ['schema', 'repository', 'scope_digest', 'resolver_identity', 'complete', 'facts'])
       || raw.schema !== PR_INSPECTION_SCHEMA || raw.complete !== true || raw.scope_digest !== grant.scope_digest
       || raw.repository !== grant.repository || raw.resolver_identity !== grant.version_resolver.identity
-      || !arrayOf(raw.facts, (fact) => exactKeys(fact, ['number', 'parent_issue', 'child_issue', 'branch', 'base', 'head', 'tree', 'version', 'lifecycle', 'version_source_digests'])
+      || !arrayOf(raw.facts, (fact) => exactKeys(fact, ['number', 'parent_issue', 'child_issue', 'branch', 'base_ref', 'base_sha', 'head', 'tree', 'version', 'lifecycle', 'version_source_digests'])
         && issue(fact.number) && issue(fact.parent_issue) && issue(fact.child_issue)
-        && safeLine(fact.branch, 256) && sha(fact.base) && sha(fact.head) && sha(fact.tree) && safeLine(fact.version, 80)
+        && safeLine(fact.branch, 256) && safeLine(fact.base_ref, 256) && sha(fact.base_sha) && sha(fact.head) && sha(fact.tree) && safeLine(fact.version, 80)
         && LIVE_PR_LIFECYCLES.includes(fact.lifecycle) && arrayOf(fact.version_source_digests, sha256, 20)
         && fact.version_source_digests.length === grant.version_resolver.sources.length, 100)
       || !same(raw.facts.map((fact) => fact.number).sort((a, b) => a - b), grant.associated_prs.slice().sort((a, b) => a - b))) return fail('trusted-pr-inspection-invalid');
@@ -607,9 +613,9 @@ function validatePrBindings(state, grant, inspection) {
     const entry = binding.registry;
     if (entry.status === 'ACTIVE') {
       const candidate = state.candidate;
-      if (!candidate || candidate.pr !== fact.number || candidate.child_issue !== fact.child_issue
-        || candidate.branch !== fact.branch || candidate.base !== fact.base || candidate.head !== fact.head
-        || candidate.tree !== fact.tree || candidate.version !== fact.version) return fail('trusted-candidate-binding-mismatch', { pr: fact.number });
+      if (!candidate || candidate.pr !== fact.number || candidate.epoch_id !== entry.epoch_id
+        || candidate.branch !== fact.branch || candidate.base_ref !== fact.base_ref || candidate.base_sha !== fact.base_sha
+        || candidate.head !== fact.head || candidate.tree !== fact.tree || candidate.version !== fact.version) return fail('trusted-candidate-binding-mismatch', { pr: fact.number });
       if (fact.lifecycle === 'OPEN_DRAFT') {
         if (entry.role !== 'INTERMEDIATE' && !(entry.role === 'TERMINAL' && !entry.completes_child)) return fail('active-draft-role-invalid', { pr: fact.number });
       } else if (fact.lifecycle === 'OPEN_READY') {
@@ -622,6 +628,25 @@ function validatePrBindings(state, grant, inspection) {
     if (entry.status === 'RETIRED' && (fact.lifecycle !== 'CLOSED_UNMERGED' || entry.retirement_evidence_ref === null)) return fail('retired-pr-live-lifecycle-invalid', { pr: fact.number });
   }
   return ok('TRUSTED_PR_BINDINGS_VALID');
+}
+
+function inspectTrustBindings(state, grant, broker) {
+  if (!broker || typeof broker.inspectRelationships !== 'function' || typeof broker.inspectPrs !== 'function') return fail('programme-trust-broker-required');
+  const scopeMatch = assertScopeEquality(state, grant);
+  if (!scopeMatch.ok) return scopeMatch;
+  const relationships = broker.inspectRelationships(state, grant);
+  if (!relationships.ok) return relationships;
+  const prs = broker.inspectPrs(state, grant);
+  if (!prs.ok) return prs;
+  const bound = validatePrBindings(state, grant, prs.inspection);
+  if (!bound.ok) return bound;
+  if (!relationshipInspections.has(relationships.inspection)) return fail('trusted-relationship-inspection-required');
+  return ok('TRUSTED_PROGRAMME_FACTS_INSPECTED', {
+    relationships: relationships.inspection,
+    prs: prs.inspection,
+    trusted_pr_inspection_digest: digest(prs.inspection),
+    trusted_relationship_inspection_digest: digest(relationships.inspection),
+  });
 }
 
 function expectedLabels(state, currentLabels = {}) {
@@ -651,8 +676,174 @@ function derivePrAssociationsV4(state) {
   }
   return ok('PROGRAMME_PR_ASSOCIATIONS_DERIVED', { associations });
 }
+
+function candidateBinding(state) {
+  if (!state.candidate) return null;
+  const binding = registryFor(state, state.candidate.pr);
+  if (!binding) return null;
+  return {
+    repository: state.repository,
+    parent_issue: state.parent.issue,
+    child_issue: binding.child.issue,
+    pr: state.candidate.pr,
+    branch: state.candidate.branch,
+    base_ref: state.candidate.base_ref,
+    base_sha: state.candidate.base_sha,
+    head: state.candidate.head,
+    tree: state.candidate.tree,
+    version: state.candidate.version,
+    epoch_id: state.candidate.epoch_id,
+    lock: binding.epoch.lock,
+    role: binding.registry.role,
+    completes_child: binding.registry.completes_child,
+    registry_status: binding.registry.status,
+  };
+}
+
+function currentAuthorityRef(state) {
+  const current = state.cursor;
+  const web = state.evidence_refs.filter((entry) => entry.kind === 'WEB');
+  const gate = current?.gate?.toLowerCase();
+  const epoch = current?.epoch_id?.toLowerCase();
+  const matched = web.find((entry) => gate && (entry.id.toLowerCase().includes(gate) || entry.summary.toLowerCase().includes(gate))
+    && (!epoch || entry.id.toLowerCase().includes(epoch) || entry.summary.toLowerCase().includes(epoch)));
+  return (matched || web[0])?.reference || null;
+}
+
+function normalizeLegacyManagedEvent(input) {
+  const types = ['lifecycle_transition', 'lock_accepted', 'candidate_bound', 'validation', 'g4_or_finality', 'blocker', 'dependency', 'owner_decision', 'reconciliation_receipt'];
+  if (!isRecord(input) || input.schema !== 'toolkit.github-program.managed-event.v1' || !types.includes(input.event_type)
+    || !safeLine(input.repository, 200) || !exactKeys(input.entity, ['kind', 'number'])
+    || !['parent', 'child', 'pr'].includes(input.entity.kind) || !issue(input.entity.number)
+    || !sha(input.exact_revision) || !safeLine(input.resulting_state, 512) || !safeLine(input.authority_ref, 256)) return fail('managed-event-inventory-invalid');
+  const event = {
+    schema: input.schema,
+    event_type: input.event_type,
+    repository: input.repository,
+    entity: clone(input.entity),
+    ...(issue(input.child_issue) ? { child_issue: input.child_issue } : {}),
+    ...(issue(input.pr_number) ? { pr_number: input.pr_number } : {}),
+    exact_revision: input.exact_revision,
+    resulting_state: input.resulting_state,
+    authority_ref: input.authority_ref,
+    ...(safeLine(input.prior_event || '', 256) ? { prior_event: input.prior_event } : {}),
+    ...(safeLine(input.epoch || '', 128) ? { epoch: input.epoch } : {}),
+  };
+  event.event_id = digest(event);
+  return input.event_id === event.event_id ? ok('MANAGED_EVENT_VALID', { event }) : fail('managed-event-inventory-invalid');
+}
+
+function normalizeManagedEventV2(input) {
+  const required = ['schema', 'event_type', 'repository', 'parent_issue', 'entity', 'source_state_schema', 'from_state_digest', 'to_canonical_digest', 'authority_ref', 'candidate_binding_digest', 'prior_event_id', 'migration_binding_digest', 'event_id'];
+  if (!exactKeys(input, required) || input.schema !== MANAGED_EVENT_SCHEMA || !['canonical_initialisation', 'canonical_transition', 'migration'].includes(input.event_type)
+    || !safeLine(input.repository, 200) || !issue(input.parent_issue) || !exactKeys(input.entity, ['kind', 'number'])
+    || !['parent', 'child', 'pr'].includes(input.entity.kind) || !issue(input.entity.number)
+    || ![null, STATE_SCHEMA, 'toolkit.github-program.legacy-state.v1'].includes(input.source_state_schema)
+    || !sha256(input.from_state_digest) || !sha256(input.to_canonical_digest) || !safeLine(input.authority_ref, 256)
+    || input.candidate_binding_digest !== null && !sha256(input.candidate_binding_digest)
+    || input.prior_event_id !== null && !sha256(input.prior_event_id)
+    || input.migration_binding_digest !== null && !sha256(input.migration_binding_digest)) return fail('managed-event-inventory-invalid');
+  if ((input.event_type === 'migration') !== (input.migration_binding_digest !== null)
+    || input.event_type === 'canonical_initialisation' !== (input.source_state_schema === null)
+    || input.event_type === 'canonical_transition' !== (input.source_state_schema === STATE_SCHEMA)
+    || input.event_type === 'migration' !== (input.source_state_schema === 'toolkit.github-program.legacy-state.v1')) return fail('managed-event-inventory-invalid');
+  const event = clone(input);
+  delete event.event_id;
+  event.event_id = digest(event);
+  return input.event_id === event.event_id ? ok('MANAGED_EVENT_VALID', { event }) : fail('managed-event-inventory-invalid');
+}
+
+function validateManagedEventInventoryV4(events, repository) {
+  if (!Array.isArray(events) || events.length > 500) return fail('managed-event-inventory-invalid');
+  const normalized = [];
+  const ids = new Set();
+  for (const supplied of events) {
+    const result = supplied?.schema === MANAGED_EVENT_SCHEMA ? normalizeManagedEventV2(supplied) : normalizeLegacyManagedEvent(supplied);
+    if (!result.ok || result.event.repository !== repository || ids.has(result.event.event_id)) return fail('managed-event-inventory-invalid');
+    ids.add(result.event.event_id);
+    normalized.push(result.event);
+  }
+  return ok('MANAGED_EVENT_INVENTORY_VALID', { events: normalized, ids, inventory_digest: digest(normalized) });
+}
+
+function eventPayload(input) {
+  const payload = {
+    schema: MANAGED_EVENT_SCHEMA,
+    event_type: input.event_type,
+    repository: input.state.repository,
+    parent_issue: input.state.parent.issue,
+    entity: clone(input.entity),
+    source_state_schema: input.source_state_schema,
+    from_state_digest: input.from_state_digest,
+    to_canonical_digest: input.to_canonical_digest,
+    authority_ref: input.authority_ref,
+    candidate_binding_digest: input.candidate_binding_digest,
+    prior_event_id: input.prior_event_id,
+    migration_binding_digest: input.migration_binding_digest,
+  };
+  payload.event_id = digest(payload);
+  return payload;
+}
+
+function expectedManagedEventsV4(state, currentInventory, canonicalDigest, migration = null, sourceCanonicalState = undefined) {
+  const events = currentInventory.events.map(clone);
+  const binding = candidateBinding(state);
+  const candidateDigest = binding ? digest(binding) : null;
+  const authorityRef = migration?.authority_ref || currentAuthorityRef(state);
+  if (!authorityRef) return fail('managed-event-authority-missing');
+  const retainedAuthorities = new Set(state.evidence_refs.map((entry) => entry.reference));
+  if (events.some((event) => event.schema === MANAGED_EVENT_SCHEMA && event.to_canonical_digest === canonicalDigest
+    && (event.parent_issue !== state.parent.issue || event.candidate_binding_digest !== candidateDigest || !retainedAuthorities.has(event.authority_ref)))) {
+    return fail('managed-event-transition-binding-invalid');
+  }
+  const targetEvents = events.filter((event) => event.schema === MANAGED_EVENT_SCHEMA && event.to_canonical_digest === canonicalDigest);
+  if (targetEvents.length > 1) return fail('managed-event-transition-binding-invalid');
+  const alreadyRepresentsTarget = targetEvents[0] || null;
+  let event;
+  if (migration) {
+    const migrationBinding = digest({
+      source_snapshot_digest: migration.source_snapshot_digest,
+      source_model_digest: migration.source_model_digest,
+      target_canonical_digest: canonicalDigest,
+      authority_ref: authorityRef,
+      candidate_binding_digest: candidateDigest,
+    });
+    event = eventPayload({
+      event_type: 'migration', state, entity: { kind: 'parent', number: state.parent.issue },
+      source_state_schema: 'toolkit.github-program.legacy-state.v1', from_state_digest: migration.source_model_digest,
+      to_canonical_digest: canonicalDigest, authority_ref: authorityRef, candidate_binding_digest: candidateDigest,
+      prior_event_id: events.at(-1)?.event_id || null, migration_binding_digest: migrationBinding,
+    });
+  } else {
+    if (sourceCanonicalState !== null && sourceCanonicalState !== undefined) {
+      const sourceValidation = validateCanonicalStateV4(sourceCanonicalState);
+      if (!sourceValidation.ok) return fail('source-canonical-state-invalid');
+      if (sourceValidation.canonical_digest === canonicalDigest) {
+        if (!alreadyRepresentsTarget) return fail('expected-managed-event-missing');
+        return ok('EXPECTED_MANAGED_EVENTS_DERIVED', { events, new_events: [], inventory_digest: digest(events), candidate_binding_digest: candidateDigest });
+      }
+      event = eventPayload({
+        event_type: 'canonical_transition', state, entity: { kind: 'parent', number: state.parent.issue },
+        source_state_schema: STATE_SCHEMA, from_state_digest: sourceValidation.canonical_digest,
+        to_canonical_digest: canonicalDigest, authority_ref: authorityRef, candidate_binding_digest: candidateDigest,
+        prior_event_id: events.at(-1)?.event_id || null, migration_binding_digest: null,
+      });
+    } else {
+      event = eventPayload({
+        event_type: 'canonical_initialisation', state, entity: { kind: 'parent', number: state.parent.issue },
+        source_state_schema: null, from_state_digest: digest(null), to_canonical_digest: canonicalDigest,
+        authority_ref: authorityRef, candidate_binding_digest: candidateDigest,
+        prior_event_id: events.at(-1)?.event_id || null, migration_binding_digest: null,
+      });
+    }
+  }
+  if (alreadyRepresentsTarget && alreadyRepresentsTarget.event_id !== event.event_id) return fail('managed-event-transition-binding-invalid');
+  if (!currentInventory.ids.has(event.event_id)) events.push(event);
+  return ok('EXPECTED_MANAGED_EVENTS_DERIVED', { events, new_events: currentInventory.ids.has(event.event_id) ? [] : [event], inventory_digest: digest(events), candidate_binding_digest: candidateDigest });
+}
+
 function snapshotDigest(snapshot) {
-  return digest({ repository: snapshot.repository, revision: snapshot.revision, complete: snapshot.complete, canonical_state: snapshot.canonical_state, bodies: snapshot.bodies, labels: snapshot.labels, native: snapshot.native });
+  return digest({ repository: snapshot.repository, revision: snapshot.revision, complete: snapshot.complete, canonical_state: snapshot.canonical_state, bodies: snapshot.bodies, labels: snapshot.labels, managed_events: snapshot.managed_events, native: snapshot.native });
 }
 function addOperation(operations, kind, target, before, after) {
   if (same(before, after)) return;
@@ -669,17 +860,13 @@ function materializeManagedBody(currentBody, kind, renderedBody) {
 function buildConvergencePreview(input = {}) {
   const valid = validateCanonicalStateV4(input.desired);
   if (!valid.ok) return valid;
-  if (!isRecord(input.snapshot) || input.snapshot.complete !== true || input.snapshot.repository !== input.desired.repository || !safeLine(input.snapshot.revision, 256)) return fail('current-snapshot-incomplete');
-  if (!input.broker || typeof input.broker.inspectRelationships !== 'function' || typeof input.broker.inspectPrs !== 'function') return fail('programme-trust-broker-required');
-  const scopeMatch = assertScopeEquality(input.desired, input.scope_grant);
-  if (!scopeMatch.ok) return scopeMatch;
-  const relationships = input.broker.inspectRelationships(input.desired, input.scope_grant);
-  if (!relationships.ok) return relationships;
-  const prs = input.broker.inspectPrs(input.desired, input.scope_grant);
-  if (!prs.ok) return prs;
-  const bound = validatePrBindings(input.desired, input.scope_grant, prs.inspection);
-  if (!bound.ok) return bound;
-  if (!relationshipInspections.has(relationships.inspection)) return fail('trusted-relationship-inspection-required');
+  if (!isRecord(input.snapshot) || input.snapshot.complete !== true || input.snapshot.repository !== input.desired.repository
+    || !safeLine(input.snapshot.revision, 256) || !isRecord(input.snapshot.bodies) || !isRecord(input.snapshot.labels)
+    || !Array.isArray(input.snapshot.managed_events) || !isRecord(input.snapshot.native)) return fail('current-snapshot-incomplete');
+  const currentEvents = validateManagedEventInventoryV4(input.snapshot.managed_events, input.snapshot.repository);
+  if (!currentEvents.ok) return currentEvents;
+  const trusted = inspectTrustBindings(input.desired, input.scope_grant, input.broker);
+  if (!trusted.ok) return trusted;
   const rendered = renderProgrammeV4(input.desired);
   if (!rendered.ok) return rendered;
   const associations = derivePrAssociationsV4(input.desired);
@@ -703,6 +890,8 @@ function buildConvergencePreview(input = {}) {
     if (!materialized.ok) return materialized;
     prBodies[number] = materialized.body;
   }
+  const expectedEvents = expectedManagedEventsV4(input.desired, currentEvents, valid.canonical_digest, null, input.snapshot.canonical_state);
+  if (!expectedEvents.ok) return expectedEvents;
   const expected = {
     repository: input.desired.repository,
     revision: input.snapshot.revision,
@@ -710,18 +899,22 @@ function buildConvergencePreview(input = {}) {
     canonical_state: clone(input.desired),
     bodies: { parent: parentBody.body, children: childBodies, prs: prBodies },
     labels: expectedLabels(input.desired, input.snapshot.labels),
+    managed_events: expectedEvents.events,
     native: { children: clone(input.scope_grant.children), dependencies: clone(input.scope_grant.dependencies), associated_prs: clone(input.scope_grant.associated_prs), pr_associations: associations.associations, api_version: input.scope_grant.api_version },
   };
   const operations = [];
   addOperation(operations, 'parent-body', input.desired.parent.issue, input.snapshot.bodies?.parent ?? null, expected.bodies.parent);
   for (const [number, body] of Object.entries(expected.bodies.children)) addOperation(operations, 'child-body', Number(number), input.snapshot.bodies?.children?.[number] ?? null, body);
   for (const [number, body] of Object.entries(expected.bodies.prs)) addOperation(operations, 'pr-body', Number(number), input.snapshot.bodies?.prs?.[number] ?? null, body);
+  for (const event of expectedEvents.new_events) addOperation(operations, 'managed-event', event.entity.number, null, event);
   addOperation(operations, 'labels', input.desired.parent.issue, input.snapshot.labels ?? {}, expected.labels);
   addOperation(operations, 'relationships', input.desired.parent.issue, input.snapshot.native ?? {}, expected.native);
   const preview = {
-    schema: 'toolkit.github-program.preview.v4', repository: input.desired.repository, parent_issue: input.desired.parent.issue,
+    schema: 'toolkit.github-program.preview.v4', preview_kind: 'CONVERGENCE', repository: input.desired.repository, parent_issue: input.desired.parent.issue,
     current_revision: input.snapshot.revision, current_snapshot_digest: snapshotDigest(input.snapshot), canonical_digest: valid.canonical_digest,
-    scope_digest: input.scope_grant.scope_digest, trusted_pr_inspection_digest: digest(prs.inspection), trusted_relationship_inspection_digest: digest(relationships.inspection),
+    scope_digest: input.scope_grant.scope_digest, trusted_pr_inspection_digest: trusted.trusted_pr_inspection_digest,
+    trusted_relationship_inspection_digest: trusted.trusted_relationship_inspection_digest,
+    candidate_binding_digest: expectedEvents.candidate_binding_digest, expected_event_inventory_digest: expectedEvents.inventory_digest,
     operations, operations_digest: digest(operations), expected_snapshot: expected,
     mutation_authority: 'NOT_GRANTED', ready_authority: 'NOT_GRANTED', merge_authority: 'NOT_GRANTED', finality_authority: 'NOT_GRANTED',
   };
@@ -733,21 +926,24 @@ function verifyConvergenceReadback(readback, preview) {
   if (!isRecord(preview) || preview.ok !== true || !isRecord(readback) || readback.complete !== true
     || readback.repository !== preview.repository || !safeLine(readback.revision, 256)) return fail('readback-incomplete');
   const expected = preview.expected_snapshot;
-  for (const key of ['canonical_state', 'bodies', 'labels', 'native']) {
+  const canonicalDigest = preview.canonical_digest || preview.target_canonical_digest;
+  for (const key of ['canonical_state', 'bodies', 'labels', 'managed_events', 'native']) {
     if (!same(readback[key], expected[key])) return fail('readback-drift', { field: key });
   }
+  const events = validateManagedEventInventoryV4(readback.managed_events, readback.repository);
+  if (!events.ok || events.inventory_digest !== preview.expected_event_inventory_digest) return fail('readback-event-inventory-drift');
   const rendered = renderProgrammeV4(readback.canonical_state);
   if (!rendered.ok || !same(expectedLabels(readback.canonical_state, readback.labels), readback.labels)) return fail('readback-projection-not-derived');
   for (const [kind, group] of [['parent', { [readback.canonical_state.parent.issue]: readback.bodies.parent }], ['child', readback.bodies.children], ['pr', readback.bodies.prs]]) {
     for (const [number, body] of Object.entries(group)) {
       const parsed = parseProgrammeV4Body(body, { kind, repository: readback.repository, parent_issue: readback.canonical_state.parent.issue, number: Number(number) });
-      if (!parsed.ok || parsed.envelope.canonical_digest !== preview.canonical_digest) return fail('readback-envelope-drift', { kind, number: Number(number) });
+      if (!parsed.ok || parsed.envelope.canonical_digest !== canonicalDigest) return fail('readback-envelope-drift', { kind, number: Number(number) });
       const extracted = extractManaged(body, kind);
       const expectedManaged = kind === 'parent' ? rendered.bodies.parent : kind === 'child' ? rendered.bodies.children[number] : rendered.bodies.prs[number];
       if (!extracted.ok || extracted.managed !== expectedManaged) return fail('readback-projection-not-derived', { kind, number: Number(number) });
     }
   }
-  return ok('PROGRAMME_READBACK_VERIFIED', { zero_delta: true, mutation_count: 0, canonical_digest: preview.canonical_digest });
+  return ok('PROGRAMME_READBACK_VERIFIED', { zero_delta: true, mutation_count: 0, canonical_digest: canonicalDigest });
 }
 
 function replaceExactManagedBody(currentBody, kind, nextManaged) {
@@ -842,24 +1038,24 @@ function parseLegacyV1Snapshot(snapshot, desired) {
 
 function buildMigrationPreviewV1(input = {}) {
   if (!isRecord(input.legacy_snapshot) || input.legacy_snapshot.complete !== true || !safeLine(input.legacy_snapshot.revision, 256)
-    || !isRecord(input.legacy_snapshot.bodies) || !safeLine(input.authority_ref, 256)) return fail('migration-input-incomplete');
+    || !isRecord(input.legacy_snapshot.bodies) || !isRecord(input.legacy_snapshot.labels)
+    || !Array.isArray(input.legacy_snapshot.managed_events) || !isRecord(input.legacy_snapshot.native)
+    || !safeLine(input.authority_ref, 256)) return fail('migration-input-incomplete');
   const valid = validateCanonicalStateV4(input.desired);
   if (!valid.ok) return valid;
+  if (input.legacy_snapshot.repository !== input.desired.repository) return fail('migration-repository-mismatch');
+  const currentEvents = validateManagedEventInventoryV4(input.legacy_snapshot.managed_events, input.legacy_snapshot.repository);
+  if (!currentEvents.ok) return currentEvents;
   const parsedLegacy = parseLegacyV1Snapshot(input.legacy_snapshot, input.desired);
   if (!parsedLegacy.ok) return parsedLegacy;
   const correctionEvidence = input.desired.evidence_refs.find((entry) => entry.kind === 'WEB' && entry.reference === input.authority_ref);
   if (!correctionEvidence) return fail('migration-authority-not-retained-in-target');
-  const scopeMatch = assertScopeEquality(input.desired, input.scope_grant);
-  if (!scopeMatch.ok) return scopeMatch;
-  if (!input.broker || typeof input.broker.inspectRelationships !== 'function' || typeof input.broker.inspectPrs !== 'function') return fail('programme-trust-broker-required');
-  const relationships = input.broker.inspectRelationships(input.desired, input.scope_grant);
-  if (!relationships.ok) return relationships;
-  const prs = input.broker.inspectPrs(input.desired, input.scope_grant);
-  if (!prs.ok) return prs;
-  const bound = validatePrBindings(input.desired, input.scope_grant, prs.inspection);
-  if (!bound.ok) return bound;
+  const trusted = inspectTrustBindings(input.desired, input.scope_grant, input.broker);
+  if (!trusted.ok) return trusted;
   const rendered = renderProgrammeV4(input.desired);
   if (!rendered.ok) return rendered;
+  const associations = derivePrAssociationsV4(input.desired);
+  if (!associations.ok) return associations;
   const replacements = { parent: null, children: {}, prs: {} };
   const parent = replaceExactManagedBody(input.legacy_snapshot.bodies.parent, 'parent', rendered.bodies.parent);
   if (!parent.ok) return parent;
@@ -874,27 +1070,49 @@ function buildMigrationPreviewV1(input = {}) {
     if (!replacement.ok) return replacement;
     replacements.prs[number] = replacement.body;
   }
+  const sourceSnapshotDigest = snapshotDigest(input.legacy_snapshot);
+  const expectedEvents = expectedManagedEventsV4(input.desired, currentEvents, valid.canonical_digest, {
+    authority_ref: input.authority_ref,
+    source_snapshot_digest: sourceSnapshotDigest,
+    source_model_digest: parsedLegacy.source_model_digest,
+  });
+  if (!expectedEvents.ok) return expectedEvents;
+  const expectedSnapshot = {
+    repository: input.desired.repository,
+    revision: input.legacy_snapshot.revision,
+    complete: true,
+    canonical_state: clone(input.desired),
+    bodies: replacements,
+    labels: expectedLabels(input.desired, input.legacy_snapshot.labels),
+    managed_events: expectedEvents.events,
+    native: { children: clone(input.scope_grant.children), dependencies: clone(input.scope_grant.dependencies), associated_prs: clone(input.scope_grant.associated_prs), pr_associations: associations.associations, api_version: input.scope_grant.api_version },
+  };
   const operations = [];
   addOperation(operations, 'migrate-parent-body', input.desired.parent.issue, input.legacy_snapshot.bodies.parent, replacements.parent);
   for (const [number, body] of Object.entries(replacements.children)) addOperation(operations, 'migrate-child-body', Number(number), input.legacy_snapshot.bodies.children[number], body);
   for (const [number, body] of Object.entries(replacements.prs)) addOperation(operations, 'migrate-pr-body', Number(number), input.legacy_snapshot.bodies.prs[number], body);
+  for (const event of expectedEvents.new_events) addOperation(operations, 'managed-event', event.entity.number, null, event);
+  addOperation(operations, 'labels', input.desired.parent.issue, input.legacy_snapshot.labels, expectedSnapshot.labels);
+  addOperation(operations, 'relationships', input.desired.parent.issue, input.legacy_snapshot.native, expectedSnapshot.native);
+  const semanticMapping = {
+    schema: 'toolkit.github-program.migration-mapping.v1',
+    identity_scope: desiredScope(input.desired),
+    source_model_digest: parsedLegacy.source_model_digest,
+    target_canonical_digest: valid.canonical_digest,
+    correction_authority_ref: input.authority_ref,
+    correction_evidence_id: correctionEvidence.id,
+    admitted_source_contradictions: parsedLegacy.contradictions,
+  };
   const preview = {
-    schema: MIGRATION_SCHEMA, repository: input.desired.repository, parent_issue: input.desired.parent.issue, authority_ref: input.authority_ref,
-    expected_revision: input.legacy_snapshot.revision, source_snapshot_digest: digest(input.legacy_snapshot), source_body_digests: {
+    schema: MIGRATION_SCHEMA, preview_kind: 'MIGRATION', repository: input.desired.repository, parent_issue: input.desired.parent.issue, authority_ref: input.authority_ref,
+    expected_revision: input.legacy_snapshot.revision, source_snapshot_digest: sourceSnapshotDigest, source_body_digests: {
       parent: digest(input.legacy_snapshot.bodies.parent),
       children: Object.fromEntries(Object.entries(input.legacy_snapshot.bodies.children || {}).map(([key, value]) => [key, digest(value)])),
       prs: Object.fromEntries(Object.entries(input.legacy_snapshot.bodies.prs || {}).map(([key, value]) => [key, digest(value)])),
     },
     source_state_digests: parsedLegacy.state_digests,
-    semantic_mapping: {
-      schema: 'toolkit.github-program.migration-mapping.v1',
-      identity_scope: desiredScope(input.desired),
-      source_model_digest: parsedLegacy.source_model_digest,
-      target_canonical_digest: valid.canonical_digest,
-      correction_authority_ref: input.authority_ref,
-      correction_evidence_id: correctionEvidence.id,
-      admitted_source_contradictions: parsedLegacy.contradictions,
-    },
+    semantic_mapping: semanticMapping,
+    semantic_mapping_digest: digest(semanticMapping),
     target_canonical_digest: valid.canonical_digest,
     target_managed_body_digests: rendered.body_digests,
     target_body_digests: {
@@ -903,54 +1121,106 @@ function buildMigrationPreviewV1(input = {}) {
       prs: Object.fromEntries(Object.entries(replacements.prs).map(([key, value]) => [key, digest(value)])),
     },
     scope_digest: input.scope_grant.scope_digest,
-    trusted_pr_inspection_digest: digest(prs.inspection), trusted_relationship_inspection_digest: digest(relationships.inspection),
-    operations, operations_digest: digest(operations), mutation_authority: 'NOT_GRANTED', finality_authority: 'NOT_GRANTED',
+    trusted_pr_inspection_digest: trusted.trusted_pr_inspection_digest,
+    trusted_relationship_inspection_digest: trusted.trusted_relationship_inspection_digest,
+    candidate_binding_digest: expectedEvents.candidate_binding_digest,
+    expected_event_inventory_digest: expectedEvents.inventory_digest,
+    target_projection_digests: rendered.body_digests,
+    expected_snapshot_digest: snapshotDigest(expectedSnapshot),
+    operations, operations_digest: digest(operations), ordered_operation_ids: operations.map((operation) => operation.operation_id),
+    mutation_authority: 'NOT_GRANTED', finality_authority: 'NOT_GRANTED',
   };
   preview.preview_id = digest(preview);
-  return ok('PROGRAMME_MIGRATION_PREVIEW_READY', { ...preview, expected_bodies: replacements });
+  return ok('PROGRAMME_MIGRATION_PREVIEW_READY', { ...preview, expected_snapshot: expectedSnapshot });
 }
 
 function createConvergenceRuntime(options = {}) {
   const accepted = new Map();
+  function register(result, desired, scopeGrant) {
+    if (result.ok) accepted.set(result.preview_id, { preview_digest: digest(result), preview_kind: result.preview_kind, desired: clone(desired), scope_grant: scopeGrant });
+    return result;
+  }
   function preview(input = {}) {
     if (typeof options.inspect_snapshot !== 'function') return fail('snapshot-adapter-required');
     let snapshot;
     try { snapshot = options.inspect_snapshot(); } catch (_error) { return fail('snapshot-inspection-failed'); }
     const result = buildConvergencePreview({ snapshot, desired: input.desired, scope_grant: input.scope_grant, broker: options.broker });
-    if (result.ok) accepted.set(result.preview_id, { preview_digest: digest(result), desired: clone(input.desired), scope_grant: input.scope_grant });
-    return result;
+    return register(result, input.desired, input.scope_grant);
+  }
+  function migrationPreview(input = {}) {
+    if (typeof options.inspect_snapshot !== 'function') return fail('snapshot-adapter-required');
+    let snapshot;
+    try { snapshot = options.inspect_snapshot(); } catch (_error) { return fail('snapshot-inspection-failed'); }
+    const result = buildMigrationPreviewV1({ legacy_snapshot: snapshot, desired: input.desired, scope_grant: input.scope_grant, broker: options.broker, authority_ref: input.authority_ref });
+    return register(result, input.desired, input.scope_grant);
+  }
+  function authorityBinding(previewResult) {
+    const binding = {
+      preview_schema: previewResult.schema,
+      preview_kind: previewResult.preview_kind,
+      repository: previewResult.repository,
+      parent_issue: previewResult.parent_issue,
+      preview_id: previewResult.preview_id,
+      expected_revision: previewResult.preview_kind === 'MIGRATION' ? previewResult.expected_revision : previewResult.current_revision,
+      source_snapshot_digest: previewResult.preview_kind === 'MIGRATION' ? previewResult.source_snapshot_digest : previewResult.current_snapshot_digest,
+      target_canonical_digest: previewResult.preview_kind === 'MIGRATION' ? previewResult.target_canonical_digest : previewResult.canonical_digest,
+      scope_digest: previewResult.scope_digest,
+      trusted_pr_inspection_digest: previewResult.trusted_pr_inspection_digest,
+      trusted_relationship_inspection_digest: previewResult.trusted_relationship_inspection_digest,
+      candidate_binding_digest: previewResult.candidate_binding_digest,
+      expected_event_inventory_digest: previewResult.expected_event_inventory_digest,
+      operations_digest: previewResult.operations_digest,
+      operation_ids: previewResult.operations.map((operation) => operation.operation_id),
+    };
+    if (previewResult.preview_kind === 'MIGRATION') Object.assign(binding, {
+      authority_ref: previewResult.authority_ref,
+      source_body_digests: clone(previewResult.source_body_digests),
+      source_state_digests: clone(previewResult.source_state_digests),
+      semantic_mapping_digest: previewResult.semantic_mapping_digest,
+      target_managed_body_digests: clone(previewResult.target_managed_body_digests),
+      target_body_digests: clone(previewResult.target_body_digests),
+      target_projection_digests: clone(previewResult.target_projection_digests),
+      expected_snapshot_digest: previewResult.expected_snapshot_digest,
+      ordered_operation_ids: clone(previewResult.ordered_operation_ids),
+    });
+    return binding;
+  }
+  function verifyStillTrusted(acceptedEntry, previewResult) {
+    const trusted = inspectTrustBindings(acceptedEntry.desired, acceptedEntry.scope_grant, options.broker);
+    if (!trusted.ok) return fail(String(trusted.reason).includes('relationship') ? 'stale-trusted-relationship-inspection' : 'stale-trusted-pr-inspection', { detail: trusted.reason });
+    if (trusted.trusted_pr_inspection_digest !== previewResult.trusted_pr_inspection_digest) return fail('stale-trusted-pr-inspection');
+    if (trusted.trusted_relationship_inspection_digest !== previewResult.trusted_relationship_inspection_digest) return fail('stale-trusted-relationship-inspection');
+    return ok('TRUSTED_PROGRAMME_FACTS_UNCHANGED');
   }
   function apply(input = {}) {
     const previewResult = input.preview;
     const acceptedEntry = isRecord(previewResult) ? accepted.get(previewResult.preview_id) : null;
     if (!isRecord(previewResult) || previewResult.ok !== true || !acceptedEntry || acceptedEntry.preview_digest !== digest(previewResult)) return fail('accepted-preview-required');
+    const expectedSourceDigest = previewResult.preview_kind === 'MIGRATION' ? previewResult.source_snapshot_digest : previewResult.current_snapshot_digest;
+    const stillTrusted = verifyStillTrusted(acceptedEntry, previewResult);
+    if (!stillTrusted.ok) return stillTrusted;
     if (previewResult.operations.length === 0) {
       let current;
       try { current = options.inspect_snapshot(); } catch (_error) { return fail('snapshot-inspection-failed'); }
-      if (snapshotDigest(current) !== previewResult.current_snapshot_digest) return fail('stale-preview');
+      if (snapshotDigest(current) !== expectedSourceDigest) return fail('stale-preview');
       const rerun = buildConvergencePreview({ snapshot: current, desired: acceptedEntry.desired, scope_grant: acceptedEntry.scope_grant, broker: options.broker });
       if (!rerun.ok || rerun.operations.length !== 0 || rerun.code !== 'PROGRAMME_ZERO_DELTA') return fail('immediate-rerun-not-zero-delta');
       accepted.delete(previewResult.preview_id);
       return ok('PROGRAMME_ZERO_DELTA', { mutation_count: 0, readback_verified: true, immediate_rerun: 'ZERO_DELTA' });
     }
     if (typeof options.verify_authority !== 'function') return fail('trusted-authority-verifier-required');
-    const binding = {
-      repository: previewResult.repository, parent_issue: previewResult.parent_issue, preview_id: previewResult.preview_id,
-      expected_revision: previewResult.current_revision, current_snapshot_digest: previewResult.current_snapshot_digest,
-      canonical_digest: previewResult.canonical_digest, scope_digest: previewResult.scope_digest,
-      operations_digest: previewResult.operations_digest, operation_ids: previewResult.operations.map((operation) => operation.operation_id),
-    };
+    const binding = authorityBinding(previewResult);
     let verified;
     try { verified = options.verify_authority({ assertion: clone(input.authority), binding: clone(binding) }); } catch (_error) { return fail('trusted-authority-verification-failed'); }
     if (!isRecord(verified) || verified.ok !== true || !isRecord(verified.grant) || !same(verified.grant.binding, binding)
       || !safeLine(verified.grant.reference, 256)) return fail('preview-bound-authority-required');
     let current;
     try { current = options.inspect_snapshot(); } catch (_error) { return fail('snapshot-inspection-failed'); }
-    if (snapshotDigest(current) !== previewResult.current_snapshot_digest) return fail('stale-preview');
+    if (snapshotDigest(current) !== expectedSourceDigest) return fail('stale-preview');
     if (typeof options.apply_operations !== 'function') return fail('apply-adapter-required');
     let applied;
-    try { applied = options.apply_operations({ repository: previewResult.repository, parent_issue: previewResult.parent_issue, expected_revision: previewResult.current_revision, authority_ref: verified.grant.reference, operations: clone(previewResult.operations) }); } catch (_error) { return fail('apply-failed'); }
-    if (!isRecord(applied) || applied.ok !== true) return fail('apply-failed');
+    try { applied = options.apply_operations({ repository: previewResult.repository, parent_issue: previewResult.parent_issue, expected_revision: binding.expected_revision, authority_ref: verified.grant.reference, operations: clone(previewResult.operations) }); } catch (_error) { return fail('apply-failed'); }
+    if (!isRecord(applied) || applied.ok !== true || applied.applied_count !== undefined && applied.applied_count !== previewResult.operations.length) return fail('apply-failed');
     let readback;
     try { readback = options.inspect_snapshot(); } catch (_error) { return fail('snapshot-inspection-failed'); }
     const verifiedReadback = verifyConvergenceReadback(readback, previewResult);
@@ -958,16 +1228,17 @@ function createConvergenceRuntime(options = {}) {
     const rerun = buildConvergencePreview({ snapshot: readback, desired: acceptedEntry.desired, scope_grant: acceptedEntry.scope_grant, broker: options.broker });
     if (!rerun.ok || rerun.operations.length !== 0 || rerun.code !== 'PROGRAMME_ZERO_DELTA') return fail('immediate-rerun-not-zero-delta');
     accepted.delete(previewResult.preview_id);
-    return ok('PROGRAMME_RECONCILED', { applied_count: applied.applied_count ?? previewResult.operations.length, readback_verified: true, immediate_rerun: 'ZERO_DELTA' });
+    return ok(previewResult.preview_kind === 'MIGRATION' ? 'PROGRAMME_MIGRATED' : 'PROGRAMME_RECONCILED', { applied_count: applied.applied_count ?? previewResult.operations.length, readback_verified: true, immediate_rerun: 'ZERO_DELTA' });
   }
-  return Object.freeze({ preview, apply });
+  return Object.freeze({ preview, migrationPreview, apply });
 }
 
 module.exports = Object.freeze({
   STATE_SCHEMA, PROJECTION_SCHEMA, EXTENSIONS_SCHEMA, SCOPE_SCHEMA, PR_INSPECTION_SCHEMA, RELATIONSHIP_INSPECTION_SCHEMA,
-  MIGRATION_SCHEMA, DESIGN_LOCK, BODY_BUDGET_BYTES, CANONICAL_STATE_BUDGET_BYTES, TOTAL_PROJECTION_BUDGET_BYTES,
+  MIGRATION_SCHEMA, MANAGED_EVENT_SCHEMA, DESIGN_LOCK, BODY_BUDGET_BYTES, CANONICAL_STATE_BUDGET_BYTES, TOTAL_PROJECTION_BUDGET_BYTES,
   LIFECYCLES, REGISTRY_STATUSES, LIVE_PR_LIFECYCLES, EXTENSION_CLASSES, MARKERS,
   canonicalJson, digest, validateExtensionsV1, validateCanonicalStateV4, deriveProjectionV1, renderProgrammeV4,
   parseProgrammeV4Body, createProgrammeTrustBroker, assertScopeEquality, validatePrBindings, derivePrAssociationsV4,
-  buildConvergencePreview, verifyConvergenceReadback, parseLegacyV1Body, parseLegacyV1Snapshot, buildMigrationPreviewV1, createConvergenceRuntime,
+  validateManagedEventInventoryV4, expectedManagedEventsV4, buildConvergencePreview, verifyConvergenceReadback,
+  parseLegacyV1Body, parseLegacyV1Snapshot, buildMigrationPreviewV1, createConvergenceRuntime,
 });

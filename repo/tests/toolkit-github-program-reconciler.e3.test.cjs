@@ -73,7 +73,7 @@ function programmeModel(childStatus = 'QUEUED') {
       candidate: {
         repository: 'weijunswj/ai-agent-toolkit', parent_issue: 240, child_issue: 359, pr: 366,
         branch: 'sol/s2-productisation-g3', base: BASE, head: HEAD, tree: TREE,
-        version: '2.11.0',
+        version: '2.11.1',
         epoch: 'E3', lock: 'DL-S2-GITHUB-PROGRAM-001', role: 'TERMINAL', completes_child: true,
         lifecycle: childStatus,
       },
@@ -101,7 +101,7 @@ function programmeModel(childStatus = 'QUEUED') {
       remaining: ['Fresh G4 and Web exact-head disposition.'],
       safety_constraints: ['INTERMEDIATE and completes_child=false.'],
       validation_status: [{ check: 'Focused tests', state: 'PASS' }, { check: 'G4', state: 'AWAITING FRESH RUN' }],
-      version: '2.11.0',
+      version: '2.11.1',
       role: 'TERMINAL',
       completes_child: true,
       changed_surfaces: ['repo/scripts/toolkit-github-program-reconciler.cjs'],

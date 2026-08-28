@@ -136,15 +136,16 @@
     "candidate": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["pr", "child_issue", "branch", "base", "head", "tree", "version"],
+      "required": ["pr", "branch", "base_ref", "base_sha", "head", "tree", "version", "epoch_id"],
       "properties": {
         "pr": { "$ref": "#/$defs/issue" },
-        "child_issue": { "$ref": "#/$defs/issue" },
         "branch": { "$ref": "#/$defs/safeLine" },
-        "base": { "$ref": "#/$defs/sha" },
+        "base_ref": { "$ref": "#/$defs/safeLine" },
+        "base_sha": { "$ref": "#/$defs/sha" },
         "head": { "$ref": "#/$defs/sha" },
         "tree": { "$ref": "#/$defs/sha" },
-        "version": { "$ref": "#/$defs/safeLine" }
+        "version": { "$ref": "#/$defs/safeLine" },
+        "epoch_id": { "$ref": "#/$defs/safeId" }
       }
     },
     "evidence": {

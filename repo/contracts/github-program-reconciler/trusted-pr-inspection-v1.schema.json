@@ -17,13 +17,14 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["number", "parent_issue", "child_issue", "branch", "base", "head", "tree", "version", "lifecycle", "version_source_digests"],
+        "required": ["number", "parent_issue", "child_issue", "branch", "base_ref", "base_sha", "head", "tree", "version", "lifecycle", "version_source_digests"],
         "properties": {
           "number": { "type": "integer", "minimum": 1 },
           "parent_issue": { "type": "integer", "minimum": 1 },
           "child_issue": { "type": "integer", "minimum": 1 },
           "branch": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\r\\n]+$" },
-          "base": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+          "base_ref": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\r\\n]+$" },
+          "base_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
           "head": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
           "tree": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
           "version": { "type": "string", "minLength": 1, "maxLength": 80, "pattern": "^[^\\r\\n]+$" },

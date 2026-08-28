@@ -4,9 +4,12 @@
   "title": "Programme v1 to canonical v4 migration preview",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "repository", "parent_issue", "authority_ref", "expected_revision", "source_snapshot_digest", "source_body_digests", "source_state_digests", "semantic_mapping", "target_canonical_digest", "target_managed_body_digests", "target_body_digests", "scope_digest", "trusted_pr_inspection_digest", "trusted_relationship_inspection_digest", "operations", "operations_digest", "mutation_authority", "finality_authority", "preview_id"],
+  "required": ["ok", "code", "schema", "preview_kind", "repository", "parent_issue", "authority_ref", "expected_revision", "source_snapshot_digest", "source_body_digests", "source_state_digests", "semantic_mapping", "semantic_mapping_digest", "target_canonical_digest", "target_managed_body_digests", "target_body_digests", "target_projection_digests", "scope_digest", "trusted_pr_inspection_digest", "trusted_relationship_inspection_digest", "candidate_binding_digest", "expected_event_inventory_digest", "expected_snapshot_digest", "operations", "operations_digest", "ordered_operation_ids", "mutation_authority", "finality_authority", "preview_id", "expected_snapshot"],
   "properties": {
+    "ok": { "const": true },
+    "code": { "const": "PROGRAMME_MIGRATION_PREVIEW_READY" },
     "schema": { "const": "toolkit.github-program.migration.v1" },
+    "preview_kind": { "const": "MIGRATION" },
     "repository": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\r\\n]+$" },
     "parent_issue": { "type": "integer", "minimum": 1 },
     "authority_ref": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\r\\n]+$" },
@@ -15,17 +18,24 @@
     "source_body_digests": { "$ref": "#/$defs/bodyDigests" },
     "source_state_digests": { "$ref": "#/$defs/bodyDigests" },
     "semantic_mapping": { "$ref": "#/$defs/semanticMapping" },
+    "semantic_mapping_digest": { "$ref": "#/$defs/digest" },
     "target_canonical_digest": { "$ref": "#/$defs/digest" },
     "target_managed_body_digests": { "$ref": "#/$defs/bodyDigests" },
     "target_body_digests": { "$ref": "#/$defs/bodyDigests" },
+    "target_projection_digests": { "$ref": "#/$defs/bodyDigests" },
     "scope_digest": { "$ref": "#/$defs/digest" },
     "trusted_pr_inspection_digest": { "$ref": "#/$defs/digest" },
     "trusted_relationship_inspection_digest": { "$ref": "#/$defs/digest" },
+    "candidate_binding_digest": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }] },
+    "expected_event_inventory_digest": { "$ref": "#/$defs/digest" },
+    "expected_snapshot_digest": { "$ref": "#/$defs/digest" },
     "operations": { "type": "array", "items": { "$ref": "#/$defs/operation" } },
     "operations_digest": { "$ref": "#/$defs/digest" },
+    "ordered_operation_ids": { "type": "array", "items": { "$ref": "#/$defs/digest" } },
     "mutation_authority": { "const": "NOT_GRANTED" },
     "finality_authority": { "const": "NOT_GRANTED" },
-    "preview_id": { "$ref": "#/$defs/digest" }
+    "preview_id": { "$ref": "#/$defs/digest" },
+    "expected_snapshot": { "$ref": "#/$defs/expectedSnapshot" }
   },
   "$defs": {
     "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
@@ -40,15 +50,40 @@
         "prs": { "$ref": "#/$defs/digestMap" }
       }
     },
+    "bodySet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parent", "children", "prs"],
+      "properties": {
+        "parent": { "type": "string", "maxLength": 65536 },
+        "children": { "type": "object", "propertyNames": { "pattern": "^[1-9][0-9]*$" }, "additionalProperties": { "type": "string", "maxLength": 65536 } },
+        "prs": { "type": "object", "propertyNames": { "pattern": "^[1-9][0-9]*$" }, "additionalProperties": { "type": "string", "maxLength": 65536 } }
+      }
+    },
+    "expectedSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "revision", "complete", "canonical_state", "bodies", "labels", "managed_events", "native"],
+      "properties": {
+        "repository": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "revision": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "complete": { "const": true },
+        "canonical_state": { "$ref": "programme-state-v4.schema.json" },
+        "bodies": { "$ref": "#/$defs/bodySet" },
+        "labels": { "type": "object" },
+        "managed_events": { "type": "array", "maxItems": 500, "items": { "type": "object" } },
+        "native": { "type": "object" }
+      }
+    },
     "operation": {
       "type": "object",
       "additionalProperties": false,
       "required": ["kind", "target", "before_digest", "after", "after_digest", "operation_id"],
       "properties": {
-        "kind": { "enum": ["migrate-parent-body", "migrate-child-body", "migrate-pr-body"] },
+        "kind": { "enum": ["migrate-parent-body", "migrate-child-body", "migrate-pr-body", "managed-event", "labels", "relationships"] },
         "target": { "type": "integer", "minimum": 1 },
         "before_digest": { "$ref": "#/$defs/digest" },
-        "after": { "type": "string", "maxLength": 65536 },
+        "after": {},
         "after_digest": { "$ref": "#/$defs/digest" },
         "operation_id": { "$ref": "#/$defs/digest" }
       }
