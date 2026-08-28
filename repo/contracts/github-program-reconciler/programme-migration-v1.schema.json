@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.github-program.migration.v1",
+  "title": "Programme v1 to canonical v4 migration preview",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "repository", "parent_issue", "authority_ref", "expected_revision", "source_snapshot_digest", "source_body_digests", "source_state_digests", "semantic_mapping", "target_canonical_digest", "target_managed_body_digests", "target_body_digests", "scope_digest", "trusted_pr_inspection_digest", "trusted_relationship_inspection_digest", "operations", "operations_digest", "mutation_authority", "finality_authority", "preview_id"],
+  "properties": {
+    "schema": { "const": "toolkit.github-program.migration.v1" },
+    "repository": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\r\\n]+$" },
+    "parent_issue": { "type": "integer", "minimum": 1 },
+    "authority_ref": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\r\\n]+$" },
+    "expected_revision": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\r\\n]+$" },
+    "source_snapshot_digest": { "$ref": "#/$defs/digest" },
+    "source_body_digests": { "$ref": "#/$defs/bodyDigests" },
+    "source_state_digests": { "$ref": "#/$defs/bodyDigests" },
+    "semantic_mapping": { "$ref": "#/$defs/semanticMapping" },
+    "target_canonical_digest": { "$ref": "#/$defs/digest" },
+    "target_managed_body_digests": { "$ref": "#/$defs/bodyDigests" },
+    "target_body_digests": { "$ref": "#/$defs/bodyDigests" },
+    "scope_digest": { "$ref": "#/$defs/digest" },
+    "trusted_pr_inspection_digest": { "$ref": "#/$defs/digest" },
+    "trusted_relationship_inspection_digest": { "$ref": "#/$defs/digest" },
+    "operations": { "type": "array", "items": { "$ref": "#/$defs/operation" } },
+    "operations_digest": { "$ref": "#/$defs/digest" },
+    "mutation_authority": { "const": "NOT_GRANTED" },
+    "finality_authority": { "const": "NOT_GRANTED" },
+    "preview_id": { "$ref": "#/$defs/digest" }
+  },
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "digestMap": { "type": "object", "propertyNames": { "pattern": "^[1-9][0-9]*$" }, "additionalProperties": { "$ref": "#/$defs/digest" } },
+    "bodyDigests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parent", "children", "prs"],
+      "properties": {
+        "parent": { "$ref": "#/$defs/digest" },
+        "children": { "$ref": "#/$defs/digestMap" },
+        "prs": { "$ref": "#/$defs/digestMap" }
+      }
+    },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "target", "before_digest", "after", "after_digest", "operation_id"],
+      "properties": {
+        "kind": { "enum": ["migrate-parent-body", "migrate-child-body", "migrate-pr-body"] },
+        "target": { "type": "integer", "minimum": 1 },
+        "before_digest": { "$ref": "#/$defs/digest" },
+        "after": { "type": "string", "maxLength": 65536 },
+        "after_digest": { "$ref": "#/$defs/digest" },
+        "operation_id": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "semanticMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "identity_scope", "source_model_digest", "target_canonical_digest", "correction_authority_ref", "correction_evidence_id", "admitted_source_contradictions"],
+      "properties": {
+        "schema": { "const": "toolkit.github-program.migration-mapping.v1" },
+        "identity_scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repository", "parent_issue", "children", "dependencies", "associated_prs"],
+          "properties": {
+            "repository": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "parent_issue": { "type": "integer", "minimum": 1 },
+            "children": { "type": "array", "maxItems": 50, "items": { "type": "integer", "minimum": 1 } },
+            "dependencies": { "type": "object" },
+            "associated_prs": { "type": "array", "maxItems": 100, "items": { "type": "integer", "minimum": 1 } }
+          }
+        },
+        "source_model_digest": { "$ref": "#/$defs/digest" },
+        "target_canonical_digest": { "$ref": "#/$defs/digest" },
+        "correction_authority_ref": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "correction_evidence_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+        "admitted_source_contradictions": { "type": "array", "maxItems": 100, "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" } }
+      }
+    }
+  }
+}

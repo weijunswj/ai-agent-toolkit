@@ -1,111 +1,79 @@
 {
-  "$schema": "toolkit.github-program.surface.v3",
-  "portable_minimum": {
-    "parent": [
-      "issue",
-      "status",
-      "outcome",
-      "goal",
-      "current_child",
-      "child_graph",
-      "progress",
-      "major_holds",
-      "predecessor_gateway",
-      "next_action"
-    ],
-    "child": [
-      "issue",
-      "parent_issue",
-      "status",
-      "outcome",
-      "goal",
-      "scope",
-      "out_of_scope",
-      "downstream_owned",
-      "current_gate",
-      "current_phase",
-      "next_gate",
-      "progress",
-      "achieved",
-      "remaining",
-      "holds",
-      "current_obligation",
-      "dependencies",
-      "epochs",
-      "lock",
-      "predecessor_issues",
-      "predecessor_gateway",
-      "pr_registry",
-      "candidate",
-      "boundaries",
-      "next_action",
-      "eli5"
-    ],
-    "pr": [
-      "number",
-      "parent_issue",
-      "child_issue",
-      "state",
-      "outcome",
-      "purpose",
-      "scope",
-      "out_of_scope",
-      "progress",
-      "achieved",
-      "remaining",
-      "safety_constraints",
-      "validation_status",
-      "epoch",
-      "lock",
-      "branch",
-      "base",
-      "head",
-      "tree",
-      "version",
-      "role",
-      "completes_child",
-      "changed_surfaces",
-      "validation",
-      "holds",
-      "finality",
-      "next_action",
-      "eli5"
-    ]
+  "$schema": "toolkit.github-program.surface.v4",
+  "design_lock": "DL-S2-GITHUB-PROGRAM-CONVERGENCE-002",
+  "canonical_state": {
+    "schema": "toolkit.github-program.state.v4",
+    "schema_path": "repo/contracts/github-program-reconciler/programme-state-v4.schema.json",
+    "semantic_authority_count": 1,
+    "storage": "Parent-managed-hidden-envelope",
+    "candidate_fields": ["pr", "child_issue", "branch", "base", "head", "tree", "version"],
+    "derived_only": ["Parent status/outcome/progress/holds/next action", "Child effective lifecycle/outcome/current gate/progress/remaining/next action", "PR outcome/epoch/Lock/role/completes Child/finality/next action", "managed labels", "PR association kind"]
   },
-  "repository_extensions": {
-    "field": "extensions",
-    "semantics": "additive-only",
-    "portable_fields_may_not_be_overridden": true
+  "portable_projection": {
+    "schema": "toolkit.github-program.projection.v1",
+    "schema_path": "repo/contracts/github-program-reconciler/programme-projection-v1.schema.json",
+    "parent": ["issue", "title", "goal", "status", "outcome", "current_child", "child_graph", "progress", "major_holds", "next_action"],
+    "child": ["issue", "parent_issue", "title", "lifecycle", "outcome", "objective", "scope", "out_of_scope", "boundaries", "dependencies", "current_epoch", "current_gate", "gate_status", "progress", "achieved", "remaining", "epochs", "holds", "pr_registry", "finality", "next_action", "eli5"],
+    "pr": ["number", "parent_issue", "child_issue", "purpose", "scope", "out_of_scope", "design_constraints", "changed_surfaces", "eli5", "registry_status", "role", "completes_child", "epoch", "lock", "candidate", "outcome", "progress", "achieved", "remaining", "finality", "next_action"]
   },
-  "lifecycle_labels": {
-    "exclusive": true,
-    "values": [
-      "completed",
-      "current",
-      "queued",
-      "blocked"
-    ]
+  "legacy_v1_portable_minimum": {
+    "purpose": "exact migration admission only",
+    "parent": ["issue", "status", "outcome", "goal", "current_child", "child_graph", "progress", "major_holds", "predecessor_gateway", "next_action"],
+    "child": ["issue", "parent_issue", "status", "outcome", "goal", "scope", "out_of_scope", "downstream_owned", "current_gate", "current_phase", "next_gate", "progress", "achieved", "remaining", "holds", "current_obligation", "dependencies", "epochs", "lock", "predecessor_issues", "predecessor_gateway", "pr_registry", "candidate", "boundaries", "next_action", "eli5"],
+    "pr": ["number", "parent_issue", "child_issue", "state", "outcome", "purpose", "scope", "out_of_scope", "progress", "achieved", "remaining", "safety_constraints", "validation_status", "epoch", "lock", "branch", "base", "head", "tree", "version", "role", "completes_child", "changed_surfaces", "validation", "holds", "finality", "next_action", "eli5"]
+  },
+  "extensions": {
+    "schema": "toolkit.github-program.extensions.v1",
+    "schema_path": "repo/contracts/github-program-reconciler/programme-extensions-v1.schema.json",
+    "semantics": "typed-target-bound-additive-only",
+    "classes": ["INFORMATION", "EVIDENCE", "POLICY", "DOMAIN_HEALTH", "TABLE", "PROVENANCE"],
+    "portable_or_derived_fields_may_not_be_overridden": true,
+    "normalized_aliases_rejected_recursively": true,
+    "missing_or_foreign_targets_rejected": true
+  },
+  "trusted_scope": {
+    "schema": "toolkit.github-program.scope-grant.v1",
+    "schema_path": "repo/contracts/github-program-reconciler/programme-scope-grant-v1.schema.json",
+    "source": "first-party-adapter-only",
+    "desired_scope_input_forbidden": true,
+    "exact_equality_before_relationship_or_PR_inspection": true,
+    "caller_capability_booleans": false
+  },
+  "trusted_pr_inspection": {
+    "schema": "toolkit.github-program.trusted-pr-inspection.v1",
+    "schema_path": "repo/contracts/github-program-reconciler/trusted-pr-inspection-v1.schema.json",
+    "candidate_exact_fields": ["repository", "parent", "child", "pr", "branch", "base", "head", "tree", "version"],
+    "live_lifecycles": ["OPEN_DRAFT", "OPEN_READY", "MERGED", "CLOSED_UNMERGED"],
+    "version_resolver": "generic host-configured JSON Pointer agreement at exact head"
+  },
+  "trusted_relationship_inspection": {
+    "schema": "toolkit.github-program.trusted-relationship-inspection.v1",
+    "schema_path": "repo/contracts/github-program-reconciler/trusted-relationship-inspection-v1.schema.json",
+    "complete_scope_digest_binding": true
+  },
+  "byte_budgets": {
+    "canonical_state_utf8_bytes": 32768,
+    "per_managed_body_utf8_bytes": 57344,
+    "all_projections_utf8_bytes": 524288,
+    "enforced_before_plan_or_apply": true
+  },
+  "migration": {
+    "schema": "toolkit.github-program.migration.v1",
+    "schema_path": "repo/contracts/github-program-reconciler/programme-migration-v1.schema.json",
+    "source": "exact-v1-managed-spans",
+    "unrelated_bytes_preserved": true,
+    "preview_only_without_separate_mutation_authority": true
   },
   "rendering": {
-    "one_line_outcome_required": true,
-    "markdown_tables_required_for_repeated_structures": true
+    "markdown_tables_required_for_repeated_structures": true,
+    "Parent_contains_canonical_state": true,
+    "Child_and_PR_contain_projection_digest_envelopes": true,
+    "comments_are_not_current_state_authority": true
   },
-  "whole_body_freshness": {
-    "current_programme_source_count": 1,
-    "managed_block_and_unmanaged_text_validated_together": true,
-    "structurally_anchored_competing_projection_detection": true,
-    "clearly_historical_context_allowed": true,
-    "repository_extensions_may_not_project_competing_current_state": true,
-    "readback_and_zero_delta_require_fresh_whole_bodies": true,
-    "stale_projection_migration": {
-      "schema": "toolkit.github-program.stale-projection-migration.v2",
-      "trusted_web_adjudication_required": true,
-      "whole_body_digest_required": true,
-      "exact_recognised_spans_required": true,
-      "stale_span_digests_required": true,
-      "resulting_body_digest_required": true,
-      "unrelated_bytes_preserved": true,
-      "arbitrary_owner_prose_rejected": true
-    }
+  "readback": {
+    "exact_canonical_digest_required": true,
+    "every_projection_digest_required": true,
+    "labels_and_native_relationships_required": true,
+    "immediate_rerun": "ZERO_DELTA_ZERO_MUTATION"
   }
 }

@@ -17,7 +17,7 @@ Use the one current runtime:
 node repo/scripts/toolkit-github-program-reconciler.cjs
 ```
 
-The runtime is a deterministic local contract and transaction library. It ships no live GitHub provider client. Fixtures and host adapters inject authoritative current state and exact mutations.
+The runtime is a deterministic local contract and transaction library. It ships no live GitHub provider client. Fixtures and host adapters inject authoritative current state and exact mutations. New programme work uses `toolkit.github-program.state.v4` under design lock `DL-S2-GITHUB-PROGRAM-CONVERGENCE-002`; recognised v1 bodies exist only as exact migration input.
 
 Inspection and PREVIEW never mutate. APPLY requires a trusted host-injected authority verifier; a caller-authored `granted` flag is never authority. The verified grant binds the accepted preview ID, repository, parent, current revision and snapshot digest, desired-state digest, operation digest, and every stable operation ID. READBACK_VERIFY rereads every affected projection, label definition, managed event, and native relationship inventory and proves unrelated state was preserved. Stale, conflicting, partial, or unverifiable work fails with `PARENT_RECONCILIATION_INCOMPLETE`.
 
@@ -46,11 +46,13 @@ Maintain one deterministic `ACTIVE / ACCEPTED / RETIRED` registry. A Development
 
 ## Materialised views
 
-- Parent body: compact programme dashboard, one-line outcome, current child, child graph table, major holds, predecessor gateway table, and next action.
-- Child body: durable operating contract, one-line outcome, parent/dependencies, status/current obligation, epoch/Lock and PR-registry tables, predecessor mapping, exact candidate, boundaries/finality, and next action.
-- PR body: concise lane with one-line outcome, parent/child, epoch/Lock, exact branch/base/head/tree and role tables, changed surfaces, validation, holds, and finality.
+- The Parent managed body contains the only canonical semantic state plus its digest envelope.
+- Parent prose is a compact derived dashboard with current child, child graph, holds, and next action.
+- Child prose is a derived operating contract with lifecycle, dependencies, current epoch/gate, epoch/Lock and PR-registry tables, holds, boundaries, and next action.
+- PR prose is a derived lane with registry lifecycle, role, completion safety, epoch/Lock, exact candidate, changed surfaces, and finality.
+- Child and PR hidden envelopes bind their projection digest, extension digest, and the Parent canonical digest.
 
-The portable minimum and additive repository-extension contract is `repo/contracts/github-program-reconciler/programme-surface-contract.json`. Repository-specific `extensions` may add detail but may not replace portable fields or project a second current programme state.
+The portable contract is `repo/contracts/github-program-reconciler/programme-surface-contract.json`. Typed, target-bound `toolkit.github-program.extensions.v1` records may add information, evidence, policy, domain health, tables, or provenance. They never feed portable derivation and may not encode current lifecycle, gate, epoch, candidate, Lock, finality, holds, progress, outcome, or next action under aliases.
 
 Any authorised transition that changes a represented current field must update the body projection in the same transaction. Comment-only current-state changes are incomplete. READBACK_VERIFY validates the whole issue or PR body, not only the managed block, and rejects structurally anchored legacy `CURRENT`, `PLANNED`, `BLOCKED BY`, current-gate, or current-candidate sections that compete with the canonical projection. Clearly labelled historical evidence remains allowed.
 
@@ -67,5 +69,11 @@ Classify repositories as `UNMANAGED`, `LEGACY_MANAGED`, `CURRENT_MANAGED`, or `D
 ## Review truth and finality
 
 Preserve the accepted server-authoritative review inventory, finding evidence, Deferred Findings, A1-A4, and repository-consent boundaries. Empty, stale, partial, caller-invented, or unverifiable review evidence is not green. Executors may inspect and recommend but must not reply to or resolve review threads, dismiss reviews, mark Ready, merge, manufacture finality, or choose the next current child autonomously.
+
+Before PREVIEW, obtain a branded `toolkit.github-program.scope-grant.v1` from a first-party adapter that was not given desired Parent/Child/PR scope. Exact repository, Parent, ordered children, dependencies, and associated PR equality is required before relationship or PR inspection. Candidate identity then binds exact trusted live repository/Parent/Child/PR, branch, base, head, tree, live lifecycle, and version resolved at that head by the host-configured generic resolver.
+
+`ACTIVE` normally requires an open Draft PR. Open Ready is legal only for a terminal completing PR after every required epoch is accepted, no blocking hold remains, and retained Web finality authority exists. `ACCEPTED` requires trusted merged evidence; `RETIRED` requires trusted closed-unmerged retirement evidence. Only the terminal completing PR may receive a closing association.
+
+Canonical state is limited to 32 KiB UTF-8, each managed body to 56 KiB, and all projections to 512 KiB. Budget failure occurs before planning or apply. READBACK_VERIFY reparses the Parent canonical state and every projection envelope, verifies labels and native relationships, and requires an immediate `ZERO_DELTA / ZERO_MUTATION` rerun.
 
 Return a compact packet with repository/parent identity, conformance, predecessor coverage, preview/current bindings, exact delta, authority boundary, apply/readback result, zero-delta rerun result, failures, and exactly one controller-owned next action.

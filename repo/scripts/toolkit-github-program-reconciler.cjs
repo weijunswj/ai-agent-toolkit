@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const a1 = require('./toolkit-control-plane/control-plane-kernel.cjs');
 const canonicalA2 = require('./toolkit-capability-registry.cjs');
+const convergenceV4 = require('./toolkit-github-program-state-v4.cjs');
 const PROGRAMME_SURFACE_CONTRACT = require('../contracts/github-program-reconciler/programme-surface-contract.json');
 
 const CONTRACT_VERSION = 'toolkit.github-program-reconciler.v1';
@@ -249,6 +250,17 @@ function validExtensions(value) {
   if (value === undefined) return true;
   if (!isRecord(value) || Object.keys(value).length > 20) return false;
   const encoded = canonicalJson(value);
+  const reserved = new Set(['status', 'lifecycle', 'current', 'current_status', 'current_gate', 'current_epoch', 'cursor', 'gate', 'epoch', 'candidate', 'candidate_lock', 'lock', 'role', 'completes_child', 'finality', 'holds', 'blocked', 'next_action', 'progress', 'outcome', 'remaining', 'achieved', 'pr_status', 'pr_state', 'version', 'head', 'tree', 'base']);
+  const stack = [value];
+  while (stack.length) {
+    const current = stack.pop();
+    for (const [key, entry] of Object.entries(current)) {
+      const normalized = key.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+      if (reserved.has(normalized) || normalized.startsWith('current_') || normalized.endsWith('_status')
+        || normalized.endsWith('_lifecycle') || normalized.includes('candidate_lock') || normalized.includes('next_action')) return false;
+      if (isRecord(entry)) stack.push(entry);
+    }
+  }
   return encoded.length <= 4096 && !forbiddenEvidence(encoded);
 }
 function safeTextArray(value) {
@@ -289,7 +301,7 @@ function validatePrRegistry(registry) {
   return success('PROGRAMME_VALID', { registry: clone(registry) });
 }
 function hasPortableFields(kind, value) {
-  const required = PROGRAMME_SURFACE_CONTRACT.portable_minimum[kind];
+  const required = PROGRAMME_SURFACE_CONTRACT.legacy_v1_portable_minimum[kind];
   return isRecord(value) && Array.isArray(required) && required.every((key) => Object.prototype.hasOwnProperty.call(value, key));
 }
 function validateProgrammeModel(model) {
@@ -385,9 +397,27 @@ function validateProgrammeModel(model) {
       const pr = model.prs.find((candidatePr) => candidatePr.number === candidate.pr);
       const registry = child.pr_registry.find((entry) => entry.pr === candidate.pr && entry.status === 'ACTIVE');
       if (!pr || !registry || candidate.branch !== pr.branch || candidate.base !== pr.base || candidate.head !== pr.head
-        || candidate.tree !== pr.tree || candidate.epoch !== pr.epoch || candidate.role !== pr.role
+        || candidate.tree !== pr.tree || candidate.version !== pr.version || candidate.epoch !== pr.epoch || candidate.role !== pr.role
         || candidate.completes_child !== pr.completes_child) {
         return programmeFailure('candidate-registry-pr-binding');
+      }
+    }
+    if (/\bG4\b/i.test(child.current_gate)
+      && child.epochs.some((entry) => /(?:await(?:ing|s)?|before)[^\r\n]{0,80}(?:fresh[^\r\n]{0,20})?\bG4\b/i.test(entry.state))) {
+      return programmeFailure('legacy-child-semantic-contradiction');
+    }
+    if (/\bG4\b/i.test(child.current_gate)) {
+      const childPrs = model.prs.filter((pr) => pr.child_issue === child.issue);
+      if (childPrs.some((pr) => /(?:await(?:ing|s)?|before)[^\r\n]{0,100}(?:fresh[^\r\n]{0,20})?\bG4\b/i.test(pr.outcome))) {
+        return programmeFailure('legacy-pr-semantic-contradiction');
+      }
+    }
+    for (const entry of child.pr_registry) {
+      const pr = model.prs.find((candidatePr) => candidatePr.number === entry.pr);
+      if (entry.status === 'ACTIVE' && !['DRAFT', 'OPEN', 'OPEN_DRAFT', 'OPEN_READY'].includes(pr.state)
+        || entry.status === 'ACCEPTED' && pr.state !== 'MERGED'
+        || entry.status === 'RETIRED' && !['CLOSED', 'CLOSED_UNMERGED', 'RETIRED'].includes(pr.state)) {
+        return programmeFailure('legacy-pr-live-lifecycle-contradiction');
       }
     }
   }
@@ -1281,6 +1311,17 @@ function createProgrammeRuntime(options = {}) {
     const inspected = inspect();
     if (!isRecord(inspected) || inspected.ok === false) return inspected?.ok === false ? inspected : programmeFailure('programme-inspection-failed');
     if (inspected.repository !== input.repository) return programmeFailure('repository-identity-mismatch');
+    const trustedScope = {
+      parent_issue: inspected.model?.parent?.issue,
+      children: inspected.model?.children?.map((child) => child.issue) || [],
+    };
+    const desiredScope = {
+      parent_issue: input.desired?.parent?.issue,
+      children: input.desired?.children?.map((child) => child.issue) || [],
+    };
+    if (desiredScope.parent_issue !== trustedScope.parent_issue || canonicalJson(desiredScope.children) !== canonicalJson(trustedScope.children)) {
+      return programmeFailure('desired-programme-scope-mismatch');
+    }
     let relationshipInspection;
     if (input.desired_native) {
       const trusted = trustedRelationshipInspection(adapter, {
@@ -2815,6 +2856,7 @@ module.exports = Object.freeze({
   buildReviewInventory, evaluateMateriality, classifyFinding, normalizeFindingEvidence, authorizeReviewMutation, resolveFinding,
   registerDeferredFinding, validateDeferredFindingRecord, revalidateDeferredFinding, projectA4Review, codexReviewState, autoCodeReadiness, adjudicateHistoricalPr310,
   findingEvidenceDigest, deferredRootDigest, reviewEvidenceDigest, durableEvidenceDigest, normalizeDurableEvidence, parseLegacyParent, rejectHistoricalRevival, nextAction, createRuntime,
+  convergenceV4,
 });
 function representedPrNumbers(state) {
   const values = [];

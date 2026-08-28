@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.github-program.trusted-relationship-inspection.v1",
+  "title": "Trusted programme relationship inspection v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "repository", "parent_issue", "children", "dependencies", "api_version", "scope_digest", "complete"],
+  "properties": {
+    "schema": { "const": "toolkit.github-program.trusted-relationship-inspection.v1" },
+    "repository": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\r\\n]+$" },
+    "parent_issue": { "type": "integer", "minimum": 1 },
+    "children": { "type": "array", "maxItems": 50, "uniqueItems": true, "items": { "type": "integer", "minimum": 1 } },
+    "dependencies": { "type": "object", "maxProperties": 50, "additionalProperties": { "type": "array", "maxItems": 50, "uniqueItems": true, "items": { "type": "integer", "minimum": 1 } } },
+    "api_version": { "type": "string", "minLength": 1, "maxLength": 80, "pattern": "^[^\\r\\n]+$" },
+    "scope_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "complete": { "const": true }
+  }
+}

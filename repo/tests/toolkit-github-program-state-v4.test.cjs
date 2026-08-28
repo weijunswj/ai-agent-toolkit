@@ -1,0 +1,517 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+
+const v4 = require('../scripts/toolkit-github-program-state-v4.cjs');
+
+const HEAD = 'a'.repeat(40);
+const TREE = 'b'.repeat(40);
+const BASE = 'c'.repeat(40);
+const EVIDENCE_DIGEST = 'd'.repeat(64);
+
+function stateFixture() {
+  return {
+    schema: v4.STATE_SCHEMA,
+    design_lock: v4.DESIGN_LOCK,
+    repository: 'example/programme',
+    parent: { issue: 1, title: 'Programme', goal: 'Deliver one bounded programme truth.' },
+    children: [
+      {
+        issue: 2,
+        order: 1,
+        title: 'Child A',
+        objective: 'Deliver the current programme product.',
+        lifecycle: 'CURRENT',
+        dependencies: [],
+        scope: ['Canonical-state convergence.'],
+        out_of_scope: ['Ready, merge, and finality.'],
+        boundaries: ['Web retains final disposition authority.'],
+        eli5: 'One plan now produces every current view.',
+        epochs: [{ id: 'E3', name: 'Productisation', lock: 'LOCK-E3', purpose: 'Converge the programme model.', gates: ['G2', 'G3', 'G4'], terminal_disposition: null, evidence_ref: null }],
+        holds: [],
+        pr_registry: [{ pr: 3, status: 'ACTIVE', role: 'INTERMEDIATE', completes_child: false, epoch_id: 'E3', accepted_evidence_ref: null, retirement_evidence_ref: null }],
+        finality: { state: 'HELD', authority_ref: null },
+      },
+      {
+        issue: 4,
+        order: 2,
+        title: 'Child B',
+        objective: 'Deliver the next programme product.',
+        lifecycle: 'QUEUED',
+        dependencies: [2],
+        scope: ['Later programme work.'],
+        out_of_scope: ['Current Child A work.'],
+        boundaries: ['Do not start while Child A is current.'],
+        eli5: 'This waits for Child A.',
+        epochs: [{ id: 'E1', name: 'Delivery', lock: 'LOCK-E1', purpose: 'Deliver Child B.', gates: ['G1'], terminal_disposition: null, evidence_ref: null }],
+        holds: [],
+        pr_registry: [],
+        finality: { state: 'HELD', authority_ref: null },
+      },
+    ],
+    prs: [{
+      number: 3,
+      child_issue: 2,
+      purpose: 'Implement canonical programme convergence.',
+      scope: ['State, projection, trust, and migration contracts.'],
+      out_of_scope: ['Ready and merge.'],
+      design_constraints: ['Preview before apply.'],
+      changed_surfaces: ['runtime', 'contracts', 'tests'],
+      eli5: 'This PR makes all views use one plan.',
+    }],
+    cursor: { child_issue: 2, epoch_id: 'E3', gate: 'G3', status: 'ACTIVE', result: null },
+    candidate: { pr: 3, child_issue: 2, branch: 'feature/convergence', base: BASE, head: HEAD, tree: TREE, version: '3.0.0' },
+    predecessor_contract_digest: EVIDENCE_DIGEST,
+    evidence_refs: [
+      { id: 'web-g3', kind: 'WEB', reference: 'github:issue-comment:2:100', summary: 'G3 convergence authority.' },
+      { id: 'web-g4-amend', kind: 'WEB', reference: 'github:issue-comment:2:90', summary: 'Prior G4 AMEND result.' },
+      { id: 'web-g2', kind: 'WEB', reference: 'github:issue-comment:2:95', summary: 'Convergence G2 accepted.' },
+      { id: 'accepted-pr', kind: 'PR', reference: 'github:pr:3:merge', summary: 'Accepted PR evidence.' },
+      { id: 'retired-pr', kind: 'PR', reference: 'github:pr:3:closed', summary: 'Retired PR evidence.' },
+      { id: 'ready-authority', kind: 'WEB', reference: 'github:issue-comment:2:110', summary: 'Ready authority.' },
+    ],
+    historical_transitions: [
+      { id: 'e3-g4-amend', child_issue: 2, epoch_id: 'E3', gate: 'G4', disposition: 'AMEND', evidence_ref: 'web-g4-amend' },
+      { id: 'e3-g2-accepted', child_issue: 2, epoch_id: 'E3', gate: 'G2', disposition: 'ACCEPTED', evidence_ref: 'web-g2' },
+    ],
+    extensions: [],
+  };
+}
+
+function scopeFixture(state = stateFixture(), overrides = {}) {
+  return {
+    schema: v4.SCOPE_SCHEMA,
+    repository: state.repository,
+    parent_issue: state.parent.issue,
+    children: state.children.slice().sort((a, b) => a.order - b.order).map((child) => child.issue),
+    dependencies: Object.fromEntries(state.children.map((child) => [String(child.issue), child.dependencies])),
+    associated_prs: state.prs.map((pr) => pr.number),
+    api_version: '2026-03-10',
+    complete: true,
+    pagination: { complete: true },
+    revision: 'scope-revision-1',
+    source_digests: [EVIDENCE_DIGEST],
+    version_resolver: {
+      identity: 'toolkit-package-v1',
+      kind: 'json-pointer-agreement',
+      agreement: 'all',
+      sources: [{ path: 'package/version.json', pointer: '/version' }],
+    },
+    ...overrides,
+  };
+}
+
+function trustHarness(state = stateFixture(), options = {}) {
+  let relationshipCalls = 0;
+  let prCalls = 0;
+  const broker = v4.createProgrammeTrustBroker({
+    inspect_scope() { return scopeFixture(state, options.scope || {}); },
+    inspect_relationships(input) {
+      relationshipCalls += 1;
+      return {
+        schema: v4.RELATIONSHIP_INSPECTION_SCHEMA,
+        repository: input.repository,
+        parent_issue: input.parent_issue,
+        children: input.children,
+        dependencies: input.dependencies,
+        api_version: input.api_version,
+        scope_digest: input.scope_digest,
+        complete: true,
+      };
+    },
+    inspect_prs(input) {
+      prCalls += 1;
+      const facts = state.prs.map((pr) => {
+        const candidate = state.candidate?.pr === pr.number ? state.candidate : { branch: 'retained/pr', base: BASE, head: HEAD, tree: TREE, version: '3.0.0' };
+        return {
+          number: pr.number,
+          parent_issue: options.pr_parent || state.parent.issue,
+          child_issue: options.pr_child || pr.child_issue,
+          branch: candidate.branch,
+          base: candidate.base,
+          head: candidate.head,
+          tree: candidate.tree,
+          version: options.version || candidate.version,
+          lifecycle: options.lifecycle || 'OPEN_DRAFT',
+          version_source_digests: [EVIDENCE_DIGEST],
+        };
+      });
+      return { schema: v4.PR_INSPECTION_SCHEMA, repository: input.repository, scope_digest: input.scope_digest, resolver_identity: input.version_resolver.identity, complete: true, facts };
+    },
+  });
+  return { broker, issueScope: () => broker.issueScope(), calls: () => ({ relationshipCalls, prCalls }) };
+}
+
+function emptySnapshot(state) {
+  return { repository: state.repository, revision: 'revision-1', complete: true, canonical_state: null, bodies: { parent: null, children: {}, prs: {} }, labels: {}, native: {} };
+}
+
+function legacyBody(kind, repository, data, prefix = '', suffix = '') {
+  const upper = kind.toUpperCase();
+  const encoded = Buffer.from(JSON.stringify({ kind, repository, data }), 'utf8').toString('base64url');
+  return `${prefix}<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-${upper}:BEGIN v1 -->\nlegacy ${kind}\n<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-STATE v1 ${encoded} -->\n<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-${upper}:END -->${suffix}`;
+}
+
+function completeLegacyData(kind, overrides) {
+  const contract = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../contracts/github-program-reconciler/programme-surface-contract.json'), 'utf8'));
+  return { ...Object.fromEntries(contract.legacy_v1_portable_minimum[kind].map((key) => [key, null])), ...overrides };
+}
+
+test('canonical state derives every semantic projection from one source', () => {
+  const state = stateFixture();
+  const valid = v4.validateCanonicalStateV4(state);
+  assert.equal(valid.ok, true);
+  assert.equal(Object.hasOwn(state.parent, 'status'), false);
+  assert.equal(Object.hasOwn(state.children[0], 'outcome'), false);
+  assert.equal(Object.hasOwn(state.prs[0], 'role'), false);
+  const derived = v4.deriveProjectionV1(state);
+  assert.equal(derived.ok, true);
+  assert.match(derived.projection.parent.status, /CURRENT \/ E3 G3/);
+  assert.match(derived.projection.children[0].outcome, /current in E3 at G3/);
+  assert.deepEqual(derived.projection.children[0].remaining, ['E3 G3', 'E3 G4', 'Web finality disposition']);
+  assert.deepEqual(derived.projection.children[0].achieved, ['E3 G4 AMEND', 'E3 G2 ACCEPTED']);
+  assert.match(derived.projection.prs[0].outcome, /active for E3/);
+  assert.equal(derived.projection.prs[0].lock, 'LOCK-E3');
+});
+
+test('active draft candidate passes exact trusted PR and generic version binding', () => {
+  const state = stateFixture();
+  const harness = trustHarness(state);
+  const scope = harness.issueScope();
+  assert.equal(scope.ok, true);
+  const preview = v4.buildConvergencePreview({ snapshot: emptySnapshot(state), desired: state, scope_grant: scope.grant, broker: harness.broker });
+  assert.equal(preview.ok, true);
+  assert.equal(preview.code, 'PROGRAMME_PREVIEW_READY');
+  assert.equal(preview.mutation_authority, 'NOT_GRANTED');
+});
+
+test('candidate version mismatch and ACTIVE merged lifecycle fail closed', () => {
+  const state = stateFixture();
+  for (const options of [{ version: '3.0.1' }, { lifecycle: 'MERGED' }]) {
+    const harness = trustHarness(state, options);
+    const scope = harness.issueScope();
+    const preview = v4.buildConvergencePreview({ snapshot: emptySnapshot(state), desired: state, scope_grant: scope.grant, broker: harness.broker });
+    assert.equal(preview.ok, false);
+  }
+});
+
+test('ACCEPTED merged and RETIRED closed-unmerged registry paths require evidence', () => {
+  const accepted = stateFixture();
+  accepted.children[0].pr_registry[0].status = 'ACCEPTED';
+  accepted.children[0].pr_registry[0].accepted_evidence_ref = 'accepted-pr';
+  accepted.candidate = null;
+  let harness = trustHarness(accepted, { lifecycle: 'MERGED' });
+  let scope = harness.issueScope();
+  assert.equal(v4.buildConvergencePreview({ snapshot: emptySnapshot(accepted), desired: accepted, scope_grant: scope.grant, broker: harness.broker }).ok, true);
+
+  const retired = stateFixture();
+  retired.children[0].pr_registry[0].status = 'RETIRED';
+  retired.children[0].pr_registry[0].retirement_evidence_ref = 'retired-pr';
+  retired.candidate = null;
+  harness = trustHarness(retired, { lifecycle: 'CLOSED_UNMERGED' });
+  scope = harness.issueScope();
+  assert.equal(v4.buildConvergencePreview({ snapshot: emptySnapshot(retired), desired: retired, scope_grant: scope.grant, broker: harness.broker }).ok, true);
+});
+
+test('Ready path is legal only for terminal completion with Web authority and no hold', () => {
+  const ready = stateFixture();
+  ready.children[0].epochs[0].terminal_disposition = 'ACCEPTED';
+  ready.children[0].epochs[0].evidence_ref = 'web-g2';
+  ready.children[0].pr_registry[0].role = 'TERMINAL';
+  ready.children[0].pr_registry[0].completes_child = true;
+  ready.children[0].finality = { state: 'READY_AUTHORIZED', authority_ref: 'ready-authority' };
+  ready.cursor = null;
+  let harness = trustHarness(ready, { lifecycle: 'OPEN_READY' });
+  let scope = harness.issueScope();
+  assert.equal(v4.buildConvergencePreview({ snapshot: emptySnapshot(ready), desired: ready, scope_grant: scope.grant, broker: harness.broker }).ok, true);
+  assert.equal(v4.derivePrAssociationsV4(ready).associations['3'].kind, 'CLOSING');
+
+  ready.children[0].finality = { state: 'HELD', authority_ref: null };
+  harness = trustHarness(ready, { lifecycle: 'OPEN_READY' });
+  scope = harness.issueScope();
+  assert.equal(v4.buildConvergencePreview({ snapshot: emptySnapshot(ready), desired: ready, scope_grant: scope.grant, broker: harness.broker }).ok, false);
+});
+
+test('gate completion and finality reject non-Web disposition evidence', () => {
+  const state = stateFixture();
+  state.evidence_refs.find((entry) => entry.id === 'web-g2').kind = 'CHECK';
+  assert.equal(v4.validateCanonicalStateV4(state).reason, 'historical-transition-web-disposition-required');
+
+  const finality = stateFixture();
+  finality.children[0].finality = { state: 'READY_AUTHORIZED', authority_ref: 'accepted-pr' };
+  assert.equal(v4.validateCanonicalStateV4(finality).reason, 'finality-web-authority-required');
+});
+
+test('wrong Parent, child, dependency, and extra PR fail before relationship inspection', () => {
+  for (const mutate of [
+    (state) => { state.parent.issue = 99; },
+    (state) => { state.children[1].issue = 99; },
+    (state) => { state.children[1].dependencies = [99]; },
+    (state) => { state.prs.push({ ...state.prs[0], number: 9 }); },
+  ]) {
+    const trustedState = stateFixture();
+    const desired = stateFixture();
+    mutate(desired);
+    const harness = trustHarness(trustedState);
+    const scope = harness.issueScope();
+    const preview = v4.buildConvergencePreview({ snapshot: emptySnapshot(desired), desired, scope_grant: scope.grant, broker: harness.broker });
+    assert.equal(preview.ok, false);
+    assert.equal(harness.calls().relationshipCalls, 0);
+  }
+});
+
+test('extension aliases, nested overrides, and foreign targets fail closed', () => {
+  for (const extension of [
+    { schema: v4.EXTENSIONS_SCHEMA, namespace: 'repository.custom', target: { kind: 'child', number: 2 }, class: 'INFORMATION', title: 'Bad', payload: { currentStatus: 'BLOCKED' } },
+    { schema: v4.EXTENSIONS_SCHEMA, namespace: 'repository.current-status', target: { kind: 'child', number: 2 }, class: 'INFORMATION', title: 'Bad', payload: { text: 'Detail.' } },
+    { schema: v4.EXTENSIONS_SCHEMA, namespace: 'repository.custom', target: { kind: 'child', number: 999 }, class: 'INFORMATION', title: 'Bad', payload: { text: 'Detail.' } },
+    { schema: v4.EXTENSIONS_SCHEMA, namespace: 'repository.custom', target: { kind: 'child', number: 2 }, class: 'TABLE', title: 'Details', payload: { columns: ['Current status'], rows: [['BLOCKED']] } },
+    { schema: v4.EXTENSIONS_SCHEMA, namespace: 'repository.custom', target: { kind: 'child', number: 2 }, class: 'INFORMATION', title: 'Next action', payload: { text: 'Do something else.' } },
+  ]) {
+    const state = stateFixture();
+    state.extensions = [extension];
+    assert.equal(v4.validateCanonicalStateV4(state).ok, false);
+  }
+});
+
+test('typed domain and table extensions render additively without feeding derivation', () => {
+  const state = stateFixture();
+  state.extensions = [
+    { schema: v4.EXTENSIONS_SCHEMA, namespace: 'deployment.environment_health', target: { kind: 'parent', number: 1 }, class: 'DOMAIN_HEALTH', title: 'Environment health', payload: { domain: 'deployment', status: 'UNKNOWN', summary: 'No deployment action is in scope.' } },
+    { schema: v4.EXTENSIONS_SCHEMA, namespace: 'repository.predecessor_coverage', target: { kind: 'child', number: 2 }, class: 'TABLE', title: 'Coverage', payload: { columns: ['Group', 'State'], rows: [['Predecessors', 'Mapped']] } },
+  ];
+  const rendered = v4.renderProgrammeV4(state);
+  assert.equal(rendered.ok, true);
+  assert.match(rendered.bodies.parent, /Environment health/);
+  assert.match(rendered.bodies.children['2'], /Predecessors/);
+  assert.match(rendered.projection.parent.status, /CURRENT \/ E3 G3/);
+});
+
+test('byte budgets reject oversized canonical state and oversized rendered body before planning', () => {
+  const oversizedState = stateFixture();
+  oversizedState.children[0].scope = Array.from({ length: 20 }, (_, index) => `${index}:` + 'x'.repeat(4000));
+  assert.equal(v4.validateCanonicalStateV4(oversizedState).reason, 'canonical-state-byte-budget-exceeded');
+
+  const oversizedBody = stateFixture();
+  oversizedBody.extensions = Array.from({ length: 6 }, (_, index) => ({
+    schema: v4.EXTENSIONS_SCHEMA,
+    namespace: `repository.long_detail_${index}`,
+    target: { kind: 'parent', number: 1 },
+    class: 'INFORMATION',
+    title: `Long detail ${index}`,
+    payload: { text: 'x'.repeat(3900) },
+  }));
+  const rendered = v4.renderProgrammeV4(oversizedBody);
+  assert.equal(rendered.ok, false);
+  assert.match(rendered.reason, /byte-budget-exceeded/);
+});
+
+test('large but bounded programme renders deterministically within transport budgets', () => {
+  const state = stateFixture();
+  for (let issue = 5; issue <= 15; issue += 1) {
+    state.children.push({
+      ...structuredClone(state.children[1]),
+      issue,
+      order: state.children.length + 1,
+      title: `Queued Child ${issue}`,
+      dependencies: [issue - 1 === 4 ? 4 : issue - 1],
+    });
+  }
+  const first = v4.renderProgrammeV4(state);
+  const second = v4.renderProgrammeV4(structuredClone(state));
+  assert.equal(first.ok, true);
+  assert.equal(first.total_projection_bytes < v4.TOTAL_PROJECTION_BUDGET_BYTES, true);
+  assert.deepEqual(first.body_digests, second.body_digests);
+});
+
+test('runtime validation rejects schema-undeclared semantic aliases', () => {
+  const state = stateFixture();
+  state.children[0].current_status = 'BLOCKED';
+  assert.equal(v4.validateCanonicalStateV4(state).ok, false);
+});
+
+test('cursor epoch state is bound to both child and epoch identity', () => {
+  const state = stateFixture();
+  state.children[1].epochs[0].id = 'E3';
+  const derived = v4.deriveProjectionV1(state);
+  assert.equal(derived.ok, true);
+  assert.equal(derived.projection.children[1].epochs[0].state, 'PENDING');
+});
+
+test('retired terminal PR never receives a closing association', () => {
+  const state = stateFixture();
+  state.children[0].pr_registry[0] = { pr: 3, status: 'RETIRED', role: 'TERMINAL', completes_child: true, epoch_id: 'E3', accepted_evidence_ref: null, retirement_evidence_ref: 'retired-pr' };
+  state.children[0].finality = { state: 'READY_AUTHORIZED', authority_ref: 'ready-authority' };
+  state.candidate = null;
+  const associations = v4.derivePrAssociationsV4(state);
+  assert.equal(associations.ok, true);
+  assert.equal(associations.associations['3'].kind, 'CROSS_REFERENCE');
+});
+
+test('render, parse, readback, and immediate rerun prove exact canonical zero delta', () => {
+  const state = stateFixture();
+  const rendered = v4.renderProgrammeV4(state);
+  assert.equal(rendered.ok, true);
+  const parsed = v4.parseProgrammeV4Body(rendered.bodies.parent, { kind: 'parent', repository: state.repository, parent_issue: 1, number: 1 });
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(parsed.state, state);
+
+  const harness = trustHarness(state);
+  const scope = harness.issueScope();
+  const first = v4.buildConvergencePreview({ snapshot: emptySnapshot(state), desired: state, scope_grant: scope.grant, broker: harness.broker });
+  const readback = structuredClone(first.expected_snapshot);
+  readback.revision = 'revision-2';
+  assert.equal(v4.verifyConvergenceReadback(readback, first).ok, true);
+
+  const secondHarness = trustHarness(state);
+  const secondScope = secondHarness.issueScope();
+  const second = v4.buildConvergencePreview({ snapshot: readback, desired: state, scope_grant: secondScope.grant, broker: secondHarness.broker });
+  assert.equal(second.code, 'PROGRAMME_ZERO_DELTA');
+  assert.equal(second.operations.length, 0);
+});
+
+test('convergence apply requires exact preview-bound authority and verifies readback', () => {
+  const state = stateFixture();
+  const harness = trustHarness(state);
+  const scope = harness.issueScope();
+  let snapshot = emptySnapshot(state);
+  let acceptedPreview;
+  const runtime = v4.createConvergenceRuntime({
+    broker: harness.broker,
+    inspect_snapshot() { return structuredClone(snapshot); },
+    verify_authority({ binding }) { return { ok: true, grant: { reference: 'owner:approved-preview', binding } }; },
+    apply_operations({ operations }) {
+      assert.equal(operations.some((operation) => /ready|merge|finality/i.test(operation.kind)), false);
+      snapshot = { ...structuredClone(acceptedPreview.expected_snapshot), revision: 'revision-2' };
+      return { ok: true, applied_count: operations.length };
+    },
+  });
+  acceptedPreview = runtime.preview({ desired: state, scope_grant: scope.grant });
+  assert.equal(acceptedPreview.ok, true);
+  const applied = runtime.apply({ preview: acceptedPreview, authority: { reference: 'owner:approved-preview' } });
+  assert.equal(applied.ok, true);
+  assert.equal(applied.readback_verified, true);
+  assert.equal(applied.immediate_rerun, 'ZERO_DELTA');
+});
+
+test('zero-delta apply reinspects and rejects drift instead of reporting fake readback', () => {
+  const state = stateFixture();
+  const rendered = v4.renderProgrammeV4(state);
+  const harness = trustHarness(state);
+  const scope = harness.issueScope();
+  let snapshot = {
+    repository: state.repository,
+    revision: 'revision-1',
+    complete: true,
+    canonical_state: structuredClone(state),
+    bodies: structuredClone(rendered.bodies),
+    labels: { '2': ['current'], '4': ['queued'] },
+    native: { children: [2, 4], dependencies: { '2': [], '4': [2] }, associated_prs: [3], pr_associations: { '3': { parent_issue: 1, child_issue: 2, kind: 'CROSS_REFERENCE' } }, api_version: '2026-03-10' },
+  };
+  const runtime = v4.createConvergenceRuntime({ broker: harness.broker, inspect_snapshot() { return structuredClone(snapshot); } });
+  const preview = runtime.preview({ desired: state, scope_grant: scope.grant });
+  assert.equal(preview.code, 'PROGRAMME_ZERO_DELTA');
+  snapshot = { ...snapshot, revision: 'revision-2' };
+  assert.equal(runtime.apply({ preview }).reason, 'stale-preview');
+});
+
+test('trusted scope grants are deeply immutable and digest-bound', () => {
+  const state = stateFixture();
+  const harness = trustHarness(state);
+  const scope = harness.issueScope();
+  assert.equal(Object.isFrozen(scope.grant.children), true);
+  assert.equal(Object.isFrozen(scope.grant.dependencies['4']), true);
+  assert.throws(() => { scope.grant.children[0] = 99; }, TypeError);
+  const forged = structuredClone(scope.grant);
+  forged.children[0] = 99;
+  assert.equal(v4.assertScopeEquality(state, forged).reason, 'trusted-scope-grant-required');
+});
+
+test('steady-state projection updates preserve owner bytes and reject competing owner truth', () => {
+  const state = stateFixture();
+  const rendered = v4.renderProgrammeV4(state);
+  const snapshot = emptySnapshot(state);
+  snapshot.bodies = structuredClone(rendered.bodies);
+  snapshot.bodies.parent = `owner-prefix\n${snapshot.bodies.parent}\nowner-suffix`;
+  snapshot.labels = { '2': ['human-label', 'current'], '4': ['queued'] };
+  snapshot.native = { children: [2, 4], dependencies: { '2': [], '4': [2] }, associated_prs: [3], pr_associations: { '3': { parent_issue: 1, child_issue: 2, kind: 'CROSS_REFERENCE' } }, api_version: '2026-03-10' };
+  const harness = trustHarness(state);
+  const scope = harness.issueScope();
+  let preview = v4.buildConvergencePreview({ snapshot, desired: state, scope_grant: scope.grant, broker: harness.broker });
+  assert.equal(preview.ok, true);
+  assert.match(preview.expected_snapshot.bodies.parent, /^owner-prefix\n/);
+  assert.match(preview.expected_snapshot.bodies.parent, /\nowner-suffix$/);
+  assert.deepEqual(preview.expected_snapshot.labels['2'], ['current', 'human-label']);
+
+  snapshot.bodies.parent = `## Current status\nBLOCKED\n${rendered.bodies.parent}`;
+  const blockedHarness = trustHarness(state);
+  const blockedScope = blockedHarness.issueScope();
+  preview = v4.buildConvergencePreview({ snapshot, desired: state, scope_grant: blockedScope.grant, broker: blockedHarness.broker });
+  assert.equal(preview.reason, 'current-body-requires-explicit-migration');
+});
+
+test('migration preview replaces only exact v1 managed spans and preserves unrelated bytes', () => {
+  const state = stateFixture();
+  const legacy = {
+    repository: state.repository,
+    revision: 'legacy-revision-1',
+    complete: true,
+    bodies: {
+      parent: legacyBody('parent', state.repository, completeLegacyData('parent', { issue: 1, current_child: 2, status: 'G3 CURRENT', extensions: {} }), 'owner-prefix\n', '\nowner-suffix'),
+      children: {
+        '2': legacyBody('child', state.repository, completeLegacyData('child', { issue: 2, parent_issue: 1, status: 'CURRENT', current_gate: 'G3', epochs: [{ state: 'CURRENT' }], candidate: { pr: 3, branch: 'feature/convergence', base: BASE, head: HEAD, tree: TREE, version: '3.0.0' } }), 'child-prefix\n', '\nchild-suffix'),
+        '4': legacyBody('child', state.repository, completeLegacyData('child', { issue: 4, parent_issue: 1, status: 'QUEUED', current_gate: 'QUEUED', epochs: [{ state: 'PENDING' }], candidate: null })),
+      },
+      prs: { '3': legacyBody('pr', state.repository, completeLegacyData('pr', { number: 3, parent_issue: 1, child_issue: 2, branch: 'feature/convergence', base: BASE, head: HEAD, tree: TREE, version: '3.0.0', outcome: 'G3 is current.' }), 'pr-prefix\n', '\npr-suffix') },
+    },
+  };
+  const harness = trustHarness(state);
+  const scope = harness.issueScope();
+  const preview = v4.buildMigrationPreviewV1({ legacy_snapshot: legacy, desired: state, scope_grant: scope.grant, broker: harness.broker, authority_ref: 'github:issue-comment:2:100' });
+  assert.equal(preview.ok, true);
+  assert.equal(preview.semantic_mapping.correction_authority_ref, 'github:issue-comment:2:100');
+  assert.equal(preview.mutation_authority, 'NOT_GRANTED');
+  assert.match(preview.expected_bodies.parent, /^owner-prefix\n/);
+  assert.match(preview.expected_bodies.parent, /\nowner-suffix$/);
+  assert.match(preview.expected_bodies.children['2'], /^child-prefix\n/);
+  assert.match(preview.expected_bodies.prs['3'], /\npr-suffix$/);
+});
+
+test('migration rejects partial v1 envelopes before trusted relationship inspection', () => {
+  const state = stateFixture();
+  const legacy = {
+    repository: state.repository,
+    revision: 'legacy-revision-1',
+    complete: true,
+    bodies: {
+      parent: legacyBody('parent', state.repository, { issue: 1, current_child: 2 }),
+      children: { '2': legacyBody('child', state.repository, { issue: 2, parent_issue: 1, status: 'CURRENT' }), '4': legacyBody('child', state.repository, { issue: 4, parent_issue: 1, status: 'QUEUED' }) },
+      prs: { '3': legacyBody('pr', state.repository, { number: 3, parent_issue: 1, child_issue: 2 }) },
+    },
+  };
+  const harness = trustHarness(state);
+  const scope = harness.issueScope();
+  const preview = v4.buildMigrationPreviewV1({ legacy_snapshot: legacy, desired: state, scope_grant: scope.grant, broker: harness.broker, authority_ref: 'github:issue-comment:2:100' });
+  assert.equal(preview.reason, 'legacy-portable-state-incomplete');
+  assert.equal(harness.calls().relationshipCalls, 0);
+});
+
+test('published v4 schemas are strict, parseable, and identity-aligned', () => {
+  const schemas = [
+    ['programme-state-v4.schema.json', v4.STATE_SCHEMA],
+    ['programme-extensions-v1.schema.json', v4.EXTENSIONS_SCHEMA],
+    ['programme-projection-v1.schema.json', v4.PROJECTION_SCHEMA],
+    ['programme-scope-grant-v1.schema.json', v4.SCOPE_SCHEMA],
+    ['trusted-pr-inspection-v1.schema.json', v4.PR_INSPECTION_SCHEMA],
+    ['trusted-relationship-inspection-v1.schema.json', v4.RELATIONSHIP_INSPECTION_SCHEMA],
+    ['programme-migration-v1.schema.json', v4.MIGRATION_SCHEMA],
+  ];
+  for (const [file, identity] of schemas) {
+    const schema = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../contracts/github-program-reconciler', file), 'utf8'));
+    assert.equal(schema.$id, identity);
+    assert.equal(schema.additionalProperties === false || schema.$defs?.extension?.additionalProperties === false, true);
+  }
+});
