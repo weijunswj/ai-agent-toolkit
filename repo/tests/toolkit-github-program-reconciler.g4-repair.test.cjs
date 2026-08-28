@@ -68,7 +68,7 @@ function model() {
       candidate: {
         repository: 'weijunswj/ai-agent-toolkit', parent_issue: 240, child_issue: 359, pr: 366,
         branch: 'sol/s2-productisation-g3', base: BASE, head: HEAD, tree: TREE,
-        version: '2.10.10',
+        version: '2.10.11',
         epoch: 'E3', lock: 'DL-S2-GITHUB-PROGRAM-001', role: 'INTERMEDIATE', completes_child: false,
         lifecycle: 'CURRENT',
       },
@@ -96,7 +96,7 @@ function model() {
       remaining: ['Hosted validation and fresh G4.'],
       safety_constraints: ['INTERMEDIATE and completes_child=false.'],
       validation_status: [{ check: 'Focused repair', state: 'PASS' }, { check: 'G4', state: 'AWAITING FRESH RUN' }],
-      version: '2.10.10',
+      version: '2.10.11',
       role: 'INTERMEDIATE',
       completes_child: false,
       changed_surfaces: ['repo/scripts/toolkit-github-program-reconciler.cjs'],
@@ -240,10 +240,12 @@ test('RED: completed is an explicit exclusive managed lifecycle label', () => {
 
 test('portable surface contract requires the full Parent Child and active PR minimum', () => {
   const contract = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../contracts/github-program-reconciler/programme-surface-contract.json'), 'utf8'));
-  assert.equal(contract.$schema, 'toolkit.github-program.surface.v2');
+  assert.equal(contract.$schema, 'toolkit.github-program.surface.v3');
   for (const field of ['goal', 'progress', 'child_graph']) assert.ok(contract.portable_minimum.parent.includes(field), field);
   for (const field of ['scope', 'achieved', 'remaining', 'holds', 'eli5']) assert.ok(contract.portable_minimum.child.includes(field), field);
   for (const field of ['purpose', 'out_of_scope', 'safety_constraints', 'validation_status', 'eli5']) assert.ok(contract.portable_minimum.pr.includes(field), field);
+  assert.equal(contract.whole_body_freshness.current_programme_source_count, 1);
+  assert.equal(contract.whole_body_freshness.stale_projection_migration.arbitrary_owner_prose_rejected, true);
 });
 
 test('portable sections fail closed while additive repository extensions survive rendering', () => {

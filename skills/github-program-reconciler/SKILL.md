@@ -50,9 +50,9 @@ Maintain one deterministic `ACTIVE / ACCEPTED / RETIRED` registry. A Development
 - Child body: durable operating contract, one-line outcome, parent/dependencies, status/current obligation, epoch/Lock and PR-registry tables, predecessor mapping, exact candidate, boundaries/finality, and next action.
 - PR body: concise lane with one-line outcome, parent/child, epoch/Lock, exact branch/base/head/tree and role tables, changed surfaces, validation, holds, and finality.
 
-The portable minimum and additive repository-extension contract is `repo/contracts/github-program-reconciler/programme-surface-contract.json`. Repository-specific `extensions` may add detail but may not replace portable fields.
+The portable minimum and additive repository-extension contract is `repo/contracts/github-program-reconciler/programme-surface-contract.json`. Repository-specific `extensions` may add detail but may not replace portable fields or project a second current programme state.
 
-Any authorised transition that changes a represented current field must update the body projection in the same transaction. Comment-only current-state changes are incomplete.
+Any authorised transition that changes a represented current field must update the body projection in the same transaction. Comment-only current-state changes are incomplete. READBACK_VERIFY validates the whole issue or PR body, not only the managed block, and rejects structurally anchored legacy `CURRENT`, `PLANNED`, `BLOCKED BY`, current-gate, or current-candidate sections that compete with the canonical projection. Clearly labelled historical evidence remains allowed.
 
 ## Managed chronology
 
@@ -62,7 +62,7 @@ Only typed managed events are machine authority: `lifecycle_transition`, `lock_a
 
 Every child has exactly one managed lifecycle label: `completed`, `current`, `queued`, or evidence-backed `blocked`. Preserve unrelated labels, reconcile the four label definitions, remove stale mutually exclusive managed labels, fail closed on multiple current children, and prefer native closure.
 
-Classify repositories as `UNMANAGED`, `LEGACY_MANAGED`, `CURRENT_MANAGED`, or `DRIFTED_MANAGED`. Initialisation or migration is inspect -> preview -> explicit authority -> write -> readback -> zero-delta rerun. A stale unmanaged projection may be replaced only when an exact repository/entity/body/span digest and Web adjudication bind a recognised projection span; arbitrary owner policy can never be selected by prefix/suffix arithmetic. Preserve unrelated content. Recognised legacy parsing exists only for bounded migration; it is not a second truth or permanent compatibility runtime.
+Classify repositories as `UNMANAGED`, `LEGACY_MANAGED`, `CURRENT_MANAGED`, or `DRIFTED_MANAGED`. Initialisation or migration is inspect -> preview -> explicit authority -> write -> readback -> zero-delta rerun. A stale projection may be transformed only under `toolkit.github-program.stale-projection-migration.v2`: a trusted Web-adjudication verifier must bind repository, entity, whole-body digest, exact recognised spans and their digests, intended result digest, and operation. The grammar permits only structurally recognised programme headings to become clearly historical; arbitrary owner prose can never be selected by caller arithmetic. Preserve every unrelated byte. Recognised legacy parsing exists only for bounded migration; it is not a second truth or permanent compatibility runtime.
 
 ## Review truth and finality
 

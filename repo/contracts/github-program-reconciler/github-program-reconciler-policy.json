@@ -106,10 +106,22 @@
       "finality": false
     },
     "body_freshness_same_transaction": true,
+    "whole_body_semantic_freshness": {
+      "managed_and_unmanaged_text": true,
+      "one_current_programme_source": true,
+      "structurally_anchored_detection": true,
+      "historical_context_allowed": true,
+      "required_for_readback_and_zero_delta": true
+    },
     "stale_projection_migration": {
+      "schema": "toolkit.github-program.stale-projection-migration.v2",
       "exact_repository_entity_body_and_span_binding": true,
-      "web_adjudication_required": true,
-      "arbitrary_prefix_suffix_selection": false
+      "trusted_web_adjudication_verifier_required": true,
+      "resulting_body_digest_binding": true,
+      "recognised_structural_grammar_required": true,
+      "historical_transform_preserves_unrelated_bytes": true,
+      "arbitrary_prefix_suffix_selection": false,
+      "arbitrary_owner_prose_rejected": true
     },
     "managed_event_inventory": {
       "stable_event_ids": true,

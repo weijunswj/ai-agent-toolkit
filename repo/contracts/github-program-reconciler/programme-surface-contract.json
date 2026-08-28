@@ -1,5 +1,5 @@
 {
-  "$schema": "toolkit.github-program.surface.v2",
+  "$schema": "toolkit.github-program.surface.v3",
   "portable_minimum": {
     "parent": [
       "issue",
@@ -89,5 +89,23 @@
   "rendering": {
     "one_line_outcome_required": true,
     "markdown_tables_required_for_repeated_structures": true
+  },
+  "whole_body_freshness": {
+    "current_programme_source_count": 1,
+    "managed_block_and_unmanaged_text_validated_together": true,
+    "structurally_anchored_competing_projection_detection": true,
+    "clearly_historical_context_allowed": true,
+    "repository_extensions_may_not_project_competing_current_state": true,
+    "readback_and_zero_delta_require_fresh_whole_bodies": true,
+    "stale_projection_migration": {
+      "schema": "toolkit.github-program.stale-projection-migration.v2",
+      "trusted_web_adjudication_required": true,
+      "whole_body_digest_required": true,
+      "exact_recognised_spans_required": true,
+      "stale_span_digests_required": true,
+      "resulting_body_digest_required": true,
+      "unrelated_bytes_preserved": true,
+      "arbitrary_owner_prose_rejected": true
+    }
   }
 }

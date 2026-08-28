@@ -23,6 +23,11 @@ function authorityVerifier({ assertion, binding }) {
   return { ok: true, grant: { ...binding, reference: assertion.reference } };
 }
 
+function staleProjectionAdjudicationVerifier({ assertion, binding }) {
+  if (assertion.reference !== 'github:issue-comment:359:5446534784') return { ok: false };
+  return { ok: true, grant: { ...binding, reference: assertion.reference } };
+}
+
 function programmeModel(childStatus = 'QUEUED') {
   return {
     repository: 'weijunswj/ai-agent-toolkit',
@@ -68,7 +73,7 @@ function programmeModel(childStatus = 'QUEUED') {
       candidate: {
         repository: 'weijunswj/ai-agent-toolkit', parent_issue: 240, child_issue: 359, pr: 366,
         branch: 'sol/s2-productisation-g3', base: BASE, head: HEAD, tree: TREE,
-        version: '2.10.10',
+        version: '2.10.11',
         epoch: 'E3', lock: 'DL-S2-GITHUB-PROGRAM-001', role: 'TERMINAL', completes_child: true,
         lifecycle: childStatus,
       },
@@ -96,7 +101,7 @@ function programmeModel(childStatus = 'QUEUED') {
       remaining: ['Fresh G4 and Web exact-head disposition.'],
       safety_constraints: ['INTERMEDIATE and completes_child=false.'],
       validation_status: [{ check: 'Focused tests', state: 'PASS' }, { check: 'G4', state: 'AWAITING FRESH RUN' }],
-      version: '2.10.10',
+      version: '2.10.11',
       role: 'TERMINAL',
       completes_child: true,
       changed_surfaces: ['repo/scripts/toolkit-github-program-reconciler.cjs'],
@@ -411,27 +416,33 @@ test('explicit stale-projection migration removes obsolete current state and pre
   const desired = programmeModel('CURRENT');
   const current = snapshot(desired);
   const prefix = 'owner note before managed projection\n';
-  const stale = [
-    '# Old programme projection',
-    'E3 has no repository delta.',
-    'Resume from cfb528ee4b5f7432f71e94f742d3e8eba41f7b42.',
-  ].join('\n');
+  const stale = '## Status';
+  const staleDetail = '\n\n`PLANNED - BLOCKED BY S1`';
   const suffix = '\nowner note after managed projection';
-  current.bodies.parent = prefix + stale + suffix;
+  current.bodies.parent = prefix + stale + staleDetail + suffix + '\n' + current.bodies.parent;
+  const replacement = '## Historical status before managed programme adoption';
+  const resultingBody = prefix + replacement + staleDetail + suffix + '\n' + reconciler.renderProgrammeViews(desired).bodies.parent;
   const migrations = {
     parent: {
-      schema: 'toolkit.github-program.stale-projection-migration.v1',
+      schema: 'toolkit.github-program.stale-projection-migration.v2',
       classification: 'STALE_PROGRAMME_PROJECTION',
-      grammar: 'toolkit.github-program.stale-projection.v1',
+      grammar: 'toolkit.github-program.stale-projection.v2',
       repository: desired.repository,
       programme_parent_issue: 240,
       entity: { kind: 'parent', number: 240 },
       body_digest: reconciler.sha256(current.bodies.parent),
-      stale_span: { start: prefix.length, end: prefix.length + stale.length, digest: reconciler.sha256(stale) },
+      stale_spans: [{
+        start: prefix.length,
+        end: prefix.length + stale.length,
+        digest: reconciler.sha256(stale),
+        classification: 'LEGACY_STATUS_HEADING',
+        replacement,
+      }],
+      resulting_body_digest: reconciler.sha256(resultingBody),
       authority: {
         kind: 'WEB_ADJUDICATION',
-        reference: 'github:issue-comment:359:5441042397',
-        decision: 'SUPERSEDED_PROJECTION_REPLACE',
+        reference: 'github:issue-comment:359:5446534784',
+        decision: 'SUPERSEDED_PROJECTION_TRANSFORM',
       },
     },
   };
@@ -440,6 +451,7 @@ test('explicit stale-projection migration removes obsolete current state and pre
   const runtime = reconciler.createProgrammeRuntime({
     predecessor_contract: predecessorContract,
     authority_verifier: authorityVerifier,
+    stale_projection_adjudication_verifier: staleProjectionAdjudicationVerifier,
     adapter: {
       inspectProgramme() { return JSON.parse(JSON.stringify(live)); },
       applyOperations(input) {
@@ -455,8 +467,8 @@ test('explicit stale-projection migration removes obsolete current state and pre
   });
   assert.equal(preview.ok, true);
   assert.match(preview.expected_snapshot.bodies.parent, /^owner note before managed projection/);
-  assert.match(preview.expected_snapshot.bodies.parent, /owner note after managed projection$/);
-  assert.doesNotMatch(preview.expected_snapshot.bodies.parent, /cfb528ee|no repository delta/);
+  assert.match(preview.expected_snapshot.bodies.parent, /owner note after managed projection/);
+  assert.match(preview.expected_snapshot.bodies.parent, /Historical status before managed programme adoption/);
   assert.ok(preview.operations.some((entry) => entry.type === 'body.update'
     && entry.entity.kind === 'parent' && entry.stale_projection_migration === true));
 
@@ -484,7 +496,10 @@ test('explicit stale-projection migration removes obsolete current state and pre
 test('stale-projection migration fails closed when the exact body binding is altered', () => {
   const desired = programmeModel('CURRENT');
   const current = snapshot(desired);
-  current.bodies.children['359'] = 'obsolete child projection';
+  current.bodies.children['359'] = '## Status\n\n`PLANNED`\n' + current.bodies.children['359'];
+  const stale = '## Status';
+  const replacement = '## Historical status before managed programme adoption';
+  const resultingBody = replacement + current.bodies.children['359'].slice(stale.length);
   const preview = reconciler.buildProgrammePreview({
     snapshot: current,
     desired,
@@ -492,22 +507,27 @@ test('stale-projection migration fails closed when the exact body binding is alt
     unmanaged_projection_migrations: {
       children: {
         '359': {
-          schema: 'toolkit.github-program.stale-projection-migration.v1',
+          schema: 'toolkit.github-program.stale-projection-migration.v2',
           classification: 'STALE_PROGRAMME_PROJECTION',
-          grammar: 'toolkit.github-program.stale-projection.v1',
+          grammar: 'toolkit.github-program.stale-projection.v2',
           repository: desired.repository,
           programme_parent_issue: 240,
           entity: { kind: 'child', number: 359 },
           body_digest: '0'.repeat(64),
-          stale_span: { start: 0, end: current.bodies.children['359'].length, digest: reconciler.sha256(current.bodies.children['359']) },
+          stale_spans: [{
+            start: 0, end: stale.length, digest: reconciler.sha256(stale),
+            classification: 'LEGACY_STATUS_HEADING', replacement,
+          }],
+          resulting_body_digest: reconciler.sha256(resultingBody),
           authority: {
             kind: 'WEB_ADJUDICATION',
-            reference: 'github:issue-comment:359:5441042397',
-            decision: 'SUPERSEDED_PROJECTION_REPLACE',
+            reference: 'github:issue-comment:359:5446534784',
+            decision: 'SUPERSEDED_PROJECTION_TRANSFORM',
           },
         },
       },
     },
+    stale_projection_adjudication_verifier: staleProjectionAdjudicationVerifier,
   });
   assert.equal(preview.ok, false);
   assert.equal(preview.code, 'PARENT_RECONCILIATION_INCOMPLETE');

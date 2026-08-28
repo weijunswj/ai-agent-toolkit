@@ -607,7 +607,7 @@ function splitProgrammeManagedBlock(body, kind) {
   const end = body.indexOf(marker.end);
   if (begin < 0 || end < begin || body.indexOf(marker.begin, begin + 1) >= 0 || body.indexOf(marker.end, end + 1) >= 0) return null;
   const finish = end + marker.end.length;
-  return { prefix: body.slice(0, begin), managed: body.slice(begin, finish), suffix: body.slice(finish) };
+  return { prefix: body.slice(0, begin), managed: body.slice(begin, finish), suffix: body.slice(finish), start: begin, finish };
 }
 function parseProgrammeView(body, kind) {
   const split = splitProgrammeManagedBlock(body, kind);
@@ -633,37 +633,165 @@ function unmanagedProjectionMigrationFor(migrations, group, key) {
   if (!isRecord(migrations[group])) return null;
   return migrations[group][key] || null;
 }
-function migrateUnmanagedProjection(currentBody, rendered, migration, context = {}) {
-  const span = migration?.stale_span;
+function normalizeLegacyProjectionLine(line) {
+  let value = String(line).trim();
+  let previous;
+  do {
+    previous = value;
+    value = value
+      .replace(/^>\s*/, '')
+      .replace(/^(?:[-+*]|\d+[.)])\s+/, '')
+      .replace(/^\[[ xX]\]\s*/, '')
+      .trim();
+  } while (value !== previous);
+  return value.replace(/^[`*_]+|[`*_]+$/g, '').trim();
+}
+function programmeProjectionFindings(body, kind) {
+  if (typeof body !== 'string') return [];
+  const split = splitProgrammeManagedBlock(body, kind);
+  const regions = split
+    ? [{ text: split.prefix, offset: 0 }, { text: split.suffix, offset: split.finish }]
+    : [{ text: body, offset: 0 }];
+  const findings = [];
+  for (const region of regions) {
+    const headings = [...region.text.matchAll(/^(#{1,6})[ \t]+([^\r\n]+)$/gm)].map((match) => ({
+      level: match[1].length,
+      title: match[2].trim(),
+      start: region.offset + match.index,
+      end: region.offset + match.index + match[0].length,
+      localEnd: match.index + match[0].length,
+    }));
+    const hierarchy = [];
+    const historicalRanges = [];
+    for (let index = 0; index < headings.length; index += 1) {
+      const heading = headings[index];
+      while (hierarchy.length && hierarchy[hierarchy.length - 1].level >= heading.level) hierarchy.pop();
+      const explicitlyHistorical = /^(?:historical\b|history\b|legacy record\b|former state\b|at-the-time\b)/i.test(heading.title);
+      const historical = explicitlyHistorical || hierarchy.some((entry) => entry.historical);
+      hierarchy.push({ level: heading.level, historical });
+      if (explicitlyHistorical) {
+        const nextPeer = headings.slice(index + 1).find((candidate) => candidate.level <= heading.level);
+        historicalRanges.push({ start: heading.start, end: nextPeer ? nextPeer.start : region.offset + region.text.length });
+      }
+      if (historical) continue;
+      const next = headings[index + 1];
+      const sectionEnd = next ? next.start - region.offset : region.text.length;
+      const section = region.text.slice(heading.localEnd, sectionEnd);
+      const firstContent = normalizeLegacyProjectionLine(section.split(/\r?\n/).find((line) => line.trim()) || '');
+      const normalizedTitle = heading.title.toLowerCase().replace(/[ \t]+/g, ' ');
+      let classification = null;
+      if (normalizedTitle === 'status' && /^(?:current|planned|queued|blocked|completed|retired)\b/i.test(firstContent)) {
+        classification = 'LEGACY_STATUS_HEADING';
+      } else if (/^(?:exact )?current candidate\b/i.test(heading.title)) {
+        classification = 'LEGACY_CURRENT_CANDIDATE_HEADING';
+      } else if (/^current (?:status|gate|phase|epoch|progress|blockers?|dependencies?)\b/i.test(heading.title)) {
+        classification = 'LEGACY_CURRENT_GATE_HEADING';
+      } else if (/\bcurrent\b/i.test(heading.title)
+        && /\b(?:unit|programme|program|candidate|gate|phase|epoch|G\d+|E\d+|S\d+)\b/i.test(heading.title)) {
+        classification = 'LEGACY_CURRENT_GATE_HEADING';
+      }
+      if (classification) findings.push({
+        classification,
+        span: { start: heading.start, end: heading.end, digest: sha256(body.slice(heading.start, heading.end)) },
+        evidence_digest: sha256(section),
+      });
+    }
+    for (const match of region.text.matchAll(/^[^\r\n]+$/gm)) {
+      const start = region.offset + match.index;
+      const end = start + match[0].length;
+      if (historicalRanges.some((range) => start >= range.start && end <= range.end)) continue;
+      const structured = normalizeLegacyProjectionLine(match[0]).match(/^\|?\s*(Current (?:status|gate|candidate|phase|epoch|progress|blockers?|dependencies?))\s*(?::|\|)/i);
+      if (!structured) continue;
+      findings.push({
+        classification: /candidate/i.test(structured[1]) ? 'LEGACY_CURRENT_CANDIDATE_FIELD' : 'LEGACY_CURRENT_GATE_FIELD',
+        span: { start, end, digest: sha256(body.slice(start, end)) },
+        evidence_digest: sha256(match[0]),
+      });
+    }
+  }
+  return findings.sort((left, right) => left.span.start - right.span.start);
+}
+function validateWholeBodyProgrammeFreshness(input = {}) {
+  if (typeof input.body !== 'string' || !['parent', 'child', 'pr'].includes(input.kind)) {
+    return programmeFailure('whole-body-freshness-input');
+  }
+  const split = splitProgrammeManagedBlock(input.body, input.kind);
+  if (!split && input.require_managed !== false) return programmeFailure('managed-view-marker');
+  if (split) {
+    const parsed = parseProgrammeView(input.body, input.kind);
+    if (!parsed.ok) return parsed;
+    if (input.entity && (parsed.state.kind !== input.entity.kind || parsed.state.data?.issue !== input.entity.number
+      && parsed.state.data?.number !== input.entity.number)) return programmeFailure('whole-body-entity-binding');
+    if (input.expected && canonicalJson(parsed.state.data) !== canonicalJson(input.expected)) {
+      return programmeFailure('managed-view-body-stale');
+    }
+  }
+  const findings = programmeProjectionFindings(input.body, input.kind);
+  if (findings.length) return programmeFailure('competing-current-programme-projection', { findings });
+  return success('PROGRAMME_WHOLE_BODY_FRESH', { competing_projection_count: 0, historical_context_preserved: true });
+}
+function migrateStaleProjection(currentBody, rendered, kind, migration, context = {}) {
+  const spans = migration?.stale_spans;
   const authority = migration?.authority;
   const entity = migration?.entity;
   if (!isRecord(migration)
-    || migration.schema !== 'toolkit.github-program.stale-projection-migration.v1'
+    || migration.schema !== 'toolkit.github-program.stale-projection-migration.v2'
     || migration.classification !== 'STALE_PROGRAMME_PROJECTION'
-    || migration.grammar !== 'toolkit.github-program.stale-projection.v1'
+    || migration.grammar !== 'toolkit.github-program.stale-projection.v2'
     || migration.repository !== context.repository
     || migration.programme_parent_issue !== context.parent_issue
     || !isRecord(entity) || entity.kind !== context.entity?.kind || entity.number !== context.entity?.number
     || !isDigest(migration.body_digest)
-    || !isRecord(span) || !Number.isSafeInteger(span.start) || !Number.isSafeInteger(span.end)
-    || span.start < 0 || span.end <= span.start || span.end > currentBody.length || !isDigest(span.digest)
+    || !Array.isArray(spans) || spans.length === 0 || !isDigest(migration.resulting_body_digest)
     || !isRecord(authority) || authority.kind !== 'WEB_ADJUDICATION'
     || !/^github:issue-comment:\d+:\d+$/.test(authority.reference || '')
-    || authority.decision !== 'SUPERSEDED_PROJECTION_REPLACE'
-    || sha256(currentBody) !== migration.body_digest
-    || sha256(currentBody.slice(span.start, span.end)) !== span.digest) {
+    || authority.decision !== 'SUPERSEDED_PROJECTION_TRANSFORM'
+    || sha256(currentBody) !== migration.body_digest) {
     return programmeFailure('stale-projection-migration-binding');
   }
-  const staleProjection = currentBody.slice(span.start, span.end);
-  const structuralSignals = [
-    /^#{1,3}\s+/m.test(staleProjection),
-    /programme|candidate|parent|child|pull request|\bPR\b/i.test(staleProjection),
-    /current|queued|blocked|completed|validation|design lock|\bE\d+\b/i.test(staleProjection),
-  ].filter(Boolean).length;
-  if (!staleProjection.trim() || structuralSignals < 2) return programmeFailure('stale-projection-migration-grammar');
+  const findings = programmeProjectionFindings(currentBody, kind);
+  const recognized = new Map(findings.map((finding) => [canonicalJson({ ...finding.span, classification: finding.classification }), finding]));
+  const ordered = [...spans].sort((left, right) => left.start - right.start);
+  let previousEnd = -1;
+  for (const span of ordered) {
+    if (!isRecord(span) || !Number.isSafeInteger(span.start) || !Number.isSafeInteger(span.end)
+      || span.start < 0 || span.end <= span.start || span.end > currentBody.length || span.start < previousEnd
+      || !isDigest(span.digest) || sha256(currentBody.slice(span.start, span.end)) !== span.digest) {
+      return programmeFailure('stale-projection-migration-binding');
+    }
+    previousEnd = span.end;
+    const key = canonicalJson({ start: span.start, end: span.end, digest: span.digest, classification: span.classification });
+    if (!recognized.has(key) || typeof span.replacement !== 'string'
+      || !/^#{1,6}\s+Historical\b[^\r\n]*$/i.test(span.replacement)) {
+      return programmeFailure('stale-projection-migration-grammar');
+    }
+  }
+  if (typeof context.adjudication_verifier !== 'function') return programmeFailure('stale-projection-adjudication-verifier-required');
+  const binding = {
+    schema: 'toolkit.github-program.stale-projection-adjudication-binding.v1',
+    repository: context.repository,
+    programme_parent_issue: context.parent_issue,
+    entity: clone(context.entity),
+    body_digest: migration.body_digest,
+    stale_spans: ordered.map((span) => ({ start: span.start, end: span.end, digest: span.digest, classification: span.classification })),
+    resulting_body_digest: migration.resulting_body_digest,
+    decision: authority.decision,
+  };
+  let verified;
+  try { verified = context.adjudication_verifier({ assertion: clone(authority), binding: clone(binding) }); }
+  catch (_error) { return programmeFailure('stale-projection-adjudication-rejected'); }
+  if (verified?.ok !== true || !isRecord(verified.grant) || verified.grant.reference !== authority.reference
+    || canonicalJson({ ...verified.grant, reference: undefined }) !== canonicalJson({ ...binding, reference: undefined })) {
+    return programmeFailure('stale-projection-adjudication-rejected');
+  }
+  let transformed = currentBody;
+  for (const span of [...ordered].reverse()) transformed = transformed.slice(0, span.start) + span.replacement + transformed.slice(span.end);
+  const body = mergeProgrammeBody(transformed, rendered, kind);
+  if (sha256(body) !== migration.resulting_body_digest) return programmeFailure('stale-projection-result-binding');
   return success('PROGRAMME_STALE_PROJECTION_MIGRATION_READY', {
-    body: currentBody.slice(0, span.start) + rendered + currentBody.slice(span.end),
-    stale_projection_digest: sha256(staleProjection),
+    body,
+    stale_projection_digest: sha256(ordered.map((span) => span.digest)),
+    stale_projection_span_digests: ordered.map((span) => span.digest),
     adjudication_reference: authority.reference,
   });
 }
@@ -679,7 +807,8 @@ function classifyProgrammeConformance(input = {}) {
   const currentKind = Object.keys(PROGRAMME_MARKERS).find((kind) => body.includes(PROGRAMME_MARKERS[kind].begin) || body.includes(PROGRAMME_MARKERS[kind].end));
   if (!currentKind) return { classification: 'UNMANAGED', mutation_authority: false };
   const parsed = parseProgrammeView(body, currentKind);
-  if (!parsed.ok || parsed.managed !== rerenderProgrammeState(parsed.state)) return { classification: 'DRIFTED_MANAGED', mutation_authority: false };
+  if (!parsed.ok || parsed.managed !== rerenderProgrammeState(parsed.state)
+    || programmeProjectionFindings(body, currentKind).length) return { classification: 'DRIFTED_MANAGED', mutation_authority: false };
   return { classification: 'CURRENT_MANAGED', mutation_authority: false, kind: currentKind, state: parsed.state };
 }
 function normalizeManagedEvent(input) {
@@ -995,24 +1124,34 @@ function buildProgrammePreview(input = {}) {
     const migration = unmanagedProjectionMigrationFor(input.unmanaged_projection_migrations, entry.group, entry.key);
     let desiredBody;
     let migrated = null;
-    if (migration) {
-      const conformance = classifyProgrammeConformance({ body: currentBody });
-      if (conformance.classification === 'UNMANAGED') {
-        migrated = migrateUnmanagedProjection(currentBody, entry.body, migration, {
+    const existingFreshness = validateWholeBodyProgrammeFreshness({ body: currentBody, kind, require_managed: false });
+    if (migration && !existingFreshness.ok && existingFreshness.reason === 'competing-current-programme-projection') {
+        migrated = migrateStaleProjection(currentBody, entry.body, kind, migration, {
           repository: input.desired.repository,
           parent_issue: input.desired.parent.issue,
           entity: entityFromBodyKey(entry.group, entry.key),
+          adjudication_verifier: input.stale_projection_adjudication_verifier,
         });
         if (!migrated.ok) return migrated;
         desiredBody = migrated.body;
-      } else if (conformance.classification === 'CURRENT_MANAGED') {
-        desiredBody = mergeProgrammeBody(currentBody, entry.body, kind);
-      } else {
-        return programmeFailure('stale-projection-migration-conformance');
-      }
+    } else if (migration && (!splitProgrammeManagedBlock(currentBody, kind) || !existingFreshness.ok)) {
+      return programmeFailure('stale-projection-migration-grammar');
     } else {
       desiredBody = mergeProgrammeBody(currentBody, entry.body, kind);
     }
+    const expectedEntity = entry.group === 'parent'
+      ? input.desired.parent
+      : entry.group === 'children'
+        ? input.desired.children.find((child) => child.issue === Number(entry.key))
+        : input.desired.prs.find((pr) => pr.number === Number(entry.key));
+    const wholeBodyFresh = validateWholeBodyProgrammeFreshness({
+      body: desiredBody,
+      kind,
+      entity: entityFromBodyKey(entry.group, entry.key),
+      expected: expectedEntity,
+      programme: input.desired,
+    });
+    if (!wholeBodyFresh.ok) return wholeBodyFresh;
     if (entry.group === 'parent') expectedBodies.parent = desiredBody;
     else expectedBodies[entry.group][entry.key] = desiredBody;
     if (currentBody !== desiredBody) operations.push({
@@ -1021,9 +1160,9 @@ function buildProgrammePreview(input = {}) {
       ...(migrated ? {
         stale_projection_migration: true,
         stale_projection_digest: migrated.stale_projection_digest,
+        stale_projection_span_digests: migrated.stale_projection_span_digests,
         adjudication_reference: migrated.adjudication_reference,
-        unrelated_prefix_preserved: true,
-        unrelated_suffix_preserved: true,
+        unrelated_bytes_preserved: true,
       } : {}),
     });
   }
@@ -1106,6 +1245,22 @@ function verifyProgrammeReadback(readback, preview) {
   for (const key of ['model', 'bodies', 'labels', 'label_definitions', 'managed_events', 'native']) {
     if (canonicalJson(readback[key]) !== canonicalJson(expected[key])) return programmeFailure('partial-transaction-readback', { field: key });
   }
+  for (const entry of bodyEntries(readback.bodies, readback.model.parent.issue)) {
+    const kind = entry.group === 'children' ? 'child' : entry.group === 'prs' ? 'pr' : 'parent';
+    const expectedEntity = entry.group === 'parent'
+      ? readback.model.parent
+      : entry.group === 'children'
+        ? readback.model.children.find((child) => child.issue === Number(entry.key))
+        : readback.model.prs.find((pr) => pr.number === Number(entry.key));
+    const fresh = validateWholeBodyProgrammeFreshness({
+      body: entry.body,
+      kind,
+      entity: entityFromBodyKey(entry.group, entry.key),
+      expected: expectedEntity,
+      programme: readback.model,
+    });
+    if (!fresh.ok) return fresh;
+  }
   const zero = buildProgrammePreview({ snapshot: readback, desired: expected.model, predecessor_contract: preview.predecessor_contract || preview._predecessor_contract || null });
   if (!zero.ok || zero.operations.length !== 0 || zero.code !== 'PROGRAMME_ZERO_DELTA') {
     return programmeFailure('immediate-rerun-not-zero-delta');
@@ -1116,6 +1271,7 @@ function createProgrammeRuntime(options = {}) {
   const adapter = options.adapter;
   const predecessorContract = options.predecessor_contract;
   const authorityVerifier = options.authority_verifier;
+  const staleProjectionAdjudicationVerifier = options.stale_projection_adjudication_verifier;
   const acceptedPreviews = new Map();
   function inspect() {
     if (typeof adapter?.inspectProgramme !== 'function') return programmeFailure('programme-adapter-missing');
@@ -1139,6 +1295,7 @@ function createProgrammeRuntime(options = {}) {
       snapshot: inspected, desired: input.desired, predecessor_contract: predecessorContract,
       events: input.events, desired_native: input.desired_native, _relationship_inspection: relationshipInspection,
       unmanaged_projection_migrations: input.unmanaged_projection_migrations,
+      stale_projection_adjudication_verifier: staleProjectionAdjudicationVerifier,
     });
     if (result.ok) {
       const bound = { ...result, _predecessor_contract: predecessorContract };
@@ -2653,7 +2810,7 @@ module.exports = Object.freeze({
   OBJECTIVE_STATUSES, MUTATION_TARGET_KINDS,
   A4_MATERIAL_PREDICATES, A4_EXCLUSIONS, DF_TRIGGERS, DF_DISPOSITIONS, REVIEW_DISPOSITIONS, MANAGED_MARKERS,
   SECTION_ORDER, FAILURE_CODES, SUCCESS_CODES, RED_FIRST_CASES, PREDECESSOR_AUTHORITY_REF, PREDECESSOR_ISSUE_ROSTER, PREDECESSOR_DISPOSITIONS, PREDECESSOR_MATRIX_SHA256, MANAGED_EVENT_TYPES, CONFORMANCE_CLASSES, PROGRAMME_MANAGED_LABELS, PR_REGISTRY_STATUSES, GITHUB_RELATIONSHIP_API_VERSION, PROGRAMME_MARKERS, canonicalJson, sha256, isDigest, isSha,
-  isPublicSafeEvidence, validatePredecessorCoverage, validateProgrammeModel, renderProgrammeViews, parseProgrammeView, classifyProgrammeConformance, renderManagedEvent, parseManagedEvent, deriveManagedLabels, planPrAssociations, planNativeRelationships, programmeLifecyclePreflight, validateBodyFreshness, buildProgrammePreview, verifyProgrammeReadback, createProgrammeRuntime, validateArchitectureReset, assureTransferredPredecessors, authorityBoundary, transactionContract, renderManagedBlock, parseManagedBlock,
+  isPublicSafeEvidence, validatePredecessorCoverage, validateProgrammeModel, renderProgrammeViews, parseProgrammeView, classifyProgrammeConformance, renderManagedEvent, parseManagedEvent, deriveManagedLabels, planPrAssociations, planNativeRelationships, programmeLifecyclePreflight, validateBodyFreshness, validateWholeBodyProgrammeFreshness, buildProgrammePreview, verifyProgrammeReadback, createProgrammeRuntime, validateArchitectureReset, assureTransferredPredecessors, authorityBoundary, transactionContract, renderManagedBlock, parseManagedBlock,
   replaceManagedBlock, validateTracker, boundedProjection, classifyBodyLimit, compactTerminal, applyBoundedUpdate,
   buildReviewInventory, evaluateMateriality, classifyFinding, normalizeFindingEvidence, authorizeReviewMutation, resolveFinding,
   registerDeferredFinding, validateDeferredFindingRecord, revalidateDeferredFinding, projectA4Review, codexReviewState, autoCodeReadiness, adjudicateHistoricalPr310,
