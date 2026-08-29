@@ -80,7 +80,11 @@
   },
   "operation_inventory": {
     "programme_state_classes_only": true,
-    "forbidden_kinds": ["bootstrap-file", "repository-file", "repo-file"],
+    "canonical_migration_classes": ["migrate-parent-body", "migrate-child-body", "migrate-pr-body", "managed-event", "labels", "native-relationships"],
+    "canonical_convergence_classes": ["parent-body", "child-body", "pr-body", "managed-event", "labels", "native-relationships"],
+    "forbidden_kinds": ["run-receipt", "receipt", "receipt-persistence", "operational-evidence", "evidence", "bootstrap-file", "repository-file", "repo-file"],
+    "receipt_evidence_fields": ["required_receipt_delta", "receipt_consumption_plan"],
+    "receipt_persistence_owner": "loop-manager-supervisor",
     "repository_code_owner": "normal verified PR merge"
   },
   "writer_ownership": {

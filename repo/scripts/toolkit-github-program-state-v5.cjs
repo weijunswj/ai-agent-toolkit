@@ -55,6 +55,10 @@ const MARKERS = Object.freeze({
   child: Object.freeze({ begin: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-CHILD:BEGIN v5 -->', end: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-CHILD:END -->' }),
   pr: Object.freeze({ begin: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PR:BEGIN v5 -->', end: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PR:END -->' }),
 });
+const CANONICAL_OPERATION_CLASSES = Object.freeze([
+  'migrate-parent-body', 'migrate-child-body', 'migrate-pr-body',
+  'parent-body', 'child-body', 'pr-body', 'managed-event', 'labels', 'native-relationships',
+]);
 const STATE_LINE_PREFIX = '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-CANONICAL v5 ';
 const PROJECTION_LINE_PREFIX = '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PROJECTION v1 ';
 const LINE_SUFFIX = ' -->';
@@ -1062,8 +1066,14 @@ function validateWriterAction(input = {}) {
 
 function validateProgrammeOperations(operations) {
   if (!Array.isArray(operations)) return fail('programme-operation-inventory-invalid');
-  const forbidden = operations.find((operation) => /(?:^|[-_])(bootstrap|repository|repo)[-_]?file(?:$|[-_])/i.test(String(operation?.kind || operation?.operation_class || '')));
-  if (forbidden) return fail('repository-file-operation-forbidden', { operation_id: forbidden.operation_id || null, kind: forbidden.kind });
+  for (const operation of operations) {
+    const kind = typeof operation?.kind === 'string' ? operation.kind : '';
+    if (CANONICAL_OPERATION_CLASSES.includes(kind)) continue;
+    const detail = { operation_id: operation?.operation_id || null, kind: kind || null };
+    if (/(?:^|[-_])(bootstrap|repository|repo)[-_]?file(?:$|[-_])/i.test(kind)) return fail('repository-file-operation-forbidden', detail);
+    if (/(?:receipt|evidence|operational)/i.test(kind)) return fail('receipt-evidence-operation-forbidden', detail);
+    return fail('unknown-programme-operation-class', detail);
+  }
   return ok('PROGRAMME_OPERATION_INVENTORY_VALID', { operation_count: operations.length });
 }
 
@@ -1324,7 +1334,6 @@ function buildMigrationPreviewV5(input = {}) {
   for (const child of target.children) addOperation(operations, 'migrate-child-body', child.issue, snapshot.bodies.children[String(child.issue)], bodies.children[String(child.issue)]);
   for (const pr of target.prs) addOperation(operations, 'migrate-pr-body', pr.number, snapshot.bodies.prs[String(pr.number)], bodies.prs[String(pr.number)]);
   addOperation(operations, 'managed-event', target.parent.issue, null, event);
-  addOperation(operations, 'run-receipt', target.parent.issue, null, receipt, { durable_persistence: 'required-before-dependent-progression', mutation_authority: 'NOT_GRANTED' });
   addOperation(operations, 'labels', target.parent.issue, snapshot.labels, expectedLabels);
   addOperation(operations, 'native-relationships', target.parent.issue, snapshot.native, native.native, { changed: nativeDelta });
   const operationCheck = validateProgrammeOperations(operations);
@@ -1383,7 +1392,10 @@ function buildConvergencePreviewV5(input = {}) {
   if (!existingTargetEvent) addOperation(operations, 'managed-event', input.desired.parent.issue, null, event);
   addOperation(operations, 'labels', input.desired.parent.issue, snapshot.labels, labels);
   addOperation(operations, 'native-relationships', input.desired.parent.issue, snapshot.native, native.native);
+  const operationCheck = validateProgrammeOperations(operations);
+  if (!operationCheck.ok) return operationCheck;
   const preview = { schema: 'toolkit.github-program.preview.v5', preview_kind: 'RECONCILIATION', repository: input.desired.repository, parent_issue: input.desired.parent.issue, current_revision: snapshot.revision, current_snapshot_digest: snapshotDigest(snapshot), canonical_digest: valid.canonical_digest, target_body_digests: { parent: digest(bodies.parent), children: Object.fromEntries(Object.entries(bodies.children).map(([key, value]) => [key, digest(value)])), prs: Object.fromEntries(Object.entries(bodies.prs).map(([key, value]) => [key, digest(value)]) ) }, target_projection_digests: rendered.body_digests, expected_event_inventory_digest: eventInventory.inventory_digest, managed_event_delta: { retained_count: events.events.length, new_events: existingTargetEvent ? [] : [event] }, operations, operations_digest: digest(operations), expected_snapshot_digest: snapshotDigest(expectedSnapshot), expected_snapshot: expectedSnapshot, mutation_authority: 'NOT_GRANTED', finality_authority: 'NOT_GRANTED' };
+  preview.ordered_operation_ids = operations.map((operation) => operation.operation_id);
   preview.preview_id = digest(preview);
   return ok(operations.length ? 'PROGRAMME_V5_PREVIEW_READY' : 'PROGRAMME_ZERO_DELTA', preview);
 }
@@ -1449,6 +1461,11 @@ function createProgrammeRuntimeV5(options = {}) {
       || !Array.isArray(preview.operations) || !same(preview, store.readPreview(preview.preview_id))) return fail('durable-preview-required');
     const operationCheck = validateProgrammeOperations(preview.operations);
     if (!operationCheck.ok) return operationCheck;
+    const orderedOperationIds = preview.operations.map((operation) => operation.operation_id);
+    if (preview.operations_digest !== digest(preview.operations)
+      || !Array.isArray(preview.ordered_operation_ids)
+      || !same(preview.ordered_operation_ids, orderedOperationIds)
+      || new Set(orderedOperationIds).size !== orderedOperationIds.length) return fail('programme-operation-binding-invalid');
     const requiredReceipt = preview.required_receipt_delta?.receipt;
     const consumedEvent = preview.managed_event_delta?.new_events?.find((event) => event?.schema === MANAGED_EVENT_SCHEMA) || null;
     if (requiredReceipt) {
@@ -1503,20 +1520,23 @@ function createProgrammeRuntimeV5(options = {}) {
     };
     let authority; try { authority = options.verify_authority({ assertion: clone(input.authority), binding: clone(binding) }); } catch (_error) { return fail('trusted-authority-verification-failed'); }
     if (!authority?.ok) return fail('trusted-authority-required');
-    let applied; try { applied = options.apply_operations({ operations: clone(preview.operations), repository: preview.repository, parent_issue: preview.parent_issue }); } catch (_error) { return fail('apply-failed'); }
+    const canonicalOperations = clone(preview.operations);
+    let applied; try { applied = options.apply_operations({ operations: canonicalOperations, repository: preview.repository, parent_issue: preview.parent_issue }); } catch (_error) { return fail('apply-failed'); }
     if (!applied?.ok) return fail('apply-failed');
+    const appliedCount = applied.applied_count ?? canonicalOperations.length;
+    if (!Number.isSafeInteger(appliedCount) || appliedCount !== canonicalOperations.length) return fail('applied-count-mismatch');
     let snapshot; try { snapshot = options.inspect_snapshot(); } catch (_error) { return fail('snapshot-inspection-failed'); }
     const readback = verifyConvergenceReadbackV5(snapshot, preview);
     if (!readback.ok) return readback;
     const zero = immediateZeroDelta(preview, snapshot);
     if (!zero.ok) return zero;
-    return ok('PROGRAMME_V5_APPLIED', { applied_count: applied.applied_count ?? preview.operations.length, readback_verified: true, immediate_rerun: zero.immediate_rerun });
+    return ok('PROGRAMME_V5_APPLIED', { applied_count: appliedCount, operations_digest: preview.operations_digest, ordered_operation_ids: clone(preview.ordered_operation_ids), readback_verified: true, immediate_rerun: zero.immediate_rerun });
   }
   return Object.freeze({ preview, migrationPreview, recordReceipt, recover, apply });
 }
 
 module.exports = Object.freeze({
-  STATE_SCHEMA, PROJECTION_SCHEMA, EXTENSIONS_SCHEMA, MANAGED_EVENT_SCHEMA, RUN_RECEIPT_SCHEMA, BOOTSTRAP_SCHEMA, MIGRATION_SCHEMA, DESIGN_LOCK, BOOTSTRAP_REVISION, BOOTSTRAP_CONTRACTS, TOOLKIT_CONTRACT_REPOSITORY, TOOLKIT_CONTRACT_PATH,
+  STATE_SCHEMA, PROJECTION_SCHEMA, EXTENSIONS_SCHEMA, MANAGED_EVENT_SCHEMA, RUN_RECEIPT_SCHEMA, BOOTSTRAP_SCHEMA, MIGRATION_SCHEMA, DESIGN_LOCK, BOOTSTRAP_REVISION, BOOTSTRAP_CONTRACTS, TOOLKIT_CONTRACT_REPOSITORY, TOOLKIT_CONTRACT_PATH, CANONICAL_OPERATION_CLASSES,
   BODY_BUDGET_BYTES, CANONICAL_STATE_BUDGET_BYTES, TOTAL_PROJECTION_BUDGET_BYTES, RECEIPT_BUDGET_BYTES, LIFECYCLES, REGISTRY_STATUSES, LIVE_PR_LIFECYCLES,
   AUTHORITY_MODES, GATE_STATES, GATE_RESULTS, PROGRAMME_STATES, TERMINAL_RECEIPT_TYPES, RECOVERY_STATUSES, RECEIPT_TYPES, MARKERS, STATE_LINE_PREFIX, PROJECTION_LINE_PREFIX,
   canonicalJson, digest, bytes, clone, authorityDigest, validateConcurrencyAuthority, validateWorkClaims, validateCanonicalStateV5, deriveProjectionV5, renderProgrammeV5,

@@ -116,8 +116,7 @@
       "required": ["kind", "target", "before_digest", "after", "after_digest", "operation_id"],
       "properties": {
         "kind": {
-          "type": "string",
-          "not": { "pattern": "(^|[-_])([Bb]ootstrap|[Rr]epository|[Rr]epo)[-_]?[Ff]ile($|[-_])" }
+          "enum": ["migrate-parent-body", "migrate-child-body", "migrate-pr-body", "managed-event", "labels", "native-relationships"]
         },
         "target": {},
         "before_digest": { "$ref": "#/$defs/digest" },

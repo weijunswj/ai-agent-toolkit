@@ -465,3 +465,74 @@ test('Repair 1 blocks Apply until the exact migration preview receipt is durably
   assert.equal(applied.code, 'PROGRAMME_V5_APPLIED', JSON.stringify(applied));
   assert.equal(applied.immediate_rerun, 'ZERO_DELTA');
 });
+
+test('Repair 2 keeps receipt evidence out of migration and convergence Apply inventories', () => {
+  const migration = v5.buildMigrationPreviewV5({ legacy_snapshot: legacySnapshot(), authority_ref: 'github:issue-comment:2:100' });
+  assert.equal(migration.ok, true, JSON.stringify(migration));
+  const convergence = v5.buildConvergencePreviewV5({ snapshot: v5RenderedSnapshot(state()), desired: state(), authority_ref: 'runtime:v5' });
+  assert.equal(convergence.ok, true, JSON.stringify(convergence));
+  for (const preview of [migration, convergence]) {
+    assert.equal(preview.operations.some((operation) => /(?:receipt|evidence|operational|bootstrap|repository|repo)[-_]?/i.test(operation.kind)), false);
+    assert.equal(preview.operations.filter((operation) => /(?:receipt|evidence|operational)/i.test(operation.kind)).length, 0);
+    assert.equal(preview.operations.filter((operation) => /(?:bootstrap|repository|repo)[-_]?file/i.test(operation.kind)).length, 0);
+  }
+  assert.equal(migration.required_receipt_delta.receipt.receipt_type, 'TRANSITION_PREVIEW');
+  assert.equal(migration.receipt_consumption_plan.persisted_in_preview, false);
+  assert.equal(migration.receipt_consumption_plan.read_back_before_apply, true);
+});
+
+test('Repair 2 enforces the explicit canonical operation allowlist', () => {
+  assert.equal(v5.validateProgrammeOperations(v5.CANONICAL_OPERATION_CLASSES.map((kind) => ({ kind }))).ok, true);
+  assert.equal(v5.validateProgrammeOperations([{ kind: 'run-receipt' }]).reason, 'receipt-evidence-operation-forbidden');
+  assert.equal(v5.validateProgrammeOperations([{ kind: 'receipt-persistence' }]).reason, 'receipt-evidence-operation-forbidden');
+  assert.equal(v5.validateProgrammeOperations([{ kind: 'operational-evidence' }]).reason, 'receipt-evidence-operation-forbidden');
+  assert.equal(v5.validateProgrammeOperations([{ kind: 'bootstrap-file' }]).reason, 'repository-file-operation-forbidden');
+  assert.equal(v5.validateProgrammeOperations([{ kind: 'repository-file' }]).reason, 'repository-file-operation-forbidden');
+  assert.equal(v5.validateProgrammeOperations([{ kind: 'untrusted-programme-write' }]).reason, 'unknown-programme-operation-class');
+  const migrationSchema = JSON.parse(fs.readFileSync('repo/contracts/github-program-reconciler/programme-migration-v2.schema.json', 'utf8'));
+  assert.deepEqual(migrationSchema.$defs.operation.properties.kind.enum, ['migrate-parent-body', 'migrate-child-body', 'migrate-pr-body', 'managed-event', 'labels', 'native-relationships']);
+});
+
+test('Repair 2 keeps receipt persistence before authority and gives the adapter canonical operations only', () => {
+  const preview = v5.buildMigrationPreviewV5({ legacy_snapshot: legacySnapshot(), authority_ref: 'github:issue-comment:2:100' });
+  assert.equal(preview.ok, true, JSON.stringify(preview));
+  const store = v5.createMemoryDurableStore();
+  store.writePreview(preview);
+  const authorityCalls = [];
+  const adapterCalls = [];
+  const runtime = v5.createProgrammeRuntimeV5({
+    durable_store: store,
+    inspect_snapshot() { return preview.expected_snapshot; },
+    verify_authority(input) { authorityCalls.push(input); return { ok: true }; },
+    apply_operations(input) { adapterCalls.push(v5.clone(input)); return { ok: true, applied_count: input.operations.length }; },
+  });
+  assert.equal(runtime.apply({ preview, authority: { reference: 'web-bound' } }).reason, 'receipt-not-persisted');
+  assert.equal(authorityCalls.length, 0);
+  assert.equal(adapterCalls.length, 0);
+  assert.equal(runtime.recordReceipt(preview.required_receipt_delta.receipt).code, 'RUN_RECEIPT_PERSISTED');
+  const applied = runtime.apply({ preview, authority: { reference: 'web-bound' } });
+  assert.equal(applied.code, 'PROGRAMME_V5_APPLIED', JSON.stringify(applied));
+  assert.equal(authorityCalls.length, 1);
+  assert.equal(adapterCalls.length, 1);
+  assert.deepEqual(adapterCalls[0].operations, preview.operations);
+  assert.equal(adapterCalls[0].operations.some((operation) => /(?:receipt|evidence|bootstrap|repository|repo)[-_]?/i.test(operation.kind)), false);
+  assert.equal(applied.applied_count, preview.operations.length);
+  assert.equal(applied.operations_digest, v5.digest(preview.operations));
+  assert.deepEqual(applied.ordered_operation_ids, preview.ordered_operation_ids);
+  assert.equal(applied.immediate_rerun, 'ZERO_DELTA');
+});
+
+test('Repair 2 rejects an exact-preview receipt inventory that is present but conflicting', () => {
+  const preview = v5.buildMigrationPreviewV5({ legacy_snapshot: legacySnapshot(), authority_ref: 'github:issue-comment:2:100' });
+  assert.equal(preview.ok, true, JSON.stringify(preview));
+  const requiredReceipt = preview.required_receipt_delta.receipt;
+  const store = v5.createMemoryDurableStore({ receipts: [{ ...requiredReceipt, result: { classification: 'TAMPERED' } }] });
+  store.writePreview(preview);
+  const runtime = v5.createProgrammeRuntimeV5({
+    durable_store: store,
+    inspect_snapshot() { return preview.expected_snapshot; },
+    verify_authority() { return { ok: true }; },
+    apply_operations() { throw new Error('adapter must not be reached'); },
+  });
+  assert.equal(runtime.apply({ preview, authority: { reference: 'web-bound' } }).reason, 'run-receipt-conflict');
+});
