@@ -1,44 +1,23 @@
 {
   "$schema": "toolkit.github-program.controller-bootstrap.v1",
   "schema": "toolkit.github-program.controller-bootstrap.v1",
-  "identity": {
+  "profile": "github-managed-programme",
+  "repository": "weijunswj/ai-agent-toolkit",
+  "parent_issue": 240,
+  "programme_state_schema": "toolkit.github-program.state.v5",
+  "surface_contract_schema": "toolkit.github-program.surface.v5",
+  "toolkit_package_version": "2.12.0",
+  "toolkit_contract": {
     "repository": "weijunswj/ai-agent-toolkit",
-    "product": "github-program-reconciler"
-  },
-  "version": "2.12.0",
-  "revision": "DL-S2-GITHUB-PROGRAM-SURFACE-RECOVERY-003-v5",
-  "digest": "7ec54773adcf1d017de075c18616289cadfb019f2fc73edb5931d55b5d573ce9",
-  "profile": "toolkit.github-program.v5",
-  "parent": {
-    "repository": "weijunswj/ai-agent-toolkit",
-    "issue": 240,
-    "canonical": true
+    "revision": "e762ba04809eb426d64d0a3dc6d5a1b193c707c6",
+    "path": "repo/contracts/github-program-reconciler/programme-surface-contract-v5.json",
+    "sha256": "407467cd0564ef088db0f2bb216eb4827e87409958ce293fcb5c0bda5a626e9b"
   },
   "conformance": {
-    "managed_repository_required": true,
-    "bootstrap_required_for_v5": true,
-    "detection_order": [
-      "bootstrap",
-      "canonical_state",
-      "managed_events"
-    ],
-    "pinned_contract_required": true
+    "required_class": "CURRENT_MANAGED",
+    "migration_from": ["toolkit.github-program.state.v4"]
   },
   "compatibility": {
-    "accepted_state_schemas": [
-      "toolkit.github-program.state.v5"
-    ],
-    "migration_input_schemas": [
-      "toolkit.github-program.state.v4"
-    ],
-    "runtime_authority": "repo-local-pinned-bootstrap",
-    "mutable_main_role": "discovery-migration-guidance-only"
-  },
-  "contracts": {
-    "state": "repo/contracts/github-program-reconciler/programme-state-v5.schema.json",
-    "event": "repo/contracts/github-program-reconciler/managed-event-v3.schema.json",
-    "receipt": "repo/contracts/github-program-reconciler/run-receipt-v1.schema.json",
-    "surface": "repo/contracts/github-program-reconciler/programme-surface-contract-v5.json",
-    "entrypoint": "repo/contracts/github-program-reconciler/web-controller-entry.md"
+    "fail_closed_on_unknown_major": true
   }
 }
