@@ -175,5 +175,37 @@
     "ready_authority": false,
     "merge_authority": false,
     "finality_authority": false
+  },
+  "programme_v5": {
+    "product": "github-program-reconciler",
+    "design_lock": "DL-S2-GITHUB-PROGRAM-SURFACE-RECOVERY-003",
+    "canonical_state_schema": "toolkit.github-program.state.v5",
+    "migration_input_schema": "toolkit.github-program.state.v4",
+    "surface_contract": "repo/contracts/github-program-reconciler/programme-surface-contract-v5.json",
+    "concurrency": {
+      "authority_modes": ["SINGLE_DEFAULT", "EXPLICIT_BOUNDED"],
+      "default_max_active_lanes": 1,
+      "explicit_authority_digest": true,
+      "multiple_current_requires_explicit_authority": true,
+      "active_lanes_ordered": true,
+      "duplicate_current_rejected": true,
+      "work_claim_overlap": "WRITE/WRITE and WRITE/READ rejected; READ/READ and proven-disjoint claims allowed"
+    },
+    "projections": {
+      "parent_order": ["Goal", "Programme status", "Active work", "Children", "Progress", "Major holds", "Additional context"],
+      "child_order": ["Summary", "Operating contract", "Objective", "Deliverables", "Done when", "Scope", "Out of scope", "Progress", "Achieved", "Remaining", "Epochs / Locks", "PR registry", "Holds", "Boundaries", "Next action", "ELI5", "Additional context"],
+      "pr_order": ["Summary", "Binding", "Exact candidate", "Purpose", "Scope", "Out of scope", "Progress", "Achieved", "Remaining", "Changed surfaces", "Validation / evidence", "Design constraints", "Finality", "ELI5", "Additional context"],
+      "parent_next_action": false,
+      "empty_sections": "None",
+      "extensions_heading": "Additional context"
+    },
+    "managed_events": { "schema": "toolkit.github-program.managed-event.v3", "canonical_transitions_separate_from_receipts": true, "legacy_events_retained": true, "arbitrary_prose_is_not_receipt": true },
+    "run_receipts": { "schema": "toolkit.github-program.run-receipt.v1", "types": ["RUN_STARTED", "EXECUTOR_TERMINAL", "G4_TERMINAL", "RUN_INTERRUPTED", "LEASE_EXPIRED", "HOSTED_CHECK", "TRANSITION_PREVIEW"], "terminal_persist_before_progression": true, "durable_replay_identity": true, "bounded_bytes": 16384 },
+    "recovery_statuses": ["RUNNING", "LOST", "TERMINAL_UNCONSUMED", "PREVIEWED_NOT_APPLIED", "APPLIED_ACK_LOST", "ALREADY_APPLIED", "STALE_CANDIDATE", "CONFLICTING_TRANSITION", "EXPIRED_FENCE", "G4_UNADJUDICATED", "WEB_DECISION_REQUIRED"],
+    "writer_ownership": { "executor": "code/candidate/structured-evidence", "g4": "read-only evidence", "loop_manager": "receipt persistence/orchestration", "reconciler": "sole canonical state mutation", "web": "architecture/Lock/material judgement/G4/finality" },
+    "bootstrap": { "schema": "toolkit.github-program.controller-bootstrap.v1", "path": ".github/ai-agent-toolkit-programme.json", "missing_invalid_unsupported_v5": "PARENT_RECONCILIATION_INCOMPLETE", "mutable_main": "discovery-migration-guidance-only" },
+    "migration": { "schema": "toolkit.github-program.migration.v2", "v4_to_v5": true, "historical_comments_byte_preserved": true, "unrelated_state_preserved": true, "arbitrary_prose_not_receipts": true, "preview_only_without_authority": true },
+    "readback": { "exact_candidate_authority_lock_gate_fence": true, "duplicate_tamper_conflict_detection": true, "immediate_rerun": "ZERO_DELTA_ZERO_MUTATION" },
+    "future_scheduler": "not_implemented_in_e3"
   }
 }

@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.github-program.controller-bootstrap.v1",
+  "title": "Pinned Web controller bootstrap for a managed GitHub programme",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "identity",
+    "version",
+    "revision",
+    "digest",
+    "profile",
+    "parent",
+    "conformance",
+    "compatibility",
+    "contracts"
+  ],
+  "properties": {
+    "$schema": { "const": "toolkit.github-program.controller-bootstrap.v1" },
+    "schema": { "const": "toolkit.github-program.controller-bootstrap.v1" },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "product"],
+      "properties": {
+        "repository": { "$ref": "#/$defs/safeLine" },
+        "product": { "const": "github-program-reconciler" }
+      }
+    },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "revision": { "$ref": "#/$defs/safeId" },
+    "digest": { "$ref": "#/$defs/digest" },
+    "profile": { "const": "toolkit.github-program.v5" },
+    "parent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "issue", "canonical"],
+      "properties": {
+        "repository": { "$ref": "#/$defs/safeLine" },
+        "issue": { "$ref": "#/$defs/issue" },
+        "canonical": { "const": true }
+      }
+    },
+    "conformance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["managed_repository_required", "bootstrap_required_for_v5", "detection_order", "pinned_contract_required"],
+      "properties": {
+        "managed_repository_required": { "const": true },
+        "bootstrap_required_for_v5": { "const": true },
+        "detection_order": {
+          "type": "array",
+          "minItems": 3,
+          "items": { "$ref": "#/$defs/safeId" }
+        },
+        "pinned_contract_required": { "const": true }
+      }
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accepted_state_schemas", "migration_input_schemas", "runtime_authority", "mutable_main_role"],
+      "properties": {
+        "accepted_state_schemas": {
+          "type": "array",
+          "items": { "const": "toolkit.github-program.state.v5" },
+          "minItems": 1
+        },
+        "migration_input_schemas": {
+          "type": "array",
+          "items": { "const": "toolkit.github-program.state.v4" },
+          "minItems": 1
+        },
+        "runtime_authority": { "const": "repo-local-pinned-bootstrap" },
+        "mutable_main_role": { "const": "discovery-migration-guidance-only" }
+      }
+    },
+    "contracts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "event", "receipt", "surface", "entrypoint"],
+      "properties": {
+        "state": { "$ref": "#/$defs/path" },
+        "event": { "$ref": "#/$defs/path" },
+        "receipt": { "$ref": "#/$defs/path" },
+        "surface": { "$ref": "#/$defs/path" },
+        "entrypoint": { "$ref": "#/$defs/path" }
+      }
+    }
+  },
+  "$defs": {
+    "issue": { "type": "integer", "minimum": 1 },
+    "safeId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "safeLine": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\r\\n]+$" },
+    "path": { "type": "string", "pattern": "^(?:repo|\\.github)/[A-Za-z0-9._/-]+$" },
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

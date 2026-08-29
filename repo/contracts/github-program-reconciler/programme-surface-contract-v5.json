@@ -1,0 +1,78 @@
+{
+  "$schema": "toolkit.github-program.surface.v5",
+  "design_lock": "DL-S2-GITHUB-PROGRAM-SURFACE-RECOVERY-003",
+  "canonical_state": {
+    "schema": "toolkit.github-program.state.v5",
+    "schema_path": "repo/contracts/github-program-reconciler/programme-state-v5.schema.json",
+    "semantic_authority_count": 1,
+    "storage": "Parent-managed-hidden-envelope",
+    "concurrency_authority": ["mode", "max_active_lanes", "authority_ref", "authority_digest", "permitted_child_issues"],
+    "active_lanes": ["lane_id", "child_issue", "epoch_id", "gate", "gate_state", "gate_result", "candidate", "work_claims"],
+    "candidate_fields": ["pr", "branch", "base_ref", "base_sha", "head", "tree", "version", "epoch_id"],
+    "derived_only": ["repository/Parent/Child/Lock/role/completes Child/registry/live lifecycle candidate facts", "Parent status/outcome/progress/holds", "Child effective lifecycle/outcome/current gate/progress/remaining/next action", "PR outcome/epoch/Lock/role/completes Child/finality", "managed labels", "managed event inventory", "PR association kind"]
+  },
+  "portable_projection": {
+    "schema": "toolkit.github-program.projection.v1",
+    "schema_path": "repo/contracts/github-program-reconciler/programme-projection-v1.schema.json",
+    "parent_heading_order": ["Goal", "Programme status", "Active work", "Children", "Progress", "Major holds", "Additional context"],
+    "child_heading_order": ["Summary", "Operating contract", "Objective", "Deliverables", "Done when", "Scope", "Out of scope", "Progress", "Achieved", "Remaining", "Epochs / Locks", "PR registry", "Holds", "Boundaries", "Next action", "ELI5", "Additional context"],
+    "pr_heading_order": ["Summary", "Binding", "Exact candidate", "Purpose", "Scope", "Out of scope", "Progress", "Achieved", "Remaining", "Changed surfaces", "Validation / evidence", "Design constraints", "Finality", "ELI5", "Additional context"],
+    "empty_section_rendering": "None",
+    "parent_next_action": "omitted"
+  },
+  "extensions": {
+    "schema": "toolkit.github-program.extensions.v1",
+    "schema_path": "repo/contracts/github-program-reconciler/programme-extensions-v1.schema.json",
+    "human_heading": "Additional context",
+    "always_rendered": true,
+    "semantics": "typed-target-bound-additive-only",
+    "reserved_semantics_preserved": true
+  },
+  "managed_events": {
+    "schema": "toolkit.github-program.managed-event.v3",
+    "schema_path": "repo/contracts/github-program-reconciler/managed-event-v3.schema.json",
+    "history_is_append_only": true,
+    "canonical_transitions_separate_from_receipts": true
+  },
+  "run_receipts": {
+    "schema": "toolkit.github-program.run-receipt.v1",
+    "schema_path": "repo/contracts/github-program-reconciler/run-receipt-v1.schema.json",
+    "terminal_persisted_before_progression": true,
+    "durable_replay_identity_required": true
+  },
+  "bootstrap": {
+    "schema": "toolkit.github-program.controller-bootstrap.v1",
+    "path": ".github/ai-agent-toolkit-programme.json",
+    "missing_or_invalid_v5_fails_closed": true,
+    "mutable_main_role": "discovery-migration-guidance-only"
+  },
+  "migration": {
+    "schema": "toolkit.github-program.migration.v2",
+    "schema_path": "repo/contracts/github-program-reconciler/programme-migration-v2.schema.json",
+    "source": "toolkit.github-program.state.v4",
+    "historical_comments_byte_preserving": true,
+    "arbitrary_prose_is_not_receipt": true,
+    "preview_only_without_separate_mutation_authority": true
+  },
+  "writer_ownership": {
+    "executor": "code/candidate plus structured evidence only",
+    "g4": "read-only evidence only",
+    "loop_manager": "receipt persistence and orchestration",
+    "reconciler": "sole canonical programme-state mutation engine",
+    "web": "architecture/Lock/material judgement/G4/finality authority"
+  },
+  "recovery_statuses": ["RUNNING", "LOST", "TERMINAL_UNCONSUMED", "PREVIEWED_NOT_APPLIED", "APPLIED_ACK_LOST", "ALREADY_APPLIED", "STALE_CANDIDATE", "CONFLICTING_TRANSITION", "EXPIRED_FENCE", "G4_UNADJUDICATED", "WEB_DECISION_REQUIRED"],
+  "byte_budgets": {
+    "canonical_state_utf8_bytes": 32768,
+    "per_managed_body_utf8_bytes": 57344,
+    "all_projections_utf8_bytes": 524288,
+    "receipt_utf8_bytes": 16384,
+    "enforced_before_plan_or_apply": true
+  },
+  "readback": {
+    "exact_canonical_digest_required": true,
+    "every_projection_digest_required": true,
+    "labels_managed_events_receipts_and_native_relationships_required": true,
+    "immediate_rerun": "ZERO_DELTA_ZERO_MUTATION"
+  }
+}

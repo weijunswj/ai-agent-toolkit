@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.github-program.migration.v2",
+  "title": "GitHub programme v4 to v5 migration preview",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "preview_kind",
+    "repository",
+    "parent_issue",
+    "source_state_schema",
+    "target_state_schema",
+    "source_snapshot_digest",
+    "source_body_digests",
+    "target_canonical_digest",
+    "target_body_digests",
+    "managed_event_delta",
+    "required_receipt_delta",
+    "operations",
+    "operations_digest",
+    "expected_snapshot_digest",
+    "preview_id"
+  ],
+  "properties": {
+    "schema": { "const": "toolkit.github-program.migration.v2" },
+    "preview_kind": { "const": "MIGRATION" },
+    "repository": { "$ref": "#/$defs/safeLine" },
+    "parent_issue": { "$ref": "#/$defs/issue" },
+    "source_state_schema": { "const": "toolkit.github-program.state.v4" },
+    "target_state_schema": { "const": "toolkit.github-program.state.v5" },
+    "source_snapshot_digest": { "$ref": "#/$defs/digest" },
+    "authority_ref": { "$ref": "#/$defs/safeLine" },
+    "expected_revision": { "$ref": "#/$defs/safeLine" },
+    "source_canonical_digest": { "$ref": "#/$defs/digest" },
+    "source_body_digests": { "$ref": "#/$defs/bodyDigests" },
+    "target_canonical_digest": { "$ref": "#/$defs/digest" },
+    "target_managed_body_digests": { "$ref": "#/$defs/bodyDigests" },
+    "target_body_digests": { "$ref": "#/$defs/bodyDigests" },
+    "bootstrap": { "type": "object" },
+    "labels": { "type": "object" },
+    "native_relationships": { "type": "object" },
+    "managed_event_delta": { "type": "object" },
+    "required_receipt_delta": { "type": "object" },
+    "operations": { "type": "array", "maxItems": 200, "items": { "type": "object" } },
+    "operations_digest": { "$ref": "#/$defs/digest" },
+    "ordered_operation_ids": { "type": "array", "items": { "$ref": "#/$defs/digest" }, "uniqueItems": true },
+    "expected_snapshot_digest": { "$ref": "#/$defs/digest" },
+    "expected_snapshot": { "type": "object" },
+    "mutation_authority": { "const": "NOT_GRANTED" },
+    "finality_authority": { "const": "NOT_GRANTED" },
+    "preview_only": { "const": true },
+    "preview_id": { "$ref": "#/$defs/digest" }
+  },
+  "$defs": {
+    "issue": { "type": "integer", "minimum": 1 },
+    "safeLine": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\r\\n]+$" },
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "bodyDigests": {
+      "type": "object",
+      "required": ["parent", "children", "prs"],
+      "additionalProperties": false,
+      "properties": {
+        "parent": { "$ref": "#/$defs/digest" },
+        "children": { "type": "object", "additionalProperties": { "$ref": "#/$defs/digest" } },
+        "prs": { "type": "object", "additionalProperties": { "$ref": "#/$defs/digest" } }
+      }
+    }
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.github-program.run-receipt.v1",
+  "title": "Durable GitHub programme run receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "receipt_type",
+    "receipt_id",
+    "run_id",
+    "repository",
+    "parent_issue",
+    "lane_id",
+    "child_issue",
+    "epoch_id",
+    "gate",
+    "lock",
+    "candidate_binding_digest",
+    "authority_digest",
+    "lease",
+    "prior_receipt_id",
+    "result",
+    "readback",
+    "created_at"
+  ],
+  "properties": {
+    "schema": { "const": "toolkit.github-program.run-receipt.v1" },
+    "receipt_type": {
+      "enum": [
+        "RUN_STARTED",
+        "EXECUTOR_TERMINAL",
+        "G4_TERMINAL",
+        "RUN_INTERRUPTED",
+        "LEASE_EXPIRED",
+        "HOSTED_CHECK",
+        "TRANSITION_PREVIEW"
+      ]
+    },
+    "receipt_id": { "$ref": "#/$defs/digest" },
+    "run_id": { "$ref": "#/$defs/safeId" },
+    "repository": { "$ref": "#/$defs/safeLine" },
+    "parent_issue": { "$ref": "#/$defs/issue" },
+    "lane_id": { "$ref": "#/$defs/safeId" },
+    "child_issue": { "$ref": "#/$defs/issue" },
+    "epoch_id": { "$ref": "#/$defs/safeId" },
+    "gate": { "$ref": "#/$defs/safeId" },
+    "lock": { "$ref": "#/$defs/safeId" },
+    "candidate_binding_digest": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }]
+    },
+    "authority_digest": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }]
+    },
+    "lease": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lease_id", "fence_id", "fence_sequence", "expires_at"],
+      "properties": {
+        "lease_id": { "$ref": "#/$defs/safeId" },
+        "fence_id": { "$ref": "#/$defs/safeId" },
+        "fence_sequence": { "type": "integer", "minimum": 0 },
+        "expires_at": { "$ref": "#/$defs/safeLine" }
+      }
+    },
+    "prior_receipt_id": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }]
+    },
+    "result": { "type": "object", "maxProperties": 40 },
+    "readback": {
+      "oneOf": [{ "type": "null" }, { "type": "object", "maxProperties": 40 }]
+    },
+    "created_at": { "$ref": "#/$defs/safeLine" }
+  },
+  "$defs": {
+    "issue": { "type": "integer", "minimum": 1 },
+    "safeId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "safeLine": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\r\\n]+$" },
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

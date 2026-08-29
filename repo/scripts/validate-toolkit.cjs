@@ -9,6 +9,7 @@ const agentInstructionSync = require('./sync-agent-instruction-shims.cjs');
 const sourceLockAudit = require('./audit-project-source-locks.cjs');
 const surfaceAudit = require('./audit-published-surfaces.cjs');
 const skillPortabilityAudit = require('./audit-skill-portability.cjs');
+const githubProgrammeV5 = require('./toolkit-github-program-state-v5.cjs');
 
 function workspaceRootFromArgs(args = process.argv.slice(2)) {
   for (let index = 0; index < args.length; index += 1) {
@@ -680,6 +681,29 @@ function validateContracts(errors) {
   for (const entry of listFiles().filter((item) => item.relPath.startsWith('repo/contracts/') && item.relPath.endsWith('.json'))) {
     try { JSON.parse(fs.readFileSync(entry.fullPath, 'utf8').replace(/^\uFEFF/, '')); }
     catch (error) { fail(errors, `${entry.relPath} is invalid JSON: ${error.message}`); }
+  }
+  const required = [
+    '.github/ai-agent-toolkit-programme.json',
+    'repo/contracts/github-program-reconciler/programme-state-v5.schema.json',
+    'repo/contracts/github-program-reconciler/managed-event-v3.schema.json',
+    'repo/contracts/github-program-reconciler/run-receipt-v1.schema.json',
+    'repo/contracts/github-program-reconciler/controller-bootstrap-v1.schema.json',
+    'repo/contracts/github-program-reconciler/programme-migration-v2.schema.json',
+    'repo/contracts/github-program-reconciler/programme-surface-contract-v5.json',
+    'repo/contracts/github-program-reconciler/web-controller-entry.md',
+    'repo/scripts/toolkit-github-program-state-v5.cjs',
+  ];
+  for (const rel of required) if (!existsRel(rel)) fail(errors, `Missing E3 v5 programme surface: ${rel}`);
+  if (existsRel('.github/ai-agent-toolkit-programme.json')) {
+    try {
+      const bootstrap = readJson('.github/ai-agent-toolkit-programme.json');
+      const result = githubProgrammeV5.validateControllerBootstrap(bootstrap, { repository: 'weijunswj/ai-agent-toolkit', parent_issue: 240, version: '2.12.0' });
+      if (!result.ok) fail(errors, `Invalid E3 v5 controller bootstrap: ${result.reason}`);
+    } catch (error) { fail(errors, `.github/ai-agent-toolkit-programme.json is invalid: ${error.message}`); }
+  }
+  if (existsRel('repo/contracts/github-program-reconciler/web-controller-entry.md')) {
+    const entry = readText('repo/contracts/github-program-reconciler/web-controller-entry.md');
+    for (const phrase of ['.github/ai-agent-toolkit-programme.json', 'PARENT_RECONCILIATION_INCOMPLETE', 'discovery and migration guidance only', 'run-receipt']) if (!entry.includes(phrase)) fail(errors, `Web controller entry is missing required v5 guidance: ${phrase}`);
   }
 }
 

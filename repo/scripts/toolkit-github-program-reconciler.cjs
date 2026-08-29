@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const a1 = require('./toolkit-control-plane/control-plane-kernel.cjs');
 const canonicalA2 = require('./toolkit-capability-registry.cjs');
 const convergenceV4 = require('./toolkit-github-program-state-v4.cjs');
+const convergenceV5 = require('./toolkit-github-program-state-v5.cjs');
 const PROGRAMME_SURFACE_CONTRACT = require('../contracts/github-program-reconciler/programme-surface-contract.json');
 
 const CONTRACT_VERSION = 'toolkit.github-program-reconciler.v1';
@@ -622,6 +623,7 @@ function renderPrView(repository, pr) {
   ].join('\n');
 }
 function renderProgrammeViews(model) {
+  if (model?.schema === convergenceV5.STATE_SCHEMA) return convergenceV5.renderProgrammeV5(model);
   const valid = validateProgrammeModel(model);
   if (!valid.ok) return valid;
   const bodies = { parent: renderParentView(model.repository, model.parent), children: {}, prs: {} };
@@ -640,6 +642,7 @@ function splitProgrammeManagedBlock(body, kind) {
   return { prefix: body.slice(0, begin), managed: body.slice(begin, finish), suffix: body.slice(finish), start: begin, finish };
 }
 function parseProgrammeView(body, kind) {
+  if (typeof body === 'string' && (body.includes(':BEGIN v5 -->') || body.includes('GITHUB-PROGRAM-CANONICAL v5 '))) return convergenceV5.parseProgrammeV5Body(body, { kind });
   const split = splitProgrammeManagedBlock(body, kind);
   if (!split) return programmeFailure('managed-view-marker');
   const match = split.managed.match(/<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-STATE v1 ([A-Za-z0-9_-]+) -->/g);
@@ -1119,6 +1122,7 @@ function bodyEntries(bodies, parentIssue) {
   return entries;
 }
 function buildProgrammePreview(input = {}) {
+  if (input.desired?.schema === convergenceV5.STATE_SCHEMA || input.snapshot?.canonical_state?.schema === convergenceV5.STATE_SCHEMA) return convergenceV5.buildPreviewV5(input);
   const snapshot = input.snapshot;
   if (!isRecord(snapshot) || snapshot.complete !== true || !isSafeLabel(snapshot.repository || '')
     || !isSafeLabel(snapshot.revision || '') || !isRecord(snapshot.model) || !isRecord(snapshot.bodies)
@@ -1298,6 +1302,7 @@ function verifyProgrammeReadback(readback, preview) {
   return success('PROGRAMME_READBACK_VERIFIED', { readback_verified: true, unrelated_state_preserved: true, zero_delta_expected: true, zero_delta_probe: true });
 }
 function createProgrammeRuntime(options = {}) {
+  if (options.v5 === true || options.schema === convergenceV5.STATE_SCHEMA || options.state_schema === convergenceV5.STATE_SCHEMA) return convergenceV5.createProgrammeRuntimeV5(options);
   const adapter = options.adapter;
   const predecessorContract = options.predecessor_contract;
   const authorityVerifier = options.authority_verifier;
@@ -2856,7 +2861,22 @@ module.exports = Object.freeze({
   buildReviewInventory, evaluateMateriality, classifyFinding, normalizeFindingEvidence, authorizeReviewMutation, resolveFinding,
   registerDeferredFinding, validateDeferredFindingRecord, revalidateDeferredFinding, projectA4Review, codexReviewState, autoCodeReadiness, adjudicateHistoricalPr310,
   findingEvidenceDigest, deferredRootDigest, reviewEvidenceDigest, durableEvidenceDigest, normalizeDurableEvidence, parseLegacyParent, rejectHistoricalRevival, nextAction, createRuntime,
-  convergenceV4,
+  convergenceV4, convergenceV5,
+  STATE_V5_SCHEMA: convergenceV5.STATE_SCHEMA, STATE_SCHEMA_V5: convergenceV5.STATE_SCHEMA, V5_DESIGN_LOCK: convergenceV5.DESIGN_LOCK,
+  MANAGED_EVENT_V3_SCHEMA: convergenceV5.MANAGED_EVENT_SCHEMA, RUN_RECEIPT_V1_SCHEMA: convergenceV5.RUN_RECEIPT_SCHEMA,
+  CONTROLLER_BOOTSTRAP_V1_SCHEMA: convergenceV5.BOOTSTRAP_SCHEMA, PROGRAMME_MIGRATION_V2_SCHEMA: convergenceV5.MIGRATION_SCHEMA,
+  V5_RECOVERY_STATUSES: convergenceV5.RECOVERY_STATUSES, V5_RECEIPT_TYPES: convergenceV5.RECEIPT_TYPES,
+  validateCanonicalStateV5: convergenceV5.validateCanonicalStateV5, deriveProjectionV5: convergenceV5.deriveProjectionV5, renderProgrammeV5: convergenceV5.renderProgrammeV5,
+  parseProgrammeV5Body: convergenceV5.parseProgrammeV5Body, verifyRenderedProgrammeIntegrityV5: convergenceV5.verifyRenderedProgrammeIntegrityV5,
+  migrateV4ToV5: convergenceV5.migrateV4ToV5, buildMigrationPreviewV5: convergenceV5.buildMigrationPreviewV5, buildV5MigrationPreview: convergenceV5.buildMigrationPreviewV5,
+  buildConvergencePreviewV5: convergenceV5.buildConvergencePreviewV5, buildV5ConvergencePreview: convergenceV5.buildConvergencePreviewV5, buildPreviewV5: convergenceV5.buildPreviewV5,
+  validateConcurrencyAuthority: convergenceV5.validateConcurrencyAuthority, validateWorkClaims: convergenceV5.validateWorkClaims,
+  createManagedEventV3: convergenceV5.createManagedEventV3, validateManagedEventV3: convergenceV5.validateManagedEventV3, validateManagedEventInventoryV5: convergenceV5.validateManagedEventInventoryV5,
+  createRunReceipt: convergenceV5.createRunReceipt, validateRunReceipt: convergenceV5.validateRunReceipt, validateRunReceiptChain: convergenceV5.validateRunReceiptChain,
+  appendRunReceipt: convergenceV5.appendRunReceipt, canAdvanceFromTerminal: convergenceV5.canAdvanceFromTerminal, consumeTerminalEvidence: convergenceV5.consumeTerminalEvidence,
+  classifyRecovery: convergenceV5.classifyRecovery, recoverRun: convergenceV5.recoverRun, validateWriterAction: convergenceV5.validateWriterAction,
+  buildControllerBootstrap: convergenceV5.buildBootstrap, validateControllerBootstrap: convergenceV5.validateControllerBootstrap, resolvePinnedContract: convergenceV5.resolvePinnedContract,
+  detectManagedRepository: convergenceV5.detectManagedRepository, inspectControllerContext: convergenceV5.inspectControllerContext, createProgrammeRuntimeV5: convergenceV5.createProgrammeRuntimeV5, createV5Runtime: convergenceV5.createProgrammeRuntimeV5,
 });
 function representedPrNumbers(state) {
   const values = [];
