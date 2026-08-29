@@ -25,7 +25,7 @@ function model(status = 'QUEUED', candidate = false) {
   const completed = status === 'COMPLETED';
   const childCandidate = candidate ? {
     repository: 'weijunswj/ai-agent-toolkit', parent_issue: 240, child_issue: 360, pr: 366,
-    branch: 'sol/s2-productisation-g3', base: BASE, head: HEAD, tree: TREE, version: '2.11.2',
+    branch: 'sol/s2-productisation-g3', base: BASE, head: HEAD, tree: TREE, version: '2.11.3',
     epoch: 'E3', lock: 'DL-S2-GITHUB-PROGRAM-001', role: 'INTERMEDIATE', completes_child: false,
     lifecycle: status,
   } : null;
@@ -81,7 +81,7 @@ function model(status = 'QUEUED', candidate = false) {
       outcome: 'The candidate awaits Web.', purpose: 'Implement the candidate.', scope: ['Bounded repair.'],
       out_of_scope: ['Finality.'], progress: 'Awaiting Web.', achieved: ['Candidate implemented.'],
       remaining: ['Web review.'], safety_constraints: ['No finality.'],
-      validation_status: [{ check: 'Focused tests', state: 'PASS' }], version: '2.11.2',
+      validation_status: [{ check: 'Focused tests', state: 'PASS' }], version: '2.11.3',
       role: 'INTERMEDIATE', completes_child: false, changed_surfaces: ['reconciler'], validation: ['tests pass'],
       holds: [], finality: 'WEB_OWNED', next_action: 'Wait for Web.', eli5: 'Web still decides.',
     }] : [],

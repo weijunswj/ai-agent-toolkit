@@ -29,6 +29,9 @@
     "classes": ["INFORMATION", "EVIDENCE", "POLICY", "DOMAIN_HEALTH", "TABLE", "PROVENANCE"],
     "portable_or_derived_fields_may_not_be_overridden": true,
     "normalized_aliases_rejected_recursively": true,
+    "every_rendered_scalar_validated": true,
+    "reserved_semantic_declarations_rejected": true,
+    "managed_markers_and_envelopes_rejected_before_render": true,
     "missing_or_foreign_targets_rejected": true
   },
   "trusted_scope": {
@@ -37,6 +40,8 @@
     "source": "first-party-adapter-only",
     "desired_scope_input_forbidden": true,
     "exact_equality_before_relationship_or_PR_inspection": true,
+    "relationship_operation_classes": ["CHILD_MEMBERSHIP", "DEPENDENCY_EDGES", "PR_ASSOCIATION"],
+    "relationship_capability_provenance_required": true,
     "caller_capability_booleans": false
   },
   "trusted_pr_inspection": {
@@ -49,7 +54,9 @@
   "trusted_relationship_inspection": {
     "schema": "toolkit.github-program.trusted-relationship-inspection.v1",
     "schema_path": "repo/contracts/github-program-reconciler/trusted-relationship-inspection-v1.schema.json",
-    "complete_scope_digest_binding": true
+    "complete_scope_digest_binding": true,
+    "operation_class_and_provenance_echo_required": true,
+    "capability_digest_bound_to_preview_and_apply": true
   },
   "byte_budgets": {
     "canonical_state_utf8_bytes": 32768,
@@ -68,6 +75,7 @@
     "markdown_tables_required_for_repeated_structures": true,
     "Parent_contains_canonical_state": true,
     "Child_and_PR_contain_projection_digest_envelopes": true,
+    "render_parse_exact_managed_bytes_round_trip_before_operations": true,
     "comments_are_not_current_state_authority": true
   },
   "readback": {

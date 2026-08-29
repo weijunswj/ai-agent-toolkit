@@ -19,6 +19,7 @@ const LIFECYCLES = Object.freeze(['QUEUED', 'CURRENT', 'COMPLETED', 'RETIRED']);
 const REGISTRY_STATUSES = Object.freeze(['ACTIVE', 'ACCEPTED', 'RETIRED']);
 const LIVE_PR_LIFECYCLES = Object.freeze(['OPEN_DRAFT', 'OPEN_READY', 'MERGED', 'CLOSED_UNMERGED']);
 const EXTENSION_CLASSES = Object.freeze(['INFORMATION', 'EVIDENCE', 'POLICY', 'DOMAIN_HEALTH', 'TABLE', 'PROVENANCE']);
+const RELATIONSHIP_OPERATION_CLASSES = Object.freeze(['CHILD_MEMBERSHIP', 'DEPENDENCY_EDGES', 'PR_ASSOCIATION']);
 const RESERVED_EXTENSION_KEYS = new Set([
   'status', 'lifecycle', 'current', 'current_status', 'current_gate', 'current_epoch', 'cursor', 'gate', 'epoch',
   'candidate', 'candidate_lock', 'lock', 'role', 'completes_child', 'finality', 'holds', 'blocked', 'next_action',
@@ -83,10 +84,56 @@ function forbiddenExtensionKey(key) {
   const normalized = normalizedKey(key);
   return RESERVED_EXTENSION_KEYS.has(normalized)
     || normalized.startsWith('current_')
-    || normalized.endsWith('_status')
-    || normalized.endsWith('_lifecycle')
+    || normalized.includes('_current_status')
+    || normalized.includes('_programme_status')
+    || normalized.includes('_program_status')
+    || normalized.includes('_pr_status')
+    || normalized.includes('_registry_status')
     || normalized.includes('candidate_lock')
     || normalized.includes('next_action');
+}
+
+const RESERVED_SEMANTIC_FIELDS = new Set([
+  'status', 'current_status', 'programme_status', 'program_status', 'lifecycle', 'current_lifecycle',
+  'current_child', 'epoch', 'current_epoch', 'gate', 'current_gate', 'gate_result', 'lock',
+  'candidate', 'current_candidate', 'progress', 'outcome', 'remaining', 'achieved', 'blocked',
+  'candidate_branch', 'candidate_head', 'candidate_tree', 'candidate_base', 'candidate_base_ref',
+  'candidate_base_sha', 'candidate_version', 'current_branch', 'current_head', 'current_tree',
+  'current_base', 'current_base_ref', 'current_base_sha', 'current_version', 'pr_lifecycle', 'pr_state',
+  'pr_status', 'registry_status', 'role', 'completes_child', 'finality', 'ready', 'merge_authority',
+  'merge', 'merge_state', 'acceptance', 'holds', 'blocking_state', 'dependencies', 'next_action', 'remaining_work',
+]);
+
+function containsReservedProgrammeControl(value) {
+  return /AI-AGENT-TOOLKIT\s*:\s*GITHUB-PROGRAM/i.test(String(value));
+}
+function semanticField(value) {
+  const normalized = normalizedKey(String(value).replace(/^[#>*+\-\d.\s]+/, '').replace(/[*_`]+/g, '').trim());
+  return RESERVED_SEMANTIC_FIELDS.has(normalized)
+    || normalized.startsWith('current_candidate_')
+    || normalized.startsWith('current_gate_')
+    || normalized.startsWith('current_epoch_')
+    || normalized.startsWith('exact_candidate_');
+}
+function extensionScalarSafe(value, options = {}) {
+  const text = String(value);
+  if (containsReservedProgrammeControl(text)) return false;
+  for (const sourceLine of text.split(/\r?\n/)) {
+    const line = sourceLine.trim();
+    if (!line) continue;
+    const heading = /^#{1,6}\s+/.test(line);
+    const unwrapped = line
+      .replace(/^#{1,6}\s+/, '')
+      .replace(/^\s*(?:[-+*>]|\d+\.)\s+/, '')
+      .trim();
+    const declaration = unwrapped.match(/^(.{1,96}?)(?:\*\*|__|`)?\s*(?::|=|\|)\s*\S/);
+    if (declaration && semanticField(declaration[1])) return false;
+    if ((heading || options.heading) && semanticField(unwrapped)) return false;
+    if (/^(?:mark\s+)?ready(?:\s+now)?[.!]?$/i.test(unwrapped)
+      || /^merge\s+now[.!]?$/i.test(unwrapped)
+      || /^(?:accept|approve)\s+(?:the\s+)?(?:programme|child|epoch|pr)(?:\s+now)?[.!]?$/i.test(unwrapped)) return false;
+  }
+  return true;
 }
 
 function extensionPayloadValid(extension) {
@@ -96,10 +143,13 @@ function extensionPayloadValid(extension) {
     return exactKeys(payload, ['columns', 'rows'])
       && arrayOf(payload.columns, (entry) => safeLine(entry, 80), 12)
       && payload.columns.length > 0
-      && payload.columns.every((entry) => !forbiddenExtensionKey(entry))
+      && payload.columns.every((entry) => !forbiddenExtensionKey(entry) && extensionScalarSafe(entry, { heading: true }))
       && Array.isArray(payload.rows)
       && payload.rows.length <= 100
-      && payload.rows.every((row) => Array.isArray(row) && row.length === payload.columns.length && row.every((cell) => safeLine(String(cell), 256)));
+      && payload.rows.every((row) => Array.isArray(row) && row.length === payload.columns.length
+        && row.every((cell) => ['string', 'number', 'boolean'].includes(typeof cell)
+          && (typeof cell !== 'number' || Number.isFinite(cell))
+          && safeLine(String(cell), 256) && extensionScalarSafe(cell)));
   }
   const allowed = {
     INFORMATION: ['text'], EVIDENCE: ['summary', 'references'], POLICY: ['summary', 'references'],
@@ -109,11 +159,11 @@ function extensionPayloadValid(extension) {
   const required = extension.class === 'INFORMATION' ? ['text'] : extension.class === 'DOMAIN_HEALTH' ? ['domain', 'status', 'summary'] : ['summary'];
   const optional = extension.class === 'INFORMATION' || extension.class === 'DOMAIN_HEALTH' ? [] : ['references'];
   if (!exactKeys(payload, required, optional)) return false;
-  if (payload.text !== undefined && !safeText(payload.text)) return false;
-  if (payload.summary !== undefined && !safeText(payload.summary)) return false;
-  if (payload.domain !== undefined && !safeLine(payload.domain, 128)) return false;
-  if (payload.status !== undefined && !['PASS', 'WARN', 'FAIL', 'UNKNOWN', 'NOT_APPLICABLE'].includes(payload.status)) return false;
-  return payload.references === undefined || arrayOf(payload.references, (entry) => safeLine(entry, 256), 20);
+  if (payload.text !== undefined && (!safeText(payload.text) || !extensionScalarSafe(payload.text))) return false;
+  if (payload.summary !== undefined && (!safeText(payload.summary) || !extensionScalarSafe(payload.summary))) return false;
+  if (payload.domain !== undefined && (!safeLine(payload.domain, 128) || !extensionScalarSafe(payload.domain, { heading: true }))) return false;
+  if (payload.status !== undefined && (!['PASS', 'WARN', 'FAIL', 'UNKNOWN', 'NOT_APPLICABLE'].includes(payload.status) || !extensionScalarSafe(payload.status))) return false;
+  return payload.references === undefined || arrayOf(payload.references, (entry) => safeLine(entry, 256) && extensionScalarSafe(entry), 20);
 }
 
 function validateExtensionsV1(extensions, state) {
@@ -126,7 +176,7 @@ function validateExtensionsV1(extensions, state) {
     if (!exactKeys(extension, ['schema', 'namespace', 'target', 'class', 'title', 'payload'])
       || extension.schema !== EXTENSIONS_SCHEMA || !safeId(extension.namespace)
       || !EXTENSION_CLASSES.includes(extension.class) || !safeLine(extension.title, 160)
-      || forbiddenExtensionKey(extension.title)
+      || forbiddenExtensionKey(extension.title) || !extensionScalarSafe(extension.title, { heading: true })
       || !exactKeys(extension.target, ['kind', 'number']) || !['parent', 'child', 'pr'].includes(extension.target.kind)
       || !issue(extension.target.number) || forbiddenExtensionKey(extension.namespace)
       || ['programme', 'portable', 'canonical', 'github_program'].includes(extension.namespace.split('.')[0])
@@ -520,13 +570,66 @@ function parseProgrammeV4Body(body, expected = {}) {
   return ok('PROGRAMME_BODY_PARSED', { envelope, state, prefix: extracted.prefix, suffix: extracted.suffix, body_digest: digest(body) });
 }
 
+function countOccurrences(value, needle) { return String(value).split(needle).length - 1; }
+function verifyRenderedProgrammeIntegrity(state, rendered) {
+  if (!isRecord(rendered) || !isRecord(rendered.bodies) || !isRecord(rendered.bodies.children) || !isRecord(rendered.bodies.prs)) return fail('render-integrity-invalid');
+  const deterministic = renderProgrammeV4(state);
+  if (!deterministic.ok || !same(deterministic.bodies, rendered.bodies)) return fail('render-integrity-not-deterministic');
+  const groups = [
+    ['parent', { [state.parent.issue]: rendered.bodies.parent }],
+    ['child', rendered.bodies.children],
+    ['pr', rendered.bodies.prs],
+  ];
+  for (const [kind, group] of groups) {
+    for (const [number, body] of Object.entries(group)) {
+      for (const [markerKind, markers] of Object.entries(MARKERS)) {
+        const expectedCount = markerKind === kind ? 1 : 0;
+        if (countOccurrences(body, markers.begin) !== expectedCount || countOccurrences(body, markers.end) !== expectedCount) {
+          return fail('render-integrity-marker-count-invalid', { kind, number: Number(number) });
+        }
+      }
+      if (countOccurrences(body, STATE_LINE_PREFIX) !== (kind === 'parent' ? 1 : 0)
+        || countOccurrences(body, PROJECTION_LINE_PREFIX) !== (kind === 'parent' ? 0 : 1)
+        || countOccurrences(body, LEGACY_STATE_LINE_PREFIX) !== 0) return fail('render-integrity-envelope-count-invalid', { kind, number: Number(number) });
+      const parsed = parseProgrammeV4Body(body, {
+        kind,
+        repository: state.repository,
+        parent_issue: state.parent.issue,
+        number: Number(number),
+      });
+      if (!parsed.ok || parsed.envelope.canonical_digest !== rendered.projection.canonical_digest
+        || kind === 'parent' && !same(parsed.state, state)) return fail('render-integrity-parse-invalid', { kind, number: Number(number) });
+      const extracted = extractManaged(body, kind);
+      const expectedBody = kind === 'parent' ? deterministic.bodies.parent : kind === 'child' ? deterministic.bodies.children[number] : deterministic.bodies.prs[number];
+      if (!extracted.ok || extracted.prefix !== '' || extracted.suffix !== '' || extracted.managed !== body || expectedBody !== body) {
+        return fail('render-integrity-managed-bytes-invalid', { kind, number: Number(number) });
+      }
+    }
+  }
+  return ok('PROGRAMME_RENDER_INTEGRITY_VERIFIED', { canonical_digest: rendered.projection.canonical_digest });
+}
+
+function relationshipCapabilityProvenanceValid(value) {
+  return exactKeys(value, ['adapter_identity', 'authority_source', 'revision', 'digest', 'api_version'])
+    && safeId(value.adapter_identity) && safeId(value.authority_source) && safeLine(value.revision, 256)
+    && sha256(value.digest) && safeLine(value.api_version, 80);
+}
+function relationshipCapabilityDigest(value) {
+  return digest({
+    allowed_relationship_operations: value.allowed_relationship_operations,
+    relationship_capability_provenance: value.relationship_capability_provenance,
+  });
+}
 function normalizeScope(raw) {
-  if (!exactKeys(raw, ['schema', 'repository', 'parent_issue', 'children', 'dependencies', 'associated_prs', 'api_version', 'complete', 'pagination', 'revision', 'source_digests', 'version_resolver'], ['scope_digest'])
+  if (!exactKeys(raw, ['schema', 'repository', 'parent_issue', 'children', 'dependencies', 'associated_prs', 'api_version', 'complete', 'pagination', 'revision', 'source_digests', 'version_resolver', 'allowed_relationship_operations', 'relationship_capability_provenance'], ['scope_digest'])
     || raw.schema !== SCOPE_SCHEMA || raw.complete !== true || !safeLine(raw.repository, 200)
     || !issue(raw.parent_issue) || !arrayOf(raw.children, issue, 50) || new Set(raw.children).size !== raw.children.length
     || !isRecord(raw.dependencies) || !arrayOf(raw.associated_prs, issue, 100) || new Set(raw.associated_prs).size !== raw.associated_prs.length
     || !safeLine(raw.api_version, 80) || !safeLine(raw.revision, 256) || !exactKeys(raw.pagination, ['complete'])
     || raw.pagination.complete !== true || !arrayOf(raw.source_digests, sha256, 50)
+    || !arrayOf(raw.allowed_relationship_operations, (entry) => RELATIONSHIP_OPERATION_CLASSES.includes(entry), RELATIONSHIP_OPERATION_CLASSES.length)
+    || new Set(raw.allowed_relationship_operations).size !== raw.allowed_relationship_operations.length
+    || !relationshipCapabilityProvenanceValid(raw.relationship_capability_provenance)
     || !exactKeys(raw.version_resolver, ['identity', 'kind', 'agreement', 'sources']) || !safeId(raw.version_resolver.identity)
     || raw.version_resolver.kind !== 'json-pointer-agreement' || raw.version_resolver.agreement !== 'all'
     || !arrayOf(raw.version_resolver.sources, (entry) => exactKeys(entry, ['path', 'pointer']) && safeLine(entry.path, 512) && safeLine(entry.pointer, 256), 20)
@@ -574,11 +677,25 @@ function createProgrammeTrustBroker(adapters = {}) {
     if (!matched.ok) return matched;
     if (typeof adapters.inspect_relationships !== 'function') return fail('trusted-relationship-adapter-required');
     let raw;
-    try { raw = adapters.inspect_relationships({ repository: grant.repository, parent_issue: grant.parent_issue, children: clone(grant.children), dependencies: clone(grant.dependencies), scope_digest: grant.scope_digest, api_version: grant.api_version }); } catch (_error) { return fail('trusted-relationship-inspection-failed'); }
-    if (!exactKeys(raw, ['schema', 'repository', 'parent_issue', 'children', 'dependencies', 'api_version', 'scope_digest', 'complete'])
+    const capabilityDigest = relationshipCapabilityDigest(grant);
+    try { raw = adapters.inspect_relationships({
+      repository: grant.repository,
+      parent_issue: grant.parent_issue,
+      children: clone(grant.children),
+      dependencies: clone(grant.dependencies),
+      scope_digest: grant.scope_digest,
+      api_version: grant.api_version,
+      allowed_relationship_operations: clone(grant.allowed_relationship_operations),
+      relationship_capability_provenance: clone(grant.relationship_capability_provenance),
+      relationship_capability_digest: capabilityDigest,
+    }); } catch (_error) { return fail('trusted-relationship-inspection-failed'); }
+    if (!exactKeys(raw, ['schema', 'repository', 'parent_issue', 'children', 'dependencies', 'api_version', 'scope_digest', 'allowed_relationship_operations', 'relationship_capability_provenance', 'relationship_capability_digest', 'complete'])
       || raw.schema !== RELATIONSHIP_INSPECTION_SCHEMA || raw.complete !== true || raw.scope_digest !== grant.scope_digest
       || raw.repository !== grant.repository || raw.parent_issue !== grant.parent_issue || raw.api_version !== grant.api_version
-      || !same(raw.children, grant.children) || !same(raw.dependencies, grant.dependencies)) return fail('trusted-relationship-inspection-invalid');
+      || !same(raw.children, grant.children) || !same(raw.dependencies, grant.dependencies)
+      || !same(raw.allowed_relationship_operations, grant.allowed_relationship_operations)
+      || !same(raw.relationship_capability_provenance, grant.relationship_capability_provenance)
+      || raw.relationship_capability_digest !== capabilityDigest) return fail('trusted-relationship-inspection-invalid');
     const inspection = deepFreeze(clone(raw));
     relationshipInspections.add(inspection);
     return ok('TRUSTED_RELATIONSHIPS_INSPECTED', { inspection });
@@ -646,6 +763,7 @@ function inspectTrustBindings(state, grant, broker) {
     prs: prs.inspection,
     trusted_pr_inspection_digest: digest(prs.inspection),
     trusted_relationship_inspection_digest: digest(relationships.inspection),
+    relationship_capability_digest: relationshipCapabilityDigest(grant),
   });
 }
 
@@ -675,6 +793,36 @@ function derivePrAssociationsV4(state) {
     };
   }
   return ok('PROGRAMME_PR_ASSOCIATIONS_DERIVED', { associations });
+}
+
+function expectedNativeRelationships(grant, associations) {
+  return {
+    children: clone(grant.children),
+    dependencies: clone(grant.dependencies),
+    associated_prs: clone(grant.associated_prs),
+    pr_associations: clone(associations),
+    api_version: grant.api_version,
+  };
+}
+function classifyRelationshipDelta(before, after) {
+  if (!isRecord(before) || !isRecord(after)) return fail('native-relationship-snapshot-invalid');
+  const fields = ['children', 'dependencies', 'associated_prs', 'pr_associations', 'api_version'];
+  if (!exactKeys(after, fields) || Object.keys(before).length !== 0 && !exactKeys(before, fields)) return fail('native-relationship-delta-unclassified');
+  const required = [];
+  if (!same(before.children ?? [], after.children)) required.push('CHILD_MEMBERSHIP');
+  if (!same(before.dependencies ?? {}, after.dependencies)) required.push('DEPENDENCY_EDGES');
+  if (!same(before.associated_prs ?? [], after.associated_prs) || !same(before.pr_associations ?? {}, after.pr_associations)) required.push('PR_ASSOCIATION');
+  const changed = !same(before, after);
+  if (changed && required.length === 0) return fail('native-relationship-delta-unclassified');
+  return ok('RELATIONSHIP_DELTA_CLASSIFIED', { changed, required_relationship_operations: required });
+}
+function requireRelationshipCapabilities(grant, required) {
+  if (!scopeGrants.has(grant)) return fail('trusted-scope-grant-required');
+  const allowed = new Set(grant.allowed_relationship_operations);
+  const missing = required.filter((entry) => !allowed.has(entry));
+  return missing.length
+    ? fail('trusted-relationship-capability-required', { missing_relationship_operations: missing })
+    : ok('TRUSTED_RELATIONSHIP_CAPABILITIES_MATCHED', { required_relationship_operations: clone(required) });
 }
 
 function candidateBinding(state) {
@@ -858,9 +1006,9 @@ function expectedManagedEventsV4(state, currentInventory, canonicalDigest, migra
 function snapshotDigest(snapshot) {
   return digest({ repository: snapshot.repository, revision: snapshot.revision, complete: snapshot.complete, canonical_state: snapshot.canonical_state, bodies: snapshot.bodies, labels: snapshot.labels, managed_events: snapshot.managed_events, native: snapshot.native });
 }
-function addOperation(operations, kind, target, before, after) {
+function addOperation(operations, kind, target, before, after, binding = {}) {
   if (same(before, after)) return;
-  const operation = { kind, target, before_digest: digest(before), after: clone(after), after_digest: digest(after) };
+  const operation = { kind, target, before_digest: digest(before), after: clone(after), after_digest: digest(after), ...clone(binding) };
   operation.operation_id = digest(operation);
   operations.push(operation);
 }
@@ -882,6 +1030,8 @@ function buildConvergencePreview(input = {}) {
   if (!trusted.ok) return trusted;
   const rendered = renderProgrammeV4(input.desired);
   if (!rendered.ok) return rendered;
+  const renderIntegrity = verifyRenderedProgrammeIntegrity(input.desired, rendered);
+  if (!renderIntegrity.ok) return renderIntegrity;
   const associations = derivePrAssociationsV4(input.desired);
   if (!associations.ok) return associations;
   const expectedChildKeys = Object.keys(rendered.bodies.children).sort();
@@ -913,20 +1063,29 @@ function buildConvergencePreview(input = {}) {
     bodies: { parent: parentBody.body, children: childBodies, prs: prBodies },
     labels: expectedLabels(input.desired, input.snapshot.labels),
     managed_events: expectedEvents.events,
-    native: { children: clone(input.scope_grant.children), dependencies: clone(input.scope_grant.dependencies), associated_prs: clone(input.scope_grant.associated_prs), pr_associations: associations.associations, api_version: input.scope_grant.api_version },
+    native: expectedNativeRelationships(input.scope_grant, associations.associations),
   };
+  const relationshipDelta = classifyRelationshipDelta(input.snapshot.native, expected.native);
+  if (!relationshipDelta.ok) return relationshipDelta;
+  const relationshipCapability = requireRelationshipCapabilities(input.scope_grant, relationshipDelta.required_relationship_operations);
+  if (!relationshipCapability.ok) return relationshipCapability;
   const operations = [];
   addOperation(operations, 'parent-body', input.desired.parent.issue, input.snapshot.bodies?.parent ?? null, expected.bodies.parent);
   for (const [number, body] of Object.entries(expected.bodies.children)) addOperation(operations, 'child-body', Number(number), input.snapshot.bodies?.children?.[number] ?? null, body);
   for (const [number, body] of Object.entries(expected.bodies.prs)) addOperation(operations, 'pr-body', Number(number), input.snapshot.bodies?.prs?.[number] ?? null, body);
   for (const event of expectedEvents.new_events) addOperation(operations, 'managed-event', event.entity.number, null, event);
   addOperation(operations, 'labels', input.desired.parent.issue, input.snapshot.labels ?? {}, expected.labels);
-  addOperation(operations, 'relationships', input.desired.parent.issue, input.snapshot.native ?? {}, expected.native);
+  addOperation(operations, 'relationships', input.desired.parent.issue, input.snapshot.native ?? {}, expected.native, {
+    required_relationship_operations: relationshipDelta.required_relationship_operations,
+    relationship_capability_digest: trusted.relationship_capability_digest,
+  });
   const preview = {
     schema: 'toolkit.github-program.preview.v4', preview_kind: 'CONVERGENCE', repository: input.desired.repository, parent_issue: input.desired.parent.issue,
     current_revision: input.snapshot.revision, current_snapshot_digest: snapshotDigest(input.snapshot), canonical_digest: valid.canonical_digest,
     scope_digest: input.scope_grant.scope_digest, trusted_pr_inspection_digest: trusted.trusted_pr_inspection_digest,
     trusted_relationship_inspection_digest: trusted.trusted_relationship_inspection_digest,
+    relationship_capability_digest: trusted.relationship_capability_digest,
+    required_relationship_operations: relationshipDelta.required_relationship_operations,
     candidate_binding_digest: expectedEvents.candidate_binding_digest, expected_event_inventory_digest: expectedEvents.inventory_digest,
     operations, operations_digest: digest(operations), expected_snapshot: expected,
     mutation_authority: 'NOT_GRANTED', ready_authority: 'NOT_GRANTED', merge_authority: 'NOT_GRANTED', finality_authority: 'NOT_GRANTED',
@@ -1067,6 +1226,8 @@ function buildMigrationPreviewV1(input = {}) {
   if (!trusted.ok) return trusted;
   const rendered = renderProgrammeV4(input.desired);
   if (!rendered.ok) return rendered;
+  const renderIntegrity = verifyRenderedProgrammeIntegrity(input.desired, rendered);
+  if (!renderIntegrity.ok) return renderIntegrity;
   const associations = derivePrAssociationsV4(input.desired);
   if (!associations.ok) return associations;
   const replacements = { parent: null, children: {}, prs: {} };
@@ -1098,15 +1259,22 @@ function buildMigrationPreviewV1(input = {}) {
     bodies: replacements,
     labels: expectedLabels(input.desired, input.legacy_snapshot.labels),
     managed_events: expectedEvents.events,
-    native: { children: clone(input.scope_grant.children), dependencies: clone(input.scope_grant.dependencies), associated_prs: clone(input.scope_grant.associated_prs), pr_associations: associations.associations, api_version: input.scope_grant.api_version },
+    native: expectedNativeRelationships(input.scope_grant, associations.associations),
   };
+  const relationshipDelta = classifyRelationshipDelta(input.legacy_snapshot.native, expectedSnapshot.native);
+  if (!relationshipDelta.ok) return relationshipDelta;
+  const relationshipCapability = requireRelationshipCapabilities(input.scope_grant, relationshipDelta.required_relationship_operations);
+  if (!relationshipCapability.ok) return relationshipCapability;
   const operations = [];
   addOperation(operations, 'migrate-parent-body', input.desired.parent.issue, input.legacy_snapshot.bodies.parent, replacements.parent);
   for (const [number, body] of Object.entries(replacements.children)) addOperation(operations, 'migrate-child-body', Number(number), input.legacy_snapshot.bodies.children[number], body);
   for (const [number, body] of Object.entries(replacements.prs)) addOperation(operations, 'migrate-pr-body', Number(number), input.legacy_snapshot.bodies.prs[number], body);
   for (const event of expectedEvents.new_events) addOperation(operations, 'managed-event', event.entity.number, null, event);
   addOperation(operations, 'labels', input.desired.parent.issue, input.legacy_snapshot.labels, expectedSnapshot.labels);
-  addOperation(operations, 'relationships', input.desired.parent.issue, input.legacy_snapshot.native, expectedSnapshot.native);
+  addOperation(operations, 'relationships', input.desired.parent.issue, input.legacy_snapshot.native, expectedSnapshot.native, {
+    required_relationship_operations: relationshipDelta.required_relationship_operations,
+    relationship_capability_digest: trusted.relationship_capability_digest,
+  });
   const semanticMapping = {
     schema: 'toolkit.github-program.migration-mapping.v1',
     identity_scope: desiredScope(input.desired),
@@ -1136,6 +1304,8 @@ function buildMigrationPreviewV1(input = {}) {
     scope_digest: input.scope_grant.scope_digest,
     trusted_pr_inspection_digest: trusted.trusted_pr_inspection_digest,
     trusted_relationship_inspection_digest: trusted.trusted_relationship_inspection_digest,
+    relationship_capability_digest: trusted.relationship_capability_digest,
+    required_relationship_operations: relationshipDelta.required_relationship_operations,
     candidate_binding_digest: expectedEvents.candidate_binding_digest,
     expected_event_inventory_digest: expectedEvents.inventory_digest,
     target_projection_digests: rendered.body_digests,
@@ -1180,6 +1350,8 @@ function createConvergenceRuntime(options = {}) {
       scope_digest: previewResult.scope_digest,
       trusted_pr_inspection_digest: previewResult.trusted_pr_inspection_digest,
       trusted_relationship_inspection_digest: previewResult.trusted_relationship_inspection_digest,
+      relationship_capability_digest: previewResult.relationship_capability_digest,
+      required_relationship_operations: clone(previewResult.required_relationship_operations),
       candidate_binding_digest: previewResult.candidate_binding_digest,
       expected_event_inventory_digest: previewResult.expected_event_inventory_digest,
       operations_digest: previewResult.operations_digest,
@@ -1199,16 +1371,25 @@ function createConvergenceRuntime(options = {}) {
     return binding;
   }
   function verifyStillTrusted(acceptedEntry, previewResult) {
-    const trusted = inspectTrustBindings(acceptedEntry.desired, acceptedEntry.scope_grant, options.broker);
+    if (!options.broker || typeof options.broker.issueScope !== 'function') return fail('stale-trusted-scope');
+    const freshScope = options.broker.issueScope();
+    if (!freshScope.ok || freshScope.grant.scope_digest !== previewResult.scope_digest) return fail('stale-trusted-scope');
+    const capability = requireRelationshipCapabilities(freshScope.grant, previewResult.required_relationship_operations || []);
+    if (!capability.ok || relationshipCapabilityDigest(freshScope.grant) !== previewResult.relationship_capability_digest) return fail('stale-trusted-relationship-capability');
+    const trusted = inspectTrustBindings(acceptedEntry.desired, freshScope.grant, options.broker);
     if (!trusted.ok) return fail(String(trusted.reason).includes('relationship') ? 'stale-trusted-relationship-inspection' : 'stale-trusted-pr-inspection', { detail: trusted.reason });
     if (trusted.trusted_pr_inspection_digest !== previewResult.trusted_pr_inspection_digest) return fail('stale-trusted-pr-inspection');
     if (trusted.trusted_relationship_inspection_digest !== previewResult.trusted_relationship_inspection_digest) return fail('stale-trusted-relationship-inspection');
+    if (trusted.relationship_capability_digest !== previewResult.relationship_capability_digest) return fail('stale-trusted-relationship-capability');
     return ok('TRUSTED_PROGRAMME_FACTS_UNCHANGED');
   }
   function apply(input = {}) {
     const previewResult = input.preview;
     const acceptedEntry = isRecord(previewResult) ? accepted.get(previewResult.preview_id) : null;
     if (!isRecord(previewResult) || previewResult.ok !== true || !acceptedEntry || acceptedEntry.preview_digest !== digest(previewResult)) return fail('accepted-preview-required');
+    const relationshipOperations = previewResult.operations.filter((operation) => operation.kind === 'relationships');
+    if (relationshipOperations.length > 1 || relationshipOperations.some((operation) => !same(operation.required_relationship_operations, previewResult.required_relationship_operations)
+      || operation.relationship_capability_digest !== previewResult.relationship_capability_digest)) return fail('preview-relationship-capability-binding-invalid');
     const expectedSourceDigest = previewResult.preview_kind === 'MIGRATION' ? previewResult.source_snapshot_digest : previewResult.current_snapshot_digest;
     const stillTrusted = verifyStillTrusted(acceptedEntry, previewResult);
     if (!stillTrusted.ok) return stillTrusted;
@@ -1249,9 +1430,9 @@ function createConvergenceRuntime(options = {}) {
 module.exports = Object.freeze({
   STATE_SCHEMA, PROJECTION_SCHEMA, EXTENSIONS_SCHEMA, SCOPE_SCHEMA, PR_INSPECTION_SCHEMA, RELATIONSHIP_INSPECTION_SCHEMA,
   MIGRATION_SCHEMA, MANAGED_EVENT_SCHEMA, DESIGN_LOCK, BODY_BUDGET_BYTES, CANONICAL_STATE_BUDGET_BYTES, TOTAL_PROJECTION_BUDGET_BYTES,
-  LIFECYCLES, REGISTRY_STATUSES, LIVE_PR_LIFECYCLES, EXTENSION_CLASSES, MARKERS,
+  LIFECYCLES, REGISTRY_STATUSES, LIVE_PR_LIFECYCLES, EXTENSION_CLASSES, RELATIONSHIP_OPERATION_CLASSES, MARKERS,
   canonicalJson, digest, validateExtensionsV1, validateCanonicalStateV4, deriveProjectionV1, renderProgrammeV4,
-  parseProgrammeV4Body, createProgrammeTrustBroker, assertScopeEquality, validatePrBindings, derivePrAssociationsV4,
+  parseProgrammeV4Body, verifyRenderedProgrammeIntegrity, createProgrammeTrustBroker, assertScopeEquality, validatePrBindings, derivePrAssociationsV4,
   validateManagedEventInventoryV4, expectedManagedEventsV4, buildConvergencePreview, verifyConvergenceReadback,
   parseLegacyV1Body, parseLegacyV1Snapshot, buildMigrationPreviewV1, createConvergenceRuntime,
 });

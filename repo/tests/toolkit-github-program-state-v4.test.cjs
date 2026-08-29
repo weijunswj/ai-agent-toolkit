@@ -95,6 +95,14 @@ function scopeFixture(state = stateFixture(), overrides = {}) {
     pagination: { complete: true },
     revision: 'scope-revision-1',
     source_digests: [EVIDENCE_DIGEST],
+    allowed_relationship_operations: [...v4.RELATIONSHIP_OPERATION_CLASSES],
+    relationship_capability_provenance: {
+      adapter_identity: 'github-programme-adapter-v1',
+      authority_source: 'github-native-relationships',
+      revision: 'capability-revision-1',
+      digest: EVIDENCE_DIGEST,
+      api_version: '2026-03-10',
+    },
     version_resolver: {
       identity: 'toolkit-package-v1',
       kind: 'json-pointer-agreement',
@@ -109,10 +117,10 @@ function trustHarness(state = stateFixture(), options = {}) {
   let relationshipCalls = 0;
   let prCalls = 0;
   const broker = v4.createProgrammeTrustBroker({
-    inspect_scope() { return scopeFixture(state, options.scope || {}); },
+    inspect_scope() { return scopeFixture(state, typeof options.scope === 'function' ? options.scope() : options.scope || {}); },
     inspect_relationships(input) {
       relationshipCalls += 1;
-      return {
+      const inspection = {
         schema: v4.RELATIONSHIP_INSPECTION_SCHEMA,
         repository: input.repository,
         parent_issue: input.parent_issue,
@@ -120,8 +128,14 @@ function trustHarness(state = stateFixture(), options = {}) {
         dependencies: input.dependencies,
         api_version: input.api_version,
         scope_digest: input.scope_digest,
+        allowed_relationship_operations: input.allowed_relationship_operations,
+        relationship_capability_provenance: input.relationship_capability_provenance,
+        relationship_capability_digest: input.relationship_capability_digest,
         complete: true,
       };
+      return typeof options.relationship_inspection === 'function'
+        ? options.relationship_inspection(inspection)
+        : { ...inspection, ...(options.relationship_inspection || {}) };
     },
     inspect_prs(input) {
       prCalls += 1;
@@ -150,6 +164,14 @@ function trustHarness(state = stateFixture(), options = {}) {
 
 function emptySnapshot(state) {
   return { repository: state.repository, revision: 'revision-1', complete: true, canonical_state: null, bodies: { parent: null, children: {}, prs: {} }, labels: {}, managed_events: [], native: {} };
+}
+
+function convergedSnapshot(state = stateFixture()) {
+  const harness = trustHarness(state);
+  const scope = harness.issueScope();
+  const preview = v4.buildConvergencePreview({ snapshot: emptySnapshot(state), desired: state, scope_grant: scope.grant, broker: harness.broker });
+  assert.equal(preview.ok, true, JSON.stringify(preview));
+  return { ...structuredClone(preview.expected_snapshot), revision: 'revision-2' };
 }
 
 function legacyBody(kind, repository, data, prefix = '', suffix = '') {
@@ -334,6 +356,134 @@ test('extension aliases, nested overrides, and foreign targets fail closed', () 
   }
 });
 
+test('Repair-2 RED: rendered extension declarations and managed markers fail before operation planning', () => {
+  for (const text of [
+    'Current status: BLOCKED',
+    '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-CHILD:END -->',
+  ]) {
+    const state = stateFixture();
+    state.extensions = [{
+      schema: v4.EXTENSIONS_SCHEMA,
+      namespace: 'repository.repair_2_reproduction',
+      target: { kind: 'child', number: 2 },
+      class: 'INFORMATION',
+      title: 'Repair 2 reproduction',
+      payload: { text },
+    }];
+    const harness = trustHarness(state);
+    const scope = harness.issueScope();
+    const preview = v4.buildConvergencePreview({ snapshot: emptySnapshot(state), desired: state, scope_grant: scope.grant, broker: harness.broker });
+    assert.equal(preview.ok, false, `${text} reached operation planning`);
+    assert.equal(preview.operations, undefined);
+  }
+});
+
+test('Repair-2 RED: trusted scope without relationship operation classes cannot plan a relationship delta', () => {
+  const state = stateFixture();
+  const harness = trustHarness(state, { scope: { allowed_relationship_operations: undefined } });
+  const scope = harness.issueScope();
+  assert.equal(scope.ok, false, 'scope without relationship operation classes was branded');
+});
+
+test('extension scalar safety rejects every reserved declaration and programme control surface before planning', () => {
+  const cases = [
+    ['information current status', { class: 'INFORMATION', payload: { text: 'Current status: BLOCKED' } }],
+    ['information finality', { class: 'INFORMATION', payload: { text: 'Finality: READY' } }],
+    ['information next action', { class: 'INFORMATION', payload: { text: 'Next action: merge now.' } }],
+    ['summary PR state', { class: 'EVIDENCE', payload: { summary: 'PR state: MERGED' } }],
+    ['table column', { class: 'TABLE', payload: { columns: ['Current Gate'], rows: [['G3']] } }],
+    ['table cell', { class: 'TABLE', payload: { columns: ['Finding'], rows: [['Current status: BLOCKED']] } }],
+    ['reference', { class: 'EVIDENCE', payload: { summary: 'Bounded evidence.', references: ['Finality: READY'] } }],
+    ['domain health summary', { class: 'DOMAIN_HEALTH', payload: { domain: 'provider', status: 'WARN', summary: 'Lifecycle = BLOCKED' } }],
+    ['child end marker', { class: 'INFORMATION', payload: { text: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-CHILD:END -->' } }],
+    ['parent begin marker', { class: 'INFORMATION', payload: { text: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PARENT:BEGIN v2 -->' } }],
+    ['PR end marker', { class: 'INFORMATION', payload: { text: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PR:END -->' } }],
+    ['canonical envelope', { class: 'INFORMATION', payload: { text: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-CANONICAL v4 payload -->' } }],
+    ['projection envelope', { class: 'INFORMATION', payload: { text: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PROJECTION v1 payload -->' } }],
+    ['legacy envelope', { class: 'INFORMATION', payload: { text: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-STATE v1 payload -->' } }],
+    ['markdown declaration', { class: 'INFORMATION', payload: { text: '**Current Status:** BLOCKED' } }],
+    ['candidate binding', { class: 'INFORMATION', payload: { text: 'Candidate head: deadbeef' } }],
+    ['gate declaration', { class: 'INFORMATION', payload: { text: 'Gate: G3' } }],
+    ['epoch declaration', { class: 'INFORMATION', payload: { text: 'Epoch: E3' } }],
+    ['lock declaration', { class: 'INFORMATION', payload: { text: 'Lock: LOCK-E3' } }],
+    ['progress declaration', { class: 'INFORMATION', payload: { text: 'Progress: complete' } }],
+    ['outcome declaration', { class: 'INFORMATION', payload: { text: 'Outcome: accepted' } }],
+    ['remaining declaration', { class: 'INFORMATION', payload: { text: 'Remaining: none' } }],
+    ['blocked declaration', { class: 'INFORMATION', payload: { text: 'Blocked: yes' } }],
+    ['current gate alias', { class: 'INFORMATION', payload: { text: 'Current gate status: ACTIVE' } }],
+  ];
+  for (const [name, partial] of cases) {
+    const state = stateFixture();
+    state.extensions = [{
+      schema: v4.EXTENSIONS_SCHEMA,
+      namespace: `repository.scalar_${name.replace(/[^a-z]+/gi, '_').toLowerCase()}`,
+      target: { kind: 'child', number: 2 },
+      title: 'Bounded extension evidence',
+      ...partial,
+    }];
+    const harness = trustHarness(state);
+    const scope = harness.issueScope();
+    const preview = v4.buildConvergencePreview({ snapshot: emptySnapshot(state), desired: state, scope_grant: scope.grant, broker: harness.broker });
+    assert.equal(preview.ok, false, name);
+    assert.equal(preview.reason, 'extensions-invalid', name);
+    assert.equal(preview.operations, undefined, name);
+    assert.equal(harness.calls().relationshipCalls, 0, name);
+  }
+});
+
+test('benign ready and historical prose plus Skill-Created extensions round-trip all extension classes', () => {
+  const state = stateFixture();
+  state.extensions = [
+    { schema: v4.EXTENSIONS_SCHEMA, namespace: 'repository.provider_note', target: { kind: 'parent', number: 1 }, class: 'INFORMATION', title: 'Provider note', payload: { text: 'Provider is ready for another test.' } },
+    { schema: v4.EXTENSIONS_SCHEMA, namespace: 'repository.design_history', target: { kind: 'child', number: 2 }, class: 'EVIDENCE', title: 'Design history', payload: { summary: 'This historical design was blocked in 2024.', references: ['github:issue:10'] } },
+    { schema: v4.EXTENSIONS_SCHEMA, namespace: 'repository.review_policy', target: { kind: 'child', number: 2 }, class: 'POLICY', title: 'Review evidence policy', payload: { summary: 'The word merge appears in this explanatory sentence.' } },
+    { schema: v4.EXTENSIONS_SCHEMA, namespace: 'repository.provider_health', target: { kind: 'parent', number: 1 }, class: 'DOMAIN_HEALTH', title: 'Provider health', payload: { domain: 'provider', status: 'UNKNOWN', summary: 'No provider action is in scope.' } },
+    { schema: v4.EXTENSIONS_SCHEMA, namespace: 'skill-created.coverage', target: { kind: 'pr', number: 3 }, class: 'TABLE', title: 'Skill-Created coverage', payload: { columns: ['Area', 'Provider Status', 'Count', 'Portable'], rows: [['Extensions', 'Ready for another test', 6, true]] } },
+    { schema: v4.EXTENSIONS_SCHEMA, namespace: 'repository.source_note', target: { kind: 'pr', number: 3 }, class: 'PROVENANCE', title: 'Source note', payload: { summary: 'Repository-local first-party evidence.', references: ['git:commit:abc'] } },
+  ];
+  const rendered = v4.renderProgrammeV4(state);
+  assert.equal(rendered.ok, true, JSON.stringify(rendered));
+  assert.equal(v4.verifyRenderedProgrammeIntegrity(state, rendered).ok, true);
+  for (const [kind, group] of [['parent', { '1': rendered.bodies.parent }], ['child', rendered.bodies.children], ['pr', rendered.bodies.prs]]) {
+    for (const [number, body] of Object.entries(group)) {
+      const parsed = v4.parseProgrammeV4Body(body, { kind, repository: state.repository, parent_issue: 1, number: Number(number) });
+      assert.equal(parsed.ok, true, `${kind} ${number}`);
+      assert.equal(parsed.envelope.canonical_digest, v4.digest(state));
+    }
+  }
+  const harness = trustHarness(state);
+  const scope = harness.issueScope();
+  const preview = v4.buildConvergencePreview({ snapshot: emptySnapshot(state), desired: state, scope_grant: scope.grant, broker: harness.broker });
+  assert.equal(preview.ok, true, JSON.stringify(preview));
+
+  const migrationHarness = trustHarness(state);
+  const migrationScope = migrationHarness.issueScope();
+  const migration = v4.buildMigrationPreviewV1({ legacy_snapshot: legacySnapshotFixture(state), desired: state, scope_grant: migrationScope.grant, broker: migrationHarness.broker, authority_ref: 'github:issue-comment:2:100' });
+  assert.equal(migration.ok, true, JSON.stringify(migration));
+});
+
+test('invalid extension in an otherwise exact snapshot never returns zero delta', () => {
+  const valid = stateFixture();
+  const snapshot = convergedSnapshot(valid);
+  const invalid = structuredClone(valid);
+  invalid.extensions = [{ schema: v4.EXTENSIONS_SCHEMA, namespace: 'repository.invalid_existing', target: { kind: 'parent', number: 1 }, class: 'INFORMATION', title: 'Existing note', payload: { text: 'Finality: READY' } }];
+  snapshot.canonical_state = structuredClone(invalid);
+  const harness = trustHarness(invalid);
+  const scope = harness.issueScope();
+  const preview = v4.buildConvergencePreview({ snapshot, desired: invalid, scope_grant: scope.grant, broker: harness.broker });
+  assert.equal(preview.ok, false);
+  assert.notEqual(preview.code, 'PROGRAMME_ZERO_DELTA');
+  assert.equal(preview.operations, undefined);
+});
+
+test('table cells reject values outside the published string number boolean contract', () => {
+  for (const cell of [null, ['text'], { text: 'value' }, Number.POSITIVE_INFINITY]) {
+    const state = stateFixture();
+    state.extensions = [{ schema: v4.EXTENSIONS_SCHEMA, namespace: 'repository.invalid_cell', target: { kind: 'parent', number: 1 }, class: 'TABLE', title: 'Invalid cell', payload: { columns: ['Value'], rows: [[cell]] } }];
+    assert.equal(v4.validateCanonicalStateV4(state).reason, 'extensions-invalid');
+  }
+});
+
 test('typed domain and table extensions render additively without feeding derivation', () => {
   const state = stateFixture();
   state.extensions = [
@@ -487,6 +637,180 @@ test('trusted scope grants are deeply immutable and digest-bound', () => {
   const forged = structuredClone(scope.grant);
   forged.children[0] = 99;
   assert.equal(v4.assertScopeEquality(state, forged).reason, 'trusted-scope-grant-required');
+});
+
+test('trusted scope rejects unknown relationship classes and untrusted provenance shapes', () => {
+  const state = stateFixture();
+  for (const scopeOverride of [
+    { allowed_relationship_operations: ['UNKNOWN_RELATIONSHIP'] },
+    { relationship_capability_provenance: { ...scopeFixture(state).relationship_capability_provenance, claim: 'caller supplied' } },
+    { relationship_capability_provenance: { ...scopeFixture(state).relationship_capability_provenance, digest: 'not-a-digest' } },
+  ]) {
+    const harness = trustHarness(state, { scope: scopeOverride });
+    assert.equal(harness.issueScope().reason, 'trusted-scope-invalid');
+  }
+});
+
+test('every relationship delta requires its exact trusted operation class before any operation list is returned', () => {
+  const state = stateFixture();
+  const base = convergedSnapshot(state);
+  const cases = [
+    ['CHILD_MEMBERSHIP', ['DEPENDENCY_EDGES'], (snapshot) => { snapshot.native.children = [2]; }],
+    ['DEPENDENCY_EDGES', ['CHILD_MEMBERSHIP'], (snapshot) => { snapshot.native.dependencies['4'] = []; }],
+    ['PR_ASSOCIATION', ['CHILD_MEMBERSHIP', 'DEPENDENCY_EDGES'], (snapshot) => { snapshot.native.pr_associations['3'].kind = 'CLOSING'; }],
+  ];
+  for (const [required, allowed, mutate] of cases) {
+    const snapshot = structuredClone(base);
+    mutate(snapshot);
+    const harness = trustHarness(state, { scope: { allowed_relationship_operations: allowed } });
+    const scope = harness.issueScope();
+    const preview = v4.buildConvergencePreview({ snapshot, desired: state, scope_grant: scope.grant, broker: harness.broker });
+    assert.equal(preview.ok, false, required);
+    assert.equal(preview.reason, 'trusted-relationship-capability-required', required);
+    assert.deepEqual(preview.missing_relationship_operations, [required]);
+    assert.equal(preview.operations, undefined);
+  }
+});
+
+test('partial authority cannot plan a multi-class relationship delta', () => {
+  const state = stateFixture();
+  const snapshot = convergedSnapshot(state);
+  snapshot.native.children = [2];
+  snapshot.native.dependencies['4'] = [];
+  const harness = trustHarness(state, { scope: { allowed_relationship_operations: ['CHILD_MEMBERSHIP'] } });
+  const scope = harness.issueScope();
+  const preview = v4.buildConvergencePreview({ snapshot, desired: state, scope_grant: scope.grant, broker: harness.broker });
+  assert.equal(preview.reason, 'trusted-relationship-capability-required');
+  assert.deepEqual(preview.missing_relationship_operations, ['DEPENDENCY_EDGES']);
+  assert.equal(preview.operations, undefined);
+});
+
+test('classified relationship changes cannot mask unclassified native fields', () => {
+  const state = stateFixture();
+  const snapshot = convergedSnapshot(state);
+  snapshot.native.children = [2];
+  snapshot.native.foreign_relationship = { preserved: true };
+  const harness = trustHarness(state);
+  const scope = harness.issueScope();
+  const preview = v4.buildConvergencePreview({ snapshot, desired: state, scope_grant: scope.grant, broker: harness.broker });
+  assert.equal(preview.reason, 'native-relationship-delta-unclassified');
+  assert.equal(preview.operations, undefined);
+});
+
+test('exact relationship capability emits one digest-bound composite operation', () => {
+  const state = stateFixture();
+  const snapshot = convergedSnapshot(state);
+  snapshot.native.children = [2];
+  const harness = trustHarness(state, { scope: { allowed_relationship_operations: ['CHILD_MEMBERSHIP'] } });
+  const scope = harness.issueScope();
+  const preview = v4.buildConvergencePreview({ snapshot, desired: state, scope_grant: scope.grant, broker: harness.broker });
+  assert.equal(preview.ok, true, JSON.stringify(preview));
+  assert.deepEqual(preview.required_relationship_operations, ['CHILD_MEMBERSHIP']);
+  const operations = preview.operations.filter((operation) => operation.kind === 'relationships');
+  assert.equal(operations.length, 1);
+  assert.deepEqual(operations[0].required_relationship_operations, ['CHILD_MEMBERSHIP']);
+  assert.equal(operations[0].relationship_capability_digest, preview.relationship_capability_digest);
+});
+
+test('caller capability and provenance assertions cannot gain trusted authority', () => {
+  const desired = stateFixture();
+  desired.allowed_relationship_operations = [...v4.RELATIONSHIP_OPERATION_CLASSES];
+  assert.equal(v4.validateCanonicalStateV4(desired).reason, 'canonical-state-shape');
+
+  const state = stateFixture();
+  const harness = trustHarness(state);
+  const scope = harness.issueScope();
+  const forged = structuredClone(scope.grant);
+  forged.relationship_capability_provenance.authority_source = 'caller-claim';
+  assert.equal(v4.assertScopeEquality(state, forged).reason, 'trusted-scope-grant-required');
+});
+
+test('relationship inspection must echo exact capability classes, provenance, and digest', () => {
+  const state = stateFixture();
+  for (const mutate of [
+    (inspection) => { inspection.allowed_relationship_operations = ['DEPENDENCY_EDGES']; },
+    (inspection) => { inspection.relationship_capability_provenance.revision = 'different-revision'; },
+    (inspection) => { inspection.relationship_capability_digest = 'f'.repeat(64); },
+  ]) {
+    const harness = trustHarness(state, { relationship_inspection(inspection) { const changed = structuredClone(inspection); mutate(changed); return changed; } });
+    const scope = harness.issueScope();
+    const preview = v4.buildConvergencePreview({ snapshot: emptySnapshot(state), desired: state, scope_grant: scope.grant, broker: harness.broker });
+    assert.equal(preview.reason, 'trusted-relationship-inspection-invalid');
+    assert.equal(preview.operations, undefined);
+  }
+});
+
+test('capability provenance changes alter scope, inspection, operation, and preview identity', () => {
+  const state = stateFixture();
+  const firstHarness = trustHarness(state);
+  const firstScope = firstHarness.issueScope();
+  const first = v4.buildConvergencePreview({ snapshot: emptySnapshot(state), desired: state, scope_grant: firstScope.grant, broker: firstHarness.broker });
+
+  const provenance = { ...scopeFixture(state).relationship_capability_provenance, revision: 'capability-revision-2', digest: 'e'.repeat(64) };
+  const secondHarness = trustHarness(state, { scope: { relationship_capability_provenance: provenance } });
+  const secondScope = secondHarness.issueScope();
+  const second = v4.buildConvergencePreview({ snapshot: emptySnapshot(state), desired: state, scope_grant: secondScope.grant, broker: secondHarness.broker });
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.notEqual(first.scope_digest, second.scope_digest);
+  assert.notEqual(first.relationship_capability_digest, second.relationship_capability_digest);
+  assert.notEqual(first.trusted_relationship_inspection_digest, second.trusted_relationship_inspection_digest);
+  assert.notEqual(first.operations_digest, second.operations_digest);
+  assert.notEqual(first.preview_id, second.preview_id);
+});
+
+test('Apply rejects a fresh relationship capability grant change before mutation', () => {
+  const state = stateFixture();
+  let capabilities = [...v4.RELATIONSHIP_OPERATION_CLASSES];
+  let applyCalls = 0;
+  const harness = trustHarness(state, { scope: () => ({ allowed_relationship_operations: capabilities }) });
+  const scope = harness.issueScope();
+  const runtime = v4.createConvergenceRuntime({
+    broker: harness.broker,
+    inspect_snapshot() { return emptySnapshot(state); },
+    verify_authority({ binding }) { return { ok: true, grant: { reference: 'owner:exact-preview', binding } }; },
+    apply_operations() { applyCalls += 1; return { ok: true }; },
+  });
+  const preview = runtime.preview({ desired: state, scope_grant: scope.grant });
+  capabilities = ['DEPENDENCY_EDGES'];
+  assert.equal(runtime.apply({ preview, authority: { reference: 'owner:exact-preview' } }).reason, 'stale-trusted-scope');
+  assert.equal(applyCalls, 0);
+});
+
+test('Apply rejects fresh relationship inspection provenance drift before mutation', () => {
+  const state = stateFixture();
+  let inspectionRevision = 'capability-revision-1';
+  let applyCalls = 0;
+  const harness = trustHarness(state, {
+    relationship_inspection(inspection) {
+      inspection.relationship_capability_provenance.revision = inspectionRevision;
+      if (inspectionRevision !== 'capability-revision-1') inspection.relationship_capability_digest = 'e'.repeat(64);
+      return inspection;
+    },
+  });
+  const scope = harness.issueScope();
+  const runtime = v4.createConvergenceRuntime({
+    broker: harness.broker,
+    inspect_snapshot() { return emptySnapshot(state); },
+    apply_operations() { applyCalls += 1; return { ok: true }; },
+  });
+  const preview = runtime.preview({ desired: state, scope_grant: scope.grant });
+  assert.equal(preview.ok, true);
+  inspectionRevision = 'capability-revision-2';
+  assert.equal(runtime.apply({ preview }).reason, 'stale-trusted-relationship-inspection');
+  assert.equal(applyCalls, 0);
+});
+
+test('valid trusted scope with zero relationship delta emits no relationship operation', () => {
+  const state = stateFixture();
+  const snapshot = convergedSnapshot(state);
+  const harness = trustHarness(state, { scope: { allowed_relationship_operations: [] } });
+  const scope = harness.issueScope();
+  const preview = v4.buildConvergencePreview({ snapshot, desired: state, scope_grant: scope.grant, broker: harness.broker });
+  assert.equal(preview.ok, true, JSON.stringify(preview));
+  assert.equal(preview.code, 'PROGRAMME_ZERO_DELTA');
+  assert.deepEqual(preview.required_relationship_operations, []);
+  assert.equal(preview.operations.filter((operation) => operation.kind === 'relationships').length, 0);
 });
 
 test('steady-state projection updates preserve owner bytes and reject competing owner truth', () => {
@@ -685,6 +1009,8 @@ test('migration apply accepts only its runtime-enrolled exact preview and exact 
   assert.equal(applied.immediate_rerun, 'ZERO_DELTA');
   assert.equal(authorityBinding.preview_kind, 'MIGRATION');
   assert.equal(authorityBinding.expected_event_inventory_digest, registered.expected_event_inventory_digest);
+  assert.equal(authorityBinding.relationship_capability_digest, registered.relationship_capability_digest);
+  assert.deepEqual(authorityBinding.required_relationship_operations, registered.required_relationship_operations);
   assert.deepEqual(authorityBinding.operation_ids, registered.operations.map((operation) => operation.operation_id));
 });
 
@@ -696,6 +1022,8 @@ test('migration apply rejects every tampered material preview binding', () => {
     (preview) => { preview.source_state_digests.parent = 'f'.repeat(64); },
     (preview) => { preview.target_canonical_digest = 'f'.repeat(64); },
     (preview) => { preview.expected_revision = 'wrong-revision'; },
+    (preview) => { preview.relationship_capability_digest = 'f'.repeat(64); },
+    (preview) => { preview.required_relationship_operations = ['CHILD_MEMBERSHIP']; },
   ];
   for (const mutate of mutators) {
     const state = stateFixture();
@@ -813,4 +1141,15 @@ test('published v4 schemas are strict, parseable, and identity-aligned', () => {
   }
   const eventSchema = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../contracts/github-program-reconciler/managed-event-v2.schema.json'), 'utf8'));
   assert.equal(eventSchema.allOf.length, 3);
+  const extensionSchema = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../contracts/github-program-reconciler/programme-extensions-v1.schema.json'), 'utf8'));
+  assert.deepEqual(extensionSchema['x-toolkit-scalar-safety'].applies_to, ['title', 'text', 'summary', 'references', 'domain', 'status', 'columns', 'rows']);
+  const scopeSchema = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../contracts/github-program-reconciler/programme-scope-grant-v1.schema.json'), 'utf8'));
+  assert.equal(scopeSchema.required.includes('allowed_relationship_operations'), true);
+  assert.equal(scopeSchema.required.includes('relationship_capability_provenance'), true);
+  assert.deepEqual(scopeSchema.properties.allowed_relationship_operations.items.enum, v4.RELATIONSHIP_OPERATION_CLASSES);
+  const relationshipSchema = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../contracts/github-program-reconciler/trusted-relationship-inspection-v1.schema.json'), 'utf8'));
+  assert.equal(relationshipSchema.required.includes('relationship_capability_digest'), true);
+  const migrationSchema = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../contracts/github-program-reconciler/programme-migration-v1.schema.json'), 'utf8'));
+  assert.equal(migrationSchema.required.includes('relationship_capability_digest'), true);
+  assert.equal(migrationSchema.required.includes('required_relationship_operations'), true);
 });

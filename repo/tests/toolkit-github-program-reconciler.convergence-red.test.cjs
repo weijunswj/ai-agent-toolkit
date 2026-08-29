@@ -97,7 +97,7 @@ function legacyModel() {
       remaining: ['Receive G4.'],
       safety_constraints: ['Remain intermediate.'],
       validation_status: [{ check: 'G4', state: 'CURRENT - RESULT PENDING' }],
-      version: '2.11.2',
+      version: '2.11.3',
       role: 'INTERMEDIATE',
       completes_child: false,
       changed_surfaces: ['runtime'],

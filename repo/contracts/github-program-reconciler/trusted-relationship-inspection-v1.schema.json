@@ -4,7 +4,7 @@
   "title": "Trusted programme relationship inspection v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "repository", "parent_issue", "children", "dependencies", "api_version", "scope_digest", "complete"],
+  "required": ["schema", "repository", "parent_issue", "children", "dependencies", "api_version", "scope_digest", "allowed_relationship_operations", "relationship_capability_provenance", "relationship_capability_digest", "complete"],
   "properties": {
     "schema": { "const": "toolkit.github-program.trusted-relationship-inspection.v1" },
     "repository": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\r\\n]+$" },
@@ -13,6 +13,25 @@
     "dependencies": { "type": "object", "maxProperties": 50, "additionalProperties": { "type": "array", "maxItems": 50, "uniqueItems": true, "items": { "type": "integer", "minimum": 1 } } },
     "api_version": { "type": "string", "minLength": 1, "maxLength": 80, "pattern": "^[^\\r\\n]+$" },
     "scope_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "allowed_relationship_operations": {
+      "type": "array",
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": { "enum": ["CHILD_MEMBERSHIP", "DEPENDENCY_EDGES", "PR_ASSOCIATION"] }
+    },
+    "relationship_capability_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adapter_identity", "authority_source", "revision", "digest", "api_version"],
+      "properties": {
+        "adapter_identity": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+        "authority_source": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+        "revision": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\r\n]+$" },
+        "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "api_version": { "type": "string", "minLength": 1, "maxLength": 80, "pattern": "^[^\r\n]+$" }
+      }
+    },
+    "relationship_capability_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "complete": { "const": true }
   }
 }

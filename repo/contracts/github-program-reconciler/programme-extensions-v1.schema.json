@@ -2,6 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "toolkit.github-program.extensions.v1",
   "title": "Additive programme extensions v1",
+  "x-toolkit-scalar-safety": {
+    "applies_to": ["title", "text", "summary", "references", "domain", "status", "columns", "rows"],
+    "reserved_programme_control": "case-insensitive AI-AGENT-TOOLKIT:GITHUB-PROGRAM marker or envelope forms",
+    "reserved_semantics": "normalized authoritative declarations for lifecycle, gate, candidate, PR state, finality, acceptance, holds, dependencies, remaining work, and next action",
+    "enforcement": "runtime validation before rendering and operation planning"
+  },
   "$defs": {
     "extension": {
       "type": "object",
