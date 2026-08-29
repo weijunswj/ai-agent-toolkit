@@ -701,7 +701,13 @@ function validateContracts(errors) {
       if (!result.ok) fail(errors, `Invalid E3 v5 controller bootstrap: ${result.reason}`);
       else {
         const pin = bootstrap.toolkit_contract;
-        const commit = spawnSync('git', ['cat-file', '-e', pin.revision + '^{commit}'], { cwd: root, encoding: 'utf8' });
+        let commit = spawnSync('git', ['cat-file', '-e', pin.revision + '^{commit}'], { cwd: root, encoding: 'utf8' });
+        if (commit.status !== 0) {
+          // Hosted validation may use a shallow checkout. Fetch only the
+          // immutable pinned object; never move or adopt a branch.
+          commit = spawnSync('git', ['fetch', '--no-tags', '--no-write-fetch-head', 'origin', pin.revision], { cwd: root, encoding: 'utf8' });
+          if (commit.status === 0) commit = spawnSync('git', ['cat-file', '-e', pin.revision + '^{commit}'], { cwd: root, encoding: 'utf8' });
+        }
         if (commit.status !== 0) fail(errors, `Pinned Toolkit contract revision cannot be resolved: ${pin.revision}`);
         const contract = spawnSync('git', ['show', pin.revision + ':' + pin.path], { cwd: root, encoding: 'utf8' });
         if (contract.status !== 0) fail(errors, `Pinned Toolkit contract path cannot be resolved: ${pin.path}`);
