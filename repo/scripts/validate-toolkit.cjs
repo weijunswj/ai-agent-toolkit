@@ -21,6 +21,14 @@ function workspaceRootFromArgs(args = process.argv.slice(2)) {
 }
 
 const root = path.resolve(workspaceRootFromArgs() || process.env.TOOLKIT_WORKSPACE_ROOT || process.cwd());
+
+function gitResolutionRoot() {
+  if (fs.existsSync(path.join(root, '.git'))) return root;
+  const scriptRepository = path.resolve(__dirname, '..', '..');
+  if (fs.existsSync(path.join(scriptRepository, '.git'))) return scriptRepository;
+  return root;
+}
+
 const legacyProjectToken = '_' + 'projects';
 const legacyPublisherToken = 'curated_' + 'output_for_ai';
 const skillCreationOperationalEvidenceFields = [
@@ -701,15 +709,16 @@ function validateContracts(errors) {
       if (!result.ok) fail(errors, `Invalid E3 v5 controller bootstrap: ${result.reason}`);
       else {
         const pin = bootstrap.toolkit_contract;
-        let commit = spawnSync('git', ['cat-file', '-e', pin.revision + '^{commit}'], { cwd: root, encoding: 'utf8' });
+        const resolutionRoot = gitResolutionRoot();
+        let commit = spawnSync('git', ['cat-file', '-e', pin.revision + '^{commit}'], { cwd: resolutionRoot, encoding: 'utf8' });
         if (commit.status !== 0) {
           // Hosted validation may use a shallow checkout. Fetch only the
           // immutable pinned object; never move or adopt a branch.
-          commit = spawnSync('git', ['fetch', '--no-tags', '--no-write-fetch-head', 'origin', pin.revision], { cwd: root, encoding: 'utf8' });
-          if (commit.status === 0) commit = spawnSync('git', ['cat-file', '-e', pin.revision + '^{commit}'], { cwd: root, encoding: 'utf8' });
+          commit = spawnSync('git', ['fetch', '--no-tags', '--no-write-fetch-head', 'origin', pin.revision], { cwd: resolutionRoot, encoding: 'utf8' });
+          if (commit.status === 0) commit = spawnSync('git', ['cat-file', '-e', pin.revision + '^{commit}'], { cwd: resolutionRoot, encoding: 'utf8' });
         }
         if (commit.status !== 0) fail(errors, `Pinned Toolkit contract revision cannot be resolved: ${pin.revision}`);
-        const contract = spawnSync('git', ['show', pin.revision + ':' + pin.path], { cwd: root, encoding: 'utf8' });
+        const contract = spawnSync('git', ['show', pin.revision + ':' + pin.path], { cwd: resolutionRoot, encoding: 'utf8' });
         if (contract.status !== 0) fail(errors, `Pinned Toolkit contract path cannot be resolved: ${pin.path}`);
         else {
           try {
