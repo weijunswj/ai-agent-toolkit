@@ -275,7 +275,7 @@
         "child_issue": { "$ref": "#/$defs/issue" },
         "epoch_id": { "$ref": "#/$defs/safeId" },
         "gate": { "$ref": "#/$defs/safeId" },
-        "gate_state": { "enum": ["ACTIVE", "RESULT_RECORDED"] },
+        "gate_state": { "enum": ["ACTIVE", "RESULT_RECORDED", "WEB_DECISION_REQUIRED", "AWAITING_FINALITY"] },
         "gate_result": { "enum": [null, "AMEND", "PASS"] },
         "candidate": {
           "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/candidate" }]

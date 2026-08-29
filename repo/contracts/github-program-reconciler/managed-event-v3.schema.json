@@ -23,6 +23,8 @@
     "fence_id",
     "prior_event_id",
     "receipt_id",
+    "consumed_receipt_ids",
+    "receipt_inventory_digest",
     "event_id"
   ],
   "properties": {
@@ -68,6 +70,15 @@
       "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }]
     },
     "receipt_id": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }]
+    },
+    "consumed_receipt_ids": {
+      "type": "array",
+      "maxItems": 500,
+      "items": { "$ref": "#/$defs/digest" },
+      "uniqueItems": true
+    },
+    "receipt_inventory_digest": {
       "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }]
     },
     "event_id": { "$ref": "#/$defs/digest" }

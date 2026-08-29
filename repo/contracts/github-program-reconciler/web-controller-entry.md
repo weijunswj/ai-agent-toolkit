@@ -1,23 +1,50 @@
 # GitHub Programme Web Controller Entry
 
-This is the compact direct-entry surface for a fresh Web Controller. Read only this file first; follow its pinned paths and do not scan the Toolkit repository.
+This is the compact generic direct-entry surface for a fresh Web Controller.
+Read it first, then inspect only the target repository's bootstrap and the
+pinned contract it names. Do not scan the Toolkit repository.
 
-## Managed-repository detection
+## Detect the managed repository
 
-For the repository under review, first read `.github/ai-agent-toolkit-programme.json`. A valid `toolkit.github-program.controller-bootstrap.v1` identifies the managed repository, canonical Parent, Toolkit version, contract revision, profile, and digest. Then read the pinned contract paths in its `contracts` object. A v5 repository with a missing, malformed, mismatched, unsupported, or unverifiable bootstrap is fail-closed as `PARENT_RECONCILIATION_INCOMPLETE`. A repository with only v4 state is a migration input; an unrecognised repository is unmanaged.
+In the target repository, read .github/ai-agent-toolkit-programme.json.
+Accept it only when schema is
+toolkit.github-program.controller-bootstrap.v1, profile is
+github-managed-programme, the target repository and parent_issue match the
+repository under review, and the state/surface schemas, package version,
+conformance, and compatibility fields are supported. A v5 repository with a
+missing, malformed, stale, unsupported, or mismatched bootstrap is fail-closed
+as PARENT_RECONCILIATION_INCOMPLETE.
 
-## Exact pinned contract resolution
+## Resolve the exact pinned contract
 
-Require repository `weijunswj/ai-agent-toolkit`, profile `toolkit.github-program.v5`, version `2.12.0`, revision `DL-S2-GITHUB-PROGRAM-SURFACE-RECOVERY-003-v5`, and the bootstrap digest. Resolve the state, managed-event, run-receipt, surface, and migration schemas only from the bootstrap's exact repo-local paths. Resolve the v4 state schema only as migration input. The mutable Toolkit `main` branch is discovery and migration guidance only; it is never runtime programme semantic authority.
+Resolve toolkit_contract.repository, toolkit_contract.revision, and
+toolkit_contract.path from the bootstrap.
+Fetch that exact immutable revision and path, then verify its SHA-256 equals
+toolkit_contract.sha256 before using any programme semantics. Follow the pinned
+contract for state, surface, events, receipts, migration, projection, and
+recovery. The target repository is the programme owner; the
+toolkit_contract.repository is only the pinned contract source.
 
-## Required inspection
+## Required reads and conformance
 
-Read the Parent body and canonical v5 envelope, every current Child and its active lane, every current PR and exact candidate, retained managed-event history, and the durable run-receipt chain. Also read native Parent/Child relationships and dependencies, PR association, required checks, review decisions and review threads. Compare repository, Parent, Child, PR, base, head, tree, version, authority, epoch, Lock, gate, fence, and digest bindings before any preview or transition.
+Read the Parent, every current Child and its epoch/Lock/gate, every current PR
+and exact candidate, managed-event history, and the durable run-receipt
+inventory. Also read native Parent/Child membership and dependencies, PR
+association, required checks, review decisions, and review threads. Verify
+repository, Parent, Child, PR, base, head, tree, version, authority, epoch,
+Lock, gate, candidate, fence, receipt, and digest bindings.
 
-## Migration and conformance
+For v4 or legacy state, use the pinned migration rules: preserve historical
+comment bytes, retain valid managed events as history, preserve unrelated
+issue/PR bytes and native state, and do not infer receipts from prose. A
+bootstrap candidate is repository code delivered through the normal PR path;
+it is conformance evidence, not a programme Apply operation. Missing, stale,
+conflicting, or untrusted facts stop the run with
+PARENT_RECONCILIATION_INCOMPLETE.
 
-Migrate v4 to v5 by preserving historical comments byte-for-byte, retaining valid managed events as history, and keeping unrelated issue/PR bytes, labels, relationships, and project state unchanged. Do not turn arbitrary historical prose into receipts. Render every fixed Parent, Child, and PR heading, including empty sections as `None`; Parent has no visible Next action. Extensions remain additive `extensions.v1` content under `Additional context` and cannot override reserved programme semantics.
-
-Canonical transitions are written only by the deterministic GitHub Programme Reconciler. Executors provide code, candidates, and structured evidence; G4 provides read-only evidence; the Loop Manager persists receipts and orchestrates; Web retains architecture, Lock, material judgement, G4, and finality authority. Persist material terminal evidence before dependent progression. Use durable receipt identity, leases, fences, prior-receipt chaining, readback, duplicate/tamper detection, and zero-delta recovery. A stale authority/candidate or expired/superseded fence remains historical and cannot advance state.
-
-If any required binding, native read, review/check read, migration invariant, receipt, fence, or conformance fact is absent, stale, conflicting, or untrusted, stop with `PARENT_RECONCILIATION_INCOMPLETE`. Do not infer authority from chat, comments alone, or mutable `main`; request one explicit Web decision for the exact unresolved binding.
+When the bootstrap is absent, classify legacy or unmanaged state using only
+the target repository and this entry surface as discovery and migration guidance only.
+Do not infer runtime authority from mutable Toolkit main: it is never
+programme semantic authority. Web retains architecture, Lock, material
+judgement, G4, and finality authority; the deterministic reconciler alone
+writes canonical programme state.

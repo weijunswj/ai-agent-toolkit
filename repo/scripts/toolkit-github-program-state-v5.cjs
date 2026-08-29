@@ -15,7 +15,12 @@ const RUN_RECEIPT_SCHEMA = 'toolkit.github-program.run-receipt.v1';
 const BOOTSTRAP_SCHEMA = 'toolkit.github-program.controller-bootstrap.v1';
 const MIGRATION_SCHEMA = 'toolkit.github-program.migration.v2';
 const DESIGN_LOCK = 'DL-S2-GITHUB-PROGRAM-SURFACE-RECOVERY-003';
-const BOOTSTRAP_REVISION = 'DL-S2-GITHUB-PROGRAM-SURFACE-RECOVERY-003-v5';
+// A bootstrap revision is a real immutable Toolkit commit.  The checked-in
+// dogfood bootstrap is rebound to the semantic commit immediately preceding
+// its binding commit; test callers may supply their own immutable revision.
+const BOOTSTRAP_REVISION = '0'.repeat(40);
+const TOOLKIT_CONTRACT_REPOSITORY = 'weijunswj/ai-agent-toolkit';
+const TOOLKIT_CONTRACT_PATH = 'repo/contracts/github-program-reconciler/programme-surface-contract-v5.json';
 const BOOTSTRAP_CONTRACTS = Object.freeze({
   state: 'repo/contracts/github-program-reconciler/programme-state-v5.schema.json',
   event: 'repo/contracts/github-program-reconciler/managed-event-v3.schema.json',
@@ -31,8 +36,10 @@ const LIFECYCLES = Object.freeze(['QUEUED', 'CURRENT', 'COMPLETED', 'RETIRED']);
 const REGISTRY_STATUSES = Object.freeze(['ACTIVE', 'ACCEPTED', 'RETIRED']);
 const LIVE_PR_LIFECYCLES = Object.freeze(['OPEN_DRAFT', 'OPEN_READY', 'MERGED', 'CLOSED_UNMERGED']);
 const AUTHORITY_MODES = Object.freeze(['SINGLE_DEFAULT', 'EXPLICIT_BOUNDED']);
-const GATE_STATES = Object.freeze(['ACTIVE', 'RESULT_RECORDED']);
+const GATE_STATES = Object.freeze(['ACTIVE', 'RESULT_RECORDED', 'WEB_DECISION_REQUIRED', 'AWAITING_FINALITY']);
 const GATE_RESULTS = Object.freeze([null, 'AMEND', 'PASS']);
+const PROGRAMME_STATES = Object.freeze(['HELD', 'WEB_DECISION_REQUIRED', 'ACTIVE', 'COMPLETE', 'IDLE']);
+const TERMINAL_RECEIPT_TYPES = Object.freeze(['EXECUTOR_TERMINAL', 'G4_TERMINAL']);
 const RECOVERY_STATUSES = Object.freeze([
   'RUNNING', 'LOST', 'TERMINAL_UNCONSUMED', 'PREVIEWED_NOT_APPLIED',
   'APPLIED_ACK_LOST', 'ALREADY_APPLIED', 'STALE_CANDIDATE',
@@ -91,6 +98,22 @@ function table(headers, rows) {
   return ['| ' + headers.map(markdownCell).join(' | ') + ' |', '| ' + headers.map(() => '---').join(' | ') + ' |', ...rows.map((row) => '| ' + row.map(markdownCell).join(' | ') + ' |')].join('\n');
 }
 function sortedNumbers(values) { return values.slice().sort((a, b) => a - b); }
+function isoTimestamp(value) { return typeof value === 'string' && Number.isFinite(Date.parse(value)) && safeLine(value, 64); }
+function safeJsonValue(value, maxProperties = 40, maxBytes = 8192) {
+  if (!isRecord(value) || Object.keys(value).length > maxProperties) return false;
+  let encoded;
+  try { encoded = canonicalJson(value); } catch (_error) { return false; }
+  return Buffer.byteLength(encoded, 'utf8') <= maxBytes
+    && !/```|(?:token|password|secret|api[_-]?key)\s*["']?\s*[:=]/i.test(encoded)
+    && !/(?:^|[\\/])(?:Users|home|private|secrets?)(?:[\\/]|$)/i.test(encoded);
+}
+function evidenceDigest(refs) { return digest(refs || []); }
+function receiptInventoryDigest(ids) { return digest(Array.isArray(ids) ? ids.slice() : []); }
+function receiptRole(type) {
+  if (type === 'EXECUTOR_TERMINAL') return 'EXECUTOR';
+  if (type === 'G4_TERMINAL') return 'G4';
+  return 'LOOP_MANAGER';
+}
 
 function validateEvidenceRefs(refs) {
   return Array.isArray(refs) && refs.length <= 200
@@ -309,7 +332,8 @@ function validateCanonicalStateV5(state) {
       || !safeId(lane.lane_id) || laneIds.has(lane.lane_id) || !issue(lane.child_issue) || !childIssues.has(lane.child_issue)
       || laneChildren.has(lane.child_issue) || !safeId(lane.epoch_id) || !safeId(lane.gate) || !GATE_STATES.includes(lane.gate_state)
       || !GATE_RESULTS.includes(lane.gate_result) || lane.gate_state === 'ACTIVE' && lane.gate_result !== null
-      || lane.gate_state === 'RESULT_RECORDED' && lane.gate_result === null || lane.candidate !== null && !candidateValid(lane.candidate)
+      || ['RESULT_RECORDED', 'WEB_DECISION_REQUIRED', 'AWAITING_FINALITY'].includes(lane.gate_state) && lane.gate_result === null
+      || lane.candidate !== null && !candidateValid(lane.candidate)
       || !Array.isArray(lane.work_claims) || !lane.work_claims.length) return fail('canonical-lane-shape', { lane: lane?.lane_id });
     const child = state.children.find((entry) => entry.issue === lane.child_issue);
     const epoch = child.epochs.find((entry) => entry.id === lane.epoch_id);
@@ -346,6 +370,8 @@ function currentOutcome(state, child) {
   if (child.lifecycle === 'QUEUED') return `${child.title} is queued behind its declared dependencies.`;
   if (child.lifecycle === 'COMPLETED') return `${child.title} is completed with retained evidence.`;
   if (child.lifecycle === 'RETIRED') return `${child.title} is retired with retained evidence.`;
+  if (lane?.gate_state === 'WEB_DECISION_REQUIRED') return `${child.title} has a recorded result awaiting Web decision.`;
+  if (lane?.gate_state === 'AWAITING_FINALITY') return `${child.title} is awaiting separately authorised finality.`;
   if (lane) return `${child.title} is current in ${lane.epoch_id} at ${lane.gate}${lane.gate_state === 'RESULT_RECORDED' ? ` with ${lane.gate_result} recorded` : ''}.`;
   return `${child.title} is current but has no active lane.`;
 }
@@ -382,7 +408,11 @@ function nextAction(state, child) {
   if (child.lifecycle === 'QUEUED') return 'Wait until dependencies are completed or retired.';
   if (child.lifecycle === 'COMPLETED' || child.lifecycle === 'RETIRED') return 'No delivery action remains.';
   const lane = laneForChild(state, child.issue);
-  if (lane) return lane.gate_state === 'RESULT_RECORDED' ? `Obtain Web disposition for ${lane.epoch_id} ${lane.gate}.` : `Complete ${lane.epoch_id} ${lane.gate} without advancing finality.`;
+  if (lane) {
+    if (lane.gate_state === 'RESULT_RECORDED' || lane.gate_state === 'WEB_DECISION_REQUIRED') return `Obtain Web disposition for ${lane.epoch_id} ${lane.gate}.`;
+    if (lane.gate_state === 'AWAITING_FINALITY') return `Await separately authorised finality for ${lane.epoch_id}.`;
+    return `Complete ${lane.epoch_id} ${lane.gate} without advancing finality.`;
+  }
   return child.finality.state === 'READY_AUTHORIZED' ? 'Await the separately authorised finality action.' : 'Obtain explicit Web finality authority.';
 }
 function extensionDigest(state) { return digest(state.extensions || []); }
@@ -394,6 +424,41 @@ function renderExtensions(extensions, target) {
     const value = entry.payload.text || entry.payload.summary || `${entry.payload.domain}: ${entry.payload.status} - ${entry.payload.summary}`;
     return `### ${entry.title}\n${value}${entry.payload.references?.length ? `\n${list(entry.payload.references)}` : ''}`;
   }).join('\n\n');
+}
+function materialHoldSummary(child) {
+  const holds = blockingHolds(child);
+  return holds.length ? holds.map((hold) => `${hold.id}: ${hold.summary}`).join('; ') : 'None';
+}
+function programmeFinalityState(state) {
+  const relevant = state.active_lanes.length
+    ? state.active_lanes.map((lane) => state.children.find((child) => child.issue === lane.child_issue)).filter(Boolean)
+    : state.children.filter((child) => ['COMPLETED', 'RETIRED'].includes(child.lifecycle));
+  if (!relevant.length) return 'HELD';
+  if (relevant.some((child) => child.finality.state === 'HELD')) return 'HELD';
+  if (relevant.some((child) => child.finality.state === 'READY_AUTHORIZED')) return 'READY_AUTHORIZED';
+  if (relevant.every((child) => child.finality.state === 'MERGED')) return 'MERGED';
+  if (relevant.every((child) => child.finality.state === 'RETIRED')) return 'RETIRED';
+  return 'HELD';
+}
+function progressMetrics(state) {
+  const totalEpochs = state.children.reduce((total, child) => total + child.epochs.length, 0);
+  const acceptedOrRetiredEpochs = state.children.reduce((total, child) => total + child.epochs.filter((epoch) => ['ACCEPTED', 'RETIRED'].includes(epoch.terminal_disposition)).length, 0);
+  const webDecisionRequiredLanes = state.active_lanes.filter((lane) => lane.gate_state === 'WEB_DECISION_REQUIRED').length;
+  return {
+    completed_children: { completed: state.children.filter((child) => child.lifecycle === 'COMPLETED').length, total: state.children.length },
+    retired_children: state.children.filter((child) => child.lifecycle === 'RETIRED').length,
+    accepted_or_retired_epochs: { accepted_or_retired: acceptedOrRetiredEpochs, total: totalEpochs },
+    active_lanes: state.active_lanes.length,
+    web_decision_required_lanes: webDecisionRequiredLanes,
+  };
+}
+function aggregateProgrammeState(state, activeWork, majorHolds) {
+  const held = majorHolds.length > 0 || activeWork.some((lane) => lane.finality_state === 'HELD');
+  if (held) return 'HELD';
+  if (activeWork.some((lane) => lane.gate_state === 'WEB_DECISION_REQUIRED')) return 'WEB_DECISION_REQUIRED';
+  if (activeWork.length) return 'ACTIVE';
+  if (state.children.length > 0 && state.children.every((child) => ['COMPLETED', 'RETIRED'].includes(child.lifecycle))) return 'COMPLETE';
+  return 'IDLE';
 }
 function deriveProjectionV5(state) {
   const valid = validateCanonicalStateV5(state);
@@ -407,7 +472,7 @@ function deriveProjectionV5(state) {
       objective: child.objective, deliverables: clone(child.deliverables), done_when: clone(child.done_when), scope: clone(child.scope), out_of_scope: clone(child.out_of_scope), boundaries: clone(child.boundaries), dependencies: clone(child.dependencies),
       current_epoch: lane?.epoch_id || null, current_gate: lane?.gate || null, gate_status: lane?.gate_state || null, progress: childProgress(state, child), achieved: childAchieved(state, child), remaining: childRemaining(state, child),
       epochs: child.epochs.map((entry) => ({ id: entry.id, name: entry.name, lock: entry.lock, purpose: entry.purpose, state: entry.terminal_disposition || (lane?.epoch_id === entry.id ? lane.gate_state : 'PENDING') })),
-      holds: clone(child.holds), pr_registry: clone(child.pr_registry), finality: clone(child.finality), next_action: nextAction(state, child), eli5: child.eli5,
+      holds: clone(child.holds), pr_registry: clone(child.pr_registry), finality: clone(child.finality), outcome: currentOutcome(state, child), next_action: nextAction(state, child), eli5: child.eli5,
     };
   });
   const prs = state.prs.slice().sort((a, b) => a.number - b.number).map((pr) => {
@@ -423,18 +488,35 @@ function deriveProjectionV5(state) {
       finality: binding.child.finality.state, next_action: nextAction(state, binding.child),
     };
   });
+  const majorHolds = children.flatMap((child) => child.holds.filter((hold) => hold.kind === 'BLOCKING' && hold.active).map((hold) => `#${child.issue} ${hold.id}: ${hold.summary}`));
   const activeWork = state.active_lanes.map((lane) => {
     const child = state.children.find((entry) => entry.issue === lane.child_issue);
-    return { lane_id: lane.lane_id, child_issue: lane.child_issue, child_title: child.title, epoch_id: lane.epoch_id, gate: lane.gate, gate_state: lane.gate_state, gate_result: lane.gate_result, candidate: lane.candidate ? clone(lane.candidate) : null, work_claims: clone(lane.work_claims), outcome: currentOutcome(state, child) };
+    const activePr = activeRegistry(child)[0]?.pr || null;
+    return {
+      lane_id: lane.lane_id, child_issue: lane.child_issue, child_title: child.title,
+      epoch_id: lane.epoch_id, gate: lane.gate, epoch_gate: `${lane.epoch_id} / ${lane.gate}`,
+      gate_state: lane.gate_state, state: lane.gate_state, gate_result: lane.gate_result,
+      candidate: lane.candidate ? clone(lane.candidate) : null,
+      candidate_pr: lane.candidate ? `PR #${lane.candidate.pr} @ ${lane.candidate.head}` : activePr ? `PR #${activePr} (exact candidate unavailable)` : 'None',
+      material_hold: materialHoldSummary(child), finality_state: child.finality.state,
+      work_claims: clone(lane.work_claims), outcome: currentOutcome(state, child),
+    };
   });
+  const finalityState = programmeFinalityState(state);
+  const aggregateState = aggregateProgrammeState(state, activeWork, majorHolds);
+  const metrics = progressMetrics(state);
   const parent = {
     issue: state.parent.issue, title: state.parent.title, goal: state.parent.goal,
-    status: activeWork.length ? `${state.concurrency_authority.mode} / ${activeWork.length} active lane${activeWork.length === 1 ? '' : 's'}` : 'NO CURRENT CHILD',
-    outcome: activeWork.length ? activeWork.map((entry) => entry.outcome).join(' ') : 'No child is currently executing.',
+    status: aggregateState, aggregate_state: aggregateState,
+    concurrency_mode: state.concurrency_authority.mode,
+    active_lane_count: activeWork.length, max_active_lanes: state.concurrency_authority.max_active_lanes,
+    current_child_ids: activeWork.map((entry) => entry.child_issue),
+    programme_finality_state: finalityState,
+    outcome: activeWork.length ? activeWork.map((entry) => entry.outcome).join(' ') : aggregateState === 'COMPLETE' ? 'All programme children are complete or retired.' : 'No child is currently executing.',
     active_work: activeWork,
-    child_graph: children.map((child) => ({ issue: child.issue, title: child.title, lifecycle: child.lifecycle, outcome: currentOutcome(state, state.children.find((entry) => entry.issue === child.issue)) })),
-    progress: children.map((child) => `#${child.issue}: ${child.outcome}`),
-    major_holds: children.flatMap((child) => child.holds.filter((hold) => hold.kind === 'BLOCKING' && hold.active).map((hold) => `#${child.issue} ${hold.id}: ${hold.summary}`)),
+    child_graph: children.map((child) => ({ issue: child.issue, title: child.title, lifecycle: child.lifecycle, dependencies: clone(child.dependencies), outcome: child.outcome })),
+    progress: metrics, progress_lines: children.map((child) => `#${child.issue}: ${child.outcome}`),
+    major_holds: majorHolds,
   };
   return ok('PROGRAMME_PROJECTION_V5_DERIVED', { projection: { schema: PROJECTION_SCHEMA, repository: state.repository, canonical_digest: valid.canonical_digest, extension_digest: extensionDigest(state), parent, children, prs, extensions: clone(state.extensions || []) } });
 }
@@ -453,9 +535,23 @@ function renderProgrammeV5(state) {
   const parent = projection.parent;
   const bodies = { parent: wrap('parent', [
     '# Programme dashboard', '', '## Goal', parent.goal, '', '## Programme status',
-    table(['Field', 'Value'], [['Programme', parent.status], ['Outcome', parent.outcome]]), '', '## Active work',
-    table(['Lane', 'Child', 'Epoch / Gate', 'State', 'Candidate'], parent.active_work.map((lane) => [lane.lane_id, `#${lane.child_issue} - ${lane.child_title}`, `${lane.epoch_id} / ${lane.gate}`, lane.gate_state, lane.candidate ? `PR #${lane.candidate.pr} @ ${lane.candidate.head}` : 'None'])),
-    '', '## Children', table(['Child', 'Lifecycle', 'Outcome'], parent.child_graph.map((entry) => [`#${entry.issue} - ${entry.title}`, entry.lifecycle, entry.outcome])), '', '## Progress', list(parent.progress), '', '## Major holds', list(parent.major_holds), '', '## Additional context', renderExtensions(projection.extensions, { kind: 'parent', number: state.parent.issue }),
+    table(['Field', 'Value'], [
+      ['Aggregate programme state', parent.aggregate_state],
+      ['Concurrency mode', parent.concurrency_mode],
+      ['Active lanes', parent.active_lane_count],
+      ['Max lanes', parent.max_active_lanes],
+      ['Current child IDs', parent.current_child_ids.length ? parent.current_child_ids.map((issueNumber) => `#${issueNumber}`).join(', ') : 'None'],
+      ['Programme finality state', parent.programme_finality_state],
+    ]), '', '## Active work',
+    table(['Child', 'State', 'Epoch / Gate', 'Candidate / PR', 'Material hold'], parent.active_work.map((lane) => [`#${lane.child_issue} - ${lane.child_title}`, lane.state, lane.epoch_gate, lane.candidate_pr, lane.material_hold])),
+    '', '## Children', table(['Child', 'Lifecycle', 'Dependencies', 'Outcome'], parent.child_graph.map((entry) => [`#${entry.issue} - ${entry.title}`, entry.lifecycle, entry.dependencies.length ? entry.dependencies.map((dependency) => `#${dependency}`).join(', ') : 'None', entry.outcome])), '', '## Progress',
+    table(['Metric', 'Value'], [
+      ['Completed children / total', `${parent.progress.completed_children.completed} / ${parent.progress.completed_children.total}`],
+      ['Retired children', parent.progress.retired_children],
+      ['Accepted or retired epochs / total', `${parent.progress.accepted_or_retired_epochs.accepted_or_retired} / ${parent.progress.accepted_or_retired_epochs.total}`],
+      ['Active lanes', parent.progress.active_lanes],
+      ['Web-decision-required lanes', parent.progress.web_decision_required_lanes],
+    ]), '', '## Major holds', list(parent.major_holds), '', '## Additional context', renderExtensions(projection.extensions, { kind: 'parent', number: state.parent.issue }),
   ], projectionEnvelope(state, projection, 'parent', state.parent.issue, parent), state), children: {}, prs: {} };
   for (const child of projection.children) {
     const envelope = projectionEnvelope(state, projection, 'child', child.issue, child);
@@ -662,6 +758,7 @@ function migrateV4ToV5(source, options = {}) {
     const candidate = cursor && source.candidate && source.candidate.pr === active[0]?.pr ? clone(source.candidate) : null;
     target.active_lanes.push({ lane_id: `child-${child.issue}`, child_issue: child.issue, epoch_id: cursor?.epoch_id || active[0]?.epoch_id || child.epochs[0].id, gate: cursor?.gate || child.epochs[0].gates[0], gate_state: cursor?.status || 'ACTIVE', gate_result: cursor?.result || null, candidate, work_claims: [{ mode: 'WRITE', resource: `programme/child/${child.issue}`, operation: 'canonical-transition' }] });
   }
+  target.active_lanes.sort((left, right) => left.lane_id.localeCompare(right.lane_id));
   if (options.live_candidate) {
     const live = clone(options.live_candidate);
     const lane = target.active_lanes.find((entry) => entry.candidate?.pr === live.pr) || target.active_lanes.find((entry) => target.children.find((child) => child.issue === entry.child_issue)?.pr_registry.some((entry) => entry.pr === live.pr));
@@ -675,6 +772,7 @@ function migrateV4ToV5(source, options = {}) {
 function eventWithoutId(event) { const value = clone(event); delete value.event_id; return value; }
 function createManagedEventV3(input = {}) {
   const source = input.source_state_schema === undefined ? null : input.source_state_schema;
+  const consumedReceiptIds = input.consumed_receipt_ids === undefined ? [] : clone(input.consumed_receipt_ids);
   const event = {
     schema: MANAGED_EVENT_SCHEMA,
     event_type: input.event_type || 'canonical_transition',
@@ -694,12 +792,16 @@ function createManagedEventV3(input = {}) {
     fence_id: input.fence_id === undefined ? null : input.fence_id,
     prior_event_id: input.prior_event_id === undefined ? null : input.prior_event_id,
     receipt_id: input.receipt_id === undefined ? null : input.receipt_id,
+    consumed_receipt_ids: consumedReceiptIds,
+    receipt_inventory_digest: input.receipt_inventory_digest === undefined
+      ? consumedReceiptIds.length ? receiptInventoryDigest(consumedReceiptIds) : null
+      : input.receipt_inventory_digest,
   };
   event.event_id = digest(event);
   return event;
 }
 function validateManagedEventV3(event, expected = {}) {
-  if (!exactKeys(event, ['schema', 'event_type', 'repository', 'parent_issue', 'entity', 'source_state_schema', 'from_state_digest', 'to_state_digest', 'authority_ref', 'authority_digest', 'candidate_binding_digest', 'lane_id', 'epoch_id', 'gate', 'lock', 'fence_id', 'prior_event_id', 'receipt_id', 'event_id'])
+  if (!exactKeys(event, ['schema', 'event_type', 'repository', 'parent_issue', 'entity', 'source_state_schema', 'from_state_digest', 'to_state_digest', 'authority_ref', 'authority_digest', 'candidate_binding_digest', 'lane_id', 'epoch_id', 'gate', 'lock', 'fence_id', 'prior_event_id', 'receipt_id', 'consumed_receipt_ids', 'receipt_inventory_digest', 'event_id'])
     || event.schema !== MANAGED_EVENT_SCHEMA || !['canonical_initialisation', 'canonical_transition', 'migration', 'recovery_transition'].includes(event.event_type)
     || !safeLine(event.repository, 200) || expected.repository !== undefined && event.repository !== expected.repository || !issue(event.parent_issue)
     || expected.parent_issue !== undefined && event.parent_issue !== expected.parent_issue || !exactKeys(event.entity, ['kind', 'number'])
@@ -709,11 +811,37 @@ function validateManagedEventV3(event, expected = {}) {
     || event.authority_digest !== null && !sha256(event.authority_digest) || event.candidate_binding_digest !== null && !sha256(event.candidate_binding_digest)
     || event.lane_id !== null && !safeId(event.lane_id) || event.epoch_id !== null && !safeId(event.epoch_id) || event.gate !== null && !safeId(event.gate)
     || event.lock !== null && !safeId(event.lock) || event.fence_id !== null && !safeId(event.fence_id) || event.prior_event_id !== null && !sha256(event.prior_event_id)
-    || event.receipt_id !== null && !sha256(event.receipt_id) || !sha256(event.event_id)) return fail('managed-event-v3-invalid');
+    || event.receipt_id !== null && !sha256(event.receipt_id) || !arrayOf(event.consumed_receipt_ids, sha256, 500)
+    || new Set(event.consumed_receipt_ids).size !== event.consumed_receipt_ids.length
+    || event.receipt_inventory_digest !== null && !sha256(event.receipt_inventory_digest) || !sha256(event.event_id)) return fail('managed-event-v3-invalid');
+  if (event.consumed_receipt_ids.length === 0 && event.receipt_inventory_digest !== null) return fail('receipt-inventory-binding-invalid');
+  if (event.consumed_receipt_ids.length > 0 && event.receipt_inventory_digest !== receiptInventoryDigest(event.consumed_receipt_ids)) return fail('receipt-inventory-digest-mismatch');
+  if (event.receipt_id !== null && !event.consumed_receipt_ids.includes(event.receipt_id)) return fail('receipt-inventory-binding-invalid');
   const expectedType = { canonical_initialisation: null, canonical_transition: STATE_SCHEMA, migration: 'toolkit.github-program.state.v4', recovery_transition: STATE_SCHEMA };
   if (event.event_type === 'canonical_initialisation' && event.source_state_schema !== null || event.event_type === 'canonical_transition' && ![STATE_SCHEMA, 'toolkit.github-program.state.v4'].includes(event.source_state_schema) || event.event_type === 'migration' && event.source_state_schema !== 'toolkit.github-program.state.v4' || event.event_type === 'recovery_transition' && event.source_state_schema !== STATE_SCHEMA) return fail('managed-event-v3-transition-binding-invalid');
   if (event.event_id !== digest(eventWithoutId(event))) return fail('managed-event-v3-tampered');
   return ok('MANAGED_EVENT_V3_VALID', { event });
+}
+function validateReceiptConsumption(event, receipts, expected = {}) {
+  const validEvent = validateManagedEventV3(event, expected);
+  if (!validEvent.ok) return validEvent;
+  if (!Array.isArray(receipts)) return fail('receipt-inventory-not-durable');
+  const byId = new Map();
+  for (const receipt of receipts) {
+    const valid = validateReceiptObject(receipt, expected);
+    if (!valid.ok) return fail('receipt-inventory-invalid', { receipt_id: receipt?.receipt_id, detail: valid.reason });
+    if (byId.has(receipt.receipt_id) && !same(byId.get(receipt.receipt_id), receipt)) return fail('receipt-inventory-conflict', { receipt_id: receipt.receipt_id });
+    byId.set(receipt.receipt_id, receipt);
+  }
+  for (const receiptId of event.consumed_receipt_ids) {
+    const receipt = byId.get(receiptId);
+    if (!receipt) return fail('receipt-not-persisted', { receipt_id: receiptId });
+    if (expected.require_readback === true && receipt.readback === null) return fail('receipt-readback-required', { receipt_id: receiptId });
+    if (event.receipt_id === receiptId && event.authority_ref !== receipt.authority_ref) return fail('receipt-authority-binding-mismatch', { receipt_id: receiptId });
+    if (event.receipt_id === receiptId && event.authority_digest !== null && receipt.authority_digest !== event.authority_digest) return fail('receipt-authority-binding-mismatch', { receipt_id: receiptId });
+    if (event.candidate_binding_digest !== null && receipt.candidate_binding_digest !== event.candidate_binding_digest) return fail('receipt-candidate-binding-mismatch', { receipt_id: receiptId });
+  }
+  return ok('RECEIPT_INVENTORY_CONSUMABLE', { consumed_receipt_ids: clone(event.consumed_receipt_ids), receipt_inventory_digest: event.receipt_inventory_digest });
 }
 function validateManagedEventInventoryV5(events, repository, options = {}) {
   if (!Array.isArray(events) || events.length > 500) return fail('managed-event-inventory-invalid');
@@ -741,40 +869,91 @@ function validateManagedEventInventoryV5(events, repository, options = {}) {
 
 function receiptWithoutId(receipt) { const value = clone(receipt); delete value.receipt_id; return value; }
 function createRunReceipt(input = {}) {
+  const producerTimestamp = input.producer_timestamp || input.created_at || new Date().toISOString();
+  const suppliedLease = clone(input.lease || {});
+  const fenceSequence = suppliedLease.monotonic_fence ?? suppliedLease.fence_sequence ?? input.monotonic_fence ?? input.fence_sequence ?? 0;
+  const issuedAt = suppliedLease.issued_at || input.lease_issued_at || producerTimestamp;
+  const expiresAt = suppliedLease.expires_at || input.lease_expires_at || input.expires_at;
+  const candidate = input.candidate === undefined ? null : clone(input.candidate);
+  const result = clone(input.result || {});
+  if (!hasOwn(result, 'classification')) result.classification = result.state || input.receipt_type || 'UNCLASSIFIED';
+  const evidenceRefs = clone(input.evidence_refs || []);
   const receipt = {
     schema: RUN_RECEIPT_SCHEMA,
     receipt_type: input.receipt_type,
     receipt_id: null,
     run_id: input.run_id,
+    attempt: input.attempt === undefined ? 1 : input.attempt,
+    role: input.role || receiptRole(input.receipt_type),
     repository: input.repository,
     parent_issue: input.parent_issue,
-    lane_id: input.lane_id,
     child_issue: input.child_issue,
+    pr_number: input.pr_number === undefined ? input.pr === undefined ? null : input.pr : input.pr_number,
+    lane_id: input.lane_id,
     epoch_id: input.epoch_id,
     gate: input.gate,
     lock: input.lock,
-    candidate_binding_digest: input.candidate_binding_digest === undefined ? null : input.candidate_binding_digest,
+    authority_ref: input.authority_ref === undefined ? null : input.authority_ref,
     authority_digest: input.authority_digest === undefined ? null : input.authority_digest,
-    lease: clone(input.lease || { lease_id: input.lease_id, fence_id: input.fence_id, fence_sequence: input.fence_sequence || 0, expires_at: input.expires_at }),
+    body_digest: input.body_digest === undefined ? null : input.body_digest,
+    candidate,
+    candidate_digest: input.candidate_digest === undefined ? candidate ? digest(candidate) : null : input.candidate_digest,
+    candidate_binding_digest: input.candidate_binding_digest === undefined ? null : input.candidate_binding_digest,
+    lease: {
+      lease_id: suppliedLease.lease_id || input.lease_id,
+      fence_id: suppliedLease.fence_id || input.fence_id,
+      fence_sequence: fenceSequence,
+      monotonic_fence: fenceSequence,
+      issued_at: issuedAt,
+      expires_at: expiresAt,
+    },
     prior_receipt_id: input.prior_receipt_id === undefined ? null : input.prior_receipt_id,
-    result: clone(input.result || {}),
+    result,
+    evidence_refs: evidenceRefs,
+    evidence_digest: input.evidence_digest === undefined ? evidenceDigest(evidenceRefs) : input.evidence_digest,
     readback: input.readback === undefined ? null : clone(input.readback),
-    created_at: input.created_at || new Date().toISOString(),
+    producer_timestamp: producerTimestamp,
+    // Retained as a compatibility alias for the earlier v5 draft.  It is
+    // bound to producer_timestamp and is not a separate clock.
+    created_at: producerTimestamp,
   };
   receipt.receipt_id = digest(receiptWithoutId(receipt));
   return receipt;
 }
 function validateReceiptObject(receipt, expected = {}) {
-  if (!exactKeys(receipt, ['schema', 'receipt_type', 'receipt_id', 'run_id', 'repository', 'parent_issue', 'lane_id', 'child_issue', 'epoch_id', 'gate', 'lock', 'candidate_binding_digest', 'authority_digest', 'lease', 'prior_receipt_id', 'result', 'readback', 'created_at'])
+  if (!exactKeys(receipt, ['schema', 'receipt_type', 'receipt_id', 'run_id', 'attempt', 'role', 'repository', 'parent_issue', 'child_issue', 'pr_number', 'lane_id', 'epoch_id', 'gate', 'lock', 'authority_ref', 'authority_digest', 'body_digest', 'candidate', 'candidate_digest', 'candidate_binding_digest', 'lease', 'prior_receipt_id', 'result', 'evidence_refs', 'evidence_digest', 'readback', 'producer_timestamp', 'created_at'])
     || receipt.schema !== RUN_RECEIPT_SCHEMA || !RECEIPT_TYPES.includes(receipt.receipt_type) || !sha256(receipt.receipt_id) || !safeId(receipt.run_id)
+    || !Number.isSafeInteger(receipt.attempt) || receipt.attempt < 1 || receipt.attempt > 100000
+    || !['EXECUTOR', 'G4', 'LOOP_MANAGER', 'WEB', 'SYSTEM'].includes(receipt.role)
     || !safeLine(receipt.repository, 200) || expected.repository !== undefined && expected.repository !== receipt.repository || !issue(receipt.parent_issue)
-    || expected.parent_issue !== undefined && expected.parent_issue !== receipt.parent_issue || !safeId(receipt.lane_id) || !issue(receipt.child_issue)
-    || !safeId(receipt.epoch_id) || !safeId(receipt.gate) || !safeId(receipt.lock) || receipt.candidate_binding_digest !== null && !sha256(receipt.candidate_binding_digest)
-    || receipt.authority_digest !== null && !sha256(receipt.authority_digest) || !exactKeys(receipt.lease, ['lease_id', 'fence_id', 'fence_sequence', 'expires_at'])
+    || expected.parent_issue !== undefined && expected.parent_issue !== receipt.parent_issue || !issue(receipt.child_issue)
+    || receipt.pr_number !== null && !issue(receipt.pr_number) || !safeId(receipt.lane_id) || !safeId(receipt.epoch_id) || !safeId(receipt.gate) || !safeId(receipt.lock)
+    || receipt.authority_ref !== null && !safeLine(receipt.authority_ref, 512) || receipt.authority_digest !== null && !sha256(receipt.authority_digest)
+    || receipt.body_digest !== null && !sha256(receipt.body_digest) || receipt.candidate !== null && !candidateValid(receipt.candidate)
+    || receipt.candidate === null && receipt.candidate_digest !== null || receipt.candidate !== null && (!sha256(receipt.candidate_digest) || receipt.candidate_digest !== digest(receipt.candidate))
+    || receipt.candidate_binding_digest !== null && !sha256(receipt.candidate_binding_digest) || !exactKeys(receipt.lease, ['lease_id', 'fence_id', 'fence_sequence', 'monotonic_fence', 'issued_at', 'expires_at'])
     || !safeId(receipt.lease.lease_id) || !safeId(receipt.lease.fence_id) || !Number.isSafeInteger(receipt.lease.fence_sequence) || receipt.lease.fence_sequence < 0
-    || !safeLine(receipt.lease.expires_at) || receipt.prior_receipt_id !== null && !sha256(receipt.prior_receipt_id) || !isRecord(receipt.result)
-    || Object.keys(receipt.result).length > 40 || receipt.readback !== null && !isRecord(receipt.readback) || receipt.readback !== null && Object.keys(receipt.readback).length > 40
-    || !safeLine(receipt.created_at, 512) || bytes(receipt) > RECEIPT_BUDGET_BYTES) return fail('run-receipt-invalid');
+    || !Number.isSafeInteger(receipt.lease.monotonic_fence) || receipt.lease.monotonic_fence < 0 || receipt.lease.monotonic_fence !== receipt.lease.fence_sequence
+    || !isoTimestamp(receipt.lease.issued_at) || !isoTimestamp(receipt.lease.expires_at) || receipt.prior_receipt_id !== null && !sha256(receipt.prior_receipt_id)
+    || !safeJsonValue(receipt.result, 40, 8192) || typeof receipt.result.classification !== 'string' || !safeLine(receipt.result.classification, 128)
+    || !arrayOf(receipt.evidence_refs, (entry) => exactKeys(entry, ['id', 'digest']) && safeId(entry.id) && sha256(entry.digest), 50)
+    || new Set(receipt.evidence_refs.map((entry) => entry.id)).size !== receipt.evidence_refs.length || receipt.evidence_digest !== evidenceDigest(receipt.evidence_refs)
+    || receipt.readback !== null && !safeJsonValue(receipt.readback, 40, 8192) || !isoTimestamp(receipt.producer_timestamp)
+    || receipt.created_at !== receipt.producer_timestamp || bytes(receipt) > RECEIPT_BUDGET_BYTES) return fail('run-receipt-invalid');
+  if (expected.authority_ref !== undefined && receipt.authority_ref !== expected.authority_ref) return fail('receipt-authority-binding-mismatch');
+  if (expected.authority_digest !== undefined && receipt.authority_digest !== expected.authority_digest) return fail('receipt-authority-digest-mismatch');
+  if (expected.body_digest !== undefined && receipt.body_digest !== expected.body_digest) return fail('receipt-body-binding-mismatch');
+  if (expected.candidate_digest !== undefined && receipt.candidate_digest !== expected.candidate_digest) return fail('receipt-candidate-digest-mismatch');
+  if (expected.candidate !== undefined && !same(receipt.candidate, expected.candidate)) return fail('receipt-candidate-binding-mismatch');
+  if (expected.pr_number !== undefined && receipt.pr_number !== expected.pr_number) return fail('receipt-pr-binding-mismatch');
+  if (expected.lease_id !== undefined && receipt.lease.lease_id !== expected.lease_id) return fail('receipt-lease-binding-mismatch');
+  if (expected.fence_id !== undefined && receipt.lease.fence_id !== expected.fence_id) return fail('receipt-fence-binding-mismatch');
+  if (expected.monotonic_fence !== undefined && receipt.lease.monotonic_fence !== expected.monotonic_fence) return fail('receipt-fence-binding-mismatch');
+  if (expected.child_issue !== undefined && receipt.child_issue !== expected.child_issue) return fail('receipt-child-binding-mismatch');
+  if (expected.lane_id !== undefined && receipt.lane_id !== expected.lane_id) return fail('receipt-lane-binding-mismatch');
+  if (expected.epoch_id !== undefined && receipt.epoch_id !== expected.epoch_id) return fail('receipt-epoch-binding-mismatch');
+  if (expected.gate !== undefined && receipt.gate !== expected.gate) return fail('receipt-gate-binding-mismatch');
+  if (expected.lock !== undefined && receipt.lock !== expected.lock) return fail('receipt-lock-binding-mismatch');
   if (receipt.receipt_id !== digest(receiptWithoutId(receipt))) return fail('run-receipt-tampered');
   return ok('RUN_RECEIPT_VALID', { receipt });
 }
@@ -792,11 +971,14 @@ function validateRunReceiptChain(receipts, expected = {}) {
   for (const receipt of receipts) {
     const valid = validateReceiptObject(receipt, expected);
     if (!valid.ok || ids.has(receipt.receipt_id) || receipt.prior_receipt_id !== previous || runId !== null && receipt.run_id !== runId) return fail(valid.ok ? 'run-receipt-chain-invalid' : valid.reason, { receipt_id: receipt.receipt_id });
-    if (receipt.receipt_type === 'RUN_STARTED') started = true;
+    if (receipt.receipt_type === 'RUN_STARTED') {
+      if (started || receipts.indexOf(receipt) !== 0) return fail('duplicate-run-started', { receipt_id: receipt.receipt_id });
+      started = true;
+    }
     if (['EXECUTOR_TERMINAL', 'G4_TERMINAL', 'RUN_INTERRUPTED', 'LEASE_EXPIRED', 'HOSTED_CHECK'].includes(receipt.receipt_type) && !started) return fail('terminal-before-start', { receipt_id: receipt.receipt_id });
     ids.add(receipt.receipt_id); previous = receipt.receipt_id; runId = runId || receipt.run_id;
   }
-  return ok('RUN_RECEIPT_CHAIN_VALID', { receipts: clone(receipts), ids, terminal: receipts.find((entry) => ['EXECUTOR_TERMINAL', 'G4_TERMINAL'].includes(entry.receipt_type)) || null });
+  return ok('RUN_RECEIPT_CHAIN_VALID', { receipts: clone(receipts), ids, terminal: receipts.find((entry) => TERMINAL_RECEIPT_TYPES.includes(entry.receipt_type)) || null });
 }
 function appendRunReceipt(store, receipt) {
   const valid = validateReceiptObject(receipt);
@@ -826,7 +1008,9 @@ function canAdvanceFromTerminal(input = {}) {
   if (!chain.ok) return chain;
   if (!terminal || !['EXECUTOR_TERMINAL', 'G4_TERMINAL'].includes(terminal.receipt_type)) return fail('terminal-receipt-required');
   if (input.terminal_persisted !== true) return fail('terminal-persistence-required');
-  if (receiptFenceExpired(terminal, input.now || new Date()) || input.superseded_fence_id === terminal.lease.fence_id) return fail('expired-fence', { historical: true, advances_state: false });
+  if (receiptFenceExpired(terminal, input.now || new Date()) || input.superseded_fence_id === terminal.lease.fence_id
+    || input.expected_monotonic_fence !== undefined && terminal.lease.monotonic_fence !== input.expected_monotonic_fence
+    || input.minimum_monotonic_fence !== undefined && terminal.lease.monotonic_fence < input.minimum_monotonic_fence) return fail('expired-fence', { historical: true, advances_state: false });
   return ok('TERMINAL_DURABLE_AND_ADVANCEABLE', { receipt_id: terminal.receipt_id, advances_state: true });
 }
 function consumeTerminalEvidence(input = {}) {
@@ -876,32 +1060,66 @@ function validateWriterAction(input = {}) {
   return ok('WRITER_ACTION_AUTHORISED', { actor, action });
 }
 
+function validateProgrammeOperations(operations) {
+  if (!Array.isArray(operations)) return fail('programme-operation-inventory-invalid');
+  const forbidden = operations.find((operation) => /(?:^|[-_])(bootstrap|repository|repo)[-_]?file(?:$|[-_])/i.test(String(operation?.kind || operation?.operation_class || '')));
+  if (forbidden) return fail('repository-file-operation-forbidden', { operation_id: forbidden.operation_id || null, kind: forbidden.kind });
+  return ok('PROGRAMME_OPERATION_INVENTORY_VALID', { operation_count: operations.length });
+}
+
+function validContractPath(value) {
+  return typeof value === 'string' && /^(?:repo|\.github)\/[A-Za-z0-9._/-]+$/.test(value) && !value.includes('..');
+}
+function validateResolvedToolkitContract(bootstrap, expected = {}) {
+  const pin = bootstrap.toolkit_contract;
+  if (expected.toolkit_contract !== undefined) {
+    const requested = expected.toolkit_contract;
+    for (const key of ['repository', 'revision', 'path', 'sha256']) {
+      if (requested[key] !== undefined && requested[key] !== pin[key]) return fail(`toolkit-contract-${key}-mismatch`);
+    }
+  }
+  const supplied = expected.contract_bytes !== undefined ? expected.contract_bytes
+    : expected.toolkit_contract_bytes !== undefined ? expected.toolkit_contract_bytes
+      : expected.resolved_contract;
+  const verifyContent = (content) => {
+    const actual = typeof content === 'string' ? digest(content) : digest(content);
+    return actual === pin.sha256 ? ok('PINNED_TOOLKIT_CONTRACT_VERIFIED', { contract_digest: actual }) : fail('toolkit-contract-digest-mismatch', { expected: pin.sha256, actual });
+  };
+  if (supplied !== undefined) return verifyContent(supplied?.bytes === undefined ? supplied?.content === undefined ? supplied : supplied.content : supplied.bytes);
+  if (typeof expected.resolve_contract === 'function') {
+    let resolved;
+    try { resolved = expected.resolve_contract(clone(pin)); } catch (_error) { return fail('toolkit-contract-resolution-failed'); }
+    if (!resolved) return fail('toolkit-contract-resolution-failed');
+    if (isRecord(resolved) && (resolved.repository !== undefined && resolved.repository !== pin.repository || resolved.revision !== undefined && resolved.revision !== pin.revision || resolved.path !== undefined && resolved.path !== pin.path)) return fail('toolkit-contract-resolution-mismatch');
+    const content = resolved?.bytes === undefined ? resolved?.content === undefined ? resolved?.contract === undefined ? resolved : resolved.contract : resolved.content : resolved.bytes;
+    if (content === undefined) return fail('toolkit-contract-resolution-failed');
+    return verifyContent(content);
+  }
+  if (expected.require_pinned_resolution === true) return fail('toolkit-contract-resolution-required');
+  return ok('PINNED_TOOLKIT_CONTRACT_UNRESOLVED', { contract_digest: pin.sha256, resolution_required: true });
+}
 function validateControllerBootstrap(bootstrap, expected = {}) {
-  if (!isRecord(bootstrap) || !exactKeys(bootstrap, ['schema', 'identity', 'version', 'revision', 'digest', 'profile', 'parent', 'conformance', 'compatibility', 'contracts'], ['$schema'])
-    || bootstrap.schema !== BOOTSTRAP_SCHEMA || !exactKeys(bootstrap.identity, ['repository', 'product']) || !SAFE_REPOSITORY.test(bootstrap.identity.repository)
-    || bootstrap.identity.product !== 'github-program-reconciler' || !/^\d+\.\d+\.\d+$/.test(bootstrap.version) || !safeId(bootstrap.revision)
-    || !sha256(bootstrap.digest) || bootstrap.profile !== 'toolkit.github-program.v5' || !exactKeys(bootstrap.parent, ['repository', 'issue', 'canonical'])
-    || !SAFE_REPOSITORY.test(bootstrap.parent.repository) || !issue(bootstrap.parent.issue) || bootstrap.parent.canonical !== true
-    || !exactKeys(bootstrap.conformance, ['managed_repository_required', 'bootstrap_required_for_v5', 'detection_order', 'pinned_contract_required'])
-    || bootstrap.conformance.managed_repository_required !== true || bootstrap.conformance.bootstrap_required_for_v5 !== true || !arrayOf(bootstrap.conformance.detection_order, safeId, 10)
-    || bootstrap.conformance.pinned_contract_required !== true || !exactKeys(bootstrap.compatibility, ['accepted_state_schemas', 'migration_input_schemas', 'runtime_authority', 'mutable_main_role'])
-    || !arrayOf(bootstrap.compatibility.accepted_state_schemas, (entry) => entry === STATE_SCHEMA, 10) || !bootstrap.compatibility.accepted_state_schemas.length
-    || !arrayOf(bootstrap.compatibility.migration_input_schemas, (entry) => entry === 'toolkit.github-program.state.v4', 10) || !bootstrap.compatibility.migration_input_schemas.length
-    || bootstrap.compatibility.runtime_authority !== 'repo-local-pinned-bootstrap' || bootstrap.compatibility.mutable_main_role !== 'discovery-migration-guidance-only'
-    || !exactKeys(bootstrap.contracts, ['state', 'event', 'receipt', 'surface', 'entrypoint']) || Object.values(bootstrap.contracts).some((value) => !/^(?:repo|\.github)\/[A-Za-z0-9._/-]+$/.test(value))
-    || !same(bootstrap.contracts, BOOTSTRAP_CONTRACTS) || bootstrap.revision !== BOOTSTRAP_REVISION || bootstrap.version !== '2.12.0') return fail('bootstrap-invalid');
-  const withoutDigest = clone(bootstrap); delete withoutDigest.digest;
-  if (digest(withoutDigest) !== bootstrap.digest) return fail('bootstrap-digest-mismatch');
-  if (expected.repository !== undefined && (bootstrap.identity.repository !== expected.repository || bootstrap.parent.repository !== expected.repository)) return fail('bootstrap-repository-mismatch');
-  if (expected.parent_issue !== undefined && bootstrap.parent.issue !== expected.parent_issue) return fail('bootstrap-parent-mismatch');
-  if (expected.version !== undefined && bootstrap.version !== expected.version) return fail('bootstrap-version-mismatch');
-  if (expected.revision !== undefined && bootstrap.revision !== expected.revision) return fail('bootstrap-revision-mismatch');
-  return ok('CONTROLLER_BOOTSTRAP_VALID', { bootstrap: clone(bootstrap), pinned_contract_digest: bootstrap.digest });
+  if (!isRecord(bootstrap) || !exactKeys(bootstrap, ['schema', 'profile', 'repository', 'parent_issue', 'programme_state_schema', 'surface_contract_schema', 'toolkit_package_version', 'toolkit_contract', 'conformance', 'compatibility'], ['$schema'])
+    || bootstrap.schema !== BOOTSTRAP_SCHEMA || bootstrap.profile !== 'github-managed-programme' || !SAFE_REPOSITORY.test(bootstrap.repository) || !issue(bootstrap.parent_issue)
+    || bootstrap.programme_state_schema !== STATE_SCHEMA || bootstrap.surface_contract_schema !== SURFACE_CONTRACT.$schema || !/^\d+\.\d+\.\d+$/.test(bootstrap.toolkit_package_version)
+    || !exactKeys(bootstrap.toolkit_contract, ['repository', 'revision', 'path', 'sha256']) || !SAFE_REPOSITORY.test(bootstrap.toolkit_contract.repository)
+    || !sha(bootstrap.toolkit_contract.revision) || !validContractPath(bootstrap.toolkit_contract.path) || bootstrap.toolkit_contract.path !== TOOLKIT_CONTRACT_PATH || !sha256(bootstrap.toolkit_contract.sha256)
+    || !exactKeys(bootstrap.conformance, ['required_class', 'migration_from']) || bootstrap.conformance.required_class !== 'CURRENT_MANAGED'
+    || !arrayOf(bootstrap.conformance.migration_from, (entry) => entry === 'toolkit.github-program.state.v4', 10) || !bootstrap.conformance.migration_from.length
+    || !exactKeys(bootstrap.compatibility, ['fail_closed_on_unknown_major']) || bootstrap.compatibility.fail_closed_on_unknown_major !== true) return fail('bootstrap-invalid');
+  if (Number(bootstrap.toolkit_package_version.split('.')[0]) !== 2) return fail('bootstrap-unknown-major');
+  if (expected.repository !== undefined && bootstrap.repository !== expected.repository) return fail('bootstrap-repository-mismatch');
+  if (expected.parent_issue !== undefined && bootstrap.parent_issue !== expected.parent_issue) return fail('bootstrap-parent-mismatch');
+  if (expected.version !== undefined && bootstrap.toolkit_package_version !== expected.version) return fail('bootstrap-version-mismatch');
+  if (expected.revision !== undefined && bootstrap.toolkit_contract.revision !== expected.revision) return fail('bootstrap-revision-mismatch');
+  const resolved = validateResolvedToolkitContract(bootstrap, expected);
+  if (!resolved.ok) return resolved;
+  return ok('CONTROLLER_BOOTSTRAP_VALID', { bootstrap: clone(bootstrap), pinned_contract_digest: bootstrap.toolkit_contract.sha256, toolkit_contract: clone(bootstrap.toolkit_contract), contract_resolution: resolved.code });
 }
 function resolvePinnedContract(bootstrap, expected = {}) {
-  const valid = validateControllerBootstrap(bootstrap, expected);
+  const valid = validateControllerBootstrap(bootstrap, { ...expected, require_pinned_resolution: true });
   if (!valid.ok) return valid;
-  return ok('PINNED_CONTRACT_RESOLVED', { repository: bootstrap.identity.repository, parent_issue: bootstrap.parent.issue, version: bootstrap.version, revision: bootstrap.revision, digest: bootstrap.digest, profile: bootstrap.profile, contracts: clone(bootstrap.contracts) });
+  return ok('PINNED_CONTRACT_RESOLVED', { repository: bootstrap.repository, parent_issue: bootstrap.parent_issue, version: bootstrap.toolkit_package_version, profile: bootstrap.profile, toolkit_contract: clone(bootstrap.toolkit_contract), contract_digest: bootstrap.toolkit_contract.sha256, programme_state_schema: bootstrap.programme_state_schema, surface_contract_schema: bootstrap.surface_contract_schema });
 }
 function detectManagedRepository(input = {}) {
   const bootstrap = input.bootstrap;
@@ -935,41 +1153,48 @@ function inspectControllerContext(input = {}) {
   const paths = ['.github/ai-agent-toolkit-programme.json'];
   if (!detection.managed) return ok('UNMANAGED_REPOSITORY', { detection, paths });
   if (detection.classification === 'DRIFTED_MANAGED') return fail('v5-bootstrap-invalid-or-missing', { detection, paths });
-  const pinned = validateControllerBootstrap(bootstrap, { repository: input.repository, parent_issue: input.parent_issue });
+  const pinned = input.resolve_contract || input.contract_bytes || input.toolkit_contract_bytes
+    ? resolvePinnedContract(bootstrap, { repository: input.repository, parent_issue: input.parent_issue, resolve_contract: input.resolve_contract, contract_bytes: input.contract_bytes, toolkit_contract_bytes: input.toolkit_contract_bytes })
+    : validateControllerBootstrap(bootstrap, { repository: input.repository, parent_issue: input.parent_issue });
   if (!pinned.ok) return pinned;
-  const parent = input.parent_body !== undefined ? input.parent_body : readDirect(`issue/${pinned.bootstrap.parent.issue}/body`);
-  const children = input.children !== undefined ? input.children : readDirect(`issue/${pinned.bootstrap.parent.issue}/children`, {});
-  const prs = input.prs !== undefined ? input.prs : readDirect(`parent/${pinned.bootstrap.parent.issue}/prs`, {});
+  const pinnedBootstrap = pinned.bootstrap || bootstrap;
+  const parentIssue = pinnedBootstrap.parent_issue;
+  const parent = input.parent_body !== undefined ? input.parent_body : readDirect(`issue/${parentIssue}/body`);
+  const children = input.children !== undefined ? input.children : readDirect(`issue/${parentIssue}/children`, {});
+  const prs = input.prs !== undefined ? input.prs : readDirect(`parent/${parentIssue}/prs`, {});
   const managedEvents = input.managed_events !== undefined ? input.managed_events : readDirect('managed-events', []);
   const receipts = input.receipts !== undefined ? input.receipts : readDirect('run-receipts', []);
-  const native = input.native !== undefined ? input.native : readDirect(`issue/${pinned.bootstrap.parent.issue}/native-relationships`, null);
-  const checks = input.checks !== undefined ? input.checks : readDirect(`issue/${pinned.bootstrap.parent.issue}/checks`, {});
-  const reviews = input.reviews !== undefined ? input.reviews : readDirect(`issue/${pinned.bootstrap.parent.issue}/reviews`, {});
-  paths.push(`issue/${pinned.bootstrap.parent.issue}/body`, `issue/${pinned.bootstrap.parent.issue}/children`, `parent/${pinned.bootstrap.parent.issue}/prs`, 'managed-events', 'run-receipts', `issue/${pinned.bootstrap.parent.issue}/native-relationships`, `issue/${pinned.bootstrap.parent.issue}/checks`, `issue/${pinned.bootstrap.parent.issue}/reviews`);
+  const native = input.native !== undefined ? input.native : readDirect(`issue/${parentIssue}/native-relationships`, null);
+  const checks = input.checks !== undefined ? input.checks : readDirect(`issue/${parentIssue}/checks`, {});
+  const reviews = input.reviews !== undefined ? input.reviews : readDirect(`issue/${parentIssue}/reviews`, {});
+  paths.push(`issue/${parentIssue}/body`, `issue/${parentIssue}/children`, `parent/${parentIssue}/prs`, 'managed-events', 'run-receipts', `issue/${parentIssue}/native-relationships`, `issue/${parentIssue}/checks`, `issue/${parentIssue}/reviews`);
   const requiredReads = { parent, children, prs, managed_events: managedEvents, receipts, native, checks, reviews };
   if (readFailure) return fail('required-controller-inspection-read-failed', { detection, pinned: pinned.bootstrap, failed_path: readFailure, paths });
   const missing = Object.entries(requiredReads).filter(([, value]) => value === undefined || value === null).map(([key]) => key);
   if (missing.length) return fail('required-controller-inspection-missing', { detection, pinned: pinned.bootstrap, missing, paths });
-  return ok('CONTROLLER_CONTEXT_INSPECTED', { detection, pinned: pinned.bootstrap, parent, children, prs, managed_events: managedEvents, receipts, native, checks, reviews, paths, repository_scan: false });
+  return ok('CONTROLLER_CONTEXT_INSPECTED', { detection, pinned: pinnedBootstrap, parent, children, prs, managed_events: managedEvents, receipts, native, checks, reviews, paths, repository_scan: false });
 }
 
 function buildBootstrap(input = {}) {
   const bootstrap = {
     $schema: BOOTSTRAP_SCHEMA,
     schema: BOOTSTRAP_SCHEMA,
-    identity: { repository: input.repository, product: 'github-program-reconciler' },
-    version: input.version || '2.12.0',
-    revision: input.revision || BOOTSTRAP_REVISION,
-    digest: null,
-    profile: 'toolkit.github-program.v5',
-    parent: { repository: input.repository, issue: input.parent_issue, canonical: true },
-    conformance: { managed_repository_required: true, bootstrap_required_for_v5: true, detection_order: ['bootstrap', 'canonical_state', 'managed_events'], pinned_contract_required: true },
-    compatibility: { accepted_state_schemas: [STATE_SCHEMA], migration_input_schemas: ['toolkit.github-program.state.v4'], runtime_authority: 'repo-local-pinned-bootstrap', mutable_main_role: 'discovery-migration-guidance-only' },
-    contracts: clone(BOOTSTRAP_CONTRACTS),
+    profile: 'github-managed-programme',
+    repository: input.repository,
+    parent_issue: input.parent_issue,
+    programme_state_schema: STATE_SCHEMA,
+    surface_contract_schema: SURFACE_CONTRACT.$schema,
+    toolkit_package_version: input.version || input.toolkit_package_version || '2.12.0',
+    toolkit_contract: {
+      repository: input.toolkit_contract?.repository || input.toolkit_contract_repository || TOOLKIT_CONTRACT_REPOSITORY,
+      revision: input.toolkit_contract?.revision || input.revision || BOOTSTRAP_REVISION,
+      path: input.toolkit_contract?.path || TOOLKIT_CONTRACT_PATH,
+      sha256: input.toolkit_contract?.sha256 || digest(SURFACE_CONTRACT),
+    },
+    conformance: { required_class: 'CURRENT_MANAGED', migration_from: ['toolkit.github-program.state.v4'] },
+    compatibility: { fail_closed_on_unknown_major: true },
   };
-  delete bootstrap.digest;
-  const withDigest = { ...bootstrap, digest: digest(bootstrap) };
-  return withDigest;
+  return bootstrap;
 }
 function validateBootstrapForProgramme(bootstrap, repository, parentIssue) {
   return validateControllerBootstrap(bootstrap, { repository, parent_issue: parentIssue, version: '2.12.0' });
@@ -1047,18 +1272,6 @@ function buildMigrationPreviewV5(input = {}) {
   const authorityRef = input.authority_ref;
   if (!safeLine(authorityRef, 512)) return fail('migration-authority-required');
   const previousEvent = snapshot.managed_events.at(-1)?.event_id || null;
-  const event = createManagedEventV3({
-    event_type: 'migration', repository: target.repository, parent_issue: target.parent.issue, entity: { kind: 'parent', number: target.parent.issue },
-    source_state_schema: 'toolkit.github-program.state.v4', from_state_digest: source.canonical_digest, to_state_digest: targetValid.canonical_digest,
-    authority_ref: authorityRef, authority_digest: input.authority_digest || digest({ authority_ref: authorityRef, target_canonical_digest: targetValid.canonical_digest }),
-    candidate_binding_digest: candidateBindingDigest(target), prior_event_id: previousEvent, state: target,
-  });
-  const eventCheck = validateManagedEventV3(event, { repository: target.repository, parent_issue: target.parent.issue });
-  if (!eventCheck.ok) return eventCheck;
-  const retainedEvents = snapshot.managed_events.map(clone);
-  const targetEvents = [...retainedEvents, event];
-  const targetEventInventory = validateManagedEventInventoryV5(targetEvents, target.repository);
-  if (!targetEventInventory.ok) return targetEventInventory;
   const native = expectedNativeRelationshipsV5(target, snapshot.native);
   if (!native.ok) return native;
   const expectedLabels = expectedLabelsV5(target, snapshot.labels);
@@ -1066,24 +1279,47 @@ function buildMigrationPreviewV5(input = {}) {
   const bootstrapAfter = input.bootstrap_after || buildBootstrap({ repository: target.repository, parent_issue: target.parent.issue, version: input.toolkit_version || '2.12.0' });
   const bootstrapCheck = validateBootstrapForProgramme(bootstrapAfter, target.repository, target.parent.issue);
   if (!bootstrapCheck.ok) return bootstrapCheck;
+  const bootstrapCandidateDigest = digest(bootstrapAfter);
+  const bootstrapConformance = { valid: true, repository: target.repository, parent_issue: target.parent.issue, apply_operation: false, ownership: 'repository-code-via-PR' };
+  const sourceBodyDigests = { parent: digest(snapshot.bodies.parent), children: Object.fromEntries(Object.entries(snapshot.bodies.children).sort(([a], [b]) => Number(a) - Number(b)).map(([key, value]) => [key, digest(value)])), prs: Object.fromEntries(Object.entries(snapshot.bodies.prs).sort(([a], [b]) => Number(a) - Number(b)).map(([key, value]) => [key, digest(value)])) };
+  const targetBodyDigests = { parent: digest(bodies.parent), children: Object.fromEntries(Object.entries(bodies.children).map(([key, value]) => [key, digest(value)])), prs: Object.fromEntries(Object.entries(bodies.prs).map(([key, value]) => [key, digest(value)])) };
   const firstLane = target.active_lanes[0];
+  const receiptChildIssue = firstLane?.child_issue || target.children[0].issue;
+  const receiptChild = target.children.find((child) => child.issue === receiptChildIssue) || target.children[0];
+  const receiptEpoch = receiptChild.epochs.find((epoch) => epoch.id === (firstLane?.epoch_id || receiptChild.epochs[0].id)) || receiptChild.epochs[0];
+  const receiptCandidate = firstLane?.candidate ? clone(firstLane.candidate) : null;
+  const receiptAuthorityDigest = input.authority_digest || digest({ authority_ref: authorityRef, target_canonical_digest: targetValid.canonical_digest });
   const receipt = createRunReceipt({
     receipt_type: 'TRANSITION_PREVIEW', run_id: `preview-${digest({ source: snapshot.revision, target: targetValid.canonical_digest }).slice(0, 20)}`,
-    repository: target.repository, parent_issue: target.parent.issue, lane_id: firstLane?.lane_id || `parent-${target.parent.issue}`,
-    child_issue: firstLane?.child_issue || target.children[0].issue, epoch_id: firstLane?.epoch_id || target.children[0].epochs[0].id,
-    gate: firstLane?.gate || target.children[0].epochs[0].gates[0], lock: (target.children.find((child) => child.issue === (firstLane?.child_issue || target.children[0].issue))?.epochs.find((epoch) => epoch.id === (firstLane?.epoch_id || target.children[0].epochs[0].id)) || target.children[0].epochs[0]).lock,
-    candidate_binding_digest: candidateBindingDigest(target), authority_digest: bootstrapAfter.digest, lease: { lease_id: `preview-${target.parent.issue}`, fence_id: `preview-fence-${target.parent.issue}`, fence_sequence: 0, expires_at: input.receipt_expires_at || '2099-01-01T00:00:00.000Z' },
-    result: { preview_id_pending: true, source_state_schema: 'toolkit.github-program.state.v4', target_state_schema: STATE_SCHEMA, mutation_authority: 'NOT_GRANTED' }, readback: { required: true, immediate_rerun: 'ZERO_DELTA' }, created_at: input.created_at || '2026-01-01T00:00:00.000Z',
+    attempt: input.attempt || 1, role: 'LOOP_MANAGER', repository: target.repository, parent_issue: target.parent.issue, pr_number: receiptCandidate?.pr || target.prs.find((pr) => pr.child_issue === receiptChildIssue)?.number || null,
+    lane_id: firstLane?.lane_id || `parent-${target.parent.issue}`, child_issue: receiptChildIssue, epoch_id: firstLane?.epoch_id || receiptEpoch.id,
+    gate: firstLane?.gate || receiptEpoch.gates[0], lock: receiptEpoch.lock, authority_ref: authorityRef, authority_digest: receiptAuthorityDigest,
+    body_digest: digest(targetBodyDigests), candidate: receiptCandidate, candidate_binding_digest: candidateBindingDigest(target),
+    lease: { lease_id: `preview-${target.parent.issue}`, fence_id: `preview-fence-${target.parent.issue}`, fence_sequence: 0, monotonic_fence: 0, issued_at: input.receipt_issued_at || input.created_at || '2026-01-01T00:00:00.000Z', expires_at: input.receipt_expires_at || '2099-01-01T00:00:00.000Z' },
+    result: { classification: 'TRANSITION_PREVIEW', preview_id_pending: true, source_state_schema: 'toolkit.github-program.state.v4', target_state_schema: STATE_SCHEMA, mutation_authority: 'NOT_GRANTED', finality_authority: 'NOT_GRANTED' },
+    evidence_refs: clone(input.evidence_refs || []), readback: { required: true, immediate_rerun: 'ZERO_DELTA', persisted_before_apply: true }, prior_receipt_id: input.prior_receipt_id || null, created_at: input.created_at || '2026-01-01T00:00:00.000Z',
   });
   const receiptCheck = validateReceiptObject(receipt, { repository: target.repository, parent_issue: target.parent.issue });
   if (!receiptCheck.ok) return receiptCheck;
+  const event = createManagedEventV3({
+    event_type: 'migration', repository: target.repository, parent_issue: target.parent.issue, entity: { kind: 'parent', number: target.parent.issue },
+    source_state_schema: 'toolkit.github-program.state.v4', from_state_digest: source.canonical_digest, to_state_digest: targetValid.canonical_digest,
+    authority_ref: authorityRef, authority_digest: receiptAuthorityDigest, candidate_binding_digest: candidateBindingDigest(target), prior_event_id: previousEvent,
+    receipt_id: receipt.receipt_id, consumed_receipt_ids: [receipt.receipt_id], receipt_inventory_digest: receiptInventoryDigest([receipt.receipt_id]), state: target,
+  });
+  const eventCheck = validateManagedEventV3(event, { repository: target.repository, parent_issue: target.parent.issue });
+  if (!eventCheck.ok) return eventCheck;
+  const retainedEvents = snapshot.managed_events.map(clone);
+  const targetEvents = [...retainedEvents, event];
+  const targetEventInventory = validateManagedEventInventoryV5(targetEvents, target.repository);
+  if (!targetEventInventory.ok) return targetEventInventory;
+  // The bootstrap is repository code owned by the PR. Programme Apply keeps
+  // the observed bootstrap bytes unchanged and reports the candidate only as
+  // a separately validated conformance surface.
   const expectedSnapshot = { repository: target.repository, revision: snapshot.revision, complete: true, canonical_state: clone(target), bodies, labels: expectedLabels, managed_events: targetEventInventory.events, native: native.native, bootstrap: bootstrapAfter };
-  const sourceBodyDigests = { parent: digest(snapshot.bodies.parent), children: Object.fromEntries(Object.entries(snapshot.bodies.children).sort(([a], [b]) => Number(a) - Number(b)).map(([key, value]) => [key, digest(value)])), prs: Object.fromEntries(Object.entries(snapshot.bodies.prs).sort(([a], [b]) => Number(a) - Number(b)).map(([key, value]) => [key, digest(value)])) };
-  const targetBodyDigests = { parent: digest(bodies.parent), children: Object.fromEntries(Object.entries(bodies.children).map(([key, value]) => [key, digest(value)])), prs: Object.fromEntries(Object.entries(bodies.prs).map(([key, value]) => [key, digest(value)])) };
   const nativeDelta = !same(snapshot.native, native.native);
   const labelsDelta = !same(snapshot.labels, expectedLabels);
   const operations = [];
-  addOperation(operations, 'bootstrap-file', '.github/ai-agent-toolkit-programme.json', bootstrapBefore, bootstrapAfter);
   addOperation(operations, 'migrate-parent-body', target.parent.issue, snapshot.bodies.parent, bodies.parent);
   for (const child of target.children) addOperation(operations, 'migrate-child-body', child.issue, snapshot.bodies.children[String(child.issue)], bodies.children[String(child.issue)]);
   for (const pr of target.prs) addOperation(operations, 'migrate-pr-body', pr.number, snapshot.bodies.prs[String(pr.number)], bodies.prs[String(pr.number)]);
@@ -1091,15 +1327,18 @@ function buildMigrationPreviewV5(input = {}) {
   addOperation(operations, 'run-receipt', target.parent.issue, null, receipt, { durable_persistence: 'required-before-dependent-progression', mutation_authority: 'NOT_GRANTED' });
   addOperation(operations, 'labels', target.parent.issue, snapshot.labels, expectedLabels);
   addOperation(operations, 'native-relationships', target.parent.issue, snapshot.native, native.native, { changed: nativeDelta });
-  const managedEventDelta = { retained_count: snapshot.managed_events.length, new_events: [event], retained_history_digest: digest(snapshot.managed_events), target_inventory_digest: targetEventInventory.inventory_digest };
-  const requiredReceiptDelta = { receipt_type: receipt.receipt_type, receipt_id: receipt.receipt_id, receipt: clone(receipt), durable_required: true, persisted_in_preview: false, reason: 'Operational receipt is separate from canonical transition history.' };
+  const operationCheck = validateProgrammeOperations(operations);
+  if (!operationCheck.ok) return operationCheck;
+  const managedEventDelta = { retained_count: snapshot.managed_events.length, new_events: [event], retained_history_digest: digest(snapshot.managed_events), target_inventory_digest: targetEventInventory.inventory_digest, consumed_receipt_ids: [receipt.receipt_id], receipt_inventory_digest: receiptInventoryDigest([receipt.receipt_id]) };
+  const requiredReceiptDelta = { receipt_type: receipt.receipt_type, receipt_id: receipt.receipt_id, receipt: clone(receipt), durable_required: true, persisted_in_preview: false, persist_before_apply: true, readback_required: true, receipt_inventory_digest: receiptInventoryDigest([receipt.receipt_id]), reason: 'Operational receipt is separate from canonical transition history.' };
   const preview = {
     schema: MIGRATION_SCHEMA, preview_kind: 'MIGRATION', repository: target.repository, parent_issue: target.parent.issue, authority_ref: authorityRef,
     source_state_schema: 'toolkit.github-program.state.v4', target_state_schema: STATE_SCHEMA, expected_revision: snapshot.revision, source_snapshot_digest: snapshotDigest(snapshot), source_canonical_digest: source.canonical_digest,
     source_body_digests: sourceBodyDigests, target_canonical_digest: targetValid.canonical_digest, target_managed_body_digests: rendered.body_digests, target_body_digests: targetBodyDigests,
-    bootstrap: { before: bootstrapBefore, after: bootstrapAfter, digest: bootstrapAfter.digest }, labels: { before: clone(snapshot.labels), after: expectedLabels, changed: labelsDelta },
+    authority_digest: receiptAuthorityDigest, candidate_binding_digest: candidateBindingDigest(target),
+    bootstrap: { before: bootstrapBefore, candidate: bootstrapAfter, after: bootstrapAfter, candidate_digest: bootstrapCandidateDigest, conformance: clone(bootstrapConformance) }, bootstrap_conformance: clone(bootstrapConformance), labels: { before: clone(snapshot.labels), after: expectedLabels, changed: labelsDelta },
     native_relationships: { before: clone(snapshot.native), after: native.native, changed: nativeDelta, pr_associations: native.native.pr_associations },
-    managed_event_delta: managedEventDelta, required_receipt_delta: requiredReceiptDelta, operations, operations_digest: digest(operations), ordered_operation_ids: operations.map((operation) => operation.operation_id),
+    managed_event_delta: managedEventDelta, required_receipt_delta: requiredReceiptDelta, receipt_consumption_plan: { transition: 'PREVIEW_TO_AUTHORISED_APPLY', required_receipt_ids: [receipt.receipt_id], receipt_inventory_digest: receiptInventoryDigest([receipt.receipt_id]), persist_before_dependent_progression: true, read_back_before_apply: true, persisted_in_preview: false, on_missing_conflicting_or_stale: 'FAIL_CLOSED' }, operations, operations_digest: digest(operations), ordered_operation_ids: operations.map((operation) => operation.operation_id),
     expected_snapshot_digest: snapshotDigest(expectedSnapshot), expected_snapshot: expectedSnapshot, mutation_authority: 'NOT_GRANTED', finality_authority: 'NOT_GRANTED', preview_only: true,
   };
   preview.preview_id = digest(preview);
@@ -1208,6 +1447,36 @@ function createProgrammeRuntimeV5(options = {}) {
     const preview = input.preview || store.readPreview(input.preview_id);
     if (!isRecord(preview) || !preview.preview_id || !['toolkit.github-program.preview.v5', MIGRATION_SCHEMA].includes(preview.schema)
       || !Array.isArray(preview.operations) || !same(preview, store.readPreview(preview.preview_id))) return fail('durable-preview-required');
+    const operationCheck = validateProgrammeOperations(preview.operations);
+    if (!operationCheck.ok) return operationCheck;
+    const requiredReceipt = preview.required_receipt_delta?.receipt;
+    const consumedEvent = preview.managed_event_delta?.new_events?.find((event) => event?.schema === MANAGED_EVENT_SCHEMA) || null;
+    if (requiredReceipt) {
+      if (typeof store.readReceiptChain !== 'function') return fail('durable-receipt-store-required');
+      let receiptChain;
+      try { receiptChain = store.readReceiptChain(requiredReceipt.run_id); } catch (_error) { return fail('run-receipt-readback-failed'); }
+      if (!Array.isArray(receiptChain)) return fail('run-receipt-readback-invalid');
+      const persistedReceipt = receiptChain.find((receipt) => receipt.receipt_id === requiredReceipt.receipt_id);
+      if (!persistedReceipt) return fail('receipt-not-persisted', { receipt_id: requiredReceipt.receipt_id });
+      if (!same(persistedReceipt, requiredReceipt)) return fail('run-receipt-conflict', { receipt_id: requiredReceipt.receipt_id });
+      const receiptCheck = validateReceiptObject(persistedReceipt, {
+        repository: preview.repository, parent_issue: preview.parent_issue, child_issue: requiredReceipt.child_issue,
+        pr_number: requiredReceipt.pr_number, lane_id: requiredReceipt.lane_id, epoch_id: requiredReceipt.epoch_id,
+        gate: requiredReceipt.gate, lock: requiredReceipt.lock, authority_ref: requiredReceipt.authority_ref,
+        authority_digest: requiredReceipt.authority_digest, body_digest: requiredReceipt.body_digest,
+        candidate: requiredReceipt.candidate, candidate_digest: requiredReceipt.candidate_digest,
+        lease_id: requiredReceipt.lease.lease_id, fence_id: requiredReceipt.lease.fence_id, monotonic_fence: requiredReceipt.lease.monotonic_fence,
+      });
+      if (!receiptCheck.ok) return receiptCheck;
+      const chainCheck = validateRunReceiptChain(receiptChain, { repository: preview.repository, parent_issue: preview.parent_issue });
+      if (!chainCheck.ok) return chainCheck;
+      if (consumedEvent) {
+        const consumption = validateReceiptConsumption(consumedEvent, receiptChain, { repository: preview.repository, parent_issue: preview.parent_issue, require_readback: true });
+        if (!consumption.ok) return consumption;
+      }
+    } else if (consumedEvent?.consumed_receipt_ids?.length) {
+      return fail('receipt-consumption-without-durable-receipt');
+    }
     if (preview.operations.length === 0) {
       if (typeof options.inspect_snapshot !== 'function') return fail('snapshot-adapter-required');
       let snapshot; try { snapshot = options.inspect_snapshot(); } catch (_error) { return fail('snapshot-inspection-failed'); }
@@ -1247,13 +1516,13 @@ function createProgrammeRuntimeV5(options = {}) {
 }
 
 module.exports = Object.freeze({
-  STATE_SCHEMA, PROJECTION_SCHEMA, EXTENSIONS_SCHEMA, MANAGED_EVENT_SCHEMA, RUN_RECEIPT_SCHEMA, BOOTSTRAP_SCHEMA, MIGRATION_SCHEMA, DESIGN_LOCK, BOOTSTRAP_REVISION, BOOTSTRAP_CONTRACTS,
+  STATE_SCHEMA, PROJECTION_SCHEMA, EXTENSIONS_SCHEMA, MANAGED_EVENT_SCHEMA, RUN_RECEIPT_SCHEMA, BOOTSTRAP_SCHEMA, MIGRATION_SCHEMA, DESIGN_LOCK, BOOTSTRAP_REVISION, BOOTSTRAP_CONTRACTS, TOOLKIT_CONTRACT_REPOSITORY, TOOLKIT_CONTRACT_PATH,
   BODY_BUDGET_BYTES, CANONICAL_STATE_BUDGET_BYTES, TOTAL_PROJECTION_BUDGET_BYTES, RECEIPT_BUDGET_BYTES, LIFECYCLES, REGISTRY_STATUSES, LIVE_PR_LIFECYCLES,
-  AUTHORITY_MODES, GATE_STATES, GATE_RESULTS, RECOVERY_STATUSES, RECEIPT_TYPES, MARKERS, STATE_LINE_PREFIX, PROJECTION_LINE_PREFIX,
+  AUTHORITY_MODES, GATE_STATES, GATE_RESULTS, PROGRAMME_STATES, TERMINAL_RECEIPT_TYPES, RECOVERY_STATUSES, RECEIPT_TYPES, MARKERS, STATE_LINE_PREFIX, PROJECTION_LINE_PREFIX,
   canonicalJson, digest, bytes, clone, authorityDigest, validateConcurrencyAuthority, validateWorkClaims, validateCanonicalStateV5, deriveProjectionV5, renderProgrammeV5,
   parseProgrammeV5Body, verifyRenderedProgrammeIntegrityV5, candidateBinding, candidateBindingDigest, derivePrAssociationsV5, expectedLabelsV5,
-  createManagedEventV3, validateManagedEventV3, validateManagedEventInventoryV5, createRunReceipt, validateRunReceipt, validateReceiptObject,
-  validateRunReceiptChain, appendRunReceipt, canAdvanceFromTerminal, consumeTerminalEvidence, classifyRecovery, recoverRun, validateWriterAction,
+  createManagedEventV3, validateManagedEventV3, validateManagedEventInventoryV5, validateReceiptConsumption, createRunReceipt, validateRunReceipt, validateReceiptObject, evidenceDigest, receiptInventoryDigest,
+  validateRunReceiptChain, appendRunReceipt, canAdvanceFromTerminal, consumeTerminalEvidence, classifyRecovery, recoverRun, validateWriterAction, validateProgrammeOperations,
   buildBootstrap, validateControllerBootstrap, resolvePinnedContract, detectManagedRepository, inspectControllerContext, migrateV4ToV5,
   buildMigrationPreviewV5, buildV5MigrationPreview: buildMigrationPreviewV5, buildConvergencePreviewV5, buildV5ConvergencePreview: buildConvergencePreviewV5,
   buildPreviewV5, verifyConvergenceReadbackV5, createMemoryDurableStore, createProgrammeRuntimeV5, createV5Runtime: createProgrammeRuntimeV5,

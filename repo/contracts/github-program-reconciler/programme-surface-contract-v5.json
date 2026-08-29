@@ -8,6 +8,7 @@
     "storage": "Parent-managed-hidden-envelope",
     "concurrency_authority": ["mode", "max_active_lanes", "authority_ref", "authority_digest", "permitted_child_issues"],
     "active_lanes": ["lane_id", "child_issue", "epoch_id", "gate", "gate_state", "gate_result", "candidate", "work_claims"],
+    "gate_states": ["ACTIVE", "RESULT_RECORDED", "WEB_DECISION_REQUIRED", "AWAITING_FINALITY"],
     "candidate_fields": ["pr", "branch", "base_ref", "base_sha", "head", "tree", "version", "epoch_id"],
     "derived_only": ["repository/Parent/Child/Lock/role/completes Child/registry/live lifecycle candidate facts", "Parent status/outcome/progress/holds", "Child effective lifecycle/outcome/current gate/progress/remaining/next action", "PR outcome/epoch/Lock/role/completes Child/finality", "managed labels", "managed event inventory", "PR association kind"]
   },
@@ -19,6 +20,16 @@
     "pr_heading_order": ["Summary", "Binding", "Exact candidate", "Purpose", "Scope", "Out of scope", "Progress", "Achieved", "Remaining", "Changed surfaces", "Validation / evidence", "Design constraints", "Finality", "ELI5", "Additional context"],
     "empty_section_rendering": "None",
     "parent_next_action": "omitted"
+  },
+  "parent_projection": {
+    "aggregate_state_precedence": ["HELD", "WEB_DECISION_REQUIRED", "ACTIVE", "COMPLETE", "IDLE"],
+    "programme_status": ["aggregate_state", "concurrency_mode", "active_lane_count", "max_active_lanes", "current_child_ids", "programme_finality_state"],
+    "active_work_columns": ["Child", "State", "Epoch / Gate", "Candidate / PR", "Material hold"],
+    "children_columns": ["Child", "Lifecycle", "Dependencies", "Outcome"],
+    "progress_metrics": ["Completed children / total", "Retired children", "Accepted or retired epochs / total", "Active lanes", "Web-decision-required lanes"],
+    "major_holds": "active blocking holds only",
+    "additional_context": "always rendered as None when empty",
+    "next_action": "not visible"
   },
   "extensions": {
     "schema": "toolkit.github-program.extensions.v1",
@@ -32,18 +43,29 @@
     "schema": "toolkit.github-program.managed-event.v3",
     "schema_path": "repo/contracts/github-program-reconciler/managed-event-v3.schema.json",
     "history_is_append_only": true,
-    "canonical_transitions_separate_from_receipts": true
+    "canonical_transitions_separate_from_receipts": true,
+    "consumed_receipt_inventory": ["consumed_receipt_ids", "receipt_inventory_digest"],
+    "receipt_consumption_requires_durable_readback": true
   },
   "run_receipts": {
     "schema": "toolkit.github-program.run-receipt.v1",
     "schema_path": "repo/contracts/github-program-reconciler/run-receipt-v1.schema.json",
     "terminal_persisted_before_progression": true,
-    "durable_replay_identity_required": true
+    "durable_replay_identity_required": true,
+    "required_bindings": ["repository", "parent", "child", "pr", "run_id", "attempt", "role", "epoch", "gate", "lock", "authority_ref", "authority_digest", "body_digest", "candidate", "candidate_digest", "candidate_binding_digest", "lease_id", "monotonic_fence", "lease_issued_at", "lease_expiry_at", "result_classification", "evidence_refs", "evidence_digests", "prior_receipt_id", "producer_timestamp", "receipt_id"],
+    "receipt_id_algorithm": "sha256(canonical_json(receipt_without_receipt_id))",
+    "bounded_bytes": 16384,
+    "raw_logs_transcripts_code_and_secrets_forbidden": true,
+    "terminal_persisted_before_progression": true
   },
   "bootstrap": {
     "schema": "toolkit.github-program.controller-bootstrap.v1",
     "path": ".github/ai-agent-toolkit-programme.json",
     "missing_or_invalid_v5_fails_closed": true,
+    "semantic_fields": ["schema", "profile", "repository", "parent_issue", "programme_state_schema", "surface_contract_schema", "toolkit_package_version", "toolkit_contract", "conformance", "compatibility"],
+    "target_repository_field": "repository",
+    "pinned_toolkit_contract_fields": ["repository", "revision", "path", "sha256"],
+    "no_bootstrap_file_apply_operation": true,
     "mutable_main_role": "discovery-migration-guidance-only"
   },
   "migration": {
@@ -52,7 +74,14 @@
     "source": "toolkit.github-program.state.v4",
     "historical_comments_byte_preserving": true,
     "arbitrary_prose_is_not_receipt": true,
-    "preview_only_without_separate_mutation_authority": true
+    "preview_only_without_separate_mutation_authority": true,
+    "bootstrap_conformance_report_is_not_operation": true,
+    "receipt_inventory_must_be_persisted_and_read_back_before_dependent_apply": true
+  },
+  "operation_inventory": {
+    "programme_state_classes_only": true,
+    "forbidden_kinds": ["bootstrap-file", "repository-file", "repo-file"],
+    "repository_code_owner": "normal verified PR merge"
   },
   "writer_ownership": {
     "executor": "code/candidate plus structured evidence only",

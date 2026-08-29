@@ -15,11 +15,16 @@
     "source_body_digests",
     "target_canonical_digest",
     "target_body_digests",
+    "bootstrap_conformance",
     "managed_event_delta",
     "required_receipt_delta",
+    "receipt_consumption_plan",
     "operations",
     "operations_digest",
     "expected_snapshot_digest",
+    "mutation_authority",
+    "finality_authority",
+    "preview_only",
     "preview_id"
   ],
   "properties": {
@@ -37,12 +42,14 @@
     "target_canonical_digest": { "$ref": "#/$defs/digest" },
     "target_managed_body_digests": { "$ref": "#/$defs/bodyDigests" },
     "target_body_digests": { "$ref": "#/$defs/bodyDigests" },
-    "bootstrap": { "type": "object" },
+    "bootstrap": { "$ref": "#/$defs/bootstrapReport" },
+    "bootstrap_conformance": { "$ref": "#/$defs/bootstrapConformance" },
     "labels": { "type": "object" },
     "native_relationships": { "type": "object" },
     "managed_event_delta": { "type": "object" },
     "required_receipt_delta": { "type": "object" },
-    "operations": { "type": "array", "maxItems": 200, "items": { "type": "object" } },
+    "receipt_consumption_plan": { "$ref": "#/$defs/receiptConsumptionPlan" },
+    "operations": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/operation" } },
     "operations_digest": { "$ref": "#/$defs/digest" },
     "ordered_operation_ids": { "type": "array", "items": { "$ref": "#/$defs/digest" }, "uniqueItems": true },
     "expected_snapshot_digest": { "$ref": "#/$defs/digest" },
@@ -65,6 +72,60 @@
         "children": { "type": "object", "additionalProperties": { "$ref": "#/$defs/digest" } },
         "prs": { "type": "object", "additionalProperties": { "$ref": "#/$defs/digest" } }
       }
+    },
+    "bootstrapConformance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["valid", "repository", "parent_issue", "apply_operation", "ownership"],
+      "properties": {
+        "valid": { "const": true },
+        "repository": { "$ref": "#/$defs/safeLine" },
+        "parent_issue": { "$ref": "#/$defs/issue" },
+        "apply_operation": { "const": false },
+        "ownership": { "const": "repository-code-via-PR" }
+      }
+    },
+    "bootstrapReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["before", "candidate", "after", "candidate_digest", "conformance"],
+      "properties": {
+        "before": {},
+        "candidate": { "type": "object" },
+        "after": {},
+        "candidate_digest": { "$ref": "#/$defs/digest" },
+        "conformance": { "$ref": "#/$defs/bootstrapConformance" }
+      }
+    },
+    "receiptConsumptionPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transition", "required_receipt_ids", "receipt_inventory_digest", "persist_before_dependent_progression", "read_back_before_apply", "persisted_in_preview", "on_missing_conflicting_or_stale"],
+      "properties": {
+        "transition": { "const": "PREVIEW_TO_AUTHORISED_APPLY" },
+        "required_receipt_ids": { "type": "array", "maxItems": 500, "uniqueItems": true, "items": { "$ref": "#/$defs/digest" } },
+        "receipt_inventory_digest": { "$ref": "#/$defs/digest" },
+        "persist_before_dependent_progression": { "const": true },
+        "read_back_before_apply": { "const": true },
+        "persisted_in_preview": { "const": false },
+        "on_missing_conflicting_or_stale": { "const": "FAIL_CLOSED" }
+      }
+    },
+    "operation": {
+      "type": "object",
+      "required": ["kind", "target", "before_digest", "after", "after_digest", "operation_id"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "not": { "pattern": "(^|[-_])([Bb]ootstrap|[Rr]epository|[Rr]epo)[-_]?[Ff]ile($|[-_])" }
+        },
+        "target": {},
+        "before_digest": { "$ref": "#/$defs/digest" },
+        "after": {},
+        "after_digest": { "$ref": "#/$defs/digest" },
+        "operation_id": { "$ref": "#/$defs/digest" }
+      },
+      "additionalProperties": true
     }
   }
 }

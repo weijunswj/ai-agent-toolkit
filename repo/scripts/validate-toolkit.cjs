@@ -699,6 +699,20 @@ function validateContracts(errors) {
       const bootstrap = readJson('.github/ai-agent-toolkit-programme.json');
       const result = githubProgrammeV5.validateControllerBootstrap(bootstrap, { repository: 'weijunswj/ai-agent-toolkit', parent_issue: 240, version: '2.12.0' });
       if (!result.ok) fail(errors, `Invalid E3 v5 controller bootstrap: ${result.reason}`);
+      else {
+        const pin = bootstrap.toolkit_contract;
+        const commit = spawnSync('git', ['cat-file', '-e', pin.revision + '^{commit}'], { cwd: root, encoding: 'utf8' });
+        if (commit.status !== 0) fail(errors, `Pinned Toolkit contract revision cannot be resolved: ${pin.revision}`);
+        const contract = spawnSync('git', ['show', pin.revision + ':' + pin.path], { cwd: root, encoding: 'utf8' });
+        if (contract.status !== 0) fail(errors, `Pinned Toolkit contract path cannot be resolved: ${pin.path}`);
+        else {
+          try {
+            const resolvedContract = JSON.parse(contract.stdout);
+            const resolved = githubProgrammeV5.validateControllerBootstrap(bootstrap, { repository: 'weijunswj/ai-agent-toolkit', parent_issue: 240, version: '2.12.0', contract_bytes: resolvedContract });
+            if (!resolved.ok) fail(errors, `Pinned Toolkit contract digest does not match: ${resolved.reason}`);
+          } catch (error) { fail(errors, `Pinned Toolkit contract is not valid JSON: ${error.message}`); }
+        }
+      }
     } catch (error) { fail(errors, `.github/ai-agent-toolkit-programme.json is invalid: ${error.message}`); }
   }
   if (existsRel('repo/contracts/github-program-reconciler/web-controller-entry.md')) {

@@ -2,26 +2,38 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "toolkit.github-program.run-receipt.v1",
   "title": "Durable GitHub programme run receipt v1",
+  "description": "Bounded operational evidence. Canonical programme transitions remain managed-event history.",
   "type": "object",
   "additionalProperties": false,
+  "x-max-utf8-bytes": 16384,
   "required": [
     "schema",
     "receipt_type",
     "receipt_id",
     "run_id",
+    "attempt",
+    "role",
     "repository",
     "parent_issue",
-    "lane_id",
     "child_issue",
+    "pr_number",
+    "lane_id",
     "epoch_id",
     "gate",
     "lock",
-    "candidate_binding_digest",
+    "authority_ref",
     "authority_digest",
+    "body_digest",
+    "candidate",
+    "candidate_digest",
+    "candidate_binding_digest",
     "lease",
     "prior_receipt_id",
     "result",
+    "evidence_refs",
+    "evidence_digest",
     "readback",
+    "producer_timestamp",
     "created_at"
   ],
   "properties": {
@@ -39,43 +51,101 @@
     },
     "receipt_id": { "$ref": "#/$defs/digest" },
     "run_id": { "$ref": "#/$defs/safeId" },
+    "attempt": { "type": "integer", "minimum": 1, "maximum": 100000 },
+    "role": { "enum": ["EXECUTOR", "G4", "LOOP_MANAGER", "WEB", "SYSTEM"] },
     "repository": { "$ref": "#/$defs/safeLine" },
     "parent_issue": { "$ref": "#/$defs/issue" },
-    "lane_id": { "$ref": "#/$defs/safeId" },
     "child_issue": { "$ref": "#/$defs/issue" },
+    "pr_number": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/issue" }]
+    },
+    "lane_id": { "$ref": "#/$defs/safeId" },
     "epoch_id": { "$ref": "#/$defs/safeId" },
     "gate": { "$ref": "#/$defs/safeId" },
     "lock": { "$ref": "#/$defs/safeId" },
-    "candidate_binding_digest": {
-      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }]
+    "authority_ref": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/safeLine" }]
     },
     "authority_digest": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }]
+    },
+    "body_digest": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }]
+    },
+    "candidate": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/candidate" }]
+    },
+    "candidate_digest": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }]
+    },
+    "candidate_binding_digest": {
       "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }]
     },
     "lease": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["lease_id", "fence_id", "fence_sequence", "expires_at"],
+      "required": ["lease_id", "fence_id", "fence_sequence", "monotonic_fence", "issued_at", "expires_at"],
       "properties": {
         "lease_id": { "$ref": "#/$defs/safeId" },
         "fence_id": { "$ref": "#/$defs/safeId" },
         "fence_sequence": { "type": "integer", "minimum": 0 },
-        "expires_at": { "$ref": "#/$defs/safeLine" }
+        "monotonic_fence": { "type": "integer", "minimum": 0 },
+        "issued_at": { "$ref": "#/$defs/timestamp" },
+        "expires_at": { "$ref": "#/$defs/timestamp" }
       }
     },
     "prior_receipt_id": {
       "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }]
     },
-    "result": { "type": "object", "maxProperties": 40 },
-    "readback": {
-      "oneOf": [{ "type": "null" }, { "type": "object", "maxProperties": 40 }]
+    "result": {
+      "type": "object",
+      "maxProperties": 40,
+      "additionalProperties": true
     },
-    "created_at": { "$ref": "#/$defs/safeLine" }
+    "evidence_refs": {
+      "type": "array",
+      "maxItems": 50,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "digest"],
+        "properties": {
+          "id": { "$ref": "#/$defs/safeId" },
+          "digest": { "$ref": "#/$defs/digest" }
+        }
+      }
+    },
+    "evidence_digest": { "$ref": "#/$defs/digest" },
+    "readback": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "object", "maxProperties": 40, "additionalProperties": true }
+      ]
+    },
+    "producer_timestamp": { "$ref": "#/$defs/timestamp" },
+    "created_at": { "$ref": "#/$defs/timestamp" }
   },
   "$defs": {
     "issue": { "type": "integer", "minimum": 1 },
     "safeId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
-    "safeLine": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\r\\n]+$" },
-    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+    "safeLine": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\r\n]+$" },
+    "timestamp": { "type": "string", "format": "date-time", "maxLength": 64 },
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pr", "branch", "base_ref", "base_sha", "head", "tree", "version", "epoch_id"],
+      "properties": {
+        "pr": { "$ref": "#/$defs/issue" },
+        "branch": { "$ref": "#/$defs/safeLine" },
+        "base_ref": { "$ref": "#/$defs/safeLine" },
+        "base_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "head": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "tree": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "version": { "$ref": "#/$defs/safeLine" },
+        "epoch_id": { "$ref": "#/$defs/safeId" }
+      }
+    }
   }
 }
