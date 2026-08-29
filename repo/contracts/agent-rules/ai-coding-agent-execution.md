@@ -24,19 +24,27 @@ If instructions conflict, follow the higher-priority source and report material 
 
 ## Agent Topology And Delegation
 
-Ordinary work begins root-first. Root owns setup, orientation, narrow changes, checks, versioning, reviews, summaries, and root-capable verification; `setup toolkit` uses no subagents.
+The root or parent executor owns integration, validation, conflict resolution, and final judgment.
 
-A host profile/capacity is a ceiling, never launch permission. Unverifiable topology, admission, effort, or non-fast enforcement means root-only. Never project controls across hosts or call policy hard enforcement. Generic helper/speed requests, child availability, UAT, or future tests cannot qualify launch.
+Optional depth-1 subagents may be used only when work is genuinely separable and their use materially accelerates the critical path. Give each subagent true isolated context and a minimal self-contained task packet.
 
-Workers require separable concurrent work and concrete critical-path/wall-clock speedup. Declare ownership, speedup, root's critical task, shorter/easier child tasks, productive root work, integration/validation, and medium non-fast admission. Missing/contradictory declarations refuse; Toolkit validates allocation, not duration.
+Subagents must not spawn or delegate to other subagents. Mutating sibling subagents require disjoint mutation ownership and scope. Read-only siblings may investigate genuinely separable questions in parallel.
 
-Never delegate all work, give a child the longer task while root keeps the easy task, or launch because a child is available. Root continues critical work, not waiting/polling, and owns integration, conflicts, validation, and final judgment.
+The root or parent remains responsible for integrating and validating every returned result. Model, reasoning, service tier, and route are launch/controller metadata; do not embed them in portable task prompts as product policy unless a runtime explicitly requires them.
 
-The sole verification exception is one fresh direct read-only pre-PR checker after meaningful root changes, focused validation, and a ready diff. Bounded context/identity/admission applies; worker-speedup fields do not. It cannot mutate, publish, spawn, or use Fast; root owns fixes. Denial is `ADMISSION_DENIED`; root self-review is not independent.
+## Deployment Branch Naming
 
-Every child uses atomic Toolkit admission: RAM after reservations is the hard gate; CPU is secondary. Reserve/release around launch and reclaim stale state identity-safely. Children default medium, never use Fast or nest; higher effort needs narrow escalation. Built-in, Security, plugin, multi-worker, third-party, and nested paths get no exception.
+A branch whose primary purpose is deployment or release-state preparation for a named environment uses `deployment/<environment>`.
 
-Use `fork_turns="none"` with required context. Full inheritance needs justification; do not claim unsupported controls.
+Examples:
+
+- `deployment/alpha`
+- `deployment/staging`
+- `deployment/production`
+
+Use a stable lowercase environment slug. Ordinary feature, fix, or refactor branches that are not deployment branches retain their ordinary branch semantics.
+
+Do not invent `deploy/`, `release-deploy/`, bare `prod/`, bare `staging/`, or equivalent ad hoc deployment branch alternatives. Branch naming never itself grants deployment, promotion, provider mutation, merge, credential, or live-system authority.
 
 ## Local Documentation
 
@@ -74,6 +82,16 @@ When touching app behavior, use generic user-facing errors with a support-safe t
 ## Fallback Policy
 
 Do not add broad fallbacks, silent compatibility paths, synthetic/sample data fallbacks, fake success states, or catch-and-continue behaviour by default; prefer fixing the real failure path. Allow only for correctness, data safety, migration safety, or explicitly approved compatibility. Approved fallbacks must be narrow, visible via logs/diagnostics/user-safe status as appropriate, tested on primary/fallback paths, reason-documented, with temporary removal/review condition. Never hide data loss, auth, permission, payment, persistence, audit, security, missing config, broken integrations, or failed validation; never use fake business data or silently downgrade production behaviour.
+
+## Shipping Law
+
+Default to the shortest safe path to a usable, verifiable, shippable outcome: `COMPLETE THE BASICS -> SHIP -> OBSERVE -> IMPROVE`. Perfection is not completion.
+
+Before shipping, complete the applicable minimum floor: core intended functionality and critical workflows; consequential correctness; authentication, authorisation, and tenant/workspace isolation; security boundaries; data integrity, persistence, migration, and destructive-operation safety; privacy and secrets handling; required validation and truthful readiness evidence; deployment, health, and rollback prerequisites when release is in scope; and every explicit acceptance criterion.
+
+Classify remaining work as `SHIP_BLOCKER` or `POST_SHIP`. Known material defects in the minimum floor are blockers. Cosmetic polish, speculative refactors, future-proofing, optional abstraction, non-critical cleanup, and low-confidence theoretical risks are `POST_SHIP` unless concrete evidence makes them blockers. Do not misclassify defects to ship early or promote non-blocking improvements without evidence.
+
+Shipping bias never bypasses mutation or deployment authority, safety gates, privacy or secret boundaries, required validation, or controller finality. After a truthful safe shipment, use observed user, runtime, and operational evidence to prioritise improvements.
 
 ## User Action Questions
 

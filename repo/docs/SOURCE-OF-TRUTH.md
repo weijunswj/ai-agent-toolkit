@@ -22,7 +22,7 @@ Do not move product-owned assets into this toolkit.
 
 The two retained deterministic synchronizers are:
 
-- `repo/scripts/sync-agent-instruction-shims.cjs` for the managed root instruction blocks, manual portable templates, and exactly four portable n8n safety derivatives sourced from `repo/contracts/agent-rules/n8n-agent-rules.md`: `skills/n8n-agent-rules/n8n-agent-rules.md`, `skills/n8n-local-setup/references/n8n-agent-rules.md`, `skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md`, and `skills/n8n-workflow-templates/references/n8n-agent-rules.md`.
+- `repo/scripts/sync-agent-instruction-shims.cjs` for the managed root instruction blocks, manual portable templates, and exactly three portable n8n safety derivatives sourced from `repo/contracts/agent-rules/n8n-safety-rules.md`: `skills/n8n-safety-router/n8n-safety-rules.md`, `skills/n8n-environment-setup/references/n8n-safety-rules.md`, and `skills/n8n-workflow-transport/references/n8n-safety-rules.md`.
 - `repo/scripts/sync-repo-doc-contract.cjs` for the managed source-of-truth block in `README.md` and `AGENTS.md`.
 
 They do not publish skills, create packs, consume secondary routing metadata, write privileged PR branches, or provide a generic Toolkit sync command. The four n8n outputs are a narrow managed safety derivative set for portable/local context in the containing copied skills; all other maintained skill and contract files are edited at their canonical paths.
@@ -37,7 +37,7 @@ Native plugin metadata remains platform-separated:
 
 `repo/source-watch/provenance/**/SOURCE-LOCK.json` owns active third-party provenance: source repo, ref, locked commit, allowlisted files, exact blob pins, attribution requirement, and manual-review update policy. Source-watch is notification-only and must not copy upstream files, update pins, execute upstream code, or treat a notification PR as approval.
 
-Repo-wide MCP is intentionally not shipped or maintained as a generated surface. Official n8n Skills plus instance-level MCP references remain inside `skills/n8n-local-setup/` as secondary setup material.
+Repo-wide MCP is intentionally not shipped or maintained as a generated surface. Official n8n Skills plus instance-level MCP references remain inside `skills/n8n-environment-setup/` as secondary setup material.
 
 ## Documentation Links
 

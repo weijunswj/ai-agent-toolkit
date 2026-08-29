@@ -7,9 +7,19 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const intendedImplicitSkills = [
-  'agent-skill-supply-chain-audit',
-  'n8n-agent-rules',
-  'toolkit-setup'
+  'frontend-art-direction',
+  'github-program-reconciler',
+  'local-ai-safety',
+  'managed-app-foundation-review',
+  'n8n-environment-setup',
+  'n8n-safety-router',
+  'n8n-workflow-transport',
+  'repository-agent-rules',
+  'secure-ci-cd',
+  'self-hosted-service-safety',
+  'skill-product-review',
+  'toolkit-setup',
+  'windows-local-dev-services'
 ];
 
 function readText(relPath) {
@@ -47,10 +57,15 @@ test('OpenAI skill metadata declares Codex product surface for plugin grouping',
   }
 });
 
-test('OpenAI invocation policy keeps only safety, setup, and high-signal knowledge routers implicit', () => {
+test('OpenAI invocation policy matches the behaviourally admitted 13-product implicit set', () => {
   const actualImplicit = skillNames().filter((name) => allowImplicit(name));
   assert.deepEqual(actualImplicit, intendedImplicitSkills);
-  assert.equal(allowImplicit('project-completion-audit'), false, 'project-completion-audit must remain explicit-only');
+  for (const skillName of [
+    'codex-ssh-hostinger-coolify-setup-maintainer',
+    'release-readiness-audit'
+  ]) {
+    assert.equal(allowImplicit(skillName), false, `${skillName} must remain explicit-only`);
+  }
 });
 
 test('native plugin default prompts stay within Plugin Eval starter budget', () => {

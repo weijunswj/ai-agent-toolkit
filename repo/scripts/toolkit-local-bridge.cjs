@@ -24,7 +24,7 @@ const {
 } = require('./toolkit-staging-generations.cjs');
 
 const ARCHITECTURE_VERSION = 2;
-const BRIDGE_VERSION = '2.10.3';
+const BRIDGE_VERSION = '2.12.0';
 const STATE_SCHEMA_VERSION = 1;
 const TOOLKIT_NAME = 'ai-agent-toolkit';
 const SUPPORTED_TARGETS = ['opencode', 'ag2'];
@@ -45,7 +45,7 @@ const HOOK_LIGHT_VALIDATION_TIMEOUT_MS = 30000;
 const NATIVE_PLUGIN_CACHE_REPORT_ERROR_LIMIT = 5;
 const THIRD_PARTY_HOOK_REPAIR_ERROR_LIMIT = 5;
 const GIT_CREDENTIAL_HELPERS = ['manager', 'manager-core'];
-const AGENT_RULES_TEMPLATE_DIR = path.join('skills', 'ai-coding-agent-rules', 'repo-local');
+const AGENT_RULES_TEMPLATE_DIR = path.join('skills', 'repository-agent-rules', 'repo-local');
 const AGENT_RULES_PREFLIGHT_MAX_FINDINGS = 8;
 const AGENT_RULES_PREFLIGHT_FILES = {
   'codex-plugin': [
@@ -1807,7 +1807,7 @@ function formatAgentRulesPreflight(result) {
     ...shown.map((finding) => `- ${finding.file}: ${finding.detail}`)
   ];
   if (missingRootAgents) {
-    lines.unshift("STOP: Root AGENTS.md is missing. Toolkit repo-local ai-coding-agent-rules are not installed in this Git repository. Stop before repository work. Ask the user whether to install/repair Toolkit repo-local rules now or proceed without Toolkit repo-local rules. Do not install, repair, create, or write anything without the user's decision.");
+    lines.unshift("STOP: Root AGENTS.md is missing. Toolkit repo-local repository-agent-rules are not installed in this Git repository. Stop before repository work. Ask the user whether to install/repair Toolkit repo-local rules now or proceed without Toolkit repo-local rules. Do not install, repair, create, or write anything without the user's decision.");
   } else if (staleOrBrokenManagedContent) {
     lines.unshift("STOP: Toolkit-managed repo-local instruction blocks are stale or broken. Stop before repository work. Ask the user whether to repair/refresh Toolkit repo-local rules now or proceed without current Toolkit repo-local rules. Do not repair, refresh, create backups, or write anything without the user's decision.");
   } else {

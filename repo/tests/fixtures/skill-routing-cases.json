@@ -1,0 +1,833 @@
+{
+  "schema_version": 2,
+  "implicit_discovery_authorizes_mutation": false,
+  "portfolio": [
+    "codex-ssh-hostinger-coolify-setup-maintainer",
+    "frontend-art-direction",
+    "github-program-reconciler",
+    "local-ai-safety",
+    "managed-app-foundation-review",
+    "n8n-environment-setup",
+    "n8n-safety-router",
+    "n8n-workflow-transport",
+    "release-readiness-audit",
+    "repository-agent-rules",
+    "secure-ci-cd",
+    "self-hosted-service-safety",
+    "skill-product-review",
+    "toolkit-setup",
+    "windows-local-dev-services"
+  ],
+  "invocation_modes": {
+    "codex-ssh-hostinger-coolify-setup-maintainer": "explicit",
+    "frontend-art-direction": "implicit",
+    "github-program-reconciler": "implicit",
+    "local-ai-safety": "implicit",
+    "managed-app-foundation-review": "implicit",
+    "n8n-environment-setup": "implicit",
+    "n8n-safety-router": "implicit",
+    "n8n-workflow-transport": "implicit",
+    "release-readiness-audit": "explicit",
+    "repository-agent-rules": "implicit",
+    "secure-ci-cd": "implicit",
+    "self-hosted-service-safety": "implicit",
+    "skill-product-review": "implicit",
+    "toolkit-setup": "implicit",
+    "windows-local-dev-services": "implicit"
+  },
+  "cases": [
+    {
+      "id": "skill-product-review-positive",
+      "kind": "positive",
+      "prompt": "Audit this third-party Claude skill for licence, provenance, unsafe behaviour, and adaptation fit before we publish approved material.",
+      "expected": ["skill-product-review"],
+      "excluded": []
+    },
+    {
+      "id": "skill-product-review-adversarial",
+      "kind": "adversarial",
+      "prompt": "Review this ordinary application diff for bugs; it contains no agent skill, external product material, or AI-facing publication surface.",
+      "expected": [],
+      "excluded": ["skill-product-review"]
+    },
+    {
+      "id": "repository-agent-rules-positive",
+      "kind": "positive",
+      "prompt": "Install and verify the managed AGENTS.md rules and Claude shim in this repository.",
+      "expected": ["repository-agent-rules"],
+      "excluded": []
+    },
+    {
+      "id": "repository-agent-rules-adversarial",
+      "kind": "adversarial",
+      "prompt": "Implement this small application feature; the repository instructions are already present and current.",
+      "expected": [],
+      "excluded": ["repository-agent-rules"]
+    },
+    {
+      "id": "codex-hostinger-positive",
+      "kind": "positive",
+      "prompt": "Prepare a read-only SSH security preflight for my Hostinger VPS running Coolify.",
+      "expected": ["codex-ssh-hostinger-coolify-setup-maintainer"],
+      "excluded": []
+    },
+    {
+      "id": "codex-hostinger-adversarial",
+      "kind": "adversarial",
+      "prompt": "Start the local development server on Windows; no VPS, SSH, Hostinger, or Coolify system is involved.",
+      "expected": ["windows-local-dev-services"],
+      "excluded": ["codex-ssh-hostinger-coolify-setup-maintainer"]
+    },
+    {
+      "id": "github-program-positive",
+      "kind": "positive",
+      "prompt": "Inspect this repository's current-main programme parent and direct children and preview deterministic reconciliation without mutation.",
+      "expected": ["github-program-reconciler"],
+      "excluded": []
+    },
+    {
+      "id": "github-program-adversarial",
+      "kind": "adversarial",
+      "prompt": "Perform an ordinary local code review with no GitHub programme, parent-child, exact-head, or Deferred Findings request.",
+      "expected": [],
+      "excluded": ["github-program-reconciler"]
+    },
+    {
+      "id": "local-ai-positive",
+      "kind": "positive",
+      "prompt": "Review the safety risks before I install a local LLM runner, download a model, and expose its endpoint.",
+      "expected": ["local-ai-safety"],
+      "excluded": []
+    },
+    {
+      "id": "local-ai-adversarial",
+      "kind": "adversarial",
+      "prompt": "Improve this prompt for an existing hosted AI API without installing or exposing any local runtime.",
+      "expected": [],
+      "excluded": ["local-ai-safety"]
+    },
+    {
+      "id": "managed-foundation-positive",
+      "kind": "positive",
+      "prompt": "Compare managed and owner-hosted auth, database, email, storage, and automation foundations before we custom-build them.",
+      "expected": ["managed-app-foundation-review"],
+      "excluded": []
+    },
+    {
+      "id": "managed-foundation-adversarial",
+      "kind": "adversarial",
+      "prompt": "Implement one narrow feature after the application's foundation choices were already approved and remain unchanged.",
+      "expected": [],
+      "excluded": ["managed-app-foundation-review"]
+    },
+    {
+      "id": "n8n-safety-positive",
+      "kind": "positive",
+      "prompt": "Design and validate an n8n workflow using official n8n Skills without touching a live instance.",
+      "expected": ["n8n-safety-router"],
+      "excluded": []
+    },
+    {
+      "id": "n8n-safety-adversarial",
+      "kind": "adversarial",
+      "prompt": "Implement ordinary application code with no n8n workflow, setup, helper, MCP, or live-instance scope.",
+      "expected": [],
+      "excluded": ["n8n-safety-router"]
+    },
+    {
+      "id": "n8n-environment-positive",
+      "kind": "positive",
+      "prompt": "Plan the separate localhost development and Cloudflare Tunnel production environments for n8n.",
+      "expected": ["n8n-environment-setup", "n8n-safety-router"],
+      "excluded": []
+    },
+    {
+      "id": "n8n-environment-adversarial",
+      "kind": "adversarial",
+      "prompt": "Explain one n8n node expression without changing Docker, hosting, tunnels, backups, launchers, or MCP configuration.",
+      "expected": ["n8n-safety-router"],
+      "excluded": ["n8n-environment-setup"]
+    },
+    {
+      "id": "n8n-transport-positive",
+      "kind": "positive",
+      "prompt": "Review and copy the offline n8n sanitizer, validator, comparison, and import-preparation helpers into a consumer repository.",
+      "expected": ["n8n-safety-router", "n8n-workflow-transport"],
+      "excluded": []
+    },
+    {
+      "id": "n8n-transport-adversarial",
+      "kind": "adversarial",
+      "prompt": "Select a reusable workflow JSON example without copying, adapting, or running any helper scripts.",
+      "expected": ["n8n-safety-router"],
+      "excluded": ["n8n-workflow-transport"]
+    },
+    {
+      "id": "release-readiness-positive",
+      "kind": "positive",
+      "prompt": "Run a guarded production-readiness audit and identify what blocks a truthful release.",
+      "expected": ["release-readiness-audit"],
+      "excluded": []
+    },
+    {
+      "id": "release-readiness-adversarial",
+      "kind": "adversarial",
+      "prompt": "Review one narrow code change without auditing whole-project completion, launch readiness, or release evidence.",
+      "expected": [],
+      "excluded": ["release-readiness-audit"]
+    },
+    {
+      "id": "secure-ci-cd-positive",
+      "kind": "positive",
+      "prompt": "Plan a security-first GitHub Actions pipeline with required checks while keeping deployment disabled.",
+      "expected": ["secure-ci-cd"],
+      "excluded": []
+    },
+    {
+      "id": "secure-ci-cd-adversarial",
+      "kind": "adversarial",
+      "prompt": "Run the existing local unit test for this code change without modifying CI, releases, branch protection, or deployment.",
+      "expected": [],
+      "excluded": ["secure-ci-cd"]
+    },
+    {
+      "id": "self-hosted-positive",
+      "kind": "positive",
+      "prompt": "Review public ports, reverse proxy, DNS, TLS, backups, admin paths, and first-run hardening for this self-hosted service.",
+      "expected": ["self-hosted-service-safety"],
+      "excluded": []
+    },
+    {
+      "id": "self-hosted-adversarial",
+      "kind": "adversarial",
+      "prompt": "Start a local-only development server with no Docker, VPS, tunnel, DNS, TLS, or public exposure.",
+      "expected": ["windows-local-dev-services"],
+      "excluded": ["self-hosted-service-safety"]
+    },
+    {
+      "id": "toolkit-setup-positive",
+      "kind": "positive",
+      "prompt": "Refresh toolkit and audit the opt-in OpenCode local bridge state.",
+      "expected": ["toolkit-setup"],
+      "excluded": []
+    },
+    {
+      "id": "toolkit-setup-adversarial",
+      "kind": "adversarial",
+      "prompt": "Repair an n8n helper script inside this repository without changing the Toolkit package, plugin, bridge, or installed hooks.",
+      "expected": ["n8n-safety-router", "n8n-workflow-transport"],
+      "excluded": ["toolkit-setup"]
+    },
+    {
+      "id": "frontend-art-positive",
+      "kind": "positive",
+      "prompt": "Create a distinctive art direction and responsive accessible design system for this new product interface.",
+      "expected": ["frontend-art-direction"],
+      "excluded": []
+    },
+    {
+      "id": "frontend-art-adversarial",
+      "kind": "adversarial",
+      "prompt": "Fix one frontend logic bug while preserving the already-approved visual design and without inventing a new theme.",
+      "expected": [],
+      "excluded": ["frontend-art-direction"]
+    },
+    {
+      "id": "windows-local-positive",
+      "kind": "positive",
+      "prompt": "Start and verify this Windows localhost API, diagnose its port conflict, and clean up only the orphaned process.",
+      "expected": ["windows-local-dev-services"],
+      "excluded": []
+    },
+    {
+      "id": "codex-hostinger-positive-2",
+      "kind": "positive",
+      "prompt": "Review the daily security report and upgrade timing for this Hostinger Coolify server.",
+      "expected": ["codex-ssh-hostinger-coolify-setup-maintainer"],
+      "excluded": []
+    },
+    {
+      "id": "codex-hostinger-positive-3",
+      "kind": "positive",
+      "prompt": "Plan a bounded Coolify deployment on my Hostinger VPS and identify every approval gate before SSH or provider changes.",
+      "expected": ["codex-ssh-hostinger-coolify-setup-maintainer"],
+      "excluded": []
+    },
+    {
+      "id": "codex-hostinger-negative-2",
+      "kind": "negative",
+      "prompt": "Configure an n8n workflow inside an already-running Coolify deployment without changing the host platform.",
+      "expected": ["n8n-safety-router"],
+      "excluded": ["codex-ssh-hostinger-coolify-setup-maintainer"]
+    },
+    {
+      "id": "codex-hostinger-negative-3",
+      "kind": "negative",
+      "prompt": "Review generic Docker exposure on a non-Hostinger server that does not run Coolify.",
+      "expected": ["self-hosted-service-safety"],
+      "excluded": ["codex-ssh-hostinger-coolify-setup-maintainer"]
+    },
+    {
+      "id": "codex-hostinger-overlap",
+      "kind": "overlap",
+      "prompt": "Plan Hostinger Coolify platform work followed by n8n environment setup, without performing either mutation yet.",
+      "expected": ["codex-ssh-hostinger-coolify-setup-maintainer", "n8n-safety-router", "n8n-environment-setup"],
+      "excluded": []
+    },
+    {
+      "id": "frontend-art-positive-2",
+      "kind": "positive",
+      "prompt": "Review this dashboard implementation for visual hierarchy, accessibility, privacy, security, and mobile behavior.",
+      "expected": ["frontend-art-direction"],
+      "excluded": []
+    },
+    {
+      "id": "frontend-art-positive-3",
+      "kind": "positive",
+      "prompt": "Explore three genuinely distinct visual worlds for a material new product interface before implementation.",
+      "expected": ["frontend-art-direction"],
+      "excluded": []
+    },
+    {
+      "id": "frontend-art-negative-2",
+      "kind": "negative",
+      "prompt": "Make a one-line prose correction that has no design, accessibility, privacy, or safety implication.",
+      "expected": [],
+      "excluded": ["frontend-art-direction"]
+    },
+    {
+      "id": "frontend-art-negative-3",
+      "kind": "negative",
+      "prompt": "Implement this already-approved frontend design faithfully without reopening art direction or changing the design contract.",
+      "expected": [],
+      "excluded": ["frontend-art-direction"]
+    },
+    {
+      "id": "frontend-art-overlap",
+      "kind": "overlap",
+      "prompt": "Choose the application's managed foundations and create a distinct frontend direction for the resulting product.",
+      "expected": ["managed-app-foundation-review", "frontend-art-direction"],
+      "excluded": []
+    },
+    {
+      "id": "github-program-positive-2",
+      "kind": "positive",
+      "prompt": "Validate the exact-head PR review inventory and Deferred Findings evidence without mutating GitHub.",
+      "expected": ["github-program-reconciler"],
+      "excluded": []
+    },
+    {
+      "id": "github-program-positive-3",
+      "kind": "positive",
+      "prompt": "Reconcile current-main programme state against its governed parent, direct children, and exact-head review evidence.",
+      "expected": ["github-program-reconciler"],
+      "excluded": []
+    },
+    {
+      "id": "github-program-negative-2",
+      "kind": "negative",
+      "prompt": "Mark a pull request Ready, resolve review threads, or merge it as part of ordinary implementation.",
+      "expected": [],
+      "excluded": ["github-program-reconciler"]
+    },
+    {
+      "id": "github-program-negative-3",
+      "kind": "negative",
+      "prompt": "Read one pull request's checks and comments without any governed parent-child programme or Deferred Findings scope.",
+      "expected": [],
+      "excluded": ["github-program-reconciler"]
+    },
+    {
+      "id": "github-program-overlap",
+      "kind": "overlap",
+      "prompt": "Explicitly inspect governed programme review evidence while separately assessing the repository's release readiness.",
+      "expected": ["github-program-reconciler", "release-readiness-audit"],
+      "excluded": []
+    },
+    {
+      "id": "local-ai-positive-2",
+      "kind": "positive",
+      "prompt": "Plan a localhost-only ComfyUI setup and identify what would require approval before public exposure.",
+      "expected": ["local-ai-safety"],
+      "excluded": []
+    },
+    {
+      "id": "local-ai-positive-3",
+      "kind": "positive",
+      "prompt": "Assess GPU, runtime, model-provenance, and endpoint risks before changing this local AI stack.",
+      "expected": ["local-ai-safety"],
+      "excluded": []
+    },
+    {
+      "id": "local-ai-negative-2",
+      "kind": "negative",
+      "prompt": "Improve this model prompt without installing, exposing, or changing a local AI stack.",
+      "expected": [],
+      "excluded": ["local-ai-safety"]
+    },
+    {
+      "id": "local-ai-negative-3",
+      "kind": "negative",
+      "prompt": "Use an existing hosted image-generation API without downloading models or changing any local AI runtime.",
+      "expected": [],
+      "excluded": ["local-ai-safety"]
+    },
+    {
+      "id": "local-ai-overlap",
+      "kind": "overlap",
+      "prompt": "Review a local model server and the separate public reverse-proxy exposure planned for its endpoint.",
+      "expected": ["local-ai-safety", "self-hosted-service-safety"],
+      "excluded": []
+    },
+    {
+      "id": "managed-foundation-positive-2",
+      "kind": "positive",
+      "prompt": "Compare low-cost managed and owner-hosted options before we commit to a new backend foundation.",
+      "expected": ["managed-app-foundation-review"],
+      "excluded": []
+    },
+    {
+      "id": "managed-foundation-positive-3",
+      "kind": "positive",
+      "prompt": "Revisit the architecture before we add custom accounts, storage, analytics, and workflow automation foundations.",
+      "expected": ["managed-app-foundation-review"],
+      "excluded": []
+    },
+    {
+      "id": "managed-foundation-negative-2",
+      "kind": "negative",
+      "prompt": "Brainstorm product ideas without selecting or materially changing any backend, account, data, automation, or operations foundation.",
+      "expected": [],
+      "excluded": ["managed-app-foundation-review"]
+    },
+    {
+      "id": "managed-foundation-negative-3",
+      "kind": "negative",
+      "prompt": "Restyle an existing frontend page without changing auth, data, backend, automation, or operations foundations.",
+      "expected": ["frontend-art-direction"],
+      "excluded": ["managed-app-foundation-review"]
+    },
+    {
+      "id": "managed-foundation-overlap",
+      "kind": "overlap",
+      "prompt": "Choose whether n8n should provide the app's automation foundation before planning its environment.",
+      "expected": ["managed-app-foundation-review", "n8n-safety-router", "n8n-environment-setup"],
+      "excluded": []
+    },
+    {
+      "id": "n8n-environment-positive-2",
+      "kind": "positive",
+      "prompt": "Plan production n8n self-hosting from a CGNAT machine using the separate Cloudflare Tunnel stack.",
+      "expected": ["n8n-safety-router", "n8n-environment-setup"],
+      "excluded": []
+    },
+    {
+      "id": "n8n-environment-positive-3",
+      "kind": "positive",
+      "prompt": "Configure the supported official n8n Skills and instance-level MCP path for this development environment.",
+      "expected": ["n8n-safety-router", "n8n-environment-setup"],
+      "excluded": []
+    },
+    {
+      "id": "n8n-environment-negative-2",
+      "kind": "negative",
+      "prompt": "Maintain the underlying Hostinger VPS and Coolify platform before any n8n-specific deployment work.",
+      "expected": ["codex-ssh-hostinger-coolify-setup-maintainer"],
+      "excluded": ["n8n-environment-setup"]
+    },
+    {
+      "id": "n8n-environment-negative-3",
+      "kind": "negative",
+      "prompt": "Sanitise and compare an exported n8n workflow without changing Docker, hosting, tunnels, backups, or MCP setup.",
+      "expected": ["n8n-safety-router", "n8n-workflow-transport"],
+      "excluded": ["n8n-environment-setup"]
+    },
+    {
+      "id": "n8n-environment-overlap",
+      "kind": "overlap",
+      "prompt": "Plan an n8n environment and then prepare offline workflow transport helpers without running live operations.",
+      "expected": ["n8n-safety-router", "n8n-environment-setup", "n8n-workflow-transport"],
+      "excluded": []
+    },
+    {
+      "id": "n8n-safety-positive-2",
+      "kind": "positive",
+      "prompt": "Inspect this proposed live n8n import and explain the approval and credential boundaries before any action.",
+      "expected": ["n8n-safety-router"],
+      "excluded": []
+    },
+    {
+      "id": "n8n-safety-positive-3",
+      "kind": "positive",
+      "prompt": "Validate that this test-only n8n workflow fixture is inactive, generic, sanitised, and credential-free.",
+      "expected": ["n8n-safety-router"],
+      "excluded": []
+    },
+    {
+      "id": "n8n-safety-negative-2",
+      "kind": "negative",
+      "prompt": "Set up a generic non-n8n self-hosted service that does not interact with n8n.",
+      "expected": ["self-hosted-service-safety"],
+      "excluded": ["n8n-safety-router"]
+    },
+    {
+      "id": "n8n-safety-negative-3",
+      "kind": "negative",
+      "prompt": "Review a generic JSON fixture that has no n8n nodes, workflow semantics, helper, MCP, or live-instance scope.",
+      "expected": [],
+      "excluded": ["n8n-safety-router"]
+    },
+    {
+      "id": "n8n-safety-overlap",
+      "kind": "overlap",
+      "prompt": "Sanitise an n8n workflow export and prepare it for a separately approved manual inactive import.",
+      "expected": ["n8n-safety-router", "n8n-workflow-transport"],
+      "excluded": ["n8n-environment-setup"]
+    },
+    {
+      "id": "n8n-transport-positive-2",
+      "kind": "positive",
+      "prompt": "Review a local sanitizer helper before using it on an exported workflow candidate.",
+      "expected": ["n8n-safety-router", "n8n-workflow-transport"],
+      "excluded": []
+    },
+    {
+      "id": "n8n-transport-positive-3",
+      "kind": "positive",
+      "prompt": "Compare a sanitised workflow file with a candidate export and prepare a manual inactive import bundle.",
+      "expected": ["n8n-safety-router", "n8n-workflow-transport"],
+      "excluded": []
+    },
+    {
+      "id": "n8n-transport-negative-2",
+      "kind": "negative",
+      "prompt": "Execute a live n8n import directly without a separately approved target instance and workflow set.",
+      "expected": ["n8n-safety-router"],
+      "excluded": ["n8n-workflow-transport"]
+    },
+    {
+      "id": "n8n-transport-negative-3",
+      "kind": "negative",
+      "prompt": "Set up the local n8n Docker and Postgres environment without copying or changing workflow transport helpers.",
+      "expected": ["n8n-safety-router", "n8n-environment-setup"],
+      "excluded": ["n8n-workflow-transport"]
+    },
+    {
+      "id": "n8n-transport-overlap",
+      "kind": "overlap",
+      "prompt": "Prepare offline transport helpers for a workflow while applying the mandatory n8n safety contract first.",
+      "expected": ["n8n-safety-router", "n8n-workflow-transport"],
+      "excluded": []
+    },
+    {
+      "id": "release-readiness-positive-2",
+      "kind": "positive",
+      "prompt": "Audit this project against its original requirements, then plan bounded P0 through P2 remediation.",
+      "expected": ["release-readiness-audit"],
+      "excluded": []
+    },
+    {
+      "id": "release-readiness-positive-3",
+      "kind": "positive",
+      "prompt": "Perform the final release-candidate QA and security-readiness pass for this whole project.",
+      "expected": ["release-readiness-audit"],
+      "excluded": []
+    },
+    {
+      "id": "release-readiness-negative-2",
+      "kind": "negative",
+      "prompt": "Review a narrow code diff for defects without running a broad readiness or remediation programme.",
+      "expected": [],
+      "excluded": ["release-readiness-audit"]
+    },
+    {
+      "id": "release-readiness-negative-3",
+      "kind": "negative",
+      "prompt": "Run one focused regression test after a specific bug fix without auditing overall release readiness.",
+      "expected": [],
+      "excluded": ["release-readiness-audit"]
+    },
+    {
+      "id": "release-readiness-overlap",
+      "kind": "overlap",
+      "prompt": "Explicitly run the final release-readiness audit and inspect whether the CI/CD gates are sufficient.",
+      "expected": ["release-readiness-audit", "secure-ci-cd"],
+      "excluded": []
+    },
+    {
+      "id": "repository-rules-positive-2",
+      "kind": "positive",
+      "prompt": "Check and repair the managed markers in AGENTS.md and the Claude shim.",
+      "expected": ["repository-agent-rules"],
+      "excluded": []
+    },
+    {
+      "id": "repository-rules-positive-3",
+      "kind": "positive",
+      "prompt": "Update this repository's managed agent instructions and verify every supported host shim stays aligned.",
+      "expected": ["repository-agent-rules"],
+      "excluded": []
+    },
+    {
+      "id": "repository-rules-negative-2",
+      "kind": "negative",
+      "prompt": "Configure an n8n workflow-specific safety adapter without first selecting its separate n8n rules contract.",
+      "expected": ["n8n-safety-router"],
+      "excluded": ["repository-agent-rules"]
+    },
+    {
+      "id": "repository-rules-negative-3",
+      "kind": "negative",
+      "prompt": "Refresh the installed Toolkit plugin and bridge without changing any consumer repository instruction file.",
+      "expected": ["toolkit-setup"],
+      "excluded": ["repository-agent-rules"]
+    },
+    {
+      "id": "repository-rules-overlap",
+      "kind": "overlap",
+      "prompt": "Set up the Toolkit package and then install its managed repository rules in a selected consumer repository.",
+      "expected": ["toolkit-setup", "repository-agent-rules"],
+      "excluded": []
+    },
+    {
+      "id": "secure-ci-cd-positive-2",
+      "kind": "positive",
+      "prompt": "Install CI validation while keeping deployment disabled until a later explicit approval.",
+      "expected": ["secure-ci-cd"],
+      "excluded": []
+    },
+    {
+      "id": "secure-ci-cd-positive-3",
+      "kind": "positive",
+      "prompt": "Harden this existing CI pipeline and define truthful required checks, permissions, and deployment gates.",
+      "expected": ["secure-ci-cd"],
+      "excluded": []
+    },
+    {
+      "id": "secure-ci-cd-negative-2",
+      "kind": "negative",
+      "prompt": "Deploy an application to a production host without first obtaining deployment-specific authority.",
+      "expected": ["self-hosted-service-safety"],
+      "excluded": ["secure-ci-cd"]
+    },
+    {
+      "id": "secure-ci-cd-negative-3",
+      "kind": "negative",
+      "prompt": "Review application authentication code without creating, changing, or governing any CI/CD pipeline.",
+      "expected": [],
+      "excluded": ["secure-ci-cd"]
+    },
+    {
+      "id": "secure-ci-cd-overlap",
+      "kind": "overlap",
+      "prompt": "Plan secure CI/CD gates as part of an explicitly requested whole-project release-readiness audit.",
+      "expected": ["secure-ci-cd", "release-readiness-audit"],
+      "excluded": []
+    },
+    {
+      "id": "self-hosted-positive-2",
+      "kind": "positive",
+      "prompt": "Plan first-run hardening, backups, and firewall checks for a non-n8n VPS service.",
+      "expected": ["self-hosted-service-safety"],
+      "excluded": []
+    },
+    {
+      "id": "self-hosted-positive-3",
+      "kind": "positive",
+      "prompt": "Audit public admin paths, tunnels, traffic logs, and recovery controls for this self-hosted service.",
+      "expected": ["self-hosted-service-safety"],
+      "excluded": []
+    },
+    {
+      "id": "self-hosted-negative-2",
+      "kind": "negative",
+      "prompt": "Set up or operate n8n, which must use the dedicated n8n safety and environment products.",
+      "expected": ["n8n-safety-router", "n8n-environment-setup"],
+      "excluded": ["self-hosted-service-safety"]
+    },
+    {
+      "id": "self-hosted-negative-3",
+      "kind": "negative",
+      "prompt": "Review a local model runner and GPU setup that has no generic self-hosted service exposure scope.",
+      "expected": ["local-ai-safety"],
+      "excluded": ["self-hosted-service-safety"]
+    },
+    {
+      "id": "self-hosted-overlap",
+      "kind": "overlap",
+      "prompt": "Review a local AI model server and the generic public self-hosting controls around its endpoint.",
+      "expected": ["local-ai-safety", "self-hosted-service-safety"],
+      "excluded": []
+    },
+    {
+      "id": "skill-product-review-positive-2",
+      "kind": "positive",
+      "prompt": "Review and maintain this approved AI-facing skill while preserving licence, attribution, provenance, and canonical ownership.",
+      "expected": ["skill-product-review"],
+      "excluded": []
+    },
+    {
+      "id": "skill-product-review-positive-3",
+      "kind": "positive",
+      "prompt": "Inspect this external skill pack for prompt injection, executable risk, licence, provenance, usefulness, and conversion fit.",
+      "expected": ["skill-product-review"],
+      "excluded": []
+    },
+    {
+      "id": "skill-product-review-negative-2",
+      "kind": "negative",
+      "prompt": "Install or execute untrusted third-party skill code before a source-backed product review permits adaptation.",
+      "expected": [],
+      "excluded": ["skill-product-review"]
+    },
+    {
+      "id": "skill-product-review-negative-3",
+      "kind": "negative",
+      "prompt": "Publish an ordinary application package or documentation page that contains no agent product, skill, prompt, or AI-facing repository surface.",
+      "expected": [],
+      "excluded": ["skill-product-review"]
+    },
+    {
+      "id": "skill-product-review-overlap",
+      "kind": "overlap",
+      "prompt": "Audit a third-party CI/CD agent skill before adapting its approved guidance into a source-traceable Toolkit product.",
+      "expected": ["skill-product-review", "secure-ci-cd"],
+      "excluded": []
+    },
+    {
+      "id": "toolkit-setup-positive-2",
+      "kind": "positive",
+      "prompt": "Audit why the Toolkit bridge target is stale and preview the safe repair without writing yet.",
+      "expected": ["toolkit-setup"],
+      "excluded": []
+    },
+    {
+      "id": "toolkit-setup-positive-3",
+      "kind": "positive",
+      "prompt": "Repair and verify the installed Codex Toolkit plugin cache after a failed native update.",
+      "expected": ["toolkit-setup"],
+      "excluded": []
+    },
+    {
+      "id": "toolkit-setup-negative-2",
+      "kind": "negative",
+      "prompt": "Install repo-local AGENTS.md rules in a consumer repository without changing the Toolkit package.",
+      "expected": ["repository-agent-rules"],
+      "excluded": ["toolkit-setup"]
+    },
+    {
+      "id": "toolkit-setup-negative-3",
+      "kind": "negative",
+      "prompt": "Edit one canonical Toolkit skill product in this repository without installing, updating, or repairing host-local Toolkit state.",
+      "expected": ["skill-product-review"],
+      "excluded": ["toolkit-setup"]
+    },
+    {
+      "id": "toolkit-setup-overlap",
+      "kind": "overlap",
+      "prompt": "Set up the Toolkit package and then install its managed repository rules in a selected consumer repository.",
+      "expected": ["toolkit-setup", "repository-agent-rules"],
+      "excluded": []
+    },
+    {
+      "id": "windows-local-positive-2",
+      "kind": "positive",
+      "prompt": "Diagnose why this PowerShell launcher exits with empty logs and leaves the target port unavailable.",
+      "expected": ["windows-local-dev-services"],
+      "excluded": []
+    },
+    {
+      "id": "windows-local-positive-3",
+      "kind": "positive",
+      "prompt": "Relaunch this Windows localhost service safely after identifying the exact orphaned process and occupied port.",
+      "expected": ["windows-local-dev-services"],
+      "excluded": []
+    },
+    {
+      "id": "windows-local-negative-2",
+      "kind": "negative",
+      "prompt": "Debug application business logic that does not involve Windows startup, process, port, runtime, or localhost readiness behavior.",
+      "expected": [],
+      "excluded": ["windows-local-dev-services"]
+    },
+    {
+      "id": "windows-local-negative-3",
+      "kind": "negative",
+      "prompt": "Repair a Linux CI job that has no Windows shell, local process, port, or localhost service behavior.",
+      "expected": ["secure-ci-cd"],
+      "excluded": ["windows-local-dev-services"]
+    },
+    {
+      "id": "windows-local-overlap",
+      "kind": "overlap",
+      "prompt": "Start the managed n8n development stack on Windows using its product-specific launcher and safety rules.",
+      "expected": ["n8n-safety-router", "n8n-environment-setup"],
+      "excluded": ["windows-local-dev-services"]
+    },
+    {
+      "id": "windows-local-adversarial",
+      "kind": "adversarial",
+      "prompt": "Review a production Linux service deployment; no Windows localhost process or local development service is involved.",
+      "expected": ["self-hosted-service-safety"],
+      "excluded": ["windows-local-dev-services"]
+    }
+  ],
+  "shipping_law_cases": [
+    {
+      "id": "cosmetic-spacing",
+      "prompt": "A non-critical spacing inconsistency remains after the required product behavior and validation pass.",
+      "expected": "POST_SHIP"
+    },
+    {
+      "id": "optional-abstraction",
+      "prompt": "An optional abstraction refactor could reduce duplication but fixes no current defect.",
+      "expected": "POST_SHIP"
+    },
+    {
+      "id": "hypothetical-scaling",
+      "prompt": "A hypothetical future scaling concern has no current runtime or user evidence.",
+      "expected": "POST_SHIP"
+    },
+    {
+      "id": "auth-bypass",
+      "prompt": "A user can bypass authentication on a protected workflow.",
+      "expected": "SHIP_BLOCKER"
+    },
+    {
+      "id": "cross-tenant-access",
+      "prompt": "One tenant can read another tenant's private records.",
+      "expected": "SHIP_BLOCKER"
+    },
+    {
+      "id": "broken-critical-flow",
+      "prompt": "The product's critical primary workflow is broken.",
+      "expected": "SHIP_BLOCKER"
+    },
+    {
+      "id": "material-data-loss",
+      "prompt": "A normal operation can cause material unrecoverable data loss.",
+      "expected": "SHIP_BLOCKER"
+    },
+    {
+      "id": "required-validation-failure",
+      "prompt": "A validation command required by the repository fails on the candidate.",
+      "expected": "SHIP_BLOCKER"
+    }
+  ],
+  "shipping_floor_cases": [
+    {
+      "id": "local-nondeployable-task",
+      "prompt": "A local non-deployable documentation tool must be correct and pass its required validation.",
+      "required": [
+        "core_functionality",
+        "correctness",
+        "required_validation"
+      ],
+      "not_required": [
+        "deployment",
+        "health",
+        "rollback"
+      ]
+    }
+  ]
+}

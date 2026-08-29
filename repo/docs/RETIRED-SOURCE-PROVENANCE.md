@@ -13,7 +13,7 @@ The following former internal inputs were inspected and their reusable material 
 - `weijunswj/ai-cicd-installer`: CI/CD safety concepts and reviewed n8n helper templates.
 - `weijunswj/n8n-workflow-templates`: generic inactive workflow templates and sanitizer guidance.
 
-Retained outputs include `skills/n8n-local-setup/`, `skills/n8n-workflow-helper-scripts/`, `skills/n8n-workflow-templates/`, `skills/secure-cicd-installer/`, `skills/ui-ux-secure-frontend-design/`, `skills/windows-localhost-workflows/`, and the matching `repo/contracts/`, `repo/scripts/`, and `repo/tests/` surfaces.
+Retained outputs include `skills/n8n-environment-setup/`, `skills/n8n-workflow-transport/`, test-only examples under `repo/tests/fixtures/n8n-workflows/`, `skills/secure-ci-cd/`, `skills/frontend-art-direction/`, `skills/windows-local-dev-services/`, and matching `repo/contracts/`, `repo/scripts/`, and `repo/tests/` surfaces.
 
 No retired internal source is an active source-watch target. No live workflow export, credential binding, package artifact, or external runtime dependency was copied into the Toolkit.
 

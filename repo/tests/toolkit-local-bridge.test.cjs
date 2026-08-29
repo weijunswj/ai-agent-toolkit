@@ -44,7 +44,7 @@ const {
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const script = path.join(repoRoot, 'repo', 'scripts', 'toolkit-local-bridge.cjs');
-const expectedBridgeVersion = '2.10.3';
+const expectedBridgeVersion = '2.12.0';
 const supportedN8nFixtureRoot = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'n8n-skills-1.0.1');
 
 function tmpBaseDir() {
@@ -205,8 +205,8 @@ function createActiveNoTargetFixture(initialSource = 'codex-plugin') {
     { recursive: true }
   );
   fs.cpSync(
-    path.join(repoRoot, 'skills', 'ai-coding-agent-rules'),
-    path.join(sourceRepo, 'skills', 'ai-coding-agent-rules'),
+    path.join(repoRoot, 'skills', 'repository-agent-rules'),
+    path.join(sourceRepo, 'skills', 'repository-agent-rules'),
     { recursive: true }
   );
   const pluginRoot = path.join(root, 'codex-cache', 'ai-agent-toolkit');
@@ -243,7 +243,7 @@ function runFixtureBridge(fixture, args) {
 
 function expectedMissingAgentsContext(root) {
   return [
-    "STOP: Root AGENTS.md is missing. Toolkit repo-local ai-coding-agent-rules are not installed in this Git repository. Stop before repository work. Ask the user whether to install/repair Toolkit repo-local rules now or proceed without Toolkit repo-local rules. Do not install, repair, create, or write anything without the user's decision.",
+    "STOP: Root AGENTS.md is missing. Toolkit repo-local repository-agent-rules are not installed in this Git repository. Stop before repository work. Ask the user whether to install/repair Toolkit repo-local rules now or proceed without Toolkit repo-local rules. Do not install, repair, create, or write anything without the user's decision.",
     'Toolkit agent-rules preflight: repo-local instructions need attention in the current repository.',
     '- AGENTS.md: required instruction file is missing',
     'No files were changed by this hook.'
@@ -3520,7 +3520,7 @@ test('agent-rules preflight accepts current managed blocks and ignores literal m
   const nested = path.join(root, 'nested');
   fs.mkdirSync(nested, { recursive: true });
   const agentsTemplate = fs.readFileSync(
-    path.join(repoRoot, 'skills', 'ai-coding-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
+    path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
     'utf8'
   );
   writeFile(path.join(root, 'AGENTS.md'), [
@@ -3560,7 +3560,7 @@ test('agent-rules preflight stops loudly when a git repo is missing root AGENTS 
   const message = formatAgentRulesPreflight(result);
   assert.match(message, /STOP/);
   assert.match(message, /AGENTS\.md is missing/);
-  assert.match(message, /repo-local ai-coding-agent-rules are not installed/);
+  assert.match(message, /repo-local repository-agent-rules are not installed/);
   assert.match(message, /ask the user whether to install\/repair/i);
   assert.match(message, /proceed without Toolkit repo-local rules/);
   assert.match(message, /No files were changed by this hook/);
@@ -3602,7 +3602,7 @@ test('Codex SessionStart hook adds no missing-rule STOP instruction for current 
   const root = tmpRoot();
   fs.mkdirSync(path.join(root, '.git'), { recursive: true });
   const template = fs.readFileSync(
-    path.join(repoRoot, 'skills', 'ai-coding-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
+    path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
     'utf8'
   );
   writeFile(path.join(root, 'AGENTS.md'), template);
@@ -3619,13 +3619,13 @@ test('Codex SessionStart hook adds no missing-rule STOP instruction for current 
 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, 'Toolkit local bridge: auto-sync disabled; run node repo/scripts/toolkit-local-bridge.cjs --audit for status.\n');
-  assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /STOP: Root AGENTS\.md is missing|repo-local ai-coding-agent-rules are not installed/);
+  assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /STOP: Root AGENTS\.md is missing|repo-local repository-agent-rules are not installed/);
 });
 
 test('agent-rules preflight reports stale managed block content without writing files', () => {
   const root = tmpRoot();
   const agentsTemplate = fs.readFileSync(
-    path.join(repoRoot, 'skills', 'ai-coding-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
+    path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
     'utf8'
   );
   writeFile(
@@ -3652,7 +3652,7 @@ test('agent-rules preflight reports stale managed block content without writing 
 
 test('Codex SessionStart hook puts stale and malformed repair decisions on stdout without automatic repair', async (t) => {
   const template = fs.readFileSync(
-    path.join(repoRoot, 'skills', 'ai-coding-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
+    path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
     'utf8'
   );
   const cases = [
@@ -3736,7 +3736,7 @@ test('agent-rules preflight does not describe a non-git directory as a Git repo 
 
 test('agent-rules preflight checks Claude shim content in Claude hook mode', () => {
   const root = tmpRoot();
-  const templateDir = path.join(repoRoot, 'skills', 'ai-coding-agent-rules', 'repo-local');
+  const templateDir = path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local');
   writeFile(path.join(root, 'AGENTS.md'), fs.readFileSync(path.join(templateDir, 'AGENTS.managed.template.md'), 'utf8'));
   writeFile(path.join(root, 'CLAUDE.md'), fs.readFileSync(path.join(templateDir, 'CLAUDE.shim.template.md'), 'utf8').replace('@AGENTS.md', '@./AGENTS.md'));
 
@@ -3752,7 +3752,7 @@ test('hook mode runs passive agent-rules preflight before bridge no-op return', 
   const root = tmpRoot();
   const hub = path.join(root, 'hub', 'current');
   const agentsTemplate = fs.readFileSync(
-    path.join(repoRoot, 'skills', 'ai-coding-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
+    path.join(repoRoot, 'skills', 'repository-agent-rules', 'repo-local', 'AGENTS.managed.template.md'),
     'utf8'
   );
   writeFile(

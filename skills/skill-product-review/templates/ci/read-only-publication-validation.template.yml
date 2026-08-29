@@ -1,0 +1,22 @@
+name: Skill Publication Read-Only Validation
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out reviewed head
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Validate canonical skill publication
+        run: |
+          <source-lock and attribution audit>
+          <routing and portability checks>
+          <repository validation command>

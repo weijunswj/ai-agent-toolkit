@@ -18,7 +18,7 @@ The toolkit adapts only the design-contract reference concept from:
 
 - `docs/spec.md`
 
-It publishes the Toolkit-local reference at `skills/ui-ux-secure-frontend-design/references/design-md-contract.md`.
+It publishes the Toolkit-local reference at `skills/frontend-art-direction/references/design-md-contract.md`.
 
 ### What Was Not Used
 
@@ -33,7 +33,7 @@ License: Apache-2.0. Public attribution is required.
 
 ## UI/UX Pro Max
 
-The external `nextlevelbuilder/ui-ux-pro-max-skill` project is used only for the safe local-search subset documented in `skills/ui-ux-secure-frontend-design/tools/design-system-generator/`.
+The external `nextlevelbuilder/ui-ux-pro-max-skill` project is used only for the safe local-search subset documented in `skills/frontend-art-direction/tools/design-system-generator/`.
 
 The active lock at `repo/source-watch/provenance/ui-ux-pro-max/SOURCE-LOCK.json` records the upstream repo, ref, commit, file pins, attribution requirement, allowlist, and manual-review update policy.
 
@@ -66,4 +66,4 @@ This toolkit does not vendor external:
 - Package metadata.
 - Install commands.
 
-Third-party-derived scripts preserved under `skills/ui-ux-secure-frontend-design/tools/` remain local-only reviewed runtime code, not automatically trusted external code.
+Third-party-derived scripts preserved under `skills/frontend-art-direction/tools/` remain local-only reviewed runtime code, not automatically trusted external code.

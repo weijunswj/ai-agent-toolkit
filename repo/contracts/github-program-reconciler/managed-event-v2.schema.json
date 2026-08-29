@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.github-program.managed-event.v2",
+  "title": "Canonical programme transition event v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "event_type", "repository", "parent_issue", "entity", "source_state_schema", "from_state_digest", "to_canonical_digest", "authority_ref", "candidate_binding_digest", "prior_event_id", "migration_binding_digest", "event_id"],
+  "properties": {
+    "schema": { "const": "toolkit.github-program.managed-event.v2" },
+    "event_type": { "enum": ["canonical_initialisation", "canonical_transition", "migration"] },
+    "repository": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\r\\n]+$" },
+    "parent_issue": { "type": "integer", "minimum": 1 },
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "number"],
+      "properties": {
+        "kind": { "enum": ["parent", "child", "pr"] },
+        "number": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "source_state_schema": { "enum": [null, "toolkit.github-program.state.v4", "toolkit.github-program.legacy-state.v1"] },
+    "from_state_digest": { "$ref": "#/$defs/digest" },
+    "to_canonical_digest": { "$ref": "#/$defs/digest" },
+    "authority_ref": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\r\\n]+$" },
+    "candidate_binding_digest": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }] },
+    "prior_event_id": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }] },
+    "migration_binding_digest": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }] },
+    "event_id": { "$ref": "#/$defs/digest" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "event_type": { "const": "canonical_initialisation" } } },
+      "then": { "properties": { "source_state_schema": { "type": "null" }, "migration_binding_digest": { "type": "null" } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "const": "canonical_transition" } } },
+      "then": { "properties": { "source_state_schema": { "const": "toolkit.github-program.state.v4" }, "migration_binding_digest": { "type": "null" } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "const": "migration" } } },
+      "then": { "properties": { "source_state_schema": { "const": "toolkit.github-program.legacy-state.v1" }, "migration_binding_digest": { "$ref": "#/$defs/digest" } } }
+    }
+  ],
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

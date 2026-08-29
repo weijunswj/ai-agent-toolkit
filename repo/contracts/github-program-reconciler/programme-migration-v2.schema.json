@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.github-program.migration.v2",
+  "title": "GitHub programme v4 to v5 migration preview",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "preview_kind",
+    "repository",
+    "parent_issue",
+    "source_state_schema",
+    "target_state_schema",
+    "source_snapshot_digest",
+    "source_body_digests",
+    "target_canonical_digest",
+    "target_body_digests",
+    "bootstrap_conformance",
+    "managed_event_delta",
+    "required_receipt_delta",
+    "receipt_consumption_plan",
+    "operations",
+    "operations_digest",
+    "expected_snapshot_digest",
+    "mutation_authority",
+    "finality_authority",
+    "preview_only",
+    "preview_id"
+  ],
+  "properties": {
+    "schema": { "const": "toolkit.github-program.migration.v2" },
+    "preview_kind": { "const": "MIGRATION" },
+    "repository": { "$ref": "#/$defs/safeLine" },
+    "parent_issue": { "$ref": "#/$defs/issue" },
+    "source_state_schema": { "const": "toolkit.github-program.state.v4" },
+    "target_state_schema": { "const": "toolkit.github-program.state.v5" },
+    "source_snapshot_digest": { "$ref": "#/$defs/digest" },
+    "authority_ref": { "$ref": "#/$defs/safeLine" },
+    "expected_revision": { "$ref": "#/$defs/safeLine" },
+    "source_canonical_digest": { "$ref": "#/$defs/digest" },
+    "source_body_digests": { "$ref": "#/$defs/bodyDigests" },
+    "target_canonical_digest": { "$ref": "#/$defs/digest" },
+    "target_managed_body_digests": { "$ref": "#/$defs/bodyDigests" },
+    "target_body_digests": { "$ref": "#/$defs/bodyDigests" },
+    "bootstrap": { "$ref": "#/$defs/bootstrapReport" },
+    "bootstrap_conformance": { "$ref": "#/$defs/bootstrapConformance" },
+    "labels": { "type": "object" },
+    "native_relationships": { "type": "object" },
+    "managed_event_delta": { "type": "object" },
+    "required_receipt_delta": { "type": "object" },
+    "receipt_consumption_plan": { "$ref": "#/$defs/receiptConsumptionPlan" },
+    "operations": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/operation" } },
+    "operations_digest": { "$ref": "#/$defs/digest" },
+    "ordered_operation_ids": { "type": "array", "items": { "$ref": "#/$defs/digest" }, "uniqueItems": true },
+    "expected_snapshot_digest": { "$ref": "#/$defs/digest" },
+    "expected_snapshot": { "type": "object" },
+    "mutation_authority": { "const": "NOT_GRANTED" },
+    "finality_authority": { "const": "NOT_GRANTED" },
+    "preview_only": { "const": true },
+    "preview_id": { "$ref": "#/$defs/digest" }
+  },
+  "$defs": {
+    "issue": { "type": "integer", "minimum": 1 },
+    "safeLine": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\r\\n]+$" },
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "bodyDigests": {
+      "type": "object",
+      "required": ["parent", "children", "prs"],
+      "additionalProperties": false,
+      "properties": {
+        "parent": { "$ref": "#/$defs/digest" },
+        "children": { "type": "object", "additionalProperties": { "$ref": "#/$defs/digest" } },
+        "prs": { "type": "object", "additionalProperties": { "$ref": "#/$defs/digest" } }
+      }
+    },
+    "bootstrapConformance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["valid", "repository", "parent_issue", "apply_operation", "ownership"],
+      "properties": {
+        "valid": { "const": true },
+        "repository": { "$ref": "#/$defs/safeLine" },
+        "parent_issue": { "$ref": "#/$defs/issue" },
+        "apply_operation": { "const": false },
+        "ownership": { "const": "repository-code-via-PR" }
+      }
+    },
+    "bootstrapReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["before", "candidate", "after", "candidate_digest", "conformance"],
+      "properties": {
+        "before": {},
+        "candidate": { "type": "object" },
+        "after": {},
+        "candidate_digest": { "$ref": "#/$defs/digest" },
+        "conformance": { "$ref": "#/$defs/bootstrapConformance" }
+      }
+    },
+    "receiptConsumptionPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transition", "required_receipt_ids", "receipt_inventory_digest", "persist_before_dependent_progression", "read_back_before_apply", "persisted_in_preview", "on_missing_conflicting_or_stale"],
+      "properties": {
+        "transition": { "const": "PREVIEW_TO_AUTHORISED_APPLY" },
+        "required_receipt_ids": { "type": "array", "maxItems": 500, "uniqueItems": true, "items": { "$ref": "#/$defs/digest" } },
+        "receipt_inventory_digest": { "$ref": "#/$defs/digest" },
+        "persist_before_dependent_progression": { "const": true },
+        "read_back_before_apply": { "const": true },
+        "persisted_in_preview": { "const": false },
+        "on_missing_conflicting_or_stale": { "const": "FAIL_CLOSED" }
+      }
+    },
+    "operation": {
+      "type": "object",
+      "required": ["kind", "target", "before_digest", "after", "after_digest", "operation_id"],
+      "properties": {
+        "kind": {
+          "enum": ["migrate-parent-body", "migrate-child-body", "migrate-pr-body", "managed-event", "labels", "native-relationships"]
+        },
+        "target": {},
+        "before_digest": { "$ref": "#/$defs/digest" },
+        "after": {},
+        "after_digest": { "$ref": "#/$defs/digest" },
+        "operation_id": { "$ref": "#/$defs/digest" }
+      },
+      "additionalProperties": true
+    }
+  }
+}

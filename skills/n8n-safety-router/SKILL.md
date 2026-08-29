@@ -1,0 +1,65 @@
+---
+name: n8n-safety-router
+description: Use when working on any n8n task, including [official n8n Skills](https://github.com/n8n-io/skills), using-n8n-skills, n8n workflow JSON, official n8n MCP, n8n_live, workflow creation, workflow updates, helper scripts, import/export, validation, credentials, webhook IDs, workflow activation, execution, repo/live sync, and n8n safety. Always apply before n8n workflow or live n8n work.
+---
+
+<!--
+Canonical Toolkit skill surface. Edit this skill folder directly.
+Source: skills/n8n-safety-router/SKILL.md
+-->
+
+# n8n Safety Router
+
+Use this skill before any n8n workflow, helper-script, MCP, or live n8n work.
+
+## Mandatory Rule
+
+Read [n8n-safety-rules.md](n8n-safety-rules.md) before planning or editing n8n material. Those rules are the full operating contract for [official n8n Skills](https://github.com/n8n-io/skills), their entry-point meta-skill currently named `using-n8n-skills`, n8n workflow JSON, official n8n MCP, `n8n_live`, workflow creation, workflow updates, helper scripts, import/export, validation, credentials, webhook IDs, activation, execution, repo/live sync, and n8n safety.
+
+## Adapter Auto-Check Protocol
+
+When this skill is selected for an n8n task, automatically check the current target repo's canonical active instruction file:
+
+- `AGENTS.md`
+
+Root `AGENTS.md` is the only repo-local target for the n8n adapter. `CLAUDE.md`, `GEMINI.md`, and `.agents/rules/00-agent-toolkit-bootstrap.md` are platform shims owned by `repository-agent-rules`; do not append the n8n adapter to those shim files.
+
+If `AGENTS.md` exists and the adapter is missing or stale, run [scripts/install-n8n-agent-adapter.cjs](scripts/install-n8n-agent-adapter.cjs) in `--dry-run` mode with `--target auto` or `--target agents`. Show the dry-run result to the user. Ask for explicit current-turn approval naming `AGENTS.md` before running `--write`. If approved, run the installer with `--write`.
+
+The installer writes the canonical managed n8n adapter block sourced from `repo/contracts/agent-rules/n8n-safety-router-adapter.md`. It must not write a separate Claude, Gemini, or platform-specific n8n adapter variant.
+
+Do not silently auto-install adapters. If declined, continue the current n8n task using the already-loaded `n8n-safety-router`, but tell the user that future sessions/tools may not auto-load the rules unless `AGENTS.md` or the skill is available.
+
+`--target auto` is discovery only. It previews or patches existing `AGENTS.md`; it must not choose a new adapter target for the user and must not patch platform shim files.
+
+If `AGENTS.md` does not exist, stop and ask the adapter-target question before continuing the n8n task, unless the user already answered that target question in the current turn. Ask this even during read-only or no-modify tasks. Read-only/no-modify blocks file writes and `--write`; it does not block the adapter-target question.
+
+Present these options neutrally:
+
+- Install or repair repo-local `AGENTS.md` with `repository-agent-rules`.
+- Create or update only `AGENTS.md` with the n8n adapter.
+- `none`.
+
+The answer `none` is allowed and must be respected.
+
+If Claude Code or Antigravity shim files are missing, stale, or unmanaged, use `repository-agent-rules` to install or repair those shims. Do not use this n8n adapter installer for shim repair.
+
+## Boundaries
+
+- This skill owns the full n8n operating ruleset.
+- `n8n-environment-setup` owns installation, environment setup, hosting, tunnels, [official n8n Skills](https://github.com/n8n-io/skills) install notes, official instance-level MCP config, and platform setup notes.
+- `n8n-workflow-transport` owns offline sanitisation, validation, comparison, manual import/export preparation, and safe workflow-file transport preparation.
+- Workflow JSON examples under `repo/tests/fixtures/n8n-workflows/` are test-only evidence, not selectable products or templates for installation.
+
+## Safety
+
+- Use [official n8n Skills](https://github.com/n8n-io/skills) first, then use the official n8n MCP tools that are actually available in the connected instance. Discover available n8n MCP tools before relying on validation, build, update, execution, or inspection capabilities.
+- Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, archive/delete, credential, source-watch, deployment, or production actions without explicit current-turn approval naming the target and allowed operation.
+- Keep workflows inactive or unpublished by default unless the user explicitly asks otherwise.
+- Never put secrets, credentials, tokens, webhook secrets, private keys, `.env` values, credential bindings, or live import/export payloads into repo files.
+
+## Optional Adapters
+
+The AGENTS adapter under [adapters/](adapters/) is a brief canonical managed snippet for root `AGENTS.md`. It points agents to this skill without copying the full rules into global always-on context.
+
+The installer script under [scripts/install-n8n-agent-adapter.cjs](scripts/install-n8n-agent-adapter.cjs) supports `--dry-run` and `--write` for `AGENTS.md` only. Do not run it with `--write` unless the user explicitly approves patching `AGENTS.md` in the current turn. Do not use it to patch `CLAUDE.md` or `GEMINI.md`.

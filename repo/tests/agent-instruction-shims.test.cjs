@@ -7,13 +7,13 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const executionPromptPath = 'repo/contracts/agent-rules/ai-coding-agent-execution.md';
-const n8nAdapterPath = 'repo/contracts/agent-rules/n8n-agent-rules-adapter.md';
+const n8nAdapterPath = 'repo/contracts/agent-rules/n8n-safety-router-adapter.md';
 const repoLocalSourceRoot = 'repo/contracts/agent-rules/repo-local';
-const repoLocalPublishedRoot = 'skills/ai-coding-agent-rules/repo-local';
+const repoLocalPublishedRoot = 'skills/repository-agent-rules/repo-local';
 const legacyProjectToken = '_' + 'projects';
 const legacyCuratedToken = 'curated_' + 'output_for_ai';
 const legacyAgentRulesMainRoot = `${legacyProjectToken}/development/ai-coding-agent-rules/_main`;
-const legacyAgentRulesCuratedRoot = `${legacyProjectToken}/development/ai-coding-agent-rules/${legacyCuratedToken}/skills/ai-coding-agent-rules`;
+const legacyAgentRulesCuratedRoot = `${legacyProjectToken}/development/ai-coding-agent-rules/${legacyCuratedToken}/skills/repository-agent-rules`;
 const toolkitBegin = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->`;
 const toolkitEnd = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:END GLOBAL-AGENTS.MD-TEMPLATE -->`;
 const n8nBegin = `<!-- AI-AGENT-TOOLKIT:${n8nAdapterPath}:BEGIN N8N-AGENT-RULES-ADAPTER v1 -->`;
@@ -51,9 +51,9 @@ const repoLocalShimTemplates = [
   }
 ];
 const expectedN8nBlock = `${n8nBegin}
-## n8n Agent Rules Adapter
+## n8n Safety Router Adapter
 
-If the task involves n8n workflows, workflow templates, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, stop and load \`skills/n8n-agent-rules\` before planning or editing.
+If the task involves n8n workflows, workflow fixtures, helper scripts, MCP, import/export, live n8n, credentials, or workflow JSON, stop and load \`skills/n8n-safety-router\` before planning or editing.
 If that skill or its full rules are unavailable, stop and report the limitation instead of continuing.
 Do not run live n8n, Docker, import/export, sync, activation, execution, publish/unpublish, credential, deployment, or production actions without explicit current-turn approval naming the target and allowed operation.
 ${n8nEnd}`;
@@ -89,7 +89,6 @@ const requiredPortablePlaybookFiles = [
   'safety-gates.md',
   'windows-command-hygiene.md'
 ];
-const failedSpeedOnlyC2Prompt = 'Use helpers to finish faster. Small task: count the top-level keys in package.json and report the count. Do not edit files. State whether any helper was spawned.';
 
 function readText(relPath) {
   return fs.readFileSync(path.join(repoRoot, relPath), 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
@@ -203,7 +202,7 @@ test('source structure keeps reusable prompt and adapter partials with no tiny s
   const kept = [
     executionPromptPath,
     n8nAdapterPath,
-    'repo/contracts/agent-rules/n8n-agent-rules.md',
+    'repo/contracts/agent-rules/n8n-safety-rules.md',
     'repo/contracts/agent-rules/toolkit-skill-routing.md'
   ];
   for (const relPath of kept) assert.equal(exists(relPath), true, relPath);
@@ -265,7 +264,7 @@ test('execution prompt requires full-bold user-action questions and generated su
     'repo/contracts/agent-rules/CLAUDE.template.md',
     'repo/contracts/agent-rules/GEMINI.template.md',
     `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
-    'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'
+    'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md'
   ]) {
     const text = readText(relPath);
     assert.match(text, requiredRule, relPath);
@@ -275,32 +274,21 @@ test('execution prompt requires full-bold user-action questions and generated su
   }
 });
 
-test('portable rules require host-profile-aware topology and a complete delegation gate', () => {
+test('portable rules require the compact host-neutral depth-1 topology contract', () => {
   const requiredRules = [
     /## Agent Topology And Delegation/,
-    /Ordinary work begins root-first/,
-    /root-capable verification/,
-    /`setup toolkit` uses no subagents/,
-    /profile\/capacity is a ceiling, never launch permission/,
-    /Unverifiable topology, admission, effort, or non-fast enforcement means root-only/,
-    /Never project controls across hosts or call policy hard enforcement/,
-    /Generic helper\/speed requests, child availability, UAT, or future tests cannot qualify launch/,
-    /Workers require separable concurrent work and concrete critical-path\/wall-clock speedup/,
-    /root's critical task, shorter\/easier child tasks, productive root work/,
-    /Missing\/contradictory declarations refuse/,
-    /Never delegate all work, give a child the longer task while root keeps the easy task/,
-    /Root continues critical work, not waiting\/polling/,
-    /owns integration, conflicts, validation, and final judgment/,
-    /sole verification exception is one fresh direct read-only pre-PR checker/,
-    /worker-speedup fields do not/,
-    /cannot mutate, publish, spawn, or use Fast/,
-    /ADMISSION_DENIED/,
-    /RAM after reservations is the hard gate; CPU is secondary/,
-    /Children default medium, never use Fast or nest/,
-    /Built-in, Security, plugin, multi-worker, third-party, and nested paths get no exception/,
-    /Use `fork_turns="none"` with required context/,
-    /do not claim unsupported controls/
+    /root or parent executor owns integration, validation, conflict resolution, and final judgment/i,
+    /Optional depth-1 subagents may be used only when work is genuinely separable/,
+    /materially accelerates the critical path/,
+    /true isolated context and a minimal self-contained task packet/,
+    /must not spawn or delegate to other subagents/,
+    /Mutating sibling subagents require disjoint mutation ownership and scope/,
+    /Read-only siblings may investigate genuinely separable questions in parallel/,
+    /root or parent remains responsible for integrating and validating every returned result/i,
+    /Model, reasoning, service tier, and route are launch\/controller metadata/,
+    /do not embed them in portable task prompts as product policy unless a runtime explicitly requires them/
   ];
+  const staleRules = /RAM|reservation|CPU|Children default|never use Fast|medium non-fast|special-worker|host-parity|host profile|profile\/capacity|ADMISSION_DENIED|worker-speedup|fork_turns/;
 
   for (const relPath of [
     executionPromptPath,
@@ -308,11 +296,14 @@ test('portable rules require host-profile-aware topology and a complete delegati
     'repo/contracts/agent-rules/CLAUDE.template.md',
     'repo/contracts/agent-rules/GEMINI.template.md',
     `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
-    'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+    'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md',
     'AGENTS.md'
   ]) {
     const text = readText(relPath);
-    for (const rule of requiredRules) assert.match(text, rule, `${relPath}: ${rule}`);
+    const section = text.match(/## Agent Topology And Delegation\n([\s\S]*?)(?=\n## )/)?.[0] || '';
+    assert.ok(section, `${relPath}: agent topology policy section exists`);
+    for (const rule of requiredRules) assert.match(section, rule, `${relPath}: ${rule}`);
+    assert.doesNotMatch(section, staleRules, `${relPath}: stale scheduler or model-route product policy`);
   }
 
   const prompt = readText(executionPromptPath);
@@ -321,23 +312,31 @@ test('portable rules require host-profile-aware topology and a complete delegati
   assert.ok(Buffer.byteLength(section, 'utf8') < 7000, 'agent topology policy stays compact instead of becoming a giant orchestration manual');
 });
 
-test('speed-only C2 wording remains root-only without blocking qualified specialist workflows', () => {
-  assert.match(failedSpeedOnlyC2Prompt, /^Use helpers to finish faster\./);
-  const surfaces = [
+test('portable rules define the deployment branch convention without granting live authority', () => {
+  const requiredRules = [
+    /## Deployment Branch Naming/,
+    /primary purpose is deployment or release-state preparation for a named environment uses `deployment\/<environment>`/,
+    /`deployment\/alpha`/,
+    /`deployment\/staging`/,
+    /`deployment\/production`/,
+    /stable lowercase environment slug/,
+    /Ordinary feature, fix, or refactor branches that are not deployment branches retain their ordinary branch semantics/,
+    /Do not invent `deploy\/`, `release-deploy\/`, bare `prod\/`, bare `staging\/`, or equivalent ad hoc deployment branch alternatives/,
+    /Branch naming never itself grants deployment, promotion, provider mutation, merge, credential, or live-system authority/
+  ];
+  for (const relPath of [
     executionPromptPath,
     'repo/contracts/agent-rules/AGENTS.template.md',
     'repo/contracts/agent-rules/CLAUDE.template.md',
+    'repo/contracts/agent-rules/GEMINI.template.md',
     `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
-    'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
-    'AGENTS.md',
-  ];
-  for (const relPath of surfaces) {
+    'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md',
+    'AGENTS.md'
+  ]) {
     const text = readText(relPath);
-    assert.match(text, /Generic helper\/speed requests/, relPath);
-    assert.match(text, /child availability, UAT, or future tests cannot qualify launch/, relPath);
-    assert.match(text, /Missing\/contradictory declarations refuse/, relPath);
-    assert.match(text, /Never delegate all work/, relPath);
-    assert.match(text, /never use Fast or nest/, relPath);
+    const section = text.match(/## Deployment Branch Naming\n([\s\S]*?)(?=\n## )/)?.[0] || '';
+    assert.ok(section, `${relPath}: deployment branch policy section exists`);
+    for (const rule of requiredRules) assert.match(section, rule, `${relPath}: ${rule}`);
   }
 });
 
@@ -366,7 +365,7 @@ test('portable rules activate GitHub issue tracking only for the applicable work
     'repo/contracts/agent-rules/CLAUDE.template.md',
     'repo/contracts/agent-rules/GEMINI.template.md',
     `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
-    'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+    'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md',
     'AGENTS.md',
   ]) {
     const text = readText(relPath);
@@ -378,19 +377,19 @@ test('repo-local source and published skill templates are local bootstrap templa
   const sourceToPublished = [
     [
       `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
-      'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
+      'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md',
     ],
     [
       `${repoLocalSourceRoot}/CLAUDE.shim.template.md`,
-      'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
+      'skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md',
     ],
     [
       `${repoLocalSourceRoot}/GEMINI.shim.template.md`,
-      'skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
+      'skills/repository-agent-rules/repo-local/GEMINI.shim.template.md',
     ],
     [
       `${repoLocalSourceRoot}/antigravity-bootstrap.template.md`,
-      'skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
+      'skills/repository-agent-rules/repo-local/antigravity-bootstrap.template.md',
     ],
   ];
 
@@ -466,7 +465,7 @@ test('root AGENTS is directly maintained while repo-local block comes from execu
 test('n8n adapter is compact and fail-closed', () => {
   for (const [label, text] of [
     ['repo-local AGENTS managed template', repoLocalPayload(readText(`${repoLocalSourceRoot}/AGENTS.managed.template.md`), 'repo-local AGENTS managed template')],
-    ['published repo-local AGENTS managed template', repoLocalPayload(readText('skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'), 'published repo-local AGENTS managed template')]
+    ['published repo-local AGENTS managed template', repoLocalPayload(readText('skills/repository-agent-rules/repo-local/AGENTS.managed.template.md'), 'published repo-local AGENTS managed template')]
   ]) {
     const n8nBlock = block(text, n8nBegin, n8nEnd, label);
     assert.equal(n8nBlock.trim(), expectedN8nBlock, label);
@@ -474,7 +473,7 @@ test('n8n adapter is compact and fail-closed', () => {
     assert.equal(inner, readText(n8nAdapterPath).trimEnd(), `${label} adapter comes from source partial`);
     assert.ok(Buffer.byteLength(inner, 'utf8') < 700, `${label} adapter text stays compact`);
     assert.ok(Buffer.byteLength(n8nBlock, 'utf8') < 900, `${label} block stays compact`);
-    assert.match(inner, /stop and load `skills\/n8n-agent-rules` before planning or editing/i, label);
+    assert.match(inner, /stop and load `skills\/n8n-safety-router` before planning or editing/i, label);
     assert.match(inner, /skill or its full rules are unavailable, stop and report the limitation instead of continuing/i, label);
     assert.match(inner, /explicit current-turn approval naming the target and allowed operation/i, label);
     for (const requiredTerm of [
@@ -536,11 +535,11 @@ test('active and generated default instruction surfaces exclude PR/VCS workflow 
     `${repoLocalSourceRoot}/CLAUDE.shim.template.md`,
     `${repoLocalSourceRoot}/GEMINI.shim.template.md`,
     `${repoLocalSourceRoot}/antigravity-bootstrap.template.md`,
-    'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md',
-    'skills/ai-coding-agent-rules/repo-local/CLAUDE.shim.template.md',
-    'skills/ai-coding-agent-rules/repo-local/GEMINI.shim.template.md',
-    'skills/ai-coding-agent-rules/repo-local/antigravity-bootstrap.template.md',
-    'skills/ai-coding-agent-rules/SKILL.md'
+    'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md',
+    'skills/repository-agent-rules/repo-local/CLAUDE.shim.template.md',
+    'skills/repository-agent-rules/repo-local/GEMINI.shim.template.md',
+    'skills/repository-agent-rules/repo-local/antigravity-bootstrap.template.md',
+    'skills/repository-agent-rules/SKILL.md'
   ]) {
     assert.equal(exists(relPath), true, relPath);
     assertNoForbiddenDefaultPromptPhrases(readText(relPath), relPath);
@@ -565,7 +564,7 @@ test('current managed outputs use source-aware markers only', () => {
     'AGENTS.md',
     'README.md',
     `${repoLocalSourceRoot}/AGENTS.managed.template.md`,
-    'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'
+    'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md'
   ]) {
     const text = readText(relPath);
     for (const marker of staleMarkers) assert.equal(text.includes(marker), false, `${relPath}: ${marker}`);
@@ -574,10 +573,10 @@ test('current managed outputs use source-aware markers only', () => {
 
 test('published skill docs focus on repo-local automatic setup', () => {
   for (const relPath of [
-    'skills/ai-coding-agent-rules/README.md',
-    'skills/ai-coding-agent-rules/SKILL.md',
-    'skills/ai-coding-agent-rules/README.md',
-    'skills/ai-coding-agent-rules/SKILL.md'
+    'skills/repository-agent-rules/README.md',
+    'skills/repository-agent-rules/SKILL.md',
+    'skills/repository-agent-rules/README.md',
+    'skills/repository-agent-rules/SKILL.md'
   ]) {
     const text = readText(relPath);
     assert.match(text, /repo\/folder-local|repo-local/i, relPath);
@@ -609,14 +608,14 @@ test('root README platform guidance requires AGENTS before platform shims', () =
   assert.doesNotMatch(section, /if using the Antigravity bootstrap/);
   assert.doesNotMatch(section, /(?:^|\n)\s*[1-9]\)/);
   assert.doesNotMatch(section, /and\/or/);
-  assert.doesNotMatch(section, /skills\/ai-coding-agent-rules\/(?:AGENTS|CLAUDE|GEMINI)\.template\.md/);
+  assert.doesNotMatch(section, /skills\/repository-agent-rules\/(?:AGENTS|CLAUDE|GEMINI)\.template\.md/);
   assert.doesNotMatch(section, /start from \[`(?:CLAUDE|GEMINI)\.template\.md`\]/);
 });
 
 test('skill README documents required file sets and shim dependency', () => {
   for (const relPath of [
-    'skills/ai-coding-agent-rules/README.md',
-    'skills/ai-coding-agent-rules/README.md'
+    'skills/repository-agent-rules/README.md',
+    'skills/repository-agent-rules/README.md'
   ]) {
     const text = readText(relPath);
     assert.match(text, /Do not install a shim alone/i, relPath);
@@ -645,8 +644,8 @@ test('skill README documents required file sets and shim dependency', () => {
 
 test('n8n local setup README describes automatic repo-local instruction checks', () => {
   for (const relPath of [
-    'skills/n8n-local-setup/README.md',
-    'skills/n8n-local-setup/README.md'
+    'skills/n8n-environment-setup/README.md',
+    'skills/n8n-environment-setup/README.md'
   ]) {
     const text = readText(relPath);
     assert.match(text, /Before repo file edits, automatically check repo-local agent instructions\./, relPath);
@@ -658,8 +657,8 @@ test('n8n local setup README describes automatic repo-local instruction checks',
 
 test('skill instructions add only target platform shims by default', () => {
   for (const relPath of [
-    'skills/ai-coding-agent-rules/SKILL.md',
-    'skills/ai-coding-agent-rules/SKILL.md'
+    'skills/repository-agent-rules/SKILL.md',
+    'skills/repository-agent-rules/SKILL.md'
   ]) {
     const text = readText(relPath);
     assert.match(text, /Check only the required files for the selected platform/i, relPath);

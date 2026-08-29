@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.github-program.managed-event.v3",
+  "title": "Canonical GitHub programme managed event v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "event_type",
+    "repository",
+    "parent_issue",
+    "entity",
+    "source_state_schema",
+    "from_state_digest",
+    "to_state_digest",
+    "authority_ref",
+    "authority_digest",
+    "candidate_binding_digest",
+    "lane_id",
+    "epoch_id",
+    "gate",
+    "lock",
+    "fence_id",
+    "prior_event_id",
+    "receipt_id",
+    "consumed_receipt_ids",
+    "receipt_inventory_digest",
+    "event_id"
+  ],
+  "properties": {
+    "schema": { "const": "toolkit.github-program.managed-event.v3" },
+    "event_type": { "enum": ["canonical_initialisation", "canonical_transition", "migration", "recovery_transition"] },
+    "repository": { "$ref": "#/$defs/safeLine" },
+    "parent_issue": { "$ref": "#/$defs/issue" },
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "number"],
+      "properties": {
+        "kind": { "enum": ["parent", "child", "pr"] },
+        "number": { "$ref": "#/$defs/issue" }
+      }
+    },
+    "source_state_schema": { "enum": [null, "toolkit.github-program.state.v4", "toolkit.github-program.state.v5", "toolkit.github-program.legacy-state.v1"] },
+    "from_state_digest": { "$ref": "#/$defs/digest" },
+    "to_state_digest": { "$ref": "#/$defs/digest" },
+    "authority_ref": { "$ref": "#/$defs/safeLine" },
+    "authority_digest": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }]
+    },
+    "candidate_binding_digest": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }]
+    },
+    "lane_id": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/safeId" }]
+    },
+    "epoch_id": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/safeId" }]
+    },
+    "gate": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/safeId" }]
+    },
+    "lock": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/safeId" }]
+    },
+    "fence_id": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/safeId" }]
+    },
+    "prior_event_id": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }]
+    },
+    "receipt_id": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }]
+    },
+    "consumed_receipt_ids": {
+      "type": "array",
+      "maxItems": 500,
+      "items": { "$ref": "#/$defs/digest" },
+      "uniqueItems": true
+    },
+    "receipt_inventory_digest": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }]
+    },
+    "event_id": { "$ref": "#/$defs/digest" }
+  },
+  "$defs": {
+    "issue": { "type": "integer", "minimum": 1 },
+    "safeId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "safeLine": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\r\\n]+$" },
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

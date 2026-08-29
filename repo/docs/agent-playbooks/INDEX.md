@@ -39,7 +39,7 @@ Read: `repo/docs/agent-playbooks/repo-local-backup-and-ignore-hygiene.md`.
 
 ## Match: Repo-Local Agent Instruction Work
 
-Triggers: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.agents/rules`, managed markers, agent bootstrap, repo-local templates, instruction shims, or the `ai-coding-agent-rules` project.
+Triggers: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.agents/rules`, managed markers, agent bootstrap, repo-local templates, instruction shims, or `repository-agent-rules`.
 
 Read: `repo/docs/agent-playbooks/repo-local-agent-instructions.md`.
 
@@ -83,7 +83,7 @@ Do not claim CI passed unless checked. Do not do reviews from metadata alone.
 
 Triggers: final audit, completion audit, production-readiness audit, release-candidate audit, launch-readiness audit, QA pass, "make sure everything works", "is this production ready?", `/goal` readiness remediation, audit against original docs, security-readiness check, or final readiness check.
 
-Read: `skills/project-completion-audit/SKILL.md` when final readiness work is present.
+Read: `skills/release-readiness-audit/SKILL.md` when final readiness work is present.
 
 Only lightweight preflight is allowed before explicit confirmation. Stop before broad validation, full builds, browser sweeps, security scans, deployment checks, external-service checks, or remediation until the user confirms the target and scope.
 

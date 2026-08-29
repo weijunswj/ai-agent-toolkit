@@ -110,15 +110,15 @@ test('noncanonical source paths fail closed even without a duplicate', () => {
 });
 
 test('noncanonical root-surface paths fail closed even without a duplicate', () => {
-  const canonicalRoot = 'skills/ui-ux-secure-frontend-design/references/design-md-contract.md';
+  const canonicalRoot = 'skills/frontend-art-direction/references/design-md-contract.md';
   const variants = [
     `./${canonicalRoot}`,
-    'skills//ui-ux-secure-frontend-design/references/design-md-contract.md',
-    'skills/ui-ux-secure-frontend-design/./references/design-md-contract.md',
-    'skills\\ui-ux-secure-frontend-design\\references\\design-md-contract.md',
-    'skills/ui-ux-secure-frontend-design/references/../references/design-md-contract.md',
+    'skills//frontend-art-direction/references/design-md-contract.md',
+    'skills/frontend-art-direction/./references/design-md-contract.md',
+    'skills\\frontend-art-direction\\references\\design-md-contract.md',
+    'skills/frontend-art-direction/references/../references/design-md-contract.md',
     `/${canonicalRoot}`,
-    'C:\\skills\\ui-ux-secure-frontend-design\\references\\design-md-contract.md'
+    'C:\\skills\\frontend-art-direction\\references\\design-md-contract.md'
   ];
 
   for (const rootSurfacePath of variants) {
@@ -162,7 +162,7 @@ test('active source locks allow one source mapping to different root surfaces', 
     const original = lock.files.find((entry) => entry.source_path === 'docs/spec.md');
     lock.files.push({
       ...original,
-      root_surface_path: 'skills/ui-ux-secure-frontend-design/README.md',
+      root_surface_path: 'skills/frontend-art-direction/README.md',
       notes: 'Reviewed alternative local adaptation surface for the focused audit fixture.'
     });
     writeLock(cwd, lock);

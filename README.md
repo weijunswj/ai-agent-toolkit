@@ -11,7 +11,7 @@ This repo keeps reusable AI-agent material in a direct canonical layout:
 - [repo/](repo/) contains maintenance docs, scripts, tests, provenance, and validation policy.
 - [.codex-plugin/](.codex-plugin/) and [.claude-plugin/](.claude-plugin/) contain platform-specific native plugin metadata.
 
-Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised as a supported surface for now. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references remain inside [skills/n8n-local-setup/](skills/n8n-local-setup/) as secondary n8n setup material.
+Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised as a supported surface for now. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references remain inside [skills/n8n-environment-setup/](skills/n8n-environment-setup/) as secondary n8n setup material.
 
 ## Quick Start
 
@@ -45,7 +45,7 @@ More setup context lives in [How To Use](repo/docs/HOW-TO-USE.md#install-toolkit
 | Term | What it means |
 |---|---|
 | Skill | A copyable AI-agent folder with instructions, references, templates, metadata, and helper files. |
-| MCP | Not a repo-wide shipped/generated surface in this repo right now. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references live inside the n8n local setup skill as secondary material. |
+| MCP | Not a repo-wide shipped/generated surface in this repo right now. [Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references live inside n8n Environment Setup as secondary material. |
 | Contract | A schema, policy, fixture, template, or reviewed source input under [repo/contracts/](repo/contracts/). |
 | Native plugin metadata | Platform-specific `.codex-plugin/**` or `.claude-plugin/**` metadata that lets Codex and Claude Code update Toolkit through their own plugin systems. |
 
@@ -66,23 +66,21 @@ Skills are copyable folder packages. The portable package unit is `skills/<skill
 
 | Skill | Use |
 |---|---|
-| [AI Coding Agent Rules](skills/ai-coding-agent-rules/) | Install generic execution-first agent rules for supported coding agents. |
+| [Repository Agent Rules](skills/repository-agent-rules/) | Install and maintain execution-first repository rules for supported coding agents. |
 | [Toolkit Setup](skills/toolkit-setup/) | Route Toolkit plugin setup, Windows hook repair, repo-backed auto-update, local bridge setup, OpenCode bridge support, Antigravity 2 adapter support, audit, sync, disable, stale-state, and bridge troubleshooting requests to the shared setup subsystem. |
-| [n8n Agent Rules](skills/n8n-agent-rules/) | Apply the full n8n operating contract before n8n workflow, MCP, import/export, credential, execution, or live-instance work. |
-| [n8n Local Setup](skills/n8n-local-setup/) | Set up n8n with the localhost/ngrok dev stack, the separate production Cloudflare Tunnel self-hosting stack for local/CGNAT machines, Hostinger Coolify VPS guidance for hosted n8n, launcher/menu use, skills-first agent routing, and [official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references. |
-| [n8n Workflow Helper Scripts](skills/n8n-workflow-helper-scripts/) | Sanitise, validate, export, import, compare, prepare, or sync n8n workflow JSON safely. |
-| [n8n Workflow Templates](skills/n8n-workflow-templates/) | Review reusable public inactive n8n workflow JSON templates. |
-| [Secure CI/CD Installer](skills/secure-cicd-installer/) | Plan CI/CD setup with approval gates, GitHub Actions notes, and status templates. |
-| [Context-Preserving AI Publisher](skills/context-preserving-ai-publisher/) | Maintain source-traceable skills, contracts, provenance, templates, and audits. |
-| [Agent Skill Supply-Chain Audit](skills/agent-skill-supply-chain-audit/) | Audit third-party agent skills for provenance, license, safety, conversion fit, and token-bloat risk. |
-| [Local AI Stack Safety](skills/local-ai-stack-safety/) | Review local AI runtimes, model downloads, local AI web UIs, and endpoint exposure before setup. |
+| [n8n Safety Router](skills/n8n-safety-router/) | Apply the full n8n operating contract before n8n workflow, MCP, import/export, credential, execution, or live-instance work. |
+| [n8n Environment Setup](skills/n8n-environment-setup/) | Set up n8n development, production-tunnel, or hosted environments, backups, launchers, official Skills, and instance-level MCP references. |
+| [n8n Workflow Transport](skills/n8n-workflow-transport/) | Sanitise, validate, compare, export, or prepare n8n workflow JSON for separately approved transport. |
+| [Secure CI/CD](skills/secure-ci-cd/) | Plan security-first CI/CD with approval gates, GitHub Actions guidance, and status templates. |
+| [Skill Product Review](skills/skill-product-review/) | Audit third-party agent products and maintain approved source-traceable skills, provenance, templates, and audits. |
+| [Local AI Safety](skills/local-ai-safety/) | Review local AI runtimes, model downloads, local AI web UIs, and endpoint exposure before setup. |
 | [Managed App Foundation Review](skills/managed-app-foundation-review/) | Compare low-cost managed or owner-hosted foundations before custom-building auth, backend, database, workflow automation, CRM, forms, email, analytics, ops, and account-security surfaces. |
-| [N5 GitHub Governance and Truthful PR-Review Reconciler](skills/github-governance-review-reconciler/) | Explicit-only current-main N5 parent/direct-child governance, bounded reconciliation, truthful PR-review inventory and disposition evidence, and Deferred Findings without review mutation or Web finality. |
-| [Project Completion Audit](skills/project-completion-audit/) | Run guarded final readiness preflight, audit reporting, security-readiness review, and remediation batches before calling a repo release-ready. |
+| [GitHub Program Reconciler](skills/github-program-reconciler/) | Mandatory managed-programme lifecycle preflight plus preview-bound native reconciliation and readback proof; implicit discovery never grants mutation, Ready, merge, or Web finality. |
+| [Release Readiness Audit](skills/release-readiness-audit/) | Run guarded release-readiness preflight, audit reporting, security review, and remediation batches. |
 | [Codex SSH Hostinger Coolify Setup Maintainer](skills/codex-ssh-hostinger-coolify-setup-maintainer/) | Guide Codex through Hostinger VPS plus Coolify deployment setup, SSH preflight, daily security checks, intrusion-signal review, optional Telegram/email maintenance alerts, and incident response with owner approval gates. |
 | [Self-Hosted Service Safety](skills/self-hosted-service-safety/) | Review non-n8n Docker/VPS, tunnel, public-port, credential, backup, SSH, traffic-log, and first-run safety. |
-| [Secure UI/UX Frontend Design](skills/ui-ux-secure-frontend-design/) | Design or review frontend work with accessibility, responsive, privacy, and security guardrails. |
-| [Windows Localhost Workflows](skills/windows-localhost-workflows/) | Start and verify Windows localhost dev services. |
+| [Frontend Art Direction](skills/frontend-art-direction/) | Establish distinctive frontend direction or review implementation against an approved design with accessibility, privacy, and security guardrails. |
+| [Windows Local Dev Services](skills/windows-local-dev-services/) | Start, verify, and troubleshoot Windows local development services. |
 
 ## Install Skills By Platform
 
@@ -93,7 +91,7 @@ This section is only for manually copying Toolkit-owned skill folders under [ski
 
 Copy the whole `skills/<skill-name>/` folder into **ANY ONE** supported location for the target platform. Keep `README.md`, `references/`, `templates/`, `agents/`, and other supporting files beside `SKILL.md` when present.
 
-`AGENTS.md` is the shared managed instruction file inside the target repo. For portable installs, create or merge it from [repo-local/AGENTS.managed.template.md](skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md), not from this toolkit repo's root [AGENTS.md](AGENTS.md). Claude Code and Antigravity 2 use tiny shims that point back to the target repo's `AGENTS.md`; do not install a shim by itself. Antigravity 2 also uses `.agents/rules/00-agent-toolkit-bootstrap.md` as a tiny bootstrap, but the target repo's `AGENTS.md` remains canonical.
+`AGENTS.md` is the shared managed instruction file inside the target repo. For portable installs, create or merge it from [repo-local/AGENTS.managed.template.md](skills/repository-agent-rules/repo-local/AGENTS.managed.template.md), not from this toolkit repo's root [AGENTS.md](AGENTS.md). Claude Code and Antigravity 2 use tiny shims that point back to the target repo's `AGENTS.md`; do not install a shim by itself. Antigravity 2 also uses `.agents/rules/00-agent-toolkit-bootstrap.md` as a tiny bootstrap, but the target repo's `AGENTS.md` remains canonical.
 
 | Platform | Manual Toolkit-owned skill folder locations | Active instruction files | Reference |
 |---|---|---|---|
@@ -110,7 +108,7 @@ Repo-wide MCP is intentionally not shipped, generated, maintained, or advertised
 
 The supported path is direct and skills-first: humans and agents use `skills/**` and `repo/**`.
 
-[Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references remain under [skills/n8n-local-setup/](skills/n8n-local-setup/) as secondary n8n setup material. They are not a repo-wide MCP surface.
+[Official n8n Skills](https://github.com/n8n-io/skills) plus instance-level MCP references remain under [skills/n8n-environment-setup/](skills/n8n-environment-setup/) as secondary n8n setup material. They are not a repo-wide MCP surface.
 
 ## Folder Map
 
@@ -163,13 +161,12 @@ git diff --check
 - `repo/source-watch/provenance/**/SOURCE-LOCK.json` contains only active third-party attribution pins. Each lock records the upstream repo, ref, commit, update policy, attribution requirement, allowlist, and exact blob pins for retained copied or adapted files.
 - Scheduled source-watch is PR-notification-only. It may compare active source-lock pins and advisory targets with upstream GitHub commits, then open or refresh a stable review PR. It must not copy upstream files, change source-lock/advisory records, execute upstream code, auto-merge, push to main, run live n8n actions, or treat notification as approval. Real updates require a separate human-approved PR.
 - The toolkit maintains one direct canonical tree. New Toolkit skills are created at `skills/**` paths after Skill Creation Center review; contracts, runtime, tests, and docs are created at canonical `repo/**` paths. Do not introduce secondary ownership, publication, packaging, or generic synchronization layers.
-- The retained deterministic synchronizers remain narrow: `repo/scripts/sync-repo-doc-contract.cjs` maintains only the managed source-of-truth block, while `repo/scripts/sync-agent-instruction-shims.cjs` maintains root/repo-local instruction shims and exactly four portable n8n safety derivatives sourced from `repo/contracts/agent-rules/n8n-agent-rules.md`:
-  - `skills/n8n-agent-rules/n8n-agent-rules.md`
-  - `skills/n8n-local-setup/references/n8n-agent-rules.md`
-  - `skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md`
-  - `skills/n8n-workflow-templates/references/n8n-agent-rules.md`
+- The retained deterministic synchronizers remain narrow: `repo/scripts/sync-repo-doc-contract.cjs` maintains only the managed source-of-truth block, while `repo/scripts/sync-agent-instruction-shims.cjs` maintains root/repo-local instruction shims and exactly three portable n8n safety derivatives sourced from `repo/contracts/agent-rules/n8n-safety-rules.md`:
+  - `skills/n8n-safety-router/n8n-safety-rules.md`
+  - `skills/n8n-environment-setup/references/n8n-safety-rules.md`
+  - `skills/n8n-workflow-transport/references/n8n-safety-rules.md`
 - This n8n derivative set is a bounded portable/local safety-context exception. Use the exact retained synchronizer command for repair; no unspecified generic `run sync` command exists.
 - `.codex-plugin/` and `.claude-plugin/` contain native plugin metadata for the current Toolkit package. They remain platform-separated and must not be used to cross-update the other native platform.
-- This repo intentionally does not ship or maintain a repo-wide MCP generated surface. Official n8n Skills plus instance-level MCP references remain inside `skills/n8n-local-setup/` as secondary n8n setup material.
+- This repo intentionally does not ship or maintain a repo-wide MCP generated surface. Official n8n Skills plus instance-level MCP references remain inside `skills/n8n-environment-setup/` as secondary n8n setup material.
 - All retained skill/runtime context must remain local, complete enough to use, and traceable through direct repository paths or the two retained third-party provenance records. External links may support provenance but must not be required for normal execution.
 <!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:END SOURCE-OF-TRUTH-CONTRACT -->

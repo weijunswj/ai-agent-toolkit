@@ -1,0 +1,31 @@
+{
+  "schema_version": 2,
+  "product_id": "product-name",
+  "verdict": "constrain",
+  "canonical_paths": [
+    "skills/product-name/SKILL.md",
+    "skills/product-name/references/source-adapted.md"
+  ],
+  "provenance_record": "repo/source-watch/provenance/product-name/SOURCE-LOCK.json",
+  "attribution_required": true,
+  "included_material": [
+    {
+      "source_path": "path/in/source-adapted.md",
+      "canonical_path": "skills/product-name/references/source-adapted.md",
+      "mode": "adapted",
+      "reason": "Retains the reviewed domain-specific guidance."
+    }
+  ],
+  "excluded_material": [
+    {
+      "source_path": "scripts/install.sh",
+      "reason": "Executable installer is outside the approved instruction-only scope."
+    }
+  ],
+  "requires_mutation_approval": true,
+  "live_actions": "explicit_current_turn_confirmation_only",
+  "validation": [
+    "node repo/scripts/validate-toolkit.cjs",
+    "node repo/scripts/audit-project-source-locks.cjs"
+  ]
+}

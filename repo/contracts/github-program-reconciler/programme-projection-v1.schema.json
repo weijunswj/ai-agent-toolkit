@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.github-program.projection.v1",
+  "title": "Programme projection digest envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "repository", "parent_issue", "kind", "number", "canonical_digest", "projection_digest", "extension_digest"],
+  "properties": {
+    "schema": { "const": "toolkit.github-program.projection.v1" },
+    "repository": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\r\\n]+$" },
+    "parent_issue": { "type": "integer", "minimum": 1 },
+    "kind": { "enum": ["parent", "child", "pr"] },
+    "number": { "type": "integer", "minimum": 1 },
+    "canonical_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "projection_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "extension_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

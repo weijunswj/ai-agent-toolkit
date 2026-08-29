@@ -1,0 +1,222 @@
+{
+  "policy_version": "toolkit.n5.github-program-reconciler.policy.v1",
+  "design_lock": "DL-S2-GITHUB-PROGRAM-001",
+  "six_root_contract_integrity": { "b1_repository_identity": true, "b2_lifecycle_and_pr_uniqueness": true, "b3_review_inventory_evidence": true, "b4_shared_transaction_registry": true, "b5_proof_gated_compaction": true, "b6_initialise_and_migrate": true },
+  "authority": {
+    "a1": { "sole_mutation_authority": true, "sole_opaque_ticket_authority": true, "operation_type": "github.mutation", "operation_shape": "canonical-typed", "broker": "authority_broker", "target_kind": "github-repository", "canonical_digest_source": ["operationDigest", "targetDigest"], "mutation_actions": { "initialise": "n5.initialise", "migrate": "n5.migrate", "reconcile": "n5.reconcile", "remove": "n5.remove" } },
+    "a2": { "consent_only": true, "capability": "repository.governance", "repository_id_exact_binding": true, "identity_source": ["worktree", "single-local-origin", "a1-remote-validation", "toolkit.repository-identity.v1"], "caller_repository_identity_override": false, "widens_task": false, "grants_review_mutation": false, "grants_finality": false },
+    "a3": { "durable_contract_count": 5, "finality_authority": false },
+    "a4": { "independent_assurance": true, "web_finality_handoff": true, "review_thread_mutation": false, "material_predicates": ["applies_to_current_candidate", "identifies_accepted_requirement", "concrete_current_failure", "evidence_reproducible", "material_impact", "in_scope_current"] },
+    "n5": { "user_authority_model": true, "new_authority_or_finality_token": false, "generic_independent_authority_class": false }
+  },
+  "intents": ["inspect", "preview", "initialise", "migrate", "validate", "reconcile", "show", "remove"],
+  "tracker": { "version": "v3", "canonical_parent_count": 1, "direct_sibling_topology": true, "current_max": 1, "flat_queue": true, "competing_subqueues": false, "global_pr_uniqueness": true, "terminal_objective_status_explicit": true, "terminal_completed_requires_accepted_evidence": true, "terminal_failure_does_not_complete": true, "event_log": false, "body_projection": "current-state" },
+  "managed_markers": { "parent": "AI-AGENT-TOOLKIT:N5-PARENT:BEGIN v3 / END", "child": "AI-AGENT-TOOLKIT:N5-CHILD:BEGIN v3 / END", "pr": "AI-AGENT-TOOLKIT:N5-PR:BEGIN v3 / END", "state": "AI-AGENT-TOOLKIT:N5-STATE:BEGIN v1 / END" },
+  "transaction": { "complete_body_required": true, "revision_binding": true, "body_digest_binding": true, "bounded_projection": true, "mechanical_update": true, "pre_write_rebind": true, "single_write": true, "immediate_readback": true, "unrelated_bytes_and_order_proof": true, "body_size_guard": "verified-only", "terminal_compaction": "proof-gated-durable-evidence-only", "terminal_evidence_adapter": "first-party-getTerminalEvidence", "caller_durable_evidence": "equality-assertion-only", "shared_owner_registry": "module-process", "injected_owner_map_cannot_bypass": true, "release_owner_in_finally": true, "legacy_migration": "exact-whole-body-target-v3-or-pre-n5-seven-section-v0", "legacy_residue_detector": "conservative-case-horizontal-spacing-normalized;strict-parser-unchanged;unrelated-prose-not-residue", "concurrent_movement": "fail-closed" },
+  "failure_codes": ["PARENT_BODY_INCOMPLETE", "PARENT_ENTRY_MISSING", "PARENT_ENTRY_DUPLICATE", "PARENT_PARSE_UNCERTAIN", "PARENT_CONCURRENCY_CONFLICT", "PARENT_BYTE_DRIFT", "PARENT_BODY_LIMIT", "PARENT_RECONCILIATION_INCOMPLETE", "N5_REPOSITORY_IDENTITY_MISMATCH", "N5_CONSENT_REQUIRED", "N5_AUTHORITY_REQUIRED", "N5_TRACKER_VERSION_UNSUPPORTED", "N5_REVIEW_INVENTORY_INCOMPLETE", "N5_DF_AMBIGUOUS", "N5_REVIEW_MUTATION_DENIED", "N5_SCOPE_REJECTED", "N5_GOVERNANCE_UNREADY", "N5_SECRET_OR_PRIVATE_DATA_REJECTED", "AUTO_CODE_GOVERNANCE_UNREADY"],
+  "success_codes": ["N5_INSPECTION_READY", "N5_PREVIEW_READY", "N5_VALID", "N5_SHOW_READY", "N5_NOOP", "N5_RECONCILED", "N5_REMOVED", "N5_DF_REGISTERED"],
+  "review": { "inventory_version": "toolkit.n5.review-inventory.v1", "trusted_evidence_version": "toolkit.n5.review-evidence.v1", "trusted_adapter": "first-party-getReviewEvidence", "caller_evidence": "arrays-counts-pagination-flags-digests-equality-assertions-only", "trusted_evidence_required": true, "stale_or_unavailable": "fail-closed", "pagination_evidence": "server-authoritative-pages-cursors-counts", "inventory_before_findings": true, "server_authoritative_pagination_required": true, "explicit_server_authoritative_required": true, "explicit_verifiable_required": true, "expected_candidate_required": true, "represented_pr_identity_required": true, "merged_and_inline_facts_explicit": true, "finding_digest": "recomputed-from-canonical-public-safe-evidence", "complete_pagination_keys": ["pull_requests", "submitted_reviews", "inline_conversations"], "rich_inventory_field": "inventory", "a4_projection_field": "review", "a4_projection": "nested-only", "executor_mutation": false, "executor_may_recommend": true, "controller_final_disposition": true, "thread_mutation": "controller-only", "empty_inventory_is_green": false },
+  "findings": { "materiality_owner": "A4-predicates", "materiality_derived_at_every_ingress": true, "caller_materiality_is_equality_assertion": true, "caller_digest_assertions_only": true, "fresh_revalidation_requires_canonical_a4": true, "materiality_evidence_root_digests_recomputed": true, "material_finding_disposal": "authority-only", "executor_finality": false, "evidence_public_safe": true, "provenance": "source-bound-pr-thread-candidate-and-evidence-digest", "a4_projection_excludes_provenance": true, "disposition_requires_factual_closure_and_evidence": true },
+  "deferred_findings": { "parent_managed": true, "queue": false, "automatic_backlog_issue": false, "index_provenance_revalidation": true, "fresh_finding_evidence_required": true, "canonical_a4_revalidation": true, "canonical_evidence_digest_required": true, "canonical_root_digest_required": true, "caller_materiality_and_digest_assertions_only": true, "material_disposal": "authority-only", "triggers": ["BEFORE_COMPONENT_WORK", "BEFORE_PR_FINALITY", "BEFORE_RELEVANT_OPERATIONAL_BOUNDARY", "FINAL_PROGRAMME_AUDIT"], "dispositions": ["DEFERRED_REVALIDATE", "SATISFIED", "SUPERSEDED", "OBSOLETE", "DISPOSED_NONMATERIAL", "PROMOTED_TO_EXISTING_CHILD", "PROMOTED_TO_CHILD"], "linked_child_field": "linked_child", "promotion": "existing-compatible-unfrozen-direct-child-first; controller-authorised-direct-sibling-only-when-material-and-unowned", "frozen_scope_widening": false, "same_root_convergence": true },
+  "codex_review": { "default": "enabled", "scope": "optional-repository-scoped-capability", "separate_from_ci_g4_web_finality": true, "owner_disabled_explicit": true, "absence_not_green": true, "timers_and_probe_history_durable": false },
+  "auto_code": { "mutation": false, "install": false, "schedule": false, "worker_claim": false, "finality": false, "readiness": "inspection-only" },
+  "historical": { "pr310": "NO_LONGER_APPLICABLE", "pr310_code": "do-not-revive", "318": "SUPERSEDE", "337": "NO_LONGER_APPLICABLE" },
+  "privacy": { "raw_secrets": false, "private_paths": false, "raw_code_blobs": false, "public_safe_evidence_only": true },
+  "mcp": { "status": "not_applicable", "custom_n8n_mcp": false },
+  "programme_v1": {
+    "product": "github-program-reconciler",
+    "design_lock": "DL-S2-GITHUB-PROGRAM-001",
+    "principle": "WEB_DECIDES_RECONCILER_EXECUTES_AND_PROVES",
+    "transaction": [
+      "PREVIEW",
+      "APPLY",
+      "READBACK_VERIFY"
+    ],
+    "predecessor_contract": "repo/contracts/github-program-predecessor-coverage.json",
+    "predecessor_authority": "github:issue-comment:359:5437827030",
+    "native_relationships": {
+      "api_version": "2026-03-10",
+      "sub_issues": [
+        "inspect",
+        "add",
+        "remove",
+        "replace_parent",
+        "reprioritize"
+      ],
+      "dependencies": [
+        "blocked_by.inspect",
+        "blocked_by.add",
+        "blocked_by.remove"
+      ],
+      "markdown_links_canonical": false,
+      "blocked_label_derived_only": true,
+      "trusted_adapter_capability_inspection": true,
+      "caller_capability_booleans": false,
+      "existing_same_repository_issue_inventory_required": true,
+      "issue_creation": false,
+      "unrelated_relationships_preserved": true,
+      "removal_scope": "programme-managed-only"
+    },
+    "materialised_views": [
+      "parent",
+      "child",
+      "pr"
+    ],
+    "surface_contract": "repo/contracts/github-program-reconciler/programme-surface-contract.json",
+    "portable_minimum_required": true,
+    "repository_extensions": "additive-only",
+    "one_line_outcomes": true,
+    "markdown_tables": true,
+    "managed_events": [
+      "lifecycle_transition",
+      "lock_accepted",
+      "candidate_bound",
+      "validation",
+      "g4_or_finality",
+      "blocker",
+      "dependency",
+      "owner_decision",
+      "reconciliation_receipt"
+    ],
+    "managed_labels": [
+      "completed",
+      "current",
+      "queued",
+      "blocked"
+    ],
+    "managed_label_exclusive_count": 1,
+    "managed_label_definitions_reconciled": true,
+    "pr_registry_statuses": [
+      "ACTIVE",
+      "ACCEPTED",
+      "RETIRED"
+    ],
+    "conformance": [
+      "UNMANAGED",
+      "LEGACY_MANAGED",
+      "CURRENT_MANAGED",
+      "DRIFTED_MANAGED"
+    ],
+    "implicit_discovery": {
+      "inspection": true,
+      "preflight": true,
+      "mutation_authority": false,
+      "ready": false,
+      "merge": false,
+      "finality": false
+    },
+    "body_freshness_same_transaction": true,
+    "whole_body_semantic_freshness": {
+      "managed_and_unmanaged_text": true,
+      "one_current_programme_source": true,
+      "structurally_anchored_detection": true,
+      "historical_context_allowed": true,
+      "required_for_readback_and_zero_delta": true
+    },
+    "stale_projection_migration": {
+      "schema": "toolkit.github-program.stale-projection-migration.v2",
+      "exact_repository_entity_body_and_span_binding": true,
+      "trusted_web_adjudication_verifier_required": true,
+      "resulting_body_digest_binding": true,
+      "recognised_structural_grammar_required": true,
+      "historical_transform_preserves_unrelated_bytes": true,
+      "arbitrary_prefix_suffix_selection": false,
+      "arbitrary_owner_prose_rejected": true
+    },
+    "managed_event_inventory": {
+      "stable_event_ids": true,
+      "duplicates_rejected": true,
+      "readback_required": true,
+      "event_bearing_rerun_zero_delta": true
+    },
+    "apply_authority": {
+      "trusted_host_verifier_required": true,
+      "caller_granted_flag": false,
+      "binding": [
+        "repository",
+        "parent_issue",
+        "preview_id",
+        "expected_revision",
+        "current_snapshot_digest",
+        "desired_digest",
+        "operations_digest",
+        "operation_ids"
+      ]
+    },
+    "immediate_rerun": "ZERO_DELTA_ZERO_MUTATION",
+    "incomplete_code": "PARENT_RECONCILIATION_INCOMPLETE"
+  },
+  "programme_v4": {
+    "product": "github-program-reconciler",
+    "design_lock": "DL-S2-GITHUB-PROGRAM-CONVERGENCE-002",
+    "principle": "ONE_CANONICAL_STATE_DERIVES_ALL_CURRENT_VIEWS",
+    "canonical_state_schema": "toolkit.github-program.state.v4",
+    "projection_schema": "toolkit.github-program.projection.v1",
+    "extension_schema": "toolkit.github-program.extensions.v1",
+    "trusted_scope_schema": "toolkit.github-program.scope-grant.v1",
+    "trusted_pr_inspection_schema": "toolkit.github-program.trusted-pr-inspection.v1",
+    "trusted_relationship_inspection_schema": "toolkit.github-program.trusted-relationship-inspection.v1",
+    "migration_schema": "toolkit.github-program.migration.v1",
+    "semantic_authority_count": 1,
+    "comments_are_current_state_authority": false,
+    "derived_surfaces": ["Parent body", "Child bodies", "PR bodies", "managed labels", "native relationship plan", "PR association safety"],
+    "candidate_exact_binding": ["repository", "Parent", "Child", "PR", "branch", "base_ref", "base_sha", "head", "tree", "version", "epoch", "Lock", "role", "completes_child", "registry_status", "live_lifecycle"],
+    "trusted_scope": { "first_party_adapter_only": true, "desired_scope_input_forbidden": true, "exact_equality_before_inspection": true, "relationship_operation_classes": ["CHILD_MEMBERSHIP", "DEPENDENCY_EDGES", "PR_ASSOCIATION"], "relationship_capability_provenance_required": true, "caller_capability_booleans": false },
+    "version_resolution": { "host_configured": true, "repository_generic": true, "exact_head": true, "all_sources_agree": true },
+    "pr_lifecycle": { "ACTIVE": ["OPEN_DRAFT", "OPEN_READY_WITH_FINALITY_AUTHORITY"], "ACCEPTED": ["MERGED_WITH_EVIDENCE"], "RETIRED": ["CLOSED_UNMERGED_WITH_EVIDENCE"] },
+    "extensions": { "typed": true, "target_bound": true, "additive_only": true, "every_rendered_scalar_validated": true, "reserved_semantic_declarations_rejected": true, "programme_markers_and_envelopes_rejected": true, "normalized_alias_rejection": true, "portable_derivation_input": false },
+    "byte_budgets": { "canonical_state": 32768, "managed_body": 57344, "all_projections": 524288, "unit": "UTF-8 bytes" },
+    "managed_events": { "schema": "toolkit.github-program.managed-event.v2", "actual_inventory_inspected": true, "legacy_v1_retained": true, "deterministic_transition_identity": true, "missing_duplicate_or_mutated_rejected": true, "migration_transition_exactly_once": true },
+    "migration_runtime": { "shared_preview_registry": true, "typed_preview_kind": "MIGRATION", "trusted_apply_authority": true, "complete_source_reinspection": true, "exact_ordered_operation_ids": true },
+    "render_integrity": { "before_operation_planning": true, "parse_every_target": true, "exact_marker_and_envelope_counts": true, "exact_managed_bytes": true, "deterministic_round_trip": true },
+    "relationship_authority": { "inspection_echo_required": true, "capability_digest_in_preview_and_apply": true, "every_changed_class_required": true, "composite_operation_digest_bound": true },
+    "readback": { "canonical_digest": true, "projection_digests": true, "labels": true, "managed_events": true, "relationships": true, "immediate_rerun": "ZERO_DELTA_ZERO_MUTATION" },
+    "mutation_authority": false,
+    "ready_authority": false,
+    "merge_authority": false,
+    "finality_authority": false
+  },
+  "programme_v5": {
+    "product": "github-program-reconciler",
+    "design_lock": "DL-S2-GITHUB-PROGRAM-SURFACE-RECOVERY-003",
+    "canonical_state_schema": "toolkit.github-program.state.v5",
+    "migration_input_schema": "toolkit.github-program.state.v4",
+    "surface_contract": "repo/contracts/github-program-reconciler/programme-surface-contract-v5.json",
+    "concurrency": {
+      "authority_modes": ["SINGLE_DEFAULT", "EXPLICIT_BOUNDED"],
+      "default_max_active_lanes": 1,
+      "explicit_authority_digest": true,
+      "multiple_current_requires_explicit_authority": true,
+      "active_lanes_ordered": true,
+      "duplicate_current_rejected": true,
+      "work_claim_overlap": "WRITE/WRITE and WRITE/READ rejected; READ/READ and proven-disjoint claims allowed"
+    },
+      "projections": {
+      "parent_order": ["Goal", "Programme status", "Active work", "Children", "Progress", "Major holds", "Additional context"],
+      "child_order": ["Summary", "Operating contract", "Objective", "Deliverables", "Done when", "Scope", "Out of scope", "Progress", "Achieved", "Remaining", "Epochs / Locks", "PR registry", "Holds", "Boundaries", "Next action", "ELI5", "Additional context"],
+      "pr_order": ["Summary", "Binding", "Exact candidate", "Purpose", "Scope", "Out of scope", "Progress", "Achieved", "Remaining", "Changed surfaces", "Validation / evidence", "Design constraints", "Finality", "ELI5", "Additional context"],
+      "parent_next_action": false,
+      "empty_sections": "None",
+      "extensions_heading": "Additional context"
+    },
+    "parent_surface": {
+      "aggregate_state_precedence": ["HELD", "WEB_DECISION_REQUIRED", "ACTIVE", "COMPLETE", "IDLE"],
+      "programme_status": ["aggregate_state", "concurrency_mode", "active_lane_count", "max_active_lanes", "current_child_ids", "programme_finality_state"],
+      "active_work_columns": ["Child", "State", "Epoch / Gate", "Candidate / PR", "Material hold"],
+      "children_columns": ["Child", "Lifecycle", "Dependencies", "Outcome"],
+      "progress_metrics": ["Completed children / total", "Retired children", "Accepted or retired epochs / total", "Active lanes", "Web-decision-required lanes"],
+      "major_holds": "active blocking holds only",
+      "next_action": false
+    },
+    "lane_gate_states": ["ACTIVE", "RESULT_RECORDED", "WEB_DECISION_REQUIRED", "AWAITING_FINALITY"],
+    "managed_events": { "schema": "toolkit.github-program.managed-event.v3", "canonical_transitions_separate_from_receipts": true, "legacy_events_retained": true, "arbitrary_prose_is_not_receipt": true, "consumed_receipt_ids": true, "receipt_inventory_digest": true, "receipt_readback_required": true },
+    "run_receipts": { "schema": "toolkit.github-program.run-receipt.v1", "types": ["RUN_STARTED", "EXECUTOR_TERMINAL", "G4_TERMINAL", "RUN_INTERRUPTED", "LEASE_EXPIRED", "HOSTED_CHECK", "TRANSITION_PREVIEW"], "required_bindings": ["repository", "parent", "child", "pr", "run_id", "attempt", "role", "epoch", "gate", "lock", "authority_ref", "authority_digest", "body_digest", "candidate", "candidate_digest", "candidate_binding_digest", "lease_id", "monotonic_fence", "lease_issued_at", "lease_expiry_at", "result_classification", "evidence_refs", "evidence_digests", "prior_receipt_id", "producer_timestamp", "receipt_id"], "terminal_persist_before_progression": true, "durable_replay_identity": true, "bounded_bytes": 16384, "receipt_id_algorithm": "sha256(canonical_json(receipt_without_receipt_id))" },
+    "recovery_statuses": ["RUNNING", "LOST", "TERMINAL_UNCONSUMED", "PREVIEWED_NOT_APPLIED", "APPLIED_ACK_LOST", "ALREADY_APPLIED", "STALE_CANDIDATE", "CONFLICTING_TRANSITION", "EXPIRED_FENCE", "G4_UNADJUDICATED", "WEB_DECISION_REQUIRED"],
+    "writer_ownership": { "executor": "code/candidate/structured-evidence", "g4": "read-only evidence", "loop_manager": "receipt persistence/orchestration", "reconciler": "sole canonical state mutation", "web": "architecture/Lock/material judgement/G4/finality" },
+    "bootstrap": { "schema": "toolkit.github-program.controller-bootstrap.v1", "path": ".github/ai-agent-toolkit-programme.json", "semantic_fields": ["schema", "profile", "repository", "parent_issue", "programme_state_schema", "surface_contract_schema", "toolkit_package_version", "toolkit_contract", "conformance", "compatibility"], "target_repository_separate_from_toolkit_contract": true, "exact_revision_path_sha256_required": true, "missing_invalid_unsupported_v5": "PARENT_RECONCILIATION_INCOMPLETE", "bootstrap_file_is_repository_code": true, "bootstrap_file_apply_operation_forbidden": true, "mutable_main": "discovery-migration-guidance-only" },
+    "migration": { "schema": "toolkit.github-program.migration.v2", "v4_to_v5": true, "historical_comments_byte_preserved": true, "unrelated_state_preserved": true, "arbitrary_prose_not_receipts": true, "bootstrap_conformance_separate": true, "receipt_inventory_persist_readback_required": true, "preview_only_without_authority": true },
+    "operation_inventory": { "programme_state_only": true, "canonical_migration_classes": ["migrate-parent-body", "migrate-child-body", "migrate-pr-body", "managed-event", "labels", "native-relationships"], "canonical_convergence_classes": ["parent-body", "child-body", "pr-body", "managed-event", "labels", "native-relationships"], "forbidden_kinds": ["run-receipt", "receipt", "receipt-persistence", "operational-evidence", "evidence", "bootstrap-file", "repository-file", "repo-file"], "receipt_evidence_fields": ["required_receipt_delta", "receipt_consumption_plan"], "receipt_persistence_owner": "loop-manager-supervisor" },
+    "readback": { "exact_candidate_authority_lock_gate_fence": true, "duplicate_tamper_conflict_detection": true, "immediate_rerun": "ZERO_DELTA_ZERO_MUTATION" },
+    "future_scheduler": "not_implemented_in_e3"
+  }
+}

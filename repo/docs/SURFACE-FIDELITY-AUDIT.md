@@ -8,7 +8,7 @@ This audit verifies the direct canonical Toolkit surfaces. It does not rebuild, 
 - `.codex-plugin/**` and `.claude-plugin/**` contain native plugin package metadata.
 - `repo/contracts/**` contains machine contracts, templates, agent-rule inputs, and the Toolkit Local Bridge package source.
 - `repo/source-watch/provenance/**` contains only active third-party attribution locks.
-- No repo-wide `mcp/**` surface is shipped or maintained. Official n8n Skills and instance-level MCP references remain inside `skills/n8n-local-setup/`.
+- No repo-wide `mcp/**` surface is shipped or maintained. Official n8n Skills and instance-level MCP references remain inside `skills/n8n-environment-setup/`.
 - No secondary routing metadata, duplicate package-build path, or privileged publication workflow is part of the maintained topology.
 
 ## Deterministic Audit

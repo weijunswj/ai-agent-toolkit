@@ -25,7 +25,7 @@ Use this checklist when reviewing the direct canonical Toolkit architecture.
 
 ## Design Generator
 
-- [ ] Optional generator lives under [skills/ui-ux-secure-frontend-design/tools/design-system-generator/](../../skills/ui-ux-secure-frontend-design/tools/design-system-generator/).
+- [ ] Optional generator lives under [skills/frontend-art-direction/tools/design-system-generator/](../../skills/frontend-art-direction/tools/design-system-generator/).
 - [ ] It searches local CSV data only.
 - [ ] It contains no network, shell, browser, subprocess, or installer code.
 - [ ] Third-party MIT attribution is preserved.

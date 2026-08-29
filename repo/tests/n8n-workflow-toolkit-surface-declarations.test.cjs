@@ -8,8 +8,8 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const auditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-published-surfaces.cjs');
-const globalErrorHandlerPublishedPath =
-  'skills/n8n-workflow-templates/templates/error-handling/global-error-handler.template.json';
+const globalErrorHandlerFixturePath =
+  'repo/tests/fixtures/n8n-workflows/global-error-handler.template.json';
 
 const unsafeAlertFields = [
   'error_message',
@@ -50,35 +50,35 @@ const subjectAlertFields = [
 ];
 
 const helperScriptOutputs = [
-  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/_export-n8n-workflows-live.cmd',
-  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/_import-n8n-workflows-live.cmd',
-  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/compare-n8n-workflow-credentials.cjs',
-  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/export-n8n-workflows-live.ps1',
-  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/import-n8n-workflows-live.ps1',
-  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/n8n-workflow-sync-menu.ps1',
-  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/prepare-n8n-live-import.cjs',
-  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/resolve-n8n-docker-target.cjs',
-  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/should-import-n8n-workflow.cjs',
-  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/sync-n8n-live-exports.cjs',
-  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/validate-n8n-workflows.cjs',
-  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/_sanitise-n8n-template.cmd',
-  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/prepare-n8n-template.js',
-  'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/sanitise-n8n-template.ps1'
+  'skills/n8n-workflow-transport/templates/helper-scripts/import-export-sync/_export-n8n-workflows-live.cmd',
+  'skills/n8n-workflow-transport/templates/helper-scripts/import-export-sync/_import-n8n-workflows-live.cmd',
+  'skills/n8n-workflow-transport/templates/helper-scripts/import-export-sync/compare-n8n-workflow-credentials.cjs',
+  'skills/n8n-workflow-transport/templates/helper-scripts/import-export-sync/export-n8n-workflows-live.ps1',
+  'skills/n8n-workflow-transport/templates/helper-scripts/import-export-sync/import-n8n-workflows-live.ps1',
+  'skills/n8n-workflow-transport/templates/helper-scripts/import-export-sync/n8n-workflow-sync-menu.ps1',
+  'skills/n8n-workflow-transport/templates/helper-scripts/import-export-sync/prepare-n8n-live-import.cjs',
+  'skills/n8n-workflow-transport/templates/helper-scripts/import-export-sync/resolve-n8n-docker-target.cjs',
+  'skills/n8n-workflow-transport/templates/helper-scripts/import-export-sync/should-import-n8n-workflow.cjs',
+  'skills/n8n-workflow-transport/templates/helper-scripts/import-export-sync/sync-n8n-live-exports.cjs',
+  'skills/n8n-workflow-transport/templates/helper-scripts/import-export-sync/validate-n8n-workflows.cjs',
+  'skills/n8n-workflow-transport/templates/helper-scripts/sanitizer/_sanitise-n8n-template.cmd',
+  'skills/n8n-workflow-transport/templates/helper-scripts/sanitizer/prepare-n8n-template.js',
+  'skills/n8n-workflow-transport/templates/helper-scripts/sanitizer/sanitise-n8n-template.ps1'
 ];
 
 const cmdWrapperCases = [
   {
-    outputPath: 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/_export-n8n-workflows-live.cmd',
+    outputPath: 'skills/n8n-workflow-transport/templates/helper-scripts/import-export-sync/_export-n8n-workflows-live.cmd',
     ps1Name: 'export-n8n-workflows-live.ps1',
     oldScriptPath: 'scripts\\export-n8n-workflows-live.ps1'
   },
   {
-    outputPath: 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/import-export-sync/_import-n8n-workflows-live.cmd',
+    outputPath: 'skills/n8n-workflow-transport/templates/helper-scripts/import-export-sync/_import-n8n-workflows-live.cmd',
     ps1Name: 'import-n8n-workflows-live.ps1',
     oldScriptPath: 'scripts\\import-n8n-workflows-live.ps1'
   },
   {
-    outputPath: 'skills/n8n-workflow-helper-scripts/templates/helper-scripts/sanitizer/_sanitise-n8n-template.cmd',
+    outputPath: 'skills/n8n-workflow-transport/templates/helper-scripts/sanitizer/_sanitise-n8n-template.cmd',
     ps1Name: 'sanitise-n8n-template.ps1',
     oldScriptPath: 'scripts\\sanitise-n8n-template.ps1'
   }
@@ -107,16 +107,16 @@ function runAuditJson() {
   return JSON.parse(result.stdout);
 }
 
-test('n8n workflow toolkit exposes direct helper-script and template surfaces', () => {
+test('n8n workflow toolkit exposes direct helpers and test-only workflow fixtures', () => {
   for (const outputPath of helperScriptOutputs) assert.equal(fs.existsSync(path.join(repoRoot, outputPath)), true, outputPath);
-  assert.equal(fs.existsSync(path.join(repoRoot, globalErrorHandlerPublishedPath)), true);
+  assert.equal(fs.existsSync(path.join(repoRoot, globalErrorHandlerFixturePath)), true);
+  assert.equal(fs.existsSync(path.join(repoRoot, 'skills', 'n8n-workflow-templates')), false);
   for (const relPath of [
-    'skills/n8n-workflow-helper-scripts/SKILL.md',
-    'skills/n8n-workflow-helper-scripts/references/credential-safety.md',
-    'skills/n8n-workflow-helper-scripts/references/import-export-flow.md',
-    'skills/n8n-workflow-helper-scripts/references/n8n-credential-safety.md',
-    'skills/n8n-workflow-helper-scripts/references/workflow-sync.md',
-    'skills/n8n-workflow-templates/SKILL.md'
+    'skills/n8n-workflow-transport/SKILL.md',
+    'skills/n8n-workflow-transport/references/credential-safety.md',
+    'skills/n8n-workflow-transport/references/import-export-flow.md',
+    'skills/n8n-workflow-transport/references/n8n-credential-safety.md',
+    'skills/n8n-workflow-transport/references/workflow-sync.md'
   ]) {
     const text = readText(relPath);
     assert.match(text, /n8n/i, relPath);
@@ -175,10 +175,9 @@ test('n8n workflow toolkit direct surfaces contain no retired publisher referenc
 
 test('n8n workflow toolkit direct Markdown surfaces have no generated-source notices', () => {
   for (const relPath of [
-    'skills/n8n-workflow-helper-scripts/SKILL.md',
-    'skills/n8n-workflow-helper-scripts/references/import-export-flow.md',
-    'skills/n8n-workflow-helper-scripts/references/workflow-sync.md',
-    'skills/n8n-workflow-templates/SKILL.md'
+    'skills/n8n-workflow-transport/SKILL.md',
+    'skills/n8n-workflow-transport/references/import-export-flow.md',
+    'skills/n8n-workflow-transport/references/workflow-sync.md'
   ]) {
     assert.doesNotMatch(readText(relPath), /Generated from toolkit (?:project source|curated output for AI)/, relPath);
   }
@@ -186,9 +185,9 @@ test('n8n workflow toolkit direct Markdown surfaces have no generated-source not
 
 test('n8n helper docs distinguish non-live and live approval requirements', () => {
   const docs = [
-    'skills/n8n-workflow-helper-scripts/SKILL.md',
-    'skills/n8n-workflow-helper-scripts/references/import-export-flow.md',
-    'skills/n8n-workflow-helper-scripts/references/workflow-sync.md'
+    'skills/n8n-workflow-transport/SKILL.md',
+    'skills/n8n-workflow-transport/references/import-export-flow.md',
+    'skills/n8n-workflow-transport/references/workflow-sync.md'
   ].map(readText).join('\n');
 
   for (const phrase of [
@@ -213,12 +212,12 @@ test('n8n helper docs distinguish non-live and live approval requirements', () =
 });
 
 test('global-error-handler direct template is valid JSON', () => {
-  const workflow = readJson(globalErrorHandlerPublishedPath);
+  const workflow = readJson(globalErrorHandlerFixturePath);
   assert.equal(typeof workflow, 'object');
 });
 
 test('global-error-handler template routes alert outputs through safe context', () => {
-  const workflow = readJson(globalErrorHandlerPublishedPath);
+  const workflow = readJson(globalErrorHandlerFixturePath);
 
   getNode(workflow, 'Build Safe Error Alert Context');
 
@@ -233,7 +232,7 @@ test('global-error-handler template routes alert outputs through safe context', 
 });
 
 test('global-error-handler safe context creates escaped, sheet-safe, and subject-safe fields', () => {
-  const workflow = readJson(globalErrorHandlerPublishedPath);
+  const workflow = readJson(globalErrorHandlerFixturePath);
   const safeContext = getNode(workflow, 'Build Safe Error Alert Context');
   const jsCode = safeContext.parameters.jsCode;
 
@@ -250,7 +249,7 @@ test('global-error-handler safe context creates escaped, sheet-safe, and subject
 });
 
 test('global-error-handler email alert uses only safe fields for unsafe values', () => {
-  const workflow = readJson(globalErrorHandlerPublishedPath);
+  const workflow = readJson(globalErrorHandlerFixturePath);
   const email = getNode(workflow, 'Send Error Email');
   const html = email.parameters.html;
   const subject = email.parameters.subject;
@@ -270,7 +269,7 @@ test('global-error-handler email alert uses only safe fields for unsafe values',
 });
 
 test('global-error-handler sheet logging uses sheet-safe fields for unsafe values', () => {
-  const workflow = readJson(globalErrorHandlerPublishedPath);
+  const workflow = readJson(globalErrorHandlerFixturePath);
   const append = getNode(workflow, 'Append Error Row');
   const columns = append.parameters.columns.value;
 
@@ -283,7 +282,7 @@ test('global-error-handler sheet logging uses sheet-safe fields for unsafe value
 });
 
 test('global-error-handler template remains inactive and credential-free', () => {
-  for (const relPath of [globalErrorHandlerPublishedPath]) {
+  for (const relPath of [globalErrorHandlerFixturePath]) {
     const workflow = readJson(relPath);
     const serialized = JSON.stringify(workflow);
     const credentialPaths = [];
