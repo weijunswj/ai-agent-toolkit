@@ -10,9 +10,9 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 const auditScript = path.join(repoRoot, 'repo', 'scripts', 'audit-published-surfaces.cjs');
 
 const targetMappings = [
-  'skills/secure-cicd-installer/templates/cicd/CURRENT_CICD_STATUS.template.md',
-  'skills/secure-cicd-installer/templates/cicd/safe-source-update-policy.md',
-  'skills/secure-cicd-installer/templates/github-actions/README.md'
+  'skills/secure-ci-cd/templates/cicd/CURRENT_CICD_STATUS.template.md',
+  'skills/secure-ci-cd/templates/cicd/safe-source-update-policy.md',
+  'skills/secure-ci-cd/templates/github-actions/README.md'
 ];
 
 function readJson(relPath) {
@@ -43,7 +43,7 @@ test('Secure CI/CD direct surfaces are included in a clean canonical audit', () 
 });
 
 test('Secure CI/CD direct surface has no pack manifests', () => {
-  assert.equal(fs.existsSync(path.join(repoRoot, 'skills/secure-cicd-installer', 'packs')), false);
+  assert.equal(fs.existsSync(path.join(repoRoot, 'skills/secure-ci-cd', 'packs')), false);
   const report = runAuditJson();
   assert.deepEqual(report.errors, []);
   assert.deepEqual(report.snapshot.pack_manifests, []);

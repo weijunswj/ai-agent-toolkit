@@ -4,7 +4,7 @@ Use this for n8n workflow JSON, templates, helper scripts, MCP, import/export, l
 
 ## Required Rules
 
-Load `skills/n8n-agent-rules` before planning or editing n8n workflow or live n8n material. Follow the full n8n operating contract there.
+Load `skills/n8n-safety-router` before planning or editing n8n workflow or live n8n material. Follow the full n8n operating contract there.
 
 ## Approval Gates
 

@@ -1,176 +1,531 @@
 {
-  "schema_version": 2,
-  "grandfathered_skill_ids": [
-    "agent-skill-supply-chain-audit",
-    "ai-coding-agent-rules",
-    "context-preserving-ai-publisher",
-    "knowledge-index-updater",
-    "n8n-agent-rules",
-    "n8n-local-setup",
-    "n8n-workflow-helper-scripts",
-    "n8n-workflow-templates",
-    "secure-cicd-installer",
-    "ui-ux-secure-frontend-design",
-    "windows-localhost-workflows"
-  ],
-  "reviewed_skill_ids": [
-    "codex-ssh-hostinger-coolify-setup-maintainer",
-    "github-governance-review-reconciler",
-    "local-ai-stack-safety",
-    "managed-app-foundation-review",
-    "project-completion-audit",
-    "self-hosted-service-safety",
-    "toolkit-setup"
-  ],
+  "schema_version": 3,
   "skill_creation_review": {
-    "github-governance-review-reconciler": {
-      "existing_skill_review": "Reviewed current A1-A4 source modules, current skills and modules, toolkit skill routing, README skill tables, and repo/docs/SKILL-SAFETY-MATRIX.md. The existing github-governance-review-reconciler skill was absent; existing governance, capability, execution-loop, assurance, GitHub, review, and publisher surfaces do not own this combined current-main N5 parent-state and truthful-review reconciler contract without duplicating or bloating an existing skill.",
-      "trigger": "Use github-governance-review-reconciler only when the user explicitly requests N5 governed GitHub parent/direct-child inspection, preview, initialise/migrate, validation, reconciliation, show/remove, truthful PR-review inventory, finding disposition evidence, conversation-closure evidence, or Deferred Findings handling for a repository-scoped current-main task. Do not invoke it implicitly for ordinary coding, ordinary GitHub inspection, CI, G4, Ready, merge, review mutation, providers, workflows, or MCP.",
-      "decision": "new_project_skill",
-      "decision_reason": "The work combines a distinct deterministic GitHub governance state contract with truthful PR-review and Deferred Findings evidence, while preserving separate A1-A4 authority boundaries. No existing skill owns this exact boundary.",
-      "unique_value": "Provides one current-main v3 source contract and bounded transaction runtime that prevents Markdown improvisation, queue duplication, review-inventory emptiness, executor review mutation, and silent Deferred Findings promotion.",
-      "runtime_footprint": "One local runtime, compact JSON policy/schema/grammar, three templates, focused tests, and a concise explicit-only skill. No provider client, workflow, MCP, credential, or live-system dependency.",
-      "local_assets": "Only first-party contracts, templates, metadata, runtime, and tests are required; no third-party text or code is copied or adapted.",
-      "output_contract": "Return inspect/preview/validate/reconcile/show/remove evidence with exact repository binding, lifecycle/queue uniqueness, revision and byte-preservation proof, truthful review inventory, finding materiality/disposition status, DF provenance and revalidation status, authority boundary, failures, and exactly one next action: Web exact-head validation when successful.",
-      "anti_bloat_review": "Reject generic web-controller stages, timer/polling history, automatic issue creation for every finding, multiple parent queues, historical PR #310 cache machinery, model reconstruction of large parent bodies, review-thread mutation by executors, and any A1-A4 redesign.",
-      "safety_boundary": "Explicit inspection and preview are read-only. Any repository/GitHub mutation requires current repository identity, A2 repository.governance consent, accepted preview, and A1 github.mutation authority. Review-thread replies, resolution/reopen/dismissal, final disposition, Ready, merge, cleanup, and Web finality remain controller-owned and are not performed by this skill.",
+    "codex-ssh-hostinger-coolify-setup-maintainer": {
+      "public_id": "codex-ssh-hostinger-coolify-setup-maintainer",
+      "public_name": "Codex SSH Hostinger Coolify Setup Maintainer",
+      "existing_skill_review": "Reviewed codex-ssh-hostinger-coolify-setup-maintainer against n8n-environment-setup, self-hosted-service-safety, secure-ci-cd, and generic coding guidance; no other current product owns the Hostinger VPS plus Coolify setup, maintenance, security-report, upgrade-advisory, and incident workflow.",
+      "native_capability_review": "Codex shell and SSH capability can execute approved commands but does not supply the domain-specific Hostinger/Coolify checklists, evidence contract, approval gates, or safe maintenance reporting owned by this product.",
+      "trigger": "Use when Codex is explicitly asked to plan, inspect, set up, deploy to, maintain, secure, or respond to incidents on a Hostinger VPS running Coolify.",
+      "positive_routing_examples": [
+        "Prepare a read-only SSH preflight for my Hostinger VPS before installing Coolify.",
+        "Review the daily security report and upgrade timing for this Hostinger Coolify server.",
+        "Plan a bounded Coolify deployment on my Hostinger VPS and identify every approval gate before SSH or provider changes."
+      ],
+      "negative_routing_examples": [
+        "Debug a local web application that has no Hostinger, VPS, SSH, or Coolify scope.",
+        "Configure an n8n workflow inside an already-running Coolify deployment without changing the host platform.",
+        "Review generic Docker exposure on a non-Hostinger server that does not run Coolify."
+      ],
+      "overlap_boundary": "Use self-hosted-service-safety for generic non-n8n exposure review and n8n-environment-setup for n8n-specific deployment after Coolify exists; this product owns Hostinger/Coolify platform operations.",
+      "invocation_mode": "explicit",
+      "invocation_mode_reason": "Packaged metadata keeps this product explicit-only because its broad or externally sensitive work requires deliberate routing and separate action authority.",
+      "decision": "new_product",
+      "decision_reason": "The product combines a distinct vendor/platform operations domain with evidence-based maintenance and incident boundaries not owned by generic self-hosting guidance.",
+      "unique_value": "Provides Hostinger/Coolify-specific preflight, setup, deploy, maintenance, incident, rollback, upgrade, and daily security-report workflows with owner gates.",
+      "runtime_footprint": "Concise entrypoint plus local runbook, checklists, report templates, and bounded reporting or timer-install scripts; no automatic remediation.",
+      "local_assets": "Hostinger/Coolify reference guide, setup and maintenance checklists, evidence and rollback templates, daily security report script, and systemd timer installer.",
+      "output_contract": "Return an evidence-based PASS/WARN/FAIL setup, deployment, security, maintenance, upgrade, or incident report with approvals, blockers, rollback state, and manual follow-up.",
+      "anti_bloat_review": "The product is limited to Hostinger VPS plus Coolify operations and routes generic self-hosting, local development, and n8n workflow concerns to narrower products.",
+      "safety_boundary": "Read-only planning and inspection are preferred. SSH, production changes, deployments, DNS/TLS, secrets, backups, restore, firewall, resize, billing, reboot, and destructive actions require explicit current-turn approval.",
+      "canonical_ownership": "Direct-canonical maintenance: skills/codex-ssh-hostinger-coolify-setup-maintainer/ owns the portable product; coupled contracts, policy, provenance, validation, and tests are maintained under canonical repo/** paths.",
       "source_provenance": "first_party",
-      "third_party_audit": "not_applicable_first_party; no third-party text, provider docs, workflow JSON, MCP, or code copied or adapted.",
-      "publisher_workflow": "Direct-canonical ownership and maintenance: skills/github-governance-review-reconciler/** is the canonical skill surface, while relevant contracts, documentation, scripts, and tests are maintained directly at canonical repo/** paths. No project-source tree, reviewed-output publication, copy/writeback, or project sync step is used.",
-      "routing": "The routing decision is explicit-only: github-governance-review-reconciler is routed only for the named N5 governance/review-reconciler contract. Ordinary GitHub inspection belongs to the GitHub skill; source publication belongs to context-preserving-ai-publisher; current finality remains Web/controller work.",
+      "third_party_audit": "Not applicable first-party material; vendor documentation informs factual guidance but no third-party skill or executable code is copied.",
       "validation": [
         "node repo/scripts/validate-toolkit.cjs",
-        "node repo/scripts/audit-published-surfaces.cjs --check",
-        "node --test repo/tests/toolkit-github-governance-review-reconciler.test.cjs repo/tests/toolkit-github-governance-review-reconciler.boundaries.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run175-red.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run177-repair.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run178-canonical-a1.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run179-remove-transaction.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run181-six-root.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run183-adversarial.test.cjs repo/tests/toolkit-github-governance-review-reconciler.run185-adversarial.test.cjs"
+        "node --test repo/tests/hostinger-coolify-production-guide.test.cjs repo/tests/skill-routing.test.cjs"
       ]
     },
-    "codex-ssh-hostinger-coolify-setup-maintainer": {
-      "existing_skill_review": "Reviewed current skills before adding codex-ssh-hostinger-coolify-setup-maintainer: n8n-local-setup for local and hosted n8n guide ownership, self-hosted-service-safety for non-n8n self-hosting safety boundaries, secure-cicd-installer for deployment-adjacent approval gates, ai-coding-agent-rules routing, README skill tables, and the skill safety matrix. The new codex-ssh-hostinger-coolify-setup-maintainer skill is distinct because it pairs a production-sensitive Hostinger/Coolify maintainer workflow with source-owned checklists, templates, scripts, agent metadata, and owner approval gates while leaving n8n-local-setup's n8n-specific Hostinger Coolify VPS deployment reference intact.",
-      "trigger": "Use codex-ssh-hostinger-coolify-setup-maintainer when a user asks Codex to help set up Hostinger for deployment, prepare a Hostinger VPS, inspect a Hostinger server over SSH, bootstrap or maintain Coolify, deploy apps through Coolify, run daily security checks, review upgrade timing from usage pressure, or respond to incidents on a Hostinger VPS running Coolify. Do not invoke it for generic local n8n setup, n8n app deployment inside an already-running Coolify platform, or generic app coding with no Hostinger/Coolify work.",
-      "decision": "new_project_skill",
-      "decision_reason": "The previous Hostinger/Coolify material is now a dedicated production-sensitive maintainer workflow rather than secondary n8n-local setup guidance or a repo-preparation-only guide.",
-      "unique_value": "Combines Codex SSH read-only preflight, owner approval gates, setup/deploy/maintenance/incident checklists, evidence templates, upgrade advisory, and a daily security report script for Hostinger VPS plus Coolify owners.",
-      "runtime_footprint": "SKILL.md stays concise and routes to a local reference only when full runbook detail matters. The long runtime guide is published as a reference file, not duplicated in the default entrypoint.",
-      "local_assets": "Full local reference guide, concise skill README, SKILL.md, agents/openai.yaml metadata, checklists, evidence templates, rollback/approval templates, read-only daily security report script, and systemd timer installer script. The scripts perform reporting/installation only and do not perform auto-remediation.",
-      "output_contract": "Return an evidence-based PASS/WARN/FAIL setup, deploy, security check, upgrade advisory, maintenance, or incident report with owner approvals, blockers, manual follow-up, and confirmation that no secrets were printed and no unapproved live production actions were performed.",
-      "anti_bloat_review": "The skill is not generic DevOps advice: it triggers only for Hostinger VPS plus Coolify setup, deployment, security checks, maintenance, and incident response. It routes longer instructions to local references/checklists and excludes unapproved live production operations.",
-      "safety_boundary": "Agent-safe by default for read-only inspection, evidence reports, placeholder-only documentation, upgrade advisory, and the bundled read-only daily security report. Hostinger, Coolify, GitHub connection, DNS/TLS, real secrets, production deployments, migrations, backups, restore tests, cutover, rollback, VPS changes, server resizing, paid upgrades, billing, customer data, firewall restrictions, reboots, and destructive actions are human-owned and approval-gated.",
-      "source_provenance": "first_party",
-      "third_party_audit": "not_applicable_first_party; no third-party text or code copied or adapted. Vendor docs were consulted only as factual context.",
-      "publisher_workflow": "Direct-canonical ownership and maintenance: skills/codex-ssh-hostinger-coolify-setup-maintainer/** is the canonical skill surface, while relevant contracts, documentation, scripts, and tests are maintained directly at canonical repo/** paths. No project-source tree, reviewed-output publication, copy/writeback, or project sync step is used.",
-      "routing": "codex-ssh-hostinger-coolify-setup-maintainer is routed for Hostinger VPS plus Coolify setup, deployment, security checks, upgrade timing review, maintenance, incident response, and prompts such as helping set up Hostinger for deployment. n8n-local-setup keeps its local n8n and n8n-specific Hostinger Coolify VPS deployment reference material for use after Coolify exists. If the target app is n8n or the task touches live n8n operations, n8n-agent-rules remains the companion safety router.",
+    "frontend-art-direction": {
+      "public_id": "frontend-art-direction",
+      "public_name": "Frontend Art Direction",
+      "existing_skill_review": "Reviewed frontend-art-direction against managed-app-foundation-review, release-readiness-audit, local AI, repository rules, and ordinary frontend coding guidance; no other current product combines art direction, design-system workflow, local recommendation data, implementation review, accessibility, privacy, and frontend security.",
+      "native_capability_review": "Native image, browser, or code-generation capabilities can assist design work but do not supply the product's local design corpus, trusted-generator path, design contract, accessibility rubric, privacy gates, or safe implementation workflow.",
+      "trigger": "Use when creating, redesigning, reviewing, or improving frontend interfaces, design systems, landing pages, dashboards, forms, components, accessibility, responsiveness, privacy-safe UX, or implementation quality.",
+      "positive_routing_examples": [
+        "Create a distinctive responsive design system and landing page direction for this product.",
+        "Review this dashboard implementation for visual hierarchy, accessibility, privacy, security, and mobile behavior.",
+        "Explore three genuinely distinct visual worlds for a material new product interface before implementation."
+      ],
+      "negative_routing_examples": [
+        "Implement a backend-only data migration with no user-interface or frontend contract change.",
+        "Make a one-line prose correction that has no design, accessibility, privacy, or safety implication.",
+        "Implement this already-approved frontend design faithfully without reopening art direction or changing the design contract."
+      ],
+      "overlap_boundary": "Use managed-app-foundation-review before choosing backend foundations and release-readiness-audit for whole-product readiness; this product owns frontend design direction and implementation review.",
+      "invocation_mode": "implicit",
+      "invocation_mode_reason": "Packaged metadata permits implicit discovery after the behavioural routing corpus proves positive, negative, and adversarial discrimination; discovery never grants mutation authority.",
+      "decision": "retain_current_product",
+      "decision_reason": "Frontend art direction, design systems, implementation quality, accessibility, privacy, and security form a cohesive product boundary with substantial local assets.",
+      "unique_value": "Combines non-generic visual direction, a local CSV-backed generator, durable DESIGN.md contracts, responsive and accessibility review, privacy-safe UX, and secure error and logging guidance.",
+      "runtime_footprint": "Instruction-first product with optional references and a local-only Python recommendation generator backed by bundled reviewed data; no package or network install is required.",
+      "local_assets": "Design workflow and security references, stack playbooks, quality rubric, examples, third-party attribution notes, design-system generator, local datasets, and tests.",
+      "output_contract": "Return the smallest useful design system, page override, component plan, implementation review, or build report with responsive, accessibility, privacy, security, validation, and remaining-risk evidence.",
+      "anti_bloat_review": "The product loads optional generator and references only when useful, rejects backend-only and trivial copy tasks, and preserves existing project design systems instead of imposing interchangeable defaults.",
+      "safety_boundary": "Do not expose private data, weaken auth or validation, add trackers, remote assets, packages, network calls, or run an untrusted generator path without the required explicit approval.",
+      "canonical_ownership": "Direct-canonical maintenance: skills/frontend-art-direction/ owns the portable product; coupled contracts, policy, provenance, validation, and tests are maintained under canonical repo/** paths.",
+      "source_provenance": "third_party_audited",
+      "third_party_audit": "Reviewed through skill-product-review; retained adapted UI/UX Pro Max material has active attribution and exact source pins under repo/source-watch/provenance/.",
       "validation": [
         "node repo/scripts/validate-toolkit.cjs",
-        "node repo/scripts/audit-published-surfaces.cjs --check",
         "node --test repo/tests/skill-routing.test.cjs"
       ]
     },
-    "local-ai-stack-safety": {
-      "existing_skill_review": "Reviewed current skills before adding local-ai-stack-safety: n8n-agent-rules, n8n-local-setup, windows-localhost-workflows, secure-cicd-installer, ai-coding-agent-rules, and context-preserving-ai-publisher. No existing skill covers this exact non-n8n safety-review trigger without either being too narrow or too broad.",
-      "trigger": "Use only when reviewing or planning local AI stack setup such as local LLM runners, model servers, Stable Diffusion or ComfyUI-style web UIs, vector databases, model downloads, GPU/runtime changes, or exposing local AI endpoints. Do not use for ordinary AI API coding, model prompting, or general application work.",
-      "decision": "new_project_skill",
-      "decision_reason": "Local AI Stack Safety has a distinct safety boundary and invocation trigger, so folding it into ai-coding-agent-rules would make the always-adjacent coding rules heavier while hiding the setup/exposure review boundary.",
-      "unique_value": "Forces a short risk review before high-impact local setup or service exposure work that agents might otherwise treat as ordinary setup commands.",
-      "runtime_footprint": "SKILL.md is intentionally short, review-only, and has no required long references or bundled tools; optional detail is not loaded by default.",
-      "local_assets": "No local assets beyond README, SKILL.md, and small platform metadata because the useful behavior is a compact safety review, not an installer or tutorial.",
-      "output_contract": "Return a compact Local AI Stack Safety Review with risk level, blocked actions, approval-gated actions, safer first-run plan, files/settings to inspect, and validation checks such as localhost-only health checks or port binding review.",
-      "anti_bloat_review": "The skill is rejected for ordinary coding and model-general advice; it triggers only on setup/exposure/credential/live-system risk and produces a compact review instead of a tutorial.",
-      "safety_boundary": "Review-only by default. Installation, model pulls, Docker, public tunnels, driver/runtime changes, shell profile edits, credentials, or non-local network exposure require explicit current-turn approval.",
+    "github-program-reconciler": {
+      "public_id": "github-program-reconciler",
+      "public_name": "GitHub Program Reconciler",
+      "existing_skill_review": "Reviewed github-program-reconciler against current governance, capability, execution-loop, assurance, GitHub, review, and publication surfaces; no other current product owns the combined current-main N5 parent-state and truthful PR-review reconciliation contract.",
+      "native_capability_review": "GitHub APIs and CLI expose issues, relationships, reviews, and comments but do not enforce the Toolkit's repository binding, deterministic queue, byte-preservation, exact-head evidence, or controller-owned disposition rules.",
+      "trigger": "Use only when the user explicitly requests governed GitHub parent/direct-child inspection, preview, validation, reconciliation, review inventory, finding disposition evidence, or Deferred Findings handling for a repository-scoped current-main task.",
+      "positive_routing_examples": [
+        "Inspect and preview reconciliation of this repository's N5 programme parent and direct children.",
+        "Validate the exact-head PR review inventory and Deferred Findings evidence without mutating GitHub.",
+        "Reconcile current-main programme state against its governed parent, direct children, and exact-head review evidence."
+      ],
+      "negative_routing_examples": [
+        "Perform an ordinary code review of a local diff with no N5 programme reconciliation request.",
+        "Mark a pull request Ready, resolve review threads, or merge it as part of ordinary implementation.",
+        "Read one pull request's checks and comments without any governed parent-child programme or Deferred Findings scope."
+      ],
+      "overlap_boundary": "Use ordinary GitHub inspection tools for ungoverned metadata reads and Web/controller authority for finality; this product owns only the explicit N5 governance and truthful-review contract.",
+      "invocation_mode": "explicit",
+      "invocation_mode_reason": "Packaged metadata keeps this product explicit-only because its broad or externally sensitive work requires deliberate routing and separate action authority.",
+      "decision": "new_product",
+      "decision_reason": "The deterministic current-main programme and review-evidence boundary is distinct from generic GitHub inspection or executor implementation.",
+      "unique_value": "Prevents Markdown improvisation, duplicate queues, empty review inventories, executor-owned review mutation, and silent Deferred Findings promotion.",
+      "runtime_footprint": "One local deterministic runtime, compact policy/schema/grammar, three templates, focused tests, and no provider client, workflow, credential, or live-service dependency.",
+      "local_assets": "Canonical skill plus first-party contracts, templates, policy, grammar, local runtime, and focused boundary and regression tests.",
+      "output_contract": "Return inspect, preview, validate, reconcile, show, or remove evidence with repository binding, lifecycle uniqueness, byte preservation, exact identity, truthful review inventory, finding status, failures, and one next action.",
+      "anti_bloat_review": "Rejects generic Web-controller stages, timer history, automatic issue creation, competing queues, model reconstruction of bodies, review-thread mutation by executors, and unrelated authority redesign.",
+      "safety_boundary": "Inspection and preview are read-only. GitHub mutation requires repository identity, governance consent, accepted preview, and mutation authority; review-thread disposition, Ready, merge, cleanup, and finality remain controller-owned.",
+      "canonical_ownership": "Direct-canonical maintenance: skills/github-program-reconciler/ owns the portable product; coupled contracts, policy, provenance, validation, and tests are maintained under canonical repo/** paths.",
       "source_provenance": "first_party",
-      "third_party_audit": "not_applicable_first_party; no third-party text or code copied or adapted.",
-      "publisher_workflow": "Direct-canonical ownership and maintenance: skills/local-ai-stack-safety/** is the canonical skill surface, while relevant contracts, documentation, scripts, and tests are maintained directly at canonical repo/** paths. No project-source tree, reviewed-output publication, copy/writeback, or project sync step is used.",
-      "routing": "local-ai-stack-safety is routed only for local-ai-stack-safety review/planning tasks involving local AI runtimes, model servers, model downloads, GPU/runtime setup, local AI web UIs, or endpoint exposure.",
+      "third_party_audit": "Not applicable first-party material; no provider documentation, workflow JSON, MCP instruction, third-party skill text, or code is copied.",
       "validation": [
         "node repo/scripts/validate-toolkit.cjs",
-        "node repo/scripts/audit-published-surfaces.cjs --check",
+        "node --test repo/tests/toolkit-github-governance-review-reconciler.test.cjs repo/tests/toolkit-github-governance-review-reconciler.boundaries.test.cjs repo/tests/skill-routing.test.cjs"
+      ]
+    },
+    "local-ai-safety": {
+      "public_id": "local-ai-safety",
+      "public_name": "Local AI Safety",
+      "existing_skill_review": "Reviewed local-ai-safety against n8n setup, Windows localhost, CI/CD, self-hosting, and generic agent rules; no other current product owns the non-n8n local model-runtime, GPU, model-download, web-UI, and endpoint-exposure safety review.",
+      "native_capability_review": "Host shell, GPU, or model-runner capability can perform setup but does not provide the product's risk classification, localhost-first plan, exposure boundary, or approval gates.",
+      "trigger": "Use when reviewing or planning local LLM runners, model servers, Stable Diffusion or ComfyUI-style interfaces, vector databases, model downloads, GPU/runtime changes, or local AI endpoint exposure.",
+      "positive_routing_examples": [
+        "Review the risks before I install a local LLM runner and download a large model.",
+        "Plan a localhost-only ComfyUI setup and identify what would require approval before public exposure.",
+        "Assess GPU, runtime, model-provenance, and endpoint risks before changing this local AI stack."
+      ],
+      "negative_routing_examples": [
+        "Write application code that calls an existing hosted AI API without changing local runtime infrastructure.",
+        "Improve this model prompt without installing, exposing, or changing a local AI stack.",
+        "Use an existing hosted image-generation API without downloading models or changing any local AI runtime."
+      ],
+      "overlap_boundary": "Use self-hosted-service-safety for generic non-n8n public services and windows-local-dev-services for ordinary app-server startup; this product owns AI-runtime and model-stack setup risk.",
+      "invocation_mode": "implicit",
+      "invocation_mode_reason": "Packaged metadata permits implicit discovery after the behavioural routing corpus proves positive, negative, and adversarial discrimination; discovery never grants mutation authority.",
+      "decision": "new_product",
+      "decision_reason": "Local AI runtimes have distinct download, execution, GPU, model provenance, and endpoint-exposure risks not covered by ordinary localhost guidance.",
+      "unique_value": "Forces a compact safety review before agents treat high-impact local AI setup or public exposure as routine installation work.",
+      "runtime_footprint": "Short review-only instructions with no bundled installer, executable helper, required reference set, or live service.",
+      "local_assets": "Canonical README, SKILL.md, and host metadata only; changing provider details are not frozen into the product.",
+      "output_contract": "Return risk level, blocked actions, approval-gated actions, safer first-run plan, files or settings to inspect, and localhost or port-binding validation checks.",
+      "anti_bloat_review": "The product is rejected for ordinary AI coding or prompting and remains limited to local runtime, model, GPU, web-UI, and endpoint setup risk.",
+      "safety_boundary": "Review-only by default. Installation, model downloads, Docker, public tunnels, driver or shell-profile changes, credentials, and non-local exposure require explicit current-turn approval.",
+      "canonical_ownership": "Direct-canonical maintenance: skills/local-ai-safety/ owns the portable product; coupled contracts, policy, provenance, validation, and tests are maintained under canonical repo/** paths.",
+      "source_provenance": "first_party",
+      "third_party_audit": "Not applicable first-party material; no third-party model, runtime, installer, or skill payload is copied or executed.",
+      "validation": [
+        "node repo/scripts/validate-toolkit.cjs",
         "node --test repo/tests/skill-routing.test.cjs"
       ]
     },
     "managed-app-foundation-review": {
-      "existing_skill_review": "Reviewed current skills and modules before adding managed-app-foundation-review: ui-ux-secure-frontend-design for frontend security and form review, self-hosted-service-safety for deployment exposure review, secure-cicd-installer for CI/CD setup, local-ai-stack-safety for local runtime exposure, codex-ssh-hostinger-coolify-setup-maintainer for Hostinger/Coolify server operations, n8n-agent-rules for n8n workflow safety, ai-coding-agent-rules routing, README skill tables, and the skill safety matrix. No existing skill owns the early product-architecture build-vs-buy decision for low-cost managed or owner-hosted auth, backend, database, automation, CRM, form, email, analytics, ops, and account foundations without becoming too broad.",
-      "trigger": "Use managed-app-foundation-review when a task introduces or materially changes a product, backend, data, automation, account, admin, ops, or security foundation primitive, or when a user wants to revisit an implementation plan, cut custom build scope, compare build-vs-buy, choose low-cost/free managed or owner-hosted foundations, ask whether to browse current provider options, define usage-limit or upgrade-watch triggers, or decide whether to use existing CRM, auth, backend APIs, workflow automation, database, forms, email, storage, analytics, traffic/security monitoring, ops, or account-security services instead of building from scratch. Do not use for ordinary implementation after the foundation decision is already recorded.",
-      "decision": "new_project_skill",
-      "decision_reason": "The trigger is an early planning and security-risk-reduction decision, not frontend UI review, deployment safety, CI/CD setup, or localhost operations. A dedicated small skill prevents recurring custom auth/database/CRM rebuilds without bloating always-on coding rules.",
-      "unique_value": "Forces a build/buy/skip/hybrid review before high-risk product, backend, data, automation, ops, and account primitives are custom-built, with explicit low-cost constraints, current-pricing verification from official docs when concrete recommendations are needed, owner-hosted n8n routing when suitable, upgrade-watch signals for later Codex review, and remaining security responsibilities.",
-      "runtime_footprint": "SKILL.md is concise and instruction-only with no required long references, scripts, copied provider docs, or pricing tables; provider-specific details are checked live from official docs only when needed.",
-      "local_assets": "No local assets beyond README, SKILL.md, and small platform metadata because provider pricing and limits change and must not be frozen into the toolkit.",
-      "output_contract": "Return a compact Managed App Foundation Review with a build/buy/skip/hybrid table, low-cost or owner-hosted foundation candidates, security work avoided, remaining configuration, cost caveats, upgrade-watch thresholds, privacy-safe deployment/AI observability baseline, cut list, keep/build list, verify-before-commit list, security-still-required list, n8n safety note when self-hosted n8n is a candidate, and a note when current official pricing/docs were or still need to be checked.",
-      "anti_bloat_review": "The skill is rejected for generic product brainstorming, ordinary implementation, or small follow-up tasks after a foundation decision is recorded; it triggers only when foundation services, backend/automation/ops primitives, low-cost provider selection, scope cutting, upgrade-watch planning, or security work reduction are materially in scope.",
-      "safety_boundary": "Review-only by default. External account creation, provider configuration, DNS changes, production data migration, credentials, billing setup, paid-plan upgrades, deployment, or live-service mutation require explicit current-turn approval.",
+      "public_id": "managed-app-foundation-review",
+      "public_name": "Managed App Foundation Review",
+      "existing_skill_review": "Reviewed managed-app-foundation-review against frontend design, self-hosting, CI/CD, local AI, Hostinger/Coolify, n8n, and repository-rule products; no other current product owns early build, buy, skip, or hybrid decisions across application foundation services.",
+      "native_capability_review": "Native web research and coding can compare providers or build components but do not force the early cost, security-work reduction, ownership, limit, and upgrade-watch decision this product records.",
+      "trigger": "Use when a plan introduces or materially changes auth, accounts, backend APIs, databases, automation, CRM, forms, email, storage, analytics, operations, monitoring, or account-security foundations.",
+      "positive_routing_examples": [
+        "Review this app plan and decide which auth, database, email, and automation foundations we should buy or self-host instead of custom-build.",
+        "Compare low-cost managed and owner-hosted options before we commit to a new backend foundation.",
+        "Revisit the architecture before we add custom accounts, storage, analytics, and workflow automation foundations."
+      ],
+      "negative_routing_examples": [
+        "Implement a small feature after the application's foundation decision is already documented and unchanged.",
+        "Brainstorm product ideas without selecting or materially changing any backend, account, data, automation, or operations foundation.",
+        "Restyle an existing frontend page without changing auth, data, backend, automation, or operations foundations."
+      ],
+      "overlap_boundary": "Use n8n-safety-router when workflow implementation starts, secure-ci-cd for pipeline setup, and self-hosted-service-safety for exposure review; this product owns the preceding foundation choice.",
+      "invocation_mode": "implicit",
+      "invocation_mode_reason": "Packaged metadata permits implicit discovery after the behavioural routing corpus proves positive, negative, and adversarial discrimination; discovery never grants mutation authority.",
+      "decision": "new_product",
+      "decision_reason": "A dedicated early decision prevents avoidable custom security-sensitive foundation work without bloating frontend, deployment, CI, or general coding products.",
+      "unique_value": "Produces a build, buy, skip, or hybrid decision with low-cost constraints, security work avoided, remaining responsibilities, scope cuts, and upgrade-watch signals.",
+      "runtime_footprint": "Concise instruction-only review with no bundled scripts, copied provider documentation, static pricing tables, or required external account.",
+      "local_assets": "Canonical README, SKILL.md, and host metadata only because provider prices and limits require current verification when material.",
+      "output_contract": "Return a foundation decision table, candidate services, security work avoided, remaining configuration, cost caveats, upgrade thresholds, cut list, build list, verification list, and residual security responsibilities.",
+      "anti_bloat_review": "The product does not route generic brainstorming or ordinary follow-up work; it applies only when foundation primitives, cost, scope reduction, or security ownership materially changes.",
+      "safety_boundary": "Review-only by default. Account creation, provider configuration, DNS, production data migration, credentials, billing, paid upgrades, deployment, and live-service mutation require explicit approval.",
+      "canonical_ownership": "Direct-canonical maintenance: skills/managed-app-foundation-review/ owns the portable product; coupled contracts, policy, provenance, validation, and tests are maintained under canonical repo/** paths.",
       "source_provenance": "first_party",
-      "third_party_audit": "not_applicable_first_party; no third-party text, provider docs, pricing tables, or code copied or adapted.",
-      "publisher_workflow": "Direct-canonical ownership and maintenance: skills/managed-app-foundation-review/** is the canonical skill surface, while relevant contracts, documentation, scripts, and tests are maintained directly at canonical repo/** paths. No project-source tree, reviewed-output publication, copy/writeback, or project sync step is used.",
-      "routing": "managed-app-foundation-review is routed for early implementation-plan reviews or material foundation changes involving managed or owner-hosted foundation selection, low-cost/free provider comparison, build-vs-buy scope cuts, usage-limit and upgrade-watch planning, auth/accounts/backend APIs/databases/workflow automation/CRM/forms/email/storage/analytics/ops foundations, and security work reduction. Do not route small follow-up implementation tasks after the foundation decision is recorded. If self-hosted n8n workflow work begins, n8n-agent-rules owns the workflow safety boundary.",
+      "third_party_audit": "Not applicable first-party material; provider documentation may be consulted as current factual evidence but is not copied into the product.",
       "validation": [
         "node repo/scripts/validate-toolkit.cjs",
-        "node repo/scripts/audit-published-surfaces.cjs --check",
         "node --test repo/tests/skill-routing.test.cjs"
       ]
     },
-    "project-completion-audit": {
-      "existing_skill_review": "Reviewed current skills and modules before adding project-completion-audit: ai-coding-agent-rules for baseline repo execution and portable playbooks, context-preserving-ai-publisher for generated-surface discipline, secure-cicd-installer for CI/CD setup, ui-ux-secure-frontend-design for frontend implementation review, managed-app-foundation-review for build-vs-buy foundation decisions, self-hosted-service-safety and codex-ssh-hostinger-coolify-setup-maintainer for hosting/deployment exposure, windows-localhost-workflows for local dev server verification, local-ai-stack-safety for local AI setup risk, n8n-agent-rules for n8n work, README skill tables, toolkit skill routing source, and the skill safety matrix. No existing skill owns a guarded final project completion or production-readiness audit and remediation loop across frontend, backend, full-stack, data/tooling, and mixed products without becoming too broad.",
-      "trigger": "Use project-completion-audit when the user asks for a final audit, completion audit, production-readiness audit, release-candidate audit, launch-readiness audit, QA pass, security-readiness check, final readiness check, make sure everything works, asks whether the repo/app is production ready, asks to use /goal to finish readiness remediation, or asks to audit against original docs. Do not use it for ordinary implementation or narrow code review unless the user is explicitly asking for readiness/completion status.",
-      "decision": "new_project_skill",
-      "decision_reason": "The trigger is a high-blast-radius final readiness gate with mandatory preflight confirmation, report creation, security scan coordination, browser verification, remediation batching, and production-ready claim limits. Folding it into always-on agent rules or a domain-specific skill would either bloat root instructions or hide the heavy audit approval boundary.",
-      "unique_value": "Forces lightweight preflight before broad validation or remediation, requires an explicit target/scope confirmation phrase, integrates standard-vs-deep Codex Security approval, records skipped/unavailable checks, prevents overclaiming production readiness, and structures remediation after a repo-local audit report exists.",
-      "runtime_footprint": "SKILL.md stays instruction-only and compact enough to load when explicitly requested. Optional heavy evidence remains in the target repo audit report, not in the skill. The platform metadata disables implicit invocation where supported; if implicit routing occurs, the body limits it to preflight only.",
-      "local_assets": "No scripts or assets beyond README, SKILL.md, and small platform metadata because the workflow must adapt to each target repo's docs, tests, browser tooling, and security-scan availability.",
-      "output_contract": "First return a lightweight preflight summary and explicit confirmation prompt. After confirmation, create or update a repo-local production-readiness audit report with scope, instructions/docs reviewed, branch/ref, app type, validation results, UI/browser checks, security scan status, findings, release gates, remediation batches, manual checks, and unverified/skipped/deferred areas; then remediate P0/P1/P2 findings in small validated batches while keeping the report current.",
-      "anti_bloat_review": "The skill is rejected for normal feature work, setup-only decisions, deployment execution, or narrow code review. Its trigger is final readiness/completion language and its first action is preflight, so it avoids root AGENTS.md bloat and accidental full-repo audits.",
-      "safety_boundary": "Preflight-only until explicit confirmation. Full audit still cannot run live-system, production, deployment, external-service, destructive, credential, import/export, sync, payment, customer-data, private-data, or irreversible actions without separate explicit current-turn approval naming the target and action. Deep security scan and browser click-through verification require approval in the confirmation step.",
+    "n8n-environment-setup": {
+      "public_id": "n8n-environment-setup",
+      "public_name": "n8n Environment Setup",
+      "existing_skill_review": "Reviewed n8n-environment-setup against n8n-safety-router, Hostinger/Coolify operations, self-hosted-service-safety, and Windows localhost workflows; no other current product owns the complete local/ngrok, production Cloudflare Tunnel, hosted n8n, backup, launcher, official Skills, and MCP setup references.",
+      "native_capability_review": "Docker, Cloudflare, host package managers, and official n8n installers provide mechanics but not the Toolkit's separated dev/production topology, beginner launcher, backup contract, or cross-host setup guidance.",
+      "trigger": "Use when setting up or explaining a safe n8n environment, local Docker stack, dev tunnel, production Cloudflare Tunnel stack, hosted n8n deployment guidance, backups, launchers, official Skills, or instance-level MCP configuration.",
+      "positive_routing_examples": [
+        "Set up the local n8n and Postgres development stack with the guided Windows launcher.",
+        "Plan production n8n self-hosting from a CGNAT machine using the separate Cloudflare Tunnel stack.",
+        "Configure the supported official n8n Skills and instance-level MCP path for this development environment."
+      ],
+      "negative_routing_examples": [
+        "Design an n8n workflow without changing or explaining its runtime environment.",
+        "Maintain the underlying Hostinger VPS and Coolify platform before any n8n-specific deployment work.",
+        "Sanitise and compare an exported n8n workflow without changing Docker, hosting, tunnels, backups, or MCP setup."
+      ],
+      "overlap_boundary": "Apply n8n-safety-router first for all n8n work; use the Hostinger/Coolify product for platform operations and return here only for n8n-specific environment guidance.",
+      "invocation_mode": "implicit",
+      "invocation_mode_reason": "Packaged metadata permits implicit discovery after the behavioural routing corpus proves positive, negative, and adversarial discrimination; discovery never grants mutation authority.",
+      "decision": "retain_current_product",
+      "decision_reason": "The environment and operator setup lifecycle is distinct from workflow design, helper transport, and generic self-hosting review.",
+      "unique_value": "Provides separated development and production topologies, guided launchers, backup and restore material, platform-specific official Skills guidance, and instance-level MCP references.",
+      "runtime_footprint": "Large but locally complete setup product with references, Compose templates, PowerShell launchers, backup templates, and MCP examples loaded only when relevant.",
+      "local_assets": "Local and production stack templates, launchers, references, backup scripts, platform guidance, MCP config examples, README, SKILL.md, and metadata.",
+      "output_contract": "Return the selected environment path, prerequisites, exact local templates or commands, safety gates, readiness evidence, backup implications, required non-secret configuration, and remaining manual actions.",
+      "anti_bloat_review": "The product retains substantial local assets because copied setup must be self-contained, while workflow, transport, generic host, and live-operation rules remain in companion products.",
+      "safety_boundary": "Do not install Docker, start production stacks, change tunnels or DNS, handle credentials, restore backups, deploy, or perform live n8n actions without explicit target-specific approval.",
+      "canonical_ownership": "Direct-canonical maintenance: skills/n8n-environment-setup/ owns the portable product; coupled contracts, policy, provenance, validation, and tests are maintained under canonical repo/** paths.",
       "source_provenance": "first_party",
-      "third_party_audit": "not_applicable_first_party; no third-party text, scanner output, browser artifacts, code, or vendor docs copied or adapted.",
-      "publisher_workflow": "Direct-canonical ownership and maintenance: skills/project-completion-audit/** is the canonical skill surface, while relevant contracts, documentation, scripts, and tests are maintained directly at canonical repo/** paths. No project-source tree, reviewed-output publication, copy/writeback, or project sync step is used.",
-      "routing": "project-completion-audit is routed for final audit, completion audit, production-readiness audit, release-candidate audit, launch-readiness audit, QA pass, make sure everything works, is this production ready, use /goal to finish readiness remediation, audit against original docs, security-readiness check, and final readiness check. It is intentionally not routed for ordinary feature implementation or narrow code review.",
+      "third_party_audit": "Not applicable first-party setup material; official vendor instructions are linked as supporting facts and are not copied as third-party skill payloads.",
       "validation": [
         "node repo/scripts/validate-toolkit.cjs",
-        "node repo/scripts/audit-published-surfaces.cjs --check",
+        "node --test repo/tests/n8n-environment-setup-fidelity.test.cjs repo/tests/n8n-launcher-runtime.test.cjs repo/tests/skill-routing.test.cjs"
+      ]
+    },
+    "n8n-safety-router": {
+      "public_id": "n8n-safety-router",
+      "public_name": "n8n Safety Router",
+      "existing_skill_review": "Reviewed n8n-safety-router against n8n-environment-setup, n8n-workflow-transport, test-only n8n workflow fixtures, and generic repository safety; no other current product owns the mandatory cross-cutting operating contract for all n8n workflow, MCP, helper, import/export, credential, and live-instance work.",
+      "native_capability_review": "Official n8n Skills and available MCP tools provide product-specific knowledge and operations but do not replace the Toolkit's approval, credential, static-data, webhook, execution, exposure, and untrusted-input safety contract.",
+      "trigger": "Use before any n8n workflow, workflow-template, helper-script, official n8n Skills, MCP, live-instance, import/export, validation, credential, webhook, activation, execution, or repository/live-sync task.",
+      "positive_routing_examples": [
+        "Help me design and validate an n8n workflow using the official n8n Skills.",
+        "Inspect this proposed live n8n import and explain the approval and credential boundaries before any action.",
+        "Validate that this test-only n8n workflow fixture is inactive, generic, sanitised, and credential-free."
+      ],
+      "negative_routing_examples": [
+        "Implement ordinary application code with no n8n workflow, helper, setup, MCP, or live-instance scope.",
+        "Set up a generic non-n8n self-hosted service that does not interact with n8n.",
+        "Review a generic JSON fixture that has no n8n nodes, workflow semantics, helper, MCP, or live-instance scope."
+      ],
+      "overlap_boundary": "Load n8n-safety-router first, then route environment work to n8n-environment-setup and transport or helper work to n8n-workflow-transport. Test-only workflow fixtures may only be inspected as test or validation evidence; fixtures cannot satisfy reusable or public workflow-template requests and are not selectable or installable templates.",
+      "invocation_mode": "implicit",
+      "invocation_mode_reason": "Packaged metadata permits implicit discovery after the behavioural routing corpus proves positive, negative, and adversarial discrimination; discovery never grants mutation authority.",
+      "decision": "retain_current_product",
+      "decision_reason": "The cross-cutting n8n safety boundary must remain independently loadable before every narrower n8n product or live tool.",
+      "unique_value": "Centralises official-skill-first routing, MCP capability discovery, live-action approvals, credential safety, webhook and static-data handling, test execution risk, and untrusted-input boundaries.",
+      "runtime_footprint": "Concise router plus one full local rules contract and a bounded AGENTS adapter installer; no live connection or package installation occurs by default.",
+      "local_assets": "Canonical skill, full n8n operating-rules reference, brief AGENTS adapter, installer, host metadata, and portable safety derivatives.",
+      "output_contract": "Return a safe n8n plan or result that names available capabilities, validation status, target instance when live work is requested, required approvals, credential boundaries, and manual configuration without exposing secrets.",
+      "anti_bloat_review": "The product owns only cross-cutting n8n operating safety and routes environment, helper, and template detail to companion products instead of duplicating it.",
+      "safety_boundary": "Never use live n8n tools speculatively. Live inspection or mutation, Docker, import/export, execution, activation, publication, credentials, data tables, deployment, or production actions require explicit target-specific approval.",
+      "canonical_ownership": "Direct-canonical maintenance: skills/n8n-safety-router/ owns the portable product; coupled contracts, policy, provenance, validation, and tests are maintained under canonical repo/** paths.",
+      "source_provenance": "first_party",
+      "third_party_audit": "Not applicable first-party safety material; official n8n documentation and Skills are external capabilities, not copied skill payloads in this record.",
+      "validation": [
+        "node repo/scripts/validate-toolkit.cjs",
+        "node --test repo/tests/n8n-safety-router.test.cjs repo/tests/skill-routing.test.cjs"
+      ]
+    },
+    "n8n-workflow-transport": {
+      "public_id": "n8n-workflow-transport",
+      "public_name": "n8n Workflow Transport",
+      "existing_skill_review": "Reviewed n8n-workflow-transport against n8n-safety-router, n8n-environment-setup, test-only n8n workflow fixtures, and CI/CD guidance; no other current product owns reusable offline sanitisation, validation, comparison, import/export preparation, and repository/live workflow hygiene helpers.",
+      "native_capability_review": "Official n8n APIs and MCP tools can inspect or mutate an instance but do not replace offline sanitisation, deterministic comparison, local credential-binding preservation, or reviewed import preparation in a consumer repository.",
+      "trigger": "Use when copying, reviewing, adapting, or explaining n8n workflow sanitizer, validation, comparison, export, import-preparation, and repository/live hygiene helper scripts.",
+      "positive_routing_examples": [
+        "Copy the approved n8n workflow validation and import-preparation helpers into this consumer repository.",
+        "Review a local sanitizer helper before using it on an exported workflow candidate.",
+        "Compare a sanitised workflow file with a candidate export and prepare a manual inactive import bundle."
+      ],
+      "negative_routing_examples": [
+        "Select an actual reusable n8n workflow JSON template without changing helper scripts.",
+        "Execute a live n8n import directly without a separately approved target instance and workflow set.",
+        "Set up the local n8n Docker and Postgres environment without copying or changing workflow transport helpers."
+      ],
+      "overlap_boundary": "Apply n8n-safety-router first and route environment setup to n8n-environment-setup; this product owns helper transport and hygiene. Workflow fixtures remain test-only evidence; they cannot satisfy reusable or public workflow-template requests and are not selectable or installable templates.",
+      "invocation_mode": "implicit",
+      "invocation_mode_reason": "Packaged metadata permits implicit discovery after the behavioural routing corpus proves positive, negative, and adversarial discrimination; discovery never grants mutation authority.",
+      "decision": "retain_current_product",
+      "decision_reason": "Offline workflow transport and sanitation helpers have a distinct code-review, scratch-data, credential-binding, and live-boundary contract.",
+      "unique_value": "Provides reviewed manual helpers for sanitising exports, validating JSON, comparing workflow state, preserving local bindings, preparing imports, and keeping temporary payloads untracked.",
+      "runtime_footprint": "Instruction router plus substantial local helper-script templates and focused references; helpers run manually and never automatically in CI or against live n8n.",
+      "local_assets": "Sanitizer and import/export helper scripts, workflow transport references, credential-safety notes, README, SKILL.md, metadata, and a local n8n rules derivative.",
+      "output_contract": "Return source inspected, helper files copied or reviewed, consumer-repository write scope, excluded files, validation, scratch-state handling, and any live operation still requiring confirmation.",
+      "anti_bloat_review": "The product retains scripts only where deterministic offline transport adds value and does not duplicate environment setup, public templates, or the cross-cutting n8n safety contract.",
+      "safety_boundary": "Do not run live import/export in Toolkit or CI, commit scratch payloads or credentials, activate workflows, or touch a live instance without explicit repository, instance, operation, and workflow-set approval.",
+      "canonical_ownership": "Direct-canonical maintenance: skills/n8n-workflow-transport/ owns the portable product; coupled contracts, policy, provenance, validation, and tests are maintained under canonical repo/** paths.",
+      "source_provenance": "first_party",
+      "third_party_audit": "Not applicable first-party helper material; no private workflow export, credential binding, or third-party executable is part of the product evidence.",
+      "validation": [
+        "node repo/scripts/validate-toolkit.cjs",
+        "node --test repo/tests/n8n-workflow-transport.test.cjs repo/tests/n8n-portable-import.test.cjs repo/tests/skill-routing.test.cjs"
+      ]
+    },
+    "release-readiness-audit": {
+      "public_id": "release-readiness-audit",
+      "public_name": "Release Readiness Audit",
+      "existing_skill_review": "Reviewed release-readiness-audit against repository rules, publication, CI/CD, frontend, foundation, self-hosting, Hostinger, Windows, local AI, and n8n products; no other current product owns a guarded cross-domain final completion and production-readiness audit.",
+      "native_capability_review": "Native test, browser, security, and shell tools provide individual checks but do not supply the preflight confirmation, evidence report, claim limits, remediation sequencing, and skipped-check accounting owned by this product.",
+      "trigger": "Use when the user explicitly asks for a final audit, completion audit, production-readiness audit, release-candidate audit, launch-readiness audit, QA pass, security-readiness check, or final readiness remediation.",
+      "positive_routing_examples": [
+        "Run a guarded production-readiness audit of this repository and tell me what blocks launch.",
+        "Audit this project against its original requirements, then plan bounded P0 through P2 remediation.",
+        "Perform the final release-candidate QA and security-readiness pass for this whole project."
+      ],
+      "negative_routing_examples": [
+        "Implement one ordinary feature without assessing whole-project completion or release readiness.",
+        "Review a narrow code diff for defects without running a broad readiness or remediation programme.",
+        "Run one focused regression test after a specific bug fix without auditing overall release readiness."
+      ],
+      "overlap_boundary": "Domain products may supply focused checks, but release-readiness-audit owns the explicit whole-project readiness gate and remains preflight-only until the user confirms scope.",
+      "invocation_mode": "explicit",
+      "invocation_mode_reason": "Packaged metadata keeps this product explicit-only because its broad or externally sensitive work requires deliberate routing and separate action authority.",
+      "decision": "new_product",
+      "decision_reason": "Final readiness is a distinct cross-domain gate with stronger approval, evidence, and claim-boundary requirements than ordinary implementation or review.",
+      "unique_value": "Forces lightweight preflight, explicit scope approval, transparent skipped or unavailable checks, durable readiness evidence, and small validated remediation batches without overclaiming production readiness.",
+      "runtime_footprint": "Instruction-only entrypoint; heavy evidence and remediation remain in the target repository and load only after explicit confirmation.",
+      "local_assets": "Canonical README, SKILL.md, and host metadata only; target-repository docs, tests, browser tooling, and security capabilities provide run-specific evidence.",
+      "output_contract": "First return preflight and a confirmation question; after approval, maintain a repository-local readiness report covering scope, refs, validations, UI checks, security status, findings, gates, remediation, and unverified areas.",
+      "anti_bloat_review": "The product is rejected for normal feature work, setup decisions, deployment execution, and narrow review; its trigger is explicit final readiness or completion language.",
+      "safety_boundary": "Preflight only until explicit confirmation. Live systems, deployment, external services, destructive actions, credentials, customer data, payments, deep scans, and browser interaction require their own approvals.",
+      "canonical_ownership": "Direct-canonical maintenance: skills/release-readiness-audit/ owns the portable product; coupled contracts, policy, provenance, validation, and tests are maintained under canonical repo/** paths.",
+      "source_provenance": "first_party",
+      "third_party_audit": "Not applicable first-party material; no scanner output, browser artifact, private repository evidence, or third-party skill text is bundled.",
+      "validation": [
+        "node repo/scripts/validate-toolkit.cjs",
         "node --test repo/tests/skill-routing.test.cjs"
+      ]
+    },
+    "repository-agent-rules": {
+      "public_id": "repository-agent-rules",
+      "public_name": "Repository Agent Rules",
+      "existing_skill_review": "Reviewed repository-agent-rules against toolkit-setup, n8n-safety-router, and general repository guidance; no other current product owns bounded bootstrap, check, repair, and refresh of portable repo-local agent instruction files.",
+      "native_capability_review": "Native hosts may read their own instruction files, but they do not provide the Toolkit's cross-host managed-marker checks, byte-preserving repair contract, backup discipline, or portable playbook installation.",
+      "trigger": "Use when explicitly asked to install, check, repair, refresh, or bootstrap AGENTS.md and supported host shims in a target repository or folder.",
+      "positive_routing_examples": [
+        "Install the Toolkit repo-local agent rules in this new repository.",
+        "Check and repair the managed markers in AGENTS.md and the Claude shim.",
+        "Update this repository's managed agent instructions and verify every supported host shim stays aligned."
+      ],
+      "negative_routing_examples": [
+        "Implement this ordinary application feature in a repository whose instruction files are already current.",
+        "Configure an n8n workflow-specific safety adapter without first selecting its separate n8n rules contract.",
+        "Refresh the installed Toolkit plugin and bridge without changing any consumer repository instruction file."
+      ],
+      "overlap_boundary": "Use repository-agent-rules for target-repository instruction files; use toolkit-setup for installing or repairing the Toolkit package, plugins, bridge, or host-local Toolkit state.",
+      "invocation_mode": "implicit",
+      "invocation_mode_reason": "Packaged metadata permits implicit discovery after the behavioural routing corpus proves positive, negative, and adversarial discrimination; discovery never grants mutation authority.",
+      "decision": "retain_current_product",
+      "decision_reason": "Portable instruction bootstrap and repair has a distinct repository-file safety boundary that should not be folded into host package setup.",
+      "unique_value": "Provides managed-marker validation, platform-scoped file selection, user-content preservation, exact backup and restore expectations, and a session-reset boundary after instruction mutation.",
+      "runtime_footprint": "Instruction-first workflow with local templates and a bounded installer; it runs only for unchecked or explicitly requested instruction-file work.",
+      "local_assets": "Canonical skill instructions, repo-local templates, portable playbooks, n8n adapter installer, and small host metadata.",
+      "output_contract": "Return checked platform files, structural or content drift, exact proposed or completed writes, backup and restore location when applicable, validation, and the required session-reset prompt after mutation.",
+      "anti_bloat_review": "The steady-state path stops after a cheap structural check; detailed templates and repair logic load only for explicit bootstrap or repair work.",
+      "safety_boundary": "Inspect first, preserve unmarked user content, preview ignore-file changes separately, require approval for writes, and never use instruction repair as authority for unrelated repository or live-system mutation.",
+      "canonical_ownership": "Direct-canonical maintenance: skills/repository-agent-rules/ owns the portable product; coupled contracts, policy, provenance, validation, and tests are maintained under canonical repo/** paths.",
+      "source_provenance": "first_party",
+      "third_party_audit": "Not applicable first-party material; no third-party skill text or executable payload is copied into this product.",
+      "validation": [
+        "node repo/scripts/validate-toolkit.cjs",
+        "node --test repo/tests/agent-onboarding.test.cjs repo/tests/skill-routing.test.cjs"
+      ]
+    },
+    "secure-ci-cd": {
+      "public_id": "secure-ci-cd",
+      "public_name": "Secure CI/CD",
+      "existing_skill_review": "Reviewed secure-ci-cd against repository rules, project completion, self-hosting, Hostinger/Coolify, n8n helpers, and ordinary GitHub tooling; no other current product owns security-first CI/CD planning, guarded workflow installation, status evidence, and deployment-disabled rollout.",
+      "native_capability_review": "GitHub Actions and host-native workflow editors provide pipeline mechanics but do not enforce the product's secret preflight, security-first ordering, deployment hold, approval gates, or durable status contract.",
+      "trigger": "Use when planning or implementing CI/CD, GitHub Actions, required checks, pipeline hardening, security checks, build and test automation, branch protection, release automation, or safe deployment rollout.",
+      "positive_routing_examples": [
+        "Plan a security-first GitHub Actions pipeline with secret scanning and required checks.",
+        "Install CI validation while keeping deployment disabled until a later explicit approval.",
+        "Harden this existing CI pipeline and define truthful required checks, permissions, and deployment gates."
+      ],
+      "negative_routing_examples": [
+        "Run the existing local unit test for an ordinary code change without altering CI/CD.",
+        "Deploy an application to a production host without first obtaining deployment-specific authority.",
+        "Review application authentication code without creating, changing, or governing any CI/CD pipeline."
+      ],
+      "overlap_boundary": "Use release-readiness-audit for whole-project readiness and hosting products for infrastructure operations; secure-ci-cd owns pipeline design, guarded workflow changes, and CI/CD status.",
+      "invocation_mode": "implicit",
+      "invocation_mode_reason": "Packaged metadata permits implicit discovery after the behavioural routing corpus proves positive, negative, and adversarial discrimination; discovery never grants mutation authority.",
+      "decision": "retain_current_product",
+      "decision_reason": "Security-first pipeline installation and governance has a distinct mutation and validation boundary beyond general repository coding guidance.",
+      "unique_value": "Enforces secret-safe preflight, security checks before build, deployment-off defaults, approval before publication or release actions, and durable CI/CD status tracking.",
+      "runtime_footprint": "Concise routing skill plus a full local procedure and CI/CD templates; no package installation, provider write, or deployment occurs by default.",
+      "local_assets": "Canonical procedure, CI/CD templates, GitHub Actions templates, status template, references, README, SKILL.md, and host metadata.",
+      "output_contract": "Return repository state, risk and secret-path findings without values, proposed pipeline and gates, exact files, validation, deployment state, approval requirements, and updated CI/CD status when authorised.",
+      "anti_bloat_review": "The product focuses on secure pipeline installation and does not duplicate n8n transport, host deployment operations, whole-project readiness, or generic coding advice.",
+      "safety_boundary": "Pause before package installation, workflow or branch-protection mutation, commit, push, PR creation, merge, deployment, credentials, or secrets; never ask for or write secret values.",
+      "canonical_ownership": "Direct-canonical maintenance: skills/secure-ci-cd/ owns the portable product; coupled contracts, policy, provenance, validation, and tests are maintained under canonical repo/** paths.",
+      "source_provenance": "first_party",
+      "third_party_audit": "Not applicable first-party procedure and templates; provider examples do not include third-party skill code or secret values.",
+      "validation": [
+        "node repo/scripts/validate-toolkit.cjs",
+        "node --test repo/tests/secure-ci-cd.test.cjs repo/tests/secure-cicd-template-declarations.test.cjs repo/tests/skill-routing.test.cjs"
       ]
     },
     "self-hosted-service-safety": {
-      "existing_skill_review": "Reviewed current skills before adding self-hosted-service-safety: n8n-agent-rules, n8n-local-setup, windows-localhost-workflows, secure-cicd-installer, ai-coding-agent-rules, and context-preserving-ai-publisher. No existing skill covers this exact non-n8n safety-review trigger without either being too narrow or too broad.",
-      "trigger": "Use only when reviewing or planning non-n8n self-hosted service setup, Docker Compose services, VPS deployment notes, reverse proxies, public ports, DNS/TLS, tunnels, admin panels, backups, public admin/backup paths, honeypot/canary paths, traffic logs, SSH access, firewall exposure, or first-run hardening. Do not use for ordinary app coding, local-only dev servers, or n8n work.",
-      "decision": "new_project_skill",
-      "decision_reason": "Self-Hosted Service Safety has a distinct safety boundary and invocation trigger, so folding it into ai-coding-agent-rules would make the always-adjacent coding rules heavier while hiding the setup/exposure review boundary.",
-      "unique_value": "Forces a short risk review before high-impact local setup or service exposure work that agents might otherwise treat as ordinary setup commands.",
-      "runtime_footprint": "SKILL.md is intentionally short, review-only, and has no required long references or bundled tools; optional detail is not loaded by default.",
-      "local_assets": "No local assets beyond README, SKILL.md, and small platform metadata because the useful behavior is a compact safety review, not an installer or tutorial.",
-      "output_contract": "Return a compact Self-Hosted Service Safety Review with risk level, blocked actions, approval-gated actions, safe first-run plan, required config changes, backup/restore notes, privacy-safe deployment/AI observability baseline, and verification checks before public exposure.",
-      "anti_bloat_review": "The skill is rejected for ordinary coding and model-general advice; it triggers only on setup/exposure/credential/live-system risk and produces a compact review instead of a tutorial.",
-      "safety_boundary": "Review-only by default. Docker, DNS/TLS, tunnels, firewall/public ports, VPS/cloud changes, credentials, production data, or deployment commands require explicit current-turn approval.",
+      "public_id": "self-hosted-service-safety",
+      "public_name": "Self-Hosted Service Safety",
+      "existing_skill_review": "Reviewed self-hosted-service-safety against n8n rules and setup, Hostinger/Coolify operations, Windows localhost, CI/CD, and repository guidance; no other current product owns compact non-n8n self-hosted exposure, backup, access, and first-run hardening review.",
+      "native_capability_review": "Shell, Docker, cloud, and reverse-proxy capabilities can perform operations but do not supply the product's exposure review, public-admin boundary, backup expectations, privacy-safe observability, or approval gates.",
+      "trigger": "Use when reviewing or planning non-n8n self-hosted services, Docker Compose, VPS deployment, reverse proxies, public ports, DNS/TLS, tunnels, admin panels, backups, SSH, firewall, or first-run hardening.",
+      "positive_routing_examples": [
+        "Review this Docker Compose service before I expose it through a public reverse proxy.",
+        "Plan first-run hardening, backups, and firewall checks for a non-n8n VPS service.",
+        "Audit public admin paths, tunnels, traffic logs, and recovery controls for this self-hosted service."
+      ],
+      "negative_routing_examples": [
+        "Start a local-only development server with no Docker, VPS, tunnel, or public exposure.",
+        "Set up or operate n8n, which must use the dedicated n8n safety and environment products.",
+        "Review a local model runner and GPU setup that has no generic self-hosted service exposure scope."
+      ],
+      "overlap_boundary": "Use the Hostinger/Coolify product for that specific platform, local-ai-safety for AI runtimes, and n8n products for n8n; this product owns generic non-n8n self-hosting risk review.",
+      "invocation_mode": "implicit",
+      "invocation_mode_reason": "Packaged metadata permits implicit discovery after the behavioural routing corpus proves positive, negative, and adversarial discrimination; discovery never grants mutation authority.",
+      "decision": "new_product",
+      "decision_reason": "Generic non-n8n self-hosting has a distinct exposure and hardening boundary not safely covered by localhost, CI/CD, or vendor-specific operations guidance.",
+      "unique_value": "Forces a short risk review before agents treat service exposure, public administration, backup paths, traffic logging, SSH, or firewall changes as ordinary setup.",
+      "runtime_footprint": "Short review-only instructions with no bundled installer, executable helper, required long reference, or live service.",
+      "local_assets": "Canonical README, SKILL.md, and host metadata only because the useful behavior is the bounded safety review.",
+      "output_contract": "Return risk level, blocked and approval-gated actions, safe first-run plan, required configuration, backup and restore notes, privacy-safe observability, and checks before public exposure.",
+      "anti_bloat_review": "The product is rejected for ordinary coding, local-only development, n8n, or vendor-specific Hostinger/Coolify work and remains a compact generic exposure review.",
+      "safety_boundary": "Review-only by default. Docker, DNS/TLS, tunnels, firewall or public ports, VPS or cloud changes, credentials, production data, backups, and deployment require explicit approval.",
+      "canonical_ownership": "Direct-canonical maintenance: skills/self-hosted-service-safety/ owns the portable product; coupled contracts, policy, provenance, validation, and tests are maintained under canonical repo/** paths.",
       "source_provenance": "first_party",
-      "third_party_audit": "not_applicable_first_party; no third-party text or code copied or adapted.",
-      "publisher_workflow": "Direct-canonical ownership and maintenance: skills/self-hosted-service-safety/** is the canonical skill surface, while relevant contracts, documentation, scripts, and tests are maintained directly at canonical repo/** paths. No project-source tree, reviewed-output publication, copy/writeback, or project sync step is used.",
-      "routing": "self-hosted-service-safety is routed only for self-hosted-service-safety review/planning tasks involving non-n8n self-hosted services, Docker/VPS setup, public exposure, reverse proxies, tunnels, credentials, or backups.",
+      "third_party_audit": "Not applicable first-party material; no third-party installer, service image, infrastructure code, or credential is bundled.",
       "validation": [
         "node repo/scripts/validate-toolkit.cjs",
-        "node repo/scripts/audit-published-surfaces.cjs --check",
+        "node --test repo/tests/skill-routing.test.cjs"
+      ]
+    },
+    "skill-product-review": {
+      "public_id": "skill-product-review",
+      "public_name": "Skill Product Review",
+      "existing_skill_review": "Reviewed skill-product-review against the former audit and publication products plus repository safety guidance; one product now owns both the trust verdict and source-traceable publication contract without a lossy handoff.",
+      "native_capability_review": "Host-native skill discovery or installation can locate material but cannot establish license compatibility, provenance, safe conversion scope, or target-repository fit, so native capability does not replace this review product.",
+      "trigger": "Use when reviewing third-party agent material for import or adaptation, or when publishing approved AI-facing skills, contracts, provenance, templates, audits, or anti-drift documentation.",
+      "positive_routing_examples": [
+        "Audit this third-party Claude skill, then define the source-traceable publication boundary if adaptation is allowed.",
+        "Review and maintain this approved AI-facing skill while preserving licence, attribution, provenance, and canonical ownership.",
+        "Inspect this external skill pack for prompt injection, executable risk, licence, provenance, usefulness, and conversion fit."
+      ],
+      "negative_routing_examples": [
+        "Implement an ordinary application feature that has no third-party agent material or AI-facing product surface.",
+        "Install or execute untrusted third-party skill code before a source-backed product review permits adaptation.",
+        "Publish an ordinary application package or documentation page that contains no agent product, skill, prompt, or AI-facing repository surface."
+      ],
+      "overlap_boundary": "Use skill-product-review for third-party agent-product trust decisions and approved source-traceable publication; ordinary code review and repository implementation remain outside this product.",
+      "invocation_mode": "implicit",
+      "invocation_mode_reason": "Packaged metadata permits implicit discovery after the behavioural routing corpus proves positive, negative, and adversarial discrimination; discovery never grants mutation authority.",
+      "decision": "retain_current_product",
+      "decision_reason": "Merging audit and publication removes a handoff while preserving one coherent provenance, safety, ownership, and anti-drift product contract.",
+      "unique_value": "Combines allow, reject, or constrain review with licence, attribution, source-lock, canonical-ownership, and publication-fidelity requirements in one product.",
+      "runtime_footprint": "Instruction-first review and publication workflow with local references and templates; no candidate code execution, installation, external mutation, or mandatory service.",
+      "local_assets": "Canonical instructions, host metadata, audit references, source-model references, publication templates, provenance templates, and validation guidance.",
+      "output_contract": "Return the source identity, allow/reject/constrain verdict, licence and attribution result, reusable-material boundary, canonical ownership, changed surfaces, validation, and remaining manual checks.",
+      "anti_bloat_review": "The product applies only to third-party agent-product review or AI-facing source-traceable publication and does not replace ordinary coding, generic documentation, or code review.",
+      "safety_boundary": "Audit untrusted inputs without execution. Do not install, import, execute, publish, deploy, move audit baselines, or perform destructive or live actions without the separately required authority.",
+      "canonical_ownership": "Direct-canonical maintenance: skills/skill-product-review/ owns the portable product; coupled contracts, policy, provenance, validation, and tests are maintained under canonical repo/** paths.",
+      "source_provenance": "first_party",
+      "third_party_audit": "This first-party product performs the review itself; candidate third-party material remains untrusted input and is not copied or executed unless the allow or constrain verdict permits a bounded adaptation.",
+      "validation": [
+        "node repo/scripts/validate-toolkit.cjs",
         "node --test repo/tests/skill-routing.test.cjs"
       ]
     },
     "toolkit-setup": {
-      "existing_skill_review": "Reviewed current skills, README skill table, Skill Safety Matrix, toolkit skill-routing source, context-preserving-ai-publisher, ai-coding-agent-rules, n8n-local-setup, windows-localhost-workflows, and the removed bridge command skills before adding toolkit-setup. Existing skills cover repo rules, source publishing, n8n setup, localhost startup, and safety reviews, but no existing single skill routes Toolkit native plugin setup, Windows hook repair, repo-backed Toolkit auto-update, plus OpenCode and Antigravity 2 local bridge troubleshooting without becoming a command-per-bridge family.",
-      "trigger": "Use toolkit-setup when the user asks about AI Agent Toolkit plugin setup, Toolkit Local Bridge setup or troubleshooting, repo-backed Toolkit auto-update, OpenCode bridge support, Antigravity 2 adapter support, bridge audit, enabled-target sync, disable, stale bridge state, native Codex or Claude Code plugin update behavior, Windows hook repair, or bridge setup safety. Do not invoke it for ordinary project coding, unrelated n8n setup, or as permission to run write commands without explicit approval.",
-      "decision": "new_project_skill",
-      "decision_reason": "A single compact toolkit-setup router skill is safer than a command-per-bridge skill family because it lets agents recognise setup requests while keeping implementation, command details, hooks, and policy in the shared updater, docs, validators, and tests.",
-      "unique_value": "The skill preserves the bridge and plugin-hook safety model in the trigger path: dry-run first, repo auto-update opt-in only, OpenCode and Antigravity 2 opt-in only, detection without autosetup, sync only enabled targets, post-install Windows hook repair before trusting Codex plugin hooks, opt-in startup repair of unsafe installed third-party Codex hook caches, no npm or pip installs, no arbitrary project repo mutation by default, no Codex-to-Claude or Claude-to-Codex cross-update, and downgrade refusal unless explicitly forced.",
-      "runtime_footprint": "SKILL.md stays a short router and safety checklist. It does not embed updater or repair implementation details or repeat command-per-target procedures; detailed behavior stays in repo/docs/TOOLKIT-LOCAL-BRIDGE.md, repo/docs/HOW-TO-USE.md, repo/scripts/toolkit-local-bridge.cjs, repo/scripts/repair-codex-plugin-windows-hooks.cjs, and tests.",
-      "local_assets": "Only the toolkit-setup README, SKILL.md, and OpenAI metadata are published. No scripts, references, templates, package archives, third-party code, or generated bridge hub outputs are bundled in the skill.",
-      "output_contract": "When used, the agent routes to the Toolkit setup subsystem, starts with audit or dry-run behavior, uses repo/scripts/toolkit-local-bridge.cjs for any requested operation, preserves explicit approval gates for writes, validates configured repo auto-updates before enabled-target sync, and runs relevant validators or tests before final reporting.",
-      "anti_bloat_review": "The skill intentionally replaces a command-per-bridge skill family with one small discoverability surface. It is not generic setup advice, and it does not duplicate existing source-publishing, n8n, localhost, or safety-review skills.",
-      "safety_boundary": "User-level hub writes, configured Toolkit repo fast-forward updates, OpenCode global skill writes, Antigravity 2 adapter writes, auto-sync enablement, target enablement, repo auto-update enablement, downgrade forcing, package installation, arbitrary project-repo mutation, live-system actions, credentials, and destructive operations require explicit current-turn approval when applicable. Hooks remain optional policy-light automation.",
+      "public_id": "toolkit-setup",
+      "public_name": "Toolkit Setup",
+      "existing_skill_review": "Reviewed toolkit-setup against repository rules, source publication, n8n setup, Windows localhost, and removed command-per-bridge skills; no other current product routes native Toolkit plugin setup, managed checkout refresh, Windows hook repair, and OpenCode or Antigravity bridge support.",
+      "native_capability_review": "Codex and Claude package managers and OpenCode or Antigravity skill locations are target capabilities, but none owns cross-host Toolkit discovery, managed-checkout update, version alignment, repair, and explicit target-enablement safety.",
+      "trigger": "Use for AI Agent Toolkit setup or refresh, managed checkout state, native Codex or Claude plugin behavior, Windows hook repair, bridge audit or sync, and opt-in OpenCode or Antigravity support.",
+      "positive_routing_examples": [
+        "Set up the AI Agent Toolkit for Codex using the managed checkout flow.",
+        "Audit why the Toolkit bridge target is stale and preview the safe repair without writing yet.",
+        "Repair and verify the installed Codex Toolkit plugin cache after a failed native update."
+      ],
+      "negative_routing_examples": [
+        "Implement ordinary application code that does not change Toolkit installation or host state.",
+        "Install repo-local AGENTS.md rules in a consumer repository without changing the Toolkit package.",
+        "Edit one canonical Toolkit skill product in this repository without installing, updating, or repairing host-local Toolkit state."
+      ],
+      "overlap_boundary": "Use repository-agent-rules for consumer-repository instruction files and n8n-environment-setup for n8n environments; toolkit-setup owns Toolkit package, plugin, bridge, refresh, and host-local setup state.",
+      "invocation_mode": "implicit",
+      "invocation_mode_reason": "Packaged metadata permits implicit discovery after the behavioural routing corpus proves positive, negative, and adversarial discrimination; discovery never grants mutation authority.",
+      "decision": "new_product",
+      "decision_reason": "One compact setup router is safer and more discoverable than command-specific bridge skills while keeping implementation in shared Toolkit runtime and docs.",
+      "unique_value": "Provides one guarded route for managed checkout setup, native package behavior, downgrade refusal, Windows hook repair, bridge audit, opt-in targets, and version-aligned validation.",
+      "runtime_footprint": "Small routing skill with no bundled scripts; implementation and detailed behavior stay in canonical Toolkit setup runtime, contracts, docs, and tests.",
+      "local_assets": "Canonical README, SKILL.md, and host metadata only; setup runtime, package contracts, bridge implementation, and validation remain under repo/**.",
+      "output_contract": "Return discovered setup state, one consolidated question or preview when required, exact approved operations, version and readback evidence, validation, and any fail-closed blocker.",
+      "anti_bloat_review": "The product consolidates setup discoverability and rejects a command-per-target skill family; it does not duplicate repository rules, n8n setup, or ordinary localhost work.",
+      "safety_boundary": "Audit and dry-run first. User-home writes, managed checkout changes, target enablement, sync, downgrade forcing, package installation, arbitrary repository mutation, and live actions require explicit approval.",
+      "canonical_ownership": "Direct-canonical maintenance: skills/toolkit-setup/ owns the portable product; coupled contracts, policy, provenance, validation, and tests are maintained under canonical repo/** paths.",
       "source_provenance": "first_party",
-      "third_party_audit": "not_applicable_first_party; no third-party plugin source, private plugin cache material, marketplace package, executable dependency, or vendor docs are copied or adapted.",
-      "publisher_workflow": "Direct-canonical ownership and maintenance: skills/toolkit-setup/** is the canonical skill surface, while relevant contracts, documentation, scripts, and tests are maintained directly at canonical repo/** paths. No project-source tree, reviewed-output publication, copy/writeback, or project sync step is used.",
-      "routing": "toolkit-setup is routed in the Toolkit skill-routing table as the single discoverability skill for Toolkit plugin and bridge setup requests. The command-specific bridge skills are omitted and removed: setup-local-toolkit-bridge, setup-opencode-bridge, setup-ag2-bridge, setup-all-non-native-bridges, sync-enabled-bridges, audit-local-toolkit-bridge, and disable-local-toolkit-bridge.",
+      "third_party_audit": "Not applicable first-party router; no private plugin cache, third-party package payload, executable dependency, or credential is copied into the skill.",
       "validation": [
         "node repo/scripts/validate-toolkit.cjs",
-        "node repo/scripts/audit-published-surfaces.cjs --check",
-        "node --test repo/tests/toolkit-local-bridge.test.cjs repo/tests/toolkit-local-bridge-hook-light.test.cjs",
-        "node --test repo/tests/skill-routing.test.cjs"
+        "node --test repo/tests/toolkit-local-bridge.test.cjs repo/tests/toolkit-local-bridge-hook-light.test.cjs repo/tests/skill-routing.test.cjs"
+      ]
+    },
+    "windows-local-dev-services": {
+      "public_id": "windows-local-dev-services",
+      "public_name": "Windows Local Dev Services",
+      "existing_skill_review": "Reviewed windows-local-dev-services against n8n-environment-setup, local AI, self-hosting, Toolkit setup, and generic coding guidance; no other current product owns Windows-specific detached launch, bounded readiness, port/process, PowerShell quoting, runtime resolution, sandbox persistence, and orphan cleanup guidance.",
+      "native_capability_review": "A host shell can start processes but does not automatically handle Windows execution policy, duplicate Path keys, Corepack failures, nested quoting, detached persistence, bounded health checks, or safe ownership of interrupted processes.",
+      "trigger": "Use when starting, relaunching, verifying, or debugging Windows localhost web applications, API servers, or development services and their process, port, runtime, launcher, or readiness failures.",
+      "positive_routing_examples": [
+        "Start this Windows development server in the background and prove its health endpoint responds.",
+        "Diagnose why this PowerShell launcher exits with empty logs and leaves the target port unavailable.",
+        "Relaunch this Windows localhost service safely after identifying the exact orphaned process and occupied port."
+      ],
+      "negative_routing_examples": [
+        "Deploy this service to a public VPS or modify production DNS and firewall settings.",
+        "Debug application business logic that does not involve Windows startup, process, port, runtime, or localhost readiness behavior.",
+        "Repair a Linux CI job that has no Windows shell, local process, port, or localhost service behavior."
+      ],
+      "overlap_boundary": "Use n8n-environment-setup for its managed n8n stacks and self-hosted-service-safety for public exposure; windows-local-dev-services owns ordinary Windows local process launch and verification.",
+      "invocation_mode": "implicit",
+      "invocation_mode_reason": "Packaged metadata permits implicit discovery after the behavioural routing corpus proves positive, negative, and adversarial discrimination; discovery never grants mutation authority.",
+      "decision": "retain_current_product",
+      "decision_reason": "Windows local development has recurring platform-specific launch and persistence failures that generic coding instructions frequently mishandle.",
+      "unique_value": "Provides detached launch, bounded readiness, exact working-command proof, safe log handling, dynamic runtime resolution, port ownership checks, and Windows-specific failure recovery.",
+      "runtime_footprint": "Instruction-only workflow with reusable PowerShell examples and no bundled executable helper or required external service.",
+      "local_assets": "Canonical README, detailed SKILL.md, host metadata, and focused Windows localhost regression tests.",
+      "output_contract": "Return dependency, server, and health status, checked URLs, exact working command, process and log paths, workaround used, and any remaining manual action without exposing secrets.",
+      "anti_bloat_review": "The product is limited to Windows localhost startup and verification and does not replace application debugging, n8n environment management, public self-hosting, or production operations.",
+      "safety_boundary": "Use bounded diagnostics, avoid foreground indefinite waits, never print secrets, do not kill ambiguous processes, and require approval before machine-level environment changes or unrelated destructive cleanup.",
+      "canonical_ownership": "Direct-canonical maintenance: skills/windows-local-dev-services/ owns the portable product; coupled contracts, policy, provenance, validation, and tests are maintained under canonical repo/** paths.",
+      "source_provenance": "first_party",
+      "third_party_audit": "Not applicable first-party instructions and examples; no external executable, package, credential, or private process data is bundled.",
+      "validation": [
+        "node repo/scripts/validate-toolkit.cjs",
+        "node --test repo/tests/windows-local-dev-services.test.cjs repo/tests/skill-routing.test.cjs"
       ]
     }
   },
-  "notes": "Grandfathered skill IDs are the pre-gate entrypoints only, including the historically retired knowledge-index-updater ID. Current post-gate skills are represented by keyed direct-canonical skill_creation_review evidence. New skill IDs must not be added to the grandfathered list to bypass review evidence."
+  "notes": "Schema-v3 evidence for the exact 15-product S2 portfolio. Historical identities are non-authoritative migration evidence only and cannot route, install, or exempt a current product."
 }

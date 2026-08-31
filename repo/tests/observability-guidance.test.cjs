@@ -71,9 +71,9 @@ function assertProductDataHandlingLegalScope(text, relPath) {
 
 test('Secure CI/CD surfaces require privacy-safe deployment and AI observability', () => {
   for (const relPath of [
-    'skills/secure-cicd-installer/templates/cicd/secure-cicd-prompt.md',
-    'skills/secure-cicd-installer/templates/cicd/CURRENT_CICD_STATUS.template.md',
-    'skills/secure-cicd-installer/SKILL.md'
+    'skills/secure-ci-cd/templates/cicd/secure-cicd-prompt.md',
+    'skills/secure-ci-cd/templates/cicd/CURRENT_CICD_STATUS.template.md',
+    'skills/secure-ci-cd/SKILL.md'
   ]) {
     const text = readText(relPath);
     assert.match(text, /privacy-safe/i, relPath);
@@ -106,8 +106,8 @@ test('self-hosted and managed app skills include metadata-only AI observability 
 
 test('frontend skill requires privacy-safe user-facing error references and legal pages', () => {
   for (const relPath of [
-    'skills/ui-ux-secure-frontend-design/SKILL.md',
-    'skills/ui-ux-secure-frontend-design/references/privacy-security-safety.md'
+    'skills/frontend-art-direction/SKILL.md',
+    'skills/frontend-art-direction/references/privacy-security-safety.md'
   ]) {
     const text = readText(relPath);
     assert.match(text, /GDPR/i, relPath);
@@ -147,7 +147,7 @@ test('repo-local agent rules keep application error defaults compact', () => {
     'repo/contracts/agent-rules/CLAUDE.template.md',
     'repo/contracts/agent-rules/GEMINI.template.md',
     'AGENTS.md',
-    'skills/ai-coding-agent-rules/repo-local/AGENTS.managed.template.md'
+    'skills/repository-agent-rules/repo-local/AGENTS.managed.template.md'
   ]) {
     const text = readText(relPath);
     assertCompactApplicationErrorBlock(text, relPath);

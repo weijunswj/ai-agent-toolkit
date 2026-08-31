@@ -1,31 +1,29 @@
 {
   "schema_version": 2,
   "skills": [
-    "skills/agent-skill-supply-chain-audit",
-    "skills/ai-coding-agent-rules",
     "skills/codex-ssh-hostinger-coolify-setup-maintainer",
-    "skills/context-preserving-ai-publisher",
-    "skills/github-governance-review-reconciler",
-    "skills/local-ai-stack-safety",
+    "skills/frontend-art-direction",
+    "skills/github-program-reconciler",
+    "skills/local-ai-safety",
     "skills/managed-app-foundation-review",
-    "skills/n8n-agent-rules",
-    "skills/n8n-local-setup",
-    "skills/n8n-workflow-helper-scripts",
-    "skills/n8n-workflow-templates",
-    "skills/project-completion-audit",
-    "skills/secure-cicd-installer",
+    "skills/n8n-environment-setup",
+    "skills/n8n-safety-router",
+    "skills/n8n-workflow-transport",
+    "skills/release-readiness-audit",
+    "skills/repository-agent-rules",
+    "skills/secure-ci-cd",
     "skills/self-hosted-service-safety",
+    "skills/skill-product-review",
     "skills/toolkit-setup",
-    "skills/ui-ux-secure-frontend-design",
-    "skills/windows-localhost-workflows"
+    "skills/windows-local-dev-services"
   ],
-  "skill_count": 17,
+  "skill_count": 15,
   "pack_manifests": [],
   "project_tree_present": false,
   "native_plugins": {
     "codex": {
       "name": "ai-agent-toolkit",
-      "version": "2.10.3",
+      "version": "2.10.8",
       "required_files": [
         {
           "path": ".codex-plugin/plugin.json",
@@ -47,7 +45,7 @@
     },
     "claude": {
       "name": "ai-agent-toolkit",
-      "version": "2.10.3",
+      "version": "2.10.8",
       "required_files": [
         {
           "path": ".claude-plugin/plugin.json",

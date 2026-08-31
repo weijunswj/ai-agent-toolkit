@@ -21,13 +21,12 @@ const mode = process.argv.includes('--write') ? 'write' : 'check';
 const sourceId = 'repo.agent-rules';
 const fixCommand = 'node repo/scripts/sync-agent-instruction-shims.cjs --write';
 const executionPromptPath = 'repo/contracts/agent-rules/ai-coding-agent-execution.md';
-const n8nAdapterPath = 'repo/contracts/agent-rules/n8n-agent-rules-adapter.md';
-const n8nRulesPath = 'repo/contracts/agent-rules/n8n-agent-rules.md';
+const n8nAdapterPath = 'repo/contracts/agent-rules/n8n-safety-router-adapter.md';
+const n8nRulesPath = 'repo/contracts/agent-rules/n8n-safety-rules.md';
 const n8nDerivativePaths = Object.freeze([
-  'skills/n8n-agent-rules/n8n-agent-rules.md',
-  'skills/n8n-local-setup/references/n8n-agent-rules.md',
-  'skills/n8n-workflow-helper-scripts/references/n8n-agent-rules.md',
-  'skills/n8n-workflow-templates/references/n8n-agent-rules.md'
+  'skills/n8n-safety-router/n8n-safety-rules.md',
+  'skills/n8n-environment-setup/references/n8n-safety-rules.md',
+  'skills/n8n-workflow-transport/references/n8n-safety-rules.md'
 ]);
 const manualTemplatePaths = {
   agents: 'repo/contracts/agent-rules/AGENTS.template.md',
@@ -42,7 +41,7 @@ const repoLocalTemplatePaths = {
 };
 const legacyProjectToken = '_' + 'projects';
 const legacyCuratedToken = 'curated_' + 'output_for_ai';
-const legacyRepoLocalSourceRoot = `${legacyProjectToken}/development/ai-coding-agent-rules/${legacyCuratedToken}/skills/ai-coding-agent-rules/repo-local`;
+const legacyRepoLocalSourceRoot = `${legacyProjectToken}/development/ai-coding-agent-rules/${legacyCuratedToken}/skills/repository-agent-rules/repo-local`;
 
 const toolkitBegin = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:BEGIN GLOBAL-AGENTS.MD-TEMPLATE v1 -->`;
 const toolkitEnd = `<!-- AI-AGENT-TOOLKIT:${executionPromptPath}:END GLOBAL-AGENTS.MD-TEMPLATE -->`;
@@ -234,7 +233,7 @@ function managedPayload(executionPrompt, n8nAdapter) {
 
 function n8nCrossSkillHeader() {
   return [
-    '# n8n Agent Rules Cross-Skill Reference',
+    '# n8n Safety Rules Cross-Product Reference',
     '',
     'Narrow managed n8n safety derivative for portable/local n8n safety context in the containing copied skill.',
     '',
@@ -252,8 +251,7 @@ function expectedN8nDerivatives(n8nRules) {
   return {
     [n8nDerivativePaths[0]]: body,
     [n8nDerivativePaths[1]]: `${n8nCrossSkillHeader()}${body}`,
-    [n8nDerivativePaths[2]]: `${n8nCrossSkillHeader()}${body}`,
-    [n8nDerivativePaths[3]]: `${n8nCrossSkillHeader()}${body}`
+    [n8nDerivativePaths[2]]: `${n8nCrossSkillHeader()}${body}`
   };
 }
 

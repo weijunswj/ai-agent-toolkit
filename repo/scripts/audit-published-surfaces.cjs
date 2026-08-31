@@ -201,7 +201,7 @@ function topologyScopePolicyResult() {
       scopeCounts[entry.scope] += 1;
     }
   });
-  for (const [scope, expected] of [['standalone-publisher', 3], ['historical-evidence', 2], ['non-operative-example', 5]]) {
+  for (const [scope, expected] of [['standalone-publisher', 3], ['historical-evidence', 2], ['non-operative-example', 0]]) {
     if (scopeCounts[scope] !== expected) errors.push(`${topologyScopePolicyPath} must contain exactly ${expected} ${scope} entries`);
   }
   return { policy: errors.length ? null : policy, errors };

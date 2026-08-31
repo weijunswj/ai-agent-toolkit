@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "source_repo": "owner/repo",
+  "source_ref": "main",
+  "source_commit": "commit-sha",
+  "source_lifecycle": "retired_after_migration",
+  "source_role": "migration_provenance_only",
+  "source_update_policy": "none",
+  "public_attribution_required": false,
+  "files": [
+    {
+      "mode": "exact",
+      "source_path": "path/in/source.md",
+      "canonical_path": "skills/product-name/references/source.md",
+      "source_blob_sha": "git-blob-sha"
+    },
+    {
+      "mode": "adapted",
+      "source_path": "path/in/source-adapted.md",
+      "canonical_path": "skills/product-name/references/source-adapted.md",
+      "source_blob_sha": "git-blob-sha",
+      "notes": "Explain what was adapted and why."
+    },
+    {
+      "mode": "excluded",
+      "source_path": "path/not/used",
+      "notes": "Explain why it is excluded."
+    }
+  ]
+}

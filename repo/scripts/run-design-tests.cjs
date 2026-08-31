@@ -11,7 +11,7 @@ const testArgs = [
   'unittest',
   'discover',
   '-s',
-  'skills/ui-ux-secure-frontend-design/tools/design-system-generator/tests'
+  'skills/frontend-art-direction/tools/design-system-generator/tests'
 ];
 
 function candidateCommands() {

@@ -15,6 +15,7 @@ const routingPartial = path.join(
   'agent-rules',
   'toolkit-skill-routing.md'
 );
+const routingCasesPath = path.join(repoRoot, 'repo', 'tests', 'fixtures', 'skill-routing-cases.json');
 
 function readText(filePath) {
   return fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
@@ -36,6 +37,54 @@ function duplicates(values) {
     seen.add(value);
   }
   return [...repeated].sort();
+}
+
+function fixtureBoundaryViolations(boundary, product) {
+  const clauses = boundary.toLowerCase().split(/[.;]/).map((clause) => clause.trim()).filter(Boolean);
+  const fixtureClauses = clauses.filter((clause, index) => {
+    if (/\bfixtures?\b/.test(clause)) return true;
+    return index > 0 && /^(?:they|these|those)\b/.test(clause) && /\bfixtures?\b/.test(clauses[index - 1]);
+  });
+  const fixtureStatements = fixtureClauses
+    .flatMap((clause) => clause.split(/\b(?:and|but)\b/))
+    .map((statement) => statement.trim())
+    .filter(Boolean);
+  const violations = [];
+  const isNegated = (clause) => /\b(?:cannot|must not|do not|not|never)\b/.test(clause);
+  const fixtureEvidenceOnly = fixtureClauses.some((clause) =>
+    /\btest-only\b/.test(clause) && /\bevidence\b/.test(clause)
+  );
+  const rejectsTemplateRequests = fixtureClauses.some((clause) =>
+    isNegated(clause) &&
+    /\b(?:satisfy|serve|provide|route)\b/.test(clause) &&
+    /\breusable\b/.test(clause) &&
+    /\bpublic\b/.test(clause) &&
+    /\bworkflow[- ]template requests?\b/.test(clause)
+  );
+  const rejectsTemplateProductStatus = fixtureClauses.some((clause) =>
+    isNegated(clause) &&
+    /\bselectable\b/.test(clause) &&
+    /\binstallable\b/.test(clause) &&
+    /\btemplates?\b/.test(clause)
+  );
+  const positiveTemplateRoute = fixtureStatements.some((statement) =>
+    !isNegated(statement) &&
+    /\b(?:use|satisfy|serve|provide|route|select|install)\b/.test(statement) &&
+    /\b(?:reusable|public)\b/.test(statement) &&
+    /\b(?:json|workflow[- ]templates?|templates?)\b/.test(statement)
+  );
+  const positiveTemplateProductStatus = fixtureStatements.some((statement) =>
+    !isNegated(statement) &&
+    /\b(?:selectable|installable)\b/.test(statement) &&
+    /\btemplates?\b/.test(statement)
+  );
+
+  if (!fixtureEvidenceOnly) violations.push(`${product}: fixtures must be explicit test-only evidence`);
+  if (!rejectsTemplateRequests) violations.push(`${product}: fixtures must not satisfy reusable/public workflow-template requests`);
+  if (!rejectsTemplateProductStatus) violations.push(`${product}: fixtures must not be selectable/installable templates`);
+  if (positiveTemplateRoute) violations.push(`${product}: fixtures must not positively route reusable/public workflow-template or JSON requests`);
+  if (positiveTemplateProductStatus) violations.push(`${product}: fixtures must not have selectable/installable template status`);
+  return violations;
 }
 
 function assertWindowsHookRecoveryGuidance(text, label) {
@@ -156,6 +205,159 @@ test('toolkit skill routing covers current skill folders or documents omissions'
     assert.ok(currentSet.has(name), `${name} is intentionally omitted but has no skills/${name}/SKILL.md`);
     assert.ok(reason.length >= 12, `${name} omission needs a concrete reason`);
   }
+});
+
+test('canonical behavioural routing corpus admits implicit discovery without predecessor aliases', () => {
+  const corpus = JSON.parse(readText(routingCasesPath));
+  const creationBaseline = JSON.parse(readText(path.join(
+    repoRoot,
+    'repo',
+    'docs',
+    'skill-creation-center-baseline.json'
+  )));
+  const current = skillNames();
+  const currentSet = new Set(current);
+  const caseIds = corpus.cases.map((entry) => entry.id);
+  const explicitProducts = [
+    'codex-ssh-hostinger-coolify-setup-maintainer',
+    'github-program-reconciler',
+    'release-readiness-audit'
+  ];
+
+  assert.equal(corpus.schema_version, 2);
+  assert.equal(corpus.implicit_discovery_authorizes_mutation, false);
+  assert.deepEqual(corpus.portfolio, current);
+  assert.deepEqual(Object.keys(corpus.invocation_modes).sort(), current);
+  assert.deepEqual(duplicates(caseIds), [], 'routing case ids must be unique');
+  assert.equal(corpus.cases.length, 105, 'routing corpus must contain seven cases for each product');
+
+  for (const entry of corpus.cases) {
+    assert.match(entry.id, /^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+    assert.match(entry.prompt, /\S.{20,}/);
+    assert.ok(['positive', 'negative', 'adversarial', 'overlap'].includes(entry.kind));
+    assert.ok(Array.isArray(entry.expected));
+    assert.ok(Array.isArray(entry.excluded));
+    assert.deepEqual(entry.expected.filter((id) => entry.excluded.includes(id)), []);
+    for (const id of [...entry.expected, ...entry.excluded]) {
+      assert.ok(currentSet.has(id), `${entry.id} references non-current product ${id}`);
+    }
+  }
+
+  for (const product of current) {
+    const positives = corpus.cases.filter(
+      (entry) => entry.kind === 'positive' && entry.expected.includes(product)
+    );
+    const negatives = corpus.cases.filter(
+      (entry) => ['negative', 'adversarial'].includes(entry.kind) && entry.excluded.includes(product)
+    );
+    const overlaps = corpus.cases.filter(
+      (entry) => entry.kind === 'overlap' &&
+        (entry.expected.includes(product) || entry.excluded.includes(product))
+    );
+    const review = creationBaseline.skill_creation_review[product];
+
+    assert.ok(positives.length >= 3, `${product} needs at least three positive routing cases`);
+    assert.ok(negatives.length >= 3, `${product} needs at least three near-neighbour negative cases`);
+    assert.ok(overlaps.length >= 1, `${product} needs an overlap or companion-boundary case`);
+    assert.equal(review.positive_routing_examples.length, 3, `${product} creation evidence positive count`);
+    assert.equal(review.negative_routing_examples.length, 3, `${product} creation evidence negative count`);
+    assert.match(review.overlap_boundary, /\S.{20,}/, `${product} creation evidence overlap boundary`);
+    assert.equal(corpus.invocation_modes[product], review.invocation_mode);
+
+    const openAiPath = path.join(repoRoot, 'skills', product, 'agents', 'openai.yaml');
+    const openAi = readText(openAiPath);
+    const packagedMode = /allow_implicit_invocation:\s*false/.test(openAi) ? 'explicit' : 'implicit';
+    assert.equal(packagedMode, corpus.invocation_modes[product], `${product} packaged invocation mode`);
+
+    if (corpus.invocation_modes[product] === 'implicit') {
+      assert.ok(
+        corpus.cases.some((entry) => entry.kind === 'adversarial' && entry.excluded.includes(product)),
+        `${product} needs an adversarial exclusion case before implicit admission`
+      );
+    }
+  }
+
+  assert.deepEqual(
+    Object.entries(corpus.invocation_modes)
+      .filter(([, mode]) => mode === 'explicit')
+      .map(([product]) => product)
+      .sort(),
+    explicitProducts
+  );
+
+  const shippingCases = Object.fromEntries(
+    corpus.shipping_law_cases.map((entry) => [entry.id, entry.expected])
+  );
+  assert.deepEqual(shippingCases, {
+    'auth-bypass': 'SHIP_BLOCKER',
+    'broken-critical-flow': 'SHIP_BLOCKER',
+    'cosmetic-spacing': 'POST_SHIP',
+    'cross-tenant-access': 'SHIP_BLOCKER',
+    'hypothetical-scaling': 'POST_SHIP',
+    'material-data-loss': 'SHIP_BLOCKER',
+    'optional-abstraction': 'POST_SHIP',
+    'required-validation-failure': 'SHIP_BLOCKER'
+  });
+  const localFloor = corpus.shipping_floor_cases.find(
+    (entry) => entry.id === 'local-nondeployable-task'
+  );
+  assert.deepEqual(localFloor.required, ['core_functionality', 'correctness', 'required_validation']);
+  assert.deepEqual(localFloor.not_required, ['deployment', 'health', 'rollback']);
+
+  const retiredIds = [
+    'agent-skill-supply-chain-audit',
+    'ai-coding-agent-rules',
+    'context-preserving-ai-publisher',
+    'github-governance-review-reconciler',
+    'local-ai-stack-safety',
+    'n8n-agent-rules',
+    'n8n-local-setup',
+    'n8n-workflow-helper-scripts',
+    'n8n-workflow-templates',
+    'project-completion-audit',
+    'secure-cicd-installer',
+    'ui-ux-secure-frontend-design',
+    'windows-localhost-workflows'
+  ];
+  for (const retiredId of retiredIds) {
+    assert.equal(JSON.stringify(corpus).includes(retiredId), false, `routing corpus must not resolve retired product ${retiredId}`);
+  }
+});
+
+test('n8n creation evidence keeps test fixtures out of workflow-template routing', () => {
+  const creationBaseline = JSON.parse(readText(path.join(
+    repoRoot,
+    'repo',
+    'docs',
+    'skill-creation-center-baseline.json'
+  )));
+  const products = ['n8n-safety-router', 'n8n-workflow-transport'];
+  const violations = [];
+  const boundaries = {};
+
+  for (const product of products) {
+    const boundary = creationBaseline.skill_creation_review[product].overlap_boundary;
+    boundaries[product] = boundary;
+    violations.push(...fixtureBoundaryViolations(boundary, product));
+  }
+
+  assert.deepEqual(violations, [], 'fixture routing evidence must preserve the accepted n8n product boundary');
+
+  const adversarialReplays = [
+    {
+      product: 'n8n-safety-router',
+      claim: 'Use test-only n8n workflow fixtures for reusable JSON.'
+    },
+    {
+      product: 'n8n-workflow-transport',
+      claim: 'Use test-only n8n workflow fixtures for public reusable JSON.'
+    }
+  ];
+  const escapedReplays = adversarialReplays
+    .filter(({ product, claim }) => fixtureBoundaryViolations(`${boundaries[product]} ${claim}`, product).length === 0)
+    .map(({ product }) => product);
+
+  assert.deepEqual(escapedReplays, [], 'fixture validator must reject prior positive reusable-JSON routes');
 });
 
 test('skill safety matrix covers current skill folders and safety boundaries', () => {
@@ -286,9 +488,9 @@ test('markdown file walker skips symlinks and stays inside the selected root', (
   assert.equal(files.includes('loop-link/safe.md'), false, 'symlink loop should be skipped');
 });
 
-test('context publisher documents published-surface readability rules', () => {
-  const source = readText(path.join(repoRoot, 'skills', 'context-preserving-ai-publisher', 'SKILL.md'));
-  const generated = readText(path.join(repoRoot, 'skills', 'context-preserving-ai-publisher', 'SKILL.md'));
+test('skill product review documents published-surface readability rules', () => {
+  const source = readText(path.join(repoRoot, 'skills', 'skill-product-review', 'SKILL.md'));
+  const generated = readText(path.join(repoRoot, 'skills', 'skill-product-review', 'SKILL.md'));
 
   for (const text of [source, generated]) {
     assert.match(text, /Sequential instructions must use Markdown numbered steps: `1\.`, `2\.`, `3\.`/);
@@ -306,11 +508,11 @@ test('context publisher documents published-surface readability rules', () => {
 test('human setup docs cover platform-specific skill and rule setup fairly', () => {
   const howToUse = readText(path.join(repoRoot, 'repo', 'docs', 'HOW-TO-USE.md'));
   const readme = readText(path.join(repoRoot, 'README.md'));
-  const aiRulesReadme = readText(path.join(repoRoot, 'skills', 'ai-coding-agent-rules', 'README.md'));
-  const codexRef = readText(path.join(repoRoot, 'skills', 'n8n-local-setup', 'references', 'ai-agent-platforms', 'codex.md'));
-  const claudeCodeRef = readText(path.join(repoRoot, 'skills', 'n8n-local-setup', 'references', 'ai-agent-platforms', 'claude-code.md'));
-  const opencodeRef = readText(path.join(repoRoot, 'skills', 'n8n-local-setup', 'references', 'ai-agent-platforms', 'opencode.md'));
-  const antigravityRef = readText(path.join(repoRoot, 'skills', 'n8n-local-setup', 'references', 'ai-agent-platforms', 'antigravity.md'));
+  const aiRulesReadme = readText(path.join(repoRoot, 'skills', 'repository-agent-rules', 'README.md'));
+  const codexRef = readText(path.join(repoRoot, 'skills', 'n8n-environment-setup', 'references', 'ai-agent-platforms', 'codex.md'));
+  const claudeCodeRef = readText(path.join(repoRoot, 'skills', 'n8n-environment-setup', 'references', 'ai-agent-platforms', 'claude-code.md'));
+  const opencodeRef = readText(path.join(repoRoot, 'skills', 'n8n-environment-setup', 'references', 'ai-agent-platforms', 'opencode.md'));
+  const antigravityRef = readText(path.join(repoRoot, 'skills', 'n8n-environment-setup', 'references', 'ai-agent-platforms', 'antigravity.md'));
   const readmeInstallSection = readme.split('\n## Install Skills By Platform\n')[1].split('\n## MCP Status\n')[0];
   const howToUseInstallSection = howToUse.split('\n## Install Toolkit Skills\n')[1].split('\n## Documentation Links\n')[0];
 
@@ -415,9 +617,9 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(howToUse, /Use `GEMINI\.md` or the configured context file/);
   assert.match(readme, /`\$HOME\/\.config\/opencode\/skills\/<skill-name>\/`/);
   assert.match(readme, /`AGENTS\.md` is the shared managed instruction file/);
-  assert.match(readme, /\[repo-local\/AGENTS\.managed\.template\.md\]\(skills\/ai-coding-agent-rules\/repo-local\/AGENTS\.managed\.template\.md\)/);
-  assert.doesNotMatch(readme, /\[`(?:AGENTS|CLAUDE|GEMINI)\.template\.md`\]\(skills\/ai-coding-agent-rules\/(?:AGENTS|CLAUDE|GEMINI)\.template\.md\)/);
-  assert.match(readme, /\(skills\/n8n-agent-rules\/\)/);
+  assert.match(readme, /\[repo-local\/AGENTS\.managed\.template\.md\]\(skills\/repository-agent-rules\/repo-local\/AGENTS\.managed\.template\.md\)/);
+  assert.doesNotMatch(readme, /\[`(?:AGENTS|CLAUDE|GEMINI)\.template\.md`\]\(skills\/repository-agent-rules\/(?:AGENTS|CLAUDE|GEMINI)\.template\.md\)/);
+  assert.match(readme, /\(skills\/n8n-safety-router\/\)/);
   assert.doesNotMatch(readme, /\$HOME\/\.gemini\/antigravity\/skills\/<skill-name>\//);
   assert.doesNotMatch(readme, /\$HOME\/\.gemini\/skills\/<skill-name>\//);
   assert.doesNotMatch(readme, /<workspace-root>\/\.agent\/skills\/<skill-name>\//);
@@ -427,8 +629,8 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   assert.match(aiRulesReadme, /\| Platform \| Preferred skill install \| Supported skill-folder location \|/);
   assert.match(aiRulesReadme, /\| Codex \| Direct whole-skill-folder install\. \| \*\*Choose any one supported Codex skill-folder location:\*\*<br>- `<repo>\/\.agents\/skills\/<skill-name>\/`/);
   assert.match(aiRulesReadme, /\| OpenCode \| Short manual whole-skill-folder install only\. \| \*\*Choose any one supported OpenCode skill-folder location:\*\*<br>- `<repo>\/\.opencode\/skills\/<skill-name>\/`/);
-  assert.match(howToUse, /\[OpenCode reference\]\(\.\.\/\.\.\/skills\/n8n-local-setup\/references\/ai-agent-platforms\/opencode\.md\)/);
-  assert.match(howToUse, /\[Antigravity 2 reference\]\(\.\.\/\.\.\/skills\/n8n-local-setup\/references\/ai-agent-platforms\/antigravity\.md\)/);
+  assert.match(howToUse, /\[OpenCode reference\]\(\.\.\/\.\.\/skills\/n8n-environment-setup\/references\/ai-agent-platforms\/opencode\.md\)/);
+  assert.match(howToUse, /\[Antigravity 2 reference\]\(\.\.\/\.\.\/skills\/n8n-environment-setup\/references\/ai-agent-platforms\/antigravity\.md\)/);
 
   assert.match(codexRef, /Do not copy, fork, vendor, mirror, or recreate the official \[`n8n-io\/skills`\]\(https:\/\/github\.com\/n8n-io\/skills\) content inside this toolkit/);
   assert.match(codexRef, /On Windows, repair and audit the installed plugin cache before approving or trusting hooks/);
@@ -481,7 +683,7 @@ test('human setup docs cover platform-specific skill and rule setup fairly', () 
   );
 });
 
-test('n8n-local-setup plugin flow stays Windows-safe before hook approval', () => {
+test('n8n environment setup plugin flow stays Windows-safe before hook approval', () => {
   const rootDocs = [
     'README.md',
     'repo/docs/HOW-TO-USE.md'
@@ -489,14 +691,14 @@ test('n8n-local-setup plugin flow stays Windows-safe before hook approval', () =
 
   for (const relPath of rootDocs) {
     const text = readText(path.join(repoRoot, relPath));
-    assert.match(text, /n8n Local Setup|skills\/n8n-local-setup/i, relPath);
+    assert.match(text, /n8n Environment Setup|skills\/n8n-environment-setup/i, relPath);
     assert.doesNotMatch(text, /codex plugin marketplace add n8n-io\/skills/, relPath);
     assert.doesNotMatch(text, /repair-codex-plugin-windows-hooks\.cjs --plugin-root/, relPath);
   }
 
   const paths = [
-    'skills/n8n-local-setup/references/ai-agent-platforms/codex.md',
-    'skills/n8n-local-setup/templates/mcp-configs/codex-mcp-config.md'
+    'skills/n8n-environment-setup/references/ai-agent-platforms/codex.md',
+    'skills/n8n-environment-setup/templates/mcp-configs/codex-mcp-config.md'
   ];
 
   for (const relPath of paths) {
