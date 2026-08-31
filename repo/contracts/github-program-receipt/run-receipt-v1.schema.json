@@ -1,0 +1,208 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.github-program.run-receipt.v1",
+  "title": "Toolkit GitHub Programme Run Receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "receipt_type",
+    "receipt_id",
+    "sequence",
+    "prior_receipt_id",
+    "run_id",
+    "allocation_id",
+    "repository",
+    "parent_issue",
+    "child_issue",
+    "lock",
+    "authority",
+    "start",
+    "candidate",
+    "lease",
+    "payload",
+    "created_at"
+  ],
+  "properties": {
+    "schema": { "const": "toolkit.github-program.run-receipt.v1" },
+    "receipt_type": {
+      "enum": [
+        "RUN_STARTED",
+        "TRANSITION_PREVIEW",
+        "EXECUTOR_TERMINAL",
+        "G4_TERMINAL",
+        "RUN_INTERRUPTED"
+      ]
+    },
+    "receipt_id": { "$ref": "#/$defs/digest" },
+    "sequence": { "type": "integer", "minimum": 1, "maximum": 128 },
+    "prior_receipt_id": {
+      "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }]
+    },
+    "run_id": { "$ref": "#/$defs/id" },
+    "allocation_id": { "$ref": "#/$defs/id" },
+    "repository": {
+      "type": "string",
+      "pattern": "^[a-z0-9_.-]{1,100}/[a-z0-9_.-]{1,100}$"
+    },
+    "parent_issue": { "type": "integer", "minimum": 1 },
+    "child_issue": { "type": "integer", "minimum": 1 },
+    "lock": { "$ref": "#/$defs/id" },
+    "authority": { "$ref": "#/$defs/authority" },
+    "start": { "$ref": "#/$defs/start" },
+    "candidate": {
+      "anyOf": [{ "$ref": "#/$defs/candidate" }, { "type": "null" }]
+    },
+    "lease": { "$ref": "#/$defs/lease" },
+    "payload": { "$ref": "#/$defs/payload" },
+    "created_at": { "$ref": "#/$defs/timestamp" }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:/-]{1,160}$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "sha1": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "maxLength": 32
+    },
+    "gitRef": {
+      "type": "string",
+      "pattern": "^(?!@$)(?!-)(?!/)(?!.*(?:\\.\\.|@\\{|//|[\\u0000-\\u0020\\u007f~^:?*\\[\\\\]))(?!.*(?:^|/)\\.)(?!.*\\.lock(?:/|$))(?!.*[/.]$).{1,240}$"
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "child_comment_id",
+        "parent_comment_id",
+        "node_id",
+        "author_login",
+        "author_association",
+        "body_digest",
+        "updated_at",
+        "update_identity_digest",
+        "scope_digest"
+      ],
+      "properties": {
+        "child_comment_id": { "type": "integer", "minimum": 1 },
+        "parent_comment_id": { "type": "integer", "minimum": 1 },
+        "node_id": { "$ref": "#/$defs/id" },
+        "author_login": { "type": "string", "pattern": "^[A-Za-z0-9-]{1,39}$" },
+        "author_association": { "const": "OWNER" },
+        "body_digest": { "$ref": "#/$defs/digest" },
+        "updated_at": { "$ref": "#/$defs/timestamp" },
+        "update_identity_digest": { "$ref": "#/$defs/digest" },
+        "scope_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "start": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "base_sha",
+        "head_sha",
+        "tree_sha",
+        "status_digest",
+        "clean_worktree",
+        "ref"
+      ],
+      "properties": {
+        "base_sha": { "$ref": "#/$defs/sha1" },
+        "head_sha": { "$ref": "#/$defs/sha1" },
+        "tree_sha": { "$ref": "#/$defs/sha1" },
+        "status_digest": { "$ref": "#/$defs/digest" },
+        "clean_worktree": { "const": true },
+        "ref": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["detached", "name"],
+              "properties": {
+                "detached": { "const": true },
+                "name": { "type": "null" }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["detached", "name"],
+              "properties": {
+                "detached": { "const": false },
+                "name": { "$ref": "#/$defs/gitRef" }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pr_number", "branch", "base_ref", "base_sha", "head_sha", "tree_sha"],
+      "properties": {
+        "pr_number": { "type": "integer", "minimum": 1 },
+        "branch": { "$ref": "#/$defs/gitRef" },
+        "base_ref": { "$ref": "#/$defs/gitRef" },
+        "base_sha": { "$ref": "#/$defs/sha1" },
+        "head_sha": { "$ref": "#/$defs/sha1" },
+        "tree_sha": { "$ref": "#/$defs/sha1" }
+      }
+    },
+    "lease": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lease_id",
+        "fence_id",
+        "fence_sequence",
+        "issued_at",
+        "expires_at"
+      ],
+      "properties": {
+        "lease_id": { "$ref": "#/$defs/id" },
+        "fence_id": { "$ref": "#/$defs/id" },
+        "fence_sequence": { "type": "integer", "minimum": 1 },
+        "issued_at": { "$ref": "#/$defs/timestamp" },
+        "expires_at": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["classification"],
+      "properties": {
+        "classification": { "$ref": "#/$defs/id" },
+        "reason_code": { "$ref": "#/$defs/id" },
+        "outcome_digest": { "$ref": "#/$defs/digest" },
+        "evidence_digest": { "$ref": "#/$defs/digest" },
+        "operation_digest": { "$ref": "#/$defs/digest" },
+        "detail_digest": { "$ref": "#/$defs/digest" },
+        "mutation_outcome": { "enum": ["KNOWN", "UNKNOWN"] },
+        "evidence_refs": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "digest"],
+            "properties": {
+              "id": { "$ref": "#/$defs/id" },
+              "digest": { "$ref": "#/$defs/digest" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

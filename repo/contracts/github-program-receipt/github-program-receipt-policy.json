@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "contract_id": "toolkit.github-program.run-receipt.v1",
+  "runtime": {
+    "node_minimum": "22.13.0",
+    "sqlite_module": "node:sqlite",
+    "npm_sqlite_dependency": false,
+    "unsupported_runtime": "GPR_UNSUPPORTED_RUNTIME"
+  },
+  "coordination_namespace": {
+    "key": ["repository", "parent_issue", "child_issue"],
+    "one_database_per_namespace": true,
+    "lock_is_row_binding_not_database_key": true,
+    "active_ownership_child_wide": true,
+    "fence_high_water_child_wide": true,
+    "different_children_independent": true
+  },
+  "state_root": {
+    "logical_root": "~/.ai-agent-toolkit/user-state/github-program-receipt/",
+    "outside_repository_and_worktrees": true,
+    "outside_os_temp": true,
+    "absolute_existing_private_directory": true,
+    "symlink_or_reparse_components": "block",
+    "unproven_storage": "block"
+  },
+  "sqlite": {
+    "journal_mode": "DELETE",
+    "synchronous": "FULL",
+    "foreign_keys": true,
+    "trusted_schema": false,
+    "busy_timeout_ms": 5000,
+    "application_id": 1196446257,
+    "user_version": 1,
+    "integrity_check": true,
+    "foreign_key_check": true,
+    "schema_fingerprint": true,
+    "append_only_tables": ["allocations", "runs", "receipts", "lease_events"],
+    "atomic_cas_transactions": true,
+    "independent_reopen_readback": true
+  },
+  "allocator": {
+    "lease_and_fence_identity_source": "cryptographic_allocator",
+    "caller_supplied_lease_or_fence_authoritative": false,
+    "fence_sequence": "persisted_child_wide_monotonic_n_plus_one",
+    "different_lock_while_active": "GPR_ACTIVE_LEASE",
+    "expired_takeover": "next_child_wide_fence",
+    "old_holder_after_takeover": "GPR_NEWER_FENCE_EXISTS",
+    "live_run_process_adoption": false,
+    "ownership": "same_store_instance_same_process_opaque_object"
+  },
+  "receipt_lifecycle": {
+    "types": [
+      "RUN_STARTED",
+      "TRANSITION_PREVIEW",
+      "EXECUTOR_TERMINAL",
+      "G4_TERMINAL",
+      "RUN_INTERRUPTED"
+    ],
+    "run_started_sequence": 1,
+    "run_started_prior_receipt_id": null,
+    "append_only_chain": true,
+    "exact_prior_continuity": true,
+    "terminal_types": ["EXECUTOR_TERMINAL", "G4_TERMINAL", "RUN_INTERRUPTED"],
+    "receipts_after_terminal": false,
+    "stale_or_expired_fence_append": false,
+    "candidate_initial": null,
+    "candidate_introduction_type": "TRANSITION_PREVIEW",
+    "candidate_immutable_after_introduction": true,
+    "terminal_append_and_release_atomic": true
+  },
+  "pre_pr_start": {
+    "exact_repository": true,
+    "exact_base_sha": true,
+    "exact_start_head_and_tree": true,
+    "exact_clean_status_digest": true,
+    "detached_or_attached_ref_truth": true,
+    "candidate_before_pr": null,
+    "placeholder_pr_number": false
+  },
+  "mutation_admission": {
+    "verified_run_started_required": true,
+    "zero_adapter_calls_before_verified_run_started": true,
+    "before_every_adapter_operation": [
+      "reopen_and_verify_store",
+      "verify_child_wide_fence",
+      "fresh_read_child_parent_owner_chronology",
+      "verify_authority_identity_body_update_and_scope",
+      "prove_no_later_controlling_authority",
+      "revalidate_operation_source_and_cas",
+      "recheck_fence_immediately_before_adapter"
+    ],
+    "authority_movement": "GPR_AUTHORITY_CHANGED",
+    "unknown_mutation_outcome": "GPR_MUTATION_OUTCOME_UNKNOWN",
+    "blind_retry": false
+  },
+  "limits": {
+    "receipt_bytes": 16384,
+    "payload_bytes": 8192,
+    "receipts_per_run": 128,
+    "allocations_per_namespace": 10000,
+    "database_bytes": 67108864,
+    "lease_min_ms": 1000,
+    "lease_max_ms": 86400000
+  },
+  "privacy": {
+    "comment_bodies": false,
+    "repository_contents": false,
+    "prompts_uploads_or_model_outputs": false,
+    "credentials_secrets_tokens_or_auth_headers": false,
+    "durable_values_are_identifiers_digests_timestamps_and_bounded_outcomes": true,
+    "payload_fields_are_closed_allowlisted": true
+  },
+  "bootstrap": {
+    "lock": "DL-S2-GITHUB-PROGRAM-RECEIPT-BOOTSTRAP-001",
+    "production_receipt_for_own_generation": false,
+    "runtime_bootstrap_mode": false,
+    "runtime_missing_receipt_exception": false
+  }
+}
