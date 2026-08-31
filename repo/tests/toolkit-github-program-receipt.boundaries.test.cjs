@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { DatabaseSync } = require('node:sqlite');
 const test = require('node:test');
 
 const runtimePath = path.resolve(__dirname, '../scripts/toolkit-github-program-receipt.cjs');
@@ -12,8 +13,11 @@ const repositoryRoot = path.resolve(__dirname, '../..');
 const {
   LIMITS,
   assertRuntimeSupport,
+  canonicalSerialize,
   createProgrammeReceiptStore,
   digestValue,
+  validateOperationDescriptor,
+  validateVerifierProcessResult,
   validateWindowsStorageProof
 } = require(runtimePath);
 
@@ -136,59 +140,223 @@ test('Windows storage proof rejects untrusted access, wrong owner, and non-fixed
   assertCode(() => validateWindowsStorageProof({ ...valid, drive_type: 4 }), 'GPR_UNSAFE_STATE_ROOT');
 });
 
+test('fresh-process verifier protocol rejects spawn, timeout, malformed, noncanonical, extra, stderr, digest, state, and runtime faults', () => {
+  const expected = verificationPacket();
+  const run = (stdout, stderr = '') => spawnSync(process.execPath, ['--no-warnings', '-e',
+    'process.stdout.write(process.env.GPR_STDOUT); process.stderr.write(process.env.GPR_STDERR)'], {
+    encoding: 'utf8', windowsHide: true, timeout: 5000,
+    env: { ...process.env, GPR_STDOUT: stdout, GPR_STDERR: stderr }
+  });
+  assert.deepEqual(validateVerifierProcessResult(run(`${canonicalSerialize(expected)}\n`), expected), expected);
+  for (const result of [
+    run('{bad json}\n'),
+    run(`${JSON.stringify(expected)}\n`),
+    run(`${canonicalSerialize(expected)}\nextra\n`),
+    run(`${canonicalSerialize(expected)}\n`, 'unexpected stderr'),
+    run(`${canonicalSerialize({ ...expected, packet_digest: 'a'.repeat(64) })}\n`),
+    run(`${canonicalSerialize(verificationPacket({ chain_digest: 'a'.repeat(64) }))}\n`),
+    run(`${canonicalSerialize(verificationPacket({ store_state_digest: 'b'.repeat(64) }))}\n`),
+    run(`${canonicalSerialize(verificationPacket({ runtime_identity_digest: 'c'.repeat(64) }))}\n`),
+    run('x'.repeat(17 * 1024)),
+    run('', 'x'.repeat(17 * 1024)),
+    spawnSync(process.execPath, ['-e', 'process.exit(7)'], { encoding: 'utf8' }),
+    spawnSync(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { encoding: 'utf8', timeout: 20 }),
+    spawnSync(path.join(stateRoot(), 'missing-node.exe'), [], { encoding: 'utf8' })
+  ]) assertCode(() => validateVerifierProcessResult(result, expected), 'GPR_FRESH_PROCESS_VERIFICATION_FAILED');
+});
+
+test('the verifier child opens the existing store read-only and cannot append, adopt, or create operations', async () => {
+  const current = await fixture();
+  const before = current.store.readReceiptChain(current.session.run_id);
+  const result = spawnSync(process.execPath, [
+    '--no-warnings', runtimePath, 'verify-run-started',
+    '--repository', current.storeOptions.repository,
+    '--parent-issue', String(current.storeOptions.parent_issue),
+    '--child-issue', String(current.storeOptions.child_issue),
+    '--state-root', current.storeOptions.stateRoot,
+    '--repository-root', current.storeOptions.repositoryRoot,
+    '--run-id', current.session.run_id,
+    '--allocation-id', current.session.allocation_id,
+    '--receipt-id', current.session.run_started_receipt_id
+  ], { cwd: repositoryRoot, encoding: 'utf8', windowsHide: true });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  assert.equal(result.stdout.split('\n').filter(Boolean).length, 1);
+  assert.deepEqual(current.store.readReceiptChain(current.session.run_id), before);
+  const db = new DatabaseSync(current.store.databasePath, { readOnly: true });
+  assert.equal(db.prepare('SELECT COUNT(*) AS value FROM mutation_operations').get().value, 0);
+  db.close();
+});
+
+test('mandatory verifier launch strips Node preload and module-path injection variables', async () => {
+  const originalOptions = process.env.NODE_OPTIONS;
+  const originalPath = process.env.NODE_PATH;
+  process.env.NODE_OPTIONS = '--require=C:\\definitely-missing-gpr-preload.cjs';
+  process.env.NODE_PATH = 'C:\\untrusted-gpr-modules';
+  try {
+    const current = await fixture();
+    assert.equal(current.store.readReceiptChain(current.session.run_id)[0].receipt_type, 'RUN_STARTED');
+  } finally {
+    if (originalOptions === undefined) delete process.env.NODE_OPTIONS;
+    else process.env.NODE_OPTIONS = originalOptions;
+    if (originalPath === undefined) delete process.env.NODE_PATH;
+    else process.env.NODE_PATH = originalPath;
+  }
+});
+
+test('fresh verifier rejects a validly re-digested but altered RUN_STARTED receipt chain', async () => {
+  const current = await fixture();
+  const tamper = `
+    const { DatabaseSync } = require('node:sqlite');
+    const { canonicalSerialize, digestValue } = require(${JSON.stringify(runtimePath)});
+    const db = new DatabaseSync(${JSON.stringify(current.store.databasePath)});
+    const row = db.prepare('SELECT * FROM receipts WHERE run_id=?').get(${JSON.stringify(current.session.run_id)});
+    const receipt = JSON.parse(row.canonical_json);
+    receipt.payload.classification = 'ALTERED_AFTER_COMMIT';
+    receipt.receipt_id = '';
+    const payload = structuredClone(receipt); delete payload.receipt_id;
+    receipt.receipt_id = digestValue(payload);
+    db.exec('DROP TRIGGER receipts_no_update');
+    db.prepare('UPDATE receipts SET receipt_id=?, canonical_json=?, receipt_digest=? WHERE run_id=?').run(receipt.receipt_id, canonicalSerialize(receipt), receipt.receipt_id, receipt.run_id);
+    db.exec("CREATE TRIGGER receipts_no_update BEFORE UPDATE ON receipts BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;");
+    db.close();
+  `;
+  assert.equal(spawnSync(process.execPath, ['-e', tamper], { encoding: 'utf8' }).status, 0);
+  const result = spawnSync(process.execPath, [
+    '--no-warnings', runtimePath, 'verify-run-started',
+    '--repository', current.storeOptions.repository,
+    '--parent-issue', String(current.storeOptions.parent_issue),
+    '--child-issue', String(current.storeOptions.child_issue),
+    '--state-root', current.storeOptions.stateRoot,
+    '--repository-root', current.storeOptions.repositoryRoot,
+    '--run-id', current.session.run_id,
+    '--allocation-id', current.session.allocation_id,
+    '--receipt-id', current.session.run_started_receipt_id
+  ], { cwd: repositoryRoot, encoding: 'utf8', windowsHide: true });
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /GPR_VERIFICATION_PACKET_INVALID/);
+});
+
 async function assertCodeAsync(callback, code) {
   await assert.rejects(callback, (error) => error && error.code === code);
 }
 
-test('authority movement before first mutation blocks all adapter calls', async () => {
-  const { store, session, expectedAuthority, expectedStart } = await fixture();
-  let calls = 0;
-  await assertCodeAsync(() => store.performMutation(session, {
-    now: '2026-08-30T11:00:01.000Z',
-    expected_source_digest: digestValue(expectedStart),
-    readAuthority: async () => ({
-      authority: expectedAuthority,
-      later_controlling_comments: [{ comment_id: 999, body_digest: digestValue('hold') }]
-    }),
-    readSource: async () => expectedStart,
-    mutate: async () => { calls += 1; }
-  }), 'GPR_AUTHORITY_CHANGED');
-  assert.equal(calls, 0);
+function descriptor(overrides = {}) {
+  const targetIdentity = overrides.target_identity || { resource_type: 'git_ref', resource_id: 'refs/heads/main' };
+  return {
+    operation_kind: 'GIT_REF_UPDATE',
+    safety_class: 'CAS',
+    target_identity: targetIdentity,
+    target_digest: digestValue(targetIdentity),
+    expected_source_digest: digestValue('source-a'),
+    cas_digest: digestValue('cas-a'),
+    expected_post_state_digest: digestValue('post-a'),
+    adapter_identity_digest: digestValue('trusted-git-ref-adapter-v1'),
+    retry_of_operation_id: null,
+    ...overrides
+  };
+}
+
+function trustedReaders(expectedAuthority, operationDescriptor, overrides = {}) {
+  return {
+    readAuthority: overrides.readAuthority || (async () => ({ authority: structuredClone(expectedAuthority), later_controlling_comments: [] })),
+    readSource: overrides.readSource || (async () => ({
+      source_digest: operationDescriptor.expected_source_digest,
+      cas_digest: operationDescriptor.cas_digest
+    })),
+    verifyOutcomeEvidence: overrides.verifyOutcomeEvidence || (async (evidence) => structuredClone(evidence))
+  };
+}
+
+function outcomeEvidence(operation, classification, overrides = {}) {
+  const evidence = {
+    operation_id: operation.operation_id,
+    logical_operation_digest: operation.logical_operation_digest,
+    adapter_identity_digest: operation.adapter_identity_digest,
+    target_identity: operation.target_identity,
+    target_digest: operation.target_digest,
+    provider_operation_key: operation.provider_operation_key,
+    cas_digest: operation.cas_digest,
+    classification,
+    observed_post_state_digest: classification === 'APPLIED'
+      ? operation.expected_post_state_digest || digestValue('created-resource') : null,
+    rejection_digest: classification === 'NOT_APPLIED' ? digestValue('definitive-pre-effect-rejection') : null,
+    delayed_completion_excluded: classification === 'NOT_APPLIED',
+    evidence_at: nowIso(),
+    evidence_digest: '',
+    ...overrides
+  };
+  const digestInput = structuredClone(evidence);
+  delete digestInput.evidence_digest;
+  evidence.evidence_digest = digestValue(digestInput);
+  return evidence;
+}
+
+async function admittedFixture(overrides = {}) {
+  const base = await fixture(overrides);
+  const operationDescriptor = overrides.descriptor || descriptor();
+  const readersForOperation = overrides.trustedReaders || trustedReaders(base.expectedAuthority, operationDescriptor);
+  const admission = await base.store.admitMutationOperation(base.session, operationDescriptor, readersForOperation);
+  return { ...base, operationDescriptor, readersForOperation, admission };
+}
+
+function verificationPacket(overrides = {}) {
+  const packet = {
+    schema: 'toolkit.github-program.run-started-verification.v1',
+    run_id: 'run-test',
+    allocation_id: 'allocation-test',
+    receipt_id: '1'.repeat(64),
+    receipt_sequence: 1,
+    namespace_digest: '2'.repeat(64),
+    authority_digest: '3'.repeat(64),
+    start_digest: '4'.repeat(64),
+    lease_id: 'lease-test',
+    fence_id: 'fence-test',
+    fence_sequence: 1,
+    chain_digest: '5'.repeat(64),
+    store_state_digest: '6'.repeat(64),
+    store_identity_digest: '7'.repeat(64),
+    node_executable_realpath_digest: '8'.repeat(64),
+    runtime_identity_digest: '9'.repeat(64),
+    node_version: process.versions.node,
+    packet_digest: '',
+    ...overrides
+  };
+  const digestInput = structuredClone(packet);
+  delete digestInput.packet_digest;
+  packet.packet_digest = digestValue(digestInput);
+  return packet;
+}
+
+test('declarative operation admission rejects authority, source, CAS, callback, and bundle movement', async () => {
+  const { store, session, expectedAuthority } = await fixture();
+  const operationDescriptor = descriptor();
+  assert.equal(typeof store.performMutation, 'undefined');
+  assertCode(() => validateOperationDescriptor({ ...operationDescriptor, mutate() {} }), 'GPR_OPERATION_DESCRIPTOR_INVALID');
+  assertCode(() => validateOperationDescriptor({
+    ...operationDescriptor,
+    target_identity: { resource_type: 'bundle', resource_id: 'resource-a,resource-b' },
+    target_digest: digestValue({ resource_type: 'bundle', resource_id: 'resource-a,resource-b' })
+  }), 'GPR_OPERATION_DESCRIPTOR_INVALID');
+  await assertCodeAsync(() => store.admitMutationOperation(session, operationDescriptor, trustedReaders(expectedAuthority, operationDescriptor, {
+    readAuthority: async () => ({ authority: expectedAuthority, later_controlling_comments: [{ comment_id: 999 }] })
+  })), 'GPR_AUTHORITY_CHANGED');
+  await assertCodeAsync(() => store.admitMutationOperation(session, operationDescriptor, trustedReaders(expectedAuthority, operationDescriptor, {
+    readSource: async () => ({ source_digest: digestValue('moved'), cas_digest: operationDescriptor.cas_digest })
+  })), 'GPR_SOURCE_CHANGED');
+  await assertCodeAsync(() => store.admitMutationOperation(session, operationDescriptor, trustedReaders(expectedAuthority, operationDescriptor, {
+    readSource: async () => ({ source_digest: operationDescriptor.expected_source_digest, cas_digest: digestValue('moved-cas') })
+  })), 'GPR_SOURCE_CHANGED');
 });
 
-test('authority is freshly checked between every mutation operation', async () => {
-  const { store, session, expectedAuthority, expectedStart } = await fixture();
-  let chronologyReads = 0;
-  let calls = 0;
-  const operation = () => ({
-    now: '2026-08-30T11:00:01.000Z',
-    expected_source_digest: digestValue(expectedStart),
-    readAuthority: async () => {
-      chronologyReads += 1;
-      return {
-        authority: expectedAuthority,
-        later_controlling_comments: chronologyReads === 1 ? [] : [{ comment_id: 1000, body_digest: digestValue('revoke') }]
-      };
-    },
-    readSource: async () => expectedStart,
-    mutate: async () => { calls += 1; return { ok: true }; }
-  });
-  assert.deepEqual(await store.performMutation(session, operation()), { ok: true });
-  await assertCodeAsync(() => store.performMutation(session, operation()), 'GPR_AUTHORITY_CHANGED');
-  assert.equal(calls, 1);
-});
-
-test('source movement is checked before every adapter mutation', async () => {
-  const { store, session, expectedAuthority, expectedStart } = await fixture();
-  let calls = 0;
-  await assertCodeAsync(() => store.performMutation(session, {
-    now: '2026-08-30T11:00:01.000Z',
-    expected_source_digest: digestValue(expectedStart),
-    readAuthority: async () => ({ authority: expectedAuthority, later_controlling_comments: [] }),
-    readSource: async () => ({ ...expectedStart, head_sha: '9'.repeat(40) }),
-    mutate: async () => { calls += 1; }
-  }), 'GPR_SOURCE_CHANGED');
-  assert.equal(calls, 0);
+test('one opaque admission authorizes exactly one immediate trusted-host dispatch', async () => {
+  const { store, session, admission } = await admittedFixture();
+  assertCode(() => JSON.stringify(admission), 'GPR_ADMISSION_NONSERIALIZABLE');
+  const operation = await store.authorizeMutationDispatch(session, admission);
+  assert.equal(operation.operation_id, admission.operation_id);
+  await assertCodeAsync(() => store.authorizeMutationDispatch(session, admission), 'GPR_ADMISSION_CONSUMED');
+  assert.equal(store.readMutationOperation(operation.operation_id).state, 'IN_FLIGHT');
 });
 
 test('an expired holder cannot backdate a receipt before takeover', async () => {
@@ -203,7 +371,21 @@ test('an expired holder cannot backdate a receipt before takeover', async () => 
   assert.equal(store.readReceiptChain(session.run_id).length, 1);
 });
 
-test('zero mutation occurs before verified RUN_STARTED and admission succeeds afterward', async () => {
+test('a newer fence created before operation admission rejects the stale started holder', async () => {
+  const current = await fixture({ lease_ms: 5000 });
+  await new Promise((resolve) => setTimeout(resolve,
+    Math.max(0, Date.parse(current.session.lease.expires_at) - Date.now() + 30)));
+  const newer = current.store.allocateRun({
+    lock: 'LOCK-NEWER-FENCE', authority: current.expectedAuthority, start: current.expectedStart,
+    candidate: null, lease_ms: 60000
+  });
+  assert.equal(newer.lease.fence_sequence, current.session.lease.fence_sequence + 1);
+  const operationDescriptor = descriptor();
+  await assertCodeAsync(() => current.store.admitMutationOperation(current.session, operationDescriptor,
+    trustedReaders(current.expectedAuthority, operationDescriptor)), 'GPR_NEWER_FENCE_EXISTS');
+});
+
+test('same-process allocation alone cannot grant operation admission before verified RUN_STARTED', async () => {
   const root = stateRoot();
   const store = createProgrammeReceiptStore(options(root));
   const expectedAuthority = authority();
@@ -212,35 +394,151 @@ test('zero mutation occurs before verified RUN_STARTED and admission succeeds af
     lock: 'LOCK-ZERO-MUTATION', authority: expectedAuthority, start: expectedStart,
     candidate: null, lease_ms: 60000
   });
-  let calls = 0;
-  const operation = {
-    now: '2026-08-30T11:00:00.000Z',
-    expected_source_digest: digestValue(expectedStart),
-    readAuthority: async () => ({ authority: expectedAuthority, later_controlling_comments: [] }),
-    readSource: async () => expectedStart,
-    mutate: async () => { calls += 1; return 'mutated'; }
-  };
-  await assertCodeAsync(() => store.performMutation(allocated, operation), 'GPR_RUN_NOT_STARTED');
-  assert.equal(calls, 0);
-  const started = await store.startAllocatedRun(allocated, readers(expectedAuthority, expectedStart, operation.now));
-  assert.equal(await store.performMutation(started, operation), 'mutated');
-  assert.equal(calls, 1);
+  const operationDescriptor = descriptor();
+  await assertCodeAsync(() => store.admitMutationOperation(allocated, operationDescriptor,
+    trustedReaders(expectedAuthority, operationDescriptor)), 'GPR_RUN_NOT_FRESHLY_VERIFIED');
+  const started = await store.startAllocatedRun(allocated, readers(expectedAuthority, expectedStart, '2026-08-30T11:00:00.000Z'));
+  const admission = await store.admitMutationOperation(started, operationDescriptor,
+    trustedReaders(expectedAuthority, operationDescriptor));
+  assert.equal(store.readMutationOperation(admission.operation_id).state, 'IN_FLIGHT');
 });
 
-test('unknown mutation outcome is interrupted without blind retry', async () => {
-  const { store, session, expectedAuthority, expectedStart } = await fixture();
-  let calls = 0;
-  await assertCodeAsync(() => store.performMutation(session, {
-    now: '2026-08-30T11:00:01.000Z',
-    expected_source_digest: digestValue(expectedStart),
-    readAuthority: async () => ({ authority: expectedAuthority, later_controlling_comments: [] }),
-    readSource: async () => expectedStart,
-    mutate: async () => { calls += 1; throw Object.assign(new Error('unknown'), { code: 'ECONNRESET' }); }
-  }), 'GPR_MUTATION_OUTCOME_UNKNOWN');
-  assert.equal(calls, 1);
-  const chain = store.readReceiptChain(session.run_id);
-  assert.equal(chain.at(-1).receipt_type, 'RUN_INTERRUPTED');
-  assert.equal(chain.at(-1).payload.classification, 'MUTATION_OUTCOME_UNKNOWN');
+test('IN_FLIGHT and UNKNOWN are durable Child-wide holds across release, Lock change, and terminal attempts', async () => {
+  const { store, session, expectedAuthority, expectedStart, admission } = await admittedFixture();
+  const secondTarget = { resource_type: 'git_ref', resource_id: 'refs/heads/other' };
+  const secondDescriptor = descriptor({ target_identity: secondTarget, target_digest: digestValue(secondTarget) });
+  await assertCodeAsync(() => store.admitMutationOperation(session, secondDescriptor,
+    trustedReaders(expectedAuthority, secondDescriptor)), 'GPR_UNRESOLVED_OPERATION');
+  assertCode(() => store.allocateRun({
+    lock: 'LOCK-NEW', authority: expectedAuthority, start: expectedStart, candidate: null, lease_ms: 60000
+  }), 'GPR_UNRESOLVED_OPERATION');
+  assertCode(() => store.appendReceipt(session, {
+    receipt_type: 'EXECUTOR_TERMINAL', payload: { classification: 'SUCCESS' }, created_at: nowIso()
+  }), 'GPR_UNRESOLVED_OPERATION');
+  store.interruptRun(session, { payload: { classification: 'PROCESS_DIED' }, created_at: nowIso() });
+  assertCode(() => store.allocateRun({
+    lock: 'LOCK-NEW', authority: expectedAuthority, start: expectedStart, candidate: null, lease_ms: 60000
+  }), 'GPR_UNRESOLVED_OPERATION');
+  const operation = store.readMutationOperation(admission.operation_id).operation;
+  const reconciled = await store.reconcileMutationOperation(operation.operation_id,
+    async () => ({ authority: authority('reconcile'), later_controlling_comments: [] }),
+    async () => outcomeEvidence(operation, 'UNKNOWN'));
+  assert.equal(reconciled.state, 'UNKNOWN');
+  assertCode(() => store.allocateRun({
+    lock: 'LOCK-NEWER', authority: expectedAuthority, start: expectedStart, candidate: null, lease_ms: 60000
+  }), 'GPR_UNRESOLVED_OPERATION');
+});
+
+test('closed adapter-bound outcome evidence records exact APPLIED, NOT_APPLIED, and UNKNOWN states', async () => {
+  for (const classification of ['APPLIED', 'NOT_APPLIED', 'UNKNOWN']) {
+    const current = await admittedFixture();
+    const operation = await current.store.authorizeMutationDispatch(current.session, current.admission);
+    const result = await current.store.recordMutationOutcome(current.session, current.admission,
+      outcomeEvidence(operation, classification));
+    assert.equal(result.state, classification);
+    assert.equal(result.events.at(-1).provider_evidence_digest,
+      outcomeEvidence(operation, classification, { evidence_at: result.events.at(-1).event_at }).evidence_digest);
+  }
+});
+
+test('arbitrary, wrong-operation, wrong-adapter, and incomplete outcome claims fail closed to UNKNOWN', async () => {
+  const invalidEvidence = [
+    (operation) => ({ classification: 'APPLIED' }),
+    (operation) => outcomeEvidence(operation, 'APPLIED', { operation_id: 'operation-wrong' }),
+    (operation) => outcomeEvidence(operation, 'APPLIED', { adapter_identity_digest: digestValue('wrong-adapter') }),
+    (operation) => outcomeEvidence(operation, 'NOT_APPLIED', { delayed_completion_excluded: false })
+  ];
+  for (const createEvidence of invalidEvidence) {
+    const current = await admittedFixture();
+    const operation = await current.store.authorizeMutationDispatch(current.session, current.admission);
+    await assertCodeAsync(() => current.store.recordMutationOutcome(current.session, current.admission,
+      createEvidence(operation)), 'GPR_OUTCOME_EVIDENCE_INVALID');
+    assert.equal(current.store.readMutationOperation(operation.operation_id).state, 'UNKNOWN');
+  }
+});
+
+test('failure to append UNKNOWN leaves the already committed IN_FLIGHT hold authoritative', async () => {
+  const current = await admittedFixture();
+  await current.store.authorizeMutationDispatch(current.session, current.admission);
+  const locker = new DatabaseSync(current.store.databasePath);
+  locker.exec('BEGIN IMMEDIATE');
+  try {
+    await assert.rejects(() => current.store.recordMutationOutcome(current.session, current.admission,
+      { classification: 'APPLIED' }));
+  } finally {
+    locker.exec('ROLLBACK');
+    locker.close();
+  }
+  assert.equal(current.store.readMutationOperation(current.admission.operation_id).state, 'IN_FLIGHT');
+  assertCode(() => current.store.allocateRun({
+    lock: 'LOCK-AFTER-UNKNOWN-WRITE-FAILURE', authority: current.expectedAuthority,
+    start: current.expectedStart, candidate: null, lease_ms: 60000
+  }), 'GPR_UNRESOLVED_OPERATION');
+});
+
+test('fresh authority and exact provider readback reconcile unresolved operations without adopting the old run', async () => {
+  for (const classification of ['APPLIED', 'NOT_APPLIED', 'UNKNOWN']) {
+    const current = await admittedFixture();
+    const operation = current.store.readMutationOperation(current.admission.operation_id).operation;
+    current.store.interruptRun(current.session, { payload: { classification: 'OWNER_DIED' }, created_at: nowIso() });
+    const reopened = createProgrammeReceiptStore(current.storeOptions);
+    const beforeChain = reopened.readReceiptChain(current.session.run_id);
+    const result = await reopened.reconcileMutationOperation(operation.operation_id,
+      async () => ({ authority: authority(`reconcile-${classification}`), later_controlling_comments: [] }),
+      async () => outcomeEvidence(operation, classification));
+    assert.equal(result.state, classification);
+    assert.deepEqual(reopened.readReceiptChain(current.session.run_id), beforeChain);
+  }
+});
+
+test('lease expiry before dispatch performs zero writes and cannot permit takeover or a newer fence', async () => {
+  const current = await admittedFixture({ lease_ms: 10000 });
+  let writes = 0;
+  await new Promise((resolve) => setTimeout(resolve,
+    Math.max(0, Date.parse(current.session.lease.expires_at) - Date.now() + 30)));
+  await assertCodeAsync(() => current.store.authorizeMutationDispatch(current.session, current.admission), 'GPR_EXPIRED_FENCE');
+  assert.equal(writes, 0);
+  assert.equal(current.store.readMutationOperation(current.admission.operation_id).state, 'IN_FLIGHT');
+  assertCode(() => current.store.allocateRun({
+    lock: 'LOCK-AFTER-EXPIRY', authority: current.expectedAuthority, start: current.expectedStart,
+    candidate: null, lease_ms: 60000
+  }), 'GPR_UNRESOLVED_OPERATION');
+});
+
+test('APPLIED forbids logical retry while NOT_APPLIED requires fresh run, fence, authority, source, CAS, and retry reference', async () => {
+  const applied = await admittedFixture();
+  const appliedOperation = await applied.store.authorizeMutationDispatch(applied.session, applied.admission);
+  await applied.store.recordMutationOutcome(applied.session, applied.admission, outcomeEvidence(appliedOperation, 'APPLIED'));
+  applied.store.interruptRun(applied.session, { payload: { classification: 'COMPLETE' }, created_at: nowIso() });
+  const appliedAuthority = authority('applied-retry');
+  const appliedSession = await applied.store.startRun({
+    lock: 'LOCK-APPLIED-RETRY', authority: appliedAuthority, start: applied.expectedStart,
+    candidate: null, lease_ms: 60000
+  }, readers(appliedAuthority, applied.expectedStart, nowIso()));
+  const appliedRetry = descriptor({
+    expected_source_digest: digestValue('source-b'), cas_digest: digestValue('cas-b'),
+    retry_of_operation_id: appliedOperation.operation_id
+  });
+  await assertCodeAsync(() => applied.store.admitMutationOperation(appliedSession, appliedRetry,
+    trustedReaders(appliedAuthority, appliedRetry)), 'GPR_OPERATION_ALREADY_APPLIED');
+
+  const notApplied = await admittedFixture();
+  const notAppliedOperation = await notApplied.store.authorizeMutationDispatch(notApplied.session, notApplied.admission);
+  await notApplied.store.recordMutationOutcome(notApplied.session, notApplied.admission,
+    outcomeEvidence(notAppliedOperation, 'NOT_APPLIED'));
+  notApplied.store.interruptRun(notApplied.session, { payload: { classification: 'RETRYABLE' }, created_at: nowIso() });
+  const retryAuthority = authority('not-applied-retry');
+  const retrySession = await notApplied.store.startRun({
+    lock: 'LOCK-NOT-APPLIED-RETRY', authority: retryAuthority, start: notApplied.expectedStart,
+    candidate: null, lease_ms: 60000
+  }, readers(retryAuthority, notApplied.expectedStart, nowIso()));
+  const freshDescriptor = descriptor({ expected_source_digest: digestValue('source-c'), cas_digest: digestValue('cas-c') });
+  await assertCodeAsync(() => notApplied.store.admitMutationOperation(retrySession, freshDescriptor,
+    trustedReaders(retryAuthority, freshDescriptor)), 'GPR_RETRY_REQUIRES_REFERENCE');
+  const explicitRetry = { ...freshDescriptor, retry_of_operation_id: notAppliedOperation.operation_id };
+  const retryAdmission = await notApplied.store.admitMutationOperation(retrySession, explicitRetry,
+    trustedReaders(retryAuthority, explicitRetry));
+  assert.equal(notApplied.store.readMutationOperation(retryAdmission.operation_id).state, 'IN_FLIGHT');
 });
 
 test('terminal append and lease release are atomic and next allocation is N+1', async () => {
@@ -258,23 +556,30 @@ test('terminal append and lease release are atomic and next allocation is N+1', 
   assert.equal(next.lease.fence_sequence, session.lease.fence_sequence + 1);
 });
 
-test('allocator and ledger tampering is blocked and a self-consistent forged schema fails reopen', async () => {
-  const { store, session, storeOptions } = await fixture();
+test('allocator, receipt, operation, and event rows are append-only and forged schema fails reopen', async () => {
+  const { store, session, storeOptions, admission } = await admittedFixture();
   const code = `
     const { DatabaseSync } = require('node:sqlite');
     const db = new DatabaseSync(${JSON.stringify(store.databasePath)});
     let update = null;
     let remove = null;
+    let operationUpdate = null;
+    let eventDelete = null;
     try { db.exec('UPDATE allocations SET lock_id=\"OTHER\"'); } catch (error) { update = error.code; }
     try { db.exec('DELETE FROM receipts'); } catch (error) { remove = error.code; }
+    try { db.exec('UPDATE mutation_operations SET lock_id=\"OTHER\"'); } catch (error) { operationUpdate = error.code; }
+    try { db.exec('DELETE FROM mutation_operation_events'); } catch (error) { eventDelete = error.code; }
     db.close();
-    process.stdout.write(JSON.stringify({ update, remove }));
+    process.stdout.write(JSON.stringify({ update, remove, operationUpdate, eventDelete }));
   `;
   const blocked = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', windowsHide: true });
   assert.equal(blocked.status, 0, blocked.stderr);
   assert.ok(JSON.parse(blocked.stdout).update);
   assert.ok(JSON.parse(blocked.stdout).remove);
+  assert.ok(JSON.parse(blocked.stdout).operationUpdate);
+  assert.ok(JSON.parse(blocked.stdout).eventDelete);
   assert.equal(store.readReceiptChain(session.run_id).length, 1);
+  assert.equal(store.readMutationOperation(admission.operation_id).events.length, 2);
 
   const tamper = `
     const { DatabaseSync } = require('node:sqlite');
@@ -289,6 +594,60 @@ test('allocator and ledger tampering is blocked and a self-consistent forged sch
   assertCode(() => createProgrammeReceiptStore(storeOptions), 'GPR_SCHEMA_MISMATCH');
 });
 
+test('operation row digest and operation event-chain tampering are detected after exact trigger restoration', async () => {
+  const operationTamper = await admittedFixture();
+  const alterOperation = `
+    const { DatabaseSync } = require('node:sqlite');
+    const db = new DatabaseSync(${JSON.stringify(operationTamper.store.databasePath)});
+    db.exec("DROP TRIGGER mutation_operations_no_update; UPDATE mutation_operations SET operation_digest='${'f'.repeat(64)}'; CREATE TRIGGER mutation_operations_no_update BEFORE UPDATE ON mutation_operations BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;");
+    db.close();
+  `;
+  assert.equal(spawnSync(process.execPath, ['-e', alterOperation], { encoding: 'utf8' }).status, 0);
+  assertCode(() => createProgrammeReceiptStore(operationTamper.storeOptions), 'GPR_OPERATION_TAMPERED');
+
+  const eventTamper = await admittedFixture();
+  const alterEvent = `
+    const { DatabaseSync } = require('node:sqlite');
+    const { digestValue } = require(${JSON.stringify(runtimePath)});
+    const db = new DatabaseSync(${JSON.stringify(eventTamper.store.databasePath)});
+    const row = db.prepare('SELECT * FROM mutation_operation_events WHERE sequence=2').get();
+    const payload = { event_id: row.event_id, operation_id: row.operation_id, sequence: row.sequence,
+      prior_event_id: null, event_type: row.event_type, state: row.state, event_at: row.event_at,
+      authority_digest: row.authority_digest, provider_evidence_digest: row.provider_evidence_digest,
+      readback_digest: row.readback_digest, detail_digest: row.detail_digest };
+    db.exec('DROP TRIGGER mutation_operation_events_no_update');
+    db.prepare('UPDATE mutation_operation_events SET prior_event_id=NULL, event_digest=? WHERE event_id=?').run(digestValue(payload), row.event_id);
+    db.exec("CREATE TRIGGER mutation_operation_events_no_update BEFORE UPDATE ON mutation_operation_events BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;");
+    db.close();
+  `;
+  assert.equal(spawnSync(process.execPath, ['-e', alterEvent], { encoding: 'utf8' }).status, 0);
+  assertCode(() => createProgrammeReceiptStore(eventTamper.storeOptions), 'GPR_OPERATION_EVENT_TAMPERED');
+});
+
+test('fresh stores use user_version 2 while old v1 and corrupted SQLite stores fail closed', async () => {
+  const old = await fixture();
+  const versionRead = spawnSync(process.execPath, ['-e', `
+    const { DatabaseSync } = require('node:sqlite');
+    const db = new DatabaseSync(${JSON.stringify(old.store.databasePath)});
+    process.stdout.write(String(db.prepare('PRAGMA user_version').get().user_version));
+    db.close();
+  `], { encoding: 'utf8' });
+  assert.equal(versionRead.stdout, '2');
+  const downgrade = spawnSync(process.execPath, ['-e', `
+    const { DatabaseSync } = require('node:sqlite');
+    const db = new DatabaseSync(${JSON.stringify(old.store.databasePath)});
+    db.exec('PRAGMA user_version=1'); db.close();
+  `]);
+  assert.equal(downgrade.status, 0);
+  assertCode(() => createProgrammeReceiptStore(old.storeOptions), 'GPR_SCHEMA_MISMATCH');
+
+  const corrupted = await fixture();
+  const size = fs.statSync(corrupted.store.databasePath).size;
+  fs.truncateSync(corrupted.store.databasePath, Math.max(512, Math.floor(size / 2)));
+  assert.throws(() => createProgrammeReceiptStore(corrupted.storeOptions),
+    (error) => error && ['GPR_STORE_INVALID', 'GPR_INTEGRITY_CHECK_FAILED', 'GPR_SCHEMA_MISMATCH'].includes(error.code));
+});
+
 test('rollback journal restores an uncommitted high-water write after process death', async () => {
   const { store, session, storeOptions } = await fixture();
   const crash = `
@@ -301,6 +660,87 @@ test('rollback journal restores an uncommitted high-water write after process de
   assert.equal(result.status, 19);
   const reopened = createProgrammeReceiptStore(storeOptions);
   assert.equal(reopened.readReceiptChain(session.run_id).length, 1);
+});
+
+test('PREPARED and IN_FLIGHT commit atomically and process death leaves the unresolved hold durable', async () => {
+  const root = stateRoot();
+  const storeOptions = options(root);
+  const auth = authority('dead-owner');
+  const initialStart = start();
+  const operationDescriptor = descriptor();
+  const childCode = `
+    const runtime = require(${JSON.stringify(runtimePath)});
+    const auth = ${JSON.stringify(auth)};
+    const start = ${JSON.stringify(initialStart)};
+    const descriptor = ${JSON.stringify(operationDescriptor)};
+    (async () => {
+      const store = runtime.createProgrammeReceiptStore(${JSON.stringify(storeOptions)});
+      const session = await store.startRun({ lock: 'LOCK-DEAD-OWNER', authority: auth, start, candidate: null, lease_ms: 60000 }, {
+        readAuthority: async () => ({ authority: auth, later_controlling_comments: [] }),
+        readStart: async () => start
+      });
+      const admission = await store.admitMutationOperation(session, descriptor, {
+        readAuthority: async () => ({ authority: auth, later_controlling_comments: [] }),
+        readSource: async () => ({ source_digest: descriptor.expected_source_digest, cas_digest: descriptor.cas_digest }),
+        verifyOutcomeEvidence: async (evidence) => evidence
+      });
+      process.stdout.write(admission.operation_id);
+    })().catch((error) => { console.error(error.code || error.message); process.exitCode = 1; });
+  `;
+  const child = spawnSync(process.execPath, ['--no-warnings', '-e', childCode], {
+    cwd: repositoryRoot, encoding: 'utf8', windowsHide: true, timeout: 30000
+  });
+  assert.equal(child.status, 0, child.stderr);
+  const reopened = createProgrammeReceiptStore(storeOptions);
+  const operation = reopened.readMutationOperation(child.stdout);
+  assert.deepEqual(operation.events.map((event) => event.state), ['PREPARED', 'IN_FLIGHT']);
+  assertCode(() => reopened.allocateRun({
+    lock: 'LOCK-REPLACEMENT', authority: auth, start: initialStart, candidate: null, lease_ms: 60000
+  }), 'GPR_UNRESOLVED_OPERATION');
+});
+
+test('process death during or after a trusted write leaves IN_FLIGHT until read-only reconciliation', async () => {
+  for (const stage of ['partial-write', 'completed-write']) {
+    const root = stateRoot();
+    const storeOptions = options(root);
+    const auth = authority(stage);
+    const initialStart = start();
+    const operationDescriptor = descriptor();
+    const marker = path.join(root, `${stage}.marker`);
+    const childCode = `
+      const fs = require('node:fs');
+      const runtime = require(${JSON.stringify(runtimePath)});
+      const auth = ${JSON.stringify(auth)};
+      const start = ${JSON.stringify(initialStart)};
+      const descriptor = ${JSON.stringify(operationDescriptor)};
+      (async () => {
+        const store = runtime.createProgrammeReceiptStore(${JSON.stringify(storeOptions)});
+        const session = await store.startRun({ lock: 'LOCK-${stage}', authority: auth, start, candidate: null, lease_ms: 60000 }, {
+          readAuthority: async () => ({ authority: auth, later_controlling_comments: [] }), readStart: async () => start
+        });
+        const trusted = {
+          readAuthority: async () => ({ authority: auth, later_controlling_comments: [] }),
+          readSource: async () => ({ source_digest: descriptor.expected_source_digest, cas_digest: descriptor.cas_digest }),
+          verifyOutcomeEvidence: async (evidence) => evidence
+        };
+        const admission = await store.admitMutationOperation(session, descriptor, trusted);
+        await store.authorizeMutationDispatch(session, admission);
+        fs.writeFileSync(${JSON.stringify(marker)}, ${JSON.stringify(stage === 'partial-write' ? 'partial' : 'complete')});
+        process.stdout.write(admission.operation_id);
+        process.exit(23);
+      })().catch((error) => { console.error(error.code || error.message); process.exit(1); });
+    `;
+    const child = spawnSync(process.execPath, ['--no-warnings', '-e', childCode], {
+      cwd: repositoryRoot, encoding: 'utf8', windowsHide: true, timeout: 30000
+    });
+    assert.equal(child.status, 23, child.stderr);
+    assert.equal(fs.existsSync(marker), true);
+    const reopened = createProgrammeReceiptStore(storeOptions);
+    assert.equal(reopened.readMutationOperation(child.stdout).state, 'IN_FLIGHT');
+    assertCode(() => reopened.allocateRun({
+      lock: `LOCK-${stage}-REPLACEMENT`, authority: auth, start: initialStart, candidate: null, lease_ms: 60000
+    }), 'GPR_UNRESOLVED_OPERATION');
+  }
 });
 
 test('payload, receipt-count, and database-size limits fail closed', async () => {
@@ -424,18 +864,13 @@ test('privacy-sensitive receipt payload fields are never persisted', async () =>
   assert.equal(store.readReceiptChain(session.run_id).length, 1);
 });
 
-test('lost supervisor ownership cannot append or mutate', async () => {
-  const { store, session, expectedAuthority, expectedStart } = await fixture();
+test('lost supervisor ownership cannot append or obtain operation admission', async () => {
+  const { store, session, expectedAuthority } = await fixture();
   const impostor = structuredClone(session);
   assertCode(() => store.appendReceipt(impostor, {
     receipt_type: 'RUN_INTERRUPTED', payload: { classification: 'OWNERSHIP_LOST' }, created_at: nowIso()
   }), 'GPR_OWNERSHIP_LOST');
-  let calls = 0;
-  await assertCodeAsync(() => store.performMutation(impostor, {
-    expected_source_digest: digestValue(expectedStart),
-    readAuthority: async () => ({ authority: expectedAuthority, later_controlling_comments: [] }),
-    readSource: async () => expectedStart,
-    mutate: async () => { calls += 1; }
-  }), 'GPR_OWNERSHIP_LOST');
-  assert.equal(calls, 0);
+  const operationDescriptor = descriptor();
+  await assertCodeAsync(() => store.admitMutationOperation(impostor, operationDescriptor,
+    trustedReaders(expectedAuthority, operationDescriptor)), 'GPR_OWNERSHIP_LOST');
 });

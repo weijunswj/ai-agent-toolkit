@@ -13,6 +13,7 @@ const repositoryRoot = path.resolve(__dirname, '../..');
 const {
   createProgrammeReceiptStore,
   digestValue,
+  USER_VERSION,
   validateReceiptChain,
   validateReceiptObject
 } = require(receiptRuntimePath);
@@ -153,7 +154,7 @@ function runChild(code) {
   });
 }
 
-test('first allocation persists allocator-owned RUN_STARTED and fresh readback', async () => {
+test('first allocation persists allocator-owned RUN_STARTED after mandatory fresh-process verification', async () => {
   const { store, session } = await startedStore();
   assert.equal(session.lease.fence_sequence, 1);
   assert.match(session.lease.lease_id, /^lease-/);
@@ -164,7 +165,10 @@ test('first allocation persists allocator-owned RUN_STARTED and fresh readback',
   assert.equal(chain[0].sequence, 1);
   assert.equal(chain[0].prior_receipt_id, null);
   assert.equal(chain[0].candidate, null);
-  assert.deepEqual(store.verifyFreshReadback(session.run_id), chain);
+  assert.equal(session.started, true);
+  assert.equal(session.run_started_receipt_id, chain[0].receipt_id);
+  assert.equal(typeof store.performMutation, 'undefined');
+  assert.equal(USER_VERSION, 2);
 });
 
 test('truthful pre-PR start rejects fake candidate and start movement', async () => {
@@ -237,16 +241,16 @@ test('active lease blocks a different Lock and expiry increments Child-wide fenc
   const initialStart = start();
   const old = await store.startRun({
     lock: 'LOCK-OLD', authority: auth, start: initialStart, candidate: null,
-    lease_ms: 1000
+    lease_ms: 5000
   }, readers(auth, initialStart, '2026-08-30T11:00:00.000Z'));
   assertCode(() => store.allocateRun({
     lock: 'LOCK-NEW', authority: auth, start: initialStart, candidate: null,
-    lease_ms: 1000
+    lease_ms: 5000
   }), 'GPR_ACTIVE_LEASE');
-  await new Promise((resolve) => setTimeout(resolve, 1050));
+  await new Promise((resolve) => setTimeout(resolve, Math.max(0, Date.parse(old.lease.expires_at) - Date.now() + 50)));
   const newer = store.allocateRun({
     lock: 'LOCK-NEW', authority: auth, start: initialStart, candidate: null,
-    lease_ms: 1000
+    lease_ms: 5000
   });
   assert.equal(newer.lease.fence_sequence, 2);
   assertCode(() => store.appendReceipt(old, {
@@ -328,6 +332,17 @@ test('restart and fresh child process read the durable receipt chain', async () 
   ], { cwd: repositoryRoot, encoding: 'utf8', windowsHide: true });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).chain.length, 2);
+});
+
+test('allocator high-water and operation-independent fencing survive restart', async () => {
+  const current = await startedStore();
+  current.store.interruptRun(current.session, { payload: { classification: 'RESTART' }, created_at: nowIso() });
+  const restarted = createProgrammeReceiptStore(current.storeOptions);
+  const next = restarted.allocateRun({
+    lock: 'LOCK-AFTER-RESTART', authority: current.expectedAuthority, start: current.expectedStart,
+    candidate: null, lease_ms: 60000
+  });
+  assert.equal(next.lease.fence_sequence, current.session.lease.fence_sequence + 1);
 });
 
 test('serialized ownership and a different store object cannot mutate a live run', async () => {

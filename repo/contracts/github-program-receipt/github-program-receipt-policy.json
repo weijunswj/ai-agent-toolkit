@@ -30,13 +30,22 @@
     "trusted_schema": false,
     "busy_timeout_ms": 5000,
     "application_id": 1196446257,
-    "user_version": 1,
+    "user_version": 2,
     "integrity_check": true,
     "foreign_key_check": true,
     "schema_fingerprint": true,
-    "append_only_tables": ["allocations", "runs", "receipts", "lease_events"],
+    "append_only_tables": [
+      "allocations",
+      "runs",
+      "receipts",
+      "lease_events",
+      "mutation_operations",
+      "mutation_operation_events"
+    ],
     "atomic_cas_transactions": true,
-    "independent_reopen_readback": true
+    "independent_reopen_readback": true,
+    "unaccepted_user_version_1": "GPR_SCHEMA_MISMATCH",
+    "migration_framework": false
   },
   "allocator": {
     "lease_and_fence_identity_source": "cryptographic_allocator",
@@ -80,18 +89,97 @@
   "mutation_admission": {
     "verified_run_started_required": true,
     "zero_adapter_calls_before_verified_run_started": true,
-    "before_every_adapter_operation": [
-      "reopen_and_verify_store",
-      "verify_child_wide_fence",
-      "fresh_read_child_parent_owner_chronology",
-      "verify_authority_identity_body_update_and_scope",
-      "prove_no_later_controlling_authority",
-      "revalidate_operation_source_and_cas",
-      "recheck_fence_immediately_before_adapter"
-    ],
+    "production_arbitrary_mutation_callback": false,
+    "declarative_one_operation_per_admission": true,
+    "opaque_process_local_nonserialisable_admission": true,
+    "trusted_host_dispatch_immediately_after_final_check": true,
+    "untrusted_planner_write_client_or_admission": false,
     "authority_movement": "GPR_AUTHORITY_CHANGED",
-    "unknown_mutation_outcome": "GPR_MUTATION_OUTCOME_UNKNOWN",
-    "blind_retry": false
+    "source_or_cas_movement": "GPR_SOURCE_CHANGED",
+    "lease_expiry_before_dispatch": "zero_writes_unresolved_hold_remains",
+    "blind_retry": false,
+    "local_fence_is_provider_server_fence": false
+  },
+  "fresh_process_run_started_verification": {
+    "mandatory_for_mutation_capable_session": true,
+    "writer_closed_before_spawn": true,
+    "new_os_process": true,
+    "canonical_process_exec_path": true,
+    "canonical_runtime_realpath": true,
+    "shell": false,
+    "path_lookup": false,
+    "node_preload_and_injection_environment_removed": true,
+    "warnings_suppressed": true,
+    "timeout_ms": 30000,
+    "stdout_bytes": 16384,
+    "stderr_bytes": 16384,
+    "stderr_allowed": false,
+    "stdout": "exactly_one_canonical_json_line",
+    "child_store_creation": false,
+    "child_mutation_or_adoption": false,
+    "aggregate_proof": "store_state_digest",
+    "global_ledger_abstraction": false,
+    "runtime_identity_binds": [
+      "node_executable_realpath_and_bytes",
+      "runtime_realpath_and_bytes",
+      "canonical_serialisation_dependency_realpath_and_bytes",
+      "node_version"
+    ]
+  },
+  "mutation_operations": {
+    "descriptor_fields": [
+      "operation_kind",
+      "safety_class",
+      "target_identity",
+      "target_digest",
+      "expected_source_digest",
+      "cas_digest",
+      "expected_post_state_digest",
+      "adapter_identity_digest",
+      "retry_of_operation_id"
+    ],
+    "caller_functions_or_executable_objects": false,
+    "multi_write_or_multi_resource_bundle": false,
+    "runtime_allocated_identity": ["operation_id", "provider_operation_key", "logical_operation_digest"],
+    "states": ["PREPARED", "IN_FLIGHT", "APPLIED", "NOT_APPLIED", "UNKNOWN"],
+    "prepared_and_in_flight_same_transaction": true,
+    "committed_prepared_only_state": false,
+    "terminal_states": ["APPLIED", "NOT_APPLIED"],
+    "unresolved_states": ["IN_FLIGHT", "UNKNOWN"],
+    "unresolved_check_same_begin_immediate_transaction": ["allocation", "takeover", "operation_admission"],
+    "hold_scope": "repository_parent_child_across_locks_runs_leases_and_processes",
+    "lease_release_clears_hold": false,
+    "success_terminal_receipt_clears_hold": false
+  },
+  "remote_operation_law": {
+    "git_ref_update": "exact_expected_old_sha_atomic_update_or_remote_cas_and_exact_readback",
+    "conditional_provider_update_or_delete": "provider_precondition_and_exact_readback",
+    "idempotent_set": "exact_target_desired_state_stable_operation_key_and_exact_readback",
+    "append_or_create": "provider_idempotency_key_or_operation_marker_and_exact_created_resource_readback",
+    "ambiguous_append_without_delayed_completion_exclusion": "UNKNOWN",
+    "non_cas_destructive_replacement": "forbidden",
+    "multi_write_or_multi_resource_bundle": "forbidden"
+  },
+  "outcome_evidence": {
+    "closed_bounded_privacy_safe": true,
+    "exact_operation_and_adapter_identity": true,
+    "arbitrary_caller_assertion_authoritative": false,
+    "applied_requires_exact_effect_readback": true,
+    "not_applied_requires_definitive_pre_effect_rejection_and_delayed_completion_exclusion": true,
+    "otherwise": "UNKNOWN",
+    "failed_unknown_append": "committed_IN_FLIGHT_remains_authoritative"
+  },
+  "reconciliation": {
+    "read_only": true,
+    "fresh_web_owner_authority": true,
+    "provider_or_repository_exact_readback": true,
+    "original_mutation_session_or_fence_ownership_required": false,
+    "allocates_mutation_fence": false,
+    "appends_one_operation_event": true,
+    "applied_retry": "forbidden",
+    "not_applied_retry": "fresh_run_fence_authority_source_cas_and_retry_of_operation_id",
+    "unknown_retry": "blocked",
+    "adopts_or_forges_old_run": false
   },
   "limits": {
     "receipt_bytes": 16384,
@@ -100,7 +188,11 @@
     "allocations_per_namespace": 10000,
     "database_bytes": 67108864,
     "lease_min_ms": 1000,
-    "lease_max_ms": 86400000
+    "lease_max_ms": 86400000,
+    "operations_per_namespace": 10000,
+    "operation_events_per_namespace": 50000,
+    "target_identity_bytes": 2048,
+    "outcome_evidence_bytes": 4096
   },
   "privacy": {
     "comment_bodies": false,

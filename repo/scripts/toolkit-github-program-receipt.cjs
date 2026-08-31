@@ -11,8 +11,10 @@ const { canonicalSerialize, digestValue } = require('./toolkit-execution-loop.cj
 const SCHEMA_ID = 'toolkit.github-program.run-receipt.v1';
 const MIN_NODE_VERSION = '22.13.0';
 const APPLICATION_ID = 1196446257;
-const USER_VERSION = 1;
+const USER_VERSION = 2;
 const BUSY_TIMEOUT_MS = 5000;
+const VERIFIER_TIMEOUT_MS = 30000;
+const VERIFIER_STREAM_BYTES = 16 * 1024;
 const RECEIPT_TYPES = Object.freeze([
   'RUN_STARTED',
   'TRANSITION_PREVIEW',
@@ -28,8 +30,39 @@ const LIMITS = Object.freeze({
   allocationsPerNamespace: 10000,
   databaseBytes: 64 * 1024 * 1024,
   leaseMinMs: 1000,
-  leaseMaxMs: 24 * 60 * 60 * 1000
+  leaseMaxMs: 24 * 60 * 60 * 1000,
+  operationsPerNamespace: 10000,
+  operationEventsPerNamespace: 50000,
+  targetIdentityBytes: 2048,
+  outcomeEvidenceBytes: 4096
 });
+const OPERATION_KINDS = Object.freeze([
+  'GIT_REF_UPDATE',
+  'CONDITIONAL_PROVIDER_UPDATE',
+  'IDEMPOTENT_SET',
+  'APPEND_CREATE'
+]);
+const SAFETY_CLASSES = Object.freeze(['CAS', 'IDEMPOTENT', 'APPEND_IDEMPOTENT']);
+const OPERATION_STATES = Object.freeze(['PREPARED', 'IN_FLIGHT', 'APPLIED', 'NOT_APPLIED', 'UNKNOWN']);
+const OPERATION_DESCRIPTOR_KEYS = Object.freeze([
+  'operation_kind', 'safety_class', 'target_identity', 'target_digest',
+  'expected_source_digest', 'cas_digest', 'expected_post_state_digest',
+  'adapter_identity_digest', 'retry_of_operation_id'
+]);
+const TARGET_IDENTITY_KEYS = Object.freeze(['resource_type', 'resource_id']);
+const OUTCOME_EVIDENCE_KEYS = Object.freeze([
+  'operation_id', 'logical_operation_digest', 'adapter_identity_digest',
+  'target_identity', 'target_digest', 'provider_operation_key', 'cas_digest',
+  'classification', 'observed_post_state_digest', 'rejection_digest',
+  'delayed_completion_excluded', 'evidence_at', 'evidence_digest'
+]);
+const VERIFICATION_PACKET_KEYS = Object.freeze([
+  'schema', 'run_id', 'allocation_id', 'receipt_id', 'receipt_sequence',
+  'namespace_digest', 'authority_digest', 'start_digest', 'lease_id',
+  'fence_id', 'fence_sequence', 'chain_digest', 'store_state_digest',
+  'store_identity_digest', 'node_executable_realpath_digest',
+  'runtime_identity_digest', 'node_version', 'packet_digest'
+]);
 const RECEIPT_KEYS = Object.freeze([
   'schema', 'receipt_type', 'receipt_id', 'sequence', 'prior_receipt_id',
   'run_id', 'allocation_id', 'repository', 'parent_issue', 'child_issue',
@@ -56,6 +89,7 @@ const PAYLOAD_KEYS = Object.freeze([
 const SENSITIVE_KEY = /(?:authorization|cookie|credential|password|private[_-]?key|secret|token|prompt|upload|model[_-]?output|raw[_-]?body)/i;
 const SENSITIVE_VALUE = /(?:\bBearer\s+[A-Za-z0-9._~+\/-]+=*|github_pat_[A-Za-z0-9_]{20,}|gh[opusr]_[A-Za-z0-9]{20,}|-----BEGIN [A-Z ]+PRIVATE KEY-----)/i;
 const SESSION_OWNERS = new WeakMap();
+const ADMISSION_OWNERS = new WeakMap();
 
 class GprError extends Error {
   constructor(code, details = {}) {
@@ -232,6 +266,89 @@ function validateCandidate(value) {
   for (const key of ['base_sha', 'head_sha', 'tree_sha']) if (!isSha(value[key])) fail('GPR_CANDIDATE_INVALID', { field: key });
   assertPrivacySafe(value);
   return clone(value);
+}
+
+function validateTargetIdentity(value) {
+  if (!exactKeys(value, TARGET_IDENTITY_KEYS)
+    || !isSafeId(value.resource_type, 80)
+    || !isSafeId(value.resource_id, 512)) fail('GPR_OPERATION_DESCRIPTOR_INVALID');
+  assertPrivacySafe(value);
+  if (byteLength(value) > LIMITS.targetIdentityBytes) fail('GPR_OPERATION_DESCRIPTOR_INVALID');
+  return clone(value);
+}
+
+function validateOperationDescriptor(value) {
+  if (!exactKeys(value, OPERATION_DESCRIPTOR_KEYS)) fail('GPR_OPERATION_DESCRIPTOR_INVALID');
+  for (const item of Object.values(value)) if (typeof item === 'function') fail('GPR_OPERATION_DESCRIPTOR_INVALID');
+  if (!OPERATION_KINDS.includes(value.operation_kind) || !SAFETY_CLASSES.includes(value.safety_class)) {
+    fail('GPR_OPERATION_CLASS_FORBIDDEN');
+  }
+  const targetIdentity = validateTargetIdentity(value.target_identity);
+  for (const key of ['target_digest', 'expected_source_digest', 'cas_digest', 'adapter_identity_digest']) {
+    if (!isDigest(value[key])) fail('GPR_OPERATION_DESCRIPTOR_INVALID', { field: key });
+  }
+  if (value.target_digest !== digestValue(targetIdentity)
+    || value.expected_post_state_digest !== null && !isDigest(value.expected_post_state_digest)
+    || value.retry_of_operation_id !== null && !isSafeId(value.retry_of_operation_id)) {
+    fail('GPR_OPERATION_DESCRIPTOR_INVALID');
+  }
+  const expectedClass = value.operation_kind === 'IDEMPOTENT_SET'
+    ? 'IDEMPOTENT'
+    : value.operation_kind === 'APPEND_CREATE' ? 'APPEND_IDEMPOTENT' : 'CAS';
+  if (value.safety_class !== expectedClass) fail('GPR_OPERATION_CLASS_FORBIDDEN');
+  const expectedResourceType = value.operation_kind === 'GIT_REF_UPDATE'
+    ? 'git_ref' : value.operation_kind === 'APPEND_CREATE' ? 'provider_collection' : 'provider_resource';
+  if (targetIdentity.resource_type !== expectedResourceType || /[,\s]/.test(targetIdentity.resource_id)) {
+    fail('GPR_OPERATION_CLASS_FORBIDDEN');
+  }
+  if (value.operation_kind !== 'APPEND_CREATE' && value.expected_post_state_digest === null) {
+    fail('GPR_OPERATION_DESCRIPTOR_INVALID');
+  }
+  assertPrivacySafe(value);
+  return deepFreeze({ ...clone(value), target_identity: targetIdentity });
+}
+
+function outcomeEvidencePayload(value) {
+  const payload = clone(value);
+  delete payload.evidence_digest;
+  return payload;
+}
+
+function validateOutcomeEvidence(value, operation) {
+  if (!exactKeys(value, OUTCOME_EVIDENCE_KEYS) || !OPERATION_STATES.slice(2).includes(value.classification)) {
+    fail('GPR_OUTCOME_EVIDENCE_INVALID');
+  }
+  const targetIdentity = validateTargetIdentity(value.target_identity);
+  if (value.operation_id !== operation.operation_id
+    || value.logical_operation_digest !== operation.logical_operation_digest
+    || value.adapter_identity_digest !== operation.adapter_identity_digest
+    || canonicalSerialize(targetIdentity) !== operation.target_identity_json
+    || value.target_digest !== operation.target_digest
+    || value.provider_operation_key !== operation.provider_operation_key
+    || value.cas_digest !== operation.cas_digest
+    || !isTimestamp(value.evidence_at)
+    || Date.parse(value.evidence_at) < Date.parse(operation.created_at)
+    || !isDigest(value.evidence_digest)
+    || value.evidence_digest !== digestValue(outcomeEvidencePayload(value))) {
+    fail('GPR_OUTCOME_EVIDENCE_INVALID');
+  }
+  for (const key of ['observed_post_state_digest', 'rejection_digest']) {
+    if (value[key] !== null && !isDigest(value[key])) fail('GPR_OUTCOME_EVIDENCE_INVALID');
+  }
+  if (typeof value.delayed_completion_excluded !== 'boolean') fail('GPR_OUTCOME_EVIDENCE_INVALID');
+  if (value.classification === 'APPLIED') {
+    if (value.observed_post_state_digest === null || value.rejection_digest !== null
+      || operation.expected_post_state_digest !== null
+        && value.observed_post_state_digest !== operation.expected_post_state_digest) {
+      fail('GPR_OUTCOME_EVIDENCE_INVALID');
+    }
+  } else if (value.classification === 'NOT_APPLIED') {
+    if (value.observed_post_state_digest !== null || !isDigest(value.rejection_digest)
+      || value.delayed_completion_excluded !== true) fail('GPR_OUTCOME_EVIDENCE_INVALID');
+  }
+  assertPrivacySafe(value);
+  if (byteLength(value) > LIMITS.outcomeEvidenceBytes) fail('GPR_OUTCOME_EVIDENCE_INVALID');
+  return deepFreeze({ ...clone(value), target_identity: targetIdentity });
 }
 
 function validatePayload(value) {
@@ -513,8 +630,50 @@ CREATE TABLE lease_events (
   detail_digest TEXT NOT NULL,
   event_digest TEXT NOT NULL
 ) STRICT;
+CREATE TABLE mutation_operations (
+  operation_id TEXT PRIMARY KEY,
+  logical_operation_digest TEXT NOT NULL,
+  run_id TEXT NOT NULL REFERENCES runs(run_id),
+  allocation_id TEXT NOT NULL REFERENCES allocations(allocation_id),
+  lock_id TEXT NOT NULL,
+  authority_digest TEXT NOT NULL,
+  lease_id TEXT NOT NULL,
+  fence_id TEXT NOT NULL,
+  fence_sequence INTEGER NOT NULL,
+  operation_kind TEXT NOT NULL CHECK (operation_kind IN ('GIT_REF_UPDATE', 'CONDITIONAL_PROVIDER_UPDATE', 'IDEMPOTENT_SET', 'APPEND_CREATE')),
+  safety_class TEXT NOT NULL CHECK (safety_class IN ('CAS', 'IDEMPOTENT', 'APPEND_IDEMPOTENT')),
+  target_identity_json TEXT NOT NULL,
+  target_digest TEXT NOT NULL,
+  source_digest TEXT NOT NULL,
+  cas_digest TEXT NOT NULL,
+  expected_post_state_digest TEXT,
+  provider_operation_key TEXT NOT NULL UNIQUE,
+  adapter_identity_digest TEXT NOT NULL,
+  retry_of_operation_id TEXT UNIQUE REFERENCES mutation_operations(operation_id),
+  created_at TEXT NOT NULL,
+  operation_digest TEXT NOT NULL
+) STRICT;
+CREATE TABLE mutation_operation_events (
+  event_id TEXT PRIMARY KEY,
+  operation_id TEXT NOT NULL REFERENCES mutation_operations(operation_id),
+  sequence INTEGER NOT NULL,
+  prior_event_id TEXT REFERENCES mutation_operation_events(event_id),
+  event_type TEXT NOT NULL CHECK (event_type IN ('PREPARED', 'IN_FLIGHT', 'OUTCOME_RECORDED', 'RECONCILED')),
+  state TEXT NOT NULL CHECK (state IN ('PREPARED', 'IN_FLIGHT', 'APPLIED', 'NOT_APPLIED', 'UNKNOWN')),
+  event_at TEXT NOT NULL,
+  authority_digest TEXT NOT NULL,
+  provider_evidence_digest TEXT NOT NULL,
+  readback_digest TEXT,
+  detail_digest TEXT NOT NULL,
+  event_digest TEXT NOT NULL,
+  UNIQUE (operation_id, sequence),
+  UNIQUE (prior_event_id)
+) STRICT;
 CREATE INDEX receipts_run_sequence ON receipts(run_id, sequence);
 CREATE INDEX lease_events_allocation ON lease_events(allocation_id, fence_sequence);
+CREATE INDEX mutation_operations_run ON mutation_operations(run_id, fence_sequence);
+CREATE INDEX mutation_operations_logical ON mutation_operations(logical_operation_digest, created_at);
+CREATE INDEX mutation_operation_events_operation ON mutation_operation_events(operation_id, sequence);
 CREATE TRIGGER metadata_no_update BEFORE UPDATE ON metadata BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
 CREATE TRIGGER metadata_no_delete BEFORE DELETE ON metadata BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
 CREATE TRIGGER coordination_high_water_cas BEFORE UPDATE ON coordination_state
@@ -529,6 +688,10 @@ CREATE TRIGGER receipts_no_update BEFORE UPDATE ON receipts BEGIN SELECT RAISE(A
 CREATE TRIGGER receipts_no_delete BEFORE DELETE ON receipts BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
 CREATE TRIGGER lease_events_no_update BEFORE UPDATE ON lease_events BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
 CREATE TRIGGER lease_events_no_delete BEFORE DELETE ON lease_events BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER mutation_operations_no_update BEFORE UPDATE ON mutation_operations BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER mutation_operations_no_delete BEFORE DELETE ON mutation_operations BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER mutation_operation_events_no_update BEFORE UPDATE ON mutation_operation_events BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER mutation_operation_events_no_delete BEFORE DELETE ON mutation_operation_events BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
 `;
 
 function oneValue(db, pragma, field) {
@@ -536,12 +699,13 @@ function oneValue(db, pragma, field) {
   return row && row[field];
 }
 
-function configureDatabase(db) {
+function configureDatabase(db, readOnly = false) {
   db.exec(`PRAGMA busy_timeout=${BUSY_TIMEOUT_MS}`);
   db.exec('PRAGMA foreign_keys=ON');
   db.exec('PRAGMA trusted_schema=OFF');
-  const journal = String(oneValue(db, 'PRAGMA journal_mode=DELETE', 'journal_mode') || '').toLowerCase();
-  db.exec('PRAGMA synchronous=FULL');
+  const journal = String(oneValue(db, readOnly ? 'PRAGMA journal_mode' : 'PRAGMA journal_mode=DELETE', 'journal_mode') || '').toLowerCase();
+  if (!readOnly) db.exec('PRAGMA synchronous=FULL');
+  else db.exec('PRAGMA query_only=ON');
   const pageSize = Number(oneValue(db, 'PRAGMA page_size', 'page_size'));
   const maxPages = Math.floor(LIMITS.databaseBytes / pageSize);
   db.exec(`PRAGMA max_page_count=${maxPages}`);
@@ -649,6 +813,120 @@ function verifyRowDigests(db) {
       detail_digest: row.detail_digest
     })) fail('GPR_LEDGER_TAMPERED');
   }
+  const operations = db.prepare('SELECT * FROM mutation_operations ORDER BY created_at, operation_id').all();
+  const events = db.prepare('SELECT * FROM mutation_operation_events ORDER BY operation_id, sequence').all();
+  if (operations.length > LIMITS.operationsPerNamespace || events.length > LIMITS.operationEventsPerNamespace) {
+    fail('GPR_OPERATION_LIMIT');
+  }
+  const operationIds = new Set();
+  const operationRowsById = new Map();
+  for (const row of operations) {
+    operationIds.add(row.operation_id);
+    operationRowsById.set(row.operation_id, row);
+    let targetIdentity;
+    try { targetIdentity = JSON.parse(row.target_identity_json); } catch (_) { fail('GPR_OPERATION_TAMPERED'); }
+    validateTargetIdentity(targetIdentity);
+    const allocation = db.prepare('SELECT * FROM allocations WHERE allocation_id = ?').get(row.allocation_id);
+    if (!allocation || allocation.run_id !== row.run_id || allocation.lock_id !== row.lock_id
+      || allocation.lease_id !== row.lease_id || allocation.fence_id !== row.fence_id
+      || allocation.fence_sequence !== row.fence_sequence
+      || digestValue(JSON.parse(allocation.authority_json)) !== row.authority_digest
+      || !OPERATION_KINDS.includes(row.operation_kind) || !SAFETY_CLASSES.includes(row.safety_class)
+      || !isSafeId(row.operation_id) || !isDigest(row.logical_operation_digest)
+      || !isDigest(row.authority_digest) || !isDigest(row.source_digest) || !isDigest(row.cas_digest)
+      || !isDigest(row.adapter_identity_digest) || !isTimestamp(row.created_at)
+      || row.expected_post_state_digest !== null && !isDigest(row.expected_post_state_digest)
+      || row.retry_of_operation_id !== null && !isSafeId(row.retry_of_operation_id)
+      || row.provider_operation_key !== `gpr:${row.operation_id}`
+      || row.logical_operation_digest !== digestValue({
+        operation_kind: row.operation_kind,
+        safety_class: row.safety_class,
+        target_identity: targetIdentity,
+        target_digest: row.target_digest,
+        expected_post_state_digest: row.expected_post_state_digest,
+        adapter_identity_digest: row.adapter_identity_digest
+      })
+      || canonicalSerialize(targetIdentity) !== row.target_identity_json
+      || digestValue(targetIdentity) !== row.target_digest
+      || row.operation_digest !== digestValue(operationRowPayload(row))) fail('GPR_OPERATION_TAMPERED');
+  }
+  const eventsByOperation = new Map();
+  for (const row of events) {
+    const operation = operationRowsById.get(row.operation_id);
+    if (!operationIds.has(row.operation_id) || !isSafeId(row.event_id)
+      || !isTimestamp(row.event_at) || !isDigest(row.authority_digest)
+      || !isDigest(row.provider_evidence_digest) || !isDigest(row.detail_digest)
+      || row.readback_digest !== null && !isDigest(row.readback_digest)
+      || row.event_digest !== digestValue(operationEventPayload(row))) {
+      fail('GPR_OPERATION_EVENT_TAMPERED');
+    }
+    const prior = eventsByOperation.get(row.operation_id) || [];
+    const expectedSequence = prior.length + 1;
+    const expectedPrior = prior.length ? prior[prior.length - 1].event_id : null;
+    if (row.sequence !== expectedSequence || row.prior_event_id !== expectedPrior
+      || Date.parse(row.event_at) < Date.parse(prior.length ? prior[prior.length - 1].event_at : operation.created_at)) {
+      fail('GPR_OPERATION_EVENT_TAMPERED');
+    }
+    if (expectedSequence === 1 && (row.event_type !== 'PREPARED' || row.state !== 'PREPARED')
+      || expectedSequence === 2 && (row.event_type !== 'IN_FLIGHT' || row.state !== 'IN_FLIGHT')
+      || expectedSequence > 2 && !validOperationTransition(prior[prior.length - 1].state, row.state)) {
+      fail('GPR_OPERATION_EVENT_TAMPERED');
+    }
+    prior.push(row);
+    eventsByOperation.set(row.operation_id, prior);
+  }
+  for (const operation of operations) {
+    const operationEvents = eventsByOperation.get(operation.operation_id) || [];
+    if (operationEvents.length < 2) fail('GPR_OPERATION_EVENT_TAMPERED');
+  }
+}
+
+function operationRowPayload(row) {
+  return {
+    operation_id: row.operation_id,
+    logical_operation_digest: row.logical_operation_digest,
+    run_id: row.run_id,
+    allocation_id: row.allocation_id,
+    lock_id: row.lock_id,
+    authority_digest: row.authority_digest,
+    lease_id: row.lease_id,
+    fence_id: row.fence_id,
+    fence_sequence: row.fence_sequence,
+    operation_kind: row.operation_kind,
+    safety_class: row.safety_class,
+    target_identity_json: row.target_identity_json,
+    target_digest: row.target_digest,
+    source_digest: row.source_digest,
+    cas_digest: row.cas_digest,
+    expected_post_state_digest: row.expected_post_state_digest,
+    provider_operation_key: row.provider_operation_key,
+    adapter_identity_digest: row.adapter_identity_digest,
+    retry_of_operation_id: row.retry_of_operation_id,
+    created_at: row.created_at
+  };
+}
+
+function operationEventPayload(row) {
+  return {
+    event_id: row.event_id,
+    operation_id: row.operation_id,
+    sequence: row.sequence,
+    prior_event_id: row.prior_event_id,
+    event_type: row.event_type,
+    state: row.state,
+    event_at: row.event_at,
+    authority_digest: row.authority_digest,
+    provider_evidence_digest: row.provider_evidence_digest,
+    readback_digest: row.readback_digest,
+    detail_digest: row.detail_digest
+  };
+}
+
+function validOperationTransition(prior, next) {
+  if (prior === 'PREPARED') return next === 'IN_FLIGHT';
+  if (prior === 'IN_FLIGHT') return ['APPLIED', 'NOT_APPLIED', 'UNKNOWN'].includes(next);
+  if (prior === 'UNKNOWN') return ['APPLIED', 'NOT_APPLIED', 'UNKNOWN'].includes(next);
+  return false;
 }
 
 function readChainDb(db, runId, allowEmpty = false) {
@@ -696,7 +974,7 @@ function verifyDatabase(db, namespace, digest, databasePath, expectedFingerprint
   for (const row of runIds) readChainDb(db, row.run_id, true);
 }
 
-function openVerified(config, create = true) {
+function openVerified(config, create = true, readOnly = false) {
   assertRuntimeSupport();
   const databasePath = config.databasePath;
   const existed = fs.existsSync(databasePath);
@@ -709,9 +987,9 @@ function openVerified(config, create = true) {
   }
   const { DatabaseSync } = assertRuntimeSupport();
   const expectedFingerprint = expectedSchemaFingerprint(DatabaseSync);
-  const db = new DatabaseSync(databasePath);
+  const db = readOnly ? new DatabaseSync(databasePath, { readOnly: true }) : new DatabaseSync(databasePath);
   try {
-    configureDatabase(db);
+    configureDatabase(db, readOnly);
     if (!existed) {
       createDatabase(db, config.namespace, config.namespaceDigest, isoAt(), expectedFingerprint);
       if (process.platform !== 'win32') fs.chmodSync(databasePath, 0o600);
@@ -723,6 +1001,191 @@ function openVerified(config, create = true) {
     if (error instanceof GprError) throw error;
     fail('GPR_STORE_INVALID', { cause: error && error.code ? error.code : 'sqlite-error' });
   }
+}
+
+function createStoreConfig(options) {
+  const namespace = namespaceValue(options || {});
+  const stateRoot = assertSafeStateRoot(options || {});
+  return Object.freeze({
+    namespace,
+    namespaceDigest: namespaceDigest(namespace),
+    stateRoot,
+    repositoryRoot: path.resolve(options.repositoryRoot),
+    databasePath: path.join(stateRoot, `github-program-receipt-${namespaceDigest(namespace)}.sqlite`)
+  });
+}
+
+function sha256File(filePath) {
+  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+
+function canonicalRegularFile(inputPath, executable = false) {
+  if (typeof inputPath !== 'string' || !path.isAbsolute(inputPath)) fail('GPR_VERIFIER_IDENTITY_INVALID');
+  const realpath = fs.realpathSync.native(inputPath);
+  const stat = fs.statSync(realpath);
+  if (!stat.isFile() || executable && process.platform !== 'win32' && (stat.mode & 0o111) === 0) {
+    fail('GPR_VERIFIER_IDENTITY_INVALID');
+  }
+  return realpath;
+}
+
+function runtimeIdentity(nodeExecutable = process.execPath, runtimePath = __filename) {
+  const nodeRealpath = canonicalRegularFile(nodeExecutable, true);
+  const runtimeRealpath = canonicalRegularFile(runtimePath);
+  const serializationRealpath = canonicalRegularFile(path.resolve(__dirname, 'toolkit-execution-loop.cjs'));
+  const identity = {
+    node_executable_realpath_digest: digestValue(nodeRealpath),
+    node_executable_digest: sha256File(nodeRealpath),
+    runtime_realpath_digest: digestValue(runtimeRealpath),
+    runtime_digest: sha256File(runtimeRealpath),
+    serialization_realpath_digest: digestValue(serializationRealpath),
+    serialization_digest: sha256File(serializationRealpath),
+    node_version: process.versions.node
+  };
+  return deepFreeze({
+    ...identity,
+    runtime_identity_digest: digestValue(identity),
+    nodeRealpath,
+    runtimeRealpath
+  });
+}
+
+function storeStateFactsDb(db) {
+  const counts = {};
+  for (const table of ['allocations', 'runs', 'receipts', 'lease_events', 'mutation_operations', 'mutation_operation_events']) {
+    counts[table] = db.prepare(`SELECT COUNT(*) AS value FROM ${table}`).get().value;
+  }
+  const latestAllocation = db.prepare('SELECT allocation_id, run_id, fence_sequence, allocation_digest FROM allocations ORDER BY fence_sequence DESC LIMIT 1').get() || null;
+  const receiptHeads = db.prepare(`
+    SELECT r.run_id, r.receipt_id, r.sequence, r.receipt_digest
+    FROM receipts r
+    WHERE r.sequence = (SELECT MAX(inner_receipt.sequence) FROM receipts inner_receipt WHERE inner_receipt.run_id = r.run_id)
+    ORDER BY r.run_id
+  `).all();
+  const operationHeads = db.prepare(`
+    SELECT o.operation_id, o.operation_digest, e.state, e.event_digest, e.sequence
+    FROM mutation_operations o
+    JOIN mutation_operation_events e ON e.operation_id = o.operation_id
+    WHERE e.sequence = (SELECT MAX(inner_event.sequence) FROM mutation_operation_events inner_event WHERE inner_event.operation_id = o.operation_id)
+    ORDER BY o.operation_id
+  `).all();
+  const leaseHead = db.prepare('SELECT event_id, event_digest, fence_sequence FROM lease_events ORDER BY fence_sequence DESC, event_at DESC, event_id DESC LIMIT 1').get() || null;
+  return {
+    high_water: db.prepare('SELECT high_water FROM coordination_state WHERE singleton = 1').get().high_water,
+    counts,
+    latest_allocation: latestAllocation,
+    receipt_heads: receiptHeads,
+    lease_head: leaseHead,
+    operation_heads: operationHeads
+  };
+}
+
+function verificationPacketDb(db, config, allocation, receipt) {
+  const chain = readChainDb(db, allocation.run_id);
+  const identity = runtimeIdentity();
+  const metadata = db.prepare('SELECT schema_id, namespace_digest, repository, parent_issue, child_issue, schema_fingerprint, created_at FROM metadata WHERE singleton = 1').get();
+  const packet = {
+    schema: 'toolkit.github-program.run-started-verification.v1',
+    run_id: allocation.run_id,
+    allocation_id: allocation.allocation_id,
+    receipt_id: receipt.receipt_id,
+    receipt_sequence: receipt.sequence,
+    namespace_digest: config.namespaceDigest,
+    authority_digest: digestValue(JSON.parse(allocation.authority_json)),
+    start_digest: digestValue(JSON.parse(allocation.start_json)),
+    lease_id: allocation.lease_id,
+    fence_id: allocation.fence_id,
+    fence_sequence: allocation.fence_sequence,
+    chain_digest: digestValue(chain),
+    store_state_digest: digestValue(storeStateFactsDb(db)),
+    store_identity_digest: digestValue({
+      database_realpath_digest: digestValue(fs.realpathSync.native(config.databasePath)),
+      metadata
+    }),
+    node_executable_realpath_digest: identity.node_executable_realpath_digest,
+    runtime_identity_digest: identity.runtime_identity_digest,
+    node_version: identity.node_version,
+    packet_digest: ''
+  };
+  const digestInput = clone(packet);
+  delete digestInput.packet_digest;
+  packet.packet_digest = digestValue(digestInput);
+  return deepFreeze(packet);
+}
+
+function validateVerificationPacket(value) {
+  if (!exactKeys(value, VERIFICATION_PACKET_KEYS)
+    || value.schema !== 'toolkit.github-program.run-started-verification.v1'
+    || !isSafeId(value.run_id) || !isSafeId(value.allocation_id)
+    || !Number.isSafeInteger(value.receipt_sequence) || value.receipt_sequence !== 1
+    || !isSafeId(value.lease_id) || !isSafeId(value.fence_id)
+    || !Number.isSafeInteger(value.fence_sequence) || value.fence_sequence < 1
+    || typeof value.node_version !== 'string') fail('GPR_VERIFICATION_PACKET_INVALID');
+  for (const key of ['receipt_id', 'namespace_digest', 'authority_digest', 'start_digest', 'chain_digest',
+    'store_state_digest', 'store_identity_digest', 'node_executable_realpath_digest',
+    'runtime_identity_digest', 'packet_digest']) if (!isDigest(value[key])) fail('GPR_VERIFICATION_PACKET_INVALID');
+  const digestInput = clone(value);
+  delete digestInput.packet_digest;
+  if (value.packet_digest !== digestValue(digestInput)) fail('GPR_VERIFICATION_PACKET_INVALID');
+  return deepFreeze(clone(value));
+}
+
+function readVerificationPacket(config, expected) {
+  const db = openVerified(config, false, true);
+  try {
+    const allocation = db.prepare('SELECT * FROM allocations WHERE allocation_id = ? AND run_id = ?').get(expected.allocation_id, expected.run_id);
+    if (!allocation) fail('GPR_VERIFICATION_PACKET_INVALID');
+    const chain = readChainDb(db, allocation.run_id);
+    if (chain.length !== 1 || chain[0].receipt_id !== expected.receipt_id) fail('GPR_VERIFICATION_PACKET_INVALID');
+    return verificationPacketDb(db, config, allocation, chain[0]);
+  } finally {
+    db.close();
+  }
+}
+
+function validateVerifierProcessResult(result, expected) {
+  if (!result || result.error || result.signal || result.status !== 0
+    || typeof result.stdout !== 'string' || typeof result.stderr !== 'string'
+    || Buffer.byteLength(result.stdout, 'utf8') > VERIFIER_STREAM_BYTES
+    || Buffer.byteLength(result.stderr, 'utf8') > VERIFIER_STREAM_BYTES
+    || result.stderr !== '' || !result.stdout.endsWith('\n')
+    || result.stdout.slice(0, -1).includes('\n')) fail('GPR_FRESH_PROCESS_VERIFICATION_FAILED');
+  let parsed;
+  try { parsed = JSON.parse(result.stdout.slice(0, -1)); } catch (_) { fail('GPR_FRESH_PROCESS_VERIFICATION_FAILED'); }
+  let packet;
+  try { packet = validateVerificationPacket(parsed); } catch (_) { fail('GPR_FRESH_PROCESS_VERIFICATION_FAILED'); }
+  if (`${canonicalSerialize(packet)}\n` !== result.stdout
+    || canonicalSerialize(packet) !== canonicalSerialize(expected)) fail('GPR_FRESH_PROCESS_VERIFICATION_FAILED');
+  return packet;
+}
+
+function verifyStartedRunFreshProcess(config, expected) {
+  const identity = runtimeIdentity();
+  if (identity.nodeRealpath !== fs.realpathSync.native(process.execPath)
+    || identity.runtimeRealpath !== fs.realpathSync.native(__filename)) fail('GPR_VERIFIER_IDENTITY_INVALID');
+  const env = { ...process.env };
+  const nodeInjectionKeys = new Set(['NODE_OPTIONS', 'NODE_PATH', 'NODE_DEBUG', 'NODE_DEBUG_NATIVE', 'NODE_REPL_EXTERNAL_MODULE', 'NODE_COMPILE_CACHE', 'NODE_V8_COVERAGE']);
+  for (const key of Object.keys(env)) if (nodeInjectionKeys.has(key.toUpperCase())) delete env[key];
+  const result = spawnSync(identity.nodeRealpath, [
+    '--no-warnings', identity.runtimeRealpath, 'verify-run-started',
+    '--repository', config.namespace.repository,
+    '--parent-issue', String(config.namespace.parent_issue),
+    '--child-issue', String(config.namespace.child_issue),
+    '--state-root', config.stateRoot,
+    '--repository-root', config.repositoryRoot,
+    '--run-id', expected.run_id,
+    '--allocation-id', expected.allocation_id,
+    '--receipt-id', expected.receipt_id
+  ], {
+    cwd: config.repositoryRoot,
+    encoding: 'utf8',
+    env,
+    shell: false,
+    windowsHide: true,
+    timeout: VERIFIER_TIMEOUT_MS,
+    maxBuffer: VERIFIER_STREAM_BYTES
+  });
+  return validateVerifierProcessResult(result, expected);
 }
 
 function randomId(prefix) {
@@ -760,6 +1223,82 @@ function insertLeaseEvent(db, allocation, eventType, eventAt, detail) {
     event.event_at, event.detail_digest, event.event_digest
   );
   return event;
+}
+
+function latestOperationEventDb(db, operationId) {
+  return db.prepare('SELECT * FROM mutation_operation_events WHERE operation_id = ? ORDER BY sequence DESC LIMIT 1').get(operationId);
+}
+
+function unresolvedOperationDb(db) {
+  return db.prepare(`
+    SELECT o.*, e.state, e.event_id AS latest_event_id, e.event_digest AS latest_event_digest
+    FROM mutation_operations o
+    JOIN mutation_operation_events e ON e.operation_id = o.operation_id
+    WHERE e.sequence = (
+      SELECT MAX(inner_event.sequence) FROM mutation_operation_events inner_event
+      WHERE inner_event.operation_id = o.operation_id
+    ) AND e.state IN ('IN_FLIGHT', 'UNKNOWN')
+    ORDER BY o.created_at, o.operation_id LIMIT 1
+  `).get();
+}
+
+function assertNoUnresolvedOperationDb(db) {
+  const unresolved = unresolvedOperationDb(db);
+  if (unresolved) fail('GPR_UNRESOLVED_OPERATION', { operation_id: unresolved.operation_id, state: unresolved.state });
+}
+
+function insertOperationEvent(db, operation, eventType, state, eventAt, authorityDigest, evidence = {}) {
+  const prior = latestOperationEventDb(db, operation.operation_id);
+  const sequence = prior ? prior.sequence + 1 : 1;
+  if (sequence === 1 && (eventType !== 'PREPARED' || state !== 'PREPARED')
+    || sequence === 2 && (eventType !== 'IN_FLIGHT' || state !== 'IN_FLIGHT')
+    || sequence > 2 && !validOperationTransition(prior.state, state)) fail('GPR_OPERATION_TRANSITION_INVALID');
+  const event = {
+    event_id: randomId('operation-event'),
+    operation_id: operation.operation_id,
+    sequence,
+    prior_event_id: prior ? prior.event_id : null,
+    event_type: eventType,
+    state,
+    event_at: eventAt,
+    authority_digest: authorityDigest,
+    provider_evidence_digest: evidence.provider_evidence_digest || digestValue({ event_type: eventType, state }),
+    readback_digest: evidence.readback_digest || null,
+    detail_digest: evidence.detail_digest || digestValue({ event_type: eventType, state })
+  };
+  event.event_digest = digestValue(operationEventPayload(event));
+  db.prepare('INSERT INTO mutation_operation_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+    event.event_id, event.operation_id, event.sequence, event.prior_event_id,
+    event.event_type, event.state, event.event_at, event.authority_digest,
+    event.provider_evidence_digest, event.readback_digest, event.detail_digest, event.event_digest
+  );
+  return event;
+}
+
+function operationPublic(row) {
+  return deepFreeze({
+    operation_id: row.operation_id,
+    logical_operation_digest: row.logical_operation_digest,
+    run_id: row.run_id,
+    allocation_id: row.allocation_id,
+    lock: row.lock_id,
+    authority_digest: row.authority_digest,
+    lease_id: row.lease_id,
+    fence_id: row.fence_id,
+    fence_sequence: row.fence_sequence,
+    operation_kind: row.operation_kind,
+    safety_class: row.safety_class,
+    target_identity: JSON.parse(row.target_identity_json),
+    target_digest: row.target_digest,
+    expected_source_digest: row.source_digest,
+    cas_digest: row.cas_digest,
+    expected_post_state_digest: row.expected_post_state_digest,
+    provider_operation_key: row.provider_operation_key,
+    adapter_identity_digest: row.adapter_identity_digest,
+    retry_of_operation_id: row.retry_of_operation_id,
+    created_at: row.created_at,
+    operation_digest: row.operation_digest
+  });
 }
 
 function allocationPublic(row) {
@@ -879,6 +1418,7 @@ function appendReceiptInternal(store, session, input) {
       verifyFenceDb(db, state, isoAt());
       const liveChain = readChainDb(db, state.runId);
       if (liveChain.length !== chain.length || liveChain[liveChain.length - 1].receipt_id !== prior.receipt_id) fail('GPR_CHAIN_CONFLICT');
+      if (['EXECUTOR_TERMINAL', 'G4_TERMINAL'].includes(receipt.receipt_type)) assertNoUnresolvedOperationDb(db);
       db.prepare('INSERT INTO receipts VALUES (?, ?, ?, ?, ?, ?, ?)').run(
         receipt.receipt_id, receipt.run_id, receipt.sequence, receipt.receipt_type,
         receipt.prior_receipt_id, canonicalSerialize(receipt), receipt.receipt_id
@@ -913,16 +1453,75 @@ async function callReader(reader, errorCode) {
   }
 }
 
-function createProgrammeReceiptStore(options) {
-  const namespace = namespaceValue(options || {});
-  const stateRoot = assertSafeStateRoot(options || {});
-  const config = Object.freeze({
-    namespace,
-    namespaceDigest: namespaceDigest(namespace),
-    stateRoot,
-    repositoryRoot: path.resolve(options.repositoryRoot),
-    databasePath: path.join(stateRoot, `github-program-receipt-${namespaceDigest(namespace)}.sqlite`)
+function validateSourceSnapshot(value) {
+  if (!exactKeys(value, ['source_digest', 'cas_digest'])
+    || !isDigest(value.source_digest) || !isDigest(value.cas_digest)) fail('GPR_SOURCE_UNVERIFIED');
+  return deepFreeze(clone(value));
+}
+
+function operationWithStateDb(db, operationId) {
+  const operation = db.prepare('SELECT * FROM mutation_operations WHERE operation_id = ?').get(operationId);
+  if (!operation) fail('GPR_OPERATION_NOT_FOUND');
+  const event = latestOperationEventDb(db, operationId);
+  if (!event) fail('GPR_OPERATION_EVENT_TAMPERED');
+  return { operation, event };
+}
+
+function operationEventsPublic(db, operationId) {
+  return db.prepare('SELECT * FROM mutation_operation_events WHERE operation_id = ? ORDER BY sequence').all(operationId).map((event) => deepFreeze({
+    event_id: event.event_id,
+    operation_id: event.operation_id,
+    sequence: event.sequence,
+    prior_event_id: event.prior_event_id,
+    event_type: event.event_type,
+    state: event.state,
+    event_at: event.event_at,
+    authority_digest: event.authority_digest,
+    provider_evidence_digest: event.provider_evidence_digest,
+    readback_digest: event.readback_digest,
+    detail_digest: event.detail_digest,
+    event_digest: event.event_digest
+  }));
+}
+
+function admissionState(store, session, admission) {
+  const sessionOwner = sessionState(store, session);
+  const state = admission && ADMISSION_OWNERS.get(admission);
+  if (!state || state.storeInstanceId !== store.instanceId || state.processId !== process.pid
+    || state.session !== session || state.runId !== sessionOwner.runId) fail('GPR_ADMISSION_INVALID');
+  return { sessionOwner, state };
+}
+
+function createAdmissionToken(state) {
+  const admission = {};
+  Object.defineProperties(admission, {
+    operation_id: { enumerable: true, get: () => state.operationId },
+    logical_operation_digest: { enumerable: true, get: () => state.logicalOperationDigest },
+    provider_operation_key: { enumerable: true, get: () => state.providerOperationKey },
+    toJSON: { value: () => fail('GPR_ADMISSION_NONSERIALIZABLE') }
   });
+  return Object.freeze(admission);
+}
+
+function validateTrustedReaders(value) {
+  if (!exactKeys(value, ['readAuthority', 'readSource', 'verifyOutcomeEvidence'])
+    || typeof value.readAuthority !== 'function'
+    || typeof value.readSource !== 'function'
+    || typeof value.verifyOutcomeEvidence !== 'function') fail('GPR_TRUSTED_READERS_INVALID');
+  return value;
+}
+
+function reconciliationAuthority(snapshot) {
+  if (!isRecord(snapshot) || !isRecord(snapshot.authority) || !Array.isArray(snapshot.later_controlling_comments)) {
+    fail('GPR_AUTHORITY_UNVERIFIED');
+  }
+  const authority = validateAuthority(snapshot.authority);
+  if (snapshot.later_controlling_comments.length) fail('GPR_AUTHORITY_CHANGED');
+  return authority;
+}
+
+function createProgrammeReceiptStore(options) {
+  const config = createStoreConfig(options);
   const store = {
     instanceId: randomId('store'),
     config,
@@ -942,6 +1541,7 @@ function createProgrammeReceiptStore(options) {
         allocation = transaction(db, () => {
           const issuedAt = isoAt();
           const expiresAt = isoAt(Date.parse(issuedAt) + input.lease_ms);
+          assertNoUnresolvedOperationDb(db);
           if (db.prepare('SELECT COUNT(*) AS value FROM allocations').get().value >= LIMITS.allocationsPerNamespace) fail('GPR_ALLOCATION_LIMIT');
           const active = activeAllocationDb(db, issuedAt);
           if (active) fail('GPR_ACTIVE_LEASE', { run_id: active.run_id, lock: active.lock_id, expires_at: active.expires_at });
@@ -1028,11 +1628,12 @@ function createProgrammeReceiptStore(options) {
       const observedStart = validateStart(await callReader(readers && readers.readStart, 'GPR_START_UNVERIFIED'));
       if (canonicalSerialize(observedStart) !== canonicalSerialize(start)) fail('GPR_START_CHANGED');
       let receipt;
+      let expectedVerification;
       const writeDb = openVerified(config);
       try {
         transaction(writeDb, () => {
           const transactionNow = isoAt();
-          verifyFenceDb(writeDb, state, transactionNow);
+          allocation = verifyFenceDb(writeDb, state, transactionNow);
           if (readChainDb(writeDb, state.runId, true).length > 0) fail('GPR_RUN_ALREADY_STARTED');
           receipt = createReceipt(allocation, config, {
             receipt_type: 'RUN_STARTED',
@@ -1046,14 +1647,14 @@ function createProgrammeReceiptStore(options) {
             receipt.receipt_id, receipt.run_id, receipt.sequence, receipt.receipt_type,
             receipt.prior_receipt_id, canonicalSerialize(receipt), receipt.receipt_id
           );
+          expectedVerification = verificationPacketDb(writeDb, config, allocation, receipt);
         });
       } finally {
         writeDb.close();
       }
-      const readback = store.readReceiptChain(state.runId);
-      if (readback.length !== 1 || readback[0].receipt_id !== receipt.receipt_id) fail('GPR_READBACK_MISMATCH');
+      const verifiedPacket = verifyStartedRunFreshProcess(config, expectedVerification);
       const started = deepFreeze({ ...allocationPublic(allocation), started: true, run_started_receipt_id: receipt.receipt_id });
-      SESSION_OWNERS.set(started, state);
+      SESSION_OWNERS.set(started, { ...state, startVerificationDigest: verifiedPacket.packet_digest });
       return started;
     },
     async startRun(input, readers) {
@@ -1092,52 +1693,221 @@ function createProgrammeReceiptStore(options) {
         db.close();
       }
     },
-    async performMutation(session, operation) {
+    async admitMutationOperation(session, descriptorInput, trustedReadersInput) {
       const state = sessionState(store, session);
-      if (!isRecord(operation) || typeof operation.readAuthority !== 'function'
-        || typeof operation.readSource !== 'function' || typeof operation.mutate !== 'function'
-        || !isDigest(operation.expected_source_digest)) fail('GPR_MUTATION_OPERATION_INVALID');
+      if (!state.startVerificationDigest) fail('GPR_RUN_NOT_FRESHLY_VERIFIED');
+      const descriptor = validateOperationDescriptor(descriptorInput);
+      const trustedReaders = validateTrustedReaders(trustedReadersInput);
       let allocation;
-      let chain;
-      const firstDb = openVerified(config, false);
+      const initialDb = openVerified(config, false);
+      try { allocation = allocationFromStateDb(initialDb, state); } finally { initialDb.close(); }
+      verifyAuthoritySnapshot(JSON.parse(allocation.authority_json), await callReader(trustedReaders.readAuthority, 'GPR_AUTHORITY_UNVERIFIED'));
+      const source = validateSourceSnapshot(await callReader(trustedReaders.readSource, 'GPR_SOURCE_UNVERIFIED'));
+      if (source.source_digest !== descriptor.expected_source_digest || source.cas_digest !== descriptor.cas_digest) fail('GPR_SOURCE_CHANGED');
+      const operationId = randomId('operation');
+      const providerOperationKey = `gpr:${operationId}`;
+      const logicalOperationDigest = digestValue({
+        operation_kind: descriptor.operation_kind,
+        safety_class: descriptor.safety_class,
+        target_identity: descriptor.target_identity,
+        target_digest: descriptor.target_digest,
+        expected_post_state_digest: descriptor.expected_post_state_digest,
+        adapter_identity_digest: descriptor.adapter_identity_digest
+      });
+      let operation;
+      const db = openVerified(config, false);
       try {
-        allocation = verifyFenceDb(firstDb, state, isoAt());
-        chain = readChainDb(firstDb, state.runId);
-        if (chain[0].receipt_type !== 'RUN_STARTED' || chain[0].sequence !== 1) fail('GPR_RUN_NOT_STARTED');
-        if (TERMINAL_TYPES.includes(chain[chain.length - 1].receipt_type)) fail('GPR_RUN_TERMINAL');
+        operation = transaction(db, () => {
+          const createdAt = isoAt();
+          allocation = verifyFenceDb(db, state, createdAt);
+          const chain = readChainDb(db, state.runId);
+          if (chain[0].receipt_type !== 'RUN_STARTED' || chain[0].sequence !== 1) fail('GPR_RUN_NOT_STARTED');
+          if (TERMINAL_TYPES.includes(chain[chain.length - 1].receipt_type)) fail('GPR_RUN_TERMINAL');
+          assertNoUnresolvedOperationDb(db);
+          if (db.prepare('SELECT COUNT(*) AS value FROM mutation_operations').get().value >= LIMITS.operationsPerNamespace
+            || db.prepare('SELECT COUNT(*) AS value FROM mutation_operation_events').get().value + 2 > LIMITS.operationEventsPerNamespace) {
+            fail('GPR_OPERATION_LIMIT');
+          }
+          const priorLogical = db.prepare(`
+            SELECT o.*, e.state FROM mutation_operations o
+            JOIN mutation_operation_events e ON e.operation_id = o.operation_id
+            WHERE o.logical_operation_digest = ?
+              AND e.sequence = (SELECT MAX(inner_event.sequence) FROM mutation_operation_events inner_event WHERE inner_event.operation_id = o.operation_id)
+            ORDER BY o.created_at DESC, o.operation_id DESC LIMIT 1
+          `).get(logicalOperationDigest);
+          if (priorLogical && priorLogical.state === 'APPLIED') fail('GPR_OPERATION_ALREADY_APPLIED');
+          if (descriptor.retry_of_operation_id === null && priorLogical && priorLogical.state === 'NOT_APPLIED') {
+            fail('GPR_RETRY_REQUIRES_REFERENCE');
+          }
+          if (descriptor.retry_of_operation_id !== null) {
+            const retry = operationWithStateDb(db, descriptor.retry_of_operation_id);
+            if (retry.event.state !== 'NOT_APPLIED'
+              || retry.operation.logical_operation_digest !== logicalOperationDigest
+              || retry.operation.run_id === allocation.run_id
+              || retry.operation.fence_sequence >= allocation.fence_sequence
+              || retry.operation.authority_digest === digestValue(JSON.parse(allocation.authority_json))
+              || retry.operation.source_digest === descriptor.expected_source_digest
+              || retry.operation.cas_digest === descriptor.cas_digest) fail('GPR_RETRY_FORBIDDEN');
+          }
+          const row = {
+            operation_id: operationId,
+            logical_operation_digest: logicalOperationDigest,
+            run_id: allocation.run_id,
+            allocation_id: allocation.allocation_id,
+            lock_id: allocation.lock_id,
+            authority_digest: digestValue(JSON.parse(allocation.authority_json)),
+            lease_id: allocation.lease_id,
+            fence_id: allocation.fence_id,
+            fence_sequence: allocation.fence_sequence,
+            operation_kind: descriptor.operation_kind,
+            safety_class: descriptor.safety_class,
+            target_identity_json: canonicalSerialize(descriptor.target_identity),
+            target_digest: descriptor.target_digest,
+            source_digest: descriptor.expected_source_digest,
+            cas_digest: descriptor.cas_digest,
+            expected_post_state_digest: descriptor.expected_post_state_digest,
+            provider_operation_key: providerOperationKey,
+            adapter_identity_digest: descriptor.adapter_identity_digest,
+            retry_of_operation_id: descriptor.retry_of_operation_id,
+            created_at: createdAt
+          };
+          row.operation_digest = digestValue(operationRowPayload(row));
+          db.prepare('INSERT INTO mutation_operations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+            row.operation_id, row.logical_operation_digest, row.run_id, row.allocation_id,
+            row.lock_id, row.authority_digest, row.lease_id, row.fence_id,
+            row.fence_sequence, row.operation_kind, row.safety_class, row.target_identity_json,
+            row.target_digest, row.source_digest, row.cas_digest, row.expected_post_state_digest,
+            row.provider_operation_key, row.adapter_identity_digest, row.retry_of_operation_id,
+            row.created_at, row.operation_digest
+          );
+          insertOperationEvent(db, row, 'PREPARED', 'PREPARED', createdAt, row.authority_digest);
+          insertOperationEvent(db, row, 'IN_FLIGHT', 'IN_FLIGHT', createdAt, row.authority_digest);
+          return row;
+        });
       } finally {
-        firstDb.close();
+        db.close();
       }
-      verifyAuthoritySnapshot(JSON.parse(allocation.authority_json), await callReader(operation.readAuthority, 'GPR_AUTHORITY_UNVERIFIED'));
-      const source = await callReader(operation.readSource, 'GPR_SOURCE_UNVERIFIED');
-      assertPrivacySafe(source);
-      if (digestValue(source) !== operation.expected_source_digest) fail('GPR_SOURCE_CHANGED');
-      const finalDb = openVerified(config, false);
+      const admissionOwner = {
+        storeInstanceId: store.instanceId,
+        processId: process.pid,
+        session,
+        runId: state.runId,
+        operationId,
+        logicalOperationDigest,
+        providerOperationKey,
+        trustedReaders,
+        dispatched: false,
+        outcomeRecorded: false
+      };
+      const admission = createAdmissionToken(admissionOwner);
+      ADMISSION_OWNERS.set(admission, admissionOwner);
+      return admission;
+    },
+    async authorizeMutationDispatch(session, admission) {
+      const { sessionOwner, state } = admissionState(store, session, admission);
+      if (state.dispatched || state.outcomeRecorded) fail('GPR_ADMISSION_CONSUMED');
+      const dbBefore = openVerified(config, false);
+      let allocation;
+      try { allocation = allocationFromStateDb(dbBefore, sessionOwner); } finally { dbBefore.close(); }
+      verifyAuthoritySnapshot(JSON.parse(allocation.authority_json), await callReader(state.trustedReaders.readAuthority, 'GPR_AUTHORITY_UNVERIFIED'));
+      const source = validateSourceSnapshot(await callReader(state.trustedReaders.readSource, 'GPR_SOURCE_UNVERIFIED'));
+      const db = openVerified(config, false);
       try {
-        verifyFenceDb(finalDb, state, isoAt());
-        const latest = readChainDb(finalDb, state.runId);
-        if (latest[0].receipt_id !== chain[0].receipt_id || TERMINAL_TYPES.includes(latest[latest.length - 1].receipt_type)) fail('GPR_RUN_TERMINAL');
+        allocation = verifyFenceDb(db, sessionOwner, isoAt());
+        const current = operationWithStateDb(db, state.operationId);
+        if (current.event.state !== 'IN_FLIGHT'
+          || current.operation.run_id !== allocation.run_id
+          || source.source_digest !== current.operation.source_digest
+          || source.cas_digest !== current.operation.cas_digest) fail('GPR_SOURCE_CHANGED');
+        const unresolved = unresolvedOperationDb(db);
+        if (!unresolved || unresolved.operation_id !== state.operationId) fail('GPR_ADMISSION_INVALID');
+        state.dispatched = true;
+        return operationPublic(current.operation);
       } finally {
-        finalDb.close();
-      }
-      try {
-        return await operation.mutate();
-      } catch (error) {
-        try {
-          appendReceiptInternal(store, session, {
-            receipt_type: 'RUN_INTERRUPTED',
-            payload: { classification: 'MUTATION_OUTCOME_UNKNOWN', operation_digest: digestValue({ expected_source_digest: operation.expected_source_digest }) },
-            created_at: isoAt()
-          });
-        } catch (_) { /* The unknown mutation result remains the primary fail-closed outcome. */ }
-        fail('GPR_MUTATION_OUTCOME_UNKNOWN', { cause: error && error.code ? error.code : 'adapter-failed' });
+        db.close();
       }
     },
-    verifyFreshReadback(runId) {
-      const first = store.readReceiptChain(runId);
-      const second = createProgrammeReceiptStore({ ...config.namespace, stateRoot: config.stateRoot, repositoryRoot: config.repositoryRoot }).readReceiptChain(runId);
-      if (canonicalSerialize(first) !== canonicalSerialize(second)) fail('GPR_READBACK_MISMATCH');
-      return second;
+    async recordMutationOutcome(session, admission, evidenceInput) {
+      const { state } = admissionState(store, session, admission);
+      if (!state.dispatched || state.outcomeRecorded) fail('GPR_ADMISSION_CONSUMED');
+      let operation;
+      const readDb = openVerified(config, false);
+      try { operation = operationWithStateDb(readDb, state.operationId).operation; } finally { readDb.close(); }
+      let evidence;
+      try {
+        const verified = await state.trustedReaders.verifyOutcomeEvidence(clone(evidenceInput), operationPublic(operation));
+        if (canonicalSerialize(verified) !== canonicalSerialize(evidenceInput)) fail('GPR_OUTCOME_EVIDENCE_INVALID');
+        evidence = validateOutcomeEvidence(verified, operation);
+      } catch (error) {
+        const db = openVerified(config, false);
+        try {
+          transaction(db, () => {
+            const current = operationWithStateDb(db, state.operationId);
+            if (['IN_FLIGHT', 'UNKNOWN'].includes(current.event.state)) {
+              insertOperationEvent(db, current.operation, 'OUTCOME_RECORDED', 'UNKNOWN', isoAt(), current.operation.authority_digest, {
+                detail_digest: digestValue({ reason: 'OUTCOME_EVIDENCE_INVALID' })
+              });
+            }
+          });
+        } finally { db.close(); }
+        state.outcomeRecorded = true;
+        fail('GPR_OUTCOME_EVIDENCE_INVALID', { cause: error && error.code ? error.code : 'adapter-evidence-invalid' });
+      }
+      const db = openVerified(config, false);
+      try {
+        transaction(db, () => {
+          const current = operationWithStateDb(db, state.operationId);
+          const highWater = db.prepare('SELECT high_water FROM coordination_state WHERE singleton = 1').get().high_water;
+          const unresolved = unresolvedOperationDb(db);
+          if (highWater !== current.operation.fence_sequence
+            || !unresolved || unresolved.operation_id !== current.operation.operation_id
+            || !['IN_FLIGHT', 'UNKNOWN'].includes(current.event.state)) fail('GPR_ADMISSION_INVALID');
+          return insertOperationEvent(db, current.operation, 'OUTCOME_RECORDED', evidence.classification,
+            evidence.evidence_at, current.operation.authority_digest, {
+              provider_evidence_digest: evidence.evidence_digest,
+              readback_digest: evidence.observed_post_state_digest,
+              detail_digest: digestValue({ classification: evidence.classification, rejection_digest: evidence.rejection_digest })
+            });
+        });
+      } finally { db.close(); }
+      state.outcomeRecorded = true;
+      return store.readMutationOperation(state.operationId);
+    },
+    readMutationOperation(operationId) {
+      if (!isSafeId(operationId)) fail('GPR_OPERATION_NOT_FOUND');
+      const db = openVerified(config, false);
+      try {
+        const current = operationWithStateDb(db, operationId);
+        return deepFreeze({ operation: operationPublic(current.operation), state: current.event.state, events: operationEventsPublic(db, operationId) });
+      } finally { db.close(); }
+    },
+    async reconcileMutationOperation(operationId, authorityReader, providerReader) {
+      if (!isSafeId(operationId) || typeof authorityReader !== 'function' || typeof providerReader !== 'function') fail('GPR_RECONCILIATION_INVALID');
+      let operation;
+      let currentState;
+      const readDb = openVerified(config, false);
+      try {
+        const current = operationWithStateDb(readDb, operationId);
+        operation = current.operation;
+        currentState = current.event.state;
+      } finally { readDb.close(); }
+      if (['APPLIED', 'NOT_APPLIED'].includes(currentState)) return store.readMutationOperation(operationId);
+      const authority = reconciliationAuthority(await callReader(authorityReader, 'GPR_AUTHORITY_UNVERIFIED'));
+      const evidence = validateOutcomeEvidence(await callReader(() => providerReader(operationPublic(operation)), 'GPR_RECONCILIATION_UNVERIFIED'), operation);
+      const db = openVerified(config, false);
+      try {
+        transaction(db, () => {
+          const current = operationWithStateDb(db, operationId);
+          if (!['IN_FLIGHT', 'UNKNOWN'].includes(current.event.state)) fail('GPR_RECONCILIATION_INVALID');
+          insertOperationEvent(db, current.operation, 'RECONCILED', evidence.classification,
+            evidence.evidence_at, digestValue(authority), {
+              provider_evidence_digest: evidence.evidence_digest,
+              readback_digest: evidence.observed_post_state_digest,
+              detail_digest: digestValue({ classification: evidence.classification, rejection_digest: evidence.rejection_digest })
+            });
+        });
+      } finally { db.close(); }
+      return store.readMutationOperation(operationId);
     }
   };
   openVerified(config).close();
@@ -1165,15 +1935,33 @@ function main() {
     process.stdout.write(`${JSON.stringify({ ok: true, schema: SCHEMA_ID, node: process.versions.node })}\n`);
     return;
   }
-  if (args._[0] === 'inspect') {
-    const store = createProgrammeReceiptStore({
+  if (args._[0] === 'verify-run-started') {
+    const config = createStoreConfig({
       repository: args.repository,
       parent_issue: Number(args.parent_issue),
       child_issue: Number(args.child_issue),
       stateRoot: args.state_root,
       repositoryRoot: args.repository_root
     });
-    const chain = store.readReceiptChain(args.run_id);
+    const packet = readVerificationPacket(config, {
+      run_id: args.run_id,
+      allocation_id: args.allocation_id,
+      receipt_id: args.receipt_id
+    });
+    process.stdout.write(`${canonicalSerialize(packet)}\n`);
+    return;
+  }
+  if (args._[0] === 'inspect') {
+    const config = createStoreConfig({
+      repository: args.repository,
+      parent_issue: Number(args.parent_issue),
+      child_issue: Number(args.child_issue),
+      stateRoot: args.state_root,
+      repositoryRoot: args.repository_root
+    });
+    const db = openVerified(config, false);
+    let chain;
+    try { chain = readChainDb(db, args.run_id); } finally { db.close(); }
     process.stdout.write(`${JSON.stringify({ ok: true, chain })}\n`);
     return;
   }
@@ -1193,7 +1981,10 @@ module.exports = Object.freeze({
   BUSY_TIMEOUT_MS,
   LIMITS,
   MIN_NODE_VERSION,
+  OPERATION_KINDS,
+  OPERATION_STATES,
   RECEIPT_TYPES,
+  SAFETY_CLASSES,
   SCHEMA_ID,
   TERMINAL_TYPES,
   USER_VERSION,
@@ -1206,8 +1997,12 @@ module.exports = Object.freeze({
   resolveDatabasePath,
   validateAuthority,
   validateCandidate,
+  validateOperationDescriptor,
+  validateOutcomeEvidence,
   validateReceiptChain,
   validateReceiptObject,
   validateStart,
+  validateVerificationPacket,
+  validateVerifierProcessResult,
   validateWindowsStorageProof
 });
