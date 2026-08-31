@@ -1744,10 +1744,7 @@ function createProgrammeReceiptStore(options) {
             if (retry.event.state !== 'NOT_APPLIED'
               || retry.operation.logical_operation_digest !== logicalOperationDigest
               || retry.operation.run_id === allocation.run_id
-              || retry.operation.fence_sequence >= allocation.fence_sequence
-              || retry.operation.authority_digest === digestValue(JSON.parse(allocation.authority_json))
-              || retry.operation.source_digest === descriptor.expected_source_digest
-              || retry.operation.cas_digest === descriptor.cas_digest) fail('GPR_RETRY_FORBIDDEN');
+              || retry.operation.fence_sequence >= allocation.fence_sequence) fail('GPR_RETRY_FORBIDDEN');
           }
           const row = {
             operation_id: operationId,

@@ -359,6 +359,61 @@ test('one opaque admission authorizes exactly one immediate trusted-host dispatc
   assert.equal(store.readMutationOperation(operation.operation_id).state, 'IN_FLIGHT');
 });
 
+test('later controlling authority after admission refuses dispatch with zero provider writes', async () => {
+  const current = await fixture();
+  const operationDescriptor = descriptor();
+  let authorityMoved = false;
+  let providerWrites = 0;
+  const currentReaders = trustedReaders(current.expectedAuthority, operationDescriptor, {
+    readAuthority: async () => ({
+      authority: structuredClone(current.expectedAuthority),
+      later_controlling_comments: authorityMoved ? [{ comment_id: 5474456292 }] : []
+    })
+  });
+  const admission = await current.store.admitMutationOperation(
+    current.session, operationDescriptor, currentReaders
+  );
+  const dispatch = async () => {
+    const operation = await current.store.authorizeMutationDispatch(current.session, admission);
+    providerWrites += 1;
+    return operation;
+  };
+  authorityMoved = true;
+  await assertCodeAsync(dispatch, 'GPR_AUTHORITY_CHANGED');
+  assert.equal(providerWrites, 0);
+  assert.equal(current.store.readMutationOperation(admission.operation_id).state, 'IN_FLIGHT');
+});
+
+test('authority movement between completed operations blocks the next admission with zero additional provider writes', async () => {
+  const current = await fixture();
+  let authorityMoved = false;
+  let providerWrites = 0;
+  const readAuthority = async () => ({
+    authority: structuredClone(current.expectedAuthority),
+    later_controlling_comments: authorityMoved ? [{ comment_id: 5474458663 }] : []
+  });
+  const firstDescriptor = descriptor();
+  const firstAdmission = await current.store.admitMutationOperation(current.session, firstDescriptor,
+    trustedReaders(current.expectedAuthority, firstDescriptor, { readAuthority }));
+  const firstOperation = await current.store.authorizeMutationDispatch(current.session, firstAdmission);
+  providerWrites += 1;
+  await current.store.recordMutationOutcome(
+    current.session, firstAdmission, outcomeEvidence(firstOperation, 'APPLIED')
+  );
+  assert.equal(current.store.readMutationOperation(firstOperation.operation_id).state, 'APPLIED');
+
+  const secondDescriptor = descriptor({
+    target_identity: { resource_type: 'git_ref', resource_id: 'refs/heads/next' },
+    target_digest: digestValue({ resource_type: 'git_ref', resource_id: 'refs/heads/next' }),
+    expected_post_state_digest: digestValue('post-next')
+  });
+  authorityMoved = true;
+  await assertCodeAsync(() => current.store.admitMutationOperation(current.session, secondDescriptor,
+    trustedReaders(current.expectedAuthority, secondDescriptor, { readAuthority })),
+  'GPR_AUTHORITY_CHANGED');
+  assert.equal(providerWrites, 1);
+});
+
 test('an expired holder cannot backdate a receipt before takeover', async () => {
   const { store, session } = await fixture({ lease_ms: 1000 });
   const priorTimestamp = store.readReceiptChain(session.run_id)[0].created_at;
@@ -505,40 +560,159 @@ test('lease expiry before dispatch performs zero writes and cannot permit takeov
   }), 'GPR_UNRESOLVED_OPERATION');
 });
 
-test('APPLIED forbids logical retry while NOT_APPLIED requires fresh run, fence, authority, source, CAS, and retry reference', async () => {
+test('APPLIED is non-retryable while unchanged freshly revalidated NOT_APPLIED retry is accepted', async () => {
   const applied = await admittedFixture();
   const appliedOperation = await applied.store.authorizeMutationDispatch(applied.session, applied.admission);
   await applied.store.recordMutationOutcome(applied.session, applied.admission, outcomeEvidence(appliedOperation, 'APPLIED'));
   applied.store.interruptRun(applied.session, { payload: { classification: 'COMPLETE' }, created_at: nowIso() });
-  const appliedAuthority = authority('applied-retry');
   const appliedSession = await applied.store.startRun({
-    lock: 'LOCK-APPLIED-RETRY', authority: appliedAuthority, start: applied.expectedStart,
+    lock: 'LOCK-APPLIED-RETRY', authority: applied.expectedAuthority, start: applied.expectedStart,
     candidate: null, lease_ms: 60000
-  }, readers(appliedAuthority, applied.expectedStart, nowIso()));
+  }, readers(applied.expectedAuthority, applied.expectedStart, nowIso()));
   const appliedRetry = descriptor({
-    expected_source_digest: digestValue('source-b'), cas_digest: digestValue('cas-b'),
     retry_of_operation_id: appliedOperation.operation_id
   });
   await assertCodeAsync(() => applied.store.admitMutationOperation(appliedSession, appliedRetry,
-    trustedReaders(appliedAuthority, appliedRetry)), 'GPR_OPERATION_ALREADY_APPLIED');
+    trustedReaders(applied.expectedAuthority, appliedRetry)), 'GPR_OPERATION_ALREADY_APPLIED');
 
   const notApplied = await admittedFixture();
   const notAppliedOperation = await notApplied.store.authorizeMutationDispatch(notApplied.session, notApplied.admission);
   await notApplied.store.recordMutationOutcome(notApplied.session, notApplied.admission,
     outcomeEvidence(notAppliedOperation, 'NOT_APPLIED'));
   notApplied.store.interruptRun(notApplied.session, { payload: { classification: 'RETRYABLE' }, created_at: nowIso() });
-  const retryAuthority = authority('not-applied-retry');
   const retrySession = await notApplied.store.startRun({
-    lock: 'LOCK-NOT-APPLIED-RETRY', authority: retryAuthority, start: notApplied.expectedStart,
+    lock: 'LOCK-NOT-APPLIED-RETRY', authority: notApplied.expectedAuthority, start: notApplied.expectedStart,
     candidate: null, lease_ms: 60000
-  }, readers(retryAuthority, notApplied.expectedStart, nowIso()));
-  const freshDescriptor = descriptor({ expected_source_digest: digestValue('source-c'), cas_digest: digestValue('cas-c') });
-  await assertCodeAsync(() => notApplied.store.admitMutationOperation(retrySession, freshDescriptor,
-    trustedReaders(retryAuthority, freshDescriptor)), 'GPR_RETRY_REQUIRES_REFERENCE');
-  const explicitRetry = { ...freshDescriptor, retry_of_operation_id: notAppliedOperation.operation_id };
+  }, readers(notApplied.expectedAuthority, notApplied.expectedStart, nowIso()));
+  await assertCodeAsync(() => notApplied.store.admitMutationOperation(retrySession, notApplied.operationDescriptor,
+    trustedReaders(notApplied.expectedAuthority, notApplied.operationDescriptor)), 'GPR_RETRY_REQUIRES_REFERENCE');
+  const explicitRetry = {
+    ...notApplied.operationDescriptor,
+    retry_of_operation_id: notAppliedOperation.operation_id
+  };
   const retryAdmission = await notApplied.store.admitMutationOperation(retrySession, explicitRetry,
-    trustedReaders(retryAuthority, explicitRetry));
-  assert.equal(notApplied.store.readMutationOperation(retryAdmission.operation_id).state, 'IN_FLIGHT');
+    trustedReaders(notApplied.expectedAuthority, explicitRetry));
+  const retry = notApplied.store.readMutationOperation(retryAdmission.operation_id);
+  assert.equal(retry.state, 'IN_FLIGHT');
+  assert.notEqual(retry.operation.run_id, notAppliedOperation.run_id);
+  assert.equal(retry.operation.fence_sequence > notAppliedOperation.fence_sequence, true);
+  assert.equal(retry.operation.authority_digest, notAppliedOperation.authority_digest);
+  assert.equal(retry.operation.source_digest, notAppliedOperation.source_digest);
+  assert.equal(retry.operation.cas_digest, notAppliedOperation.cas_digest);
+  assert.equal(retry.operation.retry_of_operation_id, notAppliedOperation.operation_id);
+});
+
+test('NOT_APPLIED retry without a fresh run is rejected', async () => {
+  const current = await admittedFixture();
+  const operation = await current.store.authorizeMutationDispatch(current.session, current.admission);
+  await current.store.recordMutationOutcome(
+    current.session, current.admission, outcomeEvidence(operation, 'NOT_APPLIED')
+  );
+  const retryDescriptor = {
+    ...current.operationDescriptor,
+    retry_of_operation_id: operation.operation_id
+  };
+  await assertCodeAsync(() => current.store.admitMutationOperation(current.session, retryDescriptor,
+    trustedReaders(current.expectedAuthority, retryDescriptor)), 'GPR_RETRY_FORBIDDEN');
+});
+
+test('NOT_APPLIED retry under stale ownership without the newer fence is rejected', async () => {
+  const current = await admittedFixture();
+  const operation = await current.store.authorizeMutationDispatch(current.session, current.admission);
+  await current.store.recordMutationOutcome(
+    current.session, current.admission, outcomeEvidence(operation, 'NOT_APPLIED')
+  );
+  current.store.interruptRun(current.session, {
+    payload: { classification: 'RETRYABLE' }, created_at: nowIso()
+  });
+  const freshSession = await current.store.startRun({
+    lock: 'LOCK-NEWER-FENCE', authority: current.expectedAuthority, start: current.expectedStart,
+    candidate: null, lease_ms: 60000
+  }, readers(current.expectedAuthority, current.expectedStart, nowIso()));
+  assert.equal(freshSession.lease.fence_sequence > current.session.lease.fence_sequence, true);
+  const retryDescriptor = {
+    ...current.operationDescriptor,
+    retry_of_operation_id: operation.operation_id
+  };
+  await assertCodeAsync(() => current.store.admitMutationOperation(current.session, retryDescriptor,
+    trustedReaders(current.expectedAuthority, retryDescriptor)), 'GPR_NEWER_FENCE_EXISTS');
+});
+
+test('NOT_APPLIED retry rejects authority movement after the fresh run starts', async () => {
+  const current = await admittedFixture();
+  const operation = await current.store.authorizeMutationDispatch(current.session, current.admission);
+  await current.store.recordMutationOutcome(
+    current.session, current.admission, outcomeEvidence(operation, 'NOT_APPLIED')
+  );
+  current.store.interruptRun(current.session, {
+    payload: { classification: 'RETRYABLE' }, created_at: nowIso()
+  });
+  const retrySession = await current.store.startRun({
+    lock: 'LOCK-AUTHORITY-MOVED', authority: current.expectedAuthority, start: current.expectedStart,
+    candidate: null, lease_ms: 60000
+  }, readers(current.expectedAuthority, current.expectedStart, nowIso()));
+  const retryDescriptor = {
+    ...current.operationDescriptor,
+    retry_of_operation_id: operation.operation_id
+  };
+  await assertCodeAsync(() => current.store.admitMutationOperation(retrySession, retryDescriptor,
+    trustedReaders(current.expectedAuthority, retryDescriptor, {
+      readAuthority: async () => ({
+        authority: structuredClone(current.expectedAuthority),
+        later_controlling_comments: [{ comment_id: 5474460226 }]
+      })
+    })), 'GPR_AUTHORITY_CHANGED');
+});
+
+test('NOT_APPLIED retry rejects source or CAS movement from the new descriptor', async () => {
+  const current = await admittedFixture();
+  const operation = await current.store.authorizeMutationDispatch(current.session, current.admission);
+  await current.store.recordMutationOutcome(
+    current.session, current.admission, outcomeEvidence(operation, 'NOT_APPLIED')
+  );
+  current.store.interruptRun(current.session, {
+    payload: { classification: 'RETRYABLE' }, created_at: nowIso()
+  });
+  const retrySession = await current.store.startRun({
+    lock: 'LOCK-SOURCE-MOVED', authority: current.expectedAuthority, start: current.expectedStart,
+    candidate: null, lease_ms: 60000
+  }, readers(current.expectedAuthority, current.expectedStart, nowIso()));
+  const retryDescriptor = {
+    ...current.operationDescriptor,
+    retry_of_operation_id: operation.operation_id
+  };
+  await assertCodeAsync(() => current.store.admitMutationOperation(retrySession, retryDescriptor,
+    trustedReaders(current.expectedAuthority, retryDescriptor, {
+      readSource: async () => ({
+        source_digest: digestValue('moved-source'),
+        cas_digest: retryDescriptor.cas_digest
+      })
+    })), 'GPR_SOURCE_CHANGED');
+  await assertCodeAsync(() => current.store.admitMutationOperation(retrySession, retryDescriptor,
+    trustedReaders(current.expectedAuthority, retryDescriptor, {
+      readSource: async () => ({
+        source_digest: retryDescriptor.expected_source_digest,
+        cas_digest: digestValue('moved-cas')
+      })
+    })), 'GPR_SOURCE_CHANGED');
+});
+
+test('UNKNOWN remains an unresolved barrier to explicit retry', async () => {
+  const current = await admittedFixture();
+  const operation = await current.store.authorizeMutationDispatch(current.session, current.admission);
+  await current.store.recordMutationOutcome(
+    current.session, current.admission, outcomeEvidence(operation, 'UNKNOWN')
+  );
+  const retryDescriptor = {
+    ...current.operationDescriptor,
+    retry_of_operation_id: operation.operation_id
+  };
+  await assertCodeAsync(() => current.store.admitMutationOperation(current.session, retryDescriptor,
+    trustedReaders(current.expectedAuthority, retryDescriptor)), 'GPR_UNRESOLVED_OPERATION');
+  assertCode(() => current.store.allocateRun({
+    lock: 'LOCK-AFTER-UNKNOWN-RETRY', authority: current.expectedAuthority,
+    start: current.expectedStart, candidate: null, lease_ms: 60000
+  }), 'GPR_UNRESOLVED_OPERATION');
 });
 
 test('terminal append and lease release are atomic and next allocation is N+1', async () => {
