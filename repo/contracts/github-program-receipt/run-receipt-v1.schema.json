@@ -31,7 +31,8 @@
         "TRANSITION_PREVIEW",
         "EXECUTOR_TERMINAL",
         "G4_TERMINAL",
-        "RUN_INTERRUPTED"
+        "RUN_INTERRUPTED",
+        "ORPHAN_ABANDONED"
       ]
     },
     "receipt_id": { "$ref": "#/$defs/digest" },
@@ -201,7 +202,179 @@
               "digest": { "$ref": "#/$defs/digest" }
             }
           }
-        }
+        },
+        "recovery": { "$ref": "#/$defs/recovery" }
+      }
+    },
+    "recovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "request_id",
+        "request_digest",
+        "target",
+        "request_binding",
+        "recovery_authority",
+        "orphan_attestation",
+        "replacement"
+      ],
+      "properties": {
+        "version": { "const": 1 },
+        "request_id": { "$ref": "#/$defs/id" },
+        "request_digest": { "$ref": "#/$defs/digest" },
+        "target": { "$ref": "#/$defs/recoveryTarget" },
+        "request_binding": { "$ref": "#/$defs/recoveryRequestBinding" },
+        "recovery_authority": { "$ref": "#/$defs/recoveryAuthority" },
+        "orphan_attestation": { "$ref": "#/$defs/orphanAttestation" },
+        "replacement": { "$ref": "#/$defs/recoveryReplacement" }
+      }
+    },
+    "recoveryTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "parent_issue",
+        "child_issue",
+        "lock",
+        "run_id",
+        "allocation_id",
+        "allocation_digest",
+        "run_digest",
+        "receipt_tip_id",
+        "receipt_chain_digest",
+        "authority_digest",
+        "start_digest",
+        "lease_digest",
+        "operation_inventory_digest",
+        "operation_count",
+        "namespace_unresolved_operation_count"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "pattern": "^[a-z0-9_.-]{1,100}/[a-z0-9_.-]{1,100}$"
+        },
+        "parent_issue": { "type": "integer", "minimum": 1 },
+        "child_issue": { "type": "integer", "minimum": 1 },
+        "lock": { "$ref": "#/$defs/id" },
+        "run_id": { "$ref": "#/$defs/id" },
+        "allocation_id": { "$ref": "#/$defs/id" },
+        "allocation_digest": { "$ref": "#/$defs/digest" },
+        "run_digest": { "$ref": "#/$defs/digest" },
+        "receipt_tip_id": { "$ref": "#/$defs/digest" },
+        "receipt_chain_digest": { "$ref": "#/$defs/digest" },
+        "authority_digest": { "$ref": "#/$defs/digest" },
+        "start_digest": { "$ref": "#/$defs/digest" },
+        "lease_digest": { "$ref": "#/$defs/digest" },
+        "operation_inventory_digest": { "$ref": "#/$defs/digest" },
+        "operation_count": { "const": 0 },
+        "namespace_unresolved_operation_count": { "const": 0 }
+      }
+    },
+    "recoveryAuthority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "child_comment_id",
+        "parent_comment_id",
+        "node_id",
+        "author_login",
+        "author_association",
+        "body_digest",
+        "updated_at",
+        "update_identity_digest",
+        "scope_digest",
+        "authority_digest"
+      ],
+      "properties": {
+        "child_comment_id": { "type": "integer", "minimum": 1 },
+        "parent_comment_id": { "type": "integer", "minimum": 1 },
+        "node_id": { "$ref": "#/$defs/id" },
+        "author_login": { "type": "string", "pattern": "^[A-Za-z0-9-]{1,39}$" },
+        "author_association": { "const": "OWNER" },
+        "body_digest": { "$ref": "#/$defs/digest" },
+        "updated_at": { "$ref": "#/$defs/timestamp" },
+        "update_identity_digest": { "$ref": "#/$defs/digest" },
+        "scope_digest": { "$ref": "#/$defs/digest" },
+        "authority_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "orphanAttestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attestation_id",
+        "run_id",
+        "allocation_id",
+        "observed_at",
+        "holder_nonadoptable",
+        "operation_count",
+        "namespace_unresolved_operation_count",
+        "operation_inventory_digest",
+        "start_digest",
+        "verifier_identity_digest",
+        "attestation_digest"
+      ],
+      "properties": {
+        "attestation_id": { "$ref": "#/$defs/id" },
+        "run_id": { "$ref": "#/$defs/id" },
+        "allocation_id": { "$ref": "#/$defs/id" },
+        "observed_at": { "$ref": "#/$defs/timestamp" },
+        "holder_nonadoptable": { "const": true },
+        "operation_count": { "const": 0 },
+        "namespace_unresolved_operation_count": { "const": 0 },
+        "operation_inventory_digest": { "$ref": "#/$defs/digest" },
+        "start_digest": { "$ref": "#/$defs/digest" },
+        "verifier_identity_digest": { "$ref": "#/$defs/digest" },
+        "attestation_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "recoveryRequestBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observed_start_digest",
+        "recovery_authority_digest",
+        "later_controlling_comment_ids_digest",
+        "orphan_attestation_digest",
+        "lease_ms"
+      ],
+      "properties": {
+        "observed_start_digest": { "$ref": "#/$defs/digest" },
+        "recovery_authority_digest": { "$ref": "#/$defs/digest" },
+        "later_controlling_comment_ids_digest": { "$ref": "#/$defs/digest" },
+        "orphan_attestation_digest": { "$ref": "#/$defs/digest" },
+        "lease_ms": { "type": "integer", "minimum": 1000, "maximum": 86400000 }
+      }
+    },
+    "recoveryReplacement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allocation_id",
+        "run_id",
+        "allocation_digest",
+        "run_digest",
+        "lease_id",
+        "fence_id",
+        "fence_sequence",
+        "issued_at",
+        "expires_at",
+        "lease_digest"
+      ],
+      "properties": {
+        "allocation_id": { "$ref": "#/$defs/id" },
+        "run_id": { "$ref": "#/$defs/id" },
+        "allocation_digest": { "$ref": "#/$defs/digest" },
+        "run_digest": { "$ref": "#/$defs/digest" },
+        "lease_id": { "$ref": "#/$defs/id" },
+        "fence_id": { "$ref": "#/$defs/id" },
+        "fence_sequence": { "type": "integer", "minimum": 1 },
+        "issued_at": { "$ref": "#/$defs/timestamp" },
+        "expires_at": { "$ref": "#/$defs/timestamp" },
+        "lease_digest": { "$ref": "#/$defs/digest" }
       }
     }
   }

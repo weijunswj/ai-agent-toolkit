@@ -20,9 +20,12 @@ const RECEIPT_TYPES = Object.freeze([
   'TRANSITION_PREVIEW',
   'EXECUTOR_TERMINAL',
   'G4_TERMINAL',
-  'RUN_INTERRUPTED'
+  'RUN_INTERRUPTED',
+  'ORPHAN_ABANDONED'
 ]);
-const TERMINAL_TYPES = Object.freeze(['EXECUTOR_TERMINAL', 'G4_TERMINAL', 'RUN_INTERRUPTED']);
+const TERMINAL_TYPES = Object.freeze(['EXECUTOR_TERMINAL', 'G4_TERMINAL', 'RUN_INTERRUPTED', 'ORPHAN_ABANDONED']);
+const ORPHAN_RECOVERY_VERSION = 1;
+const ORPHAN_TAKEOVER_ACTION = 'ORPHAN_ABANDONED_TAKEOVER';
 const LIMITS = Object.freeze({
   receiptBytes: 16 * 1024,
   payloadBytes: 8 * 1024,
@@ -84,7 +87,42 @@ const LEASE_KEYS = Object.freeze([
 ]);
 const PAYLOAD_KEYS = Object.freeze([
   'classification', 'reason_code', 'outcome_digest', 'evidence_digest',
-  'operation_digest', 'detail_digest', 'mutation_outcome', 'evidence_refs'
+  'operation_digest', 'detail_digest', 'mutation_outcome', 'evidence_refs', 'recovery'
+]);
+const RECOVERY_TARGET_KEYS = Object.freeze([
+  'repository', 'parent_issue', 'child_issue', 'lock', 'run_id', 'allocation_id',
+  'allocation_digest', 'run_digest', 'receipt_tip_id', 'receipt_chain_digest',
+  'authority_digest', 'start_digest', 'lease_digest', 'operation_inventory_digest',
+  'operation_count', 'namespace_unresolved_operation_count'
+]);
+const RECOVERY_AUTHORITY_KEYS = Object.freeze([
+  ...AUTHORITY_KEYS, 'authority_digest'
+]);
+const RECOVERY_ATTESTATION_KEYS = Object.freeze([
+  'attestation_id', 'run_id', 'allocation_id', 'observed_at', 'holder_nonadoptable',
+  'operation_count', 'namespace_unresolved_operation_count', 'operation_inventory_digest',
+  'start_digest', 'verifier_identity_digest', 'attestation_digest'
+]);
+const RECOVERY_REQUEST_BINDING_KEYS = Object.freeze([
+  'observed_start_digest', 'recovery_authority_digest',
+  'later_controlling_comment_ids_digest', 'orphan_attestation_digest', 'lease_ms'
+]);
+const RECOVERY_REPLACEMENT_KEYS = Object.freeze([
+  'allocation_id', 'run_id', 'allocation_digest', 'run_digest', 'lease_id', 'fence_id',
+  'fence_sequence', 'issued_at', 'expires_at', 'lease_digest'
+]);
+const RECOVERY_EVIDENCE_KEYS = Object.freeze([
+  'version', 'request_id', 'request_digest', 'target', 'request_binding',
+  'recovery_authority', 'orphan_attestation', 'replacement'
+]);
+const RECOVERY_REQUEST_KEYS = Object.freeze([
+  'request_id', 'target', 'observed_start', 'recovery_authority',
+  'later_controlling_comment_ids', 'orphan_attestation', 'lease_ms'
+]);
+const RECOVERY_READBACK_KEYS = Object.freeze(['run_id', 'request_id']);
+const CALLER_OWNED_KEYS = new Set([
+  'lease_id', 'fence_id', 'fence_sequence', 'owner_instance_id', 'process_id',
+  'coordination_namespace', 'state_root'
 ]);
 const SENSITIVE_KEY = /(?:authorization|cookie|credential|password|private[_-]?key|secret|token|prompt|upload|model[_-]?output|raw[_-]?body)/i;
 const SENSITIVE_VALUE = /(?:\bBearer\s+[A-Za-z0-9._~+\/-]+=*|github_pat_[A-Za-z0-9_]{20,}|gh[opusr]_[A-Za-z0-9]{20,}|-----BEGIN [A-Z ]+PRIVATE KEY-----)/i;
@@ -367,8 +405,274 @@ function validatePayload(value) {
       if (!exactKeys(item, ['id', 'digest']) || !isSafeId(item.id) || !isDigest(item.digest)) fail('GPR_PAYLOAD_INVALID');
     }
   }
+  if (value.recovery !== undefined) validateRecoveryEvidence(value.recovery);
   if (byteLength(value) > LIMITS.payloadBytes) fail('GPR_RECEIPT_TOO_LARGE');
   return clone(value);
+}
+
+function rejectCallerOwnedFields(value, seen = new Set()) {
+  if (!value || typeof value !== 'object' || seen.has(value)) return;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (const item of value) rejectCallerOwnedFields(item, seen);
+  } else {
+    for (const [key, item] of Object.entries(value)) {
+      if (CALLER_OWNED_KEYS.has(key)) fail('GPR_CALLER_FENCE_FORBIDDEN');
+      rejectCallerOwnedFields(item, seen);
+    }
+  }
+  seen.delete(value);
+}
+
+function leaseDigestFromRow(row) {
+  return digestValue({
+    lease_id: row.lease_id,
+    fence_id: row.fence_id,
+    fence_sequence: row.fence_sequence,
+    issued_at: row.issued_at,
+    expires_at: row.expires_at
+  });
+}
+
+function orphanTakeoverAuthorityScopeDigest(target, orphanAttestationDigest, requestId) {
+  return digestValue({
+    action: ORPHAN_TAKEOVER_ACTION,
+    namespace: {
+      repository: target.repository,
+      parent_issue: target.parent_issue,
+      child_issue: target.child_issue
+    },
+    lock: target.lock,
+    old_run_id: target.run_id,
+    old_allocation_id: target.allocation_id,
+    receipt_tip_id: target.receipt_tip_id,
+    source_digest: target.start_digest,
+    start_digest: target.start_digest,
+    operation_inventory_digest: target.operation_inventory_digest,
+    orphan_attestation_digest: orphanAttestationDigest,
+    recovery_request_id: requestId
+  });
+}
+
+function orphanTakeoverRequestBinding(request) {
+  return {
+    request_id: request.request_id,
+    target: request.target,
+    observed_start_digest: digestValue(request.observed_start),
+    recovery_authority_digest: digestValue(request.recovery_authority),
+    later_controlling_comment_ids_digest: digestValue(request.later_controlling_comment_ids),
+    orphan_attestation_digest: request.orphan_attestation.attestation_digest,
+    lease_ms: request.lease_ms
+  };
+}
+
+function orphanTakeoverRequestDigest(request) {
+  return digestValue(orphanTakeoverRequestBinding(request));
+}
+
+function validateRecoveryTarget(value) {
+  if (!exactKeys(value, RECOVERY_TARGET_KEYS)
+    || validateRepository(value.repository) !== value.repository
+    || !isSafeId(value.lock) || !isSafeId(value.run_id) || !isSafeId(value.allocation_id)
+    || !Number.isSafeInteger(value.parent_issue) || value.parent_issue < 1
+    || !Number.isSafeInteger(value.child_issue) || value.child_issue < 1
+    || !Number.isSafeInteger(value.operation_count) || value.operation_count !== 0
+    || !Number.isSafeInteger(value.namespace_unresolved_operation_count)
+    || value.namespace_unresolved_operation_count !== 0) {
+    fail('GPR_RECOVERY_REQUEST_INVALID');
+  }
+  for (const key of [
+    'allocation_digest', 'run_digest', 'receipt_tip_id', 'receipt_chain_digest',
+    'authority_digest', 'start_digest', 'lease_digest', 'operation_inventory_digest'
+  ]) {
+    if (!isDigest(value[key])) fail('GPR_RECOVERY_REQUEST_INVALID', { field: key });
+  }
+  assertPrivacySafe(value);
+  return clone(value);
+}
+
+function recoveryAuthorityPublic(authority) {
+  return {
+    ...clone(authority),
+    authority_digest: digestValue(authority)
+  };
+}
+
+function validateRecoveryAuthorityPublic(value) {
+  if (!exactKeys(value, RECOVERY_AUTHORITY_KEYS) || !isDigest(value.authority_digest)) {
+    fail('GPR_RECOVERY_EVIDENCE_INVALID');
+  }
+  const authority = clone(value);
+  delete authority.authority_digest;
+  validateAuthority(authority);
+  if (value.authority_digest !== digestValue(authority)) fail('GPR_RECOVERY_EVIDENCE_TAMPERED');
+  assertPrivacySafe(value);
+  return clone(value);
+}
+
+function orphanAttestationPayload(value) {
+  const payload = clone(value);
+  delete payload.attestation_digest;
+  return payload;
+}
+
+function validateOrphanAttestation(value) {
+  if (!exactKeys(value, RECOVERY_ATTESTATION_KEYS)
+    || !isSafeId(value.attestation_id)
+    || !isSafeId(value.run_id)
+    || !isSafeId(value.allocation_id)
+    || !isTimestamp(value.observed_at)
+    || value.holder_nonadoptable !== true
+    || value.operation_count !== 0
+    || value.namespace_unresolved_operation_count !== 0
+    || !isDigest(value.operation_inventory_digest)
+    || !isDigest(value.start_digest)
+    || !isDigest(value.verifier_identity_digest)
+    || !isDigest(value.attestation_digest)
+    || value.attestation_digest !== digestValue(orphanAttestationPayload(value))) {
+    fail('GPR_RECOVERY_ATTESTATION_INVALID');
+  }
+  assertPrivacySafe(value);
+  return clone(value);
+}
+
+function validateRecoveryRequestBinding(value) {
+  if (!exactKeys(value, RECOVERY_REQUEST_BINDING_KEYS)
+    || !isDigest(value.observed_start_digest)
+    || !isDigest(value.recovery_authority_digest)
+    || !isDigest(value.later_controlling_comment_ids_digest)
+    || !isDigest(value.orphan_attestation_digest)
+    || !Number.isSafeInteger(value.lease_ms)
+    || value.lease_ms < LIMITS.leaseMinMs
+    || value.lease_ms > LIMITS.leaseMaxMs
+    || value.later_controlling_comment_ids_digest !== digestValue([])) {
+    fail('GPR_RECOVERY_EVIDENCE_INVALID');
+  }
+  assertPrivacySafe(value);
+  return clone(value);
+}
+
+function validateRecoveryReplacement(value) {
+  if (!exactKeys(value, RECOVERY_REPLACEMENT_KEYS)
+    || !isSafeId(value.allocation_id)
+    || !isSafeId(value.run_id)
+    || !isSafeId(value.lease_id)
+    || !isSafeId(value.fence_id)
+    || !Number.isSafeInteger(value.fence_sequence)
+    || value.fence_sequence < 1
+    || !isTimestamp(value.issued_at)
+    || !isTimestamp(value.expires_at)
+    || Date.parse(value.expires_at) <= Date.parse(value.issued_at)
+    || !isDigest(value.allocation_digest)
+    || !isDigest(value.run_digest)
+    || !isDigest(value.lease_digest)) {
+    fail('GPR_RECOVERY_EVIDENCE_INVALID');
+  }
+  validateLease({
+    lease_id: value.lease_id,
+    fence_id: value.fence_id,
+    fence_sequence: value.fence_sequence,
+    issued_at: value.issued_at,
+    expires_at: value.expires_at
+  });
+  assertPrivacySafe(value);
+  return clone(value);
+}
+
+function validateRecoveryEvidence(value) {
+  if (!exactKeys(value, RECOVERY_EVIDENCE_KEYS)
+    || value.version !== ORPHAN_RECOVERY_VERSION
+    || !isSafeId(value.request_id)
+    || !isDigest(value.request_digest)) {
+    fail('GPR_RECOVERY_EVIDENCE_INVALID');
+  }
+  const target = validateRecoveryTarget(value.target);
+  const requestBinding = validateRecoveryRequestBinding(value.request_binding);
+  const recoveryAuthority = validateRecoveryAuthorityPublic(value.recovery_authority);
+  const orphanAttestation = validateOrphanAttestation(value.orphan_attestation);
+  const replacement = validateRecoveryReplacement(value.replacement);
+  if (requestBinding.observed_start_digest !== target.start_digest
+    || requestBinding.recovery_authority_digest !== recoveryAuthority.authority_digest
+    || requestBinding.orphan_attestation_digest !== orphanAttestation.attestation_digest
+    || orphanAttestation.run_id !== target.run_id
+    || orphanAttestation.allocation_id !== target.allocation_id
+    || orphanAttestation.operation_inventory_digest !== target.operation_inventory_digest
+    || orphanAttestation.start_digest !== target.start_digest
+    || recoveryAuthority.scope_digest !== orphanTakeoverAuthorityScopeDigest(
+      target, orphanAttestation.attestation_digest, value.request_id
+    )
+    || value.request_digest !== digestValue({
+      request_id: value.request_id,
+      target,
+      observed_start_digest: requestBinding.observed_start_digest,
+      recovery_authority_digest: requestBinding.recovery_authority_digest,
+      later_controlling_comment_ids_digest: requestBinding.later_controlling_comment_ids_digest,
+      orphan_attestation_digest: requestBinding.orphan_attestation_digest,
+      lease_ms: requestBinding.lease_ms
+    })) {
+    fail('GPR_RECOVERY_EVIDENCE_TAMPERED');
+  }
+  assertPrivacySafe(value);
+  if (byteLength(value) > LIMITS.payloadBytes) fail('GPR_RECEIPT_TOO_LARGE');
+  return deepFreeze({
+    ...clone(value),
+    target,
+    request_binding: requestBinding,
+    recovery_authority: recoveryAuthority,
+    orphan_attestation: orphanAttestation,
+    replacement
+  });
+}
+
+function validateTakeoverRequest(value, config) {
+  rejectCallerOwnedFields(value);
+  if (!isRecord(value)) fail('GPR_RECOVERY_REQUEST_INVALID');
+  if (!exactKeys(value, RECOVERY_REQUEST_KEYS)
+    || !isSafeId(value.request_id)
+    || !Array.isArray(value.later_controlling_comment_ids)
+    || value.later_controlling_comment_ids.length !== 0
+    || !Number.isSafeInteger(value.lease_ms)
+    || value.lease_ms < LIMITS.leaseMinMs
+    || value.lease_ms > LIMITS.leaseMaxMs) {
+    if (Array.isArray(value && value.later_controlling_comment_ids)
+      && value.later_controlling_comment_ids.length > 0) fail('GPR_AUTHORITY_CHANGED');
+    fail('GPR_RECOVERY_REQUEST_INVALID');
+  }
+  const target = validateRecoveryTarget(value.target);
+  const observedStart = validateStart(value.observed_start);
+  const recoveryAuthority = validateAuthority(value.recovery_authority);
+  const orphanAttestation = validateOrphanAttestation(value.orphan_attestation);
+  if (target.repository !== config.namespace.repository
+    || target.parent_issue !== config.namespace.parent_issue
+    || target.child_issue !== config.namespace.child_issue) {
+    fail('GPR_RECOVERY_NAMESPACE_MISMATCH');
+  }
+  if (target.start_digest !== digestValue(observedStart)) fail('GPR_RECOVERY_SOURCE_CHANGED');
+  if (orphanAttestation.run_id !== target.run_id
+    || orphanAttestation.allocation_id !== target.allocation_id
+    || orphanAttestation.operation_inventory_digest !== target.operation_inventory_digest
+    || orphanAttestation.start_digest !== target.start_digest) {
+    fail('GPR_RECOVERY_ATTESTATION_INVALID');
+  }
+  if (recoveryAuthority.scope_digest !== orphanTakeoverAuthorityScopeDigest(
+    target, orphanAttestation.attestation_digest, value.request_id
+  )) {
+    fail('GPR_AUTHORITY_CHANGED');
+  }
+  if (orphanAttestation.verifier_identity_digest !== verifierIdentityDigest()) {
+    fail('GPR_RECOVERY_VERIFIER_CHANGED');
+  }
+  assertPrivacySafe(value);
+  const request = deepFreeze({
+    request_id: value.request_id,
+    target,
+    observed_start: observedStart,
+    recovery_authority: recoveryAuthority,
+    later_controlling_comment_ids: [],
+    orphan_attestation: orphanAttestation,
+    lease_ms: value.lease_ms
+  });
+  return { request, requestDigest: orphanTakeoverRequestDigest(request) };
 }
 
 function validateLease(value) {
@@ -402,6 +706,13 @@ function validateReceiptObject(value) {
   if (value.candidate !== null) validateCandidate(value.candidate);
   validateLease(value.lease);
   validatePayload(value.payload);
+  if (value.receipt_type === 'ORPHAN_ABANDONED') {
+    if (value.payload.recovery === undefined || value.payload.classification !== 'ORPHAN_ABANDONED') {
+      fail('GPR_RECOVERY_EVIDENCE_INVALID');
+    }
+  } else if (value.payload.recovery !== undefined) {
+    fail('GPR_RECOVERY_EVIDENCE_INVALID');
+  }
   if (byteLength(value) > LIMITS.receiptBytes) fail('GPR_RECEIPT_TOO_LARGE');
   if (!isTimestamp(value.created_at) || Date.parse(value.created_at) < Date.parse(value.lease.issued_at)) fail('GPR_RECEIPT_INVALID');
   if (value.sequence === 1) {
@@ -1050,6 +1361,15 @@ function runtimeIdentity(nodeExecutable = process.execPath, runtimePath = __file
   });
 }
 
+function verifierIdentityDigest() {
+  const identity = runtimeIdentity();
+  return digestValue({
+    node_executable_realpath_digest: identity.node_executable_realpath_digest,
+    runtime_identity_digest: identity.runtime_identity_digest,
+    node_version: identity.node_version
+  });
+}
+
 function storeStateFactsDb(db) {
   const counts = {};
   for (const table of ['allocations', 'runs', 'receipts', 'lease_events', 'mutation_operations', 'mutation_operation_events']) {
@@ -1242,6 +1562,43 @@ function unresolvedOperationDb(db) {
   `).get();
 }
 
+function operationInventoryDb(db, runId) {
+  const rows = db.prepare(`
+    SELECT o.operation_id, o.operation_digest,
+      e.sequence, e.state, e.event_id, e.event_digest
+    FROM mutation_operations o
+    JOIN mutation_operation_events e ON e.operation_id = o.operation_id
+    WHERE o.run_id = ?
+      AND e.sequence = (
+        SELECT MAX(inner_event.sequence)
+        FROM mutation_operation_events inner_event
+        WHERE inner_event.operation_id = o.operation_id
+      )
+    ORDER BY o.created_at, o.operation_id
+  `).all(runId).map((row) => ({
+    operation_id: row.operation_id,
+    operation_digest: row.operation_digest,
+    sequence: row.sequence,
+    state: row.state,
+    event_id: row.event_id,
+    event_digest: row.event_digest
+  }));
+  return { count: rows.length, digest: digestValue(rows) };
+}
+
+function unresolvedOperationCountDb(db) {
+  return db.prepare(`
+    SELECT COUNT(*) AS value
+    FROM mutation_operations o
+    JOIN mutation_operation_events e ON e.operation_id = o.operation_id
+    WHERE e.sequence = (
+      SELECT MAX(inner_event.sequence)
+      FROM mutation_operation_events inner_event
+      WHERE inner_event.operation_id = o.operation_id
+    ) AND e.state IN ('IN_FLIGHT', 'UNKNOWN')
+  `).get().value;
+}
+
 function assertNoUnresolvedOperationDb(db) {
   const unresolved = unresolvedOperationDb(db);
   if (unresolved) fail('GPR_UNRESOLVED_OPERATION', { operation_id: unresolved.operation_id, state: unresolved.state });
@@ -1301,18 +1658,22 @@ function operationPublic(row) {
   });
 }
 
+function leasePublic(row) {
+  return {
+    lease_id: row.lease_id,
+    fence_id: row.fence_id,
+    fence_sequence: row.fence_sequence,
+    issued_at: row.issued_at,
+    expires_at: row.expires_at
+  };
+}
+
 function allocationPublic(row) {
   return deepFreeze({
     allocation_id: row.allocation_id,
     run_id: row.run_id,
     lock: row.lock_id,
-    lease: {
-      lease_id: row.lease_id,
-      fence_id: row.fence_id,
-      fence_sequence: row.fence_sequence,
-      issued_at: row.issued_at,
-      expires_at: row.expires_at
-    }
+    lease: leasePublic(row)
   });
 }
 
@@ -1337,6 +1698,496 @@ function verifyFenceDb(db, state, now, options = {}) {
   if (released && !options.allowReleased) fail('GPR_STALE_FENCE');
   if (Date.parse(allocation.expires_at) <= Date.parse(now)) fail('GPR_EXPIRED_FENCE');
   return allocation;
+}
+
+function assertRecoveryEvidence(condition, details = {}) {
+  if (!condition) fail('GPR_RECOVERY_EVIDENCE_TAMPERED', details);
+}
+
+function leaseEventPublic(row) {
+  return {
+    event_id: row.event_id,
+    allocation_id: row.allocation_id,
+    event_type: row.event_type,
+    fence_sequence: row.fence_sequence,
+    event_at: row.event_at,
+    detail_digest: row.detail_digest,
+    event_digest: row.event_digest
+  };
+}
+
+function replacementEvidenceFromRow(row) {
+  return {
+    allocation_id: row.allocation_id,
+    run_id: row.run_id,
+    allocation_digest: row.allocation_digest,
+    run_digest: null,
+    lease_id: row.lease_id,
+    fence_id: row.fence_id,
+    fence_sequence: row.fence_sequence,
+    issued_at: row.issued_at,
+    expires_at: row.expires_at,
+    lease_digest: leaseDigestFromRow(row)
+  };
+}
+
+function buildAllocatorOwnedAllocation(input) {
+  const row = {
+    allocation_id: randomId('allocation'),
+    run_id: randomId('run'),
+    lock_id: input.lock,
+    lease_id: randomId('lease'),
+    fence_id: randomId('fence'),
+    fence_sequence: input.fenceSequence,
+    owner_instance_id: input.ownerInstanceId,
+    process_id: process.pid,
+    issued_at: input.issuedAt,
+    expires_at: input.expiresAt,
+    authority_json: canonicalSerialize(input.authority),
+    start_json: canonicalSerialize(input.start)
+  };
+  row.allocation_digest = digestValue({
+    allocation_id: row.allocation_id,
+    run_id: row.run_id,
+    lock: row.lock_id,
+    lease_id: row.lease_id,
+    fence_id: row.fence_id,
+    fence_sequence: row.fence_sequence,
+    owner_instance_id: row.owner_instance_id,
+    process_id: row.process_id,
+    issued_at: row.issued_at,
+    expires_at: row.expires_at,
+    authority: input.authority,
+    start: input.start
+  });
+  return row;
+}
+
+function insertAllocationAndRun(db, row, authority, start) {
+  db.prepare('INSERT INTO allocations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+    row.allocation_id, row.run_id, row.lock_id, row.lease_id, row.fence_id,
+    row.fence_sequence, row.owner_instance_id, row.process_id, row.issued_at,
+    row.expires_at, row.authority_json, row.start_json, row.allocation_digest
+  );
+  const run = {
+    run_id: row.run_id,
+    allocation_id: row.allocation_id,
+    lock: row.lock_id,
+    authority_digest: digestValue(authority),
+    start_digest: digestValue(start)
+  };
+  run.run_digest = digestValue(run);
+  db.prepare('INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?)').run(
+    run.run_id, run.allocation_id, run.lock, run.authority_digest,
+    run.start_digest, run.run_digest
+  );
+  return run;
+}
+
+function createOrphanRecoveryEvidence(request, requestDigest, target, replacement, recoveryAuthority, orphanAttestation) {
+  const requestBinding = orphanTakeoverRequestBinding(request);
+  const recovery = {
+    version: ORPHAN_RECOVERY_VERSION,
+    request_id: request.request_id,
+    request_digest: requestDigest,
+    target: clone(target),
+    request_binding: {
+      observed_start_digest: requestBinding.observed_start_digest,
+      recovery_authority_digest: requestBinding.recovery_authority_digest,
+      later_controlling_comment_ids_digest: requestBinding.later_controlling_comment_ids_digest,
+      orphan_attestation_digest: requestBinding.orphan_attestation_digest,
+      lease_ms: requestBinding.lease_ms
+    },
+    recovery_authority: recoveryAuthorityPublic(recoveryAuthority),
+    orphan_attestation: clone(orphanAttestation),
+    replacement: clone(replacement)
+  };
+  return validateRecoveryEvidence(recovery);
+}
+
+function committedOrphanRequestDb(db, requestId) {
+  const rows = db.prepare("SELECT run_id, canonical_json FROM receipts WHERE receipt_type = 'ORPHAN_ABANDONED'").all();
+  for (const row of rows) {
+    let receipt;
+    try { receipt = JSON.parse(row.canonical_json); } catch (_) { fail('GPR_RECEIPT_TAMPERED'); }
+    const recovery = validateRecoveryEvidence(receipt.payload && receipt.payload.recovery);
+    if (recovery.request_id === requestId) {
+      return { run_id: row.run_id, request_digest: recovery.request_digest };
+    }
+  }
+  return null;
+}
+
+function readOrphanTakeoverDb(db, config, runId) {
+  const allocation = db.prepare('SELECT * FROM allocations WHERE run_id = ?').get(runId);
+  if (!allocation) fail('GPR_RECOVERY_NOT_FOUND');
+  const run = db.prepare('SELECT * FROM runs WHERE run_id = ?').get(runId);
+  if (!run) fail('GPR_RECOVERY_EVIDENCE_TAMPERED');
+  const chain = readChainDb(db, runId);
+  const receipt = chain[chain.length - 1];
+  if (receipt.receipt_type !== 'ORPHAN_ABANDONED') fail('GPR_RECOVERY_NOT_COMMITTED');
+  const recovery = validateRecoveryEvidence(receipt.payload.recovery);
+  const target = recovery.target;
+  const priorChain = chain.slice(0, -1);
+  const authority = JSON.parse(allocation.authority_json);
+  const start = JSON.parse(allocation.start_json);
+  const inventory = operationInventoryDb(db, runId);
+  const highWater = db.prepare('SELECT high_water FROM coordination_state WHERE singleton = 1').get().high_water;
+  const oldAuthorityDigest = digestValue(authority);
+  const oldStartDigest = digestValue(start);
+  const oldLeaseDigest = leaseDigestFromRow(allocation);
+
+  assertRecoveryEvidence(run.allocation_id === allocation.allocation_id
+    && run.lock_id === allocation.lock_id
+    && run.authority_digest === oldAuthorityDigest
+    && run.start_digest === oldStartDigest, { reason: 'old-run-binding' });
+
+  assertRecoveryEvidence(target.repository === config.namespace.repository
+    && target.parent_issue === config.namespace.parent_issue
+    && target.child_issue === config.namespace.child_issue
+    && target.lock === allocation.lock_id
+    && target.run_id === allocation.run_id
+    && target.allocation_id === allocation.allocation_id
+    && target.allocation_digest === allocation.allocation_digest
+    && target.run_digest === run.run_digest
+    && target.receipt_tip_id === (priorChain.length ? priorChain[priorChain.length - 1].receipt_id : null)
+    && target.receipt_chain_digest === digestValue(priorChain)
+    && target.authority_digest === oldAuthorityDigest
+    && target.start_digest === oldStartDigest
+    && target.lease_digest === oldLeaseDigest
+    && target.operation_inventory_digest === inventory.digest
+    && target.operation_count === inventory.count
+    && target.namespace_unresolved_operation_count === 0
+    && inventory.count === 0, { reason: 'target-binding' });
+  assertRecoveryEvidence(priorChain.length > 0 && receipt.prior_receipt_id === target.receipt_tip_id, {
+    reason: 'receipt-tip-binding'
+  });
+
+  const recoveryAuthority = recovery.recovery_authority;
+  const recoveryAuthorityObject = clone(recoveryAuthority);
+  delete recoveryAuthorityObject.authority_digest;
+  assertRecoveryEvidence(recoveryAuthority.authority_digest === digestValue(recoveryAuthorityObject)
+    && recoveryAuthority.scope_digest === orphanTakeoverAuthorityScopeDigest(
+      target, recovery.orphan_attestation.attestation_digest, recovery.request_id
+    ), { reason: 'recovery-authority-binding' });
+  const attestation = recovery.orphan_attestation;
+  assertRecoveryEvidence(attestation.run_id === target.run_id
+    && attestation.allocation_id === target.allocation_id
+    && attestation.operation_count === 0
+    && attestation.namespace_unresolved_operation_count === 0
+    && attestation.operation_inventory_digest === target.operation_inventory_digest
+    && attestation.start_digest === target.start_digest, { reason: 'orphan-attestation-binding' });
+  const requestBinding = recovery.request_binding;
+  assertRecoveryEvidence(requestBinding.observed_start_digest === target.start_digest
+    && requestBinding.recovery_authority_digest === recoveryAuthority.authority_digest
+    && requestBinding.later_controlling_comment_ids_digest === digestValue([])
+    && requestBinding.orphan_attestation_digest === attestation.attestation_digest
+    && recovery.request_digest === digestValue({
+      request_id: recovery.request_id,
+      target,
+      observed_start_digest: requestBinding.observed_start_digest,
+      recovery_authority_digest: requestBinding.recovery_authority_digest,
+      later_controlling_comment_ids_digest: requestBinding.later_controlling_comment_ids_digest,
+      orphan_attestation_digest: requestBinding.orphan_attestation_digest,
+      lease_ms: requestBinding.lease_ms
+    }), { reason: 'request-binding' });
+
+  const replacementSequence = allocation.fence_sequence + 1;
+  const replacements = db.prepare('SELECT * FROM allocations WHERE fence_sequence = ?').all(replacementSequence);
+  assertRecoveryEvidence(replacements.length === 1, { reason: 'replacement-count' });
+  const replacement = replacements[0];
+  const replacementRun = db.prepare('SELECT * FROM runs WHERE run_id = ?').get(replacement.run_id);
+  assertRecoveryEvidence(replacement.lock_id === allocation.lock_id
+    && replacement.fence_sequence === replacementSequence
+    && replacementRun
+    && replacementRun.allocation_id === replacement.allocation_id
+    && replacementRun.lock_id === allocation.lock_id
+    && replacementRun.authority_digest === oldAuthorityDigest
+    && replacementRun.start_digest === oldStartDigest
+    && replacement.authority_json === allocation.authority_json
+    && replacement.start_json === allocation.start_json
+    && highWater === replacementSequence, { reason: 'replacement-fence' });
+  const replacementEvidence = replacementEvidenceFromRow(replacement);
+  replacementEvidence.run_digest = replacementRun.run_digest;
+  assertRecoveryEvidence(canonicalSerialize(recovery.replacement) === canonicalSerialize(replacementEvidence), {
+    reason: 'replacement-binding'
+  });
+  const replacementChain = readChainDb(db, replacement.run_id, true);
+
+  const releaseEvents = db.prepare(
+    "SELECT * FROM lease_events WHERE allocation_id = ? AND event_type = 'RELEASED' ORDER BY event_at, event_id"
+  ).all(allocation.allocation_id);
+  assertRecoveryEvidence(releaseEvents.length === 1
+    && releaseEvents[0].fence_sequence === allocation.fence_sequence
+    && releaseEvents[0].event_at === receipt.created_at
+    && releaseEvents[0].detail_digest === digestValue({
+      receipt_id: receipt.receipt_id,
+      receipt_type: 'ORPHAN_ABANDONED'
+    }), { reason: 'release-binding' });
+  const allocationEvents = db.prepare(
+    "SELECT * FROM lease_events WHERE allocation_id = ? AND event_type = 'ALLOCATED' ORDER BY event_at, event_id"
+  ).all(replacement.allocation_id);
+  assertRecoveryEvidence(allocationEvents.length === 1
+    && allocationEvents[0].fence_sequence === replacementSequence
+    && allocationEvents[0].event_at === replacement.issued_at
+    && allocationEvents[0].detail_digest === digestValue({
+      prior_allocation_id: allocation.allocation_id,
+      prior_fence_sequence: allocation.fence_sequence,
+      allocation_reason: ORPHAN_TAKEOVER_ACTION
+    }), { reason: 'allocation-event-binding' });
+
+  return deepFreeze({
+    status: 'COMMITTED',
+    request_id: recovery.request_id,
+    request_digest: recovery.request_digest,
+    recovery_receipt: receipt,
+    recovery,
+    old: {
+      allocation: allocationPublic(allocation),
+      allocation_digest: allocation.allocation_digest,
+      run_digest: run.run_digest,
+      authority_digest: oldAuthorityDigest,
+      start_digest: oldStartDigest,
+      lease_digest: oldLeaseDigest,
+      receipt_tip_id: target.receipt_tip_id,
+      receipt_chain_digest: target.receipt_chain_digest,
+      fence_sequence: allocation.fence_sequence,
+      fence_usable: false,
+      release_event: leaseEventPublic(releaseEvents[0])
+    },
+    replacement: {
+      allocation: allocationPublic(replacement),
+      allocation_digest: replacement.allocation_digest,
+      run_digest: replacementRun.run_digest,
+      lease_digest: leaseDigestFromRow(replacement),
+      fence_sequence: replacement.fence_sequence,
+      started: replacementChain.length > 0,
+      allocation_event: leaseEventPublic(allocationEvents[0])
+    },
+    high_water: highWater
+  });
+}
+
+function validateReadbackRequest(value) {
+  rejectCallerOwnedFields(value);
+  if (!exactKeys(value, RECOVERY_READBACK_KEYS)
+    || !isSafeId(value.run_id)
+    || !isSafeId(value.request_id)) {
+    fail('GPR_RECOVERY_READBACK_INVALID');
+  }
+  return clone(value);
+}
+
+function readOrphanTakeoverInternal(config, input) {
+  const readRequest = validateReadbackRequest(input);
+  const db = openVerified(config, false);
+  try {
+    const record = readOrphanTakeoverDb(db, config, readRequest.run_id);
+    if (record.request_id !== readRequest.request_id) fail('GPR_RECOVERY_REQUEST_NOT_FOUND');
+    return record;
+  } finally {
+    db.close();
+  }
+}
+
+function assertTakeoverTargetDb(db, config, allocation, run, chain, target) {
+  const prior = chain[chain.length - 1];
+  const authority = JSON.parse(allocation.authority_json);
+  const start = JSON.parse(allocation.start_json);
+  if (run.allocation_id !== allocation.allocation_id
+    || run.lock_id !== allocation.lock_id
+    || run.authority_digest !== digestValue(authority)
+    || run.start_digest !== digestValue(start)) {
+    fail('GPR_RECOVERY_TARGET_MISMATCH', { field: 'run_binding' });
+  }
+  const inventory = operationInventoryDb(db, allocation.run_id);
+  const unresolvedCount = unresolvedOperationCountDb(db);
+  if (unresolvedCount !== 0) fail('GPR_UNRESOLVED_OPERATION', { count: unresolvedCount });
+  if (inventory.count > 0) {
+    fail('GPR_RECOVERY_OPERATIONS_PRESENT', { count: inventory.count });
+  }
+  const expected = {
+    repository: config.namespace.repository,
+    parent_issue: config.namespace.parent_issue,
+    child_issue: config.namespace.child_issue,
+    lock: allocation.lock_id,
+    run_id: allocation.run_id,
+    allocation_id: allocation.allocation_id,
+    allocation_digest: allocation.allocation_digest,
+    run_digest: run.run_digest,
+    receipt_tip_id: prior.receipt_id,
+    receipt_chain_digest: digestValue(chain),
+    authority_digest: digestValue(authority),
+    start_digest: digestValue(start),
+    lease_digest: leaseDigestFromRow(allocation),
+    operation_inventory_digest: inventory.digest,
+    operation_count: inventory.count,
+    namespace_unresolved_operation_count: unresolvedCount
+  };
+  for (const key of ['repository', 'parent_issue', 'child_issue', 'lock', 'run_id', 'allocation_id',
+    'allocation_digest', 'run_digest', 'receipt_tip_id', 'receipt_chain_digest']) {
+    if (target[key] !== expected[key]) fail('GPR_RECOVERY_TARGET_MISMATCH', { field: key });
+  }
+  if (target.authority_digest !== expected.authority_digest) fail('GPR_RECOVERY_TARGET_MISMATCH', { field: 'authority_digest' });
+  if (target.start_digest !== expected.start_digest) fail('GPR_RECOVERY_SOURCE_CHANGED');
+  if (target.lease_digest !== expected.lease_digest) fail('GPR_RECOVERY_TARGET_MISMATCH', { field: 'lease_digest' });
+  if (target.operation_inventory_digest !== expected.operation_inventory_digest
+    || target.operation_count !== expected.operation_count) {
+    fail('GPR_RECOVERY_OPERATION_INVENTORY_CHANGED');
+  }
+  if (target.namespace_unresolved_operation_count !== expected.namespace_unresolved_operation_count) {
+    fail('GPR_UNRESOLVED_OPERATION', { count: unresolvedCount });
+  }
+  return { authority, start, inventory, unresolvedCount };
+}
+
+function takeoverAbandonedRunInternal(store, input) {
+  const { request, requestDigest } = validateTakeoverRequest(input, store.config);
+  const ownerInstanceId = randomId('owner');
+  const db = openVerified(store.config, false);
+  let outcome;
+  try {
+    outcome = transaction(db, () => {
+      const target = request.target;
+      const existingRequest = committedOrphanRequestDb(db, request.request_id);
+      if (existingRequest) {
+        if (existingRequest.run_id !== target.run_id || existingRequest.request_digest !== requestDigest) {
+          fail('GPR_RECOVERY_REQUEST_CONFLICT');
+        }
+        const committed = readOrphanTakeoverDb(db, store.config, target.run_id);
+        return { kind: 'duplicate', readback: committed };
+      }
+      const allocation = db.prepare('SELECT * FROM allocations WHERE allocation_id = ?').get(target.allocation_id);
+      if (!allocation || allocation.run_id !== target.run_id) fail('GPR_RECOVERY_TARGET_NOT_FOUND');
+      const run = db.prepare('SELECT * FROM runs WHERE run_id = ?').get(target.run_id);
+      if (!run) fail('GPR_RECOVERY_TARGET_NOT_FOUND');
+      const chain = readChainDb(db, target.run_id);
+      const prior = chain[chain.length - 1];
+
+      if (prior.receipt_type === 'ORPHAN_ABANDONED') {
+        const committed = readOrphanTakeoverDb(db, store.config, target.run_id);
+        fail('GPR_RECOVERY_LOST_RACE', { committed_request_id: committed.request_id });
+      }
+      if (TERMINAL_TYPES.includes(prior.receipt_type)) {
+        fail('GPR_RECOVERY_NOT_ELIGIBLE', { classification: 'TERMINAL' });
+      }
+      if (allocation.process_id === process.pid) fail('GPR_RECOVERY_CURRENT_PROCESS_OWNER');
+      if (db.prepare(
+        "SELECT 1 AS value FROM lease_events WHERE allocation_id = ? AND event_type = 'RELEASED' LIMIT 1"
+      ).get(allocation.allocation_id)) {
+        fail('GPR_RECOVERY_ALLOCATION_RELEASED');
+      }
+      const highWater = db.prepare('SELECT high_water FROM coordination_state WHERE singleton = 1').get().high_water;
+      if (highWater > allocation.fence_sequence) fail('GPR_RECOVERY_FENCED_BY_NEWER_ALLOCATION');
+      if (highWater !== allocation.fence_sequence) fail('GPR_RECOVERY_FENCE_MISMATCH');
+      const durable = assertTakeoverTargetDb(db, store.config, allocation, run, chain, target);
+      if (request.orphan_attestation.observed_at > isoAt()) fail('GPR_RECOVERY_ATTESTATION_INVALID');
+      const now = isoAt();
+      if (Date.parse(allocation.expires_at) <= Date.parse(now)) fail('GPR_RECOVERY_EXPIRED_RACE');
+      if (db.prepare('SELECT COUNT(*) AS value FROM allocations').get().value >= LIMITS.allocationsPerNamespace) {
+        fail('GPR_ALLOCATION_LIMIT');
+      }
+
+      const replacementRow = buildAllocatorOwnedAllocation({
+        lock: allocation.lock_id,
+        authority: durable.authority,
+        start: durable.start,
+        ownerInstanceId,
+        fenceSequence: allocation.fence_sequence + 1,
+        issuedAt: now,
+        expiresAt: isoAt(Date.parse(now) + request.lease_ms)
+      });
+      const replacementRun = {
+        run_id: replacementRow.run_id,
+        allocation_id: replacementRow.allocation_id,
+        lock: replacementRow.lock_id,
+        authority_digest: digestValue(durable.authority),
+        start_digest: digestValue(durable.start)
+      };
+      replacementRun.run_digest = digestValue(replacementRun);
+      const replacementEvidence = replacementEvidenceFromRow(replacementRow);
+      replacementEvidence.run_digest = replacementRun.run_digest;
+      const recovery = createOrphanRecoveryEvidence(
+        request,
+        requestDigest,
+        target,
+        replacementEvidence,
+        request.recovery_authority,
+        request.orphan_attestation
+      );
+      const orphanReceipt = createReceipt(allocation, store.config, {
+        receipt_type: 'ORPHAN_ABANDONED',
+        sequence: prior.sequence + 1,
+        prior_receipt_id: prior.receipt_id,
+        candidate: prior.candidate,
+        payload: {
+          classification: 'ORPHAN_ABANDONED',
+          reason_code: ORPHAN_TAKEOVER_ACTION,
+          recovery
+        },
+        created_at: now
+      });
+      validateReceiptChain([...chain, orphanReceipt]);
+      db.prepare('INSERT INTO receipts VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+        orphanReceipt.receipt_id, orphanReceipt.run_id, orphanReceipt.sequence,
+        orphanReceipt.receipt_type, orphanReceipt.prior_receipt_id,
+        canonicalSerialize(orphanReceipt), orphanReceipt.receipt_id
+      );
+      insertLeaseEvent(db, allocation, 'RELEASED', now, {
+        receipt_id: orphanReceipt.receipt_id,
+        receipt_type: orphanReceipt.receipt_type
+      });
+      const highWaterUpdate = db.prepare(
+        'UPDATE coordination_state SET high_water = ? WHERE singleton = 1 AND high_water = ?'
+      ).run(replacementRow.fence_sequence, allocation.fence_sequence);
+      if (highWaterUpdate.changes !== 1) fail('GPR_RECOVERY_FENCE_RACE');
+      insertAllocationAndRun(db, replacementRow, durable.authority, durable.start);
+      insertLeaseEvent(db, replacementRow, 'ALLOCATED', now, {
+        prior_allocation_id: allocation.allocation_id,
+        prior_fence_sequence: allocation.fence_sequence,
+        allocation_reason: ORPHAN_TAKEOVER_ACTION
+      });
+      return {
+        kind: 'committed',
+        replacementRow,
+        orphanReceipt
+      };
+    });
+  } finally {
+    db.close();
+  }
+  if (outcome.kind === 'duplicate') {
+    return {
+      status: 'DUPLICATE',
+      duplicate: true,
+      recovery: outcome.readback
+    };
+  }
+  const replacementSession = deepFreeze({
+    ...allocationPublic(outcome.replacementRow),
+    started: false
+  });
+  SESSION_OWNERS.set(replacementSession, {
+    storeInstanceId: store.instanceId,
+    ownerInstanceId,
+    processId: process.pid,
+    allocationId: outcome.replacementRow.allocation_id,
+    runId: outcome.replacementRow.run_id
+  });
+  const readback = readOrphanTakeoverInternal(store.config, {
+    run_id: outcome.orphanReceipt.run_id,
+    request_id: request.request_id
+  });
+  if (readback.request_digest !== requestDigest
+    || readback.replacement.allocation.allocation_id !== replacementSession.allocation_id) {
+    fail('GPR_READBACK_MISMATCH');
+  }
+  return {
+    status: 'COMMITTED',
+    duplicate: false,
+    recovery: readback,
+    replacement: replacementSession
+  };
 }
 
 function createReceipt(allocation, config, input) {
@@ -1372,6 +2223,9 @@ function createReceipt(allocation, config, input) {
 function appendReceiptInternal(store, session, input) {
   const state = sessionState(store, session);
   if (!isRecord(input) || !RECEIPT_TYPES.includes(input.receipt_type) || input.receipt_type === 'RUN_STARTED') fail('GPR_RECEIPT_INPUT_INVALID');
+  if (input.receipt_type === 'ORPHAN_ABANDONED' || input.payload && input.payload.recovery !== undefined) {
+    fail('GPR_RECOVERY_PATH_REQUIRED');
+  }
   if ('lease' in input || 'fence_id' in input || 'fence_sequence' in input || 'lease_id' in input) fail('GPR_CALLER_FENCE_FORBIDDEN');
   const createdAt = isoAt(input.created_at);
   const payload = validatePayload(input.payload);
@@ -1671,6 +2525,12 @@ function createProgrammeReceiptStore(options) {
         payload: input.payload || { classification: 'RUN_INTERRUPTED' },
         created_at: input.created_at
       });
+    },
+    takeoverAbandonedRun(request) {
+      return takeoverAbandonedRunInternal(store, request);
+    },
+    readOrphanTakeover(request) {
+      return readOrphanTakeoverInternal(config, request);
     },
     readReceiptChain(runId) {
       if (!isSafeId(runId)) fail('GPR_RUN_ID_INVALID');
@@ -1978,6 +2838,8 @@ module.exports = Object.freeze({
   BUSY_TIMEOUT_MS,
   LIMITS,
   MIN_NODE_VERSION,
+  ORPHAN_RECOVERY_VERSION,
+  ORPHAN_TAKEOVER_ACTION,
   OPERATION_KINDS,
   OPERATION_STATES,
   RECEIPT_TYPES,
@@ -1991,15 +2853,19 @@ module.exports = Object.freeze({
   digestValue,
   canonicalSerialize,
   namespaceDigest,
+  orphanTakeoverAuthorityScopeDigest,
+  orphanTakeoverRequestDigest,
   resolveDatabasePath,
   validateAuthority,
   validateCandidate,
   validateOperationDescriptor,
   validateOutcomeEvidence,
+  validateRecoveryEvidence,
   validateReceiptChain,
   validateReceiptObject,
   validateStart,
   validateVerificationPacket,
   validateVerifierProcessResult,
-  validateWindowsStorageProof
+  validateWindowsStorageProof,
+  verifierIdentityDigest
 });

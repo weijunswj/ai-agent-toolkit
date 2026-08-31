@@ -13,6 +13,8 @@ const repositoryRoot = path.resolve(__dirname, '../..');
 const {
   createProgrammeReceiptStore,
   digestValue,
+  RECEIPT_TYPES,
+  TERMINAL_TYPES,
   USER_VERSION,
   validateReceiptChain,
   validateReceiptObject
@@ -169,6 +171,22 @@ test('first allocation persists allocator-owned RUN_STARTED after mandatory fres
   assert.equal(session.run_started_receipt_id, chain[0].receipt_id);
   assert.equal(typeof store.performMutation, 'undefined');
   assert.equal(USER_VERSION, 2);
+});
+
+test('ORPHAN_ABANDONED is terminal but ordinary receipt APIs cannot create it', async () => {
+  const { store, session } = await startedStore();
+  assert.ok(RECEIPT_TYPES.includes('ORPHAN_ABANDONED'));
+  assert.ok(TERMINAL_TYPES.includes('ORPHAN_ABANDONED'));
+  assertCode(() => store.appendReceipt(session, {
+    receipt_type: 'ORPHAN_ABANDONED',
+    payload: { classification: 'ORPHAN_ABANDONED' },
+    created_at: nowIso()
+  }), 'GPR_RECOVERY_PATH_REQUIRED');
+  assertCode(() => store.interruptRun(session, {
+    payload: { classification: 'ORPHAN_ABANDONED', recovery: {} },
+    created_at: nowIso()
+  }), 'GPR_RECOVERY_PATH_REQUIRED');
+  assert.equal(store.readReceiptChain(session.run_id).length, 1);
 });
 
 test('truthful pre-PR start rejects fake candidate and start movement', async () => {
