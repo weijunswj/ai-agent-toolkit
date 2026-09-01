@@ -4,9 +4,61 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const childProcess = require('node:child_process');
 const { DatabaseSync } = require('node:sqlite');
 const test = require('node:test');
+
+const nativeSpawnSync = childProcess.spawnSync;
+let recoveryHostFixture = null;
+
+function commandResult(status, stdout = '', stderr = '') {
+  return { status, stdout, stderr, signal: null, error: undefined };
+}
+
+childProcess.spawnSync = (command, args, spawnOptions) => {
+  const fixture = recoveryHostFixture;
+  if (!fixture) return nativeSpawnSync(command, args, spawnOptions);
+  if (Array.isArray(args) && args.includes('verify-recovery-admission')) {
+    const env = {
+      ...childEnvironment(),
+      ...(spawnOptions && spawnOptions.env ? spawnOptions.env : {}),
+      NODE_OPTIONS: '--require=' + fixture.verifierPreload,
+      GPR_TEST_RECOVERY_FIXTURE: JSON.stringify(fixture)
+    };
+    return nativeSpawnSync(command, args, { ...spawnOptions, env });
+  }
+  const commandName = typeof command === 'string'
+    ? path.basename(command).replace(/\.(?:exe|cmd)$/i, '').toLowerCase()
+    : '';
+  if (commandName === 'gh') {
+    if (fixture.transportFailure === 'authority') return commandResult(1, '', 'unavailable');
+    const endpoint = args.find((value, index) => index > 0 && typeof value === 'string' && value.startsWith('repos/')) || '';
+    if (endpoint.includes('/issues/comments/')) {
+      const id = Number(endpoint.split('/').at(-1));
+      const comment = id === fixture.childComment.id ? fixture.childComment : fixture.parentComment;
+      return commandResult(0, JSON.stringify(fixture.malformedAuthority ? {} : comment));
+    }
+    return commandResult(0, JSON.stringify([fixture.comments]));
+  }
+  if (commandName === 'git') {
+    if (fixture.transportFailure === 'start') return commandResult(1, '', 'unavailable');
+    const gitArgs = args.slice(2);
+    const startSnapshot = fixture.start;
+    const key = gitArgs.join(' ');
+    if (key === 'status --porcelain=v1') return commandResult(0, '');
+    if (key === 'merge-base HEAD origin/main') return commandResult(0, `${startSnapshot.base_sha}\n`);
+    if (key === 'rev-parse HEAD') return commandResult(0, `${startSnapshot.head_sha}\n`);
+    if (key === 'rev-parse HEAD^{tree}') return commandResult(0, `${startSnapshot.tree_sha}\n`);
+    if (key === 'symbolic-ref --quiet --short HEAD') {
+      return startSnapshot.ref.detached
+        ? commandResult(1)
+        : commandResult(0, `${startSnapshot.ref.name}\n`);
+    }
+  }
+  return nativeSpawnSync(command, args, spawnOptions);
+};
+
+const { spawn, spawnSync } = childProcess;
 
 const runtimePath = path.resolve(__dirname, '../scripts/toolkit-github-program-receipt.cjs');
 const repositoryRoot = path.resolve(__dirname, '../..');
@@ -16,12 +68,15 @@ const {
   canonicalSerialize,
   createProgrammeReceiptStore,
   digestValue,
+  orphanTakeoverAuthorityScopeDigest,
+  verifierIdentityDigest,
   validateOperationDescriptor,
   validateVerifierProcessResult,
   validateWindowsStorageProof
 } = require(runtimePath);
 
 const cleanupRoots = new Set();
+const liveChildren = new Set();
 
 function secureWindowsDirectory(root) {
   if (process.platform !== 'win32') return;
@@ -55,6 +110,8 @@ function nowIso() {
 }
 
 test.afterEach(() => {
+  for (const child of liveChildren) child.kill();
+  liveChildren.clear();
   for (const root of cleanupRoots) fs.rmSync(root, { recursive: true, force: true });
   cleanupRoots.clear();
 });
@@ -299,6 +356,581 @@ async function admittedFixture(overrides = {}) {
   const readersForOperation = overrides.trustedReaders || trustedReaders(base.expectedAuthority, operationDescriptor);
   const admission = await base.store.admitMutationOperation(base.session, operationDescriptor, readersForOperation);
   return { ...base, operationDescriptor, readersForOperation, admission };
+}
+
+function orphanFixture(overrides = {}) {
+  const root = stateRoot();
+  const storeOptions = options(root);
+  const expectedAuthority = overrides.authority || authority(overrides.seed || 'orphan');
+  const expectedStart = overrides.start || start();
+  const leaseMs = overrides.lease_ms || 60000;
+  const operationState = overrides.operationState || null;
+  const operationDescriptor = operationState ? (overrides.descriptor || descriptor()) : null;
+  const childCode = `
+    const runtime = require(${JSON.stringify(runtimePath)});
+    const auth = ${JSON.stringify(expectedAuthority)};
+    const start = ${JSON.stringify(expectedStart)};
+    const operationState = ${JSON.stringify(operationState)};
+    const operationDescriptor = ${JSON.stringify(operationDescriptor)};
+    function outcomeEvidence(operation, classification) {
+      const evidence = {
+        operation_id: operation.operation_id,
+        logical_operation_digest: operation.logical_operation_digest,
+        adapter_identity_digest: operation.adapter_identity_digest,
+        target_identity: operation.target_identity,
+        target_digest: operation.target_digest,
+        provider_operation_key: operation.provider_operation_key,
+        cas_digest: operation.cas_digest,
+        classification,
+        observed_post_state_digest: classification === 'APPLIED' ? operation.expected_post_state_digest : null,
+        rejection_digest: classification === 'NOT_APPLIED' ? runtime.digestValue('definitive-pre-effect-rejection') : null,
+        delayed_completion_excluded: classification === 'NOT_APPLIED',
+        evidence_at: new Date().toISOString(),
+        evidence_digest: ''
+      };
+      const digestInput = structuredClone(evidence);
+      delete digestInput.evidence_digest;
+      evidence.evidence_digest = runtime.digestValue(digestInput);
+      return evidence;
+    }
+    (async () => {
+      const store = runtime.createProgrammeReceiptStore(${JSON.stringify(storeOptions)});
+      const session = await store.startRun({
+        lock: ${JSON.stringify(overrides.lock || 'LOCK-ORPHAN')},
+        authority: auth,
+        start,
+        candidate: null,
+        lease_ms: ${leaseMs}
+      }, {
+        readAuthority: async () => ({ authority: auth, later_controlling_comments: [] }),
+        readStart: async () => start
+      });
+      if (operationDescriptor) {
+        const admission = await store.admitMutationOperation(session, operationDescriptor, {
+          readAuthority: async () => ({ authority: auth, later_controlling_comments: [] }),
+          readSource: async () => ({
+            source_digest: operationDescriptor.expected_source_digest,
+            cas_digest: operationDescriptor.cas_digest
+          }),
+          verifyOutcomeEvidence: async (evidence) => structuredClone(evidence)
+        });
+        const operation = await store.authorizeMutationDispatch(session, admission);
+        if (operationState !== 'IN_FLIGHT') {
+          await store.recordMutationOutcome(session, admission, outcomeEvidence(operation, operationState));
+        }
+      }
+      process.stdout.write(JSON.stringify({ run_id: session.run_id, allocation_id: session.allocation_id }));
+    })().catch((error) => {
+      process.stderr.write(error.code || error.message);
+      process.exitCode = 1;
+    });
+  `;
+  const child = spawnSync(process.execPath, ['--no-warnings', '-e', childCode], {
+    cwd: repositoryRoot, encoding: 'utf8', windowsHide: true
+  });
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(child.stderr, '');
+  const identifiers = JSON.parse(child.stdout);
+  const store = createProgrammeReceiptStore(storeOptions);
+  return {
+    store,
+    storeOptions,
+    expectedAuthority,
+    expectedStart,
+    oldRunId: identifiers.run_id,
+    oldAllocationId: identifiers.allocation_id
+  };
+}
+
+function orphanTarget(current) {
+  const db = new DatabaseSync(current.store.databasePath, { readOnly: true });
+  const allocation = db.prepare('SELECT * FROM allocations WHERE allocation_id = ? AND run_id = ?')
+    .get(current.oldAllocationId, current.oldRunId);
+  const run = db.prepare('SELECT * FROM runs WHERE run_id = ?').get(current.oldRunId);
+  const startSnapshot = JSON.parse(allocation.start_json);
+  db.close();
+  const chain = current.store.readReceiptChain(current.oldRunId);
+  return {
+    repository: current.storeOptions.repository,
+    parent_issue: current.storeOptions.parent_issue,
+    child_issue: current.storeOptions.child_issue,
+    lock: allocation.lock_id,
+    run_id: allocation.run_id,
+    allocation_id: allocation.allocation_id,
+    allocation_digest: allocation.allocation_digest,
+    run_digest: run.run_digest,
+    receipt_tip_id: chain.at(-1).receipt_id,
+    receipt_chain_digest: digestValue(chain),
+    authority_digest: digestValue(JSON.parse(allocation.authority_json)),
+    start_digest: digestValue(startSnapshot),
+    lease_digest: digestValue({
+      lease_id: allocation.lease_id,
+      fence_id: allocation.fence_id,
+      fence_sequence: allocation.fence_sequence,
+      issued_at: allocation.issued_at,
+      expires_at: allocation.expires_at
+    }),
+    operation_inventory_digest: digestValue([]),
+    operation_count: 0,
+    namespace_unresolved_operation_count: 0
+  };
+}
+
+function takeoverRequest(current, overrides = {}) {
+  const base = orphanTarget(current);
+  const target = { ...base, ...(overrides.target || {}) };
+  const requestId = overrides.request_id || ('recovery-request-' + process.pid + '-' + Date.now());
+  const observedStart = structuredClone(overrides.observed_start || current.expectedStart);
+  const attestationInput = {
+    attestation_id: overrides.attestation_id || ('orphan-attestation-' + process.pid + '-' + Date.now()),
+    run_id: target.run_id,
+    allocation_id: target.allocation_id,
+    observed_at: new Date().toISOString(),
+    holder_nonadoptable: true,
+    operation_count: 0,
+    namespace_unresolved_operation_count: 0,
+    operation_inventory_digest: target.operation_inventory_digest,
+    start_digest: target.start_digest,
+    verifier_identity_digest: verifierIdentityDigest(),
+    ...(overrides.orphan_attestation || {})
+  };
+  delete attestationInput.attestation_digest;
+  attestationInput.attestation_digest = digestValue(attestationInput);
+  const recoveryAuthority = {
+    ...authority(overrides.recovery_authority_seed || 'recovery'),
+    ...(overrides.recovery_authority || {})
+  };
+  const recoveryBody = `recovery-authority:${requestId}`;
+  recoveryAuthority.body_digest = digestValue(recoveryBody);
+  recoveryAuthority.update_identity_digest = digestValue({
+    comment_id: recoveryAuthority.child_comment_id,
+    node_id: recoveryAuthority.node_id,
+    updated_at: recoveryAuthority.updated_at
+  });
+  if (!Object.prototype.hasOwnProperty.call(overrides.recovery_authority || {}, 'scope_digest')) {
+    recoveryAuthority.scope_digest = orphanTakeoverAuthorityScopeDigest(
+      target, attestationInput.attestation_digest, requestId
+    );
+  }
+  return {
+    request_id: requestId,
+    target,
+    observed_start: observedStart,
+    recovery_authority: recoveryAuthority,
+    later_controlling_comment_ids: overrides.later_controlling_comment_ids || [],
+    orphan_attestation: attestationInput,
+    lease_ms: overrides.lease_ms || 60000
+  };
+}
+
+function recoveryFixture(current, request, overrides = {}) {
+  const authoritySnapshot = request.recovery_authority;
+  const childComment = {
+    id: authoritySnapshot.child_comment_id,
+    node_id: authoritySnapshot.node_id,
+    user: { login: authoritySnapshot.author_login },
+    author_association: authoritySnapshot.author_association,
+    body: `recovery-authority:${request.request_id}`,
+    updated_at: authoritySnapshot.updated_at,
+    issue_url: `https://api.github.com/repos/weijunswj/ai-agent-toolkit/issues/${current.storeOptions.child_issue}`
+  };
+  const fixture = {
+    childComment,
+    parentComment: {
+      id: authoritySnapshot.parent_comment_id,
+      node_id: `IC_parent_${request.request_id}`,
+      user: { login: authoritySnapshot.author_login },
+      author_association: 'OWNER',
+      body: `Parent mirror of child comment ${authoritySnapshot.child_comment_id}`,
+      updated_at: authoritySnapshot.updated_at,
+      issue_url: `https://api.github.com/repos/weijunswj/ai-agent-toolkit/issues/${current.storeOptions.parent_issue}`
+    },
+    comments: [childComment, ...(overrides.laterComments || [])],
+    start: structuredClone(overrides.start || current.expectedStart),
+    malformedAuthority: overrides.malformedAuthority === true,
+    transportFailure: overrides.transportFailure || null
+  };
+  const verifierPreload = path.join(current.storeOptions.stateRoot, 'recovery-verifier-preload.cjs');
+  const verifierCode = [
+    "'use strict';",
+    "const childProcess = require('node:child_process');",
+    "const path = require('node:path');",
+    "const nativeSpawnSync = childProcess.spawnSync;",
+    "const fixture = JSON.parse(process.env.GPR_TEST_RECOVERY_FIXTURE);",
+    "const commandResult = (status, stdout = '', stderr = '') => ({ status, stdout, stderr, signal: null, error: undefined });",
+    "const commandName = (command) => typeof command === 'string' ? path.basename(command).replace(/\\.(?:exe|cmd)$/i, '').toLowerCase() : '';",
+    "childProcess.spawnSync = (command, args, spawnOptions) => {",
+    "  const name = commandName(command);",
+    "  if (name === 'gh') {",
+    "    if (fixture.transportFailure === 'authority') return commandResult(1, '', 'unavailable');",
+    "    const endpoint = args.find((value, index) => index > 0 && typeof value === 'string' && value.startsWith('repos/')) || '';",
+    "    if (endpoint.includes('/issues/comments/')) {",
+    "      const id = Number(endpoint.split('/').at(-1));",
+    "      const comment = id === fixture.childComment.id ? fixture.childComment : fixture.parentComment;",
+    "      return commandResult(0, JSON.stringify(fixture.malformedAuthority ? {} : comment));",
+    "    }",
+    "    return commandResult(0, JSON.stringify([fixture.comments]));",
+    "  }",
+    "  if (name === 'git') {",
+    "    if (fixture.transportFailure === 'start') return commandResult(1, '', 'unavailable');",
+    "    const key = args.slice(2).join(' ');",
+    "    if (key === 'status --porcelain=v1') return commandResult(0, '');",
+    "    if (key === 'merge-base HEAD origin/main') return commandResult(0, fixture.start.base_sha + '\\n');",
+    "    if (key === 'rev-parse HEAD') return commandResult(0, fixture.start.head_sha + '\\n');",
+    "    if (key === 'rev-parse HEAD^{tree}') return commandResult(0, fixture.start.tree_sha + '\\n');",
+    "    if (key === 'symbolic-ref --quiet --short HEAD') return fixture.start.ref.detached ? commandResult(1) : commandResult(0, fixture.start.ref.name + '\\n');",
+    "    return commandResult(2, '', 'unexpected git request');",
+    "  }",
+    "  return nativeSpawnSync(command, args, spawnOptions);",
+    "};"
+  ].join('\n');
+  fs.writeFileSync(verifierPreload, verifierCode, { mode: 0o700 });
+  return {
+    ...fixture,
+    verifierPreload
+  };
+}
+
+async function recoveryAdmission(current, request, overrides = {}) {
+  recoveryHostFixture = recoveryFixture(current, request, overrides);
+  try {
+    return await current.store.verifyRecoveryAdmission(request);
+  } finally {
+    recoveryHostFixture = null;
+  }
+}
+
+async function takeoverWithAdmission(current, request, overrides = {}) {
+  const admission = await recoveryAdmission(current, request, overrides);
+  return current.store.takeoverAbandonedRun(request, admission);
+}
+
+function ledgerCounts(store) {
+  const db = new DatabaseSync(store.databasePath, { readOnly: true });
+  const counts = {};
+  for (const table of ['allocations', 'runs', 'receipts', 'lease_events', 'mutation_operations', 'mutation_operation_events']) {
+    counts[table] = db.prepare(`SELECT COUNT(*) AS value FROM ${table}`).get().value;
+  }
+  counts.high_water = db.prepare('SELECT high_water FROM coordination_state WHERE singleton = 1').get().high_water;
+  db.close();
+  return counts;
+}
+
+function childEnvironment() {
+  const env = { ...process.env };
+  delete env.PSModulePath;
+  return env;
+}
+
+function takeoverInChild(current, request) {
+  return new Promise((resolve, reject) => {
+    const code = `
+      const runtime = require(${JSON.stringify(runtimePath)});
+      (async () => {
+        const store = runtime.createProgrammeReceiptStore(${JSON.stringify(current.storeOptions)});
+        const request = ${JSON.stringify(request)};
+        const result = await store.takeoverAbandonedRun(request, {
+          readAuthority: async () => ({ authority: request.recovery_authority, later_controlling_comments: [] }),
+          readStart: async () => (${JSON.stringify(current.expectedStart)}),
+          readOrphanStatus: async () => ({
+            status: 'ORPHAN_NONADOPTABLE',
+            orphan_attestation: request.orphan_attestation
+          })
+        });
+        process.stdout.write(JSON.stringify({
+          ok: true,
+          status: result.status,
+          duplicate: result.duplicate,
+          request_id: result.recovery.request_id,
+          replacement_run_id: result.recovery.replacement.allocation.run_id
+        }));
+      })().catch((error) => {
+        process.stdout.write(JSON.stringify({ ok: false, code: error.code || error.message }));
+      });
+    `;
+    const child = spawn(process.execPath, ['--no-warnings', '-e', code], {
+      cwd: repositoryRoot,
+      env: childEnvironment(),
+      windowsHide: true
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', (status) => {
+      try {
+        resolve({ status, stdout: JSON.parse(stdout), stderr });
+      } catch (error) {
+        reject(new Error(`takeover child failed: status=${status} stdout=${stdout} stderr=${stderr}`, { cause: error }));
+      }
+    });
+  });
+}
+
+function substitutedVerifierTransportInChild(current, request) {
+  const attackerRoot = path.join(current.storeOptions.stateRoot, 'attacker-transport');
+  fs.mkdirSync(attackerRoot, { recursive: true, mode: 0o700 });
+  const verifierScript = path.join(attackerRoot, 'attacker-preload.cjs');
+  const transportMarker = path.join(attackerRoot, 'transport.log');
+  const verifierCode = `
+    const childProcess = require('node:child_process');
+    const fs = require('node:fs');
+    const nativeSpawnSync = childProcess.spawnSync;
+    const request = JSON.parse(process.env.GPR_ATTACK_REQUEST);
+    const commandResult = (status, stdout = '', stderr = '') => ({
+      status, stdout, stderr, signal: null, error: undefined
+    });
+    const log = (command) => fs.appendFileSync(process.env.GPR_ATTACK_MARKER, command + '\\n');
+    childProcess.spawnSync = (command, args, spawnOptions) => {
+      if (command === 'gh') {
+        log('gh');
+        const endpoint = args[1] || '';
+        const authority = request.recovery_authority;
+        const childComment = {
+          id: authority.child_comment_id,
+          node_id: authority.node_id,
+          user: { login: authority.author_login },
+          author_association: 'OWNER',
+          body: 'recovery-authority:' + request.request_id,
+          updated_at: authority.updated_at,
+          issue_url: 'https://api.github.com/repos/weijunswj/ai-agent-toolkit/issues/359'
+        };
+        const parentComment = {
+          id: authority.parent_comment_id,
+          node_id: 'IC_attacker-parent',
+          user: { login: authority.author_login },
+          author_association: 'OWNER',
+          body: 'Parent mirror of child comment ' + authority.child_comment_id,
+          updated_at: authority.updated_at,
+          issue_url: 'https://api.github.com/repos/weijunswj/ai-agent-toolkit/issues/240'
+        };
+        if (endpoint.includes('/issues/comments/')) {
+          const id = Number(endpoint.split('/').at(-1));
+          return commandResult(0, JSON.stringify(id === childComment.id ? childComment : parentComment));
+        }
+        return commandResult(0, JSON.stringify([[childComment]]));
+      }
+      if (command === 'git') {
+        const key = args.slice(2).join(' ');
+        log('git:' + key);
+        if (key === 'status --porcelain=v1') return commandResult(0, '');
+        if (key === 'merge-base HEAD origin/main') return commandResult(0, request.observed_start.base_sha + '\\n');
+        if (key === 'rev-parse HEAD') return commandResult(0, request.observed_start.head_sha + '\\n');
+        if (key === 'rev-parse HEAD^{tree}') return commandResult(0, request.observed_start.tree_sha + '\\n');
+        if (key === 'symbolic-ref --quiet --short HEAD') return commandResult(1);
+        return commandResult(2, '', 'unexpected git request');
+      }
+      return nativeSpawnSync(command, args, spawnOptions);
+    };
+  `;
+  fs.writeFileSync(verifierScript, verifierCode, { mode: 0o700 });
+  return new Promise((resolve, reject) => {
+    const code = `
+      const runtime = require(${JSON.stringify(runtimePath)});
+      (async () => {
+        const store = runtime.createProgrammeReceiptStore(${JSON.stringify(current.storeOptions)});
+        const request = JSON.parse(process.env.GPR_ATTACK_REQUEST);
+        let phase = 'admission';
+        try {
+          const admission = await store.verifyRecoveryAdmission(request);
+          phase = 'takeover';
+          const result = await store.takeoverAbandonedRun(request, admission);
+          process.stdout.write(JSON.stringify({ ok: true, phase, status: result.status }));
+        } catch (error) {
+          process.stdout.write(JSON.stringify({ ok: false, phase, code: error.code || error.message }));
+        }
+      })().catch((error) => {
+        process.stdout.write(JSON.stringify({ ok: false, phase: 'admission', code: error.code || error.message }));
+      });
+    `;
+    const env = {
+      ...childEnvironment(),
+      NODE_OPTIONS: '--require=' + verifierScript,
+      PATH: attackerRoot + path.delimiter + (process.env.PATH || ''),
+      GH_HOST: 'attacker.invalid',
+      GIT_CONFIG_GLOBAL: path.join(attackerRoot, 'attacker-gitconfig'),
+      GIT_DIR: path.join(attackerRoot, 'attacker-git-dir'),
+      GIT_WORK_TREE: path.join(attackerRoot, 'attacker-git-work-tree'),
+      GPR_ATTACK_MARKER: transportMarker,
+      GPR_ATTACK_REQUEST: JSON.stringify(request)
+    };
+    const child = spawn(process.execPath, ['--no-warnings', '-e', code], {
+      cwd: repositoryRoot,
+      env,
+      windowsHide: true
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', (status) => {
+      try {
+        const transport = fs.existsSync(transportMarker)
+          ? fs.readFileSync(transportMarker, 'utf8').trim().split(/\r?\n/).filter(Boolean)
+          : [];
+        resolve({ status, stdout: JSON.parse(stdout), stderr, transport });
+      } catch (error) {
+        reject(new Error('verifier substitution child failed: status=' + status
+          + ' stdout=' + stdout + ' stderr=' + stderr, { cause: error }));
+      }
+    });
+  });
+}
+
+test('foreign process cannot substitute gh/git transport to mint recovery admission or commit takeover', async () => {
+  const current = orphanFixture({ seed: 'foreign-transport-substitution', lock: 'LOCK-FOREIGN-TRANSPORT' });
+  const request = takeoverRequest(current, { request_id: 'recovery-foreign-transport-substitution' });
+  const before = ledgerCounts(current.store);
+  const result = await substitutedVerifierTransportInChild(current, request);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual({
+    admissionRejected: result.stdout.ok === false && result.stdout.phase === 'admission',
+    transport: result.transport
+  }, {
+    admissionRejected: true,
+    transport: []
+  });
+  assert.deepEqual(ledgerCounts(current.store), before);
+});
+
+function liveOrphanFixture(overrides = {}) {
+  return new Promise((resolve, reject) => {
+    const root = stateRoot();
+    const storeOptions = options(root);
+    const expectedAuthority = overrides.authority || authority(overrides.seed || 'live-orphan');
+    const expectedStart = overrides.start || start();
+    const operationDescriptor = descriptor();
+    const childCode = `
+      const runtime = require(${JSON.stringify(runtimePath)});
+      const auth = ${JSON.stringify(expectedAuthority)};
+      const start = ${JSON.stringify(expectedStart)};
+      const operationDescriptor = ${JSON.stringify(operationDescriptor)};
+      let session;
+      let store;
+      const commands = [];
+      let busy = false;
+      function outcome(value) {
+        process.stdout.write(JSON.stringify(value) + '\\n');
+      }
+      async function handle(command) {
+        if (command === 'append') {
+          try {
+            store.appendReceipt(session, {
+              receipt_type: 'TRANSITION_PREVIEW',
+              payload: { classification: 'OLD_HOLDER_APPEND' },
+              created_at: new Date().toISOString()
+            });
+            outcome({ command, ok: true });
+          } catch (error) {
+            outcome({ command, ok: false, code: error.code || error.message });
+          }
+        } else if (command === 'operation') {
+          try {
+            const admission = await store.admitMutationOperation(session, operationDescriptor, {
+              readAuthority: async () => ({ authority: auth, later_controlling_comments: [] }),
+              readSource: async () => ({
+                source_digest: operationDescriptor.expected_source_digest,
+                cas_digest: operationDescriptor.cas_digest
+              }),
+              verifyOutcomeEvidence: async (evidence) => evidence
+            });
+            outcome({ command, ok: true, operation_id: admission.operation_id });
+          } catch (error) {
+            outcome({ command, ok: false, code: error.code || error.message });
+          }
+        } else if (command === 'close') {
+          outcome({ command, ok: true });
+          process.exit(0);
+        }
+      }
+      process.stdin.setEncoding('utf8');
+      process.stdin.on('data', (chunk) => {
+        commands.push(...chunk.split(/\\r?\\n/).filter(Boolean));
+        if (busy) return;
+        busy = true;
+        (async () => {
+          while (commands.length) await handle(commands.shift());
+          busy = false;
+        })().catch((error) => {
+          outcome({ ok: false, code: error.code || error.message });
+          process.exit(1);
+        });
+      });
+      (async () => {
+        store = runtime.createProgrammeReceiptStore(${JSON.stringify(storeOptions)});
+        session = await store.startRun({
+          lock: ${JSON.stringify(overrides.lock || 'LOCK-LIVE-ORPHAN')},
+          authority: auth,
+          start,
+          candidate: null,
+          lease_ms: ${overrides.lease_ms || 60000}
+        }, {
+          readAuthority: async () => ({ authority: auth, later_controlling_comments: [] }),
+          readStart: async () => start
+        });
+        outcome({ ready: true, run_id: session.run_id, allocation_id: session.allocation_id });
+      })().catch((error) => {
+        process.stderr.write(error.code || error.message);
+        process.exit(1);
+      });
+    `;
+    const child = spawn(process.execPath, ['--no-warnings', '-e', childCode], {
+      cwd: repositoryRoot,
+      env: childEnvironment(),
+      windowsHide: true
+    });
+    liveChildren.add(child);
+    const messages = [];
+    const waiters = [];
+    let buffer = '';
+    const flush = () => {
+      while (true) {
+        const newline = buffer.indexOf('\n');
+        if (newline < 0) return;
+        const line = buffer.slice(0, newline).trim();
+        buffer = buffer.slice(newline + 1);
+        if (!line) continue;
+        const message = JSON.parse(line);
+        const waiter = waiters.shift();
+        if (waiter) waiter(message);
+        else messages.push(message);
+      }
+    };
+    child.stdout.on('data', (chunk) => {
+      buffer += chunk;
+      flush();
+    });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    const close = new Promise((resolveClose) => child.on('close', (status) => {
+      liveChildren.delete(child);
+      resolveClose({ status, stderr });
+    }));
+    child.on('error', reject);
+    const nextMessage = () => messages.length
+      ? Promise.resolve(messages.shift())
+      : new Promise((resolveMessage) => waiters.push(resolveMessage));
+    nextMessage().then((ready) => {
+      if (!ready.ready) {
+        reject(new Error('live orphan holder did not become ready'));
+        return;
+      }
+      resolve({
+        store: createProgrammeReceiptStore(storeOptions),
+        storeOptions,
+        expectedAuthority,
+        expectedStart,
+        oldRunId: ready.run_id,
+        oldAllocationId: ready.allocation_id,
+        child,
+        nextMessage,
+        close
+      });
+    }).catch(reject);
+  });
 }
 
 function verificationPacket(overrides = {}) {
@@ -1047,4 +1679,481 @@ test('lost supervisor ownership cannot append or obtain operation admission', as
   const operationDescriptor = descriptor();
   await assertCodeAsync(() => store.admitMutationOperation(impostor, operationDescriptor,
     trustedReaders(expectedAuthority, operationDescriptor)), 'GPR_OWNERSHIP_LOST');
+});
+
+test('foreign process cannot self-certify orphan takeover with echo callbacks', async () => {
+  const current = orphanFixture({ seed: 'foreign-echo-attack', lock: 'LOCK-FOREIGN-ECHO' });
+  const request = takeoverRequest(current, { request_id: 'recovery-foreign-echo-attack' });
+  const before = ledgerCounts(current.store);
+  const result = await takeoverInChild(current, request);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.stdout, { ok: false, code: 'GPR_RECOVERY_ADMISSION_INVALID' });
+  assert.deepEqual(ledgerCounts(current.store), before);
+});
+
+test('lookalike recovery capabilities and serialized authority are rejected with zero writes', async () => {
+  const current = orphanFixture({ seed: 'lookalike-capability', lock: 'LOCK-LOOKALIKE' });
+  const request = takeoverRequest(current, { request_id: 'recovery-lookalike-capability' });
+  const before = ledgerCounts(current.store);
+  const genuine = await recoveryAdmission(current, request);
+
+  assertCode(() => JSON.stringify(genuine), 'GPR_RECOVERY_ADMISSION_NONSERIALIZABLE');
+  for (const lookalike of [{}, { request_id: request.request_id }, structuredClone({})]) {
+    await assertCodeAsync(() => current.store.takeoverAbandonedRun(request, lookalike),
+      'GPR_RECOVERY_ADMISSION_INVALID');
+    assert.deepEqual(ledgerCounts(current.store), before);
+  }
+});
+
+test('recovery admission binds exact store, request digest, namespace, lock, and target', async () => {
+  const current = orphanFixture({ seed: 'capability-binding', lock: 'LOCK-CAPABILITY-BINDING' });
+  const request = takeoverRequest(current, { request_id: 'recovery-capability-binding' });
+  const admission = await recoveryAdmission(current, request);
+  const before = ledgerCounts(current.store);
+
+  const reopened = createProgrammeReceiptStore(current.storeOptions);
+  await assertCodeAsync(() => reopened.takeoverAbandonedRun(request, admission), 'GPR_RECOVERY_ADMISSION_INVALID');
+
+  const alteredDigest = structuredClone(request);
+  alteredDigest.lease_ms += 1;
+  await assertCodeAsync(() => current.store.takeoverAbandonedRun(alteredDigest, admission),
+    'GPR_RECOVERY_ADMISSION_INVALID');
+
+  const alteredTarget = takeoverRequest(current, {
+    request_id: 'recovery-capability-binding-other-target',
+    target: { run_id: 'run-other', allocation_id: 'allocation-other', lock: 'LOCK-OTHER' }
+  });
+  await assertCodeAsync(() => current.store.takeoverAbandonedRun(alteredTarget, admission),
+    'GPR_RECOVERY_ADMISSION_INVALID');
+  assert.deepEqual(ledgerCounts(current.store), before);
+
+  const committed = await current.store.takeoverAbandonedRun(request, admission);
+  assert.equal(committed.status, 'COMMITTED');
+});
+
+test('stale first-party observation and consumed pre-commit admission cannot authorize writes', async () => {
+  const stale = orphanFixture({ seed: 'stale-observation', lock: 'LOCK-STALE-OBSERVATION' });
+  const staleRequest = takeoverRequest(stale, { request_id: 'recovery-stale-observation' });
+  staleRequest.orphan_attestation.observed_at = new Date(Date.now() - 31000).toISOString();
+  staleRequest.orphan_attestation.attestation_digest = '';
+  const attestationPayload = structuredClone(staleRequest.orphan_attestation);
+  delete attestationPayload.attestation_digest;
+  staleRequest.orphan_attestation.attestation_digest = digestValue(attestationPayload);
+  staleRequest.recovery_authority.scope_digest = orphanTakeoverAuthorityScopeDigest(
+    staleRequest.target, staleRequest.orphan_attestation.attestation_digest, staleRequest.request_id
+  );
+  const staleBefore = ledgerCounts(stale.store);
+  await assertCodeAsync(() => recoveryAdmission(stale, staleRequest), 'GPR_RECOVERY_ADMISSION_STALE');
+  assert.deepEqual(ledgerCounts(stale.store), staleBefore);
+
+  const blocked = orphanFixture({
+    seed: 'consumed-admission', lock: 'LOCK-CONSUMED-ADMISSION', operationState: 'APPLIED'
+  });
+  const blockedRequest = takeoverRequest(blocked, { request_id: 'recovery-consumed-admission' });
+  const admission = await recoveryAdmission(blocked, blockedRequest);
+  const blockedBefore = ledgerCounts(blocked.store);
+  await assertCodeAsync(() => blocked.store.takeoverAbandonedRun(blockedRequest, admission),
+    'GPR_RECOVERY_OPERATIONS_PRESENT');
+  await assertCodeAsync(() => blocked.store.takeoverAbandonedRun(blockedRequest, admission),
+    'GPR_RECOVERY_ADMISSION_CONSUMED');
+  assert.deepEqual(ledgerCounts(blocked.store), blockedBefore);
+});
+
+test('zero-operation orphan takeover commits one terminal receipt, release, and allocator-owned N+1 replacement', async () => {
+  const current = orphanFixture({ seed: 'zero-operation', lock: 'LOCK-ORPHAN-ZERO' });
+  const request = takeoverRequest(current, { request_id: 'recovery-zero-operation' });
+  const before = ledgerCounts(current.store);
+  const result = await takeoverWithAdmission(current, request);
+  const after = ledgerCounts(current.store);
+
+  assert.equal(result.status, 'COMMITTED');
+  assert.equal(result.duplicate, false);
+  assert.equal(result.recovery.status, 'COMMITTED');
+  assert.equal(result.recovery.request_id, request.request_id);
+  assert.equal(result.recovery.request_digest, require(runtimePath).orphanTakeoverRequestDigest(request));
+  assert.equal(result.recovery.old.receipt_chain_digest, request.target.receipt_chain_digest);
+  assert.equal(result.recovery.old.fence_sequence, 1);
+  assert.equal(result.recovery.old.fence_usable, false);
+  assert.equal(result.recovery.replacement.fence_sequence, 2);
+  assert.equal(result.recovery.replacement.started, false);
+  assert.equal(result.replacement.started, false);
+  assert.equal(result.replacement.lease.fence_sequence, 2);
+  assert.equal(result.recovery.recovery_receipt.receipt_type, 'ORPHAN_ABANDONED');
+  assert.equal(result.recovery.recovery_receipt.payload.recovery.request_digest, result.recovery.request_digest);
+  assert.deepEqual(current.store.readReceiptChain(current.oldRunId).map((receipt) => receipt.receipt_type), [
+    'RUN_STARTED', 'ORPHAN_ABANDONED'
+  ]);
+  assert.equal(after.allocations, before.allocations + 1);
+  assert.equal(after.runs, before.runs + 1);
+  assert.equal(after.receipts, before.receipts + 1);
+  assert.equal(after.lease_events, before.lease_events + 2);
+  assert.equal(after.mutation_operations, before.mutation_operations);
+  assert.equal(after.high_water, 2);
+
+  const restarted = createProgrammeReceiptStore(current.storeOptions);
+  const readback = restarted.readOrphanTakeover({
+    run_id: current.oldRunId,
+    request_id: request.request_id
+  });
+  assert.deepEqual(readback, result.recovery);
+  assert.equal(readback.replacement.started, false);
+});
+
+test('same-process owner and ordinary receipt APIs cannot create ORPHAN_ABANDONED', async () => {
+  const current = await fixture();
+  const sameProcess = {
+    ...current,
+    oldRunId: current.session.run_id,
+    oldAllocationId: current.session.allocation_id
+  };
+  const request = takeoverRequest(sameProcess, { request_id: 'recovery-same-process-owner' });
+  const before = ledgerCounts(current.store);
+  await assertCodeAsync(() => recoveryAdmission(sameProcess, request), 'GPR_RECOVERY_CURRENT_PROCESS_OWNER');
+  assertCode(() => current.store.appendReceipt(current.session, {
+    receipt_type: 'ORPHAN_ABANDONED',
+    payload: { classification: 'ORPHAN_ABANDONED' },
+    created_at: nowIso()
+  }), 'GPR_RECOVERY_PATH_REQUIRED');
+  assertCode(() => current.store.interruptRun(current.session, {
+    payload: { classification: 'ORPHAN_ABANDONED', recovery: {} },
+    created_at: nowIso()
+  }), 'GPR_RECOVERY_PATH_REQUIRED');
+  assert.deepEqual(ledgerCounts(current.store), before);
+});
+
+test('missing or invalid recovery authority rejects with zero writes', async () => {
+  const current = orphanFixture({ seed: 'authority-rejection' });
+  const valid = takeoverRequest(current, { request_id: 'recovery-authority-valid' });
+  const before = ledgerCounts(current.store);
+  const missing = structuredClone(valid);
+  delete missing.recovery_authority;
+  await assertCodeAsync(() => current.store.verifyRecoveryAdmission(missing), 'GPR_RECOVERY_REQUEST_INVALID');
+  const invalid = structuredClone(valid);
+  invalid.recovery_authority.scope_digest = 'f'.repeat(64);
+  await assertCodeAsync(() => current.store.verifyRecoveryAdmission(invalid), 'GPR_AUTHORITY_CHANGED');
+  assert.deepEqual(ledgerCounts(current.store), before);
+});
+
+test('caller-fabricated OWNER recovery authority cannot replace trusted controller authority', async () => {
+  const current = orphanFixture({ seed: 'fabricated-authority' });
+  const request = takeoverRequest(current, { request_id: 'recovery-fabricated-authority' });
+  const before = ledgerCounts(current.store);
+  const trustedAuthority = {
+    ...request.recovery_authority,
+    child_comment_id: request.recovery_authority.child_comment_id + 1,
+    node_id: 'IC_trusted-recovery-authority'
+  };
+  const trustedRequest = structuredClone(request);
+  trustedRequest.recovery_authority = trustedAuthority;
+  recoveryHostFixture = recoveryFixture(current, trustedRequest);
+  try {
+    await assertCodeAsync(() => current.store.verifyRecoveryAdmission(request), 'GPR_AUTHORITY_UNVERIFIED');
+  } finally {
+    recoveryHostFixture = null;
+  }
+  assert.deepEqual(ledgerCounts(current.store), before);
+});
+
+test('trusted later controlling chronology rejects a caller-declared empty chronology', async () => {
+  const current = orphanFixture({ seed: 'later-authority' });
+  const request = takeoverRequest(current, { request_id: 'recovery-later-authority' });
+  const before = ledgerCounts(current.store);
+  recoveryHostFixture = recoveryFixture(current, request, {
+    laterComments: [{
+      id: request.recovery_authority.child_comment_id + 1,
+      user: { login: request.recovery_authority.author_login },
+      author_association: 'OWNER'
+    }]
+  });
+  try {
+    await assertCodeAsync(() => current.store.verifyRecoveryAdmission(request), 'GPR_AUTHORITY_CHANGED');
+  } finally {
+    recoveryHostFixture = null;
+  }
+  assert.deepEqual(ledgerCounts(current.store), before);
+});
+
+test('trusted moved start rejects caller replay of the persisted old start', async () => {
+  const current = orphanFixture({ seed: 'replayed-start' });
+  const request = takeoverRequest(current, { request_id: 'recovery-replayed-start' });
+  const before = ledgerCounts(current.store);
+  recoveryHostFixture = recoveryFixture(current, request, {
+    start: { ...current.expectedStart, head_sha: '9'.repeat(40) }
+  });
+  try {
+    await assertCodeAsync(() => current.store.verifyRecoveryAdmission(request), 'GPR_RECOVERY_SOURCE_CHANGED');
+  } finally {
+    recoveryHostFixture = null;
+  }
+  assert.deepEqual(ledgerCounts(current.store), before);
+});
+
+test('first-party recovery verifier fails closed on transport and malformed authority evidence', async () => {
+  const current = orphanFixture({ seed: 'reader-failure' });
+  const request = takeoverRequest(current, { request_id: 'recovery-reader-failure' });
+  const before = ledgerCounts(current.store);
+  const cases = [
+    [{ transportFailure: 'authority' }, 'GPR_AUTHORITY_UNVERIFIED'],
+    [{ malformedAuthority: true }, 'GPR_AUTHORITY_UNVERIFIED'],
+    [{ transportFailure: 'start' }, 'GPR_START_UNVERIFIED']
+  ];
+  for (const [overrides, code] of cases) {
+    recoveryHostFixture = recoveryFixture(current, request, overrides);
+    try {
+      await assertCodeAsync(() => current.store.verifyRecoveryAdmission(request), code);
+    } finally {
+      recoveryHostFixture = null;
+    }
+    assert.deepEqual(ledgerCounts(current.store), before);
+  }
+});
+
+test('caller-supplied lease, fence, sequence, owner, process, namespace, or state-root values are rejected', async () => {
+  const current = orphanFixture({ seed: 'caller-fields' });
+  const valid = takeoverRequest(current, { request_id: 'recovery-caller-fields' });
+  const before = ledgerCounts(current.store);
+  for (const key of [
+    'lease_id', 'fence_id', 'fence_sequence', 'owner_instance_id',
+    'process_id', 'coordination_namespace', 'state_root'
+  ]) {
+    const invalid = structuredClone(valid);
+    invalid[key] = key === 'fence_sequence' ? 2 : 'caller-value';
+    await assertCodeAsync(() => current.store.verifyRecoveryAdmission(invalid), 'GPR_CALLER_FENCE_FORBIDDEN');
+    assert.deepEqual(ledgerCounts(current.store), before);
+  }
+});
+
+test('zero-operation eligibility rejects every admitted operation state', async () => {
+  for (const [operationState, expectedCode] of [
+    ['APPLIED', 'GPR_RECOVERY_OPERATIONS_PRESENT'],
+    ['NOT_APPLIED', 'GPR_RECOVERY_OPERATIONS_PRESENT'],
+    ['IN_FLIGHT', 'GPR_UNRESOLVED_OPERATION'],
+    ['UNKNOWN', 'GPR_UNRESOLVED_OPERATION']
+  ]) {
+    const current = orphanFixture({
+      seed: 'operation-' + operationState.toLowerCase(),
+      operationState,
+      lock: 'LOCK-ORPHAN-' + operationState
+    });
+    const request = takeoverRequest(current, { request_id: 'recovery-operation-' + operationState.toLowerCase() });
+    const before = ledgerCounts(current.store);
+    const admission = await recoveryAdmission(current, request);
+    await assertCodeAsync(() => current.store.takeoverAbandonedRun(request, admission), expectedCode);
+    assert.deepEqual(ledgerCounts(current.store), before);
+    assert.equal(current.store.readReceiptChain(current.oldRunId).at(-1).receipt_type, 'RUN_STARTED');
+  }
+});
+
+test('exact duplicate is idempotent while same request ID conflicts and a different request loses the race', async () => {
+  const current = orphanFixture({ seed: 'request-idempotence' });
+  const request = takeoverRequest(current, { request_id: 'recovery-idempotence' });
+  const committed = await takeoverWithAdmission(current, request);
+  const beforeDuplicate = ledgerCounts(current.store);
+  const duplicate = await current.store.takeoverAbandonedRun(request, null);
+  assert.equal(duplicate.status, 'DUPLICATE');
+  assert.equal(duplicate.duplicate, true);
+  assert.deepEqual(duplicate.recovery, committed.recovery);
+  assert.deepEqual(ledgerCounts(current.store), beforeDuplicate);
+
+  const conflicting = structuredClone(request);
+  conflicting.lease_ms = 60001;
+  await assertCodeAsync(() => current.store.takeoverAbandonedRun(conflicting, null), 'GPR_RECOVERY_REQUEST_CONFLICT');
+  const different = takeoverRequest(current, { request_id: 'recovery-different-request' });
+  const differentAdmission = await recoveryAdmission(current, different);
+  await assertCodeAsync(() => current.store.takeoverAbandonedRun(
+    different, differentAdmission
+  ), 'GPR_RECOVERY_LOST_RACE');
+  assert.deepEqual(ledgerCounts(current.store), beforeDuplicate);
+});
+
+test('stale authority, moved source/start, wrong namespace/target, and remote adapter input fail closed', async () => {
+  const current = orphanFixture({ seed: 'target-validation' });
+  const base = takeoverRequest(current, { request_id: 'recovery-target-validation' });
+  const before = ledgerCounts(current.store);
+  const cases = [
+    ['wrong repository', { target: { repository: 'other/repository' } }, 'GPR_RECOVERY_NAMESPACE_MISMATCH'],
+    ['wrong parent', { target: { parent_issue: 241 } }, 'GPR_RECOVERY_NAMESPACE_MISMATCH'],
+    ['wrong child', { target: { child_issue: 360 } }, 'GPR_RECOVERY_NAMESPACE_MISMATCH'],
+    ['wrong lock', { target: { lock: 'LOCK-WRONG' } }, 'GPR_RECOVERY_TARGET_MISMATCH'],
+    ['wrong run', { target: { run_id: 'run-wrong' } }, 'GPR_RECOVERY_TARGET_NOT_FOUND'],
+    ['wrong allocation', { target: { allocation_id: 'allocation-wrong' } }, 'GPR_RECOVERY_TARGET_NOT_FOUND'],
+    ['wrong old authority digest', { target: { authority_digest: 'f'.repeat(64) } }, 'GPR_RECOVERY_TARGET_MISMATCH'],
+    ['moved source start', { observed_start: { ...current.expectedStart, head_sha: '9'.repeat(40) } }, 'GPR_RECOVERY_SOURCE_CHANGED'],
+    ['stale recovery authority', { recovery_authority: { scope_digest: 'f'.repeat(64) } }, 'GPR_AUTHORITY_CHANGED']
+  ];
+  for (const [label, overrides, expectedCode] of cases) {
+    const request = takeoverRequest(current, {
+      ...overrides,
+      request_id: 'recovery-target-' + label.replace(/[^a-z0-9]+/gi, '-').toLowerCase()
+    });
+    await assertCodeAsync(async () => {
+      const admission = await recoveryAdmission(current, request);
+      return current.store.takeoverAbandonedRun(request, admission);
+    }, expectedCode);
+    assert.deepEqual(ledgerCounts(current.store), before);
+  }
+  let adapterCalls = 0;
+  const invalid = { ...base, adapter: () => { adapterCalls += 1; } };
+  await assertCodeAsync(() => current.store.verifyRecoveryAdmission(invalid), 'GPR_RECOVERY_REQUEST_INVALID');
+  assert.equal(adapterCalls, 0);
+  assert.deepEqual(ledgerCounts(current.store), before);
+});
+
+test('first-party recovery observation rejects active and unverifiable foreign holders with zero writes', async () => {
+  const current = await liveOrphanFixture({ seed: 'live-holder', lock: 'LOCK-LIVE-HOLDER' });
+  const request = takeoverRequest(current, { request_id: 'recovery-live-holder' });
+  const before = ledgerCounts(current.store);
+
+  await assertCodeAsync(() => recoveryAdmission(current, request), 'GPR_RECOVERY_HOLDER_ACTIVE');
+  assert.deepEqual(ledgerCounts(current.store), before);
+
+  const malformed = structuredClone(request);
+  malformed.orphan_attestation.holder_nonadoptable = false;
+  malformed.orphan_attestation.attestation_digest = '';
+  const malformedPayload = structuredClone(malformed.orphan_attestation);
+  delete malformedPayload.attestation_digest;
+  malformed.orphan_attestation.attestation_digest = digestValue(malformedPayload);
+  malformed.recovery_authority.scope_digest = orphanTakeoverAuthorityScopeDigest(
+    malformed.target, malformed.orphan_attestation.attestation_digest, malformed.request_id
+  );
+  await assertCodeAsync(() => recoveryAdmission(current, malformed), 'GPR_RECOVERY_ATTESTATION_INVALID');
+  assert.deepEqual(ledgerCounts(current.store), before);
+
+  const nativeKill = process.kill;
+  process.kill = () => {
+    const error = new Error('holder state unavailable');
+    error.code = 'EACCES';
+    throw error;
+  };
+  try {
+    await assertCodeAsync(() => recoveryAdmission(current, request), 'GPR_RECOVERY_ORPHAN_UNVERIFIED');
+  } finally {
+    process.kill = nativeKill;
+  }
+  assert.deepEqual(ledgerCounts(current.store), before);
+
+  current.child.stdin.write('append\nclose\n');
+  const append = await current.nextMessage();
+  const closed = await current.nextMessage();
+  const exit = await current.close;
+  assert.deepEqual(append, { command: 'append', ok: true });
+  assert.deepEqual(closed, { command: 'close', ok: true });
+  assert.equal(exit.status, 0);
+});
+
+test('concurrent identical takeover requests commit once and return one deterministic duplicate', async () => {
+  const current = orphanFixture({ seed: 'concurrent-identical', lock: 'LOCK-CONCURRENT-IDENTICAL' });
+  const request = takeoverRequest(current, { request_id: 'recovery-concurrent-identical' });
+  const firstAdmission = await recoveryAdmission(current, request);
+  const secondAdmission = await recoveryAdmission(current, request);
+  const results = await Promise.all([
+    Promise.resolve().then(() => current.store.takeoverAbandonedRun(request, firstAdmission)),
+    Promise.resolve().then(() => current.store.takeoverAbandonedRun(request, secondAdmission))
+  ]);
+  assert.equal(results.filter((result) => result.status === 'COMMITTED').length, 1);
+  assert.equal(results.filter((result) => result.status === 'DUPLICATE').length, 1);
+  assert.equal(new Set(results.map((result) => result.recovery.replacement.allocation.run_id)).size, 1);
+  assert.equal(ledgerCounts(current.store).allocations, 2);
+  assert.equal(ledgerCounts(current.store).high_water, 2);
+});
+
+test('concurrent different takeover requests have exactly one winner and one lost-race result', async () => {
+  const current = orphanFixture({ seed: 'concurrent-different', lock: 'LOCK-CONCURRENT-DIFFERENT' });
+  const first = takeoverRequest(current, { request_id: 'recovery-concurrent-a' });
+  const second = takeoverRequest(current, { request_id: 'recovery-concurrent-b' });
+  const firstAdmission = await recoveryAdmission(current, first);
+  const secondAdmission = await recoveryAdmission(current, second);
+  const results = await Promise.allSettled([
+    Promise.resolve().then(() => current.store.takeoverAbandonedRun(first, firstAdmission)),
+    Promise.resolve().then(() => current.store.takeoverAbandonedRun(second, secondAdmission))
+  ]);
+  assert.equal(results.filter((result) => result.status === 'fulfilled'
+    && result.value.status === 'COMMITTED').length, 1);
+  assert.equal(results.filter((result) => result.status === 'rejected'
+    && result.reason.code === 'GPR_RECOVERY_LOST_RACE').length, 1);
+  assert.equal(ledgerCounts(current.store).allocations, 2);
+  assert.equal(ledgerCounts(current.store).high_water, 2);
+});
+
+test('not-yet-committed readback is typed and a natural lease-expiry race performs no writes or timestamp rewrite', async () => {
+  const beforeCommit = orphanFixture({ seed: 'not-committed', lock: 'LOCK-NOT-COMMITTED' });
+  const beforeRequest = takeoverRequest(beforeCommit, { request_id: 'recovery-not-committed' });
+  const beforeCounts = ledgerCounts(beforeCommit.store);
+  assertCode(() => beforeCommit.store.readOrphanTakeover({
+    run_id: beforeCommit.oldRunId,
+    request_id: beforeRequest.request_id
+  }), 'GPR_RECOVERY_NOT_COMMITTED');
+  assert.deepEqual(ledgerCounts(beforeCommit.store), beforeCounts);
+
+  const current = orphanFixture({ seed: 'expiry-race', lock: 'LOCK-EXPIRY-RACE', lease_ms: 5000 });
+  const request = takeoverRequest(current, { request_id: 'recovery-expiry-race' });
+  const db = new DatabaseSync(current.store.databasePath, { readOnly: true });
+  const original = db.prepare('SELECT issued_at, expires_at, allocation_digest FROM allocations WHERE run_id = ?')
+    .get(current.oldRunId);
+  db.close();
+  const admission = await recoveryAdmission(current, request);
+  await new Promise((resolve) => setTimeout(resolve, Math.max(0, Date.parse(original.expires_at) - Date.now() + 50)));
+  const before = ledgerCounts(current.store);
+  await assertCodeAsync(() => current.store.takeoverAbandonedRun(
+    request, admission
+  ), 'GPR_RECOVERY_EXPIRED_RACE');
+  assert.deepEqual(ledgerCounts(current.store), before);
+  const afterDb = new DatabaseSync(current.store.databasePath, { readOnly: true });
+  const after = afterDb.prepare('SELECT issued_at, expires_at, allocation_digest FROM allocations WHERE run_id = ?')
+    .get(current.oldRunId);
+  afterDb.close();
+  assert.deepEqual(after, original);
+});
+
+test('corrupt receipt chains and schema versions fail closed before takeover writes', async () => {
+  const chainCorrupt = orphanFixture({ seed: 'corrupt-chain', lock: 'LOCK-CORRUPT-CHAIN' });
+  const chainRequest = takeoverRequest(chainCorrupt, { request_id: 'recovery-corrupt-chain' });
+  const chainDb = new DatabaseSync(chainCorrupt.store.databasePath);
+  const row = chainDb.prepare('SELECT * FROM receipts WHERE run_id = ? AND sequence = 1').get(chainCorrupt.oldRunId);
+  const receipt = JSON.parse(row.canonical_json);
+  receipt.prior_receipt_id = 'f'.repeat(64);
+  const receiptPayload = structuredClone(receipt);
+  delete receiptPayload.receipt_id;
+  receipt.receipt_id = digestValue(receiptPayload);
+  chainDb.exec('DROP TRIGGER receipts_no_update');
+  chainDb.prepare('UPDATE receipts SET receipt_id = ?, canonical_json = ?, receipt_digest = ? WHERE receipt_id = ?')
+    .run(receipt.receipt_id, canonicalSerialize(receipt), receipt.receipt_id, row.receipt_id);
+  chainDb.exec("CREATE TRIGGER receipts_no_update BEFORE UPDATE ON receipts BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;");
+  chainDb.close();
+  const chainBefore = ledgerCounts(chainCorrupt.store);
+  await assertCodeAsync(() => recoveryAdmission(chainCorrupt, chainRequest), 'GPR_RECEIPT_TAMPERED');
+  assert.deepEqual(ledgerCounts(chainCorrupt.store), chainBefore);
+
+  const schemaCorrupt = orphanFixture({ seed: 'corrupt-schema', lock: 'LOCK-CORRUPT-SCHEMA' });
+  const schemaRequest = takeoverRequest(schemaCorrupt, { request_id: 'recovery-corrupt-schema' });
+  const schemaDb = new DatabaseSync(schemaCorrupt.store.databasePath);
+  schemaDb.exec('PRAGMA user_version = 1');
+  schemaDb.close();
+  const schemaBefore = ledgerCounts(schemaCorrupt.store);
+  await assertCodeAsync(() => recoveryAdmission(schemaCorrupt, schemaRequest), 'GPR_SCHEMA_MISMATCH');
+  assert.deepEqual(ledgerCounts(schemaCorrupt.store), schemaBefore);
+});
+
+test('semantically tampered recovery evidence fails independent readback after a valid receipt re-sign', async () => {
+  const current = orphanFixture({ seed: 'tampered-recovery', lock: 'LOCK-TAMPERED-RECOVERY' });
+  const request = takeoverRequest(current, { request_id: 'recovery-tampered-evidence' });
+  await takeoverWithAdmission(current, request);
+  const db = new DatabaseSync(current.store.databasePath);
+  const row = db.prepare('SELECT * FROM receipts WHERE run_id = ? AND receipt_type = ?')
+    .get(current.oldRunId, 'ORPHAN_ABANDONED');
+  const receipt = JSON.parse(row.canonical_json);
+  receipt.payload.recovery.replacement.allocation_id = receipt.payload.recovery.replacement.run_id;
+  const receiptPayload = structuredClone(receipt);
+  delete receiptPayload.receipt_id;
+  receipt.receipt_id = digestValue(receiptPayload);
+  db.exec('DROP TRIGGER receipts_no_update');
+  db.prepare('UPDATE receipts SET receipt_id = ?, canonical_json = ?, receipt_digest = ? WHERE receipt_id = ?')
+    .run(receipt.receipt_id, canonicalSerialize(receipt), receipt.receipt_id, row.receipt_id);
+  db.exec("CREATE TRIGGER receipts_no_update BEFORE UPDATE ON receipts BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;");
+  db.close();
+  assertCode(() => current.store.readOrphanTakeover({
+    run_id: current.oldRunId,
+    request_id: request.request_id
+  }), 'GPR_RECOVERY_EVIDENCE_TAMPERED');
 });
