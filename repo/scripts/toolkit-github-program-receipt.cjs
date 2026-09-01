@@ -15,6 +15,7 @@ const USER_VERSION = 2;
 const BUSY_TIMEOUT_MS = 5000;
 const VERIFIER_TIMEOUT_MS = 30000;
 const VERIFIER_STREAM_BYTES = 16 * 1024;
+const RECOVERY_ADMISSION_MAX_AGE_MS = 30000;
 const RECEIPT_TYPES = Object.freeze([
   'RUN_STARTED',
   'TRANSITION_PREVIEW',
@@ -128,6 +129,7 @@ const SENSITIVE_KEY = /(?:authorization|cookie|credential|password|private[_-]?k
 const SENSITIVE_VALUE = /(?:\bBearer\s+[A-Za-z0-9._~+\/-]+=*|github_pat_[A-Za-z0-9_]{20,}|gh[opusr]_[A-Za-z0-9]{20,}|-----BEGIN [A-Z ]+PRIVATE KEY-----)/i;
 const SESSION_OWNERS = new WeakMap();
 const ADMISSION_OWNERS = new WeakMap();
+const RECOVERY_ADMISSION_OWNERS = new WeakMap();
 
 class GprError extends Error {
   constructor(code, details = {}) {
@@ -675,16 +677,6 @@ function validateTakeoverRequest(value, config) {
   return { request, requestDigest: orphanTakeoverRequestDigest(request) };
 }
 
-function validateTrustedRecoveryReaders(value) {
-  if (!exactKeys(value, ['readAuthority', 'readStart', 'readOrphanStatus'])
-    || typeof value.readAuthority !== 'function'
-    || typeof value.readStart !== 'function'
-    || typeof value.readOrphanStatus !== 'function') {
-    fail('GPR_TRUSTED_RECOVERY_READERS_INVALID');
-  }
-  return value;
-}
-
 function verifyTrustedOrphanSnapshot(expected, snapshot) {
   if (!exactKeys(snapshot, ['status', 'orphan_attestation'])
     || !['SAME_PROCESS_OWNER', 'ACTIVE_FOREIGN_HOLDER', 'ORPHAN_NONADOPTABLE', 'UNKNOWN'].includes(snapshot.status)) {
@@ -700,25 +692,170 @@ function verifyTrustedOrphanSnapshot(expected, snapshot) {
   return observed;
 }
 
-async function verifyTrustedRecoveryAdmission(input, config, readersInput) {
-  const { request } = validateTakeoverRequest(input, config);
-  const readers = validateTrustedRecoveryReaders(readersInput);
-  const assertion = deepFreeze({
-    action: ORPHAN_TAKEOVER_ACTION,
-    request: clone(request),
-    request_digest: orphanTakeoverRequestDigest(request)
+function recoveryCommand(command, args, cwd, errorCode) {
+  const env = { ...process.env };
+  delete env.NODE_OPTIONS;
+  delete env.NODE_PATH;
+  const result = spawnSync(command, args, {
+    cwd,
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: VERIFIER_TIMEOUT_MS,
+    maxBuffer: 1024 * 1024,
+    env
   });
-  const recoveryAuthority = verifyAuthoritySnapshot(request.recovery_authority,
-    await callReader(() => readers.readAuthority(clone(assertion)), 'GPR_AUTHORITY_UNVERIFIED'));
-  const observedStart = validateStart(
-    await callReader(() => readers.readStart(clone(assertion)), 'GPR_START_UNVERIFIED')
-  );
-  if (canonicalSerialize(observedStart) !== canonicalSerialize(request.observed_start)
-    || digestValue(observedStart) !== request.target.start_digest) {
+  if (result.error || result.status !== 0 || result.signal || result.stderr) {
+    fail(errorCode, { cause: result.error && result.error.code ? result.error.code : 'transport-failed' });
+  }
+  return String(result.stdout || '').trim();
+}
+
+function recoveryJsonCommand(command, args, cwd, errorCode) {
+  const stdout = recoveryCommand(command, args, cwd, errorCode);
+  try {
+    return JSON.parse(stdout);
+  } catch (_) {
+    fail(errorCode, { cause: 'malformed-response' });
+  }
+}
+
+function canonicalRecoveryAuthority(config, request) {
+  const [owner, repository] = config.namespace.repository.split('/');
+  const commentEndpoint = (id) => `repos/${owner}/${repository}/issues/comments/${id}`;
+  const childComment = recoveryJsonCommand('gh', ['api', commentEndpoint(request.recovery_authority.child_comment_id)],
+    config.repositoryRoot, 'GPR_AUTHORITY_UNVERIFIED');
+  const parentComment = recoveryJsonCommand('gh', ['api', commentEndpoint(request.recovery_authority.parent_comment_id)],
+    config.repositoryRoot, 'GPR_AUTHORITY_UNVERIFIED');
+  const childPages = recoveryJsonCommand('gh', ['api', `repos/${owner}/${repository}/issues/${config.namespace.child_issue}/comments?per_page=100`, '--paginate', '--slurp'],
+    config.repositoryRoot, 'GPR_AUTHORITY_UNVERIFIED');
+  const parentPages = recoveryJsonCommand('gh', ['api', `repos/${owner}/${repository}/issues/${config.namespace.parent_issue}/comments?per_page=100`, '--paginate', '--slurp'],
+    config.repositoryRoot, 'GPR_AUTHORITY_UNVERIFIED');
+  if (!isRecord(childComment) || !isRecord(parentComment)
+    || !Array.isArray(childPages) || !Array.isArray(parentPages)
+    || childComment.id !== request.recovery_authority.child_comment_id
+    || parentComment.id !== request.recovery_authority.parent_comment_id
+    || childComment.author_association !== 'OWNER' || parentComment.author_association !== 'OWNER'
+    || !isRecord(childComment.user) || !isRecord(parentComment.user)
+    || childComment.user.login !== request.recovery_authority.author_login
+    || parentComment.user.login !== request.recovery_authority.author_login
+    || typeof childComment.body !== 'string' || typeof parentComment.body !== 'string'
+    || typeof childComment.issue_url !== 'string' || typeof parentComment.issue_url !== 'string'
+    || !childComment.issue_url.endsWith(`/issues/${config.namespace.child_issue}`)
+    || !parentComment.issue_url.endsWith(`/issues/${config.namespace.parent_issue}`)
+    || !parentComment.body.includes(String(childComment.id))) {
+    fail('GPR_AUTHORITY_UNVERIFIED');
+  }
+  const updatedAt = isoAt(childComment.updated_at);
+  const observed = {
+    child_comment_id: childComment.id,
+    parent_comment_id: parentComment.id,
+    node_id: childComment.node_id,
+    author_login: childComment.user.login,
+    author_association: childComment.author_association,
+    body_digest: digestValue(childComment.body),
+    updated_at: updatedAt,
+    update_identity_digest: digestValue({
+      comment_id: childComment.id,
+      node_id: childComment.node_id,
+      updated_at: updatedAt
+    }),
+    scope_digest: orphanTakeoverAuthorityScopeDigest(
+      request.target, request.orphan_attestation.attestation_digest, request.request_id
+    )
+  };
+  const laterOwnerComment = (pages, anchor) => pages.flat().some((comment) => isRecord(comment)
+    && comment.id > anchor.id
+    && comment.author_association === 'OWNER'
+    && isRecord(comment.user)
+    && comment.user.login === anchor.user.login);
+  if (laterOwnerComment(childPages, childComment) || laterOwnerComment(parentPages, parentComment)) {
+    fail('GPR_AUTHORITY_CHANGED');
+  }
+  verifyAuthoritySnapshot(request.recovery_authority, {
+    authority: observed,
+    later_controlling_comments: []
+  });
+  return deepFreeze(observed);
+}
+
+function gitRecoveryRead(config, args, errorCode = 'GPR_START_UNVERIFIED', allowDetached = false) {
+  const env = { ...process.env };
+  delete env.NODE_OPTIONS;
+  delete env.NODE_PATH;
+  const result = spawnSync('git', ['-C', config.repositoryRoot, ...args], {
+    encoding: 'utf8', windowsHide: true, timeout: VERIFIER_TIMEOUT_MS, env
+  });
+  if (allowDetached && result.status === 1 && !result.error && !result.signal) return null;
+  if (result.error || result.status !== 0 || result.signal || result.stderr) fail(errorCode);
+  return String(result.stdout || '').trim();
+}
+
+function canonicalRecoveryStart(config, request) {
+  const status = gitRecoveryRead(config, ['status', '--porcelain=v1'])
+    .split(/\r?\n/).filter(Boolean);
+  const branch = gitRecoveryRead(config, ['symbolic-ref', '--quiet', '--short', 'HEAD'], 'GPR_START_UNVERIFIED', true);
+  const observed = validateStart({
+    base_sha: gitRecoveryRead(config, ['merge-base', 'HEAD', 'origin/main']),
+    head_sha: gitRecoveryRead(config, ['rev-parse', 'HEAD']),
+    tree_sha: gitRecoveryRead(config, ['rev-parse', 'HEAD^{tree}']),
+    status_digest: digestValue({ status }),
+    clean_worktree: status.length === 0,
+    ref: branch === null
+      ? { detached: true, name: null }
+      : { detached: false, name: branch }
+  });
+  if (canonicalSerialize(observed) !== canonicalSerialize(request.observed_start)
+    || digestValue(observed) !== request.target.start_digest) {
     fail('GPR_RECOVERY_SOURCE_CHANGED');
   }
-  const orphanAttestation = verifyTrustedOrphanSnapshot(request.orphan_attestation,
-    await callReader(() => readers.readOrphanStatus(clone(assertion)), 'GPR_RECOVERY_ORPHAN_UNVERIFIED'));
+  return deepFreeze(observed);
+}
+
+function processHolderStatus(processId) {
+  if (processId === process.pid) return 'SAME_PROCESS_OWNER';
+  try {
+    process.kill(processId, 0);
+    return 'ACTIVE_FOREIGN_HOLDER';
+  } catch (error) {
+    if (error && error.code === 'ESRCH') return 'ORPHAN_NONADOPTABLE';
+    return 'UNKNOWN';
+  }
+}
+
+function canonicalRecoveryOrphan(store, request) {
+  const db = openVerified(store.config, false);
+  let allocation;
+  try {
+    allocation = db.prepare('SELECT * FROM allocations WHERE allocation_id = ? AND run_id = ?')
+      .get(request.target.allocation_id, request.target.run_id);
+  } finally {
+    db.close();
+  }
+  if (!allocation) fail('GPR_RECOVERY_TARGET_NOT_FOUND');
+  const observedAt = Date.parse(request.orphan_attestation.observed_at);
+  const now = Date.now();
+  if (!Number.isFinite(observedAt) || observedAt > now || now - observedAt > RECOVERY_ADMISSION_MAX_AGE_MS) {
+    fail('GPR_RECOVERY_ADMISSION_STALE');
+  }
+  return verifyTrustedOrphanSnapshot(request.orphan_attestation, {
+    status: processHolderStatus(allocation.process_id),
+    orphan_attestation: clone(request.orphan_attestation)
+  });
+}
+
+function createRecoveryAdmissionToken() {
+  const admission = {};
+  Object.defineProperty(admission, 'toJSON', {
+    value: () => fail('GPR_RECOVERY_ADMISSION_NONSERIALIZABLE')
+  });
+  return Object.freeze(admission);
+}
+
+function verifyFirstPartyRecoveryAdmission(store, input) {
+  const { request, requestDigest } = validateTakeoverRequest(input, store.config);
+  const recoveryAuthority = canonicalRecoveryAuthority(store.config, request);
+  const observedStart = canonicalRecoveryStart(store.config, request);
+  const orphanAttestation = canonicalRecoveryOrphan(store, request);
   const verifiedRequest = deepFreeze({
     ...request,
     observed_start: observedStart,
@@ -726,7 +863,64 @@ async function verifyTrustedRecoveryAdmission(input, config, readersInput) {
     later_controlling_comment_ids: [],
     orphan_attestation: orphanAttestation
   });
-  return { request: verifiedRequest, requestDigest: orphanTakeoverRequestDigest(verifiedRequest) };
+  const verifiedDigest = orphanTakeoverRequestDigest(verifiedRequest);
+  if (verifiedDigest !== requestDigest) fail('GPR_RECOVERY_REQUEST_CONFLICT');
+  const mintedAt = Date.now();
+  const state = {
+    storeInstanceId: store.instanceId,
+    processId: process.pid,
+    namespaceDigest: store.config.namespaceDigest,
+    databasePath: store.config.databasePath,
+    lock: request.target.lock,
+    requestId: request.request_id,
+    requestDigest,
+    runId: request.target.run_id,
+    allocationId: request.target.allocation_id,
+    authorityDigest: digestValue(recoveryAuthority),
+    chronologyDigest: digestValue([]),
+    startDigest: digestValue(observedStart),
+    orphanAttestationDigest: orphanAttestation.attestation_digest,
+    observationIdentity: digestValue({
+      request_digest: requestDigest,
+      receipt_tip_id: request.target.receipt_tip_id,
+      lease_digest: request.target.lease_digest,
+      observed_at: orphanAttestation.observed_at,
+      authority_updated_at: recoveryAuthority.updated_at
+    }),
+    mintedAt,
+    expiresAt: mintedAt + RECOVERY_ADMISSION_MAX_AGE_MS,
+    consumed: false
+  };
+  const admission = createRecoveryAdmissionToken();
+  RECOVERY_ADMISSION_OWNERS.set(admission, state);
+  return admission;
+}
+
+function consumeRecoveryAdmission(store, request, requestDigest, admission) {
+  const state = admission && RECOVERY_ADMISSION_OWNERS.get(admission);
+  const observationIdentity = digestValue({
+    request_digest: requestDigest,
+    receipt_tip_id: request.target.receipt_tip_id,
+    lease_digest: request.target.lease_digest,
+    observed_at: request.orphan_attestation.observed_at,
+    authority_updated_at: request.recovery_authority.updated_at
+  });
+  if (!state || state.storeInstanceId !== store.instanceId || state.processId !== process.pid
+    || state.namespaceDigest !== store.config.namespaceDigest || state.databasePath !== store.config.databasePath
+    || state.lock !== request.target.lock || state.requestId !== request.request_id
+    || state.requestDigest !== requestDigest || state.runId !== request.target.run_id
+    || state.allocationId !== request.target.allocation_id
+    || state.authorityDigest !== digestValue(request.recovery_authority)
+    || state.chronologyDigest !== digestValue(request.later_controlling_comment_ids)
+    || state.startDigest !== digestValue(request.observed_start)
+    || state.orphanAttestationDigest !== request.orphan_attestation.attestation_digest
+    || state.observationIdentity !== observationIdentity) {
+    fail('GPR_RECOVERY_ADMISSION_INVALID');
+  }
+  if (state.consumed) fail('GPR_RECOVERY_ADMISSION_CONSUMED');
+  if (Date.now() > state.expiresAt) fail('GPR_RECOVERY_ADMISSION_STALE');
+  state.consumed = true;
+  return state;
 }
 
 function validateLease(value) {
@@ -2109,7 +2303,7 @@ function readCommittedTakeoverForRequest(store, request, requestDigest) {
   }
 }
 
-async function takeoverAbandonedRunInternal(store, input, trustedReaders) {
+function takeoverAbandonedRunInternal(store, input, admission) {
   const asserted = validateTakeoverRequest(input, store.config);
   const committed = readCommittedTakeoverForRequest(store, asserted.request, asserted.requestDigest);
   if (committed) {
@@ -2119,7 +2313,8 @@ async function takeoverAbandonedRunInternal(store, input, trustedReaders) {
       recovery: committed
     };
   }
-  const { request, requestDigest } = await verifyTrustedRecoveryAdmission(input, store.config, trustedReaders);
+  const { request, requestDigest } = asserted;
+  consumeRecoveryAdmission(store, request, requestDigest, admission);
   const ownerInstanceId = randomId('owner');
   const db = openVerified(store.config, false);
   let outcome;
@@ -2606,8 +2801,11 @@ function createProgrammeReceiptStore(options) {
         created_at: input.created_at
       });
     },
-    takeoverAbandonedRun(request, trustedReaders) {
-      return takeoverAbandonedRunInternal(store, request, trustedReaders);
+    async verifyRecoveryAdmission(request) {
+      return verifyFirstPartyRecoveryAdmission(store, request);
+    },
+    async takeoverAbandonedRun(request, admission) {
+      return takeoverAbandonedRunInternal(store, request, admission);
     },
     readOrphanTakeover(request) {
       return readOrphanTakeoverInternal(config, request);

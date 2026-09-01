@@ -4,9 +4,49 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawn, spawnSync } = require('node:child_process');
+const childProcess = require('node:child_process');
 const { DatabaseSync } = require('node:sqlite');
 const test = require('node:test');
+
+const nativeSpawnSync = childProcess.spawnSync;
+let recoveryHostFixture = null;
+
+function commandResult(status, stdout = '', stderr = '') {
+  return { status, stdout, stderr, signal: null, error: undefined };
+}
+
+childProcess.spawnSync = (command, args, spawnOptions) => {
+  const fixture = recoveryHostFixture;
+  if (!fixture) return nativeSpawnSync(command, args, spawnOptions);
+  if (command === 'gh') {
+    if (fixture.transportFailure === 'authority') return commandResult(1, '', 'unavailable');
+    const endpoint = args[1];
+    if (endpoint.includes('/issues/comments/')) {
+      const id = Number(endpoint.split('/').at(-1));
+      const comment = id === fixture.childComment.id ? fixture.childComment : fixture.parentComment;
+      return commandResult(0, JSON.stringify(fixture.malformedAuthority ? {} : comment));
+    }
+    return commandResult(0, JSON.stringify([fixture.comments]));
+  }
+  if (command === 'git') {
+    if (fixture.transportFailure === 'start') return commandResult(1, '', 'unavailable');
+    const gitArgs = args.slice(2);
+    const startSnapshot = fixture.start;
+    const key = gitArgs.join(' ');
+    if (key === 'status --porcelain=v1') return commandResult(0, '');
+    if (key === 'merge-base HEAD origin/main') return commandResult(0, `${startSnapshot.base_sha}\n`);
+    if (key === 'rev-parse HEAD') return commandResult(0, `${startSnapshot.head_sha}\n`);
+    if (key === 'rev-parse HEAD^{tree}') return commandResult(0, `${startSnapshot.tree_sha}\n`);
+    if (key === 'symbolic-ref --quiet --short HEAD') {
+      return startSnapshot.ref.detached
+        ? commandResult(1)
+        : commandResult(0, `${startSnapshot.ref.name}\n`);
+    }
+  }
+  return nativeSpawnSync(command, args, spawnOptions);
+};
+
+const { spawn, spawnSync } = childProcess;
 
 const runtimePath = path.resolve(__dirname, '../scripts/toolkit-github-program-receipt.cjs');
 const repositoryRoot = path.resolve(__dirname, '../..');
@@ -448,6 +488,13 @@ function takeoverRequest(current, overrides = {}) {
     ...authority(overrides.recovery_authority_seed || 'recovery'),
     ...(overrides.recovery_authority || {})
   };
+  const recoveryBody = `recovery-authority:${requestId}`;
+  recoveryAuthority.body_digest = digestValue(recoveryBody);
+  recoveryAuthority.update_identity_digest = digestValue({
+    comment_id: recoveryAuthority.child_comment_id,
+    node_id: recoveryAuthority.node_id,
+    updated_at: recoveryAuthority.updated_at
+  });
   if (!Object.prototype.hasOwnProperty.call(overrides.recovery_authority || {}, 'scope_digest')) {
     recoveryAuthority.scope_digest = orphanTakeoverAuthorityScopeDigest(
       target, attestationInput.attestation_digest, requestId
@@ -464,18 +511,47 @@ function takeoverRequest(current, overrides = {}) {
   };
 }
 
-function trustedRecoveryReaders(current, request, overrides = {}) {
-  return {
-    readAuthority: overrides.readAuthority || (async () => ({
-      authority: structuredClone(request.recovery_authority),
-      later_controlling_comments: []
-    })),
-    readStart: overrides.readStart || (async () => structuredClone(current.expectedStart)),
-    readOrphanStatus: overrides.readOrphanStatus || (async () => ({
-      status: 'ORPHAN_NONADOPTABLE',
-      orphan_attestation: structuredClone(request.orphan_attestation)
-    }))
+function recoveryFixture(current, request, overrides = {}) {
+  const authoritySnapshot = request.recovery_authority;
+  const childComment = {
+    id: authoritySnapshot.child_comment_id,
+    node_id: authoritySnapshot.node_id,
+    user: { login: authoritySnapshot.author_login },
+    author_association: authoritySnapshot.author_association,
+    body: `recovery-authority:${request.request_id}`,
+    updated_at: authoritySnapshot.updated_at,
+    issue_url: `https://api.github.com/repos/weijunswj/ai-agent-toolkit/issues/${current.storeOptions.child_issue}`
   };
+  return {
+    childComment,
+    parentComment: {
+      id: authoritySnapshot.parent_comment_id,
+      node_id: `IC_parent_${request.request_id}`,
+      user: { login: authoritySnapshot.author_login },
+      author_association: 'OWNER',
+      body: `Parent mirror of child comment ${authoritySnapshot.child_comment_id}`,
+      updated_at: authoritySnapshot.updated_at,
+      issue_url: `https://api.github.com/repos/weijunswj/ai-agent-toolkit/issues/${current.storeOptions.parent_issue}`
+    },
+    comments: [childComment, ...(overrides.laterComments || [])],
+    start: structuredClone(overrides.start || current.expectedStart),
+    malformedAuthority: overrides.malformedAuthority === true,
+    transportFailure: overrides.transportFailure || null
+  };
+}
+
+async function recoveryAdmission(current, request, overrides = {}) {
+  recoveryHostFixture = recoveryFixture(current, request, overrides);
+  try {
+    return await current.store.verifyRecoveryAdmission(request);
+  } finally {
+    recoveryHostFixture = null;
+  }
+}
+
+async function takeoverWithAdmission(current, request, overrides = {}) {
+  const admission = await recoveryAdmission(current, request, overrides);
+  return current.store.takeoverAbandonedRun(request, admission);
 }
 
 function ledgerCounts(store) {
@@ -1426,11 +1502,90 @@ test('lost supervisor ownership cannot append or obtain operation admission', as
     trustedReaders(expectedAuthority, operationDescriptor)), 'GPR_OWNERSHIP_LOST');
 });
 
+test('foreign process cannot self-certify orphan takeover with echo callbacks', async () => {
+  const current = orphanFixture({ seed: 'foreign-echo-attack', lock: 'LOCK-FOREIGN-ECHO' });
+  const request = takeoverRequest(current, { request_id: 'recovery-foreign-echo-attack' });
+  const before = ledgerCounts(current.store);
+  const result = await takeoverInChild(current, request);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.stdout, { ok: false, code: 'GPR_RECOVERY_ADMISSION_INVALID' });
+  assert.deepEqual(ledgerCounts(current.store), before);
+});
+
+test('lookalike recovery capabilities and serialized authority are rejected with zero writes', async () => {
+  const current = orphanFixture({ seed: 'lookalike-capability', lock: 'LOCK-LOOKALIKE' });
+  const request = takeoverRequest(current, { request_id: 'recovery-lookalike-capability' });
+  const before = ledgerCounts(current.store);
+  const genuine = await recoveryAdmission(current, request);
+
+  assertCode(() => JSON.stringify(genuine), 'GPR_RECOVERY_ADMISSION_NONSERIALIZABLE');
+  for (const lookalike of [{}, { request_id: request.request_id }, structuredClone({})]) {
+    await assertCodeAsync(() => current.store.takeoverAbandonedRun(request, lookalike),
+      'GPR_RECOVERY_ADMISSION_INVALID');
+    assert.deepEqual(ledgerCounts(current.store), before);
+  }
+});
+
+test('recovery admission binds exact store, request digest, namespace, lock, and target', async () => {
+  const current = orphanFixture({ seed: 'capability-binding', lock: 'LOCK-CAPABILITY-BINDING' });
+  const request = takeoverRequest(current, { request_id: 'recovery-capability-binding' });
+  const admission = await recoveryAdmission(current, request);
+  const before = ledgerCounts(current.store);
+
+  const reopened = createProgrammeReceiptStore(current.storeOptions);
+  await assertCodeAsync(() => reopened.takeoverAbandonedRun(request, admission), 'GPR_RECOVERY_ADMISSION_INVALID');
+
+  const alteredDigest = structuredClone(request);
+  alteredDigest.lease_ms += 1;
+  await assertCodeAsync(() => current.store.takeoverAbandonedRun(alteredDigest, admission),
+    'GPR_RECOVERY_ADMISSION_INVALID');
+
+  const alteredTarget = takeoverRequest(current, {
+    request_id: 'recovery-capability-binding-other-target',
+    target: { run_id: 'run-other', allocation_id: 'allocation-other', lock: 'LOCK-OTHER' }
+  });
+  await assertCodeAsync(() => current.store.takeoverAbandonedRun(alteredTarget, admission),
+    'GPR_RECOVERY_ADMISSION_INVALID');
+  assert.deepEqual(ledgerCounts(current.store), before);
+
+  const committed = await current.store.takeoverAbandonedRun(request, admission);
+  assert.equal(committed.status, 'COMMITTED');
+});
+
+test('stale first-party observation and consumed pre-commit admission cannot authorize writes', async () => {
+  const stale = orphanFixture({ seed: 'stale-observation', lock: 'LOCK-STALE-OBSERVATION' });
+  const staleRequest = takeoverRequest(stale, { request_id: 'recovery-stale-observation' });
+  staleRequest.orphan_attestation.observed_at = new Date(Date.now() - 31000).toISOString();
+  staleRequest.orphan_attestation.attestation_digest = '';
+  const attestationPayload = structuredClone(staleRequest.orphan_attestation);
+  delete attestationPayload.attestation_digest;
+  staleRequest.orphan_attestation.attestation_digest = digestValue(attestationPayload);
+  staleRequest.recovery_authority.scope_digest = orphanTakeoverAuthorityScopeDigest(
+    staleRequest.target, staleRequest.orphan_attestation.attestation_digest, staleRequest.request_id
+  );
+  const staleBefore = ledgerCounts(stale.store);
+  await assertCodeAsync(() => recoveryAdmission(stale, staleRequest), 'GPR_RECOVERY_ADMISSION_STALE');
+  assert.deepEqual(ledgerCounts(stale.store), staleBefore);
+
+  const blocked = orphanFixture({
+    seed: 'consumed-admission', lock: 'LOCK-CONSUMED-ADMISSION', operationState: 'APPLIED'
+  });
+  const blockedRequest = takeoverRequest(blocked, { request_id: 'recovery-consumed-admission' });
+  const admission = await recoveryAdmission(blocked, blockedRequest);
+  const blockedBefore = ledgerCounts(blocked.store);
+  await assertCodeAsync(() => blocked.store.takeoverAbandonedRun(blockedRequest, admission),
+    'GPR_RECOVERY_OPERATIONS_PRESENT');
+  await assertCodeAsync(() => blocked.store.takeoverAbandonedRun(blockedRequest, admission),
+    'GPR_RECOVERY_ADMISSION_CONSUMED');
+  assert.deepEqual(ledgerCounts(blocked.store), blockedBefore);
+});
+
 test('zero-operation orphan takeover commits one terminal receipt, release, and allocator-owned N+1 replacement', async () => {
   const current = orphanFixture({ seed: 'zero-operation', lock: 'LOCK-ORPHAN-ZERO' });
   const request = takeoverRequest(current, { request_id: 'recovery-zero-operation' });
   const before = ledgerCounts(current.store);
-  const result = await current.store.takeoverAbandonedRun(request, trustedRecoveryReaders(current, request));
+  const result = await takeoverWithAdmission(current, request);
   const after = ledgerCounts(current.store);
 
   assert.equal(result.status, 'COMMITTED');
@@ -1475,9 +1630,7 @@ test('same-process owner and ordinary receipt APIs cannot create ORPHAN_ABANDONE
   };
   const request = takeoverRequest(sameProcess, { request_id: 'recovery-same-process-owner' });
   const before = ledgerCounts(current.store);
-  await assertCodeAsync(() => current.store.takeoverAbandonedRun(
-    request, trustedRecoveryReaders(sameProcess, request)
-  ), 'GPR_RECOVERY_CURRENT_PROCESS_OWNER');
+  await assertCodeAsync(() => recoveryAdmission(sameProcess, request), 'GPR_RECOVERY_CURRENT_PROCESS_OWNER');
   assertCode(() => current.store.appendReceipt(current.session, {
     receipt_type: 'ORPHAN_ABANDONED',
     payload: { classification: 'ORPHAN_ABANDONED' },
@@ -1496,14 +1649,10 @@ test('missing or invalid recovery authority rejects with zero writes', async () 
   const before = ledgerCounts(current.store);
   const missing = structuredClone(valid);
   delete missing.recovery_authority;
-  await assertCodeAsync(() => current.store.takeoverAbandonedRun(
-    missing, trustedRecoveryReaders(current, valid)
-  ), 'GPR_RECOVERY_REQUEST_INVALID');
+  await assertCodeAsync(() => current.store.verifyRecoveryAdmission(missing), 'GPR_RECOVERY_REQUEST_INVALID');
   const invalid = structuredClone(valid);
   invalid.recovery_authority.scope_digest = 'f'.repeat(64);
-  await assertCodeAsync(() => current.store.takeoverAbandonedRun(
-    invalid, trustedRecoveryReaders(current, invalid)
-  ), 'GPR_AUTHORITY_CHANGED');
+  await assertCodeAsync(() => current.store.verifyRecoveryAdmission(invalid), 'GPR_AUTHORITY_CHANGED');
   assert.deepEqual(ledgerCounts(current.store), before);
 });
 
@@ -1516,10 +1665,14 @@ test('caller-fabricated OWNER recovery authority cannot replace trusted controll
     child_comment_id: request.recovery_authority.child_comment_id + 1,
     node_id: 'IC_trusted-recovery-authority'
   };
-  await assertCodeAsync(() => current.store.takeoverAbandonedRun(request,
-    trustedRecoveryReaders(current, request, {
-      readAuthority: async () => ({ authority: trustedAuthority, later_controlling_comments: [] })
-    })), 'GPR_AUTHORITY_CHANGED');
+  const trustedRequest = structuredClone(request);
+  trustedRequest.recovery_authority = trustedAuthority;
+  recoveryHostFixture = recoveryFixture(current, trustedRequest);
+  try {
+    await assertCodeAsync(() => current.store.verifyRecoveryAdmission(request), 'GPR_AUTHORITY_UNVERIFIED');
+  } finally {
+    recoveryHostFixture = null;
+  }
   assert.deepEqual(ledgerCounts(current.store), before);
 });
 
@@ -1527,13 +1680,18 @@ test('trusted later controlling chronology rejects a caller-declared empty chron
   const current = orphanFixture({ seed: 'later-authority' });
   const request = takeoverRequest(current, { request_id: 'recovery-later-authority' });
   const before = ledgerCounts(current.store);
-  await assertCodeAsync(() => current.store.takeoverAbandonedRun(request,
-    trustedRecoveryReaders(current, request, {
-      readAuthority: async () => ({
-        authority: structuredClone(request.recovery_authority),
-        later_controlling_comments: [{ comment_id: 5487000000 }]
-      })
-    })), 'GPR_AUTHORITY_CHANGED');
+  recoveryHostFixture = recoveryFixture(current, request, {
+    laterComments: [{
+      id: request.recovery_authority.child_comment_id + 1,
+      user: { login: request.recovery_authority.author_login },
+      author_association: 'OWNER'
+    }]
+  });
+  try {
+    await assertCodeAsync(() => current.store.verifyRecoveryAdmission(request), 'GPR_AUTHORITY_CHANGED');
+  } finally {
+    recoveryHostFixture = null;
+  }
   assert.deepEqual(ledgerCounts(current.store), before);
 });
 
@@ -1541,30 +1699,33 @@ test('trusted moved start rejects caller replay of the persisted old start', asy
   const current = orphanFixture({ seed: 'replayed-start' });
   const request = takeoverRequest(current, { request_id: 'recovery-replayed-start' });
   const before = ledgerCounts(current.store);
-  await assertCodeAsync(() => current.store.takeoverAbandonedRun(request,
-    trustedRecoveryReaders(current, request, {
-      readStart: async () => ({ ...current.expectedStart, head_sha: '9'.repeat(40) })
-    })), 'GPR_RECOVERY_SOURCE_CHANGED');
+  recoveryHostFixture = recoveryFixture(current, request, {
+    start: { ...current.expectedStart, head_sha: '9'.repeat(40) }
+  });
+  try {
+    await assertCodeAsync(() => current.store.verifyRecoveryAdmission(request), 'GPR_RECOVERY_SOURCE_CHANGED');
+  } finally {
+    recoveryHostFixture = null;
+  }
   assert.deepEqual(ledgerCounts(current.store), before);
 });
 
-test('trusted recovery readers fail closed on throws, malformed evidence, and unknown orphan state', async () => {
+test('first-party recovery verifier fails closed on transport and malformed authority evidence', async () => {
   const current = orphanFixture({ seed: 'reader-failure' });
   const request = takeoverRequest(current, { request_id: 'recovery-reader-failure' });
   const before = ledgerCounts(current.store);
   const cases = [
-    [{ readAuthority: async () => { throw new Error('authority unavailable'); } }, 'GPR_AUTHORITY_UNVERIFIED'],
-    [{ readAuthority: async () => ({}) }, 'GPR_AUTHORITY_UNVERIFIED'],
-    [{ readStart: async () => { throw new Error('source unavailable'); } }, 'GPR_START_UNVERIFIED'],
-    [{ readStart: async () => ({}) }, 'GPR_START_INVALID'],
-    [{ readOrphanStatus: async () => { throw new Error('holder unavailable'); } }, 'GPR_RECOVERY_ORPHAN_UNVERIFIED'],
-    [{ readOrphanStatus: async () => ({}) }, 'GPR_RECOVERY_ORPHAN_UNVERIFIED'],
-    [{ readOrphanStatus: async () => ({ status: 'UNKNOWN', orphan_attestation: null }) }, 'GPR_RECOVERY_ORPHAN_UNVERIFIED']
+    [{ transportFailure: 'authority' }, 'GPR_AUTHORITY_UNVERIFIED'],
+    [{ malformedAuthority: true }, 'GPR_AUTHORITY_UNVERIFIED'],
+    [{ transportFailure: 'start' }, 'GPR_START_UNVERIFIED']
   ];
   for (const [overrides, code] of cases) {
-    await assertCodeAsync(() => current.store.takeoverAbandonedRun(
-      request, trustedRecoveryReaders(current, request, overrides)
-    ), code);
+    recoveryHostFixture = recoveryFixture(current, request, overrides);
+    try {
+      await assertCodeAsync(() => current.store.verifyRecoveryAdmission(request), code);
+    } finally {
+      recoveryHostFixture = null;
+    }
     assert.deepEqual(ledgerCounts(current.store), before);
   }
 });
@@ -1579,9 +1740,7 @@ test('caller-supplied lease, fence, sequence, owner, process, namespace, or stat
   ]) {
     const invalid = structuredClone(valid);
     invalid[key] = key === 'fence_sequence' ? 2 : 'caller-value';
-    await assertCodeAsync(() => current.store.takeoverAbandonedRun(
-      invalid, trustedRecoveryReaders(current, valid)
-    ), 'GPR_CALLER_FENCE_FORBIDDEN');
+    await assertCodeAsync(() => current.store.verifyRecoveryAdmission(invalid), 'GPR_CALLER_FENCE_FORBIDDEN');
     assert.deepEqual(ledgerCounts(current.store), before);
   }
 });
@@ -1600,9 +1759,8 @@ test('zero-operation eligibility rejects every admitted operation state', async 
     });
     const request = takeoverRequest(current, { request_id: 'recovery-operation-' + operationState.toLowerCase() });
     const before = ledgerCounts(current.store);
-    await assertCodeAsync(() => current.store.takeoverAbandonedRun(
-      request, trustedRecoveryReaders(current, request)
-    ), expectedCode);
+    const admission = await recoveryAdmission(current, request);
+    await assertCodeAsync(() => current.store.takeoverAbandonedRun(request, admission), expectedCode);
     assert.deepEqual(ledgerCounts(current.store), before);
     assert.equal(current.store.readReceiptChain(current.oldRunId).at(-1).receipt_type, 'RUN_STARTED');
   }
@@ -1611,14 +1769,9 @@ test('zero-operation eligibility rejects every admitted operation state', async 
 test('exact duplicate is idempotent while same request ID conflicts and a different request loses the race', async () => {
   const current = orphanFixture({ seed: 'request-idempotence' });
   const request = takeoverRequest(current, { request_id: 'recovery-idempotence' });
-  const readers = trustedRecoveryReaders(current, request);
-  const committed = await current.store.takeoverAbandonedRun(request, readers);
+  const committed = await takeoverWithAdmission(current, request);
   const beforeDuplicate = ledgerCounts(current.store);
-  const duplicate = await current.store.takeoverAbandonedRun(request, trustedRecoveryReaders(current, request, {
-    readAuthority: async () => { throw new Error('must not reread committed duplicate'); },
-    readStart: async () => { throw new Error('must not reread committed duplicate'); },
-    readOrphanStatus: async () => { throw new Error('must not reread committed duplicate'); }
-  }));
+  const duplicate = await current.store.takeoverAbandonedRun(request, null);
   assert.equal(duplicate.status, 'DUPLICATE');
   assert.equal(duplicate.duplicate, true);
   assert.deepEqual(duplicate.recovery, committed.recovery);
@@ -1626,12 +1779,11 @@ test('exact duplicate is idempotent while same request ID conflicts and a differ
 
   const conflicting = structuredClone(request);
   conflicting.lease_ms = 60001;
-  await assertCodeAsync(() => current.store.takeoverAbandonedRun(
-    conflicting, trustedRecoveryReaders(current, conflicting)
-  ), 'GPR_RECOVERY_REQUEST_CONFLICT');
+  await assertCodeAsync(() => current.store.takeoverAbandonedRun(conflicting, null), 'GPR_RECOVERY_REQUEST_CONFLICT');
   const different = takeoverRequest(current, { request_id: 'recovery-different-request' });
+  const differentAdmission = await recoveryAdmission(current, different);
   await assertCodeAsync(() => current.store.takeoverAbandonedRun(
-    different, trustedRecoveryReaders(current, different)
+    different, differentAdmission
   ), 'GPR_RECOVERY_LOST_RACE');
   assert.deepEqual(ledgerCounts(current.store), beforeDuplicate);
 });
@@ -1656,35 +1808,50 @@ test('stale authority, moved source/start, wrong namespace/target, and remote ad
       ...overrides,
       request_id: 'recovery-target-' + label.replace(/[^a-z0-9]+/gi, '-').toLowerCase()
     });
-    await assertCodeAsync(() => current.store.takeoverAbandonedRun(
-      request, trustedRecoveryReaders(current, request)
-    ), expectedCode);
+    await assertCodeAsync(async () => {
+      const admission = await recoveryAdmission(current, request);
+      return current.store.takeoverAbandonedRun(request, admission);
+    }, expectedCode);
     assert.deepEqual(ledgerCounts(current.store), before);
   }
   let adapterCalls = 0;
   const invalid = { ...base, adapter: () => { adapterCalls += 1; } };
-  await assertCodeAsync(() => current.store.takeoverAbandonedRun(
-    invalid, trustedRecoveryReaders(current, base)
-  ), 'GPR_RECOVERY_REQUEST_INVALID');
+  await assertCodeAsync(() => current.store.verifyRecoveryAdmission(invalid), 'GPR_RECOVERY_REQUEST_INVALID');
   assert.equal(adapterCalls, 0);
   assert.deepEqual(ledgerCounts(current.store), before);
 });
 
-test('trusted recovery observation rejects active and unverifiable foreign holders with zero writes', async () => {
+test('first-party recovery observation rejects active and unverifiable foreign holders with zero writes', async () => {
   const current = await liveOrphanFixture({ seed: 'live-holder', lock: 'LOCK-LIVE-HOLDER' });
   const request = takeoverRequest(current, { request_id: 'recovery-live-holder' });
   const before = ledgerCounts(current.store);
 
-  await assertCodeAsync(() => current.store.takeoverAbandonedRun(request,
-    trustedRecoveryReaders(current, request, {
-      readOrphanStatus: async () => ({ status: 'ACTIVE_FOREIGN_HOLDER', orphan_attestation: null })
-    })), 'GPR_RECOVERY_HOLDER_ACTIVE');
+  await assertCodeAsync(() => recoveryAdmission(current, request), 'GPR_RECOVERY_HOLDER_ACTIVE');
   assert.deepEqual(ledgerCounts(current.store), before);
 
-  await assertCodeAsync(() => current.store.takeoverAbandonedRun(request,
-    trustedRecoveryReaders(current, request, {
-      readOrphanStatus: async () => ({ status: 'UNKNOWN', orphan_attestation: null })
-    })), 'GPR_RECOVERY_ORPHAN_UNVERIFIED');
+  const malformed = structuredClone(request);
+  malformed.orphan_attestation.holder_nonadoptable = false;
+  malformed.orphan_attestation.attestation_digest = '';
+  const malformedPayload = structuredClone(malformed.orphan_attestation);
+  delete malformedPayload.attestation_digest;
+  malformed.orphan_attestation.attestation_digest = digestValue(malformedPayload);
+  malformed.recovery_authority.scope_digest = orphanTakeoverAuthorityScopeDigest(
+    malformed.target, malformed.orphan_attestation.attestation_digest, malformed.request_id
+  );
+  await assertCodeAsync(() => recoveryAdmission(current, malformed), 'GPR_RECOVERY_ATTESTATION_INVALID');
+  assert.deepEqual(ledgerCounts(current.store), before);
+
+  const nativeKill = process.kill;
+  process.kill = () => {
+    const error = new Error('holder state unavailable');
+    error.code = 'EACCES';
+    throw error;
+  };
+  try {
+    await assertCodeAsync(() => recoveryAdmission(current, request), 'GPR_RECOVERY_ORPHAN_UNVERIFIED');
+  } finally {
+    process.kill = nativeKill;
+  }
   assert.deepEqual(ledgerCounts(current.store), before);
 
   current.child.stdin.write('append\nclose\n');
@@ -1699,13 +1866,15 @@ test('trusted recovery observation rejects active and unverifiable foreign holde
 test('concurrent identical takeover requests commit once and return one deterministic duplicate', async () => {
   const current = orphanFixture({ seed: 'concurrent-identical', lock: 'LOCK-CONCURRENT-IDENTICAL' });
   const request = takeoverRequest(current, { request_id: 'recovery-concurrent-identical' });
+  const firstAdmission = await recoveryAdmission(current, request);
+  const secondAdmission = await recoveryAdmission(current, request);
   const results = await Promise.all([
-    takeoverInChild(current, request),
-    takeoverInChild(current, request)
+    Promise.resolve().then(() => current.store.takeoverAbandonedRun(request, firstAdmission)),
+    Promise.resolve().then(() => current.store.takeoverAbandonedRun(request, secondAdmission))
   ]);
-  assert.equal(results.filter((result) => result.status === 0 && result.stdout.ok && result.stdout.status === 'COMMITTED').length, 1);
-  assert.equal(results.filter((result) => result.status === 0 && result.stdout.ok && result.stdout.status === 'DUPLICATE').length, 1);
-  assert.equal(new Set(results.map((result) => result.stdout.replacement_run_id)).size, 1);
+  assert.equal(results.filter((result) => result.status === 'COMMITTED').length, 1);
+  assert.equal(results.filter((result) => result.status === 'DUPLICATE').length, 1);
+  assert.equal(new Set(results.map((result) => result.recovery.replacement.allocation.run_id)).size, 1);
   assert.equal(ledgerCounts(current.store).allocations, 2);
   assert.equal(ledgerCounts(current.store).high_water, 2);
 });
@@ -1714,13 +1883,16 @@ test('concurrent different takeover requests have exactly one winner and one los
   const current = orphanFixture({ seed: 'concurrent-different', lock: 'LOCK-CONCURRENT-DIFFERENT' });
   const first = takeoverRequest(current, { request_id: 'recovery-concurrent-a' });
   const second = takeoverRequest(current, { request_id: 'recovery-concurrent-b' });
-  const results = await Promise.all([
-    takeoverInChild(current, first),
-    takeoverInChild(current, second)
+  const firstAdmission = await recoveryAdmission(current, first);
+  const secondAdmission = await recoveryAdmission(current, second);
+  const results = await Promise.allSettled([
+    Promise.resolve().then(() => current.store.takeoverAbandonedRun(first, firstAdmission)),
+    Promise.resolve().then(() => current.store.takeoverAbandonedRun(second, secondAdmission))
   ]);
-  assert.equal(results.filter((result) => result.status === 0 && result.stdout.ok && result.stdout.status === 'COMMITTED').length, 1);
-  assert.equal(results.filter((result) => result.status === 0 && result.stdout.ok === false
-    && result.stdout.code === 'GPR_RECOVERY_LOST_RACE').length, 1);
+  assert.equal(results.filter((result) => result.status === 'fulfilled'
+    && result.value.status === 'COMMITTED').length, 1);
+  assert.equal(results.filter((result) => result.status === 'rejected'
+    && result.reason.code === 'GPR_RECOVERY_LOST_RACE').length, 1);
   assert.equal(ledgerCounts(current.store).allocations, 2);
   assert.equal(ledgerCounts(current.store).high_water, 2);
 });
@@ -1741,10 +1913,11 @@ test('not-yet-committed readback is typed and a natural lease-expiry race perfor
   const original = db.prepare('SELECT issued_at, expires_at, allocation_digest FROM allocations WHERE run_id = ?')
     .get(current.oldRunId);
   db.close();
+  const admission = await recoveryAdmission(current, request);
   await new Promise((resolve) => setTimeout(resolve, Math.max(0, Date.parse(original.expires_at) - Date.now() + 50)));
   const before = ledgerCounts(current.store);
   await assertCodeAsync(() => current.store.takeoverAbandonedRun(
-    request, trustedRecoveryReaders(current, request)
+    request, admission
   ), 'GPR_RECOVERY_EXPIRED_RACE');
   assert.deepEqual(ledgerCounts(current.store), before);
   const afterDb = new DatabaseSync(current.store.databasePath, { readOnly: true });
@@ -1770,9 +1943,7 @@ test('corrupt receipt chains and schema versions fail closed before takeover wri
   chainDb.exec("CREATE TRIGGER receipts_no_update BEFORE UPDATE ON receipts BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;");
   chainDb.close();
   const chainBefore = ledgerCounts(chainCorrupt.store);
-  await assertCodeAsync(() => chainCorrupt.store.takeoverAbandonedRun(
-    chainRequest, trustedRecoveryReaders(chainCorrupt, chainRequest)
-  ), 'GPR_RECEIPT_TAMPERED');
+  await assertCodeAsync(() => recoveryAdmission(chainCorrupt, chainRequest), 'GPR_RECEIPT_TAMPERED');
   assert.deepEqual(ledgerCounts(chainCorrupt.store), chainBefore);
 
   const schemaCorrupt = orphanFixture({ seed: 'corrupt-schema', lock: 'LOCK-CORRUPT-SCHEMA' });
@@ -1781,16 +1952,14 @@ test('corrupt receipt chains and schema versions fail closed before takeover wri
   schemaDb.exec('PRAGMA user_version = 1');
   schemaDb.close();
   const schemaBefore = ledgerCounts(schemaCorrupt.store);
-  await assertCodeAsync(() => schemaCorrupt.store.takeoverAbandonedRun(
-    schemaRequest, trustedRecoveryReaders(schemaCorrupt, schemaRequest)
-  ), 'GPR_SCHEMA_MISMATCH');
+  await assertCodeAsync(() => recoveryAdmission(schemaCorrupt, schemaRequest), 'GPR_SCHEMA_MISMATCH');
   assert.deepEqual(ledgerCounts(schemaCorrupt.store), schemaBefore);
 });
 
 test('semantically tampered recovery evidence fails independent readback after a valid receipt re-sign', async () => {
   const current = orphanFixture({ seed: 'tampered-recovery', lock: 'LOCK-TAMPERED-RECOVERY' });
   const request = takeoverRequest(current, { request_id: 'recovery-tampered-evidence' });
-  await current.store.takeoverAbandonedRun(request, trustedRecoveryReaders(current, request));
+  await takeoverWithAdmission(current, request);
   const db = new DatabaseSync(current.store.databasePath);
   const row = db.prepare('SELECT * FROM receipts WHERE run_id = ? AND receipt_type = ?')
     .get(current.oldRunId, 'ORPHAN_ABANDONED');
