@@ -675,6 +675,60 @@ function validateTakeoverRequest(value, config) {
   return { request, requestDigest: orphanTakeoverRequestDigest(request) };
 }
 
+function validateTrustedRecoveryReaders(value) {
+  if (!exactKeys(value, ['readAuthority', 'readStart', 'readOrphanStatus'])
+    || typeof value.readAuthority !== 'function'
+    || typeof value.readStart !== 'function'
+    || typeof value.readOrphanStatus !== 'function') {
+    fail('GPR_TRUSTED_RECOVERY_READERS_INVALID');
+  }
+  return value;
+}
+
+function verifyTrustedOrphanSnapshot(expected, snapshot) {
+  if (!exactKeys(snapshot, ['status', 'orphan_attestation'])
+    || !['SAME_PROCESS_OWNER', 'ACTIVE_FOREIGN_HOLDER', 'ORPHAN_NONADOPTABLE', 'UNKNOWN'].includes(snapshot.status)) {
+    fail('GPR_RECOVERY_ORPHAN_UNVERIFIED');
+  }
+  if (snapshot.status === 'SAME_PROCESS_OWNER') fail('GPR_RECOVERY_CURRENT_PROCESS_OWNER');
+  if (snapshot.status === 'ACTIVE_FOREIGN_HOLDER') fail('GPR_RECOVERY_HOLDER_ACTIVE');
+  if (snapshot.status !== 'ORPHAN_NONADOPTABLE') fail('GPR_RECOVERY_ORPHAN_UNVERIFIED');
+  const observed = validateOrphanAttestation(snapshot.orphan_attestation);
+  if (canonicalSerialize(observed) !== canonicalSerialize(expected)) {
+    fail('GPR_RECOVERY_ATTESTATION_INVALID');
+  }
+  return observed;
+}
+
+async function verifyTrustedRecoveryAdmission(input, config, readersInput) {
+  const { request } = validateTakeoverRequest(input, config);
+  const readers = validateTrustedRecoveryReaders(readersInput);
+  const assertion = deepFreeze({
+    action: ORPHAN_TAKEOVER_ACTION,
+    request: clone(request),
+    request_digest: orphanTakeoverRequestDigest(request)
+  });
+  const recoveryAuthority = verifyAuthoritySnapshot(request.recovery_authority,
+    await callReader(() => readers.readAuthority(clone(assertion)), 'GPR_AUTHORITY_UNVERIFIED'));
+  const observedStart = validateStart(
+    await callReader(() => readers.readStart(clone(assertion)), 'GPR_START_UNVERIFIED')
+  );
+  if (canonicalSerialize(observedStart) !== canonicalSerialize(request.observed_start)
+    || digestValue(observedStart) !== request.target.start_digest) {
+    fail('GPR_RECOVERY_SOURCE_CHANGED');
+  }
+  const orphanAttestation = verifyTrustedOrphanSnapshot(request.orphan_attestation,
+    await callReader(() => readers.readOrphanStatus(clone(assertion)), 'GPR_RECOVERY_ORPHAN_UNVERIFIED'));
+  const verifiedRequest = deepFreeze({
+    ...request,
+    observed_start: observedStart,
+    recovery_authority: recoveryAuthority,
+    later_controlling_comment_ids: [],
+    orphan_attestation: orphanAttestation
+  });
+  return { request: verifiedRequest, requestDigest: orphanTakeoverRequestDigest(verifiedRequest) };
+}
+
 function validateLease(value) {
   if (!exactKeys(value, LEASE_KEYS)) fail('GPR_LEASE_INVALID');
   if (!isSafeId(value.lease_id) || !isSafeId(value.fence_id)) fail('GPR_LEASE_INVALID');
@@ -2041,8 +2095,31 @@ function assertTakeoverTargetDb(db, config, allocation, run, chain, target) {
   return { authority, start, inventory, unresolvedCount };
 }
 
-function takeoverAbandonedRunInternal(store, input) {
-  const { request, requestDigest } = validateTakeoverRequest(input, store.config);
+function readCommittedTakeoverForRequest(store, request, requestDigest) {
+  const db = openVerified(store.config, false);
+  try {
+    const existingRequest = committedOrphanRequestDb(db, request.request_id);
+    if (!existingRequest) return null;
+    if (existingRequest.run_id !== request.target.run_id || existingRequest.request_digest !== requestDigest) {
+      fail('GPR_RECOVERY_REQUEST_CONFLICT');
+    }
+    return readOrphanTakeoverDb(db, store.config, request.target.run_id);
+  } finally {
+    db.close();
+  }
+}
+
+async function takeoverAbandonedRunInternal(store, input, trustedReaders) {
+  const asserted = validateTakeoverRequest(input, store.config);
+  const committed = readCommittedTakeoverForRequest(store, asserted.request, asserted.requestDigest);
+  if (committed) {
+    return {
+      status: 'DUPLICATE',
+      duplicate: true,
+      recovery: committed
+    };
+  }
+  const { request, requestDigest } = await verifyTrustedRecoveryAdmission(input, store.config, trustedReaders);
   const ownerInstanceId = randomId('owner');
   const db = openVerified(store.config, false);
   let outcome;
@@ -2081,6 +2158,9 @@ function takeoverAbandonedRunInternal(store, input) {
       if (highWater > allocation.fence_sequence) fail('GPR_RECOVERY_FENCED_BY_NEWER_ALLOCATION');
       if (highWater !== allocation.fence_sequence) fail('GPR_RECOVERY_FENCE_MISMATCH');
       const durable = assertTakeoverTargetDb(db, store.config, allocation, run, chain, target);
+      if (canonicalSerialize(request.observed_start) !== canonicalSerialize(durable.start)) {
+        fail('GPR_RECOVERY_SOURCE_CHANGED');
+      }
       if (request.orphan_attestation.observed_at > isoAt()) fail('GPR_RECOVERY_ATTESTATION_INVALID');
       const now = isoAt();
       if (Date.parse(allocation.expires_at) <= Date.parse(now)) fail('GPR_RECOVERY_EXPIRED_RACE');
@@ -2526,8 +2606,8 @@ function createProgrammeReceiptStore(options) {
         created_at: input.created_at
       });
     },
-    takeoverAbandonedRun(request) {
-      return takeoverAbandonedRunInternal(store, request);
+    takeoverAbandonedRun(request, trustedReaders) {
+      return takeoverAbandonedRunInternal(store, request, trustedReaders);
     },
     readOrphanTakeover(request) {
       return readOrphanTakeoverInternal(config, request);
