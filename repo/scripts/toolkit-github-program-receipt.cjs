@@ -120,6 +120,32 @@ const RECOVERY_REQUEST_KEYS = Object.freeze([
   'request_id', 'target', 'observed_start', 'recovery_authority',
   'later_controlling_comment_ids', 'orphan_attestation', 'lease_ms'
 ]);
+const RECOVERY_VERIFICATION_PACKET_SCHEMA = 'toolkit.github-program.recovery-verification.v1';
+const RECOVERY_VERIFICATION_PACKET_KEYS = Object.freeze([
+  'schema', 'request_digest', 'recovery_authority', 'observed_start',
+  'verifier_identity_digest', 'transport_identity_digest', 'packet_digest'
+]);
+const TRUSTED_RECOVERY_COMMAND_CANDIDATES = Object.freeze({
+  win32: Object.freeze({
+    gh: Object.freeze([
+      'C:/Program Files/GitHub CLI/gh.exe',
+      'C:/Program Files (x86)/GitHub CLI/gh.exe'
+    ]),
+    git: Object.freeze([
+      'C:/Program Files/Git/cmd/git.exe',
+      'C:/Program Files/Git/bin/git.exe',
+      'C:/Program Files (x86)/Git/cmd/git.exe'
+    ])
+  }),
+  darwin: Object.freeze({
+    gh: Object.freeze(['/usr/local/bin/gh', '/opt/homebrew/bin/gh', '/usr/bin/gh']),
+    git: Object.freeze(['/usr/bin/git', '/usr/local/bin/git', '/opt/homebrew/bin/git'])
+  }),
+  linux: Object.freeze({
+    gh: Object.freeze(['/usr/bin/gh', '/usr/local/bin/gh']),
+    git: Object.freeze(['/usr/bin/git', '/usr/local/bin/git'])
+  })
+});
 const RECOVERY_READBACK_KEYS = Object.freeze(['run_id', 'request_id']);
 const CALLER_OWNED_KEYS = new Set([
   'lease_id', 'fence_id', 'fence_sequence', 'owner_instance_id', 'process_id',
@@ -692,17 +718,112 @@ function verifyTrustedOrphanSnapshot(expected, snapshot) {
   return observed;
 }
 
-function recoveryCommand(command, args, cwd, errorCode) {
-  const env = { ...process.env };
-  delete env.NODE_OPTIONS;
-  delete env.NODE_PATH;
-  const result = spawnSync(command, args, {
+function trustedRecoveryHome() {
+  let home;
+  try { home = os.userInfo().homedir; } catch (_) { fail('GPR_VERIFIER_IDENTITY_INVALID', { reason: 'home-unproven' }); }
+  if (typeof home !== 'string' || !path.isAbsolute(home)) {
+    fail('GPR_VERIFIER_IDENTITY_INVALID', { reason: 'home-unproven' });
+  }
+  let realpath;
+  try { realpath = fs.realpathSync.native(home); } catch (_) {
+    fail('GPR_VERIFIER_IDENTITY_INVALID', { reason: 'home-unproven' });
+  }
+  if (realpath !== path.resolve(home)) fail('GPR_VERIFIER_IDENTITY_INVALID', { reason: 'home-moved' });
+  return realpath;
+}
+
+function trustedWindowsSystemRoot() {
+  if (process.platform !== 'win32') return null;
+  const expected = path.join(path.parse(trustedRecoveryHome()).root, 'Windows');
+  let realpath;
+  try { realpath = fs.realpathSync.native(expected); } catch (_) {
+    fail('GPR_VERIFIER_IDENTITY_INVALID', { reason: 'system-root-unproven' });
+  }
+  if (!recoveryPathEqual(realpath, expected)) {
+    fail('GPR_VERIFIER_IDENTITY_INVALID', { reason: 'system-root-moved' });
+  }
+  canonicalRegularFile(path.join(realpath, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), true);
+  return realpath;
+}
+
+function recoveryTransportEnvironment() {
+  const home = trustedRecoveryHome();
+  const environment = {
+    GH_HOST: 'github.com',
+    GH_PROMPT_DISABLED: '1',
+    GH_CONFIG_DIR: process.platform === 'win32'
+      ? path.join(home, 'AppData', 'Roaming', 'GitHub CLI')
+      : path.join(home, '.config', 'gh'),
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+    GIT_TERMINAL_PROMPT: '0',
+    LC_ALL: 'C',
+    LANG: 'C'
+  };
+  if (process.platform === 'win32') {
+    environment.HOME = home;
+    environment.SystemRoot = trustedWindowsSystemRoot();
+    environment.USERPROFILE = home;
+    environment.APPDATA = path.join(home, 'AppData', 'Roaming');
+    environment.LOCALAPPDATA = path.join(home, 'AppData', 'Local');
+  } else {
+    environment.HOME = home;
+    environment.XDG_CONFIG_HOME = path.join(home, '.config');
+  }
+  return Object.freeze(environment);
+}
+
+function trustedRecoveryCommandIdentity(command) {
+  const platform = process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux';
+  const candidates = TRUSTED_RECOVERY_COMMAND_CANDIDATES[platform]
+    && TRUSTED_RECOVERY_COMMAND_CANDIDATES[platform][command];
+  const errorCode = command === 'gh' ? 'GPR_AUTHORITY_UNVERIFIED' : 'GPR_START_UNVERIFIED';
+  if (!Array.isArray(candidates)) fail(errorCode, { cause: 'transport-command-invalid' });
+  for (const candidate of candidates) {
+    try {
+      const realpath = canonicalRegularFile(candidate, true);
+      return Object.freeze({
+        command,
+        path: realpath,
+        executable_digest: sha256File(realpath)
+      });
+    } catch (_) {
+      // Try only the fixed first-party allowlist; never consult PATH.
+    }
+  }
+  fail(errorCode, { cause: 'trusted-command-unavailable' });
+}
+
+function recoveryTransportContext() {
+  const environment = recoveryTransportEnvironment();
+  const commands = Object.freeze({
+    gh: trustedRecoveryCommandIdentity('gh'),
+    git: trustedRecoveryCommandIdentity('git')
+  });
+  const identity = {
+    commands: {
+      gh: commands.gh,
+      git: commands.git
+    },
+    environment_digest: digestValue(environment)
+  };
+  return Object.freeze({
+    commands,
+    environment,
+    identity_digest: digestValue(identity)
+  });
+}
+
+function recoveryCommand(command, args, cwd, errorCode, transport) {
+  if (!transport || !transport.commands[command]) fail(errorCode, { cause: 'transport-context-invalid' });
+  const result = spawnSync(transport.commands[command].path, args, {
     cwd,
     encoding: 'utf8',
     windowsHide: true,
     timeout: VERIFIER_TIMEOUT_MS,
     maxBuffer: 1024 * 1024,
-    env
+    env: { ...transport.environment },
+    shell: false
   });
   if (result.error || result.status !== 0 || result.signal || result.stderr) {
     fail(errorCode, { cause: result.error && result.error.code ? result.error.code : 'transport-failed' });
@@ -710,8 +831,8 @@ function recoveryCommand(command, args, cwd, errorCode) {
   return String(result.stdout || '').trim();
 }
 
-function recoveryJsonCommand(command, args, cwd, errorCode) {
-  const stdout = recoveryCommand(command, args, cwd, errorCode);
+function recoveryJsonCommand(command, args, cwd, errorCode, transport) {
+  const stdout = recoveryCommand(command, args, cwd, errorCode, transport);
   try {
     return JSON.parse(stdout);
   } catch (_) {
@@ -719,17 +840,17 @@ function recoveryJsonCommand(command, args, cwd, errorCode) {
   }
 }
 
-function canonicalRecoveryAuthority(config, request) {
+function canonicalRecoveryAuthority(config, request, transport) {
   const [owner, repository] = config.namespace.repository.split('/');
   const commentEndpoint = (id) => `repos/${owner}/${repository}/issues/comments/${id}`;
-  const childComment = recoveryJsonCommand('gh', ['api', commentEndpoint(request.recovery_authority.child_comment_id)],
-    config.repositoryRoot, 'GPR_AUTHORITY_UNVERIFIED');
-  const parentComment = recoveryJsonCommand('gh', ['api', commentEndpoint(request.recovery_authority.parent_comment_id)],
-    config.repositoryRoot, 'GPR_AUTHORITY_UNVERIFIED');
-  const childPages = recoveryJsonCommand('gh', ['api', `repos/${owner}/${repository}/issues/${config.namespace.child_issue}/comments?per_page=100`, '--paginate', '--slurp'],
-    config.repositoryRoot, 'GPR_AUTHORITY_UNVERIFIED');
-  const parentPages = recoveryJsonCommand('gh', ['api', `repos/${owner}/${repository}/issues/${config.namespace.parent_issue}/comments?per_page=100`, '--paginate', '--slurp'],
-    config.repositoryRoot, 'GPR_AUTHORITY_UNVERIFIED');
+  const childComment = recoveryJsonCommand('gh', ['api', '--hostname', 'github.com', commentEndpoint(request.recovery_authority.child_comment_id)],
+    config.repositoryRoot, 'GPR_AUTHORITY_UNVERIFIED', transport);
+  const parentComment = recoveryJsonCommand('gh', ['api', '--hostname', 'github.com', commentEndpoint(request.recovery_authority.parent_comment_id)],
+    config.repositoryRoot, 'GPR_AUTHORITY_UNVERIFIED', transport);
+  const childPages = recoveryJsonCommand('gh', ['api', '--hostname', 'github.com', `repos/${owner}/${repository}/issues/${config.namespace.child_issue}/comments?per_page=100`, '--paginate', '--slurp'],
+    config.repositoryRoot, 'GPR_AUTHORITY_UNVERIFIED', transport);
+  const parentPages = recoveryJsonCommand('gh', ['api', '--hostname', 'github.com', `repos/${owner}/${repository}/issues/${config.namespace.parent_issue}/comments?per_page=100`, '--paginate', '--slurp'],
+    config.repositoryRoot, 'GPR_AUTHORITY_UNVERIFIED', transport);
   if (!isRecord(childComment) || !isRecord(parentComment)
     || !Array.isArray(childPages) || !Array.isArray(parentPages)
     || childComment.id !== request.recovery_authority.child_comment_id
@@ -778,26 +899,28 @@ function canonicalRecoveryAuthority(config, request) {
   return deepFreeze(observed);
 }
 
-function gitRecoveryRead(config, args, errorCode = 'GPR_START_UNVERIFIED', allowDetached = false) {
-  const env = { ...process.env };
-  delete env.NODE_OPTIONS;
-  delete env.NODE_PATH;
-  const result = spawnSync('git', ['-C', config.repositoryRoot, ...args], {
-    encoding: 'utf8', windowsHide: true, timeout: VERIFIER_TIMEOUT_MS, env
+function gitRecoveryRead(config, args, errorCode = 'GPR_START_UNVERIFIED', allowDetached = false, transport) {
+  if (!transport || !transport.commands.git) fail(errorCode, { cause: 'transport-context-invalid' });
+  const result = spawnSync(transport.commands.git.path, ['-C', config.repositoryRoot, ...args], {
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: VERIFIER_TIMEOUT_MS,
+    env: { ...transport.environment },
+    shell: false
   });
   if (allowDetached && result.status === 1 && !result.error && !result.signal) return null;
   if (result.error || result.status !== 0 || result.signal || result.stderr) fail(errorCode);
   return String(result.stdout || '').trim();
 }
 
-function canonicalRecoveryStart(config, request) {
-  const status = gitRecoveryRead(config, ['status', '--porcelain=v1'])
+function canonicalRecoveryStart(config, request, transport) {
+  const status = gitRecoveryRead(config, ['status', '--porcelain=v1'], 'GPR_START_UNVERIFIED', false, transport)
     .split(/\r?\n/).filter(Boolean);
-  const branch = gitRecoveryRead(config, ['symbolic-ref', '--quiet', '--short', 'HEAD'], 'GPR_START_UNVERIFIED', true);
+  const branch = gitRecoveryRead(config, ['symbolic-ref', '--quiet', '--short', 'HEAD'], 'GPR_START_UNVERIFIED', true, transport);
   const observed = validateStart({
-    base_sha: gitRecoveryRead(config, ['merge-base', 'HEAD', 'origin/main']),
-    head_sha: gitRecoveryRead(config, ['rev-parse', 'HEAD']),
-    tree_sha: gitRecoveryRead(config, ['rev-parse', 'HEAD^{tree}']),
+    base_sha: gitRecoveryRead(config, ['merge-base', 'HEAD', 'origin/main'], 'GPR_START_UNVERIFIED', false, transport),
+    head_sha: gitRecoveryRead(config, ['rev-parse', 'HEAD'], 'GPR_START_UNVERIFIED', false, transport),
+    tree_sha: gitRecoveryRead(config, ['rev-parse', 'HEAD^{tree}'], 'GPR_START_UNVERIFIED', false, transport),
     status_digest: digestValue({ status }),
     clean_worktree: status.length === 0,
     ref: branch === null
@@ -811,6 +934,28 @@ function canonicalRecoveryStart(config, request) {
   return deepFreeze(observed);
 }
 
+function canonicalRecoveryRepositoryRoot() {
+  const expected = path.resolve(__dirname, '..', '..');
+  try {
+    if (!fs.existsSync(expected) || !fs.lstatSync(expected).isDirectory()) {
+      fail('GPR_VERIFIER_IDENTITY_INVALID', { reason: 'repository-root-unproven' });
+    }
+    assertNoSymlinkComponents(expected);
+    const realpath = fs.realpathSync.native(expected);
+    if (realpath !== expected) fail('GPR_VERIFIER_IDENTITY_INVALID', { reason: 'repository-root-moved' });
+    return realpath;
+  } catch (error) {
+    if (error instanceof GprError) throw error;
+    fail('GPR_VERIFIER_IDENTITY_INVALID', { reason: 'repository-root-unproven' });
+  }
+}
+
+function recoveryPathEqual(left, right) {
+  return process.platform === 'win32'
+    ? left.toLowerCase() === right.toLowerCase()
+    : left === right;
+}
+
 function processHolderStatus(processId) {
   if (processId === process.pid) return 'SAME_PROCESS_OWNER';
   try {
@@ -822,8 +967,8 @@ function processHolderStatus(processId) {
   }
 }
 
-function canonicalRecoveryOrphan(store, request) {
-  const db = openVerified(store.config, false);
+function canonicalRecoveryOrphan(config, request) {
+  const db = openVerified(config, false, true);
   let allocation;
   try {
     allocation = db.prepare('SELECT * FROM allocations WHERE allocation_id = ? AND run_id = ?')
@@ -851,11 +996,155 @@ function createRecoveryAdmissionToken() {
   return Object.freeze(admission);
 }
 
+function recoveryVerificationPacketPayload(value) {
+  const payload = clone(value);
+  delete payload.packet_digest;
+  return payload;
+}
+
+function validateRecoveryVerificationPacket(value) {
+  if (!exactKeys(value, RECOVERY_VERIFICATION_PACKET_KEYS)
+    || value.schema !== RECOVERY_VERIFICATION_PACKET_SCHEMA
+    || !isDigest(value.request_digest)
+    || !isDigest(value.verifier_identity_digest)
+    || !isDigest(value.transport_identity_digest)
+    || !isDigest(value.packet_digest)) {
+    fail('GPR_RECOVERY_VERIFICATION_PACKET_INVALID');
+  }
+  const recoveryAuthority = validateAuthority(value.recovery_authority);
+  const observedStart = validateStart(value.observed_start);
+  if (value.packet_digest !== digestValue(recoveryVerificationPacketPayload(value))) {
+    fail('GPR_RECOVERY_VERIFICATION_PACKET_INVALID');
+  }
+  assertPrivacySafe(value);
+  return deepFreeze({
+    ...clone(value),
+    recovery_authority: recoveryAuthority,
+    observed_start: observedStart
+  });
+}
+
+function failRecoveryVerifierProcess(result) {
+  if (result && result.status === 1 && !result.error && !result.signal
+    && result.stdout === '' && typeof result.stderr === 'string') {
+    try {
+      const error = JSON.parse(result.stderr);
+      if (isRecord(error) && error.ok === false
+        && typeof error.code === 'string' && /^GPR_[A-Z0-9_]+$/.test(error.code)) {
+        fail(error.code);
+      }
+    } catch (error) {
+      if (error instanceof GprError) throw error;
+    }
+  }
+  fail('GPR_FRESH_PROCESS_VERIFICATION_FAILED');
+}
+
+function validateRecoveryVerifierProcessResult(result) {
+  if (!result || result.error || result.signal || result.status !== 0
+    || typeof result.stdout !== 'string' || typeof result.stderr !== 'string'
+    || Buffer.byteLength(result.stdout, 'utf8') > VERIFIER_STREAM_BYTES
+    || Buffer.byteLength(result.stderr, 'utf8') > VERIFIER_STREAM_BYTES
+    || result.stderr !== '' || !result.stdout.endsWith('\n')
+    || result.stdout.slice(0, -1).includes('\n')) {
+    failRecoveryVerifierProcess(result);
+  }
+  let parsed;
+  try { parsed = JSON.parse(result.stdout.slice(0, -1)); } catch (_) {
+    fail('GPR_FRESH_PROCESS_VERIFICATION_FAILED');
+  }
+  let packet;
+  try { packet = validateRecoveryVerificationPacket(parsed); } catch (_) {
+    fail('GPR_FRESH_PROCESS_VERIFICATION_FAILED');
+  }
+  if (canonicalSerialize(packet) + '\n' !== result.stdout) {
+    fail('GPR_FRESH_PROCESS_VERIFICATION_FAILED');
+  }
+  return packet;
+}
+
+function recoveryVerifierLaunchEnvironment() {
+  const environment = {};
+  if (process.platform === 'win32') {
+    const systemRoot = trustedWindowsSystemRoot();
+    environment.SystemRoot = systemRoot;
+    environment.PSModulePath = path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules');
+  }
+  return Object.freeze(environment);
+}
+
+function verifyRecoveryAdmissionFreshProcess(config, request) {
+  const identity = runtimeIdentity();
+  if (!recoveryPathEqual(identity.nodeRealpath, canonicalRegularFile(process.execPath, true))
+    || !recoveryPathEqual(identity.runtimeRealpath, canonicalRegularFile(__filename))) {
+    fail('GPR_VERIFIER_IDENTITY_INVALID');
+  }
+  const repositoryRoot = canonicalRecoveryRepositoryRoot();
+  if (!recoveryPathEqual(config.repositoryRoot, repositoryRoot)) {
+    fail('GPR_VERIFIER_IDENTITY_INVALID', { reason: 'repository-root-untrusted' });
+  }
+  const result = spawnSync(identity.nodeRealpath, [
+    '--no-warnings', identity.runtimeRealpath, 'verify-recovery-admission',
+    '--repository', config.namespace.repository,
+    '--parent-issue', String(config.namespace.parent_issue),
+    '--child-issue', String(config.namespace.child_issue),
+    '--state-root', config.stateRoot,
+    '--repository-root', repositoryRoot
+  ], {
+    cwd: repositoryRoot,
+    input: canonicalSerialize(request) + '\n',
+    encoding: 'utf8',
+    env: recoveryVerifierLaunchEnvironment(),
+    shell: false,
+    windowsHide: true,
+    timeout: VERIFIER_TIMEOUT_MS,
+    maxBuffer: VERIFIER_STREAM_BYTES
+  });
+  return validateRecoveryVerifierProcessResult(result);
+}
+
+function canonicalRecoveryVerificationPacket(config, input) {
+  const { request, requestDigest } = validateTakeoverRequest(input, config);
+  const transport = recoveryTransportContext();
+  const observedStart = canonicalRecoveryStart(config, request, transport);
+  const recoveryAuthority = canonicalRecoveryAuthority(config, request, transport);
+  const verifiedRequest = deepFreeze({
+    ...request,
+    observed_start: observedStart,
+    recovery_authority: recoveryAuthority,
+    later_controlling_comment_ids: []
+  });
+  if (orphanTakeoverRequestDigest(verifiedRequest) !== requestDigest) {
+    fail('GPR_RECOVERY_REQUEST_CONFLICT');
+  }
+  const packet = {
+    schema: RECOVERY_VERIFICATION_PACKET_SCHEMA,
+    request_digest: requestDigest,
+    recovery_authority: recoveryAuthority,
+    observed_start: observedStart,
+    verifier_identity_digest: verifierIdentityDigest(),
+    transport_identity_digest: transport.identity_digest
+  };
+  return validateRecoveryVerificationPacket({
+    ...packet,
+    packet_digest: digestValue(packet)
+  });
+}
+
 function verifyFirstPartyRecoveryAdmission(store, input) {
   const { request, requestDigest } = validateTakeoverRequest(input, store.config);
-  const recoveryAuthority = canonicalRecoveryAuthority(store.config, request);
-  const observedStart = canonicalRecoveryStart(store.config, request);
-  const orphanAttestation = canonicalRecoveryOrphan(store, request);
+  const packet = verifyRecoveryAdmissionFreshProcess(store.config, request);
+  if (packet.request_digest !== requestDigest
+    || packet.verifier_identity_digest !== verifierIdentityDigest()) {
+    fail('GPR_RECOVERY_VERIFICATION_PACKET_INVALID');
+  }
+  const transport = recoveryTransportContext();
+  if (packet.transport_identity_digest !== transport.identity_digest) {
+    fail('GPR_RECOVERY_VERIFICATION_PACKET_INVALID');
+  }
+  const recoveryAuthority = packet.recovery_authority;
+  const observedStart = packet.observed_start;
+  const orphanAttestation = canonicalRecoveryOrphan(store.config, request);
   const verifiedRequest = deepFreeze({
     ...request,
     observed_start: observedStart,
@@ -1565,11 +1854,16 @@ function openVerified(config, create = true, readOnly = false) {
 function createStoreConfig(options) {
   const namespace = namespaceValue(options || {});
   const stateRoot = assertSafeStateRoot(options || {});
+  const repositoryRoot = path.resolve(options.repositoryRoot);
+  const canonicalRepositoryRoot = canonicalRecoveryRepositoryRoot();
+  if (!recoveryPathEqual(repositoryRoot, canonicalRepositoryRoot)) {
+    fail('GPR_UNSAFE_STATE_ROOT', { reason: 'repository-root-untrusted' });
+  }
   return Object.freeze({
     namespace,
     namespaceDigest: namespaceDigest(namespace),
     stateRoot,
-    repositoryRoot: path.resolve(options.repositoryRoot),
+    repositoryRoot: canonicalRepositoryRoot,
     databasePath: path.join(stateRoot, `github-program-receipt-${namespaceDigest(namespace)}.sqlite`)
   });
 }
@@ -3068,6 +3362,28 @@ function main() {
   if (args._[0] === 'runtime-check') {
     assertRuntimeSupport();
     process.stdout.write(`${JSON.stringify({ ok: true, schema: SCHEMA_ID, node: process.versions.node })}\n`);
+    return;
+  }
+  if (args._[0] === 'verify-recovery-admission') {
+    const config = createStoreConfig({
+      repository: args.repository,
+      parent_issue: Number(args.parent_issue),
+      child_issue: Number(args.child_issue),
+      stateRoot: args.state_root,
+      repositoryRoot: args.repository_root
+    });
+    const input = fs.readFileSync(0, 'utf8');
+    if (Buffer.byteLength(input, 'utf8') > VERIFIER_STREAM_BYTES
+      || !input.endsWith('\n') || input.slice(0, -1).includes('\n')) {
+      fail('GPR_RECOVERY_REQUEST_INVALID');
+    }
+    let request;
+    try { request = JSON.parse(input.slice(0, -1)); } catch (_) {
+      fail('GPR_RECOVERY_REQUEST_INVALID');
+    }
+    if (canonicalSerialize(request) + '\n' !== input) fail('GPR_RECOVERY_REQUEST_INVALID');
+    const packet = canonicalRecoveryVerificationPacket(config, request);
+    process.stdout.write(canonicalSerialize(packet) + '\n');
     return;
   }
   if (args._[0] === 'verify-run-started') {

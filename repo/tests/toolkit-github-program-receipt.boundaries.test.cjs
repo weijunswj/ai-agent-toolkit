@@ -18,9 +18,21 @@ function commandResult(status, stdout = '', stderr = '') {
 childProcess.spawnSync = (command, args, spawnOptions) => {
   const fixture = recoveryHostFixture;
   if (!fixture) return nativeSpawnSync(command, args, spawnOptions);
-  if (command === 'gh') {
+  if (Array.isArray(args) && args.includes('verify-recovery-admission')) {
+    const env = {
+      ...childEnvironment(),
+      ...(spawnOptions && spawnOptions.env ? spawnOptions.env : {}),
+      NODE_OPTIONS: '--require=' + fixture.verifierPreload,
+      GPR_TEST_RECOVERY_FIXTURE: JSON.stringify(fixture)
+    };
+    return nativeSpawnSync(command, args, { ...spawnOptions, env });
+  }
+  const commandName = typeof command === 'string'
+    ? path.basename(command).replace(/\.(?:exe|cmd)$/i, '').toLowerCase()
+    : '';
+  if (commandName === 'gh') {
     if (fixture.transportFailure === 'authority') return commandResult(1, '', 'unavailable');
-    const endpoint = args[1];
+    const endpoint = args.find((value, index) => index > 0 && typeof value === 'string' && value.startsWith('repos/')) || '';
     if (endpoint.includes('/issues/comments/')) {
       const id = Number(endpoint.split('/').at(-1));
       const comment = id === fixture.childComment.id ? fixture.childComment : fixture.parentComment;
@@ -28,7 +40,7 @@ childProcess.spawnSync = (command, args, spawnOptions) => {
     }
     return commandResult(0, JSON.stringify([fixture.comments]));
   }
-  if (command === 'git') {
+  if (commandName === 'git') {
     if (fixture.transportFailure === 'start') return commandResult(1, '', 'unavailable');
     const gitArgs = args.slice(2);
     const startSnapshot = fixture.start;
@@ -522,7 +534,7 @@ function recoveryFixture(current, request, overrides = {}) {
     updated_at: authoritySnapshot.updated_at,
     issue_url: `https://api.github.com/repos/weijunswj/ai-agent-toolkit/issues/${current.storeOptions.child_issue}`
   };
-  return {
+  const fixture = {
     childComment,
     parentComment: {
       id: authoritySnapshot.parent_comment_id,
@@ -537,6 +549,45 @@ function recoveryFixture(current, request, overrides = {}) {
     start: structuredClone(overrides.start || current.expectedStart),
     malformedAuthority: overrides.malformedAuthority === true,
     transportFailure: overrides.transportFailure || null
+  };
+  const verifierPreload = path.join(current.storeOptions.stateRoot, 'recovery-verifier-preload.cjs');
+  const verifierCode = [
+    "'use strict';",
+    "const childProcess = require('node:child_process');",
+    "const path = require('node:path');",
+    "const nativeSpawnSync = childProcess.spawnSync;",
+    "const fixture = JSON.parse(process.env.GPR_TEST_RECOVERY_FIXTURE);",
+    "const commandResult = (status, stdout = '', stderr = '') => ({ status, stdout, stderr, signal: null, error: undefined });",
+    "const commandName = (command) => typeof command === 'string' ? path.basename(command).replace(/\\.(?:exe|cmd)$/i, '').toLowerCase() : '';",
+    "childProcess.spawnSync = (command, args, spawnOptions) => {",
+    "  const name = commandName(command);",
+    "  if (name === 'gh') {",
+    "    if (fixture.transportFailure === 'authority') return commandResult(1, '', 'unavailable');",
+    "    const endpoint = args.find((value, index) => index > 0 && typeof value === 'string' && value.startsWith('repos/')) || '';",
+    "    if (endpoint.includes('/issues/comments/')) {",
+    "      const id = Number(endpoint.split('/').at(-1));",
+    "      const comment = id === fixture.childComment.id ? fixture.childComment : fixture.parentComment;",
+    "      return commandResult(0, JSON.stringify(fixture.malformedAuthority ? {} : comment));",
+    "    }",
+    "    return commandResult(0, JSON.stringify([fixture.comments]));",
+    "  }",
+    "  if (name === 'git') {",
+    "    if (fixture.transportFailure === 'start') return commandResult(1, '', 'unavailable');",
+    "    const key = args.slice(2).join(' ');",
+    "    if (key === 'status --porcelain=v1') return commandResult(0, '');",
+    "    if (key === 'merge-base HEAD origin/main') return commandResult(0, fixture.start.base_sha + '\\n');",
+    "    if (key === 'rev-parse HEAD') return commandResult(0, fixture.start.head_sha + '\\n');",
+    "    if (key === 'rev-parse HEAD^{tree}') return commandResult(0, fixture.start.tree_sha + '\\n');",
+    "    if (key === 'symbolic-ref --quiet --short HEAD') return fixture.start.ref.detached ? commandResult(1) : commandResult(0, fixture.start.ref.name + '\\n');",
+    "    return commandResult(2, '', 'unexpected git request');",
+    "  }",
+    "  return nativeSpawnSync(command, args, spawnOptions);",
+    "};"
+  ].join('\n');
+  fs.writeFileSync(verifierPreload, verifierCode, { mode: 0o700 });
+  return {
+    ...fixture,
+    verifierPreload
   };
 }
 
@@ -616,6 +667,134 @@ function takeoverInChild(current, request) {
     });
   });
 }
+
+function substitutedVerifierTransportInChild(current, request) {
+  const attackerRoot = path.join(current.storeOptions.stateRoot, 'attacker-transport');
+  fs.mkdirSync(attackerRoot, { recursive: true, mode: 0o700 });
+  const verifierScript = path.join(attackerRoot, 'attacker-preload.cjs');
+  const transportMarker = path.join(attackerRoot, 'transport.log');
+  const verifierCode = `
+    const childProcess = require('node:child_process');
+    const fs = require('node:fs');
+    const nativeSpawnSync = childProcess.spawnSync;
+    const request = JSON.parse(process.env.GPR_ATTACK_REQUEST);
+    const commandResult = (status, stdout = '', stderr = '') => ({
+      status, stdout, stderr, signal: null, error: undefined
+    });
+    const log = (command) => fs.appendFileSync(process.env.GPR_ATTACK_MARKER, command + '\\n');
+    childProcess.spawnSync = (command, args, spawnOptions) => {
+      if (command === 'gh') {
+        log('gh');
+        const endpoint = args[1] || '';
+        const authority = request.recovery_authority;
+        const childComment = {
+          id: authority.child_comment_id,
+          node_id: authority.node_id,
+          user: { login: authority.author_login },
+          author_association: 'OWNER',
+          body: 'recovery-authority:' + request.request_id,
+          updated_at: authority.updated_at,
+          issue_url: 'https://api.github.com/repos/weijunswj/ai-agent-toolkit/issues/359'
+        };
+        const parentComment = {
+          id: authority.parent_comment_id,
+          node_id: 'IC_attacker-parent',
+          user: { login: authority.author_login },
+          author_association: 'OWNER',
+          body: 'Parent mirror of child comment ' + authority.child_comment_id,
+          updated_at: authority.updated_at,
+          issue_url: 'https://api.github.com/repos/weijunswj/ai-agent-toolkit/issues/240'
+        };
+        if (endpoint.includes('/issues/comments/')) {
+          const id = Number(endpoint.split('/').at(-1));
+          return commandResult(0, JSON.stringify(id === childComment.id ? childComment : parentComment));
+        }
+        return commandResult(0, JSON.stringify([[childComment]]));
+      }
+      if (command === 'git') {
+        const key = args.slice(2).join(' ');
+        log('git:' + key);
+        if (key === 'status --porcelain=v1') return commandResult(0, '');
+        if (key === 'merge-base HEAD origin/main') return commandResult(0, request.observed_start.base_sha + '\\n');
+        if (key === 'rev-parse HEAD') return commandResult(0, request.observed_start.head_sha + '\\n');
+        if (key === 'rev-parse HEAD^{tree}') return commandResult(0, request.observed_start.tree_sha + '\\n');
+        if (key === 'symbolic-ref --quiet --short HEAD') return commandResult(1);
+        return commandResult(2, '', 'unexpected git request');
+      }
+      return nativeSpawnSync(command, args, spawnOptions);
+    };
+  `;
+  fs.writeFileSync(verifierScript, verifierCode, { mode: 0o700 });
+  return new Promise((resolve, reject) => {
+    const code = `
+      const runtime = require(${JSON.stringify(runtimePath)});
+      (async () => {
+        const store = runtime.createProgrammeReceiptStore(${JSON.stringify(current.storeOptions)});
+        const request = JSON.parse(process.env.GPR_ATTACK_REQUEST);
+        let phase = 'admission';
+        try {
+          const admission = await store.verifyRecoveryAdmission(request);
+          phase = 'takeover';
+          const result = await store.takeoverAbandonedRun(request, admission);
+          process.stdout.write(JSON.stringify({ ok: true, phase, status: result.status }));
+        } catch (error) {
+          process.stdout.write(JSON.stringify({ ok: false, phase, code: error.code || error.message }));
+        }
+      })().catch((error) => {
+        process.stdout.write(JSON.stringify({ ok: false, phase: 'admission', code: error.code || error.message }));
+      });
+    `;
+    const env = {
+      ...childEnvironment(),
+      NODE_OPTIONS: '--require=' + verifierScript,
+      PATH: attackerRoot + path.delimiter + (process.env.PATH || ''),
+      GH_HOST: 'attacker.invalid',
+      GIT_CONFIG_GLOBAL: path.join(attackerRoot, 'attacker-gitconfig'),
+      GIT_DIR: path.join(attackerRoot, 'attacker-git-dir'),
+      GIT_WORK_TREE: path.join(attackerRoot, 'attacker-git-work-tree'),
+      GPR_ATTACK_MARKER: transportMarker,
+      GPR_ATTACK_REQUEST: JSON.stringify(request)
+    };
+    const child = spawn(process.execPath, ['--no-warnings', '-e', code], {
+      cwd: repositoryRoot,
+      env,
+      windowsHide: true
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', (status) => {
+      try {
+        const transport = fs.existsSync(transportMarker)
+          ? fs.readFileSync(transportMarker, 'utf8').trim().split(/\r?\n/).filter(Boolean)
+          : [];
+        resolve({ status, stdout: JSON.parse(stdout), stderr, transport });
+      } catch (error) {
+        reject(new Error('verifier substitution child failed: status=' + status
+          + ' stdout=' + stdout + ' stderr=' + stderr, { cause: error }));
+      }
+    });
+  });
+}
+
+test('foreign process cannot substitute gh/git transport to mint recovery admission or commit takeover', async () => {
+  const current = orphanFixture({ seed: 'foreign-transport-substitution', lock: 'LOCK-FOREIGN-TRANSPORT' });
+  const request = takeoverRequest(current, { request_id: 'recovery-foreign-transport-substitution' });
+  const before = ledgerCounts(current.store);
+  const result = await substitutedVerifierTransportInChild(current, request);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual({
+    admissionRejected: result.stdout.ok === false && result.stdout.phase === 'admission',
+    transport: result.transport
+  }, {
+    admissionRejected: true,
+    transport: []
+  });
+  assert.deepEqual(ledgerCounts(current.store), before);
+});
 
 function liveOrphanFixture(overrides = {}) {
   return new Promise((resolve, reject) => {
