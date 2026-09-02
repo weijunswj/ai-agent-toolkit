@@ -13,7 +13,7 @@ const repositoryRoot = path.resolve(__dirname, '../..');
 const cleanupRoots = new Set();
 
 const digest = 'a'.repeat(64);
-const EXPECTED_FINAL_V3_SCHEMA_FINGERPRINT = '503161c994e82fbd0d59f9fd6945be796acff31e75529db7e0f47eb0c0a73378';
+const EXPECTED_FINAL_V3_SCHEMA_FINGERPRINT = '8debb8c598a8bb934fa33ef402a46ae8fc9346ebfba5e15a232564178218e740';
 const EXPECTED_PRODUCTION_V2_SCHEMA_FINGERPRINT = 'adc7b560ee06ac61a397a5df0a075685269c3bcc95daa400f10f936143807c17';
 
 const HOLDER_ATTESTATION_KEYS = [
@@ -662,6 +662,59 @@ function insertRecoveryRecord(db, record) {
   );
 }
 
+function recoveryPersistenceFixture(seed) {
+  const db = v3Database();
+  const old = durableGraph(`${seed}-old`, 1);
+  const replacement = durableGraph(`${seed}-new`, 2, old.allocation.lock_id);
+  const oldHolder = durableHolder(old);
+  const replacementHolder = durableHolder(replacement);
+  const oldStart = durableStartedReceipt(old);
+  const replacementStart = durableStartedReceipt(replacement);
+  const oldAllocated = durableLeaseEvent(old, 'ALLOCATED', `event-${seed}-old-allocated`);
+  const replacementAllocated = durableLeaseEvent(replacement, 'EXPIRED_TAKEOVER', `event-${seed}-new-allocated`);
+  const oldRelease = durableLeaseEvent(old, 'RELEASED', `event-${seed}-old-release`);
+
+  for (const graph of [old, replacement]) insertDurableGraph(db, graph);
+  for (const highWater of [1, 2]) {
+    db.prepare('UPDATE coordination_state SET high_water=? WHERE singleton=1 AND high_water=?').run(highWater, highWater - 1);
+  }
+  for (const holder of [oldHolder, replacementHolder]) insertHolder(db, holder);
+  for (const receipt of [oldStart, replacementStart]) insertReceipt(db, receipt);
+  for (const event of [oldAllocated, replacementAllocated, oldRelease]) insertLeaseEvent(db, event);
+
+  return {
+    db, seed, old, replacement, oldHolder, replacementHolder, oldStart,
+    replacementStart, oldAllocated, replacementAllocated, oldRelease
+  };
+}
+
+function recoveryPersistenceCandidate(fixture, evidenceOverrides = {}) {
+  const validEvidence = durablePreEvidence(
+    fixture.old,
+    fixture.oldHolder,
+    fixture.oldAllocated,
+    fixture.oldStart,
+    `recovery-request-${fixture.seed}`
+  );
+  const evidence = { ...validEvidence, ...evidenceOverrides };
+  const terminal = durableTerminalReceipt(
+    fixture.old,
+    fixture.oldStart,
+    runtime.preRecoveryEvidenceDigest(evidence)
+  );
+  insertReceipt(fixture.db, terminal);
+  const record = durableRecoveryRecord(
+    fixture.old,
+    fixture.replacement,
+    evidence,
+    terminal,
+    fixture.oldRelease,
+    fixture.replacementHolder,
+    `recovery-record-${fixture.seed}`
+  );
+  return { evidence, terminal, record };
+}
+
 function v3Database(databasePath = ':memory:') {
   const db = new DatabaseSync(databasePath);
   db.exec('PRAGMA foreign_keys=ON');
@@ -815,6 +868,73 @@ test('v3 persistence accepts coherent recovery chains and independent verifier r
   try {
     assert.equal(runtime.verifyV3DurableEvidence(fixture.db, V3_NAMESPACE), true);
     assert.equal(runtime.verifyFinalV3Database(fixture.db, V3_NAMESPACE), true);
+  } finally {
+    fixture.db.close();
+  }
+});
+
+test('v3 recovery persistence rejects a valid-format wrong PRE chain digest before commit', () => {
+  const fixture = recoveryPersistenceFixture('wrong-chain-digest');
+  try {
+    const canonicalChainDigest = fixture.db.prepare(
+      'SELECT chain_digest FROM receipt_chain_digests WHERE receipt_id=?'
+    ).get(fixture.oldStart.receipt_id).chain_digest;
+    const candidate = recoveryPersistenceCandidate(fixture, {
+      old_receipt_chain_digest: runtime.digestValue('wrong-old-receipt-chain')
+    });
+    assert.equal(candidate.terminal.payload.evidence_digest,
+      runtime.preRecoveryEvidenceDigest(candidate.evidence));
+    assert.equal(candidate.record.pre_recovery_evidence_digest,
+      runtime.preRecoveryEvidenceDigest(candidate.evidence));
+    const recordDigestInput = structuredClone(candidate.record);
+    delete recordDigestInput.recovery_record_digest;
+    assert.equal(candidate.record.recovery_record_digest, runtime.digestValue(recordDigestInput));
+    assert.notEqual(candidate.evidence.old_receipt_chain_digest, canonicalChainDigest);
+    assert.throws(() => insertRecoveryRecord(fixture.db, candidate.record), /GPR_V3_RECOVERY_COHERENCE/);
+    assert.equal(fixture.db.prepare('SELECT COUNT(*) AS value FROM recovery_records').get().value, 0);
+  } finally {
+    fixture.db.close();
+  }
+});
+
+test('v3 recovery persistence rejects a missing old-tip chain sidecar before commit', () => {
+  const fixture = recoveryPersistenceFixture('missing-chain-sidecar');
+  try {
+    fixture.db.exec('DROP TRIGGER receipt_chain_digests_no_delete');
+    fixture.db.prepare('DELETE FROM receipt_chain_digests WHERE receipt_id=?').run(fixture.oldStart.receipt_id);
+    fixture.db.exec("CREATE TRIGGER receipt_chain_digests_no_delete BEFORE DELETE ON receipt_chain_digests BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;");
+    const candidate = recoveryPersistenceCandidate(fixture);
+    assert.equal(fixture.db.prepare(
+      'SELECT 1 FROM receipt_chain_digests WHERE receipt_id=?'
+    ).get(fixture.oldStart.receipt_id), undefined);
+    assert.throws(() => insertRecoveryRecord(fixture.db, candidate.record), /GPR_V3_RECOVERY_COHERENCE/);
+    assert.equal(fixture.db.prepare('SELECT COUNT(*) AS value FROM recovery_records').get().value, 0);
+  } finally {
+    fixture.db.close();
+  }
+});
+
+test('v3 recovery persistence rejects an old-tip chain sidecar bound to another run and sequence before commit', () => {
+  const fixture = recoveryPersistenceFixture('misbound-chain-sidecar');
+  try {
+    fixture.db.exec('DROP TRIGGER receipt_chain_digests_no_delete');
+    fixture.db.exec('DROP TRIGGER receipt_chain_digests_no_update');
+    fixture.db.prepare('DELETE FROM receipt_chain_digests WHERE receipt_id=?').run(fixture.replacementStart.receipt_id);
+    fixture.db.prepare(`
+      UPDATE receipt_chain_digests
+      SET run_id=?, sequence=?
+      WHERE receipt_id=?
+    `).run(fixture.replacement.run.run_id, fixture.replacementStart.sequence, fixture.oldStart.receipt_id);
+    fixture.db.exec("CREATE TRIGGER receipt_chain_digests_no_update BEFORE UPDATE ON receipt_chain_digests BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;");
+    fixture.db.exec("CREATE TRIGGER receipt_chain_digests_no_delete BEFORE DELETE ON receipt_chain_digests BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;");
+    const candidate = recoveryPersistenceCandidate(fixture);
+    const sidecar = fixture.db.prepare(
+      'SELECT run_id, sequence FROM receipt_chain_digests WHERE receipt_id=?'
+    ).get(fixture.oldStart.receipt_id);
+    assert.equal(sidecar.run_id, fixture.replacement.run.run_id);
+    assert.equal(sidecar.sequence, fixture.replacementStart.sequence);
+    assert.throws(() => insertRecoveryRecord(fixture.db, candidate.record), /GPR_V3_RECOVERY_COHERENCE/);
+    assert.equal(fixture.db.prepare('SELECT COUNT(*) AS value FROM recovery_records').get().value, 0);
   } finally {
     fixture.db.close();
   }

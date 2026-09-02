@@ -1118,6 +1118,10 @@ WHEN NOT EXISTS (
     ON old_lease_tip.event_id = json_extract(NEW.pre_recovery_evidence_json, '$.old_lease_tip_event_id')
   JOIN receipts old_receipt_tip
     ON old_receipt_tip.receipt_id = json_extract(NEW.pre_recovery_evidence_json, '$.old_receipt_tip_id')
+  JOIN receipt_chain_digests old_receipt_chain
+    ON old_receipt_chain.receipt_id = old_receipt_tip.receipt_id
+   AND old_receipt_chain.run_id = old_receipt_tip.run_id
+   AND old_receipt_chain.sequence = old_receipt_tip.sequence
   JOIN holder_attestations old_holder
     ON old_holder.attestation_digest = json_extract(NEW.pre_recovery_evidence_json, '$.old_holder_attestation_digest')
   JOIN receipts terminal_receipt ON terminal_receipt.receipt_id = NEW.terminal_receipt_id
@@ -1188,6 +1192,10 @@ WHEN NOT EXISTS (
     AND old_receipt_tip.run_id = old_run.run_id
     AND old_receipt_tip.receipt_digest = json_extract(NEW.pre_recovery_evidence_json, '$.old_receipt_tip_digest')
     AND old_receipt_tip.receipt_id = old_receipt_tip.receipt_digest
+    AND old_receipt_chain.receipt_id = json_extract(NEW.pre_recovery_evidence_json, '$.old_receipt_tip_id')
+    AND old_receipt_chain.run_id = json_extract(NEW.pre_recovery_evidence_json, '$.old_run_id')
+    AND old_receipt_chain.sequence = json_extract(NEW.pre_recovery_evidence_json, '$.old_receipt_tip_sequence')
+    AND old_receipt_chain.chain_digest = json_extract(NEW.pre_recovery_evidence_json, '$.old_receipt_chain_digest')
     AND json_valid(old_receipt_tip.canonical_json)
     AND json_extract(old_receipt_tip.canonical_json, '$.schema') = 'toolkit.github-program.run-receipt.v1'
     AND json_extract(old_receipt_tip.canonical_json, '$.receipt_id') = old_receipt_tip.receipt_id
