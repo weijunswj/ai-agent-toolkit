@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.github-program.recovery-record.v1",
+  "title": "Toolkit GitHub Programme Recovery Record v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "recovery_record_id",
+    "request_id",
+    "namespace_digest",
+    "old_allocation_id",
+    "old_run_id",
+    "old_lease_id",
+    "old_fence_id",
+    "old_fence_sequence",
+    "pre_recovery_evidence",
+    "pre_recovery_evidence_digest",
+    "terminal_receipt_id",
+    "terminal_receipt_digest",
+    "release_event_id",
+    "release_event_digest",
+    "replacement_allocation_id",
+    "replacement_allocation_digest",
+    "replacement_run_id",
+    "replacement_run_digest",
+    "replacement_lease_id",
+    "replacement_fence_id",
+    "replacement_fence_sequence",
+    "replacement_holder_attestation_id",
+    "replacement_holder_attestation_digest",
+    "new_high_water",
+    "authority_digest",
+    "source_digest",
+    "start_digest",
+    "committed_at",
+    "recovery_record_digest"
+  ],
+  "properties": {
+    "schema": { "const": "toolkit.github-program.recovery-record.v1" },
+    "recovery_record_id": { "$ref": "#/$defs/id" },
+    "request_id": { "$ref": "#/$defs/id" },
+    "namespace_digest": { "$ref": "#/$defs/digest" },
+    "old_allocation_id": { "$ref": "#/$defs/id" },
+    "old_run_id": { "$ref": "#/$defs/id" },
+    "old_lease_id": { "$ref": "#/$defs/id" },
+    "old_fence_id": { "$ref": "#/$defs/id" },
+    "old_fence_sequence": { "type": "integer", "minimum": 1 },
+    "pre_recovery_evidence": { "$ref": "pre-recovery-evidence-v1.schema.json" },
+    "pre_recovery_evidence_digest": { "$ref": "#/$defs/digest" },
+    "terminal_receipt_id": { "$ref": "#/$defs/digest" },
+    "terminal_receipt_digest": { "$ref": "#/$defs/digest" },
+    "release_event_id": { "$ref": "#/$defs/id" },
+    "release_event_digest": { "$ref": "#/$defs/digest" },
+    "replacement_allocation_id": { "$ref": "#/$defs/id" },
+    "replacement_allocation_digest": { "$ref": "#/$defs/digest" },
+    "replacement_run_id": { "$ref": "#/$defs/id" },
+    "replacement_run_digest": { "$ref": "#/$defs/digest" },
+    "replacement_lease_id": { "$ref": "#/$defs/id" },
+    "replacement_fence_id": { "$ref": "#/$defs/id" },
+    "replacement_fence_sequence": { "type": "integer", "minimum": 2 },
+    "replacement_holder_attestation_id": { "$ref": "#/$defs/id" },
+    "replacement_holder_attestation_digest": { "$ref": "#/$defs/digest" },
+    "new_high_water": { "type": "integer", "minimum": 2 },
+    "authority_digest": { "$ref": "#/$defs/digest" },
+    "source_digest": { "$ref": "#/$defs/digest" },
+    "start_digest": { "$ref": "#/$defs/digest" },
+    "committed_at": { "$ref": "#/$defs/timestamp" },
+    "recovery_record_digest": { "$ref": "#/$defs/digest" }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "repository": {
+      "type": "string",
+      "pattern": "^[a-z0-9_.-]{1,100}/[a-z0-9_.-]{1,100}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "maxLength": 32
+    }
+  }
+}
