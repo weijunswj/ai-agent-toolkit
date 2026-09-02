@@ -1001,6 +1001,230 @@ CREATE TABLE recovery_records (
 CREATE INDEX holder_attestations_allocation ON holder_attestations(allocation_id, fence_sequence);
 CREATE INDEX recovery_records_old_run ON recovery_records(old_run_id, old_fence_sequence);
 CREATE INDEX recovery_records_replacement ON recovery_records(replacement_run_id, replacement_fence_sequence);
+CREATE TRIGGER holder_attestations_coherence BEFORE INSERT ON holder_attestations
+WHEN NOT EXISTS (
+  SELECT 1
+  FROM metadata m
+  JOIN allocations a ON a.allocation_id = NEW.allocation_id
+  JOIN runs r ON r.run_id = NEW.run_id
+  WHERE m.singleton = 1
+    AND NEW.repository = m.repository
+    AND NEW.parent_issue = m.parent_issue
+    AND NEW.child_issue = m.child_issue
+    AND r.allocation_id = a.allocation_id
+    AND r.run_id = a.run_id
+    AND r.lock_id = a.lock_id
+    AND NEW.allocation_digest = a.allocation_digest
+    AND NEW.run_id = a.run_id
+    AND NEW.run_digest = r.run_digest
+    AND NEW.lock_id = a.lock_id
+    AND NEW.lease_id = a.lease_id
+    AND NEW.fence_id = a.fence_id
+    AND NEW.fence_sequence = a.fence_sequence
+    AND NEW.authority_digest = r.authority_digest
+    AND NEW.start_digest = r.start_digest
+    AND NEW.lease_issued_at = a.issued_at
+    AND NEW.lease_expires_at = a.expires_at
+)
+BEGIN SELECT RAISE(ABORT, 'GPR_V3_HOLDER_COHERENCE'); END;
+CREATE TRIGGER holder_attestations_no_replace BEFORE INSERT ON holder_attestations
+WHEN EXISTS (
+  SELECT 1 FROM holder_attestations
+  WHERE attestation_id = NEW.attestation_id
+     OR allocation_id = NEW.allocation_id
+     OR run_id = NEW.run_id
+     OR attestation_digest = NEW.attestation_digest
+)
+BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER recovery_records_coherence BEFORE INSERT ON recovery_records
+WHEN NOT EXISTS (
+  SELECT 1
+  FROM metadata m
+  JOIN coordination_state c ON c.singleton = 1
+  JOIN allocations old_allocation ON old_allocation.allocation_id = NEW.old_allocation_id
+  JOIN runs old_run ON old_run.run_id = NEW.old_run_id
+  JOIN lease_events old_lease_tip
+    ON old_lease_tip.event_id = json_extract(NEW.pre_recovery_evidence_json, '$.old_lease_tip_event_id')
+  JOIN receipts old_receipt_tip
+    ON old_receipt_tip.receipt_id = json_extract(NEW.pre_recovery_evidence_json, '$.old_receipt_tip_id')
+  JOIN holder_attestations old_holder
+    ON old_holder.attestation_digest = json_extract(NEW.pre_recovery_evidence_json, '$.old_holder_attestation_digest')
+  JOIN receipts terminal_receipt ON terminal_receipt.receipt_id = NEW.terminal_receipt_id
+  JOIN lease_events release_event ON release_event.event_id = NEW.release_event_id
+  JOIN allocations replacement_allocation ON replacement_allocation.allocation_id = NEW.replacement_allocation_id
+  JOIN runs replacement_run ON replacement_run.run_id = NEW.replacement_run_id
+  JOIN holder_attestations replacement_holder
+    ON replacement_holder.attestation_id = NEW.replacement_holder_attestation_id
+  WHERE json_valid(NEW.pre_recovery_evidence_json)
+    AND m.singleton = 1
+    AND m.namespace_digest = NEW.namespace_digest
+    AND c.high_water = NEW.new_high_water
+    AND json_extract(NEW.pre_recovery_evidence_json, '$.schema') = 'toolkit.github-program.pre-recovery-evidence.v1'
+    AND json_extract(NEW.pre_recovery_evidence_json, '$.request_id') = NEW.request_id
+    AND json_extract(NEW.pre_recovery_evidence_json, '$.namespace_digest') = NEW.namespace_digest
+    AND json_extract(NEW.pre_recovery_evidence_json, '$.repository') = m.repository
+    AND json_extract(NEW.pre_recovery_evidence_json, '$.parent_issue') = m.parent_issue
+    AND json_extract(NEW.pre_recovery_evidence_json, '$.child_issue') = m.child_issue
+    AND json_extract(NEW.pre_recovery_evidence_json, '$.lock') = old_allocation.lock_id
+    AND old_run.allocation_id = old_allocation.allocation_id
+    AND old_run.run_id = old_allocation.run_id
+    AND old_run.lock_id = old_allocation.lock_id
+    AND NEW.old_run_id = old_allocation.run_id
+    AND NEW.old_lease_id = old_allocation.lease_id
+    AND NEW.old_fence_id = old_allocation.fence_id
+    AND NEW.old_fence_sequence = old_allocation.fence_sequence
+    AND json_extract(NEW.pre_recovery_evidence_json, '$.old_allocation_id') = old_allocation.allocation_id
+    AND json_extract(NEW.pre_recovery_evidence_json, '$.old_allocation_digest') = old_allocation.allocation_digest
+    AND json_extract(NEW.pre_recovery_evidence_json, '$.old_run_id') = old_run.run_id
+    AND json_extract(NEW.pre_recovery_evidence_json, '$.old_run_digest') = old_run.run_digest
+    AND json_extract(NEW.pre_recovery_evidence_json, '$.old_lease_id') = old_allocation.lease_id
+    AND json_extract(NEW.pre_recovery_evidence_json, '$.old_fence_id') = old_allocation.fence_id
+    AND json_extract(NEW.pre_recovery_evidence_json, '$.old_fence_sequence') = old_allocation.fence_sequence
+    AND json_extract(NEW.pre_recovery_evidence_json, '$.old_lease_issued_at') = old_allocation.issued_at
+    AND json_extract(NEW.pre_recovery_evidence_json, '$.old_lease_expires_at') = old_allocation.expires_at
+    AND json_extract(NEW.pre_recovery_evidence_json, '$.observed_at') >= old_allocation.expires_at
+    AND NEW.authority_digest = json_extract(NEW.pre_recovery_evidence_json, '$.authority_digest')
+    AND NEW.source_digest = json_extract(NEW.pre_recovery_evidence_json, '$.source_digest')
+    AND NEW.start_digest = json_extract(NEW.pre_recovery_evidence_json, '$.start_digest')
+    AND old_run.authority_digest = json_extract(NEW.pre_recovery_evidence_json, '$.authority_digest')
+    AND old_run.start_digest = json_extract(NEW.pre_recovery_evidence_json, '$.start_digest')
+    AND NEW.authority_digest = old_run.authority_digest
+    AND NEW.start_digest = old_run.start_digest
+    AND json_extract(NEW.pre_recovery_evidence_json, '$.zero_operation_count') = (
+      SELECT COUNT(*) FROM mutation_operations WHERE run_id = old_run.run_id
+    )
+    AND json_extract(NEW.pre_recovery_evidence_json, '$.zero_operation_event_count') = (
+      SELECT COUNT(*)
+      FROM mutation_operation_events e
+      JOIN mutation_operations o ON o.operation_id = e.operation_id
+      WHERE o.run_id = old_run.run_id
+    )
+    AND json_extract(NEW.pre_recovery_evidence_json, '$.zero_operation_count') = 0
+    AND json_extract(NEW.pre_recovery_evidence_json, '$.zero_operation_event_count') = 0
+    AND json_extract(NEW.pre_recovery_evidence_json, '$.zero_operation_inventory_digest') = '${ZERO_OPERATION_INVENTORY_DIGEST}'
+    AND old_lease_tip.allocation_id = old_allocation.allocation_id
+    AND old_lease_tip.fence_sequence = old_allocation.fence_sequence
+    AND old_lease_tip.event_digest = json_extract(NEW.pre_recovery_evidence_json, '$.old_lease_tip_event_digest')
+    AND old_lease_tip.event_at <= json_extract(NEW.pre_recovery_evidence_json, '$.observed_at')
+    AND NOT EXISTS (
+      SELECT 1 FROM lease_events later
+      WHERE later.allocation_id = old_allocation.allocation_id
+        AND (later.event_at > old_lease_tip.event_at
+          OR later.event_at = old_lease_tip.event_at AND later.event_id > old_lease_tip.event_id)
+        AND later.event_at <= json_extract(NEW.pre_recovery_evidence_json, '$.observed_at')
+    )
+    AND json_extract(NEW.pre_recovery_evidence_json, '$.old_receipt_tip_sequence') = old_receipt_tip.sequence
+    AND old_receipt_tip.run_id = old_run.run_id
+    AND old_receipt_tip.receipt_digest = json_extract(NEW.pre_recovery_evidence_json, '$.old_receipt_tip_digest')
+    AND old_receipt_tip.receipt_id = old_receipt_tip.receipt_digest
+    AND json_valid(old_receipt_tip.canonical_json)
+    AND json_extract(old_receipt_tip.canonical_json, '$.schema') = 'toolkit.github-program.run-receipt.v1'
+    AND json_extract(old_receipt_tip.canonical_json, '$.receipt_id') = old_receipt_tip.receipt_id
+    AND json_extract(old_receipt_tip.canonical_json, '$.sequence') = old_receipt_tip.sequence
+    AND json_extract(old_receipt_tip.canonical_json, '$.run_id') = old_run.run_id
+    AND json_extract(old_receipt_tip.canonical_json, '$.allocation_id') = old_allocation.allocation_id
+    AND json_extract(old_receipt_tip.canonical_json, '$.lock') = old_allocation.lock_id
+    AND json_extract(old_receipt_tip.canonical_json, '$.authority') = json(old_allocation.authority_json)
+    AND json_extract(old_receipt_tip.canonical_json, '$.start') = json(old_allocation.start_json)
+    AND json_extract(old_receipt_tip.canonical_json, '$.lease.lease_id') = old_allocation.lease_id
+    AND json_extract(old_receipt_tip.canonical_json, '$.lease.fence_id') = old_allocation.fence_id
+    AND json_extract(old_receipt_tip.canonical_json, '$.lease.fence_sequence') = old_allocation.fence_sequence
+    AND json_extract(old_receipt_tip.canonical_json, '$.lease.issued_at') = old_allocation.issued_at
+    AND json_extract(old_receipt_tip.canonical_json, '$.lease.expires_at') = old_allocation.expires_at
+    AND json_extract(old_receipt_tip.canonical_json, '$.created_at') <= json_extract(NEW.pre_recovery_evidence_json, '$.observed_at')
+    AND json_extract(old_receipt_tip.canonical_json, '$.repository') = m.repository
+    AND json_extract(old_receipt_tip.canonical_json, '$.parent_issue') = m.parent_issue
+    AND json_extract(old_receipt_tip.canonical_json, '$.child_issue') = m.child_issue
+    AND old_holder.allocation_id = old_allocation.allocation_id
+    AND old_holder.run_id = old_run.run_id
+    AND old_holder.lease_id = old_allocation.lease_id
+    AND old_holder.fence_id = old_allocation.fence_id
+    AND old_holder.fence_sequence = old_allocation.fence_sequence
+    AND old_holder.repository = m.repository
+    AND old_holder.parent_issue = m.parent_issue
+    AND old_holder.child_issue = m.child_issue
+    AND old_holder.lock_id = old_allocation.lock_id
+    AND old_holder.authority_digest = old_run.authority_digest
+    AND old_holder.start_digest = old_run.start_digest
+    AND old_holder.lease_issued_at = old_allocation.issued_at
+    AND old_holder.lease_expires_at = old_allocation.expires_at
+    AND old_holder.broker_identity_digest = json_extract(NEW.pre_recovery_evidence_json, '$.broker_identity_digest')
+    AND old_holder.key_id = json_extract(NEW.pre_recovery_evidence_json, '$.broker_key_id')
+    AND terminal_receipt.run_id = old_run.run_id
+    AND terminal_receipt.receipt_type = 'RUN_INTERRUPTED'
+    AND terminal_receipt.prior_receipt_id = old_receipt_tip.receipt_id
+    AND terminal_receipt.sequence = old_receipt_tip.sequence + 1
+    AND terminal_receipt.receipt_id = terminal_receipt.receipt_digest
+    AND terminal_receipt.receipt_digest = NEW.terminal_receipt_digest
+    AND json_valid(terminal_receipt.canonical_json)
+    AND json_extract(terminal_receipt.canonical_json, '$.schema') = 'toolkit.github-program.run-receipt.v1'
+    AND json_extract(terminal_receipt.canonical_json, '$.receipt_id') = terminal_receipt.receipt_id
+    AND json_extract(terminal_receipt.canonical_json, '$.sequence') = terminal_receipt.sequence
+    AND json_extract(terminal_receipt.canonical_json, '$.run_id') = old_run.run_id
+    AND json_extract(terminal_receipt.canonical_json, '$.allocation_id') = old_allocation.allocation_id
+    AND json_extract(terminal_receipt.canonical_json, '$.lock') = old_allocation.lock_id
+    AND json_extract(terminal_receipt.canonical_json, '$.authority') = json(old_allocation.authority_json)
+    AND json_extract(terminal_receipt.canonical_json, '$.start') = json(old_allocation.start_json)
+    AND json_extract(terminal_receipt.canonical_json, '$.lease.lease_id') = old_allocation.lease_id
+    AND json_extract(terminal_receipt.canonical_json, '$.lease.fence_id') = old_allocation.fence_id
+    AND json_extract(terminal_receipt.canonical_json, '$.lease.fence_sequence') = old_allocation.fence_sequence
+    AND json_extract(terminal_receipt.canonical_json, '$.lease.issued_at') = old_allocation.issued_at
+    AND json_extract(terminal_receipt.canonical_json, '$.lease.expires_at') = old_allocation.expires_at
+    AND json_extract(terminal_receipt.canonical_json, '$.created_at') >= json_extract(NEW.pre_recovery_evidence_json, '$.observed_at')
+    AND json_extract(terminal_receipt.canonical_json, '$.repository') = m.repository
+    AND json_extract(terminal_receipt.canonical_json, '$.parent_issue') = m.parent_issue
+    AND json_extract(terminal_receipt.canonical_json, '$.child_issue') = m.child_issue
+    AND json_extract(terminal_receipt.canonical_json, '$.payload.classification') = 'ORPHAN_NONADOPTABLE'
+    AND json_extract(terminal_receipt.canonical_json, '$.payload.reason_code') = 'BROKER_PROTECTED_RECOVERY'
+    AND json_extract(terminal_receipt.canonical_json, '$.payload.evidence_digest') = NEW.pre_recovery_evidence_digest
+    AND release_event.allocation_id = old_allocation.allocation_id
+    AND release_event.event_type = 'RELEASED'
+    AND release_event.fence_sequence = old_allocation.fence_sequence
+    AND release_event.event_digest = NEW.release_event_digest
+    AND release_event.event_at >= json_extract(terminal_receipt.canonical_json, '$.created_at')
+    AND NEW.committed_at >= release_event.event_at
+    AND replacement_run.allocation_id = replacement_allocation.allocation_id
+    AND replacement_run.run_id = replacement_allocation.run_id
+    AND replacement_run.lock_id = replacement_allocation.lock_id
+    AND replacement_allocation.lock_id = old_allocation.lock_id
+    AND NEW.replacement_allocation_digest = replacement_allocation.allocation_digest
+    AND NEW.replacement_run_id = replacement_allocation.run_id
+    AND NEW.replacement_run_digest = replacement_run.run_digest
+    AND NEW.replacement_lease_id = replacement_allocation.lease_id
+    AND NEW.replacement_fence_id = replacement_allocation.fence_id
+    AND NEW.replacement_fence_sequence = replacement_allocation.fence_sequence
+    AND replacement_allocation.fence_sequence = old_allocation.fence_sequence + 1
+    AND NEW.replacement_holder_attestation_digest = replacement_holder.attestation_digest
+    AND EXISTS (
+      SELECT 1 FROM lease_events replacement_takeover
+      WHERE replacement_takeover.allocation_id = replacement_allocation.allocation_id
+        AND replacement_takeover.event_type = 'EXPIRED_TAKEOVER'
+        AND replacement_takeover.fence_sequence = replacement_allocation.fence_sequence
+    )
+    AND replacement_holder.allocation_id = replacement_allocation.allocation_id
+    AND replacement_holder.run_id = replacement_run.run_id
+    AND replacement_holder.repository = m.repository
+    AND replacement_holder.parent_issue = m.parent_issue
+    AND replacement_holder.child_issue = m.child_issue
+    AND replacement_holder.lock_id = replacement_allocation.lock_id
+    AND replacement_holder.allocation_digest = replacement_allocation.allocation_digest
+    AND replacement_holder.run_digest = replacement_run.run_digest
+    AND replacement_holder.lease_id = replacement_allocation.lease_id
+    AND replacement_holder.fence_id = replacement_allocation.fence_id
+    AND replacement_holder.fence_sequence = replacement_allocation.fence_sequence
+    AND replacement_holder.authority_digest = replacement_run.authority_digest
+    AND replacement_holder.start_digest = replacement_run.start_digest
+    AND replacement_holder.lease_issued_at = replacement_allocation.issued_at
+    AND replacement_holder.lease_expires_at = replacement_allocation.expires_at
+)
+BEGIN SELECT RAISE(ABORT, 'GPR_V3_RECOVERY_COHERENCE'); END;
+CREATE TRIGGER recovery_records_no_replace BEFORE INSERT ON recovery_records
+WHEN EXISTS (
+  SELECT 1 FROM recovery_records
+  WHERE recovery_record_id = NEW.recovery_record_id
+     OR recovery_record_digest = NEW.recovery_record_digest
+)
+BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
 CREATE TRIGGER holder_attestations_no_update BEFORE UPDATE ON holder_attestations BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
 CREATE TRIGGER holder_attestations_no_delete BEFORE DELETE ON holder_attestations BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
 CREATE TRIGGER recovery_records_no_update BEFORE UPDATE ON recovery_records BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
@@ -1358,6 +1582,397 @@ function readChainDb(db, runId, allowEmpty = false) {
     return receipt;
   });
   return validateReceiptChain(receipts);
+}
+
+function storedHolder(row) {
+  return {
+    schema: HOLDER_ATTESTATION_SCHEMA_ID,
+    attestation_id: row.attestation_id,
+    algorithm: row.algorithm,
+    key_id: row.key_id,
+    platform: row.platform,
+    repository: row.repository,
+    parent_issue: row.parent_issue,
+    child_issue: row.child_issue,
+    lock: row.lock_id,
+    allocation_id: row.allocation_id,
+    allocation_digest: row.allocation_digest,
+    run_id: row.run_id,
+    run_digest: row.run_digest,
+    lease_id: row.lease_id,
+    fence_id: row.fence_id,
+    fence_sequence: row.fence_sequence,
+    authority_digest: row.authority_digest,
+    start_digest: row.start_digest,
+    broker_identity_digest: row.broker_identity_digest,
+    process_id_digest: row.process_id_digest,
+    process_start_digest: row.process_start_digest,
+    boot_id_digest: row.boot_id_digest,
+    pid_namespace_digest: row.pid_namespace_digest,
+    process_incarnation_digest: row.process_incarnation_digest,
+    lease_issued_at: row.lease_issued_at,
+    lease_expires_at: row.lease_expires_at,
+    attestation_digest: row.attestation_digest,
+    attestation_tag: row.attestation_tag
+  };
+}
+
+function storedRecoveryRecord(row, evidence) {
+  return {
+    schema: RECOVERY_RECORD_SCHEMA_ID,
+    recovery_record_id: row.recovery_record_id,
+    request_id: row.request_id,
+    namespace_digest: row.namespace_digest,
+    old_allocation_id: row.old_allocation_id,
+    old_run_id: row.old_run_id,
+    old_lease_id: row.old_lease_id,
+    old_fence_id: row.old_fence_id,
+    old_fence_sequence: row.old_fence_sequence,
+    pre_recovery_evidence: evidence,
+    pre_recovery_evidence_digest: row.pre_recovery_evidence_digest,
+    terminal_receipt_id: row.terminal_receipt_id,
+    terminal_receipt_digest: row.terminal_receipt_digest,
+    release_event_id: row.release_event_id,
+    release_event_digest: row.release_event_digest,
+    replacement_allocation_id: row.replacement_allocation_id,
+    replacement_allocation_digest: row.replacement_allocation_digest,
+    replacement_run_id: row.replacement_run_id,
+    replacement_run_digest: row.replacement_run_digest,
+    replacement_lease_id: row.replacement_lease_id,
+    replacement_fence_id: row.replacement_fence_id,
+    replacement_fence_sequence: row.replacement_fence_sequence,
+    replacement_holder_attestation_id: row.replacement_holder_attestation_id,
+    replacement_holder_attestation_digest: row.replacement_holder_attestation_digest,
+    new_high_water: row.new_high_water,
+    authority_digest: row.authority_digest,
+    source_digest: row.source_digest,
+    start_digest: row.start_digest,
+    committed_at: row.committed_at,
+    recovery_record_digest: row.recovery_record_digest
+  };
+}
+
+function parseStoredJson(value, code) {
+  try { return JSON.parse(value); } catch (_) { fail(code); }
+}
+
+function canonicalAllocationBindings(allocation, code) {
+  const authority = parseStoredJson(allocation.authority_json, code);
+  const start = parseStoredJson(allocation.start_json, code);
+  try {
+    validateAuthority(authority);
+    validateStart(start);
+  } catch (_) {
+    fail(code);
+  }
+  return {
+    authority,
+    start,
+    authority_digest: digestValue(authority),
+    start_digest: digestValue(start)
+  };
+}
+
+function verifyReceiptCanonicalBinding(receipt, allocation, run, namespace, bindings, code) {
+  if (!allocation || !run) fail(code);
+  const lease = {
+    lease_id: allocation.lease_id,
+    fence_id: allocation.fence_id,
+    fence_sequence: allocation.fence_sequence,
+    issued_at: allocation.issued_at,
+    expires_at: allocation.expires_at
+  };
+  if (receipt.run_id !== run.run_id
+    || receipt.allocation_id !== allocation.allocation_id
+    || receipt.repository !== namespace.repository
+    || receipt.parent_issue !== namespace.parent_issue
+    || receipt.child_issue !== namespace.child_issue
+    || receipt.lock !== allocation.lock_id
+    || canonicalSerialize(receipt.authority) !== canonicalSerialize(bindings.authority)
+    || canonicalSerialize(receipt.start) !== canonicalSerialize(bindings.start)
+    || canonicalSerialize(receipt.lease) !== canonicalSerialize(lease)) {
+    fail(code);
+  }
+}
+
+function verifyV3DurableEvidence(db, namespace, expectedNamespaceDigest) {
+  const canonicalNamespace = namespaceValue(namespace);
+  const canonicalNamespaceDigest = expectedNamespaceDigest || namespaceDigest(canonicalNamespace);
+  if (canonicalNamespaceDigest !== namespaceDigest(canonicalNamespace)) {
+    fail('GPR_V3_RECOVERY_COHERENCE');
+  }
+  verifyRowDigests(db);
+  const allocations = new Map(db.prepare('SELECT * FROM allocations').all().map((row) => [row.allocation_id, row]));
+  const runs = new Map(db.prepare('SELECT * FROM runs').all().map((row) => [row.run_id, row]));
+  const leaseEvents = new Map(db.prepare('SELECT * FROM lease_events').all().map((row) => [row.event_id, row]));
+  const holders = new Map(db.prepare('SELECT * FROM holder_attestations').all().map((row) => [row.attestation_id, row]));
+  const holdersByDigest = new Map(db.prepare('SELECT * FROM holder_attestations').all().map((row) => [row.attestation_digest, row]));
+  const recoveryRows = db.prepare('SELECT * FROM recovery_records ORDER BY recovery_record_id').all();
+  const coordination = db.prepare('SELECT high_water FROM coordination_state WHERE singleton = 1').get();
+  if (!coordination) fail('GPR_V3_RECOVERY_COHERENCE');
+
+  for (const event of leaseEvents.values()) {
+    const allocation = allocations.get(event.allocation_id);
+    if (!allocation
+      || !isSafeId(event.event_id)
+      || !['ALLOCATED', 'EXPIRED_TAKEOVER', 'RELEASED'].includes(event.event_type)
+      || event.fence_sequence !== allocation.fence_sequence
+      || !isTimestamp(event.event_at)
+      || Date.parse(event.event_at) < Date.parse(allocation.issued_at)
+      || !isDigest(event.detail_digest)) {
+      fail('GPR_V3_RECOVERY_COHERENCE');
+    }
+  }
+
+  for (const row of holders.values()) {
+    const allocation = allocations.get(row.allocation_id);
+    const run = runs.get(row.run_id);
+    if (!allocation || !run
+      || row.repository !== canonicalNamespace.repository
+      || row.parent_issue !== canonicalNamespace.parent_issue
+      || row.child_issue !== canonicalNamespace.child_issue
+      || run.allocation_id !== allocation.allocation_id
+      || run.run_id !== allocation.run_id
+      || run.lock_id !== allocation.lock_id
+      || row.allocation_digest !== allocation.allocation_digest
+      || row.run_id !== allocation.run_id
+      || row.run_digest !== run.run_digest
+      || row.lock_id !== allocation.lock_id
+      || row.lease_id !== allocation.lease_id
+      || row.fence_id !== allocation.fence_id
+      || row.fence_sequence !== allocation.fence_sequence
+      || row.authority_digest !== run.authority_digest
+      || row.start_digest !== run.start_digest
+      || row.lease_issued_at !== allocation.issued_at
+      || row.lease_expires_at !== allocation.expires_at) {
+      fail('GPR_V3_HOLDER_COHERENCE');
+    }
+    const bindings = canonicalAllocationBindings(allocation, 'GPR_V3_HOLDER_COHERENCE');
+    if (bindings.authority_digest !== run.authority_digest || bindings.start_digest !== run.start_digest) {
+      fail('GPR_V3_HOLDER_COHERENCE');
+    }
+    try { validateHolderAttestation(storedHolder(row)); } catch (_) { fail('GPR_V3_HOLDER_COHERENCE'); }
+  }
+
+  const receiptsByRun = new Map();
+  for (const run of runs.values()) {
+    const allocation = allocations.get(run.allocation_id);
+    try {
+      const bindings = allocation && canonicalAllocationBindings(allocation, 'GPR_V3_RECOVERY_COHERENCE');
+      const chain = readChainDb(db, run.run_id, true);
+      for (const receipt of chain) {
+        verifyReceiptCanonicalBinding(receipt, allocation, run, canonicalNamespace, bindings, 'GPR_V3_RECOVERY_COHERENCE');
+      }
+      receiptsByRun.set(run.run_id, chain);
+    }
+    catch (_) { fail('GPR_V3_RECOVERY_COHERENCE'); }
+  }
+  const receipts = new Map();
+  for (const chain of receiptsByRun.values()) for (const receipt of chain) receipts.set(receipt.receipt_id, receipt);
+  const receiptRowsById = new Map(db.prepare('SELECT receipt_id, receipt_digest FROM receipts').all()
+    .map((row) => [row.receipt_id, row]));
+
+  for (const row of recoveryRows) {
+    const evidence = parseStoredJson(row.pre_recovery_evidence_json, 'GPR_V3_RECOVERY_COHERENCE');
+    let record;
+    try {
+      record = storedRecoveryRecord(row, evidence);
+      validateRecoveryRecord(record);
+    } catch (_) {
+      fail('GPR_V3_RECOVERY_COHERENCE');
+    }
+    if (canonicalSerialize(evidence) !== row.pre_recovery_evidence_json
+      || row.namespace_digest !== canonicalNamespaceDigest
+      || row.request_id !== evidence.request_id
+      || row.authority_digest !== evidence.authority_digest
+      || row.source_digest !== evidence.source_digest
+      || row.start_digest !== evidence.start_digest) {
+      fail('GPR_V3_RECOVERY_COHERENCE');
+    }
+
+    const oldAllocation = allocations.get(row.old_allocation_id);
+    const oldRun = runs.get(row.old_run_id);
+    const replacementAllocation = allocations.get(row.replacement_allocation_id);
+    const replacementRun = runs.get(row.replacement_run_id);
+    if (!oldAllocation || !oldRun || !replacementAllocation || !replacementRun
+      || oldRun.allocation_id !== oldAllocation.allocation_id
+      || oldRun.run_id !== oldAllocation.run_id
+      || oldRun.lock_id !== oldAllocation.lock_id
+      || row.old_run_id !== oldAllocation.run_id
+      || row.old_lease_id !== oldAllocation.lease_id
+      || row.old_fence_id !== oldAllocation.fence_id
+      || row.old_fence_sequence !== oldAllocation.fence_sequence
+      || replacementRun.allocation_id !== replacementAllocation.allocation_id
+      || replacementRun.run_id !== replacementAllocation.run_id
+      || replacementRun.lock_id !== replacementAllocation.lock_id
+      || replacementAllocation.lock_id !== oldAllocation.lock_id
+      || row.replacement_run_id !== replacementAllocation.run_id
+      || row.replacement_allocation_digest !== replacementAllocation.allocation_digest
+      || row.replacement_run_digest !== replacementRun.run_digest
+      || row.replacement_lease_id !== replacementAllocation.lease_id
+      || row.replacement_fence_id !== replacementAllocation.fence_id
+      || row.replacement_fence_sequence !== replacementAllocation.fence_sequence
+      || replacementAllocation.fence_sequence !== oldAllocation.fence_sequence + 1
+      || row.new_high_water !== row.replacement_fence_sequence
+      || row.new_high_water > coordination.high_water) {
+      fail('GPR_V3_RECOVERY_COHERENCE');
+    }
+
+    const oldBindings = canonicalAllocationBindings(oldAllocation, 'GPR_V3_RECOVERY_COHERENCE');
+    const replacementBindings = canonicalAllocationBindings(replacementAllocation, 'GPR_V3_RECOVERY_COHERENCE');
+    if (oldRun.authority_digest !== oldBindings.authority_digest
+      || oldRun.start_digest !== oldBindings.start_digest
+      || replacementRun.authority_digest !== replacementBindings.authority_digest
+      || replacementRun.start_digest !== replacementBindings.start_digest
+      || evidence.repository !== canonicalNamespace.repository
+      || evidence.parent_issue !== canonicalNamespace.parent_issue
+      || evidence.child_issue !== canonicalNamespace.child_issue
+      || evidence.namespace_digest !== canonicalNamespaceDigest
+      || evidence.lock !== oldAllocation.lock_id
+      || evidence.old_allocation_id !== oldAllocation.allocation_id
+      || evidence.old_allocation_digest !== oldAllocation.allocation_digest
+      || evidence.old_run_id !== oldRun.run_id
+      || evidence.old_run_digest !== oldRun.run_digest
+      || evidence.old_lease_id !== oldAllocation.lease_id
+      || evidence.old_fence_id !== oldAllocation.fence_id
+      || evidence.old_fence_sequence !== oldAllocation.fence_sequence
+      || evidence.old_lease_issued_at !== oldAllocation.issued_at
+      || evidence.old_lease_expires_at !== oldAllocation.expires_at
+      || Date.parse(evidence.observed_at) < Date.parse(oldAllocation.expires_at)
+      || evidence.authority_digest !== oldRun.authority_digest
+      || evidence.start_digest !== oldRun.start_digest) {
+      fail('GPR_V3_RECOVERY_COHERENCE');
+    }
+
+    const zeroOperationCount = db.prepare(
+      'SELECT COUNT(*) AS value FROM mutation_operations WHERE run_id = ?'
+    ).get(oldRun.run_id).value;
+    const zeroOperationEventCount = db.prepare(`
+      SELECT COUNT(*) AS value
+      FROM mutation_operation_events e
+      JOIN mutation_operations o ON o.operation_id = e.operation_id
+      WHERE o.run_id = ?
+    `).get(oldRun.run_id).value;
+    if (evidence.zero_operation_count !== zeroOperationCount
+      || evidence.zero_operation_event_count !== zeroOperationEventCount
+      || zeroOperationCount !== 0
+      || zeroOperationEventCount !== 0
+      || evidence.zero_operation_inventory_digest !== ZERO_OPERATION_INVENTORY_DIGEST) {
+      fail('GPR_V3_RECOVERY_COHERENCE');
+    }
+
+    const oldLeaseTip = leaseEvents.get(evidence.old_lease_tip_event_id);
+    const releaseEvent = leaseEvents.get(row.release_event_id);
+    const replacementTakeover = [...leaseEvents.values()].some((event) =>
+      event.allocation_id === replacementAllocation.allocation_id
+      && event.event_type === 'EXPIRED_TAKEOVER'
+      && event.fence_sequence === replacementAllocation.fence_sequence);
+    const oldHolder = holdersByDigest.get(evidence.old_holder_attestation_digest);
+    const replacementHolder = holders.get(row.replacement_holder_attestation_id);
+    const oldChain = receiptsByRun.get(oldRun.run_id) || [];
+    const oldReceiptTip = oldChain[evidence.old_receipt_tip_sequence - 1];
+    const terminalReceipt = receipts.get(row.terminal_receipt_id);
+    const oldReceiptTipRow = receiptRowsById.get(oldReceiptTip && oldReceiptTip.receipt_id);
+    const terminalReceiptRow = receiptRowsById.get(terminalReceipt && terminalReceipt.receipt_id);
+    if (!oldLeaseTip || !releaseEvent || !oldHolder || !replacementHolder || !oldReceiptTip
+      || !terminalReceipt || !oldReceiptTipRow || !terminalReceiptRow
+      || oldLeaseTip.allocation_id !== oldAllocation.allocation_id
+      || oldLeaseTip.fence_sequence !== oldAllocation.fence_sequence
+      || oldLeaseTip.event_digest !== evidence.old_lease_tip_event_digest
+      || !isTimestamp(oldLeaseTip.event_at)
+      || Date.parse(oldLeaseTip.event_at) < Date.parse(oldAllocation.issued_at)
+      || Date.parse(oldLeaseTip.event_at) > Date.parse(evidence.observed_at)
+      || [...leaseEvents.values()].some((later) => later.allocation_id === oldAllocation.allocation_id
+        && (later.event_at > oldLeaseTip.event_at
+          || later.event_at === oldLeaseTip.event_at && later.event_id > oldLeaseTip.event_id)
+        && Date.parse(later.event_at) <= Date.parse(evidence.observed_at))
+      || evidence.old_receipt_tip_id !== oldReceiptTip.receipt_id
+      || evidence.old_receipt_tip_digest !== oldReceiptTipRow.receipt_digest
+      || evidence.old_receipt_chain_digest !== digestValue(oldChain.slice(0, evidence.old_receipt_tip_sequence))
+      || Date.parse(oldReceiptTip.created_at) > Date.parse(evidence.observed_at)
+      || oldChain.some((receipt) => receipt.sequence > oldReceiptTip.sequence
+        && Date.parse(receipt.created_at) <= Date.parse(evidence.observed_at))
+      || oldHolder.allocation_id !== oldAllocation.allocation_id
+      || oldHolder.run_id !== oldRun.run_id
+      || oldHolder.lease_id !== oldAllocation.lease_id
+      || oldHolder.fence_id !== oldAllocation.fence_id
+      || oldHolder.fence_sequence !== oldAllocation.fence_sequence
+      || oldHolder.repository !== canonicalNamespace.repository
+      || oldHolder.parent_issue !== canonicalNamespace.parent_issue
+      || oldHolder.child_issue !== canonicalNamespace.child_issue
+      || oldHolder.lock_id !== oldAllocation.lock_id
+      || oldHolder.authority_digest !== oldRun.authority_digest
+      || oldHolder.start_digest !== oldRun.start_digest
+      || oldHolder.lease_issued_at !== oldAllocation.issued_at
+      || oldHolder.lease_expires_at !== oldAllocation.expires_at
+      || oldHolder.broker_identity_digest !== evidence.broker_identity_digest
+      || oldHolder.key_id !== evidence.broker_key_id
+      || terminalReceipt.run_id !== oldRun.run_id
+      || terminalReceipt.allocation_id !== oldAllocation.allocation_id
+      || terminalReceipt.receipt_type !== 'RUN_INTERRUPTED'
+      || terminalReceipt.prior_receipt_id !== oldReceiptTip.receipt_id
+      || terminalReceipt.sequence !== oldReceiptTip.sequence + 1
+      || terminalReceiptRow.receipt_digest !== row.terminal_receipt_digest
+      || Date.parse(terminalReceipt.created_at) < Date.parse(evidence.observed_at)
+      || !isTimestamp(releaseEvent && releaseEvent.event_at)
+      || releaseEvent.allocation_id !== oldAllocation.allocation_id
+      || releaseEvent.event_type !== 'RELEASED'
+      || releaseEvent.fence_sequence !== oldAllocation.fence_sequence
+      || releaseEvent.event_digest !== row.release_event_digest
+      || !isTimestamp(releaseEvent.event_at)
+      || Date.parse(releaseEvent.event_at) < Date.parse(terminalReceipt.created_at)
+      || !replacementTakeover
+      || replacementHolder.allocation_id !== replacementAllocation.allocation_id
+      || replacementHolder.run_id !== replacementRun.run_id
+      || replacementHolder.repository !== canonicalNamespace.repository
+      || replacementHolder.parent_issue !== canonicalNamespace.parent_issue
+      || replacementHolder.child_issue !== canonicalNamespace.child_issue
+      || replacementHolder.lock_id !== replacementAllocation.lock_id
+      || replacementHolder.allocation_digest !== replacementAllocation.allocation_digest
+      || replacementHolder.run_digest !== replacementRun.run_digest
+      || replacementHolder.lease_id !== replacementAllocation.lease_id
+      || replacementHolder.fence_id !== replacementAllocation.fence_id
+      || replacementHolder.fence_sequence !== replacementAllocation.fence_sequence
+      || replacementHolder.authority_digest !== replacementRun.authority_digest
+      || replacementHolder.start_digest !== replacementRun.start_digest
+      || replacementHolder.lease_issued_at !== replacementAllocation.issued_at
+      || replacementHolder.lease_expires_at !== replacementAllocation.expires_at
+      || replacementHolder.attestation_digest !== row.replacement_holder_attestation_digest) {
+      fail('GPR_V3_RECOVERY_COHERENCE');
+    }
+    try { validateReservedOrphanPayload(terminalReceipt.payload); } catch (_) { fail('GPR_V3_RECOVERY_COHERENCE'); }
+    if (terminalReceipt.payload.evidence_digest !== row.pre_recovery_evidence_digest
+      || Date.parse(row.committed_at) < Date.parse(releaseEvent.event_at)) {
+      fail('GPR_V3_RECOVERY_COHERENCE');
+    }
+  }
+  return true;
+}
+
+function verifyFinalV3Database(db, namespace, databasePath = null) {
+  const expectedNamespace = namespaceValue(namespace);
+  const expectedNamespaceDigest = namespaceDigest(expectedNamespace);
+  if (databasePath && fs.statSync(databasePath).size > LIMITS.databaseBytes) fail('GPR_DATABASE_LIMIT');
+  if (Number(oneValue(db, 'PRAGMA application_id', 'application_id')) !== APPLICATION_ID
+    || Number(oneValue(db, 'PRAGMA user_version', 'user_version')) !== V3_USER_VERSION) fail('GPR_SCHEMA_MISMATCH');
+  const metadata = db.prepare('SELECT * FROM metadata WHERE singleton = 1').get();
+  const expectedFingerprint = expectedFinalV3SchemaFingerprint();
+  if (!metadata
+    || metadata.schema_id !== SCHEMA_ID
+    || metadata.namespace_digest !== expectedNamespaceDigest
+    || metadata.repository !== expectedNamespace.repository
+    || metadata.parent_issue !== expectedNamespace.parent_issue
+    || metadata.child_issue !== expectedNamespace.child_issue
+    || metadata.schema_fingerprint !== expectedFingerprint
+    || schemaFingerprint(db) !== expectedFingerprint) fail('GPR_SCHEMA_MISMATCH');
+  const integrity = db.prepare('PRAGMA integrity_check').all();
+  if (integrity.length !== 1 || integrity[0].integrity_check !== 'ok') fail('GPR_INTEGRITY_CHECK_FAILED');
+  if (db.prepare('PRAGMA foreign_key_check').all().length !== 0) fail('GPR_FOREIGN_KEY_CHECK_FAILED');
+  const state = db.prepare('SELECT high_water FROM coordination_state WHERE singleton = 1').get();
+  const max = db.prepare('SELECT COALESCE(MAX(fence_sequence), 0) AS value FROM allocations').get().value;
+  if (!state || state.high_water !== max) fail('GPR_ALLOCATOR_TAMPERED');
+  verifyV3DurableEvidence(db, expectedNamespace, expectedNamespaceDigest);
+  return true;
 }
 
 function verifyDatabase(db, namespace, digest, databasePath, expectedFingerprint) {
@@ -2422,6 +3037,8 @@ module.exports = Object.freeze({
   expectedV2SchemaFingerprint,
   namespaceDigest,
   preRecoveryEvidenceDigest,
+  verifyFinalV3Database,
+  verifyV3DurableEvidence,
   resolveDatabasePath,
   validateAuthority,
   validateCandidate,

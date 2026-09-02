@@ -60,6 +60,17 @@
         "recovery": "NATURAL_EXPIRY_ONLY",
         "historical_digests_preserved": true
       },
+      "relational_coherence": {
+        "trust_source": "CANONICAL_DURABLE_ROWS",
+        "holder_persistence": "V3_INSERT_TRIGGER_EXACT_METADATA_ALLOCATION_RUN_LEASE_FENCE_AUTHORITY_START_BINDINGS",
+        "recovery_persistence": "V3_INSERT_TRIGGER_EXACT_OLD_PRE_TERMINAL_RELEASE_REPLACEMENT_BINDINGS",
+        "independent_reopen_readback": "verifyFinalV3Database",
+        "stable_failure_classes": [
+          "GPR_V3_HOLDER_COHERENCE",
+          "GPR_V3_RECOVERY_COHERENCE"
+        ],
+        "production_v2_unchanged": true
+      },
       "migration": {
         "explicit_action_only": true,
         "read_only_open_migrates": false,

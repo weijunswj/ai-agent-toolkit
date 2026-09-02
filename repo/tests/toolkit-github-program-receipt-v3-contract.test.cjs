@@ -13,7 +13,8 @@ const repositoryRoot = path.resolve(__dirname, '../..');
 const cleanupRoots = new Set();
 
 const digest = 'a'.repeat(64);
-const EXPECTED_FINAL_V3_SCHEMA_FINGERPRINT = '4144950da411bf0142cc57e99e3743311675c6dfef4b1f01fbbb96373a417798';
+const EXPECTED_FINAL_V3_SCHEMA_FINGERPRINT = '98e975af645d26876680a20e50357d615ae8efdc0817087e93e389f37bd72aa9';
+const EXPECTED_PRODUCTION_V2_SCHEMA_FINGERPRINT = 'adc7b560ee06ac61a397a5df0a075685269c3bcc95daa400f10f936143807c17';
 
 const HOLDER_ATTESTATION_KEYS = [
   'schema', 'attestation_id', 'algorithm', 'key_id', 'platform', 'repository',
@@ -362,6 +363,700 @@ function validRecoveryRecord(overrides = {}) {
   return value;
 }
 
+const V3_NAMESPACE = {
+  repository: 'weijunswj/ai-agent-toolkit',
+  parent_issue: 240,
+  child_issue: 359
+};
+
+function graphStart(seed) {
+  const nibble = (seed.charCodeAt(0) % 16).toString(16);
+  return {
+    ...start(),
+    head_sha: nibble.repeat(40),
+    status_digest: runtime.digestValue({ seed, status: [] }),
+    ref: { detached: false, name: `feat/${seed}` }
+  };
+}
+
+function durableGraph(seed, fenceSequence, lockId = `LOCK-${seed}`) {
+  const graphAuthority = authority(`durable-${seed}`);
+  const graphStartValue = graphStart(seed);
+  const allocation = {
+    allocation_id: `allocation-${seed}`,
+    run_id: `run-${seed}`,
+    lock_id: lockId,
+    lease_id: `lease-${seed}`,
+    fence_id: `fence-${seed}`,
+    fence_sequence: fenceSequence,
+    owner_instance_id: `owner-${seed}`,
+    process_id: 1000 + fenceSequence,
+    issued_at: `2026-09-02T01:${String(fenceSequence).padStart(2, '0')}:00.000Z`,
+    expires_at: `2026-09-02T02:${String(fenceSequence).padStart(2, '0')}:00.000Z`,
+    authority_json: runtime.canonicalSerialize(graphAuthority),
+    start_json: runtime.canonicalSerialize(graphStartValue)
+  };
+  allocation.allocation_digest = runtime.digestValue({
+    allocation_id: allocation.allocation_id,
+    run_id: allocation.run_id,
+    lock: allocation.lock_id,
+    lease_id: allocation.lease_id,
+    fence_id: allocation.fence_id,
+    fence_sequence: allocation.fence_sequence,
+    owner_instance_id: allocation.owner_instance_id,
+    process_id: allocation.process_id,
+    issued_at: allocation.issued_at,
+    expires_at: allocation.expires_at,
+    authority: graphAuthority,
+    start: graphStartValue
+  });
+  const run = {
+    run_id: allocation.run_id,
+    allocation_id: allocation.allocation_id,
+    lock: allocation.lock_id,
+    authority_digest: runtime.digestValue(graphAuthority),
+    start_digest: runtime.digestValue(graphStartValue)
+  };
+  run.run_digest = runtime.digestValue(run);
+  return {
+    seed,
+    allocation,
+    run,
+    authority: graphAuthority,
+    start: graphStartValue,
+    authority_digest: run.authority_digest,
+    start_digest: run.start_digest
+  };
+}
+
+function insertDurableGraph(db, graph) {
+  const row = graph.allocation;
+  db.prepare('INSERT INTO allocations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+    row.allocation_id, row.run_id, row.lock_id, row.lease_id, row.fence_id,
+    row.fence_sequence, row.owner_instance_id, row.process_id, row.issued_at,
+    row.expires_at, row.authority_json, row.start_json, row.allocation_digest
+  );
+  db.prepare('INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?)').run(
+    graph.run.run_id, graph.run.allocation_id, graph.run.lock,
+    graph.run.authority_digest, graph.run.start_digest, graph.run.run_digest
+  );
+}
+
+function durableLeaseEvent(graph, eventType, eventId) {
+  const event = {
+    event_id: eventId,
+    allocation_id: graph.allocation.allocation_id,
+    event_type: eventType,
+    fence_sequence: graph.allocation.fence_sequence,
+    event_at: `2026-09-02T0${eventType === 'RELEASED' ? '3' : '2'}:${String(graph.allocation.fence_sequence).padStart(2, '0')}:30.000Z`,
+    detail_digest: runtime.digestValue({ eventId, eventType, seed: graph.seed })
+  };
+  event.event_digest = runtime.digestValue(event);
+  return event;
+}
+
+function insertLeaseEvent(db, event) {
+  db.prepare('INSERT INTO lease_events VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+    event.event_id, event.allocation_id, event.event_type, event.fence_sequence,
+    event.event_at, event.detail_digest, event.event_digest
+  );
+}
+
+function durableHolder(graph, suffix = graph.seed) {
+  return validHolderAttestation({
+    attestation_id: `attestation-${suffix}`,
+    repository: V3_NAMESPACE.repository,
+    parent_issue: V3_NAMESPACE.parent_issue,
+    child_issue: V3_NAMESPACE.child_issue,
+    lock: graph.allocation.lock_id,
+    allocation_id: graph.allocation.allocation_id,
+    allocation_digest: graph.allocation.allocation_digest,
+    run_id: graph.run.run_id,
+    run_digest: graph.run.run_digest,
+    lease_id: graph.allocation.lease_id,
+    fence_id: graph.allocation.fence_id,
+    fence_sequence: graph.allocation.fence_sequence,
+    authority_digest: graph.authority_digest,
+    start_digest: graph.start_digest,
+    broker_identity_digest: runtime.digestValue(`broker-${suffix}`),
+    process_id_digest: runtime.digestValue(`process-${suffix}`),
+    process_start_digest: runtime.digestValue(`process-start-${suffix}`),
+    boot_id_digest: runtime.digestValue(`boot-${suffix}`),
+    pid_namespace_digest: runtime.digestValue(`namespace-${suffix}`),
+    process_incarnation_digest: runtime.digestValue(`incarnation-${suffix}`),
+    lease_issued_at: graph.allocation.issued_at,
+    lease_expires_at: graph.allocation.expires_at
+  });
+}
+
+function insertHolder(db, holder) {
+  db.prepare(`INSERT INTO holder_attestations (
+    attestation_id, repository, parent_issue, child_issue, lock_id,
+    allocation_id, allocation_digest, run_id, run_digest, lease_id, fence_id,
+    fence_sequence, algorithm, key_id, platform, authority_digest, start_digest,
+    broker_identity_digest, process_id_digest, process_start_digest, boot_id_digest,
+    pid_namespace_digest, process_incarnation_digest, lease_issued_at,
+    lease_expires_at, attestation_digest, attestation_tag
+  ) VALUES (${Array(27).fill('?').join(', ')})`).run(
+    holder.attestation_id, holder.repository, holder.parent_issue, holder.child_issue, holder.lock,
+    holder.allocation_id, holder.allocation_digest, holder.run_id, holder.run_digest,
+    holder.lease_id, holder.fence_id, holder.fence_sequence, holder.algorithm, holder.key_id,
+    holder.platform, holder.authority_digest, holder.start_digest, holder.broker_identity_digest,
+    holder.process_id_digest, holder.process_start_digest, holder.boot_id_digest,
+    holder.pid_namespace_digest, holder.process_incarnation_digest, holder.lease_issued_at,
+    holder.lease_expires_at, holder.attestation_digest, holder.attestation_tag
+  );
+}
+
+function durableStartedReceipt(graph) {
+  const receipt = {
+    schema: 'toolkit.github-program.run-receipt.v1',
+    receipt_type: 'RUN_STARTED',
+    receipt_id: '',
+    sequence: 1,
+    prior_receipt_id: null,
+    run_id: graph.run.run_id,
+    allocation_id: graph.allocation.allocation_id,
+    repository: V3_NAMESPACE.repository,
+    parent_issue: V3_NAMESPACE.parent_issue,
+    child_issue: V3_NAMESPACE.child_issue,
+    lock: graph.allocation.lock_id,
+    authority: graph.authority,
+    start: graph.start,
+    candidate: null,
+    lease: {
+      lease_id: graph.allocation.lease_id,
+      fence_id: graph.allocation.fence_id,
+      fence_sequence: graph.allocation.fence_sequence,
+      issued_at: graph.allocation.issued_at,
+      expires_at: graph.allocation.expires_at
+    },
+    payload: { classification: 'RUN_STARTED_VERIFIED' },
+    created_at: graph.allocation.issued_at
+  };
+  const payload = structuredClone(receipt);
+  delete payload.receipt_id;
+  receipt.receipt_id = runtime.digestValue(payload);
+  return receipt;
+}
+
+function insertReceipt(db, receipt) {
+  db.prepare('INSERT INTO receipts VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+    receipt.receipt_id, receipt.run_id, receipt.sequence, receipt.receipt_type,
+    receipt.prior_receipt_id, runtime.canonicalSerialize(receipt), receipt.receipt_id
+  );
+}
+
+function durableTerminalReceipt(graph, prior, evidenceDigest) {
+  const receipt = {
+    ...prior,
+    receipt_type: 'RUN_INTERRUPTED',
+    receipt_id: '',
+    sequence: 2,
+    prior_receipt_id: prior.receipt_id,
+    payload: {
+      classification: 'ORPHAN_NONADOPTABLE',
+      reason_code: 'BROKER_PROTECTED_RECOVERY',
+      evidence_digest: evidenceDigest
+    },
+    created_at: `2026-09-02T03:${String(graph.allocation.fence_sequence).padStart(2, '0')}:00.000Z`
+  };
+  const payload = structuredClone(receipt);
+  delete payload.receipt_id;
+  receipt.receipt_id = runtime.digestValue(payload);
+  return receipt;
+}
+
+function durablePreEvidence(oldGraph, oldHolder, oldLeaseTip, oldReceipt, requestId) {
+  return validPreRecoveryEvidence({
+    request_id: requestId,
+    repository: V3_NAMESPACE.repository,
+    parent_issue: V3_NAMESPACE.parent_issue,
+    child_issue: V3_NAMESPACE.child_issue,
+    lock: oldGraph.allocation.lock_id,
+    namespace_digest: runtime.namespaceDigest(V3_NAMESPACE),
+    old_allocation_id: oldGraph.allocation.allocation_id,
+    old_run_id: oldGraph.run.run_id,
+    old_allocation_digest: oldGraph.allocation.allocation_digest,
+    old_run_digest: oldGraph.run.run_digest,
+    old_lease_id: oldGraph.allocation.lease_id,
+    old_fence_id: oldGraph.allocation.fence_id,
+    old_fence_sequence: oldGraph.allocation.fence_sequence,
+    old_lease_issued_at: oldGraph.allocation.issued_at,
+    old_lease_expires_at: oldGraph.allocation.expires_at,
+    old_lease_tip_event_id: oldLeaseTip.event_id,
+    old_lease_tip_event_digest: oldLeaseTip.event_digest,
+    old_receipt_tip_id: oldReceipt.receipt_id,
+    old_receipt_tip_sequence: oldReceipt.sequence,
+    old_receipt_tip_digest: oldReceipt.receipt_id,
+    old_receipt_chain_digest: runtime.digestValue([oldReceipt]),
+    authority_digest: oldGraph.authority_digest,
+    source_digest: runtime.digestValue({ source: oldGraph.seed }),
+    start_digest: oldGraph.start_digest,
+    old_holder_identity_digest: runtime.digestValue({ holder: oldHolder.attestation_id }),
+    old_holder_attestation_digest: oldHolder.attestation_digest,
+    recovery_peer_identity_digest: runtime.digestValue({ peer: requestId }),
+    recovery_peer_process_incarnation_digest: runtime.digestValue({ peer_incarnation: requestId }),
+    broker_identity_digest: oldHolder.broker_identity_digest,
+    observed_at: '2026-09-02T02:30:00.000Z',
+    authority_observed_at: '2026-09-02T02:25:00.000Z',
+    source_observed_at: '2026-09-02T02:26:00.000Z',
+    start_observed_at: '2026-09-02T02:27:00.000Z',
+    store_observed_at: '2026-09-02T02:28:00.000Z',
+    holder_observed_at: '2026-09-02T02:29:00.000Z'
+  });
+}
+
+function durableRecoveryRecord(oldGraph, replacementGraph, evidence, terminal, releaseEvent, replacementHolder, id) {
+  return validRecoveryRecord({
+    recovery_record_id: id,
+    request_id: evidence.request_id,
+    namespace_digest: runtime.namespaceDigest(V3_NAMESPACE),
+    old_allocation_id: oldGraph.allocation.allocation_id,
+    old_run_id: oldGraph.run.run_id,
+    old_lease_id: oldGraph.allocation.lease_id,
+    old_fence_id: oldGraph.allocation.fence_id,
+    old_fence_sequence: oldGraph.allocation.fence_sequence,
+    pre_recovery_evidence: evidence,
+    pre_recovery_evidence_digest: runtime.preRecoveryEvidenceDigest(evidence),
+    terminal_receipt_id: terminal.receipt_id,
+    terminal_receipt_digest: terminal.receipt_id,
+    release_event_id: releaseEvent.event_id,
+    release_event_digest: releaseEvent.event_digest,
+    replacement_allocation_id: replacementGraph.allocation.allocation_id,
+    replacement_allocation_digest: replacementGraph.allocation.allocation_digest,
+    replacement_run_id: replacementGraph.run.run_id,
+    replacement_run_digest: replacementGraph.run.run_digest,
+    replacement_lease_id: replacementGraph.allocation.lease_id,
+    replacement_fence_id: replacementGraph.allocation.fence_id,
+    replacement_fence_sequence: replacementGraph.allocation.fence_sequence,
+    replacement_holder_attestation_id: replacementHolder.attestation_id,
+    replacement_holder_attestation_digest: replacementHolder.attestation_digest,
+    new_high_water: replacementGraph.allocation.fence_sequence,
+    authority_digest: oldGraph.authority_digest,
+    source_digest: evidence.source_digest,
+    start_digest: oldGraph.start_digest,
+    committed_at: '2026-09-02T04:00:00.000Z'
+  });
+}
+
+function insertRecoveryRecord(db, record) {
+  db.prepare(`INSERT INTO recovery_records (
+    recovery_record_id, recovery_record_digest, request_id, namespace_digest,
+    old_allocation_id, old_run_id, old_lease_id, old_fence_id, old_fence_sequence,
+    pre_recovery_evidence_json, pre_recovery_evidence_digest, terminal_receipt_id,
+    terminal_receipt_digest, release_event_id, release_event_digest,
+    replacement_allocation_id, replacement_allocation_digest, replacement_run_id,
+    replacement_run_digest, replacement_lease_id, replacement_fence_id,
+    replacement_fence_sequence, replacement_holder_attestation_id,
+    replacement_holder_attestation_digest, new_high_water, authority_digest,
+    source_digest, start_digest, committed_at
+  ) VALUES (${Array(29).fill('?').join(', ')})`).run(
+    record.recovery_record_id, record.recovery_record_digest, record.request_id,
+    record.namespace_digest, record.old_allocation_id, record.old_run_id,
+    record.old_lease_id, record.old_fence_id, record.old_fence_sequence,
+    runtime.canonicalSerialize(record.pre_recovery_evidence), record.pre_recovery_evidence_digest,
+    record.terminal_receipt_id, record.terminal_receipt_digest, record.release_event_id,
+    record.release_event_digest, record.replacement_allocation_id,
+    record.replacement_allocation_digest, record.replacement_run_id,
+    record.replacement_run_digest, record.replacement_lease_id, record.replacement_fence_id,
+    record.replacement_fence_sequence, record.replacement_holder_attestation_id,
+    record.replacement_holder_attestation_digest, record.new_high_water,
+    record.authority_digest, record.source_digest, record.start_digest, record.committed_at
+  );
+}
+
+function v3Database(databasePath = ':memory:') {
+  const db = new DatabaseSync(databasePath);
+  db.exec('PRAGMA foreign_keys=ON');
+  db.exec(runtime.buildFinalV3SchemaSql());
+  db.exec(`PRAGMA application_id=${runtime.APPLICATION_ID}`);
+  db.exec(`PRAGMA user_version=${runtime.V3_USER_VERSION}`);
+  db.prepare('INSERT INTO metadata VALUES (1, ?, ?, ?, ?, ?, ?, ?)').run(
+    runtime.SCHEMA_ID, runtime.namespaceDigest(V3_NAMESPACE), V3_NAMESPACE.repository,
+    V3_NAMESPACE.parent_issue, V3_NAMESPACE.child_issue,
+    runtime.expectedFinalV3SchemaFingerprint(), '2026-09-02T00:00:00.000Z'
+  );
+  db.prepare('INSERT INTO coordination_state VALUES (1, 0)').run();
+  return db;
+}
+
+function v3HolderFixture() {
+  const db = v3Database();
+  const first = durableGraph('holder-a', 1);
+  const second = durableGraph('holder-b', 2);
+  insertDurableGraph(db, first);
+  insertDurableGraph(db, second);
+  db.prepare('UPDATE coordination_state SET high_water=1 WHERE singleton=1 AND high_water=0').run();
+  db.prepare('UPDATE coordination_state SET high_water=2 WHERE singleton=1 AND high_water=1').run();
+  return { db, first, second };
+}
+
+function v3RecoveryFixture(databasePath = ':memory:') {
+  const db = v3Database(databasePath);
+  const oldA = durableGraph('recovery-old-a', 1);
+  const oldB = durableGraph('recovery-old-b', 3);
+  const replacementA = durableGraph('recovery-new-a', 2, oldA.allocation.lock_id);
+  const replacementB = durableGraph('recovery-new-b', 4, oldB.allocation.lock_id);
+  const oldAHolder = durableHolder(oldA);
+  const replacementAHolder = durableHolder(replacementA);
+  const oldBHolder = durableHolder(oldB);
+  const replacementBHolder = durableHolder(replacementB);
+  const oldAStart = durableStartedReceipt(oldA);
+  const oldBStart = durableStartedReceipt(oldB);
+  const replacementAStart = durableStartedReceipt(replacementA);
+  const replacementBStart = durableStartedReceipt(replacementB);
+  const oldAAllocated = durableLeaseEvent(oldA, 'ALLOCATED', 'event-recovery-old-a-allocated');
+  const oldBAllocated = durableLeaseEvent(oldB, 'ALLOCATED', 'event-recovery-old-b-allocated');
+  const replacementAAllocated = durableLeaseEvent(replacementA, 'EXPIRED_TAKEOVER', 'event-recovery-new-a-allocated');
+  const replacementBAllocated = durableLeaseEvent(replacementB, 'EXPIRED_TAKEOVER', 'event-recovery-new-b-allocated');
+  const oldARelease = durableLeaseEvent(oldA, 'RELEASED', 'event-recovery-old-a-release');
+  const oldBRelease = durableLeaseEvent(oldB, 'RELEASED', 'event-recovery-old-b-release');
+  const evidenceA = durablePreEvidence(oldA, oldAHolder, oldAAllocated, oldAStart, 'recovery-request-a');
+  const evidenceB = durablePreEvidence(oldB, oldBHolder, oldBAllocated, oldBStart, 'recovery-request-b');
+  const terminalA = durableTerminalReceipt(oldA, oldAStart, runtime.preRecoveryEvidenceDigest(evidenceA));
+  const terminalB = durableTerminalReceipt(oldB, oldBStart, runtime.preRecoveryEvidenceDigest(evidenceB));
+  const recordA = durableRecoveryRecord(oldA, replacementA, evidenceA, terminalA, oldARelease, replacementAHolder, 'recovery-record-a');
+  const recordB = durableRecoveryRecord(oldB, replacementB, evidenceB, terminalB, oldBRelease, replacementBHolder, 'recovery-record-b');
+
+  for (const graph of [oldA, replacementA]) insertDurableGraph(db, graph);
+  for (const highWater of [1, 2]) {
+    db.prepare('UPDATE coordination_state SET high_water=? WHERE singleton=1 AND high_water=?').run(highWater, highWater - 1);
+  }
+  for (const holder of [oldAHolder, replacementAHolder]) insertHolder(db, holder);
+  for (const receipt of [oldAStart, replacementAStart]) insertReceipt(db, receipt);
+  for (const event of [oldAAllocated, replacementAAllocated, oldARelease]) insertLeaseEvent(db, event);
+  insertReceipt(db, terminalA);
+  insertRecoveryRecord(db, recordA);
+
+  for (const graph of [oldB, replacementB]) insertDurableGraph(db, graph);
+  for (const highWater of [3, 4]) {
+    db.prepare('UPDATE coordination_state SET high_water=? WHERE singleton=1 AND high_water=?').run(highWater, highWater - 1);
+  }
+  for (const holder of [oldBHolder, replacementBHolder]) insertHolder(db, holder);
+  for (const receipt of [oldBStart, replacementBStart]) insertReceipt(db, receipt);
+  for (const event of [oldBAllocated, replacementBAllocated, oldBRelease]) insertLeaseEvent(db, event);
+  insertReceipt(db, terminalB);
+  insertRecoveryRecord(db, recordB);
+  return {
+    db, oldA, replacementA, oldB, replacementB,
+    oldAHolder, replacementAHolder, oldBHolder, replacementBHolder,
+    oldAStart, replacementAStart, oldBStart, replacementBStart,
+    oldAAllocated, oldBAllocated, oldARelease, oldBRelease,
+    terminalA, terminalB, evidenceA, evidenceB, recordA, recordB
+  };
+}
+
+function resignedRecoveryRecord(record, overrides = {}, id = 'recovery-negative') {
+  const result = structuredClone(record);
+  Object.assign(result, overrides);
+  if (overrides.pre_recovery_evidence) {
+    result.pre_recovery_evidence_digest = runtime.digestValue(result.pre_recovery_evidence);
+  }
+  result.recovery_record_id = id;
+  delete result.recovery_record_digest;
+  result.recovery_record_digest = runtime.digestValue(result);
+  return result;
+}
+
+test('v3 persistence accepts a coherent holder and independent verifier readback', () => {
+  const { db, first } = v3HolderFixture();
+  try {
+    assert.doesNotThrow(() => insertHolder(db, durableHolder(first)));
+    assert.equal(runtime.verifyV3DurableEvidence(db, V3_NAMESPACE), true);
+    assert.equal(runtime.verifyFinalV3Database(db, V3_NAMESPACE), true);
+  } finally {
+    db.close();
+  }
+});
+
+test('v3 holder persistence rejects canonical-graph cross-mixes despite clean foreign-key validation', () => {
+  const cases = [
+    ['allocation A plus run B', (first, second) => ({
+      run_id: second.run.run_id,
+      run_digest: second.run.run_digest,
+      lease_id: second.allocation.lease_id,
+      fence_id: second.allocation.fence_id,
+      fence_sequence: second.allocation.fence_sequence
+    })],
+    ['wrong allocation digest', (first, second) => ({ allocation_digest: second.allocation.allocation_digest })],
+    ['wrong run digest', (first, second) => ({ run_digest: second.run.run_digest })],
+    ['run not belonging to allocation', (first, second) => ({ run_id: second.run.run_id })],
+    ['wrong lease', (first, second) => ({ lease_id: second.allocation.lease_id })],
+    ['wrong fence', (first, second) => ({ fence_id: second.allocation.fence_id })],
+    ['wrong fence sequence', (first, second) => ({ fence_sequence: second.allocation.fence_sequence })],
+    ['wrong Lock', (first, second) => ({ lock: second.allocation.lock_id })],
+    ['wrong authority digest', (first, second) => ({ authority_digest: second.authority_digest })],
+    ['wrong start digest', (first, second) => ({ start_digest: second.start_digest })],
+    ['wrong lease issued timestamp', (first, second) => ({ lease_issued_at: second.allocation.issued_at })],
+    ['wrong lease expiry timestamp', (first, second) => ({ lease_expires_at: second.allocation.expires_at })],
+    ['wrong repository namespace', () => ({ repository: 'other/repository' })],
+    ['wrong Parent namespace', () => ({ parent_issue: 241 })],
+    ['wrong Child namespace', () => ({ child_issue: 360 })],
+    ['arbitrary digest-shaped substitution', () => ({ allocation_digest: 'f'.repeat(64) })]
+  ];
+  assert.equal(cases.length, 16);
+  for (const [name, mutate] of cases) {
+    const { db, first, second } = v3HolderFixture();
+    try {
+      const holder = durableHolder(first, `holder-negative-${name.replace(/\W+/g, '-')}`);
+      Object.assign(holder, mutate(first, second));
+      const payload = { ...holder };
+      delete payload.attestation_digest;
+      delete payload.attestation_tag;
+      holder.attestation_digest = runtime.digestValue(payload);
+      assert.ok(db.prepare('SELECT 1 FROM allocations WHERE allocation_id=?').get(first.allocation.allocation_id));
+      assert.ok(db.prepare('SELECT 1 FROM runs WHERE run_id=?').get(second.run.run_id));
+      assert.equal(db.prepare('PRAGMA foreign_key_check').all().length, 0, name);
+      assert.throws(() => insertHolder(db, holder), /GPR_V3_HOLDER_COHERENCE/, name);
+    } finally {
+      db.close();
+    }
+  }
+});
+
+test('v3 persistence accepts coherent recovery chains and independent verifier readback', () => {
+  const fixture = v3RecoveryFixture();
+  try {
+    assert.equal(runtime.verifyV3DurableEvidence(fixture.db, V3_NAMESPACE), true);
+    assert.equal(runtime.verifyFinalV3Database(fixture.db, V3_NAMESPACE), true);
+  } finally {
+    fixture.db.close();
+  }
+});
+
+test('v3 recovery persistence rejects cross-mixed old/replacement evidence with clean foreign-key validation', () => {
+  const fixture = v3RecoveryFixture();
+  try {
+    const cases = [
+      ['old allocation A plus old run B', {
+        old_allocation_id: fixture.oldB.allocation.allocation_id,
+        old_run_id: fixture.oldA.run.run_id,
+        old_lease_id: fixture.oldB.allocation.lease_id,
+        old_fence_id: fixture.oldB.allocation.fence_id,
+        pre_recovery_evidence: {
+          ...fixture.evidenceA,
+          old_allocation_id: fixture.oldB.allocation.allocation_id,
+          old_run_id: fixture.oldA.run.run_id
+        }
+      }],
+      ['wrong old allocation digest', {
+        pre_recovery_evidence: { ...fixture.evidenceA, old_allocation_digest: fixture.oldB.allocation.allocation_digest }
+      }],
+      ['wrong old run digest', {
+        pre_recovery_evidence: { ...fixture.evidenceA, old_run_digest: fixture.oldB.run.run_digest }
+      }],
+      ['old lease binding mismatch', {
+        old_lease_id: fixture.oldB.allocation.lease_id,
+        pre_recovery_evidence: { ...fixture.evidenceA, old_lease_id: fixture.oldB.allocation.lease_id }
+      }],
+      ['old fence binding mismatch', {
+        old_fence_id: fixture.oldB.allocation.fence_id,
+        pre_recovery_evidence: { ...fixture.evidenceA, old_fence_id: fixture.oldB.allocation.fence_id }
+      }],
+      ['old fence sequence mismatch', {
+        old_fence_sequence: 2,
+        replacement_fence_sequence: 3,
+        new_high_water: 3,
+        pre_recovery_evidence: { ...fixture.evidenceA, old_fence_sequence: 2 }
+      }],
+      ['old lease issued timestamp mismatch', {
+        pre_recovery_evidence: {
+          ...fixture.evidenceA,
+          old_lease_issued_at: fixture.oldB.allocation.issued_at
+        }
+      }],
+      ['old lease expiry timestamp mismatch', {
+        pre_recovery_evidence: {
+          ...fixture.evidenceA,
+          old_lease_expires_at: fixture.oldB.allocation.expires_at
+        }
+      }],
+      ['old authority binding mismatch', {
+        authority_digest: runtime.digestValue('wrong-authority'),
+        pre_recovery_evidence: { ...fixture.evidenceA, authority_digest: runtime.digestValue('wrong-authority') }
+      }],
+      ['old start binding mismatch', {
+        start_digest: runtime.digestValue('wrong-start'),
+        pre_recovery_evidence: { ...fixture.evidenceA, start_digest: runtime.digestValue('wrong-start') }
+      }],
+      ['wrong PRE repository namespace', {
+        pre_recovery_evidence: { ...fixture.evidenceA, repository: 'other/repository' }
+      }],
+      ['wrong PRE Parent namespace', {
+        pre_recovery_evidence: { ...fixture.evidenceA, parent_issue: 241 }
+      }],
+      ['wrong PRE Child namespace', {
+        pre_recovery_evidence: { ...fixture.evidenceA, child_issue: 360 }
+      }],
+      ['wrong recovery namespace digest', {
+        namespace_digest: runtime.namespaceDigest({
+          repository: 'other/repository',
+          parent_issue: 240,
+          child_issue: 359
+        }),
+        pre_recovery_evidence: {
+          ...fixture.evidenceA,
+          namespace_digest: runtime.namespaceDigest({
+            repository: 'other/repository',
+            parent_issue: 240,
+            child_issue: 359
+          })
+        }
+      }],
+      ['nonzero operation claim', {
+        pre_recovery_evidence: { ...fixture.evidenceA, zero_operation_count: 1 }
+      }],
+      ['old lease tip from another allocation', {
+        pre_recovery_evidence: {
+          ...fixture.evidenceA,
+          old_lease_tip_event_id: fixture.oldBAllocated.event_id,
+          old_lease_tip_event_digest: fixture.oldBAllocated.event_digest
+        }
+      }],
+      ['old receipt tip from another run', {
+        pre_recovery_evidence: {
+          ...fixture.evidenceA,
+          old_receipt_tip_id: fixture.oldBStart.receipt_id,
+          old_receipt_tip_digest: fixture.oldBStart.receipt_id,
+          old_receipt_chain_digest: runtime.digestValue([fixture.oldBStart])
+        }
+      }],
+      ['old holder attestation from another allocation', {
+        pre_recovery_evidence: {
+          ...fixture.evidenceA,
+          old_holder_attestation_digest: fixture.oldBHolder.attestation_digest
+        }
+      }],
+      ['old broker identity from another holder', {
+        pre_recovery_evidence: {
+          ...fixture.evidenceA,
+          broker_identity_digest: fixture.oldBHolder.broker_identity_digest
+        }
+      }],
+      ['old broker key mismatch', {
+        pre_recovery_evidence: { ...fixture.evidenceA, broker_key_id: 'broker-key-other' }
+      }],
+      ['terminal receipt from another run', {
+        terminal_receipt_id: fixture.terminalB.receipt_id,
+        terminal_receipt_digest: fixture.terminalB.receipt_id
+      }],
+      ['wrong terminal receipt digest', {
+        terminal_receipt_digest: runtime.digestValue('wrong-terminal')
+      }],
+      ['terminal evidence from another PRE', {
+        terminal_receipt_id: fixture.terminalB.receipt_id,
+        terminal_receipt_digest: fixture.terminalB.receipt_id,
+        pre_recovery_evidence: fixture.evidenceA
+      }],
+      ['release event from another allocation', {
+        release_event_id: fixture.oldBRelease.event_id,
+        release_event_digest: fixture.oldBRelease.event_digest
+      }],
+      ['wrong release event digest', { release_event_digest: runtime.digestValue('wrong-release') }],
+      ['replacement allocation A plus replacement run B', {
+        replacement_allocation_id: fixture.replacementB.allocation.allocation_id,
+        replacement_run_id: fixture.replacementA.run.run_id,
+        replacement_lease_id: fixture.replacementB.allocation.lease_id,
+        replacement_fence_id: fixture.replacementB.allocation.fence_id,
+        replacement_holder_attestation_id: fixture.replacementBHolder.attestation_id,
+        replacement_holder_attestation_digest: fixture.replacementBHolder.attestation_digest
+      }],
+      ['wrong replacement allocation digest', {
+        replacement_allocation_digest: fixture.replacementB.allocation.allocation_digest
+      }],
+      ['arbitrary replacement digest-shaped substitution', {
+        replacement_allocation_digest: 'f'.repeat(64)
+      }],
+      ['wrong replacement run digest', { replacement_run_digest: fixture.replacementB.run.run_digest }],
+      ['replacement lease/fence mismatch', {
+        replacement_lease_id: fixture.replacementB.allocation.lease_id,
+        replacement_fence_id: fixture.replacementB.allocation.fence_id
+      }],
+      ['replacement holder from another graph', {
+        replacement_holder_attestation_id: fixture.replacementBHolder.attestation_id,
+        replacement_holder_attestation_digest: fixture.replacementBHolder.attestation_digest
+      }],
+      ['wrong replacement holder digest', { replacement_holder_attestation_digest: runtime.digestValue('wrong-holder') }],
+      ['replacement fence is not N plus one', { replacement_fence_sequence: 3, new_high_water: 3 }],
+      ['coordination high-water mismatch', {}]
+    ];
+    assert.equal(cases.length, 34);
+    for (const [name, overrides] of cases) {
+      const candidate = resignedRecoveryRecord(fixture.recordA, overrides, `recovery-negative-${name.replace(/\W+/g, '-')}`);
+      if (candidate.new_high_water !== candidate.replacement_fence_sequence) {
+        assert.throws(() => insertRecoveryRecord(fixture.db, candidate), /CHECK constraint/, name);
+        continue;
+      }
+      assert.ok(fixture.db.prepare('SELECT 1 FROM receipts WHERE receipt_id=?').get(candidate.terminal_receipt_id));
+      assert.ok(fixture.db.prepare('SELECT 1 FROM lease_events WHERE event_id=?').get(candidate.release_event_id));
+      assert.equal(fixture.db.prepare('PRAGMA foreign_key_check').all().length, 0, name);
+      assert.throws(() => insertRecoveryRecord(fixture.db, candidate),
+        /GPR_V3_RECOVERY_COHERENCE|CHECK constraint|FOREIGN KEY constraint/, name);
+    }
+  } finally {
+    fixture.db.close();
+  }
+});
+
+test('v3 final database independently reopens and rejects canonical tampering', () => {
+  const root = stateRoot();
+  const databasePath = path.join(root, 'v3.sqlite');
+  const fixture = v3RecoveryFixture(databasePath);
+  fixture.db.close();
+
+  const reopened = new DatabaseSync(databasePath);
+  try {
+    assert.equal(runtime.verifyFinalV3Database(reopened, V3_NAMESPACE, databasePath), true);
+  } finally {
+    reopened.close();
+  }
+
+  const tamper = structuredClone(fixture.recordA);
+  tamper.replacement_run_id = fixture.replacementB.run.run_id;
+  delete tamper.recovery_record_digest;
+  tamper.recovery_record_digest = runtime.digestValue(tamper);
+  const tamperDb = new DatabaseSync(databasePath);
+  try {
+    tamperDb.exec('DROP TRIGGER recovery_records_no_update');
+    tamperDb.prepare('UPDATE recovery_records SET replacement_run_id=?, recovery_record_digest=? WHERE recovery_record_id=?')
+      .run(tamper.replacement_run_id, tamper.recovery_record_digest, fixture.recordA.recovery_record_id);
+    tamperDb.exec("CREATE TRIGGER recovery_records_no_update BEFORE UPDATE ON recovery_records BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;");
+  } finally {
+    tamperDb.close();
+  }
+
+  const readback = new DatabaseSync(databasePath);
+  try {
+    assertCode(() => runtime.verifyFinalV3Database(readback, V3_NAMESPACE, databasePath), 'GPR_V3_RECOVERY_COHERENCE');
+  } finally {
+    readback.close();
+  }
+});
+
+test('v3 independent verifier rejects a holder cross-mix after append-only bypass', () => {
+  const { db, first, second } = v3HolderFixture();
+  try {
+    const holder = durableHolder(first, 'holder-readback');
+    insertHolder(db, holder);
+    assert.equal(runtime.verifyV3DurableEvidence(db, V3_NAMESPACE), true);
+
+    const tampered = structuredClone(holder);
+    tampered.allocation_digest = second.allocation.allocation_digest;
+    const payload = { ...tampered };
+    delete payload.attestation_digest;
+    delete payload.attestation_tag;
+    tampered.attestation_digest = runtime.digestValue(payload);
+    db.exec('DROP TRIGGER holder_attestations_no_update');
+    db.prepare('UPDATE holder_attestations SET allocation_digest=?, attestation_digest=? WHERE attestation_id=?')
+      .run(tampered.allocation_digest, tampered.attestation_digest, holder.attestation_id);
+    db.exec("CREATE TRIGGER holder_attestations_no_update BEFORE UPDATE ON holder_attestations BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;");
+    assertCode(() => runtime.verifyV3DurableEvidence(db, V3_NAMESPACE), 'GPR_V3_HOLDER_COHERENCE');
+  } finally {
+    db.close();
+  }
+});
+
 test('durable evidence shapes use the full accepted key sets', () => {
   const holder = validHolderAttestation();
   const preEvidence = validPreRecoveryEvidence();
@@ -508,6 +1203,14 @@ test('ordinary receipt append cannot mint the reserved broker orphan classificat
 test('v3 JSON schemas are closed and reject secret, path, callback, and raw process fields', () => {
   const policy = JSON.parse(fs.readFileSync(path.join(repositoryRoot, 'repo', 'contracts', 'github-program-receipt', 'github-program-receipt-policy.json'), 'utf8'));
   const v3Policy = policy.sqlite.v3_dormant_contract;
+  assert.deepEqual(v3Policy.relational_coherence, {
+    trust_source: 'CANONICAL_DURABLE_ROWS',
+    holder_persistence: 'V3_INSERT_TRIGGER_EXACT_METADATA_ALLOCATION_RUN_LEASE_FENCE_AUTHORITY_START_BINDINGS',
+    recovery_persistence: 'V3_INSERT_TRIGGER_EXACT_OLD_PRE_TERMINAL_RELEASE_REPLACEMENT_BINDINGS',
+    independent_reopen_readback: 'verifyFinalV3Database',
+    stable_failure_classes: ['GPR_V3_HOLDER_COHERENCE', 'GPR_V3_RECOVERY_COHERENCE'],
+    production_v2_unchanged: true
+  });
   assert.deepEqual([...v3Policy.holder_attestation.required_fields].sort(), [...HOLDER_ATTESTATION_KEYS].sort());
   assert.deepEqual([...v3Policy.recovery.pre_recovery_evidence_fields].sort(), [...PRE_RECOVERY_EVIDENCE_KEYS].sort());
   assert.deepEqual([...v3Policy.recovery.recovery_record_fields].sort(), [...RECOVERY_RECORD_KEYS].sort());
@@ -554,167 +1257,35 @@ test('final v3 schema fingerprint is deterministic and includes the restored met
   }
 });
 
+test('production v2 fingerprint and dormancy remain unchanged while v3 stays separate', () => {
+  assert.equal(runtime.USER_VERSION, 2);
+  assert.equal(runtime.expectedV2SchemaFingerprint(), EXPECTED_PRODUCTION_V2_SCHEMA_FINGERPRINT);
+  assert.equal(runtime.V3_USER_VERSION, 3);
+  assert.equal(typeof runtime.migrateV2ToV3, 'undefined');
+  assert.equal(typeof runtime.activateV3, 'undefined');
+});
+
 test('final v3 SQL persists and reconstructs the complete immutable evidence contracts', () => {
-  const db = new DatabaseSync(':memory:');
+  const fixture = v3RecoveryFixture();
   try {
-    db.exec('PRAGMA foreign_keys=ON');
-    db.exec(runtime.buildFinalV3SchemaSql());
-    const expectedAuthority = authority('sql');
-    const expectedStart = start();
-    const allocation = (allocationId, runId, leaseId, fenceId, fenceSequence) => {
-      const row = {
-        allocation_id: allocationId,
-        run_id: runId,
-        lock_id: 'DL-S2-GITHUB-PROGRAM-CONVERGENCE-003',
-        lease_id: leaseId,
-        fence_id: fenceId,
-        fence_sequence: fenceSequence,
-        owner_instance_id: `owner-${allocationId}`,
-        process_id: 1,
-        issued_at: '2026-09-02T01:00:00.000Z',
-        expires_at: '2026-09-02T02:00:00.000Z',
-        authority_json: runtime.canonicalSerialize(expectedAuthority),
-        start_json: runtime.canonicalSerialize(expectedStart)
-      };
-      row.allocation_digest = runtime.digestValue({
-        allocation_id: row.allocation_id,
-        run_id: row.run_id,
-        lock: row.lock_id,
-        lease_id: row.lease_id,
-        fence_id: row.fence_id,
-        fence_sequence: row.fence_sequence,
-        owner_instance_id: row.owner_instance_id,
-        process_id: row.process_id,
-        issued_at: row.issued_at,
-        expires_at: row.expires_at,
-        authority: expectedAuthority,
-        start: expectedStart
-      });
-      return row;
-    };
-    const oldAllocation = allocation('allocation-old', 'run-old', 'lease-old', 'fence-old', 1);
-    const replacementAllocation = allocation('allocation-new', 'run-new', 'lease-new', 'fence-new', 2);
-    for (const row of [oldAllocation, replacementAllocation]) {
-      db.prepare('INSERT INTO allocations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
-        row.allocation_id, row.run_id, row.lock_id, row.lease_id, row.fence_id,
-        row.fence_sequence, row.owner_instance_id, row.process_id, row.issued_at,
-        row.expires_at, row.authority_json, row.start_json, row.allocation_digest
-      );
-      const run = {
-        run_id: row.run_id,
-        allocation_id: row.allocation_id,
-        lock: row.lock_id,
-        authority_digest: runtime.digestValue(expectedAuthority),
-        start_digest: runtime.digestValue(expectedStart)
-      };
-      db.prepare('INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?)').run(
-        run.run_id, run.allocation_id, run.lock, run.authority_digest, run.start_digest,
-        runtime.digestValue(run)
-      );
-    }
-    const terminalReceiptId = digest;
-    const releaseEventId = 'event-release';
-    const releaseEventDigest = digest;
-    db.prepare('INSERT INTO receipts VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-      terminalReceiptId, oldAllocation.run_id, 1, 'RUN_INTERRUPTED', null, '{}', terminalReceiptId
-    );
-    db.prepare('INSERT INTO lease_events VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-      releaseEventId, oldAllocation.allocation_id, 'RELEASED', 1,
-      '2026-09-02T02:15:00.000Z', digest, releaseEventDigest
-    );
-
-    const holder = validHolderAttestation({
-      allocation_id: replacementAllocation.allocation_id,
-      allocation_digest: replacementAllocation.allocation_digest,
-      run_id: replacementAllocation.run_id,
-      run_digest: runtime.digestValue({ run_id: replacementAllocation.run_id }),
-      lease_id: replacementAllocation.lease_id,
-      fence_id: replacementAllocation.fence_id,
-      fence_sequence: replacementAllocation.fence_sequence
-    });
-    db.prepare(`INSERT INTO holder_attestations (
-      attestation_id, repository, parent_issue, child_issue, lock_id,
-      allocation_id, allocation_digest, run_id, run_digest, lease_id, fence_id,
-      fence_sequence, algorithm, key_id, platform, authority_digest, start_digest,
-      broker_identity_digest, process_id_digest, process_start_digest, boot_id_digest,
-      pid_namespace_digest, process_incarnation_digest, lease_issued_at,
-      lease_expires_at, attestation_digest, attestation_tag
-    ) VALUES (${Array(27).fill('?').join(', ')})`).run(
-      holder.attestation_id, holder.repository, holder.parent_issue, holder.child_issue, holder.lock,
-      holder.allocation_id, holder.allocation_digest, holder.run_id, holder.run_digest,
-      holder.lease_id, holder.fence_id, holder.fence_sequence, holder.algorithm, holder.key_id,
-      holder.platform, holder.authority_digest, holder.start_digest, holder.broker_identity_digest,
-      holder.process_id_digest, holder.process_start_digest, holder.boot_id_digest,
-      holder.pid_namespace_digest, holder.process_incarnation_digest, holder.lease_issued_at,
-      holder.lease_expires_at, holder.attestation_digest, holder.attestation_tag
-    );
-
-    const evidence = validPreRecoveryEvidence();
-    const record = validRecoveryRecord({ replacement_holder_attestation_id: holder.attestation_id });
-    db.prepare(`INSERT INTO recovery_records (
-      recovery_record_id, recovery_record_digest, request_id, namespace_digest,
-      old_allocation_id, old_run_id, old_lease_id, old_fence_id, old_fence_sequence,
-      pre_recovery_evidence_json, pre_recovery_evidence_digest, terminal_receipt_id,
-      terminal_receipt_digest, release_event_id, release_event_digest,
-      replacement_allocation_id, replacement_allocation_digest, replacement_run_id,
-      replacement_run_digest, replacement_lease_id, replacement_fence_id,
-      replacement_fence_sequence, replacement_holder_attestation_id,
-      replacement_holder_attestation_digest, new_high_water, authority_digest,
-      source_digest, start_digest, committed_at
-    ) VALUES (${Array(29).fill('?').join(', ')})`).run(
-      record.recovery_record_id, record.recovery_record_digest, record.request_id,
-      record.namespace_digest, record.old_allocation_id, record.old_run_id,
-      record.old_lease_id, record.old_fence_id, record.old_fence_sequence,
-      runtime.canonicalSerialize(evidence), record.pre_recovery_evidence_digest,
-      record.terminal_receipt_id, record.terminal_receipt_digest, record.release_event_id,
-      record.release_event_digest, record.replacement_allocation_id,
-      record.replacement_allocation_digest, record.replacement_run_id,
-      record.replacement_run_digest, record.replacement_lease_id, record.replacement_fence_id,
-      record.replacement_fence_sequence, record.replacement_holder_attestation_id,
-      record.replacement_holder_attestation_digest, record.new_high_water,
-      record.authority_digest, record.source_digest, record.start_digest, record.committed_at
-    );
-
-    const row = db.prepare('SELECT * FROM recovery_records WHERE recovery_record_id = ?').get(record.recovery_record_id);
+    const row = fixture.db.prepare('SELECT * FROM recovery_records WHERE recovery_record_id = ?').get(fixture.recordA.recovery_record_id);
     const reconstructed = {
       schema: runtime.RECOVERY_RECORD_SCHEMA_ID,
-      recovery_record_id: row.recovery_record_id,
-      request_id: row.request_id,
-      namespace_digest: row.namespace_digest,
-      old_allocation_id: row.old_allocation_id,
-      old_run_id: row.old_run_id,
-      old_lease_id: row.old_lease_id,
-      old_fence_id: row.old_fence_id,
-      old_fence_sequence: row.old_fence_sequence,
-      pre_recovery_evidence: JSON.parse(row.pre_recovery_evidence_json),
-      pre_recovery_evidence_digest: row.pre_recovery_evidence_digest,
-      terminal_receipt_id: row.terminal_receipt_id,
-      terminal_receipt_digest: row.terminal_receipt_digest,
-      release_event_id: row.release_event_id,
-      release_event_digest: row.release_event_digest,
-      replacement_allocation_id: row.replacement_allocation_id,
-      replacement_allocation_digest: row.replacement_allocation_digest,
-      replacement_run_id: row.replacement_run_id,
-      replacement_run_digest: row.replacement_run_digest,
-      replacement_lease_id: row.replacement_lease_id,
-      replacement_fence_id: row.replacement_fence_id,
-      replacement_fence_sequence: row.replacement_fence_sequence,
-      replacement_holder_attestation_id: row.replacement_holder_attestation_id,
-      replacement_holder_attestation_digest: row.replacement_holder_attestation_digest,
-      new_high_water: row.new_high_water,
-      authority_digest: row.authority_digest,
-      source_digest: row.source_digest,
-      start_digest: row.start_digest,
-      committed_at: row.committed_at,
-      recovery_record_digest: row.recovery_record_digest
+      ...row,
+      pre_recovery_evidence: JSON.parse(row.pre_recovery_evidence_json)
     };
-    assert.equal(runtime.canonicalSerialize(reconstructed.pre_recovery_evidence),
-      runtime.canonicalSerialize(evidence));
-    assert.deepEqual(runtime.validateRecoveryRecord(reconstructed), runtime.validateRecoveryRecord(record));
-    assert.throws(() => db.exec("UPDATE holder_attestations SET key_id='changed'"), /GPR_APPEND_ONLY/);
-    assert.throws(() => db.exec("UPDATE recovery_records SET request_id='changed'"), /GPR_APPEND_ONLY/);
+    delete reconstructed.pre_recovery_evidence_json;
+    assert.deepEqual(runtime.validateRecoveryRecord(reconstructed), runtime.validateRecoveryRecord(fixture.recordA));
+    assert.equal(fixture.db.prepare('SELECT COUNT(*) AS value FROM holder_attestations').get().value, 4);
+    assert.equal(fixture.db.prepare('SELECT COUNT(*) AS value FROM recovery_records').get().value, 2);
+    assert.equal(fixture.db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+    assert.equal(fixture.db.prepare('PRAGMA foreign_key_check').all().length, 0);
+    assert.throws(() => fixture.db.exec("UPDATE holder_attestations SET key_id='changed'"), /GPR_APPEND_ONLY/);
+    assert.throws(() => fixture.db.exec("UPDATE recovery_records SET request_id='changed'"), /GPR_APPEND_ONLY/);
+    assert.throws(() => fixture.db.exec("INSERT OR REPLACE INTO holder_attestations SELECT * FROM holder_attestations WHERE attestation_id='attestation-recovery-old-a'"), /GPR_APPEND_ONLY/);
+    assert.throws(() => fixture.db.exec("INSERT OR REPLACE INTO recovery_records SELECT * FROM recovery_records WHERE recovery_record_id='recovery-record-a'"), /GPR_APPEND_ONLY/);
   } finally {
-    db.close();
+    fixture.db.close();
   }
 });
 
@@ -849,6 +1420,7 @@ test('exact disposable v2 fixture migrates atomically to final v3 without legacy
   try {
     assert.equal(Number(reopened.prepare('PRAGMA user_version').get().user_version), 3);
     assert.equal(schemaDigest(reopened), plan.target_schema_fingerprint);
+    assert.equal(runtime.verifyFinalV3Database(reopened, fixture.storeOptions, fixture.store.databasePath), true);
     assert.equal(reopened.prepare('SELECT COUNT(*) AS value FROM holder_attestations').get().value, 0);
     assert.equal(reopened.prepare('SELECT COUNT(*) AS value FROM recovery_records').get().value, 0);
     assert.deepEqual(legacyRows(reopened), beforeRows);
