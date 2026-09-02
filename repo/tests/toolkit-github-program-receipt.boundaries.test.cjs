@@ -16,6 +16,7 @@ const {
   canonicalSerialize,
   createProgrammeReceiptStore,
   digestValue,
+  expectedV2SchemaFingerprint,
   validateOperationDescriptor,
   validateVerifierProcessResult,
   validateWindowsStorageProof
@@ -807,6 +808,11 @@ test('fresh stores use user_version 2 while old v1 and corrupted SQLite stores f
     db.close();
   `], { encoding: 'utf8' });
   assert.equal(versionRead.stdout, '2');
+  const currentSchema = new DatabaseSync(old.store.databasePath);
+  assert.equal(currentSchema.prepare('SELECT schema_fingerprint FROM metadata WHERE singleton = 1').get().schema_fingerprint,
+    expectedV2SchemaFingerprint());
+  assert.equal(currentSchema.prepare("SELECT COUNT(*) AS value FROM sqlite_schema WHERE name IN ('holder_attestations', 'recovery_records')").get().value, 0);
+  currentSchema.close();
   const downgrade = spawnSync(process.execPath, ['-e', `
     const { DatabaseSync } = require('node:sqlite');
     const db = new DatabaseSync(${JSON.stringify(old.store.databasePath)});
