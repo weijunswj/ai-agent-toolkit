@@ -491,7 +491,7 @@ function validateHolderAttestation(value) {
   if (!isTimestamp(value.lease_issued_at) || !isTimestamp(value.lease_expires_at)
     || Date.parse(value.lease_expires_at) <= Date.parse(value.lease_issued_at)
     || !isDigest(value.attestation_digest)
-    || value.attestation_digest !== digestWithoutKeys(value, ['attestation_digest', 'attestation_tag'])) {
+    || value.attestation_digest !== digestWithout(value, 'attestation_digest')) {
     fail('GPR_HOLDER_ATTESTATION_INVALID');
   }
   assertPrivacySafe(value);
@@ -1001,6 +1001,54 @@ CREATE TABLE recovery_records (
 CREATE INDEX holder_attestations_allocation ON holder_attestations(allocation_id, fence_sequence);
 CREATE INDEX recovery_records_old_run ON recovery_records(old_run_id, old_fence_sequence);
 CREATE INDEX recovery_records_replacement ON recovery_records(replacement_run_id, replacement_fence_sequence);
+CREATE TRIGGER v3_metadata_no_replace BEFORE INSERT ON metadata
+WHEN EXISTS (SELECT 1 FROM metadata WHERE singleton = NEW.singleton)
+BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER v3_coordination_no_replace BEFORE INSERT ON coordination_state
+WHEN EXISTS (SELECT 1 FROM coordination_state WHERE singleton = NEW.singleton)
+BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER v3_allocations_no_replace BEFORE INSERT ON allocations
+WHEN EXISTS (
+  SELECT 1 FROM allocations
+  WHERE allocation_id = NEW.allocation_id
+     OR run_id = NEW.run_id
+     OR lease_id = NEW.lease_id
+     OR fence_id = NEW.fence_id
+     OR fence_sequence = NEW.fence_sequence
+)
+BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER v3_runs_no_replace BEFORE INSERT ON runs
+WHEN EXISTS (
+  SELECT 1 FROM runs
+  WHERE run_id = NEW.run_id OR allocation_id = NEW.allocation_id
+)
+BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER v3_receipts_no_replace BEFORE INSERT ON receipts
+WHEN EXISTS (
+  SELECT 1 FROM receipts
+  WHERE receipt_id = NEW.receipt_id
+     OR (run_id = NEW.run_id AND sequence = NEW.sequence)
+)
+BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER v3_lease_events_no_replace BEFORE INSERT ON lease_events
+WHEN EXISTS (SELECT 1 FROM lease_events WHERE event_id = NEW.event_id)
+BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER v3_mutation_operations_no_replace BEFORE INSERT ON mutation_operations
+WHEN EXISTS (
+  SELECT 1 FROM mutation_operations
+  WHERE operation_id = NEW.operation_id
+     OR provider_operation_key = NEW.provider_operation_key
+     OR retry_of_operation_id = NEW.retry_of_operation_id
+)
+BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER v3_mutation_operation_events_no_replace BEFORE INSERT ON mutation_operation_events
+WHEN EXISTS (
+  SELECT 1 FROM mutation_operation_events
+  WHERE event_id = NEW.event_id
+     OR (operation_id = NEW.operation_id AND sequence = NEW.sequence)
+     OR prior_event_id = NEW.prior_event_id
+)
+BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
 CREATE TRIGGER holder_attestations_coherence BEFORE INSERT ON holder_attestations
 WHEN NOT EXISTS (
   SELECT 1
@@ -1259,6 +1307,7 @@ function configureDatabase(db, readOnly = false) {
   db.exec(`PRAGMA busy_timeout=${BUSY_TIMEOUT_MS}`);
   db.exec('PRAGMA foreign_keys=ON');
   db.exec('PRAGMA trusted_schema=OFF');
+  db.exec('PRAGMA recursive_triggers=ON');
   const journal = String(oneValue(db, readOnly ? 'PRAGMA journal_mode' : 'PRAGMA journal_mode=DELETE', 'journal_mode') || '').toLowerCase();
   if (!readOnly) db.exec('PRAGMA synchronous=FULL');
   else db.exec('PRAGMA query_only=ON');
@@ -1269,6 +1318,7 @@ function configureDatabase(db, readOnly = false) {
     || Number(oneValue(db, 'PRAGMA synchronous', 'synchronous')) !== 2
     || Number(oneValue(db, 'PRAGMA foreign_keys', 'foreign_keys')) !== 1
     || Number(oneValue(db, 'PRAGMA trusted_schema', 'trusted_schema')) !== 0
+    || Number(oneValue(db, 'PRAGMA recursive_triggers', 'recursive_triggers')) !== 1
     || Number(oneValue(db, 'PRAGMA busy_timeout', 'timeout')) !== BUSY_TIMEOUT_MS
     || !Number.isSafeInteger(pageSize) || pageSize < 512
     || Number(oneValue(db, 'PRAGMA max_page_count', 'max_page_count')) !== maxPages) {
@@ -1720,6 +1770,19 @@ function verifyV3DurableEvidence(db, namespace, expectedNamespaceDigest) {
       || !isTimestamp(event.event_at)
       || Date.parse(event.event_at) < Date.parse(allocation.issued_at)
       || !isDigest(event.detail_digest)) {
+      fail('GPR_V3_RECOVERY_COHERENCE');
+    }
+  }
+
+  for (const run of runs.values()) {
+    const allocation = allocations.get(run.allocation_id);
+    if (!allocation
+      || run.run_id !== allocation.run_id
+      || run.lock_id !== allocation.lock_id) {
+      fail('GPR_V3_RECOVERY_COHERENCE');
+    }
+    const bindings = canonicalAllocationBindings(allocation, 'GPR_V3_RECOVERY_COHERENCE');
+    if (run.authority_digest !== bindings.authority_digest || run.start_digest !== bindings.start_digest) {
       fail('GPR_V3_RECOVERY_COHERENCE');
     }
   }

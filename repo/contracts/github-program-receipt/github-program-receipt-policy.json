@@ -92,6 +92,8 @@
       "holder_attestation": {
         "schema": "toolkit.github-program.holder-attestation.v1",
         "algorithm": "HMAC-SHA-256",
+        "attestation_digest": "SHA256(canonicalSerialize(all_holder_attestation_fields_except_attestation_digest))",
+        "attestation_tag_verification": "ISSUER_SIDE_ONLY_NONPERSISTED_KEY_READBACK_INTEGRITY_BOUND_BY_ATTESTATION_DIGEST",
         "required_fields": [
           "schema",
           "attestation_id",

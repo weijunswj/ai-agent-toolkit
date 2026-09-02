@@ -13,7 +13,7 @@ const repositoryRoot = path.resolve(__dirname, '../..');
 const cleanupRoots = new Set();
 
 const digest = 'a'.repeat(64);
-const EXPECTED_FINAL_V3_SCHEMA_FINGERPRINT = '98e975af645d26876680a20e50357d615ae8efdc0817087e93e389f37bd72aa9';
+const EXPECTED_FINAL_V3_SCHEMA_FINGERPRINT = '603ad55e69492c800b539ab1acb648c395040180883d9662c617b6e81563aeb1';
 const EXPECTED_PRODUCTION_V2_SCHEMA_FINGERPRINT = 'adc7b560ee06ac61a397a5df0a075685269c3bcc95daa400f10f936143807c17';
 
 const HOLDER_ATTESTATION_KEYS = [
@@ -257,7 +257,6 @@ function validHolderAttestation(overrides = {}) {
   };
   const payload = { ...value };
   delete payload.attestation_digest;
-  delete payload.attestation_tag;
   value.attestation_digest = runtime.digestValue(payload);
   return value;
 }
@@ -803,7 +802,6 @@ test('v3 holder persistence rejects canonical-graph cross-mixes despite clean fo
       Object.assign(holder, mutate(first, second));
       const payload = { ...holder };
       delete payload.attestation_digest;
-      delete payload.attestation_tag;
       holder.attestation_digest = runtime.digestValue(payload);
       assert.ok(db.prepare('SELECT 1 FROM allocations WHERE allocation_id=?').get(first.allocation.allocation_id));
       assert.ok(db.prepare('SELECT 1 FROM runs WHERE run_id=?').get(second.run.run_id));
@@ -1045,13 +1043,62 @@ test('v3 independent verifier rejects a holder cross-mix after append-only bypas
     tampered.allocation_digest = second.allocation.allocation_digest;
     const payload = { ...tampered };
     delete payload.attestation_digest;
-    delete payload.attestation_tag;
     tampered.attestation_digest = runtime.digestValue(payload);
     db.exec('DROP TRIGGER holder_attestations_no_update');
     db.prepare('UPDATE holder_attestations SET allocation_digest=?, attestation_digest=? WHERE attestation_id=?')
       .run(tampered.allocation_digest, tampered.attestation_digest, holder.attestation_id);
     db.exec("CREATE TRIGGER holder_attestations_no_update BEFORE UPDATE ON holder_attestations BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;");
     assertCode(() => runtime.verifyV3DurableEvidence(db, V3_NAMESPACE), 'GPR_V3_HOLDER_COHERENCE');
+  } finally {
+    db.close();
+  }
+});
+
+test('v3 independent verifier rejects a run cross-mix after append-only bypass', () => {
+  const db = v3Database();
+  const first = durableGraph('run-a', 1);
+  const second = durableGraph('run-b', 2);
+  insertDurableGraph(db, first);
+  const row = second.allocation;
+  db.prepare('INSERT INTO allocations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+    row.allocation_id, row.run_id, row.lock_id, row.lease_id, row.fence_id,
+    row.fence_sequence, row.owner_instance_id, row.process_id, row.issued_at,
+    row.expires_at, row.authority_json, row.start_json, row.allocation_digest
+  );
+  db.prepare('UPDATE coordination_state SET high_water=1 WHERE singleton=1 AND high_water=0').run();
+  db.prepare('UPDATE coordination_state SET high_water=2 WHERE singleton=1 AND high_water=1').run();
+  try {
+    const tampered = {
+      ...first.run,
+      allocation_id: second.allocation.allocation_id,
+      lock: second.allocation.lock_id,
+      authority_digest: second.authority_digest,
+      start_digest: second.start_digest
+    };
+    delete tampered.run_digest;
+    tampered.run_digest = runtime.digestValue(tampered);
+    db.exec('DROP TRIGGER runs_no_update');
+    db.prepare('UPDATE runs SET allocation_id=?, lock_id=?, authority_digest=?, start_digest=?, run_digest=? WHERE run_id=?')
+      .run(tampered.allocation_id, tampered.lock, tampered.authority_digest, tampered.start_digest,
+        tampered.run_digest, first.run.run_id);
+    db.exec("CREATE TRIGGER runs_no_update BEFORE UPDATE ON runs BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;");
+    assert.equal(db.prepare('PRAGMA foreign_key_check').all().length, 0);
+    assertCode(() => runtime.verifyFinalV3Database(db, V3_NAMESPACE), 'GPR_V3_RECOVERY_COHERENCE');
+  } finally {
+    db.close();
+  }
+});
+
+test('v3 independent verifier rejects holder tag tampering after append-only bypass', () => {
+  const { db, first } = v3HolderFixture();
+  try {
+    const holder = durableHolder(first, 'holder-tag');
+    insertHolder(db, holder);
+    db.exec('DROP TRIGGER holder_attestations_no_update');
+    db.prepare('UPDATE holder_attestations SET attestation_tag=? WHERE attestation_id=?')
+      .run('b'.repeat(64), holder.attestation_id);
+    db.exec("CREATE TRIGGER holder_attestations_no_update BEFORE UPDATE ON holder_attestations BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;");
+    assertCode(() => runtime.verifyFinalV3Database(db, V3_NAMESPACE), 'GPR_V3_HOLDER_COHERENCE');
   } finally {
     db.close();
   }
@@ -1211,6 +1258,10 @@ test('v3 JSON schemas are closed and reject secret, path, callback, and raw proc
     stable_failure_classes: ['GPR_V3_HOLDER_COHERENCE', 'GPR_V3_RECOVERY_COHERENCE'],
     production_v2_unchanged: true
   });
+  assert.equal(v3Policy.holder_attestation.attestation_digest,
+    'SHA256(canonicalSerialize(all_holder_attestation_fields_except_attestation_digest))');
+  assert.equal(v3Policy.holder_attestation.attestation_tag_verification,
+    'ISSUER_SIDE_ONLY_NONPERSISTED_KEY_READBACK_INTEGRITY_BOUND_BY_ATTESTATION_DIGEST');
   assert.deepEqual([...v3Policy.holder_attestation.required_fields].sort(), [...HOLDER_ATTESTATION_KEYS].sort());
   assert.deepEqual([...v3Policy.recovery.pre_recovery_evidence_fields].sort(), [...PRE_RECOVERY_EVIDENCE_KEYS].sort());
   assert.deepEqual([...v3Policy.recovery.recovery_record_fields].sort(), [...RECOVERY_RECORD_KEYS].sort());
@@ -1284,6 +1335,24 @@ test('final v3 SQL persists and reconstructs the complete immutable evidence con
     assert.throws(() => fixture.db.exec("UPDATE recovery_records SET request_id='changed'"), /GPR_APPEND_ONLY/);
     assert.throws(() => fixture.db.exec("INSERT OR REPLACE INTO holder_attestations SELECT * FROM holder_attestations WHERE attestation_id='attestation-recovery-old-a'"), /GPR_APPEND_ONLY/);
     assert.throws(() => fixture.db.exec("INSERT OR REPLACE INTO recovery_records SELECT * FROM recovery_records WHERE recovery_record_id='recovery-record-a'"), /GPR_APPEND_ONLY/);
+  } finally {
+    fixture.db.close();
+  }
+});
+
+test('final v3 SQL blocks OR REPLACE on every populated append-only table', () => {
+  const fixture = v3RecoveryFixture();
+  try {
+    for (const statement of [
+      "INSERT OR REPLACE INTO metadata SELECT * FROM metadata WHERE singleton=1",
+      "INSERT OR REPLACE INTO coordination_state SELECT * FROM coordination_state WHERE singleton=1",
+      "INSERT OR REPLACE INTO allocations SELECT * FROM allocations WHERE allocation_id='allocation-recovery-old-a'",
+      "INSERT OR REPLACE INTO runs SELECT * FROM runs WHERE run_id='run-recovery-old-a'",
+      "INSERT OR REPLACE INTO receipts SELECT * FROM receipts WHERE receipt_id=(SELECT receipt_id FROM receipts WHERE run_id='run-recovery-old-a' AND sequence=1)",
+      "INSERT OR REPLACE INTO lease_events SELECT * FROM lease_events WHERE event_id='event-recovery-old-a-allocated'",
+      "INSERT OR REPLACE INTO holder_attestations SELECT * FROM holder_attestations WHERE attestation_id='attestation-recovery-old-a'",
+      "INSERT OR REPLACE INTO recovery_records SELECT * FROM recovery_records WHERE recovery_record_id='recovery-record-a'"
+    ]) assert.throws(() => fixture.db.exec(statement), /GPR_APPEND_ONLY/);
   } finally {
     fixture.db.close();
   }
