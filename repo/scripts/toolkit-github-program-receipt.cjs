@@ -92,32 +92,48 @@ const LEASE_KEYS = Object.freeze([
 ]);
 const HOLDER_ATTESTATION_KEYS = Object.freeze([
   'schema', 'attestation_id', 'algorithm', 'key_id', 'platform', 'repository',
-  'parent_issue', 'child_issue', 'lock', 'allocation_id', 'run_id', 'lease_id',
-  'fence_id', 'fence_sequence', 'authority_digest', 'start_digest',
-  'process_id_digest', 'process_start_digest', 'boot_id_digest',
+  'parent_issue', 'child_issue', 'lock', 'allocation_id', 'allocation_digest',
+  'run_id', 'run_digest', 'lease_id', 'fence_id', 'fence_sequence',
+  'authority_digest', 'start_digest', 'broker_identity_digest', 'process_id_digest',
+  'process_start_digest', 'boot_id_digest',
   'pid_namespace_digest', 'process_incarnation_digest', 'lease_issued_at',
   'lease_expires_at', 'attestation_digest', 'attestation_tag'
 ]);
 const PRE_RECOVERY_EVIDENCE_KEYS = Object.freeze([
-  'schema', 'evidence_digest', 'repository', 'parent_issue', 'child_issue',
-  'lock', 'allocation_id', 'run_id', 'lease_id', 'fence_id', 'fence_sequence',
-  'namespace_digest', 'authority_digest', 'start_digest',
-  'holder_attestation_digest', 'store_state_digest', 'observed_at',
-  'holder_classification', 'operation_count', 'unresolved_operation_count',
-  'high_water'
+  'schema', 'request_id', 'repository', 'parent_issue', 'child_issue', 'lock',
+  'namespace_digest', 'old_allocation_id', 'old_run_id', 'old_allocation_digest',
+  'old_run_digest', 'old_lease_id', 'old_fence_id', 'old_fence_sequence',
+  'old_lease_issued_at', 'old_lease_expires_at', 'old_lease_tip_event_id',
+  'old_lease_tip_event_digest', 'old_receipt_tip_id', 'old_receipt_tip_sequence',
+  'old_receipt_tip_digest', 'old_receipt_chain_digest', 'zero_operation_count',
+  'zero_operation_event_count', 'zero_operation_inventory_digest', 'authority_digest',
+  'source_digest', 'start_digest', 'old_holder_classification',
+  'old_holder_identity_digest', 'old_holder_attestation_digest', 'recovery_peer_platform',
+  'recovery_peer_identity_digest', 'recovery_peer_process_incarnation_digest',
+  'broker_identity_digest', 'broker_key_id', 'observed_at', 'authority_observed_at',
+  'source_observed_at', 'start_observed_at', 'store_observed_at', 'holder_observed_at'
 ]);
 const RECOVERY_RECORD_KEYS = Object.freeze([
-  'schema', 'recovery_record_id', 'recovery_record_digest', 'repository',
-  'parent_issue', 'child_issue', 'lock', 'old_allocation_id', 'old_run_id',
-  'old_lease_id', 'old_fence_id', 'old_fence_sequence',
-  'pre_recovery_evidence_digest', 'terminal_receipt_id', 'release_event_id',
-  'replacement_allocation_id', 'replacement_run_id', 'replacement_lease_id',
-  'replacement_fence_id', 'replacement_fence_sequence', 'authority_digest',
-  'holder_attestation_digest', 'classification', 'reason_code', 'recovered_at'
+  'schema', 'recovery_record_id', 'request_id', 'namespace_digest',
+  'old_allocation_id', 'old_run_id', 'old_lease_id', 'old_fence_id',
+  'old_fence_sequence', 'pre_recovery_evidence', 'pre_recovery_evidence_digest',
+  'terminal_receipt_id', 'terminal_receipt_digest', 'release_event_id',
+  'release_event_digest', 'replacement_allocation_id', 'replacement_allocation_digest',
+  'replacement_run_id', 'replacement_run_digest', 'replacement_lease_id',
+  'replacement_fence_id', 'replacement_fence_sequence',
+  'replacement_holder_attestation_id', 'replacement_holder_attestation_digest',
+  'new_high_water', 'authority_digest', 'source_digest', 'start_digest',
+  'committed_at', 'recovery_record_digest'
 ]);
 const RESERVED_ORPHAN_PAYLOAD_KEYS = Object.freeze([
   'classification', 'reason_code', 'evidence_digest'
 ]);
+const ZERO_OPERATION_INVENTORY = Object.freeze({
+  mutation_operation_ids: Object.freeze([]),
+  mutation_operation_event_ids: Object.freeze([]),
+  unresolved_operation_ids: Object.freeze([])
+});
+const ZERO_OPERATION_INVENTORY_DIGEST = digestValue(ZERO_OPERATION_INVENTORY);
 const MIGRATION_OBSERVATION_KEYS = Object.freeze([
   'application_id', 'user_version', 'schema_fingerprint', 'namespace_verified',
   'integrity_verified', 'foreign_keys_verified', 'historical_digests_verified',
@@ -466,9 +482,9 @@ function validateHolderAttestation(value) {
   validateIssue(value.parent_issue, 'parent_issue');
   validateIssue(value.child_issue, 'child_issue');
   for (const key of [
-    'authority_digest', 'start_digest', 'process_id_digest', 'process_start_digest',
-    'boot_id_digest', 'pid_namespace_digest', 'process_incarnation_digest',
-    'attestation_tag'
+    'allocation_digest', 'run_digest', 'authority_digest', 'start_digest',
+    'broker_identity_digest', 'process_id_digest', 'process_start_digest', 'boot_id_digest',
+    'pid_namespace_digest', 'process_incarnation_digest', 'attestation_tag'
   ]) {
     if (!isDigest(value[key])) fail('GPR_HOLDER_ATTESTATION_INVALID', { field: key });
   }
@@ -486,41 +502,63 @@ function validatePreRecoveryEvidence(value) {
   if (!exactKeys(value, PRE_RECOVERY_EVIDENCE_KEYS)
     || value.schema !== PRE_RECOVERY_EVIDENCE_SCHEMA_ID
     || !isCanonicalRepository(value.repository)
+    || !isSafeContractId(value.request_id)
     || !isSafeContractId(value.lock)
-    || !isSafeContractId(value.allocation_id)
-    || !isSafeContractId(value.run_id)
-    || !isSafeContractId(value.lease_id)
-    || !isSafeContractId(value.fence_id)
-    || !Number.isSafeInteger(value.fence_sequence) || value.fence_sequence < 1
-    || value.holder_classification !== BROKER_RECOVERY_CLASSIFICATION
-    || value.operation_count !== 0
-    || value.unresolved_operation_count !== 0
-    || !Number.isSafeInteger(value.high_water) || value.high_water !== value.fence_sequence
-    || !isTimestamp(value.observed_at)
-    || !isDigest(value.evidence_digest)) {
+    || !isSafeContractId(value.old_allocation_id)
+    || !isSafeContractId(value.old_run_id)
+    || !isSafeContractId(value.old_lease_id)
+    || !isSafeContractId(value.old_fence_id)
+    || !Number.isSafeInteger(value.old_fence_sequence) || value.old_fence_sequence < 1
+    || !isSafeContractId(value.old_lease_tip_event_id)
+    || !isDigest(value.old_lease_tip_event_digest)
+    || !isDigest(value.old_receipt_tip_id)
+    || !Number.isSafeInteger(value.old_receipt_tip_sequence) || value.old_receipt_tip_sequence < 1
+    || value.old_holder_classification !== BROKER_RECOVERY_CLASSIFICATION
+    || !['windows', 'linux'].includes(value.recovery_peer_platform)
+    || !isSafeContractId(value.broker_key_id, 80)
+    || value.zero_operation_count !== 0
+    || value.zero_operation_event_count !== 0) {
     fail('GPR_PRE_RECOVERY_EVIDENCE_INVALID');
   }
   validateIssue(value.parent_issue, 'parent_issue');
   validateIssue(value.child_issue, 'child_issue');
   for (const key of [
-    'namespace_digest', 'authority_digest', 'start_digest',
-    'holder_attestation_digest', 'store_state_digest'
+    'namespace_digest', 'old_allocation_digest', 'old_run_digest',
+    'old_receipt_tip_digest', 'old_receipt_chain_digest',
+    'zero_operation_inventory_digest', 'authority_digest', 'source_digest', 'start_digest',
+    'old_holder_identity_digest', 'old_holder_attestation_digest',
+    'recovery_peer_identity_digest', 'recovery_peer_process_incarnation_digest',
+    'broker_identity_digest'
   ]) {
     if (!isDigest(value[key])) fail('GPR_PRE_RECOVERY_EVIDENCE_INVALID', { field: key });
   }
-  if (value.evidence_digest !== digestWithout(value, 'evidence_digest')) {
+  if (value.zero_operation_inventory_digest !== ZERO_OPERATION_INVENTORY_DIGEST) {
     fail('GPR_PRE_RECOVERY_EVIDENCE_INVALID');
   }
+  if (!isTimestamp(value.old_lease_issued_at) || !isTimestamp(value.old_lease_expires_at)
+    || Date.parse(value.old_lease_expires_at) <= Date.parse(value.old_lease_issued_at)) {
+    fail('GPR_PRE_RECOVERY_EVIDENCE_INVALID');
+  }
+  const observations = [
+    'observed_at', 'authority_observed_at', 'source_observed_at', 'start_observed_at',
+    'store_observed_at', 'holder_observed_at'
+  ];
+  if (observations.some((key) => !isTimestamp(value[key]))) fail('GPR_PRE_RECOVERY_EVIDENCE_INVALID');
+  const observedAt = Date.parse(value.observed_at);
+  if (observations.some((key) => Date.parse(value[key]) > observedAt)) fail('GPR_PRE_RECOVERY_EVIDENCE_INVALID');
   assertPrivacySafe(value);
   return deepFreeze(clone(value));
+}
+
+function preRecoveryEvidenceDigest(value) {
+  return digestValue(validatePreRecoveryEvidence(value));
 }
 
 function validateRecoveryRecord(value) {
   if (!exactKeys(value, RECOVERY_RECORD_KEYS)
     || value.schema !== RECOVERY_RECORD_SCHEMA_ID
-    || !isCanonicalRepository(value.repository)
     || !isSafeContractId(value.recovery_record_id)
-    || !isSafeContractId(value.lock)
+    || !isSafeContractId(value.request_id)
     || !isSafeContractId(value.old_allocation_id)
     || !isSafeContractId(value.old_run_id)
     || !isSafeContractId(value.old_lease_id)
@@ -530,22 +568,40 @@ function validateRecoveryRecord(value) {
     || !isSafeContractId(value.replacement_run_id)
     || !isSafeContractId(value.replacement_lease_id)
     || !isSafeContractId(value.replacement_fence_id)
+    || !isSafeContractId(value.replacement_holder_attestation_id)
     || !Number.isSafeInteger(value.old_fence_sequence) || value.old_fence_sequence < 1
     || !Number.isSafeInteger(value.replacement_fence_sequence)
     || value.replacement_fence_sequence !== value.old_fence_sequence + 1
-    || value.classification !== BROKER_RECOVERY_CLASSIFICATION
-    || value.reason_code !== BROKER_RECOVERY_REASON
-    || !isTimestamp(value.recovered_at)
+    || !Number.isSafeInteger(value.new_high_water)
+    || value.new_high_water !== value.replacement_fence_sequence
+    || !isTimestamp(value.committed_at)
     || !isDigest(value.recovery_record_digest)) {
     fail('GPR_RECOVERY_RECORD_INVALID');
   }
-  validateIssue(value.parent_issue, 'parent_issue');
-  validateIssue(value.child_issue, 'child_issue');
+  const evidence = validatePreRecoveryEvidence(value.pre_recovery_evidence);
+  if (preRecoveryEvidenceDigest(evidence) !== value.pre_recovery_evidence_digest
+    || evidence.request_id !== value.request_id
+    || evidence.namespace_digest !== value.namespace_digest
+    || evidence.old_allocation_id !== value.old_allocation_id
+    || evidence.old_run_id !== value.old_run_id
+    || evidence.old_lease_id !== value.old_lease_id
+    || evidence.old_fence_id !== value.old_fence_id
+    || evidence.old_fence_sequence !== value.old_fence_sequence
+    || evidence.authority_digest !== value.authority_digest
+    || evidence.source_digest !== value.source_digest
+    || evidence.start_digest !== value.start_digest) {
+    fail('GPR_RECOVERY_RECORD_INVALID');
+  }
   for (const key of [
-    'pre_recovery_evidence_digest', 'terminal_receipt_id', 'authority_digest',
-    'holder_attestation_digest'
+    'namespace_digest', 'pre_recovery_evidence_digest', 'terminal_receipt_id',
+    'terminal_receipt_digest', 'release_event_digest', 'replacement_allocation_digest',
+    'replacement_run_digest', 'replacement_holder_attestation_digest', 'authority_digest',
+    'source_digest', 'start_digest'
   ]) {
     if (!isDigest(value[key])) fail('GPR_RECOVERY_RECORD_INVALID', { field: key });
+  }
+  if (value.terminal_receipt_id !== value.terminal_receipt_digest) {
+    fail('GPR_RECOVERY_RECORD_INVALID');
   }
   if (value.recovery_record_digest !== digestWithout(value, 'recovery_record_digest')) {
     fail('GPR_RECOVERY_RECORD_INVALID');
@@ -881,16 +937,23 @@ CREATE TRIGGER mutation_operation_events_no_delete BEFORE DELETE ON mutation_ope
 const V3_SCHEMA_SQL = `
 CREATE TABLE holder_attestations (
   attestation_id TEXT PRIMARY KEY,
+  repository TEXT NOT NULL,
+  parent_issue INTEGER NOT NULL,
+  child_issue INTEGER NOT NULL,
+  lock_id TEXT NOT NULL,
   allocation_id TEXT NOT NULL UNIQUE REFERENCES allocations(allocation_id),
+  allocation_digest TEXT NOT NULL,
   run_id TEXT NOT NULL UNIQUE REFERENCES runs(run_id),
+  run_digest TEXT NOT NULL,
   lease_id TEXT NOT NULL,
   fence_id TEXT NOT NULL,
-  fence_sequence INTEGER NOT NULL,
+  fence_sequence INTEGER NOT NULL CHECK (fence_sequence >= 1),
   algorithm TEXT NOT NULL CHECK (algorithm = 'HMAC-SHA-256'),
   key_id TEXT NOT NULL,
   platform TEXT NOT NULL CHECK (platform IN ('windows', 'linux')),
   authority_digest TEXT NOT NULL,
   start_digest TEXT NOT NULL,
+  broker_identity_digest TEXT NOT NULL,
   process_id_digest TEXT NOT NULL,
   process_start_digest TEXT NOT NULL,
   boot_id_digest TEXT NOT NULL,
@@ -904,28 +967,36 @@ CREATE TABLE holder_attestations (
 CREATE TABLE recovery_records (
   recovery_record_id TEXT PRIMARY KEY,
   recovery_record_digest TEXT NOT NULL UNIQUE,
-  repository TEXT NOT NULL,
-  parent_issue INTEGER NOT NULL,
-  child_issue INTEGER NOT NULL,
-  lock_id TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  namespace_digest TEXT NOT NULL,
   old_allocation_id TEXT NOT NULL REFERENCES allocations(allocation_id),
   old_run_id TEXT NOT NULL REFERENCES runs(run_id),
   old_lease_id TEXT NOT NULL,
   old_fence_id TEXT NOT NULL,
-  old_fence_sequence INTEGER NOT NULL,
+  old_fence_sequence INTEGER NOT NULL CHECK (old_fence_sequence >= 1),
+  pre_recovery_evidence_json TEXT NOT NULL,
   pre_recovery_evidence_digest TEXT NOT NULL,
   terminal_receipt_id TEXT NOT NULL REFERENCES receipts(receipt_id),
+  terminal_receipt_digest TEXT NOT NULL,
   release_event_id TEXT NOT NULL REFERENCES lease_events(event_id),
+  release_event_digest TEXT NOT NULL,
   replacement_allocation_id TEXT NOT NULL REFERENCES allocations(allocation_id),
+  replacement_allocation_digest TEXT NOT NULL,
   replacement_run_id TEXT NOT NULL REFERENCES runs(run_id),
+  replacement_run_digest TEXT NOT NULL,
   replacement_lease_id TEXT NOT NULL,
   replacement_fence_id TEXT NOT NULL,
-  replacement_fence_sequence INTEGER NOT NULL,
+  replacement_fence_sequence INTEGER NOT NULL CHECK (replacement_fence_sequence >= 2),
+  replacement_holder_attestation_id TEXT NOT NULL REFERENCES holder_attestations(attestation_id),
+  replacement_holder_attestation_digest TEXT NOT NULL,
+  new_high_water INTEGER NOT NULL CHECK (new_high_water >= 2),
   authority_digest TEXT NOT NULL,
-  holder_attestation_digest TEXT NOT NULL,
-  classification TEXT NOT NULL CHECK (classification = 'ORPHAN_NONADOPTABLE'),
-  reason_code TEXT NOT NULL CHECK (reason_code = 'BROKER_PROTECTED_RECOVERY'),
-  recovered_at TEXT NOT NULL
+  source_digest TEXT NOT NULL,
+  start_digest TEXT NOT NULL,
+  committed_at TEXT NOT NULL,
+  CHECK (terminal_receipt_id = terminal_receipt_digest),
+  CHECK (replacement_fence_sequence = old_fence_sequence + 1),
+  CHECK (new_high_water = replacement_fence_sequence)
 ) STRICT;
 CREATE INDEX holder_attestations_allocation ON holder_attestations(allocation_id, fence_sequence);
 CREATE INDEX recovery_records_old_run ON recovery_records(old_run_id, old_fence_sequence);
@@ -1714,6 +1785,10 @@ function appendReceiptInternal(store, session, input) {
   if ('lease' in input || 'fence_id' in input || 'fence_sequence' in input || 'lease_id' in input) fail('GPR_CALLER_FENCE_FORBIDDEN');
   const createdAt = isoAt(input.created_at);
   const payload = validatePayload(input.payload);
+  if (input.receipt_type === 'RUN_INTERRUPTED'
+    && payload.classification === BROKER_RECOVERY_CLASSIFICATION) {
+    fail('GPR_RESERVED_ORPHAN_PAYLOAD_FORBIDDEN');
+  }
   const observedAt = isoAt();
   if (Date.parse(createdAt) > Date.parse(observedAt)) fail('GPR_RECEIPT_CHRONOLOGY_INVALID');
   const db = openVerified(store.config);
@@ -2318,18 +2393,22 @@ module.exports = Object.freeze({
   BROKER_RECOVERY_CLASSIFICATION,
   BROKER_RECOVERY_REASON,
   HOLDER_ATTESTATION_ALGORITHM,
+  HOLDER_ATTESTATION_KEYS,
   HOLDER_ATTESTATION_SCHEMA_ID,
   LIMITS,
   MIN_NODE_VERSION,
   OPERATION_KINDS,
   OPERATION_STATES,
+  PRE_RECOVERY_EVIDENCE_KEYS,
   PRE_RECOVERY_EVIDENCE_SCHEMA_ID,
   RECEIPT_TYPES,
+  RECOVERY_RECORD_KEYS,
   RECOVERY_RECORD_SCHEMA_ID,
   SAFETY_CLASSES,
   SCHEMA_ID,
   TERMINAL_TYPES,
   USER_VERSION,
+  ZERO_OPERATION_INVENTORY_DIGEST,
   V3_MIGRATION_PLAN_SCHEMA_ID,
   V3_USER_VERSION,
   GprError,
@@ -2342,6 +2421,7 @@ module.exports = Object.freeze({
   expectedFinalV3SchemaFingerprint,
   expectedV2SchemaFingerprint,
   namespaceDigest,
+  preRecoveryEvidenceDigest,
   resolveDatabasePath,
   validateAuthority,
   validateCandidate,
