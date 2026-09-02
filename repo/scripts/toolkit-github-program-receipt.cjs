@@ -12,6 +12,14 @@ const SCHEMA_ID = 'toolkit.github-program.run-receipt.v1';
 const MIN_NODE_VERSION = '22.13.0';
 const APPLICATION_ID = 1196446257;
 const USER_VERSION = 2;
+const V3_USER_VERSION = 3;
+const HOLDER_ATTESTATION_SCHEMA_ID = 'toolkit.github-program.holder-attestation.v1';
+const PRE_RECOVERY_EVIDENCE_SCHEMA_ID = 'toolkit.github-program.pre-recovery-evidence.v1';
+const RECOVERY_RECORD_SCHEMA_ID = 'toolkit.github-program.recovery-record.v1';
+const V3_MIGRATION_PLAN_SCHEMA_ID = 'toolkit.github-program.v2-to-v3-migration-plan.v1';
+const HOLDER_ATTESTATION_ALGORITHM = 'HMAC-SHA-256';
+const BROKER_RECOVERY_CLASSIFICATION = 'ORPHAN_NONADOPTABLE';
+const BROKER_RECOVERY_REASON = 'BROKER_PROTECTED_RECOVERY';
 const BUSY_TIMEOUT_MS = 5000;
 const VERIFIER_TIMEOUT_MS = 30000;
 const VERIFIER_STREAM_BYTES = 16 * 1024;
@@ -82,6 +90,40 @@ const CANDIDATE_KEYS = Object.freeze([
 const LEASE_KEYS = Object.freeze([
   'lease_id', 'fence_id', 'fence_sequence', 'issued_at', 'expires_at'
 ]);
+const HOLDER_ATTESTATION_KEYS = Object.freeze([
+  'schema', 'attestation_id', 'algorithm', 'key_id', 'platform', 'repository',
+  'parent_issue', 'child_issue', 'lock', 'allocation_id', 'run_id', 'lease_id',
+  'fence_id', 'fence_sequence', 'authority_digest', 'start_digest',
+  'process_id_digest', 'process_start_digest', 'boot_id_digest',
+  'pid_namespace_digest', 'process_incarnation_digest', 'lease_issued_at',
+  'lease_expires_at', 'attestation_digest', 'attestation_tag'
+]);
+const PRE_RECOVERY_EVIDENCE_KEYS = Object.freeze([
+  'schema', 'evidence_digest', 'repository', 'parent_issue', 'child_issue',
+  'lock', 'allocation_id', 'run_id', 'lease_id', 'fence_id', 'fence_sequence',
+  'namespace_digest', 'authority_digest', 'start_digest',
+  'holder_attestation_digest', 'store_state_digest', 'observed_at',
+  'holder_classification', 'operation_count', 'unresolved_operation_count',
+  'high_water'
+]);
+const RECOVERY_RECORD_KEYS = Object.freeze([
+  'schema', 'recovery_record_id', 'recovery_record_digest', 'repository',
+  'parent_issue', 'child_issue', 'lock', 'old_allocation_id', 'old_run_id',
+  'old_lease_id', 'old_fence_id', 'old_fence_sequence',
+  'pre_recovery_evidence_digest', 'terminal_receipt_id', 'release_event_id',
+  'replacement_allocation_id', 'replacement_run_id', 'replacement_lease_id',
+  'replacement_fence_id', 'replacement_fence_sequence', 'authority_digest',
+  'holder_attestation_digest', 'classification', 'reason_code', 'recovered_at'
+]);
+const RESERVED_ORPHAN_PAYLOAD_KEYS = Object.freeze([
+  'classification', 'reason_code', 'evidence_digest'
+]);
+const MIGRATION_OBSERVATION_KEYS = Object.freeze([
+  'application_id', 'user_version', 'schema_fingerprint', 'namespace_verified',
+  'integrity_verified', 'foreign_keys_verified', 'historical_digests_verified',
+  'chain_verified', 'high_water_verified', 'unresolved_operation_count',
+  'unexpired_unreleased_allocation_count', 'observed_at'
+]);
 const PAYLOAD_KEYS = Object.freeze([
   'classification', 'reason_code', 'outcome_digest', 'evidence_digest',
   'operation_digest', 'detail_digest', 'mutation_outcome', 'evidence_refs'
@@ -141,6 +183,13 @@ function isSafeId(value, max = 160) {
     && /^[A-Za-z0-9._:/-]+$/.test(value)
     && !value.startsWith('-')
     && !value.includes('..');
+}
+
+function isSafeContractId(value, max = 160) {
+  return typeof value === 'string'
+    && value.length > 0
+    && value.length <= max
+    && /^(?!.*\.\.)[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value);
 }
 
 function isSafeGitRef(value) {
@@ -225,6 +274,11 @@ function validateRepository(value) {
     fail('GPR_REPOSITORY_INVALID');
   }
   return value.toLowerCase();
+}
+
+function isCanonicalRepository(value) {
+  return typeof value === 'string'
+    && /^[a-z0-9_.-]{1,100}\/[a-z0-9_.-]{1,100}$/.test(value);
 }
 
 function validateIssue(value, name) {
@@ -379,6 +433,136 @@ function validateLease(value) {
     fail('GPR_LEASE_INVALID');
   }
   return clone(value);
+}
+
+function digestWithout(value, key) {
+  const payload = clone(value);
+  delete payload[key];
+  return digestValue(payload);
+}
+
+function digestWithoutKeys(value, keys) {
+  const payload = clone(value);
+  for (const key of keys) delete payload[key];
+  return digestValue(payload);
+}
+
+function validateHolderAttestation(value) {
+  if (!exactKeys(value, HOLDER_ATTESTATION_KEYS)
+    || value.schema !== HOLDER_ATTESTATION_SCHEMA_ID
+    || value.algorithm !== HOLDER_ATTESTATION_ALGORITHM
+    || !['windows', 'linux'].includes(value.platform)
+    || !isCanonicalRepository(value.repository)
+    || !isSafeContractId(value.attestation_id, 160)
+    || !isSafeContractId(value.key_id, 80)
+    || !isSafeContractId(value.lock)
+    || !isSafeContractId(value.allocation_id)
+    || !isSafeContractId(value.run_id)
+    || !isSafeContractId(value.lease_id)
+    || !isSafeContractId(value.fence_id)
+    || !Number.isSafeInteger(value.fence_sequence) || value.fence_sequence < 1) {
+    fail('GPR_HOLDER_ATTESTATION_INVALID');
+  }
+  validateIssue(value.parent_issue, 'parent_issue');
+  validateIssue(value.child_issue, 'child_issue');
+  for (const key of [
+    'authority_digest', 'start_digest', 'process_id_digest', 'process_start_digest',
+    'boot_id_digest', 'pid_namespace_digest', 'process_incarnation_digest',
+    'attestation_tag'
+  ]) {
+    if (!isDigest(value[key])) fail('GPR_HOLDER_ATTESTATION_INVALID', { field: key });
+  }
+  if (!isTimestamp(value.lease_issued_at) || !isTimestamp(value.lease_expires_at)
+    || Date.parse(value.lease_expires_at) <= Date.parse(value.lease_issued_at)
+    || !isDigest(value.attestation_digest)
+    || value.attestation_digest !== digestWithoutKeys(value, ['attestation_digest', 'attestation_tag'])) {
+    fail('GPR_HOLDER_ATTESTATION_INVALID');
+  }
+  assertPrivacySafe(value);
+  return deepFreeze(clone(value));
+}
+
+function validatePreRecoveryEvidence(value) {
+  if (!exactKeys(value, PRE_RECOVERY_EVIDENCE_KEYS)
+    || value.schema !== PRE_RECOVERY_EVIDENCE_SCHEMA_ID
+    || !isCanonicalRepository(value.repository)
+    || !isSafeContractId(value.lock)
+    || !isSafeContractId(value.allocation_id)
+    || !isSafeContractId(value.run_id)
+    || !isSafeContractId(value.lease_id)
+    || !isSafeContractId(value.fence_id)
+    || !Number.isSafeInteger(value.fence_sequence) || value.fence_sequence < 1
+    || value.holder_classification !== BROKER_RECOVERY_CLASSIFICATION
+    || value.operation_count !== 0
+    || value.unresolved_operation_count !== 0
+    || !Number.isSafeInteger(value.high_water) || value.high_water !== value.fence_sequence
+    || !isTimestamp(value.observed_at)
+    || !isDigest(value.evidence_digest)) {
+    fail('GPR_PRE_RECOVERY_EVIDENCE_INVALID');
+  }
+  validateIssue(value.parent_issue, 'parent_issue');
+  validateIssue(value.child_issue, 'child_issue');
+  for (const key of [
+    'namespace_digest', 'authority_digest', 'start_digest',
+    'holder_attestation_digest', 'store_state_digest'
+  ]) {
+    if (!isDigest(value[key])) fail('GPR_PRE_RECOVERY_EVIDENCE_INVALID', { field: key });
+  }
+  if (value.evidence_digest !== digestWithout(value, 'evidence_digest')) {
+    fail('GPR_PRE_RECOVERY_EVIDENCE_INVALID');
+  }
+  assertPrivacySafe(value);
+  return deepFreeze(clone(value));
+}
+
+function validateRecoveryRecord(value) {
+  if (!exactKeys(value, RECOVERY_RECORD_KEYS)
+    || value.schema !== RECOVERY_RECORD_SCHEMA_ID
+    || !isCanonicalRepository(value.repository)
+    || !isSafeContractId(value.recovery_record_id)
+    || !isSafeContractId(value.lock)
+    || !isSafeContractId(value.old_allocation_id)
+    || !isSafeContractId(value.old_run_id)
+    || !isSafeContractId(value.old_lease_id)
+    || !isSafeContractId(value.old_fence_id)
+    || !isSafeContractId(value.release_event_id)
+    || !isSafeContractId(value.replacement_allocation_id)
+    || !isSafeContractId(value.replacement_run_id)
+    || !isSafeContractId(value.replacement_lease_id)
+    || !isSafeContractId(value.replacement_fence_id)
+    || !Number.isSafeInteger(value.old_fence_sequence) || value.old_fence_sequence < 1
+    || !Number.isSafeInteger(value.replacement_fence_sequence)
+    || value.replacement_fence_sequence !== value.old_fence_sequence + 1
+    || value.classification !== BROKER_RECOVERY_CLASSIFICATION
+    || value.reason_code !== BROKER_RECOVERY_REASON
+    || !isTimestamp(value.recovered_at)
+    || !isDigest(value.recovery_record_digest)) {
+    fail('GPR_RECOVERY_RECORD_INVALID');
+  }
+  validateIssue(value.parent_issue, 'parent_issue');
+  validateIssue(value.child_issue, 'child_issue');
+  for (const key of [
+    'pre_recovery_evidence_digest', 'terminal_receipt_id', 'authority_digest',
+    'holder_attestation_digest'
+  ]) {
+    if (!isDigest(value[key])) fail('GPR_RECOVERY_RECORD_INVALID', { field: key });
+  }
+  if (value.recovery_record_digest !== digestWithout(value, 'recovery_record_digest')) {
+    fail('GPR_RECOVERY_RECORD_INVALID');
+  }
+  assertPrivacySafe(value);
+  return deepFreeze(clone(value));
+}
+
+function validateReservedOrphanPayload(value) {
+  if (!exactKeys(value, RESERVED_ORPHAN_PAYLOAD_KEYS)
+    || value.classification !== BROKER_RECOVERY_CLASSIFICATION
+    || value.reason_code !== BROKER_RECOVERY_REASON
+    || !isDigest(value.evidence_digest)) {
+    fail('GPR_RESERVED_ORPHAN_PAYLOAD_INVALID');
+  }
+  assertPrivacySafe(value);
+  return deepFreeze(clone(value));
 }
 
 function receiptPayload(receipt) {
@@ -694,6 +878,83 @@ CREATE TRIGGER mutation_operation_events_no_update BEFORE UPDATE ON mutation_ope
 CREATE TRIGGER mutation_operation_events_no_delete BEFORE DELETE ON mutation_operation_events BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
 `;
 
+const V3_SCHEMA_SQL = `
+CREATE TABLE holder_attestations (
+  attestation_id TEXT PRIMARY KEY,
+  allocation_id TEXT NOT NULL UNIQUE REFERENCES allocations(allocation_id),
+  run_id TEXT NOT NULL UNIQUE REFERENCES runs(run_id),
+  lease_id TEXT NOT NULL,
+  fence_id TEXT NOT NULL,
+  fence_sequence INTEGER NOT NULL,
+  algorithm TEXT NOT NULL CHECK (algorithm = 'HMAC-SHA-256'),
+  key_id TEXT NOT NULL,
+  platform TEXT NOT NULL CHECK (platform IN ('windows', 'linux')),
+  authority_digest TEXT NOT NULL,
+  start_digest TEXT NOT NULL,
+  process_id_digest TEXT NOT NULL,
+  process_start_digest TEXT NOT NULL,
+  boot_id_digest TEXT NOT NULL,
+  pid_namespace_digest TEXT NOT NULL,
+  process_incarnation_digest TEXT NOT NULL,
+  lease_issued_at TEXT NOT NULL,
+  lease_expires_at TEXT NOT NULL,
+  attestation_digest TEXT NOT NULL UNIQUE,
+  attestation_tag TEXT NOT NULL
+) STRICT;
+CREATE TABLE recovery_records (
+  recovery_record_id TEXT PRIMARY KEY,
+  recovery_record_digest TEXT NOT NULL UNIQUE,
+  repository TEXT NOT NULL,
+  parent_issue INTEGER NOT NULL,
+  child_issue INTEGER NOT NULL,
+  lock_id TEXT NOT NULL,
+  old_allocation_id TEXT NOT NULL REFERENCES allocations(allocation_id),
+  old_run_id TEXT NOT NULL REFERENCES runs(run_id),
+  old_lease_id TEXT NOT NULL,
+  old_fence_id TEXT NOT NULL,
+  old_fence_sequence INTEGER NOT NULL,
+  pre_recovery_evidence_digest TEXT NOT NULL,
+  terminal_receipt_id TEXT NOT NULL REFERENCES receipts(receipt_id),
+  release_event_id TEXT NOT NULL REFERENCES lease_events(event_id),
+  replacement_allocation_id TEXT NOT NULL REFERENCES allocations(allocation_id),
+  replacement_run_id TEXT NOT NULL REFERENCES runs(run_id),
+  replacement_lease_id TEXT NOT NULL,
+  replacement_fence_id TEXT NOT NULL,
+  replacement_fence_sequence INTEGER NOT NULL,
+  authority_digest TEXT NOT NULL,
+  holder_attestation_digest TEXT NOT NULL,
+  classification TEXT NOT NULL CHECK (classification = 'ORPHAN_NONADOPTABLE'),
+  reason_code TEXT NOT NULL CHECK (reason_code = 'BROKER_PROTECTED_RECOVERY'),
+  recovered_at TEXT NOT NULL
+) STRICT;
+CREATE INDEX holder_attestations_allocation ON holder_attestations(allocation_id, fence_sequence);
+CREATE INDEX recovery_records_old_run ON recovery_records(old_run_id, old_fence_sequence);
+CREATE INDEX recovery_records_replacement ON recovery_records(replacement_run_id, replacement_fence_sequence);
+CREATE TRIGGER holder_attestations_no_update BEFORE UPDATE ON holder_attestations BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER holder_attestations_no_delete BEFORE DELETE ON holder_attestations BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER recovery_records_no_update BEFORE UPDATE ON recovery_records BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+CREATE TRIGGER recovery_records_no_delete BEFORE DELETE ON recovery_records BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
+`;
+
+const FINAL_V3_SCHEMA_SQL = `${SCHEMA_SQL}\n${V3_SCHEMA_SQL}`;
+const METADATA_NO_UPDATE_TRIGGER_SQL = "CREATE TRIGGER metadata_no_update BEFORE UPDATE ON metadata BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;";
+const MIGRATION_STEPS = Object.freeze([
+  Object.freeze({ step: 1, action: 'RECOGNIZE_EXACT_CANONICAL_V2' }),
+  Object.freeze({ step: 2, action: 'VERIFY_NAMESPACE_INTEGRITY_FK_HISTORICAL_DIGESTS_AND_CHAIN' }),
+  Object.freeze({ step: 3, action: 'CHECK_MIGRATION_QUIESCENCE' }),
+  Object.freeze({ step: 4, action: 'BEGIN_IMMEDIATE' }),
+  Object.freeze({ step: 5, action: 'REVERIFY_V2_SOURCE_INSIDE_TRANSACTION' }),
+  Object.freeze({ step: 6, action: 'REMOVE_METADATA_NO_UPDATE' }),
+  Object.freeze({ step: 7, action: 'ADD_FINAL_V3_TABLES_INDEXES_AND_TRIGGERS' }),
+  Object.freeze({ step: 8, action: 'WRITE_EXPECTED_FINAL_V3_FINGERPRINT' }),
+  Object.freeze({ step: 9, action: 'RESTORE_METADATA_NO_UPDATE' }),
+  Object.freeze({ step: 10, action: 'SET_USER_VERSION_3' }),
+  Object.freeze({ step: 11, action: 'VERIFY_FINAL_V3_SCHEMA_FINGERPRINT' }),
+  Object.freeze({ step: 12, action: 'REVERIFY_INTEGRITY_FK_HISTORICAL_DIGESTS_AND_HIGH_WATER' }),
+  Object.freeze({ step: 13, action: 'COMMIT' }),
+  Object.freeze({ step: 14, action: 'INDEPENDENT_REOPEN_AND_READBACK' })
+]);
+
 function oneValue(db, pragma, field) {
   const row = db.prepare(pragma).get();
   return row && row[field];
@@ -738,6 +999,84 @@ function expectedSchemaFingerprint(DatabaseSync) {
   } finally {
     db.close();
   }
+}
+
+let expectedFinalV3SchemaFingerprintCache = null;
+
+function sqliteDatabaseConstructor(DatabaseSync) {
+  if (typeof DatabaseSync === 'function') return DatabaseSync;
+  const sqlite = assertRuntimeSupport();
+  return sqlite.DatabaseSync;
+}
+
+function expectedV2SchemaFingerprint(DatabaseSync) {
+  return expectedSchemaFingerprint(sqliteDatabaseConstructor(DatabaseSync));
+}
+
+function expectedFinalV3SchemaFingerprint(DatabaseSync) {
+  if (expectedFinalV3SchemaFingerprintCache) return expectedFinalV3SchemaFingerprintCache;
+  const Constructor = sqliteDatabaseConstructor(DatabaseSync);
+  const db = new Constructor(':memory:');
+  try {
+    db.exec('PRAGMA trusted_schema=OFF');
+    db.exec(FINAL_V3_SCHEMA_SQL);
+    expectedFinalV3SchemaFingerprintCache = schemaFingerprint(db);
+    return expectedFinalV3SchemaFingerprintCache;
+  } finally {
+    db.close();
+  }
+}
+
+function buildFinalV3SchemaSql() {
+  return FINAL_V3_SCHEMA_SQL;
+}
+
+function validateV2MigrationObservation(value) {
+  if (!exactKeys(value, MIGRATION_OBSERVATION_KEYS)
+    || value.application_id !== APPLICATION_ID
+    || value.user_version !== USER_VERSION
+    || value.schema_fingerprint !== expectedV2SchemaFingerprint()
+    || value.namespace_verified !== true
+    || value.integrity_verified !== true
+    || value.foreign_keys_verified !== true
+    || value.historical_digests_verified !== true
+    || value.chain_verified !== true
+    || value.high_water_verified !== true
+    || value.unresolved_operation_count !== 0
+    || value.unexpired_unreleased_allocation_count !== 0
+    || !isTimestamp(value.observed_at)) {
+    if (isRecord(value)
+      && (value.unresolved_operation_count !== 0
+        || value.unexpired_unreleased_allocation_count !== 0)) {
+      fail('GPR_MIGRATION_NOT_QUIESCENT');
+    }
+    fail('GPR_V2_MIGRATION_SOURCE_INVALID');
+  }
+  assertPrivacySafe(value);
+  return deepFreeze(clone(value));
+}
+
+function buildV2ToV3MigrationPlan(observation) {
+  const source = validateV2MigrationObservation(observation);
+  const targetFingerprint = expectedFinalV3SchemaFingerprint();
+  return deepFreeze({
+    schema: V3_MIGRATION_PLAN_SCHEMA_ID,
+    source_application_id: APPLICATION_ID,
+    source_user_version: USER_VERSION,
+    source_schema_fingerprint: source.schema_fingerprint,
+    target_application_id: APPLICATION_ID,
+    target_user_version: V3_USER_VERSION,
+    target_schema_fingerprint: targetFingerprint,
+    source_observation_digest: digestValue(source),
+    quiescence: {
+      unresolved_operation_count: source.unresolved_operation_count,
+      unexpired_unreleased_allocation_count: source.unexpired_unreleased_allocation_count,
+      observed_at: source.observed_at
+    },
+    schema_sql: V3_SCHEMA_SQL,
+    metadata_no_update_trigger_sql: METADATA_NO_UPDATE_TRIGGER_SQL,
+    steps: MIGRATION_STEPS
+  });
 }
 
 function transaction(db, callback) {
@@ -1976,28 +2315,44 @@ if (require.main === module) {
 module.exports = Object.freeze({
   APPLICATION_ID,
   BUSY_TIMEOUT_MS,
+  BROKER_RECOVERY_CLASSIFICATION,
+  BROKER_RECOVERY_REASON,
+  HOLDER_ATTESTATION_ALGORITHM,
+  HOLDER_ATTESTATION_SCHEMA_ID,
   LIMITS,
   MIN_NODE_VERSION,
   OPERATION_KINDS,
   OPERATION_STATES,
+  PRE_RECOVERY_EVIDENCE_SCHEMA_ID,
   RECEIPT_TYPES,
+  RECOVERY_RECORD_SCHEMA_ID,
   SAFETY_CLASSES,
   SCHEMA_ID,
   TERMINAL_TYPES,
   USER_VERSION,
+  V3_MIGRATION_PLAN_SCHEMA_ID,
+  V3_USER_VERSION,
   GprError,
   assertRuntimeSupport,
+  buildFinalV3SchemaSql,
+  buildV2ToV3MigrationPlan,
   createProgrammeReceiptStore,
   digestValue,
   canonicalSerialize,
+  expectedFinalV3SchemaFingerprint,
+  expectedV2SchemaFingerprint,
   namespaceDigest,
   resolveDatabasePath,
   validateAuthority,
   validateCandidate,
+  validateHolderAttestation,
   validateOperationDescriptor,
   validateOutcomeEvidence,
+  validatePreRecoveryEvidence,
   validateReceiptChain,
   validateReceiptObject,
+  validateRecoveryRecord,
+  validateReservedOrphanPayload,
   validateStart,
   validateVerificationPacket,
   validateVerifierProcessResult,

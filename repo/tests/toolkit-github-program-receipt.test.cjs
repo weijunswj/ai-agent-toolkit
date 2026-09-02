@@ -13,6 +13,7 @@ const repositoryRoot = path.resolve(__dirname, '../..');
 const {
   createProgrammeReceiptStore,
   digestValue,
+  RECEIPT_TYPES,
   USER_VERSION,
   validateReceiptChain,
   validateReceiptObject
@@ -168,6 +169,8 @@ test('first allocation persists allocator-owned RUN_STARTED after mandatory fres
   assert.equal(session.started, true);
   assert.equal(session.run_started_receipt_id, chain[0].receipt_id);
   assert.equal(typeof store.performMutation, 'undefined');
+  assert.equal(typeof store.migrateV2ToV3, 'undefined');
+  assert.equal(RECEIPT_TYPES.includes('ORPHAN_NONADOPTABLE'), false);
   assert.equal(USER_VERSION, 2);
 });
 

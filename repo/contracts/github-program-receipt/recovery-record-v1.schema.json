@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.github-program.recovery-record.v1",
+  "title": "Toolkit GitHub Programme Recovery Record v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "recovery_record_id",
+    "recovery_record_digest",
+    "repository",
+    "parent_issue",
+    "child_issue",
+    "lock",
+    "old_allocation_id",
+    "old_run_id",
+    "old_lease_id",
+    "old_fence_id",
+    "old_fence_sequence",
+    "pre_recovery_evidence_digest",
+    "terminal_receipt_id",
+    "release_event_id",
+    "replacement_allocation_id",
+    "replacement_run_id",
+    "replacement_lease_id",
+    "replacement_fence_id",
+    "replacement_fence_sequence",
+    "authority_digest",
+    "holder_attestation_digest",
+    "classification",
+    "reason_code",
+    "recovered_at"
+  ],
+  "properties": {
+    "schema": { "const": "toolkit.github-program.recovery-record.v1" },
+    "recovery_record_id": { "$ref": "#/$defs/id" },
+    "recovery_record_digest": { "$ref": "#/$defs/digest" },
+    "repository": { "$ref": "#/$defs/repository" },
+    "parent_issue": { "type": "integer", "minimum": 1 },
+    "child_issue": { "type": "integer", "minimum": 1 },
+    "lock": { "$ref": "#/$defs/id" },
+    "old_allocation_id": { "$ref": "#/$defs/id" },
+    "old_run_id": { "$ref": "#/$defs/id" },
+    "old_lease_id": { "$ref": "#/$defs/id" },
+    "old_fence_id": { "$ref": "#/$defs/id" },
+    "old_fence_sequence": { "type": "integer", "minimum": 1 },
+    "pre_recovery_evidence_digest": { "$ref": "#/$defs/digest" },
+    "terminal_receipt_id": { "$ref": "#/$defs/digest" },
+    "release_event_id": { "$ref": "#/$defs/id" },
+    "replacement_allocation_id": { "$ref": "#/$defs/id" },
+    "replacement_run_id": { "$ref": "#/$defs/id" },
+    "replacement_lease_id": { "$ref": "#/$defs/id" },
+    "replacement_fence_id": { "$ref": "#/$defs/id" },
+    "replacement_fence_sequence": { "type": "integer", "minimum": 2 },
+    "authority_digest": { "$ref": "#/$defs/digest" },
+    "holder_attestation_digest": { "$ref": "#/$defs/digest" },
+    "classification": { "const": "ORPHAN_NONADOPTABLE" },
+    "reason_code": { "const": "BROKER_PROTECTED_RECOVERY" },
+    "recovered_at": { "$ref": "#/$defs/timestamp" }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "repository": {
+      "type": "string",
+      "pattern": "^[a-z0-9_.-]{1,100}/[a-z0-9_.-]{1,100}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "maxLength": 32
+    }
+  }
+}

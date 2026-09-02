@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.github-program.pre-recovery-evidence.v1",
+  "title": "Toolkit GitHub Programme Pre-Recovery Evidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "evidence_digest",
+    "repository",
+    "parent_issue",
+    "child_issue",
+    "lock",
+    "allocation_id",
+    "run_id",
+    "lease_id",
+    "fence_id",
+    "fence_sequence",
+    "namespace_digest",
+    "authority_digest",
+    "start_digest",
+    "holder_attestation_digest",
+    "store_state_digest",
+    "observed_at",
+    "holder_classification",
+    "operation_count",
+    "unresolved_operation_count",
+    "high_water"
+  ],
+  "properties": {
+    "schema": { "const": "toolkit.github-program.pre-recovery-evidence.v1" },
+    "evidence_digest": { "$ref": "#/$defs/digest" },
+    "repository": { "$ref": "#/$defs/repository" },
+    "parent_issue": { "type": "integer", "minimum": 1 },
+    "child_issue": { "type": "integer", "minimum": 1 },
+    "lock": { "$ref": "#/$defs/id" },
+    "allocation_id": { "$ref": "#/$defs/id" },
+    "run_id": { "$ref": "#/$defs/id" },
+    "lease_id": { "$ref": "#/$defs/id" },
+    "fence_id": { "$ref": "#/$defs/id" },
+    "fence_sequence": { "type": "integer", "minimum": 1 },
+    "namespace_digest": { "$ref": "#/$defs/digest" },
+    "authority_digest": { "$ref": "#/$defs/digest" },
+    "start_digest": { "$ref": "#/$defs/digest" },
+    "holder_attestation_digest": { "$ref": "#/$defs/digest" },
+    "store_state_digest": { "$ref": "#/$defs/digest" },
+    "observed_at": { "$ref": "#/$defs/timestamp" },
+    "holder_classification": { "const": "ORPHAN_NONADOPTABLE" },
+    "operation_count": { "const": 0 },
+    "unresolved_operation_count": { "const": 0 },
+    "high_water": { "type": "integer", "minimum": 1 }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "repository": {
+      "type": "string",
+      "pattern": "^[a-z0-9_.-]{1,100}/[a-z0-9_.-]{1,100}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "maxLength": 32
+    }
+  }
+}

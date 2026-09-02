@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.github-program.holder-attestation.v1",
+  "title": "Toolkit GitHub Programme Holder Attestation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "attestation_id",
+    "algorithm",
+    "key_id",
+    "platform",
+    "repository",
+    "parent_issue",
+    "child_issue",
+    "lock",
+    "allocation_id",
+    "run_id",
+    "lease_id",
+    "fence_id",
+    "fence_sequence",
+    "authority_digest",
+    "start_digest",
+    "process_id_digest",
+    "process_start_digest",
+    "boot_id_digest",
+    "pid_namespace_digest",
+    "process_incarnation_digest",
+    "lease_issued_at",
+    "lease_expires_at",
+    "attestation_digest",
+    "attestation_tag"
+  ],
+  "properties": {
+    "schema": { "const": "toolkit.github-program.holder-attestation.v1" },
+    "attestation_id": { "$ref": "#/$defs/id" },
+    "algorithm": { "const": "HMAC-SHA-256" },
+    "key_id": { "$ref": "#/$defs/id" },
+    "platform": { "enum": ["windows", "linux"] },
+    "repository": { "$ref": "#/$defs/repository" },
+    "parent_issue": { "type": "integer", "minimum": 1 },
+    "child_issue": { "type": "integer", "minimum": 1 },
+    "lock": { "$ref": "#/$defs/id" },
+    "allocation_id": { "$ref": "#/$defs/id" },
+    "run_id": { "$ref": "#/$defs/id" },
+    "lease_id": { "$ref": "#/$defs/id" },
+    "fence_id": { "$ref": "#/$defs/id" },
+    "fence_sequence": { "type": "integer", "minimum": 1 },
+    "authority_digest": { "$ref": "#/$defs/digest" },
+    "start_digest": { "$ref": "#/$defs/digest" },
+    "process_id_digest": { "$ref": "#/$defs/digest" },
+    "process_start_digest": { "$ref": "#/$defs/digest" },
+    "boot_id_digest": { "$ref": "#/$defs/digest" },
+    "pid_namespace_digest": { "$ref": "#/$defs/digest" },
+    "process_incarnation_digest": { "$ref": "#/$defs/digest" },
+    "lease_issued_at": { "$ref": "#/$defs/timestamp" },
+    "lease_expires_at": { "$ref": "#/$defs/timestamp" },
+    "attestation_digest": { "$ref": "#/$defs/digest" },
+    "attestation_tag": { "$ref": "#/$defs/digest" }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "repository": {
+      "type": "string",
+      "pattern": "^[a-z0-9_.-]{1,100}/[a-z0-9_.-]{1,100}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "maxLength": 32
+    }
+  }
+}

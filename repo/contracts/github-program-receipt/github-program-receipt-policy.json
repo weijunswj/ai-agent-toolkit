@@ -45,7 +45,76 @@
     "atomic_cas_transactions": true,
     "independent_reopen_readback": true,
     "unaccepted_user_version_1": "GPR_SCHEMA_MISMATCH",
-    "migration_framework": false
+    "migration_framework": false,
+    "v3_dormant_contract": {
+      "state": "DORMANT_CONTRACT_ONLY",
+      "target_user_version": 3,
+      "receipt_schema": "toolkit.github-program.run-receipt.v1",
+      "durable_tables": ["holder_attestations", "recovery_records"],
+      "legacy_v2": {
+        "holder_proof": "ABSENT",
+        "backfill": false,
+        "pid_only_orphan_inference": false,
+        "recovery": "NATURAL_EXPIRY_ONLY",
+        "historical_digests_preserved": true
+      },
+      "migration": {
+        "explicit_action_only": true,
+        "read_only_open_migrates": false,
+        "public_runtime_route": false,
+        "source_application_id_exact": true,
+        "source_user_version_exact": 2,
+        "source_fingerprint_exact": true,
+        "namespace_integrity_fk_chain_and_historical_verification": true,
+        "quiescence": {
+          "unresolved_operations": 0,
+          "unexpired_unreleased_legacy_allocations": 0,
+          "pid_liveness_waives_quiescence": false
+        },
+        "final_fingerprint_includes_restored_metadata_no_update": true,
+        "transactional": true,
+        "crash_safe": true,
+        "independent_reopen_readback": true
+      },
+      "holder_attestation": {
+        "schema": "toolkit.github-program.holder-attestation.v1",
+        "algorithm": "HMAC-SHA-256",
+        "key_value_persisted": false,
+        "lease_bound": true,
+        "independent_liveness_clock": false,
+        "required_for_future_recoverable_allocations": true,
+        "platforms": ["windows", "linux"],
+        "unsupported_platforms_fail_closed": ["macos"]
+      },
+      "recovery": {
+        "pre_recovery_evidence_schema": "toolkit.github-program.pre-recovery-evidence.v1",
+        "record_schema": "toolkit.github-program.recovery-record.v1",
+        "receipt_type": "RUN_INTERRUPTED",
+        "classification": "ORPHAN_NONADOPTABLE",
+        "reason_code": "BROKER_PROTECTED_RECOVERY",
+        "zero_operation_only": true,
+        "unknown_holder_fails_closed": true,
+        "old_allocation_fenced": true,
+        "replacement_fence": "N_PLUS_ONE",
+        "old_run_adoption": false,
+        "pre_recovery_excludes": [
+          "terminal_receipt_id",
+          "release_event_id",
+          "replacement_identities",
+          "recovery_record_id"
+        ]
+      },
+      "activation": {
+        "enabled_in_s1": false,
+        "requires_canonical_s1_s2_s3": true,
+        "requires_protected_broker_uat": true,
+        "requires_explicit_migration_authority": true,
+        "production_user_version_in_s1": 2,
+        "production_new_allocations_in_s1": "V2_ONLY",
+        "broker_installation_in_s1": false,
+        "broker_key_in_s1": false
+      }
+    }
   },
   "allocator": {
     "lease_and_fence_identity_source": "cryptographic_allocator",
