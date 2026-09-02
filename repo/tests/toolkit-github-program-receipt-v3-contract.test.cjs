@@ -13,7 +13,7 @@ const repositoryRoot = path.resolve(__dirname, '../..');
 const cleanupRoots = new Set();
 
 const digest = 'a'.repeat(64);
-const EXPECTED_FINAL_V3_SCHEMA_FINGERPRINT = '8debb8c598a8bb934fa33ef402a46ae8fc9346ebfba5e15a232564178218e740';
+const EXPECTED_FINAL_V3_SCHEMA_FINGERPRINT = 'd22a4f691392030d8a056ce6426880fd6f27a5eda13b3ffffe2bd2054803d689';
 const EXPECTED_PRODUCTION_V2_SCHEMA_FINGERPRINT = 'adc7b560ee06ac61a397a5df0a075685269c3bcc95daa400f10f936143807c17';
 
 const HOLDER_ATTESTATION_KEYS = [
@@ -808,6 +808,21 @@ function resignedRecoveryRecord(record, overrides = {}, id = 'recovery-negative'
   return result;
 }
 
+function assertRawTamperRejectsAfterReopen(databasePath, mutate, code) {
+  const tamperDb = new DatabaseSync(databasePath);
+  try {
+    mutate(tamperDb);
+  } finally {
+    tamperDb.close();
+  }
+  const reopened = new DatabaseSync(databasePath);
+  try {
+    assertCode(() => runtime.verifyFinalV3Database(reopened, V3_NAMESPACE, databasePath), code);
+  } finally {
+    reopened.close();
+  }
+}
+
 test('v3 persistence accepts a coherent holder and independent verifier readback', () => {
   const { db, first } = v3HolderFixture();
   try {
@@ -937,6 +952,113 @@ test('v3 recovery persistence rejects an old-tip chain sidecar bound to another 
     assert.equal(fixture.db.prepare('SELECT COUNT(*) AS value FROM recovery_records').get().value, 0);
   } finally {
     fixture.db.close();
+  }
+});
+
+test('v3 receipt-only persistence cannot commit without its sidecar', () => {
+  const db = v3Database();
+  try {
+    const graph = durableGraph('receipt-only', 1);
+    insertDurableGraph(db, graph);
+    db.prepare('UPDATE coordination_state SET high_water=1 WHERE singleton=1 AND high_water=0').run();
+    const receipt = durableStartedReceipt(graph);
+    assert.doesNotThrow(() => runtime.validateReceiptObject(receipt));
+    assert.throws(() => {
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        db.prepare('INSERT INTO receipts VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+          receipt.receipt_id, receipt.run_id, receipt.sequence, receipt.receipt_type,
+          receipt.prior_receipt_id, runtime.canonicalSerialize(receipt), receipt.receipt_id
+        );
+        db.exec('COMMIT');
+      } catch (error) {
+        try { db.exec('ROLLBACK'); } catch (_) { /* Preserve the direct insert failure. */ }
+        throw error;
+      }
+    }, /GPR_V3_RECEIPT_SIDECAR_REQUIRED/);
+    assert.equal(db.prepare('SELECT COUNT(*) AS value FROM receipts').get().value, 0);
+    assert.equal(db.prepare('SELECT COUNT(*) AS value FROM receipt_chain_digests').get().value, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('v3 sidecar-only persistence cannot commit without its receipt', () => {
+  const db = v3Database();
+  try {
+    const graph = durableGraph('sidecar-only', 1);
+    insertDurableGraph(db, graph);
+    db.prepare('UPDATE coordination_state SET high_water=1 WHERE singleton=1 AND high_water=0').run();
+    const receipt = durableStartedReceipt(graph);
+    assert.doesNotThrow(() => runtime.validateReceiptObject(receipt));
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare(`INSERT INTO receipt_chain_digests
+        (receipt_id, run_id, sequence, chain_digest) VALUES (?, ?, ?, ?)`).run(
+        receipt.receipt_id, receipt.run_id, receipt.sequence, runtime.digestValue([receipt])
+      );
+      assert.throws(() => db.exec('COMMIT'), /FOREIGN KEY constraint failed/);
+    } finally {
+      try { db.exec('ROLLBACK'); } catch (_) { /* The failed commit may already have closed the transaction. */ }
+    }
+    assert.equal(db.prepare('SELECT COUNT(*) AS value FROM receipts').get().value, 0);
+    assert.equal(db.prepare('SELECT COUNT(*) AS value FROM receipt_chain_digests').get().value, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('trusted v3 append commits one matching receipt and sidecar', () => {
+  const db = v3Database();
+  try {
+    const graph = durableGraph('paired-append', 1);
+    insertDurableGraph(db, graph);
+    db.prepare('UPDATE coordination_state SET high_water=1 WHERE singleton=1 AND high_water=0').run();
+    const receipt = durableStartedReceipt(graph);
+    const appended = runtime.appendV3ReceiptWithChainDigest(db, receipt);
+    const receiptRow = db.prepare('SELECT * FROM receipts WHERE receipt_id=?').get(receipt.receipt_id);
+    const sidecarRow = db.prepare('SELECT * FROM receipt_chain_digests WHERE receipt_id=?').get(receipt.receipt_id);
+    assert.equal(db.prepare('SELECT COUNT(*) AS value FROM receipts').get().value, 1);
+    assert.equal(db.prepare('SELECT COUNT(*) AS value FROM receipt_chain_digests').get().value, 1);
+    assert.equal(receiptRow.receipt_id, receipt.receipt_id);
+    assert.deepEqual({
+      receipt_id: sidecarRow.receipt_id,
+      run_id: sidecarRow.run_id,
+      sequence: sidecarRow.sequence,
+      chain_digest: sidecarRow.chain_digest
+    }, {
+      receipt_id: receipt.receipt_id,
+      run_id: receipt.run_id,
+      sequence: receipt.sequence,
+      chain_digest: appended.chain_digest
+    });
+  } finally {
+    db.close();
+  }
+});
+
+test('v3 second-half receipt failure rolls back the already-persisted sidecar', () => {
+  const db = v3Database();
+  try {
+    const graph = durableGraph('second-half-rollback', 1);
+    insertDurableGraph(db, graph);
+    db.prepare('UPDATE coordination_state SET high_water=1 WHERE singleton=1 AND high_water=0').run();
+    db.exec(`CREATE TRIGGER test_receipt_second_half_abort AFTER INSERT ON receipts
+      BEGIN
+        SELECT CASE WHEN NOT EXISTS (
+          SELECT 1 FROM receipt_chain_digests
+          WHERE receipt_id = NEW.receipt_id
+            AND run_id = NEW.run_id
+            AND sequence = NEW.sequence
+        ) THEN RAISE(ABORT, 'TEST_SIDECAR_NOT_PERSISTED') END;
+        SELECT RAISE(ABORT, 'TEST_RECEIPT_SECOND_HALF_ABORT');
+      END;`);
+    assert.throws(() => runtime.appendV3ReceiptWithChainDigest(db, durableStartedReceipt(graph)),
+      /TEST_RECEIPT_SECOND_HALF_ABORT/);
+    assert.equal(db.prepare('SELECT COUNT(*) AS value FROM receipts').get().value, 0);
+    assert.equal(db.prepare('SELECT COUNT(*) AS value FROM receipt_chain_digests').get().value, 0);
+  } finally {
+    db.close();
   }
 });
 
@@ -1219,6 +1341,174 @@ test('v3 independent verifier rejects holder tag tampering after append-only byp
   } finally {
     db.close();
   }
+});
+
+test('v3 independent verifier rejects a self-consistent old recovery run tamper after reopen', () => {
+  const root = stateRoot();
+  const databasePath = path.join(root, 'old-recovery-state.sqlite');
+  const fixture = v3RecoveryFixture(databasePath);
+  try {
+    assert.equal(runtime.verifyFinalV3Database(fixture.db, V3_NAMESPACE, databasePath), true);
+  } finally {
+    fixture.db.close();
+  }
+  assertRawTamperRejectsAfterReopen(databasePath, (db) => {
+    db.exec('PRAGMA foreign_keys=ON');
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const runsNoUpdateSql = db.prepare(
+        "SELECT sql FROM sqlite_schema WHERE type='trigger' AND name='runs_no_update'"
+      ).get().sql;
+      db.exec('DROP TRIGGER runs_no_update');
+      const row = db.prepare('SELECT * FROM runs WHERE run_id=?').get(fixture.oldA.run.run_id);
+      const authorityDigest = runtime.digestValue('tampered-old-recovery-authority');
+      const runDigest = runtime.digestValue({
+        run_id: row.run_id,
+        allocation_id: row.allocation_id,
+        lock: row.lock_id,
+        authority_digest: authorityDigest,
+        start_digest: row.start_digest
+      });
+      db.prepare('UPDATE runs SET authority_digest=?, run_digest=? WHERE run_id=?')
+        .run(authorityDigest, runDigest, row.run_id);
+      db.exec(runsNoUpdateSql);
+      assert.equal(db.prepare('PRAGMA foreign_key_check').all().length, 0);
+      db.exec('COMMIT');
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch (_) { /* Preserve the tamper setup failure. */ }
+      throw error;
+    }
+  }, 'GPR_V3_RECOVERY_COHERENCE');
+});
+
+test('v3 independent verifier rejects a re-digested terminal receipt tamper after reopen', () => {
+  const root = stateRoot();
+  const databasePath = path.join(root, 'terminal-receipt-state.sqlite');
+  const fixture = v3RecoveryFixture(databasePath);
+  try {
+    assert.equal(runtime.verifyFinalV3Database(fixture.db, V3_NAMESPACE, databasePath), true);
+  } finally {
+    fixture.db.close();
+  }
+  assertRawTamperRejectsAfterReopen(databasePath, (db) => {
+    db.exec('PRAGMA foreign_keys=ON');
+    db.exec('PRAGMA defer_foreign_keys=ON');
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const triggerSql = new Map(['receipts_no_update', 'receipt_chain_digests_no_update', 'recovery_records_no_update']
+        .map((name) => [name, db.prepare(
+          "SELECT sql FROM sqlite_schema WHERE type='trigger' AND name=?"
+        ).get(name).sql]));
+      db.exec('DROP TRIGGER receipts_no_update');
+      db.exec('DROP TRIGGER receipt_chain_digests_no_update');
+      db.exec('DROP TRIGGER recovery_records_no_update');
+
+      const terminal = structuredClone(fixture.terminalA);
+      terminal.created_at = '2026-09-02T04:30:00.000Z';
+      delete terminal.receipt_id;
+      terminal.receipt_id = runtime.digestValue(terminal);
+      const record = structuredClone(fixture.recordA);
+      record.terminal_receipt_id = terminal.receipt_id;
+      record.terminal_receipt_digest = terminal.receipt_id;
+      delete record.recovery_record_digest;
+      record.recovery_record_digest = runtime.digestValue(record);
+      db.prepare('UPDATE receipts SET receipt_id=?, canonical_json=?, receipt_digest=? WHERE receipt_id=?')
+        .run(terminal.receipt_id, runtime.canonicalSerialize(terminal), terminal.receipt_id,
+          fixture.terminalA.receipt_id);
+      db.prepare('UPDATE receipt_chain_digests SET receipt_id=?, chain_digest=? WHERE receipt_id=?')
+        .run(terminal.receipt_id, runtime.digestValue([fixture.oldAStart, terminal]), fixture.terminalA.receipt_id);
+      db.prepare('UPDATE recovery_records SET terminal_receipt_id=?, terminal_receipt_digest=?, recovery_record_digest=? WHERE recovery_record_id=?')
+        .run(record.terminal_receipt_id, record.terminal_receipt_digest, record.recovery_record_digest,
+          fixture.recordA.recovery_record_id);
+      for (const sql of triggerSql.values()) db.exec(sql);
+      assert.equal(db.prepare('PRAGMA foreign_key_check').all().length, 0);
+      db.exec('COMMIT');
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch (_) { /* Preserve the tamper setup failure. */ }
+      throw error;
+    }
+  }, 'GPR_V3_RECOVERY_COHERENCE');
+});
+
+test('v3 independent verifier rejects a re-digested release-event tamper after reopen', () => {
+  const root = stateRoot();
+  const databasePath = path.join(root, 'release-event-state.sqlite');
+  const fixture = v3RecoveryFixture(databasePath);
+  try {
+    assert.equal(runtime.verifyFinalV3Database(fixture.db, V3_NAMESPACE, databasePath), true);
+  } finally {
+    fixture.db.close();
+  }
+  assertRawTamperRejectsAfterReopen(databasePath, (db) => {
+    db.exec('PRAGMA foreign_keys=ON');
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const triggerSql = new Map(['lease_events_no_update', 'recovery_records_no_update']
+        .map((name) => [name, db.prepare(
+          "SELECT sql FROM sqlite_schema WHERE type='trigger' AND name=?"
+        ).get(name).sql]));
+      db.exec('DROP TRIGGER lease_events_no_update');
+      db.exec('DROP TRIGGER recovery_records_no_update');
+      const release = {
+        ...fixture.oldARelease,
+        event_at: '2026-09-02T02:59:30.000Z',
+        detail_digest: runtime.digestValue({
+          event_id: fixture.oldARelease.event_id,
+          mutation: 'release-before-terminal'
+        })
+      };
+      release.event_digest = runtime.digestValue({
+        event_id: release.event_id,
+        allocation_id: release.allocation_id,
+        event_type: release.event_type,
+        fence_sequence: release.fence_sequence,
+        event_at: release.event_at,
+        detail_digest: release.detail_digest
+      });
+      const record = structuredClone(fixture.recordA);
+      record.release_event_digest = release.event_digest;
+      delete record.recovery_record_digest;
+      record.recovery_record_digest = runtime.digestValue(record);
+      db.prepare('UPDATE lease_events SET event_at=?, detail_digest=?, event_digest=? WHERE event_id=?')
+        .run(release.event_at, release.detail_digest, release.event_digest, release.event_id);
+      db.prepare('UPDATE recovery_records SET release_event_digest=?, recovery_record_digest=? WHERE recovery_record_id=?')
+        .run(record.release_event_digest, record.recovery_record_digest, fixture.recordA.recovery_record_id);
+      for (const sql of triggerSql.values()) db.exec(sql);
+      assert.equal(db.prepare('PRAGMA foreign_key_check').all().length, 0);
+      db.exec('COMMIT');
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch (_) { /* Preserve the tamper setup failure. */ }
+      throw error;
+    }
+  }, 'GPR_V3_RECOVERY_COHERENCE');
+});
+
+test('v3 independent verifier rejects coordination high-water tamper after reopen', () => {
+  const root = stateRoot();
+  const databasePath = path.join(root, 'coordination-high-water-state.sqlite');
+  const fixture = v3RecoveryFixture(databasePath);
+  try {
+    assert.equal(runtime.verifyFinalV3Database(fixture.db, V3_NAMESPACE, databasePath), true);
+  } finally {
+    fixture.db.close();
+  }
+  assertRawTamperRejectsAfterReopen(databasePath, (db) => {
+    db.exec('PRAGMA foreign_keys=ON');
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const highWaterCasSql = db.prepare(
+        "SELECT sql FROM sqlite_schema WHERE type='trigger' AND name='coordination_high_water_cas'"
+      ).get().sql;
+      db.exec('DROP TRIGGER coordination_high_water_cas');
+      db.prepare('UPDATE coordination_state SET high_water=? WHERE singleton=1').run(3);
+      db.exec(highWaterCasSql);
+      assert.equal(db.prepare('PRAGMA foreign_key_check').all().length, 0);
+      db.exec('COMMIT');
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch (_) { /* Preserve the tamper setup failure. */ }
+      throw error;
+    }
+  }, 'GPR_ALLOCATOR_TAMPERED');
 });
 
 test('durable evidence shapes use the full accepted key sets', () => {

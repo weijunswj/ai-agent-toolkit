@@ -1024,6 +1024,14 @@ CREATE INDEX holder_attestations_allocation ON holder_attestations(allocation_id
 CREATE INDEX recovery_records_old_run ON recovery_records(old_run_id, old_fence_sequence);
 CREATE INDEX recovery_records_replacement ON recovery_records(replacement_run_id, replacement_fence_sequence);
 CREATE INDEX receipt_chain_digests_run_sequence ON receipt_chain_digests(run_id, sequence);
+CREATE TRIGGER v3_receipts_require_chain_digest BEFORE INSERT ON receipts
+WHEN NOT EXISTS (
+  SELECT 1 FROM receipt_chain_digests
+  WHERE receipt_id = NEW.receipt_id
+    AND run_id = NEW.run_id
+    AND sequence = NEW.sequence
+)
+BEGIN SELECT RAISE(ABORT, 'GPR_V3_RECEIPT_SIDECAR_REQUIRED'); END;
 CREATE TRIGGER v3_metadata_no_replace BEFORE INSERT ON metadata
 WHEN EXISTS (SELECT 1 FROM metadata WHERE singleton = NEW.singleton)
 BEGIN SELECT RAISE(ABORT, 'GPR_APPEND_ONLY'); END;
@@ -1706,13 +1714,13 @@ function appendV3ReceiptWithChainDigest(db, value) {
     }
     const nextChain = validateReceiptChain([...chain, receipt]);
     const chainDigest = digestValue(nextChain);
-    db.prepare('INSERT INTO receipts VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-      receipt.receipt_id, receipt.run_id, receipt.sequence, receipt.receipt_type,
-      receipt.prior_receipt_id, canonicalSerialize(receipt), receipt.receipt_id
-    );
     db.prepare(`INSERT INTO receipt_chain_digests
       (receipt_id, run_id, sequence, chain_digest) VALUES (?, ?, ?, ?)`).run(
       receipt.receipt_id, receipt.run_id, receipt.sequence, chainDigest
+    );
+    db.prepare('INSERT INTO receipts VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+      receipt.receipt_id, receipt.run_id, receipt.sequence, receipt.receipt_type,
+      receipt.prior_receipt_id, canonicalSerialize(receipt), receipt.receipt_id
     );
     return deepFreeze({ receipt, chain_digest: chainDigest });
   });
