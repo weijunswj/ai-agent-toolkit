@@ -1,0 +1,137 @@
+{
+  "canonical_cases": [
+    {
+      "name": "nested",
+      "value": {
+        "z": [true, null, -0, 9007199254740991, -9007199254740991],
+        "a": {"é": "😀", "line": "\u2028", "quote": "\"\\\n"},
+        "m": "middle"
+      },
+      "serialized": "{\"a\":{\"line\":\"\u2028\",\"quote\":\"\\\"\\\\\\n\",\"é\":\"😀\"},\"m\":\"middle\",\"z\":[true,null,0,9007199254740991,-9007199254740991]}",
+      "digest": "c935978edbb378d58eec6aab2e750cd3847dc78519a6d5419d168c0cd51b38f2"
+    },
+    {
+      "name": "array-preservation",
+      "value": [{"b": 2, "a": 1}, "x", false, null],
+      "serialized": "[{\"a\":1,\"b\":2},\"x\",false,null]",
+      "digest": "7a7bb8672cc6c224e0d934b89de561b2ca922aa21b261b7154387d1983af50b6"
+    },
+    {
+      "name": "unicode-escapes",
+      "value": {"emoji": "😀", "paragraph": "\u2029", "control": "\b\f\n\r\t\u0000\u001f"},
+      "serialized": "{\"control\":\"\\b\\f\\n\\r\\t\\u0000\\u001f\",\"emoji\":\"😀\",\"paragraph\":\"\u2029\"}",
+      "digest": "2827129a7007f93053f346d1cc9b5c1f3197310c51865e17f640711e1fdedd57"
+    },
+    {
+      "name": "safe-integer-extremes",
+      "value": {"minimum": -9007199254740991, "maximum": 9007199254740991, "zero": -0},
+      "serialized": "{\"maximum\":9007199254740991,\"minimum\":-9007199254740991,\"zero\":0}",
+      "digest": "6c2ebfc38ada26e6c5cac0887ce0571e3fe2bdd108725e1364e1dc23b6cfd0e0"
+    }
+  ],
+  "invalid_json": [
+    {"name": "float", "raw": "{\"value\":1.5}", "code": "BROKER_INVALID_FIELD"},
+    {"name": "exponent", "raw": "{\"value\":1e3}", "code": "BROKER_INVALID_FIELD"},
+    {"name": "unsafe-positive", "raw": "{\"value\":9007199254740992}", "code": "BROKER_INVALID_FIELD"},
+    {"name": "unsafe-negative", "raw": "{\"value\":-9007199254740992}", "code": "BROKER_INVALID_FIELD"}
+  ],
+  "request": {
+    "serialized": "{\"expected\":{\"state_digest\":\"6666666666666666666666666666666666666666666666666666666666666666\"},\"lock\":\"DL-S2-GITHUB-PROGRAM-CONVERGENCE-005\",\"namespace\":{\"child_issue\":359,\"parent_issue\":240,\"repository\":\"weijunswj/ai-agent-toolkit\"},\"operation\":{\"descriptor\":{\"adapter_identity_digest\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"cas_digest\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"expected_post_state_digest\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"expected_source_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"operation_kind\":\"GIT_REF_UPDATE\",\"retry_of_operation_id\":null,\"safety_class\":\"CAS\",\"target_digest\":\"1111111111111111111111111111111111111111111111111111111111111111\"},\"kind\":\"MUTATION_ADMIT\"},\"request_id\":\"0123456789abcdef0123456789abcdef\",\"schema\":\"toolkit.github-program.broker-ipc.v1\"}",
+    "digest": "b5478caabbe491b63c1d6007077432cb8ddb1748d3fab3ca295842ac1b3c701b",
+    "payload_length": 912,
+    "frame_prefix_hex": "00000390"
+  },
+  "holder": {
+    "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "value": {
+      "schema": "toolkit.github-program.holder-attestation.v1",
+      "attestation_id": "attestation-golden",
+      "repository": "weijunswj/ai-agent-toolkit",
+      "parent_issue": 240,
+      "child_issue": 359,
+      "lock": "DL-S2-GITHUB-PROGRAM-CONVERGENCE-005",
+      "allocation_id": "allocation-golden",
+      "allocation_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+      "run_id": "run-golden",
+      "run_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+      "lease_id": "lease-golden",
+      "fence_id": "fence-golden",
+      "fence_sequence": 7,
+      "authority_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+      "start_digest": "4444444444444444444444444444444444444444444444444444444444444444",
+      "algorithm": "HMAC-SHA-256",
+      "key_id": "fedcba98765432100123456789abcdef",
+      "broker_identity_digest": "5555555555555555555555555555555555555555555555555555555555555555",
+      "platform": "linux",
+      "process_id_digest": "6666666666666666666666666666666666666666666666666666666666666666",
+      "process_start_digest": "7777777777777777777777777777777777777777777777777777777777777777",
+      "boot_id_digest": "8888888888888888888888888888888888888888888888888888888888888888",
+      "pid_namespace_digest": "9999999999999999999999999999999999999999999999999999999999999999",
+      "process_incarnation_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "lease_issued_at": "2026-09-03T12:00:00.000Z",
+      "lease_expires_at": "2026-09-03T13:00:00.000Z",
+      "attestation_digest": "f619afde23477e2fca733003b33b13478c9a86511cf73985616b794a7a0ab639",
+      "attestation_tag": "27c4a95c237f3ee6d14cd97d3eb84291fa987718df550a61eb139a391180adae"
+    },
+    "tag": "27c4a95c237f3ee6d14cd97d3eb84291fa987718df550a61eb139a391180adae",
+    "attestation_digest": "f619afde23477e2fca733003b33b13478c9a86511cf73985616b794a7a0ab639",
+    "tag_payload_serialized": "{\"algorithm\":\"HMAC-SHA-256\",\"allocation_digest\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"allocation_id\":\"allocation-golden\",\"attestation_id\":\"attestation-golden\",\"authority_digest\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"boot_id_digest\":\"8888888888888888888888888888888888888888888888888888888888888888\",\"broker_identity_digest\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"child_issue\":359,\"fence_id\":\"fence-golden\",\"fence_sequence\":7,\"key_id\":\"fedcba98765432100123456789abcdef\",\"lease_expires_at\":\"2026-09-03T13:00:00.000Z\",\"lease_id\":\"lease-golden\",\"lease_issued_at\":\"2026-09-03T12:00:00.000Z\",\"lock\":\"DL-S2-GITHUB-PROGRAM-CONVERGENCE-005\",\"parent_issue\":240,\"pid_namespace_digest\":\"9999999999999999999999999999999999999999999999999999999999999999\",\"platform\":\"linux\",\"process_id_digest\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"process_incarnation_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"process_start_digest\":\"7777777777777777777777777777777777777777777777777777777777777777\",\"repository\":\"weijunswj/ai-agent-toolkit\",\"run_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"run_id\":\"run-golden\",\"schema\":\"toolkit.github-program.holder-attestation.v1\",\"start_digest\":\"4444444444444444444444444444444444444444444444444444444444444444\"}",
+    "attestation_digest_payload_serialized": "{\"algorithm\":\"HMAC-SHA-256\",\"allocation_digest\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"allocation_id\":\"allocation-golden\",\"attestation_id\":\"attestation-golden\",\"attestation_tag\":\"27c4a95c237f3ee6d14cd97d3eb84291fa987718df550a61eb139a391180adae\",\"authority_digest\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"boot_id_digest\":\"8888888888888888888888888888888888888888888888888888888888888888\",\"broker_identity_digest\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"child_issue\":359,\"fence_id\":\"fence-golden\",\"fence_sequence\":7,\"key_id\":\"fedcba98765432100123456789abcdef\",\"lease_expires_at\":\"2026-09-03T13:00:00.000Z\",\"lease_id\":\"lease-golden\",\"lease_issued_at\":\"2026-09-03T12:00:00.000Z\",\"lock\":\"DL-S2-GITHUB-PROGRAM-CONVERGENCE-005\",\"parent_issue\":240,\"pid_namespace_digest\":\"9999999999999999999999999999999999999999999999999999999999999999\",\"platform\":\"linux\",\"process_id_digest\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"process_incarnation_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"process_start_digest\":\"7777777777777777777777777777777777777777777777777777777777777777\",\"repository\":\"weijunswj/ai-agent-toolkit\",\"run_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"run_id\":\"run-golden\",\"schema\":\"toolkit.github-program.holder-attestation.v1\",\"start_digest\":\"4444444444444444444444444444444444444444444444444444444444444444\"}"
+  },
+  "identities": [
+    {
+      "name": "principal",
+      "value": ["toolkit.github-program.principal.v1", "linux", "trusted-principal"],
+      "serialized": "[\"toolkit.github-program.principal.v1\",\"linux\",\"trusted-principal\"]",
+      "digest": "b8ec65695b31dd916bd655f233159fc34febf6aec1f3b3a86884e372b01b14a2"
+    },
+    {
+      "name": "broker",
+      "value": ["toolkit.github-program.broker-identity.v1", "linux", "trusted-broker"],
+      "serialized": "[\"toolkit.github-program.broker-identity.v1\",\"linux\",\"trusted-broker\"]",
+      "digest": "ed4ee851dba3f7be56b32efd7a111722cb6e685226bab47d4103861d55bf204f"
+    },
+    {
+      "name": "process",
+      "value": ["toolkit.github-program.process-identity.v1", "linux", "18446744073709551615"],
+      "serialized": "[\"toolkit.github-program.process-identity.v1\",\"linux\",\"18446744073709551615\"]",
+      "digest": "8ca43a5e9e1f1690a3800565eb389727f11e54516fcd6a7d160d740bbf293a70"
+    },
+    {
+      "name": "process-start",
+      "value": ["toolkit.github-program.process-start-identity.v1", "linux", "18446744073709551615", "9007199254740991"],
+      "serialized": "[\"toolkit.github-program.process-start-identity.v1\",\"linux\",\"18446744073709551615\",\"9007199254740991\"]",
+      "digest": "795c7f5660f39e3cf0bf536b56c2d3f37d658fd84cb954c0868331657c310c34"
+    },
+    {
+      "name": "boot",
+      "value": ["toolkit.github-program.boot-identity.v1", "linux", "boot-golden"],
+      "serialized": "[\"toolkit.github-program.boot-identity.v1\",\"linux\",\"boot-golden\"]",
+      "digest": "be1cbe400bb194c497c5ada2ba940cffe1d66f266b078dd9c0c84ca4bc62b8c1"
+    },
+    {
+      "name": "pid-namespace",
+      "value": ["toolkit.github-program.pid-namespace-identity.v1", "linux", "pidns-golden"],
+      "serialized": "[\"toolkit.github-program.pid-namespace-identity.v1\",\"linux\",\"pidns-golden\"]",
+      "digest": "77e7931ae5a89077fdf3cb3f2b98e372dcb83516b9e17f8de3291952704b14d7"
+    },
+    {
+      "name": "process-incarnation",
+      "value": ["toolkit.github-program.process-incarnation.v1", "linux", "18446744073709551615", "9007199254740991", "boot-golden", "pidns-golden"],
+      "serialized": "[\"toolkit.github-program.process-incarnation.v1\",\"linux\",\"18446744073709551615\",\"9007199254740991\",\"boot-golden\",\"pidns-golden\"]",
+      "digest": "364063889fa67aa92c9ec2e6ad8b0a3bfd076e73a43c2b53667ff6b2f26545f3"
+    },
+    {
+      "name": "store-binding",
+      "value": ["toolkit.github-program.store-binding.v1", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+      "serialized": "[\"toolkit.github-program.store-binding.v1\",\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"]",
+      "digest": "02ac4f63c169fe802a2e7814b0f6f71e607d8b4e2ccad50dd43d93d1812524f8"
+    },
+    {
+      "name": "path-binding",
+      "value": ["toolkit.github-program.path-binding.v1", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+      "serialized": "[\"toolkit.github-program.path-binding.v1\",\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"]",
+      "digest": "162ce3029581d08b123e88f40d464dbbc5e01e992a0071fc1380feebe4e74a39"
+    }
+  ]
+}
