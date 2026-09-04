@@ -139,12 +139,30 @@ fn holder_tag_and_attestation_digest_follow_the_locked_exclusions() {
 }
 
 #[test]
+fn key_id_validation_is_exact_and_serde_matches() {
+    let cases = [
+        ("0123456789abcdef0123456789abcdef", true),
+        ("key-id", false),
+        ("0123456789ABCDEF0123456789abcdef", false),
+        ("0123456789abcdef0123456789abcdeg", false),
+        ("0123456789abcdef0123456789abcde", false),
+        ("0123456789abcdef0123456789abcdef0", false),
+    ];
+    for (value, valid) in cases {
+        assert_eq!(KeyId::parse(value).is_ok(), valid, "parse: {value}");
+        assert_eq!(
+            serde_json::from_value::<KeyId>(Value::String(value.to_owned())).is_ok(),
+            valid,
+            "serde: {value}"
+        );
+    }
+}
+
+#[test]
 fn holder_validation_matches_contract_identifier_and_timestamp_bounds() {
     let root = fixture();
     let holder: HolderAttestation =
         serde_json::from_value(root["holder"]["value"].clone()).expect("holder fixture");
-    assert!(KeyId::parse("key-id").is_ok());
-    assert!(KeyId::parse("_key-id").is_err());
 
     let mut bad_identifier = holder.clone();
     bad_identifier.attestation_id = "_bad".to_owned();

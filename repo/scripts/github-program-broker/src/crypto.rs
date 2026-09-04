@@ -53,7 +53,11 @@ pub struct KeyId(String);
 
 impl KeyId {
     pub fn parse(value: &str) -> Result<Self> {
-        if is_contract_identifier(value, 80) {
+        if value.len() == 32
+            && value
+                .bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+        {
             Ok(Self(value.to_owned()))
         } else {
             Err(BrokerError::new(ErrorCode::InvalidField))
