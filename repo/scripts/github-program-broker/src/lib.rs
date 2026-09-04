@@ -8,7 +8,4 @@ pub mod protocol;
 
 pub use canonical::{Digest, ParseLimits, canonical_digest, canonical_serialize, parse_json};
 pub use error::{BrokerError, ErrorCode, Result};
-pub use protocol::{
-    CHILD_ISSUE, LOCK_ID, PARENT_ISSUE, PROTOCOL_ID, REPOSITORY, Request, RequestId,
-    decode_request_frame, encode_request_frame,
-};
+pub use protocol::{PROTOCOL_ID, Request, RequestId, decode_request_frame, encode_request_frame};

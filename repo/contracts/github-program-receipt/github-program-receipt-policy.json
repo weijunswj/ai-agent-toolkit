@@ -7,6 +7,82 @@
     "npm_sqlite_dependency": false,
     "unsupported_runtime": "GPR_UNSUPPORTED_RUNTIME"
   },
+  "broker_ipc": {
+    "schema": "toolkit.github-program.broker-ipc.v1",
+    "contract_file": "broker-ipc-v1.schema.json",
+    "transport": {
+      "framing": "4-byte unsigned big-endian payload length followed by exactly one payload",
+      "max_frame_payload_bytes": 65536,
+      "payload_encoding": "UTF-8 JSON",
+      "canonical_bytes_required": true,
+      "trailing_bytes_rejected": true
+    },
+    "canonical_json": {
+      "object_keys": "UTF-16 code-unit ascending order",
+      "arrays": "preserve order",
+      "numbers": "integers only",
+      "safe_integer_max": 9007199254740991,
+      "negative_zero": "0",
+      "lone_surrogates": "preserve as JSON unicode escapes for digest compatibility"
+    },
+    "request_fields": ["schema", "request_id", "operation", "namespace", "lock", "expected"],
+    "request_id": "lowercase hexadecimal 16-byte identifier",
+    "operations": [
+      "READBACK_INSPECTION",
+      "ALLOCATE_RUN",
+      "START_RUN",
+      "APPEND_RECEIPT",
+      "INTERRUPT_RUN",
+      "MUTATION_ADMIT",
+      "MUTATION_DISPATCH",
+      "MUTATION_OUTCOME",
+      "MUTATION_RECONCILE",
+      "ORPHAN_RECOVERY",
+      "MIGRATE_V2_TO_V3"
+    ],
+    "mutation_operation_kinds": [
+      "GIT_REF_UPDATE",
+      "CONDITIONAL_PROVIDER_UPDATE",
+      "IDEMPOTENT_SET",
+      "APPEND_CREATE"
+    ],
+    "typed_public_objects": {
+      "allocation": ["allocation_id", "run_id", "lock", "lease"],
+      "receipt": "run-receipt-v1.schema.json",
+      "mutation_operation_target": ["resource_type", "resource_id"],
+      "mutation_outcome": "full evidence object, not a caller-supplied outcome string",
+      "readback": ["NAMESPACE", "RUN", "RECEIPT_CHAIN", "MUTATION", "RECOVERY"]
+    },
+    "response_fields": ["schema", "request_id", "ok", "result", "error"],
+    "response_result": {
+      "result_digest": "SHA256(canonicalSerialize(readback or returned result))",
+      "readback_visible_to_caller": true,
+      "error_codes_only": true
+    },
+    "error_codes": [
+      "BROKER_MALFORMED_FRAME",
+      "BROKER_MALFORMED_REQUEST",
+      "BROKER_UNSUPPORTED_SCHEMA",
+      "BROKER_UNSUPPORTED_OPERATION",
+      "BROKER_INVALID_FIELD",
+      "BROKER_LIMIT_VIOLATION",
+      "BROKER_REQUEST_CONFLICT",
+      "BROKER_BUSY",
+      "BROKER_STALE_EXPECTED_STATE",
+      "BROKER_UNVERIFIABLE_IDENTITY",
+      "BROKER_UNSUPPORTED_PLATFORM",
+      "BROKER_INTERNAL_INVARIANT"
+    ],
+    "limits": {
+      "max_nesting_depth": 16,
+      "max_object_keys": 64,
+      "max_array_items": 256,
+      "max_string_bytes": 4096,
+      "max_frame_payload_bytes": 65536
+    },
+    "unknown_fields": "rejected",
+    "protected_runtime_boundary": "offline contract and parser only; no protected broker, store, key, migration, activation, or live mutation in S1"
+  },
   "coordination_namespace": {
     "key": ["repository", "parent_issue", "child_issue"],
     "one_database_per_namespace": true,

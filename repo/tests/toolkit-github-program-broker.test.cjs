@@ -104,6 +104,16 @@ function isDigest(value) {
   return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 }
 
+function isSha(value) {
+  return typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);
+}
+
+function isTimestamp(value) {
+  if (typeof value !== 'string' || value.length !== 24) return false;
+  const time = Date.parse(value);
+  return Number.isFinite(time) && new Date(time).toISOString() === value;
+}
+
 function isIdentifier(value) {
   return typeof value === 'string'
     && value.length > 0
@@ -147,23 +157,35 @@ function validateOperation(operation) {
       if (!exactKeys(operation, ['kind', 'target']) || !['NAMESPACE', 'RUN', 'RECEIPT_CHAIN', 'MUTATION', 'RECOVERY'].includes(operation.target)) throw brokerError('BROKER_INVALID_FIELD');
       return;
     case 'ALLOCATE_RUN':
-      if (!exactKeys(operation, ['kind', 'lease_ms']) || !Number.isSafeInteger(operation.lease_ms) || operation.lease_ms < 1) throw brokerError('BROKER_INVALID_FIELD');
+      if (!exactKeys(operation, ['kind', 'authority', 'start', 'candidate', 'lease_ms'])
+        || !Number.isSafeInteger(operation.lease_ms) || operation.lease_ms < 1000 || operation.lease_ms > 86400000
+        || !exactKeys(operation.authority, ['child_comment_id', 'parent_comment_id', 'node_id', 'author_login', 'author_association', 'body_digest', 'updated_at', 'update_identity_digest', 'scope_digest'])
+        || operation.authority.author_association !== 'OWNER'
+        || !isDigest(operation.authority.body_digest) || !isDigest(operation.authority.update_identity_digest) || !isDigest(operation.authority.scope_digest)
+        || !exactKeys(operation.start, ['base_sha', 'head_sha', 'tree_sha', 'status_digest', 'clean_worktree', 'ref'])
+        || !isSha(operation.start.base_sha) || !isSha(operation.start.head_sha) || !isSha(operation.start.tree_sha)
+        || !isDigest(operation.start.status_digest) || operation.start.clean_worktree !== true
+        || !exactKeys(operation.start.ref, ['detached', 'name']) || operation.start.ref.detached !== false
+        || typeof operation.start.ref.name !== 'string' || operation.candidate !== null) throw brokerError('BROKER_INVALID_FIELD');
       return;
     case 'START_RUN':
       if (!exactKeys(operation, ['kind', 'allocation_id']) || !isIdentifier(operation.allocation_id)) throw brokerError('BROKER_INVALID_FIELD');
       return;
     case 'APPEND_RECEIPT':
-      if (!exactKeys(operation, ['kind', 'receipt']) || !operation.receipt || !exactKeys(operation.receipt, ['prior_receipt_id', 'receipt_digest', 'receipt_type'])) throw brokerError('BROKER_INVALID_FIELD');
-      if (!['RUN_STARTED', 'TRANSITION_PREVIEW', 'EXECUTOR_TERMINAL', 'G4_TERMINAL', 'RUN_INTERRUPTED'].includes(operation.receipt.receipt_type)) throw brokerError('BROKER_INVALID_FIELD');
-      digest(operation.receipt.receipt_digest);
-      if (operation.receipt.prior_receipt_id !== null) digest(operation.receipt.prior_receipt_id);
+      if (!exactKeys(operation, ['kind', 'receipt']) || !operation.receipt
+        || !exactKeys(operation.receipt, ['receipt_type', 'candidate', 'payload', 'created_at'])
+        || !['TRANSITION_PREVIEW', 'EXECUTOR_TERMINAL', 'G4_TERMINAL', 'RUN_INTERRUPTED'].includes(operation.receipt.receipt_type)
+        || operation.receipt.candidate !== null || !operation.receipt.payload
+        || typeof operation.receipt.payload.classification !== 'string'
+        || !isTimestamp(operation.receipt.created_at)) throw brokerError('BROKER_INVALID_FIELD');
       return;
     case 'INTERRUPT_RUN':
       if (!exactKeys(operation, ['kind', 'reason']) || !['REQUESTED', 'BROKER_RECOVERY', 'SHUTDOWN'].includes(operation.reason)) throw brokerError('BROKER_INVALID_FIELD');
       return;
     case 'MUTATION_ADMIT': {
       const descriptor = operation.descriptor;
-      if (!exactKeys(operation, ['descriptor', 'kind']) || !exactKeys(descriptor, ['adapter_identity_digest', 'cas_digest', 'expected_post_state_digest', 'expected_source_digest', 'operation_kind', 'retry_of_operation_id', 'safety_class', 'target_digest'])) throw brokerError('BROKER_INVALID_FIELD');
+      if (!exactKeys(operation, ['descriptor', 'kind']) || !exactKeys(descriptor, ['adapter_identity_digest', 'cas_digest', 'expected_post_state_digest', 'expected_source_digest', 'operation_kind', 'retry_of_operation_id', 'safety_class', 'target_digest', 'target_identity'])
+        || !exactKeys(descriptor.target_identity, ['resource_type', 'resource_id'])) throw brokerError('BROKER_INVALID_FIELD');
       if (!['GIT_REF_UPDATE', 'CONDITIONAL_PROVIDER_UPDATE', 'IDEMPOTENT_SET', 'APPEND_CREATE'].includes(descriptor.operation_kind)) throw brokerError('BROKER_INVALID_FIELD');
       if (!['CAS', 'IDEMPOTENT', 'APPEND_IDEMPOTENT'].includes(descriptor.safety_class)) throw brokerError('BROKER_INVALID_FIELD');
       ['target_digest', 'expected_source_digest', 'cas_digest', 'adapter_identity_digest'].forEach((key) => digest(descriptor[key]));
@@ -176,7 +198,12 @@ function validateOperation(operation) {
       if (!exactKeys(operation, ['kind', 'operation_id']) || !isIdentifier(operation.operation_id)) throw brokerError('BROKER_INVALID_FIELD');
       return;
     case 'MUTATION_OUTCOME':
-      if (!exactKeys(operation, ['kind', 'operation_id', 'outcome']) || !isIdentifier(operation.operation_id) || !['APPLIED', 'NOT_APPLIED', 'UNKNOWN'].includes(operation.outcome)) throw brokerError('BROKER_INVALID_FIELD');
+      if (!exactKeys(operation, ['kind', 'operation_id', 'evidence']) || !isIdentifier(operation.operation_id)
+        || !operation.evidence
+        || !exactKeys(operation.evidence, ['operation_id', 'logical_operation_digest', 'adapter_identity_digest', 'target_identity', 'target_digest', 'provider_operation_key', 'cas_digest', 'classification', 'observed_post_state_digest', 'rejection_digest', 'delayed_completion_excluded', 'evidence_at', 'evidence_digest'])
+        || operation.evidence.operation_id !== operation.operation_id
+        || !['APPLIED', 'NOT_APPLIED', 'UNKNOWN'].includes(operation.evidence.classification)
+        || !isTimestamp(operation.evidence.evidence_at)) throw brokerError('BROKER_INVALID_FIELD');
       return;
     case 'ORPHAN_RECOVERY':
       if (!exactKeys(operation, ['evidence_digest', 'kind', 'old_run_digest'])) throw brokerError('BROKER_INVALID_FIELD');
@@ -232,27 +259,74 @@ function expectedError(callback, code) {
 
 function operationCases() {
   const digest = 'a'.repeat(64);
+  const authority = {
+    child_comment_id: 359,
+    parent_comment_id: 240,
+    node_id: 'node-id',
+    author_login: 'owner',
+    author_association: 'OWNER',
+    body_digest: digest,
+    updated_at: '2026-09-04T12:00:00.000Z',
+    update_identity_digest: digest,
+    scope_digest: digest
+  };
+  const start = {
+    base_sha: '0'.repeat(40),
+    head_sha: '1'.repeat(40),
+    tree_sha: '2'.repeat(40),
+    status_digest: digest,
+    clean_worktree: true,
+    ref: { detached: false, name: 'refs/heads/main' }
+  };
+  const targetIdentity = { resource_type: 'git_ref', resource_id: 'refs/heads/main' };
   return [
     { kind: 'READBACK_INSPECTION', target: 'NAMESPACE' },
-    { kind: 'ALLOCATE_RUN', lease_ms: 1000 },
+    { kind: 'ALLOCATE_RUN', authority, start, candidate: null, lease_ms: 1000 },
     { kind: 'START_RUN', allocation_id: 'allocation-test' },
-    { kind: 'APPEND_RECEIPT', receipt: { receipt_type: 'RUN_STARTED', receipt_digest: digest, prior_receipt_id: null } },
+    {
+      kind: 'APPEND_RECEIPT',
+      receipt: {
+        receipt_type: 'TRANSITION_PREVIEW',
+        candidate: null,
+        payload: { classification: 'TRANSITION_PREVIEW' },
+        created_at: '2026-09-04T12:00:00.000Z'
+      }
+    },
     { kind: 'INTERRUPT_RUN', reason: 'REQUESTED' },
     {
       kind: 'MUTATION_ADMIT',
       descriptor: {
         operation_kind: 'GIT_REF_UPDATE',
         safety_class: 'CAS',
+        target_identity: targetIdentity,
         target_digest: digest,
         expected_source_digest: digest,
         cas_digest: digest,
-        expected_post_state_digest: null,
+        expected_post_state_digest: digest,
         adapter_identity_digest: digest,
         retry_of_operation_id: null
       }
     },
     { kind: 'MUTATION_DISPATCH', operation_id: 'operation-test' },
-    { kind: 'MUTATION_OUTCOME', operation_id: 'operation-test', outcome: 'APPLIED' },
+    {
+      kind: 'MUTATION_OUTCOME',
+      operation_id: 'operation-test',
+      evidence: {
+        operation_id: 'operation-test',
+        logical_operation_digest: digest,
+        adapter_identity_digest: digest,
+        target_identity: targetIdentity,
+        target_digest: digest,
+        provider_operation_key: 'gpr:operation-test',
+        cas_digest: digest,
+        classification: 'APPLIED',
+        observed_post_state_digest: digest,
+        rejection_digest: null,
+        delayed_completion_excluded: false,
+        evidence_at: '2026-09-04T12:00:00.000Z',
+        evidence_digest: digest
+      }
+    },
     { kind: 'MUTATION_RECONCILE', operation_id: 'operation-test' },
     { kind: 'ORPHAN_RECOVERY', old_run_digest: digest, evidence_digest: digest },
     { kind: 'MIGRATE_V2_TO_V3', source_schema_fingerprint: digest }

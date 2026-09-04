@@ -1,6 +1,8 @@
+use core::fmt;
+
 use hmac::{Hmac, KeyInit, Mac};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use sha2::Sha256;
 use zeroize::Zeroize;
 
@@ -8,7 +10,6 @@ use crate::canonical::{
     Digest, MAX_SAFE_INTEGER, canonical_digest, canonical_serialize, decode_hex, encode_hex,
 };
 use crate::error::{BrokerError, ErrorCode, Result};
-use crate::protocol::{CHILD_ISSUE, LOCK_ID, PARENT_ISSUE, REPOSITORY};
 
 pub const HOLDER_ATTESTATION_SCHEMA: &str = "toolkit.github-program.holder-attestation.v1";
 pub const HOLDER_ATTESTATION_ALGORITHM: &str = "HMAC-SHA-256";
@@ -23,8 +24,13 @@ pub const PROCESS_INCARNATION_DOMAIN: &str = "toolkit.github-program.process-inc
 pub const STORE_BINDING_DOMAIN: &str = "toolkit.github-program.store-binding.v1";
 pub const PATH_BINDING_DOMAIN: &str = "toolkit.github-program.path-binding.v1";
 
-#[derive(Debug)]
 pub struct HolderKey([u8; 32]);
+
+impl fmt::Debug for HolderKey {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("HolderKey([REDACTED])")
+    }
+}
 
 impl HolderKey {
     pub fn from_bytes(value: [u8; 32]) -> Self {
@@ -132,15 +138,15 @@ impl HolderAttestation {
         validate_platform(&self.platform)?;
         if self.schema != HOLDER_ATTESTATION_SCHEMA
             || self.algorithm != HOLDER_ATTESTATION_ALGORITHM
-            || self.repository != REPOSITORY
-            || self.parent_issue != PARENT_ISSUE
-            || self.child_issue != CHILD_ISSUE
-            || self.lock != LOCK_ID
             || self.fence_sequence == 0
             || self.fence_sequence > MAX_SAFE_INTEGER
         {
             return Err(BrokerError::new(ErrorCode::InvalidField));
         }
+        validate_repository(&self.repository)?;
+        validate_issue(self.parent_issue)?;
+        validate_issue(self.child_issue)?;
+        validate_identifier(&self.lock)?;
         for value in [
             &self.attestation_id,
             &self.allocation_id,
@@ -169,7 +175,8 @@ pub fn holder_tag(attestation: &HolderAttestation, key: &HolderKey) -> Result<Di
     mac.update(HOLDER_TAG_DOMAIN);
     mac.update(&payload);
     let tag = mac.finalize().into_bytes();
-    Ok(Digest::from_bytes(&tag))
+    let tag: [u8; 32] = tag.into();
+    Ok(Digest::from_bytes(tag))
 }
 
 pub fn holder_attestation_digest(attestation: &HolderAttestation) -> Result<Digest> {
@@ -208,14 +215,80 @@ pub fn verify_holder_attestation(attestation: &HolderAttestation, key: &HolderKe
     Ok(())
 }
 
-pub fn principal_digest(platform: &str, principal: &str) -> Result<Digest> {
-    validate_platform(platform)?;
-    domain_digest(PRINCIPAL_DOMAIN, &[platform, principal])
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Principal {
+    Windows { sid: String },
+    Linux { machine_id: String, uid: u64 },
 }
 
-pub fn broker_identity_digest(platform: &str, broker_principal: &str) -> Result<Digest> {
+pub fn principal_digest(platform: &str, principal: &Principal) -> Result<Digest> {
     validate_platform(platform)?;
-    domain_digest(BROKER_IDENTITY_DOMAIN, &[platform, broker_principal])
+    let principal = match (platform, principal) {
+        ("windows", Principal::Windows { sid }) => {
+            validate_windows_sid(sid)?;
+            Value::String(sid.clone())
+        }
+        ("linux", Principal::Linux { machine_id, uid }) => {
+            validate_machine_id(machine_id)?;
+            let mut value = Map::new();
+            value.insert("machine_id".to_owned(), Value::String(machine_id.clone()));
+            value.insert("uid".to_owned(), Value::String(uid.to_string()));
+            Value::Object(value)
+        }
+        _ => return Err(BrokerError::new(ErrorCode::InvalidField)),
+    };
+    canonical_digest(&Value::Array(vec![
+        Value::String(PRINCIPAL_DOMAIN.to_owned()),
+        Value::String(platform.to_owned()),
+        principal,
+    ]))
+}
+
+pub fn windows_principal_digest(sid: &str) -> Result<Digest> {
+    principal_digest(
+        "windows",
+        &Principal::Windows {
+            sid: sid.to_owned(),
+        },
+    )
+}
+
+pub fn linux_principal_digest(machine_id: &str, uid: u64) -> Result<Digest> {
+    principal_digest(
+        "linux",
+        &Principal::Linux {
+            machine_id: machine_id.to_owned(),
+            uid,
+        },
+    )
+}
+
+pub fn broker_identity_digest(
+    platform: &str,
+    executable_sha256: &Digest,
+    service_identity: &str,
+) -> Result<Digest> {
+    validate_platform(platform)?;
+    validate_identity_text(service_identity)?;
+    let mut value = Map::new();
+    value.insert(
+        "executable_sha256".to_owned(),
+        Value::String(executable_sha256.as_str().to_owned()),
+    );
+    value.insert("platform".to_owned(), Value::String(platform.to_owned()));
+    value.insert(
+        "protocol".to_owned(),
+        Value::String(crate::protocol::PROTOCOL_ID.to_owned()),
+    );
+    value.insert(
+        "schema".to_owned(),
+        Value::String(BROKER_IDENTITY_DOMAIN.to_owned()),
+    );
+    value.insert(
+        "service_identity".to_owned(),
+        Value::String(service_identity.to_owned()),
+    );
+    canonical_digest(&Value::Object(value))
 }
 
 pub fn process_identity_digest(platform: &str, process_id: u64) -> Result<Digest> {
@@ -228,18 +301,34 @@ pub fn process_identity_digest(platform: &str, process_id: u64) -> Result<Digest
 
 pub fn process_start_identity_digest(
     platform: &str,
-    process_id: u64,
+    process_id_digest: &Digest,
     process_start: u64,
 ) -> Result<Digest> {
     validate_platform(platform)?;
-    domain_digest(
-        PROCESS_START_IDENTITY_DOMAIN,
-        &[
-            platform,
-            &process_id.to_string(),
-            &process_start.to_string(),
-        ],
-    )
+    let mut value = Map::new();
+    value.insert(
+        "process_id_digest".to_owned(),
+        Value::String(process_id_digest.as_str().to_owned()),
+    );
+    value.insert("platform".to_owned(), Value::String(platform.to_owned()));
+    value.insert(
+        "process_start".to_owned(),
+        Value::String(process_start.to_string()),
+    );
+    value.insert(
+        "schema".to_owned(),
+        Value::String(PROCESS_START_IDENTITY_DOMAIN.to_owned()),
+    );
+    canonical_digest(&Value::Object(value))
+}
+
+pub fn process_start_identity_digest_from_ids(
+    platform: &str,
+    process_id: u64,
+    process_start: u64,
+) -> Result<Digest> {
+    let process_id_digest = process_identity_digest(platform, process_id)?;
+    process_start_identity_digest(platform, &process_id_digest, process_start)
 }
 
 pub fn boot_identity_digest(platform: &str, boot_id: &str) -> Result<Digest> {
@@ -254,22 +343,46 @@ pub fn pid_namespace_identity_digest(platform: &str, namespace_id: &str) -> Resu
 
 pub fn process_incarnation_digest(
     platform: &str,
-    process_id: u64,
-    process_start: u64,
-    boot_id: &str,
-    namespace_id: &str,
+    principal_digest: &Digest,
+    process_id_digest: &Digest,
+    process_start_digest: &Digest,
+    boot_id_digest: &Digest,
+    pid_namespace_digest: &Digest,
+    session_peer_scope: &str,
 ) -> Result<Digest> {
     validate_platform(platform)?;
-    domain_digest(
-        PROCESS_INCARNATION_DOMAIN,
-        &[
-            platform,
-            &process_id.to_string(),
-            &process_start.to_string(),
-            boot_id,
-            namespace_id,
-        ],
-    )
+    validate_identity_text(session_peer_scope)?;
+    let mut value = Map::new();
+    value.insert(
+        "boot_id_digest".to_owned(),
+        Value::String(boot_id_digest.as_str().to_owned()),
+    );
+    value.insert(
+        "pid_namespace_digest".to_owned(),
+        Value::String(pid_namespace_digest.as_str().to_owned()),
+    );
+    value.insert("platform".to_owned(), Value::String(platform.to_owned()));
+    value.insert(
+        "principal_digest".to_owned(),
+        Value::String(principal_digest.as_str().to_owned()),
+    );
+    value.insert(
+        "process_id_digest".to_owned(),
+        Value::String(process_id_digest.as_str().to_owned()),
+    );
+    value.insert(
+        "process_start_digest".to_owned(),
+        Value::String(process_start_digest.as_str().to_owned()),
+    );
+    value.insert(
+        "schema".to_owned(),
+        Value::String(PROCESS_INCARNATION_DOMAIN.to_owned()),
+    );
+    value.insert(
+        "session_peer_scope".to_owned(),
+        Value::String(session_peer_scope.to_owned()),
+    );
+    canonical_digest(&Value::Object(value))
 }
 
 pub fn store_binding_identity_digest(
@@ -332,6 +445,73 @@ fn validate_identifier(value: &str) -> Result<()> {
         return Err(BrokerError::new(ErrorCode::InvalidField));
     }
     Ok(())
+}
+
+fn validate_repository(value: &str) -> Result<()> {
+    let mut parts = value.split('/');
+    let owner = parts.next().unwrap_or_default();
+    let name = parts.next().unwrap_or_default();
+    if parts.next().is_some()
+        || owner.is_empty()
+        || owner.len() > 100
+        || name.is_empty()
+        || name.len() > 100
+        || !value.is_ascii()
+        || !owner.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'.' | b'-')
+        })
+        || !name.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'.' | b'-')
+        })
+    {
+        return Err(BrokerError::new(ErrorCode::InvalidField));
+    }
+    Ok(())
+}
+
+fn validate_issue(value: u64) -> Result<()> {
+    if value == 0 || value > MAX_SAFE_INTEGER {
+        Err(BrokerError::new(ErrorCode::InvalidField))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_windows_sid(value: &str) -> Result<()> {
+    let mut parts = value.split('-');
+    if parts.next() != Some("S") || parts.next() != Some("1") {
+        return Err(BrokerError::new(ErrorCode::InvalidField));
+    }
+    let parts = parts.collect::<Vec<_>>();
+    if parts.is_empty()
+        || parts.iter().any(|part| {
+            part.is_empty()
+                || (part.len() > 1 && part.starts_with('0'))
+                || !part.bytes().all(|byte| byte.is_ascii_digit())
+        })
+    {
+        return Err(BrokerError::new(ErrorCode::InvalidField));
+    }
+    Ok(())
+}
+
+fn validate_machine_id(value: &str) -> Result<()> {
+    if !crate::canonical::is_lower_hex(value, 32) {
+        Err(BrokerError::new(ErrorCode::InvalidField))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_identity_text(value: &str) -> Result<()> {
+    if value.is_empty()
+        || value.len() > 4_096
+        || value.bytes().any(|byte| matches!(byte, 0..=31 | 127))
+    {
+        Err(BrokerError::new(ErrorCode::InvalidField))
+    } else {
+        Ok(())
+    }
 }
 
 fn validate_identifier_text(value: &str) -> Result<()> {

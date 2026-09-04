@@ -1,15 +1,15 @@
 use github_program_broker::canonical::{self, Digest, ParseLimits};
 use github_program_broker::crypto::{
-    HolderAttestation, HolderKey, KeyId, boot_identity_digest, broker_identity_digest,
-    holder_attestation_digest, holder_tag, path_binding_identity_digest,
+    HolderAttestation, HolderKey, KeyId, Principal, boot_identity_digest, broker_identity_digest,
+    holder_attestation_digest, holder_tag, linux_principal_digest, path_binding_identity_digest,
     pid_namespace_identity_digest, principal_digest, process_identity_digest,
     process_incarnation_digest, process_start_identity_digest, sign_holder_attestation,
     store_binding_identity_digest, verify_holder_attestation,
 };
 use github_program_broker::error::{BrokerError, ErrorCode};
 use github_program_broker::protocol::{
-    MAX_FRAME_PAYLOAD_BYTES, MAX_NESTING_DEPTH, Request, RequestId, Response, decode_frame,
-    decode_request_frame, decode_response_frame, encode_frame, encode_request_frame,
+    MAX_FRAME_PAYLOAD_BYTES, MAX_NESTING_DEPTH, Namespace, Readback, Request, RequestId, Response,
+    decode_frame, decode_request_frame, decode_response_frame, encode_frame, encode_request_frame,
     encode_response_frame,
 };
 use serde_json::Value;
@@ -89,7 +89,7 @@ fn request_golden_digest_and_frame_are_exact() {
     );
 
     let frame = encode_request_frame(&request).expect("request frame");
-    let expected_prefix = [0x00, 0x00, 0x03, 0x90];
+    let expected_prefix = [0x00, 0x00, 0x03, 0xde];
     assert_eq!(&frame[..4], expected_prefix);
     assert_eq!(
         frame.len(),
@@ -189,22 +189,34 @@ fn holder_validation_matches_contract_identifier_and_timestamp_bounds() {
 #[test]
 fn trusted_identity_goldens_preserve_64_bit_values_as_decimal_strings() {
     let root = fixture();
+    let principal = linux_principal_digest("0123456789abcdef0123456789abcdef", 1_000).unwrap();
+    let process = process_identity_digest("linux", u64::MAX).unwrap();
+    let process_start =
+        process_start_identity_digest("linux", &process, 9_007_199_254_740_991).unwrap();
+    let boot = boot_identity_digest("linux", "boot-golden").unwrap();
+    let pid_namespace = pid_namespace_identity_digest("linux", "pidns-golden").unwrap();
+    let broker = broker_identity_digest(
+        "linux",
+        &Digest::parse(&"a".repeat(64)).unwrap(),
+        "trusted-broker",
+    )
+    .unwrap();
     for identity in root["identities"].as_array().expect("identity cases") {
         let actual = match text(identity, "name") {
-            "principal" => principal_digest("linux", "trusted-principal").unwrap(),
-            "broker" => broker_identity_digest("linux", "trusted-broker").unwrap(),
-            "process" => process_identity_digest("linux", u64::MAX).unwrap(),
-            "process-start" => {
-                process_start_identity_digest("linux", u64::MAX, 9_007_199_254_740_991).unwrap()
-            }
-            "boot" => boot_identity_digest("linux", "boot-golden").unwrap(),
-            "pid-namespace" => pid_namespace_identity_digest("linux", "pidns-golden").unwrap(),
+            "principal" => principal.clone(),
+            "broker" => broker.clone(),
+            "process" => process.clone(),
+            "process-start" => process_start.clone(),
+            "boot" => boot.clone(),
+            "pid-namespace" => pid_namespace.clone(),
             "process-incarnation" => process_incarnation_digest(
                 "linux",
-                u64::MAX,
-                9_007_199_254_740_991,
-                "boot-golden",
-                "pidns-golden",
+                &principal,
+                &process,
+                &process_start,
+                &boot,
+                &pid_namespace,
+                "session-peer-golden",
             )
             .unwrap(),
             "store-binding" => store_binding_identity_digest(
@@ -231,7 +243,16 @@ fn trusted_identity_goldens_preserve_64_bit_values_as_decimal_strings() {
         );
     }
     assert_eq!(
-        error_code(&principal_digest("freebsd", "trusted-principal").unwrap_err()),
+        error_code(
+            &principal_digest(
+                "freebsd",
+                &Principal::Linux {
+                    machine_id: "0123456789abcdef0123456789abcdef".to_owned(),
+                    uid: 1_000,
+                },
+            )
+            .unwrap_err(),
+        ),
         ErrorCode::UnsupportedPlatform.as_str()
     );
 }
@@ -242,7 +263,7 @@ fn frames_and_limits_fail_closed_without_trailing_or_invalid_data() {
     let request = text(&root["request"], "serialized").as_bytes();
     assert_eq!(
         &encode_frame(request).unwrap()[..4],
-        [0x00, 0x00, 0x03, 0x90]
+        [0x00, 0x00, 0x03, 0xde]
     );
     assert_eq!(
         &encode_frame(&vec![b'x'; MAX_FRAME_PAYLOAD_BYTES]).unwrap()[..4],
@@ -373,13 +394,83 @@ fn all_locked_operation_kinds_have_typed_exact_key_definitions() {
     let root = fixture();
     let mut base: Value = serde_json::from_str(text(&root["request"], "serialized")).unwrap();
     let digest = "a".repeat(64);
+    let target_identity = serde_json::json!({
+        "resource_type": "git_ref",
+        "resource_id": "refs/heads/main"
+    });
+    let target_digest = canonical::canonical_digest(&target_identity).unwrap();
+    let logical_operation_digest = canonical::canonical_digest(&serde_json::json!({
+        "operation_kind": "GIT_REF_UPDATE",
+        "safety_class": "CAS",
+        "target_identity": target_identity,
+        "target_digest": target_digest,
+        "expected_post_state_digest": "d".repeat(64),
+        "adapter_identity_digest": "e".repeat(64)
+    }))
+    .unwrap();
+    let mut outcome_evidence = serde_json::json!({
+        "operation_id": "operation-test",
+        "logical_operation_digest": logical_operation_digest,
+        "adapter_identity_digest": "e".repeat(64),
+        "target_identity": target_identity,
+        "target_digest": target_digest,
+        "provider_operation_key": "gpr:operation-test",
+        "cas_digest": "c".repeat(64),
+        "classification": "APPLIED",
+        "observed_post_state_digest": "d".repeat(64),
+        "rejection_digest": null,
+        "delayed_completion_excluded": false,
+        "evidence_at": "2026-09-04T12:00:00.000Z",
+        "evidence_digest": digest.clone()
+    });
+    let mut outcome_payload = outcome_evidence.clone();
+    outcome_payload
+        .as_object_mut()
+        .unwrap()
+        .remove("evidence_digest");
+    outcome_evidence["evidence_digest"] = Value::String(
+        canonical::canonical_digest(&outcome_payload)
+            .unwrap()
+            .as_str()
+            .to_owned(),
+    );
+    let authority = serde_json::json!({
+        "child_comment_id": 359,
+        "parent_comment_id": 240,
+        "node_id": "node-id",
+        "author_login": "owner",
+        "author_association": "OWNER",
+        "body_digest": "1".repeat(64),
+        "updated_at": "2026-09-04T12:00:00.000Z",
+        "update_identity_digest": "2".repeat(64),
+        "scope_digest": "3".repeat(64)
+    });
+    let start = serde_json::json!({
+        "base_sha": "0".repeat(40),
+        "head_sha": "1".repeat(40),
+        "tree_sha": "2".repeat(40),
+        "status_digest": "4".repeat(64),
+        "clean_worktree": true,
+        "ref": {"detached": false, "name": "refs/heads/main"}
+    });
     let operations = vec![
         serde_json::json!({"kind": "READBACK_INSPECTION", "target": "NAMESPACE"}),
-        serde_json::json!({"kind": "ALLOCATE_RUN", "lease_ms": 1000}),
+        serde_json::json!({
+            "kind": "ALLOCATE_RUN",
+            "authority": authority,
+            "start": start,
+            "candidate": null,
+            "lease_ms": 1000
+        }),
         serde_json::json!({"kind": "START_RUN", "allocation_id": "allocation-test"}),
         serde_json::json!({
             "kind": "APPEND_RECEIPT",
-            "receipt": {"receipt_type": "RUN_STARTED", "receipt_digest": digest.clone(), "prior_receipt_id": null}
+            "receipt": {
+                "receipt_type": "TRANSITION_PREVIEW",
+                "candidate": null,
+                "payload": {"classification": "TRANSITION_PREVIEW"},
+                "created_at": "2026-09-04T12:00:00.000Z"
+            }
         }),
         serde_json::json!({"kind": "INTERRUPT_RUN", "reason": "REQUESTED"}),
         serde_json::json!({
@@ -387,16 +478,17 @@ fn all_locked_operation_kinds_have_typed_exact_key_definitions() {
             "descriptor": {
                 "operation_kind": "GIT_REF_UPDATE",
                 "safety_class": "CAS",
-                "target_digest": "a".repeat(64),
+                "target_identity": target_identity,
+                "target_digest": target_digest,
                 "expected_source_digest": "b".repeat(64),
                 "cas_digest": "c".repeat(64),
-                "expected_post_state_digest": null,
-                "adapter_identity_digest": "d".repeat(64),
+                "expected_post_state_digest": "d".repeat(64),
+                "adapter_identity_digest": "e".repeat(64),
                 "retry_of_operation_id": null
             }
         }),
         serde_json::json!({"kind": "MUTATION_DISPATCH", "operation_id": "operation-test"}),
-        serde_json::json!({"kind": "MUTATION_OUTCOME", "operation_id": "operation-test", "outcome": "APPLIED"}),
+        serde_json::json!({"kind": "MUTATION_OUTCOME", "operation_id": "operation-test", "evidence": outcome_evidence}),
         serde_json::json!({"kind": "MUTATION_RECONCILE", "operation_id": "operation-test"}),
         serde_json::json!({"kind": "ORPHAN_RECOVERY", "old_run_digest": digest.clone(), "evidence_digest": digest.clone()}),
         serde_json::json!({"kind": "MIGRATE_V2_TO_V3", "source_schema_fingerprint": digest}),
@@ -427,5 +519,39 @@ fn response_wire_contract_exposes_only_stable_error_codes() {
         !String::from_utf8(frame[4..].to_vec())
             .unwrap()
             .contains("stack")
+    );
+}
+
+#[test]
+fn response_readback_is_typed_and_digest_bound() {
+    let namespace = Namespace {
+        repository: "weijunswj/ai-agent-toolkit".to_owned(),
+        parent_issue: 240,
+        child_issue: 359,
+    };
+    let namespace_digest = canonical::canonical_digest(&serde_json::json!({
+        "schema": "toolkit.github-program.run-receipt.v1",
+        "repository": namespace.repository,
+        "parent_issue": namespace.parent_issue,
+        "child_issue": namespace.child_issue
+    }))
+    .unwrap();
+    let response = Response::success_with_readback(
+        RequestId::parse("0123456789abcdef0123456789abcdef").unwrap(),
+        Readback::Namespace {
+            namespace,
+            namespace_digest,
+        },
+    )
+    .unwrap();
+    let frame = encode_response_frame(&response).unwrap();
+    assert_eq!(decode_response_frame(&frame).unwrap(), response);
+
+    let mut tampered = serde_json::to_value(response).unwrap();
+    tampered["result"]["readback"]["namespace_digest"] = Value::String("0".repeat(64));
+    let tampered_frame = encode_frame(&canonical::canonical_serialize(&tampered).unwrap()).unwrap();
+    assert_eq!(
+        error_code(&decode_response_frame(&tampered_frame).unwrap_err()),
+        ErrorCode::InvalidField.as_str()
     );
 }

@@ -1,7 +1,8 @@
 use core::cmp::Ordering;
 use core::fmt;
+use core::str;
 
-use serde::de::{self, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
+use serde::de::{self, Deserializer, Visitor};
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Map, Number, Value};
 use sha2::{Digest as ShaDigest, Sha256};
@@ -27,6 +28,177 @@ impl ParseLimits {
     };
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum JsonNumber {
+    Integer { negative: bool, magnitude: u64 },
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct JsonString(Vec<u16>);
+
+impl JsonString {
+    pub fn from_text(value: &str) -> Self {
+        Self(value.encode_utf16().collect())
+    }
+
+    pub fn as_units(&self) -> &[u16] {
+        &self.0
+    }
+
+    pub fn to_string(&self) -> Result<String> {
+        String::from_utf16(&self.0).map_err(|_| BrokerError::new(ErrorCode::InvalidField))
+    }
+
+    fn utf8_len(&self) -> usize {
+        let mut length = 0;
+        let mut index = 0;
+        while index < self.0.len() {
+            let unit = self.0[index];
+            if is_high_surrogate(unit)
+                && self.0.get(index + 1).copied().is_some_and(is_low_surrogate)
+            {
+                let codepoint = 0x1_0000
+                    + (u32::from(unit - 0xd800) << 10)
+                    + u32::from(self.0[index + 1] - 0xdc00);
+                length += char::from_u32(codepoint).map_or(3, char::len_utf8);
+                index += 2;
+            } else if is_surrogate(unit) {
+                length += 3;
+                index += 1;
+            } else {
+                length += char::from_u32(u32::from(unit)).map_or(3, char::len_utf8);
+                index += 1;
+            }
+        }
+        length
+    }
+}
+
+impl Ord for JsonString {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.cmp(&other.0)
+    }
+}
+
+impl PartialOrd for JsonString {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum JsonValue {
+    Null,
+    Bool(bool),
+    Number(JsonNumber),
+    String(JsonString),
+    Array(Vec<JsonValue>),
+    Object(Vec<(JsonString, JsonValue)>),
+}
+
+impl JsonValue {
+    pub fn get(&self, key: &str) -> Option<&Self> {
+        match self {
+            Self::Object(entries) => entries
+                .iter()
+                .find(|(entry_key, _)| entry_key.to_string().ok().as_deref() == Some(key))
+                .map(|(_, value)| value),
+            _ => None,
+        }
+    }
+
+    pub fn as_object(&self) -> Option<&[(JsonString, JsonValue)]> {
+        match self {
+            Self::Object(entries) => Some(entries),
+            _ => None,
+        }
+    }
+
+    pub fn as_array(&self) -> Option<&[JsonValue]> {
+        match self {
+            Self::Array(values) => Some(values),
+            _ => None,
+        }
+    }
+
+    pub fn as_string(&self) -> Option<Result<String>> {
+        match self {
+            Self::String(value) => Some(value.to_string()),
+            _ => None,
+        }
+    }
+
+    pub fn from_serde(value: &Value) -> Result<Self> {
+        match value {
+            Value::Null => Ok(Self::Null),
+            Value::Bool(value) => Ok(Self::Bool(*value)),
+            Value::Number(value) => json_number_from_serde(value),
+            Value::String(value) => Ok(Self::String(JsonString::from_text(value))),
+            Value::Array(values) => values
+                .iter()
+                .map(Self::from_serde)
+                .collect::<Result<Vec<_>>>()
+                .map(Self::Array),
+            Value::Object(values) => values
+                .iter()
+                .map(|(key, value)| Ok((JsonString::from_text(key), Self::from_serde(value)?)))
+                .collect::<Result<Vec<_>>>()
+                .map(Self::Object),
+        }
+    }
+
+    pub fn to_serde(&self) -> Result<Value> {
+        match self {
+            Self::Null => Ok(Value::Null),
+            Self::Bool(value) => Ok(Value::Bool(*value)),
+            Self::Number(JsonNumber::Integer {
+                negative,
+                magnitude,
+            }) => {
+                if *magnitude > MAX_SAFE_INTEGER {
+                    return Err(BrokerError::new(ErrorCode::InvalidField));
+                }
+                if *negative {
+                    let value = i64::try_from(*magnitude)
+                        .map_err(|_| BrokerError::new(ErrorCode::InvalidField))?;
+                    Ok(Value::Number(Number::from(-value)))
+                } else {
+                    Ok(Value::Number(Number::from(*magnitude)))
+                }
+            }
+            Self::String(value) => Ok(Value::String(value.to_string()?)),
+            Self::Array(values) => values
+                .iter()
+                .map(Self::to_serde)
+                .collect::<Result<Vec<_>>>()
+                .map(Value::Array),
+            Self::Object(entries) => {
+                let mut object = Map::new();
+                for (key, value) in entries {
+                    object.insert(key.to_string()?, value.to_serde()?);
+                }
+                Ok(Value::Object(object))
+            }
+        }
+    }
+}
+
+pub trait CanonicalJson {
+    fn write_canonical(&self, output: &mut Vec<u8>) -> Result<()>;
+}
+
+impl CanonicalJson for JsonValue {
+    fn write_canonical(&self, output: &mut Vec<u8>) -> Result<()> {
+        write_json_value(self, output)
+    }
+}
+
+impl CanonicalJson for Value {
+    fn write_canonical(&self, output: &mut Vec<u8>) -> Result<()> {
+        JsonValue::from_serde(self)?.write_canonical(output)
+    }
+}
+
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Digest(String);
 
@@ -39,8 +211,8 @@ impl Digest {
         }
     }
 
-    pub fn from_bytes(value: &[u8]) -> Self {
-        Self(encode_hex(value))
+    pub fn from_bytes(value: [u8; 32]) -> Self {
+        Self(encode_hex(&value))
     }
 
     pub fn zero() -> Self {
@@ -94,9 +266,9 @@ impl<'de> Deserialize<'de> for Digest {
     }
 }
 
-pub fn canonical_serialize(value: &Value) -> Result<Vec<u8>> {
+pub fn canonical_serialize<T: CanonicalJson + ?Sized>(value: &T) -> Result<Vec<u8>> {
     let mut output = Vec::new();
-    write_value(value, &mut output)?;
+    value.write_canonical(&mut output)?;
     Ok(output)
 }
 
@@ -106,7 +278,7 @@ pub fn canonical_serialize_value<T: Serialize>(value: &T) -> Result<Vec<u8>> {
     canonical_serialize(&value)
 }
 
-pub fn canonical_digest(value: &Value) -> Result<Digest> {
+pub fn canonical_digest<T: CanonicalJson + ?Sized>(value: &T) -> Result<Digest> {
     let bytes = canonical_serialize(value)?;
     Ok(digest_bytes(&bytes))
 }
@@ -119,47 +291,91 @@ pub fn canonical_digest_value<T: Serialize>(value: &T) -> Result<Digest> {
 pub fn digest_bytes(value: &[u8]) -> Digest {
     let mut hasher = Sha256::new();
     hasher.update(value);
-    let digest = hasher.finalize();
-    Digest::from_bytes(&digest)
+    let digest: [u8; 32] = hasher.finalize().into();
+    Digest::from_bytes(digest)
 }
 
-pub fn parse_json(bytes: &[u8], limits: ParseLimits) -> Result<Value> {
-    validate_number_lexemes(bytes)?;
-    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
-    let value = StrictValueSeed { depth: 1, limits }
-        .deserialize(&mut deserializer)
-        .map_err(classify_parse_error)?;
-    deserializer.end().map_err(classify_parse_error)?;
-    Ok(value)
+pub fn parse_json(bytes: &[u8], limits: ParseLimits) -> Result<JsonValue> {
+    JsonParser::new(bytes, limits).parse()
 }
 
-fn write_value(value: &Value, output: &mut Vec<u8>) -> Result<()> {
+fn json_number_from_serde(value: &Number) -> Result<JsonValue> {
+    if let Some(value) = value.as_i64() {
+        if value < 0 {
+            let magnitude = value.unsigned_abs();
+            if magnitude > MAX_SAFE_INTEGER {
+                return Err(BrokerError::new(ErrorCode::InvalidField));
+            }
+            return Ok(JsonValue::Number(JsonNumber::Integer {
+                negative: true,
+                magnitude,
+            }));
+        }
+        return Ok(JsonValue::Number(JsonNumber::Integer {
+            negative: false,
+            magnitude: value as u64,
+        }));
+    }
+    if let Some(value) = value.as_u64() {
+        if value > MAX_SAFE_INTEGER {
+            return Err(BrokerError::new(ErrorCode::InvalidField));
+        }
+        return Ok(JsonValue::Number(JsonNumber::Integer {
+            negative: false,
+            magnitude: value,
+        }));
+    }
+    if value
+        .as_f64()
+        .is_some_and(|value| value == 0.0 && value.is_sign_negative())
+    {
+        return Ok(JsonValue::Number(JsonNumber::Integer {
+            negative: true,
+            magnitude: 0,
+        }));
+    }
+    Err(BrokerError::new(ErrorCode::InvalidField))
+}
+
+fn write_json_value(value: &JsonValue, output: &mut Vec<u8>) -> Result<()> {
     match value {
-        Value::Null => output.extend_from_slice(b"null"),
-        Value::Bool(value) => output.extend_from_slice(if *value { b"true" } else { b"false" }),
-        Value::String(value) => write_string(value, output),
-        Value::Number(value) => write_number(value, output)?,
-        Value::Array(values) => {
+        JsonValue::Null => output.extend_from_slice(b"null"),
+        JsonValue::Bool(value) => output.extend_from_slice(if *value { b"true" } else { b"false" }),
+        JsonValue::String(value) => write_string(value.as_units(), output),
+        JsonValue::Number(JsonNumber::Integer {
+            negative,
+            magnitude,
+        }) => {
+            if *magnitude > MAX_SAFE_INTEGER {
+                return Err(BrokerError::new(ErrorCode::InvalidField));
+            }
+            if *negative && *magnitude != 0 {
+                output.push(b'-');
+            }
+            output.extend_from_slice(magnitude.to_string().as_bytes());
+        }
+        JsonValue::Array(values) => {
             output.push(b'[');
             for (index, value) in values.iter().enumerate() {
                 if index != 0 {
                     output.push(b',');
                 }
-                write_value(value, output)?;
+                write_json_value(value, output)?;
             }
             output.push(b']');
         }
-        Value::Object(values) => {
-            let mut entries: Vec<(&String, &Value)> = values.iter().collect();
-            entries.sort_by(|left, right| utf16_key_cmp(left.0, right.0));
+        JsonValue::Object(values) => {
+            let mut entries: Vec<(&JsonString, &JsonValue)> =
+                values.iter().map(|(k, v)| (k, v)).collect();
+            entries.sort_by(|left, right| left.0.cmp(right.0));
             output.push(b'{');
             for (index, (key, value)) in entries.into_iter().enumerate() {
                 if index != 0 {
                     output.push(b',');
                 }
-                write_string(key, output);
+                write_string(key.as_units(), output);
                 output.push(b':');
-                write_value(value, output)?;
+                write_json_value(value, output)?;
             }
             output.push(b'}');
         }
@@ -167,53 +383,49 @@ fn write_value(value: &Value, output: &mut Vec<u8>) -> Result<()> {
     Ok(())
 }
 
-fn write_number(value: &Number, output: &mut Vec<u8>) -> Result<()> {
-    if let Some(value) = value.as_f64()
-        && value == 0.0
-        && value.is_sign_negative()
-    {
-        output.push(b'0');
-        return Ok(());
-    }
-    if let Some(value) = value.as_i64() {
-        if value.unsigned_abs() > MAX_SAFE_INTEGER {
-            return Err(BrokerError::new(ErrorCode::InvalidField));
-        }
-        output.extend_from_slice(value.to_string().as_bytes());
-        return Ok(());
-    }
-    if let Some(value) = value.as_u64() {
-        if value > MAX_SAFE_INTEGER {
-            return Err(BrokerError::new(ErrorCode::InvalidField));
-        }
-        output.extend_from_slice(value.to_string().as_bytes());
-        return Ok(());
-    }
-    Err(BrokerError::new(ErrorCode::InvalidField))
-}
-
-fn write_string(value: &str, output: &mut Vec<u8>) {
+fn write_string(value: &[u16], output: &mut Vec<u8>) {
     output.push(b'"');
-    for character in value.chars() {
+    let mut index = 0;
+    while index < value.len() {
+        let character = value[index];
         match character {
-            '"' => output.extend_from_slice(b"\\\""),
-            '\\' => output.extend_from_slice(b"\\\\"),
-            '\u{0008}' => output.extend_from_slice(b"\\b"),
-            '\u{000c}' => output.extend_from_slice(b"\\f"),
-            '\n' => output.extend_from_slice(b"\\n"),
-            '\r' => output.extend_from_slice(b"\\r"),
-            '\t' => output.extend_from_slice(b"\\t"),
-            '\u{0000}'..='\u{001f}' => write_unicode_escape(character as u32, output),
-            _ => {
-                let mut buffer = [0_u8; 4];
-                output.extend_from_slice(character.encode_utf8(&mut buffer).as_bytes());
+            0x22 => output.extend_from_slice(b"\\\""),
+            0x5c => output.extend_from_slice(b"\\\\"),
+            0x0008 => output.extend_from_slice(b"\\b"),
+            0x000c => output.extend_from_slice(b"\\f"),
+            0x000a => output.extend_from_slice(b"\\n"),
+            0x000d => output.extend_from_slice(b"\\r"),
+            0x0009 => output.extend_from_slice(b"\\t"),
+            0x0000..=0x001f => write_unicode_escape(character, output),
+            unit if is_high_surrogate(unit)
+                && value.get(index + 1).copied().is_some_and(is_low_surrogate) =>
+            {
+                let low = value[index + 1];
+                let codepoint =
+                    0x1_0000 + (u32::from(character - 0xd800) << 10) + u32::from(low - 0xdc00);
+                if let Some(scalar) = char::from_u32(codepoint) {
+                    let mut buffer = [0_u8; 4];
+                    output.extend_from_slice(scalar.encode_utf8(&mut buffer).as_bytes());
+                } else {
+                    write_unicode_escape(character, output);
+                    write_unicode_escape(low, output);
+                }
+                index += 1;
+            }
+            unit if is_surrogate(unit) => write_unicode_escape(character, output),
+            unit => {
+                if let Some(scalar) = char::from_u32(u32::from(unit)) {
+                    let mut buffer = [0_u8; 4];
+                    output.extend_from_slice(scalar.encode_utf8(&mut buffer).as_bytes());
+                }
             }
         }
+        index += 1;
     }
     output.push(b'"');
 }
 
-fn write_unicode_escape(value: u32, output: &mut Vec<u8>) {
+fn write_unicode_escape(value: u16, output: &mut Vec<u8>) {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     output.extend_from_slice(b"\\u");
     output.push(HEX[((value >> 12) & 0x0f) as usize]);
@@ -222,237 +434,330 @@ fn write_unicode_escape(value: u32, output: &mut Vec<u8>) {
     output.push(HEX[(value & 0x0f) as usize]);
 }
 
-fn utf16_key_cmp(left: &str, right: &str) -> Ordering {
-    left.encode_utf16().cmp(right.encode_utf16())
+fn is_high_surrogate(value: u16) -> bool {
+    (0xd800..=0xdbff).contains(&value)
 }
 
-fn classify_parse_error(error: serde_json::Error) -> BrokerError {
-    let message = error.to_string();
-    if message.contains("BROKER_LIMIT_VIOLATION") {
-        BrokerError::new(ErrorCode::LimitViolation)
-    } else if message.contains("BROKER_INVALID_FIELD") {
-        BrokerError::new(ErrorCode::InvalidField)
-    } else {
-        BrokerError::new(ErrorCode::MalformedRequest)
+fn is_low_surrogate(value: u16) -> bool {
+    (0xdc00..=0xdfff).contains(&value)
+}
+
+fn is_surrogate(value: u16) -> bool {
+    is_high_surrogate(value) || is_low_surrogate(value)
+}
+
+struct JsonParser<'a> {
+    bytes: &'a [u8],
+    index: usize,
+    limits: ParseLimits,
+}
+
+impl<'a> JsonParser<'a> {
+    fn new(bytes: &'a [u8], limits: ParseLimits) -> Self {
+        Self {
+            bytes,
+            index: 0,
+            limits,
+        }
     }
-}
 
-fn validate_number_lexemes(bytes: &[u8]) -> Result<()> {
-    let mut index = 0;
-    let mut in_string = false;
-    let mut escaped = false;
-    while index < bytes.len() {
-        let byte = bytes[index];
-        if in_string {
-            if escaped {
-                escaped = false;
-            } else if byte == b'\\' {
-                escaped = true;
-            } else if byte == b'"' {
-                in_string = false;
-            }
-            index += 1;
-            continue;
+    fn parse(mut self) -> Result<JsonValue> {
+        str::from_utf8(self.bytes).map_err(|_| BrokerError::new(ErrorCode::MalformedRequest))?;
+        let value = self.parse_value(1)?;
+        self.skip_whitespace();
+        if self.index != self.bytes.len() {
+            return Err(BrokerError::new(ErrorCode::MalformedRequest));
         }
-        if byte == b'"' {
-            in_string = true;
-            index += 1;
-            continue;
-        }
-        if byte == b'-' || byte.is_ascii_digit() {
-            let start = index;
-            index += 1;
-            while index < bytes.len()
-                && !matches!(
-                    bytes[index],
-                    b',' | b']' | b'}' | b' ' | b'\t' | b'\r' | b'\n'
-                )
-            {
-                index += 1;
+        Ok(value)
+    }
+
+    fn parse_value(&mut self, depth: usize) -> Result<JsonValue> {
+        self.skip_whitespace();
+        match self.bytes.get(self.index).copied() {
+            Some(b'n') => {
+                self.literal(b"null")?;
+                Ok(JsonValue::Null)
             }
-            let token = &bytes[start..index];
-            if token.iter().any(|byte| matches!(*byte, b'.' | b'e' | b'E')) {
+            Some(b't') => {
+                self.literal(b"true")?;
+                Ok(JsonValue::Bool(true))
+            }
+            Some(b'f') => {
+                self.literal(b"false")?;
+                Ok(JsonValue::Bool(false))
+            }
+            Some(b'"') => self.parse_string().map(JsonValue::String),
+            Some(b'[') => self.parse_array(depth),
+            Some(b'{') => self.parse_object(depth),
+            Some(b'-') | Some(b'0'..=b'9') => self.parse_number(),
+            _ => Err(BrokerError::new(ErrorCode::MalformedRequest)),
+        }
+    }
+
+    fn parse_array(&mut self, depth: usize) -> Result<JsonValue> {
+        self.check_depth(depth)?;
+        self.index += 1;
+        self.skip_whitespace();
+        let mut values = Vec::new();
+        if self.consume_if(b']') {
+            return Ok(JsonValue::Array(values));
+        }
+        loop {
+            if values.len() >= self.limits.max_array_items {
+                return Err(BrokerError::new(ErrorCode::LimitViolation));
+            }
+            values.push(self.parse_value(depth + 1)?);
+            self.skip_whitespace();
+            if self.consume_if(b']') {
+                return Ok(JsonValue::Array(values));
+            }
+            if !self.consume_if(b',') {
+                return Err(BrokerError::new(ErrorCode::MalformedRequest));
+            }
+            self.skip_whitespace();
+        }
+    }
+
+    fn parse_object(&mut self, depth: usize) -> Result<JsonValue> {
+        self.check_depth(depth)?;
+        self.index += 1;
+        self.skip_whitespace();
+        let mut values = Vec::new();
+        if self.consume_if(b'}') {
+            return Ok(JsonValue::Object(values));
+        }
+        loop {
+            if values.len() >= self.limits.max_object_keys {
+                return Err(BrokerError::new(ErrorCode::LimitViolation));
+            }
+            if self.bytes.get(self.index) != Some(&b'"') {
+                return Err(BrokerError::new(ErrorCode::MalformedRequest));
+            }
+            let key = self.parse_string()?;
+            if values.iter().any(|(existing, _)| existing == &key) {
                 return Err(BrokerError::new(ErrorCode::InvalidField));
             }
-            let digits = token.strip_prefix(b"-").unwrap_or(token);
-            if !digits.is_empty() && digits.iter().all(|digit| digit.is_ascii_digit()) {
-                let mut magnitude = 0_u64;
-                for digit in digits {
-                    magnitude = magnitude
-                        .checked_mul(10)
-                        .and_then(|value| value.checked_add(u64::from(*digit - b'0')))
-                        .ok_or_else(|| BrokerError::new(ErrorCode::InvalidField))?;
+            self.skip_whitespace();
+            if !self.consume_if(b':') {
+                return Err(BrokerError::new(ErrorCode::MalformedRequest));
+            }
+            let value = self.parse_value(depth + 1)?;
+            values.push((key, value));
+            self.skip_whitespace();
+            if self.consume_if(b'}') {
+                return Ok(JsonValue::Object(values));
+            }
+            if !self.consume_if(b',') {
+                return Err(BrokerError::new(ErrorCode::MalformedRequest));
+            }
+            self.skip_whitespace();
+        }
+    }
+
+    fn parse_string(&mut self) -> Result<JsonString> {
+        if !self.consume_if(b'"') {
+            return Err(BrokerError::new(ErrorCode::MalformedRequest));
+        }
+        let mut units = Vec::new();
+        loop {
+            let byte = self
+                .bytes
+                .get(self.index)
+                .copied()
+                .ok_or_else(|| BrokerError::new(ErrorCode::MalformedRequest))?;
+            match byte {
+                b'"' => {
+                    self.index += 1;
+                    let value = JsonString(units);
+                    if value.utf8_len() > self.limits.max_string_bytes {
+                        return Err(BrokerError::new(ErrorCode::LimitViolation));
+                    }
+                    return Ok(value);
                 }
-                if magnitude > MAX_SAFE_INTEGER {
-                    return Err(BrokerError::new(ErrorCode::InvalidField));
+                b'\\' => {
+                    self.index += 1;
+                    self.parse_escape(&mut units)?;
+                }
+                0x00..=0x1f => return Err(BrokerError::new(ErrorCode::MalformedRequest)),
+                _ => {
+                    let start = self.index;
+                    while let Some(byte) = self.bytes.get(self.index).copied() {
+                        if byte == b'"' || byte == b'\\' || byte <= 0x1f {
+                            break;
+                        }
+                        self.index += 1;
+                    }
+                    let text = str::from_utf8(&self.bytes[start..self.index])
+                        .map_err(|_| BrokerError::new(ErrorCode::MalformedRequest))?;
+                    units.extend(text.encode_utf16());
                 }
             }
-            continue;
         }
-        index += 1;
-    }
-    Ok(())
-}
-
-struct StrictValueSeed {
-    depth: usize,
-    limits: ParseLimits,
-}
-
-impl<'de> DeserializeSeed<'de> for StrictValueSeed {
-    type Value = Value;
-
-    fn deserialize<D>(self, deserializer: D) -> core::result::Result<Self::Value, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_any(StrictValueVisitor {
-            depth: self.depth,
-            limits: self.limits,
-        })
-    }
-}
-
-struct StrictValueVisitor {
-    depth: usize,
-    limits: ParseLimits,
-}
-
-impl<'de> Visitor<'de> for StrictValueVisitor {
-    type Value = Value;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("a strict JSON value")
     }
 
-    fn visit_unit<E>(self) -> core::result::Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        Ok(Value::Null)
-    }
-
-    fn visit_bool<E>(self, value: bool) -> core::result::Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        Ok(Value::Bool(value))
-    }
-
-    fn visit_i64<E>(self, value: i64) -> core::result::Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        if value.unsigned_abs() > MAX_SAFE_INTEGER {
-            return Err(E::custom("BROKER_INVALID_FIELD unsafe integer"));
-        }
-        Ok(Value::Number(Number::from(value)))
-    }
-
-    fn visit_u64<E>(self, value: u64) -> core::result::Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        if value > MAX_SAFE_INTEGER {
-            return Err(E::custom("BROKER_INVALID_FIELD unsafe integer"));
-        }
-        Ok(Value::Number(Number::from(value)))
-    }
-
-    fn visit_f64<E>(self, value: f64) -> core::result::Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        if value == 0.0 && value.is_sign_negative() {
-            return Number::from_f64(value)
-                .map(Value::Number)
-                .ok_or_else(|| E::custom("BROKER_INVALID_FIELD floating-point number"));
-        }
-        Err(E::custom(
-            "BROKER_INVALID_FIELD floating-point or exponent number",
-        ))
-    }
-
-    fn visit_str<E>(self, value: &str) -> core::result::Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        self.visit_string_value(value.to_owned())
-    }
-
-    fn visit_string<E>(self, value: String) -> core::result::Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        self.visit_string_value(value)
-    }
-
-    fn visit_seq<A>(self, mut access: A) -> core::result::Result<Self::Value, A::Error>
-    where
-        A: SeqAccess<'de>,
-    {
-        self.check_depth()?;
-        let mut values = Vec::new();
-        while let Some(value) = access.next_element_seed(StrictValueSeed {
-            depth: self.depth + 1,
-            limits: self.limits,
-        })? {
-            if values.len() >= self.limits.max_array_items {
-                return Err(de::Error::custom("BROKER_LIMIT_VIOLATION array items"));
+    fn parse_escape(&mut self, units: &mut Vec<u16>) -> Result<()> {
+        let escape = self
+            .bytes
+            .get(self.index)
+            .copied()
+            .ok_or_else(|| BrokerError::new(ErrorCode::MalformedRequest))?;
+        self.index += 1;
+        match escape {
+            b'"' => units.push(0x22),
+            b'\\' => units.push(0x5c),
+            b'/' => units.push(0x2f),
+            b'b' => units.push(0x0008),
+            b'f' => units.push(0x000c),
+            b'n' => units.push(0x000a),
+            b'r' => units.push(0x000d),
+            b't' => units.push(0x0009),
+            b'u' => {
+                let high = self.parse_hex_u16()?;
+                let saved = self.index;
+                if is_high_surrogate(high)
+                    && self.bytes.get(self.index) == Some(&b'\\')
+                    && self.bytes.get(self.index + 1) == Some(&b'u')
+                {
+                    self.index += 2;
+                    let low = self.parse_hex_u16()?;
+                    if is_low_surrogate(low) {
+                        units.push(high);
+                        units.push(low);
+                    } else {
+                        self.index = saved;
+                        units.push(high);
+                    }
+                } else {
+                    units.push(high);
+                }
             }
-            values.push(value);
+            _ => return Err(BrokerError::new(ErrorCode::MalformedRequest)),
         }
-        Ok(Value::Array(values))
+        Ok(())
     }
 
-    fn visit_map<A>(self, mut access: A) -> core::result::Result<Self::Value, A::Error>
-    where
-        A: MapAccess<'de>,
-    {
-        self.check_depth()?;
-        let mut values = Map::new();
-        while let Some(key) = access.next_key::<String>()? {
-            if values.len() >= self.limits.max_object_keys {
-                return Err(de::Error::custom("BROKER_LIMIT_VIOLATION object keys"));
-            }
-            if key.len() > self.limits.max_string_bytes {
-                return Err(de::Error::custom("BROKER_LIMIT_VIOLATION string bytes"));
-            }
-            if values.contains_key(&key) {
-                return Err(de::Error::custom(
-                    "BROKER_INVALID_FIELD duplicate object key",
-                ));
-            }
-            let value = access.next_value_seed(StrictValueSeed {
-                depth: self.depth + 1,
-                limits: self.limits,
-            })?;
-            values.insert(key, value);
+    fn parse_hex_u16(&mut self) -> Result<u16> {
+        let end = self
+            .index
+            .checked_add(4)
+            .ok_or_else(|| BrokerError::new(ErrorCode::MalformedRequest))?;
+        let bytes = self
+            .bytes
+            .get(self.index..end)
+            .ok_or_else(|| BrokerError::new(ErrorCode::MalformedRequest))?;
+        self.index = end;
+        let mut value = 0_u16;
+        for byte in bytes {
+            value = value
+                .checked_mul(16)
+                .and_then(|value| hex_value(*byte).map(|digit| value + u16::from(digit)))
+                .ok_or_else(|| BrokerError::new(ErrorCode::MalformedRequest))?;
         }
-        Ok(Value::Object(values))
+        Ok(value)
     }
-}
 
-impl StrictValueVisitor {
-    fn check_depth<E>(&self) -> core::result::Result<(), E>
-    where
-        E: de::Error,
-    {
-        if self.depth > self.limits.max_depth {
-            Err(E::custom("BROKER_LIMIT_VIOLATION nesting depth"))
+    fn parse_number(&mut self) -> Result<JsonValue> {
+        let start = self.index;
+        let negative = self.consume_if(b'-');
+        let first = self
+            .bytes
+            .get(self.index)
+            .copied()
+            .ok_or_else(|| BrokerError::new(ErrorCode::MalformedRequest))?;
+        if first == b'0' {
+            self.index += 1;
+            if self.bytes.get(self.index).is_some_and(u8::is_ascii_digit) {
+                return Err(BrokerError::new(ErrorCode::MalformedRequest));
+            }
+        } else if matches!(first, b'1'..=b'9') {
+            self.index += 1;
+            while self.bytes.get(self.index).is_some_and(u8::is_ascii_digit) {
+                self.index += 1;
+            }
+        } else {
+            return Err(BrokerError::new(ErrorCode::MalformedRequest));
+        }
+        if self
+            .bytes
+            .get(self.index)
+            .is_some_and(|byte| matches!(byte, b'.' | b'e' | b'E'))
+        {
+            return Err(BrokerError::new(ErrorCode::InvalidField));
+        }
+        if self
+            .bytes
+            .get(self.index)
+            .is_some_and(|byte| !matches!(byte, b',' | b']' | b'}' | b' ' | b'\t' | b'\r' | b'\n'))
+        {
+            return Err(BrokerError::new(ErrorCode::MalformedRequest));
+        }
+        let digits = if negative {
+            &self.bytes[start + 1..self.index]
+        } else {
+            &self.bytes[start..self.index]
+        };
+        let mut magnitude = 0_u64;
+        for digit in digits {
+            magnitude = magnitude
+                .checked_mul(10)
+                .and_then(|value| value.checked_add(u64::from(*digit - b'0')))
+                .ok_or_else(|| BrokerError::new(ErrorCode::InvalidField))?;
+        }
+        if magnitude > MAX_SAFE_INTEGER {
+            return Err(BrokerError::new(ErrorCode::InvalidField));
+        }
+        Ok(JsonValue::Number(JsonNumber::Integer {
+            negative,
+            magnitude,
+        }))
+    }
+
+    fn literal(&mut self, literal: &[u8]) -> Result<()> {
+        let end = self
+            .index
+            .checked_add(literal.len())
+            .ok_or_else(|| BrokerError::new(ErrorCode::MalformedRequest))?;
+        if self.bytes.get(self.index..end) != Some(literal) {
+            return Err(BrokerError::new(ErrorCode::MalformedRequest));
+        }
+        self.index = end;
+        Ok(())
+    }
+
+    fn check_depth(&self, depth: usize) -> Result<()> {
+        if depth > self.limits.max_depth {
+            Err(BrokerError::new(ErrorCode::LimitViolation))
         } else {
             Ok(())
         }
     }
 
-    fn visit_string_value<E>(self, value: String) -> core::result::Result<Value, E>
-    where
-        E: de::Error,
-    {
-        if value.len() > self.limits.max_string_bytes {
-            return Err(E::custom("BROKER_LIMIT_VIOLATION string bytes"));
+    fn skip_whitespace(&mut self) {
+        while self
+            .bytes
+            .get(self.index)
+            .is_some_and(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
+        {
+            self.index += 1;
         }
-        Ok(Value::String(value))
+    }
+
+    fn consume_if(&mut self, expected: u8) -> bool {
+        if self.bytes.get(self.index) == Some(&expected) {
+            self.index += 1;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+fn hex_value(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
     }
 }
 
@@ -480,18 +785,9 @@ pub(crate) fn decode_hex(value: &str) -> Option<Vec<u8>> {
     let mut output = Vec::with_capacity(value.len() / 2);
     let bytes = value.as_bytes();
     for pair in bytes.as_chunks::<2>().0 {
-        let high = hex_nibble(pair[0])?;
-        let low = hex_nibble(pair[1])?;
+        let high = hex_value(pair[0])?;
+        let low = hex_value(pair[1])?;
         output.push((high << 4) | low);
     }
     Some(output)
-}
-
-fn hex_nibble(value: u8) -> Option<u8> {
-    match value {
-        b'0'..=b'9' => Some(value - b'0'),
-        b'a'..=b'f' => Some(value - b'a' + 10),
-        b'A'..=b'F' => Some(value - b'A' + 10),
-        _ => None,
-    }
 }
