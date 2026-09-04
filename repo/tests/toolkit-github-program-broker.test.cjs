@@ -395,6 +395,13 @@ test('identity constructors have fixed domain-separated and lossless decimal vec
     assert.equal(canonicalSerialize(item.value), item.serialized, item.name);
     assert.equal(digestValue(item.value), item.digest, item.name);
   }
+  const process = vectors.identities.find((item) => item.name === 'process');
+  const processStart = vectors.identities.find((item) => item.name === 'process-start');
+  const processIncarnation = vectors.identities.find((item) => item.name === 'process-incarnation');
+  assert.equal(process.value[0], 'toolkit.github-program.process-id.v1');
+  assert.equal(process.digest, '2e030748ea96f84cc538a58096389f2d7b5f80adbd5d39deb663d886a0d470b9');
+  assert.equal(processStart.digest, '6c0e43e42428bb038e64e8feab6fa3000f6eb9b818cf483a29099c98578f0edf');
+  assert.equal(processIncarnation.digest, 'ecaff574d2bab473dfb180e513ec6e072c233c0e16867398ec5616bfb5719ad7');
   assert.notEqual(vectors.identities.find((item) => item.name === 'store-binding').digest, vectors.identities.find((item) => item.name === 'path-binding').digest);
 });
 

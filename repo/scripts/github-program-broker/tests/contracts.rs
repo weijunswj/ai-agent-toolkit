@@ -1,10 +1,10 @@
 use github_program_broker::canonical::{self, Digest, ParseLimits};
 use github_program_broker::crypto::{
-    HolderAttestation, HolderKey, KeyId, Principal, boot_identity_digest, broker_identity_digest,
-    holder_attestation_digest, holder_tag, linux_principal_digest, path_binding_identity_digest,
-    pid_namespace_identity_digest, principal_digest, process_identity_digest,
-    process_incarnation_digest, process_start_identity_digest, sign_holder_attestation,
-    store_binding_identity_digest, verify_holder_attestation,
+    HolderAttestation, HolderKey, KeyId, PROCESS_IDENTITY_DOMAIN, Principal, boot_identity_digest,
+    broker_identity_digest, holder_attestation_digest, holder_tag, linux_principal_digest,
+    path_binding_identity_digest, pid_namespace_identity_digest, principal_digest,
+    process_identity_digest, process_incarnation_digest, process_start_identity_digest,
+    sign_holder_attestation, store_binding_identity_digest, verify_holder_attestation,
 };
 use github_program_broker::error::{BrokerError, ErrorCode};
 use github_program_broker::protocol::{
@@ -15,6 +15,8 @@ use github_program_broker::protocol::{
 use serde_json::Value;
 
 const VECTORS: &str = include_str!("fixtures/source-slice-1-vectors.json");
+const RECEIPT_POLICY: &str =
+    include_str!("../../../contracts/github-program-receipt/github-program-receipt-policy.json");
 
 fn fixture() -> Value {
     serde_json::from_str(VECTORS).expect("fixed fixture must be valid JSON")
@@ -201,6 +203,28 @@ fn trusted_identity_goldens_preserve_64_bit_values_as_decimal_strings() {
         "trusted-broker",
     )
     .unwrap();
+    assert_eq!(
+        process.as_str(),
+        "2e030748ea96f84cc538a58096389f2d7b5f80adbd5d39deb663d886a0d470b9"
+    );
+    assert_eq!(
+        process_start.as_str(),
+        "6c0e43e42428bb038e64e8feab6fa3000f6eb9b818cf483a29099c98578f0edf"
+    );
+    let process_incarnation = process_incarnation_digest(
+        "linux",
+        &principal,
+        &process,
+        &process_start,
+        &boot,
+        &pid_namespace,
+        "session-peer-golden",
+    )
+    .unwrap();
+    assert_eq!(
+        process_incarnation.as_str(),
+        "ecaff574d2bab473dfb180e513ec6e072c233c0e16867398ec5616bfb5719ad7"
+    );
     for identity in root["identities"].as_array().expect("identity cases") {
         let actual = match text(identity, "name") {
             "principal" => principal.clone(),
@@ -209,16 +233,7 @@ fn trusted_identity_goldens_preserve_64_bit_values_as_decimal_strings() {
             "process-start" => process_start.clone(),
             "boot" => boot.clone(),
             "pid-namespace" => pid_namespace.clone(),
-            "process-incarnation" => process_incarnation_digest(
-                "linux",
-                &principal,
-                &process,
-                &process_start,
-                &boot,
-                &pid_namespace,
-                "session-peer-golden",
-            )
-            .unwrap(),
+            "process-incarnation" => process_incarnation.clone(),
             "store-binding" => store_binding_identity_digest(
                 &Digest::parse(&"a".repeat(64)).unwrap(),
                 &Digest::parse(&"b".repeat(64)).unwrap(),
@@ -254,6 +269,19 @@ fn trusted_identity_goldens_preserve_64_bit_values_as_decimal_strings() {
             .unwrap_err(),
         ),
         ErrorCode::UnsupportedPlatform.as_str()
+    );
+}
+
+#[test]
+fn process_id_domain_is_bound_to_the_canonical_receipt_policy() {
+    let policy: Value = serde_json::from_str(RECEIPT_POLICY).expect("receipt policy JSON");
+    assert_eq!(
+        PROCESS_IDENTITY_DOMAIN,
+        "toolkit.github-program.process-id.v1"
+    );
+    assert_eq!(
+        policy["sqlite"]["v3_dormant_contract"]["holder_attestation"]["process_id_digest"],
+        "SHA256(canonicalSerialize([\"toolkit.github-program.process-id.v1\", platform, pid_decimal_string]))"
     );
 }
 

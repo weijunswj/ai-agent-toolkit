@@ -93,15 +93,15 @@
     },
     {
       "name": "process",
-      "value": ["toolkit.github-program.process-identity.v1", "linux", "18446744073709551615"],
-      "serialized": "[\"toolkit.github-program.process-identity.v1\",\"linux\",\"18446744073709551615\"]",
-      "digest": "8ca43a5e9e1f1690a3800565eb389727f11e54516fcd6a7d160d740bbf293a70"
+      "value": ["toolkit.github-program.process-id.v1", "linux", "18446744073709551615"],
+      "serialized": "[\"toolkit.github-program.process-id.v1\",\"linux\",\"18446744073709551615\"]",
+      "digest": "2e030748ea96f84cc538a58096389f2d7b5f80adbd5d39deb663d886a0d470b9"
     },
     {
       "name": "process-start",
-      "value": {"process_id_digest": "8ca43a5e9e1f1690a3800565eb389727f11e54516fcd6a7d160d740bbf293a70", "platform": "linux", "process_start": "9007199254740991", "schema": "toolkit.github-program.process-start-identity.v1"},
-      "serialized": "{\"platform\":\"linux\",\"process_id_digest\":\"8ca43a5e9e1f1690a3800565eb389727f11e54516fcd6a7d160d740bbf293a70\",\"process_start\":\"9007199254740991\",\"schema\":\"toolkit.github-program.process-start-identity.v1\"}",
-      "digest": "3472632b38dd8d51586b7a1921755af5d83570e84167917adeb0ba4f218e8ffe"
+      "value": {"process_id_digest": "2e030748ea96f84cc538a58096389f2d7b5f80adbd5d39deb663d886a0d470b9", "platform": "linux", "process_start": "9007199254740991", "schema": "toolkit.github-program.process-start-identity.v1"},
+      "serialized": "{\"platform\":\"linux\",\"process_id_digest\":\"2e030748ea96f84cc538a58096389f2d7b5f80adbd5d39deb663d886a0d470b9\",\"process_start\":\"9007199254740991\",\"schema\":\"toolkit.github-program.process-start-identity.v1\"}",
+      "digest": "6c0e43e42428bb038e64e8feab6fa3000f6eb9b818cf483a29099c98578f0edf"
     },
     {
       "name": "boot",
@@ -117,9 +117,9 @@
     },
     {
       "name": "process-incarnation",
-      "value": {"boot_id_digest": "be1cbe400bb194c497c5ada2ba940cffe1d66f266b078dd9c0c84ca4bc62b8c1", "pid_namespace_digest": "77e7931ae5a89077fdf3cb3f2b98e372dcb83516b9e17f8de3291952704b14d7", "platform": "linux", "principal_digest": "48531b37195f82bb51b7da0009024b1a443a0db75b881c4cd1a9e93fe6bbccab", "process_id_digest": "8ca43a5e9e1f1690a3800565eb389727f11e54516fcd6a7d160d740bbf293a70", "process_start_digest": "3472632b38dd8d51586b7a1921755af5d83570e84167917adeb0ba4f218e8ffe", "schema": "toolkit.github-program.process-incarnation.v1", "session_peer_scope": "session-peer-golden"},
-      "serialized": "{\"boot_id_digest\":\"be1cbe400bb194c497c5ada2ba940cffe1d66f266b078dd9c0c84ca4bc62b8c1\",\"pid_namespace_digest\":\"77e7931ae5a89077fdf3cb3f2b98e372dcb83516b9e17f8de3291952704b14d7\",\"platform\":\"linux\",\"principal_digest\":\"48531b37195f82bb51b7da0009024b1a443a0db75b881c4cd1a9e93fe6bbccab\",\"process_id_digest\":\"8ca43a5e9e1f1690a3800565eb389727f11e54516fcd6a7d160d740bbf293a70\",\"process_start_digest\":\"3472632b38dd8d51586b7a1921755af5d83570e84167917adeb0ba4f218e8ffe\",\"schema\":\"toolkit.github-program.process-incarnation.v1\",\"session_peer_scope\":\"session-peer-golden\"}",
-      "digest": "6949b265026f92dd54d53e5ba479e21cfd94f8f989a15d645a095b4637371fd5"
+      "value": {"boot_id_digest": "be1cbe400bb194c497c5ada2ba940cffe1d66f266b078dd9c0c84ca4bc62b8c1", "pid_namespace_digest": "77e7931ae5a89077fdf3cb3f2b98e372dcb83516b9e17f8de3291952704b14d7", "platform": "linux", "principal_digest": "48531b37195f82bb51b7da0009024b1a443a0db75b881c4cd1a9e93fe6bbccab", "process_id_digest": "2e030748ea96f84cc538a58096389f2d7b5f80adbd5d39deb663d886a0d470b9", "process_start_digest": "6c0e43e42428bb038e64e8feab6fa3000f6eb9b818cf483a29099c98578f0edf", "schema": "toolkit.github-program.process-incarnation.v1", "session_peer_scope": "session-peer-golden"},
+      "serialized": "{\"boot_id_digest\":\"be1cbe400bb194c497c5ada2ba940cffe1d66f266b078dd9c0c84ca4bc62b8c1\",\"pid_namespace_digest\":\"77e7931ae5a89077fdf3cb3f2b98e372dcb83516b9e17f8de3291952704b14d7\",\"platform\":\"linux\",\"principal_digest\":\"48531b37195f82bb51b7da0009024b1a443a0db75b881c4cd1a9e93fe6bbccab\",\"process_id_digest\":\"2e030748ea96f84cc538a58096389f2d7b5f80adbd5d39deb663d886a0d470b9\",\"process_start_digest\":\"6c0e43e42428bb038e64e8feab6fa3000f6eb9b818cf483a29099c98578f0edf\",\"schema\":\"toolkit.github-program.process-incarnation.v1\",\"session_peer_scope\":\"session-peer-golden\"}",
+      "digest": "ecaff574d2bab473dfb180e513ec6e072c233c0e16867398ec5616bfb5719ad7"
     },
     {
       "name": "store-binding",

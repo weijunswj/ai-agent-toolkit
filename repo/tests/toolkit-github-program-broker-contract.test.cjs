@@ -13,6 +13,7 @@ const receiptSchema = readJson(path.join(contractRoot, 'run-receipt-v1.schema.js
 const policy = readJson(path.join(contractRoot, 'github-program-receipt-policy.json'));
 const fixture = readJson(path.join(scriptRoot, 'github-program-broker', 'tests', 'fixtures', 'source-slice-1-vectors.json'));
 const runtime = require(path.join(scriptRoot, 'toolkit-github-program-receipt.cjs'));
+const PROCESS_ID_DIGEST_FORMULA = 'SHA256(canonicalSerialize(["toolkit.github-program.process-id.v1", platform, pid_decimal_string]))';
 
 const documents = new Map([
   [path.basename(schemaPath), schema],
@@ -232,6 +233,13 @@ test('canonical broker schema and policy are present and aligned with Node autho
     'BROKER_UNSUPPORTED_PLATFORM',
     'BROKER_INTERNAL_INVARIANT'
   ]);
+});
+
+test('canonical receipt policy binds the accepted process-ID digest formula', () => {
+  assert.equal(
+    policy.sqlite.v3_dormant_contract.holder_attestation.process_id_digest,
+    PROCESS_ID_DIGEST_FORMULA
+  );
 });
 
 test('all locked operation shapes validate independently against the canonical schema', () => {
