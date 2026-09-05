@@ -477,6 +477,52 @@
       "unsafe_integers": "reject",
       "failure_request_id": "echo_valid_parsed_request_id_or_null_before_parse"
     },
+    "readback_integrity": {
+      "mutation": {
+        "logical_operation_digest": "SHA256(canonicalSerialize({operation_kind,safety_class,target_identity,target_digest,expected_post_state_digest,adapter_identity_digest}))",
+        "operation_digest": "SHA256(canonicalSerialize({operation_id,logical_operation_digest,run_id,allocation_id,lock_id,authority_digest,lease_id,fence_id,fence_sequence,operation_kind,safety_class,target_identity_json,target_digest,source_digest,cas_digest,expected_post_state_digest,provider_operation_key,adapter_identity_digest,retry_of_operation_id,created_at}))",
+        "event_digest": "SHA256(canonicalSerialize({event_id,operation_id,sequence,prior_event_id,event_type,state,event_at,authority_digest,provider_evidence_digest,readback_digest,detail_digest}))",
+        "minimum_events": 2,
+        "first_event": { "event_type": "PREPARED", "state": "PREPARED" },
+        "second_event": { "event_type": "IN_FLIGHT", "state": "IN_FLIGHT" },
+        "later_state_transitions": [
+          "PREPARED->IN_FLIGHT",
+          "IN_FLIGHT->APPLIED",
+          "IN_FLIGHT->NOT_APPLIED",
+          "IN_FLIGHT->UNKNOWN",
+          "UNKNOWN->APPLIED",
+          "UNKNOWN->NOT_APPLIED",
+          "UNKNOWN->UNKNOWN"
+        ],
+        "chronology": "event_1_at >= operation_created_at and nondecreasing",
+        "state_equals_tail": true
+      },
+      "receipt_chain": {
+        "chain_digest_after_semantic_validation": true,
+        "outer_run_id_binding": true,
+        "sequence": "exactly_contiguous_from_1",
+        "prior_receipt_id": "exact_previous_receipt_id",
+        "common_bindings": [
+          "repository",
+          "parent_issue",
+          "child_issue",
+          "lock",
+          "run_id",
+          "allocation_id",
+          "authority",
+          "start",
+          "lease"
+        ],
+        "chronology": "nondecreasing_created_at",
+        "candidate": {
+          "initial": null,
+          "introduction_receipt_type": "TRANSITION_PREVIEW",
+          "immutable_after_introduction": true
+        },
+        "terminal_types": ["EXECUTOR_TERMINAL", "G4_TERMINAL", "RUN_INTERRUPTED"],
+        "receipts_after_terminal": false
+      }
+    },
     "success_result": {
       "fields": ["operation", "value", "result_digest"],
       "operation_matches_value_kind": true,

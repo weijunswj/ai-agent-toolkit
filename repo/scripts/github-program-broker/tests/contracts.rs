@@ -8,15 +8,15 @@ use github_program_broker::crypto::{
 };
 use github_program_broker::error::{BrokerError, ErrorCode};
 use github_program_broker::protocol::{
-    AuthorAssociation, AuthoritySnapshot, Lease, MAX_FRAME_PAYLOAD_BYTES, MAX_NESTING_DEPTH,
-    MutationEvent, MutationOperation, MutationOperationKind, MutationState, Namespace,
-    OperationKind, PreRecoveryEvidence, Readback, ReadbackTarget, ReceiptPayload, ReceiptRecord,
-    ReceiptType, RecoveryRecord, RefSnapshot, Request, RequestId, Response, RunAllocation,
-    SafetyClass, StartSnapshot, SuccessValue, TargetIdentity, decode_frame, decode_request_frame,
-    decode_response_frame, encode_frame, encode_request_frame, encode_response_frame,
-    namespace_digest,
+    AuthorAssociation, AuthoritySnapshot, Candidate, Lease, MAX_FRAME_PAYLOAD_BYTES,
+    MAX_NESTING_DEPTH, MutationEvent, MutationOperation, MutationOperationKind, MutationState,
+    Namespace, OperationKind, PreRecoveryEvidence, Readback, ReadbackTarget, ReceiptPayload,
+    ReceiptRecord, ReceiptType, RecoveryRecord, RefSnapshot, Request, RequestId, Response,
+    RunAllocation, SafetyClass, StartSnapshot, SuccessValue, TargetIdentity, decode_frame,
+    decode_request_frame, decode_response_frame, encode_frame, encode_request_frame,
+    encode_response_frame, namespace_digest,
 };
-use serde_json::Value;
+use serde_json::{Value, json};
 
 const VECTORS: &str = include_str!("fixtures/source-slice-1-vectors.json");
 const RECEIPT_POLICY: &str =
@@ -139,6 +139,212 @@ fn test_receipt() -> ReceiptRecord {
     receipt
 }
 
+fn resign_receipt(mut receipt: ReceiptRecord) -> ReceiptRecord {
+    let mut value = serde_json::to_value(&receipt).unwrap();
+    value.as_object_mut().unwrap().remove("receipt_id");
+    receipt.receipt_id = canonical::canonical_digest(&value).unwrap();
+    receipt
+}
+
+fn test_receipt_chain() -> Vec<ReceiptRecord> {
+    let first = test_receipt();
+    let candidate = Candidate {
+        pr_number: 374,
+        branch: "luna/s2-e3-native-protected-broker-lock006-s1".to_owned(),
+        base_ref: "main".to_owned(),
+        base_sha: "0".repeat(40),
+        head_sha: "1".repeat(40),
+        tree_sha: "2".repeat(40),
+    };
+    let second = resign_receipt(ReceiptRecord {
+        schema: first.schema.clone(),
+        receipt_type: ReceiptType::TransitionPreview,
+        receipt_id: Digest::zero(),
+        sequence: 2,
+        prior_receipt_id: Some(first.receipt_id.clone()),
+        run_id: first.run_id.clone(),
+        allocation_id: first.allocation_id.clone(),
+        repository: first.repository.clone(),
+        parent_issue: first.parent_issue,
+        child_issue: first.child_issue,
+        lock: first.lock.clone(),
+        authority: first.authority.clone(),
+        start: first.start.clone(),
+        candidate: Some(candidate.clone()),
+        lease: first.lease.clone(),
+        payload: ReceiptPayload {
+            classification: "TRANSITION_PREVIEW".to_owned(),
+            reason_code: None,
+            outcome_digest: None,
+            evidence_digest: None,
+            operation_digest: None,
+            detail_digest: None,
+            mutation_outcome: None,
+            evidence_refs: None,
+        },
+        created_at: first.created_at.clone(),
+    });
+    let third = resign_receipt(ReceiptRecord {
+        schema: second.schema.clone(),
+        receipt_type: ReceiptType::ExecutorTerminal,
+        receipt_id: Digest::zero(),
+        sequence: 3,
+        prior_receipt_id: Some(second.receipt_id.clone()),
+        run_id: second.run_id.clone(),
+        allocation_id: second.allocation_id.clone(),
+        repository: second.repository.clone(),
+        parent_issue: second.parent_issue,
+        child_issue: second.child_issue,
+        lock: second.lock.clone(),
+        authority: second.authority.clone(),
+        start: second.start.clone(),
+        candidate: second.candidate.clone(),
+        lease: second.lease.clone(),
+        payload: ReceiptPayload {
+            classification: "EXECUTOR_TERMINAL".to_owned(),
+            reason_code: None,
+            outcome_digest: None,
+            evidence_digest: None,
+            operation_digest: None,
+            detail_digest: None,
+            mutation_outcome: None,
+            evidence_refs: None,
+        },
+        created_at: second.created_at.clone(),
+    });
+    vec![first, second, third]
+}
+
+fn mutation_logical_operation_digest(operation: &MutationOperation) -> Digest {
+    canonical::canonical_digest_value(&json!({
+        "operation_kind": &operation.operation_kind,
+        "safety_class": &operation.safety_class,
+        "target_identity": &operation.target_identity,
+        "target_digest": &operation.target_digest,
+        "expected_post_state_digest": &operation.expected_post_state_digest,
+        "adapter_identity_digest": &operation.adapter_identity_digest,
+    }))
+    .unwrap()
+}
+
+fn mutation_operation_digest(operation: &MutationOperation) -> Digest {
+    let target_identity_json = String::from_utf8(
+        canonical::canonical_serialize_value(&operation.target_identity).unwrap(),
+    )
+    .unwrap();
+    canonical::canonical_digest_value(&json!({
+        "operation_id": &operation.operation_id,
+        "logical_operation_digest": &operation.logical_operation_digest,
+        "run_id": &operation.run_id,
+        "allocation_id": &operation.allocation_id,
+        "lock_id": &operation.lock,
+        "authority_digest": &operation.authority_digest,
+        "lease_id": &operation.lease_id,
+        "fence_id": &operation.fence_id,
+        "fence_sequence": operation.fence_sequence,
+        "operation_kind": &operation.operation_kind,
+        "safety_class": &operation.safety_class,
+        "target_identity_json": target_identity_json,
+        "target_digest": &operation.target_digest,
+        "source_digest": &operation.expected_source_digest,
+        "cas_digest": &operation.cas_digest,
+        "expected_post_state_digest": &operation.expected_post_state_digest,
+        "provider_operation_key": &operation.provider_operation_key,
+        "adapter_identity_digest": &operation.adapter_identity_digest,
+        "retry_of_operation_id": &operation.retry_of_operation_id,
+        "created_at": &operation.created_at,
+    }))
+    .unwrap()
+}
+
+fn mutation_event_digest(event: &MutationEvent) -> Digest {
+    canonical::canonical_digest_value(&json!({
+        "event_id": &event.event_id,
+        "operation_id": &event.operation_id,
+        "sequence": event.sequence,
+        "prior_event_id": &event.prior_event_id,
+        "event_type": &event.event_type,
+        "state": &event.state,
+        "event_at": &event.event_at,
+        "authority_digest": &event.authority_digest,
+        "provider_evidence_digest": &event.provider_evidence_digest,
+        "readback_digest": &event.readback_digest,
+        "detail_digest": &event.detail_digest,
+    }))
+    .unwrap()
+}
+
+fn mutation_operation_digest_value(operation: &Value) -> Digest {
+    let target_identity_json =
+        String::from_utf8(canonical::canonical_serialize(&operation["target_identity"]).unwrap())
+            .unwrap();
+    canonical::canonical_digest_value(&json!({
+        "operation_id": operation["operation_id"].clone(),
+        "logical_operation_digest": operation["logical_operation_digest"].clone(),
+        "run_id": operation["run_id"].clone(),
+        "allocation_id": operation["allocation_id"].clone(),
+        "lock_id": operation["lock"].clone(),
+        "authority_digest": operation["authority_digest"].clone(),
+        "lease_id": operation["lease_id"].clone(),
+        "fence_id": operation["fence_id"].clone(),
+        "fence_sequence": operation["fence_sequence"].clone(),
+        "operation_kind": operation["operation_kind"].clone(),
+        "safety_class": operation["safety_class"].clone(),
+        "target_identity_json": target_identity_json,
+        "target_digest": operation["target_digest"].clone(),
+        "source_digest": operation["expected_source_digest"].clone(),
+        "cas_digest": operation["cas_digest"].clone(),
+        "expected_post_state_digest": operation["expected_post_state_digest"].clone(),
+        "provider_operation_key": operation["provider_operation_key"].clone(),
+        "adapter_identity_digest": operation["adapter_identity_digest"].clone(),
+        "retry_of_operation_id": operation["retry_of_operation_id"].clone(),
+        "created_at": operation["created_at"].clone(),
+    }))
+    .unwrap()
+}
+
+fn mutation_event_digest_value(event: &Value) -> Digest {
+    canonical::canonical_digest_value(&json!({
+        "event_id": event["event_id"].clone(),
+        "operation_id": event["operation_id"].clone(),
+        "sequence": event["sequence"].clone(),
+        "prior_event_id": event["prior_event_id"].clone(),
+        "event_type": event["event_type"].clone(),
+        "state": event["state"].clone(),
+        "event_at": event["event_at"].clone(),
+        "authority_digest": event["authority_digest"].clone(),
+        "provider_evidence_digest": event["provider_evidence_digest"].clone(),
+        "readback_digest": event["readback_digest"].clone(),
+        "detail_digest": event["detail_digest"].clone(),
+    }))
+    .unwrap()
+}
+
+fn test_mutation_event(
+    sequence: u64,
+    prior_event_id: Option<String>,
+    event_type: &str,
+    state: MutationState,
+    digest: &Digest,
+) -> MutationEvent {
+    let mut event = MutationEvent {
+        event_id: format!("event-{sequence}"),
+        operation_id: "operation-test".to_owned(),
+        sequence,
+        prior_event_id,
+        event_type: event_type.to_owned(),
+        state,
+        event_at: "2026-09-04T12:00:00.000Z".to_owned(),
+        authority_digest: digest.clone(),
+        provider_evidence_digest: digest.clone(),
+        readback_digest: None,
+        detail_digest: digest.clone(),
+        event_digest: Digest::zero(),
+    };
+    event.event_digest = mutation_event_digest(&event);
+    event
+}
+
 fn test_mutation_readback(state: MutationState) -> Readback {
     let target_identity = TargetIdentity {
         resource_type: "git_ref".to_owned(),
@@ -146,9 +352,9 @@ fn test_mutation_readback(state: MutationState) -> Readback {
     };
     let target_digest = canonical::canonical_digest_value(&target_identity).unwrap();
     let digest = test_digest();
-    let operation = MutationOperation {
+    let mut operation = MutationOperation {
         operation_id: "operation-test".to_owned(),
-        logical_operation_digest: digest.clone(),
+        logical_operation_digest: Digest::zero(),
         run_id: "run-test".to_owned(),
         allocation_id: "allocation-test".to_owned(),
         lock: "lock-test".to_owned(),
@@ -167,26 +373,32 @@ fn test_mutation_readback(state: MutationState) -> Readback {
         adapter_identity_digest: digest.clone(),
         retry_of_operation_id: None,
         created_at: "2026-09-04T12:00:00.000Z".to_owned(),
-        operation_digest: digest.clone(),
+        operation_digest: Digest::zero(),
     };
-    let event = MutationEvent {
-        event_id: "event-test".to_owned(),
-        operation_id: "operation-test".to_owned(),
-        sequence: 1,
-        prior_event_id: None,
-        event_type: "STATE".to_owned(),
-        state: state.clone(),
-        event_at: "2026-09-04T12:00:00.000Z".to_owned(),
-        authority_digest: digest.clone(),
-        provider_evidence_digest: digest.clone(),
-        readback_digest: None,
-        detail_digest: digest,
-        event_digest: test_digest(),
-    };
+    operation.logical_operation_digest = mutation_logical_operation_digest(&operation);
+    operation.operation_digest = mutation_operation_digest(&operation);
+    let prepared = test_mutation_event(1, None, "PREPARED", MutationState::Prepared, &digest);
+    let in_flight = test_mutation_event(
+        2,
+        Some(prepared.event_id.clone()),
+        "IN_FLIGHT",
+        MutationState::InFlight,
+        &digest,
+    );
+    let mut events = vec![prepared, in_flight];
+    if state != MutationState::InFlight {
+        events.push(test_mutation_event(
+            3,
+            Some(events[1].event_id.clone()),
+            "OUTCOME_RECORDED",
+            state.clone(),
+            &digest,
+        ));
+    }
     Readback::Mutation {
         operation: Box::new(operation),
         state,
-        events: vec![event],
+        events,
     }
 }
 
@@ -374,11 +586,15 @@ fn exact_success_values() -> Vec<(OperationKind, SuccessValue)> {
     ]
 }
 
-fn assert_invalid_success_shape(operation: OperationKind, value: Value) {
-    let result = serde_json::json!({
+fn success_response_frame(operation: OperationKind, value: Value) -> Vec<u8> {
+    let result_without_digest = json!({
         "operation": operation.as_str(),
         "value": value,
-        "result_digest": test_digest(),
+    });
+    let result = json!({
+        "operation": operation.as_str(),
+        "value": result_without_digest["value"].clone(),
+        "result_digest": canonical::canonical_digest(&result_without_digest).unwrap(),
     });
     let response = serde_json::json!({
         "schema": "toolkit.github-program.broker-ipc.v1",
@@ -387,12 +603,40 @@ fn assert_invalid_success_shape(operation: OperationKind, value: Value) {
         "result": result,
         "error": null,
     });
-    let frame = encode_frame(&canonical::canonical_serialize(&response).unwrap()).unwrap();
+    encode_frame(&canonical::canonical_serialize(&response).unwrap()).unwrap()
+}
+
+fn assert_invalid_success_shape(operation: OperationKind, value: Value) {
+    let frame = success_response_frame(operation, value);
     assert!(
         decode_response_frame(&frame).is_err(),
         "wrong success shape unexpectedly decoded for {}",
         operation.as_str()
     );
+}
+
+fn receipt_chain_response_frame(receipts: Vec<Value>, run_id: &str) -> Vec<u8> {
+    let chain_digest = canonical::canonical_digest(&Value::Array(receipts.clone())).unwrap();
+    success_response_frame(
+        OperationKind::ReadbackInspection,
+        json!({
+            "kind": "READBACK_INSPECTION",
+            "target": "RECEIPT_CHAIN",
+            "readback": {
+                "kind": "RECEIPT_CHAIN",
+                "run_id": run_id,
+                "receipts": receipts,
+                "chain_digest": chain_digest,
+            },
+        }),
+    )
+}
+
+fn resign_receipt_value(receipt: &mut Value) {
+    let mut payload = receipt.clone();
+    payload.as_object_mut().unwrap().remove("receipt_id");
+    let receipt_id = canonical::canonical_digest(&payload).unwrap();
+    receipt["receipt_id"] = Value::String(receipt_id.as_str().to_owned());
 }
 
 #[test]
@@ -667,17 +911,14 @@ fn typed_response_result_and_failure_request_id_are_closed_and_digest_bound() {
         ErrorCode::InvalidField.as_str()
     );
 
-    let failure = Response::failure(
-        Some(request_id),
-        &BrokerError::new(ErrorCode::UnsupportedPlatform),
-    );
+    let failure = Response::failure(&BrokerError::new(ErrorCode::UnsupportedPlatform));
     let decoded_failure = decode_response_frame(&encode_response_frame(&failure).unwrap()).unwrap();
     assert_eq!(decoded_failure, failure);
     assert_eq!(
         decoded_failure.error.unwrap().code,
         ErrorCode::UnsupportedPlatform.as_str()
     );
-    let parse_failure = Response::failure(None, &BrokerError::new(ErrorCode::MalformedRequest));
+    let parse_failure = Response::failure(&BrokerError::new(ErrorCode::MalformedRequest));
     assert_eq!(
         decode_response_frame(&encode_response_frame(&parse_failure).unwrap()).unwrap(),
         parse_failure
@@ -757,6 +998,256 @@ fn exact_success_value_algebra_round_trips_and_rejects_superseded_shapes() {
             "source_schema_fingerprint": "a".repeat(64),
             "result_digest": "a".repeat(64)
         }),
+    );
+}
+
+#[test]
+fn mutation_readback_rejects_forged_inner_digests_and_semantics_after_outer_redigest() {
+    let valid = serde_json::to_value(test_mutation_readback(MutationState::Applied)).unwrap();
+    assert!(
+        decode_response_frame(&success_response_frame(
+            OperationKind::MutationOutcome,
+            json!({ "kind": "MUTATION_OUTCOME", "readback": valid.clone() }),
+        ))
+        .is_ok()
+    );
+
+    let mut forged = valid.clone();
+    forged["operation"]["logical_operation_digest"] = Value::String("b".repeat(64));
+    let operation_digest = mutation_operation_digest_value(&forged["operation"]);
+    forged["operation"]["operation_digest"] = Value::String(operation_digest.as_str().to_owned());
+    assert!(
+        decode_response_frame(&success_response_frame(
+            OperationKind::MutationOutcome,
+            json!({ "kind": "MUTATION_OUTCOME", "readback": forged }),
+        ))
+        .is_err()
+    );
+
+    let mut forged = valid.clone();
+    forged["operation"]["operation_digest"] = Value::String("b".repeat(64));
+    assert!(
+        decode_response_frame(&success_response_frame(
+            OperationKind::MutationOutcome,
+            json!({ "kind": "MUTATION_OUTCOME", "readback": forged }),
+        ))
+        .is_err()
+    );
+
+    let mut forged = valid.clone();
+    forged["events"][0]["event_digest"] = Value::String("b".repeat(64));
+    assert!(
+        decode_response_frame(&success_response_frame(
+            OperationKind::MutationOutcome,
+            json!({ "kind": "MUTATION_OUTCOME", "readback": forged }),
+        ))
+        .is_err()
+    );
+
+    let mut forged = valid.clone();
+    let mut events = forged["events"].as_array().unwrap().clone();
+    events.swap(1, 2);
+    forged["events"] = Value::Array(events);
+    assert!(
+        decode_response_frame(&success_response_frame(
+            OperationKind::MutationOutcome,
+            json!({ "kind": "MUTATION_OUTCOME", "readback": forged }),
+        ))
+        .is_err()
+    );
+
+    let mut forged = valid.clone();
+    forged["events"][2]["prior_event_id"] = Value::String("event-1".to_owned());
+    let event_digest = mutation_event_digest_value(&forged["events"][2]);
+    forged["events"][2]["event_digest"] = Value::String(event_digest.as_str().to_owned());
+    assert!(
+        decode_response_frame(&success_response_frame(
+            OperationKind::MutationOutcome,
+            json!({ "kind": "MUTATION_OUTCOME", "readback": forged }),
+        ))
+        .is_err()
+    );
+
+    let mut forged = valid.clone();
+    forged["events"][0]["event_at"] = Value::String("2026-09-04T12:01:00.000Z".to_owned());
+    let event_digest = mutation_event_digest_value(&forged["events"][0]);
+    forged["events"][0]["event_digest"] = Value::String(event_digest.as_str().to_owned());
+    assert!(
+        decode_response_frame(&success_response_frame(
+            OperationKind::MutationOutcome,
+            json!({ "kind": "MUTATION_OUTCOME", "readback": forged }),
+        ))
+        .is_err()
+    );
+
+    let mut forged = valid.clone();
+    forged["state"] = Value::String("PREPARED".to_owned());
+    forged["events"][2]["state"] = Value::String("PREPARED".to_owned());
+    let event_digest = mutation_event_digest_value(&forged["events"][2]);
+    forged["events"][2]["event_digest"] = Value::String(event_digest.as_str().to_owned());
+    assert!(
+        decode_response_frame(&success_response_frame(
+            OperationKind::MutationOutcome,
+            json!({ "kind": "MUTATION_OUTCOME", "readback": forged }),
+        ))
+        .is_err()
+    );
+
+    let mut forged = valid.clone();
+    forged["events"][1]["event_type"] = Value::String(String::new());
+    let event_digest = mutation_event_digest_value(&forged["events"][1]);
+    forged["events"][1]["event_digest"] = Value::String(event_digest.as_str().to_owned());
+    assert!(
+        decode_response_frame(&success_response_frame(
+            OperationKind::MutationOutcome,
+            json!({ "kind": "MUTATION_OUTCOME", "readback": forged }),
+        ))
+        .is_err()
+    );
+}
+
+#[test]
+fn receipt_chain_readback_rejects_forged_semantics_after_chain_and_outer_redigest() {
+    let valid: Vec<Value> = test_receipt_chain()
+        .into_iter()
+        .map(|receipt| serde_json::to_value(receipt).unwrap())
+        .collect();
+    assert!(
+        decode_response_frame(&receipt_chain_response_frame(valid.clone(), "run-test",)).is_ok()
+    );
+
+    let mut forged = valid.clone();
+    forged[2]["run_id"] = Value::String("other-run".to_owned());
+    resign_receipt_value(&mut forged[2]);
+    assert!(decode_response_frame(&receipt_chain_response_frame(forged, "run-test",)).is_err());
+
+    let mut forged = valid.clone();
+    forged[2]["lock"] = Value::String("other-lock".to_owned());
+    resign_receipt_value(&mut forged[2]);
+    assert!(decode_response_frame(&receipt_chain_response_frame(forged, "run-test",)).is_err());
+
+    let mut forged = valid.clone();
+    forged[2]["prior_receipt_id"] = Value::String("f".repeat(64));
+    resign_receipt_value(&mut forged[2]);
+    assert!(decode_response_frame(&receipt_chain_response_frame(forged, "run-test",)).is_err());
+
+    let mut forged = valid.clone();
+    forged[1]["created_at"] = Value::String("2026-09-04T12:01:00.000Z".to_owned());
+    resign_receipt_value(&mut forged[1]);
+    forged[2]["prior_receipt_id"] = forged[1]["receipt_id"].clone();
+    forged[2]["created_at"] = Value::String("2026-09-04T12:00:30.000Z".to_owned());
+    resign_receipt_value(&mut forged[2]);
+    assert!(decode_response_frame(&receipt_chain_response_frame(forged, "run-test",)).is_err());
+
+    let mut forged = valid.clone();
+    forged[2]["candidate"]["pr_number"] = Value::Number(375.into());
+    resign_receipt_value(&mut forged[2]);
+    assert!(decode_response_frame(&receipt_chain_response_frame(forged, "run-test",)).is_err());
+
+    let mut forged = valid.clone();
+    let mut reordered = forged.clone();
+    reordered.swap(1, 2);
+    forged = reordered;
+    assert!(decode_response_frame(&receipt_chain_response_frame(forged, "run-test",)).is_err());
+
+    let mut forged = valid.clone();
+    forged[0]["candidate"] = forged[1]["candidate"].clone();
+    resign_receipt_value(&mut forged[0]);
+    assert!(decode_response_frame(&receipt_chain_response_frame(forged, "run-test",)).is_err());
+
+    let mut forged = valid.clone();
+    forged[1]["receipt_type"] = Value::String("EXECUTOR_TERMINAL".to_owned());
+    resign_receipt_value(&mut forged[1]);
+    forged[2]["prior_receipt_id"] = forged[1]["receipt_id"].clone();
+    resign_receipt_value(&mut forged[2]);
+    assert!(decode_response_frame(&receipt_chain_response_frame(forged, "run-test",)).is_err());
+
+    let mut forged = valid;
+    let mut after_terminal = forged[2].clone();
+    after_terminal["receipt_type"] = Value::String("TRANSITION_PREVIEW".to_owned());
+    after_terminal["sequence"] = Value::Number(4.into());
+    after_terminal["prior_receipt_id"] = forged[2]["receipt_id"].clone();
+    after_terminal["payload"]["classification"] = Value::String("AFTER_TERMINAL".to_owned());
+    resign_receipt_value(&mut after_terminal);
+    forged.push(after_terminal);
+    assert!(decode_response_frame(&receipt_chain_response_frame(forged, "run-test",)).is_err());
+}
+
+#[test]
+fn request_id_context_preserves_only_the_parser_owned_id() {
+    let root = fixture();
+    let request_value: Value = serde_json::from_str(text(&root["request"], "serialized")).unwrap();
+    let request_frame =
+        encode_frame(&canonical::canonical_serialize(&request_value).unwrap()).unwrap();
+    let request = decode_request_frame(&request_frame).unwrap();
+    let request_id = request.request_id.as_str().to_owned();
+    assert!(request_id.len() == 32);
+
+    let mut invalid_value = request_value.clone();
+    invalid_value["operation"]["descriptor"]["target_identity"]["resource_id"] =
+        Value::String("invalid target".to_owned());
+    let error = decode_request_frame(
+        &encode_frame(&canonical::canonical_serialize(&invalid_value).unwrap()).unwrap(),
+    )
+    .unwrap_err();
+    assert_eq!(error.request_id().unwrap().as_str(), request_id);
+    let failure = error.failure_response();
+    assert_eq!(failure.request_id.as_ref().unwrap().as_str(), request_id);
+    assert!(failure.validate_for_request(&request).is_ok());
+
+    let wrong_id = if request_id == "f".repeat(32) {
+        "e".repeat(32)
+    } else {
+        "f".repeat(32)
+    };
+    let mut substituted = serde_json::to_value(&failure).unwrap();
+    substituted["request_id"] = Value::String(wrong_id);
+    let substituted = decode_response_frame(
+        &encode_frame(&canonical::canonical_serialize(&substituted).unwrap()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        error_code(&substituted.validate_for_request(&request).unwrap_err()),
+        ErrorCode::InvalidField.as_str()
+    );
+
+    let pre_id = decode_request_frame(&[0, 0, 0]).unwrap_err();
+    assert!(pre_id.request_id().is_none());
+    let pre_id_response = pre_id.failure_response();
+    assert!(pre_id_response.request_id.is_none());
+    pre_id_response.validate().unwrap();
+
+    let mut success = serde_json::to_value(
+        Response::success(
+            request.request_id.clone(),
+            OperationKind::ReadbackInspection,
+            SuccessValue::ReadbackInspection {
+                target: ReadbackTarget::Namespace,
+                readback: Readback::Namespace {
+                    namespace: Namespace {
+                        repository: "weijunswj/ai-agent-toolkit".to_owned(),
+                        parent_issue: 240,
+                        child_issue: 359,
+                    },
+                    namespace_digest: namespace_digest(&Namespace {
+                        repository: "weijunswj/ai-agent-toolkit".to_owned(),
+                        parent_issue: 240,
+                        child_issue: 359,
+                    })
+                    .unwrap(),
+                },
+            },
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(success["request_id"].is_string());
+    success["request_id"] = Value::Null;
+    assert!(
+        decode_response_frame(
+            &encode_frame(&canonical::canonical_serialize(&success).unwrap()).unwrap(),
+        )
+        .is_err()
     );
 }
 

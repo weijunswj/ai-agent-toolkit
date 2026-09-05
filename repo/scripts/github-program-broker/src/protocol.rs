@@ -13,6 +13,7 @@ pub const MAX_NESTING_DEPTH: usize = 16;
 pub const MAX_OBJECT_KEYS: usize = 64;
 pub const MAX_ARRAY_ITEMS: usize = 256;
 pub const MAX_STRING_BYTES: usize = 4_096;
+pub const MAX_OPERATION_EVENTS: usize = 50_000;
 pub const REQUEST_ID_BYTES: usize = 16;
 pub const REQUEST_ID_HEX_LENGTH: usize = REQUEST_ID_BYTES * 2;
 
@@ -34,6 +35,41 @@ impl RequestId {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RequestDecodeError {
+    request_id: Option<RequestId>,
+    error: BrokerError,
+}
+
+impl RequestDecodeError {
+    fn before_id(error: BrokerError) -> Self {
+        Self {
+            request_id: None,
+            error,
+        }
+    }
+
+    fn with_request_id(request_id: Option<RequestId>, error: BrokerError) -> Self {
+        Self { request_id, error }
+    }
+
+    pub fn request_id(&self) -> Option<&RequestId> {
+        self.request_id.as_ref()
+    }
+
+    pub fn error(&self) -> &BrokerError {
+        &self.error
+    }
+
+    pub fn code(&self) -> ErrorCode {
+        self.error.code()
+    }
+
+    pub fn failure_response(&self) -> Response {
+        Response::failure_with_id(self.request_id.clone(), &self.error)
     }
 }
 
@@ -604,7 +640,7 @@ impl ReceiptRecord {
             return Err(BrokerError::new(ErrorCode::InvalidField));
         }
         if matches!(self.receipt_type, ReceiptType::RunStarted) != (self.sequence == 1)
-            || (self.sequence == 1 && self.prior_receipt_id.is_some())
+            || (self.sequence == 1 && (self.prior_receipt_id.is_some() || self.candidate.is_some()))
             || (self.sequence > 1 && self.prior_receipt_id.is_none())
         {
             return Err(BrokerError::new(ErrorCode::InvalidField));
@@ -762,6 +798,11 @@ impl MutationOperation {
             retry_of_operation_id: self.retry_of_operation_id.clone(),
         };
         descriptor.validate()?;
+        if self.logical_operation_digest != mutation_logical_operation_digest(self)?
+            || self.operation_digest != mutation_operation_digest(self)?
+        {
+            return Err(BrokerError::new(ErrorCode::InvalidField));
+        }
         Ok(())
     }
 }
@@ -789,6 +830,8 @@ impl MutationEvent {
         if self.operation_id != operation.operation_id
             || self.sequence == 0
             || !crypto::is_timestamp(&self.event_at)
+            || self.event_type.is_empty()
+            || self.event_type.len() > 160
             || !self
                 .event_type
                 .bytes()
@@ -796,8 +839,97 @@ impl MutationEvent {
         {
             return Err(BrokerError::new(ErrorCode::InvalidField));
         }
+        if self.event_digest != mutation_event_digest(self)? {
+            return Err(BrokerError::new(ErrorCode::InvalidField));
+        }
         Ok(())
     }
+}
+
+fn same_receipt_binding(left: &ReceiptRecord, right: &ReceiptRecord) -> bool {
+    left.repository == right.repository
+        && left.parent_issue == right.parent_issue
+        && left.child_issue == right.child_issue
+        && left.lock == right.lock
+        && left.run_id == right.run_id
+        && left.allocation_id == right.allocation_id
+        && left.authority == right.authority
+        && left.start == right.start
+        && left.lease == right.lease
+}
+
+fn is_terminal_receipt_type(receipt_type: &ReceiptType) -> bool {
+    matches!(
+        receipt_type,
+        ReceiptType::ExecutorTerminal | ReceiptType::G4Terminal | ReceiptType::RunInterrupted
+    )
+}
+
+fn valid_mutation_transition(prior: &MutationState, next: &MutationState) -> bool {
+    match prior {
+        MutationState::Prepared => *next == MutationState::InFlight,
+        MutationState::InFlight | MutationState::Unknown => matches!(
+            next,
+            MutationState::Applied | MutationState::NotApplied | MutationState::Unknown
+        ),
+        MutationState::Applied | MutationState::NotApplied => false,
+    }
+}
+
+fn mutation_logical_operation_digest(operation: &MutationOperation) -> Result<Digest> {
+    canonical::canonical_digest_value(&serde_json::json!({
+        "operation_kind": &operation.operation_kind,
+        "safety_class": &operation.safety_class,
+        "target_identity": &operation.target_identity,
+        "target_digest": &operation.target_digest,
+        "expected_post_state_digest": &operation.expected_post_state_digest,
+        "adapter_identity_digest": &operation.adapter_identity_digest,
+    }))
+}
+
+fn mutation_operation_digest(operation: &MutationOperation) -> Result<Digest> {
+    let target_identity_json = String::from_utf8(canonical::canonical_serialize_value(
+        &operation.target_identity,
+    )?)
+    .map_err(|_| BrokerError::new(ErrorCode::InternalInvariant))?;
+    canonical::canonical_digest_value(&serde_json::json!({
+        "operation_id": &operation.operation_id,
+        "logical_operation_digest": &operation.logical_operation_digest,
+        "run_id": &operation.run_id,
+        "allocation_id": &operation.allocation_id,
+        "lock_id": &operation.lock,
+        "authority_digest": &operation.authority_digest,
+        "lease_id": &operation.lease_id,
+        "fence_id": &operation.fence_id,
+        "fence_sequence": operation.fence_sequence,
+        "operation_kind": &operation.operation_kind,
+        "safety_class": &operation.safety_class,
+        "target_identity_json": target_identity_json,
+        "target_digest": &operation.target_digest,
+        "source_digest": &operation.expected_source_digest,
+        "cas_digest": &operation.cas_digest,
+        "expected_post_state_digest": &operation.expected_post_state_digest,
+        "provider_operation_key": &operation.provider_operation_key,
+        "adapter_identity_digest": &operation.adapter_identity_digest,
+        "retry_of_operation_id": &operation.retry_of_operation_id,
+        "created_at": &operation.created_at,
+    }))
+}
+
+fn mutation_event_digest(event: &MutationEvent) -> Result<Digest> {
+    canonical::canonical_digest_value(&serde_json::json!({
+        "event_id": &event.event_id,
+        "operation_id": &event.operation_id,
+        "sequence": event.sequence,
+        "prior_event_id": &event.prior_event_id,
+        "event_type": &event.event_type,
+        "state": &event.state,
+        "event_at": &event.event_at,
+        "authority_digest": &event.authority_digest,
+        "provider_evidence_digest": &event.provider_evidence_digest,
+        "readback_digest": &event.readback_digest,
+        "detail_digest": &event.detail_digest,
+    }))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -876,8 +1008,39 @@ impl Readback {
                 if receipts.is_empty() || receipts.len() > 128 {
                     return Err(BrokerError::new(ErrorCode::InvalidField));
                 }
-                for receipt in receipts {
+                let mut candidate: Option<Candidate> = None;
+                let mut terminal = false;
+                for (index, receipt) in receipts.iter().enumerate() {
                     receipt.validate()?;
+                    let expected_sequence = u64::try_from(index + 1)
+                        .map_err(|_| BrokerError::new(ErrorCode::InternalInvariant))?;
+                    if receipt.run_id != *run_id
+                        || receipt.sequence != expected_sequence
+                        || receipts[..index]
+                            .iter()
+                            .any(|prior| prior.receipt_id == receipt.receipt_id)
+                        || (index > 0
+                            && (receipt.prior_receipt_id.as_ref()
+                                != Some(&receipts[index - 1].receipt_id)
+                                || !same_receipt_binding(receipt, &receipts[index - 1])
+                                || receipt.created_at < receipts[index - 1].created_at))
+                    {
+                        return Err(BrokerError::new(ErrorCode::InvalidField));
+                    }
+                    if index > 0 {
+                        if terminal {
+                            return Err(BrokerError::new(ErrorCode::InvalidField));
+                        }
+                        if candidate.is_none() && receipt.candidate.is_some() {
+                            if receipt.receipt_type != ReceiptType::TransitionPreview {
+                                return Err(BrokerError::new(ErrorCode::InvalidField));
+                            }
+                            candidate = receipt.candidate.clone();
+                        } else if candidate.as_ref() != receipt.candidate.as_ref() {
+                            return Err(BrokerError::new(ErrorCode::InvalidField));
+                        }
+                    }
+                    terminal = terminal || is_terminal_receipt_type(&receipt.receipt_type);
                 }
                 if chain_digest != &canonical::canonical_digest_value(receipts)? {
                     return Err(BrokerError::new(ErrorCode::InvalidField));
@@ -889,11 +1052,50 @@ impl Readback {
                 events,
             } => {
                 operation.validate()?;
-                if events.is_empty() || events.last().is_none_or(|event| &event.state != state) {
+                if events.len() < 2
+                    || events.len() > MAX_OPERATION_EVENTS
+                    || events.last().is_none_or(|event| &event.state != state)
+                {
                     return Err(BrokerError::new(ErrorCode::InvalidField));
                 }
-                for event in events {
+                for (index, event) in events.iter().enumerate() {
                     event.validate(operation)?;
+                    let expected_sequence = u64::try_from(index + 1)
+                        .map_err(|_| BrokerError::new(ErrorCode::InternalInvariant))?;
+                    let prior = index.checked_sub(1).map(|prior_index| &events[prior_index]);
+                    if event.sequence != expected_sequence
+                        || event.prior_event_id.as_deref()
+                            != prior.map(|value| value.event_id.as_str())
+                        || events[..index]
+                            .iter()
+                            .any(|prior_event| prior_event.event_id == event.event_id)
+                        || event.event_at.as_str()
+                            < prior
+                                .map(|value| value.event_at.as_str())
+                                .unwrap_or(operation.created_at.as_str())
+                    {
+                        return Err(BrokerError::new(ErrorCode::InvalidField));
+                    }
+                    match (index, prior) {
+                        (0, _)
+                            if event.event_type != "PREPARED"
+                                || event.state != MutationState::Prepared =>
+                        {
+                            return Err(BrokerError::new(ErrorCode::InvalidField));
+                        }
+                        (1, _)
+                            if event.event_type != "IN_FLIGHT"
+                                || event.state != MutationState::InFlight =>
+                        {
+                            return Err(BrokerError::new(ErrorCode::InvalidField));
+                        }
+                        (_, Some(prior))
+                            if !valid_mutation_transition(&prior.state, &event.state) =>
+                        {
+                            return Err(BrokerError::new(ErrorCode::InvalidField));
+                        }
+                        _ => {}
+                    }
                 }
             }
             Self::Recovery {
@@ -1063,6 +1265,10 @@ impl Request {
         canonical::canonical_digest_value(self)
     }
 
+    pub fn failure_response(&self, error: &BrokerError) -> Response {
+        Response::failure_with_id(Some(self.request_id.clone()), error)
+    }
+
     pub fn from_canonical_json(bytes: &[u8]) -> Result<Self> {
         let value = canonical::parse_json(bytes, ParseLimits::PROTOCOL)?;
         if canonical::canonical_serialize(&value)? != bytes {
@@ -1072,9 +1278,17 @@ impl Request {
     }
 
     pub fn from_value(value: Value) -> Result<Self> {
+        Self::from_value_with_context(value).map_err(|failure| failure.error)
+    }
+
+    fn from_value_with_context(value: Value) -> core::result::Result<Self, RequestDecodeError> {
+        let parsed_request_id = parsed_request_id(&value);
         let object = value
             .as_object()
-            .ok_or_else(|| BrokerError::new(ErrorCode::MalformedRequest))?;
+            .ok_or_else(|| BrokerError::new(ErrorCode::MalformedRequest))
+            .map_err(|error| {
+                RequestDecodeError::with_request_id(parsed_request_id.clone(), error)
+            })?;
         require_exact_keys(
             object,
             &[
@@ -1085,20 +1299,53 @@ impl Request {
                 "request_id",
                 "schema",
             ],
-        )?;
-        let schema = required_string(object, "schema")?;
+        )
+        .map_err(|error| RequestDecodeError::with_request_id(parsed_request_id.clone(), error))?;
+        let schema = required_string(object, "schema").map_err(|error| {
+            RequestDecodeError::with_request_id(parsed_request_id.clone(), error)
+        })?;
         if schema != PROTOCOL_ID {
-            return Err(BrokerError::new(ErrorCode::UnsupportedSchema));
+            return Err(RequestDecodeError::with_request_id(
+                parsed_request_id,
+                BrokerError::new(ErrorCode::UnsupportedSchema),
+            ));
         }
+        let request_id_value = required_string(object, "request_id").map_err(|error| {
+            RequestDecodeError::with_request_id(parsed_request_id.clone(), error)
+        })?;
+        let request_id = match RequestId::parse(&request_id_value) {
+            Ok(request_id) => request_id,
+            Err(error) => return Err(RequestDecodeError::with_request_id(None, error)),
+        };
+        let request_id_context = Some(request_id.clone());
         let request = Self {
             schema,
-            request_id: RequestId::parse(&required_string(object, "request_id")?)?,
-            operation: operation_from_value(required_value(object, "operation")?)?,
-            namespace: typed_value(required_value(object, "namespace")?)?,
-            lock: required_string(object, "lock")?,
-            expected: typed_value(required_value(object, "expected")?)?,
+            request_id,
+            operation: operation_from_value(required_value(object, "operation").map_err(
+                |error| RequestDecodeError::with_request_id(request_id_context.clone(), error),
+            )?)
+            .map_err(|error| {
+                RequestDecodeError::with_request_id(request_id_context.clone(), error)
+            })?,
+            namespace: typed_value(required_value(object, "namespace").map_err(|error| {
+                RequestDecodeError::with_request_id(request_id_context.clone(), error)
+            })?)
+            .map_err(|error| {
+                RequestDecodeError::with_request_id(request_id_context.clone(), error)
+            })?,
+            lock: required_string(object, "lock").map_err(|error| {
+                RequestDecodeError::with_request_id(request_id_context.clone(), error)
+            })?,
+            expected: typed_value(required_value(object, "expected").map_err(|error| {
+                RequestDecodeError::with_request_id(request_id_context.clone(), error)
+            })?)
+            .map_err(|error| {
+                RequestDecodeError::with_request_id(request_id_context.clone(), error)
+            })?,
         };
-        request.validate()?;
+        request
+            .validate()
+            .map_err(|error| RequestDecodeError::with_request_id(request_id_context, error))?;
         Ok(request)
     }
 }
@@ -1335,7 +1582,7 @@ impl Response {
         Ok(response)
     }
 
-    pub fn failure(request_id: Option<RequestId>, error: &BrokerError) -> Self {
+    fn failure_with_id(request_id: Option<RequestId>, error: &BrokerError) -> Self {
         Self {
             schema: PROTOCOL_ID.to_owned(),
             request_id,
@@ -1345,6 +1592,18 @@ impl Response {
                 code: error.as_str().to_owned(),
             }),
         }
+    }
+
+    pub fn failure(error: &BrokerError) -> Self {
+        Self::failure_with_id(None, error)
+    }
+
+    pub fn validate_for_request(&self, request: &Request) -> Result<()> {
+        self.validate()?;
+        if self.request_id.as_ref() != Some(&request.request_id) {
+            return Err(BrokerError::new(ErrorCode::InvalidField));
+        }
+        Ok(())
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -1412,9 +1671,10 @@ pub fn encode_request_frame(request: &Request) -> Result<Vec<u8>> {
     encode_frame(&canonical::canonical_serialize_value(request)?)
 }
 
-pub fn decode_request_frame(frame: &[u8]) -> Result<Request> {
-    let payload = decode_frame(frame)?;
-    decode_canonical_payload(payload).and_then(Request::from_value)
+pub fn decode_request_frame(frame: &[u8]) -> core::result::Result<Request, RequestDecodeError> {
+    let payload = decode_frame(frame).map_err(RequestDecodeError::before_id)?;
+    let value = decode_canonical_payload(payload).map_err(RequestDecodeError::before_id)?;
+    Request::from_value_with_context(value)
 }
 
 pub fn encode_response_frame(response: &Response) -> Result<Vec<u8>> {
@@ -1437,6 +1697,14 @@ fn decode_canonical_payload(payload: &[u8]) -> Result<Value> {
         return Err(BrokerError::new(ErrorCode::MalformedRequest));
     }
     value.to_serde()
+}
+
+fn parsed_request_id(value: &Value) -> Option<RequestId> {
+    value
+        .as_object()
+        .and_then(|object| object.get("request_id"))
+        .and_then(|value| value.as_str())
+        .and_then(|value| RequestId::parse(value).ok())
 }
 
 fn response_from_value(value: Value) -> Result<Response> {

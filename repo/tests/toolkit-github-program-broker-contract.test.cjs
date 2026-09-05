@@ -136,6 +136,23 @@ function assertInvalid(value, definition = schema) {
   assert.notDeepEqual(schemaErrors(value, definition), []);
 }
 
+function parserOwnedRequestId(value) {
+  const requestId = value && typeof value === 'object' && !Array.isArray(value)
+    ? value.request_id
+    : null;
+  return typeof requestId === 'string' && /^[a-f0-9]{32}$/.test(requestId) ? requestId : null;
+}
+
+function failureResponseForRequest(value, code) {
+  return {
+    schema: schema.$id,
+    request_id: parserOwnedRequestId(value),
+    ok: false,
+    result: null,
+    error: { code }
+  };
+}
+
 function operationExamples() {
   const digest = 'a'.repeat(64);
   const targetIdentity = { resource_type: 'git_ref', resource_id: 'refs/heads/main' };
@@ -285,25 +302,28 @@ function successValueExamples() {
     created_at: timestamp,
     operation_digest: digest
   };
-  const mutationReadback = (state) => ({
-    kind: 'MUTATION',
-    operation: mutationOperation,
-    state,
-    events: [{
-      event_id: 'event-test',
-      operation_id: 'operation-test',
-      sequence: 1,
-      prior_event_id: null,
-      event_type: 'STATE',
+  const mutationReadback = (state) => {
+    const states = state === 'IN_FLIGHT' ? ['PREPARED', 'IN_FLIGHT'] : ['PREPARED', 'IN_FLIGHT', state];
+    return {
+      kind: 'MUTATION',
+      operation: mutationOperation,
       state,
-      event_at: timestamp,
-      authority_digest: digest,
-      provider_evidence_digest: digest,
-      readback_digest: null,
-      detail_digest: digest,
-      event_digest: digest
-    }]
-  });
+      events: states.map((eventState, index) => ({
+        event_id: `event-${index + 1}`,
+        operation_id: 'operation-test',
+        sequence: index + 1,
+        prior_event_id: index === 0 ? null : `event-${index}`,
+        event_type: index === 0 ? 'PREPARED' : index === 1 ? 'IN_FLIGHT' : 'OUTCOME_RECORDED',
+        state: eventState,
+        event_at: timestamp,
+        authority_digest: digest,
+        provider_evidence_digest: digest,
+        readback_digest: null,
+        detail_digest: digest,
+        event_digest: digest
+      }))
+    };
+  };
   const preRecoveryEvidence = {
     schema: 'toolkit.github-program.pre-recovery-evidence.v1',
     request_id: 'request-test',
@@ -488,6 +508,7 @@ test('typed response algebra binds operation to success value and preserves fail
     result: null,
     error: { code: 'BROKER_UNSUPPORTED_PLATFORM' }
   }, schema.$defs.response);
+  assertInvalid({ ...success, request_id: null }, schema.$defs.response);
   assertInvalid({
     schema: schema.$id,
     request_id: success.request_id,
@@ -495,6 +516,37 @@ test('typed response algebra binds operation to success value and preserves fail
     result: null,
     error: { code: 'BROKER_PRIVATE_DETAIL' }
   }, schema.$defs.response);
+});
+
+test('request-ID failure echo law distinguishes pre-parse, post-parse, and substitution cases', () => {
+  const request = JSON.parse(fixture.request.serialized);
+  const requestId = request.request_id;
+  const nestedInvalid = {
+    ...request,
+    operation: {
+      ...request.operation,
+      descriptor: {
+        ...request.operation.descriptor,
+        target_identity: { resource_type: 'git_ref', resource_id: 'invalid target' }
+      }
+    }
+  };
+  const postParseFailure = failureResponseForRequest(nestedInvalid, 'BROKER_INVALID_FIELD');
+  assert.equal(postParseFailure.request_id, requestId);
+  assertValid(postParseFailure, schema.$defs.response);
+  assert.equal(postParseFailure.request_id, parserOwnedRequestId(nestedInvalid));
+
+  const preParseFailure = failureResponseForRequest(
+    { request_id: 'not-a-request-id' },
+    'BROKER_MALFORMED_REQUEST'
+  );
+  assert.equal(preParseFailure.request_id, null);
+  assertValid(preParseFailure, schema.$defs.response);
+
+  const wrongId = requestId === 'f'.repeat(32) ? 'e'.repeat(32) : 'f'.repeat(32);
+  const substituted = { ...postParseFailure, request_id: wrongId };
+  assertValid(substituted, schema.$defs.response);
+  assert.notEqual(substituted.request_id, parserOwnedRequestId(nestedInvalid));
 });
 
 test('exact per-operation success branches accept only locked shapes', () => {
@@ -522,7 +574,11 @@ test('exact per-operation success branches accept only locked shapes', () => {
     schema: schema.$id,
     request_id: requestId,
     ok: true,
-    result: { operation, value, result_digest: digest },
+    result: {
+      operation,
+      value,
+      result_digest: runtime.digestValue({ operation, value })
+    },
     error: null
   });
   const mutationReadback = examples[5][1].readback;
@@ -552,6 +608,12 @@ test('policy records strict raw-wire and Slice-1 boundaries without protected pe
     unsafe_integers: 'reject',
     failure_request_id: 'echo_valid_parsed_request_id_or_null_before_parse'
   });
+  assert.equal(policy.broker_ipc.readback_integrity.mutation.minimum_events, 2);
+  assert.equal(policy.broker_ipc.readback_integrity.mutation.state_equals_tail, true);
+  assert.equal(
+    policy.broker_ipc.readback_integrity.receipt_chain.chain_digest_after_semantic_validation,
+    true
+  );
   assert.equal(policy.broker_ipc.replay_persistence.protected_sqlite_implementation, false);
   assert.equal(policy.broker_ipc.slice_1_boundary.production_key_creation, false);
   assert.deepEqual(fixture.surrogate_cases.map((item) => item.serialized_hex), [

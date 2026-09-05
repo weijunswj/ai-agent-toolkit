@@ -445,7 +445,7 @@
             "state": { "enum": ["PREPARED", "IN_FLIGHT", "APPLIED", "NOT_APPLIED", "UNKNOWN"] },
             "events": {
               "type": "array",
-              "minItems": 1,
+              "minItems": 2,
               "maxItems": 50000,
               "items": { "$ref": "#/$defs/mutation_event" }
             }
@@ -571,7 +571,7 @@
         "state": { "const": "IN_FLIGHT" },
         "events": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 2,
           "maxItems": 50000,
           "items": { "$ref": "#/$defs/mutation_event" }
         }
@@ -587,7 +587,7 @@
         "state": { "enum": ["APPLIED", "NOT_APPLIED", "UNKNOWN"] },
         "events": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 2,
           "maxItems": 50000,
           "items": { "$ref": "#/$defs/mutation_event" }
         }
@@ -794,6 +794,7 @@
       "oneOf": [
         {
           "properties": {
+            "request_id": { "$ref": "#/$defs/request_id" },
             "ok": { "const": true },
             "result": { "$ref": "#/$defs/response_result" },
             "error": { "type": "null" }
