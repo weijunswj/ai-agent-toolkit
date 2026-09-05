@@ -1,0 +1,86 @@
+name: GitHub Program Broker Release Proof
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'repo/contracts/github-program-receipt/broker-ipc-v1.schema.json'
+      - 'repo/contracts/github-program-receipt/github-program-receipt-policy.json'
+      - 'repo/scripts/github-program-broker/**'
+      - 'repo/tests/toolkit-github-program-broker*.test.cjs'
+      - '.github/workflows/github-program-broker-release-proof.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  release-proof:
+    name: ${{ matrix.os }} / ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+    defaults:
+      run:
+        working-directory: repo/scripts/github-program-broker
+    env:
+      CARGO_TERM_COLOR: never
+      RUST_BACKTRACE: '0'
+
+    steps:
+      - name: Checkout exact pull request head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Install exact Rust toolchain and target
+        shell: bash
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal --no-self-update
+          rustup component add rustfmt clippy --toolchain 1.98.0
+          rustup target add "${{ matrix.target }}" --toolchain 1.98.0
+          rustc +1.98.0 --version --verbose
+          cargo +1.98.0 --version --verbose
+
+      - name: Check formatting
+        shell: bash
+        run: cargo +1.98.0 fmt --all -- --check
+
+      - name: Check all targets
+        shell: bash
+        run: cargo +1.98.0 check --locked --all-targets
+
+      - name: Run clippy with warnings denied
+        shell: bash
+        run: cargo +1.98.0 clippy --locked --all-targets --all-features -- -D warnings
+
+      - name: Run debug contract tests
+        shell: bash
+        run: cargo +1.98.0 test --locked --all-targets
+
+      - name: Build exact release target
+        shell: bash
+        run: cargo +1.98.0 build --locked --release --target "${{ matrix.target }}"
+
+      - name: Run exact release tests
+        shell: bash
+        run: cargo +1.98.0 test --locked --release --target "${{ matrix.target }}"
+
+      - name: Emit public-safe proof metadata
+        shell: bash
+        run: |
+          {
+            echo "### Broker release proof"
+            echo
+            echo "- git_sha: $(git rev-parse HEAD)"
+            echo "- target: ${{ matrix.target }}"
+            echo "- cargo_lock_sha256: $(sha256sum Cargo.lock | awk '{print $1}')"
+            echo "- release_binary_hashes: omitted from artifacts; no binary upload is performed"
+          } >> "$GITHUB_STEP_SUMMARY"

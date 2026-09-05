@@ -135,6 +135,7 @@
           "attestation_digest",
           "attestation_tag"
         ],
+        "process_id_digest": "SHA256(canonicalSerialize([\"toolkit.github-program.process-id.v1\", platform, pid_decimal_string]))",
         "key_value_persisted": false,
         "lease_bound": true,
         "independent_liveness_clock": false,
@@ -417,6 +418,94 @@
     "credentials_secrets_tokens_or_auth_headers": false,
     "durable_values_are_identifiers_digests_timestamps_and_bounded_outcomes": true,
     "payload_fields_are_closed_allowlisted": true
+  },
+  "broker_ipc": {
+    "schema": "toolkit.github-program.broker-ipc.v1",
+    "contract_file": "broker-ipc-v1.schema.json",
+    "operations": [
+      "READBACK_INSPECTION",
+      "ALLOCATE_RUN",
+      "START_RUN",
+      "APPEND_RECEIPT",
+      "INTERRUPT_RUN",
+      "MUTATION_ADMIT",
+      "MUTATION_DISPATCH",
+      "MUTATION_OUTCOME",
+      "MUTATION_RECONCILE",
+      "ORPHAN_RECOVERY",
+      "MIGRATE_V2_TO_V3"
+    ],
+    "mutation_operation_kinds": [
+      "GIT_REF_UPDATE",
+      "CONDITIONAL_PROVIDER_UPDATE",
+      "IDEMPOTENT_SET",
+      "APPEND_CREATE"
+    ],
+    "error_codes": [
+      "BROKER_MALFORMED_FRAME",
+      "BROKER_MALFORMED_REQUEST",
+      "BROKER_UNSUPPORTED_SCHEMA",
+      "BROKER_UNSUPPORTED_OPERATION",
+      "BROKER_INVALID_FIELD",
+      "BROKER_LIMIT_VIOLATION",
+      "BROKER_REQUEST_CONFLICT",
+      "BROKER_BUSY",
+      "BROKER_STALE_EXPECTED_STATE",
+      "BROKER_UNVERIFIABLE_IDENTITY",
+      "BROKER_UNSUPPORTED_PLATFORM",
+      "BROKER_INTERNAL_INVARIANT"
+    ],
+    "framing": {
+      "length_prefix_bytes": 4,
+      "length_byte_order": "big-endian",
+      "payload_encoding": "canonical-utf8-json",
+      "max_payload_bytes": 65536,
+      "one_request_and_response_per_connection": true
+    },
+    "limits": {
+      "nesting_depth": 16,
+      "object_keys": 64,
+      "array_items": 256,
+      "string_bytes": 4096,
+      "request_id_bytes": 16
+    },
+    "wire_rules": {
+      "unknown_keys": "reject_recursively",
+      "duplicate_keys": "reject_before_object_map_construction",
+      "noncanonical_json": "reject",
+      "floats_and_exponents": "reject",
+      "unsafe_integers": "reject",
+      "failure_request_id": "echo_valid_parsed_request_id_or_null_before_parse"
+    },
+    "success_result": {
+      "fields": ["operation", "value", "result_digest"],
+      "operation_matches_value_kind": true,
+      "result_digest": "SHA256(UTF8(canonicalSerialize({operation,value})))",
+      "digest_only_success": false,
+      "top_level_readback": false
+    },
+    "target_identity": {
+      "canonical_bytes_max": 2048,
+      "resource_type_bytes_max": 80,
+      "resource_id_bytes_max": 512
+    },
+    "replay_persistence": {
+      "state": "SLICE_2_CONTRACT_ONLY",
+      "protected_sqlite_implementation": false,
+      "generic_sql_rpc": false,
+      "request_id_is_idempotency_identity": true,
+      "same_digest_replay": "return_exact_persisted_response",
+      "different_digest_replay": "BROKER_REQUEST_CONFLICT"
+    },
+    "slice_1_boundary": {
+      "protected_store": false,
+      "migration_runtime": false,
+      "recovery_runtime": false,
+      "platform_service": false,
+      "production_key_creation": false,
+      "provider_mutation": false,
+      "activation": false
+    }
   },
   "bootstrap": {
     "lock": "DL-S2-GITHUB-PROGRAM-RECEIPT-BOOTSTRAP-001",
