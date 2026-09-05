@@ -1,0 +1,170 @@
+name: GitHub Program Broker Release Proof
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'repo/contracts/github-program-receipt/broker-ipc-v1.schema.json'
+      - 'repo/contracts/github-program-receipt/github-program-receipt-policy.json'
+      - 'repo/scripts/github-program-broker/**'
+      - 'repo/tests/toolkit-github-program-broker*.test.cjs'
+      - '.github/workflows/github-program-broker-release-proof.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  release-proof:
+    name: ${{ matrix.os }} / ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+    defaults:
+      run:
+        working-directory: repo/scripts/github-program-broker
+    env:
+      CARGO_TERM_COLOR: never
+      RUST_BACKTRACE: '0'
+
+    steps:
+      - name: Checkout exact pull request head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install exact Rust toolchain and target
+        shell: bash
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal --no-self-update
+          rustup component add rustfmt clippy --toolchain 1.98.0
+          rustup target add "${{ matrix.target }}" --toolchain 1.98.0
+          rustc +1.98.0 --version --verbose
+          cargo +1.98.0 --version --verbose
+
+      - name: Check formatting
+        shell: bash
+        run: cargo +1.98.0 fmt --all -- --check
+
+      - name: Check all targets
+        shell: bash
+        run: cargo +1.98.0 check --locked --all-targets
+
+      - name: Run clippy with warnings denied
+        shell: bash
+        run: cargo +1.98.0 clippy --locked --all-targets --all-features -- -D warnings
+
+      - name: Run debug contract tests
+        shell: bash
+        run: cargo +1.98.0 test --locked --all-targets
+
+      - name: Build and test exact release target
+        id: release_proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          build_started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          build_command="cargo +1.98.0 build --locked --release --target ${{ matrix.target }}"
+          set +e
+          cargo +1.98.0 build --locked --release --target "${{ matrix.target }}"
+          build_exit=$?
+          set -e
+          build_finished_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          if [ "$build_exit" -ne 0 ]; then
+            echo "release build failed with exit $build_exit"
+            exit "$build_exit"
+          fi
+
+          test_started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          test_command="cargo +1.98.0 test --locked --release --target ${{ matrix.target }}"
+          set +e
+          cargo +1.98.0 test --locked --release --target "${{ matrix.target }}"
+          test_exit=$?
+          set -e
+          test_finished_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          if [ "$test_exit" -ne 0 ]; then
+            echo "release tests failed with exit $test_exit"
+            exit "$test_exit"
+          fi
+
+          {
+            echo "build_started_at=$build_started_at"
+            echo "build_finished_at=$build_finished_at"
+            echo "build_command=$build_command"
+            echo "build_exit=$build_exit"
+            echo "test_started_at=$test_started_at"
+            echo "test_finished_at=$test_finished_at"
+            echo "test_command=$test_command"
+            echo "test_exit=$test_exit"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Emit public-safe proof metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          proof_started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          expected_head_sha="${{ github.event.pull_request.head.sha }}"
+          expected_base_sha="${{ github.event.pull_request.base.sha }}"
+          actual_head_sha="$(git rev-parse HEAD)"
+          head_tree_sha="$(git rev-parse HEAD^{tree})"
+          git cat-file -e "${expected_base_sha}^{commit}"
+          base_tree_sha="$(git rev-parse "${expected_base_sha}^{tree}")"
+          if [ "$actual_head_sha" != "$expected_head_sha" ]; then
+            echo "checked out head does not match the pull request head"
+            exit 1
+          fi
+          target="${{ matrix.target }}"
+          binary_path="target/${target}/release/github-program-broker"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            binary_path+=".exe"
+          fi
+          test -f "$binary_path"
+          release_binary_sha256="$(sha256sum "$binary_path" | awk '{print $1}')"
+          release_binary_bytes="$(wc -c < "$binary_path" | tr -d '[:space:]')"
+          cargo_lock_sha256="$(sha256sum Cargo.lock | awk '{print $1}')"
+          proof_finished_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          {
+            echo "### Broker release proof"
+            echo
+            echo "- pr_number: ${{ github.event.pull_request.number }}"
+            echo "- base_ref: ${{ github.event.pull_request.base.ref }}"
+            echo "- base_sha: $expected_base_sha"
+            echo "- base_tree_sha: $base_tree_sha"
+            echo "- head_sha: $actual_head_sha"
+            echo "- head_tree_sha: $head_tree_sha"
+            echo "- runner_image: ${{ matrix.os }}"
+            echo "- runner_os: ${{ runner.os }}"
+            echo "- runner_architecture: ${{ runner.arch }}"
+            echo "- target: $target"
+            echo "- rust_toolchain: 1.98.0 (rust-toolchain.toml, minimal profile)"
+            echo "- cargo_lock_sha256: $cargo_lock_sha256"
+            echo "- release_build_command: ${{ steps.release_proof.outputs.build_command }}"
+            echo "- release_build_exit: ${{ steps.release_proof.outputs.build_exit }}"
+            echo "- release_build_started_at: ${{ steps.release_proof.outputs.build_started_at }}"
+            echo "- release_build_finished_at: ${{ steps.release_proof.outputs.build_finished_at }}"
+            echo "- release_test_command: ${{ steps.release_proof.outputs.test_command }}"
+            echo "- release_test_exit: ${{ steps.release_proof.outputs.test_exit }}"
+            echo "- release_test_started_at: ${{ steps.release_proof.outputs.test_started_at }}"
+            echo "- release_test_finished_at: ${{ steps.release_proof.outputs.test_finished_at }}"
+            echo "- release_binary_path: $binary_path"
+            echo "- release_binary_sha256: $release_binary_sha256"
+            echo "- release_binary_bytes: $release_binary_bytes"
+            echo "- proof_started_at: $proof_started_at"
+            echo "- proof_finished_at: $proof_finished_at"
+            echo "- binary_upload: none"
+            echo
+            echo "#### Toolchain versions"
+            echo
+            echo '```text'
+            rustc +1.98.0 --version --verbose
+            cargo +1.98.0 --version --verbose
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

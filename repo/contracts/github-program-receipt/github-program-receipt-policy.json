@@ -135,6 +135,7 @@
           "attestation_digest",
           "attestation_tag"
         ],
+        "process_id_digest": "SHA256(canonicalSerialize([\"toolkit.github-program.process-id.v1\", platform, pid_decimal_string]))",
         "key_value_persisted": false,
         "lease_bound": true,
         "independent_liveness_clock": false,
@@ -417,6 +418,166 @@
     "credentials_secrets_tokens_or_auth_headers": false,
     "durable_values_are_identifiers_digests_timestamps_and_bounded_outcomes": true,
     "payload_fields_are_closed_allowlisted": true
+  },
+  "broker_ipc": {
+    "schema": "toolkit.github-program.broker-ipc.v1",
+    "contract_file": "broker-ipc-v1.schema.json",
+    "operations": [
+      "READBACK_INSPECTION",
+      "ALLOCATE_RUN",
+      "START_RUN",
+      "APPEND_RECEIPT",
+      "INTERRUPT_RUN",
+      "MUTATION_ADMIT",
+      "MUTATION_DISPATCH",
+      "MUTATION_OUTCOME",
+      "MUTATION_RECONCILE",
+      "ORPHAN_RECOVERY",
+      "MIGRATE_V2_TO_V3"
+    ],
+    "mutation_operation_kinds": [
+      "GIT_REF_UPDATE",
+      "CONDITIONAL_PROVIDER_UPDATE",
+      "IDEMPOTENT_SET",
+      "APPEND_CREATE"
+    ],
+    "error_codes": [
+      "BROKER_MALFORMED_FRAME",
+      "BROKER_MALFORMED_REQUEST",
+      "BROKER_UNSUPPORTED_SCHEMA",
+      "BROKER_UNSUPPORTED_OPERATION",
+      "BROKER_INVALID_FIELD",
+      "BROKER_LIMIT_VIOLATION",
+      "BROKER_REQUEST_CONFLICT",
+      "BROKER_BUSY",
+      "BROKER_STALE_EXPECTED_STATE",
+      "BROKER_UNVERIFIABLE_IDENTITY",
+      "BROKER_UNSUPPORTED_PLATFORM",
+      "BROKER_INTERNAL_INVARIANT"
+    ],
+    "framing": {
+      "length_prefix_bytes": 4,
+      "length_byte_order": "big-endian",
+      "payload_encoding": "canonical-utf8-json",
+      "max_payload_bytes": 65536,
+      "one_request_and_response_per_connection": true
+    },
+    "limits": {
+      "nesting_depth": 16,
+      "object_keys": 64,
+      "array_items": 256,
+      "string_bytes": 4096,
+      "request_id_bytes": 16
+    },
+    "wire_rules": {
+      "unknown_keys": "reject_recursively",
+      "duplicate_keys": "reject_before_object_map_construction",
+      "noncanonical_json": "reject",
+      "floats_and_exponents": "reject",
+      "unsafe_integers": "reject",
+      "failure_request_id": "echo_valid_parsed_request_id_or_null_before_parse"
+    },
+    "readback_integrity": {
+      "mutation": {
+        "logical_operation_digest": "SHA256(canonicalSerialize({operation_kind,safety_class,target_identity,target_digest,expected_post_state_digest,adapter_identity_digest}))",
+        "operation_digest": "SHA256(canonicalSerialize({operation_id,logical_operation_digest,run_id,allocation_id,lock_id,authority_digest,lease_id,fence_id,fence_sequence,operation_kind,safety_class,target_identity_json,target_digest,source_digest,cas_digest,expected_post_state_digest,provider_operation_key,adapter_identity_digest,retry_of_operation_id,created_at}))",
+        "event_digest": "SHA256(canonicalSerialize({event_id,operation_id,sequence,prior_event_id,event_type,state,event_at,authority_digest,provider_evidence_digest,readback_digest,detail_digest}))",
+        "minimum_events": 2,
+        "first_event": { "event_type": "PREPARED", "state": "PREPARED" },
+        "second_event": { "event_type": "IN_FLIGHT", "state": "IN_FLIGHT" },
+        "later_state_transitions": [
+          "PREPARED->IN_FLIGHT",
+          "IN_FLIGHT->APPLIED",
+          "IN_FLIGHT->NOT_APPLIED",
+          "IN_FLIGHT->UNKNOWN",
+          "UNKNOWN->APPLIED",
+          "UNKNOWN->NOT_APPLIED",
+          "UNKNOWN->UNKNOWN"
+        ],
+        "chronology": "event_1_at >= operation_created_at and nondecreasing",
+        "state_equals_tail": true
+      },
+      "receipt_chain": {
+        "chain_digest_after_semantic_validation": true,
+        "outer_run_id_binding": true,
+        "sequence": "exactly_contiguous_from_1",
+        "prior_receipt_id": "exact_previous_receipt_id",
+        "common_bindings": [
+          "repository",
+          "parent_issue",
+          "child_issue",
+          "lock",
+          "run_id",
+          "allocation_id",
+          "authority",
+          "start",
+          "lease"
+        ],
+        "chronology": "nondecreasing_created_at",
+        "candidate": {
+          "initial": null,
+          "introduction_receipt_type": "TRANSITION_PREVIEW",
+          "immutable_after_introduction": true
+        },
+        "terminal_types": ["EXECUTOR_TERMINAL", "G4_TERMINAL", "RUN_INTERRUPTED"],
+        "receipts_after_terminal": false
+      }
+    },
+    "success_result": {
+      "fields": ["operation", "value", "result_digest"],
+      "operation_matches_value_kind": true,
+      "result_digest": "SHA256(UTF8(canonicalSerialize({operation,value})))",
+      "digest_only_success": false,
+      "top_level_readback": false,
+      "value_branches": {
+        "READBACK_INSPECTION": ["kind", "target", "readback"],
+        "ALLOCATE_RUN": ["kind", "allocation", "started", "run_started_receipt_id"],
+        "START_RUN": ["kind", "allocation", "started", "run_started_receipt_id"],
+        "APPEND_RECEIPT": ["kind", "receipt", "duplicate"],
+        "INTERRUPT_RUN": ["kind", "receipt", "duplicate"],
+        "MUTATION_ADMIT": ["kind", "readback"],
+        "MUTATION_DISPATCH": ["kind", "readback"],
+        "MUTATION_OUTCOME": ["kind", "readback"],
+        "MUTATION_RECONCILE": ["kind", "readback"],
+        "ORPHAN_RECOVERY": ["kind", "recovery_record", "replacement_allocation"],
+        "MIGRATE_V2_TO_V3": [
+          "kind",
+          "status",
+          "source_schema_fingerprint",
+          "destination_schema_fingerprint",
+          "namespace_digest",
+          "store_binding_digest"
+        ]
+      },
+      "mutation_admit_and_dispatch_state": "IN_FLIGHT",
+      "mutation_outcome_states": ["APPLIED", "NOT_APPLIED", "UNKNOWN"],
+      "allocate_run_started": false,
+      "allocate_run_started_receipt_id": null,
+      "start_run_started": true,
+      "migration_status": "MIGRATED"
+    },
+    "target_identity": {
+      "canonical_bytes_max": 2048,
+      "resource_type_bytes_max": 80,
+      "resource_id_bytes_max": 512
+    },
+    "replay_persistence": {
+      "state": "SLICE_2_CONTRACT_ONLY",
+      "protected_sqlite_implementation": false,
+      "generic_sql_rpc": false,
+      "request_id_is_idempotency_identity": true,
+      "same_digest_replay": "return_exact_persisted_response",
+      "different_digest_replay": "BROKER_REQUEST_CONFLICT"
+    },
+    "slice_1_boundary": {
+      "protected_store": false,
+      "migration_runtime": false,
+      "recovery_runtime": false,
+      "platform_service": false,
+      "production_key_creation": false,
+      "provider_mutation": false,
+      "activation": false
+    }
   },
   "bootstrap": {
     "lock": "DL-S2-GITHUB-PROGRAM-RECEIPT-BOOTSTRAP-001",
