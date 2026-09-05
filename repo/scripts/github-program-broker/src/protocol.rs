@@ -403,6 +403,181 @@ impl RunAllocation {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct PreRecoveryEvidence {
+    pub schema: String,
+    pub request_id: String,
+    pub repository: String,
+    pub parent_issue: u64,
+    pub child_issue: u64,
+    pub lock: String,
+    pub namespace_digest: Digest,
+    pub old_allocation_id: String,
+    pub old_run_id: String,
+    pub old_allocation_digest: Digest,
+    pub old_run_digest: Digest,
+    pub old_lease_id: String,
+    pub old_fence_id: String,
+    pub old_fence_sequence: u64,
+    pub old_lease_issued_at: String,
+    pub old_lease_expires_at: String,
+    pub old_lease_tip_event_id: String,
+    pub old_lease_tip_event_digest: Digest,
+    pub old_receipt_tip_id: Digest,
+    pub old_receipt_tip_sequence: u64,
+    pub old_receipt_tip_digest: Digest,
+    pub old_receipt_chain_digest: Digest,
+    pub zero_operation_count: u64,
+    pub zero_operation_event_count: u64,
+    pub zero_operation_inventory_digest: Digest,
+    pub authority_digest: Digest,
+    pub source_digest: Digest,
+    pub start_digest: Digest,
+    pub old_holder_classification: String,
+    pub old_holder_identity_digest: Digest,
+    pub old_holder_attestation_digest: Digest,
+    pub recovery_peer_platform: String,
+    pub recovery_peer_identity_digest: Digest,
+    pub recovery_peer_process_incarnation_digest: Digest,
+    pub broker_identity_digest: Digest,
+    pub broker_key_id: String,
+    pub observed_at: String,
+    pub authority_observed_at: String,
+    pub source_observed_at: String,
+    pub start_observed_at: String,
+    pub store_observed_at: String,
+    pub holder_observed_at: String,
+}
+
+impl PreRecoveryEvidence {
+    fn validate(&self) -> Result<()> {
+        if self.schema != "toolkit.github-program.pre-recovery-evidence.v1"
+            || self.zero_operation_count != 0
+            || self.zero_operation_event_count != 0
+            || self.old_holder_classification != "ORPHAN_NONADOPTABLE"
+            || !matches!(self.recovery_peer_platform.as_str(), "windows" | "linux")
+        {
+            return Err(BrokerError::new(ErrorCode::InvalidField));
+        }
+        validate_recovery_identifier(&self.request_id)?;
+        validate_repository(&self.repository)?;
+        validate_issue(self.parent_issue)?;
+        validate_issue(self.child_issue)?;
+        validate_recovery_identifier(&self.lock)?;
+        for value in [
+            &self.old_allocation_id,
+            &self.old_run_id,
+            &self.old_lease_id,
+            &self.old_fence_id,
+            &self.old_lease_tip_event_id,
+            &self.broker_key_id,
+        ] {
+            validate_recovery_identifier(value)?;
+        }
+        validate_issue(self.old_fence_sequence)?;
+        validate_issue(self.old_receipt_tip_sequence)?;
+        for value in [
+            &self.old_lease_issued_at,
+            &self.old_lease_expires_at,
+            &self.observed_at,
+            &self.authority_observed_at,
+            &self.source_observed_at,
+            &self.start_observed_at,
+            &self.store_observed_at,
+            &self.holder_observed_at,
+        ] {
+            if !crypto::is_timestamp(value) {
+                return Err(BrokerError::new(ErrorCode::InvalidField));
+            }
+        }
+        if self.old_lease_expires_at <= self.old_lease_issued_at {
+            return Err(BrokerError::new(ErrorCode::InvalidField));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecoveryRecord {
+    pub schema: String,
+    pub recovery_record_id: String,
+    pub request_id: String,
+    pub namespace_digest: Digest,
+    pub old_allocation_id: String,
+    pub old_run_id: String,
+    pub old_lease_id: String,
+    pub old_fence_id: String,
+    pub old_fence_sequence: u64,
+    pub pre_recovery_evidence: PreRecoveryEvidence,
+    pub pre_recovery_evidence_digest: Digest,
+    pub terminal_receipt_id: Digest,
+    pub terminal_receipt_digest: Digest,
+    pub release_event_id: String,
+    pub release_event_digest: Digest,
+    pub replacement_allocation_id: String,
+    pub replacement_allocation_digest: Digest,
+    pub replacement_run_id: String,
+    pub replacement_run_digest: Digest,
+    pub replacement_lease_id: String,
+    pub replacement_fence_id: String,
+    pub replacement_fence_sequence: u64,
+    pub replacement_holder_attestation_id: String,
+    pub replacement_holder_attestation_digest: Digest,
+    pub new_high_water: u64,
+    pub authority_digest: Digest,
+    pub source_digest: Digest,
+    pub start_digest: Digest,
+    pub committed_at: String,
+    pub recovery_record_digest: Digest,
+}
+
+impl RecoveryRecord {
+    fn validate(&self) -> Result<()> {
+        if self.schema != "toolkit.github-program.recovery-record.v1"
+            || self.replacement_fence_sequence < 2
+            || self.new_high_water < 2
+        {
+            return Err(BrokerError::new(ErrorCode::InvalidField));
+        }
+        for value in [
+            &self.recovery_record_id,
+            &self.request_id,
+            &self.old_allocation_id,
+            &self.old_run_id,
+            &self.old_lease_id,
+            &self.old_fence_id,
+            &self.release_event_id,
+            &self.replacement_allocation_id,
+            &self.replacement_run_id,
+            &self.replacement_lease_id,
+            &self.replacement_fence_id,
+            &self.replacement_holder_attestation_id,
+        ] {
+            validate_recovery_identifier(value)?;
+        }
+        validate_issue(self.old_fence_sequence)?;
+        self.pre_recovery_evidence.validate()?;
+        if canonical::canonical_digest_value(&self.pre_recovery_evidence)?
+            != self.pre_recovery_evidence_digest
+            || !crypto::is_timestamp(&self.committed_at)
+        {
+            return Err(BrokerError::new(ErrorCode::InvalidField));
+        }
+        let mut value = serde_json::to_value(self)
+            .map_err(|_| BrokerError::new(ErrorCode::InternalInvariant))?;
+        value
+            .as_object_mut()
+            .ok_or_else(|| BrokerError::new(ErrorCode::InternalInvariant))?
+            .remove("recovery_record_digest");
+        if canonical::canonical_digest(&value)? != self.recovery_record_digest {
+            return Err(BrokerError::new(ErrorCode::InvalidField));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ReceiptRecord {
     pub schema: String,
     pub receipt_type: ReceiptType,
@@ -736,7 +911,7 @@ impl Readback {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub enum ReadbackTarget {
     #[serde(rename = "NAMESPACE")]
     Namespace,
@@ -932,9 +1107,16 @@ impl Request {
 #[serde(tag = "kind")]
 pub enum SuccessValue {
     #[serde(rename = "READBACK_INSPECTION")]
-    ReadbackInspection { readback: Readback },
+    ReadbackInspection {
+        target: ReadbackTarget,
+        readback: Readback,
+    },
     #[serde(rename = "ALLOCATE_RUN")]
-    AllocateRun { allocation: RunAllocation },
+    AllocateRun {
+        allocation: RunAllocation,
+        started: bool,
+        run_started_receipt_id: Option<Digest>,
+    },
     #[serde(rename = "START_RUN")]
     StartRun {
         allocation: RunAllocation,
@@ -944,27 +1126,33 @@ pub enum SuccessValue {
     #[serde(rename = "APPEND_RECEIPT")]
     AppendReceipt {
         receipt: ReceiptRecord,
-        chain_digest: Digest,
+        duplicate: bool,
     },
     #[serde(rename = "INTERRUPT_RUN")]
-    InterruptRun { receipt: ReceiptRecord },
-    #[serde(rename = "MUTATION_ADMIT")]
-    MutationAdmit { operation: MutationOperation },
-    #[serde(rename = "MUTATION_DISPATCH")]
-    MutationDispatch { event: MutationEvent },
-    #[serde(rename = "MUTATION_OUTCOME")]
-    MutationOutcome {
-        operation: MutationOperation,
-        event: MutationEvent,
+    InterruptRun {
+        receipt: ReceiptRecord,
+        duplicate: bool,
     },
+    #[serde(rename = "MUTATION_ADMIT")]
+    MutationAdmit { readback: Readback },
+    #[serde(rename = "MUTATION_DISPATCH")]
+    MutationDispatch { readback: Readback },
+    #[serde(rename = "MUTATION_OUTCOME")]
+    MutationOutcome { readback: Readback },
     #[serde(rename = "MUTATION_RECONCILE")]
     MutationReconcile { readback: Readback },
     #[serde(rename = "ORPHAN_RECOVERY")]
-    OrphanRecovery { recovery: Readback },
+    OrphanRecovery {
+        recovery_record: Box<RecoveryRecord>,
+        replacement_allocation: RunAllocation,
+    },
     #[serde(rename = "MIGRATE_V2_TO_V3")]
     MigrateV2ToV3 {
+        status: String,
         source_schema_fingerprint: Digest,
-        result_digest: Digest,
+        destination_schema_fingerprint: Digest,
+        namespace_digest: Digest,
+        store_binding_digest: Digest,
     },
 }
 
@@ -987,39 +1175,89 @@ impl SuccessValue {
 
     fn validate(&self) -> Result<()> {
         match self {
-            Self::ReadbackInspection { readback } | Self::MutationReconcile { readback } => {
-                readback.validate()
+            Self::ReadbackInspection { target, readback } => {
+                readback.validate()?;
+                if !readback_matches_target(target, readback) {
+                    return Err(BrokerError::new(ErrorCode::InvalidField));
+                }
+                Ok(())
             }
-            Self::AllocateRun { allocation } => allocation.validate(),
+            Self::AllocateRun {
+                allocation,
+                started,
+                run_started_receipt_id,
+            } => {
+                allocation.validate()?;
+                if *started || run_started_receipt_id.is_some() {
+                    return Err(BrokerError::new(ErrorCode::InvalidField));
+                }
+                Ok(())
+            }
             Self::StartRun {
                 allocation,
                 started,
                 run_started_receipt_id,
             } => {
                 allocation.validate()?;
-                if *started != run_started_receipt_id.is_some() {
+                if !*started || run_started_receipt_id.is_none() {
                     return Err(BrokerError::new(ErrorCode::InvalidField));
                 }
                 Ok(())
             }
-            Self::AppendReceipt { receipt, .. } | Self::InterruptRun { receipt } => {
+            Self::AppendReceipt { receipt, .. } | Self::InterruptRun { receipt, .. } => {
                 receipt.validate()
             }
-            Self::MutationAdmit { operation } => operation.validate(),
-            Self::MutationDispatch { event } => {
-                if event.sequence == 0 {
-                    Err(BrokerError::new(ErrorCode::InvalidField))
-                } else {
-                    Ok(())
+            Self::MutationAdmit { readback } | Self::MutationDispatch { readback } => {
+                validate_mutation_readback(readback, &[MutationState::InFlight])
+            }
+            Self::MutationOutcome { readback } => validate_mutation_readback(
+                readback,
+                &[
+                    MutationState::Applied,
+                    MutationState::NotApplied,
+                    MutationState::Unknown,
+                ],
+            ),
+            Self::MutationReconcile { readback } => readback.validate(),
+            Self::OrphanRecovery {
+                recovery_record,
+                replacement_allocation,
+            } => {
+                recovery_record.validate()?;
+                replacement_allocation.validate()
+            }
+            Self::MigrateV2ToV3 {
+                status,
+                source_schema_fingerprint: _,
+                destination_schema_fingerprint: _,
+                namespace_digest: _,
+                store_binding_digest: _,
+            } => {
+                if status != "MIGRATED" {
+                    return Err(BrokerError::new(ErrorCode::InvalidField));
                 }
+                Ok(())
             }
-            Self::MutationOutcome { operation, event } => {
-                operation.validate()?;
-                event.validate(operation)
-            }
-            Self::OrphanRecovery { recovery } => recovery.validate(),
-            Self::MigrateV2ToV3 { .. } => Ok(()),
         }
+    }
+}
+
+fn readback_matches_target(target: &ReadbackTarget, readback: &Readback) -> bool {
+    matches!(
+        (target, readback),
+        (ReadbackTarget::Namespace, Readback::Namespace { .. })
+            | (ReadbackTarget::Run, Readback::Run { .. })
+            | (ReadbackTarget::ReceiptChain, Readback::ReceiptChain { .. })
+            | (ReadbackTarget::Mutation, Readback::Mutation { .. })
+            | (ReadbackTarget::Recovery, Readback::Recovery { .. })
+    )
+}
+
+fn validate_mutation_readback(readback: &Readback, allowed_states: &[MutationState]) -> Result<()> {
+    readback.validate()?;
+    match readback {
+        Readback::Mutation { state, .. } if allowed_states.contains(state) => Ok(()),
+        _ => Err(BrokerError::new(ErrorCode::InvalidField)),
     }
 }
 
@@ -1267,15 +1505,21 @@ fn success_value_from_value(value: &Value) -> Result<SuccessValue> {
     let kind = required_string(object, "kind")?;
     match kind.as_str() {
         "READBACK_INSPECTION" => {
-            require_exact_keys(object, &["kind", "readback"])?;
+            require_exact_keys(object, &["kind", "readback", "target"])?;
             Ok(SuccessValue::ReadbackInspection {
+                target: parse_readback_target(&required_string(object, "target")?)?,
                 readback: readback_from_value(required_value(object, "readback")?)?,
             })
         }
         "ALLOCATE_RUN" => {
-            require_exact_keys(object, &["allocation", "kind"])?;
+            require_exact_keys(
+                object,
+                &["allocation", "kind", "run_started_receipt_id", "started"],
+            )?;
             Ok(SuccessValue::AllocateRun {
                 allocation: typed_value(required_value(object, "allocation")?)?,
+                started: required_bool(object, "started")?,
+                run_started_receipt_id: optional_digest(object, "run_started_receipt_id")?,
             })
         }
         "START_RUN" => {
@@ -1290,35 +1534,35 @@ fn success_value_from_value(value: &Value) -> Result<SuccessValue> {
             })
         }
         "APPEND_RECEIPT" => {
-            require_exact_keys(object, &["chain_digest", "kind", "receipt"])?;
+            require_exact_keys(object, &["duplicate", "kind", "receipt"])?;
             Ok(SuccessValue::AppendReceipt {
                 receipt: typed_value(required_value(object, "receipt")?)?,
-                chain_digest: required_digest(object, "chain_digest")?,
+                duplicate: required_bool(object, "duplicate")?,
             })
         }
         "INTERRUPT_RUN" => {
-            require_exact_keys(object, &["kind", "receipt"])?;
+            require_exact_keys(object, &["duplicate", "kind", "receipt"])?;
             Ok(SuccessValue::InterruptRun {
                 receipt: typed_value(required_value(object, "receipt")?)?,
+                duplicate: required_bool(object, "duplicate")?,
             })
         }
         "MUTATION_ADMIT" => {
-            require_exact_keys(object, &["kind", "operation"])?;
+            require_exact_keys(object, &["kind", "readback"])?;
             Ok(SuccessValue::MutationAdmit {
-                operation: typed_value(required_value(object, "operation")?)?,
+                readback: readback_from_value(required_value(object, "readback")?)?,
             })
         }
         "MUTATION_DISPATCH" => {
-            require_exact_keys(object, &["event", "kind"])?;
+            require_exact_keys(object, &["kind", "readback"])?;
             Ok(SuccessValue::MutationDispatch {
-                event: typed_value(required_value(object, "event")?)?,
+                readback: readback_from_value(required_value(object, "readback")?)?,
             })
         }
         "MUTATION_OUTCOME" => {
-            require_exact_keys(object, &["event", "kind", "operation"])?;
+            require_exact_keys(object, &["kind", "readback"])?;
             Ok(SuccessValue::MutationOutcome {
-                operation: typed_value(required_value(object, "operation")?)?,
-                event: typed_value(required_value(object, "event")?)?,
+                readback: readback_from_value(required_value(object, "readback")?)?,
             })
         }
         "MUTATION_RECONCILE" => {
@@ -1328,19 +1572,42 @@ fn success_value_from_value(value: &Value) -> Result<SuccessValue> {
             })
         }
         "ORPHAN_RECOVERY" => {
-            require_exact_keys(object, &["kind", "recovery"])?;
+            require_exact_keys(
+                object,
+                &["kind", "recovery_record", "replacement_allocation"],
+            )?;
             Ok(SuccessValue::OrphanRecovery {
-                recovery: readback_from_value(required_value(object, "recovery")?)?,
+                recovery_record: Box::new(typed_value(required_value(object, "recovery_record")?)?),
+                replacement_allocation: typed_value(required_value(
+                    object,
+                    "replacement_allocation",
+                )?)?,
             })
         }
         "MIGRATE_V2_TO_V3" => {
             require_exact_keys(
                 object,
-                &["kind", "result_digest", "source_schema_fingerprint"],
+                &[
+                    "destination_schema_fingerprint",
+                    "kind",
+                    "namespace_digest",
+                    "source_schema_fingerprint",
+                    "status",
+                    "store_binding_digest",
+                ],
             )?;
+            if required_string(object, "status")? != "MIGRATED" {
+                return Err(BrokerError::new(ErrorCode::InvalidField));
+            }
             Ok(SuccessValue::MigrateV2ToV3 {
+                status: "MIGRATED".to_owned(),
                 source_schema_fingerprint: required_digest(object, "source_schema_fingerprint")?,
-                result_digest: required_digest(object, "result_digest")?,
+                destination_schema_fingerprint: required_digest(
+                    object,
+                    "destination_schema_fingerprint",
+                )?,
+                namespace_digest: required_digest(object, "namespace_digest")?,
+                store_binding_digest: required_digest(object, "store_binding_digest")?,
             })
         }
         _ => Err(BrokerError::new(ErrorCode::UnsupportedOperation)),
@@ -1611,6 +1878,21 @@ fn validate_identifier(value: &str) -> Result<()> {
         || !value.bytes().all(|byte| {
             byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'/' | b'-')
         })
+    {
+        Err(BrokerError::new(ErrorCode::InvalidField))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_recovery_identifier(value: &str) -> Result<()> {
+    if value.is_empty()
+        || value.len() > 160
+        || value.starts_with('-')
+        || value.contains("..")
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b':' | b'-'))
     {
         Err(BrokerError::new(ErrorCode::InvalidField))
     } else {

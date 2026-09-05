@@ -482,7 +482,33 @@
       "operation_matches_value_kind": true,
       "result_digest": "SHA256(UTF8(canonicalSerialize({operation,value})))",
       "digest_only_success": false,
-      "top_level_readback": false
+      "top_level_readback": false,
+      "value_branches": {
+        "READBACK_INSPECTION": ["kind", "target", "readback"],
+        "ALLOCATE_RUN": ["kind", "allocation", "started", "run_started_receipt_id"],
+        "START_RUN": ["kind", "allocation", "started", "run_started_receipt_id"],
+        "APPEND_RECEIPT": ["kind", "receipt", "duplicate"],
+        "INTERRUPT_RUN": ["kind", "receipt", "duplicate"],
+        "MUTATION_ADMIT": ["kind", "readback"],
+        "MUTATION_DISPATCH": ["kind", "readback"],
+        "MUTATION_OUTCOME": ["kind", "readback"],
+        "MUTATION_RECONCILE": ["kind", "readback"],
+        "ORPHAN_RECOVERY": ["kind", "recovery_record", "replacement_allocation"],
+        "MIGRATE_V2_TO_V3": [
+          "kind",
+          "status",
+          "source_schema_fingerprint",
+          "destination_schema_fingerprint",
+          "namespace_digest",
+          "store_binding_digest"
+        ]
+      },
+      "mutation_admit_and_dispatch_state": "IN_FLIGHT",
+      "mutation_outcome_states": ["APPLIED", "NOT_APPLIED", "UNKNOWN"],
+      "allocate_run_started": false,
+      "allocate_run_started_receipt_id": null,
+      "start_run_started": true,
+      "migration_status": "MIGRATED"
     },
     "target_identity": {
       "canonical_bytes_max": 2048,

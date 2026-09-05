@@ -478,19 +478,56 @@
     "success_readback_inspection": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "readback"],
+      "required": ["kind", "target", "readback"],
       "properties": {
         "kind": { "const": "READBACK_INSPECTION" },
+        "target": {
+          "enum": ["NAMESPACE", "RUN", "RECEIPT_CHAIN", "MUTATION", "RECOVERY"]
+        },
         "readback": { "$ref": "#/$defs/readback" }
-      }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "target": { "const": "NAMESPACE" },
+            "readback": { "properties": { "kind": { "const": "NAMESPACE" } } }
+          }
+        },
+        {
+          "properties": {
+            "target": { "const": "RUN" },
+            "readback": { "properties": { "kind": { "const": "RUN" } } }
+          }
+        },
+        {
+          "properties": {
+            "target": { "const": "RECEIPT_CHAIN" },
+            "readback": { "properties": { "kind": { "const": "RECEIPT_CHAIN" } } }
+          }
+        },
+        {
+          "properties": {
+            "target": { "const": "MUTATION" },
+            "readback": { "properties": { "kind": { "const": "MUTATION" } } }
+          }
+        },
+        {
+          "properties": {
+            "target": { "const": "RECOVERY" },
+            "readback": { "properties": { "kind": { "const": "RECOVERY" } } }
+          }
+        }
+      ]
     },
     "success_allocate_run": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "allocation"],
+      "required": ["kind", "allocation", "started", "run_started_receipt_id"],
       "properties": {
         "kind": { "const": "ALLOCATE_RUN" },
-        "allocation": { "$ref": "#/$defs/run_allocation" }
+        "allocation": { "$ref": "#/$defs/run_allocation" },
+        "started": { "const": false },
+        "run_started_receipt_id": { "type": "null" }
       }
     },
     "success_start_run": {
@@ -500,57 +537,87 @@
       "properties": {
         "kind": { "const": "START_RUN" },
         "allocation": { "$ref": "#/$defs/run_allocation" },
-        "started": { "type": "boolean" },
-        "run_started_receipt_id": {
-          "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }]
-        }
+        "started": { "const": true },
+        "run_started_receipt_id": { "$ref": "#/$defs/digest" }
       }
     },
     "success_append_receipt": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "receipt", "chain_digest"],
+      "required": ["kind", "receipt", "duplicate"],
       "properties": {
         "kind": { "const": "APPEND_RECEIPT" },
         "receipt": { "$ref": "#/$defs/receipt" },
-        "chain_digest": { "$ref": "#/$defs/digest" }
+        "duplicate": { "type": "boolean" }
       }
     },
     "success_interrupt_run": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "receipt"],
+      "required": ["kind", "receipt", "duplicate"],
       "properties": {
         "kind": { "const": "INTERRUPT_RUN" },
-        "receipt": { "$ref": "#/$defs/receipt" }
+        "receipt": { "$ref": "#/$defs/receipt" },
+        "duplicate": { "type": "boolean" }
+      }
+    },
+    "mutation_readback_in_flight": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "operation", "state", "events"],
+      "properties": {
+        "kind": { "const": "MUTATION" },
+        "operation": { "$ref": "#/$defs/mutation_operation" },
+        "state": { "const": "IN_FLIGHT" },
+        "events": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50000,
+          "items": { "$ref": "#/$defs/mutation_event" }
+        }
+      }
+    },
+    "mutation_readback_outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "operation", "state", "events"],
+      "properties": {
+        "kind": { "const": "MUTATION" },
+        "operation": { "$ref": "#/$defs/mutation_operation" },
+        "state": { "enum": ["APPLIED", "NOT_APPLIED", "UNKNOWN"] },
+        "events": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50000,
+          "items": { "$ref": "#/$defs/mutation_event" }
+        }
       }
     },
     "success_mutation_admit": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "operation"],
+      "required": ["kind", "readback"],
       "properties": {
         "kind": { "const": "MUTATION_ADMIT" },
-        "operation": { "$ref": "#/$defs/mutation_operation" }
+        "readback": { "$ref": "#/$defs/mutation_readback_in_flight" }
       }
     },
     "success_mutation_dispatch": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "event"],
+      "required": ["kind", "readback"],
       "properties": {
         "kind": { "const": "MUTATION_DISPATCH" },
-        "event": { "$ref": "#/$defs/mutation_event" }
+        "readback": { "$ref": "#/$defs/mutation_readback_in_flight" }
       }
     },
     "success_mutation_outcome": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "operation", "event"],
+      "required": ["kind", "readback"],
       "properties": {
         "kind": { "const": "MUTATION_OUTCOME" },
-        "operation": { "$ref": "#/$defs/mutation_operation" },
-        "event": { "$ref": "#/$defs/mutation_event" }
+        "readback": { "$ref": "#/$defs/mutation_readback_outcome" }
       }
     },
     "success_mutation_reconcile": {
@@ -565,20 +632,31 @@
     "success_orphan_recovery": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "recovery"],
+      "required": ["kind", "recovery_record", "replacement_allocation"],
       "properties": {
         "kind": { "const": "ORPHAN_RECOVERY" },
-        "recovery": { "$ref": "#/$defs/readback" }
+        "recovery_record": { "$ref": "recovery-record-v1.schema.json#" },
+        "replacement_allocation": { "$ref": "#/$defs/run_allocation" }
       }
     },
     "success_migrate_v2_to_v3": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "source_schema_fingerprint", "result_digest"],
+      "required": [
+        "kind",
+        "status",
+        "source_schema_fingerprint",
+        "destination_schema_fingerprint",
+        "namespace_digest",
+        "store_binding_digest"
+      ],
       "properties": {
         "kind": { "const": "MIGRATE_V2_TO_V3" },
+        "status": { "const": "MIGRATED" },
         "source_schema_fingerprint": { "$ref": "#/$defs/digest" },
-        "result_digest": { "$ref": "#/$defs/digest" }
+        "destination_schema_fingerprint": { "$ref": "#/$defs/digest" },
+        "namespace_digest": { "$ref": "#/$defs/digest" },
+        "store_binding_digest": { "$ref": "#/$defs/digest" }
       }
     },
     "response_result": {

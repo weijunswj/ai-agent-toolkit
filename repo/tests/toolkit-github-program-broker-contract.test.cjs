@@ -10,13 +10,17 @@ const scriptRoot = path.join(__dirname, '..', 'scripts');
 const schemaPath = path.join(contractRoot, 'broker-ipc-v1.schema.json');
 const schema = readJson(schemaPath);
 const receiptSchema = readJson(path.join(contractRoot, 'run-receipt-v1.schema.json'));
+const recoverySchema = readJson(path.join(contractRoot, 'recovery-record-v1.schema.json'));
+const preRecoverySchema = readJson(path.join(contractRoot, 'pre-recovery-evidence-v1.schema.json'));
 const policy = readJson(path.join(contractRoot, 'github-program-receipt-policy.json'));
 const fixture = readJson(path.join(scriptRoot, 'github-program-broker', 'tests', 'fixtures', 'source-slice-1-vectors.json'));
 const runtime = require(path.join(scriptRoot, 'toolkit-github-program-receipt.cjs'));
 
 const documents = new Map([
   [path.basename(schemaPath), schema],
-  ['run-receipt-v1.schema.json', receiptSchema]
+  ['run-receipt-v1.schema.json', receiptSchema],
+  ['recovery-record-v1.schema.json', recoverySchema],
+  ['pre-recovery-evidence-v1.schema.json', preRecoverySchema]
 ]);
 
 function readJson(filePath) {
@@ -203,6 +207,206 @@ function operationExamples() {
   ];
 }
 
+function successValueExamples() {
+  const digest = 'a'.repeat(64);
+  const timestamp = '2026-09-04T12:00:00.000Z';
+  const authority = {
+    child_comment_id: 359,
+    parent_comment_id: 240,
+    node_id: 'node-id',
+    author_login: 'owner',
+    author_association: 'OWNER',
+    body_digest: digest,
+    updated_at: timestamp,
+    update_identity_digest: digest,
+    scope_digest: digest
+  };
+  const start = {
+    base_sha: '0'.repeat(40),
+    head_sha: '1'.repeat(40),
+    tree_sha: '2'.repeat(40),
+    status_digest: digest,
+    clean_worktree: true,
+    ref: { detached: false, name: 'refs/heads/main' }
+  };
+  const lease = {
+    lease_id: 'lease-test',
+    fence_id: 'fence-test',
+    fence_sequence: 1,
+    issued_at: timestamp,
+    expires_at: '2026-09-04T13:00:00.000Z'
+  };
+  const allocation = {
+    allocation_id: 'allocation-test',
+    run_id: 'run-test',
+    lock: 'lock-test',
+    lease
+  };
+  const receipt = {
+    schema: 'toolkit.github-program.run-receipt.v1',
+    receipt_type: 'RUN_STARTED',
+    receipt_id: digest,
+    sequence: 1,
+    prior_receipt_id: null,
+    run_id: 'run-test',
+    allocation_id: 'allocation-test',
+    repository: 'weijunswj/ai-agent-toolkit',
+    parent_issue: 240,
+    child_issue: 359,
+    lock: 'lock-test',
+    authority,
+    start,
+    candidate: null,
+    lease,
+    payload: { classification: 'RUN_STARTED' },
+    created_at: timestamp
+  };
+  const targetIdentity = { resource_type: 'git_ref', resource_id: 'refs/heads/main' };
+  const mutationOperation = {
+    operation_id: 'operation-test',
+    logical_operation_digest: digest,
+    run_id: 'run-test',
+    allocation_id: 'allocation-test',
+    lock: 'lock-test',
+    authority_digest: digest,
+    lease_id: 'lease-test',
+    fence_id: 'fence-test',
+    fence_sequence: 1,
+    operation_kind: 'GIT_REF_UPDATE',
+    safety_class: 'CAS',
+    target_identity: targetIdentity,
+    target_digest: digest,
+    expected_source_digest: digest,
+    cas_digest: digest,
+    expected_post_state_digest: digest,
+    provider_operation_key: 'gpr:operation-test',
+    adapter_identity_digest: digest,
+    retry_of_operation_id: null,
+    created_at: timestamp,
+    operation_digest: digest
+  };
+  const mutationReadback = (state) => ({
+    kind: 'MUTATION',
+    operation: mutationOperation,
+    state,
+    events: [{
+      event_id: 'event-test',
+      operation_id: 'operation-test',
+      sequence: 1,
+      prior_event_id: null,
+      event_type: 'STATE',
+      state,
+      event_at: timestamp,
+      authority_digest: digest,
+      provider_evidence_digest: digest,
+      readback_digest: null,
+      detail_digest: digest,
+      event_digest: digest
+    }]
+  });
+  const preRecoveryEvidence = {
+    schema: 'toolkit.github-program.pre-recovery-evidence.v1',
+    request_id: 'request-test',
+    repository: 'weijunswj/ai-agent-toolkit',
+    parent_issue: 240,
+    child_issue: 359,
+    lock: 'lock-test',
+    namespace_digest: digest,
+    old_allocation_id: 'allocation-test',
+    old_run_id: 'run-test',
+    old_allocation_digest: digest,
+    old_run_digest: digest,
+    old_lease_id: 'lease-test',
+    old_fence_id: 'fence-test',
+    old_fence_sequence: 1,
+    old_lease_issued_at: timestamp,
+    old_lease_expires_at: '2026-09-04T13:00:00.000Z',
+    old_lease_tip_event_id: 'event-test',
+    old_lease_tip_event_digest: digest,
+    old_receipt_tip_id: digest,
+    old_receipt_tip_sequence: 1,
+    old_receipt_tip_digest: digest,
+    old_receipt_chain_digest: digest,
+    zero_operation_count: 0,
+    zero_operation_event_count: 0,
+    zero_operation_inventory_digest: digest,
+    authority_digest: digest,
+    source_digest: digest,
+    start_digest: digest,
+    old_holder_classification: 'ORPHAN_NONADOPTABLE',
+    old_holder_identity_digest: digest,
+    old_holder_attestation_digest: digest,
+    recovery_peer_platform: 'linux',
+    recovery_peer_identity_digest: digest,
+    recovery_peer_process_incarnation_digest: digest,
+    broker_identity_digest: digest,
+    broker_key_id: 'broker-key',
+    observed_at: timestamp,
+    authority_observed_at: timestamp,
+    source_observed_at: timestamp,
+    start_observed_at: timestamp,
+    store_observed_at: timestamp,
+    holder_observed_at: timestamp
+  };
+  const recoveryRecord = {
+    schema: 'toolkit.github-program.recovery-record.v1',
+    recovery_record_id: 'recovery-test',
+    request_id: 'request-test',
+    namespace_digest: digest,
+    old_allocation_id: 'allocation-test',
+    old_run_id: 'run-test',
+    old_lease_id: 'lease-test',
+    old_fence_id: 'fence-test',
+    old_fence_sequence: 1,
+    pre_recovery_evidence: preRecoveryEvidence,
+    pre_recovery_evidence_digest: digest,
+    terminal_receipt_id: digest,
+    terminal_receipt_digest: digest,
+    release_event_id: 'release-event',
+    release_event_digest: digest,
+    replacement_allocation_id: 'replacement-allocation',
+    replacement_allocation_digest: digest,
+    replacement_run_id: 'replacement-run',
+    replacement_run_digest: digest,
+    replacement_lease_id: 'replacement-lease',
+    replacement_fence_id: 'replacement-fence',
+    replacement_fence_sequence: 2,
+    replacement_holder_attestation_id: 'replacement-holder',
+    replacement_holder_attestation_digest: digest,
+    new_high_water: 2,
+    authority_digest: digest,
+    source_digest: digest,
+    start_digest: digest,
+    committed_at: timestamp,
+    recovery_record_digest: digest
+  };
+  const namespace = {
+    kind: 'NAMESPACE',
+    namespace: { repository: 'weijunswj/ai-agent-toolkit', parent_issue: 240, child_issue: 359 },
+    namespace_digest: digest
+  };
+  return [
+    ['READBACK_INSPECTION', { kind: 'READBACK_INSPECTION', target: 'NAMESPACE', readback: namespace }],
+    ['ALLOCATE_RUN', { kind: 'ALLOCATE_RUN', allocation, started: false, run_started_receipt_id: null }],
+    ['START_RUN', { kind: 'START_RUN', allocation, started: true, run_started_receipt_id: digest }],
+    ['APPEND_RECEIPT', { kind: 'APPEND_RECEIPT', receipt, duplicate: false }],
+    ['INTERRUPT_RUN', { kind: 'INTERRUPT_RUN', receipt, duplicate: false }],
+    ['MUTATION_ADMIT', { kind: 'MUTATION_ADMIT', readback: mutationReadback('IN_FLIGHT') }],
+    ['MUTATION_DISPATCH', { kind: 'MUTATION_DISPATCH', readback: mutationReadback('IN_FLIGHT') }],
+    ['MUTATION_OUTCOME', { kind: 'MUTATION_OUTCOME', readback: mutationReadback('APPLIED') }],
+    ['MUTATION_RECONCILE', { kind: 'MUTATION_RECONCILE', readback: namespace }],
+    ['ORPHAN_RECOVERY', { kind: 'ORPHAN_RECOVERY', recovery_record: recoveryRecord, replacement_allocation: allocation }],
+    ['MIGRATE_V2_TO_V3', {
+      kind: 'MIGRATE_V2_TO_V3',
+      status: 'MIGRATED',
+      source_schema_fingerprint: digest,
+      destination_schema_fingerprint: digest,
+      namespace_digest: digest,
+      store_binding_digest: digest
+    }]
+  ];
+}
+
 test('broker schema and policy are present and aligned with canonical authorities', () => {
   assert.equal(schema.$id, 'toolkit.github-program.broker-ipc.v1');
   assert.equal(policy.broker_ipc.schema, schema.$id);
@@ -215,6 +419,10 @@ test('broker schema and policy are present and aligned with canonical authoritie
   assert.deepEqual(
     schema.$defs.operation_descriptor.properties.operation_kind.enum,
     runtime.OPERATION_KINDS
+  );
+  assert.deepEqual(
+    Object.keys(policy.broker_ipc.success_result.value_branches),
+    policy.broker_ipc.operations
   );
   assert.equal(
     policy.sqlite.v3_dormant_contract.holder_attestation.process_id_digest,
@@ -263,7 +471,7 @@ test('typed response algebra binds operation to success value and preserves fail
     ok: true,
     result: {
       operation: 'READBACK_INSPECTION',
-      value: { kind: 'READBACK_INSPECTION', readback },
+       value: { kind: 'READBACK_INSPECTION', target: 'NAMESPACE', readback },
       result_digest: digest
     },
     error: null
@@ -287,6 +495,52 @@ test('typed response algebra binds operation to success value and preserves fail
     result: null,
     error: { code: 'BROKER_PRIVATE_DETAIL' }
   }, schema.$defs.response);
+});
+
+test('exact per-operation success branches accept only locked shapes', () => {
+  const requestId = fixture.request.serialized.match(/"request_id":"([^\"]+)"/)[1];
+  const digest = 'a'.repeat(64);
+  const examples = successValueExamples();
+  for (const [operation, value] of examples) {
+    const success = {
+      schema: schema.$id,
+      request_id: requestId,
+      ok: true,
+      result: { operation, value, result_digest: digest },
+      error: null
+    };
+    assertValid(success, schema.$defs.response);
+    assert.deepEqual(
+      Object.keys(value).sort(),
+      [...policy.broker_ipc.success_result.value_branches[operation]].sort(),
+      operation
+    );
+    assert.equal(value.kind, operation);
+  }
+
+  const response = (operation, value) => ({
+    schema: schema.$id,
+    request_id: requestId,
+    ok: true,
+    result: { operation, value, result_digest: digest },
+    error: null
+  });
+  const mutationReadback = examples[5][1].readback;
+  const wrongShapes = [
+    ['READBACK_INSPECTION', { ...examples[0][1], target: 'RUN' }],
+    ['READBACK_INSPECTION', (() => { const value = { ...examples[0][1] }; delete value.target; return value; })()],
+    ['ALLOCATE_RUN', { kind: 'ALLOCATE_RUN', allocation: examples[1][1].allocation }],
+    ['START_RUN', { ...examples[2][1], started: false, run_started_receipt_id: null }],
+    ['APPEND_RECEIPT', { kind: 'APPEND_RECEIPT', receipt: examples[3][1].receipt, chain_digest: digest }],
+    ['INTERRUPT_RUN', { kind: 'INTERRUPT_RUN', receipt: examples[4][1].receipt }],
+    ['MUTATION_ADMIT', { kind: 'MUTATION_ADMIT', operation: mutationReadback.operation }],
+    ['MUTATION_DISPATCH', { kind: 'MUTATION_DISPATCH', event: mutationReadback.events[0] }],
+    ['MUTATION_OUTCOME', { kind: 'MUTATION_OUTCOME', operation: mutationReadback.operation, event: mutationReadback.events[0] }],
+    ['MUTATION_RECONCILE', { ...examples[8][1], operation: mutationReadback.operation }],
+    ['ORPHAN_RECOVERY', { kind: 'ORPHAN_RECOVERY', recovery: mutationReadback }],
+    ['MIGRATE_V2_TO_V3', { kind: 'MIGRATE_V2_TO_V3', source_schema_fingerprint: digest, result_digest: digest }]
+  ];
+  for (const [operation, value] of wrongShapes) assertInvalid(response(operation, value), schema.$defs.response);
 });
 
 test('policy records strict raw-wire and Slice-1 boundaries without protected persistence', () => {
