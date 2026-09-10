@@ -1113,9 +1113,18 @@ function validateRegistryEntry(value, target = false) {
   if (Object.prototype.hasOwnProperty.call(value, 'draft') && typeof value.draft !== 'boolean') return false;
   if (Object.prototype.hasOwnProperty.call(value, 'merged') && typeof value.merged !== 'boolean') return false;
   if (Object.prototype.hasOwnProperty.call(value, 'github_state') && !['OPEN', 'CLOSED', 'MERGED'].includes(value.github_state)) return false;
-  if (Object.prototype.hasOwnProperty.call(value, 'candidate') && value.candidate !== null && !validateCandidate(value.candidate)) return false;
+  if (Object.prototype.hasOwnProperty.call(value, 'candidate') && value.candidate !== null && !validateCanonicalCandidateShape(value.candidate)) return false;
   if (target && !exactKeys(value, ['accepted_evidence_ref', 'candidate', 'completes_child', 'draft', 'epoch_id', 'github_state', 'merged', 'pr', 'retention_evidence_ref', 'retirement_evidence_ref', 'role', 'status'])) return false;
   return true;
+}
+function validateCanonicalCandidateShape(value) {
+  return isRecord(value)
+    && exactKeys(value, ['repository', 'branch', 'base_ref', 'base_sha', 'head', 'tree', 'version'])
+    && typeof value.repository === 'string' && value.repository.length > 0 && !/[\r\n\t]/.test(value.repository)
+    && typeof value.branch === 'string' && value.branch.length > 0 && !/[\r\n\t]/.test(value.branch)
+    && typeof value.base_ref === 'string' && value.base_ref.length > 0 && !/[\r\n\t]/.test(value.base_ref)
+    && isSha(value.base_sha) && isSha(value.head) && isSha(value.tree)
+    && typeof value.version === 'string' && value.version.length > 0 && !/[\r\n\t]/.test(value.version);
 }
 function validateChild(value) {
   const keys = ['boundaries', 'deliverables', 'dependencies', 'done_when', 'eli5', 'epochs', 'finality', 'holds', 'issue', 'lifecycle', 'objective', 'order', 'out_of_scope', 'pr_registry', 'scope', 'summary', 'title'];
@@ -1149,7 +1158,7 @@ function validateParent(value) {
 function validatePrDescriptor(value) {
   const keys = ['changed_surfaces', 'child_issue', 'design_constraints', 'eli5', 'evidence_refs', 'number', 'out_of_scope', 'purpose', 'scope', 'summary', 'validation_requirements'];
   return isRecord(value)
-    && exactKeys(value, keys)
+    && hasOnly(value, keys, ['candidate'])
     && isStringArray(value.changed_surfaces)
     && isIssue(value.child_issue)
     && isStringArray(value.design_constraints)
@@ -1160,7 +1169,8 @@ function validatePrDescriptor(value) {
     && typeof value.purpose === 'string'
     && isStringArray(value.scope)
     && typeof value.summary === 'string'
-    && isStringArray(value.validation_requirements);
+    && isStringArray(value.validation_requirements)
+    && (!Object.prototype.hasOwnProperty.call(value, 'candidate') || value.candidate === null || validateCanonicalCandidateShape(value.candidate));
 }
 function validateLane(value) {
   return isRecord(value)
@@ -3567,7 +3577,7 @@ function validateControllerBootstrap(value) {
     || value.parent_issue !== PARENT_ISSUE
     || value.programme_state_schema !== STATE_SCHEMA
     || value.surface_contract_schema !== SURFACE_SCHEMA
-    || value.toolkit_package_version !== '2.10.8'
+    || value.toolkit_package_version !== '2.10.9'
     || !isRecord(value.toolkit_contract)
     || !exactKeys(value.toolkit_contract, ['repository', 'revision', 'path', 'sha256'])
     || value.toolkit_contract.repository !== REPOSITORY
@@ -3610,6 +3620,1828 @@ function verifyBootstrapWorkspaceProof(input = {}) {
   });
 }
 
+/*
+ * Human-v2 is a source-bound projection layer.  It is intentionally kept
+ * beside, rather than inside, the historical v5 renderer: the latter owns
+ * the exact E3 byte contract and must not acquire a second interpretation.
+ */
+const HUMAN_V2_VERSION = 'human-v2';
+const HUMAN_V2_PRESENTATION_SCHEMA = 'github.program.presentation.v2';
+const HUMAN_V2_PR_PRESENTATION_SCHEMA = 'github.program.pr-presentation.v2';
+const HUMAN_V2_PARENT_CARRIER_SCHEMA = 'github.program.human-parent-carrier.v2';
+const HUMAN_V2_CHILD_CARRIER_SCHEMA = 'github.program.human-child-carrier.v2';
+const HUMAN_V2_PR_CARRIER_SCHEMA = 'github.program.human-pr-carrier.v2';
+const HUMAN_V2_PARENT_PROJECTION_SCHEMA = 'github.program.parent-projection.v2';
+const HUMAN_V2_CHILD_PROJECTION_SCHEMA = 'github.program.child-projection.v2';
+const HUMAN_V2_PR_PROJECTION_SCHEMA = 'github.program.pr-projection.v2';
+const HUMAN_V2_PR_DESCRIPTOR_SCHEMA = 'github.program.pr-descriptor.v2';
+const HUMAN_V2_CANONICAL_CLASS = 'canonical-programme-state';
+const HUMAN_V2_GENERIC_ADAPTER_ID = 'generic-programme-adapter';
+const HUMAN_V2_TOOLKIT_ADAPTER_ID = 'toolkit-v5-adapter';
+const HUMAN_V2_ADAPTER_VERSION = HUMAN_V2_VERSION;
+const HUMAN_V2_RENDERER_ID = 'github.program.markdown';
+const HUMAN_V2_STAGE_B_DIGEST = FINALISATION_STAGE_B_CANONICAL_DIGEST;
+const HUMAN_V2_HISTORY_DECISION_SCHEMA = 'toolkit.github-program.human-surface-conformance-decision.v1';
+const HUMAN_V2_HISTORY_EVIDENCE_SCHEMA = 'toolkit.github-program.human-surface-conformance-evidence.v1';
+const HUMAN_V2_HISTORY_ALLOWED_PATHS = Object.freeze([
+  'prs',
+  'children[*].pr_registry',
+  'evidence_refs',
+  'historical_transitions',
+]);
+const HUMAN_V2_NEXT_ACTIONS = Object.freeze([
+  'BLOCKING_HOLD',
+  'ACTIVE_GATE',
+  'AMEND_REQUIRED',
+  'REPLACEMENT_OR_AUTHORITY_REQUIRED',
+  'AWAIT_EPOCH_AUTHORITY',
+  'AWAIT_CHILD_FINALITY',
+  'QUEUED_CHILD',
+  'WAIT_DEPENDENCIES',
+  'AWAIT_PROGRAMME_FINALITY',
+  'PROGRAMME_COMPLETE',
+]);
+const HUMAN_V2_MARKERS = Object.freeze({
+  parent: Object.freeze({
+    begin: '<!-- MANAGED-PROGRAM-PARENT:BEGIN human-v2 -->',
+    carrier: '<!-- MANAGED-PROGRAM-PARENT-CARRIER human-v2 ',
+    end: '<!-- MANAGED-PROGRAM-PARENT:END human-v2 -->',
+  }),
+  child: Object.freeze({
+    begin: '<!-- MANAGED-PROGRAM-CHILD:BEGIN human-v2 -->',
+    carrier: '<!-- MANAGED-PROGRAM-CHILD-CARRIER human-v2 ',
+    end: '<!-- MANAGED-PROGRAM-CHILD:END human-v2 -->',
+  }),
+  pr: Object.freeze({
+    begin: '<!-- MANAGED-PROGRAM-PR:BEGIN human-v2 -->',
+    carrier: '<!-- MANAGED-PROGRAM-PR-CARRIER human-v2 ',
+    end: '<!-- MANAGED-PROGRAM-PR:END human-v2 -->',
+  }),
+});
+const HUMAN_V2_TOOLKIT_MARKERS = Object.freeze({
+  parent: Object.freeze({
+    begin: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PARENT:BEGIN human-v2 -->',
+    carrier: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PARENT-CARRIER human-v2 ',
+    end: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PARENT:END human-v2 -->',
+  }),
+  child: Object.freeze({
+    begin: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-CHILD:BEGIN human-v2 -->',
+    carrier: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-CHILD-CARRIER human-v2 ',
+    end: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-CHILD:END human-v2 -->',
+  }),
+  pr: Object.freeze({
+    begin: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PR:BEGIN human-v2 -->',
+    carrier: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PR-CARRIER human-v2 ',
+    end: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PR:END human-v2 -->',
+  }),
+});
+
+function humanOwn(value, key) { return Object.prototype.hasOwnProperty.call(value, key); }
+function humanSuccess(code, extra = {}) { return { ...extra, ok: true, code, safe_for_mutation: false }; }
+function humanFailure(code, extra = {}) { return { ...extra, ok: false, code, safe_for_mutation: false }; }
+function humanError(code, message) {
+  const error = new Error(message || code);
+  error.code = code;
+  return error;
+}
+function humanIsRepository(value) {
+  return typeof value === 'string' && value.length >= 3 && value.length <= 512 && /^[^/\s]+\/[^/\s]+$/.test(value);
+}
+function humanIsSafeLine(value, max = 8192) {
+  return typeof value === 'string' && value.length <= max && !/[\r\n\t]/.test(value);
+}
+function humanHasMalformedUnicode(value) {
+  if (typeof value !== 'string') return false;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return true;
+      index += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return true;
+    }
+  }
+  return false;
+}
+const HUMAN_SECRET_PATTERN = /(?:\b(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|token|tokens|bearer|password|passwd|secret|private[_ -]?key|client[_ -]?secret|authorization|credential)\s*[:=]\s*[^\s,;)}\]]+|\bbearer\s+[A-Za-z0-9._~+/=-]{1,}|\b(?:ghp|gho|ghu|ghs|ghr)[_-][A-Za-z0-9_-]{8,}\b|\bgithub_pat_[A-Za-z0-9_-]{8,}\b|\bsk-[A-Za-z0-9_-]{8,}\b|\bAKIA[0-9A-Z]{12,}\b)/i;
+const HUMAN_SENSITIVE_KEY_PATTERN = /^(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|bearer|password|passwd|secret|private[_ -]?key|client[_ -]?secret|authorization|credential|credentials|token|tokens|secret[_ -]?value|private[_ -]?value)$/i;
+const HUMAN_PRIVATE_PATH_PATTERN = /(?:file:\/\/|data:|(?:^|[^A-Za-z0-9])[A-Za-z]:[\\/]|(?:^|[\s(])\/(?:Users|home|root|private|etc|var|tmp|opt|srv)(?:[\\/]|$))/i;
+function humanUnsafeString(value) {
+  return humanHasMalformedUnicode(value)
+    || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value)
+    || HUMAN_SECRET_PATTERN.test(value)
+    || /-----BEGIN [^-]*PRIVATE KEY-----/i.test(value)
+    || HUMAN_PRIVATE_PATH_PATTERN.test(value);
+}
+function humanAuditValue(value, path = '$', seen = new Set()) {
+  if (typeof value === 'string') return humanUnsafeString(value) ? humanFailure('HUMAN_PUBLIC_DATA_UNSAFE', { path }) : null;
+  if (value === null || typeof value === 'boolean') return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? null : humanFailure('HUMAN_CANONICAL_VALUE_INVALID', { path });
+  if (typeof value !== 'object') return humanFailure('HUMAN_CANONICAL_VALUE_INVALID', { path });
+  if (seen.has(value)) return humanFailure('HUMAN_CANONICAL_VALUE_INVALID', { path, reason: 'cycle' });
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      const result = humanAuditValue(value[index], path + '[' + String(index) + ']', seen);
+      if (result) return result;
+    }
+  } else {
+    for (const [key, item] of Object.entries(value)) {
+      if (HUMAN_SENSITIVE_KEY_PATTERN.test(key) || humanUnsafeString(key)) return humanFailure('HUMAN_PUBLIC_DATA_UNSAFE', { path: path + '.' + key });
+      const result = humanAuditValue(item, path + '.' + key, seen);
+      if (result) return result;
+    }
+  }
+  seen.delete(value);
+  return null;
+}
+function humanCheckedCanonicalJson(value, label = 'value') {
+  const audited = humanAuditValue(value, label);
+  if (audited) return audited;
+  try {
+    const serialized = canonicalSerialize(value);
+    if (typeof serialized !== 'string' || humanHasMalformedUnicode(serialized)) return humanFailure('HUMAN_CANONICAL_VALUE_INVALID', { path: label });
+    return humanSuccess('HUMAN_CANONICAL_JSON_READY', { serialized });
+  } catch (_error) {
+    return humanFailure('HUMAN_CANONICAL_VALUE_INVALID', { path: label });
+  }
+}
+function humanDigestValue(value, label = 'value') {
+  const checked = humanCheckedCanonicalJson(value, label);
+  if (!checked.ok) return checked;
+  return humanSuccess('HUMAN_DIGEST_READY', {
+    digest: crypto.createHash('sha256').update(checked.serialized, 'utf8').digest('hex'),
+  });
+}
+function humanDigestText(value, label = 'text') {
+  if (typeof value !== 'string' || humanHasMalformedUnicode(value)) return humanFailure('HUMAN_PUBLIC_DATA_UNSAFE', { path: label });
+  return humanSuccess('HUMAN_TEXT_DIGEST_READY', { digest: crypto.createHash('sha256').update(value, 'utf8').digest('hex') });
+}
+function humanCandidate(value, field = 'candidate', nullable = true) {
+  if (value === null || value === undefined) {
+    if (nullable) return null;
+    throw humanError('HUMAN_CANDIDATE_INVALID', field + ' is required');
+  }
+  const keys = ['repository', 'branch', 'base_ref', 'base_sha', 'head', 'tree', 'version'];
+  if (!isRecord(value) || !exactKeys(value, keys) || !humanIsRepository(value.repository)
+    || !humanIsSafeLine(value.branch, 512) || !humanIsSafeLine(value.base_ref, 512)
+    || !isSha(value.base_sha) || !isSha(value.head) || !isSha(value.tree)
+    || !humanIsSafeLine(value.version, 512)) throw humanError('HUMAN_CANDIDATE_INVALID', field + ' is not a complete lineage identity');
+  return clone(value);
+}
+function humanText(value, field, required = true) {
+  if (value === undefined || value === null) {
+    if (!required) return null;
+    throw humanError('HUMAN_PUBLIC_TEXT_INVALID', field + ' is required');
+  }
+  if (!humanIsSafeLine(value) || humanUnsafeString(value)) throw humanError('HUMAN_PUBLIC_DATA_UNSAFE', field + ' is not safe public text');
+  return value;
+}
+function humanTextArray(value, field, required = false) {
+  if (value === undefined || value === null) {
+    if (!required) return [];
+    throw humanError('HUMAN_PUBLIC_ARRAY_INVALID', field + ' is required');
+  }
+  if (!Array.isArray(value)) throw humanError('HUMAN_PUBLIC_ARRAY_INVALID', field + ' must be an array');
+  return value.map((item, index) => humanText(item, field + '[' + String(index) + ']'));
+}
+function humanIssue(value, field, nullable = false) {
+  if ((value === null || value === undefined) && nullable) return null;
+  if (!isIssue(value)) throw humanError('HUMAN_ISSUE_INVALID', field + ' must be a positive issue number');
+  return value;
+}
+function humanStateName(value, field, fallback = 'PENDING') {
+  const result = value === undefined || value === null || value === '' ? fallback : String(value).toUpperCase();
+  if (!/^[A-Z][A-Z0-9 _./:-]{0,127}$/.test(result) || humanUnsafeString(result)) throw humanError('HUMAN_STATE_INVALID', field + ' is not safe');
+  return result;
+}
+function humanDigest(value, field, nullable = false) {
+  if ((value === null || value === undefined) && nullable) return null;
+  if (!isDigest(value)) throw humanError('HUMAN_DIGEST_INVALID', field + ' must be a lowercase SHA-256 digest');
+  return value;
+}
+function humanValidateGenericDescriptor(value, field = 'prs[]', allowPreNumber = false) {
+  const required = ['changed_surfaces', 'child_issue', 'design_constraints', 'eli5', 'evidence_refs', 'number', 'out_of_scope', 'purpose', 'scope', 'summary', 'validation_requirements'];
+  const optional = ['schema', 'repository', 'candidate', 'number_authority', 'position', 'next_action', 'applicability', 'optional', 'repair_history', 'before_after', 'repair_budget', 'hosted_qualification', 'recovery_evidence'];
+  if (!isRecord(value) || !hasOnly(value, required, optional)) return false;
+  if (!Array.isArray(value.changed_surfaces) || !value.changed_surfaces.every((item) => humanIsSafeLine(item))) return false;
+  if (!isIssue(value.child_issue) || !Array.isArray(value.design_constraints) || !value.design_constraints.every((item) => humanIsSafeLine(item))) return false;
+  if (!humanIsSafeLine(value.eli5) || !Array.isArray(value.evidence_refs) || !value.evidence_refs.every((item) => isSafeId(item, 512))) return false;
+  if (allowPreNumber ? (value.number !== null && !isIssue(value.number)) : !isIssue(value.number)) return false;
+  if (!Array.isArray(value.out_of_scope) || !value.out_of_scope.every((item) => humanIsSafeLine(item))
+    || !humanIsSafeLine(value.purpose) || !Array.isArray(value.scope) || !value.scope.every((item) => humanIsSafeLine(item))
+    || !humanIsSafeLine(value.summary) || !Array.isArray(value.validation_requirements) || !value.validation_requirements.every((item) => humanIsSafeLine(item))) return false;
+  if (humanUnsafeString(JSON.stringify(value))) return false;
+  if (humanOwn(value, 'candidate') && value.candidate !== null) {
+    try { humanCandidate(value.candidate, field + '.candidate', false); } catch (_error) { return false; }
+  }
+  if (humanOwn(value, 'number_authority') && value.number_authority !== null && !isRecord(value.number_authority)) return false;
+  if (humanOwn(value, 'schema') && value.schema !== HUMAN_V2_PR_DESCRIPTOR_SCHEMA) return false;
+  if (humanOwn(value, 'repository') && !humanIsRepository(value.repository)) return false;
+  return true;
+}
+function humanValidateGenericRegistry(value, field = 'pr_registry[]') {
+  if (!isRecord(value)) return false;
+  const required = ['accepted_evidence_ref', 'completes_child', 'epoch_id', 'pr', 'retirement_evidence_ref', 'role', 'status'];
+  const optional = ['candidate', 'draft', 'github_state', 'merged', 'retention_evidence_ref'];
+  if (!hasOnly(value, required, optional) || !isIssue(value.pr) || !isSafeId(value.epoch_id, 512)
+    || typeof value.completes_child !== 'boolean' || !isSafeId(value.role, 128) || !isSafeId(value.status, 128)) return false;
+  for (const key of ['accepted_evidence_ref', 'retirement_evidence_ref', 'retention_evidence_ref']) {
+    if (humanOwn(value, key) && value[key] !== null && !isSafeId(value[key], 512)) return false;
+  }
+  for (const key of ['draft', 'merged']) if (humanOwn(value, key) && typeof value[key] !== 'boolean') return false;
+  if (humanOwn(value, 'github_state') && !humanIsSafeLine(value.github_state, 128)) return false;
+  if (humanOwn(value, 'candidate') && value.candidate !== null) {
+    try { humanCandidate(value.candidate, field + '.candidate', false); } catch (_error) { return false; }
+  }
+  return true;
+}
+function humanValidateGenericEpoch(value, field = 'epochs[]') {
+  return isRecord(value) && hasOnly(value, ['id', 'name', 'purpose', 'terminal_disposition', 'evidence_ref'], ['gates', 'lock', 'state', 'status'])
+    && isSafeId(value.id, 512) && humanIsSafeLine(value.name) && humanIsSafeLine(value.purpose)
+    && (value.terminal_disposition === null || ['ACCEPTED', 'REJECTED', 'AMEND'].includes(value.terminal_disposition))
+    && (value.evidence_ref === null || isSafeId(value.evidence_ref, 512))
+    && (!humanOwn(value, 'gates') || (Array.isArray(value.gates) && value.gates.every((item) => humanIsSafeLine(item, 256))))
+    && (!humanOwn(value, 'lock') || isSafeId(value.lock, 512))
+    && (!humanOwn(value, 'state') || humanIsSafeLine(value.state, 128))
+    && (!humanOwn(value, 'status') || humanIsSafeLine(value.status, 128));
+}
+function humanValidateGenericEvidence(value, field = 'evidence_refs[]') {
+  return isRecord(value) && hasOnly(value, ['id', 'kind', 'reference', 'summary'])
+    && isSafeId(value.id, 512) && humanIsSafeLine(value.kind, 128) && humanIsSafeLine(value.reference, 1024) && humanIsSafeLine(value.summary);
+}
+function humanValidateGenericCanonicalState(value) {
+  if (!isRecord(value) || !humanIsSafeLine(value.schema, 512) || !humanIsRepository(value.repository)
+    || !isRecord(value.parent) || !isIssue(value.parent.issue) || !humanIsSafeLine(value.parent.title) || !humanIsSafeLine(value.parent.goal)) return false;
+  if (humanOwn(value, 'source') || humanOwn(value, 'next_action') || humanOwn(value, 'current_child') || humanOwn(value, 'status')) return false;
+  if (!Array.isArray(value.children) || value.children.length === 0 || !Array.isArray(value.prs)
+    || !Array.isArray(value.evidence_refs) || !Array.isArray(value.historical_transitions) || !Array.isArray(value.active_lanes)) return false;
+  const issueSet = new Set();
+  const orderSet = new Set();
+  let currentCount = 0;
+  for (const [index, child] of value.children.entries()) {
+    if (!isRecord(child) || !isIssue(child.issue) || issueSet.has(child.issue) || !Number.isSafeInteger(child.order) || orderSet.has(child.order)
+      || !humanIsSafeLine(child.title) || !humanIsSafeLine(child.summary) || !humanIsSafeLine(child.objective) || !humanIsSafeLine(child.eli5)
+      || !Array.isArray(child.scope) || !child.scope.every((item) => humanIsSafeLine(item)) || !Array.isArray(child.boundaries) || !child.boundaries.every((item) => humanIsSafeLine(item))
+      || !Array.isArray(child.out_of_scope) || !child.out_of_scope.every((item) => humanIsSafeLine(item)) || !Array.isArray(child.done_when) || !child.done_when.every((item) => humanIsSafeLine(item))
+      || !Array.isArray(child.epochs) || !child.epochs.every((item) => humanValidateGenericEpoch(item, 'children[' + String(index) + '].epochs'))
+      || !isRecord(child.finality) || !['HELD', 'MERGED', 'UNMERGED'].includes(child.finality.state)
+      || !Array.isArray(child.pr_registry) || !child.pr_registry.every((item) => humanValidateGenericRegistry(item))) return false;
+    if (humanOwn(child, 'dependencies') && (!Array.isArray(child.dependencies) || !child.dependencies.every(isIssue))) return false;
+    if (humanOwn(child, 'holds') && !Array.isArray(child.holds)) return false;
+    if (!['COMPLETED', 'CURRENT', 'QUEUED'].includes(child.lifecycle)) return false;
+    if (child.lifecycle === 'CURRENT') currentCount += 1;
+    issueSet.add(child.issue); orderSet.add(child.order);
+  }
+  if (currentCount !== 1) return false;
+  if (!value.prs.every((item) => humanValidateGenericDescriptor(item, 'prs[]'))) return false;
+  if (!value.evidence_refs.every((item) => humanValidateGenericEvidence(item))) return false;
+  if (!value.historical_transitions.every((item) => isRecord(item))) return false;
+  for (const lane of value.active_lanes) {
+    if (!isRecord(lane) || !isIssue(lane.child_issue ?? lane.child)) return false;
+    const child = value.children.find((item) => item.issue === (lane.child_issue ?? lane.child));
+    if (!child || child.lifecycle !== 'CURRENT') return false;
+  }
+  if (humanOwn(value, 'extensions') && (!Array.isArray(value.extensions) || !value.extensions.every(isRecord))) return false;
+  return true;
+}
+function validateHumanCanonicalState(value) {
+  if (!isRecord(value)) return humanFailure('HUMAN_CANONICAL_STATE_INVALID');
+  const audited = humanAuditValue(value);
+  if (audited) return audited;
+  const toolkitIdentity = value.schema === STATE_SCHEMA;
+  const valid = validateCanonicalStateV5(value);
+  if (toolkitIdentity && !valid.ok) {
+    const historyExtended = typeof humanValidateHistoryExtendedToolkitState === 'function' ? humanValidateHistoryExtendedToolkitState(value) : humanFailure('HUMAN_CANONICAL_STATE_INVALID');
+    if (!historyExtended.ok) return humanFailure(valid.code === 'V5_STATE_INVALID' ? 'HUMAN_CANONICAL_STATE_INVALID' : valid.code, { reason: valid.reason });
+  }
+  if (!toolkitIdentity && !humanValidateGenericCanonicalState(value)) return humanFailure('HUMAN_CANONICAL_STATE_INVALID');
+  const digest = humanDigestValue(value, 'canonical_state');
+  if (!digest.ok) return digest;
+  return humanSuccess('HUMAN_CANONICAL_STATE_VALID', {
+    state: clone(value),
+    canonical_digest: digest.digest,
+    adapter_id: toolkitIdentity ? HUMAN_V2_TOOLKIT_ADAPTER_ID : HUMAN_V2_GENERIC_ADAPTER_ID,
+    adapter_version: HUMAN_V2_ADAPTER_VERSION,
+  });
+}
+
+function humanMarkerStyle(options = {}) {
+  const markers = options.markers;
+  if (options.toolkit === true || markers === HUMAN_V2_TOOLKIT_MARKERS) return { namespace: 'toolkit', markers: HUMAN_V2_TOOLKIT_MARKERS, toolkit: true };
+  if (markers === HUMAN_V2_MARKERS || markers === undefined || markers === null) return { namespace: 'generic', markers: HUMAN_V2_MARKERS, toolkit: false };
+  if (isRecord(markers) && markers.parent && markers.child && markers.pr
+    && markers.parent.begin === HUMAN_V2_MARKERS.parent.begin && markers.child.begin === HUMAN_V2_MARKERS.child.begin && markers.pr.begin === HUMAN_V2_MARKERS.pr.begin) return { namespace: 'generic', markers: HUMAN_V2_MARKERS, toolkit: false };
+  if (isRecord(markers) && markers.parent && markers.child && markers.pr
+    && markers.parent.begin === HUMAN_V2_TOOLKIT_MARKERS.parent.begin && markers.child.begin === HUMAN_V2_TOOLKIT_MARKERS.child.begin && markers.pr.begin === HUMAN_V2_TOOLKIT_MARKERS.pr.begin) return { namespace: 'toolkit', markers: HUMAN_V2_TOOLKIT_MARKERS, toolkit: true };
+  throw humanError('MARKER_MIXED_NAMESPACE', 'unsupported marker family');
+}
+function humanPrefixSuffix(options = {}) {
+  const prefix = options.prefix === undefined ? '' : options.prefix;
+  const suffix = options.suffix === undefined ? '' : options.suffix;
+  if (typeof prefix !== 'string' || typeof suffix !== 'string' || humanHasMalformedUnicode(prefix) || humanHasMalformedUnicode(suffix)
+    || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(prefix + suffix)) throw humanError('HUMAN_PREFIX_SUFFIX_INVALID', 'prefix and suffix are not byte-safe strings');
+  if (prefix.includes('MANAGED-PROGRAM-') || prefix.includes('AI-AGENT-TOOLKIT:GITHUB-PROGRAM-')
+    || suffix.includes('MANAGED-PROGRAM-') || suffix.includes('AI-AGENT-TOOLKIT:GITHUB-PROGRAM-')) throw humanError('RESERVED_RESIDUE_OUTSIDE_BLOCK', 'reserved marker residue is outside the managed block');
+  return { prefix, suffix };
+}
+function humanCarrierEncoding(value) {
+  const checked = humanCheckedCanonicalJson(value, 'carrier');
+  if (!checked.ok) throw humanError(checked.code, 'carrier is not canonical');
+  return Buffer.from(checked.serialized, 'utf8').toString('base64url');
+}
+function humanCarrierDecoding(value) {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]+$/.test(value) || value.length % 4 === 1) return humanFailure('CARRIER_DECODE_INVALID');
+  let decoded;
+  try { decoded = Buffer.from(value, 'base64url').toString('utf8'); } catch (_error) { return humanFailure('CARRIER_DECODE_INVALID'); }
+  if (humanHasMalformedUnicode(decoded) || Buffer.from(decoded, 'utf8').toString('base64url') !== value) return humanFailure('CARRIER_DECODE_INVALID');
+  let parsed;
+  try { parsed = JSON.parse(decoded); } catch (_error) { return humanFailure('CARRIER_DECODE_INVALID'); }
+  const checked = humanCheckedCanonicalJson(parsed, 'carrier');
+  if (!checked.ok || checked.serialized !== decoded) return humanFailure('CARRIER_DECODE_INVALID');
+  return humanSuccess('CARRIER_DECODED', { carrier: parsed, encoded: value });
+}
+
+function humanCodecEncode(value, context = 'paragraph') {
+  if (typeof value !== 'string' || !humanIsSafeLine(value) || humanUnsafeString(value)) throw humanError('HUMAN_PUBLIC_DATA_UNSAFE', context + ' contains unsafe text');
+  let encoded = value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  encoded = encoded.replace(/\\/g, '\\\\').replace(/`/g, '\\`');
+  encoded = encoded.replace(/[\*_\[\]\(\){}#+!>]/g, '\\$&');
+  if (context === 'table-cell') encoded = encoded.replace(/\|/g, '\\|');
+  if ((context === 'bullet' && /^\s*[-+*]>?\s/.test(value)) || (context === 'heading' && /^\s*#{1,6}\s/.test(value))) {
+    encoded = '\\' + encoded;
+  }
+  return encoded;
+}
+function humanCodecUrl(value) {
+  if (typeof value !== 'string' || humanHasMalformedUnicode(value) || /[\r\n\t]/.test(value)) throw humanError('HUMAN_PUBLIC_URL_INVALID', 'URL is not a safe public URL');
+  let parsed;
+  try { parsed = new URL(value); } catch (_error) { throw humanError('HUMAN_PUBLIC_URL_INVALID', 'URL is not valid'); }
+  const hostname = parsed.hostname.toLowerCase();
+  const privateHost = hostname === 'localhost' || hostname === '::1' || hostname.endsWith('.local')
+    || /^(?:127\.|10\.|192\.168\.|169\.254\.)/.test(hostname)
+    || /^172\.(?:1[6-9]|2\d|3[01])\./.test(hostname)
+    || !hostname.includes('.');
+  if (parsed.protocol !== 'https:' || parsed.username || parsed.password || privateHost
+    || /(?:token|secret|password|passwd|api[_-]?key|authorization|private[_-]?key|credential)/i.test(parsed.search + parsed.hash)
+    || humanUnsafeString(value)) throw humanError('HUMAN_PUBLIC_URL_INVALID', 'URL is not a safe public HTTPS URL');
+  return '<' + value.replace(/&/g, '&amp;') + '>';
+}
+const PublicSurfaceCodec = Object.freeze({
+  paragraph: (value) => humanCodecEncode(value, 'paragraph'),
+  heading: (value) => humanCodecEncode(value, 'heading'),
+  bullet: (value) => humanCodecEncode(value, 'bullet'),
+  tableCell: (value) => humanCodecEncode(value, 'table-cell'),
+  identifier: (value) => humanCodecEncode(value, 'identifier'),
+  lineage: (value) => humanCodecEncode(value, 'lineage'),
+  url: humanCodecUrl,
+});
+function humanBoundaryCategory(value) {
+  const textValue = String(value).toUpperCase();
+  if (/SAFETY|HOLD|SECURITY|PRIVATE/.test(textValue)) return 'SAFETY';
+  if (/NOT[_ -]?AUTHORI[ZS]ED|UNAUTHORI[ZS]ED|PROHIBIT|DENY|CANNOT/.test(textValue)) return 'NOT_AUTHORISED';
+  if (/OUT[_ -]?OF[_ -]?SCOPE|OUTSIDE/.test(textValue)) return 'OUT_OF_SCOPE';
+  if (/READY|MERGE|FINALITY|TRANSITION|WEB OWNS|AUTHORITY/.test(textValue)) return 'OWNERSHIP_AUTHORITY';
+  if (/LIFECYCLE|CURRENT CHILD|COMPLETION|FINAL/.test(textValue)) return 'LIFECYCLE_FINALITY_RESTRICTION';
+  return 'SCOPE';
+}
+function humanBoundaryProjection(state, child) {
+  const values = [];
+  const append = (items, fallbackCategory) => {
+    if (!Array.isArray(items)) return;
+    for (const item of items) values.push({ category: fallbackCategory || humanBoundaryCategory(item), text: item });
+  };
+  append(state.boundaries, null);
+  append(child?.boundaries, null);
+  append(child?.out_of_scope, 'OUT_OF_SCOPE');
+  append(state.out_of_scope, 'OUT_OF_SCOPE');
+  const holds = Array.isArray(child?.holds) ? child.holds.filter((item) => item && item.active === true && item.blocks_normal_lanes === true) : [];
+  if (holds.length) append(holds.map((item) => item.summary), 'SAFETY');
+  const unique = new Set();
+  return values.filter((item) => {
+    const key = item.category + '\u0000' + item.text;
+    if (unique.has(key)) return false;
+    unique.add(key);
+    return true;
+  });
+}
+function humanEvidenceMap(state) {
+  const result = new Map();
+  for (const item of state.evidence_refs || []) {
+    if (result.has(item.id)) throw humanError('HUMAN_EVIDENCE_DUPLICATE', item.id);
+    result.set(item.id, item);
+  }
+  return result;
+}
+function humanLanesFor(state, childIssue) {
+  return (state.active_lanes || []).filter((lane) => (lane.child_issue ?? lane.child) === childIssue);
+}
+function humanEpochProjection(child, evidence, state) {
+  const lanes = humanLanesFor(state, child.issue);
+  return child.epochs.map((epoch) => {
+    const lane = lanes.find((item) => (item.epoch_id ?? item.epoch) === epoch.id) || null;
+    const disposition = epoch.terminal_disposition;
+    const stateName = disposition || (lane ? 'ACTIVE' : 'PENDING');
+    const evidenceItem = epoch.evidence_ref ? evidence.get(epoch.evidence_ref) : null;
+    const outcome = disposition
+      ? (evidenceItem?.summary || disposition)
+      : lane
+        ? 'Active gate: ' + String(lane.gate_result ?? lane.gate ?? 'in progress') + '.'
+        : 'Pending authority or completion for ' + epoch.name + '.';
+    return {
+      id: epoch.id,
+      name: epoch.name,
+      purpose: epoch.purpose,
+      state: stateName,
+      outcome,
+      evidence_ref: epoch.evidence_ref ?? null,
+      why: evidenceItem?.summary || epoch.purpose,
+    };
+  });
+}
+function humanDescriptorMap(state) {
+  const map = new Map();
+  for (const descriptor of state.prs || []) {
+    if (map.has(descriptor.number)) throw humanError('HUMAN_PR_DESCRIPTOR_DUPLICATE', '#' + String(descriptor.number));
+    map.set(descriptor.number, descriptor);
+  }
+  return map;
+}
+function humanPrOutcome(entry) {
+  const status = String(entry.status || 'RECORDED').toUpperCase();
+  const github = entry.github_state ? String(entry.github_state).toUpperCase() : null;
+  if (status === 'ACCEPTED' && github === 'MERGED') return 'ACCEPTED / MERGED';
+  if (status === 'RETIRED' && github === 'CLOSED') return 'RETIRED / CLOSED';
+  return github ? status + ' / ' + github : status;
+}
+function humanPrHistory(child, state, descriptors, evidence) {
+  return (child.pr_registry || []).map((entry) => {
+    const descriptor = descriptors.get(entry.pr);
+    const evidenceRef = entry.accepted_evidence_ref || entry.retirement_evidence_ref || entry.retention_evidence_ref || null;
+    return {
+      pr: entry.pr,
+      child_issue: child.issue,
+      epoch_id: entry.epoch_id,
+      what_it_was_for: descriptor?.purpose || entry.purpose || 'Canonical registry chronology for this child.',
+      outcome: humanPrOutcome(entry),
+      why: evidence.get(evidenceRef)?.summary || descriptor?.summary || entry.summary || 'The canonical registry records this disposition.',
+    };
+  });
+}
+function humanBlockingHolds(state, child) {
+  const values = [];
+  const append = (items) => {
+    if (!Array.isArray(items)) return;
+    for (const item of items) if (isRecord(item) && item.active === true && item.blocks_normal_lanes === true) values.push(item);
+  };
+  append(state.holds);
+  append(child?.holds);
+  if (state.recovery?.active_blocking_recovery_hold === true) values.push({ id: state.recovery.root || 'recovery-hold', summary: state.recovery.summary || 'An authority-defined recovery hold is active.' });
+  const seen = new Set();
+  return values.filter((item) => {
+    const key = String(item.id || item.root || 'hold');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).map((item) => ({ id: String(item.id || item.root || 'hold'), summary: String(item.summary || 'An authority-defined blocking hold is active.') }));
+}
+function humanContradiction(state) {
+  for (const child of state.children) {
+    if (child.lifecycle === 'COMPLETED' && child.finality.state !== 'MERGED') return 'completed child is not merged';
+    for (const epoch of child.epochs) {
+      if (epoch.terminal_disposition !== null && epoch.terminal_disposition !== undefined && !epoch.evidence_ref) return 'terminal epoch lacks evidence';
+    }
+    for (const entry of child.pr_registry || []) {
+      if (entry.completes_child === true && child.lifecycle !== 'COMPLETED') return 'registry claims child completion before lifecycle completion';
+      if (entry.merged === true && entry.github_state && entry.github_state !== 'MERGED') return 'merged registry entry has non-merged provider state';
+    }
+  }
+  return null;
+}
+function humanProgrammeFinality(state) {
+  const candidates = [state.programme_finality, state.finality, state.parent?.finality].filter(isRecord);
+  return candidates.find((item) => item.state === 'MERGED' && (item.authority_ref || item.authority || item.evidence_ref)) || null;
+}
+function humanAction(kind, source, text) { return { kind, source: source === undefined ? null : source, text }; }
+function humanGlobalNextAction(state, currentChild) {
+  const contradiction = humanContradiction(state);
+  if (contradiction) throw humanError('CANONICAL_STATE_CONTRADICTORY', contradiction);
+  const holds = humanBlockingHolds(state, currentChild);
+  if (holds.length) return humanAction('BLOCKING_HOLD', holds[0].id, 'Maintain the active blocking hold and wait for the authority-defined next window.');
+  const lanes = state.active_lanes || [];
+  if (lanes.length) {
+    const lane = lanes[0];
+    return humanAction('ACTIVE_GATE', lane.epoch_id || lane.epoch || 'active-gate', 'Continue the active gate for child #' + String(lane.child_issue ?? lane.child) + '.');
+  }
+  const currentEpochs = currentChild ? currentChild.epochs : [];
+  const amend = currentEpochs.find((epoch) => epoch.terminal_disposition === 'AMEND');
+  if (amend) return humanAction('AMEND_REQUIRED', amend.id, 'Amend ' + amend.name + ' under fresh authority before continuing.');
+  const rejected = currentEpochs.find((epoch) => epoch.terminal_disposition === 'REJECTED');
+  if (rejected) return humanAction('REPLACEMENT_OR_AUTHORITY_REQUIRED', rejected.id, 'Obtain an authorised replacement or disposition for ' + rejected.name + '.');
+  const replacement = (currentChild?.pr_registry || []).find((entry) => ['REJECTED', 'SUPERSEDED', 'NON_CONVERGENT'].includes(String(entry.status).toUpperCase()));
+  if (replacement) return humanAction('REPLACEMENT_OR_AUTHORITY_REQUIRED', replacement.pr, 'Obtain an authorised replacement or disposition for PR #' + String(replacement.pr) + '.');
+  const pending = currentEpochs.find((epoch) => epoch.terminal_disposition === null || epoch.terminal_disposition === undefined);
+  if (pending) return humanAction('AWAIT_EPOCH_AUTHORITY', pending.id, 'Complete or obtain authority for ' + pending.name + '.');
+  if (currentChild && (currentChild.lifecycle === 'CURRENT' || currentChild.finality.state !== 'MERGED')) {
+    return humanAction('AWAIT_CHILD_FINALITY', currentChild.issue, 'Await authoritative child finality for #' + String(currentChild.issue) + '.');
+  }
+  const queued = state.children.filter((child) => child.lifecycle === 'QUEUED');
+  const readyQueued = queued.find((child) => (child.dependencies || []).every((dependency) => {
+    const dependencyChild = state.children.find((item) => item.issue === dependency);
+    return dependencyChild && dependencyChild.lifecycle === 'COMPLETED' && dependencyChild.finality.state === 'MERGED';
+  }));
+  if (readyQueued) return humanAction('QUEUED_CHILD', readyQueued.issue, 'Begin queued child #' + String(readyQueued.issue) + ' when its authority window opens.');
+  const blockedQueued = queued.find((child) => (child.dependencies || []).some((dependency) => {
+    const dependencyChild = state.children.find((item) => item.issue === dependency);
+    return !dependencyChild || dependencyChild.lifecycle !== 'COMPLETED' || dependencyChild.finality.state !== 'MERGED';
+  }));
+  if (blockedQueued) return humanAction('WAIT_DEPENDENCIES', blockedQueued.issue, 'Wait for dependencies before starting child #' + String(blockedQueued.issue) + '.');
+  if (queued.length) return humanAction('QUEUED_CHILD', queued[0].issue, 'Begin queued child #' + String(queued[0].issue) + ' when its authority window opens.');
+  const allCompleted = state.children.every((child) => child.lifecycle === 'COMPLETED' && child.finality.state === 'MERGED');
+  if (!allCompleted) return humanAction('AWAIT_CHILD_FINALITY', currentChild?.issue || null, 'Await authoritative finality for the remaining child work.');
+  if (!humanProgrammeFinality(state)) return humanAction('AWAIT_PROGRAMME_FINALITY', state.parent.issue, 'Await authoritative programme finality.');
+  return humanAction('PROGRAMME_COMPLETE', state.parent.issue, 'The programme is complete; no child or phase remains pending.');
+}
+function humanChildNextAction(state, child) {
+  const holds = humanBlockingHolds(state, child);
+  if (holds.length) return humanAction('BLOCKING_HOLD', holds[0].id, 'Maintain the active blocking hold and wait for the authority-defined next window.');
+  const lane = humanLanesFor(state, child.issue)[0];
+  if (lane) return humanAction('ACTIVE_GATE', lane.epoch_id || lane.epoch || 'active-gate', 'Continue the active gate for this child.');
+  const amend = child.epochs.find((epoch) => epoch.terminal_disposition === 'AMEND');
+  if (amend) return humanAction('AMEND_REQUIRED', amend.id, 'Amend ' + amend.name + ' under fresh authority.');
+  const rejected = child.epochs.find((epoch) => epoch.terminal_disposition === 'REJECTED');
+  if (rejected) return humanAction('REPLACEMENT_OR_AUTHORITY_REQUIRED', rejected.id, 'Obtain an authorised replacement or disposition for ' + rejected.name + '.');
+  const replacement = (child.pr_registry || []).find((entry) => ['REJECTED', 'SUPERSEDED', 'NON_CONVERGENT'].includes(String(entry.status).toUpperCase()));
+  if (replacement) return humanAction('REPLACEMENT_OR_AUTHORITY_REQUIRED', replacement.pr, 'Obtain an authorised replacement or disposition for PR #' + String(replacement.pr) + '.');
+  const pending = child.epochs.find((epoch) => epoch.terminal_disposition === null || epoch.terminal_disposition === undefined);
+  if (pending) return humanAction('AWAIT_EPOCH_AUTHORITY', pending.id, 'Complete or obtain authority for ' + pending.name + '.');
+  if (child.lifecycle === 'QUEUED') {
+    const dependenciesReady = (child.dependencies || []).every((dependency) => {
+      const item = state.children.find((candidate) => candidate.issue === dependency);
+      return item && item.lifecycle === 'COMPLETED' && item.finality.state === 'MERGED';
+    });
+    return dependenciesReady ? humanAction('QUEUED_CHILD', child.issue, 'Begin this queued child when its authority window opens.') : humanAction('WAIT_DEPENDENCIES', child.issue, 'Wait for this child\'s dependencies to become terminal.');
+  }
+  if (child.lifecycle === 'COMPLETED' && child.finality.state === 'MERGED') return humanAction('CHILD_COMPLETE', child.issue, 'This child is complete and receives no current-child instruction.');
+  return humanAction('AWAIT_CHILD_FINALITY', child.issue, 'Await authoritative finality for this child.');
+}
+function humanSelectChildFromState(state, optionalChildIssue) {
+  const children = state.children || [];
+  if (optionalChildIssue !== undefined && optionalChildIssue !== null) {
+    const matches = children.filter((child) => child.issue === optionalChildIssue);
+    if (matches.length !== 1) throw humanError('CHILD_NOT_FOUND', 'requested child does not resolve exactly once');
+    return matches[0];
+  }
+  const current = children.filter((child) => child.lifecycle === 'CURRENT');
+  if (current.length !== 1) throw humanError('CHILD_SELECTION_AMBIGUOUS', 'exactly one CURRENT child is required when child_issue is omitted');
+  return current[0];
+}
+function humanChildSelectionGuard(state, optionalChildIssue) {
+  if (optionalChildIssue !== undefined && optionalChildIssue !== null) return null;
+  if (!isRecord(state) || !Array.isArray(state.children)) return null;
+  const currentCount = state.children.filter((child) => isRecord(child) && child.lifecycle === 'CURRENT').length;
+  return currentCount === 1 ? null : humanFailure('CHILD_SELECTION_AMBIGUOUS');
+}
+function humanBuildProjection(state, kind, options = {}) {
+  const valid = validateHumanCanonicalState(state);
+  if (!valid.ok) return valid;
+  try {
+    const value = valid.state;
+    const child = humanSelectChildFromState(value, kind === 'child' ? options.child_issue : undefined);
+    const evidence = humanEvidenceMap(value);
+    const descriptors = humanDescriptorMap(value);
+    const globalAction = humanGlobalNextAction(value, humanSelectChildFromState(value));
+    const boundaries = humanBoundaryProjection(value, child);
+    if (kind === 'parent') {
+      const projection = {
+        schema: HUMAN_V2_PARENT_PROJECTION_SCHEMA,
+        version: HUMAN_V2_VERSION,
+        kind: 'parent',
+        repository: value.repository,
+        parent_issue: value.parent.issue,
+        title: value.parent.title,
+        lifecycle: value.parent.lifecycle || (value.children.some((item) => item.lifecycle === 'CURRENT') ? 'ACTIVE' : 'COMPLETED'),
+        finality: value.parent.finality?.state || value.programme_finality?.state || (child.finality.state === 'MERGED' ? 'PENDING' : child.finality.state),
+        current_child: { issue: child.issue, title: child.title, lifecycle: child.lifecycle, finality: child.finality.state, summary: child.summary },
+        current_phase: child.epochs.find((epoch) => epoch.terminal_disposition === null || epoch.terminal_disposition === undefined)?.id || null,
+        next_action: globalAction,
+        work_packages: value.children.slice().sort((left, right) => left.order - right.order).map((item) => ({ issue: item.issue, order: item.order, title: item.title, purpose: item.objective, lifecycle: item.lifecycle, finality: item.finality.state })),
+        completed_work: value.children.filter((item) => item.lifecycle === 'COMPLETED').map((item) => ({ issue: item.issue, title: item.title, summary: item.summary })),
+        boundaries,
+      };
+      return humanSuccess('HUMAN_PROJECTION_READY', { projection, projection_digest: digestValue(projection), state: value, canonical_digest: valid.canonical_digest });
+    }
+    const projection = {
+      schema: HUMAN_V2_CHILD_PROJECTION_SCHEMA,
+      version: HUMAN_V2_VERSION,
+      kind: 'child',
+      repository: value.repository,
+      parent_issue: value.parent.issue,
+      child_issue: child.issue,
+      title: child.title,
+      lifecycle: child.lifecycle,
+      summary: child.summary,
+      objective: child.objective,
+      scope: child.scope,
+      boundaries,
+      out_of_scope: child.out_of_scope,
+      done_when: child.done_when,
+      eli5: child.eli5,
+      finality: child.finality.state,
+      epochs: humanEpochProjection(child, evidence, value),
+      pr_history: humanPrHistory(child, value, descriptors, evidence),
+      next_action: humanChildNextAction(value, child),
+    };
+    return humanSuccess('HUMAN_PROJECTION_READY', { projection, projection_digest: digestValue(projection), state: value, canonical_digest: valid.canonical_digest, child_issue: child.issue });
+  } catch (error) {
+    return humanFailure(error.code || 'HUMAN_PROJECTION_INVALID', { reason: error.message });
+  }
+}
+
+function humanFindTokens(body, markerText) {
+  const result = [];
+  if (typeof body !== 'string' || !markerText) return result;
+  let offset = 0;
+  while (true) {
+    const index = body.indexOf(markerText, offset);
+    if (index < 0) break;
+    result.push(index);
+    offset = index + markerText.length;
+  }
+  return result;
+}
+function humanLineBoundary(body, index, afterLength = 0) {
+  return (index === 0 || body[index - 1] === '\n')
+    && (index + afterLength === body.length || body[index + afterLength] === '\n');
+}
+function humanContainsLegacyMarker(body) {
+  return typeof body === 'string' && /AI-AGENT-TOOLKIT:GITHUB-PROGRAM-(?:PARENT|CHILD):(?:BEGIN v5|END)/.test(body);
+}
+function humanReservedClassification(body, expectedKind) {
+  if (typeof body !== 'string') return humanFailure('BODY_NOT_STRING');
+  const hasHumanV1 = /(?:MANAGED-PROGRAM-[^>\r\n]*|AI-AGENT-TOOLKIT:GITHUB-PROGRAM-[^>\r\n]*)human-v1/i.test(body);
+  if (hasHumanV1) return humanFailure('HUMAN_V1_UNSUPPORTED');
+  const unknownVersion = /(?:MANAGED-PROGRAM-[^>\r\n]*|AI-AGENT-TOOLKIT:GITHUB-PROGRAM-[^>\r\n]*)human-(?!v2(?:\s|-->|$))[A-Za-z0-9_-]+/i.test(body);
+  if (unknownVersion) return humanFailure('HUMAN_VERSION_UNSUPPORTED');
+  const genericHits = [];
+  const toolkitHits = [];
+  for (const kind of ['parent', 'child', 'pr']) {
+    for (const part of ['begin', 'carrier', 'end']) {
+      if (humanFindTokens(body, HUMAN_V2_MARKERS[kind][part]).length) genericHits.push(kind + ':' + part);
+      if (humanFindTokens(body, HUMAN_V2_TOOLKIT_MARKERS[kind][part]).length) toolkitHits.push(kind + ':' + part);
+    }
+  }
+  const hasHumanV2 = genericHits.length > 0 || toolkitHits.length > 0;
+  const hasReserved = body.includes('MANAGED-PROGRAM-') || body.includes('AI-AGENT-TOOLKIT:GITHUB-PROGRAM-');
+  if (hasHumanV2) {
+    if (genericHits.length && toolkitHits.length) return humanFailure('MARKER_MIXED_NAMESPACE');
+    const hits = genericHits.length ? genericHits : toolkitHits;
+    if (hits.every((item) => item.endsWith(':carrier'))) return humanFailure('CARRIER_OUTSIDE_BLOCK');
+    const kinds = [...new Set(hits.map((item) => item.split(':')[0]))];
+    if (kinds.length !== 1) return humanFailure('MARKER_MIXED_FORMAT');
+    const kind = kinds[0];
+    if (expectedKind && expectedKind !== kind) return humanFailure('MARKER_WRONG_KIND');
+    return humanSuccess('HUMAN_V2_BODY_CLASSIFIED', { kind, toolkit: toolkitHits.length > 0 });
+  }
+  if (hasReserved && !humanContainsLegacyMarker(body)) return humanFailure('RESERVED_NAMESPACE_MALFORMED');
+  if (humanContainsLegacyMarker(body) && expectedKind && expectedKind === 'pr') return humanFailure('MARKER_WRONG_KIND');
+  return humanSuccess('NON_HUMAN_V2_BODY', { legacy: humanContainsLegacyMarker(body) });
+}
+function humanSplitV2Block(body, kind, toolkit) {
+  const markers = (toolkit ? HUMAN_V2_TOOLKIT_MARKERS : HUMAN_V2_MARKERS)[kind];
+  const begins = humanFindTokens(body, markers.begin);
+  const ends = humanFindTokens(body, markers.end);
+  const carriers = humanFindTokens(body, markers.carrier);
+  if (begins.length > 1 || ends.length > 1 || carriers.length > 1) {
+    return humanFailure(begins.length > 1 && ends.length === 1 ? 'MARKER_NESTED' : 'MARKER_DUPLICATE');
+  }
+  if (begins.length !== 1 || ends.length !== 1) return humanFailure('MARKER_PARTIAL');
+  const start = begins[0];
+  const end = ends[0];
+  if (!humanLineBoundary(body, start, markers.begin.length) || !humanLineBoundary(body, end, markers.end.length) || end < start) return humanFailure('MARKER_PARTIAL');
+  if (carriers.length !== 1 || carriers[0] < start || carriers[0] > end) return humanFailure(carriers.length ? 'CARRIER_OUTSIDE_BLOCK' : 'MARKER_PARTIAL');
+  const managedEnd = end + markers.end.length;
+  const managed = body.slice(start, managedEnd);
+  const lines = managed.split('\n');
+  if (lines[0] !== markers.begin || lines[lines.length - 1] !== markers.end) return humanFailure('MARKER_PARTIAL');
+  const carrierLinePattern = new RegExp('^' + markers.carrier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '([A-Za-z0-9_-]+) -->$');
+  const carrierIndexes = lines.map((line, index) => carrierLinePattern.test(line) ? index : -1).filter((index) => index >= 0);
+  if (carrierIndexes.length !== 1) return humanFailure('CARRIER_DECODE_INVALID');
+  const carrierIndex = carrierIndexes[0];
+  const beginLineIndex = 0;
+  const endLineIndex = lines.length - 1;
+  if (carrierIndex <= beginLineIndex || carrierIndex >= endLineIndex) return humanFailure('MARKER_PARTIAL');
+  const malformedCarrier = lines.some((line, index) => index !== carrierIndex && line.includes(markers.carrier));
+  if (malformedCarrier) return humanFailure('CARRIER_DECODE_INVALID');
+  const prefix = body.slice(0, start);
+  const suffix = body.slice(managedEnd);
+  if (prefix.includes('MANAGED-PROGRAM-') || prefix.includes('AI-AGENT-TOOLKIT:GITHUB-PROGRAM-')
+    || suffix.includes('MANAGED-PROGRAM-') || suffix.includes('AI-AGENT-TOOLKIT:GITHUB-PROGRAM-')) return humanFailure('RESERVED_RESIDUE_OUTSIDE_BLOCK');
+  return humanSuccess('HUMAN_V2_BLOCK_SPLIT', {
+    kind,
+    toolkit,
+    markers,
+    prefix,
+    suffix,
+    managed,
+    lines,
+    carrierIndex,
+    encoded: lines[carrierIndex].slice(markers.carrier.length, -4),
+    proseLines: lines.slice(1, carrierIndex),
+    body,
+  });
+}
+function humanValidateCarrier(value, kind, toolkit) {
+  const common = kind === 'parent'
+    ? ['schema', 'version', 'kind', 'repository', 'parent_issue', 'canonical', 'adapter', 'renderer', 'projection', 'public_prose_digest']
+    : kind === 'child'
+      ? ['schema', 'version', 'kind', 'repository', 'parent_issue', 'child_issue', 'canonical', 'adapter', 'renderer', 'projection', 'public_prose_digest']
+      : ['schema', 'version', 'kind', 'repository', 'pr_number', 'number_state', 'descriptor', 'candidate', 'number_authority_digest', 'renderer', 'projection', 'public_prose_digest'];
+  if (!isRecord(value) || !exactKeys(value, common) || value.version !== HUMAN_V2_VERSION || value.kind !== kind
+    || !humanIsRepository(value.repository) || !humanDigest(value.public_prose_digest, 'carrier.public_prose_digest')
+    || !isRecord(value.renderer) || !exactKeys(value.renderer, ['id', 'version']) || value.renderer.id !== HUMAN_V2_RENDERER_ID || value.renderer.version !== HUMAN_V2_VERSION
+    || !isRecord(value.projection) || !exactKeys(value.projection, ['schema', 'digest']) || !humanDigest(value.projection.digest, 'carrier.projection.digest')) return false;
+  if (kind !== 'pr' && (!isRecord(value.adapter) || !exactKeys(value.adapter, ['id', 'version']) || value.adapter.version !== HUMAN_V2_ADAPTER_VERSION
+    || value.adapter.id !== (toolkit ? HUMAN_V2_TOOLKIT_ADAPTER_ID : HUMAN_V2_GENERIC_ADAPTER_ID))) return false;
+  const expectedSchema = kind === 'parent' ? HUMAN_V2_PARENT_CARRIER_SCHEMA : kind === 'child' ? HUMAN_V2_CHILD_CARRIER_SCHEMA : HUMAN_V2_PR_CARRIER_SCHEMA;
+  if (value.schema !== expectedSchema) return false;
+  if (kind === 'parent') {
+    if (!isIssue(value.parent_issue) || !isRecord(value.canonical) || !exactKeys(value.canonical, ['schema', 'class', 'digest', 'state'])
+      || !humanIsSafeLine(value.canonical.schema, 512) || value.canonical.class !== HUMAN_V2_CANONICAL_CLASS || !humanDigest(value.canonical.digest, 'carrier.canonical.digest')
+      || !isRecord(value.canonical.state) || value.projection.schema !== HUMAN_V2_PARENT_PROJECTION_SCHEMA) return false;
+  } else if (kind === 'child') {
+    if (!isIssue(value.parent_issue) || !isIssue(value.child_issue) || !isRecord(value.canonical) || !exactKeys(value.canonical, ['schema', 'class', 'digest'])
+      || !humanIsSafeLine(value.canonical.schema, 512) || value.canonical.class !== HUMAN_V2_CANONICAL_CLASS || !humanDigest(value.canonical.digest, 'carrier.canonical.digest')
+      || value.projection.schema !== HUMAN_V2_CHILD_PROJECTION_SCHEMA) return false;
+  } else {
+    if (value.pr_number !== null && !isIssue(value.pr_number)) return false;
+    if (!['PRE_NUMBER', 'BOUND'].includes(value.number_state) || !isRecord(value.descriptor)
+      || !exactKeys(value.descriptor, ['schema', 'digest']) || value.descriptor.schema !== HUMAN_V2_PR_DESCRIPTOR_SCHEMA
+      || !humanDigest(value.descriptor.digest, 'carrier.descriptor.digest') || !isRecord(value.candidate)
+      || !exactKeys(value.candidate, ['present', 'digest']) || typeof value.candidate.present !== 'boolean'
+      || (value.candidate.present ? !humanDigest(value.candidate.digest, 'carrier.candidate.digest') : value.candidate.digest !== null)
+      || (value.number_authority_digest !== null && !humanDigest(value.number_authority_digest, 'carrier.number_authority_digest'))
+      || value.projection.schema !== HUMAN_V2_PR_PROJECTION_SCHEMA) return false;
+  }
+  return true;
+}
+function humanProseDigest(proseLines) {
+  const prose = proseLines.join('\n');
+  if (proseLines.length === 0 || proseLines[0] === '' || proseLines[proseLines.length - 1] === '') return humanFailure('PUBLIC_PROSE_DIGEST_MISMATCH');
+  return humanDigestText(prose, 'public_prose');
+}
+function humanManagedResult(split, carrier, projection, state, kind) {
+  const proseDigest = humanProseDigest(split.proseLines);
+  if (!proseDigest.ok || carrier.public_prose_digest !== proseDigest.digest) return humanFailure('PUBLIC_PROSE_DIGEST_MISMATCH');
+  return humanSuccess('HUMAN_V2_READBACK', {
+    kind,
+    state: state ? clone(state) : undefined,
+    carrier: clone(carrier),
+    carrier_digest: digestValue(carrier),
+    projection: projection ? clone(projection) : undefined,
+    projection_digest: projection ? digestValue(projection) : carrier.projection.digest,
+    prefix: split.prefix,
+    suffix: split.suffix,
+    managed: split.managed,
+    managed_block_bytes_digest: sha256Text(split.managed),
+    complete_body_bytes_digest: sha256Text(split.body),
+    public_prose_bytes_digest: proseDigest.digest,
+    complete_body: split.body,
+  });
+}
+function humanBuildManaged(kind, style, proseLines, carrier, prefix, suffix) {
+  const proseDigest = humanProseDigest(proseLines);
+  if (!proseDigest.ok) throw humanError(proseDigest.code, 'human prose is empty or has boundary whitespace');
+  const finalCarrier = { ...carrier, public_prose_digest: proseDigest.digest };
+  const encoded = humanCarrierEncoding(finalCarrier);
+  const managed = [style.markers[kind].begin, ...proseLines, style.markers[kind].carrier + encoded + ' -->', style.markers[kind].end].join('\n');
+  const body = prefix + managed + suffix;
+  return {
+    body,
+    managed,
+    carrier: finalCarrier,
+    carrier_digest: digestValue(finalCarrier),
+    public_prose_bytes_digest: proseDigest.digest,
+    managed_block_bytes_digest: sha256Text(managed),
+    complete_body_bytes_digest: sha256Text(body),
+    prefix,
+    suffix,
+  };
+}
+function humanCell(value) { return PublicSurfaceCodec.tableCell(String(value)); }
+function humanParagraph(value) { return PublicSurfaceCodec.paragraph(String(value)); }
+function humanHeading(value) { return PublicSurfaceCodec.heading(String(value)); }
+function humanBullet(value) { return '- ' + PublicSurfaceCodec.bullet(String(value)); }
+function humanBulletList(values, empty = 'None recorded.') {
+  return Array.isArray(values) && values.length ? values.map((item) => humanBullet(item)) : [empty];
+}
+function humanParentProse(projection) {
+  const lines = [
+    '# ' + humanHeading(projection.title),
+    '',
+    '## Current programme',
+    '| Field | Value |',
+    '| --- | --- |',
+    '| Repository | ' + humanCell(projection.repository) + ' |',
+    '| Lifecycle | ' + humanCell(projection.lifecycle) + ' |',
+    '| Finality | ' + humanCell(projection.finality) + ' |',
+    '| Current phase | ' + humanCell(projection.current_phase || 'None recorded') + ' |',
+    '',
+    '## Current child',
+    '#'+String(projection.current_child.issue)+' - '+humanParagraph(projection.current_child.title),
+    '',
+    humanParagraph(projection.current_child.summary),
+    '',
+    '## Immediate next',
+    humanBullet(projection.next_action.text),
+    '',
+    '## Work packages',
+    '| Order | Status | Issue | Title | Purpose |',
+    '| --- | --- | --- | --- | --- |',
+    ...projection.work_packages.map((item) => '| ' + humanCell(item.order) + ' | ' + humanCell(item.lifecycle) + ' | #' + humanCell(item.issue) + ' | ' + humanCell(item.title) + ' | ' + humanCell(item.purpose) + ' |'),
+    '',
+    '## Completed work',
+    ...humanBulletList(projection.completed_work.map((item) => '#' + String(item.issue) + ' - ' + item.summary)),
+    '',
+    '## Boundaries',
+    ...humanBulletList(projection.boundaries.map((item) => '[' + item.category + '] ' + item.text)),
+  ];
+  return lines;
+}
+function humanChildProse(projection, includeEli5 = true) {
+  const lines = [
+    '# ' + humanHeading(projection.title),
+    '',
+    '## Status / Summary',
+    '| Field | Value |',
+    '| --- | --- |',
+    '| Parent | #' + humanCell(projection.parent_issue) + ' |',
+    '| Child | #' + humanCell(projection.child_issue) + ' |',
+    '| Lifecycle | ' + humanCell(projection.lifecycle) + ' |',
+    '| Finality | ' + humanCell(projection.finality) + ' |',
+    '',
+    humanParagraph(projection.summary),
+    '',
+    '## Objective',
+    humanParagraph(projection.objective),
+    '',
+    '## Scope / Boundaries / Completion',
+    '### In scope',
+    ...humanBulletList(projection.scope),
+    '### Boundaries',
+    ...humanBulletList(projection.boundaries.map((item) => '[' + item.category + '] ' + item.text)),
+    '### Completion shape',
+    ...humanBulletList(projection.done_when),
+    '### Out of scope',
+    ...humanBulletList(projection.out_of_scope),
+    '',
+    '## Epochs / phases',
+    '| Epoch | Name | State | Purpose | Outcome |',
+    '| --- | --- | --- | --- | --- |',
+    ...projection.epochs.map((epoch) => '| ' + humanCell(epoch.id) + ' | ' + humanCell(epoch.name) + ' | ' + humanCell(epoch.state) + ' | ' + humanCell(epoch.purpose) + ' | ' + humanCell(epoch.outcome) + ' |'),
+    '',
+    '## PR history',
+    '| PR | Epoch | Outcome | What it was for | Why |',
+    '| --- | --- | --- | --- | --- |',
+    ...(projection.pr_history.length ? projection.pr_history.map((entry) => '| #' + humanCell(entry.pr) + ' | ' + humanCell(entry.epoch_id) + ' | ' + humanCell(entry.outcome) + ' | ' + humanCell(entry.what_it_was_for) + ' | ' + humanCell(entry.why) + ' |') : ['| None | - | None recorded | - | - |']),
+    '',
+    '## Immediate next',
+    humanBullet(projection.next_action.text),
+  ];
+  if (includeEli5) lines.push('', '## ELI5', humanParagraph(projection.eli5));
+  return lines;
+}
+function humanRenderFromManaged(result, projection, state, kind) {
+  return humanSuccess('HUMAN_V2_RENDER_READY', {
+    kind,
+    body: result.body,
+    state: clone(state),
+    canonical_digest: digestValue(state),
+    projection: clone(projection),
+    projection_digest: digestValue(projection),
+    carrier: clone(result.carrier),
+    carrier_digest: result.carrier_digest,
+    prefix: result.prefix,
+    suffix: result.suffix,
+    managed: result.managed,
+    managed_block_bytes_digest: result.managed_block_bytes_digest,
+    complete_body_bytes_digest: result.complete_body_bytes_digest,
+    public_prose_bytes_digest: result.public_prose_bytes_digest,
+  });
+}
+function renderHumanV2Parent(canonicalState, options = {}) {
+  const valid = validateHumanCanonicalState(canonicalState);
+  if (!valid.ok) return valid;
+  try {
+    const style = humanMarkerStyle({ ...options, toolkit: options.toolkit === undefined && valid.adapter_id === HUMAN_V2_TOOLKIT_ADAPTER_ID ? true : options.toolkit });
+    const projectionResult = humanBuildProjection(valid.state, 'parent', options);
+    if (!projectionResult.ok) return projectionResult;
+    const outside = humanPrefixSuffix(options);
+    const lines = humanParentProse(projectionResult.projection);
+    const carrier = {
+      schema: HUMAN_V2_PARENT_CARRIER_SCHEMA,
+      version: HUMAN_V2_VERSION,
+      kind: 'parent',
+      repository: valid.state.repository,
+      parent_issue: valid.state.parent.issue,
+      canonical: { schema: valid.state.schema, class: HUMAN_V2_CANONICAL_CLASS, digest: valid.canonical_digest, state: clone(valid.state) },
+      adapter: { id: style.toolkit ? HUMAN_V2_TOOLKIT_ADAPTER_ID : HUMAN_V2_GENERIC_ADAPTER_ID, version: HUMAN_V2_ADAPTER_VERSION },
+      renderer: { id: HUMAN_V2_RENDERER_ID, version: HUMAN_V2_VERSION },
+      projection: { schema: HUMAN_V2_PARENT_PROJECTION_SCHEMA, digest: projectionResult.projection_digest },
+      public_prose_digest: null,
+    };
+    const result = humanBuildManaged('parent', style, lines, carrier, outside.prefix, outside.suffix);
+    return humanRenderFromManaged(result, projectionResult.projection, valid.state, 'parent');
+  } catch (error) {
+    return humanFailure(error.code || 'HUMAN_V2_RENDER_INVALID', { reason: error.message });
+  }
+}
+function renderHumanV2Child(canonicalState, childIssue, options = {}) {
+  const selectionGuard = humanChildSelectionGuard(canonicalState, childIssue);
+  if (selectionGuard) return selectionGuard;
+  const valid = validateHumanCanonicalState(canonicalState);
+  if (!valid.ok) return valid;
+  try {
+    const selected = humanSelectChildFromState(valid.state, childIssue);
+    const effectiveOptions = { ...options, child_issue: selected.issue };
+    const style = humanMarkerStyle({ ...effectiveOptions, toolkit: options.toolkit === undefined && valid.adapter_id === HUMAN_V2_TOOLKIT_ADAPTER_ID ? true : options.toolkit });
+    const projectionResult = humanBuildProjection(valid.state, 'child', effectiveOptions);
+    if (!projectionResult.ok) return projectionResult;
+    const outside = humanPrefixSuffix(options);
+    const lines = humanChildProse(projectionResult.projection, options.include_eli5 !== false);
+    const carrier = {
+      schema: HUMAN_V2_CHILD_CARRIER_SCHEMA,
+      version: HUMAN_V2_VERSION,
+      kind: 'child',
+      repository: valid.state.repository,
+      parent_issue: valid.state.parent.issue,
+      child_issue: selected.issue,
+      canonical: { schema: valid.state.schema, class: HUMAN_V2_CANONICAL_CLASS, digest: valid.canonical_digest },
+      adapter: { id: style.toolkit ? HUMAN_V2_TOOLKIT_ADAPTER_ID : HUMAN_V2_GENERIC_ADAPTER_ID, version: HUMAN_V2_ADAPTER_VERSION },
+      renderer: { id: HUMAN_V2_RENDERER_ID, version: HUMAN_V2_VERSION },
+      projection: { schema: HUMAN_V2_CHILD_PROJECTION_SCHEMA, digest: projectionResult.projection_digest },
+      public_prose_digest: null,
+    };
+    const result = humanBuildManaged('child', style, lines, carrier, outside.prefix, outside.suffix);
+    return humanRenderFromManaged(result, projectionResult.projection, valid.state, 'child');
+  } catch (error) {
+    return humanFailure(error.code || 'HUMAN_V2_RENDER_INVALID', { reason: error.message });
+  }
+}
+function humanAuthorityComplete(value) {
+  return isRecord(value) && value.complete === true
+    && (!humanOwn(value, 'pr_number') || isIssue(value.pr_number))
+    && (!humanOwn(value, 'authority_digest') || isDigest(value.authority_digest))
+    && (!humanOwn(value, 'source') || humanIsSafeLine(value.source, 1024));
+}
+function humanNormalizePrDescriptor(value, allowPreNumber = true) {
+  if (!isRecord(value) || !humanValidateGenericDescriptor(value, 'descriptor', allowPreNumber)) throw humanError('HUMAN_PR_DESCRIPTOR_INVALID', 'descriptor is not complete');
+  const result = clone(value);
+  if (humanOwn(result, 'schema') && result.schema !== HUMAN_V2_PR_DESCRIPTOR_SCHEMA) throw humanError('HUMAN_PR_DESCRIPTOR_INVALID', 'descriptor schema is not human-v2');
+  if (result.number === null && !allowPreNumber) throw humanError('HUMAN_PR_DESCRIPTOR_INVALID', 'descriptor number is required');
+  if (result.candidate !== undefined && result.candidate !== null) result.candidate = humanCandidate(result.candidate, 'descriptor.candidate', false);
+  if (result.number_authority !== undefined && result.number_authority !== null) {
+    if (!humanAuthorityComplete(result.number_authority)) throw humanError('HUMAN_PR_NUMBER_AUTHORITY_INVALID', 'number authority is incomplete');
+    result.number_authority = clone(result.number_authority);
+  }
+  return result;
+}
+function humanDescriptorDigest(descriptor, authority) {
+  const value = clone(descriptor);
+  value.number_authority = authority === undefined ? (value.number_authority ?? null) : authority;
+  const result = humanDigestValue(value, 'pr_descriptor');
+  if (!result.ok) throw humanError(result.code, 'descriptor digest cannot be computed');
+  return result.digest;
+}
+function humanCandidateDigest(candidate) {
+  if (candidate === null || candidate === undefined) return null;
+  const result = humanDigestValue(candidate, 'candidate');
+  if (!result.ok) throw humanError(result.code, 'candidate digest cannot be computed');
+  return result.digest;
+}
+function humanPrNumberBinding(descriptor, options = {}) {
+  const requestedState = options.number_state || options.phase || (descriptor.number === null ? 'PRE_NUMBER' : 'BOUND');
+  const numberState = String(requestedState).toUpperCase().replace('-', '_');
+  const authority = options.number_authority !== undefined ? options.number_authority : (descriptor.number_authority ?? null);
+  if (numberState === 'PRE_NUMBER') {
+    if (descriptor.number !== null || (authority !== null && authority !== undefined)) throw humanError('HUMAN_PR_NUMBER_STATE_INVALID', 'PRE_NUMBER requires a null descriptor number and null number authority');
+    return { number_state: 'PRE_NUMBER', pr_number: null, authority: null, authority_digest: null };
+  }
+  if (numberState !== 'BOUND' || !isIssue(descriptor.number) || !humanAuthorityComplete(authority)
+    || authority.pr_number !== descriptor.number) throw humanError('PR_NUMBER_AUTHORITY_REQUIRED', 'BOUND requires complete controller authority for the exact number');
+  if (descriptor.number_authority !== undefined && descriptor.number_authority !== null && !same(descriptor.number_authority, authority)) throw humanError('PR_NUMBER_AUTHORITY_REQUIRED', 'descriptor authority and bound authority must match');
+  const authorityDigest = humanDigestValue(authority, 'number_authority');
+  if (!authorityDigest.ok) throw humanError(authorityDigest.code, 'number authority digest cannot be computed');
+  return { number_state: 'BOUND', pr_number: descriptor.number, authority: clone(authority), authority_digest: authorityDigest.digest };
+}
+function humanPrProjection(descriptor, numberBinding, candidate) {
+  return {
+    schema: HUMAN_V2_PR_PROJECTION_SCHEMA,
+    version: HUMAN_V2_VERSION,
+    kind: 'pr',
+    repository: descriptor.repository || null,
+    pr_number: numberBinding.pr_number,
+    number_state: numberBinding.number_state,
+    child_issue: descriptor.child_issue,
+    summary: descriptor.summary,
+    purpose: descriptor.purpose,
+    position: descriptor.position || null,
+    candidate_digest: humanCandidateDigest(candidate),
+    optional_sections: Object.fromEntries(['repair_history', 'before_after', 'repair_budget', 'hosted_qualification', 'recovery_evidence'].map((key) => [key, Boolean(descriptor.applicability?.[key] || descriptor.optional?.[key])])),
+  };
+}
+function humanOptionalLines(descriptor, key, heading) {
+  const enabled = Boolean(descriptor.applicability?.[key] || descriptor.optional?.[key]);
+  if (!enabled || !Array.isArray(descriptor[key]) || descriptor[key].length === 0) return [];
+  return ['', '## ' + heading, ...humanBulletList(descriptor[key])];
+}
+function humanPrProse(descriptor, numberBinding, candidate) {
+  const position = isRecord(descriptor.position) ? descriptor.position : {};
+  const next = numberBinding.number_state === 'BOUND'
+    ? 'Continue only under the bound controller authority.'
+    : (descriptor.next_action || 'Return the exact PRE_NUMBER body for controller adjudication.');
+  const candidateLines = candidate
+    ? [
+      '| Repository | ' + humanCell(candidate.repository) + ' |',
+      '| Branch | ' + humanCell(candidate.branch) + ' |',
+      '| Base ref | ' + humanCell(candidate.base_ref) + ' |',
+      '| Base SHA | ' + humanCell(candidate.base_sha) + ' |',
+      '| Head | ' + humanCell(candidate.head) + ' |',
+      '| Tree | ' + humanCell(candidate.tree) + ' |',
+      '| Version | ' + humanCell(candidate.version) + ' |',
+    ]
+    : ['None recorded.'];
+  const lines = [
+    '## Summary',
+    humanParagraph(descriptor.summary),
+    '',
+    '## Programme position',
+    '| Field | Value |',
+    '| --- | --- |',
+    '| Parent | ' + humanCell(position.parent ?? 'Not supplied') + ' |',
+    '| Child | #' + humanCell(descriptor.child_issue) + ' |',
+    '| Epoch | ' + humanCell(position.epoch ?? 'Not supplied') + ' |',
+    '| Gate | ' + humanCell(position.gate ?? 'Not supplied') + ' |',
+    '| Role | ' + humanCell(position.role ?? 'INTERMEDIATE') + ' |',
+    '| Completes child | ' + humanCell(position.completes_child ?? false) + ' |',
+    '| PR number | ' + (numberBinding.pr_number === null ? 'pending provider assignment' : '#' + humanCell(numberBinding.pr_number)) + ' |',
+    '',
+    '## What changed',
+    ...humanBulletList(descriptor.changed_surfaces),
+    '',
+    '## Why',
+    humanParagraph(descriptor.purpose),
+    '',
+    '## Scope',
+    ...humanBulletList(descriptor.scope),
+    '',
+    '## Out of scope',
+    ...humanBulletList(descriptor.out_of_scope),
+    '',
+    '## Validation',
+    ...humanBulletList(descriptor.validation_requirements),
+    '',
+    '## Candidate / lineage',
+    '| Field | Value |',
+    '| --- | --- |',
+    '| Candidate present | ' + humanCell(Boolean(candidate)) + ' |',
+    ...candidateLines,
+    '',
+    '## Final status / what happens next',
+    humanBullet('Number state: ' + numberBinding.number_state + '.'),
+    humanBullet(next),
+  ];
+  lines.push(...humanOptionalLines(descriptor, 'repair_history', 'Repair history'));
+  lines.push(...humanOptionalLines(descriptor, 'before_after', 'Before / after'));
+  lines.push(...humanOptionalLines(descriptor, 'repair_budget', 'Repair budget'));
+  lines.push(...humanOptionalLines(descriptor, 'hosted_qualification', 'Hosted qualification'));
+  lines.push(...humanOptionalLines(descriptor, 'recovery_evidence', 'Recovery-specific evidence'));
+  if (descriptor.eli5) lines.push('', '## ELI5', humanParagraph(descriptor.eli5));
+  return lines;
+}
+function renderHumanV2Pr(descriptor, options = {}) {
+  try {
+    const normalized = humanNormalizePrDescriptor(descriptor, true);
+    const numberBinding = humanPrNumberBinding(normalized, options);
+    const candidate = normalized.candidate === undefined ? null : normalized.candidate;
+    const style = humanMarkerStyle(options);
+    const outside = humanPrefixSuffix(options);
+    const descriptorDigest = humanDescriptorDigest(normalized, numberBinding.authority);
+    const projection = humanPrProjection(normalized, numberBinding, candidate);
+    const projectionDigest = digestValue(projection);
+    const lines = humanPrProse(normalized, numberBinding, candidate);
+    const carrier = {
+      schema: HUMAN_V2_PR_CARRIER_SCHEMA,
+      version: HUMAN_V2_VERSION,
+      kind: 'pr',
+      repository: normalized.repository || options.repository || null,
+      pr_number: numberBinding.pr_number,
+      number_state: numberBinding.number_state,
+      descriptor: { schema: HUMAN_V2_PR_DESCRIPTOR_SCHEMA, digest: descriptorDigest },
+      candidate: { present: candidate !== null, digest: humanCandidateDigest(candidate) },
+      number_authority_digest: numberBinding.authority_digest,
+      renderer: { id: HUMAN_V2_RENDERER_ID, version: HUMAN_V2_VERSION },
+      projection: { schema: HUMAN_V2_PR_PROJECTION_SCHEMA, digest: projectionDigest },
+      public_prose_digest: null,
+    };
+    if (!humanIsRepository(carrier.repository)) throw humanError('HUMAN_PR_DESCRIPTOR_INVALID', 'repository is required for PR presentation');
+    const result = humanBuildManaged('pr', style, lines, carrier, outside.prefix, outside.suffix);
+    return humanSuccess('HUMAN_V2_PR_RENDER_READY', {
+      kind: 'pr',
+      body: result.body,
+      descriptor: clone(normalized),
+      descriptor_digest: descriptorDigest,
+      number_state: numberBinding.number_state,
+      pr_number: numberBinding.pr_number,
+      number_authority: numberBinding.authority,
+      number_authority_digest: numberBinding.authority_digest,
+      candidate: candidate ? clone(candidate) : null,
+      candidate_digest: humanCandidateDigest(candidate),
+      projection: clone(projection),
+      projection_digest: projectionDigest,
+      carrier: clone(result.carrier),
+      carrier_digest: result.carrier_digest,
+      prefix: result.prefix,
+      suffix: result.suffix,
+      managed: result.managed,
+      managed_block_bytes_digest: result.managed_block_bytes_digest,
+      complete_body_bytes_digest: result.complete_body_bytes_digest,
+      public_prose_bytes_digest: result.public_prose_bytes_digest,
+    });
+  } catch (error) {
+    return humanFailure(error.code || 'HUMAN_V2_PR_RENDER_INVALID', { reason: error.message });
+  }
+}
+function humanCompleteRead(input) {
+  if (typeof input === 'string') return humanSuccess('BODY_READ_COMPLETE', { body: input });
+  if (!isRecord(input)) return humanFailure('BODY_NOT_STRING');
+  const body = input.body === undefined ? input.raw_body : input.body;
+  if (typeof body !== 'string') return humanFailure('BODY_NOT_STRING');
+  if (humanOwn(input, 'complete') && input.complete !== true) return humanFailure('BODY_READ_INCOMPLETE');
+  if (humanOwn(input, 'read_complete') && input.read_complete !== true) return humanFailure('BODY_READ_INCOMPLETE');
+  if (humanHasMalformedUnicode(body)) return humanFailure('BODY_BYTES_INVALID');
+  return humanSuccess('BODY_READ_COMPLETE', { body });
+}
+function humanParseBlockCarrier(completeRead, kind, expectedIdentity) {
+  const complete = humanCompleteRead(completeRead);
+  if (!complete.ok) return complete;
+  const classification = humanReservedClassification(complete.body, kind);
+  if (!classification.ok) return classification;
+  if (classification.code !== 'HUMAN_V2_BODY_CLASSIFIED') return humanFailure('MARKER_PARTIAL');
+  const split = humanSplitV2Block(complete.body, kind, classification.toolkit);
+  if (!split.ok) return split;
+  const decoded = humanCarrierDecoding(split.encoded);
+  if (!decoded.ok) return decoded;
+  const carrier = decoded.carrier;
+  if (!humanValidateCarrier(carrier, kind, classification.toolkit)) return humanFailure('CARRIER_SCHEMA_INVALID');
+  if (expectedIdentity && isRecord(expectedIdentity)) {
+    const identity = {
+      repository: carrier.repository,
+      parent_issue: carrier.parent_issue,
+      child_issue: carrier.child_issue,
+      schema: kind === 'parent' ? carrier.canonical.schema : carrier.canonical?.schema,
+      class: carrier.canonical?.class,
+      canonical_digest: carrier.canonical?.digest,
+    };
+    for (const key of ['repository', 'parent_issue', 'child_issue', 'schema', 'class', 'canonical_digest']) {
+      if (expectedIdentity[key] !== undefined && expectedIdentity[key] !== identity[key]) return humanFailure('HUMAN_IDENTITY_MISMATCH', { field: key });
+    }
+    if (expectedIdentity.canonical_state && !same(expectedIdentity.canonical_state, carrier.canonical?.state)) return humanFailure('CANONICAL_DIGEST_MISMATCH');
+  }
+  return humanSuccess('HUMAN_V2_CARRIER_READ', { complete: complete.body, split, carrier, style: classification.toolkit ? 'toolkit' : 'generic' });
+}
+function humanDeterministicCompare(readback, rendered) {
+  if (rendered.body !== readback.complete) return humanFailure('DETERMINISTIC_BYTES_MISMATCH');
+  if (!same(rendered.carrier, readback.carrier)) return humanFailure('CARRIER_DIGEST_MISMATCH');
+  return humanSuccess('DETERMINISTIC_BYTES_EQUAL');
+}
+function parseHumanV2Parent(completeRead, expectedIdentity = {}) {
+  const parsed = humanParseBlockCarrier(completeRead, 'parent', expectedIdentity);
+  if (!parsed.ok) return parsed;
+  const carrier = parsed.carrier;
+  const stateValid = validateHumanCanonicalState(carrier.canonical.state);
+  if (!stateValid.ok) return humanFailure('CANONICAL_STATE_INVALID', { reason: stateValid.code });
+  if (carrier.canonical.schema !== stateValid.state.schema || carrier.canonical.digest !== stateValid.canonical_digest
+    || carrier.parent_issue !== stateValid.state.parent.issue) return humanFailure('CANONICAL_DIGEST_MISMATCH');
+  const projectionResult = humanBuildProjection(stateValid.state, 'parent', {});
+  if (!projectionResult.ok) return projectionResult;
+  if (carrier.projection.digest !== projectionResult.projection_digest) return humanFailure('PROJECTION_DIGEST_MISMATCH');
+  const verified = humanManagedResult(parsed.split, carrier, projectionResult.projection, stateValid.state, 'parent');
+  if (!verified.ok) return verified;
+  const rendered = renderHumanV2Parent(stateValid.state, {
+    markers: parsed.style === 'toolkit' ? HUMAN_V2_TOOLKIT_MARKERS : HUMAN_V2_MARKERS,
+    toolkit: parsed.style === 'toolkit',
+    prefix: parsed.split.prefix,
+    suffix: parsed.split.suffix,
+  });
+  if (!rendered.ok) return rendered;
+  const deterministic = humanDeterministicCompare(parsed, rendered);
+  if (!deterministic.ok) return deterministic;
+  return humanSuccess('HUMAN_V2_PARENT_VALID', {
+    ...verified,
+    canonical_digest: stateValid.canonical_digest,
+    state: clone(stateValid.state),
+    projection: clone(projectionResult.projection),
+    projection_digest: projectionResult.projection_digest,
+  });
+}
+function parseHumanV2Child(completeRead, expectedIdentity = {}) {
+  const parsed = humanParseBlockCarrier(completeRead, 'child', expectedIdentity);
+  if (!parsed.ok) return parsed;
+  const carrier = parsed.carrier;
+  if (expectedIdentity.canonical_digest !== undefined && carrier.canonical.digest !== expectedIdentity.canonical_digest) return humanFailure('CANONICAL_DIGEST_MISMATCH');
+  const verified = humanManagedResult(parsed.split, carrier, null, null, 'child');
+  if (!verified.ok) return verified;
+  return humanSuccess('HUMAN_V2_CHILD_CARRIER_VALID', { ...verified, child_issue: carrier.child_issue, canonical_digest: carrier.canonical.digest });
+}
+function verifyHumanV2Child(completeRead, canonicalState, childIssue, options = {}) {
+  const selectionGuard = humanChildSelectionGuard(canonicalState, childIssue);
+  if (selectionGuard) return selectionGuard;
+  const valid = validateHumanCanonicalState(canonicalState);
+  if (!valid.ok) return valid;
+  let selected;
+  try { selected = humanSelectChildFromState(valid.state, childIssue); } catch (error) { return humanFailure(error.code || 'CHILD_NOT_FOUND', { reason: error.message }); }
+  const parsed = humanParseBlockCarrier(completeRead, 'child', {
+    repository: valid.state.repository,
+    parent_issue: valid.state.parent.issue,
+    child_issue: selected.issue,
+    schema: valid.state.schema,
+    class: HUMAN_V2_CANONICAL_CLASS,
+    canonical_digest: valid.canonical_digest,
+  });
+  if (!parsed.ok) return parsed;
+  const carrier = parsed.carrier;
+  if (carrier.canonical.digest !== valid.canonical_digest) return humanFailure('CANONICAL_DIGEST_MISMATCH');
+  const projectionResult = humanBuildProjection(valid.state, 'child', { child_issue: selected.issue });
+  if (!projectionResult.ok) return projectionResult;
+  if (carrier.projection.digest !== projectionResult.projection_digest) return humanFailure('PROJECTION_DIGEST_MISMATCH');
+  const verified = humanManagedResult(parsed.split, carrier, projectionResult.projection, valid.state, 'child');
+  if (!verified.ok) return verified;
+  const rendered = renderHumanV2Child(valid.state, selected.issue, {
+    ...options,
+    markers: parsed.style === 'toolkit' ? HUMAN_V2_TOOLKIT_MARKERS : HUMAN_V2_MARKERS,
+    toolkit: parsed.style === 'toolkit',
+    prefix: parsed.split.prefix,
+    suffix: parsed.split.suffix,
+  });
+  if (!rendered.ok) return rendered;
+  const deterministic = humanDeterministicCompare(parsed, rendered);
+  if (!deterministic.ok) return deterministic;
+  return humanSuccess('HUMAN_V2_CHILD_VALID', {
+    ...verified,
+    state: clone(valid.state),
+    canonical_digest: valid.canonical_digest,
+    projection: clone(projectionResult.projection),
+    projection_digest: projectionResult.projection_digest,
+    child_issue: selected.issue,
+  });
+}
+function humanParsePrCarrier(completeRead, expectedIdentity = {}) {
+  const parsed = humanParseBlockCarrier(completeRead, 'pr', expectedIdentity);
+  if (!parsed.ok) return parsed;
+  const carrier = parsed.carrier;
+  const verified = humanManagedResult(parsed.split, carrier, null, null, 'pr');
+  if (!verified.ok) return verified;
+  return humanSuccess('HUMAN_V2_PR_CARRIER_READ', { ...verified, complete: parsed.complete, split: parsed.split, style: parsed.style, number_state: carrier.number_state, pr_number: carrier.pr_number });
+}
+function verifyHumanV2Pr(completeRead, descriptor, options = {}) {
+  try {
+    const normalized = humanNormalizePrDescriptor(descriptor, true);
+    const binding = humanPrNumberBinding(normalized, options);
+    const expectedRepository = normalized.repository || options.repository;
+    const parsed = humanParsePrCarrier(completeRead, expectedRepository ? { repository: expectedRepository } : {});
+    if (!parsed.ok) return parsed;
+    const carrier = parsed.carrier;
+    if (carrier.number_state !== binding.number_state || carrier.pr_number !== binding.pr_number) return humanFailure('PR_NUMBER_BINDING_MISMATCH');
+    const descriptorDigest = humanDescriptorDigest(normalized, binding.authority);
+    if (carrier.descriptor.digest !== descriptorDigest) return humanFailure('DESCRIPTOR_DIGEST_MISMATCH');
+    const candidate = normalized.candidate === undefined ? null : normalized.candidate;
+    if (carrier.candidate.present !== (candidate !== null) || carrier.candidate.digest !== humanCandidateDigest(candidate)) return humanFailure('CANDIDATE_DIGEST_MISMATCH');
+    if (carrier.number_authority_digest !== binding.authority_digest) return humanFailure('PR_NUMBER_AUTHORITY_MISMATCH');
+    const projection = humanPrProjection(normalized, binding, candidate);
+    const projectionDigest = digestValue(projection);
+    if (carrier.projection.digest !== projectionDigest) return humanFailure('PROJECTION_DIGEST_MISMATCH');
+    const verified = humanManagedResult(parsed.split, carrier, projection, null, 'pr');
+    if (!verified.ok) return verified;
+    const rendered = renderHumanV2Pr(normalized, {
+      ...options,
+      number_state: binding.number_state,
+      number_authority: binding.authority,
+      markers: parsed.style === 'toolkit' ? HUMAN_V2_TOOLKIT_MARKERS : HUMAN_V2_MARKERS,
+      toolkit: parsed.style === 'toolkit',
+      prefix: parsed.split.prefix,
+      suffix: parsed.split.suffix,
+    });
+    if (!rendered.ok) return rendered;
+    const deterministic = humanDeterministicCompare(parsed, rendered);
+    if (!deterministic.ok) return deterministic;
+    return humanSuccess('HUMAN_V2_PR_VALID', {
+      ...verified,
+      descriptor: clone(normalized),
+      descriptor_digest: descriptorDigest,
+      number_state: binding.number_state,
+      pr_number: binding.pr_number,
+      candidate: candidate ? clone(candidate) : null,
+      projection: clone(projection),
+      projection_digest: projectionDigest,
+    });
+  } catch (error) {
+    return humanFailure(error.code || 'HUMAN_V2_PR_INVALID', { reason: error.message });
+  }
+}
+function parseProgrammeBodyComplete(completeRead, context = {}) {
+  const complete = humanCompleteRead(completeRead);
+  if (!complete.ok) return complete;
+  const classification = humanReservedClassification(complete.body, context.kind);
+  if (!classification.ok) return classification;
+  if (classification.code === 'HUMAN_V2_BODY_CLASSIFIED') {
+    if (classification.kind === 'parent') return parseHumanV2Parent(complete, context.expectedIdentity || context);
+    if (classification.kind === 'child') {
+      if (context.canonical_state || context.state) return verifyHumanV2Child(complete, context.canonical_state || context.state, context.child_issue, context);
+      return parseHumanV2Child(complete, context.expectedIdentity || context);
+    }
+    if (!context.descriptor && !context.pr_descriptor) return humanFailure('PR_DESCRIPTOR_REQUIRED');
+    return verifyHumanV2Pr(complete, context.descriptor || context.pr_descriptor, context);
+  }
+  if (!classification.legacy) return humanFailure('MARKER_PARTIAL');
+  const kind = context.kind || (complete.body.includes(MANAGED_MARKERS.parent.begin) ? 'parent' : complete.body.includes(MANAGED_MARKERS.child.begin) ? 'child' : null);
+  if (kind === 'parent') return parseParentV5Body(complete.body, { ...context, complete: true });
+  if (kind === 'child') return parseChildV5Body(complete.body, { ...context, complete: true });
+  return humanFailure('MARKER_WRONG_KIND');
+}
+function selectChildIssue(canonicalState, optionalChildIssue) {
+  const selectionGuard = humanChildSelectionGuard(canonicalState, optionalChildIssue);
+  if (selectionGuard) return selectionGuard;
+  const valid = validateHumanCanonicalState(canonicalState);
+  if (!valid.ok) return valid;
+  try {
+    const child = humanSelectChildFromState(valid.state, optionalChildIssue);
+    return humanSuccess('CHILD_SELECTED', { child_issue: child.issue, child: clone(child), canonical_digest: valid.canonical_digest });
+  } catch (error) {
+    return humanFailure(error.code || 'CHILD_SELECTION_AMBIGUOUS', { reason: error.message });
+  }
+}
+function humanHistoryImmutableDigest(state) {
+  const copy = clone(state);
+  copy.prs = [];
+  copy.evidence_refs = [];
+  copy.historical_transitions = [];
+  copy.children = (copy.children || []).map((child) => ({ ...child, pr_registry: [] }));
+  const result = humanDigestValue(copy, 'history_immutable_state');
+  if (!result.ok) throw humanError(result.code, 'immutable history digest cannot be computed');
+  return result.digest;
+}
+function humanHistoryDescriptor(value, field = 'history_additions.prs[]') {
+  const normalized = humanNormalizePrDescriptor(value, false);
+  if (!humanIsSafeLine(normalized.purpose) || !humanIsSafeLine(normalized.summary)) throw humanError('HUMAN_HISTORY_DESCRIPTOR_INVALID', field);
+  return normalized;
+}
+function humanHistoryEvidenceRef(value, field = 'history_additions.evidence_refs[]') {
+  if (!humanValidateGenericEvidence(value, field)) throw humanError('HUMAN_HISTORY_EVIDENCE_REF_INVALID', field);
+  return clone(value);
+}
+function humanHistoryTransition(value, field = 'history_additions.historical_transitions[]') {
+  if (!isRecord(value) || !exactKeys(value, ['child_issue', 'disposition', 'epoch_id', 'evidence_ref', 'gate', 'id'])
+    || !isIssue(value.child_issue) || !isSafeId(value.disposition, 256) || !isSafeId(value.epoch_id, 512)
+    || !isSafeId(value.evidence_ref, 512) || !isSafeId(value.gate, 256) || !isSafeId(value.id, 512)) throw humanError('HUMAN_HISTORY_TRANSITION_INVALID', field);
+  return clone(value);
+}
+function humanHistoryRegistry(value, field = 'history_additions.registry[].entry') {
+  if (!humanValidateGenericRegistry(value, field)) throw humanError('HUMAN_HISTORY_REGISTRY_INVALID', field);
+  return clone(value);
+}
+function humanHistoryCandidateIdentity(value, field = 'accepted_candidate_identities[]') {
+  if (!isRecord(value) || !hasOnly(value, ['pr_number', 'candidate'], ['child_issue', 'epoch_id']) || !isIssue(value.pr_number)) throw humanError('HUMAN_HISTORY_CANDIDATE_INVALID', field);
+  const candidate = humanCandidate(value.candidate, field + '.candidate', false);
+  const result = { pr_number: value.pr_number, candidate };
+  if (humanOwn(value, 'child_issue')) result.child_issue = humanIssue(value.child_issue, field + '.child_issue');
+  if (humanOwn(value, 'epoch_id')) {
+    if (!isSafeId(value.epoch_id, 512)) throw humanError('HUMAN_HISTORY_CANDIDATE_INVALID', field + '.epoch_id');
+    result.epoch_id = value.epoch_id;
+  }
+  return result;
+}
+function humanHistoryCandidateBindings(additions, accepted, repository = null) {
+  const descriptors = new Map();
+  const registries = new Map();
+  for (const descriptor of additions.prs) {
+    if (descriptors.has(descriptor.number)) throw humanError('HUMAN_HISTORY_DUPLICATE_PR', '#' + String(descriptor.number));
+    descriptors.set(descriptor.number, descriptor);
+    if (descriptor.candidate !== undefined && descriptor.candidate !== null) descriptors.get(descriptor.number).candidate = humanCandidate(descriptor.candidate, 'descriptor.candidate', false);
+  }
+  for (const item of additions.registry) {
+    const key = String(item.child_issue) + ':' + String(item.entry.pr);
+    if (registries.has(key)) throw humanError('HUMAN_HISTORY_DUPLICATE_REGISTRY', key);
+    registries.set(key, item);
+  }
+  const expected = new Map();
+  const record = (pr, candidate, childIssue, epochId) => {
+    if (expected.has(pr) && (!same(expected.get(pr).candidate, candidate) || expected.get(pr).child_issue !== childIssue || expected.get(pr).epoch_id !== epochId)) throw humanError('HUMAN_HISTORY_CANDIDATE_MISMATCH', '#' + String(pr));
+    expected.set(pr, { pr_number: pr, candidate: clone(candidate), child_issue: childIssue, epoch_id: epochId });
+  };
+  for (const descriptor of descriptors.values()) {
+    if (descriptor.candidate !== undefined && descriptor.candidate !== null) {
+      const registry = [...registries.values()].find((item) => item.entry.pr === descriptor.number);
+      if (!registry || registry.child_issue !== descriptor.child_issue || registry.entry.candidate === undefined || registry.entry.candidate === null) throw humanError('HUMAN_HISTORY_CANDIDATE_BINDING_MISMATCH', '#' + String(descriptor.number));
+      record(descriptor.number, descriptor.candidate, descriptor.child_issue, registry.entry.epoch_id);
+    }
+  }
+  for (const item of registries.values()) {
+    if (item.entry.candidate !== undefined && item.entry.candidate !== null) {
+      const descriptor = descriptors.get(item.entry.pr);
+      if (!descriptor || descriptor.candidate === undefined || descriptor.candidate === null || descriptor.child_issue !== item.child_issue) throw humanError('HUMAN_HISTORY_CANDIDATE_BINDING_MISMATCH', '#' + String(item.entry.pr));
+      record(item.entry.pr, item.entry.candidate, item.child_issue, item.entry.epoch_id);
+    }
+  }
+  const identities = new Map();
+  for (const value of accepted) {
+    const identity = humanHistoryCandidateIdentity(value);
+    if (identities.has(identity.pr_number)) throw humanError('HUMAN_HISTORY_CANDIDATE_INVALID', '#' + String(identity.pr_number));
+    identities.set(identity.pr_number, identity);
+  }
+  if (identities.size !== expected.size || [...expected.keys()].some((pr) => !identities.has(pr))) throw humanError('HUMAN_HISTORY_CANDIDATE_SET_MISMATCH', 'candidate identity set is not exact');
+  for (const [pr, expectedIdentity] of expected) {
+    const identity = identities.get(pr);
+    if ((repository !== null && expectedIdentity.candidate.repository !== repository)
+      || !same(identity.candidate, expectedIdentity.candidate)
+      || identity.child_issue !== expectedIdentity.child_issue
+      || identity.epoch_id !== expectedIdentity.epoch_id) throw humanError('HUMAN_HISTORY_CANDIDATE_BINDING_MISMATCH', '#' + String(pr));
+  }
+  return { descriptors, registries, expected, identities };
+}
+function humanHistoryAdditions(value, acceptedCandidateIdentities = [], repository = null) {
+  if (!isRecord(value) || !exactKeys(value, ['prs', 'registry', 'evidence_refs', 'historical_transitions'])
+    || !Array.isArray(value.prs) || !Array.isArray(value.registry) || !Array.isArray(value.evidence_refs) || !Array.isArray(value.historical_transitions)) throw humanError('HUMAN_HISTORY_ADDITIONS_INVALID', 'history additions must be complete');
+  const result = {
+    prs: value.prs.map((item, index) => humanHistoryDescriptor(item, 'history_additions.prs[' + String(index) + ']')),
+    registry: value.registry.map((item, index) => {
+      if (!isRecord(item) || !exactKeys(item, ['child_issue', 'entry']) || !isIssue(item.child_issue)) throw humanError('HUMAN_HISTORY_REGISTRY_INVALID', 'registry[' + String(index) + ']');
+      return { child_issue: item.child_issue, entry: humanHistoryRegistry(item.entry, 'history_additions.registry[' + String(index) + '].entry') };
+    }),
+    evidence_refs: value.evidence_refs.map((item, index) => humanHistoryEvidenceRef(item, 'history_additions.evidence_refs[' + String(index) + ']')),
+    historical_transitions: value.historical_transitions.map((item, index) => humanHistoryTransition(item, 'history_additions.historical_transitions[' + String(index) + ']')),
+  };
+  humanHistoryCandidateBindings(result, acceptedCandidateIdentities, repository);
+  return result;
+}
+function validateHumanSurfaceConformanceDecision(value, context = {}) {
+  const keys = ['schema', 'root', 'lock', 'repository', 'source', 'authority', 'history_additions', 'accepted_candidate_identities', 'invariants'];
+  try {
+    if (!isRecord(value) || !exactKeys(value, keys) || value.schema !== HUMAN_V2_HISTORY_DECISION_SCHEMA
+      || !isSafeId(value.root, 512) || !isSafeId(value.lock, 512) || !humanIsRepository(value.repository)
+      || !isRecord(value.source) || !exactKeys(value.source, ['schema', 'canonical_digest', 'immutable_digest', 'state'])
+      || !humanIsSafeLine(value.source.schema, 512) || !isDigest(value.source.canonical_digest) || !isDigest(value.source.immutable_digest)
+      || !isRecord(value.authority) || !exactKeys(value.authority, ['kind', 'repository', 'issue', 'comment_id', 'body_digest'])
+      || value.authority.kind !== 'USER_WEB_CONTROLLER' || value.authority.repository !== value.repository || !isIssue(value.authority.issue)
+      || !Number.isSafeInteger(value.authority.comment_id) || value.authority.comment_id < 1 || !isDigest(value.authority.body_digest)
+      || !isRecord(value.invariants) || !exactKeys(value.invariants, ['allowed_paths', 'immutable_digest', 'no_provider_target_rebase', 'no_state_movement', 'provider_evidence_observational_only'])
+      || !same(value.invariants.allowed_paths, HUMAN_V2_HISTORY_ALLOWED_PATHS) || value.invariants.immutable_digest !== value.source.immutable_digest
+      || value.invariants.no_provider_target_rebase !== true || value.invariants.no_state_movement !== true || value.invariants.provider_evidence_observational_only !== true
+      || !Array.isArray(value.accepted_candidate_identities)) return humanFailure('HUMAN_HISTORY_DECISION_INVALID');
+    const sourceValid = validateHumanCanonicalState(value.source.state);
+    if (!sourceValid.ok || sourceValid.state.repository !== value.repository || sourceValid.state.schema !== value.source.schema
+      || sourceValid.canonical_digest !== value.source.canonical_digest || humanHistoryImmutableDigest(sourceValid.state) !== value.source.immutable_digest) return humanFailure('HUMAN_HISTORY_DECISION_INVALID');
+    const accepted = value.accepted_candidate_identities.map((item, index) => humanHistoryCandidateIdentity(item, 'accepted_candidate_identities[' + String(index) + ']'));
+    const additions = humanHistoryAdditions(value.history_additions, accepted);
+    humanHistoryCandidateBindings(additions, accepted, value.repository);
+    const audited = humanAuditValue(value);
+    if (audited) return audited;
+    return humanSuccess('HUMAN_HISTORY_DECISION_VALID', { decision: clone(value), decision_digest: digestValue(value), source: sourceValid.state });
+  } catch (error) {
+    return humanFailure(error.code || 'HUMAN_HISTORY_DECISION_INVALID', { reason: error.message });
+  }
+}
+function createHumanSurfaceConformanceDecision(input = {}) {
+  try {
+    if (!isRecord(input)) throw humanError('HUMAN_HISTORY_DECISION_INVALID', 'decision input must be an object');
+    for (const key of ['target', 'desired', 'patch', 'transition', 'provider_target', 'provider_rebase']) if (humanOwn(input, key)) throw humanError('HUMAN_HISTORY_TARGET_FORBIDDEN', key + ' is not a controller decision field');
+    const sourceInput = input.source || input.source_state;
+    const sourceState = isRecord(sourceInput?.state) ? sourceInput.state : sourceInput;
+    const sourceValid = validateHumanCanonicalState(sourceState);
+    if (!sourceValid.ok) throw humanError(sourceValid.code, 'source state is not canonical');
+    const additionsInput = input.history_additions || { prs: [], registry: [], evidence_refs: [], historical_transitions: [] };
+    const acceptedInput = input.accepted_candidate_identities || [];
+    const accepted = acceptedInput.map((item, index) => humanHistoryCandidateIdentity(item, 'accepted_candidate_identities[' + String(index) + ']'));
+    const normalizedAdditions = humanHistoryAdditions(additionsInput, accepted, input.repository || sourceValid.state.repository);
+    humanHistoryCandidateBindings(normalizedAdditions, accepted);
+    const authority = input.authority || input.web_authority;
+    if (!isRecord(authority)) throw humanError('HUMAN_HISTORY_AUTHORITY_INVALID', 'complete Web authority is required');
+    const immutableDigest = input.source?.immutable_digest || humanHistoryImmutableDigest(sourceValid.state);
+    const decision = {
+      schema: HUMAN_V2_HISTORY_DECISION_SCHEMA,
+      root: input.root || 'HUMAN-SURFACE-CONFORMANCE',
+      lock: input.lock || input.design_lock || 'HUMAN-SURFACE-CONFORMANCE',
+      repository: input.repository || sourceValid.state.repository,
+      source: {
+        schema: input.source?.schema || sourceValid.state.schema,
+        canonical_digest: sourceValid.canonical_digest,
+        immutable_digest: immutableDigest,
+        state: clone(sourceValid.state),
+      },
+      authority: clone(authority),
+      history_additions: normalizedAdditions,
+      accepted_candidate_identities: accepted,
+      invariants: {
+        allowed_paths: input.invariants?.allowed_paths || [...HUMAN_V2_HISTORY_ALLOWED_PATHS],
+        immutable_digest: input.invariants?.immutable_digest || immutableDigest,
+        no_provider_target_rebase: input.invariants?.no_provider_target_rebase ?? true,
+        no_state_movement: input.invariants?.no_state_movement ?? true,
+        provider_evidence_observational_only: input.invariants?.provider_evidence_observational_only ?? true,
+      },
+    };
+    const valid = validateHumanSurfaceConformanceDecision(decision);
+    if (!valid.ok) throw humanError(valid.code, valid.reason || valid.code);
+    return deepFreeze(decision);
+  } catch (error) {
+    throw humanError(error.code || 'HUMAN_HISTORY_DECISION_INVALID', error.message);
+  }
+}
+function prepareHumanSurfaceConformanceDecision(input = {}) {
+  try {
+    const decision = createHumanSurfaceConformanceDecision(input);
+    return humanSuccess('HUMAN_HISTORY_DECISION_READY', { decision: clone(decision), decision_digest: digestValue(decision) });
+  } catch (error) {
+    return humanFailure(error.code || 'HUMAN_HISTORY_DECISION_INVALID', { reason: error.message });
+  }
+}
+function humanEvidenceObservation(value, field) {
+  if (!isRecord(value) || !exactKeys(value, ['pr_number', 'state', 'merged', 'head', 'tree', 'base', 'revision']) || !isIssue(value.pr_number)
+    || !humanIsSafeLine(value.state, 512) || (value.merged !== null && typeof value.merged !== 'boolean')) throw humanError('HUMAN_HISTORY_EVIDENCE_INVALID', field);
+  for (const key of ['head', 'tree', 'base', 'revision']) if (value[key] !== null && !humanIsSafeLine(value[key], 1024)) throw humanError('HUMAN_HISTORY_EVIDENCE_INVALID', field + '.' + key);
+  return clone(value);
+}
+function validateHumanSurfaceConformanceEvidence(value, decision) {
+  try {
+    if (!isRecord(value) || !exactKeys(value, ['schema', 'repository', 'decision_digest', 'source_canonical_digest', 'observations', 'readback', 'provider_evidence_observational_only', 'target_rebase', 'evidence_digest'])
+      || value.schema !== HUMAN_V2_HISTORY_EVIDENCE_SCHEMA || !humanIsRepository(value.repository) || !isDigest(value.decision_digest) || !isDigest(value.source_canonical_digest)
+      || !Array.isArray(value.observations) || !isRecord(value.readback) || !exactKeys(value.readback, ['complete', 'exact'])
+      || typeof value.readback.complete !== 'boolean' || typeof value.readback.exact !== 'boolean' || value.provider_evidence_observational_only !== true
+      || value.target_rebase !== false || !isDigest(value.evidence_digest)) return humanFailure('HUMAN_HISTORY_EVIDENCE_INVALID');
+    value.observations.forEach((item, index) => humanEvidenceObservation(item, 'observations[' + String(index) + ']'));
+    const unsigned = clone(value);
+    delete unsigned.evidence_digest;
+    const evidenceDigest = humanDigestValue(unsigned, 'human_history_evidence');
+    if (!evidenceDigest.ok || evidenceDigest.digest !== value.evidence_digest) return humanFailure('HUMAN_HISTORY_EVIDENCE_DIGEST_INVALID');
+    if (decision) {
+      const decisionValid = validateHumanSurfaceConformanceDecision(decision);
+      if (!decisionValid.ok || value.decision_digest !== decisionValid.decision_digest || value.source_canonical_digest !== decision.source.canonical_digest || value.repository !== decision.repository) return humanFailure('HUMAN_HISTORY_EVIDENCE_BINDING_INVALID');
+    }
+    const audited = humanAuditValue(value);
+    if (audited) return audited;
+    return humanSuccess('HUMAN_HISTORY_EVIDENCE_VALID', { evidence: clone(value), evidence_digest: value.evidence_digest });
+  } catch (error) {
+    return humanFailure(error.code || 'HUMAN_HISTORY_EVIDENCE_INVALID', { reason: error.message });
+  }
+}
+function createHumanSurfaceConformanceEvidence(input = {}) {
+  try {
+    const value = {
+      schema: HUMAN_V2_HISTORY_EVIDENCE_SCHEMA,
+      repository: input.repository,
+      decision_digest: input.decision_digest,
+      source_canonical_digest: input.source_canonical_digest,
+      observations: (input.observations || []).map((item, index) => humanEvidenceObservation(item, 'observations[' + String(index) + ']')),
+      readback: clone(input.readback || { complete: false, exact: false }),
+      provider_evidence_observational_only: input.provider_evidence_observational_only,
+      target_rebase: input.target_rebase,
+      evidence_digest: null,
+    };
+    const unsigned = clone(value);
+    delete unsigned.evidence_digest;
+    const digest = humanDigestValue(unsigned, 'human_history_evidence');
+    if (!digest.ok) throw humanError(digest.code, 'evidence digest cannot be computed');
+    value.evidence_digest = digest.digest;
+    const valid = validateHumanSurfaceConformanceEvidence(value, input.decision);
+    if (!valid.ok) throw humanError(valid.code, valid.reason || valid.code);
+    return deepFreeze(value);
+  } catch (error) {
+    throw humanError(error.code || 'HUMAN_HISTORY_EVIDENCE_INVALID', error.message);
+  }
+}
+function buildHumanSurfaceConformanceEvidence(input = {}, decision) {
+  try {
+    const value = createHumanSurfaceConformanceEvidence({
+      ...input,
+      decision,
+      decision_digest: input.decision_digest || (decision ? digestValue(decision) : undefined),
+      source_canonical_digest: input.source_canonical_digest || decision?.source.canonical_digest,
+      repository: input.repository || decision?.repository,
+    });
+    return humanSuccess('HUMAN_HISTORY_EVIDENCE_READY', { evidence: clone(value), evidence_digest: value.evidence_digest });
+  } catch (error) {
+    return humanFailure(error.code || 'HUMAN_HISTORY_EVIDENCE_INVALID', { reason: error.message });
+  }
+}
+function humanHistoryCore(state) {
+  const copy = clone(state);
+  copy.prs = [];
+  copy.evidence_refs = [];
+  copy.historical_transitions = [];
+  copy.children = (copy.children || []).map((child) => ({ ...child, pr_registry: [] }));
+  return copy;
+}
+function humanArrayPrefix(actual, expected) {
+  return Array.isArray(actual) && actual.length >= expected.length && expected.every((item, index) => same(actual[index], item));
+}
+function humanValidateHistoryExtendedToolkitState(value) {
+  if (!isRecord(value) || value.schema !== STATE_SCHEMA || value.repository !== REPOSITORY) return humanFailure('HISTORY_TARGET_CANONICAL_INVALID');
+  const base = FINALISATION_STAGE_B_TARGET_STATE;
+  if (!base || !same(humanHistoryCore(value), humanHistoryCore(base)) || !humanArrayPrefix(value.prs, base.prs)
+    || !humanArrayPrefix(value.evidence_refs, base.evidence_refs) || !humanArrayPrefix(value.historical_transitions, base.historical_transitions)) return humanFailure('HISTORY_TARGET_CANONICAL_INVALID');
+  const baseChild = childByIssue(base, CHILD_ISSUE);
+  const child = childByIssue(value, CHILD_ISSUE);
+  if (!child || !humanArrayPrefix(child.pr_registry, baseChild.pr_registry)) return humanFailure('HISTORY_TARGET_CANONICAL_INVALID');
+  if (!value.prs.every((item) => validatePrDescriptor(item)) || !value.evidence_refs.every((item) => validateEvidenceRef(item))
+    || !value.historical_transitions.every((item) => validateTransition(item)) || !child.pr_registry.every((item) => validateRegistryEntry(item))) return humanFailure('HISTORY_TARGET_CANONICAL_INVALID');
+  const digest = humanDigestValue(value, 'history_extended_state');
+  if (!digest.ok) return digest;
+  return humanSuccess('HISTORY_EXTENDED_PRE_E4_VALID', { state: clone(value), canonical_digest: digest.digest });
+}
+function humanHistorySourceAdmitted(state, digest, context = {}) {
+  if (digest === HUMAN_V2_STAGE_B_DIGEST) return true;
+  const marked = Array.isArray(state.extensions) && state.extensions.some((item) => isRecord(item)
+    && (item.kind === 'HISTORY_EXTENDED_PRE_E4' || item.status === 'HISTORY_EXTENDED_PRE_E4' || item.history_status === 'HISTORY_EXTENDED_PRE_E4'));
+  return marked && context.validated_history_state === true;
+}
+function humanHistoryAppend(baseItems, additions, keyFn, conflictCode) {
+  const result = clone(baseItems || []);
+  const byKey = new Map();
+  for (const item of result) {
+    const key = keyFn(item);
+    if (byKey.has(key)) throw humanError(conflictCode, 'duplicate source history entry');
+    byKey.set(key, item);
+  }
+  for (const item of additions) {
+    const key = keyFn(item);
+    if (byKey.has(key)) {
+      if (!same(byKey.get(key), item)) throw humanError('HUMAN_HISTORY_CONFLICT', String(key) + ' conflicts with source history');
+    } else {
+      const copy = clone(item);
+      result.push(copy);
+      byKey.set(key, copy);
+    }
+  }
+  return result;
+}
+function humanApplyHistoryAdditions(source, decision) {
+  const next = clone(source);
+  const additions = decision.history_additions;
+  next.prs = humanHistoryAppend(next.prs, additions.prs, (item) => String(item.number), 'HUMAN_HISTORY_DUPLICATE_PR');
+  next.evidence_refs = humanHistoryAppend(next.evidence_refs, additions.evidence_refs, (item) => item.id, 'HUMAN_HISTORY_DUPLICATE_EVIDENCE');
+  next.historical_transitions = humanHistoryAppend(next.historical_transitions, additions.historical_transitions, (item) => item.id, 'HUMAN_HISTORY_DUPLICATE_TRANSITION');
+  for (const item of additions.registry) {
+    const child = next.children.find((candidate) => candidate.issue === item.child_issue);
+    if (!child) throw humanError('HUMAN_HISTORY_CHILD_NOT_FOUND', '#' + String(item.child_issue));
+    child.pr_registry = humanHistoryAppend(child.pr_registry, [item.entry], (entry) => String(entry.pr), 'HUMAN_HISTORY_DUPLICATE_REGISTRY');
+  }
+  return next;
+}
+function humanHistoryDeltaAllowed(source, target) {
+  if (!isRecord(source) || !isRecord(target) || !same(humanHistoryCore(source), humanHistoryCore(target))) return false;
+  if (!humanArrayPrefix(target.prs, source.prs) || !humanArrayPrefix(target.evidence_refs, source.evidence_refs) || !humanArrayPrefix(target.historical_transitions, source.historical_transitions)) return false;
+  return source.children.every((child, index) => humanArrayPrefix(target.children[index]?.pr_registry, child.pr_registry));
+}
+function validateHistoryOnlyDelta(sourceState, targetState, decision) {
+  const decisionValid = validateHumanSurfaceConformanceDecision(decision);
+  if (!decisionValid.ok) return decisionValid;
+  const sourceValid = validateHumanCanonicalState(sourceState);
+  if (!sourceValid.ok || sourceValid.canonical_digest !== decision.source.canonical_digest) return humanFailure('HUMAN_HISTORY_SOURCE_DIGEST_MISMATCH');
+  const targetValid = validateHumanCanonicalState(targetState);
+  if (!targetValid.ok) return humanFailure('HISTORY_TARGET_CANONICAL_INVALID', { reason: targetValid.code });
+  try {
+    const applied = humanApplyHistoryAdditions(sourceValid.state, decision);
+    if (!same(applied, targetState) || !humanHistoryDeltaAllowed(sourceValid.state, targetState)
+      || humanHistoryImmutableDigest(targetState) !== decision.source.immutable_digest) return humanFailure('HUMAN_HISTORY_STATE_MOVEMENT');
+    return humanSuccess('HUMAN_HISTORY_DELTA_VALID', { source_digest: sourceValid.canonical_digest, target_digest: digestValue(targetState) });
+  } catch (error) {
+    return humanFailure(error.code || 'HUMAN_HISTORY_DELTA_INVALID', { reason: error.message });
+  }
+}
+function deriveHumanSurfaceHistoryTarget(sourceOrInput = {}, decisionInput, contextInput = {}) {
+  const input = decisionInput === undefined
+    ? sourceOrInput
+    : { ...(isRecord(contextInput) ? contextInput : {}), source: sourceOrInput, decision: decisionInput };
+  if (!isRecord(input) || !isRecord(input.source) || !isRecord(input.decision)) return humanFailure('HUMAN_HISTORY_TARGET_INPUT_INVALID');
+  if (input.source_complete === false || input.complete === false) return humanFailure('BODY_READ_INCOMPLETE');
+  let sourceValid = validateHumanCanonicalState(input.source);
+  if (!sourceValid.ok && input.validated_history_state === true) {
+    sourceValid = humanValidateHistoryExtendedToolkitState(input.source);
+  }
+  if (!sourceValid.ok) return sourceValid;
+  const sourceDigest = sourceValid.canonical_digest;
+  if (input.source.canonical_digest && input.source.canonical_digest !== sourceDigest) return humanFailure('HISTORY_SOURCE_DIGEST_MISMATCH');
+  if (!humanHistorySourceAdmitted(sourceValid.state, sourceDigest, input)) return humanFailure('HISTORY_SOURCE_NOT_ADMITTED');
+  const decisionValid = validateHumanSurfaceConformanceDecision(input.decision);
+  if (!decisionValid.ok) return decisionValid;
+  if (input.decision.repository !== sourceValid.state.repository || input.decision.source.canonical_digest !== sourceDigest) return humanFailure('HUMAN_HISTORY_SOURCE_DIGEST_MISMATCH');
+  if (humanHistoryImmutableDigest(sourceValid.state) !== input.decision.source.immutable_digest) return humanFailure('HUMAN_HISTORY_STATE_MOVEMENT');
+  if (input.provider_evidence !== undefined && input.provider_evidence !== null) {
+    const evidenceValid = validateHumanSurfaceConformanceEvidence(input.provider_evidence, input.decision);
+    if (!evidenceValid.ok) return evidenceValid;
+  }
+  let target;
+  try { target = humanApplyHistoryAdditions(sourceValid.state, input.decision); } catch (error) { return humanFailure(error.code || 'HUMAN_HISTORY_APPLY_INVALID', { reason: error.message }); }
+  if (!humanHistoryDeltaAllowed(sourceValid.state, target)) return humanFailure('HUMAN_HISTORY_STATE_MOVEMENT');
+  if (input.target_state !== undefined && !same(input.target_state, target)) {
+    const suppliedTargetValid = validateHumanCanonicalState(input.target_state);
+    if (!suppliedTargetValid.ok) return humanFailure('HISTORY_TARGET_CANONICAL_INVALID', { reason: suppliedTargetValid.code });
+    return humanFailure('HUMAN_HISTORY_TARGET_DIGEST_MISMATCH');
+  }
+  if (input.target_canonical_digest !== undefined && input.target_canonical_digest !== digestValue(target)) return humanFailure('HUMAN_HISTORY_TARGET_DIGEST_MISMATCH');
+  let targetValid = validateCanonicalStateV5(target);
+  if (!targetValid.ok && sourceValid.state.schema === STATE_SCHEMA) targetValid = humanValidateHistoryExtendedToolkitState(target);
+  if (!targetValid.ok) return humanFailure('HISTORY_TARGET_CANONICAL_INVALID', { reason: targetValid.code });
+  return humanSuccess('HISTORY_EXTENDED_PRE_E4_TARGET_READY', {
+    state: clone(targetValid.state || target),
+    target_state: clone(targetValid.state || target),
+    source_state: clone(sourceValid.state),
+    source_canonical_digest: sourceDigest,
+    target_canonical_digest: targetValid.canonical_digest || digestValue(target),
+    decision: clone(input.decision),
+    decision_digest: decisionValid.decision_digest,
+    provider_evidence: input.provider_evidence ? clone(input.provider_evidence) : null,
+    provider_evidence_observational_only: true,
+    target_rebase: false,
+    history_status: 'HISTORY_EXTENDED_PRE_E4',
+    render_eligible: true,
+  });
+}
+const HUMAN_V2_MIGRATION_STALE_CHILD_STATE = 'PARENT_HUMAN_V2_COMMITTED_CHILD_LEGACY_STALE';
+function classifyHumanV2MigrationState(input = {}) {
+  const state = typeof input === 'string' ? input : input.transaction_state || input.state;
+  if (state === HUMAN_V2_MIGRATION_STALE_CHILD_STATE) return humanSuccess('MIGRATION_STATE_RECOVERABLE', { transaction_state: state, recoverable: true, parent_owner_committed: true, child_owner_stale: true });
+  if (state === 'HUMAN_V2_RECONCILED') return humanSuccess('MIGRATION_STATE_RECONCILED', { transaction_state: state, recoverable: false });
+  if (state === 'HUMAN_V2_PREPARED') return humanSuccess('MIGRATION_STATE_PREPARED', { transaction_state: state, recoverable: true });
+  return humanFailure('MIGRATION_STATE_UNKNOWN');
+}
+function prepareHumanV2Migration(input = {}) {
+  try {
+    if (!isRecord(input)) return humanFailure('MIGRATION_INPUT_INVALID');
+    const parentRead = input.parent_complete_read || input.parent;
+    const childRead = input.child_complete_read || input.child;
+    const parentParsed = parseProgrammeBodyComplete(parentRead, { kind: 'parent' });
+    if (!parentParsed.ok) return parentParsed;
+    const source = input.source_state || parentParsed.state;
+    const sourceDigest = digestValue(source);
+    const childParsed = childRead ? parseProgrammeBodyComplete(childRead, {
+      kind: 'child',
+      canonical_state: source,
+      canonical_digest: sourceDigest,
+      child_issue: input.child_issue,
+    }) : null;
+    if (childParsed && !childParsed.ok) return childParsed;
+    const targetResult = input.decision
+      ? deriveHumanSurfaceHistoryTarget({ source, decision: input.decision, provider_evidence: input.provider_evidence, validated_history_state: input.validated_history_state })
+      : humanSuccess('HUMAN_V2_MIGRATION_SOURCE_READY', { state: clone(source), target_state: clone(source), target_canonical_digest: digestValue(source), history_status: null });
+    if (!targetResult.ok) return targetResult;
+    const parent = renderHumanV2Parent(targetResult.target_state, input.render_options || {});
+    if (!parent.ok) return parent;
+    const childIssue = input.child_issue === undefined ? humanSelectChildFromState(targetResult.target_state).issue : input.child_issue;
+    const child = renderHumanV2Child(targetResult.target_state, childIssue, input.render_options || {});
+    if (!child.ok) return child;
+    return humanSuccess('HUMAN_V2_MIGRATION_PREPARED', {
+      transaction_state: 'HUMAN_V2_PREPARED',
+      source_state: clone(source),
+      target_state: clone(targetResult.target_state),
+      target_canonical_digest: targetResult.target_canonical_digest,
+      parent: { body: parent.body, canonical_digest: parent.canonical_digest, body_digest: parent.complete_body_bytes_digest },
+      child: { body: child.body, canonical_digest: child.canonical_digest, body_digest: child.complete_body_bytes_digest, child_issue: childIssue },
+      writes: ['parent', 'child'],
+      provider_cas_claim: false,
+      automatic_rollback: false,
+    });
+  } catch (error) {
+    return humanFailure(error.code || 'MIGRATION_INPUT_INVALID', { reason: error.message });
+  }
+}
+function recoverHumanV2Migration(input = {}) {
+  try {
+    if (!isRecord(input) || input.transaction_state !== HUMAN_V2_MIGRATION_STALE_CHILD_STATE) return humanFailure('MIGRATION_STATE_UNKNOWN');
+    const parent = parseHumanV2Parent(input.parent_complete_read || input.parent, input.expected_identity || {});
+    if (!parent.ok) return humanFailure('MIGRATION_PARENT_DRIFT', { reason: parent.code });
+    const state = parent.state;
+    if (!input.child_complete_read && !input.child) return humanSuccess('MIGRATION_PARENT_RECOVERED', {
+      transaction_state: HUMAN_V2_MIGRATION_STALE_CHILD_STATE,
+      recovered_parent_state: clone(state),
+      child_write_required: true,
+      provider_cas_claim: false,
+      automatic_rollback: false,
+    });
+    const child = verifyHumanV2Child(input.child_complete_read || input.child, state, input.child_issue, input.child_options || {});
+    if (!child.ok) return humanFailure(child.code === 'CHILD_WRITE_FAILED_RECOVERABLE' ? child.code : 'MIGRATION_CHILD_DRIFT', { reason: child.code });
+    return humanSuccess('HUMAN_V2_MIGRATION_RECOVERED', {
+      transaction_state: 'HUMAN_V2_RECONCILED',
+      recovered_parent_state: clone(state),
+      child_issue: child.child_issue,
+      provider_cas_claim: false,
+      automatic_rollback: false,
+    });
+  } catch (error) {
+    return humanFailure('MIGRATION_PARENT_DRIFT', { reason: error.message });
+  }
+}
+
 const projectionBootstrapRecovery = Object.freeze({
   schema: DECISION_SCHEMA,
   evidenceSchema: EVIDENCE_SCHEMA,
@@ -3626,6 +5458,18 @@ const projectionBootstrapRecovery = Object.freeze({
   buildReceiptOperationDescriptor,
   validateControllerBootstrap,
   verifyBootstrapWorkspaceProof,
+  renderHumanV2Parent,
+  renderHumanV2Child,
+  renderHumanV2Pr,
+  parseHumanV2Parent,
+  parseHumanV2Child,
+  verifyHumanV2Child,
+  verifyHumanV2Pr,
+  parseProgrammeBodyComplete,
+  selectChildIssue,
+  classifyHumanV2MigrationState,
+  prepareHumanV2Migration,
+  recoverHumanV2Migration,
 });
 const postMergeEpochFinalisation = Object.freeze({
   schema: FINALISATION_DECISION_SCHEMA,
@@ -3643,6 +5487,10 @@ const postMergeEpochFinalisation = Object.freeze({
 });
 const programmeV5 = Object.freeze({
   schema: STATE_SCHEMA,
+  HUMAN_V2_VERSION,
+  HUMAN_V2_MARKERS,
+  HUMAN_V2_TOOLKIT_MARKERS,
+  PublicSurfaceCodec,
   validateCanonicalStateV5,
   deriveProjectionV5: (state, kind) => {
     const valid = validateCanonicalStateV5(state);
@@ -3650,6 +5498,29 @@ const programmeV5 = Object.freeze({
   },
   renderProgrammeV5,
   parseProgrammeV5Body,
+  renderHumanV2Parent,
+  renderHumanV2Child,
+  renderHumanV2Pr,
+  parseHumanV2Parent,
+  parseHumanV2Child,
+  verifyHumanV2Child,
+  verifyHumanV2Pr,
+  parseProgrammeBodyComplete,
+  selectChildIssue,
+  validateHumanCanonicalState,
+  validateHumanSurfaceConformanceDecision,
+  validateHumanSurfaceConformanceEvidence,
+  createHumanSurfaceConformanceDecision,
+  prepareHumanSurfaceConformanceDecision,
+  createHumanSurfaceConformanceEvidence,
+  buildHumanSurfaceConformanceEvidence,
+  deriveHumanSurfaceHistoryTarget,
+  validateHistoryOnlyDelta,
+  humanHistoryImmutableDigest,
+  HUMAN_V2_MIGRATION_STALE_CHILD_STATE,
+  classifyHumanV2MigrationState,
+  prepareHumanV2Migration,
+  recoverHumanV2Migration,
   projectionBootstrapRecovery,
   postMergeEpochFinalisation,
 });
@@ -3750,6 +5621,47 @@ module.exports = Object.freeze({
   parseParentV5Body,
   parseChildV5Body,
   parseProgrammeV5Body,
+  HUMAN_V2_VERSION,
+  HUMAN_V2_PRESENTATION_SCHEMA,
+  HUMAN_V2_PR_PRESENTATION_SCHEMA,
+  HUMAN_V2_PARENT_CARRIER_SCHEMA,
+  HUMAN_V2_CHILD_CARRIER_SCHEMA,
+  HUMAN_V2_PR_CARRIER_SCHEMA,
+  HUMAN_V2_PARENT_PROJECTION_SCHEMA,
+  HUMAN_V2_CHILD_PROJECTION_SCHEMA,
+  HUMAN_V2_PR_PROJECTION_SCHEMA,
+  HUMAN_V2_PR_DESCRIPTOR_SCHEMA,
+  HUMAN_V2_CANONICAL_CLASS,
+  HUMAN_V2_HISTORY_DECISION_SCHEMA,
+  HUMAN_V2_HISTORY_EVIDENCE_SCHEMA,
+  HUMAN_V2_HISTORY_ALLOWED_PATHS,
+  HUMAN_V2_NEXT_ACTIONS,
+  HUMAN_V2_MARKERS,
+  HUMAN_V2_TOOLKIT_MARKERS,
+  PublicSurfaceCodec,
+  validateHumanCanonicalState,
+  renderHumanV2Parent,
+  renderHumanV2Child,
+  renderHumanV2Pr,
+  parseHumanV2Parent,
+  parseHumanV2Child,
+  verifyHumanV2Child,
+  verifyHumanV2Pr,
+  parseProgrammeBodyComplete,
+  selectChildIssue,
+  validateHumanSurfaceConformanceDecision,
+  createHumanSurfaceConformanceDecision,
+  prepareHumanSurfaceConformanceDecision,
+  validateHumanSurfaceConformanceEvidence,
+  createHumanSurfaceConformanceEvidence,
+  buildHumanSurfaceConformanceEvidence,
+  deriveHumanSurfaceHistoryTarget,
+  validateHistoryOnlyDelta,
+  humanHistoryImmutableDigest,
+  HUMAN_V2_MIGRATION_STALE_CHILD_STATE,
+  classifyHumanV2MigrationState,
+  prepareHumanV2Migration,
+  recoverHumanV2Migration,
   validateEvidence,
   validateProviderEvidence,
   buildPaginationEvidence,

@@ -13,5 +13,27 @@
   "child_sections": ["Metadata", "Progress checklist", "Objective", "Scope and Design Lock", "Current blockers and next gate", "Technical and repository detail", "Tracker format contract"],
   "pr_sections": ["Metadata", "Current disposition", "Scope", "Changes, evidence, validation and exact identity", "Repository-specific detail", "Tracker format contract"],
   "lifecycle": ["pending", "current", "terminal"],
-  "rules": { "one_canonical_parent": true, "direct_siblings_only": true, "current_max": 1, "flat_pending_queue": true, "queue_order_contiguous": true, "no_competing_subqueues": true, "deferred_findings_not_queue_items": true, "current_state_projection_not_event_log": true, "exact_repository_identity": true, "global_pr_uniqueness": true, "terminal_objective_status_required": true, "terminal_completion_requires_delivery": true, "terminal_completed_requires_accepted_evidence": true, "initialise_unmanaged_only": true, "legacy_initialise_requires_migrate": true, "ambiguous_authority_residue_reject": true }
+  "rules": { "one_canonical_parent": true, "direct_siblings_only": true, "current_max": 1, "flat_pending_queue": true, "queue_order_contiguous": true, "no_competing_subqueues": true, "deferred_findings_not_queue_items": true, "current_state_projection_not_event_log": true, "exact_repository_identity": true, "global_pr_uniqueness": true, "terminal_objective_status_required": true, "terminal_completion_requires_delivery": true, "terminal_completed_requires_accepted_evidence": true, "initialise_unmanaged_only": true, "legacy_initialise_requires_migrate": true, "ambiguous_authority_residue_reject": true },
+  "human_presentation": {
+    "schema": "github.program.presentation.v2",
+    "version": "human-v2",
+    "generic_renderer": true,
+    "legacy_renderer_preserved": true,
+    "canonical_state_embedded": "parent-only",
+    "presentation_model_persisted": false,
+    "complete_read_dispatch": true,
+    "human_v1_reserved_unsupported": true,
+    "parent_carrier": "github.program.human-parent-carrier.v2",
+    "child_carrier": "github.program.human-child-carrier.v2",
+    "pr_carrier": "github.program.human-pr-carrier.v2",
+    "parent_sections": ["Current programme status", "Immediate next", "Children / work packages", "Completed work", "Programme boundaries"],
+    "child_sections": ["Status / Summary", "Objective", "Scope / Boundaries / Completion shape", "Epochs / phases", "PR history", "What remains / Immediate next", "ELI5"],
+    "pr_sections": ["Summary", "Programme position", "What changed", "Why", "Scope", "Out of scope", "Validation", "Candidate / lineage", "Final status / what happens next"],
+    "optional_sections_require_explicit_applicability": true,
+    "history_allowed_paths": ["prs", "children[*].pr_registry", "evidence_refs", "historical_transitions"],
+    "provider_evidence_observational_only": true,
+    "provider_evidence_may_rebase": false,
+    "no_state_movement": true,
+    "unknown_or_mixed_marker_versions_fail_closed": true
+  }
 }

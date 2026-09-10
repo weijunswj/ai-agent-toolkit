@@ -445,12 +445,37 @@
           "summary": {
             "type": "string"
           },
-          "validation_requirements": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
+        "validation_requirements": {
+          "type": "array",
+          "items": {
+            "type": "string"
           }
+        },
+        "candidate": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "required": [
+            "repository",
+            "branch",
+            "base_ref",
+            "base_sha",
+            "head",
+            "tree",
+            "version"
+          ],
+          "properties": {
+            "repository": { "type": "string" },
+            "branch": { "type": "string" },
+            "base_ref": { "type": "string" },
+            "base_sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+            "head": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+            "tree": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+            "version": { "type": "string" }
+          }
+        }
         }
       }
     },
