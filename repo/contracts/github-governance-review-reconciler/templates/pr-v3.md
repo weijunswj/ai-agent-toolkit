@@ -13,3 +13,7 @@
 
 Tracker format contract: review evidence is inventory-first and disposition is
 truthful, controller-owned, and exact-head bound.
+
+Root-003 human-v2 projection note: a PR body is a deterministic descriptor
+projection. PRE_NUMBER has no PR-number authority; BOUND may use only the exact
+source-bound Web controller authority, and the facade never mutates the PR.

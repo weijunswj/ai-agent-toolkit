@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "repository": "weijunswj/ai-agent-toolkit",
   "design_lock": "DL-S2-E3-V5-POST-MERGE-FINALISATION-SOURCE-ANCHORED-TARGETS-002",
-  "toolkit_package_version": "2.10.8",
+  "toolkit_package_version": "2.10.9",
   "canonical_state": {
     "schema": "toolkit.github-program.state.v5",
     "parent_issue": 240,
@@ -51,6 +51,52 @@
       "parser": "PR_V5_NOT_REQUIRED",
       "renderer": "PR_RENDERER_NOT_REQUIRED",
       "mutation": false
+    }
+  },
+  "human_surface_v2": {
+    "schema": "toolkit.github-program.human-surface.v2",
+    "root": "S2-PRE-E4-HUMAN-SURFACE-TRUST-BOUNDARY-SIMPLIFICATION-003",
+    "lock": "DL-S2-PRE-E4-HUMAN-SURFACE-TRUST-BOUNDARY-SIMPLIFICATION-003",
+    "version": "human-v2",
+    "package_version": "2.10.9",
+    "facade_export": "humanSurfaceV2",
+    "operations": ["readComplete", "render", "extendHistory", "planMigration"],
+    "failure_shape": ["ok", "code", "operation", "stage", "safe_for_provider_write", "provider_mutation_authorised"],
+    "provider_write": false,
+    "provider_mutation_authorised": false,
+    "reserved_stems": ["AI-AGENT-TOOLKIT:GITHUB-PROGRAM-", "MANAGED-PROGRAM-"],
+    "legacy_reads": ["accepted-frozen-v5-parent", "accepted-frozen-v5-child"],
+    "new_rendering": "human-v2-only",
+    "complete_read": {
+      "keys": ["body", "complete", "byte_length", "body_sha256", "revision"],
+      "complete": true,
+      "revision_observational_only": true
+    },
+    "authority": {
+      "descriptor_schema": "github.program.pr-descriptor.v2",
+      "bound_authority_schema": "github.program.bind-pr-number.v1",
+      "pr_number_source": "bound_authority_only",
+      "pre_number": true
+    },
+    "history": {
+      "decision_schema": "toolkit.github.program.human-history-decision.v2",
+      "additive_target_only": true,
+      "source_bound": true,
+      "provider_observational_only": true
+    },
+    "migration": {
+      "one_write_plan_maximum": 1,
+      "legacy_parent_legacy_child": "WRITE_PARENT",
+      "human_v2_parent_legacy_child": "WRITE_CHILD",
+      "human_v2_parent_exact_human_v2_child": "RECONCILED",
+      "human_v2_parent_drifted_human_v2_child": "MIGRATION_CHILD_DRIFT",
+      "legacy_parent_human_v2_child": "MIGRATION_ORDER_INVALID"
+    },
+    "lifecycle": {
+      "child_actions": ["CHILD_COMPLETE", "BLOCKING_HOLD", "WAIT_DEPENDENCIES", "AWAIT_CHILD_AUTHORITY", "CONTINUE_ACTIVE_GATE", "AMEND_REQUIRED", "REPLACEMENT_REQUIRED", "AWAIT_EPOCH_AUTHORITY", "BEGIN_OR_CONTINUE_EPOCH", "AWAIT_CHILD_FINALITY"],
+      "programme_actions": ["CONTINUE_CURRENT_CHILD", "AWAIT_PROGRAMME_FINALITY", "PROGRAMME_COMPLETE"],
+      "zero_current_is_not_sufficient": true,
+      "source_backed_terminal_truth_required": true
     }
   },
   "projection_bootstrap_recovery": {
