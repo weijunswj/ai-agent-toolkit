@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.github-program.human-surface-conformance-evidence.v1",
+  "title": "Observational provider evidence for a human-surface history decision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "repository", "decision_digest", "source_canonical_digest", "observations", "readback", "provider_evidence_observational_only", "target_rebase", "evidence_digest"],
+  "properties": {
+    "schema": { "const": "toolkit.github-program.human-surface-conformance-evidence.v1" },
+    "repository": { "type": "string", "minLength": 3, "maxLength": 512, "pattern": "^[^/\\s]+/[^/\\s]+$" },
+    "decision_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "source_canonical_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "observations": { "type": "array", "items": { "$ref": "#/$defs/observation" } },
+    "readback": {
+      "type": "object", "additionalProperties": false, "required": ["complete", "exact"],
+      "properties": { "complete": { "type": "boolean" }, "exact": { "type": "boolean" } }
+    },
+    "provider_evidence_observational_only": { "const": true },
+    "target_rebase": { "const": false },
+    "evidence_digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "$defs": {
+    "observation": {
+      "type": "object", "additionalProperties": false, "required": ["pr_number", "state", "merged", "head", "tree", "base", "revision"],
+      "properties": {
+        "pr_number": { "type": "integer", "minimum": 1 },
+        "state": { "type": "string", "maxLength": 128, "pattern": "^[^\\r\\n]*$" },
+        "merged": { "type": ["boolean", "null"] },
+        "head": { "type": ["string", "null"], "maxLength": 512, "pattern": "^[^\\r\\n]*$" },
+        "tree": { "type": ["string", "null"], "maxLength": 512, "pattern": "^[^\\r\\n]*$" },
+        "base": { "type": ["string", "null"], "maxLength": 512, "pattern": "^[^\\r\\n]*$" },
+        "revision": { "type": ["string", "null"], "maxLength": 512, "pattern": "^[^\\r\\n]*$" }
+      }
+    }
+  }
+}

@@ -22,5 +22,33 @@
   "auto_code": { "mutation": false, "install": false, "schedule": false, "worker_claim": false, "finality": false, "readiness": "inspection-only" },
   "historical": { "pr310": "NO_LONGER_APPLICABLE", "pr310_code": "do-not-revive", "318": "SUPERSEDE", "337": "NO_LONGER_APPLICABLE" },
   "privacy": { "raw_secrets": false, "private_paths": false, "raw_code_blobs": false, "public_safe_evidence_only": true },
-  "mcp": { "status": "not_applicable", "custom_n8n_mcp": false }
+  "mcp": { "status": "not_applicable", "custom_n8n_mcp": false },
+  "human_presentation": {
+    "schema": "github.program.presentation.v2",
+    "version": "human-v2",
+    "generic_renderer": true,
+    "legacy_compatibility": true,
+    "optional_sections_require_applicability": true,
+    "canonical_state_embedded": "parent-only",
+    "presentation_model_persisted": false,
+    "complete_read_dispatch": true,
+    "human_v1_reserved_unsupported": true,
+    "parent_carrier": "github.program.human-parent-carrier.v2",
+    "child_carrier": "github.program.human-child-carrier.v2",
+    "pr_carrier": "github.program.human-pr-carrier.v2",
+    "history_trust": {
+      "authority_defined_additions_only": true,
+      "provider_evidence_observational_only": true,
+      "provider_evidence_may_define_target": false,
+      "provider_evidence_may_rebase": false,
+      "no_state_movement": true,
+      "allowed_history_paths": ["prs", "children[*].pr_registry", "evidence_refs", "historical_transitions"]
+    },
+    "pr_renderer": {
+      "schema": "github.program.pr-presentation.v2",
+      "pre_number": true,
+      "post_number": true,
+      "mutation": false
+    }
+  }
 }
