@@ -1,0 +1,37 @@
+{
+  "schema": "toolkit.github-program.human-surface.red-proof.v1",
+  "root": "S2-PRE-E4-HUMAN-SURFACE-TRUST-BOUNDARY-SIMPLIFICATION-003",
+  "rejected_candidate": "54443300ead5b1db052fe47b970192ac5e3d054c",
+  "rejected_source": "8c0467ff0d5b00a01e3a0befe6fcf05244f23b6a",
+  "rejected_source_tree": "883c6315249f442f0bf62e7e6d1e32508fa63a66",
+  "immutable_blobs": {
+    "runtime": {
+      "path": "repo/scripts/toolkit-github-program-state-v5.cjs",
+      "blob": "8cc97e892777c3f29f9c3b03f62966a10be55fbf"
+    },
+    "predecessor_test": {
+      "path": "repo/tests/toolkit-github-programme-human-surface-conformance-v5.test.cjs",
+      "blob": "2409f4d0f48cdbe7fa642205dc1846a73d326ddd"
+    },
+    "schema": {
+      "path": "repo/contracts/github-program-reconciler/human-surface-conformance-decision-v1.schema.json",
+      "blob": "45296bf48f7f9bca5f8cc3026878143a8de5d300"
+    }
+  },
+  "red_cases": [
+    { "id": "R1", "mechanism": "caller-selectable alternate state or adapter", "entrypoint": "readComplete" },
+    { "id": "R2", "mechanism": "partial or mixed managed markers", "entrypoint": "readComplete" },
+    { "id": "R3", "mechanism": "authority replay after descriptor or candidate mutation", "entrypoint": "render" },
+    { "id": "R4", "mechanism": "invented relationship referent or orphan evidence", "entrypoint": "extendHistory" },
+    { "id": "R5", "mechanism": "provider observation rewrites candidate or authority", "entrypoint": "extendHistory" },
+    { "id": "R6", "mechanism": "source_state or caller-selected migration action", "entrypoint": "planMigration" },
+    { "id": "R7", "mechanism": "unsafe public text or HTTPS structural syntax", "entrypoint": "render" },
+    { "id": "R8", "mechanism": "zero-current or incomplete lifecycle treated as complete", "entrypoint": "render" }
+  ],
+  "required_totals": {
+    "rejected_red_proof": "8/8",
+    "replacement_green_proof": "8/8",
+    "f1_f8_green": "8/8"
+  },
+  "provenance_note": "Blob IDs are immutable evidence labels; the replacement test reproduces the named failure mechanisms through the four production facade operations without executing rejected code."
+}

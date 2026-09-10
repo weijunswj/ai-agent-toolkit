@@ -8,3 +8,11 @@ review-thread mutation, Ready, merge, Web finality, providers, workflows, or
 MCP.
 
 This skill is directly canonical. Use the local runtime and focused tests when validating it.
+
+Root-003 also provides one production human-surface authority facade,
+`humanSurfaceV2`, with only `readComplete`, `render`, `extendHistory`, and
+`planMigration`. Complete reads are source-bound and fail closed on malformed,
+mixed, residual, or unsupported managed bodies. Human-v2 rendering uses typed
+public nodes, strict canonical carriers, source-bound descriptors and BOUND
+authorities, while accepted frozen v5 bodies remain read-only compatibility
+inputs. The facade never performs provider writes or claims provider CAS.
