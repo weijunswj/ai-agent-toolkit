@@ -20,7 +20,8 @@
     "result": { "$ref": "#/$defs/result" },
     "authority": { "$ref": "#/$defs/authority" },
     "transaction": { "$ref": "#/$defs/transaction" },
-    "six_root_contract_integrity": { "$ref": "#/$defs/sixRootContract" }
+    "six_root_contract_integrity": { "$ref": "#/$defs/sixRootContract" },
+    "human_presentation": { "$ref": "#/$defs/humanPresentation" }
   },
   "$defs": {
     "safeId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
@@ -322,6 +323,37 @@
     },
     "authority": { "type": "object", "additionalProperties": false, "required": ["a1", "a2", "a3", "a4", "n5"], "properties": { "a1": { "type": "object" }, "a2": { "type": "object" }, "a3": { "type": "object" }, "a4": { "type": "object" }, "n5": { "type": "object" } } },
     "sixRootContract": { "type": "object", "additionalProperties": false, "required": ["b1_repository_identity", "b2_lifecycle_and_pr_uniqueness", "b3_review_inventory_evidence", "b4_shared_transaction_registry", "b5_proof_gated_compaction", "b6_initialise_and_migrate"], "properties": { "b1_repository_identity": { "const": true }, "b2_lifecycle_and_pr_uniqueness": { "const": true }, "b3_review_inventory_evidence": { "const": true }, "b4_shared_transaction_registry": { "const": true }, "b5_proof_gated_compaction": { "const": true }, "b6_initialise_and_migrate": { "const": true } } },
-    "transaction": { "type": "object", "additionalProperties": false, "required": ["fetch_complete_body", "bind_revision", "bounded_projection", "pre_write_rebind", "immediate_readback", "readback_required", "shared_owner_registry", "proof_gated_terminal_compaction", "legacy_migration_exact"], "properties": { "fetch_complete_body": { "const": true }, "bind_revision": { "const": true }, "bounded_projection": { "const": true }, "pre_write_rebind": { "const": true }, "immediate_readback": { "const": true }, "readback_required": { "const": true }, "shared_owner_registry": { "const": "module-process" }, "proof_gated_terminal_compaction": { "const": true }, "legacy_migration_exact": { "const": true } } }
+    "transaction": { "type": "object", "additionalProperties": false, "required": ["fetch_complete_body", "bind_revision", "bounded_projection", "pre_write_rebind", "immediate_readback", "readback_required", "shared_owner_registry", "proof_gated_terminal_compaction", "legacy_migration_exact"], "properties": { "fetch_complete_body": { "const": true }, "bind_revision": { "const": true }, "bounded_projection": { "const": true }, "pre_write_rebind": { "const": true }, "immediate_readback": { "const": true }, "readback_required": { "const": true }, "shared_owner_registry": { "const": "module-process" }, "proof_gated_terminal_compaction": { "const": true }, "legacy_migration_exact": { "const": true } } },
+    "humanPresentation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "version", "generic_renderer", "legacy_compatibility", "optional_sections_require_applicability", "history_trust", "canonical_state_embedded", "presentation_model_persisted", "complete_read_dispatch", "human_v1_reserved_unsupported"],
+      "properties": {
+        "schema": { "const": "github.program.presentation.v2" },
+        "version": { "const": "human-v2" },
+        "generic_renderer": { "const": true },
+        "legacy_compatibility": { "const": true },
+        "optional_sections_require_applicability": { "const": true },
+        "canonical_state_embedded": { "const": "parent-only" },
+        "presentation_model_persisted": { "const": false },
+        "complete_read_dispatch": { "const": true },
+        "human_v1_reserved_unsupported": { "const": true },
+        "history_trust": {
+          "type": "object", "additionalProperties": false,
+          "required": ["authority_defined_additions_only", "provider_evidence_observational_only", "provider_evidence_may_define_target", "provider_evidence_may_rebase", "no_state_movement", "allowed_history_paths"],
+          "properties": {
+            "authority_defined_additions_only": { "const": true },
+            "provider_evidence_observational_only": { "const": true },
+            "provider_evidence_may_define_target": { "const": false },
+            "provider_evidence_may_rebase": { "const": false },
+            "no_state_movement": { "const": true },
+            "allowed_history_paths": { "type": "array", "items": { "enum": ["prs", "children[*].pr_registry", "evidence_refs", "historical_transitions"] } }
+          }
+        },
+        "parent_carrier": { "const": "github.program.human-parent-carrier.v2" },
+        "child_carrier": { "const": "github.program.human-child-carrier.v2" },
+        "pr_carrier": { "const": "github.program.human-pr-carrier.v2" }
+      }
+    }
   }
 }

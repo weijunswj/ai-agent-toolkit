@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "toolkit.github-program.human-surface-conformance-decision.v1",
+  "title": "Authority-defined human-surface history decision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "root", "lock", "repository", "source", "authority", "history_additions", "accepted_candidate_identities", "invariants"],
+  "properties": {
+    "schema": { "const": "toolkit.github-program.human-surface-conformance-decision.v1" },
+    "root": { "$ref": "#/$defs/safeId" },
+    "lock": { "$ref": "#/$defs/safeId" },
+    "repository": { "$ref": "#/$defs/repository" },
+    "source": { "$ref": "#/$defs/source" },
+    "authority": { "$ref": "#/$defs/authority" },
+    "history_additions": { "$ref": "#/$defs/additions" },
+    "accepted_candidate_identities": { "type": "array", "items": { "$ref": "#/$defs/candidateIdentity" } },
+    "invariants": { "$ref": "#/$defs/invariants" }
+  },
+  "$defs": {
+    "safeId": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._:/#-]*$" },
+    "repository": { "type": "string", "minLength": 3, "maxLength": 512, "pattern": "^[^/\\s]+/[^/\\s]+$" },
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "sha": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "issue": { "type": "integer", "minimum": 1 },
+    "text": { "type": "string", "maxLength": 8192, "pattern": "^[^\\r\\n]*$" },
+    "nullableId": { "type": ["string", "null"], "maxLength": 512, "pattern": "^(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._:/#-]*$" },
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema", "canonical_digest", "immutable_digest", "state"],
+      "properties": {
+        "schema": { "$ref": "#/$defs/safeId" },
+        "canonical_digest": { "$ref": "#/$defs/digest" },
+        "immutable_digest": { "$ref": "#/$defs/digest" },
+        "state": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "authority": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "repository", "issue", "comment_id", "body_digest"],
+      "properties": {
+        "kind": { "const": "USER_WEB_CONTROLLER" },
+        "repository": { "$ref": "#/$defs/repository" },
+        "issue": { "$ref": "#/$defs/issue" },
+        "comment_id": { "type": "integer", "minimum": 1 },
+        "body_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "candidate": {
+      "type": "object", "additionalProperties": false,
+      "required": ["repository", "branch", "base_ref", "base_sha", "head", "tree", "version"],
+      "properties": {
+        "repository": { "$ref": "#/$defs/repository" },
+        "branch": { "$ref": "#/$defs/safeId" },
+        "base_ref": { "$ref": "#/$defs/safeId" },
+        "base_sha": { "$ref": "#/$defs/sha" },
+        "head": { "$ref": "#/$defs/sha" },
+        "tree": { "$ref": "#/$defs/sha" },
+        "version": { "$ref": "#/$defs/text" }
+      }
+    },
+    "descriptor": {
+      "type": "object", "additionalProperties": false,
+      "required": ["changed_surfaces", "child_issue", "design_constraints", "eli5", "evidence_refs", "number", "out_of_scope", "purpose", "scope", "summary", "validation_requirements"],
+      "properties": {
+        "changed_surfaces": { "type": "array", "items": { "$ref": "#/$defs/text" } },
+        "child_issue": { "$ref": "#/$defs/issue" },
+        "design_constraints": { "type": "array", "items": { "$ref": "#/$defs/text" } },
+        "eli5": { "$ref": "#/$defs/text" },
+        "evidence_refs": { "type": "array", "items": { "$ref": "#/$defs/safeId" } },
+        "number": { "$ref": "#/$defs/issue" },
+        "out_of_scope": { "type": "array", "items": { "$ref": "#/$defs/text" } },
+        "purpose": { "$ref": "#/$defs/text" },
+        "scope": { "type": "array", "items": { "$ref": "#/$defs/text" } },
+        "summary": { "$ref": "#/$defs/text" },
+        "validation_requirements": { "type": "array", "items": { "$ref": "#/$defs/text" } },
+        "candidate": { "type": ["object", "null"], "additionalProperties": false, "required": ["repository", "branch", "base_ref", "base_sha", "head", "tree", "version"], "properties": { "repository": { "$ref": "#/$defs/repository" }, "branch": { "$ref": "#/$defs/safeId" }, "base_ref": { "$ref": "#/$defs/safeId" }, "base_sha": { "$ref": "#/$defs/sha" }, "head": { "$ref": "#/$defs/sha" }, "tree": { "$ref": "#/$defs/sha" }, "version": { "$ref": "#/$defs/text" } } }
+      }
+    },
+    "registryEntry": {
+      "type": "object", "additionalProperties": false,
+      "required": ["accepted_evidence_ref", "completes_child", "epoch_id", "pr", "retirement_evidence_ref", "role", "status"],
+      "properties": {
+        "accepted_evidence_ref": { "$ref": "#/$defs/nullableId" },
+        "candidate": { "type": ["object", "null"], "additionalProperties": false, "required": ["repository", "branch", "base_ref", "base_sha", "head", "tree", "version"], "properties": { "repository": { "$ref": "#/$defs/repository" }, "branch": { "$ref": "#/$defs/safeId" }, "base_ref": { "$ref": "#/$defs/safeId" }, "base_sha": { "$ref": "#/$defs/sha" }, "head": { "$ref": "#/$defs/sha" }, "tree": { "$ref": "#/$defs/sha" }, "version": { "$ref": "#/$defs/text" } } },
+        "completes_child": { "type": "boolean" },
+        "draft": { "type": "boolean" },
+        "epoch_id": { "$ref": "#/$defs/safeId" },
+        "github_state": { "$ref": "#/$defs/safeId" },
+        "merged": { "type": "boolean" },
+        "pr": { "$ref": "#/$defs/issue" },
+        "retention_evidence_ref": { "$ref": "#/$defs/nullableId" },
+        "retirement_evidence_ref": { "$ref": "#/$defs/nullableId" },
+        "role": { "$ref": "#/$defs/safeId" },
+        "status": { "$ref": "#/$defs/safeId" }
+      }
+    },
+    "evidenceRef": {
+      "type": "object", "additionalProperties": false, "required": ["id", "kind", "reference", "summary"],
+      "properties": { "id": { "$ref": "#/$defs/safeId" }, "kind": { "$ref": "#/$defs/safeId" }, "reference": { "$ref": "#/$defs/safeId" }, "summary": { "$ref": "#/$defs/text" } }
+    },
+    "transition": {
+      "type": "object", "additionalProperties": false, "required": ["child_issue", "disposition", "epoch_id", "evidence_ref", "gate", "id"],
+      "properties": { "child_issue": { "$ref": "#/$defs/issue" }, "disposition": { "$ref": "#/$defs/safeId" }, "epoch_id": { "$ref": "#/$defs/safeId" }, "evidence_ref": { "$ref": "#/$defs/safeId" }, "gate": { "$ref": "#/$defs/safeId" }, "id": { "$ref": "#/$defs/safeId" } }
+    },
+    "registryAddition": {
+      "type": "object", "additionalProperties": false, "required": ["child_issue", "entry"],
+      "properties": { "child_issue": { "$ref": "#/$defs/issue" }, "entry": { "$ref": "#/$defs/registryEntry" } }
+    },
+    "additions": {
+      "type": "object", "additionalProperties": false, "required": ["prs", "registry", "evidence_refs", "historical_transitions"],
+      "properties": {
+        "prs": { "type": "array", "items": { "$ref": "#/$defs/descriptor" } },
+        "registry": { "type": "array", "items": { "$ref": "#/$defs/registryAddition" } },
+        "evidence_refs": { "type": "array", "items": { "$ref": "#/$defs/evidenceRef" } },
+        "historical_transitions": { "type": "array", "items": { "$ref": "#/$defs/transition" } }
+      }
+    },
+    "candidateIdentity": {
+      "type": "object", "additionalProperties": false, "required": ["pr_number", "candidate"],
+      "properties": {
+        "pr_number": { "$ref": "#/$defs/issue" },
+        "candidate": { "$ref": "#/$defs/candidate" },
+        "child_issue": { "$ref": "#/$defs/issue" },
+        "epoch_id": { "$ref": "#/$defs/safeId" }
+      }
+    },
+    "invariants": {
+      "type": "object", "additionalProperties": false, "required": ["immutable_digest", "allowed_paths", "provider_evidence_observational_only", "no_provider_target_rebase", "no_state_movement"],
+      "properties": {
+        "immutable_digest": { "$ref": "#/$defs/digest" },
+        "allowed_paths": { "type": "array", "items": { "enum": ["prs", "children[*].pr_registry", "evidence_refs", "historical_transitions"] } },
+        "provider_evidence_observational_only": { "const": true },
+        "no_provider_target_rebase": { "const": true },
+        "no_state_movement": { "const": true }
+      }
+    }
+  }
+}

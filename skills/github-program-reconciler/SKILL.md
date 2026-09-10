@@ -1,15 +1,35 @@
 ---
 name: github-program-reconciler
-description: Explicit-only GitHub programme parent/direct-child governance and truthful PR-review and Deferred Findings reconciliation. E2 renames the product only; current N5 runtime semantics remain unchanged until their separately authorised redesign.
+description: Explicit-only GitHub programme governance, human-v2 source-bound parent/child/PR projections, truthful review reconciliation, and bounded history conformance. Legacy N5/v3 and exact E3 compatibility remain explicit and separate; no E4 or live migration authority is included.
 ---
 
 # GitHub Program Reconciler
 
 This skill is explicit-only. Its OpenAI metadata sets `allow_implicit_invocation: false`.
-Use it only when the user explicitly asks for the current-main N5 governance and
-truthful PR-review reconciler contract for a repository-scoped task. Ordinary
+Use it only when the user explicitly asks for the current-main N5 governance,
+human-v2 surface conformance, or truthful PR-review reconciler contract for a
+repository-scoped task. Ordinary
 GitHub inspection belongs to the GitHub skill, ordinary coding belongs to the
 coding agent, and final Web/controller work remains outside this skill.
+
+## Human-v2 source-bound surfaces
+
+The human-v2 path is a deterministic derived projection of one authoritative
+canonical programme state. Use the local programme runtime entrypoints
+`renderHumanV2Parent`, `parseHumanV2Parent`, `renderHumanV2Child`,
+`verifyHumanV2Child`, `renderHumanV2Pr`, `verifyHumanV2Pr`, and
+`parseProgrammeBodyComplete` for public production flows. Parent carriers embed
+the complete audited canonical state; child and PR carriers do not embed
+canonical authority and must be rebound to complete external state or a
+controller-authorised descriptor. All results are safe for inspection only by
+default. The global and child-local action machines, exact child selection,
+PublicSurfaceCodec, complete-read fail-closed grammar, and bounded
+`HISTORY_EXTENDED_PRE_E4` bridge are part of the path.
+
+Human-v1 is reserved unsupported residue. Legacy v3 and exact E3 rendering
+remain separate explicit compatibility paths. This skill does not start E4,
+perform Programme Apply, perform live migration, create provider authority, or
+bind a newly assigned PR number without separate controller authority.
 
 ## Scope
 
