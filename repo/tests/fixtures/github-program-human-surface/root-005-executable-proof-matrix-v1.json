@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schema": "toolkit.github.program.root-005-executable-proof-matrix.v1",
+  "root": "S2-PRE-E4-HUMAN-SURFACE-VALIDATION-PROOF-INTEGRITY-005",
+  "lock": "DL-S2-PRE-E4-HUMAN-SURFACE-VALIDATION-PROOF-INTEGRITY-005",
+  "version": "2.10.9",
+  "historical_reference": {
+    "path": "repo/tests/fixtures/github-program-human-surface/rejected-54443300-red-proof-v1.json",
+    "immutable": true,
+    "rejected_candidate": "54443300ead5b1db052fe47b970192ac5e3d054c",
+    "rejected_source": "8c0467ff0d5b00a01e3a0befe6fcf05244f23b6a",
+    "rejected_source_tree": "883c6315249f442f0bf62e7e6d1e32508fa63a66",
+    "immutable_blobs": {
+      "runtime": {
+        "path": "repo/scripts/toolkit-github-program-state-v5.cjs",
+        "blob": "8cc97e892777c3f29f9c3b03f62966a10be55fbf"
+      },
+      "predecessor_test": {
+        "path": "repo/tests/toolkit-github-programme-human-surface-conformance-v5.test.cjs",
+        "blob": "2409f4d0f48cdbe7fa642205dc1846a73d326ddd"
+      },
+      "schema": {
+        "path": "repo/contracts/github-program-reconciler/human-surface-conformance-decision-v1.schema.json",
+        "blob": "45296bf48f7f9bca5f8cc3026878143a8de5d300"
+      }
+    },
+    "metadata_totals_are_not_receipts": true
+  },
+  "families": [
+    {
+      "id": "REJECTED_RED_PROOF",
+      "order": 1,
+      "case_prefix": "R",
+      "mode": "rejected",
+      "cases": [
+        { "id": "R1", "entrypoint": "render", "assertion": "caller cannot add an alternate source key", "expected": { "ok": false, "code": "INPUT_KEY_UNEXPECTED", "stage": "INPUT" } },
+        { "id": "R2", "entrypoint": "readComplete", "assertion": "partial managed marker namespaces fail classification", "expected": { "ok": false, "code": "MARKER_PARTIAL", "stage": "CLASSIFY" } },
+        { "id": "R3", "entrypoint": "readComplete", "assertion": "bound authority replay fails the carrier projection comparison", "expected": { "ok": false, "code": "CARRIER_PROJECTION_MISMATCH", "stage": "READBACK" } },
+        { "id": "R4", "entrypoint": "extendHistory", "assertion": "invented transition referents fail history validation", "expected": { "ok": false, "code": "HISTORY_REFERENT_MISSING", "stage": "HISTORY" } },
+        { "id": "R5", "entrypoint": "extendHistory", "assertion": "provider observations cannot rewrite the candidate identity", "expected": { "ok": false, "code": "PROVIDER_ASSERTION_MISMATCH", "stage": "PROVIDER_ASSERTION" } },
+        { "id": "R6", "entrypoint": "planMigration", "assertion": "caller cannot supply source state control", "expected": { "ok": false, "code": "INPUT_KEY_UNEXPECTED", "stage": "INPUT" } },
+        { "id": "R7", "entrypoint": "render", "assertion": "unsafe public text fails the public audit", "expected": { "ok": false, "code": "PUBLIC_DATA_UNSAFE", "stage": "PUBLIC_AUDIT" } },
+        { "id": "R8", "entrypoint": "readComplete", "assertion": "rewritten lifecycle state fails canonical validation", "expected": { "ok": false, "code": "CANONICAL_STATE_INVALID", "stage": "CANONICAL" } }
+      ]
+    },
+    {
+      "id": "REPLACEMENT_GREEN_PROOF",
+      "order": 2,
+      "case_prefix": "G",
+      "mode": "replacement",
+      "cases": [
+        { "id": "G1", "entrypoint": "readComplete", "assertion": "accepted legacy parent is readable", "expected": { "ok": true, "code": "READ_COMPLETE", "stage": "READBACK" } },
+        { "id": "G2", "entrypoint": "render", "assertion": "legacy parent renders through human-v2", "expected": { "ok": true, "code": "RENDER_READY", "stage": "SERIALIZE" } },
+        { "id": "G3", "entrypoint": "render", "assertion": "PR descriptor renders before provider number assignment", "expected": { "ok": true, "code": "RENDER_READY", "stage": "SERIALIZE", "number_state": "PRE_NUMBER" } },
+        { "id": "G4", "entrypoint": "render", "assertion": "bound authority renders only the bound current projection", "expected": { "ok": true, "code": "RENDER_READY", "stage": "SERIALIZE", "number_state": "BOUND" } },
+        { "id": "G5", "entrypoint": "extendHistory", "assertion": "history extension returns complete parent and child artifacts", "expected": { "ok": true, "code": "HISTORY_EXTENDED", "stage": "READBACK" } },
+        { "id": "G6", "entrypoint": "extendHistory", "assertion": "provider observation is exact and observational", "expected": { "ok": true, "code": "HISTORY_EXTENDED", "stage": "READBACK" } },
+        { "id": "G7", "entrypoint": "planMigration", "assertion": "legacy parent and child produce one parent write plan", "expected": { "ok": true, "code": "MIGRATION_PARENT_WRITE_READY", "stage": "MIGRATION", "action": "WRITE_PARENT" } },
+        { "id": "G8", "entrypoint": "planMigration", "assertion": "human parent and legacy child produce one child write plan", "expected": { "ok": true, "code": "MIGRATION_CHILD_WRITE_READY", "stage": "MIGRATION", "action": "WRITE_CHILD" } }
+      ]
+    },
+    {
+      "id": "F1_F8_GREEN",
+      "order": 3,
+      "case_prefix": "F",
+      "mode": "focused",
+      "cases": [
+        { "id": "F1", "entrypoint": "render", "assertion": "parent canonical identity owns the rendered child", "expected": { "ok": true, "code": "RENDER_READY", "stage": "SERIALIZE" } },
+        { "id": "F2", "entrypoint": "extendHistory", "assertion": "valid history target is additive and source-bound", "expected": { "ok": true, "code": "HISTORY_EXTENDED", "stage": "READBACK" } },
+        { "id": "F3", "entrypoint": "extendHistory", "assertion": "candidate identities remain exact under provider observation", "expected": { "ok": true, "code": "HISTORY_EXTENDED", "stage": "READBACK" } },
+        { "id": "F4", "entrypoint": "readComplete", "assertion": "complete-read dispatch uses the complete record contract", "expected": { "ok": true, "code": "READ_COMPLETE", "stage": "READBACK" } },
+        { "id": "F5", "entrypoint": "render", "assertion": "public serializer preserves safe URL and text boundaries", "expected": { "ok": true, "code": "RENDER_READY", "stage": "SERIALIZE" } },
+        { "id": "F6", "entrypoint": "render", "assertion": "lifecycle action remains source-derived and non-terminal", "expected": { "ok": true, "code": "RENDER_READY", "stage": "SERIALIZE" } },
+        { "id": "F7", "entrypoint": "render", "assertion": "explicit child selection remains parent-bound", "expected": { "ok": true, "code": "RENDER_READY", "stage": "SERIALIZE" } },
+        { "id": "F8", "entrypoint": "render", "assertion": "generic-facing presentation uses the same narrow facade", "expected": { "ok": true, "code": "RENDER_READY", "stage": "SERIALIZE" } }
+      ]
+    }
+  ],
+  "execution_contract": {
+    "receipt_schema": "toolkit.github.program.executable-proof-receipt.v1",
+    "receipt_fields": ["schema", "family", "id", "entrypoint", "executed", "status", "result", "assertion", "receipt_sha256"],
+    "required_cases_per_family": 8,
+    "canonical_order": "fixture family order and case order",
+    "aggregate_requires": [
+      "every expected case has exactly one receipt",
+      "every receipt is produced by its mapped production facade entrypoint",
+      "every receipt has an exact PASS assertion and valid receipt digest",
+      "no metadata-only, selective, missing, duplicate, unknown, failed, mismatched, or tampered receipt is accepted"
+    ],
+    "aggregate_format": "<family>=<passed>/<total>"
+  }
+}

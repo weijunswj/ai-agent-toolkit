@@ -11,6 +11,37 @@ truthful PR-review reconciler contract for a repository-scoped task. Ordinary
 GitHub inspection belongs to the GitHub skill, ordinary coding belongs to the
 coding agent, and final Web/controller work remains outside this skill.
 
+## Root-005 executable-proof human surface
+
+For the Root-005 human-surface proof, use only the production `humanSurfaceV2`
+facade from
+`repo/scripts/toolkit-github-program-state-v5.cjs`. It has exactly four
+operations: `readComplete`, `render`, `extendHistory`, and `planMigration`.
+This preserves the accepted Root-004 architecture: the facade owns complete-read
+validation, whole-body marker classification, canonical and relationship
+validation, source-bound authority, deterministic public serialization,
+additive history, provider-observation comparison, and legacy migration
+planning. A valid `extendHistory` result includes complete parent and child
+`RenderArtifact` values with `read_record` and the full digest set; lifecycle
+actions are derived by `h2ProgrammeAction` and `h2ChildAction`. PR rendering
+must follow the private production flow from a validated immutable
+`PrDescriptorV2` plus validated BOUND authority or null through
+`h2BuildPrPhaseProjection`, `h2ValidatePrPhaseProjection`, and
+`h2BuildPrTypedDocument` before the existing audit and serializer. Provenance,
+not wording or keyword classification, selects exactly the four zones; BOUND
+descriptor text belongs only to the explicitly labelled historical region and
+`next_action_pre_number` is omitted from BOUND public prose and carrier.
+The executable proof matrix at
+`repo/tests/fixtures/github-program-human-surface/root-005-executable-proof-matrix-v1.json`
+requires three independently ordered eight-case families, actual production
+entrypoint receipts, and no aggregate for metadata-only, selective, incomplete,
+duplicate, unknown, failed, mismatched, or tampered receipt sets.
+Do not expose or select parser, codec, marker, graph, authority, history,
+migration, or source-adapter helpers. Existing v5 helpers remain historical
+compatibility internals for frozen E3 bytes; new rendering is human-v2 only.
+Provider writes, PR-number binding, Web finality, Ready, merge, and Programme
+Apply remain outside the facade and require their separate authority boundaries.
+
 ## Scope
 
 The supported intents are `inspect`, `preview`, `initialise`, `migrate`,
