@@ -307,7 +307,7 @@ function serverJobEvidence(overrides = {}) {
     head_sha: SERVER_PR.head_sha,
     status: 'completed',
     conclusion: 'success',
-    steps: [{ number: 5, name: 'Run validation', status: 'completed', conclusion: 'success' }],
+    steps: [{ number: runtime.PRODUCER_MAP.workflow.aggregate_step.number, name: 'Run validation', status: 'completed', conclusion: 'success' }],
     ...overrides,
   };
 }
@@ -537,7 +537,7 @@ test('unsupported deleted provider status fails closed as PATH_INVALID', () => {
   assert.equal(runtime.validateChangedPathCollection({ pull_request: SERVER_PR, pages }).code, 'PATH_INVALID');
 });
 
-test('checked-in server evidence fixture is closed, current, and digest-valid', () => {
+test('checked-in historical server evidence remains immutable and fails closed after producer pin advancement', () => {
   const result = runtime.validateServerEvidence(serverEvidenceFixtureFile, {
     repository_id: SERVER_PR.repository_id,
     pr: SERVER_PR.number,
@@ -545,8 +545,8 @@ test('checked-in server evidence fixture is closed, current, and digest-valid', 
     base_sha: SERVER_PR.base_sha,
     merge_sha: SERVER_PR.merge_sha,
   });
-  assert.equal(result.ok, true, result.code);
-  assert.equal(result.required_component_ids.includes('git-diff-check'), false);
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'EVIDENCE_SCHEMA_INVALID');
 });
 
 test('stable post-transition source binding accepts the canonical workflow at every source revision', () => {
