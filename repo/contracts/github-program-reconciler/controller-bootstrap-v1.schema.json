@@ -36,7 +36,7 @@
       "const": "toolkit.github-program.surface.v5"
     },
     "toolkit_package_version": {
-      "const": "2.10.8"
+      "const": "2.10.9"
     },
     "toolkit_contract": {
       "type": "object",

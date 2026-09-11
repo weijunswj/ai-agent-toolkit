@@ -19,3 +19,7 @@ per-call repository identity override is valid. Current and expected review
 candidate identity must be explicit and match the represented PR head, tree,
 and base. Terminal objectives require explicit completed/disposed status;
 completed status requires durable public-safe evidence and a retained digest.
+
+Root-004 human-v2 projection note: managed human surfaces are read and rendered
+through the single `humanSurfaceV2` facade. Provider mutation, PR-number binding,
+Ready, merge, and finality remain outside this projection contract.
