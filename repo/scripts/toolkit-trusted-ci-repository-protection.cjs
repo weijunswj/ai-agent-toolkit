@@ -403,7 +403,7 @@ function validateProducerMap(map) {
   if (!Number.isSafeInteger(map.workflow.id) || map.workflow.id < 1
     || !isSafeText(map.workflow.path, 512) || map.workflow.event !== 'pull_request'
     || map.workflow.approved_ref !== 'refs/heads/main' || !isSha(map.workflow.approved_source_blob_sha)
-    || map.workflow.job.name !== 'validate' || map.workflow.aggregate_step.number !== 5
+    || map.workflow.job.name !== 'validate' || map.workflow.aggregate_step.number !== 6
     || map.workflow.aggregate_step.name !== 'Run validation'
     || map.workflow.aggregate_step.fail_fast !== 'github-actions-default-bash'
     || canonicalSerialize(map.workflow.source_revisions) !== canonicalSerialize(['base', 'head', 'merge'])) {
