@@ -5,12 +5,12 @@
   "parent_issue": 240,
   "programme_state_schema": "toolkit.github-program.state.v5",
   "surface_contract_schema": "toolkit.github-program.surface.v5",
-  "toolkit_package_version": "2.10.8",
+  "toolkit_package_version": "2.10.9",
   "toolkit_contract": {
     "repository": "weijunswj/ai-agent-toolkit",
-    "revision": "191de97596e37769ee6be3ac421c49cd86fe074c",
+    "revision": "e0c0f1c90d739b1535a6cb7d899a86a131a9bea1",
     "path": "repo/contracts/github-program-reconciler/programme-surface-contract-v5.json",
-    "sha256": "900d295613844bfedcca429249701f35f220bc9c3fa03b785b12ebcb70a4d577"
+    "sha256": "01ec793d380413c8a05bf88651da0000cfad4a75083c60d100cbfab0d57cd1a8"
   },
   "conformance": {
     "actual_workspace_bytes": true,
