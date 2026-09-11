@@ -3567,7 +3567,7 @@ function validateControllerBootstrap(value) {
     || value.parent_issue !== PARENT_ISSUE
     || value.programme_state_schema !== STATE_SCHEMA
     || value.surface_contract_schema !== SURFACE_SCHEMA
-    || value.toolkit_package_version !== '2.10.8'
+    || value.toolkit_package_version !== '2.10.9'
     || !isRecord(value.toolkit_contract)
     || !exactKeys(value.toolkit_contract, ['repository', 'revision', 'path', 'sha256'])
     || value.toolkit_contract.repository !== REPOSITORY
@@ -3609,6 +3609,1895 @@ function verifyBootstrapWorkspaceProof(input = {}) {
     resolver: 'unchanged',
   });
 }
+
+const H2_ROOT = 'S2-PRE-E4-HUMAN-SURFACE-VALIDATION-PROOF-INTEGRITY-005';
+const H2_LOCK = 'DL-S2-PRE-E4-HUMAN-SURFACE-VALIDATION-PROOF-INTEGRITY-005';
+const H2_PACKAGE_VERSION = '2.10.9';
+const H2_VERSION = 'human-v2';
+const H2_CANONICAL_CLASS = 'canonical-programme-state';
+const H2_DESCRIPTOR_SCHEMA = 'github.program.pr-descriptor.v2';
+const H2_BIND_AUTHORITY_SCHEMA = 'github.program.bind-pr-number.v1';
+const H2_HISTORY_SCHEMA = 'toolkit.github.program.human-history.v2';
+const H2_HISTORY_DECISION_SCHEMA = 'toolkit.github.program.human-history-decision.v2';
+const H2_PROVIDER_OBSERVATION_SCHEMA = 'github.program.provider-observation.v1';
+const H2_PARENT_CARRIER_SCHEMA = 'github.program.human-parent-carrier.v2';
+const H2_CHILD_CARRIER_SCHEMA = 'github.program.human-child-carrier.v2';
+const H2_PR_CARRIER_SCHEMA = 'github.program.human-pr-carrier.v2';
+const H2_PARENT_PROJECTION_SCHEMA = 'github.program.parent-projection.v2';
+const H2_CHILD_PROJECTION_SCHEMA = 'github.program.child-projection.v2';
+const H2_PR_PHASE_PROJECTION_SCHEMA = 'github.program.pr-phase-projection.v1';
+const H2_HISTORY_KEY = 'human_surface_v2_history';
+const H2_STAGES = Object.freeze([
+  'INPUT', 'COMPLETE_READ', 'CLASSIFY', 'PARSE', 'AUTHORITY', 'CANONICAL',
+  'RELATIONSHIP', 'HISTORY', 'PROVIDER_ASSERTION', 'MIGRATION', 'LIFECYCLE',
+  'PUBLIC_AUDIT', 'SERIALIZE', 'READBACK',
+]);
+const H2_CHILD_ACTIONS = Object.freeze([
+  'CHILD_COMPLETE', 'BLOCKING_HOLD', 'WAIT_DEPENDENCIES',
+  'AWAIT_CHILD_AUTHORITY', 'CONTINUE_ACTIVE_GATE', 'AMEND_REQUIRED',
+  'REPLACEMENT_REQUIRED', 'AWAIT_EPOCH_AUTHORITY', 'BEGIN_OR_CONTINUE_EPOCH',
+  'AWAIT_CHILD_FINALITY',
+]);
+const H2_PROGRAMME_ACTIONS = Object.freeze([
+  'CONTINUE_CURRENT_CHILD', 'AWAIT_PROGRAMME_FINALITY', 'PROGRAMME_COMPLETE',
+]);
+const H2_RESERVED_STEMS = Object.freeze([
+  'AI-AGENT-TOOLKIT:GITHUB-PROGRAM-',
+  'MANAGED-PROGRAM-',
+]);
+const H2_TEXT_PUNCTUATION = (code) => (
+  code >= 0x21 && code <= 0x2f
+  || code >= 0x3a && code <= 0x40
+  || code >= 0x5b && code <= 0x60
+  || code >= 0x7b && code <= 0x7e
+);
+const H2_SENSITIVE_KEY = /^(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|bearer|password|passwd|secret|private[_ -]?key|client[_ -]?secret|authorization|credential|credentials|token|tokens|private[_ -]?value|secret[_ -]?value)$/i;
+const H2_SECRET_VALUE = /(?:\b(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|token|tokens|password|passwd|secret|private[_ -]?key|client[_ -]?secret|authorization|credential)\s*[:=]\s*[^\s,;)}\]]+|\bbearer\s+[A-Za-z0-9._~+/=-]{6,}|\b(?:ghp|gho|ghu|ghs|ghr)[_-][A-Za-z0-9_-]{8,}\b|\bgithub_pat_[A-Za-z0-9_-]{8,}\b|\bsk-[A-Za-z0-9_-]{8,}\b|\bAKIA[0-9A-Z]{12,}\b)/i;
+const H2_PRIVATE_PATH = /(?:file:\/\/|data:|(?:^|[^A-Za-z0-9])[A-Za-z]:[\\/]|(?:^|[\s(])\/(?:Users|home|root|private|etc|var|tmp|opt|srv)(?:[\\/]|$))/i;
+const H2_STRUCTURAL_TOKENS = Object.freeze(['<!--', '-->', '```']);
+
+const H2_MARKERS = Object.freeze({
+  generic: Object.freeze({
+    parent: Object.freeze({
+      begin: '<!-- MANAGED-PROGRAM-PARENT:BEGIN human-v2 -->',
+      carrier: '<!-- MANAGED-PROGRAM-PARENT-CARRIER human-v2 ',
+      end: '<!-- MANAGED-PROGRAM-PARENT:END human-v2 -->',
+    }),
+    child: Object.freeze({
+      begin: '<!-- MANAGED-PROGRAM-CHILD:BEGIN human-v2 -->',
+      carrier: '<!-- MANAGED-PROGRAM-CHILD-CARRIER human-v2 ',
+      end: '<!-- MANAGED-PROGRAM-CHILD:END human-v2 -->',
+    }),
+    pr: Object.freeze({
+      begin: '<!-- MANAGED-PROGRAM-PR:BEGIN human-v2 -->',
+      carrier: '<!-- MANAGED-PROGRAM-PR-CARRIER human-v2 ',
+      end: '<!-- MANAGED-PROGRAM-PR:END human-v2 -->',
+    }),
+  }),
+  toolkit: Object.freeze({
+    parent: Object.freeze({
+      begin: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PARENT:BEGIN human-v2 -->',
+      carrier: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PARENT-CARRIER human-v2 ',
+      end: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PARENT:END human-v2 -->',
+    }),
+    child: Object.freeze({
+      begin: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-CHILD:BEGIN human-v2 -->',
+      carrier: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-CHILD-CARRIER human-v2 ',
+      end: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-CHILD:END human-v2 -->',
+    }),
+    pr: Object.freeze({
+      begin: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PR:BEGIN human-v2 -->',
+      carrier: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PR-CARRIER human-v2 ',
+      end: '<!-- AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PR:END human-v2 -->',
+    }),
+  }),
+});
+
+function h2Own(value, key) { return Object.prototype.hasOwnProperty.call(value, key); }
+function h2Error(code, stage) {
+  const error = new Error(code);
+  error.h2_code = code;
+  error.h2_stage = stage;
+  return error;
+}
+function h2Require(condition, _legacyBoolean, code, stage) {
+  if (!condition) throw h2Error(code, stage);
+  return condition;
+}
+function h2IsPlain(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return false;
+  const names = Object.getOwnPropertyNames(value);
+  const symbols = Object.getOwnPropertySymbols(value);
+  if (symbols.length > 0) return false;
+  return names.every((key) => {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor && descriptor.enumerable && Object.prototype.hasOwnProperty.call(descriptor, 'value');
+  });
+}
+function h2Exact(value, keys) {
+  if (!h2IsPlain(value)) return false;
+  const expected = [...keys].sort();
+  const actual = Object.keys(value).sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+function h2NoMalformedUnicode(value) {
+  if (typeof value !== 'string') return false;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) return false;
+  }
+  return true;
+}
+function h2ForbiddenUnicode(value) {
+  if (!h2NoMalformedUnicode(value)) return true;
+  for (const character of value) {
+    const code = character.codePointAt(0);
+    if (code === 0xfeff || code === 0x061c || code === 0x200e || code === 0x200f
+      || code >= 0x202a && code <= 0x202e || code >= 0x2066 && code <= 0x2069
+      || code >= 0xfdd0 && code <= 0xfdef || (code & 0xffff) === 0xfffe || (code & 0xffff) === 0xffff) return true;
+  }
+  return false;
+}
+function h2Canonical(value, seen = new Set()) {
+  if (value === null) return 'null';
+  if (typeof value === 'string') {
+    if (h2ForbiddenUnicode(value)) throw h2Error('CANONICAL_VALUE_INVALID', 'CANONICAL');
+    return JSON.stringify(value);
+  }
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'number') {
+    if (!Number.isSafeInteger(value)) throw h2Error('CANONICAL_VALUE_INVALID', 'CANONICAL');
+    return Object.is(value, -0) ? '0' : String(value);
+  }
+  if (Array.isArray(value)) {
+    if (Object.getPrototypeOf(value) !== Array.prototype && Object.getPrototypeOf(value) !== null) throw h2Error('CANONICAL_VALUE_INVALID', 'CANONICAL');
+    if (Object.getOwnPropertySymbols(value).length > 0) throw h2Error('CANONICAL_VALUE_INVALID', 'CANONICAL');
+    for (const key of Object.getOwnPropertyNames(value)) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || (descriptor.get || descriptor.set)) throw h2Error('CANONICAL_VALUE_INVALID', 'CANONICAL');
+      if (key !== 'length' && (!/^(?:0|[1-9][0-9]*)$/.test(key) || Number(key) >= value.length)) throw h2Error('CANONICAL_VALUE_INVALID', 'CANONICAL');
+    }
+    for (let index = 0; index < value.length; index += 1) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+      if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) throw h2Error('CANONICAL_VALUE_INVALID', 'CANONICAL');
+    }
+    if (seen.has(value)) throw h2Error('CANONICAL_VALUE_INVALID', 'CANONICAL');
+    seen.add(value);
+    const serialized = '[' + value.map((item) => h2Canonical(item, seen)).join(',') + ']';
+    seen.delete(value);
+    return serialized;
+  }
+  if (!h2IsPlain(value) || seen.has(value)) throw h2Error('CANONICAL_VALUE_INVALID', 'CANONICAL');
+  seen.add(value);
+  const serialized = '{' + Object.keys(value).sort().map((key) => {
+    if (h2ForbiddenUnicode(key)) throw h2Error('CANONICAL_VALUE_INVALID', 'CANONICAL');
+    return JSON.stringify(key) + ':' + h2Canonical(value[key], seen);
+  }).join(',') + '}';
+  seen.delete(value);
+  return serialized;
+}
+function h2Clone(value) { return JSON.parse(h2Canonical(value)); }
+function h2Digest(value) {
+  return crypto.createHash('sha256').update(h2Canonical(value), 'utf8').digest('hex');
+}
+function h2DigestText(value) {
+  h2Require(typeof value === 'string' && h2NoMalformedUnicode(value), true, 'PUBLIC_TEXT_INVALID', 'PUBLIC_AUDIT');
+  return crypto.createHash('sha256').update(value, 'utf8').digest('hex');
+}
+function h2SafeLine(value, max = 4096) {
+  return typeof value === 'string' && value.length <= max && h2NoMalformedUnicode(value)
+    && !/[\r\n\t]/.test(value) && !h2ForbiddenUnicode(value);
+}
+function h2SafeId(value, max = 512) {
+  return h2SafeLine(value, max) && value.length > 0 && !value.includes('..') && /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(value);
+}
+function h2Repository(value) {
+  return h2SafeLine(value, 512) && /^[^/\s]+\/[^/\s]+$/.test(value);
+}
+function h2AuditScalar(value) {
+  return typeof value === 'string'
+    && !h2ForbiddenUnicode(value)
+    && !/[\u0000-\u001f\u007f]/.test(value)
+    && !H2_SECRET_VALUE.test(value)
+    && !/-----BEGIN [^-]*PRIVATE KEY-----/i.test(value)
+    && !H2_PRIVATE_PATH.test(value)
+    && !H2_STRUCTURAL_TOKENS.some((token) => value.includes(token));
+}
+function h2Audit(value, seen = new Set()) {
+  if (typeof value === 'string') return h2AuditScalar(value);
+  if (value === null || typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isSafeInteger(value);
+  if (Array.isArray(value)) {
+    if (seen.has(value)) return false;
+    seen.add(value);
+    const valid = value.every((item) => h2Audit(item, seen));
+    seen.delete(value);
+    return valid;
+  }
+  if (!h2IsPlain(value) || seen.has(value)) return false;
+  seen.add(value);
+  const valid = Object.entries(value).every(([key, item]) => !H2_SENSITIVE_KEY.test(key) && h2AuditScalar(key) && h2Audit(item, seen));
+  seen.delete(value);
+  return valid;
+}
+function h2Sha(value) { return typeof value === 'string' && /^[a-f0-9]{40}$/.test(value); }
+function h2Hash(value) { return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value); }
+function h2Issue(value) { return Number.isSafeInteger(value) && value >= 1; }
+function h2Array(value) { return Array.isArray(value); }
+function h2StringArray(value, max = 4096) { return Array.isArray(value) && value.every((item) => h2SafeLine(item, max)); }
+function h2Comparable(left, right) {
+  try { return h2Canonical(left) === h2Canonical(right); } catch (_error) { return false; }
+}
+function h2Without(value, key) {
+  const copy = h2Clone(value);
+  delete copy[key];
+  return copy;
+}
+function h2Candidate(value, stage = 'AUTHORITY') {
+  const keys = ['repository', 'branch', 'base_ref', 'base_sha', 'head', 'tree', 'version'];
+  h2Require(h2Exact(value, keys)
+    && h2Repository(value.repository)
+    && h2SafeLine(value.branch, 1024)
+    && h2SafeLine(value.base_ref, 256)
+    && h2Sha(value.base_sha) && h2Sha(value.head) && h2Sha(value.tree)
+    && h2SafeLine(value.version, 256), true, 'CANDIDATE_INVALID', stage);
+  return h2Clone(value);
+}
+function h2Descriptor(value, stage = 'AUTHORITY') {
+  const keys = [
+    'schema', 'root', 'lock', 'repository', 'parent_issue', 'child_issue', 'epoch_id',
+    'gate', 'role', 'completes_child', 'summary', 'purpose', 'changed_surfaces',
+    'scope', 'out_of_scope', 'design_constraints', 'validation_requirements',
+    'evidence_refs', 'eli5', 'next_action_pre_number', 'repair_history', 'before_after',
+    'repair_budget', 'hosted_qualification', 'recovery_evidence', 'candidate',
+  ];
+  h2Require(h2Exact(value, keys)
+    && value.schema === H2_DESCRIPTOR_SCHEMA
+    && value.root === H2_ROOT && value.lock === H2_LOCK
+    && h2Repository(value.repository) && h2Issue(value.parent_issue) && h2Issue(value.child_issue)
+    && h2SafeId(value.epoch_id) && h2SafeId(value.gate)
+    && value.role === 'INTERMEDIATE' && typeof value.completes_child === 'boolean'
+    && h2SafeLine(value.summary) && h2SafeLine(value.purpose)
+    && h2StringArray(value.changed_surfaces) && h2StringArray(value.scope)
+    && h2StringArray(value.out_of_scope) && h2StringArray(value.design_constraints)
+    && h2StringArray(value.validation_requirements) && h2StringArray(value.evidence_refs)
+    && h2SafeLine(value.eli5) && h2SafeLine(value.next_action_pre_number)
+    && h2StringArray(value.repair_history) && h2StringArray(value.before_after)
+    && h2StringArray(value.repair_budget) && h2StringArray(value.hosted_qualification)
+    && h2StringArray(value.recovery_evidence), true, 'DESCRIPTOR_INVALID', stage);
+  const candidate = h2Candidate(value.candidate, stage);
+  h2Require(candidate.repository === value.repository, true, 'CANDIDATE_INVALID', stage);
+  h2Require(h2Audit(value), true, 'PUBLIC_DATA_UNSAFE', 'PUBLIC_AUDIT');
+  return h2Clone(value);
+}
+function h2BoundAuthority(value, descriptor, stage = 'AUTHORITY') {
+  const keys = ['schema', 'decision', 'root', 'lock', 'source', 'repository', 'pr_number', 'descriptor_sha256', 'candidate', 'authority_sha256'];
+  const sourceKeys = ['kind', 'reference', 'body_sha256'];
+  if (h2IsPlain(value) && value.decision === 'BIND_PR_NUMBER'
+    && keys.some((key) => !h2Own(value, key))) {
+    throw h2Error('BOUND_CURRENT_FIELD_MISSING', stage);
+  }
+  h2Require(h2Exact(value, keys)
+    && value.schema === H2_BIND_AUTHORITY_SCHEMA && value.decision === 'BIND_PR_NUMBER'
+    && value.root === descriptor.root && value.lock === descriptor.lock
+    && h2Exact(value.source, sourceKeys) && value.source.kind === 'USER_WEB_CONTROLLER'
+    && h2SafeLine(value.source.reference, 2048) && h2Hash(value.source.body_sha256)
+    && h2Repository(value.repository) && h2Issue(value.pr_number)
+    && h2Hash(value.descriptor_sha256) && h2Repository(value.candidate?.repository), true, 'BOUND_AUTHORITY_INVALID', stage);
+  const normalizedDescriptor = h2Descriptor(descriptor, stage);
+  h2Candidate(value.candidate, stage);
+  h2Require(value.repository === normalizedDescriptor.repository
+    && value.candidate.repository === normalizedDescriptor.candidate.repository
+    && value.descriptor_sha256 === h2Digest(normalizedDescriptor)
+    && h2Comparable(value.candidate, normalizedDescriptor.candidate), true, 'BOUND_AUTHORITY_INVALID', stage);
+  h2Require(value.authority_sha256 === h2Digest(h2Without(value, 'authority_sha256')), true, 'BOUND_AUTHORITY_INVALID', stage);
+  h2Require(h2Audit(value), true, 'PUBLIC_DATA_UNSAFE', 'PUBLIC_AUDIT');
+  return h2Clone(value);
+}
+function h2ValidateCompleteRead(value) {
+  const keys = ['body', 'complete', 'byte_length', 'body_sha256', 'revision'];
+  h2Require(h2Exact(value, keys) && typeof value.body === 'string' && typeof value.complete === 'boolean'
+    && Number.isSafeInteger(value.byte_length) && value.byte_length >= 0
+    && h2Hash(value.body_sha256) && (value.revision === null || typeof value.revision === 'string'), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+  h2Require(value.complete === true, true, 'COMPLETE_READ_INVALID', 'COMPLETE_READ');
+  h2Require(h2NoMalformedUnicode(value.body) && !value.body.includes('\uFEFF'), true, 'COMPLETE_READ_INVALID', 'COMPLETE_READ');
+  h2Require(!h2ForbiddenUnicode(value.body), true, 'COMPLETE_READ_INVALID', 'COMPLETE_READ');
+  const bytes = Buffer.byteLength(value.body, 'utf8');
+  h2Require(bytes === value.byte_length, true, 'COMPLETE_READ_BYTE_LENGTH_MISMATCH', 'COMPLETE_READ');
+  h2Require(sha256Text(value.body) === value.body_sha256, true, 'COMPLETE_READ_DIGEST_MISMATCH', 'COMPLETE_READ');
+  h2Require(value.revision === null || h2SafeLine(value.revision), true, 'COMPLETE_READ_INVALID', 'COMPLETE_READ');
+  return h2Clone(value);
+}
+function h2CompleteRead(body, revision = null) {
+  h2Require(typeof body === 'string' && h2NoMalformedUnicode(body), true, 'COMPLETE_READ_INVALID', 'COMPLETE_READ');
+  return {
+    body,
+    complete: true,
+    byte_length: Buffer.byteLength(body, 'utf8'),
+    body_sha256: sha256Text(body),
+    revision: revision === undefined ? null : revision,
+  };
+}
+
+function h2Count(body, token) {
+  let count = 0;
+  let offset = 0;
+  while (true) {
+    const found = body.indexOf(token, offset);
+    if (found < 0) return count;
+    count += 1;
+    offset = found + token.length;
+  }
+}
+function h2StrictCarrierText(encoded) {
+  return typeof encoded === 'string' && encoded.length > 0 && encoded.length % 4 !== 1
+    && /^[A-Za-z0-9_-]+$/.test(encoded);
+}
+function h2DecodeCarrier(encoded) {
+  h2Require(h2StrictCarrierText(encoded), true, 'CARRIER_INVALID', 'PARSE');
+  let decoded;
+  try { decoded = Buffer.from(encoded, 'base64url').toString('utf8'); } catch (_error) { throw h2Error('CARRIER_INVALID', 'PARSE'); }
+  h2Require(h2NoMalformedUnicode(decoded) && !decoded.includes('\uFEFF'), true, 'CARRIER_INVALID', 'PARSE');
+  h2Require(Buffer.from(decoded, 'utf8').toString('base64url') === encoded, true, 'CARRIER_INVALID', 'PARSE');
+  let value;
+  try { value = JSON.parse(decoded); } catch (_error) { throw h2Error('CARRIER_INVALID', 'PARSE'); }
+  let canonical;
+  try { canonical = h2Canonical(value); } catch (_error) { throw h2Error('CARRIER_INVALID', 'PARSE'); }
+  h2Require(canonical === decoded && h2Audit(value), true, 'CARRIER_INVALID', 'PARSE');
+  return value;
+}
+function h2MarkerStyleForState(state) {
+  return state?.schema === STATE_SCHEMA ? H2_MARKERS.toolkit : H2_MARKERS.generic;
+}
+function h2MarkerStyleForRepository(repository) {
+  return repository === REPOSITORY ? H2_MARKERS.toolkit : H2_MARKERS.generic;
+}
+function h2Classifier(body) {
+  h2Require(typeof body === 'string', true, 'BODY_NOT_STRING', 'CLASSIFY');
+  h2Require(!body.includes('\r'), true, 'HUMAN_LINE_ENDING_INVALID', 'CLASSIFY');
+  const humanVariants = [];
+  for (const namespace of ['generic', 'toolkit']) {
+    for (const kind of ['parent', 'child', 'pr']) {
+      const marker = H2_MARKERS[namespace][kind];
+      const beginCount = h2Count(body, marker.begin);
+      const carrierCount = h2Count(body, marker.carrier);
+      const endCount = h2Count(body, marker.end);
+      if (beginCount || carrierCount || endCount) humanVariants.push({ namespace, kind, marker, beginCount, carrierCount, endCount });
+    }
+  }
+  const hasHumanStem = body.includes('MANAGED-PROGRAM-') || humanVariants.length > 0;
+  const hasToolkitStem = body.includes('AI-AGENT-TOOLKIT:GITHUB-PROGRAM-');
+  const hasHumanVersion = /(?:MANAGED-PROGRAM-|GITHUB-PROGRAM-)[^\n]*human-v/i.test(body);
+  if (body.includes('human-v1')) throw h2Error('HUMAN_V1_UNSUPPORTED', 'CLASSIFY');
+  if (humanVariants.length > 0 || hasHumanVersion && hasHumanStem) {
+    h2Require(humanVariants.length > 0, true, 'HUMAN_VERSION_UNSUPPORTED', 'CLASSIFY');
+    const namespaces = new Set(humanVariants.map((item) => item.namespace));
+    const kinds = new Set(humanVariants.map((item) => item.kind));
+    h2Require(namespaces.size === 1, true, 'MARKER_MIXED_NAMESPACE', 'CLASSIFY');
+    h2Require(kinds.size === 1, true, 'MARKER_MIXED_KIND', 'CLASSIFY');
+    const selected = humanVariants[0];
+    h2Require(selected.beginCount === 1 && selected.carrierCount === 1 && selected.endCount === 1,
+      true, selected.beginCount > 1 || selected.carrierCount > 1 || selected.endCount > 1 ? 'MARKER_DUPLICATE' : 'MARKER_PARTIAL', 'CLASSIFY');
+    h2Require(!hasToolkitStem || selected.namespace === 'toolkit', true, 'MARKER_MIXED_NAMESPACE', 'CLASSIFY');
+    h2Require(!body.endsWith('\n'), true, 'MARKER_FINAL_NEWLINE', 'CLASSIFY');
+    h2Require(body.startsWith(selected.marker.begin), true, 'MARKER_PREFIX', 'CLASSIFY');
+    h2Require(body.endsWith(selected.marker.end), true, 'MARKER_SUFFIX', 'CLASSIFY');
+    const lines = body.split('\n');
+    h2Require(lines.length >= 3 && lines[0] === selected.marker.begin && lines[lines.length - 1] === selected.marker.end,
+      true, 'MARKER_ORDER_INVALID', 'CLASSIFY');
+    const carrierLine = lines[lines.length - 2];
+    h2Require(carrierLine.startsWith(selected.marker.carrier) && carrierLine.endsWith(' -->'), true, 'CARRIER_INVALID', 'CLASSIFY');
+    const encoded = carrierLine.slice(selected.marker.carrier.length, -4);
+    h2Require(h2StrictCarrierText(encoded), true, 'CARRIER_INVALID', 'CLASSIFY');
+    const expectedStem = selected.namespace === 'toolkit' ? H2_RESERVED_STEMS[0] : H2_RESERVED_STEMS[1];
+    const otherStem = selected.namespace === 'toolkit' ? H2_RESERVED_STEMS[1] : H2_RESERVED_STEMS[0];
+    h2Require(h2Count(body, expectedStem) === 3 && h2Count(body, otherStem) === 0, true, 'RESERVED_RESIDUE', 'CLASSIFY');
+    for (const line of lines.slice(1, -2)) h2Require(!H2_RESERVED_STEMS.some((stem) => line.includes(stem)), true, 'RESERVED_RESIDUE', 'CLASSIFY');
+    return { format: 'human-v2', namespace: selected.namespace, kind: selected.kind, marker: selected.marker, lines, encoded };
+  }
+  const legacy = [];
+  for (const kind of ['parent', 'child']) {
+    const marker = MANAGED_MARKERS[kind];
+    const begin = h2Count(body, marker.begin);
+    const end = h2Count(body, marker.end);
+    const carrier = kind === 'parent'
+      ? h2Count(body, 'AI-AGENT-TOOLKIT:GITHUB-PROGRAM-CANONICAL v5 ')
+      : h2Count(body, 'AI-AGENT-TOOLKIT:GITHUB-PROGRAM-PROJECTION v1 ');
+    if (begin || end || carrier) legacy.push({ kind, begin, end, carrier });
+  }
+  if (legacy.length > 0) {
+    h2Require(legacy.length === 1, true, 'MARKER_MIXED_KIND', 'CLASSIFY');
+    const selected = legacy[0];
+    const known = selected.kind === 'parent' ? H2_LEGACY_PARENT_DIGESTS : H2_LEGACY_CHILD_DIGESTS;
+
+    h2Require(known.has(sha256Text(body)), true, 'LEGACY_BODY_NOT_FROZEN', 'CLASSIFY');
+    h2Require(selected.begin === 1 && selected.end === 1 && selected.carrier === 1, true, 'MARKER_PARTIAL', 'CLASSIFY');
+    h2Require(!body.includes('MANAGED-PROGRAM-'), true, 'MARKER_MIXED_NAMESPACE', 'CLASSIFY');
+    return { format: 'legacy-v5', namespace: 'toolkit', kind: selected.kind };
+  }
+  if (hasHumanStem || hasToolkitStem) throw h2Error('BODY_UNRECOGNISED', 'CLASSIFY');
+  throw h2Error('BODY_UNRECOGNISED', 'CLASSIFY');
+}
+
+const H2_LEGACY_PARENT_DIGESTS = new Set([
+  SOURCE_PARENT_BODY_DIGEST,
+  FINALISATION_SOURCE_PARENT_BODY_DIGEST,
+  sha256Text(FINALISATION_STAGE_A_RENDERED.parent),
+  sha256Text(FINALISATION_STAGE_B_RENDERED.parent),
+]);
+const H2_LEGACY_CHILD_DIGESTS = new Set([
+  SOURCE_CHILD_BODY_DIGEST,
+  FINALISATION_SOURCE_CHILD_BODY_DIGEST,
+  sha256Text(FINALISATION_STAGE_A_RENDERED.child),
+  sha256Text(FINALISATION_STAGE_B_RENDERED.child),
+]);
+
+function h2ValidateEpoch(value) {
+  const required = ['evidence_ref', 'id', 'name', 'purpose', 'terminal_disposition'];
+  const optional = ['gates', 'lock', 'state', 'status'];
+  return h2IsPlain(value) && h2Exact(value, [...required, ...optional])
+    && (value.evidence_ref === null || h2SafeId(value.evidence_ref))
+    && h2SafeId(value.id) && h2SafeLine(value.name) && h2SafeLine(value.purpose)
+    && (value.terminal_disposition === null || ['ACCEPTED', 'REJECTED', 'NON_CONVERGENT', 'AMEND'].includes(value.terminal_disposition))
+    && (!h2Own(value, 'gates') || h2StringArray(value.gates, 256))
+    && (!h2Own(value, 'lock') || h2SafeId(value.lock, 1024))
+    && (!h2Own(value, 'state') || h2SafeLine(value.state, 128))
+    && (!h2Own(value, 'status') || h2SafeLine(value.status, 128));
+}
+function h2ValidateEvidence(value) {
+  return h2IsPlain(value) && h2Exact(value, ['id', 'kind', 'reference', 'summary'])
+    && h2SafeId(value.id) && ['WEB', 'USER_WEB_CONTROLLER', 'COMMIT', 'CHECK'].includes(value.kind)
+    && h2SafeLine(value.reference, 2048) && h2SafeLine(value.summary);
+}
+function h2ValidateLegacyDescriptor(value) {
+  const required = ['changed_surfaces', 'child_issue', 'design_constraints', 'eli5', 'evidence_refs', 'number', 'out_of_scope', 'purpose', 'scope', 'summary', 'validation_requirements'];
+  const optional = ['candidate', 'schema', 'repository'];
+  return h2IsPlain(value) && h2Exact(value, [...required, ...optional])
+    && h2StringArray(value.changed_surfaces) && h2Issue(value.child_issue)
+    && h2StringArray(value.design_constraints) && h2SafeLine(value.eli5)
+    && h2StringArray(value.evidence_refs) && h2Issue(value.number)
+    && h2StringArray(value.out_of_scope) && h2SafeLine(value.purpose)
+    && h2StringArray(value.scope) && h2SafeLine(value.summary)
+    && h2StringArray(value.validation_requirements)
+    && (!h2Own(value, 'schema') || value.schema === H2_DESCRIPTOR_SCHEMA)
+    && (!h2Own(value, 'repository') || h2Repository(value.repository))
+    && (!h2Own(value, 'candidate') || value.candidate === null || (() => { try { h2Candidate(value.candidate, 'CANONICAL'); return true; } catch (_error) { return false; } })());
+}
+function h2ValidateRegistry(value, legacy = false) {
+  const required = ['accepted_evidence_ref', 'completes_child', 'epoch_id', 'pr', 'retirement_evidence_ref', 'role', 'status'];
+  const optional = ['candidate', 'draft', 'github_state', 'merged', 'retention_evidence_ref'];
+  if (!h2IsPlain(value) || !h2Exact(value, [...required, ...optional]) || !h2Issue(value.pr)
+    || !h2SafeId(value.epoch_id) || typeof value.completes_child !== 'boolean'
+    || value.role !== 'INTERMEDIATE' || !['ACTIVE', 'ACCEPTED', 'RETIRED', 'RETAINED'].includes(value.status)) return false;
+  for (const key of ['accepted_evidence_ref', 'retirement_evidence_ref', 'retention_evidence_ref']) {
+    if (h2Own(value, key) && value[key] !== null && !h2SafeId(value[key])) return false;
+  }
+  for (const key of ['draft', 'merged']) if (h2Own(value, key) && typeof value[key] !== 'boolean') return false;
+  if (h2Own(value, 'github_state') && !['OPEN', 'CLOSED', 'MERGED'].includes(value.github_state)) return false;
+  if (h2Own(value, 'candidate') && value.candidate !== null) {
+    try { h2Candidate(value.candidate, 'RELATIONSHIP'); } catch (_error) { return false; }
+  }
+  if (!legacy && (!h2Own(value, 'draft') || !h2Own(value, 'merged') || !h2Own(value, 'github_state') || !h2Own(value, 'candidate') || value.candidate === null)) return false;
+  return true;
+}
+function h2ValidateFinality(value) {
+  return h2IsPlain(value) && (h2Exact(value, ['state']) || h2Exact(value, ['authority_ref', 'state']))
+    && ['HELD', 'MERGED', 'UNMERGED'].includes(value.state)
+    && (!h2Own(value, 'authority_ref') || value.authority_ref === null || h2SafeId(value.authority_ref));
+}
+function h2ValidateChild(value, legacy = false) {
+  const required = ['boundaries', 'done_when', 'eli5', 'epochs', 'finality', 'issue', 'lifecycle', 'objective', 'order', 'out_of_scope', 'pr_registry', 'scope', 'summary', 'title'];
+  const optional = ['dependencies', 'holds', 'deliverables'];
+  if (!h2IsPlain(value) || !h2Exact(value, [...required, ...optional])
+    || !h2Issue(value.issue) || !Number.isSafeInteger(value.order) || value.order < 1
+    || !['COMPLETED', 'CURRENT', 'QUEUED'].includes(value.lifecycle)
+    || !h2SafeLine(value.title) || !h2SafeLine(value.summary) || !h2SafeLine(value.objective) || !h2SafeLine(value.eli5)
+    || !h2StringArray(value.scope) || !h2StringArray(value.boundaries) || !h2StringArray(value.out_of_scope)
+    || !h2StringArray(value.done_when) || !Array.isArray(value.epochs) || !value.epochs.every(h2ValidateEpoch)
+    || !h2ValidateFinality(value.finality) || !Array.isArray(value.pr_registry)
+    || !value.pr_registry.every((item) => h2ValidateRegistry(item, legacy))) return false;
+  if (h2Own(value, 'dependencies') && (!Array.isArray(value.dependencies) || !value.dependencies.every(h2Issue))) return false;
+  if (h2Own(value, 'holds') && !Array.isArray(value.holds)) return false;
+  if (h2Own(value, 'deliverables') && !h2StringArray(value.deliverables)) return false;
+  return true;
+}
+function h2ValidateGenericState(value) {
+  const required = ['active_lanes', 'children', 'evidence_refs', 'historical_transitions', 'parent', 'prs', 'repository', 'schema'];
+  const optional = ['design_lock', 'extensions', 'dependencies', H2_HISTORY_KEY];
+  if (!h2IsPlain(value) || !h2Exact(value, [...required, ...optional]) || !h2Repository(value.repository)
+    || !h2SafeLine(value.schema) || !h2IsPlain(value.parent) || !h2Exact(value.parent, ['goal', 'issue', 'title'])
+    || !h2Issue(value.parent.issue) || !h2SafeLine(value.parent.title) || !h2SafeLine(value.parent.goal)
+    || !Array.isArray(value.children) || value.children.length === 0
+    || !Array.isArray(value.prs) || !Array.isArray(value.evidence_refs)
+    || !Array.isArray(value.historical_transitions) || !Array.isArray(value.active_lanes)) return false;
+  if (h2Own(value, 'design_lock') && !h2SafeLine(value.design_lock, 1024)) return false;
+  if (h2Own(value, 'extensions') && (!Array.isArray(value.extensions) || !value.extensions.every(h2IsPlain))) return false;
+  const issues = new Set();
+  const orders = new Set();
+  let current = 0;
+  for (const child of value.children) {
+    if (!h2ValidateChild(child, false) || issues.has(child.issue) || orders.has(child.order)) return false;
+    issues.add(child.issue); orders.add(child.order); if (child.lifecycle === 'CURRENT') current += 1;
+    const epochs = new Set();
+    for (const epoch of child.epochs) { if (epochs.has(epoch.id)) return false; epochs.add(epoch.id); }
+  }
+  const allCompleted = value.children.every((child) => child.lifecycle === 'COMPLETED' && child.finality.state === 'MERGED');
+  if (current !== 1 && !(current === 0 && allCompleted && value.evidence_refs.some((item) => item.kind === 'WEB' || item.kind === 'USER_WEB_CONTROLLER'))) throw h2Error('CANONICAL_STATE_CONTRADICTION', 'CANONICAL');
+  if (!value.prs.every((item) => h2ValidateLegacyDescriptor(item) || (() => { try { h2Descriptor(item, 'CANONICAL'); return true; } catch (_error) { return false; } })())) return false;
+  if (!value.evidence_refs.every(h2ValidateEvidence)) return false;
+  if (!value.historical_transitions.every((item) => h2IsPlain(item) && h2Exact(item, ['child_issue', 'disposition', 'epoch_id', 'evidence_ref', 'gate', 'id'])
+    && h2Issue(item.child_issue) && h2SafeId(item.disposition) && h2SafeId(item.epoch_id) && h2SafeId(item.evidence_ref) && h2SafeId(item.gate) && h2SafeId(item.id))) return false;
+  for (const lane of value.active_lanes) {
+    if (!h2IsPlain(lane) || !h2Issue(lane.child_issue ?? lane.child)) return false;
+    const child = value.children.find((item) => item.issue === (lane.child_issue ?? lane.child));
+    if (!child || child.lifecycle !== 'CURRENT') return false;
+  }
+  return true;
+}
+function h2ValidateToolkitState(value) {
+  if (value.schema !== STATE_SCHEMA) return false;
+  const base = h2Clone(value);
+  delete base[H2_HISTORY_KEY];
+  const valid = validateCanonicalStateV5(base);
+  if (!valid.ok) return false;
+  return true;
+}
+
+function h2ValidateHistoryEntry(value, sourceRepository = null) {
+  const keys = ['descriptor', 'bound_authority', 'registry'];
+  h2Require(h2Exact(value, keys), true, 'HISTORY_ENTRY_INVALID', 'HISTORY');
+  const descriptor = h2Descriptor(value.descriptor, 'HISTORY');
+  const authority = h2BoundAuthority(value.bound_authority, descriptor, 'HISTORY');
+  h2Require(authority.root === H2_ROOT && authority.lock === H2_LOCK
+    && authority.repository === descriptor.repository && authority.candidate.repository === descriptor.repository
+    && authority.pr_number >= 1, true, 'HISTORY_ENTRY_INVALID', 'HISTORY');
+  const registry = value.registry;
+  h2Require(h2Exact(registry, ['child_issue', 'entry']) && registry.child_issue === descriptor.child_issue
+    && h2ValidateRegistry(registry.entry, false), true, 'HISTORY_ENTRY_INVALID', 'HISTORY');
+  h2Require(registry.entry.pr === authority.pr_number && registry.entry.epoch_id === descriptor.epoch_id
+    && h2Comparable(registry.entry.candidate, descriptor.candidate)
+    && (sourceRepository === null || descriptor.repository === sourceRepository), true, 'HISTORY_ENTRY_INVALID', 'HISTORY');
+  h2Require(h2Audit(value), true, 'PUBLIC_DATA_UNSAFE', 'PUBLIC_AUDIT');
+  return { descriptor, authority, registry: { child_issue: registry.child_issue, entry: h2Clone(registry.entry) } };
+}
+function h2ValidateHistoryContainer(value, sourceRepository = null) {
+  if (value === undefined) return { pr_history: [], evidence_refs: [], transitions: [] };
+  h2Require(h2Exact(value, ['schema', 'pr_history', 'evidence_refs', 'transitions']) && value.schema === H2_HISTORY_SCHEMA
+    && Array.isArray(value.pr_history) && Array.isArray(value.evidence_refs) && Array.isArray(value.transitions), true, 'HISTORY_INVALID', 'RELATIONSHIP');
+  const entries = value.pr_history.map((item) => h2ValidateHistoryEntry(item, sourceRepository));
+  for (let index = 1; index < entries.length; index += 1) h2Require(entries[index - 1].authority.pr_number < entries[index].authority.pr_number, true, 'HISTORY_ORDER_INVALID', 'RELATIONSHIP');
+  const evidence = value.evidence_refs.map((item) => {
+    h2Require(h2ValidateEvidence(item), true, 'HISTORY_EVIDENCE_INVALID', 'RELATIONSHIP');
+    return h2Clone(item);
+  });
+  for (let index = 1; index < evidence.length; index += 1) h2Require(evidence[index - 1].id < evidence[index].id, true, 'HISTORY_ORDER_INVALID', 'RELATIONSHIP');
+  const transitions = value.transitions.map((item) => {
+    h2Require(h2IsPlain(item) && h2Exact(item, ['id', 'child_issue', 'epoch_id', 'gate', 'disposition', 'evidence_ref'])
+      && h2SafeId(item.id) && h2Issue(item.child_issue) && h2SafeId(item.epoch_id) && h2SafeId(item.gate)
+      && h2SafeId(item.disposition) && h2SafeId(item.evidence_ref), true, 'HISTORY_TRANSITION_INVALID', 'RELATIONSHIP');
+    return h2Clone(item);
+  });
+  for (let index = 1; index < transitions.length; index += 1) h2Require(transitions[index - 1].id < transitions[index].id, true, 'HISTORY_ORDER_INVALID', 'RELATIONSHIP');
+  const prs = new Set();
+  for (const entry of entries) {
+    h2Require(!prs.has(entry.authority.pr_number), true, 'RELATIONSHIP_DUPLICATE', 'RELATIONSHIP');
+    prs.add(entry.authority.pr_number);
+  }
+  const ids = new Set();
+  for (const item of evidence) { h2Require(!ids.has(item.id), true, 'RELATIONSHIP_DUPLICATE', 'RELATIONSHIP'); ids.add(item.id); }
+  const transitionIds = new Set();
+  for (const item of transitions) { h2Require(!transitionIds.has(item.id), true, 'RELATIONSHIP_DUPLICATE', 'RELATIONSHIP'); transitionIds.add(item.id); }
+  return { schema: H2_HISTORY_SCHEMA, pr_history: entries, evidence_refs: evidence, transitions };
+}
+function h2MergedEvidenceMap(state, history) {
+  const map = new Map();
+  for (const item of state.evidence_refs || []) {
+    h2Require(!map.has(item.id), true, 'RELATIONSHIP_DUPLICATE', 'RELATIONSHIP');
+    map.set(item.id, item);
+  }
+  for (const item of history.evidence_refs) {
+    h2Require(!map.has(item.id), true, 'RELATIONSHIP_DUPLICATE', 'RELATIONSHIP');
+    map.set(item.id, item);
+  }
+  return map;
+}
+function h2FindEpoch(state, childIssue, epochId) {
+  const child = state.children.find((item) => item.issue === childIssue);
+  return child?.epochs.find((item) => item.id === epochId) || null;
+}
+function h2Relationship(state, history, legacyCompatibilityOnly = false) {
+  const evidence = h2MergedEvidenceMap(state, history);
+  const childByIssueMap = new Map();
+  for (const child of state.children) childByIssueMap.set(child.issue, child);
+  const descriptorByPr = new Map();
+  for (const descriptor of state.prs || []) {
+    if (h2Own(descriptor, 'number')) {
+      h2Require(!descriptorByPr.has(descriptor.number), true, 'RELATIONSHIP_DUPLICATE', 'RELATIONSHIP');
+      descriptorByPr.set(descriptor.number, { descriptor, legacy: true });
+    }
+  }
+  const registryByPr = new Map();
+  for (const child of state.children) {
+    for (const entry of child.pr_registry || []) {
+      h2Require(!registryByPr.has(entry.pr), true, 'RELATIONSHIP_DUPLICATE', 'RELATIONSHIP');
+      registryByPr.set(entry.pr, { entry, child });
+      for (const ref of [entry.accepted_evidence_ref, entry.retirement_evidence_ref, entry.retention_evidence_ref]) {
+        if (ref !== null && ref !== undefined) h2Require(evidence.has(ref) || legacyCompatibilityOnly, true, 'RELATIONSHIP_EVIDENCE_MISSING', 'RELATIONSHIP');
+      }
+    }
+  }
+  const newPrs = new Set();
+  for (const item of history.pr_history) {
+    const pr = item.authority.pr_number;
+    h2Require(!newPrs.has(pr) && !descriptorByPr.has(pr) && !registryByPr.has(pr), true, 'RELATIONSHIP_DUPLICATE', 'RELATIONSHIP');
+    newPrs.add(pr);
+    const child = childByIssueMap.get(item.descriptor.child_issue);
+    h2Require(child && h2FindEpoch(state, item.descriptor.child_issue, item.descriptor.epoch_id), true, 'RELATIONSHIP_REFERENT_MISSING', 'RELATIONSHIP');
+    descriptorByPr.set(pr, { descriptor: item.descriptor, authority: item.authority, legacy: false });
+    registryByPr.set(pr, { entry: item.registry.entry, child });
+    for (const ref of item.descriptor.evidence_refs) h2Require(evidence.has(ref), true, 'RELATIONSHIP_EVIDENCE_MISSING', 'RELATIONSHIP');
+    for (const ref of [item.registry.entry.accepted_evidence_ref, item.registry.entry.retirement_evidence_ref, item.registry.entry.retention_evidence_ref]) {
+      if (ref !== null) h2Require(evidence.has(ref), true, 'RELATIONSHIP_EVIDENCE_MISSING', 'RELATIONSHIP');
+    }
+    const entry = item.registry.entry;
+    if (entry.status === 'ACCEPTED') {
+      h2Require(entry.accepted_evidence_ref !== null && ['WEB', 'USER_WEB_CONTROLLER'].includes(evidence.get(entry.accepted_evidence_ref).kind)
+        && entry.retirement_evidence_ref === null && entry.retention_evidence_ref === null, true, 'RELATIONSHIP_ACCEPTANCE_INVALID', 'RELATIONSHIP');
+    }
+    if (entry.status === 'RETIRED') h2Require(entry.retirement_evidence_ref !== null && entry.accepted_evidence_ref === null, true, 'RELATIONSHIP_RETIREMENT_INVALID', 'RELATIONSHIP');
+    if (entry.status === 'RETAINED') h2Require(entry.retention_evidence_ref !== null && entry.accepted_evidence_ref === null, true, 'RELATIONSHIP_RETENTION_INVALID', 'RELATIONSHIP');
+    h2Require(entry.child_issue === undefined || entry.child_issue === item.descriptor.child_issue, true, 'RELATIONSHIP_CHILD_INVALID', 'RELATIONSHIP');
+  }
+  for (const [pr, record] of registryByPr) {
+    const descriptor = descriptorByPr.get(pr);
+    if (!descriptor) {
+      const legacyRetainedGap = legacyCompatibilityOnly && ['RETIRED', 'RETAINED'].includes(record.entry.status);
+      h2Require(legacyRetainedGap, true, 'RELATIONSHIP_DESCRIPTOR_MISSING', 'RELATIONSHIP');
+      continue;
+    }
+    if (!descriptor.legacy) {
+      h2Require(descriptor.descriptor.child_issue === record.child.issue
+        && descriptor.descriptor.epoch_id === record.entry.epoch_id
+        && h2Comparable(descriptor.descriptor.candidate, record.entry.candidate), true, 'RELATIONSHIP_DESCRIPTOR_REGISTRY_MISMATCH', 'RELATIONSHIP');
+    } else if (h2Own(descriptor.descriptor, 'child_issue')) {
+      h2Require(descriptor.descriptor.child_issue === record.child.issue, true, 'RELATIONSHIP_DESCRIPTOR_REGISTRY_MISMATCH', 'RELATIONSHIP');
+      for (const ref of descriptor.descriptor.evidence_refs || []) h2Require(evidence.has(ref) || legacyCompatibilityOnly, true, 'RELATIONSHIP_EVIDENCE_MISSING', 'RELATIONSHIP');
+    }
+  }
+  for (const item of state.historical_transitions || []) {
+    h2Require(childByIssueMap.has(item.child_issue) && h2FindEpoch(state, item.child_issue, item.epoch_id)
+      && (evidence.has(item.evidence_ref) || legacyCompatibilityOnly), true, 'RELATIONSHIP_REFERENT_MISSING', 'RELATIONSHIP');
+  }
+  for (const item of history.transitions) {
+    h2Require(childByIssueMap.has(item.child_issue) && h2FindEpoch(state, item.child_issue, item.epoch_id)
+      && evidence.has(item.evidence_ref), true, 'RELATIONSHIP_REFERENT_MISSING', 'RELATIONSHIP');
+  }
+  if (history.evidence_refs.length > 0) {
+    const referenced = new Set();
+    for (const item of history.pr_history) {
+      for (const ref of item.descriptor.evidence_refs) referenced.add(ref);
+      for (const ref of [item.registry.entry.accepted_evidence_ref, item.registry.entry.retirement_evidence_ref, item.registry.entry.retention_evidence_ref]) if (ref) referenced.add(ref);
+    }
+    for (const item of history.transitions) referenced.add(item.evidence_ref);
+    for (const item of history.evidence_refs) h2Require(referenced.has(item.id), true, 'RELATIONSHIP_ORPHAN_EVIDENCE', 'RELATIONSHIP');
+  }
+  return { evidence, descriptorByPr, registryByPr };
+}
+function h2ValidateState(value) {
+  h2Require(h2IsPlain(value), true, 'CANONICAL_STATE_INVALID', 'CANONICAL');
+  h2Require(h2Audit(value), true, 'PUBLIC_DATA_UNSAFE', 'PUBLIC_AUDIT');
+  const history = h2ValidateHistoryContainer(value[H2_HISTORY_KEY], value.repository || null);
+  const base = h2Clone(value);
+  delete base[H2_HISTORY_KEY];
+  let legacyCompatibilityOnly = false;
+  if (value.schema === STATE_SCHEMA) {
+    legacyCompatibilityOnly = h2ValidateToolkitState(value);
+    h2Require(legacyCompatibilityOnly, true, 'CANONICAL_STATE_INVALID', 'CANONICAL');
+  } else {
+    h2Require(h2ValidateGenericState(base), true, 'CANONICAL_STATE_INVALID', 'CANONICAL');
+  }
+  h2Relationship(base, history, legacyCompatibilityOnly);
+  return { state: h2Clone(value), canonical_sha256: h2Digest(value), history };
+}
+
+function h2BoundaryCategory(value) {
+  const upper = String(value).toUpperCase();
+  if (/SAFETY|HOLD|SECURITY|PRIVATE|SECRET/.test(upper)) return 'SAFETY';
+  if (/NOT[_ -]?AUTHORI[ZS]ED|UNAUTHORI[ZS]ED|PROHIBIT|DENY|CANNOT/.test(upper)) return 'NOT_AUTHORISED';
+  if (/OUT[_ -]?OF[_ -]?SCOPE|OUTSIDE/.test(upper)) return 'OUT_OF_SCOPE';
+  if (/READY|MERGE|FINALITY|TRANSITION|WEB OWNS|AUTHORITY/.test(upper)) return 'OWNERSHIP_AUTHORITY';
+  if (/LIFECYCLE|CURRENT CHILD|COMPLETION|FINAL/.test(upper)) return 'LIFECYCLE_FINALITY_RESTRICTION';
+  return 'SCOPE';
+}
+function h2EvidenceMap(state, history) {
+  const map = new Map();
+  for (const item of state.evidence_refs || []) map.set(item.id, item);
+  for (const item of history.evidence_refs || []) map.set(item.id, item);
+  return map;
+}
+function h2ActiveHold(child) {
+  return Array.isArray(child?.holds) && child.holds.some((hold) => h2IsPlain(hold)
+    && hold.active === true && hold.blocks_normal_lanes === true);
+}
+function h2DependenciesMet(state, child) {
+  const dependencies = Array.isArray(child.dependencies) ? child.dependencies : [];
+  return dependencies.every((issue) => {
+    const dependency = state.children.find((item) => item.issue === issue);
+    return dependency && (dependency.lifecycle === 'COMPLETED' || dependency.finality.state === 'MERGED');
+  });
+}
+function h2ChildAction(state, child, history) {
+  if (!child) throw h2Error('CANONICAL_STATE_CONTRADICTION', 'LIFECYCLE');
+  if (child.lifecycle === 'COMPLETED' || child.finality.state === 'MERGED') return { action: 'CHILD_COMPLETE', ref: null, text: 'The child is complete under source-backed terminal evidence.' };
+  if (h2ActiveHold(child)) return { action: 'BLOCKING_HOLD', ref: null, text: 'A blocking hold keeps this child paused until its authority is resolved.' };
+  if (child.lifecycle === 'QUEUED') {
+    if (!h2DependenciesMet(state, child)) return { action: 'WAIT_DEPENDENCIES', ref: null, text: 'Declared dependencies are not complete, so this child remains queued.' };
+    return { action: 'AWAIT_CHILD_AUTHORITY', ref: null, text: 'Dependencies are met, but separate child activation authority is still required.' };
+  }
+  const lanes = (state.active_lanes || []).filter((lane) => (lane.child_issue ?? lane.child) === child.issue);
+  if (lanes.length > 0) return { action: 'CONTINUE_ACTIVE_GATE', ref: lanes[0].lane_id ?? lanes[0].id ?? null, text: 'Continue the already admitted active gate; no new lane is created.' };
+  const registries = child.pr_registry || [];
+  if (registries.some((entry) => entry.status === 'AMEND' || entry.github_state === 'AMEND')
+    || child.epochs.some((epoch) => epoch.terminal_disposition === 'AMEND' || epoch.status === 'AMEND')) return { action: 'AMEND_REQUIRED', ref: null, text: 'The current candidate needs an amendment before the gate can continue.' };
+  if (registries.some((entry) => ['REJECTED', 'NON_CONVERGENT'].includes(entry.status))
+    || child.epochs.some((epoch) => ['REJECTED', 'NON_CONVERGENT'].includes(epoch.terminal_disposition) || epoch.status === 'NON_CONVERGENT')) return { action: 'REPLACEMENT_REQUIRED', ref: null, text: 'The current candidate is rejected or non-convergent; a replacement requires separate authority.' };
+  const pending = child.epochs.filter((epoch) => epoch.terminal_disposition === null);
+  if (pending.length > 0) {
+    const admitted = pending.some((epoch) => registries.some((entry) => entry.epoch_id === epoch.id && ['ACTIVE', 'ACCEPTED', 'RETAINED'].includes(entry.status)));
+    if (admitted) return { action: 'BEGIN_OR_CONTINUE_EPOCH', ref: pending[0].id, text: 'An admitted candidate exists for the next pending epoch; begin or continue only that epoch.' };
+    return { action: 'AWAIT_EPOCH_AUTHORITY', ref: pending[0].id, text: 'The next epoch is pending separate authority; no activation is inferred.' };
+  }
+  return { action: 'AWAIT_CHILD_FINALITY', ref: null, text: 'All epochs are terminal, but source-backed child finality is not yet complete.' };
+}
+function h2ProgrammeAction(state, history) {
+  const current = state.children.filter((child) => child.lifecycle === 'CURRENT');
+  if (current.length > 1) throw h2Error('CANONICAL_STATE_CONTRADICTION', 'LIFECYCLE');
+  const terminal = state.children.length > 0 && state.children.every((child) => child.lifecycle === 'COMPLETED' && child.finality.state === 'MERGED');
+  const terminalEvidence = state.evidence_refs.some((item) => ['WEB', 'USER_WEB_CONTROLLER'].includes(item.kind)) || history.evidence_refs.some((item) => ['WEB', 'USER_WEB_CONTROLLER'].includes(item.kind));
+  if (terminal && terminalEvidence) return { action: 'PROGRAMME_COMPLETE', current_child: null, child_action: null, ref: null, text: 'All children are complete under source-backed terminal evidence.' };
+  if (current.length === 1) {
+    const childAction = h2ChildAction(state, current[0], history);
+    return { action: 'CONTINUE_CURRENT_CHILD', current_child: current[0].issue, child_action: childAction.action, ref: childAction.ref, text: childAction.text };
+  }
+  return { action: 'AWAIT_PROGRAMME_FINALITY', current_child: null, child_action: null, ref: null, text: 'No current child is selected; source-backed programme finality is still pending.' };
+}
+function h2ProjectionState(state, history) {
+  const evidence = h2EvidenceMap(state, history);
+  const children = state.children.map((child) => ({
+    issue: child.issue,
+    order: child.order,
+    title: child.title,
+    lifecycle: child.lifecycle,
+    finality: child.finality.state,
+    summary: child.summary,
+  }));
+  const boundaries = [];
+  for (const item of state.boundaries || []) boundaries.push({ category: h2BoundaryCategory(item), text: item });
+  for (const child of state.children) for (const item of child.boundaries || []) boundaries.push({ category: h2BoundaryCategory(item), text: item });
+  const unique = new Set();
+  const boundaryList = boundaries.filter((item) => { const key = item.category + '\u0000' + item.text; if (unique.has(key)) return false; unique.add(key); return true; });
+  const current = state.children.find((child) => child.lifecycle === 'CURRENT') || null;
+  const programme = h2ProgrammeAction(state, history);
+  const childAction = current ? h2ChildAction(state, current, history) : null;
+  const historyRows = history.pr_history.map((item) => ({
+    pr: item.authority.pr_number,
+    child_issue: item.descriptor.child_issue,
+    epoch_id: item.descriptor.epoch_id,
+    summary: item.descriptor.summary,
+    outcome: item.registry.entry.status,
+    evidence_refs: item.descriptor.evidence_refs,
+  }));
+  for (const descriptor of state.prs || []) if (h2Own(descriptor, 'number')) {
+    const registry = state.children.flatMap((child) => child.pr_registry || []).find((entry) => entry.pr === descriptor.number);
+    historyRows.unshift({ pr: descriptor.number, child_issue: descriptor.child_issue, epoch_id: registry?.epoch_id || null, summary: descriptor.summary, outcome: registry?.status || 'HISTORICAL', evidence_refs: descriptor.evidence_refs || [] });
+  }
+  historyRows.sort((left, right) => left.pr - right.pr);
+  return {
+    schema: H2_PARENT_PROJECTION_SCHEMA,
+    version: H2_VERSION,
+    kind: 'parent',
+    repository: state.repository,
+    parent_issue: state.parent.issue,
+    title: state.parent.title,
+    lifecycle: current ? 'ACTIVE' : (programme.action === 'PROGRAMME_COMPLETE' ? 'COMPLETED' : 'PENDING_FINALITY'),
+    finality: programme.action === 'PROGRAMME_COMPLETE' ? 'MERGED' : (current?.finality.state || 'HELD'),
+    programme_action: programme.action,
+    current_child: current ? { issue: current.issue, title: current.title, lifecycle: current.lifecycle, finality: current.finality.state, summary: current.summary, action: childAction.action } : null,
+    children,
+    completed_work: children.filter((child) => child.lifecycle === 'COMPLETED'),
+    boundaries: boundaryList,
+    pr_history: historyRows,
+    next_action: { action: programme.action, ref: programme.ref, text: programme.text },
+    evidence_count: evidence.size,
+  };
+
+}
+function h2ProjectionChild(state, history, childIssue) {
+  const child = state.children.find((item) => item.issue === childIssue);
+  h2Require(child, true, 'CHILD_NOT_FOUND', 'CANONICAL');
+  const evidence = h2EvidenceMap(state, history);
+  const action = h2ChildAction(state, child, history);
+  const epochs = child.epochs.map((epoch) => {
+    const evidenceItem = epoch.evidence_ref ? evidence.get(epoch.evidence_ref) : null;
+    const active = (state.active_lanes || []).find((lane) => (lane.child_issue ?? lane.child) === child.issue && (lane.epoch_id ?? lane.epoch) === epoch.id);
+    return { id: epoch.id, name: epoch.name, purpose: epoch.purpose, state: epoch.terminal_disposition || (active ? 'ACTIVE' : 'PENDING'), outcome: epoch.terminal_disposition || evidenceItem?.summary || (active ? 'Active gate admitted.' : 'Awaiting authority or completion.'), evidence_ref: epoch.evidence_ref || null };
+  });
+  const rows = [];
+  for (const descriptor of state.prs || []) if (h2Own(descriptor, 'number') && descriptor.child_issue === child.issue) {
+    const registry = child.pr_registry.find((entry) => entry.pr === descriptor.number);
+    rows.push({ pr: descriptor.number, epoch_id: registry?.epoch_id || null, outcome: registry?.status || 'HISTORICAL', summary: descriptor.summary });
+  }
+  for (const item of history.pr_history) if (item.descriptor.child_issue === child.issue) rows.push({ pr: item.authority.pr_number, epoch_id: item.descriptor.epoch_id, outcome: item.registry.entry.status, summary: item.descriptor.summary });
+  rows.sort((left, right) => left.pr - right.pr);
+  return {
+    schema: H2_CHILD_PROJECTION_SCHEMA,
+    version: H2_VERSION,
+    kind: 'child',
+    repository: state.repository,
+    parent_issue: state.parent.issue,
+    child_issue: child.issue,
+    title: child.title,
+    lifecycle: child.lifecycle,
+    summary: child.summary,
+    objective: child.objective,
+    scope: child.scope,
+    boundaries: [...(child.boundaries || []), ...(child.out_of_scope || []).map((item) => 'Out of scope: ' + item)].map((text) => ({ category: h2BoundaryCategory(text), text })),
+    done_when: child.done_when,
+    out_of_scope: child.out_of_scope,
+    eli5: child.eli5,
+    finality: child.finality.state,
+    epochs,
+    pr_history: rows,
+    next_action: { action: action.action, ref: action.ref, text: action.text },
+  };
+}
+function h2Line(type, value, field) {
+  if (['heading', 'paragraph', 'bullet', 'table_cell'].includes(type)) {
+    h2Require(typeof value === 'string' && h2AuditScalar(value), true, 'PUBLIC_NODE_INVALID', 'PUBLIC_AUDIT');
+    h2Require(!value.includes('\n') && !value.includes('\r'), true, 'PUBLIC_NODE_INVALID', 'PUBLIC_AUDIT');
+    return { type, value };
+  }
+  if (type === 'identifier') {
+    h2Require(h2Issue(value) || (typeof value === 'string' && h2AuditScalar(value) && !/[\r\n]/.test(value)), true, 'PUBLIC_NODE_INVALID', 'PUBLIC_AUDIT');
+    return { type, value };
+  }
+  if (type === 'lineage') {
+    h2Require(['repository', 'branch', 'base_ref', 'base_sha', 'head', 'tree', 'version'].includes(field)
+      && typeof value === 'string' && h2AuditScalar(value) && !/[\r\n]/.test(value), true, 'PUBLIC_NODE_INVALID', 'PUBLIC_AUDIT');
+    return { type, field, value };
+  }
+  if (type === 'url') {
+    h2Require(typeof value?.href === 'string' && typeof value?.label === 'string', true, 'PUBLIC_NODE_INVALID', 'PUBLIC_AUDIT');
+    h2Require(h2AuditScalar(value.href) && h2AuditScalar(value.label) && !/[\r\n]/.test(value.href + value.label), true, 'PUBLIC_NODE_INVALID', 'PUBLIC_AUDIT');
+    return { type, href: value.href, label: value.label };
+  }
+  throw h2Error('PUBLIC_NODE_INVALID', 'PUBLIC_AUDIT');
+}
+function h2EncodeText(value, context) {
+  const node = h2Line(context === 'cell' ? 'table_cell' : context, value);
+  const original = node.value;
+  let result = '';
+  for (const character of original) {
+    const code = character.codePointAt(0);
+    if (character === '&') result += '&amp;';
+    else if (character === '<') result += '&#60;';
+    else if (character === '>') result += '&#62;';
+    else if (H2_TEXT_PUNCTUATION(code)) result += '\\' + character;
+    else result += character;
+  }
+  return result;
+}
+function h2Cell(value) { return h2EncodeText(String(value), 'cell'); }
+function h2Paragraph(value) { return h2EncodeText(String(value), 'paragraph'); }
+function h2Heading(value) { return h2EncodeText(String(value), 'heading'); }
+function h2Bullet(value) { return '- ' + h2EncodeText(String(value), 'bullet'); }
+function h2Identifier(value) { return h2EncodeText(String(value), 'identifier'); }
+function h2Lineage(value, field = 'branch') {
+  h2Line('lineage', String(value), field);
+  return h2EncodeText(String(value), 'paragraph');
+}
+function h2DecodeUrlComponent(value) {
+  try { return decodeURIComponent(value); } catch (_error) { throw h2Error('PUBLIC_URL_INVALID', 'PUBLIC_AUDIT'); }
+}
+function h2UrlPart(value, allowed) {
+  let result = '';
+  for (let index = 0; index < value.length;) {
+    const character = value[index];
+    if (character === '%') {
+      h2Require(index + 2 < value.length && /^[0-9A-Fa-f]{2}$/.test(value.slice(index + 1, index + 3)), true, 'PUBLIC_URL_INVALID', 'PUBLIC_AUDIT');
+      result += '%' + value.slice(index + 1, index + 3).toUpperCase();
+      index += 3;
+      continue;
+    }
+    const code = value.codePointAt(index);
+    const fullCharacter = String.fromCodePoint(code);
+    const length = fullCharacter.length;
+    if (code <= 0x7f && allowed.includes(character)) result += character;
+    else {
+      const encoded = encodeURIComponent(String.fromCodePoint(code)).replace(/%[0-9a-f]{2}/gi, (part) => part.toUpperCase());
+      result += encoded;
+    }
+    index += length;
+  }
+  return result;
+}
+function h2HostIsPrivate(hostname) {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (!host || host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')
+    || host.endsWith('.test') || host.endsWith('.invalid') || host.endsWith('.example')) return true;
+  if (host === '::1' || host === '::' || host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe80:')) return true;
+  const ipv4 = host.split('.');
+  if (ipv4.length === 4 && ipv4.every((part) => /^\d+$/.test(part) && Number(part) <= 255)) {
+    const [a, b] = ipv4.map(Number);
+    return a === 0 || a === 10 || a === 127 || a === 169 && b === 254 || a === 192 && b === 168 || a === 172 && b >= 16 && b <= 31;
+  }
+  return !host.includes('.') && !host.includes(':');
+}
+function h2CanonicalUrl(value) {
+  h2Require(typeof value === 'string' && h2NoMalformedUnicode(value) && !/[\r\n\t]/.test(value), true, 'PUBLIC_URL_INVALID', 'PUBLIC_AUDIT');
+  for (let index = 0; index < value.length; index += 1) if (value[index] === '%') h2Require(/^[0-9A-Fa-f]{2}$/.test(value.slice(index + 1, index + 3)), true, 'PUBLIC_URL_INVALID', 'PUBLIC_AUDIT');
+  let parsed;
+  try { parsed = new URL(value); } catch (_error) { throw h2Error('PUBLIC_URL_INVALID', 'PUBLIC_AUDIT'); }
+  h2Require(parsed.protocol === 'https:' && !parsed.username && !parsed.password && !h2HostIsPrivate(parsed.hostname), true, 'PUBLIC_URL_INVALID', 'PUBLIC_AUDIT');
+  const decoded = h2DecodeUrlComponent(parsed.pathname + parsed.search + parsed.hash);
+  h2Require(h2AuditScalar(decoded), true, 'PUBLIC_URL_INVALID', 'PUBLIC_AUDIT');
+  const host = parsed.hostname.toLowerCase();
+  const port = parsed.port && parsed.port !== '443' ? ':' + parsed.port : '';
+  const pathname = h2UrlPart(parsed.pathname || '/', "-._~!$&'()*+,;=:@/");
+  const searchValue = parsed.search.startsWith('?') ? parsed.search.slice(1) : '';
+  const hashValue = parsed.hash.startsWith('#') ? parsed.hash.slice(1) : '';
+  const search = searchValue === '' ? '' : '?' + h2UrlPart(searchValue, "-._~!$&'()*+,;=:@/?");
+  const hash = hashValue === '' ? '' : '#' + h2UrlPart(hashValue, "-._~!$&'()*+,;=:@/?");
+  const rebuilt = 'https://' + host + port + pathname + search + hash;
+  h2Require(!/[\u0000-\u0020<>"\\\u007f]/.test(rebuilt), true, 'PUBLIC_URL_INVALID', 'PUBLIC_AUDIT');
+  h2Require(!H2_SECRET_VALUE.test(h2DecodeUrlComponent(searchValue + hashValue)), true, 'PUBLIC_URL_INVALID', 'PUBLIC_AUDIT');
+  return rebuilt;
+}
+function h2UrlNode(href, label) {
+  const canonical = h2CanonicalUrl(href);
+  h2Line('url', { href, label });
+  return '[' + h2EncodeText(label, 'paragraph') + '](<' + canonical + '>)';
+}
+function h2LinesForArray(values, empty = 'None recorded.') {
+  return values.length ? values.map((item) => {
+    const text = String(item);
+    return /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(text) ? h2UrlNode(text, text) : h2Bullet(item);
+  }) : [h2Paragraph(empty)];
+}
+function h2ManagedDocument(style, kind, prose, carrier) {
+  const marker = style[kind];
+  h2Require(Array.isArray(prose) && prose.every((line) => typeof line === 'string' && !/[\r\n]/.test(line)), true, 'PUBLIC_NODE_INVALID', 'PUBLIC_AUDIT');
+  for (const line of prose) h2Require(!H2_RESERVED_STEMS.some((stem) => line.includes(stem)), true, 'RESERVED_RESIDUE', 'PUBLIC_AUDIT');
+  const proseDigest = h2DigestText(prose.join('\n'));
+  const finalizedCarrier = { ...carrier, public_prose_sha256: proseDigest };
+  h2Require(h2Audit(finalizedCarrier), true, 'PUBLIC_DATA_UNSAFE', 'PUBLIC_AUDIT');
+  const encoded = Buffer.from(h2Canonical(finalizedCarrier), 'utf8').toString('base64url');
+  h2Require(h2StrictCarrierText(encoded), true, 'CARRIER_INVALID', 'SERIALIZE');
+  const body = [marker.begin, ...prose, marker.carrier + encoded + ' -->', marker.end].join('\n');
+  h2Require(body.startsWith(marker.begin) && body.endsWith(marker.end) && !body.endsWith('\n'), true, 'SERIALIZE', 'SERIALIZE');
+  return {
+    body,
+    carrier: finalizedCarrier,
+    carrier_sha256: h2Digest(finalizedCarrier),
+    managed_block_sha256: sha256Text(body),
+    public_prose_sha256: proseDigest,
+    encoded,
+    marker,
+    prose,
+  };
+}
+function h2ParentProse(state, projection) {
+  const lines = [
+    '# AI Agent Toolkit Programme',
+    '',
+    '## Programme status',
+    '| Field | Value |',
+    '| --- | --- |',
+    '| Repository | ' + h2Cell(projection.repository) + ' |',
+    '| Parent issue | #' + h2Identifier(projection.parent_issue) + ' |',
+    '| Lifecycle | ' + h2Cell(projection.lifecycle) + ' |',
+    '| Finality | ' + h2Cell(projection.finality) + ' |',
+    '| Programme action | ' + h2Cell(projection.programme_action) + ' |',
+    '',
+    '## Children',
+    '| Issue | Order | Lifecycle | Finality | Summary |',
+    '| --- | --- | --- | --- | --- |',
+  ];
+  for (const child of projection.children) lines.push('| #' + h2Identifier(child.issue) + ' | ' + h2Identifier(child.order) + ' | ' + h2Cell(child.lifecycle) + ' | ' + h2Cell(child.finality) + ' | ' + h2Cell(child.summary) + ' |');
+  lines.push('', '## Current action', h2Bullet(projection.next_action.action + ': ' + projection.next_action.text), '');
+  lines.push('## Completed work', ...h2LinesForArray(projection.completed_work.map((item) => '#' + item.issue + ' - ' + item.title + ': ' + item.summary)), '');
+  lines.push('## Boundaries', ...h2LinesForArray(projection.boundaries.map((item) => '[' + item.category + '] ' + item.text)), '');
+  lines.push('## PR history', '| PR | Child | Epoch | Outcome | Summary |', '| --- | --- | --- | --- | --- |');
+  if (projection.pr_history.length) for (const item of projection.pr_history) lines.push('| #' + h2Identifier(item.pr) + ' | #' + h2Identifier(item.child_issue) + ' | ' + h2Cell(item.epoch_id || '-') + ' | ' + h2Cell(item.outcome) + ' | ' + h2Cell(item.summary) + ' |');
+  else lines.push('| None | - | - | None recorded | - |');
+  lines.push('', '## ELI5', h2Paragraph('The parent is the one source of programme truth; child and PR views are derived from it.'), '');
+  lines.push('## Immediate next', h2Bullet(projection.next_action.text));
+  return lines;
+}
+function h2ChildProse(projection) {
+  const lines = [
+    '# ' + h2Heading(projection.title),
+    '',
+    '## Status / summary',
+    '| Field | Value |',
+    '| --- | --- |',
+    '| Repository | ' + h2Cell(projection.repository) + ' |',
+    '| Parent | #' + h2Identifier(projection.parent_issue) + ' |',
+    '| Child | #' + h2Identifier(projection.child_issue) + ' |',
+    '| Lifecycle | ' + h2Cell(projection.lifecycle) + ' |',
+    '| Finality | ' + h2Cell(projection.finality) + ' |',
+    '',
+    h2Paragraph(projection.summary),
+    '',
+    '## Objective', h2Paragraph(projection.objective),
+    '',
+    '## Scope', ...h2LinesForArray(projection.scope),
+    '',
+    '## Boundaries', ...h2LinesForArray(projection.boundaries.map((item) => '[' + item.category + '] ' + item.text)),
+    '',
+    '## Completion criteria', ...h2LinesForArray(projection.done_when),
+    '',
+    '## Out of scope', ...h2LinesForArray(projection.out_of_scope),
+    '',
+    '## Epochs / phases',
+    '| Epoch | Name | State | Purpose | Outcome |',
+    '| --- | --- | --- | --- | --- |',
+  ];
+  for (const epoch of projection.epochs) lines.push('| ' + h2Cell(epoch.id) + ' | ' + h2Cell(epoch.name) + ' | ' + h2Cell(epoch.state) + ' | ' + h2Cell(epoch.purpose) + ' | ' + h2Cell(epoch.outcome) + ' |');
+  lines.push('', '## PR history', '| PR | Epoch | Outcome | Summary |', '| --- | --- | --- | --- |');
+  if (projection.pr_history.length) for (const row of projection.pr_history) lines.push('| #' + h2Identifier(row.pr) + ' | ' + h2Cell(row.epoch_id || '-') + ' | ' + h2Cell(row.outcome) + ' | ' + h2Cell(row.summary) + ' |');
+  else lines.push('| None | - | None recorded | - |');
+  lines.push('', '## ELI5', h2Paragraph(projection.eli5), '', '## Immediate next', h2Bullet(projection.next_action.action + ': ' + projection.next_action.text));
+  return lines;
+}
+function h2ProjectionNode(zone, field, type, value) {
+  const nodeField = field.split('.').pop().replace(/\[[0-9]+\]$/, '');
+  return { zone, field, node: h2Line(type, value, nodeField) };
+}
+function h2PhaseProjectionNodes(projection) {
+  const nodes = [];
+  const push = (zone, field, type, value) => nodes.push(h2ProjectionNode(zone, field, type, value));
+  const current = projection.current_derived;
+  push('CURRENT_DERIVED', 'current_derived.authority_presence', 'table_cell', current.authority_presence);
+  push('CURRENT_DERIVED', 'current_derived.number_state', 'table_cell', current.number_state);
+  push('CURRENT_DERIVED', 'current_derived.pr_number', current.pr_number === null ? 'table_cell' : 'identifier',
+    current.pr_number === null ? 'pending provider assignment' : current.pr_number);
+  push('CURRENT_DERIVED', 'current_derived.next_action', 'paragraph', current.next_action);
+  const structural = projection.structural_provenance;
+  const structuralValues = [
+    ['root', 'table_cell', structural.root],
+    ['lock', 'table_cell', structural.lock],
+    ['repository', 'table_cell', structural.repository],
+    ['parent_issue', 'identifier', structural.parent_issue],
+    ['child_issue', 'identifier', structural.child_issue],
+    ['epoch_id', 'table_cell', structural.epoch_id],
+    ['gate', 'table_cell', structural.gate],
+    ['role', 'table_cell', structural.role],
+    ['completes_child', 'table_cell', String(structural.completes_child)],
+    ['descriptor_sha256', 'table_cell', structural.descriptor_sha256],
+    ['candidate_sha256', 'table_cell', structural.candidate_sha256],
+  ];
+  for (const [field, type, value] of structuralValues) push('STRUCTURAL_PROVENANCE', 'structural_provenance.' + field, type, value);
+  for (const field of ['repository', 'branch', 'base_ref', 'base_sha', 'head', 'tree', 'version']) {
+    push('STRUCTURAL_PROVENANCE', 'structural_provenance.candidate.' + field, 'lineage', structural.candidate[field]);
+  }
+  if (structural.authority_source !== null) {
+    push('STRUCTURAL_PROVENANCE', 'structural_provenance.authority_source.kind', 'table_cell', structural.authority_source.kind);
+    push('STRUCTURAL_PROVENANCE', 'structural_provenance.authority_source.reference', 'table_cell', structural.authority_source.reference);
+    push('STRUCTURAL_PROVENANCE', 'structural_provenance.authority_source.body_sha256', 'table_cell', structural.authority_source.body_sha256);
+    push('STRUCTURAL_PROVENANCE', 'structural_provenance.authority_sha256', 'table_cell', structural.authority_sha256);
+  }
+  const descriptor = projection.descriptor_at_creation;
+  push('DESCRIPTOR_AT_CREATION', 'descriptor_at_creation.heading', 'heading', descriptor.heading);
+  push('DESCRIPTOR_AT_CREATION', 'descriptor_at_creation.preamble', 'paragraph', descriptor.preamble);
+  for (const field of ['summary', 'purpose', 'eli5_at_creation']) {
+    push('DESCRIPTOR_AT_CREATION', 'descriptor_at_creation.' + field, 'paragraph', descriptor[field]);
+  }
+  for (const field of ['changed_surfaces', 'scope', 'out_of_scope', 'design_constraints',
+    'validation_requirements', 'evidence_refs', 'repair_history', 'before_after',
+    'repair_budget', 'hosted_qualification', 'recovery_evidence']) {
+    descriptor[field].forEach((value, index) => push('DESCRIPTOR_AT_CREATION',
+      'descriptor_at_creation.' + field + '[' + index + ']', 'bullet', value));
+  }
+  if (projection.phase === 'PRE_NUMBER') {
+    push('DESCRIPTOR_AT_CREATION', 'descriptor_at_creation.next_action_pre_number', 'paragraph', descriptor.next_action_pre_number);
+  }
+  return nodes;
+}
+function h2ValidatePrPhaseProjection(projection) {
+  const currentKeys = ['authority_presence', 'number_state', 'pr_number', 'next_action'];
+  const structuralKeys = ['root', 'lock', 'repository', 'parent_issue', 'child_issue', 'epoch_id', 'gate',
+    'role', 'completes_child', 'candidate', 'descriptor_sha256', 'candidate_sha256',
+    'authority_source', 'authority_sha256'];
+  const descriptorKeys = ['heading', 'preamble', 'summary', 'purpose', 'changed_surfaces', 'scope',
+    'out_of_scope', 'design_constraints', 'validation_requirements', 'evidence_refs',
+    'repair_history', 'before_after', 'repair_budget', 'hosted_qualification',
+    'recovery_evidence', 'eli5_at_creation', 'next_action_pre_number'];
+  const omittedKeys = ['field', 'reason'];
+  if (h2IsPlain(projection) && projection.phase === 'BOUND' && h2IsPlain(projection.current_derived)
+    && currentKeys.some((key) => !h2Own(projection.current_derived, key))) {
+    throw h2Error('BOUND_CURRENT_FIELD_MISSING', 'AUTHORITY');
+  }
+  h2Require(h2Exact(projection, ['schema', 'version', 'kind', 'phase', 'current_derived',
+    'structural_provenance', 'descriptor_at_creation', 'omitted', 'typed_nodes'])
+    && projection.schema === H2_PR_PHASE_PROJECTION_SCHEMA && projection.version === H2_VERSION
+    && projection.kind === 'pr' && ['PRE_NUMBER', 'BOUND'].includes(projection.phase), true,
+    'PR_PHASE_PROJECTION_INVALID', 'CANONICAL');
+  h2Require(h2Exact(projection.current_derived, currentKeys)
+    && h2Exact(projection.structural_provenance, structuralKeys)
+    && h2Exact(projection.descriptor_at_creation, descriptorKeys)
+    && Array.isArray(projection.omitted), true, 'PR_PHASE_PROJECTION_INVALID', 'CANONICAL');
+  const current = projection.current_derived;
+  const structural = projection.structural_provenance;
+  const descriptor = projection.descriptor_at_creation;
+  h2Require(['ABSENT', 'BOUND_VALIDATED'].includes(current.authority_presence)
+    && current.number_state === projection.phase
+    && (current.pr_number === null || h2Issue(current.pr_number))
+    && h2SafeLine(current.next_action), true, 'PR_PHASE_PROJECTION_INVALID', 'CANONICAL');
+  h2Require(h2Repository(structural.repository) && h2Issue(structural.parent_issue)
+    && h2Issue(structural.child_issue) && h2SafeId(structural.epoch_id) && h2SafeId(structural.gate)
+    && structural.root === H2_ROOT && structural.lock === H2_LOCK
+    && structural.role === 'INTERMEDIATE' && typeof structural.completes_child === 'boolean'
+    && h2Hash(structural.descriptor_sha256) && h2Hash(structural.candidate_sha256)
+    && (structural.authority_source === null || h2IsPlain(structural.authority_source))
+    && (structural.authority_sha256 === null || h2Hash(structural.authority_sha256)), true,
+    'PR_PHASE_PROJECTION_INVALID', 'CANONICAL');
+  h2Candidate(structural.candidate, 'CANONICAL');
+  h2Require(h2SafeLine(descriptor.heading) && h2SafeLine(descriptor.preamble)
+    && h2SafeLine(descriptor.summary) && h2SafeLine(descriptor.purpose)
+    && h2SafeLine(descriptor.eli5_at_creation)
+    && h2StringArray(descriptor.changed_surfaces) && h2StringArray(descriptor.scope)
+    && h2StringArray(descriptor.out_of_scope) && h2StringArray(descriptor.design_constraints)
+    && h2StringArray(descriptor.validation_requirements) && h2StringArray(descriptor.evidence_refs)
+    && h2StringArray(descriptor.repair_history) && h2StringArray(descriptor.before_after)
+    && h2StringArray(descriptor.repair_budget) && h2StringArray(descriptor.hosted_qualification)
+    && h2StringArray(descriptor.recovery_evidence)
+    && (descriptor.next_action_pre_number === null || h2SafeLine(descriptor.next_action_pre_number)), true,
+    'PR_PHASE_PROJECTION_INVALID', 'CANONICAL');
+  const expectedPreHeading = projection.phase === 'PRE_NUMBER'
+    ? '## Descriptor at creation (active PRE_NUMBER candidate declaration)'
+    : '## Descriptor at creation (historical evidence only)';
+  const expectedPreamble = projection.phase === 'PRE_NUMBER'
+    ? 'This immutable descriptor is the active candidate declaration before provider number binding.'
+    : 'This immutable descriptor records creation-time evidence only. It does not assert current provider, gate, review, check, Draft, Ready, merge, finality, or number-binding state.';
+  h2Require(descriptor.heading === expectedPreHeading && descriptor.preamble === expectedPreamble, true,
+    'PR_PHASE_PROJECTION_INVALID', 'CANONICAL');
+  if (projection.phase === 'PRE_NUMBER') {
+    h2Require(current.authority_presence === 'ABSENT' && current.pr_number === null
+      && current.next_action === descriptor.next_action_pre_number
+      && descriptor.next_action_pre_number !== null
+      && structural.authority_source === null && structural.authority_sha256 === null
+      && projection.omitted.length === 0, true, 'PR_PHASE_PROJECTION_INVALID', 'CANONICAL');
+  } else {
+    h2Require(current.authority_presence === 'BOUND_VALIDATED' && h2Issue(current.pr_number)
+      && current.next_action === 'Continue only under the bound controller authority.'
+      && descriptor.next_action_pre_number === null
+      && structural.authority_source !== null && h2Hash(structural.authority_sha256)
+      && projection.omitted.length === 1
+      && h2Exact(projection.omitted[0], omittedKeys)
+      && projection.omitted[0].field === 'next_action_pre_number'
+      && projection.omitted[0].reason === 'BOUND_NONDISPLAYABLE', true,
+      'PR_PHASE_PROJECTION_INVALID', 'CANONICAL');
+  }
+  h2Require(h2Audit(projection), true, 'PR_PHASE_PROJECTION_INVALID', 'CANONICAL');
+  const expectedNodes = h2PhaseProjectionNodes(projection);
+  h2Require(Array.isArray(projection.typed_nodes), true, 'PR_PHASE_PROVENANCE_INVALID', 'PUBLIC_AUDIT');
+  const expectedByField = new Map(expectedNodes.map((item) => [item.field, item]));
+  const seen = new Set();
+  for (const item of projection.typed_nodes) {
+    if (!h2IsPlain(item) || !h2Exact(item, ['zone', 'field', 'node'])) {
+      throw h2Error('PR_PHASE_PROVENANCE_INVALID', 'PUBLIC_AUDIT');
+    }
+    if (seen.has(item.field)) throw h2Error('PR_PHASE_PROVENANCE_INVALID', 'PUBLIC_AUDIT');
+    seen.add(item.field);
+    const expected = expectedByField.get(item.field);
+    if (!expected) {
+      if (String(item.field).includes('next_action_pre_number') && projection.phase === 'BOUND') {
+        throw h2Error('PRE_NUMBER_FIELD_IN_BOUND', 'PUBLIC_AUDIT');
+      }
+      throw h2Error('PR_PHASE_PROVENANCE_INVALID', 'PUBLIC_AUDIT');
+    }
+    if (expected.zone === 'DESCRIPTOR_AT_CREATION' && item.zone === 'CURRENT_DERIVED') {
+      throw h2Error('DESCRIPTOR_TEXT_CURRENT_ZONE', 'PUBLIC_AUDIT');
+    }
+    if (expected.zone === 'STRUCTURAL_PROVENANCE' && item.zone !== 'STRUCTURAL_PROVENANCE') {
+      throw h2Error('STRUCTURAL_FIELD_ZONE_INVALID', 'PUBLIC_AUDIT');
+    }
+    if (item.zone !== expected.zone) throw h2Error('PR_PHASE_PROVENANCE_INVALID', 'PUBLIC_AUDIT');
+    if (!h2Comparable(item.node, expected.node)) throw h2Error('PR_PHASE_PROVENANCE_INVALID', 'PUBLIC_AUDIT');
+  }
+  h2Require(seen.size === expectedNodes.length, true, 'PR_PHASE_PROVENANCE_INVALID', 'PUBLIC_AUDIT');
+  return h2Clone(projection);
+}
+function h2BuildPrPhaseProjection(descriptor, authority) {
+  const normalized = h2Descriptor(descriptor, 'AUTHORITY');
+  const bound = authority === null ? null : h2BoundAuthority(authority, normalized, 'AUTHORITY');
+  const projection = {
+    schema: H2_PR_PHASE_PROJECTION_SCHEMA,
+    version: H2_VERSION,
+    kind: 'pr',
+    phase: bound ? 'BOUND' : 'PRE_NUMBER',
+    current_derived: {
+      authority_presence: bound ? 'BOUND_VALIDATED' : 'ABSENT',
+      number_state: bound ? 'BOUND' : 'PRE_NUMBER',
+      pr_number: bound ? bound.pr_number : null,
+      next_action: bound ? 'Continue only under the bound controller authority.' : normalized.next_action_pre_number,
+    },
+    structural_provenance: {
+      root: normalized.root,
+      lock: normalized.lock,
+      repository: normalized.repository,
+      parent_issue: normalized.parent_issue,
+      child_issue: normalized.child_issue,
+      epoch_id: normalized.epoch_id,
+      gate: normalized.gate,
+      role: normalized.role,
+      completes_child: normalized.completes_child,
+      candidate: h2Clone(normalized.candidate),
+      descriptor_sha256: h2Digest(normalized),
+      candidate_sha256: h2Digest(normalized.candidate),
+      authority_source: bound ? h2Clone(bound.source) : null,
+      authority_sha256: bound ? bound.authority_sha256 : null,
+    },
+    descriptor_at_creation: {
+      heading: bound
+        ? '## Descriptor at creation (historical evidence only)'
+        : '## Descriptor at creation (active PRE_NUMBER candidate declaration)',
+      preamble: bound
+        ? 'This immutable descriptor records creation-time evidence only. It does not assert current provider, gate, review, check, Draft, Ready, merge, finality, or number-binding state.'
+        : 'This immutable descriptor is the active candidate declaration before provider number binding.',
+      summary: normalized.summary,
+      purpose: normalized.purpose,
+      changed_surfaces: h2Clone(normalized.changed_surfaces),
+      scope: h2Clone(normalized.scope),
+      out_of_scope: h2Clone(normalized.out_of_scope),
+      design_constraints: h2Clone(normalized.design_constraints),
+      validation_requirements: h2Clone(normalized.validation_requirements),
+      evidence_refs: h2Clone(normalized.evidence_refs),
+      repair_history: h2Clone(normalized.repair_history),
+      before_after: h2Clone(normalized.before_after),
+      repair_budget: h2Clone(normalized.repair_budget),
+      hosted_qualification: h2Clone(normalized.hosted_qualification),
+      recovery_evidence: h2Clone(normalized.recovery_evidence),
+      eli5_at_creation: normalized.eli5,
+      next_action_pre_number: bound ? null : normalized.next_action_pre_number,
+    },
+    omitted: bound ? [{ field: 'next_action_pre_number', reason: 'BOUND_NONDISPLAYABLE' }] : [],
+    typed_nodes: [],
+  };
+  projection.typed_nodes = h2PhaseProjectionNodes(projection);
+  return h2ValidatePrPhaseProjection(projection);
+}
+function h2BuildPrTypedDocument(projection) {
+  const checked = h2ValidatePrPhaseProjection(projection);
+  const current = checked.current_derived;
+  const structural = checked.structural_provenance;
+  const descriptor = checked.descriptor_at_creation;
+  const lines = [
+    '# Pull request candidate',
+    '',
+    '## Current phase',
+    '| Field | Value |',
+    '| --- | --- |',
+    '| Phase | ' + h2Cell(checked.phase) + ' |',
+    '| Authority | ' + h2Cell(current.authority_presence) + ' |',
+    '| Number state | ' + h2Cell(current.number_state) + ' |',
+    '| PR number | ' + (current.pr_number === null ? h2Cell('pending provider assignment') : '#' + h2Identifier(current.pr_number)) + ' |',
+    '',
+    '## Programme position',
+    'These fields identify programme and candidate provenance only. They do not assert current provider state, gate activation, reviews, checks, Draft, Ready, merge, or finality.',
+    '| Field | Value |',
+    '| --- | --- |',
+    '| Root | ' + h2Cell(structural.root) + ' |',
+    '| Lock | ' + h2Cell(structural.lock) + ' |',
+    '| Repository | ' + h2Cell(structural.repository) + ' |',
+    '| Parent | #' + h2Identifier(structural.parent_issue) + ' |',
+    '| Child | #' + h2Identifier(structural.child_issue) + ' |',
+    '| Epoch | ' + h2Cell(structural.epoch_id) + ' |',
+    '| Gate | ' + h2Cell(structural.gate) + ' |',
+    '| Role | ' + h2Cell(structural.role) + ' |',
+    '| Completes child | ' + h2Cell(String(structural.completes_child)) + ' |',
+    '',
+    '## Candidate / lineage',
+    '| Field | Value |',
+    '| --- | --- |',
+    '| Repository | ' + h2Lineage(structural.candidate.repository, 'repository') + ' |',
+    '| Branch | ' + h2Lineage(structural.candidate.branch, 'branch') + ' |',
+    '| Base ref | ' + h2Lineage(structural.candidate.base_ref, 'base_ref') + ' |',
+    '| Base SHA | ' + h2Lineage(structural.candidate.base_sha, 'base_sha') + ' |',
+    '| Head | ' + h2Lineage(structural.candidate.head, 'head') + ' |',
+    '| Tree | ' + h2Lineage(structural.candidate.tree, 'tree') + ' |',
+    '| Version | ' + h2Lineage(structural.candidate.version, 'version') + ' |',
+    '| Descriptor digest | ' + h2Cell(structural.descriptor_sha256) + ' |',
+    '| Candidate digest | ' + h2Cell(structural.candidate_sha256) + ' |',
+    '',
+    descriptor.heading,
+    h2Paragraph(descriptor.preamble),
+    '',
+    '### Summary', h2Paragraph(descriptor.summary),
+    '',
+    '### Purpose', h2Paragraph(descriptor.purpose),
+    '',
+    '### Changed surfaces', ...h2LinesForArray(descriptor.changed_surfaces),
+    '',
+    '### Scope', ...h2LinesForArray(descriptor.scope),
+    '',
+    '### Out of scope', ...h2LinesForArray(descriptor.out_of_scope),
+    '',
+    '### Design constraints', ...h2LinesForArray(descriptor.design_constraints),
+    '',
+    '### Validation requirements', ...h2LinesForArray(descriptor.validation_requirements),
+    '',
+    '### Evidence references', ...h2LinesForArray(descriptor.evidence_refs),
+    '',
+    '### Repair history', ...h2LinesForArray(descriptor.repair_history),
+    '',
+    '### Before and after', ...h2LinesForArray(descriptor.before_after),
+    '',
+    '### Repair budget', ...h2LinesForArray(descriptor.repair_budget),
+    '',
+    '### Hosted qualification', ...h2LinesForArray(descriptor.hosted_qualification),
+    '',
+    '### Recovery evidence', ...h2LinesForArray(descriptor.recovery_evidence),
+    '',
+    '### ELI5 at creation', h2Paragraph(descriptor.eli5_at_creation),
+    '',
+    '## What happens next', h2Bullet(current.next_action),
+  ];
+  return lines;
+}
+function h2PrProse(projection) {
+  return h2BuildPrTypedDocument(projection);
+}
+function h2BuildParentDoc(state) {
+  const checked = h2ValidateState(state);
+  const projection = h2ProjectionState(checked.state, checked.history);
+  const style = h2MarkerStyleForState(checked.state);
+  const carrier = {
+    schema: H2_PARENT_CARRIER_SCHEMA,
+    version: H2_VERSION,
+    kind: 'parent',
+    repository: checked.state.repository,
+    parent_issue: checked.state.parent.issue,
+    canonical: { schema: checked.state.schema, class: H2_CANONICAL_CLASS, digest: checked.canonical_sha256, state: h2Clone(checked.state) },
+    projection: { schema: H2_PARENT_PROJECTION_SCHEMA, digest: h2Digest(projection) },
+    public_prose_sha256: null,
+  };
+  const prose = h2ParentProse(checked.state, projection);
+  const document = h2ManagedDocument(style, 'parent', prose, carrier);
+  h2Require(document.carrier.projection.digest === h2Digest(projection), true, 'PROJECTION_DIGEST_INVALID', 'PUBLIC_AUDIT');
+  return { ...document, state: checked.state, canonical_sha256: checked.canonical_sha256, projection, projection_sha256: h2Digest(projection), kind: 'parent', format: 'human-v2' };
+}
+function h2BuildChildDoc(state, issue) {
+  const checked = h2ValidateState(state);
+  const projection = h2ProjectionChild(checked.state, checked.history, issue);
+  const style = h2MarkerStyleForState(checked.state);
+  const carrier = {
+    schema: H2_CHILD_CARRIER_SCHEMA,
+    version: H2_VERSION,
+    kind: 'child',
+    repository: checked.state.repository,
+    parent_issue: checked.state.parent.issue,
+    child_issue: issue,
+    canonical: { schema: checked.state.schema, class: H2_CANONICAL_CLASS, digest: checked.canonical_sha256 },
+    projection: { schema: H2_CHILD_PROJECTION_SCHEMA, digest: h2Digest(projection) },
+    public_prose_sha256: null,
+  };
+  const prose = h2ChildProse(projection);
+  const document = h2ManagedDocument(style, 'child', prose, carrier);
+  return { ...document, state: checked.state, canonical_sha256: checked.canonical_sha256, projection, projection_sha256: h2Digest(projection), child_issue: issue, kind: 'child', format: 'human-v2' };
+}
+function h2RenderArtifact(document, number, action) {
+  const artifact = {
+    kind: document.kind,
+    repository: document.state.repository,
+    number,
+    action,
+    body: document.body,
+    read_record: h2CompleteRead(document.body),
+    digests: {
+      complete_body_sha256: sha256Text(document.body),
+      public_prose_sha256: document.public_prose_sha256,
+      managed_block_sha256: document.managed_block_sha256,
+      carrier_sha256: document.carrier_sha256,
+      projection_sha256: document.projection_sha256,
+      canonical_sha256: document.canonical_sha256 ?? null,
+      descriptor_sha256: null,
+      candidate_sha256: null,
+      bound_authority_sha256: null,
+    },
+  };
+  const actions = document.kind === 'parent' ? H2_PROGRAMME_ACTIONS : H2_CHILD_ACTIONS;
+  h2Require(h2Exact(artifact, ['kind', 'repository', 'number', 'action', 'body', 'read_record', 'digests'])
+    && ['parent', 'child'].includes(artifact.kind) && h2Repository(artifact.repository) && h2Issue(artifact.number)
+    && actions.includes(artifact.action) && typeof artifact.body === 'string'
+    && h2Exact(artifact.read_record, ['body', 'complete', 'byte_length', 'body_sha256', 'revision'])
+    && h2Exact(artifact.digests, ['complete_body_sha256', 'public_prose_sha256', 'managed_block_sha256', 'carrier_sha256', 'projection_sha256', 'canonical_sha256', 'descriptor_sha256', 'candidate_sha256', 'bound_authority_sha256'])
+    && artifact.read_record.body === artifact.body && artifact.read_record.complete === true
+    && artifact.read_record.body_sha256 === artifact.digests.complete_body_sha256
+    && Object.entries(artifact.digests).every(([key, value]) => ['canonical_sha256', 'descriptor_sha256', 'candidate_sha256', 'bound_authority_sha256'].includes(key)
+      ? value === null || h2Hash(value) : h2Hash(value)), true, 'RENDER_ARTIFACT_INVALID', 'READBACK');
+  return artifact;
+}
+function h2BuildPrDoc(descriptor, authority) {
+  const normalized = h2Descriptor(descriptor, 'AUTHORITY');
+  const bound = authority === null ? null : h2BoundAuthority(authority, normalized, 'AUTHORITY');
+  const projection = h2BuildPrPhaseProjection(normalized, bound);
+  const style = h2MarkerStyleForRepository(normalized.repository);
+  const carrier = {
+    schema: H2_PR_CARRIER_SCHEMA,
+    version: H2_VERSION,
+    kind: 'pr',
+    repository: normalized.repository,
+    pr_number: projection.current_derived.pr_number,
+    number_state: projection.current_derived.number_state,
+    descriptor: { schema: H2_DESCRIPTOR_SCHEMA, digest: projection.structural_provenance.descriptor_sha256 },
+    candidate: { digest: projection.structural_provenance.candidate_sha256 },
+    authority_sha256: projection.structural_provenance.authority_sha256,
+    projection: { schema: H2_PR_PHASE_PROJECTION_SCHEMA, phase: projection.phase, digest: h2Digest(projection) },
+    public_prose_sha256: null,
+  };
+  const prose = h2BuildPrTypedDocument(projection);
+  const document = h2ManagedDocument(style, 'pr', prose, carrier);
+  return {
+    ...document,
+    descriptor: normalized,
+    bound_authority: bound,
+    projection,
+    projection_sha256: h2Digest(projection),
+    kind: 'pr',
+    format: 'human-v2',
+  };
+}
+function h2ValidateCarrierShape(carrier, kind) {
+  const common = ['schema', 'version', 'kind', 'repository'];
+  if (!h2IsPlain(carrier) || carrier.version !== H2_VERSION || carrier.kind !== kind || !h2Repository(carrier.repository)) throw h2Error('CARRIER_INVALID', 'PARSE');
+  if (kind === 'parent') {
+    h2Require(h2Exact(carrier, [...common, 'parent_issue', 'canonical', 'projection', 'public_prose_sha256'])
+      && carrier.schema === H2_PARENT_CARRIER_SCHEMA && h2Issue(carrier.parent_issue), true, 'CARRIER_INVALID', 'PARSE');
+    h2Require(h2Exact(carrier.canonical, ['schema', 'class', 'digest', 'state']) && carrier.canonical.class === H2_CANONICAL_CLASS
+      && h2SafeLine(carrier.canonical.schema) && h2Hash(carrier.canonical.digest), true, 'CARRIER_INVALID', 'PARSE');
+    h2Require(h2Exact(carrier.projection, ['schema', 'digest']) && carrier.projection.schema === H2_PARENT_PROJECTION_SCHEMA && h2Hash(carrier.projection.digest), true, 'CARRIER_INVALID', 'PARSE');
+  } else if (kind === 'child') {
+    h2Require(h2Exact(carrier, [...common, 'parent_issue', 'child_issue', 'canonical', 'projection', 'public_prose_sha256'])
+      && carrier.schema === H2_CHILD_CARRIER_SCHEMA && h2Issue(carrier.parent_issue) && h2Issue(carrier.child_issue), true, 'CARRIER_INVALID', 'PARSE');
+    h2Require(h2Exact(carrier.canonical, ['schema', 'class', 'digest']) && carrier.canonical.class === H2_CANONICAL_CLASS
+      && h2SafeLine(carrier.canonical.schema) && h2Hash(carrier.canonical.digest), true, 'CARRIER_INVALID', 'PARSE');
+    h2Require(h2Exact(carrier.projection, ['schema', 'digest']) && carrier.projection.schema === H2_CHILD_PROJECTION_SCHEMA && h2Hash(carrier.projection.digest), true, 'CARRIER_INVALID', 'PARSE');
+  } else {
+    h2Require(h2Exact(carrier, [...common, 'pr_number', 'number_state', 'descriptor', 'candidate', 'authority_sha256', 'projection', 'public_prose_sha256'])
+      && carrier.schema === H2_PR_CARRIER_SCHEMA && (carrier.pr_number === null || h2Issue(carrier.pr_number))
+      && ['PRE_NUMBER', 'BOUND'].includes(carrier.number_state), true, 'CARRIER_INVALID', 'PARSE');
+    h2Require(h2Exact(carrier.descriptor, ['schema', 'digest']) && carrier.descriptor.schema === H2_DESCRIPTOR_SCHEMA && h2Hash(carrier.descriptor.digest)
+      && h2Exact(carrier.candidate, ['digest']) && h2Hash(carrier.candidate.digest)
+      && (carrier.authority_sha256 === null || h2Hash(carrier.authority_sha256))
+      && h2Exact(carrier.projection, ['schema', 'phase', 'digest'])
+      && carrier.projection.schema === H2_PR_PHASE_PROJECTION_SCHEMA
+      && ['PRE_NUMBER', 'BOUND'].includes(carrier.projection.phase)
+      && h2Hash(carrier.projection.digest), true, 'CARRIER_INVALID', 'PARSE');
+    h2Require(carrier.number_state === 'PRE_NUMBER' ? carrier.pr_number === null && carrier.authority_sha256 === null : h2Issue(carrier.pr_number) && h2Hash(carrier.authority_sha256), true, 'CARRIER_INVALID', 'PARSE');
+  }
+  h2Require(h2Hash(carrier.public_prose_sha256), true, 'CARRIER_INVALID', 'PARSE');
+  h2Require(h2Audit(carrier), true, 'PUBLIC_DATA_UNSAFE', 'PUBLIC_AUDIT');
+}
+function h2CarrierParts(envelope, kind) {
+  const carrier = h2DecodeCarrier(envelope.classification.encoded);
+  h2ValidateCarrierShape(carrier, kind);
+
+  const prose = envelope.classification.lines.slice(1, -2).join('\n');
+  h2Require(h2DigestText(prose) === carrier.public_prose_sha256, true, 'PUBLIC_PROSE_DIGEST_MISMATCH', 'READBACK');
+  return { carrier, prose };
+}
+function h2ReadEnvelope(read) {
+  const complete = h2ValidateCompleteRead(read);
+  const classification = h2Classifier(complete.body);
+  return { read: complete, classification };
+}
+function h2Expect(value) {
+  h2Require(h2IsPlain(value) && h2Own(value, 'kind') && h2Own(value, 'repository')
+    && ['parent', 'child', 'pr'].includes(value.kind) && h2Repository(value.repository), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+  if (value.kind === 'parent') h2Require(h2Exact(value, ['kind', 'repository', 'issue']), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+  if (value.kind === 'child') h2Require(h2Exact(value, ['kind', 'repository', 'issue', 'parent_issue', 'parent_read'])
+    && h2Issue(value.issue) && h2Issue(value.parent_issue) && h2Exact(value.parent_read, ['body', 'complete', 'byte_length', 'body_sha256', 'revision']), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+  if (value.kind === 'parent') h2Require(h2Issue(value.issue), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+  if (value.kind === 'pr') h2Require(h2Exact(value, ['kind', 'repository', 'descriptor', 'bound_authority'])
+    && (value.bound_authority === null || h2IsPlain(value.bound_authority)), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+  return value;
+}
+function h2ParsedResult(envelope, kind, extra = {}) {
+  return { ...extra, kind, format: envelope.classification.format, read: h2Clone(envelope.read), body: envelope.read.body, body_sha256: envelope.read.body_sha256 };
+}
+function h2ParseParentEnvelope(envelope, expected = null) {
+  if (envelope.classification.format === 'legacy-v5') {
+    h2Require(envelope.classification.kind === 'parent', true, 'MARKER_WRONG_KIND', 'CLASSIFY');
+    const parsed = parseParentV5Body(envelope.read.body, { complete: true });
+    h2Require(parsed.ok, true, 'LEGACY_PARSE_INVALID', 'PARSE');
+    const valid = h2ValidateState(parsed.state);
+    h2Require(valid.canonical_sha256 === parsed.envelope.canonical_digest, true, 'CANONICAL_DIGEST_MISMATCH', 'CANONICAL');
+    if (expected) h2Require(parsed.state.repository === expected.repository && parsed.state.parent.issue === expected.issue, true, 'IDENTITY_MISMATCH', 'PARSE');
+    return h2ParsedResult(envelope, 'parent', { state: valid.state, canonical_sha256: valid.canonical_sha256, legacy_compatibility_only: true, projection: h2ProjectionState(valid.state, valid.history), legacy_envelope: parsed.envelope });
+  }
+  h2Require(envelope.classification.kind === 'parent', true, 'MARKER_WRONG_KIND', 'CLASSIFY');
+  const parts = h2CarrierParts(envelope, 'parent');
+  const valid = h2ValidateState(parts.carrier.canonical.state);
+  h2Require(parts.carrier.canonical.schema === valid.state.schema && parts.carrier.canonical.digest === valid.canonical_sha256
+    && parts.carrier.parent_issue === valid.state.parent.issue, true, 'CANONICAL_DIGEST_MISMATCH', 'CANONICAL');
+  if (expected) h2Require(valid.state.repository === expected.repository && valid.state.parent.issue === expected.issue, true, 'IDENTITY_MISMATCH', 'PARSE');
+  const expectedDoc = h2BuildParentDoc(valid.state);
+  h2Require(expectedDoc.body === envelope.read.body && h2Comparable(expectedDoc.carrier, parts.carrier), true, 'READBACK_MISMATCH', 'READBACK');
+  return h2ParsedResult(envelope, 'parent', { state: valid.state, canonical_sha256: valid.canonical_sha256, projection: expectedDoc.projection, projection_sha256: expectedDoc.projection_sha256, carrier: parts.carrier });
+}
+function h2ParseChildEnvelope(envelope, expected = null, parentParsed = null) {
+  if (envelope.classification.format === 'legacy-v5') {
+    h2Require(envelope.classification.kind === 'child', true, 'MARKER_WRONG_KIND', 'CLASSIFY');
+    const parsed = parseChildV5Body(envelope.read.body, { complete: true });
+    h2Require(parsed.ok, true, 'LEGACY_PARSE_INVALID', 'PARSE');
+    h2Require(parsed.envelope.kind === 'child', true, 'LEGACY_PARSE_INVALID', 'PARSE');
+    if (expected) h2Require(parsed.envelope.repository === expected.repository && parsed.envelope.parent_issue === expected.parent_issue
+      && parsed.envelope.number === expected.issue, true, 'IDENTITY_MISMATCH', 'PARSE');
+    if (parentParsed) h2Require(parsed.envelope.canonical_digest === parentParsed.canonical_sha256, true, 'CHILD_SOURCE_MISMATCH', 'RELATIONSHIP');
+    return h2ParsedResult(envelope, 'child', { canonical_sha256: parsed.envelope.canonical_digest, child_issue: parsed.envelope.number, legacy_compatibility_only: true, legacy_envelope: parsed.envelope, parent_state: parentParsed?.state || null });
+  }
+  h2Require(envelope.classification.kind === 'child', true, 'MARKER_WRONG_KIND', 'CLASSIFY');
+  const parts = h2CarrierParts(envelope, 'child');
+  const carrier = parts.carrier;
+  h2Require(carrier.canonical.schema && carrier.canonical.class === H2_CANONICAL_CLASS, true, 'CANONICAL_DIGEST_MISMATCH', 'CANONICAL');
+  if (expected) h2Require(carrier.repository === expected.repository && carrier.parent_issue === expected.parent_issue && carrier.child_issue === expected.issue, true, 'IDENTITY_MISMATCH', 'PARSE');
+  if (parentParsed) {
+    h2Require(carrier.repository === parentParsed.state.repository && carrier.parent_issue === parentParsed.state.parent.issue
+      && carrier.canonical.schema === parentParsed.state.schema && carrier.canonical.digest === parentParsed.canonical_sha256, true, 'CHILD_SOURCE_MISMATCH', 'RELATIONSHIP');
+    const expectedDoc = h2BuildChildDoc(parentParsed.state, carrier.child_issue);
+    h2Require(expectedDoc.body === envelope.read.body && h2Comparable(expectedDoc.carrier, carrier), true, 'READBACK_MISMATCH', 'READBACK');
+    return h2ParsedResult(envelope, 'child', { state: parentParsed.state, parent_state: parentParsed.state, canonical_sha256: parentParsed.canonical_sha256, child_issue: carrier.child_issue, projection: expectedDoc.projection, projection_sha256: expectedDoc.projection_sha256, carrier });
+  }
+  h2Require(h2Hash(carrier.canonical.digest), true, 'CANONICAL_DIGEST_MISMATCH', 'CANONICAL');
+  return h2ParsedResult(envelope, 'child', { canonical_sha256: carrier.canonical.digest, child_issue: carrier.child_issue, carrier });
+}
+function h2ParsePrEnvelope(envelope, descriptor, authority) {
+  h2Require(envelope.classification.format === 'human-v2' && envelope.classification.kind === 'pr', true, 'MARKER_WRONG_KIND', 'CLASSIFY');
+  const parts = h2CarrierParts(envelope, 'pr');
+  const normalized = h2Descriptor(descriptor, 'AUTHORITY');
+  const bound = authority === null ? null : h2BoundAuthority(authority, normalized, 'AUTHORITY');
+  const expectedDoc = h2BuildPrDoc(normalized, bound);
+  const expectedProjectionDigest = h2Digest(expectedDoc.projection);
+  h2Require(expectedDoc.projection_sha256 === expectedProjectionDigest, true, 'PROJECTION_DIGEST_MISMATCH', 'READBACK');
+  h2Require(parts.carrier.projection.schema === H2_PR_PHASE_PROJECTION_SCHEMA
+    && parts.carrier.projection.phase === expectedDoc.projection.phase
+    && parts.carrier.projection.digest === expectedProjectionDigest, true, 'CARRIER_PROJECTION_MISMATCH', 'READBACK');
+  h2Require(parts.carrier.repository === normalized.repository
+    && parts.carrier.number_state === expectedDoc.projection.current_derived.number_state
+    && parts.carrier.pr_number === expectedDoc.projection.current_derived.pr_number
+    && parts.carrier.descriptor.digest === expectedDoc.projection.structural_provenance.descriptor_sha256
+    && parts.carrier.candidate.digest === expectedDoc.projection.structural_provenance.candidate_sha256
+    && parts.carrier.authority_sha256 === expectedDoc.projection.structural_provenance.authority_sha256, true,
+    'BOUND_AUTHORITY_CURRENT_MISMATCH', 'AUTHORITY');
+  h2Require(expectedDoc.body === envelope.read.body && h2Comparable(expectedDoc.carrier, parts.carrier), true, 'READBACK_MISMATCH', 'READBACK');
+  return h2ParsedResult(envelope, 'pr', {
+    descriptor: normalized,
+    bound_authority: bound,
+    projection: expectedDoc.projection,
+    projection_sha256: expectedDoc.projection_sha256,
+    carrier: parts.carrier,
+    pr_number: expectedDoc.projection.current_derived.pr_number,
+    number_state: expectedDoc.projection.current_derived.number_state,
+  });
+}
+function h2ReadInternal(read, expected) {
+  const envelope = h2ReadEnvelope(read);
+  h2Expect(expected);
+  h2Require(envelope.classification.kind === expected.kind, true, 'MARKER_WRONG_KIND', 'CLASSIFY');
+  if (expected.kind === 'parent') return h2ParseParentEnvelope(envelope, expected);
+  if (expected.kind === 'pr') {
+    h2Require(expected.repository === expected.descriptor.repository, true, 'IDENTITY_MISMATCH', 'PARSE');
+    h2Descriptor(expected.descriptor, 'AUTHORITY');
+    if (expected.bound_authority !== null) h2BoundAuthority(expected.bound_authority, expected.descriptor, 'AUTHORITY');
+    return h2ParsePrEnvelope(envelope, expected.descriptor, expected.bound_authority);
+  }
+  const parent = h2ReadInternal(expected.parent_read, { kind: 'parent', repository: expected.repository, issue: expected.parent_issue });
+  return h2ParseChildEnvelope(envelope, { repository: expected.repository, parent_issue: expected.parent_issue, issue: expected.issue }, parent);
+}
+function h2ReadParentUnbound(read) {
+  const envelope = h2ReadEnvelope(read);
+  h2Require(envelope.classification.kind === 'parent', true, 'MARKER_WRONG_KIND', 'CLASSIFY');
+  return h2ParseParentEnvelope(envelope, null);
+}
+function h2ReadChildUnbound(read) {
+  const envelope = h2ReadEnvelope(read);
+  h2Require(envelope.classification.kind === 'child', true, 'MARKER_WRONG_KIND', 'CLASSIFY');
+  return h2ParseChildEnvelope(envelope, null, null);
+}
+function h2ValidateProviderObservation(value) {
+  const keys = ['schema', 'provider', 'repository', 'pr_number', 'github_state', 'draft', 'merged', 'base_ref', 'base_sha', 'head', 'tree', 'observed_revision'];
+  return h2IsPlain(value) && h2Exact(value, keys) && value.schema === H2_PROVIDER_OBSERVATION_SCHEMA
+    && value.provider === 'GITHUB' && h2Repository(value.repository) && h2Issue(value.pr_number)
+    && ['OPEN', 'CLOSED', 'MERGED'].includes(value.github_state) && typeof value.draft === 'boolean' && typeof value.merged === 'boolean'
+    && h2SafeLine(value.base_ref, 256) && h2Sha(value.base_sha) && h2Sha(value.head) && h2Sha(value.tree)
+    && (value.observed_revision === null || h2SafeLine(value.observed_revision, 1024));
+}
+function h2CandidateForPr(state, history, pr) {
+  for (const item of history.pr_history) if (item.authority.pr_number === pr) return { candidate: item.descriptor.candidate, entry: item.registry.entry };
+  for (const child of state.children) for (const entry of child.pr_registry || []) if (entry.pr === pr && entry.candidate) {
+    const descriptor = (state.prs || []).find((item) => item.number === pr);
+    return { candidate: entry.candidate, entry, descriptor };
+  }
+  return null;
+}
+function h2ValidateProviderAssertions(value, state, history) {
+  if (value === null) return [];
+  h2Require(Array.isArray(value), true, 'PROVIDER_ASSERTION_INVALID', 'PROVIDER_ASSERTION');
+  let previous = null;
+  const seen = new Set();
+  const result = [];
+  for (const observation of value) {
+    h2Require(h2ValidateProviderObservation(observation), true, 'PROVIDER_ASSERTION_INVALID', 'PROVIDER_ASSERTION');
+    h2Require(observation.repository === state.repository, true, 'PROVIDER_ASSERTION_MISMATCH', 'PROVIDER_ASSERTION');
+    const key = observation.repository + '\u0000' + String(observation.pr_number);
+    h2Require(!seen.has(key), true, 'PROVIDER_ASSERTION_INVALID', 'PROVIDER_ASSERTION');
+    seen.add(key);
+    if (previous !== null) h2Require(previous.repository < observation.repository || previous.repository === observation.repository && previous.pr_number < observation.pr_number, true, 'PROVIDER_ASSERTION_INVALID', 'PROVIDER_ASSERTION');
+    previous = observation;
+    const known = h2CandidateForPr(state, history, observation.pr_number);
+    h2Require(known && known.candidate, true, 'PROVIDER_ASSERTION_MISMATCH', 'PROVIDER_ASSERTION');
+    const candidate = known.candidate;
+    const entry = known.entry || {};
+    h2Require(observation.base_ref === candidate.base_ref && observation.base_sha === candidate.base_sha
+      && observation.head === candidate.head && observation.tree === candidate.tree, true, 'PROVIDER_ASSERTION_MISMATCH', 'PROVIDER_ASSERTION');
+    if (h2Own(entry, 'github_state')) h2Require(observation.github_state === entry.github_state, true, 'PROVIDER_ASSERTION_MISMATCH', 'PROVIDER_ASSERTION');
+    if (h2Own(entry, 'draft')) h2Require(observation.draft === entry.draft, true, 'PROVIDER_ASSERTION_MISMATCH', 'PROVIDER_ASSERTION');
+    if (h2Own(entry, 'merged')) h2Require(observation.merged === entry.merged, true, 'PROVIDER_ASSERTION_MISMATCH', 'PROVIDER_ASSERTION');
+    result.push(h2Clone(observation));
+  }
+  return result;
+}
+function h2ValidateDecision(value, sourceParsed) {
+  const keys = ['schema', 'decision', 'root', 'lock', 'repository', 'source', 'authority', 'additions', 'decision_sha256'];
+  const sourceKeys = ['body_sha256', 'canonical_sha256'];
+  const authorityKeys = ['kind', 'reference', 'body_sha256'];
+  const additionsKeys = ['pr_history', 'evidence_refs', 'transitions'];
+  h2Require(h2Exact(value, keys) && value.schema === H2_HISTORY_DECISION_SCHEMA && value.decision === 'EXTEND_HISTORY'
+    && value.root === H2_ROOT && value.lock === H2_LOCK && value.repository === sourceParsed.state.repository
+    && h2Exact(value.source, sourceKeys) && value.source.body_sha256 === sourceParsed.read.body_sha256 && value.source.canonical_sha256 === sourceParsed.canonical_sha256
+    && h2Exact(value.authority, authorityKeys) && value.authority.kind === 'USER_WEB_CONTROLLER'
+    && h2SafeLine(value.authority.reference, 2048) && h2Hash(value.authority.body_sha256)
+    && h2Exact(value.additions, additionsKeys) && Array.isArray(value.additions.pr_history)
+    && Array.isArray(value.additions.evidence_refs) && Array.isArray(value.additions.transitions) && h2Hash(value.decision_sha256), true, 'HISTORY_DECISION_INVALID', 'HISTORY');
+  let previousPr = 0;
+  const entryNumbers = new Set();
+  for (const item of value.additions.pr_history) {
+    const normalized = h2ValidateHistoryEntry(item, sourceParsed.state.repository);
+    h2Require(normalized.descriptor.parent_issue === sourceParsed.state.parent.issue, true, 'HISTORY_ENTRY_INVALID', 'HISTORY');
+    h2Require(normalized.authority.pr_number > previousPr && !entryNumbers.has(normalized.authority.pr_number), true, 'HISTORY_ORDER_INVALID', 'HISTORY');
+    previousPr = normalized.authority.pr_number; entryNumbers.add(normalized.authority.pr_number);
+    h2Require(normalized.descriptor.evidence_refs.every((ref) => sourceParsed.state.evidence_refs.some((item) => item.id === ref) || value.additions.evidence_refs.some((item) => item.id === ref)), true, 'HISTORY_EVIDENCE_MISSING', 'HISTORY');
+  }
+  let previousId = '';
+  const evidenceIds = new Set();
+  for (const item of value.additions.evidence_refs) {
+    h2Require(h2ValidateEvidence(item), true, 'HISTORY_EVIDENCE_INVALID', 'HISTORY');
+    h2Require(item.id > previousId && !evidenceIds.has(item.id), true, 'HISTORY_ORDER_INVALID', 'HISTORY');
+    previousId = item.id; evidenceIds.add(item.id);
+  }
+  let previousTransition = '';
+  const transitionIds = new Set();
+  for (const item of value.additions.transitions) {
+    h2Require(h2IsPlain(item) && h2Exact(item, ['id', 'child_issue', 'epoch_id', 'gate', 'disposition', 'evidence_ref'])
+      && h2SafeId(item.id) && h2Issue(item.child_issue) && h2SafeId(item.epoch_id) && h2SafeId(item.gate)
+      && h2SafeId(item.disposition) && h2SafeId(item.evidence_ref), true, 'HISTORY_TRANSITION_INVALID', 'HISTORY');
+    h2Require(item.id > previousTransition && !transitionIds.has(item.id), true, 'HISTORY_ORDER_INVALID', 'HISTORY');
+    previousTransition = item.id; transitionIds.add(item.id);
+    h2Require(sourceParsed.state.children.some((child) => child.issue === item.child_issue && child.epochs.some((epoch) => epoch.id === item.epoch_id)), true, 'HISTORY_REFERENT_MISSING', 'HISTORY');
+    h2Require(sourceParsed.state.evidence_refs.some((evidence) => evidence.id === item.evidence_ref) || evidenceIds.has(item.evidence_ref), true, 'HISTORY_REFERENT_MISSING', 'HISTORY');
+  }
+  h2Require(value.decision_sha256 === h2Digest(h2Without(value, 'decision_sha256')), true, 'HISTORY_DECISION_DIGEST_INVALID', 'HISTORY');
+  h2Require(h2Audit(value), true, 'PUBLIC_DATA_UNSAFE', 'PUBLIC_AUDIT');
+  return h2Clone(value);
+}
+function h2ApplyHistory(source, decision) {
+  const existing = h2ValidateHistoryContainer(source[H2_HISTORY_KEY], source.repository);
+  const additions = decision.additions;
+  const target = h2Clone(source);
+  const prHistory = existing.pr_history.map((item) => ({ descriptor: item.descriptor, bound_authority: item.authority, registry: item.registry }));
+  const evidenceRefs = existing.evidence_refs.map((item) => h2Clone(item));
+  const transitions = existing.transitions.map((item) => h2Clone(item));
+  const existingPr = new Set(existing.pr_history.map((item) => item.authority.pr_number));
+  const existingEvidence = new Set(existing.evidence_refs.map((item) => item.id));
+  const existingTransitions = new Set(existing.transitions.map((item) => item.id));
+  for (const item of additions.pr_history) {
+    const normalized = h2ValidateHistoryEntry(item, source.repository);
+    h2Require(!existingPr.has(normalized.authority.pr_number), true, 'HISTORY_DUPLICATE', 'HISTORY');
+    existingPr.add(normalized.authority.pr_number);
+    prHistory.push({ descriptor: normalized.descriptor, bound_authority: normalized.authority, registry: normalized.registry });
+  }
+  for (const item of additions.evidence_refs) {
+    h2Require(!existingEvidence.has(item.id), true, 'HISTORY_DUPLICATE', 'HISTORY');
+    existingEvidence.add(item.id); evidenceRefs.push(h2Clone(item));
+  }
+  for (const item of additions.transitions) {
+    h2Require(!existingTransitions.has(item.id), true, 'HISTORY_DUPLICATE', 'HISTORY');
+    existingTransitions.add(item.id); transitions.push(h2Clone(item));
+  }
+  prHistory.sort((left, right) => left.bound_authority.pr_number - right.bound_authority.pr_number);
+  evidenceRefs.sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+  transitions.sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+  target[H2_HISTORY_KEY] = { schema: H2_HISTORY_SCHEMA, pr_history: prHistory, evidence_refs: evidenceRefs, transitions };
+  const valid = h2ValidateState(target);
+  return valid.state;
+}
+function h2Call(operation, fn) {
+  try {
+    return fn();
+  } catch (error) {
+    const code = error?.h2_code || 'SURFACE_INPUT_INVALID';
+    const stage = H2_STAGES.includes(error?.h2_stage) ? error.h2_stage : 'INPUT';
+    return {
+      ok: false,
+      code,
+      operation,
+      stage,
+      safe_for_provider_write: false,
+      provider_mutation_authorised: false,
+    };
+  }
+}
+function h2Success(operation, code, stage, extra = {}) {
+  return {
+    ok: true,
+    code,
+    operation,
+    stage,
+    safe_for_provider_write: false,
+    provider_mutation_authorised: false,
+    ...extra,
+  };
+}
+function h2PublicReadProjection(projection) {
+  const publicProjection = h2Clone(projection);
+  if (publicProjection.phase === 'BOUND') {
+    delete publicProjection.descriptor_at_creation.next_action_pre_number;
+    delete publicProjection.omitted;
+  }
+  return publicProjection;
+}
+function h2ReadCompletePublic(input) {
+  return h2Call('readComplete', () => {
+    h2Require(arguments.length === 1, true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+    h2Require(h2IsPlain(input) && h2Exact(input, ['read', 'expect']), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+    const parsed = h2ReadInternal(input.read, input.expect);
+    const result = {
+      kind: parsed.kind,
+      format: parsed.format,
+      repository: parsed.kind === 'pr' ? parsed.descriptor.repository : parsed.state.repository,
+      issue: parsed.kind === 'pr' ? (parsed.pr_number || null) : parsed.kind === 'parent' ? parsed.state.parent.issue : parsed.child_issue,
+      canonical_sha256: parsed.canonical_sha256 || null,
+      body_sha256: parsed.body_sha256,
+      read: parsed.read,
+    };
+    if (parsed.state) result.canonical_state = h2Clone(parsed.state);
+    if (parsed.projection) {
+      result.projection = h2PublicReadProjection(parsed.projection);
+      result.projection_sha256 = h2Digest(parsed.projection);
+    }
+    if (parsed.descriptor) {
+      const descriptor = h2Clone(parsed.descriptor);
+      if (parsed.bound_authority) delete descriptor.next_action_pre_number;
+      result.descriptor = descriptor;
+    }
+    if (parsed.bound_authority !== undefined) result.bound_authority = parsed.bound_authority === null ? null : h2Clone(parsed.bound_authority);
+    if (parsed.pr_number !== undefined) { result.pr_number = parsed.pr_number; result.number_state = parsed.number_state; }
+    return h2Success('readComplete', 'READ_COMPLETE', 'READBACK', result);
+  });
+}
+function h2RenderPublic(input) {
+  return h2Call('render', () => {
+    h2Require(arguments.length === 1, true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+    h2Require(h2IsPlain(input) && h2Exact(input, ['source', 'target']) && h2IsPlain(input.source) && h2IsPlain(input.target), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+    const source = input.source;
+    const target = input.target;
+    h2Require(h2Own(source, 'type') && typeof source.type === 'string', true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+    let document;
+    if (source.type === 'PARENT_READ') {
+      h2Require(h2Exact(source, ['type', 'parent_read']), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+      h2Require(h2IsPlain(target) && (target.kind === 'parent' && h2Exact(target, ['kind']) || target.kind === 'child' && h2Exact(target, ['kind', 'issue']) && h2Issue(target.issue)), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+      const parent = h2ReadParentUnbound(source.parent_read);
+      document = target.kind === 'parent' ? h2BuildParentDoc(parent.state) : h2BuildChildDoc(parent.state, target.issue);
+    } else if (source.type === 'PR_DESCRIPTOR') {
+      h2Require(h2Exact(source, ['type', 'descriptor', 'bound_authority']) && h2IsPlain(target) && h2Exact(target, ['kind']) && target.kind === 'pr', true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+      h2Descriptor(source.descriptor, 'AUTHORITY');
+      h2Require(source.bound_authority === null || h2IsPlain(source.bound_authority), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+      document = h2BuildPrDoc(source.descriptor, source.bound_authority);
+    } else {
+      throw h2Error('INPUT_KEY_UNEXPECTED', 'INPUT');
+    }
+    const complete = h2CompleteRead(document.body);
+    const extra = document.kind === 'pr'
+      ? { kind: 'pr', descriptor: h2Clone(document.descriptor), bound_authority: document.bound_authority === null ? null : h2Clone(document.bound_authority), pr_number: document.bound_authority?.pr_number || null, number_state: document.bound_authority ? 'BOUND' : 'PRE_NUMBER', projection: h2Clone(document.projection), projection_sha256: document.projection_sha256 }
+      : { kind: document.kind, canonical_state: h2Clone(document.state), canonical_sha256: document.canonical_sha256, projection: h2Clone(document.projection), projection_sha256: document.projection_sha256 };
+    return h2Success('render', 'RENDER_READY', 'SERIALIZE', { ...extra, body: document.body, read: complete, body_sha256: complete.body_sha256, carrier_sha256: document.carrier_sha256, managed_block_sha256: document.managed_block_sha256, public_prose_sha256: document.public_prose_sha256 });
+  });
+}
+function h2ExtendHistoryPublic(input) {
+  return h2Call('extendHistory', () => {
+    h2Require(arguments.length === 1, true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+    h2Require(h2IsPlain(input) && h2Exact(input, ['parent_read', 'decision', 'provider_observations'])
+      && h2IsPlain(input.decision) && (input.provider_observations === null || Array.isArray(input.provider_observations)), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+    const source = h2ReadParentUnbound(input.parent_read);
+    const decision = h2ValidateDecision(input.decision, source);
+    const target = h2ApplyHistory(source.state, decision);
+    const targetValid = h2ValidateState(target);
+    const observations = h2ValidateProviderAssertions(input.provider_observations, targetValid.state, targetValid.history);
+    const parent = h2BuildParentDoc(targetValid.state);
+    const children = targetValid.state.children.map((child) => h2BuildChildDoc(targetValid.state, child.issue));
+    const programmeAction = h2ProgrammeAction(targetValid.state, targetValid.history);
+    return h2Success('extendHistory', 'HISTORY_EXTENDED', 'READBACK', {
+      source_body_sha256: source.read.body_sha256,
+      source_canonical_sha256: source.canonical_sha256,
+      decision_sha256: input.decision.decision_sha256,
+      target_state: h2Clone(targetValid.state),
+      target_canonical_sha256: targetValid.canonical_sha256,
+      parent: h2RenderArtifact(parent, targetValid.state.parent.issue, programmeAction.action),
+      children: children.map((child) => h2RenderArtifact(
+        child,
+        child.child_issue,
+        h2ChildAction(targetValid.state, targetValid.state.children.find((item) => item.issue === child.child_issue), targetValid.history).action,
+      )),
+      provider_observations: observations,
+    });
+  });
+}
+function h2WritePlan(kind, issue, document) {
+  return { kind, issue, body: document.body, read: h2CompleteRead(document.body), body_sha256: sha256Text(document.body), canonical_sha256: document.canonical_sha256 };
+}
+function h2PlanMigrationPublic(input) {
+  return h2Call('planMigration', () => {
+    h2Require(arguments.length === 1, true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+    h2Require(h2IsPlain(input) && h2Exact(input, ['parent_read', 'child_read', 'history_decision', 'provider_observations'])
+      && h2IsPlain(input.parent_read) && h2IsPlain(input.child_read)
+      && (input.history_decision === null || h2IsPlain(input.history_decision))
+      && (input.provider_observations === null || Array.isArray(input.provider_observations)), true, 'INPUT_KEY_UNEXPECTED', 'INPUT');
+    const parent = h2ReadParentUnbound(input.parent_read);
+    const childEnvelope = h2ReadEnvelope(input.child_read);
+    h2Require(childEnvelope.classification.kind === 'child', true, 'MIGRATION_INPUT_INVALID', 'MIGRATION');
+    const childIssue = parent.state.children.find((item) => item.lifecycle === 'CURRENT')?.issue || CHILD_ISSUE;
+    let child = null;
+    let observations;
+    if (parent.format === 'human-v2') {
+      h2Require(input.history_decision === null, true, 'MIGRATION_HISTORY_DECISION_PHASE_INVALID', 'MIGRATION');
+      if (childEnvelope.classification.format === 'legacy-v5') {
+        try { child = h2ParseChildEnvelope(childEnvelope, null, parent); } catch (_error) { throw h2Error('MIGRATION_CHILD_DRIFT', 'MIGRATION'); }
+        h2Require(child.child_issue === childIssue, true, 'MIGRATION_CHILD_DRIFT', 'MIGRATION');
+        observations = h2ValidateProviderAssertions(input.provider_observations, parent.state, h2ValidateHistoryContainer(parent.state[H2_HISTORY_KEY], parent.state.repository));
+        const document = h2BuildChildDoc(parent.state, childIssue);
+        return h2Success('planMigration', 'MIGRATION_CHILD_WRITE_READY', 'MIGRATION', { action: 'WRITE_CHILD', writes: [h2WritePlan('child', childIssue, document)], write_count: 1, source_parent_format: parent.format, source_child_format: child.format, provider_observations: observations });
+      }
+      const parsedChild = h2ParseChildEnvelope(childEnvelope, null, null);
+      h2Require(parsedChild.child_issue === childIssue, true, 'MIGRATION_CHILD_DRIFT', 'MIGRATION');
+      const expected = h2BuildChildDoc(parent.state, childIssue);
+      h2Require(expected.body === childEnvelope.read.body && h2Comparable(expected.carrier, parsedChild.carrier), true, 'MIGRATION_CHILD_DRIFT', 'MIGRATION');
+      observations = h2ValidateProviderAssertions(input.provider_observations, parent.state, h2ValidateHistoryContainer(parent.state[H2_HISTORY_KEY], parent.state.repository));
+      return h2Success('planMigration', 'MIGRATION_RECONCILED', 'MIGRATION', { action: 'RECONCILED', writes: [], write_count: 0, source_parent_format: parent.format, source_child_format: childEnvelope.classification.format, child_issue: childIssue, provider_observations: observations });
+    }
+    if (childEnvelope.classification.format === 'human-v2') throw h2Error('MIGRATION_ORDER_INVALID', 'MIGRATION');
+    if (input.history_decision !== null) h2ValidateDecision(input.history_decision, parent);
+    child = h2ParseChildEnvelope(childEnvelope, null, parent);
+    h2Require(child.child_issue === childIssue, true, 'MIGRATION_CHILD_DRIFT', 'MIGRATION');
+    observations = h2ValidateProviderAssertions(input.provider_observations, parent.state, h2ValidateHistoryContainer(parent.state[H2_HISTORY_KEY], parent.state.repository));
+    const document = h2BuildParentDoc(parent.state);
+    return h2Success('planMigration', 'MIGRATION_PARENT_WRITE_READY', 'MIGRATION', { action: 'WRITE_PARENT', writes: [h2WritePlan('parent', parent.state.parent.issue, document)], write_count: 1, source_parent_format: parent.format, source_child_format: child.format, provider_observations: observations });
+  });
+}
+
+const humanSurfaceV2 = Object.freeze({
+  readComplete: h2ReadCompletePublic,
+  render: h2RenderPublic,
+  extendHistory: h2ExtendHistoryPublic,
+  planMigration: h2PlanMigrationPublic,
+});
 
 const projectionBootstrapRecovery = Object.freeze({
   schema: DECISION_SCHEMA,
@@ -3759,5 +5648,6 @@ module.exports = Object.freeze({
   validateControllerBootstrap,
   projectionBootstrapRecovery,
   postMergeEpochFinalisation,
+  humanSurfaceV2,
   programmeV5,
 });
