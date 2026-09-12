@@ -6,12 +6,12 @@
     "path": ".github/workflows/validate.yml",
     "event": "pull_request",
     "approved_ref": "refs/heads/main",
-    "approved_source_blob_sha": "5278755a5a59e7d4e9ba102224ba22547a452334",
+    "approved_source_blob_sha": "ef4879d4b50da92c7ee5aed710e39b78054a3eee",
     "job": {
       "name": "validate"
     },
     "aggregate_step": {
-      "number": 5,
+      "number": 6,
       "name": "Run validation",
       "fail_fast": "github-actions-default-bash"
     },
