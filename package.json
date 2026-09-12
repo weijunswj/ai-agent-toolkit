@@ -19,5 +19,8 @@
     "validate:all": "node repo/scripts/sync-agent-instruction-shims.cjs --check && node repo/scripts/sync-repo-doc-contract.cjs --check && node repo/scripts/audit-project-source-locks.cjs && node repo/scripts/audit-published-surfaces.cjs --check && node repo/scripts/audit-fallback-risk.cjs && node repo/scripts/validate-toolkit.cjs && node --test repo/tests/*.test.cjs && node repo/scripts/audit-skill-portability.cjs && node repo/scripts/run-design-tests.cjs && git diff --check",
     "safe-source-update": "node repo/scripts/safe-source-update.cjs"
   },
-  "license": "UNLICENSED"
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "ajv": "8.20.0"
+  }
 }
